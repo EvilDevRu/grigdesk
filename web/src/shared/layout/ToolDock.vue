@@ -11,11 +11,11 @@
          @pointerup.prevent="finish" @pointercancel.prevent="cancel" @keydown="onKey">
       <span aria-hidden="true"></span>
     </div>
-    <div v-if="mode === 'dock'" class="dock-actions" aria-label="Управление панелью">
+    <div v-if="mode === 'dock'" class="dock-actions" :aria-label="t('core.panelControls')">
       <UiIconButton ref="expandButton" class="expand-action" role="embedded"
                     data-context="tool-dock-expand"
-                    :label="expanded ? 'Вернуть ширину панели' : 'Во весь экран'"
-                    v-tooltip="expanded ? 'Вернуть ширину панели' : 'Во весь экран'"
+                    :label="expanded ? t('core.restorePanelWidth') : t('core.fullScreen')"
+                    v-tooltip="expanded ? t('core.restorePanelWidth') : t('core.fullScreen')"
                     :pressed="expanded" @click="emit('toggle-expanded')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -25,7 +25,7 @@
       </UiIconButton>
       <UiIconButton class="hide-action" role="embedded" tone="danger"
                     data-context="tool-dock-hide"
-                    label="Скрыть панель" v-tooltip="'Скрыть панель'" @click="emit('hide')">
+                    :label="t('core.hidePanel')" v-tooltip="t('core.hidePanel')" @click="emit('hide')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
              stroke-linecap="round" aria-hidden="true">
           <path d="M6 6l12 12 M18 6 6 18" />
@@ -37,6 +37,8 @@
 </template>
 
 <script setup>
+import { t } from '../../ui.ts';
+
 import { computed, ref } from 'vue';
 import { UiIconButton, vTooltip } from '../../ui';
 

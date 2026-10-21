@@ -36,6 +36,8 @@
 
 - [Кэш payload: marker, leases/pins, продолжение попытки и ручной GC](server-binary-cache.md)
 
+- [Лишний `__pycache__` в поколении ломает prepare и установку окна; источник — юниты конвейера](stray-pycache-in-package.md)
+
 - [Контракт metadata и CLI автономного сервера](server-binary-contract.md)
 
 - [Внешний DeepSeek: опись SEA, обычный Node Factory и граница исходников](sea-deepseek-boundary.md)

@@ -1,3 +1,5 @@
+import type { UiText } from '../../../shared/i18n/core.ts';
+
 import type { ComponentPublicInstance, Ref, VNode } from 'vue';
 import type { UiLayerName } from './uiLayers';
 
@@ -65,9 +67,9 @@ export interface UiPopoverSlots {
 export type DialogAction<Value> = (value: Value) => void | Promise<void>;
 
 export interface ConfirmDialogOptions {
-  title?: string;
-  okText?: string;
-  cancelText?: string;
+  title?: UiText;
+  okText?: UiText;
+  cancelText?: UiText;
   danger?: boolean;
   touchTargets?: boolean;
   action?: DialogAction<true>;
@@ -75,19 +77,19 @@ export interface ConfirmDialogOptions {
 
 export interface PromptDialogOptions {
   multiline?: boolean;
-  title?: string;
-  text?: string;
-  placeholder?: string;
-  okText?: string;
-  cancelText?: string;
+  title?: UiText;
+  text?: UiText;
+  placeholder?: UiText;
+  okText?: UiText;
+  cancelText?: UiText;
   value?: string;
   danger?: boolean;
   action?: DialogAction<string>;
 }
 
 export interface AlertDialogOptions {
-  title?: string;
-  okText?: string;
+  title?: UiText;
+  okText?: UiText;
   danger?: boolean;
   action?: DialogAction<void>;
 }
@@ -95,7 +97,7 @@ export interface AlertDialogOptions {
 export interface ConfirmDialogRequest {
   readonly id: number;
   readonly kind: 'confirm';
-  readonly text: string;
+  readonly text: UiText;
   readonly options: Readonly<ConfirmDialogOptions>;
 }
 
@@ -108,7 +110,7 @@ export interface PromptDialogRequest {
 export interface AlertDialogRequest {
   readonly id: number;
   readonly kind: 'alert';
-  readonly text: string;
+  readonly text: UiText;
   readonly options: Readonly<AlertDialogOptions>;
 }
 

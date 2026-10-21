@@ -21,7 +21,7 @@
       ref="promptInput"
       v-model="promptValue"
       :aria-label="dialogTitle"
-      :placeholder="request.options.placeholder"
+      :placeholder="resolveUiText(request.options.placeholder ?? '')"
       :disabled="busy"
       @keydown="onPromptKeydown"
     />
@@ -31,7 +31,7 @@
       v-model="promptValue"
       class="ui-dialog-host__prompt"
       :aria-label="dialogTitle"
-      :placeholder="request.options.placeholder"
+      :placeholder="resolveUiText(request.options.placeholder ?? '')"
       :disabled="busy"
       @keydown="onPromptKeydown"
     />
@@ -70,6 +70,8 @@
 </template>
 
 <script setup lang="ts">
+import { t, resolveUiText } from '../../services/locale.ts';
+
 import {
   computed,
   nextTick,
@@ -119,13 +121,13 @@ const dialogTitle = computed(() => {
     return '';
   }
   if (current.kind === 'confirm') {
-    return current.options.title ?? 'Подтверди действие';
+    return resolveUiText(current.options.title ?? t('core.confirmAction'));
   }
   if (current.kind === 'prompt') {
-    return current.options.title ?? 'Пояснение';
+    return resolveUiText(current.options.title ?? t('core.explanation'));
   }
 
-  return current.options.title ?? 'GrigDesk';
+  return resolveUiText(current.options.title ?? 'GrigDesk');
 });
 const dialogText = computed(() => {
   const current = request.value;
@@ -134,9 +136,9 @@ const dialogText = computed(() => {
     return '';
   }
 
-  return current.kind === 'prompt'
+  return resolveUiText(current.kind === 'prompt'
     ? (current.options.text ?? '')
-    : current.text;
+    : current.text);
 });
 const okText = computed(() => {
   const current = request.value;
@@ -145,13 +147,13 @@ const okText = computed(() => {
     return '';
   }
   if (current.kind === 'confirm') {
-    return current.options.okText ?? 'Да';
+    return resolveUiText(current.options.okText ?? t('core.yes'));
   }
   if (current.kind === 'prompt') {
-    return current.options.okText ?? 'Отправить';
+    return resolveUiText(current.options.okText ?? t('core.send'));
   }
 
-  return current.options.okText ?? 'Понятно';
+  return resolveUiText(current.options.okText ?? t('core.gotIt'));
 });
 const cancelText = computed(() => {
   const current = request.value;
@@ -160,7 +162,7 @@ const cancelText = computed(() => {
     return '';
   }
 
-  return current.options.cancelText ?? 'Отмена';
+  return resolveUiText(current.options.cancelText ?? t('settings.cancel'));
 });
 const danger = computed(() => Boolean(request.value?.options.danger));
 
@@ -249,7 +251,7 @@ function errorText(error: unknown): string {
     return error;
   }
 
-  return 'Не удалось выполнить действие';
+  return t('core.couldNotPerformTheAction');
 }
 
 /**

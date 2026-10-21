@@ -1,3 +1,5 @@
+import { desktopText } from './locale.ts';
+
 export type LocalConnection = {
   kind: 'local';
   origin: string;
@@ -7,7 +9,7 @@ export type Connection = LocalConnection;
 
 export const DEFAULT_ORIGIN = 'http://127.0.0.1:8140';
 
-const ADDRESS_ERROR = 'Адрес GrigDesk должен быть вида http://127.0.0.1:<порт>/.';
+const ADDRESS_ERROR = 'desktop.addressError';
 
 type ArgumentOrigin = { origin: string } | { error: string } | null;
 type ResolvedConnection = {
@@ -53,12 +55,12 @@ export function originFromArgs(argv: readonly string[]): ArgumentOrigin {
   }
 
   if (args.length !== 1 || args[0] === '--grigdesk-url') {
-    return { error: ADDRESS_ERROR };
+    return { error: desktopText(ADDRESS_ERROR) };
   }
 
   const origin = localOrigin(args[0]?.slice('--grigdesk-url='.length));
 
-  return origin ? { origin } : { error: ADDRESS_ERROR };
+  return origin ? { origin } : { error: desktopText(ADDRESS_ERROR) };
 }
 
 /**

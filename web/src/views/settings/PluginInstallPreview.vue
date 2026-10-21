@@ -8,13 +8,13 @@
       <code class="preview-id">{{ preview.id }}</code>
       <p v-if="preview.description">{{ preview.description }}</p>
     </div>
-    <p class="preview-replacement">{{ replacesText(preview.replaces) }}</p>
+    <p class="preview-replacement">{{ replacesText(preview.replaces, uiLocale) }}</p>
     <dl class="preview-source">
-      <dt>Источник</dt>
+      <dt>{{ t('settings.source') }}</dt>
       <dd>{{ preview.source.kind }} · {{ preview.source.url }}</dd>
-      <dt>Тег</dt>
+      <dt>{{ t('settings.tag') }}</dt>
       <dd>{{ preview.target.tag }}</dd>
-      <dt>Коммит</dt>
+      <dt>{{ t('settings.commit') }}</dt>
       <dd class="preview-sha">{{ preview.target.sha }}</dd>
     </dl>
     <UiInlineMessage
@@ -31,18 +31,18 @@
         controls="plugin-install-changes"
         data-role="install-changes-toggle"
       >
-        Изменения · коммитов: {{ preview.changes.commits.length }} · файлов:
+        {{ t('settings.changesCommits') }} {{ preview.changes.commits.length }} {{ t('settings.files') }}
         {{ preview.changes.files.length }}
       </UiDisclosureButton>
       <p v-if="preview.changes.sensitive.length" class="preview-sensitive">
-        Затронута серверная часть или зависимости.
+        {{ t('settings.serverCodeOrDependenciesAreAffected') }}
       </p>
       <div
         v-if="changesOpen"
         id="plugin-install-changes"
         class="preview-diff"
       >
-        <h4>Коммиты</h4>
+        <h4>{{ t('settings.commits') }}</h4>
         <ul v-if="preview.changes.commits.length">
           <li
             v-for="commit in preview.changes.commits"
@@ -53,8 +53,8 @@
             {{ commit.subject }}
           </li>
         </ul>
-        <p v-else>Нет новых коммитов.</p>
-        <h4>Файлы</h4>
+        <p v-else>{{ t('settings.noNewCommits') }}</p>
+        <h4>{{ t('settings.files2') }}</h4>
         <ul v-if="preview.changes.files.length">
           <li
             v-for="file in preview.changes.files"
@@ -64,22 +64,23 @@
           >
             <code>{{ file.status }} · {{ file.path }}</code>
             <small v-if="preview.changes.sensitive.includes(file.path)">
-              серверная часть или зависимости
+              {{ t('settings.serverCodeOrDependencies') }}
             </small>
           </li>
         </ul>
-        <p v-else>Нет изменённых файлов.</p>
+        <p v-else>{{ t('settings.noChangedFiles') }}</p>
       </div>
-      <p v-if="preview.changes.truncated" class="preview-sensitive">Список сокращён.</p>
+      <p v-if="preview.changes.truncated" class="preview-sensitive">{{ t('settings.theListIsTruncated') }}</p>
     </div>
     <UiInlineMessage tone="warning">
-      Код плагина выполняется внутри GrigDesk с его правами. Ставьте плагины только из источников, которым
-      доверяете.
+      {{ t('settings.pluginCodeRunsInsideGrigDeskWithIts') }}
     </UiInlineMessage>
   </section>
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale } from '../../ui.ts';
+
 import { ref } from 'vue';
 
 import { UiDisclosureButton, UiInlineMessage } from '../../ui';

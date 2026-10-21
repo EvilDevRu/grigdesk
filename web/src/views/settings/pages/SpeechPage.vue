@@ -6,13 +6,13 @@
   >
     <SettingsScope />
     <p v-if="error || operations.message.value" role="alert">{{ error || operations.message.value }}</p>
-    <p v-if="!loaded">Загрузка речи…</p>
+    <p v-if="!loaded">{{ t('settings.loadingSpeechSettings') }}</p>
     <template v-else>
       <template v-if="settings.pageId === 'speech.dictation'">
         <SettingsField :address="address('engine')">
           <UiSelect :model-value="text('engine')" @update:model-value="edit('engine', $event)">
-            <option value="browser">Браузер</option>
-            <option value="whisper">Whisper на сервере</option>
+            <option value="browser">{{ t('settings.browser') }}</option>
+            <option value="whisper">{{ t('settings.whisperOnServer') }}</option>
           </UiSelect>
         </SettingsField>
         <SettingsField :address="address('browserProcessing')">
@@ -20,8 +20,8 @@
             :model-value="text('browserProcessing')"
             @update:model-value="edit('browserProcessing', $event)"
           >
-            <option value="auto">Способ обработки выбирает браузер</option>
-            <option value="local">Только локально в браузере</option>
+            <option value="auto">{{ t('settings.browserSelectsProcessing') }}</option>
+            <option value="local">{{ t('settings.localBrowserOnly') }}</option>
           </UiSelect>
         </SettingsField>
         <SettingsField :address="address('quality')">
@@ -35,11 +35,11 @@
             </option>
           </UiSelect>
         </SettingsField>
-        <SettingsSection heading="Как обрабатывается речь">
+        <SettingsSection :heading="t('settings.sectionHowSpeechIsProcessed')">
           <p>{{ effectivePath }}</p>
-          <p>Локальная модель браузера: {{ browserStatusLabel }}.</p>
-          <p>Согласие на браузерную обработку: {{ view.browserAutoConsent ? 'получено' : 'не получено' }}.</p>
-          <p>Диктовка: {{ dictationModel }} · видео: {{ videoModel }}.</p>
+          <p>{{ t('settings.localBrowserModel') }} {{ browserStatusLabel }}.</p>
+          <p>{{ t('settings.browserProcessingConsent') }} {{ view.browserAutoConsent ? t('settings.given') : t('settings.notGiven') }}.</p>
+          <p>{{ t('settings.dictation') }} {{ dictationModel }} {{ t('settings.video') }} {{ videoModel }}.</p>
         </SettingsSection>
       </template>
       <template v-else-if="settings.pageId === 'speech.video'">
@@ -62,17 +62,17 @@
             @update:model-value="edit('videoInitialPrompt', $event)"
           />
         </SettingsField>
-        <UiButton @click="edit('videoInitialPrompt', null)">Вернуть стандартную подсказку</UiButton>
+        <UiButton @click="edit('videoInitialPrompt', null)">{{ t('settings.restoreDefaultPrompt') }}</UiButton>
         <p v-if="value('videoInitialPrompt') === null">
-          После применения сервер подставит свой текст по умолчанию.
+          {{ t('settings.afterApplyingTheServerWillUseIts') }}
         </p>
       </template>
       <template v-else-if="settings.pageId === 'speech.language'">
         <SettingsField :address="address('language')">
           <UiSelect :model-value="text('language')" @update:model-value="edit('language', $event)">
-            <option value="auto">Автоматически</option>
-            <option value="ru">Русский</option>
-            <option value="en">Английский</option>
+            <option value="auto">{{ t('settings.automatic') }}</option>
+            <option value="ru">{{ t('settings.russian') }}</option>
+            <option value="en">{{ t('settings.english') }}</option>
           </UiSelect>
         </SettingsField>
         <SettingsField :address="address('dictionary')">
@@ -83,15 +83,15 @@
             @update:model-value="edit('dictionary', $event)"
           />
         </SettingsField>
-        <UiButton @click="edit('dictionary', GRIGDESK_DICTIONARY)">Подставить термины GrigDesk</UiButton>
+        <UiButton @click="edit('dictionary', GRIGDESK_DICTIONARY)">{{ t('settings.insertGrigDeskTerms') }}</UiButton>
         <p v-if="view.capabilities.lastDictionaryMeasure">
-          Последний замер словаря: {{ view.capabilities.lastDictionaryMeasure.hotwordsTokens }} токенов
-          {{ view.capabilities.lastDictionaryMeasure.hotwordsTruncated ? '· словарь обрезан' : '' }}.
+          {{ t('settings.lastDictionaryMeasurement') }} {{ view.capabilities.lastDictionaryMeasure.hotwordsTokens }} {{ t('settings.tokens') }}
+          {{ view.capabilities.lastDictionaryMeasure.hotwordsTruncated ? t('settings.dictionaryTruncated') : '' }}.
         </p>
       </template>
       <template v-else-if="settings.pageId === 'speech.models'">
-        <p>Скачивание, копирование и отмена выполняются сразу. Они продолжаются после ухода со страницы.</p>
-        <p v-if="!view.capabilities.models.length">Сервер пока не сообщил каталог моделей.</p>
+        <p>{{ t('settings.downloadsCopiesAndCancellationsTakeEffectImmediately') }}</p>
+        <p v-if="!view.capabilities.models.length">{{ t('settings.theServerHasNotReportedTheModel') }}</p>
         <SettingsSection
           v-for="model in view.capabilities.models"
           :key="model.modelId"
@@ -99,7 +99,7 @@
           :heading="model.modelId"
         >
           <p>
-            {{ model.repo }} · {{ model.cached ? 'В кэше' : 'Не скачана' }} · {{ modelSize(model.sizeMb) }}
+            {{ model.repo }} · {{ model.cached ? t('settings.cached') : t('settings.notDownloaded') }} · {{ modelSize(model.sizeMb) }}
           </p>
           <div class="settings-speech-actions">
             <UiButton
@@ -107,7 +107,7 @@
               :disabled="model.cached || modelBusy(model.modelId)"
               @click="operations.start('download', model.modelId)"
             >
-              Скачать
+              {{ t('settings.download') }}
             </UiButton>
             <UiButton
               v-if="!model.cached"
@@ -115,7 +115,7 @@
               :disabled="modelBusy(model.modelId)"
               @click="operations.start('copy', model.modelId)"
             >
-              Скопировать из общего кэша
+              {{ t('settings.copyFromSharedCache') }}
             </UiButton>
             <UiButton
               v-if="operations.isActive(operations.jobFor(model.modelId))"
@@ -123,16 +123,16 @@
               :disabled="operations.busy.value.includes(`cancel:${operations.jobFor(model.modelId)?.jobId}`)"
               @click="operations.cancel(operations.jobFor(model.modelId))"
             >
-              Отменить
+              {{ t('settings.cancel2') }}
             </UiButton>
           </div>
           <p v-if="operations.jobFor(model.modelId)">
-            {{ operations.jobFor(model.modelId)?.kind === 'copy' ? 'Копирование' : 'Скачивание' }}:
+            {{ operations.jobFor(model.modelId)?.kind === 'copy' ? t('settings.copying') : t('settings.downloading3') }}:
             {{ jobLabel(operations.jobFor(model.modelId)) }}
           </p>
           <UiProgress
             v-if="operations.jobFor(model.modelId)?.percent != null"
-            label="Прогресс модели"
+            :label="t('settings.modelProgress')"
             :value="operations.jobFor(model.modelId)?.percent ?? undefined"
           />
           <p v-if="operations.jobFor(model.modelId)?.error" role="alert">
@@ -141,14 +141,14 @@
         </SettingsSection>
       </template>
       <template v-else-if="settings.pageId === 'speech.advanced'">
-        <SettingsSection heading="Модели распознавания">
+        <SettingsSection :heading="t('settings.sectionRecognitionModels')">
           <SettingsField
             v-for="key in ['model', 'videoModel']"
             :key="key"
             :address="address(key)"
           >
             <UiSelect :model-value="text(key)" @update:model-value="edit(key, $event === '' ? null : $event)">
-              <option value="">По пресету</option>
+              <option value="">{{ t('settings.presetDefault') }}</option>
               <option
                 v-for="model in SPEECH_MODELS"
                 :key="model"
@@ -159,10 +159,10 @@
             </UiSelect>
           </SettingsField>
         </SettingsSection>
-        <SettingsSection heading="Обработка на сервере">
+        <SettingsSection :heading="t('settings.sectionServerProcessing')">
           <SettingsField :address="address('device')">
             <UiSelect :model-value="text('device')" @update:model-value="edit('device', $event)">
-              <option value="auto">Автоматически</option>
+              <option value="auto">{{ t('settings.automatic') }}</option>
               <option value="cpu">CPU</option>
               <option value="cuda" :disabled="!cudaReady">CUDA</option>
             </UiSelect>
@@ -172,7 +172,7 @@
               :model-value="text('computeType')"
               @update:model-value="edit('computeType', $event === '' ? null : $event)"
             >
-              <option value="">По устройству</option>
+              <option value="">{{ t('settings.deviceDefault') }}</option>
               <option
                 v-for="type in ['int8', 'int8_float16', 'float16', 'float32']"
                 :key="type"
@@ -187,7 +187,7 @@
               :model-value="number('beamSize')"
               :min="1"
               :max="10"
-              placeholder="По пресету"
+              :placeholder="t('settings.presetDefault')"
               @update:model-value="edit('beamSize', $event === '' ? null : $event)"
             />
           </SettingsField>
@@ -206,27 +206,28 @@
             />
           </SettingsField>
         </SettingsSection>
-        <SettingsSection heading="Окружение и замер">
+        <SettingsSection :heading="t('settings.sectionEnvironmentAndBenchmark')">
           <p>
             Whisper:
-            {{ view.capabilities.local.ready ? 'Готов' : view.capabilities.local.reason || 'Не готов' }}.
+            {{ view.capabilities.local.ready ? t('settings.ready2') : view.capabilities.local.reason || t('settings.notReady') }}.
           </p>
           <ul>
             <li v-for="check in view.capabilities.local.checks" :key="check.name">
-              {{ check.name }} · {{ check.ok ? 'готово' : check.fix || 'требует исправления' }}
+              {{ speechCheckName(check.name, uiLocale) }} ·
+              {{ check.ok ? t('settings.done2') : check.fix || t('settings.needsAttention') }}
             </li>
           </ul>
           <p>CUDA: {{ cudaReason }}.</p>
           <p v-if="!cudaReady">
-            Установка библиотек:
+            {{ t('settings.libraryInstallation') }}
             <code>deploy/install.sh --with-cuda</code>
             .
           </p>
-          <UiButton :disabled="refreshing" @click="refresh">Перепроверить окружение и кэш</UiButton>
+          <UiButton :disabled="refreshing" @click="refresh">{{ t('settings.recheckEnvironmentAndCache') }}</UiButton>
         </SettingsSection>
-        <SettingsSection heading="Замер на эталонной записи">
+        <SettingsSection :heading="t('settings.sectionReferenceRecordingBenchmark')">
           <p>
-            Модель {{ benchmarkParameters.modelId }} · {{ benchmarkParameters.language }} ·
+            {{ t('settings.model') }} {{ benchmarkParameters.modelId }} · {{ benchmarkParameters.language }} ·
             {{ benchmarkParameters.device }} · {{ benchmarkParameters.computeType }}.
           </p>
           <UiButton
@@ -234,10 +235,10 @@
             :disabled="benchmarkDisabled"
             @click="operations.start('benchmark')"
           >
-            Замерить
+            {{ t('settings.benchmark') }}
           </UiButton>
           <p v-if="!view.capabilities.benchmark.available">
-            {{ view.capabilities.benchmark.reason }} Эталонный WAV задаётся через
+            {{ view.capabilities.benchmark.reason }} {{ t('settings.referenceWAVIsConfiguredThrough') }}
             <code>GRIGDESK_SPEECH_BENCHMARK_AUDIO</code>
             .
           </p>
@@ -245,14 +246,14 @@
             <p>{{ jobLabel(benchmarkJob) }}</p>
             <UiProgress
               v-if="benchmarkJob.percent !== null"
-              label="Прогресс замера"
+              :label="t('settings.benchmarkProgress')"
               :value="benchmarkJob.percent"
             />
             <UiButton v-if="operations.isActive(benchmarkJob)" @click="operations.cancel(benchmarkJob)">
-              Отменить замер
+              {{ t('settings.cancelBenchmark') }}
             </UiButton>
             <p v-if="benchmarkJob.error" role="alert">{{ benchmarkJob.error }}</p>
-            <p v-if="benchmarkJob.status === 'done'">{{ speechBenchmarkText(benchmarkJob) }}</p>
+            <p v-if="benchmarkJob.status === 'done'">{{ speechBenchmarkText(benchmarkJob, uiLocale) }}</p>
           </template>
         </SettingsSection>
       </template>
@@ -261,6 +262,9 @@
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale } from '../../../ui.ts';
+import { formatNumber } from '../../../../../shared/i18n/formats.ts';
+
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import SettingsScope from '../SettingsScope.vue';
 import SettingsSection from '../SettingsSection.vue';
@@ -269,7 +273,7 @@ import { api, failureText } from '../../../shared/apiClient.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
 import { useChatStore } from '../../../stores/chat.js';
 import { sseSubscribe } from '../../../composables/useSse.ts';
-import { SETTINGS_FIELDS } from '../../../features/settings/catalog.ts';
+import { SETTINGS_FIELDS, getSettingsFields } from '../../../features/settings/catalog.ts';
 import type { FieldAddress, JsonValue } from '../../../features/settings/contracts.ts';
 import {
   createSpeechResource,
@@ -277,6 +281,7 @@ import {
   SPEECH_QUALITIES,
   QUALITY_MODELS,
   GRIGDESK_DICTIONARY,
+  speechCheckName,
 } from '../../../features/settings/resources/speech.ts';
 import {
   createSpeechOperations,
@@ -311,7 +316,7 @@ const service = settings.sessionService('speech', () => {
       revision: snapshot.revision,
       capabilities: snapshot.capabilities,
     });
-  });
+  }, uiLocale);
   const view = shallowRef(resource.getSnapshot());
   const operations = createSpeechOperations(api, () => {
     const device = String(settings.getValue('speech', 'device') ?? 'auto');
@@ -360,16 +365,17 @@ const cudaReady = computed(() => view.value.capabilities.cuda.state === 'ready')
 const cudaReason = computed(() => {
   const cuda = view.value.capabilities.cuda;
 
-  return cuda.state === 'ready' ? 'Готово' : cuda.reason
-    || (cuda.state === 'no_device' ? 'NVIDIA GPU не обнаружен'
-      : cuda.state === 'missing_library' ? 'Библиотеки CUDA не установлены' : 'Не удалось проверить CUDA');
+  return cuda.state === 'ready' ? t('settings.done') : cuda.reason
+    || (cuda.state === 'no_device' ? t('settings.nvidiaGPUNotDetected')
+      : cuda.state === 'missing_library'
+        ? t('settings.cudaLibrariesAreNotInstalled') : t('settings.couldNotCheckCUDA'));
 });
 const browserStatusLabel = computed(() => ({
-  available: 'готова',
-  downloadable: 'можно скачать при первом запуске',
-  downloading: 'скачивается',
-  unavailable: 'недоступна',
-  unknown: 'проверяется',
+  available: t('settings.ready'),
+  downloadable: t('settings.canDownloadOnFirstUse'),
+  downloading: t('settings.downloading2'),
+  unavailable: t('settings.unavailable3'),
+  unknown: t('settings.checking'),
 } as Record<string, string>)[browserStatus.value] ?? browserStatus.value);
 const dictationModel = computed(() => text('model') || QUALITY_MODELS[text('quality')] || 'medium');
 const videoModel = computed(() => text('videoModel') || QUALITY_MODELS[text('videoQuality')] || 'medium');
@@ -391,21 +397,22 @@ const effectivePath = computed(() => {
   const local = view.value.capabilities.local;
 
   if (text('engine') === 'whisper') {
-    return local.ready ? 'Whisper на сервере GrigDesk' : `Недоступно: ${local.reason}`;
+    return local.ready ? t('settings.whisperOnTheGrigDeskServer')
+    : t('settings.unavailable4', { localReason: local.reason });
   }
   if (!browserSpeechRecognition(window)
       || text('browserProcessing') === 'local' && browserStatus.value === 'unavailable') {
-    return local.ready ? 'Whisper (fallback: браузерный режим недоступен)'
-      : `Недоступно: браузерный режим и Whisper не готовы. ${local.reason}`;
+    return local.ready ? t('settings.whisperFallbackBrowserModeUnavailable')
+      : t('settings.unavailableBrowserModeAndWhisperAreNot', { localReason: local.reason });
   }
 
   if (text('browserProcessing') !== 'local') {
-    return 'Браузер — способ обработки выбирает сам браузер';
+    return t('settings.browserProcessingIsSelectedByTheBrowser');
   }
 
-  return browserStatus.value === 'downloadable' ? 'Браузер локально — модель скачается при первом запуске'
-    : browserStatus.value === 'downloading' ? 'Браузер локально — модель скачивается'
-      : 'Браузер локально на этом устройстве';
+  return browserStatus.value === 'downloadable' ? t('settings.localBrowserModelDownloadsOnFirstUse')
+    : browserStatus.value === 'downloading' ? t('settings.localBrowserDownloadingModel')
+      : t('settings.localBrowserOnThisDevice');
 });
 
 function value(key: string): JsonValue | undefined {
@@ -434,9 +441,9 @@ function edit(key: string, next: JsonValue): void {
 
 function qualityLabel(quality: string): string {
   const labels: Record<string, string> = {
-    fast: 'Быстро',
-    balanced: 'Обычно',
-    accurate: 'Точно',
+    fast: t('settings.fast'),
+    balanced: t('settings.normal'),
+    accurate: t('settings.accurate'),
   };
 
   return labels[quality] ?? quality;
@@ -452,8 +459,15 @@ function modelBusy(modelId: string): boolean {
  * Маленьким моделям хватает одной десятичной цифры, большим — целых мегабайт.
  */
 function modelSize(sizeMb: number): string {
-  return sizeMb <= 0 ? 'размер неизвестен' : sizeMb >= 1024
-    ? `${(sizeMb / 1024).toFixed(1)} ГБ` : `${sizeMb.toFixed(sizeMb >= 100 ? 0 : 1)} МБ`;
+  return sizeMb <= 0 ? t('settings.unknownSize') : sizeMb >= 1024
+    ? t('settings.gb', { value1: formatNumber(sizeMb / 1024, uiLocale, {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }) })
+    : t('settings.mb', { value1: formatNumber(sizeMb, uiLocale, {
+      minimumFractionDigits: sizeMb >= 100 ? 0 : 1,
+      maximumFractionDigits: sizeMb >= 100 ? 0 : 1,
+    }) });
 }
 
 /**
@@ -462,12 +476,12 @@ function modelSize(sizeMb: number): string {
  */
 function jobLabel(job?: SpeechJob): string {
   const labels: Record<string, string> = {
-    queued: 'в очереди',
-    running: 'выполняется',
-    done: 'готово',
-    failed: 'ошибка',
-    cancelled: 'отменено',
-    interrupted: 'прервано перезапуском',
+    queued: t('settings.queued'),
+    running: t('settings.running'),
+    done: t('settings.done2'),
+    failed: t('settings.error'),
+    cancelled: t('settings.cancelled'),
+    interrupted: t('settings.interruptedByRestart'),
   };
 
   return job ? `${labels[job.status] ?? job.status}${job.percent === null ? '' : ` · ${job.percent}%`}` : '';

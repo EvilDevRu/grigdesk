@@ -1,12 +1,12 @@
 <template>
   <SettingsSection
-    heading="Добавьте возможности GrigDesk"
-    description="Установите плагин из Git-репозитория."
+    :heading="t('settings.sectionAddGrigdeskFeatures')"
+    :description="t('settings.installAPluginFromAGitRepository')"
   >
-    <SettingsScope scope="Отдельная операция">Установка выполняется сразу после подтверждения.</SettingsScope>
-    <p v-if="installer.job">Есть задание установки: {{ installer.job.status }}.</p>
+    <SettingsScope :scope="t('settings.separateAction')">{{ t('settings.installationStartsImmediatelyAfterConfirmation') }}</SettingsScope>
+    <p v-if="installer.job">{{ t('settings.installationJob') }} {{ installer.job.status }}.</p>
     <p v-if="installer.recoveryError" role="alert">{{ installer.recoveryError.message }}</p>
-    <UiButton variant="solid" tone="accent" @click="open = true">Открыть установку из git</UiButton>
+    <UiButton variant="solid" tone="accent" @click="open = true">{{ t('settings.openGitInstallation') }}</UiButton>
     <PluginInstallDialog
       v-if="open"
       v-model:open="open"
@@ -17,6 +17,8 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '../../../ui.ts';
+
 import { ref } from 'vue';
 import { UiButton } from '../../../ui.ts';
 import { usePluginInstallStore } from '../../../stores/pluginInstall.ts';

@@ -1,3 +1,4 @@
+import { messageRef } from '../ui.ts';
 // Pinia хранит только проверенные DTO. Подписка принадлежит оболочке вкладки.
 // Таймеры, controllers и coalescing promises лежат в closure вне reactive state.
 import { computed, ref, toRaw } from 'vue';
@@ -409,7 +410,8 @@ export const useStudio3dStore = defineStore('studio3d', () => {
       tone: row.status === 'ready' ? 'accent' : 'danger',
       sticky: row.status === 'failed',
       title: row.status === 'ready'
-        ? `Модель «${row.modelName ?? row.label}» готова` : `Не получилось: «${row.modelName ?? row.label}»`,
+        ? messageRef('core.modelReady', { name: row.modelName ?? row.label })
+        : messageRef('core.modelFailed', { name: row.modelName ?? row.label }),
       body: row.error?.message ?? undefined,
       target: {
         kind: 'studio',

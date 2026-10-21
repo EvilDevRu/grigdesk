@@ -22,7 +22,7 @@ public final class AndroidActions implements ShellApi.Native {
   @Override
   public String scan() throws Exception {
     if (!context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
-      throw new IllegalStateException("На устройстве нет камеры.");
+      throw new IllegalStateException(ClientLocale.text("noCamera"));
     }
 
     return local.grigdesk.client.shell.ClientFailure.await(activity.get().scan());
@@ -49,13 +49,13 @@ public final class AndroidActions implements ShellApi.Native {
     Uri uri = context.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
 
     if (uri == null) {
-      throw new IllegalStateException("Не удалось создать файл в Загрузках.");
+      throw new IllegalStateException(ClientLocale.text("createFileFailure"));
     }
 
     try {
       try (OutputStream output = context.getContentResolver().openOutputStream(uri)) {
         if (output == null) {
-          throw new IllegalStateException("Не удалось открыть файл в Загрузках.");
+          throw new IllegalStateException(ClientLocale.text("openFileFailure"));
         }
 
         byte[] bytes = new byte[8192];

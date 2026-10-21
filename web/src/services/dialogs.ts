@@ -1,3 +1,6 @@
+import { snapshotText } from '../../../shared/i18n/core.ts';
+import type { UiText } from '../../../shared/i18n/core.ts';
+
 import type {
   AlertDialogOptions,
   AlertDialogRequest,
@@ -94,13 +97,17 @@ export function completeDialogRequest(requestId: number, result: DialogResult): 
   return true;
 }
 
-export function confirmDialog(text: string, options: ConfirmDialogOptions = {}): Promise<boolean> {
+/**
+ * Очередь хранит снимок текста и параметров, сохраняя выбор одного открытого диалога.
+ * Host переводит descriptor при показе, не выполняя подтверждение повторно.
+ */
+export function confirmDialog(text: UiText, options: ConfirmDialogOptions = {}): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     const request: ConfirmDialogRequest = Object.freeze({
       id: ++sequence,
       kind: 'confirm',
-      text: String(text ?? ''),
-      options: Object.freeze({ ...options }),
+      text: snapshotText(text ?? ''),
+      options: snapshotOptions(options),
     });
     enqueue({ request, resolve });
   });
@@ -111,19 +118,23 @@ export function promptDialog(options: PromptDialogOptions = {}): Promise<string 
     const request: PromptDialogRequest = Object.freeze({
       id: ++sequence,
       kind: 'prompt',
-      options: Object.freeze({ ...options }),
+      options: snapshotOptions(options),
     });
     enqueue({ request, resolve });
   });
 }
 
-export function alertDialog(text: string, options: AlertDialogOptions = {}): Promise<void> {
+/**
+ * Сообщение ставится в общую очередь со снимком descriptor и кнопок.
+ * Переключение языка не меняет обещание завершения и порядок показа.
+ */
+export function alertDialog(text: UiText, options: AlertDialogOptions = {}): Promise<void> {
   return new Promise<void>((resolve) => {
     const request: AlertDialogRequest = Object.freeze({
       id: ++sequence,
       kind: 'alert',
-      text: String(text ?? ''),
-      options: Object.freeze({ ...options }),
+      text: snapshotText(text ?? ''),
+      options: snapshotOptions(options),
     });
     enqueue({ request, resolve });
   });
@@ -132,4 +143,22 @@ export function alertDialog(text: string, options: AlertDialogOptions = {}): Pro
 /** Диагностический read-only state для component-тестов. */
 export function pendingDialogCount(): number {
   return queue.length + (active ? 1 : 0);
+}
+
+/**
+ * Опции сохраняют callback и ввод, а тексты получают отдельный неизменяемый снимок.
+ * Переключение языка не создаёт новый запрос и не повторяет действие диалога.
+ */
+function snapshotOptions<T extends object>(options: T): Readonly<T> {
+  const copy = { ...options };
+
+  for (const key of ['title', 'text', 'placeholder', 'okText', 'cancelText']) {
+    const value = (copy as Record<string, unknown>)[key];
+
+    if (value !== undefined) {
+      (copy as Record<string, unknown>)[key] = snapshotText(value as UiText);
+    }
+  }
+
+  return Object.freeze(copy);
 }

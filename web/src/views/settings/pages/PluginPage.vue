@@ -10,24 +10,24 @@
         v-model="filters.query"
         data-plugin-filter
         type="search"
-        aria-label="Поиск плагинов"
-        placeholder="Найти плагин"
+        :aria-label="t('settings.searchPlugins')"
+        :placeholder="t('settings.findAPlugin')"
       />
-      <UiSelect v-model="filters.state" aria-label="Состояние плагинов">
-        <option value="all">Все</option>
-        <option value="enabled">Включены</option>
-        <option value="disabled">Выключены</option>
+      <UiSelect v-model="filters.state" :aria-label="t('settings.pluginStatus')">
+        <option value="all">{{ t('settings.all') }}</option>
+        <option value="enabled">{{ t('settings.enabled') }}</option>
+        <option value="disabled">{{ t('settings.disabled3') }}</option>
       </UiSelect>
-      <UiCheckbox v-model="filters.configurable">С параметрами</UiCheckbox>
-      <UiCheckbox v-model="filters.custom">Только пользовательские</UiCheckbox>
-      <UiButton @click="clearFilters">Сбросить фильтры</UiButton>
+      <UiCheckbox v-model="filters.configurable">{{ t('settings.withSettings') }}</UiCheckbox>
+      <UiCheckbox v-model="filters.custom">{{ t('settings.customOnly') }}</UiCheckbox>
+      <UiButton @click="clearFilters">{{ t('settings.resetFilters') }}</UiButton>
     </div>
     <div class="settings-plugin-workspace">
-      <aside class="settings-plugin-sidebar" aria-label="Выбор плагина">
+      <aside class="settings-plugin-sidebar" :aria-label="t('settings.pluginSelection')">
         <div class="settings-plugin-picker">
           <UiSelect
             :model-value="plugin?.id || ''"
-            aria-label="Выберите плагин"
+            :aria-label="t('settings.selectAPlugin')"
             @update:model-value="selectPlugin(String($event))"
           >
             <optgroup v-for="group in groups" :key="group.id" :label="group.label">
@@ -55,9 +55,9 @@
                   <span class="ui-settings-catalog-copy">
                     <span class="ui-settings-catalog-title">{{ entry.name }}</span>
                     <span class="ui-settings-catalog-status" :data-available="draftEnabled(entry.id)">
-                      {{ draftEnabled(entry.id) ? 'Включён' : 'Выключен' }}
+                      {{ draftEnabled(entry.id) ? t('settings.enabled2') : t('settings.disabled') }}
                       <span v-if="pluginInstallBadge(entry)">
-                        · {{ pluginInstallBadge(entry) === 'restart' ? 'Ждёт перезапуска' : 'Обновление' }}
+                        · {{ pluginInstallBadge(entry) === 'restart' ? t('settings.waitingForRestart') : t('settings.update2') }}
                       </span>
                     </span>
                   </span>
@@ -65,14 +65,14 @@
                 <UiSwitch
                   :model-value="draftEnabled(entry.id)"
                   :disabled="recoveryBlocked"
-                  :aria-label="`Включить ${entry.name}`"
+                  :aria-label="t('settings.enable', { entryName: entry.name })"
                   @update:model-value="toggleEntry(entry, $event)"
                 />
               </div>
             </div>
           </SettingsSection>
         </div>
-        <p v-if="!groups.length">Плагины не найдены. Измените запрос или сбросьте фильтры.</p>
+        <p v-if="!groups.length">{{ t('settings.noPluginsFoundChangeTheQueryOr') }}</p>
         <p v-if="installer.recoveryError" role="alert">{{ installer.recoveryError.message }}</p>
         <p v-else-if="installer.job?.status === 'recovery_required'" role="alert">
           {{ installer.job.error?.message }}
@@ -85,7 +85,7 @@
             :disabled="recoveryBlocked"
             @click="settings.selectPage('plugins.install')"
           >
-            Установить из git
+            {{ t('settings.installFromGit') }}
           </UiButton>
           <UiButton
             v-if="list.some((entry) => entry.install)"
@@ -94,11 +94,11 @@
             :disabled="recoveryBlocked || installer.checking"
             @click="installer.checkUpdates()"
           >
-            Проверить обновления
+            {{ t('settings.checkForUpdates') }}
           </UiButton>
         </div>
       </aside>
-      <section class="settings-plugin-editor" aria-label="Настройки выбранного плагина">
+      <section class="settings-plugin-editor" :aria-label="t('settings.selectedPluginSettings')">
         <template v-if="plugin && ready">
           <header class="settings-plugin-title">
             <SettingsIcon name="plugins" />
@@ -119,18 +119,18 @@
             :plugin="setupPlugin"
             :active="active"
           />
-          <SettingsScope>Значения и размещения сохранятся по «Применить».</SettingsScope>
+          <SettingsScope>{{ t('settings.valuesAndPlacementsAreSavedWithApply') }}</SettingsScope>
           <SettingsField :address="address('enabled')">
             <UiSwitch
               :model-value="enabled"
               :disabled="recoveryBlocked"
-              :aria-label="`Включить ${plugin.name}`"
+              :aria-label="t('settings.enable2', { pluginName: plugin.name })"
               @update:model-value="setEnabled"
             />
           </SettingsField>
-          <p v-if="restartPending">Ждёт перезапуска</p>
-          <p v-else-if="plugin.needsRestart">Изменение состояния серверной части потребует перезапуска.</p>
-          <h4 v-if="plugin.placements?.length">Размещение</h4>
+          <p v-if="restartPending">{{ t('settings.waitingForRestart') }}</p>
+          <p v-else-if="plugin.needsRestart">{{ t('settings.changingServerComponentStatusWillRequireA') }}</p>
+          <h4 v-if="plugin.placements?.length">{{ t('settings.placement') }}</h4>
           <SettingsField
             v-for="slot in plugin.placements ?? []"
             :key="slot.slot"
@@ -143,7 +143,7 @@
               {{ slot.label }} · {{ slot.slot }}
             </UiCheckbox>
           </SettingsField>
-          <h4 v-if="plugin.settings.length">Параметры</h4>
+          <h4 v-if="plugin.settings.length">{{ t('settings.parameters') }}</h4>
           <SettingsField
             v-for="field in plugin.settings"
             :key="field.key"
@@ -168,10 +168,10 @@
                 {{ entry.name }}
               </UiCheckbox>
               <p v-for="id in missingProviders(field.key)" :key="id">
-                {{ id }} — нет в реестре
-                <UiButton @click="setProvider(field.key, id, false)">Убрать</UiButton>
+                {{ id }} {{ t('settings.missingFromRegistry2') }}
+                <UiButton @click="setProvider(field.key, id, false)">{{ t('settings.remove') }}</UiButton>
               </p>
-              <p>Ни один не отмечен — значит все.</p>
+              <p>{{ t('settings.noneSelectedMeansAll') }}</p>
             </template>
             <template v-else-if="field.type === 'model'">
               <UiSelect
@@ -180,7 +180,7 @@
                 :aria-label="field.label"
                 @update:model-value="setModel(field.key, $event)"
               >
-                <option value="">— не выбрана —</option>
+                <option value="">{{ t('settings.notSelected') }}</option>
                 <option
                   v-if="lostModel(field)"
                   :value="modelOption(field.key)"
@@ -191,7 +191,7 @@
                 <optgroup
                   v-for="group in modelGroups(field)"
                   :key="group.id"
-                  :label="group.name + (group.available ? '' : ' — недоступен')"
+                  :label="group.name + (group.available ? '' : t('settings.unavailable'))"
                 >
                   <option
                     v-for="entry in group.models"
@@ -203,16 +203,16 @@
                 </optgroup>
               </UiSelect>
               <template v-if="efforts(field.key).length || modelValue(field.key)?.effort">
-                <p>Усилие</p>
+                <p>{{ t('settings.effort') }}</p>
                 <UiSelect
                   :disabled="fieldUnavailable(field.key)"
                   :model-value="modelValue(field.key)?.effort || ''"
-                  aria-label="Усилие"
+                  :aria-label="t('settings.effort')"
                   @update:model-value="setEffort(field.key, $event)"
                 >
-                  <option value="">По умолчанию исполнителя</option>
+                  <option value="">{{ t('settings.providerDefault') }}</option>
                   <option v-if="lostEffort(field.key)" :value="lostEffort(field.key)">
-                    {{ lostEffort(field.key) }} — нет у этой модели
+                    {{ lostEffort(field.key) }} {{ t('settings.unavailableForThisModel') }}
                   </option>
                   <option
                     v-for="effort in efforts(field.key)"
@@ -247,7 +247,7 @@
                 :value="textValue(field.key)"
                 disabled
               >
-                {{ textValue(field.key) }} — нет в списке
+                {{ textValue(field.key) }} {{ t('settings.missingFromList') }}
               </option>
               <option
                 v-for="option in field.options"
@@ -276,16 +276,16 @@
               v-if="fieldUnavailable(field.key)"
               @click="discard(pluginValueKey('values', field.key))"
             >
-              Отменить правку
+              {{ t('settings.discardEdit') }}
             </UiButton>
           </SettingsField>
         </template>
-        <p v-else-if="!plugin && settings.entityId">Плагин больше недоступен.</p>
+        <p v-else-if="!plugin && settings.entityId">{{ t('settings.thePluginIsNoLongerAvailable') }}</p>
         <div v-else-if="!plugin" class="settings-plugin-empty">
-          <h4>{{ list.length ? 'Выберите плагин' : 'Плагины не установлены' }}</h4>
+          <h4>{{ list.length ? t('settings.selectAPlugin') : t('settings.noPluginsInstalled') }}</h4>
           <p>
-            {{ list.length ? 'Выберите плагин в списке, чтобы изменить его параметры.'
-              : 'Установите плагин из Git, чтобы добавить возможности GrigDesk.' }}
+            {{ list.length ? t('settings.selectAPluginFromTheListTo')
+              : t('settings.installAPluginFromGitToAdd') }}
           </p>
         </div>
         <SettingsField
@@ -293,7 +293,7 @@
           :key="field.key"
           :address="field.address"
         >
-          <UiButton @click="discard(field.key)">Отменить правку</UiButton>
+          <UiButton @click="discard(field.key)">{{ t('settings.discardEdit') }}</UiButton>
         </SettingsField>
       </section>
     </div>
@@ -307,6 +307,10 @@
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale } from '../../../ui.ts';
+
+import { localizePluginMetadata, localizePluginCategory } from '../../../features/settings/metadataLocale.ts';
+
 import SettingsSection from '../SettingsSection.vue';
 import SettingsScope from '../SettingsScope.vue';
 import SettingsIcon from '../SettingsIcon.vue';
@@ -343,11 +347,12 @@ const filters = settings.sessionService('plugin-filters', () => reactive({
   configurable: false,
   custom: false,
 }));
-const list = computed(() => plugins.list as PluginListItem[]);
+const list = computed(() => (plugins.list as PluginListItem[])
+  .map((entry) => localizePluginMetadata(entry, uiLocale.value)));
 const visible = computed(() => list.value.filter((entry) => {
   const needle = filters.query.trim().toLocaleLowerCase('ru');
   const text = [entry.id, entry.name, entry.description, entry.nav?.label,
-    entry.system ? 'системный' : 'пользовательский'].join(' ').toLocaleLowerCase('ru');
+    entry.system ? t('settings.system') : t('settings.custom')].join(' ').toLocaleLowerCase('ru');
 
   return (!needle || text.includes(needle))
     && (filters.state === 'all' || (filters.state === 'enabled') === draftEnabled(entry.id))
@@ -355,7 +360,7 @@ const visible = computed(() => list.value.filter((entry) => {
     && (!filters.configurable || entry.settings.length > 0 || Boolean(entry.placements?.length));
 }));
 const groups = computed(() => PLUGIN_CATEGORIES.map((category) => ({
-  ...category,
+  ...localizePluginCategory(category, uiLocale.value),
   plugins: visible.value.filter((entry) => pluginCategoryOf(entry) === category.id),
 })).filter((group) => group.plugins.length));
 const recoveryBlocked = computed(() => Boolean(installer.recoveryError)
@@ -364,7 +369,7 @@ const installOpen = ref(false);
 const installMode = ref<'install' | 'update'>('install');
 const providers = useProvidersStore();
 const registry = computed(() => providers.providers as ProviderEntry[]);
-const plugin = computed(() => (plugins.list as PluginListItem[])
+const plugin = computed(() => list.value
   .find((entry) => entry.id === settings.entityId));
 const resourceId = computed(() => `pluginSettings:${settings.entityId}`);
 const enabledId = computed(() => `pluginEnabled:${settings.entityId}`);
@@ -558,11 +563,14 @@ function lostModel(field: PluginSetting): string {
   const model = selectedModel(field.key);
 
   if (!model) {
-    return `${current.provider}: ${current.model} — нет в реестре`;
+    return t('settings.missingFromRegistry', {
+    currentProvider: current.provider,
+    currentModel: current.model,
+  });
   }
 
   return field.requiresCapability && !provider?.capabilities?.[field.requiresCapability]
-    ? `${provider?.name}: ${model.name} — не подходит для этой настройки` : '';
+    ? t('settings.notSuitableForThisSetting', { providerName: provider?.name, modelName: model.name }) : '';
 }
 
 /**

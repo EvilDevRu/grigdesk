@@ -1,3 +1,4 @@
+import { desktopText } from './locale.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { API_VERSION } from '../../shared/client/apiVersion.ts';
@@ -16,6 +17,8 @@ interface RuntimeOptions {
   nativeWindows?: NativeWindows;
   settings: DesktopSettings;
   save(): Promise<void>;
+  systemLanguage?: string;
+  onLocale?(preference: string): void;
   uiDir: string;
   secret: string;
   appApi?: ApiVersion;
@@ -49,6 +52,9 @@ export function createClientRuntime(options: RuntimeOptions) {
     nativeWindows: options.nativeWindows,
     profiles,
     pairing,
+    systemLanguage: options.systemLanguage,
+    saveLocale: options.save,
+    onLocale: options.onLocale,
     appApi,
     localAvailable: options.localAvailable,
     localAddress: options.localAddress,
@@ -79,7 +85,7 @@ export function createClientRuntime(options: RuntimeOptions) {
         }, '/api/client/hello');
 
         if (hello.fp !== profile.fp) {
-          throw new Error('Это не тот сервер.');
+          throw new Error(desktopText('desktop.wrongServer'));
         }
       }
     },
@@ -222,7 +228,7 @@ export function createClientRuntime(options: RuntimeOptions) {
         }
       }
 
-      throw new Error('Не удалось открыть локальный порт приложения.');
+      throw new Error(desktopText('desktop.localPortFailure'));
     })().finally(() => pending.delete(id));
 
     pending.set(id, starting);

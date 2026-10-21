@@ -1,4 +1,5 @@
 import './shared/legacyStorage.ts';
+import { bootstrapUiLocale } from './shared/uiLocale.ts';
 import { createApp, nextTick } from 'vue';
 import { createPinia } from 'pinia';
 import { router } from './router.js';
@@ -36,6 +37,7 @@ configureSseRelay(SSE_RELAY_ROLES[currentDesktopMode()]);
 
 const pinia = createPinia();
 const app = createApp(App);
+const removeUiLocale = bootstrapUiLocale({ window, shell: useShellStore(pinia) });
 let logStorage = null;
 
 try {
@@ -158,6 +160,7 @@ import.meta.hot?.dispose(() => {
   removeRouteError();
   removeBackAction();
   removeAppViewport();
+  removeUiLocale();
   removeSurfaceMain();
   configureSseRelay('off');
 });

@@ -1,5 +1,5 @@
 <template>
-  <section v-if="toasts.length" class="ui-toast-host" aria-label="Оповещения" v-bind="layerProps">
+  <section v-if="toasts.length" class="ui-toast-host" :aria-label="t('settings.notifications')" v-bind="layerProps">
     <TransitionGroup name="ui-toast">
       <article
         v-for="toast in visibleToasts"
@@ -21,9 +21,9 @@
         </span>
 
         <div class="ui-toast__content">
-          <strong class="ui-toast__title">{{ toast.title }}</strong>
-          <p v-if="toast.body" class="ui-toast__body">{{ toast.body }}</p>
-          <pre v-if="toast.detail" class="ui-toast__detail">{{ toast.detail }}</pre>
+          <strong class="ui-toast__title">{{ resolveUiText(toast.title) }}</strong>
+          <p v-if="toast.body" class="ui-toast__body">{{ resolveUiText(toast.body) }}</p>
+          <pre v-if="toast.detail" class="ui-toast__detail">{{ resolveUiText(toast.detail) }}</pre>
           <div v-if="toast.actions.length" class="ui-toast__actions">
             <UiButton
               v-for="action in toast.actions"
@@ -33,7 +33,7 @@
               :variant="action.variant || 'outline'"
               @click="void runToastAction(toast.id, action.id)"
             >
-              {{ action.label }}
+              {{ resolveUiText(action.label) }}
             </UiButton>
           </div>
         </div>
@@ -41,7 +41,7 @@
         <UiIconButton
           class="ui-toast__close"
           data-context="toast-close"
-          label="Закрыть оповещение"
+          :label="t('core.dismissNotification')"
           role="rail"
           @click="dismissToast(toast.id, 'user')"
         >
@@ -51,15 +51,17 @@
     </TransitionGroup>
 
     <p v-if="hiddenCount" class="ui-toast-host__more">
-      <span>Ещё {{ hiddenCount }}</span>
+      <span>{{ t('core.more') }} {{ hiddenCount }}</span>
       <UiButton data-context="toast-action" variant="text" @click="dismissAllToasts('user')">
-        Скрыть все
+        {{ t('core.dismissAll') }}
       </UiButton>
     </p>
   </section>
 </template>
 
 <script setup lang="ts">
+import { t, resolveUiText } from '../../services/locale.ts';
+
 import {
   computed,
   onBeforeUnmount,

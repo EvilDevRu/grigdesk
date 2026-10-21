@@ -142,6 +142,7 @@ async function mountApp(t, options = {}) {
     './views/DiffModal.vue': marker('diff'),
     './views/DocumentModal.vue': marker('document'),
     './ui': `import { h } from 'vue';
+      export { t, uiLocale } from ${JSON.stringify(webFile('src/services/locale.ts'))};
       const Host = { render: () => h('div') };
       export const UiDialogHost = Host;
       export const UiTooltipHost = Host;

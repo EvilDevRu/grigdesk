@@ -7,12 +7,22 @@ import org.json.JSONObject;
 
 public final class ShellState {
   private final ProfileStore store;
+  private final ShellLocale locale;
   private final int major;
   private final int minor;
   private final Map<String, JSONObject> states = new HashMap<>();
   private long rev;
 
   public ShellState(ProfileStore store, int major, int minor) {
+    this(store, major, minor, null);
+  }
+
+  /**
+   * Снимок использует тот же переводчик установки, что endpoint и собственные окна.
+   * Старый конструктор сохраняет прежний контракт без обязательного поля locale.
+   */
+  public ShellState(ProfileStore store, int major, int minor, ShellLocale locale) {
+    this.locale = locale;
     this.store = store;
     this.major = major;
     this.minor = minor;
@@ -96,6 +106,11 @@ public final class ShellState {
     }
 
     JSONObject connection = states.get(store.selected);
+
+    if (locale != null) {
+      result.put("locale", new JSONObject().put("preference", locale.preference())
+        .put("systemLanguage", locale.systemLanguage()));
+    }
 
     result.put("rev", rev);
     result.put("profiles", profiles);

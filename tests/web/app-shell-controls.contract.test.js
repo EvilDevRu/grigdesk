@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
+import { shellContractBrowser } from './helpers/shell-contract-browser.js';
+
 const APP_SHELL_PATH = new URL('../../web/src/shared/layout/AppShell.vue', import.meta.url);
 const PROVIDER_USAGE_PATH = new URL(
   '../../web/src/features/providers/ProviderUsageResources.vue',
@@ -13,7 +15,7 @@ const PIPELINE_POPOVER_PATH = new URL(
 );
 const ACTIONS_PATH = new URL('../../web/src/styles/components/actions.css', import.meta.url);
 
-test('AppShell использует public UI controls и общую поверхность инструментов', async () => {
+test('AppShell использует public UI controls и общую поверхность инструментов', async (t) => {
   const [source, providerUsage, pipelinePopover, actions] = await Promise.all([
     readFile(APP_SHELL_PATH, 'utf8'),
     readFile(PROVIDER_USAGE_PATH, 'utf8'),
@@ -33,9 +35,16 @@ test('AppShell использует public UI controls и общую повер�
   assert.equal([...source.matchAll(/<UiIconButton\b/gu)].length, 4);
   assert.doesNotMatch(source, /<button\b/u);
 
-  const gear = source.match(/<UiIconButton label="Настройки"[^>]*>/u)?.[0] ?? '';
+  const { page } = await shellContractBrowser(t);
+  const settings = page.getByRole('button', { name: 'Настройки', exact: true });
 
-  assert.match(gear, /v-tooltip="'Настройки'"/u);
+  assert.equal(await settings.getAttribute('aria-haspopup'), 'dialog');
+  await settings.hover();
+  await page.getByRole('tooltip', { name: 'Настройки', exact: true }).waitFor();
+
+  const gear = source.match(/<UiIconButton\b[^>]*aria-haspopup="dialog"[^>]*>/u)?.[0] ?? '';
+
+  assert.match(gear, /v-tooltip=/u);
   assert.match(gear, /aria-haspopup="dialog"/u);
   assert.match(gear, /:pressed="settings.isOpen"/u);
   assert.doesNotMatch(source, /<router-link to="\/settings"/u);
@@ -114,7 +123,7 @@ test('AppShell использует public UI controls и общую повер�
 
 // Всплывашка исполнителя: имя вместо строки фактов, обновление — точкой справа, беда
 // со ссылкой на состояние вендора СВЕРХУ, деньги аккаунта — только на чтение.
-test('всплывашка исполнителя короткая и сама ведёт к причине сбоя', async () => {
+test('всплывашка исполнителя короткая и сама ведёт к причине сбоя', async (t) => {
   const [source, actions] = await Promise.all([
     readFile(APP_SHELL_PATH, 'utf8'),
     readFile(ACTIONS_PATH, 'utf8'),
@@ -124,11 +133,13 @@ test('всплывашка исполнителя короткая и сама �
   assert.doesNotMatch(source, /<span>\{\{ provTitle\(p\) \}\}<\/span>/u);
   assert.match(source, /class="ptip-upd"/u);
   assert.match(source, /usedUsagePercent\(b\.pct\)/u);
-  assert.match(
-    source,
-    /v-tooltip="`Израсходовано: \$\{usedUsagePercent\(b\.pct\)\} окна «\$\{b\.label\}»`"/u,
-  );
-  assert.match(source, /v-if="!p\.available" class="ptip-off">недоступен/u);
+
+  const h = await shellContractBrowser(t);
+
+  await h.openProvider();
+  await h.page.locator('.pu-head b').hover();
+  await h.page.getByRole('tooltip', { name: 'Израсходовано: 42% окна «Неделя»', exact: true }).waitFor();
+  assert.equal(await h.page.locator('.ptip-off').textContent(), 'недоступен');
   assert.match(source, /data-context="topbar-popover-status-link"/u);
   assert.match(source, /:href="statusHintOf\(p\)\.url"/u);
   assert.match(source, /<ProviderUsageResources[\s\S]*?readonly[\s\S]*?\/>/u);

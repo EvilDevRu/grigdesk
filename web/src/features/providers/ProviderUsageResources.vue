@@ -47,7 +47,7 @@
           :disabled="control.disabled || stateOf(resource, control).busy"
           @update:model-value="ask(resource, control, $event)"
         >
-          {{ stateOf(resource, control).busy ? 'применяю…' : control.label }}
+          {{ stateOf(resource, control).busy ? t('core.applying') : control.label }}
         </UiSwitch>
 
         <span v-else-if="control.kind === 'number'" class="usage-number-control">
@@ -70,7 +70,7 @@
               :loading="stateOf(resource, control).busy"
               @click.stop="ask(resource, control, draftOf(resource, control))"
             >
-              Сохранить
+              {{ t('core.save') }}
             </UiButton>
           </span>
         </span>
@@ -89,8 +89,8 @@
           v-if="stateOf(resource, control).ask"
           data-context="topbar-popover-confirm"
           :model-value="true"
-          :question="stateOf(resource, control).ask.confirm.text"
-          :confirm-text="stateOf(resource, control).ask.confirm.label"
+          :question="confirmationOf(resource, control).text"
+          :confirm-text="confirmationOf(resource, control).label"
           :tone="confirmationTone(resource, control)"
           :loading="stateOf(resource, control).busy"
           @update:model-value="updateConfirmation(resource, control, $event)"
@@ -106,7 +106,12 @@
 </template>
 
 <script setup>
-import { reactive } from 'vue';
+import { uiLocale } from '../../ui.ts';
+
+import { t } from '../../ui.ts';
+
+import { computed, reactive } from 'vue';
+import { localizeUsageResource } from './providerUsage.js';
 import { useProvidersStore } from '../../stores/providers.js';
 import {
   UiActionLink,
@@ -138,6 +143,8 @@ const props = defineProps({
 });
 
 const providers = useProvidersStore();
+const resources = computed(() => props.resources.map((resource) =>
+  localizeUsageResource(props.providerId, resource, uiLocale)));
 const local = reactive({});
 const EMPTY_STATE = Object.freeze({
   busy: false,
@@ -209,6 +216,16 @@ function confirmationTone(resource, control) {
 }
 
 /**
+ * Открытое подтверждение разрешается из текущей проекции control при каждом показе.
+ * Сохранённый request и введённое значение остаются прежними до явного действия.
+ */
+function confirmationOf(resource, control) {
+  const request = stateOf(resource, control).ask;
+
+  return usageControlConfirmation(control, request?.value, uiLocale);
+}
+
+/**
  * Подтверждение хранится отдельно для каждого server-declared control: смена
  * черновика одного лимита не должна затронуть соседний ресурс провайдера.
  */
@@ -219,7 +236,7 @@ function ask(resource, control, input) {
     return;
   }
 
-  const prepared = prepareUsageControl(control, input);
+  const prepared = prepareUsageControl(control, input, uiLocale);
 
   state.error = prepared.ok ? '' : prepared.error;
   state.ask = prepared.ok
@@ -227,7 +244,7 @@ function ask(resource, control, input) {
       ...prepared,
       requestId: globalThis.crypto?.randomUUID?.()
         || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      confirm: usageControlConfirmation(control, prepared.value),
+      confirm: usageControlConfirmation(control, prepared.value, uiLocale),
     }
     : null;
 }
@@ -235,7 +252,7 @@ function ask(resource, control, input) {
 function actionError(error) {
   return error instanceof Error && error.message
     ? error.message
-    : 'Не получилось';
+    : t('core.failed2');
 }
 
 /**
@@ -263,7 +280,7 @@ async function apply(resource, control) {
 
     state.error = result.ok
       ? ''
-      : (result.error || result.message || 'Не получилось');
+      : (result.error || result.message || t('core.failed2'));
 
     if (result.ok) {
       state.ask = null;

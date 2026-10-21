@@ -4,43 +4,44 @@
     data-processes-page
     :data-ready="loaded"
   >
-    <SettingsScope scope="Эта машина">Операции с процессами выполняются сразу.</SettingsScope>
+    <SettingsScope :scope="t('settings.thisMachine')">{{ t('settings.processActionsTakeEffectImmediately') }}</SettingsScope>
     <div class="settings-process-actions">
-      <UiButton :disabled="busy || loading" @click="load">Обновить</UiButton>
-      <UiButton :disabled="busy || !freeCount" @click="closeFree">Погасить свободные</UiButton>
+      <UiButton :disabled="busy || loading" @click="load">{{ t('settings.update') }}</UiButton>
+      <UiButton :disabled="busy || !freeCount" @click="closeFree">{{ t('settings.stopIdleProcesses') }}</UiButton>
     </div>
-    <p v-if="!loaded">Загружаем процессы…</p>
+    <p v-if="!loaded">{{ t('settings.loadingProcesses') }}</p>
     <p v-else>
-      В пуле: {{ sessions.length }} · ведут ход: {{ sessions.length - freeCount }} · свободны: {{ freeCount }}
+      {{ t('settings.inPool') }} {{ sessions.length }} {{ t('settings.runningATurn') }} {{ sessions.length - freeCount }} {{ t('settings.idle') }} {{ freeCount }}
     </p>
-    <p v-if="loaded && !sessions.length">Сейчас ни одного живого процесса.</p>
+    <p v-if="loaded && !sessions.length">{{ t('settings.noLiveProcessesRightNow') }}</p>
     <article v-for="item in sessions" :key="item.chatKey" :data-running="item.running">
-      <h4>{{ title(item) }}</h4>
+      <h4>{{ resolveUiText(title(item)) }}</h4>
       <p>{{ runLabel(item) }}</p>
       <p>
-        PID {{ item.pid ?? 'неизвестен' }} · открыт {{ minutes(item.openedAt) }} мин назад ·
-        {{ item.running ? 'Идёт ход' : `Простой ${minutes(item.lastUsed)} мин` }}
+        PID {{ item.pid ?? t('settings.unknown') }} {{ t('settings.opened') }} {{ minutes(item.openedAt) }} {{ t('settings.minAgo') }}
+        {{ item.running ? t('settings.turnRunning') : t('settings.idleMin', { value1: minutes(item.lastUsed) }) }}
         <span v-if="!item.running && item.idleAtMs">
-          · погаснет через {{ Math.max(0, Math.round((item.idleAtMs - now) / 60000)) }} мин
+          {{ t('settings.stopsIn') }} {{ Math.max(0, Math.round((item.idleAtMs - now) / 60000)) }} {{ t('settings.min') }}
         </span>
-        <span v-if="item.unsolicited">· может заговорить сам</span>
+        <span v-if="item.unsolicited">{{ t('settings.maySpeakOnItsOwn') }}</span>
       </p>
       <p v-if="item.cwd">{{ item.cwd }}</p>
       <div class="settings-process-actions">
-        <UiButton :disabled="busy" @click="actions.openChat(item.chatKey)">Открыть чат</UiButton>
-        <UiButton :disabled="busy" @click="closeOne(item)">Погасить</UiButton>
+        <UiButton :disabled="busy" @click="actions.openChat(item.chatKey)">{{ t('settings.openChat') }}</UiButton>
+        <UiButton :disabled="busy" @click="closeOne(item)">{{ t('settings.stopProcess') }}</UiButton>
       </div>
     </article>
     <p v-if="limits">
-      Лимит пула — {{ limits.maxSessions }}, автогашение — через {{ Math.round(limits.idleMs / 60000) }} мин
-      простоя.
+      {{ t('settings.poolLimit') }} {{ limits.maxSessions }}{{ t('settings.autoStopAfter') }} {{ Math.round(limits.idleMs / 60000) }} {{ t('settings.minIdle') }}
     </p>
-    <p v-if="message" role="status">{{ message }}</p>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <p v-if="message" role="status">{{ resolveUiText(message) }}</p>
+    <p v-if="error" role="alert">{{ resolveUiText(error) }}</p>
   </section>
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale, messageRef, resolveUiText, type UiText } from '../../../ui.ts';
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import SettingsScope from '../SettingsScope.vue';
 import { useRouter } from 'vue-router';
@@ -80,8 +81,8 @@ const limits = ref<{ maxSessions: number; idleMs: number } | null>(null);
 const loaded = ref(false);
 const loading = ref(false);
 const busy = ref(false);
-const error = ref('');
-const message = ref('');
+const error = ref<UiText>('');
+const message = ref<UiText>('');
 const now = ref(Date.now());
 const freeCount = computed(() => sessions.value.filter((item) => !item.running).length);
 const opening = settings.snapshot.sessionId;
@@ -101,7 +102,7 @@ const actions = createSettingsActions({
 
     return true;
   },
-});
+}, uiLocale);
 
 function current(): boolean {
   return !disposed && props.active && settings.isOpen && settings.snapshot.sessionId === opening;
@@ -111,9 +112,14 @@ function current(): boolean {
  * Подпись сохраняет название чата и принадлежность задаче без раскрытия ключа.
  * Для безымянного разговора задача остаётся понятной человеку точкой входа.
  */
-function title(item: ProcessView): string {
-  return item.chatTitle ? item.chatTitle + (item.taskId ? ` · задача ${item.taskId}` : '')
-    : item.taskId ? `Чат задачи ${item.taskId}` : 'Чат без названия';
+function title(item: ProcessView): UiText {
+  return item.chatTitle
+    ? messageRef('settings.namedProcessChat', {
+      chatTitle: item.chatTitle,
+      task: item.taskId ? messageRef('settings.task', { itemTaskId: item.taskId }) : '',
+    })
+    : item.taskId ? messageRef('settings.taskChat', { itemTaskId: item.taskId })
+      : messageRef('settings.untitledChat');
 }
 
 function runLabel(item: ProcessView): string {
@@ -121,8 +127,12 @@ function runLabel(item: ProcessView): string {
 
   const mode = provider?.modes?.find((entry) => entry.id === item.permissionMode)?.label;
 
-  return [provider?.name || item.executor, item.model, item.effort ? `Усилие ${item.effort}` : '',
-    mode || item.permissionMode].filter(Boolean).join(' · ');
+  return [
+    provider?.name || item.executor,
+    item.model,
+    item.effort ? t('settings.effort2', { itemEffort: item.effort }) : '',
+    mode || item.permissionMode,
+  ].filter(Boolean).join(' · ');
 }
 
 function minutes(at: number | undefined): number {
@@ -178,11 +188,14 @@ async function closeOne(item: ProcessView): Promise<void> {
   busy.value = true;
 
   try {
-    const accepted = await confirmDialog(`Погасить процесс чата «${title(item)}»?`
-      + (item.running ? ' Сейчас идёт ход; незаписанная работа потеряется.'
-        : ' Следующий ход поднимет его заново.'), {
+    const warning = item.running ? messageRef('settings.aTurnIsRunningUnsavedWorkWill')
+      : messageRef('settings.theNextTurnWillStartItAgain');
+    const accepted = await confirmDialog(messageRef('settings.processStopConfirmation', {
+      value1: title(item),
+      warning,
+    }), {
       danger: item.running,
-      okText: item.running ? 'Погасить с ходом' : 'Погасить',
+      okText: item.running ? messageRef('settings.stopRunningTurn') : messageRef('settings.stopProcess'),
     });
 
     if (accepted && current()) {
@@ -193,7 +206,7 @@ async function closeOne(item: ProcessView): Promise<void> {
       const query = item.running ? '?force=1' : '';
 
       await api.del(`/api/chat/sessions/${encodeURIComponent(item.chatKey)}${query}`);
-      message.value = 'Процесс погашен. Разговор сохранён.';
+      message.value = messageRef('settings.processStoppedConversationSaved');
       await load();
     }
   } catch (cause) {
@@ -215,8 +228,8 @@ async function closeFree(): Promise<void> {
   busy.value = true;
 
   try {
-    const accepted = await confirmDialog('Погасить свободные процессы? Занятые ходом останутся.', {
-      okText: 'Погасить свободные',
+    const accepted = await confirmDialog(messageRef('settings.stopIdleProcessesBusyProcessesWillRemain'), {
+      okText: messageRef('settings.stopIdleProcesses'),
     });
 
     if (accepted && current()) {
@@ -226,7 +239,10 @@ async function closeFree(): Promise<void> {
 
       const result = await api.del('/api/chat/sessions') as { closed: number; skipped?: number };
 
-      message.value = `Погашено: ${result.closed}. Занятых пропущено: ${result.skipped ?? 0}.`;
+      message.value = messageRef('settings.stoppedBusyProcessesSkipped', {
+        resultClosed: result.closed,
+        value2: result.skipped ?? 0,
+      });
       await load();
     }
   } catch (cause) {

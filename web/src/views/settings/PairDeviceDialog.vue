@@ -1,32 +1,34 @@
 <template>
-  <UiDialog :open="open" title="Добавить устройство" :busy="busy" @update:open="$emit('update:open', $event)">
+  <UiDialog :open="open" :title="t('settings.addDevice')" :busy="busy" @update:open="$emit('update:open', $event)">
     <template v-if="!pairing">
-      <UiField v-if="!draft" label="Имя устройства">
-        <UiInput v-model="name" placeholder="Например, планшет" :disabled="busy" />
+      <UiField v-if="!draft" :label="t('settings.deviceName')">
+        <UiInput v-model="name" :placeholder="t('settings.forExampleTablet')" :disabled="busy" />
       </UiField>
-      <UiField v-if="!draft" label="Адрес машины (необязательно)">
-        <UiInput v-model="address" placeholder="Например, desk.example:8145" :disabled="busy" />
+      <UiField v-if="!draft" :label="t('settings.machineAddressOptional')">
+        <UiInput v-model="address" :placeholder="t('settings.forExampleDeskExample')" :disabled="busy" />
       </UiField>
-      <p>Для общего адреса входа укажите доступное имя или GRIGDESK_CLIENT_ADDRESS на машине.</p>
+      <p>{{ t('settings.forASharedConnectionAddressEnterA') }}</p>
     </template>
     <template v-else>
-      <img :src="qrUrl" alt="QR-код привязки" class="pairing-qr" />
-      <UiField label="Строка привязки">
+      <img :src="qrUrl" :alt="t('settings.pairingQRCode')" class="pairing-qr" />
+      <UiField :label="t('settings.pairingString')">
         <UiTextarea :model-value="pairing.text" readonly />
       </UiField>
-      <p role="status">{{ seconds > 0 ? `Осталось ${seconds} с, один раз` : 'Код истёк' }}</p>
+      <p role="status">{{ seconds > 0 ? t('settings.sLeftSingleUse', { seconds: seconds }) : t('settings.codeExpired') }}</p>
     </template>
     <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
     <template #footer>
       <UiButton v-if="!pairing || seconds === 0" :disabled="busy || !name.trim()" @click="issue">
-        {{ pairing ? 'Новый код' : 'Получить код' }}
+        {{ pairing ? t('settings.newCode') : t('settings.getCode') }}
       </UiButton>
-      <UiButton variant="text" @click="$emit('update:open', false)">Закрыть</UiButton>
+      <UiButton variant="text" @click="$emit('update:open', false)">{{ t('settings.close') }}</UiButton>
     </template>
   </UiDialog>
 </template>
 
 <script setup lang="ts">
+import { t } from '../../ui.ts';
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import { errorMessage } from '../../../../shared/lib/errors.ts';
@@ -109,8 +111,8 @@ async function issue(): Promise<void> {
     const code = (cause as { data?: { error?: string } } | null)?.data?.error;
 
     error.value = code === 'client_listener_off'
-      ? 'Вход по сети выключен: задайте GRIGDESK_CLIENT_LISTEN и перезапустите сервер.'
-      : errorMessage(cause, 'Не удалось получить код привязки.');
+      ? t('settings.networkAccessIsDisabledSetGRIGDESKCLIENT')
+      : errorMessage(cause, t('settings.couldNotGetAPairingCode'));
   } finally {
     busy.value = false;
   }

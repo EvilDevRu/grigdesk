@@ -1,12 +1,13 @@
 <template>
   <span class="connection-status" :data-status="disconnected ? 'none' : status">
     <span class="connection-status-dot" aria-hidden="true" />
-    <span v-if="!compact">{{ text || CONNECTION_TEXT[status] }}</span>
+    <span v-if="!compact">{{ text || connectionStatusText(status, uiLocale) }}</span>
   </span>
 </template>
 
 <script setup lang="ts">
-import { CONNECTION_TEXT } from '../../../../shared/client/clientShell.ts';
+import { uiLocale } from '../../ui.ts';
+import { connectionStatusText } from '../../../../shared/client/clientShell.ts';
 import type { ConnectionStatus } from '../../../../shared/client/clientShell.ts';
 
 withDefaults(defineProps<{

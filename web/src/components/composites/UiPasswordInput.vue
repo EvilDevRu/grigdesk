@@ -13,7 +13,7 @@
     />
     <UiIconButton
       role="embedded"
-      :label="visible ? hideLabel : showLabel"
+      :label="visible ? (hideLabel ?? t('core.hidePassword')) : (showLabel ?? t('core.showPassword'))"
       :disabled="disabled"
       @click="visible = !visible"
     >
@@ -23,6 +23,8 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '../../services/locale.ts';
+
 import { ref } from 'vue';
 import UiIconButton from '../primitives/UiIconButton.vue';
 import UiInput from '../primitives/UiInput.vue';
@@ -40,8 +42,8 @@ withDefaults(
     disabled: false,
     readonly: false,
     invalid: false,
-    showLabel: 'Показать пароль',
-    hideLabel: 'Скрыть пароль',
+    showLabel: undefined,
+    hideLabel: undefined,
   },
 );
 defineEmits<{

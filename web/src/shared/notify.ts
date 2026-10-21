@@ -1,3 +1,6 @@
+import { translator, type LocaleSource } from '../../../shared/i18n/catalogs.ts';
+import { snapshotText, type UiText } from '../../../shared/i18n/core.ts';
+
 // Оповещения пользователю: системная нотификация, если доступна и разрешена,
 // иначе — мигание заголовком вкладки. Notification API требует secure context
 // (https/localhost) — на http://<ip> молча падаем в фоллбэк.
@@ -25,7 +28,7 @@ function notificationApi(): typeof Notification | null {
  * Исходный заголовок фиксируется на время мигания — возврат на вкладку обязан
  * восстановить именно его, а не то, что успело смениться по дороге.
  */
-function titleBlink(text: string): void {
+function titleBlink(text: () => string): void {
   if (blinkTimer) {
     clearInterval(blinkTimer);
   }
@@ -39,7 +42,7 @@ function titleBlink(text: string): void {
 
   blinkTimer = setInterval(() => {
     on = !on;
-    document.title = on ? `● ${text}` : original;
+    document.title = on ? `● ${text()}` : original;
   }, 1200);
 
   // Возврат на вкладку гасит мигание и снимает собственного слушателя: иначе он
@@ -92,19 +95,30 @@ export async function ensureNotifyPermission(): Promise<boolean> {
  * с тем же тегом, а не копится в шторке. Возврат говорит, показали ли системное
  * уведомление, — на `false` вызывающий уже ничего не должен делать, фоллбэк отработал.
  */
-export async function notify(title: string, body = '', tag = '', url = ''): Promise<boolean> {
+export async function notify(
+  title: UiText,
+  body: UiText = '',
+  tag = '',
+  url = '',
+  locale: LocaleSource = 'ru',
+): Promise<boolean> {
+  const savedTitle = snapshotText(title);
+  const savedBody = snapshotText(body);
+  const resolve = (text: UiText) => translator.resolveText(
+    text, typeof locale === 'string' ? locale : locale.value,
+  );
   const NotificationApi = notificationApi();
 
   if (NotificationApi?.permission === 'granted') {
     const options: NotificationOptions = {
-      body,
+      body: resolve(savedBody),
       tag: tag || undefined,
       icon: NOTIFICATION_ICON,
       data: { url: url || (typeof window !== 'undefined' ? window.location.href : '') },
     };
 
     try {
-      const n = new NotificationApi(title, options);
+      const n = new NotificationApi(resolve(savedTitle), options);
 
       if (tag) {
         systemNotifications.set(tag, n);
@@ -130,7 +144,7 @@ export async function notify(title: string, body = '', tag = '', url = ''): Prom
   }
 
   if (typeof document !== 'undefined' && document.hidden) {
-    titleBlink(title);
+    titleBlink(() => resolve(savedTitle));
   }
 
   return false;

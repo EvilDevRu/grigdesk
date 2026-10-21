@@ -3,7 +3,7 @@
     ref="tree"
     class="settings-tree"
     role="tree"
-    aria-label="Разделы настроек"
+    :aria-label="t('settings.settingsSections')"
   >
     <UiPressable
       v-for="node in nodes"
@@ -24,7 +24,7 @@
       <SettingsIcon v-if="node.group" :name="node.id" />
       <span v-else class="settings-tree-branch" aria-hidden="true" />
       <span class="settings-tree-label">{{ node.label }}</span>
-      <span v-if="dirty(node.id, node.group)" class="settings-tree-dirty" aria-label="Есть изменения" />
+      <span v-if="dirty(node.id, node.group)" class="settings-tree-dirty" :aria-label="t('settings.hasChanges')" />
       <svg
         v-if="node.group"
         class="settings-tree-chevron"
@@ -40,9 +40,11 @@
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale } from '../../ui.ts';
+
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { UiPressable } from '../../ui.ts';
-import { SETTINGS_GROUPS, SETTINGS_PAGES } from '../../features/settings/catalog.ts';
+import { getSettingsGroups, getSettingsPages } from '../../features/settings/catalog.ts';
 import { useSettingsStore } from '../../stores/settings.ts';
 import SettingsIcon from './SettingsIcon.vue';
 
@@ -60,13 +62,13 @@ const tree = ref<HTMLElement>();
 const focusId = ref(settings.pageId);
 let resizeObserver: ResizeObserver | undefined;
 
-const nodes = computed<TreeNode[]>(() => SETTINGS_GROUPS.flatMap((group) => [
+const nodes = computed<TreeNode[]>(() => getSettingsGroups(uiLocale.value).flatMap((group) => [
   {
     ...group,
     group: true,
     level: 1,
   },
-  ...settings.expandedGroups.includes(group.id) ? SETTINGS_PAGES
+  ...settings.expandedGroups.includes(group.id) ? getSettingsPages(uiLocale.value)
     .filter((page) => page.groupId === group.id)
     .map((page) => ({
       id: page.id,

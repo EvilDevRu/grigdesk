@@ -1,3 +1,6 @@
+import { snapshotText } from '../../../shared/i18n/core.ts';
+import { resolveUiText } from './locale.ts';
+
 import type {
   UiToast,
   UiToastAction,
@@ -33,10 +36,11 @@ export interface UiToastCenter {
 function normalizeActions(actions: readonly UiToastAction[] = []): readonly UiToastAction[] {
   return Object.freeze(actions.filter((action) => action &&
     typeof action.id === 'string' && Boolean(action.id.trim()) &&
-    typeof action.label === 'string' && Boolean(action.label.trim()) &&
+    Boolean(action.label) && Boolean(resolveUiText(action.label).trim()) &&
     typeof action.run === 'function').slice(0, UI_TOAST_ACTION_LIMIT)
     .map((action) => Object.freeze({
-    ...action
+    ...action,
+    label: snapshotText(action.label),
   })));
 }
 
@@ -51,11 +55,11 @@ function normalizeToast(options: UiToastOptions): UiToast {
 
   return Object.freeze({
     id: options.id,
-    title: options.title,
+    title: snapshotText(options.title),
     scope: String(options.scope ?? ''),
     tone: options.tone === 'warning' || options.tone === 'danger' ? options.tone : 'accent',
-    body: String(options.body ?? ''),
-    detail: String(options.detail ?? ''),
+    body: snapshotText(options.body ?? ''),
+    detail: snapshotText(options.detail ?? ''),
     durationMs,
     actions: normalizeActions(options.actions),
   });
@@ -131,7 +135,7 @@ export function createToastCenter(timers: UiToastTimers = {
      */
     show(options: UiToastOptions): boolean {
       if (typeof options.id !== 'string' || !options.id.trim() ||
-        typeof options.title !== 'string' || !options.title.trim()) {
+        !options.title || !resolveUiText(options.title).trim()) {
         return false;
       }
 

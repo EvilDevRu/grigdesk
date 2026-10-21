@@ -1,5 +1,5 @@
 <template>
-  <nav class="tools-grid" aria-label="Инструменты">
+  <nav class="tools-grid" :aria-label="t('core.tools')">
     <router-link v-for="item in items" :key="item.id || item.to" :to="item.to"
                  :aria-label="item.label + (badges[item.to] ? ' · ' + badges[item.to].title : '')"
                  v-tooltip="badges[item.to]?.title" class="tool-tile" active-class="active" @click="$emit('select', item)">
@@ -16,6 +16,8 @@
 </template>
 
 <script setup>
+import { t } from '../../ui.ts';
+
 import { NAV_ICONS } from '../navIcons.ts';
 import { vTooltip } from '../../ui';
 import NavigationCount from './NavigationCount.vue';

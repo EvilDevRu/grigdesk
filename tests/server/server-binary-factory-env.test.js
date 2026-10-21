@@ -31,6 +31,7 @@ const HOSTILE_EXTRA = {
   ZAI_API_KEY: 'extra-zai-key',
   ZAI_CODING_API_KEY: 'extra-coding-key',
   FACTORY_STAGE_AUTO_COMPACT: '0',
+  PYTHONDONTWRITEBYTECODE: '',
 };
 
 /**
@@ -102,6 +103,8 @@ require('node:fs').writeFileSync(${JSON.stringify(capture)},
 `, { mode: 0o755 });
   process.env.PATH = `${bin}:${userCli}:/usr/bin:/bin`;
   Object.assign(process.env, KEYS, { GRIGDESK_GLM_API_MODE: 'api' });
+  // Запрет pyc обязан приходить от хоста явно, а не случайно из env процесса тестов.
+  delete process.env.PYTHONDONTWRITEBYTECODE;
 
   const config = {
     dataHome: path.join(root, 'data'),
@@ -166,6 +169,8 @@ function assertHostEnvironment(env, { config, userCli }) {
   assert.equal(env.ZAI_API_KEY, KEYS.ZAI_API_KEY);
   assert.equal(env.ZAI_CODING_API_KEY, undefined);
   assert.equal(env.FACTORY_STAGE_AUTO_COMPACT, '0');
+  // Движок закреплённого поколения живёт в R: Python не должен писать туда __pycache__.
+  assert.equal(env.PYTHONDONTWRITEBYTECODE, '1');
 }
 
 test('SB13: transient-юнит получает host env, режим GLM и ключи только файлом 0600', async (t) => {

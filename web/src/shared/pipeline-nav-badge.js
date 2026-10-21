@@ -1,3 +1,4 @@
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 // Сводка для счётчика внимания «Конвейер» в сайдбаре и popover в топбаре.
 // Категории обязаны быть взаимоисключающими: один ход может одновременно числиться
 // живым и молчащим, а задача на воротах — ещё и иметь аварийный флаг. В обоих
@@ -7,17 +8,38 @@
 import { trimmedText } from '../../../shared/lib/text.ts';
 
 const PIPELINE_GROUPS = [
-  { source: 'stalled', kind: 'error', label: 'Встал', detail: 'title' },
-  { source: 'silent', kind: 'error', label: 'Молчит', detail: 'text' },
-  { source: 'waiting', kind: 'waiting', label: 'Ждёт решения', detail: 'text' },
-  { source: 'running', kind: 'running', label: 'В работе', detail: null },
+  {
+    source: 'stalled',
+    kind: 'error',
+    messageKey: 'core.stalled',
+    detail: 'title',
+  },
+  {
+    source: 'silent',
+    kind: 'error',
+    messageKey: 'core.silent',
+    detail: 'text',
+  },
+  {
+    source: 'waiting',
+    kind: 'waiting',
+    messageKey: 'core.awaitingDecision2',
+    detail: 'text',
+  },
+  {
+    source: 'running',
+    kind: 'running',
+    messageKey: 'core.running',
+    detail: null,
+  },
 ];
 
 /**
  * Один приоритетный список питает и цифры, и данные popover. Повтор задачи в более
  * слабой категории отбрасываем, чтобы их знаменатель никогда не разошёлся.
  */
-function classifiedTasks(state = {}) {
+function classifiedTasks(state = {}, locale = 'ru') {
+  const t = localeTranslator(locale);
   const tasks = new Map();
 
   for (const group of PIPELINE_GROUPS) {
@@ -28,7 +50,12 @@ function classifiedTasks(state = {}) {
         continue;
       }
 
-      tasks.set(task, { task, entry, ...group });
+      tasks.set(task, {
+        task,
+        entry,
+        ...group,
+        label: t(group.messageKey),
+      });
     }
   }
 
@@ -63,8 +90,8 @@ export function pipelineBadgeSummary(state = {}) {
  * Добавляет к тому же дедуплицированному списку уже загруженные название, текущий
  * этап и прогресс. Функция не делает запросов и не выдумывает отсутствующие поля.
  */
-export function pipelineTopbarItems(state = {}) {
-  return classifiedTasks(state).map((item) => {
+export function pipelineTopbarItems(state = {}, locale = 'ru') {
+  return classifiedTasks(state, locale).map((item) => {
     const observed = state.observedByTask?.[item.task] || {};
     const progress = observed.progress;
     const validProgress = Number.isSafeInteger(progress?.done)

@@ -16,15 +16,17 @@
     >
       <slot />
     </UiField>
-    <UiInlineMessage v-if="field?.conflict" tone="warning">Параметр изменён снаружи.</UiInlineMessage>
+    <UiInlineMessage v-if="field?.conflict" tone="warning">{{ t('settings.theSettingWasChangedExternally') }}</UiInlineMessage>
     <div v-if="field?.conflict" class="settings-field-actions">
-      <UiButton @click="resolve('take-current')">Взять текущее</UiButton>
-      <UiButton @click="resolve('keep-mine')">Оставить моё</UiButton>
+      <UiButton @click="resolve('take-current')">{{ t('settings.useCurrent') }}</UiButton>
+      <UiButton @click="resolve('keep-mine')">{{ t('settings.keepMine') }}</UiButton>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { t } from '../../ui.ts';
+
 import { computed, onMounted, onUpdated, ref, watch } from 'vue';
 import { UiField, UiButton, UiInlineMessage } from '../../ui.ts';
 import { equalFieldAddress } from '../../features/settings/catalog.ts';

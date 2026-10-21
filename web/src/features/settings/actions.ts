@@ -1,8 +1,10 @@
+import { localeMessage, type LocaleSource } from '../../../../shared/i18n/catalogs.ts';
+import type { UiText } from '../../../../shared/i18n/core.ts';
 import { validTerminalInsert, validChatKey } from '../../../../shared/desktop/desktopWindowContract.ts';
 
 interface ActionPorts {
   requestAction(run: () => Promise<boolean>): Promise<boolean>;
-  notify(text: string): void;
+  notify(text: UiText): void;
   openTerminal(target: { insert: string }): Promise<boolean>;
   openChat(key: string): Promise<boolean>;
 }
@@ -11,11 +13,15 @@ interface ActionPorts {
  * Команда и ключ чата проходят общую проверку до вопроса о черновике.
  * Доставка остаётся внутри того же документа; терминал получает строку без Enter.
  */
-export function createSettingsActions(ports: ActionPorts) {
+export function createSettingsActions(ports: ActionPorts,
+  locale: LocaleSource = 'ru',
+) {
+  const message = localeMessage(locale);
+
   return {
     openTerminal(insert: string): Promise<boolean> {
       if (!validTerminalInsert(insert)) {
-        ports.notify('Команду нельзя передать в терминал.');
+        ports.notify(message('settings.cannotSendTheCommandToTheTerminal'));
 
         return Promise.resolve(false);
       }
@@ -24,7 +30,7 @@ export function createSettingsActions(ports: ActionPorts) {
     },
     openChat(key: string): Promise<boolean> {
       if (!validChatKey(key)) {
-        ports.notify('Некорректный адрес чата.');
+        ports.notify(message('settings.invalidChatAddress'));
 
         return Promise.resolve(false);
       }

@@ -1,3 +1,7 @@
+import { localeTranslator, resolveLocaleText } from '../../../shared/i18n/catalogs.ts';
+import { messageRef, type UiText } from '../../../shared/i18n/core.ts';
+
+import { uiLocalePort as uiLocale } from '../shared/uiLocalePort.ts';
 // Состояние карточек сохраняется при v-show, а запросы изолированы по provider.
 // Таймеры и очереди находятся вне подписываемого состояния Pinia.
 
@@ -8,6 +12,8 @@ import { providerSettingsApi } from '../shared/providerSettingsApi.ts';
 import type { ProviderSettingsApi } from '../shared/providerSettingsApi.ts';
 import type { JsonValue, ProviderSettingsCatalog } from '../../../shared/chat/providerSettingsContracts.ts';
 import type { ProviderSettingsOverrideRequest } from '../../../shared/chat/providerSettingsContracts.ts';
+
+const t = localeTranslator(uiLocale);
 
 export interface NativeSettingsPanelState {
   catalog: ProviderSettingsCatalog | null;
@@ -27,6 +33,7 @@ export function defineProviderSettingsStore(
 ) {
   return defineStore('providerSettings', () => {
     const entries = reactive<Record<string, NativeSettingsPanelState>>({});
+    const texts = reactive<Record<string, { error: UiText; message: UiText }>>({});
     const loads = new Map<string, Promise<void>>();
     const checkedAt = new Map<string, number>();
     const generations = new Map<string, number>();
@@ -35,12 +42,23 @@ export function defineProviderSettingsStore(
     const writeCounts = new Map<string, number>();
 
     function panel(id: string): NativeSettingsPanelState {
+      texts[id] ??= { error: '', message: '' };
       entries[id] ??= {
         catalog: null,
         loading: false,
         saving: false,
-        error: '',
-        message: '',
+        get error() {
+          return resolveLocaleText(texts[id]!.error, uiLocale);
+        },
+        set error(value: string) {
+          texts[id]!.error = value;
+        },
+        get message() {
+          return resolveLocaleText(texts[id]!.message, uiLocale);
+        },
+        set message(value: string) {
+          texts[id]!.message = value;
+        },
       };
 
       return entries[id];
@@ -77,7 +95,8 @@ export function defineProviderSettingsStore(
           }
         } catch (error) {
           if (generations.get(id) === generation) {
-            state.error = error instanceof Error ? error.message : 'Не удалось получить настройки';
+            texts[id]!.error = error instanceof Error ? error.message
+              : messageRef('settings.providerSettingsFailure');
           }
         } finally {
           if (generations.get(id) === generation) {
@@ -113,7 +132,7 @@ export function defineProviderSettingsStore(
       const pending = previous.then(async () => {
         try {
           if (epoch !== (writeEpochs.get(id) ?? 0)) {
-            const message = 'Запись отменена из-за конфликта; проверьте и повторите выбор';
+            const message = t('settings.providerWriteCancelled');
 
             return {
               ok: false,
@@ -126,7 +145,7 @@ export function defineProviderSettingsStore(
           const catalog = state.catalog;
 
           if (!catalog || (operation === 'set' && (catalog.schemaRevision === null || value === undefined))) {
-            throw new Error('Сначала перечитайте каталог настроек');
+            throw new Error(t('settings.providerReloadCatalog'));
           }
 
           const request: ProviderSettingsOverrideRequest =
@@ -152,11 +171,11 @@ export function defineProviderSettingsStore(
           state.catalog = response.catalog;
           checkedAt.set(id, clock());
 
-          state.message = 'Сохранено для следующего запуска';
+          texts[id]!.message = messageRef('settings.providerSavedForNextRun');
 
           return { ok: true } as WriteOutcome;
         } catch (error) {
-          const message = error instanceof Error ? error.message : 'Не удалось сохранить настройку';
+          const message = error instanceof Error ? error.message : t('settings.providerWriteFailure');
 
           const status =
             (error as { status?: unknown; statusCode?: unknown } | null)?.status ??
@@ -173,7 +192,7 @@ export function defineProviderSettingsStore(
               outcome: status === 409 ? 'conflict' : 'failed',
               status,
               message,
-            }) : classifyWriteError(error);
+            }, uiLocale) : classifyWriteError(error, uiLocale);
         } finally {
           writeCounts.set(id, (writeCounts.get(id) ?? 1) - 1);
           state.saving = (writeCounts.get(id) ?? 0) > 0;

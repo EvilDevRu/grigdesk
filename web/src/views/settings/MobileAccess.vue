@@ -24,32 +24,32 @@
         </svg>
       </span>
       <div>
-        <h3 id="mobile-access-title">Приложение на телефоне</h3>
-        <p>Подключите телефон по QR-коду, чтобы пользоваться GrigDesk в приложении.</p>
+        <h3 id="mobile-access-title">{{ t('settings.phoneApplication') }}</h3>
+        <p>{{ t('settings.connectYourPhoneWithAQRCode') }}</p>
       </div>
       <span class="mobile-loading-indicator">
-        <UiSpinner v-if="loading" label="Загружаем подключения" />
+        <UiSpinner v-if="loading" :label="t('settings.loadingConnections')" />
       </span>
     </header>
     <UiInlineMessage v-if="error || loadError" tone="danger">
-      {{ error || loadError }}
+      {{ resolveUiText(error || loadError) }}
       <UiButton
         v-if="loadError"
         variant="text"
         :disabled="loading"
         @click="load"
       >
-        Повторить загрузку
+        {{ t('settings.retryLoading') }}
       </UiButton>
     </UiInlineMessage>
     <UiInlineMessage v-if="status && !status.server.up" tone="warning">
-      {{ status.server.error || 'Мобильный доступ ещё не запущен.' }}
+      {{ status.server.error || t('settings.mobileAccessHasNotStartedYet') }}
     </UiInlineMessage>
     <section class="mobile-card" aria-labelledby="mobile-relays-title">
       <header class="mobile-card-head">
         <div>
-          <h4 id="mobile-relays-title">Подключение через посредника</h4>
-          <p>Выберите, через какой адрес телефон будет подключаться к этому GrigDesk.</p>
+          <h4 id="mobile-relays-title">{{ t('settings.connectionThroughARelay') }}</h4>
+          <p>{{ t('settings.chooseTheAddressYourPhoneWillUse') }}</p>
         </div>
         <UiButton
           data-role="settings-action"
@@ -57,7 +57,7 @@
           :disabled="busy || !status"
           @click="openAdd"
         >
-          Добавить посредника
+          {{ t('settings.addRelay') }}
         </UiButton>
       </header>
       <div
@@ -78,8 +78,8 @@
         </div>
       </div>
       <div v-else-if="!status.relays.length" class="mobile-empty">
-        <b>Сначала добавьте посредника</b>
-        <p>Укажите его адрес, скачайте настройки и запустите. Затем здесь появится QR для телефона.</p>
+        <b>{{ t('settings.addARelayFirst') }}</b>
+        <p>{{ t('settings.enterItsAddressDownloadTheSettingsAnd') }}</p>
       </div>
       <div v-else class="mobile-relays">
         <article
@@ -107,12 +107,12 @@
               :disabled="busy || !status.server.up"
               @click="showQr(relay, true)"
             >
-              Подключить телефон
+              {{ t('settings.connectPhone') }}
             </UiButton>
             <UiIconButton
-              v-tooltip="'Настройки посредника'"
+              v-tooltip="t('settings.relaySettings')"
               class="mobile-relay-settings"
-              :label="`Настройки посредника «${relay.name}»`"
+              :label="t('settings.settingsForRelay', { relayName: relay.name })"
               :tone="expandedRelay === relay.id ? 'accent' : 'neutral'"
               :aria-expanded="expandedRelay === relay.id"
               :aria-controls="`mobile-relay-${relay.id}`"
@@ -138,7 +138,7 @@
             </UiIconButton>
           </div>
           <p v-if="relay.link.state !== 'online'" class="mobile-connection-note">
-            {{ relay.link.lastError || 'Для привязки телефона посредник должен быть в сети.' }}
+            {{ relay.link.lastError || t('settings.theRelayMustBeOnlineToPair') }}
           </p>
           <div
             v-if="expandedRelay === relay.id"
@@ -147,28 +147,28 @@
           >
             <div class="mobile-row">
               <div class="mobile-identity">
-                <b>Уже привязали телефон?</b>
-                <p>Добавьте этот адрес в приложении как ещё один способ подключения.</p>
+                <b>{{ t('settings.phoneAlreadyPaired') }}</b>
+                <p>{{ t('settings.addThisAddressInTheApplicationAs') }}</p>
               </div>
               <UiButton
                 data-role="settings-action"
                 :disabled="busy"
                 @click="showQr(relay, false)"
               >
-                QR посредника
+                {{ t('settings.relayQR') }}
               </UiButton>
             </div>
             <div class="mobile-row">
               <div class="mobile-identity">
-                <b>Установка посредника</b>
-                <p>Скачайте файл настроек для запуска на выбранном сервере.</p>
+                <b>{{ t('settings.relayInstallation') }}</b>
+                <p>{{ t('settings.downloadTheSettingsFileToStartOn') }}</p>
               </div>
               <UiButton
                 data-role="settings-action"
                 :disabled="busy"
                 @click="downloadEnv(relay.id)"
               >
-                Скачать relay.env
+                {{ t('settings.downloadRelayEnv') }}
               </UiButton>
             </div>
             <div
@@ -176,10 +176,9 @@
               class="mobile-install"
               role="status"
             >
-              <p>Сохраните relay.env в приватный каталог вне проекта с правами 0600 и запустите:</p>
-              <pre>RELAY_ENV_FILE=/путь/вне-проекта/relay.env docker compose up -d --build
-docker compose ps</pre>
-              <p>Когда появится статус «В сети», нажмите «Подключить телефон».</p>
+              <p>{{ t('settings.saveRelayEnvInAPrivateDirectory') }}</p>
+              <pre>{{ t('settings.relayENVFILEPathOutsideProjectRelay') }}</pre>
+              <p>{{ t('settings.whenTheStatusBecomesOnlineClickConnect') }}</p>
             </div>
             <div class="mobile-relay-remove">
               <UiButton
@@ -189,7 +188,7 @@ docker compose ps</pre>
                 :disabled="busy"
                 @click="removeRelay(relay)"
               >
-                Удалить посредника
+                {{ t('settings.deleteRelay') }}
               </UiButton>
             </div>
           </div>
@@ -200,10 +199,10 @@ docker compose ps</pre>
       <header class="mobile-card-head">
         <div>
           <h4 id="mobile-devices-title">
-            Привязанные телефоны
+            {{ t('settings.pairedPhones') }}
             <span class="mobile-count">{{ status ? activeDevices.length : '—' }}</span>
           </h4>
-          <p>Устройства, которым разрешён доступ к этому GrigDesk.</p>
+          <p>{{ t('settings.devicesAllowedToAccessThisGrigDesk') }}</p>
         </div>
       </header>
       <div class="mobile-device-list">
@@ -226,8 +225,8 @@ docker compose ps</pre>
           </div>
         </div>
         <div v-else-if="!activeDevices.length" class="mobile-empty">
-          <b>Пока нет привязанных телефонов</b>
-          <p>Нажмите «Подключить телефон» у посредника и отсканируйте QR в приложении.</p>
+          <b>{{ t('settings.noPhonesPairedYet') }}</b>
+          <p>{{ t('settings.clickConnectPhoneForTheRelayAnd') }}</p>
         </div>
         <div v-else class="mobile-devices">
           <div
@@ -237,18 +236,18 @@ docker compose ps</pre>
           >
             <div class="mobile-identity">
               <b>{{ device.name }}</b>
-              <span class="mobile-device-status">Доступ разрешён</span>
+              <span class="mobile-device-status">{{ t('settings.accessAllowed') }}</span>
             </div>
             <UiButton
               data-role="settings-action"
               variant="ghost"
               tone="danger"
               data-testid="mobile-revoke"
-              :aria-label="`Отозвать доступ: ${device.name}`"
+              :aria-label="t('settings.revokeAccess2', { deviceName: device.name })"
               :disabled="busy"
               @click="revoke(device)"
             >
-              Отозвать доступ
+              {{ t('settings.revokeAccess') }}
             </UiButton>
           </div>
         </div>
@@ -266,9 +265,9 @@ docker compose ps</pre>
           v-model:open="historyOpen"
           controls="mobile-revoked-devices"
         >
-          Отозванные телефоны · {{ revokedDevices.length }}
+          {{ t('settings.revokedPhones') }} {{ revokedDevices.length }}
         </UiDisclosureButton>
-        <p v-else class="mobile-history-empty">Отозванных телефонов нет</p>
+        <p v-else class="mobile-history-empty">{{ t('settings.noRevokedPhones') }}</p>
         <div
           v-if="historyOpen && revokedDevices.length"
           id="mobile-revoked-devices"
@@ -280,14 +279,14 @@ docker compose ps</pre>
             class="mobile-device mobile-row"
           >
             <b>{{ device.name }}</b>
-            <span class="mobile-badge">Доступ отозван</span>
+            <span class="mobile-badge">{{ t('settings.accessRevoked') }}</span>
           </div>
         </div>
       </div>
     </section>
     <UiDialog
       v-model:open="addOpen"
-      title="Добавить посредника"
+      :title="t('settings.addRelay')"
       size="compact"
       initial-focus="#mobile-relay-name"
       :persistent="busy"
@@ -299,12 +298,12 @@ docker compose ps</pre>
         class="mobile-form"
         @submit.prevent="addRelay"
       >
-        <p class="mobile-form-hint">Укажите адрес сервера, доступный вашему телефону.</p>
-        <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
+        <p class="mobile-form-hint">{{ t('settings.enterAServerAddressAccessibleFromYour') }}</p>
+        <UiInlineMessage v-if="error" tone="danger">{{ resolveUiText(error) }}</UiInlineMessage>
         <UiField
           id="mobile-relay-name"
-          label="Название"
-          hint="Чтобы отличать подключения, например «Дом»."
+          :label="t('settings.name')"
+          :hint="t('settings.connectionNameHint')"
         >
           <UiInput
             v-model="form.name"
@@ -317,8 +316,8 @@ docker compose ps</pre>
         <div class="mobile-form-address">
           <UiField
             id="mobile-relay-host"
-            label="Адрес"
-            hint="IP или имя хоста, без https:// и порта."
+            :label="t('settings.address')"
+            :hint="t('settings.hostHint')"
           >
             <UiInput
               v-model="form.host"
@@ -328,7 +327,7 @@ docker compose ps</pre>
               required
             />
           </UiField>
-          <UiField id="mobile-relay-port" label="Порт">
+          <UiField id="mobile-relay-port" :label="t('settings.port')">
             <UiNumberInput
               v-model="form.port"
               :min="1"
@@ -345,7 +344,7 @@ docker compose ps</pre>
           :disabled="busy"
           @click="addOpen = false"
         >
-          Отмена
+          {{ t('settings.cancel') }}
         </UiButton>
         <UiButton
           type="submit"
@@ -357,7 +356,7 @@ docker compose ps</pre>
           :disabled="!canAdd"
           :loading="busy"
         >
-          Добавить посредника
+          {{ t('settings.addRelay') }}
         </UiButton>
       </template>
     </UiDialog>
@@ -371,6 +370,8 @@ docker compose ps</pre>
 </template>
 
 <script setup lang="ts">
+import { t, messageRef, resolveUiText, type UiText } from '../../ui.ts';
+
 import { saveFile } from '../../shared/saveFile.ts';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 
@@ -423,8 +424,8 @@ const form = ref({
   host: '',
   port: 443 as number | '',
 });
-const error = ref('');
-const loadError = ref('');
+const error = ref<UiText>('');
+const loadError = ref<UiText>('');
 const busy = ref(false);
 const created = ref('');
 const addOpen = ref(false);
@@ -457,7 +458,11 @@ async function load() {
     const value = (await api.get('/api/mobile/status')) as Status;
 
     if (!value?.server || !Array.isArray(value.relays) || !Array.isArray(value.devices)) {
-      throw new Error('Не удалось загрузить подключения. Повторите попытку.');
+      if (!disposed) {
+        loadError.value = messageRef('settings.couldNotLoadConnectionsTryAgain');
+      }
+
+      return;
     }
 
     if (!disposed) {
@@ -478,17 +483,17 @@ async function load() {
  */
 function linkLabel(link: Relay['link']) {
   const names: Record<string, string> = {
-    online: 'В сети',
-    connecting: 'Подключается',
-    waiting_vpn: 'Ждёт VPN',
-    offline: 'Нет связи',
+    online: t('settings.online'),
+    connecting: t('settings.connecting'),
+    waiting_vpn: t('settings.waitingForVPN'),
+    offline: t('settings.offline'),
   };
 
-  return link.state === 'error' ? 'Ошибка подключения' : names[link.state] || 'Нет связи';
+  return link.state === 'error' ? t('settings.connectionError') : names[link.state] || t('settings.offline');
 }
 
-function message(cause: unknown) {
-  return cause instanceof Error ? cause.message : 'Не удалось выполнить действие.';
+function message(cause: unknown): UiText {
+  return cause instanceof Error ? cause.message : messageRef('settings.couldNotPerformTheAction');
 }
 
 /**
@@ -570,12 +575,12 @@ async function downloadEnv(id: string) {
  * После отказа диалога сетевой мутации не возникает.
  */
 async function removeRelay(relay: Relay) {
-  const text = `Удалить посредника «${relay.name}»? Телефоны больше не смогут подключаться через него.`;
+  const text = messageRef('settings.deleteRelayPhonesWillNoLongerBe', { relayName: relay.name });
 
   if (
     await confirmDialog(text, {
       danger: true,
-      okText: 'Удалить',
+      okText: messageRef('settings.delete'),
       touchTargets: true,
     })
   ) {
@@ -590,12 +595,12 @@ async function removeRelay(relay: Relay) {
  * Сервер завершает живые соединения только после durable записи отзыва.
  */
 async function revoke(device: Device) {
-  const text = `Отозвать доступ у «${device.name}»? Для повторного подключения понадобится новый QR.`;
+  const text = messageRef('settings.revokeAccessForANewQRWill', { deviceName: device.name });
 
   if (
     await confirmDialog(text, {
       danger: true,
-      okText: 'Отозвать доступ',
+      okText: messageRef('settings.revokeAccess'),
       touchTargets: true,
     })
   ) {

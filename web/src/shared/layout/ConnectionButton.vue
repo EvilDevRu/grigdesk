@@ -1,6 +1,6 @@
 <template>
   <template v-if="shell.present">
-    <UiTopbarPanel v-model:open="open" title="Машины" trigger-mode="click">
+    <UiTopbarPanel v-model:open="open" :title="t('core.machines')" trigger-mode="click">
       <template #trigger>
         <UiButton v-tooltip="label" variant="ghost" :aria-label="label" :aria-expanded="open"
                   data-context="connection-trigger">
@@ -14,7 +14,7 @@
                                 :disconnected="disconnected" compact aria-hidden="true" />
             </span>
           </template>
-          <span class="connection-label">{{ shell.profile?.name ?? 'Машины' }}</span>
+          <span class="connection-label">{{ shell.profile ? machineProfileName(shell.profile, uiLocale) : t('core.machines') }}</span>
           <template #trailing>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                  aria-hidden="true"><path d="m8 10 4 4 4-4" /></svg>
@@ -26,7 +26,7 @@
         <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
         <div class="connection-profiles">
           <UiButton v-for="profile in shell.profiles" :key="profile.id" variant="ghost"
-                    data-context="connection-machine" :aria-label="profile.name"
+                    data-context="connection-machine" :aria-label="machineProfileName(profile, uiLocale)"
                     :aria-current="profile.id === shell.profile?.id ? 'true' : undefined"
                     @click="select(profile.id)">
             <span class="connection-machine-icon" aria-hidden="true">
@@ -37,9 +37,9 @@
               </svg>
             </span>
             <span class="connection-machine-copy">
-              <strong>{{ profile.name }}</strong>
+              <strong>{{ machineProfileName(profile, uiLocale) }}</strong>
               <span class="connection-machine-detail">
-                <span>{{ profile.kind === 'local' ? 'Локальная' : 'Удалённая' }}</span>
+                <span>{{ profile.kind === 'local' ? t('core.local') : t('core.remote') }}</span>
                 <span aria-hidden="true">·</span>
                 <ConnectionStatus :status="profile.id === shell.profile?.id ? shell.status : profile.status"
                                   :text="profile.id === shell.profile?.id ? statusText : undefined"
@@ -51,19 +51,19 @@
               <path d="m5 12 4 4L19 6" />
             </svg>
           </UiButton>
-          <p v-if="!shell.profiles.length" class="connection-empty">Добавьте первую машину для подключения.</p>
+          <p v-if="!shell.profiles.length" class="connection-empty">{{ t('core.addTheFirstMachineToConnect') }}</p>
         </div>
         <UiButton variant="ghost" data-context="connection-action" @click="addMachine">
           <template #leading>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                  aria-hidden="true"><path d="M12 5v14 M5 12h14" /></svg>
           </template>
-          Добавить машину
+          {{ t('core.addMachine') }}
         </UiButton>
       </div>
       <template #footer>
         <UiButton variant="ghost" data-context="connection-action" @click="showAll">
-          Все машины
+          {{ t('core.allMachines') }}
           <template #trailing>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                  aria-hidden="true"><path d="M5 12h14 m-5-5 5 5-5 5" /></svg>
@@ -76,7 +76,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                  aria-hidden="true"><path d="M12 3v9 M7 5.5a8 8 0 1 0 10 0" /></svg>
           </template>
-          {{ disconnected ? 'Подключиться' : 'Отключиться' }}
+          {{ disconnected ? t('core.connect') : t('core.disconnect') }}
         </UiButton>
       </template>
     </UiTopbarPanel>
@@ -85,9 +85,11 @@
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale } from '../../ui.ts';
+
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
-import { CONNECTION_TEXT } from '../../../../shared/client/clientShell.ts';
+import { connectionStatusText, machineProfileName } from '../../../../shared/client/clientShell.ts';
 import { UiButton, UiInlineMessage, UiTopbarPanel, useUiLayer, vTooltip } from '../../ui.ts';
 import { useShellStore } from '../../stores/shell.ts';
 import { failureText } from '../apiClient.ts';
@@ -114,19 +116,22 @@ onBeforeUnmount(() => clearInterval(clock));
 
 const statusText = computed(() => {
   if (disconnected.value) {
-    return 'отключено';
+    return t('core.disconnected2');
   }
 
   if (shell.status === 'incompatible') {
     return typeof shell.detail !== 'string' && shell.detail?.code === 'server_upgrade_required'
-      ? 'нужно обновить сервер' : 'нужно обновить приложение';
+      ? t('core.serverUpdateRequired') : t('core.applicationUpdateRequired');
   }
 
-  const retry = retrySeconds.value > 0 ? ` · повтор через ${retrySeconds.value} с` : '';
+  const retry = retrySeconds.value > 0 ? t('core.retryInS', { retrySecondsValue: retrySeconds.value }) : '';
 
-  return CONNECTION_TEXT[shell.status] + retry;
+  return connectionStatusText(shell.status, uiLocale.value) + retry;
 });
-const label = computed(() => `${shell.profile?.name ?? 'Машины'} · ${statusText.value}`);
+const label = computed(() => t('core.caption2', {
+  value1: shell.profile ? machineProfileName(shell.profile, uiLocale.value) : t('core.machines'),
+  statusTextValue: statusText.value,
+}));
 
 useUiLayer('popover', {
   enabled: open,
@@ -159,7 +164,7 @@ async function select(id: string): Promise<void> {
 
     open.value = false;
   } catch (failure) {
-    error.value = failureText(failure, 'Не удалось выбрать машину.');
+    error.value = failureText(failure, t('core.couldNotSelectTheMachine'));
   }
 }
 
@@ -172,7 +177,7 @@ async function connect(): Promise<void> {
     await shell.connect();
     open.value = false;
   } catch (failure) {
-    error.value = failureText(failure, 'Не удалось подключиться.');
+    error.value = failureText(failure, t('core.couldNotConnect'));
   }
 }
 
@@ -185,7 +190,7 @@ async function disconnect(): Promise<void> {
     await shell.disconnect();
     open.value = false;
   } catch (failure) {
-    error.value = failureText(failure, 'Не удалось отключиться.');
+    error.value = failureText(failure, t('core.couldNotDisconnect'));
   }
 }
 </script>

@@ -1,16 +1,16 @@
 <template>
   <div class="web-log-panel">
-    <h3>Журнал окна</h3>
+    <h3>{{ t('settings.windowLog') }}</h3>
     <p class="muted small">
-      При сбое сделайте отметку: журнал сохранит её вместе с недавними событиями окна.
+      {{ t('settings.whenAProblemOccursAddAMarker') }}
     </p>
     <p v-if="status.level === 'off'" class="muted small">
-      Диагностическое логирование выключено общей настройкой выше.
+      {{ t('settings.diagnosticLoggingIsDisabledByTheShared') }}
     </p>
     <p v-else-if="status.level === null" class="muted small">
-      Ожидаем уровень диагностического логирования от сервера.
+      {{ t('settings.waitingForTheDiagnosticLoggingLevelFrom') }}
     </p>
-    <label for="web-log-comment">Комментарий к сбою</label>
+    <label for="web-log-comment">{{ t('settings.problemComment') }}</label>
     <UiTextarea
       id="web-log-comment"
       v-model="comment"
@@ -18,34 +18,36 @@
       rows="3"
       data-context="settings-field"
     />
-    <p class="muted small">Комментарий сохраняется в локальном журнале.</p>
+    <p class="muted small">{{ t('settings.theCommentIsSavedInTheLocal') }}</p>
     <div class="web-log-actions">
       <UiButton
         data-role="settings-action"
         :disabled="!status.level || status.level === 'off'"
         @click="createMark"
       >
-        Отметить сбой
+        {{ t('settings.markAProblem') }}
       </UiButton>
       <UiButton
         data-role="settings-action"
         :disabled="downloading"
         @click="downloadToday"
       >
-        {{ downloading ? 'Скачиваю…' : 'Скачать журнал за сегодня (UTC)' }}
+        {{ downloading ? t('settings.downloading') : t('settings.downloadTodaySLogUTC') }}
       </UiButton>
     </div>
     <p v-if="markMessage" role="status">{{ markMessage }}</p>
-    <p v-if="downloadError" role="alert">{{ downloadError }}</p>
+    <p v-if="downloadError" role="alert">{{ resolveUiText(downloadError) }}</p>
     <p class="muted small">
-      В кольце {{ status.ringCount }} записей, ожидают отправки {{ status.pendingCount }}.
-      <span v-if="status.ringFrom">Охват: {{ status.ringFrom }} — {{ status.ringTo }}.</span>
-      <span v-if="status.lossCount">Не доставлено записей: {{ status.lossCount }}.</span>
+      {{ t('settings.inTheBuffer') }} {{ status.ringCount }} {{ t('settings.entriesWaitingToSend') }} {{ status.pendingCount }}.
+      <span v-if="status.ringFrom">{{ t('settings.coverage') }} {{ status.ringFrom }} — {{ status.ringTo }}.</span>
+      <span v-if="status.lossCount">{{ t('settings.undeliveredEntries') }} {{ status.lossCount }}.</span>
     </p>
   </div>
 </template>
 
 <script setup lang="ts">
+import { t, messageRef, resolveUiText, type UiText } from '../../ui.ts';
+
 import { saveFile } from '../../shared/saveFile.ts';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 
@@ -61,28 +63,28 @@ const comment = ref('');
 const markState = ref<'idle' | 'pending' | 'ack' | 'drop' | 'evicted' | 'failed'>('idle');
 const currentMark = ref<WebLogKey | null>(null);
 const downloading = ref(false);
-const downloadError = ref('');
+const downloadError = ref<UiText>('');
 let stopDelivery: (() => void) | null = null;
 
 const markMessage = computed(() => {
   if (markState.value === 'failed') {
     return status.level === 'off' || status.level === null
-      ? 'Диагностическое логирование выключено'
-      : 'Не удалось создать отметку';
+      ? t('settings.diagnosticLoggingIsDisabled')
+      : t('settings.couldNotCreateAMarker');
   }
   if (markState.value === 'ack') {
-    return 'Сохранено на сервере';
+    return t('settings.savedOnTheServer');
   }
   if (markState.value === 'drop') {
-    return 'Отметка не сохранена: её отбросили уровень или суточная квота журнала';
+    return t('settings.markerNotSavedDiscardedByTheLogging');
   }
   if (markState.value === 'evicted') {
-    return 'Подтверждение сохранения не получено';
+    return t('settings.saveConfirmationNotReceived');
   }
   if (markState.value === 'pending') {
     return status.storageAvailable
-      ? 'Ожидает отправки'
-      : 'Сохранение после перезагрузки недоступно';
+      ? t('settings.waitingToSend')
+      : t('settings.savingAfterReloadIsUnavailable');
   }
 
   return '';
@@ -135,7 +137,7 @@ async function downloadToday(): Promise<void> {
 
     await saveFile(file.blob, filename);
   } catch {
-    downloadError.value = 'Не удалось скачать журнал за сегодня.';
+    downloadError.value = messageRef('settings.couldNotDownloadTodaySLog');
   } finally {
     downloading.value = false;
   }

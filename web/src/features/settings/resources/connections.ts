@@ -1,3 +1,5 @@
+import { localeMessage, localeTranslator, type LocaleSource } from '../../../../../shared/i18n/catalogs.ts';
+import { translate as t } from '../../../../../shared/i18n/catalogs.ts';
 import type { ApiClient } from '../../../shared/apiClient.ts';
 import type { B24CredsView } from '../../../../../shared/b24/credentialsContracts.ts';
 import type { ResourceAdapter, JsonValue } from '../contracts.ts';
@@ -6,12 +8,17 @@ import type { ResourceAdapter, JsonValue } from '../contracts.ts';
  * Публичный снимок Б24 никогда не превращает маску пароля в содержимое поля.
  * Явная проверка пары строк нужна и для первого чтения, и для подтверждения POST.
  */
-function decodeB24(raw: unknown): B24CredsView {
+function decodeB24(raw: unknown,
+  locale: LocaleSource = 'ru',
+): B24CredsView {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   const value = raw as Partial<B24CredsView> | null;
 
   if (!value || typeof value.baseUrl !== 'string' || typeof value.login !== 'string'
       || typeof value.configured !== 'boolean') {
-    throw new TypeError('Не получен снимок подключения Б24');
+    throw new TypeError(t("settings.bConnectionSnapshotNotReceived"));
   }
 
   return {
@@ -28,7 +35,12 @@ function decodeB24(raw: unknown): B24CredsView {
 export function createB24Adapter(
   client: Pick<ApiClient, 'get' | 'post'>,
   onView: (view: B24CredsView) => void,
+  locale: LocaleSource = 'ru',
+
 ): ResourceAdapter {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   return {
     id: 'b24',
     chain: 'b24',
@@ -36,7 +48,7 @@ export function createB24Adapter(
     body: 'full-record',
     supportsUnset: false,
     async read(signal) {
-      const view = decodeB24(await client.get('/api/settings/b24', { signal }));
+      const view = decodeB24(await client.get('/api/settings/b24', { signal }), locale);
 
       onView(view);
 
@@ -59,7 +71,8 @@ export function createB24Adapter(
         typeof values[key] === 'string' && values[key].trim()
           ? [] : [{
             key,
-            message: key === 'password' ? 'Введите новый пароль для записи подключения' : 'Заполните поле',
+            message: key === 'password'
+              ? messageText("settings.enterANewPasswordToSaveThe") : messageText("settings.fillInThisField"),
           }]);
     },
     /**
@@ -79,13 +92,13 @@ export function createB24Adapter(
         baseUrl: values.baseUrl,
         login: values.login,
         password: values.password,
-      }, { signal }));
+      }, { signal }), locale);
 
       if (!view.configured) {
         return {
           status: 'unknown',
           fields: [],
-          message: 'Подключение не подтверждено сервером',
+          message: messageText("settings.connectionNotConfirmedByTheServer"),
         };
       }
 

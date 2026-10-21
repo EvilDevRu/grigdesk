@@ -1,3 +1,7 @@
+import {
+  localeMessage, localeTranslator, resolveLocaleText, type LocaleSource,
+} from '../../../../shared/i18n/catalogs.ts';
+import { snapshotText, type UiText } from '../../../../shared/i18n/core.ts';
 import { failureText } from '../../shared/apiClient.ts';
 import { decodeResourceWriteResult, resourceWriteFailure } from './contracts.ts';
 import type {
@@ -25,6 +29,13 @@ interface ApplyRun {
   stop?: () => void;
 }
 
+type StoredIssue = Omit<ValidationIssue, 'message'> & { message: UiText };
+type StoredFailure = Omit<ApplyFailure, 'message'> & { message: UiText };
+type StoredResult = Omit<ApplyResult, 'errors' | 'validation'> & {
+  errors: StoredFailure[];
+  validation: StoredIssue[];
+};
+
 interface ResourceState {
   adapter: ResourceAdapter;
   fields: Map<string, SessionField>;
@@ -32,7 +43,7 @@ interface ResourceState {
   latest: Record<string, JsonValue>;
   intents: Map<string, FieldIntent>;
   conflicts: Map<string, FieldConflict>;
-  errors: Map<string, string>;
+  errors: Map<string, UiText>;
   loaded: boolean;
   pending?: Promise<boolean>;
 }
@@ -90,15 +101,30 @@ function setRecordValue(record: Record<string, JsonValue>, key: string, value: J
  */
 function publicMessage(
   resource: ResourceState,
-  message: string,
+  message: UiText,
   intents: ReadonlyMap<string, FieldIntent> = resource.intents,
-): string {
-  let result = message;
+  locale: LocaleSource = 'ru',
+
+): UiText {
+  const t = localeTranslator(locale);
+
+  let result = typeof message === 'string' ? message : snapshotText({
+    ...message,
+    params: Object.fromEntries(Object.entries(message.params).map(([key, value]) => [key,
+      typeof value === 'string' ? publicMessage(resource, value, intents, locale) as string : value,
+    ])),
+    fallback: message.fallback === undefined ? undefined
+      : publicMessage(resource, message.fallback, intents, locale) as string,
+  });
+
+  if (typeof result !== 'string') {
+    return result;
+  }
 
   for (const [key, intent] of intents) {
     if (resource.fields.get(key)?.secret && intent.op === 'set'
         && typeof intent.value === 'string' && intent.value.length) {
-      result = result.split(intent.value).join('[скрыто]');
+      result = result.split(intent.value).join(t("settings.hidden"));
     }
   }
 
@@ -109,17 +135,21 @@ function publicMessage(
  * Общая строка состояния не выдаёт частичный или неопределённый исход за успех.
  * Подробности сохраняются в публичном результате с адресами сохранённых и оставшихся полей.
  */
-function applicationMessage(result?: ApplyResult): string {
+function applicationMessage(result?: StoredResult,
+  locale: LocaleSource = 'ru',
+): string {
+  const t = localeTranslator(locale);
+
   if (!result) {
     return '';
   }
 
   const messages = {
-    unknown: 'Неизвестно, применены ли изменения',
-    partial: 'Часть изменений сохранена',
-    failed: 'Не удалось применить изменения',
-    conflict: 'Настройки изменились снаружи',
-    success: result.saved.length ? 'Изменения сохранены' : '',
+    unknown: t("settings.unknownWhetherChangesWereApplied"),
+    partial: t("settings.someChangesWereSaved"),
+    failed: t("settings.couldNotApplyChanges"),
+    conflict: t("settings.settingsChangedExternally"),
+    success: result.saved.length ? t("settings.changesSaved") : '',
   };
 
   return messages[result.status];
@@ -129,7 +159,12 @@ function applicationMessage(result?: ApplyResult): string {
  * Намерения, адаптеры и секретный ввод живут только в замыкании одного открытия.
  * Наружу для reactive state выдаются копии публичных снимков без значений секретов.
  */
-export function createSettingsSession(options: { clock?: SessionClock } = {}) {
+export function createSettingsSession(options: { clock?: SessionClock } = {},
+  locale: LocaleSource = 'ru',
+) {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   const resources = new Map<string, ResourceState>();
   const listeners = new Set<() => void>();
   const clock: SessionClock = options.clock ?? {
@@ -141,11 +176,26 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
   let controller = new AbortController();
   let applicationSequence = 0;
   let currentRun: ApplyRun | null = null;
-  let lastResult: ApplyResult | undefined;
+  let lastResult: StoredResult | undefined;
+
+  /**
+   * Публичные результаты остаются строковыми и не удерживают реактивные объекты.
+   * Сохранённый ключ разрешается заново при снимке без повторной проверки или записи.
+   */
+  function resultView(result: StoredResult): ApplyResult {
+    return {
+      ...structuredClone(result),
+      errors: result.errors.map((error) => ({ ...error, message: resolveLocaleText(error.message, locale) })),
+      validation: result.validation.map((issue) => ({
+        ...structuredClone(issue),
+        message: resolveLocaleText(issue.message, locale),
+      })),
+    };
+  }
 
   function assertNotApplying(): void {
     if (currentRun) {
-      throw new Error('Настройки сохраняются. Дождитесь результата');
+      throw new Error(t("settings.settingsAreBeingSavedWaitForThe"));
     }
   }
 
@@ -214,13 +264,14 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
     const resource = resources.get(id);
 
     if (!active || !resource || !resource.loaded) {
-      throw new Error('Сначала нужно загрузить настройки ресурса');
+      throw new Error(t("settings.loadTheResourceSettingsFirst"));
     }
 
     const field = resource.fields.get(key);
 
     if (!field || field.unavailable && !(operation === 'unset' && resource.adapter.supportsUnset)) {
-      throw new Error(field?.unavailable ?? 'Поле настроек недоступно');
+      throw new Error(field?.unavailable === undefined ? t("settings.settingsFieldUnavailable")
+        : resolveLocaleText(field.unavailable, locale));
     }
 
     return resource;
@@ -250,7 +301,7 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
    */
   function register(adapter: ResourceAdapter, fields: readonly SessionField[]): void {
     if (!active) {
-      throw new Error('Сессия настроек закрыта');
+      throw new Error(t("settings.settingsSessionClosed"));
     }
 
     const previous = resources.get(adapter.id);
@@ -259,7 +310,7 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
     if (previous) {
       for (const [key, field] of previous.fields) {
         if (!nextFields.has(key) && previous.intents.has(key)) {
-          nextFields.set(key, { ...field, unavailable: 'Поле больше недоступно' });
+          nextFields.set(key, { ...field, unavailable: messageText("settings.fieldNoLongerAvailable") });
         }
       }
 
@@ -396,7 +447,7 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
     lastResult = undefined;
 
     if (!resource.adapter.supportsUnset) {
-      throw new Error('Сброс для этого ресурса не поддерживается');
+      throw new Error(t("settings.resetIsNotSupportedForThisResource"));
     }
 
     if (!Object.hasOwn(resource.baseline, key) && !resource.fields.get(key)?.hasStoredValue) {
@@ -441,6 +492,8 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
       loaded: resource.loaded,
       fields: [...resource.fields.values()].map((field): SessionFieldState => ({
         ...structuredClone(field),
+        unavailable: field.unavailable === undefined ? undefined
+          : resolveLocaleText(field.unavailable, locale),
         dirty: resource.intents.has(field.key),
         hasSecretDraft: Boolean(field.secret && resource.intents.has(field.key)),
         ...(!field.secret ? {
@@ -448,7 +501,8 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
           intent: getIntent(resource.adapter.id, field.key),
           conflict: structuredClone(resource.conflicts.get(field.key)),
         } : {}),
-        error: resource.errors.get(field.key),
+        error: resource.errors.has(field.key) ? resolveLocaleText(resource.errors.get(field.key)!, locale)
+          : undefined,
       })),
     }));
 
@@ -460,9 +514,9 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
       applying: currentRun !== null,
       delayed: currentRun?.delayed ?? false,
       canClose: currentRun === null,
-      statusMessage: currentRun ? currentRun.delayed ? 'Ответ задерживается' : 'Сохраняем…'
-        : applicationMessage(lastResult),
-      lastResult: structuredClone(lastResult),
+      statusMessage: currentRun ? currentRun.delayed ? t("settings.responseDelayed") : t("settings.saving")
+        : applicationMessage(lastResult, locale),
+      lastResult: lastResult ? resultView(lastResult) : undefined,
     };
   }
 
@@ -503,8 +557,8 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
    * Валидируются все изменённые ресурсы, включая размонтированные страницы.
    * Адрес берётся из регистрации поля, а адаптер получает собственные копии данных.
    */
-  function validate(): ValidationIssue[] {
-    const issues: ValidationIssue[] = [];
+  function validateStored(): StoredIssue[] {
+    const issues: StoredIssue[] = [];
 
     for (const resource of orderedResources()) {
       resource.errors.clear();
@@ -513,7 +567,7 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
         continue;
       }
 
-      const problems: Array<{ key: string; message: string }> = [];
+      const problems: Array<{ key: string; message: UiText }> = [];
 
       for (const key of resource.intents.keys()) {
         const field = resource.fields.get(key);
@@ -523,7 +577,10 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
         if (field?.unavailable && !canUnset) {
           problems.push({ key, message: field.unavailable });
         } else if (resource.conflicts.has(key)) {
-          problems.push({ key, message: 'Настройка изменилась снаружи. Выберите нужный вариант' });
+          problems.push({
+            key,
+            message: messageText("settings.settingChangedExternallySelectTheDesiredOption"),
+          });
         }
       }
 
@@ -538,7 +595,7 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
         if (key !== undefined) {
           problems.push({
             key,
-            message: failureText(error, 'Не удалось проверить настройки ресурса'),
+            message: failureText(error, '') || messageText("settings.couldNotValidateTheResourceSettings"),
           });
         }
       }
@@ -549,7 +606,7 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
           ?? (firstDirtyKey === undefined ? undefined : resource.fields.get(firstDirtyKey));
 
         if (field && !resource.errors.has(field.key)) {
-          const message = publicMessage(resource, problem.message);
+          const message = publicMessage(resource, problem.message, undefined, locale);
 
           resource.errors.set(field.key, message);
           issues.push({
@@ -565,6 +622,14 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
     notify();
 
     return issues;
+  }
+
+  /**
+   * Прямой вызов проверки сохраняет прежний контракт строк для вызывающего кода.
+   * Внутренняя сессия удерживает descriptors, не перевычисляя валидацию при смене языка.
+   */
+  function validate(): ValidationIssue[] {
+    return validateStored().map((issue) => ({ ...issue, message: resolveLocaleText(issue.message, locale) }));
   }
 
   /**
@@ -658,9 +723,9 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
     run: ApplyRun,
     mode: 'apply' | 'ok',
     saved: SavedFieldChange[],
-    errors: ApplyFailure[],
-    validation: ValidationIssue[] = [],
-  ): ApplyResult {
+    errors: StoredFailure[],
+    validation: StoredIssue[] = [],
+  ): StoredResult {
     const belongs = active && sequence === run.sessionId;
     const remaining = belongs ? remainingChanges() : [];
     const status = !belongs || errors.some((error) => error.status === 'unknown') ? 'unknown'
@@ -706,7 +771,7 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
       interrupt({
         status: 'unknown',
         fields: [],
-        message: 'Ожидание прекращено. Результат записи неизвестен',
+        message: messageText("settings.stoppedWaitingTheWriteResultIsUnknown"),
       });
       writeController.abort();
       run.stop = undefined;
@@ -717,7 +782,8 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
       structuredClone(requested),
       structuredClone(resource.baseline),
       AbortSignal.any([ownerSignal, writeController.signal]),
-    )).then(decodeResourceWriteResult).catch(resourceWriteFailure);
+    )).then((result) => decodeResourceWriteResult(result, locale))
+      .catch((error: unknown) => resourceWriteFailure(error, locale));
 
     try {
       return await Promise.race([operation, interrupted]);
@@ -771,15 +837,15 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
     requested: ReadonlyMap<string, FieldIntent>,
     response: ResourceWriteResult,
     saved: SavedFieldChange[],
-  ): ApplyFailure | null {
+  ): StoredFailure | null {
     const fields = new Map(response.fields.map((field) => [field.key, field]));
     let status = response.status;
     let message = response.message === undefined ? undefined
-      : publicMessage(resource, response.message, requested);
+      : publicMessage(resource, response.message, requested, locale);
 
     if ([...fields.keys()].some((key) => !requested.has(key))) {
       status = 'unknown';
-      message = 'Ответ содержит неизвестное подтверждение поля';
+      message = messageText("settings.responseContainsAnUnknownFieldConfirmation");
       fields.clear();
     }
 
@@ -795,8 +861,8 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
         const outcome = field?.status !== 'success' ? field?.status ?? response.status : 'failed';
         const failure = outcome === 'success' ? 'failed' : outcome;
 
-        message = field?.message === undefined ? message ?? 'Сервер не принял значение'
-          : publicMessage(resource, field.message, requested);
+        message = field?.message === undefined ? message ?? messageText("settings.theServerRejectedTheValue")
+          : publicMessage(resource, field.message, requested, locale);
         resource.errors.set(key, message);
 
         if (status !== 'unknown') {
@@ -811,7 +877,7 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
     return status === 'success' ? null : {
       resourceId: resource.adapter.id,
       status,
-      message: message ?? 'Не удалось сохранить настройки',
+      message: message ?? messageText("settings.couldNotSaveSettings"),
       ...(response.httpStatus === undefined ? {} : { httpStatus: response.httpStatus }),
     };
   }
@@ -836,16 +902,16 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
    * Весь dirty-набор проверяется до первой записи; записи идут строго последовательно.
    * Обычный отказ блокирует цепочку, неизвестность или потеря входа — всю очередь.
    */
-  async function runApplication(run: ApplyRun, mode: 'apply' | 'ok'): Promise<ApplyResult> {
+  async function runApplication(run: ApplyRun, mode: 'apply' | 'ok'): Promise<StoredResult> {
     const saved: SavedFieldChange[] = [];
-    const errors: ApplyFailure[] = [];
+    const errors: StoredFailure[] = [];
     const blockedChains = new Set<string>();
 
     if (!active || sequence !== run.sessionId || currentRun !== run) {
       return applicationResult(run, mode, saved, errors);
     }
 
-    const validation = validate();
+    const validation = validateStored();
 
     if (validation.length) {
       return applicationResult(run, mode, saved, errors, validation);
@@ -911,7 +977,7 @@ export function createSettingsSession(options: { clock?: SessionClock } = {}) {
         lastResult = structuredClone(result);
       }
 
-      return result;
+      return resultView(result);
     }).finally(() => {
       if (currentRun === run) {
         currentRun = null;

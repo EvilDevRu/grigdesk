@@ -1,3 +1,6 @@
+import { snapshotText, type UiText } from '../../../shared/i18n/core.ts';
+import { translator, type LocaleSource } from '../../../shared/i18n/catalogs.ts';
+
 import {
   dismissAllToasts,
   dismissToast,
@@ -8,7 +11,7 @@ import {
 } from '../ui';
 import type { UiToastAction, UiToastTone } from '../ui';
 import { closeSystemNotification, notify } from './notify.ts';
-import { alertTargetHash, alertTargetLabel } from './alertTargets.ts';
+import { alertTargetHash, alertTargetLabel, alertTargetMessage } from './alertTargets.ts';
 import type { AlertTarget } from './alertTargets.ts';
 import { createAlertHistory } from './alertHistory.ts';
 import type { AlertHistoryListener } from './alertHistory.ts';
@@ -17,20 +20,35 @@ export const ALERT_OPEN_ACTION_ID = 'open';
 
 export interface AlertInput {
   id: string;
-  title: string;
+  title: UiText;
   scope?: string;
   tone?: UiToastTone;
-  body?: string;
-  detail?: string;
+  body?: UiText;
+  detail?: UiText;
   target?: AlertTarget;
   actions?: readonly UiToastAction[];
   sticky?: boolean;
 }
 
+let alertLocale: LocaleSource | null = null;
 let subscribed = false;
 const systemIds = new Set<string>();
 const history = createAlertHistory();
 let targetOpener: ((target: AlertTarget) => void) | null = null;
+
+/**
+ * Bootstrap передаёт текущий язык явно, без зависимости центра оповещений от Vue.
+ * Прежние прямые вызовы до подключения сохраняют русский строковый контракт.
+ */
+export function setAlertsLocale(locale: LocaleSource | null): void {
+  alertLocale = locale;
+}
+
+function resolveAlertText(text: UiText): string {
+  const locale = typeof alertLocale === 'string' ? alertLocale : alertLocale?.value ?? 'ru';
+
+  return translator.resolveText(text, locale);
+}
 
 /**
  * Оболочка задаёт переходы только на время своей жизни.
@@ -55,7 +73,7 @@ export function userIsHere(): boolean {
  */
 export function alertUser(input: AlertInput): boolean {
   if (typeof input.id !== 'string' || !input.id.trim() ||
-    typeof input.title !== 'string' || !input.title.trim()) {
+    !input.title || !resolveAlertText(input.title).trim()) {
     return false;
   }
   if (!subscribed) {
@@ -81,7 +99,7 @@ export function alertUser(input: AlertInput): boolean {
   if (target) {
     actions.push({
       id: ALERT_OPEN_ACTION_ID,
-      label: alertTargetLabel(target),
+      label: alertLocale ? alertTargetMessage(target) : alertTargetLabel(target),
       tone: 'accent',
       variant: 'outline',
       run() {
@@ -92,7 +110,7 @@ export function alertUser(input: AlertInput): boolean {
 
   const shown = showToast({
     id: input.id,
-    title: input.title,
+    title: snapshotText(input.title),
     scope: input.scope,
     tone: input.tone || 'accent',
     body: input.body,
@@ -106,7 +124,7 @@ export function alertUser(input: AlertInput): boolean {
       id: input.id,
       scope: input.scope,
       tone: input.tone || 'accent',
-      title: input.title,
+      title: snapshotText(input.title),
       body: input.body,
       target,
     });
@@ -116,7 +134,12 @@ export function alertUser(input: AlertInput): boolean {
     const url = target ? new URL(alertTargetHash(target), window.location.href).href : '';
 
     systemIds.add(input.id);
-    void notify(input.title, input.body || '', input.id, url);
+
+    if (alertLocale) {
+      void notify(input.title, input.body || '', input.id, url, alertLocale);
+    } else {
+      void notify(resolveAlertText(input.title), resolveAlertText(input.body || ''), input.id, url);
+    }
   }
 
   return shown;

@@ -1,8 +1,10 @@
 <template>
   <span v-if="total" class="pipeline-topbar-wrap">
-    <UiTopbarPanel title="Конвейеры" trigger-mode="both">
+    <UiTopbarPanel :title="t('core.pipelines')" trigger-mode="both">
       <template #meta>
-        <span :aria-label="`Активных конвейеров: ${total}`">{{ total }} активных</span>
+        <span :aria-label="t('core.activePipelines', { total: total })">
+          {{ t('core.activePipelineCount', { count: total }) }}
+        </span>
       </template>
       <template #trigger>
         <UiButton
@@ -28,18 +30,18 @@
       </template>
 
       <template #default>
-        <section class="pipeline-topbar-popover" aria-label="Активные конвейеры">
-          <dl class="pipeline-topbar-popover-summary" aria-label="Сводка по состояниям">
+        <section class="pipeline-topbar-popover" :aria-label="t('core.activePipelines2')">
+          <dl class="pipeline-topbar-popover-summary" :aria-label="t('core.statusSummary')">
             <div class="running">
-              <dt>В работе</dt>
+              <dt>{{ t('core.running') }}</dt>
               <dd class="mono" :class="{ empty: !runningCount }">{{ runningCount }}</dd>
             </div>
             <div class="waiting">
-              <dt>Ждут решения</dt>
+              <dt>{{ t('core.awaitingDecision') }}</dt>
               <dd class="mono" :class="{ empty: !waitingCount }">{{ waitingCount }}</dd>
             </div>
             <div class="error">
-              <dt>Проблемы</dt>
+              <dt>{{ t('core.issues2') }}</dt>
               <dd class="mono" :class="{ empty: !issueCount }">{{ issueCount }}</dd>
             </div>
           </dl>
@@ -47,10 +49,10 @@
           <section
             v-if="attentionItems.length"
             class="pipeline-topbar-popover-attention"
-            aria-label="Конвейеры, требующие внимания"
+            :aria-label="t('core.pipelinesRequiringAttention')"
           >
             <header class="pipeline-topbar-popover-attention-head">
-              <strong>Требуют внимания</strong>
+              <strong>{{ t('core.needAttention') }}</strong>
               <span class="mono" :class="{ error: issueCount }">
                 {{ attentionItems.length }}
               </span>
@@ -66,7 +68,7 @@
                 <span class="pipeline-topbar-popover-copy">
                   <span class="pipeline-topbar-popover-title" v-tooltip="item.title">
                     <span class="mono">#{{ item.task }}</span>
-                    <span>{{ item.title || 'Без названия' }}</span>
+                    <span>{{ item.title || t('core.untitled') }}</span>
                   </span>
                   <span class="pipeline-topbar-popover-meta">
                     <span class="pipeline-topbar-popover-state" :class="item.kind">
@@ -86,15 +88,15 @@
           </section>
 
           <div v-else class="pipeline-topbar-popover-ok">
-            <strong>Все конвейеры работают</strong>
-            <small>Сейчас ничего не требует вашего решения.</small>
+            <strong>{{ t('core.allPipelinesAreRunning') }}</strong>
+            <small>{{ t('core.nothingNeedsYourDecisionRightNow') }}</small>
           </div>
 
           <div v-if="aggregateProgress" class="pipeline-topbar-popover-progress">
             <span class="pipeline-topbar-popover-progress-copy">
               <span>{{ progressLabel }}</span>
               <small v-if="aggregateProgress.observed < total">
-                По {{ aggregateProgress.observed }} из {{ total }} конвейеров
+                {{ t('core.by') }} {{ aggregateProgress.observed }} {{ t('settings.from') }} {{ total }} {{ t('core.pipelines2') }}
               </small>
             </span>
             <strong class="mono">
@@ -103,7 +105,7 @@
           </div>
 
           <UiInlineMessage v-if="error" tone="warning">
-            Состояние может быть устаревшим: {{ error }}
+            {{ t('core.statusMayBeStale') }} {{ error }}
           </UiInlineMessage>
         </section>
       </template>
@@ -114,10 +116,10 @@
             variant="outline"
             @click="openPipeline(close)"
           >
-            Открыть конвейер →
+            {{ t('core.openPipeline') }}
           </UiButton>
           <small v-if="hiddenAttentionCount" class="pipeline-topbar-popover-more">
-            Ещё {{ hiddenAttentionCount }}
+            {{ t('core.more') }} {{ hiddenAttentionCount }}
           </small>
         </span>
       </template>
@@ -126,6 +128,8 @@
 </template>
 
 <script setup>
+import { t, uiLocale } from '../../ui.ts';
+
 import { computed } from 'vue';
 
 import { UiButton, UiInlineMessage, UiTopbarPanel, vTooltip } from '../../ui';
@@ -159,8 +163,11 @@ const issueCount = computed(() => (
   props.items.filter((item) => item.kind === 'error').length
 ));
 const triggerLabel = computed(() => (
-  `Конвейеры: в работе ${runningCount.value}, ждут решения ${waitingCount.value}, `
-  + `проблемы ${issueCount.value}`
+  t('core.pipelinesRunningAwaitingDecision', {
+    runningCountValue: runningCount.value,
+    waitingCountValue: waitingCount.value,
+  })
+  + t('core.issues', { issueCountValue: issueCount.value })
 ));
 const attentionItems = computed(() => props.items.filter((item) => item.kind !== 'running'));
 const visibleAttentionItems = computed(() => attentionItems.value.slice(0, ATTENTION_LIMIT));
@@ -193,8 +200,8 @@ const aggregateProgress = computed(() => {
 });
 const progressLabel = computed(() => (
   aggregateProgress.value?.observed === total.value
-    ? 'Этапы выполнены'
-    : 'Известный прогресс'
+    ? t('core.stagesCompleted')
+    : t('core.knownProgress')
 ));
 
 function openPipeline(close) {

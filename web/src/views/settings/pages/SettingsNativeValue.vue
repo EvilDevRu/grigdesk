@@ -15,7 +15,7 @@
       :aria-label="field.label"
       @update:model-value="select"
     >
-      <option value="" disabled>Выбирает исполнитель</option>
+      <option value="" disabled>{{ t('settings.providerChooses') }}</option>
       <option
         v-for="(choice, index) in choices"
         :key="index"
@@ -32,7 +32,7 @@
       :min="field.constraints.minimum"
       :max="field.constraints.maximum"
       :step="field.constraints.step ?? (field.kind === 'integer' ? 1 : 'any')"
-      :placeholder="value === null ? 'Пустое значение (null)' : 'Укажите число'"
+      :placeholder="value === null ? t('settings.emptyValueNull') : t('settings.enterANumber')"
       @update:model-value="choose"
     />
     <UiInput
@@ -42,7 +42,7 @@
       :aria-label="field.label"
       :minlength="field.constraints.minLength"
       :maxlength="field.constraints.maxLength"
-      :placeholder="value === null ? 'Пустое значение (null)' : ''"
+      :placeholder="value === null ? t('settings.emptyValueNull') : ''"
       @update:model-value="choose"
     />
     <UiButton
@@ -50,19 +50,21 @@
       :disabled="disabled"
       @click="choose(null)"
     >
-      Задать пустое значение (null)
+      {{ t('settings.setEmptyValueNull') }}
     </UiButton>
     <UiButton
       v-if="field.kind === 'string' && value === null"
       :disabled="disabled"
       @click="choose('')"
     >
-      Задать пустую строку
+      {{ t('settings.setEmptyString') }}
     </UiButton>
   </div>
 </template>
 
 <script setup lang="ts">
+import { t } from '../../../ui.ts';
+
 import { computed } from 'vue';
 import { UiSwitch, UiSelect, UiNumberInput, UiInput, UiButton } from '../../../ui.ts';
 import type { JsonValue, ProviderSettingNode } from '../../../../../shared/chat/providerSettingsContracts.ts';
@@ -98,9 +100,9 @@ function select(value: unknown): void {
  * Placeholder не является значением и не создаёт set или unset.
  */
 function describe(value: JsonValue): string {
-  return value === null ? 'Пустое значение (null)' : typeof value === 'string'
+  return value === null ? t('settings.emptyValueNull') : typeof value === 'string'
     ? choices.value.some((choice) => typeof choice !== 'string') ? JSON.stringify(value) : value
-    : typeof value === 'boolean' ? value ? 'Да (true)' : 'Нет (false)' : String(value);
+    : typeof value === 'boolean' ? value ? t('settings.yesTrue') : t('settings.noFalse') : String(value);
 }
 </script>
 

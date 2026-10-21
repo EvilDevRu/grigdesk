@@ -4,21 +4,21 @@
     :data-system-page="settings.pageId"
     :data-ready="ready"
   >
-    <p v-if="error" role="alert">{{ error }}</p>
-    <p v-if="message" role="status">{{ message }}</p>
+    <p v-if="error" role="alert">{{ resolveUiText(error) }}</p>
+    <p v-if="message" role="status">{{ resolveUiText(message) }}</p>
     <template v-if="settings.pageId === 'system.startup'">
-      <SettingsSection heading="Процесс GrigDesk" description="Текущее состояние сервера на этой машине.">
+      <SettingsSection :heading="t('settings.sectionGrigdeskProcess')" :description="t('settings.currentServerStatusOnThisMachine')">
         <dl v-if="server" class="settings-system-facts">
-          <div><dt>Режим работы</dt><dd>{{ serverText.pill }}</dd></div>
-          <div><dt>Время работы</dt><dd>{{ uptime }}</dd></div>
-          <div><dt>Процесс</dt><dd>PID {{ server.pid }}</dd></div>
+          <div><dt>{{ t('settings.runtimeMode') }}</dt><dd>{{ serverText.pill }}</dd></div>
+          <div><dt>{{ t('settings.uptime') }}</dt><dd>{{ uptime }}</dd></div>
+          <div><dt>{{ t('settings.process') }}</dt><dd>PID {{ server.pid }}</dd></div>
         </dl>
         <p v-if="serverText.hint">{{ serverText.hint }}</p>
-        <UiButton :disabled="busy || !server" @click="restart">Перезапустить сервер</UiButton>
+        <UiButton :disabled="busy || !server" @click="restart">{{ t('settings.restartServer') }}</UiButton>
       </SettingsSection>
-      <SettingsSection heading="Автозапуск">
-        <SettingsScope scope="Эта машина">
-          Автозапуск применяется по «Применить», живой процесс продолжает работу.
+      <SettingsSection :heading="t('settings.sectionAutomaticStartup')">
+        <SettingsScope :scope="t('settings.thisMachine')">
+          {{ t('settings.autostartIsSavedWithApplyTheLive') }}
         </SettingsScope>
         <SettingsField
           v-for="field in startupFields"
@@ -36,28 +36,28 @@
           <div class="settings-autostart-note">
             <p>{{ autostartNote }}</p>
             <p v-if="server?.mode === 'desktop'">
-              Сервером управляет приложение. Переключатель касается юнита.
+              {{ t('settings.theApplicationManagesTheServerTheSwitch') }}
             </p>
-            <p v-else-if="server && !server.systemd">Сервер запущен вручную. Переключатель касается юнита.</p>
+            <p v-else-if="server && !server.systemd">{{ t('settings.theServerWasStartedManuallyTheSwitch') }}</p>
           </div>
         </template>
       </SettingsSection>
       <template v-if="launcher">
         <SettingsSection
-          heading="Ярлык приложения"
-          description="Быстрый доступ с рабочего стола и из меню приложений."
+          :heading="t('settings.sectionApplicationShortcut')"
+          :description="t('settings.quickAccessFromTheDesktopAndApplication')"
         >
-          <p>Ярлык: {{ shortcutLabel }}</p>
+          <p>{{ t('settings.shortcut') }} {{ shortcutLabel }}</p>
           <UiButton :disabled="busy || (!shortcutPresent && !launcher.shortcut.desktopDir)" @click="shortcut">
-            {{ shortcutPresent ? 'Убрать ярлык' : 'Создать ярлык' }}
+            {{ shortcutPresent ? t('settings.removeShortcut') : t('settings.createShortcut') }}
           </UiButton>
         </SettingsSection>
       </template>
     </template>
     <template v-else>
       <SettingsSection
-        heading="Версия GrigDesk"
-        description="Установленная версия, стабильный канал и проверка обновлений."
+        :heading="t('settings.sectionGrigdeskVersion')"
+        :description="t('settings.installedVersionStableChannelAndUpdateCheck')"
       >
         <PackagedServerVersion
           v-if="packageCapability"
@@ -66,70 +66,68 @@
           :message="packageCapability.message"
         />
         <template v-else-if="release">
-          <p>Запущено: {{ release.running.version }} · {{ shortSha(release.running.sha) }}</p>
+          <p>{{ t('settings.running2') }} {{ release.running.version }} · {{ shortSha(release.running.sha) }}</p>
           <p>
-            Checkout: {{ release.checkout.version }} · {{ shortSha(release.checkout.sha) }} ·
+            {{ t('settings.checkoutLabel') }} {{ release.checkout.version }} · {{ shortSha(release.checkout.sha) }} ·
             {{ release.checkout.branch || 'detached HEAD' }}
-            <span v-if="release.checkout.dirty">· Есть изменения</span>
+            <span v-if="release.checkout.dirty">{{ t('settings.hasChanges2') }}</span>
           </p>
-          <p>Интерфейс приложения: {{ buildVersion }} · {{ shortSha(buildSha) }}</p>
+          <p>{{ t('settings.applicationInterface') }} {{ buildVersion }} · {{ shortSha(buildSha) }}</p>
           <p v-if="release.latest">
-            Стабильный канал: {{ release.latest.tag }} · {{ shortSha(release.latest.sha) }}
+            {{ t('settings.stableChannel') }} {{ release.latest.tag }} · {{ shortSha(release.latest.sha) }}
             <UiActionLink
               v-if="release.latest.url"
               :href="release.latest.url"
               target="_blank"
             >
-              Что изменилось
+              {{ t('settings.whatSChanged') }}
             </UiActionLink>
           </p>
-          <p v-else>Релизы пока не найдены</p>
-          <p>Последняя проверка: {{ release.checkedAt || 'Ещё не проверялось' }}</p>
+          <p v-else>{{ t('settings.noReleasesFoundYet') }}</p>
+          <p>{{ t('settings.lastCheck') }} {{ release.checkedAt || t('settings.notCheckedYet') }}</p>
           <p v-if="release.checkError">
-            {{ release.checkError.message }} Последний успешный результат сохранён.
+            {{ release.checkError.message }} {{ t('settings.lastSuccessfulResultSaved') }}
           </p>
           <p v-if="release.checkoutChanged">
-            Checkout изменился после запуска.
-            Примените локальные изменения, чтобы сервер использовал новый код.
+            {{ t('settings.checkoutChangedAfterStartupApplyLocalChanges') }}
           </p>
-          <p>Интерфейс приложения обновляется установкой нового пакета.</p>
+          <p>{{ t('settings.theApplicationInterfaceIsUpdatedByInstalling') }}</p>
           <p v-if="release.job">
-            {{ stageLabel }} · {{ release.job.kind === 'update' ? 'Релиз' : 'Локальный checkout' }} ·
+            {{ stageLabel }} · {{ release.job.kind === 'update' ? t('settings.release2') : t('settings.localCheckout') }} ·
             {{ shortSha(release.job.targetSha) }}
             <span v-if="release.job.error">{{ release.job.error.message }}</span>
           </p>
           <div class="settings-system-actions">
             <UiButton :disabled="updates.checking || updates.active || busy" @click="updates.check()">
-              Проверить обновления
+              {{ t('settings.checkForUpdates') }}
             </UiButton>
             <UiButton
               :disabled="!release.canApplyCheckout || updates.actionBusy || busy"
               @click="update('apply')"
             >
-              Применить локальные изменения
+              {{ t('settings.applyLocalChanges') }}
             </UiButton>
             <UiButton
               v-if="release.latest"
               :disabled="!release.canInstallRelease || updates.actionBusy || busy"
               @click="update('update')"
             >
-              Обновить до {{ release.latest.tag }}
+              {{ t('settings.updateTo') }} {{ release.latest.tag }}
             </UiButton>
           </div>
           <p v-for="reason in release.applyBlockReasons" :key="`apply:${reason}`">
-            Локальное применение: {{ blockReasonLabel(reason) }}
+            {{ t('settings.localApplication') }} {{ blockReasonLabel(reason, uiLocale) }}
           </p>
           <p v-for="reason in release.installBlockReasons" :key="`install:${reason}`">
-            Установка релиза: {{ blockReasonLabel(reason) }}
+            {{ t('settings.releaseInstallation') }} {{ blockReasonLabel(reason, uiLocale) }}
           </p>
         </template>
         <p v-if="updates.error" role="alert">{{ updates.error }}</p>
       </SettingsSection>
-      <SettingsSection v-if="!packageCapability" heading="Сборка интерфейса">
-        <UiButton :disabled="busy || updates.active" @click="rebuild">Пересобрать web-бандл</UiButton>
+      <SettingsSection v-if="!packageCapability" :heading="t('settings.sectionInterfaceBuild')">
+        <UiButton :disabled="busy || updates.active" @click="rebuild">{{ t('settings.rebuildWebBundle') }}</UiButton>
         <p>
-          Сборка из рабочего дерева включает незакоммиченные правки. Состояние задания перечитывается при
-          возвращении на страницу.
+          {{ t('settings.buildingFromTheWorkingTreeIncludesUncommitted') }}
         </p>
       </SettingsSection>
     </template>
@@ -137,6 +135,8 @@
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale, messageRef, resolveUiText, type UiText } from '../../../ui.ts';
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import SettingsSection from '../SettingsSection.vue';
 import SettingsScope from '../SettingsScope.vue';
@@ -144,9 +144,9 @@ import { UiSwitch, UiButton, UiActionLink, confirmDialog } from '../../../ui.ts'
 import { api, ApiError, failureText } from '../../../shared/apiClient.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
 import { useGrigDeskUpdateStore } from '../../../stores/grigdesk-update.js';
-import { serverModeText } from '../serverMode.ts';
+import { serverModeText, serverRestartMessage } from '../serverMode.ts';
 import { blockReasonLabel, UPDATE_STAGE_LABELS } from '../../../shared/grigdesk-update.js';
-import { SETTINGS_FIELDS } from '../../../features/settings/catalog.ts';
+import { getSettingsFields } from '../../../features/settings/catalog.ts';
 import { createAutostartResource } from '../../../features/settings/resources/startup.ts';
 import { sseSubscribe } from '../../../composables/useSse.ts';
 import type { LauncherState } from '../../../../../shared/runtime/launcherContracts.ts';
@@ -171,13 +171,14 @@ const updates = useGrigDeskUpdateStore();
 const server = ref<ServerView | null>(null);
 const launcher = ref<LauncherState | null>(null);
 const ready = ref(false);
-const error = ref('');
-const message = ref('');
+const error = ref<UiText>('');
+const message = ref<UiText>('');
 const busy = ref(false);
 const controller = new AbortController();
 const opening = settings.snapshot.sessionId;
-const startupFields = SETTINGS_FIELDS.filter((field) => field.resourceId === 'autostart');
-const serverText = computed(() => serverModeText(server.value));
+const startupFields = computed(() => getSettingsFields(uiLocale.value)
+  .filter((field) => field.resourceId === 'autostart'));
+const serverText = computed(() => serverModeText(server.value, uiLocale));
 const release = computed(() => updates.status as ReleaseStatus | null);
 const packageCapability = computed(() => {
   const capability = release.value?.updateCapability;
@@ -196,28 +197,29 @@ const autostartValue = computed(() => {
 });
 const shortcutPresent = computed(() => launcher.value?.shortcut.desktop || launcher.value?.shortcut.menu);
 const shortcutLabel = computed(() => launcher.value?.shortcut.desktop && launcher.value.shortcut.menu
-  ? 'На рабочем столе и в меню приложений' : launcher.value?.shortcut.desktop ? 'На рабочем столе'
-    : launcher.value?.shortcut.menu ? 'В меню приложений' : 'Не создан');
+  ? t('settings.onDesktopAndInApplicationMenu') : launcher.value?.shortcut.desktop ? t('settings.onDesktop')
+    : launcher.value?.shortcut.menu ? t('settings.inApplicationMenu') : t('settings.notCreated'));
 const uptime = computed(() => {
   const seconds = server.value?.uptimeSec ?? 0;
 
-  return seconds >= 86400 ? `${Math.floor(seconds / 86400)} дн`
-    : seconds >= 3600 ? `${Math.floor(seconds / 3600)} ч`
-      : seconds >= 60 ? `${Math.floor(seconds / 60)} мин` : `${seconds} с`;
+  return seconds >= 86400 ? t('settings.d', { value1: Math.floor(seconds / 86400) })
+    : seconds >= 3600 ? t('settings.h', { value1: Math.floor(seconds / 3600) })
+      : seconds >= 60
+      ? t('settings.min2', { value1: Math.floor(seconds / 60) }) : t('settings.s', { seconds });
 });
 const autostartNote = computed(() => {
   const state = launcher.value?.autostart;
 
   if (!state || state.unit === 'missing') {
-    return 'Юнит systemd не установлен. Автозапуск недоступен.';
+    return t('settings.theSystemdUnitIsNotInstalledAutostart');
   }
   if (state.unit === 'disabled') {
-    return 'Автозапуск выключен. После перезагрузки сервер можно открыть ярлыком или вручную.';
+    return t('settings.autostartIsDisabledAfterRebootOpenThe');
   }
 
-  return state.linger === true ? 'Сервер стартует при включении машины, до входа в систему.'
-    : state.linger === false ? 'Только при входе в систему. Для старта раньше нужен loginctl enable-linger.'
-      : 'Автозапуск включён; logind не сообщил, возможен ли старт до входа.';
+  return state.linger === true ? t('settings.theServerStartsWhenTheMachineTurns')
+    : state.linger === false ? t('settings.onlyOnLoginEarlierStartupRequiresLoginctl')
+      : t('settings.autostartIsEnabledLogindDidNotReport');
 });
 
 function current(): boolean {
@@ -287,11 +289,14 @@ async function restart(): Promise<void> {
   try {
     const active = await activeTurns();
     const warning = active
-      ? ` Сейчас идут ходы агентов: ${active}; незавершённая работа может прерваться.` : '';
-    const text = `Перезапустить сервер GrigDesk? ${serverText.value.restartConfirm}${warning}`;
+      ? messageRef('settings.agentTurnsAreRunningUnfinishedWorkMay', { active }) : '';
+    const text = messageRef('settings.restartTheGrigDeskServer', {
+      serverTextValueRestartConfirm: serverRestartMessage(server.value),
+      warning,
+    });
     const accepted = await confirmDialog(text, {
       danger: active > 0,
-      okText: 'Перезапустить',
+      okText: messageRef('settings.restart'),
     });
 
     if (!accepted || !current()) {
@@ -317,7 +322,7 @@ async function restart(): Promise<void> {
       try {
         await api.get('/api/auth/state', { signal: controller.signal });
         await readServer();
-        message.value = 'Сервер снова доступен.';
+        message.value = messageRef('settings.theServerIsAvailableAgain');
 
         return;
       } catch {
@@ -326,7 +331,7 @@ async function restart(): Promise<void> {
     }
 
     if (current()) {
-      error.value = 'Сервер не вернулся за 60 секунд. Проверьте журнал сервера.';
+      error.value = messageRef('settings.theServerDidNotReturnWithinSeconds');
     }
   } finally {
     busy.value = false;
@@ -350,7 +355,7 @@ async function shortcut(): Promise<void> {
 
     if (current()) {
       launcher.value = { ...launcher.value, shortcut: result.shortcut };
-      message.value = 'Ярлык обновлён.';
+      message.value = messageRef('settings.shortcutUpdated');
     }
   } catch (cause) {
     error.value = failureText(cause);
@@ -375,12 +380,20 @@ async function update(kind: 'apply' | 'update'): Promise<void> {
 
   try {
     const active = await activeTurns();
-    const target = kind === 'apply' ? `текущий checkout ${status.checkout.branch || 'detached HEAD'} · `
-      + shortSha(status.checkout.sha) : `релиз ${status.latest?.tag} · ${shortSha(status.latest?.sha)}`;
-    const accepted = await confirmDialog(`Применить ${target}? GrigDesk ненадолго станет недоступен.`
-      + (active ? ` Сейчас идут ходы агентов: ${active}; их работа может прерваться.` : ''), {
+    const target = kind === 'apply'
+      ? messageRef('settings.checkoutUpdateTarget', {
+        value1: status.checkout.branch || 'detached HEAD',
+        sha: shortSha(status.checkout.sha),
+      })
+      : messageRef('settings.release', {
+        statusLatestTag: status.latest?.tag,
+        value2: shortSha(status.latest?.sha),
+      });
+    const warning = active ? messageRef('settings.agentTurnsAreRunningTheirWorkMay', { active }) : '';
+    const text = messageRef('settings.serverUpdateConfirmation', { target, warning });
+    const accepted = await confirmDialog(text, {
       danger: active > 0,
-      okText: kind === 'apply' ? 'Применить checkout' : 'Обновить',
+      okText: kind === 'apply' ? messageRef('settings.applyCheckout') : messageRef('settings.update'),
     });
 
     if (accepted && current()) {
@@ -413,10 +426,10 @@ async function pollRebuild(): Promise<void> {
       }
       if (result.rebuild?.status !== 'running') {
         message.value = result.rebuild?.status === 'done'
-          ? 'Рабочая сборка готова. Интерфейс приложения обновляется установкой нового пакета.'
+          ? messageRef('settings.developmentBuildIsReadyTheApplicationInterface')
           : result.rebuild?.status === 'failed'
-            ? result.rebuild.error?.message || 'Пересборка завершилась ошибкой.'
-            : 'Нет выполняемой пересборки.';
+            ? result.rebuild.error?.message || messageRef('settings.theRebuildFailed')
+            : messageRef('settings.noRebuildIsRunning');
 
         return;
       }
@@ -431,8 +444,7 @@ async function pollRebuild(): Promise<void> {
   }
 
   if (current()) {
-    error.value = 'Статус неизвестен: пересборка не подтвердила завершение за 12 минут. '
-      + 'Проверьте журнал сервера.';
+    error.value = messageRef('settings.webRebuildTimeout');
   }
 }
 
@@ -448,8 +460,9 @@ async function rebuild(): Promise<void> {
   busy.value = true;
 
   try {
-    const accepted = await confirmDialog('Пересобрать web-бандл из текущего рабочего дерева? '
-      + 'В сборку попадут и незакоммиченные правки.', { okText: 'Пересобрать' });
+    const accepted = await confirmDialog(messageRef('settings.webRebuildConfirmation'), {
+      okText: messageRef('settings.rebuild'),
+    });
 
     if (accepted && current()) {
       await api.post('/api/system/web-rebuild');
@@ -475,9 +488,10 @@ async function load(): Promise<void> {
     if (settings.pageId === 'system.startup') {
       await readServer();
 
-      const resource = settings.sessionService('autostart-resource', () => createAutostartResource(api));
+      const resource = settings.sessionService('autostart-resource',
+    () => createAutostartResource(api, uiLocale));
 
-      settings.registerResource(resource.adapter, startupFields);
+      settings.registerResource(resource.adapter, startupFields.value);
       await settings.loadResource('autostart');
       launcher.value = resource.view();
     } else {
@@ -503,7 +517,8 @@ const unsubscribe = sseSubscribe((name) => {
 });
 
 watch(() => settings.snapshot.lastResult, () => {
-  const resource = settings.sessionService('autostart-resource', () => createAutostartResource(api));
+  const resource = settings.sessionService('autostart-resource',
+    () => createAutostartResource(api, uiLocale));
 
   launcher.value = resource.view();
 });

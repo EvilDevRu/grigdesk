@@ -1,3 +1,5 @@
+import { localeMessage, localeTranslator, type LocaleSource } from '../../../../../shared/i18n/catalogs.ts';
+import { translate as t } from '../../../../../shared/i18n/catalogs.ts';
 import { isPlainRecord } from '../../../../../shared/lib/objects.ts';
 import { diagnosticLevel, type DiagnosticLevel } from '../../../../../shared/web-log/diagnosticLogging.ts';
 import type { ApiClient } from '../../../shared/apiClient.ts';
@@ -14,9 +16,14 @@ export interface DiagnosticView {
  * Настроенный уровень и действующий уровень различаются при внешнем переопределении.
  * Некорректное подтверждение не выдаётся за сохранённый выбор человека.
  */
-function diagnosticView(payload: unknown): DiagnosticView {
+function diagnosticView(payload: unknown,
+  locale: LocaleSource = 'ru',
+): DiagnosticView {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   if (!isPlainRecord(payload)) {
-    throw new TypeError('Некорректный ответ диагностики');
+    throw new TypeError(t("settings.invalidDiagnosticsResponse"));
   }
 
   const effective = diagnosticLevel(payload.effective);
@@ -24,7 +31,7 @@ function diagnosticView(payload: unknown): DiagnosticView {
 
   if (!effective || !level || typeof payload.source !== 'string'
       || typeof payload.expiresAt !== 'number') {
-    throw new TypeError('Некорректный ответ диагностики');
+    throw new TypeError(t("settings.invalidDiagnosticsResponse"));
   }
 
   return {
@@ -42,7 +49,12 @@ function diagnosticView(payload: unknown): DiagnosticView {
 export function createFactoryDebugAdapter(
   client: Pick<ApiClient, 'get' | 'post'>,
   onView: (view: DiagnosticView) => void,
+  locale: LocaleSource = 'ru',
+
 ): ResourceAdapter {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   let version = 0;
 
   return {
@@ -57,10 +69,11 @@ export function createFactoryDebugAdapter(
      */
     async read(signal) {
       const request = ++version;
-      const view = diagnosticView(await client.get('/api/settings/factory-debug?scope=global', { signal }));
+      const payload = await client.get('/api/settings/factory-debug?scope=global', { signal });
+      const view = diagnosticView(payload, locale);
 
       if (version !== request) {
-        throw new DOMException('Устаревшее чтение диагностики', 'AbortError');
+        throw new DOMException(t("settings.staleDiagnosticsRead"), 'AbortError');
       }
 
       onView(view);
@@ -71,7 +84,7 @@ export function createFactoryDebugAdapter(
       const intent = intents.get('level');
 
       return intent?.op === 'set' && diagnosticLevel(intent.value) === null
-        ? [{ key: 'level', message: 'Неизвестный уровень диагностики' }] : [];
+        ? [{ key: 'level', message: messageText("settings.unknownDiagnosticLevel") }] : [];
     },
     /**
      * Тело записи содержит только выбранный уровень и явную глобальную область.
@@ -85,7 +98,7 @@ export function createFactoryDebugAdapter(
       const view = diagnosticView(await client.post('/api/settings/factory-debug', {
         scope: 'global',
         level: intent?.op === 'set' ? intent.value : 'off',
-      }, { signal }));
+      }, { signal }), locale);
 
       onView(view);
 

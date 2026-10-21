@@ -1,3 +1,5 @@
+import { locales, localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { resolveLocale } from '../../../shared/i18n/core.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { API_VERSION } from '../../../shared/client/apiVersion.ts';
 import type { ApiVersion, MachineProfile, ShellState } from '../../../shared/client/clientShell.ts';
@@ -22,6 +24,9 @@ export interface NativeWindows {
 interface ShellOptions {
   nativeWindows?: NativeWindows;
   profiles: Profiles;
+  systemLanguage?: string;
+  saveLocale?(): Promise<void>;
+  onLocale?(preference: string): void;
   pairing: { addByPairing(text: string): Promise<DesktopProfile> };
   appApi?: ApiVersion;
   localAvailable(): boolean;
@@ -38,14 +43,15 @@ interface ShellOptions {
  * JSON управления ограничен отдельно от прикладных потоков и загрузок файлов.
  * Ошибка не включает строку привязки или другое содержимое запроса.
  */
-async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function readBody(req: IncomingMessage, locale: string): Promise<Record<string, unknown>> {
+  const t = localeTranslator(locale);
   let text = '';
 
   for await (const chunk of req) {
     text += String(chunk);
 
     if (text.length > 65536) {
-      throw new Error('Слишком большой запрос.');
+      throw new Error(t('desktop.shellRequestTooLarge'));
     }
   }
 
@@ -73,6 +79,7 @@ export function createShellApi(options: ShellOptions) {
     return () => clearTimeout(timer);
   });
   let rev = 0;
+  let localeQueue = Promise.resolve();
   let closed = false;
 
   const changed = () => {
@@ -100,6 +107,12 @@ export function createShellApi(options: ShellOptions) {
 
     return {
       rev,
+      ...(options.systemLanguage === undefined ? {} : {
+        locale: {
+          preference: options.profiles.settings.uiLanguage ?? 'system',
+          systemLanguage: options.systemLanguage,
+        },
+      }),
       profile: selected ? publicProfile(selected) : null,
       profiles: options.profiles.settings.profiles.map(publicProfile),
       status: connection?.status || (selected ? 'offline' : 'none'),
@@ -293,6 +306,9 @@ export function createShellApi(options: ShellOptions) {
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url || '/', 'http://pipe');
     const pathname = url.pathname;
+    const locale = options.systemLanguage === undefined ? 'ru'
+      : resolveLocale(options.profiles.settings.uiLanguage, options.systemLanguage, locales);
+    const t = localeTranslator(locale);
 
     try {
       if (req.method === 'GET' && pathname === '/__shell/state') {
@@ -305,7 +321,39 @@ export function createShellApi(options: ShellOptions) {
         return;
       }
 
-      const body = await readBody(req);
+      const body = await readBody(req, locale);
+
+      if (req.method === 'POST' && pathname === '/__shell/locale') {
+        const preference = body.preference;
+
+        if (Object.keys(body).length !== 1 || typeof preference !== 'string'
+          || (preference !== 'system' && !locales.some((item) => item.id === preference))) {
+          throw new Error(t('desktop.shellInvalidLanguage'));
+        }
+
+        const save = localeQueue.catch(() => {}).then(async () => {
+          const previous = options.profiles.settings.uiLanguage;
+
+          options.profiles.settings.uiLanguage = preference;
+
+          try {
+            await options.saveLocale?.();
+          } catch (error) {
+            options.profiles.settings.uiLanguage = previous;
+
+            throw error;
+          }
+
+          options.onLocale?.(preference);
+          changed();
+        });
+
+        localeQueue = save;
+        await save;
+        json(res, 200, state());
+
+        return;
+      }
 
       if (req.method === 'POST' && pathname.startsWith('/__shell/surfaces/')) {
         if (!options.nativeWindows) {
@@ -349,7 +397,7 @@ export function createShellApi(options: ShellOptions) {
         } else if (typeof body.pairing === 'string') {
           profile = await options.pairing.addByPairing(body.pairing);
         } else {
-          throw new Error('Добавьте машину по строке привязки.');
+          throw new Error(t('desktop.shellPairingRequired'));
         }
 
         if (profile.id === options.profiles.settings.selected) {
@@ -377,16 +425,16 @@ export function createShellApi(options: ShellOptions) {
         const updated = normalizeProfile({ ...profile, ...body });
 
         if (!updated || Object.keys(body).some((key) => !['name', 'address'].includes(key))) {
-          throw new Error('Неверное имя или адрес машины.');
+          throw new Error(t('desktop.shellInvalidMachineAddress'));
         }
 
         if (updated.address !== profile.address) {
           if (updated.kind === 'local' && !localOrigin(updated.address)) {
-            throw new Error('Неверный местный адрес.');
+            throw new Error(t('desktop.shellInvalidLocalAddress'));
           }
 
           if (updated.kind === 'remote' && !options.verifyAddress) {
-            throw new Error('Проверка новой машины недоступна.');
+            throw new Error(t('desktop.shellAddressCheckUnavailable'));
           }
 
           await options.verifyAddress?.(updated);

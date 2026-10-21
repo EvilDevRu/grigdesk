@@ -1,3 +1,7 @@
+import {
+  localeMessage, localeTranslator, messages, translator, type LocaleSource,
+} from '../../../../../shared/i18n/catalogs.ts';
+import { translate as t } from '../../../../../shared/i18n/catalogs.ts';
 import { isPlainRecord } from '../../../../../shared/lib/objects.ts';
 import type { ApiClient } from '../../../shared/apiClient.ts';
 import type { JsonValue, ResourceAdapter } from '../contracts.ts';
@@ -30,6 +34,24 @@ export const GRIGDESK_DICTIONARY = [
   'GrigDesk', 'конвейер', 'worktree', 'песочница', 'ворота', 'Битрикс24',
   'Fastify', 'Pinia', 'SSE', 'Codex', 'Kimi',
 ].join('\n');
+
+/**
+ * Названия собственных проверок получают язык UI отдельно от результата диагностики.
+ * Пути, неизвестные проверки и серверные fix/reason остаются исходными данными.
+ */
+export function speechCheckName(name: string, locale: LocaleSource = 'ru'): string {
+  const id = typeof locale === 'string' ? locale : locale.value;
+  const key = Object.entries(messages.ru.settings.speechChecks)
+    .find(([, original]) => original === name)?.[0];
+
+  if (key) {
+    return translator.t(id, `settings.speechChecks.${key}`, {}, name);
+  }
+
+  const modelId = SPEECH_MODELS.find((modelId) => name === t('settings.speechCheckModel', { modelId }));
+
+  return modelId ? translator.t(id, 'settings.speechCheckModel', { modelId }) : name;
+}
 
 export interface SpeechModel {
   modelId: string;
@@ -163,7 +185,12 @@ function capabilities(value: unknown, previous: SpeechCapabilities): SpeechCapab
 export function createSpeechResource(
   client: Pick<ApiClient, 'get' | 'post'>,
   onSnapshot: (snapshot: SpeechSnapshot) => void = () => {},
+  locale: LocaleSource = 'ru',
+
 ) {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   let current: SpeechSnapshot = {
     values: structuredClone(SPEECH_DEFAULTS),
     revision: '',
@@ -180,7 +207,7 @@ export function createSpeechResource(
    */
   function decode(payload: unknown) {
     if (!isPlainRecord(payload)) {
-      throw new TypeError('Некорректный снимок речи');
+      throw new TypeError(t("settings.invalidSpeechSnapshot"));
     }
 
     const raw = isPlainRecord(payload.settings) ? payload.settings
@@ -284,7 +311,7 @@ export function createSpeechResource(
     read: async (signal) => (await refresh(signal) ?? current).values,
     validate: (intents) => [...intents].flatMap(([key, intent]) =>
       intent.op !== 'set' || !Object.hasOwn(SPEECH_DEFAULTS, key) || !validSpeechValue(key, intent.value)
-        ? [{ key, message: 'Проверьте значение и допустимый диапазон параметра речи' }] : []),
+        ? [{ key, message: messageText("settings.checkTheValueAndAllowedRangeOf") }] : []),
     /**
      * Patch строится только из изменённых редактируемых полей, без capabilities и consent.
      * Старый ответ записи после внешнего снимка оставляет ввод и требует разрешить конфликт.
@@ -299,7 +326,7 @@ export function createSpeechResource(
       if (epoch !== context.epoch && decoded.snapshot.revision !== current.revision) {
         return {
           status: 'conflict',
-          message: 'Настройки речи изменились снаружи; проверьте неприменённые поля',
+          message: messageText("settings.speechSettingsChangedExternallyCheckUnappliedFields"),
           fields: [...intents.keys()].map((key) => ({ key, status: 'conflict' })),
         };
       }

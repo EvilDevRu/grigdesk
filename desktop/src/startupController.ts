@@ -1,3 +1,5 @@
+import { desktopText } from './locale.ts';
+
 export const SPLASH_MINIMUM_MS = 2000;
 export const STARTUP_DEADLINE_MS = 90_000;
 export const FRAME_LIMIT_MS = 1500;
@@ -43,7 +45,7 @@ export interface FrameTracker {
  * Причина сигнала сохраняется, если вызывающий код её задал.
  */
 function abortError(signal: AbortSignal): unknown {
-  return signal.reason ?? new Error('Старт окна отменён.');
+  return signal.reason ?? new Error(desktopText('desktop.windowStartAborted'));
 }
 
 /**

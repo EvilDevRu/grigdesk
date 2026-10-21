@@ -23,10 +23,10 @@
             </svg>
           </span>
           <div class="install-head-copy">
-            <p>Плагины GrigDesk</p>
+            <p>{{ t('settings.grigdeskPlugins') }}</p>
             <h2 class="install-heading" data-role="install-heading">{{ heading }}</h2>
           </div>
-          <UiIconButton label="Закрыть окно установки" @click="onOpenChange(false)">
+          <UiIconButton :label="t('settings.closeInstallationWindow')" @click="onOpenChange(false)">
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -38,9 +38,9 @@
             </svg>
           </UiIconButton>
         </div>
-        <ol class="install-steps" aria-label="Этапы установки">
+        <ol class="install-steps" :aria-label="t('settings.installationSteps')">
           <li
-            v-for="(step, index) in ['Источник', 'Проверка', 'Установка']"
+            v-for="(step, index) in [t('settings.source'), t('settings.verification'), t('settings.installation')]"
             :key="step"
             :data-current="activeStep === index && !completed"
             :data-complete="completed || activeStep > index"
@@ -98,7 +98,7 @@
           @submit.prevent="findVersions"
         >
           <template v-if="mode === 'install'">
-            <UiField id="plugin-install-url" label="Адрес репозитория">
+            <UiField id="plugin-install-url" :label="t('settings.repositoryAddress')">
               <div class="install-repository-input">
                 <UiInput
                   v-model="url"
@@ -112,39 +112,39 @@
                   data-role="install-find"
                   :disabled="locked || !url.trim() || store.versionsLoading"
                   :loading="store.versionsLoading"
-                  loading-label="Ищем версии"
+                  :loading-label="t('settings.lookingForVersions')"
                   @click="findVersions"
                 >
-                  Найти версии
+                  {{ t('settings.findVersions') }}
                 </UiButton>
               </div>
             </UiField>
           </template>
           <template v-else-if="plugin?.install">
             <p class="install-current-version">
-              Установлена v{{ plugin.install.version }} из
+              {{ t('settings.installedV') }}{{ plugin.install.version }} {{ t('settings.from') }}
               <span>{{ plugin.install.source.url }}</span>
             </p>
             <template v-if="plugin.install.localChanges">
-              <UiInlineMessage tone="warning">В установленной копии есть ручные правки.</UiInlineMessage>
+              <UiInlineMessage tone="warning">{{ t('settings.theInstalledCopyHasManualChanges') }}</UiInlineMessage>
               <UiCheckbox
                 v-model="replaceModified"
                 data-role="install-replace-modified"
                 :disabled="locked"
               >
-                Отложить правки в резерв и поставить версию начисто
+                {{ t('settings.backUpChangesAndInstallAClean') }}
               </UiCheckbox>
             </template>
           </template>
           <div class="install-version-block" :aria-busy="store.versionsLoading">
-            <UiField id="plugin-install-version" label="Версия">
+            <UiField id="plugin-install-version" :label="t('settings.version')">
               <UiSelect
                 v-model="selectedVersion"
                 data-role="install-version"
                 aria-describedby="plugin-install-version-status"
                 :disabled="locked || store.versionsLoading || !store.versions.length"
               >
-                <option value="">— выберите версию —</option>
+                <option value="">{{ t('settings.selectAVersion') }}</option>
                 <option
                   v-for="version in store.versions"
                   :key="version.tag"
@@ -161,18 +161,18 @@
             >
               <p v-if="store.versionsLoading" class="install-loading-label">
                 <UiSpinner decorative />
-                Ищем версии в репозитории…
+                {{ t('settings.lookingForVersionsInTheRepository') }}
               </p>
               <UiInlineMessage v-else-if="store.versionsError" tone="danger">
                 {{ store.versionsError }}
               </UiInlineMessage>
               <p v-else-if="store.versionsUrl && !store.versions.length">
-                В источнике нет тегов вида vX.Y.Z.
+                {{ t('settings.theSourceHasNoVXYZ') }}
               </p>
               <p v-else-if="store.versions.length">
-                Выберите релиз. По умолчанию выбрана самая новая версия.
+                {{ t('settings.selectAReleaseTheLatestVersionIs') }}
               </p>
-              <p v-else>Укажите адрес и нажмите «Найти версии».</p>
+              <p v-else>{{ t('settings.enterTheAddressAndClickFindVersions') }}</p>
             </div>
             <UiButton
               v-if="mode === 'update'"
@@ -180,20 +180,19 @@
               :loading="store.versionsLoading"
               @click="findVersions"
             >
-              Обновить список версий
+              {{ t('settings.refreshVersionList') }}
             </UiButton>
           </div>
           <template v-if="mode === 'install'">
             <UiDisclosureButton v-model:open="sourceHelpOpen" controls="plugin-install-source-help">
-              SSH и приватные репозитории
+              {{ t('settings.sshAndPrivateRepositories') }}
             </UiDisclosureButton>
             <p
               v-if="sourceHelpOpen"
               id="plugin-install-source-help"
               class="install-source-help"
             >
-              Поддерживаются https://…, ssh://…, git@хост:путь и file:///путь. Для приватного репозитория
-              настройте доступ Git на машине, где запущен GrigDesk.
+              {{ t('settings.httpsSshGitHostPathAndFile') }}
             </p>
           </template>
         </form>
@@ -212,7 +211,7 @@
             data-role="install-stages"
           >
             <li
-              v-for="row in installStageRows(store.job)"
+              v-for="row in installStageRows(store.job, uiLocale)"
               :key="row.id"
               :data-stage="row.id"
               :data-state="row.state"
@@ -222,14 +221,14 @@
                 <template v-else>{{ row.state === 'done' ? '✓' : '·' }}</template>
               </span>
               {{ row.label }}
-              <span class="install-stage-status">{{ row.state === 'done' ? 'Готово' : '' }}</span>
+              <span class="install-stage-status">{{ row.state === 'done' ? t('settings.done') : '' }}</span>
             </li>
           </ol>
           <div class="install-progress-area">
             <UiProgress
               v-if="progress"
               data-role="install-progress"
-              label="Ход установки"
+              :label="t('settings.installationProgress')"
               :value="progress.value"
               :indeterminate="progress.indeterminate"
             />
@@ -245,9 +244,9 @@
             </div>
             <p class="install-package-id">{{ store.job.preview.id }}</p>
             <dl>
-              <dt>Репозиторий</dt>
+              <dt>{{ t('settings.repository') }}</dt>
               <dd>{{ store.job.source.url }}</dd>
-              <dt>Коммит</dt>
+              <dt>{{ t('settings.commit') }}</dt>
               <dd class="install-package-sha">{{ shortSha(store.job.preview.target.sha) }}</dd>
             </dl>
           </div>
@@ -256,14 +255,14 @@
             class="install-result-message"
             data-role="install-result"
           >
-            {{ installResultText(store.job) }}
+            {{ installResultText(store.job, uiLocale) }}
           </p>
           <UiInlineMessage
             v-else
             data-role="install-result"
             :tone="resultTone"
           >
-            {{ installResultText(store.job) }}
+            {{ installResultText(store.job, uiLocale) }}
           </UiInlineMessage>
         </section>
       </div>
@@ -299,7 +298,7 @@
               data-role="install-dismiss"
               @click="onOpenChange(false)"
             >
-              Отмена
+              {{ t('settings.cancel') }}
             </UiButton>
             <UiButton
               v-else-if="view === 'ready'
@@ -309,7 +308,7 @@
               :disabled="locked"
               @click="store.cancel()"
             >
-              Отменить
+              {{ t('settings.cancel2') }}
             </UiButton>
             <UiButton
               v-else-if="view === 'result' && store.job?.status === 'failed'"
@@ -317,7 +316,7 @@
               data-role="install-close"
               @click="onOpenChange(false)"
             >
-              Закрыть
+              {{ t('settings.close') }}
             </UiButton>
           </div>
           <div class="install-primary">
@@ -327,7 +326,7 @@
               disabled
               loading
             >
-              Проверяем состояние
+              {{ t('settings.checkingStatus') }}
             </UiButton>
             <UiButton
               v-else-if="view === 'unavailable'"
@@ -337,7 +336,7 @@
               data-role="install-reload"
               @click="loadCurrent"
             >
-              Повторить загрузку
+              {{ t('settings.retryLoading') }}
             </UiButton>
             <UiButton
               v-else-if="view === 'source'"
@@ -349,7 +348,7 @@
               :loading="store.busy"
               @click="start"
             >
-              Скачать и проверить
+              {{ t('settings.downloadAndVerify') }}
             </UiButton>
             <UiButton
               v-else-if="view === 'ready'"
@@ -361,7 +360,7 @@
               @click="confirmApply"
             >
               {{ store.job?.kind === 'update' || preview?.replaces.kind === 'managed'
-                ? 'Обновить' : 'Установить' }}
+                ? t('settings.update') : t('settings.install') }}
             </UiButton>
             <UiButton
               v-else-if="view === 'result' && store.job?.status === 'failed'"
@@ -372,7 +371,7 @@
               :disabled="locked"
               @click="retry"
             >
-              Попробовать снова
+              {{ t('settings.tryAgain') }}
             </UiButton>
             <UiButton
               v-else
@@ -382,7 +381,7 @@
               :data-role="view === 'result' ? 'install-close' : 'install-dismiss'"
               @click="onOpenChange(false)"
             >
-              {{ completed ? 'Готово' : 'Закрыть' }}
+              {{ completed ? t('settings.done') : t('settings.close') }}
             </UiButton>
           </div>
         </div>
@@ -392,6 +391,10 @@
 </template>
 
 <script setup lang="ts">
+import { uiLocale } from '../../ui.ts';
+
+import { t } from '../../ui.ts';
+
 import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue';
 
 import {
@@ -453,7 +456,7 @@ const dialogView = computed(() => deriveInstallDialogView({
   url: url.value,
   selectedVersion: selectedVersion.value,
   replaceModified: replaceModified.value,
-}));
+}, uiLocale));
 
 const heading = computed(() => dialogView.value.heading);
 const clarifying = computed(() => dialogView.value.clarifying);

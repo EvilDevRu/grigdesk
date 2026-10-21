@@ -2,7 +2,7 @@
   <UiDialog
     :open="settings.isOpen"
     size="workspace"
-    label="Настройки"
+    :label="t('settings.settings')"
     :body-inset="false"
     :busy="busy"
     data-role="settings-modal"
@@ -12,10 +12,10 @@
       <div class="settings-heading">
         <div class="settings-heading-title">
           <span class="settings-heading-icon"><SettingsIcon /></span>
-          <h2>Настройки</h2>
+          <h2>{{ t('settings.settings') }}</h2>
         </div>
         <UiIconButton
-          label="Закрыть настройки"
+          :label="t('settings.closeSettings')"
           :disabled="busy"
           @click="settings.requestClose('action')"
         >
@@ -32,7 +32,7 @@
           <p class="settings-save-summary" :data-pending="Boolean(settings.snapshot.dirtyCount)">
             <span class="settings-save-dot" aria-hidden="true" />
             {{ settings.snapshot.statusMessage || (settings.snapshot.dirtyCount
-              ? `Изменений: ${settings.snapshot.dirtyCount}` : 'Нет изменений') }}
+              ? t('settings.changes', { settingsSnapshotDirtyCount: settings.snapshot.dirtyCount }) : t('settings.noChanges')) }}
           </p>
           <div v-if="settings.snapshot.lastResult" class="settings-apply-results">
             <p
@@ -41,14 +41,14 @@
               data-settings-saved
             >
               {{ fieldLabel(field.address) }}:
-              {{ field.normalized ? `сохранено как ${JSON.stringify(field.serverValue)}` : 'сохранено' }}
+              {{ field.normalized ? t('settings.savedAs', { value1: JSON.stringify(field.serverValue) }) : t('settings.saved') }}
             </p>
             <p
               v-for="(field, index) in settings.snapshot.lastResult.remaining"
               :key="`remaining-${index}`"
               data-settings-remaining
             >
-              {{ fieldLabel(field.address) }}: осталось применить
+              {{ fieldLabel(field.address) }}{{ t('settings.remainingToApply') }}
             </p>
             <p v-for="error in settings.snapshot.lastResult.errors" :key="error.resourceId">
               {{ error.message }}
@@ -57,11 +57,11 @@
         </div>
         <div class="settings-actions">
           <UiButton v-if="settings.snapshot.delayed" @click="settings.stopWaiting">
-            Прекратить ожидание
+            {{ t('settings.stopWaiting') }}
           </UiButton>
-          <UiButton :disabled="busy" @click="settings.cancel">Отмена</UiButton>
+          <UiButton :disabled="busy" @click="settings.cancel">{{ t('settings.cancel') }}</UiButton>
           <UiButton :disabled="busy || !settings.snapshot.dirtyCount" @click="settings.apply('apply')">
-            Применить
+            {{ t('settings.apply') }}
           </UiButton>
           <UiButton
             variant="solid"
@@ -69,7 +69,7 @@
             :disabled="busy"
             @click="settings.apply('ok')"
           >
-            ОК
+            {{ t('settings.ok') }}
           </UiButton>
         </div>
       </div>
@@ -79,6 +79,8 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '../../ui.ts';
+
 import { computed, onBeforeUnmount, watch } from 'vue';
 import { UiButton, UiDialog, UiIconButton } from '../../ui.ts';
 import { useSettingsStore } from '../../stores/settings.ts';

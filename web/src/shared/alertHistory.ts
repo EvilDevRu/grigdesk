@@ -1,3 +1,5 @@
+import { snapshotText, type UiText } from '../../../shared/i18n/core.ts';
+
 import type { UiToastDismissReason, UiToastTone } from '../ui';
 import type { AlertTarget } from './alertTargets.ts';
 
@@ -14,8 +16,8 @@ export interface AlertHistoryEntry {
   readonly id: string;
   readonly scope: string;
   readonly tone: UiToastTone;
-  readonly title: string;
-  readonly body: string;
+  readonly title: UiText;
+  readonly body: UiText;
   readonly target: AlertTarget | null;
   readonly at: number;
   readonly state: AlertHistoryState;
@@ -23,10 +25,10 @@ export interface AlertHistoryEntry {
 
 export interface AlertHistoryRecord {
   id: string;
-  title: string;
+  title: UiText;
   scope?: string;
   tone?: UiToastTone;
-  body?: string;
+  body?: UiText;
   target?: AlertTarget;
 }
 
@@ -109,8 +111,8 @@ export function createAlertHistory(now: () => number = Date.now): AlertHistory {
         id: input.id,
         scope: String(input.scope ?? ''),
         tone: input.tone || 'accent',
-        title: input.title,
-        body: String(input.body ?? ''),
+        title: snapshotText(input.title),
+        body: snapshotText(input.body ?? ''),
         target: input.target ? Object.freeze({ ...input.target }) : null,
         at: now(),
         state: 'live',

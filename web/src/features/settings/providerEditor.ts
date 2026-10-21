@@ -1,3 +1,5 @@
+import { t, uiLocale } from '../../ui.ts';
+import { localizeProviderMetadata, localizeNativeMetadata } from './metadataLocale.ts';
 import { effectScope, watch } from 'vue';
 import type { ProviderEntry } from '../../../../shared/chat/providersContracts.ts';
 import type { useSettingsStore } from '../../stores/settings.ts';
@@ -37,8 +39,8 @@ export function createProviderEditor(
     settings: `providerSettings:${id}`,
     native: `providerNative:${id}`,
   };
-  const ordinaryAdapter = createProviderSettingsAdapter(id, providers, () => registryReady);
-  const nativeAdapter = createProviderNativeAdapter(id, native);
+  const ordinaryAdapter = createProviderSettingsAdapter(id, providers, () => registryReady, uiLocale);
+  const nativeAdapter = createProviderNativeAdapter(id, native, undefined, uiLocale);
   const credentialsAdapter = createProviderCredentialsAdapter(id, providers, async (ready) => {
     registryReady = ready;
     sync();
@@ -46,10 +48,12 @@ export function createProviderEditor(
     if (nativeVisited && ready) {
       await loadNative(true);
     }
-  });
+  }, uiLocale);
 
   function provider(): ProviderEntry | undefined {
-    return providers.providers.find((entry) => entry.id === id);
+    const entry = providers.providers.find((item) => item.id === id);
+
+    return entry ? localizeProviderMetadata(entry, uiLocale.value) : undefined;
   }
 
   function current(): boolean {
@@ -66,7 +70,8 @@ export function createProviderEditor(
    */
   function metadata(): SettingsFieldMetadata[] {
     const entry = provider();
-    const catalog = native.panel(id).catalog;
+    const source = native.panel(id).catalog;
+    const catalog = source ? localizeNativeMetadata(source, uiLocale.value) : null;
 
     if (!entry) {
       return [];
@@ -128,8 +133,10 @@ export function createProviderEditor(
           tabId: 'parameters',
           fieldPath: ['native-catalog'],
         },
-        label: `Дополнительные параметры исполнителя ${entry.name}`,
-        description: 'Поиск по этим полям продолжится после загрузки параметров.',
+        label: t("settings.advancedProviderParametersFor", { entryName: entry.name }),
+        get description() {
+    return t("settings.searchForTheseFieldsContinuesAfterLoading");
+  },
         load: true,
       });
     }
@@ -166,7 +173,7 @@ export function createProviderEditor(
         fieldPath: ['settings', field.id],
       },
       ...field.disabled || !registryReady
-        ? { unavailable: field.note || 'Перечитайте реестр исполнителя' } : {},
+        ? { unavailable: field.note || t("settings.reloadTheProviderRegistry") } : {},
     }));
 
     settings.registerResource(credentialsAdapter, credentialFields);
@@ -182,7 +189,7 @@ export function createProviderEditor(
     const catalog = native.panel(id).catalog;
 
     if (nativeVisited && catalog) {
-      settings.registerResource(nativeAdapter, entry ? nativeSessionFields(catalog) : []);
+      settings.registerResource(nativeAdapter, entry ? nativeSessionFields(catalog, uiLocale) : []);
 
       if (loaded(resourceIds.native)) {
         settings.acceptSnapshot(resourceIds.native, nativeValues(catalog), opening);
@@ -201,7 +208,7 @@ export function createProviderEditor(
 
     const catalog = native.panel(id).catalog;
 
-    settings.registerResource(nativeAdapter, catalog ? nativeSessionFields(catalog) : []);
+    settings.registerResource(nativeAdapter, catalog ? nativeSessionFields(catalog, uiLocale) : []);
 
     if (refresh) {
       await native.load(id, true);
@@ -233,6 +240,7 @@ export function createProviderEditor(
   sync();
   scope.run(() => {
     watch(() => providers.providers, sync, { flush: 'sync' });
+    watch(uiLocale, sync, { flush: 'sync' });
     watch(() => native.panel(id).catalog, sync, { flush: 'sync' });
   });
   settings.bindSession(`provider-editor:${id}`, () => () => scope.stop());

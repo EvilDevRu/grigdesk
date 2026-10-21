@@ -1,7 +1,8 @@
+import { translator } from '../../../../shared/i18n/catalogs.ts';
 import {
-  SETTINGS_FIELDS,
-  SETTINGS_GROUPS,
-  SETTINGS_PAGES,
+  getSettingsFields,
+  getSettingsGroups,
+  getSettingsPages,
   resolveFieldAddress,
   type SettingsFieldMetadata,
 } from './catalog.ts';
@@ -55,6 +56,7 @@ export function publicFieldMetadata(field: SettingsFieldMetadata): SettingsField
 export function searchSettings(
   query: string,
   fields: readonly SettingsFieldMetadata[] = [],
+  locale = 'ru',
 ): SettingsSearchResult[] {
   const words = normalizeSettingsQuery(query).split(' ').filter(Boolean);
 
@@ -64,12 +66,12 @@ export function searchSettings(
 
   const results: SettingsSearchResult[] = [];
 
-  for (const page of SETTINGS_PAGES) {
-    const group = SETTINGS_GROUPS.find((item) => item.id === page.groupId);
+  for (const page of getSettingsPages(locale)) {
+    const group = getSettingsGroups(locale).find((item) => item.id === page.groupId);
     const path = `${group?.label} ${page.label}`;
-    const pageIndex = normalizeSettingsQuery(
-      `${path} ${page.description} ${(PAGE_SYNONYMS[page.id] ?? []).join(' ')}`,
-    );
+    const synonyms = page.id === 'interface.shortcuts'
+      ? translator.t(locale, 'settings.shortcutSearchTerms') : '';
+    const pageIndex = normalizeSettingsQuery(`${path} ${page.description} ${synonyms}`);
 
     if (words.every((word) => pageIndex.includes(word))) {
       results.push({
@@ -79,7 +81,7 @@ export function searchSettings(
       });
     }
 
-    for (const source of [...SETTINGS_FIELDS, ...fields]) {
+    for (const source of [...getSettingsFields(locale), ...fields]) {
       const field = publicFieldMetadata(source);
 
       if (!field || field.available === false || field.address.pageId !== page.id) {

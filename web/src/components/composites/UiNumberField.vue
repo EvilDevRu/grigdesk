@@ -15,7 +15,7 @@
     <span class="ui-number-field__steps">
       <UiIconButton
         role="stepper"
-        label="Увеличить"
+        :label="t('core.increase')"
         :disabled="disabled || readonly || atMax"
         @click="changeBy(1)"
       >
@@ -23,7 +23,7 @@
       </UiIconButton>
       <UiIconButton
         role="stepper"
-        label="Уменьшить"
+        :label="t('core.decrease')"
         :disabled="disabled || readonly || atMin"
         @click="changeBy(-1)"
       >
@@ -34,6 +34,8 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '../../services/locale.ts';
+
 import { computed, ref } from 'vue';
 import type { UiNumberValue } from '../../types/uiFields';
 import UiIconButton from '../primitives/UiIconButton.vue';

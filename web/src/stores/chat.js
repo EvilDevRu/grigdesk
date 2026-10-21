@@ -1,3 +1,4 @@
+import { messageRef } from '../ui.ts';
 // Чат с агентами — МУЛЬТИСЕССИИ (вкладки, как в VS Code).
 // Каждая сессия: своя задача (опционально), модель, усилие, история, sessionId (--resume),
 // размер контекста. История хранится НА СЕРВЕРЕ (файл в .state GrigDesk) — общая для всех
@@ -1822,8 +1823,8 @@ export const useChatStore = defineStore('chat', {
         id: 'chat-save-error',
         tone: 'danger',
         sticky: true,
-        title: 'История чата не сохраняется',
-        body: `${this.saveError}. Не закрывай вкладку — идут повторные попытки.`,
+        title: messageRef('core.saveChatTitle'),
+        body: messageRef('core.saveChatBody', { error: this.saveError }),
       });
     },
     _get(id) { return this.sessions.find((s) => s.id === id) || null; },
@@ -1914,7 +1915,7 @@ export const useChatStore = defineStore('chat', {
         id: `chat-${s.id}`,
         scope: `chat:${s.id}`,
         tone: 'accent',
-        title: `Агент ответил — ${this.tabLabel(s)}`,
+        title: messageRef('core.agentReplied', { name: this.tabLabel(s) }),
         body: String(text || '').slice(0, 120),
         target: { kind: 'chat', chatId: s.id },
       });
@@ -2296,22 +2297,23 @@ export const useChatStore = defineStore('chat', {
       const s = this._find(req.chatKey);
       const who = s ? this.tabLabel(s) : 'чат';
       const what = req.kind === 'question'
-        ? (req.prompt || req.questions?.[0]?.question || 'Агент задал вопрос')
+        ? (req.prompt || req.questions?.[0]?.question || messageRef('core.agentQuestion'))
         : (req.input?.kind === 'external_url'
-          ? (req.input?.description || 'Сервис просит завершить действие на внешней странице')
-          : `Агент просит разрешение: ${req.tool || 'действие'}`);
+          ? (req.input?.description || messageRef('core.externalAction'))
+          : req.tool ? messageRef('core.agentPermission', { tool: req.tool })
+            : messageRef('core.agentPermissionDefault'));
       const quick = quickPermission(req);
       const actions = quick ? [
         {
           id: 'allow',
-          label: 'Разрешить',
+          label: messageRef('core.allow'),
           tone: 'success',
           variant: 'solid',
           run: () => this.answerPerm(req.pid, true),
         },
         {
           id: 'deny',
-          label: 'Отклонить',
+          label: messageRef('core.deny'),
           tone: 'danger',
           variant: 'outline',
           run: () => this.answerPerm(req.pid, false),
@@ -2323,8 +2325,8 @@ export const useChatStore = defineStore('chat', {
         scope: req.chatKey ? `chat:${req.chatKey}` : '',
         tone: 'warning',
         sticky: true,
-        title: `Нужен твой ответ — ${who}`,
-        body: what.slice(0, 120),
+        title: s ? messageRef('core.answerNeeded', { name: who }) : messageRef('core.answerNeededChat'),
+        body: typeof what === 'string' ? what.slice(0, 120) : what,
         detail: quick?.detail || '',
         target: req.chatKey ? { kind: 'chat', chatId: req.chatKey } : undefined,
         actions,

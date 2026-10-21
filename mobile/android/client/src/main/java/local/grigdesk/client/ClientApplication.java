@@ -39,9 +39,20 @@ public final class ClientApplication extends Application implements Application.
     }
   };
 
+  /**
+   * Локаль установки читается до первого собственного сообщения приложения.
+   * Отказ чтения каталога журналируется и не мешает регистрации lifecycle.
+   */
   @Override
   public void onCreate() {
     super.onCreate();
+
+    try {
+      ClientLocale.initialize(this);
+    } catch (Exception exception) {
+      android.util.Log.e("GrigDesk", "Не удалось прочитать локаль установки", exception);
+    }
+
     registerActivityLifecycleCallbacks(this);
   }
 

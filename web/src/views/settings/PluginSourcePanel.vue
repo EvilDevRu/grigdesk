@@ -5,7 +5,7 @@
     :data-managed="!!plugin.install"
   >
     <header class="source-heading">
-      <h3>Источник и обновления</h3>
+      <h3>{{ t('settings.sourceAndUpdates') }}</h3>
       <span v-if="plugin.install" class="source-version">v{{ plugin.install.version }}</span>
     </header>
     <UiInlineMessage v-if="store.error" tone="danger">{{ store.error }}</UiInlineMessage>
@@ -13,25 +13,25 @@
       {{ store.recoveryError.message }}
     </UiInlineMessage>
     <div v-if="store.reconciling" class="source-actions">
-      <p>Уточняю исход</p>
+      <p>{{ t('settings.checkingOutcome') }}</p>
       <UiButton
         data-role="plugin-source-reconcile"
         :disabled="store.busy"
         @click="store.reconcile()"
       >
-        Уточнить результат
+        {{ t('settings.checkResult') }}
       </UiButton>
     </div>
     <template v-if="!plugin.install">
-      <p>Плагин установлен вручную и не связан с источником.</p>
-      <p class="source-hint">Привяжите репозиторий, чтобы выбирать версии и получать обновления.</p>
+      <p>{{ t('settings.thePluginWasInstalledManuallyAndHas') }}</p>
+      <p class="source-hint">{{ t('settings.attachARepositoryToSelectVersionsAnd') }}</p>
       <div class="source-actions">
         <UiButton
           data-role="plugin-source-bind"
           :disabled="locked"
           @click="emit('bind')"
         >
-          Привязать к git…
+          {{ t('settings.attachToGit') }}
         </UiButton>
       </div>
     </template>
@@ -47,21 +47,21 @@
         tone="warning"
         data-role="plugin-source-restart"
       >
-        Новая версия ждёт перезапуска GrigDesk.
+        {{ t('settings.theNewVersionIsWaitingForA') }}
       </UiInlineMessage>
       <UiInlineMessage
         v-if="plugin.install.localChanges"
         tone="warning"
         data-role="plugin-source-local-changes"
       >
-        Установленная копия отличается от версии из источника: в ней ручные правки.
+        {{ t('settings.theInstalledCopyDiffersFromTheSource') }}
       </UiInlineMessage>
       <div class="source-update">
         <p v-if="plugin.install.updateAvailable" class="source-update-title">
-          Доступна версия v{{ plugin.install.latest?.version }}
+          {{ t('settings.versionAvailableV') }}{{ plugin.install.latest?.version }}
         </p>
         <p class="source-checked" role="status">
-          {{ store.checking ? 'Проверяем обновления…' : checkedText }}
+          {{ store.checking ? t('settings.checkingForUpdates') : checkedText }}
         </p>
         <UiInlineMessage
           v-if="plugin.install.checkError"
@@ -77,7 +77,7 @@
             :disabled="store.checking || !!store.recoveryError"
             @click="store.checkUpdates()"
           >
-            Проверить обновления
+            {{ t('settings.checkForUpdates') }}
           </UiButton>
           <UiButton
             v-if="plugin.install.localChanges"
@@ -85,7 +85,7 @@
             :disabled="locked"
             @click="emit('update')"
           >
-            Переустановить начисто…
+            {{ t('settings.reinstallCleanly') }}
           </UiButton>
           <UiButton
             v-else-if="plugin.install.updateAvailable"
@@ -95,21 +95,21 @@
             :disabled="locked"
             @click="emit('update')"
           >
-            Обновить до v{{ plugin.install.latest?.version }}
+            {{ t('settings.updateToV') }}{{ plugin.install.latest?.version }}
           </UiButton>
         </div>
       </div>
       <div v-if="plugin.install.previous" class="source-previous">
         <div>
-          <p>Предыдущая версия</p>
-          <p class="source-hint">Можно вернуться, если обновление не подошло.</p>
+          <p>{{ t('settings.previousVersion') }}</p>
+          <p class="source-hint">{{ t('settings.youCanRestoreItIfTheUpdate') }}</p>
         </div>
         <UiButton
           data-role="plugin-source-rollback"
           :disabled="locked || !plugin.install.rollbackAvailable"
           @click="rollback"
         >
-          Вернуть v{{ plugin.install.previous.version }}
+          {{ t('settings.restoreV') }}{{ plugin.install.previous.version }}
         </UiButton>
       </div>
       <UiInlineMessage
@@ -124,6 +124,10 @@
 </template>
 
 <script setup lang="ts">
+import { intlLocale } from '../../../../shared/i18n/formats.ts';
+import { uiLocale } from '../../ui.ts';
+import { t, messageRef } from '../../ui.ts';
+
 import { computed, ref, onBeforeUnmount } from 'vue';
 
 import { UiButton, UiInlineMessage, confirmDialog } from '../../ui';
@@ -144,8 +148,10 @@ const locked = computed(() => confirming.value || store.busy || store.reconcilin
   || !!store.recoveryError || !!store.pendingAction || store.job?.status === 'recovery_required');
 
 const checkedText = computed(() => props.plugin.install?.checkedAt
-  ? `Проверено ${new Date(props.plugin.install.checkedAt).toLocaleString('ru-RU')}`
-  : 'Обновления не проверялись');
+  ? t('settings.checked', {
+      value1: new Date(props.plugin.install.checkedAt).toLocaleString(intlLocale(uiLocale)),
+    })
+  : t('settings.updatesHaveNotBeenChecked'));
 
 /**
  * Откат требует отдельного явного подтверждения через общий dialog host.
@@ -168,9 +174,8 @@ async function rollback(): Promise<void> {
 
   try {
     confirmed = await confirmDialog(
-      `Вернуть v${previous.version}? Текущая версия станет прежней; `
-        + 'применится после перезапуска GrigDesk.',
-      { okText: 'Вернуть' },
+      messageRef('settings.pluginRollbackConfirmation', { previousVersion: previous.version }),
+      { okText: messageRef('settings.restore') },
     );
   } finally {
     confirming.value = false;

@@ -22,6 +22,8 @@
 </template>
 
 <script setup lang="ts">
+import { messageRef } from '../../services/locale.ts';
+
 import { computed, ref } from 'vue';
 import { uiDownloadAvailable, saveUiDownload } from '../../services/downloads.ts';
 import { showToast } from '../../services/toasts.ts';
@@ -96,7 +98,7 @@ async function onClick(event: MouseEvent): Promise<void> {
   } catch {
     showToast({
       id: 'save-file-failed',
-      title: 'Не удалось сохранить файл.',
+      title: messageRef('core.couldNotSaveTheFile'),
       tone: 'danger',
     });
   }

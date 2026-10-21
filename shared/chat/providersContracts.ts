@@ -71,6 +71,7 @@ export interface ProviderEntry {
   canUpdate?: boolean;
   updateAvailable?: boolean;
   version?: string;
+  auth?: string;
   authLabel?: string;
   setupCommand?: string;
   install?: string;

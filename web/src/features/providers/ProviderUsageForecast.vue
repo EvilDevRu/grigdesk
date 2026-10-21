@@ -1,6 +1,6 @@
 <template>
   <span v-if="rows.length" class="usage-forecast" data-context="topbar-popover-forecast">
-    <span class="usage-forecast-title">Прогноз</span>
+    <span class="usage-forecast-title">{{ t('core.forecast') }}</span>
     <span v-for="row in rows" :key="row.key" class="usage-forecast-row">
       <span class="usage-forecast-head">
         <span>{{ row.label }}</span>
@@ -17,7 +17,10 @@
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale } from '../../ui.ts';
+
 import { computed } from 'vue';
+import { localizeUsageBar } from './providerUsage.js';
 
 import { useUsageForecastStore } from '../../stores/usageForecast.ts';
 import { watchUsageForecast } from '../../actions/usageForecast/watchUsageForecast.ts';
@@ -41,10 +44,12 @@ const store = useUsageForecastStore();
 const rows = computed<ForecastRow[]>(() => {
   const now = Date.now();
   const bars = store.barsOf(props.providerId);
-  const result = bars.map((bar) => barRowOf(bar, now)).filter((row): row is ForecastRow => row !== null);
+  const result = bars.map((bar) => barRowOf(localizeUsageBar(props.providerId,
+    { ...bar, key: bar.barKey }, uiLocale), now, uiLocale))
+    .filter((row): row is ForecastRow => row !== null);
 
   if (bars.length && !result.length) {
-    result.push(idleRow());
+    result.push(idleRow(uiLocale));
   }
 
   return result;

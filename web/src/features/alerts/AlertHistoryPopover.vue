@@ -1,6 +1,6 @@
 <template>
   <UiTopbarPanel
-    title="Оповещения"
+    :title="t('settings.notifications')"
     trigger-mode="click"
     @open="onOpen"
     @close="onClose"
@@ -11,7 +11,7 @@
         data-context="alert-history"
         role="rail"
         :label="triggerLabel"
-        v-tooltip="'История оповещений'"
+        v-tooltip="t('core.notificationHistory')"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -30,14 +30,14 @@
         variant="text"
         @click="clearAlertHistory()"
       >
-        Очистить
+        {{ t('core.clear') }}
       </UiButton>
     </template>
 
     <template #default="{ close }">
-      <section class="alert-history" aria-label="История оповещений">
+      <section class="alert-history" :aria-label="t('core.notificationHistory')">
         <p v-if="!entries.length" class="alert-history-empty">
-          Пока пусто. Здесь собираются оповещения этого окна, в том числе ушедшие сами.
+          {{ t('core.nothingYetNotificationsFromThisWindowAppear') }}
         </p>
 
         <ol v-else class="alert-history-list">
@@ -51,8 +51,8 @@
           >
             <span class="alert-history-dot" aria-hidden="true"></span>
             <span class="alert-history-text">
-              <span class="alert-history-title">{{ entry.title }}</span>
-              <span v-if="entry.body" class="alert-history-body">{{ entry.body }}</span>
+              <span class="alert-history-title">{{ resolveUiText(entry.title) }}</span>
+              <span v-if="entry.body" class="alert-history-body">{{ resolveUiText(entry.body) }}</span>
               <span class="alert-history-meta">
                 {{ timeLabel(entry.at) }}
                 <template v-if="stateLabel(entry)"> · {{ stateLabel(entry) }}</template>
@@ -64,7 +64,7 @@
               variant="text"
               @click="open(entry.key, close)"
             >
-              Открыть
+              {{ t('core.open') }}
             </UiButton>
           </li>
         </ol>
@@ -74,6 +74,10 @@
 </template>
 
 <script setup lang="ts">
+import { intlLocale } from '../../../../shared/i18n/formats.ts';
+import { uiLocale } from '../../ui.ts';
+import { t, resolveUiText } from '../../ui.ts';
+
 import {
   computed,
   onBeforeUnmount,
@@ -97,8 +101,8 @@ let unsubscribe: (() => void) | undefined;
 
 const missedCount = computed(() => entries.value.filter((entry) => entry.state === 'missed').length);
 const triggerLabel = computed(() => (missedCount.value
-  ? `История оповещений, пропущено: ${missedCount.value}`
-  : 'История оповещений'));
+  ? t('core.notificationHistoryMissed', { missedCountValue: missedCount.value })
+  : t('core.notificationHistory')));
 
 /**
  * Открытая история значит «посмотрел»: пропущенные перестают считаться в значке.
@@ -129,14 +133,14 @@ function timeLabel(at: number): string {
   const minutes = Math.floor((Date.now() - at) / 60_000);
 
   if (minutes < 1) {
-    return 'только что';
+    return t('core.justNow');
   }
   if (minutes < 60) {
-    return `${minutes} мин назад`;
+    return t('core.minAgo', { minutes: minutes });
   }
 
   const date = new Date(at);
-  const time = date.toLocaleTimeString('ru-RU', {
+  const time = date.toLocaleTimeString(intlLocale(uiLocale), {
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -145,7 +149,7 @@ function timeLabel(at: number): string {
     return time;
   }
 
-  return `${date.toLocaleDateString('ru-RU', {
+  return `${date.toLocaleDateString(intlLocale(uiLocale), {
     day: 'numeric',
     month: 'short',
   })}, ${time}`;
@@ -157,13 +161,13 @@ function timeLabel(at: number): string {
  */
 function stateLabel(entry: AlertHistoryEntry): string {
   if (fresh.value.has(entry.key)) {
-    return 'пропущено';
+    return t('core.missed');
   }
   if (entry.state === 'live') {
-    return 'на экране';
+    return t('core.onScreen');
   }
   if (entry.state === 'resolved') {
-    return 'разобрано';
+    return t('core.seen');
   }
 
   return '';

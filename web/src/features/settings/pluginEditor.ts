@@ -1,4 +1,8 @@
+
+import { uiLocale } from '../../ui.ts';
+import { t } from '../../ui.ts';
 import { effectScope, watch } from 'vue';
+import { localizePluginMetadata } from './metadataLocale.ts';
 import type { useSettingsStore } from '../../stores/settings.ts';
 import type { SessionField } from './contracts.ts';
 import {
@@ -22,8 +26,8 @@ export function createPluginEditor(
   const opening = settings.snapshot.sessionId;
   const resourceId = `pluginSettings:${id}`;
   const enabledId = `pluginEnabled:${id}`;
-  const adapter = createPluginSettingsAdapter(id, plugins);
-  const enabledAdapter = createPluginEnabledAdapter(id, plugins);
+  const adapter = createPluginSettingsAdapter(id, plugins, uiLocale);
+  const enabledAdapter = createPluginEnabledAdapter(id, plugins, uiLocale);
   const schemas = new Map<string, string>();
 
   /**
@@ -35,7 +39,8 @@ export function createPluginEditor(
       return;
     }
 
-    const plugin = plugins.list.find((entry) => entry.id === id);
+    const source = plugins.list.find((entry) => entry.id === id);
+    const plugin = source ? localizePluginMetadata(source, uiLocale.value) : undefined;
     const state = settings.snapshot.resources.find((resource) => resource.id === resourceId);
     const fields: SessionField[] = (plugin?.settings ?? []).map((field) => {
       const key = pluginValueKey('values', field.key);
@@ -58,7 +63,7 @@ export function createPluginEditor(
           fieldPath: ['values', field.key],
         },
         ...changed ? {
-          unavailable: 'Схема поля изменилась. Отмените правку и выберите значение заново.',
+          unavailable: t("settings.theFieldSchemaChangedDiscardTheEdit"),
         } : {},
       };
     });
@@ -107,8 +112,10 @@ export function createPluginEditor(
           entityId: id,
           fieldPath: ['enabled'],
         },
-        label: `Включить ${plugin.name}`,
-        description: 'Доступность плагина для всех устройств',
+        label: t("settings.enable2", { pluginName: plugin.name }),
+        get description() {
+    return t("settings.pluginAvailabilityForAllDevices");
+  },
       },
     ] : []);
   }
@@ -124,7 +131,10 @@ export function createPluginEditor(
   }
 
   sync();
-  scope.run(() => watch(() => plugins.list, sync, { deep: true, flush: 'sync' }));
+  scope.run(() => {
+    watch(() => plugins.list, sync, { deep: true, flush: 'sync' });
+    watch(uiLocale, sync, { flush: 'sync' });
+  });
   settings.bindSession(`plugin-editor:${id}`, () => () => scope.stop());
 
   return { load, sync };

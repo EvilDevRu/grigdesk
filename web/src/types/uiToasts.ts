@@ -1,10 +1,12 @@
+import type { UiText } from '../../../shared/i18n/core.ts';
+
 import type { UiActionTone, UiActionVariant } from './uiActions';
 
 export type UiToastTone = 'accent' | 'warning' | 'danger';
 
 export interface UiToastAction {
   id: string;
-  label: string;
+  label: UiText;
   tone?: UiActionTone;
   variant?: UiActionVariant;
   run(): unknown;
@@ -12,11 +14,11 @@ export interface UiToastAction {
 
 export interface UiToastOptions {
   id: string;
-  title: string;
+  title: UiText;
   scope?: string;
   tone?: UiToastTone;
-  body?: string;
-  detail?: string;
+  body?: UiText;
+  detail?: UiText;
   actions?: readonly UiToastAction[];
   durationMs?: number;
 }
@@ -25,9 +27,9 @@ export interface UiToast {
   readonly id: string;
   readonly scope: string;
   readonly tone: UiToastTone;
-  readonly title: string;
-  readonly body: string;
-  readonly detail: string;
+  readonly title: UiText;
+  readonly body: UiText;
+  readonly detail: UiText;
   readonly durationMs: number;
   readonly actions: readonly UiToastAction[];
 }

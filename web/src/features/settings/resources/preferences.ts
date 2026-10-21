@@ -1,3 +1,5 @@
+import { localeMessage, localeTranslator, type LocaleSource } from '../../../../../shared/i18n/catalogs.ts';
+import { translate as t } from '../../../../../shared/i18n/catalogs.ts';
 import type { ApiClient } from '../../../shared/apiClient.ts';
 import { isPlainRecord } from '../../../../../shared/lib/objects.ts';
 import type { FieldIntent, JsonValue, ResourceAdapter } from '../contracts.ts';
@@ -10,9 +12,14 @@ const ARBITER_KEYS = ['arbiterAuto', 'arbiterModelRef', 'arbiterEffort'];
  * Ответ разбирается по белому списку ресурса и переводится в единицы формы.
  * Дробные минуты сохраняют исходные секунды без округления нетронутого поля.
  */
-export function preferencesValues(payload: unknown, defaults = false): Record<string, JsonValue> {
+export function preferencesValues(payload: unknown, defaults = false,
+  locale: LocaleSource = 'ru',
+): Record<string, JsonValue> {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   if (!isPlainRecord(payload)) {
-    throw new TypeError('Некорректный ответ настроек приложения');
+    throw new TypeError(t("settings.invalidApplicationSettingsResponse"));
   }
 
   const values: Record<string, JsonValue> = {};
@@ -92,34 +99,41 @@ function preferencesPatch(
 export function createPreferencesAdapter(
   client: Pick<ApiClient, 'get' | 'post'>,
   onSaved: (values: Record<string, JsonValue>) => void = () => {},
+  locale: LocaleSource = 'ru',
+
 ): ResourceAdapter {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   return {
     id: 'prefs',
     chain: 'prefs',
     order: 0,
     body: 'patch',
     supportsUnset: false,
-    read: async (signal) => preferencesValues(await client.get('/api/settings/prefs', { signal }), true),
+    read: async (signal) => preferencesValues(
+      await client.get('/api/settings/prefs', { signal }), true, locale,
+    ),
     validate: (intents) => [...intents].flatMap(([key, intent]) => {
       if (intent.op !== 'set') {
-        return [{ key, message: 'Удаление этой настройки недоступно' }];
+        return [{ key, message: messageText("settings.removingThisSettingIsUnavailable") }];
       }
 
       if (NUMBERS.includes(key) && (typeof intent.value !== 'number'
           || !Number.isFinite(intent.value) || intent.value < 0
           || key !== 'runSilenceWindow' && !Number.isInteger(intent.value))) {
-        return [{ key, message: 'Введите число не меньше нуля в указанных единицах' }];
+        return [{ key, message: messageText("settings.enterANonnegativeNumberInTheSpecified") }];
       }
 
       if ([...BOOLEANS, 'arbiterAuto'].includes(key) && typeof intent.value !== 'boolean') {
-        return [{ key, message: 'Выберите включение или выключение' }];
+        return [{ key, message: messageText("settings.selectEnabledOrDisabled") }];
       }
 
       return [];
     }),
     async write(intents, baseline, signal) {
       const values = preferencesValues(await client.post('/api/settings/prefs',
-        preferencesPatch(intents, baseline), { signal }));
+        preferencesPatch(intents, baseline), { signal }), undefined, locale);
 
       onSaved(values);
 

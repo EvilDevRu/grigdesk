@@ -1,3 +1,5 @@
+import { translator } from '../../shared/i18n/catalogs.ts';
+
 import type { ContextMenuParams, MenuItemConstructorOptions, Input } from 'electron';
 
 export const SETTINGS_ACCELERATOR = 'CommandOrControl+Alt+S';
@@ -33,79 +35,80 @@ const EDIT_ACTIONS = [
   {
     flag: 'canCut',
     role: 'cut',
-    label: 'Вырезать',
+    label: 'desktop.cut',
   },
   {
     flag: 'canCopy',
     role: 'copy',
-    label: 'Копировать',
+    label: 'desktop.copy',
   },
   {
     flag: 'canPaste',
     role: 'paste',
-    label: 'Вставить',
+    label: 'desktop.paste',
   },
   {
     flag: 'canSelectAll',
     role: 'selectAll',
-    label: 'Выделить всё',
+    label: 'desktop.selectAll',
   },
 ] satisfies EditAction[];
 
 /**
  * Роли Electron сохраняют системные действия и горячие клавиши правки и вида.
- * Все видимые подписи русские независимо от языка окружения рабочего стола.
+ * Подписи вычисляются по локали установки, роли и горячие клавиши сохраняются.
  */
 export function applicationMenuTemplate(
   actions: { openSettings: () => void },
+  locale = 'ru',
 ): MenuItemConstructorOptions[] {
   return [
     {
-      label: 'Файл',
+      label: translator.t(locale, 'desktop.file'),
       submenu: [{
-        label: 'Настройки…',
+        label: translator.t(locale, 'desktop.settings'),
         accelerator: SETTINGS_ACCELERATOR,
         registerAccelerator: false,
         click: () => actions.openSettings(),
       }],
     },
     {
-      label: 'Правка',
+      label: translator.t(locale, 'desktop.edit'),
       submenu: [
         {
           role: 'undo',
-          label: 'Отменить',
+          label: translator.t(locale, 'desktop.undo'),
         },
         {
           role: 'redo',
-          label: 'Повторить',
+          label: translator.t(locale, 'desktop.redo'),
         },
         { type: 'separator' },
         ...EDIT_ACTIONS.map((action) => ({
           role: action.role,
-          label: action.label,
+          label: translator.t(locale, action.label),
         })),
       ],
     },
     {
-      label: 'Вид',
+      label: translator.t(locale, 'desktop.view'),
       submenu: [
         {
           role: 'zoomIn',
-          label: 'Увеличить',
+          label: translator.t(locale, 'desktop.zoomIn'),
         },
         {
           role: 'zoomOut',
-          label: 'Уменьшить',
+          label: translator.t(locale, 'desktop.zoomOut'),
         },
         {
           role: 'resetZoom',
-          label: 'Сбросить масштаб',
+          label: translator.t(locale, 'desktop.resetZoom'),
         },
         { type: 'separator' },
         {
           role: 'togglefullscreen',
-          label: 'Полный экран',
+          label: translator.t(locale, 'desktop.fullscreen'),
         },
       ],
     },
@@ -119,12 +122,13 @@ export function applicationMenuTemplate(
 export function contextMenuTemplate(
   params: ContextMenuInput,
   copyLink: (url: string) => void,
+  locale = 'ru',
 ): MenuItemConstructorOptions[] {
   const items: MenuItemConstructorOptions[] = EDIT_ACTIONS
     .filter((action) => params.editFlags[action.flag])
     .map((action) => ({
       role: action.role,
-      label: action.label,
+      label: translator.t(locale, action.label),
     }));
 
   if (params.linkURL) {
@@ -135,7 +139,7 @@ export function contextMenuTemplate(
     const url = params.linkURL;
 
     items.push({
-      label: 'Копировать адрес ссылки',
+      label: translator.t(locale, 'desktop.copyLink'),
       click: () => copyLink(url),
     });
   }

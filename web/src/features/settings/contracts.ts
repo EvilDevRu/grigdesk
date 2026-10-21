@@ -1,3 +1,6 @@
+import { localeMessage, localeTranslator, type LocaleSource } from '../../../../shared/i18n/catalogs.ts';
+import type { UiText } from '../../../../shared/i18n/core.ts';
+import { translate as t } from '../../../../shared/i18n/catalogs.ts';
 import { isPlainRecord } from '../../../../shared/lib/objects.ts';
 import { ApiError } from '../../shared/apiClient.ts';
 
@@ -30,13 +33,13 @@ export interface FieldResult {
   key: string;
   status: WriteStatus;
   serverValue?: JsonValue;
-  message?: string;
+  message?: UiText;
 }
 
 export interface ResourceWriteResult {
   status: WriteStatus;
   fields: FieldResult[];
-  message?: string;
+  message?: UiText;
   httpStatus?: number;
 }
 
@@ -46,7 +49,7 @@ export type WriteOutcome =
     ok: false;
     outcome: Exclude<WriteStatus, 'success'>;
     status?: number;
-    message: string;
+    message: UiText;
   };
 
 export interface ResourceAdapter {
@@ -60,7 +63,7 @@ export interface ResourceAdapter {
   validate(
     intents: ReadonlyMap<string, FieldIntent>,
     baseline: Readonly<Record<string, JsonValue>>,
-  ): Array<{ key: string; message: string }>;
+  ): Array<{ key: string; message: UiText }>;
   write(
     intents: ReadonlyMap<string, FieldIntent>,
     baseline: Readonly<Record<string, JsonValue>>,
@@ -72,7 +75,7 @@ export interface SessionField {
   key: string;
   address: FieldAddress;
   secret?: boolean;
-  unavailable?: string;
+  unavailable?: UiText;
   hasStoredValue?: boolean;
 }
 
@@ -88,7 +91,8 @@ export interface FieldConflict {
   serverValue?: JsonValue;
 }
 
-export interface SessionFieldState extends SessionField {
+export interface SessionFieldState extends Omit<SessionField, 'unavailable'> {
+  unavailable?: string;
   dirty: boolean;
   hasSecretDraft: boolean;
   value?: JsonValue;
@@ -151,7 +155,11 @@ export interface ApplyResult {
  * HTTP-отказ является известным исходом, а обрыв или повреждённый ответ — неизвестным.
  * Явный отказ доменного store сохраняет его исход и HTTP-код для остановки по 401.
  */
-export function classifyWriteError(error: unknown): Exclude<WriteOutcome, { ok: true }> {
+export function classifyWriteError(error: unknown,
+  locale: LocaleSource = 'ru',
+): Exclude<WriteOutcome, { ok: true }> {
+  const messageText = localeMessage(locale);
+
   if (error instanceof ApiError) {
     return {
       ok: false,
@@ -170,14 +178,14 @@ export function classifyWriteError(error: unknown): Exclude<WriteOutcome, { ok: 
       ok: false,
       outcome,
       ...(typeof error.status === 'number' ? { status: error.status } : {}),
-      message: typeof error.message === 'string' ? error.message : 'Не удалось сохранить настройки',
+      message: isUiText(error.message) ? error.message : messageText("settings.couldNotSaveSettings"),
     };
   }
 
   return {
     ok: false,
     outcome: 'unknown',
-    message: 'Не удалось определить результат записи',
+    message: messageText("settings.couldNotDetermineTheWriteResult"),
   };
 }
 
@@ -185,8 +193,12 @@ export function classifyWriteError(error: unknown): Exclude<WriteOutcome, { ok: 
  * Общая классификация превращается в явный результат неподтверждённого запроса.
  * Пустой список полей не объявляет успешными никакие намерения ресурса.
  */
-export function resourceWriteFailure(error: unknown): ResourceWriteResult {
-  const failure = classifyWriteError(error);
+export function resourceWriteFailure(error: unknown,
+  locale: LocaleSource = 'ru',
+): ResourceWriteResult {
+  const t = localeTranslator(locale);
+
+  const failure = classifyWriteError(error, locale);
 
   return {
     status: failure.outcome,
@@ -214,29 +226,48 @@ function isJsonValue(value: unknown): value is JsonValue {
 }
 
 /**
+ * Локальный адаптер может вернуть собственный descriptor вместе с обычной строкой сервера.
+ * Декодер проверяет его форму и параметры, не пытаясь угадать перевод по содержимому.
+ */
+function isUiText(value: unknown): value is UiText {
+  if (typeof value === 'string') {
+    return true;
+  }
+
+  return isPlainRecord(value) && typeof value.key === 'string' && isPlainRecord(value.params)
+    && Object.values(value.params).every((parameter) => parameter === undefined
+      || typeof parameter === 'string' || typeof parameter === 'number' && Number.isFinite(parameter))
+    && (value.fallback === undefined || typeof value.fallback === 'string');
+}
+
+/**
  * Resolved Promise не подтверждает запись без ожидаемой формы результата.
  * Потерянное поле остаётся задачей координатора, повреждённая форма даёт unknown.
  */
-export function decodeResourceWriteResult(value: unknown): ResourceWriteResult {
+export function decodeResourceWriteResult(value: unknown,
+  locale: LocaleSource = 'ru',
+): ResourceWriteResult {
+  const t = localeTranslator(locale);
+
   if (isPlainRecord(value) && value.ok === false) {
-    return resourceWriteFailure(value);
+    return resourceWriteFailure(value, locale);
   }
 
   const statuses = ['success', 'failed', 'conflict', 'unknown'];
 
   if (!isPlainRecord(value) || !statuses.includes(String(value.status)) || !Array.isArray(value.fields)
-      || (value.message !== undefined && typeof value.message !== 'string')
+      || (value.message !== undefined && !isUiText(value.message))
       || (value.httpStatus !== undefined && typeof value.httpStatus !== 'number')) {
-    throw new TypeError('Некорректный ответ записи настроек');
+    throw new TypeError(t("settings.invalidSettingsWriteResponse"));
   }
 
   const seen = new Set<string>();
   const fields = value.fields.map((field): FieldResult => {
     if (!isPlainRecord(field) || typeof field.key !== 'string' || seen.has(field.key)
         || !statuses.includes(String(field.status))
-        || (field.message !== undefined && typeof field.message !== 'string')
+        || (field.message !== undefined && !isUiText(field.message))
         || (Object.hasOwn(field, 'serverValue') && !isJsonValue(field.serverValue))) {
-      throw new TypeError('Некорректное подтверждение поля настроек');
+      throw new TypeError(t("settings.invalidSettingsFieldConfirmation"));
     }
 
     seen.add(field.key);
@@ -247,14 +278,14 @@ export function decodeResourceWriteResult(value: unknown): ResourceWriteResult {
       ...(Object.hasOwn(field, 'serverValue') ? {
         serverValue: structuredClone(field.serverValue as JsonValue),
       } : {}),
-      ...(field.message === undefined ? {} : { message: field.message as string }),
+      ...(field.message === undefined ? {} : { message: structuredClone(field.message as UiText) }),
     };
   });
 
   return {
     status: value.status as WriteStatus,
     fields,
-    ...(value.message === undefined ? {} : { message: value.message as string }),
+    ...(value.message === undefined ? {} : { message: structuredClone(value.message as UiText) }),
     ...(value.httpStatus === undefined ? {} : { httpStatus: value.httpStatus as number }),
   };
 }

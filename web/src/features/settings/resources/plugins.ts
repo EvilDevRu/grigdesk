@@ -1,3 +1,5 @@
+import { localeMessage, localeTranslator, type LocaleSource } from '../../../../../shared/i18n/catalogs.ts';
+import { translate as t } from '../../../../../shared/i18n/catalogs.ts';
 import type { PluginListItem, PluginSetting } from '../../../../../shared/plugins/pluginsContracts.ts';
 import { decodeSettingsJson } from '../../../../../shared/chat/providerSettingsContracts.ts';
 import type { FieldIntent, JsonValue, ResourceAdapter, WriteOutcome } from '../contracts.ts';
@@ -66,7 +68,12 @@ export function validPluginValue(field: PluginSetting, value: JsonValue): boolea
  * Схема и baseline определяют полный PUT, намерения заменяют только изменённые значения.
  * Settings предшествует enabled в общей цепочке конкретного плагина.
  */
-export function createPluginSettingsAdapter(id: string, store: PluginStorePort): ResourceAdapter {
+export function createPluginSettingsAdapter(id: string, store: PluginStorePort,
+  locale: LocaleSource = 'ru',
+): ResourceAdapter {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   const plugin = () => store.list.find((entry) => entry.id === id);
 
   return {
@@ -88,7 +95,7 @@ export function createPluginSettingsAdapter(id: string, store: PluginStorePort):
       const entry = plugin();
 
       if (!entry) {
-        throw new Error('Плагин больше недоступен');
+        throw new Error(t("settings.pluginNoLongerAvailable"));
       }
 
       return pluginValues(entry);
@@ -102,7 +109,7 @@ export function createPluginSettingsAdapter(id: string, store: PluginStorePort):
         const valid = intent.op === 'set' && (field ? validPluginValue(field, intent.value)
           : slot && typeof intent.value === 'boolean');
 
-        return valid ? [] : [{ key, message: 'Поле недоступно или значение не соответствует схеме' }];
+        return valid ? [] : [{ key, message: messageText("settings.fieldUnavailableOrValueDoesNotMatch") }];
       });
     },
     /**
@@ -116,7 +123,7 @@ export function createPluginSettingsAdapter(id: string, store: PluginStorePort):
         return {
           status: 'failed',
           fields: [],
-          message: 'Плагин больше недоступен',
+          message: messageText("settings.pluginNoLongerAvailable"),
         };
       }
 
@@ -170,7 +177,12 @@ export function createPluginSettingsAdapter(id: string, store: PluginStorePort):
  * Тумблер сохраняет отдельное явное намерение после настроек своего плагина.
  * ACK несёт фактически принятое enabled, а отсутствующий плагин остаётся failed.
  */
-export function createPluginEnabledAdapter(id: string, store: PluginStorePort): ResourceAdapter {
+export function createPluginEnabledAdapter(id: string, store: PluginStorePort,
+  locale: LocaleSource = 'ru',
+): ResourceAdapter {
+  const t = localeTranslator(locale);
+  const messageText = localeMessage(locale);
+
   return {
     id: `pluginEnabled:${id}`,
     chain: `plugin:${id}`,
@@ -187,7 +199,7 @@ export function createPluginEnabledAdapter(id: string, store: PluginStorePort): 
     },
     validate: (intents) => [...intents].flatMap(([key, intent]) =>
       store.list.some((entry) => entry.id === id) && intent.op === 'set' && typeof intent.value === 'boolean'
-        ? [] : [{ key, message: 'Плагин недоступен или состояние не задано' }]),
+        ? [] : [{ key, message: messageText("settings.pluginUnavailableOrStatusUnspecified") }]),
     /**
      * Переключение следует после успешного PUT того же плагина.
      * Отсутствующий ACK не очищает намерение и не закрывает форму.
@@ -199,7 +211,7 @@ export function createPluginEnabledAdapter(id: string, store: PluginStorePort): 
         return {
           status: 'failed',
           fields: [],
-          message: 'Состояние плагина не задано',
+          message: messageText("settings.pluginStatusUnspecified"),
         };
       }
 

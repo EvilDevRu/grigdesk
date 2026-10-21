@@ -6,37 +6,37 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
              aria-hidden="true"><path d="M19 12H5 m5-5-5 5 5 5" /></svg>
       </template>
-      Вернуться к работе
+      {{ t('core.returnToWork') }}
     </UiButton>
     <header class="connections-heading">
       <div>
-        <h1 id="connections-title">Машины</h1>
-        <p>Выберите компьютер, с которым хотите работать.</p>
+        <h1 id="connections-title">{{ t('core.machines') }}</h1>
+        <p>{{ t('core.chooseTheComputerToWorkWith') }}</p>
       </div>
       <UiButton variant="solid" tone="accent" :disabled="busy" @click="adding = true">
         <template #leading>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                aria-hidden="true"><path d="M12 5v14 M5 12h14" /></svg>
         </template>
-        Добавить машину
+        {{ t('core.addMachine') }}
       </UiButton>
     </header>
-    <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
+    <UiInlineMessage v-if="error" tone="danger">{{ resolveUiText(error) }}</UiInlineMessage>
     <div class="connections-state" role="status">
       <ConnectionStatus :status="shell.status" :disconnected="disconnected"
-                        :text="disconnected ? 'Отключено' : undefined" />
-      <span v-if="shell.profile">{{ shell.profile.name }}</span>
+                        :text="disconnected ? t('core.disconnected') : undefined" />
+      <span v-if="shell.profile">{{ machineProfileName(shell.profile, uiLocale) }}</span>
       <span v-if="detailText">{{ detailText }}</span>
     </div>
     <section v-if="shell.status === 'incompatible'" class="connection-versions">
       <p>{{ versionHint }}</p>
-      <p>Приложение: {{ shell.appApi.major }}.{{ shell.appApi.minor }}</p>
-      <p v-if="shell.serverApi">Сервер: {{ shell.serverApi.major }}.{{ shell.serverApi.minor }}</p>
-      <UiActionLink v-if="RELEASES_URL" :href="RELEASES_URL" target="_blank">Скачать с GitHub</UiActionLink>
+      <p>{{ t('core.application2') }} {{ shell.appApi.major }}.{{ shell.appApi.minor }}</p>
+      <p v-if="shell.serverApi">{{ t('core.server2') }} {{ shell.serverApi.major }}.{{ shell.serverApi.minor }}</p>
+      <UiActionLink v-if="RELEASES_URL" :href="RELEASES_URL" target="_blank">{{ t('core.downloadFromGitHub') }}</UiActionLink>
     </section>
     <div v-if="!shell.profiles.length" class="connections-empty">
-      <strong>Здесь будут ваши компьютеры</strong>
-      <p>Добавьте машину строкой привязки или QR-кодом.</p>
+      <strong>{{ t('core.yourComputersWillAppearHere') }}</strong>
+      <p>{{ t('core.addAMachineUsingAPairingString') }}</p>
     </div>
     <div class="machines-list">
       <article v-for="profile in shell.profiles" :key="profile.id" class="machine-row"
@@ -50,43 +50,45 @@
           </span>
           <div class="machine-copy">
             <div class="machine-title">
-              <strong>{{ profile.name }}</strong>
-              <span v-if="profile.id === shell.profile?.id" class="machine-current">Текущая</span>
+              <strong>{{ machineProfileName(profile, uiLocale) }}</strong>
+              <span v-if="profile.id === shell.profile?.id" class="machine-current">{{ t('core.current') }}</span>
             </div>
             <span class="machine-address">
-              {{ profile.kind === 'local' ? 'Локальная машина' : profile.address }}
+              {{ profile.kind === 'local' ? t('core.localMachine') : profile.address }}
             </span>
             <ConnectionStatus :status="profile.id === shell.profile?.id ? shell.status : profile.status"
                               :disconnected="profile.id === shell.profile?.id && disconnected"
-                              :text="profile.id === shell.profile?.id && disconnected ? 'Отключено' : undefined" />
+                              :text="profile.id === shell.profile?.id && disconnected ? t('core.disconnected') : undefined" />
           </div>
         </div>
         <div class="machine-actions">
           <UiButton v-if="profile.id !== shell.profile?.id" :disabled="busy"
-                    @click="run(() => shell.selectProfile(profile.id))">Выбрать</UiButton>
+                    @click="run(() => shell.selectProfile(profile.id))">{{ t('core.select') }}</UiButton>
           <UiButton v-else-if="disconnected || shell.status !== 'online'" tone="accent"
-                    :disabled="busy" @click="connect(profile.id)">Подключиться</UiButton>
-          <UiButton v-else :disabled="busy" @click="run(() => shell.disconnect())">Отключиться</UiButton>
+                    :disabled="busy" @click="connect(profile.id)">{{ t('core.connect') }}</UiButton>
+          <UiButton v-else :disabled="busy" @click="run(() => shell.disconnect())">{{ t('core.disconnect') }}</UiButton>
           <UiButton v-if="profile.kind === 'remote'" :disabled="busy" variant="text"
-                    @click="changeAddress(profile)">Изменить адрес</UiButton>
-          <UiButton tone="danger" variant="text" :disabled="busy" @click="remove(profile)">Удалить</UiButton>
+                    @click="changeAddress(profile)">{{ t('core.changeAddress') }}</UiButton>
+          <UiButton tone="danger" variant="text" :disabled="busy" @click="remove(profile)">{{ t('settings.delete') }}</UiButton>
         </div>
       </article>
     </div>
     <div v-if="shell.localAvailable && !shell.profiles.some(profile => profile.kind === 'local')"
          class="connections-local">
-      <span>GrigDesk запущен на этом устройстве</span>
-      <UiButton :disabled="busy" @click="run(() => shell.addLocal())">Этот компьютер</UiButton>
+      <span>{{ t('core.grigdeskIsRunningOnThisDevice') }}</span>
+      <UiButton :disabled="busy" @click="run(() => shell.addLocal())">{{ t('core.localComputer') }}</UiButton>
     </div>
     <AddMachineDialog v-model:open="adding" />
   </main>
 </template>
 
 <script setup lang="ts">
+import { t, uiLocale, messageRef, resolveUiText, type UiText } from '../ui.ts';
+
 import { computed, ref } from 'vue';
 
 import {
-  RELEASES_URL, connectionDetailText,
+  RELEASES_URL, connectionDetailText, machineProfileName,
 } from '../../../shared/client/clientShell.ts';
 import type { MachineProfile } from '../../../shared/client/clientShell.ts';
 import { UiButton, UiInlineMessage, UiActionLink, confirmDialog, promptDialog } from '../ui.ts';
@@ -100,16 +102,19 @@ const adding = ref(false);
 const busy = ref(false);
 const disconnected = computed(() => typeof shell.detail !== 'string'
   && shell.detail?.code === 'disconnected');
-const detailText = computed(() => disconnected.value ? '' : connectionDetailText(shell.detail));
+const detailText = computed(() => disconnected.value
+  ? '' : connectionDetailText(shell.detail, uiLocale.value));
 const versionHint = computed(() => {
   const upgradeServer = typeof shell.detail !== 'string'
     && shell.detail?.code === 'server_upgrade_required';
   const version = upgradeServer ? shell.appApi : shell.serverApi || shell.appApi;
 
-  return `Нужна версия ${upgradeServer ? 'сервера' : 'приложения'} не ниже `
+  return t('core.requiredVersionAtLeast', {
+    value1: upgradeServer ? t('core.server') : t('core.application'),
+  })
     + `${version.major}.${version.minor}.`;
 });
-const error = ref('');
+const error = ref<UiText>('');
 
 /**
  * Экран подключения остаётся доступным при любом отказе удалённой машины.
@@ -122,7 +127,7 @@ async function run(work: () => Promise<unknown>): Promise<void> {
   try {
     await work();
   } catch (failure) {
-    error.value = failureText(failure, 'Не удалось изменить подключение.');
+    error.value = failureText(failure, '') || messageRef('core.couldNotChangeTheConnection');
   } finally {
     busy.value = false;
   }
@@ -136,7 +141,7 @@ async function connect(id: string): Promise<void> {
 }
 
 async function remove(profile: MachineProfile): Promise<void> {
-  if (await confirmDialog(`Удалить машину «${profile.name}»?`)) {
+  if (await confirmDialog(messageRef('core.deleteMachine', { profileName: profile.name }))) {
     await run(() => shell.removeProfile(profile.id));
   }
 }
@@ -146,7 +151,10 @@ async function remove(profile: MachineProfile): Promise<void> {
  * Оболочка проверит hello новым адресом до сохранения, а отмена не отправляет запрос.
  */
 async function changeAddress(profile: MachineProfile): Promise<void> {
-  const address = await promptDialog({ title: 'Изменить адрес', value: profile.address });
+  const address = await promptDialog({
+    title: messageRef('core.changeAddress'),
+    value: profile.address,
+  });
 
   if (address !== null) {
     await run(() => shell.editProfile(profile.id, { address }));

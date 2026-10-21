@@ -40,8 +40,12 @@
 import { asyncView } from './shared/asyncView.ts';
 import { showSectionLoadFailure } from './shared/sectionLoadFailure.ts';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { CONNECTION_TEXT, connectionDetailText } from '../../shared/client/clientShell.ts';
-import { UiDialogHost, UiTooltipHost, UiToastHost, UiInlineMessage, UiSpinner } from './ui';
+import {
+  connectionStatusText,
+  connectionDetailText,
+  machineProfileName,
+} from '../../shared/client/clientShell.ts';
+import { t, uiLocale, UiDialogHost, UiTooltipHost, UiToastHost, UiInlineMessage, UiSpinner } from './ui';
 import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
 import NoAccessView from './views/NoAccessView.vue';
@@ -88,21 +92,24 @@ const workspaceStarted = ref(auth.authenticated);
 const connectionTone = computed(() => ['unpaired', 'revoked', 'identityMismatch', 'incompatible']
   .includes(shell.status) ? 'warning' : 'info');
 const connectionMessage = computed(() => {
-  const detail = connectionDetailText(shell.detail);
+  const detail = connectionDetailText(shell.detail, uiLocale.value);
 
   if (detail) {
     return detail;
   }
 
   if (!shell.profile) {
-    return 'Выберите компьютер через значок машин в верхней панели.';
+    return t('core.chooseMachine');
   }
 
   if (shell.status === 'connecting' || shell.status === 'online') {
-    return 'Подключаемся к «' + shell.profile.name + '». Рабочие данные появятся автоматически.';
+    return t('core.connectingMachine', { name: machineProfileName(shell.profile, uiLocale.value) });
   }
 
-  return shell.profile.name + ': ' + CONNECTION_TEXT[shell.status] + '.';
+  const name = machineProfileName(shell.profile, uiLocale.value);
+  const status = connectionStatusText(shell.status, uiLocale.value);
+
+  return `${name}: ${status}.`;
 });
 const settings = useSettingsStore();
 const SettingsModal = asyncView(() => import('./views/settings/SettingsModal.vue'), undefined, () => {

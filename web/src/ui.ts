@@ -72,3 +72,8 @@ export {
   subscribeToasts,
 } from './services/toasts';
 export type * from './types/uiToasts';
+
+export {
+  uiLocale, setUiLocale, snapshotText, t, resolveUiText, messageRef, locales,
+} from './services/locale.ts';
+export type { UiText, MessageRef } from './services/locale.ts';

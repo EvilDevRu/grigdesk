@@ -1,3 +1,5 @@
+import { translator } from '../i18n/catalogs.ts';
+
 export type ConnectionStatus = 'none' | 'connecting' | 'online' | 'offline' | 'locked'
   | 'unpaired' | 'revoked' | 'identityMismatch' | 'incompatible';
 
@@ -15,6 +17,7 @@ export interface MachineProfile {
 }
 
 export interface ShellState {
+  locale?: { preference: string; systemLanguage: string };
   rev: number;
   status: ConnectionStatus;
   detail: string | {
@@ -45,11 +48,35 @@ export const CONNECTION_TEXT: Record<ConnectionStatus, string> = {
 };
 
 /**
+ * Коды состояния переводятся отдельно от сохранённых имён и серверных причин.
+ * Прежние вызовы без локали сохраняют точные русские подписи протокола UI.
+ */
+export function connectionStatusText(status: ConnectionStatus, locale = 'ru'): string {
+  return translator.t(locale, `core.connection.${status}`, {}, CONNECTION_TEXT[status]);
+}
+
+/**
+ * Заводское имя локального профиля принадлежит приложению, а удалённые имена — человеку.
+ * Проекция не переписывает настройки профиля и не меняет его идентификатор.
+ */
+export function machineProfileName(profile: MachineProfile, locale = 'ru'): string {
+  return profile.kind === 'local' && profile.name === 'Этот компьютер'
+    ? translator.t(locale, 'core.thisComputer') : profile.name;
+}
+
+/**
  * Причина отображается без привязки к способу транспорта оболочки.
  * Старые строковые детали и новые структурированные причины читаются одинаково.
  */
-export function connectionDetailText(detail: ShellState['detail']): string {
-  return typeof detail === 'string' ? detail : detail?.message ?? '';
+export function connectionDetailText(detail: ShellState['detail'], locale = 'ru'): string {
+  if (typeof detail === 'string') {
+    return detail;
+  }
+
+  const code = detail?.code;
+
+  return code && Object.hasOwn(CLIENT_FAILURES, code)
+    ? translator.t(locale, `native.${code}`) : detail?.message ?? '';
 }
 
 
@@ -63,13 +90,17 @@ const CLIENT_FAILURES: Record<string, string> = {
   pair_locked: 'Слишком много попыток привязки. Повторите позже.',
   device_revoked: 'Доступ этого устройства отозван. Привяжите его заново.',
   locked: 'Разблокируйте приложение.',
+  disconnected: 'Отключено',
+  retry_wait: 'Ожидание повторного подключения',
+  identity_unavailable: 'Нужна повторная привязка устройства.',
 };
 
 /**
  * Системные ошибки сети могут содержать адрес и не предназначены для человека.
  * Код переводится по закрытому словарю; неизвестный отказ даёт проверяемую подсказку входа.
  */
-export function clientFailureText(code: unknown): string {
-  return typeof code === 'string' && CLIENT_FAILURES[code] ||
-    'Машина недоступна. Проверьте связь и включён ли GRIGDESK_CLIENT_LISTEN на машине.';
+export function clientFailureText(code: unknown, locale = 'ru'): string {
+  const key = typeof code === 'string' && Object.hasOwn(CLIENT_FAILURES, code) ? code : 'offline';
+
+  return translator.t(locale, `native.${key}`);
 }

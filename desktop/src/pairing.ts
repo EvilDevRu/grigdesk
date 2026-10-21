@@ -1,3 +1,4 @@
+import { desktopText, desktopLocale } from './locale.ts';
 import https from 'node:https';
 import { clientFailureText } from '../../shared/client/clientShell.ts';
 import { decodePairing } from '../../shared/client/pairingPayload.ts';
@@ -32,7 +33,7 @@ export async function pinnedJson(options: {
           text += chunk.toString();
 
           if (text.length > 1024 * 1024) {
-            request.destroy(new Error('Ответ машины слишком большой.'));
+            request.destroy(new Error(desktopText('desktop.pairingResponseTooLarge')));
           }
         });
         response.on('end', () => {
@@ -40,20 +41,22 @@ export async function pinnedJson(options: {
             const value = JSON.parse(text) as Record<string, unknown>;
 
             if (failure || response.statusCode !== 200) {
-              reject(new Error(clientFailureText(failure || value.error)));
+              reject(new Error(clientFailureText(failure || value.error, desktopLocale())));
             } else {
               resolve(value);
             }
           } catch {
-            reject(new Error('Машина вернула неверный ответ.'));
+            reject(new Error(desktopText('desktop.pairingInvalidResponse')));
           }
         });
         response.on('error', reject);
       });
 
-      request.setTimeout(3000, () => request.destroy(new Error('Машина не отвечает.')));
+      request.setTimeout(3000, () => request.destroy(new Error(desktopText('desktop.pairingTimeout'))));
       request.on('error', (error) => reject(new Error(clientFailureText(
-        error.message === 'identityMismatch' ? error.message : (error as NodeJS.ErrnoException).code))));
+        error.message === 'identityMismatch' ? error.message : (error as NodeJS.ErrnoException).code,
+        desktopLocale(),
+      ))));
       request.end(body === undefined ? undefined : JSON.stringify(body));
     });
   } finally {
@@ -83,7 +86,7 @@ export function createPairing(options: {
         identity = await options.identity.create(options.directory, 'GrigDesk');
       } catch (error) {
         if ((error as Error).message === 'secure_store_unavailable') {
-          throw new Error('Защищённое хранилище ключей недоступно. Разблокируйте связку ключей.');
+          throw new Error(desktopText('desktop.secureStoreUnavailable'));
         }
 
         throw error;
@@ -100,7 +103,7 @@ export function createPairing(options: {
       const hello = await pinnedJson(connection, '/api/client/hello');
 
       if (hello.fp !== payload.fp || typeof hello.name !== 'string') {
-        throw new Error('Это не тот сервер.');
+        throw new Error(desktopText('desktop.wrongServer'));
       }
 
       return options.profiles.add({

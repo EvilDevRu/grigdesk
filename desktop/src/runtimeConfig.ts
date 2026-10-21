@@ -1,3 +1,4 @@
+import { desktopText } from './locale.ts';
 import { assertServerBinaryFile, recoverRuntimeSelection } from '../../server/src/lib/selectSeaServer.ts';
 import { readTextOrNull } from '../../shared/node/files.ts';
 import { verifySeaRuntime } from '../../shared/node/seaRuntime.ts';
@@ -187,7 +188,7 @@ export function decodePreparedBinary(value: unknown, binary: string, expected?: 
   const prepared = decodePreparedRuntime(value, expected ?? (value as PreparedBinary)?.packageId);
 
   if (prepared.installationBin !== path.dirname(binary)) {
-    throw new Error('Подготовка не соответствует выбранному серверному ELF');
+    throw new Error(desktopText('desktop.preparationMismatch'));
   }
 
   return prepared;
@@ -254,7 +255,7 @@ async function prepareBinary(
 
     for (const file of [prepared.root, prepared.node, prepared.engine, prepared.installationBin]) {
       if (await realpath(file) !== file) {
-        throw new Error('Подготовка вернула путь через символическую ссылку');
+        throw new Error(desktopText('desktop.preparationSymlink'));
       }
     }
 
@@ -295,7 +296,7 @@ async function loadBinaryRuntime(
     const origin = localOrigin(`http://127.0.0.1:${port}`);
 
     if (!origin) {
-      throw new Error('Некорректный порт GrigDesk');
+      throw new Error(desktopText('desktop.invalidPort'));
     }
 
     if (input.purpose === 'inspect') {
@@ -378,7 +379,7 @@ async function loadBinaryRuntime(
   } catch {
     await handle?.release();
 
-    return { problem: 'package', message: 'Серверный ELF недоступен или повреждён; повторите выбор.' };
+    return { problem: 'package', message: desktopText('desktop.serverElfDamaged') };
   }
 }
 
@@ -491,7 +492,7 @@ export async function loadServerRuntime(input: RuntimeLoadInput): Promise<Runtim
     const code = (error as NodeJS.ErrnoException).code;
 
     if (code?.startsWith('server_selection_')) {
-      return { problem: 'invalid', message: `Выбор сервера не завершён: ${code}. Проверьте descriptor.` };
+      return { problem: 'invalid', message: desktopText('desktop.serverSelectionIncomplete', { code }) };
     }
 
     text = '';
@@ -500,7 +501,7 @@ export async function loadServerRuntime(input: RuntimeLoadInput): Promise<Runtim
   if (text === null) {
     return {
       problem: 'not_installed',
-      message: 'Сервер GrigDesk не установлен для приложения: выполните grigdesk-ctl desktop install.',
+      message: desktopText('desktop.serverNotInstalled'),
     };
   }
 
@@ -509,8 +510,7 @@ export async function loadServerRuntime(input: RuntimeLoadInput): Promise<Runtim
   if (!descriptor) {
     return {
       problem: 'invalid',
-      message: `Описание установки сервера повреждено: ${descriptorPath}. `
-        + 'Выполните grigdesk-ctl desktop install.',
+      message: desktopText('desktop.serverDescriptorDamaged', { path: descriptorPath }),
     };
   }
 
@@ -539,13 +539,13 @@ export async function loadServerRuntime(input: RuntimeLoadInput): Promise<Runtim
     if (!await input.deps.exists(path.join(root, relative), kind)) {
       return {
         problem: 'root',
-        message: `В каталоге GrigDesk ${root} нет ${relative}.`,
+        message: desktopText('desktop.runtimeFileMissing', { root, relative }),
       };
     }
   }
 
   if (sea && !await input.deps.checkRelease(root)) {
-    return { problem: 'package', message: `Серверный пакет GrigDesk повреждён: ${root}.` };
+    return { problem: 'package', message: desktopText('desktop.serverPackageDamaged', { root }) };
   }
 
   const parent = descriptor.version !== 1 ? { ...input.env, GRIGDESK_HOME: descriptor.home } : input.env;
@@ -575,7 +575,7 @@ export async function loadServerRuntime(input: RuntimeLoadInput): Promise<Runtim
   } catch {
     return {
       problem: 'invalid',
-      message: `Не удалось прочитать настройки сервера: ${envPath}.`,
+      message: desktopText('desktop.serverSettingsUnreadable', { path: envPath }),
     };
   }
 
@@ -594,7 +594,7 @@ export async function loadServerRuntime(input: RuntimeLoadInput): Promise<Runtim
   if (!sea && !input.bundledUi && !await input.deps.exists(index, 'file')) {
     return {
       problem: 'web',
-      message: `Нет собранного интерфейса: ${index}.`,
+      message: desktopText('desktop.interfaceMissing', { path: index }),
     };
   }
 
@@ -604,8 +604,11 @@ export async function loadServerRuntime(input: RuntimeLoadInput): Promise<Runtim
     if (!version || !isNodeVersionSupported(version)) {
       return {
         problem: 'node',
-        message: `Node ${node} недоступен или старше ${MIN_NODE_VERSION.split('.').slice(0, 2).join('.')}`
-          + ` (нужно ^${MIN_NODE_VERSION} || >=24.0.0).`,
+        message: desktopText('desktop.unsupportedNode', {
+          node,
+          minimum: MIN_NODE_VERSION.split('.').slice(0, 2).join('.'),
+          required: MIN_NODE_VERSION,
+        }),
       };
     }
   }
@@ -616,7 +619,7 @@ export async function loadServerRuntime(input: RuntimeLoadInput): Promise<Runtim
   if (!origin) {
     return {
       problem: 'invalid',
-      message: `Некорректный порт GrigDesk: ${port}.`,
+      message: desktopText('desktop.invalidPortValue', { port: String(port) }),
     };
   }
 

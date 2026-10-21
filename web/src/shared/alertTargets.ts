@@ -1,3 +1,6 @@
+import { translator, type LocaleSource } from '../../../shared/i18n/catalogs.ts';
+import { messageRef, type MessageRef } from '../../../shared/i18n/core.ts';
+
 export const ALERT_CHAT_QUERY = 'openChat';
 export const ALERT_TASK_QUERY = 'openTask';
 
@@ -38,15 +41,25 @@ export function alertTargetHash(target: AlertTarget): string {
  * Называет действие по виду цели одинаково для всех источников оповещений.
  * Подпись не зависит от текущего раздела приложения.
  */
-export function alertTargetLabel(target: AlertTarget): string {
-  if (target.kind === 'studio') {
-    return 'Открыть модель';
-  }
-  if (target.kind === 'chat') {
-    return 'Открыть чат';
-  }
+export function alertTargetLabel(target: AlertTarget, locale: LocaleSource = 'ru'): string {
+  return translator.resolveText(
+    alertTargetMessage(target), typeof locale === 'string' ? locale : locale.value,
+  );
+}
 
-  return target.kind === 'task' ? 'Открыть задачу' : 'Открыть конвейер';
+/**
+ * Действие оповещения хранит смысл до показа, а не снимок выбранного языка.
+ * Обычные подписи прежних прямых вызовов остаются совместимыми через alertTargetLabel.
+ */
+export function alertTargetMessage(target: AlertTarget): MessageRef {
+  const keys = {
+    studio: 'core.openModel',
+    chat: 'core.openChat',
+    task: 'core.openTask',
+    pipeline: 'core.openPipeline',
+  };
+
+  return messageRef(keys[target.kind]);
 }
 
 /**

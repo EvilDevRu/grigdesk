@@ -44,6 +44,7 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
 
   public final ShellState state;
   private final ProfileStore store;
+  private final ShellLocale locale;
   private final Pairing pairing;
   private final Factory factory;
   private final Scheduler scheduler;
@@ -69,6 +70,17 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   public ShellApi(ProfileStore store, Pairing pairing, Factory factory, Scheduler scheduler,
     Consumer<Runnable> worker, Consumer<String> navigate, Native nativeActions, DoubleSupplier random,
     int major, int minor) {
+    this(store, pairing, factory, scheduler, worker, navigate, nativeActions, random, major, minor, null);
+  }
+
+  /**
+   * Локаль установки необязательна для прежних потребителей ShellApi.
+   * Новый endpoint не зависит от машины и не вызывает переход WebView.
+   */
+  public ShellApi(ProfileStore store, Pairing pairing, Factory factory, Scheduler scheduler,
+    Consumer<Runnable> worker, Consumer<String> navigate, Native nativeActions, DoubleSupplier random,
+    int major, int minor, ShellLocale locale) {
+    this.locale = locale;
     this.store = store;
     this.pairing = pairing;
     this.factory = factory;
@@ -79,7 +91,7 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
     this.random = random;
     this.major = major;
     this.minor = minor;
-    state = new ShellState(store, major, minor);
+    state = new ShellState(store, major, minor, locale);
   }
 
   public Upstream upstream(String id) {
@@ -150,7 +162,9 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
         }, 5000));
       }
     } catch (Exception exception) {
-      throw new IllegalStateException("Не удалось обновить состояние связи.", exception);
+      throw new IllegalStateException(
+        ShellLocale.text(locale, "native.connectionStateFailure", "Не удалось обновить состояние связи."),
+        exception);
     }
   }
 
@@ -253,9 +267,18 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
    * Пути, управляющие символы и неоднозначные сегменты не принимаются.
    */
   public static String saveName(String name) {
+    return saveName(name, null);
+  }
+
+  /**
+   * Имя файла проверяется тем же предикатом в старых и новых оболочках.
+   * Локаль установки меняет только сообщение об отклонённом вводе.
+   */
+  public static String saveName(String name, ShellLocale locale) {
     if (name == null || name.trim().isEmpty() || name.length() > 180 || name.contains("/")
       || name.contains("\\") || name.contains("..") || name.matches(".*[\\x00-\\x1f\\x7f].*")) {
-      throw new IllegalArgumentException("Недопустимое имя файла.");
+      throw new IllegalArgumentException(
+        ShellLocale.text(locale, "native.invalidFileName", "Недопустимое имя файла."));
     }
 
     return name.trim();
@@ -295,7 +318,7 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
       }
 
       if (head.method().equals("POST") && path.equals("/__shell/save")) {
-        nativeActions.save(saveName(query.get("name")),
+        nativeActions.save(saveName(query.get("name"), locale),
           query.getOrDefault("type", "application/octet-stream"),
           body);
         return PipeResponse.json(200, new JSONObject().put("ok", true));
@@ -303,6 +326,17 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
 
       String text = StaticAssets.readText(body, 65536);
       JSONObject data = new JSONObject(text.isEmpty() ? "{}" : text);
+      if (head.method().equals("POST") && path.equals("/__shell/locale") && locale != null) {
+        if (data.length() != 1 || !(data.opt("preference") instanceof String)) {
+          throw new IllegalArgumentException(locale.text("native.invalidLanguage"));
+        }
+
+        locale.setPreference(data.getString("preference"));
+        state.changed();
+
+        return PipeResponse.json(200, state.snapshot());
+      }
+
       String navigation = null;
       boolean move = false;
 
@@ -346,11 +380,12 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
         while (fields.hasNext()) {
           String key = fields.next();
           if (!key.equals("name") && !key.equals("address")) {
-            throw new IllegalArgumentException("Неверные поля машины.");
+            throw new IllegalArgumentException(
+              ShellLocale.text(locale, "native.invalidMachineFields", "Неверные поля машины."));
           }
         }
 
-        ProfileStore.validate(name, address, profile.getString("fp"));
+        ProfileStore.validate(name, address, profile.getString("fp"), locale);
         boolean changed = !address.equals(profile.getString("address"));
 
         if (changed) {
@@ -379,10 +414,11 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
     } catch (Exception exception) {
       Throwable cause = ClientFailure.unwrap(exception);
       String message = cause instanceof IllegalArgumentException || cause instanceof IllegalStateException
-        ? cause.getMessage() : "Не удалось выполнить действие. Проверьте связь и повторите.";
+        ? cause.getMessage() : locale == null ? "Не удалось выполнить действие. Проверьте связь и повторите."
+          : locale.text("native.actionFailure");
 
       if (message != null && java.util.Set.of("invalid_pairing", "unsupported_address").contains(message)) {
-        message = ClientFailure.message(message);
+        message = ClientFailure.message(message, locale);
       }
 
       return PipeResponse.json(400, new JSONObject()

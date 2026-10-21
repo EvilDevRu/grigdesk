@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { checkI18n } from './check-i18n.mjs';
 import { checkNativeTitles } from './check-native-titles.mjs';
 import { checkUiBoundary } from './check-ui-boundary.mjs';
 import { checkUiDependencyBoundary } from './check-ui-dependency-boundary.mjs';
@@ -8,6 +9,7 @@ import { checkUiGalleryBoundary } from './check-ui-gallery-boundary.mjs';
 import { checkUiStyleInjection } from './check-ui-style-injection.mjs';
 
 const checks = [
+  ['interface language', checkI18n],
   ['native/structural boundary', checkUiBoundary],
   ['dependency boundary', checkUiDependencyBoundary],
   ['file naming', checkUiFileNaming],

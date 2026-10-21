@@ -1,3 +1,4 @@
+import { desktopLocale, desktopText, setDesktopLocale } from './locale.ts';
 import {
   app,
   BrowserWindow,
@@ -93,7 +94,8 @@ const dataDirectory = process.env.GRIGDESK_DESKTOP_DATA_DIR;
 
 if (dataDirectory !== undefined) {
   if (!path.isAbsolute(dataDirectory)) {
-    dialog.showErrorBox('GrigDesk', 'Каталог данных приложения должен быть абсолютным.');
+    setDesktopLocale('system', app.getPreferredSystemLanguages()[0] ?? '');
+    dialog.showErrorBox('GrigDesk', desktopText('desktop.dataDirectoryNotAbsolute'));
     app.exit(1);
   } else {
     app.setPath('userData', dataDirectory);
@@ -322,6 +324,9 @@ function createSurfaceWindow(url: string, _target: SurfaceTarget, index: number)
   const window = new BrowserWindow({
     ...options,
     ...bounds,
+    // Карточка оформляется целиком своей шапкой: системных кнопок поверх неё нет,
+    // окно двигают за шапку, а закрывает его собственная кнопка карточки.
+    titleBarOverlay: false,
     minWidth: Math.min(600, bounds.width),
     minHeight: Math.min(600, bounds.height),
     webPreferences: {
@@ -391,7 +396,7 @@ function configureWindow(
     onChild: (child) => configureWindow(child, origin, options),
   });
   window.webContents.on('context-menu', (_event, params) => {
-    const template = contextMenuTemplate(params, (url) => clipboard.writeText(url));
+    const template = contextMenuTemplate(params, (url) => clipboard.writeText(url), desktopLocale());
 
     if (template.length > 0 && !window.isDestroyed()) {
       Menu.buildFromTemplate(template).popup({ window });
@@ -420,7 +425,8 @@ function fatal(error: unknown): void {
   void quit.request({
     reason: 'failure',
     exitCode: 1,
-    message: error instanceof Error && error.message ? error.message : 'Окно не удалось запустить.',
+    message: error instanceof Error && error.message
+      ? error.message : desktopText('desktop.windowStartFailure'),
   });
 }
 
@@ -437,7 +443,7 @@ async function showFatalDialog(message: string, signal: AbortSignal): Promise<vo
     type: 'error',
     title: 'GrigDesk',
     message,
-    buttons: ['Закрыть'],
+    buttons: [desktopText('core.close')],
     signal,
   });
 }
@@ -448,14 +454,14 @@ async function showFatalDialog(message: string, signal: AbortSignal): Promise<vo
  */
 function timeoutMessage(phase: StartupPhase): string {
   if (phase === 'splash') {
-    return 'Заставка не загрузилась за 90 секунд.';
+    return desktopText('desktop.splashTimeout');
   }
 
   if (phase === 'server') {
-    return 'Не удалось подготовить локальный интерфейс за 90 секунд.';
+    return desktopText('desktop.interfaceTimeout');
   }
 
-  return 'Интерфейс GrigDesk не отрисовался.';
+  return desktopText('desktop.interfaceNotPainted');
 }
 
 /**
@@ -506,7 +512,7 @@ function showSplash(signal: AbortSignal): Promise<void> {
       }
     };
 
-    const cancel = () => finish(new Error('Старт окна отменён.'));
+    const cancel = () => finish(new Error(desktopText('desktop.windowStartAborted')));
 
     /**
      * Показ ждёт оба условия: документ загружен и пришёл ready-to-show.
@@ -530,13 +536,23 @@ function showSplash(signal: AbortSignal): Promise<void> {
       show();
     });
     signal.addEventListener('abort', cancel, { once: true });
-    window.loadFile(path.join(__dirname, 'splash', 'index.html')).then(() => {
+    window.loadFile(path.join(__dirname, 'splash', 'index.html')).then(async () => {
+      const text = JSON.stringify(desktopText('desktop.loading'));
+      const language = JSON.stringify(desktopLocale());
+      const script = `(async () => {
+        document.documentElement.lang = ${language};
+        document.querySelector('.status').textContent = ${text};
+        await new Promise(requestAnimationFrame);
+        await new Promise(requestAnimationFrame);
+      })()`;
+
+      await window.webContents.executeJavaScript(script);
       loaded = true;
       show();
     }, (error: unknown) => {
       const detail = error instanceof Error ? ` ${error.message}` : '';
 
-      finish(new Error(`Заставка не загрузилась.${detail}`));
+      finish(new Error(desktopText('desktop.splashLoadFailure', { detail })));
     });
   });
 }
@@ -550,7 +566,7 @@ async function createMainWindow(origin: string, stored: DesktopSettings): Promis
     openSettings: () => {
       settingsRequest?.open();
     },
-  })));
+  }, desktopLocale())));
 
   const grigDeskSession = session.fromPartition(LOCAL_PARTITION);
 
@@ -606,9 +622,7 @@ async function createMainWindow(origin: string, stored: DesktopSettings): Promis
  * Supervisor запускается в фоне после выбора местного профиля и не задерживает UI.
  */
 async function prepare(signal: AbortSignal): Promise<void> {
-  settingsFile = path.join(app.getPath('userData'), 'settings.json');
-
-  const stored = await readSettings(settingsFile);
+  const stored = settings!;
   const loaded = await loadServerRuntime({
     purpose: 'inspect',
     env: process.env,
@@ -650,6 +664,13 @@ async function prepare(signal: AbortSignal): Promise<void> {
     uiDir,
     secret: pipeSecret,
     appApi,
+    systemLanguage: app.getPreferredSystemLanguages()[0] ?? '',
+    onLocale: (preference) => {
+      setDesktopLocale(preference, app.getPreferredSystemLanguages()[0] ?? '');
+      Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate({
+        openSettings: () => settingsRequest?.open(),
+      }, desktopLocale())));
+    },
     nativeWindows: {
       open: async (origin, target) => surfaceWindows?.open(origin, target) ?? false,
 
@@ -812,14 +833,14 @@ async function prepare(signal: AbortSignal): Promise<void> {
  */
 async function connectMain(signal: AbortSignal): Promise<void> {
   if (!mainWindow || !pipeOrigin) {
-    throw new Error('Главное окно GrigDesk не создано.');
+    throw new Error(desktopText('desktop.mainWindowMissing'));
   }
 
   await loadDocument(mainWindow, pipeOrigin + '/', signal);
   signal.throwIfAborted();
 
   if (mainDocumentCode !== 200) {
-    throw new Error('Установка повреждена. Переустановите приложение.');
+    throw new Error(desktopText('desktop.installationDamaged'));
   }
 }
 
@@ -908,6 +929,10 @@ async function boot(): Promise<void> {
   if (quit.stopping) {
     return;
   }
+
+  settingsFile = path.join(app.getPath('userData'), 'settings.json');
+  settings = await readSettings(settingsFile);
+  setDesktopLocale(settings.uiLanguage ?? 'system', app.getPreferredSystemLanguages()[0] ?? '');
 
   bootStartedAt = Date.now();
   await startup.start();

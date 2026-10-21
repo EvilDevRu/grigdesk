@@ -1,11 +1,11 @@
 <template>
   <span v-if="tasks.length" class="board-timers-topbar">
-    <UiTopbarPanel title="Таймеры задач">
+    <UiTopbarPanel :title="t('core.taskTimers')">
       <template #trigger>
         <UiButton
           data-context="board-timers-topbar"
           variant="ghost"
-          :aria-label="`Таймеры задач: активных ${activeCount}, сегодня отработано ${workedToday}`"
+          :aria-label="t('core.taskTimersActiveWorkedToday', { activeCount: activeCount, workedToday: workedToday })"
         >
           <svg class="board-timers-topbar-icon" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 7.5v4.5l3 2 M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" />
@@ -16,15 +16,15 @@
 
       <template #meta>
         <span class="board-timers-popover-summary">
-          Активно
+          {{ t('core.active') }}
           <span class="board-timers-popover-active mono">{{ activeCount }}</span>
           <span aria-hidden="true">·</span>
-          сегодня
+          {{ t('core.today') }}
           <span class="board-timers-popover-today mono">{{ workedToday }}</span>
         </span>
       </template>
       <template #default="{ close }">
-        <section class="board-timers-popover" aria-label="Таймеры задач">
+        <section class="board-timers-popover" :aria-label="t('core.taskTimers')">
           <ul class="board-timers-popover-list">
             <li
               v-for="task in tasks"
@@ -95,7 +95,7 @@
             variant="outline"
             @click="openBoard(close)"
           >
-            Открыть доску
+            {{ t('core.openBoard') }}
           </UiButton>
         </span>
       </template>
@@ -104,6 +104,8 @@
 </template>
 
 <script setup>
+import { t } from '../../ui.ts';
+
 import { computed, onUnmounted, ref } from 'vue';
 
 import { hoursToHM, liveTimerSec, secToHMS } from '../../shared/format.ts';
@@ -142,8 +144,8 @@ const elapsed = (task) => secToHMS(liveTimerSec(task, now.value));
 const isTimerBusy = (task) => String(props.busyTaskId) === String(task.id);
 const timerActionLabel = (task) => (
   task.timerRunning
-    ? `Поставить таймер задачи #${task.id} на паузу`
-    : `Запустить таймер задачи #${task.id}`
+    ? t('core.pauseTaskTimer', { taskId: task.id })
+    : t('core.startTaskTimer', { taskId: task.id })
 );
 
 function openTask(taskId, close) {
