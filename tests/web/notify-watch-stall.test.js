@@ -11,6 +11,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { resolveLocaleText } from '../../shared/i18n/catalogs.ts';
+
 import { compileModule, webFile } from './helpers/compile-vue.js';
 
 const CRASHED = {
@@ -44,9 +46,10 @@ async function makeWatch(t) {
   globalThis.__notifyWatchHarness = harness;
   t.after(() => { delete globalThis.__notifyWatchHarness; });
 
-  const module = await compileModule(webFile('src/stores/notify-watch.js'), {
+  const module = await compileModule(webFile('src/stores/notifyWatch.ts'), {
     stubs: {
       '../shared/apiClient.ts': [
+        `export { failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,
         'export const api = {',
         '  async get(url) {',
         '    const harness = globalThis.__notifyWatchHarness;',
@@ -90,7 +93,8 @@ test('оборвавшийся прогон звонит, и в звонке с�
 
   assert.equal(harness.notifications.length, 1, 'авария обязана звонить');
   const [call] = harness.notifications;
-  assert.match(call.title, /Конвейер оборвался — #8324/);
+
+  assert.match(resolveLocaleText(call.title), /Конвейер оборвался — #8324/);
   // Заголовок карточки у аварии общий, поэтому в теле — подсказка: она единственная
   // говорит, что делать. Иначе оповещение дублировало бы само себя.
   assert.match(call.body, /запусти заново/);
@@ -143,7 +147,7 @@ test('другой узел, вставший так же, — отдельна�
   assert.equal(harness.notifications.length, 2);
   // У затыка полезен именно заголовок: он называет узел и причину, а подсказка общая.
   assert.match(harness.notifications[0].body, /замкнутый набор замечаний/);
-  assert.match(harness.notifications[1].title, /Конвейер встал — #900022/);
+  assert.match(resolveLocaleText(harness.notifications[1].title), /Конвейер встал — #900022/);
 });
 
 test('наблюдаемая проекция несёт уже загруженные этап и прогресс графа', async (t) => {
@@ -244,7 +248,7 @@ test('ворота: срочный тост ждёт решения челове
   const notice = harness.notifications[0]?.notice;
 
   assert.equal(notice?.id, 'conveyor-900001');
-  assert.match(notice.title, /Конвейер ждёт тебя — #900001/);
+  assert.match(resolveLocaleText(notice.title), /Конвейер ждёт тебя — #900001/);
   assert.equal(notice.tone, 'warning');
   assert.equal(notice.sticky, true);
 });

@@ -11,12 +11,12 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { t } from '../ui.ts';
-import { usePluginsStore } from '../stores/plugins.js';
+import { usePluginsStore } from '../stores/plugins.ts';
 import ToolsGrid from '../shared/layout/ToolsGrid.vue';
 
 const plugins = usePluginsStore();
@@ -26,7 +26,8 @@ if (!plugins.loaded) {
   plugins.load();
 }
 
-const items = computed(() => plugins.toolsNav.filter((item) => router.resolve(item.to).matched.length));
+const items = computed(() => plugins.toolsNav.filter((item: { to: string }) =>
+  router.resolve(item.to).matched.length));
 const badges = {};
 </script>
 

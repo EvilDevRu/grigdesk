@@ -10,7 +10,7 @@
     <!-- Речь принадлежит рабочему документу и сохраняет один controller при потере связи.
          Без оболочки потеря входа размонтирует Provider и освобождает browser resources. -->
     <SpeechProvider v-else-if="shell.present || auth.authenticated">
-      <div class="shell-workspace" :inert="shell.present && shell.status === 'locked' ? '' : undefined">
+      <div class="shell-workspace" :inert="shell.present && shell.status === 'locked' ? true : undefined">
       <TaskWindowPage v-if="surfaceDocument" :target="surfaceTarget" :ready="surfaceStarted" />
       <AppShell v-else :active="auth.authenticated && (!shell.present || shell.status === 'online')">
         <div v-if="!workspaceStarted" class="workspace-waiting" role="status">
@@ -36,7 +36,7 @@
   </template>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { asyncView } from './shared/asyncView.ts';
 import { showSectionLoadFailure } from './shared/sectionLoadFailure.ts';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -53,19 +53,19 @@ import TaskModal from './views/TaskModal.vue';
 import TaskWindowPage from './views/TaskWindowPage.vue';
 import { currentDesktopMode } from './shared/desktopSettings.ts';
 import { surfaceTargetFromUrl } from '../../shared/desktop/surfaceContract.ts';
-import { usePluginsStore } from './stores/plugins.js';
+import { usePluginsStore } from './stores/plugins.ts';
 import { startBoardRelay, startShellRelay, startShelfRelay } from './shared/windowRelay.ts';
 import { startTaskWindowSync, createQueuedReload } from './shared/taskWindowSync.ts';
 import DiffModal from './views/DiffModal.vue';
 import DocumentModal from './views/DocumentModal.vue';
-import { SpeechProvider } from './features/speech/provider.js';
-import { useBoardStore } from './stores/board.js';
-import { useSystemStore } from './stores/system.js';
-import { useAuthStore } from './stores/auth.js';
+import { SpeechProvider } from './features/speech/provider.ts';
+import { useBoardStore } from './stores/board.ts';
+import { useSystemStore } from './stores/system.ts';
+import { useAuthStore } from './stores/auth.ts';
 import { useSettingsStore } from './stores/settings.ts';
-import { useTaskFavoritesStore } from './stores/task-favorites.js';
+import { useTaskFavoritesStore } from './stores/taskFavorites.ts';
 import { useTaskShelfStore } from './stores/taskShelf.ts';
-import { useTaskSeenStore } from './stores/task-seen.js';
+import { useTaskSeenStore } from './stores/taskSeen.ts';
 import { useVideoSessionStore } from './stores/videoSession.ts';
 import { setSseEnabled, sseSubscribe } from './composables/useSse.ts';
 import { useShellStore } from './stores/shell.ts';
@@ -90,7 +90,7 @@ const shell = useShellStore();
 const showMachines = computed(() => shell.present && shell.showConnections);
 const workspaceStarted = ref(auth.authenticated);
 const connectionTone = computed(() => ['unpaired', 'revoked', 'identityMismatch', 'incompatible']
-  .includes(shell.status) ? 'warning' : 'info');
+  .includes(shell.status) ? 'warning' : 'neutral');
 const connectionMessage = computed(() => {
   const detail = connectionDetailText(shell.detail, uiLocale.value);
 
@@ -119,8 +119,8 @@ const SettingsModal = asyncView(() => import('./views/settings/SettingsModal.vue
 
 let pollingStarted = false;
 let pollingGeneration = 0;
-let stopShellRelay = null;
-let stopTaskWindowSync = null;
+let stopShellRelay: (() => void) | null = null;
+let stopTaskWindowSync: (() => void) | null = null;
 
 /**
  * Сигналы оболочки живут через offline, чтобы карточка могла восстановить подключение.
@@ -182,7 +182,10 @@ function startWindowSync() {
       data: JSON.parse(JSON.stringify(board.data)),
       readAt: board.readAt,
     } : null),
-    watchLoads: (callback) => board.$onAction(({ name, after }) => {
+    watchLoads: (callback) => board.$onAction(({ name, after }: {
+      name: string;
+      after: (callback: (readAt: unknown) => void) => void;
+    }) => {
       if (name === 'load') {
         after((readAt) => {
           if (typeof readAt === 'number' && readAt === board.readAt) {
@@ -262,6 +265,7 @@ onMounted(async () => {
     localStorage.removeItem('grigdesk-chat-panel-composer-h');
     localStorage.removeItem('grigdesk-companion-device-v1');
   } catch { /* storage может быть недоступен */ }
+
   auth.watchUnauthorized();
   startDocumentShellRelay();
   await shell.start(surfaceDocument ? { poll: false } : undefined);

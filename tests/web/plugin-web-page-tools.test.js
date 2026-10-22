@@ -1,3 +1,4 @@
+import { loadProductModule } from './helpers/compile-vue.js';
 // Страница пользовательского плагина в рейке: стор превращает включённый плагин с папкой
 // web и пунктом навигации в страницу по /ext/<id>, реестр — в инструмент с общей
 // панелью-iframe; выключенный или без страницы в рейку не попадает.
@@ -5,7 +6,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
-import { normalizeNavItem, usePluginsStore } from '../../web/src/stores/plugins.js';
+
+const { normalizeNavItem, usePluginsStore } = await loadProductModule('src/stores/plugins.ts');
+
 import { pluginPageRoute } from '../../web/src/shared/tools/catalog.ts';
 import { compileModule, webFile } from './helpers/compile-vue.js';
 
@@ -29,7 +32,13 @@ function plugin(overrides = {}) {
     description: '',
     system: false,
     enabled: true,
-    nav: { path: '/anything', label: 'Обзор', icon: 'plugin', group: 'dock', order: 5 },
+    nav: {
+      path: '/anything',
+      label: 'Обзор',
+      icon: 'plugin',
+      group: 'dock',
+      order: 5
+    },
     web: '/api/ext/viewer/web/',
     settings: [],
     values: {},
@@ -46,6 +55,7 @@ test('пункт навигации плагина со страницей ве�
 
 test('стор отдаёт страницы только включённых плагинов с папкой web и навигацией', () => {
   setActivePinia(createPinia());
+
   const store = usePluginsStore();
 
   store.list = [
@@ -58,7 +68,12 @@ test('стор отдаёт страницы только включённых �
   store.loaded = true;
 
   assert.deepEqual(store.webPages, [{
-    id: 'viewer', src: '/api/ext/viewer/web/', label: 'Обзор', icon: 'plugin', order: 5, group: 'dock',
+    id: 'viewer',
+    src: '/api/ext/viewer/web/',
+    label: 'Обзор',
+    icon: 'plugin',
+    order: 5,
+    group: 'dock',
   }]);
   // Навигация по-прежнему считает всех включённых с nav — мёртвые ссылки отсеивает AppShell
   // по роутеру; у страницы плагина адрес живой.
@@ -68,7 +83,12 @@ test('стор отдаёт страницы только включённых �
 test('реестр добавляет страницу плагина инструментом с панелью-iframe поверх встроенных', () => {
   const plugins = {
     webPages: [{
-      id: 'viewer', src: '/api/ext/viewer/web/', label: 'Обзор', icon: 'plugin', order: 5, group: 'dock',
+      id: 'viewer',
+      src: '/api/ext/viewer/web/',
+      label: 'Обзор',
+      icon: 'plugin',
+      order: 5,
+      group: 'dock',
     }],
   };
   const tools = pluginTools(plugins);

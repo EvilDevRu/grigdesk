@@ -36,7 +36,7 @@ test('UI gallery остаётся отдельным dev entry без product de
 
 test('UI gallery guard ловит private import, production link и dist artifact', (t) => {
   const root = fixtureRepo(t, {
-    'web/dev/ui-gallery/main.ts': "import '../../src/stores/auth.js';",
+    'web/dev/ui-gallery/main.ts': "import '../../src/stores/auth.ts';",
     'web/src/App.vue': '<script setup>const marker = "dev/ui-gallery";</script>',
     'web/ui-gallery.html': '<script type="module" src="/dev/ui-gallery/main.ts"></script>',
     'web/dist/assets/ui-gallery.js': 'GrigDesk UI Gallery',

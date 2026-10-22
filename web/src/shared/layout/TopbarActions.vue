@@ -6,7 +6,7 @@
   </Teleport>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // Телепортирует содержимое в слот действий топбара (#tb-slot в AppShell).
 // Любой экран оборачивает свои кнопки в <TopbarActions>…</TopbarActions> — они появляются
 // в топбаре и исчезают при уходе с экрана. Унификация места действий.

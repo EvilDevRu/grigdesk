@@ -46,17 +46,21 @@
           :fill="index === 0 && provider.available !== false ? '#F6D85A' : 'currentColor'" />
   </svg>
   <span v-else class="fb" :style="{ width: size + 'px', height: size + 'px', fontSize: size * 0.62 + 'px' }">
-    {{ (provider.name || '?')[0].toUpperCase() }}
+    {{ (provider.name || '?')[0]!.toUpperCase() }}
   </span>
 </template>
 
-<script setup>
-import { computed } from 'vue';
+<script setup lang="ts">
+import { computed, type PropType } from 'vue';
+import type { ProviderEntry } from '../../../shared/chat/providersContracts.ts';
 
 // Иконка LLM-исполнителя по id из реестра (/api/providers).
 // Известным рисуем фирменный знак, неизвестным — кружок с первой буквой имени.
 const props = defineProps({
-  provider: { type: Object, required: true },
+  provider: {
+    type: Object as PropType<Pick<ProviderEntry, 'id' | 'name' | 'available'>>,
+    required: true,
+  },
   size: { type: Number, default: 16 },
   equalHeight: {
     type: Boolean,
@@ -66,7 +70,7 @@ const props = defineProps({
 
 // Границы видимого рисунка, измеренные в браузере; у Claude учтена толщина штриха.
 // В топбаре общая высота важнее квадратного кадра, поэтому широкий кит получает больше ширины.
-const markBounds = {
+const markBounds: Record<string, [number, number, number, number]> = {
   claude: [1.3, 1.3, 21.4, 21.4],
   codex: [0.163, 0, 23.674, 24],
   kimi: [0, 0, 30.119, 32.001],

@@ -26,7 +26,7 @@ const { record } = contractDecoders((path) => {
 export type GraphPosition = [number, number];
 
 // [подпись, подзаголовок?, класс?] — второй и третий элементы необязательны.
-export type GraphNodeDefinition = [string, string?, string?];
+export type GraphNodeDefinition = [string | number, string?, string?];
 
 // [откуда, куда, вид, подпись, класс?]
 export type GraphEdge = [string, string, string, string, string?];

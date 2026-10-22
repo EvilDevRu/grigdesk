@@ -379,12 +379,12 @@
                       v-if="answerFor(question)"
                       class="clarify-status"
                       :class="{
-                        warn: answerFor(question).status === 'human_required',
+                        warn: answerFor(question)!.status === 'human_required',
                       }"
                     >
-                      {{ answerFor(question).status === 'human_required'
+                      {{ answerFor(question)!.status === 'human_required'
                         ? 'Арбитр оставил вопрос человеку'
-                        : answerFor(question).actor === 'grigdesk-arbiter'
+                        : answerFor(question)!.actor === 'grigdesk-arbiter'
                           ? 'Арбитр — машинный ответ'
                           : 'Ответил человек' }}
                     </span>
@@ -430,7 +430,7 @@
                     <small>{{ question.options.length ? 'необязательно' : 'своими словами' }}</small>
                   </div>
                   <UiTextarea
-                    v-model="clarifyDrafts[question.id].text"
+                    v-model="clarifyDrafts[question.id]!.text"
                     class="clarify-text"
                     data-role="task-clarification"
                     rows="2"
@@ -771,7 +771,7 @@
             <OpenDiffButton
               @click="close('action')"
               data-context="task-footer-action"
-              :task-id="taskId"
+              :task-id="taskId!"
             />
                 </div>
               </template>
@@ -780,7 +780,7 @@
           <!-- Обычный запуск показывает только человеческое решение. Immutable-техника
                видна кратко и раскрывается отдельно для редкой ручной корректировки. -->
           <div v-if="launchForm" class="lform">
-            <div v-if="launchOpts.profiles?.length > 1" class="lrow">
+            <div v-if="launchOpts!.profiles?.length! > 1" class="lrow">
               <label class="llbl" for="launch-profile">Профиль</label>
               <UiSelect
                 id="launch-profile"
@@ -790,7 +790,7 @@
                 :disabled="launchOptionsBusy || busy === 'launch'"
                 @change="changeLaunchProfile"
               >
-                <option v-for="p in launchOpts.profiles" :key="p" :value="p">{{ p }}</option>
+                <option v-for="p in launchOpts!.profiles" :key="p" :value="p">{{ p }}</option>
               </UiSelect>
               <span v-if="launchOptionsBusy" class="lhint">
                 <UiSpinner decorative /> читаю каталог…
@@ -807,10 +807,10 @@
                 @change="changeLaunchRoute"
               >
                 <option
-                  v-for="r in launchOpts.routes"
+                  v-for="r in launchOpts!.routes"
                   :key="r"
                   :value="r"
-                  :title="launchOpts.routeOptions?.[r]?.title || ''"
+                  :title="launchOpts!.routeOptions?.[r]?.title || ''"
                 >{{ r }}</option>
               </UiSelect>
               <span v-if="launchRouteIsSuggested" class="lhint suggested">
@@ -827,7 +827,7 @@
                 почему: {{ routeSuggestionReason }}
               </span>
             </div>
-            <div v-if="launchOpts.runners?.length" class="lrow">
+            <div v-if="launchOpts!.runners?.length" class="lrow">
               <label class="llbl" for="launch-runner">Исполнитель</label>
               <UiSelect
                 id="launch-runner"
@@ -836,8 +836,8 @@
                 compact
                 :disabled="launchOptionsBusy || busy === 'launch'"
               >
-                <option value="">Из профиля<template v-if="launchOpts.defaultRunner"> ({{ providerLabel(launchOpts.defaultRunner) }})</template></option>
-                <option v-for="r in launchOpts.runners" :key="r" :value="r">{{ providerLabel(r) }}</option>
+                <option value="">Из профиля<template v-if="launchOpts!.defaultRunner"> ({{ providerLabel(launchOpts!.defaultRunner) }})</template></option>
+                <option v-for="r in launchOpts!.runners" :key="r" :value="r">{{ providerLabel(r) }}</option>
               </UiSelect>
             </div>
 
@@ -877,7 +877,7 @@
             >
               <span class="lscope-skip-title">Триаж предлагает НЕ делать:</span>
               <ul>
-                <li v-for="line in launchOpts.scopeSuggestion.skip" :key="line">{{ line }}</li>
+                <li v-for="line in launchOpts!.scopeSuggestion.skip" :key="line">{{ line }}</li>
               </ul>
               <span>Не согласен — допиши пункт в критерии выше.</span>
             </div>
@@ -887,7 +887,7 @@
               <div class="ladvanced-body">
                 <template v-if="launchNeedsDelivery">
                   <label class="llbl">Целевые ветки из конфигурации профиля</label>
-                  <div v-for="repo in launchOpts.repositories" :key="repo.name" class="lrepo">
+                  <div v-for="repo in launchOpts!.repositories" :key="repo.name" class="lrepo">
                     <span class="mono">{{ repo.name }}</span>
                     <code class="mono">{{ repo.targetBranch }}</code>
                   </div>
@@ -945,7 +945,7 @@
                 variant="solid"
                 aria-label="Запустить задачу"
                 :loading="busy === 'launch'"
-                :disabled="!!busy || launchOptionsBusy || !!launchOpts.error || !!launchValidationError"
+                :disabled="!!busy || launchOptionsBusy || !!launchOpts!.error || !!launchValidationError"
                 loading-label="Запускаю задачу"
                 @click="launchSelected"
               >
@@ -963,11 +963,24 @@
   </TaskCardFrame>
 </template>
 
-<script setup>
-import { ref, computed, watch, onUnmounted } from 'vue';
+<script setup lang="ts">
+import type {
+  BoardNamedItem, TaskComment, TaskDetail, TaskLaunchOptions,
+} from '../shared/boardContracts.ts';
+import type { ChatAttachment } from '../shared/chatContracts.ts';
+import type { PipelineTask } from '../shared/pipelineContracts.ts';
+import type {
+  AnalysisDetail, AnalysisQuestion, AnalysisClarificationEntry, AnalysisMeta,
+} from '../../../shared/pipeline/analysisContracts.ts';
+import { isRecord, objectOrEmpty } from '../../../shared/lib/objects.ts';
+import { decodeBoardNamedItems, decodeTaskComments } from '../shared/boardContracts.ts';
+import { decodeChatAttachment } from '../shared/chatContracts.ts';
+import { decodeLiveGraph, decodePipelineTasks } from '../shared/pipelineContracts.ts';
+
+import { ref, computed, watch, onUnmounted, type PropType } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
-import { api } from '../shared/apiClient.ts';
+import { api, failureText } from '../shared/apiClient.ts';
 import { shellAction } from '../shared/shellClient.ts';
 import { leaveTaskForPipeline } from '../shared/taskWindowNavigation.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
@@ -991,17 +1004,17 @@ import {
   UiTooltip,
   vTooltip,
 } from '../ui';
-import { useUiStore } from '../stores/ui.js';
-import { useTasksStore } from '../stores/tasks.js';
-import { useBoardStore } from '../stores/board.js';
+import { useUiStore } from '../stores/ui.ts';
+import { useTasksStore } from '../stores/tasks.ts';
+import { useBoardStore } from '../stores/board.ts';
 import { analyzeTask, readAnalysisDetail, useAnalysisStore } from '../actions/analysis';
 import { analysisApi } from '../shared/analysisApi.ts';
 import { questionKey } from '../../../shared/pipeline/analysisContracts.ts';
-import { useTaskFavoritesStore } from '../stores/task-favorites.js';
+import { useTaskFavoritesStore } from '../stores/taskFavorites.ts';
 import { useTaskShelfStore } from '../stores/taskShelf.ts';
-import { usePluginsStore } from '../stores/plugins.js';
-import { useTaskSeenStore } from '../stores/task-seen.js';
-import { useDictationController } from '../features/speech/provider.js';
+import { usePluginsStore } from '../stores/plugins.ts';
+import { useTaskSeenStore } from '../stores/taskSeen.ts';
+import { useDictationController } from '../features/speech/provider.ts';
 import { liveTimerSec, mmss, secToHMS } from '../shared/format.ts';
 import { mdToHtml } from '../shared/md.ts';
 import { providerLabel } from '../shared/runnerDisplay.ts';
@@ -1009,8 +1022,14 @@ import OpenDiffButton from './OpenDiffButton.vue';
 import TaskCardFrame from './TaskCardFrame.vue';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
 
+interface ClarifyDraft {
+  text: string;
+  optionIds: string[];
+  attachments: ChatAttachment[];
+}
+
 const props = defineProps({
-  presentation: { type: String, default: 'dialog' },
+  presentation: { type: String as PropType<'dialog' | 'document'>, default: 'dialog' },
 });
 
 const COMPLETED_STATUS = 5;
@@ -1026,30 +1045,43 @@ const plugins = usePluginsStore();
 const seen = useTaskSeenStore();
 const { taskId } = storeToRefs(ui);
 
-const detail = ref(null);
+const detail = ref<TaskDetail | null>(null);
 const loading = ref(false);
-const busy = ref(null);   // какое действие выполняется
-const err = ref(null);
+const busy = ref<string | null>(null);   // какое действие выполняется
+const err = ref<string | null>(null);
 const commentText = ref('');
 const now = ref(Date.now());
 
-let ticker = null;
+let ticker: ReturnType<typeof setInterval> | null = null;
 
 // Таймер задачи — из кеша доски (там timerRunning/elapsed/startedAt).
 const boardTask = computed(() => {
-  const d = board.data; if (!d || !taskId.value) return null;
-  const id = Number(taskId.value);
+  const d = board.data;
+
+  if (!d || !taskId.value) {
+    return null;
+  }
+
+  const id = Number(taskId.value!);
+
   for (const list of [d.tasks, d.toReview, d.created, d.accomplice, d.auditor]) {
     const t = (list || []).find((x) => x.id === id);
-    if (t) return t;
+
+    if (t) {
+      return t;
+    }
   }
+
   return null;
 });
 const taskContext = useUiContextSource('task', { layer: 'overlay', active: false });
-function taskContextDetails(id) {
+
+function taskContextDetails(id: string | number) {
   const title = detail.value?.title || boardTask.value?.title || '';
+
   return { taskId: String(id), ...(title ? { title } : {}) };
 }
+
 const running = computed(() => !!boardTask.value?.timerRunning);
 const completed = computed(() => detail.value?.status === COMPLETED_STATUS);
 const timerStartBlocked = computed(() => completed.value && !running.value);
@@ -1059,7 +1091,7 @@ const taskProject = computed(() => detail.value?.group_name || boardTask.value?.
 const taskResponsible = computed(() => detail.value?.responsible?.name || boardTask.value?.responsible || '');
 
 // B24 отдаёт описание с HTML/entities — чистим до читаемого текста.
-function htmlToText(s) {
+function htmlToText(s: string | null | undefined) {
   return (s || '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|li)>/gi, '\n')
@@ -1069,31 +1101,35 @@ function htmlToText(s) {
     .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
     .replace(/\n{3,}/g, '\n\n').trim();
 }
+
 const cleanDesc = computed(() => htmlToText(detail.value?.description));
 
 // Описание — текстом, но URL в нём должны жить: экранируем и оборачиваем ссылки.
-function linkify(s) {
-  const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function linkify(s: string) {
+  const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
   return esc(s || '').replace(/(https?:\/\/[^\s&]+(?:&amp;[^\s&]+)*)/g,
     (u) => `<a href="${u.replace(/&amp;/g, '&')}" target="_blank" rel="noopener">${u}</a>`);
 }
+
 const descHtml = computed(() => linkify(cleanDesc.value));
 
 // ── Редактирование основных полей задачи в Битрикс24 ──
-const editForm = ref(null);
-const editBaseline = ref(null);
-const editUsers = ref([]);
-const editGroups = ref([]);
+const editForm = ref<ReturnType<typeof taskEditSnapshot> | null>(null);
+const editBaseline = ref<ReturnType<typeof taskEditSnapshot> | null>(null);
+const editUsers = ref<BoardNamedItem[]>([]);
+const editGroups = ref<BoardNamedItem[]>([]);
 const editOptionsBusy = ref(false);
-const editOptionsError = ref(null);
-const editMessage = ref(null);
+const editOptionsError = ref<string | null>(null);
+const editMessage = ref<string | null>(null);
 let editOptionsRequest = 0;
 
 /**
  * Делает редактируемый снимок из DTO портала. Описание становится обычным текстом,
  * но уйдёт обратно только после фактического изменения человеком.
  */
-function taskEditSnapshot(task) {
+function taskEditSnapshot(task: TaskDetail) {
   const responsibleId = task?.responsible?.id ?? boardTask.value?.responsibleId ?? '';
   const groupId = Number(task?.group_id);
   const priority = Number(task?.priority);
@@ -1111,8 +1147,12 @@ function taskEditSnapshot(task) {
  * Оставляет текущее значение доступным, даже если сотрудник или проект уже исчез
  * из активного справочника портала. Без fallback открытие формы само меняло бы select.
  */
-function optionsWithCurrent(items, id, name, fallback) {
-  if (!id || items.some((item) => String(item.id) === String(id))) return items;
+function optionsWithCurrent(
+  items: BoardNamedItem[], id: string | undefined, name: string | undefined, fallback: string,
+) {
+  if (!id || items.some((item) => String(item.id) === String(id))) {
+    return items;
+  }
 
   return [{ id: Number(id), name: name || `${fallback} #${id}` }, ...items];
 }
@@ -1137,12 +1177,20 @@ const editGroupOptions = computed(() => optionsWithCurrent(
 function taskEditPayload() {
   const form = editForm.value;
   const baseline = editBaseline.value;
-  if (!form || !baseline) return {};
 
-  const fields = {};
+  if (!form || !baseline) {
+    return {};
+  }
+
+  const fields: Record<string, unknown> = {};
   const title = form.title.trim();
-  if (title !== baseline.title) fields.title = title;
-  if (form.description !== baseline.description) fields.description = form.description;
+
+  if (title !== baseline.title) {
+    fields.title = title;
+  }
+  if (form.description !== baseline.description) {
+    fields.description = form.description;
+  }
   if (form.groupId !== baseline.groupId) {
     fields.groupId = form.groupId ? Number(form.groupId) : null;
   }
@@ -1152,6 +1200,7 @@ function taskEditPayload() {
   if (Number(form.priority) !== Number(baseline.priority)) {
     fields.priority = Number(form.priority);
   }
+
   return fields;
 }
 
@@ -1166,28 +1215,37 @@ const editCanSave = computed(() => (
  * заголовок, описание и уже известные значения всё равно можно сохранить.
  */
 async function loadEditOptions() {
-  if (!editForm.value) return;
+  if (!editForm.value) {
+    return;
+  }
 
   const requestId = ++editOptionsRequest;
+
   editOptionsBusy.value = true;
   editOptionsError.value = null;
+
   const [users, groups] = await Promise.allSettled([
     api.get('/api/b24/users'),
     api.get('/api/b24/groups'),
   ]);
-  if (requestId !== editOptionsRequest || !editForm.value) return;
+
+  if (requestId !== editOptionsRequest || !editForm.value) {
+    return;
+  }
 
   const failures = [];
+
   if (users.status === 'fulfilled') {
-    editUsers.value = Array.isArray(users.value?.users) ? users.value.users : [];
+    editUsers.value = decodeBoardNamedItems(users.value, 'users');
   } else {
     failures.push('исполнителей');
   }
   if (groups.status === 'fulfilled') {
-    editGroups.value = Array.isArray(groups.value?.groups) ? groups.value.groups : [];
+    editGroups.value = decodeBoardNamedItems(groups.value, 'groups');
   } else {
     failures.push('проекты');
   }
+
   editOptionsError.value = failures.length
     ? `Не удалось загрузить: ${failures.join(' и ')}`
     : null;
@@ -1195,10 +1253,18 @@ async function loadEditOptions() {
 }
 
 /** Открывает форму на точном снимке показанной карточки и начинает загрузку справочников. */
+
+/**
+ * Открывает форму на снимке показанной карточки и загружает справочники.
+ * Повторное открытие не сбрасывает уже введённые человеком изменения.
+ */
 function openTaskEdit() {
-  if (!detail.value || editForm.value) return;
+  if (!detail.value || editForm.value) {
+    return;
+  }
 
   const snapshot = taskEditSnapshot(detail.value);
+
   editBaseline.value = snapshot;
   editForm.value = { ...snapshot };
   editMessage.value = null;
@@ -1206,6 +1272,11 @@ function openTaskEdit() {
   loadEditOptions();
 }
 
+
+/**
+ * Закрывает редактор и обесценивает его незавершённый запрос справочников.
+ * Поздний ответ не восстанавливает уже закрытую форму.
+ */
 function cancelTaskEdit() {
   editOptionsRequest += 1;
   editOptionsBusy.value = false;
@@ -1219,17 +1290,24 @@ function cancelTaskEdit() {
  * Поздний ответ другой задачи остаётся только в store-кеше и не меняет открытую модалку.
  */
 async function saveTaskEdit() {
-  if (!editCanSave.value || !taskId.value) return;
+  if (!editCanSave.value || !taskId.value) {
+    return;
+  }
 
-  const id = String(taskId.value);
+  const id = String(taskId.value!);
   const fields = taskEditPayload();
+
   await act('edit', async () => {
     const updated = await tasks.update(id, fields);
-    if (String(taskId.value) !== id) return;
+
+    if (String(taskId.value) !== id) {
+      return;
+    }
 
     detail.value = updated;
     cancelTaskEdit();
     editMessage.value = 'Изменения сохранены в Битрикс24.';
+
     if ((Object.hasOwn(fields, 'title') || Object.hasOwn(fields, 'description'))
         && triage.value?.analysis) {
       editMessage.value += ' Триаж основан на прежней постановке — запустите переоценку.';
@@ -1245,37 +1323,68 @@ async function saveTaskEdit() {
 // ни цитат, ни имени чата, и придумывать их за него нельзя.
 const tgLinks = computed(() => detail.value?.telegram?.links || []);
 
-function tgTime(sec) {
-  if (!sec) return '';
+function tgTime(sec: number | undefined) {
+  if (!sec) {
+    return '';
+  }
+
   return new Date(sec * 1000).toLocaleString('ru-RU',
-    { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
 }
 // «ещё 1 сообщение / 3 сообщения / 5 сообщений» — общего хелпера склонения
 // во фронте нет, а хвост без согласования читается как опечатка.
-function tgPlural(n) {
+function tgPlural(n: number) {
   const teen = n % 100;
-  if (teen >= 11 && teen <= 14) return 'сообщений';
+
+  if (teen >= 11 && teen <= 14) {
+    return 'сообщений';
+  }
+
   const one = n % 10;
-  if (one === 1) return 'сообщение';
-  if (one >= 2 && one <= 4) return 'сообщения';
+
+  if (one === 1) {
+    return 'сообщение';
+  }
+  if (one >= 2 && one <= 4) {
+    return 'сообщения';
+  }
+
   return 'сообщений';
 }
 
+/**
+ * Загружает карточку через общий кеш задач с прежним принудительным обновлением.
+ * Отказ остаётся в открытой карточке и не превращается в пустой успешный ответ.
+ */
 async function loadDetail(force = false) {
-  if (!taskId.value) return;
-  loading.value = true; err.value = null;
-  try { detail.value = await tasks.load(taskId.value, force); }
-  catch (e) { err.value = e.message; }
-  finally { loading.value = false; }
+  if (!taskId.value) {
+    return;
+  }
+
+  loading.value = true;
+  err.value = null;
+
+  try {
+    detail.value = await tasks.load(taskId.value!, force);
+  } catch (e) {
+    err.value = failureText(e);
+  } finally {
+    loading.value = false;
+  }
 }
 
 // ── Триаж: оценка сложности/рисков разведкой кода (без стенда) ──
 const analysisStore = useAnalysisStore();
-const triage = ref(null);        // ответ /api/analysis/:id
+const triage = ref<AnalysisDetail | null>(null);        // ответ /api/analysis/:id
 const showNote = ref(false);     // разведнота развёрнута
 const showClarifyHistory = ref(false);
 const showAnalysisDetails = ref(false);
-let triageTimer = null;
+let triageTimer: ReturnType<typeof setInterval> | null = null;
 const analysisManifest = computed(() => plugins.byId('analysis'));
 // Старый сервер ещё не отдаёт manifest триажа: до ручного рестарта считаем его включённым.
 const analysisEnabled = computed(() => analysisManifest.value?.enabled !== false);
@@ -1283,13 +1392,13 @@ const triageState = computed(() => triage.value?.status?.state || null);
 const triageBusy = computed(() => triageState.value === 'queued' || triageState.value === 'running');
 const noteHtml = computed(() => (triage.value?.note ? mdToHtml(triage.value.note) : ''));
 
-const TRIAGE_WORK_LABELS = {
+const TRIAGE_WORK_LABELS: Record<string, string> = {
   feature: 'Новая функциональность',
   debug: 'Исправление ошибки',
   perf: 'Оптимизация',
   hunt: 'Поиск дефектов',
 };
-const CONFIDENCE_LABELS = {
+const CONFIDENCE_LABELS: Record<string, string> = {
   high: 'Высокая',
   medium: 'Средняя',
   low: 'Низкая',
@@ -1297,7 +1406,7 @@ const CONFIDENCE_LABELS = {
 const triageWorkLabel = computed(() => {
   const kind = triage.value?.analysis?.route_guess;
 
-  return TRIAGE_WORK_LABELS[kind] || kind || 'Тип работы не указан';
+  return TRIAGE_WORK_LABELS[kind || ''] || kind || 'Тип работы не указан';
 });
 
 /**
@@ -1316,13 +1425,13 @@ const triageMetrics = computed(() => {
       id: 'complexity',
       label: 'Сложность',
       value: triageScore(value.complexity),
-      tone: value.complexity >= 4 ? 'warning' : 'neutral',
+      tone: value.complexity! >= 4 ? 'warning' : 'neutral',
     },
     {
       id: 'risk',
       label: 'Риск',
       value: triageScore(value.risk),
-      tone: value.risk >= 4 ? 'danger' : value.risk === 3 ? 'warning' : 'neutral',
+      tone: value.risk! >= 4 ? 'danger' : value.risk === 3 ? 'warning' : 'neutral',
     },
     {
       id: 'diff',
@@ -1333,13 +1442,13 @@ const triageMetrics = computed(() => {
     {
       id: 'confidence',
       label: 'Уверенность',
-      value: CONFIDENCE_LABELS[value.confidence] || 'Не указана',
+      value: CONFIDENCE_LABELS[value.confidence || ''] || 'Не указана',
       tone: value.confidence === 'low' ? 'warning' : 'neutral',
     },
   ];
 });
 
-function triageScore(value) {
+function triageScore(value: unknown) {
   const score = Number(value);
 
   return Number.isInteger(score) && score >= 1 && score <= 5 ? `${score}/5` : '—';
@@ -1347,7 +1456,10 @@ function triageScore(value) {
 
 // По какому коду шла оценка: снимок ветки origin или рабочая копия, с короткой ревизией
 // и причиной, если снимок подготовить не удалось.
-function triageSourceLabel(key, repo) {
+function triageSourceLabel(
+  key: string,
+  repo: NonNullable<NonNullable<AnalysisDetail['analysis']>['repos']>[string],
+) {
   const where = repo.ref || 'рабочая копия';
   const revision = repo.sha ? ` @ ${repo.sha.slice(0, 7)}` : '';
   const note = repo.note ? ` — ${repo.note}` : '';
@@ -1368,7 +1480,9 @@ const triageProgressLabel = computed(() => {
   if (busy.value === 'clarify') {
     return 'уточнения сохраняются…';
   }
+
   const again = Boolean(triage.value?.analysis);
+
   if (triageState.value === 'running') {
     return again ? 'переоценка идёт…' : 'разведка идёт…';
   }
@@ -1380,6 +1494,7 @@ const triageProgressLabel = computed(() => {
 // человек ждёт так же, как саму работу, а пустая панель без счётчика выглядит зависшей.
 const triageProgressElapsed = computed(() => {
   const startedAt = Number(triage.value?.status?.startedAt || triage.value?.status?.queuedAt || 0);
+
   if (!triageBusy.value || !startedAt) {
     return '';
   }
@@ -1387,34 +1502,43 @@ const triageProgressElapsed = computed(() => {
   return mmss(Math.max(0, (now.value - startedAt) / 1000));
 });
 
-function normalizeTriageQuestions(values) {
+function normalizeTriageQuestions(values: unknown): AnalysisQuestion[] {
   return (Array.isArray(values) ? values : []).map((raw, index) => {
-    const text = typeof raw === 'string' ? raw.trim() : String(raw?.text || '').trim();
-    const id = typeof raw === 'object' && raw?.id
-      ? String(raw.id)
+    const item = objectOrEmpty(raw);
+    const text = typeof raw === 'string' ? raw.trim() : String(item.text || '').trim();
+    const id = typeof raw === 'object' && item.id
+      ? String(item.id)
       : `legacy-${index}-${text.slice(0, 40)}`;
+
     return {
       id,
       text,
-      options: (Array.isArray(raw?.options) ? raw.options : []).map((option, optionIndex) => ({
-        id: String(option?.id || `legacy-option-${optionIndex}`),
-        label: String(option?.label || option || ''),
-        description: String(option?.description || ''),
+      options: (Array.isArray(item.options) ? item.options : []).map((option, optionIndex) => ({
+        id: String(objectOrEmpty(option).id || `legacy-option-${optionIndex}`),
+        label: String(objectOrEmpty(option).label || option || ''),
+        description: String(objectOrEmpty(option).description || ''),
       })).filter((option) => option.label),
-      recommendation: raw?.recommendation || null,
+      recommendation: isRecord(item.recommendation)
+        && typeof item.recommendation.option === 'string' && typeof item.recommendation.reason === 'string'
+        ? { option: item.recommendation.option, reason: item.recommendation.reason } : null,
     };
   }).filter((question) => question.text);
 }
 
 const triageQuestions = computed(() => normalizeTriageQuestions(triage.value?.analysis?.questions));
-const clarifyDrafts = ref({});
-const clarifyEntries = ref([]);
-const clarifyComposerOpen = ref({});
-const activeQuestionId = ref(null);
+const clarifyDrafts = ref<Record<string, ClarifyDraft>>({});
+const clarifyEntries = ref<AnalysisClarificationEntry[]>([]);
+const clarifyComposerOpen = ref<Record<string, boolean>>({});
+const activeQuestionId = ref<string | null>(null);
 
+/**
+ * Новый набор вопросов сохраняет уже введённые ответы по их идентификаторам.
+ * Активный композер переключается только после исчезновения прежнего вопроса.
+ */
 function syncClarifyDrafts() {
-  const next = {};
-  const nextComposerOpen = {};
+  const next: Record<string, ClarifyDraft> = {};
+  const nextComposerOpen: Record<string, boolean> = {};
+
   for (const question of triageQuestions.value) {
     next[question.id] = clarifyDrafts.value[question.id] || {
       text: '',
@@ -1424,32 +1548,41 @@ function syncClarifyDrafts() {
     nextComposerOpen[question.id] = question.options.length === 0
       || clarifyComposerOpen.value[question.id] === true;
   }
+
   clarifyDrafts.value = next;
   clarifyComposerOpen.value = nextComposerOpen;
-  if (!next[activeQuestionId.value]) {
+
+  if (!next[activeQuestionId.value || '']) {
     activeQuestionId.value = triageQuestions.value[0]?.id || null;
   }
 }
 
-function draftFor(questionId) {
-  return clarifyDrafts.value[questionId] || { text: '', optionIds: [], attachments: [] };
+function draftFor(questionId: string) {
+  return clarifyDrafts.value[questionId] || {
+    text: '',
+    optionIds: [],
+    attachments: [],
+  };
 }
 
 // Ответ ищем и по идентификатору вопроса, и по смыслу его текста: следующий заход
 // триажа переписывает вопросы заново, и по одному id уже данный ответ пропадал из
 // карточки — человек отвечал второй раз на то же самое.
-function answerFor(question) {
+function answerFor(question: AnalysisQuestion) {
   const key = questionKey(question.text);
+
   for (let index = clarifyEntries.value.length - 1; index >= 0; index -= 1) {
-    const entry = clarifyEntries.value[index];
+    const entry = clarifyEntries.value[index]!;
+
     if (entry.questionId === question.id || (key && questionKey(entry.questionText) === key)) {
       return entry;
     }
   }
+
   return null;
 }
 
-function clarifyOptions(question) {
+function clarifyOptions(question: AnalysisQuestion) {
   return question.options.map((option) => ({
     value: option.id,
     label: option.label,
@@ -1457,75 +1590,113 @@ function clarifyOptions(question) {
   }));
 }
 
-function selectedClarifyOption(questionId) {
+function selectedClarifyOption(questionId: string) {
   return draftFor(questionId).optionIds[0] || null;
 }
 
-function recommendationOption(question) {
+function recommendationOption(question: AnalysisQuestion) {
   const option = String(question.recommendation?.option || '').trim();
+
   return question.options.find((candidate) => candidate.id === option)?.label || option;
 }
 
-function composerOpenFor(question) {
+function composerOpenFor(question: AnalysisQuestion) {
   return question.options.length === 0 || clarifyComposerOpen.value[question.id] === true;
 }
 
-function setComposerOpen(questionId, open) {
+function setComposerOpen(questionId: string, open: boolean) {
   clarifyComposerOpen.value[questionId] = open;
 }
 
+/**
+ * Опрос триажа продолжается только пока задача стоит в очереди или выполняется.
+ * Ошибка этого блока не закрывает карточку и не создаёт второй таймер опроса.
+ */
 async function loadTriage() {
-  if (!taskId.value || !analysisEnabled.value) return;
+  if (!taskId.value || !analysisEnabled.value) {
+    return;
+  }
+
   try {
-    triage.value = await readAnalysisDetail(taskId.value);
+    triage.value = await readAnalysisDetail(taskId.value!);
     syncClarifyDrafts();
   } catch { /* блок триажа не ломает модалку */ }
   // Пока идёт — подтягиваем статус; закончилось — останавливаемся.
   if (triageBusy.value && !triageTimer) {
     triageTimer = setInterval(loadTriage, 6000);
   } else if (!triageBusy.value && triageTimer) {
-    clearInterval(triageTimer); triageTimer = null;
+    clearInterval(triageTimer);
+    triageTimer = null;
   }
 }
+
 const analyzeNow = () => act('analyze', async () => {
-  if (!analysisEnabled.value) return;
-  await analyzeTask(taskId.value);
+  if (!analysisEnabled.value) {
+    return;
+  }
+
+  await analyzeTask(taskId.value!);
   await loadTriage();
 });
 
 const clarifyUploading = ref(false);
-async function onClarifyFiles(questionId, files) {
+
+async function onClarifyFiles(questionId: string, files: File[]) {
   await uploadClarifyFiles(questionId, files);
 }
-function dropClarifyAtt(questionId, file) {
+
+function dropClarifyAtt(questionId: string, file: string) {
   const draft = draftFor(questionId);
+
   draft.attachments = draft.attachments.filter((attachment) => attachment.file !== file);
 }
 // Скрин из буфера обмена (Ctrl+V прямо в поле) и перетаскивание файлов — как в чате.
-async function uploadClarifyFiles(questionId, files) {
-  if (!files.length) return;
+/**
+ * Вложение добавляется в уточнение после проверки ответа загрузки.
+ * Повреждённый ответ остаётся ошибкой и не публикует сломанную миниатюру.
+ */
+async function uploadClarifyFiles(questionId: string, files: File[]) {
+  if (!files.length) {
+    return;
+  }
+
   clarifyUploading.value = true;
+
   try {
     for (const f of files) {
       const fd = new FormData();
+
       fd.append('file', f, f.name || 'clipboard.png');
-      draftFor(questionId).attachments.push(await api.upload('/api/chat/upload', fd));
+      draftFor(questionId).attachments.push(decodeChatAttachment(await api.upload('/api/chat/upload', fd)));
     }
-  } catch (e2) { err.value = e2.message; }
-  finally { clarifyUploading.value = false; }
+  } catch (e2) {
+    err.value = failureText(e2);
+  } finally {
+    clarifyUploading.value = false;
+  }
 }
-function onClarifyPaste(questionId, e) {
+
+function onClarifyPaste(questionId: string, e: ClipboardEvent) {
   const files = [...(e.clipboardData?.items || [])]
     .filter((i) => i.kind === 'file' && i.type.startsWith('image/'))
-    .map((i) => i.getAsFile()).filter(Boolean);
-  if (files.length) { e.preventDefault(); uploadClarifyFiles(questionId, files); }
+    .map((i) => i.getAsFile()).filter((file): file is File => file !== null);
+
+  if (files.length) {
+    e.preventDefault();
+    uploadClarifyFiles(questionId, files);
+  }
 }
 // Сохраняются ЛОКАЛЬНО (t<id>.clarify.md), НЕ комментарием в B24: комментарии
 // видит заказчик, а рабочие пояснения — внутренняя кухня. Их читают триаж и конвейер.
 const clarifySaved = ref('');
+/**
+ * Ответы человека загружаются отдельно от перезаписываемой оценки триажа.
+ * При отказе сохраняется прежний пустой fallback истории уточнений.
+ */
 async function loadClarifications() {
   try {
-    const response = await analysisApi.clarifications(taskId.value);
+    const response = await analysisApi.clarifications(taskId.value!);
+
     clarifySaved.value = response.text || '';
     clarifyEntries.value = response.entries || [];
   } catch {
@@ -1533,18 +1704,21 @@ async function loadClarifications() {
     clarifyEntries.value = [];
   }
 }
+
 const hasClarifyAnswers = computed(() => triageQuestions.value.some((question) => {
   const draft = draftFor(question.id);
+
   return draft.text.trim() || draft.optionIds.length || draft.attachments.length;
 }));
 
-function selectClarifyOption(questionId, optionId) {
+function selectClarifyOption(questionId: string, optionId: string | string[] | null | undefined) {
   draftFor(questionId).optionIds = optionId == null ? [] : [String(optionId)];
 }
 
 const sendClarify = () => act('clarify', async () => {
   const answers = triageQuestions.value.map((question) => {
     const draft = draftFor(question.id);
+
     return {
       questionId: question.id,
       optionIds: [...draft.optionIds],
@@ -1557,6 +1731,7 @@ const sendClarify = () => act('clarify', async () => {
   }).filter((answer) => answer.text || answer.optionIds.length || answer.attachments.length);
   const legacyText = answers.map((answer) => {
     const draft = draftFor(answer.questionId);
+
     return [
       answer.text,
       ...draft.attachments
@@ -1566,73 +1741,117 @@ const sendClarify = () => act('clarify', async () => {
         .filter(Boolean),
     ].filter(Boolean).join('\n');
   }).filter(Boolean).join('\n\n');
-  const r = await analysisApi.answer(taskId.value, answers, legacyText);
+  const r = await analysisApi.answer(taskId.value!, answers, legacyText);
+
   clarifySaved.value = r.text || '';
   clarifyEntries.value = r.entries || clarifyEntries.value;
   clarifyDrafts.value = {};
   syncClarifyDrafts();
-  await analyzeTask(taskId.value);
+  await analyzeTask(taskId.value!);
   await loadTriage();
 });
 
 const arbitrateQuestions = () => act('arbitrate', async () => {
-  await analysisApi.arbitrate(taskId.value);
+  await analysisApi.arbitrate(taskId.value!);
   await Promise.all([loadClarifications(), loadTriage()]);
 });
 
 const dictationController = useDictationController();
 const dictationLease = dictationController.acquire('task-modal-analysis', {
+  /**
+   * Итог диктовки дописывается только в ещё существующий активный вопрос.
+   * Смена карточки не переносит распознанный текст в другое уточнение.
+   */
   onCommit(text) {
     const questionId = activeQuestionId.value;
-    if (!questionId || !clarifyDrafts.value[questionId]) return;
-    const current = clarifyDrafts.value[questionId].text.trimEnd();
-    clarifyDrafts.value[questionId].text = current ? `${current} ${text}` : String(text || '');
+
+    if (!questionId || !clarifyDrafts.value[questionId]) {
+      return;
+    }
+
+    const current = clarifyDrafts.value[questionId]!.text.trimEnd();
+
+    clarifyDrafts.value[questionId]!.text = current ? `${current} ${text}` : String(text || '');
   },
 });
 
-async function startClarifyDictation(questionId) {
+/**
+ * Переключение вопроса отменяет предыдущую диктовку до нового захвата.
+ * Отказ микрофона остаётся в карточке текущей задачи.
+ */
+async function startClarifyDictation(questionId: string) {
   if (activeQuestionId.value && activeQuestionId.value !== questionId) {
     await dictationLease.cancel();
   }
+
   activeQuestionId.value = questionId;
+
   try {
     await dictationLease.start();
   } catch (error) {
-    err.value = error?.message || 'Микрофон недоступен';
+    err.value = failureText(error, 'Микрофон недоступен');
   }
 }
 
 // ── Табы модалки: Триаж | Комментарии ──
 const mtab = ref('triage');
-const comments = ref(null);    // null = ещё не загружали
+const comments = ref<TaskComment[] | null>(null);    // null = ещё не загружали
 const comLoading = ref(false);
+/**
+ * Список комментариев проверяется до публикации в шаблоне карточки.
+ * Ошибка формы использует прежнее пустое состояние и снимает индикатор загрузки.
+ */
 async function loadComments() {
   comLoading.value = true;
-  try { comments.value = (await api.get(`/api/b24/task/${taskId.value}/comments`)).comments || []; }
-  catch { comments.value = []; }
-  finally { comLoading.value = false; }
+
+  try {
+    comments.value = decodeTaskComments(await api.get(`/api/b24/task/${taskId.value}/comments`));
+  } catch {
+    comments.value = [];
+  } finally {
+    comLoading.value = false;
+  }
 }
-watch(mtab, (t) => { if (t === 'comments' && comments.value === null) loadComments(); });
+
+watch(mtab, (t) => {
+  if (t === 'comments' && comments.value === null) {
+    loadComments();
+  }
+});
 
 // Уже ли задача на конвейере (есть в состоянии фабрики) — для защиты от повторного запуска.
-const conveyor = ref(null);
+const conveyor = ref<PipelineTask | null>(null);
 // Живой стенд задачи ({fePort, apiPort}) — чтобы снести его прямо отсюда.
-const sandbox = ref(null);
+const sandbox = ref<{ fePort: number; apiPort: number | null } | null>(null);
+/**
+ * Присутствие задачи в фабрике и её стенд загружаются независимо от карточки B24.
+ * Общий стенд и исторический реестр сохраняют запрет управления из карточки.
+ */
 async function loadConveyor() {
-  conveyor.value = null; sandbox.value = null;
-  if (!taskId.value) return;
+  conveyor.value = null;
+  sandbox.value = null;
+
+  if (!taskId.value) {
+    return;
+  }
+
   try {
-    const { tasks: list } = await api.get('/api/tasks');
-    conveyor.value = (list || []).find((t) => String(t.task) === String(taskId.value)) || null;
+    const { tasks: list } = decodePipelineTasks(await api.get('/api/tasks'));
+
+    conveyor.value = (list || []).find((t) => String(t.task) === String(taskId.value!)) || null;
   } catch { /* нет данных фабрики — не блокируем */ }
-  if (!conveyor.value) return;
+
+  if (!conveyor.value) {
+    return;
+  }
   // Порты стенда лежат не в списке задач, а в графе — тянем только для задач конвейера.
   // Общий стенд и исторический реестр принадлежат не этой карточке: их lifecycle
   // интерфейс не трогает.
   try {
-    const g = await api.get(`/api/tasks/${taskId.value}/graph`);
-    if (g?.fePort && !g.readOnly && g.workspaceMode !== 'shared') {
-      sandbox.value = { fePort: g.fePort, apiPort: g.apiPort || null };
+    const g = decodeLiveGraph(await api.get(`/api/tasks/${taskId.value}/graph`));
+
+    if (typeof g.fePort === 'number' && g.fePort && !g.readOnly && g.workspaceMode !== 'shared') {
+      sandbox.value = { fePort: g.fePort, apiPort: typeof g.apiPort === 'number' ? g.apiPort || null : null };
     }
   } catch { /* графа нет — кнопку сноса просто не покажем */ }
 }
@@ -1661,33 +1880,69 @@ function openConveyor() {
 // После сноса перечитываем состояние: сервер уносит реестр задачи в архив, то есть
 // задача уходит и с конвейера — иначе в карточке осталась бы кнопка «Уже на конвейере».
 const sandboxBusy = ref(false);
-const sandboxMsg = ref(null);
+const sandboxMsg = ref<string | null>(null);
+
+
+/**
+ * Сносит стенд только после подтверждения человека и один раз за действие.
+ * Результат остаётся в карточке, затем состояние конвейера перечитывается.
+ */
 async function sandboxDown() {
-  if (sandboxBusy.value) return;
+  if (sandboxBusy.value) {
+    return;
+  }
   if (!(await confirmDialog(
-    `Снести стенд задачи #${taskId.value}? Текущий прогон уйдёт в архив, после чего задачу можно будет отправить на конвейер заново. Ветка и незакоммиченные изменения сохранятся.`,
+    `Снести стенд задачи #${taskId.value}? Текущий прогон уйдёт в архив, `
+      + 'после чего задачу можно будет отправить на конвейер заново. '
+      + 'Ветка и незакоммиченные изменения сохранятся.',
     { danger: true, okText: 'Снести' },
-  ))) return;
-  sandboxBusy.value = true; err.value = null; sandboxMsg.value = null;
+  ))) {
+    return;
+  }
+
+  sandboxBusy.value = true;
+  err.value = null;
+  sandboxMsg.value = null;
+
   try {
     await api.post(`/api/tasks/${taskId.value}/sandbox/down`);
     await loadConveyor();
     sandboxMsg.value = 'Стенд снесён, прогон перенесён в архив';
   } catch (e) {
-    err.value = e.status === 501
+    err.value = objectOrEmpty(e).status === 501
       ? 'Снос стенда не настроен: нет GRIGDESK_SANDBOX_DOWN_CMD и down.sh у профиля.'
-      : e.message;
-  } finally { sandboxBusy.value = false; }
+      : failureText(e);
+  } finally {
+    sandboxBusy.value = false;
+  }
 }
 
-async function act(name, fn) {
-  busy.value = name; err.value = null;
-  try { await fn(); }
-  catch (e) { err.value = e.message; }
-  finally { busy.value = null; }
+/**
+ * Одна выполняемая команда задаёт индикатор и сообщение отказа карточки.
+ * Снятие busy происходит при любом исходе без повторной мутации сервера.
+ */
+async function act(name: string, fn: () => Promise<unknown>) {
+  busy.value = name;
+  err.value = null;
+
+  try {
+    await fn();
+  } catch (e) {
+    err.value = failureText(e);
+  } finally {
+    busy.value = null;
+  }
 }
-const toggleTimer = () => act('timer', () => tasks.timer(taskId.value, running.value ? 'pause' : 'start'));
-const complete = async () => { if (await confirmDialog('Завершить задачу?', { okText: 'Завершить' })) act('complete', async () => { await tasks.complete(taskId.value); ui.close(); }); };
+
+const toggleTimer = () => act('timer', () => tasks.timer(taskId.value!, running.value ? 'pause' : 'start'));
+const complete = async () => {
+  if (await confirmDialog('Завершить задачу?', { okText: 'Завершить' })) {
+    act('complete', async () => {
+      await tasks.complete(taskId.value!);
+      ui.close();
+    });
+  }
+};
 
 // Возобновление не возвращает детали задачи: после подтверждения перечитываем их.
 // Статус и доступные действия определяет портал, а ошибки остаются в карточке.
@@ -1697,12 +1952,12 @@ async function renew() {
   }
 
   await act('renew', async () => {
-    await tasks.renew(taskId.value);
+    await tasks.renew(taskId.value!);
     await loadDetail(true);
   });
 }
 
-const launchMsg = ref(null);
+const launchMsg = ref<string | null>(null);
 
 // ── Запуск на конвейер ──
 // Маршрут и критерии задаёт человек. Технические immutable-входы route engine форма
@@ -1712,10 +1967,10 @@ const launchMsg = ref(null);
 // тогда узлы маршрута читают пункты постановки как есть; переводчик формулирует критерии
 // только у маршрутов с планом. Выдумывать их за человека нельзя — отказ на приёмке
 // откатывает маршрут на сборку со сбросом всего хвоста.
-const launchForm = ref(null);   // форма открыта
-const launchOpts = ref(null);   // ответ /launch-options
+const launchForm = ref<ReturnType<typeof makeLaunchForm> | null>(null);   // форма открыта
+const launchOpts = ref<TaskLaunchOptions | null>(null);   // ответ /launch-options
 const launchOptionsBusy = ref(false);
-const DIAGNOSIS_LABELS = {
+const DIAGNOSIS_LABELS: Record<string, string> = {
   functional: 'поведение',
   performance: 'производительность',
   data: 'данные',
@@ -1724,18 +1979,23 @@ const DIAGNOSIS_LABELS = {
 let launchOptionsRequest = 0;
 // Рекомендацию маршрута считает сервер: только он знает, из этого ли каталога пришла
 // оценка и остался ли предложенный маршрут опубликованным. Клиент её не пересчитывает.
-function preferredLaunchRoute(opts) {
+function preferredLaunchRoute(opts: TaskLaunchOptions) {
   return opts.routeSuggestion?.route || opts.defaultRoute;
 }
 // Объём из триажа — подсказка формы, а не решение: пустое поле заполняется им один раз
 // при открытии, а введённое человеком (в т.ч. стёртое до пустоты при смене профиля)
 // не перезаписывается.
-function suggestedCriteria(opts) {
+function suggestedCriteria(opts: TaskLaunchOptions) {
   return (opts.scopeSuggestion?.criteria || []).join('\n');
 }
-function makeLaunchForm(opts, criteria = null) {
+/**
+ * Форма создаётся из каталога профиля, показанного человеку.
+ * Критерии сохраняются при смене профиля, а выбор исполнителя сбрасывается как прежде.
+ */
+function makeLaunchForm(opts: TaskLaunchOptions, criteria: string | null = null) {
   const route = preferredLaunchRoute(opts);
-  const needsInstrumentation = opts.routeOptions?.[route]?.instrumentationRequired;
+  const needsInstrumentation = opts.routeOptions?.[route!]?.instrumentationRequired;
+
   return {
     profile: opts.profile,
     route,
@@ -1751,67 +2011,130 @@ function makeLaunchForm(opts, criteria = null) {
     runner: '',
   };
 }
+
+
+/**
+ * Загружает каталог запуска для открытой задачи и создаёт форму выбора.
+ * Поколение запроса защищает её от ответа предыдущей карточки.
+ */
 async function openLaunch() {
-  if (conveyor.value) { launchMsg.value = 'Уже на конвейере'; return; }
-  if (launchOptionsBusy.value) return;
-  err.value = null; launchMsg.value = null;
+
+  if (conveyor.value) {
+    launchMsg.value = 'Уже на конвейере';
+
+    return;
+  }
+  if (launchOptionsBusy.value) {
+    return;
+  }
+
+  err.value = null;
+  launchMsg.value = null;
+
   const requestId = ++launchOptionsRequest;
   let opts = null;
+
   launchOptionsBusy.value = true;
-  try { opts = await tasks.launchOptions(taskId.value); }
-  catch (e) {
-    if (requestId === launchOptionsRequest) err.value = `Не удалось узнать параметры запуска: ${e.message}`;
+
+  try {
+    opts = await tasks.launchOptions(taskId.value!);
+  } catch (e) {
+    if (requestId === launchOptionsRequest) {
+      err.value = `Не удалось узнать параметры запуска: ${failureText(e)}`;
+    }
+
     return;
   } finally {
-    if (requestId === launchOptionsRequest) launchOptionsBusy.value = false;
+    if (requestId === launchOptionsRequest) {
+      launchOptionsBusy.value = false;
+    }
   }
-  if (requestId !== launchOptionsRequest) return;
+
+  if (requestId !== launchOptionsRequest) {
+    return;
+  }
+
   launchOpts.value = opts;
 
   // Если каталог выбранного по умолчанию профиля недоступен, при нескольких профилях
   // оставляем форму открытой: человек может выбрать другой опубликованный каталог.
   const profiles = opts.profiles?.length ? opts.profiles : [opts.profile];
+
   if (opts.error && profiles.length === 1) {
     err.value = opts.message || 'маршрут сейчас нельзя запустить';
+
     return;
   }
   // Триаж уже прикинул маршрут — показываем это подсказкой рядом, но выбирает человек.
   launchForm.value = makeLaunchForm(opts);
-  if (opts.error) err.value = opts.message || 'выбранный профиль сейчас нельзя запустить';
+
+  if (opts.error) {
+    err.value = opts.message || 'выбранный профиль сейчас нельзя запустить';
+  }
+
   return undefined;
 }
+
+
+/**
+ * Перечитывает параметры выбранного профиля, сохраняя критерии человека.
+ * При отказе возвращает прежний выбор, не публикуя ответ старого запроса.
+ */
 async function changeLaunchProfile() {
   const profile = launchForm.value?.profile;
-  if (!profile || launchOptionsBusy.value) return;
+
+  if (!profile || launchOptionsBusy.value) {
+    return;
+  }
+
   const previousProfile = launchOpts.value?.profile;
   const requestId = ++launchOptionsRequest;
-  const criteria = launchForm.value.criteria;
+  const criteria = launchForm.value!.criteria;
+
   launchOptionsBusy.value = true;
   err.value = null;
+
   try {
-    const opts = await tasks.launchOptions(taskId.value, profile);
-    if (requestId !== launchOptionsRequest || !launchForm.value) return;
+    const opts = await tasks.launchOptions(taskId.value!, profile);
+
+    if (requestId !== launchOptionsRequest || !launchForm.value) {
+      return;
+    }
+
     launchOpts.value = opts;
     launchForm.value = makeLaunchForm(opts, criteria);
-    if (opts.error) err.value = opts.message || 'выбранный профиль сейчас нельзя запустить';
+
+    if (opts.error) {
+    err.value = opts.message || 'выбранный профиль сейчас нельзя запустить';
+  }
   } catch (e) {
     if (requestId === launchOptionsRequest) {
-      if (launchForm.value && previousProfile) launchForm.value.profile = previousProfile;
-      err.value = `Не удалось выбрать профиль: ${e.message}`;
+      if (launchForm.value && previousProfile) {
+        launchForm.value.profile = previousProfile;
+      }
+
+      err.value = `Не удалось выбрать профиль: ${failureText(e)}`;
     }
   } finally {
-    if (requestId === launchOptionsRequest) launchOptionsBusy.value = false;
+    if (requestId === launchOptionsRequest) {
+      launchOptionsBusy.value = false;
+    }
   }
 }
 // Глубина — вторая половина рекомендации: человек видит не только «какой маршрут»,
 // но и «насколько короткий», а рядом — по каким числам оценки это вышло.
-const DEPTH_LABELS = { light: 'лёгкий', mid: 'средний', full: 'полный' };
-const triageDepthLabel = computed(() => DEPTH_LABELS[triage.value?.analysis?.route_depth] || '');
+const DEPTH_LABELS: Record<string, string> = {
+  light: 'лёгкий',
+  mid: 'средний',
+  full: 'полный',
+};
+const triageDepthLabel = computed(() => DEPTH_LABELS[triage.value?.analysis?.route_depth || ''] || '');
 // Кнопка называет маршрут, который откроется уже выбранным: путь от оценки триажа до
 // запуска — один клик, и человек заранее знает, с чем согласится.
 const launchOpenHint = computed(() => {
   const route = triage.value?.analysis?.route_guess;
   const depth = triageDepthLabel.value;
+
   return route
     ? `Открыть параметры запуска: триаж предлагает «${route}»${depth ? ` (${depth} маршрут)` : ''}`
     : 'Открыть параметры запуска фабрики по задаче';
@@ -1819,10 +2142,10 @@ const launchOpenHint = computed(() => {
 const routeSuggestion = computed(() => launchOpts.value?.routeSuggestion?.route || null);
 const routeSuggestionReason = computed(() => launchOpts.value?.routeSuggestion?.reason || '');
 const routeDepthLabel = computed(() => (
-  DEPTH_LABELS[launchOpts.value?.routeSuggestion?.depth] || ''
+  DEPTH_LABELS[launchOpts.value?.routeSuggestion?.depth || ''] || ''
 ));
 const launchRouteOption = computed(() => (
-  launchOpts.value?.routeOptions?.[launchForm.value?.route] || null
+  launchOpts.value?.routeOptions?.[launchForm.value?.route || ''] || null
 ));
 const launchNeedsDelivery = computed(() => launchRouteOption.value?.deliveryMode === 'publish');
 const launchNeedsInstrumentation = computed(() => Boolean(
@@ -1839,53 +2162,96 @@ const launchInstrumentationItems = computed(() => String(
 ).split('\n').map((item) => item.trim()).filter(Boolean));
 const launchInstrumentationSummary = computed(() => {
   const [first, ...rest] = launchInstrumentationItems.value;
-  if (!first) return 'scope не определён';
+
+  if (!first) {
+    return 'scope не определён';
+  }
+
   const short = first.split('/').pop();
+
   return rest.length ? `${short} + ещё ${rest.length}` : short;
 });
 const launchDiagnosisSummary = computed(() => (
-  DIAGNOSIS_LABELS[launchForm.value?.diagnosisKind] || launchForm.value?.diagnosisKind || 'поведение'
+  DIAGNOSIS_LABELS[launchForm.value?.diagnosisKind || ''] || launchForm.value?.diagnosisKind || 'поведение'
 ));
 const launchValidationError = computed(() => {
-  if (loading.value || !detail.value) return 'Постановка задачи ещё загружается.';
-  if (!launchForm.value?.route) return 'Выбери маршрут.';
-  if (!launchRouteOption.value?.deliveryMode) return 'Каталог не отдал delivery contract маршрута.';
-  if (launchOpts.value?.profileContractError) return launchOpts.value.profileContractError;
+  if (loading.value || !detail.value) {
+    return 'Постановка задачи ещё загружается.';
+  }
+  if (!launchForm.value?.route) {
+    return 'Выбери маршрут.';
+  }
+  if (!launchRouteOption.value?.deliveryMode) {
+    return 'Каталог не отдал delivery contract маршрута.';
+  }
+  if (launchOpts.value?.profileContractError) {
+    return launchOpts.value.profileContractError;
+  }
   if (launchNeedsDelivery.value) {
-    if (!launchOpts.value?.repositories?.length) return 'Профиль не объявил репозитории для SHIP.';
+    if (!launchOpts.value?.repositories?.length) {
+      return 'Профиль не объявил репозитории для SHIP.';
+    }
+
     const missing = launchOpts.value.repositories
       .filter((repo) => !repo.targetBranch?.trim())
       .map((repo) => repo.name);
-    if (missing.length) return `Профиль не настроил целевые ветки: ${missing.join(', ')}.`;
+
+    if (missing.length) {
+      return `Профиль не настроил целевые ветки: ${missing.join(', ')}.`;
+    }
   }
-  if (launchNeedsInstrumentation.value && !launchForm.value.instrumentationFiles.trim()) {
+  if (launchNeedsInstrumentation.value && !launchForm.value!.instrumentationFiles.trim()) {
     return 'Маршрут требует хотя бы один файл инструментации.';
   }
+
   return null;
 });
+
 function changeLaunchRoute() {
   if (!launchForm.value || !launchNeedsInstrumentation.value
-      || launchForm.value.instrumentationFiles.trim()) return;
-  launchForm.value.instrumentationFiles = (launchOpts.value?.instrumentationSuggestions || [])
+      || launchForm.value.instrumentationFiles.trim()) {
+    return;
+  }
+
+  launchForm.value!.instrumentationFiles = (launchOpts.value?.instrumentationSuggestions || [])
     .slice(0, 1).join('\n');
 }
-function launchErrorText(e) {
-  const code = e?.data?.error;
-  const known = {
+/**
+ * Известные коды запуска объясняются человеку до общего сообщения ошибки.
+ * Повреждённый ответ не превращает отказ команды в успешный запуск.
+ */
+function launchErrorText(e: unknown) {
+  const error = objectOrEmpty(e);
+  const data = objectOrEmpty(error.data);
+  const code = typeof data.error === 'string' ? data.error : '';
+  const known: Record<string, string> = {
     catalog_changed: 'Каталог маршрутов изменился. Перечитай параметры и поставь задачу заново.',
     run_exists: 'У задачи уже есть незакрытый прогон. Продолжи или закрой его на странице конвейера.',
   };
-  return known[code] || e?.data?.message || e?.message || 'Не удалось запустить задачу.';
+
+  return known[code] || (typeof data.message === 'string' ? data.message : '')
+    || failureText(e, 'Не удалось запустить задачу.');
 }
-async function doLaunch(payload) {
-  if (busy.value) return;
+/**
+ * Команда запуска отправляется один раз из уже проверенной формы.
+ * Сообщение результата строится из ACK, затем перечитывается состояние конвейера.
+ */
+async function doLaunch(payload: unknown) {
+  if (busy.value) {
+    return;
+  }
+
   busy.value = 'launch';
   err.value = null;
+
   try {
-    const r = await tasks.launch(taskId.value, payload);
+    const r = await tasks.launch(taskId.value!, payload);
+
     launchForm.value = null;
     launchMsg.value = r.outcome === 'already_running' ? 'Уже идёт на конвейере'
-      : r.outcome === 'launched' ? `Запущено (профиль ${r.profile}${r.route ? `, маршрут ${r.route}` : ''}${r.attempt ? `, попытка ${r.attempt.slice(0, 10)}…` : ''})`
+      : r.outcome === 'launched' ? `Запущено (профиль ${r.profile}`
+        + `${r.route ? `, маршрут ${r.route}` : ''}`
+        + `${r.attempt ? `, попытка ${r.attempt.slice(0, 10)}…` : ''})`
       : r.note || 'Отправлено';
     await loadConveyor();
   } catch (e) {
@@ -1894,25 +2260,30 @@ async function doLaunch(payload) {
     busy.value = null;
   }
 }
+/**
+ * Собирает прежний контракт запуска из видимого решения человека.
+ * Неявный исполнитель и отсутствующий hash каталога не добавляют лишние поля.
+ */
 function launchPayload() {
   const instrumentationFiles = launchNeedsInstrumentation.value
-    ? launchForm.value.instrumentationFiles.split('\n').map((s) => s.trim()).filter(Boolean)
+    ? launchForm.value!.instrumentationFiles.split('\n').map((s) => s.trim()).filter(Boolean)
     : [];
+
   return {
-    profile: launchForm.value.profile,
-    route: launchForm.value.route,
+    profile: launchForm.value!.profile,
+    route: launchForm.value!.route,
     title: detail.value?.title || '',
     description: cleanDesc.value || '',
     // По строке на критерий: пустые строки отбрасывает сборка тикета.
-    acceptanceCriteria: launchForm.value.criteria.split('\n').map((s) => s.trim()).filter(Boolean),
+    acceptanceCriteria: launchForm.value!.criteria.split('\n').map((s) => s.trim()).filter(Boolean),
     instrumentationFiles,
-    diagnosisKind: launchNeedsInstrumentation.value ? launchForm.value.diagnosisKind : '',
+    diagnosisKind: launchNeedsInstrumentation.value ? launchForm.value!.diagnosisKind : '',
     diagnosisSignal: launchNeedsInstrumentation.value
-      ? launchForm.value.diagnosisSignal.trim()
+      ? launchForm.value!.diagnosisSignal.trim()
       : '',
     // Исполнитель — только при явном выборе: пустое значение значит «по профилю»,
     // и сервер не должен получать лишний ключ.
-    ...(launchForm.value.runner ? { runnerPrimary: launchForm.value.runner } : {}),
+    ...(launchForm.value!.runner ? { runnerPrimary: launchForm.value!.runner } : {}),
     // Старт pin-ит тот каталог, который человек видел в форме: между её открытием и
     // запуском профиль мог опубликовать новый, и молча уехать по нему нельзя.
     ...(launchOpts.value?.catalogHash
@@ -1920,29 +2291,47 @@ function launchPayload() {
       : {}),
   };
 }
+
 const launchSelected = () => {
-  if (launchValidationError.value) return;
+  if (launchValidationError.value) {
+    return;
+  }
+
   return doLaunch(launchPayload());
 };
 const sendComment = () => act('comment', async () => {
-  await tasks.comment(taskId.value, commentText.value);
+  await tasks.comment(taskId.value!, commentText.value);
   commentText.value = '';
   loadComments();
 });
-const refresh = () => { loadDetail(true); board.load(true); };
-const toggleFavorite = () => favorites.toggle(taskId.value);
-const toggleShelf = () => shelf.toggle(taskId.value);
+const refresh = () => {
+  loadDetail(true);
+  board.load(true);
+};
+const toggleFavorite = () => favorites.toggle(taskId.value!);
+const toggleShelf = () => shelf.toggle(taskId.value!);
 let acknowledgedShelfTask = '';
-function acknowledgeShelfOnOpen(id = taskId.value) {
+/**
+ * Открытие карточки гасит накопленное внимание только один раз на задачу.
+ * Поздний отказ позволяет повторить подтверждение при следующем обновлении полки.
+ */
+function acknowledgeShelfOnOpen(id = taskId.value!) {
   const key = String(id || '');
+
   if (!key || !shelfEnabled.value || !shelf.loaded || !shelf.isOnShelf(key)
-    || acknowledgedShelfTask === key) return;
+    || acknowledgedShelfTask === key) {
+    return;
+  }
+
   acknowledgedShelfTask = key;
   void Promise.resolve(shelf.acknowledge(key)).then((ok) => {
-    if (!ok && String(taskId.value || '') === key) acknowledgedShelfTask = '';
+    if (!ok && String(taskId.value || '') === key) {
+      acknowledgedShelfTask = '';
+    }
   });
 }
-function onTaskDialogOpenChange(open) {
+
+function onTaskDialogOpenChange(open: boolean) {
   if (!open) {
     ui.close();
   }
@@ -1953,22 +2342,35 @@ watch(taskId, (id) => {
   acknowledgedShelfTask = '';
   cancelTaskEdit();
   editMessage.value = null;
+
   if (id) {
-    detail.value = null; launchMsg.value = null; sandboxMsg.value = null;
+    detail.value = null;
+    launchMsg.value = null;
+    sandboxMsg.value = null;
     taskContext.focus({
       routingScope: { kind: 'task', taskId: String(id) },
       details: taskContextDetails(id),
     });
-    launchForm.value = null; launchOpts.value = null;
-    launchOptionsRequest += 1; launchOptionsBusy.value = false;
-    triage.value = null; showNote.value = false;
+    launchForm.value = null;
+    launchOpts.value = null;
+    launchOptionsRequest += 1;
+    launchOptionsBusy.value = false;
+    triage.value = null;
+    showNote.value = false;
     showClarifyHistory.value = false;
     showAnalysisDetails.value = false;
-    mtab.value = 'triage'; comments.value = null; clarifyDrafts.value = {}; clarifySaved.value = '';
+    mtab.value = 'triage';
+    comments.value = null;
+    clarifyDrafts.value = {};
+    clarifySaved.value = '';
     clarifyEntries.value = [];
     clarifyComposerOpen.value = {};
     activeQuestionId.value = null;
-    if (analysisEnabled.value) loadClarifications();
+
+    if (analysisEnabled.value) {
+      loadClarifications();
+    }
+
     loadDetail();
     favorites.load(true);
     acknowledgeShelfOnOpen(id);
@@ -1977,28 +2379,45 @@ watch(taskId, (id) => {
     seen.markSeen([id]);
     loadConveyor();
     loadTriage();
-    if (!ticker) ticker = setInterval(() => { now.value = Date.now(); }, 1000);
+
+    if (!ticker) {
+      ticker = setInterval(() => {
+        now.value = Date.now();
+      }, 1000);
+    }
   } else {
     void dictationLease.cancel();
     taskContext.blur();
-    if (ticker) { clearInterval(ticker); ticker = null; }
-    if (triageTimer) { clearInterval(triageTimer); triageTimer = null; }
+
+    if (ticker) {
+      clearInterval(ticker);
+      ticker = null;
+    }
+    if (triageTimer) {
+      clearInterval(triageTimer);
+      triageTimer = null;
+    }
   }
 }, { immediate: true });
 
 // Полка загружается параллельно карточке. Если её снимок пришёл позже, открытая
 // задача всё равно должна погасить накопленный огонёк ровно один раз.
 watch(
-  () => [taskId.value, shelf.loaded, shelf.entries, shelfEnabled.value],
-  ([id]) => acknowledgeShelfOnOpen(id),
+  () => [taskId.value!, shelf.loaded, shelf.entries, shelfEnabled.value],
+  () => acknowledgeShelfOnOpen(),
 );
 watch(analysisEnabled, (enabled) => {
   if (!enabled) {
     void dictationLease.cancel();
-    if (triageTimer) { clearInterval(triageTimer); triageTimer = null; }
+
+    if (triageTimer) {
+      clearInterval(triageTimer);
+      triageTimer = null;
+    }
+
     return;
   }
-  if (taskId.value) {
+  if (taskId.value!) {
     loadClarifications();
     loadTriage();
   }
@@ -2006,13 +2425,22 @@ watch(analysisEnabled, (enabled) => {
 // Заголовок может приехать после открытия карточки. Обновляем bounded details, но не
 // focus revision: открытый позже Pipeline/Task overlay должен остаться верхним.
 watch(
-  () => [taskId.value, detail.value?.title || '', boardTask.value?.title || ''],
-  ([id]) => { if (id) taskContext.update({ details: taskContextDetails(id) }); },
+  () => [taskId.value!, detail.value?.title || '', boardTask.value?.title || ''],
+  ([id]) => {
+    if (id) {
+      taskContext.update({ details: taskContextDetails(id) });
+    }
+  },
   { immediate: true },
 );
 onUnmounted(() => {
-  if (ticker) clearInterval(ticker);
-  if (triageTimer) clearInterval(triageTimer);
+  if (ticker) {
+    clearInterval(ticker);
+  }
+  if (triageTimer) {
+    clearInterval(triageTimer);
+  }
+
   void dictationLease.release();
 });
 </script>

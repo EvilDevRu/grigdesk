@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { boardActivity, boardTaskIds } from '../../web/src/shared/board-activity.js';
+import { boardActivity, boardTaskIds } from '../../web/src/shared/boardActivity.ts';
 
 test('чип доски считает только задачи с живым таймером, а не все начатые', () => {
   const dashboard = {

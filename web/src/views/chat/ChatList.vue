@@ -148,10 +148,13 @@
   </aside>
 </template>
 
-<script setup>
+<script setup lang="ts">
+import type { ChatListRow } from '../../shared/chatContracts.ts';
+import type { UiFieldHandle } from '../../ui.ts';
+
 import { computed, nextTick, ref, watch } from 'vue';
-import { useChatStore } from '../../stores/chat.js';
-import { useProvidersStore } from '../../stores/providers.js';
+import { useChatStore } from '../../stores/chat.ts';
+import { useProvidersStore } from '../../stores/providers.ts';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
 import {
   confirmDialog,
@@ -167,12 +170,15 @@ import {
 
 // Телеграм-сайдбар чатов: поиск сверху, ниже — активные либо архивные чаты.
 // Строка: аватар, название, сниппет последнего сообщения (или совпадения при поиске), время.
+type ListRow = ChatListRow & { modelName: string };
+
 const chat = useChatStore();
 // open — «чат выбран, покажи его». Нужен мобильной раскладке, где список и чат делят одну
 // колонку: следить за activeId там мало — повторный тык по уже активному чату его не меняет.
 const emit = defineEmits(['open']);
 
 const prov = useProvidersStore();
+
 prov.load();
 
 const q = ref('');
@@ -190,17 +196,21 @@ const emptyLabel = computed(() => {
 
 // Строки уже с моделью чата: кто отвечает (иконка исполнителя) и короткое имя модели.
 // Резолвим здесь, а не в шаблоне — иначе поиск по реестру шёл бы на каждый рендер каждой строки.
-const rows = computed(() => chat.list(q.value, showArchived.value).map((r) => {
+const rows = computed(() => chat.list(q.value, showArchived.value).map((r: ChatListRow) => {
   const { model, provider } = prov.modelOf(r.modelRef || r.model);
 
-  return { ...r, provider, modelName: model?.name || '' };
+  return {
+    ...r,
+    provider,
+    modelName: model?.name || '',
+  };
 }));
 
 // Отправка из архивного разговора сама возвращает его в активные. В этот момент
 // переключаем и левый список: иначе открытый чат уже активный, а сайдбар продолжает
 // показывать архив, из которого его строка только что исчезла.
 watch(
-  () => chat.archived.some((session) => session.id === chat.activeId),
+  () => chat.archived.some((session: { id: string }) => session.id === chat.activeId),
   (archived, wasArchived) => {
     if (showArchived.value && wasArchived && !archived) {
       showArchived.value = false;
@@ -209,11 +219,15 @@ watch(
 );
 
 // Буква — фоллбэк, пока реестр исполнителей не загрузился (иначе аватар пустой).
-function letter(row) {
+function letter(row: ListRow) {
   return row.taskId ? '#' : (row.title[0] || '?').toUpperCase();
 }
 
-function avatarTitle(row) {
+/**
+ * Заголовок аватара называет модель и текущее состояние чата.
+ * Сжатие имеет отдельную подпись при том же индикаторе занятости.
+ */
+function avatarTitle(row: ListRow) {
   const modelName = row.modelName || 'Модель по умолчанию';
 
   if (row.compacting) {
@@ -236,7 +250,7 @@ const calendarDate = new Intl.DateTimeFormat('ru', { day: '2-digit', month: '2-d
  * Форматтер принадлежит смонтированному списку и создаётся один раз, а не для каждой строки.
  * При пересортировке сохраняется прежний календарный и относительный формат времени.
  */
-function ago(ts) {
+function ago(ts: number) {
   if (!ts) {
     return '';
   }
@@ -259,15 +273,15 @@ function ago(ts) {
   return calendarDate.format(new Date(ts));
 }
 
-const editId = ref(null);
+const editId = ref<string | null>(null);
 const editVal = ref('');
-const editEl = ref(null);
+const editEl = ref<UiFieldHandle<HTMLInputElement> | UiFieldHandle<HTMLInputElement>[] | null>(null);
 
 /**
  * Инлайн-редактор заменяет primary pressable, поэтому после рендера фокусируем
  * exposed handle поля из текущей строки и выделяем прежнее название целиком.
  */
-async function startEdit(r) {
+async function startEdit(r: ListRow) {
   editId.value = r.id;
   editVal.value = r.title;
 
@@ -275,8 +289,9 @@ async function startEdit(r) {
 
   // ref внутри v-for собирается в массив
   const el = Array.isArray(editEl.value) ? editEl.value[0] : editEl.value;
+
   el?.focus();
-  el?.select();
+  el?.select?.();
 }
 
 function commitEdit() {
@@ -293,12 +308,12 @@ function newChat() {
   emit('open');
 }
 
-function select(r) {
+function select(r: ListRow) {
   chat.selectChat(r.id);
   emit('open');
 }
 
-function restore(r) {
+function restore(r: ListRow) {
   chat.restoreArchived(r.id);
   showArchived.value = false;
 }
@@ -307,7 +322,7 @@ function restore(r) {
  * Активный чат сначала архивируется, архивный удаляется безвозвратно.
  * Диалог сохраняет эту разницу в тексте и danger-семантике до мутации store.
  */
-async function del(r) {
+async function del(r: ListRow) {
   const permanent = r.archived;
   const ok = await confirmDialog(
     permanent

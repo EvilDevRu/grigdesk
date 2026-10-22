@@ -6,14 +6,19 @@ import test from 'node:test';
 
 import { compileModule, webFile } from './helpers/compile-vue.js';
 
-const STORE_PATH = webFile('src/stores/providers.js');
+const STORE_PATH = webFile('src/stores/providers.ts');
 
+/**
+ * Проверяет настоящий стор с изолированной сетью для каждого сценария установки.
+ * Общая обработка ошибок остаётся продуктовой, чтобы не менять семантику отказов.
+ */
 async function providersStore(t, api) {
   globalThis.__providersStoreApi = api;
 
   const module = await compileModule(STORE_PATH, {
     stubs: {
-      '../shared/apiClient.ts': 'export const api = globalThis.__providersStoreApi;',
+      '../shared/apiClient.ts': `export const api = globalThis.__providersStoreApi;
+        export { failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,
     },
   });
   const { createPinia, setActivePinia } = await import(

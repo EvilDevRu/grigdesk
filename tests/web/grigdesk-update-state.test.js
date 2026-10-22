@@ -5,7 +5,7 @@ import {
   blockReasonLabel,
   grigDeskUpdateTone,
   UPDATE_STAGE_LABELS,
-} from '../../web/src/shared/grigdesk-update.js';
+} from '../../web/src/shared/grigdeskUpdate.ts';
 
 test('GrigDesk update dot follows failure, checkout, release priority', () => {
   assert.equal(grigDeskUpdateTone(null), '');

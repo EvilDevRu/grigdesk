@@ -29,19 +29,33 @@
   </section>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
+import type { PropType } from 'vue';
+
+import { isRecord } from '../../../../shared/lib/objects.ts';
+import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { api } from '../../shared/apiClient.ts';
 import { UiButton, UiTextarea } from '../../ui';
+
+interface BootstrapStopView {
+  reason: string;
+  visitId: string;
+  recordHash: string;
+  state?: string;
+  decision?: { recordHash?: string } | null;
+  verdict?: { findings?: Array<{ id: string; summary: string }> } | null;
+}
 
 const props = defineProps({
   task: [String, Number],
   profile: String,
   attempt: String,
-  stop: { type: Object, required: true },
+  stop: { type: Object as PropType<BootstrapStopView>, required: true },
   running: Boolean,
 });
-const emit = defineEmits(['changed']);
+
+const emit = defineEmits<{ changed: [] }>();
 
 const answer = ref('');
 const recorded = ref(false);
@@ -81,8 +95,8 @@ async function submit() {
         return;
       }
 
-      if (!result.ok || result.decision?.visitId !== stop.visitId
-          || result.decision?.stopHash !== stop.recordHash) {
+      if (!isRecord(result) || !result.ok || !isRecord(result.decision)
+          || result.decision.visitId !== stop.visitId || result.decision.stopHash !== stop.recordHash) {
         throw new Error('Сохранение ответа не подтверждено — обнови карточку.');
       }
 
@@ -96,9 +110,11 @@ async function submit() {
       return;
     }
 
+    const message = errorMessage(cause, 'Не удалось выполнить запрос');
+
     error.value = recorded.value
-      ? `Ответ сохранён, продолжение не запустилось: ${cause.message}`
-      : `Ответ не принят: ${cause.message}`;
+      ? `Ответ сохранён, продолжение не запустилось: ${message}`
+      : `Ответ не принят: ${message}`;
   } finally {
     busy.value = false;
   }

@@ -1,6 +1,6 @@
 # Адрес стенда: прямой порт текущего хоста
 
-`web/src/shared/sandbox.js` (`sandboxUrl(port)`) строит ссылку
+`web/src/shared/sandbox.ts` (`sandboxUrl(port)`) строит ссылку
 `http://<location.hostname>:<порт>/`. Пустой порт даёт `null`, отсутствие `location` —
 fallback `localhost`. IPv6 hostname сохраняет квадратные скобки. Схема всегда HTTP:
 стенды — обычные dev-серверы, ссылка открывается отдельной вкладкой.

@@ -9,7 +9,7 @@
 defineProps<{
   badge?: {
     n: number;
-    kind: string;
+    kind: string | null;
     title: string;
   } | null;
 }>();

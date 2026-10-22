@@ -44,7 +44,7 @@ async function compileView(view) {
         '../shared/settingsNavigation.ts': `
           export const openSettings = (request) => globalThis.__channelSettingsRequests.push(request);
         `,
-        '../stores/plugins.js': `
+        '../stores/plugins.ts': `
           export const usePluginsStore = () => ({
             loaded: true,
             list: [{ id: 'synthetic-inbox', nav: { path: '/inbox' } }],

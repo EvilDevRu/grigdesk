@@ -10,7 +10,7 @@
 // живёт один переход и не должен повторно открывать файл при возврате назад.
 import { watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useDockStore } from '../stores/dock.js';
+import { useDockStore } from '../stores/dock.ts';
 import { parseCodeRouteHref } from '../features/code/links';
 
 const route = useRoute();

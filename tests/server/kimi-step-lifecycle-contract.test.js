@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { createKimiStepNormalizer } from '../../server/src/lib/executors/_kimiSteps.ts';
-import { lineDiff, unifiedDiff } from '../../web/src/shared/diff.js';
+import { lineDiff, unifiedDiff } from '../../web/src/shared/diff.ts';
 
 const fixture = JSON.parse(readFileSync(
   new URL('./fixtures/kimi-acp-tool-lifecycle.json', import.meta.url),

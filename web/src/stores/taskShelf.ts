@@ -17,9 +17,9 @@ import { parseShelfState } from '../../../shared/b24/shelfContracts.ts';
 import type { ShelfEntry, ShelfReason } from '../../../shared/b24/shelfContracts.ts';
 import { sseSubscribe } from '../composables/useSse.ts';
 import { useAnalysisStore } from './analysis.ts';
-import { useNotifyWatchStore } from './notify-watch.js';
-import { useBoardStore } from './board.js';
-import { usePluginsStore } from './plugins.js';
+import { useNotifyWatchStore } from './notifyWatch.ts';
+import { useBoardStore } from './board.ts';
+import { usePluginsStore } from './plugins.ts';
 
 // Триаж уже на TypeScript, и полка читает его настоящий стор: собственная копия
 // формы разошлась бы с ним молча. Остальные соседи ещё на JavaScript, поэтому для

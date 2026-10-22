@@ -141,7 +141,7 @@
 import { computed } from 'vue';
 
 import { UiActionLink, UiButton, UiSpinner, vTooltip } from '../../ui';
-import { sandboxUrl } from '../../shared/sandbox.js';
+import { sandboxUrl } from '../../shared/sandbox.ts';
 import type {
   ShowcaseOverview,
   ShowcaseProjectSummary,

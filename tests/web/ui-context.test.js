@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createUiContextRegistry } from '../../web/src/stores/ui-context.js';
+import { createUiContextRegistry } from '../../web/src/stores/uiContext.ts';
 
 const route = (path = '/pipeline', title = 'Конвейер') => ({
   path,

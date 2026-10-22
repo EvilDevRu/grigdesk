@@ -1,7 +1,7 @@
 import { useRoute, useRouter } from 'vue-router';
 import type { RouteLocationNormalizedLoaded, Router } from 'vue-router';
 
-import { useDockStore } from '../../stores/dock.js';
+import { useDockStore } from '../../stores/dock.ts';
 import { TOOL_META_BY_ID } from './catalog.ts';
 import { viewportCanDock } from './viewport.ts';
 
@@ -13,8 +13,8 @@ export interface ToolIntent {
   [field: string]: unknown;
 }
 
-// Док ещё на JavaScript, и вывод типов не знает форму его действий. Объявлено ровно
-// то, что зовёт этот файл: очередь намерений, открытие и runtime-флаги панели.
+// Локальный порт ограничен действиями, которые нужны запуску инструмента:
+// очередь намерений, открытие и runtime-флаги панели.
 interface DockPort {
   runtime: Record<string, { focusNonce?: unknown } | undefined>;
   enqueue: (id: string, payload: ToolIntent) => void;
@@ -99,7 +99,7 @@ export interface ToolLauncher {
 export function useToolLauncher(): ToolLauncher {
   const route = useRoute();
   const router = useRouter();
-  const dock = useDockStore() as unknown as DockPort;
+  const dock: DockPort = useDockStore();
 
   const context: LaunchContext = {
     route,

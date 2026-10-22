@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { compileModule, webFile } from './helpers/compile-vue.js';
+import { loadProductModule } from './helpers/compile-vue.js';
 
 test('COMP-STT-13: authenticated provider создаёт один controller, inject и dispose при logout', async (t) => {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
@@ -27,10 +27,8 @@ test('COMP-STT-13: authenticated provider создаёт один controller, in
   ] = await Promise.all([
     import('../../web/node_modules/vue/index.mjs'),
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
-    compileModule(webFile('src/features/speech/provider.js'), {
-      stubs: {
-        '../../stores/chat.js': 'export const useChatStore = () => null;',
-      },
+    loadProductModule('src/features/speech/provider.ts', {
+      '../../stores/chat.ts': 'export const useChatStore = () => null;',
     }),
   ]);
   const created = [];

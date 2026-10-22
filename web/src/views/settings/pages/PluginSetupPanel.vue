@@ -32,7 +32,7 @@ import { t } from '../../../ui.ts';
 
 import { ref, watch, onBeforeUnmount } from 'vue';
 import { UiButton } from '../../../ui.ts';
-import { usePluginsStore } from '../../../stores/plugins.js';
+import { usePluginsStore } from '../../../stores/plugins.ts';
 import { failureText } from '../../../shared/apiClient.ts';
 import type {
   PluginListItem, PluginSetupStatus, PluginSetupItem,

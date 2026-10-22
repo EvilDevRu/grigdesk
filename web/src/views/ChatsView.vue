@@ -17,10 +17,10 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import { useChatStore } from '../stores/chat.js';
+import { useChatStore } from '../stores/chat.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useDockViewport } from '../shared/tools/viewport.ts';
 import ChatList from './chat/ChatList.vue';
@@ -46,19 +46,28 @@ watch(() => chat.revealRequest, (id) => {
 
 const { dockCapable } = useDockViewport();
 const chatsContext = useUiContextSource('chats', { layer: 'page', active: false });
+
 watch(activeId, (chatId) => {
-  if (chatId) chatsContext.focus({ details: { chatId } });
-  else chatsContext.blur();
+  if (chatId) {
+    chatsContext.focus({ details: { chatId } });
+  } else {
+    chatsContext.blur();
+  }
 }, { immediate: true });
 
 // CSS скрывает detail-pane на телефоне, но компонент остаётся mounted. Регистрируем
 // фактическую поверхность тем же breakpoint-контрактом, чтобы скрытый чат не гасил
 // unread и не подавлял уведомление.
 const pageSurface = chat.registerSurface('chats-page', { chatId: null, visible: false });
+
 watch([activeId, dockCapable, pane], ([chatId, wide, currentPane]) => {
   const visible = Boolean(chatId) && (wide || currentPane === 'chat');
+
   pageSurface.update({ chatId: chatId || null, visible });
-  if (visible) chat.markRead(chatId);
+
+  if (visible) {
+    chat.markRead(chatId!);
+  }
 }, { immediate: true });
 onMounted(() => {
   chat.ensure();
@@ -76,30 +85,50 @@ const LIST_DEF_W = 300;
 // (порог 900 в медиазапросах ChatSession отсчитывается от ширины ОКНА, а не колонки).
 const CHAT_MIN_W = 420;
 
-function storedListWidth() {
+/**
+ * Читает только явный положительный выбор ширины из настройки устройства.
+ * Отсутствие или отказ storage сохраняют прежнюю раскладку CSS.
+ */
+function storedListWidth(): number | null {
   try {
     const raw = Number(localStorage.getItem(LIST_WIDTH_KEY));
+
     return Number.isFinite(raw) && raw > 0 ? raw : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
-const host = ref(null);
-const splitter = ref(null);
+const host = ref<HTMLElement | null>(null);
+const splitter = ref<HTMLElement | null>(null);
 const listMaxW = ref(560);
 // Желаемая ширина отдельно от применённой: при временном сужении окна список ужимается,
 // а на широком экране возвращается к выбору человека — как разделитель дерева в «Коде».
 const listPreferred = ref(storedListWidth());
-const listWidth = computed(() => (listPreferred.value == null ? null : clampListWidth(listPreferred.value)));
-const layoutStyle = computed(() => (listWidth.value == null ? null : { '--chat-list-w': `${listWidth.value}px` }));
+const listWidth = computed(() => (
+  listPreferred.value == null ? null : clampListWidth(listPreferred.value)
+));
+const layoutStyle = computed(() => (
+  listWidth.value == null ? null : { '--chat-list-w': `${listWidth.value}px` }
+));
 
-function clampListWidth(value) {
+function clampListWidth(value: number) {
   const max = Math.max(LIST_MIN_W, listMaxW.value);
+
   return Math.round(Math.min(Math.max(LIST_MIN_W, value), max));
 }
 
+/**
+ * Ограничивает список измеренной шириной хоста, оставляя место самому чату.
+ * Нулевое измерение скрытой страницы не меняет последний доступный потолок.
+ */
 function measureListMax() {
   const width = host.value?.getBoundingClientRect?.().width;
-  if (!(width > 0)) return;
+
+  if (width === undefined || !(width > 0)) {
+    return;
+  }
+
   // Потолок — не фиксированные 560: на широком мониторе человек вправе отдать списку
   // больше, но чату всегда остаётся CHAT_MIN_W.
   listMaxW.value = Math.max(LIST_MIN_W, Math.min(Math.max(560, width * 0.4), width - CHAT_MIN_W));
@@ -108,77 +137,162 @@ function measureListMax() {
 // Текущая ширина для клавиатуры и ARIA. Пока переменная не задана, ширину знает только
 // CSS — измеряем её по положению самого разделителя (он стоит ровно на правом краю
 // списка), а не по второму медиазапросу в JS.
+/**
+ * Возвращает применённую ширину либо измеряет обычное положение разделителя.
+ * Измерение и клавиатура используют те же границы, что перетаскивание.
+ */
 function currentListWidth() {
-  if (listWidth.value != null) return listWidth.value;
+  if (listWidth.value != null) {
+    return listWidth.value;
+  }
+
   const rect = splitter.value?.getBoundingClientRect?.();
   const hostRect = host.value?.getBoundingClientRect?.();
-  if (rect?.width && hostRect?.width) return clampListWidth(rect.left + rect.width / 2 - hostRect.left);
+
+  if (rect?.width && hostRect?.width) {
+    return clampListWidth(rect.left + rect.width / 2 - hostRect.left);
+  }
+
   return LIST_DEF_W;
 }
 
+/**
+ * Сохраняет только применённую ширину после действия человека.
+ * Закрытый storage не прерывает перетаскивание в текущем окне.
+ */
 function saveListWidth() {
-  if (listWidth.value == null) return;
-  try { localStorage.setItem(LIST_WIDTH_KEY, String(listWidth.value)); } catch { /* приватный режим может запретить storage */ }
+  if (listWidth.value == null) {
+    return;
+  }
+
+  try {
+    localStorage.setItem(LIST_WIDTH_KEY, String(listWidth.value));
+  } catch { /* приватный режим может запретить storage */ }
 }
 
-let listPointer = null;
-function listWidthFrom(clientX) {
+let listPointer: number | null = null;
+
+function listWidthFrom(clientX: number) {
   const rect = host.value?.getBoundingClientRect?.();
-  if (!rect?.width) return currentListWidth();
+
+  if (!rect?.width) {
+    return currentListWidth();
+  }
+
   return clampListWidth(clientX - rect.left);
 }
-function startListResize(event) {
-  if (event.button !== undefined && event.button !== 0) return;
+/**
+ * Начинает перетаскивание основным указателем и запоминает его id.
+ * Захват оставляет дальнейшие события на разделителе до отпускания.
+ */
+function startListResize(event: PointerEvent) {
+  if (event.button !== undefined && event.button !== 0) {
+    return;
+  }
+
   listPointer = event.pointerId;
-  event.currentTarget?.setPointerCapture?.(event.pointerId);
+
+  if (event.currentTarget instanceof HTMLElement) {
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
   measureListMax();
   listPreferred.value = listWidthFrom(event.clientX);
 }
-function moveListResize(event) {
-  if (listPointer !== event.pointerId) return;
+
+function moveListResize(event: PointerEvent) {
+  if (listPointer !== event.pointerId) {
+    return;
+  }
+
   listPreferred.value = listWidthFrom(event.clientX);
 }
-function finishListResize(event) {
-  if (listPointer !== event.pointerId) return;
+/**
+ * Завершает только текущее перетаскивание и записывает настройку устройства.
+ * Событие чужого указателя не сбрасывает действующий захват.
+ */
+function finishListResize(event: PointerEvent) {
+  if (listPointer !== event.pointerId) {
+    return;
+  }
+
   listPointer = null;
-  event.currentTarget?.releasePointerCapture?.(event.pointerId);
+
+  if (event.currentTarget instanceof HTMLElement) {
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
   saveListWidth();
 }
-function cancelListResize(event) {
-  if (listPointer !== event.pointerId) return;
+/**
+ * Отмена сохраняет уже применённую ширину без чтения ненадёжного clientX.
+ * Освобождается только указатель текущего перетаскивания.
+ */
+function cancelListResize(event: PointerEvent) {
+  if (listPointer !== event.pointerId) {
+    return;
+  }
+
   listPointer = null;
-  event.currentTarget?.releasePointerCapture?.(event.pointerId);
+
+  if (event.currentTarget instanceof HTMLElement) {
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
   // pointercancel не гарантирует осмысленный clientX — сохраняем уже применённую ширину.
   saveListWidth();
 }
-function onListResizeKey(event) {
+/**
+ * Меняет ширину клавишами с прежним обычным и ускоренным шагом.
+ * Обрабатываемая клавиша сохраняет ту же настройку, что мышь.
+ */
+function onListResizeKey(event: KeyboardEvent) {
   const step = event.shiftKey ? 64 : 16;
+
   measureListMax();
-  if (event.key === 'ArrowLeft') listPreferred.value = clampListWidth(currentListWidth() - step);
-  else if (event.key === 'ArrowRight') listPreferred.value = clampListWidth(currentListWidth() + step);
-  else if (event.key === 'Home') listPreferred.value = LIST_MIN_W;
-  else if (event.key === 'End') listPreferred.value = clampListWidth(listMaxW.value);
-  else return;
+
+  if (event.key === 'ArrowLeft') {
+    listPreferred.value = clampListWidth(currentListWidth() - step);
+  } else if (event.key === 'ArrowRight') {
+    listPreferred.value = clampListWidth(currentListWidth() + step);
+  } else if (event.key === 'Home') {
+    listPreferred.value = LIST_MIN_W;
+  } else if (event.key === 'End') {
+    listPreferred.value = clampListWidth(listMaxW.value);
+  } else {
+    return;
+  }
+
   event.preventDefault();
   saveListWidth();
 }
 // Двойной клик — вернуть ширину по умолчанию. Настройку именно СТИРАЕМ, а не пишем 300:
 // иначе список навсегда терял бы более узкий умолчательный размер планшета.
+/**
+ * Возвращает управление шириной CSS, удаляя явное предпочтение устройства.
+ * Удаление сохраняет разные обычные размеры планшета и широкого экрана.
+ */
 function resetListWidth() {
   listPreferred.value = null;
-  try { localStorage.removeItem(LIST_WIDTH_KEY); } catch { /* ignore */ }
+
+  try {
+    localStorage.removeItem(LIST_WIDTH_KEY);
+  } catch { /* настройка недоступна */ }
 }
 
-let hostObserver = null;
+let hostObserver: ResizeObserver | null = null;
+
 onMounted(() => {
   measureListMax();
+
   if (typeof ResizeObserver === 'function' && host.value) {
     hostObserver = new ResizeObserver(() => measureListMax());
     hostObserver.observe(host.value);
   }
 });
 onBeforeUnmount(() => {
-  hostObserver?.disconnect?.(); hostObserver = null;
+  hostObserver?.disconnect?.();
+  hostObserver = null;
   pageSurface.dispose();
 });
 </script>

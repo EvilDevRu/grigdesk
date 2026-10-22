@@ -37,23 +37,23 @@
     "web/src/features/alerts/AlertHistoryPopover.vue",
     "web/src/features/board/BoardTimerPopover.vue",
     "web/src/features/pipeline/PipelineTopbarPopover.vue",
-    "web/src/shared/factory-debug.js",
-    "web/src/shared/grigdesk-update.js",
+    "web/src/shared/factoryDebug.ts",
+    "web/src/shared/grigdeskUpdate.ts",
     "web/src/shared/hotkeys/combo.ts",
     "web/src/shared/tools/catalog.ts",
     "web/src/shared/tools/registry.ts",
     "web/src/shared/commandCatalog.ts",
-    "web/src/shared/nav-badges.js",
-    "web/src/shared/pipeline-nav-badge.js",
+    "web/src/shared/navBadges.ts",
+    "web/src/shared/pipelineNavBadge.ts",
     "web/src/shared/pluginInstall.ts",
     "web/src/shared/pluginInstallView.ts",
     "web/src/shared/sectionLoadFailure.ts",
     "web/src/shared/alerts.ts",
     "web/src/shared/notify.ts",
-    "web/src/features/providers/providerUsage.js",
+    "web/src/features/providers/providerUsage.ts",
     "web/src/features/providers/providerUsageSummary.ts",
     "web/src/features/providers/usageForecastText.ts",
-    "web/src/features/providers/providerUsageActions.js",
+    "web/src/features/providers/providerUsageActions.ts",
     "desktop/src/connection.ts",
     "desktop/src/pairing.ts",
     "desktop/src/profiles.ts",
@@ -62,10 +62,10 @@
     "desktop/src/uiRelease.ts",
     "desktop/src/startupController.ts",
     "desktop/src/windowDocuments.ts",
-    "web/src/stores/device.js",
-    "web/src/stores/hotkeys.js",
-    "web/src/stores/plugins.js",
-    "web/src/stores/providers.js",
+    "web/src/stores/device.ts",
+    "web/src/stores/hotkeys.ts",
+    "web/src/stores/plugins.ts",
+    "web/src/stores/providers.ts",
     "web/src/stores/providerSettings.ts",
     "web/src/shared/shellClient.ts",
     "web/src/shared/uiLocale.ts",
@@ -78,8 +78,8 @@
     "web/src/features/providers/providerLocale.ts"
   ],
   "fragments": [
-    "web/src/stores/chat.js",
-    "web/src/stores/notify-watch.js",
+    "web/src/stores/chat.ts",
+    "web/src/stores/notifyWatch.ts",
     "web/src/stores/studio3d.ts"
   ],
   "dynamicKeys": {},
@@ -341,12 +341,12 @@
     "desktop/src/menu.ts": [
       "EDIT_ACTIONS"
     ],
-    "web/src/shared/grigdesk-update.js": [
+    "web/src/shared/grigdeskUpdate.ts": [
       "UPDATE_STAGE_MESSAGES",
       "UPDATE_STAGE_SHORT_MESSAGES",
       "BLOCK_REASON_MESSAGES"
     ],
-    "web/src/shared/factory-debug.js": [
+    "web/src/shared/factoryDebug.ts": [
       "MESSAGES"
     ]
   },
@@ -448,7 +448,7 @@
         "desktop.addressError"
       ]
     },
-    "web/src/shared/grigdesk-update.js": {
+    "web/src/shared/grigdeskUpdate.ts": {
       "BLOCK_REASON_MESSAGES[code]": [
         "core.*"
       ]
@@ -466,7 +466,7 @@
         "core.builtinNavigation.*"
       ]
     },
-    "web/src/shared/pipeline-nav-badge.js": {
+    "web/src/shared/pipelineNavBadge.ts": {
       "group.messageKey": [
         "core.*"
       ]
@@ -476,23 +476,23 @@
         "settings.installStage.*"
       ]
     },
-    "web/src/stores/hotkeys.js": {
+    "web/src/stores/hotkeys.ts": {
       "`core.builtinNavigation.${item.id}`": [
         "core.builtinNavigation.*"
       ]
     },
-    "web/src/stores/plugins.js": {
+    "web/src/stores/plugins.ts": {
       "`core.builtinNavigation.${item.id}`": [
         "core.builtinNavigation.*"
       ]
     },
-    "web/src/stores/notify-watch.js": {
+    "web/src/stores/notifyWatch.ts": {
       "crashed ? 'core.pipelineCrashed' : 'core.pipelineStalled'": [
         "core.pipelineCrashed",
         "core.pipelineStalled"
       ]
     },
-    "web/src/stores/device.js": {
+    "web/src/stores/device.ts": {
       "state.wakeLockIssue": [
         "settings.wakeLock*"
       ],
@@ -505,7 +505,7 @@
         "settings.mcpGroups.*.hint"
       ]
     },
-    "web/src/features/providers/providerUsage.js": {
+    "web/src/features/providers/providerUsage.ts": {
       "key": [
         "core.usageResources.*"
       ],

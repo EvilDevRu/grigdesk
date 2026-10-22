@@ -48,12 +48,12 @@ async function compileToolHostPublisher() {
         export const useRoute = () => globalThis.__uiContextToolRoute;
         export const useRouter = () => ({ push() {} });
       `,
-      '../../stores/dock.js': `
+      '../../stores/dock.ts': `
         export const MIN_DOCK_WIDTH = globalThis.__uiContextDockModule.MIN_DOCK_WIDTH;
         export const useDockStore = (...args) =>
           globalThis.__uiContextDockModule.useDockStore(...args);
       `,
-      '../../stores/plugins.js': `
+      '../../stores/plugins.ts': `
         export const usePluginsStore = (...args) => globalThis.__uiContextPluginsStore(...args);
       `,
       '../../stores/taskShelf.ts': `
@@ -89,7 +89,7 @@ test('COMP-PROV-09/10: owner dispose и explicit focus управляют scope 
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
   ]);
   const [{ useUiContextStore }, { useUiContextSource }] = await Promise.all([
-    import('../../web/src/stores/ui-context.js'),
+    import('../../web/src/stores/uiContext.ts'),
     import('../../web/src/composables/useUiContextSource.ts'),
   ]);
 
@@ -170,7 +170,7 @@ test('COMP-PROV-11: реальные Pipeline stage и TaskModal сохраня�
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
     import('../../web/node_modules/vue/index.mjs'),
-    import('../../web/src/stores/ui-context.js'),
+    import('../../web/src/stores/uiContext.ts'),
     import('../../web/src/composables/useUiContextSource.ts'),
   ]);
 
@@ -388,9 +388,9 @@ test('COMP-PROV-12: реальный ToolHost не публикует hidden pan
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
     import('../../web/node_modules/vue/index.mjs'),
-    import('../../web/src/stores/ui-context.js'),
+    import('../../web/src/stores/uiContext.ts'),
     import('../../web/src/composables/useUiContextSource.ts'),
-    import('../../web/src/stores/dock.js'),
+    import('../../web/src/stores/dock.ts'),
   ]);
   const pinia = createPinia();
   setActivePinia(pinia);
@@ -509,7 +509,10 @@ test('COMP-PROV-01..08: реальные страницы используют o
   }
 
   assert.match(files.pipeline, /function pipelineContextDetails/);
-  assert.match(files.pipeline, /const details = \{ taskId:[^\n]*stageId:[^\n]*, tab \};/);
+  assert.match(
+    files.pipeline,
+    /const details = \{\s*taskId:[^,{}]+,\s*stageId:[^,{}]+,\s*tab,?\s*\};/,
+  );
   assert.match(files.task, /function taskContextDetails/);
   assert.match(files.task, /routingScope:\s*\{ kind: 'task', taskId:/);
   assert.doesNotMatch(

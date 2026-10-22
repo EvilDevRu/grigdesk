@@ -50,7 +50,7 @@ DeepSeek Harness 0.1.5-rc.2. Номера и количества ниже оп�
 Опорные файлы: `server/src/lib/providerSettings.ts`,
 `server/src/modules/providers/index.ts`, `server/src/lib/executors/{claude,codex,kimi,deepseek}.ts`,
 `web/src/views/settings/pages/ProviderPage.vue`,
-`web/src/features/settings/resources/providers.ts`, `web/src/stores/providers.js`.
+`web/src/features/settings/resources/providers.ts`, `web/src/stores/providers.ts`.
 
 ## Codex: каталог флагов, схема протокола и конфигурация
 

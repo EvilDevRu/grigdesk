@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createUsageWatch } from '../../web/src/features/providers/usageWatch.js';
+import { createUsageWatch } from '../../web/src/features/providers/usageWatch.ts';
 
 function fakeTimers() {
   const started = new Map();

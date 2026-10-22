@@ -127,9 +127,11 @@
   </span>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { t, uiLocale } from '../../ui.ts';
 
+import type { PropType } from 'vue';
+import type { pipelineTopbarItems } from '../../shared/pipelineNavBadge.ts';
 import { computed } from 'vue';
 
 import { UiButton, UiInlineMessage, UiTopbarPanel, vTooltip } from '../../ui';
@@ -138,7 +140,7 @@ const ATTENTION_LIMIT = 3;
 
 const props = defineProps({
   items: {
-    type: Array,
+    type: Array as PropType<ReturnType<typeof pipelineTopbarItems>>,
     default: () => [],
   },
   error: {
@@ -184,19 +186,23 @@ const aggregateProgress = computed(() => {
     const progressTotal = item.progress?.total;
     const valid = Number.isSafeInteger(progressDone)
       && Number.isSafeInteger(progressTotal)
-      && progressDone >= 0
-      && progressTotal >= 0;
+      && progressDone! >= 0
+      && progressTotal! >= 0;
 
     if (!valid) {
       continue;
     }
 
-    done += progressDone;
-    total += progressTotal;
+    done += progressDone!;
+    total += progressTotal!;
     observed += 1;
   }
 
-  return observed ? { done, total, observed } : null;
+  return observed ? {
+    done,
+    total,
+    observed,
+  } : null;
 });
 const progressLabel = computed(() => (
   aggregateProgress.value?.observed === total.value
@@ -204,7 +210,7 @@ const progressLabel = computed(() => (
     : t('core.knownProgress')
 ));
 
-function openPipeline(close) {
+function openPipeline(close: (reason: 'action') => void) {
   close('action');
   emit('openPipeline');
 }

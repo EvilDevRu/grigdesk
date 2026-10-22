@@ -5,7 +5,7 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
-import { compileModule, webFile } from './helpers/compile-vue.js';
+import { compileModule, renamedSpecifier, webFile } from './helpers/compile-vue.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -21,13 +21,14 @@ async function analysisFixture(t, api, { pluginEnabled = false } = {}) {
     },
     shelf: { async autoAdd() {} },
   };
+
   const module = await compileModule(ACTIONS_PATH, {
     stubs: {
       './apiClient.ts': 'export const api = globalThis.__analysisStoreHarness.api;',
-      './plugins.js': (
+      './plugins.ts': (
         'export const usePluginsStore = () => globalThis.__analysisStoreHarness.plugins;'
       ),
-      '../../stores/plugins.js': (
+      '../../stores/plugins.ts': (
         'export const usePluginsStore = () => globalThis.__analysisStoreHarness.plugins;'
       ),
       '../../stores/taskShelf.ts': (
@@ -138,9 +139,9 @@ test('стор триажа не знает ни путей API, ни транс
   const source = await readFile(STORE_PATH, 'utf8');
   const imports = [...source.matchAll(/^import[^;]*from '([^']+)';/gm)].map(([, from]) => from);
 
-  assert.deepEqual(imports.sort(), [
+  assert.deepEqual(imports.map(renamedSpecifier).sort(), [
     '../../../shared/pipeline/analysisContracts.ts',
-    './plugins.js',
+    './plugins.ts',
     'pinia',
   ]);
   assert.equal(/\/api\//u.test(source), false, 'адреса API живут в слое операций');

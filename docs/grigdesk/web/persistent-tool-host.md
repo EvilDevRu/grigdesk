@@ -5,7 +5,7 @@
   `hidden` меняют CSS одного render-site.
   Поэтому во вкладке бывает максимум один Monaco и по одному активному terminal/SSH WebSocket.
   Внутренние вкладки SSH переподключают один xterm, а сессии остаются на сервере. Компоненты загружаются
-  независимо через `shared/tools/registry.ts`, а `stores/dock.js` держит динамические mounted-флаги,
+  независимо через `shared/tools/registry.ts`, а `stores/dock.ts` держит динамические mounted-флаги,
   runtime и exact-once intent-очереди. Правая рейка и overlay-док существуют с 900 px; на
   всех ширинах ниже 900 px остаются боковая рейка и route-страницы. Левая рейка
   всегда имеет ширину 36 px. [Геометрия](desktop-ui-density.md).

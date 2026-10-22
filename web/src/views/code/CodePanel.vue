@@ -1113,8 +1113,8 @@
 import { ref, computed, watch, onBeforeUnmount, onMounted, nextTick } from 'vue';
 import { codeApi, codeErrorMessage } from '../../shared/codeApi';
 import { useSse } from '../../composables/useSse';
-import { useChatStore } from '../../stores/chat.js';
-import { router } from '../../router.js';
+import { useChatStore } from '../../stores/chat.ts';
+import { router } from '../../router.ts';
 import type {
   CodeBlameLine,
   CodeDirectoryEntry,

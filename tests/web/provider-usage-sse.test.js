@@ -1,3 +1,4 @@
+import { loadProductModule } from './helpers/compile-vue.js';
 // Свежие лимиты приходят от сервера сами (SSE providers-usage): окно обязано слушать это
 // имя, а стор — принимать снимок и не оплачивать его лишним запросом.
 import assert from 'node:assert/strict';
@@ -8,7 +9,8 @@ import { shellContractBrowser } from './helpers/shell-contract-browser.js';
 
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
 import { api } from '../../web/src/shared/apiClient.ts';
-import { useProvidersStore } from '../../web/src/stores/providers.js';
+
+const { useProvidersStore } = await loadProductModule('src/stores/providers.ts');
 
 const SSE_PATH = new URL('../../web/src/composables/useSse.ts', import.meta.url);
 const SHELL_PATH = new URL('../../web/src/shared/layout/AppShell.vue', import.meta.url);
@@ -25,6 +27,7 @@ test('providers-usage входит в единственную SSE-подпис�
 
 test('снимок с сервера ложится в стор и сдвигает троттл loadUsage', async (t) => {
   setActivePinia(createPinia());
+
   const providers = useProvidersStore();
   let requests = 0;
 
@@ -46,6 +49,7 @@ test('снимок с сервера ложится в стор и сдвига�
 
 test('мусор вместо снимка стор не принимает', () => {
   setActivePinia(createPinia());
+
   const providers = useProvidersStore();
 
   providers.applyUsage({ claude: { state: 'ok', bars: [] } });
@@ -58,6 +62,7 @@ test('мусор вместо снимка стор не принимает', ()
 // что и снимок с фонового тика, а повторный клик во время хода не плодит запросов.
 test('принудительная проверка идёт одним POST и не дублируется, пока идёт', async (t) => {
   setActivePinia(createPinia());
+
   const providers = useProvidersStore();
   const calls = [];
   let finish;
@@ -71,6 +76,7 @@ test('принудительная проверка идёт одним POST и 
   });
 
   const pending = providers.refreshUsage();
+
   await providers.refreshUsage();
   assert.equal(providers.usageRefreshing, true);
   assert.deepEqual(calls, ['/api/providers/usage/refresh']);

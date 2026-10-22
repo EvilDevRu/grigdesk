@@ -28,7 +28,7 @@ async function mountWorkdir(t, browser, store) {
 
   const Component = await compileVue(webFile('src/views/chat/ChatWorkdir.vue'), {
     stubs: {
-      '../../stores/chat.js': 'export const useChatStore = () => globalThis.__workdirChat;',
+      '../../stores/chat.ts': 'export const useChatStore = () => globalThis.__workdirChat;',
       '../../shared/apiClient.ts': 'export const api = { get: async () => ({ projects: [] }) };',
     }
   });

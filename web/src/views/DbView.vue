@@ -2,6 +2,6 @@
   <div class="tool-route-adapter" data-tool-route="db" aria-hidden="true"></div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // Route-adapter не монтирует панель БД: ею владеет единственный ToolHost.
 </script>

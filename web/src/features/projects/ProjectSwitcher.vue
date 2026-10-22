@@ -25,20 +25,23 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // Переключатель проекта: выбор открытого профиля и просьба завести новый.
 //
 // Заведение проекта — не его дело: форма, проверка идентификатора и запись живут
 // в разделе «Проекты», и второй вход создавал бы вторую запись в том же реестре.
+import type { PropType } from 'vue';
 import { UiButton, UiControlGroup, UiIconButton, vTooltip } from '../../ui';
 
 defineProps({
   profiles: {
-    type: Array,
+    type: Array as PropType<string[]>,
     required: true,
   },
 });
-const emit = defineEmits(['create']);
+
+const emit = defineEmits<{ create: [] }>();
+
 const model = defineModel({
   type: String,
   required: true,

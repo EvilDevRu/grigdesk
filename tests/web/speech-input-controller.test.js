@@ -1,9 +1,10 @@
+import { loadProductModule, migrationUrl } from './helpers/compile-vue.js';
 // Проверяет единый контроллер диктовки и отсутствие дублирующего автомата речи в UI.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 
-import { createDictationController } from '../../web/src/features/speech/controller.js';
+const { createDictationController } = await loadProductModule('src/features/speech/controller.ts');
 
 function speech(overrides = {}) {
   return {
@@ -26,8 +27,8 @@ function recognitionResult(text, isFinal) {
 
 test('COMP-STT-01/12: root provider — единственная точка factory, UI не содержит второго speech FSM', async () => {
   const [controller, provider, app, chatSession] = await Promise.all([
-    readFile(new URL('../../web/src/features/speech/controller.js', import.meta.url), 'utf8'),
-    readFile(new URL('../../web/src/features/speech/provider.js', import.meta.url), 'utf8'),
+    readFile(migrationUrl('src/features/speech/controller.ts'), 'utf8'),
+    readFile(migrationUrl('src/features/speech/provider.ts'), 'utf8'),
     readFile(new URL('../../web/src/App.vue', import.meta.url), 'utf8'),
     readFile(new URL('../../web/src/views/chat/ChatSession.vue', import.meta.url), 'utf8'),
   ]);

@@ -11,18 +11,20 @@
   </main>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { api } from '../shared/apiClient.ts';
+import { api, failureText } from '../shared/apiClient.ts';
+import { parseResolvedDocument } from '../../../shared/plugins/documents/documentsContracts.ts';
+import type { DocumentFile } from '../features/documents/contracts.ts';
 import TopbarActions from '../shared/layout/TopbarActions.vue';
 import DocumentPanel from '../features/documents/DocumentPanel.vue';
-import { documentScope } from '../features/documents/links.js';
+import { documentScope } from '../features/documents/links.ts';
 import { UiIconButton, UiSpinner, vTooltip } from '../ui';
 
 const route = useRoute();
 const router = useRouter();
-const document = ref(null);
+const document = ref<DocumentFile | null>(null);
 const resolveError = ref('');
 const resolving = ref(false);
 let resolveGeneration = 0;
@@ -30,20 +32,34 @@ let resolveGeneration = 0;
 const source = computed(() => String(route.query.source || ''));
 const documentPath = computed(() => String(route.query.path || ''));
 const anchor = computed(() => String(route.query.anchor || ''));
-const line = computed(() => Math.max(0, Number.parseInt(route.query.line, 10) || 0));
+const line = computed(() => Math.max(0, Number.parseInt(String(route.query.line), 10) || 0));
 
 // Ответы, созданные до появления viewer-а, содержат абсолютный host path. Он живёт
 // только один переход: сервер разрешает его в DocumentRef, затем replace убирает его из URL.
 watch(() => String(route.query.open || ''), async (openPath) => {
   const generation = ++resolveGeneration;
+
   resolveError.value = '';
-  if (!openPath) { resolving.value = false; return; }
+
+  if (!openPath) {
+    resolving.value = false;
+
+    return;
+  }
+
   resolving.value = true;
+
   try {
     const scope = documentScope(route.query.scope);
     const body = scope ? { path: openPath, scope } : { path: openPath };
-    const resolved = await api.post('/api/documents/resolve', body);
-    if (generation !== resolveGeneration) return;
+    const value = await api.post('/api/documents/resolve', body);
+
+    if (generation !== resolveGeneration) {
+      return;
+    }
+
+    const resolved = parseResolvedDocument(value);
+
     await router.replace({
       name: 'documents',
       query: {
@@ -54,16 +70,24 @@ watch(() => String(route.query.open || ''), async (openPath) => {
       },
     });
   } catch (e) {
-    if (generation === resolveGeneration) resolveError.value = e.message || 'Ссылка на документ недоступна';
+    if (generation === resolveGeneration) {
+      resolveError.value = failureText(e, 'Ссылка на документ недоступна');
+    }
   } finally {
-    if (generation === resolveGeneration) resolving.value = false;
+    if (generation === resolveGeneration) {
+      resolving.value = false;
+    }
   }
 }, { immediate: true });
 
 const title = computed(() => document.value?.name || 'Документ');
+
 function close() {
-  if (window.history.length > 1) router.back();
-  else router.push('/chats');
+  if (window.history.length > 1) {
+    router.back();
+  } else {
+    router.push('/chats');
+  }
 }
 </script>
 

@@ -79,16 +79,17 @@ function inertComponentStub(className) {
  * ChatSession бандлится единым TS-aware compiler-ом с настоящими UI primitives.
  * Stores, сеть, speech-controller и product children остаются границами сценария.
  */
-export function compileChatSession(prefix, { realSteps = false } = {}) {
+export function compileChatSession(prefix, { realSteps = false, expose = [] } = {}) {
   return compileVue(CHAT_SESSION_PATH, {
+    expose,
     stubs: {
       'vue-router': [
         'export const useRouter = () =>',
         `  globalThis.${prefix}Router || { push() {} };`,
       ].join('\n'),
       '../../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
-      '../../features/speech/provider.js': speechProviderStub(prefix),
-      '../../stores/chat.js': [
+      '../../features/speech/provider.ts': speechProviderStub(prefix),
+      '../../stores/chat.ts': [
         `export const CONTEXT_WINDOW = globalThis.${prefix}ContextWindow || 200000;`,
         `export const useChatStore = globalThis.${prefix}ChatStore;`,
       ].join('\n'),
@@ -102,9 +103,9 @@ export function compileChatSession(prefix, { realSteps = false } = {}) {
         '  return helper ? helper(...args) : true;',
         '}',
       ].join('\n'),
-      '../../stores/tasks.js': `export const useTasksStore = globalThis.${prefix}TasksStore;`,
-      '../../stores/ui.js': `export const useUiStore = globalThis.${prefix}UiStore;`,
-      '../../stores/providers.js': (
+      '../../stores/tasks.ts': `export const useTasksStore = globalThis.${prefix}TasksStore;`,
+      '../../stores/ui.ts': `export const useUiStore = globalThis.${prefix}UiStore;`,
+      '../../stores/providers.ts': (
         `export const useProvidersStore = globalThis.${prefix}ProvidersStore;`
       ),
       './EffortSlider.vue': effortSliderStub(),
@@ -131,7 +132,7 @@ export function compileChatSession(prefix, { realSteps = false } = {}) {
         '  return renderer ? renderer(...args) : String(args[0] || "");',
         '};',
       ].join('\n'),
-      '../../features/documents/links.js': 'export const documentLinkFromClick = () => "";',
+      '../../features/documents/links.ts': 'export const documentLinkFromClick = () => "";',
       '../../features/code/links.ts': [
         'export const chatFileLinkHref = () => "";',
         'export const codeLinkFromClick = () => null;',
@@ -147,10 +148,108 @@ export function compileChatSession(prefix, { realSteps = false } = {}) {
         `  return globalThis.${prefix}DocumentPreview || { show() {}, showImage() {} };`,
         '}',
       ].join('\n'),
-      '../../shared/chat-model-run.js': [
+      '../../shared/chatModelRun.ts': [
         'export const lastModelRun = () => null;',
         'export const modelRunView = () => ({ model: "" });',
       ].join('\n'),
     },
   });
+}
+
+
+/**
+ * У загрузки вложений настоящий ChatSession, а результат API задаётся тестом.
+ * Два чата позволяют проверить, что поздний ответ остаётся у инициатора загрузки.
+ */
+export async function chatUploadBoundaryFixture(t) {
+  const { reactive } = await import('../../../web/node_modules/vue/index.mjs');
+  const { mount, flushPromises } = await import(
+    '../../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+  );
+  const { contextFill } = await import('../../../shared/chat/chatContext.ts');
+
+  globalThis.__sharedChatContextFill = contextFill;
+
+  const sessions = reactive(['a', 'b'].map((id) => ({
+    id,
+    title: 'Чат',
+    model: 'test-model',
+    modelRef: {provider: 'test-provider', model: 'test-model'},
+    messages: [],
+    steps: [],
+    draft: '',
+    draftAttachments: [],
+    sending: false,
+  })));
+  const store = {
+    sessions,
+    archived: [],
+    compactWindow: 0,
+    loadConveyor() {},
+    markRead() {},
+    permFor: () => null,
+    questionFor: () => null,
+    isOnConveyor: () => false,
+    tabLabel: () => 'Чат',
+    setDraft(id, text) {
+      const session = sessions.find((session) => session.id === id);
+
+      if (session) {
+        session.draft = text;
+      }
+    },
+    addDraftAttachment(id, attachment) {
+      sessions.find((session) => session.id === id).draftAttachments.push(attachment);
+    },
+  };
+  const reply = { value: /** @type {unknown} */ (null) };
+  const calls = [];
+  const model = {
+    id: 'test-model',
+    name: 'Модель',
+    efforts: []
+  };
+  const provider = {
+    id: 'test-provider',
+    name: 'Исполнитель',
+    models: [model],
+    commands: []
+  };
+
+  globalThis.__uploadBoundaryApi = {
+    url: (value) => value,
+    get: async () => ({tasks: []}),
+    upload: async (url) => {
+      calls.push(url);
+
+      return reply.value;
+    },
+  };
+  globalThis.__uploadBoundaryChatStore = () => store;
+  globalThis.__uploadBoundaryTasksStore = () => ({load: async () => null});
+  globalThis.__uploadBoundaryUiStore = () => ({openTaskLaunch() {}});
+  globalThis.__uploadBoundaryProvidersStore = () => ({
+    providers: [provider],
+    load() {},
+    modelOf: () => ({
+      id: model.id,
+      model,
+      provider
+    }),
+    visibleModels: () => [model],
+    modesOf: () => [],
+  });
+
+  const Component = await compileChatSession('__uploadBoundary', {expose: ['addFiles', 'inputErr']});
+  const wrapper = mount(Component, {props: {sid: 'a'}});
+
+  t.after(() => wrapper.unmount());
+  await flushPromises();
+
+  return {
+    wrapper,
+    sessions,
+    reply,
+    calls
+  };
 }

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createChatVisibilityRegistry } from '../../web/src/shared/chat-visibility.js';
+import { createChatVisibilityRegistry } from '../../web/src/shared/chatVisibility.ts';
 
 test('COMP-VIS-01: surface видит только свой exact chat id', () => {
   const registry = createChatVisibilityRegistry({ isDocumentVisible: () => true });

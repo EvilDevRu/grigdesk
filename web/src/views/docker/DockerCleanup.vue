@@ -106,7 +106,7 @@ import { computed, reactive, ref } from 'vue';
 import type { DockerPruneTarget } from '../../../../shared/plugins/docker/dockerContracts';
 
 import { useDockerStore } from '../../stores/docker';
-import { usePluginsStore } from '../../stores/plugins.js';
+import { usePluginsStore } from '../../stores/plugins.ts';
 import { UiButton, UiCheckbox, UiInlineMessage, confirmDialog } from '../../ui';
 import { formatAge, formatSize } from './format';
 import { dockerSettings } from './settings';

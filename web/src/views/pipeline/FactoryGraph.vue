@@ -251,9 +251,9 @@ import {
   nodeGeom,
   nodeLabelLines,
   START_DOT,
-} from '../../shared/graph-geom.js';
-import { arbiterRunLabel, nodeIsArbitrated } from '../../shared/arbiter-run.js';
-import { graphStallView } from '../../shared/graph-stall.js';
+} from '../../shared/graphGeom.ts';
+import { arbiterRunLabel, nodeIsArbitrated } from '../../shared/arbiterRun.ts';
+import { graphStallView } from '../../shared/graphStall.ts';
 import { factoryLoopView } from '../../shared/factoryLoopView.ts';
 import {
   runnerChainLabel,
@@ -295,12 +295,12 @@ interface GraphNodeElement {
   id: string;
   originId: string | null;
   executable: boolean;
-  kind: string;
+  kind: string | number;
   label: string;
   labelLines: string[];
   labelY: number;
   contentX: number;
-  kindLabel: string;
+  kindLabel: string | number;
   description: string;
   icon: string;
   statusLabel: string;

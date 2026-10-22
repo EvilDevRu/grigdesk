@@ -27,7 +27,7 @@ test('provider resource подтверждает number-action через UiInli
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compileVue(webFile('src/features/providers/ProviderUsageResources.vue'), {
       stubs: {
-        '../../stores/providers.js': PROVIDERS_STUB,
+        '../../stores/providers.ts': PROVIDERS_STUB,
       },
     }),
   ]);
@@ -94,7 +94,7 @@ test('readonly не отражает ручки аккаунта и оставл
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compileVue(webFile('src/features/providers/ProviderUsageResources.vue'), {
       stubs: {
-        '../../stores/providers.js': PROVIDERS_STUB,
+        '../../stores/providers.ts': PROVIDERS_STUB,
       },
     }),
   ]);
@@ -176,7 +176,7 @@ test('readonly оставляет заметку только у беды', asyn
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compileVue(webFile('src/features/providers/ProviderUsageResources.vue'), {
       stubs: {
-        '../../stores/providers.js': PROVIDERS_STUB,
+        '../../stores/providers.ts': PROVIDERS_STUB,
       },
     }),
   ]);

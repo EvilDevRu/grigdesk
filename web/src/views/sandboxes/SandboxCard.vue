@@ -163,7 +163,7 @@ import {
   vTooltip,
 } from '../../ui';
 import { loadSandboxJobLog } from '../../actions/sandboxes';
-import { sandboxUrl } from '../../shared/sandbox.js';
+import { sandboxUrl } from '../../shared/sandbox.ts';
 import { writeClipboardText } from '../../shared/clipboard.ts';
 import type {
   SandboxActionDecl, SandboxEntry, SandboxJob,

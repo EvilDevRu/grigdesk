@@ -82,15 +82,15 @@ test('WL-03–08 следующие шаги, save CAS, агент и дейст
     }; },
     run: async (body) => {
       calls.push(['run', body]);
-      
+
       return { model: detail.model, versions: [] };
     },
     addFromFile: async (...args) => calls.push(['incoming', ...args]),
     deleteVersion: async () => {
       const error = new Error('children');
-      
+
       error.code = 'has_children';
-      
+
       throw error;
     },
     lighten: async (...args) => calls.push(['lighten', ...args]),
@@ -99,18 +99,18 @@ test('WL-03–08 следующие шаги, save CAS, агент и дейст
     redownload: async () => {},
     save: async (model, vid, body) => {
       calls.push(['save', structuredClone(body)]);
-      
+
       const count = calls.filter((call) => call[0] === 'save').length;
-      
+
       if (count <= 2) {
         const error = new Error('Изменился файл');
-        
+
         error.status = 409; error.code = count === 1 ? 'exists' : 'changed';
         error.body = { sha256: (count === 1 ? 'a' : 'b').repeat(64) };
-        
+
         throw error;
       }
-      
+
       return {
         libraryId: LIBRARY_ID,
         path: '/repo/models/people/Куб_Модель.glb',
@@ -118,7 +118,7 @@ test('WL-03–08 следующие шаги, save CAS, агент и дейст
       };
     }
   });
-  
+
   globalThis.__studioModel = {
     store,
     calls,
@@ -134,7 +134,7 @@ test('WL-03–08 следующие шаги, save CAS, агент и дейст
     '../../shared/projectsApi.ts': `export const projectsApi={list:async()=>[
       {id:'demo',title:'Проект',archivedAt:null,defaultRepoKey:'main',repos:[{key:'main',
         dir:'/repo',exists:true}]}]};`,
-    '../../stores/chat.js': 'export const useChatStore=()=>({defModelRef:null});',
+    '../../stores/chat.ts': 'export const useChatStore=()=>({defModelRef:null});',
     'vue-router': 'export const useRouter=()=>({push:async()=>{}});',
   };
   const Steps = await compileVue(webFile('src/views/studio3d/NextSteps.vue'), { stubs });
@@ -155,25 +155,25 @@ test('WL-03–08 следующие шаги, save CAS, агент и дейст
     version,
     folders: detail.saveFolders
   } });
-  
+
   t.after(() => save.unmount());
   await new Promise(setImmediate);
   await save.vm.$nextTick();
-  
+
   const selects = document.querySelectorAll('select');
-  
+
   selects[0].value = 'demo';
   selects[0].dispatchEvent(new Event('change'));
   await save.vm.$nextTick();
   assert.equal(document.querySelector('[data-context="studio-save-folder"]').value, 'models/people');
-  
+
   const button = [...document.querySelectorAll('button')].find((item) => item.textContent === 'Сохранить');
-  
+
   button.click();
   await new Promise(setImmediate);
-  
+
   const saves = calls.filter((call) => call[0] === 'save');
-  
+
   assert.equal(saves.length, 3);
   assert.equal(saves[1][1].overwrite, true);
   assert.equal(saves[1][1].expectedSha256, 'a'.repeat(64));
@@ -184,7 +184,7 @@ test('WL-03–08 следующие шаги, save CAS, агент и дейст
 
   const Page = await compileVue(webFile('src/views/studio3d/ModelPage.vue'), { stubs });
   const page = mount(Page, { props: { section: 'details' } });
-  
+
   t.after(() => page.unmount());
   assert.match(page.text(), /Готово к использованию/);
   assert.ok(page.get('.studio-model-result').text().includes('Сохранить в проект'));
@@ -313,13 +313,13 @@ test('WL-03–08 следующие шаги, save CAS, агент и дейст
       mainFileId: 'main',
       files: [{ ...file, url: '/api/studio3d/files/m/other/model.glb' }]
     });
-    
+
     store.detail.versions.push(other);
-    
+
     const viewer = mount(Page, { props: { compareVersionId: 'other' }, slots: {
       viewer: (props) => h('span', { 'data-compare': props.compareSrc }, props.src),
     } });
-    
+
     scenario.after(() => viewer.unmount());
     assert.equal(viewer.get('[data-compare]').attributes('data-compare'), other.files[0].url);
     await page.setProps({ compareVersionId: other.id });
@@ -337,17 +337,17 @@ test('WL-03–08 следующие шаги, save CAS, агент и дейст
 
   await t.test('WL-05 штатный resolver допускает внешнюю библиотеку без проекта', async (scenario) => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-agent-'));
-    
+
     scenario.after(() => fs.rm(root, { recursive: true, force: true }));
-    
+
     const grigdesk = path.join(root, 'grigdesk');
     const modelDirectory = path.join(root, 'library', 'hero');
-    
+
     await fs.mkdir(grigdesk, { recursive: true });
     await fs.mkdir(path.join(modelDirectory, version.id), { recursive: true });
     await fs.mkdir(path.join(modelDirectory, 'incoming'));
     await fs.writeFile(path.join(modelDirectory, version.id, file.name), 'offline fixture');
-    
+
     const { askStudioAgent } = await compileModule(webFile('src/features/studio3d/askAgent.ts'));
     const drafts = [];
     const routes = [];
@@ -372,7 +372,7 @@ test('WL-03–08 следующие шаги, save CAS, агент и дейст
       factoryState: { readEnv: async () => ({}) },
       trustedProject: async () => null
     }) });
-    
+
     await askStudioAgent(entry, version, chat, router, preview);
     assert.deepEqual(drafts[0].workdir, { kind: 'path', path: modelDirectory });
     assert.equal(drafts[0].title, '3D · Пётр');

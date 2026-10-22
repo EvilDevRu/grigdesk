@@ -138,18 +138,18 @@ async function mountVideoView(t, {
         if (globalThis.__vidSaveFailure) throw new Error('Сохранение отменено.');
       };`,
       '../shared/clipboard.ts': 'export const writeClipboardText = async () => true;',
-      '../stores/plugins.js': `
+      '../stores/plugins.ts': `
         export const usePluginsStore = (...args) => globalThis.__vidPluginsStore(...args);
       `,
       // Тот же стор реестра плагинов, но импортированный ИЗ стора сеанса: заглушка
       // ищется по точной строке импорта, и второго пути к ней у бандлера нет.
-      './plugins.js': `
+      './plugins.ts': `
         export const usePluginsStore = (...args) => globalThis.__vidPluginsStore(...args);
       `,
       '../stores/documentPreview.ts': `
         export const useDocumentPreviewStore = (...args) => globalThis.__vidPreviewStore(...args);
       `,
-      '../stores/ui.js': `
+      '../stores/ui.ts': `
         export const useUiStore = (...args) => globalThis.__vidUiStore(...args);
       `,
       './services/dialogs': `

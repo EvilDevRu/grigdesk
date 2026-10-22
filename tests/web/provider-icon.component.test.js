@@ -1,3 +1,4 @@
+import { compileVue } from './helpers/compile-vue.js';
 // Иконки исполнителей (ProviderIcon.vue). Смысл проверки: у известного исполнителя
 // должен рисоваться ЗНАК, а не кружок с буквой. Фоллбэк молчаливый — новый исполнитель
 // без своей ветки выглядит «почти нормально» (буква в кружке), и пропажу знака замечают
@@ -25,19 +26,12 @@ const MARKED = [
   { id: 'tripo', name: 'Tripo' },
 ];
 
-async function compileIcon() {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(ICON_PATH, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: ICON_PATH });
-  assert.deepEqual(errors, []);
-  const code = compileScript(descriptor, { id: 'data-v-icon-test', inlineTemplate: true }).content
-    .replaceAll('from "vue"', `from "${VUE_URL}"`)
-    .replaceAll("from 'vue'", `from "${VUE_URL}"`);
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`
-  )).default;
+/**
+ * Общий compiler стирает типы script после миграции ProviderIcon.
+ * Сам рисунок и runtime props остаются настоящими для прежних DOM assertions.
+ */
+function compileIcon() {
+  return compileVue(ICON_PATH);
 }
 
 let shared = null;

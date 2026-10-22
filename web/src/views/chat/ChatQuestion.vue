@@ -23,7 +23,7 @@
         <template v-if="structured">
           <UiInput
             v-if="question.inputType === 'text'"
-            v-model="state[questionIndex].value"
+            v-model="state[questionIndex]!.value as string"
             class="q-own"
             :type="textInputType(question)"
             :required="question.required"
@@ -36,7 +36,7 @@
 
           <UiNumberInput
             v-else-if="question.inputType === 'number' || question.inputType === 'integer'"
-            v-model="state[questionIndex].value"
+            v-model="state[questionIndex]!.value as number | null"
             class="q-own"
             :required="question.required"
             :min="question.minimum"
@@ -54,7 +54,7 @@
             :model-value="structuredValue(questionIndex)"
             :options="structuredOptions(question)"
             selection-indicator
-            @update:model-value="setStructuredValue(questionIndex, $event)"
+            @update:model-value="setStructuredValue(questionIndex, $event as QuestionValue | undefined)"
           />
 
           <div v-if="constraintText(question)" class="q-rule">
@@ -78,7 +78,7 @@
           class="q-own-toggle"
           variant="text"
           tone="neutral"
-          :pressed="state[questionIndex].own"
+          :pressed="state[questionIndex]!.own"
           block
           @click="toggleOwn(questionIndex)"
         >
@@ -86,8 +86,8 @@
         </UiButton>
 
         <UiInput
-          v-if="freeText(question) && state[questionIndex].own"
-          v-model="state[questionIndex].text"
+          v-if="freeText(question) && state[questionIndex]!.own"
+          v-model="state[questionIndex]!.text"
           class="q-own"
           placeholder="напиши своими словами"
           @keydown.enter.prevent="ready && submit()"
@@ -134,8 +134,10 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import type { PropType } from 'vue';
+import type { ChatQuestion, ChatQuestionItem, QuestionValue } from '../../shared/chatContracts.ts';
 import {
   UiButton,
   UiChoiceList,
@@ -147,13 +149,20 @@ import {
 // Диалог агента: он спросил по существу, а не запросил разрешение на действие.
 const props = defineProps({
   req: {
-    type: Object,
+    type: Object as PropType<ChatQuestion>,
     required: true,
   },
 });
 const emit = defineEmits(['answer', 'skip']);
 
-const state = ref([]);
+interface QuestionState {
+  picked: string[];
+  text: string;
+  own: boolean;
+  value: QuestionValue | undefined;
+}
+
+const state = ref<QuestionState[]>([]);
 
 watch(
   () => props.req?.pid,
@@ -177,7 +186,7 @@ const ready = computed(() => (structured.value
   : state.value.some((item) => item.picked.length || item.text.trim())));
 
 const DEFAULT_ACTIONS = Object.freeze(['accept', 'cancel']);
-const ACTION_LABELS = Object.freeze({
+const ACTION_LABELS: Readonly<Record<string, string>> = Object.freeze({
   accept: 'Отправить',
   accept_session: 'Разрешить на сессию',
   accept_always: 'Разрешать всегда',
@@ -198,23 +207,33 @@ const acceptingActions = computed(() => (
   actions.value.filter((entry) => entry.action.startsWith('accept'))
 ));
 
-function initialValue(question) {
+/**
+ * Начальное значение сохраняет тип default из вопроса.
+ * Дата переводится в локальный формат только для соответствующего поля ввода.
+ */
+function initialValue(question: ChatQuestionItem) {
   if (Object.hasOwn(question || {}, 'default')) {
     if (question?.format === 'date-time' && typeof question.default === 'string') {
       return dateTimeInputValue(question.default);
     }
+
     return Array.isArray(question.default) ? [...question.default] : question.default;
   }
-  if (question?.inputType === 'multi-choice') return [];
-  if (question?.inputType === 'choice' || question?.inputType === 'boolean') return null;
+  if (question?.inputType === 'multi-choice') {
+    return [];
+  }
+  if (question?.inputType === 'choice' || question?.inputType === 'boolean') {
+    return null;
+  }
+
   return '';
 }
 
-function freeText(question) {
+function freeText(question: ChatQuestionItem) {
   return question?.allowFreeText !== false;
 }
 
-function optionsOf(question) {
+function optionsOf(question: ChatQuestionItem) {
   return (question?.options || []).map((option) => ({
     value: String(option.label || ''),
     label: String(option.label || ''),
@@ -222,11 +241,11 @@ function optionsOf(question) {
   }));
 }
 
-function structuredChoices(question) {
-  return ['choice', 'multi-choice', 'boolean'].includes(question?.inputType);
+function structuredChoices(question: ChatQuestionItem) {
+  return ['choice', 'multi-choice', 'boolean'].includes(question?.inputType || '');
 }
 
-function structuredOptions(question) {
+function structuredOptions(question: ChatQuestionItem) {
   if (question?.inputType === 'boolean') {
     return [
       { value: true, label: 'Да' },
@@ -235,126 +254,238 @@ function structuredOptions(question) {
   }
 
   return (question?.options || []).map((option) => ({
-    value: Object.hasOwn(option || {}, 'value') ? option.value : String(option?.label || ''),
+    value: Object.hasOwn(option || {}, 'value') ? option.value! : String(option?.label || ''),
     label: String(option?.label ?? option?.value ?? ''),
     description: option?.description ? String(option.description) : undefined,
   }));
 }
 
-function structuredValue(questionIndex) {
+function structuredValue(questionIndex: number) {
   return state.value[questionIndex]?.value ?? null;
 }
 
-function setStructuredValue(questionIndex, value) {
+function setStructuredValue(questionIndex: number, value: QuestionValue | undefined) {
   const item = state.value[questionIndex];
-  if (item) item.value = value;
+
+  if (item) {
+    item.value = value;
+  }
 }
 
-function hasStructuredValue(question, value) {
-  if (question?.inputType === 'text') return typeof value === 'string';
-  if (question?.inputType === 'multi-choice') return Array.isArray(value);
+/**
+ * Определяет наличие ответа по типу поля, отдельно от проверки ограничений.
+ * Пустая строка остаётся значением текстового поля, как в прежней форме.
+ */
+function hasStructuredValue(question: ChatQuestionItem, value: QuestionValue | undefined) {
+  if (question?.inputType === 'text') {
+    return typeof value === 'string';
+  }
+  if (question?.inputType === 'multi-choice') {
+    return Array.isArray(value);
+  }
   if (question?.inputType === 'number' || question?.inputType === 'integer') {
     return typeof value === 'number';
   }
-  if (question?.inputType === 'boolean') return typeof value === 'boolean';
+  if (question?.inputType === 'boolean') {
+    return typeof value === 'boolean';
+  }
+
   return value !== '' && value !== null && value !== undefined;
 }
 
-function validStructured(question, value) {
+/**
+ * Проверяет ограничения вопроса до разрешения отправки формы.
+ * Необязательные пустые ответы сохраняют прежнее поведение пропуска.
+ */
+function validStructured(question: ChatQuestionItem, value: QuestionValue | undefined) {
   const present = hasStructuredValue(question, value);
-  if (!present) return !question?.required;
+
+  if (!present) {
+    return !question?.required;
+  }
   if (!question?.required && (value === '' || (Array.isArray(value) && !value.length))) {
     return true;
   }
 
   if (question?.inputType === 'text') {
-    if (typeof value !== 'string' || value.length > 4_000) return false;
-    if (question.minLength !== undefined && value.length < question.minLength) return false;
-    if (question.maxLength !== undefined && value.length > question.maxLength) return false;
+    if (typeof value !== 'string' || value.length > 4_000) {
+      return false;
+    }
+    if (question.minLength !== undefined && value.length < question.minLength) {
+      return false;
+    }
+    if (question.maxLength !== undefined && value.length > question.maxLength) {
+      return false;
+    }
+
     return validTextFormat(question.format, value);
   }
   if (question?.inputType === 'number' || question?.inputType === 'integer') {
-    if (typeof value !== 'number' || !Number.isFinite(value)) return false;
-    if (question.inputType === 'integer' && !Number.isInteger(value)) return false;
-    if (question.minimum !== undefined && value < question.minimum) return false;
-    if (question.maximum !== undefined && value > question.maximum) return false;
-    return true;
-  }
-  if (question?.inputType === 'boolean') return typeof value === 'boolean';
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return false;
+    }
+    if (question.inputType === 'integer' && !Number.isInteger(value)) {
+      return false;
+    }
+    if (question.minimum !== undefined && value < question.minimum) {
+      return false;
+    }
+    if (question.maximum !== undefined && value > question.maximum) {
+      return false;
+    }
 
-  const allowed = new Set(structuredOptions(question).map((option) => option.value));
-  if (question?.inputType === 'choice') return allowed.has(value);
-  if (question?.inputType === 'multi-choice') {
-    if (!Array.isArray(value) || !value.every((entry) => allowed.has(entry))) return false;
-    if (question.minItems !== undefined && value.length < question.minItems) return false;
-    if (question.maxItems !== undefined && value.length > question.maxItems) return false;
     return true;
   }
+  if (question?.inputType === 'boolean') {
+    return typeof value === 'boolean';
+  }
+
+  const allowed = new Set<QuestionValue | undefined>(
+    structuredOptions(question).map((option) => option.value),
+  );
+
+  if (question?.inputType === 'choice') {
+    return allowed.has(value);
+  }
+  if (question?.inputType === 'multi-choice') {
+    if (!Array.isArray(value) || !value.every((entry) => allowed.has(entry))) {
+      return false;
+    }
+    if (question.minItems !== undefined && value.length < question.minItems) {
+      return false;
+    }
+    if (question.maxItems !== undefined && value.length > question.maxItems) {
+      return false;
+    }
+
+    return true;
+  }
+
   return false;
 }
 
-function textInputType(question) {
-  return {
+function textInputType(question: ChatQuestionItem) {
+  const types: Record<string, 'email' | 'url' | 'date' | 'datetime-local'> = {
     email: 'email',
     uri: 'url',
     date: 'date',
     'date-time': 'datetime-local',
-  }[question?.format] || 'text';
+  };
+
+  return types[question?.format || ''] || 'text';
 }
 
-function validTextFormat(format, value) {
-  if (!format) return true;
-  if (format === 'email') return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+/**
+ * Проверяет только объявленный формат текста, не изменяя введённую строку.
+ * Ошибка даты или URL остаётся локальным отказом готовности формы.
+ */
+function validTextFormat(format: string | undefined, value: string) {
+  if (!format) {
+    return true;
+  }
+  if (format === 'email') {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  }
   if (format === 'uri') {
-    try { return !!new URL(value).protocol; } catch { return false; }
+    try {
+      return !!new URL(value).protocol;
+    } catch {
+      return false;
+    }
   }
   if (format === 'date') {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-    if (!match) return false;
+
+    if (!match) {
+      return false;
+    }
+
     const date = new Date(`${value}T00:00:00Z`);
+
     return !Number.isNaN(date.valueOf())
       && date.getUTCFullYear() === Number(match[1])
       && date.getUTCMonth() + 1 === Number(match[2])
       && date.getUTCDate() === Number(match[3]);
   }
-  if (format === 'date-time') return !Number.isNaN(new Date(value).valueOf());
+  if (format === 'date-time') {
+    return !Number.isNaN(new Date(value).valueOf());
+  }
+
   return false;
 }
 
-function dateTimeInputValue(value) {
+/**
+ * Показывает серверную дату в локальном времени поля datetime-local.
+ * Неразбираемая строка сохраняется для прежней обработки ошибки формы.
+ */
+function dateTimeInputValue(value: string) {
   const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return value;
+
+  if (Number.isNaN(date.valueOf())) {
+    return value;
+  }
+
   const local = new Date(date.valueOf() - date.getTimezoneOffset() * 60_000);
+
   return local.toISOString().slice(0, 16);
 }
 
-function answerValue(question, value) {
-  if (question?.format !== 'date-time' || typeof value !== 'string') return value;
+/**
+ * Возвращает введённое значение с прежним преобразованием времени в ISO.
+ * Остальные типы передаются исполнителю без строкового приведения.
+ */
+function answerValue(question: ChatQuestionItem, value: QuestionValue | undefined) {
+  if (question?.format !== 'date-time' || typeof value !== 'string') {
+    return value;
+  }
+
   const date = new Date(value);
+
   return Number.isNaN(date.valueOf()) ? value : date.toISOString();
 }
 
-function constraintText(question) {
+/**
+ * Собирает подсказку из объявленных ограничений вопроса.
+ * Отсутствующие границы не добавляют выдуманных требований к ответу.
+ */
+function constraintText(question: ChatQuestionItem) {
   const parts = [];
-  if (question?.minLength !== undefined) parts.push(`минимум ${question.minLength} симв.`);
-  if (question?.maxLength !== undefined) parts.push(`максимум ${question.maxLength} симв.`);
-  if (question?.minimum !== undefined) parts.push(`не меньше ${question.minimum}`);
-  if (question?.maximum !== undefined) parts.push(`не больше ${question.maximum}`);
-  if (question?.minItems !== undefined) parts.push(`выбрать минимум ${question.minItems}`);
-  if (question?.maxItems !== undefined) parts.push(`выбрать максимум ${question.maxItems}`);
+
+  if (question?.minLength !== undefined) {
+    parts.push(`минимум ${question.minLength} симв.`);
+  }
+  if (question?.maxLength !== undefined) {
+    parts.push(`максимум ${question.maxLength} симв.`);
+  }
+  if (question?.minimum !== undefined) {
+    parts.push(`не меньше ${question.minimum}`);
+  }
+  if (question?.maximum !== undefined) {
+    parts.push(`не больше ${question.maximum}`);
+  }
+  if (question?.minItems !== undefined) {
+    parts.push(`выбрать минимум ${question.minItems}`);
+  }
+  if (question?.maxItems !== undefined) {
+    parts.push(`выбрать максимум ${question.maxItems}`);
+  }
+
   return parts.join(' · ');
 }
 
-function hasAction(action) {
+function hasAction(action: string) {
   return actions.value.some((entry) => entry.action === action);
 }
 
-function actionLabel(action) {
-  if (action === 'accept' && !questions.value.length) return 'Разрешить';
+function actionLabel(action: string) {
+  if (action === 'accept' && !questions.value.length) {
+    return 'Разрешить';
+  }
+
   return actions.value.find((entry) => entry.action === action)?.label || ACTION_LABELS[action];
 }
 
-function pickedValue(questionIndex) {
+function pickedValue(questionIndex: number) {
   const picked = state.value[questionIndex]?.picked || [];
 
   return questions.value[questionIndex]?.multiSelect
@@ -366,7 +497,7 @@ function pickedValue(questionIndex) {
  * UiChoiceList использует scalar в single-режиме и массив в multiple.
  * Внутреннее состояние хранит единый массив, чтобы payload ответа оставался прежним.
  */
-function setPicked(questionIndex, value) {
+function setPicked(questionIndex: number, value: unknown) {
   const item = state.value[questionIndex];
 
   if (!item) {
@@ -376,10 +507,11 @@ function setPicked(questionIndex, value) {
   const selected = Array.isArray(value)
     ? value
     : (value == null ? [] : [value]);
+
   item.picked = selected.map((entry) => String(entry));
 }
 
-function toggleOwn(questionIndex) {
+function toggleOwn(questionIndex: number) {
   const item = state.value[questionIndex];
 
   if (item) {
@@ -403,20 +535,29 @@ function submit() {
   );
 }
 
-/** Structured-форма сохраняет raw primitive values и явный исход MCP отдельно. */
-function submitStructured(action) {
+/**
+ * Отправляет явный исход MCP отдельно от типизированных значений.
+ * Необязательные пустые поля не добавляются в список ответов.
+ */
+function submitStructured(action: string) {
   const accepts = action.startsWith('accept');
-  if (accepts && !ready.value) return;
+
+  if (accepts && !ready.value) {
+    return;
+  }
+
   const answers = accepts
     ? questions.value.flatMap((question, index) => {
       const value = state.value[index]?.value;
       const emptyOptional = !question.required
         && (value === '' || (Array.isArray(value) && !value.length));
+
       return hasStructuredValue(question, value) && !emptyOptional
         ? [{ key: question.key, value: answerValue(question, value) }]
         : [];
     })
     : [];
+
   emit('answer', { action, answers });
 }
 </script>

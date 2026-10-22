@@ -48,7 +48,7 @@ export async function mountDesktopEntry(t, options = {}) {
     }
   });
 
-  await compileModule(webFile('src/main.js'), {
+  await compileModule(webFile('src/main.ts'), {
     stubs: {
       vue: `export const createApp = () => ({ use() { return this; }, mount() {} });
         export const nextTick = async () => {};`,
@@ -56,11 +56,11 @@ export async function mountDesktopEntry(t, options = {}) {
       'virtual:pwa-register': `export const registerSW = () => {
         globalThis.__desktopBootstrap.push('sw');
       };`,
-      './router.js': 'export const router = globalThis.__surfaceNavigation.router;',
+      './router.ts': 'export const router = globalThis.__surfaceNavigation.router;',
       './App.vue': 'export default {};',
       './styles/index.css': '',
       './plugins/index.ts': '',
-      './stores/device.js': `export const useDeviceStore = () => ({
+      './stores/device.ts': `export const useDeviceStore = () => ({
         initInstall: () => globalThis.__desktopBootstrap.push('install'),
         initWakeLock: () => globalThis.__desktopBootstrap.push('wake'),
         initNotifications: () => globalThis.__desktopBootstrap.push('notify'),
@@ -70,7 +70,7 @@ export async function mountDesktopEntry(t, options = {}) {
         profile: { id: 'fixture' }, capabilities: ['windows'],
         snapshot: { rev: 1, status: 'online', profile: { id: 'fixture' } },
       });`,
-      './stores/auth.js': 'export const useAuthStore = () => ({ ready: true, authenticated: true });',
+      './stores/auth.ts': 'export const useAuthStore = () => ({ ready: true, authenticated: true });',
       './shared/apiClient.ts': `export const api = { url: (path) => path };
         export const isReportedApiError = () => false;
         export const setApiLogSink = () => {};`,
@@ -78,7 +78,8 @@ export async function mountDesktopEntry(t, options = {}) {
         export const configureSseRelay = () => {};`,
       './shared/desktopSettings.ts':
         'export const currentDesktopMode = () => globalThis.__surfaceNavigation.mode;',
-      './stores/ui.js': 'export const useUiStore = () => globalThis.__surfaceNavigation.ui;',
+      './shared/uiLocale.ts': 'export const bootstrapUiLocale = () => () => {};',
+      './stores/ui.ts': 'export const useUiStore = () => globalThis.__surfaceNavigation.ui;',
       './shared/webLogRuntime.ts': `export const createWebLogRuntime = () => ({
         attachAuthStore() {},
       });`,

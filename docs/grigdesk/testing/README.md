@@ -34,6 +34,9 @@
 - [Единая команда: отдельная песочница, проверенное перекрытие системных команд и ветки b24](cli-sandbox.md)
 
 - [Проверка типов UI должна видеть импортируемые JS-сторы](ui-typecheck-js-imports.md)
+- [Типизированные модули, Vite URL и lazy-компоненты в unit-загрузчиках](typed-vite-unit-loaders.md)
+- [Проверки исходника должны допускать TS-синтаксис и многострочные объекты](typed-source-contracts.md)
+- [Проверка lazy-маршрутов учитывает многострочные объекты и связь пути с компонентом](router-lazy-route-checks.md)
 - [ResizeObserver окна happy-dom нужно перенести в глобальное окружение теста](happy-dom-resize-observer.md)
 - [Изолированный UI preview: область наблюдения Vite и доступ Chromium к loopback](isolated-ui-preview.md)
 - [Electron проверяется в одноразовой сессии D-Bus и GNOME Keyring](electron-keyring-isolation.md)
@@ -62,6 +65,7 @@
 - [Сторож, читающий текст задачи, ловит фикстуру, а не страницу](fixture-text-false-positives.md)
 - [Тест прошёл по другой причине — правило не проверено вовсе](behavioral-test-coverage.md)
 - [Новый импорт в экране валит весь его тест = подмена модуля не экспортирует это имя](view-stub-exports.md)
+- [Проверки после перевода интерфейса: подмены UI, descriptors, flex-текст и heap инвентаризации](translated-ui-contracts.md)
 - [Асинхронные компоненты и composable настроек требуют точных подмен](settings-window-test-stubs.md)
 - [Двойник dock store включает ограничение ширины](tool-host-test-store.md)
 - [Однострочные пояснения функций прошли незамеченными = сторож читаемости видел только TS в web/](readability-guard-scope.md)

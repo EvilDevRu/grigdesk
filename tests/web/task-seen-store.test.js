@@ -1,3 +1,5 @@
+import { loadProductModule } from './helpers/compile-vue.js';
+import { migrationUrl } from './helpers/compile-vue.js';
 // Стор серверных отметок «задачу просмотрели». Проверяется ровно то, чем он
 // отличается от избранного: базовая линия (`initialized`), переиспользование идущего
 // запроса и молчаливая устойчивость к отказу — метка важна, но показу задачи не мешает.
@@ -6,7 +8,7 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const STORE_PATH = fileURLToPath(new URL('../../web/src/stores/task-seen.js', import.meta.url));
+const STORE_PATH = fileURLToPath(migrationUrl('src/stores/taskSeen.ts'));
 const PINIA_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url),
 )).href;
@@ -15,17 +17,17 @@ const apiHarness = {};
 globalThis.__taskSeenApi = apiHarness;
 let actualStoreModule;
 
+/**
+ * Компилятор стирает типы, сохраняя отдельный модуль и прежний транспорт теста.
+ * Действия и проверки снимков исполняются из настоящего стора.
+ */
 async function loadActualStore() {
-  if (actualStoreModule) return actualStoreModule;
-  const code = (await readFile(STORE_PATH, 'utf8'))
-    .replace("import { defineStore } from 'pinia';", `import { defineStore } from "${PINIA_URL}";`)
-    .replace(
-      "import { api } from '../shared/apiClient.ts';",
-      'const api = globalThis.__taskSeenApi;',
-    );
-  actualStoreModule = await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`
-  );
+  if (!actualStoreModule) {
+    actualStoreModule = await loadProductModule('src/stores/taskSeen.ts', {
+      '../shared/apiClient.ts': 'export const api = globalThis.__taskSeenApi;',
+    });
+  }
+
   return actualStoreModule;
 }
 

@@ -22,7 +22,7 @@ interface StatusSession {
     queued?: boolean;
     delivery?: string;
   }[];
-  workdirState?: { committed?: { cwd?: string; extraDirs?: string[] } | null };
+  workdirState?: { committed?: { cwd?: string; extraDirs?: string[] } | null } | null;
   workdirPreview?: { target?: { cwd?: string; extraDirs?: string[] } } | null;
 }
 

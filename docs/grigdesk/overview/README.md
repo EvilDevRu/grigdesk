@@ -21,6 +21,13 @@
 - [Ресурсы общей конфигурации SEA и совместимость вызова Б24](sea-build-assets.md)
 
 - [Состояние миграции на TypeScript: остаток JS/Vue, границы проверок и совместимость](typescript-migration-state.md)
+- [Типы чистых модулей web и локальных сторов](typed-pure-web-modules.md)
+- [Типы и язык после объединения интерфейса](typed-web-i18n-integration.md)
+- [Типы малых сетевых сторов и запуска web](typed-network-web-stores.md)
+- [Отдельная среда AudioWorklet и компилируемый URL](typed-audio-worklet.md)
+- [Типы компонентов web и проверки входящих данных](typed-web-boundaries.md)
+- [Типы чата и живого конвейера](typed-chat-pipeline-boundaries.md)
+- [Типы доски и карточки задачи: справочники, вложения и каталог запуска](typed-task-views.md)
 - [Перенос знаний в документацию: полнота и правила поддержки](documentation-migration.md)
 - [Модули сервера (server/src/modules/)](server-modules.md)
 - [Что лежит в bin/: единая команда, собранные b24, DeepSeek, посредник и окно, иконка](bin-directory.md)
@@ -35,3 +42,5 @@
 - [База знаний: как была устроена до переноса в docs/](knowledge-base-history.md)
 - [Демо: удалено целиком](demo-removal.md)
 - [Браузерный VS Code был и ВЫПИЛЕН: serve-web не видит git в worktree](browser-vscode-removal.md)
+
+- [Типизированные границы исполнителей и речи](typed-provider-speech-boundaries.md) — реестр, usage, плагины, оповещения и browser ports.

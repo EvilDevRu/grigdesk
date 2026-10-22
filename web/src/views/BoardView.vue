@@ -9,7 +9,7 @@
     <template v-else-if="data">
       <!-- Показатели + месяц -->
       <div class="stats-summary">
-        <span>Сегодня {{ hoursToHM(data.today.hours) }} · {{ data.today.tasks_count }} задач</span>
+        <span>Сегодня {{ hoursToHM(data.today!.hours) }} · {{ data.today!.tasks_count }} задач</span>
         <UiButton variant="text" :aria-expanded="statsExpanded" aria-controls="board-stats"
                   @click="statsExpanded = !statsExpanded">Показатели</UiButton>
       </div>
@@ -32,19 +32,19 @@
             <span class="tpct mono" :class="{ over: overwork }">{{ monthPct }}%</span>
           </div>
           <div class="month-summary">
-            <div class="tval">{{ hoursToHM(data.month.hours) }}</div>
+            <div class="tval">{{ hoursToHM(data.month!.hours) }}</div>
             <div
               class="month-completed"
               data-stat="month-completed"
-              :aria-label="`Выполнено задач за месяц: ${data.month.completedTasks ?? 0}`"
+              :aria-label="`Выполнено задач за месяц: ${data.month!.completedTasks ?? 0}`"
             >
-              <strong class="mono">{{ data.month.completedTasks ?? 0 }}</strong>
+              <strong class="mono">{{ data.month!.completedTasks ?? 0 }}</strong>
               <span>выполнено задач</span>
             </div>
           </div>
           <div class="bar"><span class="fill" :class="{ over: overwork }" :style="{ width: Math.min(100, monthPct) + '%' }"></span></div>
           <div class="mfoot">
-            <span class="muted">норма {{ data.month.norm }}ч</span>
+            <span class="muted">норма {{ data.month!.norm }}ч</span>
             <span v-if="overwork" class="over mono">+{{ overwork }}ч переработки</span>
           </div>
         </div>
@@ -100,14 +100,14 @@
         </ul>
       </section>
 
-      <div class="cols" :class="{ solo: !(data.toReview.length || data.created.length) }">
+      <div class="cols" :class="{ solo: !(data.toReview!.length || data.created!.length) }">
         <!-- Мои задачи — основной блок -->
         <section class="col primary">
           <div class="colhead">
             <h3 class="h big">
               <span class="heading-name">Мои задачи</span>
               <span class="cnt">
-                {{ myTasks.length }}<template v-if="hasListFilters"> из {{ data.tasks.length }}</template>
+                {{ myTasks.length }}<template v-if="hasListFilters"> из {{ data.tasks!.length }}</template>
               </span>
             </h3>
             <UiButton
@@ -351,16 +351,16 @@
         </section>
 
         <!-- Контроль / поставленные: блок скрыт, когда обе секции пусты -->
-        <section v-if="data.toReview.length || data.created.length" class="col secondary">
+        <section v-if="data.toReview!.length || data.created!.length" class="col secondary">
           <h3 class="h big">Контроль и поручения</h3>
-          <UiTabs v-model="secondaryMode" class="secondary-tabs" label="Связанные задачи">
+          <UiTabs v-model="secondaryMode!" class="secondary-tabs" label="Связанные задачи">
             <UiTab id="board-review-tab" data-context="board-related-tab"
                    value="review" controls="board-related-list">
-              Контроль <span class="cnt">{{ data.toReview.length }}</span>
+              Контроль <span class="cnt">{{ data.toReview!.length }}</span>
             </UiTab>
             <UiTab id="board-created-tab" data-context="board-related-tab"
                    value="created" controls="board-related-list">
-              Поручения <span class="cnt">{{ data.created.length }}</span>
+              Поручения <span class="cnt">{{ data.created!.length }}</span>
             </UiTab>
           </UiTabs>
           <UiSearchInput
@@ -428,24 +428,29 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+import type { BoardTask } from '../shared/boardContracts.ts';
+import type { UiFieldHandle } from '../ui.ts';
+import { isRecord } from '../../../shared/lib/objects.ts';
+import { decodePipelineTasks } from '../shared/pipelineContracts.ts';
+
 import { openSettings } from '../shared/settingsNavigation.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { hoursToHM, liveTimerSec, secToHMS, signed } from '../shared/format.ts';
-import { useBoardStore } from '../stores/board.js';
-import { useUiStore } from '../stores/ui.js';
+import { useBoardStore } from '../stores/board.ts';
+import { useUiStore } from '../stores/ui.ts';
 import { analyzeTask, startAnalysisPolling, useAnalysisStore } from '../actions/analysis';
-import { useTaskFavoritesStore } from '../stores/task-favorites.js';
+import { useTaskFavoritesStore } from '../stores/taskFavorites.ts';
 import { useTaskShelfStore } from '../stores/taskShelf.ts';
-import { usePluginsStore } from '../stores/plugins.js';
-import { useTaskSeenStore } from '../stores/task-seen.js';
+import { usePluginsStore } from '../stores/plugins.ts';
+import { useTaskSeenStore } from '../stores/taskSeen.ts';
 import MiniChart from './board/MiniChart.vue';
 import TriageBadge from './board/TriageBadge.vue';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
 import { api } from '../shared/apiClient.ts';
 import { useSse } from '../composables/useSse.ts';
-import { boardTaskListResetKey, matchesBoardTask, selectBoardTasks } from '../shared/board-task-list.js';
+import { boardTaskListResetKey, matchesBoardTask, selectBoardTasks } from '../shared/boardTaskList.ts';
 import {
   confirmDialog,
   UiButton,
@@ -473,36 +478,75 @@ const PERIOD_OPTIONS = [
   { value: 'month', label: 'Мес' },
 ];
 
-const STATUS_COLOR = {
-  running: 'var(--accent)', overdue: 'var(--bad)', my_review: 'var(--warn)',
-  waiting: 'var(--warn)', deferred: 'var(--idle)', completed: 'var(--good)', done: 'var(--good)',
+const STATUS_COLOR: Record<string, string> = {
+  running: 'var(--accent)',
+  overdue: 'var(--bad)',
+  my_review: 'var(--warn)',
+  waiting: 'var(--warn)',
+  deferred: 'var(--idle)',
+  completed: 'var(--good)',
+  done: 'var(--good)',
 };
-function statusColor(kind) { return STATUS_COLOR[kind] || 'var(--ink-mid)'; }
+
+function statusColor(kind: string | undefined) {
+  return STATUS_COLOR[kind || ''] || 'var(--ink-mid)';
+}
 
 // Задачи на конвейере фабрики: id → жив ли демон. Точка статуса в списке берёт
 // цвет конвейера (зелёный — идёт, оранжевый — стоит/ждёт), как на странице конвейера.
-const conveyor = ref(new Map());
+const conveyor = ref(new Map<string, boolean>());
+/**
+ * Дешёвый снимок фабрики уточняет точки состояния задач B24.
+ * Неверный ответ оставляет прежние точки и не объявляет пустую успешную загрузку.
+ */
 async function loadConveyor() {
   try {
-    const { tasks } = await api.get('/api/tasks');
+    const { tasks } = decodePipelineTasks(await api.get('/api/tasks'));
+
     conveyor.value = new Map((tasks || []).map((t) => [String(t.task), !!t.daemonAlive]));
   } catch { /* фабрика недоступна — точки остаются статусными */ }
 }
-useSse((name) => { if (name === 'state-change') loadConveyor(); });
-function dotColor(t) {
+
+useSse((name) => {
+  if (name === 'state-change') {
+    loadConveyor();
+  }
+});
+/**
+ * Точка задачи использует состояние фабрики, когда оно уже известно.
+ * При отсутствии проекции сохраняется прежний цвет портального статуса.
+ */
+function dotColor(t: BoardTask) {
   const k = String(t.id);
-  if (conveyor.value.has(k)) return conveyor.value.get(k) ? 'var(--good)' : 'var(--warn)';
+
+  if (conveyor.value.has(k)) {
+    return conveyor.value.get(k) ? 'var(--good)' : 'var(--warn)';
+  }
+
   return statusColor(t.statusKind);
 }
-function dotTitle(t) {
+/**
+ * Подпись точки объясняет текущую работу или остановку конвейера.
+ * Задача вне фабрики продолжает показывать исходную подпись B24.
+ */
+function dotTitle(t: BoardTask) {
   const k = String(t.id);
-  if (conveyor.value.has(k)) return conveyor.value.get(k) ? 'На конвейере — идёт' : 'На конвейере — стоит (ждёт/прерван)';
+
+  if (conveyor.value.has(k)) {
+    return conveyor.value.get(k) ? 'На конвейере — идёт' : 'На конвейере — стоит (ждёт/прерван)';
+  }
+
   return t.statusLabel;
 }
-function projectName(t) {
+
+function projectName(t: BoardTask) {
   return String(t?.group || '').trim();
 }
-function taskStateLabel(task) {
+/**
+ * Доступная подпись задачи согласована с её точкой состояния.
+ * Признак просрочки используется только вне уже известного конвейера.
+ */
+function taskStateLabel(task: BoardTask) {
   const id = String(task.id);
 
   if (conveyor.value.has(id)) {
@@ -513,16 +557,17 @@ function taskStateLabel(task) {
 }
 
 // Живой тик таймера: считается от timer_started_at из B24 — см. liveTimerSec.
-function liveElapsed(t) {
+function liveElapsed(t: BoardTask) {
   return liveTimerSec(t, now.value);
 }
 
 // Иконки плиток (Lucide-контуры, stroke=currentColor).
-const TILE_ICONS = {
+const TILE_ICONS: Record<string, string> = {
   clock: 'M12 7.5v4.5l3 2 M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
   check: 'M21.5 11.1V12a9.5 9.5 0 1 1-5.6-8.7 M22 5 12 15l-3-3',
   gauge: 'M12 13l3.4-3.4 M4.5 17.5a9 9 0 1 1 15 0',
-  calendar: 'M8 2.5v3 M16 2.5v3 M3.5 9.5h17 M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v13A1.5 1.5 0 0 1 19 20.5H5A1.5 1.5 0 0 1 3.5 19V6A1.5 1.5 0 0 1 5 4.5z',
+  calendar: 'M8 2.5v3 M16 2.5v3 M3.5 9.5h17 M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v13A1.5 1.5 0'
+    + ' 0 1 19 20.5H5A1.5 1.5 0 0 1 3.5 19V6A1.5 1.5 0 0 1 5 4.5z',
 };
 const statTiles = computed(() => {
   const d = data.value;
@@ -532,7 +577,7 @@ const statTiles = computed(() => {
   }
 
   const dyn = d.dynamics || {};
-  const dir = (n) => (n > 0 ? 'up' : n < 0 ? 'down' : 'flat');
+  const dir = (n: number | undefined) => (Number(n) > 0 ? 'up' : Number(n) < 0 ? 'down' : 'flat');
 
   return [
     {
@@ -565,22 +610,32 @@ const statTiles = computed(() => {
   ];
 });
 const overwork = computed(() => {
-  const m = data.value?.month; if (!m?.norm) return 0;
-  return Math.max(0, +(m.hours - m.norm).toFixed(1));
+  const m = data.value?.month;
+
+  if (!m?.norm) {
+    return 0;
+  }
+
+  return Math.max(0, +(m.hours! - m.norm).toFixed(1));
 });
 // Процент выполнения месячной нормы (может быть > 100 при переработке).
 const monthPct = computed(() => {
-  const m = data.value?.month; if (!m?.norm) return 0;
-  return Math.round((m.hours / m.norm) * 100);
+  const m = data.value?.month;
+
+  if (!m?.norm) {
+    return 0;
+  }
+
+  return Math.round((m.hours! / m.norm) * 100);
 });
 const activeTasks = computed(() => (data.value?.tasks || []).filter((task) => task.timerRunning));
 // Поиск основного списка независим от поиска контроля и поручений.
 const q = ref('');
-const taskSearch = ref(null);
-const taskList = ref(null);
+const taskSearch = ref<UiFieldHandle<HTMLInputElement> | null>(null);
+const taskList = ref<HTMLElement | null>(null);
 const secondaryQuery = ref('');
-const secondaryMode = ref(null);
-const relatedList = ref(null);
+const secondaryMode = ref<string | null>(null);
+const relatedList = ref<HTMLElement | null>(null);
 const relatedSource = computed(() => secondaryMode.value === 'created'
   ? data.value?.created || []
   : data.value?.toReview || []);
@@ -589,7 +644,7 @@ const relatedTasks = computed(() => relatedSource.value
 
 // При первом ответе открываем непустой список. Дальше выбор принадлежит человеку,
 // даже если после обновления в выбранном разделе больше нет задач.
-watch(() => [data.value?.toReview.length || 0, data.value?.created.length || 0], ([review, created]) => {
+watch(() => [data.value?.toReview?.length || 0, data.value?.created?.length || 0], ([review, created]) => {
   if (secondaryMode.value === null && (review || created)) {
     secondaryMode.value = review ? 'review' : 'created';
   }
@@ -608,6 +663,7 @@ const plugins = usePluginsStore();
 const shelfEnabled = computed(() => plugins.enabled('shelf'));
 const analysisEnabled = computed(() => {
   const manifest = plugins.byId('analysis');
+
   return manifest ? manifest.enabled !== false : true;
 });
 const favoriteOnly = ref(false);
@@ -617,7 +673,7 @@ const filtersOpen = ref(false);
 // загрузки (и до базовой линии) новых не бывает: см. геттер ready.
 const seen = useTaskSeenStore();
 const newOnly = ref(false);
-const isNewTask = (task) => seen.ready && !seen.isSeen(task.id);
+const isNewTask = (task: BoardTask) => seen.ready && !seen.isSeen(task.id);
 const TRIAGE_LS = 'board.triage';
 const SORT_MODES = new Set(['b24', 'risk', 'complexity', 'size', 'fresh']);
 const TRIAGE_OPTIONS = [
@@ -625,11 +681,17 @@ const TRIAGE_OPTIONS = [
   { value: 'unrated', label: 'Без оценки' },
   { value: 'needs-info', label: 'Нужны уточнения' },
 ];
+/**
+ * Сохранённые предпочтения принимаются как неизвестный JSON.
+ * Неверный контейнер сохраняет прежний fallback сортировки и фильтров доски.
+ */
 function readTriagePrefs() {
   try {
-    const saved = JSON.parse(localStorage.getItem(TRIAGE_LS) || '{}');
+    const value: unknown = JSON.parse(localStorage.getItem(TRIAGE_LS) || '{}');
+    const saved = isRecord(value) ? value : {};
+
     return {
-      sortBy: SORT_MODES.has(saved?.sortBy) ? saved.sortBy : 'b24',
+      sortBy: typeof saved.sortBy === 'string' && SORT_MODES.has(saved.sortBy) ? saved.sortBy : 'b24',
       // Один режим вместо двух независимых флагов: повреждённое старое значение
       // больше не может одновременно включить «без оценки» и «нужны уточнения».
       triageMode: saved?.onlyUnrated ? 'unrated' : saved?.onlyNeedsInfo ? 'needs-info' : 'all',
@@ -638,11 +700,13 @@ function readTriagePrefs() {
     return { sortBy: 'b24', triageMode: 'all' };
   }
 }
+
 const savedTriage = readTriagePrefs();
 const sortBy = ref(savedTriage.sortBy);   // b24 | risk | complexity | size | fresh
 const triageMode = ref(savedTriage.triageMode); // all | unrated | needs-info
 const onlyUnrated = computed(() => triageMode.value === 'unrated');
 const onlyNeedsInfo = computed(() => triageMode.value === 'needs-info');
+
 watch([sortBy, triageMode], () => {
   try {
     localStorage.setItem(TRIAGE_LS, JSON.stringify({
@@ -652,20 +716,36 @@ watch([sortBy, triageMode], () => {
     }));
   } catch { /* приватный режим/запрет хранилища не должен ронять доску */ }
 });
-const triageOf = (t) => analysis.byTask[t.id] || null;
+
+const triageOf = (t: BoardTask) => analysis.byTask[t.id] || null;
 // Батч: все задачи без оценки и не в очереди — в триаж по одной (очередь на сервере).
 const unrated = computed(() => (data.value?.tasks || []).filter((t) => {
-  if (!analysisEnabled.value) return false;
+  if (!analysisEnabled.value) {
+    return false;
+  }
+
   const r = triageOf(t);
-  return !r?.analysis && !['queued', 'running'].includes(r?.status?.state);
+
+  return !r?.analysis && !['queued', 'running'].includes(r?.status?.state || '');
 }));
+/**
+ * Последовательно ставит ещё не оценённые задачи в существующую очередь триажа.
+ * Подтверждение человека и отказ одной задачи не меняют порядок остальных запросов.
+ */
 async function analyzeAllUnrated() {
   const list = unrated.value;
-  if (!list.length) return;
+
+  if (!list.length) {
+    return;
+  }
   if (!(await confirmDialog(
-    `Поставить в очередь триажа ${list.length} задач(и)? Оценки идут последовательно, по несколько минут на задачу.`,
+    `Поставить в очередь триажа ${list.length} задач(и)? Оценки идут последовательно, `
+      + 'по несколько минут на задачу.',
     { title: 'Оценить все задачи без оценки', okText: 'Поставить в очередь' },
-  ))) return;
+  ))) {
+    return;
+  }
+
   for (const t of list) {
     try { await analyzeTask(t.id); } catch { /* очередь дедупит и переживает отказ одной задачи */ }
   }
@@ -687,12 +767,16 @@ const myTasks = computed(() => {
 });
 const currentFavoriteCount = computed(() => {
   const ids = new Set(favorites.taskIds.map(String));
+
   return (data.value?.tasks || []).filter((task) => ids.has(String(task.id))).length;
 });
 // Счётчик на кнопке фильтра — по всему списку доски, а не по видимой выборке:
 // он отвечает на вопрос «сколько задач я ещё не смотрел», а не «сколько нашлось».
 const currentNewCount = computed(() => {
-  if (!seen.ready) return 0;
+  if (!seen.ready) {
+    return 0;
+  }
+
   return (data.value?.tasks || []).filter((task) => !seen.isSeen(task.id)).length;
 });
 const activeFilterCount = computed(() => [
@@ -718,13 +802,14 @@ async function resetTaskFilters() {
   await nextTick();
   taskSearch.value?.focus();
 }
+
 const hasFavoriteMatchesBeforeSearch = computed(() => selectBoardTasks({
   tasks: data.value?.tasks || [],
   analysisByTask: analysis.byTask,
   favoriteOnly: true,
   favoriteTaskIds: favorites.taskIds,
 }).length > 0);
-const toggleFavorite = (task) => favorites.toggle(task.id);
+const toggleFavorite = (task: BoardTask) => favorites.toggle(task.id);
 // Пагинация по скроллу: рисуем первые N, при докрутке до низа добавляем ещё.
 const PAGE = 40;
 const visibleCount = ref(PAGE);
@@ -738,33 +823,56 @@ const listResetKey = computed(() => boardTaskListResetKey({
   sortBy: sortBy.value,
   taskCount: data.value?.tasks?.length || 0,
 }));
+
 watch(listResetKey, () => {
   visibleCount.value = PAGE;
+
   if (taskList.value) {
     taskList.value.scrollTop = 0;
   }
 });
+
 function showMoreTasks() {
   visibleCount.value = Math.min(myTasks.value.length, visibleCount.value + PAGE);
 }
-function onTasksScroll(e) {
+/**
+ * Подгружает следующую порцию строк при приближении к концу списка.
+ * Проверка DOM-цели оставляет посторонние события без изменения пагинации.
+ */
+function onTasksScroll(e: Event) {
   const el = e.target;
+
+  if (!(el instanceof HTMLElement)) {
+    return;
+  }
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80 && visibleCount.value < myTasks.value.length) {
     showMoreTasks();
   }
 }
+
 const chart = computed(() => data.value?.charts?.[period.value] || null);
 
-let ticker = null;
+let ticker: ReturnType<typeof setInterval> | null = null;
+
 onMounted(() => {
   board.load();
   favorites.load(true);
   seen.load(true);
-  if (analysisEnabled.value) startAnalysisPolling();
+
+  if (analysisEnabled.value) {
+    startAnalysisPolling();
+  }
+
   loadConveyor();
-  ticker = setInterval(() => { now.value = Date.now(); }, 1000);
+  ticker = setInterval(() => {
+    now.value = Date.now();
+  }, 1000);
 });
-onUnmounted(() => { if (ticker) clearInterval(ticker); });
+onUnmounted(() => {
+  if (ticker) {
+    clearInterval(ticker);
+  }
+});
 </script>
 
 <style scoped>

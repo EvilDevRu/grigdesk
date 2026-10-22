@@ -61,7 +61,7 @@ async function mountCleanup(t, { values = {}, prune = async () => ({ ok: true, r
   const component = await compileVue(CLEANUP, {
     stubs: {
       '../../stores/docker': 'export const useDockerStore = () => globalThis.__dockerCleanupHarness.store;',
-      '../../stores/plugins.js': (
+      '../../stores/plugins.ts': (
         'export const usePluginsStore = () => globalThis.__dockerCleanupHarness.plugins;'
       ),
       '../../ui': (UI_STUB) +

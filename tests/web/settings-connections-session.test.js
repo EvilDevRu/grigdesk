@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+
+import { resolveLocaleText } from '../../shared/i18n/catalogs.ts';
 import { compileModule, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 import { assertSettingsFields } from './helpers/settings-consistency.js';
@@ -20,7 +22,7 @@ test('Подключения и система в общей сессии', asyn
           };
         `,
         '../../composables/useSse.ts': 'export const useSse = () => ({ connected: { value: false } });',
-        '../router.js': 'export const router = { push: async () => {} };',
+        '../router.ts': 'export const router = { push: async () => {} };',
         '../../../composables/useSse.ts': 'export const sseSubscribe = () => () => {};',
       },
     }),
@@ -206,7 +208,7 @@ test('Подключения и система в общей сессии', asyn
       assert.ok(calls.filter((call) => call.path === '/api/system/server').length > before);
       assert.match(system.text(), /Сервер снова доступен/);
       assert.equal(location.href, href);
-      assert.match(globalThis.__connectionsConfirms.at(-1)[0], /ходы агентов: 2/);
+      assert.match(resolveLocaleText(globalThis.__connectionsConfirms.at(-1)[0]), /ходы агентов: 2/);
       globalThis.__connectionsAnswer = false;
     } finally {
       system.unmount();

@@ -125,7 +125,7 @@ import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vu
 import { UiButton, UiInlineMessage, confirmDialog } from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useDockViewport } from '../shared/tools/viewport.ts';
-import { useChatStore } from '../stores/chat.js';
+import { useChatStore } from '../stores/chat.ts';
 import {
   archiveProject,
   checkRepositories,

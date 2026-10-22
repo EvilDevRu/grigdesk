@@ -7,7 +7,7 @@ import {
   CHAT_SESSION_PATH as VIEW_PATH,
   compileChatSession as compileChatSessionHarness,
 } from './helpers/chat-session.js';
-import { webFile } from './helpers/compile-vue.js';
+import { loadProductModule, webFile } from './helpers/compile-vue.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -76,12 +76,13 @@ async function mountChat(t, {
 } = {}) {
   const browser = await installBrowser(t);
   configureBrowser?.(browser);
+
   const [
     { reactive, watch },
     { createDictationController, speechExecutionFingerprint },
   ] = await Promise.all([
     import('../../web/node_modules/vue/index.mjs'),
-    import('../../web/src/features/speech/controller.js'),
+    loadProductModule('src/features/speech/controller.ts'),
   ]);
   const chatStore = reactive(makeChatStore(speech));
   const posts = [];

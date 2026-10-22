@@ -1,20 +1,24 @@
+import { loadProductModule } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
-import { useDockStore, clampDockWidth } from '../../web/src/stores/dock.js';
-import { normalizeNavItem, sortNavItems } from '../../web/src/stores/plugins.js';
+import { useDockStore, clampDockWidth } from '../../web/src/stores/dock.ts';
+
+const { normalizeNavItem, sortNavItems } = await loadProductModule('src/stores/plugins.ts');
+
 import {
   aggregateNavBadges,
   chatNavBadge,
   inboxNavBadge,
   pipelineNavBadge,
   shelfNavBadge,
-} from '../../web/src/shared/nav-badges.js';
+} from '../../web/src/shared/navBadges.ts';
 import { launchTool } from '../../web/src/shared/tools/launcher.ts';
 
 function memoryStorage(seed = {}) {
   const data = new Map(Object.entries(seed));
+
   return {
     getItem: (key) => data.has(key) ? data.get(key) : null,
     setItem: (key, value) => data.set(key, String(value)),
@@ -29,8 +33,10 @@ test('dock store клампит ширину, запоминает геомет�
     'grigdesk-dock-width': 'oops',
     'grigdesk-dock-expanded': '0',
   });
+
   Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
   setActivePinia(createPinia());
+
   const dock = useDockStore();
 
   assert.equal(dock.activeTool, 'code');
@@ -63,9 +69,14 @@ test('dock store клампит ширину, запоминает геомет�
   assert.equal(dock.mounted.terminal, true, 'скрытие не размонтирует живой инструмент');
   assert.equal(dock.runtime.terminal.status, 'open', 'скрытие не сбрасывает живую сессию');
 
-  const first = dock.enqueue('terminal', { id: 999, type: 'insert', text: 'one' });
+  const first = dock.enqueue('terminal', {
+    id: 999,
+    type: 'insert',
+    text: 'one'
+  });
   const second = dock.enqueue('terminal', { type: 'insert', text: 'two' });
   const code = dock.enqueue('code', { type: 'project', project: 'grigdesk' });
+
   assert.deepEqual([first.id, second.id, code.id], [1, 2, 3], 'payload не подменяет монотонный id');
   dock.consume('terminal', first.id);
   assert.deepEqual(dock.intents.terminal.map((item) => item.id), [2]);
@@ -105,7 +116,9 @@ test('dock store клампит ширину, запоминает геомет�
   dock.resetAllRuntime();
   assert.equal(dock.expandedPreference, true, 'runtime-reset не стирает настройку геометрии');
   setActivePinia(createPinia());
+
   const restored = useDockStore();
+
   restored.open('code');
   assert.equal(restored.isExpanded, true, 'полноширинный режим восстанавливается из localStorage');
 });
@@ -115,8 +128,10 @@ test('старый общий fullscreen мигрирует только к по
     'grigdesk-dock-tool': 'code',
     'grigdesk-dock-expanded': '1',
   });
+
   Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
   setActivePinia(createPinia());
+
   const dock = useDockStore();
 
   assert.deepEqual(JSON.parse(storage.value('grigdesk-dock-expanded-tools')), { code: true });
@@ -133,35 +148,61 @@ function launcherHarness({ routeTool = null, isOpen = false, activeTool = 'code'
     isOpen,
     activeTool,
     runtime: {},
-    enqueue(id, intent) { events.push(['enqueue', id, intent]); },
-    open(id) { events.push(['open', id]); this.isOpen = true; this.activeTool = id; },
+    enqueue(id, intent) {
+       events.push(['enqueue', id, intent]);
+    },
+    open(id) {
+       events.push(['open', id]);
+      this.isOpen = true;
+      this.activeTool = id;
+    },
     setRuntime(id, value) {
       events.push(['runtime', id, value]);
       this.runtime[id] = { ...(this.runtime[id] || {}), ...value };
     },
   };
-  const router = { async push(path) { events.push(['push', path]); } };
-  return { route: { meta: routeTool ? { tool: routeTool } : {} }, router, dock, events };
+  const router = { async push(path) {
+                      events.push(['push', path]);
+                   } };
+
+  return {
+    route: { meta: routeTool ? { tool: routeTool } : {} },
+    router,
+    dock,
+    events
+  };
 }
 
 test('launcher соблюдает route/dock state machine и кладёт intent до перехода', async () => {
   const desktop = launcherHarness();
+
   assert.equal(await launchTool({ ...desktop, canDock: () => true }, 'terminal', { type: 'insert', text: 'cmd' }), true);
   assert.deepEqual(desktop.events.map((event) => event[0]), ['enqueue', 'open', 'runtime']);
   assert.equal(desktop.dock.activeTool, 'terminal');
 
   const mobile = launcherHarness();
+
   await launchTool({ ...mobile, canDock: () => false }, 'code', { type: 'project', project: 'demo' });
   assert.deepEqual(mobile.events.map((event) => event[0]), ['enqueue', 'push']);
   assert.equal(mobile.events[1][1], '/code');
 
-  const sameRoute = launcherHarness({ routeTool: 'code', isOpen: true, activeTool: 'terminal' });
+  const sameRoute = launcherHarness({
+    routeTool: 'code',
+    isOpen: true,
+    activeTool: 'terminal'
+  });
+
   await launchTool({ ...sameRoute, canDock: () => true }, 'code', { type: 'project', project: 'demo' });
   assert.deepEqual(sameRoute.events.map((event) => event[0]), ['enqueue', 'runtime']);
   assert.equal(sameRoute.dock.isOpen, true, 'полноценная tool-страница не скрывает лежащий под ней dock');
   assert.equal(sameRoute.dock.activeTool, 'terminal');
 
-  const otherRoute = launcherHarness({ routeTool: 'code', isOpen: true, activeTool: 'code' });
+  const otherRoute = launcherHarness({
+    routeTool: 'code',
+    isOpen: true,
+    activeTool: 'code'
+  });
+
   await launchTool({ ...otherRoute, canDock: () => true }, 'terminal', { type: 'insert', text: 'login' });
   assert.deepEqual(otherRoute.events.map((event) => event[0]), ['enqueue', 'push']);
   assert.equal(otherRoute.events[1][1], '/terminal');
@@ -177,6 +218,7 @@ test('Полка, Код и Терминал переключают один act
     configurable: true,
   });
   setActivePinia(createPinia());
+
   const dock = useDockStore();
   const sequence = [];
 
@@ -194,10 +236,21 @@ test('Полка, Код и Терминал переключают один act
 
 test('nav placement сортируется стабильно, invalid group остаётся в rail, а badge сохраняет приоритет', () => {
   const items = [
-    normalizeNavItem({ id: 'z', nav: { path: '/z', label: 'Я', group: 'tools', order: 20 } }),
-    normalizeNavItem({ id: 'a', nav: { path: '/a', label: 'А', group: 'broken', order: 10 } }),
+    normalizeNavItem({ id: 'z', nav: {
+      path: '/z',
+      label: 'Я',
+      group: 'tools',
+      order: 20
+    } }),
+    normalizeNavItem({ id: 'a', nav: {
+      path: '/a',
+      label: 'А',
+      group: 'broken',
+      order: 10
+    } }),
     normalizeNavItem({ id: 'b', nav: { path: '/b', label: 'Б' } }),
   ];
+
   assert.equal(items[1].group, 'rail');
   assert.equal(items[2].group, 'rail');
   assert.deepEqual(sortNavItems(items).map((item) => item.id), ['a', 'z', 'b']);
@@ -207,6 +260,7 @@ test('nav placement сортируется стабильно, invalid group о�
     system: true,
     nav: { path: `/${id}`, label: id },
   }));
+
   assert.deepEqual(
     legacySystem.map(({ id, group, order }) => [id, group, order]),
     [
@@ -219,21 +273,32 @@ test('nav placement сортируется стабильно, invalid group о�
     'новый web не возвращает встроенные инструменты в левую рейку до рестарта старого server',
   );
   assert.equal(
-    normalizeNavItem({ id: 'code', system: false, nav: { path: '/code', label: 'Чужой Code' } }).group,
+    normalizeNavItem({
+      id: 'code',
+      system: false,
+      nav: { path: '/code', label: 'Чужой Code' }
+    }).group,
     'rail',
     'fallback не даёт пользовательскому manifest привилегий встроенного Code',
   );
 
   const inbox = inboxNavBadge({ reviewCount: 4 });
+
   assert.deepEqual(inbox, {
-    '/inbox': { n: 4, kind: 'info', title: 'к разбору: 4' },
+    '/inbox': {
+      n: 4,
+      kind: 'info',
+      title: 'к разбору: 4'
+    },
   });
   assert.deepEqual(inboxNavBadge({ reviewCount: 0 }), {}, 'нулевой чип скрыт');
+
   const aggregate = aggregateNavBadges([
     { label: 'Видео', badge: { n: 2, kind: 'wait' } },
     { label: 'Входящие', badge: inbox['/inbox'] },
     { label: 'База', badge: { n: 1, kind: 'stall' } },
   ]);
+
   assert.deepEqual(aggregate, {
     n: 7,
     kind: 'stall',

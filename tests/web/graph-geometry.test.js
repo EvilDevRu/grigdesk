@@ -7,7 +7,7 @@ import {
   layoutGraphPositions,
   nodeGeom,
   nodeLabelLines,
-} from '../../web/src/shared/graph-geom.js';
+} from '../../web/src/shared/graphGeom.ts';
 
 const nodes = {
   build: ['agent', 'Исправление', ''],

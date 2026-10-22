@@ -211,9 +211,9 @@ import type {
   DockerStatsMap,
 } from '../../../../shared/plugins/docker/dockerContracts';
 
-import { sandboxUrl } from '../../shared/sandbox.js';
+import { sandboxUrl } from '../../shared/sandbox.ts';
 import { useDockerStore } from '../../stores/docker';
-import { usePluginsStore } from '../../stores/plugins.js';
+import { usePluginsStore } from '../../stores/plugins.ts';
 import {
   UiButton,
   UiCheckbox,

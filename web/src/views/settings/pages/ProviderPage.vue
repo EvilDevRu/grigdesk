@@ -358,7 +358,7 @@ import type {
   ProviderSettingEntry,
 } from '../../../../../shared/chat/providersContracts.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
-import { useProvidersStore } from '../../../stores/providers.js';
+import { useProvidersStore } from '../../../stores/providers.ts';
 import { useProviderSettingsStore } from '../../../stores/providerSettings.ts';
 import {
   localizeProviderMetadata, localizeNativeMetadata, localizeExecutorType,
@@ -407,7 +407,7 @@ const actions = createSettingsActions({
   openTerminal: launcher.openTerminal,
   openChat: async () => false,
 }, uiLocale);
-const resources = computed(() => (providers.usage as Record<string, { resources?: unknown[] }>)[
+const resources = computed(() => providers.usage[
   settings.entityId ?? ''
 ]?.resources ?? []);
 const updateResult = computed(() => (providers.updateResults as Record<string, { text: string }>)[

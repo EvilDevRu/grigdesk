@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
 import { api } from '../../web/src/shared/apiClient.ts';
-import { useBoardStore } from '../../web/src/stores/board.js';
-import { useTasksStore } from '../../web/src/stores/tasks.js';
+import { useBoardStore } from '../../web/src/stores/board.ts';
+import { useTasksStore } from '../../web/src/stores/tasks.ts';
 
 test('BM-01: окно карточки просит снимок, а после своего действия читает доску само', async (t) => {
   let dashboards = 0;

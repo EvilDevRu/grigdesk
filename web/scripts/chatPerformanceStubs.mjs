@@ -1,10 +1,10 @@
 // Внешние службы стенда не обращаются к рабочему API.
 // Store, Markdown и компоненты остаются настоящими.
 export const performanceStubs = new Map([
-  ['web/src/router.js', `
+  ['web/src/router.ts', `
     export const router = { currentRoute: { value: { path: '/chats', meta: {} } } };
   `],
-  ['web/src/stores/ui-context.js', `
+  ['web/src/stores/uiContext.ts', `
     export const useUiContextStore = () => ({
       capture: () => ({ routingScope: null, promptContext: { page: 'Чаты', path: '/chats' } }),
     });
@@ -19,7 +19,7 @@ export const performanceStubs = new Map([
       return () => {};
     };
   `],
-  ['web/src/stores/providers.js', `
+  ['web/src/stores/providers.ts', `
     const model = { id: 'fixture-model', name: 'Модель стенда', efforts: [], contextWindow: 200000 };
     const provider = { id: 'fixture-provider', name: 'Стенд', models: [model], color: '#88aacc' };
     const store = {
@@ -31,10 +31,10 @@ export const performanceStubs = new Map([
     };
     export const useProvidersStore = () => store;
   `],
-  ['web/src/stores/tasks.js', 'export const useTasksStore = () => ({ load: async () => ({}) });'],
-  ['web/src/stores/ui.js', 'export const useUiStore = () => ({});'],
+  ['web/src/stores/tasks.ts', 'export const useTasksStore = () => ({ load: async () => ({}) });'],
+  ['web/src/stores/ui.ts', 'export const useUiStore = () => ({});'],
   ['web/src/stores/documentPreview.ts', 'export const useDocumentPreviewStore = () => ({});'],
-  ['web/src/features/speech/provider.js', `
+  ['web/src/features/speech/provider.ts', `
     export const useDictationController = () => ({
       acquire: () => ({
         state: { phase: 'idle', busy: false, prompt: null, interim: '', notice: '' },

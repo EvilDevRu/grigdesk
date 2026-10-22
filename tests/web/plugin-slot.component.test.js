@@ -62,7 +62,7 @@ test('слот рисует включённые размещения с кон�
       .then(async (utils) => ({ ...utils, ...(await import('../../web/node_modules/vue/index.mjs')) })),
     compileVue(webFile('src/plugins/PluginSlot.vue'), {
       stubs: {
-        '../stores/plugins.js': PLUGINS_STUB,
+        '../stores/plugins.ts': PLUGINS_STUB,
         './registry.ts': REGISTRY_STUB,
       },
     }),

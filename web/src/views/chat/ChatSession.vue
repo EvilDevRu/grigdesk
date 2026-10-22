@@ -133,7 +133,7 @@
             :model-value="currentMode"
             :disabled="frozen"
             v-tooltip="modeHint" :aria-description="modeHint"
-            @change="chat.setMode(sid, $event.target.value)"
+            @change="chat.setMode(sid, ($event.target as HTMLSelectElement).value)"
           >
             <option v-for="m in modes" :key="m.id" :value="m.id" :title="m.hint">{{ m.label }}</option>
           </UiSelect>
@@ -233,9 +233,9 @@
                :key="key" class="msg" :class="[m.role, { compact }]"
                :style="m.role === 'assistant' ? group.brandStyle : null">
             <div v-if="m.attachments?.length" class="m-atts">
-              <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url)" target="_blank" rel="noopener"
+              <a v-for="a in m.attachments" :key="a.file" :href="api.url(a.url || '')" target="_blank" rel="noopener"
                  @click="onAttachmentClick($event, a)">
-                <img v-if="isImg(a)" :src="api.url(a.url)" :alt="a.name" v-tooltip="a.name" />
+                <img v-if="isImg(a)" :src="api.url(a.url || '')" :alt="a.name" v-tooltip="a.name" />
                 <span v-else class="m-file">📄 {{ a.name }}</span>
               </a>
             </div>
@@ -296,11 +296,11 @@
                   :datetime="messageTimeIso(m.sentAt)" v-tooltip="messageTimeTitle(m.sentAt)"
                   :aria-label="messageTimeTitle(m.sentAt)">{{ messageTime(m.sentAt) }}</time>
                 <span v-if="deliveryMark(m)?.kind === 'pending'" class="m-pending" role="img"
-                  data-role="chat-message-pending" :aria-label="deliveryMark(m).label"
-                  v-tooltip="deliveryMark(m).label">
+                  data-role="chat-message-pending" :aria-label="deliveryMark(m)?.label"
+                  v-tooltip="deliveryMark(m)?.label">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <template v-if="deliveryMark(m).icon === 'offline'">
+                    <template v-if="deliveryIcon(m) === 'offline'">
                       <line x1="1" y1="1" x2="23" y2="23" />
                       <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
                       <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39" />
@@ -320,8 +320,8 @@
                    turnId, поэтому дошедшее всё-таки сообщение второй раз агента не запустит. -->
               <UiIconButton
                 v-if="deliveryMark(m)?.kind === 'failed'"
-                :label="`${deliveryMark(m).label}. Повторить отправку`"
-                v-tooltip="`${deliveryMark(m).label}. Нажмите, чтобы повторить отправку`"
+                :label="`${deliveryMark(m)?.label}. Повторить отправку`"
+                v-tooltip="`${deliveryMark(m)?.label}. Нажмите, чтобы повторить отправку`"
                 data-context="chat-delivery-retry"
                 :disabled="frozen"
                 @click="confirmRetryDelivery(m)"
@@ -394,7 +394,7 @@
 
     <!-- Всплывашка разрешения: агент хочет выполнить действие -->
     <ChatPermission v-if="perm" :req="perm"
-                    @answer="(allow, remember, comment, choice) => chat.answerPerm(perm.pid, allow, remember, comment, choice)" />
+                    @answer="(allow, remember, comment, choice) => chat.answerPerm(perm!.pid, allow, remember, comment, choice)" />
 
     <!-- Ввод: единый композер, кнопки внутри (📎 фото, 🎤 диктовка) -->
     <div class="cs-input">
@@ -414,7 +414,7 @@
         <!-- Чипы ещё не отправленных вложений -->
         <div v-if="pending.length || attachBusy" class="pend">
           <div v-for="(a, i) in pending" :key="a.file" class="chip">
-            <img v-if="isImg(a)" :src="api.url(a.url)" alt="" />
+            <img v-if="isImg(a)" :src="api.url(a.url || '')" alt="" />
             <span class="nm">{{ a.name }}</span>
             <UiIconButton
               class="x"
@@ -627,17 +627,26 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import ChatWorkdir from './ChatWorkdir.vue';
 import { chatWorkdirLabel } from '../../../../shared/chat/chatWorkdir.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api } from '../../shared/apiClient.ts';
-import { useDictationController } from '../../features/speech/provider.js';
-import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.js';
+import { errorMessage } from '../../../../shared/lib/errors.ts';
+import { decodeChatAttachment } from '../../shared/chatContracts.ts';
+import { decodePipelineTasks } from '../../shared/pipelineContracts.ts';
+import type {
+  ChatAttachment, HistoryAttachment, ChatMessage, ContextCache,
+} from '../../shared/chatContracts.ts';
+import type { PipelineTask } from '../../shared/pipelineContracts.ts';
+import type { ProviderEntry, ProviderModelEntry } from '../../../../shared/chat/providersContracts.ts';
+
+import { useDictationController } from '../../features/speech/provider.ts';
+import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.ts';
 import { contextFill } from '../../../../shared/chat/chatContext.ts';
 import { writeClipboardText } from '../../shared/clipboard.ts';
-import { useTasksStore } from '../../stores/tasks.js';
-import { useProvidersStore } from '../../stores/providers.js';
+import { useTasksStore } from '../../stores/tasks.ts';
+import { useProvidersStore } from '../../stores/providers.ts';
 import EffortSlider from './EffortSlider.vue';
 import StepList from './StepList.vue';
 import ChatInTurnReply from './ChatInTurnReply.vue';
@@ -663,11 +672,11 @@ import {
   vTooltip,
 } from '../../ui';
 import ChatMarkdown from './ChatMarkdown.vue';
-import { documentLinkFromClick } from '../../features/documents/links.js';
+import { documentLinkFromClick } from '../../features/documents/links.ts';
 import { codeLinkFromClick, loadCodeRoots } from '../../features/code/links.ts';
 import { useToolLauncher } from '../../shared/tools/launcher.ts';
 import { useDocumentPreviewStore } from '../../stores/documentPreview.ts';
-import { lastModelRun, modelRunView } from '../../shared/chat-model-run.js';
+import { lastModelRun, modelRunView } from '../../shared/chatModelRun.ts';
 
 // Полноразмерная сессия на единственной странице «Чаты».
 const props = defineProps({
@@ -675,7 +684,7 @@ const props = defineProps({
 });
 // back — «назад к списку чатов»: кнопка живёт в шапке, но видна только на узком экране,
 // где список и чат делят одну колонку (показом управляет CSS, не JS).
-const emit = defineEmits(['back']);
+const emit = defineEmits<{ back: [] }>();
 
 const chat = useChatStore();
 const tasks = useTasksStore();
@@ -686,47 +695,68 @@ const { openTool } = useToolLauncher();
 // текстом; резолвер читает реактивный ref, поэтому лента дорисуется сама.
 loadCodeRoots();
 
-function onMarkdownClick(event) {
-  if (!isPlainClick(event)) return;
-  const image = event.target?.closest?.('img');
+
+/**
+ * Открывает изображение, документ или файл кода по обычному клику в ленте.
+ * Модифицированные клики сохраняют стандартное поведение браузера.
+ */
+function onMarkdownClick(event: MouseEvent) {
+  if (!isPlainClick(event)) {
+    return;
+  }
+
+  const image = (event.target instanceof Element ? event.target.closest('img') : null);
+
   if (image) {
     event.preventDefault();
     documentPreview.showImage({
-      src: image.currentSrc || image.getAttribute('src'),
+      src: image.currentSrc || image.getAttribute('src') || '',
       name: image.getAttribute('alt') || image.getAttribute('title') || 'Изображение',
       mime: '',
     });
+
     return;
   }
+
   const href = documentLinkFromClick(event);
+
   if (href) {
     event.preventDefault();
     documentPreview.show(href);
+
     return;
   }
+
   const codeTarget = codeLinkFromClick(event);
-  if (!codeTarget) return;
+
+  if (!codeTarget) {
+    return;
+  }
+
   event.preventDefault();
   openTool('code', { type: 'open-file', ...codeTarget });
 }
 
-function isPlainClick(event) {
+function isPlainClick(event: MouseEvent) {
   return event?.button === 0
     && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 }
 
-function onAttachmentClick(event, attachment) {
-  if (!isImg(attachment) || !isPlainClick(event)) return;
+function onAttachmentClick(event: MouseEvent, attachment: HistoryAttachment) {
+  if (!isImg(attachment) || !isPlainClick(event)) {
+    return;
+  }
+
   event.preventDefault();
   documentPreview.showImage({
-    src: api.url(attachment.url),
-    name: attachment.name,
-    mime: attachment.mime,
+    src: api.url(attachment.url || ''),
+    name: attachment.name || '',
+    mime: attachment.mime || '',
   });
 }
 
 // Архивный разговор открывается для чтения прямо из архива. Отправка сообщения
-// сама перенесёт тот же объект в активные (stores/chat.js), отдельной копии нет.
+// сама перенесёт тот же объект в активные (stores/chat.ts), отдельной копии нет.
 const sess = computed(() => chat.sessions.find((s) => s.id === props.sid)
   || (chat.archived || []).find((s) => s.id === props.sid)
   || null);
@@ -765,16 +795,26 @@ const timelineGroups = computed(() => groupChatTimeline(timeline.value).map((gro
 // ── Название чата в шапке страницы «Чаты» ──
 const editingTitle = ref(false);
 const titleVal = ref('');
-const titleEl = ref(null);
+const titleEl = ref<InstanceType<typeof UiInput> | null>(null);
+
+
+/**
+ * Открывает редактор с фактической подписью текущего чата.
+ * Фокус и выделение устанавливаются после появления поля в DOM.
+ */
 async function startTitleEdit() {
-  titleVal.value = chat.tabLabel(sess.value);
+  titleVal.value = chat.tabLabel(sess.value || {});
   editingTitle.value = true;
   await nextTick();
   titleEl.value?.focus();
   titleEl.value?.select();
 }
+
 function commitTitle() {
-  if (editingTitle.value) chat.setTitle(props.sid, titleVal.value.trim());
+  if (editingTitle.value) {
+    chat.setTitle(props.sid, titleVal.value.trim());
+  }
+
   editingTitle.value = false;
 }
 
@@ -782,6 +822,7 @@ function commitTitle() {
 // у каждой модели свои уровни эффорта и своё окно контекста. Хардкода нет:
 // новая модель/уровень появляется из реестра сама. ──
 const prov = useProvidersStore();
+
 prov.load();
 // Модель чата: пустая = «по умолчанию»; сохранённый алиас (`opus`) резолвится в ту модель,
 // на которую он указывает у текущего CLI. Решаем здесь, а не при создании чата: реестр
@@ -802,7 +843,7 @@ const status = computed(() => {
   return view;
 });
 const usageNow = ref(Date.now());
-let usageResetTimer = null;
+let usageResetTimer: ReturnType<typeof setTimeout> | null = null;
 
 const statusUsage = computed(() => providerUsageSummary(
   status.value.providerId,
@@ -850,14 +891,14 @@ onUnmounted(() => {
 const modelId = computed(() => current.value.id);
 const effortValue = computed(() => sess.value?.effort || '');
 const currentModel = computed(() => current.value.model);
-const fmtTokens = (value) => Math.max(0, Number(value) || 0).toLocaleString('ru');
+const fmtTokens = (value: unknown) => Math.max(0, Number(value) || 0).toLocaleString('ru');
 
 /**
  * Каталог Codex намеренно не сообщает окно. Для выбранной модели точнее всего замер
  * живой thread; до него вместо паспортной или сохранённой заглушки показываем источник
  * будущего факта. Остальные исполнители сохраняют прежний каталожный контракт.
  */
-function modelContextTitle(model, label) {
+function modelContextTitle(model: ProviderModelEntry | null, label: string) {
   const runtimeWindow = model?.id === currentModel.value?.id
     ? Math.max(0, Number(sess.value?.contextWindow) || 0)
     : 0;
@@ -870,12 +911,13 @@ function modelContextTitle(model, label) {
   }
 
   const context = Math.max(0, Number(model?.context) || 0);
+
   if (!context) {
     return `${label} · окно контекста неизвестно`;
   }
 
   return `${label} · контекст ${fmtTokens(context)} токенов`
-    + (model.contextUnverified ? ' · окно не подтверждено' : '');
+    + (model?.contextUnverified ? ' · окно не подтверждено' : '');
 }
 
 const currentModelTitle = computed(() => (
@@ -883,10 +925,12 @@ const currentModelTitle = computed(() => (
 ));
 // Подсказка пункта: окно модели и оговорки каталога. Недоступность исполнителя
 // названа здесь же и словами: она предупреждает о вероятном отказе, но выбор не отменяет.
-const modelOptionTitle = (model, provider) => modelContextTitle(model, model.id)
+const modelOptionTitle = (
+  model: ProviderModelEntry, provider: { available?: boolean } | null,
+) => modelContextTitle(model, model.id)
   + (model.unknown ? ' · нет в каталоге установленного CLI' : '')
   + (provider?.available === false ? ' · исполнитель недоступен по последней проверке' : '');
-const modelOptionLabel = (model) => model.name
+const modelOptionLabel = (model: ProviderModelEntry) => model.name
   + (model.contextUnverified && !model.contextRuntimeOnly ? ' · окно не подтверждено' : '')
   + (model.unknown ? ' ?' : '');
 // Группы моделей для селекта (что именно видно — решает стор, правило одно на весь GrigDesk).
@@ -901,10 +945,16 @@ const modes = computed(() => prov.modesOf(sess.value?.modelRef || sess.value?.mo
 const currentMode = computed(() => {
   const want = sess.value?.mode;
   const list = modes.value;
-  if (want && list.some((m) => m.id === want)) return want;
+
+  if (want && list.some((m) => m.id === want)) {
+    return want;
+  }
+
   return list.some((m) => m.id === 'manual') ? 'manual' : (list[0]?.id || '');
 });
-const modeHint = computed(() => modes.value.find((m) => m.id === currentMode.value)?.hint || 'Режим прав агента');
+const modeHint = computed(() => (
+  modes.value.find((m) => m.id === currentMode.value)?.hint || 'Режим прав агента'
+));
 // Codex сообщает эффективное окно только в token usage конкретной сессии (например,
 // 272k × 95% = 258.4k). Каталог его не обещает; 200k ниже — только внутренний fallback,
 // который не показываем человеку как свойство модели.
@@ -926,7 +976,7 @@ const ctxWindow = computed(() => (
 const modelUnknown = computed(() => !!currentModel.value?.unknown);
 // Ключ хода — ЗАПРОШЕННАЯ модель: она из реестра и разворачивает алиасы. Факт из потока
 // CLI берём вторым: у Claude это полный версионный id, которого в каталоге может не быть.
-function runModelId(message) {
+function runModelId(message: ChatMessage) {
   const id = message.model || message.actualModel || '';
 
   return typeof id === 'string' ? id : '';
@@ -940,8 +990,12 @@ const runProviders = computed(() => {
   for (const message of sess.value?.messages || []) {
     const id = message?.role === 'assistant' ? runModelId(message) : '';
 
-    if (!id || map.has(id)) continue;
+    if (!id || map.has(id)) {
+      continue;
+    }
+
     const found = prov.modelOf(id);
+
     map.set(id, { provider: found.provider || null, label: found.model?.name || id });
   }
 
@@ -952,15 +1006,18 @@ const runProviders = computed(() => {
 // машинный id. У DeepSeek id — opaque JSON-массив, и без каталога шапка чата и шаг
 // «старт» показывали его как есть. Незнакомый реестру id остаётся сырым: он всё ещё
 // обязан называть, чем отвечали.
-function modelLabelOf(id) {
-  if (!id) return '';
+function modelLabelOf(id: unknown) {
+  if (!id) {
+    return '';
+  }
+
   const found = prov.modelOf(id);
 
-  return found.model?.name || found.id || id;
+  return found.model?.name || found.id || String(id);
 }
 
 /** Подпись модели готового ответа: факт из потока или запрошенная, но именем из каталога. */
-function runModelLabel(message) {
+function runModelLabel(message: ChatMessage) {
   const id = runModelId(message);
 
   return runProviders.value.get(id)?.label || id;
@@ -971,8 +1028,10 @@ function runModelLabel(message) {
  * из селекта сессии — иначе смена ИИ задним числом переписывает всю прошлую переписку.
  * Незнакомую реестру модель оставляем без знака: чужой фирменный знак хуже, чем никакого.
  */
-function runProvider(message) {
-  if (message?.role !== 'assistant') return null;
+function runProvider(message: ChatMessage) {
+  if (message?.role !== 'assistant') {
+    return null;
+  }
 
   return runProviders.value.get(runModelId(message))?.provider || null;
 }
@@ -990,6 +1049,7 @@ const lastRun = computed(() => lastModelRun(sess.value?.messages || []));
 const lastRunView = computed(() => modelRunView(lastRun.value));
 const lastRequestedName = computed(() => {
   const id = lastRun.value?.model;
+
   return id ? (prov.modelOf(id).model?.name || id) : '';
 });
 
@@ -997,7 +1057,7 @@ const lastRequestedName = computed(() => {
  * Смена исполнителя требует сбросить несовместимую сессию или server-owned binding.
  * У сохранённого чата без адаптера могла остаться память и seed даже без sessionId.
  */
-function requiresContextReset(nextModelId) {
+function requiresContextReset(nextModelId: string) {
   const session = sess.value;
   const oldProvider = current.value.provider;
   const oldProviderId = oldProvider?.id || session?.modelRef?.provider;
@@ -1009,18 +1069,18 @@ function requiresContextReset(nextModelId) {
 
   return Boolean(session?.sessionId)
     || oldProvider?.sessionBinding === true
-    || (!oldProvider && session?.revision > 0);
+    || (!oldProvider && (session?.revision || 0) > 0);
 }
 
 /**
  * Смена исполнителя подтверждает сброс прежней памяти до записи новой модели.
  * Отказ сервера возвращает селект к прежней паре и сохраняет историю и память.
  */
-async function onModelChange(e) {
+async function onModelChange(e: Event) {
   // Reset Kimi асинхронный и на время запроса перерисовывает select со старой моделью.
   // Поэтому выбранный id надо снять с DOM до await, иначе после подтверждения здесь
   // снова окажется K3 и визуально успешный reset отменит саму смену модели.
-  const select = e.target;
+  const select = e.target as HTMLSelectElement;
   const nextModelId = select.value;
 
   if (requiresContextReset(nextModelId) && !await chat.resetContext(props.sid)) {
@@ -1034,6 +1094,7 @@ async function onModelChange(e) {
   // У новой модели может не быть текущего уровня эффорта — снимаем явный выбор.
   // Выбирать другую ступень за пользователя нельзя.
   const lv = effortLevels.value;
+
   if (sess.value?.effort && lv.length && !lv.includes(sess.value.effort)) {
     chat.setEffort(props.sid, '');
   }
@@ -1048,31 +1109,63 @@ watch(effortLevels, (levels) => {
 }, { immediate: true });
 
 // ── Список задач для селекта (с ЗАГОЛОВКАМИ, не только номером) ──
-let taskListPromise = null;
+let taskListPromise: Promise<PipelineTask[]> | null = null;
+
 function fetchTaskList() {
-  if (!taskListPromise) taskListPromise = api.get('/api/tasks').then((r) => r.tasks || []).catch(() => []);
+  if (!taskListPromise) {
+    taskListPromise = api.get('/api/tasks')
+      .then((r) => decodePipelineTasks(r).tasks || [])
+      .catch(() => []);
+  }
+
   return taskListPromise;
 }
-const taskOpts = ref([]); // [{ task, route, title }]
+
+const taskOpts = ref<Array<{
+  task: string;
+  route: unknown;
+  title: string;
+}>>([]); // [{ task, route, title }]
 
 onMounted(async () => {
   // При открытии — сразу в конец истории
   await nextTick();
   scrollDown();
+
   const list = await fetchTaskList();
 
-  taskOpts.value = list.map((t) => ({ task: String(t.task), route: t.route, title: '' }));
+  taskOpts.value = list.map((t) => ({
+    task: String(t.task),
+    route: t.route,
+    title: '',
+  }));
   // Подтягиваем названия из B24 (для «#<TASK> · Название задачи…»).
   list.forEach((t) => tasks.load(t.task).then((d) => {
     const o = taskOpts.value.find((x) => x.task === String(t.task));
-    if (o && d?.title) o.title = d.title;
+
+    if (o && d?.title) {
+      o.title = d.title;
+    }
   }).catch(() => {}));
 });
-function optLabel(o) { return `#${o.task} · ${o.title || o.route || 'задача'}`; }
+
+function optLabel(o: {
+  task: string;
+  title: string;
+  route?: unknown;
+}) {
+  return `#${o.task} · ${o.title || o.route || 'задача'}`;
+}
+
 const activeTaskLabel = computed(() => {
   const id = String(sess.value?.taskId || '');
-  if (!id) return 'Без привязки к задаче';
+
+  if (!id) {
+    return 'Без привязки к задаче';
+  }
+
   const option = taskOpts.value.find((o) => o.task === id);
+
   return option ? optLabel(option) : `#${id}`;
 });
 // Селект задачи показывает фактическую привязку чата. Смена задачи идёт через переход
@@ -1081,20 +1174,20 @@ const activeTaskLabel = computed(() => {
 const taskChoice = ref('');
 
 watch(() => sess.value?.taskId || '', (taskId) => {
-  taskChoice.value = taskId;
+  taskChoice.value = String(taskId);
 }, { immediate: true });
 
 /**
  * Выбор задачи в селекте — просьба о переходе, а не готовая привязка: название задачи
  * передаётся стору для чата, а при отказе или ожидании решения селект откатывается.
  */
-async function onTaskChange(e) {
-  const val = e.target.value;
+async function onTaskChange(e: Event) {
+  const val = (e.target as HTMLSelectElement).value;
   const o = taskOpts.value.find((x) => x.task === val);
   const done = await chat.setTask(props.sid, val || null, o ? (o.title || `#${o.task}`) : '');
 
   if (!done) {
-    taskChoice.value = sess.value?.taskId || '';
+    taskChoice.value = String(sess.value?.taskId || '');
   }
 }
 
@@ -1104,10 +1197,10 @@ async function onTaskChange(e) {
 // автокомпакт CLI срабатывает на границе хода, и без живого замера кольцо весь ход горело
 // бы красным по уже сжатому контексту.
 const ctxHasLiveUsage = computed(() => sess.value?.sending
-  && (sess.value?.liveContextUsage?.contextTokens !== undefined || sess.value?.liveContext > 0));
+  && (sess.value?.liveContextUsage?.contextTokens !== undefined || (sess.value?.liveContext || 0) > 0));
 const ctxTokens = computed(() => (
   ctxHasLiveUsage.value
-    ? (sess.value?.liveContextUsage?.contextTokens ?? sess.value.liveContext)
+    ? (sess.value?.liveContextUsage?.contextTokens ?? sess.value?.liveContext)
     : (sess.value?.contextTokens || 0)
 ));
 // ── Ближайший практический порог контекста ────────────────────────────────────
@@ -1133,43 +1226,58 @@ const ctxLimit = computed(() => ctxFill.value.limit);
 const ctxPct = computed(() => ctxFill.value.pct);
 const ctxRuntimeWindowPending = computed(() => (
   !ctxUsage.value?.contextWindow
-    && (!!currentModel.value?.contextRuntimeOnly || !(currentModel.value?.context > 0))
+    && (!!currentModel.value?.contextRuntimeOnly || !((currentModel.value?.context || 0) > 0))
 ));
 const ctxUnavailable = computed(() => (!!sess.value?.sessionId || ctxHasLiveUsage.value)
-  && (['legacy-unavailable', 'unavailable'].includes(ctxUsage.value?.contextMetric)
+  && (['legacy-unavailable', 'unavailable'].includes(ctxUsage.value?.contextMetric || '')
     || ctxRuntimeWindowPending.value || ctxWindowUnverified.value));
 const ctxClass = computed(() => (ctxUnavailable.value ? '' : ctxFill.value.tone));
 const ctxIsEstimate = computed(() => !!ctxUsage.value?.contextIsEstimate);
 const ctxSampleHint = computed(() => {
-  if (!sess.value?.sending) return '';
+  if (!sess.value?.sending) {
+    return '';
+  }
 
   return ctxHasLiveUsage.value ? ' · этот ход' : ' · прошлый ход, ждём замер';
 });
 const ctxWindowUnverified = computed(() => (
   !ctxUsage.value?.contextWindow && !!currentModel.value?.contextUnverified
 ));
-const fmtSessionTokens = (value) => {
+const fmtSessionTokens = (value: unknown) => {
   const tokens = Math.max(0, Number(value) || 0);
-  if (tokens < 1_000_000) return fmtTokens(tokens);
+
+  if (tokens < 1_000_000) {
+    return fmtTokens(tokens);
+  }
+
   return `${(tokens / 1_000_000).toLocaleString('ru', { maximumFractionDigits: 1 })} млн`;
 };
-const fmtCompactTokens = (value) => {
+
+/**
+ * Сокращает счётчики кэша до тысяч и миллионов для компактной строки.
+ * Малые значения остаются в прежнем формате токенов.
+ */
+const fmtCompactTokens = (value: unknown) => {
   const tokens = Math.max(0, Number(value) || 0);
+
   if (tokens >= 1_000_000) {
     return `${(tokens / 1_000_000).toLocaleString('ru', { maximumFractionDigits: 1 })} млн`;
   }
   if (tokens >= 1_000) {
     return `${(tokens / 1_000).toLocaleString('ru', { maximumFractionDigits: 1 })} тыс.`;
   }
+
   return fmtTokens(tokens);
 };
 const spentHint = computed(() => {
   const total = sess.value?.totalInputTokens || 0;
+
   return total ? ` · за сессию обработано ${fmtTokens(total)} входных токенов` : '';
 });
 const contextCache = computed(() => {
   const live = sess.value?.sending ? sess.value?.liveContextCache : null;
   const cache = live || sess.value?.contextCache;
+
   if (cache?.scope !== 'request'
     || !['reported', 'unavailable', 'not-applicable'].includes(cache?.status)) {
     return { scope: 'request', status: 'unavailable' };
@@ -1178,15 +1286,24 @@ const contextCache = computed(() => {
     && !['readTokens', 'writeTokens', 'uncachedTokens'].some((key) => cacheMetric(cache, key) !== null)) {
     return { scope: 'request', status: 'unavailable' };
   }
+
   return cache;
 });
-const cacheMetric = (cache, key) => (
-  Number.isSafeInteger(cache?.[key]) && cache[key] >= 0 ? cache[key] : null
-);
+const cacheMetric = (cache: ContextCache, key: string): number | null => {
+  const value = cache[key as keyof ContextCache];
+
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+};
 const contextCacheValue = computed(() => {
   const cache = contextCache.value;
-  if (cache.status === 'unavailable') return 'нет данных';
-  if (cache.status === 'not-applicable') return 'без тарифа';
+
+  if (cache.status === 'unavailable') {
+    return 'нет данных';
+  }
+  if (cache.status === 'not-applicable') {
+    return 'без тарифа';
+  }
+
   const read = cacheMetric(cache, 'readTokens');
   const write = cacheMetric(cache, 'writeTokens');
   const uncached = cacheMetric(cache, 'uncachedTokens');
@@ -1197,11 +1314,19 @@ const contextCacheValue = computed(() => {
     const measured = read + (write || 0) + uncached;
     const percent = (measured > 0 ? (read / measured) * 100 : 0)
       .toLocaleString('ru', { maximumFractionDigits: 1 });
+
     parts.push(`${percent}%`);
   }
-  if (read !== null) parts.push(`чт. ${fmtCompactTokens(read)}`);
-  if (write !== null) parts.push(`зап. ${fmtCompactTokens(write)}`);
-  if (uncached !== null) parts.push(`мимо ${fmtCompactTokens(uncached)}`);
+  if (read !== null) {
+    parts.push(`чт. ${fmtCompactTokens(read)}`);
+  }
+  if (write !== null) {
+    parts.push(`зап. ${fmtCompactTokens(write)}`);
+  }
+  if (uncached !== null) {
+    parts.push(`мимо ${fmtCompactTokens(uncached)}`);
+  }
+
   return parts.join(' · ');
 });
 const cacheHint = computed(() => ` · кэш: ${contextCacheValue.value}`);
@@ -1216,13 +1341,29 @@ const ctxLimitShort = computed(() => ctxFill.value.limitShort);
 const ctxTooltip = computed(() => {
   const s = sess.value;
   const modelWindow = `${fmtTokens(ctxWindow.value)}${ctxWindowUnverified.value ? ' · неточно' : ''}`;
-  const rows = ctxRuntimeWindowPending.value
+  const rows: Array<{
+    label: string;
+    value: string;
+    unverified?: boolean;
+    cache?: boolean;
+  }> = ctxRuntimeWindowPending.value
     ? []
-    : [{ label: 'Окно', value: modelWindow, unverified: ctxWindowUnverified.value }];
+    : [{
+      label: 'Окно',
+      value: modelWindow,
+      unverified: ctxWindowUnverified.value,
+    }];
   const total = s?.totalInputTokens || 0;
   const addSessionRows = () => {
-    if (total) rows.push({ label: 'За сессию', value: fmtSessionTokens(total) });
-    rows.push({ label: 'Кэш', value: contextCacheValue.value, cache: true });
+    if (total) {
+      rows.push({ label: 'За сессию', value: fmtSessionTokens(total) });
+    }
+
+    rows.push({
+      label: 'Кэш',
+      value: contextCacheValue.value,
+      cache: true,
+    });
   };
 
   if (s?.compacting) {
@@ -1300,23 +1441,33 @@ const ctxTooltip = computed(() => {
 const ctxTitle = computed(() => {
   const s = sess.value;
   const tokens = fmtTokens(ctxTokens.value);
-  if (s?.compacting) return 'Сжимаю контекст…';
+
+  if (s?.compacting) {
+    return 'Сжимаю контекст…';
+  }
   if (!s?.sessionId && !ctxHasLiveUsage.value) {
     const empty = s?.pendingSeed
       ? 'Контекст сжат — выжимка уедет со следующим сообщением'
       : 'Контекст: пусто';
+
     if (ctxRuntimeWindowPending.value) {
       return `${empty} · рабочее окно появится после первого хода`;
     }
+
     return ctxWindowUnverified.value
       ? `${empty} · окно модели ${fmtTokens(ctxWindow.value)} (не подтверждено)`
       : empty;
   }
-  if (s?.compactedAt && !ctxTokens.value) return 'Контекст сжат — размер покажется после следующего хода';
+  if (s?.compactedAt && !ctxTokens.value) {
+    return 'Контекст сжат — размер покажется после следующего хода';
+  }
+
   const hint = 'клик — сжать (Alt+клик — сбросить память агента)';
+
   if (ctxUnavailable.value) {
     return `Точная заполненность пока недоступна${spentHint.value}${cacheHint.value} · ${hint}`;
   }
+
   const warn = ctxLimitReached.value
     ? ' · порог достигнут — пора сжать'
     : (ctxAtWarning.value ? ' · порог близко — пора сжать' : '');
@@ -1335,8 +1486,11 @@ const ctxTitle = computed(() => {
   // сменился формат), и окно ниже это заглушка, а не факт. Молчать нельзя: именно по
   // этой цифре человек решает, пора ли сжимать. Замер самой сессии (Codex сообщает своё
   // окно) сильнее каталога, и к нему оговорка не относится.
-  const window = ` · окно модели ${fmtTokens(ctxWindow.value)}${ctxWindowUnverified.value ? ' (не подтверждено)' : ''}`;
-  return `Контекст: ${estimate}${tokens} из ${limit} ${ctxLimitWhat.value} (${ctxPct.value}%)${live}${warn}${window}${spentHint.value}${cacheHint.value} · ${hint}`;
+  const window = ` · окно модели ${fmtTokens(ctxWindow.value)}`
+    + `${ctxWindowUnverified.value ? ' (не подтверждено)' : ''}`;
+
+  return `Контекст: ${estimate}${tokens} из ${limit} ${ctxLimitWhat.value} (${ctxPct.value}%)`
+    + `${live}${warn}${window}${spentHint.value}${cacheHint.value} · ${hint}`;
 });
 // Кольцо-индикатор контекста (клик — сжатие, Alt+клик — сброс памяти).
 const RING_C = 2 * Math.PI * 9;
@@ -1344,8 +1498,12 @@ const RING_C = 2 * Math.PI * 9;
 // (или почти полное) кольцо при вращении выглядело бы неподвижным.
 const SPIN_DASH = RING_C * 0.75;
 const ringDash = computed(() => {
-  if (sess.value?.compacting) return SPIN_DASH;
-  if (ctxUnavailable.value) return RING_C;
+  if (sess.value?.compacting) {
+    return SPIN_DASH;
+  }
+  if (ctxUnavailable.value) {
+    return RING_C;
+  }
 
   return RING_C * (1 - ctxPct.value / 100);
 });
@@ -1361,25 +1519,43 @@ const ctxRingDisabled = computed(() => !sess.value?.sessionId
  * памяти агента: путать эти два действия дорого (после сброса переписка на экране
  * остаётся, а агент не помнит ничего), поэтому у каждого свой вопрос и свой текст.
  */
-async function onCtxClick(e) {
+async function onCtxClick(e: { altKey: boolean }) {
   const s = sess.value;
-  if (!s?.sessionId || s.compacting || s.sending) return;
+
+  if (!s?.sessionId || s.compacting || s.sending) {
+      return;
+    }
   if (e.altKey) {
     const ok = await confirmDialog(
-      'Агент забудет весь разговор: следующее сообщение начнёт его с нуля. Переписка на экране останется, но вернуть агенту контекст будет уже нельзя.',
-      { title: 'Сбросить память агента?', okText: 'Сбросить', danger: true },
+      'Агент забудет весь разговор: следующее сообщение начнёт его с нуля. '
+        + 'Переписка на экране останется, но вернуть агенту контекст будет уже нельзя.',
+      {
+        title: 'Сбросить память агента?',
+        okText: 'Сбросить',
+        danger: true,
+      },
     );
-    if (ok) await chat.resetContext(props.sid);
+
+    if (ok) {
+      await chat.resetContext(props.sid);
+    }
+
     return;
   }
+
   const contextNow = ctxUnavailable.value
     ? 'Точный размер текущего контекста пока недоступен.'
     : `Сейчас в контексте ${fmtTokens(ctxTokens.value)} токенов.`;
   const ok = await confirmDialog(
-    `${contextNow} Агент соберёт из разговора рабочую выжимку и продолжит с неё — что решили, чего касались, что осталось. Это полноценный ход: он займёт время и потратит токены один раз, зато каждый следующий ход станет дешевле.`,
+    `${contextNow} Агент соберёт из разговора рабочую выжимку и продолжит с неё — `
+      + 'что решили, чего касались, что осталось. Это полноценный ход: '
+      + 'он займёт время и потратит токены один раз, зато каждый следующий ход станет дешевле.',
     { title: 'Сжать контекст чата?', okText: 'Сжать' },
   );
-  if (ok) chat.compact(props.sid);
+
+  if (ok) {
+    chat.compact(props.sid);
+  }
 }
 
 // Сжатие или server-owned reset замораживают управление: менять модель/задачу/права
@@ -1387,7 +1563,7 @@ async function onCtxClick(e) {
 // отправки ждёт завершения перехода.
 const frozen = computed(() => !!sess.value?.compacting || !!sess.value?.sessionResetting
   || !!sess.value?.workdirChanging || !!sess.value?.workdirProposal
-  || ['preparing', 'ready', 'resetting'].includes(sess.value?.workdirState?.transition?.phase));
+  || ['preparing', 'ready', 'resetting'].includes(sess.value?.workdirState?.transition?.phase || ''));
 const frozenHint = computed(() => (sess.value?.sessionResetting
   ? 'Сбрасывается память агента — отправка будет доступна после подтверждения сервера'
   : sess.value?.compacting
@@ -1398,15 +1574,25 @@ const frozenHint = computed(() => (sess.value?.sessionResetting
 // Открытый на экране чат читается сам: компонент рисуется ровно тогда, когда на чат
 // смотрят на странице «Чаты». Ответ, пришедший в свёрнутую вкладку ОС,
 // остаётся непрочитанным до возврата — поэтому слушаем ещё и visibilitychange.
-function markRead() { if (!document.hidden) chat.markRead(props.sid); }
+function markRead() {
+  if (!document.hidden) {
+    chat.markRead(props.sid);
+  }
+}
+
 watch(() => [props.sid, sess.value?.unread], markRead, { immediate: true });
 document.addEventListener('visibilitychange', markRead);
 onUnmounted(() => document.removeEventListener('visibilitychange', markRead));
 
 // ── Ввод ──
 const input = ref(sess.value?.draft || '');
-const body = ref(null);
-function scrollDown() { if (body.value) body.value.scrollTop = body.value.scrollHeight; }
+const body = ref<HTMLElement | null>(null);
+
+function scrollDown() {
+  if (body.value) {
+    body.value.scrollTop = body.value.scrollHeight;
+  }
+}
 
 // ── Высота поля ввода ───────────────────────────────────────────────────────────
 // Настройка устройства (localStorage, как ширина дока и списка чатов). Пусто =
@@ -1418,69 +1604,138 @@ const COMPOSER_MIN = 48;
 // Потолок тот же, что в CSS (`max-height: 46vh`) — вторая цифра рядом с первой
 // разъезжается, и разделитель снова получает мёртвый ход.
 const COMPOSER_MAX_VH = 0.46;
-const taEl = ref(null);
+const taEl = ref<InstanceType<typeof UiTextarea> | null>(null);
 
+
+/**
+ * Читает сохранённую положительную высоту поля ввода.
+ * Отказ storage и неверное число оставляют управление размером CSS.
+ */
 function storedComposerHeight() {
   try {
     const raw = Number(localStorage.getItem(COMPOSER_KEY));
+
     return Number.isFinite(raw) && raw > 0 ? raw : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
-const composerH = ref(storedComposerHeight());
-const composerStyle = computed(() => (composerH.value == null ? null : { '--composer-h': `${composerH.value}px` }));
+
+const composerH = ref<number | null>(storedComposerHeight());
+const composerStyle = computed(() => (
+  composerH.value == null ? null : { '--composer-h': `${composerH.value}px` }
+));
 
 function composerMax() {
   const view = typeof window === 'undefined' ? 0 : window.innerHeight;
+
   return Math.max(COMPOSER_MIN, Math.round((view || 720) * COMPOSER_MAX_VH));
 }
-function clampComposer(value) {
+
+function clampComposer(value: number) {
   return Math.round(Math.min(Math.max(COMPOSER_MIN, value), composerMax()));
 }
 // Тянем от ФАКТИЧЕСКОЙ высоты поля, а не от сохранённого числа: после смены окна
 // (поворот планшета) CSS уже подрезал поле по 46vh, и старое число дало бы скачок.
 function composerHeightNow() {
   const h = taEl.value?.el?.getBoundingClientRect?.().height;
-  return clampComposer(h > 0 ? h : (composerH.value ?? COMPOSER_MIN));
-}
-function saveComposerHeight() {
-  if (composerH.value == null) return;
-  try { localStorage.setItem(COMPOSER_KEY, String(composerH.value)); } catch { /* приватный режим может запретить storage */ }
+
+  return clampComposer(h !== undefined && h > 0 ? h : (composerH.value ?? COMPOSER_MIN));
 }
 
-let composerPointer = null;
-let composerFrom = null; // { y, h } на момент захвата
-function startComposerResize(event) {
-  if (event.button !== undefined && event.button !== 0) return;
+
+/**
+ * Сохраняет явно выбранную высоту поля ввода на этом устройстве.
+ * Запрет storage в приватном режиме не прерывает работу чата.
+ */
+function saveComposerHeight() {
+  if (composerH.value == null) {
+    return;
+  }
+
+  try {
+    localStorage.setItem(COMPOSER_KEY, String(composerH.value));
+  } catch { /* приватный режим может запретить storage */ }
+}
+
+let composerPointer: number | null = null;
+let composerFrom: { y: number; h: number } | null = null; // { y, h } на момент захвата
+
+
+/**
+ * Захватывает указатель и фактическую высоту поля в начале перетаскивания.
+ * Правые и вспомогательные кнопки не начинают изменение размера.
+ */
+function startComposerResize(event: PointerEvent) {
+  if (event.button !== undefined && event.button !== 0) {
+    return;
+  }
+
   composerPointer = event.pointerId;
-  event.currentTarget?.setPointerCapture?.(event.pointerId);
+  (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
   composerFrom = { y: event.clientY, h: composerHeightNow() };
 }
-function moveComposerResize(event) {
-  if (composerPointer !== event.pointerId || !composerFrom) return;
+
+function moveComposerResize(event: PointerEvent) {
+  if (composerPointer !== event.pointerId || !composerFrom) {
+    return;
+  }
   // Вверх = выше: разделитель на верхней кромке поля, и поле растёт за курсором.
   composerH.value = clampComposer(composerFrom.h + (composerFrom.y - event.clientY));
 }
-function finishComposerResize(event) {
-  if (composerPointer !== event.pointerId) return;
+
+
+/**
+ * Завершает изменение размера только указателем текущего захвата.
+ * После освобождения указателя сохраняет выбранную высоту.
+ */
+function finishComposerResize(event: PointerEvent) {
+  if (composerPointer !== event.pointerId) {
+    return;
+  }
+
   composerPointer = null;
   composerFrom = null;
-  event.currentTarget?.releasePointerCapture?.(event.pointerId);
+  (event.currentTarget as HTMLElement | null)?.releasePointerCapture?.(event.pointerId);
   saveComposerHeight();
 }
-function cancelComposerResize(event) {
-  if (composerPointer !== event.pointerId) return;
+
+
+/**
+ * Снимает отменённый захват только у его собственного указателя.
+ * Текущая высота сохраняется тем же способом, что при завершении.
+ */
+function cancelComposerResize(event: PointerEvent) {
+  if (composerPointer !== event.pointerId) {
+    return;
+  }
+
   composerPointer = null;
   composerFrom = null;
-  event.currentTarget?.releasePointerCapture?.(event.pointerId);
+  (event.currentTarget as HTMLElement | null)?.releasePointerCapture?.(event.pointerId);
   saveComposerHeight();
 }
-function onComposerResizeKey(event) {
+
+
+/**
+ * Изменяет высоту поля доступными клавишами с прежними границами.
+ * Необработанные клавиши сохраняют стандартное поведение браузера.
+ */
+function onComposerResizeKey(event: KeyboardEvent) {
   const step = event.shiftKey ? 48 : 16;
-  if (event.key === 'ArrowUp') composerH.value = clampComposer(composerHeightNow() + step);
-  else if (event.key === 'ArrowDown') composerH.value = clampComposer(composerHeightNow() - step);
-  else if (event.key === 'Home') composerH.value = COMPOSER_MIN;
-  else if (event.key === 'End') composerH.value = composerMax();
-  else return;
+
+  if (event.key === 'ArrowUp') {
+    composerH.value = clampComposer(composerHeightNow() + step);
+  } else if (event.key === 'ArrowDown') {
+    composerH.value = clampComposer(composerHeightNow() - step);
+  } else if (event.key === 'Home') {
+    composerH.value = COMPOSER_MIN;
+  } else if (event.key === 'End') {
+    composerH.value = composerMax();
+  } else {
+    return;
+  }
+
   event.preventDefault();
   saveComposerHeight();
 }
@@ -1488,7 +1743,10 @@ function onComposerResizeKey(event) {
 // чтобы будущие изменения layout-default не перекрывались старым числом.
 function resetComposerHeight() {
   composerH.value = null;
-  try { localStorage.removeItem(COMPOSER_KEY); } catch { /* ignore */ }
+
+  try {
+    localStorage.removeItem(COMPOSER_KEY);
+  } catch { /* приватный режим может запретить storage */ }
 }
 
 // ── Автопрокрутка ──
@@ -1496,13 +1754,22 @@ function resetComposerHeight() {
 // и так внизу: отлистал историю вверх — не дёргаем, иначе читать невозможно.
 const NEAR_BOTTOM_PX = 120;
 const atBottom = ref(true);
+
 function onBodyScroll() {
   const el = body.value;
-  if (!el) return;
+
+  if (!el) {
+    return;
+  }
+
   atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
 }
+
 async function autoScroll() {
-  if (!atBottom.value) return;
+  if (!atBottom.value) {
+    return;
+  }
+
   await nextTick();
   scrollDown();
 }
@@ -1524,16 +1791,26 @@ watch(() => props.sid, async () => {
 });
 // Набранный, но не отправленный текст живёт в чате (и на сервере): переключение чатов,
 // перезагрузка страницы и второе окно его не теряют. Пишем с задержкой — не на каждую букву.
-let draftTimer = null;
+let draftTimer: ReturnType<typeof setTimeout> | null = null;
+
 watch(input, (v) => {
-  clearTimeout(draftTimer);
+  clearTimeout(draftTimer ?? undefined);
+
   const sid = props.sid;
+
   draftTimer = setTimeout(() => chat.setDraft(sid, v), 400);
 });
 // Уход со страницы/закрытие вкладки — дописываем черновик немедленно, дебаунс не успел бы.
-function flushDraft() { clearTimeout(draftTimer); chat.setDraft(props.sid, input.value); }
+function flushDraft() {
+  clearTimeout(draftTimer ?? undefined);
+  chat.setDraft(props.sid, input.value);
+}
+
 window.addEventListener('beforeunload', flushDraft);
-onUnmounted(() => { flushDraft(); window.removeEventListener('beforeunload', flushDraft); });
+onUnmounted(() => {
+  flushDraft();
+  window.removeEventListener('beforeunload', flushDraft);
+});
 /**
  * Кнопка и Enter используют один маршрут: готовый канал текущего хода или обычную очередь.
  * Отказ уже начатой передачи сохраняет черновик и не создаёт второй запрос другим путём.
@@ -1571,7 +1848,7 @@ async function submit() {
 
     inputErr.value = '';
     input.value = '';
-    clearTimeout(draftTimer);
+    clearTimeout(draftTimer ?? undefined);
     chat.setDraft(props.sid, '');
 
     if (atts.length) {
@@ -1588,7 +1865,7 @@ async function submit() {
   atBottom.value = true; // своё сообщение всегда показываем — как в мессенджерах
   // Черновик отправленного сообщения гасим сразу: дебаунс успел бы записать его
   // уже после отправки, и в списке чат остался бы «с черновиком».
-  clearTimeout(draftTimer);
+  clearTimeout(draftTimer ?? undefined);
   chat.setDraft(props.sid, '');
 
   if (atts.length) {
@@ -1612,27 +1889,34 @@ async function submit() {
 // продолжение — обычное сообщение в ту же сессию. Текст называет причину по метке:
 // агент должен сверить сделанное, а не переделывать с нуля.
 const RESUME_TAIL = 'Продолжай с места остановки: сверь, что уже сделано, и доведи работу до конца.';
-const RESUME_TEXT = Object.freeze({
+const RESUME_TEXT: Readonly<Record<string, string>> = Object.freeze({
   server_shutdown: `Сервер GrigDesk перезапустился, и твой ход был прерван. ${RESUME_TAIL}`,
   delivery_failure: 'Твой прошлый ход оборвал сам CLI (сеть или лимит), ответ до меня не дошёл. '
     + RESUME_TAIL,
 });
 
 /** Текст продолжения по метке прерывания; без известной метки продолжать нечего. */
-function resumeTextFor(m) {
+function resumeTextFor(m: ChatMessage | undefined) {
   const reason = m?.interruptedBy;
+
   return typeof reason === 'string' && Object.hasOwn(RESUME_TEXT, reason) ? RESUME_TEXT[reason] : '';
 }
 
-function deliveryMark(m) {
-  return messageDeliveryMark(m, chat.deliveries?.[m.turnId]?.state);
+function deliveryIcon(m: ChatMessage) {
+  const mark = deliveryMark(m);
+
+  return mark?.kind === 'pending' ? mark.icon : undefined;
+}
+
+function deliveryMark(m: ChatMessage) {
+  return messageDeliveryMark(m, chat.deliveries?.[m.turnId || '']?.state);
 }
 
 /**
  * Повтор недоставленного сообщения — осознанное действие: значок мог быть задет случайно.
  * Общий диалог проекта спрашивает подтверждение и только потом отправляет тот же turnId.
  */
-async function confirmRetryDelivery(m) {
+async function confirmRetryDelivery(m: ChatMessage) {
   if (!sess.value || frozen.value) {
     return;
   }
@@ -1649,40 +1933,96 @@ async function confirmRetryDelivery(m) {
 }
 
 // Повтор идёт тем же turnId: если прежний запрос всё-таки дошёл, второго запуска не будет.
-async function retryDelivery(m) {
+async function retryDelivery(m: ChatMessage) {
   if (!sess.value || frozen.value) {
     return;
   }
 
   atBottom.value = true;
-  await chat.retryDelivery(props.sid, m.turnId);
+  await chat.retryDelivery(props.sid, m.turnId || '');
 }
 
 /** Кнопку показываем только у последнего сообщения и только свободному чату. */
-function isResumeOffer(m, i) {
-  if (!resumeTextFor(m)) return false;
+
+/**
+ * Предлагает продолжение только у последнего прерванного сообщения.
+ * Занятый или замороженный чат не получает новую кнопку отправки.
+ */
+function isResumeOffer(m: ChatMessage, i: number) {
+  if (!resumeTextFor(m)) {
+    return false;
+  }
+
   const messages = sess.value?.messages || [];
-  if (i !== messages.length - 1) return false;
+
+  if (i !== messages.length - 1) {
+    return false;
+  }
+
   return !sess.value?.sending && !sess.value?.compacting && !frozen.value;
 }
 
+
+/**
+ * Отправляет текст продолжения из последнего прерванного сообщения.
+ * Пустое предложение и замороженный чат остаются без новой отправки.
+ */
 async function resumeInterrupted() {
-  if (!sess.value || frozen.value) return;
+  if (!sess.value || frozen.value) {
+    return;
+  }
+
   const text = resumeTextFor(sess.value.messages?.at(-1));
-  if (!text) return;
+
+  if (!text) {
+    return;
+  }
+
   atBottom.value = true;
   await chat.send(props.sid, text, []);
 }
-function onKey(e) {
-  if (e.isComposing || e.keyCode === 229) return;
+
+
+/**
+ * Направляет клавиши в открытое меню команд или обычную отправку.
+ * Ввод через IME не отправляет незавершённый текст.
+ */
+function onKey(e: KeyboardEvent) {
+  if (e.isComposing || e.keyCode === 229) {
+    return;
+  }
   // Открыто меню команд — стрелки/Enter/Tab/Esc управляют им.
   // Навигация по выбираемым пунктам (cmdNav): заголовки и run:'none' пропускаются.
   const m = cmdNav.value;
+
   if (cmdMatches.value.length) {
-    if (e.key === 'ArrowDown' && m.length) { e.preventDefault(); cmdIndex.value = (cmdIndex.value + 1) % m.length; return; }
-    if (e.key === 'ArrowUp' && m.length) { e.preventDefault(); cmdIndex.value = (cmdIndex.value - 1 + m.length) % m.length; return; }
-    if ((e.key === 'Enter' || e.key === 'Tab') && m.length) { e.preventDefault(); runCommand(m[Math.min(cmdIndex.value, m.length - 1)]); return; }
-    if (e.key === 'Escape') { input.value = ''; return; }
+
+    if (e.key === 'ArrowDown' && m.length) {
+      e.preventDefault();
+      cmdIndex.value = (cmdIndex.value + 1) % m.length;
+
+      return;
+    }
+
+    if (e.key === 'ArrowUp' && m.length) {
+      e.preventDefault();
+      cmdIndex.value = (cmdIndex.value - 1 + m.length) % m.length;
+
+      return;
+    }
+
+    if ((e.key === 'Enter' || e.key === 'Tab') && m.length) {
+      e.preventDefault();
+      runCommand(m[Math.min(cmdIndex.value, m.length - 1)]!);
+
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      input.value = '';
+
+      return;
+    }
   }
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
@@ -1693,33 +2033,70 @@ function onKey(e) {
 // ── Команды и навыки: «/» открывает CLI-команды, «$» — skills Codex ──
 // Две секции: клиентские команды GrigDesk и команды CLI выбранной модели (провайдерский
 // список приезжает в /api/providers, контракт — server/src/lib/executors/index.js).
-const COMMANDS = [
-  { cmd: '/compact', desc: 'Сжать контекст: агент пересказывает разговор и продолжает с выжимки', source: 'grigdesk', run: 'local' },
-  { cmd: '/clear', desc: 'Очистить историю и сбросить контекст агента', source: 'grigdesk', run: 'local' },
-  { cmd: '/reset', desc: 'Сбросить только контекст (история остаётся)', source: 'grigdesk', run: 'local' },
-  { cmd: '/new', desc: 'Открыть новый чат', source: 'grigdesk', run: 'local' },
+interface ChatCommand {
+  cmd: string;
+  desc?: string;
+  source: string;
+  run?: string;
+  args?: boolean | string;
+  hint?: string;
+}
+
+const COMMANDS: ChatCommand[] = [
+  {
+    cmd: '/compact',
+    desc: 'Сжать контекст: агент пересказывает разговор и продолжает с выжимки',
+    source: 'grigdesk',
+    run: 'local',
+  },
+  {
+    cmd: '/clear',
+    desc: 'Очистить историю и сбросить контекст агента',
+    source: 'grigdesk',
+    run: 'local',
+  },
+  {
+    cmd: '/reset',
+    desc: 'Сбросить только контекст (история остаётся)',
+    source: 'grigdesk',
+    run: 'local',
+  },
+  {
+    cmd: '/new',
+    desc: 'Открыть новый чат',
+    source: 'grigdesk',
+    run: 'local',
+  },
 ];
 // Команды исполнителя текущей модели. Резолвер тот же, что у селекта модели: для
 // legacy-чатов без modelRef провайдер достаётся из сохранённого id модели.
 const providerInfo = computed(() => current.value.provider || null);
 const providerCommands = computed(() => {
   const p = providerInfo.value;
+
   return (Array.isArray(p?.commands) ? p.commands : [])
-    .map((c) => ({ ...c, source: p.id }));
+    .map((c) => ({ ...c, source: p?.id || '' }));
 });
 // Объединённый список: команда GrigDesk глушит провайдерскую с тем же именем
 // (/compact уже есть у GrigDesk — дубль не показываем, поведение не меняется).
 const allCommands = computed(() => {
   const merged = [...COMMANDS];
+
   for (const c of providerCommands.value) {
-    if (!merged.some((x) => x.cmd === c.cmd)) merged.push(c);
+    if (!merged.some((x) => x.cmd === c.cmd)) {
+      merged.push(c);
+    }
   }
+
   return merged;
 });
 const cmdIndex = ref(0);
 const cmdMatches = computed(() => {
   const t = input.value.trimStart().toLowerCase();
-  if (!/^[/$]/.test(t) || /[\s\n]/.test(t)) return [];
+
+  if (!/^[/$]/.test(t) || /[\s\n]/.test(t)) {
+    return [];
+  }
   // Имя навыка приходит от Codex и заглавные в нём законны (`$Review-Agent`),
   // поэтому сверяем в нижнем регистре: иначе такой пункт нельзя было бы найти.
   return allCommands.value.filter((c) => c.cmd.toLowerCase().startsWith(t));
@@ -1729,39 +2106,91 @@ const cmdMatches = computed(() => {
 const cmdNav = computed(() => cmdMatches.value.filter((c) => c.run !== 'none'));
 // Плоский список для рендера: заголовки секций + пункты с их индексом навигации.
 const cmdMenu = computed(() => {
-  const items = [];
+  const items: Array<ChatCommand & {
+    key: string;
+    header?: string;
+    color?: string;
+    nav: number;
+  }> = [];
   let nav = 0;
-  const push = (c) => items.push({ ...c, key: `${c.source}:${c.cmd}`, nav: c.run === 'none' ? -1 : nav++ });
+  const push = (c: ChatCommand) => items.push({
+    ...c,
+    key: `${c.source}:${c.cmd}`,
+    nav: c.run === 'none' ? -1 : nav++,
+  });
   const grigdesk = cmdMatches.value.filter((c) => c.source === 'grigdesk');
   const own = cmdMatches.value.filter((c) => c.source !== 'grigdesk');
-  if (grigdesk.length) items.push({ header: 'GrigDesk', key: 'h:grigdesk' });
+
+  if (grigdesk.length) {
+    items.push({
+      header: 'GrigDesk',
+      key: 'h:grigdesk',
+      cmd: '',
+      source: '',
+      nav: -1,
+    });
+  }
+
   grigdesk.forEach(push);
-  if (own.length) items.push({ header: providerInfo.value?.name || 'Исполнитель', color: providerInfo.value?.color || '', key: 'h:provider' });
+
+  if (own.length) {
+    items.push({
+      header: providerInfo.value?.name || 'Исполнитель',
+      color: providerInfo.value?.color || '',
+      key: 'h:provider',
+      cmd: '',
+      source: '',
+      nav: -1,
+    });
+  }
+
   own.forEach(push);
+
   return items;
 });
-watch(cmdNav, (m) => { if (cmdIndex.value >= m.length) cmdIndex.value = 0; });
+
+watch(cmdNav, (m) => {
+  if (cmdIndex.value >= m.length) {
+    cmdIndex.value = 0;
+  }
+});
 // Меню ограничено по высоте и скроллится — при навигации стрелками подгоняем
 // выбранный пункт в видимую область.
-const cmdMenuEl = ref(null);
+const cmdMenuEl = ref<HTMLElement | null>(null);
+
 watch(cmdIndex, async () => {
   await nextTick();
   cmdMenuEl.value?.querySelector('.cmd.on')?.scrollIntoView({ block: 'nearest' });
 });
-async function runCommand(command) {
-  if (speechBusy.value) return;
+
+
+/**
+ * Выполняет выбранную локальную команду либо передаёт её исполнителю.
+ * Отклонённая отправка восстанавливает черновик и его вложения.
+ */
+async function runCommand(command: string | ChatCommand) {
+  if (speechBusy.value) {
+    return;
+  }
+
   const c = typeof command === 'string'
     ? allCommands.value.find((x) => x.cmd === command)
     : command;
-  if (!c || c.run === 'none') return;
+
+  if (!c || c.run === 'none') {
+    return;
+  }
   if (c.source !== 'grigdesk') {
     // Провайдерская команда/навык. Гард тот же, что у submit():
     // пока чат заморожен (сжатие/reset), ничего не выполняем и ввод не трогаем.
-    if (!sess.value || frozen.value) return;
+    if (!sess.value || frozen.value) {
+    return;
+  }
     // Команда с обязательным аргументом не отправляется: подставляем в композер.
     if (c.args) {
       input.value = `${c.cmd} `;
       cmdIndex.value = 0;
+
       return;
     }
     // `$skill` — обычный model prompt: Codex сам раскрывает явное упоминание в
@@ -1769,16 +2198,20 @@ async function runCommand(command) {
     // Вложения тоже уезжают только с навыком: у служебного хода их не бывает,
     // а «переделай вот эту картинку» — обычный сценарий $-навыка.
     const skill = c.cmd.startsWith('$');
+
     if (skill && sess.value.sending) {
       input.value = c.cmd;
       cmdIndex.value = 0;
       await submit();
+
       return;
     }
+
     const atts = skill ? pending.value.slice() : [];
+
     input.value = '';
     cmdIndex.value = 0;
-    clearTimeout(draftTimer);
+    clearTimeout(draftTimer ?? undefined);
     chat.setDraft(props.sid, '');
 
     if (atts.length) {
@@ -1797,8 +2230,10 @@ async function runCommand(command) {
         chat.setDraftAttachments(props.sid, atts);
       }
     }
+
     return;
   }
+
   input.value = '';
   cmdIndex.value = 0;
 
@@ -1831,47 +2266,82 @@ const attachBusy = ref(false);
  * Загружает файлы по одному и дописывает их в черновик того чата, где их приложили.
  * Чат фиксируется до первой загрузки: ответ сервера может прийти уже после переключения.
  */
-async function addFiles(files) {
+async function addFiles(files: Iterable<File | null>) {
   const sid = props.sid;
 
   for (const f of files) {
-    if (!f) continue;
+    if (!f) {
+      continue;
+    }
+
     attachBusy.value = true;
 
     try {
       const fd = new FormData();
+
       fd.append('file', f, f.name || 'image.png');
-      chat.addDraftAttachment(sid, await api.upload('/api/chat/upload', fd));
+      chat.addDraftAttachment(sid, decodeChatAttachment(await api.upload('/api/chat/upload', fd)));
     } catch (e) {
-      inputErr.value = `Загрузка: ${e.message}`;
-    } finally { attachBusy.value = false; }
+      inputErr.value = `Загрузка: ${errorMessage(e, '')}`;
+    } finally {
+      attachBusy.value = false;
+    }
   }
 }
-function onPick(files) {
+
+function onPick(files: File[]) {
   addFiles(files);
 }
-function onPaste(e) {
+
+
+/**
+ * Забирает изображения из буфера в прежний путь загрузки вложений.
+ * Вставка без изображений остаётся стандартной операцией браузера.
+ */
+function onPaste(e: ClipboardEvent) {
   const imgs = [...(e.clipboardData?.items || [])].filter((i) => i.type.startsWith('image/'));
-  if (!imgs.length) return;
+
+  if (!imgs.length) {
+    return;
+  }
+
   e.preventDefault();
   addFiles(imgs.map((i) => i.getAsFile()).filter(Boolean));
 }
 
-function removePending(i) {
+function removePending(i: number) {
   chat.setDraftAttachments(props.sid, pending.value.filter((_, at) => at !== i));
 }
-function isImg(a) { return (a.mime || '').startsWith('image/'); }
+
+function isImg(a: HistoryAttachment) {
+  return (a.mime || '').startsWith('image/');
+}
 
 // Drag&drop файлов на весь чат: счётчик enter/leave (leave стреляет на каждом
 // дочернем элементе), оверлей-подсказка поверх.
 const dragDepth = ref(0);
 const dragOver = computed(() => dragDepth.value > 0);
-function onDragEnter(e) { if (e.dataTransfer?.types?.includes('Files')) dragDepth.value++; }
-function onDragLeave() { if (dragDepth.value > 0) dragDepth.value--; }
-function onDrop(e) {
+
+function onDragEnter(e: DragEvent) {
+  if (e.dataTransfer?.types?.includes('Files')) {
+    dragDepth.value++;
+  }
+}
+
+function onDragLeave() {
+  if (dragDepth.value > 0) {
+    dragDepth.value--;
+  }
+}
+
+function onDrop(e: DragEvent) {
   dragDepth.value = 0;
+
   const files = [...(e.dataTransfer?.files || [])];
-  if (files.length) addFiles(files);
+
+  if (files.length) {
+    addFiles(files);
+  }
 }
 
 // ── Диктовка: единый root-owned controller ──
@@ -1880,10 +2350,20 @@ function onDrop(e) {
 // controller для карточки ответа на вопрос триажа.
 const inputErr = ref('');
 
-function appendDictationText(text) {
+
+/**
+ * Дописывает устойчивый фрагмент диктовки в текущий черновик.
+ * Пустые фрагменты пропускаются, граница слов сохраняется пробелом.
+ */
+function appendDictationText(text: string) {
   const piece = String(text || '').trim();
-  if (!piece) return;
+
+  if (!piece) {
+    return;
+  }
+
   const before = input.value;
+
   input.value = before ? before + (/\s$/.test(before) ? '' : ' ') + piece : piece;
 }
 
@@ -1908,21 +2388,34 @@ const speechNotice = computed(() => speechState.notice || '');
 const speechBusy = computed(() => speechState.busy);
 
 function stopSpeech({ cancel = false } = {}) {
-  if (cancel) return dictationLease.cancel();
+  if (cancel) {
+    return dictationLease.cancel();
+  }
+
   return dictationLease.stop();
 }
 
+
+/**
+ * Переключает диктовку через единственный захваченный controller.
+ * Подготовка ответа и завершение потока блокируют повторный запуск.
+ */
 function toggleMic() {
   inputErr.value = '';
-  if (transcribing.value || drainingSpeech.value) return;
+
+  if (transcribing.value || drainingSpeech.value) {
+    return;
+  }
   if (speechBusy.value) {
     if (consentPending.value || browserInstallPending.value) {
       void stopSpeech({ cancel: true });
     } else {
       void stopSpeech();
     }
+
     return;
   }
+
   void dictationLease.start().catch((error) => {
     inputErr.value = error?.message || 'Не удалось запустить диктовку';
   });
@@ -1932,19 +2425,27 @@ function confirmBrowserConsent() {
   inputErr.value = '';
   void dictationLease.confirmBrowserConsent();
 }
+
 function useWhisperFromPrompt() {
   inputErr.value = '';
   void dictationLease.useWhisper();
 }
+
 function installBrowserLanguage() {
   inputErr.value = '';
   void dictationLease.installBrowserLanguage();
 }
 
-function onGlobalKey(e) {
+
+/**
+ * Обрабатывает общую клавишу диктовки и отмену активного захвата.
+ * Комбинации с лишними модификаторами остаются за браузером.
+ */
+function onGlobalKey(e: KeyboardEvent) {
   if (e.key === 'Escape' && speechBusy.value) {
     e.preventDefault();
     void stopSpeech({ cancel: true });
+
     return;
   }
   if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD' && !e.shiftKey && !e.altKey) {
@@ -1954,7 +2455,9 @@ function onGlobalKey(e) {
 }
 
 watch(() => props.sid, () => {
-  if (speechBusy.value) void stopSpeech({ cancel: true });
+  if (speechBusy.value) {
+    void stopSpeech({ cancel: true });
+  }
 }, { flush: 'sync' });
 onMounted(() => window.addEventListener('keydown', onGlobalKey));
 onUnmounted(() => {
@@ -1963,7 +2466,13 @@ onUnmounted(() => {
 });
 // ── Копирование сообщения (иконка при наведении) ──
 const copiedIdx = ref(-1);
-async function copyMsg(m, i) {
+
+
+/**
+ * Копирует текст сообщения через общий адаптер буфера обмена.
+ * Краткий индикатор успеха снимается только у того же сообщения.
+ */
+async function copyMsg(m: ChatMessage, i: number) {
   const text = m.text || '';
   const copied = await writeClipboardText(text);
 
@@ -1983,25 +2492,35 @@ async function copyMsg(m, i) {
 // локальную дату оставляем в подсказке и семантическом <time>. Старым сообщениям без
 // sentAt время не придумываем — updatedAt относится ко всему чату, а не к запросу.
 const messageTimeFormatter = new Intl.DateTimeFormat('ru-RU', {
-  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
 });
 const messageDateTimeFormatter = new Intl.DateTimeFormat('ru-RU', {
   dateStyle: 'medium', timeStyle: 'short',
 });
-function validMessageTime(value) {
+
+function validMessageTime(value: unknown) {
   const time = Number(value);
+
   return Number.isSafeInteger(time) && time > 0 ? time : 0;
 }
-function messageTime(value) {
+
+function messageTime(value: unknown) {
   const time = validMessageTime(value);
+
   return time ? messageTimeFormatter.format(new Date(time)) : '';
 }
-function messageTimeTitle(value) {
+
+function messageTimeTitle(value: unknown) {
   const time = validMessageTime(value);
+
   return time ? `Отправлено ${messageDateTimeFormatter.format(new Date(time))}` : '';
 }
-function messageTimeIso(value) {
+
+function messageTimeIso(value: unknown) {
   const time = validMessageTime(value);
+
   return time ? new Date(time).toISOString() : '';
 }
 
@@ -2010,11 +2529,17 @@ function messageTimeIso(value) {
 // берём адресованные этому чату. Висят, пока не ответишь: агент их ждёт. ──
 const perm = computed(() => chat.permFor(props.sid));
 const question = computed(() => chat.questionFor(props.sid));
-function answerQuestion(payload) {
-  if (question.value) void chat.answerQuestion(question.value.pid, payload);
+
+function answerQuestion(payload: unknown) {
+  if (question.value) {
+    void chat.answerQuestion(question.value.pid, payload);
+  }
 }
+
 function skipQuestion() {
-  if (question.value) void chat.answerQuestion(question.value.pid, []);
+  if (question.value) {
+    void chat.answerQuestion(question.value.pid, []);
+  }
 }
 </script>
 

@@ -98,14 +98,14 @@ import {
 import { SETTINGS_FIELDS, getSettingsFields } from '../../../features/settings/catalog.ts';
 import { createHotkeysAdapter, createWakeLockAdapter } from '../../../features/settings/resources/device.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
-import { useDeviceStore, WAKE_LOCK_KEY } from '../../../stores/device.js';
+import { useDeviceStore, WAKE_LOCK_KEY } from '../../../stores/device.ts';
 import {
   useHotkeysStore,
   validateHotkeyOverrides,
   DEFAULT_HOTKEYS,
   HOTKEYS_KEY,
-} from '../../../stores/hotkeys.js';
-import { usePluginsStore } from '../../../stores/plugins.js';
+} from '../../../stores/hotkeys.ts';
+import { usePluginsStore } from '../../../stores/plugins.ts';
 import { TOOL_CATALOG, toolAvailability } from '../../../shared/tools/catalog.ts';
 import { comboFromEvent, formatCombo, isLayoutSwitch } from '../../../shared/hotkeys/combo.ts';
 import { failureText } from '../../../shared/apiClient.ts';

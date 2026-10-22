@@ -1,3 +1,4 @@
+import { migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
@@ -15,7 +16,7 @@ test('перенесённая панель 3D соблюдает общую г�
  */
 async function source(relative, contract) {
   try {
-    return await readFile(new URL(`../../${relative}`, import.meta.url), 'utf8');
+    return await readFile(migrationUrl(relative.slice(4)), 'utf8');
   } catch (error) {
     assert.fail(`${contract}: ${error.message}`);
   }
@@ -45,7 +46,7 @@ test('«3D» зарегистрированы одной встроенной п
 });
 
 test('маршрут 3D делегирует единственному ToolHost', async () => {
-  const router = await source('web/src/router.js', 'маршрут 3D ещё не реализован');
+  const router = await source('web/src/router.ts', 'маршрут 3D ещё не реализован');
 
   const route = /path:\s*['"]\/3d['"][\s\S]*?component:\s*/;
   const panel = /\(\)\s*=>\s*import\(['"]\.\/views\/Studio3dView\.vue['"]\)/;

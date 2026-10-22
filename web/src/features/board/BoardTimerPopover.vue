@@ -103,9 +103,11 @@
   </span>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { t } from '../../ui.ts';
 
+import type { PropType } from 'vue';
+import type { BoardTask } from '../../shared/boardContracts.ts';
 import { computed, onUnmounted, ref } from 'vue';
 
 import { hoursToHM, liveTimerSec, secToHMS } from '../../shared/format.ts';
@@ -113,7 +115,7 @@ import { UiButton, UiIconButton, UiInlineMessage, UiTopbarPanel, vTooltip } from
 
 const props = defineProps({
   tasks: {
-    type: Array,
+    type: Array as PropType<BoardTask[]>,
     default: () => [],
   },
   busyTaskId: {
@@ -138,22 +140,23 @@ const timerControlsBusy = computed(() => props.busyTaskId !== null);
 const ticker = setInterval(() => {
   now.value = Date.now();
 }, 1000);
-ticker.unref?.();
 
-const elapsed = (task) => secToHMS(liveTimerSec(task, now.value));
-const isTimerBusy = (task) => String(props.busyTaskId) === String(task.id);
-const timerActionLabel = (task) => (
+(ticker as typeof ticker & { unref?: () => void }).unref?.();
+
+const elapsed = (task: BoardTask) => secToHMS(liveTimerSec(task, now.value));
+const isTimerBusy = (task: BoardTask) => String(props.busyTaskId) === String(task.id);
+const timerActionLabel = (task: BoardTask) => (
   task.timerRunning
     ? t('core.pauseTaskTimer', { taskId: task.id })
     : t('core.startTaskTimer', { taskId: task.id })
 );
 
-function openTask(taskId, close) {
+function openTask(taskId: string | number, close: (reason: 'action') => void) {
   close('action');
   emit('openTask', taskId);
 }
 
-function openBoard(close) {
+function openBoard(close: (reason: 'action') => void) {
   close('action');
   emit('openBoard');
 }

@@ -2,13 +2,18 @@
 // Сеть, навигация и каналы подменены, чистые зависимости загружаются из исходников.
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { compileModule } from './compile-vue.js';
+import { loadProductModule } from './compile-vue.js';
 
-const STORE_PATH = fileURLToPath(new URL('../../../web/src/stores/chat.js', import.meta.url));
 const PINIA_PATH = fileURLToPath(new URL('../../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url));
 const LOCALE_PATH = fileURLToPath(new URL('../../../web/src/services/locale.ts', import.meta.url));
 
 // Запросы стора: тест подменяет нужные методы (`api.get` и т.д.).
+/** @type {{
+ * get(url: string, options?: object): Promise<unknown>;
+ * post(url: string, body?: object): Promise<unknown>;
+ * put(url: string, body?: object): Promise<unknown>;
+ * del(url: string): Promise<unknown>;
+ * }} */
 export const apiHarness = {};
 globalThis.__chatApi = apiHarness;
 globalThis.__chatNotifications = [];
@@ -58,11 +63,11 @@ function storeStubs() {
       export const dismissAlertScope = (scope) => globalThis.__chatDismissed.push('scope:' + scope);
     `,
     '../shared/apiClient.ts': 'export const api = globalThis.__chatApi;',
-    '../router.js': `
+    '../router.ts': `
       export const router = { currentRoute: { value: { path: '/chats', meta: {} } } };
     `,
-    './ui-context.js': 'export const useUiContextStore = () => globalThis.__chatUiContext;',
-    './providers.js': 'export const useProvidersStore = () => globalThis.__chatProviders;',
+    './uiContext.ts': 'export const useUiContextStore = () => globalThis.__chatUiContext;',
+    './providers.ts': 'export const useProvidersStore = () => globalThis.__chatProviders;',
     '../composables/useSse.ts': `
       export const sseSubscribe = (fn) => {
         globalThis.__chatSse = fn;
@@ -70,8 +75,8 @@ function storeStubs() {
       };
     `,
     '../shared/md.ts': 'export const mdToText = (value) => value;',
-    '../shared/chat-visibility.js': 'export const chatVisibility = globalThis.__chatVisibility;',
-    '../shared/chat-title.js': `
+    '../shared/chatVisibility.ts': 'export const chatVisibility = globalThis.__chatVisibility;',
+    '../shared/chatTitle.ts': `
       export const applyGeneratedChatTitle = (session) => session;
       export const firstMessageTitle = () => '';
       export const provisionalChatTitle = () => '';
@@ -91,7 +96,6 @@ function storeStubs() {
  *
  * @param {{ sessions?: object[], archived?: object[], activeId?: string }} state
  * @param {{ api?: object, fromServer?: boolean }} options
- * @returns {Promise<object>} стор, уже помеченный как загруженный и синхронный с сервером
  */
 export async function chatStoreFixture(state = {}, { api = null, fromServer = false } = {}) {
   globalThis.__chatNotifications = [];
@@ -110,7 +114,7 @@ export async function chatStoreFixture(state = {}, { api = null, fromServer = fa
 
   const [{ createPinia, setActivePinia }, { useChatStore }] = await Promise.all([
     import(pathToFileURL(PINIA_PATH).href),
-    compileModule(STORE_PATH, { stubs: storeStubs() }),
+    loadProductModule('src/stores/chat.ts', storeStubs()),
   ]);
 
   globalThis.__chatApi = apiHarness;

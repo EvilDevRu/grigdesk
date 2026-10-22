@@ -35,7 +35,7 @@ import { t, uiLocale } from '../../../ui.ts';
 import { computed, ref, watch } from 'vue';
 import { UiSelect } from '../../../ui.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
-import { FACTORY_DEBUG_LEVELS } from '../../../shared/factory-debug.js';
+import { FACTORY_DEBUG_LEVELS } from '../../../shared/factoryDebug.ts';
 import { getWebLogRuntime } from '../../../shared/webLogRuntime.ts';
 import { sseSubscribe } from '../../../composables/useSse.ts';
 import { getSettingsFields } from '../../../features/settings/catalog.ts';

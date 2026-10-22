@@ -67,7 +67,7 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import { UiPopover, UiPressable, UiSpinner, vTooltip } from '../../ui';
-import { clockOf, resetIn } from '../../features/providers/providerUsage.js';
+import { clockOf, resetIn } from '../../features/providers/providerUsage.ts';
 import type { UsageSummary } from '../../features/providers/providerUsageSummary.ts';
 import type { ChatStatus } from './chatStatus.ts';
 import { statusOverflow, statusSummaryLayout } from './chatStatusLayout.ts';

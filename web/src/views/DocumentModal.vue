@@ -81,7 +81,7 @@ import DocumentPanel from '../features/documents/DocumentPanel.vue';
 import {
   documentLinkFromClick,
   parseDocumentRouteHref,
-} from '../features/documents/links.js';
+} from '../features/documents/links.ts';
 
 interface LoadedDocument {
   name?: string;

@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "ES2023.Array"],
+    "types": []
+  },
+  "include": ["src/shared/speechPcmWorklet.ts"]
+}

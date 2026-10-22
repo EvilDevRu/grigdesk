@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { graphStallView } from '../../web/src/shared/graph-stall.js';
+import { graphStallView } from '../../web/src/shared/graphStall.ts';
 
 test('graph stall presentation keeps the affected node, explicit reason and recovery hint visible', () => {
   const view = graphStallView({

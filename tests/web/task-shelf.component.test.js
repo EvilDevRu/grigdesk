@@ -59,7 +59,7 @@ async function mountPanel(t, rows, { error = null } = {}) {
         '../../stores/taskShelf.ts': [
           'export const useTaskShelfStore = () => globalThis.__taskShelfPanel.shelf;',
         ].join('\n'),
-        '../../stores/ui.js': [
+        '../../stores/ui.ts': [
           'export const useUiStore = () => globalThis.__taskShelfPanel.ui;',
         ].join('\n'),
       },
@@ -462,14 +462,14 @@ async function mountToolHost(t, rows) {
           'export const useRoute = () => ({ path: "/board", meta: {} });',
           'export const useRouter = () => ({ async push() {} });',
         ].join('\n'),
-        '../../stores/dock.js': [
+        '../../stores/dock.ts': [
           'export const MIN_DOCK_WIDTH = 380;',
           'export const useDockStore = () => globalThis.__taskShelfHost.dock;',
         ].join('\n'),
-        '../../stores/plugins.js': [
+        '../../stores/plugins.ts': [
           'export const usePluginsStore = () => globalThis.__taskShelfHost.plugins;',
         ].join('\n'),
-        '../../stores/hotkeys.js': [
+        '../../stores/hotkeys.ts': [
           'export const useHotkeysStore = () =>',
           '  ({ recording: null, toolByCombo: {}, comboOf: () => "" });',
         ].join('\n'),
@@ -555,6 +555,6 @@ test('Счётчик полки сохраняет просмотренные о
 
   assert.equal(wrapper.get('.navigation-count').text(), '999+');
   assert.equal(wrapper.get('.navigation-count').classes().includes('info'), true);
-  assert.match(wrapper.get('button').attributes('data-ui-tooltip'), /Требуют внимания: 1000/);
-  assert.match(wrapper.get('button').attributes('aria-label'), /Требуют внимания: 1000/);
+  assert.match(wrapper.get('button').attributes('data-ui-tooltip'), /Требуют внимания: 1\u00a0000/);
+  assert.match(wrapper.get('button').attributes('aria-label'), /Требуют внимания: 1\u00a0000/);
 });

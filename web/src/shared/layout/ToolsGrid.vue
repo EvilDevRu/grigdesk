@@ -1,12 +1,12 @@
 <template>
   <nav class="tools-grid" :aria-label="t('core.tools')">
     <router-link v-for="item in items" :key="item.id || item.to" :to="item.to"
-                 :aria-label="item.label + (badges[item.to] ? ' · ' + badges[item.to].title : '')"
+                 :aria-label="item.label + (badges[item.to] ? ' · ' + badges[item.to]?.title : '')"
                  v-tooltip="badges[item.to]?.title" class="tool-tile" active-class="active" @click="$emit('select', item)">
       <span class="tool-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path :d="NAV_ICONS[item.icon] || NAV_ICONS.plugin" />
+          <path :d="icons[item.icon] || icons.plugin" />
         </svg>
         <NavigationCount :badge="badges[item.to]" />
       </span>
@@ -15,16 +15,28 @@
   </nav>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { t } from '../../ui.ts';
 
 import { NAV_ICONS } from '../navIcons.ts';
 import { vTooltip } from '../../ui';
 import NavigationCount from './NavigationCount.vue';
+import type { PropType } from 'vue';
+
+interface ToolNavItem {
+  id?: string;
+  to: string;
+  label: string;
+  icon: string;
+}
+
+type Badge = InstanceType<typeof NavigationCount>['$props']['badge'];
+
+const icons: Readonly<Record<string, string>> = NAV_ICONS;
 
 defineProps({
-  items: { type: Array, default: () => [] },
-  badges: { type: Object, default: () => ({}) },
+  items: { type: Array as PropType<ToolNavItem[]>, default: () => [] },
+  badges: { type: Object as PropType<Record<string, Badge>>, default: () => ({}) },
 });
 defineEmits(['select']);
 </script>

@@ -8,7 +8,7 @@
 <script setup>
 import ChatList from '../../../../web/src/views/chat/ChatList.vue';
 import ChatSession from '../../../../web/src/views/chat/ChatSession.vue';
-import { useChatStore } from '../../../../web/src/stores/chat.js';
+import { useChatStore } from '../../../../web/src/stores/chat.ts';
 
 const chat = useChatStore();
 </script>

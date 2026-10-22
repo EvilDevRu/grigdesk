@@ -291,7 +291,7 @@ async function mountView(t, {
 
   const component = await compileVue(VIEW, {
     stubs: {
-      '../stores/chat.js': `export const useChatStore = () => ({
+      '../stores/chat.ts': `export const useChatStore = () => ({
         async _load() {},
         newSession: (options) => globalThis.__projectsViewHarness.calls.push(['chat', options]),
       });`,

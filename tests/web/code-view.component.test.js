@@ -60,10 +60,10 @@ async function compileCodeView() {
           return { connected: { value: true } };
         }
       `,
-      '../../stores/chat.js': `
+      '../../stores/chat.ts': `
         export const useChatStore = () => globalThis.__codeViewChat;
       `,
-      '../../router.js': `
+      '../../router.ts': `
         export const router = globalThis.__codeViewRouter;
       `,
       '../../ui': (`

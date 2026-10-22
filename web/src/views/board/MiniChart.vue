@@ -27,8 +27,8 @@
   </div>
 </template>
 
-<script setup>
-import { ref, computed } from 'vue';
+<script setup lang="ts">
+import { ref, computed, type PropType } from 'vue';
 import { hoursToHM } from '../../shared/format.ts';
 
 // Компактный линейный график: «Вы» (сплошная) + «Коллеги» (пунктир). SVG, без библиотек.
@@ -36,9 +36,9 @@ import { hoursToHM } from '../../shared/format.ts';
 // (хвост массива = будущие дни месяца с нулями, их брать нельзя).
 const props = defineProps({
   title: { type: String, default: '' },
-  labels: { type: Array, default: () => [] },
-  you: { type: Array, default: () => [] },
-  dept: { type: Array, default: () => [] },
+  labels: { type: Array as PropType<string[]>, default: () => [] },
+  you: { type: Array as PropType<Array<number | string>>, default: () => [] },
+  dept: { type: Array as PropType<Array<number | string>>, default: () => [] },
   kind: { type: String, default: 'count' }, // 'hours' | 'count'
 });
 
@@ -49,37 +49,64 @@ const PAD = 6;
 const n = computed(() => props.you.length);
 const max = computed(() => {
   const all = [...props.you, ...props.dept].map(Number).filter((x) => !Number.isNaN(x));
+
   return Math.max(1, ...all);
 });
 
-function xOf(i) { return n.value === 1 ? W / 2 : PAD + (i * (W - 2 * PAD)) / (n.value - 1); }
-function yOf(v) { return H - PAD - ((Number(v) || 0) / max.value) * (H - 2 * PAD); }
-function pointsFor(arr) { return arr.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' '); }
+function xOf(i: number) {
+  return n.value === 1 ? W / 2 : PAD + (i * (W - 2 * PAD)) / (n.value - 1);
+}
+
+function yOf(v: unknown) {
+  return H - PAD - ((Number(v) || 0) / max.value) * (H - 2 * PAD);
+}
+
+function pointsFor(arr: Array<number | string>) {
+  return arr.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ');
+}
 
 const youPts = computed(() => pointsFor(props.you));
 const deptPts = computed(() => pointsFor(props.dept));
 
-const fmt = (v) => (props.kind === 'hours' ? hoursToHM(Number(v) || 0) : String(Math.round(Number(v) || 0)));
+const fmt = (v: unknown) => (props.kind === 'hours'
+  ? hoursToHM(Number(v) || 0)
+  : String(Math.round(Number(v) || 0)));
 
 // Индекс по умолчанию — последний день, где есть хоть какие-то данные.
 const defaultIdx = computed(() => {
   for (let i = n.value - 1; i >= 0; i -= 1) {
-    if ((Number(props.you[i]) || 0) > 0 || (Number(props.dept[i]) || 0) > 0) return i;
+    if ((Number(props.you[i]) || 0) > 0 || (Number(props.dept[i]) || 0) > 0) {
+      return i;
+    }
   }
+
   return Math.max(0, n.value - 1);
 });
-const hoverIdx = ref(null);
+
+const hoverIdx = ref<number | null>(null);
 const activeIdx = computed(() => (hoverIdx.value !== null ? hoverIdx.value : defaultIdx.value));
 const headVal = computed(() => fmt(props.you[activeIdx.value]));
 
-const wrap = ref(null);
-function onMove(e) {
-  if (!n.value || !wrap.value) return;
+const wrap = ref<HTMLElement | null>(null);
+
+/**
+ * Выбирает ближайший день по положению курсора в области графика.
+ * Пустой ряд и ещё не смонтированный контейнер не меняют выбор.
+ */
+function onMove(e: MouseEvent) {
+  if (!n.value || !wrap.value) {
+    return;
+  }
+
   const r = wrap.value.getBoundingClientRect();
   const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+
   hoverIdx.value = Math.round(frac * (n.value - 1));
 }
-function onLeave() { hoverIdx.value = null; }
+
+function onLeave() {
+  hoverIdx.value = null;
+}
 
 // Позиции оверлея (направляющая, точки, тултип) в процентах контейнера.
 const hx = computed(() => (n.value <= 1 ? 50 : (activeIdx.value / (n.value - 1)) * 100));

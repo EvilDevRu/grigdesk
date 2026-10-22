@@ -30,7 +30,7 @@ const module = await compileModule(webFile('src/stores/videoSession.ts'), {
       get: (...args) => globalThis.__videoSessionApi.get(...args),
       post: (...args) => globalThis.__videoSessionApi.post(...args),
     };`,
-    './plugins.js': 'export const usePluginsStore = () => globalThis.__videoSessionPlugins();',
+    './plugins.ts': 'export const usePluginsStore = () => globalThis.__videoSessionPlugins();',
   },
 });
 

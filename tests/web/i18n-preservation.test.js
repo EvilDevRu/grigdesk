@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createDictationController } from '../../web/src/features/speech/controller.js';
+import { loadProductModule } from './helpers/compile-vue.js';
 import { probeLocalSpeech } from '../../web/src/features/settings/speechBrowser.ts';
 import { installUiBrowser } from './helpers/ui-components.js';
 import { i18nBrowser, openLanguageChat, assertLanguageChat } from './helpers/i18nBrowser.js';
+
+const { createDictationController } = await loadProductModule('src/features/speech/controller.ts');
 
 test('GUARD-STATE: настройки сохраняют настоящий чат, DOM, ввод, выделение и прокрутку', {
   timeout: 120000,

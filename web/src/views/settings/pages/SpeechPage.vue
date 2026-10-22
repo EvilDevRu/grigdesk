@@ -271,7 +271,7 @@ import SettingsSection from '../SettingsSection.vue';
 import { UiButton, UiSelect, UiTextarea, UiNumberInput, UiSwitch, UiProgress } from '../../../ui.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
-import { useChatStore } from '../../../stores/chat.js';
+import { useChatStore } from '../../../stores/chat.ts';
 import { sseSubscribe } from '../../../composables/useSse.ts';
 import { SETTINGS_FIELDS, getSettingsFields } from '../../../features/settings/catalog.ts';
 import type { FieldAddress, JsonValue } from '../../../features/settings/contracts.ts';

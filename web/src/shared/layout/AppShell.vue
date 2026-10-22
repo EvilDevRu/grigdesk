@@ -77,8 +77,8 @@
               </span>
               <span class="sep" aria-hidden="true"></span>
               <span>
-                RAM <b :class="loadClass(sys.mem.percent)">
-                  {{ formatNumber(sys.mem.usedGb, uiLocale) }}/{{ formatNumber(sys.mem.totalGb, uiLocale) }}
+                RAM <b :class="loadClass(sys.mem!.percent)">
+                  {{ formatNumber(sys.mem!.usedGb!, uiLocale) }}/{{ formatNumber(sys.mem!.totalGb!, uiLocale) }}
                 </b>
               </span>
             </UiPressable>
@@ -95,37 +95,37 @@
                   </span>
                   <span class="pu-bar"><span class="pu-fill" :class="loadClass(sys.cpu.percent)" :style="{ width: Math.min(100, sys.cpu.percent) + '%' }"></span></span>
                   <span class="pu-reset">
-                    {{ t('core.averageLoadOverOneMinute') }} {{ formatNumber(sys.cpu.load1, uiLocale) }}
+                    {{ t('core.averageLoadOverOneMinute') }} {{ formatNumber(sys.cpu.load1!, uiLocale) }}
                   </span>
                 </span>
                 <span class="pu-row">
                   <span class="pu-head">
                     <span>{{ t('core.ram') }}</span>
-                    <b :class="loadClass(mem.ramPercent)">{{ formatNumber(mem.ramPercent, uiLocale) }}%</b>
+                    <b :class="loadClass(mem!.ramPercent)">{{ formatNumber(mem!.ramPercent, uiLocale) }}%</b>
                   </span>
-                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(mem.ramPercent)" :style="{ width: Math.min(100, mem.ramPercent) + '%' }"></span></span>
+                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(mem!.ramPercent)" :style="{ width: Math.min(100, mem!.ramPercent) + '%' }"></span></span>
                   <span class="pu-reset">
-                    {{ t('core.used') }} {{ formatNumber(mem.ramUsed, uiLocale) }}
-                    {{ t('settings.from') }} {{ formatNumber(mem.ramTotal, uiLocale) }}
-                    {{ t('core.gbFree') }} {{ formatNumber(mem.ramFree, uiLocale) }} {{ t('core.gb') }}
+                    {{ t('core.used') }} {{ formatNumber(mem!.ramUsed, uiLocale) }}
+                    {{ t('settings.from') }} {{ formatNumber(mem!.ramTotal, uiLocale) }}
+                    {{ t('core.gbFree') }} {{ formatNumber(mem!.ramFree, uiLocale) }} {{ t('core.gb') }}
                   </span>
                 </span>
-                <span v-if="mem.swapTotal" class="pu-row">
+                <span v-if="mem!.swapTotal" class="pu-row">
                   <span class="pu-head">
                     <span>{{ t('core.swap') }}</span>
-                    <b :class="loadClass(mem.swapPercent)">{{ formatNumber(mem.swapPercent, uiLocale) }}%</b>
+                    <b :class="loadClass(mem!.swapPercent)">{{ formatNumber(mem!.swapPercent, uiLocale) }}%</b>
                   </span>
-                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(mem.swapPercent)" :style="{ width: Math.min(100, mem.swapPercent) + '%' }"></span></span>
+                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(mem!.swapPercent)" :style="{ width: Math.min(100, mem!.swapPercent) + '%' }"></span></span>
                   <span class="pu-reset">
-                    {{ t('core.used') }} {{ formatNumber(mem.swapUsed, uiLocale) }}
-                    {{ t('settings.from') }} {{ formatNumber(mem.swapTotal, uiLocale) }} {{ t('core.gb') }}
+                    {{ t('core.used') }} {{ formatNumber(mem!.swapUsed, uiLocale) }}
+                    {{ t('settings.from') }} {{ formatNumber(mem!.swapTotal, uiLocale) }} {{ t('core.gb') }}
                   </span>
                 </span>
                 <span v-else class="pu-reset">{{ t('core.swapDisabled') }}</span>
               </span>
               <span class="sysnote">
-                {{ t('core.theHeaderCombinesRAMAndSwapUsed') }} {{ formatNumber(sys.mem.usedGb, uiLocale) }}
-                {{ t('settings.from') }} {{ formatNumber(sys.mem.totalGb, uiLocale) }} {{ t('core.gb') }}
+                {{ t('core.theHeaderCombinesRAMAndSwapUsed') }} {{ formatNumber(sys.mem!.usedGb!, uiLocale) }}
+                {{ t('settings.from') }} {{ formatNumber(sys.mem!.totalGb!, uiLocale) }} {{ t('core.gb') }}
               </span>
               <span v-if="sysStale" class="sysnote stale-note">
                 {{ t('core.noFreshDataTheServerDidNot') }} {{ sysSnapshotTime }}.
@@ -138,7 +138,7 @@
           v-if="topbarTimerTasks.length"
           :tasks="topbarTimerTasks"
           :worked-today-hours="workedTodayHours"
-          :busy-task-id="timerActionTaskId"
+          :busy-task-id="timerActionTaskId ?? undefined"
           :error="timerActionError"
           @open-task="openBoardTask"
           @open-board="openBoard"
@@ -153,7 +153,7 @@
           v-if="pipelineTopbar.total"
           :items="notifyWatch.topbarItems"
           :error="notifyWatch.error || ''"
-          :icon="ICONS.pipeline"
+          :icon="ICONS.pipeline!"
           @open-pipeline="openPipeline"
         />
         <span
@@ -273,38 +273,38 @@
                   <span
                     v-if="updateNoteOf(p)"
                     class="pu-state"
-                    :class="updateNoteOf(p).type === 'err' ? 'is-bad' : 'is-warn'"
-                  >{{ updateNoteOf(p).text }}</span>
+                    :class="updateNoteOf(p)!.type === 'err' ? 'is-bad' : 'is-warn'"
+                  >{{ updateNoteOf(p)!.text }}</span>
                   <!-- Беда лимитов — СВЕРХУ и со ссылкой на состояние вендора: снизу её
                        читали уже после того, как начинали гадать о причине сбоя. -->
-                  <span v-if="usageOf(p).message" class="pu-state" :class="`is-${usageOf(p).tone}`">
-                    <span>{{ usageOf(p).message }}</span>
+                  <span v-if="usageOf(p)!.message" class="pu-state" :class="`is-${usageOf(p)!.tone}`">
+                    <span>{{ usageOf(p)!.message }}</span>
                     <!-- Срок паузы — рядом с отказом: «временно ограничил» без «до когда»
                          оставляло человека гадать, ждать минуту или час. -->
                     <span v-if="usagePauseOf(p)">{{ t('core.nextCheck') }} {{ usagePauseOf(p) }}.</span>
                     <span v-if="statusHintOf(p)" class="pu-status">
-                      {{ statusHintOf(p).text }}
+                      {{ statusHintOf(p)!.text }}
                       <UiActionLink
                         data-context="topbar-popover-status-link"
-                        :href="statusHintOf(p).url"
+                        :href="statusHintOf(p)!.url"
                         variant="text"
                         target="_blank"
-                      >{{ statusHintOf(p).host }}</UiActionLink>
+                      >{{ statusHintOf(p)!.host }}</UiActionLink>
                     </span>
                     <UiButton
-                      v-if="usageOf(p).action"
+                      v-if="usageOf(p)!.action"
                       data-context="topbar-popover-action"
                       variant="outline"
-                      @click.stop="close('action'); runUsageAction(usageOf(p).action)"
+                      @click.stop="close('action'); runUsageAction(usageOf(p)!.action)"
                     >
-                      {{ usageOf(p).action.label }}
+                      {{ usageOf(p)!.action!.label }}
                     </UiButton>
                   </span>
-                  <span v-if="usageOf(p).stale" class="pu-reset">{{ t('core.limitDataIsStale') }}</span>
+                  <span v-if="usageOf(p)!.stale" class="pu-reset">{{ t('core.limitDataIsStale') }}</span>
                   <!-- Потребление лимитов подписки — как /usage в CLI -->
                   <span class="pu">
                     <span
-                      v-for="b in usageOf(p).bars"
+                      v-for="b in usageOf(p)!.bars"
                       :key="b.key"
                       class="pu-row"
                       :class="{ 'pu-split': b.separated }"
@@ -316,11 +316,11 @@
                                иначе замечается только случайно. Гаснет само. -->
                           <span v-if="b.fresh" class="pu-new" v-tooltip="t('core.thisLimitBucketAppearedRecently')">{{ t('core.new') }}</span>
                         </span>
-                        <b :class="{ hot: b.pct >= 85 }"
+                        <b :class="{ hot: b.pct! >= 85 }"
                            v-tooltip="t('core.usedOfWindow', { value1: usedUsagePercent(b.pct), bLabel: b.label })"
                         >{{ usedUsagePercent(b.pct) }}</b>
                       </span>
-                      <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct >= 85 }" :style="{ width: Math.min(100, b.pct) + '%' }"></span></span>
+                      <span class="pu-bar"><span class="pu-fill" :class="{ hot: b.pct! >= 85 }" :style="{ width: Math.min(100, b.pct!) + '%' }"></span></span>
                       <!-- Отсчёт отвечает «скоро ли», дата — «во сколько»: планировать по
                            одному «через 4 д» нельзя. Полоса своей ширины не меняет, поэтому
                            вторая половина уходит к правому краю, а не удлиняет строку. -->
@@ -338,7 +338,7 @@
                          можно в «Настройках → Исполнители», кнопка на них ведёт ниже. -->
                     <ProviderUsageResources
                       :provider-id="p.id"
-                      :resources="usageOf(p).resources"
+                      :resources="usageOf(p)!.resources"
                       readonly
                     />
                   </span>
@@ -351,13 +351,13 @@
         <UiTopbarPanel v-if="sys?.net" :title="t('core.network')">
           <template #trigger>
             <UiPressable class="netbox mono" data-context="topbar-network" :aria-label="t('core.networkInformation')">
-              <span class="flag">{{ flagOf(sys.net.countryCode) }}</span>
-              <span class="ip">{{ sys.net.ip }}</span>
+              <span class="flag">{{ flagOf(sys.net!.countryCode) }}</span>
+              <span class="ip">{{ sys.net!.ip }}</span>
             </UiPressable>
           </template>
           <template #default>
-            {{ t('core.brainPublicIP') }} {{ sys.net.ip }}
-            <template v-if="sys.net.country"> · {{ sys.net.country }}</template>
+            {{ t('core.brainPublicIP') }} {{ sys.net!.ip }}
+            <template v-if="sys.net!.country"> · {{ sys.net!.country }}</template>
           </template>
         </UiTopbarPanel>
       </div>
@@ -385,11 +385,15 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { formatNumber, intlLocale } from '../../../../shared/i18n/formats.ts';
 import { uiLocale } from '../../ui.ts';
 
 import { t } from '../../ui.ts';
+
+import { isRecord } from '../../../../shared/lib/objects.ts';
+import { failureText } from '../apiClient.ts';
+import type { BoardTask } from '../boardContracts.ts';
 
 import { installAlertDeepLinks, openAlertTarget } from '../alertDeepLinks.ts';
 import ConnectionButton from './ConnectionButton.vue';
@@ -407,27 +411,27 @@ import {
   vTooltip,
 } from '../../ui';
 import { useSse } from '../../composables/useSse.ts';
-import { useSystemStore } from '../../stores/system.js';
-import { useProvidersStore } from '../../stores/providers.js';
+import { useSystemStore } from '../../stores/system.ts';
+import { useProvidersStore } from '../../stores/providers.ts';
 import { isTopbarProvider } from '../../../../shared/chat/executorTypes.ts';
 import { localizeProviderAuthLabel } from '../../features/providers/providerLocale.ts';
-import { usePluginsStore } from '../../stores/plugins.js';
+import { usePluginsStore } from '../../stores/plugins.ts';
 import { useStudio3dStore } from '../../stores/studio3d.ts';
-import { useAuthStore } from '../../stores/auth.js';
-import { useNotifyWatchStore } from '../../stores/notify-watch.js';
-import { useGrigDeskUpdateStore } from '../../stores/grigdesk-update.js';
-import { useChatStore } from '../../stores/chat.js';
-import { useBoardStore } from '../../stores/board.js';
-import { useTasksStore } from '../../stores/tasks.js';
-import { useUiStore } from '../../stores/ui.js';
+import { useAuthStore } from '../../stores/auth.ts';
+import { useNotifyWatchStore } from '../../stores/notifyWatch.ts';
+import { useGrigDeskUpdateStore } from '../../stores/grigdeskUpdate.ts';
+import { useChatStore } from '../../stores/chat.ts';
+import { useBoardStore } from '../../stores/board.ts';
+import { useTasksStore } from '../../stores/tasks.ts';
+import { useUiStore } from '../../stores/ui.ts';
 import { startInboxSummary, stopInboxSummary, useInboxStore } from '../../actions/inbox';
-import { useDockStore } from '../../stores/dock.js';
+import { useDockStore } from '../../stores/dock.ts';
 import {
   providerStatusHint,
   providerUsageView,
   resetAt,
   resetIn,
-} from '../../features/providers/providerUsage.js';
+} from '../../features/providers/providerUsage.ts';
 import { usedUsagePercent } from '../../features/providers/providerUsageSummary';
 import {
   aggregateNavBadges,
@@ -435,7 +439,7 @@ import {
   inboxNavBadge,
   pipelineNavBadge,
   shelfNavBadge,
-} from '../nav-badges.js';
+} from '../navBadges.ts';
 import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import NavigationCount from './NavigationCount.vue';
 import BoardTimerPopover from '../../features/board/BoardTimerPopover.vue';
@@ -445,7 +449,7 @@ import { vSvgPixelSnap } from '../svgPixelSnap.ts';
 import GrigDeskMark from '../GrigDeskMark.vue';
 import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
 import PluginSlot from '../../plugins/PluginSlot.vue';
-import { createUsageWatch } from '../../features/providers/usageWatch.js';
+import { createUsageWatch } from '../../features/providers/usageWatch.ts';
 import AttentionAlerts from '../../features/analysis/AttentionAlerts.vue';
 import CommandPalette from './CommandPalette.vue';
 import AlertHistoryPopover from '../../features/alerts/AlertHistoryPopover.vue';
@@ -463,6 +467,10 @@ const props = defineProps({
     default: true,
   },
 });
+
+type TopbarProvider = ReturnType<typeof useProvidersStore>['providers'][number];
+type NavLink = { to: string; label: string };
+
 const workspaceStarted = ref(props.active);
 const isDesktopMain = currentDesktopMode() === 'main';
 
@@ -501,6 +509,7 @@ watch(() => [studioAuth.authenticated, studioAuth.clientScope, plugins.loaded, p
     }
   }, { immediate: true });
 onUnmounted(() => studio3d.stop());
+
 const inboxStore = useInboxStore();
 
 watch(() => (props.active && plugins.loaded ? plugins.enabled('inbox') : null), (enabled) => {
@@ -519,14 +528,18 @@ const providersTimer = setInterval(() => {
     void prov.load();
   }
 }, 60_000);
-providersTimer.unref?.();
+
+if (typeof providersTimer === 'object' && 'unref' in providersTimer) {
+  (providersTimer as { unref?: () => void }).unref?.();
+}
+
 onUnmounted(() => clearInterval(providersTimer));
 
 /**
  * Подсказка провайдера объединяет собственные подписи с неизменёнными данными каталога.
  * Она вычисляется при показе, сохраняя текущий язык верхней панели.
  */
-function provTitle(p) {
+function provTitle(p: TopbarProvider) {
   return t('core.caption', {
     pName: p.name,
     pVendor: p.vendor,
@@ -543,11 +556,11 @@ function toProviders() {
   openSettings({ pageId: 'agents.providers' });
 }
 
-const usageOf = (p) => providerUsageView(prov.usage[p.id], p, uiLocale);
+const usageOf = (p: TopbarProvider) => providerUsageView(prov.usage[p.id], p, uiLocale);
 // Пауза после «стучитесь реже»: сервер кладёт её срок в retryAt снимка. Пока она идёт,
 // принудительная проверка вернёт прошлый снимок — кнопка гаснет и называет время. Формат
 // тот же, что у сброса полосы: «сегодня 03:45», и в прошлом он пуст — пауза снята.
-const usagePauseOf = (p) => {
+const usagePauseOf = (p: TopbarProvider) => {
   const usage = prov.usage[p.id];
 
   return usage?.state === 'rate_limited' ? resetAt(usage.retryAt, undefined, uiLocale) : '';
@@ -557,48 +570,73 @@ const usagePauseOf = (p) => {
 // минутный троттл стора, а серверный кэш остаётся — он и стережёт частоту походов
 // в API вендора, поэтому такое чтение к вендору не ходит.
 const usageWatch = createUsageWatch(() => prov.loadUsage(true));
+
 onUnmounted(() => usageWatch.stop());
 // Кнопка установки во всплывашке: только у отставшего CLI, который GrigDesk умеет ставить
 // сам. Пока идёт установка, кнопка остаётся на месте — иначе она исчезла бы вместе с
 // ходом, который сама и начала, и человек не понял бы, ставится ли ещё.
-function canUpdateCli(p) {
+function canUpdateCli(p: TopbarProvider) {
   return Boolean(p.installed && p.canUpdate && (p.updateAvailable || prov.updating === p.id));
 }
 // Итог установки во всплывашке: показываем отказ и «ничего не изменилось». Удачную
 // установку объявлять нечем — предложение обновиться просто исчезает, а полный текст
 // («Обновлён: X → Y») живёт в плашке настроек, где у него есть своя строка.
-function updateNoteOf(p) {
+function updateNoteOf(p: TopbarProvider) {
   const result = prov.updateResults[p.id];
 
   return result && (result.type === 'err' || result.changed === false) ? result : null;
 }
 // Куда смотреть при сбое вендора. Домен объявляет адаптер исполнителя, поэтому
 // всплывашка не знает ни одного вендорского адреса.
-const statusHintOf = (p) => providerStatusHint(p, prov.usage[p.id] || {}, uiLocale);
-function runUsageAction(action) {
-  if (action?.kind !== 'terminal' || !action.command) return;
+const statusHintOf = (p: TopbarProvider) => providerStatusHint(p, prov.usage[p.id] || {}, uiLocale);
+
+function runUsageAction(action: { kind: string; command?: string } | null | undefined) {
+  if (action?.kind !== 'terminal' || !action.command) {
+    return;
+  }
+
   openTerminal({ insert: action.command });
 }
-function loadClass(p) { return p >= 85 ? 'lv-bad' : p >= 60 ? 'lv-warn' : 'lv-ok'; }
+/**
+ * Цвет ресурса следует прежним порогам нагрузки без округления процента.
+ * Отсутствующий показатель сохраняет нейтральный класс до первого снимка.
+ */
+function loadClass(p: number | undefined) {
+  return p! >= 85 ? 'lv-bad' : p! >= 60 ? 'lv-warn' : 'lv-ok';
+}
 // Разбивка памяти для всплывашки: физическая отдельно, подкачка отдельно.
 // `??` — страховка на окно между выкаткой фронта и перезапуском сервера: пока сервер
 // старой сборки, полей ram*/swapPercent нет, и без фолбэка всплывашка покажет undefined.
 const mem = computed(() => {
   const m = sys.value?.mem;
-  if (!m) return null;
+
+  if (!m) {
+    return null;
+  }
+
   const swapTotal = m.swapTotalGb || 0;
   const swapUsed = m.swapUsedGb || 0;
-  const ramTotal = m.ramTotalGb ?? +(m.totalGb - swapTotal).toFixed(1);
-  const ramUsed = m.ramUsedGb ?? +(m.usedGb - swapUsed).toFixed(1);
+  const ramTotal = m.ramTotalGb ?? +(m.totalGb! - swapTotal).toFixed(1);
+  const ramUsed = m.ramUsedGb ?? +(m.usedGb! - swapUsed).toFixed(1);
+
   return {
-    ramTotal, ramUsed, ramFree: m.ramFreeGb ?? +(ramTotal - ramUsed).toFixed(1),
+    ramTotal,
+    ramUsed,
+    ramFree: m.ramFreeGb ?? +(ramTotal - ramUsed).toFixed(1),
     ramPercent: m.ramPercent ?? (ramTotal ? Math.round((ramUsed / ramTotal) * 100) : 0),
-    swapTotal, swapUsed,
+    swapTotal,
+    swapUsed,
     swapPercent: m.swapPercent ?? (swapTotal ? Math.round((swapUsed / swapTotal) * 100) : 0),
   };
 });
 // Эмодзи-флаг из ISO-кода страны (2 буквы → региональные индикаторы).
-function flagOf(cc) { if (!cc || cc.length !== 2) return '🏳'; return cc.toUpperCase().replace(/[A-Z]/g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0))); }
+function flagOf(cc: string | null | undefined) {
+  if (!cc || cc.length !== 2) {
+    return '🏳';
+  }
+
+  return cc.toUpperCase().replace(/[A-Z]/g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)));
+}
 
 // ── Бейджи в навигации ──
 // Правило одно на все разделы: жёлтый пульсирующий — работа СТОИТ, пока не подойду;
@@ -616,7 +654,7 @@ const alertLinkDeps = {
   chat: chatStore,
   ui,
 };
-let stopAlertLinks = null;
+let stopAlertLinks: (() => void) | null = null;
 
 setAlertTargetOpener((target) => openAlertTarget(target, alertLinkDeps));
 onUnmounted(() => {
@@ -627,8 +665,8 @@ onUnmounted(() => {
 // При паузе сохраняем строку, чтобы таймер можно было сразу продолжить.
 const boardStore = useBoardStore();
 const taskStore = useTasksStore();
-const recentPausedTimerIds = ref([]);
-const timerActionTaskId = ref(null);
+const recentPausedTimerIds = ref<string[]>([]);
+const timerActionTaskId = ref<string | null>(null);
 const timerActionError = ref('');
 const boardTasks = computed(() => boardStore.data?.tasks || []);
 const workedTodayHours = computed(() => boardStore.data?.today?.hours ?? 0);
@@ -639,12 +677,15 @@ const topbarTimerTasks = computed(() => {
     task.timerRunning || recentIds.has(String(task.id))
   ));
 });
-function openBoardTask(taskId) {
+
+function openBoardTask(taskId: string | number) {
   ui.openTask(taskId);
 }
+
 function openBoard() {
   router.push('/board');
 }
+
 function openPipeline() {
   router.push('/pipeline');
 }
@@ -653,8 +694,10 @@ function openPipeline() {
  * Переключает таймер через общий B24-store. Поставленную здесь паузу запоминаем,
  * чтобы строка не исчезла и человек мог сразу продолжить учёт времени кнопкой play.
  */
-async function toggleBoardTimer(task) {
-  if (timerActionTaskId.value !== null) return;
+async function toggleBoardTimer(task: BoardTask) {
+  if (timerActionTaskId.value !== null) {
+    return;
+  }
 
   const taskId = String(task.id);
   const action = task.timerRunning ? 'pause' : 'start';
@@ -678,7 +721,7 @@ async function toggleBoardTimer(task) {
       recentPausedTimerIds.value = recentPausedTimerIds.value.filter((id) => id !== taskId);
     }
 
-    timerActionError.value = error?.message || t('core.couldNotToggleTheTimer');
+    timerActionError.value = failureText(error, t('core.couldNotToggleTheTimer'));
   } finally {
     timerActionTaskId.value = null;
   }
@@ -710,6 +753,7 @@ watch(() => props.active, (active) => {
   void prov.loadUsage();
   notifyWatch.start();
 }, { immediate: true });
+
 const pipelineTopbar = computed(() => {
   return {
     total: notifyWatch.topbarItems.length,
@@ -717,7 +761,9 @@ const pipelineTopbar = computed(() => {
 });
 const shelfStore = useTaskShelfStore();
 const badges = computed(() => {
-  const out = inboxNavBadge({ reviewCount: inboxStore.reviewCount }, uiLocale);
+  const out: Record<string, ReturnType<typeof chatNavBadge>> = inboxNavBadge(
+    { reviewCount: inboxStore.reviewCount }, uiLocale,
+  );
   const unseen = boardStore.activity.unseenCount;
 
   out['/chats'] = chatNavBadge(chatStore, uiLocale);
@@ -742,13 +788,13 @@ const badges = computed(() => {
 });
 
 
-function navTitle(item) {
+function navTitle(item: NavLink) {
   const detail = badges.value[item.to]?.title;
 
   return detail ? `${item.label} · ${detail}` : item.label;
 }
 
-const ICONS = {
+const ICONS: Record<string, string> = {
   connection: 'M4 5h16v10H4z M8 20h8 M12 15v5',
   cube: 'M12 2l9 5v10l-9 5-9-5V7z M12 22V12 M21 7l-9 5-9-5',
   board: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
@@ -756,7 +802,8 @@ const ICONS = {
   // Песочница — отдельный ящик со своим содержимым: короб с крышкой и полкой внутри.
   sandbox: 'M3 9h18v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M6 9V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v3 M8 14h8',
   chats: 'M8 10h8 M8 14h5 M7 4h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H9l-4 4v-4a3 3 0 0 1-1-2V7a3 3 0 0 1 3-3z',
-  agents: 'M12 3v3 M12 3a1.2 1.2 0 1 0 0-.01 M8 6h8a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3z M9 12h.01 M15 12h.01 M9.5 16h5',
+  agents: 'M12 3v3 M12 3a1.2 1.2 0 1 0 0-.01 M8 6h8a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H8a3 3'
+    + ' 0 0 1-3-3V9a3 3 0 0 1 3-3z M9 12h.01 M15 12h.01 M9.5 16h5',
   routes: 'M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3z M9 3v15 M15 6v15',
   projects: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z',
   code: 'M9 8l-4 4 4 4 M15 8l4 4-4 4',
@@ -766,10 +813,23 @@ const ICONS = {
   // получается обычная кнопка «отправить».
   telegram: 'M20.4 5.2 4 11.6l5.3 2 1.7 5.2 2.5-3 4.1 3.1z M9.3 13.6 20.4 5.2 13.5 15.8',
   inbox: 'M4 4h16v12a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V4z M4 13h4l2 3h4l2-3h4',
-  github: 'M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.87c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.6 9.6 0 0 1 12 6.84a9.6 9.6 0 0 1 2.5.34c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.86v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z',
+  github: 'M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.87c-2.78.6-3.37-1.18-3.3'
+    + '7-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.'
+    + '53 1.03.9 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4'
+    + '.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.'
+    + '02A9.6 9.6 0 0 1 12 6.84a9.6 9.6 0 0 1 2.5.34c1.91-1.29 2.75-1.02 2.75-1.02.'
+    + '55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36'
+    + '.31.68.92.68 1.86v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z',
   terminal: 'M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z M7 9l3 3-3 3 M13 15h4',
   tools: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z',
-  settings: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z',
+  settings: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-'
+    + '.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.51'
+    + 'a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.0'
+    + '8a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-'
+    + '.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38'
+    + 'a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a'
+    + '2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.2'
+    + '5a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z',
   plugin: 'M4 7h3a2 2 0 1 1 4 0h3v3a2 2 0 1 1 0 4v3h-3a2 2 0 1 0-4 0H4v-3a2 2 0 1 0 0-4V7z',
 };
 // Основные разделы сохраняют прежние адреса и порядок при смене языка.
@@ -827,7 +887,7 @@ const nav = [
 // Плагины в сайдбаре: включённые и с СУЩЕСТВУЮЩЕЙ страницей во фронте. У системных
 // страница собрана в бандл, у пользовательских — своя папка web, которую ведёт общий
 // роут /ext/:id; пункт с мёртвой ссылкой хуже отсутствующего — такие скрываем.
-const routeExists = (item) => router.resolve(item.to).matched.length > 0;
+const routeExists = (item: NavLink) => router.resolve(item.to).matched.length > 0;
 const pluginNav = computed(() => plugins.railNav.filter(routeExists));
 const toolsNav = computed(() => plugins.toolsNav.filter(routeExists));
 // До 900 px правой рейки нет, поэтому dock-инструменты становятся обычными
@@ -845,7 +905,8 @@ const dockRouteNav = computed(() => [
     order: 30,
   },
 ].sort((a, b) => (a.order || 0) - (b.order || 0)
-  || (a.sourceLabel || a.label).localeCompare(b.sourceLabel || b.label, 'ru')));
+  || (('sourceLabel' in a ? a.sourceLabel : '') || a.label)
+    .localeCompare(('sourceLabel' in b ? b.sourceLabel : '') || b.label, 'ru')));
 
 const commands = computed(() => [
   ...nav.map((item) => ({ ...item, id: item.to })),
@@ -868,7 +929,7 @@ const { connected } = useSse((name, data) => {
   }
   // Фоновая проверка нашла новую версию CLI — подтягиваем реестр, чтобы зажечь индикатор.
   if (name === 'providers-update') {
-    if (data?.credentials) {
+    if (isRecord(data) && typeof data.credentials === 'string' && data.credentials) {
       void prov.invalidateCredentials(data.credentials);
     } else {
       void prov.load();
@@ -876,9 +937,11 @@ const { connected } = useSse((name, data) => {
   }
   // Фоновый тик сервера принёс свежие лимиты — полосы в шапке идут за ними без наведения.
   if (name === 'providers-usage') {
-    prov.applyUsage(data?.usage);
+    prov.applyUsage(isRecord(data) ? data.usage : undefined);
   }
-  if (name === 'grigdesk-update') grigDeskUpdate.load({ quiet: true });
+  if (name === 'grigdesk-update') {
+    grigDeskUpdate.load({ quiet: true });
+  }
 });
 
 watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, flush: 'sync' });

@@ -34,8 +34,8 @@ test('IN01/02/04/06/10/11: App сохраняет основной докуме�
         './views/ConnectionsView.vue': 'export default { render: () => null };',
         './shared/layout/LockOverlay.vue': 'export default { render: () => null };',
         './shared/desktopSettings.ts': 'export const currentDesktopMode = () => "page";',
-        './stores/auth.js': 'export const useAuthStore = () => globalThis.__modalAppAuth;',
-        './features/speech/provider.js': `
+        './stores/auth.ts': 'export const useAuthStore = () => globalThis.__modalAppAuth;',
+        './features/speech/provider.ts': `
           import { h, onMounted, onUnmounted } from 'vue';
           export const SpeechProvider = {
             setup(_props, { slots }) {
@@ -70,15 +70,15 @@ test('IN01/02/04/06/10/11: App сохраняет основной докуме�
         './views/TaskModal.vue': 'export default { render: () => null };',
         './views/DiffModal.vue': 'export default { render: () => null };',
         './views/DocumentModal.vue': 'export default { render: () => null };',
-        './stores/board.js': 'export const useBoardStore = () => ({ startPolling() {}, stopPolling() {} });',
-        './stores/system.js': `
+        './stores/board.ts': 'export const useBoardStore = () => ({ startPolling() {}, stopPolling() {} });',
+        './stores/system.ts': `
           export const useSystemStore = () => ({ startPolling() {}, stopPolling() {} });
         `,
-        './stores/task-favorites.js': 'export const useTaskFavoritesStore = () => ({ clear() {} });',
+        './stores/taskFavorites.ts': 'export const useTaskFavoritesStore = () => ({ clear() {} });',
         './stores/taskShelf.ts': `
           export const useTaskShelfStore = () => ({ start() {}, stop() {}, clear() {} });
         `,
-        './stores/task-seen.js': 'export const useTaskSeenStore = () => ({ load() {}, clear() {} });',
+        './stores/taskSeen.ts': 'export const useTaskSeenStore = () => ({ load() {}, clear() {} });',
         './stores/videoSession.ts': 'export const useVideoSessionStore = () => ({ stopPoll() {} });',
       } }),
     ]);

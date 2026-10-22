@@ -4,7 +4,7 @@
 import { defineStore } from 'pinia';
 
 import type { AnalysisRow } from '../../../shared/pipeline/analysisContracts.ts';
-import { usePluginsStore } from './plugins.js';
+import { usePluginsStore } from './plugins.ts';
 
 export interface AnalysisStoreState {
   byTask: Record<string, AnalysisRow>;

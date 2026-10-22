@@ -47,11 +47,13 @@
 
 ### Клиент графа
 
+- [Старый формат узлов живого графа](live-graph-legacy-nodes.md)
+
 - [Петля агентов: круг, этап и видимая передача между ведущим и исполнителем](loop-visualization.md)
 - [Работа узла: вращающаяся обводка и синяя стрелка текущего возврата](running-node-outline.md)
 - [Выбор исполнителя — карточки, и он не закрывает модалку](node-executor-selection.md)
 - [Документ этапа: карта NODE_DOC и список сервера обязаны сходиться](stage-document-mapping.md)
-- [Клиент (web/src/shared/graph-geom.js)](graph-client.md)
+- [Клиент (web/src/shared/graphGeom.ts)](graph-client.md)
 - [Импорт общего API из вложенных компонентов конвейера](client-api-imports.md)
 - [Модель и effort в модалке узла](node-model-and-effort.md)
 - [Раскладка модалки: шапка называет этап, колонки отвечают на вопрос](stage-dialog-layout.md)

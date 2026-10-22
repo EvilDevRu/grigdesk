@@ -4,7 +4,7 @@ import test from 'node:test';
 import { compileModule, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
-const CHAT_STORE = webFile('src/stores/chat.js');
+const CHAT_STORE = webFile('src/stores/chat.ts');
 
 async function chatStore(t, api) {
   await installUiBrowser(t, 'http://grigdesk.test/#/chats');
@@ -13,9 +13,9 @@ async function chatStore(t, api) {
     stubs: {
       '../shared/apiClient.ts': 'export const api = globalThis.__dbApprovalApi;',
       '../composables/useSse.ts': 'export const sseSubscribe = () => () => {};',
-      '../router.js': 'export const router = { currentRoute: { value: {} }, push() {} };',
-      './ui-context.js': 'export const useUiContextStore = () => ({ current: null });',
-      './providers.js': 'export const useProvidersStore = () => ({ providers: [] });',
+      '../router.ts': 'export const router = { currentRoute: { value: {} }, push() {} };',
+      './uiContext.ts': 'export const useUiContextStore = () => ({ current: null });',
+      './providers.ts': 'export const useProvidersStore = () => ({ providers: [] });',
       '../shared/alerts.ts': 'export const alertUser = () => true; export const dismissAlert = () => {};'
         + ' export const dismissAlertScope = () => {};',
     },

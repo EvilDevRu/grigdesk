@@ -1,6 +1,6 @@
 import { onBeforeUnmount, shallowReactive } from 'vue';
 
-import { useUiContextStore } from '../stores/ui-context.js';
+import { useUiContextStore } from '../stores/uiContext.ts';
 
 // Что компонент рассказывает о себе GrigDesk. Слой отвечает на «где человек сейчас»,
 // приоритет разводит одновременно открытые слои, `details` — свободная форма самого
@@ -8,7 +8,7 @@ import { useUiContextStore } from '../stores/ui-context.js';
 export interface UiContextDescriptor {
   layer: string;
   active: boolean;
-  routingScope: string | null;
+  routingScope: unknown;
   details: Record<string, unknown> | null;
   priority?: number;
 }
@@ -26,8 +26,8 @@ export interface UiContextSource {
   dispose: () => boolean;
 }
 
-// Стор ещё на JavaScript, и вывод типов не знает форму его ручки. Объявлено ровно то,
-// что зовёт этот файл: реестр возвращает замороженный объект из трёх методов.
+// Локальный порт описывает только методы, которые использует компонент.
+// Реестр возвращает замороженную ручку из трёх методов без передачи полномочий.
 interface RegistryOwner {
   update: (value: UiContextDescriptor) => boolean;
   focus: () => boolean;

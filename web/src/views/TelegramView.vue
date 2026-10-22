@@ -839,7 +839,7 @@ import type {
   TelegramStatus,
   TelegramTopic,
 } from '../../../shared/telegram/telegramContracts.ts';
-import { usePluginsStore } from '../stores/plugins.js';
+import { usePluginsStore } from '../stores/plugins.ts';
 
 // Состояние канала закрыто перечислением на границе сети: «подключается» и
 // «отвалился» ведут человека к разным действиям, и своего значения раздел не

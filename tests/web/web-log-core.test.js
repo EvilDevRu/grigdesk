@@ -1,3 +1,4 @@
+import { migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
@@ -184,7 +185,7 @@ test('сопоставитель выбирает самый точный шаб
 });
 
 test('шаблоны маршрутов окна совпадают с router.js', async () => {
-  const router = await readFile(new URL('../../web/src/router.js', import.meta.url), 'utf8');
+  const router = await readFile(migrationUrl('src/router.ts'), 'utf8');
   const paths = [...router.matchAll(/\{\s*path:\s*'([^']+)'/gu)].map((match) => match[1]);
 
   assert.deepEqual([...WEB_LOG_ROUTES].sort(), [...new Set(paths)].sort());

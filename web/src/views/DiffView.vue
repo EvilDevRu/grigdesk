@@ -5,7 +5,7 @@
   <DiffPanel :task-id="taskId" />
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import TopbarActions from '../shared/layout/TopbarActions.vue';

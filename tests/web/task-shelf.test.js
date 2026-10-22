@@ -6,6 +6,7 @@ import { compileModule, webFile } from './helpers/compile-vue.js';
 
 let sharedModule;
 let sharedModuleError;
+
 try {
   sharedModule = await import('../../web/src/shared/taskShelfDecision.ts');
 } catch (error) {
@@ -412,10 +413,10 @@ async function analysisFixture({ enabled = true, autoAdd = true, shelfError = nu
       '../../stores/taskShelf.ts': [
         'export const useTaskShelfStore = () => globalThis.__shelfAnalysisHarness.shelf;',
       ].join('\n'),
-      '../../stores/plugins.js': [
+      '../../stores/plugins.ts': [
         'export const usePluginsStore = () => globalThis.__shelfAnalysisHarness.plugins;',
       ].join('\n'),
-      './plugins.js': [
+      './plugins.ts': [
         'export const usePluginsStore = () => globalThis.__shelfAnalysisHarness.plugins;',
       ].join('\n'),
     },
@@ -549,13 +550,13 @@ async function reactiveStoreFixture({
       './analysis.ts': [
         'export const useAnalysisStore = () => globalThis.__taskShelfStoreHarness.analysis;',
       ].join('\n'),
-      './notify-watch.js': [
+      './notifyWatch.ts': [
         'export const useNotifyWatchStore = () => globalThis.__taskShelfStoreHarness.pipeline;',
       ].join('\n'),
-      './board.js': [
+      './board.ts': [
         'export const useBoardStore = () => globalThis.__taskShelfStoreHarness.board;',
       ].join('\n'),
-      './plugins.js': [
+      './plugins.ts': [
         'export const usePluginsStore = () => globalThis.__taskShelfStoreHarness.plugins;',
       ].join('\n'),
     },

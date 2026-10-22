@@ -89,7 +89,7 @@ async function mountPanel(t, { pending = {}, store: storeOverrides = {}, props =
           export const detachSshTerminal = (...args) => bridge().detach(...args);
           export const watchSsh = () => {};
         `,
-        '../../shared/chatApprovals.js': (
+        '../../shared/chatApprovals.ts': (
           'export const useChatApprovals = () => globalThis.__sshPanelChatStore;'
         ),
         './services/dialogs': `

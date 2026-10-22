@@ -168,7 +168,7 @@ test('Новые страницы речи и операции', async (t) => {
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compileModule(webFile('../tests/web/helpers/settings-pages.ts'), {
       stubs: {
-        '../router.js': 'export const router = { push: async () => {} };',
+        '../router.ts': 'export const router = { push: async () => {} };',
         '../../../composables/useSse.ts': 'export const sseSubscribe = () => () => {};',
       },
     }),

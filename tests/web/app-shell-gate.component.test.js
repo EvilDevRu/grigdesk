@@ -50,14 +50,14 @@ test('оболочка: интерфейс открыт до сервера, м�
         isOpen: false, setAuthenticated() {}, dispose() {},
       });`,
       './views/settings/SettingsModal.vue': 'export default { render: () => null };',
-      './stores/auth.js': 'export const useAuthStore = () => globalThis.__gateAuth;',
+      './stores/auth.ts': 'export const useAuthStore = () => globalThis.__gateAuth;',
       './stores/shell.ts': 'export const useShellStore = () => globalThis.__gateShell;',
       './shared/desktopSettings.ts': "export const currentDesktopMode = () => 'main';",
       './shared/alerts.ts': [
         'export const clearAlertHistory = () => {};',
         'export const dismissAllAlerts = () => {};',
       ].join('\n'),
-      './features/speech/provider.js': 'export const SpeechProvider = { template: `<div><slot /></div>` };',
+      './features/speech/provider.ts': 'export const SpeechProvider = { template: `<div><slot /></div>` };',
       './shared/layout/AppShell.vue': 'export default { template: `<div data-app-shell><slot /></div>` };',
       './views/ConnectionsView.vue': 'export default { template: `<div data-machines>Машины</div>` };',
       './shared/layout/LockOverlay.vue': 'export default { template: `<div data-lock>Замок</div>` };',
@@ -153,7 +153,7 @@ test('оболочка: 401 обновляет состояние связи, о
     globalThis.sessionStorage = storage;
   });
 
-  const module = await compileModule(webFile('src/stores/auth.js'), {
+  const module = await compileModule(webFile('src/stores/auth.ts'), {
     stubs: {
       './shell.ts': 'export const useShellStore = () => globalThis.__authShell;',
       '../shared/apiClient.ts': 'export const api = {};',

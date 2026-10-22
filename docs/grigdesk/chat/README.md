@@ -58,6 +58,7 @@
 - [«Требуют вмешательства»: чипы, чтобы вопрос не проехал мимо](intervention-badges.md)
 - [Автопрокрутка](auto-scroll.md)
 - [Вложения (фото) и диктовка](attachments-and-dictation.md)
+- [Типизированные границы старых ответов: MIME, revision папки и сетевые ошибки](typed-legacy-responses.md)
 - [Всплывашка разрешений (аналог permission prompt Claude Code)](permission-prompt.md)
 - [Диалог: агент задаёт вопрос (AskUserQuestion)](agent-questions.md)
 - [Доставка хода: приём по turnId, журнал ходов, итог через pending](turn-delivery.md)

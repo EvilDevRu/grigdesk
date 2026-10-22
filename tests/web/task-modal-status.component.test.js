@@ -134,10 +134,10 @@ async function mountCard(t, browser, {
     }
   });
 
-  const module = await compileModule(webFile('src/stores/tasks.js'), {
+  const module = await compileModule(webFile('src/stores/tasks.ts'), {
     stubs: {
       '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
-      './board.js': `export const useBoardStore = globalThis.${prefix}BoardStore;`,
+      './board.ts': `export const useBoardStore = globalThis.${prefix}BoardStore;`,
     },
   });
 

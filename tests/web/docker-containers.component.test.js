@@ -108,7 +108,7 @@ async function mountContainers(t, { values = {}, stats = {}, busyIds = [] } = {}
       '../../stores/docker': (
         'export const useDockerStore = () => globalThis.__dockerContainersHarness.store;'
       ),
-      '../../stores/plugins.js': (
+      '../../stores/plugins.ts': (
         'export const usePluginsStore = () => globalThis.__dockerContainersHarness.plugins;'
       ),
       '../../ui': (UI_STUB) +

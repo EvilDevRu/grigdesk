@@ -18,7 +18,7 @@ server-owned companion-чате, что виден на странице `/chats
   видно диффа, единственная защита — спрос, а его карточки пульт уже умеет
   показывать.
 - **История**: обе реплики сохраняются тем же точечным GET/PUT chat-store циклом
-  с CAS/revision, что и `web/src/stores/chat.js` — user-сообщение до запуска,
+  с CAS/revision, что и `web/src/stores/chat.ts` — user-сообщение до запуска,
   assistant после ответа; server-owned identity сохраняется, прямой записи файлов
   истории нет. Поэтому уже открытое окно `/chats` обновляется существующим
   chat-store SSE.

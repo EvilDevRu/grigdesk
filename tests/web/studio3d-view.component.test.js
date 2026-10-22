@@ -60,9 +60,9 @@ function panelStubs(h) {
     './VersionTree.vue': TREE_STUB,
     './ModelPage.vue': MODEL_PAGE_STUB,
     '../../stores/studio3d.ts': 'export const useStudio3dStore = () => globalThis.__studioPanel.store;',
-    '../../stores/plugins.js': 'export const usePluginsStore = () => ({'
+    '../../stores/plugins.ts': 'export const usePluginsStore = () => ({'
       + ' loaded: true, enabled: (id) => globalThis.__studioPanel.enabledRef.value });',
-    '../../stores/dock.js': 'export const useDockStore = () => globalThis.__studioPanel.dock;'
+    '../../stores/dock.ts': 'export const useDockStore = () => globalThis.__studioPanel.dock;'
   };
 }
 
@@ -351,7 +351,7 @@ test('ModelPage: active управляет монтажом ModelViewer', async 
       '../../shared/viewer3d/ModelViewer.vue': 'export default {props: ["src", "ext", "name"],'
         + ' template: "<div class=\'stub-viewer\' />"};',
       '../../stores/studio3d.ts': 'export const useStudio3dStore = () => globalThis.__studioModelPage.store;',
-      '../../stores/chat.js': 'export const useChatStore = () => ({});'
+      '../../stores/chat.ts': 'export const useChatStore = () => ({});'
     }
   });
   const wrapper = mount(component, { props: { active: false } });

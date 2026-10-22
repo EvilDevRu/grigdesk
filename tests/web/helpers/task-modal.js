@@ -100,11 +100,14 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
       'vue-router': `export const useRouter = () => globalThis.${prefix}Router || ({ push() {} });`,
       '../shared/shellClient.ts':
         `export const shellAction = (...args) => globalThis.${prefix}ShellAction?.(...args);`,
-      '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
+      '../shared/apiClient.ts': [
+        `export const api = globalThis.${prefix}Api;`,
+        `export { failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,
+      ].join('\n'),
       '../composables/useUiContextSource.ts': contextSourceStub(prefix),
-      '../stores/ui.js': `export const useUiStore = globalThis.${prefix}UiStore;`,
-      '../stores/tasks.js': `export const useTasksStore = globalThis.${prefix}TasksStore;`,
-      '../stores/board.js': `export const useBoardStore = globalThis.${prefix}BoardStore;`,
+      '../stores/ui.ts': `export const useUiStore = globalThis.${prefix}UiStore;`,
+      '../stores/tasks.ts': `export const useTasksStore = globalThis.${prefix}TasksStore;`,
+      '../stores/board.ts': `export const useBoardStore = globalThis.${prefix}BoardStore;`,
       '../actions/analysis': [
         `export const useAnalysisStore = globalThis.${prefix}AnalysisStore;`,
         `export const analyzeTask = (...args) => globalThis.${prefix}AnalysisStore().analyze(...args);`,
@@ -119,7 +122,7 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
         `  arbitrate: (id) => globalThis.${prefix}Api.post('/api/tasks/' + id + '/analysis/arbitrate', {}),`,
         '};',
       ].join('\n'),
-      '../stores/task-favorites.js': (
+      '../stores/taskFavorites.ts': (
         `export const useTaskFavoritesStore = globalThis.${prefix}FavoritesStore;`
       ),
       '../stores/taskShelf.ts': [
@@ -129,13 +132,13 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
         '  async toggle() { return true; }, async acknowledge() { return true; },',
         '}));',
       ].join('\n'),
-      '../stores/plugins.js': [
+      '../stores/plugins.ts': [
         `export const usePluginsStore = globalThis.${prefix}PluginsStore || (() => ({`,
         '  loaded: true, enabled: () => false, byId: () => null,',
         '}));',
       ].join('\n'),
-      '../stores/task-seen.js': `export const useTaskSeenStore = globalThis.${prefix}SeenStore;`,
-      '../features/speech/provider.js': [
+      '../stores/taskSeen.ts': `export const useTaskSeenStore = globalThis.${prefix}SeenStore;`,
+      '../features/speech/provider.ts': [
         'const fallbackController = {',
         '  acquire() {',
         '    return {',

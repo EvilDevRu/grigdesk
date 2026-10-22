@@ -28,9 +28,9 @@ const resolve = (href) => chatFileLinkHref(href, { roots: ROOTS });
 
 test('CODE-LINK-01: путь под известным деревом становится route панели', () => {
   assert.equal(
-    codeRouteHref('/home/user/Workspace/grigdesk/web/src/stores/chat.js', { roots: ROOTS }),
+    codeRouteHref('/home/user/Workspace/grigdesk/web/src/stores/chat.ts', { roots: ROOTS }),
     '#/code?project=grigdesk&repo=main'
-      + '&root=%2Fhome%2Fuser%2FWorkspace%2Fgrigdesk&path=web%2Fsrc%2Fstores%2Fchat.js',
+      + '&root=%2Fhome%2Fuser%2FWorkspace%2Fgrigdesk&path=web%2Fsrc%2Fstores%2Fchat.ts',
   );
   assert.deepEqual(parseCodeTarget('/srv/api/app/main.py:120', ROOTS), {
     project: 'other', repo: 'api', root: '/srv/api', path: 'app/main.py', line: 120,
@@ -69,7 +69,9 @@ test('CODE-LINK-05: у документов приоритет, у кода — 
   // .md остаётся у просмотрщика документов, даже если лежит под известным деревом.
   assert.match(resolve('/home/user/Workspace/grigdesk/docs/grigdesk/b24.md'), /^#\/documents\?open=/);
 
-  const html = mdToHtml('[стор](/home/user/Workspace/grigdesk/web/src/stores/chat.js)', { resolveHref: resolve });
+  const html = mdToHtml('[стор](/home/user/Workspace/grigdesk/web/src/stores/chat.ts)', {
+    resolveHref: resolve,
+  });
   assert.match(html, /data-code-link="true"/);
   assert.doesNotMatch(html, /target="_blank"/);
 });

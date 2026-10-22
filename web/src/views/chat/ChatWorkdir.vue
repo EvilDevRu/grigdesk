@@ -157,7 +157,8 @@ import {
 import type { UiOverlayContentSlotProps } from '../../ui.ts';
 import { api } from '../../shared/apiClient.ts';
 import { NAV_ICONS } from '../../shared/navIcons.ts';
-import { useChatStore } from '../../stores/chat.js';
+import { normalizeChatWorkdir } from '../../../../shared/chat/chatWorkdir.ts';
+import { useChatStore } from '../../stores/chat.ts';
 import {
   chatWorkdirLabel, normalizeRecentWorkdirs, sameChatWorkdir,
 } from '../../../../shared/chat/chatWorkdir.ts';
@@ -176,7 +177,7 @@ interface WorkdirPreview {
 
 interface WorkdirSession {
   id: string;
-  taskId?: string | null;
+  taskId?: string | number | null;
   purpose?: string;
   workdir?: unknown;
   modelRef?: unknown;
@@ -186,7 +187,7 @@ interface WorkdirSession {
   sessionResetting?: boolean;
   workdirChanging?: boolean;
   workdirPreview?: WorkdirPreview | null;
-  workdirState?: { committed?: { cwd?: string; }; };
+  workdirState?: { committed?: { cwd?: string; }; } | null;
   workdirProposal?: {
     transfer?: string | null;
     preview: WorkdirPreview;
@@ -327,7 +328,7 @@ function onProjectChange(event: Event, close: ClosePopover): Promise<void> | voi
 }
 
 function retry(): void {
-  void chat.commitWorkdir(props.sid, proposal.value?.transfer);
+  void chat.commitWorkdir(props.sid, proposal.value?.transfer || '');
 }
 
 function cancel(): void {
@@ -347,7 +348,7 @@ async function confirmCurrent(close: ClosePopover): Promise<void> {
 
   const accepted = await chat.proposeWorkdir(props.sid, {
     taskId: session.value.taskId || null,
-    workdir: session.value.workdir,
+    workdir: normalizeChatWorkdir(session.value.workdir),
   });
 
   error.value = session.value?.error || '';

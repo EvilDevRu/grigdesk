@@ -8,7 +8,7 @@ import { decodeUriComponentOrOriginal } from '../../../../shared/lib/text.ts';
 
 import { codeApi } from '../../shared/codeApi.ts';
 import type { CodeRoot, CodeTarget } from '../../../../shared/plugins/code/codeContracts.ts';
-import { documentRouteHref } from '../documents/links.js';
+import { documentRouteHref } from '../documents/links.ts';
 
 type LinkRoot = Pick<CodeRoot, 'project' | 'repo' | 'root'>;
 interface LinkOptions {

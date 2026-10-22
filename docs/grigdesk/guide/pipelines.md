@@ -51,6 +51,6 @@
 не выдаёт свои узлы за кнопки. Идущий разбор арбитра, его след и плашка остановки
 сохраняют правила [остановок на человеке](gates.md).
 
-Геометрия находится в `web/src/shared/graph-geom.js`, представление — в
+Геометрия находится в `web/src/shared/graphGeom.ts`, представление — в
 `web/src/views/pipeline/FactoryGraph.vue`. Проверки:
 `tests/web/graph-geometry.test.js` и `tests/web/factory-graph.component.test.js`.

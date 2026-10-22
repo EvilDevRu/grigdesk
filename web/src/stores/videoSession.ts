@@ -21,7 +21,7 @@ import type {
   MediaJob,
   MediaTranscriptSegment,
 } from '../../../shared/media/mediaContracts.ts';
-import { usePluginsStore } from './plugins.js';
+import { usePluginsStore } from './plugins.ts';
 
 // Окно фрагмента: 15 секунд до и после места задачи, шаг расширения тот же, потолок
 // минута с каждой стороны. Дальше это уже не «нужный кусок», а пересказ соседних тем.

@@ -10,8 +10,8 @@
   </div>
 </template>
 
-<script setup>
-import { computed } from 'vue';
+<script setup lang="ts">
+import { computed, type PropType } from 'vue';
 import { UiDiscreteSlider, vTooltip } from '../../ui';
 
 // Слайдер усилия рассуждения — как переключатель в расширении VS Code:
@@ -19,14 +19,15 @@ import { UiDiscreteSlider, vTooltip } from '../../ui';
 // УРОВНИ НЕ ЗАХАРДКОЖЕНЫ: приходят пропсом levels из реестра моделей
 // (у каждой модели свой набор; появится новый уровень — отрисуется сам).
 const props = defineProps({
-  levels: { type: Array, default: () => [] },
-  hints: { type: Object, default: () => ({}) },
+  levels: { type: Array as PropType<string[]>, default: () => [] },
+  hints: { type: Object as PropType<Record<string, string>>, default: () => ({}) },
   // Уровень показан, но менять его здесь нельзя (замороженный разговор). Слайдер
   // тогда остаётся индикатором и молча ничего не эмитит.
   disabled: { type: Boolean, default: false },
   // Чем заменить обычную подсказку: неактивный слайдер обязан объяснить, где менять.
   hint: { type: String, default: '' },
 });
+
 const model = defineModel({ type: String, default: '' });
 
 // Скринридер получает выбранный уровень вместе с его смыслом.
@@ -64,7 +65,7 @@ const idx = computed(() => {
 });
 const sliderIndex = computed({
   get: () => Math.max(0, idx.value),
-  set: (value) => {
+  set: (value: number) => {
     if (!props.disabled && props.levels[value] !== undefined) {
       model.value = props.levels[value];
     }

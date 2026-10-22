@@ -31,13 +31,14 @@
   </section>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // Переиспользуемое ядро viewer-а: route-страница — лишь одна оболочка. Компонент
 // получает стабильный DocumentRef, читает API и не сохраняет содержимое в store/localStorage.
 import { computed, nextTick, ref, watch } from 'vue';
-import { api } from '../../shared/apiClient.ts';
+import { api, failureText } from '../../shared/apiClient.ts';
+import { parseDocumentFile, type DocumentFile } from './contracts.ts';
 import { mdToHtml } from '../../shared/md.ts';
-import { documentRefAssetHref, documentRefRouteHref } from './links.js';
+import { documentRefAssetHref, documentRefRouteHref } from './links.ts';
 import { UiButton, UiSpinner } from '../../ui';
 
 const props = defineProps({
@@ -46,25 +47,28 @@ const props = defineProps({
   anchor: { type: String, default: '' },
   line: { type: Number, default: 0 },
 });
-const emit = defineEmits(['loaded']);
+
+const emit = defineEmits<{ loaded: [document: DocumentFile | null] }>();
 
 const loading = ref(false);
 const error = ref('');
-const document = ref(null);
-const contentEl = ref(null);
+const document = ref<DocumentFile | null>(null);
+const contentEl = ref<HTMLElement | null>(null);
 const showSource = ref(false);
 let loadGeneration = 0;
 
-function localLink(href) {
+function localLink(href: string) {
   const current = document.value?.ref;
+
   return current ? documentRefRouteHref(href, {
     source: current.source,
     basePath: current.path,
   }) : '';
 }
 
-function localImage(href) {
+function localImage(href: string) {
   const current = document.value?.ref;
+
   return current ? documentRefAssetHref(href, {
     source: current.source,
     basePath: current.path,
@@ -80,7 +84,7 @@ const markdown = computed(() => document.value?.format === 'markdown'
   : '');
 const textLines = computed(() => String(document.value?.content || '').split('\n'));
 
-function slug(value) {
+function slug(value: unknown) {
   return String(value || '')
     .normalize('NFKC')
     .trim()
@@ -89,17 +93,32 @@ function slug(value) {
     .replace(/^-+|-+$/g, '') || 'section';
 }
 
+/**
+ * Добавляет устойчивые якоря заголовкам и прокручивает к выбранной строке.
+ * Декорирование ждёт DOM, чтобы выбор исходника и Markdown не терял позицию.
+ */
 async function decorateAndScroll() {
   await nextTick();
+
   const root = contentEl.value;
-  if (!root) return;
-  const seen = new Map();
+
+  if (!root) {
+    return;
+  }
+
+  const seen = new Map<string, number>();
+
   for (const heading of root.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
     const base = slug(heading.textContent);
     const n = (seen.get(base) || 0) + 1;
+
     seen.set(base, n);
-    if (!heading.id) heading.id = n === 1 ? base : `${base}-${n}`;
+
+    if (!heading.id) {
+      heading.id = n === 1 ? base : `${base}-${n}`;
+    }
   }
+
   const wanted = props.anchor;
   const exactLineVisible = props.line > 0
     && (document.value?.format !== 'markdown' || showSource.value);
@@ -108,45 +127,77 @@ async function decorateAndScroll() {
     : (wanted
       ? [...root.querySelectorAll('[id]')].find((node) => node.id === wanted || node.id === slug(wanted))
       : null);
+
   target?.scrollIntoView({ block: 'start' });
 }
 
+/**
+ * Сбрасывает прежний файл и публикует только проверенный ответ текущего запроса.
+ * Смена документа сохраняет прежнюю защиту от опоздавшей загрузки.
+ */
 async function load() {
   const generation = ++loadGeneration;
+
   document.value = null;
   error.value = '';
   emit('loaded', null);
-  if (!props.source || !props.path) return;
+
+  if (!props.source || !props.path) {
+    return;
+  }
+
   loading.value = true;
+
   try {
     const query = new URLSearchParams({ source: props.source, path: props.path });
     const value = await api.get(`/api/documents/file?${query}`);
-    if (generation !== loadGeneration) return;
-    document.value = value;
+
+    if (generation !== loadGeneration) {
+      return;
+    }
+
+    const file = parseDocumentFile(value);
+
+    document.value = file;
     // Точный :line важнее красивого render: открываем исходник с номерами строк.
     // Пользователь в любой момент может вернуться к Markdown-предпросмотру.
-    showSource.value = value.format === 'markdown' && props.line > 0;
-    emit('loaded', value);
+    showSource.value = file.format === 'markdown' && props.line > 0;
+    emit('loaded', file);
     await decorateAndScroll();
   } catch (e) {
-    if (generation === loadGeneration) error.value = e.message || 'Не удалось открыть документ';
+    if (generation === loadGeneration) {
+      error.value = failureText(e, 'Не удалось открыть документ');
+    }
   } finally {
-    if (generation === loadGeneration) loading.value = false;
+    if (generation === loadGeneration) {
+      loading.value = false;
+    }
   }
 }
 
 watch(() => [props.source, props.path], load, { immediate: true });
 watch(() => props.line, (value) => {
-  if (value > 0 && document.value?.format === 'markdown') showSource.value = true;
+  if (value > 0 && document.value?.format === 'markdown') {
+    showSource.value = true;
+  }
 });
 watch(() => [props.anchor, props.line, markdown.value, showSource.value], decorateAndScroll);
 
-function formatSize(bytes) {
-  if (bytes < 1024) return `${bytes} Б`;
+/**
+ * Показывает прежние единицы размера без изменения границ округления.
+ * Небольшие файлы остаются в байтах, остальные показываются в килобайтах.
+ */
+function formatSize(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} Б`;
+  }
+
   return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} КБ`;
 }
-function formatTime(value) {
+
+function formatTime(value: string) {
   const date = new Date(value);
+
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('ru-RU');
 }
 </script>

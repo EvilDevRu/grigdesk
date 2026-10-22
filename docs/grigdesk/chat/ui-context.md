@@ -1,6 +1,6 @@
 # UI-контекст: чат знает, где пользователь
 
-- Стор `ui-context` (`web/src/stores/ui-context.js`) выдаёт каждому publisher-у owner token.
+- Стор `ui-context` (`web/src/stores/uiContext.ts`) выдаёт каждому publisher-у owner token.
   `useUiContextSource()` обновляет bounded positive schema и гарантированно удаляет только
   свою запись при unmount. Focus-bearing overlay выше page, page выше dock; при равном
   приоритете побеждает последняя явная focus revision, а фоновое обновление title/status

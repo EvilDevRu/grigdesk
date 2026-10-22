@@ -17,7 +17,7 @@ callback адаптера с журналом `ChatAssistantMessages`. Он на
 сохраняя метаданные уже известных сообщений. Оба пути получения финала — pending
 и синхронный HTTP-ответ — вызывают `applyAssistantFinal`: существующий блок того же
 запуска дополняется, новый добавляется. Обновление Pinia и сохранение истории остаются
-в `web/src/stores/chat.js`.
+в `web/src/stores/chat.ts`.
 
 Общий продуктовый контракт — [уточнение работающему агенту](in-turn-messages.md).
 Барьер записи проверяет `tests/server/chat-in-turn-replies.test.js`, перенос финала

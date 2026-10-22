@@ -2,7 +2,7 @@ import { createApp, nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import App from './App.vue';
 import { mdToHtml, mdToText } from '../../../../web/src/shared/md.ts';
-import { useChatStore } from '../../../../web/src/stores/chat.js';
+import { useChatStore } from '../../../../web/src/stores/chat.ts';
 import '../../../../web/src/styles/index.css';
 
 interface Stats {
@@ -76,7 +76,13 @@ function resetStats(): void {
 resetStats();
 await chat._load();
 
-const target = chat.session('fixture-0');
+const loadedSession = chat.session('fixture-0');
+
+if (!loadedSession) {
+  throw new Error('В фикстуре производительности отсутствует чат fixture-0');
+}
+
+const target = loadedSession;
 
 target.sending = true;
 target.turnStartedAt = Date.now();

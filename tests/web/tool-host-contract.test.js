@@ -1,3 +1,4 @@
+import { migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
@@ -6,7 +7,7 @@ import { compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
 const root = new URL('../../', import.meta.url);
-const source = (path) => readFile(new URL(path, root), 'utf8');
+const source = (path) => readFile(migrationUrl(path.slice(4)), 'utf8');
 const count = (text, pattern) => (text.match(pattern) || []).length;
 
 test('AppShell держит один ToolHost, а route-adapter не монтирует вторую панель', async () => {
@@ -69,9 +70,9 @@ test('Code, Shelf, Terminal, SSH, DB и Докер лениво загружаю
 
 test('Узкий route полки объявлен как tool и не создаёт отдельный dock state', async () => {
   const [router, catalog, dock] = await Promise.all([
-    source('web/src/router.js'),
+    source('web/src/router.ts'),
     source('web/src/shared/tools/catalog.ts'),
-    source('web/src/stores/dock.js'),
+    source('web/src/stores/dock.ts'),
   ]);
 
   assert.deepEqual({
@@ -114,7 +115,7 @@ test('док использует строку инструмента, а раз
   const [dockView, host, dockStore] = await Promise.all([
     source('web/src/shared/layout/ToolDock.vue'),
     source('web/src/shared/layout/ToolHost.vue'),
-    source('web/src/stores/dock.js'),
+    source('web/src/stores/dock.ts'),
   ]);
 
   assert.doesNotMatch(dockView, /class="dock-head"/);
@@ -156,7 +157,13 @@ test('док использует строку инструмента, а раз
   assert.match(dockStore, /LEGACY_DOCK_EXPANDED_KEY = 'grigdesk-dock-expanded'/);
   assert.match(dockStore, /expandedPreferences: storedExpandedPreferences\(activeTool\)/);
   assert.match(dockStore, /expandedPreferences\[state\.activeTool\] === true/);
-  assert.match(dockStore, /setExpanded\(value, \{ persist = true \} = \{\}\)/);
+  assert.match(
+    dockStore,
+    new RegExp(
+      String.raw`setExpanded\(value(?:: unknown)?, \{ persist = true \}` +
+      String.raw`(?:: \{ persist\?: boolean \})? = \{\}\)(?:: void)?`,
+    ),
+  );
   assert.match(dockStore, /close\(\)\s*{[\s\S]*this\.isExpanded = false;/);
   assert.match(dockStore, /this\.isExpanded = this\.isOpen && this\.expandedPreference/);
 });

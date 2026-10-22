@@ -6,9 +6,9 @@ export * as metadataLocale from '../../../web/src/features/settings/metadataLoca
 export { probeLocalSpeech } from '../../../web/src/features/settings/speechBrowser.ts';
 export { useSettingsStore } from '../../../web/src/stores/settings.ts';
 export { useShellStore } from '../../../web/src/stores/shell.ts';
-export { useDeviceStore } from '../../../web/src/stores/device.js';
-export { usePluginsStore } from '../../../web/src/stores/plugins.js';
-export { useProvidersStore } from '../../../web/src/stores/providers.js';
+export { useDeviceStore } from '../../../web/src/stores/device.ts';
+export { usePluginsStore } from '../../../web/src/stores/plugins.ts';
+export { useProvidersStore } from '../../../web/src/stores/providers.ts';
 export { default as ProviderPage } from '../../../web/src/views/settings/pages/ProviderPage.vue';
 export { SETTINGS_PAGE_COMPONENTS } from '../../../web/src/views/settings/pageComponents.ts';
 export * from '../../../web/src/ui.ts';

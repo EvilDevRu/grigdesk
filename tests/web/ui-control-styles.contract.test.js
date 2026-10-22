@@ -93,3 +93,15 @@ test('удалённый web/src/styles.css нельзя вернуть даже
 
   assert.match(errors, /legacy CSS entry запрещён/u);
 });
+
+test('STYLE-main-ts', (t) => {
+  for (const count of [1, 0, 2]) {
+    const root = fixtureRepo(t, {
+      'web/src/main.ts': "import './styles/index.css';\n".repeat(count),
+    });
+    const report = collectUiControlStyles(root);
+
+    assert.equal(report.structuralErrors.length === 0, count === 1,
+      `main.ts должен иметь ровно один CSS import, получено ${count}`);
+  }
+});

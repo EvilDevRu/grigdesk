@@ -1,3 +1,4 @@
+import { migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -36,7 +37,7 @@ test('GW-01: настройки переносятся без перезапис
 });
 
 test('GW-02: перенос выполняется первым импортом приложения', () => {
-  const source = readFileSync(new URL('../../web/src/main.js', import.meta.url), 'utf8');
+  const source = readFileSync(migrationUrl('src/main.ts'), 'utf8');
 
   assert.equal(source.match(/^import .+$/m)?.[0], "import './shared/legacyStorage.ts';");
 });

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+
+import { resolveLocaleText } from '../../shared/i18n/catalogs.ts';
 import catalog from '../fixtures/executor-settings/synthetic-catalog.json' with { type: 'json' };
 import { compileModule, webFile } from './helpers/compile-vue.js';
 import { assertSettingsFields } from './helpers/settings-consistency.js';
@@ -17,7 +19,7 @@ test('Исполнители: очередь и исходы общей сесс
         '../../../shared/tools/launcher.ts': `
           export const useToolLauncher = () => ({ openTerminal: async () => true });
         `,
-        '../router.js': 'export const router = { push: async () => {} };',
+        '../router.ts': 'export const router = { push: async () => {} };',
         '../../../composables/useSse.ts': 'export const sseSubscribe = () => () => {};',
         '../../../ui.ts': `
           export * from './src/ui.ts';
@@ -556,7 +558,10 @@ test('Исполнители: очередь и исходы общей сесс
     assert.equal(settings.getValue('providerCredentials:alpha', 'SYNTHETIC_KEY'), undefined);
     await page.find('[data-delete-key]').trigger('click');
 
-    assert.match(globalThis.__providerConfirmations.at(-1).text, /Ключ будет удалён после «Применить»/);
+    assert.match(
+      resolveLocaleText(globalThis.__providerConfirmations.at(-1).text),
+      /Ключ будет удалён после «Применить»/,
+    );
     assert.equal(settings.getIntent('providerCredentials:alpha', 'SYNTHETIC_KEY').value, null);
     assert.equal(calls.filter((entry) => entry.kind === 'credentials').length, 1);
     settings.cancel();

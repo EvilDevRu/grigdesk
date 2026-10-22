@@ -166,11 +166,14 @@ function validateImportGraph(repoRoot, structuralErrors) {
     }
   }
 
-  const mainFile = path.join(repoRoot, 'web/src/main.js');
+  const mainFile = path.join(repoRoot, 'web/src/main.ts');
   if (fs.existsSync(mainFile)) {
     const main = fs.readFileSync(mainFile, 'utf8');
     const count = (main.match(/import\s+['"]\.\/styles\/index\.css['"]/g) || []).length;
-    if (count !== 1) structuralErrors.push(`web/src/main.js: нужен ровно один import './styles/index.css'`);
+
+    if (count !== 1) {
+      structuralErrors.push(`web/src/main.ts: нужен ровно один import './styles/index.css'`);
+    }
   }
   for (const absoluteFile of [
     ...walk(path.join(repoRoot, 'web/src'), new Set(['.js', '.ts', '.vue'])),
@@ -180,7 +183,7 @@ function validateImportGraph(repoRoot, structuralErrors) {
     const source = fs.readFileSync(absoluteFile, 'utf8');
     const cssRefs = [...source.matchAll(/(?:import\s*(?:\([^)]*)?|from\s*)['"]([^'"]+\.css)['"]/g)]
       .map((match) => match[1]);
-    const allowed = file === 'web/src/main.js'
+    const allowed = file === 'web/src/main.ts'
       ? ['./styles/index.css']
       : file === 'web/dev/ui-gallery/main.ts'
         ? ['../../src/styles/index.css', '../../src/styles/dev/ui-gallery.css']

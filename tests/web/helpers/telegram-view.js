@@ -24,7 +24,7 @@ export async function compileTelegramView(_prefix = 'telegram') {
       // Транспорт раздела импортирует клиента соседним путём: заглушка
       // сопоставляется по точной строке, и обе формы нужны одновременно.
       './apiClient.ts': 'export const api = globalThis.__tgApi;',
-      '../stores/plugins.js': `
+      '../stores/plugins.ts': `
         export const usePluginsStore = (...args) => globalThis.__tgPluginsStore(...args);
       `,
       './services/dialogs': `

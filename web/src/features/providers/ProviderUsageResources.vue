@@ -17,8 +17,8 @@
       >
         <span
           class="usage-resource-fill"
-          :class="{ hot: resource.percent >= 85 }"
-          :style="{ width: `${Math.min(100, resource.percent)}%` }"
+          :class="{ hot: resource.percent! >= 85 }"
+          :style="{ width: `${Math.min(100, resource.percent!)}%` }"
         />
       </span>
 
@@ -34,7 +34,7 @@
         <UiActionLink
           v-if="control.kind === 'link'"
           data-context="topbar-popover-resource-link"
-          :href="control.href"
+          :href="control.href!"
           variant="text"
           target="_blank"
         >
@@ -54,7 +54,7 @@
           <span>{{ control.label }}</span>
           <span class="usage-number-field">
             <UiInput
-              :model-value="draftOf(resource, control)"
+              :model-value="draftOf(resource, control) as string | number | null | undefined"
               inputmode="decimal"
               :disabled="control.disabled || stateOf(resource, control).busy"
               :aria-label="control.label"
@@ -105,14 +105,16 @@
   </span>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { uiLocale } from '../../ui.ts';
 
 import { t } from '../../ui.ts';
 
+import type { PropType } from 'vue';
+import type { UsageResource, UsageControl } from './contracts.ts';
 import { computed, reactive } from 'vue';
-import { localizeUsageResource } from './providerUsage.js';
-import { useProvidersStore } from '../../stores/providers.js';
+import { localizeUsageResource } from './providerUsage.ts';
+import { useProvidersStore } from '../../stores/providers.ts';
 import {
   UiActionLink,
   UiButton,
@@ -123,7 +125,7 @@ import {
 import {
   prepareUsageControl,
   usageControlConfirmation,
-} from './providerUsageActions.js';
+} from './providerUsageActions.ts';
 
 const props = defineProps({
   providerId: {
@@ -131,7 +133,7 @@ const props = defineProps({
     required: true,
   },
   resources: {
-    type: Array,
+    type: Array as PropType<UsageResource[]>,
     default: () => [],
   },
   // Всплывашка топбара показывает ресурсы только на чтение: единственное место
@@ -143,10 +145,22 @@ const props = defineProps({
 });
 
 const providers = useProvidersStore();
-const resources = computed(() => props.resources.map((resource) =>
+const resources = computed(() => props.resources.map((resource: UsageResource) =>
   localizeUsageResource(props.providerId, resource, uiLocale)));
-const local = reactive({});
-const EMPTY_STATE = Object.freeze({
+
+type Request = Extract<ReturnType<typeof prepareUsageControl>, { ok: true }> & {
+  requestId: string;
+  confirm: ReturnType<typeof usageControlConfirmation>;
+};
+type ControlState = {
+  busy: boolean;
+  error: string;
+  ask: Request | null;
+  draft: unknown;
+};
+
+const local = reactive<Record<string, ControlState>>({});
+const EMPTY_STATE = Object.freeze<ControlState>({
   busy: false,
   error: '',
   ask: null,
@@ -159,7 +173,7 @@ const EMPTY_STATE = Object.freeze({
  * своей плашке настроек, а `scope: 'live'` — операция над рантаймом, и её место там, где
  * человек видит состояние, то есть и во всплывашке топбара.
  */
-function controlsOf(resource) {
+function controlsOf(resource: UsageResource) {
   return (resource.controls || [])
     .filter((control) => !props.readonly || control.scope === 'live');
 }
@@ -170,7 +184,7 @@ function controlsOf(resource) {
  * out_of_credits» стоит рядом со сводкой «выключено» и говорит то же самое второй раз.
  * Состояние самих ручек там не отражается вовсе — на «включено или нет» отвечает сводка.
  */
-function noteOf(resource) {
+function noteOf(resource: UsageResource) {
   if (!resource.note) {
     return '';
   }
@@ -178,15 +192,15 @@ function noteOf(resource) {
   return !props.readonly || resource.tone === 'bad' ? resource.note : '';
 }
 
-function stateKey(resource, control) {
+function stateKey(resource: UsageResource, control: UsageControl) {
   return `${resource.key}:${control.id}`;
 }
 
-function stateOf(resource, control) {
+function stateOf(resource: UsageResource, control: UsageControl) {
   return local[stateKey(resource, control)] || EMPTY_STATE;
 }
 
-function mutableState(resource, control) {
+function mutableState(resource: UsageResource, control: UsageControl) {
   const key = stateKey(resource, control);
 
   if (!local[key]) {
@@ -198,10 +212,10 @@ function mutableState(resource, control) {
     };
   }
 
-  return local[key];
+  return local[key]!;
 }
 
-function draftOf(resource, control) {
+function draftOf(resource: UsageResource, control: UsageControl) {
   const state = stateOf(resource, control);
 
   return state.draft === undefined
@@ -209,7 +223,7 @@ function draftOf(resource, control) {
     : state.draft;
 }
 
-function confirmationTone(resource, control) {
+function confirmationTone(resource: UsageResource, control: UsageControl) {
   return stateOf(resource, control).ask?.confirm.danger
     ? 'danger'
     : 'accent';
@@ -219,7 +233,7 @@ function confirmationTone(resource, control) {
  * Открытое подтверждение разрешается из текущей проекции control при каждом показе.
  * Сохранённый request и введённое значение остаются прежними до явного действия.
  */
-function confirmationOf(resource, control) {
+function confirmationOf(resource: UsageResource, control: UsageControl) {
   const request = stateOf(resource, control).ask;
 
   return usageControlConfirmation(control, request?.value, uiLocale);
@@ -229,7 +243,7 @@ function confirmationOf(resource, control) {
  * Подтверждение хранится отдельно для каждого server-declared control: смена
  * черновика одного лимита не должна затронуть соседний ресурс провайдера.
  */
-function ask(resource, control, input) {
+function ask(resource: UsageResource, control: UsageControl, input?: unknown) {
   const state = mutableState(resource, control);
 
   if (state.busy) {
@@ -249,7 +263,7 @@ function ask(resource, control, input) {
     : null;
 }
 
-function actionError(error) {
+function actionError(error: unknown) {
   return error instanceof Error && error.message
     ? error.message
     : t('core.failed2');
@@ -259,7 +273,7 @@ function actionError(error) {
  * Подтверждённый request сохраняется до результата. При ошибке его можно
  * повторить без повторного ввода значения и с тем же идемпотентным requestId.
  */
-async function apply(resource, control) {
+async function apply(resource: UsageResource, control: UsageControl) {
   const state = mutableState(resource, control);
 
   if (!state.ask || state.busy) {
@@ -280,7 +294,7 @@ async function apply(resource, control) {
 
     state.error = result.ok
       ? ''
-      : (result.error || result.message || t('core.failed2'));
+      : (result.error || ('message' in result ? result.message : '') || t('core.failed2'));
 
     if (result.ok) {
       state.ask = null;
@@ -293,15 +307,15 @@ async function apply(resource, control) {
   }
 }
 
-function setDraft(resource, control, value) {
+function setDraft(resource: UsageResource, control: UsageControl, value: unknown) {
   mutableState(resource, control).draft = value;
 }
 
-function cancel(resource, control) {
+function cancel(resource: UsageResource, control: UsageControl) {
   mutableState(resource, control).ask = null;
 }
 
-function updateConfirmation(resource, control, open) {
+function updateConfirmation(resource: UsageResource, control: UsageControl, open: boolean) {
   if (!open) {
     cancel(resource, control);
   }

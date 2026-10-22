@@ -2,7 +2,7 @@
 // Общие gate-тесты продолжают проверять настоящие watchers оболочки и авторизации.
 export const appWindowStubs = {
   './views/TaskWindowPage.vue': 'export default { render: () => null };',
-  './stores/plugins.js': 'export const usePluginsStore = () => ({ load: async () => {} });',
+  './stores/plugins.ts': 'export const usePluginsStore = () => ({ load: async () => {} });',
   './composables/useSse.ts': `export const setSseEnabled = () => {};
     export const sseSubscribe = () => () => {};`,
   './shared/windowRelay.ts': `

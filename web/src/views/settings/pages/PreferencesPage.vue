@@ -78,8 +78,8 @@ import { createPreferencesAdapter } from '../../../features/settings/resources/p
 import type { ProviderEntry } from '../../../../../shared/chat/providersContracts.ts';
 import type { JsonValue } from '../../../features/settings/contracts.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
-import { useChatStore } from '../../../stores/chat.js';
-import { useProvidersStore } from '../../../stores/providers.js';
+import { useChatStore } from '../../../stores/chat.ts';
+import { useProvidersStore } from '../../../stores/providers.ts';
 import SettingsField from '../SettingsField.vue';
 import SettingsScope from '../SettingsScope.vue';
 

@@ -1,10 +1,15 @@
+import { migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+/**
+ * Контракт читает конечный TS-путь с переходным выбором входа до BUILD.
+ * Отсутствие исходника сообщает причину отказа проверяемой регистрации.
+ */
 async function source(relative, contract) {
   try {
-    return await readFile(new URL(`../../${relative}`, import.meta.url), 'utf8');
+    return await readFile(migrationUrl(relative.slice(4)), 'utf8');
   } catch (error) {
     assert.fail(`${contract}: ${error.message}`);
   }
@@ -34,7 +39,7 @@ test('SSH зарегистрирован одной встроенной пан�
 });
 
 test('маршрут SSH делегирует единственному ToolHost', async () => {
-  const router = await source('web/src/router.js', 'маршрут SSH ещё не реализован');
+  const router = await source('web/src/router.ts', 'маршрут SSH ещё не реализован');
 
   assert.equal(
     /path:\s*['"]\/ssh['"][\s\S]*?component:\s*\(\)\s*=>\s*import\(['"]\.\/views\/SshView\.vue['"]\)[\s\S]*?tool:\s*['"]ssh['"]/.test(router),

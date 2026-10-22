@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { lastModelRun, modelRunView } from '../../web/src/shared/chat-model-run.js';
+import { lastModelRun, modelRunView } from '../../web/src/shared/chatModelRun.ts';
 
 test('GPT-ход без actualModel не откатывает шапку к старому Claude-факту', () => {
   const messages = [

@@ -105,7 +105,7 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
           'data-ready': String(props.ready),
         }),
       };`,
-    './stores/plugins.js': 'export const usePluginsStore = () => globalThis.__settingsApp.plugins;',
+    './stores/plugins.ts': 'export const usePluginsStore = () => globalThis.__settingsApp.plugins;',
     './shared/windowRelay.ts': `
       export const startShellRelay = (options) => {
         globalThis.__settingsApp.relays.push('shell:' + options.role);
@@ -126,7 +126,7 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
     './views/NoAccessView.vue': marker('noaccess'),
     './views/ConnectionsView.vue': marker('machines'),
     './shared/layout/LockOverlay.vue': marker('lock'),
-    './features/speech/provider.js': `import { h } from 'vue';
+    './features/speech/provider.ts': `import { h } from 'vue';
       export const SpeechProvider = {
         setup(_props, { slots }) { return () => h('div', slots.default?.()); }
       };`,
@@ -134,6 +134,7 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
     './views/DiffModal.vue': marker('diff'),
     './views/DocumentModal.vue': marker('document'),
     './ui': `import { h } from 'vue';
+      export { t, uiLocale } from './src/services/locale.ts';
       const Host = { render: () => h('div') };
       export const UiDialogHost = Host;
       export const UiTooltipHost = Host;
@@ -143,7 +144,7 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
     './shared/alerts.ts': `
       export const clearAlertHistory = () => {};
       export const dismissAllAlerts = () => {};`,
-    './stores/auth.js': 'export const useAuthStore = () => globalThis.__settingsApp.auth;',
+    './stores/auth.ts': 'export const useAuthStore = () => globalThis.__settingsApp.auth;',
     './stores/shell.ts': 'export const useShellStore = () => globalThis.__settingsApp.shell;',
   };
 

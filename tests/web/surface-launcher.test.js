@@ -44,7 +44,7 @@ async function surfaceFixture(t, replies) {
     delete globalThis.__surfaceLauncher;
   });
 
-  const module = await compileModule(webFile('src/stores/ui.js'), { stubs: {
+  const module = await compileModule(webFile('src/stores/ui.ts'), { stubs: {
     './shell.ts': 'export const useShellStore = () => ({ capabilities: ["windows"] });',
     '../stores/shell.ts': 'export const useShellStore = () => ({ capabilities: ["windows"] });',
     '../shared/desktopSettings.ts': 'export const currentDesktopMode = () => "surface";',
@@ -109,7 +109,7 @@ test('SL-02: настоящий UI store не применяет поздний 
   globalThis.__surfaceUiTest = state;
   t.after(() => delete globalThis.__surfaceUiTest);
 
-  const module = await compileModule(webFile('src/stores/ui.js'), { stubs: {
+  const module = await compileModule(webFile('src/stores/ui.ts'), { stubs: {
       '../stores/shell.ts': [
         'export const useShellStore = () => ({',
         '  capabilities: globalThis.__surfaceUiTest.supported ? ["windows"] : []',

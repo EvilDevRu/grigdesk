@@ -16,7 +16,7 @@ const browser = await createUiBrowser();
 
 const { createPinia, setActivePinia } = await import('../../web/node_modules/pinia/dist/pinia.mjs');
 const { DEFAULT_HOTKEYS, HOTKEYS_KEY, useHotkeysStore } =
-  await import('../../web/src/stores/hotkeys.js');
+  await import('../../web/src/stores/hotkeys.ts');
 const { TOOL_CATALOG } = await import('../../web/src/shared/tools/catalog.ts');
 
 after(() => browser.close());

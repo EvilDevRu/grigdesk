@@ -1,6 +1,8 @@
+import { migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import ts from '../../web/node_modules/typescript/lib/typescript.js';
 
 import { apiError, mountChannelView } from './helpers/channel-views.js';
 
@@ -652,7 +654,46 @@ test('недоставленный ответ в чат виден челове�
 });
 
 test('router регистрирует lazy /inbox и /github', async () => {
-  const source = await readFile(new URL('../../web/src/router.js', import.meta.url), 'utf8');
-  assert.match(source, /path: '\/inbox'.*InboxView\.vue/);
-  assert.match(source, /path: '\/github'.*GitHubView\.vue/);
+  const source = await readFile(migrationUrl('src/router.ts'), 'utf8');
+  const ast = ts.createSourceFile('router.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const objects = [];
+
+  // Связываем поля в пределах одного объекта маршрута:
+  // компонент соседнего маршрута не должен подтверждать проверяемый путь.
+  function visit(node) {
+    if (ts.isObjectLiteralExpression(node)) {
+      objects.push(node);
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(ast);
+
+  for (const [path, component] of [
+    ['/inbox', './views/InboxView.vue'],
+    ['/github', './views/GitHubView.vue'],
+  ]) {
+    const matches = objects.filter((object) => object.properties.some((property) => (
+      ts.isPropertyAssignment(property) && property.name.getText(ast) === 'path'
+      && ts.isStringLiteral(property.initializer) && property.initializer.text === path
+    )));
+
+    assert.equal(matches.length, 1, path);
+
+    const property = matches[0].properties.find((entry) => (
+      ts.isPropertyAssignment(entry) && entry.name.getText(ast) === 'component'
+    ));
+
+    assert.ok(property && ts.isPropertyAssignment(property), path);
+    assert.ok(ts.isArrowFunction(property.initializer), `${path}: lazy component`);
+
+    const body = property.initializer.body;
+
+    assert.ok(ts.isCallExpression(body), path);
+    assert.equal(body.expression.kind, ts.SyntaxKind.ImportKeyword, path);
+    assert.equal(body.arguments.length, 1, path);
+    assert.ok(ts.isStringLiteral(body.arguments[0]), path);
+    assert.equal(body.arguments[0].text, component, path);
+  }
 });

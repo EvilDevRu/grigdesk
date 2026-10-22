@@ -16,7 +16,7 @@ import { ref } from 'vue';
 import { UiButton, UiDialog, UiDialogHost, hasOpenModal } from '../../../web/src/ui.ts';
 import SettingsModal from '../../../web/src/views/settings/SettingsModal.vue';
 import { useSettingsStore } from '../../../web/src/stores/settings.ts';
-import { useUiContextStore } from '../../../web/src/stores/ui-context.js';
+import { useUiContextStore } from '../../../web/src/stores/uiContext.ts';
 
 const settings = useSettingsStore();
 const ui = useUiContextStore();

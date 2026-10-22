@@ -638,8 +638,8 @@ import {
   useSshStore,
   watchSsh,
 } from '../../actions/ssh';
-import { useChatApprovals } from '../../shared/chatApprovals.js';
-import type { ChatApproval } from '../../shared/chatApprovals.js';
+import { useChatApprovals } from '../../shared/chatApprovals.ts';
+import type { ChatApproval } from '../../shared/chatApprovals.ts';
 
 const props = withDefaults(
   defineProps<{

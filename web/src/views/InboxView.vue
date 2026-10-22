@@ -252,7 +252,7 @@ import {
   promptDialog,
 } from '../ui';
 import { openSettings } from '../shared/settingsNavigation.ts';
-import { usePluginsStore } from '../stores/plugins.js';
+import { usePluginsStore } from '../stores/plugins.ts';
 import type { PluginListItem } from '../../../shared/plugins/pluginsContracts.ts';
 import { useSse } from '../composables/useSse.ts';
 

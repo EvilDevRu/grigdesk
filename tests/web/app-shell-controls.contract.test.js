@@ -59,7 +59,7 @@ test('AppShell использует public UI controls и общую повер�
   assert.match(source, /<BoardTimerPopover/u);
   assert.match(source, /:tasks="topbarTimerTasks"/u);
   assert.match(source, /:worked-today-hours="workedTodayHours"/u);
-  assert.match(source, /:busy-task-id="timerActionTaskId"/u);
+  assert.match(source, /:busy-task-id="timerActionTaskId(?: \?\? undefined)?"/u);
   assert.match(source, /@toggle-timer="toggleBoardTimer"/u);
   assert.match(source, /<PipelineTopbarPopover/u);
   assert.match(source, /:items="notifyWatch\.topbarItems"/u);
@@ -141,7 +141,7 @@ test('всплывашка исполнителя короткая и сама �
   await h.page.getByRole('tooltip', { name: 'Израсходовано: 42% окна «Неделя»', exact: true }).waitFor();
   assert.equal(await h.page.locator('.ptip-off').textContent(), 'недоступен');
   assert.match(source, /data-context="topbar-popover-status-link"/u);
-  assert.match(source, /:href="statusHintOf\(p\)\.url"/u);
+  assert.match(source, /:href="statusHintOf\(p\)!?\.url"/u);
   assert.match(source, /<ProviderUsageResources[\s\S]*?readonly[\s\S]*?\/>/u);
   // Класс `.ptip` и подвал `.ptip-go` носит ещё и всплывашка «мозга», поэтому всё
   // остальное сверяем внутри блока исполнителя: от его шапки до соседнего блока сети.

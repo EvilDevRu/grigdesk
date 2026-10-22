@@ -655,7 +655,7 @@ test('недоверенные поля Tripo не попадают в HTTP/SSE/
 
 test('ACK плюс SSE запускают два GET, разделяющие единственную проверку текущего аккаунта', async (t) => {
   const { createPinia, setActivePinia } = await import('../../web/node_modules/pinia/dist/pinia.mjs');
-  const { useProvidersStore } = await import('../../web/src/stores/providers.js');
+  const { useProvidersStore } = await import('../../web/src/stores/providers.ts');
   const { api } = await import('../../web/src/shared/apiClient.ts');
   const response = deferred();
   const started = deferred();

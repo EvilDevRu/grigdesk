@@ -24,7 +24,7 @@ Telegram и GitHub системные, но выключены: их стран�
 
 Серверный manifest отвечает только за размещение ссылки. Встроить Vue-компонент в правый
 док может лишь явная запись клиентского `shared/tools/registry.ts`: произвольный user plugin
-не получает frontend runtime одним JSON-полем. Фронт: `stores/plugins.js`, VideoView,
+не получает frontend runtime одним JSON-полем. Фронт: `stores/plugins.ts`, VideoView,
 InboxView, TelegramView, GitHubView и `ToolHost` для Code/Shelf показывают заглушку при выключенном плагине
 (по `plugins.loaded && !plugins.enabled(id)`, а `404 plugin_disabled` от сервера в этом
 случае НЕ показывается красной плашкой — это состояние, а не поломка). Выключение Code

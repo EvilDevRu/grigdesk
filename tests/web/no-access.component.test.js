@@ -1,3 +1,4 @@
+import { migrationUrl } from './helpers/compile-vue.js';
 // Интерфейс без входа: локальный экран «Нет входа», одна перезагрузка по 401 и владелец 3D.
 // Настоящие App и стор авторизации работают с подменённой сетью и подменённым reload.
 process.env.NODE_ENV = 'test';
@@ -134,7 +135,7 @@ async function mountApp(t, options = {}) {
     './views/LoginView.vue': marker('login'),
     './views/ConnectionsView.vue': marker('machines'),
     './shared/layout/LockOverlay.vue': marker('lock'),
-    './features/speech/provider.js': `import { h } from 'vue';
+    './features/speech/provider.ts': `import { h } from 'vue';
       export const SpeechProvider = {
         setup(_props, { slots }) { return () => h('div', slots.default?.()); }
       };`,
@@ -162,14 +163,14 @@ async function mountApp(t, options = {}) {
       post: (path, body) => globalThis.__noAccess.network.post(path, body),
       onUnauthorized: (handler) => globalThis.__noAccess.register(handler),
     };`,
-    './stores/auth.js': `export { useAuthStore } from ${JSON.stringify(webFile('src/stores/auth.js'))};`,
+    './stores/auth.ts': `export { useAuthStore } from ${JSON.stringify(webFile('src/stores/auth.ts'))};`,
     './stores/shell.ts': 'export const useShellStore = () => globalThis.__noAccess.shell;',
     './shell.ts': 'export const useShellStore = () => globalThis.__noAccess.shell;',
-    './stores/board.js': store('useBoardStore'),
-    './stores/system.js': store('useSystemStore'),
-    './stores/task-favorites.js': store('useTaskFavoritesStore'),
+    './stores/board.ts': store('useBoardStore'),
+    './stores/system.ts': store('useSystemStore'),
+    './stores/taskFavorites.ts': store('useTaskFavoritesStore'),
     './stores/taskShelf.ts': store('useTaskShelfStore'),
-    './stores/task-seen.js': store('useTaskSeenStore'),
+    './stores/taskSeen.ts': store('useTaskSeenStore'),
     './stores/videoSession.ts': store('useVideoSessionStore'),
   };
   const { createPinia, setActivePinia } = await import(
@@ -286,7 +287,7 @@ test('DW-NA5: ответ 401 не повторяется и обмен ключ�
   };
 
   // Повторный load доказывает единственность запроса на один вызов.
-  const { useAuthStore } = await import('../../web/src/stores/auth.js');
+  const { useAuthStore } = await import(migrationUrl('src/stores/auth.ts').href);
   const store = useAuthStore();
 
   await store.load();
@@ -301,7 +302,7 @@ test('DW-NA5: ответ 401 не повторяется и обмен ключ�
 
 test('DW-NA6: прежний вход становится clientScope владельца 3D', async (t) => {
   const { h } = await mountApp(t);
-  const { useAuthStore } = await import('../../web/src/stores/auth.js');
+  const { useAuthStore } = await import(migrationUrl('src/stores/auth.ts').href);
 
   h.state = {
     method: 'window-key',

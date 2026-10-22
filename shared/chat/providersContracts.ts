@@ -51,23 +51,44 @@ export interface ProviderModelEntry {
   extra?: boolean;
   unknown?: boolean;
   hidden?: boolean;
+  aliases?: string[];
+  modelRefAliases?: string[];
+  family?: string;
   efforts?: string[];
   effortHints?: Record<string, string>;
+  context?: number;
+  contextRuntimeOnly?: boolean;
+  contextUnverified?: boolean;
 }
 
 // Исполнитель реестра: доступность решает, можно ли его выбрать, а возможности —
 // подходит ли он настройке, которая требует, например, безопасного разбора текста.
 export interface ProviderEntry {
+  sessionBinding?: boolean;
+  commands?: Array<{
+    cmd: string;
+    desc?: string;
+    run?: string;
+    args?: boolean | string;
+    hint?: string;
+  }>;
   id: string;
   name: string;
   available?: boolean;
   type?: string;
   vendor?: string;
+  color?: string;
+  latest?: string;
+  statusPage?: string;
   kind?: string;
   installed?: boolean;
   mcp?: boolean;
   chatEnabled?: boolean;
-  modes?: Array<{ id: string; label: string }>;
+  modes?: Array<{
+    id: string;
+    label: string;
+    hint?: string;
+  }>;
   canUpdate?: boolean;
   updateAvailable?: boolean;
   version?: string;

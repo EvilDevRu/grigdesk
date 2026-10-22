@@ -525,10 +525,19 @@
     "claude": "Войти в Claude",
     "codex": "Войти в Codex"
   },
+  "invalidSystemMetrics": "Сервер вернул некорректные метрики",
+  "invalidUpdateStatus": "Сервер вернул некорректное состояние обновления",
+  "invalidUpdateJob": "Сервер вернул некорректное задание обновления",
+  "invalidBoardSnapshot": "Сервер вернул некорректный снимок доски",
+  "invalidChatSnapshot": "Сервер вернул некорректные данные чата",
+  "invalidChatAttachment": "Сервер вернул некорректное вложение чата",
+  "invalidTaskDetails": "Сервер вернул некорректные детали задачи",
   "activePipelineCount": {
     "one": "{count} активный",
     "few": "{count} активных",
     "many": "{count} активных",
     "other": "{count} активных"
-  }
+  },
+  "invalidPipelineSnapshot": "Сервер вернул некорректную сводку конвейера",
+  "invalidPipelineGraph": "Сервер вернул некорректный граф конвейера"
 }

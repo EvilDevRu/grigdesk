@@ -1,11 +1,12 @@
 import { watch } from 'vue';
+import type { LocationQueryRaw } from 'vue-router';
 import { ALERT_CHAT_QUERY, ALERT_TASK_QUERY, firstQueryValue } from './alertTargets.ts';
 import type { AlertTarget } from './alertTargets.ts';
 
 export interface AlertLinkDeps {
   route: {
     path: string;
-    query: Record<string, unknown>;
+    query: LocationQueryRaw;
   };
   router: {
     push(location: {
@@ -14,7 +15,7 @@ export interface AlertLinkDeps {
     }): unknown;
     replace(location: {
       path: string;
-      query: Record<string, unknown>;
+      query: LocationQueryRaw;
     }): unknown;
   };
   chat: {

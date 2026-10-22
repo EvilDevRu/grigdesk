@@ -4,8 +4,8 @@
   </UiButton>
 </template>
 
-<script setup>
-import { useDiffStore } from '../stores/diff.js';
+<script setup lang="ts">
+import { useDiffStore } from '../stores/diff.ts';
 import { UiButton, vTooltip } from '../ui';
 
 // Кнопка задачи: открыть диф (несохранённые изменения воркдира) в большом модале.
@@ -14,8 +14,12 @@ import { UiButton, vTooltip } from '../ui';
 const props = defineProps({
   taskId: { type: [String, Number], required: true },
 });
+
 const diff = useDiffStore();
-function openDiff() { diff.openFor(props.taskId); }
+
+function openDiff() {
+  diff.openFor(props.taskId);
+}
 </script>
 
 <style scoped>

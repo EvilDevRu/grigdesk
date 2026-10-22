@@ -517,8 +517,17 @@
     "claude": "Sign in to Claude",
     "codex": "Sign in to Codex"
   },
+  "invalidSystemMetrics": "The server returned invalid system metrics",
+  "invalidUpdateStatus": "The server returned an invalid update status",
+  "invalidUpdateJob": "The server returned an invalid update job",
+  "invalidBoardSnapshot": "The server returned an invalid board snapshot",
+  "invalidChatSnapshot": "The server returned invalid chat data",
+  "invalidChatAttachment": "The server returned an invalid chat attachment",
+  "invalidTaskDetails": "The server returned invalid task details",
   "activePipelineCount": {
     "one": "{count} active",
     "other": "{count} active"
-  }
+  },
+  "invalidPipelineSnapshot": "The server returned an invalid pipeline summary",
+  "invalidPipelineGraph": "The server returned an invalid pipeline graph"
 }

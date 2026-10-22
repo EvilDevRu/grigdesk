@@ -134,9 +134,11 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { lineDiff, splitRows } from '../../shared/diff.js';
+import type { PropType } from 'vue';
+import type { ChatPermission, PermissionChoice } from '../../shared/chatContracts.ts';
+import { lineDiff, splitRows } from '../../shared/diff.ts';
 import {
   promptDialog,
   UiActionLink,
@@ -149,14 +151,14 @@ import {
 // Плашка показывает разобранный permission-запрос или готовый план на утверждение.
 const props = defineProps({
   req: {
-    type: Object,
+    type: Object as PropType<ChatPermission>,
     required: true,
   },
 });
 const emit = defineEmits(['answer']);
 
 const remember = ref(false);
-const selectedChoice = ref(null);
+const selectedChoice = ref<string | string[] | null>(null);
 
 watch(
   () => props.req?.pid,
@@ -193,15 +195,19 @@ const canRemember = computed(() => (
   && !isExternalUrl.value
   && props.req?.canRemember !== false
 ));
-const dbRole = computed(() => ({ read: 'чтение', write: 'запись' }[props.req?.profile?.role]
-  || String(props.req?.profile?.role || '')));
-const dbQueryClass = computed(() => ({
+const DB_ROLES: Record<string, string> = { read: 'чтение', write: 'запись' };
+const DB_CLASSES: Record<string, string> = {
   read: 'чтение',
   write: 'запись',
   ddl: 'DDL',
   admin: 'администрирование',
   unknown: 'неизвестный',
-}[props.req?.queryClass] || String(props.req?.queryClass || '')));
+};
+
+const dbRole = computed(() => (DB_ROLES[props.req?.profile?.role || '']
+  || String(props.req?.profile?.role || '')));
+const dbQueryClass = computed(() => (DB_CLASSES[props.req?.queryClass || '']
+  || String(props.req?.queryClass || '')));
 const dbTables = computed(() => Array.isArray(props.req?.tables) && props.req.tables.length
   ? props.req.tables.join(', ')
   : 'не определены');
@@ -240,7 +246,7 @@ const choiceOptions = computed(() => choices.value.map((choice) => ({
   label: String(choice.label),
 })));
 
-function isAllowChoice(choice) {
+function isAllowChoice(choice: PermissionChoice) {
   return choice.kind === 'allow_once' || choice.kind === 'allow_always';
 }
 
@@ -308,18 +314,31 @@ async function reject(choice = '') {
     return;
   }
 
-  if (isSsh.value && !text.trim()) return;
+  if (isSsh.value && !text.trim()) {
+    return;
+  }
 
   emit('answer', false, false, text.trim(), choice);
 }
 
-/** Повторяет server policy: внешние credentials и активные/локальные схемы запрещены. */
-function safeExternalUrl(value) {
-  if (typeof value !== 'string' || value.length > 4_000) return '';
+/**
+ * Внешняя ссылка повторяет серверную политику допустимых протоколов.
+ * Credentials и активные схемы не передаются браузеру из permission-запроса.
+ */
+function safeExternalUrl(value: unknown) {
+  if (typeof value !== 'string' || value.length > 4_000) {
+    return '';
+  }
+
   try {
     const parsed = new URL(value);
-    if (parsed.username || parsed.password) return '';
+
+    if (parsed.username || parsed.password) {
+      return '';
+    }
+
     const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+
     return parsed.protocol === 'https:' || (parsed.protocol === 'http:' && loopback)
       ? parsed.href
       : '';
@@ -328,7 +347,7 @@ function safeExternalUrl(value) {
   }
 }
 
-function choose(choice) {
+function choose(choice: PermissionChoice) {
   if (isAllowChoice(choice)) {
     emit('answer', true, remember.value, '', choice.id);
 
@@ -338,7 +357,7 @@ function choose(choice) {
   void reject(choice.id);
 }
 
-function chooseById(value) {
+function chooseById(value: unknown) {
   const choice = choices.value.find((entry) => String(entry.id) === String(value));
 
   if (choice) {

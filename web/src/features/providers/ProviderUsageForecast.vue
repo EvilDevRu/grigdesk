@@ -20,7 +20,7 @@
 import { t, uiLocale } from '../../ui.ts';
 
 import { computed } from 'vue';
-import { localizeUsageBar } from './providerUsage.js';
+import { localizeUsageBar } from './providerUsage.ts';
 
 import { useUsageForecastStore } from '../../stores/usageForecast.ts';
 import { watchUsageForecast } from '../../actions/usageForecast/watchUsageForecast.ts';

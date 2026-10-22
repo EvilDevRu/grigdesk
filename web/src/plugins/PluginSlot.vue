@@ -11,7 +11,7 @@
 import { computed } from 'vue';
 
 import type { PluginSlotContexts, PluginSlotName } from '../../../shared/plugins/slots/index.ts';
-import { usePluginsStore } from '../stores/plugins.js';
+import { usePluginsStore } from '../stores/plugins.ts';
 import PluginSlotItem from './PluginSlotItem.vue';
 import { placementsOf } from './registry.ts';
 

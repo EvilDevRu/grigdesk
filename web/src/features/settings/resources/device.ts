@@ -1,6 +1,6 @@
 import { localeMessage, localeTranslator, type LocaleSource } from '../../../../../shared/i18n/catalogs.ts';
 import { translate as t } from '../../../../../shared/i18n/catalogs.ts';
-import { validateHotkeyOverrides } from '../../../stores/hotkeys.js';
+import { validateHotkeyOverrides } from '../../../stores/hotkeys.ts';
 import type { JsonValue, ResourceAdapter } from '../contracts.ts';
 
 interface DevicePort {

@@ -1,8 +1,9 @@
+import { loadProductModule, migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 
-import {
+const {
   createSpeechStream,
   encodeSpeechPcmPacket,
   SPEECH_PCM_FRAME_SAMPLES,
@@ -10,10 +11,10 @@ import {
   SPEECH_PCM_WORKLET_NAME,
   SPEECH_STREAM_AUDIO,
   SPEECH_STREAM_PROTOCOL_VERSION,
-} from '../../web/src/shared/speech-stream.js';
+} = await loadProductModule('src/shared/speechStream.ts');
 
-const WORKLET_PATH = new URL('../../web/src/shared/speech-pcm-worklet.js', import.meta.url);
-const STREAM_PATH = new URL('../../web/src/shared/speech-stream.js', import.meta.url);
+const WORKLET_PATH = migrationUrl('src/shared/speechPcmWorklet.ts');
+const STREAM_PATH = migrationUrl('src/shared/speechStream.ts');
 const VITE_CONFIG_PATH = new URL('../../web/vite.config.js', import.meta.url);
 
 function nextTurn() {

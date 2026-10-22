@@ -31,12 +31,12 @@ test('TWP-01: карточка ждёт запуска синхронизаци�
         globalThis.__taskWindowPage.listener = listener;
         return () => globalThis.__taskWindowPage.calls.push('unsubscribe');
       };`,
-      '../stores/auth.js': 'export const useAuthStore = () => globalThis.__taskWindowPage.auth;',
-      '../stores/chat.js': `export const useChatStore = () => ({
+      '../stores/auth.ts': 'export const useAuthStore = () => globalThis.__taskWindowPage.auth;',
+      '../stores/chat.ts': `export const useChatStore = () => ({
         syncSpeech: async () => globalThis.__taskWindowPage.calls.push('sync'),
         setSpeechSnapshot: (value) => globalThis.__taskWindowPage.calls.push('speech:' + value.revision),
       });`,
-      '../stores/ui.js': 'export const useUiStore = () => globalThis.__taskWindowPage.ui;',
+      '../stores/ui.ts': 'export const useUiStore = () => globalThis.__taskWindowPage.ui;',
       './TaskModal.vue': `import { h, ref, onMounted } from 'vue';
         export default { setup() {
           const draft = ref('');

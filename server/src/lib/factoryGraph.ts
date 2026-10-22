@@ -2,7 +2,7 @@
 //  - загрузка схемы профиля (profiles/<profile>/graph.json),
 //  - расчёт статуса каждого узла (pipeline_statuses),
 //  - разбор возвратов/остановок из журнала (loop_facts).
-// Геометрия узлов и кривые рёбер считаются на клиенте (graph-geom.js) — здесь только данные.
+// Геометрия узлов и кривые рёбер считаются на клиенте (graphGeom.ts) — здесь только данные.
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveNode } from './stages.ts';

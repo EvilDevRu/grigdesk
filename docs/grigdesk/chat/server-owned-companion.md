@@ -32,4 +32,4 @@
 `speechSafe`, слой `companion` в UI-layers, `stores/companion.js`, `features/companion/`,
 `shared/companion-run.js`, `lib/companionSettings.ts`, device-prefs
 (`grigdesk-companion-device-v1` — `App.vue` один раз чистит ключ из localStorage).
-`routingScope` в `stores/ui-context.js` остался описательным полем без потребителя.
+`routingScope` в `stores/uiContext.ts` остался описательным полем без потребителя.

@@ -36,7 +36,7 @@
   </section>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { t } from '../../ui.ts';
 
 import { computed, ref } from 'vue';
@@ -53,53 +53,108 @@ const props = defineProps({
   expandedWidth: { type: Number, default: 0 },
 });
 const emit = defineEmits(['hide', 'toggle-expanded', 'resize', 'resize-end']);
-const surface = ref(null);
-const expandButton = ref(null);
+const surface = ref<HTMLElement | null>(null);
+const expandButton = ref<{ focus?: () => void } | null>(null);
 const resizing = ref(false);
-let pointer = null;
+let pointer: number | null = null;
 
 const style = computed(() => {
-  if (props.mode !== 'dock') return null;
+  if (props.mode !== 'dock') {
+    return undefined;
+  }
+
   const width = props.expanded && props.expandedWidth > 0 ? props.expandedWidth : props.width;
+
   return { width: `${width}px` };
 });
-// Край поверхности уже учитывает рейку, плотность и текущий viewport.
-const nextWidth = (clientX) => (surface.value?.getBoundingClientRect().right ?? clientX) - clientX;
 
-function start(event) {
-  if (event.button !== undefined && event.button !== 0) return;
+// Край поверхности уже учитывает рейку, плотность и текущий viewport.
+const nextWidth = (clientX: number) => (surface.value?.getBoundingClientRect().right ?? clientX) - clientX;
+
+/**
+ * Захватывает только основной указатель и сразу применяет его начальную ширину.
+ * Последующие события принадлежат этой же операции изменения размера.
+ */
+function start(event: PointerEvent) {
+  if (event.button !== undefined && event.button !== 0) {
+    return;
+  }
+
   pointer = event.pointerId;
   resizing.value = true;
-  event.currentTarget?.setPointerCapture?.(event.pointerId);
+
+  if (event.currentTarget instanceof Element) {
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
   emit('resize', nextWidth(event.clientX));
 }
-function move(event) {
-  if (pointer === event.pointerId) emit('resize', nextWidth(event.clientX));
+
+function move(event: PointerEvent) {
+  if (pointer === event.pointerId) {
+    emit('resize', nextWidth(event.clientX));
+  }
 }
-function finish(event) {
-  if (pointer !== event.pointerId) return;
+
+/**
+ * Фиксирует последнюю координату только захваченного указателя.
+ * Освобождение захвата завершает прежний цикл resize без новой панели.
+ */
+function finish(event: PointerEvent) {
+  if (pointer !== event.pointerId) {
+    return;
+  }
+
   pointer = null;
   resizing.value = false;
-  event.currentTarget?.releasePointerCapture?.(event.pointerId);
+
+  if (event.currentTarget instanceof Element) {
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
   emit('resize-end', nextWidth(event.clientX));
 }
-function cancel(event) {
-  if (pointer !== event.pointerId) return;
+
+/**
+ * Отмена сохраняет последнюю применённую ширину, а не координату pointercancel.
+ * У отменённого события положение указателя может уже не иметь смысла.
+ */
+function cancel(event: PointerEvent) {
+  if (pointer !== event.pointerId) {
+    return;
+  }
+
   pointer = null;
   resizing.value = false;
-  event.currentTarget?.releasePointerCapture?.(event.pointerId);
+
+  if (event.currentTarget instanceof Element) {
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
   // pointercancel не гарантирует осмысленный clientX; сохраняем последнюю уже
   // применённую ширину, а не прыгаем к краю viewport.
   emit('resize-end', props.width);
 }
-function onKey(event) {
+/**
+ * Клавиатура меняет ту же ширину с прежними шагами и границами панели.
+ * Неизвестная клавиша сохраняет обычное действие браузера.
+ */
+function onKey(event: KeyboardEvent) {
   const step = event.shiftKey ? 64 : 16;
   let value = props.width;
-  if (event.key === 'ArrowLeft') value += step;
-  else if (event.key === 'ArrowRight') value -= step;
-  else if (event.key === 'Home') value = props.minWidth;
-  else if (event.key === 'End') value = props.maxWidth;
-  else return;
+
+  if (event.key === 'ArrowLeft') {
+    value += step;
+  } else if (event.key === 'ArrowRight') {
+    value -= step;
+  } else if (event.key === 'Home') {
+    value = props.minWidth;
+  } else if (event.key === 'End') {
+    value = props.maxWidth;
+  } else {
+    return;
+  }
+
   event.preventDefault();
   emit('resize-end', value);
 }

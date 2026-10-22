@@ -41,7 +41,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, watch } from 'vue';
 import { UiDialog, UiIconButton, vTooltip } from '../ui';
-import { useDiffStore } from '../stores/diff.js';
+import { useDiffStore } from '../stores/diff.ts';
 import DiffPanel from './diff/DiffPanel.vue';
 
 const diff = useDiffStore();

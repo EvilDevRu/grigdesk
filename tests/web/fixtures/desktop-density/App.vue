@@ -9,6 +9,6 @@
 
 <script setup>
 import AppShell from '../../../../web/src/shared/layout/AppShell.vue';
-import { SpeechProvider } from '../../../../web/src/features/speech/provider.js';
+import { SpeechProvider } from '../../../../web/src/features/speech/provider.ts';
 import { UiDialogHost, UiTooltipHost, UiToastHost } from '../../../../web/src/ui.ts';
 </script>

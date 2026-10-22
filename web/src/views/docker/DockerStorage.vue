@@ -110,7 +110,7 @@ import type {
 } from '../../../../shared/plugins/docker/dockerContracts';
 
 import { useDockerStore } from '../../stores/docker';
-import { usePluginsStore } from '../../stores/plugins.js';
+import { usePluginsStore } from '../../stores/plugins.ts';
 import { UiCheckbox, UiIconButton, UiInlineMessage, confirmDialog, vTooltip } from '../../ui';
 import { formatSize } from './format';
 import { dockerSettings } from './settings';

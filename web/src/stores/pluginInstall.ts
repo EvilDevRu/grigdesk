@@ -11,7 +11,7 @@ import {
   decodeStoredRollback,
   PluginInstallProtocolError,
 } from '../shared/pluginInstallApi.ts';
-import { usePluginsStore } from './plugins.js';
+import { usePluginsStore } from './plugins.ts';
 import type { PluginVersionRef, PluginInstallJob } from '../../../shared/plugins/pluginInstallContracts.ts';
 import type { PluginListItem } from '../../../shared/plugins/pluginsContracts.ts';
 

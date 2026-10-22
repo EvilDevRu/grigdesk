@@ -25,7 +25,7 @@
   </UiIconButton>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue';
 import { UiIconButton, vTooltip } from '../../ui';
 
@@ -34,7 +34,8 @@ const props = defineProps({
   pending: { type: Boolean, default: false },
   taskTitle: { type: String, default: '' },
 });
-const emit = defineEmits(['toggle']);
+
+const emit = defineEmits<{ toggle: [] }>();
 
 const subject = computed(() => props.taskTitle ? `задачу «${props.taskTitle}»` : 'эту задачу');
 const label = computed(() => (

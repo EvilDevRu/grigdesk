@@ -12,7 +12,7 @@ const module = await compileModule(webFile('src/stores/pluginInstall.ts'), {
         post: (...args) => globalThis.__pluginInstallFixture.invoke('POST', ...args),
       };
     `,
-    './plugins.js': 'export const usePluginsStore = () => globalThis.__pluginInstallFixture.catalog;',
+    './plugins.ts': 'export const usePluginsStore = () => globalThis.__pluginInstallFixture.catalog;',
   },
 });
 

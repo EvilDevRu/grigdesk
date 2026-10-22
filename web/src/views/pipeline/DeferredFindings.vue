@@ -21,28 +21,51 @@
   </section>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
+
+import { isRecord } from '../../../../shared/lib/objects.ts';
+import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { api } from '../../shared/apiClient.ts';
 import { UiButton } from '../../ui';
+
+interface DeferredFindingView {
+  id: string;
+  summary: string;
+  sourceNode?: string;
+  source?: { phase?: string } | null;
+}
 
 const props = defineProps({
   task: [Number, String],
   profile: String,
   attempt: String,
 });
-const emit = defineEmits(['ready']);
-const items = ref([]);
+
+const emit = defineEmits<{ ready: [value: boolean] }>();
+
+const items = ref<DeferredFindingView[]>([]);
 const error = ref('');
 const loading = ref(false);
 let generation = 0;
 
-function findingKey(item) {
+function findingKey(item: DeferredFindingView) {
   return `${item.source?.phase || 'route'}/${item.sourceNode}/${item.id}`;
 }
 
-function sourceLabel(item) {
+function sourceLabel(item: DeferredFindingView) {
   return item.source?.phase === 'bootstrap' ? 'Разведка SCOUT' : `Узел ${item.sourceNode}`;
+}
+
+/**
+ * Проверяет поля находки, которые читает список и подпись источника.
+ * Остальные поля остаются в исходном объекте для совместимости со старым сервером.
+ */
+function isDeferredFinding(value: unknown): value is DeferredFindingView {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.summary === 'string'
+    && (value.sourceNode === undefined || typeof value.sourceNode === 'string')
+    && (value.source == null || (isRecord(value.source)
+      && (value.source.phase === undefined || typeof value.source.phase === 'string')));
 }
 
 /**
@@ -69,8 +92,9 @@ async function load() {
       return;
     }
 
-    if (value.attemptId !== props.attempt || value.profile !== props.profile
-        || !Array.isArray(value.findings?.deferred)) {
+    if (!isRecord(value) || value.attemptId !== props.attempt || value.profile !== props.profile
+        || !isRecord(value.findings) || !Array.isArray(value.findings.deferred)
+        || !value.findings.deferred.every(isDeferredFinding)) {
       throw new Error('Попытка изменилась — обнови карточку.');
     }
 
@@ -81,7 +105,7 @@ async function load() {
       return;
     }
 
-    error.value = `Замечания недоступны: ${cause.message}`;
+    error.value = `Замечания недоступны: ${errorMessage(cause, 'Не удалось выполнить запрос')}`;
   } finally {
     if (request === generation) {
       loading.value = false;

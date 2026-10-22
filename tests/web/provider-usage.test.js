@@ -6,11 +6,11 @@ import {
   providerUsageView,
   resetAt,
   resetIn,
-} from '../../web/src/features/providers/providerUsage.js';
+} from '../../web/src/features/providers/providerUsage.ts';
 import {
   prepareUsageControl,
   usageControlConfirmation,
-} from '../../web/src/features/providers/providerUsageActions.js';
+} from '../../web/src/features/providers/providerUsageActions.ts';
 
 test('missing usage data has visible loading copy', () => {
   const view = providerUsageView(null, { name: 'Claude' });

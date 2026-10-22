@@ -16,6 +16,6 @@
 Дополнительного чтения dashboard при отбрасывании нет: обычный опрос остаётся в главном
 окне, карточка читает доску после своего действия.
 
-Реализация: `web/src/stores/board.js`, `web/src/App.vue`; сообщения описаны в
+Реализация: `web/src/stores/board.ts`, `web/src/App.vue`; сообщения описаны в
 [контракте связи окон](window-relay.md). Проверки зеркала и собственного действия —
 `tests/web/board-mirror.test.js`, формы relay — `tests/web/window-relay.test.js`.

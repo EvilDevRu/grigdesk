@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   FACTORY_DEBUG_LEVELS,
   factoryDebugPayload,
-} from '../../web/src/shared/factory-debug.js';
+} from '../../web/src/shared/factoryDebug.ts';
 
 test('settings exposes every engine debug level including off', () => {
   assert.deepEqual(

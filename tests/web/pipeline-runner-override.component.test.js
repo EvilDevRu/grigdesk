@@ -1,3 +1,5 @@
+import { loadProductModule } from './helpers/compile-vue.js';
+import { migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
@@ -6,7 +8,7 @@ import { compilePipelineView } from './helpers/pipeline-view.js';
 
 process.env.NODE_ENV = 'test';
 
-const TASKS_STORE_PATH = fileURLToPath(new URL('../../web/src/stores/tasks.js', import.meta.url));
+const TASKS_STORE_PATH = fileURLToPath(migrationUrl('src/stores/tasks.ts'));
 const PINIA_URL = pathToFileURL(fileURLToPath(
   new URL('../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url),
 )).href;
@@ -43,8 +45,16 @@ function makeFixture({
           actual,
           model: null,
           models: {
-            claude: { family: 'opus', version: 'latest', effort: 'max' },
-            codex: { family: 'sol', version: 'latest', effort: 'ultra' },
+            claude: {
+              family: 'opus',
+              version: 'latest',
+              effort: 'max'
+            },
+            codex: {
+              family: 'sol',
+              version: 'latest',
+              effort: 'ultra'
+            },
           },
           attempts: [],
           reason: null,
@@ -52,8 +62,13 @@ function makeFixture({
         },
       },
     },
-    progress: { done: 0, total: 2, current: 'plan' },
+    progress: {
+      done: 0,
+      total: 2,
+      current: 'plan'
+    },
   };
+
   return { factoryTask, graph };
 }
 
@@ -63,6 +78,7 @@ async function mountPipeline(t, {
 }) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
+
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -78,8 +94,13 @@ async function mountPipeline(t, {
     CustomEvent: browser.CustomEvent,
     getComputedStyle: browser.getComputedStyle.bind(browser),
   })) {
-    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+    Object.defineProperty(globalThis, key, {
+      value,
+      configurable: true,
+      writable: true
+    });
   }
+
   browser.document.body.innerHTML = '<div id="mount"></div>';
 
   const [{ mount, flushPromises }, { createPinia, defineStore }] = await Promise.all([
@@ -88,16 +109,33 @@ async function mountPipeline(t, {
   ]);
   const getCalls = [];
   const runnerCalls = [];
+
   globalThis.__pipelineRunnerApi = {
+    /**
+     * Маршруты читают один согласованный снимок задачи, графа и списка исполнителей.
+     * Неожиданный URL остаётся видимым ошибкой фикстуры вместо обращения в живой API.
+     */
     async get(url) {
       getCalls.push(url);
-      if (url === '/api/tasks') return { tasks: [factoryTask] };
-      if (url === `/api/tasks/${factoryTask.task}/graph`) return graph;
-      if (url === '/api/factory/runners') return { runners };
-      if (url.includes('/instruction')) return { text: '' };
+
+      if (url === '/api/tasks') {
+        return { tasks: [factoryTask] };
+      }
+      if (url === `/api/tasks/${factoryTask.task}/graph`) {
+        return graph;
+      }
+      if (url === '/api/factory/runners') {
+        return { runners };
+      }
+      if (url.includes('/instruction')) {
+        return { text: '' };
+      }
+
       return {};
     },
-    async post() { return { ok: true }; },
+    async post() {
+       return { ok: true };
+    },
   };
   globalThis.__pipelineRunnerConfirmDialog = async () => true;
   globalThis.__pipelineRunnerAlertDialog = async () => {};
@@ -112,14 +150,19 @@ async function mountPipeline(t, {
   });
   globalThis.__pipelineRunnerTasksStore = defineStore('pipeline-runner-tasks', {
     actions: {
-      async load() { return {}; },
-      title() { return null; },
+      async load() {
+         return {};
+      },
+      title() {
+         return null;
+      },
       async setStageRunner(id, stage, primary) {
         runnerCalls.push([id, stage, primary]);
         // Сервер применил override: следующий /graph отдаст новый primary и источник.
         if (applyOverride && primary) {
           Object.assign(graph.nodeMeta.plan.runner, { primary, source: 'task-stage' });
         }
+
         return { ok: true };
       },
     },
@@ -128,6 +171,7 @@ async function mountPipeline(t, {
     state: () => ({ data: null }),
     actions: { async load() {} },
   });
+
   const wrapper = mount(await compilePipelineView('__pipelineRunner'), {
     attachTo: browser.document.querySelector('#mount'),
     global: {
@@ -135,9 +179,11 @@ async function mountPipeline(t, {
       stubs: { teleport: true },
     },
   });
+
   t.after(() => {
     wrapper.unmount();
     browser.close();
+
     for (const key of [
       '__pipelineRunnerApi',
       '__pipelineRunnerConfirmDialog',
@@ -160,17 +206,28 @@ async function mountPipeline(t, {
     subtitle: '',
     status,
   });
-  return { wrapper, flushPromises, getCalls, runnerCalls, openStage, openPlanStage };
+
+  return {
+    wrapper,
+    flushPromises,
+    getCalls,
+    runnerCalls,
+    openStage,
+    openPlanStage
+  };
 }
 
 test('небегущий этап: карточки всех исполнителей, текущий подсвечен, клик шлёт override', async (t) => {
   const { wrapper, getCalls, runnerCalls, openPlanStage } = await mountPipeline(t, makeFixture());
+
   await openPlanStage('wait');
 
   const block = wrapper.get('.runner-override');
+
   assert.match(block.text(), /Исполнитель этапа/);
   // Все установленные исполнители — карточками, а не пунктами скрытого списка.
   const picks = wrapper.findAll('.runner-pick');
+
   assert.deepEqual(picks.map((pick) => pick.get('b').text()), ['Claude', 'Codex']);
   // Текущее эффективное значение — runner.primary, источник виден рядом (RUNNER_SOURCE).
   assert.deepEqual(
@@ -192,6 +249,7 @@ test('выбор исполнителя не закрывает модалку, 
   const { wrapper, flushPromises, runnerCalls, openPlanStage } = await mountPipeline(
     t, { ...makeFixture(), applyOverride: true },
   );
+
   await openPlanStage('wait');
 
   await wrapper.findAll('.runner-pick')[1].trigger('click');
@@ -202,6 +260,7 @@ test('выбор исполнителя не закрывает модалку, 
   assert.ok(wrapper.find('.smodal').exists(), 'модалка не закрылась и после ответа сервера');
   // Новое состояние узла приезжает обычным путём: load() → watch(stageLive) → stage.meta.
   const picks = wrapper.findAll('.runner-pick');
+
   assert.equal(picks[0].classes('on'), false);
   assert.ok(picks[1].classes('on'));
   assert.match(wrapper.get('.runner-sect').text(), /переопределение этапа задачи/);
@@ -210,6 +269,7 @@ test('выбор исполнителя не закрывает модалку, 
 
 test('карточка текущего исполнителя запроса не шлёт', async (t) => {
   const { wrapper, runnerCalls, openPlanStage } = await mountPipeline(t, makeFixture());
+
   await openPlanStage('wait');
 
   await wrapper.findAll('.runner-pick')[0].trigger('click');
@@ -218,17 +278,25 @@ test('карточка текущего исполнителя запроса н
 
 test('модалка показывает policy effort до запуска и фактический effort в попытке', async (t) => {
   const fixture = makeFixture({ status: 'done', actual: 'codex' });
+
   Object.assign(fixture.graph.nodeMeta.plan.runner, {
     model: 'gpt-5.6-sol',
     attempts: [{
-      id: 'run-1', epoch: 1, runner: 'codex', model: 'gpt-5.6-sol', effort: 'xhigh',
+      id: 'run-1',
+      epoch: 1,
+      runner: 'codex',
+      model: 'gpt-5.6-sol',
+      effort: 'xhigh',
       result: 'ok',
     }],
   });
+
   const { wrapper, openPlanStage } = await mountPipeline(t, fixture);
+
   await openPlanStage('done');
 
   const hops = wrapper.findAll('.runner-hop');
+
   assert.match(hops[0].text(), /opus · effort max/);
   // У уже запущенного Codex telemetry xhigh важнее обновлённой policy ultra.
   assert.match(hops[1].text(), /gpt-5\.6-sol · effort xhigh/);
@@ -237,10 +305,13 @@ test('модалка показывает policy effort до запуска и �
 
 test('ручной запуск без Bitrix показывает заголовок сохранённого тикета', async (t) => {
   const fixture = makeFixture();
+
   fixture.factoryTask.title = 'Исправить источник задачи API';
+
   const { wrapper } = await mountPipeline(t, fixture);
 
   const title = wrapper.get('.ctitle');
+
   assert.equal(title.text(), 'Исправить источник задачи API');
   assert.equal(title.element.tagName, 'SPAN');
   assert.equal(wrapper.text().includes('загрузка названия'), false);
@@ -250,9 +321,11 @@ test('источник task-stage: видна «Сбросить» с честн
   const { wrapper, runnerCalls, openPlanStage } = await mountPipeline(
     t, makeFixture({ source: 'task-stage' }),
   );
+
   await openPlanStage('idle');
 
   const reset = wrapper.get('.runner-reset');
+
   assert.match(reset.text(), /Сбросить/);
   // Подпись обязана говорить, к чему вернётся этап: к override задачи или к профилю.
   assert.match(wrapper.get('.runner-override').text(), /запуске задачи|профил/);
@@ -263,6 +336,7 @@ test('источник task-stage: видна «Сбросить» с честн
 
 test('источник не task-stage: кнопки «Сбросить» нет', async (t) => {
   const { wrapper, openPlanStage } = await mountPipeline(t, makeFixture({ source: 'task' }));
+
   await openPlanStage('wait');
 
   assert.ok(wrapper.get('.runner-override').exists());
@@ -271,22 +345,32 @@ test('источник не task-stage: кнопки «Сбросить» нет
 
 test('этап в run: блока выбора нет, остаются только switch-кнопки', async (t) => {
   const { wrapper, openPlanStage } = await mountPipeline(t, makeFixture({ status: 'run', actual: 'claude' }));
+
   await openPlanStage('run');
 
   assert.equal(wrapper.find('.runner-override').exists(), false);
+
   const switches = wrapper.get('.runner-switches');
+
   assert.match(switches.text(), /Переключить сейчас на Codex/);
 });
 
 test('остановленный run: вместо live-switch показывается override для следующего resume', async (t) => {
   const { wrapper, runnerCalls, openPlanStage } = await mountPipeline(
     t,
-    makeFixture({ status: 'run', actual: 'claude', daemonAlive: false }),
+    makeFixture({
+      status: 'run',
+      actual: 'claude',
+      daemonAlive: false
+    }),
   );
+
   await openPlanStage('run');
 
   assert.equal(wrapper.find('.runner-switches').exists(), false);
+
   const block = wrapper.get('.runner-override');
+
   assert.match(block.text(), /Прогон остановлен/);
   assert.match(block.text(), /Продолжить прогон/);
 
@@ -296,6 +380,7 @@ test('остановленный run: вместо live-switch показыва�
 
 test('readOnly: блока выбора исполнителя нет', async (t) => {
   const { wrapper, openPlanStage } = await mountPipeline(t, makeFixture({ readOnly: true }));
+
   await openPlanStage('wait');
 
   assert.ok(wrapper.get('.runner-sect').exists());
@@ -306,24 +391,23 @@ test('readOnly: блока выбора исполнителя нет', async (t
 test('tasks.setStageRunner шлёт POST /api/tasks/:id/runner/override (пустой primary — снятие)', async () => {
   globalThis.__pipelineRunnerStoreApi = {
     posts: [],
-    async post(url, body) { this.posts.push([url, body]); return { ok: true }; },
+    async post(url, body) {
+       this.posts.push([url, body]);
+
+      return { ok: true };
+    },
   };
-  let code = await readFile(TASKS_STORE_PATH, 'utf8');
-  code = code
-    .replace("import { defineStore } from 'pinia';", `import { defineStore } from "${PINIA_URL}";`)
-    .replace(
-      "import { api } from '../shared/apiClient.ts';",
-      'const api = globalThis.__pipelineRunnerStoreApi;',
-    )
-    .replace(
-      "import { useBoardStore } from './board.js';",
-      'const useBoardStore = () => ({ load: async () => {} });',
-    );
+
   const [{ createPinia, setActivePinia }, { useTasksStore }] = await Promise.all([
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
-    import('data:text/javascript;base64,' + Buffer.from(code).toString('base64')),
+    loadProductModule('src/stores/tasks.ts', {
+      '../shared/apiClient.ts': 'export const api = globalThis.__pipelineRunnerStoreApi;',
+      './board.ts': 'export const useBoardStore = () => ({load: async () => {}});',
+    }),
   ]);
+
   setActivePinia(createPinia());
+
   const store = useTasksStore();
 
   await store.setStageRunner(42, 'PLAN', 'codex');

@@ -1,8 +1,11 @@
+import { loadProductModule } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
-import { useProvidersStore } from '../../web/src/stores/providers.js';
+
+const { useProvidersStore } = await loadProductModule('src/stores/providers.ts');
+
 import { api } from '../../web/src/shared/apiClient.ts';
 import { providerUsageSummary, remainingUsagePercent, usedUsagePercent }
   from '../../web/src/features/providers/providerUsageSummary.ts';
@@ -99,6 +102,7 @@ test('первый GET, ошибка, отсутствие записи, сня�
 
 test('поздний GET и refresh не заменяют новый SSE, включая позднюю ошибку', async (t) => {
   setActivePinia(createPinia());
+
   const store = useProvidersStore();
   let resolveGet;
   let rejectRefresh;
@@ -129,6 +133,7 @@ test('поздний GET и refresh не заменяют новый SSE, вкл
 
 test('ошибка первичной загрузки завершается, reconnect ждёт принятого снимка', async (t) => {
   setActivePinia(createPinia());
+
   const store = useProvidersStore();
 
   t.mock.method(api, 'get', async () => {

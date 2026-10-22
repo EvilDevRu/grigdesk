@@ -1,6 +1,6 @@
 # Состояние миграции на TypeScript
 
-Проверено 2026-10-13 по рабочему дереву, включая текущие неигнорируемые новые файлы.
+Остаток JS/Vue проверен 2026-10-21 по рабочему дереву, включая неигнорируемые новые файлы.
 Числа ниже — датированный снимок, а не ограничение на дальнейшее развитие проекта.
 Актуальные пути перечисляет `node tools/migrationInventory.mts --json`.
 
@@ -8,52 +8,66 @@
 
 | Область | JS/MJS | Vue с script без `lang="ts"` |
 | --- | ---: | ---: |
-| `web/src` | 44 | 40 |
+| `web/src` | 0 | 0 |
 | `server/src` | 7 | — |
 | `server/scripts` | 1 | — |
-| `web/scripts` | 17 | — |
+| `web/scripts` | 18 | — |
 | `web/vite.config.js` | 1 | — |
-| `web/public` | 1 | — |
-| `tools` | 8 | — |
+| `web/public` | 0 | — |
+| `tools` | 5 | — |
 | `engine` | 2 | — |
-| `tests`, включая helpers и fixtures | 933 | Отдельные намеренные образцы |
+| `deepseek` | 4 | — |
+| `tests`, включая helpers и fixtures | 1175 | Отдельные намеренные образцы |
 | `shared`, product-код `mobile`, `relay`, `desktop` | 0 | 0 |
 
-Всего 1014 JS/MJS. `remainingBeyondCompatibility()` вычитает семь поимённых исключений
-и возвращает 1007 путей; 40 Vue считаются отдельно. Набор JS совпал с независимым
-перечислением через `git ls-files --cached --others --exclude-standard`.
+Всего 1213 JS/MJS. `remainingBeyondCompatibility()` вычитает шесть поимённых исключений
+и возвращает 1207 путей. Продуктовых Vue с JS-script больше нет.
+Снимок `tests/fixtures/migration-inventory-baseline.json` обновлён после снятия
+переходных исключений web; его списки совпадают с фактическим остатком. Согласованный вход соседних изменений
+добавил относительно снимка 32 JS-файла тестов и один web script `check-i18n.mjs`.
+Эта входная дельта учитывается отдельно от уменьшения продуктового остатка.
 
-Основной продуктовый остаток — точка входа web, router, 17 stores, функции речи,
-часть shared/helpers и крупные Vue: `ChatSession`, `PipelineView`,
-`TaskModal`, `BoardView`, `AppShell`. Новые JS-helper сервера:
+Весь `web/src` перенесён в TypeScript, включая store чата, adapter подтверждений
+и крупные Vue `ChatSession` и `PipelineView`. Новые JS-helper сервера:
 `server/src/lib/pluginInstall/commandSupervisor.mjs` и `gitBlobPrefix.mjs`.
 
 Зависимости, build output и приватное состояние не являются предметом переноса.
 Пять JS-SFC в `tests/web/fixtures/ui` перечислены в `COVERAGE_EXCEPTIONS` и намеренно
-проверяют правила компонентов: это не те 40 Vue продукта.
+проверяют правила компонентов: это не оставшиеся Vue продукта.
 
-## Что означает зелёная проверка типов
+## Что означает проверка типов
 
-Восемь команд завершились с кодом 0: `typecheck` в server, web, mobile, relay, desktop;
-`typecheck:tests` в server и web; `typecheck:scripts` в web. Четыре теста
-`tests/docs/migration-inventory.test.mts`, запущенные через memory guard, прошли.
-Снимок совпал с baseline, `typecheckDebt` пуст, `uncheckedTypeScript()` пуст в границах
-текущего инвентаризатора. Полный offline suite, сборка и browser smoke этим аудитом
-не проверялись.
+Общая проверка web, AudioWorklet и отдельная проверка web scripts завершились с кодом 0.
+Снимок остатка имеет пустой `typecheckDebt`: он отражает диагностики общего web-компилятора,
+а не результат тестов и всех проверок других пакетов. Тесты, их типы и охват новых TS/MTS
+проверяются отдельными командами и барьерами инвентаризатора.
+
+25 чистых модулей перенесены в `lowerCamelCase.ts`: 16 shared, четыре helper-а документов
+и лимитов, пять локальных сторов;
+[границы этой волны](typed-pure-web-modules.md) описаны отдельно.
+
+Все 36 Vue-компонентов этой волны получили TS-script: выбор проекта, иконка исполнителя,
+действия топбара, простые оболочки БД/дифа/плагина/терминала, кнопки дифа и избранного,
+мини-график, ползунок усилия, панель и страница документов, панели терминала и дифа,
+страница чатов, три компонента решений конвейера, App, ToolDock, ToolsGrid, ToolsView,
+поповеры таймеров и конвейера, ресурсы исполнителей, AppShell, ToolHost,
+ChatList, ChatPermission, ChatQuestion, StepList, BoardView, TaskModal, ChatSession и PipelineView.
+[Границы доски и карточки задачи](typed-task-views.md) описаны отдельно.
+Для всех продуктовых компонентов сняты
+переходные исключения; [входящие данные](typed-web-boundaries.md) проверяются до публикации в UI.
+
+Сторы `providers.ts`, `plugins.ts`, `notifyWatch.ts` и модули речи
+`controller.ts`, `provider.ts`, `speechStream.ts` также перенесены; их
+[сетевые границы](typed-provider-speech-boundaries.md) сохраняют старые частичные ответы.
 
 Это не означает завершённую миграцию:
 
-- Общие server/web конфигурации, проекты их тестов и web scripts используют
-  `allowJs: true`, `checkJs: false`: JavaScript не получает собственных диагностик.
-- После переноса настроек (проверка 2026-10-19) `web/tsconfig.json.exclude` содержит
-  34 пути Vue: 33 существующих компонента и прежний отсутствующий `views/LoginView.vue`.
-  Три существующих Vue с JS-script не названы там: `views/ExtPluginView.vue`,
-  `views/pipeline/BootstrapDecision.vue`, `views/pipeline/DeferredFindings.vue`.
-  Страницы общего модала, включая `views/settings/pages/SystemPage.vue`, используют TS.
-  Исключение из начального набора файлов не запрещает транзитивные импорты.
-- `web/src/shared/chatApprovals.d.ts` описывает узкий контракт соседнего JS-adapter,
-  но не проверяет реализацию `web/src/stores/chat.js`.
-- В собственных TS/MTS и TS-script Vue вне tests найдено 77 явных типов `any`
+- Основной web-проект наследует `allowJs: false`, `checkJs: false` из строгой базы.
+  В его `exclude` остался только `shared/node`; все продуктовые Vue включены в проверку.
+  Server, проекты тестов и web scripts сохраняют собственные переходные настройки.
+- `chatApprovals.ts` экспортирует прямой alias настоящего стора и его типы;
+  отдельный собственный `chatApprovals.d.ts` удалён.
+- В аудите 2026-10-13 в собственных TS/MTS и TS-script Vue вне tests найдено 77 явных типов `any`
   в 23 файлах. Подсчёт сделан по TypeScript AST, без комментариев и строковых литералов.
   Самые большие группы: `server/src/lib/analysis/analyzer.ts` — 21,
   `deepseek/scripts/runtimeComposition.ts` — 11, `server/src/lib/analysis/arbiter.ts` — 7.
@@ -69,7 +83,6 @@
 - `server/src/lib/executors/_direct-ssh-policy-hook.js`.
 - `server/src/workers/grigdesk-update-worker.js`.
 - `tests/server/grigdesk-release.test.js`.
-- `web/public/notification-sw.js`.
 
 Четыре серверных файла между launcher приложения и smoke-тестом содержат собственную
 JS-реализацию; TS-копий этих реализаций в дереве нет. Текущий сервер по-прежнему
@@ -77,14 +90,9 @@ JS-реализацию; TS-копий этих реализаций в дере
 Существование старого entrypoint важно для MCP, sandbox, hooks и обновления старой
 установки; его удаление требует проверки фактического вызывающего кода.
 
-Описание `notification-sw.js` в списке расходится с деревом: стоит `generated: true`
-и назван источник `web/src/sw/`, но JS отслеживается Git, а указанного каталога нет.
-Workbox действительно подключает JS через `importScripts`. На дату аудита это
-собственный JS-источник с внешним контрактом имени, а не доказанный результат TS-сборки.
-
-`web/src/shared/speech-pcm-worklet.js` также исполняется отдельно: его URL передаётся
-AudioWorklet. Переименование исходника и получение исполняемого браузером JS — разные
-шаги, которые требуется проверять вместе.
+`web/src/shared/speechPcmWorklet.ts` также исполняется отдельно: Vite выпускает JS asset,
+его URL передаётся AudioWorklet. Процессор проверяется и общим web-проектом, и отдельным
+проектом без DOM/Node; [граница среды](typed-audio-worklet.md) описана отдельно.
 
 ## Ограничения учёта и запуска
 

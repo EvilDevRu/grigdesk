@@ -17,10 +17,10 @@
 <script setup lang="ts">
 import { onUnmounted, watch } from 'vue';
 import { sseSubscribe } from '../composables/useSse.ts';
-import { useAuthStore } from '../stores/auth.js';
-import { useChatStore } from '../stores/chat.js';
+import { useAuthStore } from '../stores/auth.ts';
+import { useChatStore } from '../stores/chat.ts';
 import type { SurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
-import { useUiStore } from '../stores/ui.js';
+import { useUiStore } from '../stores/ui.ts';
 import { UiIconButton } from '../ui';
 import TaskModal from './TaskModal.vue';
 

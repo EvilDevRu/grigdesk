@@ -7,7 +7,7 @@
 import { onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { firstQueryValue } from '../shared/alertTargets.ts';
-import { useDockStore } from '../stores/dock.js';
+import { useDockStore } from '../stores/dock.ts';
 
 const route = useRoute();
 const router = useRouter();

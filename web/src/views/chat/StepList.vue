@@ -60,7 +60,7 @@
               <span class="ttl">{{ r.title }}</span>
               <span v-if="r.diff || hasRichDiff(r)" class="stat">{{ diffStat(r) }}</span>
               <span v-else-if="r.lines" class="stat">{{ r.lines }} стр.</span>
-              <span v-if="r.res" class="mark" :class="{ bad: !r.res.ok }">
+              <span v-if="r.res" class="mark" :class="{ bad: !r.res!.ok }">
                 {{ r.res.ok ? '✓' : '✕' }}
               </span>
               <span v-else-if="live" class="mark run">…</span>
@@ -101,7 +101,7 @@
               </div>
             </div>
             <pre v-if="r.preview" class="body">{{ r.preview }}</pre>
-            <pre v-if="resTextOf(r)" class="body res" :class="{ bad: !r.res.ok }">{{ resTextOf(r) }}</pre>
+            <pre v-if="resTextOf(r)" class="body res" :class="{ bad: !r.res!.ok }">{{ resTextOf(r) }}</pre>
           </div>
         </template>
 
@@ -136,42 +136,54 @@
           старт · модель <b>{{ modelLabel(r.model) || '?' }}</b><template v-if="r.mode"> · режим {{ r.mode }}</template>
         </div>
         <div v-else-if="r.k === 'note'" class="note" :class="r.level">
-          {{ r.text }}<template v-if="r.times > 1"> ×{{ r.times }}</template>
+          {{ r.text }}<template v-if="r.times! > 1"> ×{{ r.times }}</template>
         </div>
       </div>
     </div>
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+import type { PropType } from 'vue';
+import type { ChatStep, ChatChange } from '../../shared/chatContracts.ts';
+
 import { ref, reactive, computed, useId, watch } from 'vue';
 import { STEP_IMAGE_TEXT } from '../../../../shared/chat/chatSteps.ts';
-import { lineDiff, splitRows, unifiedDiff } from '../../shared/diff.js';
+import { lineDiff, splitRows, unifiedDiff } from '../../shared/diff.ts';
 import { api } from '../../shared/apiClient.ts';
 import { UiDisclosureButton } from '../../ui';
 import { chatWorkdirImageHref } from './chatImages.ts';
+
+interface StepRow extends ChatStep {
+  res?: ChatStep;
+  secs?: number;
+  times?: number;
+}
 
 // Лента хода агента: размышления, вызовы инструментов и их результаты —
 // то же, что видно в чате VS Code. Живая (пока агент работает) и сохранённая
 // (в истории сообщения) ленты рисуются одним компонентом.
 const props = defineProps({
-  steps: { type: Array, default: () => [] },
+  steps: { type: Array as PropType<ChatStep[]>, default: () => [] },
   live: { type: Boolean, default: false }, // ход идёт прямо сейчас
   section: { type: Boolean, default: false }, // участок общей ленты между репликами
-  displayedAssistantIds: { type: Array, default: () => [] },
+  displayedAssistantIds: { type: Array as PropType<string[]>, default: () => [] },
   // Подпись модели в шаге «старт»: id → имя из каталога. Реестр знает чат, а не лента,
   // поэтому функция приходит снаружи; без неё показывается id как есть.
-  modelLabel: { type: Function, default: (id) => id },
+  modelLabel: {
+    type: Function as PropType<(id?: string) => unknown>,
+    default: (id: string | undefined) => id,
+  },
   // Разговор, из рабочей папки которого сервер отдаёт рассмотренные агентом картинки.
   chatId: { type: String, default: '' },
 });
 
 // Свёрнутая по умолчанию сохранённая лента (в живой всё видно сразу).
 const open = ref(props.live);
-const expanded = ref({}); // индекс шага → раскрыт ли
+const expanded = ref<Record<number, boolean>>({}); // индекс шага → раскрыт ли
 // Адреса, которые сервер или браузер не отдали. Ключ — адрес, а не номер строки: окно
 // ленты сдвигает номера, а повторное раскрытие не перезапрашивает уже битый файл.
-const brokenImages = reactive(new Set());
+const brokenImages = reactive(new Set<string>());
 const baseId = `chat-steps-${useId().replaceAll(':', '')}`;
 
 // После финала тот же участок становится свёрнутой историей.
@@ -183,14 +195,23 @@ watch(() => props.live, (live) => {
 // Результаты приклеиваем к своим вызовам (res приходит отдельным шагом с тем же id) —
 // строка ленты должна быть одна: «инструмент + чем закончился».
 const rows = computed(() => {
-  const out = [];
-  const byId = new Map();
+  const out: StepRow[] = [];
+  const byId = new Map<string | undefined, StepRow>();
   const displayed = new Set(props.displayedAssistantIds);
+
   for (const s of props.steps || []) {
-    if (s.k === 'text' && s.id && displayed.has(s.id)) continue;
+    if (s.k === 'text' && s.id && displayed.has(s.id)) {
+      continue;
+    }
+
     if (s.k === 'res') {
       const tool = byId.get(s.id);
-      if (tool) { tool.res = s; continue; }
+
+      if (tool) {
+        tool.res = s;
+
+        continue;
+      }
       // Вызов не дошёл (его вытеснило окно ленты) — результат всё равно показываем
       // своей строкой: раньше он молча превращался в пустую строку без разметки.
     }
@@ -198,25 +219,46 @@ const rows = computed(() => {
     // Иначе одно действие выглядело бы двумя, а свежий вариант — повтором.
     if (s.k === 'tool' && s.id) {
       const known = byId.get(s.id);
-      if (known) { Object.assign(known, s); continue; }
+
+      if (known) {
+        Object.assign(known, s);
+
+        continue;
+      }
     }
     // Одинаковые служебные строки подряд (ретраи сети идут сериями) — одной строкой с «×N».
     const prev = out[out.length - 1];
+
     if (s.k === 'note' && prev?.k === 'note' && prev.text === s.text) {
       prev.times = (prev.times || 1) + 1;
+
       continue;
     }
+
     const row = { ...s };
-    if (s.k === 'tool' && s.id) byId.set(s.id, row);
+
+    if (s.k === 'tool' && s.id) {
+      byId.set(s.id, row);
+    }
+
     out.push(row);
   }
   // Сколько агент думал: блок размышления приходит уже готовым, поэтому его длительность —
   // это время от ПРЕДЫДУЩЕГО шага до него (как «Thought for 49s» в VS Code).
   for (let i = 1; i < out.length; i++) {
-    if (out[i].k !== 'think' || !out[i].at) continue;
+    const row = out[i]!;
+
+    if (row.k !== 'think' || !row.at) {
+      continue;
+    }
+
     const prev = out[i - 1]?.at;
-    if (prev && out[i].at > prev) out[i].secs = Math.round((out[i].at - prev) / 1000);
+
+    if (prev && row.at > prev) {
+      row.secs = Math.round((row.at - prev) / 1000);
+    }
   }
+
   return out;
 });
 
@@ -224,58 +266,86 @@ const toolCount = computed(() => rows.value.filter((r) => r.k === 'tool').length
 const summary = computed(() => {
   const think = rows.value.filter((r) => r.k === 'think').length;
   const parts = [];
-  if (toolCount.value) parts.push(`${toolCount.value} действ.`);
-  if (think) parts.push(`${think} размышл.`);
+
+  if (toolCount.value) {
+    parts.push(`${toolCount.value} действ.`);
+  }
+  if (think) {
+    parts.push(`${think} размышл.`);
+  }
+
   return parts.join(' · ') || `${rows.value.length} шаг.`;
 });
 
 // Дифф правки считаем лениво — только для раскрытого шага.
-function diffOf(row) {
+function diffOf(row: StepRow) {
   return lineDiff(row.diff?.old, row.diff?.new);
 }
-function changesOf(row) {
+
+function changesOf(row: StepRow) {
   return Array.isArray(row.changes)
     ? row.changes.filter((change) => change && typeof change === 'object')
     : [];
 }
-function changeDiffOf(change) {
-  if (typeof change.diff === 'string') return unifiedDiff(change.diff, change.kind);
+
+function changeDiffOf(change: ChatChange) {
+  if (typeof change.diff === 'string') {
+    return unifiedDiff(change.diff, change.kind);
+  }
+
   return lineDiff(change.diff?.old, change.diff?.new);
 }
 // Пары строк для показа в две колонки (слева убрано, справа добавлено).
-function splitOf(row) {
+function splitOf(row: StepRow) {
   return splitRows(diffOf(row).rows);
 }
-function splitChangeOf(change) {
+
+function splitChangeOf(change: ChatChange) {
   return splitRows(changeDiffOf(change).rows);
 }
-function hasChangeDiff(change) {
+
+function hasChangeDiff(change: ChatChange) {
   return typeof change?.diff === 'string'
     || (change?.diff && typeof change.diff === 'object');
 }
-function hasRichDiff(row) {
+
+function hasRichDiff(row: StepRow) {
   return changesOf(row).some(hasChangeDiff);
 }
-function diffStat(row) {
+
+function diffStat(row: StepRow) {
   if (hasRichDiff(row)) {
     const stat = changesOf(row).reduce((sum, change) => {
-      if (!hasChangeDiff(change)) return sum;
+      if (!hasChangeDiff(change)) {
+        return sum;
+      }
+
       const diff = changeDiffOf(change);
+
       sum.added += diff.added;
       sum.removed += diff.removed;
+
       return sum;
     }, { added: 0, removed: 0 });
+
     return `+${stat.added} −${stat.removed}`;
   }
+
   const d = diffOf(row);
+
   return `+${d.added} −${d.removed}`;
 }
-function toggle(i, row) {
+
+function toggle(i: number, row: StepRow) {
   // Раскрывать есть что только у шагов с телом.
-  if (!hasBody(row)) return;
+  if (!hasBody(row)) {
+    return;
+  }
+
   expanded.value[i] = !expanded.value[i];
 }
-function hasBody(row) {
+
+function hasBody(row: StepRow) {
   return !!(
     row.text || row.command || row.preview || row.diff || row.res?.text || pathOf(row)
     || changesOf(row).length
@@ -284,7 +354,7 @@ function hasBody(row) {
 
 // Подпись шага (путь файла, сервер MCP, пространство имён) — только строка: в сохранённых
 // лентах старых ходов `sub` бывает булевым признаком вложенности, показывать его нечего.
-function pathOf(row) {
+function pathOf(row: StepRow) {
   return typeof row.sub === 'string' ? row.sub : '';
 }
 
@@ -292,8 +362,8 @@ function pathOf(row) {
 // после успешного итога. Адрес даёт только маршрут картинок разговора: внешний URL и готовый
 // адрес /api из пути инструмента в ленту не попадают, а сервер отдаёт лишь растр из
 // рабочей папки или объявленного исполнителем каталога.
-function imageOf(row) {
-  if (!IMAGE_STEPS.has(row.name) || !row.res?.ok) {
+function imageOf(row: StepRow) {
+  if (!IMAGE_STEPS.has(row.name || '') || !row.res?.ok) {
     return '';
   }
 
@@ -304,7 +374,7 @@ function imageOf(row) {
 
 // Нормализатор заменяет блок картинки в итоге общей заглушкой STEP_IMAGE_TEXT.
 // Рядом с самой картинкой или с отметкой о её недоступности эта строка ничего не добавляет.
-function resTextOf(row) {
+function resTextOf(row: StepRow) {
   const text = row.res?.text || '';
 
   return text.trim() === STEP_IMAGE_TEXT && imageOf(row) ? '' : text;
@@ -312,14 +382,14 @@ function resTextOf(row) {
 
 // Вложенный шаг — шаг субагента: у него `parent` (id вызова Task). Старые ленты несли
 // вместо него `sub: true` — их читаем так же, чтобы сохранённые ходы не поменяли вид.
-function isNested(row) {
+function isNested(row: StepRow) {
   return Boolean(row.parent) || row.sub === true;
 }
 
 const IMAGE_STEPS = new Set(['Read', 'GenerateImage']);
 
 // Иконка и подпись вида шага.
-const KIND = {
+const KIND: Record<string, { ico: string; cls: string }> = {
   Bash: { ico: '❯', cls: 'bash' },
   Read: { ico: '👁', cls: 'read' },
   GenerateImage: { ico: '🖼', cls: 'read' },
@@ -336,16 +406,27 @@ const KIND = {
   ExitPlanMode: { ico: '📋', cls: 'plan' },
   Skill: { ico: '⚙', cls: 'skill' },
 };
-function kindOf(name) {
-  if (KIND[name]) return KIND[name];
+
+/**
+ * Знакомое имя инструмента выбирает его прежнюю иконку.
+ * Неизвестный MCP-вызов сохраняет общую подпись подключения.
+ */
+function kindOf(name: string | undefined) {
+  if (name && KIND[name]) {
+    return KIND[name];
+  }
+
   return name?.startsWith('mcp__') ? { ico: '🔌', cls: 'mcp' } : { ico: '•', cls: 'other' };
 }
-function toolLabel(name) {
+
+function toolLabel(name: string | undefined) {
   // mcp__playwright__browser_click → playwright · browser_click
   if (name?.startsWith('mcp__')) {
     const [, srv, ...rest] = name.split('__');
+
     return `${srv} · ${rest.join('__')}`;
   }
+
   return name;
 }
 </script>

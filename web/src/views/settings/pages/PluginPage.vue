@@ -323,14 +323,14 @@ import type {
 } from '../../../../../shared/plugins/pluginsContracts.ts';
 import type { ProviderEntry } from '../../../../../shared/chat/providersContracts.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
-import { pluginCategoryOf, usePluginsStore } from '../../../stores/plugins.js';
+import { pluginCategoryOf, usePluginsStore } from '../../../stores/plugins.ts';
 import { usePluginInstallStore } from '../../../stores/pluginInstall.ts';
 import { pluginInstallBadge } from '../../../shared/pluginInstall.ts';
 import { PLUGIN_CATEGORIES } from '../../../../../shared/plugins/pluginsContracts.ts';
 import PluginSourcePanel from '../PluginSourcePanel.vue';
 import PluginInstallDialog from '../PluginInstallDialog.vue';
 import PluginSetupPanel from './PluginSetupPanel.vue';
-import { useProvidersStore } from '../../../stores/providers.js';
+import { useProvidersStore } from '../../../stores/providers.ts';
 import { createPluginEditor } from '../../../features/settings/pluginEditor.ts';
 import { pluginValueKey, type PluginStorePort } from '../../../features/settings/resources/plugins.ts';
 import type { FieldAddress, JsonValue } from '../../../features/settings/contracts.ts';

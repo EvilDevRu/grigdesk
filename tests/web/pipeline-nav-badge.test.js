@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   pipelineBadgeSummary,
   pipelineTopbarItems,
-} from '../../web/src/shared/pipeline-nav-badge.js';
+} from '../../web/src/shared/pipelineNavBadge.ts';
 
 test('сводка даёт топбару взаимоисключающие числа работы / ожидания / проблем', () => {
   const summary = pipelineBadgeSummary({

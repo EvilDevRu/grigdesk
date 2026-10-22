@@ -106,7 +106,7 @@ export async function i18nComponent(t, options = {}) {
   const [module, piniaApi, vue, utils] = await Promise.all([
     compileModule(webFile('../tests/web/helpers/i18nApp.ts'), {
       stubs: {
-        '../router.js': 'export const router = { push: async () => {} };',
+        '../router.ts': 'export const router = { push: async () => {} };',
         ...sseStubs,
       },
     }),

@@ -1,3 +1,4 @@
+import { migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -49,7 +50,7 @@ test('R9: ChatSession обновляет квоты с одним таймеро
     draft: '',
     workdirState: { committed: { cwd: '/next/project' } },
   }] });
-  const { useProvidersStore } = await import('../../web/src/stores/providers.js');
+  const { useProvidersStore } = await import(migrationUrl('src/stores/providers.ts').href);
   const providers = useProvidersStore();
 
   providers.providers = [

@@ -45,7 +45,7 @@ test('UI dependencies: product consumer импортирует UI только �
 test('UI dependencies: UI-kit не знает stores/domain, UiFileInput остаётся private', (t) => {
   const root = fixtureRepo(t, {
     'web/src/components/primitives/UiBad.vue': `<template><div /></template><script setup lang="ts">
-      import { useAuth } from '../../stores/auth.js';
+      import { useAuth } from '../../stores/auth.ts';
     </script>`,
     'web/src/components/composites/UiWrong.vue': `<template><div /></template><script setup lang="ts">
       import UiFileInput from '../primitives/UiFileInput.vue';

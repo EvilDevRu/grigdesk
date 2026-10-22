@@ -14,7 +14,7 @@
 
 1. `server/src/modules/chat/index.ts`, `parkTurnResult()`: сервер сохраняет ответ в
    `chats/pending`, закрывает запись журнала и посылает `chat-orphan`.
-2. `web/src/stores/chat.js`, `_applyPending()` / `_collectPendingOnce()`: окно добавляет
+2. `web/src/stores/chat.ts`, `_applyPending()` / `_collectPendingOnce()`: окно добавляет
    ответ в сообщения и сохраняет историю; только после этого подтверждает pending.
 3. Следующий `runChatTurn()` после turn lock перечитывает запись через
    `workdirTransitions.recover(chatKey)` и передаёт `target.record.messages` как chatHistory.

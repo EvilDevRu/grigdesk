@@ -9,7 +9,7 @@ import {
   documentRouteHref,
   parseDocumentHref,
   parseDocumentRouteHref,
-} from '../../web/src/features/documents/links.js';
+} from '../../web/src/features/documents/links.ts';
 import { mdToHtml } from '../../web/src/shared/md.ts';
 
 test('DOC-WEB-01: абсолютная MD/TXT-ссылка превращается во внутренний route', () => {

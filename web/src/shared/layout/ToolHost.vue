@@ -10,12 +10,12 @@
       <span class="rail-mark">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path :d="NAV_ICONS[item.icon] || NAV_ICONS.plugin" />
+          <path :d="navIcon(item.icon) || NAV_ICONS.plugin" />
         </svg>
         <NavigationCount :badge="toolBadges[item.id]" />
       </span>
-      <span v-if="item.id === 'terminal' && ['open', 'connecting'].includes(dock.runtime.terminal?.status)"
-            class="runtime-dot" :class="dock.runtime.terminal.status" aria-hidden="true"></span>
+      <span v-if="item.id === 'terminal' && ['open', 'connecting'].includes(String(dock.runtime.terminal?.status))"
+            class="runtime-dot" :class="String(dock.runtime.terminal?.status || '')" aria-hidden="true"></span>
     </UiIconButton>
   </aside>
 
@@ -27,7 +27,7 @@
               :expanded="expandedOf(item.id)" :expanded-width="contentWidth"
               @hide="hideDock(item.id)" @toggle-expanded="toggleDockExpanded"
               @resize="resize($event)" @resize-end="resize($event, true)">
-      <component :is="item.component" :ref="(value) => setPanelRef(item.id, value)"
+      <component :is="item.component" :ref="(value: unknown) => setPanelRef(item.id, value)"
                  v-bind="item.panelProps || {}"
                  :active="presentedTool === item.id" :compact="compactOf(item.id)"
                  :presentation="modeOf(item.id)" :intents="dock.intents[item.id] || []"
@@ -44,25 +44,28 @@
   </section>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { uiLocale } from '../../ui.ts';
 
 import { t } from '../../ui.ts';
 
+import type { ToolMeta } from '../tools/catalog.ts';
+import { isRecord } from '../../../../shared/lib/objects.ts';
+
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useDockStore, MIN_DOCK_WIDTH } from '../../stores/dock.js';
-import { usePluginsStore } from '../../stores/plugins.js';
+import { useDockStore, MIN_DOCK_WIDTH } from '../../stores/dock.ts';
+import { usePluginsStore } from '../../stores/plugins.ts';
 import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import { useUiContextSource } from '../../composables/useUiContextSource.ts';
 import { NAV_ICONS } from '../navIcons.ts';
 import { toolsOf, toolById, toolAvailability } from '../tools/registry.ts';
 import { useDockViewport } from '../tools/viewport.ts';
 import { comboFromEvent, formatCombo } from '../hotkeys/combo.ts';
-import { useHotkeysStore } from '../../stores/hotkeys.js';
+import { useHotkeysStore } from '../../stores/hotkeys.ts';
 import ToolDock from './ToolDock.vue';
 import NavigationCount from './NavigationCount.vue';
-import { shelfNavBadge } from '../nav-badges.js';
+import { shelfNavBadge } from '../navBadges.ts';
 import { UiIconButton, useUiLayer, vTooltip } from '../../ui';
 
 const route = useRoute();
@@ -80,130 +83,234 @@ const tools = computed(() => toolsOf(plugins));
 
 // Страница плагина ведётся общим роутом /ext/:id — инструмент называет адрес.
 const routeTool = computed(() => {
-  if (route.meta?.tool === 'ext') return String(route.params?.id || '') || null;
-  return route.meta?.tool || null;
+  if (route.meta?.tool === 'ext') {
+    return String(route.params?.id || '') || null;
+  }
+
+  return typeof route.meta?.tool === 'string' ? route.meta.tool || null : null;
 });
 const routeItem = computed(() => toolById(plugins, routeTool.value));
 const routeState = computed(() => (routeItem.value
   ? toolAvailability(routeItem.value, plugins)
   : null));
 const presentedTool = computed(() => {
-  if (routeItem.value) return routeState.value === 'enabled' ? routeItem.value.id : null;
+  if (routeItem.value) {
+    return routeState.value === 'enabled' ? routeItem.value.id : null;
+  }
+
   const item = toolById(plugins, dock.activeTool);
+
   return dockCapable.value && dock.isOpen && toolAvailability(item, plugins) === 'enabled'
-    ? item.id
+    ? item!.id
     : null;
 });
 const presentation = computed(() => {
-  if (routeItem.value) return routeState.value === 'enabled' ? 'page' : 'placeholder';
+  if (routeItem.value) {
+    return routeState.value === 'enabled' ? 'page' : 'placeholder';
+  }
+
   return presentedTool.value ? 'dock' : 'hidden';
 });
 
 const railItems = computed(() => tools.value.filter((item) => {
-  if (toolAvailability(item, plugins) !== 'enabled') return false;
-  if (!item.plugin) return true;
+  if (toolAvailability(item, plugins) !== 'enabled') {
+    return false;
+  }
+  if (!item.plugin) {
+    return true;
+  }
+
   return plugins.dockNav.some((nav) => nav.id === item.id);
 }));
 
-const toolBadges = computed(() => ({ shelf: shelfNavBadge(shelf.rows, uiLocale) }));
+const toolBadges = computed<Record<string, ReturnType<typeof shelfNavBadge>>>(() => ({
+  shelf: shelfNavBadge(shelf.rows, uiLocale),
+}));
 
 /**
  * Подсказка и доступное имя называют точное число с причинами внимания.
  * Горячая клавиша остаётся частью того же описания кнопки инструмента.
  */
-function railTitle(item) {
+function navIcon(name: string): string | undefined {
+  return Object.hasOwn(NAV_ICONS, name) ? NAV_ICONS[name as keyof typeof NAV_ICONS] : undefined;
+}
+
+function railTitle(item: ToolMeta) {
   const combo = formatCombo(hotkeys.comboOf(item.id));
   const detail = toolBadges.value[item.id]?.title;
 
   return [item.label, detail, combo].filter(Boolean).join(' · ');
 }
 
-const contexts = reactive({});
-const panelRefs = new Map();
-const dockRefs = new Map();
-const railButtons = new Map();
+interface FocusHandle {
+  focus?: () => void;
+  focusHeader?: () => void;
+}
+
+const contexts = reactive<Record<string, Record<string, unknown>>>({});
+const panelRefs = new Map<string | null, FocusHandle>();
+const dockRefs = new Map<string | null, FocusHandle>();
+const railButtons = new Map<string | null, FocusHandle>();
 const contentWidth = ref(0);
 const maxWidth = computed(() => Math.max(0, Math.floor(contentWidth.value * 0.7)));
 const minWidth = computed(() => Math.min(MIN_DOCK_WIDTH, maxWidth.value));
-let contentObserver = null;
+let contentObserver: ResizeObserver | null = null;
 let publishedContextKey = '';
 
-function modeOf(id) {
+/**
+ * Ручка панели содержит только доступные методы фокуса.
+ * Значение template ref проверяется до сохранения в реестре.
+ */
+function isFocusHandle(value: unknown): value is FocusHandle {
+  return isRecord(value)
+    && (value.focus == null || typeof value.focus === 'function')
+    && (value.focusHeader == null || typeof value.focusHeader === 'function');
+}
+
+function modeOf(id: string): 'dock' | 'page' | 'hidden' | 'placeholder' {
   return presentedTool.value === id ? presentation.value : 'hidden';
 }
-function expandedOf(id) {
+
+function expandedOf(id: string) {
   return modeOf(id) === 'dock' && dock.isExpanded;
 }
-function compactOf(id) {
+
+function compactOf(id: string) {
   return presentedTool.value === id && (presentation.value === 'dock' || !dockCapable.value);
 }
-function setPanelRef(id, value) {
-  if (value) panelRefs.set(id, value);
-  else panelRefs.delete(id);
+
+function setPanelRef(id: string, value: unknown) {
+  if (isFocusHandle(value)) {
+    panelRefs.set(id, value);
+  } else {
+    panelRefs.delete(id);
+  }
 }
-function setDockRef(id, value) {
-  if (value) dockRefs.set(id, value);
-  else dockRefs.delete(id);
+
+function setDockRef(id: string, value: unknown) {
+  if (isFocusHandle(value)) {
+    dockRefs.set(id, value);
+  } else {
+    dockRefs.delete(id);
+  }
 }
-function setRailButton(id, value) {
-  if (value) railButtons.set(id, value);
-  else railButtons.delete(id);
+
+function setRailButton(id: string, value: unknown) {
+  if (isFocusHandle(value)) {
+    railButtons.set(id, value);
+  } else {
+    railButtons.delete(id);
+  }
 }
-function consumeIntent(id, intentId) { dock.consume(id, intentId); }
-function onStatus(id, value) { dock.setRuntime(id, value); }
-function onContext(id, value) {
-  if (value) contexts[id] = value;
-  else delete contexts[id];
+
+function consumeIntent(id: string, intentId: number) {
+  dock.consume(id, intentId);
+}
+
+function onStatus(id: string, value: Record<string, unknown>) {
+  dock.setRuntime(id, value);
+}
+
+function onContext(id: string, value: Record<string, unknown> | null) {
+  if (value) {
+    contexts[id] = value;
+  } else {
+    delete contexts[id];
+  }
+
   syncUiContext();
 }
-function safeToolDetails(id, value) {
-  const details = { id, presentation: presentation.value };
-  if (id !== 'code') return details;
-  // CodePanel знает рабочую копию, но ToolHost пропускает только подписи и
-  // относительный файл. Абсолютный treePath и содержимое Monaco сюда не входят.
-  for (const key of ['project', 'repository', 'context', 'tab', 'file']) {
-    if (typeof value?.[key] === 'string' && value[key]) details[key] = value[key];
+
+/**
+ * Контекст инструмента содержит только подписи и относительный путь файла.
+ * Абсолютный treePath и содержимое редактора остаются внутри CodePanel.
+ */
+function safeToolDetails(id: string, value: Record<string, unknown>) {
+  const details: Record<string, unknown> = { id, presentation: presentation.value };
+
+  if (id !== 'code') {
+    return details;
   }
-  if (Number.isSafeInteger(value?.line) && value.line > 0) details.line = value.line;
+
+  for (const key of ['project', 'repository', 'context', 'tab', 'file']) {
+    if (typeof value?.[key] === 'string' && value[key]) {
+      details[key] = value[key];
+    }
+  }
+
+  if (typeof value.line === 'number' && Number.isSafeInteger(value.line) && value.line > 0) {
+    details.line = value.line;
+  }
+
   return details;
 }
+
+/**
+ * Публикует контекст только видимого инструмента, не меняя владельца панели.
+ * Повторное обновление подписи сохраняет фокус уже зарегистрированного источника.
+ */
 function syncUiContext() {
   const id = presentedTool.value;
-  const value = contexts[id];
+  const value = id ? contexts[id] : undefined;
+
   if (!id || !value || presentation.value === 'hidden' || presentation.value === 'placeholder') {
     publishedContextKey = '';
     toolContext.blur();
+
     return;
   }
+
   const contextKey = `${id}:${presentation.value}`;
   const next = {
     layer: presentation.value === 'page' ? 'page' : 'dock',
     details: safeToolDetails(id, value),
   };
-  if (contextKey !== publishedContextKey) toolContext.focus(next);
-  else toolContext.update(next);
+
+  if (contextKey !== publishedContextKey) {
+    toolContext.focus(next);
+  } else {
+    toolContext.update(next);
+  }
+
   publishedContextKey = contextKey;
 }
 
 function focusPresented({ dockHeader = false } = {}) {
   const id = presentedTool.value;
-  if (!id) return;
+
+  if (!id) {
+    return;
+  }
+
   nextTick(() => {
-    if (dockHeader && presentation.value === 'dock') dockRefs.get(id)?.focusHeader?.();
-    else panelRefs.get(id)?.focus?.();
+    if (dockHeader && presentation.value === 'dock') {
+      dockRefs.get(id)?.focusHeader?.();
+    } else {
+      panelRefs.get(id)?.focus?.();
+    }
   });
 }
 
-async function clickRail(item) {
+/**
+ * Повторный выбор возвращает фокус, а выбор другого инструмента меняет маршрут или док.
+ * Один хост сохраняет уже смонтированную панель и очередь её намерений.
+ */
+async function clickRail(item: ToolMeta) {
   if (routeTool.value) {
-    if (routeTool.value === item.id) focusPresented();
-    else await router.push(item.route);
+    if (routeTool.value === item.id) {
+      focusPresented();
+    } else {
+      await router.push(item.route);
+    }
+
     return;
   }
   if (dock.isOpen && dock.activeTool === item.id) {
     hideDock(item.id);
+
     return;
   }
+
   dock.open(item.id);
   focusPresented({ dockHeader: true });
 }
@@ -212,8 +319,11 @@ async function clickRail(item) {
  * Одна и та же команда «показать инструмент» для рейки и для клавиши. На узком
  * экране дока нет вовсе, поэтому там открывается страница инструмента.
  */
-function activateTool(item) {
-  if (routeTool.value || dockCapable.value) return clickRail(item);
+function activateTool(item: ToolMeta) {
+  if (routeTool.value || dockCapable.value) {
+    return clickRail(item);
+  }
+
   return router.push(item.route);
 }
 
@@ -222,12 +332,17 @@ function activateTool(item) {
  * а панель обязана открываться и поверх них. Сочетание без Ctrl/Alt настройка не
  * принимает, поэтому обычный набор текста сюда не доходит.
  */
-function onHotkey(event) {
-  if (hotkeys.recording || event.defaultPrevented || event.repeat || event.isComposing) return;
+function onHotkey(event: KeyboardEvent) {
+  if (hotkeys.recording || event.defaultPrevented || event.repeat || event.isComposing) {
+    return;
+  }
 
   const id = hotkeys.toolByCombo[comboFromEvent(event)];
   const item = id && railItems.value.some((entry) => entry.id === id) ? toolById(plugins, id) : null;
-  if (!item) return;
+
+  if (!item) {
+    return;
+  }
 
   event.preventDefault();
   event.stopPropagation();
@@ -246,10 +361,13 @@ function toggleDockExpanded() {
 function closeDockLayer() {
   if (dock.isExpanded) {
     const id = presentedTool.value;
+
     dock.setExpanded(false);
     nextTick(() => dockRefs.get(id)?.focusHeader?.());
+
     return;
   }
+
   hideDock();
 }
 
@@ -259,8 +377,12 @@ useUiLayer('dock', {
   onEscape: closeDockLayer,
 });
 
-function resize(value, persist = false) {
-  dock.setWidth(value, { min: minWidth.value, max: maxWidth.value, persist });
+function resize(value: number, persist = false) {
+  dock.setWidth(value, {
+    min: minWidth.value,
+    max: maxWidth.value,
+    persist,
+  });
 }
 
 function measureContent() {
@@ -273,23 +395,33 @@ function measureContent() {
 
 watch([presentedTool, presentation, dockCapable], () => {
   const id = presentedTool.value;
-  if (id && presentation.value !== 'placeholder') dock.setMounted(id, true);
+
+  if (id && presentation.value !== 'placeholder') {
+    dock.setMounted(id, true);
+  }
   // В route-only режиме живёт только текущая tool-страница. Уход с неё обязан
   // закрыть PTY/Monaco обычным unmount и сбросить runtime-индикатор.
   if (!dockCapable.value) {
     for (const item of tools.value) {
-      if (item.id !== id && dock.mounted[item.id]) dock.resetRuntime(item.id);
+      if (item.id !== id && dock.mounted[item.id]) {
+        dock.resetRuntime(item.id);
+      }
     }
   }
+
   syncUiContext();
 }, { immediate: true });
 
 watch(dockCapable, (can, was) => {
   measureContent();
+
   if (!can && was) {
     dock.close();
+
     for (const item of tools.value) {
-      if (item.id !== routeTool.value) dock.resetRuntime(item.id);
+      if (item.id !== routeTool.value) {
+        dock.resetRuntime(item.id);
+      }
     }
   }
 });
@@ -298,23 +430,43 @@ watch(dockCapable, (can, was) => {
 // другой раздел, возвращаем обычную ширину, чтобы результат навигации сразу был
 // виден; сам док и живая Terminal/Code-сессия при этом остаются открыты.
 watch(() => route.path, (path, previous) => {
-  if (path !== previous && dock.isExpanded) dock.setExpanded(false, { persist: false });
+  if (path !== previous && dock.isExpanded) {
+    dock.setExpanded(false, { persist: false });
+  }
 });
 
-watch(() => [plugins.loaded, ...plugins.list.map((item) => `${item.id}:${item.enabled}:${item.nav?.group || ''}`)], () => {
-  if (!plugins.loaded) return;
+watch(() => [
+  plugins.loaded,
+  ...plugins.list.map((item) => `${item.id}:${item.enabled}:${item.nav?.group || ''}`),
+], () => {
+  if (!plugins.loaded) {
+    return;
+  }
+
   for (const item of tools.value.filter((entry) => entry.plugin)) {
-    if (toolAvailability(item, plugins) === 'enabled') continue;
-    if (dock.activeTool === item.id) dock.close();
+    if (toolAvailability(item, plugins) === 'enabled') {
+      continue;
+    }
+    if (dock.activeTool === item.id) {
+      dock.close();
+    }
+
     dock.resetRuntime(item.id);
     delete contexts[item.id];
   }
+
   const valid = railItems.value.some((item) => item.id === dock.activeTool);
+
   if (!valid) {
     const fallback = railItems.value[0]?.id || null;
+
     dock.rememberTool(fallback);
-    if (!fallback) dock.close();
+
+    if (!fallback) {
+      dock.close();
+    }
   }
+
   syncUiContext();
 }, { immediate: true });
 
@@ -325,10 +477,12 @@ watch(
 
 onMounted(() => {
   const content = document.querySelector('.shell > .content');
+
   if (content && typeof ResizeObserver !== 'undefined') {
     contentObserver = new ResizeObserver(measureContent);
     contentObserver.observe(content);
   }
+
   window.addEventListener('resize', measureContent, { passive: true });
   document.addEventListener('keydown', onHotkey, true);
   measureContent();

@@ -24,7 +24,7 @@ export async function settingsHarness(t, pageId, component, options = {}) {
     import('../../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     compileModule(webFile('../tests/web/helpers/settings-pages.ts'), {
       stubs: {
-        '../router.js': 'export const router = { push: async () => {} };',
+        '../router.ts': 'export const router = { push: async () => {} };',
         '../../../composables/useSse.ts': 'export const sseSubscribe = () => () => {};',
         '../../composables/useSse.ts': 'export const useSse = () => ({ connected: { value: false } });',
         '../../../ui.ts': `

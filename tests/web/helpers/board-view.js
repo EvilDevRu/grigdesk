@@ -22,10 +22,10 @@ export async function compileBoardView() {
         export const secToHMS = (value) => String(value ?? 0);
         export const signed = (value) => String(value ?? 0);
       `,
-      '../stores/board.js': `
+      '../stores/board.ts': `
         export const useBoardStore = (...args) => globalThis.__boardViewStores.board(...args);
       `,
-      '../stores/ui.js': `
+      '../stores/ui.ts': `
         export const useUiStore = (...args) => globalThis.__boardViewStores.ui(...args);
       `,
       '../actions/analysis': `
@@ -35,7 +35,7 @@ export async function compileBoardView() {
         export const startAnalysisPolling = () =>
           globalThis.__boardViewStores.analysis().startPolling?.();
       `,
-      '../stores/task-favorites.js': `
+      '../stores/taskFavorites.ts': `
         export const useTaskFavoritesStore = (...args) =>
           globalThis.__boardViewStores.favorites(...args);
       `,
@@ -43,11 +43,11 @@ export async function compileBoardView() {
         export const useTaskShelfStore = (...args) =>
           globalThis.__boardViewStores.shelf(...args);
       `,
-      '../stores/plugins.js': `
+      '../stores/plugins.ts': `
         export const usePluginsStore = (...args) =>
           globalThis.__boardViewStores.plugins(...args);
       `,
-      '../stores/task-seen.js': `
+      '../stores/taskSeen.ts': `
         export const useTaskSeenStore = (...args) => globalThis.__boardViewStores.seen(...args);
       `,
       './board/MiniChart.vue': `

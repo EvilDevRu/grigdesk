@@ -102,7 +102,8 @@ function compileShell() {
       ...stubs,
       '../../stores/settings.ts': 'export const useSettingsStore = () => ({ isOpen: false });',
       '../settingsNavigation.ts': 'export const openSettings = () => {};',
-      '../apiClient.ts': 'export const api = { get: async () => ({}) };',
+      '../apiClient.ts': `export const api = { get: async () => ({}) };
+        export { failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,
       '../../composables/useSse.ts': `
         export const useSse = (handler) => {
           globalThis.__typesShellSse = handler;

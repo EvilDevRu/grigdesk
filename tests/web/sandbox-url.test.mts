@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { sandboxUrl } from '../../web/src/shared/sandbox.js';
+import { sandboxUrl } from '../../web/src/shared/sandbox.ts';
 
 test('LO-11: стенды открываются прямым HTTP-портом текущего хоста', (t) => {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'location');

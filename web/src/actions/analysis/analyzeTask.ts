@@ -1,6 +1,6 @@
 import { analysisApi } from '../../shared/analysisApi.ts';
 import { useAnalysisStore } from '../../stores/analysis.ts';
-import { usePluginsStore } from '../../stores/plugins.js';
+import { usePluginsStore } from '../../stores/plugins.ts';
 import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import { scheduleAnalysisPolling } from './pollAnalysis.ts';
 import type { AnalysisQueueResponse } from '../../../../shared/pipeline/analysisContracts.ts';

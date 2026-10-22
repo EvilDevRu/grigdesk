@@ -95,10 +95,28 @@
   </UiDialog>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import type { PropType } from 'vue';
+
 import { UiButton, UiDialog, UiIconButton, UiTextarea, vTooltip } from '../../ui';
-import { buildRewindNote } from '../../shared/rewind-note.js';
+import { buildRewindNote } from '../../shared/rewindNote.ts';
+
+interface ArbiterDecisionView {
+  node?: string;
+  label?: string;
+  questions?: NonNullable<Parameters<typeof buildRewindNote>[0]>;
+  card?: {
+    verdict?: string;
+    model?: string;
+    card?: {
+      what?: string;
+      why?: string;
+      proof?: string;
+      risk?: string;
+    };
+  } | null;
+}
 
 // Разбор арбитра и ответ на него. Отдельная модалка, потому что узел отвечает на другой
 // вопрос («чем занят исполнитель и чем кончился заход»), а здесь человек читает четыре
@@ -110,7 +128,7 @@ const props = defineProps({
     default: false,
   },
   decision: {
-    type: Object,
+    type: Object as PropType<ArbiterDecisionView | null>,
     default: null,
   },
   busy: {
@@ -119,15 +137,18 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(['close', 'submit']);
+const emit = defineEmits<{
+  close: [];
+  submit: [note: string];
+}>();
 
 const PARTS = [
   ['why', 'Почему'],
   ['proof', 'Чем проверял'],
   ['risk', 'Чем грозит ошибка'],
-];
+] as const;
 
-const answers = ref({});
+const answers = ref<Record<string, string>>({});
 const free = ref('');
 
 const card = computed(() => props.decision?.card || null);
@@ -140,7 +161,11 @@ const kicker = computed(() => (
 // Показываем только то, что арбитр действительно написал: пустая графа означает «он об
 // этом не говорил», и заголовок без текста читался бы как потерянный ответ.
 const parts = computed(() => PARTS
-  .map(([key, partLabel]) => ({ key, label: partLabel, text: card.value?.card?.[key] || '' }))
+  .map(([key, partLabel]) => ({
+    key,
+    label: partLabel,
+    text: card.value?.card?.[key] || '',
+  }))
   .filter((part) => part.text));
 
 const note = computed(() => buildRewindNote(questions.value, answers.value, free.value));
@@ -153,18 +178,25 @@ watch(() => [props.open, props.decision?.node], () => {
   free.value = '';
 });
 
-function onOpenChange(value) {
-  if (!value) emit('close');
+function onOpenChange(value: boolean) {
+  if (!value) {
+    emit('close');
+  }
 }
 
 function submit() {
-  if (!filled.value) return;
+  if (!filled.value) {
+    return;
+  }
 
   emit('submit', note.value);
 }
 
-/** Хвост якоря: полный путь остаётся в подсказке, в строке он съедал бы формулировку. */
-function shortAnchor(anchor) {
+/**
+ * Оставляет в строке вопроса только хвост якоря, чтобы путь не съедал формулировку.
+ * Полный адрес по-прежнему доступен в подсказке исходного поля.
+ */
+function shortAnchor(anchor: unknown) {
   const text = String(anchor || '');
   const segments = text.split('/');
 

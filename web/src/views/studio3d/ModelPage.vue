@@ -163,7 +163,7 @@ import { useRouter } from 'vue-router';
 import { UiButton, UiField, UiSelect, UiInlineMessage, UiProgress, UiDisclosureButton,
   confirmDialog } from '../../ui.ts';
 import { useStudio3dStore } from '../../stores/studio3d.ts';
-import { useChatStore } from '../../stores/chat.js';
+import { useChatStore } from '../../stores/chat.ts';
 import { ACTIVE_STATUSES } from '../../../../shared/studio3d/studio3dContracts.ts';
 import type { Studio3dQuote, Studio3dValidation } from '../../../../shared/studio3d/studio3dContracts.ts';
 import { formatPrice, MISSING_TASK_WAIT_REASON } from '../../../../shared/studio3d/studio3dOperations.ts';

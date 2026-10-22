@@ -3,7 +3,7 @@ import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const STORE_URL = pathToFileURL(fileURLToPath(
-  new URL('../../web/src/stores/device.js', import.meta.url),
+  new URL('../../web/src/stores/device.ts', import.meta.url),
 )).href;
 // Vue фиксирует наличие document при импорте runtime-dom. Загружаем Pinia до установки
 // нашего минимального fake document: самому стору DOM-рендерер не нужен.

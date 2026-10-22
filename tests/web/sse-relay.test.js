@@ -148,7 +148,7 @@ test('SR-03: без роли ретрансляции поток вкладки 
   assert.equal(made, 0);
 });
 test('SR-04: вход приложения задаёт роль до журнала окна', async () => {
-  const source = await readFile(new URL('../../web/src/main.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../../web/src/main.ts', import.meta.url), 'utf8');
   const configured = source.indexOf('configureSseRelay(SSE_RELAY_ROLES[currentDesktopMode()]);');
 
   assert.notEqual(configured, -1);

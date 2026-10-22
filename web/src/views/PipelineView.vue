@@ -282,7 +282,7 @@
         >
           #{{ t.task }}
         </UiButton>
-        <span class="route">{{ ROUTE_ICON[t.route] || '•' }} {{ t.route }}</span>
+        <span class="route">{{ ROUTE_ICON[t.route || ''] || '•' }} {{ t.route }}</span>
         <span v-if="t.graph.runnerPolicy?.chain?.length" class="runner-policy"
               v-tooltip="`Аварийная цепочка проекта: ${runnerChainLabel(t.graph.runnerPolicy)}`">
           ИИ {{ runnerChainLabel(t.graph.runnerPolicy) }}
@@ -336,9 +336,9 @@
       <LoopStatus :graph="t.graph" />
 
       <!-- Ждёт тебя (видно и в свёрнутом виде) -->
-      <div v-if="!t.readOnly && waitingReason(t.graph)" class="waitme" :class="{ premature: waitingReason(t.graph).premature }">
-        ⏳ ждёт тебя: {{ waitingReason(t.graph).text }}
-        <span v-if="waitingReason(t.graph).premature" class="pm">(преждевременно — хвост не доделан)</span>
+      <div v-if="!t.readOnly && waitingReason(t.graph)" class="waitme" :class="{ premature: waitingReason(t.graph)!.premature }">
+        ⏳ ждёт тебя: {{ waitingReason(t.graph)!.text }}
+        <span v-if="waitingReason(t.graph)!.premature" class="pm">(преждевременно — хвост не доделан)</span>
       </div>
 
       <!-- ПОЧЕМУ КОНВЕЙЕР СТОИТ. Движок останавливается сам и зовёт человека, но до сих
@@ -472,8 +472,8 @@
       <footer v-if="!isCollapsed(t.task)" class="strip">
         <span v-if="t.graph.fePort" class="chunk">
           <span class="sdot" :class="t.daemonAlive ? 'on' : 'off'"></span>
-          стенд · <a :href="sandboxUrl(t.graph.fePort)" target="_blank" rel="noopener">фронт :{{ t.graph.fePort }}</a>
-          <a v-if="t.graph.apiPort" :href="sandboxUrl(t.graph.apiPort)" target="_blank" rel="noopener">API :{{ t.graph.apiPort }}</a>
+          стенд · <a :href="sandboxUrl(t.graph.fePort) || undefined" target="_blank" rel="noopener">фронт :{{ t.graph.fePort }}</a>
+          <a v-if="t.graph.apiPort" :href="sandboxUrl(t.graph.apiPort) || undefined" target="_blank" rel="noopener">API :{{ t.graph.apiPort }}</a>
         </span>
         <!-- Стенд ещё строится: живой прогресс сборки песочницы из t*.stage -->
         <span v-else-if="t.graph.sandbox" class="chunk building">
@@ -572,7 +572,7 @@
         <header class="sh">
           <div class="shead-copy">
             <span class="shead-kicker">Этап конвейера</span>
-            <h3 id="stage-modal-title">{{ stage.label }}</h3>
+            <h3 id="stage-modal-title">{{ stage!.label }}</h3>
           </div>
           <!-- Статус этапа и признак жизни хода — один вопрос человека («этап идёт
                или встал?»), поэтому они стоят рядом. Раньше ответ был разнесён по двум
@@ -581,8 +581,8 @@
             <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{
               agentActivityLabel(stageActivity)
             }}</span>
-            <span class="sbadge" :class="stageArbitrating ? 'arb' : stage.status">{{
-              stageArbitrating ? 'арбитр разбирает' : stageStatusHint(stage)
+            <span class="sbadge" :class="stageArbitrating ? 'arb' : stage!.status">{{
+              stageArbitrating ? 'арбитр разбирает' : stageStatusHint(stage!)
             }}</span>
           </div>
           <UiIconButton
@@ -610,17 +610,17 @@
              что в подвале карточки конвейера; нового действия или отдельного API здесь нет. -->
         <div id="stage-task-context" class="stage-context">
           <div class="stage-task-context">
-            <span class="stage-context-label">Задача <b class="mono">#{{ stage.task }}</b></span>
+            <span class="stage-context-label">Задача <b class="mono">#{{ stage!.task }}</b></span>
             <span v-if="stageTaskTitle" class="stage-task-title" v-tooltip="stageTaskTitle">{{ stageTaskTitle }}</span>
             <span v-else class="stage-task-title muted">Название загружается…</span>
           </div>
           <div class="stage-stand-context">
             <span class="stage-context-label">Стенд</span>
             <template v-if="stageGraph?.fePort">
-              <a class="stage-stand-link" :href="sandboxUrl(stageGraph.fePort)" target="_blank" rel="noopener">
+              <a class="stage-stand-link" :href="sandboxUrl(stageGraph.fePort) || undefined" target="_blank" rel="noopener">
                 Фронт <b class="mono">:{{ stageGraph.fePort }}</b> <span aria-hidden="true">↗</span>
               </a>
-              <a v-if="stageGraph.apiPort" class="stage-stand-link" :href="sandboxUrl(stageGraph.apiPort)"
+              <a v-if="stageGraph.apiPort" class="stage-stand-link" :href="sandboxUrl(stageGraph.apiPort) || undefined"
                  target="_blank" rel="noopener">
                 API <b class="mono">:{{ stageGraph.apiPort }}</b> <span aria-hidden="true">↗</span>
               </a>
@@ -663,10 +663,10 @@
                   разбор и решение
                 </UiButton>
               </div>
-              <div v-if="stage.meta.stall" class="scomment failed">
+              <div v-if="stage!.meta.stall" class="scomment failed">
                 <span class="sclbl">Почему этап остановился</span>
-                <b>{{ stage.meta.stall.title }}</b>
-                <div>{{ stage.meta.stall.hint }}</div>
+                <b>{{ stage!.meta.stall.title }}</b>
+                <div>{{ stage!.meta.stall.hint }}</div>
               </div>
               <!-- Что узел СКАЗАЛ, закрывая заход: типизированные находки с якорями на файлы.
                    Блокирующие уезжают отсюда, когда ниже стоит форма возврата: там у каждой
@@ -674,12 +674,12 @@
                    вопрос дважды на одном экране. Текст пишет агент, поэтому только
                    интерполяция: `v-html` здесь запрещён. -->
               <div
-                v-if="verdictFindings.length && !stage.meta.bootstrapStop"
+                v-if="verdictFindings.length && !stage!.meta.bootstrapStop"
                 class="sverdict"
-                :class="{ human: stage.meta.verdict.stop === 'human' && !verdictDeferredOnly }"
+                :class="{ human: stage!.meta.verdict!.stop === 'human' && !verdictDeferredOnly }"
               >
                 <div class="svhead">
-                  <span class="sclbl">{{ verdictLabel(stage.meta.verdict, verdictDeferredOnly) }}</span>
+                  <span class="sclbl">{{ verdictLabel(stage!.meta.verdict!, verdictDeferredOnly) }}</span>
                 </div>
                 <ul class="svlist">
                   <li
@@ -691,35 +691,35 @@
                     <span class="svsum">{{ f.summary }}</span>
                   </li>
                 </ul>
-                <div v-if="stage.meta.verdict.omitted" class="svmore">
-                  …и ещё {{ stage.meta.verdict.omitted }} — остальные в журнале попытки
+                <div v-if="stage!.meta.verdict!.omitted" class="svmore">
+                  …и ещё {{ stage!.meta.verdict!.omitted }} — остальные в журнале попытки
                 </div>
               </div>
-              <div v-if="stage.meta.comment" class="snotices">
+              <div v-if="stage!.meta.comment" class="snotices">
                 <div
                   class="scomment"
-                  :class="{ failed: ['skipbad', 'stall'].includes(stage.status) }"
+                  :class="{ failed: ['skipbad', 'stall'].includes(stage!.status) }"
                 >
-                  <span class="sclbl">{{ stageCommentLabel(stage) }}</span>
-                  {{ stage.meta.comment }}
+                  <span class="sclbl">{{ stageCommentLabel(stage!) }}</span>
+                  {{ stage!.meta.comment }}
                 </div>
               </div>
             </div>
 
             <BootstrapDecision
-              v-if="stage.meta.bootstrapStop && !stageTask?.readOnly"
-              :task="stageTask.task"
-              :profile="stageTask.profile"
-              :attempt="stageTask.attempt"
-              :stop="stage.meta.bootstrapStop"
-              :running="stageTask.daemonAlive"
+              v-if="stage!.meta.bootstrapStop && !stageTask?.readOnly"
+              :task="stageTask!.task"
+              :profile="stageTask!.profile"
+              :attempt="stageTask!.attempt == null ? undefined : String(stageTask!.attempt)"
+              :stop="stage!.meta.bootstrapStop"
+              :running="stageTask!.daemonAlive"
               @changed="load"
             />
             <DeferredFindings
-              v-if="stage.id === 'gate_accept' && !stage.readOnly"
-              :task="stage.task"
+              v-if="stage!.id === 'gate_accept' && !stage!.readOnly"
+              :task="stage!.task"
               :profile="stageTask?.profile"
-              :attempt="stageTask?.attempt"
+              :attempt="stageTask?.attempt == null ? undefined : String(stageTask.attempt)"
               @ready="stageFindingsReady = $event"
             />
 
@@ -736,7 +736,7 @@
                 <div class="gwalh">Решено арбитром, пока тебя не звали</div>
                 <div v-for="(row, i) in gateArbiterLog" :key="i" class="gwrow" :class="row.verdict">
                   <span class="gwtag">{{ row.verdict === 'deferred' ? 'за тебя' : 'тупик' }}</span>
-                  <span class="gwwhat">{{ row.card.what }}</span>
+                  <span class="gwwhat">{{ row.card!.what }}</span>
                 </div>
                 <p class="gate-hint">Не согласен — отклони ворота либо верни конвейер
                   на нужный узел: решение арбитра отменяется тем же возвратом.</p>
@@ -781,7 +781,7 @@
                     tone="success"
                     variant="solid"
                     :loading="stageBusy === 'gate'"
-                    :disabled="stageBusy === 'gate' || (stage.id === 'gate_accept' && !stageFindingsReady)"
+                    :disabled="stageBusy === 'gate' || (stage!.id === 'gate_accept' && !stageFindingsReady)"
                     loading-label="Принимаю решение"
                     @click="gateDecide('approve')"
                   >
@@ -862,39 +862,39 @@
                  которому принадлежит, а не полосой в шапке — вопрос «что от меня хотят»
                  она не решает, а место занимала всегда, даже когда сообщать было нечего. -->
             <div v-if="stageHasMeta" class="smeta" aria-label="Показатели этапа">
-              <span v-if="stage.meta.at" class="smchip mono">{{ stage.meta.at.slice(11, 16) || stage.meta.at }}</span>
-              <span v-if="stage.meta.dur != null" class="smchip">{{ stage.meta.dur }} мин</span>
+              <span v-if="stage!.meta.at" class="smchip mono">{{ stage!.meta.at.slice(11, 16) || stage!.meta.at }}</span>
+              <span v-if="stage!.meta.dur != null" class="smchip">{{ stage!.meta.dur }} мин</span>
               <!-- Ноль субагентов не сообщает ничего: заход без них — обычное дело, а чип
                    ради нуля занимал всю полосу метаданных. То же правило, что у отказов прав. -->
-              <span v-if="stage.meta.fanout" class="smchip">{{ stage.meta.fanout }} субаг.</span>
+              <span v-if="stage!.meta.fanout" class="smchip">{{ stage!.meta.fanout }} субаг.</span>
               <!-- Отказ политики прав показываем ТОЛЬКО когда он был: ноль и «не знаем»
                    одинаково означают «беспокоиться не о чем», а нулевой чип в каждой строке
                    обесценил бы ненулевой. Он предупреждает о подмене проверки: агент, которому
                    запретили нужный запуск, склонен подобрать похожий и выдать его результат за
                    доказательство. -->
-              <span v-if="stage.meta.denials" class="smchip failed"
+              <span v-if="stage!.meta.denials" class="smchip failed"
                 v-tooltip="'Отказов политики прав внутри хода. Проверь, не подменил ли агент запрещённую проверку похожей.'">
-                {{ stage.meta.denials }} отказ. прав</span>
-              <span v-if="stage.meta.tokens" class="smchip mono">{{ stage.meta.tokens.toLocaleString('ru') }} ток.</span>
-              <span v-if="stage.meta.fails" class="smchip failed">{{ stage.meta.fails }} возвр.</span>
-              <span v-if="stage.sub" class="smchip">{{ stage.sub }}</span>
-              <span v-if="stage.meta.verdict?.reviewed?.length" class="smchip"
-                v-tooltip="stage.meta.verdict.reviewed.join('\n')">
-                просм. файлов: {{ stage.meta.verdict.reviewed.length }}</span>
+                {{ stage!.meta.denials }} отказ. прав</span>
+              <span v-if="stage!.meta.tokens" class="smchip mono">{{ stage!.meta.tokens.toLocaleString('ru') }} ток.</span>
+              <span v-if="stage!.meta.fails" class="smchip failed">{{ stage!.meta.fails }} возвр.</span>
+              <span v-if="stage!.sub" class="smchip">{{ stage!.sub }}</span>
+              <span v-if="stage!.meta.verdict?.reviewed?.length" class="smchip"
+                v-tooltip="stage!.meta.verdict!.reviewed.join('\n')">
+                просм. файлов: {{ stage!.meta.verdict!.reviewed.length }}</span>
             </div>
 
             <!-- Выбор исполнителя этапа + та runner-chain, по которой движок принимает решение. -->
-            <div v-if="stage.meta.runner" class="sect runner-sect">
+            <div v-if="stage!.meta.runner" class="sect runner-sect">
               <div class="secth">
                 Исполнитель
-                <span class="runner-source">{{ RUNNER_SOURCE[stage.meta.runner.source] || stage.meta.runner.source }}</span>
+                <span class="runner-source">{{ RUNNER_SOURCE[stage!.meta.runner.source || ''] || stage!.meta.runner.source }}</span>
               </div>
               <!-- Главное действие узла: выбрать исполнителя одним кликом, не закрывая модалку. -->
-              <div v-if="!stage.readOnly && !stageRunnerLive && stageRunnerOptions.length" class="runner-override">
+              <div v-if="!stage!.readOnly && !stageRunnerLive && stageRunnerOptions.length" class="runner-override">
                 <div class="runner-override-row">
                   <span class="runner-override-lbl">Исполнитель этапа</span>
                   <UiButton
-                    v-if="stage.meta.runner.source === 'task-stage'"
+                    v-if="stage!.meta.runner.source === 'task-stage'"
                     class="btn runner-reset"
                     data-role="pipeline-compact-action"
                     variant="text"
@@ -921,39 +921,39 @@
                     @click="pickStageRunner(id)"
                   >
                     <b>{{ providerLabel(id) }}</b>
-                    <small v-if="runnerModelEffortLabel(stage.meta.runner, id)">{{ runnerModelEffortLabel(stage.meta.runner, id) }}</small>
+                    <small v-if="runnerModelEffortLabel(stage!.meta.runner, id)">{{ runnerModelEffortLabel(stage!.meta.runner, id) }}</small>
                   </UiButton>
                 </div>
-                <p v-if="stage.meta.runner.source === 'task-stage'" class="runner-hint">
+                <p v-if="stage!.meta.runner.source === 'task-stage'" class="runner-hint">
                   Сброс вернёт этап к исполнителю, заданному при запуске задачи, а без него — к политике профиля.
                 </p>
-                <p v-if="stage.status === 'run' && !stage.daemonAlive" class="runner-hint">
+                <p v-if="stage!.status === 'run' && !stage!.daemonAlive" class="runner-hint">
                   Прогон остановлен — выбранный исполнитель запустится после «Продолжить прогон».
                 </p>
               </div>
               <!-- Цепочка вторична: она объясняет, кто подхватит этап при аварии, и решения не требует. -->
               <div class="runner-chain">
                 <span class="runner-chain-lbl">цепочка</span>
-                <template v-for="(id, i) in stage.meta.runner.chain" :key="id">
+                <template v-for="(id, i) in stage!.meta.runner.chain" :key="id">
                   <span v-if="i" class="runner-arrow">→</span>
                   <span class="runner-hop"
-                        :class="{ actual: id === stage.meta.runner.actual, reserve: i > 0 }"
+                        :class="{ actual: id === stage!.meta.runner.actual, reserve: i > 0 }"
                         v-tooltip="i
                           ? 'резерв: подхватит этап, если основной отпадёт'
                           : 'основной исполнитель'">
                     {{ providerLabel(id) }}
-                    <small v-if="runnerModelEffortLabel(stage.meta.runner, id)">{{ runnerModelEffortLabel(stage.meta.runner, id) }}</small>
+                    <small v-if="runnerModelEffortLabel(stage!.meta.runner, id)">{{ runnerModelEffortLabel(stage!.meta.runner, id) }}</small>
                   </span>
                 </template>
               </div>
-              <div v-if="stage.meta.runner.actual" class="runner-current"
-                   :class="{ switched: stage.meta.runner.switched }">
-                Сейчас: <b>{{ runnerNodeLabel(stage.meta.runner) }}</b>
-                <span v-if="stage.meta.runner.reason"> · {{ runnerReasonLabel(stage.meta.runner.reason) }}</span>
+              <div v-if="stage!.meta.runner.actual" class="runner-current"
+                   :class="{ switched: stage!.meta.runner.switched }">
+                Сейчас: <b>{{ runnerNodeLabel(stage!.meta.runner) }}</b>
+                <span v-if="stage!.meta.runner.reason"> · {{ runnerReasonLabel(stage!.meta.runner.reason) }}</span>
               </div>
-              <div v-if="stage.meta.runner.attempts?.length" class="runner-attempts">
+              <div v-if="stage!.meta.runner.attempts?.length" class="runner-attempts">
                 <div class="runner-attempt-title">Попытки запуска</div>
-                <div v-for="a in stage.meta.runner.attempts" :key="a.id" class="runner-attempt">
+                <div v-for="a in stage!.meta.runner.attempts" :key="a.id" class="runner-attempt">
                   <span class="mono">#{{ a.epoch ?? '—' }}</span>
                   <b>{{ providerLabel(a.runner) }}</b>
                   <span v-if="runnerAttemptModelLabel(a)" class="runner-attempt-model mono">{{ runnerAttemptModelLabel(a) }}</span>
@@ -968,9 +968,9 @@
                   </span>
                 </div>
               </div>
-              <div v-if="!stage.readOnly && stageRunnerLive" class="runner-switches">
+              <div v-if="!stage!.readOnly && stageRunnerLive" class="runner-switches">
                 <UiButton
-                  v-for="id in stage.meta.runner.chain.filter((x) => x !== stage.meta.runner.actual)"
+                  v-for="id in stage!.meta.runner.chain.filter((x) => x !== stage!.meta.runner!.actual)"
                   :key="id"
                   class="btn runner-switch"
                   tone="warning"
@@ -986,7 +986,7 @@
             </div>
 
             <!-- Живая лента действий агента (для идущего этапа) -->
-            <div v-if="stage.status === 'run' && stageActivity?.live" class="sect content-sect">
+            <div v-if="stage!.status === 'run' && stageActivity?.live" class="sect content-sect">
               <div class="secth"><span class="live-dot"></span> Агент сейчас</div>
               <div v-if="stageActivity.live.actions.length" class="live-feed" ref="liveFeed">
                 <div v-for="(a, i) in stageActivity.live.actions" :key="i" class="lf-row" :class="a.status">
@@ -1009,7 +1009,7 @@
             </div>
 
             <!-- Журнал этапов (stages.log) — сворачиваемый -->
-            <div v-if="stage.status === 'run' && stageActivity?.tail?.length" class="sect content-sect">
+            <div v-if="stage!.status === 'run' && stageActivity?.tail?.length" class="sect content-sect">
               <UiDisclosureButton
                 class="stage-disclosure"
                 data-role="pipeline-section-disclosure"
@@ -1053,9 +1053,9 @@
 
         <!-- Универсальные действия закреплены внизу и не уезжают за длинным документом. -->
         <footer class="sactions">
-          <span class="sactions-context"><b class="mono">#{{ stage.task }}</b> · действия с задачей</span>
+          <span class="sactions-context"><b class="mono">#{{ stage!.task }}</b> · действия с задачей</span>
           <div class="sactions-buttons">
-            <OpenDiffButton :task-id="stage.task" />
+            <OpenDiffButton :task-id="stage!.task" />
           </div>
         </footer>
     </UiDialog>
@@ -1072,16 +1072,57 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import DeferredFindings from './pipeline/DeferredFindings.vue';
 import BootstrapDecision from './pipeline/BootstrapDecision.vue';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api } from '../shared/apiClient.ts';
+import { isRecord } from '../../../shared/lib/objects.ts';
+import { errorMessage } from '../../../shared/lib/errors.ts';
+import {
+  decodePipelineTasks, decodePipelineViewGraph, decodeFactoryRunners,
+  decodePipelineActivity, decodePipelineReply,
+} from '../shared/pipelineContracts.ts';
+import type {
+  PipelineViewTask, PipelineViewGraph, PipelineNotice, TaskObservation,
+  NodeMetadata, NodeVerdict, ArbiterCard, PipelineActivity, PipelineReply,
+} from '../shared/pipelineContracts.ts';
+import type { BoardTask } from '../shared/boardContracts.ts';
+
+type TaskId = string | number;
+interface Stage {
+  task: TaskId;
+  id: string;
+  key: string;
+  runnerKey: string;
+  isGate: boolean;
+  label: string;
+  sub?: string;
+  readOnly: boolean;
+  daemonAlive: boolean;
+  status: string;
+  meta: NodeMetadata;
+}
+interface StageNode {
+  id: string;
+  label: string;
+  subtitle?: string;
+  status: string;
+}
+interface ArbiterDecisionState {
+  task: TaskId;
+  node: string;
+  key: string;
+  label: string;
+  card: ArbiterCard;
+  questions: ReturnType<typeof rewindQuestionsOf>;
+}
+
 import { useSse } from '../composables/useSse.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
-import { useUiStore } from '../stores/ui.js';
-import { useTasksStore } from '../stores/tasks.js';
-import { useBoardStore } from '../stores/board.js';
+import { useUiStore } from '../stores/ui.ts';
+import { useTasksStore } from '../stores/tasks.ts';
+import { useBoardStore } from '../stores/board.ts';
 import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.ts';
 import { mdToHtml } from '../shared/md.ts';
 import {
@@ -1096,17 +1137,17 @@ import {
   UiTextarea,
   vTooltip,
 } from '../ui';
-import { sandboxUrl } from '../shared/sandbox.js';
+import { sandboxUrl } from '../shared/sandbox.ts';
 import { agentActivityLabel, silenceReason } from '../../../shared/pipeline/agentActivity.ts';
-import { arbiterRunLabel, nodeIsArbitrated } from '../shared/arbiter-run.js';
-import { buildRewindNote, rewindQuestionsOf } from '../shared/rewind-note.js';
+import { arbiterRunLabel, nodeIsArbitrated } from '../shared/arbiterRun.ts';
+import { buildRewindNote, rewindQuestionsOf } from '../shared/rewindNote.ts';
 // «Ждёт тебя» и подписи узлов — общие с чипом в навигации и оповещениями:
 // цифра на чипе обязана сходиться с тем, что нарисовано на этой странице.
 import { waitingReason, stripEmoji } from '../../../shared/pipeline/pipelineWait.ts';
 import {
   pipelineBadgeSummary,
   pipelineTopbarItems,
-} from '../shared/pipeline-nav-badge.js';
+} from '../shared/pipelineNavBadge.ts';
 import {
   attemptCostLabel,
   attemptCostTitle,
@@ -1127,8 +1168,8 @@ const ui = useUiStore();
 const taskStore = useTasksStore();
 const board = useBoardStore();
 
-const tasks = ref([]);
-const error = ref(null);
+const tasks = ref<PipelineViewTask[]>([]);
+const error = ref<string | null>(null);
 const loaded = ref(false);
 const now = ref(Date.now());
 const silenceWindow = ref(0);
@@ -1136,12 +1177,33 @@ const silenceWindow = ref(0);
 // Тикет — обязательный вход route-прогона, поэтому его заголовок доступен и задачам
 // без трекера. Живое название B24 оставляем приоритетным и только его делаем
 // кликабельным: ручной тикет не должен открывать модалку несуществующей B24-задачи.
-function b24Title(taskNum) { return taskStore.title(taskNum); }
-function title(taskOrNum) {
+/**
+ * Сохранённый список карточек проверяет контейнер до создания локального Set.
+ * Ошибка JSON сохраняет прежний отказ, автоматического восстановления здесь нет.
+ */
+function collapsedCards(value: unknown): TaskId[] {
+  if (!Array.isArray(value) || !value.every((id) => typeof id === 'string' || typeof id === 'number')) {
+    throw new TypeError('Неверный список свёрнутых карточек');
+  }
+
+  return value;
+}
+
+function b24Title(taskNum: TaskId) {
+  return taskStore.title(taskNum);
+}
+
+
+/**
+ * Показывает живой заголовок B24 с запасным названием ручного тикета.
+ * Числовой вход сначала связывается с текущим списком конвейера.
+ */
+function title(taskOrNum: PipelineViewTask | TaskId) {
   const taskNum = typeof taskOrNum === 'object' ? taskOrNum.task : taskOrNum;
   const task = typeof taskOrNum === 'object'
     ? taskOrNum
     : tasks.value.find((item) => Number(item.task) === Number(taskNum));
+
   return b24Title(taskNum) || task?.title || null;
 }
 
@@ -1149,7 +1211,7 @@ const boardTasksById = computed(() => new Map(
   (board.data?.tasks || []).map((task) => [Number(task.id), task]),
 ));
 
-function boardTask(t) {
+function boardTask(t: PipelineViewTask) {
   return boardTasksById.value.get(Number(t.task));
 }
 
@@ -1157,16 +1219,31 @@ function boardTask(t) {
  * Не превращаем отсутствие портальной задачи в ложное состояние «таймер стоит».
  * Статус существует только для явного булева значения из снимка доски.
  */
-function b24TimerState(t) {
+function b24TimerState(t: PipelineViewTask) {
   const timerRunning = boardTask(t)?.timerRunning;
-  if (timerRunning === true) return 'running';
-  if (timerRunning === false) return 'stopped';
+
+  if (timerRunning === true) {
+    return 'running';
+  }
+  if (timerRunning === false) {
+    return 'stopped';
+  }
+
   return null;
 }
 
-function b24TimerLabel(t) {
+
+/**
+ * Подписывает только явно известное состояние портального таймера.
+ * Отсутствие задачи остаётся пустой подписью, а не остановленным таймером.
+ */
+function b24TimerLabel(t: PipelineViewTask) {
   const task = boardTask(t);
-  if (!task || typeof task.timerRunning !== 'boolean') return '';
+
+  if (!task || typeof task.timerRunning !== 'boolean') {
+    return '';
+  }
+
   return task.timerRunning
     ? `B24-таймер идёт · ${secToHMS(liveTimerSec(task, now.value))}`
     : 'B24-таймер стоит';
@@ -1175,53 +1252,86 @@ function b24TimerLabel(t) {
 // Таймеры, идущие ВНЕ фабрики: активные задачи доски, которых нет на конвейере.
 const factoryIds = computed(() => new Set(tasks.value.map((t) => Number(t.task))));
 const outsideTimers = computed(() => {
-  const d = board.data; if (!d) return [];
+
+  const d = board.data;
+
+  if (!d) {
+    return [];
+  }
+
   return (d.tasks || []).filter((t) => (
     t.timerRunning && !factoryIds.value.has(Number(t.id))
   ));
 });
-function outsideElapsed(t) {
+
+function outsideElapsed(t: BoardTask) {
   return liveTimerSec(t, now.value);
 }
 
 // Чистая работа узлов конвейера (не путать с таймером B24). Для закреплённого маршрута
 // сервер складывает фактические runner-запуски текущей попытки: паузы между ними и
 // ожидание человека на воротах сюда не попадают.
-function elapsedSec(t) {
+function elapsedSec(t: PipelineViewTask) {
   return pipelineWorkSec(t.graph?.timing, now.value);
 }
-function elapsedLabel(t) {
+
+
+/**
+ * Показывает длительность работы с признаком приблизительного расчёта.
+ * Отсутствующая длительность не превращается в ноль.
+ */
+function elapsedLabel(t: PipelineViewTask) {
   const sec = elapsedSec(t);
-  if (sec == null) return '';
+
+  if (sec == null) {
+    return '';
+  }
+
   return `${t.graph?.timing?.approximate ? '≈' : ''}${secToHMS(sec)}`;
 }
-function elapsedTitle(t) {
+
+
+/**
+ * Объясняет источник показанной длительности работы узлов.
+ * Ожидание человека исключено при обоих поддерживаемых источниках.
+ */
+function elapsedTitle(t: PipelineViewTask) {
   if (t.graph?.timing?.source === 'runner-telemetry') {
-    return 'фактическое время запущенных агентов текущей попытки: паузы между запусками и ожидание человека на воротах не входят';
+    return 'фактическое время запущенных агентов текущей попытки: '
+      + 'паузы между запусками и ожидание человека на воротах не входят';
   }
+
   return t.graph?.timing
     ? 'оценка по журналу маршрута: ожидание человека на воротах не входит'
     : '';
 }
 
-let ticker = null;
+let ticker: ReturnType<typeof setInterval> | null = null;
+
 onMounted(() => {
-  ticker = setInterval(() => { now.value = Date.now(); }, 1000);
+  ticker = setInterval(() => {
+    now.value = Date.now();
+  }, 1000);
 });
 onUnmounted(() => {
-  if (ticker) clearInterval(ticker);
-  clearInterval(actPoll);
-  clearTimeout(stateReloadTimer);
+  if (ticker) {
+    clearInterval(ticker ?? undefined);
+  }
+
+  clearInterval(actPoll ?? undefined);
+  clearTimeout(stateReloadTimer ?? undefined);
 });
 
 // Тумблеры (переживают перезагрузку — как в старом дашборде).
 const compact = ref(localStorage.getItem('grigdesk-compact') === '1');
 const loopsOn = ref(localStorage.getItem('grigdesk-loops') === '1');
-function toggleCompact(value) {
+
+function toggleCompact(value: boolean) {
   compact.value = value;
   localStorage.setItem('grigdesk-compact', value ? '1' : '0');
 }
-function toggleLoops(value) {
+
+function toggleLoops(value: boolean) {
   loopsOn.value = value;
   localStorage.setItem('grigdesk-loops', value ? '1' : '0');
 }
@@ -1232,11 +1342,15 @@ const savedProject = localStorage.getItem('grigdesk-pipeline-project')
   || localStorage.getItem('grigdesk-project')
   || 'all';
 const activeProject = ref(savedProject);
-function setProject(project) {
+
+function setProject(project: string) {
   activeProject.value = project;
   localStorage.setItem('grigdesk-pipeline-project', project);
 }
-const projects = computed(() => [...new Set(tasks.value.map((t) => t.profile).filter(Boolean))]);
+
+const projects = computed(() => [...new Set(
+  tasks.value.map((t) => t.profile).filter((profile): profile is string => !!profile),
+)]);
 const projectCounts = computed(() => {
   const counts = new Map();
 
@@ -1249,7 +1363,11 @@ const projectCounts = computed(() => {
   return counts;
 });
 const projectOptions = computed(() => [
-  { id: 'all', label: 'Все', count: tasks.value.length },
+  {
+    id: 'all',
+    label: 'Все',
+    count: tasks.value.length,
+  },
   ...projects.value.map((project) => ({
     id: project,
     label: project,
@@ -1259,10 +1377,10 @@ const projectOptions = computed(() => [
 
 // Тот же приём, что у адаптивных легенд графиков: скрытый ряд даёт натуральную
 // ширину каждой кнопки, а ResizeObserver пересчитывает хвост без breakpoint-магии.
-const projectStrip = ref(null);
-const projectMeasure = ref(null);
-const visibleProjectIds = ref([]);
-let projectResizeObserver = null;
+const projectStrip = ref<HTMLElement | null>(null);
+const projectMeasure = ref<HTMLElement | null>(null);
+const visibleProjectIds = ref<string[]>([]);
+let projectResizeObserver: ResizeObserver | null = null;
 
 const visibleProjectOptions = computed(() => {
   if (!visibleProjectIds.value.length) {
@@ -1279,13 +1397,23 @@ const hiddenProjectOptions = computed(() => {
   return projectOptions.value.filter((option) => !visible.has(option.id));
 });
 
-function projectWidth(ids, widths, gap) {
+
+/**
+ * Суммирует измеренные ширины выбранных кнопок в исходном порядке.
+ * Промежуток добавляется только между присутствующими элементами.
+ */
+function projectWidth(ids: Set<string>, widths: Map<string, number>, gap: number) {
   let width = 0;
   let count = 0;
 
   for (const option of projectOptions.value) {
-    if (!ids.has(option.id)) continue;
-    if (count) width += gap;
+    if (!ids.has(option.id)) {
+      continue;
+    }
+    if (count) {
+      width += gap;
+    }
+
     width += widths.get(option.id) || 0;
     count += 1;
   }
@@ -1293,27 +1421,37 @@ function projectWidth(ids, widths, gap) {
   return width;
 }
 
+
+/**
+ * Оставляет в видимом ряду выбранный проект и доступные соседние кнопки.
+ * Остальные проекты уходят в меню после измерения настоящей ширины DOM.
+ */
 function measureProjectStrip() {
   const strip = projectStrip.value;
   const measure = projectMeasure.value;
 
-  // DOM-less component tests keep the complete row. Real geometry is applied as soon
-  // as the browser reports a positive content width.
+  // Без DOM сохраняем полный ряд кнопок. Реальная геометрия применяется,
+  // когда браузер сообщает положительную ширину контейнера.
   if (!strip || !measure || strip.clientWidth <= 0) {
     visibleProjectIds.value = [];
+
     return;
   }
 
-  const widths = new Map();
-  for (const element of measure.querySelectorAll('[data-project-measure]')) {
+  const widths = new Map<string, number>();
+
+  for (const element of measure.querySelectorAll<HTMLElement>('[data-project-measure]')) {
     widths.set(
-      element.dataset.projectMeasure,
+      element.dataset.projectMeasure!,
       element.getBoundingClientRect().width || element.offsetWidth,
     );
   }
 
   const options = projectOptions.value;
-  if (!options.length || widths.size !== options.length) return;
+
+  if (!options.length || widths.size !== options.length) {
+    return;
+  }
 
   const style = getComputedStyle(measure);
   const gap = Number.parseFloat(style.columnGap || style.gap) || 6;
@@ -1322,10 +1460,11 @@ function measureProjectStrip() {
 
   if (projectWidth(everyId, widths, gap) <= available) {
     visibleProjectIds.value = options.map((option) => option.id);
+
     return;
   }
 
-  const more = measure.querySelector('[data-project-more-measure]');
+  const more = measure.querySelector<HTMLElement>('[data-project-more-measure]');
   const moreWidth = more
     ? (more.getBoundingClientRect().width || more.offsetWidth)
     : 0;
@@ -1336,14 +1475,21 @@ function measureProjectStrip() {
   // «Все» остаётся быстрым возвратом, пока вместе с выбранным проектом помещается.
   if (selected !== 'all') {
     const withAll = new Set(chosen).add('all');
-    if (projectWidth(withAll, widths, gap) <= budget) chosen.add('all');
+
+    if (projectWidth(withAll, widths, gap) <= budget) {
+      chosen.add('all');
+    }
   }
 
   // Остаток заполняется в исходном порядке, но место выбранного уже зарезервировано:
   // проект, взятый из +N, не исчезает сразу после клика.
   for (const option of options) {
-    if (chosen.has(option.id)) continue;
+    if (chosen.has(option.id)) {
+      continue;
+    }
+
     const candidate = new Set(chosen).add(option.id);
+
     if (projectWidth(candidate, widths, gap) <= budget) {
       chosen.add(option.id);
     }
@@ -1379,7 +1525,8 @@ const projectTasks = computed(() => (activeProject.value === 'all'
 const STATUS_IDS = new Set(['all', 'running', 'waiting', 'error', 'inactive']);
 const savedStatus = localStorage.getItem('grigdesk-pipeline-status') || 'all';
 const activeStatus = ref(STATUS_IDS.has(savedStatus) ? savedStatus : 'all');
-function setStatus(status) {
+
+function setStatus(status: string) {
   activeStatus.value = STATUS_IDS.has(status) ? status : 'all';
   localStorage.setItem('grigdesk-pipeline-status', activeStatus.value);
 }
@@ -1388,11 +1535,11 @@ function setStatus(status) {
 // проблема сильнее штатного ожидания, ожидание сильнее обычной работы.
 const pipelineState = computed(() => {
   const state = {
-    stalled: [],
-    silent: [],
-    waiting: [],
-    running: [],
-    observedByTask: {},
+    stalled: [] as PipelineNotice[],
+    silent: [] as PipelineNotice[],
+    waiting: [] as PipelineNotice[],
+    running: [] as PipelineNotice[],
+    observedByTask: {} as Record<string, Pick<TaskObservation, 'stage' | 'progress'>>,
   };
 
   for (const task of projectTasks.value) {
@@ -1469,7 +1616,7 @@ const statusKindByTask = computed(() => {
  * Подсказка раскрывает не только цифру, но и конкретные задачи с причиной.
  * Для пустой категории честно говорит, что таких задач в выбранном проекте нет.
  */
-function statusHint(kind, emptyText) {
+function statusHint(kind: string, emptyText: string) {
   const items = kind === 'inactive'
     ? projectTasks.value
       .filter((task) => statusKindByTask.value.get(String(task.task)) === 'inactive')
@@ -1485,7 +1632,8 @@ function statusHint(kind, emptyText) {
   }
 
   return items.map((item) => {
-    const detail = item.detail || item.stage || item.title;
+    const detail = item.detail || ('stage' in item ? item.stage : '') || item.title;
+
     return detail ? `#${item.task}: ${detail}` : `#${item.task}`;
   }).join('\n');
 }
@@ -1495,35 +1643,35 @@ const statusOptions = computed(() => [
     id: 'all',
     label: 'Все',
     count: projectTasks.value.length,
-    tone: 'neutral',
+    tone: 'neutral' as const,
     hint: 'Все задачи выбранного проекта',
   },
   {
     id: 'running',
     label: 'В работе',
     count: statusSummary.value.runningCount,
-    tone: 'accent',
+    tone: 'accent' as const,
     hint: statusHint('running', 'Сейчас нет задач в обычной работе'),
   },
   {
     id: 'waiting',
     label: 'Ждут решения',
     count: statusSummary.value.waitingCount,
-    tone: 'warning',
+    tone: 'warning' as const,
     hint: statusHint('waiting', 'Сейчас никто не ждёт твоего решения'),
   },
   {
     id: 'error',
     label: 'Проблемы',
     count: statusSummary.value.errorCount,
-    tone: 'danger',
+    tone: 'danger' as const,
     hint: statusHint('error', 'Сейчас нет вставших или молчащих прогонов'),
   },
   {
     id: 'inactive',
     label: 'Неактивные',
     count: projectTasks.value.length - statusSummary.value.totalCount,
-    tone: 'neutral',
+    tone: 'neutral' as const,
     hint: statusHint(
       'inactive',
       'Нет завершённых, остановленных или доступных только для чтения прогонов',
@@ -1532,7 +1680,7 @@ const statusOptions = computed(() => [
 ]);
 const currentStatusOption = computed(() => (
   statusOptions.value.find((option) => option.id === activeStatus.value)
-  || statusOptions.value[0]
+  || statusOptions.value[0]!
 ));
 
 const filteredTasks = computed(() => {
@@ -1544,6 +1692,7 @@ const filteredTasks = computed(() => {
     statusKindByTask.value.get(String(task.task)) === activeStatus.value
   ));
 });
+
 function resetStatusFilter() {
   setStatus('all');
 }
@@ -1560,45 +1709,75 @@ watch(tasks, (list) => {
 });
 
 // По-карточное сворачивание (запоминается). Свёрнута, если глобальный compact ИЛИ отмечена.
-const collapsedSet = ref(new Set(JSON.parse(localStorage.getItem('grigdesk-cards-collapsed') || '[]')));
-function toggleCard(task) {
+const collapsedSet = ref(new Set<TaskId>(collapsedCards(
+  JSON.parse(localStorage.getItem('grigdesk-cards-collapsed') || '[]'),
+)));
+
+
+/**
+ * Меняет свёрнутость одной карточки через новый Set для реактивности.
+ * Порядок записи локальной настройки остаётся прежним.
+ */
+function toggleCard(task: TaskId) {
   const s = new Set(collapsedSet.value);
+
   s.has(task) ? s.delete(task) : s.add(task);
   collapsedSet.value = s;
   localStorage.setItem('grigdesk-cards-collapsed', JSON.stringify([...s]));
 }
-function isCollapsed(task) { return compact.value || collapsedSet.value.has(task); }
+
+function isCollapsed(task: TaskId) {
+  return compact.value || collapsedSet.value.has(task);
+}
 
 // Модалка этапа (клик по узлу графа): инфо + управление (ворота/форс/указание/активность).
-const stage = ref(null);
-const stageBusy = ref(null);
+const stage = ref<Stage | null>(null);
+const stageBusy = ref<string | null>(null);
 // Два РАЗНЫХ текста, а не один на обе кнопки: у ворот пояснение доезжает до агента только
 // при отклонении, у возврата — всегда. Общий ref переносил бы набранное из одного смысла
 // в другой и подсказывал, что при «Принять» текст тоже куда-то уйдёт (он не уходит).
 const gateComment = ref('');
 const stageFindingsReady = ref(false);
 const gateRejecting = ref(false);
-const gateNoteEl = ref(null);
+const gateNoteEl = ref<InstanceType<typeof UiTextarea> | null>(null);
 const rewindComment = ref('');
 // Ответы на вопросы узла: id находки → текст. Отдельно от свободного поля, потому что
 // каждый ответ обязан приехать агенту привязанным к ЕГО вопросу, а не сплошняком.
-const rewindAnswers = ref({});
-const stageActivity = ref(null);
+const rewindAnswers = ref<Record<string, string>>({});
+const stageActivity = ref<PipelineActivity | null>(null);
 const stageDoc = ref('');       // документ этапа (план/разведнота/диагноз…) — рендерится в модалке
 const stageDocOpen = ref(true);
 const stageLogOpen = ref(false);
 const pipelineContext = useUiContextSource('pipeline', { layer: 'overlay', active: false });
-const liveFeed = ref(null);
+const liveFeed = ref<HTMLElement | null>(null);
 const stageDocLoading = ref(false);
-let actPoll = null;
+let actPoll: ReturnType<typeof setInterval> | null = null;
 // Какой документ показывать на каком узле: у ворот плана — сам план, у приёмки — отчёт.
-const NODE_DOC = {
-  gate_plan: 'plan', plan: 'plan', skeptic: 'plan', validate: 'plan', translator: 'plan',
-  scout: 'recon', diagnose: 'diag', hyposkeptic: 'diag', proof: 'diag', gate_cause: 'diag',
-  hunt_access: 'diag', hunt_data: 'diag', hunt_errors: 'diag', hunt_race: 'diag', verify: 'diag',
-  baseline: 'diag', perfplan: 'plan', perfskeptic: 'plan',
-  ship: 'ship', gate_accept: 'report', browser: 'report', triage: 'report',
-  measure: 'report', measurecheck: 'report',
+const NODE_DOC: Record<string, string> = {
+  gate_plan: 'plan',
+  plan: 'plan',
+  skeptic: 'plan',
+  validate: 'plan',
+  translator: 'plan',
+  scout: 'recon',
+  diagnose: 'diag',
+  hyposkeptic: 'diag',
+  proof: 'diag',
+  gate_cause: 'diag',
+  hunt_access: 'diag',
+  hunt_data: 'diag',
+  hunt_errors: 'diag',
+  hunt_race: 'diag',
+  verify: 'diag',
+  baseline: 'diag',
+  perfplan: 'plan',
+  perfskeptic: 'plan',
+  ship: 'ship',
+  gate_accept: 'report',
+  browser: 'report',
+  triage: 'report',
+  measure: 'report',
+  measurecheck: 'report',
   // У аудита свой документ — досье приёмки. Ворота рядом продолжают показывать
   // отчёт: сводку аудита узел дописывает и туда, поэтому человеку на воротах
   // видно главное, а полное досье — в клике по узлу.
@@ -1607,35 +1786,72 @@ const NODE_DOC = {
   // было: документ существовал и не открывался нигде.
   review: 'review',
 };
+
+
+/**
+ * Описывает открытый узел и выбранную поверхность для общего контекста UI.
+ * Закрытая модалка не публикует сведения о прежнем узле.
+ */
 function pipelineContextDetails() {
-  if (!stage.value) return null;
-  const document = stageDocOpen.value ? NODE_DOC[stage.value.id] || null : null;
+  if (!stage.value) {
+    return null;
+  }
+
+  const document = stageDocOpen.value ? NODE_DOC[stage.value!.id] || null : null;
   const tab = stageLogOpen.value ? 'activity' : document ? 'document' : 'overview';
-  const details = { taskId: String(stage.value.task), stageId: String(stage.value.id), tab };
+  const details = {
+    taskId: String(stage.value!.task),
+    stageId: String(stage.value!.id),
+    tab,
+  };
+
   return { ...details, ...(document ? { document } : {}) };
 }
+
 const pipelineContextIdentity = computed(() => (
-  stage.value ? `${stage.value.task}:${stage.value.id}` : ''
+  stage.value ? `${stage.value!.task}:${stage.value!.id}` : ''
 ));
+
 watch(pipelineContextIdentity, (identity, previous) => {
-  if (!identity) { pipelineContext.blur(); return; }
-  const taskId = String(stage.value.task);
+
+  if (!identity) {
+    pipelineContext.blur();
+
+    return;
+  }
+
+  const taskId = String(stage.value!.task);
   const next = {
     routingScope: { kind: 'task', taskId },
     details: pipelineContextDetails(),
   };
-  if (identity !== previous) pipelineContext.focus(next);
-  else pipelineContext.update(next);
+
+  if (identity !== previous) {
+    pipelineContext.focus(next);
+  } else {
+    pipelineContext.update(next);
+  }
 }, { immediate: true });
 watch(
   () => [pipelineContextIdentity.value, stageDocOpen.value, stageLogOpen.value],
-  () => { if (stage.value) pipelineContext.update({ details: pipelineContextDetails() }); },
+  () => {
+    if (stage.value) {
+      pipelineContext.update({ details: pipelineContextDetails() });
+    }
+  },
   { immediate: true },
 );
-const STAGE_HINT = {
-  done: 'пройден', run: 'выполняется сейчас', wait: 'ждёт твоего решения', pending: 'ещё не начинался',
-  skip: 'пропущен осознанно', idle: 'нет данных (прогон по прежней схеме)', stall: 'завис — агент молчит',
-  skipbad: 'пропущен без причины — аномалия', premature: 'преждевременно: хвост не доделан',
+
+const STAGE_HINT: Record<string, string> = {
+  done: 'пройден',
+  run: 'выполняется сейчас',
+  wait: 'ждёт твоего решения',
+  pending: 'ещё не начинался',
+  skip: 'пропущен осознанно',
+  idle: 'нет данных (прогон по прежней схеме)',
+  stall: 'завис — агент молчит',
+  skipbad: 'пропущен без причины — аномалия',
+  premature: 'преждевременно: хвост не доделан',
   fail: 'провалился — стенд не поднялся',
 };
 // Подпись статуса узла. Обычно берётся из карты, но у остановки есть два случая, когда карта
@@ -1647,118 +1863,196 @@ const STAGE_HINT = {
 // что и у причины остановки в карточке (`meta.stall`), чтобы бейдж и причина рассказывали
 // одну историю: на t7989 бейдж говорил «молчит», причина — «вернул решение», замечание —
 // «исчерпан бюджет повторов».
-function stageStatusHint(s) {
-  if (s.status === 'stall' && s.meta?.stall?.outcome === 'exhausted') return 'раннер не получил результат';
-  if (s.status === 'stall' && s.meta?.verdict?.stop === 'human') return 'вернул решение человеку';
+function stageStatusHint(s: Stage) {
+  if (s.status === 'stall' && s.meta?.stall?.outcome === 'exhausted') {
+    return 'раннер не получил результат';
+  }
+  if (s.status === 'stall' && s.meta?.verdict?.stop === 'human') {
+    return 'вернул решение человеку';
+  }
+
   return STAGE_HINT[s.status] || s.status;
 }
 
 const FORCE_STATUSES = ['running', 'done', 'skipped', 'pending'];
-const RUNNER_SOURCE = {
+const RUNNER_SOURCE: Record<string, string> = {
   'profile-project': 'политика проекта',
   'profile-stage': 'политика этапа',
   task: 'переопределение задачи',
   'task-stage': 'переопределение этапа задачи',
 };
 
-const LIVE_ICONS = { tool: '⚙', subagent: '🤖', text: '💬', think: '🧠' };
-function liveIcon(a) { return LIVE_ICONS[a.type] || '·'; }
+const LIVE_ICONS: Record<string, string> = {
+  tool: '⚙',
+  subagent: '🤖',
+  text: '💬',
+  think: '🧠',
+};
+
+function liveIcon(a: { type: string }) {
+  return LIVE_ICONS[a.type] || '·';
+}
 
 /**
  * FactoryGraph эмитит нормализованный `id`, а API-граф хранит метаданные по этому же ключу.
  * Один canonical id нужен всему снимку модалки, иначе ошибка возникает ещё до её открытия.
  */
-function openStage(t, node) {
+function openStage(t: PipelineViewTask, node: StageNode) {
   const origin = t.graph.nodeOrigins?.[node.id];
-  if (origin && !origin.executable) return;
+
+  if (origin && !origin.executable) {
+    return;
+  }
+
   const nodeId = origin?.originId || node.id;
 
   stage.value = {
-    task: t.task, id: nodeId, key: t.graph.keys?.[nodeId] || nodeId.toUpperCase(),
+    task: t.task,
+    id: nodeId,
+    key: t.graph.keys?.[nodeId] || nodeId.toUpperCase(),
     runnerKey: t.graph.runnerKeys?.[nodeId]
       || t.graph.keys?.[nodeId]
       || nodeId.toUpperCase(),
-    isGate: nodeId.startsWith('gate_'), label: stripEmoji(node.label), sub: node.subtitle,
+    isGate: nodeId.startsWith('gate_'),
+    label: stripEmoji(node.label),
+    sub: node.subtitle,
     readOnly: Boolean(t.readOnly || t.graph.readOnly),
     daemonAlive: Boolean(t.graph.daemonAlive),
-    status: node.status, meta: t.graph.nodeMeta?.[nodeId] || {},
+    status: node.status,
+    meta: t.graph.nodeMeta?.[nodeId] || {},
   };
   loadFactoryRunners();
-  gateComment.value = ''; gateRejecting.value = false; rewindComment.value = '';
+  gateComment.value = '';
+  gateRejecting.value = false;
+  rewindComment.value = '';
   rewindAnswers.value = {};
   runnerPending.value = null;
   stageActivity.value = null;
-  stageDoc.value = ''; stageDocOpen.value = true; stageDocLoading.value = false;
+  stageDoc.value = '';
+  stageDocOpen.value = true;
+  stageDocLoading.value = false;
   stageLogOpen.value = false;
+
   const doc = NODE_DOC[nodeId];
+
   if (doc) {
     stageDocLoading.value = true;
     api.get(`/api/tasks/${t.task}/doc/${doc}`)
-      .then((r) => { stageDoc.value = r.text || ''; })
+      .then((r) => {
+        stageDoc.value = decodePipelineReply(r).text || '';
+      })
       .catch(() => { /* документа нет — секция не показывается */ })
-      .finally(() => { stageDocLoading.value = false; });
+      .finally(() => {
+        stageDocLoading.value = false;
+      });
   }
-  clearInterval(actPoll);
+
+  clearInterval(actPoll ?? undefined);
+
   if (node.status === 'run' && t.graph.daemonAlive) {
-    pollActivity(); actPoll = setInterval(pollActivity, 3000);
+    pollActivity();
+    actPoll = setInterval(pollActivity, 3000);
   }
 }
-function closeStage() { stage.value = null; clearInterval(actPoll); }
-function onStageDialogOpenChange(open) {
+
+function closeStage() {
+  stage.value = null;
+  clearInterval(actPoll ?? undefined);
+}
+
+function onStageDialogOpenChange(open: boolean) {
   if (!open) {
     closeStage();
   }
 }
+
+
+/**
+ * Обновляет активность только открытого узла существующим опросом.
+ * Отказ не закрывает модалку и не стирает последний успешный снимок.
+ */
 async function pollActivity() {
-  if (!stage.value) return;
-  try { stageActivity.value = await api.get(`/api/tasks/${stage.value.task}/activity`); } catch { /* игнор */ }
+  if (!stage.value) {
+    return;
+  }
+
+  try {
+    stageActivity.value = decodePipelineActivity(await api.get(`/api/tasks/${stage.value!.task}/activity`));
+  } catch { /* игнор */ }
 }
 // Модалка живёт дольше этапа: её открывают на бегущем узле и не закрывают. Статус в ней
 // обязан идти за графом, иначе она навсегда остаётся «выполняется сейчас» и продолжает
 // опрашивать активность уже закончившегося этапа, пока конвейер стоит у ворот.
 const stageLive = computed(() => {
-  if (!stage.value) return null;
-  const g = tasks.value.find((x) => Number(x.task) === Number(stage.value.task))?.graph;
-  if (!g?.statuses?.[stage.value.id]) return null;
+  if (!stage.value) {
+    return null;
+  }
+
+  const g = tasks.value.find((x) => Number(x.task) === Number(stage.value!.task))?.graph;
+
+  if (!g?.statuses?.[stage.value!.id]) {
+    return null;
+  }
+
   return {
-    status: g.statuses[stage.value.id],
-    meta: g.nodeMeta?.[stage.value.id] || {},
+    status: g.statuses[stage.value!.id]!,
+    meta: g.nodeMeta?.[stage.value!.id] || {},
     daemonAlive: Boolean(g.daemonAlive),
   };
 });
+
 watch(stageLive, (live) => {
-  if (!stage.value || !live) return;
+  if (!stage.value || !live) {
+    return;
+  }
   // Мета (время, длительность, токены, попытки runner-а) обновляется всегда: этап
   // дописывает её и после того, как перестал быть активным.
-  stage.value.meta = live.meta;
-  if (live.status === stage.value.status && live.daemonAlive === stage.value.daemonAlive) return;
-  stage.value.status = live.status;
-  stage.value.daemonAlive = live.daemonAlive;
-  clearInterval(actPoll);
-  if (live.status === 'run' && live.daemonAlive) {
-    pollActivity(); actPoll = setInterval(pollActivity, 3000);
+  stage.value!.meta = live.meta;
+
+  if (live.status === stage.value!.status && live.daemonAlive === stage.value!.daemonAlive) {
+    return;
   }
-  else { stageActivity.value = null; }
+
+  stage.value!.status = live.status;
+  stage.value!.daemonAlive = live.daemonAlive;
+  clearInterval(actPoll ?? undefined);
+
+  if (live.status === 'run' && live.daemonAlive) {
+    pollActivity();
+    actPoll = setInterval(pollActivity, 3000);
+  }
+  else {
+    stageActivity.value = null;
+  }
 });
 
 // Автопрокрутка ленты действий агента вниз при обновлении.
 watch(() => stageActivity.value?.live?.actions?.length, () => {
-  nextTick(() => { if (liveFeed.value) liveFeed.value.scrollTop = liveFeed.value.scrollHeight; });
+  nextTick(() => {
+    if (liveFeed.value) {
+      liveFeed.value.scrollTop = liveFeed.value.scrollHeight;
+    }
+  });
 });
 // Решение и возврат курсора уходят в журнал попытки СРАЗУ, а продолжение прогона —
 // отдельным resume, который может не подняться (например, профиль правили при живой
 // попытке). Сервер отвечает 200 с resumed:false, и молчать об этом нельзя: карточка
 // выглядит принятой, а конвейер стоит — так несколько попыток продолжить
 // прошли «успешно» и ничего не поехало.
-async function warnIfNotResumed(res) {
-  if (!res || res.resumed !== false) return;
-  await alertDialog(`Записано, но прогон не поехал: ${res.resumeError || 'причина — в журнале этапов задачи'}`);
+async function warnIfNotResumed(res: PipelineReply | null) {
+  if (!res || res.resumed !== false) {
+    return;
+  }
+
+  await alertDialog(
+    `Записано, но прогон не поехал: ${res.resumeError || 'причина — в журнале этапов задачи'}`,
+  );
 }
 // Ворота — состояние, в котором решение вообще принимают. Отдельным computed, потому что
 // на него смотрят и секция решения, и подпись комментария под шапкой.
 const gateDecidable = computed(() => Boolean(
-  stage.value && !stage.value.readOnly && stage.value.isGate
-  && ['wait', 'premature'].includes(stage.value.status),
+  stage.value && !stage.value!.readOnly && stage.value!.isGate
+  && ['wait', 'premature'].includes(stage.value!.status),
 ));
 // Только компоновка модалки: на широком экране информационная колонка и управление
 // живут рядом, но пустую колонку не держим ради одной рамки. Условия действий остаются
@@ -1770,18 +2064,22 @@ const gateDecidable = computed(() => Boolean(
 const gateArbiterLog = computed(() => {
   const graph = tasks.value.find((x) => Number(x.task) === Number(stage.value?.task))?.graph;
   const log = graph?.arbiterLog;
-  if (!Array.isArray(log)) return [];
+
+  if (!Array.isArray(log)) {
+    return [];
+  }
 
   const rows = log.filter((row) => row?.card?.what && row.verdict !== 'human');
+
   return [...rows].sort((a, b) => Number(b.verdict === 'deferred') - Number(a.verdict === 'deferred'));
 });
 
 const stageHasRewind = computed(() => Boolean(
-  stage.value && !stage.value.readOnly && !stage.value.isGate
-  && stageTask.value?.graph?.nodeOrigins?.[stage.value.id]?.scope !== 'bootstrap',
+  stage.value && !stage.value!.readOnly && !stage.value!.isGate
+  && stageTask.value?.graph?.nodeOrigins?.[stage.value!.id]?.scope !== 'bootstrap',
 ));
 // Вопросом к человеку является только БЛОКИРУЮЩАЯ находка: правило общее с отдельной
-// модалкой разбора, поэтому живёт в `shared/rewind-note.js`.
+// модалкой разбора, поэтому живёт в `shared/rewindNote.ts`.
 const rewindQuestions = computed(() => rewindQuestionsOf(stage.value?.meta?.verdict));
 
 /**
@@ -1794,14 +2092,19 @@ const rewindQuestions = computed(() => rewindQuestionsOf(stage.value?.meta?.verd
  */
 const verdictFindings = computed(() => {
   const findings = stage.value?.meta?.verdict?.findings;
-  if (!Array.isArray(findings)) return [];
-  if (!stageHasRewind.value || !rewindQuestions.value.length) return findings;
+
+  if (!Array.isArray(findings)) {
+    return [];
+  }
+  if (!stageHasRewind.value || !rewindQuestions.value.length) {
+    return findings;
+  }
 
   return findings.filter((f) => f.severity !== 'blocking');
 });
 
 const stageArbiterCard = computed(() => (
-  stage.value ? arbiterCardFor(stageTask.value, stage.value.id) : null
+  stage.value ? arbiterCardFor(stageTask.value, stage.value!.id) : null
 ));
 
 // Блокирующие вопросы ушли в форму ответа — значит список стал списком отложенного.
@@ -1811,14 +2114,14 @@ const verdictDeferredOnly = computed(() => (
 
 // Чем закончился заход: разбор арбитра, причина остановки, находки узла и дайджест.
 const stageHasSituation = computed(() => Boolean(
-  stage.value && (stage.value.meta.stall || stage.value.meta.comment
+  stage.value && (stage.value!.meta.stall || stage.value!.meta.comment
     || verdictFindings.value.length || stageArbiterCard.value),
 ));
 // Телеметрия захода. Нулевой fanout сюда не входит: чип ради нуля держал целую полосу.
 const stageHasMeta = computed(() => Boolean(
-  stage.value && (stage.value.meta.at || stage.value.meta.dur != null || stage.value.meta.fanout
-    || stage.value.meta.denials || stage.value.meta.tokens || stage.value.meta.fails || stage.value.sub
-    || stage.value.meta.verdict?.reviewed?.length),
+  stage.value && (stage.value!.meta.at || stage.value!.meta.dur != null || stage.value!.meta.fanout
+    || stage.value!.meta.denials || stage.value!.meta.tokens || stage.value!.meta.fails || stage.value!.sub
+    || stage.value!.meta.verdict?.reviewed?.length),
 ));
 
 const stageHasMain = computed(() => Boolean(
@@ -1838,11 +2141,14 @@ const stageHasRail = computed(() => (
 // после открытия модалки, а стенд — появиться после очередного SSE-обновления графа.
 // Снимок в openStage здесь дал бы устаревшие название и порты до повторного открытия.
 const stageTask = computed(() => {
-  if (!stage.value) return null;
-  return tasks.value.find((item) => Number(item.task) === Number(stage.value.task)) || null;
+  if (!stage.value) {
+    return null;
+  }
+
+  return tasks.value.find((item) => Number(item.task) === Number(stage.value!.task)) || null;
 });
 const stageTaskTitle = computed(() => (
-  stage.value ? title(stageTask.value || stage.value.task) : null
+  stage.value ? title(stageTask.value || stage.value!.task) : null
 ));
 const stageGraph = computed(() => stageTask.value?.graph || null);
 // Пояснение — часть ОТКЛОНЕНИЯ, а не ворот вообще: при «Принять» движок его выбрасывает
@@ -1850,83 +2156,130 @@ const stageGraph = computed(() => stageTask.value?.graph || null);
 // Пока поле висело всегда, интерфейс обещал доставку текста, которой при принятии нет.
 function startGateReject() {
   gateRejecting.value = true;
-  nextTick(() => { gateNoteEl.value?.focus(); });
+  nextTick(() => {
+    gateNoteEl.value?.focus();
+  });
 }
+
 function cancelGateReject() {
   gateRejecting.value = false;
   gateComment.value = '';
 }
 // Движок отказывает, когда rejected-пояснение некому доставить: возврат ведёт в узел,
 // который исполняет не агент. Голое «Ошибка: …» тут ничего не подсказывает, а выход есть.
-function gateErrorText(e) {
-  const base = `Решение не принято: ${e.message}`;
-  return /нельзя доставить/.test(e.message || '')
-    ? `${base}\n\nОтклони без текста либо верни конвейер кнопкой «▶ Перейти сюда» на тот узел, чей агент должен прочитать указание.`
+function gateErrorText(e: unknown) {
+  const base = `Решение не принято: ${errorMessage(e, '')}`;
+
+  return /нельзя доставить/.test(errorMessage(e, '') || '')
+    ? `${base}\n\nОтклони без текста либо верни конвейер кнопкой «▶ Перейти сюда» `
+      + 'на тот узел, чей агент должен прочитать указание.'
     : base;
 }
-async function gateDecide(decision) {
+
+
+/**
+ * Отправляет решение по текущим воротам и обновляет снимок конвейера.
+ * Комментарий передаётся только при отклонении, как требует маршрут.
+ */
+async function gateDecide(decision: string) {
   stageBusy.value = 'gate';
   // При принятии комментарий не отправляем вовсе: пустое поле честнее, чем текст,
   // который движок молча выбросит, а проекция реестра потом покажет как «Замечание».
   const comment = decision === 'reject' ? gateComment.value : '';
 
   try {
-    const res = await api.post(`/api/tasks/${stage.value.task}/gate/${stage.value.key}/${decision}`, {
+    const res = decodePipelineReply(await api.post(
+      `/api/tasks/${stage.value!.task}/gate/${stage.value!.key}/${decision}`, {
       comment,
       profile: stageTask.value?.profile,
       attempt: stageTask.value?.attempt,
-    });
-    await load(); closeStage();
+    }));
+
+    await load();
+    closeStage();
     await warnIfNotResumed(res);
   }
-  catch (e) { await alertDialog(gateErrorText(e)); } finally { stageBusy.value = null; }
+  catch (e) {
+    await alertDialog(gateErrorText(e));
+  } finally {
+    stageBusy.value = null;
+  }
 }
-async function forceStatus(status) {
+
+
+/**
+ * Переводит курсор после подтверждения сброса последующих результатов.
+ * Указание человека уходит вместе с прежним запросом смены статуса.
+ */
+async function forceStatus(status: string) {
   // Возврат курсора сбрасывает НЕ ТОЛЬКО этот узел, но и весь хвост маршрута за ним.
   // Возврат с приёмки на план сносит результаты всего, что между.
-  const question = `Вернуть конвейер на «${stage.value.label}»? Результаты этого узла и всех следующих за ним будут сброшены.`;
-  if (!await confirmDialog(question, { okText: 'Вернуть' })) return;
+  const question = `Вернуть конвейер на «${stage.value!.label}»? `
+    + 'Результаты этого узла и всех следующих за ним будут сброшены.';
+
+  if (!await confirmDialog(question, { okText: 'Вернуть' })) {
+    return;
+  }
+
   stageBusy.value = 'force';
   // Указание уезжает тем же запросом, что и сам возврат: сервер кладёт его в журнал
   // попытки причиной human-rewind, движок оттуда подмешивает его в промпт захода.
   try {
-    const res = await api.post(`/api/tasks/${stage.value.task}/stage/${stage.value.key}/${status}`,
-      { comment: buildRewindNote(rewindQuestions.value, rewindAnswers.value, rewindComment.value) });
-    await load(); closeStage();
+    const res = decodePipelineReply(await api.post(
+      `/api/tasks/${stage.value!.task}/stage/${stage.value!.key}/${status}`,
+      { comment: buildRewindNote(rewindQuestions.value, rewindAnswers.value, rewindComment.value) }));
+
+    await load();
+    closeStage();
     await warnIfNotResumed(res);
   }
-  catch (e) { alertDialog(`Ошибка: ${e.message}`); } finally { stageBusy.value = null; }
+  catch (e) {
+    alertDialog(`Ошибка: ${errorMessage(e, '')}`);
+  } finally {
+    stageBusy.value = null;
+  }
 }
 // Выбор исполнителя модалку НЕ закрывает: человек сравнивает варианты и перебирает их,
 // а закрытие после каждого клика заставляло открывать узел заново. Новое состояние узла
 // приезжает обычным путём — load() → watch(stageLive) → stage.meta.
-async function switchRunner(target) {
+async function switchRunner(target: string) {
   if (!await confirmDialog(
-    `Остановить текущий запуск ${providerLabel(stage.value.meta.runner.actual)} и продолжить этап через ${providerLabel(target)}?`,
+    `Остановить текущий запуск ${providerLabel(stage.value!.meta.runner!.actual)} `
+      + `и продолжить этап через ${providerLabel(target)}?`,
     { okText: 'Переключить' },
-  )) return;
+  )) {
+    return;
+  }
+
   stageBusy.value = 'runner-switch';
+
   try {
-    await api.post(`/api/tasks/${stage.value.task}/runner/switch`, {
-      stage: stage.value.runnerKey,
+    await api.post(`/api/tasks/${stage.value!.task}/runner/switch`, {
+      stage: stage.value!.runnerKey,
       target,
     });
     await load();
   } catch (e) {
-    alertDialog(`Не удалось переключить исполнителя: ${e.message}`);
+    alertDialog(`Не удалось переключить исполнителя: ${errorMessage(e, '')}`);
   } finally {
     stageBusy.value = null;
   }
 }
 // Исполнители, установленные на фабрике — для override этапа. Тянем один раз,
 // при первом открытии узла; сервер не отдал — блок выбора просто не показываем.
-const factoryRunners = ref([]);
+const factoryRunners = ref<string[]>([]);
 let factoryRunnersRequested = false;
+
 function loadFactoryRunners() {
-  if (factoryRunnersRequested) return;
+  if (factoryRunnersRequested) {
+    return;
+  }
+
   factoryRunnersRequested = true;
   api.get('/api/factory/runners')
-    .then((r) => { factoryRunners.value = r.runners || []; })
+    .then((r) => {
+      factoryRunners.value = decodeFactoryRunners(r);
+    })
     .catch(() => { /* без списка блок выбора скрыт */ });
 }
 // Текущий primary могли снять с фабрики — тогда добавляем его в список сами,
@@ -1934,7 +2287,11 @@ function loadFactoryRunners() {
 const stageRunnerOptions = computed(() => {
   const list = [...factoryRunners.value];
   const primary = stage.value?.meta?.runner?.primary;
-  if (primary && !list.includes(primary)) list.unshift(primary);
+
+  if (primary && !list.includes(primary)) {
+    list.unshift(primary);
+  }
+
   return list;
 });
 // status=run и runner.actual остаются в проекции после ручного stop. Live-switch
@@ -1947,38 +2304,51 @@ const stageRunnerLive = computed(() => Boolean(
 ));
 // Кого выбрали прямо сейчас: подсветка обязана переехать по клику, а не через секунду,
 // когда доедет полный load() всех задач с графами.
-const runnerPending = ref(null);
+const runnerPending = ref<string | null>(null);
 const stageRunnerActive = computed(() => (
   runnerPending.value ?? (stage.value?.meta?.runner?.primary || '')
 ));
 // Override исполнителя до запуска этапа (бегущий переключают только кнопки switch).
 // '' — снять override этапа: вернётся переопределение задачи с запуска или профиль.
-async function setStageRunner(primary) {
-  if (stageBusy.value) return;
+async function setStageRunner(primary: string) {
+  if (stageBusy.value) {
+    return;
+  }
+
   stageBusy.value = 'runner-override';
   // У сброса будущего значения нет (его решит профиль) — подсветку до ответа не двигаем.
   runnerPending.value = primary || null;
+
   try {
-    await taskStore.setStageRunner(stage.value.task, stage.value.runnerKey, primary);
+    await taskStore.setStageRunner(stage.value!.task, stage.value!.runnerKey, primary);
     await load();
   } catch (e) {
-    alertDialog(`Не удалось сменить исполнителя этапа: ${e.message}`);
+    alertDialog(`Не удалось сменить исполнителя этапа: ${errorMessage(e, '')}`);
   } finally {
     stageBusy.value = null;
     runnerPending.value = null;
   }
 }
-function pickStageRunner(primary) {
-  if (primary === stageRunnerActive.value) return;
+
+function pickStageRunner(primary: string) {
+  if (primary === stageRunnerActive.value) {
+    return;
+  }
+
   setStageRunner(primary);
 }
 // Подпись у `meta.comment`: один и тот же ключ реестра (`<КЛЮЧ>_COMMENT`) значит разное.
 // У ворот это текст ЧЕЛОВЕКА, и его судьба зависит от решения: отклонение уезжает агенту
 // заданием, а комментарий при принятии движок выбрасывает — назвать его «Замечанием»
 // значит соврать про доставку (старые прогоны такие записи ещё содержат).
-function stageCommentLabel(s) {
-  if (['skip', 'skipbad'].includes(s.status)) return 'Почему пропущен';
-  if (!s.isGate) return 'Замечание';
+function stageCommentLabel(s: Stage) {
+  if (['skip', 'skipbad'].includes(s.status)) {
+    return 'Почему пропущен';
+  }
+  if (!s.isGate) {
+    return 'Замечание';
+  }
+
   return s.status === 'done'
     ? 'Комментарий при принятии — агенту он не уходил'
     : 'Отправлено агенту на доработку';
@@ -1992,41 +2362,79 @@ function stageCommentLabel(s) {
 // Когда блокирующие уехали в форму ответа, в списке остаются только отложенные — и
 // «узел вернул решение человеку» над строчкой «подпись оси не выровнена» приписывало бы
 // остановку косметике: решение вернули из-за вопроса, который теперь стоит ниже полем.
-function verdictLabel(v, deferredOnly = false) {
-  if (deferredOnly) return 'Замечания на будущее';
-  if (v.stop === 'human') return 'Узел вернул решение человеку';
-  if (v.rewind) return `Замечания — маршрут вернулся на ${v.rewind}`;
+function verdictLabel(v: NodeVerdict, deferredOnly = false) {
+  if (deferredOnly) {
+    return 'Замечания на будущее';
+  }
+  if (v.stop === 'human') {
+    return 'Узел вернул решение человеку';
+  }
+  if (v.rewind) {
+    return `Замечания — маршрут вернулся на ${v.rewind}`;
+  }
+
   return 'Замечания узла';
 }
 
 // Якорь находки — путь внутри репозитория. Целиком он съедает строку и обрезается
 // с конца, то есть теряет как раз имя файла; полный путь остаётся в подсказке.
-function shortAnchor(anchor) {
+function shortAnchor(anchor: unknown) {
   const parts = String(anchor).split('/').filter(Boolean);
+
   return parts.length ? parts[parts.length - 1] : anchor;
 }
 
 // Снос идёт до пары минут (docker + схемы БД) — на это время кнопка превращается
 // в индикатор «сношу…», повторный клик заблокирован.
-const sandboxBusy = ref(new Set());
-async function sandboxDown(task) {
-  if (sandboxBusy.value.has(task)) return;
+const sandboxBusy = ref(new Set<TaskId>());
+
+
+/**
+ * Сносит стенд после подтверждения и блокирует повторный клик по задаче.
+ * После ответа перечитывает список, а индикатор снимает и при отказе.
+ */
+async function sandboxDown(task: TaskId) {
+  if (sandboxBusy.value.has(task)) {
+    return;
+  }
   if (!await confirmDialog(
-    `Снести стенд задачи #${task}? Текущий прогон уйдёт в архив, после чего задачу можно будет отправить на конвейер заново. Ветка и незакоммиченные изменения сохранятся.`,
+    `Снести стенд задачи #${task}? Текущий прогон уйдёт в архив, `
+      + 'после чего задачу можно будет отправить на конвейер заново. '
+      + 'Ветка и незакоммиченные изменения сохранятся.',
     { danger: true, okText: 'Снести' },
-  )) return;
+  )) {
+    return;
+  }
+
   sandboxBusy.value = new Set([...sandboxBusy.value, task]);
-  try { await api.post(`/api/tasks/${task}/sandbox/down`); await load(); }
-  catch (e) { alertDialog(e.status === 501 ? 'Снос стенда не настроен: нет GRIGDESK_SANDBOX_DOWN_CMD и down.sh у профиля.' : `Ошибка: ${e.message}`); }
-  finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
+
+  try {
+    await api.post(`/api/tasks/${task}/sandbox/down`);
+    await load();
+  }
+  catch (e) {
+    alertDialog(isRecord(e) && e.status === 501
+      ? 'Снос стенда не настроен: нет GRIGDESK_SANDBOX_DOWN_CMD и down.sh у профиля.'
+      : `Ошибка: ${errorMessage(e, '')}`);
+  }
+
+  finally {
+    const s = new Set(sandboxBusy.value);
+
+    s.delete(task);
+    sandboxBusy.value = s;
+  }
 }
 
 // Ручная архивация нужна задаче, стенд которой GrigDesk не сносит: его либо уже нет
 // (подъём оборвался до выдачи порта), либо он не наш (shared checkout). Там, где стенд
 // наш, прогон архивирует сам «снести стенд».
-async function closeTask(t) {
+async function closeTask(t: PipelineViewTask) {
   const task = t.task;
-  if (sandboxBusy.value.has(task)) return;
+
+  if (sandboxBusy.value.has(task)) {
+    return;
+  }
 
   // Идущий прогон закрытие ПРЕРЫВАЕТ: сервер закрывает попытку как оборванную и гасит
   // её юнит. Молчать об этом нельзя. Кнопка стоит прямо под работающим конвейером, а у
@@ -2045,45 +2453,78 @@ async function closeTask(t) {
   const branchNote = canDestroySandbox(t)
     ? ' Пустая ветка будет удалена (ветка с коммитами останется).'
     : ' Общий checkout и его ветки не затрагиваются.';
+
   if (!await confirmDialog(
     `${runNote}Закрыть задачу #${task}? Реестр уйдёт в архив.${branchNote}`,
     { danger: true, okText: t.daemonAlive ? 'Прервать и закрыть' : 'Закрыть' },
-  )) return;
+  )) {
+    return;
+  }
+
   sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+
   try {
-    const r = await api.post(`/api/tasks/${task}/close`);
+    const r = decodePipelineReply(await api.post(`/api/tasks/${task}/close`));
     const branches = (r.branches || []).map((b) => `${b.repo}: ${b.state}`).join('; ');
+
     await alertDialog(`Задача #${task} закрыта.${branches ? ` Ветки — ${branches}.` : ''}`);
     await load();
-  } catch (e) { alertDialog(`Ошибка: ${e.message}`); }
-  finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
+  } catch (e) {
+    alertDialog(`Ошибка: ${errorMessage(e, '')}`);
+  }
+
+  finally {
+    const s = new Set(sandboxBusy.value);
+
+    s.delete(task);
+    sandboxBusy.value = s;
+  }
 }
 
 // Стенд не поднялся — вернуть задачу в работу одной кнопкой. Двумя действиями это было
 // невозможно: «снести стенд» показывается только у живого стенда, а его-то и нет.
 // Пересборки стенда отдельно от прогона в движке не существует, поэтому здесь именно
 // перезапуск конвейера (resume) — со сносом остатков упавшей песочницы перед ним.
-async function sandboxRetry(task) {
-  if (sandboxBusy.value.has(task)) return;
+async function sandboxRetry(task: TaskId) {
+  if (sandboxBusy.value.has(task)) {
+    return;
+  }
   if (!await confirmDialog(
-    `Перезапустить стенд задачи #${task}? Остатки упавшей песочницы будут снесены, конвейер продолжит с того места, где встал.`,
+    `Перезапустить стенд задачи #${task}? Остатки упавшей песочницы будут снесены, `
+      + 'конвейер продолжит с того места, где встал.',
     { okText: 'Перезапустить' },
-  )) return;
+  )) {
+    return;
+  }
+
   sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+
   try {
-    const r = await api.post(`/api/tasks/${task}/sandbox/retry`);
+    const r = decodePipelineReply(await api.post(`/api/tasks/${task}/sandbox/retry`));
+
     await load();
     // Снос мог оставить за собой worktree с незакоммиченными изменениями — тогда новый
     // подъём упрётся в тот же гард. Сказать об этом надо сразу, а не через двадцать минут
     // провижининга: в плашке это будет выглядеть как «стенд опять не поднялся» без причины.
     const warn = (r.downOutput || '').split('\n').filter((s) => s.includes('ВНИМАНИЕ')).join('\n');
-    if (warn) alertDialog(`Конвейер перезапущен, но снос сообщил:\n${warn}`);
-    else if (r.note) alertDialog(r.note);
+
+    if (warn) {
+      alertDialog(`Конвейер перезапущен, но снос сообщил:\n${warn}`);
+    }
+    else if (r.note) {
+      alertDialog(r.note);
+    }
   } catch (e) {
-    alertDialog(e.status === 501
+    alertDialog(isRecord(e) && e.status === 501
       ? 'Снос стенда не настроен: нет GRIGDESK_SANDBOX_DOWN_CMD и down.sh у профиля.'
-      : `Не удалось перезапустить: ${e.message}`);
-  } finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
+      : `Не удалось перезапустить: ${errorMessage(e, '')}`);
+
+  } finally {
+    const s = new Set(sandboxBusy.value);
+
+    s.delete(task);
+    sandboxBusy.value = s;
+  }
 }
 
 // Арбитр типизированной остановки. Гейт по МАШИННОМУ виду остановки (`stall.stop`), а не
@@ -2103,16 +2544,32 @@ async function sandboxRetry(task) {
  * Карточка привязана к попытке, но не к узлу: после ответа человека маршрут может встать
  * дальше, и прежний разбор той же попытки остался бы на экране как свежий.
  */
-function arbiterAsksHuman(t) {
+function arbiterAsksHuman(t: PipelineViewTask) {
   const card = t.stall?.arbiter;
-  if (!card || card.verdict !== 'human') return false;
-  if (!card.node) return true;
-  return t.graph?.keys?.[card.node] === t.stall.stage;
+
+  if (!card || card.verdict !== 'human') {
+    return false;
+  }
+  if (!card.node) {
+    return true;
+  }
+
+  return t.graph?.keys?.[card.node] === t.stall!.stage;
 }
 // Подпись разбора одна на ленту и модалку: две копии разошлись бы на первой же правке.
-function arbiterCardLabel(card) {
-  if (card?.verdict === 'human') return 'Арбитр разобрал: решать тебе';
-  if (card?.verdict === 'deferred') return 'Арбитр решил за тебя — проверишь на воротах';
+
+/**
+ * Объясняет человеку исход сохранённого разбора арбитра.
+ * Решение на человеке и отложенное решение получают разные подписи.
+ */
+function arbiterCardLabel(card: ArbiterCard | null | undefined) {
+  if (card?.verdict === 'human') {
+    return 'Арбитр разобрал: решать тебе';
+  }
+  if (card?.verdict === 'deferred') {
+    return 'Арбитр решил за тебя — проверишь на воротах';
+  }
+
   return 'Арбитр снял тупик';
 }
 /**
@@ -2122,18 +2579,29 @@ function arbiterCardLabel(card) {
  * открыв схему, не знает, что курсор на узле двигал не он. История принадлежит попытке
  * и приезжает тем же ответом графа (`arbiterLog`).
  */
-function arbitratedNodes(graph) {
+function arbitratedNodes(graph: PipelineViewGraph | null) {
   const log = graph?.arbiterLog;
-  if (!Array.isArray(log) || !log.length) return null;
 
-  const nodes = {};
-  for (const row of log) {
-    if (row?.node && row.verdict && !nodes[row.node]) nodes[row.node] = row.verdict;
+  if (!Array.isArray(log) || !log.length) {
+    return null;
   }
+
+  const nodes: Record<string, string> = {};
+
+  for (const row of log) {
+    if (row?.node && row.verdict && !nodes[row.node]) {
+      nodes[row.node] = row.verdict;
+    }
+  }
+
   return Object.keys(nodes).length ? nodes : null;
 }
-function canAnswerStall(t) {
-  if (t.readOnly || t.daemonAlive || t.arbitrating || !t.stall) return false;
+
+function canAnswerStall(t: PipelineViewTask) {
+  if (t.readOnly || t.daemonAlive || t.arbitrating || !t.stall) {
+    return false;
+  }
+
   return Boolean(stallNodeId(t)) && t.stall.stage !== 'SANDBOX' && t.stall.kind !== 'crashed';
 }
 
@@ -2141,7 +2609,7 @@ function canAnswerStall(t) {
  * Вопрос bootstrap открывает узел своей фазы при совпадении имён scout.
  * Карта registry keys сама по себе не различает отдельную разведку и основной маршрут.
  */
-function stallNodeId(t) {
+function stallNodeId(t: PipelineViewTask) {
   if (t.stall?.phase === 'bootstrap') {
     return Object.entries(t.graph?.nodeOrigins || {}).find(([, origin]) => (
       origin.scope === 'bootstrap' && origin.originId === 'scout'
@@ -2149,6 +2617,7 @@ function stallNodeId(t) {
   }
 
   const keys = t.graph?.keys || {};
+
   return Object.keys(keys).find((id) => keys[id] === t.stall?.stage) || '';
 }
 /**
@@ -2160,15 +2629,21 @@ function stallNodeId(t) {
  * до появления истории, — и только если она про этот же узел: карточка привязана к
  * попытке, и чужой разбор выглядел бы ответом на сегодняшний вопрос.
  */
-function arbiterCardFor(task, nodeId) {
+function arbiterCardFor(task: PipelineViewTask | null, nodeId: string) {
   const log = task?.graph?.arbiterLog;
   const fromLog = Array.isArray(log)
     ? log.find((row) => row?.node === nodeId && row?.card?.what)
     : null;
-  if (fromLog) return fromLog;
+
+  if (fromLog) {
+    return fromLog;
+  }
 
   const card = task?.stall?.arbiter;
-  if (!card?.card?.what) return null;
+
+  if (!card?.card?.what) {
+    return null;
+  }
 
   return !card.node || card.node === nodeId ? card : null;
 }
@@ -2180,12 +2655,20 @@ function arbiterCardFor(task, nodeId) {
  * возврат, поэтому и склейка текста общая. Разбора нет — открывать нечего: молчаливая
  * пустая модалка читалась бы как поломка.
  */
-function openArbiterDecision(task, nodeId) {
-  const key = task?.graph?.keys?.[nodeId];
+function openArbiterDecision(task: PipelineViewTask | null, nodeId?: string) {
+  if (!task || !nodeId) {
+    return;
+  }
+
+  const key = task.graph.keys?.[nodeId];
   const card = arbiterCardFor(task, nodeId);
-  if (!key || !card) return;
+
+  if (!key || !card) {
+    return;
+  }
 
   const definition = task.graph?.nodes?.[nodeId] || [];
+
   arbiterDecision.value = {
     task: task.task,
     node: nodeId,
@@ -2197,9 +2680,15 @@ function openArbiterDecision(task, nodeId) {
 }
 
 /** Вход в разбор из модалки узла: одну модалку поверх другой не держим. */
+
+/**
+ * Открывает разбор из текущего узла с сохранением его идентификатора.
+ * Предыдущая модалка закрывается до открытия следующей.
+ */
 function openArbiterFromStage() {
   const task = stageTask.value;
   const nodeId = stage.value?.id;
+
   closeStage();
   openArbiterDecision(task, nodeId);
 }
@@ -2211,24 +2700,36 @@ function openArbiterFromStage() {
  * причиной human-rewind, движок подмешивает его в промпт захода. Подтверждение остаётся —
  * возврат сбрасывает не только этот узел, но и весь хвост маршрута за ним.
  */
-async function sendArbiterDecision(note) {
+async function sendArbiterDecision(note: string) {
   const target = arbiterDecision.value;
-  if (!target || arbiterDecisionBusy.value) return;
+
+  if (!target || arbiterDecisionBusy.value) {
+    return;
+  }
 
   const question = `Вернуть конвейер на «${target.label}»? Результаты этого узла и всех`
     + ' следующих за ним будут сброшены.';
-  if (!await confirmDialog(question, { okText: 'Вернуть' })) return;
+
+  if (!await confirmDialog(question, { okText: 'Вернуть' })) {
+    return;
+  }
 
   arbiterDecisionBusy.value = true;
+
   try {
-    const res = await api.post(`/api/tasks/${target.task}/stage/${target.key}/running`,
-      { comment: note });
+    const res = decodePipelineReply(await api.post(`/api/tasks/${target.task}/stage/${target.key}/running`,
+      { comment: note }));
+
     arbiterDecision.value = null;
     await load();
     await warnIfNotResumed(res);
   }
-  catch (e) { alertDialog(`Ошибка: ${e.message}`); }
-  finally { arbiterDecisionBusy.value = false; }
+  catch (e) {
+    alertDialog(`Ошибка: ${errorMessage(e, '')}`);
+  }
+  finally {
+    arbiterDecisionBusy.value = false;
+  }
 }
 
 /**
@@ -2237,9 +2738,10 @@ async function sendArbiterDecision(note) {
  * Разбор арбитра ведёт в свою модалку — там его текст и поле решения; обычный затык без
  * разбора ведёт в узел, где кроме возврата человеку нужны и телеметрия, и вердикт.
  */
-function openStallAnswer(t) {
+function openStallAnswer(t: PipelineViewTask) {
   if (arbiterAsksHuman(t)) {
     openArbiterDecision(t, stallNodeId(t));
+
     return;
   }
 
@@ -2247,11 +2749,20 @@ function openStallAnswer(t) {
 }
 
 /** Открывает узел, на котором стоит остановка: решение принимают там. */
-function openStallStage(t) {
+
+/**
+ * Открывает узел текущей остановки по ключам того же графа.
+ * При отсутствии узла не создаёт пустую модалку.
+ */
+function openStallStage(t: PipelineViewTask) {
   const nodeId = stallNodeId(t);
-  if (!nodeId) return;
+
+  if (!nodeId) {
+    return;
+  }
 
   const definition = t.graph?.nodes?.[nodeId] || [];
+
   openStage(t, {
     id: nodeId,
     label: definition[1] || nodeId,
@@ -2262,11 +2773,12 @@ function openStallStage(t) {
 
 // Отдельный разбор арбитра: узел, его карточка и вопросы. Живёт рядом с модалкой узла,
 // а не внутри неё — вопрос у него один, и ширина нужна вся.
-const arbiterDecision = ref(null);
+const arbiterDecision = ref<ArbiterDecisionState | null>(null);
 const arbiterDecisionBusy = ref(false);
 
-const arbiterBusy = ref(new Set());
-function canArbitrate(t) {
+const arbiterBusy = ref(new Set<TaskId>());
+
+function canArbitrate(t: PipelineViewTask) {
   // Признак считает СЕРВЕР одним правилом (`stopIsArbitrable`), общим с гейтом самого
   // арбитра: раньше здесь стояла своя копия сравнения с `no-progress`, и после
   // расширения арбитра на вызов человека узлом она бы молча разошлась с ним.
@@ -2278,7 +2790,7 @@ function canArbitrate(t) {
 // выглядела вставшей, и человек шёл делать руками работу, которую в этот момент делал
 // арбитр. Ровно то ложное чувство «конвейер встал, надо быть курьером».
 //
-// Подпись — общая (`shared/arbiter-run.js`): её показывают три поверхности (свёрнутая
+// Подпись — общая (`shared/arbiterRun.ts`): её показывают три поверхности (свёрнутая
 // карточка, узел схемы и модалка узла), и своя копия в каждой разъехалась бы.
 
 /**
@@ -2286,57 +2798,85 @@ function canArbitrate(t) {
  * нет: арбитр занимается остановкой, а она принадлежит одному узлу.
  */
 const stageArbitrating = computed(() => {
-  if (!stage.value) return null;
+  if (!stage.value) {
+    return null;
+  }
 
-  const task = tasks.value.find((x) => Number(x.task) === Number(stage.value.task));
-  if (!task?.arbitrating) return null;
+  const task = tasks.value.find((x) => Number(x.task) === Number(stage.value!.task));
 
-  return nodeIsArbitrated(stage.value.status, task.arbitrating) ? task.arbitrating : null;
+  if (!task?.arbitrating) {
+    return null;
+  }
+
+  return nodeIsArbitrated(stage.value!.status, task.arbitrating) ? task.arbitrating : null;
 });
-async function arbitrate(task) {
-  if (arbiterBusy.value.has(task)) return;
+
+
+/**
+ * Передаёт остановку арбитру после явного подтверждения человека.
+ * Показывает разный итог для разрешённого спора и решения на человеке.
+ */
+async function arbitrate(task: TaskId) {
+  if (arbiterBusy.value.has(task)) {
+    return;
+  }
   if (!await confirmDialog(
-    `Отдать тупик задачи #${task} арбитру? Он прочитает оба вердикта, проверит спорное по коду рабочего дерева и вернёт узел с указанием. Решение будет записано в журнал как машинное.`,
+    `Отдать тупик задачи #${task} арбитру? Он прочитает оба вердикта, `
+      + 'проверит спорное по коду рабочего дерева и вернёт узел с указанием. '
+      + 'Решение будет записано в журнал как машинное.',
     { okText: 'Разобрать' },
-  )) return;
+  )) {
+    return;
+  }
+
   arbiterBusy.value = new Set([...arbiterBusy.value, task]);
+
   try {
-    const r = await api.post(`/api/tasks/${task}/arbitrate`);
+    const r = decodePipelineReply(await api.post(`/api/tasks/${task}/arbitrate`));
+
     await load();
     // Два разных исхода, и путать их нельзя. `resolved: false` — не отказ: арбитр
     // отработал и вернул то, что обязан вернуть, когда решение меняет границу задачи.
     if (r.resolved) {
       alertDialog(`Арбитр вернул узел «${r.node}».
 
-${r.card.what}
+${r.card!.what}
 
-Почему: ${r.card.why}
-Чем доказал: ${r.card.proof}
-Чем грозит ошибка: ${r.card.risk}`);
+Почему: ${r.card!.why}
+Чем доказал: ${r.card!.proof}
+Чем грозит ошибка: ${r.card!.risk}`);
     } else {
       alertDialog(`Это решает человек, а не арбитр.
 
-${r.card.what}
+${r.card!.what}
 
-Почему: ${r.card.why}
-Чем доказал: ${r.card.proof}
-Чем грозит ошибка: ${r.card.risk}`);
+Почему: ${r.card!.why}
+Чем доказал: ${r.card!.proof}
+Чем грозит ошибка: ${r.card!.risk}`);
     }
   } catch (e) {
-    alertDialog(`Арбитр не разобрал: ${e.message}`);
-  } finally { const s = new Set(arbiterBusy.value); s.delete(task); arbiterBusy.value = s; }
+    alertDialog(`Арбитр не разобрал: ${errorMessage(e, '')}`);
+
+  } finally {
+    const s = new Set(arbiterBusy.value);
+
+    s.delete(task);
+    arbiterBusy.value = s;
+  }
 }
 
 // Оборвавшийся прогон продолжает человек кнопкой: новый start движок отклонит,
 // пока у задачи есть открытая попытка. Исторические записи остаются только чтением.
-function canResume(t) {
+function canResume(t: PipelineViewTask) {
   return !t.readOnly && !t.daemonAlive && !!t.attempt
     && !['completed', 'abandoned'].includes(t.result || '');
 }
-function canRetrySandbox(t) {
+
+function canRetrySandbox(t: PipelineViewTask) {
   return !t.readOnly && t.workspaceMode !== 'shared' && t.stall?.stage === 'SANDBOX';
 }
-function canDestroySandbox(t) {
+
+function canDestroySandbox(t: PipelineViewTask) {
   return !t.readOnly && t.workspaceMode !== 'shared';
 }
 // «Закрыть задачу» = убрать прогон с экрана в архив. Разрешено, когда GrigDesk нечего
@@ -2347,45 +2887,98 @@ function canDestroySandbox(t) {
 // на экране НАВСЕГДА: убрать его было нечем ни одной кнопкой. Ровно так залипла
 // выполненная задача тестового профиля. Сервер в shared-режиме при закрытии не
 // трогает ни стенд, ни ветки — только переносит проекцию реестра в архив.
-function canCloseTask(t) {
+function canCloseTask(t: PipelineViewTask) {
   return !t.readOnly && !t.graph.sandbox && (!t.graph.fePort || !canDestroySandbox(t));
 }
-async function resumeRun(task) {
-  if (sandboxBusy.value.has(task)) return;
+
+
+/**
+ * Продолжает оборвавшийся прогон после подтверждения человека.
+ * Повторная команда блокируется до завершения запроса и обновления списка.
+ */
+async function resumeRun(task: TaskId) {
+  if (sandboxBusy.value.has(task)) {
+    return;
+  }
   if (!await confirmDialog(
     `Продолжить прогон задачи #${task}? Конвейер поедет с того узла, на котором оборвался.`,
     { okText: 'Продолжить' },
-  )) return;
+  )) {
+    return;
+  }
+
   sandboxBusy.value = new Set([...sandboxBusy.value, task]);
-  try { await api.post(`/api/tasks/${task}/resume`); await load(); }
-  catch (e) { alertDialog(`Не удалось продолжить: ${e.message}`); }
-  finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
+
+  try {
+    await api.post(`/api/tasks/${task}/resume`);
+    await load();
+  }
+  catch (e) {
+    alertDialog(`Не удалось продолжить: ${errorMessage(e, '')}`);
+  }
+
+  finally {
+    const s = new Set(sandboxBusy.value);
+
+    s.delete(task);
+    sandboxBusy.value = s;
+  }
 }
 
 // Работающий конвейер останавливает человек кнопкой: движок получает TERM и
 // убирает за собой сам, попытка остаётся открытой для «продолжить прогон».
-function canStop(t) {
+function canStop(t: PipelineViewTask) {
   return !t.readOnly && t.daemonAlive;
 }
-async function stopRun(task) {
-  if (sandboxBusy.value.has(task)) return;
+
+
+/**
+ * Останавливает работающий прогон после подтверждения человека.
+ * Состояние перечитывается перед снятием блокировки повторной команды.
+ */
+async function stopRun(task: TaskId) {
+  if (sandboxBusy.value.has(task)) {
+    return;
+  }
   if (!await confirmDialog(
-    `Остановить конвейер задачи #${task}? Текущий этап будет прерван, прогон встанет — продолжить его можно будет кнопкой «продолжить прогон».`,
+    `Остановить конвейер задачи #${task}? Текущий этап будет прерван, `
+      + 'прогон встанет — продолжить его можно будет кнопкой «продолжить прогон».',
     { danger: true, okText: 'Остановить' },
-  )) return;
+  )) {
+    return;
+  }
+
   sandboxBusy.value = new Set([...sandboxBusy.value, task]);
-  try { await api.post(`/api/tasks/${task}/stop`); await load(); }
-  catch (e) { alertDialog(`Не удалось остановить: ${e.message}`); }
-  finally { const s = new Set(sandboxBusy.value); s.delete(task); sandboxBusy.value = s; }
+
+  try {
+    await api.post(`/api/tasks/${task}/stop`);
+    await load();
+  }
+  catch (e) {
+    alertDialog(`Не удалось остановить: ${errorMessage(e, '')}`);
+  }
+
+  finally {
+    const s = new Set(sandboxBusy.value);
+
+    s.delete(task);
+    sandboxBusy.value = s;
+  }
 }
 
-const ROUTE_ICON = {
-  feature: '✨', debug: '🔍', trivial: '⚡', hunt: '🕵', perf: '⏱', dev: '🛠', quick: '⚡',
+const ROUTE_ICON: Record<string, string> = {
+  feature: '✨',
+  debug: '🔍',
+  trivial: '⚡',
+  hunt: '🕵',
+  perf: '⏱',
+  dev: '🛠',
+  quick: '⚡',
 };
 
-let loadPromise = null;
+let loadPromise: Promise<void> | null = null;
 let loadQueued = false;
-let stateReloadTimer = null;
+let stateReloadTimer: ReturnType<typeof setTimeout> | null = null;
 const STATE_RELOAD_DELAY_MS = 800;
 
 /**
@@ -2395,18 +2988,25 @@ const STATE_RELOAD_DELAY_MS = 800;
  */
 async function loadSnapshot() {
   try {
-    const { tasks: list, silenceWindow: nextSilenceWindow } = await api.get('/api/tasks');
+    const { tasks: list = [], silenceWindow: nextSilenceWindow }
+      = decodePipelineTasks(await api.get('/api/tasks'));
     const graphs = await Promise.all(
-      list.map((t) => api.get(`/api/tasks/${t.task}/graph`).catch(() => null)),
+      list.map((t) => api.get(`/api/tasks/${t.task}/graph`).catch(() => null)
+        .then((graph) => graph == null ? null : decodePipelineViewGraph(graph))),
     );
-    silenceWindow.value = Number.isFinite(nextSilenceWindow) ? nextSilenceWindow : 0;
-    tasks.value = list.map((t, i) => ({ ...t, graph: graphs[i] })).filter((x) => x.graph);
+
+    silenceWindow.value = Number.isFinite(nextSilenceWindow) ? nextSilenceWindow! : 0;
+    tasks.value = list.flatMap((task, index) => {
+      const graph = graphs[index];
+
+      return graph ? [{ ...task, graph }] : [];
+    });
     // Названия задач из B24 (для заголовка) + доска (для «таймеров вне фабрики»).
     tasks.value.forEach((t) => taskStore.load(t.task).catch(() => {}));
     board.load();
     error.value = null;
   } catch (e) {
-    error.value = e.message;
+    error.value = errorMessage(e, '');
   } finally {
     loaded.value = true;
   }
@@ -2416,9 +3016,10 @@ async function loadSnapshot() {
  * Single-flight с одним trailing-проходом: частые SSE не создают параллельный веер
  * `/graph`, но изменение, пришедшее во время чтения, обязательно будет перечитано.
  */
-function load() {
+function load(): Promise<void> {
   if (loadPromise) {
     loadQueued = true;
+
     return loadPromise;
   }
 
@@ -2458,26 +3059,56 @@ useSse((name) => {
 load();
 
 // Класс полосы прогресса по текущему статусу.
-function progressClass(g) {
+
+/**
+ * Выбирает цвет полосы по текущему статусу узла конвейера.
+ * Ожидание и аварийная остановка сохраняют свои отдельные состояния.
+ */
+function progressClass(g: PipelineViewGraph) {
   const cur = g.progress.current;
   const s = cur ? g.statuses[cur] : 'done';
-  if (s === 'run') return 'pk-run';
-  if (s === 'wait' || s === 'premature') return 'pk-wait';
-  if (['stall', 'fail', 'skipbad'].includes(s)) return 'pk-stall';
+
+  if (s === 'run') {
+    return 'pk-run';
+  }
+  if (s === 'wait' || s === 'premature') {
+    return 'pk-wait';
+  }
+  if (['stall', 'fail', 'skipbad'].includes(s || '')) {
+    return 'pk-stall';
+  }
+
   return 'pk-done';
 }
-function currentLabel(g) {
+
+function currentLabel(g: PipelineViewGraph) {
   const cur = g.progress.current;
+
   return cur ? stripEmoji(g.nodes[cur]?.[1]) : 'готово';
 }
-function loopList(g) {
+
+function loopList(g: PipelineViewGraph) {
   return Object.entries(g.loops || {}).map(([k, n]) => `${stripEmoji(g.nodes[k]?.[1]) || k} ×${n}`);
 }
-function cardState(g) {
+
+
+/**
+ * Определяет состояние карточки по всем статусам графа.
+ * Остановка имеет приоритет над ожиданием и выполняющимися узлами.
+ */
+function cardState(g: PipelineViewGraph) {
   const vals = Object.values(g.statuses);
-  if (vals.some((s) => ['stall', 'fail', 'skipbad'].includes(s))) return 'stall';
-  if (vals.includes('wait') || vals.includes('premature')) return 'attn';
-  if (vals.includes('run')) return 'act';
+
+  if (vals.some((s) => ['stall', 'fail', 'skipbad'].includes(s || ''))) {
+    return 'stall';
+  }
+  if (vals.includes('wait') || vals.includes('premature')) {
+    return 'attn';
+  }
+  if (vals.includes('run')) {
+    return 'act';
+  }
+
   return '';
 }
 </script>

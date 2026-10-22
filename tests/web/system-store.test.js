@@ -1,3 +1,5 @@
+import { loadProductModule } from './helpers/compile-vue.js';
+import { migrationUrl } from './helpers/compile-vue.js';
 // Опрос нагрузки «мозга» для шапки. Раньше таймер запускал новый GET каждые три секунды,
 // не дожидаясь прежнего: при забитых соединениях браузера опросы копились десятками, а
 // любая ошибка стирала метрики (`data = null`), и CPU/RAM исчезали из топбара. Теперь
@@ -6,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const STORE = new URL('../../web/src/stores/system.js', import.meta.url);
+const STORE = migrationUrl('src/stores/system.ts');
 const PINIA = new URL('../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url).href;
 
 let instance = 0;
@@ -16,15 +18,13 @@ let instance = 0;
  * импорта один раз, поэтому подменять транспорт нужно через globalThis.
  */
 async function systemFixture() {
-  const source = (await readFile(STORE, 'utf8'))
-    .replace("import { defineStore } from 'pinia';", `import { defineStore } from '${PINIA}';`)
-    .replace(
-      "import { api } from '../shared/apiClient.ts';",
-      'const api = { get: (...args) => globalThis.__systemApi.get(...args) };',
-    );
   const [{ createPinia, setActivePinia }, { useSystemStore }] = await Promise.all([
     import(PINIA),
-    import(`data:text/javascript;base64,${Buffer.from(`${source}\n// ${++instance}`).toString('base64')}`),
+    loadProductModule('src/stores/system.ts', {
+      '../shared/apiClient.ts': `export const api = {
+        get: (...args) => globalThis.__systemApi.get(...args),
+      };`,
+    }),
   ]);
 
   setActivePinia(createPinia());

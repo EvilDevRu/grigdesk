@@ -216,7 +216,7 @@
 import { computed, nextTick, ref } from 'vue';
 import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import type { ShelfActivity, ShelfActivityProgress, ShelfRow } from '../../stores/taskShelf.ts';
-import { useUiStore } from '../../stores/ui.js';
+import { useUiStore } from '../../stores/ui.ts';
 import {
   UiButton,
   UiSelect,

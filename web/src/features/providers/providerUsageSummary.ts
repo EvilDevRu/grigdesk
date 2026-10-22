@@ -1,7 +1,7 @@
 import { intlLocale } from '../../../../shared/i18n/formats.ts';
 import { localeTranslator, type LocaleSource } from '../../../../shared/i18n/catalogs.ts';
 import { translate as t } from '../../../../shared/i18n/catalogs.ts';
-import { localizeUsageBar, localizeUsageResource } from './providerUsage.js';
+import { localizeUsageBar, localizeUsageResource } from './providerUsage.ts';
 
 export interface UsageDelivery {
   status?: string;

@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   boardTaskListResetKey,
   selectBoardTasks,
-} from '../../web/src/shared/board-task-list.js';
+} from '../../web/src/shared/boardTaskList.ts';
 
 const tasks = [
   { id: 11, title: 'Альфа отчёт', group: 'SEO', status: 2 },

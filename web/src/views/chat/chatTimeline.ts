@@ -1,3 +1,4 @@
+import type { ChatMessage } from '../../shared/chatContracts.ts';
 import type { ChatInTurnRun } from '../../stores/chatInTurn.ts';
 import { isInTurnReceipt } from '../../stores/chatInTurn.ts';
 
@@ -8,8 +9,8 @@ interface TimelineStep {
   [field: string]: unknown;
 }
 
-interface TimelineMessage {
-  role: string;
+interface TimelineMessage extends ChatMessage {
+  role?: string;
   kind?: string;
   runId?: string;
   turnId?: string;
@@ -19,7 +20,6 @@ interface TimelineMessage {
   finalAssistantMessageId?: string;
   sequence?: number;
   startedAt?: number;
-  receipt?: { acceptedAt?: number };
   text?: string;
   steps?: TimelineStep[];
   queued?: boolean;

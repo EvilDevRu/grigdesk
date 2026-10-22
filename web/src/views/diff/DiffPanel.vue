@@ -61,10 +61,13 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, useId } from 'vue';
+import type { editor } from 'monaco-editor';
+
+import { isRecord } from '../../../../shared/lib/objects.ts';
 import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco.ts';
-import { api } from '../../shared/apiClient.ts';
+import { api, failureText } from '../../shared/apiClient.ts';
 import {
   UiButton,
   UiIconButton,
@@ -74,127 +77,400 @@ import {
   vTooltip,
 } from '../../ui';
 
-// Ядро дифа задачи (дерево файлов + Monaco). Переиспользуется на роуте /diff и в модале.
-// Обвязка Monaco (воркер, тема, языки) — общая с плагином «Код»: shared/monaco.ts.
+interface DiffFile {
+  path: string;
+  status: string;
+  add?: number;
+  del?: number;
+  binary?: boolean;
+  tooBig?: boolean;
+  oldContent?: string;
+  newContent?: string;
+  hunks?: unknown[] | null;
+}
+
+interface DiffRepo {
+  name: string;
+  branch?: string | null;
+  files?: DiffFile[] | null;
+}
+
+type SelectedFile = DiffFile & { repo: string; branch?: string | null };
+
+type TreeNode = DirectoryNode | {
+  name: string;
+  dir: false;
+  path: string;
+  file: DiffFile;
+};
+
+interface DirectoryNode {
+  name: string;
+  dir: true;
+  path: string;
+  children: Map<string, TreeNode>;
+}
+
+type TreeRow = {
+  type: 'dir';
+  name: string;
+  key: string;
+  depth: number;
+} | {
+  type: 'file';
+  name: string;
+  file: DiffFile;
+  depth: number;
+};
+
+// Ядро дифа задачи: дерево файлов и Monaco с прежним выбором файла и настройкой раскладки.
 const props = defineProps({ taskId: { type: [String, Number], default: '' } });
 const tid = computed(() => String(props.taskId || '').replace(/[^0-9]/g, ''));
 
 const loading = ref(false);
 const error = ref('');
-const repos = ref([]);
+const repos = ref<DiffRepo[]>([]);
 const sideBySide = ref(localStorage.getItem('grigdesk-diff-side') !== '0');
-// Полноэкранная загрузка — только когда данных ещё нет. При рефреше редактор НЕ прячем
-// (иначе размонтируется хост Monaco и редактор гаснет).
-const showLoading = computed(() => loading.value && !repos.value.length);
 
-// Плоский список файлов (для выбора первого).
-const files = computed(() => repos.value.flatMap((r) => (r.files || []).map((f) => ({ ...f, repo: r.name, branch: r.branch }))));
+// При обновлении сохраняем хост Monaco: полноэкранная загрузка нужна только до первых данных.
+const showLoading = computed(() => loading.value && !repos.value.length);
+const files = computed(() => repos.value.flatMap((r) => (
+  (r.files || []).map((f) => ({
+    ...f,
+    repo: r.name,
+    branch: r.branch,
+  }))
+)));
 const selectedKey = ref('');
 const filesCollapsed = ref(false);
 const fileListId = `diff-files-${useId()}`;
 const selected = computed(() => files.value.find((f) => `${f.repo}:${f.path}` === selectedKey.value) || null);
-function fkey(f) { return `${f.repo}:${f.path}`; }
-const STLABEL = { A: 'A', M: 'M', D: 'D', R: 'R' };
+const STLABEL: Record<string, string> = {
+  A: 'A',
+  M: 'M',
+  D: 'D',
+  R: 'R',
+};
+const collapsedDirs = ref(new Set<string>());
+const host = ref<HTMLElement | null>(null);
+let diffEditor: editor.IStandaloneDiffEditor | null = null;
+let models: editor.ITextModel[] = [];
 
-// ── Дерево файлов (иерархия папок, как в Explorer VS Code) ──
-const collapsedDirs = ref(new Set());
-function toggleDir(key) { const s = new Set(collapsedDirs.value); s.has(key) ? s.delete(key) : s.add(key); collapsedDirs.value = s; }
+/**
+ * Проверяет используемые поля файла, не обрезая неизвестные расширения ответа.
+ * Содержимое и счётчики могут отсутствовать в старом снимке, но не менять тип.
+ */
+function isDiffFile(value: unknown): value is DiffFile {
+  if (!isRecord(value) || typeof value.path !== 'string' || typeof value.status !== 'string') {
+    return false;
+  }
 
-function buildTree(list) {
-  const root = { name: '', dir: true, path: '', children: new Map() };
+  for (const field of ['oldContent', 'newContent']) {
+    if (value[field] !== undefined && typeof value[field] !== 'string') {
+      return false;
+    }
+  }
+  for (const field of ['add', 'del']) {
+    if (value[field] !== undefined && (typeof value[field] !== 'number' || !Number.isFinite(value[field]))) {
+      return false;
+    }
+  }
+  for (const field of ['binary', 'tooBig']) {
+    if (value[field] !== undefined && typeof value[field] !== 'boolean') {
+      return false;
+    }
+  }
+
+  return value.hunks == null || Array.isArray(value.hunks);
+}
+
+/**
+ * Репозиторий должен содержать список проверенных файлов до публикации в редакторе.
+ * Отсутствующий старый список файлов по-прежнему означает пустой репозиторий.
+ */
+function isDiffRepo(value: unknown): value is DiffRepo {
+  return isRecord(value) && typeof value.name === 'string'
+    && (value.branch == null || typeof value.branch === 'string')
+    && (value.files == null || (Array.isArray(value.files) && value.files.every(isDiffFile)));
+}
+
+/**
+ * Сужает сетевой контейнер до изменения реактивного состояния панели.
+ * Неверный ответ использует прежний отказ с очисткой репозиториев.
+ */
+function parseRepos(value: unknown): DiffRepo[] {
+  if (!isRecord(value)) {
+    throw new Error('Сервер вернул некорректный диф');
+  }
+  if (value.repos == null) {
+    return [];
+  }
+  if (!Array.isArray(value.repos) || !value.repos.every(isDiffRepo)) {
+    throw new Error('Сервер вернул некорректный диф');
+  }
+
+  return value.repos;
+}
+
+function fkey(f: SelectedFile) {
+  return `${f.repo}:${f.path}`;
+}
+
+/**
+ * Меняет только локальное раскрытие каталога в дереве.
+ * Новый Set сохраняет реактивное уведомление после переключения ключа.
+ */
+function toggleDir(key: string) {
+  const s = new Set(collapsedDirs.value);
+
+  s.has(key) ? s.delete(key) : s.add(key);
+  collapsedDirs.value = s;
+}
+
+/**
+ * Собирает иерархию из путей файлов в прежнем порядке обхода.
+ * Файл не может одновременно быть родительским каталогом другого пути.
+ */
+function buildTree(list: DiffFile[]): DirectoryNode {
+  const root: DirectoryNode = {
+    name: '',
+    dir: true,
+    path: '',
+    children: new Map(),
+  };
+
   for (const f of list) {
     const parts = f.path.split('/');
     let node = root;
+
     parts.forEach((part, i) => {
-      if (i === parts.length - 1) { node.children.set(part, { name: part, dir: false, path: f.path, file: f }); return; }
-      if (!node.children.has(part)) node.children.set(part, { name: part, dir: true, path: parts.slice(0, i + 1).join('/'), children: new Map() });
-      node = node.children.get(part);
+      if (i === parts.length - 1) {
+        node.children.set(part, {
+          name: part,
+          dir: false,
+          path: f.path,
+          file: f,
+        });
+
+        return;
+      }
+
+      let child = node.children.get(part);
+
+      if (!child) {
+        child = {
+          name: part,
+          dir: true,
+          path: parts.slice(0, i + 1).join('/'),
+          children: new Map(),
+        };
+        node.children.set(part, child);
+      }
+      if (!child.dir) {
+        throw new Error('Некорректные пути файлов дифа');
+      }
+
+      node = child;
     });
   }
+
   return root;
 }
-// Схлопывание цепочек папок с единственным потомком-папкой (app/Domains/Projects → одна строка).
-function compactDirs(node) {
-  if (!node.dir) return;
-  while (node.children.size === 1) {
-    const only = [...node.children.values()][0];
-    if (!only.dir) break;
-    node.name = node.name ? `${node.name}/${only.name}` : only.name;
-    node.path = only.path; node.children = only.children;
+
+/**
+ * Схлопывает цепочки папок с единственным потомком-папкой в одну строку.
+ * Путь последней папки остаётся ключом раскрытия всей цепочки.
+ */
+function compactDirs(node: TreeNode) {
+  if (!node.dir) {
+    return;
   }
-  for (const c of node.children.values()) compactDirs(c);
+
+  while (node.children.size === 1) {
+    const only = [...node.children.values()][0]!;
+
+    if (!only.dir) {
+      break;
+    }
+
+    node.name = node.name ? `${node.name}/${only.name}` : only.name;
+    node.path = only.path;
+    node.children = only.children;
+  }
+
+  for (const c of node.children.values()) {
+    compactDirs(c);
+  }
 }
-function flattenTree(node, repo, depth, out, collapsed) {
-  const kids = [...node.children.values()].sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : (a.dir ? -1 : 1)));
+
+/**
+ * Разворачивает видимую часть дерева: каталоги прежде файлов, затем локальная сортировка.
+ * Закрытые ветви сохраняются в дереве, но не создают строки панели.
+ */
+function flattenTree(
+  node: DirectoryNode,
+  repo: string,
+  depth: number,
+  out: TreeRow[],
+  collapsed: Set<string>,
+) {
+  const kids = [...node.children.values()].sort((a, b) => (
+    a.dir === b.dir ? a.name.localeCompare(b.name) : (a.dir ? -1 : 1)
+  ));
+
   for (const c of kids) {
     if (c.dir) {
       const key = `${repo}:${c.path}`;
-      out.push({ type: 'dir', name: c.name, key, depth });
-      if (!collapsed.has(key)) flattenTree(c, repo, depth + 1, out, collapsed);
+
+      out.push({
+        type: 'dir',
+        name: c.name,
+        key,
+        depth,
+      });
+
+      if (!collapsed.has(key)) {
+        flattenTree(c, repo, depth + 1, out, collapsed);
+      }
     } else {
-      out.push({ type: 'file', name: c.name, file: c.file, depth });
+      out.push({
+        type: 'file',
+        name: c.name,
+        file: c.file,
+        depth,
+      });
     }
   }
 }
+
 const treeRepos = computed(() => repos.value.filter((r) => (r.files || []).length).map((r) => {
   const root = buildTree(r.files || []);
-  for (const c of root.children.values()) compactDirs(c);
-  const rows = [];
+
+  for (const c of root.children.values()) {
+    compactDirs(c);
+  }
+
+  const rows: TreeRow[] = [];
+
   flattenTree(root, r.name, 0, rows, collapsedDirs.value);
-  return { name: r.name, branch: r.branch, rows };
+
+  return {
+    name: r.name,
+    branch: r.branch,
+    rows,
+  };
 }));
-function indent(depth) { return `${depth * 13 + 8}px`; }
 
-// ── Monaco diff editor ──
-const host = ref(null);
-let diffEditor = null;
-let models = [];
-function disposeModels() { models.forEach((m) => m.dispose()); models = []; }
+function indent(depth: number) {
+  return `${depth * 13 + 8}px`;
+}
 
+function disposeModels() {
+  models.forEach((m) => m.dispose());
+  models = [];
+}
+
+/**
+ * Создаёт один diff editor при появлении хоста в DOM.
+ * Переключение файла и обновление данных переиспользуют тот же экземпляр Monaco.
+ */
 function mountEditor() {
-  if (diffEditor || !host.value) return;
+  if (diffEditor || !host.value) {
+    return;
+  }
+
   diffEditor = monaco.editor.createDiffEditor(host.value, {
     ...READONLY_OPTS,
     renderSideBySide: sideBySide.value,
-    renderOverviewRuler: true, ignoreTrimWhitespace: false,
-    hideUnchangedRegions: { enabled: true, minimumLineCount: 3, contextLineCount: 3 },
+    renderOverviewRuler: true,
+    ignoreTrimWhitespace: false,
+    hideUnchangedRegions: {
+      enabled: true,
+      minimumLineCount: 3,
+      contextLineCount: 3,
+    },
   });
 }
-function showFile(f) {
-  if (!f) return;
+
+/**
+ * Подменяет модели выбранного файла, сохраняя прежнюю обработку больших файлов.
+ * Старые модели снимаются после setModel, чтобы Monaco не потерял текущий диф.
+ */
+function showFile(f: SelectedFile | null) {
+  if (!f) {
+    return;
+  }
+
   mountEditor();
-  if (!diffEditor) return; // хост ещё не в DOM (идёт загрузка) — покажем после nextTick
+
+  if (!diffEditor) {
+    return;
+  }
+
   const lang = langOf(f.path);
   const orig = monaco.editor.createModel(f.tooBig ? '' : (f.oldContent || ''), lang);
   const mod = monaco.editor.createModel(f.tooBig ? '' : (f.newContent || ''), lang);
   const old = models;
+
   models = [orig, mod];
   diffEditor.setModel({ original: orig, modified: mod });
-  old.forEach((m) => m.dispose()); // старые модели снимаем ПОСЛЕ переустановки (иначе варнинг Monaco)
+  old.forEach((m) => m.dispose());
 }
-watch(selected, (f) => showFile(f));
-watch(sideBySide, (v) => { localStorage.setItem('grigdesk-diff-side', v ? '1' : '0'); diffEditor?.updateOptions({ renderSideBySide: v }); });
 
+watch(selected, (f) => showFile(f));
+watch(sideBySide, (v) => {
+  localStorage.setItem('grigdesk-diff-side', v ? '1' : '0');
+  diffEditor?.updateOptions({ renderSideBySide: v });
+});
+
+/**
+ * Загружает проверенный снимок и сохраняет прежний выбор файла при обновлении.
+ * Первый показ ждёт DOM после loading=false; последующие делает watch(selected).
+ */
 async function load() {
-  if (!tid.value) { error.value = 'не указана задача'; return; }
-  loading.value = true; error.value = '';
+  if (!tid.value) {
+    error.value = 'не указана задача';
+
+    return;
+  }
+
+  loading.value = true;
+  error.value = '';
+
   try {
-    repos.value = (await api.get(`/api/tasks/${tid.value}/diff`)).repos || [];
-    if (!selected.value) selectedKey.value = files.value[0] ? fkey(files.value[0]) : '';
-  } catch (e) { error.value = e.message; repos.value = []; }
-  finally { loading.value = false; }
-  // Хост рендерится только после loading=false. Явно показываем только при ПЕРВОМ монтировании;
-  // на рефреше перерисовку делает watch(selected) — иначе двойной showFile дёргает модели
-  // в момент вычисления дифа («no diff result available»).
+    repos.value = parseRepos(await api.get(`/api/tasks/${tid.value}/diff`));
+
+    if (!selected.value) {
+      selectedKey.value = files.value[0] ? fkey(files.value[0]) : '';
+    }
+  } catch (e) {
+    error.value = failureText(e);
+    repos.value = [];
+  } finally {
+    loading.value = false;
+  }
+
   await nextTick();
+
   const firstMount = !diffEditor;
+
   mountEditor();
-  if (firstMount && selected.value) showFile(selected.value);
+
+  if (firstMount && selected.value) {
+    showFile(selected.value);
+  }
 }
 
 onMounted(load);
-watch(tid, () => { selectedKey.value = ''; load(); });
-onBeforeUnmount(() => { diffEditor?.dispose(); diffEditor = null; disposeModels(); });
+watch(tid, () => {
+  selectedKey.value = '';
+  load();
+});
+onBeforeUnmount(() => {
+  diffEditor?.dispose();
+  diffEditor = null;
+  disposeModels();
+});
 </script>
 
 <style scoped>

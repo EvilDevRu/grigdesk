@@ -1,18 +1,30 @@
+import { loadProductModule } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
 
 import { api } from '../../web/src/shared/apiClient.ts';
-import { useAuthStore } from '../../web/src/stores/auth.js';
+
+const { useAuthStore } = await loadProductModule('src/stores/auth.ts');
 
 test('каждый успешный auth.load подтверждает сессию независимо от boolean-флагов', async () => {
   setActivePinia(createPinia());
+
   const store = useAuthStore();
   const originalGet = api.get;
-  api.get = async () => ({ configured: true, authenticated: true, login: 'test', secure: true });
+
+  api.get = async () => ({
+    configured: true,
+    authenticated: true,
+    login: 'test',
+    secure: true
+  });
+
   try {
     await store.load();
+
     const previous = store.logConfirmation;
+
     await store.load();
     assert.equal(store.authenticated, true);
     assert.equal(store.logConfirmation, previous + 1);
@@ -24,6 +36,7 @@ test('каждый успешный auth.load подтверждает сесс�
 
 test('потеря сессии меняет эпоху, перезагружает документ и не возобновляет вход', async (t) => {
   setActivePinia(createPinia());
+
   const store = useAuthStore();
   const originalGet = api.get;
   const originalOn = api.onUnauthorized;

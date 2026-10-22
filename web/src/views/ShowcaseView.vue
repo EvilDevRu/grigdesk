@@ -196,7 +196,7 @@ import {
   watchShowcase,
 } from '../actions/showcase';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
-import { sandboxUrl } from '../shared/sandbox.js';
+import { sandboxUrl } from '../shared/sandbox.ts';
 import { showcaseApi } from '../shared/showcaseApi';
 import type { SeedStatus, ShowcaseVoiceChoice } from '../actions/showcase';
 import type {

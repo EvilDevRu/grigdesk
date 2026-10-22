@@ -26,43 +26,37 @@ const PINIA_URL = pathToFileURL(fileURLToPath(
 const LIST_WIDTH_KEY = 'grigdesk-chats-list-width';
 
 let nonce = 0;
-async function compileSfc(path, id, patch = (code) => code) {
-  const { parse, compileScript } = await import(
-    '../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.esm-browser.js'
-  );
-  const source = await readFile(path, 'utf8');
-  const { descriptor, errors } = parse(source, { filename: path });
-  assert.deepEqual(errors, []);
-  const code = patch(
-    compileScript(descriptor, { id, inlineTemplate: true }).content
-      .replaceAll('from "vue"', `from "${VUE_URL}"`)
-      .replaceAll("from 'vue'", `from "${VUE_URL}"`)
-      .replaceAll("from 'pinia'", `from "${PINIA_URL}"`),
-  );
-  // Хвост-nonce в URL: Node кэширует data:-модуль по всей строке, а байты двух
-  // монтирований одного SFC совпадают — без него второй тест работал бы со сторами первого.
-  return (await import(
-    `data:text/javascript;base64,${Buffer.from(code).toString('base64')}#${nonce++}`
-  )).default;
-}
 
-const compileChatsView = () => compileSfc(CHATS_VIEW_PATH, 'data-v-chats-resize', (code) => code
-  .replace(
-    "import { vTooltip } from '../ui';",
-    `import { vTooltip } from '${pathToFileURL(webFile('src/services/tooltipDirective.ts')).href}';`,
-  )
-  .replace("import { useChatStore } from '../stores/chat.js';", 'const useChatStore = globalThis.__chatsResizeStore;')
-  .replace("import { useUiContextSource } from '../composables/useUiContextSource.ts';", 'const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });')
-  .replace("import { useDockViewport } from '../shared/tools/viewport.ts';", 'const useDockViewport = () => ({ dockCapable: globalThis.__chatsDockCapable });')
-  .replace("import ChatList from './chat/ChatList.vue';", 'const ChatList = { emits: ["open"], template: "<aside class=\\"cl\\"><button class=\\"stub-open\\" @click=\\"$emit(\\\'open\\\')\\"></button></aside>" };')
-  .replace("import ChatSession from './chat/ChatSession.vue';", 'const ChatSession = { props: ["sid"], template: "<div class=\\"cs\\"></div>" };'));
+const compileChatsView = () => compileVue(CHATS_VIEW_PATH, {
+  stubs: {
+    '../ui': `export {vTooltip} from './src/services/tooltipDirective.ts';`,
+    '../stores/chat.ts': 'export const useChatStore = globalThis.__chatsResizeStore;',
+    '../composables/useUiContextSource.ts': `export const useUiContextSource = () => ({
+      focus() {}, update() {}, blur() {},
+    });`,
+    '../shared/tools/viewport.ts': `export const useDockViewport = () => ({
+      dockCapable: globalThis.__chatsDockCapable,
+    });`,
+    './chat/ChatList.vue': `
+      import {h} from 'vue';
+      export default {
+        emits: ['open'],
+        setup(_, {emit}) {
+          return () => h('aside', {class: 'cl'}, h('button', {
+            class: 'stub-open', onClick: () => emit('open'),
+          }));
+        },
+      };`,
+    './chat/ChatSession.vue': `export default {props: ['sid'], template: '<div class="cs"></div>'};`,
+  },
+});
 
 const compileChatList = () => compileVue(CHAT_LIST_PATH, {
   stubs: {
-    '../../stores/chat.js': `
+    '../../stores/chat.ts': `
       export const useChatStore = globalThis.__chatListStore;
     `,
-    '../../stores/providers.js': `
+    '../../stores/providers.ts': `
       export const useProvidersStore = globalThis.__chatListProviders;
     `,
     '../../shared/ProviderIcon.vue': `
