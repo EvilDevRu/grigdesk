@@ -21,6 +21,10 @@ import {
 } from './egressProxy.ts';
 import { buildKimiHostLaunch } from './hostLaunch.ts';
 import { buildKimiHostWebHome } from './hostWebHome.ts';
+import { createKimiCommandChannel } from './commandChannel.ts';
+import { COMMAND_NAME, hasUserShellPolicy } from './commandProfile.ts';
+import { checkKimiNativeShellPolicy } from './commandNativePolicy.ts';
+import type { KimiServerClient } from './serverClient.ts';
 import { runKimiServerTurn } from './serverTurn.ts';
 import { startKimiServer } from './serverRuntime.ts';
 import type { PreparedNativeSettings } from '../executorSettings/types.ts';
@@ -128,6 +132,7 @@ interface KimiRuntimeDeps {
   stopUnit?: typeof stopKimiUnit;
   assertVersion?: typeof assertPinnedVersion;
   startServer?: typeof startKimiServer;
+  createCommandChannel?: typeof createKimiCommandChannel;
 }
 const MAX_REPLY_BYTES = 8 * 1024 * 1024;
 const MAX_STATUS_BYTES = 64 * 1024;
@@ -396,6 +401,7 @@ export async function runContainedKimi({
   providerSettings?: {
     blockDirectSsh?: unknown;
     blockDirectDb?: unknown;
+    strictUnknownDbClient?: unknown;
   } | null;
   signal?: AbortSignal;
   onStep?: (step: ChatStep) => void;
@@ -423,13 +429,21 @@ export async function runContainedKimi({
   // прежний bwrap-профиль. Отсутствие ключа трактуем как contained: старые вызовы
   // и тесты без обновлённого конфига получают прежнее, более строгое поведение.
   const launchMode = config.kimiLaunchMode === 'host' ? 'host' : 'contained';
-  if (launchMode === 'host' && providerSettings?.blockDirectSsh !== false) {
+  const commandSettings = {
+    blockDirectSsh: providerSettings?.blockDirectSsh !== false,
+    blockDirectDb: providerSettings?.blockDirectDb === true,
+    strictUnknownDbClient: providerSettings?.strictUnknownDbClient === true,
+  };
+  const controlledCommands = launchMode === 'host' && transport === 'server'
+    && (commandSettings.blockDirectSsh || commandSettings.blockDirectDb);
+
+  if (launchMode === 'host' && providerSettings?.blockDirectSsh !== false && !controlledCommands) {
     throw Object.assign(new Error(
       'Kimi host не умеет обеспечить запрет прямого SSH: включи contained '
       + 'или подтверждённо выключи настройку.',
     ), { code: 'direct_ssh_policy_unavailable' });
   }
-  if (launchMode === 'host' && providerSettings?.blockDirectDb === true) {
+  if (launchMode === 'host' && providerSettings?.blockDirectDb === true && !controlledCommands) {
     throw Object.assign(new Error(
       'Kimi host не умеет обеспечить запрет прямых подключений к БД: включи contained.',
     ), { code: 'direct_db_policy_unavailable' });
@@ -488,6 +502,10 @@ export async function runContainedKimi({
   }
   let staged: Awaited<ReturnType<typeof stageKimiAttachments>> | null = null;
   let hostWebHome: Awaited<ReturnType<typeof buildKimiHostWebHome>> | null = null;
+  const commandChannel: {
+    current: Awaited<ReturnType<typeof createKimiCommandChannel>> | null;
+  } = { current: null };
+  let commandContext: { client: KimiServerClient; sessionId: string } | null = null;
   let child: ChildProcess | null = null;
   let launch: KimiLaunch | null = null;
   let stderrTail = '';
@@ -578,6 +596,32 @@ export async function runContainedKimi({
           runtimeHome: config.kimiRuntimeHome,
           mcpServers: sessionMcpServers,
           isolateConfig: Boolean(nativeSettings?.accepted.length),
+          controlledCommands,
+          commandMcpFactory: async (profile) => {
+            try {
+              const createChannel = deps.createCommandChannel ?? createKimiCommandChannel;
+
+              commandChannel.current = await createChannel({
+                cwd: launch!.cwdReal,
+                env: launch!.env ?? {},
+                settings: commandSettings,
+                permissionMode: permissionMode || 'manual',
+                commandsAllowed: profile.commandsAllowed
+                  && !hasUserShellPolicy(nativeSettings?.payload ?? {}),
+                blockedReason: profile.blockedReason,
+                signal,
+                authorize: onPermission,
+                nativeGuard: async () => commandContext !== null
+                  && await checkKimiNativeShellPolicy(commandContext.client, commandContext.sessionId),
+              });
+
+              return commandChannel.current.mcpServer;
+            } catch {
+              log?.warn?.({}, 'Канал команд Kimi недоступен; команды остаются закрытыми.');
+
+              return undefined;
+            }
+          },
         });
       }
     } else {
@@ -623,6 +667,10 @@ export async function runContainedKimi({
     if (transport === 'server') {
       const result = await runKimiServerTurn({
         nativeSettings,
+        controlledCommands,
+        onCommandContext: (client, currentSessionId) => {
+          commandContext = { client, sessionId: currentSessionId };
+        },
         bin: config.kimiBin,
         home: launchMode === 'host' ? hostWebHome?.home || config.kimiHome : runtimeHome,
         cwd: launch.cwdReal,
@@ -644,6 +692,13 @@ export async function runContainedKimi({
         onAssistantMessage,
         onApproval: async (approval, respond) => {
           const tool = String(approval.tool_name || approval.tool || 'Действие агента');
+
+          if (controlledCommands && tool === COMMAND_NAME) {
+            await respond({ decision: 'approved' });
+
+            return;
+          }
+
           const answer = await onPermission?.({
             tool,
             input: {
@@ -1042,6 +1097,7 @@ export async function runContainedKimi({
     }
     await proxy?.close().catch(() => {});
     await staged?.cleanup?.().catch(() => {});
+    await commandChannel.current?.close().catch(() => {});
     await hostWebHome?.cleanup().catch(() => {});
     if (runDir) await fs.rm(runDir, { recursive: true, force: true }).catch(() => {});
   }

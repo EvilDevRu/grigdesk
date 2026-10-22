@@ -654,3 +654,87 @@ test('server runtime сохраняет контекст и берёт окно 
     assert.equal(out.contextMetric, 'kimi-agent-status-v1');
   }
 });
+
+test('host server отвечает при DB-политике и сохраняет закрытый Bash в каждом режиме', async (t) => {
+  const scenarios = [
+    ...['manual', 'auto', 'plan', 'yolo'].map((permissionMode) => ({ permissionMode, brokerFails: false })),
+    { permissionMode: 'yolo', brokerFails: true },
+    {
+      permissionMode: 'yolo',
+      brokerFails: false,
+      invalidMatcher: true,
+    },
+  ];
+
+  for (const { permissionMode, brokerFails, invalidMatcher } of scenarios) {
+    const f = await fixture(t);
+
+    await fs.mkdir(path.join(f.config.kimiHome, 'sessions'), { recursive: true });
+
+    const originalSource = invalidMatcher
+      ? 'telemetry = false\n[[hooks]]\nevent = "PreToolUse"\nmatcher = "["\ncommand = "true"\n'
+      : 'telemetry = false\n';
+
+    await fs.writeFile(path.join(f.config.kimiHome, 'config.toml'), originalSource);
+    await fs.writeFile(path.join(f.config.kimiHome, 'mcp.json'), JSON.stringify({
+      mcpServers: { 'grigdesk-command': { command: '/must-not-run' } },
+    }));
+
+    const wire = await kimiUsageWire(t, [(send) => {
+      send({ type: 'assistant.delta', delta: 'Ответ.' });
+      send({ type: 'turn.ended', reason: 'completed' });
+    }]);
+    let launchHome = '';
+    let mcp;
+    const out = await runContainedKimi({
+      config: { ...f.config, kimiLaunchMode: 'host' },
+      chatKey: 'fixture-host-command',
+      cwd: f.cwd,
+      message: 'Можно сделать плагин?',
+      model: 'kimi-code/k3',
+      permissionMode,
+      providerSettings: { blockDirectSsh: true, blockDirectDb: true },
+      transport: 'server',
+      deps: {
+        assertVersion: async () => '0.33.0',
+        createCommandChannel: brokerFails ? async () => {
+          throw new Error('Канал недоступен');
+        } : undefined,
+        buildHostLaunch: async () => ({
+          command: 'fake',
+          args: [],
+          cwdReal: f.cwd,
+          env: {},
+          unit: null,
+        }),
+        startServer: async (input) => {
+          launchHome = input.home;
+
+          const source = await fs.readFile(path.join(input.home, 'config.toml'), 'utf8');
+
+          assert.match(source, /Bash/);
+          mcp = JSON.parse(await fs.readFile(path.join(input.home, 'mcp.json'), 'utf8'));
+
+          const server = await wire.startServer();
+
+          server.client.tools = async () => ({ tools: [{ name: 'Bash', active: false }] });
+
+          return server;
+        },
+      },
+    });
+
+    assert.equal(out.reply, 'Ответ.');
+
+    if (brokerFails) {
+      assert.equal(mcp.mcpServers['grigdesk-command'], undefined);
+    } else {
+      assert.equal(mcp.mcpServers['grigdesk-command'].toolTimeoutMs, 2_147_483_647);
+    }
+
+    const originalConfig = await fs.readFile(path.join(f.config.kimiHome, 'config.toml'), 'utf8');
+
+    assert.equal(originalConfig, originalSource);
+    await assert.rejects(fs.access(launchHome), { code: 'ENOENT' });
+  }
+});

@@ -17,6 +17,7 @@ import { openKimiEventStream } from './serverEvents.ts';
 import type { KimiRawEvent } from './serverEvents.ts';
 import type { KimiServerProcess } from './serverRuntime.ts';
 import { startKimiServer } from './serverRuntime.ts';
+import type { KimiServerClient } from './serverClient.ts';
 import type { StartKimiServerOptions } from './serverRuntime.ts';
 import type { PreparedNativeSettings } from '../executorSettings/types.ts';
 import { applyKimiNativeSettings } from '../executorSettings/kimi.ts';
@@ -34,6 +35,8 @@ export interface KimiServerTurnOptions {
   effort?: string;
   signal?: AbortSignal;
   nativeSettings?: PreparedNativeSettings;
+  controlledCommands?: boolean;
+  onCommandContext?: (client: KimiServerClient, sessionId: string) => void | Promise<void>;
   onStep?: (step: ChatStep) => void;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
@@ -96,6 +99,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
   const server: KimiServerProcess = await (options.startServer || startKimiServer)({
     bin: options.bin,
     home: options.home,
+    debugEndpoints: options.controlledCommands === true,
     ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.env ? { env: options.env } : {}),
     log: options.log || null,
@@ -119,6 +123,25 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
 
     if (!options.sessionId) {
       await options.onSessionCreated?.(session.id);
+    }
+
+    if (options.controlledCommands) {
+      if (options.sessionId) {
+        await server.client.snapshot(session.id);
+      }
+
+      const response = await server.client.tools(session.id);
+      const tools = Array.isArray(response.tools) ? response.tools : [];
+      const bash = tools.find((raw) => raw && typeof raw === 'object'
+        && (raw as Record<string, unknown>).name === 'Bash') as Record<string, unknown> | undefined;
+
+      if (bash?.active !== false) {
+        throw new Error('kimi_native_bash_not_disabled');
+      }
+    }
+
+    if (options.controlledCommands) {
+      await options.onCommandContext?.(server.client, session.id);
     }
 
     const stepSink = createStepSink(options.onStep);

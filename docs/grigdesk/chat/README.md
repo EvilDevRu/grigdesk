@@ -46,6 +46,8 @@
 
 ### Kimi
 
+- [Kimi host: проверка команд, native Bash и сохранение пользовательских ограничений](kimi-command-policy.md)
+- [Kimi host: причина прежней блокировки ходов с плагином БД](kimi-db-policy.md)
 - [Дополнительные workspace-каталоги для kimi-чатов (паритет с codex --add-dir)](kimi-workspace-extra-dirs.md)
 - [Kimi ACP: результаты contract spike](kimi-acp-spike.md)
 - [KimiRuntime: security gate](kimi-runtime-security.md)
