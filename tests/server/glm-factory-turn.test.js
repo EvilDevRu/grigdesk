@@ -12,7 +12,10 @@ import { GLM_FACTORY_STATUS_TOOLS } from '../../server/src/lib/glm/factoryPolicy
 import { describeGlmGeneration } from '../../server/src/lib/glm/generation.ts';
 import { runGlmTurn } from '../../server/src/lib/glm/runtime.ts';
 import { runtimeYaml } from '../../deepseek/scripts/runtimeComposition.ts';
+import { testDeepSeekRuntimeDependencies } from '../helpers/deepseekBinary.mts';
 import { GLM_FIXTURE_PLUGIN, writeGlmArtifactFixture } from '../helpers/glmArtifactFixture.mts';
+
+const DEPENDENCIES = await testDeepSeekRuntimeDependencies();
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const FAKE_WEB = path.join(REPO_ROOT, 'tests/fixtures/deepseek-harness/fakeWeb.mjs');
@@ -131,7 +134,7 @@ async function fixture(t, scenario = { updates: [] }, envOverrides = {}) {
 
       launches.push({
         launchDir,
-        overlay: runtimeYaml().load(readFileSync(overlayPath, 'utf8')),
+        overlay: runtimeYaml(DEPENDENCIES.directory).load(readFileSync(overlayPath, 'utf8')),
         hooks: JSON.parse(readFileSync(path.join(launchDir, 'hooks.json'), 'utf8')),
         policy: JSON.parse(readFileSync(path.join(launchDir, 'glm-policy.json'), 'utf8')),
       });

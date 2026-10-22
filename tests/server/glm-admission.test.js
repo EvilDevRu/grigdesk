@@ -17,7 +17,10 @@ import {
 } from '../../server/src/lib/glm/contract.ts';
 import { describeGlmGeneration } from '../../server/src/lib/glm/generation.ts';
 import { runtimeYaml } from '../../deepseek/scripts/runtimeComposition.ts';
+import { testDeepSeekRuntimeDependencies } from '../helpers/deepseekBinary.mts';
 import { GLM_FIXTURE_PLUGIN, writeGlmArtifactFixture } from '../helpers/glmArtifactFixture.mts';
+
+const DEPENDENCIES = await testDeepSeekRuntimeDependencies();
 
 const exec = promisify(execFile);
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -85,7 +88,7 @@ async function fixture(t, plugin = GLM_FIXTURE_PLUGIN, dependencyLock) {
           const overlay = args[args.indexOf('--patch') + 1];
 
           launches.push({
-            overlay: runtimeYaml().load(readFileSync(overlay, 'utf8')),
+            overlay: runtimeYaml(DEPENDENCIES.directory).load(readFileSync(overlay, 'utf8')),
             env: options.env,
           });
 

@@ -10,6 +10,9 @@ import { GLM_PROFILE_REVISION, buildGlmRoute } from '../../server/src/lib/glm/co
 import { glmChatHome, prepareGlmLaunch } from '../../server/src/lib/glm/launch.ts';
 import { buildGlmLaunchFiles, glmLaunchFingerprint } from '../../server/src/lib/glm/profile.ts';
 import { runtimeYaml } from '../../deepseek/scripts/runtimeComposition.ts';
+import { testDeepSeekRuntimeDependencies } from '../helpers/deepseekBinary.mts';
+
+const DEPENDENCIES = await testDeepSeekRuntimeDependencies();
 
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const GOLDEN = path.join(REPO_ROOT, 'tests/fixtures/glm/deepseek-launch-golden.json');
@@ -73,7 +76,7 @@ function prepareOptions(f, overrides = {}) {
 }
 
 async function overlayRows(files) {
-  return runtimeYaml().load(await fs.readFile(files.overlayPath, 'utf8'));
+  return runtimeYaml(DEPENDENCIES.directory).load(await fs.readFile(files.overlayPath, 'utf8'));
 }
 
 function insertRows(rows) {

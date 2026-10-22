@@ -23,6 +23,9 @@ import {
   glmLaunchFingerprint,
 } from '../../server/src/lib/glm/profile.ts';
 import { runtimeYaml } from '../../deepseek/scripts/runtimeComposition.ts';
+import { testDeepSeekRuntimeDependencies } from '../helpers/deepseekBinary.mts';
+
+const DEPENDENCIES = await testDeepSeekRuntimeDependencies();
 
 const STATUS_TOOLS = ['stage_progress', 'stage_result']
   .map((name) => glmMcpToolName('factory-status', name));
@@ -67,7 +70,7 @@ function launchOptions(f, name, overrides = {}) {
 }
 
 async function overlayRows(files) {
-  return runtimeYaml().load(await fs.readFile(files.overlayPath, 'utf8'));
+  return runtimeYaml(DEPENDENCIES.directory).load(await fs.readFile(files.overlayPath, 'utf8'));
 }
 
 test('SB07: headless GLM сохраняет ФС-политику и не ждёт вопросов', () => {
