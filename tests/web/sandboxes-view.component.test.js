@@ -13,6 +13,8 @@ const VIEW = webFile('src/views/SandboxesView.vue');
 // Элементы управления остаются настоящими: подменяется только решение человека
 // в диалоге, чтобы проверялось поведение самой страницы.
 const UI_STUB = `
+export { default as UiPaneHeader } from '${webFile('src/components/composites/UiPaneHeader.vue')}';
+export { default as UiActionLink } from '${webFile('src/components/primitives/UiActionLink.vue')}';
 export { default as UiButton } from '${webFile('src/components/primitives/UiButton.vue')}';
 export { default as UiIconButton } from '${webFile('src/components/primitives/UiIconButton.vue')}';
 export { default as UiInput } from '${webFile('src/components/primitives/UiInput.vue')}';
@@ -88,7 +90,7 @@ function entry(overrides = {}) {
  * и передаёт службе именно то, что он выбрал. Настоящих стендов здесь нет.
  */
 async function mountView(t, {
-  sandboxes = [entry()], jobs = [], confirmed = true, answers = [],
+  sandboxes = [entry()], jobs = [], confirmed = true, answers = [], state = {},
 } = {}) {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/sandboxes');
   const calls = [];
@@ -113,6 +115,7 @@ async function mountView(t, {
       orphanJobs: jobs.filter((job) => !sandboxes.some((item) => item.task === job.task)),
       jobOf: (task) => jobs.find((job) => job.task === task) || null,
       isBusy: () => false,
+      ...state,
     },
   };
 
@@ -170,13 +173,14 @@ test('обычный снос бережёт незакоммиченное, а 
   const buttons = wrapper.findAll('.sandbox-card__actions button');
 
   assert.deepEqual(buttons.map((button) => button.text()), [
-    'Снести вместе с незакоммиченным',
     'Снести стенд',
+    'Снести вместе с изменениями',
   ]);
 
-  await buttons[1].trigger('click');
+  assert.equal(wrapper.find('.sandbox-card__removal').attributes('open'), undefined);
+  await buttons[0].trigger('click');
   await flushPromises();
-  await wrapper.findAll('.sandbox-card__actions button')[0].trigger('click');
+  await wrapper.findAll('.sandbox-card__actions button')[1].trigger('click');
   await flushPromises();
 
   assert.deepEqual(calls.filter(([kind]) => kind === 'dismantle'), [
@@ -284,4 +288,81 @@ test('итог прогона показан на карточке, а журн�
 
   assert.deepEqual(calls.filter(([kind]) => kind === 'log'), [['log', '990000']]);
   assert.match(wrapper.find('.sandbox-card__log-text').text(), /все звенья СОВПАДАЮТ/);
+});
+
+test('поиск по ветке и фильтр владельца сохраняют недавние задания', async (t) => {
+  const { wrapper } = await mountView(t, {
+    sandboxes: [entry(), entry({
+      task: '4242',
+      owner: 'pipeline',
+      repos: [],
+    })],
+    jobs: [{
+      task: '990001',
+      action: 'up',
+      state: 'failed',
+      message: 'Нет свободного слота',
+    }],
+  });
+
+  await wrapper.find('[aria-label="Поиск стенда"]').setValue('ROUTE-TASK');
+  assert.equal(wrapper.findAll('.sandbox-card').length, 1);
+  assert.match(wrapper.find('.sandbox-card h3').text(), /990000/);
+  assert.match(wrapper.find('.sandboxes__jobs').text(), /Нет свободного слота/);
+
+  await wrapper.find('[aria-label="Какие стенды показать"]').setValue('pipeline');
+  assert.equal(wrapper.findAll('.sandbox-card').length, 0);
+  assert.match(wrapper.text(), /Подходящих стендов нет/);
+  await wrapper.findAll('button').find((button) => button.text() === 'Сбросить').trigger('click');
+  assert.equal(wrapper.findAll('.sandbox-card').length, 2);
+});
+
+test('сворачивание формы сохраняет номер, а неправильный ввод не открывает подтверждение', async (t) => {
+  const { wrapper, flushPromises, calls, harness } = await mountView(t);
+  const toggle = wrapper.find('[aria-controls="sandboxes-create"]');
+
+  await toggle.trigger('click');
+  await wrapper.find('[role="switch"]').trigger('click');
+  await wrapper.find('input[inputmode="numeric"]').setValue('не номер');
+  await wrapper.find('form').trigger('submit');
+  assert.equal(harness.confirmations.length, 0);
+  assert.match(wrapper.find('form').text(), /Нужен номер задачи/);
+
+  await wrapper.find('input[inputmode="numeric"]').setValue('12345');
+  await toggle.trigger('click');
+  await toggle.trigger('click');
+  assert.equal(wrapper.find('input[inputmode="numeric"]').element.value, '12345');
+  await wrapper.find('form').trigger('submit');
+  await flushPromises();
+  assert.deepEqual(calls.filter(([kind]) => kind === 'raise'), [['raise', 'demo-profile', '12345']]);
+});
+
+test('ошибка первого чтения не выдаётся за отсутствие стендов или профилей', async (t) => {
+  const { wrapper } = await mountView(t, {
+    sandboxes: [],
+    state: { loaded: false, error: 'Не удалось прочитать состояние песочниц.' },
+  });
+
+  assert.match(wrapper.find('[role="alert"]').text(), /Не удалось прочитать/);
+  assert.equal(wrapper.find('#sandboxes-create').isVisible(), false);
+  assert.equal(wrapper.find('.sandboxes__empty').exists(), false);
+  assert.equal(wrapper.find('[aria-label="Обновить песочницы"]').exists(), true);
+});
+
+test('задание до появления стенда показывает шаг и не называется завершённым', async (t) => {
+  const { wrapper } = await mountView(t, {
+    sandboxes: [],
+    jobs: [{
+      task: '990001',
+      action: 'up',
+      state: 'running',
+      index: 2,
+      total: 11,
+      label: 'Копируем код',
+    }],
+  });
+
+  assert.match(wrapper.find('.sandboxes__jobs').text(), /выполняется/);
+  assert.match(wrapper.find('.sandboxes__jobs').text(), /2\/11 · Копируем код/);
+  assert.match(wrapper.find('.sandboxes__empty').text(), /Подготовка идёт/);
 });
