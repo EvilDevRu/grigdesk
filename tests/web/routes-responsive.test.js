@@ -133,7 +133,7 @@ async function geometry(page) {
     return {
       fits: root.scrollWidth <= root.clientWidth + 1 && box.right <= innerWidth + 1,
       panelsFit: panels.every((node) => node.scrollWidth <= node.clientWidth + 1),
-      headers: [...root.querySelectorAll('.ui-pane-header')].filter(visible)
+      headers: [...root.querySelectorAll('.list > .ui-pane-header, .panel > .ui-pane-header')].filter(visible)
         .map((node) => node.getBoundingClientRect().height),
       rowsFit: rows.every((node) => node.scrollHeight <= node.clientHeight + 1),
     };

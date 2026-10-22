@@ -46,6 +46,14 @@
   min-height: 58px;
 }
 
+/* Инструкция остаётся обычным полем UI-kit: многострочный рабочий текст
+   получает общую высоту и моноширинный ритм без локального скина страницы. */
+.ui-textarea[data-context='workspace-instruction'] {
+  min-height: 240px;
+  font-family: var(--mono);
+  line-height: 1.55;
+}
+
 .ui-textarea[data-role='pipeline-stage-note'] {
   min-height: 112px;
   max-height: 220px;
@@ -258,6 +266,12 @@
   flex: none;
   align-content: center;
   margin-left: 4px;
+}
+
+/* Подпись checkbox — полная площадка строки рабочей формы, а не только значок.
+   Размер наследуется от контекста формы, включая сенсорные 44 px. */
+[data-context='workspace-form'] > .ui-checkbox {
+  min-height: var(--control-height);
 }
 
 .ui-file-picker {

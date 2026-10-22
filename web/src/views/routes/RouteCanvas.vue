@@ -1,6 +1,7 @@
 <template>
   <section class="route-canvas">
     <div class="route-canvas__toolbar">
+      <strong>Схема</strong>
       <div class="route-canvas__zoom" role="group" aria-label="Масштаб схемы">
         <UiIconButton data-context="workspace-form" label="Уменьшить масштаб"
                       v-tooltip="'Уменьшить масштаб'" data-test="zoom-out"

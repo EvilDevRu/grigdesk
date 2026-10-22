@@ -1,163 +1,195 @@
 <template>
-  <div class="agents-page" :class="{ 'has-editor': mobileEditor && form }">
-    <!-- Список -->
-    <aside class="list">
-      <div class="list-head">
-        <div class="list-title">
-          <span class="ttl">База агентов</span>
-          <!-- На планшете ховера нет, а объяснение раздела длинное — его открывают явно. -->
-          <UiPopover
-            trigger-mode="both"
-            focus-policy="none"
-            placement="top-start"
-            :style="{ maxWidth: '330px' }"
-          >
-            <template #trigger>
-              <UiIconButton class="page-tip" role="embedded" label="О разделе">?</UiIconButton>
-            </template>
-            <span class="doc">
-              <b class="doc-ttl">Библиотека ролей конвейера</b>
-              <span v-for="(p, i) in helpPage" :key="i" class="doc-p">{{ p }}</span>
-            </span>
-          </UiPopover>
+  <div class="agents-page ui-page ui-workspace" data-ui-workspace
+       :class="{ 'has-editor': mobileEditor && form }">
+    <aside class="catalog" aria-label="Библиотека агентов">
+      <UiPaneHeader>
+        <template #title><h1>Агенты</h1></template>
+        <template #meta>{{ agents.length }}</template>
+        <template #actions>
+          <UiButton variant="ghost" data-context="workspace-toolbar" :disabled="busy"
+                    aria-label="Новый агент" @click="createNew">+ Новый</UiButton>
+        </template>
+      </UiPaneHeader>
+
+      <div class="catalog-scroll">
+        <div class="catalog-tools">
+          <UiSearchInput v-model="search" aria-label="Поиск агентов" placeholder="Название или ID…" />
+          <UiButton v-if="form" class="agent-resume" variant="text" data-context="workspace-form"
+                    @click="mobileEditor = true">
+            {{ isNew ? 'Продолжить создание' : 'Вернуться к агенту' }}
+          </UiButton>
         </div>
-        <div class="list-actions">
-          <UiButton class="btn" :loading="installing"
-                    v-tooltip="'Доустановить отсутствующих агентов из стандартного набора. Существующие и ваши правки не перезаписываются'"
-                    loading-label="Устанавливаю набор" @click="install">⇩ Набор</UiButton>
-          <UiButton class="btn accent" tone="accent" @click="createNew">+ Новый</UiButton>
+        <div v-if="error" class="catalog-message">
+          <UiInlineMessage tone="danger">{{ error }}</UiInlineMessage>
+          <UiButton variant="text" data-context="workspace-form" :disabled="busy || loading"
+                    @click="load">Повторить загрузку</UiButton>
         </div>
-      </div>
-      <UiButton v-if="form" class="agent-resume" variant="text" @click="mobileEditor = true">
-        Вернуться к {{ isNew ? 'новому агенту' : 'редактору' }}
-      </UiButton>
-      <p class="list-sub">Заготовки ролей для схем конвейера. На запуск не влияют: боевой промпт и модель живут в маршруте проекта.</p>
-      <p v-if="installNotice" class="list-sub" :class="{ bad: installNotice.startsWith('Ошибка') }">{{ installNotice }}</p>
-      <div v-if="loading && !agents.length" class="pad muted"><UiSpinner decorative /> Загружаю…</div>
-      <div v-else-if="error && !agents.length" class="pad bad">{{ error }}</div>
-      <div v-else-if="!agents.length" class="pad empty-list">
-        <p class="muted">Добавьте свою роль или установите стандартный набор агентов для конвейера.</p>
-        <UiButton class="btn accent" tone="accent" :loading="installing"
-                  loading-label="Устанавливаю набор" @click="install">Установить стандартный набор</UiButton>
-      </div>
-      <template v-for="g in groups" :key="g.v">
-        <div class="grp-ttl">{{ g.label }}</div>
-        <UiSelectableRow v-for="a in g.items" :key="a.id" class="item"
-                         :selected="a.id === selectedId && !isNew" @select="select(a.id)">
-          <span class="item-content">
-            <span class="ic" :class="`k-${a.kind}`">{{ kindIcon[a.kind] }}</span>
-            <span class="item-main">
-              <span class="nm" v-tooltip="a.label || a.id">{{ a.label || a.id }}</span>
-              <span v-if="a.tier || a.effort" class="advice" v-tooltip="adviceTitle(a)">
-                <span v-if="a.tier" class="chip tier-chip">{{ tierLabel[a.tier] || a.tier }}</span>
-                <span v-if="a.effort" class="chip effort-chip mono">{{ a.effort }}</span>
+        <p v-if="loading && !agents.length" class="catalog-message muted" role="status">Загрузка агентов…</p>
+        <div v-else-if="!agents.length && !error" class="catalog-message empty-list">
+          <strong>Агентов пока нет</strong>
+          <p>Создайте свою роль или установите стандартный набор ниже.</p>
+        </div>
+        <div v-else-if="agents.length && !groups.length" class="catalog-message empty-list" role="status">
+          <strong>Ничего не найдено</strong>
+          <p>Попробуйте другое название или ID.</p>
+          <UiButton variant="text" data-context="workspace-form" @click="search = ''">Сбросить поиск</UiButton>
+        </div>
+        <div v-for="group in groups" :key="group.v" class="agent-group">
+          <h2 class="group-title">{{ group.label }} <span>{{ group.items.length }}</span></h2>
+          <UiButton v-for="agent in group.items" :key="agent.id" variant="ghost"
+                       data-context="workspace-catalog-row" :data-agent-id="agent.id"
+                       :pressed="agent.id === selectedId && !isNew"
+                       :disabled="busy" @click="select(agent.id)">
+            <span class="agent-row-content">
+              <span class="agent-name">{{ agent.label || agent.id }}</span>
+              <span class="agent-id mono">{{ agent.id }}</span>
+              <span v-if="(agent.tier || agent.effort) && !['human', 'code'].includes(agent.kind)"
+                    class="agent-advice" v-tooltip="adviceTitle(agent)">
+                {{ [tierLabel[agent.tier] || agent.tier, agent.effort].filter(Boolean).join(' · ') }}
               </span>
             </span>
-          </span>
-        </UiSelectableRow>
-      </template>
+          </UiButton>
+        </div>
+      </div>
+
+      <div class="catalog-footer">
+        <UiButton variant="outline" data-context="workspace-form" :loading="installing"
+                  :disabled="busy && !installing" loading-label="Установка набора…" @click="install">
+          Стандартный набор
+        </UiButton>
+        <p class="muted">Добавляет готовые роли. Ваши правки сохраняются.</p>
+        <p v-if="installNotice" :class="installNotice.startsWith('Ошибка') ? 'bad' : 'good'"
+           :role="installNotice.startsWith('Ошибка') ? 'alert' : 'status'">{{ installNotice }}</p>
+      </div>
     </aside>
 
-    <!-- Редактор -->
-    <section v-if="form" class="editor">
-      <header class="ehead">
-        <UiButton class="agent-back" variant="text" @click="mobileEditor = false">← Агенты</UiButton>
-        <template v-if="isNew">
-          <UiInput v-model.trim="form.id" class="fld idfld mono" placeholder="id (латиница, напр. my_agent)" spellcheck="false" />
+    <section v-if="form" class="editor" aria-label="Редактор агента">
+      <UiPaneHeader class="agent-header" inset="content">
+        <template #navigation>
+          <UiButton class="agent-back" variant="ghost" data-context="workspace-toolbar"
+                    @click="mobileEditor = false">← Агенты</UiButton>
         </template>
-        <template v-else>
-          <span class="eid mono">{{ selectedId }}</span>
+        <template #title><h2>{{ isNew ? 'Новый агент' : original?.label || selectedId }}</h2></template>
+        <template #meta><span v-if="dirty">Не сохранён</span></template>
+        <template v-if="!isNew" #actions>
+          <UiButton variant="ghost" tone="danger" data-context="workspace-toolbar"
+                    :disabled="busy" @click="del">Удалить</UiButton>
         </template>
-        <span class="grow"></span>
-        <span v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }">{{ notice }}</span>
-        <UiSwitch v-model="pro"
-                  v-tooltip="'Редкие поля роли: сноска под блоком, ключ в реестре задачи, таймаут, бюджет и флаги'" aria-description="Редкие поля роли: сноска под блоком, ключ в реестре задачи, таймаут, бюджет и флаги">профи</UiSwitch>
-        <UiButton v-if="!isNew" class="btn danger" tone="danger" @click="del">Удалить</UiButton>
-        <UiButton class="btn accent" tone="accent" :loading="saving"
-                  :disabled="!dirty || (isNew && !form.id)" loading-label="Сохраняю" @click="save">Сохранить</UiButton>
-      </header>
+      </UiPaneHeader>
 
-        <label class="f f-label">
-          <span class="lbl">
-            Подпись <UiTooltip :text="help.label" placement="top-start" />
-          </span>
-          <UiInput v-model="form.label" class="fld" placeholder="Название блока на схеме" />
-        </label>
+      <form class="agent-form" @submit.prevent="save">
+        <div class="form-scroll">
+          <p class="library-note">
+            Здесь хранятся шаблоны ролей для конвейера. Инструкцию и рекомендации переносят
+            в маршрут проекта. Изменения агента сохраняются только в библиотеке.
+          </p>
+          <fieldset class="agent-fields" :disabled="busy">
+            <div class="basic-fields">
+              <UiField label="Название агента" :help="help.label">
+                <UiInput v-model="form.label" placeholder="Например, Разведка" />
+              </UiField>
+              <UiField label="Тип роли" :help="help.kind">
+                <UiSelect v-model="form.kind">
+                  <option v-if="!kinds.some(kind => kind.v === form?.kind)" :value="form.kind">
+                    {{ form.kind }}
+                  </option>
+                  <option v-for="kind in kinds" :key="kind.v" :value="kind.v">{{ kind.label }}</option>
+                </UiSelect>
+              </UiField>
+            </div>
+            <UiField v-if="isNew" label="ID агента" :help="help.id"
+                     hint="До 41 символа: строчные латинские буквы, цифры, дефис и подчёркивание. После создания ID не меняется.">
+              <UiInput v-model.trim="form.id" class="mono" placeholder="Например, code_review"
+                       required pattern="[a-z0-9](?:[a-z0-9_]|-){0,40}" maxlength="41" spellcheck="false" />
+            </UiField>
+            <UiField label="Инструкция роли" :help="help.prompt"
+                     :hint="form.kind === 'human'
+                       ? 'Для решения человека инструкция необязательна: опишите, что нужно проверить.'
+                       : form.kind === 'code'
+                         ? 'Опишите назначение команды и ожидаемый результат. Сам запуск настраивают в маршруте.'
+                         : 'Опишите задачу роли, порядок работы и ожидаемый результат.'">
+              <UiTextarea v-model="form.prompt" data-context="workspace-instruction" rows="12"
+                          spellcheck="false" placeholder="Что нужно сделать и как проверить результат…" />
+            </UiField>
 
-      <div class="prompt-wrap">
-        <div class="lbl prompt-lbl">
-          Заготовка задания <UiTooltip :text="help.prompt" placement="top-start" />
-          <span class="muted sm">
-            — основа для промпта этапа; боевой текст живёт в маршруте проекта
-          </span>
+            <section v-show="!['human', 'code'].includes(form.kind)" class="recommendations"
+                     aria-label="Рекомендации автору маршрута">
+              <h3>Рекомендации автору маршрута</h3>
+              <p class="section-help">Конкретную модель и параметры запуска выбирают в проекте.</p>
+              <div class="recommendation-fields">
+                <UiField label="Класс модели" :help="help.tier">
+                  <UiSelect v-model="form.tier">
+                    <option value="">Без рекомендации</option>
+                    <option v-if="form.tier && !tiers.some(tier => tier.v === form?.tier)" :value="form.tier">
+                      {{ form.tier }}
+                    </option>
+                    <option v-for="tier in tiers" :key="tier.v" :value="tier.v">{{ tier.label }}</option>
+                  </UiSelect>
+                </UiField>
+                <UiField label="Глубина рассуждений" :help="help.effort">
+                  <UiSelect v-model="form.effort">
+                    <option value="">Без рекомендации</option>
+                    <option v-if="form.effort && !efforts.includes(form.effort)" :value="form.effort">
+                      {{ form.effort }}
+                    </option>
+                    <option v-for="effort in efforts" :key="effort" :value="effort">{{ effort }}</option>
+                  </UiSelect>
+                </UiField>
+              </div>
+            </section>
+
+            <details class="technical" :open="pro" @toggle="pro = ($event.target as HTMLDetailsElement).open">
+              <summary>Технические параметры</summary>
+              <div class="technical-fields">
+                <UiField v-if="!isNew" label="ID агента" :help="help.id">
+                  <UiInput :model-value="selectedId" class="mono" readonly />
+                </UiField>
+                <UiField label="Примечание к роли" :help="help.sub">
+                  <UiInput v-model="form.sub" placeholder="Например, lint · tests" />
+                </UiField>
+                <UiField label="Ключ запуска" :help="help.key">
+                  <UiInput v-model="form.key" class="mono" placeholder="Например, SCOUT" spellcheck="false" />
+                </UiField>
+                <UiField label="Время на этап, сек" :help="help.timeout" hint="0 — без рекомендации">
+                  <UiNumberInput :model-value="form.timeout" :min="0" :step="60"
+                                 @update:model-value="form.timeout = typeof $event === 'number' ? $event : 0" />
+                </UiField>
+                <UiField label="Бюджет работы" :help="help.budget" hint="0 — без рекомендации">
+                  <UiNumberInput :model-value="form.budget" :min="0"
+                                 @update:model-value="form.budget = typeof $event === 'number' ? $event : 0" />
+                </UiField>
+              </div>
+              <div class="role-flags" data-context="workspace-form">
+                <UiCheckbox v-model="form.readonly">Только чтение репозитория</UiCheckbox>
+                <UiCheckbox v-model="form.optional">Этап можно пропустить</UiCheckbox>
+              </div>
+              <p class="section-help">{{ help.flags }}</p>
+            </details>
+          </fieldset>
         </div>
-        <UiTextarea v-model="form.prompt" class="prompt mono" spellcheck="false"
-                    :placeholder="form.kind === 'human' ? 'У человеческого этапа задания нет — конвейер просто ждёт решения человека' : 'С чего начинается задание этапа…'" />
-      </div>
-      <!-- Рекомендации к роли не оттесняют саму инструкцию. -->
-      <div class="fields">
-        <label class="f">
-          <span class="lbl">Форма блока <UiTooltip :text="help.kind" /></span>
-          <UiSelect v-model="form.kind" class="fld">
-            <option v-for="k in kinds" :key="k.v" :value="k.v">{{ k.label }}</option>
-          </UiSelect>
-        </label>
-        <label class="f">
-          <span class="lbl">Класс модели <UiTooltip :text="help.tier" /></span>
-          <UiSelect v-model="form.tier" class="fld">
-            <option value="">без рекомендации</option>
-            <option v-for="t in tiers" :key="t.v" :value="t.v">{{ t.label }}</option>
-          </UiSelect>
-        </label>
-        <label class="f">
-          <span class="lbl">Рекомендация effort <UiTooltip :text="help.effort" /></span>
-          <UiSelect v-model="form.effort" class="fld">
-            <option value="">без рекомендации</option>
-            <option v-for="e in effortOptions" :key="e" :value="e">{{ e }}</option>
-          </UiSelect>
-        </label>
-      </div>
 
-      <!-- Профи-настройки -->
-      <div v-if="pro" class="fields pro">
-        <label class="f">
-          <span class="lbl">
-            Сноска <UiTooltip :text="help.sub" placement="top-start" />
-          </span>
-          <UiInput v-model="form.sub" class="fld" placeholder="под блоком (напр. lint · tests)" />
-        </label>
-        <label class="f">
-          <span class="lbl">Ключ реестра <UiTooltip :text="help.key" /></span>
-          <UiInput v-model="form.key" class="fld mono" placeholder="SCOUT" spellcheck="false" />
-        </label>
-        <label class="f">
-          <span class="lbl">Таймаут, сек <UiTooltip :text="help.timeout" /></span>
-          <UiNumberField :model-value="form.timeout" :min="0" :step="60" placeholder="0 = дефолт"
-                         @update:model-value="form.timeout = typeof $event === 'number' ? $event : 0" />
-        </label>
-        <label class="f">
-          <span class="lbl">Бюджет <UiTooltip :text="help.budget" /></span>
-          <UiNumberField :model-value="form.budget" :min="0" placeholder="0 = нет"
-                         @update:model-value="form.budget = typeof $event === 'number' ? $event : 0" />
-        </label>
-        <div class="f">
-          <span class="lbl">Флаги <UiTooltip :text="help.flags" /></span>
-          <div class="row">
-            <UiToggleButton v-model="form.readonly" class="tag"
-                    v-tooltip="'Советовать запрет записи в репозиторий: этап только смотрит и отчитывается'"
-                    >read-only</UiToggleButton>
-            <UiToggleButton v-model="form.optional" class="tag"
-                    v-tooltip="'Советовать разрешить пропуск: конвейер идёт дальше, если этап нечего делать'"
-                    >optional</UiToggleButton>
+        <footer class="editor-footer">
+          <div class="save-state" :class="{ bad: notice.startsWith('Ошибка'), good: notice === 'Сохранено' }"
+               :role="notice.startsWith('Ошибка') ? 'alert' : 'status'">
+            {{ notice || (dirty ? 'Есть несохранённые изменения' : 'Все изменения сохранены') }}
           </div>
-        </div>
-      </div>
-
-
+          <div class="footer-actions">
+            <UiButton variant="ghost" data-context="workspace-form" :disabled="!dirty || busy"
+                      @click="cancelChanges">Отменить</UiButton>
+            <UiButton type="submit" tone="accent" data-context="workspace-form" :loading="saving"
+                      :disabled="!dirty || busy || (isNew && !form.id)" loading-label="Сохранение…">
+              {{ isNew ? 'Создать агента' : 'Сохранить' }}
+            </UiButton>
+          </div>
+        </footer>
+      </form>
     </section>
 
-    <section v-else class="editor empty">
-      <p class="muted">Выбери роль слева или заведи новую</p>
+    <section v-else class="editor empty-editor">
+      <h2>{{ loading ? 'Загрузка библиотеки' : 'Выберите агента' }}</h2>
+      <p>Здесь можно подготовить инструкцию роли для маршрутов конвейера.</p>
+      <UiButton variant="outline" data-context="workspace-form" :disabled="busy"
+                @click="createNew">Создать агента</UiButton>
     </section>
   </div>
 </template>
@@ -170,17 +202,15 @@ import { agentsApi } from '../shared/agentsApi.ts';
 import { failureText } from '../shared/apiClient.ts';
 import {
   UiButton,
-  UiIconButton,
+  UiCheckbox,
+  UiField,
+  UiInlineMessage,
+  UiPaneHeader,
+  UiSearchInput,
   UiInput,
-  UiNumberField,
-  UiPopover,
+  UiNumberInput,
   UiSelect,
-  UiSelectableRow,
-  UiSpinner,
-  UiSwitch,
   UiTextarea,
-  UiToggleButton,
-  UiTooltip,
   confirmDialog,
   vTooltip,
 } from '../ui';
@@ -192,8 +222,8 @@ import { useUiContextSource } from '../composables/useUiContextSource.ts';
 // лимиты — в runners.env. Отсюда текст переносят в маршрут, а не наоборот.
 // Тексты подсказок пишем в этой логике: сначала что это для человека, потом где лежит
 // боевое значение — иначе раздел читается как настройки запуска, которыми он не является.
-// Два уровня рекомендаций: обычные (подпись, форма, класс модели, промпт) и «Профи»
-// (ключ реестра, сноска, таймаут, бюджет, флаги) — скрыты за тумблером.
+// Основные поля видны сразу; технические рекомендации раскрываются отдельно.
+// Все изменения применяются к библиотеке только после явного сохранения.
 
 // Черновик карточки: та же форма, что у сохранённой. Отдельного типа для нового
 // агента не нужно — создание от правки отличает адрес запроса, а не форма тела.
@@ -205,12 +235,14 @@ const agents = ref<AgentCard[]>([]);
 const loading = ref(false);
 const error = ref('');
 const selectedId = ref('');
+const search = ref('');
 // Редактируемая копия: правка карточки не должна менять список до сохранения.
 const form = ref<AgentForm | null>(null);
 // Режим создания: у нового агента ещё нет id, и удалять его нечего.
 const isNew = ref(false);
 const mobileEditor = ref(false);
 const saving = ref(false);
+const deleting = ref(false);
 const notice = ref('');
 // Идёт установка стандартного набора; её итог показывается в шапке списка.
 const installing = ref(false);
@@ -233,18 +265,10 @@ watch(selectedId, (agentId) => {
 watch(pro, (value) => localStorage.setItem(PRO_KEY, value ? '1' : '0'));
 
 const kinds = [
-  { v: 'agent', label: '🤖 Агент' },
-  { v: 'human', label: '👤 Человек' },
-  { v: 'code', label: '</> Код' },
+  { v: 'agent', label: 'Агент ИИ' },
+  { v: 'human', label: 'Решение человека' },
+  { v: 'code', label: 'Команда проекта' },
 ];
-
-// Значок рода — свободный словарь: файл базы пишет человек, и незнакомый род должен
-// доехать до списка без значка, а не исчезнуть вместе с карточкой.
-const kindIcon: Record<string, string> = {
-  agent: '🤖',
-  human: '👤',
-  code: '</>',
-};
 
 // Класс модели, а не семейство: база агентов общая для всех проектов, а проекты
 // живут на разных исполнителях. Какое семейство закрывает класс — дело runners.env.
@@ -261,57 +285,42 @@ const tierLabel: Record<string, string> = Object.fromEntries(
 
 // Описания настроек для тултипов — языком человека, не движка.
 const help = {
-  label: 'Как этап будет подписан на схеме конвейера — текст внутри блока.'
-    + ' Например «Разведка» или «Приёмка кода».',
-  kind: 'Кто делает этап: 🤖 агент — работает ИИ; 👤 человек — конвейер останавливается'
-    + ' и ждёт решения человека; </> код — выполняется команда на хосте. Здесь это'
-    + ' заготовка для нового блока: у этапов уже собранной схемы форма задана самой схемой.',
-  tier: 'Насколько сильная модель нужна этапу: рассуждающая — для сложного анализа,'
-    + ' сбалансированная — для рутины по готовой спецификации, экономная — для механики'
-    + ' и проверок. Конкретную модель (opus, sonnet…) здесь не выбирают: база агентов'
-    + ' общая для всех проектов, а какой моделью закрыть класс — решает runners.env'
-    + ' проекта. Это пометка человеку, который собирает маршрут; запуск её не читает.',
-  effort: 'Сколько усилий модели тратить на обдумывание хода — пометка тому, кто собирает'
-    + ' маршрут. На запуск не влияет: фактический effort этапа берётся из runners.env проекта.',
-  sub: 'Мелкая приписка под названием блока на схеме — уточнение, чем этап занят'
-    + ' (например «lint · tests»).',
-  key: 'Короткое имя этапа в реестре задачи (runKey): под ним движок хранит результат'
-    + ' этапа и показывает его в дашборде и логах. Здесь — предложение для нового узла;'
-    + ' у собранной схемы ключ берётся из неё.',
-  timeout: 'За сколько секунд этап должен уложиться — ориентир тому, кто собирает маршрут;'
-    + ' 0 — без рекомендации. Боевой лимит принадлежит опубликованному маршруту, и агент'
-    + ' узнаёт его из служебного «регламента времени» в конце промпта.',
-  budget: 'Ориентир объёма работы этапа для автора маршрута; 0 — без рекомендации.'
-    + ' В маршрутах бюджет задан именованным классом (standard, large), так что число'
-    + ' отсюда никуда не едет.',
-  flags: 'Две пометки для нового узла: read-only — этапу нельзя писать в репозиторий'
-    + ' (только смотрит и отчитывается), optional — этап разрешено штатно пропустить.'
-    + ' Настоящую файловую политику и допустимые исходы задаёт маршрут.',
-  prompt: 'С чего начинается задание этапа. Это заготовка: боевой текст живёт в маршруте'
-    + ' профиля (routes/<маршрут>/prompts/), туда его переносят отсюда — правка заготовки'
-    + ' собранные маршруты не меняет. Данные задачи (номер, ветку, отчёты предыдущих'
-    + ' этапов) движок подставляет сам отдельными блоками.',
+  id: 'Уникальное техническое имя агента в библиотеке, например code_review.'
+    + ' Используется в имени файла. Начните с буквы или цифры; после создания ID не меняется.',
+  label: 'Название роли в библиотеке и заготовке этапа. Например, «Разведка» или «Проверка кода».',
+  kind: 'Агент ИИ выполняет инструкцию, команда проекта запускает проверку или сборку,'
+    + ' решение человека ждёт одобрения или отказа. Здесь задаётся тип шаблона роли.',
+  tier: 'Рассуждающая — для сложного анализа, сбалансированная — для работы по готовому плану,'
+    + ' экономная — для механических проверок. Это рекомендация: конкретную модель выбирают в проекте.',
+  effort: 'Рекомендация, сколько усилий модель должна тратить на обдумывание (effort).'
+    + ' Доступные значения приходят из реестра исполнителей. Фактический уровень задают в проекте.',
+  sub: 'Короткое уточнение под названием блока на схеме. Например, «lint · tests».',
+  key: 'Предлагаемый ключ результата этапа, например SCOUT. При сборке маршрута его указывают'
+    + ' в ключе запуска этапа (runKey), под которым движок хранит результат.',
+  timeout: 'Рекомендуемое время на этап в секундах. 0 — без рекомендации.'
+    + ' Фактическое ограничение задаётся в опубликованном маршруте.',
+  budget: 'Числовая пометка об объёме работы для автора маршрута. 0 — без рекомендации.'
+    + ' В маршруте бюджет выбирают отдельно по именованному классу, например standard или large.',
+  flags: 'Это рекомендации. Права на запись и возможность пропуска задаются отдельно в маршруте.',
+  prompt: 'Шаблон задания для роли. Опишите, что нужно сделать и какой результат подготовить.'
+    + ' Текст переносят в инструкцию этапа маршрута; правки здесь не обновляют существующие маршруты.'
+    + ' Данные задачи и отчёты предыдущих этапов движок добавляет отдельно.',
 };
 
-// Что это за раздел вообще — главный вопрос к нему. Держим ответ в трёх абзацах:
-// что здесь лежит, чего оно НЕ делает и зачем тогда нужно.
-const helpPage = [
-  'Агент здесь — описание роли конвейера: как этап подписан на схеме, какого класса'
-    + ' модель ему нужна и с чего начинается его задание.',
-  'Это библиотека, а не настройки запуска. Прогон задачи отсюда не читает ничего:'
-    + ' боевой промпт этапа лежит в маршруте проекта, а модель, effort и лимиты —'
-    + ' в runners.env профиля. Правка карточки не трогает ни собранные маршруты,'
-    + ' ни бегущие задачи.',
-  'Смысл — держать формулировку роли в одном месте: описать её один раз и переносить'
-    + ' в маршруты проектов, а не выдумывать заново под каждый. Все поля карточки —'
-    + ' рекомендации автору маршрута.',
-];
+const groups = computed(() => {
+  const query = search.value.trim().toLocaleLowerCase();
+  const visible = agents.value.filter((agent) => (
+    `${agent.label} ${agent.id}`.toLocaleLowerCase().includes(query)
+  ));
+  const unknownKinds = [...new Set(visible.map((agent) => agent.kind))]
+    .filter((kind) => !kinds.some((known) => known.v === kind));
 
-const groups = computed(() => kinds
-  .map((kind) => ({ ...kind, items: agents.value.filter((agent) => agent.kind === kind.v) }))
-  .filter((group) => group.items.length));
+  return [...kinds, ...unknownKinds.map((kind) => ({ v: kind, label: kind || 'Другие роли' }))]
+    .map((kind) => ({ ...kind, items: visible.filter((agent) => agent.kind === kind.v) }))
+    .filter((group) => group.items.length);
+});
 
-const effortOptions = computed(() => efforts.value);
+const busy = computed(() => saving.value || deleting.value || installing.value);
 
 const original = computed(() => (
   agents.value.find((agent) => agent.id === selectedId.value) || null
@@ -329,8 +338,8 @@ const dirty = computed(() => {
 });
 
 /**
- * Подсказка к чипам списка. Чипы — рекомендации автору маршрута, а не то, чем этап
- * реально пойдёт: без этой оговорки они читаются как «вот на чём он запустится».
+ * Объясняет краткие рекомендации в строке каталога, чтобы класс и effort
+ * не воспринимались как фактические параметры запуска этапа.
  */
 function adviceTitle(agent: AgentCard): string {
   const parts: string[] = [];
@@ -342,8 +351,7 @@ function adviceTitle(agent: AgentCard): string {
     parts.push(`effort ${agent.effort}`);
   }
 
-  return `Рекомендация автору маршрута: ${parts.join(', ')}. На запуск не влияет —`
-    + ' модель и effort берутся из runners.env проекта.';
+  return `Рекомендация автору маршрута: ${parts.join(', ')}. Параметры запуска задаются в проекте.`;
 }
 
 /** Копия карточки для правки: список не должен меняться до сохранения. */
@@ -364,8 +372,9 @@ async function load(): Promise<void> {
 
     const first = agents.value[0];
 
-    if (!selectedId.value && first) {
-      await select(first.id);
+    if (!selectedId.value && !isNew.value && first) {
+      selectedId.value = first.id;
+      form.value = editableCopy(first);
     }
   } catch (failure) {
     error.value = failureText(failure);
@@ -385,6 +394,10 @@ async function load(): Promise<void> {
  * спрашивают, и отказ оставляет его на прежней карточке.
  */
 async function select(id: string): Promise<void> {
+  if (busy.value) {
+    return;
+  }
+
   if (selectedId.value === id && form.value && !isNew.value) {
     mobileEditor.value = true;
 
@@ -398,7 +411,9 @@ async function select(id: string): Promise<void> {
   }
 
   const dropChanges = !dirty.value
-    || await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' });
+    || await confirmDialog('Есть несохранённые изменения. Отменить их и продолжить?', {
+      okText: 'Отменить изменения',
+    });
 
   if (!dropChanges) {
     return;
@@ -416,8 +431,14 @@ async function select(id: string): Promise<void> {
  * иначе создание молча меняло бы то, чего человек не заполнял.
  */
 async function createNew(): Promise<void> {
+  if (busy.value) {
+    return;
+  }
+
   const dropChanges = !dirty.value
-    || await confirmDialog('Есть несохранённые изменения — бросить?', { okText: 'Бросить' });
+    || await confirmDialog('Есть несохранённые изменения. Отменить их и продолжить?', {
+      okText: 'Отменить изменения',
+    });
 
   if (!dropChanges) {
     return;
@@ -444,13 +465,34 @@ async function createNew(): Promise<void> {
 }
 
 /**
- * Сохраняет карточку и перечитывает список. Перечитывание обязательно: сервер
- * нормализует поля при записи, и оставленная форма разошлась бы с файлом на диске.
+ * Возвращает загруженную карточку без сетевой записи. Новый несохранённый агент
+ * закрывается; библиотека и применённые ранее изменения остаются нетронутыми.
+ */
+function cancelChanges(): void {
+  if (busy.value) {
+    return;
+  }
+
+  notice.value = '';
+
+  if (isNew.value) {
+    isNew.value = false;
+    selectedId.value = agents.value[0]?.id || '';
+    form.value = agents.value[0] ? editableCopy(agents.value[0]) : null;
+    mobileEditor.value = false;
+  } else if (original.value) {
+    form.value = editableCopy(original.value);
+  }
+}
+
+/**
+ * Принимает нормализованную карточку из ответа записи и перечитывает список.
+ * Если перечитывание не удалось, подтверждённая запись не откатывается старым снимком.
  */
 async function save(): Promise<void> {
   const draft = form.value;
 
-  if (!draft) {
+  if (!draft || !dirty.value || busy.value) {
     return;
   }
 
@@ -458,14 +500,16 @@ async function save(): Promise<void> {
   notice.value = '';
 
   try {
-    if (isNew.value) {
-      const created = await agentsApi.create(draft);
+    const saved = isNew.value
+      ? await agentsApi.create(draft)
+      : await agentsApi.update(selectedId.value, draft);
 
-      isNew.value = false;
-      selectedId.value = created.id;
-    } else {
-      await agentsApi.update(selectedId.value, draft);
-    }
+    isNew.value = false;
+    selectedId.value = saved.id;
+    form.value = editableCopy(saved);
+    agents.value = agents.value.some((agent) => agent.id === saved.id)
+      ? agents.value.map((agent) => agent.id === saved.id ? saved : agent)
+      : [...agents.value, saved];
 
     await load();
 
@@ -491,6 +535,10 @@ async function save(): Promise<void> {
  * на сервере его нет вовсе, и запрос отправился бы в никуда.
  */
 async function del(): Promise<void> {
+  if (busy.value) {
+    return;
+  }
+
   if (!selectedId.value || isNew.value) {
     return;
   }
@@ -505,6 +553,8 @@ async function del(): Promise<void> {
     return;
   }
 
+  deleting.value = true;
+
   try {
     await agentsApi.remove(selectedId.value);
     selectedId.value = '';
@@ -512,6 +562,8 @@ async function del(): Promise<void> {
     await load();
   } catch (failure) {
     notice.value = `Ошибка: ${failureText(failure)}`;
+  } finally {
+    deleting.value = false;
   }
 }
 
@@ -520,6 +572,10 @@ async function del(): Promise<void> {
  * Create-only: свои правки и одноимённые агенты не перезаписываются, жать можно смело.
  */
 async function install(): Promise<void> {
+  if (busy.value) {
+    return;
+  }
+
   installing.value = true;
   installNotice.value = '';
 
@@ -544,93 +600,128 @@ onMounted(load);
 </script>
 
 <style scoped>
-.agents-page { height: 100%; display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 0; container: agents / inline-size; }
+.agents-page {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  container: agents / inline-size;
+}
 
-/* ── Список ── */
-.list { border-right: 1px solid var(--line); background: var(--sidebar); overflow-y: auto; padding: 10px; }
-.list-head {
+.catalog, .editor {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.catalog {
+  background: var(--sidebar);
+  border-right: 1px solid var(--line);
+}
+
+.catalog-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+.catalog-tools {
   display: grid;
   gap: 8px;
-  padding: 2px 4px 10px;
+  padding: 12px;
 }
-.list-title, .list-actions {
+
+.catalog-message { margin: 0; padding: 0 12px 12px; }
+.empty-list { display: grid; gap: 6px; color: var(--ink-mid); }
+.empty-list p { margin: 0; }
+.agent-group { padding: 0 6px 8px; }
+.group-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  padding: 6px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.agent-row-content { display: grid; gap: 1px; width: 100%; min-width: 0; }
+.agent-name { min-width: 0; overflow-wrap: anywhere; }
+.agent-id, .agent-advice {
+  min-width: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.catalog-footer {
+  flex: none;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.catalog-footer p { margin: 0; font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.agent-form { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.form-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px 24px; }
+.library-note { max-width: 84ch; margin: 0 0 16px; color: var(--ink-mid); }
+.agent-fields { display: grid; gap: 16px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.basic-fields { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 12px; }
+.recommendation-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.recommendations h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.section-help { margin: 4px 0 8px; color: var(--ink-mid); font-size: 12px; line-height: 18px; }
+.technical { min-width: 0; border-top: 1px solid var(--line); padding-top: 8px; }
+.technical summary { min-height: var(--control-height); align-content: center; cursor: pointer; }
+.technical-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-top: 8px; }
+.role-flags { display: flex; flex-wrap: wrap; gap: 12px 20px; margin-top: 16px; }
+.editor-footer {
+  flex: none;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 8px 12px;
+  padding: 10px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
 }
-.list-actions > .btn { flex: none; }
-.ttl { font-weight: 700; font-size: 13.5px; }
-.page-tip { flex: none; }
-/* Ответ на «что это вообще за раздел» виден без ховера: на планшете его иначе не прочитать */
-.list-sub { margin: 0 4px 8px; font-size: 11px; line-height: 1.45; color: var(--ink-mid); }
-/* Развёрнутое объяснение раздела внутри тултипа (он в body, но слот — из этого scope) */
-.doc { display: flex; flex-direction: column; gap: 7px; }
-.doc-ttl { font-size: 12.5px; }
-.doc-p { display: block; }
-.grp-ttl { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
-  color: var(--ink-mid); padding: 10px 6px 4px; }
-.item { width: 100%; margin-bottom: 4px; }
-.item-content { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 8px; width: 100%; min-width: 0; }
-.item .ic { width: 20px; margin-top: 2px; font-size: 12px; text-align: center; }
-.ic.k-code { color: var(--node-code); font-weight: 700; font-size: 10px; }
-.item-main { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; width: 100%; }
-.item .nm { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px; }
-.advice { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; margin-top: 2px; overflow: hidden; }
-.chip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px;
-  line-height: 14px; color: var(--ink-mid); background: var(--surface-2); border: 1px solid var(--line);
-  border-radius: 5px; padding: 0 5px; }
-.tier-chip { flex: 0 1 auto; }
-.effort-chip { flex: none; color: var(--accent); }
-.pad { padding: 12px 8px; }
-.empty-list { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; font-size: 12px; line-height: 1.45; }
-.empty-list p { margin: 0; }
 
-/* ── Редактор ── */
-.editor { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; padding: 12px 16px; gap: 12px; }
-.editor.empty { align-items: center; justify-content: center; }
-.ehead { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.ehead > .btn, .ehead > .ui-switch { flex: none; }
-.eid { min-width: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 700; color: var(--node-code); }
-.idfld { max-width: 280px; }
-.grow { flex: 1; }
-.notice { font-size: 12.5px; color: var(--good); }
-.notice.bad { color: var(--bad); }
-
-.fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 14px; }
-.fields.pro { padding: 12px; border: 1px dashed var(--line-2); border-radius: 10px; background: color-mix(in srgb, var(--surface) 55%, transparent); }
-.f { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.f-label { flex: none; }
-.lbl { font-size: 11px; font-weight: 600; color: var(--ink-mid); text-transform: uppercase; letter-spacing: .04em;
-  display: inline-flex; align-items: center; gap: 5px; }
-.fld { width: 100%; }
-
-.row { display: flex; gap: 6px; flex-wrap: wrap; }
-.tag { font-family: var(--mono); }
-
-.prompt-wrap { flex: 1 0 200px; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
-.prompt-lbl .sm { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 11px; }
-.prompt { flex: 1; min-height: 180px; resize: none; line-height: 1.55; }
-
+.save-state { min-width: 0; font-size: 12px; color: var(--ink-mid); overflow-wrap: anywhere; }
+.footer-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.empty-editor { align-items: center; justify-content: center; gap: 12px; padding: 20px; text-align: center; }
+.empty-editor h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.empty-editor p { max-width: 45ch; margin: 0; color: var(--ink-mid); }
 .bad { color: var(--bad); }
-.sm { font-size: 11px; }
+.good { color: var(--good); }
+.muted { color: var(--ink-mid); }
 
-/* В узкой рабочей области каталог и редактор занимают одно место.
-   Скрытие CSS сохраняет форму и её черновик при возврате и повороте. */
+/* Панели скрываются без размонтирования: поиск и локальный ввод переживают возврат.
+   Размер контейнера учитывает и узкую область внутри широкого окна. */
 .agent-back, .agent-resume { display: none; }
+.agent-header :deep(.ui-pane-header__navigation) { display: none; }
 @container agents (max-width: 900px) {
-  .list, .editor { grid-column: 1 / -1; grid-row: 1; }
-  .list { border-right: 0; }
-  .has-editor > .list, .agents-page:not(.has-editor) > .editor { display: none; }
+  .catalog, .editor { grid-column: 1 / -1; grid-row: 1; }
+  .catalog { border-right: 0; }
+  .has-editor > .catalog, .agents-page:not(.has-editor) > .editor { display: none; }
   .agent-back, .agent-resume { display: inline-flex; }
-  .editor { padding: 8px; }
-  .fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ehead { gap: 8px; }
-  .ehead .grow { display: none; }
-  .prompt-lbl { flex-wrap: wrap; }
-  .prompt-lbl .sm { display: none; }
+  .agent-header :deep(.ui-pane-header__navigation) { display: flex; }
 }
-@container agents (max-width: 480px) {
-  .fields { grid-template-columns: minmax(0, 1fr); }
+
+/* Шапка, форма и footer используют одну ось на узком экране. */
+.editor { background: var(--surface); container: agent-editor / inline-size; }
+@container agent-editor (max-width: 600px) {
+  .basic-fields, .recommendation-fields, .technical-fields { grid-template-columns: minmax(0, 1fr); }
+}
+
+@container agent-editor (max-width: 480px) {
+  .form-scroll { padding: 12px 12px 20px; }
+  .editor-footer { padding: 10px 12px; }
 }
 </style>

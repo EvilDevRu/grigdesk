@@ -10,6 +10,7 @@ process.env.NODE_ENV = 'test';
 
 const UI_STUB = `
 import { defineComponent, h } from 'vue';
+export { default as UiPaneHeader } from './src/components/composites/UiPaneHeader.vue';
 export { default as UiField } from './src/components/composites/UiField.vue';
 export { default as UiIconButton } from './src/components/primitives/UiIconButton.vue';
 export const UiSvgPressable = defineComponent({ emits: ['click'],

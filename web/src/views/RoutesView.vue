@@ -76,6 +76,20 @@
         </template>
       </UiPaneHeader>
       <div class="panel-scroll">
+        <aside class="route-workflow-hint ui-workspace-guide" aria-label="О разделе «Маршруты»">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+               stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10v.01" />
+          </svg>
+          <div>
+            <strong>Как устроен маршрут</strong>
+            <p>Маршрут задаёт порядок работы: какие этапы выполнять и куда переходить после каждого результата.</p>
+            <p v-if="editingDraft">
+              Сейчас вы редактируете черновик. Для публикации: проверьте → сравните с опубликованным
+              → подтвердите публикацию.
+            </p>
+          </div>
+        </aside>
         <p v-if="!editingDraft && (published || routesStore.opened?.catalogHash)" class="publication-info">
           Только просмотр
           <span v-if="routesStore.editorInfo?.source.mode === 'editor'">
@@ -98,10 +112,6 @@
                           @reload="reloadConflictedDraft" />
 
       <template v-if="editingDraft && routesStore.localDocument">
-        <p class="route-workflow-hint">
-          Вы редактируете черновик. Чтобы изменения заработали, проверьте его,
-          сравните с опубликованным каталогом и подтвердите публикацию.
-        </p>
         <div class="route-editor-actions" role="group" aria-label="Действия черновика">
           <UiIconButton data-context="workspace-toolbar" label="Отменить"
                         v-tooltip="'Отменить последнее изменение'"
@@ -145,12 +155,14 @@
           </UiButton>
 
         </div>
-        <details class="route-disclosure route-catalog-properties" :open="!displayRouteList.length">
+        <details class="ui-workspace-disclosure route-disclosure route-catalog-properties" :open="!displayRouteList.length">
           <summary>Свойства маршрута и каталог</summary>
-          <RouteCatalog mode="manage" :drafts="[]" :selected-draft-id="routesStore.opened?.draftId ?? null"
-                        :document="routesStore.opened?.readOnly ? null : routesStore.localDocument"
-                        :selected-route-id="selectedRoute" @change="replaceEditorDocument"
-                        @select-route="selectRoute" />
+          <div class="ui-workspace-section__body">
+            <RouteCatalog mode="manage" :drafts="[]" :selected-draft-id="routesStore.opened?.draftId ?? null"
+                          :document="routesStore.opened?.readOnly ? null : routesStore.localDocument"
+                          :selected-route-id="selectedRoute" @change="replaceEditorDocument"
+                          @select-route="selectRoute" />
+          </div>
         </details>
         <p v-if="routesStore.rebaseError" class="bad" role="alert">{{ routesStore.rebaseError }}</p>
         <RouteRebaseDialog v-if="routesStore.rebasePreview"
@@ -208,42 +220,50 @@
                                       @change="replaceEditorDocument" />
           </div>
           </div>
-          <details class="route-disclosure">
-          <summary>Инструкции этапов</summary>
-          <RouteDraftPanel :document="routesStore.localDocument" :route-id="selectedRoute"
-                           @select-node="openPrompt" />
-        </details>
+          <details class="ui-workspace-disclosure route-disclosure">
+            <summary>Инструкции этапов</summary>
+            <div class="ui-workspace-section__body">
+              <RouteDraftPanel :document="routesStore.localDocument" :route-id="selectedRoute"
+                               @select-node="openPrompt" />
+            </div>
+          </details>
         </div>
         <p v-else class="muted">Публикация недоступна: сначала добавьте маршрут и его инструкции.</p>
         <p v-if="routesStore.promptPreviewError" class="bad" role="alert">
           {{ routesStore.promptPreviewError }}
         </p>
-        <details class="route-disclosure" v-if="selectedAgentNode">
+        <details class="ui-workspace-disclosure route-disclosure" v-if="selectedAgentNode">
           <summary>Предпросмотр инструкции</summary>
-          <RoutePromptPreview
-                            :result="selectedPromptPreview?.result ?? null"
-                            :stale="selectedPromptPreview?.stale ?? false"
-                            :busy="routesStore.promptPreviewBusy"
-                            @request="previewSelectedPrompt" />
+          <div class="ui-workspace-section__body">
+            <RoutePromptPreview
+                              :result="selectedPromptPreview?.result ?? null"
+                              :stale="selectedPromptPreview?.stale ?? false"
+                              :busy="routesStore.promptPreviewBusy"
+                              @request="previewSelectedPrompt" />
+          </div>
         </details>
         <p v-if="routesStore.simulationError" class="bad" role="alert">
           {{ routesStore.simulationError }}
         </p>
-        <details class="route-disclosure" v-if="routesStore.serverSnapshot">
+        <details class="ui-workspace-disclosure route-disclosure" v-if="routesStore.serverSnapshot">
           <summary>Пробный сценарий</summary>
-          <RouteSimulation
-                         :document="routesStore.serverSnapshot"
-                         :simulation="routesStore.simulation"
-                         @start="startRouteSimulation" @step="stepRouteSimulation"
-                         @approve="approveRouteSimulation" />
+          <div class="ui-workspace-section__body">
+            <RouteSimulation
+                           :document="routesStore.serverSnapshot"
+                           :simulation="routesStore.simulation"
+                           @start="startRouteSimulation" @step="stepRouteSimulation"
+                           @approve="approveRouteSimulation" />
+          </div>
         </details>
-        <details class="route-disclosure" v-if="routesStore.serverSnapshot">
+        <details class="ui-workspace-disclosure route-disclosure" v-if="routesStore.serverSnapshot">
           <summary>Экспорт и импорт</summary>
-          <RouteTransferDialog
-                             :document="routesStore.serverSnapshot"
-                             :profiles="profiles" :dirty="routesStore.dirty || routesStore.saving
-                               || routesStore.conflict || Boolean(routesStore.jsonBuffer?.dirty)"
-                             @open="openTransferredDraft" />
+          <div class="ui-workspace-section__body">
+            <RouteTransferDialog
+                               :document="routesStore.serverSnapshot"
+                               :profiles="profiles" :dirty="routesStore.dirty || routesStore.saving
+                                 || routesStore.conflict || Boolean(routesStore.jsonBuffer?.dirty)"
+                               @open="openTransferredDraft" />
+          </div>
         </details>
         <template v-if="routesStore.compareReport
           && routesStore.compareGeneration === routesStore.editGeneration">
@@ -265,10 +285,12 @@
         <div v-if="graphLoading" class="mid muted"><UiSpinner decorative /> Схема…</div>
         <div v-else-if="graphError" class="mid bad" role="alert">{{ graphError }}</div>
         <div v-else-if="graph" class="published-canvas"><FactoryGraph :graph="graph" reference /></div>
-        <details v-if="selectedRoute" class="route-disclosure">
+        <details v-if="selectedRoute" class="ui-workspace-disclosure route-disclosure">
           <summary>Инструкции этапов</summary>
-          <RouteDraftPanel :document="routesStore.publishedSnapshot"
-                         :route-id="selectedRoute" />
+          <div class="ui-workspace-section__body">
+            <RouteDraftPanel :document="routesStore.publishedSnapshot"
+                           :route-id="selectedRoute" />
+          </div>
         </details>
 
       </template>
@@ -298,11 +320,13 @@
       </details>
 
       </template>
-      <details v-if="revisions.length" class="route-disclosure route-history" :open="!editingDraft">
+      <details v-if="revisions.length" class="ui-workspace-disclosure route-disclosure route-history" :open="!editingDraft">
         <summary>Ревизии каталога <span class="muted">{{ revisions.length }}</span></summary>
-        <RouteRevisionHistory :revisions="revisions" :busy="!!busy || !pageReady"
-                              v-tooltip="helpRevisions" @view="viewRevision"
-                              @create="createFromRevision" @compare="compareRevision" @rollback="rollback" />
+        <div class="ui-workspace-section__body">
+          <RouteRevisionHistory :revisions="revisions" :busy="!!busy || !pageReady"
+                                v-tooltip="helpRevisions" @view="viewRevision"
+                                @create="createFromRevision" @compare="compareRevision" @rollback="rollback" />
+        </div>
       </details>
       <RouteCompare v-if="historyCompareReport" :report="historyCompareReport" :can-publish="false" />
       </div>
@@ -1471,7 +1495,8 @@ onUnmounted(() => {
   flex: 1;
   margin: 0;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
+  color: var(--ink);
 }
 
 .route-item-content {
@@ -1530,13 +1555,6 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-.route-workflow-hint {
-  margin: 0;
-  color: var(--ink-mid);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
 .route-editor-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1555,7 +1573,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.4fr);
   align-items: start;
-  gap: 20px;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -1563,30 +1581,6 @@ onUnmounted(() => {
   display: grid;
   gap: 16px;
   min-width: 0;
-}
-
-.route-disclosure {
-  min-width: 0;
-  border-top: 1px solid var(--line);
-  padding-top: 8px;
-}
-
-.route-disclosure > summary {
-  cursor: pointer;
-  color: var(--ink-mid);
-  font-size: 12px;
-  padding-block: 4px;
-  min-height: var(--toolbar-control-h);
-}
-
-.route-disclosure[open] > summary {
-  color: var(--ink);
-  margin-bottom: 8px;
-}
-
-.route-catalog-properties {
-  border-top: 0;
-  padding-top: 0;
 }
 
 .published-canvas {
@@ -1642,7 +1636,7 @@ onUnmounted(() => {
   color: var(--bad);
 }
 
-.panel :deep(h3) {
+.panel :deep(h3:not(header *)) {
   margin: 0 0 8px;
   font-size: 13px;
   line-height: 20px;

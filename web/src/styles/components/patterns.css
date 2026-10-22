@@ -72,9 +72,11 @@
 }
 
 .ui-pane-header__meta {
+  min-width: 0;
   color: var(--ink-mid);
   font-size: 12px;
   line-height: 18px;
+  overflow-wrap: anywhere;
 }
 
 .ui-pane-header__actions {
@@ -110,6 +112,90 @@
   margin: 0;
   font-size: var(--workspace-title-size);
   overflow-wrap: anywhere;
+}
+
+/* Группа отделяет рабочие поля от соседних задач, сохраняя компактную шапку панели.
+   Раскрываемые подгруппы используют тот же фон; закрытие не размонтирует содержимое. */
+.ui-workspace-section,
+.ui-workspace-disclosure {
+  min-width: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.ui-workspace-section > .ui-pane-header {
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.ui-workspace-section__body {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.ui-workspace-disclosure > summary {
+  min-height: var(--control-height);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--sidebar);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.ui-workspace-disclosure > summary::marker {
+  color: var(--ink-mid);
+}
+
+.ui-workspace-disclosure > summary:hover {
+  background: var(--surface-2);
+}
+
+.ui-workspace-disclosure > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ui-workspace-disclosure[open] > summary {
+  border-bottom: 1px solid var(--line-2);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+/* Справка — отдельный текстовый слой: цветная кромка и значок отличают её от формы.
+   Она не получает роль alert и не забирает внимание при изменении черновика. */
+.ui-workspace-guide {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ui-workspace-guide > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: var(--accent);
+}
+
+.ui-workspace-guide strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.ui-workspace-guide p {
+  margin: 4px 0 0;
 }
 
 .ui-workspace .ui-field__label {

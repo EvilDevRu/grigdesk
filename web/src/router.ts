@@ -49,7 +49,7 @@ const routes: RouteRecordRaw[] = [
     path: '/agents',
     name: 'agents',
     component: () => import('./views/AgentsView.vue'),
-    meta: { title: 'Агенты' },
+    meta: { title: 'Агенты', layout: 'workspace' },
   },
   {
     path: '/diff',

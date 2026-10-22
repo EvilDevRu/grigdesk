@@ -52,14 +52,15 @@ Desktop использует один вид без настройки плот�
 Expanded, Escape, inert и единый render-site сохранены. Локальный `.compact` инструмента
 или графа обозначает его presentation и не является режимом всего интерфейса.
 
-Route metadata `layout: workspace` у `/chats`, `/code`, `/terminal`, `/ssh` снимает внешний
-gutter. Обычные формы и карточки сохраняют `--page-gutter`. Ниже 900 px инструменты
+Route metadata `layout: workspace` снимает внешний gutter у `/chats`, `/code`,
+`/terminal`, `/ssh`, `/projects`, `/routes` и `/agents`. Обычные формы и карточки сохраняют `--page-gutter`. Ниже 900 px инструменты
 открываются полноразмерными маршрутами, список чатов и разговор делят одну колонку.
 Боковая навигация сохраняется на всех ширинах, нижнего меню нет.
 
 При 600 px общие кнопки остаются 36 px. Рабочие формы с `data-ui-workspace`
 используют отдельную роль `--workspace-control-h`: 32 px в
-[«Проектах»](projects-design.md) и [«Маршрутах»](routes-design.md). Fullscreen-диалоги, safe areas, переносы форм
+[«Проектах»](projects-design.md), [«Маршрутах»](routes-design.md)
+и [«Агентах»](agents-design.md). Fullscreen-диалоги, safe areas, переносы форм
 и многострочные карточки сохраняют свою роль. Явный `data-ui-touch` включает 44 px,
 в том числе на surface Teleport. Деревья, toolbar и смысловые карточки имеют свои роли.
 
