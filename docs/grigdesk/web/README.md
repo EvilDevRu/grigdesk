@@ -157,6 +157,8 @@
 
 ## Грабли
 
+- [Сообщения Linux-окна: накопление слушателей, Mesa и Chromium atom cache](desktop-linux-diagnostics.md)
+
 - [Восстановление настроек после отказа чтения или загрузки](settings-recovery.md)
 
 - [Фризы при перестановке чатов и ответе агента: Markdown всех строк, сравнение истории и старые ленты](chat-update-freezes.md)

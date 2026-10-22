@@ -165,6 +165,19 @@ export function createUpstream(options: UpstreamOptions) {
   };
 
   /**
+   * Запросы и probe разделяют один учёт живого сокета, даже при его повторной выдаче агентом.
+   * Единственный обработчик закрытия удаляет сокет из набора без накопления на keep-alive.
+   */
+  const trackStream = (socket: Duplex) => {
+    if (streams.has(socket)) {
+      return;
+    }
+
+    streams.add(socket);
+    socket.once('close', () => streams.delete(socket));
+  };
+
+  /**
    * Закрываются и HTTP-потоки, и обе стороны upgrade, кроме ответа с причиной отказа.
    * Его сокет освобождает вызывающий код после отправки диагностики renderer.
    */
@@ -508,10 +521,7 @@ export function createUpstream(options: UpstreamOptions) {
       }
     });
 
-    outgoing.on('socket', (socket) => {
-      streams.add(socket);
-      socket.once('close', () => streams.delete(socket));
-    });
+    outgoing.on('socket', trackStream);
     outgoing.on('error', (error) => fail(error, res));
     outgoing.once('socket', (socket) => {
       if (socket.connecting) {
@@ -676,10 +686,7 @@ export function createUpstream(options: UpstreamOptions) {
         const deadline = setTimeout(() => outgoing.destroy(new Error('timeout')), 3000);
 
         outgoing.once('close', () => clearTimeout(deadline));
-        outgoing.on('socket', (socket) => {
-          streams.add(socket);
-          socket.once('close', () => streams.delete(socket));
-        });
+        outgoing.on('socket', trackStream);
         outgoing.on('error', reject);
         outgoing.end();
       });

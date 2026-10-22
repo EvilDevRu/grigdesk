@@ -131,6 +131,133 @@ async function localMachine(t) {
   };
 }
 
+/**
+ * Наблюдает выдачу настоящего клиентского сокета, не добавляя ему close-слушателей.
+ * Фильтр порта исключает локальную трубу и внутренние запросы TLS-стенда.
+ */
+function observeUpstreamSockets(t, address) {
+  const port = Number(new URL(address).port);
+  const sockets = new Set();
+  const warnings = [];
+  const original = http.Agent.prototype.addRequest;
+
+  t.mock.method(http.Agent.prototype, 'addRequest', function (request, options, ...rest) {
+    if (Number(options.port) === port) {
+      request.once('socket', (socket) => sockets.add(socket));
+    }
+
+    return Reflect.apply(original, this, [request, options, ...rest]);
+  });
+
+  const onWarning = (warning) => {
+    if (warning.name === 'MaxListenersExceededWarning'
+      && warning.type === 'close' && sockets.has(warning.emitter)) {
+      warnings.push(warning);
+    }
+  };
+
+  process.on('warning', onWarning);
+  t.after(() => process.off('warning', onWarning));
+
+  return { sockets, warnings };
+}
+
+/**
+ * Удалённый вариант использует настоящий pinned TLS-вход и синтетическое привязанное устройство.
+ * Все ключи и состояние создаются соседней фикстурой во временной папке.
+ */
+async function socketReuseMachine(t, remote) {
+  if (!remote) {
+    const machine = await localMachine(t);
+
+    return { address: machine.address, windowKey: async () => 'synthetic-key' };
+  }
+
+  const fixture = await clientFixture(t, {
+    register({ app }) {
+      app.get('/api/client/hello', async () => ({ product: 'grigdesk' }));
+    },
+  });
+
+  await fixture.devices.add({
+    name: 'Тестовое окно',
+    fp: fixture.client.fp,
+    scope: 'client',
+  });
+
+  return {
+    address: `https://127.0.0.1:${fixture.port}`,
+    fp: fixture.identity.fp,
+    identity: { key: fixture.client.keyPem, cert: fixture.client.certPem },
+  };
+}
+
+for (const remote of [false, true]) {
+  for (const mode of ['GET', 'probe', 'GET + probe']) {
+    const protocol = remote ? 'TLS' : 'HTTP';
+
+    test(`${protocol}: 30 ${mode} не накапливают close на одном живом сокете`,
+      { timeout: 15000 }, async (t) => {
+        const options = await socketReuseMachine(t, remote);
+        const observed = observeUpstreamSockets(t, options.address);
+        const upstream = createUpstream(options);
+        const pipe = await makePipe(t, upstream);
+        const counts = [];
+
+        t.after(() => upstream.close());
+
+        for (let index = 0; index < 30; index += 1) {
+          const operations = mode === 'GET + probe' ? ['GET', 'probe'] : [mode];
+
+          for (const operation of operations) {
+            if (operation === 'GET') {
+              const response = await fetch(`${pipe.origin}/api/private`, { headers: { cookie: COOKIE } });
+
+              assert.equal(response.status, 200);
+              assert.ok(await response.text(), 'Короткий ответ полностью прочитан.');
+            } else {
+              await upstream.probe();
+              assert.equal(upstream.state().status, 'online');
+            }
+
+            // Даём Agent убрать временные слушатели завершившегося HTTP-запроса.
+            // Измеряем живой свободный сокет, а не незавершённый ответ.
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.equal(observed.sockets.size, 1, 'Все операции переиспользуют один сокет.');
+
+            const [socket] = observed.sockets;
+
+            assert.equal(socket.destroyed, false);
+            assert.equal(socket.getMaxListeners(), 10, 'Штатный лимит слушателей не повышен.');
+            counts.push(socket.listenerCount('close'));
+          }
+        }
+
+        const [socket] = observed.sockets;
+
+        if (remote) {
+          assert.equal(socket.getProtocol(), 'TLSv1.3');
+          assert.equal(socket.getPeerX509Certificate().fingerprint256.replaceAll(':', '').toLowerCase(),
+            options.fp);
+        }
+
+        const closed = once(socket, 'close');
+
+        upstream.close();
+        await closed;
+        assert.equal(socket.destroyed, true);
+        assert.ok(socket.listenerCount('close') < counts[0], 'Закрытие освободило close-обработчики.');
+        t.diagnostic(`close после операций: ${counts.join(', ')}; warnings: ${observed.warnings.length}`);
+
+        for (const [index, count] of counts.entries()) {
+          assert.equal(count, counts[0], `Число close выросло после операции ${index + 1}.`);
+        }
+
+        assert.equal(observed.warnings.length, 0, 'Переиспользование не вызывает предупреждение close.');
+      });
+  }
+}
+
 test('местная труба очищает заголовки, передаёт 5 МиБ, SSE и бинарный WebSocket', async (t) => {
   const machine = await localMachine(t);
   const upstream = createUpstream({ address: machine.address, windowKey: async () => 'synthetic-key' });
