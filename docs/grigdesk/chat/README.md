@@ -46,6 +46,7 @@
 
 ### Kimi
 
+- [Серверная лента Kimi: цельные размышления, подписи инструментов и границы](kimi-server-steps.md)
 - [Kimi host: проверка команд, native Bash и сохранение пользовательских ограничений](kimi-command-policy.md)
 - [Kimi host: причина прежней блокировки ходов с плагином БД](kimi-db-policy.md)
 - [Дополнительные workspace-каталоги для kimi-чатов (паритет с codex --add-dir)](kimi-workspace-extra-dirs.md)

@@ -135,10 +135,10 @@ test('Kimi: поток отдаёт рассуждение и расход ко�
   assert.equal(progress[0].info.contextTokens, 12_345);
   assert.equal(progress[0].info.contextWindow, 262_144);
   assert.equal(progress[0].info.contextMetric, 'kimi-active-input-v1');
-  assert.ok(steps.some((step) => step.k === 'think' && step.text.includes('Сверяю порядок')));
   assert.ok(steps.some((step) => step.k === 'text' && step.id === 'assistant-main'));
 
   await turn;
+  assert.ok(steps.some((step) => step.k === 'think' && step.text.includes('Сверяю порядок')));
 });
 
 test('Kimi: спрос человека закрывает канал до ответа и открывает после', async (t) => {
