@@ -28,6 +28,7 @@ v1 сохранено отдельно. Основной HTTP и прежний 
 - [Посредник одним файлом: сборка и выпуск](relay-binary.md)
 - [Ограниченный журнал контейнера и отключение compression](relay-log.md)
 - [Сборка Android, версии и ключ подписи](android-build.md)
+- [Совместимость с POCO X3 Pro: Android 11+, проверенный APK и границы проверки](poco-x3-pro.md)
 - [Локальное окружение Android: FEX, Docker, Termux и Linux-VM](android-runtime.md)
 - [Упаковка Linux в APK: rootfs, PRoot и target SDK в DroidDeck](android-linux-packaging.md)
 - [Gradle Wrapper в git: зачем хранится, сверка jar и `cap migrate`](gradle-wrapper.md)

@@ -1048,6 +1048,7 @@
       "tests/web/routes-editor-transfer.component.test.js",
       "tests/web/routes-editor-transition-commands.test.js",
       "tests/web/routes-editor-view.component.test.js",
+      "tests/web/routes-responsive.test.js",
       "tests/web/runner-display.test.js",
       "tests/web/sandboxes-store.test.js",
       "tests/web/sandboxes-view.component.test.js",

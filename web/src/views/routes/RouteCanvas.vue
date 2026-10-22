@@ -2,17 +2,30 @@
   <section class="route-canvas">
     <div class="route-canvas__toolbar">
       <div class="route-canvas__zoom" role="group" aria-label="Масштаб схемы">
-        <UiButton aria-label="Уменьшить масштаб" data-test="zoom-out" :disabled="scale <= MIN_SCALE" @click="zoomBy(1 / ZOOM_STEP)">
-          −
-        </UiButton>
-        <UiButton data-test="zoom-reset" :disabled="scale === 1" @click="scale = 1">100%</UiButton>
-        <UiButton aria-label="Увеличить масштаб" data-test="zoom-in" :disabled="scale >= MAX_SCALE" @click="zoomBy(ZOOM_STEP)">
-          +
-        </UiButton>
-        <UiButton data-test="fit-all" @click="fitAll">Показать всё</UiButton>
+        <UiIconButton data-context="workspace-form" label="Уменьшить масштаб"
+                      v-tooltip="'Уменьшить масштаб'" data-test="zoom-out"
+                      :disabled="scale <= MIN_SCALE" @click="zoomBy(1 / ZOOM_STEP)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+               stroke-linecap="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </UiIconButton>
+        <UiButton data-context="workspace-form" variant="ghost" data-test="zoom-reset"
+                  v-tooltip="'Масштаб 100%'" :disabled="scale === 1" @click="scale = 1">100%</UiButton>
+        <UiIconButton data-context="workspace-form" label="Увеличить масштаб"
+                      v-tooltip="'Увеличить масштаб'" data-test="zoom-in"
+                      :disabled="scale >= MAX_SCALE" @click="zoomBy(ZOOM_STEP)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+               stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M12 5v14" /></svg>
+        </UiIconButton>
+        <UiIconButton data-context="workspace-form" label="Показать всё"
+                      v-tooltip="'Показать всю схему'" data-test="fit-all" @click="fitAll">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
+          </svg>
+        </UiIconButton>
       </div>
-      <label class="route-canvas__search">Найти этап
-        <UiInput data-test="search-nodes" :model-value="searchTerm" placeholder="Подпись или ID"
+      <label class="route-canvas__search"><span class="ui-visually-hidden">Найти этап</span>
+        <UiInput data-test="search-nodes" :model-value="searchTerm" placeholder="Название этапа или ID"
                  @update:model-value="searchTerm = String($event ?? '')"
                  @keydown.enter="searchNode" />
       </label>
@@ -35,7 +48,7 @@
           </option>
         </UiSelect>
       </label>
-      <UiButton data-test="connect-start" :disabled="!connectSourceId || !connectOutcome"
+      <UiButton data-context="workspace-form" variant="ghost" data-test="connect-start" :disabled="!connectSourceId || !connectOutcome"
                 @click="connecting = true">Соединить с узлом</UiButton>        </div>
       </details>
       <span v-if="connecting" class="muted">Выберите цель на схеме</span>
@@ -58,7 +71,7 @@ import type { RouteDraft, RouteEditorIssue } from '../../../../shared/pipeline/r
 import FactoryGraph from '../pipeline/FactoryGraph.vue';
 import type { RouteCommandScope } from './routeCommands.ts';
 import { setTransition } from './routeCommands.ts';
-import { UiButton, UiInput, UiSelect } from '../../ui';
+import { UiButton, UiIconButton, UiInput, UiSelect, vTooltip } from '../../ui';
 
 // Узел, который схема отдаёт по активации: ID на схеме и ID в машине.
 interface ActivatedNode {
@@ -273,22 +286,58 @@ watch(() => props.focusedIssue, (issue) => {
 .route-canvas {
   min-width: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-2);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
+
 .route-canvas__toolbar {
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
+  align-items: center;
   gap: 8px;
   padding: 8px;
+  background: var(--sidebar);
   border-bottom: 1px solid var(--line);
 }
-.route-canvas__toolbar label { display: grid; gap: 3px; }
-.route-canvas__search { width: min(100%, 240px); }
-.route-canvas__zoom { display: flex; flex-wrap: wrap; gap: 6px; }
-.route-canvas__connections { flex: 1 0 100%; }
-.route-canvas__connections summary { cursor: pointer; color: var(--ink-mid); }
-.route-canvas__connection-fields { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.route-canvas__graph { min-width: 0; padding: 8px 10px; }
+
+.route-canvas__toolbar label {
+  display: grid;
+  gap: 3px;
+}
+
+.route-canvas__search {
+  width: min(100%, 240px);
+}
+
+.route-canvas__zoom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.route-canvas__connections {
+  min-width: 0;
+}
+
+.route-canvas__connections summary {
+  cursor: pointer;
+  color: var(--ink-mid);
+  min-height: var(--toolbar-control-h);
+  padding-block: 4px;
+  font-size: 12px;
+}
+
+.route-canvas__connection-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: end;
+}
+
+.route-canvas__graph {
+  min-width: 0;
+  padding: 12px 8px;
+  overflow: auto;
+}
 </style>

@@ -102,7 +102,7 @@ const routes: RouteRecordRaw[] = [
     path: '/routes',
     name: 'routes',
     component: () => import('./views/RoutesView.vue'),
-    meta: { title: 'Маршруты' },
+    meta: { title: 'Маршруты', layout: 'workspace' },
   },
   {
     path: '/projects/:id?',

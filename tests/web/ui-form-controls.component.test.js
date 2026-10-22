@@ -67,6 +67,11 @@ test('UiField связывает label, hint/error и invalid с control', async
   await wrapper.setProps({ error: 'Ошибка' });
   assert.equal(input.attributes('aria-invalid'), 'true');
   assert.equal(input.attributes('aria-describedby'), `${id}-error`);
+  await wrapper.setProps({ help: 'Имя видно в списке участников.' });
+  assert.equal(wrapper.get('label').attributes('for'), id);
+  assert.equal(input.attributes('aria-describedby'), `${id}-error`);
+  assert.equal(wrapper.find('label button').exists(), false);
+  assert.match(wrapper.get('button').attributes('aria-label'), /Имя/);
   wrapper.unmount();
 });
 

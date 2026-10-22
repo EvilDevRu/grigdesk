@@ -12,6 +12,7 @@ process.env.NODE_ENV = 'test';
 
 const UI_STUB = `
 import { defineComponent, h } from 'vue';
+export { default as UiField } from './src/components/composites/UiField.vue';
 export const UiButton = defineComponent({ emits: ['click'], setup(_, { emit, slots, attrs }) {
   return () => h('button', { ...attrs, onClick: () => emit('click') }, slots.default?.());
 } });
@@ -151,7 +152,7 @@ test('RE-F4-03: gate показывает исходы/emits, status меняе�
     const gateFixture = await fixture(t, makeDraft(), 'gate_accept');
     assert.match(gateFixture.wrapper.text(), /approved/);
     assert.match(gateFixture.wrapper.text(), /rejected/);
-    assert.match(gateFixture.wrapper.text(), /Публикует статусы/);
+    assert.match(gateFixture.wrapper.text(), /Обновляет статусы/);
     const gate = gateFixture.getDocument().routes.quick.route.nodes.find((node) =>
       node.id === 'gate_accept');
     assert.equal(Object.hasOwn(gate, 'policy'), false);

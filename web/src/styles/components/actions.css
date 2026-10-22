@@ -239,6 +239,35 @@
   min-height: var(--toolbar-control-h);
 }
 
+/* В строках формы кнопки равны полям; компактная высота остаётся у шапок. */
+.ui-button[data-context='workspace-form'] {
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.ui-icon-button[data-context='workspace-form'][data-role] {
+  width: var(--control-height);
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0;
+}
+
+/* Небольшой знак справки сохраняет полную сенсорную площадку на touch. */
+.ui-icon-button[data-context='field-help'][data-role] {
+  width: var(--toolbar-control-h);
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 0;
+}
+
+.ui-icon-button[data-context='field-help'] svg {
+  width: 14px;
+  height: 14px;
+}
+
 .ui-button[data-context='workspace-filter'] {
   border: 0;
   border-radius: 0;
@@ -2174,4 +2203,27 @@
 :root[data-ui-touch] :is(.ui-button, .ui-pressable, .ui-action-link, [data-ui-shell-nav]) {
   min-height: 44px;
   min-width: 44px;
+}
+
+/* Выбор этапа сохраняет семантику кнопки и общий масштаб строк каталога. */
+.ui-button[data-context='workspace-catalog-row'] {
+  width: 100%;
+  height: auto;
+  justify-content: flex-start;
+  white-space: normal;
+  text-align: left;
+  min-height: var(--control-height);
+  padding: 7px 10px;
+  line-height: 20px;
+  font-size: var(--workspace-text-size);
+  color: var(--ink);
+  border-color: transparent;
+}
+
+.ui-button[data-context='workspace-catalog-row'] .ui-button__content,
+.ui-button[data-context='workspace-catalog-row'] .ui-button__label { width: 100%; }
+
+.ui-button[data-context='workspace-catalog-row'][aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 13%, var(--sidebar));
+  box-shadow: inset 2px 0 var(--accent);
 }

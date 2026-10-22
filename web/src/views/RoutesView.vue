@@ -1,43 +1,92 @@
 <template>
-  <div class="routes-page" :data-pane="mobilePane">
-    <UiTabs v-model="mobilePane" class="route-pane-nav" data-ui-workspace-tabs label="Область маршрута">
+  <div class="routes-page ui-workspace" data-ui-workspace :data-pane="mobilePane">
+    <div class="route-pane-nav">
+    <UiTabs v-model="mobilePane" data-ui-workspace-tabs label="Область маршрута">
       <UiTab value="catalog" controls="route-catalog-pane">Каталог</UiTab>
       <UiTab value="work" controls="route-work-pane">Маршрут</UiTab>
-      <UiTab value="inspector" controls="route-work-pane" :disabled="!selectedRoute">Свойства</UiTab>
+      <UiTab value="inspector" controls="route-work-pane" :disabled="!editingDraft || !selectedRoute">
+        Свойства
+      </UiTab>
     </UiTabs>
-    <!-- Черновики и состав опубликованного каталога -->
+    </div>
     <aside id="route-catalog-pane" class="list">
-      <div class="list-head">
-        <span class="ttl">Маршруты</span>
-        <UiTooltip :text="helpPanel" />
+      <UiPaneHeader>
+        <template #title><h1>Маршруты</h1></template>
+        <template #actions>
+          <UiButton v-if="profile" data-test="create-draft" data-context="workspace-toolbar"
+                    variant="ghost" :disabled="!pageReady"
+                    :aria-label="currentHash ? 'Создать черновик из current' : 'Создать черновик'"
+                    v-tooltip="currentHash ? 'Создать черновик из current' : 'Создать черновик'"
+                    @click="createEditorDraft">+ Черновик</UiButton>
+        </template>
+      </UiPaneHeader>
+      <div class="catalog-content">
+        <ProjectSwitcher compact :profiles="profiles" :model-value="profile"
+                         @update:model-value="switchProfile" @create="openProjectCreate" />
+        <div class="catalog-heading">
+          <h2>{{ editingDraft ? 'В черновике' : 'Опубликованные' }}</h2>
+          <span>{{ displayRouteList.length }}</span>
+          <UiTooltip :text="helpPanel" />
+        </div>
+        <div v-if="loading && !revisions.length" class="pad muted"><UiSpinner decorative /> Загружаю…</div>
+        <div v-else-if="error" class="pad bad" role="alert">{{ error }}</div>
+        <p v-else-if="!displayRouteList.length" class="pad muted">
+          {{ editingDraft ? 'В черновике пока нет маршрутов' : 'Каталог не опубликован' }}
+        </p>
+        <UiSelectableRow v-for="r in displayRouteList" :key="r.id" class="item"
+                         data-context="workspace-catalog" :selected="r.id === selectedRoute"
+                         @select="selectRoute(r.id)">
+          <span class="route-item-content">
+            <span class="rid">{{ r.name || r.id }}</span>
+            <span v-if="r.hash" class="route-hash" v-tooltip="r.hash">{{ shortHash(r.hash) }}</span>
+          </span>
+        </UiSelectableRow>
+        <UiButton v-if="editingDraft" variant="ghost" data-context="workspace-toolbar"
+                  data-test="catalog-bootstrap" :pressed="route.query.scope === 'bootstrap'"
+                  @click="selectBootstrap">Начальная разведка</UiButton>
+        <RouteCatalog mode="drafts"
+                      :drafts="routesStore.draftsProfile === profile ? routesStore.drafts : []"
+                      :selected-draft-id="routesStore.opened?.draftId ?? null" @select="openDraft" />
       </div>
-      <ProjectSwitcher :profiles="profiles" :model-value="profile"
-                       @update:model-value="switchProfile" @create="openProjectCreate" />
-      <UiButton v-if="profile" class="btn" :disabled="!pageReady" @click="createEditorDraft">
-        {{ currentHash ? 'Создать черновик из current' : 'Создать черновик' }}
-      </UiButton>
-      <RouteCatalog :drafts="routesStore.draftsProfile === profile ? routesStore.drafts : []"
-                    :selected-draft-id="routesStore.opened?.draftId ?? null"
-                    :document="routesStore.opened?.draftId && !routesStore.opened.readOnly
-                      ? routesStore.localDocument : null"
-                    :selected-route-id="selectedRoute"
-                    @select="openDraft" @change="replaceEditorDocument"
-                    @select-route="selectRoute" @select-bootstrap="selectBootstrap" />
-      <div v-if="loading && !revisions.length" class="pad muted"><UiSpinner decorative /> Загружаю…</div>
-      <div v-else-if="error" class="pad bad">{{ error }}</div>
-      <div v-else-if="!published" class="pad muted">Каталог не опубликован</div>
-      <UiSelectableRow v-for="r in displayRouteList" :key="r.id" class="item"
-                       :selected="r.id === selectedRoute" @select="selectRoute(r.id)">
-        <span class="route-item-content">
-          <span class="rid mono">{{ r.id }}</span>
-          <span v-if="r.hash" class="chip mono" v-tooltip="r.hash">{{ shortHash(r.hash) }}</span>
-        </span>
-      </UiSelectableRow>
     </aside>
 
     <section id="route-work-pane" class="panel" @keydown="onEditorKeydown">
-      <div v-if="editorQueryError || routesStore.error" class="bad" role="alert">
-        {{ editorQueryError || routesStore.error }}
+      <RouteEditorHeader v-if="editingDraft && routesStore.localDocument"
+                         :heading="workTitle" :document="routesStore.localDocument"
+                         :read-only="routesStore.opened?.readOnly ?? false"
+                         :saved="!routesStore.dirty" :saving="routesStore.saving" @save="saveDraft" />
+      <UiPaneHeader v-else inset="content">
+        <template #title><h2>{{ workTitle }}</h2></template>
+        <template #meta>
+          <span v-if="published || routesStore.opened?.catalogHash" class="catalog-state">
+            Опубликован <span class="route-hash" v-tooltip="routesStore.opened?.catalogHash ?? currentHash ?? ''">
+              {{ shortHash(routesStore.opened?.catalogHash ?? currentHash) }}
+            </span>
+          </span>
+          <span v-else>Нет публикации</span>
+        </template>
+        <template v-if="!routesStore.opened?.catalogHash && publishSupported
+          && routesStore.editorInfo?.source.mode !== 'editor'" #actions>
+          <UiButton data-context="workspace-toolbar" variant="ghost" :loading="busy === 'validate'"
+                    :disabled="!!busy && busy !== 'validate'" loading-label="Проверяю"
+                    @click="run('validate')">Проверить</UiButton>
+          <UiButton data-context="workspace-toolbar" tone="accent" variant="outline"
+                    :loading="busy === 'publish'" :disabled="!!busy && busy !== 'publish'"
+                    loading-label="Публикую" @click="run('publish')">Опубликовать</UiButton>
+        </template>
+      </UiPaneHeader>
+      <div class="panel-scroll">
+        <p v-if="!editingDraft && (published || routesStore.opened?.catalogHash)" class="publication-info">
+          Только просмотр
+          <span v-if="routesStore.editorInfo?.source.mode === 'editor'">
+            · источник маршрутов — редактор
+          </span>
+        </p>
+        <p v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }" role="status">
+          {{ notice }}
+        </p>
+      <div v-if="editorQueryError || routesStore.error || error" class="bad" role="alert">
+        {{ editorQueryError || routesStore.error || error }}
       </div>
       <div v-if="routesStore.saveError" class="bad" role="alert">{{ routesStore.saveError }}</div>
       <div v-if="routesStore.publicationError" class="bad" role="alert">
@@ -47,35 +96,61 @@
       </div>
       <RouteConflictPanel v-if="routesStore.conflict" @copy="copyConflictedDraft"
                           @reload="reloadConflictedDraft" />
-      <template v-if="routesStore.opened?.draftId && routesStore.localDocument && !editorQueryError">
-        <RouteEditorHeader :document="routesStore.localDocument"
-                           :read-only="routesStore.opened.readOnly"
-                           :saved="!routesStore.dirty" :saving="routesStore.saving"
-                           @save="saveDraft" />
-        <details class="route-actions-disclosure">
-          <summary>Действия черновика</summary>
-          <div class="route-editor-actions">
-          <UiButton :disabled="!routesStore.historyPast.length" @click="undoDraft">Отменить</UiButton>
-          <UiButton :disabled="!routesStore.historyFuture.length" @click="redoDraft">Повторить</UiButton>
-          <UiButton :disabled="routesStore.saving || routesStore.conflict
+
+      <template v-if="editingDraft && routesStore.localDocument">
+        <p class="route-workflow-hint">
+          Вы редактируете черновик. Чтобы изменения заработали, проверьте его,
+          сравните с опубликованным каталогом и подтвердите публикацию.
+        </p>
+        <div class="route-editor-actions" role="group" aria-label="Действия черновика">
+          <UiIconButton data-context="workspace-toolbar" label="Отменить"
+                        v-tooltip="'Отменить последнее изменение'"
+                        :disabled="!routesStore.historyPast.length" @click="undoDraft">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m9 5-5 5 5 5M4 10h10a6 6 0 0 1 6 6v2" />
+            </svg>
+          </UiIconButton>
+          <UiIconButton data-context="workspace-toolbar" label="Повторить"
+                        v-tooltip="'Повторить отменённое изменение'"
+                        :disabled="!routesStore.historyFuture.length" @click="redoDraft">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m15 5 5 5-5 5m5-5H10a6 6 0 0 0-6 6v2" />
+            </svg>
+          </UiIconButton>
+          <UiButton data-context="workspace-toolbar" variant="ghost" :disabled="routesStore.saving || routesStore.conflict
                     || Boolean(routesStore.jsonBuffer?.dirty)"
-                    @click="validateDraft">Проверить черновик</UiButton>
-          <UiButton v-if="selectedTab !== 'json'" data-test="route-json-tab"
+                    aria-label="Проверить черновик"
+                    v-tooltip="'Проверить этапы, переходы и инструкции перед публикацией'"
+                    @click="validateDraft">Проверить</UiButton>
+          <UiButton data-context="workspace-toolbar" variant="ghost" v-if="selectedTab !== 'json'" data-test="route-json-tab"
                     @click="openJsonTab">JSON-режим</UiButton>
-          <UiButton v-else data-test="route-form-tab" @click="openFormsTab">
+          <UiButton data-context="workspace-toolbar" variant="ghost" v-else data-test="route-form-tab" @click="openFormsTab">
             Вернуться к формам
           </UiButton>
-          <UiButton :disabled="!routesStore.canPublish" @click="compareDraft">
-            Сравнить с current
+          <UiButton data-context="workspace-toolbar" variant="ghost" v-tooltip="routesStore.canPublish
+                      ? 'Посмотреть изменения перед подтверждением публикации'
+                      : 'Сначала проверьте черновик и исправьте найденные ошибки'"
+                    :disabled="!routesStore.canPublish" @click="compareDraft">
+            Сравнить с опубликованным
           </UiButton>
-          <UiButton v-if="currentHash && routesStore.serverSnapshot?.baseCatalogHash !== currentHash"
+          <UiButton data-context="workspace-toolbar" variant="ghost" v-if="currentHash && routesStore.serverSnapshot?.baseCatalogHash !== currentHash"
                     data-test="preview-rebase"
+                    v-tooltip="'Учесть новую опубликованную версию и выбрать, как объединить изменения'"
                     :disabled="routesStore.dirty || routesStore.saving || routesStore.conflict
                       || Boolean(routesStore.jsonBuffer?.dirty)
                       || routesStore.rebaseBusy" @click="previewDraftRebase">
-            Перенести на current
+            Обновить основу черновика
           </UiButton>
+
         </div>
+        <details class="route-disclosure route-catalog-properties" :open="!displayRouteList.length">
+          <summary>Свойства маршрута и каталог</summary>
+          <RouteCatalog mode="manage" :drafts="[]" :selected-draft-id="routesStore.opened?.draftId ?? null"
+                        :document="routesStore.opened?.readOnly ? null : routesStore.localDocument"
+                        :selected-route-id="selectedRoute" @change="replaceEditorDocument"
+                        @select-route="selectRoute" />
         </details>
         <p v-if="routesStore.rebaseError" class="bad" role="alert">{{ routesStore.rebaseError }}</p>
         <RouteRebaseDialog v-if="routesStore.rebasePreview"
@@ -90,7 +165,7 @@
         <RouteJsonEditor v-if="selectedTab === 'json' && routesStore.jsonBuffer"
                          :buffer="routesStore.jsonBuffer"
                          :issues="routesStore.validationIssues"
-                         :read-only="routesStore.opened.readOnly"
+                         :read-only="routesStore.opened?.readOnly ?? false"
                          @update:raw="updateJsonDraftBuffer"
                          @format="formatJsonDraftBuffer"
                          @apply="applyJsonDraftBuffer" />
@@ -133,31 +208,43 @@
                                       @change="replaceEditorDocument" />
           </div>
           </div>
+          <details class="route-disclosure">
+          <summary>Инструкции этапов</summary>
           <RouteDraftPanel :document="routesStore.localDocument" :route-id="selectedRoute"
                            @select-node="openPrompt" />
+        </details>
         </div>
         <p v-else class="muted">Публикация недоступна: сначала добавьте маршрут и его инструкции.</p>
         <p v-if="routesStore.promptPreviewError" class="bad" role="alert">
           {{ routesStore.promptPreviewError }}
         </p>
-        <RoutePromptPreview v-if="selectedAgentNode"
+        <details class="route-disclosure" v-if="selectedAgentNode">
+          <summary>Предпросмотр инструкции</summary>
+          <RoutePromptPreview
                             :result="selectedPromptPreview?.result ?? null"
                             :stale="selectedPromptPreview?.stale ?? false"
                             :busy="routesStore.promptPreviewBusy"
                             @request="previewSelectedPrompt" />
+        </details>
         <p v-if="routesStore.simulationError" class="bad" role="alert">
           {{ routesStore.simulationError }}
         </p>
-        <RouteSimulation v-if="routesStore.serverSnapshot"
+        <details class="route-disclosure" v-if="routesStore.serverSnapshot">
+          <summary>Пробный сценарий</summary>
+          <RouteSimulation
                          :document="routesStore.serverSnapshot"
                          :simulation="routesStore.simulation"
                          @start="startRouteSimulation" @step="stepRouteSimulation"
                          @approve="approveRouteSimulation" />
-        <RouteTransferDialog v-if="routesStore.serverSnapshot"
+        </details>
+        <details class="route-disclosure" v-if="routesStore.serverSnapshot">
+          <summary>Экспорт и импорт</summary>
+          <RouteTransferDialog
                              :document="routesStore.serverSnapshot"
                              :profiles="profiles" :dirty="routesStore.dirty || routesStore.saving
                                || routesStore.conflict || Boolean(routesStore.jsonBuffer?.dirty)"
                              @open="openTransferredDraft" />
+        </details>
         <template v-if="routesStore.compareReport
           && routesStore.compareGeneration === routesStore.editGeneration">
           <UiButton v-if="routesStore.compareReport.sourceMode === 'profile-script'"
@@ -172,46 +259,22 @@
                             :busy="routesStore.publicationOutcome === 'pending'"
                             @confirm="confirmEditorPublish"
                             @cancel="publishDialogOpen = false" />
+
       </template>
       <template v-else-if="routesStore.opened?.catalogHash && routesStore.publishedSnapshot && !editorQueryError">
-        <header class="route-readonly-head">
-          <strong>Опубликованный каталог {{ shortHash(routesStore.opened.catalogHash) }}</strong>
-          <span class="muted">Только просмотр</span>
-          <span v-if="routesStore.editorInfo?.source.mode === 'editor'" class="muted">
-            источник маршрутов — редактор
-          </span>
-        </header>
         <div v-if="graphLoading" class="mid muted"><UiSpinner decorative /> Схема…</div>
         <div v-else-if="graphError" class="mid bad" role="alert">{{ graphError }}</div>
-        <FactoryGraph v-else-if="graph" :graph="graph" reference />
-        <RouteDraftPanel v-if="selectedRoute" :document="routesStore.publishedSnapshot"
+        <div v-else-if="graph" class="published-canvas"><FactoryGraph :graph="graph" reference /></div>
+        <details v-if="selectedRoute" class="route-disclosure">
+          <summary>Инструкции этапов</summary>
+          <RouteDraftPanel :document="routesStore.publishedSnapshot"
                          :route-id="selectedRoute" />
+        </details>
+
       </template>
       <template v-else>
-      <header class="phead">
-        <span class="ttl">{{ profile || '—' }}</span>
-        <span v-if="published" class="hash mono" v-tooltip="currentHash ?? undefined">current {{ shortHash(currentHash) }}</span>
-        <span v-else class="muted">маршрутов ещё нет</span>
-        <span class="grow"></span>
-        <span v-if="notice" class="notice" :class="{ bad: notice.startsWith('Ошибка') }">{{ notice }}</span>
-        <template v-if="publishSupported && routesStore.editorInfo?.source.mode !== 'editor'">
-          <UiButton class="btn" :loading="busy === 'validate'" :disabled="!!busy && busy !== 'validate'"
-                    loading-label="Проверяю" @click="run('validate')">Проверить</UiButton>
-          <UiButton class="btn accent" tone="accent" :loading="busy === 'publish'"
-                    :disabled="!!busy && busy !== 'publish'" loading-label="Публикую"
-                    @click="run('publish')">Опубликовать</UiButton>
-        </template>
-
-        <span v-else-if="routesStore.editorInfo?.source.mode === 'editor'" class="muted nopub">
-          источник маршрутов — редактор
-        </span>
-        <span v-else class="muted nopub" v-tooltip="'Публикацию собирает сам профиль: profiles/&lt;проект&gt;/routes/publish.mjs'">
-          нет скрипта публикации
-        </span>
-      </header>
-
       <!-- Каталог ещё не опубликован: подсказываем доступный способ публикации -->
-      <div v-if="!published && !loading" class="hint">
+      <div v-if="!published && !loading && !error" class="hint">
         <p>У проекта нет опубликованного каталога маршрутов.</p>
         <p v-if="routesStore.editorInfo?.source.mode === 'editor'" class="muted">
           Создайте черновик, заполните маршрут и инструкции, проверьте и опубликуйте его здесь.
@@ -221,7 +284,7 @@
       </div>
 
       <!-- Схема выбранного маршрута — ровно та, по которой пойдёт попытка -->
-      <div v-else class="canvas">
+      <div v-else class="published-canvas">
         <div v-if="graphLoading" class="mid muted"><UiSpinner decorative /> Схема…</div>
         <div v-else-if="graphError" class="mid bad">{{ graphError }}</div>
         <FactoryGraph v-else-if="graph" :graph="graph" reference />
@@ -233,14 +296,16 @@
         <summary>Отчёт публикатора</summary>
         <pre class="mono">{{ JSON.stringify(report, null, 2) }}</pre>
       </details>
-      </template>
 
-      <RouteRevisionHistory v-if="revisions.length" :revisions="revisions" :busy="!!busy || !pageReady"
-                            v-tooltip="helpRevisions" @view="viewRevision"
-                            @create="createFromRevision" @compare="compareRevision"
-                            @rollback="rollback" />
-      <RouteCompare v-if="historyCompareReport" :report="historyCompareReport"
-                    :can-publish="false" />
+      </template>
+      <details v-if="revisions.length" class="route-disclosure route-history" :open="!editingDraft">
+        <summary>Ревизии каталога <span class="muted">{{ revisions.length }}</span></summary>
+        <RouteRevisionHistory :revisions="revisions" :busy="!!busy || !pageReady"
+                              v-tooltip="helpRevisions" @view="viewRevision"
+                              @create="createFromRevision" @compare="compareRevision" @rollback="rollback" />
+      </details>
+      <RouteCompare v-if="historyCompareReport" :report="historyCompareReport" :can-publish="false" />
+      </div>
     </section>
   </div>
 </template>
@@ -262,6 +327,8 @@ import type { DraftCreateRequest } from '../shared/routesApi.ts';
 import { agentsApi } from '../shared/agentsApi.ts';
 import {
   UiButton,
+  UiIconButton,
+  UiPaneHeader,
   UiTabs,
   UiTab,
   UiSelectableRow,
@@ -337,6 +404,7 @@ import {
 interface RouteEntry {
   id: string;
   hash: string;
+  name?: string;
 }
 
 // Что сейчас делает кнопка. Пустая строка — ничего: раздел не занят.
@@ -446,13 +514,34 @@ const routeList = computed<RouteEntry[]>(() => Object.entries(currentRevision.va
 
 const displayRouteList = computed<RouteEntry[]>(() => (
   routesStore.opened?.draftId && routesStore.localDocument
-    ? Object.keys(routesStore.localDocument.routes).map((id) => ({ id, hash: '' }))
+    ? Object.entries(routesStore.localDocument.routes).map(([id, bundle]) => ({
+      id,
+      hash: '',
+      name: bundle.route.title,
+    }))
     : routesStore.opened?.catalogHash && routesStore.publishedSnapshot
-      ? Object.keys(routesStore.publishedSnapshot.routes).map((id) => ({ id, hash: '' }))
+      ? Object.entries(routesStore.publishedSnapshot.routes).map(([id, bundle]) => ({
+        id,
+        hash: '',
+        name: bundle.route.title,
+      }))
     : routeList.value
 ).sort((left, right) => left.id.localeCompare(right.id)));
 
 const published = computed(() => Boolean(currentHash.value));
+const editingDraft = computed(() => Boolean(
+  routesStore.opened?.draftId && routesStore.localDocument && !editorQueryError.value,
+));
+const workTitle = computed(() => {
+  if (route.query.scope === 'bootstrap' && editingDraft.value) {
+    return 'Начальная разведка';
+  }
+
+  const document = routesStore.localDocument ?? routesStore.publishedSnapshot;
+
+  return document?.routes[selectedRoute.value]?.route.title
+    || selectedRoute.value || profile.value || 'Маршруты';
+});
 
 function shortHash(hash: string | null | undefined): string {
   return hash ? String(hash).slice(0, 12) : '—';
@@ -604,6 +693,8 @@ function selectRoute(id: string): void {
  * Действие синхронизирует выбор в интерфейсе с открытым снимком редактора.
  */
 function selectBootstrap(): void {
+  mobilePane.value = 'work';
+
   if (!routesStore.opened?.draftId || !routesStore.localDocument) {
     return;
   }
@@ -1341,88 +1432,299 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.routes-page { grid-template-rows: auto minmax(0, 1fr); height: 100%; display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 0; container: routes / inline-size; }
-
-.routes-page > .list, .routes-page > .panel { grid-row: 1 / -1; }
-
-/* ── Состав каталога ── */
-.list { border-right: 1px solid var(--line); background: var(--sidebar); overflow-y: auto; padding: 10px; }
-.list-head { display: flex; align-items: center; gap: 8px; padding: 2px 4px 10px; }
-.ttl { font-weight: 700; font-size: 13.5px; }
-.item { width: 100%; margin-bottom: 4px; }
-.route-item-content { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; }
-.route-item-content .rid { flex: 1; min-width: 0; font-weight: 700; color: var(--node-code); font-size: 12.5px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chip { flex: none; font-size: 10px; color: var(--ink-mid); background: var(--surface-2);
-  border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
-.pad { padding: 12px 8px; }
-
-/* ── Панель ── */
-.panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto;
-  padding: 12px 16px 16px; gap: 10px; }
-.phead { display: flex; align-items: center; gap: 10px; }
-.route-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-/* Схема идёт во всю ширину: на натуральном масштабе, где текст читается, ей нужен простор.
-   Под ней — список этапов и инспекторы выбранного этапа. */
-.route-editor-workspace { display: grid; grid-template-columns: minmax(0, 1fr);
-  align-items: start; gap: 10px; min-width: 0; }
-.route-editor-workspace__sidebar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
-  align-items: start; gap: 10px; min-width: 0; }
-.route-editor-inspectors { display: grid; gap: 10px; min-width: 0; }
-.route-editor-workspace .route-draft-panel { grid-column: 1 / -1; }
-.hash { font-size: 12px; color: var(--ink-mid); background: var(--surface-2); border: 1px solid var(--line);
-  border-radius: 6px; padding: 3px 8px; }
-.grow { flex: 1; }
-.notice { font-size: 12.5px; color: var(--good); }
-.notice.bad { color: var(--bad); }
-.nopub { font-size: 12px; cursor: help; }
-
-.hint { border: 1px solid var(--line); background: var(--surface); border-radius: 10px;
-  padding: 14px 16px; font-size: 13px; line-height: 1.6; }
-.hint p { margin: 0 0 6px; }
-.hint p:last-child { margin: 0; }
-
-.canvas { position: relative; flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--line);
-  border-radius: 10px; background: var(--surface); padding: 14px; }
-.mid { height: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; }
-
-.report { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 8px 12px; }
-.report summary { cursor: pointer; font-size: 12.5px; }
-.report pre { margin: 8px 0 4px; max-height: 220px; overflow: auto; font-size: 11.5px; line-height: 1.5;
-  color: var(--ink-mid); }
-
-/* ── Ревизии ── */
-.revs { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 12px;
-  max-height: 30vh; overflow-y: auto; flex: none; }
-.revs-head { display: flex; align-items: center; gap: 8px; padding: 0 2px 8px; }
-.rcount { font-size: 11.5px; }
-.rrow { display: flex; align-items: center; gap: 10px; padding: 6px 4px; border-top: 1px solid var(--line);
-  font-size: 12.5px; }
-.rrow.cur { background: color-mix(in srgb, var(--good) 8%, transparent); }
-.rhash { flex: none; color: var(--node-code); }
-.rwhen { flex: none; font-size: 12px; }
-.rroutes { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.rcur { font-size: 11.5px; color: var(--good); }
-.rbad { font-size: 12px; }
-
-.bad { color: var(--bad); }
-
-/* В небольшом контейнере выбранная область занимает всю рабочую высоту.
-   Панели скрываются без размонтирования: undo, буферы и выбор остаются прежними. */
-.route-pane-nav { display: none; }
-.route-actions-disclosure > summary { cursor: pointer; color: var(--ink-mid); }
-.route-actions-disclosure[open] > summary { margin-bottom: 8px; }
-@container routes (max-width: 1100px) {
-  .route-pane-nav { display: inline-flex; grid-column: 1 / -1; grid-row: 1; margin-bottom: 8px; }
-  .routes-page > .list, .routes-page > .panel { grid-column: 1 / -1; grid-row: 2; }
-  .list { max-height: none; border: 0; }
-  .panel { padding: 8px; }
-  [data-pane='catalog'] > .panel { display: none; }
-  [data-pane='work'] > .list, [data-pane='inspector'] > .list { display: none; }
-  [data-pane='work'] .route-editor-workspace__sidebar { display: none; }
-  [data-pane='inspector'] .route-editor-workspace > :deep(.route-canvas),
-  [data-pane='inspector'] .route-editor-workspace > :deep(.route-draft-panel) { display: none; }
-  .route-editor-workspace__sidebar { grid-template-columns: minmax(0, 1fr); }
+.routes-page {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  container: routes / inline-size;
 }
 
+.routes-page > .list, .routes-page > .panel {
+  grid-row: 1 / -1;
+}
+
+.list {
+  min-width: 0;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  background: var(--sidebar);
+}
+
+.catalog-content {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 12px 6px;
+}
+
+.catalog-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 6px 6px;
+  color: var(--ink-mid);
+}
+
+.catalog-heading h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.route-item-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.rid {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.route-hash {
+  font-family: var(--mono);
+  color: var(--ink-mid);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.pad {
+  margin: 0;
+  padding: 8px 6px;
+  font-size: 12px;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+  container: route-panel / inline-size;
+}
+
+.panel-scroll {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: 12px 20px 20px;
+}
+
+.panel-scroll > * + * {
+  margin-top: 12px;
+}
+
+.catalog-state {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.route-workflow-hint {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.route-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.route-editor-workspace {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.route-editor-workspace__sidebar {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.4fr);
+  align-items: start;
+  gap: 20px;
+  min-width: 0;
+}
+
+.route-editor-inspectors {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.route-disclosure {
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.route-disclosure > summary {
+  cursor: pointer;
+  color: var(--ink-mid);
+  font-size: 12px;
+  padding-block: 4px;
+  min-height: var(--toolbar-control-h);
+}
+
+.route-disclosure[open] > summary {
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+
+.route-catalog-properties {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.published-canvas {
+  min-height: 280px;
+  overflow: auto;
+  padding-block: 16px;
+}
+
+.notice {
+  font-size: 12px;
+  color: var(--good);
+}
+
+.publication-info {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+
+.hint {
+  padding: 16px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.hint p {
+  margin: 0 0 6px;
+}
+
+.mid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+}
+
+.report {
+  padding-block: 8px;
+  font-size: 12px;
+}
+
+.report summary {
+  cursor: pointer;
+}
+
+.report pre {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.bad {
+  color: var(--bad);
+}
+
+.panel :deep(h3) {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+.panel :deep(label), .panel :deep(legend) {
+  font-size: 12px;
+  color: var(--workspace-label-color);
+}
+
+.panel :deep(label) {
+  min-width: 0;
+}
+
+.panel :deep(fieldset) {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.panel :deep(p), .panel :deep(small) {
+  overflow-wrap: anywhere;
+}
+
+.route-pane-nav {
+  display: none;
+}
+
+@container route-panel (max-width: 660px) {
+
+  .panel-scroll {
+    padding: 12px;
+  }
+
+  .route-editor-workspace__sidebar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Узкая область сохраняет экземпляры редактора: выбор и буферы не теряются. */
+
+@container routes (max-width: 1000px) {
+
+  .route-pane-nav {
+    display: flex;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--line);
+    background: var(--topbar);
+  }
+
+  .routes-page > .list, .routes-page > .panel {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .list {
+    border-right: 0;
+  }
+
+  [data-pane='catalog'] > .panel {
+    display: none;
+  }
+
+  [data-pane='work'] > .list, [data-pane='inspector'] > .list {
+    display: none;
+  }
+
+  .route-editor-workspace__sidebar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-pane='work'] .route-editor-inspectors {
+    display: none;
+  }
+
+  [data-pane='inspector'] .route-editor-workspace > :deep(.route-canvas),
+  [data-pane='inspector'] .route-editor-workspace__sidebar > :deep(.route-stage-list),
+  [data-pane='inspector'] .route-workflow-hint {
+    display: none;
+  }
+}
 </style>

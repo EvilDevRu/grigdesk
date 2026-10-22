@@ -33,12 +33,39 @@ const routeEntry = computed(() => props.document.routes[props.routeId] ?? null);
 </script>
 
 <style scoped>
-.route-draft-panel { overflow: auto; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
-.route-draft-panel h3 { margin: 0 0 10px; }
-.route-draft-panel ol { margin: 0; padding-left: 22px; }
-.route-draft-panel li { padding: 5px 0; border-top: 1px solid var(--line); }
-.route-draft-panel small { margin-left: 8px; color: var(--ink-mid); }
-.route-draft-panel__prompts { margin: 6px 0; }
-.route-draft-panel__prompts pre { white-space: pre-wrap; overflow-wrap: anywhere;
-  background: var(--surface-2); padding: 8px; border-radius: 6px; }
+.route-draft-panel {
+  overflow: auto;
+  padding: 0;
+}
+
+.route-draft-panel h3 {
+  margin: 0 0 10px;
+}
+
+.route-draft-panel ol {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.route-draft-panel li {
+  padding: 5px 0;
+  border-top: 1px solid var(--line);
+}
+
+.route-draft-panel small {
+  margin-left: 8px;
+  color: var(--ink-mid);
+}
+
+.route-draft-panel__prompts {
+  margin: 6px 0;
+}
+
+.route-draft-panel__prompts pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface-2);
+  padding: 8px;
+  border-radius: var(--radius);
+}
 </style>
