@@ -1,8 +1,9 @@
 <template>
   <form class="sandbox-raise" @submit.prevent="submit">
     <div class="sandbox-raise__row">
-      <UiField label="Профиль" :error="profileError">
-        <UiSelect v-model="profile" :disabled="!options.length">
+      <UiField label="Профиль" :error="profileError"
+               help="Профиль определяет проект и способ подготовки стенда: код, контейнеры и базы данных.">
+        <UiSelect v-model="profile" :disabled="!options.length || busy">
           <option v-if="!options.length" value="">нет профилей с песочницей</option>
           <option v-for="item in options" :key="item.id" :value="item.id">{{ item.id }}</option>
         </UiSelect>
@@ -10,39 +11,34 @@
 
       <UiField
         label="Номер задачи"
-        :hint="taskHint"
         :error="taskError"
+        help="Укажите номер задачи из портала. Позже её можно запустить по конвейеру на этом же стенде."
       >
         <UiInput
           v-model.trim="task"
-          :disabled="withoutTask"
+          :disabled="withoutTask || busy"
           inputmode="numeric"
           :placeholder="taskPlaceholder"
         />
       </UiField>
     </div>
 
-    <label class="sandbox-raise__toggle">
-      <UiSwitch v-model="withoutTask" />
-      <span>
-        Без задачи — служебный номер из диапазона
-        {{ range.from }}–{{ range.to }}
-      </span>
-    </label>
+    <UiSwitch v-model="withoutTask" :disabled="busy">Без привязки к задаче</UiSwitch>
+    <p class="sandbox-raise__note">{{ taskHint }}</p>
 
     <div class="sandbox-raise__footer">
       <p class="sandbox-raise__note">
-        Подъём занимает слот стенда и обычно 12–15 минут: скрипт профиля создаёт worktree,
-        контейнеры и свои схемы данных. Вкладку можно закрыть — процесс идёт своим ходом.
+        Подготовка занимает 12–15 минут и один слот стенда. Вкладку можно закрыть.
       </p>
       <UiButton
         type="submit"
         variant="solid"
         tone="accent"
+        data-context="workspace-form"
         :loading="busy"
         :aria-disabled="!canSubmit"
       >
-        Поднять песочницу
+        Поднять стенд
       </UiButton>
     </div>
   </form>
@@ -82,7 +78,7 @@ const withoutTask = ref(true);
 const taskError = ref('');
 
 const taskHint = computed(() => (withoutTask.value
-  ? 'Номер выдаст GrigDesk: он не пересекается с номерами задач портала.'
+  ? `GrigDesk выберет свободный служебный номер: ${props.range.from}–${props.range.to}.`
   : 'Стенд получит имя этой задачи, и позже её можно пустить по конвейеру на готовый стенд.'));
 
 // Выключенное поле не должно звать вводить номер: подсказка внутри него говорит,
@@ -91,13 +87,13 @@ const taskPlaceholder = computed(() => (withoutTask.value ? 'выдаст GrigDe
 
 const profileError = computed(() => (props.options.length
   ? ''
-  : 'Ни один профиль не объявил up.sh и down.sh.'));
+  : 'Нет профилей для создания песочницы. В профиле нужны скрипты up.sh и down.sh.'));
 
-const canSubmit = computed(() => Boolean(profile.value) && !props.busy);
+const canSubmit = computed(() => props.options.some((option) => option.id === profile.value) && !props.busy);
 
 // Первый доступный профиль подставляется сам: чаще всего он на машине один.
 watch(() => props.options, (options) => {
-  if (!profile.value && options.length) {
+  if (!options.some((option) => option.id === profile.value)) {
     profile.value = options[0]?.id || '';
   }
 }, { immediate: true });
@@ -136,35 +132,29 @@ function submit() {
 .sandbox-raise {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
+  min-width: 0;
+  max-width: 760px;
+  container: sandbox-raise / inline-size;
 }
 
 .sandbox-raise__row {
   display: grid;
-  grid-template-columns: minmax(180px, 260px) minmax(180px, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: start;
-  gap: 14px;
-}
-
-.sandbox-raise__toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--ink-mid);
-  font-size: 13px;
-  cursor: pointer;
+  gap: 12px;
 }
 
 .sandbox-raise__footer {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 16px;
-  padding-top: 12px;
+  gap: 8px 16px;
+  padding-top: 8px;
   border-top: 1px solid var(--line);
 }
 
 .sandbox-raise__note {
-  flex: 1;
   min-width: 0;
   margin: 0;
   color: var(--ink-mid);
@@ -172,14 +162,13 @@ function submit() {
   line-height: 1.5;
 }
 
-@media (max-width: 640px) {
+@container sandbox-raise (max-width: 520px) {
   .sandbox-raise__row {
     grid-template-columns: 1fr;
   }
 
   .sandbox-raise__footer {
-    flex-direction: column;
-    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

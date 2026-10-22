@@ -77,6 +77,8 @@
 
 - [Зависимости SEA от хоста: системные библиотеки, Python, CLI и дополнительные runtime](sea-host-requirements.md)
 
+- [Минимум системы: glibc 2.28 у собранных ELF и libfuse.so.2 у AppImage окна](binary-host-minimum.md)
+
 - [Единая папка данных: раскладка, перенос, ранний старт и блокировка](data-home.md)
 
 - [Сервер только API: встроенный интерфейс, снимки и страницы плагинов](api-only-server.md)
@@ -100,6 +102,8 @@
 - [Обновление GrigDesk с независимым ELF: contract 2, readiness и сохранение runtime](deepseek-binary-update.md)
 
 ## Грабли
+
+- [Плоская папка бинарников: descriptor окна, корень установки, deploy и JSON](portable-binary-layout.md)
 
 - [Постоянный виртуальный вход helper исключает случайный путь staging из бандла](sea-helper-staging-comments.md)
 
