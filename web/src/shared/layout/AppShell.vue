@@ -363,7 +363,6 @@
       </div>
       <!-- Колокольчик — над стопкой тостов: ушедшее само оповещение можно найти здесь. -->
       <div class="topbar-actions">
-        <CommandPalette :sections="commands" />
         <ConnectionButton :icon="ICONS.connection" />
         <AlertHistoryPopover />
         <UiIconButton :label="t('settings.settings')" v-tooltip="t('settings.settings')"
@@ -451,7 +450,6 @@ import ProviderUsageResources from '../../features/providers/ProviderUsageResour
 import PluginSlot from '../../plugins/PluginSlot.vue';
 import { createUsageWatch } from '../../features/providers/usageWatch.ts';
 import AttentionAlerts from '../../features/analysis/AttentionAlerts.vue';
-import CommandPalette from './CommandPalette.vue';
 import AlertHistoryPopover from '../../features/alerts/AlertHistoryPopover.vue';
 import ToolHost from './ToolHost.vue';
 import ToolsGrid from './ToolsGrid.vue';
@@ -907,13 +905,6 @@ const dockRouteNav = computed(() => [
 ].sort((a, b) => (a.order || 0) - (b.order || 0)
   || (('sourceLabel' in a ? a.sourceLabel : '') || a.label)
     .localeCompare(('sourceLabel' in b ? b.sourceLabel : '') || b.label, 'ru')));
-
-const commands = computed(() => [
-  ...nav.map((item) => ({ ...item, id: item.to })),
-  ...pluginNav.value,
-  ...toolsNav.value,
-  ...dockRouteNav.value,
-]);
 
 const toolsOpen = ref(false);
 const toolsActive = computed(() => route.path === '/tools'

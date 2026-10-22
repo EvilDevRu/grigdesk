@@ -289,10 +289,6 @@
   "clearSearch": "Очистить поиск",
   "couldNotSaveTheFile": "Не удалось сохранить файл.",
   "thisComputer": "Этот компьютер",
-  "searchCommands": "Поиск разделов и команд",
-  "commandQuery": "Найти раздел или действие",
-  "noCommandResults": "Ничего не найдено",
-  "openSettings": "Открыть настройки",
   "connection": {
     "none": "Машина не выбрана",
     "connecting": "Подключение…",

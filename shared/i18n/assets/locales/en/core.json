@@ -287,10 +287,6 @@
   "clearSearch": "Clear search",
   "couldNotSaveTheFile": "Could not save the file.",
   "thisComputer": "This computer",
-  "searchCommands": "Search sections and commands",
-  "commandQuery": "Find a section or action",
-  "noCommandResults": "No results",
-  "openSettings": "Open settings",
   "connection": {
     "none": "No machine selected",
     "connecting": "Connecting…",
