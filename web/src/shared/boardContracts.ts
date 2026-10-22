@@ -11,7 +11,7 @@ export interface BoardTask extends Record<string, unknown> {
   statusLabel?: string;
   timerRunning?: boolean;
   timerElapsed?: number;
-  timerStartedAt?: string | null;
+  timerStartedAt?: number | string | null;
   overdue?: boolean;
   deadline?: string;
   responsibleId?: string | number;
@@ -135,7 +135,7 @@ const t = localeTranslator(uiLocalePort);
 
 /**
  * Проверяет отображаемые поля задачи, не проецируя неизвестные расширения портала.
- * Числовые и строковые идентификаторы остаются равноправными.
+ * Идентификаторы и Unix-старт таймера допускают числовой и строковый формат портала.
  */
 function isBoardTask(value: unknown): value is BoardTask {
   if (!isRecord(value) || !['string', 'number'].includes(typeof value.id)) {
@@ -143,14 +143,16 @@ function isBoardTask(value: unknown): value is BoardTask {
   }
 
   const textFields = [
-    'title', 'group', 'responsible', 'statusKind', 'statusLabel', 'timerStartedAt', 'deadline',
+    'title', 'group', 'responsible', 'statusKind', 'statusLabel', 'deadline',
   ];
   const textValid = textFields.every((key) => value[key] == null || typeof value[key] === 'string');
   const numbersValid = ['timerElapsed'].every((key) => value[key] == null || typeof value[key] === 'number');
   const flagsValid = ['timerRunning', 'overdue']
     .every((key) => value[key] == null || typeof value[key] === 'boolean');
+  const timerStartValid = value.timerStartedAt == null || typeof value.timerStartedAt === 'string'
+    || (typeof value.timerStartedAt === 'number' && Number.isFinite(value.timerStartedAt));
 
-  return textValid && numbersValid && flagsValid && (value.responsibleId == null
+  return textValid && numbersValid && flagsValid && timerStartValid && (value.responsibleId == null
     || typeof value.responsibleId === 'string' || typeof value.responsibleId === 'number');
 }
 
