@@ -20,6 +20,9 @@ import {
 } from '../../deepseek/scripts/deepseekBuildInputs.ts';
 import { writeDeepSeekLicenseInventory } from '../../deepseek/scripts/deepseekBuildLicenses.ts';
 import { deepSeekBuildInputs } from '../../deepseek/scripts/buildRuntime.mts';
+import { testDeepSeekRuntimeDependencies } from '../helpers/deepseekBinary.mts';
+
+const DEPENDENCIES = await testDeepSeekRuntimeDependencies();
 
 const PLUGIN = '@deepseek-ai/dsh-llm-pi-ai';
 const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G1');
@@ -65,10 +68,10 @@ async function compositionFixture(t) {
     const rows = bundle === 'base' ? [{ insert: [{ id: 'llm-pi-ai', name: PLUGIN }] }] : [];
 
     await fs.writeFile(path.join(root, 'packages/bundle', bundle, 'cordis.patch.yml'),
-      runtimeYaml().dump(rows));
+      runtimeYaml(DEPENDENCIES.directory).dump(rows));
   }
 
-  await fs.writeFile(path.join(root, 'pnpm-lock.yaml'), runtimeYaml().dump({
+  await fs.writeFile(path.join(root, 'pnpm-lock.yaml'), runtimeYaml(DEPENDENCIES.directory).dump({
     importers: {
       'packages/llm/llm-pi-ai': {
         dependencies: {
@@ -83,8 +86,8 @@ async function compositionFixture(t) {
 
 test('llm-pi-ai входит в замыкание как host overlay, а base YAML не содержит его строки', async (t) => {
   const root = await compositionFixture(t);
-  const closure = await discoverRuntimeClosure(root);
-  const layers = await readRuntimeComposition(root);
+  const closure = await discoverRuntimeClosure(root, DEPENDENCIES.directory);
+  const layers = await readRuntimeComposition(root, DEPENDENCIES.directory);
 
   assert.equal(closure.packages.some((item) => item.name === PLUGIN), true);
   assert.deepEqual(closure.reasons[PLUGIN], ['GrigDesk server-owned overlay']);
@@ -94,7 +97,9 @@ test('llm-pi-ai входит в замыкание как host overlay, а base 
 });
 
 test('pi-ai разрешён в exact 0.85.1 с integrity из upstream lock', async () => {
-  const lock = runtimeYaml().load(await fs.readFile(path.join(UPSTREAM, 'pnpm-lock.yaml'), 'utf8'));
+  const lock = runtimeYaml(DEPENDENCIES.directory).load(
+    await fs.readFile(path.join(UPSTREAM, 'pnpm-lock.yaml'), 'utf8'),
+  );
   const dependencies = llmPiAiExternalDependencies(lock);
   const modelLibrary = dependencies.find((entry) => entry.name === '@earendil-works/pi-ai');
 
@@ -106,7 +111,9 @@ test('pi-ai разрешён в exact 0.85.1 с integrity из upstream lock', a
 });
 
 test('внешние зависимости llm-pi-ai выводятся из upstream lock', async () => {
-  const lock = runtimeYaml().load(await fs.readFile(path.join(UPSTREAM, 'pnpm-lock.yaml'), 'utf8'));
+  const lock = runtimeYaml(DEPENDENCIES.directory).load(
+    await fs.readFile(path.join(UPSTREAM, 'pnpm-lock.yaml'), 'utf8'),
+  );
   const dependencies = llmPiAiExternalDependencies(lock);
 
   assert.equal(dependencies.length, 190);
@@ -135,9 +142,11 @@ test('внешние зависимости llm-pi-ai выводятся из up
 
 test('каждый внешний пакет closure pi-ai имеет лицензию в notices', async (t) => {
   const root = await fs.mkdtemp(path.join(ARTIFACTS, 'licenses-'));
-  const lock = runtimeYaml().load(await fs.readFile(path.join(UPSTREAM, 'pnpm-lock.yaml'), 'utf8'));
+  const lock = runtimeYaml(DEPENDENCIES.directory).load(
+    await fs.readFile(path.join(UPSTREAM, 'pnpm-lock.yaml'), 'utf8'),
+  );
   const dependencies = llmPiAiExternalDependencies(lock);
-  const modules = path.resolve(import.meta.dirname, '../../deepseek/build/runtime-deps/node_modules');
+  const modules = path.join(DEPENDENCIES.directory, 'node_modules');
   const compilerPackages = ['typescript', 'esbuild', '@esbuild'];
 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -171,7 +180,7 @@ test('каждый внешний пакет closure pi-ai имеет лицен
 test('license supplements входят в identity сборки и не разрешают соседнюю версию', async (t) => {
   const directory = path.resolve(import.meta.dirname, '../../deepseek/build/licenses');
   const sources = JSON.parse(await fs.readFile(path.join(directory, 'sources.json'), 'utf8'));
-  const inputs = await deepSeekBuildInputs(path.dirname(UPSTREAM));
+  const inputs = await deepSeekBuildInputs(path.dirname(UPSTREAM), DEPENDENCIES.directory);
 
   for (const source of sources.files) {
     const bytes = await fs.readFile(path.join(directory, source.file));

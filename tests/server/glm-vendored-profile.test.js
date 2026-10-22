@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { runtimeYaml } from '../../deepseek/scripts/runtimeComposition.ts';
+import { testDeepSeekRuntimeDependencies } from '../helpers/deepseekBinary.mts';
 import { ensureGlmTestRuntime } from '../helpers/glmTestRuntime.mts';
 import { runGlmTurn } from '../helpers/glmDriver.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
@@ -16,6 +17,8 @@ import {
   glmToolCall,
   startGlmProductionProcess,
 } from '../helpers/glmProductionFixture.mts';
+
+const DEPENDENCIES = await testDeepSeekRuntimeDependencies();
 
 const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G4/fixtures');
 
@@ -151,7 +154,9 @@ test('настоящий процесс GLM не применяет retryPolicy,
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // Факт G4: DSH сам сохраняет в документ выбор модели, но секции llm-pi-ai там нет.
-    const document = runtimeYaml().load(await fs.readFile(launch.settingsDocument, 'utf8'));
+    const document = runtimeYaml(DEPENDENCIES.directory).load(
+      await fs.readFile(launch.settingsDocument, 'utf8'),
+    );
 
     assert.equal(Object.hasOwn(document ?? {}, 'llm-pi-ai'), false);
     assert.equal(turn.turnEnd.data.reason.error.code, 'AUTH');

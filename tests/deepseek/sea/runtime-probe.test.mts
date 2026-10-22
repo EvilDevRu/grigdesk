@@ -5,7 +5,6 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { createAcpClient } from '../../../server/src/lib/acp/client.ts';
@@ -13,7 +12,10 @@ import { startDeepSeekServer } from '../../../server/src/lib/deepseek/serverRunt
 import { sha256 } from '../../../shared/node/hash.ts';
 import { artifactsPath } from '../../../shared/runtime/dataHome.ts';
 import { hashRuntimePayload } from '../../../deepseek/scripts/buildRuntime.mts';
-import { ensureTestDeepSeekBinary } from '../../helpers/deepseekBinary.mts';
+import {
+  ensureTestDeepSeekBinary,
+  testDeepSeekRuntimeDependencies,
+} from '../../helpers/deepseekBinary.mts';
 import { nativeSource, workerSource } from '../../helpers/deepseekNativeProbes.mts';
 
 const run = promisify(execFile);
@@ -21,11 +23,12 @@ const run = promisify(execFile);
 test('изолированный Node 24 runtime работает через ELF в ACP и web без fixture исходников', {
   timeout: 600000,
 }, async (t) => {
+  const dependencies = await testDeepSeekRuntimeDependencies();
   const candidate = await ensureTestDeepSeekBinary();
   const artifacts = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'deepseek-binary');
   const scratch = path.join(artifacts, 's10a/native-proof');
-  const source = new URL('../../../deepseek/build/runtime-deps/node_modules', import.meta.url);
-  const before = sha256(JSON.stringify(await hashRuntimePayload(fileURLToPath(source))));
+  const source = path.join(dependencies.directory, 'node_modules');
+  const before = sha256(JSON.stringify(await hashRuntimePayload(source)));
 
   await mkdir(scratch, { recursive: true });
 
@@ -157,10 +160,10 @@ test('изолированный Node 24 runtime работает через ELF
   assert.ok(webDescription.namespaces.some((entry: { ns: string }) => entry.ns === 'llm-deepseek'));
   await server.stop();
 
-  const after = await hashRuntimePayload(fileURLToPath(source));
+  const after = await hashRuntimePayload(source);
 
-  await writeFile(path.join(scratch, 'legacy-deps-before.sha256'), `${before}\n`);
-  await writeFile(path.join(scratch, 'legacy-deps-after.sha256'), `${sha256(JSON.stringify(after))}\n`);
+  await writeFile(path.join(scratch, 'prepared-deps-before.sha256'), `${before}\n`);
+  await writeFile(path.join(scratch, 'prepared-deps-after.sha256'), `${sha256(JSON.stringify(after))}\n`);
   assert.equal(sha256(JSON.stringify(after)), before);
   await writeFile(path.join(scratch, 'transport-proof.json'), `${JSON.stringify({
     hostNode: process.versions.node,
@@ -171,6 +174,6 @@ test('изолированный Node 24 runtime работает через ELF
     acpSettingsContract: initialized.agentCapabilities._meta['grigdesk.settings'].contract,
     acpSettings: acpDescription.writable,
     webSettings: webDescription.writable,
-    legacyDependenciesUnchanged: true,
+    preparedDependenciesUnchanged: true,
   }, null, 2)}\n`);
 });

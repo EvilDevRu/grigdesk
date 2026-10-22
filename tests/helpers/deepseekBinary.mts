@@ -16,7 +16,10 @@ import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { binaryPackageInputs } from '../../deepseek/scripts/binaryInputs.mts';
 import { deepSeekBuildInputs } from '../../deepseek/scripts/buildRuntime.mts';
 import { deepSeekPackagePaths } from '../../deepseek/scripts/paths.ts';
-import { readPreparedRuntimeDependencies } from '../../deepseek/scripts/prepareRuntimeDeps.mts';
+import {
+  readPreparedRuntimeDependencies,
+  type PreparedRuntimeDependencies,
+} from '../../deepseek/scripts/prepareRuntimeDeps.mts';
 
 const run = promisify(execFile);
 const repository = fileURLToPath(new URL('../..', import.meta.url));
@@ -131,13 +134,27 @@ export function deepSeekTestArtifactsRoot(): string {
 }
 
 /**
+ * Source-проверки и binary candidate читают один явно подготовленный prefix pinned Node.
+ * Общий verifier проверяет stamp и exact lock; helper не устанавливает зависимости.
+ */
+export async function testDeepSeekRuntimeDependencies(): Promise<
+  PreparedRuntimeDependencies & { cacheDir: string }
+> {
+  const root = deepSeekTestArtifactsRoot();
+  const cacheDir = process.env.GRIGDESK_DEEPSEEK_NODE_CACHE ?? path.join(root, 'node-cache');
+  const dependencies = await readPreparedRuntimeDependencies(cacheDir);
+
+  return { ...dependencies, cacheDir };
+}
+
+/**
  * Ключ включает собственный пакет и проверенные входы generation, без UI и ABI Node сервера.
  * Зависимости должны быть явно подготовлены; helper не запускает npm и не загружает архив.
  */
 async function candidateRoot(): Promise<{ directory: string; cache: string }> {
   const root = deepSeekTestArtifactsRoot();
-  const cache = process.env.GRIGDESK_DEEPSEEK_NODE_CACHE ?? path.join(root, 'node-cache');
-  const dependencies = await readPreparedRuntimeDependencies(cache);
+  const dependencies = await testDeepSeekRuntimeDependencies();
+  const cache = dependencies.cacheDir;
   const pinFile = path.join(repository, 'deepseek/build/node-runtime.json');
   const pin = JSON.parse(await fs.readFile(pinFile, 'utf8'));
 
