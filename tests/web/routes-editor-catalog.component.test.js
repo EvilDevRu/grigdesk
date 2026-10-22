@@ -14,6 +14,7 @@ const bootstrapScope = { kind: 'bootstrap' };
 
 const UI_STUB = `
 import { defineComponent, h } from 'vue';
+export { default as UiField } from './src/components/composites/UiField.vue';
 export const UiButton = defineComponent({ emits: ['click'],
   setup(_, { emit, attrs, slots }) { return () => h('button', { ...attrs,
     onClick: () => emit('click') }, slots.default?.()); } });

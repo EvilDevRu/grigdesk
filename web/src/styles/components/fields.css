@@ -183,6 +183,13 @@
   font-weight: 600;
 }
 
+.ui-field__heading {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
 .ui-field__required {
   color: var(--bad);
 }

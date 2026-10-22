@@ -1,5 +1,5 @@
 <template>
-  <UiField label="Имя" hint="Подсказка" :error="error" required>
+  <UiField label="Имя" hint="Подсказка" :help="help" :error="error" required>
     <UiInput v-model.trim="value" />
   </UiField>
 </template>
@@ -8,6 +8,6 @@
 import { ref } from 'vue';
 import { UiField, UiInput } from '../../../../../web/src/ui';
 
-defineProps<{ error?: string }>();
+defineProps<{ error?: string; help?: string }>();
 const value = ref('');
 </script>

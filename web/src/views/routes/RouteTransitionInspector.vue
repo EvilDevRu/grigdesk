@@ -1,18 +1,26 @@
 <template>
   <section class="route-transition-inspector">
-    <strong>Переходы: {{ node?.id || 'этап не найден' }}</strong>
+    <strong>Что делать после этапа</strong>
+    <p class="route-transition-help">
+      Для каждого результата выберите действие и следующий этап.
+      Изменения сохраняются автоматически в черновик.
+    </p>
     <template v-if="node && node.executor !== 'status'">
-      <UiButton v-if="(node.executor === 'agent' || node.executor === 'command') && !node.onFailure"
+      <UiButton data-context="workspace-form" v-if="(node.executor === 'agent' || node.executor === 'command') && !node.onFailure"
                 data-test="enable-failure-routes" @click="toggleFailureRoutes(true)">
-        Добавить ветки onFailure
+        Настроить действия при ошибках
       </UiButton>
-      <UiButton v-if="node.onFailure" data-test="disable-failure-routes"
-                @click="toggleFailureRoutes(false)">Убрать ветки onFailure</UiButton>
+      <UiButton data-context="workspace-form" v-if="node.onFailure" data-test="disable-failure-routes"
+                @click="toggleFailureRoutes(false)">Убрать отдельные действия при ошибках</UiButton>
       <fieldset v-for="group in groups" :key="group.name">
-        <legend>{{ group.name === 'on' ? 'Исходы' : 'Причины отказа' }}</legend>
+        <legend>{{ group.name === 'on' ? 'Результат этапа' : 'Причина ошибки' }}</legend>
         <div v-for="entry in group.entries" :key="entry.outcome" class="route-transition-row">
-          <span>{{ entry.outcome }}</span>
+          <span>
+            {{ outcomeNames[entry.outcome] ?? entry.outcome }}
+            <small v-if="outcomeNames[entry.outcome]" class="muted">{{ entry.outcome }}</small>
+          </span>
           <UiSelect :data-test="`action-${group.name}-${entry.outcome}`"
+                    :aria-label="`Действие: ${outcomeNames[entry.outcome] ?? entry.outcome}`"
                     :model-value="actionOf(entry.transition)"
                     @update:model-value="changeAction(group.name, entry.outcome, String($event ?? ''))">
             <option value="incomplete">Не выбрано</option>
@@ -23,6 +31,7 @@
           </UiSelect>
           <UiSelect v-if="actionOf(entry.transition) === 'next' || actionOf(entry.transition) === 'rewind'"
                     :data-test="`target-${group.name}-${entry.outcome}`"
+                    :aria-label="`Следующий этап: ${outcomeNames[entry.outcome] ?? entry.outcome}`"
                     :model-value="entry.transition?.next ?? entry.transition?.rewind ?? ''"
                     @update:model-value="changeTarget(group.name, entry.outcome,
                       actionOf(entry.transition), String($event ?? ''))">
@@ -33,11 +42,12 @@
           </UiSelect>
           <UiSelect v-if="actionOf(entry.transition) === 'stop'"
                     :data-test="`stop-kind-${group.name}-${entry.outcome}`"
+                    :aria-label="`Причина остановки: ${outcomeNames[entry.outcome] ?? entry.outcome}`"
                     :model-value="entry.transition?.stop ?? 'human'"
                     @update:model-value="changeStop(group.name, entry.outcome, String($event ?? ''))">
-            <option value="human">Человек</option>
-            <option value="failed">Ошибка</option>
-            <option value="done">Готово</option>
+            <option value="human">Ждать человека</option>
+            <option value="failed">Завершить с ошибкой</option>
+            <option value="done">Завершить успешно</option>
           </UiSelect>
           <span v-if="actionOf(entry.transition) === 'rewind'" class="muted">
             Сброс: {{ entry.transition?.reset?.join(', ') || 'после выбора цели' }}
@@ -46,7 +56,7 @@
             Маршруты: {{ entry.transition?.escalate?.routes.join(', ') || 'не выбраны' }}
           </span>
           <div v-if="actionOf(entry.transition) === 'escalate'" class="route-transition-choices">
-            <UiButton v-for="routeId in escalation?.allowedRoutes ?? []" :key="routeId"
+            <UiButton data-context="workspace-form" v-for="routeId in escalation?.allowedRoutes ?? []" :key="routeId"
                       :data-test="`escalate-route-${group.name}-${entry.outcome}-${routeId}`"
                       :aria-pressed="entry.transition?.escalate?.routes.includes(routeId) ?? false"
                       @click="toggleTransitionRoute(group.name, entry.outcome,
@@ -56,7 +66,7 @@
       </fieldset>
       <fieldset>
         <legend>Разрешённые маршруты для смены</legend>
-        <UiButton v-for="routeId in routeIds" :key="routeId"
+        <UiButton data-context="workspace-form" v-for="routeId in routeIds" :key="routeId"
                   :data-test="`allow-route-${routeId}`"
                   :aria-pressed="escalation?.allowedRoutes.includes(routeId) ?? false"
                   @click="toggleAllowedRoute(routeId)">{{ routeId }}</UiButton>
@@ -80,6 +90,7 @@ import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContrac
 import type { RouteCommandScope } from './routeCommands.ts';
 import { setEscalation, setFailureRoutes, setTransition } from './routeCommands.ts';
 import { UiButton, UiSelect } from '../../ui';
+import { outcomeNames } from './routeLabels.ts';
 
 const props = defineProps<{
   document: RouteDraft;
@@ -216,7 +227,43 @@ function toggleTransitionRoute(group: GroupName, outcome: string,
 </script>
 
 <style scoped>
-.route-transition-inspector fieldset { border: 1px solid var(--line); margin: 8px 0; }
-.route-transition-row { display: grid; grid-template-columns: minmax(90px, 1fr) repeat(2, minmax(130px, 1fr));
-  align-items: center; gap: 6px; margin: 6px 0; }
+.route-transition-inspector fieldset {
+  border: 1px solid var(--line);
+  margin: 8px 0;
+}
+
+.route-transition-row {
+  display: grid;
+  grid-template-columns: minmax(60px, 0.6fr) repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.route-transition-help {
+  margin: 8px 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.route-transition-row small {
+  display: block;
+}
+
+.route-transition-inspector {
+  min-width: 0;
+  container: route-transitions / inline-size;
+}
+
+@container route-transitions (max-width: 340px) {
+
+  .route-transition-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .route-transition-row > span:first-child {
+    grid-column: 1 / -1;
+  }
+}
 </style>

@@ -5,8 +5,10 @@
 // `prompts:steer`, а видимый ответ приходит событиями `assistant.delta`/`assistant.completed`.
 import { normalizeContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
 import type { ChatContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
+import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
+import { textOr, trimmedText } from '../../../../shared/lib/text.ts';
 
-import { createStepSink } from '../chat/streamSteps.ts';
+import { createStepSink, cut, cutMiddle, STEP_THINK_LIMIT } from '../chat/streamSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 import type {
   InTurnAssistantEvent,
@@ -157,6 +159,8 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
     let currentTextId = '';
     let stepNumber = 0;
     let turnNumber = '';
+    let thought = '';
+    let thoughtAt = 0;
     const writes = new Set<Promise<void>>();
     const outputByStep = new Map<string, number>();
 
@@ -175,6 +179,26 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
     };
     const emit = (step: ChatStep) => {
       stepSink.emit(step);
+    };
+
+    /**
+     * Выпускает непрерывное размышление перед следующим действием или выходом.
+     * Время первой дельты сохраняет его место перед уже принятым уточнением.
+     */
+    const flushThought = () => {
+      const text = thought.trim();
+      const at = thoughtAt;
+
+      thought = '';
+      thoughtAt = 0;
+
+      if (text) {
+        emit({
+          k: 'think',
+          text: cut(text, STEP_THINK_LIMIT),
+          at,
+        });
+      }
     };
 
     /**
@@ -236,6 +260,10 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
      * сервера, поэтому шаг и блок склеиваются по нему, а не по тексту.
      */
     function handleEvent(event: KimiRawEvent): void {
+      if (finished) {
+        return;
+      }
+
       const payload = event.payload || {};
       // Сервер шлёт дельты текста БЕЗ префикса `event.` (это поток агента), а события
       // сессии — с префиксом. Принимаем обе формы: протокол принадлежит серверу, и
@@ -252,12 +280,14 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
       }
 
       if (kind === 'turn.started') {
+        flushThought();
         turnNumber = String(payload.turnId || payload.turn_id || '');
 
         return;
       }
 
       if (kind === 'turn.step.started') {
+        flushThought();
         finishText(currentTextId);
         stepNumber += 1;
         currentTextId = `kimi-${turnNumber || 'turn'}-${stepNumber}`;
@@ -266,6 +296,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
       }
 
       if (kind === 'turn.step.completed') {
+        flushThought();
         finishText(currentTextId);
 
         const usage = (payload.usage || {}) as Record<string, unknown>;
@@ -288,7 +319,11 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
         const delta = String(payload.delta ?? '');
 
         if (delta) {
-          emit({ k: 'think', text: delta });
+          if (!thought) {
+            thoughtAt = Date.now();
+          }
+
+          thought = `${thought}${delta}`.slice(0, STEP_THINK_LIMIT * 2);
         }
 
         return;
@@ -342,6 +377,8 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
           return;
         }
 
+        flushThought();
+
         const text = `${drafts.get(id) || ''}${delta}`;
 
         currentTextId = id;
@@ -369,17 +406,24 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
           return;
         }
 
+        flushThought();
         finishText(id, text);
 
         return;
       }
 
       if (kind === 'tool.call.started') {
+        flushThought();
+
         const id = String(payload.toolCallId || payload.tool_call_id || '');
-        const name = String(payload.name || payload.tool_name || 'Инструмент');
-        const display = (payload.display || {}) as Record<string, unknown>;
-        const args = (payload.args || {}) as Record<string, unknown>;
-        const file = String(display.path || args.path || args.file_path || '');
+        const name = trimmedText(payload.name) || trimmedText(payload.tool_name) || 'Инструмент';
+        const display = recordOrEmpty(payload.display);
+        const args = recordOrEmpty(payload.args);
+        const file = textOr(display.path) || textOr(args.path) || textOr(args.file_path);
+        const command = trimmedText(display.command) || trimmedText(args.command)
+          || trimmedText(args.cmd) || trimmedText(args.script);
+        const title = trimmedText(display.description) || command.split('\n')[0] || trimmedText(file)
+          || trimmedText(args.pattern) || trimmedText(args.query) || trimmedText(args.regex) || name;
         const operation = String(display.operation || '');
         const changed = display.kind === 'diff' || operation === 'write' || operation === 'edit';
         const before = String(display.before || '');
@@ -388,10 +432,11 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
         emit({
           k: 'tool',
           id,
-          tool: name,
-          kind: display.kind === 'command' ? 'execute'
-            : changed ? 'edit' : display.kind === 'search' ? 'search' : 'read',
-          text: String(display.description || display.command || file || name),
+          name,
+          title: cut(title, 200),
+          ...(command ? { command: cutMiddle(command), lang: 'bash' } : {}),
+          sub: file || textOr(args.glob),
+          preview: Object.keys(args).length ? cut(JSON.stringify(args), 600) : '',
           ...(changed && file ? {
             files: [file],
             changes: [{
@@ -406,6 +451,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
       }
 
       if (kind === 'tool.result') {
+        flushThought();
         emit({
           k: 'res',
           id: String(payload.toolCallId || payload.tool_call_id || ''),
@@ -417,6 +463,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
       }
 
       if (kind === 'approval.requested' || kind === 'question.requested') {
+        flushThought();
         // Пока человек не ответил, уточнение не должно выглядеть как ответ на спрос.
         awaitingAnswer = true;
         options.onInTurnAvailability?.({ available: false, reason: 'awaiting_answer' });
@@ -453,6 +500,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
       }
 
       if (kind === 'approval.resolved' || kind === 'question.answered' || kind === 'question.dismissed') {
+        flushThought();
         awaitingAnswer = false;
         options.onInTurnAvailability?.({ available: true });
 
@@ -460,6 +508,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
       }
 
       if (kind === 'turn.ended') {
+        flushThought();
         finishText(currentTextId);
         options.onInTurnAvailability?.({ available: false, reason: 'not_ready' });
 
@@ -476,6 +525,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
       }
 
       if (kind === 'prompt.aborted' || kind === 'turn.step.interrupted') {
+        flushThought();
         finished = true;
         failure = Object.assign(new Error('Ход остановлен.'), { stopped: true });
         notify();
@@ -506,6 +556,10 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
           };
         }
 
+        // Уточнение уже принято чатом: кадры во время HTTP-доставки идут после него.
+        // Ожидание ответа транспорта склеило бы их с мыслью до уточнения.
+        flushThought();
+
         return server.client.deliverInTurn(session.id, {
           text,
           userMessageId: messageId,
@@ -522,6 +576,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
      * Остановка серверного процесса выполняется в общем finally.
      */
     const onAbort = () => {
+      flushThought();
       finished = true;
       failure = Object.assign(new Error('Ход остановлен.'), { stopped: true });
       notify();
@@ -575,6 +630,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
         steps: stepSink.steps,
       };
     } finally {
+      flushThought();
       options.signal?.removeEventListener('abort', onAbort);
       stream.close();
     }

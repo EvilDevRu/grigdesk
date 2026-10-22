@@ -96,6 +96,7 @@ import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContrac
 import type { RouteSimulationObservation, RouteSimulationState } from '../../stores/routes.ts';
 import { UiButton, UiCheckbox, UiNumberInput, UiSelect } from '../../ui';
 import type { UiNumberValue } from '../../ui';
+import { outcomeNames } from './routeLabels.ts';
 
 const props = defineProps<{
   document: RouteDraft;
@@ -115,15 +116,7 @@ const loopMaxRounds = ref<UiNumberValue>(ROUTES_LOOP_DEFAULT_MAX_ROUNDS);
 const outcome = ref('done');
 const failureOwner = ref('');
 const selectedRouteId = ref('');
-const outcomeNames: Record<string, string> = {
-  done: 'Выполнено',
-  skipped: 'Пропущено',
-  failed: 'Ошибка',
-  exhausted: 'Повторы исчерпаны',
-  approved: 'Одобрено',
-  rejected: 'Отклонено',
-  noResult: 'Нет результата',
-};
+
 const ownerNames: Record<string, string> = {
   build: 'Сборка',
   tests: 'Тесты',

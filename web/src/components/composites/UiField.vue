@@ -3,7 +3,21 @@
     class="ui-field"
     :class="{ 'is-invalid': invalid, 'is-required': required }"
   >
-    <label v-if="label" class="ui-field__label" :for="controlId">
+    <div v-if="label && help" class="ui-field__heading">
+      <label class="ui-field__label" :for="controlId">
+        {{ label }}<span v-if="required" class="ui-field__required" aria-hidden="true"> *</span>
+      </label>
+      <UiTooltip :text="help">
+        <UiIconButton :label="`${label}: ${t('core.tooltip')}`" data-context="field-help">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+               stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M9.5 8.5a2.5 2.5 0 0 1 5 0c0 1.8-2.5 2-2.5 4M12 16h.01" />
+          </svg>
+        </UiIconButton>
+      </UiTooltip>
+    </div>
+    <label v-else-if="label" class="ui-field__label" :for="controlId">
       {{ label
       }}<span v-if="required" class="ui-field__required" aria-hidden="true">
         *</span
@@ -20,10 +34,14 @@
 <script setup lang="ts">
 import { computed, toRef, useId } from 'vue';
 import { provideUiFieldContext } from '../../composables/useUiFieldContext';
+import { t } from '../../services/locale.ts';
+import UiIconButton from '../primitives/UiIconButton.vue';
+import UiTooltip from '../overlays/UiTooltip.vue';
 
 const props = withDefaults(
   defineProps<{
     label?: string;
+    help?: string;
     hint?: string;
     error?: string;
     required?: boolean;
@@ -31,6 +49,7 @@ const props = withDefaults(
   }>(),
   {
     label: undefined,
+    help: undefined,
     hint: undefined,
     error: undefined,
     required: false,

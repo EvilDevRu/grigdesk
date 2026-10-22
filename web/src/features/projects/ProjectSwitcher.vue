@@ -1,6 +1,14 @@
 <template>
   <div class="project-switcher">
-    <UiControlGroup label="Проект">
+    <UiControlGroup v-if="compact" label="Проект" data-context="workspace-project">
+      <UiSelect :model-value="model" aria-label="Проект" data-context="workspace-project"
+                @update:model-value="model = String($event ?? '')">
+        <option v-for="project in profiles" :key="project" :value="project">{{ project }}</option>
+      </UiSelect>
+      <UiIconButton label="Новый проект" v-tooltip="'Новый проект'"
+                    data-context="workspace-form" tone="accent" @click="emit('create')">+</UiIconButton>
+    </UiControlGroup>
+    <UiControlGroup v-else label="Проект">
       <UiButton
         v-for="project in profiles"
         :key="project"
@@ -31,9 +39,10 @@
 // Заведение проекта — не его дело: форма, проверка идентификатора и запись живут
 // в разделе «Проекты», и второй вход создавал бы вторую запись в том же реестре.
 import type { PropType } from 'vue';
-import { UiButton, UiControlGroup, UiIconButton, vTooltip } from '../../ui';
+import { UiButton, UiControlGroup, UiIconButton, UiSelect, vTooltip } from '../../ui';
 
 defineProps({
+  compact: Boolean,
   profiles: {
     type: Array as PropType<string[]>,
     required: true,

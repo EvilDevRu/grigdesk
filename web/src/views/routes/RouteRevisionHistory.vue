@@ -1,6 +1,5 @@
 <template>
   <section class="route-revision-history revs">
-    <h3>Ревизии каталога</h3>
     <div v-if="healthy.length > 1" class="route-revision-history__compare">
       <label>От
         <UiSelect data-test="revision-from" :model-value="fromHash"
@@ -16,7 +15,7 @@
                   :value="revision.catalogHash">{{ revision.catalogHash.slice(0, 12) }}</option>
         </UiSelect>
       </label>
-      <UiButton data-test="compare-revisions" :disabled="busy || !fromHash || !toHash
+      <UiButton data-context="workspace-form" variant="ghost" data-test="compare-revisions" :disabled="busy || !fromHash || !toHash
                 || fromHash === toHash" @click="$emit('compare', fromHash, toHash)">
         Сравнить ревизии
       </UiButton>
@@ -32,13 +31,13 @@
         Повреждена: {{ revision.integrity }}
       </span>
       <div class="route-revision-history__actions">
-        <UiButton :data-test="`view-${revision.catalogHash}`"
+        <UiButton data-context="workspace-form" variant="ghost" :data-test="`view-${revision.catalogHash}`"
                   :disabled="busy || revision.integrity !== 'ok'"
                   @click="$emit('view', revision.catalogHash)">Открыть</UiButton>
-        <UiButton :data-test="`create-${revision.catalogHash}`"
+        <UiButton data-context="workspace-form" variant="ghost" :data-test="`create-${revision.catalogHash}`"
                   :disabled="busy || revision.integrity !== 'ok'"
                   @click="$emit('create', revision.catalogHash)">Создать черновик</UiButton>
-        <UiButton v-if="!revision.isCurrent" :data-test="`rollback-${revision.catalogHash}`"
+        <UiButton data-context="workspace-form" variant="ghost" v-if="!revision.isCurrent" :data-test="`rollback-${revision.catalogHash}`"
                   :disabled="busy || revision.integrity !== 'ok'"
                   @click="$emit('rollback', revision)">Откатить</UiButton>
       </div>
@@ -83,15 +82,56 @@ function formatDate(value: string): string {
 </script>
 
 <style scoped>
-.route-revision-history { display: grid; gap: 8px; }
+.route-revision-history {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+
 /* Кнопки не сжимаются: «Открыть» и «Откатить», урезанные до «От…», неразличимы, а откат
    меняет весь каталог. На узкой панели действия уходят на следующую строку. */
-.route-revision-history__row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
-.route-revision-history__routes { flex: 1 1 220px; min-width: 0; }
-.route-revision-history__actions { display: flex; flex: none; gap: 8px; margin-left: auto; }
-.route-revision-history__compare { display: flex; align-items: end; gap: 10px; }
-.route-revision-history__compare label { display: grid; gap: 4px; }
-.mono { font-family: var(--font-mono); }
-.bad { color: var(--bad); }
-.muted { color: var(--ink-mid); }
+
+.route-revision-history__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.route-revision-history__routes {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.route-revision-history__actions {
+  display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.route-revision-history__compare {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+}
+
+.route-revision-history__compare label {
+  display: grid;
+  gap: 4px;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.bad {
+  color: var(--bad);
+}
+
+.muted {
+  color: var(--ink-mid);
+}
 </style>

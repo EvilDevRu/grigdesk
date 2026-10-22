@@ -1,27 +1,33 @@
 <template>
-  <section class="route-catalog">
+  <section class="route-catalog" :data-mode="mode">
+    <template v-if="mode !== 'manage'">
     <div class="route-catalog__title">Черновики</div>
     <p v-if="!drafts.length" class="muted">Черновиков пока нет</p>
-    <UiSelectableRow v-for="draft in drafts" :key="draft.id"
+    <UiSelectableRow v-for="draft in drafts" :key="draft.id" data-context="workspace-catalog"
                      :selected="draft.id === selectedDraftId"
                      @select="$emit('select', draft.id)">
       <span>{{ draft.title }}</span>
       <small>r{{ draft.revision }} · {{ draft.state === 'editing' ? 'редактируется' : 'закрыт' }}</small>
     </UiSelectableRow>
-    <div v-if="document" class="route-catalog__editor">
+    </template>
+    <div v-if="document && mode !== 'drafts'" class="route-catalog__editor">
+      <details class="route-catalog__operation">
+        <summary>Добавить или скопировать маршрут</summary>
+        <div class="route-catalog__fields">
       <strong>Состав каталога</strong>
-      <UiButton data-test="catalog-bootstrap" @click="emit('select-bootstrap')">
+      <UiButton data-context="workspace-form" variant="ghost" v-if="mode === 'all'" data-test="catalog-bootstrap" @click="emit('select-bootstrap')">
         Начальная разведка
       </UiButton>
-      <label>ID нового маршрута
+      <UiField label="ID нового маршрута"
+               help="Уникальное техническое имя маршрута, например review. Оно используется в ссылках и JSON. Понятное человеку название указывается ниже.">
         <UiInput data-test="route-new-id" :model-value="newId"
                  @update:model-value="newId = String($event ?? '')" />
-      </label>
+      </UiField>
       <label>Название
         <UiInput data-test="route-new-title" :model-value="newTitle"
                  @update:model-value="newTitle = String($event ?? '')" />
       </label>
-      <UiButton data-test="route-create" @click="create">Создать маршрут</UiButton>
+      <UiButton data-context="workspace-form" variant="ghost" data-test="route-create" @click="create">Создать маршрут</UiButton>
       <label>Скопировать маршрут
         <UiSelect data-test="route-copy-source" :model-value="copySource"
                   @update:model-value="copySource = String($event ?? '')">
@@ -33,46 +39,52 @@
         <UiInput data-test="route-copy-id" :model-value="copyId"
                  @update:model-value="copyId = String($event ?? '')" />
       </label>
-      <UiButton data-test="route-copy" :disabled="!copySource" @click="copyRoute">
+      <UiButton data-context="workspace-form" variant="ghost" data-test="route-copy" :disabled="!copySource" @click="copyRoute">
         Копировать маршрут
       </UiButton>
+        </div>
+      </details>
       <template v-if="selectedBundle">
         <strong>Маршрут {{ selectedRouteId }}</strong>
-        <label>Название маршрута
+        <UiField label="Название маршрута"
+               help="Название помогает отличать маршруты в каталоге. Например: «Разработка функции» или «Исправление ошибки».">
           <UiInput data-test="route-title" :model-value="routeTitle"
                    @update:model-value="routeTitle = String($event ?? '')" />
-        </label>
-        <label>Начальная разведка перед маршрутом
+        </UiField>
+        <UiField label="Начальная разведка перед маршрутом"
+               help="Разведка предварительно изучает задачу и помогает выбрать маршрут. «Обязательна» запускает её перед этим маршрутом, «Пропустить» сразу начинает маршрут, «По умолчанию» оставляет общее правило.">
           <UiSelect data-test="route-bootstrap-mode" :model-value="bootstrapMode"
                     @update:model-value="bootstrapMode = String($event ?? '') as BootstrapMode">
             <option value="">По умолчанию</option>
             <option value="required">Обязательна</option>
             <option value="skip">Пропустить</option>
           </UiSelect>
-        </label>
-        <label>Начальный этап
+        </UiField>
+        <UiField label="Начальный этап"
+               help="Этап, с которого начинается выполнение маршрута. Например, «Разработка». Дальнейший путь задают переходы между этапами.">
           <UiSelect data-test="route-entry" :model-value="entryId"
                     @update:model-value="entryId = String($event ?? '')">
             <option value="">Не выбран</option>
             <option v-for="node in selectedBundle.route.nodes.filter((item) => item.executor !== 'status')"
                     :key="node.id" :value="node.id">{{ node.label || node.id }}</option>
           </UiSelect>
-        </label>
-        <UiButton data-test="route-save-properties" @click="saveProperties">Сохранить поля маршрута</UiButton>
-        <label>Новый ID маршрута
+        </UiField>
+        <UiButton data-context="workspace-form" variant="ghost" data-test="route-save-properties" @click="saveProperties">Сохранить поля маршрута</UiButton>
+        <UiField label="Новый ID маршрута"
+               help="Техническое имя маршрута в ссылках и JSON. При переименовании редактор проверяет связанные ссылки. Для изменения видимого названия используйте «Название маршрута».">
           <UiInput data-test="route-rename-id" :model-value="renameId"
                    @update:model-value="renameId = String($event ?? '')" />
-        </label>
-        <UiButton data-test="route-rename" @click="rename">Переименовать ID</UiButton>
-        <UiButton data-test="route-remove" @click="previewRemove">Удалить маршрут</UiButton>
+        </UiField>
+        <UiButton data-context="workspace-form" variant="ghost" data-test="route-rename" @click="rename">Переименовать ID</UiButton>
+        <UiButton data-context="workspace-form" variant="ghost" data-test="route-remove" @click="previewRemove">Удалить маршрут</UiButton>
         <div v-if="removePreview" data-test="route-remove-preview" class="route-catalog__preview">
           <strong>Удаление «{{ removePreview.routeId }}»</strong>
           <p>Ссылки останутся проблемами черновика до явного исправления.</p>
           <ul><li v-for="reference in removePreview.references" :key="reference.path">
             {{ reference.path }}
           </li></ul>
-          <UiButton data-test="route-confirm-remove" @click="remove">Удалить с показанными ссылками</UiButton>
-          <UiButton data-test="route-cancel-remove" @click="removePreview = null">Отмена</UiButton>
+          <UiButton data-context="workspace-form" variant="ghost" data-test="route-confirm-remove" @click="remove">Удалить с показанными ссылками</UiButton>
+          <UiButton data-context="workspace-form" variant="ghost" data-test="route-cancel-remove" @click="removePreview = null">Отмена</UiButton>
         </div>
       </template>
       <details v-if="routeIds.length > 1">
@@ -92,13 +104,13 @@
           </UiSelect>
         </label>
         <div class="route-catalog__nodes">
-          <UiButton v-for="node in sourceNodes" :key="node.id"
+          <UiButton data-context="workspace-form" variant="ghost" v-for="node in sourceNodes" :key="node.id"
                     :data-test="`route-node-copy-${node.id}`"
                     :pressed="copyNodeIds.includes(node.id)" @click="toggleNode(node.id)">
             {{ node.label || node.id }}
           </UiButton>
         </div>
-        <UiButton data-test="route-copy-nodes" :disabled="!copyNodeIds.length || !nodeTarget"
+        <UiButton data-context="workspace-form" variant="ghost" data-test="route-copy-nodes" :disabled="!copyNodeIds.length || !nodeTarget"
                   @click="copyNodes">Копировать выбранные этапы</UiButton>
       </details>
       <ul v-if="issues.length" data-test="route-catalog-issues" role="alert">
@@ -114,16 +126,18 @@ import type { RouteDraft, RouteDraftSummary } from '../../../../shared/pipeline/
 import type { CatalogCommandIssue, CatalogCommandResult } from './catalogCommands.ts';
 import { createRoute, cloneRoute, renameRoute, removeRoute, inspectRouteReferences,
   copyNodesFromRoute, setRouteProperties } from './catalogCommands.ts';
-import { UiButton, UiInput, UiSelect, UiSelectableRow } from '../../ui.ts';
+import { UiButton, UiField, UiInput, UiSelect, UiSelectableRow } from '../../ui.ts';
 
 type BootstrapMode = '' | 'required' | 'skip';
 
 const props = defineProps<{
+  mode?: 'all' | 'drafts' | 'manage';
   drafts: RouteDraftSummary[];
   selectedDraftId: string | null;
   document?: RouteDraft | null;
   selectedRouteId?: string
 }>();
+const mode = computed(() => props.mode ?? 'all');
 const emit = defineEmits<{
   select: [id: string];
   change: [document: RouteDraft];
@@ -321,15 +335,82 @@ watch(() => [props.selectedRouteId, props.document?.routes[props.selectedRouteId
 </script>
 
 <style scoped>
-.route-catalog { display: grid; gap: 5px; padding: 10px 4px; border-top: 1px solid var(--line); }
-.route-catalog__title { font-weight: 700; font-size: 13px; }
-small { display: block; color: var(--ink-mid); }
-.route-catalog__editor { display: grid; gap: 8px; padding-top: 10px;
-  border-top: 1px solid var(--line); min-width: 0; }
-.route-catalog__editor label { display: grid; gap: 3px; font-size: 12px; }
-.route-catalog__editor details { min-width: 0; }
-.route-catalog__editor details label { margin-top: 8px; }
-.route-catalog__nodes { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
-.route-catalog__preview { border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
-.route-catalog__preview p { margin: 6px 0; }
+.route-catalog {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+
+.route-catalog[data-mode='manage'] {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.route-catalog__title {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--ink-mid);
+  padding: 0 6px 4px;
+}
+
+small {
+  display: block;
+  color: var(--ink-mid);
+}
+
+.route-catalog__editor {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-width: 620px;
+}
+
+.route-catalog__fields {
+  display: grid;
+  gap: 8px;
+  padding-block: 8px;
+}
+
+.route-catalog__operation summary {
+  cursor: pointer;
+  color: var(--ink-mid);
+  font-size: 12px;
+  min-height: var(--toolbar-control-h);
+  padding-block: 4px;
+}
+
+.route-catalog__editor label {
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+}
+
+.route-catalog__editor details {
+  min-width: 0;
+}
+
+.route-catalog__editor details label {
+  margin-top: 8px;
+}
+
+.route-catalog__nodes {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+.route-catalog__preview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+
+.route-catalog__preview p {
+  margin: 6px 0;
+}
 </style>

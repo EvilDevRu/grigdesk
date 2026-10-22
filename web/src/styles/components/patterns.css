@@ -470,6 +470,34 @@
   text-align: left;
 }
 
+/* Компактный каталог использует ту же плоскую строку, что рабочие списки.
+   Контекст применяется к составной строке без локального skin у потребителя. */
+.ui-selectable-row[data-context='workspace-catalog'] {
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+}
+
+.ui-selectable-row[data-context='workspace-catalog'] .ui-selectable-row__primary {
+  min-height: var(--control-height);
+  padding: 7px 10px;
+  font-size: var(--workspace-text-size);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.ui-selectable-row[data-context='workspace-catalog'].is-selected {
+  background: color-mix(in srgb, var(--accent) 13%, var(--sidebar));
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.ui-selectable-row[data-context='workspace-catalog']:hover:not(.is-disabled) {
+  background: var(--surface-2);
+}
+
+.ui-control-group[data-context='workspace-project'] { flex-wrap: nowrap; align-items: center; }
+.ui-control-group[data-context='workspace-project'] > .ui-select-wrap { flex: 1; width: 0; min-width: 0; }
+
 .ui-selectable-row__actions {
   display: flex;
   flex: none;

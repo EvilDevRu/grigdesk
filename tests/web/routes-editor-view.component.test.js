@@ -8,6 +8,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 const VIEW = webFile('src/views/RoutesView.vue');
 const UI_STUB = `
 import { defineComponent, h } from 'vue';
+export { default as UiIconButton } from './src/components/primitives/UiIconButton.vue';
 export const UiButton = defineComponent({
   props: ['disabled', 'loading'], emits: ['click'],
   setup(props, { slots, emit }) {
@@ -21,6 +22,7 @@ export const UiSelectableRow = defineComponent({
     }, slots.default?.());
   },
 });
+export { default as UiPaneHeader } from './src/components/composites/UiPaneHeader.vue';
 export { default as UiTabs } from './src/components/composites/UiTabs.vue';
 export { default as UiTab } from './src/components/composites/UiTab.vue';
 export const UiSpinner = defineComponent({ setup: () => () => h('span', '…') });
@@ -259,7 +261,7 @@ test('RE-E2-02: создание из current передаёт точный hash
     const { wrapper, calls, route, draft, flushPromises } = await fixture(t,
       { currentCatalogHash: catalogHash });
     const create = wrapper.findAll('button').find((button) =>
-      button.text().includes('Создать черновик из current'));
+      button.attributes('aria-label') === 'Создать черновик из current');
     assert.ok(create);
     await create.trigger('click');
     await flushPromises();
@@ -279,7 +281,7 @@ test('RE-E2-06: создание ждёт начальной загрузки, �
     const { wrapper, calls, route, draft, flushPromises } = await fixture(t,
       { currentCatalogHash: 'a'.repeat(64), editorGate });
     const create = () => wrapper.findAll('button').find((button) =>
-      button.text().includes('Создать черновик из current'));
+      button.attributes('aria-label') === 'Создать черновик из current');
 
     assert.equal(create().attributes('disabled'), '');
     await create().trigger('click');
@@ -301,7 +303,7 @@ test('RE-E2-03: без current создаётся пустой draft с объя
     const { wrapper, calls, route, flushPromises } = await fixture(t,
       { createResponse: empty });
     const create = wrapper.findAll('button').find((button) =>
-      button.text().trim() === 'Создать черновик');
+      button.attributes('aria-label') === 'Создать черновик');
     assert.ok(create);
     await create.trigger('click');
     await flushPromises();
@@ -367,7 +369,8 @@ test('RE-E6-06: опубликованный catalog показывает сос
     query: { catalog: current, route: 'quick' }, currentCatalogHash: current,
     revisions, catalogInput: makeCatalogInput(),
   });
-  assert.match(wrapper.text(), /Опубликованный каталог/);
+
+  assert.match(wrapper.text(), /Опубликован/);
   assert.match(wrapper.text(), /Создай проверяемый результат/);
   assert.equal(wrapper.find('.revs').exists(), true);
   const rollback = wrapper.findAll('button').find((button) => button.text().trim() === 'Откатить');
@@ -415,7 +418,7 @@ test('RE-G2-01: устаревшее основание открывает previ
       rebasePreview,
     });
     const button = wrapper.findAll('button').find((item) =>
-      item.text().trim() === 'Перенести на current');
+      item.text().trim() === 'Обновить основу черновика');
     assert.ok(button);
     await button.trigger('click');
     await flushPromises();

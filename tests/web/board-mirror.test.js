@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/p
 import { api } from '../../web/src/shared/apiClient.ts';
 import { useBoardStore } from '../../web/src/stores/board.ts';
 import { useTasksStore } from '../../web/src/stores/tasks.ts';
+import { liveTimerSec } from '../../web/src/shared/format.ts';
 
 test('BM-01: окно карточки просит снимок, а после своего действия читает доску само', async (t) => {
   let dashboards = 0;
@@ -88,4 +89,84 @@ test('BM-02: своё действие во время ожидания сним
   await useTasksStore().timer('42', 'start');
   assert.equal(dashboards, 1);
   assert.equal(board.data.tasks[0].timerRunning, true);
+});
+
+test('BM-03: HTTP-снимок принимает числовой Unix-старт таймера во всех списках', async (t) => {
+  setActivePinia(createPinia());
+
+  const startedAt = 1800000000;
+  const lists = ['tasks', 'toReview', 'created', 'accomplice', 'auditor'];
+  const dashboard = Object.fromEntries(lists.map((key) => [key, [
+    {
+      id: 42,
+      timerRunning: true,
+      timerElapsed: 0,
+      timerStartedAt: startedAt,
+    },
+    {
+      id: 43,
+      timerRunning: true,
+      timerElapsed: 0,
+      timerStartedAt: String(startedAt),
+    },
+    {
+      id: 44,
+      timerRunning: false,
+      timerElapsed: 30,
+      timerStartedAt: null,
+    },
+  ]]));
+
+  t.mock.method(api, 'get', async (path) => {
+    if (path === '/api/b24/task-seen') {
+      return {
+        scope: 'fixture',
+        revision: 1,
+        initialized: true,
+        taskIds: [],
+      };
+    }
+
+    assert.equal(path, '/api/b24/dashboard');
+
+    return dashboard;
+  });
+
+  const board = useBoardStore();
+
+  await board.load(true);
+  assert.equal(board.error, null);
+  assert.deepEqual(board.data, dashboard);
+
+  for (const key of lists) {
+    assert.equal(liveTimerSec(board.data[key][0], (startedAt + 90) * 1000), 90);
+    assert.equal(liveTimerSec(board.data[key][1], (startedAt + 90) * 1000), 90);
+    assert.equal(liveTimerSec(board.data[key][2], (startedAt + 90) * 1000), 30);
+  }
+});
+
+test('BM-04: зеркало принимает Unix-старт и сохраняет данные при повреждённом таймере', () => {
+  setActivePinia(createPinia());
+
+  const board = useBoardStore();
+  const lists = ['tasks', 'toReview', 'created', 'accomplice', 'auditor'];
+  const dashboard = Object.fromEntries(lists.map((key) => [key, [
+    {
+      id: 42,
+      timerRunning: true,
+      timerStartedAt: 1800000000,
+    },
+  ]]));
+
+  board.applySnapshot(dashboard, 2000);
+  assert.deepEqual(board.data, dashboard);
+  assert.equal(board.readAt, 2000);
+
+  for (const key of lists) {
+    for (const timerStartedAt of [{ seconds: 1800000000 }, [], true, NaN, Infinity]) {
+      board.applySnapshot({ [key]: [{ id: 42, timerStartedAt }] }, 3000);
+      assert.deepEqual(board.data, dashboard);
+      assert.equal(board.readAt, 2000);
+    }
+  }
 });

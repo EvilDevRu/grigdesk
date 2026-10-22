@@ -22,5 +22,6 @@
 
 ## Грабли
 
+- [Проверка снимка доски принимает числовой Unix-старт таймера](board-snapshot-timer.md)
 - [Таймер задачи: timer_elapsed из B24 всегда 0 — считать от timer_started_at](task-timer-calculation.md)
 - [B24Client НЕ потокобезопасен — все вызовы через очередь _run](client-request-queue.md)

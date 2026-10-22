@@ -11,6 +11,7 @@
 ## Грабли
 
 - [Source-фикстуры с установленным ELF и trusted файлы legacy /gate](source-runtime-fixtures.md)
+- [Подготовленные dependencies source-проверок GLM и SEA без legacy prefix](source-runtime-dependencies.md)
 - [Smoke GLM проверяет admission выбранного выпуска без внешней модели](glm-release-admission-fixture.md)
 
 - [Родитель временной фикстуры в артефактах создаётся самим тестом](artifact-fixture-parent.md)
