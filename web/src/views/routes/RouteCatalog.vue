@@ -1,7 +1,7 @@
 <template>
   <section class="route-catalog" :data-mode="mode">
     <template v-if="mode !== 'manage'">
-    <div class="route-catalog__title">Черновики</div>
+    <h2 class="route-catalog__title">Черновики</h2>
     <p v-if="!drafts.length" class="muted">Черновиков пока нет</p>
     <UiSelectableRow v-for="draft in drafts" :key="draft.id" data-context="workspace-catalog"
                      :selected="draft.id === selectedDraftId"
@@ -11,37 +11,37 @@
     </UiSelectableRow>
     </template>
     <div v-if="document && mode !== 'drafts'" class="route-catalog__editor">
-      <details class="route-catalog__operation">
+      <details class="route-catalog__operation ui-workspace-disclosure">
         <summary>Добавить или скопировать маршрут</summary>
-        <div class="route-catalog__fields">
-      <strong>Состав каталога</strong>
-      <UiButton data-context="workspace-form" variant="ghost" v-if="mode === 'all'" data-test="catalog-bootstrap" @click="emit('select-bootstrap')">
-        Начальная разведка
-      </UiButton>
-      <UiField label="ID нового маршрута"
-               help="Уникальное техническое имя маршрута, например review. Оно используется в ссылках и JSON. Понятное человеку название указывается ниже.">
-        <UiInput data-test="route-new-id" :model-value="newId"
-                 @update:model-value="newId = String($event ?? '')" />
-      </UiField>
-      <label>Название
-        <UiInput data-test="route-new-title" :model-value="newTitle"
-                 @update:model-value="newTitle = String($event ?? '')" />
-      </label>
-      <UiButton data-context="workspace-form" variant="ghost" data-test="route-create" @click="create">Создать маршрут</UiButton>
-      <label>Скопировать маршрут
-        <UiSelect data-test="route-copy-source" :model-value="copySource"
-                  @update:model-value="copySource = String($event ?? '')">
-          <option value="">Выберите маршрут</option>
-          <option v-for="id in routeIds" :key="id" :value="id">{{ id }}</option>
-        </UiSelect>
-      </label>
-      <label>ID копии
-        <UiInput data-test="route-copy-id" :model-value="copyId"
-                 @update:model-value="copyId = String($event ?? '')" />
-      </label>
-      <UiButton data-context="workspace-form" variant="ghost" data-test="route-copy" :disabled="!copySource" @click="copyRoute">
-        Копировать маршрут
-      </UiButton>
+        <div class="route-catalog__fields ui-workspace-section__body">
+          <strong>Состав каталога</strong>
+          <UiButton data-context="workspace-form" variant="ghost" v-if="mode === 'all'" data-test="catalog-bootstrap" @click="emit('select-bootstrap')">
+            Начальная разведка
+          </UiButton>
+          <UiField label="ID нового маршрута"
+                   help="Уникальное техническое имя маршрута, например review. Оно используется в ссылках и JSON. Понятное человеку название указывается ниже.">
+            <UiInput data-test="route-new-id" :model-value="newId"
+                     @update:model-value="newId = String($event ?? '')" />
+          </UiField>
+          <label>Название
+            <UiInput data-test="route-new-title" :model-value="newTitle"
+                     @update:model-value="newTitle = String($event ?? '')" />
+          </label>
+          <UiButton data-context="workspace-form" variant="ghost" data-test="route-create" @click="create">Создать маршрут</UiButton>
+          <label>Скопировать маршрут
+            <UiSelect data-test="route-copy-source" :model-value="copySource"
+                      @update:model-value="copySource = String($event ?? '')">
+              <option value="">Выберите маршрут</option>
+              <option v-for="id in routeIds" :key="id" :value="id">{{ id }}</option>
+            </UiSelect>
+          </label>
+          <label>ID копии
+            <UiInput data-test="route-copy-id" :model-value="copyId"
+                     @update:model-value="copyId = String($event ?? '')" />
+          </label>
+          <UiButton data-context="workspace-form" variant="ghost" data-test="route-copy" :disabled="!copySource" @click="copyRoute">
+            Копировать маршрут
+          </UiButton>
         </div>
       </details>
       <template v-if="selectedBundle">
@@ -87,31 +87,33 @@
           <UiButton data-context="workspace-form" variant="ghost" data-test="route-cancel-remove" @click="removePreview = null">Отмена</UiButton>
         </div>
       </template>
-      <details v-if="routeIds.length > 1">
+      <details v-if="routeIds.length > 1" class="ui-workspace-disclosure">
         <summary>Копировать этапы из другого маршрута</summary>
-        <label>Источник
-          <UiSelect data-test="route-node-source" :model-value="nodeSource"
-                    @update:model-value="changeNodeSource(String($event ?? ''))">
-            <option value="">Выберите маршрут</option>
-            <option v-for="id in routeIds" :key="id" :value="id">{{ id }}</option>
-          </UiSelect>
-        </label>
-        <label>Цель
-          <UiSelect data-test="route-node-target" :model-value="nodeTarget"
-                    @update:model-value="nodeTarget = String($event ?? '')">
-            <option value="">Выберите маршрут</option>
-            <option v-for="id in routeIds" :key="id" :value="id">{{ id }}</option>
-          </UiSelect>
-        </label>
-        <div class="route-catalog__nodes">
-          <UiButton data-context="workspace-form" variant="ghost" v-for="node in sourceNodes" :key="node.id"
-                    :data-test="`route-node-copy-${node.id}`"
-                    :pressed="copyNodeIds.includes(node.id)" @click="toggleNode(node.id)">
-            {{ node.label || node.id }}
-          </UiButton>
+        <div class="ui-workspace-section__body">
+          <label>Источник
+            <UiSelect data-test="route-node-source" :model-value="nodeSource"
+                      @update:model-value="changeNodeSource(String($event ?? ''))">
+              <option value="">Выберите маршрут</option>
+              <option v-for="id in routeIds" :key="id" :value="id">{{ id }}</option>
+            </UiSelect>
+          </label>
+          <label>Цель
+            <UiSelect data-test="route-node-target" :model-value="nodeTarget"
+                      @update:model-value="nodeTarget = String($event ?? '')">
+              <option value="">Выберите маршрут</option>
+              <option v-for="id in routeIds" :key="id" :value="id">{{ id }}</option>
+            </UiSelect>
+          </label>
+          <div class="route-catalog__nodes">
+            <UiButton data-context="workspace-form" variant="ghost" v-for="node in sourceNodes" :key="node.id"
+                      :data-test="`route-node-copy-${node.id}`"
+                      :pressed="copyNodeIds.includes(node.id)" @click="toggleNode(node.id)">
+              {{ node.label || node.id }}
+            </UiButton>
+          </div>
+          <UiButton data-context="workspace-form" variant="ghost" data-test="route-copy-nodes" :disabled="!copyNodeIds.length || !nodeTarget"
+                    @click="copyNodes">Копировать выбранные этапы</UiButton>
         </div>
-        <UiButton data-context="workspace-form" variant="ghost" data-test="route-copy-nodes" :disabled="!copyNodeIds.length || !nodeTarget"
-                  @click="copyNodes">Копировать выбранные этапы</UiButton>
       </details>
       <ul v-if="issues.length" data-test="route-catalog-issues" role="alert">
         <li v-for="(issue, index) in issues" :key="index">{{ issue.message }}</li>
@@ -351,9 +353,10 @@ watch(() => [props.selectedRouteId, props.document?.routes[props.selectedRouteId
 }
 
 .route-catalog__title {
-  font-weight: 500;
+  margin: 0;
+  font-weight: 600;
   font-size: 12px;
-  color: var(--ink-mid);
+  color: var(--ink);
   padding: 0 6px 4px;
 }
 
@@ -367,20 +370,6 @@ small {
   gap: 8px;
   min-width: 0;
   max-width: 620px;
-}
-
-.route-catalog__fields {
-  display: grid;
-  gap: 8px;
-  padding-block: 8px;
-}
-
-.route-catalog__operation summary {
-  cursor: pointer;
-  color: var(--ink-mid);
-  font-size: 12px;
-  min-height: var(--toolbar-control-h);
-  padding-block: 4px;
 }
 
 .route-catalog__editor label {

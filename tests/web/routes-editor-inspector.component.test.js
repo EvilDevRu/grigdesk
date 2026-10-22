@@ -12,6 +12,7 @@ process.env.NODE_ENV = 'test';
 
 const UI_STUB = `
 import { defineComponent, h } from 'vue';
+export { default as UiPaneHeader } from './src/components/composites/UiPaneHeader.vue';
 export { default as UiField } from './src/components/composites/UiField.vue';
 export const UiButton = defineComponent({ emits: ['click'], setup(_, { emit, slots, attrs }) {
   return () => h('button', { ...attrs, onClick: () => emit('click') }, slots.default?.());

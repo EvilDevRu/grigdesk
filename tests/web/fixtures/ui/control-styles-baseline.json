@@ -1,31 +1,6 @@
 {
   "version": 1,
   "findings": {
-    "web/src/views/AgentsView.vue": {
-      ".item .ic": {
-        "font-size": {
-          "12px": 1
-        }
-      },
-      ".item .nm": {
-        "line-height": {
-          "18px": 1
-        }
-      },
-      ".tag": {
-        "font-family": {
-          "var(--mono)": 1
-        }
-      },
-      ".prompt": {
-        "min-height": {
-          "180px": 1
-        },
-        "line-height": {
-          "1.55": 1
-        }
-      }
-    },
     "web/src/views/InboxView.vue": {
       ".section-tab span": {
         "padding": {
