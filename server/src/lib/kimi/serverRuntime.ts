@@ -37,6 +37,7 @@ export interface StartKimiServerOptions {
   port?: number;
   env?: NodeJS.ProcessEnv;
   startupTimeoutMs?: number;
+  debugEndpoints?: boolean;
   log?: KimiServerLog | null;
   launch?: {
     command: string;
@@ -114,6 +115,7 @@ export async function startKimiServer({
   port,
   env,
   startupTimeoutMs = DEFAULT_STARTUP_TIMEOUT_MS,
+  debugEndpoints,
   log = null,
   launch,
   socketPath,
@@ -136,6 +138,7 @@ export async function startKimiServer({
     '--port', String(listenPort),
     '--host', '127.0.0.1',
     '--no-open',
+    ...(debugEndpoints ? ['--debug-endpoints'] : []),
   ];
   const child = spawn(launch?.command || bin, launch?.args || normalArgs, {
     cwd: launch?.cwd || cwd || home,

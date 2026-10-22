@@ -338,16 +338,18 @@ export default {
         note: 'Contained-режим оставляет SSH закрытым сетевой песочницей при любом значении.',
       };
     }
+
     return {
-      enforcement: 'fail-closed',
-      note: 'Host-режим не умеет обеспечить запрет и остановит ход.',
+      enforcement: 'command-broker',
+      note: 'Host-режим проверяет команды перед запуском; сбой проверки оставляет команду запрещённой.',
     };
   },
   settings(config: KimiConfig) {
     const host = config?.kimiLaunchMode !== 'contained';
+
     return [directSshSetting({
       note: host
-        ? 'Host-режим не умеет обеспечить запрет и остановит ход.'
+        ? 'Host-режим проверяет команды перед запуском; сбой проверки оставляет команду запрещённой.'
         : 'Contained-режим закрывает SSH сетевой песочницей независимо от тумблера.',
       extraConfirmation: 'При будущей смене contained на host разрешение останется снятым.',
     })];

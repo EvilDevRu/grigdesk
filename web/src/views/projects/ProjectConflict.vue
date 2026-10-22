@@ -1,8 +1,9 @@
 <template>
   <div class="conflict" data-role="project-conflict">
-    <p class="ttl">Паспорт изменился после того, как форма его прочитала.</p>
+    <p class="ttl">Проект изменён в другом окне.</p>
     <p class="sub">
-      Серверная ревизия: {{ conflict.currentRevision }}. Ваши правки не потеряны:
+      Загрузите версию с сервера или замените её своими изменениями.
+      Текущая версия: {{ conflict.currentRevision }}. Ваши изменения:
     </p>
     <ul class="fields">
       <li v-for="field in labels" :key="field">{{ field }}</li>
@@ -11,19 +12,21 @@
     <div class="acts">
       <UiButton
         data-role="project-conflict-reload"
+        data-context="project-conflict-action"
         tone="accent"
         :disabled="busy"
         @click="emit('reload')"
       >
-        Перечитать серверную версию
+        Загрузить версию
       </UiButton>
       <UiButton
         data-role="project-conflict-overwrite"
+        data-context="project-conflict-action"
         variant="text"
         :disabled="busy"
         @click="emit('overwrite')"
       >
-        Сохранить мой черновик поверх свежей ревизии
+        Заменить моей
       </UiButton>
     </div>
   </div>
@@ -69,7 +72,7 @@ const labels = computed(() => props.conflict.changedFields.map((field) => LABELS
   gap: 6px;
   padding: 10px 12px;
   border: 1px solid var(--warn-border, #e0b070);
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 .ttl {

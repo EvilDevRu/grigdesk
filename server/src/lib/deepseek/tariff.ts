@@ -1,3 +1,13 @@
+import {
+  formatUtcOffset,
+  localClock,
+  localDateTime,
+  localFormatter,
+  momentLabel,
+  timeZoneOffsetMinutes,
+  transitionLabel,
+} from '../usageTariffTime.ts';
+
 import type { DeepSeekPricingStatus } from './pricingWatch.ts';
 
 // Источник: https://api-docs.deepseek.com/quick_start/pricing/; проверено 21.09.2026.
@@ -41,21 +51,6 @@ const PRICING_STALE_MS = 7 * 24 * 60 * 60_000;
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 const MAX_PEAK_SEARCH_DAYS = 370;
-
-const TARIFF_WEEKDAYS = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'] as const;
-const TARIFF_MONTHS = [
-  'янв', 'фев', 'мар', 'апр', 'мая', 'июн',
-  'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
-] as const;
-
-interface LocalDateTime {
-  year: number;
-  month: number;
-  day: number;
-  hour: number;
-  minute: number;
-  second: number;
-}
 
 export interface DeepSeekTariffPhase {
   peak: boolean;
@@ -156,97 +151,6 @@ export function deepSeekTariffPhase(now: number): DeepSeekTariffPhase {
   };
 }
 
-/**
- * Разбирает один момент через Intl с явно заданной зоной. Числовая локаль нужна только
- * как стабильный способ получить части даты; русские подписи берутся из своих списков.
- */
-function localDateTime(at: number, formatter: Intl.DateTimeFormat): LocalDateTime {
-  const values: Record<string, string> = {};
-
-  for (const part of formatter.formatToParts(at)) {
-    if (part.type !== 'literal') values[part.type] = part.value;
-  }
-
-  return {
-    year: Number(values.year),
-    month: Number(values.month),
-    day: Number(values.day),
-    hour: Number(values.hour),
-    minute: Number(values.minute),
-    second: Number(values.second),
-  };
-}
-
-function localFormatter(timeZone: string): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    calendar: 'gregory',
-    numberingSystem: 'latn',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  });
-}
-
-function localClock(value: LocalDateTime): string {
-  const hour = String(value.hour).padStart(2, '0');
-  const minute = String(value.minute).padStart(2, '0');
-
-  return `${hour}:${minute}`;
-}
-
-function localCalendarDay(value: LocalDateTime): number {
-  return Date.UTC(value.year, value.month - 1, value.day) / DAY_MS;
-}
-
-/**
- * Подписывает абсолютный момент по местным календарным датам. Ровно через семь дат уже
- * показывается число и месяц: сокращение дня недели там выглядело бы как ближайшая неделя.
- */
-function transitionLabel(
-  now: number,
-  until: number,
-  formatter: Intl.DateTimeFormat,
-): string {
-  const current = localDateTime(now, formatter);
-  const target = localDateTime(until, formatter);
-  const days = localCalendarDay(target) - localCalendarDay(current);
-  const clock = localClock(target);
-
-  if (days <= 0) return clock;
-  if (days === 1) return `завтра ${clock}`;
-
-  if (days < 7) {
-    const weekday = new Date(
-      Date.UTC(target.year, target.month - 1, target.day),
-    ).getUTCDay();
-
-    return `${TARIFF_WEEKDAYS[weekday]} ${clock}`;
-  }
-
-  return `${target.day} ${TARIFF_MONTHS[target.month - 1]} ${clock}`;
-}
-
-/**
- * Подписывает прошедший момент по местным датам: сверка со страницей цен случается раз в
- * сутки, и «вчера 09:00» отвечает на «давно ли», не заставляя читать полную дату.
- */
-function momentLabel(now: number, at: number, formatter: Intl.DateTimeFormat): string {
-  const current = localDateTime(now, formatter);
-  const target = localDateTime(at, formatter);
-  const days = localCalendarDay(target) - localCalendarDay(current);
-  const clock = localClock(target);
-
-  if (days === 0) return `сегодня ${clock}`;
-  if (days === -1) return `вчера ${clock}`;
-
-  return `${target.day} ${TARIFF_MONTHS[target.month - 1]} ${clock}`;
-}
-
 function utcClock(minutes: number): string {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
@@ -309,37 +213,6 @@ function localPeakSchedule(now: number, formatter: Intl.DateTimeFormat): string 
 
     return `${start}–${end}`;
   }).join(' и ');
-}
-
-/**
- * Смещение считается из тех же местных частей даты, а не из хардкода зоны. Округление
- * до минуты сохраняет зоны с получасовым и четвертьчасовым смещением.
- */
-function timeZoneOffsetMinutes(
-  now: number,
-  formatter: Intl.DateTimeFormat,
-): number {
-  const local = localDateTime(now, formatter);
-  const representedAsUtc = Date.UTC(
-    local.year,
-    local.month - 1,
-    local.day,
-    local.hour,
-    local.minute,
-    local.second,
-  );
-  const wholeSecondNow = Math.floor(now / 1_000) * 1_000;
-
-  return Math.round((representedAsUtc - wholeSecondNow) / MINUTE_MS);
-}
-
-function formatUtcOffset(offsetMinutes: number): string {
-  const sign = offsetMinutes >= 0 ? '+' : '-';
-  const absolute = Math.abs(offsetMinutes);
-  const hours = Math.floor(absolute / 60);
-  const minutes = absolute % 60;
-
-  return `UTC${sign}${hours}${minutes ? `:${String(minutes).padStart(2, '0')}` : ''}`;
 }
 
 /**

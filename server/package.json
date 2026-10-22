@@ -49,6 +49,7 @@
     "mysql2": "^3.24.3",
     "playwright-core": "^1.62.1",
     "qrcode-generator": "^2.0.4",
+    "smol-toml": "1.4.2",
     "ssh2": "^1.17.0",
     "ws": "^8.21.1"
   },

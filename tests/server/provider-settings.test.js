@@ -255,7 +255,7 @@ test('способ запрета объявляет сам адаптер с у
     'command-hook',
     'command-hook',
     'network-sandbox',
-    'fail-closed',
+    'command-broker',
   ]);
 });
 

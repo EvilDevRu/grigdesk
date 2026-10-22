@@ -40,6 +40,12 @@
   resize: vertical;
 }
 
+/* Короткая заметка в рабочей форме начинает с двух строк и растёт вручную.
+   Обычные текстовые области сохраняют прежнюю высоту. */
+.ui-textarea[data-context='workspace-note'] {
+  min-height: 58px;
+}
+
 .ui-textarea[data-role='pipeline-stage-note'] {
   min-height: 112px;
   max-height: 220px;
@@ -607,4 +613,13 @@
   .ui-file-picker--dropzone .ui-button__trailing {
     display: none;
   }
+}
+
+.ui-workspace :is(.ui-input, .ui-textarea) {
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.ui-input[data-context='workspace-path'] {
+  font: 12px/20px var(--mono);
 }

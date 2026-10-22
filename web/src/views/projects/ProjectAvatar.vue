@@ -18,13 +18,13 @@ const initial = computed(() => props.title.trim().slice(0, 1).toLocaleUpperCase(
   display: grid;
   flex: none;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
-  background: linear-gradient(145deg, var(--surface-2), var(--surface));
+  border-radius: var(--control-radius);
+  background: var(--surface);
   color: var(--ink-mid);
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -32,7 +32,7 @@ const initial = computed(() => props.title.trim().slice(0, 1).toLocaleUpperCase(
   width: 52px;
   height: 52px;
   border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
-  border-radius: 15px;
+  border-radius: var(--radius);
   background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 12%, var(--surface)), var(--surface));
   color: var(--accent);
   font-size: 23px;

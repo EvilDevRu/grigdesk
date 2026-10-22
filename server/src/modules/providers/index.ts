@@ -97,6 +97,7 @@ const USAGE_BACKOFF_MAX_TICKS = 12;
 const USAGE_FORCE_MIN_AGE_MS = 15_000;
 const DIRECT_SSH_ENFORCEMENTS = new Set([
   'command-hook',
+  'command-broker',
   'network-sandbox',
   'fail-closed',
   'unsupported',

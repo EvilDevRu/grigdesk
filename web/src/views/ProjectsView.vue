@@ -1,26 +1,11 @@
 <template>
-  <div class="page projects ui-page">
-    <header v-if="!formVisible || splitView" class="page-heading ui-page-head">
-      <div>
-        <h1>Проекты</h1>
-        <p>Рабочие пространства, репозитории и связи с фабрикой.</p>
-      </div>
-      <UiButton v-if="!creating" data-role="project-create" tone="accent" variant="solid" @click="createProject">
-        <template #leading>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </template>
-        Новый проект
-      </UiButton>
-    </header>
-
+  <div class="page projects ui-page ui-workspace" data-ui-workspace>
     <div ref="workspace" class="workspace" :class="{ 'single-pane': !splitView }">
       <!--
         На широком экране список и паспорт стоят рядом: так видно, куда вернёшься.
-        На узком остаётся одна область, и обратно ведёт кнопка «← К списку».
+        На узком остаётся одна область, и обратно ведёт кнопка «Проекты».
       -->
-      <div v-if="listVisible" class="pane list-pane">
+      <div v-show="listVisible" class="pane list-pane">
         <ProjectList
           :items="store.items"
           :loading="store.loading"
@@ -28,57 +13,52 @@
           :selected-id="creating ? '' : openedId"
           @open="openProject"
           @retry="retry"
-        />
+        >
+          <template #actions>
+            <UiButton
+              v-if="!creating"
+              data-role="project-create"
+              data-context="workspace-toolbar"
+              variant="ghost"
+              aria-label="Новый проект"
+              v-tooltip="'Новый проект'"
+              @click="createProject"
+            >
+              <template #leading><ProjectIcon name="plus" /></template>Новый
+            </UiButton>
+          </template>
+        </ProjectList>
       </div>
 
       <section v-if="formVisible" class="pane form-pane" data-role="project-form">
-        <header class="project-heading">
-        <UiButton
-          v-if="!splitView"
-          variant="text"
-          data-role="project-back"
-          @click="backToList"
-        >
-          ← К списку
-        </UiButton>
-
-
-          <ProjectAvatar :title="creating ? '' : formTitle" />
-          <div class="project-identity">
-            <h2 class="fhead">{{ formTitle }}</h2>
-            <span v-if="!creating" class="project-id">{{ openedId }}</span>
-          </div>
-          <span v-if="!creating && store.opened" class="project-status">
-            <span :class="['status-dot', { archived: store.opened.archivedAt }]" />
-            {{ store.opened.archivedAt ? 'В архиве' : 'Активный' }}
-          </span>
-          <UiButton v-if="!creating && store.opened && !store.opened.archivedAt" @click="openChat">
-            Чат с проектом
-          </UiButton>
-        </header>
+        <UiPaneHeader inset="content">
+          <template v-if="!splitView" #navigation>
+            <UiButton variant="ghost" data-context="workspace-toolbar"
+              data-role="project-back" @click="backToList">
+              <template #leading><ProjectIcon name="back" /></template>Проекты
+            </UiButton>
+          </template>
+          <template #title><h2>{{ formTitle }}</h2></template>
+          <template v-if="!creating && currentDetail" #meta>
+            <span class="project-status">
+              <span :class="['status-dot', { archived: currentDetail.archivedAt }]" />
+              {{ currentDetail.archivedAt ? 'В архиве' : 'Активный' }}
+            </span>
+          </template>
+          <template v-if="!creating && currentDetail && !currentDetail.archivedAt" #actions>
+            <UiButton variant="ghost" tone="accent" data-context="workspace-toolbar"
+              aria-label="Чат с проектом" @click="openChat">
+              <template #leading><ProjectIcon name="chat" /></template>
+              <span class="chat-full">Чат с проектом</span><span class="chat-short">Чат</span>
+            </UiButton>
+          </template>
+        </UiPaneHeader>
 
         <div class="form-content">
-          <ProjectConflict
-            v-if="store.conflict"
-            :conflict="store.conflict"
-            :busy="saving"
-            @reload="reloadFromServer"
-            @overwrite="overwriteServer"
-          />
-
-          <div v-if="saveFailure === 'exists'" data-role="project-save-failure">
-            <UiInlineMessage tone="warning">
-              <p class="sub">Проект с таким идентификатором уже есть. Правки не потеряны.</p>
-              <UiButton data-role="project-open-found" variant="text" @click="openFound">
-                Открыть найденный проект
-              </UiButton>
-            </UiInlineMessage>
-          </div>
-
           <ProjectForm
-            v-if="store.draft"
+            v-if="currentDraft && store.draft"
             v-model="store.draft"
-            :detail="creating ? null : store.opened"
+            :detail="creating ? null : currentDetail"
             :creating="creating"
             :saving="saving"
             :dirty="dirty"
@@ -88,17 +68,65 @@
             :lifecycle-failure="lifecycleFailure"
             :dependencies="store.dependencies"
             @save="submit"
+            @cancel="cancelChanges"
             @check="check"
             @select-repo="selectRepo"
             @open-routes="openRoutes"
             @archive="archive"
             @restore="restore"
             @open-rules="openRules"
-          />
+          >
+            <template #notices>
+              <div
+                v-if="store.error && !store.conflict && saveFailure !== 'exists'"
+                class="form-notice"
+                role="alert"
+              >
+                <UiInlineMessage tone="danger">{{ store.error }}</UiInlineMessage>
+                <UiButton
+                  v-if="!creating && !currentDetail"
+                  data-role="project-detail-retry"
+                  @click="retryProject"
+                >
+                  Повторить
+                </UiButton>
+              </div>
+              <ProjectConflict
+                v-if="currentDraft && store.conflict"
+                class="form-notice"
+                :conflict="store.conflict"
+                :busy="saving"
+                @reload="reloadFromServer"
+                @overwrite="overwriteServer"
+              />
+
+              <div v-if="saveFailure === 'exists'" class="form-notice" data-role="project-save-failure">
+                <UiInlineMessage tone="warning">
+                  <p class="sub">Проект с таким идентификатором уже есть. Правки не потеряны.</p>
+                  <UiButton data-role="project-open-found" variant="text" @click="openFound">
+                    Открыть найденный проект
+                  </UiButton>
+                </UiInlineMessage>
+              </div>
+
+            </template>
+          </ProjectForm>
+          <div v-else class="form-notice">
+            <template v-if="store.error">
+              <UiInlineMessage tone="danger">{{ store.error }}</UiInlineMessage>
+              <UiButton v-if="!creating" data-role="project-detail-retry" @click="retryProject">
+                Повторить
+              </UiButton>
+            </template>
+            <p v-else role="status">Загрузка проекта…</p>
+          </div>
         </div>
       </section>
 
-      <section v-else-if="splitView" class="welcome">
+      <section
+        v-else-if="splitView && (store.items.length || (!store.loading && !store.error))"
+        class="welcome"
+      >
         <div class="welcome-symbol" aria-hidden="true">
           <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.4">
             <rect x="8" y="10" width="32" height="28" rx="5" />
@@ -106,7 +134,9 @@
           </svg>
         </div>
         <h2>{{ store.items.length ? 'Выберите проект' : 'Создайте первый проект' }}</h2>
-        <p>Выберите проект слева, чтобы настроить его репозитории и связи с фабрикой.</p>
+        <p>{{ store.items.length
+          ? 'Здесь будут его настройки, репозитории и связи с фабрикой.'
+          : 'Объедините рабочие копии кода под одним названием.' }}</p>
         <UiButton variant="outline" @click="createProject">Создать проект</UiButton>
       </section>
     </div>
@@ -122,7 +152,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
 
-import { UiButton, UiInlineMessage, confirmDialog } from '../ui';
+import { UiButton, UiInlineMessage, UiPaneHeader, confirmDialog, vTooltip } from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useDockViewport } from '../shared/tools/viewport.ts';
 import { useChatStore } from '../stores/chat.ts';
@@ -141,7 +171,7 @@ import { createDraft, isDirty } from './projects/projectDraft';
 import ProjectConflict from './projects/ProjectConflict.vue';
 import ProjectForm from './projects/ProjectForm.vue';
 import ProjectList from './projects/ProjectList.vue';
-import ProjectAvatar from './projects/ProjectAvatar.vue';
+import ProjectIcon from './projects/ProjectIcon.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -171,8 +201,10 @@ const creating = computed(() => route.query.create === '1');
 const formVisible = computed(() => creating.value || openedId.value !== '');
 const splitView = computed(() => dockCapable.value && workspaceWidth.value >= 760);
 const listVisible = computed(() => splitView.value || !formVisible.value);
+const currentDetail = computed(() => store.opened?.id === openedId.value ? store.opened : null);
+const currentDraft = computed(() => creating.value || store.draft?.id === openedId.value);
 const formTitle = computed(() => (
-  creating.value ? 'Новый проект' : store.opened?.title || openedId.value
+  creating.value ? 'Новый проект' : currentDetail.value?.title || openedId.value
 ));
 
 /**
@@ -448,48 +480,43 @@ function createProject(): void {
   void router.push({ path: '/projects', query: { create: '1' } });
 }
 
+/**
+ * Явная отмена возвращает паспорт к загруженному снимку без запроса к серверу.
+ * Общий черновик и выбранный для чата репозиторий сбрасываются вместе.
+ */
+function cancelChanges(): void {
+  if (saving.value) {
+    return;
+  }
+
+  store.setDraft(createDraft(creating.value ? null : currentDetail.value));
+  fieldErrors.value = [];
+  saveFailure.value = '';
+  selectedRepo.value = '';
+}
+
 function retry(): void {
   void loadProjects();
+}
+
+function retryProject(): void {
+  void loadProject(openedId.value);
+  void loadDependencies(openedId.value);
 }
 </script>
 
 <style scoped>
 .projects {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
   height: 100%;
   min-height: 0;
   container: projects-page / inline-size;
 }
 
-.page-heading {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.page-heading h1 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-}
-
-.page-heading p {
-  margin: 3px 0 0;
-  color: var(--ink-mid);
-  font-size: 13px;
-}
-
 .workspace {
   display: grid;
-  grid-template-columns: 296px minmax(0, 1fr);
-  flex: 1;
-  gap: 20px;
-  min-height: 0;
+  grid-template-columns: 240px minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
 }
 
 .workspace.single-pane {
@@ -499,72 +526,36 @@ function retry(): void {
 .pane {
   min-width: 0;
   min-height: 0;
-  border: 1px solid var(--line);
-  border-radius: 16px;
 }
 
 .list-pane {
   background: var(--sidebar);
-  overflow: hidden;
+  border-right: 1px solid var(--line);
+  overflow: auto;
+}
+
+.single-pane .list-pane {
+  border-right: 0;
 }
 
 .form-pane {
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  background: color-mix(in srgb, var(--surface) 48%, var(--ground));
-  scrollbar-gutter: stable;
+  overflow: hidden;
+  background: var(--surface);
   container: project-detail / inline-size;
-}
-
-.project-heading {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--line);
-}
-
-.project-identity {
-  min-width: 0;
-}
-
-.eyebrow {
-  color: var(--ink-mid);
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.fhead {
-  margin: 0;
-  font-size: 25px;
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  overflow-wrap: anywhere;
-}
-
-.project-id {
-  color: var(--ink-low);
-  font-family: var(--mono);
-  font-size: 11px;
-  overflow-wrap: anywhere;
 }
 
 .project-status {
   display: inline-flex;
-  flex: none;
   align-items: center;
-  gap: 7px;
-  margin-left: auto;
-  color: var(--ink-mid);
-  font-size: 12px;
+  gap: 5px;
 }
 
 .status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-round);
   background: var(--good);
 }
 
@@ -573,8 +564,21 @@ function retry(): void {
 }
 
 .form-content {
+  display: flex;
+  flex-direction: column;
   flex: 1;
-  padding: 0 16px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.form-notice {
+  margin-bottom: 16px;
+  overflow-wrap: anywhere;
+}
+
+.form-content > .form-notice {
+  padding: 20px;
+  overflow: auto;
 }
 
 .welcome {
@@ -582,90 +586,46 @@ function retry(): void {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 40px;
-  border: 1px dashed var(--line);
-  border-radius: 16px;
+  gap: 12px;
+  padding: 24px;
   text-align: center;
+  background: var(--surface);
 }
 
 .welcome-symbol {
-  display: grid;
-  place-items: center;
-  width: 80px;
-  height: 80px;
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  background: var(--sidebar);
   color: var(--accent);
 }
 
 .welcome-symbol svg {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
 }
 
 .welcome h2 {
-  margin: 8px 0 0;
-  font-size: 22px;
-  font-weight: 500;
-  letter-spacing: -0.02em;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .welcome p {
   max-width: 340px;
-  margin: 0 0 8px;
+  margin: 0;
   color: var(--ink-mid);
   font-size: 13px;
 }
 
-@container project-detail (max-width: 580px) {
-  .project-heading {
-    flex-wrap: wrap;
-    padding: 12px 16px;
-  }
-
-  .form-content {
-    padding: 0 16px;
-  }
-
-  .project-status {
-    margin-left: 0;
-  }
+.chat-short {
+  display: none;
 }
 
-@container projects-page (max-width: 600px) {
-  .page-heading p {
-    display: none;
-  }
-}
-
-@media (max-width: 899px) {
-  .projects {
-    gap: 8px;
-  }
-
-  .workspace {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .page-heading h1 {
-    font-size: 24px;
-  }
-
-  .page-heading p {
+@container project-detail (max-width: 320px) {
+  .chat-full {
     display: none;
   }
 
-  .project-heading {
-    padding-top: 12px;
+  .chat-short {
+    display: inline;
   }
-}
 
-@media (min-width: 900px) and (max-width: 1150px) {
-  .workspace {
-    grid-template-columns: 260px minmax(0, 1fr);
-    gap: 14px;
-  }
 }
 </style>

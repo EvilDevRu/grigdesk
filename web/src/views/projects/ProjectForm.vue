@@ -1,183 +1,133 @@
 <template>
-  <form class="form" @submit.prevent="submit">
-    <section class="section">
-      <header class="section-heading">
-        <div>
-          <h3 class="sttl">Основное</h3>
-          <p class="section-description">Название и детали, по которым легко найти проект.</p>
-        </div>
-      </header>
+  <form class="project-editor" @submit.prevent="submit">
+    <div class="editor-scroll">
+      <div class="editor-body">
+        <slot name="notices" />
+        <section class="basics" aria-label="Основное">
+          <UiField v-if="creating" label="Идентификатор" :error="errorOf('id')"
+            data-context="workspace-property"
+            hint="Латинские буквы, цифры, «-» и «_», начиная с буквы. После создания изменить нельзя.">
+            <UiInput :ref="(element) => setIdRef(element)" :model-value="draft.id"
+              data-role="project-id" placeholder="my-project" @update:model-value="setId" />
+          </UiField>
+          <UiField label="Название" :error="errorOf('title')" data-context="workspace-property">
+            <UiInput :ref="(element) => setTitleRef(element)" :model-value="draft.title"
+              data-role="project-title" placeholder="Название проекта" @update:model-value="set('title', $event)" />
+          </UiField>
+          <div v-if="!creating" class="identity-row">
+            <span class="label">Идентификатор</span>
+            <div class="identity-value"><span>{{ draft.id }}</span><span class="hint">Не меняется</span></div>
+          </div>
+          <UiField label="Описание" :error="errorOf('description')" data-context="workspace-property">
+            <UiTextarea :model-value="draft.description" data-role="project-description"
+              data-context="workspace-note" :rows="2" placeholder="Чем занимается проект и что важно о нём знать"
+              @update:model-value="set('description', $event)" />
+          </UiField>
+          <UiField label="Метки" :error="errorOf('tags')" hint="Через запятую"
+            data-context="workspace-property" data-hint-inline="true">
+            <UiInput :model-value="draft.tags.join(', ')" data-role="project-tags"
+              placeholder="продукт, сайт, внутренний" @update:model-value="setTags" />
+          </UiField>
+        </section>
+        <section class="editor-section">
+          <ProjectRepoRows ref="repoRows" v-model="draft" :errors="shownErrors"
+            :checks="checks" :readonly="reposReadonly" @check="emit('check', $event)"
+            @select-repo="emit('selectRepo', $event)" />
+          <div class="source-row">
+            <span class="hint">{{ reposReadonly ? 'Пути из профиля фабрики' : 'Пути из паспорта проекта' }}</span>
+            <UiButton variant="ghost" data-context="workspace-toolbar" :aria-expanded="accessNoteOpen"
+              :aria-controls="accessNoteId" @click="accessNoteOpen = !accessNoteOpen">
+              Доступ к папкам {{ accessNoteOpen ? '↑' : '↓' }}
+            </UiButton>
+          </div>
+          <p v-if="reposReadonly" class="hint">
+            Пути задаёт профиль фабрики; редактирование откроется после миграции
+          </p>
+          <p v-show="accessNoteOpen" :id="accessNoteId" class="trust" data-role="project-trust">
+            Пути из паспорта расширяют область чтения триажа и обновления кода.
+            Права чатов и попыток фабрики они не расширяют.
+          </p>
+        </section>
+        <section v-if="!creating" class="editor-section">
+          <header class="editor-heading">
+            <h3>Фабрика и связи</h3>
+          </header>
 
-      <div class="basics">
-        <UiField
-          v-if="creating"
-          label="Идентификатор"
-          :error="errorOf('id')"
-          hint="Строчная латинская буква, дальше буквы, цифры, «-» и «_»"
-        >
-          <UiInput
-            :ref="(element) => setIdRef(element)"
-            :model-value="draft.id"
-            data-role="project-id"
-            placeholder="my-project"
-            @update:model-value="setId"
+          <ProjectProfileStatus
+            v-if="detail"
+            :detail="detail"
+            @open-routes="emit('openRoutes')"
           />
-        </UiField>
+          <p v-else class="hint">Связи появятся после создания проекта.</p>
+        </section>
 
-        <UiField label="Название" :error="errorOf('title')">
-          <UiInput
-            :ref="(element) => setTitleRef(element)"
-            :model-value="draft.title"
-            data-role="project-title"
-            placeholder="Название проекта"
-            @update:model-value="set('title', $event)"
-          />
-        </UiField>
+        <section v-if="!creating" class="management" data-role="project-manage">
+          <h3 class="ui-visually-hidden">Управление</h3>
 
-        <UiField label="Метки" :error="errorOf('tags')" hint="Через запятую">
-          <UiInput
-            :model-value="draft.tags.join(', ')"
-            data-role="project-tags"
-            placeholder="продукт, сайт, внутренний"
-            @update:model-value="setTags"
-          />
-        </UiField>
+          <p v-if="archived" class="hint">
+            Проект в архиве: разделы его больше не предлагают, а связи и маршруты остались.
+          </p>
 
-        <UiField class="description" label="Описание" :error="errorOf('description')">
-          <UiTextarea
-            :model-value="draft.description"
-            data-role="project-description"
-            :rows="2"
-            placeholder="Чем занимается проект и что важно о нём знать"
-            @update:model-value="set('description', $event)"
-          />
-        </UiField>
+          <!--
+            Связи показываются до архива: «нельзя» без списка того, что мешает, человеку
+            ничего не объясняет. У правил рядом ссылка на их раздел.
+          -->
+          <div v-if="dependencies && dependencies.items.length" class="links">
+            <div v-for="item in dependencies.items" :key="item.kind" class="link">
+              <span class="link-label">{{ item.label }}: {{ item.count }}</span>
+              <span v-if="item.items.length" class="link-items">{{ item.items.join(', ') }}</span>
+              <UiButton
+                v-if="ruleRoute(item.kind)"
+                variant="text"
+                :data-role="`project-rule-link-${item.kind}`"
+                @click="emit('openRules', ruleRoute(item.kind))"
+              >
+                Настроить правило
+              </UiButton>
+            </div>
+          </div>
+
+          <p v-for="reason in dependencies?.reasons ?? []" :key="reason" class="warn">{{ reason }}</p>
+
+          <UiFormActions align="between">
+            <UiButton
+              v-if="!archived"
+              data-role="project-archive"
+              data-context="workspace-toolbar"
+              variant="text"
+              :disabled="!canArchive"
+              :loading="busy"
+              @click="emit('archive')"
+            >
+              <template #leading><ProjectIcon name="archive" /></template>Архивировать
+            </UiButton>
+            <UiButton
+              v-else
+              data-role="project-restore"
+              tone="accent"
+              :disabled="busy"
+              :loading="busy"
+              @click="emit('restore')"
+            >
+              Восстановить
+            </UiButton>
+            <span v-if="dirty" class="hint">
+              Сначала сохраните или отмените изменения.
+            </span>
+            <span v-else-if="!archived && dependencies?.archivable === false" class="hint">
+              Архив недоступен: проверьте связи проекта выше.
+            </span>
+          </UiFormActions>
+
+          <p v-if="lifecycleFailure" class="warn" data-role="project-manage-failure">
+            {{ lifecycleFailure }}
+          </p>
+        </section>
+
       </div>
-    </section>
-
-    <section class="section">
-      <header class="section-heading">
-        <div>
-          <h3 class="sttl">Репозитории <span class="repo-count">{{ draft.repos.length }}</span></h3>
-          <p class="section-description">Рабочие копии кода и репозиторий по умолчанию.</p>
-        </div>
-      </header>
-
-      <ProjectRepoRows
-        ref="repoRows"
-        v-model="draft"
-        :errors="shownErrors"
-        :checks="checks"
-        :readonly="reposReadonly"
-        @check="emit('check', $event)"
-        @select-repo="emit('selectRepo', $event)"
-      />
-
-      <p v-if="reposReadonly" class="hint">
-        Пути задаёт профиль фабрики; редактирование откроется после миграции
-      </p>
-
-      <!--
-        Граница доверия: пути вводит человек, и они расширяют только те области,
-        которые перечислены здесь. Обещать больше — значит соврать о правах.
-      -->
-      <div class="access-note">
-        <UiButton
-          variant="text"
-          :aria-expanded="accessNoteOpen"
-          :aria-controls="accessNoteId"
-          @click="accessNoteOpen = !accessNoteOpen"
-        >
-          Как используются эти пути {{ accessNoteOpen ? '↑' : '↓' }}
-        </UiButton>
-        <p v-show="accessNoteOpen" :id="accessNoteId" class="trust" data-role="project-trust">
-          Пути из паспорта расширяют область чтения триажа и обновления кода.
-          Права чатов и попыток фабрики они не расширяют.
-        </p>
-      </div>
-    </section>
-
-    <section class="section">
-      <header class="section-heading">
-        <div>
-          <h3 class="sttl">Фабрика и связи</h3>
-          <p class="section-description">Профиль и маршруты автоматизации проекта.</p>
-        </div>
-      </header>
-
-      <ProjectProfileStatus
-        v-if="detail"
-        :detail="detail"
-        @open-routes="emit('openRoutes')"
-      />
-      <p v-else class="hint">Связи появятся после создания проекта.</p>
-    </section>
-
-    <section class="section" data-role="project-manage">
-      <header class="section-heading">
-        <div>
-          <h3 class="sttl">Управление</h3>
-          <p class="section-description">Архив проекта и связи, которые его держат.</p>
-        </div>
-      </header>
-
-      <p v-if="archived" class="hint">
-        Проект в архиве: разделы его больше не предлагают, а связи и маршруты остались.
-      </p>
-
-      <!--
-        Связи показываются до архива: «нельзя» без списка того, что мешает, человеку
-        ничего не объясняет. У правил рядом ссылка на их раздел.
-      -->
-      <div v-if="dependencies && dependencies.items.length" class="links">
-        <div v-for="item in dependencies.items" :key="item.kind" class="link">
-          <span class="link-label">{{ item.label }}: {{ item.count }}</span>
-          <span v-if="item.items.length" class="link-items">{{ item.items.join(', ') }}</span>
-          <UiButton
-            v-if="ruleRoute(item.kind)"
-            variant="text"
-            :data-role="`project-rule-link-${item.kind}`"
-            @click="emit('openRules', ruleRoute(item.kind))"
-          >
-            Настроить правило
-          </UiButton>
-        </div>
-      </div>
-
-      <p v-for="reason in dependencies?.reasons ?? []" :key="reason" class="warn">{{ reason }}</p>
-
-      <UiFormActions align="between">
-        <UiButton
-          v-if="!archived"
-          data-role="project-archive"
-          :disabled="!canArchive"
-          :loading="busy"
-          @click="emit('archive')"
-        >
-          Архивировать
-        </UiButton>
-        <UiButton
-          v-else
-          data-role="project-restore"
-          tone="accent"
-          :disabled="busy"
-          :loading="busy"
-          @click="emit('restore')"
-        >
-          Восстановить
-        </UiButton>
-        <span v-if="!archived && !canArchive" class="hint">
-          Архив запрещён, пока на проект ссылаются другие разделы.
-        </span>
-      </UiFormActions>
-
-      <p v-if="lifecycleFailure" class="warn" data-role="project-manage-failure">
-        {{ lifecycleFailure }}
-      </p>
-    </section>
-
-    <footer class="savebar">
-      <UiFormActions align="between">
+    </div>
+    <footer class="editor-footer">
+      <UiFormActions class="save-actions" align="between">
         <span v-if="draft.defaultRepoRequired" class="save-status attention" role="status">
           Выберите репозиторий по умолчанию.
         </span>
@@ -185,17 +135,22 @@
           <span v-if="!creating" class="save-dot" aria-hidden="true" />
           {{ saveStatus }}
         </span>
-        <UiButton
-          data-role="project-save"
-          tone="accent"
-          variant="solid"
-          :disabled="!canSave"
-          :loading="saving"
-          loading-label="Сохраняю"
-          @click="submit"
-        >
-          {{ creating ? 'Создать проект' : 'Сохранить' }}
-        </UiButton>
+        <div class="save-buttons">
+          <UiButton v-if="dirty" variant="ghost" data-context="workspace-toolbar"
+            data-role="project-cancel" :disabled="saving" @click="cancel">Отменить</UiButton>
+          <UiButton
+            data-role="project-save"
+            data-context="workspace-save"
+            tone="accent"
+            variant="outline"
+            :disabled="!canSave"
+            :loading="saving"
+            loading-label="Сохраняю"
+            type="submit"
+          >
+            {{ creating ? 'Создать проект' : 'Сохранить' }}
+          </UiButton>
+        </div>
       </UiFormActions>
     </footer>
   </form>
@@ -218,6 +173,7 @@ import {
 } from '../../ui';
 import { validateProjectInput } from '../../../../shared/runtime/projectsContracts';
 import { toInput } from './projectDraft';
+import ProjectIcon from './ProjectIcon.vue';
 import ProjectProfileStatus from './ProjectProfileStatus.vue';
 import ProjectRepoRows from './ProjectRepoRows.vue';
 import type {
@@ -247,6 +203,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   save: [];
+  cancel: [];
   check: [dirs: string[]];
   selectRepo: [key: string];
   openRoutes: [];
@@ -300,6 +257,11 @@ const archived = computed(() => Boolean(props.detail?.archivedAt));
 const canArchive = computed(() => (
   !props.busy && !props.dirty && props.dependencies?.archivable !== false
 ));
+
+function cancel(): void {
+  localErrors.value = [];
+  emit('cancel');
+}
 
 function ruleRoute(kind: string): string {
   return RULE_ROUTES[kind] ?? '';
@@ -377,74 +339,98 @@ async function submit(): Promise<void> {
 </script>
 
 <style scoped>
-.form {
+.project-editor {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
-.section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--line);
+.editor-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
-.section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.section-index {
-  color: var(--ink-low);
-  font-family: var(--mono);
-  font-size: 11px;
-}
-
-.section-description {
-  margin: 4px 0 0;
-  color: var(--ink-mid);
-  font-size: 12px;
+.editor-body {
+  max-width: 980px;
+  padding: 20px;
 }
 
 .basics {
   display: grid;
-  align-items: start;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
+  gap: 8px;
+  width: calc(100% - var(--workspace-selection-column) - var(--workspace-actions-column) - 2 * var(--workspace-column-gap));
 }
 
-.description {
-  grid-column: 1 / -1;
+.identity-row {
+  display: grid;
+  grid-template-columns: var(--workspace-label-column) minmax(0, 1fr);
+  gap: var(--workspace-column-gap);
+  align-items: center;
+  min-height: 24px;
 }
 
-.sttl {
+.identity-value {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.label {
+  color: var(--workspace-label-color);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.editor-section {
+  margin-top: 20px;
+}
+
+.editor-heading {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.editor-heading h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: -0.015em;
 }
 
-.repo-count {
-  margin-left: 6px;
-  color: var(--ink-mid);
-  font-size: 12px;
-  font-weight: 400;
+.source-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
 }
 
-.hint,
-.trust {
+.management {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.hint, .trust {
   margin: 0;
   font-size: 12px;
+  line-height: 18px;
   color: var(--ink-mid);
 }
 
-.access-note {
-  color: var(--ink-low);
-  font-size: 12px;
+.trust {
+  max-width: 650px;
+  margin-top: 4px;
+  line-height: 20px;
 }
 
 .links {
@@ -459,6 +445,7 @@ async function submit(): Promise<void> {
   gap: 8px;
   align-items: baseline;
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .link-label {
@@ -466,32 +453,18 @@ async function submit(): Promise<void> {
 }
 
 .link-items {
-  color: var(--ink-low);
+  color: var(--ink-mid);
 }
 
 .warn {
   margin: 0;
   font-size: 12px;
-  color: var(--warn-fg, #b26a00);
+  color: var(--warn);
 }
 
-.trust {
-  max-width: 650px;
-  margin-top: 8px;
-}
-
-.manage-note {
-  margin: 16px 0 24px;
-  color: var(--ink-low);
-  font-size: 11px;
-}
-
-.savebar {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  margin: auto -16px 0;
-  padding: 10px 16px;
+.editor-footer {
+  flex: none;
+  padding: 8px 20px;
   border-top: 1px solid var(--line);
   background: var(--sidebar);
 }
@@ -499,47 +472,65 @@ async function submit(): Promise<void> {
 .save-status {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   color: var(--ink-mid);
   font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
 }
 
 .save-dot {
   width: 5px;
   height: 5px;
   flex: none;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--good);
-}
-
-.attention {
-  color: var(--warn);
 }
 
 .attention .save-dot {
   background: var(--warn);
 }
 
-@container project-detail (max-width: 580px) {
-  .basics {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
-  }
-
-  .section {
-    padding: 12px 0;
-  }
-
-  .savebar {
-    margin-inline: -16px;
-    padding: 8px 16px;
-  }
+.save-buttons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-left: auto;
 }
 
-@container project-detail (max-width: 360px) {
-  .save-status {
-    max-width: 145px;
-    font-size: 11px;
+@container project-detail (max-width: 660px) {
+  .basics {
+    width: 100%;
   }
+
+}
+
+@container project-detail (max-width: 480px) {
+  .editor-body {
+    padding: 16px 12px;
+  }
+
+  .editor-footer {
+    padding: 8px 12px;
+  }
+
+  .identity-row {
+    grid-template-columns: 108px minmax(0, 1fr);
+    gap: 5px;
+  }
+
+  .source-row {
+    gap: 0;
+  }
+
+}
+
+@container project-detail (max-width: 320px) {
+  .identity-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+
 }
 </style>

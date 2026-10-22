@@ -7,11 +7,16 @@
 тем же, что получает claude. Мотивация: contained-профиль не давал read-доступа к
 диагностике движка (`~/.factory/**`), что блокировало разборы инцидентов из чата.
 
-Настройка исполнителя `blockDirectSsh` по умолчанию включена. Host не имеет отдельного
-сетевого или командного рубежа, который честно удержал бы её во всех ACP-режимах, поэтому
-здесь выбран `fail-closed`: ход отклоняется кодом `direct_ssh_policy_unavailable` до
-preflight, сборки launch и spawn. Запустить host-ход можно только после подтверждённого
-сохранения `false` либо переключением на contained.
+Настройка исполнителя `blockDirectSsh` по умолчанию включена. В штатном server transport
+(`kimi web`) host использует [канал команд GrigDesk](kimi-command-policy.md): отдельная
+копия TOML глобально закрывает Bash, а команды выполняет private MCP после проверки
+SSH/БД, native ограничений и обычного разрешения чата. Обычный текст работает с включённым
+DB-плагином. Сбой проверки запрещает команду; неподтверждённый native запрет Bash
+не допускает prompt. Пользовательские правила и hooks не ослабляются.
+
+Внутренний ACP host сохраняет fail-closed: активная SSH/DB-политика отклоняет ход до
+сборки launch/spawn с direct_ssh_policy_unavailable/direct_db_policy_unavailable.
+История причины и пределы native PreToolUse — в [разборе DB-политики](kimi-db-policy.md).
 
 Contained сохраняет прежний network invariant независимо от тумблера: даже при явно
 сохранённом `blockDirectSsh: false` отдельная сеть и egress allowlist пропускают только API
@@ -24,7 +29,8 @@ Kimi. Выключение не расширяет contained-сеть; оно в
 - egress allowlist: сеть прямая (как у claude/codex);
 - cgroup-лимиты (CPU/memory/RuntimeMaxSec): остаётся chat watchdog модуля;
 - per-chat KIMI_CODE_HOME и broker config: host config/skills/plugins/hooks/MCP
-  наследуются (parity с claude `~/.claude`);
+  наследуются; server transport создаёт временный home с копией config при активной
+  политике и собственным mcp.json, сессии остаются в исходном home;
 - жёсткий pin версии: расхождение — предупреждение в лог (host CLI обновляет
   пользователь). ACP `protocolVersion === 1` остаётся обязательным;
 - staging вложений: файлы читаются по исходным путям (корень `chats/attachments`
@@ -141,8 +147,8 @@ GrigDesk показывает четыре пункта, но соответст
   не нужно: авто-allow на каждый запрос стоил бы полного round-trip reverse RPC на каждое
   действие. Это осознанный выбор человека в конкретном чате, ровно как `dontAsk`/
   `bypassPermissions` у claude: в contained-профиле границу продолжает держать runtime
-  (bwrap + cgroup + egress allowlist), в host-профиле её не держит ничто, кроме прав
-  пользователя. Классификатор GrigDesk к этому режиму не применяется по определению —
+  (bwrap + cgroup + egress allowlist), в host-профиле сетевой изоляции нет; в server transport прямые SSH/DB-команды
+  продолжает проверять канал GrigDesk даже при yolo. Классификатор GrigDesk к этому режиму не применяется по определению —
   спросов, которые он мог бы разобрать, не существует.
 
 Источник до переноса: docs/grigdesk/kimi-runtime-security.md § Режимы прав: что даёт ACP, а что — GrigDesk

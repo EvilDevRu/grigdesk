@@ -1,5 +1,25 @@
 <template>
   <div class="rows">
+    <header class="repo-heading">
+      <h3>Репозитории <span class="repo-count">{{ draft.repos.length }}</span></h3>
+      <UiButton
+        data-role="project-repo-add"
+        aria-label="Добавить репозиторий"
+        variant="ghost"
+        tone="accent"
+        data-context="workspace-toolbar"
+        :disabled="readonly"
+        @click="add"
+      >
+        <template #leading>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </template>
+        Добавить
+      </UiButton>
+    </header>
+    <div class="repo-columns" aria-hidden="true"><span>Метка</span><span>Путь к рабочей копии</span></div>
     <div
       v-for="(repo, index) in draft.repos"
       :key="index"
@@ -7,8 +27,13 @@
       data-role="project-repo-row"
       :data-repo-key="repo.key"
     >
-      <span class="repo-number" aria-hidden="true">{{ String(index + 1).padStart(2, '0') }}</span>
-      <UiField class="key" label="Метка" :error="errorOf(`repos.${index}.key`)">
+      <UiField
+        class="key"
+        label="Метка"
+        data-context="workspace-repo"
+        :data-label-repeat="index > 0"
+        :error="errorOf(`repos.${index}.key`)"
+      >
         <UiInput
           :ref="(element) => setKeyRef(index, element)"
           :model-value="repo.key"
@@ -19,11 +44,18 @@
         />
       </UiField>
 
-      <UiField class="dir" label="Путь к рабочей копии" :error="errorOf(`repos.${index}.dir`)">
+      <UiField
+        class="dir"
+        label="Путь к рабочей копии"
+        data-context="workspace-repo"
+        :data-label-repeat="index > 0"
+        :error="errorOf(`repos.${index}.dir`)"
+      >
         <UiInput
           :ref="(element) => setDirRef(index, element)"
           :model-value="repo.dir"
           data-role="project-repo-dir"
+          data-context="workspace-path"
           :disabled="readonly"
           v-tooltip="repo.dir"
           placeholder="/srv/project/service"
@@ -42,7 +74,7 @@
           :data-repo-key="repo.key"
           @update:model-value="setDefault(index)"
         >
-          По умолчанию
+          Основной
         </UiRadio>
       </div>
       <span v-if="stateText(repo.dir)" class="state" :data-state="stateOf(repo.dir)" role="status">
@@ -80,7 +112,6 @@
           data-role="project-repo-remove"
           data-context="project-repo-action"
           variant="ghost"
-          tone="danger"
           :aria-label="`Убрать ${repo.key || 'репозиторий'}`"
           :disabled="readonly"
           v-tooltip="'Убрать строку'"
@@ -95,16 +126,7 @@
 
     <p v-if="!draft.repos.length" class="empty">Добавьте рабочую копию, чтобы связать проект с кодом.</p>
 
-    <div class="add-row">
-      <UiButton data-role="project-repo-add" variant="outline" :disabled="readonly" @click="add">
-        <template #leading>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </template>
-        Добавить репозиторий
-      </UiButton>
-    </div>
+
   </div>
 </template>
 
@@ -236,46 +258,77 @@ defineExpose({ focus });
 .rows {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+}
+
+.repo-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 32px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.repo-heading h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.repo-count {
+  margin-left: 6px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.row, .repo-columns {
+  display: grid;
+  grid-template-columns: var(--workspace-label-column) minmax(0, 1fr) var(--workspace-selection-column) var(--workspace-actions-column);
+  gap: var(--workspace-column-gap);
+  align-items: start;
+}
+
+.repo-columns {
+  margin-bottom: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--workspace-label-color);
 }
 
 .row {
-  display: grid;
-  grid-template-columns: 20px minmax(100px, 148px) minmax(0, 1fr) auto auto;
-  gap: 10px 12px;
-  align-items: end;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--sidebar);
+  padding-block: 4px;
 }
 
-.repo-number {
-  align-self: start;
-  margin-top: 29px;
-  color: var(--ink-low);
-  font-family: var(--mono);
-  font-size: 11px;
+.row + .row {
+  border-top: 1px solid var(--line);
 }
 
-.key,
-.dir {
+.key, .dir {
   min-width: 0;
 }
 
 .repo-meta {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
-  grid-column: 4;
+  grid-column: 3;
   grid-row: 1;
-  min-height: var(--control-height);
   min-width: 0;
 }
 
+.acts {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  grid-column: 4;
+  grid-row: 1;
+  min-height: var(--control-height);
+}
+
 .state {
-  grid-column: 3 / -1;
+  grid-column: 2 / -1;
   grid-row: 2;
   min-width: 0;
   color: var(--ink-mid);
@@ -283,86 +336,56 @@ defineExpose({ focus });
   overflow-wrap: anywhere;
 }
 
-.state[data-state='git'],
-.state[data-state='worktree'] {
+.state[data-state='git'], .state[data-state='worktree'] {
   color: var(--good);
 }
 
-.state[data-state='missing'],
-.state[data-state='denied'],
-.state[data-state='file'],
-.state[data-state='timeout'] {
+.state[data-state='missing'], .state[data-state='denied'], .state[data-state='file'], .state[data-state='timeout'] {
   color: var(--warn);
-}
-
-.acts {
-  display: flex;
-  gap: 2px;
-  align-items: center;
-  grid-column: 5;
-  grid-row: 1;
-}
-
-.add-row {
-  padding-top: 4px;
 }
 
 .empty {
   margin: 0;
-  padding: 22px;
-  border: 1px dashed var(--line-2);
-  border-radius: 10px;
+  padding: 8px 0;
   color: var(--ink-mid);
   font-size: 13px;
-  text-align: center;
 }
 
-@container project-detail (max-width: 960px) {
-  .row {
-    grid-template-columns: minmax(90px, 130px) minmax(0, 1fr);
+@container project-detail (max-width: 660px) {
+  .repo-columns {
+    display: none;
   }
 
-  .repo-number {
-    display: none;
+  .row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+    padding-block: 10px;
+  }
+
+  .key {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .dir {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 
   .repo-meta {
     grid-column: 1;
-    grid-row: 2;
-  }
-
-  .state {
-    grid-column: 1 / -1;
     grid-row: 3;
   }
 
   .acts {
     grid-column: 2;
-    grid-row: 2;
-    justify-content: flex-end;
-  }
-
-}
-
-@container project-detail (max-width: 420px) {
-  .row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
-  }
-
-  .repo-meta {
-    grid-column: 1;
     grid-row: 3;
   }
 
-  .acts {
-    grid-column: 1;
+  .state {
+    grid-column: 1 / -1;
     grid-row: 4;
-    justify-content: flex-start;
   }
 
-  .state {
-    grid-row: 5;
-  }
 }
 </style>

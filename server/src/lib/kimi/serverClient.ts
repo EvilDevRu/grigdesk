@@ -146,6 +146,14 @@ export class KimiServerClient {
     return { ...answer, id: String(answer.id || answer.session_id || '') };
   }
 
+  /**
+   * Получает эффективную доступность инструментов именно выбранной сессии.
+   * Список конфигурации MCP не доказывает, что нативный Bash закрыт перед исполнением.
+   */
+  async tools(sessionId: string): Promise<Record<string, unknown>> {
+    return this.request('GET', `/api/v1/tools?session_id=${encodeURIComponent(sessionId)}`);
+  }
+
   async getSession(sessionId: string): Promise<Record<string, unknown>> {
     return this.request('GET', `/api/v1/sessions/${encodeURIComponent(sessionId)}`);
   }

@@ -77,7 +77,7 @@
 //                              адаптер продолжает читать ключ из окружения без перезапуска
 //   directSshPolicy?         — как адаптер обеспечивает запрет прямого SSH: объект
 //                              либо `(config) => object`, где enforcement — один из
-//                              command-hook|network-sandbox|fail-closed|
+//                              command-hook|command-broker|network-sandbox|fail-closed|
 //                              unsupported, note? — честная режимная граница для UI.
 //                              Не объявлен или сломан → unsupported.
 //   workdir?                 — { switch: 'resume'|'reseed', roots: 'multi'|'single' }

@@ -415,6 +415,7 @@ test('/api/providers нормализует способ запрета SSH бе
   });
   const adapters = new Map([
     ['static', runtimeAdapter('static', { enforcement: 'command-hook' })],
+    ['broker', runtimeAdapter('broker', { enforcement: 'command-broker' })],
     ['dynamic', runtimeAdapter('dynamic', (config) => ({
       enforcement: config.contained ? 'network-sandbox' : 'fail-closed',
       note: 'Режим выбирает адаптер.',
@@ -434,12 +435,15 @@ test('/api/providers нормализует способ запрета SSH бе
 
   const response = await app.inject({ method: 'GET', url: '/api/providers' });
   const byId = new Map(response.json().providers.map((provider) => [provider.id, provider]));
+
   assert.deepEqual({
     static: byId.get('static')?.directSshPolicy,
+    broker: byId.get('broker')?.directSshPolicy,
     dynamic: byId.get('dynamic')?.directSshPolicy,
     broken: byId.get('broken')?.directSshPolicy?.enforcement,
   }, {
     static: { enforcement: 'command-hook' },
+    broker: { enforcement: 'command-broker' },
     dynamic: { enforcement: 'network-sandbox', note: 'Режим выбирает адаптер.' },
     broken: 'unsupported',
   });

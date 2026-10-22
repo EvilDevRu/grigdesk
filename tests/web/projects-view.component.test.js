@@ -15,6 +15,7 @@ const draftModule = await compileModule(webFile('src/views/projects/projectDraft
 // Элементы управления настоящие: подменяются только диалоги, чтобы проверялось
 // поведение самой страницы, а не её заглушек.
 const UI_STUB = `
+export { default as UiPaneHeader } from '${webFile('src/components/composites/UiPaneHeader.vue')}';
 export { default as UiButton } from '${webFile('src/components/primitives/UiButton.vue')}';
 export { default as UiIconButton } from '${webFile('src/components/primitives/UiIconButton.vue')}';
 export { default as UiInput } from '${webFile('src/components/primitives/UiInput.vue')}';
@@ -320,7 +321,7 @@ async function mountView(t, {
   return { wrapper, harness };
 }
 
-test('строки списка показывают title, id, число репозиториев и предупреждения', async (t) => {
+test('строки списка показывают название, число репозиториев и предупреждения', async (t) => {
   const items = [summary({
     repos: [
       { key: 'be', dir: '/srv/demo/be', exists: true },
@@ -333,10 +334,9 @@ test('строки списка показывают title, id, число ре�
 
   assert.ok(row.exists());
   assert.match(row.text(), /Демо-проект/);
-  assert.match(row.text(), /demo/);
-  assert.match(row.text(), /Репозиториев: 2/);
+  assert.equal(row.attributes('data-project-id'), 'demo');
+  assert.match(row.text(), /Репозитории:\s+2/);
   assert.match(row.text(), /один каталог/);
-  assert.match(row.text(), /профиля нет/);
 });
 
 test('ошибка загрузки показывает Повторить и не стирает прежний список', async (t) => {
@@ -354,6 +354,15 @@ test('ошибка загрузки показывает Повторить и �
   assert.deepEqual(harness.calls, [['load']]);
 });
 
+test('отказ первой загрузки не выдаётся за пустой каталог', async (t) => {
+  const { wrapper } = await mountView(t, { items: [], error: 'Каталог временно недоступен.' });
+
+  assert.match(wrapper.find('[role="alert"]').text(), /Каталог временно недоступен/);
+  assert.equal(wrapper.text().includes('Проектов пока нет'), false);
+  assert.equal(wrapper.text().includes('Создайте первый проект'), false);
+  assert.equal(wrapper.find('[data-role="project-retry"]').isVisible(), true);
+});
+
 test('поиск фильтрует по названию, ID, меткам и путям, фильтр Архив скрывает активные', async (t) => {
   const active = summary({ id: 'demo', title: 'Демо-проект', tags: ['конвейер'] });
   const archived = summary({
@@ -363,7 +372,7 @@ test('поиск фильтрует по названию, ID, меткам и �
   });
   const { wrapper } = await mountView(t, { items: [active, archived] });
   const search = wrapper.find('[data-role="project-search"] input');
-  const filter = wrapper.find('[data-role="project-filter"] select');
+  const filter = (value) => wrapper.find(`[data-role="project-filter"] [data-value="${value}"]`);
   const rows = () => wrapper.findAll('[data-role="project-row"]');
 
   assert.deepEqual(rows().map((row) => row.attributes('data-project-id')), ['demo']);
@@ -389,11 +398,11 @@ test('поиск фильтрует по названию, ID, меткам и �
   assert.match(wrapper.text(), /Ничего не найдено/);
 
   await search.setValue('');
-  await filter.setValue('archive');
+  await filter('archive').trigger('click');
 
   assert.deepEqual(rows().map((row) => row.attributes('data-project-id')), ['old']);
 
-  await filter.setValue('active');
+  await filter('active').trigger('click');
 
   assert.deepEqual(rows().map((row) => row.attributes('data-project-id')), ['demo']);
 });
@@ -429,10 +438,10 @@ test('создание открывает сохранённый проект б
   assert.equal(harness.confirmations.length, 0, 'успешно сохранённая форма не считается изменённой');
 });
 
-test('узкий экран показывает одну область с кнопкой «← К списку», широкий — обе', async (t) => {
+test('узкий экран показывает одну область с возвратом в «Проекты», широкий — обе', async (t) => {
   const narrow = await mountView(t, { dockCapable: false, params: { id: 'demo' } });
 
-  assert.equal(narrow.wrapper.find('[data-role="project-list"]').exists(), false);
+  assert.equal(narrow.wrapper.find('[data-role="project-list"]').isVisible(), false);
   assert.ok(narrow.wrapper.find('[data-role="project-form"]').exists());
   assert.deepEqual(
     narrow.harness.calls.filter(([name]) => name === 'open').map(([, id]) => id),
@@ -441,7 +450,7 @@ test('узкий экран показывает одну область с кн
 
   const back = narrow.wrapper.find('[data-role="project-back"]');
 
-  assert.match(back.text(), /К списку/);
+  assert.match(back.text(), /Проекты/);
   await back.trigger('click');
 
   assert.deepEqual(narrow.harness.pushes, ['/projects']);
@@ -453,10 +462,67 @@ test('узкий экран показывает одну область с кн
   assert.equal(wide.wrapper.find('[data-role="project-back"]').exists(), false);
 });
 
+test('возврат к каталогу на телефоне сохраняет поиск, архив и сортировку', async (t) => {
+  const { wrapper, harness } = await mountView(t, {
+    dockCapable: false,
+    items: [summary(), summary({
+      id: 'old',
+      title: 'Архивный проект',
+      archivedAt: '2026-09-01T00:00:00Z',
+    })],
+  });
+  const { nextTick } = await import('../../web/node_modules/vue/index.mjs');
+
+  await wrapper.find('[data-role="project-filter"] [data-value="archive"]').trigger('click');
+  await wrapper.find('[data-role="project-sort"] button').trigger('click');
+  await wrapper.find('[data-role="project-search"] input').setValue('Архивный');
+  harness.route.params = { id: 'old' };
+  await nextTick();
+
+  assert.equal(wrapper.find('[data-role="project-list"]').isVisible(), false);
+  await wrapper.find('[data-role="project-back"]').trigger('click');
+
+  assert.equal(wrapper.find('[data-role="project-list"]').isVisible(), true);
+  assert.equal(wrapper.find('[data-role="project-search"] input').element.value, 'Архивный');
+  assert.equal(wrapper.find('[data-value="archive"]').attributes('aria-pressed'), 'true');
+  assert.equal(wrapper.find('[data-role="project-sort"]').attributes('data-sort'), 'updated');
+  assert.deepEqual(wrapper.findAll('[data-role="project-row"]')
+    .map((row) => row.attributes('data-project-id')), ['old']);
+});
+
+test('новый проект не предлагает архив и маршруты до первого сохранения', async (t) => {
+  const { wrapper } = await mountView(t, { query: { create: '1' } });
+
+  assert.equal(wrapper.find('[data-role="project-manage"]').exists(), false);
+  assert.equal(wrapper.find('[data-role="project-routes"]').exists(), false);
+  assert.equal(wrapper.find('[data-role="project-save"]').text(), 'Создать проект');
+});
+
+test('ошибка карточки видна на телефоне и не открывает форму предыдущего проекта', async (t) => {
+  const { wrapper, harness } = await mountView(t, {
+    dockCapable: false,
+    params: { id: 'missing' },
+    opened: DETAIL,
+    error: 'Проект не найден.',
+  });
+
+  assert.equal(wrapper.find('[data-role="project-list"]').isVisible(), false);
+  assert.match(wrapper.find('[data-role="project-form"]').text(), /Проект не найден/);
+  assert.equal(wrapper.find('[data-role="project-title"]').exists(), false);
+  assert.equal(wrapper.find('[data-role="project-save"]').exists(), false);
+  harness.calls.length = 0;
+  await wrapper.find('[data-role="project-detail-retry"]').trigger('click');
+
+  assert.deepEqual(harness.calls.map(([name, id]) => [name, id]), [
+    ['open', 'missing'],
+    ['dependencies', 'missing'],
+  ]);
+});
+
 test('открытый паспорт публикует в UI-контекст только project, без путей', async (t) => {
   const { harness } = await mountView(t, {
     params: { id: 'demo' },
-    opened: { ...summary(), description: 'Описание', createdAt: null, import: null },
+    opened: { ...DETAIL, description: 'Описание' },
   });
   const focused = harness.context.filter(([name]) => name === 'focus').at(-1);
 
@@ -546,7 +612,7 @@ test('409 revision_conflict показывает изменённые поля �
   const conflict = wrapper.find('[data-role="project-conflict"]');
 
   assert.ok(conflict.exists());
-  assert.match(conflict.text(), /изменил/i);
+  assert.match(conflict.text(), /изменён/i);
   assert.match(conflict.text(), /Название/);
 
   await wrapper.find('[data-role="project-conflict-reload"]').trigger('click');
@@ -585,4 +651,20 @@ test('409 exists при создании показывает «Открыть �
   await wrapper.find('[data-role="project-open-found"]').trigger('click');
 
   assert.deepEqual(harness.pushes, ['/projects/demo']);
+});
+
+
+test('отмена восстанавливает общий черновик и убирает предупреждение об уходе', async (t) => {
+  const { wrapper, harness } = await mountView(t, { params: { id: 'demo' }, opened: DETAIL });
+
+  await wrapper.find('[data-role="project-title"]').setValue('Несохранённое название');
+  await wrapper.find('[data-role="project-repo-dir"]').setValue('/srv/new');
+  assert.equal(wrapper.find('[data-role="project-save"]').element.disabled, false);
+  await wrapper.find('[data-role="project-cancel"]').trigger('click');
+  assert.equal(harness.store.draft.title, DETAIL.title);
+  assert.equal(harness.store.draft.repos[0].dir, DETAIL.repos[0].dir);
+  assert.equal(wrapper.find('[data-role="project-save"]').element.disabled, true);
+  assert.equal(wrapper.find('[data-role="project-cancel"]').exists(), false);
+  assert.equal(await harness.leaveGuards[0](), true);
+  assert.deepEqual(harness.confirmations, []);
 });

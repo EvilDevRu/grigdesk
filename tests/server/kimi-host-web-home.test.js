@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readlink, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readlink, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -39,4 +39,47 @@ test('Kimi host web сохраняет сессии и конфигурацию,
 
   await overlay.cleanup();
   assert.equal(await readFile(path.join(kimiHome, 'config.toml'), 'utf8'), 'default_model = "k3"\n');
+});
+
+test('контролируемый host получает собственный config и сохраняет пользовательские сессии', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'kimi-command-overlay-'));
+  const kimiHome = path.join(root, 'user');
+  const source = 'telemetry = false\n';
+
+  await mkdir(path.join(kimiHome, 'sessions'), { recursive: true });
+  await writeFile(path.join(kimiHome, 'config.toml'), source);
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const overlay = await buildKimiHostWebHome({
+    kimiHome,
+    runtimeHome: path.join(root, 'runtime'),
+    mcpServers: [],
+    controlledCommands: true,
+  });
+
+  t.after(() => overlay.cleanup());
+  assert.equal((await lstat(path.join(overlay.home, 'config.toml'))).isSymbolicLink(), false);
+  assert.equal(overlay.commandProfile.commandsAllowed, true);
+  assert.match(await readFile(path.join(overlay.home, 'config.toml'), 'utf8'), /Bash/);
+  assert.equal(await readFile(path.join(kimiHome, 'config.toml'), 'utf8'), source);
+  assert.equal(await readlink(path.join(overlay.home, 'sessions')), path.join(kimiHome, 'sessions'));
+});
+
+test('первый home сохраняет новую сессию после удаления overlay', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'kimi-first-sessions-'));
+  const kimiHome = path.join(root, 'user');
+
+  await mkdir(kimiHome);
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const overlay = await buildKimiHostWebHome({
+    kimiHome,
+    runtimeHome: path.join(root, 'runtime'),
+    mcpServers: [],
+    controlledCommands: true,
+  });
+
+  await writeFile(path.join(overlay.home, 'sessions', 'synthetic-session'), 'saved');
+  await overlay.cleanup();
+  assert.equal(await readFile(path.join(kimiHome, 'sessions', 'synthetic-session'), 'utf8'), 'saved');
 });
