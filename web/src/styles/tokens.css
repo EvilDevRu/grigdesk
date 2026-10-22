@@ -46,10 +46,27 @@
   --chat-flow-inset: 12px;
   --chat-flow-gap: 14px;
 
+  /* Общая шкала формы: небольшие элементы, панели и круглые индикаторы.
+     Рабочие разделы подключают её через роли ниже; перенос остальных экранов постепенный. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-round: 50%;
+
   /* Каноническая геометрия обычных контролов. Одноранговые кнопки, поля и select
      обязаны брать один токен; адаптив меняет раскладку, а не высоту контролов. */
   --control-height: 36px;
   --control-radius: 9px;
+
+  /* Рабочие формы рядом с каталогом: одна шкала с компактным каркасом.
+     Область подключается явно; переписка, документы и остальные страницы её не наследуют. */
+  --workspace-control-h: 32px;
+  --workspace-title-size: 13px;
+  --workspace-entity-title-size: 13px;
+  --workspace-text-size: 13px;
+  --workspace-meta-size: 12px;
+  --workspace-gap: 12px;
+  --workspace-inset: 20px;
+  --workspace-row-inset: 7px 10px;
 
   /* Семантические токены общего control skin. Значения только ссылаются на исходную
      палитру: foundation не вводит вторую тему и не меняет существующие поверхности. */
@@ -94,11 +111,41 @@
   --md-code-token-changed: var(--warn);
 }
 
+[data-ui-workspace] {
+  /* Рабочая форма наследует палитру каркаса; ввод получает более светлый surface-2.
+     Роли общие, локального оформления controls у экранов нет. */
+  --workspace-catalog-background: var(--sidebar);
+  --workspace-field-background: var(--surface-2);
+  --workspace-label-column: 128px;
+  --workspace-selection-column: 100px;
+  --workspace-actions-column: calc(3 * var(--toolbar-control-h));
+  --workspace-column-gap: 12px;
+  --workspace-label-color: color-mix(in srgb, var(--ink-mid) 72%, var(--ink));
+  --control-height: var(--workspace-control-h);
+  --control-radius: var(--radius-sm);
+  --radius: var(--radius-md);
+
+  /* Ввод и обычные действия светлее панели, чтобы не выглядеть провалами в фон.
+     Hover сохраняет эту поверхность; readonly остаётся отдельным спокойным слоем. */
+  --control-background: var(--workspace-field-background);
+  --control-background-hover: var(--surface-2);
+  --control-background-readonly: var(--surface);
+  --control-outline-background-hover: var(--control-background-hover);
+  --control-outline-border: var(--control-border);
+  --control-border: var(--line-2);
+  --control-border-hover: color-mix(in srgb, var(--ink-mid) 60%, var(--line-2));
+  --control-text: var(--ink);
+  --control-placeholder: var(--ink-mid);
+  --control-focus-color: var(--accent);
+  --control-focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
 /* Сенсорный размер задаёт общая граница UI, consumer включает его на своём контейнере.
    Диалоги получают тот же атрибут на собственном teleported surface. */
 :root[data-ui-touch],
 [data-ui-touch] {
   --control-height: 44px;
+  --workspace-control-h: 44px;
   --toolbar-control-h: 44px;
   --tool-dock-action-size: 44px;
 }

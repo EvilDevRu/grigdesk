@@ -27,6 +27,7 @@ export { default as UiFormActions } from './components/composites/UiFormActions.
 export { default as UiInlineConfirm } from './components/composites/UiInlineConfirm.vue';
 export { default as UiNumberField } from './components/composites/UiNumberField.vue';
 export { default as UiPasswordInput } from './components/composites/UiPasswordInput.vue';
+export { default as UiPaneHeader } from './components/composites/UiPaneHeader.vue';
 export { default as UiRadioGroup } from './components/composites/UiRadioGroup.vue';
 export { default as UiSearchInput } from './components/composites/UiSearchInput.vue';
 export { default as UiSegmentedControl } from './components/composites/UiSegmentedControl.vue';

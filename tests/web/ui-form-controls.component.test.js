@@ -176,3 +176,37 @@ test('TIP-MIG-02: составные поля сохраняют описани�
     wrapper.unmount();
   }
 });
+
+
+test('UiPaneHeader сохраняет семантику слотов и действия вложенных controls', async (t) => {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, { h }, UiPaneHeader, UiButton] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    import('../../web/node_modules/vue/index.mjs'),
+    compileVue(webFile('src/components/composites/UiPaneHeader.vue')),
+    compileVue(webFile('src/components/primitives/UiButton.vue')),
+  ]);
+  let clicks = 0;
+  const wrapper = mount(UiPaneHeader, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { inset: 'content' },
+    attrs: { 'aria-label': 'Паспорт проекта' },
+    slots: {
+      title: () => h('h2', 'Название из данных'),
+      meta: () => h('span', 'Активный'),
+      navigation: () => h(UiButton, {}, () => 'Проекты'),
+      actions: () => h(UiButton, { onClick: () => {
+        clicks += 1;
+      } }, () => 'Открыть'),
+      default: () => h('span', 'Дополнительное содержимое'),
+    },
+  });
+
+  t.after(() => wrapper.unmount());
+  assert.equal(wrapper.element.tagName, 'HEADER');
+  assert.equal(wrapper.attributes('aria-label'), 'Паспорт проекта');
+  assert.equal(wrapper.get('h2').text(), 'Название из данных');
+  assert.match(wrapper.text(), /Дополнительное содержимое/);
+  await wrapper.get('.ui-pane-header__actions button').trigger('click');
+  assert.equal(clicks, 1);
+});

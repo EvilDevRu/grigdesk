@@ -13,6 +13,7 @@ const VIEW = webFile('src/views/ProjectsView.vue');
 const draftModule = await compileModule(webFile('src/views/projects/projectDraft.ts'));
 
 const UI_STUB = `
+export { default as UiPaneHeader } from '${webFile('src/components/composites/UiPaneHeader.vue')}';
 export { default as UiButton } from '${webFile('src/components/primitives/UiButton.vue')}';
 export { default as UiIconButton } from '${webFile('src/components/primitives/UiIconButton.vue')}';
 export { default as UiInput } from '${webFile('src/components/primitives/UiInput.vue')}';

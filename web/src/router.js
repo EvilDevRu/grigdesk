@@ -53,7 +53,15 @@ const routes = [
   { path: '/db', name: 'db', component: () => import('./views/DbView.vue'), meta: { title: 'Базы', tool: 'db' } },
   { path: '/docker', name: 'docker', component: () => import('./views/DockerView.vue'), meta: { title: 'Докер', tool: 'docker' } },
   { path: '/routes', name: 'routes', component: () => import('./views/RoutesView.vue'), meta: { title: 'Маршруты' } },
-  { path: '/projects/:id?', name: 'projects', component: () => import('./views/ProjectsView.vue'), meta: { title: 'Проекты' } },
+  {
+    path: '/projects/:id?',
+    name: 'projects',
+    component: () => import('./views/ProjectsView.vue'),
+    meta: {
+      title: 'Проекты',
+      layout: 'workspace',
+    },
+  },
   {
     path: '/code',
     name: 'code',

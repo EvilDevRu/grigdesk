@@ -10,6 +10,12 @@
   cursor: pointer;
 }
 
+/* Выбор в рабочей форме имеет ту же площадку, что соседние поля и кнопки.
+   Токен сохраняет 44 px на touch, включая подпись репозитория по умолчанию. */
+.ui-workspace .ui-radio {
+  min-height: var(--control-height);
+}
+
 /* Компактная дорожка сохраняет плотность toolbar, а подпись использует шрифт интерфейса.
    Моноширинное начертание остаётся у кода и технических значений, не у обычных действий. */
 .ui-switch {
@@ -292,4 +298,18 @@
 .speech-check > .ui-checkbox .ui-checkbox__mark,
 .plugcheck > .ui-checkbox .ui-checkbox__mark {
   margin-top: 2px;
+}
+
+.ui-workspace .ui-radio__label {
+  font-size: 12px;
+}
+
+.ui-workspace .ui-radio__mark {
+  width: 16px;
+  height: 16px;
+}
+
+.ui-workspace .ui-radio__mark::after {
+  width: 6px;
+  height: 6px;
 }

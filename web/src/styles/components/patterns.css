@@ -24,6 +24,192 @@
   .ui-page-head h1 { font-size: 20px; }
 }
 
+/* Панель повторяет геометрию toolbar конвейера: 28 + 8 px, на touch 44 + 8.
+   Слоты содержат семантические заголовки, состояния и настоящие controls экрана. */
+.ui-pane-header {
+  flex: none;
+  min-width: 0;
+  background: var(--topbar);
+  border-bottom: 1px solid var(--line);
+  container: ui-pane-header / inline-size;
+}
+
+.ui-pane-header__layout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-height: calc(var(--toolbar-control-h) + 7px);
+  padding: 3px 12px 4px;
+}
+
+.ui-pane-header[data-inset='content'] .ui-pane-header__layout {
+  padding-left: 20px;
+}
+
+.ui-pane-header__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-pane-header__identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.ui-pane-header__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-pane-header__title :is(h1, h2, h3) {
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+}
+
+.ui-pane-header__meta {
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ui-pane-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.ui-pane-header__navigation {
+  display: flex;
+}
+
+@container ui-pane-header (max-width: 480px) {
+  .ui-pane-header[data-inset='content'] .ui-pane-header__layout {
+    padding-left: 12px;
+  }
+
+  .ui-pane-header__navigation {
+    flex-basis: 100%;
+  }
+
+}
+
+.ui-workspace {
+  font-size: var(--workspace-text-size);
+  line-height: 20px;
+  color: var(--ink);
+}
+
+.ui-workspace-title {
+  margin: 0;
+  font-size: var(--workspace-title-size);
+  overflow-wrap: anywhere;
+}
+
+.ui-workspace .ui-field__label {
+  color: var(--workspace-label-color);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.ui-workspace .ui-field__hint {
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ui-workspace .ui-field__control {
+  display: grid;
+  align-content: start;
+}
+
+/* Одна ось подписей для обычных полей, репозиториев и справочных значений.
+   Привязку label, hint и error к полю по-прежнему обеспечивает UiField. */
+.ui-field[data-context='workspace-property'] {
+  display: grid;
+  grid-template-columns: var(--workspace-label-column) minmax(0, 1fr);
+  gap: 0 var(--workspace-column-gap);
+  align-items: start;
+}
+
+.ui-field[data-context='workspace-property'] > .ui-field__label {
+  grid-column: 1;
+  padding-top: 7px;
+}
+
+.ui-field[data-context='workspace-property'] > .ui-field__control {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.ui-field[data-context='workspace-property'] > :is(.ui-field__error, .ui-field__hint) {
+  grid-column: 2;
+}
+
+.ui-field[data-context='workspace-property'][data-hint-inline='true'] {
+  align-items: center;
+}
+
+.ui-field[data-hint-inline='true'] > .ui-field__label {
+  padding-top: 0;
+}
+
+.ui-field[data-context='workspace-property'][data-hint-inline='true'] > .ui-field__hint {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.ui-field[data-hint-inline='true'] > .ui-field__control {
+  grid-row: 1 / span 2;
+}
+
+@container project-detail (min-width: 661px) {
+  .ui-field[data-context='workspace-repo'] > .ui-field__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+}
+
+@container project-detail (max-width: 480px) {
+  .ui-field[data-context='workspace-property'] {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+
+  .ui-field[data-context='workspace-property'] > .ui-field__label {
+    grid-row: 1;
+    padding: 0;
+  }
+
+  .ui-field[data-context='workspace-property'] > .ui-field__control {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .ui-field[data-context='workspace-property'] > :is(.ui-field__error, .ui-field__hint) {
+    grid-column: 1;
+  }
+
+  .ui-field[data-context='workspace-property'][data-hint-inline='true'] > .ui-field__hint {
+    grid-row: 1;
+    justify-self: end;
+  }
+
+}
+
 .ui-control-group,
 .ui-form-actions {
   display: flex;

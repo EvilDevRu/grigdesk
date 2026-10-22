@@ -191,36 +191,76 @@
   font-size: 10px;
 }
 
-/* Строка каталога проектов: выбранный паспорт заметен и мышью, и с клавиатуры.
+/* Строка рабочего каталога: выбранная сущность заметна и мышью, и с клавиатуры.
    Скин принадлежит UI-kit; сам экран задаёт только раскладку содержимого строки. */
-.ui-pressable[data-context='project-catalog-row'] {
-  padding: 13px 10px;
-  border: 1px solid transparent;
-  border-radius: 10px;
+.ui-pressable[data-context='workspace-catalog-row'] {
+  min-height: max(34px, var(--control-height));
+  padding: var(--workspace-row-inset);
+  border: 0;
+  border-radius: var(--control-radius);
   color: var(--ink);
   text-align: left;
   cursor: pointer;
   transition: background 150ms ease, border-color 150ms ease;
 }
 
-.ui-pressable[data-context='project-catalog-row']:hover {
+.ui-pressable[data-context='workspace-catalog-row']:hover {
   background: var(--surface);
 }
 
-.ui-pressable[data-context='project-catalog-row'][aria-current='page'] {
-  border-color: color-mix(in srgb, var(--accent) 26%, var(--line));
-  background: color-mix(in srgb, var(--accent) 9%, var(--sidebar));
+.ui-pressable[data-context='workspace-catalog-row'][aria-current='page'] {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 14%, var(--sidebar));
+  box-shadow: inset 2px 0 var(--accent);
 }
 
-.ui-pressable[data-context='project-catalog-row']:focus-visible {
+.ui-pressable[data-context='workspace-catalog-row']:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
-.ui-button[data-context='project-repo-action'] {
-  flex: none;
-  width: var(--control-height);
+/* Компактные действия панели и рабочей формы берут один toolbar-токен. */
+.ui-button[data-context='workspace-toolbar'], .ui-button[data-context='workspace-filter'], .ui-button[data-context='project-repo-action'] {
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 0 7px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.ui-icon-button[data-context='workspace-toolbar'][data-role], .ui-button[data-context='project-repo-action'] {
+  width: var(--toolbar-control-h);
   padding: 0;
+  flex: none;
+}
+
+.ui-icon-button[data-context='workspace-toolbar'][data-role] {
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+}
+
+.ui-button[data-context='workspace-filter'] {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ui-button[data-context='workspace-filter'][aria-pressed='true'] {
+  color: var(--accent);
+  box-shadow: inset 0 -1px var(--accent);
+}
+
+.ui-button[data-context='workspace-save'] {
+  font-size: 12px;
+}
+
+/* Выбор версии должен читаться целиком даже в узкой карточке с крупным текстом.
+   Высота растёт по содержимому, сохраняя общий минимум площадки нажатия. */
+.ui-button[data-context='project-conflict-action'] {
+  height: auto;
+  padding-block: 9px;
+  line-height: 1.4;
+  white-space: normal;
 }
 
 .ui-button,
@@ -373,8 +413,9 @@
 .ui-toggle-button[data-variant='outline'],
 .ui-disclosure-button[data-variant='outline'] {
   --ui-action-background: var(--control-background);
-  --ui-action-background-hover: var(--ui-action-soft);
-  --ui-action-border: color-mix(in srgb, var(--ui-action-tone) 44%, var(--control-border));
+  --ui-action-background-hover: var(--control-outline-background-hover, var(--ui-action-soft));
+  --ui-action-border: var(--control-outline-border,
+    color-mix(in srgb, var(--ui-action-tone) 44%, var(--control-border)));
   --ui-action-color: var(--ui-action-tone);
 }
 
