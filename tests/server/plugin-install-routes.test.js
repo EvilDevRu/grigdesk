@@ -826,3 +826,34 @@ test('R10: GET повторяет неудачный refresh и сохраняе
   assert.equal(await lstat(marker).catch(() => null), null);
   assert.equal(response.json().plugins.find((plugin) => plugin.id === 'demo').enabled, true);
 });
+
+test('CAT-I1: expectedSha строгий и доходит до install/update port', async (t) => {
+  const fixture = await installHttpFixture(t);
+  const sha = 'a'.repeat(40);
+
+  for (const endpoint of ['/jobs', '/plugins/demo/update']) {
+    const body = endpoint === '/jobs' ? { url: 'file:///fixture' } : {};
+    const response = await fixture.app.inject({
+      method: 'POST',
+      url: base + endpoint,
+      headers: fixture.session,
+      payload: {
+        ...body,
+        version: '1.1.0',
+        expectedSha: sha
+      },
+    });
+
+    assert.equal(response.statusCode, 202);
+    assert.equal(fixture.stub.calls.at(-1).args.at(-1).expectedSha, sha);
+
+    for (const invalid of [{ expectedSha: sha }, { version: '1.1.0', expectedSha: 'short' }]) {
+      assert.equal((await fixture.app.inject({
+        method: 'POST',
+        url: base + endpoint,
+        headers: fixture.session,
+        payload: { ...body, ...invalid },
+      })).statusCode, 400);
+    }
+  }
+});

@@ -66,6 +66,12 @@ test('UI00: общий модал на изолированном браузер
     },
     '/api/settings/speech': data.speech,
     '/api/plugins': data.plugins,
+    '/api/plugin-catalog': {
+      state: 'unconfigured',
+      applicationVersion: '1.0.0',
+      fetchedAt: null,
+      catalog: null,
+    },
     '/api/plugin-installs/jobs/current': { job: null, recoveryError: null },
     '/api/providers': data.providers,
     '/api/providers/usage': { usage: {} },
@@ -174,7 +180,8 @@ test('UI00: общий модал на изолированном браузер
     }
   }
 
-  await fixture.page.evaluate(() => window.settingsFixture.settings.selectPage('plugins.install'));
+  await fixture.page.evaluate(() => window.settingsFixture.settings.selectPage('plugins.installed'));
+  await fixture.page.locator('[data-install-git]').click();
   await fixture.page.locator('[data-role="plugin-install-dialog"]').waitFor();
 
   for (const [width, height] of [[1280, 800], [390, 844]]) {
@@ -219,6 +226,12 @@ async function geometryFixture(t) {
     '/api/providers/usage': { usage: {} },
     '/api/providers/fixture/settings/catalog': native,
     '/api/plugins': data.plugins,
+    '/api/plugin-catalog': {
+      state: 'unconfigured',
+      applicationVersion: '1.0.0',
+      fetchedAt: null,
+      catalog: null,
+    },
     '/api/plugin-installs/jobs/current': { job: null, recoveryError: null },
     '/api/mobile/status': data.mobile,
   });

@@ -106,7 +106,7 @@
                   placeholder="https://github.com/owner/plugin"
                   autocomplete="off"
                   spellcheck="false"
-                  :disabled="locked"
+                  :disabled="locked || Boolean(catalogSelection)"
                 />
                 <UiButton
                   data-role="install-find"
@@ -142,11 +142,12 @@
                 v-model="selectedVersion"
                 data-role="install-version"
                 aria-describedby="plugin-install-version-status"
-                :disabled="locked || store.versionsLoading || !store.versions.length"
+                :disabled="locked || store.versionsLoading || !store.versions.length
+                  || Boolean(catalogSelection)"
               >
                 <option value="">{{ t('settings.selectAVersion') }}</option>
                 <option
-                  v-for="version in store.versions"
+                  v-for="version in displayVersions"
                   :key="version.tag"
                   :value="version.version"
                 >
@@ -235,7 +236,10 @@
             <p v-if="progress && !progress.indeterminate" class="install-percent">{{ progress.value }}%</p>
           </div>
         </section>
-        <PluginInstallPreview v-else-if="view === 'ready' && preview" :preview="preview" />
+        <section v-else-if="view === 'ready' && preview" class="install-ready">
+          <PluginSourceNotice :membership="membership" :source="store.job?.source.url ?? ''" />
+          <PluginInstallPreview :preview="preview" />
+        </section>
         <section v-else-if="view === 'result' && store.job" class="install-result-layout">
           <div v-if="store.job.preview" class="install-package-summary">
             <div class="install-package-title">
@@ -356,11 +360,10 @@
               variant="solid"
               tone="accent"
               data-role="install-apply"
-              :disabled="locked"
+              :disabled="locked || catalog.loading"
               @click="confirmApply"
             >
-              {{ store.job?.kind === 'update' || preview?.replaces.kind === 'managed'
-                ? t('settings.update') : t('settings.install') }}
+              {{ applyCaption }}
             </UiButton>
             <UiButton
               v-else-if="view === 'result' && store.job?.status === 'failed'"
@@ -411,6 +414,9 @@ import {
   UiSpinner,
 } from '../../ui';
 import PluginInstallPreview from './PluginInstallPreview.vue';
+import PluginSourceNotice from './PluginSourceNotice.vue';
+import { usePluginCatalogStore } from '../../stores/pluginCatalog.ts';
+import { sourceMembership, type CatalogSelection } from '../../../../shared/plugins/pluginCatalogPolicy.ts';
 import { usePluginInstallStore } from '../../stores/pluginInstall.ts';
 import { deriveInstallDialogView } from '../../shared/pluginInstallView.ts';
 import {
@@ -425,9 +431,11 @@ const props = defineProps<{
   open: boolean;
   mode: 'install' | 'update';
   plugin: PluginListItem | null;
+  catalogSelection?: CatalogSelection | null;
 }>();
 const emit = defineEmits<{ 'update:open': [value: boolean] }>();
 const store = usePluginInstallStore();
+const catalog = usePluginCatalogStore();
 const url = ref('');
 const selectedVersion = ref('');
 const replaceModified = ref(false);
@@ -458,12 +466,24 @@ const dialogView = computed(() => deriveInstallDialogView({
   replaceModified: replaceModified.value,
 }, uiLocale));
 
+const displayVersions = computed(() => props.catalogSelection
+  ? store.versions.filter((item) => item.version === props.catalogSelection!.target.version
+    && item.sha === props.catalogSelection!.target.sha)
+  : store.versions);
+
 const heading = computed(() => dialogView.value.heading);
 const clarifying = computed(() => dialogView.value.clarifying);
 const locked = computed(() => dialogView.value.locked);
 const view = computed(() => dialogView.value.screen);
 const progress = computed(() => dialogView.value.progress);
 const preview = computed(() => dialogView.value.preview);
+const membership = computed(() => sourceMembership(
+  catalog.index, catalog.state, preview.value?.id ?? '', store.job?.source ?? null,
+));
+const applyCaption = computed(() => ['external', 'unverified'].includes(membership.value)
+  ? t('settings.marketplaceInstallFromSource')
+  : store.job?.kind === 'update' || preview.value?.replaces.kind === 'managed'
+    ? t('settings.update') : t('settings.install'));
 const stageLabel = computed(() => dialogView.value.stageLabel);
 const progressHeading = computed(() => dialogView.value.progressHeading);
 const activeStep = computed(() => dialogView.value.activeStep);
@@ -478,8 +498,8 @@ const stageIcon = computed(() => dialogView.value.stageIcon);
 const canStart = computed(() => dialogView.value.canStart);
 
 /**
- * Поиск привязан к текущему input key, а не изменённому сервером canonical URL.
- * Выбор берётся из принятого списка, поэтому поздний ответ не возвращает старую версию.
+ * Ручной поиск выбирает latest; preset требует точного version/SHA выбранной карточки.
+ * Поздний ответ закрытого открытия не возвращает старый выбор и не разрешает подготовку.
  */
 async function findVersions(): Promise<void> {
   if (disposed || !props.open || locked.value || store.versionsLoading || !url.value.trim()) {
@@ -490,8 +510,19 @@ async function findVersions(): Promise<void> {
 
   await store.listVersions(url.value);
 
-  if (!disposed && props.open && epoch === openingEpoch && store.versionsInputKey === url.value.trim()) {
-    selectedVersion.value = store.versions[0]?.version ?? '';
+  if (disposed || !props.open || epoch !== openingEpoch
+    || store.versionsInputKey !== url.value.trim()) {
+    return;
+  }
+
+  const selection = props.catalogSelection;
+  const target = selection ? store.versions.find((item) => item.version === selection.target.version
+    && item.sha === selection.target.sha) : store.versions[0];
+
+  selectedVersion.value = target?.version ?? '';
+
+  if (selection && !target && !store.versionsError) {
+    store.versionsError = t('settings.marketplaceVersionChanged');
   }
 }
 
@@ -500,7 +531,7 @@ async function findVersions(): Promise<void> {
  * Disabled разметка обновится позднее, поэтому одного атрибута кнопки недостаточно.
  */
 async function confirmApply(): Promise<void> {
-  if (!locked.value && store.job?.status === 'ready') {
+  if (!locked.value && !catalog.loading && store.job?.status === 'ready') {
     await store.apply();
   }
 }
@@ -511,6 +542,20 @@ async function confirmApply(): Promise<void> {
  */
 async function start(): Promise<void> {
   if (!canStart.value) {
+    return;
+  }
+
+  const selection = props.catalogSelection;
+
+  if (selection) {
+    if (props.mode === 'update' && props.plugin?.install) {
+      await store.startUpdate(props.plugin.id, selectedVersion.value,
+        replaceModified.value, selection.target.sha);
+    } else {
+      await store.startInstall(store.versionsUrl, selectedVersion.value,
+        replaceModified.value, selection.id, selection.target.sha);
+    }
+
     return;
   }
 
@@ -543,6 +588,13 @@ watch(url, (value, old) => {
     store.invalidateVersions(value);
   }
 });
+
+watch(() => props.open && store.job?.status === 'ready'
+  ? `${store.job.id}:${store.job.revision}` : '', (identity) => {
+  if (identity) {
+    void catalog.loadIndex(true);
+  }
+}, { immediate: true, flush: 'sync' });
 
 // Каждый новый экран начинается с общего заголовка. Прокрутка длинного diff
 // не переносится на итог, а фоновое обновление того же шага сохраняет позицию.
@@ -579,22 +631,27 @@ async function loadCurrent(): Promise<void> {
 }
 
 /**
- * Возврат из ошибки обновления снова подбирает версии того же источника.
- * Поздний ответ закрытого диалога не начинает поиск и не сбрасывает выбор в новом открытии.
+ * Preset заполняется только после current; существующий job остаётся главным экраном.
+ * Update сохраняет installed source и ручное подтверждение replaceModified.
  */
 async function prepareUpdate(epoch: number): Promise<void> {
-  if (!store.job && !store.recoveryError && props.mode === 'update' && props.plugin?.install) {
-    url.value = props.plugin.install.source.url;
-    selectedVersion.value = '';
-    replaceModified.value = false;
-    await nextTick();
+  const selection = props.catalogSelection;
+  const source = props.mode === 'update' ? props.plugin?.install?.source : selection?.source;
 
-    if (disposed || !props.open || epoch !== openingEpoch) {
-      return;
-    }
-
-    await findVersions();
+  if (store.job || store.recoveryError || !source) {
+    return;
   }
+
+  url.value = source.url;
+  selectedVersion.value = '';
+  replaceModified.value = false;
+  await nextTick();
+
+  if (disposed || !props.open || epoch !== openingEpoch) {
+    return;
+  }
+
+  await findVersions();
 }
 
 async function retry(): Promise<void> {
@@ -780,6 +837,7 @@ onBeforeUnmount(() => {
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 12%, transparent);
 }
+.install-ready,
 .install-source,
 .install-bootstrap,
 .install-preparation,

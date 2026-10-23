@@ -780,3 +780,17 @@ test('ST24: reopen при pending apply читает A по id, current B не �
   assert.equal(store.job.status, 'done');
   assert.equal(fixture.loads, 1);
 });
+
+test('CAT-W4: SHA выбранного каталожного релиза входит в install и update body', async (t) => {
+  const fixture = pluginInstallStoreFixture(t);
+  const store = fixture.newStore();
+  const sha = 'a'.repeat(40);
+
+  fixture.handlers.set('POST ' + ROOT + '/jobs', () => ({ job: webInstallJob('ready') }));
+  fixture.handlers.set('POST ' + ROOT + '/plugins/demo/update',
+    () => ({ job: webInstallJob('ready', 'update') }));
+  await store.startInstall(SOURCE.url, '1.1.0', false, 'demo', sha);
+  assert.equal(fixture.calls.at(-1).body.expectedSha, sha);
+  await store.startUpdate('demo', '1.1.0', false, sha);
+  assert.equal(fixture.calls.at(-1).body.expectedSha, sha);
+});

@@ -26,3 +26,11 @@ export { default as ProcessesPage } from '../../../web/src/views/settings/pages/
 export { createProviderSettingsAdapter } from '../../../web/src/features/settings/resources/providers.ts';
 
 export { default as DevicesPage } from '../../../web/src/views/settings/pages/DevicesPage.vue';
+
+export { default as PluginCatalogPanel } from '../../../web/src/views/settings/pages/PluginCatalogPanel.vue';
+export { usePluginCatalogStore } from '../../../web/src/stores/pluginCatalog.ts';
+export { setUiLocale } from '../../../web/src/ui.ts';
+
+export {
+  default as PluginWorkspacePage,
+} from '../../../web/src/views/settings/pages/PluginWorkspacePage.vue';
