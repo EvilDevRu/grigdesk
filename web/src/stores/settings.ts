@@ -103,6 +103,8 @@ export const useSettingsStore = defineStore('settings', () => {
    * В storage уходит только ID страницы, без ввода, поисковой строки и адреса поля.
    */
   function selectPage(id: string, entity?: string, tab?: string): boolean {
+    id = id === 'connections.mobile' || id === 'access' ? 'connections.devices' : id;
+
     if (!SETTINGS_PAGES.some((page) => page.id === id)) {
       navigationMessage.value = messageRef('settings.settingsSectionNoLongerAvailable');
 
@@ -147,7 +149,7 @@ export const useSettingsStore = defineStore('settings', () => {
     }
 
     if (isOpen.value) {
-      if (request.pageId && SETTINGS_PAGES.some((page) => page.id === request.pageId)) {
+      if (request.pageId) {
         selectPage(request.pageId, request.entityId);
       }
 

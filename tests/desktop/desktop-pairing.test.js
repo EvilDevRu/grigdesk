@@ -88,7 +88,8 @@ test('W3: отказ сети объясняется по-русски без а
   const unavailable = encodePairing({ ...payload, port: await freePort() });
 
   await assert.rejects(pairing.addByPairing(unavailable), (error) => {
-    assert.match(error.message, /GRIGDESK_CLIENT_LISTEN/);
+    assert.match(error.message, /Доступ к серверу/);
+    assert.doesNotMatch(error.message, /GRIGDESK_CLIENT_LISTEN/);
     assert.doesNotMatch(error.message, /127\.0\.0\.1|ECONNREFUSED|ENOTFOUND/);
 
     return true;

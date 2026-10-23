@@ -1336,6 +1336,7 @@ async function build(desktopParent: DesktopParent | null) {
     address: config.clientAccess.address,
     name: config.serverName,
     disconnectMobile: (fp) => mobile.disconnectDevice(fp),
+    access: Object.assign({ root: fastify }, { mobile, config }),
   });
   fastify.addHook('onListen', async () => {
     let error = config.clientAccess.reason;

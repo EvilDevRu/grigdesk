@@ -8,7 +8,7 @@ import native from '../../fixtures/executor-settings/synthetic-catalog.json' wit
  * Подменяется только сеть: неизвестный адрес является ошибкой, операции видны в calls.
  */
 export async function settingsHarness(t, pageId, component, options = {}) {
-  const browser = await installUiBrowser(t);
+  const browser = options.browser || await installUiBrowser(t);
   const control = {
     data: structuredClone(data),
     calls: [],

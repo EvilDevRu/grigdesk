@@ -24,7 +24,9 @@
         </svg>
       </span>
       <div>
-        <h3 id="mobile-access-title">{{ t('settings.phoneApplication') }}</h3>
+        <h3 id="mobile-access-title">
+          {{ t('settings.phoneApplication') }}
+        </h3>
         <p>{{ t('settings.connectYourPhoneWithAQRCode') }}</p>
       </div>
       <span class="mobile-loading-indicator">
@@ -107,7 +109,7 @@
               :disabled="busy || !status.server.up"
               @click="showQr(relay, true)"
             >
-              {{ t('settings.connectPhone') }}
+              {{ t('settings.phoneConnectLegacy') }}
             </UiButton>
             <UiIconButton
               v-tooltip="t('settings.relaySettings')"
@@ -195,7 +197,7 @@
         </article>
       </div>
     </section>
-    <section class="mobile-card" aria-labelledby="mobile-devices-title">
+    <section v-if="!hideDevices" class="mobile-card" aria-labelledby="mobile-devices-title">
       <header class="mobile-card-head">
         <div>
           <h4 id="mobile-devices-title">
@@ -427,6 +429,9 @@ const form = ref({
 const error = ref<UiText>('');
 const loadError = ref<UiText>('');
 const busy = ref(false);
+
+defineProps<{ hideDevices?: boolean }>();
+
 const created = ref('');
 const addOpen = ref(false);
 const expandedRelay = ref('');

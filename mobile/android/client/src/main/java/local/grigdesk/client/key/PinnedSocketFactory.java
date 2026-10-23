@@ -18,10 +18,20 @@ import javax.net.ssl.X509KeyManager;
 public final class PinnedSocketFactory extends SSLSocketFactory {
   private final X509KeyManager keys;
   private final PinnedTrustManager trust;
+  private final int handshakeTimeoutMillis;
 
   public PinnedSocketFactory(X509KeyManager keys, PinnedTrustManager trust) {
+    this(keys, trust, 3000);
+  }
+
+  /**
+   * Relay завершает внешний dial до внутреннего TLS, поэтому получает отдельный предел.
+   * Direct сохраняет прежние три секунды и ту же проверку pin до HTTP.
+   */
+  public PinnedSocketFactory(X509KeyManager keys, PinnedTrustManager trust, int handshakeTimeoutMillis) {
     this.keys = keys;
     this.trust = trust;
+    this.handshakeTimeoutMillis = handshakeTimeoutMillis;
   }
 
   /**
@@ -44,7 +54,7 @@ public final class PinnedSocketFactory extends SSLSocketFactory {
   }
 
   private Socket restrict(Socket socket) throws java.net.SocketException {
-    socket.setSoTimeout(3000);
+    socket.setSoTimeout(handshakeTimeoutMillis);
     ((SSLSocket) socket).setEnabledProtocols(new String[] { "TLSv1.3" });
 
     return socket;
