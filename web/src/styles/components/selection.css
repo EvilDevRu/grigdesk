@@ -252,6 +252,51 @@
   color: var(--accent);
 }
 
+/* Пустой выбор не изображает первую ступень: трек повторяет незаполненный нативный.
+   После выбора ступени оформление снова нативное и не зависит от прошлых значений. */
+.ui-discrete-slider--unselected .ui-range {
+  appearance: none;
+  background: transparent;
+}
+
+.ui-discrete-slider--unselected .ui-range::-webkit-slider-runnable-track {
+  box-sizing: border-box;
+  height: 8px;
+  border: 1px solid #858585;
+  border-radius: 4px;
+  background: #3b3b3b;
+}
+
+.ui-discrete-slider--unselected .ui-range::-moz-range-track {
+  box-sizing: border-box;
+  height: 8px;
+  border: 1px solid #858585;
+  border-radius: 4px;
+  background: #3b3b3b;
+}
+
+.ui-discrete-slider--unselected .ui-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -4px;
+  border: 0;
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.ui-discrete-slider--unselected .ui-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.ui-discrete-slider--unselected .ui-range::-moz-range-progress {
+  background: transparent;
+}
+
 /* Компактные риски располагаются под нативным треком и не добавляют второй ряд.
    Отступ равен половине ширины бегунка: крайние риски совпадают с его центром. */
 .ui-discrete-slider--ticks {

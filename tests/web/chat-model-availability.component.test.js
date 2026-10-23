@@ -74,7 +74,7 @@ function modelOf(value) {
  * Монтирует настоящий селект с управляемым ответом на сброс памяти.
  * Сохранённое состояние задаётся до загрузки реестра и не исправляется фикстурой.
  */
-async function mountChat(t, { initial = {}, reset = async () => true } = {}) {
+async function mountChat(t, { initial = {}, reset = async () => true, binding = false } = {}) {
   const browser = await installBrowser(t);
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const session = reactive({
@@ -97,6 +97,7 @@ async function mountChat(t, { initial = {}, reset = async () => true } = {}) {
   });
   const setModelCalls = [];
   const resetCalls = [];
+  const resetOptions = [];
 
   globalThis.__modelAvailApi = {
     url: (path) => path,
@@ -118,10 +119,21 @@ async function mountChat(t, { initial = {}, reset = async () => true } = {}) {
       session.model = modelId;
       session.modelRef = { provider: modelOf(modelId).provider?.id || '', model: modelId };
     },
-    async resetContext(sid) {
+    /**
+     * Наблюдает параметры сброса, не скрывая ожидание подтверждения сервера.
+     * Плашка добавляется только после успеха, согласно тому же note, что у стора.
+     */
+    async resetContext(sid, options = {}) {
       resetCalls.push({ sid, modelRef: { ...session.modelRef } });
+      resetOptions.push(options);
 
-      return reset(sid);
+      const accepted = await reset(sid);
+
+      if (accepted && options.note !== false) {
+        session.messages.push({ role: 'note', text: '🧹 Память агента сброшена' });
+      }
+
+      return accepted;
     },
     permFor() { return null; },
     questionFor() { return null; },
@@ -134,7 +146,13 @@ async function mountChat(t, { initial = {}, reset = async () => true } = {}) {
   globalThis.__modelAvailProvidersStore = () => ({
     providers: PROVIDERS,
     load() {},
-    modelOf,
+    modelOf(value) {
+      const resolved = modelOf(value);
+
+      return binding && resolved.provider
+        ? { ...resolved, provider: { ...resolved.provider, sessionBinding: true } }
+        : resolved;
+    },
     visibleModels(provider) { return provider.models; },
     modesOf() { return []; },
   });
@@ -164,6 +182,7 @@ async function mountChat(t, { initial = {}, reset = async () => true } = {}) {
     session,
     setModelCalls,
     resetCalls,
+    resetOptions,
     flushPromises,
   };
 }
@@ -310,3 +329,46 @@ test('смена исполнителя меняет справку усилия
   assert.deepEqual(slider.props('levels'), ['high', 'ultra']);
   assert.deepEqual(slider.props('hints'), codexModel.effortHints);
 });
+
+test('MODEL-NOTE-B1: смена непустого чата сохраняет плашку и переписку', async (t) => {
+  const messages = [{ role: 'user', text: 'Вопрос' }, { role: 'assistant', text: 'Ответ' }];
+  const { wrapper, session, resetCalls, resetOptions, flushPromises } = await mountChat(t, {
+    initial: { messages: messages.map((message) => ({ ...message })) },
+    binding: true,
+  });
+
+  await wrapper.find('.sel.model select').setValue('gpt-5.6-sol');
+  await flushPromises();
+
+  assert.equal(resetCalls.length, 1);
+  assert.notEqual(resetOptions[0].note, false);
+  assert.deepEqual(session.messages.slice(0, 2), messages.slice(0, 2));
+  assert.ok(session.messages.some((message) => message.role === 'note'
+    && message.text.includes('Память агента сброшена')));
+  assert.match(wrapper.text(), /Память агента сброшена/);
+  assert.equal(session.modelRef.model, 'gpt-5.6-sol');
+});
+
+for (const draft of ['', 'Черновик без единого хода']) {
+  test(`MODEL-NOTE-01: пустой чат меняет исполнителя без плашки, draft=${Boolean(draft)}`, async (t) => {
+    const { wrapper, session, resetOptions, setModelCalls, flushPromises } = await mountChat(t, {
+      initial: {
+        revision: 3,
+        messages: [],
+        draft,
+      },
+      binding: true,
+    });
+
+    await wrapper.find('.sel.model select').setValue('gpt-5.6-sol');
+    await flushPromises();
+
+    assert.equal(resetOptions.length, 1, 'серверный reset в пустом сохранённом чате остаётся');
+    assert.equal(resetOptions[0].note, false);
+    assert.equal(setModelCalls.length, 1);
+    assert.equal(session.modelRef.model, 'gpt-5.6-sol');
+    assert.equal(session.draft, draft);
+    assert.equal(session.messages.some((message) => message.role === 'note'), false);
+    assert.doesNotMatch(wrapper.text(), /Память агента сброшена/);
+  });
+}
