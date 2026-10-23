@@ -333,7 +333,7 @@
         <span class="pw">{{ currentLabel(t.graph) }}</span>
       </div>
 
-      <LoopStatus :graph="t.graph" />
+      <LoopStatus v-if="!t.stall || !isCollapsed(t.task)" :graph="t.graph" />
 
       <!-- Ждёт тебя (видно и в свёрнутом виде) -->
       <div v-if="!t.readOnly && waitingReason(t.graph)" class="waitme" :class="{ premature: waitingReason(t.graph)!.premature }">
@@ -341,127 +341,23 @@
         <span v-if="waitingReason(t.graph)!.premature" class="pm">(преждевременно — хвост не доделан)</span>
       </div>
 
-      <!-- ПОЧЕМУ КОНВЕЙЕР СТОИТ. Движок останавливается сам и зовёт человека, но до сих
-           пор писал причину только в logs/tNNNN.stages.log — в интерфейсе её не было
-           вовсе. Поэтому плашка живёт рядом с «ждёт тебя» и видна в свёрнутом виде:
-           затык надо замечать в списке, а не открывая карточку.
-
-           Но и РАЗВЁРНУТУЮ карточку она покидать не вправе, а до 28.08.2026 покидала:
-           `isCollapsed` уносил вместе с ней разбор арбитра и все три кнопки действия.
-           Человек с открытой схемой видел красный узел и ничего больше — законченный
-           разбор, объясняющий остановку человеческими словами, был ему недоступен, и
-           это читалось как «арбитр молчит». Заголовок и подсказку в развёрнутом виде
-           не повторяем: их уже говорит плашка над самой схемой. -->
-      <div v-if="!t.readOnly && t.stall" class="stalled" :class="t.stall.kind">
-        <template v-if="isCollapsed(t.task)">
-          <div class="srow">
-            <span class="sico">{{ t.stall.kind === 'crashed' ? '✖' : '🛑' }}</span>
-            <span class="stitle">{{ t.stall.title }}</span>
-            <span v-if="t.stall.since" class="ssince mono">{{ t.stall.since }}</span>
-          </div>
-          <div class="shint">{{ t.stall.hint }}</div>
-          <div v-if="t.stall.comment" class="scomment">замечание движка: {{ t.stall.comment }}</div>
-        </template>
-        <!-- Разбор арбитра в ленте — ОДНА СТРОКА-признак, а не весь текст. Полный
-             разбор занимал в карточке до 190 px: четыре абзаца, которые человек читает
-             один раз и принимает по ним решение, — а лента конвейера отвечает на вопрос
-             «где стоит и на ком». Сам текст и поле ответа живут в модалке узла, где
-             ширина позволяет их прочитать и написать ответ по-человечески. -->
-        <div v-if="t.stall.arbiter" class="sarbnote" :class="t.stall.arbiter.verdict">
-          <span class="sarbicon" aria-hidden="true">⚖</span>
-          <span class="sarbnote-text">{{ arbiterCardLabel(t.stall.arbiter) }}</span>
-          <span v-if="t.stall.arbiter.model" class="samodel mono">{{ t.stall.arbiter.model }}</span>
-        </div>
-        <!-- Вход в решение. Сам ответ пишется в модалке узла: там разбор арбитра целиком,
-             причина остановки, вопросы узла своими полями и место под текст. До 28.08.2026
-             входа не было вовсе — карточка спрашивала решение, а отправить его можно было
-             только догадавшись кликнуть нужный узел на схеме. -->
-        <div v-if="canAnswerStall(t)" class="sfix">
-          <UiButton
-            class="sbretry"
-            data-role="pipeline-stall-answer-open"
-            tone="warning"
-            variant="outline"
-            @click="openStallAnswer(t)"
-          >
-            {{ arbiterAsksHuman(t) ? '⚖ разбор и решение' : '✍ ответить и продолжить' }}
-          </UiButton>
-          <span class="sfixhint">{{ arbiterAsksHuman(t)
-            ? 'разбор арбитра целиком и поле для твоего решения'
-            : t.stall.phase === 'bootstrap'
-              ? 'откроет вопрос разведки и поле ответа следующему SCOUT'
-              : 'откроет узел: там указание агенту и возврат конвейера на него' }}</span>
-        </div>
-        <!-- Единственный затык, который чинится прямо отсюда: упавший подъём стенда.
-             Кнопки «снести стенд» в подвале карточки в этот момент нет — она привязана
-             к живому порту фронта, — поэтому починка живёт в самой плашке. -->
-        <!-- Типизированное топтание разбирает арбитр: собирает оба вердикта дуги,
-             проверяет спорное в рабочем дереве и возвращает курсор с указанием. Это
-             замена курьерской работы человека, а не «ещё одна модель»: замер по
-             журналам — 28 таких остановок, сумма ожидания 59.7 часа. -->
-        <!-- Разбор ИДЁТ. Плашка отвечает ровно на вопрос «стоит ли это на мне»: пока
-             арбитр читает код, работа не стоит, и браться за неё руками не нужно. -->
-        <div v-if="t.arbitrating" class="sarbrun">
-          <span class="sarbspin" aria-hidden="true"></span>
-          <span class="sarbtxt">Арбитр разбирает остановку</span>
-          <span class="sarbmeta mono">{{ arbiterRunLabel(t.arbitrating) }}</span>
-        </div>
-        <div v-if="canArbitrate(t)" class="sfix">
-          <UiButton
-            class="sbretry"
-            data-role="pipeline-compact-action"
-            tone="accent"
-            variant="outline"
-            :loading="arbiterBusy.has(t.task)"
-            :disabled="arbiterBusy.has(t.task)"
-            loading-label="Арбитр разбирает"
-            @click="arbitrate(t.task)"
-          >
-            ⚖ разобрать и продолжить
-          </UiButton>
-          <span class="sfixhint">{{ arbiterAsksHuman(t)
-            ? 'арбитр уже разобрал и отдал решение тебе — повторный разбор нужен, только если'
-              + ' условия изменились'
-            : 'арбитр проверит спор по коду и вернёт узел с указанием; границу задачи он менять'
-              + ' не вправе и отдаст её тебе' }}</span>
-        </div>
-        <div v-if="canRetrySandbox(t) || canResume(t)" class="sfix">
-          <UiButton
-            v-if="canRetrySandbox(t)"
-            class="sbretry"
-            data-role="pipeline-compact-action"
-            tone="accent"
-            variant="outline"
-            :loading="sandboxBusy.has(t.task)"
-            :disabled="sandboxBusy.has(t.task)"
-            loading-label="Перезапускаю стенд"
-            @click="sandboxRetry(t.task)"
-          >
-            ↻ перезапустить стенд
-          </UiButton>
-          <!-- Оборвавшийся прогон: стенд на месте, продолжать нужно ту же попытку. -->
-          <UiButton
-            v-else
-            class="sbretry"
-            data-role="pipeline-compact-action"
-            tone="accent"
-            variant="outline"
-            :loading="sandboxBusy.has(t.task)"
-            :disabled="sandboxBusy.has(t.task)"
-            loading-label="Продолжаю прогон"
-            @click="resumeRun(t.task)"
-          >
-            ▶ продолжить прогон
-          </UiButton>
-          <span class="sfixhint">{{ canRetrySandbox(t)
-            ? 'снесёт остатки песочницы и продолжит конвейер с этого места'
-            : 'та же попытка поедет дальше с узла, на котором оборвалась' }}</span>
-        </div>
-      </div>
+      <PipelineStopPanel
+        v-if="!t.readOnly && t.stall"
+        :view="graphStallView(t.graph, t.stall)"
+        :identity="`${t.task}:${t.attempt}:${t.stall.since || ''}`"
+        :collapsed="isCollapsed(t.task)"
+        :arbitrating="t.arbitrating"
+        :arbiter-note="t.stall.arbiter ? arbiterCardLabel(t.stall.arbiter) : ''"
+        :arbiter-model="t.stall.arbiter?.model"
+        :arbiter-verdict="t.stall.arbiter?.verdict"
+      >
+        <PipelineCardActions :actions="cardActions(t)" @action="(id) => runCardAction(t, id)" />
+      </PipelineStopPanel>
 
       <div v-if="!isCollapsed(t.task)" class="gwrap">
         <FactoryGraph
           :graph="t.graph"
+          :show-stop-banner="t.readOnly || !t.stall"
           :loops-on="loopsOn"
           :arbitrating="t.arbitrating"
           :arbitrated="arbitratedNodes(t.graph)"
@@ -469,7 +365,8 @@
         />
       </div>
 
-      <footer v-if="!isCollapsed(t.task)" class="strip">
+      <footer v-if="!isCollapsed(t.task) || !t.stall" class="strip">
+        <template v-if="!isCollapsed(t.task)">
         <span v-if="t.graph.fePort" class="chunk">
           <span class="sdot" :class="t.daemonAlive ? 'on' : 'off'"></span>
           стенд · <a :href="sandboxUrl(t.graph.fePort) || undefined" target="_blank" rel="noopener">фронт :{{ t.graph.fePort }}</a>
@@ -480,64 +377,16 @@
           <UiSpinner decorative />
           стенд строится · {{ t.graph.sandbox.step }}/{{ t.graph.sandbox.total }} · {{ t.graph.sandbox.label }}
         </span>
-        <!-- Развёрнутая карточка: продолжение прогона рядом с остальными действиями —
-             плашка затыка видна только у свёрнутой. -->
-        <UiButton
-          v-if="canStop(t)"
-          class="sbstop"
-          data-role="pipeline-compact-action"
-          tone="danger"
-          variant="outline"
-          :loading="sandboxBusy.has(t.task)"
-          :disabled="sandboxBusy.has(t.task)"
-          loading-label="Останавливаю прогон"
-          @click="stopRun(t.task)"
-        >
-          ■ остановить
-        </UiButton>
-        <UiButton
-          v-if="canResume(t)"
-          class="sbresume"
-          data-role="pipeline-compact-action"
-          tone="accent"
-          variant="outline"
-          :loading="sandboxBusy.has(t.task)"
-          :disabled="sandboxBusy.has(t.task)"
-          loading-label="Продолжаю прогон"
-          @click="resumeRun(t.task)"
-        >
-          ▶ продолжить прогон
-        </UiButton>
-        <UiButton
-          v-if="t.graph.fePort && canDestroySandbox(t)"
-          class="sbdown"
-          data-role="pipeline-compact-action"
-          tone="danger"
-          variant="outline"
-          :loading="sandboxBusy.has(t.task)"
-          :disabled="sandboxBusy.has(t.task)"
-          loading-label="Сношу стенд"
-          @click="sandboxDown(t.task)"
-        >
-          ⏏ снести стенд
-        </UiButton>
-        <!-- Класс sbclose — только адрес кнопки (оформление общее с «снести стенд»):
-             обе выглядят одинаково, а различать их надо и тесту, и глазами в разметке. -->
-        <UiButton
-          v-if="canCloseTask(t)"
-          class="sbdown sbclose"
-          data-role="pipeline-compact-action"
-          tone="danger"
-          variant="outline"
-          :loading="sandboxBusy.has(t.task)"
-          :disabled="sandboxBusy.has(t.task)"
-          loading-label="Закрываю задачу"
-          @click="closeTask(t)"
-        >
-          ✓ закрыть задачу
-        </UiButton>
         <span v-if="loopList(t.graph).length" class="chunk warn">↻ возвраты: {{ loopList(t.graph).join(', ') }}</span>
-        <span v-if="t.graph.halted" class="chunk halted">⚠ застряла на {{ stripEmoji(t.graph.nodes[t.graph.halted]?.[1]) || t.graph.halted }}</span>
+        <span v-if="t.graph.halted && !t.stall" class="chunk halted">
+          ⚠ застряла на {{ stripEmoji(t.graph.nodes[t.graph.halted]?.[1]) || t.graph.halted }}
+        </span>
+        </template>
+        <PipelineCardActions
+          v-if="!t.stall"
+          :actions="cardActions(t)"
+          @action="(id) => runCardAction(t, id)"
+        />
       </footer>
     </article>
 
@@ -1161,6 +1010,10 @@ import {
 } from '../shared/runnerDisplay.ts';
 import ArbiterDecision from './pipeline/ArbiterDecision.vue';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
+import PipelineStopPanel from './pipeline/PipelineStopPanel.vue';
+import PipelineCardActions from './pipeline/PipelineCardActions.vue';
+import { graphStallView } from '../shared/graphStall.ts';
+import type { PipelineCardAction, PipelineCardActionId } from '../shared/pipelineCardActions.ts';
 import LoopStatus from './pipeline/LoopStatus.vue';
 import OpenDiffButton from './OpenDiffButton.vue';
 
@@ -2893,6 +2746,115 @@ function canCloseTask(t: PipelineViewTask) {
 
 
 /**
+ * Один список сохраняет независимые гейты и действия во всех видах карточки.
+ * Главное действие выбирается после отбора: retry не вытесняет доступный resume.
+ */
+function cardActions(t: PipelineViewTask): PipelineCardAction[] {
+  const actions: PipelineCardAction[] = [];
+  const busy = sandboxBusy.value.has(t.task);
+
+  /**
+   * Общие атрибуты действия задаются один раз после проверки права в родителе.
+   * Локальный список не меняет загрузку, подтверждения и эффекты обработчиков.
+   */
+  const add = (
+    id: PipelineCardActionId,
+    label: string,
+    hint: string,
+    loadingLabel: string,
+    className: string,
+  ) => {
+    actions.push({
+      id,
+      label,
+      hint,
+      loadingLabel,
+      className,
+      role: id === 'answer' ? 'pipeline-stall-answer-open' : 'pipeline-compact-action',
+      tone: ['stop', 'down', 'close'].includes(id) ? 'danger' : 'accent',
+      busy: id === 'arbitrate' ? arbiterBusy.value.has(t.task) : busy,
+      primary: false,
+    });
+  };
+
+  if (canAnswerStall(t)) {
+    add(
+      'answer', arbiterAsksHuman(t) ? '⚖ разбор и решение' : '✍ ответить и продолжить',
+      arbiterAsksHuman(t) ? 'Разбор арбитра целиком и поле для твоего решения.'
+        : t.stall?.phase === 'bootstrap' ? 'Откроет вопрос разведки и поле ответа следующему SCOUT.'
+          : 'Откроет узел: там указание агенту и возврат конвейера на него.',
+      'Открываю решение', 'sbretry',
+    );
+  }
+
+  if (canArbitrate(t)) {
+    add(
+      'arbitrate', '⚖ разобрать и продолжить',
+      arbiterAsksHuman(t) ? 'Арбитр уже отдал решение тебе; повтор нужен, только если условия изменились.'
+        : 'Арбитр проверит спор по коду и вернёт узел с указанием; границу задачи он менять не вправе.',
+      'Арбитр разбирает', 'sbretry',
+    );
+  }
+
+  if (canRetrySandbox(t)) {
+    add(
+      'retry', '↻ перезапустить стенд',
+      'Снесёт остатки песочницы и продолжит конвейер с этого места.',
+      'Перезапускаю стенд', 'sbretry',
+    );
+  }
+
+  if (canResume(t)) {
+    add(
+      'resume', '▶ продолжить прогон', 'Та же попытка поедет дальше с узла, на котором оборвалась.',
+      'Продолжаю прогон', 'sbresume',
+    );
+  }
+
+  if (canStop(t)) {
+    add('stop', '■ остановить', 'Остановит прогон; попытку можно будет продолжить.',
+      'Останавливаю прогон', 'sbstop');
+  }
+
+  if (t.graph.fePort && canDestroySandbox(t)) {
+    add('down', '⏏ снести стенд', 'Снесёт стенд задачи после подтверждения.', 'Сношу стенд', 'sbdown');
+  }
+
+  if (canCloseTask(t)) {
+    add('close', '✓ закрыть задачу', 'Уберёт прогон с экрана в архив после подтверждения.',
+      'Закрываю задачу', 'sbdown sbclose');
+  }
+
+  const human = t.stall?.stop === 'human' || (!t.stall?.stop && t.stall?.kind === 'human');
+  const question = t.stall?.phase === 'bootstrap' || arbiterAsksHuman(t)
+    || (human && t.stall?.outcome !== 'exhausted');
+  const priority: PipelineCardActionId[] = question
+    ? ['answer', 'retry', 'arbitrate', 'resume', 'stop', 'down', 'close']
+    : ['retry', 'arbitrate', 'resume', 'answer', 'stop', 'down', 'close'];
+  const primary = priority.find((id) => actions.some((action) => action.id === id));
+
+  return actions.map((action) => ({ ...action, primary: action.id === primary }));
+}
+
+/**
+ * Компонент действий только сообщает выбор, а эффекты остаются в родителе.
+ * Прежние обработчики сохраняют подтверждения, HTTP и блокировку повторного запроса.
+ */
+function runCardAction(t: PipelineViewTask, id: PipelineCardActionId) {
+  const handlers = {
+    answer: () => openStallAnswer(t),
+    arbitrate: () => arbitrate(t.task),
+    retry: () => sandboxRetry(t.task),
+    resume: () => resumeRun(t.task),
+    stop: () => stopRun(t.task),
+    down: () => sandboxDown(t.task),
+    close: () => closeTask(t),
+  };
+
+  return handlers[id]();
+}
+
+/**
  * Продолжает оборвавшийся прогон после подтверждения человека.
  * Повторная команда блокируется до завершения запроса и обновления списка.
  */
@@ -3422,20 +3384,6 @@ function cardState(g: PipelineViewGraph) {
 .waitme.premature { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
 .waitme .pm { color: var(--bad); }
 
-/* Затык: сильнее «ждёт тебя» по тону — у ворот конвейер стоит штатно, а здесь он упёрся. */
-.stalled { margin: 6px 0 0; font-size: 12.5px; color: var(--bad); border-radius: 8px; padding: 6px 10px;
-  background: color-mix(in srgb, var(--bad) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent); }
-.stalled.crashed { color: var(--ink-mid);
-  background: color-mix(in srgb, var(--ink-mid) 10%, transparent);
-  border-color: color-mix(in srgb, var(--ink-mid) 30%, transparent); }
-.stalled .srow { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
-.stalled .stitle { font-weight: 600; }
-.stalled .ssince { margin-left: auto; opacity: .7; font-size: 11.5px; }
-.stalled .shint { margin-top: 2px; opacity: .85; }
-.stalled .scomment { margin-top: 2px; opacity: .85; font-style: italic; }
-.stalled .sfix { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
-.stalled .sfixhint { opacity: .75; font-size: 11.5px; }
 /* Признак разбора в ленте: одна строка вместо четырёх абзацев. Полный текст живёт в
    модалке узла — лента отвечает на «где стоит и на ком», а не заменяет собой карточку. */
 .sarbnote { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; padding: 6px 10px;

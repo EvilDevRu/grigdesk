@@ -146,3 +146,26 @@ test('документ описывается ссылкой внутри кор
     DocumentsContractError,
   );
 });
+
+test('кривая presentation не роняет снимок', async () => {
+  const { decodePipelineTasks, decodePipelineViewGraph } = await import(
+    '../../web/src/shared/pipelineContracts.ts'
+  );
+  const stall = {
+    kind: 'human',
+    title: 'T',
+    hint: 'H',
+    presentation: { reason: 5, details: 'x' },
+  };
+  const snapshot = { tasks: [{ task: '1', stall }] };
+  const graph = {
+    nodes: { x: ['agent', 'Этап'] },
+    pos: { x: [0, 0] },
+    statuses: { x: 'stall' },
+    progress: { done: 0, total: 1 },
+    nodeMeta: { x: { stall } },
+  };
+
+  assert.equal(decodePipelineTasks(snapshot).tasks[0].task, '1');
+  assert.equal(decodePipelineViewGraph(graph).nodeMeta.x.stall.title, 'T');
+});

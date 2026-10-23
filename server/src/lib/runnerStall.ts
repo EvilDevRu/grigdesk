@@ -172,11 +172,19 @@ export async function enrichRunnerStall(input: RunnerStallInput): Promise<StallI
     }
 
     const detail = runnerFailureDetail(evidence.failure, evidence.model);
+    // Старые retained-события не всегда содержат код лимита. Уточняем только подпись:
+    // машинный класс, политика повтора и исходный текст провайдера остаются прежними.
+    const displayFailure = evidence.failure.code === 'unknown'
+      && /^Rate limit reached\b/iu.test(evidence.failure.message)
+      ? { ...evidence.failure, code: 'rate_limit' } : evidence.failure;
+    const lastFailure = runnerFailureDetail(displayFailure);
     const runs = stall.title.match(/\d+ заход(?:а|ов)? без результата/u)?.[0];
-    const hint = evidence.failure.code === 'capacity' || evidence.failure.code === 'rate_limit'
+    const attempts = stall.presentation?.attempts ?? (runs ? Number.parseInt(runs, 10) : undefined);
+    const temporary = ['capacity', 'rate_limit'].includes(displayFailure.code);
+    const hint = temporary
       ? 'Провайдер временно отклонил запрос. Повторите этап позже;'
-        + ' он продолжит работу с сохранённого черновика.'
-      : 'Проверьте сообщение провайдера. При повторе этап получит сохранённый черновик работы.';
+        + ' если черновик записан, он будет передан следующему заходу.'
+      : 'Проверьте сообщение провайдера. Если черновик записан, при повторе этап получит его.';
 
     return {
       ...stall,
@@ -184,6 +192,21 @@ export async function enrichRunnerStall(input: RunnerStallInput): Promise<StallI
       comment: stall.comment?.replace(/последний —[^\n]*$/u, () => `последний — ${detail}`) ?? null,
       detail: `${stall.detail || stall.comment || ''}\nОтвет провайдера: ${evidence.failure.message}`,
       hint,
+      presentation: {
+        reason: 'агент не вернул результат',
+        summary: temporary
+          ? 'Провайдер отклонил запрос; повторите этап позже.'
+          : 'Проверьте сообщение провайдера перед повтором этапа.',
+        details: {
+          what: 'Результат этапа не получен после завершившихся заходов.',
+          cause: lastFailure,
+          retained: 'Если черновик хода записан, он сохраняется и передаётся следующему заходу.',
+          action: hint,
+        },
+        ...(attempts !== undefined ? { attempts } : {}),
+        lastFailure,
+        ...(evidence.model ? { model: evidence.model } : {}),
+      },
     };
   } catch {
     return stall;

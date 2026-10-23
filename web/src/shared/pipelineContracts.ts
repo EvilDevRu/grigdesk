@@ -1,6 +1,7 @@
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from './uiLocalePort.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
+import type { StallPresentation } from '../../../shared/pipeline/stallPresentation.ts';
 import type { AgentSilence } from '../../../shared/pipeline/agentActivity.ts';
 import type { PipelineGraph } from '../../../shared/pipeline/pipelineWait.ts';
 
@@ -22,12 +23,17 @@ export interface PipelineTask extends Record<string, unknown> {
     kind: string;
     title: string;
     hint?: string;
-    stage?: string;
+    stage?: string | null;
+    node?: string | null;
+    stop?: string;
+    outcome?: string;
+    fails?: number | null;
+    presentation?: StallPresentation;
     phase?: string;
-    since?: string;
-    comment?: string;
+    since?: string | null;
+    comment?: string | null;
     arbitrable?: boolean;
-    arbiter?: ArbiterCard;
+    arbiter?: ArbiterCard | null;
   } | null;
 }
 
@@ -165,10 +171,11 @@ export interface NodeMetadata {
   fails?: number;
   comment?: string;
   stall?: {
+    presentation?: StallPresentation;
     outcome?: string;
     title?: string;
     hint?: string;
-  };
+  } | null;
   verdict?: NodeVerdict;
   bootstrapStop?: {
     reason: string;
