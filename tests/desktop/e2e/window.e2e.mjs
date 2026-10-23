@@ -222,7 +222,10 @@ async function verifyWebReload(page) {
 test('DW-E1: окно загружает выбранный origin с sandbox', options, async (t) => {
   const run = await createRun(t);
   const stub = await run.stub();
+  const started = Date.now();
   const { app, page } = await run.launch(stub.address);
+
+  assert.ok(Date.now() - started < 10_000, 'Готовая заглушка показывается быстрее 10 с.');
 
   await page.locator('#same').waitFor();
   assert.match(new URL(page.url()).origin, /^http:\/\/127\.0\.0\.1:471[0-9]{2}$/u);

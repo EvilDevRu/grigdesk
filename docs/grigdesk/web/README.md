@@ -14,6 +14,8 @@
 
 ## Устройство
 
+- [Местный сервер под заставкой: бюджет, вход, отмена и обнаружение по файлам](desktop-local-startup.md)
+
 - [Единый раздел плагинов: каталог, установленные и общая кнопка Git](../plugins/plugin-marketplace.md)
 
 - [Песочницы: создание, поиск, сведения о стенде, удаление и адаптив](sandboxes-design.md)
@@ -108,7 +110,7 @@
 - [Внешний выбор ELF/R/source, идентичность local и независимое сообщение переноса](desktop-server-selection.md)
 - [Ошибки подготовки местного сервера: код трубы и текст причины](desktop-preparation-errors.md)
 - [Ошибка местной установки не мешает запуску переносимого окна с remote](desktop-portable-local-errors.md)
-- [Приложение до готовности сервера: локальный выбор, каркас и отложенные запросы](application-first-startup.md)
+- [Старт приложения: ожидание местной машины, каркас и отложенные запросы](application-first-startup.md)
 - [Общие настройки: native-команда и совместимость прежнего адреса](desktop-settings-window.md)
 - [Несколько окон Electron: UA не наследуется, window.close, связь документов](electron-windows-behavior.md)
 - [Скрытое окно Electron: ready-to-show на каждый документ, модальность при скрытом родителе, выход](electron-hidden-window-startup.md)

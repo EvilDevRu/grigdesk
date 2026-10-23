@@ -45,7 +45,7 @@
 - [Изолированная сессия вернула 1 при PASS внутри = портал документов не снял FUSE-точку doc](isolated-session-doc-portal.md)
 - [Локальное окно: наблюдение событий, запрет SW, настоящий вход и SSE](desktop-window-e2e.md)
 - [Готовый пакет окна: spawn без inspector, fuses и постоянная шифрованная cookie](desktop-window-package.md)
-- [E2E старта окна: корень-фикстура, окружение по списку и отказ через stderr и SIGTERM](desktop-startup-e2e.md)
+- [E2E старта окна: ожидание local и входа, мягкий срок, изолированные фикстуры и выход](desktop-startup-e2e.md)
 - [SEA GUI-фикстура: явный выбор местной машины до ожидания рабочего экрана](sea-desktop-fixture.md)
 - [Горячая клавиша меню не срабатывает в тесте = Playwright не доводит клавиши до главного процесса Electron](electron-synthetic-keys.md)
 - [Файл теста висит до таймаута = в Node остался открытый BroadcastChannel](node-broadcast-channel.md)

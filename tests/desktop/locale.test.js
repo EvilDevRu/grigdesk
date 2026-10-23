@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { access } from 'node:fs/promises';
 import test from 'node:test';
 
+import { createDesktopLocale } from '../../desktop/src/locale.ts';
 import { applicationMenuTemplate, contextMenuTemplate } from '../../desktop/src/menu.ts';
 import { SPLASH_STATUS_TEXT } from '../../desktop/src/splashWindow.ts';
 import { localeMain } from './helpers/localeMain.js';
@@ -97,4 +98,17 @@ for (const readyFirst of [true, false]) {
         assert.equal(SPLASH_STATUS_TEXT, 'Загрузка…');
       });
   }
+}
+
+
+for (const [key, ru, en] of [
+  ['checkingServer', 'Проверка сервера…', 'Checking server…'],
+  ['startingServer', 'Запуск сервера…', 'Starting server…'],
+  ['preparingServer', 'Подготовка сервера…', 'Preparing server…'],
+  ['waitingVpn', 'Ожидание VPN…', 'Waiting for VPN…'],
+]) {
+  test(`I18N-D01: этап ${key} переведён в общем каталоге окна`, () => {
+    assert.equal(createDesktopLocale({ preference: 'ru' }).t(`desktop.${key}`), ru);
+    assert.equal(createDesktopLocale({ preference: 'en' }).t(`desktop.${key}`), en);
+  });
 }

@@ -40,6 +40,7 @@ const authKey = randomBytes(32).toString('base64url');
 const stub = await startStub({
   port: Number(process.env.GRIGDESK_PORT),
   authKey,
+  authStateDelayMs: Number(process.env.GRIGDESK_E2E_AUTH_DELAY_MS) || 0,
   packagedCookie: process.env.GRIGDESK_E2E_FIXTURE_PACKAGED_COOKIE || null,
   uiReleasesDir: process.env.GRIGDESK_UI_RELEASES_DIR
     || dataPath(dataHome({ env: process.env, home: os.homedir() }), 'uiReleases'),

@@ -5,6 +5,7 @@ import type { ServerRuntime } from './runtimeConfig.ts';
 
 export type StartDecision = 'connect' | 'wait' | 'spawn' | 'conflict';
 export type Ownership = 'none' | 'external' | 'owned';
+export type ServerStartupStage = 'checking' | 'starting' | 'preparing' | 'vpn';
 
 export interface ChildHandle {
   readonly pid?: number;
@@ -33,6 +34,7 @@ export interface ServerSupervisor {
   readonly ownership: Ownership;
   readonly generation: number;
   readonly waitReason: string | null;
+  readonly stage: ServerStartupStage | null;
   ensure(input: {
     origin: string;
     signal: AbortSignal;
@@ -83,6 +85,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
   let ownership: Ownership = 'none';
   let generation = 0;
   let waitReason: string | null = null;
+  let stage: ServerStartupStage | null = null;
   let current: OwnedChild | null = null;
   let pending: Promise<void> | null = null;
   let workController: AbortController | null = null;
@@ -121,6 +124,10 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
   async function decision(input: EnsureInput): Promise<StartDecision> {
     check(input);
 
+    if (stage !== 'vpn') {
+      stage = 'checking';
+    }
+
     const probe = await adapters.probe(input.signal);
 
     check(input);
@@ -140,6 +147,10 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
     const result = decideStart(probe, state);
 
     if (result === 'wait') {
+      if (stage !== 'vpn') {
+        stage = 'starting';
+      }
+
       waitReason = desktopText('desktop.serviceStarting');
     }
 
@@ -299,6 +310,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
    * После его раннего выхода один новый probe отличает внешнего владельца от отказа запуска.
    */
   async function waitOwn(child: OwnedChild, input: EnsureInput): Promise<void> {
+    stage = 'starting';
     waitReason = desktopText('desktop.ownServerStarting');
 
     while (!child.ended) {
@@ -395,6 +407,10 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
 
       waitReason = desktopText('desktop.preparingServer');
 
+      if (stage !== 'vpn') {
+        stage = 'preparing';
+      }
+
       const loaded = await adapters.loadRuntime({ purpose: 'start' });
 
       const runtime = 'runtime' in loaded ? loaded.runtime : null;
@@ -416,7 +432,10 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
 
         const gate = await adapters.runGate(runtime, input.signal);
 
+        check(input);
+
         if (gate.code !== 0) {
+          stage = 'vpn';
           // Строки скрипта ворот уже начинаются с «VPN-ворота:», префикс не дублируется.
           waitReason = gate.lastLine.startsWith('VPN-ворота')
             ? gate.lastLine : `VPN-ворота: ${gate.lastLine}`;
@@ -425,6 +444,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
         }
 
         check(input);
+        stage = 'checking';
 
         const repeated = await decision(input);
 
@@ -437,6 +457,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
           continue;
         }
 
+        stage = 'starting';
         spawned = observe(adapters.spawnServer(runtime), runtime);
 
         await waitAdoption(spawned, input);
@@ -503,6 +524,7 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
       activeInput.signal.removeEventListener('abort', onAbort);
       pending = null;
       workController = null;
+      stage = null;
     });
 
     return pending;
@@ -593,6 +615,9 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
     },
     get waitReason() {
       return waitReason;
+    },
+    get stage() {
+      return stage;
     },
     ensure,
     stop,
