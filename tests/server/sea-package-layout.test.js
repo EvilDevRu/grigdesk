@@ -20,6 +20,32 @@ const { auditStage } = stage;
 
 const SOURCE = path.resolve(import.meta.dirname, '../..');
 
+test('RET-ASSETS: снятый набор отсутствует в allowlist и исходниках', async (t) => {
+  const retiredSource = ['server', 'seed', 'agents'].join('/');
+
+  for (const name of ['resources.json', 'binary-resources.json']) {
+    await t.test(name, async () => {
+      const file = path.join(SOURCE, 'server/build', name);
+      const manifest = JSON.parse(await readFile(file, 'utf8'));
+
+      assert.equal(manifest.entries.some((entry) =>
+        entry.source === retiredSource || entry.target === retiredSource), false);
+    });
+  }
+
+  await t.test('опись ресурсов', async () => {
+    const file = path.join(SOURCE, 'server/build/sea-inventory.json');
+    const inventory = JSON.parse(await readFile(file, 'utf8'));
+    const retiredResource = ['server', 'seed', ''].join('/');
+
+    assert.equal(inventory.resources.some((resource) => resource.path === retiredResource), false);
+  });
+
+  await t.test('исходный каталог', async () => {
+    await assert.rejects(stat(path.join(SOURCE, retiredSource)), { code: 'ENOENT' });
+  });
+});
+
 /**
  * Создаёт только временные входы и staging одного теста.
  * Fixture не читает пользовательское состояние и удаляет собственный каталог.

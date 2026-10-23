@@ -52,6 +52,10 @@
               :size="19"
             />
             <template v-else>{{ letter(r) }}</template>
+            <ChatSleepBadge
+              v-if="r.sleep && !r.sending && !r.compacting"
+              :tasks="r.sleep.backgroundTasks"
+            />
             <span
               v-if="r.unread"
               class="udot"
@@ -94,6 +98,10 @@
               :size="19"
             />
             <template v-else>{{ letter(r) }}</template>
+            <ChatSleepBadge
+              v-if="r.sleep && !r.sending && !r.compacting"
+              :tasks="r.sleep.backgroundTasks"
+            />
             <span
               v-if="r.unread"
               class="udot"
@@ -151,11 +159,14 @@
 <script setup lang="ts">
 import type { ChatListRow } from '../../shared/chatContracts.ts';
 import type { UiFieldHandle } from '../../ui.ts';
+import type { ChatSleepingSession } from '../../../../shared/chat/chatBackgroundTasks.ts';
 
 import { computed, nextTick, ref, watch } from 'vue';
 import { useChatStore } from '../../stores/chat.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
+import ChatSleepBadge from './ChatSleepBadge.vue';
+import { useChatSleeping } from '../../composables/useChatSleeping.ts';
 import {
   confirmDialog,
   UiButton,
@@ -170,7 +181,7 @@ import {
 
 // Телеграм-сайдбар чатов: поиск сверху, ниже — активные либо архивные чаты.
 // Строка: аватар, название, сниппет последнего сообщения (или совпадения при поиске), время.
-type ListRow = ChatListRow & { modelName: string };
+type ListRow = ChatListRow & { modelName: string; sleep?: ChatSleepingSession };
 
 const chat = useChatStore();
 // open — «чат выбран, покажи его». Нужен мобильной раскладке, где список и чат делят одну
@@ -178,6 +189,7 @@ const chat = useChatStore();
 const emit = defineEmits(['open']);
 
 const prov = useProvidersStore();
+const { sessions: sleepingSessions } = useChatSleeping();
 
 prov.load();
 
@@ -203,6 +215,7 @@ const rows = computed(() => chat.list(q.value, showArchived.value).map((r: ChatL
     ...r,
     provider,
     modelName: model?.name || '',
+    sleep: sleepingSessions.value[r.id],
   };
 }));
 

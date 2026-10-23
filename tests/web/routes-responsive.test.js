@@ -63,7 +63,6 @@ async function fixture(t, draft = makeDraft()) {
       updatedAt: draft.updatedAt,
     }] },
     [`/api/routes/sample/catalog/${hash}/graph`]: { graph },
-    '/api/agents': { agents: [] },
   };
   const client = await clientBrowser(t, { responses });
 

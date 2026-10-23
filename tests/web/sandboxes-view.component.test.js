@@ -329,15 +329,15 @@ test('поиск по ветке и фильтр владельца сохран
   });
 
   await wrapper.find('[aria-label="Поиск стенда"]').setValue('ROUTE-TASK');
-  assert.equal(wrapper.findAll('.sandbox-card').length, 1);
+  assert.equal(wrapper.findAll('[data-context="workspace-catalog-row"]').length, 1);
   assert.match(wrapper.find('.sandbox-card h3').text(), /990000/);
   assert.match(wrapper.find('.sandboxes__jobs').text(), /Нет свободного слота/);
 
   await wrapper.find('[aria-label="Какие стенды показать"]').setValue('pipeline');
-  assert.equal(wrapper.findAll('.sandbox-card').length, 0);
+  assert.equal(wrapper.findAll('[data-context="workspace-catalog-row"]').length, 0);
   assert.match(wrapper.text(), /Подходящих стендов нет/);
   await wrapper.findAll('button').find((button) => button.text() === 'Сбросить').trigger('click');
-  assert.equal(wrapper.findAll('.sandbox-card').length, 2);
+  assert.equal(wrapper.findAll('[data-context="workspace-catalog-row"]').length, 2);
 });
 
 test('сворачивание формы сохраняет номер, а неправильный ввод не открывает подтверждение', async (t) => {

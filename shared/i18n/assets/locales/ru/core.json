@@ -1,4 +1,19 @@
 {
+  "toolReturnNarrow": "Расширьте главное окно для возврата в колонку.",
+  "toolReturnFailed": "Не удалось вернуть панель.",
+  "toolUnavailable": "Инструмент недоступен. Проверьте настройки плагинов.",
+  "toolStateNotReady": "Панель не подготовила восстановление состояния.",
+  "toolSourceNotReady": "Панель ещё не готова к передаче.",
+  "toolCodeBusy": "Дождитесь завершения операции в Коде.",
+  "toolCodeStateInvalid": "Неверный снимок Кода.",
+  "toolSshBusy": "Дождитесь завершения операции SSH.",
+  "toolDbBusy": "Дождитесь завершения запроса БД.",
+
+  "detachTool": "Открепить",
+  "returnTool": "Вернуть в колонку",
+  "closeTool": "Закрыть",
+  "toolWaiting": "Подключаем инструмент…",
+
   "settings": "Настройки",
   "close": "Закрыть",
   "cancel": "Отмена",
@@ -19,7 +34,6 @@
   "board": "Доска",
   "pipeline": "Конвейер",
   "sandboxes": "Песочницы",
-  "agents": "Агенты",
   "routes": "Маршруты",
   "projects": "Проекты",
   "terminal": "Терминал",
@@ -559,5 +573,32 @@
   "invalidPipelineSnapshot": "Сервер вернул некорректную сводку конвейера",
   "invalidPipelineGraph": "Сервер вернул некорректный граф конвейера",
   "relayAddress": "Через настроенный ретранслятор",
-  "desktopPairingPlaceholder": "GRIGDESK:PAIR:1:…"
+  "desktopPairingPlaceholder": "GRIGDESK:PAIR:1:…",
+  "chatSleepHeading": "Агент спит — ждёт фоновые задачи",
+  "chatSleepSubagents": {
+    "one": "{count} субагент:",
+    "few": "{count} субагента:",
+    "many": "{count} субагентов:",
+    "other": "{count} субагента:"
+  },
+  "chatSleepMonitors": {
+    "one": "{count} монитор:",
+    "few": "{count} монитора:",
+    "many": "{count} мониторов:",
+    "other": "{count} монитора:"
+  },
+  "chatSleepCommands": {
+    "one": "{count} фоновая команда:",
+    "few": "{count} фоновые команды:",
+    "many": "{count} фоновых команд:",
+    "other": "{count} фоновые команды:"
+  },
+  "chatSleepOther": {
+    "one": "{count} прочая задача:",
+    "few": "{count} прочие задачи:",
+    "many": "{count} прочих задач:",
+    "other": "{count} прочие задачи:"
+  },
+  "chatSleepNoDescription": "Без описания",
+  "chatSleepDescription": "• {description}"
 }

@@ -1,8 +1,6 @@
-import type { AgentCard, AgentDraft } from '../../shared/pipeline/agentsContracts';
 import type { ProjectRepoInput } from '../../shared/runtime/projectsContracts';
 import type { RouteRevision } from '../../shared/pipeline/routesContracts';
 import type { FactoryGraphData } from '../../shared/pipeline/factoryGraphContracts';
-import { agentsApi } from '../../web/src/shared/agentsApi';
 import { projectsApi } from '../../web/src/shared/projectsApi';
 import { routesApi } from '../../web/src/shared/routesApi';
 import { api } from '../../web/src/shared/apiClient';
@@ -18,7 +16,6 @@ type IsExactlyUnknown<Value> = [unknown] extends [Value]
 type Exact<Value extends true> = Value;
 
 export type TransportIsUnknown = Exact<IsExactlyUnknown<Awaited<ReturnType<typeof api.get>>>>;
-export type AgentsAreChecked = Checked<IsUnchecked<Awaited<ReturnType<typeof agentsApi.list>>>>;
 export type ProjectsAreChecked = Checked<IsUnchecked<Awaited<ReturnType<typeof projectsApi.list>>>>;
 export type RevisionsAreChecked = Checked<
   IsUnchecked<Awaited<ReturnType<typeof routesApi.revisions>>>
@@ -29,15 +26,11 @@ export type RevisionsAreChecked = Checked<
  * оставаться ошибкой: ослабление контракта сломает обязательный typecheck.
  */
 async function checkPipelineContracts(
-  agent: AgentCard,
   revision: RouteRevision,
   graph: FactoryGraphData,
 ): Promise<void> {
   // @ts-expect-error Ответ сети — unknown: превращать его в модель обязан декодер.
-  const rawAgents: AgentCard[] = await api.get('/api/agents');
-
-  // @ts-expect-error Времена карточки — числа, а не строки формы.
-  const badTimeout: AgentDraft = { ...agent, timeout: '900' };
+  const rawRevisions: RouteRevision[] = await api.get('/api/routes/grigdesk/revisions');
 
   // @ts-expect-error Источник пути назначает сервер: клиент его не присылает.
   const badRepo: ProjectRepoInput = { key: 'be', dir: '/srv/be', from: 'grigdesk' };
@@ -54,8 +47,7 @@ async function checkPipelineContracts(
   // @ts-expect-error Режим публикации закрыт перечислением.
   await routesApi.publish('grigdesk', 'deploy', null);
 
-  void rawAgents;
-  void badTimeout;
+  void rawRevisions;
   void badRepo;
   void statuses;
 }

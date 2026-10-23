@@ -1,12 +1,12 @@
+import { isToolWindowId, isToolInstance } from './toolWindowContract.ts';
+
 import { recordOrNull } from '../lib/objects.ts';
 
-export type SurfaceKind = 'task';
-export interface SurfaceTarget {
-  kind: SurfaceKind;
-  id: string;
-}
+export type SurfaceKind = 'task' | 'tool';
+export type SurfaceTarget = { kind: 'task'; id: string } | { kind: 'tool'; id: string };
+export type SurfaceDocument = SurfaceTarget & { instance?: string };
 export type MainRequest = { destination: 'pipeline' }
-  | { destination: 'task-dialog'; target: SurfaceTarget };
+  | { destination: 'task-dialog'; target: Extract<SurfaceTarget, { kind: 'task' }> };
 
 /**
  * Единственный реестр входов поверхности не принимает произвольные адреса.
@@ -14,6 +14,10 @@ export type MainRequest = { destination: 'pipeline' }
  */
 export function parseSurfaceTarget(value: unknown): SurfaceTarget | null {
   const item = recordOrNull(value);
+
+  if (item && Object.keys(item).length === 2 && item.kind === 'tool' && isToolWindowId(item.id)) {
+    return { kind: 'tool', id: item.id };
+  }
 
   if (!item || Object.keys(item).length !== 2 || item.kind !== 'task'
     || typeof item.id !== 'string' || !/^[1-9][0-9]{0,14}$/.test(item.id)) {
@@ -26,11 +30,16 @@ export function parseSurfaceTarget(value: unknown): SurfaceTarget | null {
  * Адрес поверхностей всегда принадлежит встроенному UI текущего origin.
  * Ни request body, ни реестр не подставляют удалённую страницу в BrowserWindow.
  */
-export function surfaceUrl(origin: string, target: SurfaceTarget): string {
+export function surfaceUrl(origin: string, target: SurfaceTarget, instance?: string): string {
   const url = new URL('/', origin);
 
   url.searchParams.set('surface', target.kind);
   url.searchParams.set('id', target.id);
+
+  if (target.kind === 'tool' && isToolInstance(instance)) {
+    url.searchParams.set('instance', instance);
+  }
+
   url.hash = '/surface';
 
   return url.href;
@@ -39,19 +48,29 @@ export function surfaceUrl(origin: string, target: SurfaceTarget): string {
  * Только точный вход документа позволяет восстановить target из адреса.
  * Дубли полей, fragment и неизвестные параметры не меняют назначение окна.
  */
-export function surfaceTargetFromUrl(value: string, origin: string): SurfaceTarget | null {
+export function surfaceTargetFromUrl(value: string, origin: string): SurfaceDocument | null {
   try {
     const url = new URL(value);
 
     if (url.origin !== origin || url.protocol !== 'http:' || url.username || url.password
-      || url.pathname !== '/' || url.hash !== '#/surface' || [...url.searchParams].length !== 2) {
+      || url.pathname !== '/' || url.hash !== '#/surface'
+      || [...url.searchParams].length !== (url.searchParams.get('surface') === 'tool' ? 3 : 2)
+      || new Set(url.searchParams.keys()).size !== [...url.searchParams].length) {
       return null;
     }
 
-    return parseSurfaceTarget({
+    const target = parseSurfaceTarget({
       kind: url.searchParams.get('surface'),
       id: url.searchParams.get('id'),
     });
+
+    if (target?.kind === 'tool') {
+      const instance = url.searchParams.get('instance');
+
+      return isToolInstance(instance) ? { ...target, instance } : null;
+    }
+
+    return target;
   }
   catch {
     return null;
@@ -76,7 +95,7 @@ export function parseMainRequest(value: unknown): MainRequest | null {
   if (Object.keys(item).length === 2 && item.destination === 'task-dialog') {
     const target = parseSurfaceTarget(item.target);
 
-    return target ? { destination: 'task-dialog', target } : null;
+    return target?.kind === 'task' ? { destination: 'task-dialog', target } : null;
   }
 
   return null;

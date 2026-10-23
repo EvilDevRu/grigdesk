@@ -12,8 +12,16 @@ function fixture() {
   let hold = null;
   let failCreate = false;
   const prepared = [];
+  const closed = [];
   const controller = createSurfaceWindows({
     allowedOrigin: () => origin,
+    closed(origin, target, instance) {
+      closed.push({
+        origin,
+        target,
+        instance,
+      });
+    },
     beforeShow(win) {
       prepared.push({ id: win.target.id, shows: win.shows });
     },
@@ -87,6 +95,7 @@ function fixture() {
     made,
     timers,
     prepared,
+    closed,
     changeOrigin(value) {
       origin = value;
     },
@@ -212,4 +221,84 @@ test('SW-04: закрытое окно освобождает задачу, от
   assert.equal(f.made.length, 4);
   assert.equal(f.made[3].index, 1);
   f.controller.closeAll();
+});
+
+test('TW-N01: concurrent tool open даёт одну instance, restore и focus-only без создания', async (t) => {
+  const f = fixture();
+  const origin = 'http://127.0.0.1:47101';
+  const target = { kind: 'tool', id: 'code' };
+  const gate = Promise.withResolvers();
+
+  t.after(() => f.controller.closeAll());
+  f.holdNext(gate.promise);
+
+  const first = f.controller.open(origin, target);
+  const second = f.controller.open(origin, target);
+
+  gate.resolve();
+
+  const result = await first;
+
+  assert.equal(result.opened, true, 'Tool open должен вернуть native instance, а не task boolean');
+  assert.equal(typeof result.instance, 'string');
+  assert.ok(result.instance.length > 0);
+  assert.deepEqual(await second, result);
+  assert.equal(f.made.length, 1);
+  assert.equal(f.made[0].loads.length, 1);
+
+  let restored = 0;
+
+  f.made[0].isMinimized = () => true;
+  f.made[0].restore = () => {
+    restored += 1;
+  };
+  assert.equal(await f.controller.focus(origin, target, result.instance), true);
+  assert.equal(restored, 1);
+  assert.equal(f.made.length, 1);
+  assert.equal(await f.controller.focus(origin, target, 'stale-instance'), false);
+  f.made[0].destroy();
+  assert.equal(await f.controller.focus(origin, target, result.instance), false);
+  assert.equal(f.made.length, 1);
+});
+
+test('TW-N02: closed/status проверяют instance; closeAll отменяет pending до show', async (t) => {
+  const f = fixture();
+  const origin = 'http://127.0.0.1:47101';
+  const target = { kind: 'tool', id: 'code' };
+
+  t.after(() => f.controller.closeAll());
+  assert.equal(typeof f.controller.status, 'function', 'Native пока не умеет сверять живые tool instances');
+
+  const first = await f.controller.open(origin, target);
+
+  assert.deepEqual(await f.controller.status(origin), [{ id: 'code', instance: first.instance }]);
+  assert.equal(await f.controller.close(origin, target, 'stale-instance'), false);
+  assert.equal(f.made[0].destroyed, false);
+  assert.equal(await f.controller.close(origin, target, first.instance), true);
+  assert.deepEqual(await f.controller.status(origin), []);
+  assert.deepEqual(f.closed, [{
+    origin,
+    target,
+    instance: first.instance,
+  }]);
+
+  const second = await f.controller.open(origin, target);
+
+  assert.notEqual(second.instance, first.instance);
+  f.made[0].destroy();
+  assert.deepEqual(await f.controller.status(origin), [{ id: 'code', instance: second.instance }]);
+  f.controller.closeAll();
+
+  const gate = Promise.withResolvers();
+
+  f.holdNext(gate.promise);
+
+  const pending = f.controller.open(origin, { kind: 'tool', id: 'shelf' });
+
+  f.controller.closeAll();
+  gate.resolve();
+  await pending;
+  assert.equal(f.made.at(-1).shows, 0);
+  assert.equal(f.made.at(-1).destroyed, true);
+  assert.deepEqual(await f.controller.status(origin), []);
 });

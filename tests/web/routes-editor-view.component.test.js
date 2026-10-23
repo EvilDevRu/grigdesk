@@ -597,6 +597,40 @@ test('RE-G2-01: устаревшее основание открывает previ
     assert.match(wrapper.text(), /Независимые правки объединятся/);
   });
 
+test('RET-LOAD: инструкции обоих scope не загружают библиотеку', async (t) => {
+  for (const scope of ['route', 'bootstrap']) {
+    await t.test(scope, async (t) => {
+      const draft = makeDraft();
+      const query = scope === 'route'
+        ? {
+          draft: draft.id,
+          route: 'quick',
+          node: 'build',
+          tab: 'prompt',
+        }
+        : {
+          draft: draft.id,
+          scope: 'bootstrap',
+          node: 'scout',
+          tab: 'prompt',
+        };
+      const { wrapper, calls, route, flushPromises } = await fixture(t, { query, createResponse: draft });
+
+      await flushPromises();
+      assert.equal(calls.some(([method, url]) => method === 'get'
+        && url === `/api/routes/sample/drafts/${draft.id}`), true);
+      assert.ok(wrapper.text().includes(`Черновик · r${draft.revision}`));
+      assert.equal(wrapper.find('[role="alert"]').exists(), false);
+      assert.equal(route.query.tab, 'prompt');
+      assert.equal(route.query.node, query.node);
+
+      const retiredApi = ['', 'api', 'agents'].join('/');
+
+      assert.deepEqual(calls.filter(([method, url]) => method === 'get' && url === retiredApi), []);
+    });
+  }
+});
+
 test('PD-entry: управление из черновиков ведёт в паспорт выбранного проекта', async (t) => {
   const { wrapper, pushes, flushPromises } = await fixture(t);
 

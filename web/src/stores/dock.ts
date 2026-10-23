@@ -5,6 +5,7 @@ interface DockIntent extends Record<string, unknown> {
 }
 
 interface DockState {
+  windowOwners: Record<string, boolean>;
   isOpen: boolean;
   isExpanded: boolean;
   expandedPreferences: Record<string, boolean>;
@@ -111,6 +112,7 @@ export const useDockStore = defineStore('dock', {
     const activeTool = stored(DOCK_TOOL_KEY) || null;
 
     return {
+      windowOwners: {},
       isOpen: false,
       // Развёрнутое состояние — только геометрия того же overlay-дока. Оно не
       // меняет route, не перезаписывает обычную ширину и не создаёт второй panel.

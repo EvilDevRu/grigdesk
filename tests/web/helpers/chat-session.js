@@ -79,7 +79,7 @@ function inertComponentStub(className) {
  * ChatSession бандлится единым TS-aware compiler-ом с настоящими UI primitives.
  * Stores, сеть, speech-controller и product children остаются границами сценария.
  */
-export function compileChatSession(prefix, { realSteps = false, expose = [] } = {}) {
+export function compileChatSession(prefix, { realSteps = false, expose = [], stubs = {} } = {}) {
   return compileVue(CHAT_SESSION_PATH, {
     expose,
     stubs: {
@@ -152,6 +152,7 @@ export function compileChatSession(prefix, { realSteps = false, expose = [] } = 
         'export const lastModelRun = () => null;',
         'export const modelRunView = () => ({ model: "" });',
       ].join('\n'),
+      ...stubs,
     },
   });
 }
@@ -161,7 +162,7 @@ export function compileChatSession(prefix, { realSteps = false, expose = [] } = 
  * У загрузки вложений настоящий ChatSession, а результат API задаётся тестом.
  * Два чата позволяют проверить, что поздний ответ остаётся у инициатора загрузки.
  */
-export async function chatUploadBoundaryFixture(t) {
+export async function chatUploadBoundaryFixture(t, { stubs = {} } = {}) {
   const { reactive } = await import('../../../web/node_modules/vue/index.mjs');
   const { mount, flushPromises } = await import(
     '../../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
@@ -240,7 +241,7 @@ export async function chatUploadBoundaryFixture(t) {
     modesOf: () => [],
   });
 
-  const Component = await compileChatSession('__uploadBoundary', {expose: ['addFiles', 'inputErr']});
+  const Component = await compileChatSession('__uploadBoundary', { expose: ['addFiles', 'inputErr'], stubs });
   const wrapper = mount(Component, {props: {sid: 'a'}});
 
   t.after(() => wrapper.unmount());

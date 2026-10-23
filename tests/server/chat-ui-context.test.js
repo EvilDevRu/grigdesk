@@ -67,7 +67,8 @@ test('COMP-SCTX-06/07/08: UI-context не выдаёт cwd, permissions или t
     },
   });
   assert.deepEqual(normalized.details, { selectedAgent: 'reviewer' });
-  assert.match(pageHint('/agents'), /шаблон/i);
+  assert.equal(pageHint('/agents'), '');
+  assert.notEqual(pageHint('/routes'), '');
   assert.equal(pageHint('/agents/../../tmp'), '');
   assert.equal(pageHint('/agents?x=1'), '');
 });
@@ -136,7 +137,6 @@ test('COMP-SCTX-06/07/08/10: живые chat routes используют context
       chatBindingsDir: path.join(root, 'bindings'),
       rootDir: root,
       factoryHome: root,
-      agentsDir: path.join(root, 'agents'),
       port: 18140,
     },
     factoryState: {

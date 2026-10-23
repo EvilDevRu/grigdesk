@@ -165,12 +165,12 @@ async function fixture(t, { store, viaRoutesModule = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-routes-api-'));
   const baseDir = path.join(root, 'routes');
   const app = Fastify({ logger: false });
+
   if (viaRoutesModule) {
     app.register(routesModule, {
       config: {
         routesDir: baseDir,
         profilesDir: path.join(root, 'profiles'),
-        agentsDir: path.join(root, 'agents'),
       },
       prefs: { read: () => ({}), write: () => {} },
     });

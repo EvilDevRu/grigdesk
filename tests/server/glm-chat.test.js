@@ -40,7 +40,6 @@ async function fixture(t, scenario = TEXT) {
     chatStoreLegacyPath: path.join(runtime.root, 'legacy.json'),
     chatBindingsDir: path.join(runtime.root, 'bindings'),
     factoryHome: runtime.root,
-    agentsDir: path.join(runtime.root, 'agents'),
     modelsPath: path.join(runtime.root, 'models.json'),
     port: 18145,
   };

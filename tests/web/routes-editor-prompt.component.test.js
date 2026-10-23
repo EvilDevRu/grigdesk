@@ -174,28 +174,6 @@ test('RE-E5-03: условие сохраняет false, 0 и null, requiredCont
       { context: 'task.other', equals: null });
   });
 
-test('RE-E5-04: заготовка копируется по значению; неизвестный kind не превращается в agent',
-  async (t) => {
-    const templates = [
-      { id: 'writer', kind: 'agent', label: 'Автор', prompt: 'Заготовка v1.\n' },
-      { id: 'mystery', kind: 'unknown', label: 'Иной тип', prompt: 'Не применять.\n' },
-    ];
-    const { wrapper, getDocument, flushPromises } = await fixture(t, makeDraft(), templates);
-    await wrapper.find('[data-test="template-select"]').setValue('writer');
-    await wrapper.find('[data-test="copy-template"]').trigger('click');
-    await flushPromises();
-    const afterCopy = getDocument();
-    const file = afterCopy.routes.quick.route.nodes[0].prompt.blocks[0].file;
-    assert.equal(afterCopy.routes.quick.prompts[file], 'Заготовка v1.\n');
-    templates[0].prompt = 'Заготовка v2.\n';
-    await wrapper.setProps({ templates: [...templates] });
-    assert.equal(getDocument().routes.quick.prompts[file], 'Заготовка v1.\n');
-    await wrapper.find('[data-test="template-select"]').setValue('mystery');
-    assert.match(wrapper.text(), /тип.*не поддерживается/i);
-    assert.equal(getDocument().routes.quick.route.nodes[0].executor, 'agent');
-    assert.equal(getDocument().routes.quick.prompts[file], 'Заготовка v1.\n');
-  });
-
 test('RE-E5-05: уход при dirty требует подтверждения, cancel сохраняет страницу', async () => {
   const { confirmDirtyRouteExit } = await compileModule(
     webFile('src/actions/routes/navigation.ts')
@@ -209,35 +187,59 @@ test('RE-E5-05: уход при dirty требует подтверждения,
   assert.equal(asked, 1);
 });
 
-test('RE-E5-07: обновление из заготовки показывает diff и меняет только показанный текст',
-  async (t) => {
-    const draft = makeDraft();
-    const originalPolicy = structuredClone(draft.routes.quick.route.nodes[0].policy);
-    const untouched = draft.routes.quick.prompts['prompts/build.audit.md'];
-    const templates = [{ id: 'writer', kind: 'agent', label: 'Автор',
-      prompt: 'Новая версия шаблона.\n' }];
-    const { wrapper, getDocument, flushPromises } = await fixture(t, draft, templates);
-    await wrapper.find('[data-test="template-select"]').setValue('writer');
-    await wrapper.find('[data-test="update-template"]').trigger('click');
-    assert.match(wrapper.find('[data-test="template-diff"]').text(),
-      /Создай проверяемый результат/);
-    assert.match(wrapper.find('[data-test="template-diff"]').text(),
-      /Новая версия шаблона/);
-    await wrapper.find('[data-test="cancel-template-update"]').trigger('click');
-    assert.equal(getDocument().routes.quick.prompts['prompts/build.base.md'],
-      'Создай проверяемый результат.\n');
-    await wrapper.find('[data-test="update-template"]').trigger('click');
-    await wrapper.find('[data-test="apply-template-update"]').trigger('click');
-    await flushPromises();
-    assert.equal(getDocument().routes.quick.prompts['prompts/build.base.md'],
-      'Новая версия шаблона.\n');
-    assert.equal(getDocument().routes.quick.prompts['prompts/build.audit.md'], untouched);
-    assert.deepEqual(getDocument().routes.quick.route.nodes[0].policy, originalPolicy);
-  });
-
 test('RE-E6-01: путь проблемы выбирает конкретный блок инструкции', async (t) => {
   const { wrapper } = await fixture(t, makeDraft(), [],
     '/routes/quick/route/nodes/0/prompt/blocks/1');
   assert.equal(wrapper.find('textarea').element.value,
     'Для аудита перечисли найденные риски.\n');
+});
+
+
+test('RET-PROMPT: инструкция не предлагает заготовки', async (t) => {
+  for (const scope of ['route', 'bootstrap']) {
+    await t.test(scope, async (t) => {
+      const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
+      const Component = await compileVue(webFile('src/views/routes/RoutePromptEditor.vue'), {
+        stubs: {
+          '../../ui': UI_STUB +
+            '\nexport { vTooltip } from "./src/services/tooltipDirective.ts";',
+          './RouteMarkdownInput.vue': MARKDOWN_STUB,
+        },
+      });
+      const { mount, flushPromises } = await import(
+        '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+      );
+      const document = makeDraft();
+      const wrapper = mount(Component, {
+        attachTo: browser.document.querySelector('#mount'),
+        props: {
+          document,
+          scope,
+          routeId: scope === 'route' ? 'quick' : '',
+          nodeId: scope === 'route' ? 'build' : 'scout',
+          templates: [{
+            id: 'writer',
+            kind: 'agent',
+            label: 'Автор',
+            prompt: 'Заготовка.\n',
+          }],
+        },
+      });
+
+      t.after(() => wrapper.unmount());
+      await flushPromises();
+
+      const expectedText = scope === 'route'
+        ? document.routes.quick.prompts['prompts/build.base.md']
+        : document.bootstrapPrompts['bootstrap/prompts/scout.base.md'];
+
+      assert.equal(wrapper.find('textarea').exists(), true);
+      assert.equal(wrapper.find('textarea').element.value, expectedText);
+      assert.doesNotMatch(wrapper.text(), /Заготовка из библиотеки/);
+
+      for (const control of ['template-select', 'copy-template', 'update-template', 'template-diff']) {
+        assert.equal(wrapper.find(`[data-test="${control}"]`).exists(), false, `${scope}: ${control}`);
+      }
+    });
+  }
 });

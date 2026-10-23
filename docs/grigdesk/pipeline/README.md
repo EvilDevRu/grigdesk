@@ -4,7 +4,7 @@
 
 Фабрика и движок маршрутов, граф попытки, ворота, арбитр и триаж.
 
-Читай перед правкой: `engine`, `server/src/modules/factory`, `server/src/modules/routes`, `server/src/modules/agents`, `web/src/views/pipeline`, `web/src/views/routes`.
+Читай перед правкой: `engine`, `server/src/modules/factory`, `server/src/modules/routes`, `web/src/views/pipeline`, `web/src/views/routes`.
 
 ## Контракты продукта
 
@@ -27,7 +27,6 @@
 - [DeepSeek: canonical prefs, runtime identity и host status каждого узла](deepseek-native-settings-runtime.md)
 
 - [Авто-шип фабрики](automatic-shipping.md)
-- [База агентов (modules/agents) — стадии конвейера](agent-stage-catalog.md)
 - [Маршруты (modules/routes)](route-management.md)
 - [Палитра](graph-palette.md)
 - [Сервер (server/src/lib/factoryGraph.ts)](graph-server.md)

@@ -6,6 +6,7 @@ import { messageRef } from '../ui.ts';
 // окон/устройств и переживает чистку браузера. Это единый источник истории для
 // полноразмерной страницы «Чаты» и Telegram-пульта.
 import { defineStore } from 'pinia';
+import { toRaw } from 'vue';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 import {
@@ -37,6 +38,7 @@ import {
   stringifyChatStoreSnapshot,
 } from '../shared/chatPersistenceProjection.ts';
 import { createChatHistoryStepReuseState, mayRetryFullHistory } from '../shared/chatHistoryStepReuse.ts';
+import { createChatSelectionState } from '../shared/chatSelectionState.ts';
 import { chatVisibility } from '../shared/chatVisibility.ts';
 import { normalizeContextUsage } from '../../../shared/chat/chatContextUsage.ts';
 import { normalizeChatRunSnapshot } from '../../../shared/chat/chatRun.ts';
@@ -283,18 +285,22 @@ let needSnapshot = false;
 // совсем, а клиент молча ретраил. Теперь объём запроса не зависит от размера истории.
 const historyPersistence = new WeakMap<object, ReturnType<typeof createChatHistoryStepReuseState>>();
 const persistenceProjections = new WeakMap<object, ReturnType<typeof createChatPersistenceProjectionCache>>();
+const selectionStates = new WeakMap<object, ReturnType<typeof createChatSelectionState>>();
 
 /**
  * Подтверждения и dirty-сигнатуры принадлежат экземпляру стора, а не Pinia-снимку.
  * Поколение данных защищает от позднего ACK после принятого GET или удаления чата.
+ * Devtools оборачивает каждый action новым Proxy; runtime использует общий raw-ключ.
  */
 function historyPersistenceFor(store: object) {
-  let state = historyPersistence.get(store);
+  const key = toRaw(store);
+  let state = historyPersistence.get(key);
 
   if (!state) {
     state = createChatHistoryStepReuseState();
-    historyPersistence.set(store, state);
-    persistenceProjections.set(store, createChatPersistenceProjectionCache({
+    historyPersistence.set(key, state);
+    selectionStates.set(key, createChatSelectionState());
+    persistenceProjections.set(key, createChatPersistenceProjectionCache({
       active: slimOf,
       archived: archivedSlimOf,
       fingerprint: fingerprintOf,
@@ -306,16 +312,28 @@ function historyPersistenceFor(store: object) {
     if (dispose && '$dispose' in store) {
       store.$dispose = () => {
         state?.clear();
-        previewCaches.get(store)?.clear();
-        persistenceProjections.get(store)?.clear();
-        persistenceProjections.delete(store);
-        historyPersistence.delete(store);
+        selectionStates.get(key)?.clear();
+        selectionStates.delete(key);
+        previewCaches.get(key)?.clear();
+        persistenceProjections.get(key)?.clear();
+        persistenceProjections.delete(key);
+        historyPersistence.delete(key);
         dispose.call(store);
       };
     }
   }
 
   return state;
+}
+
+/**
+ * Выбор пользователя хранится отдельно от сериализуемого состояния Pinia.
+ * Общий lifecycle сохранения освобождает его при загрузке и уничтожении стора.
+ */
+function selectionStateFor(store: object) {
+  historyPersistenceFor(store);
+
+  return selectionStates.get(toRaw(store))!;
 }
 
 const previewCaches = new WeakMap<object, ReturnType<typeof createChatListPreviewCache>>();
@@ -757,23 +775,29 @@ function fingerprintOf(chat: ChatHistorySnapshot) {
  * Применяет подтверждённые метаданные записи к тому же объекту чата.
  * Optional-поля меняются только при собственном ключе ответа сервера.
  */
-function applySaveAck(session: ChatRecord | null, response: ChatEnvelope | null) {
+function applySaveAck(
+  session: ChatRecord | null,
+  response: Pick<ChatEnvelope,
+    'revision' | 'schema' | 'surface' | 'modelRef' | 'modelRefState'
+    | 'workdir' | 'taskId' | 'workdirState' | 'sessionId' | 'pendingSeed'> | null,
+  { runtimeOnly = false, preserveModel = false } = {},
+) {
   if (!session || !response) {
     return;
   }
-  if (Number.isSafeInteger(response.revision)) {
+  if (!runtimeOnly && Number.isSafeInteger(response.revision)) {
     session.revision = response.revision;
   }
-  if (Number.isSafeInteger(response.schema)) {
+  if (!runtimeOnly && Number.isSafeInteger(response.schema)) {
     session.schema = response.schema;
   }
-  if (response.surface) {
+  if (!runtimeOnly && response.surface) {
     session.surface = response.surface;
   }
-  if (response.modelRef) {
+  if (!runtimeOnly && !preserveModel && response.modelRef) {
     session.modelRef = response.modelRef;
   }
-  if (response.modelRefState) {
+  if (!runtimeOnly && !preserveModel && response.modelRefState) {
     session.modelRefState = response.modelRefState;
   }
 
@@ -1066,11 +1090,11 @@ export const useChatStore = defineStore('chat', {
     list(s): (q: string, showArchived?: boolean) => ChatListRow[] { return (q, showArchived = false) => {
       historyPersistenceFor(this);
 
-      let previews = previewCaches.get(this);
+      let previews = previewCaches.get(toRaw(this));
 
       if (!previews) {
         previews = createChatListPreviewCache(mdToText);
-        previewCaches.set(this, previews);
+        previewCaches.set(toRaw(this), previews);
       }
 
       const t = q.trim().toLowerCase();
@@ -1404,8 +1428,9 @@ export const useChatStore = defineStore('chat', {
       }
       if (!loadPromise) {
         historyPersistenceFor(this).clear();
-        persistenceProjections.get(this)?.clear();
-        previewCaches.get(this)?.clear();
+        selectionStateFor(this).clear();
+        persistenceProjections.get(toRaw(this))?.clear();
+        previewCaches.get(toRaw(this))?.clear();
 
         loadPromise = (async () => {
           let j = null;
@@ -1709,10 +1734,6 @@ export const useChatStore = defineStore('chat', {
       if (role === 'error' && p.turnId) {
         s.error = p.reply || '';
       }
-      // Как и в send(): слайдер под реальный эффорт, дефолт новых чатов не трогаем.
-      if (ownsRuntime && p.effort && p.effort !== s.effort) {
-        s.effort = p.effort;
-      }
       // Строку хода старого синхронного запуска снимаем здесь. У принятого хода её
       // снимает chat-done или сверка активных ходов: в очереди чата мог стартовать
       // следующий ход, и ответ предыдущего не должен гасить его «думает…».
@@ -1745,7 +1766,7 @@ export const useChatStore = defineStore('chat', {
       const write = () => {
         const state = historyPersistenceFor(this);
 
-        const cache = persistenceProjections.get(this)!;
+        const cache = persistenceProjections.get(toRaw(this))!;
         const projections = {
           sessions: this.sessions.map((chat) => cache.get(chat)),
           archived: (this.archived || []).map((chat) => cache.get(chat, true)),
@@ -1801,7 +1822,7 @@ export const useChatStore = defineStore('chat', {
           // Страховка уже записана: обычный PUT получает отдельную задачу браузера.
           // Очередь заново читает чат; dispose отменяет ещё не начатую запись этого экземпляра.
           const send = new Promise((resolve) => setTimeout(resolve, 0)).then(() => (
-            historyPersistence.get(this) === state ? this._writeChat(c.id!) : null
+            historyPersistence.get(toRaw(this)) === state ? this._writeChat(c.id!) : null
           ));
 
           jobs.push(send);
@@ -1819,6 +1840,7 @@ export const useChatStore = defineStore('chat', {
           jobs.push(api.del(`/api/chat/store/chat/${id}?origin=${WINDOW_ID}`)
             .then(() => {
               historyPersistenceFor(this).forget(id);
+              selectionStateFor(this).forget(id);
             }));
         }
 
@@ -1979,7 +2001,7 @@ export const useChatStore = defineStore('chat', {
      * уходит. Ответ сервера (ревизия, модель) применяется и к живому чату, и к отпечатку:
      * иначе следующий снимок считался бы отличным от сервера и уехал бы повторно.
      */
-    async _putChat(id: string, force: boolean): Promise<ChatEnvelope | null> {
+    async _putChat(id: string, force: boolean, attempt = 0): Promise<ChatEnvelope | null> {
       const live = this._find(id);
 
       if (!live) {
@@ -2001,6 +2023,8 @@ export const useChatStore = defineStore('chat', {
       const fingerprint = fingerprintOf(snapshot);
       const steps = state.signature(snapshot);
       const generation = state.generation(id);
+      const selections = selectionStateFor(this);
+      const selected = selections.capture(id);
 
       if (!force && state.isSent(snapshot, fingerprint)) {
         return null;
@@ -2047,11 +2071,45 @@ export const useChatStore = defineStore('chat', {
         return response;
       }
 
-      applySaveAck(current, response);
+      if (response?.stale && !force) {
+        // До GET нельзя выдавать старым настройкам свежую CAS-базу или менять селект.
+        // Служебные поля памяти и папки по прежнему принадлежат серверу.
+        applySaveAck(current, response, { runtimeOnly: true });
+        state.resetBase(id);
+
+        const remote = decodeChatEnvelope(await api.get(`/api/chat/store/chat/${id}`)).chat;
+        const latest = this._find(id);
+
+        if (!latest || state.generation(id) !== generation) {
+          return response;
+        }
+        if (!remote || !Number.isSafeInteger(remote.revision)) {
+          throw chatRevisionConflict();
+        }
+        if ((latest.revision || 0) > (remote.revision || 0)) {
+          return response;
+        }
+
+        selections.rebase(id, latest, remote);
+        applySaveAck(latest, remote, { runtimeOnly: true });
+        latest.revision = remote.revision;
+
+        if (attempt + 1 >= CHAT_SAVE_ATTEMPTS) {
+          throw chatRevisionConflict();
+        }
+
+        return this._putChat(id, false, attempt + 1);
+      }
+
+      applySaveAck(current, response, { preserveModel: selections.newerModel(id, selected) });
 
       const acknowledged = { ...snapshot };
 
       applySaveAck(acknowledged, response);
+
+      if (!response?.stale) {
+        selections.acknowledge(id, selected, acknowledged);
+      }
 
       // Отпечаток — только полей снимка. Поле ответа, которого снимок не несёт (например,
       // modelRefState), навсегда делало чат «несохранённым», и каждая следующая запись
@@ -2080,6 +2138,7 @@ export const useChatStore = defineStore('chat', {
       const state = historyPersistenceFor(this);
 
       state.clear();
+      selectionStateFor(this).clear();
 
       for (const [sessions, archived] of [[this.sessions, false], [this.archived || [], true]] as const) {
         for (const session of sessions) {
@@ -3068,6 +3127,7 @@ export const useChatStore = defineStore('chat', {
       const appliedSnapshot = archived ? archivedSlimOf(applied) : slimOf(applied);
       const state = historyPersistenceFor(this);
 
+      selectionStateFor(this).forget(chat.id);
       state.markSent(appliedSnapshot, fingerprintOf(appliedSnapshot));
       state.acceptLoaded(applied);
       // Реплику с неподтверждённым приёмом отправляет другое окно. Если оно умерло до
@@ -3101,8 +3161,9 @@ export const useChatStore = defineStore('chat', {
       }
 
       historyPersistenceFor(this).forget(id);
-      persistenceProjections.get(this)?.remove(id);
-      previewCaches.get(this)?.remove(id);
+      selectionStateFor(this).forget(id);
+      persistenceProjections.get(toRaw(this))?.remove(id);
+      previewCaches.get(toRaw(this))?.remove(id);
 
       if (this.activeId === id) {
         this.activeId = this.sessions[0]?.id || this.archived[0]?.id || null;
@@ -3559,7 +3620,7 @@ export const useChatStore = defineStore('chat', {
       }
 
       this.archived.splice(j, 1);
-      previewCaches.get(this)?.remove(id);
+      previewCaches.get(toRaw(this))?.remove(id);
       historyPersistenceFor(this).resetBase(id);
 
       if (this.activeId === id) {
@@ -3878,6 +3939,7 @@ export const useChatStore = defineStore('chat', {
         return;
       }
 
+      selectionStateFor(this).change(id, 'mode', s, { ...s, mode: m });
       s.mode = m;
       this.defMode = m;
       this._persist();
@@ -3896,11 +3958,25 @@ export const useChatStore = defineStore('chat', {
       }
 
       const resolved = useProvidersStore().modelOf(m);
+      const before = {
+        model: s.model,
+        modelRef: s.modelRef,
+        effort: s.effort,
+      };
 
       s.model = resolved.id || m;
       s.modelRef = resolved.provider && resolved.model
         ? { provider: resolved.provider.id, model: resolved.model.id }
         : null;
+
+      const modelGeneration = selectionStateFor(this).change(id, 'model', before, s);
+
+      if (resolved.model && s.effort && !(resolved.model.efforts || []).includes(s.effort)) {
+        selectionStateFor(this).change(id, 'effort', before, { ...before, effort: '' }, modelGeneration);
+        s.effort = '';
+        this.defEffort = '';
+      }
+
       this.defModel = s.model;
       this.defModelRef = s.modelRef;
       this._persist();
@@ -3964,6 +4040,7 @@ export const useChatStore = defineStore('chat', {
         return;
       }
 
+      selectionStateFor(this).change(id, 'effort', s, { ...s, effort: e });
       s.effort = e;
       this.defEffort = e;
       this._persist();
@@ -4403,12 +4480,6 @@ export const useChatStore = defineStore('chat', {
             // Прерван перезапуском сервера или обрывом CLI: по метке чат предложит продолжить ход.
             ...(r.interruptedBy ? { interruptedBy: r.interruptedBy } : {}),
           });
-        }
-        // Сервер мог подменить эффорт (модель не тянет выбранный уровень) — подтягиваем
-        // слайдер под реальность, чтобы UI не врал. Пишем в сессию напрямую, НЕ через
-        // setEffort: вынужденный откат не должен становиться дефолтом для новых чатов.
-        if (r.effort && r.effort !== s.effort) {
-          s.effort = r.effort;
         }
 
         s.steps = [];

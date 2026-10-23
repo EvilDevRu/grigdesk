@@ -76,7 +76,6 @@ test('CD-DH-1 вся раскладка данных отделена от ко�
     telegramDir: 'telegram', 
     githubDir: 'github', 
     studio3dDir: '3d',
-    agentsDir: 'agents', 
     userPluginsDir: 'plugins', 
     mobileDir: 'mobile', 
     chatBindingsDir: 'chats/.bindings',
@@ -124,7 +123,6 @@ test('CD-DH-1 вся раскладка данных отделена от ко�
   assert.equal('webDist' in c, false);
   assert.equal('uiReleasesDir' in c, false);
   assert.equal(c.deepseekGenerationRoot, path.join(ROOT, 'server/runtime/deepseek'));
-  assert.equal(c.agentsSeedDir, path.join(ROOT, 'server/seed/agents'));
 });
 
 test('CD-DH-2 умолчание и CD-DH-5 чистый импорт не создаёт данных', (t) => {

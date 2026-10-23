@@ -805,8 +805,6 @@ const ICONS: Record<string, string> = {
   // Горка песка с песчинками буквально обозначает песочницу.
   sandbox: 'M3 20h18 M4 20c4-2 5-8 8-8s4 6 8 8 M9 5h.01 M14 3h.01 M12 8h.01 M9 17h.01 M15 18h.01',
   chats: 'M8 10h8 M8 14h5 M7 4h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H9l-4 4v-4a3 3 0 0 1-1-2V7a3 3 0 0 1 3-3z',
-  agents: 'M12 3v3 M12 3a1.2 1.2 0 1 0 0-.01 M8 6h8a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H8a3 3'
-    + ' 0 0 1-3-3V9a3 3 0 0 1 3-3z M9 12h.01 M15 12h.01 M9.5 16h5',
   routes: 'M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3z M9 3v15 M15 6v15',
   projects: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z',
   code: 'M9 8l-4 4 4 4 M15 8l4 4-4 4',
@@ -864,13 +862,6 @@ const nav = [
       return t('settings.chats');
     },
     icon: 'chats',
-  },
-  {
-    to: '/agents',
-    get label() {
-      return t('core.agents');
-    },
-    icon: 'agents',
   },
   {
     to: '/routes',

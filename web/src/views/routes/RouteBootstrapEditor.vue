@@ -33,7 +33,6 @@
     </div>
     <RoutePromptEditor v-if="activeNode?.prompt" :document="document" route-id=""
                        scope="bootstrap" :node-id="activeNodeId"
-                       :templates="templates"
                        :focus-path="focusedIssue?.path ?? ''"
                        @change="changePrompt" @end-history-group="emit('end-history-group')"
                        @save="emit('save')" />
@@ -43,7 +42,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { DraftMachine } from '../../../../shared/pipeline/routeDefinition.ts';
-import type { AgentCard } from '../../../../shared/pipeline/agentsContracts.ts';
 import type { RouteDraft, RouteEditorInfo,
   RouteEditorIssue } from '../../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteCommandScope } from './routeCommands.ts';
@@ -60,7 +58,6 @@ const props = defineProps<{
   selectedNodeId?: string;
   focusedIssue?: RouteEditorIssue | null;
   capabilities?: RouteEditorInfo['capabilities'] | null;
-  templates?: AgentCard[];
 }>();
 const emit = defineEmits<{
   change: [document: RouteDraft];
