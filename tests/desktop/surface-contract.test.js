@@ -81,3 +81,73 @@ test('SC-03: роль surface отделена от main и обычной ст�
     assert.equal(parseMainRequest(value), null);
   }
 });
+
+test('TC-01: tool target и канонический URL instance; адреса карточек побайтно прежние', () => {
+  const origin = 'http://127.0.0.1:47101';
+  const instance = 'tool-instance-aaaaaaaa';
+
+  for(const id of ['code', 'shelf', 'ssh', 'db', 'docker', 'plugin:example']) {
+    const target = { kind: 'tool', id };
+
+    assert.deepEqual(parseSurfaceTarget(target), target);
+
+    const url = surfaceUrl(origin, target, instance);
+
+    assert.equal(url, `${origin}/?surface=tool&id=${encodeURIComponent(id)}&instance=${instance}#/surface`);
+    assert.deepEqual(surfaceTargetFromUrl(url, origin), { ...target, instance });
+  }
+
+  assert.equal(surfaceUrl(origin, { kind: 'task', id: '42' }), origin + '/?surface=task&id=42#/surface');
+});
+
+test('TC-02: закрытый контракт не принимает лишние поля, запретные tools и чужие документы', () => {
+  const origin = 'http://127.0.0.1:47101';
+
+  for(const id of ['terminal', 'studio3d', 'unknown', 'plugin:../x', 'plugin:', 'plugin:X']) {
+    assert.equal(parseSurfaceTarget({ kind: 'tool', id }), null);
+  }
+
+  for(const input of [
+    {
+      kind: 'tool',
+      id: 'code',
+      url: 'https://example.org'
+
+
+    },
+    {
+      kind: 'tool',
+      id: 'code',
+      options: {}
+
+
+    },
+    { kind: 'unknown', id: 'code' },
+    {
+      kind: 'tool',
+      id: 'code',
+      instance: 'caller-created'
+
+
+    },
+  ]) {
+    assert.equal(parseSurfaceTarget(input), null);
+  }
+
+  const url = origin + '/?surface=tool&id=code&instance=tool-instance-aaaaaaaa#/surface';
+
+  for(const invalid of [
+    url.replace(origin, 'http://127.0.0.1:47102'),
+    url.replace('&instance=', '&id=shelf&instance='),
+    url.replace('#/surface', '&extra=1#/surface'),
+    url.replace('instance=tool-instance-aaaaaaaa', 'instance='),
+    url.replace('#/surface', '#/code'),
+    url.replace('/?surface', '/other?surface'),
+  ]) {
+    assert.equal(surfaceTargetFromUrl(invalid, origin), null);
+  }
+
+  assert.equal(parseMainRequest({
+    destination: 'task-dialog', target: { kind: 'tool', id: 'code' },
+  }), null);
+});

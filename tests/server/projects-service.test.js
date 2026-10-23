@@ -592,3 +592,212 @@ test('read неизвестного проекта и чужого id', async (t
     (error) => isProjectsError(error, 400, 'bad_id'),
   );
 });
+
+// К1–4,6–9: удаляется только регистрация; физические данные принадлежат другим владельцам.
+for (const source of ['prefs', 'profile', 'both']) {
+  test(`PD-remove: архивная регистрация удаляется из обоих источников (${source})`, async (t) => {
+    const { pdFixture } = await import('./helpers/projects-deletion.js');
+    const f = await pdFixture(t, { source });
+    const archived = await f.service.archive('demo', source === 'profile' ? 0 : 1);
+    const other = f.prefs.readStored().projects.other;
+
+    assert.equal(typeof f.service.remove, 'function', 'сервис должен удалять регистрацию');
+    await f.service.remove('demo', archived.revision);
+
+    const stored = f.prefs.readStored();
+
+    assert.equal(Object.hasOwn(stored.projects, 'demo'), false);
+    assert.equal(stored.projectsMeta.tombstones.demo.revision, archived.revision + 1);
+    assert.equal(stored.projectsMeta.tombstones.demo.deletedAt, '2026-10-20T10:00:00.000Z');
+    assert.equal(stored.projectsMeta.marker, 'соседнее поле');
+    assert.deepEqual(stored.projects.other, other);
+    assert.equal((await f.service.list()).some((item) => item.id === 'demo'), false);
+    await assert.rejects(f.service.read('demo'), { code: 'not_found', status: 404 });
+
+    const restarted = createProjectsService({ config: f.config, prefs: f.prefs });
+
+    assert.equal((await restarted.list()).some((item) => item.id === 'demo'), false);
+    await assert.rejects(restarted.read('demo'), { code: 'not_found' });
+    await assert.rejects(restarted.create(inputFor('demo', f.repos)), { code: 'tombstoned' });
+
+    for (const operation of [
+      () => restarted.update('demo', updateBody(f.repos), archived.revision),
+      () => restarted.archive('demo', archived.revision),
+      () => restarted.restore('demo', archived.revision),
+      () => restarted.dependencies('demo'),
+    ]) {
+      await assert.rejects(operation, { code: 'not_found' });
+    }
+  });
+}
+
+test('PD-CAS: remove проверяет ревизию и повтор', async (t) => {
+  const env = await withPrefs(t);
+  const { service, changes } = serviceFor(env);
+
+  await service.create(inputFor('demo', []));
+  assert.equal(typeof service.remove, 'function', 'remove отсутствует');
+
+  for (const [revision, code] of [[undefined, 'revision_required'], [-1, 'bad_revision'],
+  ['2', 'bad_revision'], [1.5, 'bad_revision']]) {
+    await assert.rejects(service.remove('demo', revision), { status: 400, code });
+  }
+
+  await assert.rejects(service.remove('missing', 0), { status: 404, code: 'not_found' });
+  await assert.rejects(service.remove('demo', 1), { status: 409, code: 'not_archived' });
+  await service.archive('demo', 1);
+  await assert.rejects(service.remove('demo', 1), { status: 409, code: 'revision_conflict' });
+  await service.remove('demo', 2);
+  await service.remove('demo', 2);
+  await assert.rejects(service.remove('demo', 3), { status: 409, code: 'revision_conflict' });
+  assert.equal(changes.filter((item) => item.kind === 'deleted').length, 1);
+});
+
+test('PD-retry: отказ очистки или финала не даёт успеха', async (t) => {
+  const { pdFixture, pdDeferred } = await import('./helpers/projects-deletion.js');
+  const f = await pdFixture(t, { source: 'prefs' });
+  const entered = pdDeferred();
+  const release = pdDeferred();
+  let calls = 0;
+  let fail = true;
+
+  await f.service.archive('demo', 1);
+  assert.equal(typeof f.service.registerDeletionCleanup, 'function', 'cleanup hook отсутствует');
+  f.service.registerDeletionCleanup(async ({ id, revision }, finalize) => {
+    assert.equal(id, 'demo');
+    assert.equal(revision, 2);
+    calls += 1;
+    entered.resolve();
+    await release.promise;
+
+    if (fail) {
+      throw new Error('настройки чатов: диск недоступен');
+    }
+
+    finalize();
+  });
+
+  const removing = f.service.remove('demo', 2);
+
+  await entered.promise;
+  assert.equal(f.events.some((event) => event.data.kind === 'deleted'), false);
+  assert.equal(f.prefs.readStored().projects.demo.revision, 2);
+  release.resolve();
+  await assert.rejects(removing, (error) => {
+    assert.equal(error.code, 'deletion_incomplete');
+    assert.match(error.message, /настройки чатов/);
+
+    return true;
+  });
+  assert.equal(f.prefs.readStored().projectsMeta.tombstones.demo, undefined);
+  fail = false;
+  await f.service.remove('demo', 2);
+  await f.service.remove('demo', 2);
+  assert.equal(calls, 2, 'идемпотентный повтор cleanup не вызывает');
+});
+
+test('PD-retry: повреждённые prefs не перезаписываются', async (t) => {
+  const env = await withPrefs(t);
+  const { service } = serviceFor(env);
+
+  assert.equal(typeof service.remove, 'function', 'remove отсутствует');
+  await writeFile(env.prefsPath, '{повреждено');
+  await assert.rejects(service.remove('demo', 2), (error) => error instanceof PrefsCorruptedError);
+  assert.equal(await readFile(env.prefsPath, 'utf8'), '{повреждено');
+});
+
+test('PD-files: remove сохраняет Git и владельцев', async (t) => {
+  const { pdFixture, pdSnapshot } = await import('./helpers/projects-deletion.js');
+  const f = await pdFixture(t, { git: true });
+
+  await f.service.archive('demo', 1);
+
+  const before = await pdSnapshot(f);
+
+  assert.equal(typeof f.service.remove, 'function', 'remove отсутствует');
+  await f.service.remove('demo', 2);
+  assert.deepEqual(await pdSnapshot(f), before);
+});
+
+test('PD-reference-delete-race: ссылка и удаление согласуются одной очередью', async (t) => {
+  const { pdFixture, pdDeferred } = await import('./helpers/projects-deletion.js');
+  const f = await pdFixture(t, { source: 'prefs' });
+  const entered = pdDeferred();
+  const release = pdDeferred();
+  let links = 0;
+
+  f.prefs.write({ showAllModels: false });
+  assert.equal(f.prefs.readStored().showAllModels, false);
+  await f.service.archive('demo', 1);
+  f.service.registerDependencyProvider({
+
+    kind: 'ssh',
+    label: 'SSH',
+    blocksArchive: false,
+    blocksDelete: true,
+
+    count: () => ({ count: links }),
+
+  });
+  assert.equal(typeof f.service.withReferences, 'function', 'очередь ссылок отсутствует');
+
+  const reference = f.service.withReferences(async () => {
+    entered.resolve();
+    await release.promise;
+    links += 1;
+  });
+
+  await entered.promise;
+
+  const removing = f.service.remove('demo', 2);
+
+  release.resolve();
+  await reference;
+  await assert.rejects(removing, { code: 'has_dependencies' });
+  links = 0;
+  f.service.registerDeletionCleanup(async (_context, finalize) => {
+    f.prefs.write({
+      showAllModels: true,
+      projects: {
+        ...f.prefs.readStored().projects,
+        other: { ...f.prefs.readStored().projects.other, title: 'Свежая правка' },
+      },
+    });
+    assert.equal(f.prefs.readStored().showAllModels, true);
+    finalize();
+  });
+  await f.service.remove('demo', 2);
+  await assert.rejects(f.service.withReferences(() => f.service.read('demo')), { code: 'not_found' });
+  assert.equal(f.prefs.readStored().projects.other.title, 'Свежая правка');
+  assert.equal(f.prefs.readStored().showAllModels, true);
+});
+
+test('PD-retry: ошибка финальной записи сохраняет архив и свежие соседние настройки', async (t) => {
+  const { pdFixture } = await import('./helpers/projects-deletion.js');
+  const f = await pdFixture(t, { source: 'prefs' });
+
+  await f.service.archive('demo', 1);
+  assert.equal(typeof f.service.remove, 'function', 'remove отсутствует');
+
+  const write = f.prefs.write.bind(f.prefs);
+  let fail = true;
+
+  t.mock.method(f.prefs, 'write', (patch) => {
+    if (fail && patch.projectsMeta?.tombstones?.demo) {
+      throw Object.assign(new Error('финальная запись запрещена'), { code: 'EACCES' });
+    }
+
+    return write(patch);
+  });
+  await assert.rejects(f.service.remove('demo', 2), (error) => {
+    assert.equal(error.code, 'deletion_incomplete');
+    assert.match(error.message, /запись регистрации/);
+
+    return true;
+  });
+  assert.equal(f.prefs.readStored().projects.demo.revision, 2);
+  assert.equal(f.prefs.readStored().projectsMeta.tombstones.demo, undefined);
+  fail = false;
+  await f.service.remove('demo', 2);
+  assert.equal(f.prefs.readStored().projectsMeta.tombstones.demo.revision, 3);
+});

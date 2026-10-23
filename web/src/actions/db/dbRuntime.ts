@@ -6,6 +6,7 @@ import type { useDbStore } from '../../stores/db.ts';
 export type DbStore = ReturnType<typeof useDbStore>;
 
 interface DbRuntime {
+  projectsRequest: number;
   off: (() => void) | null;
 }
 
@@ -20,7 +21,7 @@ export function runtimeOf(store: DbStore): DbRuntime {
   let runtime = runtimes.get(store);
 
   if (!runtime) {
-    runtime = { off: null };
+    runtime = { off: null, projectsRequest: 0 };
     runtimes.set(store, runtime);
   }
 

@@ -1,3 +1,5 @@
+import { toRaw } from 'vue';
+
 import { defineStore } from 'pinia';
 import { dockerApi, dockerErrorMessage } from '../shared/dockerApi';
 import { parseDockerStatsMessage } from '../../../shared/plugins/docker/dockerContracts';
@@ -54,9 +56,13 @@ const runtimes = new WeakMap<object, DockerRuntime>();
 
 /**
  * Хранит нереактивное соединение отдельно для каждого экземпляра стора.
+ * Ключ снимает devtools Proxy, чтобы следующий action нашёл прежнее соединение.
  */
 function runtimeOf(store: object): DockerRuntime {
-  let runtime = runtimes.get(store);
+  // Devtools оборачивает каждый вызов action новым Proxy; ключ соединения должен
+  // оставаться тем же после смены вкладки и unmount панели.
+  const owner = toRaw(store);
+  let runtime = runtimes.get(owner);
 
   if (!runtime) {
     runtime = {
@@ -65,7 +71,7 @@ function runtimeOf(store: object): DockerRuntime {
       generation: 0,
       watched: '',
     };
-    runtimes.set(store, runtime);
+    runtimes.set(owner, runtime);
   }
 
   return runtime;

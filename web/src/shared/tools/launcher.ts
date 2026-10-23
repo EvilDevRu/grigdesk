@@ -1,5 +1,12 @@
+import { getActivePinia } from 'pinia';
+
 import { useRoute, useRouter } from 'vue-router';
 import type { RouteLocationNormalizedLoaded, Router } from 'vue-router';
+
+import { getToolWindowCoordinator } from '../../stores/toolWindows.ts';
+import type { ToolWindowCoordinator } from '../../stores/toolWindows.ts';
+import { usePluginsStore } from '../../stores/plugins.ts';
+import { pluginPageRoute } from './catalog.ts';
 
 import { useDockStore } from '../../stores/dock.ts';
 import { TOOL_META_BY_ID } from './catalog.ts';
@@ -27,6 +34,7 @@ export interface LaunchContext {
   router: Router;
   dock: DockPort;
   canDock?: () => boolean;
+  toolWindows?: ToolWindowCoordinator;
 }
 
 /**
@@ -34,11 +42,19 @@ export interface LaunchContext {
  * поэтому команда не теряется ни на lazy import, ни на закрытом WebSocket.
  */
 export async function launchTool(
-  { route, router, dock, canDock = viewportCanDock }: LaunchContext,
+  { route, router, dock, toolWindows, canDock = viewportCanDock }: LaunchContext,
   id: string,
   intent: ToolIntent | null = null,
 ): Promise<boolean> {
-  const item = TOOL_META_BY_ID.get(id);
+  const coordinator = toolWindows ?? getToolWindowCoordinator(dock as ReturnType<typeof useDockStore>);
+
+  if (await coordinator?.activateIfDetached(id, intent)) {
+    return true;
+  }
+
+  const item = TOOL_META_BY_ID.get(id)
+    ?? (getActivePinia() && usePluginsStore().webPages.some((page) => page.id === id)
+      ? { route: pluginPageRoute(id) } : null);
 
   if (!item) {
     return false;

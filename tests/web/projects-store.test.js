@@ -312,3 +312,189 @@ test('повторный вызов проверки в окне склейки 
 
   assert.deepEqual(dirs, [['/srv/be']]);
 });
+
+test('PD-delete-transport: DELETE кодирует ID, передаёт revision и принимает пустой 204', async (t) => {
+  const sent = [];
+
+  globalThis.__pdDeleteApi = {
+
+    del: async (...args) => {
+      sent.push(args);
+
+      return undefined;
+    },
+  };
+  t.after(() => {
+    delete globalThis.__pdDeleteApi;
+  });
+
+  const { projectsApi } = await compileModule(webFile('src/shared/projectsApi.ts'), {
+    stubs: { './apiClient.ts': 'export const api = globalThis.__pdDeleteApi;' },
+  });
+
+  assert.equal(typeof projectsApi.remove, 'function', 'транспорт удаления отсутствует');
+  await projectsApi.remove('id/with space', 3);
+  assert.deepEqual(sent, [['/api/projects/id%2Fwith%20space', { expectedRevision: 3 }]]);
+});
+
+for (const operation of ['list', 'detail', 'dependencies', 'save', 'archive']) {
+  test(`PD-race: поздний ${operation} после deleted не возвращает выбор`, async (t) => {
+    const slow = deferred();
+    const entered = deferred();
+    let pending = false;
+    let deleted = false;
+    const api = apiWith();
+    const dependencies = {
+      items: [],
+      archivable: true,
+      deletable: true,
+      reasons: []
+    };
+    const fixture = await sectionFixture(t, {
+      ...api,
+      get: async (url) => {
+        const kind = url.endsWith('/dependencies')
+          ? 'dependencies' : url === '/api/projects' ? 'list' : 'detail';
+
+        if (pending && kind === operation) {
+          pending = false;
+          entered.resolve();
+          await slow.promise;
+
+          return kind === 'list' ? { projects: [SUMMARY] } : kind === 'dependencies' ? dependencies : DETAIL;
+        }
+        if (url === '/api/projects') {
+          return { projects: deleted ? [] : [SUMMARY] };
+        }
+
+        return kind === 'dependencies' ? dependencies : DETAIL;
+      },
+      put: async () => {
+        entered.resolve();
+        await slow.promise;
+
+        return DETAIL;
+      },
+      post: async () => {
+        entered.resolve();
+        await slow.promise;
+
+        return { ...DETAIL, archivedAt: '2026-10-20T10:00:00.000Z' };
+      },
+    });
+    const { store, loadProject, loadProjects, loadDependencies,
+      saveProject, archiveProject, watchProjects, emit } =
+      fixture;
+
+    await loadProjects();
+    await loadProject('demo');
+    watchProjects();
+    pending = true;
+
+    const request = operation === 'list' ? loadProjects()
+      : operation === 'detail' ? loadProject('demo')
+        : operation === 'dependencies' ? loadDependencies('demo')
+          : operation === 'save' ? saveProject('demo', store.draft)
+            : archiveProject('demo', { expectedRevision: 3 });
+
+    await entered.promise;
+    deleted = true;
+    emit('projects-changed', {
+      id: 'demo',
+      revision: 4,
+      kind: 'deleted'
+    });
+    slow.resolve();
+    await request;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(store.opened?.id ?? null, null);
+    assert.equal(store.items.some((item) => item.id === 'demo'), false);
+    assert.equal(store.dependencies, null);
+  });
+}
+
+test('PD-hello: успешный свежий список обнаруживает пропущенное удаление', async (t) => {
+  let removed = false;
+  const api = apiWith();
+  const { store, loadProjects, loadProject, watchProjects, emit } = await sectionFixture(t, {
+    ...api,
+    get: async (url) => url === '/api/projects' ? { projects: removed ? [] : [SUMMARY] } : DETAIL,
+  });
+
+  await loadProjects();
+  await loadProject('demo');
+  watchProjects();
+  removed = true;
+  emit('hello', null);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(store.opened?.id ?? null, null);
+  assert.equal(store.draft, null);
+});
+
+test('PD-neighbor: updated и чужой deleted сохраняют dirty', async (t) => {
+  const { store, loadProject, watchProjects, emit } = await sectionFixture(t, apiWith());
+
+  await loadProject('demo');
+  store.draft.title = 'Несохранённый текст';
+  watchProjects();
+  emit('projects-changed', {
+    id: 'demo',
+    revision: 4,
+    kind: 'updated'
+  });
+  emit('projects-changed', {
+    id: 'other',
+    revision: 2,
+    kind: 'deleted'
+  });
+  emit('projects-changed', { unexpected: 'данные' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(store.opened.id, 'demo');
+  assert.equal(store.draft.title, 'Несохранённый текст');
+});
+
+test('PD-failure: ошибка DELETE сохраняет паспорт, показывает причину и допускает повтор', async (t) => {
+  let fail = true;
+  let checks = 0;
+  const { store, loadProject, removeProject } = await sectionFixture(t, {
+    ...apiWith(),
+    get: async (url) => {
+      if (url.endsWith('/dependencies')) {
+        checks += 1;
+
+        return {
+          items: [],
+          archivable: true,
+          deletable: false,
+          reasons: ['Подключение SSH']
+        };
+      }
+
+      return url === '/api/projects' ? { projects: [] } : DETAIL;
+    },
+    del: async () => {
+      if (fail) {
+        throw Object.assign(new Error('Переназначьте подключение SSH'), {
+          status: 409,
+          data: { error: 'has_dependencies', message: 'Переназначьте подключение SSH' },
+        });
+      }
+    },
+  });
+
+  await loadProject('demo');
+  assert.equal(typeof removeProject, 'function', 'операция удаления отсутствует');
+
+  const rejected = await removeProject('demo', { expectedRevision: 3 });
+
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.message, /Переназначьте подключение SSH/);
+  assert.equal(store.opened.id, 'demo');
+  assert.equal(checks, 1);
+  fail = false;
+
+  const repeated = await removeProject('demo', { expectedRevision: 3 });
+
+  assert.equal(repeated.ok, true);
+  assert.equal(store.opened, null);
+});

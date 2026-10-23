@@ -41,9 +41,17 @@ function connection(overrides = {}) {
   };
 }
 
+/**
+ * Операции SSH используют реальный стор и управляемый общий транспорт.
+ * События доставляются сохранённым подписчикам без отдельного EventSource.
+ */
 async function sshSection(t, api, sockets = []) {
   await installUiBrowser(t, 'http://grigdesk.test/#/ssh');
   globalThis.__sshStoreApi = api;
+
+  const listeners = [];
+
+  globalThis.__sshProjectListeners = listeners;
   globalThis.__sshStoreSocket = class {
     constructor(url) {
       this.url = url;
@@ -64,7 +72,8 @@ async function sshSection(t, api, sockets = []) {
   const module = await compileModule(ACTIONS_PATH, {
     stubs: {
       './apiClient.ts': 'export const api = globalThis.__sshStoreApi;',
-      '../../composables/useSse.ts': 'export const sseSubscribe = () => () => {};',
+      '../../composables/useSse.ts': 'export const sseSubscribe = (fn) => {'
+        + ' globalThis.__sshProjectListeners.push(fn); return () => {}; };',
     },
   });
   const { createPinia, setActivePinia } = await import(
@@ -81,7 +90,11 @@ async function sshSection(t, api, sockets = []) {
     delete globalThis.__sshStoreSocket;
   });
 
-  return { module, store };
+  return {
+    module,
+    store,
+    emit: (name, data) => listeners.forEach((fn) => fn(name, data))
+  };
 }
 
 test('пароль отправляется байтами без JSON-сериализации', async (t) => {
@@ -283,3 +296,45 @@ test('стор SSH не знает ни путей API, ни транспорт�
   assert.equal(/\/api\//u.test(source), false, 'адреса API живут в слое операций');
   assert.equal(/WebSocket/u.test(source), false, 'канал терминала живёт в слое операций');
 });
+
+
+for (const event of ['projects-changed', 'hello']) {
+  test(`PD-ssh-catalog: ${event} обновляет выбор, поздний ответ не возвращает удалённое`, async (t) => {
+    const slow = Promise.withResolvers();
+    let call = 0;
+    const { module, store, emit } = await sshSection(t, {
+      get: async (url) => {
+        assert.equal(url, '/api/projects');
+        call += 1;
+
+        if (call === 2) {
+          await slow.promise;
+
+          return { projects: [{ id: 'demo' }, { id: 'other' }] };
+        }
+
+        return { projects: call === 1 ? [{ id: 'demo' }, { id: 'other' }] : [{ id: 'other' }] };
+      },
+    });
+
+    await module.loadSshProjects();
+    store.sessions = [session()];
+
+    const before = JSON.stringify(store.sessions);
+
+    module.watchSsh();
+
+    const old = module.loadSshProjects();
+
+    emit(event, {
+      id: 'demo',
+      revision: 4,
+      kind: 'deleted'
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    slow.resolve();
+    await old;
+    assert.deepEqual(store.projects.map((item) => item.id), ['other']);
+    assert.equal(JSON.stringify(store.sessions), before);
+  });
+}

@@ -29,8 +29,8 @@ export function watchSandboxes(): void {
   }
 
   runtime.off = sseSubscribe((name: string, data: unknown) => {
-    if (name === 'sandboxes-changed') {
-      void loadSandboxes();
+    if (name === 'sandboxes-changed' || name === 'projects-changed' || name === 'hello') {
+      void loadSandboxes({ fresh: name !== 'sandboxes-changed' });
     }
 
     if (name === 'sandbox-progress') {

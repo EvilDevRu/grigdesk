@@ -169,6 +169,7 @@ const emit = defineEmits<{
 const store = useDockerStore();
 const tab = ref<DockerTab>('containers');
 const viewer = reactive<DockerViewer>({ kind: '', container: null });
+let pendingViewer: { kind: ViewerKind; container: DockerContainer } | null = null;
 
 const available = computed(() => Boolean(store.health?.available && !store.error));
 const connectionLabel = computed(() => {
@@ -230,6 +231,8 @@ watch(() => props.active, async (active) => {
     return;
   }
 
+  restoreViewer();
+
   // Рейка получает статус после ответа, когда уже известно состояние демона.
   await store.load();
   emit('status', store.health?.available ? 'open' : 'closed');
@@ -249,6 +252,40 @@ watch(() => store.containers, (containers) => {
     closeViewer();
   }
 });
+
+function exportState() {
+  return { tab: tab.value, viewer: { kind: viewer.kind, containerId: viewer.container?.id ?? '' } };
+}
+
+/**
+ * Возврат сначала импортирует снимок в скрытую панель, затем показывает колонку.
+ * Просмотрщик монтируется активным, чтобы его единственный клиент открыл соединение.
+ */
+function restoreViewer() {
+  if (props.active && pendingViewer) {
+    openViewer(pendingViewer.kind, pendingViewer.container);
+    pendingViewer = null;
+  }
+}
+
+/**
+ * Восстанавливает вкладку и просмотрщик после перечитывания контейнеров.
+ * Соединения статистики принадлежат только новому смонтированному экземпляру.
+ */
+async function importState(state: Record<string, unknown>) {
+  await store.load();
+  selectTab(String(state.tab));
+
+  const selected = state.viewer as { kind?: string; containerId?: string } | undefined;
+  const container = store.containers.find((item) => item.id === selected?.containerId);
+
+  if (container && (selected?.kind === 'logs' || selected?.kind === 'exec')) {
+    pendingViewer = { kind: selected.kind, container };
+    restoreViewer();
+  }
+}
+
+defineExpose({ exportState, importState });
 
 onBeforeUnmount(() => {
   store.stopStats();

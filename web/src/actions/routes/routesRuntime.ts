@@ -25,7 +25,7 @@ export interface RoutesRuntime {
   saveQueued: boolean;
   pendingDraftRevision: number | null;
   watchProfile: string | null;
-  watchCatalogChanged: (() => void) | null;
+  watchCatalogChanged: ((event?: string) => void) | null;
   watchOff: (() => void) | null;
   watchFocusOff: (() => void) | null;
   operationId: () => string;

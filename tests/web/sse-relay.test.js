@@ -157,3 +157,75 @@ test('SR-04: вход приложения задаёт роль до журна
   assert.match(source, /surface: 'mirror'/);
   assert.match(source, /page: 'off'/);
 });
+
+test('TW-EVENT01: tool события проходят source→mirror без второго EventSource и chat-step', (t) => {
+  const sources = installEventSource(t);
+  const channels = [];
+  const received = [];
+  const names = ['chat-done', 'ssh-sessions', 'ssh-audit', 'db-sessions', 'db-queries', 'db-audit'];
+
+  configureSseRelay('source', () => fakeChannel(channels));
+  sseSubscribe(() => { });
+
+  for(const name of [...names, 'chat-step']) {
+    assert.equal(typeof sources[0].listeners.get(name), 'function');
+    sources[0].listeners.get(name)({ data: JSON.stringify({ marker: name }) });
+  }
+
+  assert.equal(channels.length, 1, 'Новые события не создают relay: отсутствуют в RELAYED_EVENTS');
+
+  const sent = structuredClone(channels[0].posted);
+
+  assert.deepEqual(sent.map((message) => message.name), names);
+  resetSseForTests();
+  configureSseRelay('mirror', () => fakeChannel(channels));
+  sseSubscribe((name, data) => received.push({ name, data }));
+
+  for(const data of sent) {
+    channels.at(-1).onmessage({ data });
+  }
+
+  assert.equal(sources.length, 1);
+  assert.deepEqual(received.map((item) => item.name), names);
+  assert.deepEqual(received.map((item) => item.data.marker), names);
+});
+
+test('PD-relay: deleted доходит в mirror, page сохраняет один поток', (t) => {
+  const sources = installEventSource(t);
+  const channels = [];
+  const received = [];
+  const data = {
+    id: 'demo',
+    revision: 3,
+    kind: 'deleted'
+  };
+
+  configureSseRelay('source', () => fakeChannel(channels));
+  sseSubscribe((name, value) => received.push({ name, data: value }));
+  sources[0].listeners.get('projects-changed')({ data: JSON.stringify(data) });
+  assert.equal(sources.length, 1);
+  assert.deepEqual(received, [{ name: 'projects-changed', data }]);
+  assert.equal(channels.length, 1, 'projects-changed должен ретранслироваться в канал окон');
+  assert.deepEqual(channels[0].posted, [{
+    version: 1,
+    name: 'projects-changed',
+    data
+  }]);
+
+  const packet = channels[0].posted[0];
+
+  resetSseForTests();
+  sources.length = 0;
+  received.length = 0;
+  configureSseRelay('mirror', () => fakeChannel(channels));
+  sseSubscribe((name, value) => received.push({ name, data: value }));
+
+  const deliver = (value) => channels.at(-1).onmessage({ data: value });
+
+  deliver(packet);
+  deliver({ ...packet, version: 99 });
+  deliver({ ...packet, name: 'execute' });
+  deliver({ ...packet, extra: true });
+  assert.deepEqual(received, [{ name: 'projects-changed', data }]);
+  assert.equal(sources.length, 0);
+});

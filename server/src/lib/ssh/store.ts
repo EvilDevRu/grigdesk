@@ -30,6 +30,8 @@ export interface SshConnectionInput {
 export interface SshStoreOptions {
   dir?: string;
   file?: string;
+  withReferences?: <T>(op: () => Promise<T>) => Promise<T>;
+  isProjectDeleted?: (id: string) => boolean;
   projects?: () => { id: unknown }[] | Promise<{ id: unknown }[]>;
 }
 
@@ -82,7 +84,10 @@ async function writePrivate(file: string, value: unknown): Promise<void> {
  * отбрасывается на границе нормализации и никогда не попадает в DTO или файл.
  */
 export async function createSshStore(
-  { dir = '', file = '', projects = () => [] }: SshStoreOptions = {},
+  {
+    dir = '', file = '', projects = () => [], withReferences = (op) => op(),
+    isProjectDeleted = () => false,
+  }: SshStoreOptions = {},
 ): Promise<SshStore> {
   const target = file || path.join(dir, 'connections.json');
   let connections: SshConnection[] = [];
@@ -95,7 +100,15 @@ export async function createSshStore(
     }
   }
 
+  /**
+   * Ссылка проверяется строго внутри очереди регистрации, до изменения соединений.
+   * Нечитаемые настройки не позволяют обнаружить удалённый проект через профиль.
+   */
   async function validate(candidate: SshConnection, exceptId = ''): Promise<void> {
+    if (isProjectDeleted(candidate.projectId)) {
+      throw new SshFailure('project_not_found', 'Регистрация проекта SSH-соединения удалена');
+    }
+
     const knownProjects = await Promise.resolve(projects() || []);
     if (!knownProjects.some((project) => String(project.id) === candidate.projectId)) {
       throw new SshFailure('project_not_found', 'Проект SSH-соединения не существует');
@@ -115,24 +128,28 @@ export async function createSshStore(
   }
 
   async function create(input: SshConnectionInput): Promise<SshConnection> {
-    const candidate = cleanConnection(input);
-    await validate(candidate);
-    connections.push(candidate);
-    await writePrivate(target, connections);
-    return structuredClone(candidate);
+    return withReferences(async () => {
+      const candidate = cleanConnection(input);
+      await validate(candidate);
+      connections.push(candidate);
+      await writePrivate(target, connections);
+      return structuredClone(candidate);
+    });
   }
 
   async function update(idValue: string, input: SshConnectionInput): Promise<SshConnection> {
-    const id = String(idValue || '');
-    const index = connections.findIndex((connection) => connection.id === id);
-    if (index < 0) {
-      throw new SshFailure('not_found', 'SSH-соединение не найдено');
-    }
-    const candidate = cleanConnection({ ...connections[index], ...input }, id);
-    await validate(candidate, id);
-    connections[index] = candidate;
-    await writePrivate(target, connections);
-    return structuredClone(candidate);
+    return withReferences(async () => {
+      const id = String(idValue || '');
+      const index = connections.findIndex((connection) => connection.id === id);
+      if (index < 0) {
+        throw new SshFailure('not_found', 'SSH-соединение не найдено');
+      }
+      const candidate = cleanConnection({ ...connections[index], ...input }, id);
+      await validate(candidate, id);
+      connections[index] = candidate;
+      await writePrivate(target, connections);
+      return structuredClone(candidate);
+    });
   }
 
   async function remove(idValue: string): Promise<boolean> {

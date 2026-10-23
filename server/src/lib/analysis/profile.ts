@@ -39,11 +39,13 @@ export interface TriageProfilePaths {
 
 /**
  * Читает переменные профиля фабрики. Профиль не читается — возвращаются пустые
- * значения: триаж работает вслепую, но работает.
+ * значения: триаж работает вслепую, но работает. Строгий читатель снимка истории
+ * получает ошибку, чтобы не закрепить непроверенную пустоту после удаления проекта.
  */
 export async function loadTriageProfile(
   { factoryHome, profilesDir }: TriageProfilePaths,
   name?: string,
+  { strict = false }: { strict?: boolean } = {},
 ): Promise<TriageProfile> {
   const empty: TriageProfile = {
     ctx: '',
@@ -55,7 +57,14 @@ export async function loadTriageProfile(
     rules: [],
     workspaceMode: null,
   };
-  if (!name || !factoryHome || !profilesDir) return empty;
+
+  if (!name || !factoryHome || !profilesDir) {
+    if (strict) {
+      throw new Error('Не заданы пути чтения профиля проекта.');
+    }
+
+    return empty;
+  }
   const file = path.join(profilesDir, name, 'profile.sh');
   const script = `source "${file}" >/dev/null 2>&1 || exit 1
 __triage_mode=$(declare -F profile_workspace_mode >/dev/null && profile_workspace_mode 2>/dev/null)
@@ -67,7 +76,14 @@ printf '%s${SEP}' "$PROFILE_CTX" "$PROFILE_AGENT_CWD" "$PROFILE_AGENT_DIRS" "$PR
       timeout: 10000,
     }, (err, stdout) => resolve(err ? null : stdout));
   });
-  if (out === null) return empty;
+
+  if (out === null || out.split(SEP).length !== 9) {
+    if (strict) {
+      throw new Error('Не удалось прочитать корни профиля проекта.');
+    }
+
+    return empty;
+  }
 
   const [
     ctx = '',

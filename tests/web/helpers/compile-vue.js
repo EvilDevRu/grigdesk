@@ -384,7 +384,10 @@ export async function compileBoundary(relative, expose, additional = {}) {
     'vue-router': `${viewPrelude}
       export const useRoute = () => h.route;
       export const useRouter = () => h.router;`,
-    '../composables/useSse.ts': 'export const useSse = () => ({connected: {value: true}});',
+    '../composables/useSse.ts': `
+      export const useSse = () => ({connected: {value: true}});
+      export const sseSubscribe = () => () => {};
+    `,
     '../composables/useUiContextSource.ts': `export const useUiContextSource = () => ({
       focus() {}, update() {}, blur() {},
     });`,

@@ -14,6 +14,8 @@
 
 ## Устройство
 
+- [Терминальное меню CLI: язык, прогресс, TERM=dumb, журналы и прерывание](cli-terminal-menu.md)
+
 - [Переносимая папка: свежая сборка, архив, первый запуск и меню](portable-bundle.md)
 
 - [Каталог плагинов: автоматический выбор сайта и закрытый локальный API](../plugins/plugin-marketplace.md)
@@ -126,3 +128,4 @@
 - [StartLimitIntervalSec=0 в юните GrigDesk — не украшение](systemd-start-limit.md)
 - [Старт модуля не ждёт тяжёлых проб: лимит Fastify на плагин](plugin-start-timeout.md)
 - [Повторный deploy/install.sh без флага включает автозапуск обратно](install-resets-autostart.md)
+- [`node --watch` теряет импорт, на котором упал, и не поднимается после исправления](node-watch-lost-import.md)

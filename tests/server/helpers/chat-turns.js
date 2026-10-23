@@ -126,6 +126,8 @@ export async function chatAppFixture(t, {
   extraRoutes = null,
   taskEnv = null,
   modelsRegistry = async () => ({ 'test-provider': [{ id: 'test-model', efforts: [] }] }),
+  syntheticPorts = {},
+  configOverrides = {},
   // Паузы автопродолжения для интеграционных проверок: короткие значения вместо
   // боевых минут, чтобы тест ждал событие, а не реальное время.
   autoContinueDelaysMs = null,
@@ -175,6 +177,7 @@ export async function chatAppFixture(t, {
     factoryHome: root,
     artifactsDir: path.join(root, 'artifacts'),
     port: 18140,
+    ...configOverrides,
   };
 
   await app.register(chatModule, {
@@ -202,6 +205,7 @@ export async function chatAppFixture(t, {
     backgroundStopGraceMs,
     shutdownGraceMs,
     shutdownInterruptMs,
+    ...syntheticPorts,
   });
 
   if (extraRoutes) {

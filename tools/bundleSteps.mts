@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import type { BuildStepEvent } from '../shared/node/buildStepEvents.ts';
 import { acquireDirectoryLock } from '../shared/node/directoryLock.ts';
 import { sha256File } from '../shared/node/hash.ts';
 import { auditStage, normalizeStageModes } from '../server/scripts/sea/stage.mts';
@@ -24,6 +25,7 @@ export interface BundleBuildInput {
 
 interface BundleOptions {
   root: string;
+  onStep?(event: BuildStepEvent): void;
   env?: NodeJS.ProcessEnv;
   builders: Record<Stage, (input: BundleBuildInput) => Promise<string>>;
   readSourceState?(): Promise<{ commit: string; dirty: boolean }>;
@@ -152,6 +154,36 @@ export async function executeBundle(options: BundleOptions): Promise<void> {
   let work: string | undefined;
   let preserve = false;
 
+  /**
+   * Наблюдение обрамляет прежнюю фазу и не скрывает её исходную ошибку.
+   * После отказа end содержит код ребёнка, следующие фазы не запускаются.
+   */
+  async function step<T>(id: string, action: () => Promise<T>): Promise<T> {
+    options.onStep?.({ type: 'start', id });
+
+    try {
+      const result = await action();
+
+      options.onStep?.({
+        type: 'end',
+        id,
+        code: 0,
+      });
+
+      return result;
+    } catch (error) {
+      const code = Number((error as { code?: unknown }).code);
+
+      options.onStep?.({
+        type: 'end',
+        id,
+        code: Number.isInteger(code) && code > 0 ? code : 1,
+      });
+
+      throw error;
+    }
+  }
+
   try {
     const source = options.readSourceState ? await options.readSourceState() : {
       commit: (await execute('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim(),
@@ -176,79 +208,85 @@ export async function executeBundle(options: BundleOptions): Promise<void> {
     await files.mkdir(path.join(stage, 'bin/lib'), { recursive: true });
 
     for (const name of Object.keys(targets) as Stage[]) {
-      const outDir = path.join(work, 'build', name);
-      const cacheDir = path.join(work, 'cache', name);
+      await step(`bundle.${name}`, async () => {
+        const outDir = path.join(work!, 'build', name);
+        const cacheDir = path.join(work!, 'cache', name);
 
-      await files.mkdir(outDir, { recursive: true });
-      await files.mkdir(cacheDir, { recursive: true });
+        await files.mkdir(outDir, { recursive: true });
+        await files.mkdir(cacheDir, { recursive: true });
 
-      const output = await options.builders[name]({
-        outDir,
-        cacheDir,
-        env,
+        const output = await options.builders[name]({
+          outDir,
+          cacheDir,
+          env,
+        });
+        const physical = await files.realpath(output);
+
+        if (!physical.startsWith(outDir + path.sep) || !(await files.lstat(output)).isFile()) {
+          throw new Error(`Сборщик ${name} вернул чужой выход`);
+        }
+
+        await files.copyFile(output, path.join(stage, targets[name]));
       });
-      const physical = await files.realpath(output);
-
-      if (!physical.startsWith(outDir + path.sep) || !(await files.lstat(output)).isFile()) {
-        throw new Error(`Сборщик ${name} вернул чужой выход`);
-      }
-
-      await files.copyFile(output, path.join(stage, targets[name]));
     }
 
     const deepseek = path.join(stage, 'bin/deepseek');
 
-    await options.verifyDeepSeek(deepseek, env);
-    await options.verifyDeepSeekCompatibility(deepseek, env);
-    await files.copyFile(path.join(root, 'bin/grigdesk-ctl'), path.join(stage, 'bin/grigdesk-ctl'));
-    await files.copyFile(path.join(root, 'deploy/lib/runtime-env.sh'),
-      path.join(stage, 'bin/lib/runtime-env.sh'));
-    await files.writeFile(path.join(stage, 'README.md'), readme);
-
-    for (const relative of payload) {
-      await files.chmod(path.join(stage, relative), executables.includes(relative) ? 0o755 : 0o644);
-    }
-
-    await normalizeStageModes(stage);
-
-    const inventory = await auditStage(stage, { required: payload, executables });
-
-    if (inventory.length !== payload.length || inventory.some((file) => file.type !== 'file'
-      || !payload.includes(file.path))) {
-      throw new Error('Состав переносимой поставки не совпадает с allowlist');
-    }
-
-    await options.audit?.(stage);
-    await files.writeFile(path.join(stage, 'bin/bundle.json'), JSON.stringify({
-      format: 1,
-      kind: 'portable',
-      version,
-      ...source,
-      files: inventory.map(({ type: _type, ...entry }) => entry),
-    }, null, 2) + '\n', { mode: 0o644 });
-
-    const archive = path.join(work, 'release.tar.gz');
-    const unpack = path.join(work, 'unpack');
-
-    await files.mkdir(unpack);
-    await run('tar', ['-czf', archive, '-C', work, 'release'], { env });
-    await run('tar', ['-xzf', archive, '-C', unpack], { env });
-
-    const packed = await auditStage(stage, { required: [...payload, 'bin/bundle.json'], executables });
-    const extracted = await auditStage(path.join(unpack, 'release'), {
-      required: [...payload, 'bin/bundle.json'], executables,
+    await step('bundle.verify', async () => {
+      await options.verifyDeepSeek(deepseek, env);
+      await options.verifyDeepSeekCompatibility(deepseek, env);
     });
+    await step('bundle.pack', async () => {
+      await files.copyFile(path.join(root, 'bin/grigdesk-ctl'), path.join(stage, 'bin/grigdesk-ctl'));
+      await files.copyFile(path.join(root, 'deploy/lib/runtime-env.sh'),
+        path.join(stage, 'bin/lib/runtime-env.sh'));
+      await files.writeFile(path.join(stage, 'README.md'), readme);
 
-    if (JSON.stringify(packed) !== JSON.stringify(extracted)) {
-      throw new Error('Архив изменил байты или права поставки');
-    }
+      for (const relative of payload) {
+        await files.chmod(path.join(stage, relative), executables.includes(relative) ? 0o755 : 0o644);
+      }
 
-    await files.writeFile(path.join(work, 'release.tar.gz.sha256'), [
-      `${await sha256File(archive)}  release.tar.gz`,
-      `${await sha256File(path.join(stage, 'bin/bundle.json'))}  release/bin/bundle.json`,
-      '',
-    ].join('\n'), { mode: 0o644 });
-    await publish(root, work, files);
+      await normalizeStageModes(stage);
+
+      const inventory = await auditStage(stage, { required: payload, executables });
+
+      if (inventory.length !== payload.length || inventory.some((file) => file.type !== 'file'
+        || !payload.includes(file.path))) {
+        throw new Error('Состав переносимой поставки не совпадает с allowlist');
+      }
+
+      await options.audit?.(stage);
+      await files.writeFile(path.join(stage, 'bin/bundle.json'), JSON.stringify({
+        format: 1,
+        kind: 'portable',
+        version,
+        ...source,
+        files: inventory.map(({ type: _type, ...entry }) => entry),
+      }, null, 2) + '\n', { mode: 0o644 });
+
+      const archive = path.join(work!, 'release.tar.gz');
+      const unpack = path.join(work!, 'unpack');
+
+      await files.mkdir(unpack);
+      await run('tar', ['-czf', archive, '-C', work!, 'release'], { env });
+      await run('tar', ['-xzf', archive, '-C', unpack], { env });
+
+      const packed = await auditStage(stage, { required: [...payload, 'bin/bundle.json'], executables });
+      const extracted = await auditStage(path.join(unpack, 'release'), {
+        required: [...payload, 'bin/bundle.json'], executables,
+      });
+
+      if (JSON.stringify(packed) !== JSON.stringify(extracted)) {
+        throw new Error('Архив изменил байты или права поставки');
+      }
+
+      await files.writeFile(path.join(work!, 'release.tar.gz.sha256'), [
+        `${await sha256File(archive)}  release.tar.gz`,
+        `${await sha256File(path.join(stage, 'bin/bundle.json'))}  release/bin/bundle.json`,
+        '',
+      ].join('\n'), { mode: 0o644 });
+    });
+    await step('bundle.publish', () => publish(root, work!, files));
   } catch (error) {
     preserve = Boolean((error as { preserveWork?: boolean }).preserveWork);
 

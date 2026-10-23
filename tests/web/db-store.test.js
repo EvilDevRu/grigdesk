@@ -25,13 +25,22 @@ function session(overrides = {}) {
 const ACTIONS_PATH = webFile('src/actions/db/index.ts');
 const STORE_PATH = webFile('src/stores/db.ts');
 
+/**
+ * Операции DB используют реальный стор и управляемый общий транспорт.
+ * События доставляются сохранённым подписчикам без отдельного EventSource.
+ */
 async function dbSection(t, api) {
   await installUiBrowser(t, 'https://grigdesk.test/#/db');
   globalThis.__dbStoreApi = api;
+
+  const listeners = [];
+
+  globalThis.__dbProjectListeners = listeners;
   const module = await compileModule(ACTIONS_PATH, {
     stubs: {
       './apiClient.ts': 'export const api = globalThis.__dbStoreApi;',
-      '../../composables/useSse.ts': 'export const sseSubscribe = () => () => {};',
+      '../../composables/useSse.ts': 'export const sseSubscribe = (fn) => {'
+        + ' globalThis.__dbProjectListeners.push(fn); return () => {}; };',
     },
   });
   const { createPinia, setActivePinia } = await import(
@@ -46,7 +55,11 @@ async function dbSection(t, api) {
     delete globalThis.__dbStoreApi;
   });
 
-  return { module, store };
+  return {
+    module,
+    store,
+    emit: (name, data) => listeners.forEach((fn) => fn(name, data))
+  };
 }
 
 test('пароль DB-сессии отправляется raw bytes и не попадает в JSON', async (t) => {
@@ -235,3 +248,45 @@ test('потерянная сессия не подменяет собой ст�
 
   assert.deepEqual(store.sessions, [session({ agentAllowed: true })]);
 });
+
+
+for (const event of ['projects-changed', 'hello']) {
+  test(`PD-db-catalog: ${event} обновляет выбор, поздний ответ не возвращает удалённое`, async (t) => {
+    const slow = Promise.withResolvers();
+    let call = 0;
+    const { module, store, emit } = await dbSection(t, {
+      get: async (url) => {
+        assert.equal(url, '/api/projects');
+        call += 1;
+
+        if (call === 2) {
+          await slow.promise;
+
+          return { projects: [{ id: 'demo' }, { id: 'other' }] };
+        }
+
+        return { projects: call === 1 ? [{ id: 'demo' }, { id: 'other' }] : [{ id: 'other' }] };
+      },
+    });
+
+    await module.loadDbProjects();
+    store.sessions = [session()];
+
+    const before = JSON.stringify(store.sessions);
+
+    module.watchDb();
+
+    const old = module.loadDbProjects();
+
+    emit(event, {
+      id: 'demo',
+      revision: 4,
+      kind: 'deleted'
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    slow.resolve();
+    await old;
+    assert.deepEqual(store.projects.map((item) => item.id), ['other']);
+    assert.equal(JSON.stringify(store.sessions), before);
+  });
+}

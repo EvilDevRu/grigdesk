@@ -15,10 +15,10 @@ import { secureWebPreferences } from '../../desktop/src/windowSecurity.ts';
 
 const assets = new URL('../../desktop/assets/splash/', import.meta.url);
 const SPLASH_HASHES = {
-  'background.png': 'dfdcded22be22703db57e8a5b96e2ab34019f7789d1e9ff6e142021ea43a9188',
+  'background.png': '2d7040803a92ddb9aad1cae4bf1afdc46732859f1e325e9cfd564b3738c976cc',
   'wordmark.svg': '732ca732444dd5df453748cbec861562ec5fa344c124210f43fb6b7dd8925ba7',
-  'index.html': 'acf8133f47d09ab8e2b49842fd25f16551197434df3cdbe10a19bc082a1a65e5',
-  'style.css': 'b8a9538d1b90ec7792923f708d61a2ef2b5f94680883821a7522cd8b914aa18f',
+  'index.html': '4ead04a147544b294dd574d6a3729141bef32f6f07a009c9095be3b57e1e101d',
+  'style.css': 'f74c79251bf9f6661bd67869ad79eecea48ec22d8afe1f25714de02760152d6e',
 };
 
 /**

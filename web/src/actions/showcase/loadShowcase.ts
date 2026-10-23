@@ -7,29 +7,43 @@ import type { ShowcaseStore } from './showcaseRuntime';
  * и переходом по ссылке, и переподключением событий, а два одинаковых обзора
  * подряд отличались бы только тем, чей ответ пришёл вторым.
  */
-export function loadShowcase(store: ShowcaseStore): Promise<void> {
+export function loadShowcase(store: ShowcaseStore,
+  { fresh = false }: { fresh?: boolean } = {},): Promise<void> {
   const runtime = runtimeOf(store);
+
+  if (fresh) {
+    runtime.generation += 1;
+    runtime.refreshPending = true;
+  }
 
   if (runtime.loading) {
     return runtime.loading;
   }
 
   store.setLoading(true);
+  runtime.loading = (async () => {
+    do {
+      runtime.refreshPending = false;
 
-  const request = showcaseApi.overview()
-    .then((overview) => {
-      store.setOverview(overview);
-      store.setError('');
-    })
-    .catch((error: unknown) => {
-      store.setError(showcaseErrorMessage(error, 'Не удалось прочитать список роликов.'));
-    })
-    .finally(() => {
-      runtime.loading = null;
-      store.setLoading(false);
-    });
+      const generation = runtime.generation;
 
-  runtime.loading = request;
+      try {
+        const overview = await showcaseApi.overview();
 
-  return request;
+        if (generation === runtime.generation) {
+          store.setOverview(overview);
+          store.setError('');
+        }
+      } catch (error) {
+        if (generation === runtime.generation) {
+          store.setError(showcaseErrorMessage(error, 'Не удалось прочитать список роликов.'));
+        }
+      }
+    } while (runtime.refreshPending);
+  })().finally(() => {
+    runtime.loading = null;
+    store.setLoading(false);
+  });
+
+  return runtime.loading;
 }
