@@ -1,3 +1,4 @@
+import { runtimeOf } from './projectsRuntime';
 import { projectsApi, projectsErrorData, projectsFailureText } from '../../shared/projectsApi';
 import { useProjectsStore } from '../../stores/projects';
 import { changedFields, createDraft, toInput } from '../../views/projects/projectDraft';
@@ -27,6 +28,8 @@ export async function saveProject(
   { expectedRevision }: { expectedRevision?: number } = {},
 ): Promise<SaveProjectResult> {
   const store = useProjectsStore();
+  const runtime = runtimeOf(store);
+  const generation = runtime.selectionGeneration;
   const input = toInput(draft);
 
   try {
@@ -36,6 +39,14 @@ export async function saveProject(
         ...input,
         expectedRevision: expectedRevision ?? store.opened?.revision ?? 0,
       });
+
+    if (generation !== runtime.selectionGeneration) {
+      return {
+        ok: false,
+        error: 'selection_changed',
+        fieldErrors: [],
+      };
+    }
 
     store.setOpened(detail);
     store.setDraft(createDraft(detail));
@@ -49,6 +60,14 @@ export async function saveProject(
       fieldErrors: [],
     };
   } catch (error) {
+    if (generation !== runtime.selectionGeneration) {
+      return {
+        ok: false,
+        error: 'selection_changed',
+        fieldErrors: [],
+      };
+    }
+
     const body = projectsErrorData(error);
 
     if (body?.error === 'revision_conflict') {

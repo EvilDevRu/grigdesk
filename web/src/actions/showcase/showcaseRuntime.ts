@@ -8,6 +8,8 @@ export type ShowcaseStore = ReturnType<typeof useShowcaseStore>;
 
 interface ShowcaseRuntime {
   off: (() => void) | null;
+  generation: number;
+  refreshPending: boolean;
   loading: Promise<void> | null;
   builds: Map<string, Promise<boolean>>;
   manifests: Map<string, Promise<boolean>>;
@@ -26,6 +28,8 @@ export function runtimeOf(store: ShowcaseStore): ShowcaseRuntime {
   if (!runtime) {
     runtime = {
       off: null,
+      generation: 0,
+      refreshPending: false,
       loading: null,
       builds: new Map(),
       manifests: new Map(),

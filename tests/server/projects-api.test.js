@@ -344,3 +344,171 @@ test('архив при блокирующей связи отвечает 409 a
   assert.match(body.message, /Правила Telegram/);
   assert.equal(env.prefs.readStored().projects.demo.archivedAt, null);
 });
+
+test('PD-DELETE: 204 только после очистки', async (t) => {
+  const { pdFixture, pdProjectsApp, pdDeferred } = await import('./helpers/projects-deletion.js');
+  const f = await pdFixture(t);
+  const app = await pdProjectsApp(t, f);
+
+  await f.service.archive('demo', 1);
+
+  // Сначала публичный маршрут: на базе ожидается 404 отсутствующего DELETE,
+  // а не ошибка отсутствующего метода регистрации hook в обвязке.
+  const missingRevision = await app.inject({
+    method: 'DELETE',
+    url: '/api/projects/demo',
+    payload: {
+    }
+  });
+
+  assert.equal(missingRevision.statusCode, 400, missingRevision.body);
+  assert.equal(missingRevision.json().error, 'revision_required');
+
+  const entered = pdDeferred();
+  const release = pdDeferred();
+  let fail = true;
+
+  f.service.registerDeletionCleanup(async (_context, finalize) => {
+    entered.resolve();
+    await release.promise;
+
+    if (fail) {
+      throw new Error('снимок корней: ошибка записи');
+    }
+
+    finalize();
+  });
+
+  const removal = app.inject({
+    method: 'DELETE',
+    url: '/api/projects/demo',
+    payload: {
+      expectedRevision: 2
+    }
+  });
+
+  await entered.promise;
+  assert.equal(f.events.some((event) => event.data.kind === 'deleted'), false);
+  release.resolve();
+
+  const failure = await removal;
+
+  assert.equal(failure.statusCode, 500, failure.body);
+  assert.equal(failure.json().error, 'deletion_incomplete');
+  assert.match(failure.json().message, /снимок корней/);
+  fail = false;
+
+  const success = await app.inject({
+
+    method: 'DELETE',
+    url: '/api/projects/demo',
+    payload: { expectedRevision: 2 },
+
+  });
+
+  assert.equal(success.statusCode, 204, success.body);
+  assert.equal(success.body, '');
+  assert.equal((await app.inject('/api/projects/demo')).statusCode, 404);
+  assert.equal((await app.inject('/api/projects')).json().projects.some((row) => row.id === 'demo'), false);
+  assert.equal((await app.inject('/api/profiles')).json().profiles.includes('demo'), false);
+  assert.equal((await app.inject({
+
+    method: 'DELETE',
+    url: '/api/projects/demo',
+    payload: { expectedRevision: 2 },
+
+  })).statusCode, 204);
+});
+
+test('PD-auth-delete: анонимный DELETE не меняет регистрацию', async (t) => {
+  const { pdFixture, pdProjectsApp } = await import('./helpers/projects-deletion.js');
+  const f = await pdFixture(t);
+  const app = await pdProjectsApp(t, f, { auth: true });
+
+  await f.service.archive('demo', 1);
+
+  const request = {
+    method: 'DELETE',
+    url: '/api/projects/demo',
+    payload: {
+      expectedRevision: 2
+    }
+  };
+  const anonymous = await app.inject(request);
+
+  assert.equal(anonymous.statusCode, 401, anonymous.body);
+  assert.match(anonymous.headers['cache-control'], /no-store/);
+  assert.equal(f.prefs.readStored().projects.demo.revision, 2);
+
+  const authorized = await app.inject({ ...request, headers: { 'x-grigdesk-token': 'pd-cli-token' } });
+
+  assert.equal(authorized.statusCode, 204, authorized.body);
+});
+
+test('PD-DELETE: публичные коды ревизии, связей, повтора и tombstone', async (t) => {
+  const { pdFixture, pdProjectsApp } = await import('./helpers/projects-deletion.js');
+  const f = await pdFixture(t, { source: 'prefs' });
+  const app = await pdProjectsApp(t, f);
+  const remove = (id, revision) => app.inject({
+
+    method: 'DELETE',
+    url: `/api/projects/${id}`,
+    payload: { expectedRevision: revision },
+
+  });
+
+  for (const [id, revision, status, code] of [
+    ['demo', -1, 400, 'bad_revision'], ['missing', 0, 404, 'not_found'],
+    ['demo', 1, 409, 'not_archived'],
+  ]) {
+    const response = await remove(id, revision);
+
+    assert.equal(response.statusCode, status, response.body);
+    assert.equal(response.json().error, code);
+  }
+
+  await f.service.archive('demo', 1);
+
+  const stale = await remove('demo', 1);
+
+  assert.equal(stale.statusCode, 409, stale.body);
+  assert.equal(stale.json().currentRevision, 2);
+
+  let links = 1;
+
+  f.service.registerDependencyProvider({
+
+    kind: 'ssh',
+    label: 'SSH',
+    blocksArchive: false,
+    blocksDelete: true,
+
+    count: () => ({ count: links }),
+
+  });
+
+  const blocked = await remove('demo', 2);
+
+  assert.equal(blocked.statusCode, 409, blocked.body);
+  assert.equal(blocked.json().error, 'has_dependencies');
+  links = 0;
+  assert.equal((await remove('demo', 2)).statusCode, 204);
+  assert.equal((await remove('demo', 2)).statusCode, 204);
+
+  const wrongRepeat = await remove('demo', 3);
+
+  assert.equal(wrongRepeat.statusCode, 409);
+  assert.equal(wrongRepeat.json().error, 'revision_conflict');
+  assert.equal(wrongRepeat.json().currentRevision, 3);
+
+  const recreated = await app.inject({
+    method: 'POST',
+    url: '/api/profiles',
+    payload: {
+      id: 'demo'
+    }
+  });
+
+  assert.equal(recreated.statusCode, 409, recreated.body);
+  assert.equal(recreated.json().error, 'tombstoned');
+});

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { makeCatalogInput, makeDraft } from '../fixtures/routes-editor.mjs';
-import { compileVue, webFile } from './helpers/compile-vue.js';
+import { compileModule, compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
 const VIEW = webFile('src/views/RoutesView.vue');
@@ -25,6 +25,7 @@ export const UiSelectableRow = defineComponent({
 export { default as UiPaneHeader } from './src/components/composites/UiPaneHeader.vue';
 export { default as UiTabs } from './src/components/composites/UiTabs.vue';
 export { default as UiTab } from './src/components/composites/UiTab.vue';
+export { default as UiInlineMessage } from './src/components/feedback/UiInlineMessage.vue';
 export const UiSpinner = defineComponent({ setup: () => () => h('span', '…') });
 export const UiTooltip = defineComponent({ setup: () => () => h('span') });
 export const confirmDialog = async () => true;
@@ -32,13 +33,15 @@ export const confirmDialog = async () => true;
 const SWITCHER_STUB = `
 import { defineComponent, h } from 'vue';
 export default defineComponent({
-  props: ['profiles', 'modelValue'], emits: ['update:modelValue', 'create'],
+  props: ['profiles', 'modelValue'], emits: ['update:modelValue', 'create', 'manage'],
   setup(props, { emit }) {
     return () => h('div', [
       h('select', {
         'data-test': 'project-switcher', value: props.modelValue,
         onChange: (event) => emit('update:modelValue', event.target.value),
       }, props.profiles.map((profile) => h('option', { value: profile }, profile))),
+      h('button', { 'data-test': 'manage-project',
+        onClick: () => emit('manage', props.modelValue) }, 'Управление'),
       h('button', { 'data-test': 'create-project', onClick: () => emit('create') }, '+'),
     ]);
   },
@@ -49,6 +52,7 @@ async function fixture(t, {
   query = {}, drafts = [], currentCatalogHash = null, createResponse = null,
   publishSupported = false, revisions = [], catalogInput = null, rebasePreview = null,
   editorGate = null,
+  profiles = () => ['sample', 'other'],
 } = {}) {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/routes');
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
@@ -72,7 +76,10 @@ async function fixture(t, {
   const api = {
     get: async (url) => {
       calls.push(['get', url]);
-      if (url === '/api/profiles') return { profiles: ['sample', 'other'] };
+
+      if (url === '/api/profiles') {
+        return { profiles: await profiles() };
+      }
       if (url.endsWith('/revisions')) return {
         profile: url.includes('/other/') ? 'other' : 'sample',
         publishSupported, currentCatalogHash,
@@ -122,7 +129,13 @@ async function fixture(t, {
       return { changed: true, catalogHash: body.desiredCatalogHash };
     },
   };
-  globalThis.__routesViewHarness = { route, router, api };
+
+  globalThis.__routesViewHarness = {
+    route,
+    router,
+    api,
+    listeners: []
+  };
   setActivePinia(createPinia());
 
   const component = await compileVue(VIEW, { stubs: {
@@ -138,7 +151,8 @@ async function fixture(t, {
       + ' export const onBeforeRouteUpdate = () => {};',
     '../composables/useUiContextSource.ts':
       'export const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });',
-    '../../composables/useSse.ts': 'export const sseSubscribe = () => () => {};',
+      '../../composables/useSse.ts': 'export const sseSubscribe = (fn) => {'
+        + ' globalThis.__routesViewHarness.listeners.push(fn); return () => {}; };',
     '../features/projects/ProjectSwitcher.vue': SWITCHER_STUB,
     './pipeline/FactoryGraph.vue': 'export default { template: "<div />" };',
     './routes/RoutePromptEditor.vue': 'export default { template: "<div />" };',
@@ -175,13 +189,28 @@ async function fixture(t, {
   const wrapper = mount(component, { attachTo: browser.document.querySelector('#mount') });
   t.after(() => { wrapper.unmount(); delete globalThis.__routesViewHarness; });
   await flushPromises();
-  return { wrapper, route, pushes, calls, draft, flushPromises };
+
+  return {
+    wrapper,
+    route,
+    pushes,
+    calls,
+    draft,
+    flushPromises,
+
+    emit: (name, data) => globalThis.__routesViewHarness.listeners.forEach((fn) => fn(name, data)),
+
+  };
 }
 
 test('RE-E2-01: URL открывает адресованный draft и маршрут после mount/reload', async (t) => {
   const draft = makeDraft();
   const { wrapper, calls } = await fixture(t, {
-    query: { draft: draft.id, route: 'quick', tab: 'graph' },
+    query: {
+      draft: draft.id,
+      route: 'quick',
+      tab: 'graph'
+    },
     drafts: [{
       id: draft.id, profile: 'sample', title: draft.title, revision: 1,
       baseCatalogHash: null, state: 'editing', updatedAt: draft.updatedAt,
@@ -198,7 +227,11 @@ test('RE-E2-01: URL открывает адресованный draft и мар�
 test('RE-G4-01: открытый черновик предлагает переносимый JSON export/import', async (t) => {
   const draft = makeDraft();
   const { wrapper } = await fixture(t, {
-    query: { draft: draft.id, route: 'quick', tab: 'graph' },
+    query: {
+      draft: draft.id,
+      route: 'quick',
+      tab: 'graph'
+    },
   });
   assert.match(wrapper.text(), /Экспорт и импорт JSON/);
 });
@@ -207,7 +240,11 @@ test('RE-G5-01: черновик открывает отдельный JSON-ре
   async (t) => {
     const draft = makeDraft();
     const { wrapper } = await fixture(t, {
-      query: { draft: draft.id, route: 'quick', tab: 'graph' },
+      query: {
+        draft: draft.id,
+        route: 'quick',
+        tab: 'graph'
+      },
     });
     assert.equal(wrapper.find('[data-test="route-json-tab"]').exists(), true);
   });
@@ -216,7 +253,11 @@ test('RE-F5-01: выбор узла схемы меняет query и откры�
   async (t) => {
     const draft = makeDraft();
     const { wrapper, route, flushPromises } = await fixture(t, {
-      query: { draft: draft.id, route: 'quick', tab: 'graph' },
+      query: {
+        draft: draft.id,
+        route: 'quick',
+        tab: 'graph'
+      },
     });
     await wrapper.find('[data-test="choose-check"]').trigger('click');
     await flushPromises();
@@ -229,7 +270,11 @@ test('RE-F5-01: выбор узла схемы меняет query и откры�
 test('RE-F5-05: выбор из списка этапов открывает тот же инспектор и query', async (t) => {
   const draft = makeDraft();
   const { wrapper, route, flushPromises } = await fixture(t, {
-    query: { draft: draft.id, route: 'quick', tab: 'graph' },
+    query: {
+      draft: draft.id,
+      route: 'quick',
+      tab: 'graph'
+    },
   });
   await wrapper.find('[data-test="stage-choose-build"]').trigger('click');
   await flushPromises();
@@ -241,7 +286,11 @@ test('RE-F7-04: bootstrap выбирается отдельным scope без �
   async (t) => {
     const draft = makeDraft();
     const { wrapper, route, flushPromises } = await fixture(t, {
-      query: { draft: draft.id, route: 'quick', tab: 'graph' },
+      query: {
+        draft: draft.id,
+        route: 'quick',
+        tab: 'graph'
+      },
     });
     await wrapper.find('[data-test="catalog-bootstrap"]').trigger('click');
     await flushPromises();
@@ -426,3 +475,108 @@ test('RE-G2-01: устаревшее основание открывает previ
       && call[1] === `/api/routes/sample/drafts/${draft.id}/rebase/preview`), true);
     assert.match(wrapper.text(), /Независимые правки объединятся/);
   });
+
+test('PD-entry: управление из черновиков ведёт в паспорт выбранного проекта', async (t) => {
+  const { wrapper, pushes, flushPromises } = await fixture(t);
+
+  await wrapper.get('[data-test="manage-project"]').trigger('click');
+  await flushPromises();
+
+  const target = pushes.at(-1);
+
+  assert.equal(typeof target === 'string' ? target : target?.path, '/projects/sample');
+});
+
+for (const event of ['projects-changed', 'hello']) {
+  test(`PD-routes: ${event} сбрасывает исчезнувший профиль без подстановки соседа`, async (t) => {
+    let deleted = false;
+    const { wrapper, route, calls, flushPromises, emit } = await fixture(t, {
+      profiles: () => deleted ? ['other'] : ['sample', 'other'],
+    });
+
+    deleted = true;
+    emit(event, {
+      id: 'sample',
+      revision: 3,
+      kind: 'deleted'
+    });
+    await flushPromises();
+    assert.equal(calls.filter((call) => call[1] === '/api/profiles').length >= 2, true);
+    assert.equal(route.query.profile ?? '', '');
+    assert.equal(wrapper.get('[data-test="project-switcher"]').element.value, '');
+  });
+}
+
+test('PD-routes: dirty удалённого проекта остаётся для чтения без серверного export', async (t) => {
+  let deleted = false;
+  const draft = makeDraft();
+  const { wrapper, calls, emit, flushPromises } = await fixture(t, {
+    query: {
+      draft: draft.id,
+      route: 'quick',
+      tab: 'graph'
+    },
+    profiles: () => deleted ? ['other'] : ['sample', 'other'],
+  });
+  const { useRoutesStore } = await compileModule(webFile('src/stores/routes.ts'));
+  const store = useRoutesStore();
+
+  assert.equal(store.opened.profile, 'sample', 'fixture открыла настоящий draft');
+  store.localDocument.title = 'Несохранённый текст';
+  store.dirty = true;
+  deleted = true;
+  emit('projects-changed', {
+    id: 'sample',
+    revision: 3,
+    kind: 'deleted'
+  });
+  await flushPromises();
+  assert.equal(store.localDocument.title, 'Несохранённый текст');
+  assert.equal(store.opened.readOnly, true);
+  assert.match(wrapper.text(), /Регистрация проекта удалена.*Несохранённые изменения сохранить нельзя/su);
+  assert.equal(calls.some((call) => call[1]?.includes('/export')), false);
+});
+
+test('PD-routes: поздний draft не возвращает документ удалённого профиля', async (t) => {
+  let deleted = false;
+  const slow = Promise.withResolvers();
+  const entered = Promise.withResolvers();
+  const { route, emit, flushPromises } = await fixture(t, {
+    profiles: () => deleted ? ['other'] : ['sample', 'other'],
+  });
+  const api = globalThis.__routesViewHarness.api;
+  const get = api.get.bind(api);
+  const draft = { ...makeDraft(), id: '22222222-2222-4222-8222-222222222222' };
+
+  api.get = async (url) => {
+    if (url.endsWith(`/drafts/${draft.id}`)) {
+      entered.resolve();
+
+      return slow.promise;
+    }
+
+    return get(url);
+  };
+  route.query = {
+    profile: 'sample',
+    draft: draft.id,
+    route: 'quick'
+  };
+  await entered.promise;
+  deleted = true;
+  emit('projects-changed', {
+    id: 'sample',
+    revision: 3,
+    kind: 'deleted'
+  });
+  await flushPromises();
+  slow.resolve(draft);
+  await flushPromises();
+
+  const { useRoutesStore } = await compileModule(webFile('src/stores/routes.ts'));
+  const store = useRoutesStore();
+
+  assert.equal(route.query.profile ?? '', '');
+  assert.equal(store.opened, null);
+  assert.equal(store.localDocument, null);
+});

@@ -1,3 +1,4 @@
+import { parseProjectsChange } from '../../../shared/runtime/projectsContracts.ts';
 import { messageRef } from '../ui.ts';
 // Чат с агентами — МУЛЬТИСЕССИИ (вкладки, как в VS Code).
 // Каждая сессия: своя задача (опционально), модель, усилие, история, sessionId (--resume),
@@ -252,6 +253,20 @@ function pickStore(j: ChatStoreData | null) {
     defWorkdir: normalizeChatWorkdir(j?.defWorkdir) || { kind: 'grigdesk' },
     recentWorkdirs: normalizeRecentWorkdirs(j?.recentWorkdirs),
   };
+}
+
+const deletedProjectChoices = new WeakMap<object, Set<string>>();
+const workdirSyncEpochs = new WeakMap<object, number>();
+
+/**
+ * Поздняя мета не возвращает удалённую регистрацию в выбор нового разговора.
+ * Сохранённые рабочие папки самих разговоров этим фильтром не меняются.
+ */
+function availableWorkdir(store: object, value: unknown) {
+  const choice = normalizeChatWorkdir(value);
+
+  return choice?.kind === 'project' && deletedProjectChoices.get(store)?.has(choice.projectId)
+    ? { kind: 'grigdesk' as const } : choice;
 }
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1436,6 +1451,10 @@ export const useChatStore = defineStore('chat', {
 
           this._normalize(picked.sessions);
           this._normalize(picked.archived);
+          picked.defWorkdir = availableWorkdir(this, picked.defWorkdir) || { kind: 'grigdesk' };
+          picked.recentWorkdirs = picked.recentWorkdirs.filter((choice) => (
+            choice.kind !== 'project' || !deletedProjectChoices.get(this)?.has(choice.projectId)
+          ));
           Object.assign(this, picked);
           this.speech = speech;
           this.loaded = true;
@@ -2311,6 +2330,29 @@ export const useChatStore = defineStore('chat', {
       // Общий EventSource вкладки (useSse) — свой открывать НЕЛЬЗЯ: лимит браузера
       // 6 соединений на хост, лишние SSE душат все fetch (см. composables/useSse.js).
       permOff = sseSubscribe((name, payload) => {
+        if (name === 'projects-changed') {
+          try {
+            const change = parseProjectsChange(payload);
+
+            if (change.kind === 'deleted') {
+              workdirSyncEpochs.set(this, (workdirSyncEpochs.get(this) ?? 0) + 1);
+
+              const deleted = deletedProjectChoices.get(this) ?? new Set<string>();
+
+              deleted.add(change.id);
+              deletedProjectChoices.set(this, deleted);
+              this.defWorkdir = availableWorkdir(this, this.defWorkdir);
+              this.recentWorkdirs = this.recentWorkdirs.filter((choice) => (
+                choice.kind !== 'project' || !deleted.has(choice.projectId)
+              ));
+            }
+          } catch {
+            // Неизвестное событие не меняет мету разговора.
+          }
+
+          return;
+        }
+
         const d = decodeChatEvent(name, payload);
 
         if (!d) {
@@ -2374,6 +2416,10 @@ export const useChatStore = defineStore('chat', {
 
           const m = d.meta || {};
 
+          if (m.defWorkdir !== undefined || m.recentWorkdirs !== undefined) {
+            workdirSyncEpochs.set(this, (workdirSyncEpochs.get(this) ?? 0) + 1);
+          }
+
           if (m.defModel !== undefined) {
             this.defModel = m.defModel || '';
           }
@@ -2387,11 +2433,25 @@ export const useChatStore = defineStore('chat', {
             this.defMode = m.defMode || '';
           }
           if (m.defWorkdir !== undefined) {
-            this.defWorkdir = normalizeChatWorkdir(m.defWorkdir);
+            this.defWorkdir = availableWorkdir(this, m.defWorkdir);
           }
           if (m.recentWorkdirs !== undefined) {
-            this.recentWorkdirs = normalizeRecentWorkdirs(m.recentWorkdirs);
+            this.recentWorkdirs = normalizeRecentWorkdirs(m.recentWorkdirs).filter((choice) => (
+              choice.kind !== 'project' || !deletedProjectChoices.get(this)?.has(choice.projectId)
+            ));
           }
+
+          // Полученный от сервера выбор уже сохранён: следующая сверка не должна
+          // принять его отличие от прежней отправки этого окна за локальный черновик.
+          const acknowledged = JSON.parse(sentMeta || '{}');
+
+          for (const field of ['defWorkdir', 'recentWorkdirs'] as const) {
+            if (m[field] !== undefined) {
+              acknowledged[field] = this[field];
+            }
+          }
+
+          sentMeta = JSON.stringify(acknowledged);
         } else if (name === 'speech-settings') {
           // Настройка общая для всех окон/устройств. Revision позволяет компоненту
           // отличить реальную смену от собственного SSE-эха, но snapshot применяем весь.
@@ -3086,6 +3146,15 @@ export const useChatStore = defineStore('chat', {
      * событий никто не слышал: без сверки чат, заведённый в это время, снова ждал бы F5.
      */
     async _resyncStore() {
+      const epoch = (workdirSyncEpochs.get(this) ?? 0) + 1;
+      const choices = {
+        defWorkdir: JSON.stringify(this.defWorkdir),
+        recentWorkdirs: JSON.stringify(this.recentWorkdirs),
+      };
+      const acknowledged = JSON.parse(sentMeta || '{}');
+
+      workdirSyncEpochs.set(this, epoch);
+
       let j = null;
 
       try {
@@ -3096,6 +3165,31 @@ export const useChatStore = defineStore('chat', {
 
       if (!j?.sessions && !j?.archived) {
         return;
+      }
+
+      // Метаданные сверяются отдельно от разговоров: их папки остаются прежними.
+      // Несохранённый выбор, SSE и более новый GET имеют приоритет над этим ответом.
+      if (workdirSyncEpochs.get(this) === epoch) {
+        for (const field of ['defWorkdir', 'recentWorkdirs'] as const) {
+          if (j[field] === undefined || JSON.stringify(this[field]) !== choices[field]
+            || (acknowledged[field] !== undefined
+              && JSON.stringify(acknowledged[field]) !== choices[field])) {
+            continue;
+          }
+
+          if (field === 'defWorkdir') {
+            this.defWorkdir = availableWorkdir(this, j.defWorkdir);
+          } else {
+            this.recentWorkdirs = normalizeRecentWorkdirs(j.recentWorkdirs).filter((choice) => (
+              choice.kind !== 'project' || !deletedProjectChoices.get(this)?.has(choice.projectId)
+            ));
+          }
+
+          const sent = JSON.parse(sentMeta || '{}');
+
+          sent[field] = this[field];
+          sentMeta = JSON.stringify(sent);
+        }
       }
 
       storeSyncedAt = Date.now();

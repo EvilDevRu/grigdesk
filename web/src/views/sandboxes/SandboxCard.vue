@@ -1,7 +1,9 @@
 <template>
   <article class="sandbox-card ui-workspace-section" :aria-labelledby="`sandbox-title-${entry.task}`">
     <UiPaneHeader class="sandbox-card__head">
-      <template #title><h3 :id="`sandbox-title-${entry.task}`">Стенд t{{ entry.task }}</h3></template>
+      <template #title>
+        <h3 :id="`sandbox-title-${entry.task}`">Стенд t{{ entry.task }} · {{ taskTitle }}</h3>
+      </template>
       <template #meta>
         <span class="sandbox-card__alive" :data-state="aliveState">
           <span class="sandbox-card__dot" aria-hidden="true"></span>{{ aliveLabel }}
@@ -15,6 +17,11 @@
       </template>
     </UiPaneHeader>
     <div class="sandbox-card__body">
+      <p v-if="stateLabel" class="sandbox-card__state">{{ stateLabel }}</p>
+      <p v-if="stateDetail" class="sandbox-card__hint">{{ stateDetail }}</p>
+      <UiActionLink v-if="entry.owner === 'pipeline'" :href="taskHref" data-context="workspace-form">
+        Открыть задачу
+      </UiActionLink>
       <div v-if="job && job.state === 'running'" class="sandbox-card__progress">
         <UiProgress
           :label="`${jobTitle} стенда t${entry.task}`"
@@ -77,14 +84,18 @@
         </UiActionLink>
       </div>
 
+      <p v-if="typeof entry.feAlive === 'boolean'" class="sandbox-card__hint">
+        {{ entry.feAlive ? 'Сайт отвечает' : 'Сайт не отвечает' }}
+      </p>
+
       <div v-if="actions.length" class="sandbox-card__runs">
         <div v-for="action in actions" :key="action.id" class="sandbox-card__run">
           <UiButton variant="outline" data-context="workspace-form-wrap"
                     :aria-disabled="busy || (job !== null && job.state === 'running')"
+                    v-tooltip="action.description || undefined"
                     @click="emit('run', { task: entry.task, action })">
             {{ action.label }}
           </UiButton>
-          <p v-if="action.description" class="sandbox-card__hint">{{ action.description }}</p>
         </div>
       </div>
 
@@ -152,7 +163,11 @@
             </div>
           </div>
         </details>
-        <p v-else-if="blockedReason" class="sandbox-card__hint">{{ blockedReason }}</p>
+        <p v-else-if="blockedReason" class="sandbox-card__hint">
+          {{ blockedReason }}
+          <UiActionLink v-if="entry.removableReason === 'pipeline_owned'" :href="taskHref"
+                        data-context="workspace-form">Открыть задачу</UiActionLink>
+        </p>
       </div>
     </div>
   </article>
@@ -172,6 +187,7 @@ import {
 } from '../../ui';
 import { loadSandboxJobLog } from '../../actions/sandboxes';
 import { sandboxUrl } from '../../shared/sandbox.ts';
+import { ALERT_TASK_QUERY } from '../../shared/alertTargets.ts';
 import { writeClipboardText } from '../../shared/clipboard.ts';
 import type {
   SandboxActionDecl, SandboxEntry, SandboxJob,
@@ -192,6 +208,9 @@ const props = defineProps<{
   entry: SandboxEntry;
   job: SandboxJob | null;
   busy: boolean;
+  taskTitle?: string;
+  stateLabel?: string;
+  stateDetail?: string;
 }>();
 
 const emit = defineEmits<{
@@ -204,6 +223,8 @@ const emit = defineEmits<{
     action: SandboxActionDecl;
   }];
 }>();
+
+const taskHref = computed(() => `#/sandboxes?${ALERT_TASK_QUERY}=${encodeURIComponent(props.entry.task)}`);
 
 const copied = ref('');
 const logOpen = ref(false);
@@ -361,6 +382,15 @@ async function copyPath(value: string) {
   container: sandbox-card / inline-size;
 }
 
+.sandbox-card__head h3 {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.sandbox-card__state {
+  margin: 0;
+}
+
 .sandbox-card__body {
   display: grid;
   gap: 8px;
@@ -486,11 +516,20 @@ async function copyPath(value: string) {
 }
 
 .sandbox-card__runs {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-.sandbox-card__run,
+.sandbox-card__run {
+  width: 220px;
+  max-width: 100%;
+}
+
+.sandbox-card__run > .ui-button {
+  width: 100%;
+}
+
 .sandbox-card__removal-option {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
@@ -546,7 +585,10 @@ async function copyPath(value: string) {
     grid-row: 1 / 4;
   }
 
-  .sandbox-card__run,
+  .sandbox-card__run {
+    width: 100%;
+  }
+
   .sandbox-card__removal-option {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -84,6 +84,8 @@ export interface SandboxServiceOptions {
   sandboxActivityGuard?: SandboxActivityGuard;
   // Архивный проект новых стендов не поднимает: спрашиваем об этом раздел «Проекты»,
   // а не читаем реестр сами — архивность там одна на всех потребителей.
+  isProjectDeleted?: (id: string) => boolean;
+  deletedProjectIds?: () => Set<string>;
   isProjectArchived?: (id: string) => boolean;
   // Журнал сервера: кривой манифест действий профиля — предупреждение, а не отказ.
   log?: { warn: (fields: Record<string, unknown>, message: string) => void };
@@ -222,6 +224,8 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
     probe = probePort,
     log = null,
     isProjectArchived = null,
+    isProjectDeleted = null,
+    deletedProjectIds = null,
   } = options;
 
   // Живые задания держатся в памяти: тик слежения обязан стоить одно чтение журнала
@@ -272,6 +276,22 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
       // а снос ищет владельца именно здесь. Запрещён только подъём нового.
       const archived = isProjectArchived?.(id) === true;
 
+      let deleted = false;
+
+      try {
+        deleted = deletedProjectIds ? deletedProjectIds().has(id) : isProjectDeleted?.(id) === true;
+      } catch {
+        // Инвентарь нужен для доступа к существующим стендам даже при битых настройках.
+      }
+
+      if (deleted) {
+        return {
+          id,
+          canRaise: false,
+          reason: 'регистрация проекта удалена',
+        };
+      }
+
       if (archived) {
         return { id, canRaise: false, reason: 'проект в архиве: новый стенд не поднимается' };
       }
@@ -287,6 +307,10 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
   async function requireProfile(profile: string): Promise<void> {
     if (!PROFILE_RE.test(String(profile || ''))) {
       throw new SandboxError('bad_profile', 'имя профиля имеет недопустимую форму', 400);
+    }
+
+    if (isProjectDeleted?.(profile)) {
+      throw new SandboxError('tombstoned', 'Регистрация проекта удалена.', 409);
     }
 
     const known = await profiles();

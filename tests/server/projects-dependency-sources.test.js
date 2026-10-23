@@ -99,3 +99,17 @@ test('правила GitHub считаются своим lease', async () => {
   assert.deepEqual(found.items ?? [], []);
   assert.equal(connection.state.released, 1);
 });
+
+for (const [name, count] of [['Telegram', countTelegramRules], ['GitHub', countGitHubRules]]) {
+  for (const lease of [undefined, { context: {} }, { context: { rules: {} } }]) {
+    test(`PD-owner: ${name} без порта чтения: ${JSON.stringify(lease)}`, async () => {
+      const connection = {
+        status: async () => ({ configured: true, connection: 'connected' }),
+        acquireLease: () => lease,
+        acquireInboxLease: () => lease,
+      };
+
+      await assert.rejects(count(connection, 'demo'), /связи не проверены/iu);
+    });
+  }
+}

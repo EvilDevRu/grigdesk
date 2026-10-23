@@ -11,7 +11,7 @@
               data-role="project-id" placeholder="my-project" @update:model-value="setId" />
           </UiField>
           <UiField label="Название" :error="errorOf('title')" data-context="workspace-property">
-            <UiInput :ref="(element) => setTitleRef(element)" :model-value="draft.title"
+            <UiInput :ref="(element) => setTitleRef(element)" :model-value="draft.title" :readonly="readonly"
               data-role="project-title" placeholder="Название проекта" @update:model-value="set('title', $event)" />
           </UiField>
           <div v-if="!creating" class="identity-row">
@@ -19,13 +19,13 @@
             <div class="identity-value"><span>{{ draft.id }}</span><span class="hint">Не меняется</span></div>
           </div>
           <UiField label="Описание" :error="errorOf('description')" data-context="workspace-property">
-            <UiTextarea :model-value="draft.description" data-role="project-description"
+            <UiTextarea :model-value="draft.description" :readonly="readonly" data-role="project-description"
               data-context="workspace-note" :rows="2" placeholder="Чем занимается проект и что важно о нём знать"
               @update:model-value="set('description', $event)" />
           </UiField>
           <UiField label="Метки" :error="errorOf('tags')" hint="Через запятую"
             data-context="workspace-property" data-hint-inline="true">
-            <UiInput :model-value="draft.tags.join(', ')" data-role="project-tags"
+            <UiInput :model-value="draft.tags.join(', ')" :readonly="readonly" data-role="project-tags"
               placeholder="продукт, сайт, внутренний" @update:model-value="setTags" />
           </UiField>
         </section>
@@ -34,13 +34,13 @@
             :checks="checks" :readonly="reposReadonly" @check="emit('check', $event)"
             @select-repo="emit('selectRepo', $event)" />
           <div class="source-row">
-            <span class="hint">{{ reposReadonly ? 'Пути из профиля фабрики' : 'Пути из паспорта проекта' }}</span>
+            <span class="hint">{{ profilePaths ? 'Пути из профиля фабрики' : 'Пути из паспорта проекта' }}</span>
             <UiButton variant="ghost" data-context="workspace-toolbar" :aria-expanded="accessNoteOpen"
               :aria-controls="accessNoteId" @click="accessNoteOpen = !accessNoteOpen">
               Доступ к папкам {{ accessNoteOpen ? '↑' : '↓' }}
             </UiButton>
           </div>
-          <p v-if="reposReadonly" class="hint">
+          <p v-if="profilePaths" class="hint">
             Пути задаёт профиль фабрики; редактирование откроется после миграции
           </p>
           <p v-show="accessNoteOpen" :id="accessNoteId" class="trust" data-role="project-trust">
@@ -89,7 +89,7 @@
 
           <p v-for="reason in dependencies?.reasons ?? []" :key="reason" class="warn">{{ reason }}</p>
 
-          <UiFormActions align="between">
+          <UiFormActions v-if="!readonly" align="between">
             <UiButton
               v-if="!archived"
               data-role="project-archive"
@@ -111,6 +111,16 @@
             >
               Восстановить
             </UiButton>
+            <UiButton
+              v-if="archived"
+              data-role="project-remove"
+              tone="danger"
+              :disabled="busy || saving || dirty"
+              :loading="busy"
+              @click="emit('remove')"
+            >
+              Удалить регистрацию
+            </UiButton>
             <span v-if="dirty" class="hint">
               Сначала сохраните или отмените изменения.
             </span>
@@ -119,6 +129,10 @@
             </span>
           </UiFormActions>
 
+          <UiButton v-if="!dependencies && !readonly" variant="text"
+            :disabled="busy" @click="emit('retryDependencies')">
+            Повторить проверку
+          </UiButton>
           <p v-if="lifecycleFailure" class="warn" data-role="project-manage-failure">
             {{ lifecycleFailure }}
           </p>
@@ -197,6 +211,7 @@ const props = defineProps<{
   // Архив и восстановление: кнопки выключены, пока идёт операция, есть правки или
   // живые связи. Отказ сервера показывается текстом рядом с кнопкой.
   busy: boolean;
+  readonly?: boolean;
   lifecycleFailure: string;
   dependencies: ProjectDependencies | null;
 }>();
@@ -209,6 +224,8 @@ const emit = defineEmits<{
   openRoutes: [];
   archive: [];
   restore: [];
+  remove: [];
+  retryDependencies: [];
   openRules: [path: string];
 }>();
 
@@ -230,13 +247,15 @@ const shownErrors = computed(() => (
   localErrors.value.length ? localErrors.value : props.serverErrors
 ));
 
-// У профильного проекта пути задаёт профиль фабрики: строки только показываются.
-const reposReadonly = computed(() => props.detail?.profile.pathsSource === 'profile');
+// Источник путей сохраняется и в локальной копии удалённого паспорта.
+// Запрет редактирования всей формы не меняет происхождение репозиториев.
+const profilePaths = computed(() => props.detail?.profile.pathsSource === 'profile');
+const reposReadonly = computed(() => props.readonly || profilePaths.value);
 
 // Пока выбор по умолчанию потерян, сохранять нельзя: репозиторий по умолчанию
 // исчез бы молча, а от него зависят и «Код», и пути триажа.
 const canSave = computed(() => (
-  props.dirty && !draft.value.defaultRepoRequired && !props.saving
+  props.dirty && !draft.value.defaultRepoRequired && !props.saving && !props.busy && !props.readonly
 ));
 
 const saveStatus = computed(() => {

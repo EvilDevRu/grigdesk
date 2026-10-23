@@ -104,6 +104,9 @@ test('задача без доверенного проекта возвраща
   };
 
   assert.equal((await resolveChatWorkdir(input)).cwd, f.first);
+  assert.equal((await resolveChatWorkdir({
+    ...input, factoryState: { readEnv: async () => ({}) },
+  })).cwd, f.first, 'отсутствующий стенд оставляет выбранную папку');
   await assert.rejects(resolveChatWorkdir({
     ...input,
     factoryState: { readEnv: async () => ({ REPO_COUNT: '1' }) },

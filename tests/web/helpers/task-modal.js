@@ -105,6 +105,10 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
         `export { failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,
       ].join('\n'),
       '../composables/useUiContextSource.ts': contextSourceStub(prefix),
+      '../composables/useSse.ts': [
+        'export const sseSubscribe = (handler) =>',
+        `  globalThis.${prefix}Subscribe?.(handler) || (() => {});`,
+      ].join('\n'),
       '../stores/ui.ts': `export const useUiStore = globalThis.${prefix}UiStore;`,
       '../stores/tasks.ts': `export const useTasksStore = globalThis.${prefix}TasksStore;`,
       '../stores/board.ts': `export const useBoardStore = globalThis.${prefix}BoardStore;`,

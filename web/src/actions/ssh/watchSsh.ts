@@ -1,6 +1,6 @@
 import { sseSubscribe } from '../../composables/useSse.ts';
 import { useSshStore } from '../../stores/ssh.ts';
-import { loadSsh, reloadSshAudit } from './loadSsh.ts';
+import { loadSshProjects, loadSsh, reloadSshAudit } from './loadSsh.ts';
 import { runtimeOf } from './sshRuntime.ts';
 
 /**
@@ -16,6 +16,10 @@ export function watchSsh(): void {
   }
 
   runtime.off = sseSubscribe((name: string) => {
+    if (name === 'projects-changed' || name === 'hello') {
+      void loadSshProjects();
+    }
+
     if (name === 'ssh-sessions') {
       void loadSsh();
     }

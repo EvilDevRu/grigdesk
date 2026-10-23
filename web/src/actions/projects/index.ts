@@ -11,3 +11,5 @@ export { loadProject } from './loadProject';
 export { loadProjects } from './loadProjects';
 export { saveProject } from './saveProject';
 export { watchProjects } from './watchProjects';
+
+export { removeProject } from './removeProject';

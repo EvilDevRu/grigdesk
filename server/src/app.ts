@@ -11,6 +11,7 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import websocket from '@fastify/websocket';
 
+import { isProjectDeleted, deletedProjectIds } from './lib/projects/deletion.ts';
 import { assertSupportedNode } from './lib/nodeVersion.ts';
 import { createShutdownCoordinator } from './lib/shutdown.ts';
 import { attachDesktopParent } from './lib/desktopParent.ts';
@@ -284,8 +285,16 @@ async function build(desktopParent: DesktopParent | null) {
     workTimeReader: (identity) => readRouteWorkTime(config, identity),
     arbiterCards,
   });
+  const projectsService = createProjectsService({
+    config,
+    prefs,
+    broadcast: (event, data) => fastify.sse?.broadcast?.(event, data),
+  });
+  const isDeletedProject = (id: string) => isProjectDeleted(prefs, id);
   const permissionQueue = createPermissionQueue();
   const sshConnections = await createSshStore({
+    withReferences: projectsService.withReferences,
+    isProjectDeleted: isDeletedProject,
     file: config.sshConnectionsPath,
     projects: async () => (await listProjects(config, prefs)).map((id) => ({ id })),
   });
@@ -414,6 +423,8 @@ async function build(desktopParent: DesktopParent | null) {
 
   const dbEngines = await createEngineRegistry();
   const dbProfiles = await createDbStore({
+    withReferences: projectsService.withReferences,
+    isProjectDeleted: isDeletedProject,
     path: config.dbProfilesPath,
     projects: async () => (await listProjects(config, prefs)).map((id) => ({ id })),
   });
@@ -473,6 +484,8 @@ async function build(desktopParent: DesktopParent | null) {
     manualRange: config.sandboxManualRange,
     sandboxActivityGuard,
     // Архивный проект новых стендов не поднимает: уже поднятый сносится как обычно.
+    isProjectDeleted: (id: string) => isDeletedProject(id),
+    deletedProjectIds: () => deletedProjectIds(prefs),
     isProjectArchived: (id: string) => isProjectArchived(prefs, id),
     downCmd: config.sandboxDownCmd,
     log: fastify.log,
@@ -876,6 +889,7 @@ async function build(desktopParent: DesktopParent | null) {
   let showcaseWatch: NodeJS.Timeout | null = null;
 
   const telegramInboxChannel = createTelegramInboxChannel({
+    isProjectDeleted: isDeletedProject,
     enabled: () => fastify.pluginEnabled('telegram'),
     state: async () => {
       const provider = await telegramConnection.status();
@@ -898,6 +912,7 @@ async function build(desktopParent: DesktopParent | null) {
     log: fastify.log,
   });
   const githubInboxChannel = createGitHubInboxChannel({
+    isProjectDeleted: isDeletedProject,
     enabled: () => fastify.pluginEnabled('github'),
     state: () => githubConnection.status(),
     acquireInboxLease: () => githubConnection.acquireInboxLease(),
@@ -1120,6 +1135,8 @@ async function build(desktopParent: DesktopParent | null) {
     projects: () => fastify.projects,
   });
   await fastify.register<GitHubModuleOptions>(githubModule, {
+    isProjectDeleted: isDeletedProject,
+    withReferences: projectsService.withReferences,
     connection: asPort(githubConnection),
     listProjects: () => listProjects(config, prefs),
   });
@@ -1129,6 +1146,8 @@ async function build(desktopParent: DesktopParent | null) {
     worker: inboxAutoTasks,
   });
   await fastify.register<TelegramModuleOptions>(telegramModule, {
+    isProjectDeleted: isDeletedProject,
+    withReferences: projectsService.withReferences,
     connection: asPort(telegramConnection),
     poller: telegramPoller,
     botApi: telegramBotApi,
@@ -1139,11 +1158,7 @@ async function build(desktopParent: DesktopParent | null) {
   await fastify.register(documentsModule, { reader: documentReader });
   // Сервис проектов создаётся здесь, а не внутри модуля: провайдеры связей знают
   // соседние разделы, и регистрировать их может только сборка приложения.
-  const projectsService = createProjectsService({
-    config,
-    prefs,
-    broadcast: (event, data) => fastify.sse?.broadcast?.(event, data),
-  });
+
 
   // Связи проекта: каждый раздел сам отвечает, сколько записей держится за id.
   // Правила Telegram и GitHub сюда добавятся из своих модулей: их хранилища живут
@@ -1151,6 +1166,7 @@ async function build(desktopParent: DesktopParent | null) {
   projectsService.registerDependencyProvider({
     kind: 'routes',
     label: 'Опубликованный каталог маршрутов',
+    blocksDelete: false,
     blocksArchive: false,
     count: async (id) => {
       const store = new RoutesStore({ baseDir: config.routesDir });
@@ -1164,6 +1180,7 @@ async function build(desktopParent: DesktopParent | null) {
   projectsService.registerDependencyProvider({
     kind: 'factory',
     label: 'Попытки фабрики',
+    blocksDelete: false,
     blocksArchive: false,
     count: async (id) => {
       const tasks = await factoryState.listTaskIds().catch(() => []);
@@ -1183,6 +1200,7 @@ async function build(desktopParent: DesktopParent | null) {
   projectsService.registerDependencyProvider({
     kind: 'ssh',
     label: 'Профили SSH',
+    blocksDelete: true,
     blocksArchive: false,
     count: (id) => {
       const items = sshConnections.list()
@@ -1195,6 +1213,7 @@ async function build(desktopParent: DesktopParent | null) {
   projectsService.registerDependencyProvider({
     kind: 'db',
     label: 'Профили баз',
+    blocksDelete: true,
     blocksArchive: false,
     count: (id) => {
       const items = dbProfiles.list()
@@ -1207,6 +1226,7 @@ async function build(desktopParent: DesktopParent | null) {
   projectsService.registerDependencyProvider({
     kind: 'showcase',
     label: 'Цели презентаций',
+    blocksDelete: false,
     blocksArchive: false,
     count: async (id) => {
       const overview = await showcaseService.overview();
@@ -1222,12 +1242,14 @@ async function build(desktopParent: DesktopParent | null) {
   projectsService.registerDependencyProvider({
     kind: 'telegram',
     label: 'Правила Telegram',
+    blocksDelete: true,
     blocksArchive: true,
     count: (id) => countTelegramRules(telegramConnection, id),
   });
   projectsService.registerDependencyProvider({
     kind: 'github',
     label: 'Правила GitHub',
+    blocksDelete: true,
     blocksArchive: true,
     count: (id) => countGitHubRules(githubConnection, id),
   });
@@ -1239,7 +1261,13 @@ async function build(desktopParent: DesktopParent | null) {
   await fastify.register(sandboxesModule, { service: sandboxService });
   await fastify.register(showcaseModule, { service: showcaseService });
   await fastify.register(chatModule, {
-    factoryState, config, claudeAuth, internalToken, prefs, speechRuntime,
+    projectsService,
+    factoryState,
+    config,
+    claudeAuth,
+    internalToken,
+    prefs,
+    speechRuntime,
     taskExists: companionTaskExists,
     permissionQueue,
     sshBroker,

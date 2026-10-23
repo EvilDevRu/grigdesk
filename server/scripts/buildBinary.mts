@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import type { Readable, Writable } from 'node:stream';
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,13 +17,14 @@ const sourceRoot = path.resolve(import.meta.dirname, '../..');
  * Каждая стадия работает на переднем плане под timeout и пишет собственные log/exit.
  * Вывод компилятора не накапливается в памяти и не смешивается с JSON результата сборки.
  */
-async function loggedStage(input: {
+export async function loggedStage(input: {
   name: string;
   file: string;
   args: string[];
   cwd: string;
   env: NodeJS.ProcessEnv;
   prefix: string;
+  streamOutput?: boolean;
 }) {
   const logFile = `${input.prefix}${input.name}.log`;
   const exitFile = `${input.prefix}${input.name}.exit`;
@@ -34,17 +37,61 @@ async function loggedStage(input: {
     const child = spawn('/usr/bin/timeout', ['--foreground', '3600', input.file, ...input.args], {
       cwd: input.cwd,
       env: input.env,
-      stdio: ['ignore', log.fd, log.fd],
+      stdio: ['ignore', input.streamOutput ? 'pipe' : log.fd, input.streamOutput ? 'pipe' : log.fd],
     });
+    let pending = Promise.resolve();
+
+    /**
+     * Полные строки сохраняются общей очередью без перемешивания их частичных порций.
+     * Незавершённая строка ограничена 256 КиБ, а drain ограничивает буфер внешнего потока.
+     */
+    async function mirror(source: Readable, destination: Writable): Promise<void> {
+      let partial = Buffer.alloc(0);
+
+      for await (const chunk of source) {
+        partial = Buffer.concat([partial, chunk]);
+
+        const newline = partial.lastIndexOf(10);
+        const length = newline >= 0 ? newline + 1 : partial.length >= 262144 ? 262144 : 0;
+
+        if (length) {
+          const bytes = partial.subarray(0, length);
+
+          partial = partial.subarray(length);
+          pending = pending.then(async () => {
+            await log.writeFile(bytes);
+          });
+          await pending;
+        }
+
+        if (!destination.write(chunk)) {
+          await once(destination, 'drain');
+        }
+      }
+
+      if (partial.length) {
+        pending = pending.then(async () => {
+          await log.writeFile(partial);
+        });
+        await pending;
+      }
+    }
+
+    const streams = input.streamOutput
+      ? Promise.all([mirror(child.stdout!, process.stdout), mirror(child.stderr!, process.stderr)])
+      : Promise.resolve();
     const result = await new Promise<number>((resolve, reject) => {
       child.once('error', reject);
-      child.once('exit', (status) => resolve(status ?? 1));
+      child.once('close', (status) => resolve(status ?? 1));
     });
 
+    await streams;
     code = result;
 
     if (code !== 0) {
-      throw new Error(`Стадия ${input.name} завершилась кодом ${code}; журнал ${logFile}`);
+      throw Object.assign(new Error(
+        `Стадия ${input.name} завершилась кодом ${code}; журнал ${logFile}`,
+      ), { code });
     }
 
     return { stdout: '', stderr: '' };
@@ -59,6 +106,7 @@ async function loggedStage(input: {
  * Единственная публикация ELF происходит после metadata/full verify/authenticated HTTP/IPC E0.
  */
 export async function buildBinary(options: BinaryBuildOptions) {
+  const streamOutput = process.env.GRIGDESK_CTL_BUILD_OBSERVED === '1';
   const runtime = readNodeRuntime(JSON.parse(await readFile(
     path.join(sourceRoot, 'server/build/node-runtime.json'), 'utf8',
   )), 'server/build/node-runtime.json');
@@ -90,6 +138,7 @@ export async function buildBinary(options: BinaryBuildOptions) {
     cwd: sourceRoot,
     env,
     prefix,
+    streamOutput,
   });
 
   return executeBinaryBuild(options, {
@@ -103,6 +152,7 @@ export async function buildBinary(options: BinaryBuildOptions) {
       cwd: context.cwd,
       env: { ...env, ...context.env },
       prefix,
+      streamOutput,
     }),
     prepare: async (work) => {
       await writeFile(path.join(work, 'build-input.json'), JSON.stringify({
@@ -132,6 +182,7 @@ export async function buildBinary(options: BinaryBuildOptions) {
         cwd: work,
         env,
         prefix,
+        streamOutput,
       });
     },
     smoke: async (binary, manifest, work) => {
@@ -161,6 +212,7 @@ export async function buildBinary(options: BinaryBuildOptions) {
         cwd: sourceRoot,
         env,
         prefix,
+        streamOutput,
       });
 
       const report = JSON.parse(await readFile(reportFile, 'utf8')) as BinarySmokeMetrics;

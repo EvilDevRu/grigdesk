@@ -63,6 +63,10 @@ async function countRules(
       throw accountChanged();
     }
 
+    if (typeof lease?.context?.rules?.read !== 'function') {
+      throw new Error('Связи не проверены: правила аккаунта недоступны.');
+    }
+
     const rows = rulesOf(await lease?.context?.rules?.read?.());
 
     if (lease?.isCurrent?.() === false) {
