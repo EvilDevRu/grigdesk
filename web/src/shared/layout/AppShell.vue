@@ -183,7 +183,11 @@
                 <UiPressable
                   class="prov"
                   data-context="provider-status"
-                  :class="[p.id, { off: !p.available, upd: p.updateAvailable }]"
+                  :class="[p.id, {
+                    off: !p.available,
+                    upd: p.updateAvailable,
+                    installing: installation.snapshot.active?.providerId === p.id,
+                  }]"
                   :aria-label="provTitle(p)"
                   :style="p.available ? { color: p.color } : null"
                 >
@@ -194,6 +198,8 @@
                       equal-height
                     />
                     <span v-if="p.updateAvailable" class="updot" aria-hidden="true"></span>
+                    <span v-if="installation.snapshot.active?.providerId === p.id"
+                      :aria-label="t('settings.providerInstallationRunning')">⟳</span>
                   </span>
                 </UiPressable>
               </template>
@@ -215,21 +221,28 @@
                        за ней приходилось в настройки. Ход один на весь GrigDesk, поэтому
                        пока ставится один CLI, кнопки соседей заблокированы. -->
                   <UiIconButton
-                    v-if="canUpdateCli(p)"
+                    v-if="!p.installed && p.installation?.canInstall
+                      || canUpdateCli(p) || installation.snapshot.active?.providerId === p.id"
                     data-context="topbar-popover-update"
                     role="embedded"
-                    :label="t('core.updateTo', { pLatest: p.latest })"
-                    v-tooltip="t('core.updateCLIToTheModelCatalogWill', { pLatest: p.latest })"
-                    :disabled="!!prov.updating"
-                    :loading="prov.updating === p.id"
-                    :loading-label="t('core.updating')"
-                    @click="prov.updateCli(p.id)"
+                    :label="providerInstallationLabel(p)"
+                    v-tooltip="providerInstallationLabel(p)"
+                    :disabled="installation.busy && installation.snapshot.active?.providerId !== p.id"
+                    @click="startProviderInstallation(p, close)"
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M12 3v12 M7 10l5 5 5-5 M4 20h16" />
                     </svg>
                   </UiIconButton>
+                  <UiIconButton
+                    v-if="installation.snapshot.recent[p.id]
+                      && installation.snapshot.active?.providerId !== p.id"
+                    role="embedded"
+                    :label="t('settings.providerInstallationResult')"
+                    v-tooltip="t('settings.providerInstallationResult')"
+                    @click="showProviderInstallation(p.id, close)"
+                  ><span aria-hidden="true">✓</span></UiIconButton>
                   <!-- Проверка «прямо сейчас»: фон ходит к вендору раз в пять минут, а
                        человеку иногда нужна цифра этой минуты. Пока идёт пауза после
                        отказа вендора, кнопка гаснет и называет время: клик всё равно
@@ -382,6 +395,7 @@
           :aria-hidden="toolDock.isExpanded ? 'true' : undefined"><slot /></main>
     <ToolHost v-if="workspaceStarted" />
     <PhoneConnectDialog />
+    <ProviderInstallDialog />
 
   </div>
 </template>
@@ -399,6 +413,8 @@ import type { BoardTask } from '../boardContracts.ts';
 import { installAlertDeepLinks, openAlertTarget } from '../alertDeepLinks.ts';
 import ConnectionButton from './ConnectionButton.vue';
 import PhoneConnectButton from './PhoneConnectButton.vue';
+import ProviderInstallDialog from '../ProviderInstallDialog.vue';
+import { useProviderInstallStore } from '../../stores/providerInstall.ts';
 import { usePhoneAccessStore } from '../../stores/phoneAccess.ts';
 import PhoneConnectDialog from '../../views/settings/PhoneConnectDialog.vue';
 import { setAlertTargetOpener } from '../alerts.ts';
@@ -493,6 +509,7 @@ const grigDeskUpdate = useGrigDeskUpdateStore();
 
 // Реестр LLM-исполнителей — иконки доступных агентов в топбаре.
 const prov = useProvidersStore();
+const installation = useProviderInstallStore();
 // Setup-only карточки (сейчас Kimi) живут в настройках, но не изображают работающего
 // чат-исполнителя в шапке до появления transport-а и каталога моделей.
 const runtimeProviders = computed(() => prov.providers.filter(isTopbarProvider));
@@ -578,6 +595,39 @@ onUnmounted(() => usageWatch.stop());
 // Кнопка установки во всплывашке: только у отставшего CLI, который GrigDesk умеет ставить
 // сам. Пока идёт установка, кнопка остаётся на месте — иначе она исчезла бы вместе с
 // ходом, который сама и начала, и человек не понял бы, ставится ли ещё.
+/**
+ * Первая установка ещё не имеет latest, поэтому её подпись не подставляет пустую версию.
+ * Активный статус остаётся доступным действием повторного открытия общего окна.
+ */
+function providerInstallationLabel(p: TopbarProvider): string {
+  if (installation.snapshot.active?.providerId === p.id) {
+    return t('settings.providerInstallationRunning');
+  }
+  if (!p.installed) {
+    return t('settings.providerInstallationInstall');
+  }
+
+  return p.latest ? t('core.updateTo', { pLatest: p.latest }) : t('settings.providerInstallationUpdate');
+}
+
+/**
+ * Всплывашка закрывается до подтверждения и открытия установки.
+ * Её верхний слой не должен закрывать команду и шаги нового окна на телефоне.
+ */
+function startProviderInstallation(p: TopbarProvider, close: () => void): void {
+  close();
+  void installation.requestInstall(p.id, p.installed ? 'update' : 'install');
+}
+
+/**
+ * Просмотр уже сохранённого результата открывает то же окно без нового запуска.
+ * Исходная всплывашка освобождает экран, как и при первом открытии.
+ */
+function showProviderInstallation(id: string, close: () => void): void {
+  close();
+  installation.show(id);
+}
+
 function canUpdateCli(p: TopbarProvider) {
   return Boolean(p.installed && p.canUpdate && (p.updateAvailable || prov.updating === p.id));
 }

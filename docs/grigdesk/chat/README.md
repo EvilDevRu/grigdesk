@@ -1,5 +1,8 @@
 # Чат и исполнители
 
+- [Установка CLI: общее окно, серверная операция и восстановление](provider-cli-installation.md)
+- [Вывод установки, обновление реестра и перевод собственных причин](provider-install-output-and-messages.md)
+
 - [Самостоятельная поставка DeepSeek: установка, память и границы](deepseek-binary.md)
 
 - [Первый переход на автономный Harness: home и CAS без потери сессии](deepseek-binary-cutover.md)
@@ -149,6 +152,7 @@
 - [Запрет прямого SSH — настройка каждого исполнителя, а не общая политика UI](executor-ssh-policy.md)
 - [Инвалидация каталога учитывает ВСЕ входы](model-catalog-invalidation.md)
 - [Индикатор «вышла новая версия» — есть, автообновления НЕТ](cli-update-indicator.md)
+- [Окно установки поверх настроек, сохранение отказа запуска и совместимость со старым сервером](provider-install-window-recovery.md)
 - [Новые модели Anthropic обнаруживаются сами](anthropic-model-discovery.md)
 - [Подключение нового ИИ — модульное](executor-adapter-boundary.md)
 - [Типы исполнителей, Tripo API и смена аккаунта без прежнего счёта](executor-types.md)

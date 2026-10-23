@@ -2828,6 +2828,32 @@ export default {
     return codexSupportsRestrictedWorkspace(config?.codexBin);
   },
   install: 'npm i -g @openai/codex && codex login',
+  login: 'codex login',
+  /**
+   * Сервер исполняет только эту декларацию; вход остаётся отдельным действием.
+   * Обновление проверяет настроенную копию, запасная команда сохраняет прежний путь.
+   */
+  installation(config: CodexConfig) {
+    const command = 'npm i -g @openai/codex';
+    const install = {
+        executable: 'npm',
+        args: ['i', '-g', '@openai/codex'],
+        command,
+        fallbackCommand: 'npm i -g @openai/codex && codex login',
+    };
+
+    return {
+      install,
+      update: {
+        executable: config.codexBin,
+        args: ['update'],
+        command: [config.codexBin, ...['update']].join(' '),
+        fallbackCommand: [config.codexBin, ...['update']].join(' '),
+      },
+      loginCommand: 'codex login',
+    };
+  },
+
   statusPage: 'https://status.openai.com',
   // Каждый путь из opts.extraDirs становится writableRoot sandboxPolicy хода.
   workdir: { switch: 'resume', roots: 'multi' },
