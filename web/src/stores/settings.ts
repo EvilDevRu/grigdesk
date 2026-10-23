@@ -100,12 +100,17 @@ export const useSettingsStore = defineStore('settings', () => {
   });
 
   /**
-   * Старый install ID нормализуется до проверки видимого каталога страниц.
+   * Прежние ID раздела доступа и страницы установки ведут на актуальные страницы каталога.
    * Хранилище и entity остаются прежними; открытие не запускает отдельный диалог.
    * В дереве раскрыта только группа выбранной страницы, остальные сворачиваются.
    */
+  function normalizePageId(id: unknown): string | undefined {
+    return normalizeSettingsPageId(
+      id === 'connections.mobile' || id === 'access' ? 'connections.devices' : id);
+  }
+
   function selectPage(id: string, entity?: string, tab?: string): boolean {
-    const selected = normalizeSettingsPageId(id);
+    const selected = normalizePageId(id);
 
     if (!selected) {
       navigationMessage.value = messageRef('settings.settingsSectionNoLongerAvailable');
@@ -151,7 +156,7 @@ export const useSettingsStore = defineStore('settings', () => {
     }
 
     if (isOpen.value) {
-      const selected = normalizeSettingsPageId(request.pageId) ?? normalizeSettingsPageId(request.queryPage);
+      const selected = normalizePageId(request.pageId) ?? normalizePageId(request.queryPage);
 
       if (selected) {
         selectPage(selected, request.entityId);

@@ -627,12 +627,14 @@ function validateDraftAttachment(source: unknown, cache: Map<string, Payload>) {
  */
 export function createTelegramInboxChannel({
   enabled,
+  isProjectDeleted,
   state,
   acquireInboxLease,
   // Свободный текст ошибки провайдера наружу не идёт (в нём бывает токен), но и
   // пропадать не должен: разбирать «почему не скачалось» больше негде.
   log = console,
 }: {
+  isProjectDeleted?: (id: string) => boolean;
   enabled?: () => Promise<unknown> | unknown;
   state?: () => Promise<unknown>;
   acquireInboxLease?: () => Promise<unknown>;
@@ -644,6 +646,20 @@ export function createTelegramInboxChannel({
     acquireInboxLease,
     'acquireInboxLease',
   ) as () => Promise<unknown>;
+
+  const deletedCallback = callable(isProjectDeleted, 'isProjectDeleted') as (id: string) => boolean;
+
+  /**
+   * Проверка выполняется повторно после асинхронного чтения политики и архива.
+   * Ошибка настроек закрывает автоматическую работу, сохраняя raw правила.
+   */
+  function deleted(project: unknown): boolean {
+    try {
+      return Boolean(deletedCallback(String(project || '')));
+    } catch {
+      return fail('telegram_inbox_invalid_policy', 'Не удалось проверить регистрацию проекта.');
+    }
+  }
 
   return {
     id: CHANNEL,
@@ -761,7 +777,10 @@ export function createTelegramInboxChannel({
                 username: position.chatUsername,
                 threadId: position.threadId,
               });
-              if (rule === null) continue;
+
+              if (rule === null || deleted(rule.project)) {
+                continue;
+              }
               if (admitted.length >= wanted) {
                 truncated = true;
                 break scan;
@@ -772,6 +791,9 @@ export function createTelegramInboxChannel({
               await assertCurrent();
               if (!snapshotMatchesPosition(snapshot, position)) {
                 fail('telegram_inbox_invalid_archive', 'Telegram snapshot не совпадает с metadata position.');
+              }
+              if (deleted(rule.project)) {
+                continue;
               }
               const message = toInboxMessage(snapshot, { accountRef: owner.accountRef });
               const urlKey = cacheKey(message.source.id, message.id);
@@ -826,7 +848,8 @@ export function createTelegramInboxChannel({
           }
           for (const batch of admitted) batch.truncated = truncated;
           await assertCurrent();
-          return admitted;
+
+          return admitted.filter((batch) => !deleted(batch.policy.project));
         },
 
         sourceUrl({ source, message }: {

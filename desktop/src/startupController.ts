@@ -1,6 +1,7 @@
 import { desktopText } from './locale.ts';
 
 export const SPLASH_MINIMUM_MS = 2000;
+export const LOCAL_SERVER_WAIT_MS = 30_000;
 export const STARTUP_DEADLINE_MS = 90_000;
 export const FRAME_LIMIT_MS = 1500;
 // Ожидание VPN-ворот срок старта не расходует, но не дольше этого предела от start().
@@ -19,6 +20,9 @@ export interface StartupAdapters {
   prepare(signal: AbortSignal): Promise<void>;
   connect(signal: AbortSignal): Promise<void>;
   waitFrame(signal: AbortSignal): Promise<void>;
+  localSelected?(): boolean;
+  waitLocal?(signal: AbortSignal): Promise<void>;
+  localFallback?(kind: 'timeout' | 'failed', message?: string): void;
   reveal(): void;
   focusMain(): void;
   timeoutMessage(phase: StartupPhase): string;
@@ -165,8 +169,62 @@ export function createStartupController(adapters: StartupAdapters): StartupContr
   }
 
   /**
+   * Местный сервер получает отдельный бюджет от показа заставки, включая подготовку и VPN.
+   * Мягкий исход отменяет только наблюдение: фоновый запуск и общий сигнал остаются живыми.
+   */
+  function waitLocal(shownAt: number): Promise<void> {
+    return new Promise((resolve) => {
+      const local = new AbortController();
+      let settled = false;
+      let cancelTimer = () => {};
+
+      /**
+       * Первый исход освобождает срок и подписку, поздние ответы адаптера поглощаются.
+       * Отмена приложения завершает ожидание без мягкой ошибки и без показа окна.
+       */
+      const finish = (kind?: 'timeout' | 'failed', message?: string) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        cancelTimer();
+        signal.removeEventListener('abort', abort);
+        local.abort();
+
+        if (kind && state === 'booting' && !signal.aborted) {
+          adapters.localFallback?.(kind, message);
+        }
+
+        resolve();
+      };
+      const abort = () => finish();
+
+      signal.addEventListener('abort', abort, { once: true });
+      cancelTimer = adapters.setTimer(
+        Math.max(0, LOCAL_SERVER_WAIT_MS - (adapters.now() - shownAt)),
+        () => finish('timeout'),
+      );
+
+      if (signal.aborted) {
+        finish();
+
+        return;
+      }
+
+      try {
+        adapters.waitLocal!(local.signal).then(() => finish(), (error: unknown) => {
+          finish('failed', error instanceof Error ? error.message : String(error));
+        });
+      } catch (error) {
+        finish('failed', error instanceof Error ? error.message : String(error));
+      }
+    });
+  }
+
+  /**
    * Шаги идут строго по порядку; после каждого await проверяется, не закончен ли старт.
-   * Показ главного окна — только после кадра и минимума с момента показа заставки.
+   * Показ — после кадра, ограниченного ожидания выбранного local и минимума заставки.
    */
   async function run(): Promise<StartupState> {
     try {
@@ -204,6 +262,14 @@ export function createStartupController(adapters: StartupAdapters): StartupContr
 
       if (state !== 'booting') {
         return state;
+      }
+
+      if (adapters.localSelected?.() && adapters.waitLocal) {
+        await waitLocal(shownAt);
+
+        if (state !== 'booting') {
+          return state;
+        }
       }
 
       const rest = SPLASH_MINIMUM_MS - (adapters.now() - shownAt);

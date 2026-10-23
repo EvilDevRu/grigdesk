@@ -831,6 +831,13 @@ const activeSession = computed(() => (
 // Новый профиль базы заводят только на активный проект: архивным уже не работают,
 // а профили, заведённые до архива, остаются на месте вместе со своим проектом.
 const projectOptions = computed(() => (store.projects || []).filter((project) => !project.archivedAt));
+
+watch(projectOptions, (projects) => {
+  if (draft.projectId && !projects.some((project) => project.id === draft.projectId)) {
+    draft.projectId = '';
+  }
+});
+
 const activeQueryCount = computed(() => (store.queries || []).filter((item) => (
   ['checking', 'waiting', 'running'].includes(item.state)
 )).length);

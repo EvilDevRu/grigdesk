@@ -255,3 +255,66 @@ test('сторож: сборка приложения регистрирует �
     'модуль обязан получить тот же сервис, на котором зарегистрированы провайдеры',
   );
 });
+
+test('PD-owner: физический профиль, история и сбой информационного провайдера не запрещают удаление архива',
+  async (t) => {
+    const { pdFixture } = await import('./helpers/projects-deletion.js');
+    const f = await pdFixture(t);
+
+    await f.service.archive('demo', 1);
+
+    for (const kind of ['routes', 'factory', 'history']) {
+      f.service.registerDependencyProvider({
+
+        kind,
+        label: kind,
+        blocksArchive: false,
+        blocksDelete: false,
+
+        count: () => ({ count: 1 }),
+
+      });
+    }
+
+    f.service.registerDependencyProvider({
+
+      kind: 'showcase',
+      label: 'Презентации',
+      blocksArchive: false,
+      blocksDelete: false,
+
+      count: () => {
+        throw new Error('plugin_disabled');
+      },
+
+    });
+
+    const summary = await f.service.dependencies('demo');
+
+    assert.equal(summary.deletable, true);
+    assert.match(summary.reasons.join(' '), /plugin_disabled/);
+  });
+
+for (const kind of ['ssh', 'db', 'telegram', 'github']) {
+  test(`PD-owner: живой или непроверенный владелец запрещает удаление (${kind})`, async (t) => {
+    const { pdFixture } = await import('./helpers/projects-deletion.js');
+    const f = await pdFixture(t, { source: 'prefs' });
+
+    await f.service.archive('demo', 1);
+    f.service.registerDependencyProvider({
+
+      kind,
+      label: kind,
+      blocksArchive: false,
+      blocksDelete: true,
+
+      count: () => ({ count: 1 }),
+
+    });
+
+    assert.equal((await f.service.dependencies('demo')).deletable, false);
+    assert.equal(typeof f.service.remove, 'function', 'remove отсутствует');
+    await assert.rejects(f.service.remove('demo', 2), { code: 'has_dependencies' });
+    assert.equal(f.prefs.readStored().projects.demo.revision, 2);
+  });
+}

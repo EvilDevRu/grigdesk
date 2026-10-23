@@ -81,6 +81,13 @@ export function connectionDetailText(detail: ShellState['detail'], locale = 'ru'
 
 
 const CLIENT_FAILURES: Record<string, string> = {
+  offline: 'Сервер недоступен. Проверьте связь и доступ к серверу.',
+  unpaired: 'Нужна повторная привязка устройства.',
+  device_unknown: 'Устройство не найдено. Получите новый QR и привяжите его заново.',
+  device_scope_forbidden: 'Отзовите старую привязку и подключите актуальное приложение новым QR.',
+  relay_upgrade_required: 'Обновите ретранслятор сервера для нового приложения.',
+  relay_pin_mismatch: 'Сертификат ретранслятора не совпал. Дома телефон подключится напрямую.',
+  relay_unauthorized: 'Ретранслятор отклонил ключ телефона. Получите новый QR.',
   identityMismatch: 'Это не тот сервер.',
   invalid_pairing: 'Строка привязки повреждена. Получите новый код на машине.',
   unsupported_address: 'Этот тип адреса пока не поддерживается приложением.',

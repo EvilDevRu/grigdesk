@@ -335,6 +335,7 @@
   "openChat": "Open chat",
   "openTask": "Open task",
   "pairingLifetime": "The code expires. Create a new code if it has expired.",
+  "pairingStringPlaceholder": "GRIGDESK:PHONE:2:… / GRIGDESK:PAIR:1:…",
   "forecast": "Forecast",
   "fileUnits": {
     "0": "B",
@@ -546,5 +547,7 @@
     "other": "{count} active"
   },
   "invalidPipelineSnapshot": "The server returned an invalid pipeline summary",
-  "invalidPipelineGraph": "The server returned an invalid pipeline graph"
+  "invalidPipelineGraph": "The server returned an invalid pipeline graph",
+  "relayAddress": "Via the configured relay",
+  "desktopPairingPlaceholder": "GRIGDESK:PAIR:1:…"
 }

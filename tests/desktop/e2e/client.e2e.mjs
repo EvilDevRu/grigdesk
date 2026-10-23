@@ -55,10 +55,10 @@ async function start(t, args = [], key) {
 
 /**
  * Наблюдение проверяет реальную видимость BrowserWindow, а не только загрузку документа.
- * Отказ ограничен десятью секундами и завершает только собственный Electron.
+ * Предел проверки оставляет запас над тридцатью секундами местного ожидания.
  */
-async function visibleMain(app) {
-  const deadline = Date.now() + 10000;
+async function visibleMain(app, timeout = 40_000) {
+  const deadline = Date.now() + timeout;
 
   while (Date.now() < deadline) {
     const page = app.windows().find((value) => value.url().startsWith('http://127.0.0.1:'));
@@ -87,16 +87,44 @@ async function waitState(page, status) {
   }, status);
 }
 
-test('UC-E01: местный сервер выключен — сразу показан интерфейс приложения',
-  { timeout: 30000 }, async (t) => {
+/**
+ * Время отсчитывается от наблюдаемого показа заставки в главном процессе.
+ * Ожидание не скрывает ранний показ main и не включает запуск Electron.
+ */
+async function splashShownAt(app) {
+  const deadline = Date.now() + 10_000;
+
+  while (Date.now() < deadline) {
+    const shown = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()
+      .some((window) => window.isVisible()
+        && window.webContents.getURL().endsWith('/splash/index.html')));
+
+    if (shown) {
+      return Date.now();
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  assert.fail('Заставка не показана за 10 с.');
+}
+
+test('UC-E01: явный местный адрес недоступен — мягкий показ по сроку',
+  { timeout: 60_000 }, async (t) => {
     const port = await freePort();
     const { app } = await start(t, [`--grigdesk-url=http://127.0.0.1:${port}`]);
+    const shownAt = await splashShownAt(app);
     const page = await visibleMain(app);
+    const elapsed = Date.now() - shownAt;
 
-    await page.locator('.shell').waitFor();
+    assert.ok(elapsed >= 25_000 && elapsed <= 35_000, `Первый показ через ${elapsed} мс от заставки.`);
+    assert.ok((await page.locator('.workspace-connection-message').textContent()).trim());
     assert.equal(await page.locator('.connections').count(), 0);
+    assert.equal(app.process().exitCode, null);
+    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
     await page.locator('[data-context="connection-trigger"]').click();
-    await page.getByRole('button', { name: 'Добавить машину', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Все машины', exact: true }).click();
+    await page.getByRole('heading', { name: 'Машины', exact: true }).waitFor();
     assert.notEqual(new URL(page.url()).port, String(port));
   });
 
@@ -119,8 +147,8 @@ test('UC-E02: без установки открыт интерфейс, маш�
   await page.locator('.shell').waitFor();
 });
 
-test('UC-E03: окно показано до отложенного старта; сессия остаётся в трубе',
-  { timeout: 30000 }, async (t) => {
+test('UC-E03: явный местный адрес ждёт listen и вход; сессия остаётся в трубе',
+  { timeout: 60_000 }, async (t) => {
     const port = await freePort();
     const key = randomBytes(32).toString('base64url');
     const server = http.createServer((req, res) => {
@@ -139,7 +167,8 @@ test('UC-E03: окно показано до отложенного старта
         res.end('{}');
       }
     });
-    const timer = setTimeout(() => server.listen(port, '127.0.0.1'), 5000);
+    const listening = once(server, 'listening');
+    let timer;
 
     t.after(async () => {
       clearTimeout(timer);
@@ -148,14 +177,46 @@ test('UC-E03: окно показано до отложенного старта
     });
 
     const { app } = await start(t, [`--grigdesk-url=http://127.0.0.1:${port}`], key);
+    let hidden;
+    const documentDeadline = Date.now() + 10_000;
+
+    while (!hidden && Date.now() < documentDeadline) {
+      hidden = app.windows().find((page) => page.url().startsWith('http://127.0.0.1:'));
+
+      if (!hidden) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+
+    assert.ok(hidden, 'Труба создаёт скрытый документ до готовности сервера.');
+    await waitState(hidden, 'offline');
+
+    const offlineAt = Date.now();
+    let listenAt;
+
+    await hidden.locator('.shell').waitFor();
+    await hidden.locator('.shell').evaluate((element) => element.dataset.startupRetained = 'true');
+    timer = setTimeout(() => {
+      server.listen(port, '127.0.0.1', () => {
+        listenAt = Date.now();
+      });
+    }, 3000);
+
     const page = await visibleMain(app);
 
-    await page.locator('.shell').waitFor();
+    assert.equal(server.listening, true, 'Первый показ должен следовать listen местного сервера.');
+    await listening;
+    assert.ok(listenAt - offlineAt <= 5000,
+      `Предусловие повторов: listen через ${listenAt - offlineAt} мс после первого offline.`);
+
+    const snapshot = await page.evaluate(async () => ({
+      state: await (await fetch('/__shell/state')).json(),
+      waiting: Boolean(document.querySelector('.workspace-waiting')),
+    }));
+
+    assert.equal(snapshot.state.status, 'online');
+    assert.equal(snapshot.waiting, false, 'Рабочая область готова при первом показе.');
     assert.equal(await page.locator('.connections').count(), 0);
-    await page.locator('.shell').evaluate((element) => element.dataset.startupRetained = 'true');
-    assert.equal(server.listening, false, 'показ не должен ждать сервер');
-    await once(server, 'listening');
-    await waitState(page, 'online');
 
     const result = await page.evaluate(async () => ({
       state: await (await fetch('/api/auth/state')).json(),

@@ -337,6 +337,7 @@
   "openChat": "Открыть чат",
   "openTask": "Открыть задачу",
   "pairingLifetime": "Код действует ограниченное время. Если он истёк, создайте новый.",
+  "pairingStringPlaceholder": "GRIGDESK:PHONE:2:… / GRIGDESK:PAIR:1:…",
   "forecast": "Прогноз",
   "fileUnits": {
     "0": "Б",
@@ -556,5 +557,7 @@
     "other": "{count} активных"
   },
   "invalidPipelineSnapshot": "Сервер вернул некорректную сводку конвейера",
-  "invalidPipelineGraph": "Сервер вернул некорректный граф конвейера"
+  "invalidPipelineGraph": "Сервер вернул некорректный граф конвейера",
+  "relayAddress": "Через настроенный ретранслятор",
+  "desktopPairingPlaceholder": "GRIGDESK:PAIR:1:…"
 }

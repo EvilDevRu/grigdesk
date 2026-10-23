@@ -57,7 +57,7 @@ export function registerClientPairRoute(app: FastifyInstance, options: ClientBoo
 
       return reply.send(error);
     },
-  }, async (request) => {
+  }, async (request, reply) => {
     const fp = (request.raw.socket as TLSSocket).getPeerX509Certificate?.()
       ?.fingerprint256.replaceAll(':', '').toLowerCase();
 
@@ -71,6 +71,10 @@ export function registerClientPairRoute(app: FastifyInstance, options: ClientBoo
 
     const device = await options.pairing.pair(request.body.code, fp, request.body.name, 'client',
       request.raw.socket.remoteAddress ?? request.ip);
+
+    // Маршрут TLS выбирается один раз: следующий hello требует нового соединения.
+    // Закрытие после ответа сохраняет повтор pair тем же сертификатом.
+    reply.header('Connection', 'close');
 
     return {
       device: { id: device.id, name: device.name },

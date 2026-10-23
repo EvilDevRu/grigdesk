@@ -1,3 +1,4 @@
+import { runtimeOf } from './sshRuntime.ts';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 
 import { sshApi } from '../../shared/sshApi.ts';
@@ -44,16 +45,28 @@ export async function loadSsh(): Promise<void> {
  */
 export async function loadSshProjects(): Promise<void> {
   const store = useSshStore();
+  const runtime = runtimeOf(store);
+  const request = ++runtime.projectsRequest;
 
   store.setProjectsLoading(true);
   store.setProjectsError('');
 
   try {
-    store.setProjects(await sshApi.projects());
+    const projects = await sshApi.projects();
+
+    if (request === runtime.projectsRequest) {
+      store.setProjects(projects);
+    }
   } catch (error) {
+    if (request !== runtime.projectsRequest) {
+      return;
+    }
+
     store.setProjectsError(errorMessage(error, 'Не удалось загрузить проекты'));
   } finally {
-    store.setProjectsLoading(false);
+    if (request === runtime.projectsRequest) {
+      store.setProjectsLoading(false);
+    }
   }
 }
 

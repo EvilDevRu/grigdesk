@@ -18,14 +18,24 @@ export async function loadProject(
   const runtime = runtimeOf(store);
   const previousId = store.opened?.id ?? null;
 
+  if (store.deletedIds.has(id)) {
+    return;
+  }
+
+  if (runtime.selectedId !== id) {
+    runtime.selectedId = id;
+    runtime.selectionGeneration += 1;
+  }
+
   runtime.detailRequest += 1;
 
   const request = runtime.detailRequest;
+  const generation = runtime.selectionGeneration;
 
   try {
     const detail = await projectsApi.detail(id);
 
-    if (request !== runtime.detailRequest) {
+    if (request !== runtime.detailRequest || generation !== runtime.selectionGeneration) {
       return;
     }
 
@@ -38,7 +48,7 @@ export async function loadProject(
 
     store.setError('');
   } catch (error) {
-    if (request !== runtime.detailRequest) {
+    if (request !== runtime.detailRequest || generation !== runtime.selectionGeneration) {
       return;
     }
 

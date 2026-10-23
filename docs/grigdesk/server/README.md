@@ -1,5 +1,9 @@
 # Сервер и доступ
 
+- [Подтверждение TLS-привязки, готовность relay и диагностика отказов](phone-pairing-confirmation.md)
+
+- [Управляемый direct-вход, PHONE:2 и общий client relay](phone-access.md)
+
 - [Синхронный ранний импорт папки данных и отдельный поиск CLI](early-data-home-imports.md)
 
 Запуск и юнит, авторизация, переменные машины, сеть.
@@ -9,6 +13,8 @@
 Читай перед правкой: `server/src/app.ts`, `server/src/plugins`, `server/src/modules/auth`, `bin`, `deploy`.
 
 ## Устройство
+
+- [Терминальное меню CLI: язык, прогресс, TERM=dumb, журналы и прерывание](cli-terminal-menu.md)
 
 - [Переносимая папка: свежая сборка, архив, первый запуск и меню](portable-bundle.md)
 
@@ -122,3 +128,4 @@
 - [StartLimitIntervalSec=0 в юните GrigDesk — не украшение](systemd-start-limit.md)
 - [Старт модуля не ждёт тяжёлых проб: лимит Fastify на плагин](plugin-start-timeout.md)
 - [Повторный deploy/install.sh без флага включает автозапуск обратно](install-resets-autostart.md)
+- [`node --watch` теряет импорт, на котором упал, и не поднимается после исправления](node-watch-lost-import.md)

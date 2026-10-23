@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { normalizeChatWorkdir } from '../../../../shared/chat/chatWorkdir.ts';
 import type { ChatWorkdir, WorkdirCapability } from '../../../../shared/chat/chatWorkdir.ts';
-import { projectRepos, readProjectRecord, isProjectArchived } from '../projects.ts';
+import { projectRepos, readProjectRecord, isProjectArchived, isProjectDeleted } from '../projects.ts';
 import { listProjects } from '../profiles.ts';
 import { parseSandboxRepositories } from '../sandboxEnv.ts';
 import type { GrigDeskConfig } from '../../config.ts';
@@ -110,37 +110,27 @@ export async function resolveWorkdirCapability(adapter: {
 }
 
 /**
- * Единый резолвер отделяет сохранённый выбор от реальных корней задачи/проекта.
- * Ни ошибка пути, ни ограничение single-root не разрешают расширить cwd до общего предка.
+ * Источник выбирается одинаково для нового разговора и исторического чтения.
+ * Рабочие копии задачи имеют приоритет над доверенным проектом и сохранённой папкой.
  */
-export async function resolveChatWorkdir({
-  taskId = null, workdir: value, provider, caps, validateWorkdir, config, prefs,
-  factoryState, trustedProject, allowArchived = true,
-}: {
-  taskId?: string | null;
-  workdir?: unknown;
-  provider: string;
-  caps: WorkdirCapability | null;
-  validateWorkdir?: WorkdirValidator;
-  config: GrigDeskConfig;
-  prefs: ProjectsPrefsReader & { read?: () => { projects?: Record<string, unknown>; } | null; };
-  factoryState: { readEnv: (id: string) => Promise<unknown>; };
+export async function resolveWorkdirSource({ taskId, workdir, factoryState, trustedProject }: {
+  taskId: string | null;
+  workdir: ChatWorkdir;
+  factoryState: { readEnv: (id: string) => Promise<unknown> };
   trustedProject: (id: string) => Promise<string | null>;
-  allowArchived?: boolean;
-}): Promise<ResolvedWorkdir> {
-  const workdir = normalizeChatWorkdir(value);
-
-  if (!workdir) {
-    throw new ChatWorkdirError('bad_workdir', 'Выбор рабочей папки повреждён.', 400);
-  }
-
+}) {
   let source: string = workdir.kind;
   let copies: ResolvedWorkdir['copies'] = [];
   let projectId = workdir.kind === 'project' ? workdir.projectId : '';
   let repoKey = workdir.kind === 'project' ? workdir.repoKey : null;
 
   if (taskId) {
-    const parsed = parseSandboxRepositories(await factoryState.readEnv(taskId));
+    const env = await factoryState.readEnv(taskId);
+    // Отсутствующий t<ID>.env адаптер представляет пустым объектом.
+    // Непустой повреждённый реестр по-прежнему нельзя считать отсутствующим стендом.
+    const absent = env !== null && typeof env === 'object'
+      && !Array.isArray(env) && Object.keys(env).length === 0;
+    const parsed = absent ? { kind: 'empty', repos: [] } : parseSandboxRepositories(env);
 
     if (parsed.kind === 'invalid') {
       throw new ChatWorkdirError('invalid_sandbox_env', 'Реестр рабочих копий задачи повреждён.');
@@ -160,18 +150,66 @@ export async function resolveChatWorkdir({
       }
     }
   }
+
+  return {
+    source,
+    copies,
+    projectId,
+    repoKey,
+  };
+}
+
+/**
+ * Единый резолвер отделяет сохранённый выбор от реальных корней задачи/проекта.
+ * Ни ошибка пути, ни ограничение single-root не разрешают расширить cwd до общего предка.
+ */
+export async function resolveChatWorkdir({
+  taskId = null, workdir: value, provider, caps, validateWorkdir, config, prefs,
+  factoryState, trustedProject, allowArchived = true, retainedProject,
+}: {
+  taskId?: string | null;
+  workdir?: unknown;
+  provider: string;
+  caps: WorkdirCapability | null;
+  validateWorkdir?: WorkdirValidator;
+  config: GrigDeskConfig;
+  prefs: ProjectsPrefsReader & { read?: () => { projects?: Record<string, unknown>; } | null; };
+  factoryState: { readEnv: (id: string) => Promise<unknown>; };
+  trustedProject: (id: string) => Promise<string | null>;
+  allowArchived?: boolean;
+  retainedProject?: {
+    id: string;
+    repos: import('../projects.ts').ProjectRepoRef[];
+    defaultRepoKey: string | null;
+  };
+}): Promise<ResolvedWorkdir> {
+  const workdir = normalizeChatWorkdir(value);
+
+  if (!workdir) {
+    throw new ChatWorkdirError('bad_workdir', 'Выбор рабочей папки повреждён.', 400);
+  }
+
+  let { source, copies, projectId, repoKey } = await resolveWorkdirSource({
+    taskId,
+    workdir,
+    factoryState,
+    trustedProject,
+  });
+
   if (!copies.length && projectId) {
-    const record = readProjectRecord(prefs, projectId);
+    const retained = retainedProject?.id === projectId ? retainedProject : null;
+    const deleted = isProjectDeleted(prefs, projectId);
+    const record = retained ?? readProjectRecord(prefs, projectId);
     const known = record || (await listProjects(config, prefs)).includes(projectId);
 
-    if (!known) {
+    if (!known || (deleted && !retained)) {
       throw new ChatWorkdirError('workdir_unknown_project', 'Проект рабочей папки больше не существует.');
     }
     if (!allowArchived && source !== 'task-project' && isProjectArchived(prefs, projectId)) {
       throw new ChatWorkdirError('workdir_archived_project', 'Для нового выбора нужен активный проект.');
     }
 
-    const repos = await projectRepos({
+    const repos = retained?.repos ?? await projectRepos({
       config,
       prefs,
       id: projectId

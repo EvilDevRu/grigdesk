@@ -22,7 +22,7 @@
       </UiPaneHeader>
       <div class="catalog-content">
         <ProjectSwitcher compact :profiles="profiles" :model-value="profile"
-                         @update:model-value="switchProfile" @create="openProjectCreate" />
+                         @update:model-value="switchProfile" @create="openProjectCreate" @manage="manageProject" />
         <div class="catalog-heading">
           <h2>{{ editingDraft ? 'В черновике' : 'Опубликованные' }}</h2>
           <span>{{ displayRouteList.length }}</span>
@@ -76,6 +76,9 @@
         </template>
       </UiPaneHeader>
       <div class="panel-scroll">
+        <UiInlineMessage v-if="registrationDeleted" tone="warning">
+          Регистрация проекта удалена. Несохранённые изменения сохранить нельзя — скопируйте нужное.
+        </UiInlineMessage>
         <aside class="route-workflow-hint ui-workspace-guide" aria-label="О разделе «Маршруты»">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                stroke-linecap="round" aria-hidden="true">
@@ -352,6 +355,7 @@ import { agentsApi } from '../shared/agentsApi.ts';
 import {
   UiButton,
   UiIconButton,
+  UiInlineMessage,
   UiPaneHeader,
   UiTabs,
   UiTab,
@@ -439,6 +443,10 @@ const DRAFT_ID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-
 const CATALOG_HASH_RE = /^[a-f0-9]{64}$/;
 
 const profiles = ref<string[]>([]);
+const registrationDeleted = ref(false);
+let projectsRequest = 0;
+let pageGeneration = 0;
+let resettingCatalog = false;
 const route = useRoute();
 const profile = ref(typeof route.query.profile === 'string'
   ? route.query.profile : localStorage.getItem(PROJECT_KEY) || '');
@@ -601,6 +609,8 @@ function say(text: string, bad = false): void {
  * как недоступный раздел — список ревизий при этом остаётся рабочим.
  */
 async function loadGraph(): Promise<void> {
+  const generation = pageGeneration;
+
   graph.value = null;
   graphError.value = '';
 
@@ -614,9 +624,15 @@ async function loadGraph(): Promise<void> {
   graphLoading.value = true;
 
   try {
-    graph.value = await routesApi.catalogGraph(profile.value, catalogHash, routeId);
+    const loaded = await routesApi.catalogGraph(profile.value, catalogHash, routeId);
+
+    if (generation === pageGeneration) {
+      graph.value = loaded;
+    }
   } catch (failure) {
-    graphError.value = failureText(failure);
+    if (generation === pageGeneration) {
+      graphError.value = failureText(failure);
+    }
   } finally {
     graphLoading.value = false;
   }
@@ -627,6 +643,8 @@ async function loadGraph(): Promise<void> {
  * пока он есть в каталоге: после публикации человек ожидает остаться там же, где был.
  */
 async function load(): Promise<void> {
+  const generation = pageGeneration;
+
   loading.value = true;
   error.value = '';
 
@@ -650,6 +668,10 @@ async function load(): Promise<void> {
     }
 
     const data = await routesApi.revisions(profile.value);
+
+    if (generation !== pageGeneration) {
+      return;
+    }
 
     publishSupported.value = data.publishSupported;
 
@@ -1256,6 +1278,67 @@ function switchProfile(next: string): void {
  * Новый проект заводится общей формой раздела «Проекты»: здесь только переход.
  * Список проектов после возврата перечитает сама страница раздела.
  */
+function manageProject(id: string): void {
+  void router.push(`/projects/${id}`);
+}
+
+/**
+ * Успешный каталог сбрасывает исчезнувший профиль, не выбирая соседний за человека.
+ * Локальный документ остаётся только для чтения, а старые ответы теряют право записи.
+ */
+async function refreshProjects(): Promise<void> {
+  const request = ++projectsRequest;
+  let available: string[];
+
+  try {
+    available = await routesApi.profiles();
+  } catch {
+    return;
+  }
+
+  if (request !== projectsRequest) {
+    return;
+  }
+
+  profiles.value = available;
+
+  if (!profile.value || available.includes(profile.value)) {
+    return;
+  }
+
+  registrationDeleted.value = true;
+  pageGeneration += 1;
+  stopWatchingRoutes();
+  closeDraft({ keepDocument: routesStore.dirty || Boolean(routesStore.jsonBuffer?.dirty) });
+  routesStore.draftsProfile = '';
+  routesStore.drafts = [];
+  profile.value = '';
+  localStorage.removeItem(PROJECT_KEY);
+  revisions.value = [];
+  graph.value = null;
+  currentHash.value = null;
+  loading.value = false;
+  resettingCatalog = true;
+
+  try {
+    await router.replace({ path: '/routes', query: {} });
+  } finally {
+    resettingCatalog = false;
+  }
+}
+
+/**
+ * Каталог регистраций перечитывается тем же подписчиком редактора.
+ * Обычная публикация сохраняет прежнее чтение ревизий.
+ */
+function catalogChanged(event?: string): void {
+  if (event === 'projects-changed' || event === 'hello') {
+    void refreshProjects();
+  } else {
+    void load();
+  }
+}
+
 function openProjectCreate(): void {
   void router.push({ path: '/projects', query: { create: '1' } });
 }
@@ -1379,6 +1462,12 @@ watch(() => route.query, async (query, previous) => {
  * возможности редактора, затем открывается документ, названный в адресе.
  */
 async function syncQuery(query: typeof route.query): Promise<void> {
+  if (registrationDeleted.value && !query.profile) {
+    return;
+  }
+
+  registrationDeleted.value = false;
+
   if (typeof query.profile === 'string' && query.profile !== profile.value) {
     localStorage.setItem(PROJECT_KEY, query.profile);
     profile.value = query.profile;
@@ -1401,9 +1490,7 @@ async function syncQuery(query: typeof route.query): Promise<void> {
   await openFromQuery();
 
   if (profile.value) {
-    watchRoutes(profile.value, () => {
-       void load();
-    });
+    watchRoutes(profile.value, catalogChanged);
   }
 }
 
@@ -1414,7 +1501,7 @@ const confirmLeave = () => confirmDialog(
 
 onBeforeRouteLeave(() => confirmDirtyRouteExit(
   routesStore.dirty || Boolean(routesStore.jsonBuffer?.dirty), true, confirmLeave));
-onBeforeRouteUpdate((to, from) => confirmDirtyRouteExit(
+onBeforeRouteUpdate((to, from) => resettingCatalog || confirmDirtyRouteExit(
   routesStore.dirty || Boolean(routesStore.jsonBuffer?.dirty),
   to.query.profile !== from.query.profile || to.query.draft !== from.query.draft
     || to.query.catalog !== from.query.catalog, confirmLeave));
@@ -1441,9 +1528,7 @@ onMounted(async () => {
     await loadEditor(profile.value);
     await loadDrafts(profile.value);
     await openFromQuery();
-    watchRoutes(profile.value, () => {
-       void load();
-    });
+    watchRoutes(profile.value, catalogChanged);
   } finally {
     pageReady.value = true;
   }

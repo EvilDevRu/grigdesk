@@ -30,6 +30,10 @@
         +
       </UiIconButton>
     </UiControlGroup>
+    <UiButton v-if="model" variant="ghost" data-context="workspace-toolbar"
+      @click="emit('manage', model)">
+      Управление проектом
+    </UiButton>
   </div>
 </template>
 
@@ -49,7 +53,7 @@ defineProps({
   },
 });
 
-const emit = defineEmits<{ create: [] }>();
+const emit = defineEmits<{ create: []; manage: [id: string] }>();
 
 const model = defineModel({
   type: String,

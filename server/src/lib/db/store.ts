@@ -36,6 +36,8 @@ export interface DbProfileInput {
 export interface DbStoreOptions {
   path?: string;
   file?: string;
+  withReferences?: <T>(op: () => Promise<T>) => Promise<T>;
+  isProjectDeleted?: (id: string) => boolean;
   projects?: () => { id?: unknown }[] | Promise<{ id?: unknown }[]>;
 }
 
@@ -73,9 +75,15 @@ async function writePrivate(file: string, value: unknown): Promise<void> {
   await fs.rename(temporary, file);
 }
 
-/** Профиль хранит только описание; неизвестные поля и пароль отбрасываются здесь. */
+/**
+ * Профиль хранит только описание; неизвестные поля и пароль отбрасываются здесь.
+ * Проверка ссылки и запись согласуются с удалением регистрации через её очередь.
+ */
 export async function createDbStore(
-  { path: file, file: alternate, projects }: DbStoreOptions = {},
+  {
+    path: file, file: alternate, projects, withReferences = (op) => op(),
+    isProjectDeleted = () => false,
+  }: DbStoreOptions = {},
 ) {
   const target = String(file || alternate || '');
   let profiles: DbProfile[] = [];
@@ -92,7 +100,15 @@ export async function createDbStore(
     if (errorCode(error) !== 'ENOENT') throw error;
   }
 
+  /**
+   * Проверка регистрации выполняется до изменения профилей и внутри общей очереди.
+   * Ошибка чтения настроек запрещает как новую связь, так и изменение существующей.
+   */
   async function validate(profile: DbProfile, exceptId = ''): Promise<void> {
+    if (isProjectDeleted(profile.projectId)) {
+      throw new DbStoreError('project_not_found', 'Регистрация проекта профиля БД удалена');
+    }
+
     if (!profile.projectId || !profile.label || !profile.engine || !profile.host || !profile.user) {
       throw new DbStoreError(
         'invalid_profile',
@@ -114,22 +130,26 @@ export async function createDbStore(
   }
 
   async function create(input: DbProfileInput): Promise<DbProfile> {
-    const profile = clean(input);
-    await validate(profile);
-    profiles.push(profile);
-    await writePrivate(target, profiles);
-    return structuredClone(profile);
+    return withReferences(async () => {
+      const profile = clean(input);
+      await validate(profile);
+      profiles.push(profile);
+      await writePrivate(target, profiles);
+      return structuredClone(profile);
+    });
   }
 
   async function update(idValue: string, input: DbProfileInput): Promise<DbProfile | null> {
-    const id = String(idValue || '');
-    const index = profiles.findIndex((profile) => profile.id === id);
-    if (index < 0) return null;
-    const profile = clean({ ...profiles[index], ...input }, id);
-    await validate(profile, id);
-    profiles[index] = profile;
-    await writePrivate(target, profiles);
-    return structuredClone(profile);
+    return withReferences(async () => {
+      const id = String(idValue || '');
+      const index = profiles.findIndex((profile) => profile.id === id);
+      if (index < 0) return null;
+      const profile = clean({ ...profiles[index], ...input }, id);
+      await validate(profile, id);
+      profiles[index] = profile;
+      await writePrivate(target, profiles);
+      return structuredClone(profile);
+    });
   }
 
   async function remove(idValue: string): Promise<boolean> {

@@ -32,14 +32,20 @@ test('I18N-A01: JVM ShellLocale/ShellApi/WebPolicy/ProfileStore с явными 
 }
 `);
 
+  const cache = process.env.GRIGDESK_ANDROID_GRADLE_HOME;
+  const gradleHome = cache || path.join(directory, 'gradle-home');
   const args = [
     'gradlew', '--no-daemon', '--max-workers=2',
     '-Dorg.gradle.jvmargs=-Xmx768m',
     '--project-cache-dir', path.join(directory, 'project-cache'),
-    '--gradle-user-home', path.join(directory, 'gradle-home'),
+    '--gradle-user-home', gradleHome,
     '--init-script', init,
     ':client:testDebugUnitTest',
   ];
+
+  if (cache) {
+    args.push('--offline');
+  }
 
   for (const name of [
     'shell.ShellLocaleTest', 'shell.ShellApiTest', 'WebPolicyTest', 'shell.ProfileStoreTest',
@@ -51,6 +57,7 @@ test('I18N-A01: JVM ShellLocale/ShellApi/WebPolicy/ProfileStore с явными 
     cwd: new URL('../../mobile/android/', import.meta.url),
     env: {
       ...process.env,
+      GRADLE_USER_HOME: gradleHome,
       JAVA_HOME: jdk,
       ANDROID_HOME: sdk,
       ANDROID_SDK_ROOT: sdk,

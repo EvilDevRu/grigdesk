@@ -176,15 +176,17 @@ export function gateReason(journal: string): string | null {
  * Читает службу и HTTP параллельно, затем журнал только при activating.
  * Результат содержит лишь контракт статуса, без вывода внутреннего журнала или ключей.
  */
-export async function readServer(root: string, settings: Settings): Promise<ServerState & { url: string }> {
+export async function readServer(
+  root: string, settings: Settings, options: { timeoutMs?: number; includeJournal?: boolean } = {},
+): Promise<ServerState & { url: string }> {
   const [show, probe] = await Promise.all([
-    run('systemctl', ['--user', 'show', UNIT, `--property=${PROPERTIES}`], 5000),
-    probeGrigDesk(settings.origin),
+    run('systemctl', ['--user', 'show', UNIT, `--property=${PROPERTIES}`], options.timeoutMs ?? 5000),
+    probeGrigDesk(settings.origin, { timeoutMs: options.timeoutMs }),
   ]);
   const unit = show.code === 0 ? parseShow(show.stdout) : null;
   let gate: string | null = null;
 
-  if (unit?.active === 'activating') {
+  if (unit?.active === 'activating' && options.includeJournal !== false) {
     const journal = await run('journalctl', [
       '--user', '-u', UNIT, '-n', '50', '-o', 'cat', '--no-pager',
     ], 10000);

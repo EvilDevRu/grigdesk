@@ -1,4 +1,7 @@
 {
+  "checkingServer": "Checking server…",
+  "startingServer": "Starting server…",
+  "waitingVpn": "Waiting for VPN…",
   "loading": "Loading…",
   "file": "File",
   "edit": "Edit",

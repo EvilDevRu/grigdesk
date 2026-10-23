@@ -97,6 +97,8 @@
 - [Смена папки требует согласования истории, очереди и памяти](workdir-transition-preconditions.md)
 - [Чат (modules/chat)](chat-module.md)
 - [Рабочая папка чата: приоритет задачи, выбор проекта и границы записи](chat-workspace.md)
+- [Исчезнувший профиль задачи сохраняет прежний выбор папки разговора](task-project-fallback.md)
+- [Создание истории без стенда, строгий снимок корней и сверка default/recent](project-deletion-recovery.md)
 - [Что реально ушло в запуск (проверка модели и эффорта)](launch-model-and-effort.md)
 - [UI-контекст: чат знает, где пользователь](ui-context.md)
 
@@ -142,6 +144,7 @@
 - [Собранный DeepSeek: чат, поток, настройки и файловые границы](deepseek-compiled-chat-parity.md)
 - [Обновление upstream DeepSeek и совместимый откат журналов](deepseek-upstream-update-rollback.md)
 - [Границы сборки каталога и переключения модели](model-selection-boundaries.md)
+- [Смена модели откатывается, эффорт расходится с сервером](model-switch-revert.md)
 - [Реестр моделей: устаревший отдаётся сразу, пересборка одна и в фоне](models-registry-cache.md)
 - [Алиасы CLI отдельными пунктами НЕ показываются](cli-model-aliases.md)
 - [В кратком списке моделей — только свежая версия каждого семейства](model-shortlist.md)

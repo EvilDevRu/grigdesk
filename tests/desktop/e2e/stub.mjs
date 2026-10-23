@@ -12,6 +12,7 @@ import path from 'node:path';
 export async function startStub({
   port = 0,
   authKey = null,
+  authStateDelayMs = 0,
   externalOrigin = 'http://127.0.0.1:9',
   packagedCookie = null,
   uiReleasesDir = null,
@@ -59,7 +60,7 @@ export async function startStub({
 
     return `<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><title>GrigDesk — тестовое окно</title></head>
-<body><h1 id="stub">Тестовое окно</h1>
+<body><div class="shell"><h1 id="stub">Тестовое окно</h1>
 <p id="kind">${second ? 'Дочернее окно' : 'Главное окно'}</p>
 <p id="cookie">cookie:${cookiePresent ? 'yes' : 'no'}</p>
 <a id="same" href="/second.html" target="_blank">Своё окно</a>
@@ -85,7 +86,7 @@ document.querySelector('#stub-settings-close').onclick = () => {
 document.querySelector('#notify').onclick = async () => {
   document.querySelector('#notification-result').textContent = await Notification.requestPermission();
 };
-</script></body></html>`;
+</script></div></body></html>`;
   }
 
   /**
@@ -112,6 +113,8 @@ document.querySelector('#notify').onclick = async () => {
       response.end(JSON.stringify(authenticated(request)
         ? { name: 'Фикстура окна' } : { error: 'unauthorized' }));
     } else if (pathname === '/api/auth/state') {
+      await new Promise((resolve) => setTimeout(resolve, authStateDelayMs));
+
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify({
         configured: Boolean(authKey),
