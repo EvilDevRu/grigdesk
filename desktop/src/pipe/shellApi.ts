@@ -22,6 +22,7 @@ export interface NativeWindows {
 }
 
 interface ShellOptions {
+  beforeSelect?(profile: DesktopProfile): Promise<void>;
   nativeWindows?: NativeWindows;
   profiles: Profiles;
   systemLanguage?: string;
@@ -81,6 +82,7 @@ export function createShellApi(options: ShellOptions) {
   let rev = 0;
   let localeQueue = Promise.resolve();
   let closed = false;
+  let selectionQueue = Promise.resolve();
 
   const changed = () => {
     rev += 1;
@@ -257,11 +259,15 @@ export function createShellApi(options: ShellOptions) {
    * Выбор сохраняется перед навигацией на отдельный origin профиля.
    * Прежнее подключение закрывается, новая попытка не задерживает загрузку UI.
    */
-  const select = async (id: string | null) => {
+  const selectNow = async (id: string | null) => {
     const previous = options.profiles.settings.selected;
 
     if (previous === id) {
       return;
+    }
+
+    if (id) {
+      await options.beforeSelect?.(options.profiles.get(id));
     }
 
     if (previous && previous !== id) {
@@ -274,6 +280,14 @@ export function createShellApi(options: ShellOptions) {
     if (id) {
       void connect(id);
     }
+  };
+
+  const select = (id: string | null) => {
+    const operation = selectionQueue.then(() => selectNow(id));
+
+    selectionQueue = operation.catch(() => {});
+
+    return operation;
   };
 
   /**

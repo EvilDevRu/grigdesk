@@ -18,7 +18,7 @@ const EXPECTED_PAGES = [
   ['automation', ['chats', 'context', 'launch', 'monitoring', 'arbiter']],
   ['speech', ['dictation', 'video', 'language', 'models', 'advanced']],
   ['connections', ['b24', 'devices']],
-  ['plugins', ['installed', 'install']],
+  ['plugins', ['installed']],
   ['system', ['startup', 'updates', 'diagnostics', 'processes']],
 ];
 
@@ -209,4 +209,14 @@ test('PHONE-14: старые ID ведут в единый раздел', () => 
     storage: storageFixture({ 'grigdesk-settings-tab': 'access' }),
   }), canonical);
   assert.equal(SETTINGS_PAGES.filter((page) => /^connections\.(mobile|devices)$/.test(page.id)).length, 1);
+});
+
+test('CAT-N1: старый install адрес переносится в общий раздел', () => {
+  assert.equal(resolveSettingsPage({ pageId: 'plugins.install' }), 'plugins.installed');
+  assert.equal(resolveSettingsPage({ queryPage: 'plugins.install' }), 'plugins.installed');
+  assert.equal(resolveSettingsPage({ storage: storageFixture({
+    'grigdesk-settings-page': 'plugins.install',
+  }) }), 'plugins.installed');
+  assert.deepEqual(SETTINGS_PAGES.filter((page) => page.groupId === 'plugins').map((page) => page.id),
+    ['plugins.installed']);
 });

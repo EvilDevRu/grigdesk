@@ -166,6 +166,31 @@
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 
+/* В плоском списке раскрытие не добавляет вложенные рамки и новые оси отступов. */
+.ui-workspace-disclosure[data-context='workspace-inline'] {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ui-workspace-disclosure[data-context='workspace-inline'] > summary {
+  padding-inline: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.ui-workspace-disclosure[data-context='workspace-inline'] > summary:hover {
+  color: var(--accent);
+}
+
+.ui-workspace-disclosure[data-context='workspace-inline'][open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.ui-workspace-disclosure[data-context='workspace-inline'] > .ui-workspace-section__body {
+  padding: 8px 0 0;
+}
+
 /* Справка — отдельный текстовый слой: цветная кромка и значок отличают её от формы.
    Она не получает роль alert и не забирает внимание при изменении черновика. */
 .ui-workspace-guide {
@@ -981,6 +1006,43 @@
 [data-ui-settings-catalog] .ui-settings-catalog-status[data-available='true'] {
   color: var(--good);
 }
+/* Плагины отделены друг от друга; общий каталог сохраняет прежний вид у других страниц. */
+[data-ui-settings-catalog][data-context='plugin-entry'] {
+  border-color: var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  color: var(--ink);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+[data-ui-settings-catalog][data-context='plugin-entry'][aria-pressed='true'] {
+  border-color: var(--accent);
+}
+[data-ui-settings-catalog][data-context='plugin-entry'] .ui-settings-catalog-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+[data-ui-settings-catalog][data-context='plugin-entry'] :is(small, .ui-settings-catalog-description,
+  .ui-settings-catalog-status) {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+[data-ui-settings-catalog][data-context='plugin-entry'] .ui-settings-catalog-status[data-available='true'] {
+  color: var(--good);
+}
+.ui-action-link[data-context='plugin-repository'] {
+  display: inline;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--accent);
+  font-size: 12px;
+  line-height: inherit;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 [data-ui-settings-sidebar-action] {
   justify-content: flex-start;
   min-height: 32px;
@@ -1027,6 +1089,11 @@
 }
 [data-ui-settings-tabs] > .ui-tab:hover {
   background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+[data-plugins-workspace] [data-ui-settings-tabs] > .ui-tab {
+  min-height: var(--control-height);
+  padding-block: 6px;
+  font-size: 12px;
 }
 @media (max-width: 600px) {
   [data-ui-settings-node] {

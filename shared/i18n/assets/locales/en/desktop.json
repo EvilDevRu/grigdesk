@@ -79,5 +79,14 @@
   "shellInvalidMachineAddress": "Invalid machine name or address.",
   "shellInvalidLocalAddress": "Invalid local address.",
   "shellAddressCheckUnavailable": "Checking the new machine is unavailable.",
-  "dataDirectoryNotAbsolute": "The application data directory must be absolute."
+  "dataDirectoryNotAbsolute": "The application data directory must be absolute.",
+  "preparingServer": "Preparing server…",
+  "portableMachine": "GrigDesk next to this window",
+  "portableRelocated": "The saved server is missing. The server next to this window was selected.",
+  "selectionChanged": "Machine selection changed.",
+  "invalidRuntime": "The server descriptor is invalid.",
+  "portableMenuTitle": "Add GrigDesk to the applications menu?",
+  "portableMenuAdd": "Add",
+  "portableMenuLater": "Not now",
+  "portableMenuError": "Could not add GrigDesk to the applications menu."
 }

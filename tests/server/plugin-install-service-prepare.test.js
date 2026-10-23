@@ -438,3 +438,35 @@ test('M12: ready revision/token/prepared устойчивы на диске, GET
   assert.ok(disk.job.revision > 0);
   assert.equal(disk.job.reviewToken, ready.reviewToken);
 });
+
+test('CAT-I2: сдвиг SHA выбранной версии запрещён до fetch/npm', async (t) => {
+  const source = mirrorSource();
+  let fetches = 0;
+  const original = source.fetch;
+
+  source.fetch = async (input) => {
+    fetches += 1;
+    await original(input);
+  };
+
+
+  const { service } = await serviceFixture(t, { sources: new PluginSourceRegistry([source]) });
+
+  await service.startInstall({
+    url: 'mirror://fixture/demo',
+    version: '1.1.0',
+    expectedSha: 'c'.repeat(40),
+  });
+  await service.whenIdle();
+  assert.equal((await service.currentJob()).status, 'failed');
+  assert.equal((await service.currentJob()).error.code, 'checkout_mismatch');
+  assert.equal(fetches, 0);
+  await service.startInstall({
+    url: 'mirror://fixture/demo',
+    version: '1.1.0',
+    expectedSha: 'b'.repeat(40),
+  });
+  await service.whenIdle();
+  assert.equal((await service.currentJob()).status, 'ready');
+  assert.equal(fetches, 1);
+});

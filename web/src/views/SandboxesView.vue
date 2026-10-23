@@ -1,117 +1,138 @@
 <template>
-  <section class="sandboxes ui-page" aria-labelledby="sandboxes-title">
-    <header class="sandboxes__head ui-page-head">
-      <div class="sandboxes__intro">
-        <h1 id="sandboxes-title">Песочницы</h1>
-        <p>Стенды задач для проверки и ручной работы.</p>
-      </div>
-      <UiButton v-if="store.manualSandboxes.length" tone="accent" @click="createOpen = !createOpen">
-        {{ createOpen ? 'Скрыть создание' : 'Поднять стенд' }}
-      </UiButton>
-      <UiButton
-        class="sandboxes__refresh"
-        variant="ghost"
-        :loading="store.loading"
-        @click="loadSandboxes()"
-      >
-        Обновить
-      </UiButton>
-    </header>
+  <section class="sandboxes ui-page ui-workspace" data-ui-workspace aria-labelledby="sandboxes-title">
+    <UiPaneHeader class="sandboxes__header">
+      <template #title><h1 id="sandboxes-title">Песочницы</h1></template>
+      <template #meta><span v-if="store.loaded">Стендов: {{ store.sandboxes.length }}</span></template>
+      <template #actions>
+        <UiButton v-if="store.loaded && store.sandboxes.length" tone="accent"
+                  data-context="workspace-toolbar" :aria-expanded="showCreate"
+                  aria-controls="sandboxes-create" @click="createOpen = !createOpen">
+          {{ createOpen ? 'Скрыть форму' : '+ Поднять стенд' }}
+        </UiButton>
+        <UiIconButton label="Обновить песочницы" v-tooltip="'Обновить песочницы'"
+                      data-context="workspace-toolbar" :loading="store.loading" @click="loadSandboxes()">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 7v5h-5M4 17v-5h5M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9" />
+          </svg>
+        </UiIconButton>
+      </template>
+    </UiPaneHeader>
 
-    <UiInlineMessage v-if="store.error" tone="danger">{{ store.error }}</UiInlineMessage>
+    <div class="sandboxes__scroll">
+      <div class="sandboxes__content">
+        <aside class="sandboxes__guide ui-workspace-guide">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7v1" />
+          </svg>
+          <div><strong>Стенды для проверки изменений.</strong>
+            Поднимите песочницу и откройте её сайт или рабочие папки.
+          </div>
+        </aside>
 
-    <section v-show="createOpen || !store.manualSandboxes.length" class="sandboxes__panel" aria-labelledby="sandboxes-raise-title">
-      <h2 id="sandboxes-raise-title" class="sandboxes__panel-title">Поднять стенд</h2>
-      <SandboxRaiseForm
-        :options="store.capableProfiles"
-        :range="store.manualRange"
-        :busy="raising"
-        @raise="raise"
-      />
-    </section>
-
-    <section class="sandboxes__block" aria-labelledby="sandboxes-manual-title">
-      <div class="sandboxes__block-head">
-        <h2 id="sandboxes-manual-title">Ручные стенды</h2>
-        <span v-if="store.manualSandboxes.length" class="sandboxes__count">
-          {{ store.manualSandboxes.length }}
-        </span>
-      </div>
-
-      <div v-if="!store.manualSandboxes.length" class="sandboxes__empty">
-        <strong>{{ store.loaded ? 'Ни одного стенда не поднято' : 'Читаем состояние…' }}</strong>
-        <p v-if="store.loaded">
-          Поднятый отсюда стенд встанет сюда: с адресами фронта и API, ветками worktree
-          и кнопкой сноса.
+        <UiInlineMessage v-if="store.error" class="sandboxes__error" tone="danger">
+          {{ store.error }}
+        </UiInlineMessage>
+        <p v-if="!store.loaded && !store.error" class="sandboxes__empty" role="status">
+          Читаем состояние песочниц…
         </p>
-      </div>
-      <div v-else class="sandboxes__list">
-        <SandboxCard
-          v-for="entry in store.manualSandboxes"
-          :key="entry.task"
-          :entry="entry"
-          :job="store.jobOf(entry.task)"
-          :busy="store.isBusy(entry.task)"
-          @dismantle="dismantle"
-          @run="run"
-        />
-      </div>
-    </section>
 
-    <section
-      v-if="store.orphanJobs.length"
-      class="sandboxes__block"
-      aria-labelledby="sandboxes-jobs-title"
-    >
-      <div class="sandboxes__block-head">
-        <h2 id="sandboxes-jobs-title">Недавние задания</h2>
-      </div>
-      <p class="sandboxes__note">Стендов этих заданий в реестре уже нет — остался их итог.</p>
+        <section v-show="showCreate" id="sandboxes-create" class="sandboxes__create"
+                 aria-labelledby="sandboxes-raise-title">
+          <UiPaneHeader>
+            <template #title><h2 id="sandboxes-raise-title">Новая песочница</h2></template>
+          </UiPaneHeader>
+          <div class="ui-workspace-section__body">
+            <SandboxRaiseForm :options="store.capableProfiles" :range="store.manualRange"
+                              :busy="raising" @raise="raise" />
+          </div>
+        </section>
 
-      <ul class="sandboxes__jobs">
-        <li v-for="job in store.orphanJobs" :key="job.task">
-          <span class="sandboxes__job-dot" :data-state="job.state" aria-hidden="true"></span>
-          <strong>t{{ job.task }}</strong>
-          <span class="sandboxes__job-state">
-            {{ jobKind(job) }} · {{ jobState(job) }}
+        <div v-if="store.sandboxes.length" class="sandboxes__filters"
+             :class="{ 'is-filtered': filtered, 'is-after-create': showCreate }">
+          <UiInput v-model="search" type="search" aria-label="Поиск стенда"
+                   placeholder="Номер, профиль или ветка" />
+          <UiSelect v-model="owner" aria-label="Какие стенды показать">
+            <option value="all">Все стенды</option>
+            <option value="manual">Ручные стенды</option>
+            <option value="pipeline">Стенды конвейера</option>
+          </UiSelect>
+          <UiButton v-if="filtered" variant="text" data-context="workspace-form" @click="resetFilters">
+            Сбросить
+          </UiButton>
+          <span v-if="filtered" class="sandboxes__note" role="status">
+            Найдено: {{ visibleCount }} из {{ store.sandboxes.length }}
           </span>
-          <span v-if="job.message" class="sandboxes__job-message">{{ job.message }}</span>
-        </li>
-      </ul>
-    </section>
+        </div>
+        <p v-if="store.loaded && !store.error && !store.sandboxes.length" class="sandboxes__empty">
+          <template v-if="awaitingStand">
+            Подготовка идёт. Стенд появится здесь; текущий шаг — в недавних заданиях.
+          </template>
+          <template v-else>Стендов пока нет. Выберите профиль выше и поднимите первую песочницу.</template>
+        </p>
+        <p v-else-if="store.sandboxes.length && !visibleCount" class="sandboxes__empty">
+          Подходящих стендов нет. Измените запрос или сбросьте фильтры.
+        </p>
 
-    <section
-      v-if="store.pipelineSandboxes.length"
-      class="sandboxes__block"
-      aria-labelledby="sandboxes-pipeline-title"
-    >
-      <div class="sandboxes__block-head">
-        <h2 id="sandboxes-pipeline-title">Стенды конвейера</h2>
-        <span class="sandboxes__count">{{ store.pipelineSandboxes.length }}</span>
-      </div>
-      <p class="sandboxes__note">
-        Их жизненным циклом владеет попытка движка; действия профиля на них доступны.
-      </p>
+        <section v-if="manualEntries.length" class="sandboxes__block" aria-labelledby="sandboxes-manual-title">
+          <div class="sandboxes__block-head">
+            <h2 id="sandboxes-manual-title">Ручные стенды</h2>
+            <span class="sandboxes__count">{{ manualEntries.length }}</span>
+          </div>
+          <div class="sandboxes__list">
+            <SandboxCard v-for="entry in manualEntries" :key="entry.task" :entry="entry"
+                         :job="store.jobOf(entry.task)" :busy="store.isBusy(entry.task)"
+                         @dismantle="dismantle" @run="run" />
+          </div>
+        </section>
 
-      <div class="sandboxes__list">
-        <SandboxCard
-          v-for="entry in store.pipelineSandboxes"
-          :key="entry.task"
-          :entry="entry"
-          :job="store.jobOf(entry.task)"
-          :busy="store.isBusy(entry.task)"
-          @dismantle="dismantle"
-          @run="run"
-        />
+        <section v-if="store.orphanJobs.length" class="sandboxes__block" aria-labelledby="sandboxes-jobs-title">
+          <div class="sandboxes__block-head">
+            <h2 id="sandboxes-jobs-title">Недавние задания</h2>
+            <span class="sandboxes__count">{{ store.orphanJobs.length }}</span>
+          </div>
+          <p class="sandboxes__note">
+            Стенд ещё не появился в списке или уже удалён. Здесь остаются ход работы и результат.
+          </p>
+          <ul class="sandboxes__jobs">
+            <li v-for="job in store.orphanJobs" :key="job.task">
+              <span class="sandboxes__job-dot" :data-state="job.state" aria-hidden="true"></span>
+              <strong>t{{ job.task }}</strong>
+              <span>{{ jobKind(job) }} · {{ jobState(job) }}</span>
+              <span v-if="job.profile" class="sandboxes__note">{{ job.profile }}</span>
+              <p v-if="job.state === 'running' && job.label" class="sandboxes__job-message">
+                <template v-if="job.total">{{ job.index }}/{{ job.total }} · </template>{{ job.label }}
+              </p>
+              <p v-else-if="job.message" class="sandboxes__job-message">{{ job.message }}</p>
+            </li>
+          </ul>
+        </section>
+
+        <section v-if="pipelineEntries.length" class="sandboxes__block"
+                 aria-labelledby="sandboxes-pipeline-title">
+          <div class="sandboxes__block-head">
+            <h2 id="sandboxes-pipeline-title">Стенды конвейера</h2>
+            <span class="sandboxes__count">{{ pipelineEntries.length }}</span>
+          </div>
+          <p class="sandboxes__note">
+            Проверки доступны здесь, снос — в карточке задачи.
+          </p>
+          <div class="sandboxes__list">
+            <SandboxCard v-for="entry in pipelineEntries" :key="entry.task" :entry="entry"
+                         :job="store.jobOf(entry.task)" :busy="store.isBusy(entry.task)"
+                         @dismantle="dismantle" @run="run" />
+          </div>
+        </section>
       </div>
-    </section>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import {
-  UiButton, UiInlineMessage, confirmDialog, promptDialog,
+  UiButton, UiIconButton, UiInlineMessage, UiInput, UiPaneHeader, UiSelect,
+  confirmDialog, promptDialog, vTooltip,
 } from '../ui';
 import {
   dismantleSandbox,
@@ -121,13 +142,46 @@ import {
   useSandboxesStore,
   watchSandboxes,
 } from '../actions/sandboxes';
-import type { SandboxActionDecl, SandboxJob } from '../../../shared/plugins/sandboxes/sandboxContracts';
+import type {
+  SandboxActionDecl, SandboxEntry, SandboxJob,
+} from '../../../shared/plugins/sandboxes/sandboxContracts';
 import SandboxCard from './sandboxes/SandboxCard.vue';
 import SandboxRaiseForm from './sandboxes/SandboxRaiseForm.vue';
 
 const store = useSandboxesStore();
 const raising = ref(false);
 const createOpen = ref(false);
+const search = ref('');
+const owner = ref('all');
+
+const showCreate = computed(() => store.loaded && (createOpen.value
+  || (!store.sandboxes.length && !store.error)));
+const manualEntries = computed(() => store.manualSandboxes.filter(matches));
+const pipelineEntries = computed(() => store.pipelineSandboxes.filter(matches));
+const visibleCount = computed(() => manualEntries.value.length + pipelineEntries.value.length);
+const filtered = computed(() => Boolean(search.value.trim()) || owner.value !== 'all');
+const awaitingStand = computed(() => store.orphanJobs.some((job) =>
+  job.action === 'up' && job.state === 'running'));
+
+/**
+ * Поиск ограничивает только список стендов: недавние задания остаются видны,
+ * чтобы ошибка подъёма или текущая работа не исчезли из-за фильтра владельца.
+ */
+function matches(entry: SandboxEntry): boolean {
+  if (owner.value !== 'all' && entry.owner !== owner.value) {
+    return false;
+  }
+
+  const text = [entry.task, `t${entry.task}`, entry.profile,
+    ...entry.repos.flatMap((repo) => [repo.name, repo.branch, repo.path])].join(' ').toLowerCase();
+
+  return text.includes(search.value.trim().toLowerCase());
+}
+
+function resetFilters() {
+  search.value = '';
+  owner.value = 'all';
+}
 
 onMounted(() => {
   watchSandboxes();
@@ -150,10 +204,10 @@ function jobKind(job: SandboxJob) {
 // что остаётся человеку от подъёма или сноса.
 function jobState(job: SandboxJob) {
   if (job.state === 'running') {
-    return 'идёт';
+    return 'выполняется';
   }
 
-  return job.state === 'done' ? 'выполнено' : 'отказ';
+  return job.state === 'done' ? 'выполнено' : 'ошибка';
 }
 
 /**
@@ -259,134 +313,123 @@ async function run(payload: { task: string; action: SandboxActionDecl }) {
 .sandboxes {
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  min-width: 0;
-  margin-inline: auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  container: sandboxes / inline-size;
+  background: var(--surface);
 }
 
-.sandboxes__head {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px 16px;
-}
-
-.sandboxes__intro {
-  flex: 1 1 320px;
-}
-
-.sandboxes__refresh {
-  flex: none;
-}
-
-.sandboxes__head h1 {
-  margin: 0 0 6px;
-  font-size: 22px;
-}
-
-.sandboxes__intro p {
-  margin: 0;
-  max-width: 620px;
-  color: var(--ink-mid);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-/* Подъём — единственное действие раздела, поэтому его форма собрана в карточку. */
-.sandboxes__panel {
+.sandboxes__scroll {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  gap: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 
-.sandboxes__panel-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 650;
+.sandboxes__guide,
+.sandboxes__error {
+  margin: 12px;
+}
+
+.sandboxes__create {
+  border-block: 1px solid var(--line);
+}
+
+.sandboxes__content {
+  flex: none;
+  min-width: 0;
+  width: 100%;
+}
+
+.sandboxes__content > * {
+  min-width: 0;
+}
+
+.sandboxes__filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.sandboxes__filters.is-filtered {
+  grid-template-columns: minmax(0, 1fr) 200px auto;
+}
+
+.sandboxes__filters.is-after-create {
+  padding-top: 12px;
+}
+
+.sandboxes__filters > .sandboxes__note {
+  grid-column: 1 / -1;
 }
 
 .sandboxes__block {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  gap: 0;
 }
 
 .sandboxes__block-head {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 8px 12px;
+}
+
+.sandboxes__block > .sandboxes__note {
+  padding: 0 12px 8px;
 }
 
 .sandboxes__block-head h2 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sandboxes__count,
+.sandboxes__note {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .sandboxes__count {
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--ink-mid);
-  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
 }
 
-.sandboxes__note {
-  margin: -6px 0 0;
-  color: var(--ink-mid);
-  font-size: 12.5px;
-}
-
 .sandboxes__list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 12px;
+  padding: 0 12px 12px;
 }
 
 .sandboxes__empty {
-  padding: 28px 20px;
-  border: 1px dashed var(--line-2);
-  border-radius: var(--radius);
-  text-align: center;
-}
-
-.sandboxes__empty strong {
-  font-size: 14px;
-}
-
-.sandboxes__empty p {
-  margin: 8px auto 0;
-  max-width: 460px;
+  margin: 0;
+  padding: 12px;
   color: var(--ink-mid);
   font-size: 13px;
-  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .sandboxes__jobs {
-  display: flex;
-  flex-direction: column;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
   list-style: none;
-  font-size: 13px;
+  border-block: 1px solid var(--line);
 }
 
 .sandboxes__jobs li {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 10px;
-  padding: 10px 14px;
+  gap: 4px 8px;
+  padding: 8px 12px;
+  overflow-wrap: anywhere;
 }
 
 .sandboxes__jobs li + li {
@@ -394,8 +437,8 @@ async function run(payload: { task: string; action: SandboxActionDecl }) {
 }
 
 .sandboxes__job-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   flex: none;
   border-radius: 50%;
   background: var(--accent);
@@ -409,15 +452,33 @@ async function run(payload: { task: string; action: SandboxActionDecl }) {
   background: var(--bad);
 }
 
-.sandboxes__job-state,
 .sandboxes__job-message {
+  flex-basis: 100%;
+  min-width: 0;
+  margin: 0 0 0 14px;
   color: var(--ink-mid);
   font-size: 12px;
+  white-space: pre-wrap;
 }
 
-.sandboxes__job-message {
-  flex: 1;
-  min-width: 0;
-  text-align: right;
+@container sandboxes (max-width: 660px) {
+  .sandboxes__filters,
+  .sandboxes__filters.is-filtered {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .sandboxes__filters > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  .sandboxes__filters:not(.is-filtered) > :nth-child(2) {
+    grid-column: 1 / -1;
+  }
+}
+
+@container sandboxes (max-width: 360px) {
+  .sandboxes__header :deep(.ui-pane-header__actions) {
+    flex-basis: 100%;
+  }
 }
 </style>

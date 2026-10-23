@@ -10,6 +10,7 @@ import {
   SETTINGS_PAGE_KEY,
   resolveFieldAddress,
   resolveSettingsPage,
+  normalizeSettingsPageId,
   equalFieldAddress,
   type SettingsFieldMetadata,
 } from '../features/settings/catalog.ts';
@@ -99,31 +100,36 @@ export const useSettingsStore = defineStore('settings', () => {
   });
 
   /**
-   * Страница выбирается только из чистого каталога, произвольного импорта нет.
-   * В storage уходит только ID страницы, без ввода, поисковой строки и адреса поля.
+   * Прежние ID раздела доступа и страницы установки ведут на актуальные страницы каталога.
+   * Хранилище и entity остаются прежними; открытие не запускает отдельный диалог.
    */
-  function selectPage(id: string, entity?: string, tab?: string): boolean {
-    id = id === 'connections.mobile' || id === 'access' ? 'connections.devices' : id;
+  function normalizePageId(id: unknown): string | undefined {
+    return normalizeSettingsPageId(
+      id === 'connections.mobile' || id === 'access' ? 'connections.devices' : id);
+  }
 
-    if (!SETTINGS_PAGES.some((page) => page.id === id)) {
+  function selectPage(id: string, entity?: string, tab?: string): boolean {
+    const selected = normalizePageId(id);
+
+    if (!selected) {
       navigationMessage.value = messageRef('settings.settingsSectionNoLongerAvailable');
 
       return false;
     }
 
-    pageId.value = id;
+    pageId.value = selected;
     entityId.value = entity;
     tabId.value = tab;
     navigationMessage.value = '';
 
-    const group = SETTINGS_PAGES.find((page) => page.id === id)?.groupId;
+    const group = SETTINGS_PAGES.find((page) => page.id === selected)?.groupId;
 
     if (group && !expandedGroups.value.includes(group)) {
       expandedGroups.value.push(group);
     }
 
     try {
-      navigationStorage()?.setItem(SETTINGS_PAGE_KEY, id);
+      navigationStorage()?.setItem(SETTINGS_PAGE_KEY, selected);
     } catch {
       // Выбор страницы сохраняется в памяти до закрытия документа.
     }
@@ -149,8 +155,10 @@ export const useSettingsStore = defineStore('settings', () => {
     }
 
     if (isOpen.value) {
-      if (request.pageId) {
-        selectPage(request.pageId, request.entityId);
+      const selected = normalizePageId(request.pageId) ?? normalizePageId(request.queryPage);
+
+      if (selected) {
+        selectPage(selected, request.entityId);
       }
 
       return true;

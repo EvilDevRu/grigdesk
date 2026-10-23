@@ -28,6 +28,7 @@ export interface ServerBinaryVerification {
 }
 
 export interface ServerBinaryProbeOptions {
+  signal?: AbortSignal;
   home?: string;
   expectPackageId?: string;
   timeoutMs?: number;
@@ -36,6 +37,7 @@ export interface ServerBinaryProbeOptions {
     env: NodeJS.ProcessEnv;
     timeout: number;
     maxBuffer: number;
+    signal?: AbortSignal;
   }) => Promise<{ stdout: string; stderr?: string }>;
 }
 
@@ -104,6 +106,7 @@ async function runJson(binary: string, args: string[], options: ServerBinaryProb
     env: { PATH: '', ...(options.home ? { GRIGDESK_HOME: options.home } : {}) },
     timeout: options.timeoutMs ?? 30000,
     maxBuffer: 65536,
+    signal: options.signal,
   });
 
   if (Buffer.byteLength(result.stdout) > 65536) {

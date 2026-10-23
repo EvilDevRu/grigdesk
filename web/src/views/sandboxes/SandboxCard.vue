@@ -1,165 +1,173 @@
 <template>
-  <article class="sandbox-card" :class="{ 'is-pipeline': entry.owner === 'pipeline' }">
-    <header class="sandbox-card__head">
-      <span class="sandbox-card__dot" :data-state="aliveState" aria-hidden="true"></span>
-      <h3 class="sandbox-card__title">Стенд t{{ entry.task }}</h3>
-      <span class="sandbox-card__chip" :class="{ 'is-manual': entry.owner === 'manual' }">
-        {{ entry.owner === 'manual' ? 'ручная' : 'конвейер' }}
-      </span>
-
-      <div class="sandbox-card__meta">
-        <span v-if="entry.profile">профиль {{ entry.profile }}</span>
-        <span v-if="entry.slot !== null">слот {{ entry.slot }}</span>
-        <span v-if="updatedLabel">{{ updatedLabel }}</span>
-      </div>
-    </header>
-
-    <div v-if="job && job.state === 'running'" class="sandbox-card__progress">
-      <UiProgress
-        :label="`${jobTitle} стенда t${entry.task}`"
-        :value="job.index"
-        :max="job.total"
-        :indeterminate="!job.total"
-        :value-text="progressLabel"
-      />
-      <p class="sandbox-card__step">{{ progressLabel }}</p>
-    </div>
-
-    <UiInlineMessage v-if="job && job.state === 'failed'" tone="danger">
-      {{ job.message || 'Задание завершилось с ошибкой.' }}
-    </UiInlineMessage>
-    <UiInlineMessage
-      v-else-if="job && job.action === 'down' && job.state === 'done' && job.message"
-      tone="warning"
-    >
-      {{ job.message }}
-    </UiInlineMessage>
-    <UiInlineMessage
-      v-else-if="job && job.action === 'run' && job.state === 'done'"
-      tone="success"
-    >
-      <span class="sandbox-card__result">{{ runSummary }}</span>
-    </UiInlineMessage>
-
-    <!-- Журнал задания — по запросу: итог в карточке короткий, а прогон профиля печатает
-         сверку по шагам, которую человек читает целиком. -->
-    <div v-if="job && (job.action === 'run' || job.state === 'failed')" class="sandbox-card__log">
-      <UiDisclosureButton
-        density="compact"
-        :open="logOpen"
-        :controls="`sandbox-log-${entry.task}`"
-        @update:open="toggleLog"
-      >
-        {{ logOpen ? 'Скрыть журнал' : 'Журнал задания' }}
-      </UiDisclosureButton>
-      <pre
-        v-if="logOpen"
-        :id="`sandbox-log-${entry.task}`"
-        class="sandbox-card__log-text"
-      >{{ logText || 'Вывода пока нет.' }}</pre>
-      <p v-if="logOpen && logTruncated" class="sandbox-card__hint">
-        Показан только хвост журнала.
-      </p>
-    </div>
-
-    <div v-if="hasPorts || entry.standAlive !== null" class="sandbox-card__ports">
-      <a
-        v-if="feHref"
-        class="sandbox-port"
-        :href="feHref"
-        target="_blank"
-        rel="noopener"
-        v-tooltip="`Открыть фронт стенда: ${feHref}`"
-      >Фронт <b>:{{ entry.fePort }}</b><span aria-hidden="true"> ↗</span></a>
-
-      <a
-        v-if="apiHref"
-        class="sandbox-port"
-        :href="apiHref"
-        target="_blank"
-        rel="noopener"
-        v-tooltip="`Открыть API стенда: ${apiHref}`"
-      >API <b>:{{ entry.apiPort }}</b><span aria-hidden="true"> ↗</span></a>
-
-      <span class="sandbox-card__alive" :data-state="aliveState">{{ aliveLabel }}</span>
-    </div>
-
-    <ul v-if="entry.repos.length" class="sandbox-card__repos">
-      <li v-for="repo in entry.repos" :key="repo.path" class="sandbox-repo">
-        <span class="sandbox-repo__name">{{ repo.name }}</span>
-        <span class="sandbox-repo__branch" v-tooltip="repo.branch || undefined">
-          {{ repo.branch || 'ветка неизвестна' }}
+  <article class="sandbox-card ui-workspace-section" :aria-labelledby="`sandbox-title-${entry.task}`">
+    <UiPaneHeader class="sandbox-card__head">
+      <template #title><h3 :id="`sandbox-title-${entry.task}`">Стенд t{{ entry.task }}</h3></template>
+      <template #meta>
+        <span class="sandbox-card__alive" :data-state="aliveState">
+          <span class="sandbox-card__dot" aria-hidden="true"></span>{{ aliveLabel }}
         </span>
-        <code class="sandbox-repo__path" v-tooltip="repo.path">{{ repo.path }}</code>
-        <UiIconButton
-          role="embedded"
-          :label="copyLabel(repo.path)"
-          v-tooltip="copyLabel(repo.path)"
-          @click="copyPath(repo.path)"
-        >
-          <svg v-if="copied === repo.path" v-bind="ICON" aria-hidden="true">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-          <svg v-else v-bind="ICON" aria-hidden="true">
-            <rect x="9" y="9" width="13" height="13" rx="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-        </UiIconButton>
-      </li>
-    </ul>
-
-    <!-- Действия профиля: прогоны на поднятом стенде, объявленные рядом с его up/down.
-         Доступны и стенду конвейера — на воротах приёмки человек гоняет стенд руками. -->
-    <div v-if="actions.length" class="sandbox-card__runs">
-      <UiButton
-        v-for="action in actions"
-        :key="action.id"
-        variant="ghost"
-        tone="accent"
-        v-tooltip="action.description"
-        :aria-disabled="busy || (job !== null && job.state === 'running')"
-        @click="emit('run', { task: entry.task, action })"
-      >
-        {{ action.label }}
-      </UiButton>
-    </div>
-
-    <footer
-      v-if="entry.removable || blockedReason"
-      class="sandbox-card__actions"
-      :class="{ 'is-blocked': !entry.removable }"
-    >
-      <p v-if="!entry.removable" class="sandbox-card__hint">{{ blockedReason }}</p>
-      <template v-else>
-        <UiButton
-          variant="ghost"
-          tone="danger"
-          :aria-disabled="busy"
-          @click="emit('dismantle', { task: entry.task, force: true })"
-        >
-          Снести вместе с незакоммиченным
-        </UiButton>
-        <UiButton
-          variant="solid"
-          tone="danger"
-          :loading="busy"
-          @click="emit('dismantle', { task: entry.task, force: false })"
-        >
-          Снести стенд
-        </UiButton>
       </template>
-    </footer>
+      <template #actions>
+        <div class="sandbox-card__meta">
+          <span v-if="entry.profile">Профиль: {{ entry.profile }}</span>
+          <span v-if="entry.slot !== null">Слот {{ entry.slot }}</span>
+        </div>
+      </template>
+    </UiPaneHeader>
+    <div class="sandbox-card__body">
+      <div v-if="job && job.state === 'running'" class="sandbox-card__progress">
+        <UiProgress
+          :label="`${jobTitle} стенда t${entry.task}`"
+          :value="job.index"
+          :max="job.total"
+          :indeterminate="!job.total"
+          :value-text="progressLabel"
+        />
+        <p class="sandbox-card__step">{{ progressLabel }}</p>
+      </div>
+
+      <UiInlineMessage v-if="job && job.state === 'failed'" tone="danger">
+        {{ job.message || 'Задание завершилось с ошибкой.' }}
+      </UiInlineMessage>
+      <UiInlineMessage
+        v-else-if="job && job.action === 'down' && job.state === 'done' && job.message"
+        tone="warning"
+      >
+        {{ job.message }}
+      </UiInlineMessage>
+      <UiInlineMessage
+        v-else-if="job && job.action === 'run' && job.state === 'done'"
+        tone="success"
+      >
+        <span class="sandbox-card__result">{{ runSummary }}</span>
+      </UiInlineMessage>
+
+      <!-- Журнал задания — по запросу: итог в карточке короткий, а прогон профиля печатает
+           сверку по шагам, которую человек читает целиком. -->
+      <div v-if="job && (job.action === 'run' || job.state === 'failed')" class="sandbox-card__log">
+        <UiDisclosureButton
+          density="compact"
+          data-context="workspace-form"
+          :open="logOpen"
+          :controls="`sandbox-log-${entry.task}`"
+          @update:open="toggleLog"
+        >
+          {{ logOpen ? 'Скрыть журнал' : 'Журнал задания' }}
+        </UiDisclosureButton>
+        <pre
+          v-if="logOpen"
+          :id="`sandbox-log-${entry.task}`"
+          class="sandbox-card__log-text"
+        >{{ logText || 'Вывода пока нет.' }}</pre>
+        <p v-if="logOpen && logTruncated" class="sandbox-card__hint">
+          Показан только хвост журнала.
+        </p>
+      </div>
+
+      <div v-if="hasPorts" class="sandbox-card__ports">
+        <UiActionLink v-if="feHref" :href="feHref" target="_blank" tone="accent"
+                      :aria-label="`Открыть сайт стенда t${entry.task}`"
+                      data-context="workspace-form" v-tooltip="`Открыть сайт стенда: ${feHref}`">
+          Сайт <span class="sandbox-card__port">:{{ entry.fePort }}</span>
+          <span aria-hidden="true">↗</span>
+        </UiActionLink>
+        <UiActionLink v-if="apiHref" :href="apiHref" target="_blank" data-context="workspace-form"
+                      v-tooltip="`Открыть API — интерфейс сервера: ${apiHref}`">
+          API <span class="sandbox-card__port">:{{ entry.apiPort }}</span><span aria-hidden="true">↗</span>
+        </UiActionLink>
+      </div>
+
+      <div v-if="actions.length" class="sandbox-card__runs">
+        <div v-for="action in actions" :key="action.id" class="sandbox-card__run">
+          <UiButton variant="outline" data-context="workspace-form-wrap"
+                    :aria-disabled="busy || (job !== null && job.state === 'running')"
+                    @click="emit('run', { task: entry.task, action })">
+            {{ action.label }}
+          </UiButton>
+          <p v-if="action.description" class="sandbox-card__hint">{{ action.description }}</p>
+        </div>
+      </div>
+
+      <div class="sandbox-card__tools">
+        <details v-if="entry.repos.length || updatedLabel" class="ui-workspace-disclosure sandbox-card__details"
+                 data-context="workspace-inline">
+          <summary>
+            <template v-if="entry.repos.length">Код и рабочие папки · {{ entry.repos.length }}</template>
+            <template v-else>Сведения о стенде</template>
+          </summary>
+          <div class="ui-workspace-section__body">
+            <p v-if="entry.repos.length" class="sandbox-card__hint">
+              Отдельные копии репозиториев стенда (worktree). Путь можно скопировать.
+            </p>
+            <ul v-if="entry.repos.length" class="sandbox-card__repos">
+              <li v-for="repo in entry.repos" :key="repo.path" class="sandbox-repo">
+                <span class="sandbox-repo__name">{{ repo.name }}</span>
+                <span class="sandbox-repo__branch" v-tooltip="repo.branch || undefined">
+                  {{ repo.branch || 'ветка неизвестна' }}
+                </span>
+                <code class="sandbox-repo__path" v-tooltip="repo.path">{{ repo.path }}</code>
+                <UiIconButton
+                  role="embedded"
+                  data-context="workspace-form"
+                  :label="copyLabel(repo.path)"
+                  v-tooltip="copyLabel(repo.path)"
+                  @click="copyPath(repo.path)"
+                >
+                  <svg v-if="copied === repo.path" v-bind="ICON" aria-hidden="true">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  <svg v-else v-bind="ICON" aria-hidden="true">
+                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                </UiIconButton>
+              </li>
+            </ul>
+
+            <p v-if="updatedLabel" class="sandbox-card__hint">{{ updatedLabel }}</p>
+          </div>
+        </details>
+
+        <details v-if="entry.removable" class="ui-workspace-disclosure sandbox-card__removal"
+                 data-context="workspace-inline">
+          <summary>Удаление стенда</summary>
+          <div class="sandbox-card__actions ui-workspace-section__body">
+            <div class="sandbox-card__removal-option">
+              <UiButton variant="outline" tone="danger" data-context="workspace-form-wrap"
+                        :loading="busy" @click="emit('dismantle', { task: entry.task, force: false })">
+                Снести стенд
+              </UiButton>
+              <p class="sandbox-card__hint">
+                Удалить контейнеры и базы. Рабочие папки с незакоммиченными изменениями сохранятся.
+              </p>
+            </div>
+            <div class="sandbox-card__removal-option">
+              <UiButton variant="ghost" tone="danger" data-context="workspace-form-wrap" :aria-disabled="busy"
+                        @click="emit('dismantle', { task: entry.task, force: true })">
+                Снести вместе с изменениями
+              </UiButton>
+              <p class="sandbox-card__hint">
+                Удалить и рабочие папки. Профиль предварительно сохранит изменения патчем в архив.
+              </p>
+            </div>
+          </div>
+        </details>
+        <p v-else-if="blockedReason" class="sandbox-card__hint">{{ blockedReason }}</p>
+      </div>
+    </div>
   </article>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import {
+  UiActionLink,
   UiButton,
   UiDisclosureButton,
   UiIconButton,
   UiInlineMessage,
   UiProgress,
+  UiPaneHeader,
   vTooltip,
 } from '../../ui';
 import { loadSandboxJobLog } from '../../actions/sandboxes';
@@ -224,10 +232,10 @@ const aliveState = computed(() => {
 
 const aliveLabel = computed(() => {
   if (aliveState.value === 'unknown') {
-    return 'портов ещё нет';
+    return 'Не проверен';
   }
 
-  return aliveState.value === 'alive' ? 'порты отвечают' : 'порты молчат';
+  return aliveState.value === 'alive' ? 'Порты отвечают' : 'Порты не отвечают';
 });
 
 // Шаг по умолчанию, пока задание не назвало свой: у прогона журнал ещё пуст.
@@ -291,14 +299,14 @@ const updatedLabel = computed(() => {
     timeStyle: 'short',
   });
 
-  return `реестр от ${when}`;
+  return `Запись о стенде обновлена ${when}`;
 });
 
 // Причину запрета считает сервер: клиентская догадка по состоянию задания разошлась
 // бы с настоящим отказом ручки, а правило владения живёт там же, где и снос.
 const BLOCKED: Record<string, string> = {
   pipeline_owned: 'Стендом владеет конвейер или общий checkout: он сносится из карточки задачи.',
-  job_running: 'По стенду сейчас идёт работа.',
+  job_running: 'Удаление недоступно, пока выполняется задание стенда.',
   unknown_owner: 'GrigDesk не знает, чей это стенд, — снос остаётся за скриптом профиля в терминале.',
 };
 
@@ -349,238 +357,205 @@ async function copyPath(value: string) {
 
 <style scoped>
 .sandbox-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  min-width: 0;
+  container: sandbox-card / inline-size;
 }
 
-/* Стенд конвейера показан для сведения: он тише ручного и не притворяется кликабельным. */
-.sandbox-card.is-pipeline {
-  background: color-mix(in srgb, var(--surface) 55%, var(--ground));
-  box-shadow: none;
-}
-
-.sandbox-card__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+.sandbox-card__body {
+  display: grid;
   gap: 8px;
-}
-
-.sandbox-card__dot {
-  width: 8px;
-  height: 8px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--idle);
-}
-
-.sandbox-card__dot[data-state='alive'] {
-  background: var(--good);
-}
-
-.sandbox-card__dot[data-state='silent'] {
-  background: var(--bad);
-}
-
-.sandbox-card__title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 650;
-}
-
-.sandbox-card__chip {
-  padding: 1px 8px;
-  border: 1px solid var(--line-2);
-  border-radius: 999px;
-  color: var(--ink-mid);
-  font-size: 11px;
-}
-
-.sandbox-card__chip.is-manual {
-  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
-  color: var(--accent);
-}
-
-.sandbox-card__meta {
-  display: flex;
-  flex-wrap: wrap;
-  margin-left: auto;
-  gap: 4px 14px;
-  color: var(--ink-mid);
-  font-size: 12px;
-}
-
-.sandbox-card__progress {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  min-width: 0;
   padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--surface-2);
 }
 
-.sandbox-card__step {
-  margin: 0;
-  color: var(--ink-mid);
-  font-size: 12px;
-}
-
-.sandbox-card__ports {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 10px;
-}
-
-.sandbox-port {
-  padding: 3px 8px;
-  border: 1px solid var(--line-2);
-  border-radius: 6px;
-  color: var(--accent);
-  font-size: 11.5px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.sandbox-port b {
-  font-family: var(--mono);
-  font-weight: 600;
-}
-
-.sandbox-port:hover {
-  border-color: var(--accent);
+.sandbox-card__body > * {
+  min-width: 0;
 }
 
 .sandbox-card__alive {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--ink-mid);
-  font-size: 12px;
 }
 
 .sandbox-card__alive[data-state='silent'] {
   color: var(--bad);
 }
 
-.sandbox-card__repos {
+.sandbox-card__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--idle);
+}
+
+.sandbox-card__alive[data-state='alive'] .sandbox-card__dot {
+  background: var(--good);
+}
+
+.sandbox-card__alive[data-state='silent'] .sandbox-card__dot {
+  background: var(--bad);
+}
+
+.sandbox-card__meta {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.sandbox-card__progress {
+  display: grid;
+  gap: 6px;
+}
+
+.sandbox-card__step,
+.sandbox-card__hint {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.sandbox-card__ports {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  width: 220px;
+  max-width: 100%;
+  gap: 8px;
+}
+
+.sandbox-card__port {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.sandbox-card__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0 24px;
+}
+
+.sandbox-card__tools > details[open],
+.sandbox-card__tools > .sandbox-card__hint {
+  flex-basis: 100%;
+  min-width: 0;
+}
+
+.sandbox-card__repos {
+  display: grid;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 10px;
   list-style: none;
-  overflow: hidden;
 }
 
 .sandbox-repo {
   display: grid;
-  grid-template-columns: minmax(64px, auto) minmax(90px, auto) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(64px, 120px) minmax(90px, 220px) minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
-}
-
-.sandbox-repo + .sandbox-repo {
+  gap: 8px;
+  padding: 4px 0;
   border-top: 1px solid var(--line);
 }
 
 .sandbox-repo__name {
-  font-size: 12.5px;
+  min-width: 0;
+  font-size: 12px;
   font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sandbox-repo__branch,
+.sandbox-repo__path {
+  min-width: 0;
+  color: var(--ink-mid);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .sandbox-repo__branch {
-  overflow: hidden;
   color: var(--node-code);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sandbox-repo__path {
-  overflow: hidden;
-  color: var(--ink-mid);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .sandbox-card__runs {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 8px;
+}
+
+.sandbox-card__run,
+.sandbox-card__removal-option {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 12px;
 }
 
 .sandbox-card__result {
   white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 .sandbox-card__log {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  justify-items: start;
   gap: 6px;
-  align-items: flex-start;
 }
 
 .sandbox-card__log-text {
   width: 100%;
   max-height: 320px;
   margin: 0;
-  padding: 10px 12px;
+  padding: 8px;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  background: var(--sidebar);
   color: var(--ink);
   font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 18px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.sandbox-card__actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 10px;
-}
-
-.sandbox-card__actions.is-blocked {
-  justify-content: flex-start;
-}
-
-.sandbox-card__hint {
-  margin: 0;
-  color: var(--ink-mid);
-  font-size: 12px;
-}
-
-@media (max-width: 720px) {
-  .sandbox-card__meta {
-    margin-left: 0;
-    flex-basis: 100%;
+@container sandbox-card (max-width: 660px) {
+  .sandbox-card__ports {
+    width: 100%;
   }
 
   .sandbox-repo {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 4px 10px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 8px;
   }
 
+  .sandbox-repo__branch,
   .sandbox-repo__path {
-    grid-area: 2 / 1 / 3 / -1;
+    grid-column: 1;
   }
 
-  .sandbox-card__actions {
-    flex-wrap: wrap;
+  .sandbox-repo > :last-child {
+    grid-column: 2;
+    grid-row: 1 / 4;
   }
+
+  .sandbox-card__run,
+  .sandbox-card__removal-option {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container sandbox-card (max-width: 520px) {
+  .sandbox-card__head :deep(.ui-pane-header__actions) {
+    flex-basis: 100%;
+  }
+
 }
 </style>

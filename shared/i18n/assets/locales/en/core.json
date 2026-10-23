@@ -287,10 +287,6 @@
   "clearSearch": "Clear search",
   "couldNotSaveTheFile": "Could not save the file.",
   "thisComputer": "This computer",
-  "searchCommands": "Search sections and commands",
-  "commandQuery": "Find a section or action",
-  "noCommandResults": "No results",
-  "openSettings": "Open settings",
   "connection": {
     "none": "No machine selected",
     "connecting": "Connecting…",
@@ -402,6 +398,24 @@
         }
       }
     },
+    "kimi": {
+      "kimi-extra-usage": {
+        "label": "Extra Usage",
+        "controls": {
+          "enable-kimi-usage": {
+            "label": "Enable and add funds in Kimi"
+          }
+        }
+      },
+      "kimi-monthly-volume": {
+        "label": "Monthly volume",
+        "controls": {
+          "view-kimi-monthly-volume": {
+            "label": "View in Kimi"
+          }
+        }
+      }
+    },
     "deepseek": {
       "forecast": {
         "label": "Forecast"
@@ -445,6 +459,9 @@
     "other": "Window ({count} minutes)"
   },
   "usageText": {
+    "creditsUnavailable": "No credit data",
+    "kimiWalletUnavailable": "Not enabled or not funded",
+    "kimiMonthlyVolumeUnavailable": "Kimi does not report the remaining volume",
     "disabled": "disabled",
     "uncapped": "no monthly cap",
     "spent": "{used} of {limit}",

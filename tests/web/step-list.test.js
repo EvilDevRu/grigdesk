@@ -237,3 +237,219 @@ test('StepList заменяет неотданную картинку честн
   assert.equal(wrapper.get('.step-image-missing').text(), 'Изображение недоступно');
   assert.equal(wrapper.find('.body.res').exists(), false);
 });
+
+test('StepList собирает досланных детей под Agent и сохраняет раскрытие нижних строк', async (t) => {
+    const steps = [
+        {
+            k: 'tool',
+            id: 'agent',
+            name: 'Agent',
+            title: 'Проверка',
+            sub: 'Explore',
+            preview: 'Найди причину'
+        },
+        {
+            k: 'tool',
+            id: 'main',
+            name: 'Bash',
+            title: 'main',
+            command: 'pwd'
+        },
+        {
+            k: 'think',
+            at: 1000,
+            text: 'нижнее размышление'
+        },
+        {
+            k: 'res',
+            id: 'lost',
+            ok: true,
+            text: 'нижний результат'
+        },
+    ];
+    const snapshot = JSON.stringify(steps);
+    const wrapper = await mountStepList(t, steps);
+    const main = wrapper.findAll('.step.tool')[1];
+    const thinking = wrapper.get('.step.think');
+    const result = wrapper.get('.step.res');
+
+    await main.get('button').trigger('click');
+    await thinking.get('button').trigger('click');
+    await result.get('button').trigger('click');
+
+    const controls = [main, thinking, result].map((row) => row.get('button').attributes('aria-controls'));
+    const child = {
+        k: 'tool',
+        id: 'child',
+        name: 'Read',
+        title: 'child',
+        parent: 'agent'
+    };
+    const later = [...steps, child];
+
+    await wrapper.setProps({
+        steps: later
+    });
+    assert.deepEqual(
+        wrapper.findAll('.step.tool .ttl').map((row) => row.text()),
+        ['Проверка', 'child', 'main'],
+    );
+
+    const finalSteps = [
+        ...later,
+        {
+            k: 'tool',
+            id: 'second',
+            name: 'Bash',
+            title: 'second',
+            parent: 'agent'
+        },
+        {
+            k: 'tool',
+            id: 'child',
+            name: 'Read',
+            title: 'child updated',
+            parent: 'agent'
+        },
+        {
+            k: 'res',
+            id: 'child',
+            ok: true,
+            text: 'прочитано'
+        },
+    ];
+
+    await wrapper.setProps({
+        steps: finalSteps
+    });
+    assert.deepEqual(wrapper.findAll('.step.tool .ttl').map((row) => row.text()), [
+        'Проверка', 'child updated', 'second', 'main',
+    ]);
+    assert.equal(wrapper.findAll('.step.tool')[1].get('.mark').text(), '✓');
+    assert.equal(main.get('.body.command').text(), 'pwd');
+    assert.equal(thinking.get('.body').text(), 'нижнее размышление');
+    assert.equal(result.get('.body').text(), 'нижний результат');
+    assert.deepEqual(
+        [main, thinking, result].map((row) => row.get('button').attributes('aria-controls')),
+        controls,
+    );
+    assert.equal(wrapper.findAll('.step.tool')[0].get('.ico').text(), '🤖');
+    await wrapper.findAll('.step.tool')[0].get('button').trigger('click');
+    assert.equal(wrapper.get('.path').text(), 'Explore');
+    assert.equal(wrapper.get('.body-wrap .body').text(), 'Найди причину');
+    assert.equal(JSON.stringify(steps), snapshot);
+    await wrapper.setProps({
+        live: false
+    });
+    await wrapper.get('.summary-disclosure').trigger('click');
+
+    const titles = wrapper.findAll('.step.tool .ttl').map((row) => row.text());
+    const restored = await mountStepList(t, JSON.parse(JSON.stringify(finalSteps)), {
+        live: false
+    });
+
+    await restored.get('.summary-disclosure').trigger('click');
+    assert.deepEqual(restored.findAll('.step.tool .ttl').map((row) => row.text()), titles);
+});
+
+test('StepList сохраняет время прихода, результат и повторы при группировке двух уровней', async (t) => {
+    const steps = [
+        {
+            k: 'tool',
+            id: 'agent',
+            name: 'Task',
+            title: 'Запуск',
+            at: 1000
+        },
+        {
+            k: 'tool',
+            id: 'main',
+            name: 'Bash',
+            title: 'main',
+            at: 2000
+        },
+        {
+            k: 'tool',
+            id: 'inner',
+            name: 'Agent',
+            title: 'Второй уровень',
+            parent: 'agent',
+            at: 3000
+        },
+        {
+            k: 'note',
+            text: 'повтор',
+            parent: 'agent',
+            at: 4000
+        },
+        {
+            k: 'note',
+            text: 'повтор',
+            parent: 'agent',
+            at: 5000
+        },
+        {
+            k: 'res',
+            id: 'inner',
+            ok: true,
+            text: 'готово',
+            at: 6000
+        },
+        {
+            k: 'think',
+            text: 'смотрю',
+            parent: 'inner',
+            at: 10000
+        },
+        {
+            k: 'tool',
+            id: 'last',
+            name: 'Read',
+            title: 'последний',
+            parent: 'agent',
+            at: 11000
+        },
+    ];
+    const wrapper = await mountStepList(t, steps);
+
+    assert.deepEqual(wrapper.findAll('.step').map((row) => row.find('.ttl').exists()
+        ? row.get('.ttl').text() : row.text()), [
+        'Запуск', 'Второй уровень', 'Размышление · 6 с', 'повтор ×2', 'последний', 'main',
+    ]);
+    assert.equal(wrapper.findAll('.step.tool')[1].get('.mark').text(), '✓');
+    assert.equal(wrapper.findAll('.step.nested').length, 4);
+});
+
+test('StepList оставляет сирот и старую вложенность на месте среди корневых шагов', async (t) => {
+    const steps = [
+        {
+            k: 'tool',
+            name: 'Bash',
+            title: 'до',
+            command: 'pwd'
+        },
+        {
+            k: 'tool',
+            name: 'Read',
+            title: 'сирота',
+            parent: 'вытеснен'
+        },
+        {
+            k: 'tool',
+            name: 'Edit',
+            title: 'после',
+            sub: '/repo/a.ts'
+        },
+        {
+            k: 'think',
+            text: 'старая запись',
+            sub: true
+        },
+    ];
+    const wrapper = await mountStepList(t, steps);
+
+    assert.deepEqual(wrapper.findAll('.step.tool .ttl').map((row) => row.text()), ['до', 'сирота', 'после']);
+    assert.deepEqual(wrapper.findAll('.step').map((row) => row.classes().includes('nested')), [
+        false, true, false, true,
+    ]);
+});

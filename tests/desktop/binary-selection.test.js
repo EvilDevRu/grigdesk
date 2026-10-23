@@ -12,8 +12,165 @@ import { loadServerRuntime, runtimeDependencies } from '../../desktop/src/runtim
 import { recoverRuntimeSelection, selectSeaServer } from '../../server/src/lib/selectSeaServer.ts';
 import { acquireDirectoryLock } from '../../shared/node/directoryLock.ts';
 import { processStarttime } from '../../server/src/lib/dataHomeBoot.ts';
+import { verifyServerBinary } from '../../shared/node/serverBinaryRuntime.ts';
 
 const execute = promisify(execFile);
+
+test('PB-SELECT-01: пустой XDG принимает portable ELF без marker и previous', async (t) => {
+  const fixture = await binaryFixture(t);
+  const directory = path.dirname(fixture.runtimePath);
+
+  await fs.rm(directory, { recursive: true });
+  await selectSeaServer({
+    root: fixture.binary,
+    env: fixture.env,
+    home: fixture.home,
+    windowVersion: 4,
+    expectedPrevious: null,
+    verifyBinary: async () => {},
+  });
+
+  const selected = JSON.parse(await fs.readFile(fixture.runtimePath, 'utf8'));
+
+  assert.deepEqual(selected, {
+    version: 4,
+    kind: 'binary',
+    binary: fixture.binary,
+    home: path.join(fixture.home, '.grigdesk'),
+    cliPaths: [],
+  });
+  assert.equal((await fs.stat(directory)).mode & 0o777, 0o700);
+  assert.equal((await fs.stat(fixture.runtimePath)).mode & 0o777, 0o600);
+  await assert.rejects(fs.stat(`${fixture.runtimePath}.previous`), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(path.join(directory, 'runtime-version')), { code: 'ENOENT' });
+});
+
+test('PB-SELECT-02: verify failure, CAS race и abort не публикуют выбор', async (t) => {
+  for (const initial of [false, true]) {
+    for (const failure of ['verify', 'race', 'abort']) {
+      await t.test(`${initial ? 'initial' : 'saved'}: ${failure}`, async (t) => {
+        const fixture = await binaryFixture(t);
+        const previous = initial ? null : await fs.readFile(fixture.runtimePath, 'utf8');
+        const foreign = JSON.stringify({ ...fixture.descriptor, cliPaths: [] }) + '\n';
+        const controller = new AbortController();
+        let verified = false;
+
+        if (initial) {
+          await fs.rm(path.dirname(fixture.runtimePath), { recursive: true });
+        }
+
+        await assert.rejects(selectSeaServer({
+          root: fixture.binary,
+          env: fixture.env,
+          home: fixture.home,
+          windowVersion: 4,
+          expectedPrevious: previous,
+          signal: controller.signal,
+          verifyBinary: async () => {
+            verified = true;
+
+            if (failure === 'verify') {
+              throw new Error('Отказ проверки тестового ELF');
+            }
+
+            if (failure === 'race') {
+              await fs.writeFile(fixture.runtimePath, foreign);
+            }
+
+            if (failure === 'abort') {
+              controller.abort();
+            }
+          },
+        }));
+        assert.equal(verified, true, 'отказ должен наступить после входа в нужную проверку');
+
+        if (failure === 'race') {
+          assert.equal(await fs.readFile(fixture.runtimePath, 'utf8'), foreign);
+        } else if (initial) {
+          await assert.rejects(fs.stat(fixture.runtimePath), { code: 'ENOENT' });
+        } else {
+          assert.equal(await fs.readFile(fixture.runtimePath, 'utf8'), previous);
+        }
+
+        await assert.rejects(fs.stat(`${fixture.runtimePath}.previous`), { code: 'ENOENT' });
+      });
+    }
+  }
+
+  await t.test('signal доходит до фонового probe/verify', async (t) => {
+    const fixture = await binaryFixture(t);
+    const controller = new AbortController();
+    let forwarded;
+    const checking = verifyServerBinary(fixture.binary, {
+      home: fixture.data,
+      signal: controller.signal,
+      run: async (_binary, _args, options) => {
+        forwarded = options.signal;
+
+        if (!options.signal) {
+          return { stdout: JSON.stringify({
+            ok: true,
+            verified: true,
+            packageId: 'a'.repeat(64),
+            elfSha256: 'b'.repeat(64),
+            runtime: {
+              node: '24.21.0',
+              abi: '137',
+              platform: 'linux',
+              arch: 'x64',
+            },
+            filesVerified: 1,
+            nativeBindingsVerified: 2,
+          }) };
+        }
+
+        return new Promise((_resolve, reject) => {
+          options.signal.addEventListener('abort', () => {
+            reject(Object.assign(new Error('Проверка отменена'), { name: 'AbortError' }));
+          }, { once: true });
+        });
+      },
+    });
+
+    controller.abort();
+    await assert.rejects(checking, { name: 'AbortError' });
+    assert.equal(forwarded, controller.signal);
+  });
+});
+
+test('PB-SELECT-03: journal без прежнего primary восстанавливает обе стороны commit', async (t) => {
+  for (const committed of [false, true]) {
+    await t.test(committed ? 'после primary' : 'до primary', async (t) => {
+      const fixture = await binaryFixture(t);
+      const next = await fs.readFile(fixture.runtimePath, 'utf8');
+      const journal = {
+        format: 1,
+        token: '12345678-1234-4234-8234-123456789abc',
+        previous: null,
+        next,
+        backup: 'прежняя резервная копия',
+      };
+
+      if (!committed) {
+        await fs.rm(fixture.runtimePath);
+      }
+
+      await fs.writeFile(`${fixture.runtimePath}.previous`, journal.backup);
+      await fs.writeFile(`${fixture.runtimePath}.transaction`, JSON.stringify(journal), { mode: 0o600 });
+      await recoverRuntimeSelection(fixture.runtimePath);
+
+      if (committed) {
+        assert.equal(await fs.readFile(fixture.runtimePath, 'utf8'), next);
+        await assert.rejects(fs.stat(`${fixture.runtimePath}.previous`), { code: 'ENOENT' });
+      } else {
+        await assert.rejects(fs.stat(fixture.runtimePath), { code: 'ENOENT' });
+        assert.equal(await fs.readFile(`${fixture.runtimePath}.previous`, 'utf8'), journal.backup);
+      }
+
+      await assert.rejects(fs.stat(`${fixture.runtimePath}.transaction`), { code: 'ENOENT' });
+    });
+  }
+});
 
 test('SB10: v4 хранит внешний ELF и пользовательские CLI directories', () => {
   const value = {

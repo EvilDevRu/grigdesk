@@ -6,6 +6,123 @@ import { normalizeSettings } from '../../desktop/src/settings.ts';
 import { Profiles } from '../../desktop/src/profiles.ts';
 import { createShellApi } from '../../desktop/src/pipe/shellApi.ts';
 
+test('PB-LOCAL-02: активация ELF предшествует commit, private-путь не попадает в JSON', async (t) => {
+  for (const refused of [false, true]) {
+    const title = refused ? 'отказ сохраняет прежний выбор' : 'успех меняет выбор после активации';
+
+    await t.test(title, async (t) => {
+      const settings = normalizeSettings({
+        version: 1,
+        connection: { kind: 'local', origin: 'http://127.0.0.1:12345' },
+      });
+      const previous = settings.selected;
+      const profiles = new Profiles({
+        settings,
+        save: async () => {},
+        available: async () => true,
+      });
+      const candidate = {
+        ...settings.profiles[0],
+        id: 'portable-candidate',
+        port: 47102,
+        name: 'Соседняя установка',
+        serverBinary: '/private/portable/bin/grigdesk-server',
+      };
+      const events = [];
+      let release;
+      const gate = new Promise((resolve) => {
+        release = resolve;
+      });
+
+      settings.profiles.push(candidate);
+
+      const shell = createShellApi({
+        profiles,
+        pairing: { addByPairing: async () => candidate },
+        localAvailable: () => true,
+        localAddress: () => candidate.address,
+        navigate: async () => {
+          events.push('navigate');
+        },
+        /**
+         * Удерживает активацию до явного разрешения теста.
+         * Отказ должен сохранить прежний транспорт и выбранный профиль.
+         */
+        async beforeSelect(profile) {
+          assert.equal(profile.serverBinary, candidate.serverBinary);
+          events.push('activate');
+          await gate;
+
+          if (refused) {
+            throw new Error('Проверка соседнего ELF отклонена');
+          }
+
+          events.push('activated');
+        },
+        upstream(_profile, report) {
+          return {
+            request() {},
+            upgrade() {},
+            close() {
+              events.push('disconnect');
+            },
+            async probe() {
+              report({
+                status: 'online',
+                detail: null,
+                serverApi: null,
+              });
+            },
+          };
+        },
+      });
+      const server = http.createServer((req, res) => shell.handle(req, res));
+
+      await shell.connect();
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+      t.after(async () => {
+        release();
+        shell.close();
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+      });
+
+      const origin = `http://127.0.0.1:${server.address().port}`;
+      const selection = fetch(`${origin}/__shell/select`, {
+        method: 'POST',
+        body: JSON.stringify({ id: candidate.id }),
+      });
+
+      try {
+        // Запрос проходит настоящий HTTP-router; очередь ограничена сроком теста.
+        for (let attempt = 0; attempt < 100 && events.length === 0; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+
+        assert.deepEqual(events, ['activate']);
+        assert.equal(settings.selected, previous);
+      } finally {
+        release();
+        await selection;
+      }
+
+      const response = await selection;
+
+      assert.equal(response.ok, !refused);
+      assert.equal(settings.selected, refused ? previous : candidate.id);
+
+      if (!refused) {
+        assert.ok(events.indexOf('activated') < events.indexOf('disconnect'));
+      }
+
+      const publicJson = await (await fetch(`${origin}/__shell/profiles`)).text();
+
+      assert.doesNotMatch(publicJson, /serverBinary|\/private\//u);
+      assert.doesNotMatch(JSON.stringify(shell.state()), /serverBinary|\/private\//u);
+    });
+  }
+});
+
 /**
  * Время повторов управляется очередью, а транспорт даёт явные состояния без сети.
  * Никакие таймеры и случайные порты этой проверки не относятся к живому GrigDesk.

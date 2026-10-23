@@ -393,6 +393,8 @@ export function createServerSupervisor(adapters: SupervisorAdapters): ServerSupe
         continue;
       }
 
+      waitReason = desktopText('desktop.preparingServer');
+
       const loaded = await adapters.loadRuntime({ purpose: 'start' });
 
       const runtime = 'runtime' in loaded ? loaded.runtime : null;

@@ -27,7 +27,8 @@ interface RuntimeOptions {
   localAvailable(): boolean;
   localAddress(): string;
   windowKey(profile: DesktopProfile): Promise<string>;
-  prepareLocal?(profile: DesktopProfile): void;
+  prepareLocal?(profile: DesktopProfile, options?: { signal: AbortSignal }): void | Promise<void>;
+  beforeSelect?(profile: DesktopProfile): Promise<void>;
   onOrigin(origin: string, resetStorage: boolean): void | Promise<void>;
   onOriginRemoved?(origin: string): void;
   navigate(origin: string): Promise<void>;
@@ -52,6 +53,7 @@ export function createClientRuntime(options: RuntimeOptions) {
     nativeWindows: options.nativeWindows,
     profiles,
     pairing,
+    beforeSelect: options.beforeSelect,
     systemLanguage: options.systemLanguage,
     saveLocale: options.save,
     onLocale: options.onLocale,
@@ -96,6 +98,7 @@ export function createClientRuntime(options: RuntimeOptions) {
     upstream(profile, report) {
       let transport: ReturnType<typeof createUpstream> | null = null;
       let cancelled = false;
+      const controller = new AbortController();
       const ready = (async () => {
         const identity = profile.kind === 'remote'
           ? await options.identity.load(options.identityDirectory) : undefined;
@@ -105,7 +108,11 @@ export function createClientRuntime(options: RuntimeOptions) {
         }
 
         if (profile.kind === 'local') {
-          options.prepareLocal?.(profile);
+          await options.prepareLocal?.(profile, { signal: controller.signal });
+        }
+
+        if (cancelled) {
+          return;
         }
 
         transport = createUpstream({
@@ -128,21 +135,32 @@ export function createClientRuntime(options: RuntimeOptions) {
           try {
             await ready;
             await transport?.probe();
-          } catch {
+          } catch (error) {
+            const local = profile.kind === 'local';
+
             report({
-              status: 'unpaired',
-              detail: { code: 'identity_unavailable' },
+              status: local ? 'offline' : 'unpaired',
+              detail: local ? {
+                code: 'server_start_failed',
+                message: error instanceof Error ? error.message : desktopText('desktop.serverNotPrepared'),
+              } : { code: 'identity_unavailable' },
               serverApi: null,
             });
           }
         },
+        /**
+         * Запрос не опережает async-подготовку местного сервера или личности remote.
+         * Отказ подготовки возвращается через ту же трубу без создания раннего транспорта.
+         */
         async request(req, res) {
           await ready.catch(() => {});
 
           if (transport) {
             await transport.request(req, res);
           } else {
-            json(res, 503, { error: 'identity_unavailable' });
+            json(res, 503, {
+              error: profile.kind === 'local' ? 'server_start_failed' : 'identity_unavailable',
+            });
           }
         },
         upgrade(req, socket, head) {
@@ -156,6 +174,7 @@ export function createClientRuntime(options: RuntimeOptions) {
         },
         close() {
           cancelled = true;
+          controller.abort();
           transport?.close();
         },
       };

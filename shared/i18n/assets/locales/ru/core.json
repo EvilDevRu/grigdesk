@@ -289,10 +289,6 @@
   "clearSearch": "Очистить поиск",
   "couldNotSaveTheFile": "Не удалось сохранить файл.",
   "thisComputer": "Этот компьютер",
-  "searchCommands": "Поиск разделов и команд",
-  "commandQuery": "Найти раздел или действие",
-  "noCommandResults": "Ничего не найдено",
-  "openSettings": "Открыть настройки",
   "connection": {
     "none": "Машина не выбрана",
     "connecting": "Подключение…",
@@ -404,6 +400,24 @@
         }
       }
     },
+    "kimi": {
+      "kimi-extra-usage": {
+        "label": "Extra Usage",
+        "controls": {
+          "enable-kimi-usage": {
+            "label": "Включить и пополнить в Kimi"
+          }
+        }
+      },
+      "kimi-monthly-volume": {
+        "label": "Месячный объём",
+        "controls": {
+          "view-kimi-monthly-volume": {
+            "label": "Посмотреть в Kimi"
+          }
+        }
+      }
+    },
     "deepseek": {
       "forecast": {
         "label": "Прогноз"
@@ -449,6 +463,9 @@
     "other": "Окно ({count} минуты)"
   },
   "usageText": {
+    "creditsUnavailable": "Нет данных о кредитах",
+    "kimiWalletUnavailable": "Не включено или не пополнено",
+    "kimiMonthlyVolumeUnavailable": "Kimi не сообщает остаток",
     "disabled": "выключено",
     "uncapped": "без месячного потолка",
     "spent": "{used} из {limit}",

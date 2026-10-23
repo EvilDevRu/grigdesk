@@ -7,6 +7,30 @@ SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
 DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 CMD="${1:-open}"
 
+# Справка и ошибки bundle обрабатываются до Node и подготовки установленного ELF.
+# Сборщик работает только с исходниками и не использует ветвь build с установкой.
+if [[ "$CMD" == bundle ]]; then
+  for argument in "${@:2}"; do
+    if [[ "$argument" == --help || "$argument" == -h ]]; then
+      echo 'grigdesk-ctl bundle — собрать переносимую папку release/ и release.tar.gz из исходников'
+      exit 0
+    fi
+  done
+
+  if (( $# > 1 )); then
+    echo 'Справка: grigdesk-ctl bundle [--help]' >&2
+    exit 2
+  fi
+
+  if [[ -f "$DIR/release.json" || ! -f "$DIR/server/src/app.ts" \
+    || ! -f "$DIR/web/package.json" || ! -f "$DIR/desktop/package.json" ]]; then
+    echo 'Команда bundle доступна только в папке исходников.' >&2
+    exit 1
+  fi
+
+  exec node "$DIR/tools/bundle.mts"
+fi
+
 # Явные команды разработки распознают checkout независимо от установленного ELF.
 # release.json сохраняет приоритет готовой поставки даже при случайных исходниках рядом.
 SOURCE_COMMAND=0
@@ -20,7 +44,13 @@ fi
 # Внешний ELF сам читает раннее окружение и запускает сервер своим Node.
 # Для CLI удерживаем preparation до завершения собранного helper-а, затем освобождаем.
 if [[ "$SOURCE_COMMAND" == 0 && ( -e "$DIR/bin/grigdesk-server" || -L "$DIR/bin/grigdesk-server" ) ]]; then
-  source "$DIR/deploy/lib/runtime-env.sh"
+  PORTABLE=0
+  if [[ -f "$DIR/bin/bundle.json" ]]; then
+    PORTABLE=1
+    source "$DIR/bin/lib/runtime-env.sh"
+  else
+    source "$DIR/deploy/lib/runtime-env.sh"
+  fi
   grigdesk_select_server_binary "$DIR"
   trap 'grigdesk_release_binary_preparation' EXIT
   trap 'exit 130' INT
@@ -39,6 +69,18 @@ if [[ "$SOURCE_COMMAND" == 0 && ( -e "$DIR/bin/grigdesk-server" || -L "$DIR/bin/
       exec "$DIR/bin/b24" "${@:2}"
       ;;
     desktop)
+      if [[ "$PORTABLE" == 1 ]]; then
+        if [[ "${2:-}" != use-server || $# != 3 ]]; then
+          echo 'Переносимый комплект: desktop use-server <ELF>. Установка окна требует исходников.' >&2
+          exit 2
+        fi
+
+        grigdesk_require_node
+        grigdesk_node "$_grigdesk_binary_root/server/runtime/helpers/select-sea-server.mjs" \
+          --portable "$3"
+        exit $?
+      fi
+
       exec "$DIR/deploy/desktop.sh" "${@:2}"
       ;;
     dev|build|deps|mobile|release)

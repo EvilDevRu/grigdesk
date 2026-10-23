@@ -15,6 +15,7 @@ const { mount, flushPromises } = await import(
 );
 const Dialog = await compileVue(webFile('src/views/settings/PluginInstallDialog.vue'), {
   stubs: {
+    '../../stores/pluginCatalog.ts': 'export const usePluginCatalogStore = () => globalThis.__catalogUi;',
     '../../stores/pluginInstall.ts': 'export const usePluginInstallStore = () => globalThis.__installUi;',
   },
 });
@@ -30,6 +31,12 @@ async function mountInstallDialog(t, state = {}, props = {}, configure = () => {
 
   configure(fixture);
   globalThis.__installUi = fixture.state;
+  globalThis.__catalogUi = reactive({
+    index: null,
+    state: 'unavailable',
+    loading: false,
+    loadIndex: async () => {},
+  });
 
   const wrapper = mount(Dialog, {
     attachTo: browser.document.querySelector('#mount'),
@@ -45,6 +52,7 @@ async function mountInstallDialog(t, state = {}, props = {}, configure = () => {
   t.after(() => {
     wrapper.unmount();
     delete globalThis.__installUi;
+    delete globalThis.__catalogUi;
   });
   await flushPromises();
 
@@ -189,7 +197,7 @@ test('D6: ready показывает полный preview/diff/warnings и яв�
   assert.match(text, /серверная часть или зависимости/u);
   assert.match(text, /Список сокращён/u);
   assert.match(text, /Код плагина выполняется внутри GrigDesk с его правами/u);
-  assert.equal(wrapper.get('[data-role="install-apply"]').text(), 'Обновить');
+  assert.equal(wrapper.get('[data-role="install-apply"]').text(), 'Установить из этого источника');
   await wrapper.get('[data-role="install-apply"]').trigger('click');
   assert.equal(calls.filter(([method]) => method === 'apply').length, 1);
 });
@@ -1046,3 +1054,153 @@ for (const scenario of dialogVisualCases) {
       }
     });
 }
+
+test('CAT-DLG1: unknown source и offline различимы, повторное открытие не теряет warning', async (t) => {
+  const { wrapper, calls } = await mountInstallDialog(t, { job: webInstallJob() });
+
+  assert.match(wrapper.get('[data-source-notice]').text(), /Не удалось проверить источник/u);
+  assert.equal(wrapper.get('[data-role="install-apply"]').text(), 'Установить из этого источника');
+  globalThis.__catalogUi.index = {
+    schemaVersion: 1,
+    generatedAt: '2026-10-22T10:00:00.000Z',
+    plugins: []
+  };
+  globalThis.__catalogUi.state = 'fresh';
+  await nextTick();
+  assert.match(wrapper.get('[data-source-notice]').text(), /Установка из неизвестного источника/u);
+  assert.match(wrapper.get('[data-source-notice]').text(), /доступ к файлам и запуску команд/u);
+  globalThis.__catalogUi.loading = true;
+  await nextTick();
+  assert.equal(wrapper.get('[data-role="install-apply"]').element.disabled, true);
+  globalThis.__catalogUi.loading = false;
+  await wrapper.setProps({ open: false });
+  await wrapper.setProps({ open: true });
+  await flushPromises();
+  assert.match(wrapper.get('[data-source-notice]').text(), /Установка из неизвестного источника/u);
+  await wrapper.get('[data-role="install-apply"]').trigger('click');
+  assert.equal(calls.filter(([method]) => method === 'apply').length, 1);
+});
+
+test('CAT-DLG2: происхождение берётся из actual job, а не props другой карточки', async (t) => {
+  const { catalogFixture } = await import('../helpers/pluginCatalog.js');
+  const data = catalogFixture();
+  const job = webInstallJob();
+
+  job.source = data.entry.source;
+  job.preview.source = data.entry.source;
+
+
+  const { wrapper, state } = await mountInstallDialog(t, { job }, {
+    plugin: {
+      id: 'other',
+      name: 'Other',
+      system: false
+    },
+  });
+
+  globalThis.__catalogUi.index = data.index;
+  globalThis.__catalogUi.state = 'fresh';
+  await nextTick();
+  assert.equal(wrapper.get('[data-source-notice]').attributes('data-membership'), 'community');
+  state.job.source = { kind: 'git', url: 'https://github.com/other/demo.git' };
+  state.job.preview.source = state.job.source;
+  await nextTick();
+  assert.equal(wrapper.get('[data-source-notice]').attributes('data-membership'), 'external');
+});
+
+test('CAT-DLG5: ready и reopen запускают проверку; apply ждёт её фактического исхода', async (t) => {
+  const { wrapper, state } = await mountInstallDialog(t);
+  const reads = [];
+  let rejectRead;
+  const response = new Promise((_resolve, reject) => {
+    rejectRead = reject;
+  });
+  const catalog = globalThis.__catalogUi;
+
+  catalog.loadIndex = async (force) => {
+    reads.push(force);
+    catalog.loading = true;
+
+    try {
+      await response;
+    } catch {
+      catalog.index = null;
+      catalog.state = 'unavailable';
+    } finally {
+      catalog.loading = false;
+    }
+  };
+  state.job = webInstallJob();
+  await nextTick();
+  assert.deepEqual(reads, [true]);
+  assert.equal(wrapper.get('[data-role="install-apply"]').element.disabled, true);
+  rejectRead(new Error('catalog offline'));
+  await flushPromises();
+  assert.equal(wrapper.get('[data-role="install-apply"]').element.disabled, false);
+  assert.equal(wrapper.get('[data-source-notice]').attributes('data-membership'), 'unverified');
+  await wrapper.setProps({ open: false });
+  await wrapper.setProps({ open: true });
+  await flushPromises();
+  assert.deepEqual(reads, [true, true]);
+});
+
+test('CAT-DLG3: preset выбирает точную версию и отправляет SHA, current имеет приоритет', async (t) => {
+  const selection = {
+    id: 'demo',
+    source: { kind: 'git', url: 'https://github.com/example/demo.git' },
+    target: {
+      version: '1.1.0',
+      tag: 'v1.1.0',
+      sha: 'a'.repeat(40),
+      api: 1,
+      minGrigDeskVersion: '1.0.0'
+    },
+  };
+  const { wrapper, calls } = await mountInstallDialog(t, {}, { catalogSelection: selection }, (fixture) => {
+    fixture.state.listVersions = async (url) => {
+      fixture.calls.push(['listVersions', [url]]);
+      fixture.state.versionsInputKey = url.trim();
+      fixture.state.versionsUrl = selection.source.url;
+      fixture.state.versions = [selection.target];
+    };
+  });
+
+  assert.equal(wrapper.get('[data-role="install-url"]').element.value, selection.source.url);
+  assert.equal(wrapper.get('[data-role="install-url"]').element.disabled, true);
+  assert.equal(wrapper.get('[data-role="install-version"]').element.value, '1.1.0');
+  assert.equal(calls.some(([name]) => name === 'startInstall'), false);
+  await wrapper.get('[data-role="install-start"]').trigger('click');
+  assert.deepEqual(calls.find(([name]) => name === 'startInstall')[1],
+    [selection.source.url, '1.1.0', false, 'demo', selection.target.sha]);
+  wrapper.unmount();
+
+  const existing = await mountInstallDialog(t, { job: webInstallJob() }, { catalogSelection: selection });
+
+  assert.equal(existing.wrapper.find('[data-role="install-url"]').exists(), false);
+  assert.equal(existing.calls.some(([name]) => name === 'listVersions' || name === 'startInstall'), false);
+});
+
+test('CAT-DLG4: moved preset tag блокирует подготовку ещё в списке версий', async (t) => {
+  const selection = {
+    id: 'demo',
+    source: { kind: 'git', url: 'https://github.com/example/demo.git' },
+    target: {
+      version: '1.1.0',
+      tag: 'v1.1.0',
+      sha: 'a'.repeat(40),
+      api: 1,
+      minGrigDeskVersion: null
+    },
+  };
+  const { wrapper, calls } = await mountInstallDialog(t, {}, { catalogSelection: selection }, (fixture) => {
+    fixture.state.listVersions = async (url) => {
+      fixture.state.versionsInputKey = url.trim();
+      fixture.state.versionsUrl = url;
+      fixture.state.versions = [{ ...selection.target, sha: 'b'.repeat(40) }];
+    };
+  });
+
+  assert.equal(wrapper.get('[data-role="install-start"]').element.disabled, true);
+  assert.match(wrapper.text(), /Выбранная версия изменилась/u);
+  assert.equal(calls.some(([name]) => name === 'startInstall'), false);
+});

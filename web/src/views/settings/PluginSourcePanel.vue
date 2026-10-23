@@ -15,6 +15,7 @@
     <div v-if="store.reconciling" class="source-actions">
       <p>{{ t('settings.checkingOutcome') }}</p>
       <UiButton
+        data-context="workspace-form-wrap"
         data-role="plugin-source-reconcile"
         :disabled="store.busy"
         @click="store.reconcile()"
@@ -27,6 +28,7 @@
       <p class="source-hint">{{ t('settings.attachARepositoryToSelectVersionsAnd') }}</p>
       <div class="source-actions">
         <UiButton
+          data-context="workspace-form-wrap"
           data-role="plugin-source-bind"
           :disabled="locked"
           @click="emit('bind')"
@@ -72,6 +74,7 @@
         </UiInlineMessage>
         <div class="source-actions">
           <UiButton
+            data-context="workspace-form-wrap"
             data-role="plugin-source-check"
             :loading="store.checking"
             :disabled="store.checking || !!store.recoveryError"
@@ -80,6 +83,7 @@
             {{ t('settings.checkForUpdates') }}
           </UiButton>
           <UiButton
+            data-context="workspace-form-wrap"
             v-if="plugin.install.localChanges"
             data-role="plugin-source-update"
             :disabled="locked"
@@ -88,6 +92,7 @@
             {{ t('settings.reinstallCleanly') }}
           </UiButton>
           <UiButton
+            data-context="workspace-form-wrap"
             v-else-if="plugin.install.updateAvailable"
             variant="solid"
             tone="accent"
@@ -105,6 +110,7 @@
           <p class="source-hint">{{ t('settings.youCanRestoreItIfTheUpdate') }}</p>
         </div>
         <UiButton
+          data-context="workspace-form-wrap"
           data-role="plugin-source-rollback"
           :disabled="locked || !plugin.install.rollbackAvailable"
           @click="rollback"
@@ -196,13 +202,15 @@ onBeforeUnmount(() => {
 <style scoped>
 .plugin-source {
   display: grid;
-  gap: 1rem;
+  gap: 12px;
   min-width: 0;
-  padding: 1rem;
+  padding: 12px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  font-size: 0.875rem;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
   line-height: 1.5;
+  margin-bottom: 12px;
+  container: plugin-source / inline-size;
 }
 .plugin-source p,
 .plugin-source h3 {
@@ -217,20 +225,20 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
 }
 .source-heading h3 {
-  font-size: 0.875rem;
+  font-size: 13px;
   font-weight: 600;
 }
 .source-version {
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 0.8125rem;
+  font-size: 12px;
 }
 .source-repository {
   display: grid;
   gap: 0.35rem;
   min-width: 0;
   padding: 0.75rem;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--ground);
 }
 .source-revision {
@@ -241,7 +249,7 @@ onBeforeUnmount(() => {
 .source-hint,
 .source-checked {
   color: var(--ink-mid);
-  font-size: 0.8125rem;
+  font-size: 12px;
 }
 .source-checked {
   min-height: 1.25rem;
@@ -268,7 +276,7 @@ onBeforeUnmount(() => {
   padding-top: 1rem;
   border-top: 1px solid var(--line);
 }
-@media (max-width: 420px) {
+@container plugin-source (max-width: 360px) {
   .source-actions {
     display: grid;
     grid-template-columns: minmax(0, 1fr);

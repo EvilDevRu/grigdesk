@@ -5,6 +5,8 @@ import { parseEnv } from 'node:util';
 
 import { runtimeInstallationRoot, runtimeRoot } from '../server/src/lib/runtimePaths.ts';
 
+import { isPortableBundle } from '../shared/node/bundleLayout.ts';
+
 import { dataHome, dataPath, envFilePath } from '../shared/runtime/dataHome.ts';
 import { desktopRuntimePath, parseRuntimeDescriptor } from '../shared/desktop/desktopRuntime.ts';
 import { resolveRuntimeSettings } from '../shared/runtime/runtimeSettings.ts';
@@ -126,7 +128,7 @@ export async function runCli(argv: readonly string[]): Promise<number> {
     if (args.kind === 'open') {
       const windowCode = await openWindow(root, settings, process.env);
 
-      if (await windowStartsServer(process.env)) {
+      if (await isPortableBundle(root) || await windowStartsServer(process.env)) {
         return windowCode;
       }
 

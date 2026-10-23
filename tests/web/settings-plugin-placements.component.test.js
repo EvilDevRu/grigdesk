@@ -37,10 +37,9 @@ test('Размещения: один полный PUT, отказ, Cancel и п�
   });
   const plugin = h.plugins.byId('forecast');
 
-  assert.match(h.wrapper.text(), /Всплывашка исполнителя.*provider.popover.after-bars/);
-  await h.wrapper.findAll('input[type="checkbox"]').find((input) =>
-    input.element.closest('[data-settings-field]')?.textContent.includes('Размещение'))?.setValue(false);
-  h.settings.setField('pluginSettings:forecast', '["placements","provider.popover.after-bars"]', false);
+  assert.match(h.wrapper.text(), /Всплывашка исполнителя/);
+  assert.equal(h.wrapper.find('input[aria-label="Всплывашка исполнителя"]').exists(), true);
+  await h.wrapper.get('input[aria-label="Всплывашка исполнителя"]').setValue(false);
   h.settings.setField('pluginSettings:forecast', '["values","providers"]', []);
   assert.equal(plugin.placements[0].enabled, true);
   assert.deepEqual(plugin.values.providers, ['fixture']);

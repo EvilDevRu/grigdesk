@@ -29,6 +29,7 @@
 | `grigdesk-ctl device revoke <id>` | Отзыв сертификата и разрыв соединений |
 | `grigdesk-ctl desktop …`, `mobile …`, `release …` | Передача прежним скриптам |
 | `grigdesk-ctl b24 …` | Собранный `bin/b24`, без него — исходник `b24/src/main.ts` ([команда b24](../b24/binary-cli.md)) |
+| `grigdesk-ctl bundle` | Свежая переносимая папка и архив без установки ([контракт](portable-bundle.md)) |
 | `grigdesk-ctl build [all\|server\|web\|window]` | Сборка и установка; без цели — сервер, веб, окно ([контракт](ctl-build.md)) |
 | `grigdesk-ctl dev`, `deps`, `run` | Прежние команды разработки |
 | `grigdesk-ctl --help`, `-h`, `help`; `--help` или `-h` в любой команде | Справка без внешних вызовов |
@@ -146,3 +147,7 @@ links равен null при недоступном сервере, токене
 `tests/desktop/offline.test.js`. Включены общий typecheck, граф входов и сторож миграции.
 Переходный режим `open` — `tests/cli/open.test.mts` (CO-4…8): с исправным `runtime.json`
 ни systemctl, ни HTTP не вызываются.
+
+В [переносимом комплекте](portable-bundle.md) `open` находит корневой `GrigDesk`,
+не передаёт forced origin и всегда поручает запуск сервера окну, даже без runtime.json.
+Библиотека ctl лежит в bin/lib; команды работают своим Node из payload без исходников.

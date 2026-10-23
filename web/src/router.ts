@@ -28,7 +28,7 @@ const routes: RouteRecordRaw[] = [
     path: '/sandboxes',
     name: 'sandboxes',
     component: () => import('./views/SandboxesView.vue'),
-    meta: { title: 'Песочницы' },
+    meta: { title: 'Песочницы', layout: 'workspace' },
   },
   {
     path: '/showcase/:id?',

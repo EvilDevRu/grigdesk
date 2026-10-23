@@ -473,3 +473,163 @@ test('устаревший черновик store не перекрывает з
     assert.notEqual(row.message.abandoned, true, 'отметка store не обрывает законченный блок');
   }
 });
+
+test('дети и внуки остаются в участке запуска выше ответа и уточнения во всех режимах', () => {
+    const launch = {
+        k: 'tool',
+        id: 'agent',
+        name: 'Agent',
+        title: 'Подзадача',
+        at: 20
+    };
+    const child = {
+        k: 'tool',
+        id: 'child',
+        parent: 'agent',
+        title: 'Действие субагента',
+        at: 50
+    };
+    const later = [
+        steps[0], launch,
+        {
+            k: 'tool',
+            id: 'main',
+            title: 'Команда главного',
+            at: 25
+        },
+        steps[2], child,
+        {
+            k: 'tool',
+            id: 'grandchild',
+            parent: 'child',
+            title: 'Внук',
+            at: 55
+        },
+        {
+            k: 'res',
+            id: 'grandchild',
+            ok: true,
+            text: 'Результат',
+            at: 60
+        },
+        {
+            k: 'tool',
+            id: 'child',
+            parent: 'agent',
+            title: 'Обновлённое действие',
+            at: 65
+        },
+        {
+            k: 'tool',
+            id: 'second',
+            parent: 'agent',
+            title: 'Второй ребёнок',
+            at: 70
+        },
+    ];
+    const final = {
+        role: 'assistant',
+        runId: RUN,
+        text: 'Готово',
+        steps: later,
+        sequence: 3
+    };
+    const messages = [parent, reply, clarification];
+    const snapshot = JSON.stringify({
+        messages,
+        later
+    });
+    const projector = createChatTimelineProjector();
+    const active = projector.project(messages, later.slice(0, 5), true, run);
+    const extended = projector.project(messages, later, true, run);
+    const savedMessages = [...messages, final];
+    const saved = projector.project(savedMessages, [], false, null);
+    const restored = createChatTimelineProjector().project(
+        JSON.parse(JSON.stringify(savedMessages)), [], false, null,
+    );
+
+    for (const rows of [active, extended, saved, restored]) {
+        const section = rows.find((row) => row.steps.some((step) => step.id === launch.id));
+        const replyIndex = rows.findIndex((row) => row.message.text === reply.text);
+        const clarificationIndex = rows.findIndex((row) => row.message.text === clarification.text);
+
+        assert.ok(rows.indexOf(section) < replyIndex);
+        assert.ok(replyIndex < clarificationIndex);
+        assert.ok(section.steps.some((step) => step === child || step.id === child.id));
+        assert.equal(rows.filter((row) => row.steps.some((step) => step.parent === launch.id)).length, 1);
+        assert.equal(section.key, active.find((row) => row.steps.includes(launch)).key);
+    }
+
+    const owner = extended.find((row) => row.steps.includes(launch));
+
+    assert.deepEqual(
+        owner.steps.filter((step) => step.id === 'grandchild').map((step) => step.k),
+        ['tool', 'res'],
+    );
+    assert.equal(JSON.stringify({
+        messages,
+        later
+    }), snapshot);
+});
+
+test('размышление сохраняет исходное время при переносе, а сироты не пересекают реплики и запуски', () => {
+    const later = [
+        {
+            k: 'tool',
+            id: 'agent',
+            title: 'Запуск',
+            at: 1000
+        },
+        {
+            k: 'text',
+            id: reply.assistantMessageId,
+            text: reply.text,
+            at: 2000
+        },
+        {
+            k: 'tool',
+            id: 'main',
+            title: 'перед размышлением',
+            at: 8000
+        },
+        {
+            k: 'think',
+            parent: 'agent',
+            text: 'детское размышление',
+            at: 10000
+        },
+        {
+            k: 'tool',
+            id: 'orphan',
+            parent: 'missing',
+            title: 'Сирота',
+            at: 11000
+        },
+    ];
+    const rows = chatTimeline([parent, reply], later, true, run);
+    const thought = rows.flatMap((row) => row.steps).find((step) => step.k === 'think');
+
+    assert.equal(thought.secs, 2);
+    assert.deepEqual(rows.find((row) => row.steps.some((step) => step.id === 'main'))
+        .steps.map((step) => step.id), ['main', 'orphan']);
+    assert.ok(rows.findIndex((row) => row.steps.includes(thought))
+        < rows.findIndex((row) => row.message.text === reply.text));
+    assert.equal(Object.hasOwn(later[3], 'secs'), false);
+
+    const firstInSection = chatTimeline([parent, reply], [later[0], later[1], later[3]], true, run);
+    const firstThought = firstInSection.flatMap((row) => row.steps).find((step) => step.k === 'think');
+
+    assert.equal(firstThought.secs, 0, 'перенос не добавляет время от нового соседа');
+
+    const older = {
+        role: 'assistant',
+        runId: 'older',
+        text: 'Раньше',
+        steps: [later[0]]
+    };
+    const isolated = chatTimeline([older, parent, reply], [later[1], later[3]], true, run);
+    const orphanThought = isolated.find((row) => row.steps.some((step) => step.k === 'think'));
+
+    assert.equal(orphanThought.turnKey, RUN);
+    assert.ok(isolated.indexOf(orphanThought) > isolated.findIndex((row) => row.message.text === reply.text));
+});
