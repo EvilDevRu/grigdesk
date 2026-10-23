@@ -45,7 +45,7 @@ test('SEA-UI-02: общий модал показывает пакет и не �
   assert.match(fixture.wrapper.text(), /Версия сервера: 2\.3\.4/);
   assert.match(fixture.wrapper.text(), /Установите новый пакет GrigDesk/);
   assert.doesNotMatch(fixture.wrapper.text(),
-    /Checkout:|Применить локальные|Пересобрать web|Проверить обновления/);
+    /Рабочая копия|Применить локальные|Пересобрать интерфейс|Проверить обновления/);
   assert.equal(fixture.control.calls.some((call) => call.path === '/api/system/web-rebuild'), false);
   assert.equal(fixture.writes().length, 0);
 });

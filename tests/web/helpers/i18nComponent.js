@@ -73,6 +73,12 @@ export async function i18nComponent(t, options = {}) {
       '/api/settings/speech': data.speech,
       '/api/providers': data.providers,
       '/api/plugins': data.plugins,
+      '/api/plugin-catalog': {
+        state: 'unconfigured',
+        applicationVersion: '1.0.0',
+        fetchedAt: null,
+        catalog: null,
+      },
       '/api/settings/b24': data.b24,
       '/api/system/launcher': data.launcher,
       '/api/system/server': data.server,

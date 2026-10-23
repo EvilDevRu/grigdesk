@@ -287,10 +287,6 @@
   "clearSearch": "Clear search",
   "couldNotSaveTheFile": "Could not save the file.",
   "thisComputer": "This computer",
-  "searchCommands": "Search sections and commands",
-  "commandQuery": "Find a section or action",
-  "noCommandResults": "No results",
-  "openSettings": "Open settings",
   "connection": {
     "none": "No machine selected",
     "connecting": "Connecting…",
@@ -339,6 +335,7 @@
   "openChat": "Open chat",
   "openTask": "Open task",
   "pairingLifetime": "The code expires. Create a new code if it has expired.",
+  "pairingStringPlaceholder": "GRIGDESK:PHONE:2:… / GRIGDESK:PAIR:1:…",
   "forecast": "Forecast",
   "fileUnits": {
     "0": "B",
@@ -401,6 +398,24 @@
         }
       }
     },
+    "kimi": {
+      "kimi-extra-usage": {
+        "label": "Extra Usage",
+        "controls": {
+          "enable-kimi-usage": {
+            "label": "Enable and add funds in Kimi"
+          }
+        }
+      },
+      "kimi-monthly-volume": {
+        "label": "Monthly volume",
+        "controls": {
+          "view-kimi-monthly-volume": {
+            "label": "View in Kimi"
+          }
+        }
+      }
+    },
     "deepseek": {
       "forecast": {
         "label": "Forecast"
@@ -444,6 +459,9 @@
     "other": "Window ({count} minutes)"
   },
   "usageText": {
+    "creditsUnavailable": "No credit data",
+    "kimiWalletUnavailable": "Not enabled or not funded",
+    "kimiMonthlyVolumeUnavailable": "Kimi does not report the remaining volume",
     "disabled": "disabled",
     "uncapped": "no monthly cap",
     "spent": "{used} of {limit}",
@@ -529,5 +547,7 @@
     "other": "{count} active"
   },
   "invalidPipelineSnapshot": "The server returned an invalid pipeline summary",
-  "invalidPipelineGraph": "The server returned an invalid pipeline graph"
+  "invalidPipelineGraph": "The server returned an invalid pipeline graph",
+  "relayAddress": "Via the configured relay",
+  "desktopPairingPlaceholder": "GRIGDESK:PAIR:1:…"
 }

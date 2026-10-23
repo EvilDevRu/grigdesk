@@ -1,4 +1,7 @@
 {
+  "checkingServer": "Проверка сервера…",
+  "startingServer": "Запуск сервера…",
+  "waitingVpn": "Ожидание VPN…",
   "loading": "Загрузка…",
   "file": "Файл",
   "edit": "Правка",
@@ -79,5 +82,14 @@
   "shellInvalidMachineAddress": "Неверное имя или адрес машины.",
   "shellInvalidLocalAddress": "Неверный местный адрес.",
   "shellAddressCheckUnavailable": "Проверка новой машины недоступна.",
-  "dataDirectoryNotAbsolute": "Каталог данных приложения должен быть абсолютным."
+  "dataDirectoryNotAbsolute": "Каталог данных приложения должен быть абсолютным.",
+  "preparingServer": "Подготовка сервера…",
+  "portableMachine": "GrigDesk рядом с окном",
+  "portableRelocated": "Сохранённый сервер пропал. Выбран сервер рядом с окном.",
+  "selectionChanged": "Выбор машины изменился.",
+  "invalidRuntime": "Описание сервера повреждено.",
+  "portableMenuTitle": "Добавить GrigDesk в меню приложений?",
+  "portableMenuAdd": "Добавить",
+  "portableMenuLater": "Не сейчас",
+  "portableMenuError": "Не удалось добавить GrigDesk в меню приложений."
 }

@@ -240,12 +240,22 @@
 }
 
 /* В строках формы кнопки равны полям; компактная высота остаётся у шапок. */
-.ui-button[data-context='workspace-form'] {
+.ui-button[data-context='workspace-form'],
+.ui-button[data-context='workspace-form-wrap'] {
   height: var(--control-height);
   min-height: var(--control-height);
   padding: 0 10px;
   border-radius: var(--radius-sm);
   font-size: 12px;
+}
+
+/* Длинные названия операций переносятся; короткая кнопка сохраняет высоту поля. */
+.ui-button[data-context='workspace-form-wrap'] {
+  height: auto;
+  padding-block: 5px;
+  line-height: 20px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .ui-icon-button[data-context='workspace-form'][data-role] {
@@ -1915,6 +1925,9 @@
    действия сохраняют собственную плотность и двухстрочную геометрию. */
 .ui-button[data-role='settings-action'] {
   font-size: 14px;
+}
+.ui-button[data-role='settings-action'][data-context='workspace-form-wrap'] {
+  font-size: 12px;
 }
 
 /* Строка гармошки вмещает сводку исполнителя и остаётся одной кнопкой.

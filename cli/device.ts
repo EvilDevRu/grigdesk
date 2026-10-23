@@ -67,7 +67,8 @@ export async function deviceCommand(args: CliArgs, settings: Settings): Promise<
 
   if (!response.ok) {
     throw new Error(body.error === 'client_listener_off'
-      ? 'Включите GRIGDESK_CLIENT_LISTEN в настройках сервера и перезапустите его.'
+      ? 'Откройте «Доступ к серверу» и включите прямой доступ; '
+        + 'администратор также может задать GRIGDESK_CLIENT_LISTEN.'
       : body.message ?? 'Команда устройства не выполнена.');
   }
 

@@ -20,6 +20,8 @@ import local.grigdesk.client.key.DeviceKeyManager;
 import local.grigdesk.client.pipe.ClientPipe;
 import local.grigdesk.client.pipe.StaticAssets;
 import local.grigdesk.client.pipe.Upstream;
+import local.grigdesk.client.pipe.RoutedUpstream;
+import local.grigdesk.client.pipe.PipeTransport;
 import local.grigdesk.client.shell.Pairing;
 import local.grigdesk.client.shell.ProfileStore;
 import local.grigdesk.client.shell.ShellApi;
@@ -86,8 +88,7 @@ public final class ClientRuntime implements AutoCloseable {
     }, major, minor, ClientLocale.initialize(context));
 
     shell = new ShellApi(profiles, pairing, (profile, gate, report) -> {
-      Upstream transport = new Upstream(profile.getString("address"), profile.getString("fp"), keys.get(),
-        gate, report::accept);
+      RoutedUpstream transport = new RoutedUpstream(profile, keys.get(), gate, report::accept);
 
       return new ShellApi.Transport() {
         public void probe() throws Exception {
@@ -96,7 +97,7 @@ public final class ClientRuntime implements AutoCloseable {
         public void close() {
           transport.close();
         }
-        public Upstream pipe() {
+        public PipeTransport pipe() {
           return transport;
         }
       };

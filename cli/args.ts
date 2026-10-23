@@ -32,6 +32,7 @@ grigdesk-ctl device list [--json]
 grigdesk-ctl device revoke <id>
 grigdesk-ctl desktop … | b24 … | mobile … | release …
 grigdesk-ctl desktop use-server <ELF|R>  Выбрать серверный ELF или прежний SEA-комплект для окна
+grigdesk-ctl bundle             Собрать переносимую папку release/ и архив из исходников
 grigdesk-ctl build [all|server|web|window]
                                 Без аргументов: сервер → веб → окно (all по умолчанию)
 grigdesk-ctl dev | deps | run

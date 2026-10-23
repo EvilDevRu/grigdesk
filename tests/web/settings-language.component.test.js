@@ -15,7 +15,7 @@ const pages = [
   'automation.chats', 'automation.context', 'automation.launch', 'automation.monitoring',
   'automation.arbiter', 'agents.models', 'connections.devices', 'connections.b24',
   'connections.mobile', 'system.startup', 'system.updates', 'system.processes',
-  'plugins.install', 'plugins.installed', 'agents.providers', 'speech.dictation',
+  'plugins.installed', 'agents.providers', 'speech.dictation',
   'speech.video', 'speech.language', 'speech.models', 'speech.advanced', 'system.diagnostics',
 ];
 
@@ -152,8 +152,21 @@ test('I18N-S01: system/ru/en, немедленный выбор, Cancel и пр�
   assert.equal(localStorage.getItem('grigdesk-ui-language'), 'en');
 });
 
-test('I18N-S02: все 24 страницы, публичные метаданные, EN/RU поиск и сохранение значений', async (t) => {
-  const h = await i18nComponent(t);
+test('I18N-S02: все страницы, публичные метаданные, EN/RU поиск и сохранение значений', async (t) => {
+  // Раздел «Доступ к серверу» читает способы связи выбранного сервера в форме его DTO.
+  const access = {
+    name: 'Server',
+    source: 'off',
+    direct: {
+      enabled: false,
+      state: 'disabled',
+      addresses: [],
+      error: null,
+    },
+    networks: [],
+    relays: [],
+  };
+  const h = await i18nComponent(t, { responses: { '/api/devices/access': access } });
 
   assert.deepEqual(Object.keys(h.module.SETTINGS_PAGE_COMPONENTS).sort(), [...pages].sort());
   h.settings.setAuthenticated(true);
@@ -187,15 +200,16 @@ test('I18N-S02: все 24 страницы, публичные метаданн�
     assert.doesNotMatch(ownText(document.querySelector('.settings-page-area')), /[А-Яа-яЁё]/, pageId);
     assert.doesNotMatch(ownText(document.querySelector('.settings-page-area')),
       /\bsettings\.[a-z]+\./, pageId);
-    assert.equal(h.settings.pageId, pageId);
+    // Прежний раздел мобильного доступа стал псевдонимом единого «Доступа к серверу».
+    assert.equal(h.settings.pageId, pageId === 'connections.mobile' ? 'connections.devices' : pageId);
   }
 
   h.settings.selectPage('connections.devices');
-  await h.flushPromises();
 
-  const name = new h.DOMWrapper(document.querySelector('.settings-devices input'));
-
-  await name.setValue('Мой ноутбук');
+  // «Добавить устройство» активна после загрузки списка устройств выбранного сервера.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await h.flushPromises();
+  }
 
   const adding = await catalogMessage('settings', 'Добавить устройство');
   const add = [...document.querySelectorAll('[role="dialog"] button')]
@@ -207,8 +221,16 @@ test('I18N-S02: все 24 страницы, публичные метаданн�
   await h.flushPromises();
 
   const pairing = [...document.querySelectorAll('[role="dialog"]')].at(-1);
+  // Имя устройства вводится в диалоге настольной привязки: страница не начинается с формы.
+  const name = new h.DOMWrapper(pairing.querySelector('input'));
 
+  await name.setValue('Мой ноутбук');
   assert.doesNotMatch(pairing.textContent, /[А-Яа-яЁё]/);
+  await h.module.localeAdapter.setUiLanguage('ru');
+  await h.flushPromises();
+  assert.equal(name.element.value, 'Мой ноутбук');
+  await h.module.localeAdapter.setUiLanguage('en');
+  await h.flushPromises();
 
   const close = [...pairing.querySelectorAll('button')]
     .find((button) => button.textContent.trim() === 'Close');
@@ -223,7 +245,6 @@ test('I18N-S02: все 24 страницы, публичные метаданн�
   h.settings.query = 'клавиши';
   await h.flushPromises();
   assert.match(document.querySelector('.settings-results')?.textContent || '', /Сочетания клавиш/);
-  assert.equal(name.element.value, 'Мой ноутбук');
   assert.equal(h.calls.filter((call) => call.method && call.method !== 'GET').length, 0);
 });
 

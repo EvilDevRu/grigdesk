@@ -4,7 +4,6 @@
     "web/src/views/settings",
     "web/src/features/settings",
     "web/src/shared/layout/AppShell.vue",
-    "web/src/shared/layout/CommandPalette.vue",
     "web/src/shared/layout/ToolsGrid.vue",
     "web/src/shared/layout/ToolDock.vue",
     "web/src/shared/layout/ToolHost.vue",
@@ -42,7 +41,6 @@
     "web/src/shared/hotkeys/combo.ts",
     "web/src/shared/tools/catalog.ts",
     "web/src/shared/tools/registry.ts",
-    "web/src/shared/commandCatalog.ts",
     "web/src/shared/navBadges.ts",
     "web/src/shared/pipelineNavBadge.ts",
     "web/src/shared/pluginInstall.ts",
@@ -305,6 +303,11 @@
       "reason": "Код протокола ошибки трубы, переводится по коду в каркасе"
     },
     {
+      "text": "server_start_failed",
+      "file": "desktop/src/clientRuntime.ts",
+      "reason": "Код ошибки подготовки local в ответе трубы; текст причины передаётся в detail.message"
+    },
+    {
       "text": "disconnected",
       "reason": "Код протокола ошибки трубы, переводится по коду в каркасе"
     },
@@ -533,6 +536,39 @@
     "web/src/features/settings/resources/speech.ts": {
       "`settings.speechChecks.${key}`": [
         "settings.speechChecks.*"
+      ]
+    },
+    "web/src/views/settings/PluginSourceNotice.vue": {
+      "keys[props.membership]": [
+        "settings.marketplaceOfficial",
+        "settings.marketplaceCommunity",
+        "settings.marketplaceUnknownSource",
+        "settings.marketplaceUnverifiedSource",
+        "settings.marketplaceManual"
+      ]
+    },
+    "web/src/views/settings/pages/PluginCatalogPanel.vue": {
+      "statusKey": [
+        "settings.marketplaceCatalog",
+        "settings.marketplaceStale",
+        "settings.marketplaceUnavailable",
+        "settings.marketplaceUnconfigured"
+      ],
+      "reasonKeys[action.reason] ?? 'settings.marketplaceDetailError'": [
+        "settings.marketplaceArchived",
+        "settings.marketplaceIncompatible",
+        "settings.marketplaceSourceConflict",
+        "settings.marketplaceCommitConflict",
+        "settings.marketplaceDetailError"
+      ]
+    },
+    "web/src/views/settings/pages/PluginPage.vue": {
+      "provenanceKeys[sourceMembership(catalog.index, catalog.state,\n    entry.id, entry.install?.source ?? null)]": [
+        "settings.marketplaceOfficial",
+        "settings.marketplaceCommunity",
+        "settings.marketplaceExternal",
+        "settings.marketplaceUnverifiedSource",
+        "settings.marketplaceManual"
       ]
     }
   },

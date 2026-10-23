@@ -150,36 +150,111 @@ test('I18N-U01: EN/RU каркас, builtin/custom/disabled и прежний п
   assert.equal(await page.getByRole('button', { name: 'Настройки', exact: true }).isVisible(), true);
 });
 
-test('I18N-U02: поиск разделов/команд, Enter, отсутствие результатов и Escape с фокусом', {
+test('I18N-U02: топбар без поиска команд, соседние действия и локальный поиск RU/EN', {
   timeout: 120000,
 }, async (t) => {
-  const { browser, origin } = await i18nBrowser(t);
-  const context = await browser.newContext({ locale: 'en-US' });
-
-  t.after(() => context.close());
-
-  const page = await context.newPage();
-
-  await page.goto(origin + '#/chats');
-
-  const trigger = page.getByRole('button', {
-    name: /^(Search|Search commands|Search sections and commands)$/,
+  const profile = {
+    id: 'topbar-machine',
+    name: 'Тестовая машина',
+    kind: 'remote',
+    address: 'https://machine.example:443',
+    status: 'online',
+  };
+  const { browser, origin } = await i18nBrowser(t, {
+    shell: {
+      rev: 1,
+      profile,
+      profiles: [profile],
+      status: 'online',
+      detail: null,
+      localAvailable: false,
+      serverApi: { major: 0, minor: 1 },
+      appApi: { major: 0, minor: 1 },
+      capabilities: [],
+    },
+    responses: {
+      '/api/system': {
+        cpu: { percent: 12, cores: 8 },
+        mem: {
+          percent: 25,
+          usedGb: 4,
+          totalGb: 16,
+        },
+        net: { ip: '203.0.113.1', countryCode: 'GB' },
+      },
+    },
   });
 
-  await trigger.click();
+  for (const locale of ['ru-RU', 'en-US']) {
+    const context = await browser.newContext({ locale });
 
-  const input = page.getByRole('searchbox').last();
+    t.after(() => context.close());
 
-  await input.fill('settings');
-  await input.press('ArrowDown');
-  await input.press('Enter');
-  await page.locator('[data-role="settings-modal"]').waitFor();
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await trigger.click();
-  await page.getByRole('searchbox').last().fill('no-such-section-93001');
-  assert.match(await page.getByRole('dialog').last().textContent(), /[Nn]o (results|matches)/);
-  await page.keyboard.press('Escape');
-  assert.equal(await trigger.evaluate((element) => document.activeElement === element), true);
+    const page = await context.newPage();
+
+    for (const width of [1440, 600]) {
+      await page.setViewportSize({ width, height: 900 });
+
+      for (const route of ['/chats', '/agents']) {
+        await page.goto(origin + '#' + route);
+
+        const actions = page.locator('.topbar-actions');
+        const settings = actions.getByRole('button', { name: /^(Настройки|Settings)$/ });
+
+        await settings.waitFor();
+        await actions.locator('[data-context="connection-trigger"]').waitFor();
+        assert.equal(await actions.getByRole('button', { name: /поиск|search/i }).count(), 0);
+        assert.equal(await actions.getByRole('button').count(), 3);
+        assert.equal(await actions.locator('[data-context="alert-history"]').isVisible(), true);
+        await page.locator('[data-context="topbar-network"]').waitFor();
+        await page.locator('[data-context="provider-status"]').first().waitFor();
+
+        const unusedWidth = await actions.evaluate((element) => {
+          const buttons = [...element.querySelectorAll('button')];
+          const occupied = buttons.reduce((sum, button) => sum + button.getBoundingClientRect().width, 0);
+
+          return element.getBoundingClientRect().width - occupied;
+        });
+
+        assert.ok(Math.abs(unusedWidth) < 1, 'В группе действий нет пустого места от палитры');
+
+        await actions.locator('[data-context="connection-trigger"]').click();
+        await page.locator('[data-connection-menu]').waitFor();
+        await page.keyboard.press('Escape');
+        await actions.locator('[data-context="alert-history"]').click();
+        await page.locator('.alert-history').waitFor();
+        await page.keyboard.press('Escape');
+
+        if (route === '/chats') {
+          const search = page.locator('.cl').getByRole('searchbox');
+
+          await page.locator('.cl .row-hit').first().waitFor();
+          await search.fill('no-such-chat-93013');
+          await page.locator('.cl .none').waitFor();
+          assert.equal(await page.locator('.cl .row-hit').count(), 0);
+          await search.fill('');
+          await page.locator('.cl .row-hit').first().waitFor();
+        }
+
+        await settings.click();
+        await page.locator('[data-role="settings-modal"]').waitFor();
+
+        const search = page.getByRole('searchbox', { name: /^(Поиск настроек|Search settings)$/ });
+
+        if (!await search.isVisible()) {
+          await page.getByRole('button', { name: /^(Разделы|Sections)$/ }).click();
+        }
+
+        await search.fill(locale === 'ru-RU' ? 'клавиши' : 'keyboard');
+        await page.locator('[data-settings-result]').first().waitFor();
+        assert.match(await page.locator('.settings-results').textContent(),
+          /Сочетания клавиш|[Kk]eyboard|[Ss]hortcut/);
+        await page.keyboard.press('Escape');
+        await page.locator('[data-role="settings-modal"]').waitFor({ state: 'hidden' });
+        assert.equal(await settings.evaluate((element) => document.activeElement === element), true);
+      }
+    }
+  }
 });
 
 test('I18N-U03: открытые confirm/prompt/error/toast и история меняют перевод без повторных действий',

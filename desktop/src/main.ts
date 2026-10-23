@@ -38,9 +38,13 @@ import { loadServerRuntime, runtimeDependencies } from './runtimeConfig.ts';
 import type { ServerRuntime } from './runtimeConfig.ts';
 import { openServerLog, readUnitState, runVpnGate, spawnServer } from './serverProcess.ts';
 import { createServerSupervisor } from './serverSupervisor.ts';
+import type { ServerStartupStage } from './serverSupervisor.ts';
 import { readSettings, writeSettings } from './settings.ts';
 import { API_VERSION } from '../../shared/client/apiVersion.ts';
 import { createClientRuntime } from './clientRuntime.ts';
+import { createPortableRuntime } from './portableRuntime.ts';
+import { offerPortableIntegration } from './portableIntegration.ts';
+import { Profiles } from './profiles.ts';
 import { electronSealer, sealedIdentity } from './identity.ts';
 import { readWindowKey } from './autoLogin.ts';
 import { localPort, originFromArgs } from './connection.ts';
@@ -135,23 +139,41 @@ function startOwnServer(runtime: ServerRuntime): ChildProcess {
 // Каталог пакета для очистки окружения своего сервера: распакованный AppRun не экспортирует APPDIR.
 const packageDir = app.isPackaged ? path.dirname(process.execPath) : null;
 
-const supervisor = createServerSupervisor({
-  loadRuntime: ({ purpose }) => loadServerRuntime({
-    purpose,
-    env: process.env,
-    home: os.homedir(),
-    deps: runtimeDependencies,
-    appDir: packageDir,
-    bundledUi: true,
-  }),
-  probe: (signal) => probeGrigDesk(selectedOrigin ?? '', { signal }),
-  unitState: (signal) => readUnitState(signal),
-  runGate: (runtime, signal) => runVpnGate(runtime, signal),
-  spawnServer: (runtime) => startOwnServer(runtime),
-  sleep: (ms, signal) => delayWithAbort(ms, signal),
-  now: () => Date.now(),
-  log: (message) => writeLog(message),
+let portable: ReturnType<typeof createPortableRuntime> | null = null;
+let portablePreparing = false;
+let startupLocalId: string | null = null;
+let splashStatus: string | null = null;
+let portableWindow: string | null = null;
+let markMainShown = () => {};
+const mainShown = new Promise<void>((resolve) => {
+  markMainShown = resolve;
 });
+
+/**
+ * После смены ELF нужен новый supervisor: stop завершает прежний контроллер навсегда.
+ * Все поколения используют общий descriptor, а владение процессом остаётся внутри supervisor.
+ */
+function createOwnSupervisor() {
+  return createServerSupervisor({
+    loadRuntime: ({ purpose }) => loadServerRuntime({
+      purpose,
+      env: process.env,
+      home: os.homedir(),
+      deps: runtimeDependencies,
+      appDir: packageDir,
+      bundledUi: true,
+    }),
+    probe: (signal) => probeGrigDesk(selectedOrigin ?? '', { signal }),
+    unitState: (signal) => readUnitState(signal),
+    runGate: (runtime, signal) => runVpnGate(runtime, signal),
+    spawnServer: (runtime) => startOwnServer(runtime),
+    sleep: (ms, signal) => delayWithAbort(ms, signal),
+    now: () => Date.now(),
+    log: (message) => writeLog(message),
+  });
+}
+
+let supervisor = createOwnSupervisor();
 
 /**
  * Окно показано: дальше перезагрузка, 401 и потеря связи идут обычным offline-путём.
@@ -558,6 +580,49 @@ function showSplash(signal: AbortSignal): Promise<void> {
 }
 
 /**
+ * Подпись меняется главным процессом в прежнем документе без скриптов и новых разрешений.
+ * Повторы и поздние ответы уничтоженной заставки не создают эффектов.
+ */
+function setSplashStatus(text: string): void {
+  const window = splashWindow;
+  const language = desktopLocale();
+  const status = JSON.stringify([language, text]);
+
+  if (!window || window.isDestroyed() || splashStatus === status) {
+    return;
+  }
+
+  splashStatus = status;
+
+  const script = `document.documentElement.lang = ${JSON.stringify(language)};
+    document.querySelector('.status').textContent = ${JSON.stringify(text)};`;
+
+  void window.webContents.executeJavaScript(script).catch(() => {});
+}
+
+/**
+ * Этап запуска переводится по стабильному коду, без разбора диагностического текста.
+ * Подготовка переносимого сервера предшествует supervisor, а вход снова показывает проверку.
+ */
+function localStartupText(): string {
+  const stage: ServerStartupStage = supervisor.stage ?? (portablePreparing ? 'preparing' : 'checking');
+
+  if (stage === 'starting') {
+    return desktopText('desktop.startingServer');
+  }
+
+  if (stage === 'preparing') {
+    return desktopText('desktop.preparingServer');
+  }
+
+  if (stage === 'vpn') {
+    return desktopText('desktop.waitingVpn');
+  }
+
+  return desktopText('desktop.checkingServer');
+}
+
+/**
  * Создаёт скрытое главное окно со всеми обработчиками и lifecycle, без показа.
  * Документ трубы грузится независимо от доступности выбранной машины.
  */
@@ -619,7 +684,7 @@ async function createMainWindow(origin: string, stored: DesktopSettings): Promis
 
 /**
  * Подготовка после показа заставки: настройки, установка сервера, адрес и скрытое окно.
- * Supervisor запускается в фоне после выбора местного профиля и не задерживает UI.
+ * Supervisor запускается в фоне после выбора местного профиля и не задерживает создание документа.
  */
 async function prepare(signal: AbortSignal): Promise<void> {
   const stored = settings!;
@@ -631,7 +696,7 @@ async function prepare(signal: AbortSignal): Promise<void> {
     appDir: packageDir,
     bundledUi: true,
   });
-  const runtime = 'inspection' in loaded ? loaded.inspection : null;
+  let runtime = 'inspection' in loaded ? loaded.inspection : null;
   const argument = originFromArgs(process.argv);
 
   signal.throwIfAborted();
@@ -641,6 +706,108 @@ async function prepare(signal: AbortSignal): Promise<void> {
   }
 
   settings = stored;
+
+  const profiles = new Profiles({
+    settings: stored,
+    save: () => writeSettings(settingsFile!, stored),
+  });
+
+  portable = createPortableRuntime({
+    isPackaged: app.isPackaged,
+    execPath: process.execPath,
+    env: process.env,
+    home: os.homedir(),
+    explicitUrl: argument && 'origin' in argument ? argument.origin : null,
+    profiles,
+    ownsServer: () => supervisor.ownership === 'owned',
+    async stopServer() {
+      await supervisor.stop();
+      supervisor = createOwnSupervisor();
+      supervising = false;
+    },
+    /**
+     * Выбранный descriptor перечитывается до подготовки payload новым supervisor.
+     * Опрос сообщает ожидание только от текущего поколения контроллера.
+     */
+    async startServer(_binary, input) {
+      portablePreparing = false;
+
+      const inspected = await loadServerRuntime({
+        purpose: 'inspect',
+        env: process.env,
+        home: os.homedir(),
+        deps: runtimeDependencies,
+        appDir: packageDir,
+        bundledUi: true,
+      });
+
+      runtime = 'inspection' in inspected ? inspected.inspection : null;
+
+      if (!runtime) {
+        throw new Error(desktopText('desktop.serverNotPrepared'));
+      }
+
+      selectedOrigin = runtime.origin;
+      supervising = true;
+
+      const current = supervisor;
+      const progress = setInterval(() => {
+        const id = stored.selected;
+
+        if (id && current === supervisor) {
+          setSplashStatus(localStartupText());
+        }
+
+        if (id && current === supervisor && current.waitReason) {
+          client?.shell.reportBackground(id, {
+            status: 'connecting',
+            detail: { code: 'server_starting', message: current.waitReason },
+            serverApi: null,
+          });
+        }
+      }, 500);
+
+      try {
+        await current.ensure({
+          origin: runtime.origin,
+          signal: input?.signal ?? lifetime.signal,
+          deadline: Date.now() + STARTUP_HOLD_LIMIT_MS + STARTUP_DEADLINE_MS,
+        });
+      } finally {
+        clearInterval(progress);
+        supervising = false;
+      }
+    },
+    async notify(message) {
+      await mainShown;
+
+      if (!lifetime.signal.aborted) {
+        await dialog.showMessageBox({
+          type: 'info',
+          title: 'GrigDesk',
+          message,
+        });
+      }
+    },
+    report(message) {
+      portablePreparing = true;
+
+      const id = stored.selected;
+
+      if (id) {
+        setSplashStatus(localStartupText());
+        client?.shell.reportBackground(id, {
+          status: 'connecting',
+          detail: { code: 'server_starting', message },
+          serverApi: null,
+        });
+      }
+    },
+  });
+
+  const discovered = await portable.discover();
+
+  portableWindow = discovered.windowPath;
 
   const uiDir = clientUiDirectory({
     packaged: app.isPackaged,
@@ -716,8 +883,8 @@ async function prepare(signal: AbortSignal): Promise<void> {
 
     identity: sealedIdentity(electronSealer(safeStorage, process.platform)),
     identityDirectory: path.join(app.getPath('userData'), 'identity'),
-    localAvailable: () => runtime !== null,
-    localAddress: () => runtime?.origin || '',
+    localAvailable: () => runtime != null || discovered.localAvailable,
+    localAddress: () => runtime?.origin || discovered.address,
     windowKey: async (profile) => {
       const file = windowKeyPath({
         env: runtime?.env || process.env,
@@ -727,11 +894,18 @@ async function prepare(signal: AbortSignal): Promise<void> {
 
       return await readWindowKey(file) || '';
     },
+    beforeSelect: (profile) => portable!.activate(profile),
     /**
      * Supervisor работает независимо от показа окна и сообщает ожидание в shell.
      * Управление касается только собственного сервера исправной установки.
      */
-    prepareLocal(profile) {
+    async prepareLocal(profile, input) {
+      if (profile.serverBinary) {
+        await portable!.prepareLocal(profile, input);
+
+        return;
+      }
+
       if (!runtime || supervising || profile.address !== runtime.origin) {
         return;
       }
@@ -740,6 +914,8 @@ async function prepare(signal: AbortSignal): Promise<void> {
       selectedOrigin = profile.address;
 
       const progress = setInterval(() => {
+        setSplashStatus(localStartupText());
+
         if (supervisor.waitReason) {
           client?.shell.reportBackground(profile.id, {
             status: 'connecting',
@@ -845,6 +1021,96 @@ async function connectMain(signal: AbortSignal): Promise<void> {
 }
 
 /**
+ * Соединение online ещё не означает вход страницы: ждём рабочую область в документе трубы.
+ * Два кадра и повторный снимок защищают показ от смены машины или потери связи во время входа.
+ */
+async function waitLocalServer(signal: AbortSignal): Promise<void> {
+  const id = client?.shell.state().profile?.id;
+
+  startupLocalId = id ?? null;
+
+  while (id) {
+    signal.throwIfAborted();
+
+    const state = client?.shell.state();
+    const detail = typeof state?.detail === 'object' ? state?.detail : null;
+
+    if (!state || state.profile?.id !== id || detail?.code === 'disconnected'
+      || !['none', 'offline', 'connecting', 'online'].includes(state.status)) {
+      return;
+    }
+
+    setSplashStatus(localStartupText());
+
+    if (detail?.code === 'server_start_failed') {
+      throw new Error(detail.message);
+    }
+
+    const window = mainWindow;
+    const origin = pipeOrigin;
+
+    if (state.status === 'online' && window && !window.isDestroyed() && origin
+      && sameOrigin(window.webContents.getURL(), origin)) {
+      const script = `(async () => {
+        const ready = () => !!document.querySelector('.shell')
+          && !document.querySelector('.workspace-waiting');
+
+        if (!ready()) {
+          return false;
+        }
+
+        await new Promise(requestAnimationFrame);
+        await new Promise(requestAnimationFrame);
+
+        return ready();
+      })()`;
+      const ready = await window.webContents.executeJavaScript(script).catch(() => false);
+
+      signal.throwIfAborted();
+
+      const current = client?.shell.state();
+
+      if (ready === true && mainWindow === window && !window.isDestroyed() && pipeOrigin === origin
+        && sameOrigin(window.webContents.getURL(), origin)
+        && current?.profile?.id === id && current.status === 'online') {
+        return;
+      }
+    }
+
+    await delayWithAbort(100, signal);
+    signal.throwIfAborted();
+  }
+}
+
+/**
+ * Ошибка сервера открывает обычный каркас с причиной, не затрагивая запуск и выход приложения.
+ * Срок относится только к прежнему local: готовое соединение и явные причины сохраняются.
+ */
+function reportLocalStartupFallback(kind: 'timeout' | 'failed', message?: string): void {
+  const state = client?.shell.state();
+  const detail = typeof state?.detail === 'object' ? state?.detail : null;
+
+  if (!state || !startupLocalId || state.profile?.id !== startupLocalId || state.profile.kind !== 'local'
+    || !['offline', 'connecting'].includes(state.status)
+    || ['server_start_failed', 'disconnected'].includes(detail?.code ?? '')) {
+    return;
+  }
+
+  const reason = (typeof state.detail === 'string' ? state.detail : detail?.message) || localStartupText();
+
+  client?.shell.report(startupLocalId, {
+    status: state.status,
+    detail: {
+      code: kind === 'timeout' ? 'server_start_timeout' : 'server_start_failed',
+      message: kind === 'timeout'
+        ? desktopText('desktop.serverStartTimeout', { detail: ` ${reason}` })
+        : message || reason,
+    },
+    serverApi: state.serverApi,
+  });
+}
+
+/**
  * Показ синхронно в одном обработчике: развернуть по настройке, показать главное,
  * уничтожить заставку и отдать фокус главному.
  */
@@ -862,6 +1128,34 @@ function revealMain(): void {
   }
 
   window.show();
+  markMainShown();
+
+  if (portableWindow) {
+    void offerPortableIntegration({
+      isPortable: true,
+      windowPath: portableWindow,
+      userData: app.getPath('userData'),
+      home: os.homedir(),
+      env: process.env,
+      shown: mainShown,
+      async ask() {
+        const result = await dialog.showMessageBox(window, {
+          type: 'question',
+          title: 'GrigDesk',
+          message: desktopText('desktop.portableMenuTitle'),
+          buttons: [desktopText('desktop.portableMenuAdd'), desktopText('desktop.portableMenuLater')],
+          defaultId: 0,
+          cancelId: 1,
+        });
+
+        return result.response === 0;
+      },
+      reportError() {
+        dialog.showErrorBox('GrigDesk', desktopText('desktop.portableMenuError'));
+      },
+    });
+  }
+
   destroySplash();
   window.focus();
 }
@@ -874,6 +1168,9 @@ const startup = createStartupController({
   prepare: (signal) => prepare(signal),
   connect: (signal) => connectMain(signal),
   waitFrame: (signal) => frames.wait(signal, FRAME_LIMIT_MS, setTimer),
+  localSelected: () => client?.shell.state().profile?.kind === 'local',
+  waitLocal: (signal) => waitLocalServer(signal),
+  localFallback: (kind, message) => reportLocalStartupFallback(kind, message),
   reveal: () => revealMain(),
   focusMain: () => focusMainWindow(),
   timeoutMessage: (phase) => timeoutMessage(phase),
@@ -891,6 +1188,7 @@ const quit = createQuitController({
     startup.cancel();
     surfaceWindows?.closeAll();
     lifetime.abort();
+    portable?.close();
     client?.shell.close();
   },
   closeSplash: () => destroySplash(),

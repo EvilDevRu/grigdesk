@@ -61,8 +61,13 @@ function describeTool(name: unknown, input: ToolInput = {}): Record<string, unkn
       return { title: i.pattern || '', sub: i.path || '' };
     case 'Grep':
       return { title: i.pattern || '', sub: [i.path, i.glob].filter(Boolean).join(' · ') };
+    case 'Agent':
     case 'Task':
-      return { title: i.description || i.subagent_type || 'подзадача', preview: cut(i.prompt, 400), sub: i.subagent_type || '' };
+      return {
+        title: i.description || i.subagent_type || 'подзадача',
+        preview: cut(i.prompt, 400),
+        sub: i.subagent_type || '',
+      };
     case 'WebFetch':
       return { title: i.url || '', preview: cut(i.prompt, 200) };
     case 'WebSearch':
@@ -138,7 +143,7 @@ export function toClaudeSteps(value: unknown): ChatStep[] {
   }
 
   if (event.type === 'assistant') {
-    // Шаги субагента несут id родительского вызова (`Task`): по нему лента рисует их
+    // Шаги субагента несут id родительского вызова (`Agent`/`Task`): по нему лента рисует их
     // вложенными. Раньше признак ехал булевым `sub`, а это же поле у инструментов — путь
     // файла: `Edit` в корне хода выглядел вложенным, а у вложенного Bash в теле стояло «true».
     const parentId = event.parent_tool_use_id ? String(event.parent_tool_use_id) : '';

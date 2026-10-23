@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
-import { lstat, open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { parseEnv, promisify } from 'node:util';
@@ -18,6 +18,9 @@ import { checkDataHome, processStarttime } from './dataHomeBoot.ts';
 
 export interface SelectSeaServerInput {
   root: string;
+  windowVersion?: 4;
+  expectedPrevious?: string | null;
+  signal?: AbortSignal;
   env?: NodeJS.ProcessEnv;
   home?: string;
   verify?: (root: string) => Promise<void>;
@@ -31,7 +34,7 @@ export interface SelectSeaServerInput {
  * Отсутствующий lock допустим, повреждённый или недоступный владелец закрывает выбор.
  * PID/starttime читаются через proc: ни нулевых, ни останавливающих сигналов нет.
  */
-async function assertDataIdle(home: string): Promise<void> {
+export async function assertDataIdle(home: string): Promise<void> {
   let text: string;
 
   try {
@@ -142,13 +145,16 @@ export async function assertServerBinaryFile(binary: string): Promise<void> {
  * Проверяет публичный контракт и полный verify выбранного ELF без запуска API.
  * PackageId закрепляется между двумя пробами, loader-переменные не наследуются.
  */
-async function verifyBinary(binary: string, parent: NodeJS.ProcessEnv): Promise<void> {
-  const info = await probeServerBinary(binary);
+async function verifyBinary(
+  binary: string, parent: NodeJS.ProcessEnv, signal?: AbortSignal,
+): Promise<void> {
+  const info = await probeServerBinary(binary, { signal });
 
   await verifyServerBinary(binary, {
     home: parent.GRIGDESK_HOME!,
     expectPackageId: info.packageId,
     timeoutMs: 120000,
+    signal,
   });
 }
 
@@ -200,11 +206,20 @@ export async function selectSeaServer(input: SelectSeaServerInput): Promise<stri
   const root = await realpath(input.root);
   const binary = (await stat(root)).isFile();
 
-  if (!['3', '4'].includes(supported.trim()) || binary && supported.trim() !== '4') {
+  const portable = input.windowVersion === 4 && binary;
+
+  if (!portable && (!['3', '4'].includes(supported.trim()) || binary && supported.trim() !== '4')) {
     throw new Error('Сначала установите обновлённое окно: grigdesk-ctl desktop install.');
   }
 
-  const previous = await readFile(runtimePath, 'utf8');
+  input.signal?.throwIfAborted();
+
+  if (portable) {
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+  }
+
+  const previous = Object.hasOwn(input, 'expectedPrevious')
+    ? input.expectedPrevious! : await readTextOrNull(runtimePath);
   const lock = await acquireSelectionLock(runtimePath);
   const temporary = `${runtimePath}.${randomUUID()}.tmp`;
   const temporaryBackup = `${temporary}.previous`;
@@ -212,19 +227,20 @@ export async function selectSeaServer(input: SelectSeaServerInput): Promise<stri
   try {
     await recoverSelectionLocked(runtimePath);
 
-    if (await readFile(runtimePath, 'utf8') !== previous) {
+    if (await readTextOrNull(runtimePath) !== previous) {
       throw new Error('Описание сервера изменилось во время проверки; повторите выбор.');
     }
 
-    const descriptor = parseRuntimeDescriptor(previous);
+    const descriptor = previous === null ? null : parseRuntimeDescriptor(previous);
 
-    if (!descriptor) {
+    if (!descriptor && !(portable && previous === null)) {
       throw new Error('Описание прежнего сервера повреждено; восстановите runtime.json перед выбором.');
     }
 
-    const selectionEnv = !Object.hasOwn(env, 'GRIGDESK_HOME') && descriptor.version !== 1
+    const selectionEnv = !Object.hasOwn(env, 'GRIGDESK_HOME') && descriptor && descriptor.version !== 1
       ? { ...env, GRIGDESK_HOME: descriptor.home } : env;
-    const previousHome = descriptor.version === 1 ? dataHome({ env: {}, home }) : descriptor.home;
+    const previousHome = descriptor && descriptor.version !== 1
+      ? descriptor.home : dataHome({ env: {}, home });
     const selectedHome = checkDataHome({
       codeRoot: binary ? path.dirname(path.dirname(root)) : root,
       home,
@@ -232,8 +248,9 @@ export async function selectSeaServer(input: SelectSeaServerInput): Promise<stri
     }, fs);
 
     await assertProfiles({
-      previousRoot: descriptor.version === 4
-        ? path.dirname(path.dirname(descriptor.binary)) : descriptor.root,
+      previousRoot: descriptor?.version === 4
+        ? path.dirname(path.dirname(descriptor.binary))
+        : descriptor?.root ?? path.dirname(path.dirname(root)),
       root: binary ? path.dirname(path.dirname(root)) : root,
       env: selectionEnv,
       home,
@@ -259,14 +276,16 @@ export async function selectSeaServer(input: SelectSeaServerInput): Promise<stri
       };
     } else if (binary) {
       await assertServerBinaryFile(root);
-      await (input.verifyBinary ?? verifyBinary)(root, { ...env, GRIGDESK_HOME: selectedHome });
+      await (input.verifyBinary ?? verifyBinary)(root, { ...env, GRIGDESK_HOME: selectedHome },
+        input.signal);
       next = {
         version: 4,
         kind: 'binary',
         binary: root,
         home: selectedHome,
-        cliPaths: descriptor.version === 4 ? descriptor.cliPaths
-          : descriptor.version <= 2 && 'node' in descriptor ? [path.dirname(descriptor.node)] : [],
+        cliPaths: descriptor?.version === 4 ? descriptor.cliPaths
+          : descriptor && descriptor.version <= 2 && 'node' in descriptor
+            ? [path.dirname(descriptor.node)] : [],
       };
     } else {
       await (input.verify ?? verifySeaRuntime)(root);
@@ -278,14 +297,21 @@ export async function selectSeaServer(input: SelectSeaServerInput): Promise<stri
       };
     }
 
-    if (JSON.stringify(descriptor) === JSON.stringify(next)) {
-      return runtimePath;
-    }
 
     await assertDataIdle(selectedHome);
 
     if (previousHome !== selectedHome) {
       await assertDataIdle(previousHome);
+    }
+
+    input.signal?.throwIfAborted();
+
+    if (await readTextOrNull(runtimePath) !== previous) {
+      throw new Error('Описание сервера изменилось во время проверки; повторите выбор.');
+    }
+
+    if (JSON.stringify(descriptor) === JSON.stringify(next)) {
+      return runtimePath;
     }
 
     await writePrivate(`${runtimePath}.transaction`, JSON.stringify({
@@ -297,8 +323,12 @@ export async function selectSeaServer(input: SelectSeaServerInput): Promise<stri
     }));
     await syncDirectory(directory);
     await writePrivate(temporary, JSON.stringify(next) + '\n');
-    await writePrivate(temporaryBackup, previous);
-    await rename(temporaryBackup, `${runtimePath}.previous`);
+
+    if (previous !== null) {
+      await writePrivate(temporaryBackup, previous);
+      await rename(temporaryBackup, `${runtimePath}.previous`);
+    }
+
     await input.afterRename?.('backup');
     await rename(temporary, runtimePath);
     await input.afterRename?.('primary');
@@ -375,7 +405,8 @@ async function recoverSelectionLocked(runtimePath: string): Promise<void> {
 
   if (!journal || typeof journal !== 'object' || Array.isArray(journal)
     || Object.keys(journal).sort().join(',') !== 'backup,format,next,previous,token'
-    || journal.format !== 1 || typeof journal.previous !== 'string' || typeof journal.next !== 'string'
+    || journal.format !== 1 || journal.previous !== null && typeof journal.previous !== 'string'
+    || typeof journal.next !== 'string'
     || journal.backup !== null && typeof journal.backup !== 'string'
     || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(journal.token)) {
     throw Object.assign(new Error('Некорректный журнал выбора сервера.'), {
@@ -383,7 +414,7 @@ async function recoverSelectionLocked(runtimePath: string): Promise<void> {
     });
   }
 
-  const primary = await readFile(runtimePath, 'utf8');
+  const primary = await readTextOrNull(runtimePath);
 
   if (primary !== journal.previous && primary !== journal.next) {
     throw Object.assign(new Error('Descriptor изменился вне транзакции выбора сервера.'), {
@@ -432,9 +463,10 @@ export async function recoverRuntimeSelection(runtimePath: string): Promise<void
  * Отказы не останавливают владельца данных и не изменяют настройки службы.
  */
 export async function main(argv = process.argv.slice(2)): Promise<number> {
+  const portable = argv.length === 2 && argv[0] === '--portable';
   const source = argv.length === 4 && argv[0] === '--source' && argv[2] === '--node';
 
-  if (!(argv.length === 1 && !argv[0]!.startsWith('-')) && !source) {
+  if (!(argv.length === 1 && !argv[0]!.startsWith('-')) && !source && !portable) {
     process.stderr.write('Использование: use-server <ELF|R> или use-source <root> --node <node>\n');
 
     return 2;
@@ -442,7 +474,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
   try {
     const selected = await selectSeaServer({
-      root: source ? argv[1]! : argv[0]!,
+      root: source || portable ? argv[1]! : argv[0]!,
+      windowVersion: portable ? 4 : undefined,
       node: source ? argv[3] : undefined,
     });
 

@@ -10,6 +10,7 @@ import {
   SETTINGS_PAGE_KEY,
   resolveFieldAddress,
   resolveSettingsPage,
+  normalizeSettingsPageId,
   equalFieldAddress,
   type SettingsFieldMetadata,
 } from '../features/settings/catalog.ts';
@@ -99,29 +100,37 @@ export const useSettingsStore = defineStore('settings', () => {
   });
 
   /**
-   * Страница выбирается только из чистого каталога, произвольного импорта нет.
-   * В storage уходит только ID страницы, без ввода, поисковой строки и адреса поля.
+   * Прежние ID раздела доступа и страницы установки ведут на актуальные страницы каталога.
+   * Хранилище и entity остаются прежними; открытие не запускает отдельный диалог.
+   * В дереве раскрыта только группа выбранной страницы, остальные сворачиваются.
    */
+  function normalizePageId(id: unknown): string | undefined {
+    return normalizeSettingsPageId(
+      id === 'connections.mobile' || id === 'access' ? 'connections.devices' : id);
+  }
+
   function selectPage(id: string, entity?: string, tab?: string): boolean {
-    if (!SETTINGS_PAGES.some((page) => page.id === id)) {
+    const selected = normalizePageId(id);
+
+    if (!selected) {
       navigationMessage.value = messageRef('settings.settingsSectionNoLongerAvailable');
 
       return false;
     }
 
-    pageId.value = id;
+    pageId.value = selected;
     entityId.value = entity;
     tabId.value = tab;
     navigationMessage.value = '';
 
-    const group = SETTINGS_PAGES.find((page) => page.id === id)?.groupId;
+    const group = SETTINGS_PAGES.find((page) => page.id === selected)?.groupId;
 
-    if (group && !expandedGroups.value.includes(group)) {
-      expandedGroups.value.push(group);
+    if (group) {
+      expandedGroups.value = [group];
     }
 
     try {
-      navigationStorage()?.setItem(SETTINGS_PAGE_KEY, id);
+      navigationStorage()?.setItem(SETTINGS_PAGE_KEY, selected);
     } catch {
       // Выбор страницы сохраняется в памяти до закрытия документа.
     }
@@ -147,8 +156,10 @@ export const useSettingsStore = defineStore('settings', () => {
     }
 
     if (isOpen.value) {
-      if (request.pageId && SETTINGS_PAGES.some((page) => page.id === request.pageId)) {
-        selectPage(request.pageId, request.entityId);
+      const selected = normalizePageId(request.pageId) ?? normalizePageId(request.queryPage);
+
+      if (selected) {
+        selectPage(selected, request.entityId);
       }
 
       return true;
@@ -246,12 +257,13 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
+   * Раскрытие группы сворачивает остальные: в дереве открыта одна группа.
    * Сохраняется только список известных ID групп, без состояния формы и поиска.
    * Ошибка storage оставляет раскрытие рабочим в текущем документе.
    */
   function setGroupExpanded(id: string, expanded: boolean): void {
     expandedGroups.value = expanded
-      ? [...new Set([...expandedGroups.value, id])]
+      ? [id]
       : expandedGroups.value.filter((group) => group !== id);
 
     try {

@@ -38,7 +38,7 @@ test('W5: опрос пересборки переживает временны�
   assert.equal(wrapper.find('[role="alert"]').exists(), false);
 
   unavailable = true;
-  await wrapper.findAll('button').find((button) => button.text() === 'Пересобрать web-бандл')
+  await wrapper.findAll('button').find((button) => button.text() === 'Пересобрать интерфейс')
     .trigger('click');
   await flushPromises();
   t.mock.timers.tick(12 * 60000);

@@ -8,7 +8,7 @@ import native from '../../fixtures/executor-settings/synthetic-catalog.json' wit
  * Подменяется только сеть: неизвестный адрес является ошибкой, операции видны в calls.
  */
 export async function settingsHarness(t, pageId, component, options = {}) {
-  const browser = await installUiBrowser(t);
+  const browser = options.browser || await installUiBrowser(t);
   const control = {
     data: structuredClone(data),
     calls: [],
@@ -88,6 +88,13 @@ export async function settingsHarness(t, pageId, component, options = {}) {
       value = { providers: providers.providers };
     } else if (path === '/api/plugins') {
       value = { plugins: plugins.list };
+    } else if (path === '/api/plugin-catalog' || path === '/api/plugin-catalog?refresh=1') {
+      value = {
+        state: 'unconfigured',
+        applicationVersion: '1.0.0',
+        fetchedAt: null,
+        catalog: null,
+      };
     } else if (path === '/api/plugin-installs/jobs/current') {
       value = { job: null, recoveryError: null };
     } else if (/\/api\/providers\/[^/]+\/settings\/catalog/.test(path)) {
@@ -117,7 +124,10 @@ export async function settingsHarness(t, pageId, component, options = {}) {
   const wrapper = mount(module[component], {
     attachTo: browser.document.querySelector('#mount'),
     props: { active: true },
-    global: { plugins: [pinia] },
+    global: {
+      plugins: [pinia],
+      stubs: options.stubs ?? {},
+    },
   });
 
   t.after(() => {

@@ -1,19 +1,23 @@
 <template>
   <div class="settings-interface">
     <SettingsScope :scope="t('settings.thisDevice2')" />
-    <div v-if="settings.pageId === 'interface.behavior'" class="settings-language">
-      <label>{{ t('core.language') }}</label>
-      <UiSelect
-        :aria-label="t('core.language')"
-        :model-value="uiLanguage"
-        :disabled="uiLanguageBusy"
-        @update:model-value="setUiLanguage(String($event))"
-      >
-        <option value="system">{{ t('core.system') }}</option>
-        <option v-for="locale in locales" :key="locale.id" :value="locale.id">{{ locale.name }}</option>
-      </UiSelect>
-      <p>{{ t('settings.languageHint') }}</p>
-      <p v-if="uiLanguageError" role="alert">{{ uiLanguageError }}</p>
+    <div
+      v-if="settings.pageId === 'interface.behavior'"
+      class="settings-language"
+      data-ui-settings-field
+      data-layout="row"
+    >
+      <UiField :label="t('core.language')" :hint="t('settings.languageHint')" :error="uiLanguageError">
+        <UiSelect
+          :aria-label="t('core.language')"
+          :model-value="uiLanguage"
+          :disabled="uiLanguageBusy"
+          @update:model-value="setUiLanguage(String($event))"
+        >
+          <option value="system">{{ t('core.system') }}</option>
+          <option v-for="locale in locales" :key="locale.id" :value="locale.id">{{ locale.name }}</option>
+        </UiSelect>
+      </UiField>
     </div>
     <p v-if="error" role="alert">{{ resolveUiText(error) }}</p>
     <SettingsField
@@ -35,7 +39,7 @@
         <p v-else-if="!device.wakeLockSupported">{{ t('settings.keepingTheScreenOnIsUnavailableIn') }}</p>
       </template>
       <template v-else-if="field.key === 'notificationTest'">
-        <UiButton
+        <UiButton data-context="workspace-form-wrap"
           :disabled="device.notificationBusy || !device.notificationSupported"
           @click="device.testNotification"
         >
@@ -48,43 +52,46 @@
         <p v-else-if="!device.notificationSupported">{{ t('settings.systemNotificationsAreUnavailableInThisBrowser') }}</p>
       </template>
       <template v-else-if="loaded('hotkeys')">
+        <p v-if="rows.some((row) => row.availability === 'pending')">
+          {{ t('settings.pluginStatusesNotReceivedYet') }}
+        </p>
         <div
           v-for="row in rows"
           :key="row.id"
           :data-hotkey-tool="row.id"
           class="settings-hotkey-row"
         >
-          <span>
-            {{ row.label }}
-            <small v-if="row.availability === 'disabled'">{{ t('settings.pluginDisabledShortcutInactive') }}</small>
-            <small v-else-if="row.availability === 'pending'">{{ t('settings.pluginStatusNotReceivedYet') }}</small>
-          </span>
-          <kbd class="settings-hotkey-combo" :data-recording="hotkeys.recording === row.id">
-            {{ hotkeys.recording === row.id ? t('settings.pressAShortcut') : formatCombo(row.combo) || t('settings.disabled2') }}
-          </kbd>
+          <span class="settings-hotkey-label">{{ row.label }}</span>
           <div class="settings-hotkey-actions">
             <UiButton
               data-record
-              :aria-label="t('settings.changeShortcut', { rowLabel: row.label })"
+              :aria-label="t('settings.changeShortcutWithCombo', {
+                combo: comboText(row),
+                rowLabel: row.label,
+              })"
+              :aria-pressed="hotkeys.recording === row.id"
               @click="record(row.id)"
             >
-              {{ hotkeys.recording === row.id ? t('settings.cancel2') : t('settings.change') }}
+              <kbd class="settings-hotkey-combo" :data-recording="hotkeys.recording === row.id">
+                {{ comboText(row) }}
+              </kbd>
             </UiButton>
-            <UiButton @click="toggle(row.id, Boolean(row.combo))">
+            <UiButton data-context="workspace-form-wrap" @click="toggle(row.id, Boolean(row.combo))">
               {{ row.combo ? t('settings.disable') : t('settings.restore') }}
             </UiButton>
           </div>
+          <small v-if="row.availability === 'disabled'">{{ t('settings.pluginDisabledShortcutInactive') }}</small>
         </div>
         <p v-if="mapIssue" role="alert">{{ mapIssue }}</p>
         <p>{{ t('settings.recordingUsesThePhysicalKeySystemAnd') }}</p>
-        <UiButton @click="settings.setField('hotkeys', 'overrides', {})">{{ t('settings.restoreDefaults') }}</UiButton>
+        <UiButton data-context="workspace-form-wrap" @click="settings.setField('hotkeys', 'overrides', {})">{{ t('settings.restoreDefaults') }}</UiButton>
       </template>
     </SettingsField>
   </div>
 </template>
 
 <script setup lang="ts">
-import { t, uiLocale, messageRef, resolveUiText, type UiText } from '../../../ui.ts';
+import { UiField, t, uiLocale, messageRef, resolveUiText, type UiText } from '../../../ui.ts';
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
@@ -146,6 +153,11 @@ let stopLayers: (() => void) | undefined;
 
 function loaded(id: string): boolean {
   return settings.snapshot.resources.some((resource) => resource.id === id && resource.loaded);
+}
+
+function comboText(row: { id: string; combo?: string }): string {
+  return hotkeys.recording === row.id ? t('settings.pressAShortcut')
+    : formatCombo(row.combo) || t('settings.disabled2');
 }
 
 function record(id: string): void {
@@ -301,47 +313,49 @@ onBeforeUnmount(() => {
   align-content: start;
   min-width: 0;
 }
+.settings-language {
+  container: settings-field / inline-size;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+/* Сочетание само является кнопкой изменения: в строке название и две кнопки. */
 .settings-hotkey-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'label actions' 'hint hint';
   align-items: center;
-  gap: 12px;
-  padding: 14px 0;
+  gap: 4px 12px;
+  padding: 8px 0;
   border-bottom: 1px solid var(--line);
 }
 .settings-hotkey-row:first-child {
   padding-top: 0;
 }
+.settings-hotkey-label {
+  display: flex;
+  align-items: center;
+  grid-area: label;
+  min-height: var(--control-height);
+  line-height: 18px;
+}
 .settings-hotkey-row small {
-  display: block;
-  margin-top: 4px;
+  grid-area: hint;
   color: var(--ink-low);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 16px;
 }
 .settings-hotkey-combo {
-  justify-self: end;
-  padding: 5px 8px;
-  border: 1px solid var(--line-2);
-  border-radius: 6px;
-  background: var(--ground);
-  color: var(--ink-mid);
-  font: 11px var(--mono);
+  color: var(--ink);
+  font: 12px var(--mono);
 }
 .settings-hotkey-combo[data-recording='true'] {
-  border-color: var(--accent);
   color: var(--accent);
 }
 .settings-hotkey-actions {
   display: flex;
   flex-wrap: wrap;
+  grid-area: actions;
+  justify-content: flex-end;
   gap: 8px;
-}
-@container settings-field (max-width: 620px) {
-  .settings-hotkey-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .settings-hotkey-actions {
-    grid-column: 1 / -1;
-  }
 }
 </style>

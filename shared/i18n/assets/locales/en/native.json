@@ -1,5 +1,5 @@
 {
-  "offline": "The machine is unavailable. Check the connection and GRIGDESK_CLIENT_LISTEN on the machine.",
+  "offline": "Server unavailable. Check connectivity and connection routes in Server access.",
   "unlock": "Unlock",
   "identityMismatch": "This is a different server.",
   "invalid_pairing": "The pairing string is damaged. Get a new code on the machine.",
@@ -38,5 +38,11 @@
   "noFreePort": "No free port is available for the machine.",
   "invalidFileName": "Invalid file name.",
   "invalidMachineFields": "Invalid machine fields.",
-  "connectionStateFailure": "Could not update the connection state."
+  "connectionStateFailure": "Could not update the connection state.",
+  "relay_upgrade_required": "Update the server relay for the current app.",
+  "relay_pin_mismatch": "The relay certificate did not match: the network is intercepting the connection or the relay was recreated. At home the phone connects directly; otherwise get a new QR code.",
+  "relay_unauthorized": "The relay rejected the phone key. Get a new QR code in Server access.",
+  "unpaired": "Pair this device again. Get a new QR in Server access.",
+  "device_scope_forbidden": "Revoke the old pairing and connect the current app with a new QR.",
+  "device_unknown": "Device not found. Get a new QR code and pair it again."
 }

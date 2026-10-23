@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -8,6 +8,36 @@ import test from 'node:test';
 import { HELP_TEXT } from '../../cli/args.ts';
 import { parseLockTarget, readWindow, windowAppPath, windowDataDir } from '../../cli/window.ts';
 import { completed, createSandbox } from './helpers/sandbox.mts';
+
+test('PB-CTL-OPEN: portable open без descriptor не вызывает службу и не навязывает origin', async (t) => {
+  const box = await createSandbox(t);
+
+  box.installWindow();
+  renameSync(path.join(box.root, 'bin/grigdesk-app'), path.join(box.root, 'GrigDesk'));
+  mkdirSync(path.join(box.root, 'shared/node'), { recursive: true });
+
+  // Копируется общая Node-область: будущий layout helper доступен и в синтетической копии CLI.
+  cpSync(new URL('../../shared/node/', import.meta.url), path.join(box.root, 'shared/node'), {
+    recursive: true,
+  });
+  writeFileSync(path.join(box.root, 'bin/bundle.json'), JSON.stringify({
+    format: 1,
+    kind: 'portable',
+    version: '0.1.0',
+    commit: 'a'.repeat(40),
+    dirty: false,
+    files: [],
+  }));
+
+  const result = await box.run(['open']);
+
+  assert.equal(result.code, 0, result.stderr);
+  await box.waitFor(() => box.calls().some((call) => call.startsWith('app-argc ')));
+  assert.ok(box.calls().includes('app-argc 0'), box.calls().join('\n'));
+  assert.ok(!box.calls().some((call) => call.startsWith('systemctl ')), box.calls().join('\n'));
+  assert.deepEqual(box.requests(), []);
+  assert.equal(await readWindow(box.root, box.environment), 'closed');
+});
 
 test('CO-1 пути установки и профиля', () => {
   assert.equal(windowAppPath('/opt/копия grigdesk'), '/opt/копия grigdesk/bin/grigdesk-app');

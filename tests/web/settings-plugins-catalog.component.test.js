@@ -50,6 +50,6 @@ test('Список плагинов: категории, фильтры, draft e
   assert.equal(h.wrapper.findAll('[role="switch"]').every((item) => item.element.disabled), true);
   installer.recoveryError = null;
   await h.flushPromises();
-  await h.wrapper.findAll('button').find((item) => item.text() === 'Установить из git').trigger('click');
-  assert.equal(h.settings.pageId, 'plugins.install');
+  assert.equal(h.wrapper.findAll('button').some((item) => item.text() === 'Установить из git'), false);
+  assert.equal(h.settings.pageId, 'plugins.installed');
 });

@@ -48,6 +48,19 @@ public final class ClientFailure {
 
   public static String message(String code) {
     switch (code) {
+      case "unpaired":
+        return "Нужна повторная привязка устройства. Получите новый QR в разделе «Доступ к серверу».";
+      case "device_unknown":
+        return "Устройство не найдено. Получите новый QR и привяжите его заново.";
+      case "device_scope_forbidden":
+        return "Отзовите старую привязку и подключите актуальное приложение новым QR.";
+      case "relay_upgrade_required":
+        return "Обновите ретранслятор сервера для нового приложения.";
+      case "relay_pin_mismatch":
+        return "Сертификат ретранслятора не совпал: сеть подменяет соединение или ретранслятор "
+          + "пересоздан. Дома телефон подключится напрямую; иначе получите новый QR.";
+      case "relay_unauthorized":
+        return "Ретранслятор отклонил ключ телефона. Получите новый QR в разделе «Доступ к серверу».";
       case "server_upgrade_required":
         return "Обновите GrigDesk на машине.";
       case "client_upgrade_required":
@@ -67,7 +80,7 @@ public final class ClientFailure {
       case "device_revoked":
         return "Доступ этого устройства отозван. Привяжите его заново.";
       default:
-        return "Машина недоступна. Проверьте связь и включён ли GRIGDESK_CLIENT_LISTEN на машине.";
+        return "Сервер недоступен. Проверьте связь и способы подключения в разделе «Доступ к серверу».";
     }
   }
 }

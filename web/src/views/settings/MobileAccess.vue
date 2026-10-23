@@ -1,7 +1,6 @@
 <template>
   <section
     class="mobile-access"
-    data-ui-touch
     aria-labelledby="mobile-access-title"
     :aria-busy="loading"
   >
@@ -23,7 +22,7 @@
           <path d="M10 5h4M10 19h4" />
         </svg>
       </span>
-      <div>
+      <div class="ui-visually-hidden">
         <h3 id="mobile-access-title">{{ t('settings.phoneApplication') }}</h3>
         <p>{{ t('settings.connectYourPhoneWithAQRCode') }}</p>
       </div>
@@ -33,7 +32,7 @@
     </header>
     <UiInlineMessage v-if="error || loadError" tone="danger">
       {{ resolveUiText(error || loadError) }}
-      <UiButton
+      <UiButton data-context="workspace-form-wrap"
         v-if="loadError"
         variant="text"
         :disabled="loading"
@@ -51,7 +50,7 @@
           <h4 id="mobile-relays-title">{{ t('settings.connectionThroughARelay') }}</h4>
           <p>{{ t('settings.chooseTheAddressYourPhoneWillUse') }}</p>
         </div>
-        <UiButton
+        <UiButton data-context="workspace-form-wrap"
           data-role="settings-action"
           data-testid="mobile-open-add"
           :disabled="busy || !status"
@@ -77,10 +76,12 @@
           </div>
         </div>
       </div>
-      <div v-else-if="!status.relays.length" class="mobile-empty">
-        <b>{{ t('settings.addARelayFirst') }}</b>
-        <p>{{ t('settings.enterItsAddressDownloadTheSettingsAnd') }}</p>
-      </div>
+      <SettingsEmpty
+        v-else-if="!status.relays.length"
+        class="mobile-empty"
+        :heading="t('settings.addARelayFirst')"
+        :text="t('settings.enterItsAddressDownloadTheSettingsAnd')"
+      />
       <div v-else class="mobile-relays">
         <article
           v-for="relay in status.relays"
@@ -98,7 +99,7 @@
               </div>
               <span class="mobile-address">{{ relay.host }}:{{ relay.port }}</span>
             </div>
-            <UiButton
+            <UiButton data-context="workspace-form-wrap"
               class="mobile-connect"
               data-role="settings-action"
               data-testid="mobile-phone-qr"
@@ -107,7 +108,7 @@
               :disabled="busy || !status.server.up"
               @click="showQr(relay, true)"
             >
-              {{ t('settings.connectPhone') }}
+              {{ t('settings.phoneConnectLegacy') }}
             </UiButton>
             <UiIconButton
               v-tooltip="t('settings.relaySettings')"
@@ -150,7 +151,7 @@
                 <b>{{ t('settings.phoneAlreadyPaired') }}</b>
                 <p>{{ t('settings.addThisAddressInTheApplicationAs') }}</p>
               </div>
-              <UiButton
+              <UiButton data-context="workspace-form-wrap"
                 data-role="settings-action"
                 :disabled="busy"
                 @click="showQr(relay, false)"
@@ -163,7 +164,7 @@
                 <b>{{ t('settings.relayInstallation') }}</b>
                 <p>{{ t('settings.downloadTheSettingsFileToStartOn') }}</p>
               </div>
-              <UiButton
+              <UiButton data-context="workspace-form-wrap"
                 data-role="settings-action"
                 :disabled="busy"
                 @click="downloadEnv(relay.id)"
@@ -181,7 +182,7 @@
               <p>{{ t('settings.whenTheStatusBecomesOnlineClickConnect') }}</p>
             </div>
             <div class="mobile-relay-remove">
-              <UiButton
+              <UiButton data-context="workspace-form-wrap"
                 data-role="settings-action"
                 variant="ghost"
                 tone="danger"
@@ -195,7 +196,7 @@
         </article>
       </div>
     </section>
-    <section class="mobile-card" aria-labelledby="mobile-devices-title">
+    <section v-if="!hideDevices" class="mobile-card" aria-labelledby="mobile-devices-title">
       <header class="mobile-card-head">
         <div>
           <h4 id="mobile-devices-title">
@@ -224,10 +225,12 @@
             <span class="mobile-skeleton-button" />
           </div>
         </div>
-        <div v-else-if="!activeDevices.length" class="mobile-empty">
-          <b>{{ t('settings.noPhonesPairedYet') }}</b>
-          <p>{{ t('settings.clickConnectPhoneForTheRelayAnd') }}</p>
-        </div>
+        <SettingsEmpty
+          v-else-if="!activeDevices.length"
+          class="mobile-empty"
+          :heading="t('settings.noPhonesPairedYet')"
+          :text="t('settings.clickConnectPhoneForTheRelayAnd')"
+        />
         <div v-else class="mobile-devices">
           <div
             v-for="device in activeDevices"
@@ -238,7 +241,7 @@
               <b>{{ device.name }}</b>
               <span class="mobile-device-status">{{ t('settings.accessAllowed') }}</span>
             </div>
-            <UiButton
+            <UiButton data-context="workspace-form-wrap"
               data-role="settings-action"
               variant="ghost"
               tone="danger"
@@ -339,14 +342,14 @@
         </div>
       </form>
       <template #footer>
-        <UiButton
+        <UiButton data-context="workspace-form-wrap"
           data-role="settings-action"
           :disabled="busy"
           @click="addOpen = false"
         >
           {{ t('settings.cancel') }}
         </UiButton>
-        <UiButton
+        <UiButton data-context="workspace-form-wrap"
           type="submit"
           form="mobile-relay-form"
           data-role="settings-action"
@@ -391,6 +394,7 @@ import {
 import { api } from '../../shared/apiClient.ts';
 import { useSse } from '../../composables/useSse.ts';
 import MobilePairingDialog from './MobilePairingDialog.vue';
+import SettingsEmpty from './SettingsEmpty.vue';
 
 type Relay = {
   id: string;
@@ -427,6 +431,9 @@ const form = ref({
 const error = ref<UiText>('');
 const loadError = ref<UiText>('');
 const busy = ref(false);
+
+defineProps<{ hideDevices?: boolean }>();
+
 const created = ref('');
 const addOpen = ref(false);
 const expandedRelay = ref('');
@@ -627,12 +634,15 @@ onUnmounted(() => {
 .mobile-access {
   container-type: inline-size;
   display: grid;
-  gap: 1.25rem;
+  gap: 16px;
   min-width: 0;
 }
+/* Заголовок раздела дублирует заголовок страницы и скрыт визуально. В шапке остаётся
+   заранее отведённое место индикатора загрузки справа: обновление не сдвигает страницу. */
 .mobile-heading {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 1rem;
 }
 .mobile-heading > div {
@@ -647,24 +657,17 @@ onUnmounted(() => {
 }
 .mobile-heading h3 {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 14px;
 }
 .mobile-heading p,
 .mobile-card p {
   margin: 0.35rem 0 0;
   color: var(--ink-mid);
-  font-size: 0.875rem;
+  font-size: 12px;
   line-height: 1.55;
 }
 .mobile-icon {
-  display: grid;
-  place-items: center;
-  flex: 0 0 3rem;
-  height: 3rem;
-  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
-  border-radius: var(--radius);
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  display: none;
 }
 .mobile-icon svg {
   width: 1.5rem;
@@ -672,10 +675,7 @@ onUnmounted(() => {
 }
 .mobile-card {
   min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  overflow: hidden;
+  border-top: 1px solid var(--line);
 }
 .mobile-card-head {
   display: flex;
@@ -683,7 +683,7 @@ onUnmounted(() => {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 1rem;
-  padding: 1.25rem;
+  padding: 12px 0;
 }
 .mobile-card-head > div {
   flex: 1 1 17rem;
@@ -694,7 +694,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
   margin: 0;
-  font-size: 0.9375rem;
+  font-size: 13px;
 }
 .mobile-count {
   padding: 0.125rem 0.45rem;
@@ -707,13 +707,13 @@ onUnmounted(() => {
 .mobile-relays {
   display: grid;
   gap: 0.75rem;
-  padding: 0 1.25rem 1.25rem;
+  padding: 0 0 12px;
 }
 .mobile-relay {
   min-width: 0;
-  padding: 1rem;
+  padding: 12px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--ground);
 }
 .mobile-relay-summary {
@@ -780,7 +780,7 @@ onUnmounted(() => {
 .mobile-address {
   color: var(--ink-mid);
   font-family: var(--mono);
-  font-size: 0.8125rem;
+  font-size: 12px;
 }
 .mobile-card .mobile-connection-note {
   margin: 0.75rem 0 0;
@@ -793,16 +793,16 @@ onUnmounted(() => {
   margin-top: 0.75rem;
   padding-top: 1rem;
   border-top: 1px solid var(--line);
-  font-size: 0.875rem;
+  font-size: 12px;
 }
 .mobile-relay-remove {
   border-top: 1px solid var(--line);
   padding-top: 0.5rem;
 }
 .mobile-install {
-  padding: 1rem;
+  padding: 12px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--surface);
 }
 .mobile-install pre {
@@ -812,10 +812,10 @@ onUnmounted(() => {
   line-height: 1.6;
 }
 .mobile-devices {
-  padding: 0 1.25rem;
+  padding: 0;
 }
 .mobile-device-list {
-  min-height: 10rem;
+  min-height: 0;
 }
 .mobile-device {
   min-width: 0;
@@ -825,16 +825,16 @@ onUnmounted(() => {
 }
 .mobile-device-status {
   color: var(--ink-mid);
-  font-size: 0.8125rem;
+  font-size: 12px;
 }
 .mobile-history {
-  padding: 0.5rem 1.25rem;
+  padding: 8px 0;
   border-top: 1px solid var(--line);
 }
 .mobile-history .mobile-devices {
   padding: 0;
   color: var(--ink-mid);
-  font-size: 0.875rem;
+  font-size: 12px;
 }
 .mobile-history-empty,
 .mobile-history-placeholder {
@@ -884,31 +884,14 @@ onUnmounted(() => {
     animation: none;
   }
 }
-.mobile-empty {
-  display: grid;
-  justify-items: start;
-  gap: 0.5rem;
-  padding: 1.25rem;
-  color: var(--ink-mid);
-  font-size: 0.875rem;
-}
-.mobile-card > .mobile-empty,
-.mobile-device-list > .mobile-empty {
-  margin: 0 1.25rem 1.25rem;
-  border: 1px dashed var(--line-2);
-  border-radius: var(--radius);
-}
-.mobile-empty b {
-  color: var(--ink);
-}
 .mobile-form {
   display: grid;
-  gap: 1.25rem;
+  gap: 16px;
 }
 .mobile-form-hint {
   margin: 0;
   color: var(--ink-mid);
-  font-size: 0.875rem;
+  font-size: 12px;
   line-height: 1.5;
 }
 .mobile-form-address {
@@ -917,12 +900,11 @@ onUnmounted(() => {
   gap: 0.75rem;
 }
 @container (max-width: 480px) {
-  .mobile-card-head,
   .mobile-relay {
-    padding: 1rem;
+    padding: 12px;
   }
   .mobile-relays {
-    padding: 0 1rem 1rem;
+    padding: 0 0 12px;
   }
   .mobile-relay-summary {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -958,8 +940,7 @@ onUnmounted(() => {
   .mobile-heading { gap: 8px; }
   .mobile-icon { display: none; }
   .mobile-heading p { margin-bottom: 0; }
-  .mobile-card-head { padding: 12px; }
-  .mobile-relays { padding: 0 12px 12px; }
-  .mobile-empty { padding: 12px; }
+  .mobile-card-head { padding: 12px 0; }
+  .mobile-relays { padding: 0 0 12px; }
 }
 </style>

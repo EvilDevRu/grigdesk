@@ -8,6 +8,54 @@ import org.junit.Test;
 
 public class ProfileStoreTest {
   /**
+   * Старый single-address профиль читается без записи и соседствует с relay-only.
+   * Пустой address разрешён лишь при сохранённом relay; id и порт не перенумеровываются.
+   */
+  @Test
+  public void legacyReadAndRelayOnlyRoundTrip() throws Exception {
+    Path root = Files.createTempDirectory("phone-profile-roundtrip-");
+    Path file = root.resolve("profiles.json");
+
+    try {
+      ProfileStore store = new ProfileStore(file.toFile(), port -> true);
+      JSONObject legacy = store.add("Старый", "https://old.example:443", "1".repeat(64));
+      byte[] original = Files.readAllBytes(file);
+      ProfileStore read = new ProfileStore(file.toFile(), port -> true);
+
+      assertEquals(legacy.getString("id"), read.profiles.get(0).getString("id"));
+      assertArrayEquals(original, Files.readAllBytes(file));
+
+      JSONObject data = new JSONObject(new String(original, java.nio.charset.StandardCharsets.UTF_8));
+      JSONObject relayOnly = new JSONObject().put("id", "relay-only").put("name", "Вне дома")
+        .put("kind", "remote").put("address", "").put("fp", "2".repeat(64)).put("port", 47102)
+        .put("createdAt", 1).put("direct", new org.json.JSONArray())
+        .put("relay", new JSONObject().put("id", "r12345678").put("name", "Relay")
+          .put("host", "relay.example").put("port", 443).put("fp", "3".repeat(64))
+          .put("token", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8").put("protocol", 2));
+
+      data.getJSONArray("profiles").put(relayOnly);
+      Files.write(file, data.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+      ProfileStore restored = new ProfileStore(file.toFile(), port -> true);
+
+      assertEquals(2, restored.profiles.size());
+      assertEquals("", restored.get("relay-only").getString("address"));
+      restored.select("relay-only");
+
+      ProfileStore again = new ProfileStore(file.toFile(), port -> true);
+
+      assertEquals("relay-only", again.selected);
+      assertEquals(47102, again.get("relay-only").getInt("port"));
+      assertEquals(legacy.getString("id"), again.profiles.get(0).getString("id"));
+      assertEquals("relay.example", again.get("relay-only").getJSONObject("relay").getString("host"));
+      assertFalse(new ShellState(again, 0, 1).snapshot().toString().contains("relay.example"));
+    } finally {
+      Files.deleteIfExists(file);
+      Files.deleteIfExists(root);
+    }
+  }
+
+  /**
    * Пустое хранилище и повтор pin сохраняют устойчивую идентичность профилей.
    * Занятый порт заменяется с записью, остальные origin не меняются.
    */

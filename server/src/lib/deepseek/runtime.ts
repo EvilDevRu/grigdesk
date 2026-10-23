@@ -36,7 +36,11 @@ import {
   startDeepSeekAcpSettings,
 } from './nativeSettingsRpc.ts';
 import { applyDeepSeekNativeSettings, verifyDeepSeekNativeSettings } from '../executorSettings/deepseek.ts';
-import { spawnDeepSeekBinary, type OwnedDeepSeekBinary } from './binaryProcess.ts';
+import {
+  combineDeepSeekCleanupFailure,
+  spawnDeepSeekBinary,
+  type OwnedDeepSeekBinary,
+} from './binaryProcess.ts';
 import { adoptLegacyChatHome, installedLegacyBuildId } from './legacyCutover.ts';
 
 interface DeepSeekConfig extends DeepSeekRuntimeConfig {
@@ -498,9 +502,19 @@ export async function runDeepSeekTurn({
 
       return (deps.spawn || spawn)(runtime.command, args, spawnOptions);
     } catch (error) {
-      await preparation?.stop();
+      const pending = preparation;
+
       preparation = undefined;
-      await fs.rm(launch.launchDir, { recursive: true, force: true });
+
+      try {
+        await pending?.stop();
+      } catch (cleanup) {
+        throw combineDeepSeekCleanupFailure(error, cleanup);
+      }
+
+      if ((error as { code?: unknown })?.code !== 'deepseek_binary_cleanup') {
+        await fs.rm(launch.launchDir, { recursive: true, force: true });
+      }
 
       throw error;
     } finally {
@@ -750,12 +764,19 @@ export async function runDeepSeekTurn({
     });
     retryState = 'post_prompt';
     let result: { stopReason?: unknown } | null;
+
     try {
       result = await prompt as { stopReason?: unknown } | null;
     } catch (error) {
       const cut = deliveryFailureText(error);
       if (cut === null) throw error;
-      await shutdown();
+
+      try {
+        await shutdown();
+      } catch (cleanup) {
+        throw combineDeepSeekCleanupFailure(error, cleanup);
+      }
+
       return {
         reply: cut,
         deliveryFailure: true,
@@ -790,7 +811,7 @@ export async function runDeepSeekTurn({
     try {
       await shutdown();
     } catch (cleanupError) {
-      failure = cleanupError;
+      failure = combineDeepSeekCleanupFailure(error, cleanupError);
     }
 
     log?.error?.({

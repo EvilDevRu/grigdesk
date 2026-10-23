@@ -13,7 +13,7 @@ import local.grigdesk.client.pipe.ClientPipe;
 import local.grigdesk.client.pipe.HttpHead;
 import local.grigdesk.client.pipe.PipeResponse;
 import local.grigdesk.client.pipe.StaticAssets;
-import local.grigdesk.client.pipe.Upstream;
+import local.grigdesk.client.pipe.PipeTransport;
 import local.grigdesk.client.pipe.VersionGate;
 import org.json.JSONObject;
 
@@ -21,7 +21,7 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   public interface Transport {
     void probe() throws Exception;
     void close();
-    Upstream pipe();
+    PipeTransport pipe();
   }
 
   public interface Report {
@@ -94,7 +94,7 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
     state = new ShellState(store, major, minor, locale);
   }
 
-  public Upstream upstream(String id) {
+  public PipeTransport upstream(String id) {
     Transport transport = transports.get(id);
 
     return transport == null ? null : transport.pipe();
@@ -385,7 +385,8 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
           }
         }
 
-        ProfileStore.validate(name, address, profile.getString("fp"), locale);
+        ProfileStore.validate(name, address.isEmpty() && profile.has("relay")
+          ? "https://profile.invalid" : address, profile.getString("fp"), locale);
         boolean changed = !address.equals(profile.getString("address"));
 
         if (changed) {

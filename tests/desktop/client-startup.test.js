@@ -13,7 +13,11 @@ import { temporary } from '../relay/helpers.js';
  */
 async function startupFixture(t, { available = true, profiles = [], selected = null } = {}) {
   const root = await temporary(t);
-  const server = createServer((_request, response) => response.writeHead(503).end());
+  let requests = 0;
+  const server = createServer((_request, response) => {
+    requests += 1;
+    response.writeHead(503).end();
+  });
 
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
@@ -60,6 +64,7 @@ async function startupFixture(t, { available = true, profiles = [], selected = n
     saved,
     prepared,
     identityReads: () => identityReads,
+    requests: () => requests,
   };
 }
 
@@ -154,4 +159,15 @@ test('SB24-main-inspect: загрузка адреса для UI не вызыв
   assert.equal(calls, 0);
   assert.equal(loaded.inspection.origin, 'http://127.0.0.1:9311');
   assert.equal('runtime' in loaded, false);
+});
+
+
+test('старт: живой порт без местной установки не опрашивается', async (t) => {
+  const fixture = await startupFixture(t, { available: false });
+
+  await fixture.client.start();
+  assert.equal(fixture.client.shell.state().profile, null);
+  assert.equal(fixture.settings.selected, null);
+  assert.deepEqual(fixture.prepared, []);
+  assert.equal(fixture.requests(), 0, 'Живой порт не служит признаком установки.');
 });

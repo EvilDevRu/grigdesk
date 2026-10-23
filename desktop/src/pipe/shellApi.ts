@@ -22,6 +22,7 @@ export interface NativeWindows {
 }
 
 interface ShellOptions {
+  beforeSelect?(profile: DesktopProfile): Promise<void>;
   nativeWindows?: NativeWindows;
   profiles: Profiles;
   systemLanguage?: string;
@@ -81,6 +82,7 @@ export function createShellApi(options: ShellOptions) {
   let rev = 0;
   let localeQueue = Promise.resolve();
   let closed = false;
+  let selectionQueue = Promise.resolve();
 
   const changed = () => {
     rev += 1;
@@ -152,7 +154,11 @@ export function createShellApi(options: ShellOptions) {
     const current = states.get(id);
 
     if (current) {
-      states.set(id, { ...current, detail: { code: 'retry_wait', retryAt: Date.now() + duration } });
+      const previous = current.detail;
+      const detail = previous && ['server_start_failed', 'server_start_timeout'].includes(previous.code)
+        ? previous : { code: 'retry_wait' };
+
+      states.set(id, { ...current, detail: { ...detail, retryAt: Date.now() + duration } });
       changed();
     }
   };
@@ -162,6 +168,10 @@ export function createShellApi(options: ShellOptions) {
    * Любая терминальная причина отменяет ранее назначенный offline-повтор.
    */
   const report = (id: string, value: UpstreamState) => {
+    if (value.detail?.code === 'server_start_timeout' && states.get(id)?.status === 'online') {
+      return;
+    }
+
     if (JSON.stringify(states.get(id)) !== JSON.stringify(value)) {
       states.set(id, value);
       changed();
@@ -257,11 +267,15 @@ export function createShellApi(options: ShellOptions) {
    * Выбор сохраняется перед навигацией на отдельный origin профиля.
    * Прежнее подключение закрывается, новая попытка не задерживает загрузку UI.
    */
-  const select = async (id: string | null) => {
+  const selectNow = async (id: string | null) => {
     const previous = options.profiles.settings.selected;
 
     if (previous === id) {
       return;
+    }
+
+    if (id) {
+      await options.beforeSelect?.(options.profiles.get(id));
     }
 
     if (previous && previous !== id) {
@@ -274,6 +288,14 @@ export function createShellApi(options: ShellOptions) {
     if (id) {
       void connect(id);
     }
+  };
+
+  const select = (id: string | null) => {
+    const operation = selectionQueue.then(() => selectNow(id));
+
+    selectionQueue = operation.catch(() => {});
+
+    return operation;
   };
 
   /**

@@ -215,7 +215,7 @@ test('Подключения и система в общей сессии', asyn
     }
   });
 
-  await t.test('CN03/04: мобильная страница сохраняет touch-размеры и справку локального входа', async () => {
+  await t.test('CN03/04: размеры окна и справка мобильного доступа', async () => {
     settings.selectPage('connections.mobile');
 
     const mobile = mount(module.ConnectionsPage, { props: { active: true }, global: { plugins: [pinia] } });
@@ -223,7 +223,9 @@ test('Подключения и система в общей сессии', asyn
     try {
       await flushPromises();
       assertSettingsFields(mobile.element, module.SETTINGS_FIELDS, 'connections.mobile');
-      assert.equal(mobile.find('[data-ui-touch]').exists(), true);
+      assert.equal(mobile.find('.mobile-access').attributes('data-ui-touch'), undefined);
+      assert.equal(mobile.get('[data-testid=mobile-open-add]').attributes('data-context'),
+        'workspace-form-wrap');
       await mobile.findAll('button').find((entry) => entry.text().includes('Вход на этом компьютере'))
         .trigger('click');
       assert.match(mobile.text(), /Автоматический вход по локальному ключу/);

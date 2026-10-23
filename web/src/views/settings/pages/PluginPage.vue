@@ -18,9 +18,14 @@
         <option value="enabled">{{ t('settings.enabled') }}</option>
         <option value="disabled">{{ t('settings.disabled3') }}</option>
       </UiSelect>
-      <UiCheckbox v-model="filters.configurable">{{ t('settings.withSettings') }}</UiCheckbox>
-      <UiCheckbox v-model="filters.custom">{{ t('settings.customOnly') }}</UiCheckbox>
-      <UiButton @click="clearFilters">{{ t('settings.resetFilters') }}</UiButton>
+      <div class="settings-plugin-filter-options">
+        <UiCheckbox v-model="filters.configurable">{{ t('settings.withSettings') }}</UiCheckbox>
+        <UiCheckbox v-model="filters.custom">{{ t('settings.customOnly') }}</UiCheckbox>
+        <UiButton v-if="filters.query || filters.state !== 'all' || filters.configurable || filters.custom"
+                  variant="text" data-context="workspace-form-wrap" @click="clearFilters">
+          {{ t('settings.resetFilters') }}
+        </UiButton>
+      </div>
     </div>
     <div class="settings-plugin-workspace">
       <aside class="settings-plugin-sidebar" :aria-label="t('settings.pluginSelection')">
@@ -38,22 +43,23 @@
           </UiSelect>
         </div>
         <div class="settings-plugin-catalog">
-          <SettingsSection
+          <section class="settings-plugin-group"
             v-for="group in groups"
             :key="group.id"
             :data-plugin-category="group.id"
-            :heading="group.label"
           >
+            <h4>{{ group.label }}</h4>
             <div class="settings-plugin-list">
               <div v-for="entry in group.plugins" :key="entry.id" class="settings-plugin-entry">
                 <UiButton
                   :data-select-plugin="entry.id"
                   :pressed="plugin?.id === entry.id"
-                  data-ui-settings-catalog
+                  data-ui-settings-catalog data-context="plugin-entry"
                   @click="selectPlugin(entry.id)"
                 >
                   <span class="ui-settings-catalog-copy">
                     <span class="ui-settings-catalog-title">{{ entry.name }}</span>
+                    <small v-if="!entry.system">{{ provenance(entry) }}</small>
                     <span class="ui-settings-catalog-status" :data-available="draftEnabled(entry.id)">
                       {{ draftEnabled(entry.id) ? t('settings.enabled2') : t('settings.disabled') }}
                       <span v-if="pluginInstallBadge(entry)">
@@ -62,15 +68,9 @@
                     </span>
                   </span>
                 </UiButton>
-                <UiSwitch
-                  :model-value="draftEnabled(entry.id)"
-                  :disabled="recoveryBlocked"
-                  :aria-label="t('settings.enable', { entryName: entry.name })"
-                  @update:model-value="toggleEntry(entry, $event)"
-                />
               </div>
             </div>
-          </SettingsSection>
+          </section>
         </div>
         <p v-if="!groups.length">{{ t('settings.noPluginsFoundChangeTheQueryOr') }}</p>
         <p v-if="installer.recoveryError" role="alert">{{ installer.recoveryError.message }}</p>
@@ -79,17 +79,7 @@
         </p>
         <div class="settings-plugin-actions">
           <UiButton
-            variant="ghost"
-            tone="accent"
-            data-ui-settings-sidebar-action
-            :disabled="recoveryBlocked"
-            @click="settings.selectPage('plugins.install')"
-          >
-            {{ t('settings.installFromGit') }}
-          </UiButton>
-          <UiButton
             v-if="list.some((entry) => entry.install)"
-            variant="ghost"
             data-ui-settings-sidebar-action
             :disabled="recoveryBlocked || installer.checking"
             @click="installer.checkUpdates()"
@@ -105,6 +95,7 @@
             <h4>{{ plugin.name }}</h4>
             <span>{{ plugin.version }}</span>
             <p>{{ plugin.description }}</p>
+            <p v-if="!plugin.system" :data-installed-source="plugin.id">{{ provenance(plugin) }}</p>
           </header>
           <PluginSourcePanel
             v-if="!plugin.system"
@@ -138,10 +129,9 @@
           >
             <UiCheckbox
               :model-value="value('placements', slot.slot) === true"
+              :aria-label="slot.label"
               @update:model-value="set('placements', slot.slot, $event === true)"
-            >
-              {{ slot.label }} · {{ slot.slot }}
-            </UiCheckbox>
+            />
           </SettingsField>
           <h4 v-if="plugin.settings.length">{{ t('settings.parameters') }}</h4>
           <SettingsField
@@ -153,10 +143,9 @@
               :disabled="fieldUnavailable(field.key)"
               v-if="field.type === 'checkbox'"
               :model-value="value('values', field.key) === true"
+              :aria-label="field.label"
               @update:model-value="set('values', field.key, $event === true)"
-            >
-              {{ field.label }}
-            </UiCheckbox>
+            />
             <template v-else-if="field.type === 'providers'">
               <UiCheckbox
                 :disabled="fieldUnavailable(field.key)"
@@ -311,7 +300,6 @@ import { t, uiLocale } from '../../../ui.ts';
 
 import { localizePluginMetadata, localizePluginCategory } from '../../../features/settings/metadataLocale.ts';
 
-import SettingsSection from '../SettingsSection.vue';
 import SettingsScope from '../SettingsScope.vue';
 import SettingsIcon from '../SettingsIcon.vue';
 import { computed, reactive, ref, watch, onMounted } from 'vue';
@@ -324,6 +312,10 @@ import type {
 import type { ProviderEntry } from '../../../../../shared/chat/providersContracts.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
 import { pluginCategoryOf, usePluginsStore } from '../../../stores/plugins.ts';
+import { usePluginCatalogStore } from '../../../stores/pluginCatalog.ts';
+import {
+  sourceMembership, type SourceMembership,
+} from '../../../../../shared/plugins/pluginCatalogPolicy.ts';
 import { usePluginInstallStore } from '../../../stores/pluginInstall.ts';
 import { pluginInstallBadge } from '../../../shared/pluginInstall.ts';
 import { PLUGIN_CATEGORIES } from '../../../../../shared/plugins/pluginsContracts.ts';
@@ -341,6 +333,7 @@ const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
 const plugins = usePluginsStore();
 const installer = usePluginInstallStore();
+const catalog = usePluginCatalogStore();
 const filters = settings.sessionService('plugin-filters', () => reactive({
   query: '',
   state: 'all',
@@ -395,6 +388,25 @@ const unavailable = computed(() => settings.snapshot.resources.find((item) => it
       pluginValueKey('placements', item.slot) === field.key)) ?? []);
 let editor: ReturnType<typeof createPluginEditor> | null = null;
 
+const provenanceKeys: Record<SourceMembership, 'settings.marketplaceOfficial'
+  | 'settings.marketplaceCommunity' | 'settings.marketplaceExternal'
+  | 'settings.marketplaceUnverifiedSource' | 'settings.marketplaceManual'> = {
+  official: 'settings.marketplaceOfficial',
+  community: 'settings.marketplaceCommunity',
+  external: 'settings.marketplaceExternal',
+  unverified: 'settings.marketplaceUnverifiedSource',
+  manual: 'settings.marketplaceManual',
+};
+
+/**
+ * Badge описывает источник установленного пакета, а не один совпавший ID каталога.
+ * Ручной пакет без managed metadata никогда не получает происхождение по догадке.
+ */
+function provenance(entry: PluginListItem): string {
+  return t(provenanceKeys[sourceMembership(catalog.index, catalog.state,
+    entry.id, entry.install?.source ?? null)]);
+}
+
 function selectPlugin(id: string): void {
   settings.selectPage('plugins.installed', id);
 }
@@ -405,29 +417,6 @@ function draftEnabled(id: string): boolean {
   return settings.getValue(`pluginEnabled:${id}`, 'enabled') === undefined
     ? list.value.find((entry) => entry.id === id)?.enabled === true
     : settings.getValue(`pluginEnabled:${id}`, 'enabled') === true;
-}
-
-/**
- * Тумблер списка ставит намерение в свой ресурс, не меняя действующий plugin gate.
- * Фильтр состояния сбрасывается, чтобы выбранная строка не исчезла под указателем.
- */
-async function toggleEntry(entry: PluginListItem, next: boolean): Promise<void> {
-  const service = settings.sessionService(`plugin-editor:${entry.id}`, () =>
-    createPluginEditor(entry.id, settings, plugins as unknown as PluginStorePort));
-
-  const loaded = settings.snapshot.resources.some((resource) =>
-    resource.id === `pluginEnabled:${entry.id}` && resource.loaded);
-
-  if (!loaded) {
-    await service.load();
-  }
-
-  if (!settings.isOpen || settings.snapshot.applying) {
-    return;
-  }
-
-  filters.state = 'all';
-  settings.setField(`pluginEnabled:${entry.id}`, 'enabled', next);
 }
 
 /**
@@ -667,52 +656,55 @@ watch([() => props.active, () => settings.pageId, () => settings.entityId, () =>
 <style scoped>
 .settings-plugin {
   display: grid;
-  gap: 24px;
+  gap: 12px;
   min-width: 0;
   align-content: start;
+  container: installed-plugins / inline-size;
 }
 .settings-plugin-filters {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 10px 12px;
-  padding-bottom: 16px;
+  gap: 8px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--line);
 }
-.settings-plugin-filters > :first-child {
-  flex: 1 1 180px;
+.settings-plugin-filter-options {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
   min-width: 0;
 }
 .settings-plugin-workspace {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px;
   min-width: 0;
 }
 .settings-plugin-sidebar {
   display: grid;
   align-content: start;
-  gap: 20px;
+  gap: 12px;
   min-width: 0;
   padding-right: 16px;
   border-right: 1px solid var(--line);
 }
 .settings-plugin-catalog {
   display: grid;
-  gap: 24px;
+  gap: 16px;
   min-width: 0;
 }
 .settings-plugin-list {
   display: grid;
-  gap: 4px;
+  gap: 8px;
   width: 100%;
   min-width: 0;
 }
 .settings-plugin-entry {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px;
+  min-width: 0;
 }
 .settings-plugin-actions {
   display: grid;
@@ -728,7 +720,7 @@ watch([() => props.active, () => settings.pageId, () => settings.entityId, () =>
   min-width: 0;
 }
 .settings-plugin-editor > h4 {
-  padding: 20px 0 8px;
+  padding: 16px 0 8px;
   border-bottom: 1px solid var(--line-2);
   font-size: 13px;
   font-weight: 600;
@@ -739,7 +731,7 @@ watch([() => props.active, () => settings.pageId, () => settings.entityId, () =>
 .settings-plugin-editor > p {
   padding: 10px 0;
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
 }
 .settings-plugin-title {
@@ -747,15 +739,15 @@ watch([() => props.active, () => settings.pageId, () => settings.entityId, () =>
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 .settings-plugin-title h4 {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
 }
 .settings-plugin-title > span {
   color: var(--ink-low);
-  font-size: 11px;
+  font-size: 12px;
 }
 .settings-plugin-title p {
   flex-basis: 100%;
@@ -779,7 +771,7 @@ watch([() => props.active, () => settings.pageId, () => settings.entityId, () =>
   font-size: 12px;
   line-height: 1.6;
 }
-@media (max-width: 1000px) {
+@container installed-plugins (max-width: 680px) {
   .settings-plugin-workspace {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -798,6 +790,21 @@ watch([() => props.active, () => settings.pageId, () => settings.entityId, () =>
   .settings-plugin-actions {
     display: flex;
     flex-wrap: wrap;
+  }
+}
+.settings-plugin-group {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.settings-plugin-group > h4 {
+  color: var(--ink-mid);
+  font-size: 12px;
+  font-weight: 600;
+}
+@container installed-plugins (max-width: 400px) {
+  .settings-plugin-filters {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

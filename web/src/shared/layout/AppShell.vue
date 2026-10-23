@@ -363,8 +363,8 @@
       </div>
       <!-- Колокольчик — над стопкой тостов: ушедшее само оповещение можно найти здесь. -->
       <div class="topbar-actions">
-        <CommandPalette :sections="commands" />
         <ConnectionButton :icon="ICONS.connection" />
+        <PhoneConnectButton />
         <AlertHistoryPopover />
         <UiIconButton :label="t('settings.settings')" v-tooltip="t('settings.settings')"
           aria-haspopup="dialog" :pressed="settings.isOpen"
@@ -381,6 +381,7 @@
     <main class="content" :class="{ 'is-workspace': route.meta.layout === 'workspace' }" :inert="toolDock.isExpanded"
           :aria-hidden="toolDock.isExpanded ? 'true' : undefined"><slot /></main>
     <ToolHost v-if="workspaceStarted" />
+    <PhoneConnectDialog />
 
   </div>
 </template>
@@ -397,6 +398,9 @@ import type { BoardTask } from '../boardContracts.ts';
 
 import { installAlertDeepLinks, openAlertTarget } from '../alertDeepLinks.ts';
 import ConnectionButton from './ConnectionButton.vue';
+import PhoneConnectButton from './PhoneConnectButton.vue';
+import { usePhoneAccessStore } from '../../stores/phoneAccess.ts';
+import PhoneConnectDialog from '../../views/settings/PhoneConnectDialog.vue';
 import { setAlertTargetOpener } from '../alerts.ts';
 import { ref, computed, onUnmounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -451,7 +455,6 @@ import ProviderUsageResources from '../../features/providers/ProviderUsageResour
 import PluginSlot from '../../plugins/PluginSlot.vue';
 import { createUsageWatch } from '../../features/providers/usageWatch.ts';
 import AttentionAlerts from '../../features/analysis/AttentionAlerts.vue';
-import CommandPalette from './CommandPalette.vue';
 import AlertHistoryPopover from '../../features/alerts/AlertHistoryPopover.vue';
 import ToolHost from './ToolHost.vue';
 import ToolsGrid from './ToolsGrid.vue';
@@ -799,8 +802,8 @@ const ICONS: Record<string, string> = {
   cube: 'M12 2l9 5v10l-9 5-9-5V7z M12 22V12 M21 7l-9 5-9-5',
   board: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
   pipeline: 'M6 3v12 M15 6a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M3 18a3 3 0 1 0 6 0 3 3 0 1 0-6 0 M18 9a9 9 0 0 1-9 9',
-  // Песочница — отдельный ящик со своим содержимым: короб с крышкой и полкой внутри.
-  sandbox: 'M3 9h18v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z M6 9V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v3 M8 14h8',
+  // Горка песка с песчинками буквально обозначает песочницу.
+  sandbox: 'M3 20h18 M4 20c4-2 5-8 8-8s4 6 8 8 M9 5h.01 M14 3h.01 M12 8h.01 M9 17h.01 M15 18h.01',
   chats: 'M8 10h8 M8 14h5 M7 4h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H9l-4 4v-4a3 3 0 0 1-1-2V7a3 3 0 0 1 3-3z',
   agents: 'M12 3v3 M12 3a1.2 1.2 0 1 0 0-.01 M8 6h8a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H8a3 3'
     + ' 0 0 1-3-3V9a3 3 0 0 1 3-3z M9 12h.01 M15 12h.01 M9.5 16h5',
@@ -908,13 +911,6 @@ const dockRouteNav = computed(() => [
   || (('sourceLabel' in a ? a.sourceLabel : '') || a.label)
     .localeCompare(('sourceLabel' in b ? b.sourceLabel : '') || b.label, 'ru')));
 
-const commands = computed(() => [
-  ...nav.map((item) => ({ ...item, id: item.to })),
-  ...pluginNav.value,
-  ...toolsNav.value,
-  ...dockRouteNav.value,
-]);
-
 const toolsOpen = ref(false);
 const toolsActive = computed(() => route.path === '/tools'
   || toolsNav.value.some((item) => item.to === route.path));
@@ -923,7 +919,14 @@ watch(() => route.fullPath, () => {
   toolsOpen.value = false;
 });
 
+const phoneAccess = usePhoneAccessStore();
+
 const { connected } = useSse((name, data) => {
+  if (name === 'mobile-changed' && phoneAccess.open) {
+    void phoneAccess.refresh().catch(() => {});
+  }
+
+
   if (name === 'state-change') {
     notifyWatch.check();
   }

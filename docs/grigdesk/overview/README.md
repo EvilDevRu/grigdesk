@@ -7,7 +7,7 @@
 - [Удаление регистрации без удаления файлов и инфраструктуры](project-registration-deletion.md)
 - [Фазы отказа удаления, исходная ошибка и безопасный повтор](project-deletion-failures.md)
 - [Новые связи SSH/БД: строгая проверка внутри очереди регистрации](project-reference-validation.md)
-
+- [Лицензия проекта: корневой MIT и лицензии сторонних компонентов](license.md)
 - [Проекты и их репозитории](../guide/projects.md)
 - [Дополнительные runtime-контракты](../reference/runtime-contracts.md)
 

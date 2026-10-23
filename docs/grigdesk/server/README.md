@@ -1,5 +1,9 @@
 # Сервер и доступ
 
+- [Подтверждение TLS-привязки, готовность relay и диагностика отказов](phone-pairing-confirmation.md)
+
+- [Управляемый direct-вход, PHONE:2 и общий client relay](phone-access.md)
+
 - [Синхронный ранний импорт папки данных и отдельный поиск CLI](early-data-home-imports.md)
 
 Запуск и юнит, авторизация, переменные машины, сеть.
@@ -9,6 +13,10 @@
 Читай перед правкой: `server/src/app.ts`, `server/src/plugins`, `server/src/modules/auth`, `bin`, `deploy`.
 
 ## Устройство
+
+- [Переносимая папка: свежая сборка, архив, первый запуск и меню](portable-bundle.md)
+
+- [Каталог плагинов: автоматический выбор сайта и закрытый локальный API](../plugins/plugin-marketplace.md)
 
 - [Сборка и установка сервера, веба и окна одной командой из исходников](ctl-build.md)
 
@@ -77,6 +85,8 @@
 
 - [Зависимости SEA от хоста: системные библиотеки, Python, CLI и дополнительные runtime](sea-host-requirements.md)
 
+- [Минимум системы: glibc 2.28 у собранных ELF и libfuse.so.2 у AppImage окна](binary-host-minimum.md)
+
 - [Единая папка данных: раскладка, перенос, ранний старт и блокировка](data-home.md)
 
 - [Сервер только API: встроенный интерфейс, снимки и страницы плагинов](api-only-server.md)
@@ -101,6 +111,8 @@
 
 ## Грабли
 
+- [Плоская папка бинарников: descriptor окна, корень установки, deploy и JSON](portable-binary-layout.md)
+
 - [Постоянный виртуальный вход helper исключает случайный путь staging из бандла](sea-helper-staging-comments.md)
 
 - [«Встал агент», «упал прогон», «нет лимитов» — один корень: подсеть docker поверх VPN](docker-vpn-subnet-conflict.md)
@@ -114,3 +126,4 @@
 - [StartLimitIntervalSec=0 в юните GrigDesk — не украшение](systemd-start-limit.md)
 - [Старт модуля не ждёт тяжёлых проб: лимит Fastify на плагин](plugin-start-timeout.md)
 - [Повторный deploy/install.sh без флага включает автозапуск обратно](install-resets-autostart.md)
+- [`node --watch` теряет импорт, на котором упал, и не поднимается после исправления](node-watch-lost-import.md)
