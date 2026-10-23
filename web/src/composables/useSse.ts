@@ -95,6 +95,12 @@ const RELAYED_EVENTS: readonly SseEventName[] = [
   'diagnostic-logging',
   'task-shelf-changed',
   'speech-settings',
+  'chat-done',
+  'ssh-sessions',
+  'ssh-audit',
+  'db-sessions',
+  'db-queries',
+  'db-audit',
 ];
 const SSE_RELAY_NAME = 'grigdesk-sse-v1';
 const defaultRelayFactory = (): RelayChannel => new BroadcastChannel(SSE_RELAY_NAME);

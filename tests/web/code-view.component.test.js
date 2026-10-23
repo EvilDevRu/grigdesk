@@ -4211,3 +4211,224 @@ test('вкладка «Код» обновляет файл и Git-метки, �
   assert.equal(wrapper.get('button[data-file-path="src/app.js"]').attributes('data-status'), 'A');
   assert.equal(monacoState.fileEditors[0].model.content, 'version 2');
 });
+
+/**
+ * Два дерева содержат одноимённый файл с разным текстом: случайный fallback заметен в Monaco.
+ * API переносит только чтение; любой вызов мутации в ходе transfer считается ошибкой теста.
+ */
+function transferCodeApi({ missingTree = false, missingFile = false } = {}) {
+  return {
+    /**
+     * Отдаёт выбор каталога и разные байты двух рабочих деревьев.
+     * Исчезнувшие идентификаторы воспроизводятся ответами того же API.
+     */
+    async get(url) {
+      if(url === '/api/projects') {
+        return { projects: [projectFixture('demo', ['/demo']), projectFixture('other', ['/other'])] };
+      }
+      if(url === '/api/code/demo/repos') {
+        return {
+          repos: [{
+
+            key: 'demo',
+
+            dir: '/demo',
+
+            trees: [mainTree('/demo'), ...(!missingTree ? [worktree('/work/task', 'task', 'task-1')] : [])],
+
+
+
+          }]
+        };
+      }
+      if(url.includes('/ls?')) {
+        return { entries: missingFile ? [] : [{ name: 'a.ts', dir: false }] };
+      }
+      if(url.includes('/file?')) {
+        if(missingFile) {
+          throw new Error('Файл a.ts не найден');
+        }
+
+        return {
+
+          size: 20,
+
+          binary: false,
+
+          tooBig: false,
+
+          content: query(url).get('root') === '/work/task' ? 'WORKTREE\nsecond\nthird' : 'MAIN',
+
+
+
+        };
+      }
+      if(url.includes('/git?')) {
+        return {
+
+          branch: 'task-1',
+
+          stat: '',
+
+          tracking: {
+            detached: false,
+            upstream: '',
+            ahead: 0,
+            behind: 0
+
+
+          },
+
+          staged: [{
+
+            path: 'a.ts',
+            status: 'M',
+            group: 'staged',
+            binary: false,
+            tooBig: false,
+
+            oldContent: 'HEAD',
+            newContent: 'INDEX',
+            add: 1,
+            del: 1,
+
+
+
+          }],
+
+          files: [{
+
+            path: 'a.ts',
+            status: 'M',
+            group: 'work',
+            binary: false,
+            tooBig: false,
+
+            oldContent: 'INDEX',
+            newContent: 'WORKTREE',
+            add: 1,
+            del: 1,
+
+
+
+          }],
+
+          log: [],
+
+
+
+        };
+      }
+
+      throw new Error(`Неожиданное чтение transfer: ${url}`);
+    },
+    async post() {
+      assert.fail('Перенос панели не должен выполнять мутацию');
+    },
+  };
+}
+
+test('TW-C01: новый экземпляр и возврат сохраняют project/repo/root/file/line и commit draft', async (t) => {
+  const api = transferCodeApi();
+  const first = await mountCodeView(t, { api, props: { active: true } });
+
+  await first.wrapper.setProps({
+    intents: [{
+
+      id: 1,
+      type: 'open-file',
+      project: 'demo',
+      repo: 'demo',
+      root: '/work/task',
+      path: 'a.ts',
+      line: 3,
+
+
+
+    }]
+  });
+  await settle(first.flushPromises, 10);
+  assert.equal(first.monacoState.fileEditors.at(-1).model.content, 'WORKTREE\nsecond\nthird');
+  assert.equal(
+    typeof first.wrapper.vm.exportState,
+    'function',
+    'CodePanel ещё не экспортирует состояние окна'
+  );
+  await selectCodeTab(first.wrapper, 'changes');
+  await settle(first.flushPromises);
+  await first.wrapper.get('textarea.commit-message').setValue('Точный черновик коммита');
+  await selectCodeTab(first.wrapper, 'files');
+  await settle(first.flushPromises);
+
+  const state = await first.wrapper.vm.exportState();
+
+  first.wrapper.unmount();
+
+  const second = await mountCodeView(t, { api });
+
+  await second.wrapper.vm.importState(state);
+  await settle(second.flushPromises, 10);
+  assert.equal(second.wrapper.get('#code-project').element.value, 'demo');
+  assert.equal(second.wrapper.get('#code-context').element.value, JSON.stringify(['demo', '/work/task']));
+  assert.equal(second.wrapper.get('.ehead .epath').text(), 'a.ts');
+  assert.equal(second.monacoState.fileEditors.at(-1).model.content, 'WORKTREE\nsecond\nthird');
+  assert.equal(second.monacoState.fileEditors.at(-1).position.lineNumber, 3);
+  await selectCodeTab(second.wrapper, 'changes');
+  await settle(second.flushPromises);
+  assert.equal(second.wrapper.get('textarea.commit-message').element.value, 'Точный черновик коммита');
+
+  const returning = await second.wrapper.vm.exportState();
+
+  second.wrapper.unmount();
+
+  const third = await mountCodeView(t, { api });
+
+  await third.wrapper.vm.importState(returning);
+  await settle(third.flushPromises, 10);
+  assert.equal(third.wrapper.get('#code-context').element.value, JSON.stringify(['demo', '/work/task']));
+  assert.equal(third.wrapper.get('textarea.commit-message').element.value, 'Точный черновик коммита');
+});
+
+test('TW-C02: transfer сохраняет staged gitRef; пропавшие tree/file дают именованную ошибку', async (t) => {
+  const first = await mountCodeView(t, { api: transferCodeApi() });
+
+  await selectCodeTab(first.wrapper, 'changes');
+  await settle(first.flushPromises);
+  assert.equal(typeof first.wrapper.vm.exportState, 'function', 'Нет snapshot выбранной стороны git');
+
+  const staged = first.wrapper.find('button.git-file[data-group="staged"][data-path="a.ts"]');
+
+  assert.ok(staged.exists(), 'Фикстура показывает staged-сторону');
+  await staged.trigger('click');
+  await settle(first.flushPromises);
+
+  const state = await first.wrapper.vm.exportState();
+
+  first.wrapper.unmount();
+
+  const second = await mountCodeView(t, { api: transferCodeApi() });
+
+  await second.wrapper.vm.importState(state);
+  await settle(second.flushPromises);
+  assert.equal(second.monacoState.diffEditors.at(-1).model.modified.content, 'INDEX');
+  second.wrapper.unmount();
+
+  for(const missing of ['missingTree', 'missingFile']) {
+    const panel = await mountCodeView(t, { api: transferCodeApi({ [missing]: true }) });
+
+    await panel.wrapper.vm.importState({
+      ...state,
+      root: '/work/task',
+      tab: 'files',
+      file: 'a.ts',
+      line: 3
+
+
+    });
+    await settle(panel.flushPromises, 10);
+    assert.match(panel.wrapper.text(), missing === 'missingTree' ? /\/work\/task/ : /a\.ts/);
+    assert.ok(panel.wrapper.find('.perr').exists());
+    assert.equal(panel.monacoState.fileEditors.some((editor) => editor.model?.content === 'MAIN'), false);
+    panel.wrapper.unmount();
+  }
+});

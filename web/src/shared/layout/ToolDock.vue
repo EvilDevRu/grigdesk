@@ -12,6 +12,8 @@
       <span aria-hidden="true"></span>
     </div>
     <div v-if="mode === 'dock'" class="dock-actions" :aria-label="t('core.panelControls')">
+      <UiIconButton v-if="detachable" :label="t('core.detachTool')"
+                    data-context="tool-dock-detach" @click="emit('detach')">↗</UiIconButton>
       <UiIconButton ref="expandButton" class="expand-action" role="embedded"
                     data-context="tool-dock-expand"
                     :label="expanded ? t('core.restorePanelWidth') : t('core.fullScreen')"
@@ -43,6 +45,7 @@ import { computed, ref } from 'vue';
 import { UiIconButton, vTooltip } from '../../ui';
 
 const props = defineProps({
+  detachable: { type: Boolean, default: false },
   mode: { type: String, default: 'hidden' },
   workspace: { type: Boolean, default: false },
   label: { type: String, required: true },
@@ -52,7 +55,7 @@ const props = defineProps({
   expanded: { type: Boolean, default: false },
   expandedWidth: { type: Number, default: 0 },
 });
-const emit = defineEmits(['hide', 'toggle-expanded', 'resize', 'resize-end']);
+const emit = defineEmits(['detach', 'hide', 'toggle-expanded', 'resize', 'resize-end']);
 const surface = ref<HTMLElement | null>(null);
 const expandButton = ref<{ focus?: () => void } | null>(null);
 const resizing = ref(false);
@@ -65,7 +68,7 @@ const style = computed(() => {
 
   const width = props.expanded && props.expandedWidth > 0 ? props.expandedWidth : props.width;
 
-  return { width: `${width}px` };
+  return { width: `${width}px`, '--tool-dock-actions-space': props.detachable ? '116px' : '80px' };
 });
 
 // Край поверхности уже учитывает рейку, плотность и текущий viewport.

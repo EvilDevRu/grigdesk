@@ -11,7 +11,9 @@
          Без оболочки потеря входа размонтирует Provider и освобождает browser resources. -->
     <SpeechProvider v-else-if="shell.present || auth.authenticated">
       <div class="shell-workspace" :inert="shell.present && shell.status === 'locked' ? true : undefined">
-      <TaskWindowPage v-if="surfaceDocument" :target="surfaceTarget" :ready="surfaceStarted" />
+      <ToolWindowPage v-if="surfaceDocument && surfaceTarget?.kind === 'tool'"
+                      :target="surfaceTarget" :ready="surfaceStarted" />
+      <TaskWindowPage v-else-if="surfaceDocument" :target="surfaceTarget" :ready="surfaceStarted" />
       <AppShell v-else :active="auth.authenticated && (!shell.present || shell.status === 'online')">
         <div v-if="!workspaceStarted" class="workspace-waiting" role="status">
           <UiInlineMessage :tone="connectionTone">
@@ -50,6 +52,9 @@ import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
 import NoAccessView from './views/NoAccessView.vue';
 import TaskModal from './views/TaskModal.vue';
+import ToolWindowPage from './views/ToolWindowPage.vue';
+import { startToolShelfRelay } from './shared/tools/toolWindowRelay.ts';
+
 import TaskWindowPage from './views/TaskWindowPage.vue';
 import { currentDesktopMode } from './shared/desktopSettings.ts';
 import { surfaceTargetFromUrl } from '../../shared/desktop/surfaceContract.ts';
@@ -83,6 +88,10 @@ const surfaceStarted = ref(false);
 
 if (surfaceDocument) {
   useTaskShelfStore().setPassive(true);
+
+  if (surfaceTarget?.kind === 'tool' && surfaceTarget.id === 'shelf') {
+    useTaskShelfStore().setViewMirror(true);
+  }
 }
 
 const auth = useAuthStore();
@@ -198,6 +207,15 @@ function startWindowSync() {
     mirror: (request) => board.setMirror(request),
   });
 
+  const stopToolShelf = !surfaceDocument || surfaceTarget?.id === 'shelf'
+    ? startToolShelfRelay({
+      role: surfaceDocument ? 'mirror' : 'source',
+      channel: new BroadcastChannel('grigdesk-tool-shelf-v1'),
+      store: shelf,
+      instance: 'shelf-document',
+    })
+    : () => {};
+
   const stopShelfAcknowledge = surfaceDocument ? () => {} : startShelfRelay({
     role: 'source',
     channel: new BroadcastChannel('grigdesk-task-data-v1'),
@@ -205,6 +223,7 @@ function startWindowSync() {
   });
 
   stopTaskWindowSync = () => {
+    stopToolShelf();
     stopShelfAcknowledge();
     stopSync();
     stopShelf();

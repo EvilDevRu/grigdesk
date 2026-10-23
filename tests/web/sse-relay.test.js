@@ -157,3 +157,35 @@ test('SR-04: вход приложения задаёт роль до журна
   assert.match(source, /surface: 'mirror'/);
   assert.match(source, /page: 'off'/);
 });
+
+test('TW-EVENT01: tool события проходят source→mirror без второго EventSource и chat-step', (t) => {
+  const sources = installEventSource(t);
+  const channels = [];
+  const received = [];
+  const names = ['chat-done', 'ssh-sessions', 'ssh-audit', 'db-sessions', 'db-queries', 'db-audit'];
+
+  configureSseRelay('source', () => fakeChannel(channels));
+  sseSubscribe(() => { });
+
+  for(const name of [...names, 'chat-step']) {
+    assert.equal(typeof sources[0].listeners.get(name), 'function');
+    sources[0].listeners.get(name)({ data: JSON.stringify({ marker: name }) });
+  }
+
+  assert.equal(channels.length, 1, 'Новые события не создают relay: отсутствуют в RELAYED_EVENTS');
+
+  const sent = structuredClone(channels[0].posted);
+
+  assert.deepEqual(sent.map((message) => message.name), names);
+  resetSseForTests();
+  configureSseRelay('mirror', () => fakeChannel(channels));
+  sseSubscribe((name, data) => received.push({ name, data }));
+
+  for(const data of sent) {
+    channels.at(-1).onmessage({ data });
+  }
+
+  assert.equal(sources.length, 1);
+  assert.deepEqual(received.map((item) => item.name), names);
+  assert.deepEqual(received.map((item) => item.data.marker), names);
+});
