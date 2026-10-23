@@ -8,6 +8,7 @@ import { createIpLimiter } from './limits.ts';
 import { createLineReader, encodeReply, parseHello, ProtocolError } from './protocol.ts';
 
 type Pending = {
+  target?: string;
   socket: TLSSocket;
   timer: ReturnType<typeof setTimeout>;
 };
@@ -28,6 +29,7 @@ export function createRelayServer(config: RelayConfig, { log }: { log: (event: s
     handshakeTimeout: config.helloTimeoutMs,
   });
   let control: TLSSocket | null = null;
+  let clientSupported = false;
   let closing = false;
 
   const sweep = setInterval(() => limiter.sweep(), Math.min(config.banWindowMs, 60000));
@@ -190,6 +192,7 @@ export function createRelayServer(config: RelayConfig, { log }: { log: (event: s
         const previous = control;
 
         control = socket;
+        clientSupported = hello.capabilities?.includes('client-v2') === true;
         previous?.destroy();
 
         for (const id of pending.keys()) {
@@ -197,10 +200,23 @@ export function createRelayServer(config: RelayConfig, { log }: { log: (event: s
         }
 
         phase = 'control';
-        socket.write(encodeReply({ ok: true }));
+        socket.write(encodeReply({ ok: true,
+          ...(clientSupported ? { capabilities: ['client-v2'] } : {}) }));
         refreshControl();
         pingTimer = setInterval(() => socket.write('{"t":"ping"}\n'), config.pingMs);
         log('control_online');
+
+        return;
+      }
+
+      if (hello.v === 2 && (!control || control.destroyed)) {
+        fail(socket, 'brain_offline');
+
+        return;
+      }
+
+      if (hello.v === 2 && !clientSupported) {
+        fail(socket, 'client_unavailable');
 
         return;
       }
@@ -226,12 +242,14 @@ export function createRelayServer(config: RelayConfig, { log }: { log: (event: s
         pending.set(id, {
           socket,
           timer,
+          target: hello.target,
         });
         socket.once('close', () => cancelPending(id));
         control.write(
           `${JSON.stringify({
             t: 'incoming',
             id,
+            ...(hello.target ? { target: hello.target } : {}),
           })}\n`,
         );
 
@@ -240,7 +258,7 @@ export function createRelayServer(config: RelayConfig, { log }: { log: (event: s
 
       const entry = pending.get(hello.id!);
 
-      if (!entry) {
+      if (!entry || entry.target !== hello.target) {
         fail(socket, 'unknown_id');
 
         return;

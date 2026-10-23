@@ -470,7 +470,15 @@ test('web и GLM на настоящем ELF проходят полную та�
                 await waitForGone([worker, shell]);
               }
 
-              await server.stop();
+              if (scenario === 'kill') {
+                // SIGKILL не подтверждает штатный код 0/130, даже если worker уже исчез.
+                // Сохраняем диагностику и проверяем честный отказ owner.
+                await assert.rejects(server.stop(), { code: 'deepseek_binary_cleanup' });
+                await fs.access(input.options.launch.launchDir);
+              } else {
+                await server.stop();
+              }
+
               assert.equal(alive(worker), false);
               assert.equal(alive(shell), false);
               assert.equal(alive(input.launcher().pid), false);

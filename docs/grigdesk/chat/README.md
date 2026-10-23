@@ -79,6 +79,7 @@
 - [Кольцо контекста, prompt cache и сжатие](context-cache-and-compaction.md)
 - [Компактный companion удалён; остался server-owned companion-чат](server-owned-companion.md)
 - [Лента хода агента (как в чате VS Code)](agent-turn-feed.md)
+- [Действия субагента под своим вызовом, включая поздние реплики (№93016)](subagent-step-placement.md)
 - [Картинка в строке Read и генерации Codex: миниатюра через маршрут картинок чата вместо «[изображение]» и base64](step-images.md)
 - [Приглушённые подписи инструментов и служебных сведений](activity-visual-hierarchy.md)
 - [Ответы среди действий: хронология и компактные реплики](conversation-timeline.md)
@@ -100,6 +101,8 @@
 - [UI-контекст: чат знает, где пользователь](ui-context.md)
 
 ### Исполнители и модели
+
+- [Видимость доплаты Kimi/Codex, пустые ответы и слияние снимков](extra-usage-visibility.md)
 
 - [Gemini: отдельные точки подключения чата и Factory, offline-защита и внешние контракты](gemini-integration-boundaries.md)
 
@@ -131,6 +134,7 @@
 - [Descriptor автономного DeepSeek: metadata probe, cache-dir и безопасные отказы](deepseek-binary-descriptor.md)
 - [Async cache metadata DeepSeek: single-flight, замена файла и отмена waiter](deepseek-binary-probe-cache.md)
 - [Остановка автономного DeepSeek: IPC bootstrap, disposal и честный timeout](deepseek-binary-lifecycle.md)
+- [Сетевой сбой DeepSeek и отказ остановки: раздельные причины и безопасное продолжение](deepseek-transport-cleanup.md)
 - [Отказ запуска GLM: выход процесса прерывает ожидание URL и HTTP-авторизацию](glm-startup-failure.md)
 - [Этап фабрики на GLM: политика без вопросов, typed контекст хоста, wrapper и metadata](glm-factory-stage.md)
 - [Замена DeepSeek сохраняет heartbeat живого WebSocket](deepseek-publication-event-loop.md)

@@ -92,9 +92,9 @@ export async function clientFixture(t, options = {}) {
  * Проверяет сертификат сервера в рукопожатии до отправки HTTP-заголовков.
  * Каждый вызов открывает новый TLS без возобновления и полностью вычитывает JSON-ответ.
  */
-export async function clientRequest(fixture, url, body, client = fixture.client) {
+export async function clientRequest(fixture, url, body, client = fixture.client, headers = {}) {
   const socket = tls.connect({
-    host: '127.0.0.1',
+    host: fixture.host ?? '127.0.0.1',
     port: fixture.port,
     key: client?.keyPem,
     cert: client?.certPem,
@@ -115,12 +115,17 @@ export async function clientRequest(fixture, url, body, client = fixture.client)
 
   return new Promise((resolve, reject) => {
     const outgoing = https.request({
-      hostname: '127.0.0.1',
+      hostname: fixture.host ?? '127.0.0.1',
       port: fixture.port,
       path: url,
       method: body === undefined ? 'GET' : 'POST',
       agent,
-      headers: body === undefined ? {} : { 'content-type': 'application/json' },
+      headers: {
+        ...(body === undefined ? {} : {
+          'content-type': Buffer.isBuffer(body) ? 'application/octet-stream' : 'application/json',
+        }),
+        ...headers,
+      },
     }, (incoming) => {
       let text = '';
 
@@ -139,6 +144,6 @@ export async function clientRequest(fixture, url, body, client = fixture.client)
       agent.destroy();
       reject(error);
     });
-    outgoing.end(body === undefined ? undefined : JSON.stringify(body));
+    outgoing.end(body === undefined || Buffer.isBuffer(body) ? body : JSON.stringify(body));
   });
 }

@@ -49,7 +49,7 @@ public class ShellLocaleTest {
    */
   private ShellLocale locale(Preference preference, String system) throws Exception {
     return new ShellLocale(
-      asset -> Files.readString(ASSETS.resolve(asset)),
+      asset -> new String(Files.readAllBytes(ASSETS.resolve(asset)), StandardCharsets.UTF_8),
       preference,
       () -> Locale.forLanguageTag(system)
     );
@@ -90,8 +90,10 @@ public class ShellLocaleTest {
   public void nativeCatalogIncludesScanUnlockSaveOfflineAndCancel() throws Exception {
     Preference preference = new Preference();
     ShellLocale context = locale(preference, "ru-RU");
-    JSONObject ru = new JSONObject(Files.readString(ASSETS.resolve("locales/ru/native.json")));
-    JSONObject en = new JSONObject(Files.readString(ASSETS.resolve("locales/en/native.json")));
+    JSONObject ru = new JSONObject(new String(Files.readAllBytes(ASSETS.resolve("locales/ru/native.json")),
+      StandardCharsets.UTF_8));
+    JSONObject en = new JSONObject(new String(Files.readAllBytes(ASSETS.resolve("locales/en/native.json")),
+      StandardCharsets.UTF_8));
     List<String> keys = new ArrayList<>();
 
     leaves(ru, "", keys);
@@ -169,11 +171,14 @@ public class ShellLocaleTest {
   @Test
   public void thirdCatalogUsesTheSameNativeReader() throws Exception {
     Preference preference = new Preference();
-    JSONArray registry = new JSONArray(Files.readString(ASSETS.resolve("locales/catalog.json")));
+    JSONArray registry = new JSONArray(new String(Files.readAllBytes(ASSETS.resolve("locales/catalog.json")),
+      StandardCharsets.UTF_8));
 
     registry.put(new JSONObject().put("id", "fr").put("name", "Français").put("intlLocale", "fr-FR"));
 
-    JSONObject translated = new JSONObject(Files.readString(ASSETS.resolve("locales/en/native.json")));
+    JSONObject translated = new JSONObject(new String(
+      Files.readAllBytes(ASSETS.resolve("locales/en/native.json")),
+      StandardCharsets.UTF_8));
     List<String> keys = new ArrayList<>();
 
     leaves(translated, "", keys);
@@ -197,7 +202,8 @@ public class ShellLocaleTest {
         return translated.toString();
       }
 
-      return Files.readString(ASSETS.resolve(asset.replace("/fr/", "/en/")));
+      return new String(Files.readAllBytes(ASSETS.resolve(asset.replace("/fr/", "/en/"))),
+        StandardCharsets.UTF_8);
     }, preference, () -> Locale.FRANCE);
 
     context.setPreference("fr");
@@ -209,8 +215,11 @@ public class ShellLocaleTest {
    * Путь ключа сохраняется при рекурсивном чтении JSON-каталога.
    * Вложенные группы не требуют специальных ветвей в native reader.
    */
-  private void leaves(JSONObject object, String prefix, List<String> keys) {
-    for (String key : object.keySet()) {
+  private void leaves(JSONObject object, String prefix, List<String> keys) throws Exception {
+    java.util.Iterator<String> iterator = object.keys();
+
+    while (iterator.hasNext()) {
+      String key = iterator.next();
       String path = prefix.isEmpty() ? key : prefix + "." + key;
 
       if (object.optJSONObject(key) != null) {
@@ -225,7 +234,7 @@ public class ShellLocaleTest {
    * Ожидаемый текст извлекается из того же locale-файла, который получает Source.
    * Отсутствие соответствующего EN ключа является ошибкой каталога.
    */
-  private String value(JSONObject object, String key) {
+  private String value(JSONObject object, String key) throws Exception {
     String[] parts = key.split("\\.");
 
     for (int index = 0; index < parts.length - 1; index++) {

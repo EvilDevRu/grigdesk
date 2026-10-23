@@ -5,6 +5,62 @@ import test from 'node:test';
 import { startSettingsBrowser } from '../fixtures/settings-modal/browser.mjs';
 
 /**
+ * Название и пояснение образуют один блок слева, одиночное поле стоит по центру этого блока.
+ * Пояснение остаётся в колонке названия и не заходит под поле.
+ */
+function findFieldMisalignments(modal) {
+  const fields = [...modal.querySelectorAll('[data-ui-settings-field] > .ui-field')].flatMap((field) => {
+    const label = field.querySelector(':scope > .ui-field__label');
+    const group = field.querySelector(':scope > .ui-field__control');
+    const controls = [...group.children].filter((control) => control.getBoundingClientRect().width);
+
+    if (!label || controls.length !== 1) {
+      return [];
+    }
+
+    const title = label.getBoundingClientRect();
+    const control = controls[0].getBoundingClientRect();
+    const hint = field.querySelector(':scope > .ui-field__hint, :scope > .ui-field__error')
+      ?.getBoundingClientRect();
+
+    if (!title.width || title.right > control.left) {
+      return [];
+    }
+
+    const bottom = hint ? hint.bottom : title.bottom;
+    const axis = Math.abs((title.top + bottom) / 2 - (control.top + control.bottom) / 2);
+    const hintBeside = !hint || hint.right <= control.left + 1 && hint.top >= title.bottom - 1;
+
+    return axis > 1 || !hintBeside ? [{
+      label: label.textContent.trim(),
+      axis,
+      hintBeside,
+    }] : [];
+  });
+  const hotkeys = [...modal.querySelectorAll('.settings-hotkey-row')].flatMap((row) => {
+    const label = row.querySelector('.settings-hotkey-label');
+    const title = label.getBoundingClientRect();
+    const combo = row.querySelector('kbd').getBoundingClientRect();
+    const hint = row.querySelector('small');
+
+    if (!title.width) {
+      return [];
+    }
+
+    const axis = Math.abs(title.top + title.height / 2 - combo.top - combo.height / 2);
+    const hintBelow = !hint || hint.getBoundingClientRect().top >= Math.max(title.bottom, combo.bottom);
+
+    return axis > 1 || !hintBelow ? [{
+      label: label.textContent.trim(),
+      axis,
+      hintBelow,
+    }] : [];
+  });
+
+  return [...fields, ...hotkeys];
+}
+
+/**
  * Каждый снимок дополнен замером обеих областей: форма не расширяет окно,
  * а прокрутка страницы остаётся вертикальной даже с длинными подписями.
  */
@@ -32,6 +88,11 @@ async function captureSettingsPage(fixture, filename) {
     pageFits: true,
     selectedVisible: true,
   }, `Геометрия: ${filename}`);
+
+  const misalignments = await fixture.page.locator('[data-role="settings-modal"]')
+    .evaluate(findFieldMisalignments);
+
+  assert.deepEqual(misalignments, [], `Выравнивание полей: ${filename}`);
   await fixture.page.screenshot({ path: path.join(fixture.artifacts, filename) });
 }
 

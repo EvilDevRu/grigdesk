@@ -6,7 +6,7 @@ import type { AcpClient } from '../acp/client.ts';
 import { createAcpClient, initializeAcp } from '../acp/client.ts';
 import type { DeepSeekRuntimeDescriptor } from './runtimeProcess.ts';
 import { verifyDeepSeekRuntimeDescriptorAsync } from './runtimeProcess.ts';
-import { spawnDeepSeekBinary } from './binaryProcess.ts';
+import { combineDeepSeekCleanupFailure, spawnDeepSeekBinary } from './binaryProcess.ts';
 
 export interface DeepSeekSettingsRpc {
   rpc(method: string, args?: unknown, timeoutMs?: number, signal?: AbortSignal): Promise<unknown>;
@@ -150,7 +150,12 @@ export async function startDeepSeekAcpSettings(options: {
     };
   } catch (error) {
     options.signal?.removeEventListener('abort', abort);
-    await stop();
+
+    try {
+      await stop();
+    } catch (cleanup) {
+      throw combineDeepSeekCleanupFailure(error, cleanup);
+    }
 
     throw error;
   }

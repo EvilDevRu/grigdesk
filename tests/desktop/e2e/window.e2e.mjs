@@ -1021,7 +1021,9 @@ test('SM-E03 prefs, локальная клавиша и плагин приме
   const before = await page.evaluate(() => document.querySelector('#app').__vue_app__
     .config.globalProperties.$pinia._s.get('plugins').byId('inbox').enabled);
 
-  await page.getByRole('switch', { name: 'Включить Входящие', exact: true }).first().press('Space');
+  await page.locator('[data-select-plugin="inbox"]').click();
+  await page.locator('[data-plugin-page="inbox"][data-ready="true"]').waitFor();
+  await page.getByRole('switch', { name: 'Включить Входящие', exact: true }).press('Space');
   await page.getByRole('button', { name: 'Применить', exact: true }).click();
   await waitFor(() => page.evaluate((before) => document.querySelector('#app').__vue_app__
     .config.globalProperties.$pinia._s.get('plugins').byId('inbox').enabled !== before, before));

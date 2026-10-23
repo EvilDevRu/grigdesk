@@ -40,15 +40,15 @@
             :value="item"
             @change="changeItem(index, $event)"
           />
-          <UiButton :aria-label="t('settings.removeItem', { value1: index + 1 })" @click="removeItem(index)">{{ t('settings.delete') }}</UiButton>
+          <UiButton data-context="workspace-form-wrap" :aria-label="t('settings.removeItem', { value1: index + 1 })" @click="removeItem(index)">{{ t('settings.delete') }}</UiButton>
         </div>
-        <UiButton
+        <UiButton data-context="workspace-form-wrap"
           :disabled="field.constraints.maxItems !== undefined && array.length >= field.constraints.maxItems"
           @click="addItem"
         >
           {{ t('settings.addItem') }}
         </UiButton>
-        <UiButton v-if="field.constraints.nullable" @click="set(null)">
+        <UiButton data-context="workspace-form-wrap" v-if="field.constraints.nullable" @click="set(null)">
           {{ t('settings.setEmptyValueNull') }}
         </UiButton>
       </template>
@@ -61,8 +61,8 @@
       <p v-if="field.reason">{{ field.reason }}</p>
       <p>{{ status }}</p>
       <div class="settings-native-actions">
-        <UiButton v-if="field.override.state === 'known' || state?.dirty" @click="unset">{{ t('settings.reset') }}</UiButton>
-        <UiButton v-if="state?.dirty" @click="settings.discardField(resourceId, field.id)">
+        <UiButton data-context="workspace-form-wrap" v-if="field.override.state === 'known' || state?.dirty" @click="unset">{{ t('settings.reset') }}</UiButton>
+        <UiButton data-context="workspace-form-wrap" v-if="state?.dirty" @click="settings.discardField(resourceId, field.id)">
           {{ t('settings.discardEdit') }}
         </UiButton>
         <UiDisclosureButton v-model:open="detailsOpen" :controls="detailsId">{{ t('settings.details') }}</UiDisclosureButton>

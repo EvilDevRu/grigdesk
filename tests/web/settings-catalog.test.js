@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { translator } from '../../shared/i18n/catalogs.ts';
 import {
   SETTINGS_GROUPS,
   SETTINGS_PAGES,
   equalFieldAddress,
+  getSettingsFields,
+  getSettingsPages,
   resolveFieldAddress,
   resolveSettingsPage,
 } from '../../web/src/features/settings/catalog.ts';
@@ -14,7 +17,7 @@ const EXPECTED_PAGES = [
   ['agents', ['providers', 'models']],
   ['automation', ['chats', 'context', 'launch', 'monitoring', 'arbiter']],
   ['speech', ['dictation', 'video', 'language', 'models', 'advanced']],
-  ['connections', ['b24', 'devices', 'mobile']],
+  ['connections', ['b24', 'devices']],
   ['plugins', ['installed']],
   ['system', ['startup', 'updates', 'diagnostics', 'processes']],
 ];
@@ -83,7 +86,7 @@ test('CAT02: вызов, query, сохранённая страница, пер�
     runs: 'automation.chats',
     plugins: 'plugins.installed',
     server: 'system.startup',
-    access: 'connections.mobile',
+    access: 'connections.devices',
   };
 
   for (const [tab, page] of Object.entries(oldTabs)) {
@@ -169,14 +172,43 @@ test('CAT05 (guard): реестр содержит только публичны
   }
 });
 
-test('единый клиент: устройства имеют страницу и адресуемые поля поиска', async () => {
+test('PHONE-14: поиск находит раздел доступа без удалённых полей привязки', async () => {
   const { searchSettings } = await import('../../web/src/features/settings/search.ts');
 
   assert.ok(SETTINGS_PAGES.some((page) => page.id === 'connections.devices'));
-  assert.ok(searchSettings('Имя устройства').some((result) =>
-    result.address?.pageId === 'connections.devices' && result.address.fieldPath[0] === 'name'));
-  assert.ok(searchSettings('Адрес машины').some((result) =>
-    result.address?.pageId === 'connections.devices' && result.address.fieldPath[0] === 'address'));
+
+  for (const locale of ['ru', 'en']) {
+    const page = getSettingsPages(locale).find((item) => item.id === 'connections.devices');
+
+    assert.ok(page);
+    assert.ok(searchSettings(page.label, [], locale).some((result) =>
+      result.pageId === page.id && result.address === undefined));
+    assert.deepEqual(getSettingsFields(locale).filter((field) => field.resourceId === 'devicePairing'), []);
+
+    for (const key of ['settings.deviceName', 'settings.machineAddress']) {
+      const results = searchSettings(translator.t(locale, key), [], locale);
+
+      assert.equal(results.some((result) => result.address?.pageId === page.id
+        && ['name', 'address'].includes(result.address.fieldPath[0])), false);
+    }
+  }
+});
+
+test('PHONE-14: старые ID ведут в единый раздел', () => {
+  const canonical = 'connections.devices';
+
+  for (const alias of ['connections.mobile', 'access']) {
+    assert.equal(resolveSettingsPage({ pageId: alias }), canonical);
+    assert.equal(resolveSettingsPage({ queryPage: alias }), canonical);
+    assert.equal(resolveSettingsPage({
+      storage: storageFixture({ 'grigdesk-settings-page': alias }),
+    }), canonical);
+  }
+
+  assert.equal(resolveSettingsPage({
+    storage: storageFixture({ 'grigdesk-settings-tab': 'access' }),
+  }), canonical);
+  assert.equal(SETTINGS_PAGES.filter((page) => /^connections\.(mobile|devices)$/.test(page.id)).length, 1);
 });
 
 test('CAT-N1: старый install адрес переносится в общий раздел', () => {

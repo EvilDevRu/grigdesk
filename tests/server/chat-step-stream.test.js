@@ -535,3 +535,57 @@ test('Codex executor передаёт JSONL-шаги живьём и сохра�
   // они атрибут той же метрики output_tokens). Вторым слагаемым они удваивали счётчик.
   assert.deepEqual(progress, [3]);
 });
+
+test('Claude Agent описывается как Task, включая тип без описания и вложенные события', () => {
+    for (const name of ['Agent', 'Task']) {
+        for (const description of ['Проверить чат', '']) {
+            const input = {
+                description,
+                subagent_type: 'Explore',
+                prompt: 'Найди причину сдвига'
+            };
+            const [step] = toClaudeSteps({
+                type: 'assistant',
+                message: {
+                    content: [{
+                        type: 'tool_use',
+                        id: 'agent',
+                        name,
+                        input
+                    }]
+                }
+            });
+
+            assert.deepEqual(step, {
+                k: 'tool',
+                id: 'agent',
+                name,
+                title: description || 'Explore',
+                sub: 'Explore',
+                preview: input.prompt
+            });
+        }
+    }
+
+    const sent = [];
+    const sink = createStepSink((step) => sent.push(step), {
+        now: () => 10
+    });
+
+    sink.emitAll(toClaudeSteps({
+        type: 'assistant',
+        parent_tool_use_id: 'agent',
+        message: {
+            content: [{
+                type: 'tool_use',
+                id: 'child',
+                name: 'Bash',
+                input: {
+                        command: 'pwd'
+                    }
+            }]
+        }
+    }));
+    assert.equal(sent[0].parent, 'agent');
+    assert.deepEqual(sent, sink.steps);
+});

@@ -364,6 +364,7 @@
       <!-- Колокольчик — над стопкой тостов: ушедшее само оповещение можно найти здесь. -->
       <div class="topbar-actions">
         <ConnectionButton :icon="ICONS.connection" />
+        <PhoneConnectButton />
         <AlertHistoryPopover />
         <UiIconButton :label="t('settings.settings')" v-tooltip="t('settings.settings')"
           aria-haspopup="dialog" :pressed="settings.isOpen"
@@ -380,6 +381,7 @@
     <main class="content" :class="{ 'is-workspace': route.meta.layout === 'workspace' }" :inert="toolDock.isExpanded"
           :aria-hidden="toolDock.isExpanded ? 'true' : undefined"><slot /></main>
     <ToolHost v-if="workspaceStarted" />
+    <PhoneConnectDialog />
 
   </div>
 </template>
@@ -396,6 +398,9 @@ import type { BoardTask } from '../boardContracts.ts';
 
 import { installAlertDeepLinks, openAlertTarget } from '../alertDeepLinks.ts';
 import ConnectionButton from './ConnectionButton.vue';
+import PhoneConnectButton from './PhoneConnectButton.vue';
+import { usePhoneAccessStore } from '../../stores/phoneAccess.ts';
+import PhoneConnectDialog from '../../views/settings/PhoneConnectDialog.vue';
 import { setAlertTargetOpener } from '../alerts.ts';
 import { ref, computed, onUnmounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -914,7 +919,14 @@ watch(() => route.fullPath, () => {
   toolsOpen.value = false;
 });
 
+const phoneAccess = usePhoneAccessStore();
+
 const { connected } = useSse((name, data) => {
+  if (name === 'mobile-changed' && phoneAccess.open) {
+    void phoneAccess.refresh().catch(() => {});
+  }
+
+
   if (name === 'state-change') {
     notifyWatch.check();
   }

@@ -5,12 +5,14 @@ export class RelayHub {
   private links = new Map<string, RelayLink>();
   private options: {
     mobilePort: number;
+    clientTarget?: () => Promise<number>;
     vpnGate: (ip: string) => Promise<boolean>;
     changed?: () => void;
   };
 
   constructor(options: {
     mobilePort: number;
+    clientTarget?: () => Promise<number>;
     vpnGate: (ip: string) => Promise<boolean>;
     changed?: () => void;
   }) {

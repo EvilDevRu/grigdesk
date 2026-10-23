@@ -897,23 +897,24 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas: 'label' 'control' 'hint';
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 [data-ui-settings-field] > .ui-field > .ui-field__label {
   grid-area: label;
   margin: 0;
   color: var(--ink);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.5;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
 }
 [data-ui-settings-field] > .ui-field > .ui-field__hint,
 [data-ui-settings-field] > .ui-field > .ui-field__error {
   grid-area: hint;
-  max-width: 70ch;
-  font-size: 11px;
-  line-height: 1.6;
+  align-self: start;
+  max-width: 78ch;
+  font-size: 12px;
+  line-height: 16px;
 }
 [data-ui-settings-field] > .ui-field > .ui-field__control {
   display: grid;
@@ -925,38 +926,92 @@
 [data-ui-settings-field] .ui-field__control > p {
   margin: 0;
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
 [data-ui-settings-field] .ui-field__control > .ui-number-input {
-  width: min(100%, 144px);
-  justify-self: end;
+  width: 100%;
 }
 [data-ui-settings-field] .ui-field__control > .ui-button {
   justify-self: start;
 }
+/* Название и пояснение — один блок слева, одиночное поле стоит по центру этого блока.
+   Сложные значения сохраняют свою высоту и начинают содержимое у названия. */
 @container settings-field (min-width: 480px) {
   [data-ui-settings-field][data-layout='row'] > .ui-field {
     grid-template-columns: minmax(0, 1fr) minmax(160px, 260px);
+    grid-template-areas: 'label control' 'hint hint';
+    gap: 4px 24px;
+  }
+  [data-ui-settings-field][data-layout='row']:not(:has(.ui-textarea)) > .ui-field:has(
+    > :is(.ui-field__hint, .ui-field__error)
+  ) {
     grid-template-areas: 'label control' 'hint control';
-    gap: 5px 28px;
+    row-gap: 2px;
+  }
+  [data-ui-settings-field][data-layout='row'] > .ui-field > .ui-field__label {
+    display: flex;
+    align-items: center;
+    align-self: start;
+    min-height: var(--control-height);
+  }
+  [data-ui-settings-field][data-layout='row'] .ui-field__control:has(> :only-child) {
+    align-self: center;
+  }
+  [data-ui-settings-field][data-layout='row'] > .ui-field:has(
+    > .ui-field__control > :only-child
+  ) > .ui-field__label {
+    align-self: center;
+  }
+  [data-ui-settings-field][data-layout='row']:not(:has(.ui-textarea)) > .ui-field:has(
+    > .ui-field__control > :only-child
+  ):has(> :is(.ui-field__hint, .ui-field__error)) > .ui-field__label {
+    align-self: end;
+    min-height: 0;
   }
   [data-ui-settings-field]:has(.ui-textarea) > .ui-field {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: 'label' 'control' 'hint';
-    gap: 8px;
+    gap: 6px;
+  }
+  [data-ui-settings-field]:has(.ui-textarea) > .ui-field > .ui-field__label {
+    min-height: 0;
   }
 }
-[data-ui-settings-field]:has(> .ui-field > .ui-field__control > .ui-switch) > .ui-field {
+[data-ui-settings-field]:has(> .ui-field > .ui-field__control > :is(
+  .ui-switch, .ui-checkbox:only-child
+)) > .ui-field {
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: 'label control' 'hint control' 'status status';
-  gap: 5px 24px;
+  grid-template-areas: 'label control' 'hint hint' 'status status';
+  gap: 4px 16px;
 }
-[data-ui-settings-field]:has(> .ui-field > .ui-field__control > .ui-switch) .ui-field__control {
+[data-ui-settings-field]:has(> .ui-field > .ui-field__control > :is(
+  .ui-switch, .ui-checkbox:only-child
+)) > .ui-field:has(> :is(.ui-field__hint, .ui-field__error)) {
+  grid-template-areas: 'label control' 'hint control' 'status status';
+  row-gap: 2px;
+}
+[data-ui-settings-field]:has(> .ui-field > .ui-field__control > :is(
+  .ui-switch, .ui-checkbox:only-child
+)) > .ui-field > .ui-field__label {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-height);
+}
+[data-ui-settings-field]:has(> .ui-field > .ui-field__control > :is(
+  .ui-switch, .ui-checkbox:only-child
+)) > .ui-field:has(> :is(.ui-field__hint, .ui-field__error)) > .ui-field__label {
+  align-self: end;
+  min-height: 0;
+}
+[data-ui-settings-field]:has(> .ui-field > .ui-field__control > :is(
+  .ui-switch, .ui-checkbox:only-child
+)) .ui-field__control {
   display: contents;
 }
-[data-ui-settings-field] .ui-field__control > .ui-switch {
+[data-ui-settings-field] .ui-field__control > :is(.ui-switch, .ui-checkbox:only-child) {
+  min-height: var(--control-height);
   align-self: center;
   justify-self: end;
   grid-area: control;
@@ -1006,8 +1061,10 @@
 [data-ui-settings-catalog] .ui-settings-catalog-status[data-available='true'] {
   color: var(--good);
 }
-/* Плагины отделены друг от друга; общий каталог сохраняет прежний вид у других страниц. */
-[data-ui-settings-catalog][data-context='plugin-entry'] {
+/* Каталоги настроек разделяют строки и сохраняют общую высоту текста. */
+[data-ui-settings-catalog]:is(
+  [data-context='plugin-entry'], [data-context='provider-entry']
+) {
   border-color: var(--line);
   border-radius: var(--radius-sm);
   padding: 10px;
@@ -1015,19 +1072,27 @@
   line-height: 18px;
   overflow-wrap: anywhere;
 }
-[data-ui-settings-catalog][data-context='plugin-entry'][aria-pressed='true'] {
+[data-ui-settings-catalog]:is(
+  [data-context='plugin-entry'], [data-context='provider-entry']
+)[aria-pressed='true'] {
   border-color: var(--accent);
 }
-[data-ui-settings-catalog][data-context='plugin-entry'] .ui-settings-catalog-title {
+[data-ui-settings-catalog]:is(
+  [data-context='plugin-entry'], [data-context='provider-entry']
+) .ui-settings-catalog-title {
   font-size: 13px;
   font-weight: 600;
 }
-[data-ui-settings-catalog][data-context='plugin-entry'] :is(small, .ui-settings-catalog-description,
+[data-ui-settings-catalog]:is(
+  [data-context='plugin-entry'], [data-context='provider-entry']
+) :is(small, .ui-settings-catalog-description,
   .ui-settings-catalog-status) {
   color: var(--ink-mid);
   font-size: 12px;
 }
-[data-ui-settings-catalog][data-context='plugin-entry'] .ui-settings-catalog-status[data-available='true'] {
+[data-ui-settings-catalog]:is(
+  [data-context='plugin-entry'], [data-context='provider-entry']
+) .ui-settings-catalog-status[data-available='true'] {
   color: var(--good);
 }
 .ui-action-link[data-context='plugin-repository'] {
@@ -1045,13 +1110,17 @@
 }
 [data-ui-settings-sidebar-action] {
   justify-content: flex-start;
-  min-height: 32px;
+  min-height: var(--control-height);
   height: auto;
   padding: 7px 8px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
   text-align: start;
   white-space: normal;
+}
+/* Раскрывашка в форме настроек начинается на оси названий параметров. */
+[data-ui-settings-workspace] .ui-disclosure-button {
+  padding-inline: 0;
 }
 [data-ui-settings-sidebar-action] .ui-button__label {
   overflow: visible;
@@ -1090,6 +1159,7 @@
 [data-ui-settings-tabs] > .ui-tab:hover {
   background: color-mix(in srgb, var(--ink) 4%, transparent);
 }
+[data-ui-settings-workspace] [data-ui-settings-tabs] > .ui-tab,
 [data-plugins-workspace] [data-ui-settings-tabs] > .ui-tab {
   min-height: var(--control-height);
   padding-block: 6px;
