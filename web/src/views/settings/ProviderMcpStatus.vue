@@ -4,7 +4,7 @@
       {{ t('settings.mcpServers') }}
       <UiButton
         class="mcpbtn"
-        data-role="settings-compact-action"
+        data-context="workspace-form-wrap"
         :disabled="status?.loading"
         @click="emit('refresh')"
       >
@@ -257,10 +257,9 @@ function mcpState(server: McpServer): McpState {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 12px;
-  color: var(--ink-mid);
-  text-transform: uppercase;
-  letter-spacing: .04em;
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 600;
 }
 
 .small {
@@ -307,11 +306,11 @@ function mcpState(server: McpServer): McpState {
 }
 
 .mcpgrpttl {
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .mcpgrphint {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
   opacity: .8;
 }
@@ -388,7 +387,7 @@ function mcpState(server: McpServer): McpState {
 }
 
 .mcpdetail {
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.45;
   padding-left: 16px;
   overflow-wrap: anywhere;

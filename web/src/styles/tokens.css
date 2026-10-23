@@ -155,3 +155,12 @@
   --app-topbar-h: 44px;
   --app-nav-row-h: 44px;
 }
+
+/* Узкое окно настроек использует те же площадки, что и сенсорный интерфейс. */
+@media (max-width: 600px) {
+  [data-role='settings-modal'] {
+    --workspace-control-h: 44px;
+    --control-height: 44px;
+    --toolbar-control-h: 44px;
+  }
+}

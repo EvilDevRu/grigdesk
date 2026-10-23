@@ -1,5 +1,10 @@
 <template>
-  <div class="settings-workspace" :data-navigation="navigationVisible" :data-page="settings.pageId">
+  <div
+    class="settings-workspace"
+    data-ui-settings-workspace
+    :data-navigation="navigationVisible"
+    :data-page="settings.pageId"
+  >
     <aside class="settings-sidebar" :aria-label="t('settings.settingsNavigation')">
       <UiSearchInput
         v-model="settings.query"
@@ -94,10 +99,12 @@ function openResult(result: SettingsSearchResult): void {
 <style scoped>
 .settings-workspace {
   display: grid;
-  grid-template-columns: 216px minmax(0, 1fr);
+  grid-template-columns: 244px minmax(0, 1fr);
   flex: 1;
   min-width: 0;
   min-height: 0;
+  font-size: 13px;
+  line-height: 1.5;
 }
 .settings-sidebar {
   display: flex;
@@ -112,7 +119,7 @@ function openResult(result: SettingsSearchResult): void {
 .settings-navigation-label {
   margin: 0 8px;
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
 }
 .settings-navigation-scroll {
   flex: 1;
@@ -128,12 +135,14 @@ function openResult(result: SettingsSearchResult): void {
   min-height: 0;
   background: var(--surface);
 }
+/* Путь раздела нужен только в узком окне, где дерево скрыто за кнопкой «Разделы».
+   На широком окне путь уже виден в дереве и в заголовке страницы. */
 .settings-page-heading {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 12px;
-  min-height: 43px;
-  padding: 12px 32px 0;
+  min-height: 36px;
+  padding: 8px 16px 0;
 }
 .settings-page-heading p {
   display: flex;
@@ -141,7 +150,7 @@ function openResult(result: SettingsSearchResult): void {
   gap: 5px 8px;
   margin: 0;
   color: var(--ink-low);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .settings-page-heading p > span:last-child {
@@ -156,22 +165,28 @@ function openResult(result: SettingsSearchResult): void {
   scrollbar-width: thin;
 }
 .settings-page-inner {
+  container: settings-page / inline-size;
   display: grid;
   align-content: start;
-  gap: 24px;
-  max-width: 940px;
-  margin: 0 auto;
-  padding: 16px 32px 32px;
+  gap: 16px;
+  max-width: 760px;
+  margin: 0;
+  padding: 20px 16px;
+}
+/* Каталог рядом с редактором занимает всю ширину: иначе редактор становится узким. */
+.settings-workspace:is([data-page='agents.providers'], [data-page='plugins.installed'])
+  .settings-page-inner {
+  max-width: none;
 }
 .settings-page-intro {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 .settings-page-intro h3 {
   margin: 0;
-  font-size: 21px;
+  font-size: 18px;
   font-weight: 600;
-  letter-spacing: -.025em;
+  letter-spacing: normal;
   line-height: 1.3;
 }
 .settings-page-intro p {
@@ -192,7 +207,7 @@ function openResult(result: SettingsSearchResult): void {
 .settings-results small {
   margin-top: 5px;
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .settings-search-empty {
@@ -222,13 +237,7 @@ function openResult(result: SettingsSearchResult): void {
 }
 @media (max-width: 900px) {
   .settings-workspace {
-    grid-template-columns: 204px minmax(0, 1fr);
-  }
-  .settings-page-inner {
-    padding: 16px 24px 28px;
-  }
-  .settings-page-heading {
-    padding-inline: 24px;
+    grid-template-columns: 216px minmax(0, 1fr);
   }
 }
 @media (max-width: 600px) {
@@ -246,13 +255,13 @@ function openResult(result: SettingsSearchResult): void {
   .settings-workspace[data-navigation='true'] .settings-page-area {
     display: none;
   }
-  .settings-page-inner {
-    padding: 20px;
-    gap: 22px;
-  }
   .settings-page-heading {
-    padding: 8px 10px;
+    display: flex;
+    padding: 8px 16px;
     border-bottom: 1px solid var(--line);
+  }
+  .settings-page-inner {
+    padding-top: 12px;
   }
   .settings-page-heading p {
     gap: 4px 7px;
@@ -260,22 +269,5 @@ function openResult(result: SettingsSearchResult): void {
   .settings-sections {
     display: inline-flex;
   }
-}
-/* Плагины используют всю область; геометрия остальных страниц сохраняется. */
-.settings-workspace[data-page='plugins.installed'] .settings-page-inner {
-  max-width: none;
-  margin: 0;
-  padding: 12px 16px 20px;
-  gap: 16px;
-}
-.settings-workspace[data-page='plugins.installed'] .settings-page-heading {
-  padding-inline: 16px;
-}
-.settings-workspace[data-page='plugins.installed'] .settings-page-intro {
-  gap: 4px;
-}
-.settings-workspace[data-page='plugins.installed'] .settings-page-intro h3 {
-  font-size: 15px;
-  letter-spacing: normal;
 }
 </style>

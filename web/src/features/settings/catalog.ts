@@ -383,7 +383,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     id: 'interface.behavior',
     groupId: 'interface',
     label: translator.t('ru', 'settings.behavior'),
-    description: translator.t('ru', 'settings.screenWakeLockOnThisDevice'),
+    description: translator.t('ru', 'settings.languageAndScreenWakeLockOnThisDevice'),
   },
   {
     id: 'interface.notifications',
@@ -466,7 +466,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   {
     id: 'speech.advanced',
     groupId: 'speech',
-    label: translator.t('ru', 'settings.advancedParameters'),
+    label: translator.t('ru', 'settings.speechAdvancedPage'),
     description: translator.t('ru', 'settings.modelsDeviceEnvironmentAndPerformanceMeasurement'),
   },
   {
@@ -636,7 +636,7 @@ const GROUP_MESSAGES: Record<string, Record<string, string>> = {
 const PAGE_MESSAGES: Record<string, Record<string, string>> = {
   "interface.behavior": {
     "label": "settings.behavior",
-    "description": "settings.screenWakeLockOnThisDevice"
+    "description": "settings.languageAndScreenWakeLockOnThisDevice"
   },
   "interface.notifications": {
     "label": "settings.notifications",
@@ -691,7 +691,7 @@ const PAGE_MESSAGES: Record<string, Record<string, string>> = {
     "description": "settings.modelCatalogDownloadsAndCopying"
   },
   "speech.advanced": {
-    "label": "settings.advancedParameters",
+    "label": "settings.speechAdvancedPage",
     "description": "settings.modelsDeviceEnvironmentAndPerformanceMeasurement"
   },
   "connections.b24": {

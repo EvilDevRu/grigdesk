@@ -102,6 +102,7 @@ export const useSettingsStore = defineStore('settings', () => {
   /**
    * Старый install ID нормализуется до проверки видимого каталога страниц.
    * Хранилище и entity остаются прежними; открытие не запускает отдельный диалог.
+   * В дереве раскрыта только группа выбранной страницы, остальные сворачиваются.
    */
   function selectPage(id: string, entity?: string, tab?: string): boolean {
     const selected = normalizeSettingsPageId(id);
@@ -119,8 +120,8 @@ export const useSettingsStore = defineStore('settings', () => {
 
     const group = SETTINGS_PAGES.find((page) => page.id === selected)?.groupId;
 
-    if (group && !expandedGroups.value.includes(group)) {
-      expandedGroups.value.push(group);
+    if (group) {
+      expandedGroups.value = [group];
     }
 
     try {
@@ -251,12 +252,13 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
+   * Раскрытие группы сворачивает остальные: в дереве открыта одна группа.
    * Сохраняется только список известных ID групп, без состояния формы и поиска.
    * Ошибка storage оставляет раскрытие рабочим в текущем документе.
    */
   function setGroupExpanded(id: string, expanded: boolean): void {
     expandedGroups.value = expanded
-      ? [...new Set([...expandedGroups.value, id])]
+      ? [id]
       : expandedGroups.value.filter((group) => group !== id);
 
     try {

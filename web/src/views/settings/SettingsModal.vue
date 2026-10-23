@@ -6,6 +6,7 @@
     :body-inset="false"
     :busy="busy"
     data-role="settings-modal"
+    data-ui-workspace
     @close="settings.requestClose"
   >
     <template #header>
@@ -56,14 +57,14 @@
           </div>
         </div>
         <div class="settings-actions">
-          <UiButton v-if="settings.snapshot.delayed" @click="settings.stopWaiting">
+          <UiButton data-context="workspace-form-wrap" v-if="settings.snapshot.delayed" @click="settings.stopWaiting">
             {{ t('settings.stopWaiting') }}
           </UiButton>
-          <UiButton :disabled="busy" @click="settings.cancel">{{ t('settings.cancel') }}</UiButton>
-          <UiButton :disabled="busy || !settings.snapshot.dirtyCount" @click="settings.apply('apply')">
+          <UiButton data-context="workspace-form-wrap" :disabled="busy" @click="settings.cancel">{{ t('settings.cancel') }}</UiButton>
+          <UiButton data-context="workspace-form-wrap" :disabled="busy || !settings.snapshot.dirtyCount" @click="settings.apply('apply')">
             {{ t('settings.apply') }}
           </UiButton>
-          <UiButton
+          <UiButton data-context="workspace-form-wrap"
             variant="solid"
             tone="accent"
             :disabled="busy"
@@ -154,7 +155,7 @@ onBeforeUnmount(() => settings.dispose('unmount'));
 }
 .settings-save-status {
   min-width: 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ink-mid);
 }
 .settings-save-summary {

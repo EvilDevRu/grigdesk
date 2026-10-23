@@ -33,7 +33,10 @@ const draft = settings.sessionService('devicePairing', () => reactive({ name: ''
 <style scoped>
 .settings-devices {
   display: grid;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
+}
+.settings-devices > [data-settings-field] + [data-settings-field] {
+  margin-top: -12px;
 }
 </style>

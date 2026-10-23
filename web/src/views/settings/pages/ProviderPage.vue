@@ -32,7 +32,7 @@
               :key="entry.id"
               :data-select-provider="entry.id"
               :pressed="selected?.id === entry.id"
-              data-ui-settings-catalog
+              data-ui-settings-catalog data-context="provider-entry"
               @click="selectProvider(entry.id)"
             >
               <template #leading><ProviderIcon :provider="entry" :size="20" /></template>
@@ -50,7 +50,6 @@
       </div>
       <div class="settings-provider-actions">
         <UiButton
-          variant="ghost"
           data-ui-settings-sidebar-action
           :disabled="refreshing"
           @click="refreshRegistry"
@@ -58,7 +57,6 @@
           {{ t('settings.recheck') }}
         </UiButton>
         <UiButton
-          variant="ghost"
           data-ui-settings-sidebar-action
           :disabled="checking"
           @click="checkUpdates"
@@ -102,7 +100,7 @@
                   @update:model-value="editCredential(field.env, $event)"
                 />
                 <p v-if="field.set && field.inFile === false">{{ t('settings.theKeyIsConfiguredOutsideTheService') }}</p>
-                <UiButton
+                <UiButton data-context="workspace-form-wrap"
                   v-if="field.inFile === true"
                   data-delete-key
                   @click="deleteKey(field)"
@@ -140,7 +138,7 @@
           <div v-for="field in hiddenCredentialDrafts" :key="field.env">
             <SettingsField :address="fieldAddress('credentials', field.env)">
               <p>{{ t('settings.theFieldIsHiddenByTheSelected') }}</p>
-              <UiButton @click="settings.discardField(credentialsId, field.env)">{{ t('settings.discardEdit') }}</UiButton>
+              <UiButton data-context="workspace-form-wrap" @click="settings.discardField(credentialsId, field.env)">{{ t('settings.discardEdit') }}</UiButton>
             </SettingsField>
           </div>
           <p v-if="!selected.credentials?.length">{{ t('settings.thisProviderHasNoEditableAccessKeys') }}</p>
@@ -202,14 +200,17 @@
               <p v-if="nativeState.error" role="alert">{{ nativeState.error }}</p>
               <template v-if="nativeState.catalog">
                 <p>{{ nativeState.catalog.scope.label }} {{ t('settings.savedForTheNextRun') }}</p>
-                <UiInput
-                  v-model="nativeQuery"
-                  type="search"
-                  :aria-label="t('settings.findAnAdvancedParameter')"
-                />
-                <UiButton :disabled="nativeState.loading" @click="reloadNative">
-                  {{ t('settings.recheckCatalog') }}
-                </UiButton>
+                <div class="settings-native-tools">
+                  <UiInput
+                    v-model="nativeQuery"
+                    type="search"
+                    :aria-label="t('settings.findAnAdvancedParameter')"
+                    :placeholder="t('settings.findAnAdvancedParameter')"
+                  />
+                  <UiButton data-context="workspace-form-wrap" :disabled="nativeState.loading" @click="reloadNative">
+                    {{ t('settings.recheckCatalog') }}
+                  </UiButton>
+                </div>
                 <SettingsNativeEditor
                   v-for="field in nativeView.editable"
                   :key="field.id"
@@ -224,7 +225,7 @@
                   :address="fieldAddress('native', field.path)"
                 >
                   <p>{{ field.reason }}</p>
-                  <UiButton @click="settings.unsetField(nativeId, field.id)">{{ t('settings.clearSelection') }}</UiButton>
+                  <UiButton data-context="workspace-form-wrap" @click="settings.unsetField(nativeId, field.id)">{{ t('settings.clearSelection') }}</UiButton>
                 </SettingsField>
               </template>
             </section>
@@ -279,7 +280,7 @@
             <h4>{{ t('settings.providerResources') }}</h4>
             <ProviderUsageResources :provider-id="selected.id" :resources="resources" />
           </section>
-          <UiButton
+          <UiButton data-context="workspace-form-wrap"
             v-if="selected.installed && selected.canUpdate"
             :disabled="Boolean(providers.updating)"
             @click="providers.updateCli(selected.id)"
@@ -316,13 +317,13 @@
       <div v-for="item in orphaned" :key="`${item.resourceId}:${item.field.key}`">
         <SettingsField :address="item.field.address">
           <p>{{ item.field.unavailable }}</p>
-          <UiButton
+          <UiButton data-context="workspace-form-wrap"
             v-if="item.resourceId === nativeId"
             @click="settings.unsetField(item.resourceId, item.field.key)"
           >
             {{ t('settings.reset') }}
           </UiButton>
-          <UiButton @click="settings.discardField(item.resourceId, item.field.key)">{{ t('settings.discardEdit') }}</UiButton>
+          <UiButton data-context="workspace-form-wrap" @click="settings.discardField(item.resourceId, item.field.key)">{{ t('settings.discardEdit') }}</UiButton>
         </SettingsField>
       </div>
     </section>
@@ -766,8 +767,8 @@ watch(showNative, async (open) => {
 <style scoped>
 .settings-provider {
   display: grid;
-  grid-template-columns: 176px minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px;
   min-width: 0;
   align-content: start;
 }
@@ -778,19 +779,27 @@ watch(showNative, async (open) => {
 .settings-provider-sidebar {
   display: grid;
   align-content: start;
-  gap: 20px;
+  gap: 12px;
   min-width: 0;
   padding-right: 16px;
   border-right: 1px solid var(--line);
 }
 .settings-provider-list {
   display: grid;
-  gap: 24px;
+  gap: 16px;
   min-width: 0;
+}
+/* Группы каталога подписаны тихо, как группы плагинов: это не разделы формы. */
+.settings-provider-list :deep(.settings-section-heading) {
+  padding-top: 0;
+}
+.settings-provider-list :deep(.settings-section-heading h4) {
+  color: var(--ink-mid);
+  font-size: 12px;
 }
 .settings-provider-options {
   display: grid;
-  gap: 3px;
+  gap: 8px;
   width: 100%;
   min-width: 0;
 }
@@ -842,13 +851,13 @@ watch(showNative, async (open) => {
 .settings-provider-title h4 {
   flex: 1 1 140px;
   margin: 0;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.4;
 }
 .settings-provider-status {
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
 }
 .settings-provider-facts {
   display: grid;
@@ -870,6 +879,12 @@ watch(showNative, async (open) => {
   margin: 0;
   overflow-wrap: anywhere;
 }
+.settings-native-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
 .settings-native-panel {
   display: grid;
   gap: 12px;
@@ -882,7 +897,7 @@ watch(showNative, async (open) => {
   gap: 6px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -893,10 +908,10 @@ watch(showNative, async (open) => {
 .settings-provider-model code, .settings-provider-model span {
   color: var(--ink-mid);
 }
-@media (max-width: 1000px) {
+@container settings-page (max-width: 680px) {
   .settings-provider {
     grid-template-columns: minmax(0, 1fr);
-    gap: 24px;
+    gap: 16px;
   }
   .settings-provider-sidebar {
     gap: 10px;
@@ -914,5 +929,9 @@ watch(showNative, async (open) => {
     display: flex;
     flex-wrap: wrap;
   }
+}
+@container settings-page (max-width: 400px) {
+  .settings-native-tools { grid-template-columns: minmax(0, 1fr); }
+  .settings-native-tools > :last-child { justify-self: start; }
 }
 </style>

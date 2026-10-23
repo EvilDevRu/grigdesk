@@ -15,16 +15,22 @@ withDefaults(defineProps<{ scope?: string }>(), { scope: undefined });
 .settings-scope {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 12px;
+  align-items: center;
+  gap: 4px 10px;
   min-width: 0;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
 }
+/* Область — тихая метка рядом с фразой о сохранении, а не ещё одна строка текста. */
 .settings-scope-label {
   flex: none;
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
   color: var(--ink-mid);
+  font-size: 11px;
   font-weight: 500;
+  line-height: 18px;
 }
 .settings-scope p {
   flex: 1 1 200px;

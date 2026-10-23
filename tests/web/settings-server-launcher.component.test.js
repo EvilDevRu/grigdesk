@@ -35,7 +35,7 @@ test('Автозапуск: boot/login/missing, независимый ярлы�
   assert.equal(h.writes().length, 0);
   await h.settings.apply();
   assert.deepEqual(h.writes()[0].body, { enabled: false });
-  assert.match(h.wrapper.text(), /живой процесс продолжает работу/);
+  assert.match(h.wrapper.text(), /живой процесс продолжает работать/);
 
   const shortcut = h.wrapper.findAll('button')
     .find((item) => /Создать ярлык|Удалить ярлык/.test(item.text()));
