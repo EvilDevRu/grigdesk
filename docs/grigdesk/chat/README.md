@@ -131,6 +131,7 @@
 - [Descriptor автономного DeepSeek: metadata probe, cache-dir и безопасные отказы](deepseek-binary-descriptor.md)
 - [Async cache metadata DeepSeek: single-flight, замена файла и отмена waiter](deepseek-binary-probe-cache.md)
 - [Остановка автономного DeepSeek: IPC bootstrap, disposal и честный timeout](deepseek-binary-lifecycle.md)
+- [Сетевой сбой DeepSeek и отказ остановки: раздельные причины и безопасное продолжение](deepseek-transport-cleanup.md)
 - [Отказ запуска GLM: выход процесса прерывает ожидание URL и HTTP-авторизацию](glm-startup-failure.md)
 - [Этап фабрики на GLM: политика без вопросов, typed контекст хоста, wrapper и metadata](glm-factory-stage.md)
 - [Замена DeepSeek сохраняет heartbeat живого WebSocket](deepseek-publication-event-loop.md)

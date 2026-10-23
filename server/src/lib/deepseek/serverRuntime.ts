@@ -8,7 +8,7 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { DeepSeekWebClient } from './serverClient.ts';
 import type { DeepSeekRuntimeDescriptor } from './runtimeProcess.ts';
 import { verifyDeepSeekRuntimeDescriptorAsync } from './runtimeProcess.ts';
-import { spawnDeepSeekBinary } from './binaryProcess.ts';
+import { combineDeepSeekCleanupFailure, spawnDeepSeekBinary } from './binaryProcess.ts';
 
 export interface DeepSeekServerProcess {
   client: DeepSeekWebClient;
@@ -196,7 +196,13 @@ export async function startDeepSeekServer(options: StartDeepSeekServerOptions): 
     options.signal?.removeEventListener('abort', abort);
     child.off('error', startupFailed);
     child.off('exit', startupExited);
-    await stop();
+
+    try {
+      await stop();
+    } catch (cleanup) {
+      throw combineDeepSeekCleanupFailure(error, cleanup);
+    }
+
     throw error;
   }
 }

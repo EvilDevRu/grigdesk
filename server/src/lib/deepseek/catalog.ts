@@ -14,7 +14,7 @@ import {
   verifyDeepSeekRuntimeDescriptorAsync,
 } from './runtimeProcess.ts';
 import type { DeepSeekRuntimeConfig } from './runtimeProcess.ts';
-import { spawnDeepSeekBinary } from './binaryProcess.ts';
+import { combineDeepSeekCleanupFailure, spawnDeepSeekBinary } from './binaryProcess.ts';
 
 interface SelectOption {
   value?: unknown;
@@ -197,6 +197,8 @@ export async function readDeepSeekCatalog({
   const exit = waitForExit(child);
   const client = createAcpClient(child);
   let sessionId = '';
+  let primaryFailure: unknown;
+
   try {
     await initializeAcp(client, 10_000);
     const created = await client.request('session/new', {
@@ -221,6 +223,10 @@ export async function readDeepSeekCatalog({
     ]);
     if (!ended) child.kill('SIGTERM');
     return result;
+  } catch (error) {
+    primaryFailure = error;
+
+    throw error;
   } finally {
     if (!client.closed) {
       if (sessionId) await client.request('session/close', { sessionId }, 1_000).catch(() => {});
@@ -232,6 +238,8 @@ export async function readDeepSeekCatalog({
     if (owned) {
       try {
         await owned.stop();
+      } catch (cleanup) {
+        throw primaryFailure === undefined ? cleanup : combineDeepSeekCleanupFailure(primaryFailure, cleanup);
       } finally {
         client.close();
       }
