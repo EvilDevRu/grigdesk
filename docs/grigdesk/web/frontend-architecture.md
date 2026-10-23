@@ -1,6 +1,6 @@
 # Веб (web/src/)
 
-- `views/`: Board (доска B24), Pipeline (конвейер + модалка этапа), Agents (база агентов-стадий),
+- `views/`: Board (доска B24), Pipeline (конвейер + модалка этапа),
   Chats (телеграм-раскладка чатов), Routes (редактор маршрутов + живой превью),
   Projects, Code (дерево/файл/git), Shelf (полка задач), Documents (скрытый route просмотра MD/TXT),
   Diff (Monaco), Tools (агрегатор), Video, Terminal,

@@ -48,7 +48,6 @@ export function environment(): NodeJS.ProcessEnv {
     FACTORY_CONTROL_ROOT: '/D/factory/control',
     FACTORY_CONFIG_ROOT: '/D/factory/config',
     FACTORY_PROFILES_DIR: '/D/profiles',
-    GRIGDESK_AGENTS_DIR: '/D/agents',
     GRIGDESK_ROUTES_DIR: '/D/routes',
     GRIGDESK_MEDIA_DIR: '/D/media',
     GRIGDESK_MEDIA_HF_DIR: '/D/hf',

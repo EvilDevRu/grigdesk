@@ -1,7 +1,7 @@
 # Карта экранов для визуальной сверки
 
 Источник маршрутов — `web/src/router.ts`: 24 маршрута с компонентами и редирект
-`/` → `/board`. Это карта точек входа; вкладки, модальные окна и состояние
+`/` → `/board` и `/agents` → `/routes`. Это карта точек входа; вкладки, модальные окна и состояние
 выбранного объекта не становятся отдельными маршрутами автоматически.
 
 ## Маршруты
@@ -13,7 +13,6 @@
 | `/board` | `BoardView.vue` |
 | `/pipeline` | `PipelineView.vue` |
 | `/chats` | `ChatsView.vue` |
-| `/agents` | `AgentsView.vue` |
 | `/routes` | `RoutesView.vue` |
 | `/projects/:id?` | `ProjectsView.vue` |
 | `/tools` | `ToolsView.vue` |

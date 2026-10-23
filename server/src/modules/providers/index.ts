@@ -3,7 +3,6 @@
 // топбар рисует иконки, чат строит выбор модели/эффорта, схемы выбирают исполнителя по id.
 // ПОДКЛЮЧЕНИЕ НОВОГО ИИ — МОДУЛЬНОЕ: один файл в server/src/lib/executors/ (контракт там),
 // этот модуль ничего не знает про конкретных вендоров.
-// Не путать с /api/agents — там база агентов-стадий конвейера (промпты).
 import { resolveWorkdirCapability } from '../../lib/chat/workdir.ts';
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';

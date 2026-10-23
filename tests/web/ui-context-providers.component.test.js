@@ -498,7 +498,6 @@ test('COMP-PROV-01..08: реальные страницы используют o
     ['tool', 'web/src/shared/layout/ToolHost.vue'],
     ['task', 'web/src/views/TaskModal.vue'],
     ['pipeline', 'web/src/views/PipelineView.vue'],
-    ['agents', 'web/src/views/AgentsView.vue'],
     ['chats', 'web/src/views/ChatsView.vue'],
     ['projects', 'web/src/views/ProjectsView.vue'],
   ].map(async ([id, path]) => [id, await source(path)])));
@@ -519,7 +518,6 @@ test('COMP-PROV-01..08: реальные страницы используют o
     files.task.match(/function taskContextDetails[\s\S]*?\n\}/)?.[0] || '',
     /description|comment|telegram|portal|payload/i,
   );
-  assert.match(files.agents, /details:\s*\{ agentId \}/);
   assert.match(files.chats, /details:\s*\{ chatId \}/);
   assert.doesNotMatch(files.chats, /details:\s*\{[^}]*messages|details:\s*\{[^}]*draft|details:\s*\{[^}]*sessionId/s);
   assert.match(files.projects, /useUiContextSource\('projects'/);

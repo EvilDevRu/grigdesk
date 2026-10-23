@@ -461,6 +461,105 @@ test('SA-02: без адаптера новая возможность отсу�
   f.shell.close();
 });
 
+test('TW-N03b: старый surfaces/open отвергает tool и tool+instance без вызова native', async (t) => {
+  const calls = [];
+  const f = fixture({
+    nativeWindows: {
+      open: async (...args) => {
+        calls.push(args);
+
+        return true;
+      },
+      main: async () => true,
+    }
+  });
+
+  t.after(() => f.shell.close());
+
+  for(const body of [
+    { kind: 'tool', id: 'code' },
+    {
+      kind: 'tool',
+      id: 'code',
+      instance: 'tool-instance-aaaaaaaa'
+
+
+    },
+  ]) {
+    const response = await invokeSurface(f.shell, '/__shell/surfaces/open', body);
+
+    assert.equal(response.status, 400);
+    assert.equal(response.result.error, 'invalid_surface');
+  }
+
+  assert.deepEqual(calls, []);
+});
+
+test('TW-N03: отдельный tool control, точная форма и неизвестная instance', async (t) => {
+  const calls = [];
+  const instance = 'tool-instance-aaaaaaaa';
+  const f = fixture({
+    nativeWindows: {
+
+      open: async () => true,
+
+      main: async () => true,
+
+      async tool(origin, request) {
+        calls.push({ origin, request });
+
+        return request.action === 'open'
+          ? { opened: true, instance }
+          : { closed: request.instance === instance };
+      },
+
+
+
+    }
+  });
+
+  t.after(() => f.shell.close());
+
+  const opening = await invokeSurface(f.shell, '/__shell/surfaces/tool', { action: 'open', id: 'code' });
+
+  assert.equal(opening.status, 200, 'В защищённой трубе отсутствует управление tool windows');
+  assert.deepEqual(opening.result, { opened: true, instance });
+  assert.equal((await invokeSurface(f.shell, '/__shell/surfaces/tool', {
+
+    action: 'close',
+    id: 'code',
+    instance: 'stale-instance',
+
+
+
+  })).result.closed, false);
+
+  for(const body of [
+    { action: 'open', id: 'terminal' },
+    {
+      action: 'open',
+      id: 'code',
+      url: 'https://example.org'
+
+
+    },
+    { action: 'close', id: 'code' },
+    { action: 'execute', id: 'code' },
+  ]) {
+    assert.equal((await invokeSurface(f.shell, '/__shell/surfaces/tool', body)).status, 400);
+  }
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].origin, 'http://127.0.0.1:47101');
+
+  const noNative = fixture();
+
+  t.after(() => noNative.shell.close());
+  assert.equal((await invokeSurface(noNative.shell, '/__shell/surfaces/tool', {
+    action: 'open', id: 'code',
+  })).status, 404);
+});
+
 for (const code of ['server_start_failed', 'server_start_timeout']) {
   test(`SH-START-REASON: ${code} сохраняет причину и рабочий повтор`, async (t) => {
     const value = fixture();

@@ -2,10 +2,12 @@ import { migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import ts from '../../web/node_modules/typescript/lib/typescript.js';
 
 import { createWebLog } from '../../web/src/shared/webLog.ts';
 import {
   WEB_LOG_ROUTES,
+  normalizeRoute,
   projectWebLogEntry,
   utf8Bytes,
   vueErrorSource,
@@ -184,9 +186,40 @@ test('сопоставитель выбирает самый точный шаб
   assert.equal(match('/api/unknown/private'), 'other');
 });
 
-test('шаблоны маршрутов окна совпадают с router.js', async () => {
-  const router = await readFile(migrationUrl('src/router.ts'), 'utf8');
-  const paths = [...router.matchAll(/\{\s*path:\s*'([^']+)'/gu)].map((match) => match[1]);
+test('шаблоны страниц журнала совпадают с component-маршрутами и корнем окна', async () => {
+  const source = await readFile(migrationUrl('src/router.ts'), 'utf8');
+  const ast = ts.createSourceFile('router.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const statement = ast.statements.find((node) => ts.isVariableStatement(node)
+    && node.declarationList.declarations.some((entry) => entry.name.getText(ast) === 'routes'));
+
+  assert.ok(statement && ts.isVariableStatement(statement));
+
+  const declaration = statement.declarationList.declarations.find((entry) =>
+    entry.name.getText(ast) === 'routes');
+
+  assert.ok(declaration?.initializer && ts.isArrayLiteralExpression(declaration.initializer));
+
+  const paths = ['/'];
+
+  for (const entry of declaration.initializer.elements) {
+    assert.ok(ts.isObjectLiteralExpression(entry));
+
+    const properties = entry.properties.filter(ts.isPropertyAssignment);
+    const path = properties.find((property) => property.name.getText(ast) === 'path')?.initializer;
+    const hasComponent = properties.some((property) => property.name.getText(ast) === 'component');
+
+    assert.ok(path && ts.isStringLiteral(path));
+
+    if (hasComponent) {
+      paths.push(path.text);
+    }
+  }
 
   assert.deepEqual([...WEB_LOG_ROUTES].sort(), [...new Set(paths)].sort());
+});
+
+test('RET-LOG: снятый адрес не является страницей журнала', () => {
+  assert.equal(normalizeRoute('/agents'), 'other');
+  assert.equal(normalizeRoute('/agents?x=1'), 'other');
+  assert.equal(normalizeRoute('/routes'), '/routes');
 });

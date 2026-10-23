@@ -20,13 +20,17 @@
   </aside>
 
   <template v-for="item in tools" :key="item.id">
-    <ToolDock v-if="dock.mounted[item.id]"
+    <ToolDock v-if="dock.mounted[item.id] && !dock.windowOwners[item.id]"
               :ref="(value) => setDockRef(item.id, value)" :mode="modeOf(item.id)"
+              :detachable="canDetach(item.id)" @detach="detach(item.id)"
               :label="item.label" :width="dock.width" :min-width="minWidth" :max-width="maxWidth"
               :workspace="route.meta.layout === 'workspace'"
               :expanded="expandedOf(item.id)" :expanded-width="contentWidth"
               @hide="hideDock(item.id)" @toggle-expanded="toggleDockExpanded"
               @resize="resize($event)" @resize-end="resize($event, true)">
+      <UiInlineMessage v-if="dock.runtime[item.id]?.transferError" tone="danger">
+        {{ dock.runtime[item.id]?.transferError }}
+      </UiInlineMessage>
       <component :is="item.component" :ref="(value: unknown) => setPanelRef(item.id, value)"
                  v-bind="item.panelProps || {}"
                  :active="presentedTool === item.id" :compact="compactOf(item.id)"
@@ -45,6 +49,13 @@
 </template>
 
 <script setup lang="ts">
+import { toolWindowText } from '../tools/toolWindowMessages.ts';
+import { getToolWindowCoordinator } from '../../stores/toolWindows.ts';
+import { useShellStore } from '../../stores/shell.ts';
+import { desktopWindowRole } from '../../../../shared/desktop/desktopWindowContract.ts';
+import { setToolPanelPorts } from '../tools/toolWindowState.ts';
+import type { ToolPanelHandle, ToolWindowState } from '../tools/toolWindowState.ts';
+
 import { uiLocale } from '../../ui.ts';
 
 import { t } from '../../ui.ts';
@@ -66,11 +77,12 @@ import { useHotkeysStore } from '../../stores/hotkeys.ts';
 import ToolDock from './ToolDock.vue';
 import NavigationCount from './NavigationCount.vue';
 import { shelfNavBadge } from '../navBadges.ts';
-import { UiIconButton, useUiLayer, vTooltip } from '../../ui';
+import { UiIconButton, UiInlineMessage, useUiLayer, vTooltip } from '../../ui';
 
 const route = useRoute();
 const router = useRouter();
 const dock = useDockStore();
+const shell = useShellStore();
 const plugins = usePluginsStore();
 const shelf = useTaskShelfStore();
 const hotkeys = useHotkeysStore();
@@ -95,12 +107,14 @@ const routeState = computed(() => (routeItem.value
   : null));
 const presentedTool = computed(() => {
   if (routeItem.value) {
-    return routeState.value === 'enabled' ? routeItem.value.id : null;
+    return routeState.value === 'enabled' && !dock.windowOwners[routeItem.value.id]
+      ? routeItem.value.id : null;
   }
 
   const item = toolById(plugins, dock.activeTool);
 
-  return dockCapable.value && dock.isOpen && toolAvailability(item, plugins) === 'enabled'
+  return dockCapable.value && dock.isOpen && !dock.windowOwners[dock.activeTool || '']
+    && toolAvailability(item, plugins) === 'enabled'
     ? item!.id
     : null;
 });
@@ -142,7 +156,7 @@ function railTitle(item: ToolMeta) {
   return [item.label, detail, combo].filter(Boolean).join(' · ');
 }
 
-interface FocusHandle {
+interface FocusHandle extends ToolPanelHandle {
   focus?: () => void;
   focusHeader?: () => void;
 }
@@ -296,6 +310,10 @@ function focusPresented({ dockHeader = false } = {}) {
  * Один хост сохраняет уже смонтированную панель и очередь её намерений.
  */
 async function clickRail(item: ToolMeta) {
+  if (await getToolWindowCoordinator(dock)?.activateIfDetached(item.id)) {
+    return;
+  }
+
   if (routeTool.value) {
     if (routeTool.value === item.id) {
       focusPresented();
@@ -349,6 +367,47 @@ function onHotkey(event: KeyboardEvent) {
   activateTool(item);
 }
 
+function canDetach(id: string) {
+  return desktopWindowRole(navigator.userAgent) === 'main' && shell.capabilities.includes('windows')
+    && !['terminal', 'studio3d'].includes(id);
+}
+
+function detach(id: string) {
+  void getToolWindowCoordinator(dock)?.detach(id);
+}
+
+setToolPanelPorts(dock, {
+  async exportState(id) {
+    return await panelRefs.get(id)?.exportState?.() ?? { id };
+  },
+  async unmount(id) {
+    dock.setMounted(id, false);
+    await nextTick();
+  },
+/**
+ * Восстанавливает локальную панель после фактического unmount окна-источника.
+ * Lazy-компонент получает снимок только после появления его публичного handle.
+ */
+  async mount(id, state: ToolWindowState) {
+    delete dock.windowOwners[id];
+    dock.setMounted(id, true);
+    await nextTick();
+
+    const transfersState = ['code', 'shelf', 'ssh', 'db', 'docker'].includes(id);
+
+    for (let attempt = 0; attempt < 200
+      && (!panelRefs.get(id) || transfersState && !panelRefs.get(id)?.importState); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    if (transfersState && !panelRefs.get(id)?.importState) {
+      throw new Error(toolWindowText('toolStateNotReady'));
+    }
+
+    await panelRefs.get(id)?.importState?.(state);
+  },
+});
+
 function hideDock(id = dock.activeTool) {
   dock.close();
   nextTick(() => railButtons.get(id)?.focus?.());
@@ -396,7 +455,7 @@ function measureContent() {
 watch([presentedTool, presentation, dockCapable], () => {
   const id = presentedTool.value;
 
-  if (id && presentation.value !== 'placeholder') {
+  if (id && !dock.windowOwners[id] && presentation.value !== 'placeholder') {
     dock.setMounted(id, true);
   }
   // В route-only режиме живёт только текущая tool-страница. Уход с неё обязан

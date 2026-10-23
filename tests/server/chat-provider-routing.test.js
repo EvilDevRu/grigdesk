@@ -47,7 +47,6 @@ async function apiFixture(t, { executor = null, withArtifacts = false } = {}) {
     chatBindingsDir: path.join(root, 'bindings'),
     rootDir: root,
     factoryHome: root,
-    agentsDir: path.join(root, 'agents'),
     port: 18140,
     ...(withArtifacts ? { artifactsDir: path.join(root, 'artifacts') } : {}),
   };

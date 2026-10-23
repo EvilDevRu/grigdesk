@@ -33,7 +33,6 @@ async function apiFixture(t, { executor, ticket = null } = {}) {
     chatBindingsDir: path.join(root, 'bindings'),
     rootDir: root,
     factoryHome: root,
-    agentsDir: path.join(root, 'agents'),
     ticketsDir,
     port: 18140,
   };

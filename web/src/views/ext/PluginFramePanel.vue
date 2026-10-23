@@ -42,6 +42,10 @@ defineExpose({ focus, src: props.src });
   height: 100%;
 }
 
+.plugin-frame.is-compact {
+  padding-top: 36px;
+}
+
 .plugin-frame__view {
   flex: 1 1 auto;
   width: 100%;

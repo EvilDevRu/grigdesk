@@ -63,8 +63,6 @@ export function legacyEnvWarnings(env: Readonly<Record<string, string | undefine
 
 export const HOST_ENV_SUFFIXES: readonly string[] = [
   '3D_DIR',
-  'AGENTS_DIR',
-  'AGENTS_SEED_DIR',
   'ALREADY_RUNNING',
   'ANALYSIS_CONCURRENCY',
   'ANALYSIS_DIR',

@@ -1105,6 +1105,10 @@
 </template>
 
 <script setup lang="ts">
+import { toolWindowText } from '../../shared/tools/toolWindowMessages.ts';
+import { sendCodeWindowAction } from '../../shared/tools/toolWindowActions.ts';
+import { parseToolWindowState } from '../../shared/tools/toolWindowState.ts';
+import type { ToolWindowState } from '../../shared/tools/toolWindowState.ts';
 // Плагин «Код» — просмотр кода и управление Git проектов, как в VS Code:
 // слева рейка режимов (код | гит), дальше панель (дерево файлов или изменения),
 // справа Monaco. Смотреть можно ЛЮБОЕ дерево репозитория — основное или worktree
@@ -2267,7 +2271,113 @@ function focusPanel() {
   panelHeader.value?.focus?.();
 }
 
-defineExpose({ focus: focusPanel });
+defineExpose({
+  focus: focusPanel,
+  exportState,
+  importState,
+});
+
+/**
+ * Экспортирует только выбор и черновик после завершения уже принятой команды.
+ * Незавершённая мутация остаётся у прежнего владельца и блокирует перенос.
+ */
+async function exportState(): Promise<ToolWindowState> {
+  if (gitBusy.value || askAgentBusy.value) {
+    throw new Error(toolWindowText('toolCodeBusy'));
+  }
+
+  while (loading.value || contextLoading.value || fileLoading.value || processingIntents) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  return {
+    project: project.value,
+    repo: repoKey.value,
+    root: treePath.value,
+    tab: tab.value,
+    gitPane: gitPane.value,
+    file: fileSel.value,
+    gitRef: gitSel.value,
+    line: fileEditor?.getPosition?.()?.lineNumber || 1,
+    commitSel: [...commitSel.value],
+    branchMode: branchMode.value,
+    commitsWithWork: commitsWithWork.value,
+    commitMessage: commitMessage.value,
+    amendCommit: amendCommit.value,
+    commitComposerOpen: commitComposerOpen.value,
+    commitComposerTouched: commitComposerTouched.value,
+  };
+}
+
+/**
+ * Восстанавливает точную рабочую копию до файла, а черновик после сбросов выбора.
+ * Скрытая панель загружает каталог до импорта, не ожидая показа после подтверждения возврата.
+ * Исчезнувший путь показывает прежнюю ошибку и не открывает одноимённый файл другой копии.
+ */
+async function importState(value: ToolWindowState): Promise<void> {
+  const state = parseToolWindowState('code', value);
+
+  if (!state) {
+    throw new Error(toolWindowText('toolCodeStateInvalid'));
+  }
+
+  if (!initialized && !props.active) {
+    await activate();
+  }
+
+  while (loading.value || contextLoading.value || fileLoading.value || processingIntents) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  // После перезагрузки main снимок принятого окна может отсутствовать.
+  // Пустой снимок оставляет обычный выбор панели, не адресует рабочую копию undefined.
+  if (Object.keys(state).length === 0) {
+    return;
+  }
+
+  if (typeof state.project === 'string' && project.value !== state.project) {
+    await setProject(state.project);
+  }
+
+  const target = contexts.value.find((item) => item.repoKey === state.repo && item.treePath === state.root);
+
+  if (!target) {
+    error.value = `Рабочая копия ${String(state.root)} недоступна — проверь пути в разделе «Проекты»`;
+
+    return;
+  }
+
+  if (contextId.value !== target.id) {
+    await setContext(target.id);
+  }
+
+  if (state.tab === 'files' && typeof state.file === 'string' && state.file) {
+    await openIntentFile({
+      type: 'open-file',
+      project: String(state.project),
+      repo: String(state.repo),
+      root: String(state.root),
+      path: state.file,
+      line: Number(state.line) || 1,
+    });
+  } else if (state.tab === 'git') {
+    branchMode.value = state.branchMode === true;
+    commitSel.value = new Set(Array.isArray(state.commitSel) ? state.commitSel.map(String) : []);
+    commitsWithWork.value = state.commitsWithWork !== false;
+    gitPane.value = ['changes', 'commits', 'branches'].includes(String(state.gitPane))
+      ? state.gitPane as GitPane : 'changes';
+    await setTab('git');
+
+    if (typeof state.gitRef === 'string' && gitEntries.value.has(state.gitRef)) {
+      await selectGit(state.gitRef);
+    }
+  }
+
+  commitMessage.value = typeof state.commitMessage === 'string' ? state.commitMessage : '';
+  amendCommit.value = state.amendCommit === true;
+  commitComposerOpen.value = state.commitComposerOpen === true;
+  commitComposerTouched.value = state.commitComposerTouched === true;
+}
 
 function selectProject(event: Event) {
   if (event.target instanceof HTMLSelectElement) {
@@ -2991,17 +3101,21 @@ async function askAgentAboutCode() {
     });
     const taskId = selectedContext.task.replace(/\D/gu, '');
 
-    chatStore.newSession({
+    const action = {
       ...(taskId ? { taskId } : {}),
       workdir: {
-        kind: 'project',
+        kind: 'project' as const,
         projectId: project.value,
         repoKey: selectedContext.repoKey
       },
       title: `Код · ${relPath.split('/').at(-1) || relPath}`,
       draft,
-    });
-    await router.push('/chats');
+    };
+
+    if (!sendCodeWindowAction(action)) {
+      chatStore.newSession(action);
+      await router.push('/chats');
+    }
   } catch (askError) {
     error.value = codeErrorMessage(askError, 'Не удалось создать черновик для агента');
   } finally {
@@ -4469,6 +4583,7 @@ function showFile(rel: string, data: CodeFileResponse) {
       renderLineHighlight: 'none',
     });
     installBlameClick();
+    fileEditor.onDidChangeCursorPosition?.(publishCodeContext);
   }
 
   const model = monaco.editor.createModel(data.binary || data.tooBig ? '' : data.content, langOf(rel));
@@ -4485,6 +4600,10 @@ function showFile(rel: string, data: CodeFileResponse) {
     revealLine(pendingReveal.line);
     pendingReveal = null;
   }
+
+  // Новая модель уже стоит на строке 1: Monaco может не сообщить о таком же курсоре.
+  // Контекст публикуется после модели и перехода, включая повторное открытие того же файла.
+  publishCodeContext();
 }
 
 /** Ссылка вида `file.js:120` открывает файл на нужной строке и подсвечивает её. */
@@ -4914,16 +5033,25 @@ watch(() => props.active, (active, wasActive) => {
   }
 }, { immediate: true });
 watch(() => props.intents, processIntents, { deep: true });
-watch(
-  [() => props.active, () => props.presentation, project, contextId, tab, fileSel],
-  ([active, presentation]) => emit('context', active ? {
+/**
+ * Публикует текущую строку после движения курсора и смены выбора панели.
+ * В проекцию не входят абсолютный корень, текст файла или черновик коммита.
+ */
+function publishCodeContext() {
+  emit('context', props.active ? {
     id: 'code',
-    presentation,
+    presentation: props.presentation,
     ...(project.value ? { project: project.value } : {}),
+    ...(repoKey.value ? { repository: repoKey.value } : {}),
     ...(context.value?.label ? { context: context.value.label } : {}),
     tab: tab.value,
-    ...(fileSel.value ? { file: fileSel.value } : {}),
-  } : null),
+    ...(fileSel.value ? { file: fileSel.value, line: fileEditor?.getPosition?.()?.lineNumber || 1 } : {}),
+  } : null);
+}
+
+watch(
+  [() => props.active, () => props.presentation, project, contextId, tab, fileSel],
+  publishCodeContext,
   { immediate: true },
 );
 onMounted(() => {

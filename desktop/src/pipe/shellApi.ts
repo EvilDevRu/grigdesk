@@ -12,12 +12,16 @@ import type { UpstreamState } from './upstream.ts';
 import { parseSurfaceTarget, parseMainRequest } from '../../../shared/desktop/surfaceContract.ts';
 import type { MainRequest, SurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
 
+import { parseToolControl } from '../../../shared/desktop/toolWindowContract.ts';
+import type { ToolControl } from '../../../shared/desktop/toolWindowContract.ts';
+
 interface ProbeUpstream extends PipeUpstream {
   probe(): Promise<void>;
 }
 
 export interface NativeWindows {
   open(origin: string, target: SurfaceTarget): Promise<boolean>;
+  tool?(origin: string, request: ToolControl): Promise<unknown>;
   main(origin: string, request: MainRequest): Promise<boolean>;
 }
 
@@ -384,7 +388,24 @@ export function createShellApi(options: ShellOptions) {
           return;
         }
 
-        const target = pathname === '/__shell/surfaces/open' ? parseSurfaceTarget(body) : null;
+        if (pathname === '/__shell/surfaces/tool') {
+          const control = parseToolControl(body);
+
+          if (!control) {
+            json(res, 400, { error: 'invalid_surface' });
+          } else if (!options.nativeWindows.tool) {
+            json(res, 404, { error: 'not_found' });
+          } else {
+            const origin = new URL('http://' + req.headers.host).origin;
+
+            json(res, 200, await options.nativeWindows.tool(origin, control));
+          }
+
+          return;
+        }
+
+        const parsed = pathname === '/__shell/surfaces/open' ? parseSurfaceTarget(body) : null;
+        const target = parsed?.kind === 'task' ? parsed : null;
         const request = pathname === '/__shell/surfaces/main' ? parseMainRequest(body) : null;
 
         if (!target && !request) {

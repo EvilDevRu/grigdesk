@@ -5,6 +5,7 @@ globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContex
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compileVue, webFile } from './helpers/compile-vue.js';
+import { api } from '../../web/src/shared/apiClient.ts';
 
 process.env.NODE_ENV = 'test';
 
@@ -256,6 +257,31 @@ test('строка чата: знак исполнителя красится ц
       },
     },
   });
+  // R1: новый потребитель сна остаётся внутри тестовой сети. Источник не открывается,
+  // поэтому общий useSse не заводит таймеров переподключения или проверки устойчивости.
+  const previousSource = Object.getOwnPropertyDescriptor(globalThis, 'EventSource');
+
+  Object.defineProperty(globalThis, 'EventSource', {
+    configurable: true,
+    value: class {
+      addEventListener() {}
+
+      close() {}
+    },
+  });
+  t.mock.method(api, 'get', async (url) => {
+    assert.equal(url, '/api/chat/sessions');
+
+    return { sessions: [] };
+  });
+  t.after(() => {
+    if (previousSource) {
+      Object.defineProperty(globalThis, 'EventSource', previousSource);
+    } else {
+      delete globalThis.EventSource;
+    }
+  });
+
   const ChatList = await compileChatList();
   const wrapper = mount(ChatList, {
     attachTo: browser.document.querySelector('#mount'),
