@@ -15,7 +15,7 @@ POST ожидает native loadURL, поэтому одновременные PO
 
 | Канал | Контракт |
 |---|---|
-| `grigdesk-sse-v1` | `{version:1,name,data}`; только hello, diagnostic-logging, task-shelf-changed, speech-settings, projects-changed |
+| `grigdesk-sse-v1` | `{version:1,name,data}`; только hello, diagnostic-logging, task-shelf-changed, speech-settings, projects-changed, chat-done, ssh-sessions, ssh-audit, db-sessions, db-queries, db-audit |
 | `grigdesk-shell-v1` | `{version:1,type:'shell-changed'}`; карточка делает короткий refresh без rev |
 | `grigdesk-board-v1` | board-request или board-snapshot с object data и конечным числом readAt |
 | `grigdesk-task-data-v1` | task-data-changed после успешных setFavorite/markSeen; shelf-acknowledge с каноническим taskId |
@@ -42,3 +42,6 @@ offline до unmount; старый Promise загрузки плагинов п�
 SSE или зеркало; unmount и HMR освобождают принадлежащие им каналы и обработчики.
 
 Проверки: SR, WR, TS, BM, SP, TWP и TWS в целевых тестах окон.
+
+Окна инструментов используют тот же SSE mirror. Их отдельный протокол владения и проекция
+Полки описаны в [контракте окон инструментов](tool-windows.md); поток chat-step не пересылается.

@@ -206,3 +206,28 @@ test('стенд ещё строится: закрывать нечего — к
 
   assert.equal(wrapper.find('.sbclose').exists(), false);
 });
+
+test('readOnly не предлагает управление', async (t) => {
+  const fixture = makeFixture();
+
+  fixture.factoryTask.readOnly = true;
+  fixture.graph.readOnly = true;
+  fixture.factoryTask.stall = {
+    kind: 'human',
+    stage: 'BUILD',
+    title: 'BUILD: нужно решение человека',
+    hint: 'Откройте узел.',
+    arbitrable: true,
+  };
+  fixture.graph.stall = { ...fixture.factoryTask.stall, node: 'build' };
+
+  const { wrapper } = await mountPipeline(t, fixture);
+
+  assert.equal(wrapper.find('.gwrap').exists(), true);
+
+  for (const selector of [
+    '[data-role="pipeline-stall-answer-open"]', '.sbretry', '.sbresume', '.sbstop', '.sbdown', '.sbclose',
+  ]) {
+    assert.equal(wrapper.find(selector).exists(), false, selector);
+  }
+});

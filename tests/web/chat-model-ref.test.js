@@ -113,6 +113,16 @@ test('stale durable save повторяет CAS и запускает ход р�
       modelRef: { provider: 'test-provider', model: 'chosen-model' },
     };
   };
+  apiHarness.get = async (url) => {
+    assert.equal(url, '/api/chat/store/chat/stale-chat');
+
+    return { chat: {
+      ...chat.sessions[0],
+      revision: 3,
+      modelRef: { provider: 'test-provider', model: 'other-model' },
+    } };
+  };
+
   let posts = 0;
   let requestSentAt = 0;
   apiHarness.post = async (url, body) => {
@@ -170,6 +180,15 @@ test('неисчерпаемый stale не маскируется под обр
     surface: 'chats',
     modelRef: { provider: 'test-provider', model: 'other-model' },
   });
+  apiHarness.get = async (url) => {
+    assert.equal(url, '/api/chat/store/chat/busy-chat');
+
+    return { chat: {
+      ...chat.sessions[0],
+      revision: 5 + puts,
+      modelRef: { provider: 'test-provider', model: 'other-model' },
+    } };
+  };
   apiHarness.post = async () => { posts += 1; return {}; };
 
   await chat.send('busy-chat', 'Не потеряй это сообщение');

@@ -4,7 +4,7 @@
 Состав payload нового варианта описан в [обзоре одиночного ELF](server-binary.md).
 
 `server/build/resources.json` задаёт исходный и выходной путь каждого ресурса.
-Копируются seed агентов, Python-программы, requirements, движок, запускалки,
+Копируются Python-программы, requirements, движок, запускалки,
 каталог helper-ов и ESM bridge. Исходные `server/src`, `server/scripts` и `shared`
 целиком в комплект не переносятся. Совместимые обёртки создаются отдельно.
 

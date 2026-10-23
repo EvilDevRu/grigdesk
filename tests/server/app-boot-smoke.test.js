@@ -54,7 +54,6 @@ function isolatedEnv(root, port, mobilePort = port + 1) {
     FACTORY_CONTROL_ROOT: path.join(root, 'factory/control'),
     FACTORY_CONFIG_ROOT: path.join(root, 'factory/config'),
     FACTORY_PROFILES_DIR: path.join(root, 'profiles'),
-    GRIGDESK_AGENTS_DIR: path.join(root, 'agents'),
     GRIGDESK_MEDIA_DIR: path.join(root, 'media'),
     GRIGDESK_MEDIA_HF_DIR: path.join(root, 'hf'),
     GRIGDESK_PLUGINS_DIR: path.join(root, 'plugins'),

@@ -154,7 +154,6 @@ async function chatFixture(t, {
       chatBindingsDir: path.join(root, 'bindings'),
       rootDir: root,
       factoryHome: root,
-      agentsDir: path.join(root, 'agents'),
       port: 18140,
     },
     factoryState: { async readEnv() { return {}; } },

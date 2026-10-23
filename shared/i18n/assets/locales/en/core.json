@@ -1,4 +1,19 @@
 {
+  "toolReturnNarrow": "Expand the main window to return the tool to its column.",
+  "toolReturnFailed": "Could not return the panel.",
+  "toolUnavailable": "The tool is unavailable. Check plugin settings.",
+  "toolStateNotReady": "The panel could not prepare state restoration.",
+  "toolSourceNotReady": "The panel is not ready to transfer yet.",
+  "toolCodeBusy": "Wait for the Code operation to finish.",
+  "toolCodeStateInvalid": "Invalid Code state.",
+  "toolSshBusy": "Wait for the SSH operation to finish.",
+  "toolDbBusy": "Wait for the database query to finish.",
+
+  "detachTool": "Detach",
+  "returnTool": "Return to column",
+  "closeTool": "Close",
+  "toolWaiting": "Connecting tool…",
+
   "settings": "Settings",
   "close": "Close",
   "cancel": "Cancel",
@@ -19,7 +34,6 @@
   "board": "Board",
   "pipeline": "Pipeline",
   "sandboxes": "Sandboxes",
-  "agents": "Agents",
   "routes": "Routes",
   "projects": "Projects",
   "terminal": "Terminal",
@@ -40,6 +54,13 @@
   "swapDisabled": "swap disabled",
   "theHeaderCombinesRAMAndSwapUsed": "The header combines RAM and swap: used",
   "noFreshDataTheServerDidNot": "No fresh data: the server did not respond. Snapshot from",
+  "gpu": "GPU",
+  "videoMemoryUsage": "video memory {used} of {total} GB",
+  "diskFreeSpace": "{free} GB free",
+  "diskUsedSpace": "used {used} of {total} GB",
+  "grigDeskDataDisk": "GrigDesk data disk",
+  "resourceTemperature": "{value} °C",
+  "resourcesAlarm": "Low disk space or high device temperature",
   "updateAvailable": "Update available: {pLatest}",
   "updateTo": "Update to {pLatest}",
   "updateCLIToTheModelCatalogWill": "Update CLI to {pLatest}. The model catalog will be refreshed.",
@@ -549,5 +570,24 @@
   "invalidPipelineSnapshot": "The server returned an invalid pipeline summary",
   "invalidPipelineGraph": "The server returned an invalid pipeline graph",
   "relayAddress": "Via the configured relay",
-  "desktopPairingPlaceholder": "GRIGDESK:PAIR:1:…"
+  "desktopPairingPlaceholder": "GRIGDESK:PAIR:1:…",
+  "chatSleepHeading": "Agent is sleeping — waiting for background tasks",
+  "chatSleepSubagents": {
+    "one": "{count} subagent:",
+    "other": "{count} subagents:"
+  },
+  "chatSleepMonitors": {
+    "one": "{count} monitor:",
+    "other": "{count} monitors:"
+  },
+  "chatSleepCommands": {
+    "one": "{count} background command:",
+    "other": "{count} background commands:"
+  },
+  "chatSleepOther": {
+    "one": "{count} other task:",
+    "other": "{count} other tasks:"
+  },
+  "chatSleepNoDescription": "No description",
+  "chatSleepDescription": "• {description}"
 }

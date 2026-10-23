@@ -1468,7 +1468,8 @@
   color: var(--accent);
 }
 
-.ui-button[data-role='pipeline-compact-action'] {
+.ui-button[data-role='pipeline-compact-action'],
+.ui-button[data-role='pipeline-stall-answer-open'] {
   height: 30px;
   min-height: 30px;
   padding: 0 10px;
@@ -2173,6 +2174,20 @@
 
 .ui-pressable[data-context='topbar-metrics'].stale > span {
   opacity: .5;
+}
+
+/* Метка тревоги не занимает места рядом с цифрами ресурсов.
+   Даже при устаревшем снимке она сохраняет яркость поверх приглушённых показаний. */
+.ui-pressable[data-context='topbar-metrics'] > span.resources-alarm {
+  position: absolute;
+  top: -5px;
+  right: -8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bad);
+  opacity: 1;
+  pointer-events: none;
 }
 
 .ui-pressable[data-context='topbar-network'] {

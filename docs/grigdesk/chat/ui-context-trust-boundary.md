@@ -3,7 +3,7 @@
 Контекст страницы легко случайно превратить во второй роутер полномочий. Это запрещено для
 любого хода чата: в запрос модели уходит только bounded `promptContext` (`page`, canonical
 `path`, positive-schema `details`), и сервер повторно нормализует его как недоверенные данные.
-Ни `details.taskId`, ни `details.scope`, ни path вроде `/agents` не выбирают cwd, worktree,
+Ни `details.taskId`, ни `details.scope`, ни path вроде `/routes` не выбирают cwd, worktree,
 режим или разрешения; маршрут хода задаёт только сам endpoint (`/api/chat` или
 `/api/tasks/<id>/chat`). DOM, скриншот, PTY output и введённые команды в контекст вообще не
 читаются. Trusted `routingScope` из `capture(route)` живёт только на клиенте, в HTTP не

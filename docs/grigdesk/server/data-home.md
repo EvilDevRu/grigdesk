@@ -40,12 +40,14 @@ GrigDesk хранит настройки и рабочие данные вне �
 | `telegram` | `telegram` | Архив и настройки Telegram |
 | `github` | `github` | Архив и настройки GitHub |
 | `studio3d` | `3d` | Файлы 3D |
-| `agents` | `agents` | Шаблоны агентов |
 | `plugins` | `plugins` | Установленные пользовательские плагины |
 | `profiles` | `profiles` | Проектные профили фабрики в бинарной поставке |
 | `artifacts` | `artifacts` | Рабочая папка агентов: снимки, дампы, скрипты и отчёты проверок |
 | `moveJournal` | `.move-journal.json` | Журнал переноса |
 | `moveLock` | `.move-lock` | Блокировка команды переноса |
+
+Существующая папка `agents` остаётся на диске: сервер её не читает, не создаёт и не удаляет.
+Имя `DATA_LAYOUT.agents` сохраняется для совместимости прежней раскладки данных.
 
 ## Что остаётся снаружи
 
@@ -60,7 +62,7 @@ GrigDesk хранит настройки и рабочие данные вне �
   программа.
 - Разработка: Android SDK, Gradle, загрузки, ключи подписи APK и состояние DevLink. Неиспользуемые каталоги прежней конфигурации не удаляются.
 - Сборки и ресурсы кода: `node_modules`, `web/dist`, legacy generation DeepSeek,
-  `server/seed/agents`, `third_party`, `bin/grigdesk-relay`, `desktop/release`.
+  `third_party`, `bin/grigdesk-relay`, `desktop/release`.
   Обновлятель получает отдельный `--work-root <код>/.state` для временной копии git.
 - Homes внешних исполнителей: `~/.claude`, `~/.codex`, `~/.kimi-code`.
 

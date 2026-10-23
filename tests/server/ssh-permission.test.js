@@ -143,7 +143,6 @@ test('chat/index в auto-режиме не применяет autoDecision и re
       rootDir: root,
       factoryHome: root,
       profilesDir,
-      agentsDir: path.join(root, 'agents'),
       port: 18140,
     },
     permissionQueue: queue,

@@ -731,6 +731,7 @@
 </template>
 
 <script setup lang="ts">
+import { toolWindowText } from '../../shared/tools/toolWindowMessages.ts';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 
@@ -1338,6 +1339,35 @@ watch(
   reconcileSelections,
 );
 
+/**
+ * Снимок хранит выбор и SQL-черновик без пароля и результатов запроса.
+ * Выполняющийся запрос не переносится и не запускается повторно.
+ */
+function exportState() {
+  if (queryInFlight.value) {
+    throw new Error(toolWindowText('toolDbBusy'));
+  }
+
+  return {
+    profileId: selectedProfileId.value,
+    sessionId: selectedSessionId.value,
+    query: query.value,
+  };
+}
+
+/**
+ * Выбор применяется к перечитанным профилям и сессиям без исполнения SQL.
+ * Исчезнувшие сущности остаются в прежнем состоянии пустого выбора.
+ */
+async function importState(state: Record<string, unknown>) {
+  await refresh();
+  selectedProfileId.value = typeof state.profileId === 'string' ? state.profileId : '';
+  selectedSessionId.value = typeof state.sessionId === 'string' ? state.sessionId : '';
+  reconcileSelections();
+  query.value = typeof state.query === 'string' ? state.query : '';
+}
+
+defineExpose({ exportState, importState });
 onMounted(refresh);
 </script>
 

@@ -9,6 +9,8 @@ import { locales } from '../../shared/i18n/catalogs.ts';
 
 import { recordOrNull } from '../../shared/lib/objects.ts';
 
+import { isToolWindowId } from '../../shared/desktop/toolWindowContract.ts';
+
 import { localOrigin } from './connection.ts';
 import { normalizeSurfaceGeometry } from './surfaceGeometry.ts';
 import { normalizeExitPreference } from './desktopExitPreference.ts';
@@ -31,7 +33,7 @@ export type DesktopSettings = {
   profiles: DesktopProfile[];
   selected: string | null;
   window: WindowState;
-  surfaceWindows?: { task: SurfaceGeometry };
+  surfaceWindows?: { task?: SurfaceGeometry; tools?: Record<string, SurfaceGeometry> };
 };
 
 export const DEFAULT_WINDOW: Readonly<WindowState> = Object.freeze({
@@ -113,10 +115,23 @@ export function normalizeSettings(value: unknown): DesktopSettings {
     ? normalizeSurfaceGeometry(recordOrNull(settings?.surfaceWindows)?.task)
     : null;
 
+  const tools: Record<string, SurfaceGeometry> = {};
+  const candidates = supported ? recordOrNull(recordOrNull(settings?.surfaceWindows)?.tools) : null;
+
+  for (const [id, value] of Object.entries(candidates ?? {})) {
+    const geometry = normalizeSurfaceGeometry(value);
+
+    if (isToolWindowId(id) && geometry) {
+      tools[id] = geometry;
+    }
+  }
+
   return {
     ...(supported && normalizeExitPreference(settings.skipExitConfirmation)
       ? { skipExitConfirmation: true } : {}),
-    ...(taskWindow ? { surfaceWindows: { task: taskWindow } } : {}),
+    ...(taskWindow || Object.keys(tools).length ? {
+      surfaceWindows: { ...(taskWindow ? { task: taskWindow } : {}), tools },
+    } : {}),
     version: 2,
     ...(supported && (settings.uiLanguage === 'system'
       || locales.some((item) => item.id === settings.uiLanguage))

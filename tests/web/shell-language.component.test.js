@@ -195,7 +195,7 @@ test('I18N-U02: топбар без поиска команд, соседние 
     for (const width of [1440, 600]) {
       await page.setViewportSize({ width, height: 900 });
 
-      for (const route of ['/chats', '/agents']) {
+      for (const route of ['/chats', '/routes']) {
         await page.goto(origin + '#' + route);
 
         const actions = page.locator('.topbar-actions');
@@ -204,7 +204,12 @@ test('I18N-U02: топбар без поиска команд, соседние 
         await settings.waitFor();
         await actions.locator('[data-context="connection-trigger"]').waitFor();
         assert.equal(await actions.getByRole('button', { name: /поиск|search/i }).count(), 0);
-        assert.equal(await actions.getByRole('button').count(), 3);
+        // Подключение, телефон, колокольчик и настройки.
+        assert.equal(await actions.getByRole('button').count(), 4);
+        assert.equal(
+          await actions.getByRole('button', { name: /^(Подключить телефон|Connect phone)$/ }).count(),
+          1,
+        );
         assert.equal(await actions.locator('[data-context="alert-history"]').isVisible(), true);
         await page.locator('[data-context="topbar-network"]').waitFor();
         await page.locator('[data-context="provider-status"]').first().waitFor();
@@ -458,4 +463,58 @@ test('I18N-U01/gates: вход и блокировка переводятся, r
   dialog.querySelector('button').click();
   await h.flushPromises();
   assert.ok(document.body.textContent.includes(raw));
+});
+
+
+test('RET-NAV: старая ссылка открывает маршруты без пункта библиотеки', {
+  timeout: 120000,
+}, async (t) => {
+  const { browser, origin } = await i18nBrowser(t, {
+    responses: { '/api/profiles': { profiles: [] } },
+  });
+
+  for (const locale of ['ru-RU', 'en-US']) {
+    for (const touch of [false, true]) {
+      await t.test(`${locale}: ${touch ? 'touch' : 'desktop'}`, async () => {
+        const context = await browser.newContext({
+          locale,
+          viewport: { width: touch ? 390 : 1440, height: 900 },
+          hasTouch: touch,
+          isMobile: touch,
+        });
+        const page = await context.newPage();
+        const errors = [];
+
+        page.on('pageerror', (error) => errors.push(error.message));
+
+        try {
+          await page.goto(origin + '#/agents?from=bookmark');
+          await page.getByRole('button', { name: /^(Настройки|Settings)$/ }).waitFor();
+          await page.evaluate(async () => {
+            const router = document.querySelector('#app').__vue_app__.config.globalProperties.$router;
+
+            await router.isReady();
+          });
+          assert.equal(await page.locator('html').getAttribute('lang'), locale.slice(0, 2));
+          assert.equal(new URL(page.url()).hash, '#/routes?from=bookmark');
+          await page.locator('.routes-page').waitFor();
+          await page.reload();
+          await page.locator('.routes-page').waitFor();
+          assert.equal(new URL(page.url()).hash, '#/routes?from=bookmark');
+          assert.equal(await page.locator('[href="#/agents"]').count(), 0);
+          assert.equal(await page.getByRole('link', { name: /^(Агенты|Agents)$/ }).count(), 0);
+          assert.equal(await page.locator('[href="#/routes"]').count(), 1);
+
+          await page.locator('[href="#/board"]').click();
+          await page.waitForURL(origin + '#/board');
+          await page.locator('[href="#/routes"]').click();
+          await page.locator('.routes-page').waitFor();
+          assert.equal(new URL(page.url()).hash, '#/routes');
+          assert.deepEqual(errors, []);
+        } finally {
+          await context.close();
+        }
+      });
+    }
+  }
 });

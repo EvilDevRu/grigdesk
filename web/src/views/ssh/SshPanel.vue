@@ -588,6 +588,7 @@
 </template>
 
 <script setup lang="ts">
+import { toolWindowText } from '../../shared/tools/toolWindowMessages.ts';
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import type { IDisposable } from '@xterm/xterm';
@@ -1203,6 +1204,36 @@ function deny(approval: ChatApproval): void {
 
   chat.answerPerm(approval.pid, false, false, comment, '');
 }
+/**
+ * Перенос сохраняет серверную сессию, но не её пароль или вывод терминала.
+ * Клиентский канал заново присоединяется после загрузки списка сессий.
+ */
+function exportState() {
+  if (connectingId.value || closingSessionId.value || savingConnection.value) {
+    throw new Error(toolWindowText('toolSshBusy'));
+  }
+
+  return { sessionId: selectedSessionId.value, remotePath: remotePath.value };
+}
+
+/**
+ * Восстанавливает выбор без повторного подключения к удалённому серверу.
+ * Существующая серверная сессия получает только новый клиентский терминал.
+ */
+async function importState(state: Record<string, unknown>) {
+  await refresh();
+
+  if (typeof state.sessionId === 'string'
+    && store.sessions.some((session) => session.id === state.sessionId)) {
+    await activateSession(state.sessionId);
+  }
+
+  if (typeof state.remotePath === 'string') {
+    remotePath.value = state.remotePath;
+  }
+}
+
+defineExpose({ exportState, importState });
 </script>
 
 <style scoped>
