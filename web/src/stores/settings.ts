@@ -10,6 +10,7 @@ import {
   SETTINGS_PAGE_KEY,
   resolveFieldAddress,
   resolveSettingsPage,
+  normalizeSettingsPageId,
   equalFieldAddress,
   type SettingsFieldMetadata,
 } from '../features/settings/catalog.ts';
@@ -99,29 +100,31 @@ export const useSettingsStore = defineStore('settings', () => {
   });
 
   /**
-   * Страница выбирается только из чистого каталога, произвольного импорта нет.
-   * В storage уходит только ID страницы, без ввода, поисковой строки и адреса поля.
+   * Старый install ID нормализуется до проверки видимого каталога страниц.
+   * Хранилище и entity остаются прежними; открытие не запускает отдельный диалог.
    */
   function selectPage(id: string, entity?: string, tab?: string): boolean {
-    if (!SETTINGS_PAGES.some((page) => page.id === id)) {
+    const selected = normalizeSettingsPageId(id);
+
+    if (!selected) {
       navigationMessage.value = messageRef('settings.settingsSectionNoLongerAvailable');
 
       return false;
     }
 
-    pageId.value = id;
+    pageId.value = selected;
     entityId.value = entity;
     tabId.value = tab;
     navigationMessage.value = '';
 
-    const group = SETTINGS_PAGES.find((page) => page.id === id)?.groupId;
+    const group = SETTINGS_PAGES.find((page) => page.id === selected)?.groupId;
 
     if (group && !expandedGroups.value.includes(group)) {
       expandedGroups.value.push(group);
     }
 
     try {
-      navigationStorage()?.setItem(SETTINGS_PAGE_KEY, id);
+      navigationStorage()?.setItem(SETTINGS_PAGE_KEY, selected);
     } catch {
       // Выбор страницы сохраняется в памяти до закрытия документа.
     }
@@ -147,8 +150,10 @@ export const useSettingsStore = defineStore('settings', () => {
     }
 
     if (isOpen.value) {
-      if (request.pageId && SETTINGS_PAGES.some((page) => page.id === request.pageId)) {
-        selectPage(request.pageId, request.entityId);
+      const selected = normalizeSettingsPageId(request.pageId) ?? normalizeSettingsPageId(request.queryPage);
+
+      if (selected) {
+        selectPage(selected, request.entityId);
       }
 
       return true;

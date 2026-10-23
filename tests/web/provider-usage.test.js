@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  localizeUsageResource,
   providerStatusHint,
   providerUsageView,
   resetAt,
@@ -11,6 +12,84 @@ import {
   prepareUsageControl,
   usageControlConfirmation,
 } from '../../web/src/features/providers/providerUsageActions.ts';
+
+test('Новые состояния доплаты переводятся на RU/EN без изменения данных и ссылок', () => {
+  const cases = [
+    {
+      providerId: 'kimi',
+      resource: {
+        key: 'kimi-extra-usage',
+        label: 'Extra Usage',
+        summary: 'Не включено или не пополнено',
+        controls: [{
+          id: 'enable-kimi-usage',
+          kind: 'link',
+          label: 'Включить и пополнить в Kimi',
+          href: 'https://www.kimi.com/code/console',
+        }],
+      },
+      label: 'Extra Usage',
+      summary: 'Not enabled or not funded',
+      control: 'Enable and add funds in Kimi',
+    },
+    {
+      providerId: 'kimi',
+      resource: {
+        key: 'kimi-monthly-volume',
+        label: 'Месячный объём',
+        summary: 'Kimi не сообщает остаток',
+        controls: [{
+          id: 'view-kimi-monthly-volume',
+          kind: 'link',
+          label: 'Посмотреть в Kimi',
+          href: 'https://www.kimi.com/code/console',
+        }],
+      },
+      label: 'Monthly volume',
+      summary: 'Kimi does not report the remaining volume',
+      control: 'View in Kimi',
+    },
+    {
+      providerId: 'codex',
+      resource: {
+        key: 'chatgpt-credits',
+        label: 'Дополнительные кредиты',
+        summary: 'Нет данных о кредитах',
+        controls: [{
+          id: 'manage-credits',
+          kind: 'link',
+          label: 'Купить / управлять кредитами',
+          href: 'https://chatgpt.com/codex/settings/usage',
+        }],
+      },
+      label: 'Extra credits',
+      summary: 'No credit data',
+      control: 'Buy or manage credits',
+    },
+  ];
+
+  for (const { providerId, resource, label, summary, control } of cases) {
+    const source = structuredClone(resource);
+    const english = localizeUsageResource(providerId, resource, 'en');
+
+    assert.equal(english.label, label);
+    assert.equal(english.summary, summary);
+    assert.equal(english.controls[0].label, control);
+    assert.equal(english.controls[0].href, resource.controls[0].href);
+    assert.deepEqual(localizeUsageResource(providerId, resource, 'ru'), source);
+    assert.deepEqual(resource, source);
+  }
+
+  const wallet = {
+    key: 'kimi-extra-usage',
+    kind: 'balance',
+    balance: { amount: 12.5, currency: 'CNY' },
+    summary: 'Баланс: ¥12.50',
+    note: 'В этом месяце: ¥10.00 из ¥50.00.',
+  };
+
+  assert.deepEqual(localizeUsageResource('kimi', wallet, 'en'), wallet);
+});
 
 test('missing usage data has visible loading copy', () => {
   const view = providerUsageView(null, { name: 'Claude' });

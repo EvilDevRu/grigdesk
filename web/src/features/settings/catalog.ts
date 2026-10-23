@@ -490,14 +490,8 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   {
     id: 'plugins.installed',
     groupId: 'plugins',
-    label: translator.t('ru', 'settings.installed'),
-    description: translator.t('ru', 'settings.pluginActivationParametersSourceAndReadiness'),
-  },
-  {
-    id: 'plugins.install',
-    groupId: 'plugins',
-    label: translator.t('ru', 'settings.installation'),
-    description: translator.t('ru', 'settings.installingAPluginFromGitAndRecovering'),
+    label: translator.t('ru', 'settings.marketplaceOverview'),
+    description: translator.t('ru', 'settings.marketplaceOverviewHint'),
   },
   {
     id: 'system.startup',
@@ -569,6 +563,16 @@ function migrateLegacyPage(storage: SettingsStorage): string | undefined {
 }
 
 /**
+ * Бывшая отдельная страница установки стала безопасным alias общего раздела.
+ * Неизвестный ID по-прежнему не даёт импортировать произвольный компонент.
+ */
+export function normalizeSettingsPageId(raw: unknown): string | undefined {
+  const id = raw === 'plugins.install' ? 'plugins.installed' : raw;
+
+  return typeof id === 'string' && SETTINGS_PAGES.some((page) => page.id === id) ? id : undefined;
+}
+
+/**
  * Приоритет источников фиксирован и не зависит от порядка монтирования страниц.
  * Неизвестные ID не разрешаются в импорт и не затирают сохранённую страницу.
  */
@@ -577,7 +581,7 @@ export function resolveSettingsPage(request: PageRequest = {}): string {
   const migrated = request.storage && saved === null ? migrateLegacyPage(request.storage) : undefined;
   const candidates = [request.pageId, request.queryPage, saved, migrated];
 
-  return candidates.find((id) => SETTINGS_PAGES.some((page) => page.id === id)) as string
+  return candidates.map(normalizeSettingsPageId).find((id) => id !== undefined)
     ?? DEFAULT_SETTINGS_PAGE;
 }
 
@@ -703,12 +707,8 @@ const PAGE_MESSAGES: Record<string, Record<string, string>> = {
     "description": "settings.relaysDevicePairingAndLoginOnThis"
   },
   "plugins.installed": {
-    "label": "settings.installed",
-    "description": "settings.pluginActivationParametersSourceAndReadiness"
-  },
-  "plugins.install": {
-    "label": "settings.installation",
-    "description": "settings.installingAPluginFromGitAndRecovering"
+    "label": "settings.marketplaceOverview",
+    "description": "settings.marketplaceOverviewHint"
   },
   "system.startup": {
     "label": "settings.systemStartup",

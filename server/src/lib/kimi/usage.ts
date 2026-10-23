@@ -283,12 +283,49 @@ function money(cents: unknown, currency: unknown): string {
 }
 
 /**
- * Дополнительный денежный счёт сохраняет валюту и отдельно проверенный баланс.
- * Отсутствующая или сломанная сумма не превращается в видимый ноль.
+ * Полученные лимиты всегда объясняют доплату и неизвестный месячный остаток.
+ * Заглушки не подтверждают пустой ответ; кошелёк сохраняет прежние суммы и валюту.
  */
 export function parseKimiUsageResources(result: KimiUsageResult | null | undefined) {
-  const raw = result?.kind === 'ok' ? result.extra_usage : null;
-  if (!raw || typeof raw !== 'object') return [];
+  if (result?.kind !== 'ok') {
+    return [];
+  }
+
+  const raw = result.extra_usage;
+  const hasWallet = raw && typeof raw === 'object';
+
+  if (!hasWallet && !parseKimiUsageBars(result).length) {
+    return [];
+  }
+
+  const monthlyVolume = {
+    key: 'kimi-monthly-volume',
+    label: 'Месячный объём',
+    summary: 'Kimi не сообщает остаток',
+    tone: 'muted',
+    controls: [{
+      id: 'view-kimi-monthly-volume',
+      kind: 'link',
+      label: 'Посмотреть в Kimi',
+      href: KIMI_CONSOLE,
+    }],
+  };
+
+  if (!hasWallet) {
+    return [{
+      key: 'kimi-extra-usage',
+      label: 'Extra Usage',
+      summary: 'Не включено или не пополнено',
+      tone: 'muted',
+      controls: [{
+        id: 'enable-kimi-usage',
+        kind: 'link',
+        label: 'Включить и пополнить в Kimi',
+        href: KIMI_CONSOLE,
+      }],
+    }, monthlyVolume];
+  }
+
   const extra = raw as Record<string, unknown>;
   const currency = String(extra.currency || 'CNY');
   const rawBalance = extra.balance_cents;
@@ -319,7 +356,7 @@ export function parseKimiUsageResources(result: KimiUsageResult | null | undefin
       label: 'Лимиты и пополнение в Kimi',
       href: KIMI_CONSOLE,
     }],
-  }];
+  }, monthlyVolume];
 }
 
 /**

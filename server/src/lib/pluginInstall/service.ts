@@ -8,6 +8,7 @@ import type {
   PluginInstallPreview,
   PluginInstalledVersion,
 } from '../../../../shared/plugins/pluginInstallContracts.ts';
+import { isInstallSha } from '../../../../shared/plugins/pluginInstallValues.ts';
 import { createDefaultPluginSources } from './sources.ts';
 import type { PluginSourceRegistry } from './sources.ts';
 import type { NpmRunner } from './npm.ts';
@@ -84,6 +85,7 @@ interface CachedDescription {
 export interface InstallRequest {
   url: unknown;
   version?: string;
+  expectedSha?: string;
   expectedId?: string;
   replaceModified?: boolean;
 }
@@ -873,6 +875,10 @@ export class PluginInstallService {
   ): Promise<PluginInstallJob> {
     this.assertOpen();
 
+    if (request.expectedSha !== undefined && (!isInstallSha(request.expectedSha) || !request.version)) {
+      throw installError('version_invalid');
+    }
+
     const known = sourceKind ? this.sources.get(sourceKind) : null;
     const selected = known ? { source: known, url: known.normalizeUrl(request.url) }
       : this.sources.forUrl(request.url);
@@ -1119,6 +1125,10 @@ export class PluginInstallService {
 
       if (!target) {
         throw installError(versions.length === 0 ? 'source_no_versions' : 'version_not_found');
+      }
+
+      if (request.expectedSha !== undefined && request.expectedSha !== target.sha) {
+        throw installError('checkout_mismatch');
       }
 
       await this.updateJob(initial.id, generation, (job) => {

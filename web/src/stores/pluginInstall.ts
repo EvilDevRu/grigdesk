@@ -241,6 +241,7 @@ export const usePluginInstallStore = defineStore('plugin-install', () => {
     version: string,
     replaceModified = false,
     expectedId?: string,
+    expectedSha?: string,
   ): Promise<void> {
     const input = url.trim();
 
@@ -256,6 +257,7 @@ export const usePluginInstallStore = defineStore('plugin-install', () => {
       ...(version ? { version } : {}),
       ...(replaceModified ? { replaceModified } : {}),
       ...(expectedId ? { expectedId } : {}),
+      ...(expectedSha ? { expectedSha } : {}),
     });
   }
 
@@ -473,10 +475,16 @@ export const usePluginInstallStore = defineStore('plugin-install', () => {
    * Обновление привязано к установленному id и не меняет источник пользователя.
    * Version и force относятся к этой подготовке и не меняют ручные prefs каталога.
    */
-  async function startUpdate(id: string, version: string, replaceModified = false): Promise<void> {
+  async function startUpdate(
+    id: string,
+    version: string,
+    replaceModified = false,
+    expectedSha?: string,
+  ): Promise<void> {
     await postJob(`/api/plugin-installs/plugins/${encodeURIComponent(id)}/update`, {
       ...(version ? { version } : {}),
       replaceModified,
+      ...(expectedSha ? { expectedSha } : {}),
     });
   }
 

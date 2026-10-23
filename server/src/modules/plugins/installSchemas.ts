@@ -45,15 +45,25 @@ export const revisionInput = {
   minimum: 0,
   maximum: Number.MAX_SAFE_INTEGER,
 };
-export const versionOptions = { version: versionInput, replaceModified: { type: 'boolean' } };
+export const versionOptions = {
+  version: versionInput,
+  replaceModified: { type: 'boolean' },
+  expectedSha: { type: 'string', pattern: '^([a-f0-9]{40}|[a-f0-9]{64})$' },
+};
 export const inputs = {
   versions: closedObject({ url: urlInput }, ['url']),
-  install: closedObject({
-    url: urlInput,
-    expectedId: pluginIdInput,
-    ...versionOptions,
-  }, ['url']),
-  update: closedObject(versionOptions),
+  install: {
+    ...closedObject({
+      url: urlInput,
+      expectedId: pluginIdInput,
+      ...versionOptions,
+    }, ['url']),
+    dependencies: { expectedSha: ['version'] },
+  },
+  update: {
+    ...closedObject(versionOptions),
+    dependencies: { expectedSha: ['version'] },
+  },
   apply: closedObject({ reviewToken: digestInput }, ['reviewToken']),
   rollback: closedObject({
     requestId: uuidInput,

@@ -91,3 +91,10 @@ web/.generated/markdown/
 
 # Встроенный общий интерфейс готовит tools/client-ui.mts.
 mobile/android/client/src/main/assets/ui/
+
+# Переносимый комплект и собственные временные выходы его сборщика.
+/release/
+/release.tar.gz
+/release.tar.gz.sha256
+/.grigdesk-bundle-*/
+/.grigdesk-bundle.lock/

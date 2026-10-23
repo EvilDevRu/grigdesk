@@ -59,7 +59,7 @@ test('каждый системный пункт навигации имеет �
 // Список и страницы берут controls и иконки из общей границы UI.
 // После переноса формы не поддерживают собственные карты рисунков.
 test('страницы плагинов используют общую границу UI без собственной карты', async () => {
-  for (const name of ['PluginPage', 'PluginInstallPage']) {
+  for (const name of ['PluginPage', 'PluginWorkspacePage', 'PluginCatalogPanel']) {
     const source = await readFile(new URL(`web/src/views/settings/pages/${name}.vue`, root), 'utf8');
 
     assert.doesNotMatch(source, /const PLUGIN_ICON_PATHS/);

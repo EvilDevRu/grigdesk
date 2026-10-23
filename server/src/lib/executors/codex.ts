@@ -501,6 +501,10 @@ function codexCreditAmount(balance: unknown): string {
   return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(amount);
 }
 
+/**
+ * Дополнительные кредиты видны и без состояния счёта, если сервис вернул другие данные.
+ * Пустой ответ не становится успешным из-за справочной карточки без баланса.
+ */
 export function parseCodexUsageResources(value: unknown): Array<Record<string, unknown>> {
   if (!value || typeof value !== 'object') return [];
   const result = value as {
@@ -528,29 +532,39 @@ export function parseCodexUsageResources(value: unknown): Array<Record<string, u
     resources.push(spendControl);
   }
 
+  const resetState = result.rateLimitResetCredits;
+  const count = Number(resetState?.availableCount);
+  const hasResets = Number.isFinite(count) && count > 0;
+
+  if (!creditState && !spendControl && !hasResets && !parseCodexRateLimits(value).length) {
+    return [];
+  }
+
+  let summary = 'Нет данных о кредитах';
+
   if (creditState) {
     const balance = creditState.balance == null
       ? (creditState.hasCredits ? 'доступен' : '0')
       : codexCreditAmount(creditState.balance);
-    const summary = creditState.unlimited ? 'Без ограничений' : `Баланс: ${balance}`;
-    resources.push({
-      key: 'chatgpt-credits',
-      label: 'Дополнительные кредиты',
-      summary,
-      tone: creditState.unlimited || creditState.hasCredits ? 'ok' : 'muted',
-      note: 'Покупка и автопополнение управляются в ChatGPT.',
-      controls: [{
-        id: 'manage-credits',
-        kind: 'link',
-        label: 'Купить / управлять кредитами',
-        href: 'https://chatgpt.com/codex/settings/usage',
-      }],
-    });
+
+    summary = creditState.unlimited ? 'Без ограничений' : `Баланс: ${balance}`;
   }
 
-  const resetState = result.rateLimitResetCredits;
-  const count = Number(resetState?.availableCount);
-  if (Number.isFinite(count) && count > 0) {
+  resources.push({
+    key: 'chatgpt-credits',
+    label: 'Дополнительные кредиты',
+    summary,
+    tone: creditState?.unlimited || creditState?.hasCredits ? 'ok' : 'muted',
+    note: 'Покупка и автопополнение управляются в ChatGPT.',
+    controls: [{
+      id: 'manage-credits',
+      kind: 'link',
+      label: 'Купить / управлять кредитами',
+      href: 'https://chatgpt.com/codex/settings/usage',
+    }],
+  });
+
+  if (hasResets) {
     const first = (Array.isArray(resetState?.credits)
       ? (resetState.credits as Array<{ status?: unknown; id?: unknown; description?: unknown }>)
         .find((credit) => credit?.status === 'available' && credit.id)
