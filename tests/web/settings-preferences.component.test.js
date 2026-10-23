@@ -312,7 +312,7 @@ test('Параметры приложения — общий черновик и
 
     assert.deepEqual(debugPosts, [{ scope: 'global', level: 'verbose' }]);
     assert.deepEqual(globalThis.__settingsPolicyCalls.at(-1), ['errors', 12000]);
-    assert.match(page.text(), /env/);
+    assert.match(page.text(), /переменная окружения/);
     await page.find('select').setValue('decisions');
 
     debug = {

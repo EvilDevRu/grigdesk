@@ -1926,6 +1926,9 @@
 .ui-button[data-role='settings-action'] {
   font-size: 14px;
 }
+.ui-button[data-role='settings-action'][data-context='workspace-form-wrap'] {
+  font-size: 12px;
+}
 
 /* Строка гармошки вмещает сводку исполнителя и остаётся одной кнопкой.
    Естественная высота сохраняет все строки и на узком экране. */

@@ -16,18 +16,17 @@
       v-model="comment"
       maxlength="500"
       rows="3"
-      data-context="settings-field"
     />
     <p class="muted small">{{ t('settings.theCommentIsSavedInTheLocal') }}</p>
     <div class="web-log-actions">
-      <UiButton
+      <UiButton data-context="workspace-form-wrap"
         data-role="settings-action"
         :disabled="!status.level || status.level === 'off'"
         @click="createMark"
       >
         {{ t('settings.markAProblem') }}
       </UiButton>
-      <UiButton
+      <UiButton data-context="workspace-form-wrap"
         data-role="settings-action"
         :disabled="downloading"
         @click="downloadToday"
@@ -160,12 +159,14 @@ onUnmounted(() => {
 }
 .web-log-panel h3 {
   margin: 0 0 4px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
 .web-log-panel p {
   margin: 0;
   line-height: 1.6;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .web-log-panel label {
   margin-top: 6px;

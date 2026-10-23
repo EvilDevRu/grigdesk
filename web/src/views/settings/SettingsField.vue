@@ -18,8 +18,8 @@
     </UiField>
     <UiInlineMessage v-if="field?.conflict" tone="warning">{{ t('settings.theSettingWasChangedExternally') }}</UiInlineMessage>
     <div v-if="field?.conflict" class="settings-field-actions">
-      <UiButton @click="resolve('take-current')">{{ t('settings.useCurrent') }}</UiButton>
-      <UiButton @click="resolve('keep-mine')">{{ t('settings.keepMine') }}</UiButton>
+      <UiButton data-context="workspace-form-wrap" @click="resolve('take-current')">{{ t('settings.useCurrent') }}</UiButton>
+      <UiButton data-context="workspace-form-wrap" @click="resolve('keep-mine')">{{ t('settings.keepMine') }}</UiButton>
     </div>
   </div>
 </template>
@@ -79,7 +79,7 @@ watch(() => settings.revealTarget, reveal, { flush: 'post' });
   gap: 10px;
   min-width: 0;
   width: 100%;
-  padding: 12px 0;
+  padding: 10px 0;
   border-bottom: 1px solid var(--line);
   scroll-margin-block: 16px;
 }

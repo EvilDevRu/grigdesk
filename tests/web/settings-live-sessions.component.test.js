@@ -24,7 +24,7 @@ test('Процессы: DTO и подтверждение погашения с�
   assert.match(h.wrapper.text(), /Разбор/);
   assert.match(h.wrapper.text(), /123/);
   assert.match(h.wrapper.text(), /\/fixture\/work/);
-  assert.match(h.wrapper.text(), /Лимит пула — 4/);
+  assert.match(h.wrapper.text(), /Лимит пула\s*4, автогашение через 30 мин простоя/);
   h.control.answer = false;
   await h.wrapper.findAll('button').find((item) => item.text() === 'Погасить').trigger('click');
   assert.equal(h.writes().length, 0);
