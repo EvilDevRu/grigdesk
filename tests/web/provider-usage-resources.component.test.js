@@ -217,3 +217,77 @@ test('readonly оставляет заметку только у беды', asyn
   // В плашке настроек причина отказа остаётся: там её читают, когда доплата не включается.
   assert.match(settings.text(), /out_of_credits/);
 });
+
+test('Карточки Kimi и Codex видны в обоих режимах, ссылки остаются только в настройках', async (t) => {
+  await installUiBrowser(t);
+
+  globalThis.__providerUsageStore = {
+    async runUsageAction() {
+      return { ok: true };
+    },
+  };
+
+  const [{ mount }, ProviderUsageResources, kimi, codex] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/features/providers/ProviderUsageResources.vue'), {
+      stubs: {
+        '../../stores/providers.ts': PROVIDERS_STUB,
+      },
+    }),
+    import('../../server/src/lib/kimi/usage.ts'),
+    import('../../server/src/lib/executors/codex.ts'),
+  ]);
+  const cases = [
+    {
+      providerId: 'kimi',
+      resources: kimi.parseKimiUsageResources({
+        kind: 'ok',
+        summary: { used: 40, limit: 100 },
+        extra_usage: null,
+      }),
+      summaries: ['Extra Usage', 'Не включено или не пополнено',
+        'Месячный объём', 'Kimi не сообщает остаток'],
+      href: 'https://www.kimi.com/code/console',
+    },
+    {
+      providerId: 'codex',
+      resources: codex.parseCodexUsageResources({
+        rateLimits: { primary: { usedPercent: 40 }, credits: null },
+      }),
+      summaries: ['Дополнительные кредиты', 'Нет данных о кредитах'],
+      href: 'https://chatgpt.com/codex/settings/usage',
+    },
+  ];
+
+  for (const { providerId, resources, summaries, href } of cases) {
+    const wrapper = mount(ProviderUsageResources, {
+      props: {
+        providerId,
+        resources,
+        readonly: true,
+      },
+    });
+
+    t.after(() => wrapper.unmount());
+
+    for (const summary of summaries) {
+      assert.ok(wrapper.text().includes(summary), summary);
+    }
+
+    assert.equal(wrapper.findAll('.usage-resource.is-muted').length, resources.length);
+    assert.equal(wrapper.findAll('.usage-resource-bar').length, 0);
+    assert.equal(wrapper.findAll('a, button, input').length, 0);
+
+    await wrapper.setProps({ readonly: false });
+
+    const links = wrapper.findAll('a');
+
+    assert.equal(links.length, resources.length);
+    assert.ok(links.every((link) => link.attributes('href') === href));
+    assert.equal(wrapper.findAll('button, input').length, 0);
+
+    if (providerId === 'kimi') {
+      assert.ok(links.some((link) => link.text() === 'Включить и пополнить в Kimi'));
+    }
+  }
+});

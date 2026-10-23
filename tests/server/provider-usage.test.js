@@ -18,6 +18,7 @@ import {
   parseClaudeUsageResources,
 } from '../../server/src/lib/executors/claude.ts';
 import { claudeOauthMetadata } from '../../server/src/lib/executors/_claudeCatalog.ts';
+import { classifyKimiUsageResponse } from '../../server/src/lib/kimi/usage.ts';
 import {
   classifyCodexUsageResponse,
   consumeCodexRateLimitReset,
@@ -77,6 +78,74 @@ test('last successful account resources also survive a temporary usage failure',
   assert.equal(merged.stale, true);
   assert.equal(merged.resources[0].summary, '10');
   assert.equal(merged.dataCheckedAt, 100);
+});
+
+test('Новый ответ Kimi и Codex без кошелька заменяет прежний баланс справочной карточкой', () => {
+  const cases = [
+    {
+      classify: classifyKimiUsageResponse,
+      result: {
+        kind: 'ok',
+        summary: { used: 40, limit: 100 },
+        extra_usage: null,
+      },
+      key: 'kimi-extra-usage',
+      summary: 'Не включено или не пополнено',
+    },
+    {
+      classify: classifyCodexUsageResponse,
+      result: { rateLimits: { primary: { usedPercent: 40 }, credits: null } },
+      key: 'chatgpt-credits',
+      summary: 'Нет данных о кредитах',
+    },
+  ];
+
+  for (const { classify, result, key, summary } of cases) {
+    const previous = normalizeProviderUsage({
+      state: 'ok',
+      resources: [{
+        key,
+        label: 'Доплата',
+        summary: 'Баланс: 10',
+        controls: [],
+      }],
+    }, { checkedAt: 100 });
+    const current = normalizeProviderUsage(classify({ result }), { checkedAt: 200 });
+    const merged = mergeProviderUsage(previous, current);
+
+    assert.equal(merged.state, 'ok');
+    assert.equal(merged.stale, false);
+    assert.equal(merged.resources.find((resource) => resource.key === key).summary, summary);
+    assert.equal(merged.dataCheckedAt, 200);
+  }
+});
+
+test('При сбое Kimi и Codex не создают заглушки и сохраняют последний снимок ресурсов', () => {
+  const failures = [
+    classifyKimiUsageResponse({ result: { kind: 'error', status: 503 } }),
+    classifyCodexUsageResponse({ error: { message: 'Service unavailable' } }),
+  ];
+
+  for (const failure of failures) {
+    const current = normalizeProviderUsage(failure, { checkedAt: 200 });
+    const previous = normalizeProviderUsage({
+      state: 'ok',
+      resources: [{
+        key: 'balance',
+        label: 'Баланс',
+        summary: '10',
+        controls: [],
+      }],
+    }, { checkedAt: 100 });
+    const merged = mergeProviderUsage(previous, current);
+
+    assert.deepEqual(current.resources, []);
+    assert.equal(mergeProviderUsage(null, current).resources.length, 0);
+    assert.equal(merged.state, 'unavailable');
+    assert.equal(merged.stale, true);
+    assert.deepEqual(merged.resources, previous.resources);
+    assert.equal(merged.dataCheckedAt, 100);
+  }
 });
 
 test('provider without a usage API is explicit instead of blank', () => {
@@ -372,6 +441,74 @@ test('Codex usage distinguishes login, old CLI and an empty service response', (
   const empty = classifyCodexUsageResponse({ result: { rateLimits: null } });
   assert.equal(empty.state, 'unavailable');
   assert.match(empty.message, /не вернул/i);
+});
+
+test('Codex без состояния кредитов показывает серую карточку с прежней ссылкой покупки', () => {
+  for (const credits of [null, undefined]) {
+    for (const result of [
+      { rateLimits: { primary: { usedPercent: 40 }, credits } },
+      { rateLimitsByLimitId: { codex: { primary: { usedPercent: 40 }, credits } } },
+    ]) {
+      const usage = classifyCodexUsageResponse({ result });
+
+      assert.equal(usage.state, 'ok');
+      assert.equal(usage.bars.length, 1);
+      assert.deepEqual(usage.resources, [{
+        key: 'chatgpt-credits',
+        label: 'Дополнительные кредиты',
+        summary: 'Нет данных о кредитах',
+        tone: 'muted',
+        note: 'Покупка и автопополнение управляются в ChatGPT.',
+        controls: [{
+          id: 'manage-credits',
+          kind: 'link',
+          label: 'Купить / управлять кредитами',
+          href: 'https://chatgpt.com/codex/settings/usage',
+        }],
+      }]);
+    }
+  }
+});
+
+test('Codex не считает карточку кредитов данными пустого или неудачного ответа', () => {
+  for (const result of [
+    {},
+    { rateLimits: null },
+    {
+      rateLimitsByLimitId: {},
+      credits: null,
+      rateLimitResetCredits: { availableCount: 0 },
+    },
+  ]) {
+    const usage = classifyCodexUsageResponse({ result });
+
+    assert.equal(usage.state, 'unavailable');
+    assert.match(usage.message, /OpenAI не вернул данные о лимитах Codex/);
+    assert.deepEqual(usage.resources, []);
+    assert.deepEqual(parseCodexUsageResources(result), []);
+  }
+
+  const failed = normalizeProviderUsage(classifyCodexUsageResponse({
+    result: { rateLimits: { primary: { usedPercent: 40 } } },
+    error: { message: 'Service unavailable' },
+  }));
+
+  assert.equal(failed.state, 'unavailable');
+  assert.deepEqual(failed.resources, []);
+});
+
+test('Codex показывает кредиты и когда получен только контроль трат или заработанный сброс', () => {
+  for (const result of [
+    { rateLimits: { spendControlReached: true } },
+    { rateLimitResetCredits: { availableCount: 1 } },
+    { credits: { hasCredits: true, unlimited: true } },
+  ]) {
+    const usage = classifyCodexUsageResponse({ result });
+
+    assert.equal(usage.state, 'ok');
+    assert.deepEqual(usage.bars, []);
+    assert.ok(usage.resources.some((resource) => resource.key === 'chatgpt-credits'));
+  }
 });
 
 test('Codex exposes purchased credits and earned resets through generic resources', () => {

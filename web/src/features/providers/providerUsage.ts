@@ -323,7 +323,13 @@ export function localizeUsageResource<T extends UsageResource>(
 ): T {
   const id = typeof locale === 'string' ? locale : locale.value;
 
-  if (id === 'ru' || !['claude', 'codex', 'deepseek', 'glm', 'tripo'].includes(providerId)) {
+  if (id === 'ru' || !['claude', 'codex', 'kimi', 'deepseek', 'glm', 'tripo'].includes(providerId)) {
+    return resource;
+  }
+
+  // Денежный кошелёк Kimi сохраняет прежнее представление до миграции его текстов.
+  // Здесь переводятся новые справочные состояния, которые не содержат баланса.
+  if (providerId === 'kimi' && resource.kind === 'balance') {
     return resource;
   }
 
