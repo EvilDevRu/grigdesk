@@ -1,0 +1,182 @@
+<template>
+  <div class="plugins-workspace ui-workspace" data-plugins-workspace data-ui-workspace>
+    <div class="plugins-toolbar">
+      <div class="plugins-tabs">
+        <UiTabs v-model="state.tab" :label="t('settings.grigdeskPlugins')" data-ui-settings-tabs>
+          <UiTab
+            id="plugins-catalog-tab"
+            value="catalog"
+            controls="plugins-catalog-panel"
+            data-plugins-tab="catalog"
+          >
+            {{ t('settings.marketplaceCatalog') }}
+          </UiTab>
+          <UiTab
+            id="plugins-installed-tab"
+            value="installed"
+            controls="plugins-installed-panel"
+            data-plugins-tab="installed"
+          >
+            {{ t('settings.installed') }}
+          </UiTab>
+        </UiTabs>
+      </div>
+      <UiButton data-context="workspace-form" data-install-git :disabled="recoveryBlocked" @click="openGit">
+        {{ t('settings.marketplaceInstallGit') }}
+      </UiButton>
+    </div>
+    <UiInlineMessage v-if="recoveryBlocked" tone="warning">
+      {{ installer.recoveryError?.message ?? installer.job?.error?.message }}
+    </UiInlineMessage>
+    <UiInlineMessage v-if="plugins.loadError" tone="warning">
+      {{ plugins.loadError }}
+    </UiInlineMessage>
+    <UiButton v-if="plugins.loadError" data-context="workspace-form" @click="plugins.load()">
+      {{ t('settings.retryLoading') }}
+    </UiButton>
+    <UiButton v-if="installer.job || installer.recoveryError" data-context="workspace-form" data-install-job @click="openJob">
+      {{ t('settings.marketplaceOpenJob') }}
+    </UiButton>
+    <section
+      id="plugins-catalog-panel"
+      v-if="state.tab === 'catalog'"
+      role="tabpanel"
+      aria-labelledby="plugins-catalog-tab"
+    >
+      <PluginCatalogPanel @install="openSelection" @configure="configure" />
+    </section>
+    <section
+      id="plugins-installed-panel"
+      v-show="state.tab === 'installed'"
+      role="tabpanel"
+      aria-labelledby="plugins-installed-tab"
+    >
+      <PluginPage :active="active && state.tab === 'installed'" />
+    </section>
+    <PluginInstallDialog
+      v-if="installOpen"
+      v-model:open="installOpen"
+      :mode="installMode"
+      :plugin="installPlugin"
+      :catalog-selection="selection"
+    />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, ref, shallowRef, watch } from 'vue';
+
+import { UiTabs, UiTab, UiButton, UiInlineMessage, t } from '../../../ui.ts';
+import { useSettingsStore } from '../../../stores/settings.ts';
+import { usePluginInstallStore } from '../../../stores/pluginInstall.ts';
+import { usePluginCatalogStore } from '../../../stores/pluginCatalog.ts';
+import { usePluginsStore } from '../../../stores/plugins.ts';
+import { usePluginMarketplaceState } from '../../../features/settings/pluginMarketplace.ts';
+import type { CatalogSelection } from '../../../../../shared/plugins/pluginCatalogPolicy.ts';
+import type { PluginListItem } from '../../../../../shared/plugins/pluginsContracts.ts';
+import PluginPage from './PluginPage.vue';
+import PluginCatalogPanel from './PluginCatalogPanel.vue';
+import PluginInstallDialog from '../PluginInstallDialog.vue';
+
+defineProps<{ active: boolean }>();
+
+const settings = useSettingsStore();
+const installer = usePluginInstallStore();
+const catalog = usePluginCatalogStore();
+const plugins = usePluginsStore();
+const state = usePluginMarketplaceState();
+const installOpen = ref(false);
+const installMode = ref<'install' | 'update'>('install');
+const installPlugin = shallowRef<PluginListItem | null>(null);
+const selection = shallowRef<CatalogSelection | null>(null);
+const recoveryBlocked = computed(() => Boolean(installer.recoveryError)
+  || installer.job?.status === 'recovery_required');
+
+/**
+ * Общая ручная установка не наследует id выбранного редактора или прежний preset.
+ * Это отдельное немедленное действие, которое не сохраняет черновики настроек.
+ */
+function openGit(): void {
+  if (recoveryBlocked.value) {
+    return;
+  }
+
+  selection.value = null;
+  installPlugin.value = null;
+  installMode.value = 'install';
+  installOpen.value = true;
+}
+
+/**
+ * Текущее задание открывается без прежнего preset каталога: иначе «Попробовать снова»
+ * подставил бы адрес и версию давно закрытого выбора. Recovery здесь не блокирует открытие.
+ */
+function openJob(): void {
+  selection.value = null;
+  installPlugin.value = null;
+  installMode.value = 'install';
+  installOpen.value = true;
+}
+
+/**
+ * Карточка передаёт один immutable по смыслу выбор в прежний диалог установки.
+ * Update получает установленный объект; чужой источник отсекается правилами карточки.
+ */
+function openSelection(next: CatalogSelection, installed: PluginListItem | null): void {
+  if (recoveryBlocked.value) {
+    return;
+  }
+
+  selection.value = {
+    ...next,
+    source: { ...next.source },
+    target: { ...next.target }
+  };
+  installPlugin.value = installed;
+  installMode.value = installed?.install ? 'update' : 'install';
+  installOpen.value = true;
+}
+
+/**
+ * Настройки конкретного установленного плагина адресуются существующей сессией.
+ * Вкладка выбирается явно и не зависит от того, менялся ли уже entityId.
+ */
+function configure(id: string): void {
+  settings.selectPage('plugins.installed', id);
+  state.tab = 'installed';
+}
+
+watch([() => settings.entityId, () => settings.revealTarget], ([id, target]) => {
+  if (id || target?.pageId === 'plugins.installed') {
+    state.tab = 'installed';
+  }
+}, { immediate: true });
+
+onMounted(() => {
+  void catalog.loadIndex();
+  void installer.loadJob();
+
+  if (!plugins.loaded) {
+    void plugins.load();
+  }
+});
+</script>
+
+<style scoped>
+.plugins-workspace {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.plugins-tabs {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.plugins-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+</style>

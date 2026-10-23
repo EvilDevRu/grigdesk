@@ -1,8 +1,12 @@
 # Данные фабрики
 
 - Реестр прогона: `~/.factory/state/tNNNN.pipeline` — `KEY=VALUE` (не JSON), парс `lib/pipeline-parse`.
-- Форма графа: `<config.profilesDir>/<profile>/graph.json` (по умолчанию локальный корневой
-  `profiles/`, целиком вне Git) (`capabilities`, nodes/keys/optional/routes с pos+edges).
+- Возможности профиля: `<config.profilesDir>/<profile>/graph.json`; каталог выбирается
+  через `FACTORY_PROFILES_DIR` или умолчание режима установки. Содержимое профилей —
+  локальная конфигурация вне Git исходников, ссылка на внешний каталог может отслеживаться
+  отдельно. Поля nodes/keys/optional/routes с pos+edges описывают исторический граф;
+  новый route-v2 граф читается из закреплённого bundle, а не из этих полей.
+  Справочник — [профили конвейера](project-profiles.md).
 - Статусы узлов: `lib/factory-graph.computeNodeStatuses` — порт `pipeline_statuses` из `dashboard.py`.
 - Возвраты: `parseLoops` из `logs/tNNNN.stages.log`. Порты стенда: `tNNNN.env`.
 - Стадии — глобальный каталог `lib/stages.ts` (enum), профиль оверрайдит подпись/тип.

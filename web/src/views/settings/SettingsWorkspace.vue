@@ -1,5 +1,5 @@
 <template>
-  <div class="settings-workspace" :data-navigation="navigationVisible">
+  <div class="settings-workspace" :data-navigation="navigationVisible" :data-page="settings.pageId">
     <aside class="settings-sidebar" :aria-label="t('settings.settingsNavigation')">
       <UiSearchInput
         v-model="settings.query"
@@ -260,5 +260,22 @@ function openResult(result: SettingsSearchResult): void {
   .settings-sections {
     display: inline-flex;
   }
+}
+/* Плагины используют всю область; геометрия остальных страниц сохраняется. */
+.settings-workspace[data-page='plugins.installed'] .settings-page-inner {
+  max-width: none;
+  margin: 0;
+  padding: 12px 16px 20px;
+  gap: 16px;
+}
+.settings-workspace[data-page='plugins.installed'] .settings-page-heading {
+  padding-inline: 16px;
+}
+.settings-workspace[data-page='plugins.installed'] .settings-page-intro {
+  gap: 4px;
+}
+.settings-workspace[data-page='plugins.installed'] .settings-page-intro h3 {
+  font-size: 15px;
+  letter-spacing: normal;
 }
 </style>

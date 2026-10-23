@@ -15,7 +15,7 @@ const pages = [
   'automation.chats', 'automation.context', 'automation.launch', 'automation.monitoring',
   'automation.arbiter', 'agents.models', 'connections.devices', 'connections.b24',
   'connections.mobile', 'system.startup', 'system.updates', 'system.processes',
-  'plugins.install', 'plugins.installed', 'agents.providers', 'speech.dictation',
+  'plugins.installed', 'agents.providers', 'speech.dictation',
   'speech.video', 'speech.language', 'speech.models', 'speech.advanced', 'system.diagnostics',
 ];
 
@@ -152,7 +152,7 @@ test('I18N-S01: system/ru/en, немедленный выбор, Cancel и пр�
   assert.equal(localStorage.getItem('grigdesk-ui-language'), 'en');
 });
 
-test('I18N-S02: все 24 страницы, публичные метаданные, EN/RU поиск и сохранение значений', async (t) => {
+test('I18N-S02: все страницы, публичные метаданные, EN/RU поиск и сохранение значений', async (t) => {
   const h = await i18nComponent(t);
 
   assert.deepEqual(Object.keys(h.module.SETTINGS_PAGE_COMPONENTS).sort(), [...pages].sort());

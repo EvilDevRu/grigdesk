@@ -15,7 +15,7 @@ const EXPECTED_PAGES = [
   ['automation', ['chats', 'context', 'launch', 'monitoring', 'arbiter']],
   ['speech', ['dictation', 'video', 'language', 'models', 'advanced']],
   ['connections', ['b24', 'devices', 'mobile']],
-  ['plugins', ['installed', 'install']],
+  ['plugins', ['installed']],
   ['system', ['startup', 'updates', 'diagnostics', 'processes']],
 ];
 
@@ -177,4 +177,14 @@ test('единый клиент: устройства имеют страниц�
     result.address?.pageId === 'connections.devices' && result.address.fieldPath[0] === 'name'));
   assert.ok(searchSettings('Адрес машины').some((result) =>
     result.address?.pageId === 'connections.devices' && result.address.fieldPath[0] === 'address'));
+});
+
+test('CAT-N1: старый install адрес переносится в общий раздел', () => {
+  assert.equal(resolveSettingsPage({ pageId: 'plugins.install' }), 'plugins.installed');
+  assert.equal(resolveSettingsPage({ queryPage: 'plugins.install' }), 'plugins.installed');
+  assert.equal(resolveSettingsPage({ storage: storageFixture({
+    'grigdesk-settings-page': 'plugins.install',
+  }) }), 'plugins.installed');
+  assert.deepEqual(SETTINGS_PAGES.filter((page) => page.groupId === 'plugins').map((page) => page.id),
+    ['plugins.installed']);
 });

@@ -15,6 +15,9 @@
 
 ## Устройство
 
+- [Профили конвейера: устройство и параметры](project-profiles.md) — файлы, переменные,
+  хуки, исполнители и модели, маршруты, значения по умолчанию и применение изменений.
+
 - [Холодный запуск ACP: единый бюджет без повтора initialize](deepseek-acp-startup.md)
 
 - [Упакованные Factory helpers и границы стадий status MCP](../server/server-binary-factory-helpers.md)

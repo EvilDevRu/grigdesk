@@ -131,6 +131,8 @@ import usageForecastModule from './modules/usage-forecast/index.ts';
 import analysisModule from './modules/analysis/index.ts';
 import authModule from './modules/auth/index.ts';
 import pluginsModule from './modules/plugins/index.ts';
+import pluginCatalogModule from './modules/plugin-catalog/index.ts';
+import { PluginCatalogService } from './lib/pluginCatalog.ts';
 import projectsModule from './modules/projects/index.ts';
 import { createProjectsService } from './modules/projects/service.ts';
 import {
@@ -1049,6 +1051,17 @@ async function build(desktopParent: DesktopParent | null) {
     config,
     desktop: desktopParent,
   });
+  // Каталог сам выбирает публичный сайт по приоритету и не задерживает boot сетью.
+  // Его собственные запросы завершаются при закрытии приложения.
+  const pluginCatalog = new PluginCatalogService({
+    applicationVersion: installOptions.grigDeskVersion,
+  });
+
+  fastify.addHook('onClose', async () => {
+    await pluginCatalog.close();
+  });
+  await fastify.register(pluginCatalogModule, { catalog: pluginCatalog });
+
   // Сервис получает полный список встроенных id и только проверенные boot paths.
   // Recovery выполняется модулем до scan/import пользовательского runtime.
   const pluginInstalls = new PluginInstallService({
