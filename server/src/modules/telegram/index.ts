@@ -73,6 +73,8 @@ export interface TelegramConnectionPort {
 }
 
 export interface TelegramModuleOptions {
+  withReferences?: <T>(op: () => Promise<T>) => Promise<T>;
+  isProjectDeleted?: (id: string) => boolean;
   connection?: TelegramConnectionPort;
   poller?: { status?: () => Payload } | null;
   botApi?: typeof realBotApi;
@@ -488,7 +490,9 @@ async function telegramModule(
     } finally { await lease.release(); }
   }));
 
-  fastify.put('/api/telegram/rules', run(async (request, reply) => {
+  fastify.put('/api/telegram/rules', run(async (request, reply) => (
+    opts.withReferences ?? ((op) => op())
+  )(async () => {
     const body = exactBody(request.body, ['botId', 'policyFingerprint', 'rules']);
     let expectedBotId = null;
     try { expectedBotId = normalizeTelegramBotId(body?.botId); } catch { /* invalid client CAS */ }
@@ -520,6 +524,17 @@ async function telegramModule(
       } catch { /* stale projection */ }
       if (liveBotId !== expectedBotId) throw accountChanged();
       const projects = await listProjects();
+
+      for (const row of Array.isArray(body.rules) ? body.rules : []) {
+        const id = isPlainRecord(row) && typeof row.project === 'string' ? row.project : '';
+
+        if (id && opts.isProjectDeleted?.(id)) {
+          return reply.code(409).send({
+            error: 'tombstoned', message: `Регистрация проекта «${id}» удалена.`,
+          });
+        }
+      }
+
       if (!lease.isCurrent()) throw accountChanged();
       const snapshot = await checked(lease, (context) => context.rules.writeHumanCas(body.rules, {
         expectedPolicyFingerprint: body.policyFingerprint,
@@ -533,7 +548,7 @@ async function telegramModule(
       }
       throw error;
     } finally { await lease.release(); }
-  }));
+  })));
 
   fastify.put('/api/telegram/rules/agent-search', run(async (request, reply) => (
     withCasLease(

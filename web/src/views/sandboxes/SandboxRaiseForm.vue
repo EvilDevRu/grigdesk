@@ -93,11 +93,21 @@ const profileError = computed(() => (props.options.length
   ? ''
   : 'Ни один профиль не объявил up.sh и down.sh.'));
 
-const canSubmit = computed(() => Boolean(profile.value) && !props.busy);
+const canSubmit = computed(() => props.options.some((item) => item.id === profile.value) && !props.busy);
 
-// Первый доступный профиль подставляется сам: чаще всего он на машине один.
+// Первый доступный профиль подставляется при начальной загрузке.
+// После исчезновения выбора соседний профиль выбирает только человек.
+let initialProfileApplied = false;
+
 watch(() => props.options, (options) => {
-  if (!profile.value && options.length) {
+  if (profile.value && !options.some((item) => item.id === profile.value)) {
+    profile.value = '';
+
+    return;
+  }
+
+  if (!profile.value && options.length && !initialProfileApplied) {
+    initialProfileApplied = true;
     profile.value = options[0]?.id || '';
   }
 }, { immediate: true });

@@ -1,6 +1,6 @@
 import { projectsApi, projectsFailureText } from '../../shared/projectsApi';
 import { useProjectsStore } from '../../stores/projects';
-import { runtimeOf } from './projectsRuntime';
+import { forgetProject, runtimeOf } from './projectsRuntime';
 
 /**
  * Список проектов целиком — вместе с архивными: прятать их должен потребитель, а
@@ -20,10 +20,18 @@ export async function loadProjects(): Promise<void> {
   store.setLoading(true);
 
   try {
-    const items = await projectsApi.list();
+    const response = await projectsApi.list();
+    const items = response.filter((item) => !store.deletedIds.has(item.id));
 
     if (request !== runtime.listRequest) {
       return;
+    }
+
+    const selected = store.opened?.id || runtime.selectedId;
+
+    if (selected && !items.some((item) => item.id === selected)) {
+      store.setLoading(false);
+      forgetProject(store, selected);
     }
 
     store.setItems(items);

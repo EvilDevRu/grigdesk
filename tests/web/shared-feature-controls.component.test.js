@@ -210,3 +210,35 @@ test('AttentionAlerts не опрашивает и не показывает о�
     staleIssueVisible: false,
   });
 });
+
+for (const width of [390, 1280]) {
+  test(`PD-switcher: управление выбранным проектом без кнопки удаления (${width}px)`, async (t) => {
+    const browser = await installUiBrowser(t);
+    const [{ mount }, ProjectSwitcher] = await Promise.all([
+      import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+      compileProjectSwitcher(),
+    ]);
+    const wrapper = mount(ProjectSwitcher, {
+      attachTo: browser.document.querySelector('#mount'),
+      props: {
+        profiles: ['alpha', 'beta'],
+        modelValue: 'alpha',
+        compact: width === 390
+      },
+    });
+
+    t.after(() => wrapper.unmount());
+
+    const manage = wrapper.findAll('button').find((item) =>
+      item.text().includes('Управление проектом') || item.attributes('aria-label') === 'Управление проектом');
+
+    assert.equal(Boolean(manage), true, 'у выбранного проекта доступно управление');
+    await manage.trigger('click');
+    assert.deepEqual(wrapper.emitted('manage'), [['alpha']]);
+    assert.equal(wrapper.text().includes('Удалить регистрацию'), false);
+    await wrapper.setProps({ modelValue: '' });
+    assert.equal(wrapper.findAll('button').some((item) =>
+      item.text().includes('Управление проектом')
+      || item.attributes('aria-label') === 'Управление проектом'), false);
+  });
+}

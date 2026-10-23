@@ -1,3 +1,5 @@
+import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
+import { isProjectDeleted, deletedProjectIds } from '../../lib/projects/deletion.ts';
 // Модуль factory (read-only, M0) — отдаёт состояние конвейера в чистом JSON,
 // которого нет у Python-дашборда (там server-rendered HTML). Мутации (ворота/запуск)
 // добавятся отдельным этапом через factory-cli.
@@ -1451,6 +1453,23 @@ async function factoryModule(
     if (!profile) return { status: 400, body: { error: 'no_profile', message: 'профиль конвейера не определён' } };
     const profiles = factoryState.discoverProfiles().filter((name) => PROFILE_RE.test(name));
 
+    let deleted = false;
+
+    try {
+      deleted = profiles.includes(profile) && isProjectDeleted(prefs, profile);
+    } catch (error) {
+      if (!(error instanceof PrefsCorruptedError)) {
+        throw error;
+      }
+
+      return { status: 500, body: { error: 'prefs_corrupted', message: error.message } };
+    }
+
+    if (deleted) {
+      return { status: 409, body: { error: 'tombstoned',
+        message: `Регистрация проекта «${profile}» удалена.` } };
+    }
+
     // Архивный проект — не «сломанный», а убранный: уже бегущие попытки идут дальше,
     // а новую запускать некуда. Отказ до любых побочных эффектов, как и bad_profile.
     if (archivedProjectIds(prefs).has(profile)) {
@@ -1628,7 +1647,24 @@ async function factoryModule(
     // Архив — решение человека о том, что проектом больше не начинают работу.
     // Форма о нём говорит тем же кодом, что и запуск: иначе выбор архивного
     // профиля выглядел бы рабочим до самого нажатия «Запустить».
-    const archivedIds = archivedProjectIds(prefs);
+    let deleted = false;
+
+    try {
+      deleted = typeof requested === 'string' && isProjectDeleted(prefs, requested);
+    } catch (error) {
+      if (!(error instanceof PrefsCorruptedError)) {
+        throw error;
+      }
+
+      return reply.code(500).send({ error: 'prefs_corrupted', message: error.message });
+    }
+
+    if (deleted) {
+      return reply.code(409).send({ error: 'tombstoned',
+        message: `Регистрация проекта «${requested}» удалена.` });
+    }
+
+    const archivedIds = new Set([...archivedProjectIds(prefs), ...deletedProjectIds(prefs)]);
     if (typeof requested === 'string' && archivedIds.has(requested)) {
       return reply.code(409).send({
         error: 'archived',

@@ -1,3 +1,7 @@
+import { ChatProjectWorkspaces } from '../../lib/chat/projectWorkspaces.ts';
+import { isProjectDeleted, readProjectsMeta, readProjectRecord, projectRepos } from '../../lib/projects.ts';
+import type { ProjectsService } from '../projects/service.ts';
+import { projectDeletionError } from '../projects/errors.ts';
 // Модуль chat — интерактивное обсуждение с CLI-агентом прямо из GrigDesk.
 // Два режима:
 //   • по задаче  — выбранный executor в worktree задачи, контекст через его sessionId;
@@ -103,7 +107,9 @@ import {
   withChatTitleHook,
 } from '../../lib/chat/titleHook.ts';
 import { normalizeChatWorkdir, sameChatWorkdir } from '../../../../shared/chat/chatWorkdir.ts';
-import { resolveChatWorkdir, resolveWorkdirCapability, ChatWorkdirError } from '../../lib/chat/workdir.ts';
+import {
+  resolveChatWorkdir, resolveWorkdirCapability, resolveWorkdirSource, ChatWorkdirError,
+} from '../../lib/chat/workdir.ts';
 import type { ResolvedWorkdir } from '../../lib/chat/workdir.ts';
 import {
   ChatWorkdirTransitions, EMPTY_WORKDIR_MEMORY, workdirTaskId,
@@ -315,6 +321,7 @@ interface ChatPrefs extends Record<string, unknown> {
 }
 
 interface ChatModuleOptions {
+  projectsService?: Pick<ProjectsService, 'withReferences' | 'registerDeletionCleanup'>;
   config: GrigDeskConfig;
   factoryState: Pick<FactoryStateAdapter,
     'readRegistry' | 'readTrustedAttempt' | 'readEnv' | 'verifyTrustedEnvironment'>;
@@ -593,8 +600,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // способна обратиться к живому трекеру, поэтому объединяем только текущую проверку без устаревающего кэша.
   const taskVerificationJobs = new Map<string, Promise<boolean>>();
 
-  /** Project scope рабочего инструмента берётся только из trusted attempt ledger. */
-  async function trustedWorkProject(taskId: string | null | undefined) {
+  /**
+   * Источник корней рабочего разговора берётся только из trusted attempt ledger.
+   * Каталог сохраняет прежний выбор для неизвестного ID; tombstone нужен историческому scope.
+   */
+  async function trustedWorkspaceProject(taskId: string | null | undefined) {
     if (!taskId || typeof factoryState?.readTrustedAttempt !== 'function') {
       return null;
     }
@@ -607,11 +617,22 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       if (!PROFILE_RE.test(projectId)) {
         return null;
       }
-      const projects = await listProjects(config, prefs);
-      return projects.includes(projectId) ? projectId : null;
+
+      return isProjectDeleted(prefs, projectId) || (await listProjects(config, prefs)).includes(projectId)
+        ? projectId : null;
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Рабочие инструменты сохраняют прежний фильтр доступного каталога.
+   * Исторический resolver отдельно получает доверенный ID удалённого проекта.
+   */
+  async function trustedWorkProject(taskId: string | null | undefined) {
+    const id = await trustedWorkspaceProject(taskId);
+
+    return id && (await listProjects(config, prefs)).includes(id) ? id : null;
   }
 
   /** Один UDS живёт вместе с chat scope и переиспользуется живым CLI-процессом. */
@@ -653,7 +674,50 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     log: fastify.log,
     registryProvider: () => modelsRegistry(config),
     defaultSurface: 'chats',
+    isProjectDeleted: (id) => isProjectDeleted(prefs, id),
+    guardNewChat: (commit, record) => {
+      const operation = async () => {
+        // Создание истории проверяет только явно записываемую ссылку на проект.
+        // Стенд и доверенный профиль задачи разрешаются при работе с её файлами.
+        const workdir = normalizeChatWorkdir(record?.workdir);
+
+        if (workdir?.kind === 'project' && isProjectDeleted(prefs, workdir.projectId)) {
+          throw new ChatHistoryError('workdir_unknown_project', 'Регистрация проекта удалена.');
+        }
+
+        return commit();
+      };
+
+      return opts.projectsService ? opts.projectsService.withReferences(operation) : operation();
+    },
   });
+  const projectWorkspaces = new ChatProjectWorkspaces(config.chatsDir);
+
+  opts.projectsService?.registerDeletionCleanup(async ({ id, revision }, finalize) => {
+    try {
+      const repos = await projectRepos({
+        config,
+        prefs,
+        id,
+        strict: true,
+      });
+
+      await projectWorkspaces.capture(id, {
+        revision,
+        repos: repos.map(({ key, dir }) => ({ key, dir })),
+        defaultRepoKey: readProjectRecord(prefs, id)?.defaultRepoKey ?? null,
+      });
+    } catch (cause) {
+      throw projectDeletionError('снимок корней', cause);
+    }
+
+    try {
+      await history.withProjectPreferencesRemoved(id, finalize);
+    } catch (cause) {
+      throw projectDeletionError('настройки чатов', cause);
+    }
+  });
+
   const bindingStore = new ChatSessionBindingStore({
     dir: config.chatBindingsDir || path.join(config.chatsDir, '.bindings'),
   });
@@ -1051,7 +1115,29 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const executor = ref ? await executorResolver(ref.provider) : null;
     const caps = await resolveWorkdirCapability(executor, config);
 
+    let retainedProject;
+    const unchanged = !selection || (selection.taskId === (record.taskId || null)
+      && sameChatWorkdir(selection.workdir, record.workdir));
+    const saved = unchanged && record.id ? await history.readOne(record.id) : null;
+    const source = await resolveWorkdirSource({
+      taskId: record.taskId || null,
+      workdir: normalizeChatWorkdir(record.workdir) || { kind: 'grigdesk' },
+      factoryState,
+      trustedProject: trustedWorkspaceProject,
+    });
+    const id = source.copies.length ? null : source.projectId;
+
+    if (saved && id && isProjectDeleted(prefs, id)) {
+      const tombstone = readProjectsMeta(prefs).tombstones[id];
+      const snapshot = tombstone ? await projectWorkspaces.retained(id, tombstone.revision) : null;
+
+      if (snapshot) {
+        retainedProject = { id, ...snapshot };
+      }
+    }
+
     return resolveChatWorkdir({
+      retainedProject,
       taskId: selection?.taskId === undefined ? record.taskId || null : selection.taskId,
       workdir: selection?.workdir ?? record.workdir,
       provider: ref?.provider || '',
@@ -1060,7 +1146,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       config,
       prefs,
       factoryState,
-      trustedProject: trustedWorkProject,
+      trustedProject: trustedWorkspaceProject,
       allowArchived: !selection || sameChatWorkdir(selection.workdir, record.workdir),
     });
   }
@@ -1164,6 +1250,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
   const workdirTransitions = new ChatWorkdirTransitions({
     history,
+    withReferences: opts.projectsService?.withReferences,
     busy: (id) => draining || deletingChats.has(id) || !!savingChats.get(id)
       || !!acceptedTurns.get(id) || activeRuns.has(id) || turnLocks.isBusy({ chatKey: id })
       || backgroundRuns.has(id),

@@ -8,6 +8,8 @@ export type SandboxesStore = ReturnType<typeof useSandboxesStore>;
 
 interface SandboxesRuntime {
   off: (() => void) | null;
+  generation: number;
+  refreshPending: boolean;
   loading: Promise<void> | null;
 }
 
@@ -22,7 +24,12 @@ export function runtimeOf(store: SandboxesStore): SandboxesRuntime {
   let runtime = runtimes.get(store);
 
   if (!runtime) {
-    runtime = { off: null, loading: null };
+    runtime = {
+      off: null,
+      loading: null,
+      generation: 0,
+      refreshPending: false,
+    };
     runtimes.set(store, runtime);
   }
 

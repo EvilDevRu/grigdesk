@@ -368,7 +368,8 @@ async function scanAuthorizedRows({ archive, bounds, windows, limit, assertCurre
  * {accountRef,generation,isCurrent,release,context:
  *   {repositoryId,repositoryFullName,archive,rules,inboxState}}.
  */
-export function createGitHubInboxChannel({ enabled, state, acquireInboxLease }: {
+export function createGitHubInboxChannel({ enabled, state, acquireInboxLease, isProjectDeleted }: {
+  isProjectDeleted?: (id: string) => boolean;
   enabled?: unknown;
   state?: unknown;
   acquireInboxLease?: unknown;
@@ -376,6 +377,20 @@ export function createGitHubInboxChannel({ enabled, state, acquireInboxLease }: 
   const enabledCallback = callable(enabled, 'enabled');
   const stateCallback = callable(state, 'state');
   const acquireCallback = callable(acquireInboxLease, 'acquireInboxLease');
+
+  const deletedCallback = callable(isProjectDeleted, 'isProjectDeleted') as (id: string) => boolean;
+
+  /**
+   * Проверка выполняется повторно после асинхронного чтения политики и архива.
+   * Ошибка настроек закрывает автоматическую работу, сохраняя raw правила.
+   */
+  function deleted(project: unknown): boolean {
+    try {
+      return Boolean(deletedCallback(String(project || '')));
+    } catch {
+      return fail('github_inbox_invalid_policy', 'Не удалось проверить регистрацию проекта.');
+    }
+  }
 
   return {
     id: CHANNEL,
@@ -473,6 +488,10 @@ export function createGitHubInboxChannel({ enabled, state, acquireInboxLease }: 
           if (rule === null) return [];
           const policy = policyOf(rule, owner.repositoryId);
 
+          if (deleted(policy.project)) {
+            return [];
+          }
+
           const scanned = await scanAuthorizedRows({
             archive: owner.archive,
             bounds,
@@ -497,7 +516,8 @@ export function createGitHubInboxChannel({ enabled, state, acquireInboxLease }: 
             };
           });
           await assertCurrent();
-          return batches;
+
+          return deleted(policy.project) ? [] : batches;
         },
 
         sourceUrl({ source, message }: { source?: Payload; message?: Payload } = {}) {

@@ -1,10 +1,147 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { apiHarness, chatStoreFixture } from './helpers/chat-store.js';
+import { apiHarness, chatStoreFixture, sseOf } from './helpers/chat-store.js';
 
 const FIRST = { kind: 'path', path: '/workspace/first' };
 const SECOND = { kind: 'path', path: '/workspace/second' };
+
+test('PD: reconnect очищает default/recent пропущенного удаления и сохраняет папку истории', async () => {
+  const { chat, session } = await fixture();
+  const choice = {
+    kind: 'project',
+    projectId: 'demo',
+    repoKey: null,
+  };
+
+  session.workdir = choice;
+  chat.defWorkdir = choice;
+  chat.recentWorkdirs = [choice];
+  chat._markSent();
+  apiHarness.get = async () => ({
+    sessions: [{ ...session }],
+    archived: [],
+    defWorkdir: { kind: 'grigdesk' },
+    recentWorkdirs: [],
+  });
+  await chat._resyncStore();
+  assert.deepEqual(chat.defWorkdir, { kind: 'grigdesk' });
+  assert.deepEqual(chat.recentWorkdirs, []);
+  assert.deepEqual(session.workdir, choice);
+});
+
+for (const during of [false, true]) {
+  test(`PD: reconnect сохраняет локальный выбор (правка во время GET=${during})`, async () => {
+    const { chat } = await fixture();
+    let release;
+
+    apiHarness.get = () => new Promise((resolve) => {
+      release = resolve;
+    });
+
+    if (!during) {
+      chat.defWorkdir = SECOND;
+      chat.recentWorkdirs = [SECOND];
+    }
+
+    const syncing = chat._resyncStore();
+
+    chat.defWorkdir = SECOND;
+    chat.recentWorkdirs = [SECOND];
+    release({
+      sessions: [],
+      archived: [],
+      defWorkdir: FIRST,
+      recentWorkdirs: [FIRST],
+    });
+    await syncing;
+    assert.deepEqual(chat.defWorkdir, SECOND);
+    assert.deepEqual(chat.recentWorkdirs, [SECOND]);
+  });
+}
+
+test('PD: поздний GET до удаления не возвращает default/recent', async () => {
+  const { chat } = await fixture();
+  const choice = {
+    kind: 'project',
+    projectId: 'demo',
+    repoKey: null,
+  };
+  const emit = sseOf(chat);
+  let release;
+
+  chat.defWorkdir = choice;
+  chat.recentWorkdirs = [choice];
+  chat._markSent();
+  apiHarness.get = () => new Promise((resolve) => {
+    release = resolve;
+  });
+
+  const syncing = chat._resyncStore();
+
+  emit('projects-changed', {
+    kind: 'deleted',
+    id: 'demo',
+    revision: 3,
+  });
+  release({
+    sessions: [],
+    archived: [],
+    defWorkdir: choice,
+    recentWorkdirs: [choice],
+  });
+  await syncing;
+  assert.deepEqual(chat.defWorkdir, { kind: 'grigdesk' });
+  assert.deepEqual(chat.recentWorkdirs, []);
+});
+
+test('PD: новый reconnect имеет приоритет над поздним старым GET', async () => {
+  const { chat } = await fixture();
+  const responses = [];
+
+  apiHarness.get = () => new Promise((resolve) => {
+    responses.push(resolve);
+  });
+
+  const old = chat._resyncStore();
+  const fresh = chat._resyncStore();
+
+  responses[1]({
+    sessions: [],
+    archived: [],
+    defWorkdir: SECOND,
+    recentWorkdirs: [SECOND],
+  });
+  await fresh;
+  responses[0]({
+      sessions: [],
+      archived: [],
+      defWorkdir: FIRST,
+      recentWorkdirs: [FIRST],
+    });
+  await old;
+  assert.deepEqual(chat.defWorkdir, SECOND);
+  assert.deepEqual(chat.recentWorkdirs, [SECOND]);
+});
+
+test('PD: полученный по SSE выбор не считается локальной правкой при следующем reconnect', async () => {
+  const { chat } = await fixture();
+  const emit = sseOf(chat);
+
+  emit('chat-store-meta', {
+    origin: 'other-window',
+    meta: { defWorkdir: FIRST, recentWorkdirs: [FIRST] },
+  });
+  apiHarness.get = async () => ({
+    sessions: [],
+    archived: [],
+    defWorkdir: SECOND,
+    recentWorkdirs: [SECOND],
+  });
+  await chat._resyncStore();
+  assert.deepEqual(chat.defWorkdir, SECOND);
+  assert.deepEqual(chat.recentWorkdirs, [SECOND]);
+});
 
 /**
  * Стор использует управляемый HTTP-транспорт: проверяем подтверждение и видимый выбор.
@@ -342,4 +479,31 @@ test('подтверждение сервера с полем вне снимк�
   assert.equal(puts, 1);
   await chat._writeChat('chat');
   assert.equal(puts, 1, 'неизменённый чат повторно целиком не отправляется');
+});
+
+test('PD-chat-catalog: deleted очищает default/recent, поздняя мета не возвращает выбор', async () => {
+  const { chat, session } = await fixture();
+  const choice = {
+    kind: 'project',
+    projectId: 'demo',
+    repoKey: null
+  };
+
+  session.workdir = choice;
+  chat.defWorkdir = choice;
+  chat.recentWorkdirs = [choice, FIRST];
+  chat.initPerms();
+  globalThis.__chatSse('projects-changed', {
+    id: 'demo',
+    revision: 4,
+    kind: 'deleted'
+  });
+  assert.deepEqual(chat.defWorkdir, { kind: 'grigdesk' });
+  assert.deepEqual(chat.recentWorkdirs, [FIRST]);
+  assert.deepEqual(session.workdir, choice, 'папка старого разговора сохраняется');
+  globalThis.__chatSse('chat-store-meta', {
+    origin: 'other-window', meta: { defWorkdir: choice, recentWorkdirs: [choice, FIRST] },
+  });
+  assert.deepEqual(chat.defWorkdir, { kind: 'grigdesk' });
+  assert.deepEqual(chat.recentWorkdirs, [FIRST]);
 });

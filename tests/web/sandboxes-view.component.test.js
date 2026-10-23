@@ -116,6 +116,9 @@ async function mountView(t, {
     },
   };
 
+  const { reactive } = await import('../../web/node_modules/vue/index.mjs');
+
+  harness.store = reactive(harness.store);
   globalThis.__sandboxViewHarness = harness;
 
   const component = await compileVue(VIEW, {
@@ -285,3 +288,23 @@ test('итог прогона показан на карточке, а журн�
   assert.deepEqual(calls.filter(([kind]) => kind === 'log'), [['log', '990000']]);
   assert.match(wrapper.find('.sandbox-card__log-text').text(), /все звенья СОВПАДАЮТ/);
 });
+
+for (const remaining of [[], [{
+  id: 'other',
+  canRaise: true,
+  reason: null
+}]]) {
+  test(`PD-raise-catalog: форма сбрасывает удалённый выбранный профиль (${remaining.length} осталось)`,
+    async (t) => {
+      const { wrapper, harness, calls, flushPromises } = await mountView(t);
+
+      harness.store.profiles = remaining;
+      harness.store.capableProfiles = remaining;
+      await flushPromises();
+      await wrapper.get('form').trigger('submit');
+      await flushPromises();
+      assert.equal(calls.some(([kind]) => kind === 'raise'), false);
+      assert.equal(wrapper.find('select').element.value, '');
+      assert.equal(wrapper.text().includes('990000'), true, 'поднятый стенд остаётся на экране');
+    });
+}

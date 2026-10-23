@@ -96,6 +96,8 @@
 - [Смена папки требует согласования истории, очереди и памяти](workdir-transition-preconditions.md)
 - [Чат (modules/chat)](chat-module.md)
 - [Рабочая папка чата: приоритет задачи, выбор проекта и границы записи](chat-workspace.md)
+- [Исчезнувший профиль задачи сохраняет прежний выбор папки разговора](task-project-fallback.md)
+- [Создание истории без стенда, строгий снимок корней и сверка default/recent](project-deletion-recovery.md)
 - [Что реально ушло в запуск (проверка модели и эффорта)](launch-model-and-effort.md)
 - [UI-контекст: чат знает, где пользователь](ui-context.md)
 

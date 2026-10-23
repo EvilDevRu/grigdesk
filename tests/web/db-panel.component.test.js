@@ -339,3 +339,47 @@ test('архивный проект не предлагается новому �
   // Новый профиль базы заводят только на активный проект: архивным уже не работают.
   assert.deepEqual(options, ['grigdesk']);
 });
+
+test('PD-db-catalog: исчезнувший выбор нового профиля сбрасывается, сессии сохраняются', async (t) => {
+  await installUiBrowser(t, 'http://grigdesk.test/#/db');
+
+  const { reactive } = await import('../../web/node_modules/vue/index.mjs');
+  const saved = [];
+  const store = reactive({
+
+    profiles: [],
+    projects: [{ id: 'demo' }, { id: 'other' }],
+    sessions: [],
+    sshSessions: [],
+
+    engines: [{ id: 'mysql', label: 'MySQL' }],
+    queries: [],
+    audit: [],
+    schemas: {},
+
+    load: async () => { },
+    loadProjects: async () => { },
+
+    saveProfile: async (profile) => {
+      saved.push(profile);
+    },
+
+  });
+  const { wrapper, flushPromises } = await mountPanel(t, store);
+
+  await wrapper.get('[data-db-project-select]').setValue('demo');
+  await wrapper.get('[aria-label="Метка профиля"]').setValue('Заказы');
+  await wrapper.get('[aria-label="Адрес базы"]').setValue('fixture.invalid');
+  await wrapper.get('[aria-label="Пользователь базы"]').setValue('reader');
+  store.projects = [{ id: 'other' }];
+  await flushPromises();
+  await wrapper.get('.db-profile-form').trigger('submit');
+  await flushPromises();
+  assert.equal(wrapper.get('[data-db-project-select]').element.value, '');
+  assert.equal(saved.length, 0, 'старый projectId не уходит в новый профиль');
+  assert.equal(wrapper.get('[aria-label="Метка профиля"]').element.value, 'Заказы');
+  store.projects = [{ id: 'demo' }, { id: 'other' }];
+  await flushPromises();
+  assert.equal(wrapper.get('[data-db-project-select]').element.value, '',
+    'поздний каталог не восстанавливает прежний выбор');
+});

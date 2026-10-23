@@ -13,11 +13,13 @@ import { promises as fs } from 'node:fs';
 import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
 
 import { PROFILE_RE, listFactoryProfiles, listProjects } from '../../lib/profiles.ts';
-import { cachedTriageProfile, readProjectRecord } from '../../lib/projects.ts';
+import {
+  cachedTriageProfile, readProjectRecord, readProjectsMeta, isProjectDeleted,
+} from '../../lib/projects.ts';
 import { checkRepositoryPaths } from '../../lib/projects/repositoryCheck.ts';
 import { RoutesStore } from '../routes/store.ts';
 import { validateProjectInput } from '../../../../shared/runtime/projectsContracts.ts';
-import { ProjectsError } from './errors.ts';
+import { ProjectsError, projectDeletionError } from './errors.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
 import type { ProjectImport, ProjectRecord, ProjectRepoRef } from '../../lib/projects.ts';
 import type { RepositoryCheckResult } from '../../lib/projects/repositoryCheck.ts';
@@ -64,6 +66,7 @@ export interface ProjectDependencyProvider {
   kind: string;
   label: string;
   blocksArchive: boolean;
+  blocksDelete?: boolean;
   count: (id: string) => Promise<{ count: number; items?: string[] }> | { count: number; items?: string[] };
 }
 
@@ -81,7 +84,15 @@ export interface ProjectDependencies {
   reasons: string[];
 }
 
+type DeletionCleanup = (
+  context: { id: string; revision: number },
+  finalize: () => void,
+) => Promise<void>;
+
 export interface ProjectsService {
+  remove: (id: string, expectedRevision: unknown) => Promise<void>;
+  withReferences: <T>(op: () => Promise<T>) => Promise<T>;
+  registerDeletionCleanup: (hook: DeletionCleanup) => void;
   list: () => Promise<ProjectSummary[]>;
   read: (id: string) => Promise<ProjectDetail>;
   create: (input: unknown) => Promise<ProjectDetail>;
@@ -164,6 +175,7 @@ export function createProjectsService({
 }: ProjectsServiceOptions): ProjectsService {
   const listeners = new Set<(change: ProjectsChange) => void>();
   const dependencyProviders: ProjectDependencyProvider[] = [];
+  let deletionCleanup: DeletionCleanup | undefined;
   let mutationTail: Promise<unknown> = Promise.resolve();
 
   /**
@@ -403,6 +415,8 @@ export function createProjectsService({
 
     // Паспорт читается из фактического файла: если файл не читается, показать проект
     // нельзя — это отказ записи настроек, а не «проекта нет».
+    requireAvailable(id);
+
     const stored = prefs.readForWrite();
     const record = readProjectRecord(storedPort(stored), id);
     const factorySet = await factoryIds();
@@ -421,6 +435,10 @@ export function createProjectsService({
     return mutate(async () => {
       const stored = prefs.readForWrite();
       const port = storedPort(stored);
+
+      if (isProjectDeleted(prefs, id)) {
+        throw new ProjectsError(409, 'tombstoned', `Регистрация проекта «${id}» удалена.`);
+      }
 
       if (readProjectRecord(port, id)) {
         throw new ProjectsError(409, 'exists', `Проект «${id}» уже есть в реестре.`);
@@ -462,6 +480,9 @@ export function createProjectsService({
       const revision = requireRevision(expectedRevision);
       const stored = prefs.readForWrite();
       const port = storedPort(stored);
+
+      requireAvailable(id);
+
       const record = readProjectRecord(port, id);
       const profile = await profileStateOf(id, (await factoryIds()).has(id));
 
@@ -550,10 +571,13 @@ export function createProjectsService({
   async function dependencies(id: string): Promise<ProjectDependencies> {
     requireId(id);
 
+    requireAvailable(id);
+
     const items: ProjectDependencyItem[] = [];
     const reasons: string[] = [];
     let archivable = true;
-    let checked = true;
+    let checkedBlocking = true;
+    let blockedDelete = false;
 
     for (const provider of dependencyProviders) {
       try {
@@ -571,28 +595,39 @@ export function createProjectsService({
           items: (found.items ?? []).slice(0, DEPENDENCY_ITEMS_LIMIT),
         });
 
+        if (provider.blocksDelete !== false) {
+          blockedDelete = true;
+
+          if (Boolean(readProjectRecord(prefs, id)?.archivedAt)) {
+            reasons.push(`${provider.label}: ${count}. Переназначьте связи в этом разделе.`);
+          }
+        }
+
         if (provider.blocksArchive) {
           archivable = false;
           reasons.push(`${provider.label}: ${count}. Пока они ссылаются на проект, архив запрещён.`);
         }
       } catch (error) {
         archivable = false;
-        checked = false;
+
+        if (provider.blocksDelete !== false) {
+          checkedBlocking = false;
+        }
+
         reasons.push(`Связи не проверены (${provider.label}): ${errorText(error)}`);
       }
     }
 
     const stored = prefs.readForWrite();
     const record = readProjectRecord(storedPort(stored), id);
-    const profilePresent = (await factoryIds()).has(id);
     const archived = Boolean(record?.archivedAt);
 
-    // Удалять можно только архивную запись, у которой нет профиля на диске (профиль —
-    // территория движка) и на которую никто не ссылается.
+    // История и профиль остаются у владельцев; удаление блокируют только
+    // живые или непроверенные ссылки на регистрацию.
     return {
       items,
       archivable,
-      deletable: checked && archived && !profilePresent && items.length === 0,
+      deletable: checkedBlocking && archived && !blockedDelete,
       reasons,
     };
   }
@@ -600,10 +635,14 @@ export function createProjectsService({
   /** Архив: проект остаётся в реестре, но потребители его больше не предлагают. */
   async function archive(id: string, expectedRevision: unknown): Promise<ProjectDetail> {
     requireId(id);
+
     const revision = requireRevision(expectedRevision);
 
     return mutate(async () => {
       const stored = prefs.readForWrite();
+
+      requireAvailable(id);
+
       const record = readProjectRecord(storedPort(stored), id);
       const profile = await profileStateOf(id, (await factoryIds()).has(id));
 
@@ -653,10 +692,14 @@ export function createProjectsService({
   /** Возврат из архива: путь и ревизия те же, проект снова доступен потребителям. */
   async function restore(id: string, expectedRevision: unknown): Promise<ProjectDetail> {
     requireId(id);
+
     const revision = requireRevision(expectedRevision);
 
     return mutate(async () => {
       const stored = prefs.readForWrite();
+
+      requireAvailable(id);
+
       const record = readProjectRecord(storedPort(stored), id);
       const profile = await profileStateOf(id, (await factoryIds()).has(id));
 
@@ -690,6 +733,112 @@ export function createProjectsService({
     });
   }
 
+  /**
+   * Удалённый паспорт не восстанавливается через физический профиль.
+   * Все прямые операции реестра используют этот же строгий барьер.
+   */
+  function requireAvailable(id: string): void {
+    if (isProjectDeleted(prefs, id)) {
+      throw new ProjectsError(404, 'not_found', `Проект «${id}» не найден.`);
+    }
+  }
+
+  /**
+   * Удаляет регистрацию после подготовки данных владельцев под общей очередью ссылок.
+   * Финал перечитывает настройки синхронно, сохраняя соседние записи после ожиданий.
+   */
+  async function remove(id: string, expectedRevision: unknown): Promise<void> {
+    requireId(id);
+
+    const revision = requireRevision(expectedRevision);
+
+    return mutate(async () => {
+      const stored = prefs.readForWrite();
+      const tombstone = readProjectsMeta(storedPort(stored)).tombstones[id];
+      const currentRevision = tombstone?.revision
+        ?? readProjectRecord(storedPort(stored), id)?.revision ?? 0;
+
+      if (tombstone && revision + 1 === currentRevision) {
+        return;
+      }
+
+      if (tombstone) {
+        throw new ProjectsError(409, 'revision_conflict', 'Паспорт изменился.', { currentRevision });
+      }
+
+      const detail = await read(id);
+
+      if (!detail.archivedAt) {
+        throw new ProjectsError(409, 'not_archived', 'Сначала отправьте проект в архив.');
+      }
+
+      if (revision !== detail.revision) {
+        throw new ProjectsError(409, 'revision_conflict', 'Паспорт изменился.', {
+          currentRevision: detail.revision,
+        });
+      }
+
+      const summary = await dependencies(id);
+
+      if (!summary.deletable) {
+        const unchecked = summary.reasons.some((reason) => dependencyProviders.some((provider) => (
+          provider.blocksDelete !== false && reason.startsWith(`Связи не проверены (${provider.label}):`)
+        )));
+
+        throw new ProjectsError(409, unchecked ? 'dependency_check_failed' : 'has_dependencies',
+          summary.reasons.join(' '));
+      }
+
+      /**
+       * Финальная запись читает свежие соседние настройки после всех ожиданий.
+       * Между повторной проверкой ревизии и записью нет асинхронной границы.
+       */
+      const finalize = () => {
+        const fresh = prefs.readForWrite();
+        const record = readProjectRecord(storedPort(fresh), id);
+
+        if (record?.revision !== revision || !record.archivedAt) {
+          throw new ProjectsError(409, 'revision_conflict', 'Паспорт изменился.', {
+            currentRevision: record?.revision ?? 0,
+          });
+        }
+
+        const projects = { ...storedProjectsOf(fresh) };
+        const meta = recordOrEmpty(fresh.projectsMeta);
+
+        delete projects[id];
+        prefs.write({ projects, projectsMeta: {
+          ...meta,
+          tombstones: { ...recordOrEmpty(meta.tombstones), [id]: {
+            deletedAt: now(), revision: revision + 1,
+          } },
+        } });
+      };
+
+      try {
+        if (deletionCleanup) {
+          await deletionCleanup({ id, revision }, () => {
+            try {
+              finalize();
+            } catch (cause) {
+              throw projectDeletionError('запись регистрации', cause);
+            }
+          });
+        } else {
+          finalize();
+        }
+      } catch (cause) {
+        throw projectDeletionError('запись регистрации', cause);
+      }
+
+      announce({
+        id,
+        revision: revision + 1,
+        kind: 'deleted',
+      });
+    });
+  }
+
   function registerDependencyProvider(provider: ProjectDependencyProvider): void {
     dependencyProviders.push(provider);
   }
@@ -706,6 +855,11 @@ export function createProjectsService({
   }
 
   return {
+    remove,
+    withReferences: mutate,
+    registerDeletionCleanup: (hook) => {
+      deletionCleanup = hook;
+    },
     list,
     read,
     create,

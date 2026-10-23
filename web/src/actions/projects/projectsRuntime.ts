@@ -11,6 +11,9 @@ export type ProjectsStore = ReturnType<typeof useProjectsStore>;
 
 export interface ProjectsRuntime {
   off: (() => void) | null;
+  selectedId: string;
+  selectionGeneration: number;
+  dependenciesRequest: number;
   listRequest: number;
   detailRequest: number;
   checkRequest: number;
@@ -31,6 +34,9 @@ export function runtimeOf(store: ProjectsStore): ProjectsRuntime {
   if (!runtime) {
     runtime = {
       off: null,
+      selectedId: '',
+      selectionGeneration: 0,
+      dependenciesRequest: 0,
       listRequest: 0,
       detailRequest: 0,
       checkRequest: 0,
@@ -41,4 +47,30 @@ export function runtimeOf(store: ProjectsStore): ProjectsRuntime {
   }
 
   return runtime;
+}
+
+/**
+ * Удаление инвалидирует ответы выбранного паспорта, но не соседние правки.
+ * Счётчик списка меняется для любого удаления, чтобы старый GET не вернул строку.
+ */
+export function forgetProject(store: ProjectsStore, id: string): void {
+  const runtime = runtimeOf(store);
+
+  runtime.listRequest += 1;
+
+  if (runtime.selectedId === id || store.opened?.id === id || store.draft?.id === id) {
+    runtime.selectionGeneration += 1;
+    runtime.selectedId = '';
+    runtime.detailRequest += 1;
+    runtime.dependenciesRequest += 1;
+    runtime.checkRequest += 1;
+    runtime.checkCancelled?.();
+
+    if (runtime.checkTimer !== null) {
+      clearTimeout(runtime.checkTimer);
+      runtime.checkTimer = null;
+    }
+  }
+
+  store.removeRegistration(id);
 }
