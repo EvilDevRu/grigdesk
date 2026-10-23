@@ -41,6 +41,9 @@ import { createServerSupervisor } from './serverSupervisor.ts';
 import { readSettings, writeSettings } from './settings.ts';
 import { API_VERSION } from '../../shared/client/apiVersion.ts';
 import { createClientRuntime } from './clientRuntime.ts';
+import { createPortableRuntime } from './portableRuntime.ts';
+import { offerPortableIntegration } from './portableIntegration.ts';
+import { Profiles } from './profiles.ts';
 import { electronSealer, sealedIdentity } from './identity.ts';
 import { readWindowKey } from './autoLogin.ts';
 import { localPort, originFromArgs } from './connection.ts';
@@ -135,23 +138,38 @@ function startOwnServer(runtime: ServerRuntime): ChildProcess {
 // Каталог пакета для очистки окружения своего сервера: распакованный AppRun не экспортирует APPDIR.
 const packageDir = app.isPackaged ? path.dirname(process.execPath) : null;
 
-const supervisor = createServerSupervisor({
-  loadRuntime: ({ purpose }) => loadServerRuntime({
-    purpose,
-    env: process.env,
-    home: os.homedir(),
-    deps: runtimeDependencies,
-    appDir: packageDir,
-    bundledUi: true,
-  }),
-  probe: (signal) => probeGrigDesk(selectedOrigin ?? '', { signal }),
-  unitState: (signal) => readUnitState(signal),
-  runGate: (runtime, signal) => runVpnGate(runtime, signal),
-  spawnServer: (runtime) => startOwnServer(runtime),
-  sleep: (ms, signal) => delayWithAbort(ms, signal),
-  now: () => Date.now(),
-  log: (message) => writeLog(message),
+let portable: ReturnType<typeof createPortableRuntime> | null = null;
+let portableWindow: string | null = null;
+let markMainShown = () => {};
+const mainShown = new Promise<void>((resolve) => {
+  markMainShown = resolve;
 });
+
+/**
+ * После смены ELF нужен новый supervisor: stop завершает прежний контроллер навсегда.
+ * Все поколения используют общий descriptor, а владение процессом остаётся внутри supervisor.
+ */
+function createOwnSupervisor() {
+  return createServerSupervisor({
+    loadRuntime: ({ purpose }) => loadServerRuntime({
+      purpose,
+      env: process.env,
+      home: os.homedir(),
+      deps: runtimeDependencies,
+      appDir: packageDir,
+      bundledUi: true,
+    }),
+    probe: (signal) => probeGrigDesk(selectedOrigin ?? '', { signal }),
+    unitState: (signal) => readUnitState(signal),
+    runGate: (runtime, signal) => runVpnGate(runtime, signal),
+    spawnServer: (runtime) => startOwnServer(runtime),
+    sleep: (ms, signal) => delayWithAbort(ms, signal),
+    now: () => Date.now(),
+    log: (message) => writeLog(message),
+  });
+}
+
+let supervisor = createOwnSupervisor();
 
 /**
  * Окно показано: дальше перезагрузка, 401 и потеря связи идут обычным offline-путём.
@@ -631,7 +649,7 @@ async function prepare(signal: AbortSignal): Promise<void> {
     appDir: packageDir,
     bundledUi: true,
   });
-  const runtime = 'inspection' in loaded ? loaded.inspection : null;
+  let runtime = 'inspection' in loaded ? loaded.inspection : null;
   const argument = originFromArgs(process.argv);
 
   signal.throwIfAborted();
@@ -641,6 +659,99 @@ async function prepare(signal: AbortSignal): Promise<void> {
   }
 
   settings = stored;
+
+  const profiles = new Profiles({
+    settings: stored,
+    save: () => writeSettings(settingsFile!, stored),
+  });
+
+  portable = createPortableRuntime({
+    isPackaged: app.isPackaged,
+    execPath: process.execPath,
+    env: process.env,
+    home: os.homedir(),
+    explicitUrl: argument && 'origin' in argument ? argument.origin : null,
+    profiles,
+    ownsServer: () => supervisor.ownership === 'owned',
+    async stopServer() {
+      await supervisor.stop();
+      supervisor = createOwnSupervisor();
+      supervising = false;
+    },
+    /**
+     * Выбранный descriptor перечитывается до подготовки payload новым supervisor.
+     * Опрос сообщает ожидание только от текущего поколения контроллера.
+     */
+    async startServer(_binary, input) {
+      const inspected = await loadServerRuntime({
+        purpose: 'inspect',
+        env: process.env,
+        home: os.homedir(),
+        deps: runtimeDependencies,
+        appDir: packageDir,
+        bundledUi: true,
+      });
+
+      runtime = 'inspection' in inspected ? inspected.inspection : null;
+
+      if (!runtime) {
+        throw new Error(desktopText('desktop.serverNotPrepared'));
+      }
+
+      selectedOrigin = runtime.origin;
+      supervising = true;
+
+      const current = supervisor;
+      const progress = setInterval(() => {
+        const id = stored.selected;
+
+        if (id && current === supervisor && current.waitReason) {
+          client?.shell.reportBackground(id, {
+            status: 'connecting',
+            detail: { code: 'server_starting', message: current.waitReason },
+            serverApi: null,
+          });
+        }
+      }, 500);
+
+      try {
+        await current.ensure({
+          origin: runtime.origin,
+          signal: input?.signal ?? lifetime.signal,
+          deadline: Date.now() + STARTUP_HOLD_LIMIT_MS + STARTUP_DEADLINE_MS,
+        });
+      } finally {
+        clearInterval(progress);
+        supervising = false;
+      }
+    },
+    async notify(message) {
+      await mainShown;
+
+      if (!lifetime.signal.aborted) {
+        await dialog.showMessageBox({
+          type: 'info',
+          title: 'GrigDesk',
+          message,
+        });
+      }
+    },
+    report(message) {
+      const id = stored.selected;
+
+      if (id) {
+        client?.shell.reportBackground(id, {
+          status: 'connecting',
+          detail: { code: 'server_starting', message },
+          serverApi: null,
+        });
+      }
+    },
+  });
+
+  const discovered = await portable.discover();
+
+  portableWindow = discovered.windowPath;
 
   const uiDir = clientUiDirectory({
     packaged: app.isPackaged,
@@ -716,8 +827,8 @@ async function prepare(signal: AbortSignal): Promise<void> {
 
     identity: sealedIdentity(electronSealer(safeStorage, process.platform)),
     identityDirectory: path.join(app.getPath('userData'), 'identity'),
-    localAvailable: () => runtime !== null,
-    localAddress: () => runtime?.origin || '',
+    localAvailable: () => runtime != null || discovered.localAvailable,
+    localAddress: () => runtime?.origin || discovered.address,
     windowKey: async (profile) => {
       const file = windowKeyPath({
         env: runtime?.env || process.env,
@@ -727,11 +838,18 @@ async function prepare(signal: AbortSignal): Promise<void> {
 
       return await readWindowKey(file) || '';
     },
+    beforeSelect: (profile) => portable!.activate(profile),
     /**
      * Supervisor работает независимо от показа окна и сообщает ожидание в shell.
      * Управление касается только собственного сервера исправной установки.
      */
-    prepareLocal(profile) {
+    async prepareLocal(profile, input) {
+      if (profile.serverBinary) {
+        await portable!.prepareLocal(profile, input);
+
+        return;
+      }
+
       if (!runtime || supervising || profile.address !== runtime.origin) {
         return;
       }
@@ -862,6 +980,34 @@ function revealMain(): void {
   }
 
   window.show();
+  markMainShown();
+
+  if (portableWindow) {
+    void offerPortableIntegration({
+      isPortable: true,
+      windowPath: portableWindow,
+      userData: app.getPath('userData'),
+      home: os.homedir(),
+      env: process.env,
+      shown: mainShown,
+      async ask() {
+        const result = await dialog.showMessageBox(window, {
+          type: 'question',
+          title: 'GrigDesk',
+          message: desktopText('desktop.portableMenuTitle'),
+          buttons: [desktopText('desktop.portableMenuAdd'), desktopText('desktop.portableMenuLater')],
+          defaultId: 0,
+          cancelId: 1,
+        });
+
+        return result.response === 0;
+      },
+      reportError() {
+        dialog.showErrorBox('GrigDesk', desktopText('desktop.portableMenuError'));
+      },
+    });
+  }
+
   destroySplash();
   window.focus();
 }
@@ -891,6 +1037,7 @@ const quit = createQuitController({
     startup.cancel();
     surfaceWindows?.closeAll();
     lifetime.abort();
+    portable?.close();
     client?.shell.close();
   },
   closeSplash: () => destroySplash(),

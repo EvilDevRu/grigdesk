@@ -303,6 +303,11 @@
       "reason": "Код протокола ошибки трубы, переводится по коду в каркасе"
     },
     {
+      "text": "server_start_failed",
+      "file": "desktop/src/clientRuntime.ts",
+      "reason": "Код ошибки подготовки local в ответе трубы; текст причины передаётся в detail.message"
+    },
+    {
       "text": "disconnected",
       "reason": "Код протокола ошибки трубы, переводится по коду в каркасе"
     },

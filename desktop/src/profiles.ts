@@ -1,6 +1,7 @@
 import { desktopText } from './locale.ts';
 import { randomUUID } from 'node:crypto';
 import net from 'node:net';
+import path from 'node:path';
 import type { DesktopSettings } from './settings.ts';
 import { localOrigin } from './connection.ts';
 
@@ -10,6 +11,8 @@ export interface DesktopProfile {
   kind: 'local' | 'remote';
   address: string;
   fp: string | null;
+  serverBinary?: string;
+  portable?: true;
   port: number;
   createdAt: number;
 }
@@ -19,6 +22,8 @@ export interface ProfileInput {
   kind: 'local' | 'remote';
   address: string;
   fp: string | null;
+  serverBinary?: string;
+  portable?: true;
 }
 
 /**
@@ -70,6 +75,9 @@ export function normalizeProfile(value: unknown): DesktopProfile | null {
     fp: item.kind === 'remote' ? item.fp : null,
     port: item.port,
     createdAt: item.createdAt,
+    ...(item.kind === 'local' && typeof item.serverBinary === 'string'
+      && path.isAbsolute(item.serverBinary) ? { serverBinary: item.serverBinary } : {}),
+    ...(item.kind === 'local' && item.portable === true ? { portable: true } : {}),
   };
 }
 
@@ -136,11 +144,14 @@ export class Profiles {
 
   /**
    * Повтор привязки одного сертификата обновляет существующую запись без нового origin.
+   * Местный URL обновляет этот компьютер даже после привязки ELF, сохраняя отдельного portable-соседа.
    * Выбор свободного порта и запись нового профиля завершаются одной операцией сохранения.
    */
   async add(input: ProfileInput): Promise<DesktopProfile> {
     const existing = this.settings.profiles.find((item) => input.kind === 'local'
-      ? item.kind === 'local' : item.kind === 'remote' && item.fp === input.fp);
+      ? item.kind === 'local' && (input.serverBinary
+        ? item.serverBinary === input.serverBinary && item.portable === input.portable : !item.portable)
+      : item.kind === 'remote' && item.fp === input.fp);
 
     if (existing) {
       existing.address = input.address;
@@ -180,6 +191,21 @@ export class Profiles {
     await this.save();
 
     return profile;
+  }
+
+  /**
+   * Привязка установки остаётся приватной настройкой main и сохраняет origin профиля.
+   * Перенос меняет только executable, не создавая новую личность машины.
+   */
+  async bind(id: string, binary: string): Promise<void> {
+    const profile = this.get(id);
+
+    if (profile.kind !== 'local' || !path.isAbsolute(binary)) {
+      throw new Error(desktopText('desktop.invalidMachine'));
+    }
+
+    profile.serverBinary = binary;
+    await this.save();
   }
 
   async select(id: string | null): Promise<void> {

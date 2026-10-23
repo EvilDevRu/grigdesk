@@ -145,6 +145,36 @@ test('SV-01 таблица decideStart покрывает все строки Р
   }
 });
 
+test('PB-PREPARE: причина подготовки видна до завершения loadRuntime', async () => {
+  let release;
+  let entered;
+  const loading = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const fixture = supervisorFixture({
+    async loadRuntime() {
+      entered();
+
+      return pending;
+    },
+  });
+  const running = fixture.run();
+
+  await loading;
+
+  try {
+    assert.match(fixture.supervisor.waitReason || '', /подготов/iu);
+    assert.ok(!fixture.calls.includes('spawn'));
+  } finally {
+    fixture.controller.abort();
+    release({ runtime: RUNTIME });
+    await running.catch(() => {});
+  }
+});
+
 test('SV-02 готовый внешний сервер не требует runtime, ворот и spawn', async () => {
   const fixture = supervisorFixture({ probes: ['grigdesk'] });
 

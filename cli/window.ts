@@ -1,6 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
 
+import { isPortableBundle } from '../shared/node/bundleLayout.ts';
+
 import type { Settings } from './commands.ts';
 import { printable } from './status.ts';
 import { executable, pidAlive, readLink, spawnDetached } from './system.ts';
@@ -12,6 +14,10 @@ export type WindowStateName = 'open' | 'closed' | 'not_installed' | 'unknown';
  * лежит в bin/ копии под именем grigdesk-app, рядом с остальными программами.
  */
 export function windowAppPath(root: string): string {
+  if (isPortableBundle(root)) {
+    return path.join(root, 'GrigDesk');
+  }
+
   return path.join(root, 'bin/grigdesk-app');
 }
 
@@ -90,7 +96,9 @@ export async function openWindow(root: string, settings: Settings, env: NodeJS.P
   }
 
   try {
-    await spawnDetached(app, [`--grigdesk-url=${settings.origin}/`], childEnv);
+    const args = await isPortableBundle(root) ? [] : [`--grigdesk-url=${settings.origin}/`];
+
+    await spawnDetached(app, args, childEnv);
     console.log('Окно открывается');
 
     return 0;
