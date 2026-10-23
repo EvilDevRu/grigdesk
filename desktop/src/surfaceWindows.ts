@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { SurfaceTarget } from '../../shared/desktop/surfaceContract.ts';
 import { surfaceUrl } from '../../shared/desktop/surfaceContract.ts';
 
@@ -14,13 +16,18 @@ export interface SurfaceWindow {
 interface SurfaceAdapters {
   allowedOrigin(): string | null;
   create(url: string, target: SurfaceTarget, index: number): SurfaceWindow;
+  closed?(origin: string, target: SurfaceTarget, instance: string): void;
   beforeShow?(window: SurfaceWindow): void;
   schedule?(callback: () => void, milliseconds: number): () => void;
 }
 interface Entry {
   window: SurfaceWindow;
   target: SurfaceTarget;
+  instance?: string;
+  origin: string;
 }
+
+type OpenResult = boolean | { opened: boolean; instance?: string };
 
 const OPEN_TIMEOUT_MS = 10000;
 
@@ -35,10 +42,10 @@ function schedule(callback: () => void, milliseconds: number): () => void {
  */
 export function createSurfaceWindows(adapters: SurfaceAdapters) {
   const entries = new Map<string, Entry>();
-  const pending = new Map<string, Promise<boolean>>();
+  const pending = new Map<string, Promise<OpenResult>>();
   let generation = 0;
 
-  function focus(window: SurfaceWindow): void {
+  function focusWindow(window: SurfaceWindow): void {
     if (window.isMinimized()) {
       window.restore();
     }
@@ -50,18 +57,22 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
    * Отрицательный ответ выдаётся лишь после удаления окна этой задачи.
    * Поэтому вызывающий может безопасно показать inline fallback.
    */
-  async function openWindow(origin: string, target: SurfaceTarget, key: string): Promise<boolean> {
+  async function openWindow(origin: string, target: SurfaceTarget, key: string): Promise<OpenResult> {
     const epoch = generation;
-    const url = surfaceUrl(origin, target);
+    const instance = target.kind === 'tool' ? randomUUID() : undefined;
+    const url = surfaceUrl(origin, target, instance);
     let entry: Entry | null = null;
     let cancelTimeout = () => {
     };
 
     try {
-      const window = adapters.create(url, target, entries.size);
+      const window = adapters.create(url, target, [...entries.values()]
+        .filter((entry) => entry.target.kind === 'task').length);
       const owned: Entry = {
         window,
         target,
+        origin,
+        instance,
       };
 
       entry = owned;
@@ -69,6 +80,10 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
       window.on('closed', () => {
         if (entries.get(key) === owned) {
           entries.delete(key);
+
+          if (owned.instance) {
+            adapters.closed?.(origin, target, owned.instance);
+          }
         }
       });
 
@@ -86,9 +101,9 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
       }
 
       adapters.beforeShow?.(window);
-      focus(window);
+      focusWindow(window);
 
-      return true;
+      return instance ? { opened: true, instance } : true;
     }
     catch {
       if (entry && entries.get(key) === entry) {
@@ -98,7 +113,7 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
         entry.window.destroy();
       }
 
-      return false;
+      return instance ? { opened: false } : false;
     }
     finally {
       cancelTimeout();
@@ -108,9 +123,9 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
    * Второй клик по загружающейся задаче получает тот же результат, а не второе окно.
    * Живое окно задачи только поднимается: его документ и черновик остаются прежними.
    */
-  function open(origin: string, target: SurfaceTarget): Promise<boolean> {
+  function open(origin: string, target: SurfaceTarget): Promise<OpenResult> {
     if (origin !== adapters.allowedOrigin()) {
-      return Promise.resolve(false);
+      return Promise.resolve(target.kind === 'tool' ? { opened: false } : false);
     }
 
     const key = origin + ' ' + target.kind + ':' + target.id;
@@ -123,9 +138,9 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
     const entry = entries.get(key);
 
     if (entry && !entry.window.isDestroyed()) {
-      focus(entry.window);
+      focusWindow(entry.window);
 
-      return Promise.resolve(true);
+      return Promise.resolve(entry.instance ? { opened: true, instance: entry.instance } : true);
     }
 
     const opening = openWindow(origin, target, key);
@@ -158,5 +173,50 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
     }
   }
 
-  return { open, closeAll };
+  function status(origin: string) {
+    return [...entries.values()].filter((entry) => entry.origin === origin
+      && origin === adapters.allowedOrigin() && entry.instance && !entry.window.isDestroyed())
+      .map((entry) => ({ id: entry.target.id, instance: entry.instance! }));
+  }
+
+/**
+ * Поднимает только совпавший живой экземпляр без создания нового окна.
+ * Чужая машина и устаревшая instance не получают побочных эффектов.
+ */
+  function focus(origin: string, target: SurfaceTarget, instance: string): boolean {
+    const entry = entries.get(origin + ' ' + target.kind + ':' + target.id);
+
+    if (!entry || entry.instance !== instance || origin !== adapters.allowedOrigin()
+      || entry.window.isDestroyed()) {
+      return false;
+    }
+
+    focusWindow(entry.window);
+
+    return true;
+  }
+
+/**
+ * Закрывает только совпавший экземпляр текущей машины.
+ * Запоздалый запрос старого документа не затрагивает его замену.
+ */
+  function close(origin: string, target: SurfaceTarget, instance: string): boolean {
+    const entry = entries.get(origin + ' ' + target.kind + ':' + target.id);
+
+    if (!entry || entry.instance !== instance || origin !== adapters.allowedOrigin()) {
+      return false;
+    }
+
+    entry.window.destroy();
+
+    return true;
+  }
+
+  return {
+    open,
+    closeAll,
+    status,
+    focus,
+    close,
+  };
 }

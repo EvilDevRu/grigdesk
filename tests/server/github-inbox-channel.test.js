@@ -97,6 +97,10 @@ function inboxState({ activationWindows = windows(), persisted = null } = {}) {
   };
 }
 
+/**
+ * Синтетический lease читает настоящую политику канала без внешнего аккаунта.
+ * Предикат удаления и паузы позволяют менять регистрацию на границе чтения.
+ */
 function harness({
   rows = [row()],
   repositoryRule = rule(),
@@ -105,6 +109,7 @@ function harness({
   onHead = null,
   onList = null,
   nativeExtras = {},
+  isProjectDeleted = () => false,
 } = {}) {
   const counters = { acquire: 0, release: 0, rule: 0, head: 0, list: 0 };
   const stateStore = inboxState();
@@ -131,6 +136,7 @@ function harness({
     },
   };
   const capability = createGitHubInboxChannel({
+    isProjectDeleted,
     enabled: async () => true,
     state: async () => ({
       connection,
@@ -443,5 +449,74 @@ test('flattened coordinator context не выставляет repository identit
     ]) assert.equal(keys.includes(forbidden), false);
   } finally {
     await context.release();
+  }
+});
+
+
+test('PD-reconnect: tombstone не получает эффективную политику после подключения', async () => {
+  const { capability, counters, rules } = harness({
+    isProjectDeleted: (id) => id === 'SUPPORT',
+  });
+  const before = await rules.ruleFor(REPOSITORY_ID);
+  const context = await capability.acquireInboxContext();
+
+  try {
+    const batches = await context.listAuthorizedBatches({
+
+      nowMs: (OCCURRED_AT + 1) * 1000,
+      limit: 100,
+      activationWindows: windows(),
+
+    });
+
+    assert.deepEqual(batches, []);
+    assert.equal(counters.list, 0, 'tombstone проверяется до чтения текста');
+    assert.deepEqual(await rules.ruleFor(REPOSITORY_ID), before);
+  } finally {
+    context.release();
+  }
+});
+
+test('PD-policy-race: удаление во время чтения не выдаёт batch', async () => {
+  let deleted = false;
+  const { capability } = harness({
+    isProjectDeleted: () => deleted,
+    onList: () => {
+      deleted = true;
+    },
+  });
+  const context = await capability.acquireInboxContext();
+
+  try {
+    assert.deepEqual(await context.listAuthorizedBatches({
+
+      nowMs: (OCCURRED_AT + 1) * 1000,
+      limit: 100,
+      activationWindows: windows(),
+
+    }), []);
+  } finally {
+    context.release();
+  }
+});
+
+test('PD-reconnect: ошибка предиката закрывает эффективную политику', async () => {
+  const { capability } = harness({
+    isProjectDeleted: () => {
+      throw new Error('prefs повреждены');
+    },
+  });
+  const context = await capability.acquireInboxContext();
+
+  try {
+    await assert.rejects(context.listAuthorizedBatches({
+
+      nowMs: (OCCURRED_AT + 1) * 1000,
+      limit: 100,
+      activationWindows: windows(),
+
+    }), { code: 'github_inbox_invalid_policy' });
+  } finally {
+    context.release();
   }
 });

@@ -236,3 +236,72 @@ test('одновременные обновления схлопываются �
 
   assert.equal(loads, 1);
 });
+
+for (const event of ['projects-changed', 'hello']) {
+  test(`PD-raise-catalog: ${event} перечитывает варианты без потери стендов`, async (t) => {
+    let calls = 0;
+    const { store, loadSandboxes, watchSandboxes, emit } = await sectionFixture(t, {
+      get: async () => {
+        calls += 1;
+
+        return calls === 1 ? OVERVIEW : { ...OVERVIEW, profiles: [] };
+      },
+    });
+
+    await loadSandboxes();
+    assert.deepEqual(store.sandboxes.map((item) => item.task), [ENTRY.task]);
+    assert.deepEqual(store.jobs.map((item) => item.task), [JOB.task]);
+
+    const initialSandboxes = JSON.parse(JSON.stringify(store.sandboxes));
+    const initialJobs = JSON.parse(JSON.stringify(store.jobs));
+
+    watchSandboxes();
+    emit(event, {
+      id: 'demo-profile',
+      revision: 3,
+      kind: 'deleted'
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(store.capableProfiles, []);
+    assert.deepEqual(store.sandboxes, initialSandboxes);
+    assert.deepEqual(store.jobs, initialJobs);
+  });
+}
+
+test('PD-raise-catalog: поздний общий обзор не возвращает удалённый профиль', async (t) => {
+  const slow = Promise.withResolvers();
+  let calls = 0;
+  const { store, loadSandboxes, watchSandboxes, emit } = await sectionFixture(t, {
+    get: async () => {
+      calls += 1;
+
+      if (calls === 2) {
+        await slow.promise;
+
+        return OVERVIEW;
+      }
+
+      return calls === 1 ? OVERVIEW : { ...OVERVIEW, profiles: [] };
+    },
+  });
+
+  await loadSandboxes();
+  assert.deepEqual(store.sandboxes.map((item) => item.task), [ENTRY.task]);
+
+  const initialSandboxes = JSON.parse(JSON.stringify(store.sandboxes));
+
+  watchSandboxes();
+
+  const old = loadSandboxes();
+
+  emit('projects-changed', {
+    id: 'demo-profile',
+    revision: 3,
+    kind: 'deleted'
+  });
+  slow.resolve();
+  await old;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(store.capableProfiles, []);
+  assert.deepEqual(store.sandboxes, initialSandboxes);
+});

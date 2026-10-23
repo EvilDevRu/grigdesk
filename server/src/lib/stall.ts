@@ -10,6 +10,9 @@
 // REPRO может не воспроизвести баг, движок корректно встанет и позовёт человека,
 // но без отдельного признака человек об этом не узнает. Этот модуль достаёт причину из журнала и
 // формулирует её так, чтобы по ней было понятно, что делать.
+import { stallFailureLabel } from '../../../shared/pipeline/stallPresentation.ts';
+import type { StallDetails, StallPresentation } from '../../../shared/pipeline/stallPresentation.ts';
+
 import { parseStagesLog } from './stagesParse.ts';
 import type { BootstrapStop } from './factoryBootstrapLedger.ts';
 
@@ -28,6 +31,28 @@ interface HaltMatch {
   outcome?: 'exhausted' | 'failed' | 'skipped';
   title: string;
   hint: string;
+  presentation?: StallPresentation;
+}
+
+/**
+ * Короткая подпись и полки создаются вместе с правилом остановки.
+ * Полный текст остаётся отдельным контрактом для окна этапа и уведомлений.
+ */
+function presentation(
+  reason: string,
+  what: string,
+  action: string,
+  extra: Partial<Omit<StallDetails, 'what' | 'action'>> = {},
+): StallPresentation {
+  return {
+    reason,
+    summary: action,
+    details: {
+      what,
+      ...extra,
+      action,
+    },
+  };
 }
 
 // Приставка комментария узла, которым route-runtime называет исчерпание бюджета заходов.
@@ -52,19 +77,37 @@ function exhaustedCause(stage: string | null, reason: string | null): HaltMatch 
   // а место в строке нужно цифрам. В комментарии узла она остаётся — там свой контекст.
   // Прежняя формулировка движка («раннер не зафиксировал результат», без цифр) — тоже
   // пересказ заголовка: в таком заголовке одна и та же мысль стояла бы дважды.
-  const detail = (reason || '')
+  const rawDetail = (reason || '')
     .replace(new RegExp(`^${EXHAUSTED_COMMENT}:?\\s*`), '')
     .replace(/^раннер не зафиксировал результат$/, '')
     .trim();
+  const failure = rawDetail.match(/последний — (.+)$/u)?.[1];
+  const lastFailure = failure ? stallFailureLabel(failure) : undefined;
+  const detail = failure ? rawDetail.replace(/последний — .+$/u, () => `последний — ${lastFailure}`)
+    : rawDetail;
+  const attempts = rawDetail.match(/(\d+) заход(?:а|ов)? без результата/u)?.[1];
+
   return {
     stage,
     stop: 'human',
     outcome: 'exhausted',
     title: `${named}раннер не получил результат — ${detail || EXHAUSTED_COMMENT}`,
-    hint: 'агент не успел отчитаться в лимит этапа или лежал провайдер; черновик хода'
-      + ' t<TASK>.<этап>.checkpoint.md уцелел — «продолжить прогон» переиграет узел с'
-      + ' него, а не с нуля; упирается во время раз за разом — подними класс времени'
-      + ' этапа в профиле',
+    hint: 'агент не успел отчитаться в лимит этапа или лежал провайдер; если черновик хода'
+      + ' (.checkpoint.md) записан, он передаётся следующему заходу; «продолжить прогон»'
+      + ' переиграет узел; при повторных таймаутах подними класс времени этапа в профиле',
+    presentation: {
+      ...presentation(
+        'агент не вернул результат',
+        detail || 'Бюджет заходов исчерпан, результат узла не получен.',
+        'Продолжите прогон; при повторных таймаутах увеличьте время этапа в профиле.',
+        {
+          cause: 'Агент мог исчерпать время этапа или столкнуться с отказом провайдера.',
+          retained: 'Если черновик хода записан, он сохраняется и передаётся следующему заходу.',
+        },
+      ),
+      ...(attempts ? { attempts: Number(attempts) } : {}),
+      ...(lastFailure ? { lastFailure } : {}),
+    },
   };
 }
 
@@ -125,6 +168,15 @@ export function bootstrapStall(stop: BootstrapStop | null | undefined, environme
     arbiter: null,
     bootstrap: stop,
     environmentError: environmentError || null,
+    presentation: presentation(
+      stop.state === 'answered' ? 'ответ сохранён' : 'нужен ответ человека',
+      stop.reason,
+      stop.state === 'answered' ? 'Продолжите прогон с записанным ответом.' : 'Ответьте на вопрос разведки.',
+      {
+        ...(environmentError ? { cause: environmentError } : {}),
+        ...(stop.state === 'answered' && stop.decision ? { retained: 'Ответ человека записан.' } : {}),
+      },
+    ),
   };
 }
 
@@ -142,6 +194,11 @@ const HALT_RULES: readonly HaltRule[] = [
       // Машинный вид остановки. Заголовок и подсказка — человеку, а решение «можно ли
       // отдать это арбитру» обязано приниматься по типу, а не по разбору русского текста.
       stop: 'no-progress',
+      presentation: presentation(
+        'исправления не сняли замечания',
+        m[2] || 'Блокирующие замечания пережили ремонт.',
+        'Разберите замечания или верните узел с указанием, что считать отложенным.',
+      ),
       title: m[2]
         ? `${m[1]}: ${m[2]}`
         : `${m[1]}: исправления не меняют набор замечаний`,
@@ -153,6 +210,12 @@ const HALT_RULES: readonly HaltRule[] = [
     build: (m) => ({
       stage: m[1] ?? null,
       stop: 'rewind-limit',
+      presentation: presentation(
+        'исчерпан лимит возвратов',
+        m[2] || 'Достигнут защитный лимит возвратов.',
+        'Посмотрите комментарий и выберите точку возврата вручную.',
+        { cause: 'Старый этап мог не передать типизированные замечания.' },
+      ),
       title: m[2]
         ? `${m[1]}: ${m[2]}`
         : `${m[1]}: исчерпан защитный лимит возвратов`,
@@ -167,6 +230,11 @@ const HALT_RULES: readonly HaltRule[] = [
     build: (m) => ({
       stage: m[1] ?? null,
       stop: 'loop-ceiling',
+      presentation: presentation(
+        'исчерпан лимит кругов',
+        m[2] || 'Достигнут потолок кругов цикла.',
+        'Поднимите лимит PROFILE_LOOP_MAX_ROUNDS в профиле и продолжите прогон.',
+      ),
       title: m[2]
         ? `${m[1]}: ${m[2]}`
         : `${m[1]}: исчерпан потолок кругов цикла`,
@@ -194,6 +262,11 @@ const HALT_RULES: readonly HaltRule[] = [
       stage: m[1] ?? null,
       stop: 'human',
       title: `${m[1]}: сторож отверг сдачу — ${m[2]}`,
+      presentation: presentation(
+        'проверка не приняла результат', m[2] || 'Сторож отверг сдачу.',
+        'Разберите отказ и верните узел с указанием.',
+        { cause: 'Возможна ошибка сдачи, охвата проверки или самого сторожа.' },
+      ),
       hint: 'агент отчитался done, а хост доказательства не принял; повтор с этой же причиной'
         + ' уже был — разберись, что не так (сдача, охват или сам сторож), и верни узел'
         + ' «перейти сюда» с указанием',
@@ -217,6 +290,10 @@ const HALT_RULES: readonly HaltRule[] = [
       stage: m[1] ?? null,
       stop: 'human',
       title: `${m[1]}: узел вернул решение человеку`,
+      presentation: presentation(
+        'нужно решение человека', 'Узел передал решение человеку.',
+        'Откройте замечание узла и ответьте на вопрос.',
+      ),
       hint: 'агент отдал развилку человеку — открой узел и прочитай его замечание: там сказано, чего не хватает',
     }),
   },
@@ -231,6 +308,10 @@ const HALT_RULES: readonly HaltRule[] = [
       stage: null,
       stop: 'human',
       title: 'маршрут вернул решение человеку',
+      presentation: presentation(
+        'нужно решение человека', 'Маршрут передал решение человеку; узел в записи не указан.',
+        'Откройте последний исполненный узел на схеме и прочитайте замечание.',
+      ),
       hint: 'узел отдал развилку человеку — какой именно, journal этой записи не называет: смотри последний исполненный узел на схеме',
     }),
   },
@@ -239,6 +320,13 @@ const HALT_RULES: readonly HaltRule[] = [
     build: (m) => ({
       stage: m[1] ?? null,
       title: `${m[1]}: ${m[2]} возврата не помогли`,
+      presentation: {
+        ...presentation(
+          'повторные возвраты не помогли', `${m[2]} возврата не помогли.`,
+          'Посмотрите отчёт: исправить результат, изменить план или вести задачу вручную.',
+        ),
+        returns: Number(m[2]),
+      },
       hint: 'этап падает раз за разом — посмотри его отчёт: чинить, менять план или вести руками',
     }),
   },
@@ -247,6 +335,14 @@ const HALT_RULES: readonly HaltRule[] = [
     build: (m) => ({
       stage: m[1] ?? null,
       title: `${m[1]}: агент трижды не отчитался о результате`,
+      presentation: {
+        ...presentation(
+          'агент не вернул результат', 'Три попытки завершились без результата.',
+          'Проверьте ограничения времени, права и доступность инструментов.',
+          { cause: 'Возможна нехватка времени, прав или недоступность инструмента.' },
+        ),
+        attempts: 3,
+      },
       hint: 'этап не выставил статус — обычно упирается в бюджет времени, права или недоступный инструмент',
     }),
   },
@@ -255,6 +351,10 @@ const HALT_RULES: readonly HaltRule[] = [
     build: (m) => ({
       stage: m[1] ?? null,
       title: `${m[1]}: агенту не хватило прав записать статус`,
+      presentation: presentation(
+        'не хватило прав записать результат', 'Агенту не дали записать результат этапа.',
+        'Исправьте права или настройки этапа; повтор без этого бесполезен.',
+      ),
       hint: 'повтор бесполезен — нужны права на запись в реестр (песочница/settings этапа)',
     }),
   },
@@ -263,7 +363,12 @@ const HALT_RULES: readonly HaltRule[] = [
     build: () => ({
       stage: 'SANDBOX',
       title: 'стенд не поднялся',
-      hint: 'смотри хвост logs/tNNNN.orch.log — чаще всего занятый порт или недоснесённая песочница',
+      presentation: presentation(
+        'стенд не запустился', 'Подъём стенда завершился ошибкой.',
+        'Проверьте журнал запуска и перезапустите стенд.',
+        { cause: 'Возможен занятый порт или остатки песочницы.' },
+      ),
+      hint: 'смотри журнал запуска — чаще всего занятый порт или недоснесённая песочница',
     }),
   },
   {
@@ -273,9 +378,15 @@ const HALT_RULES: readonly HaltRule[] = [
     build: (m) => ({
       stage: 'SANDBOX',
       title: `среда профиля не готова (код ${m[1]})`,
+      presentation: presentation(
+        'среда не готова', `Среда профиля не готова (код ${m[1]}).`,
+        m[1] === '75'
+          ? 'Проверьте рабочую копию и ветку; shared-ресурсы не удаляйте.'
+          : 'Проверьте журнал запуска; shared-стенд восстанавливает его внешний владелец.',
+      ),
       hint: m[1] === '75'
         ? 'проверь exact checkout/ветку; для isolated-режима отдельно проверь остатки песочницы, shared-ресурсы не удаляй'
-        : 'смотри хвост logs/tNNNN.orch.log; shared-стенд должен восстановить его внешний владелец',
+        : 'смотри журнал запуска; shared-стенд должен восстановить его внешний владелец',
     }),
   },
   {
@@ -283,7 +394,11 @@ const HALT_RULES: readonly HaltRule[] = [
     build: (m) => ({
       stage: m[1] ?? null,
       title: `${m[1]}: агент убит по таймауту`,
-      hint: 'работа этапа потеряна целиком — поднимай лимит времени этапа, а не правь промпт',
+      presentation: presentation(
+        'агент остановлен по времени', 'Агент остановлен после истечения времени этапа.',
+        'Увеличьте лимит времени этапа в профиле.',
+      ),
+      hint: 'агент остановлен по времени — поднимай лимит времени этапа в профиле',
     }),
   },
   // Сторож state-only: проверяющий узел оставил после себя изменённое рабочее дерево.
@@ -297,6 +412,11 @@ const HALT_RULES: readonly HaltRule[] = [
     build: (m) => ({
       stage: m[1] ?? null,
       stop: 'guard',
+      presentation: presentation(
+        'проверка изменила рабочие файлы', m[2] || 'Проверяющий узел изменил рабочее дерево.',
+        'Для артефакта проверки объявите временный путь; правку агента верните с указанием не менять файлы.',
+        { cause: 'Это может быть временный артефакт проверки или правка агента.' },
+      ),
       title: `${m[1]}: узел изменил рабочее дерево — ${m[2]}`,
       hint: 'проверяющий узел не пишет в дерево: runtime-артефакт тестов (storage state, скриншоты)'
         + ' — объяви путь в profile_route_volatile_paths профиля или в .gitignore проекта и продолжи;'
@@ -312,9 +432,12 @@ const HALT_RULES: readonly HaltRule[] = [
     build: (m) => ({
       stage: null,
       stop: 'fail-closed',
+      presentation: presentation(
+        'движок остановился с ошибкой', `Диспетчер остановился с кодом ${m[1]}.`,
+        'Проверьте журнал этапов, исправьте причину и продолжите прогон.',
+      ),
       title: `диспетчер остановлен fail-closed (код ${m[1]})`,
-      hint: 'узел не закоммичен: причина — строкой выше в logs/tNNNN.stages.log или в'
-        + ' tNNNN.route-v2.log; после починки resume продолжит с этого узла',
+      hint: 'узел не закоммичен: смотри журнал этапов; после исправления resume продолжит с этого узла',
     }),
   },
 ];
@@ -415,10 +538,15 @@ export function detectStall(
     const gate = Object.keys(registry)
       .find((k) => /^GATE_[A-Z_]+$/.test(k) && registry[k] === 'waiting');
     if (gate && !found) return null;
+
     const base: StallCause = found || {
       stage: null,
       title: 'конвейер остановлен и ждёт человека',
-      hint: 'причина не нашлась в журнале — смотри logs/tNNNN.stages.log',
+      hint: 'причина не нашлась в журнале — смотри журнал этапов',
+      presentation: presentation(
+        'нужно выяснить причину остановки', 'Конвейер остановлен и ждёт человека.',
+        'Посмотрите журнал этапов и выясните причину остановки.',
+      ),
       detail: null,
       since: events.at(-1)?.ts ?? null,
     };
@@ -440,8 +568,14 @@ export function detectStall(
   // пропуская служебный хвост выгрузки находок.
   const last = events.findLast((entry) => !AFTER_FINISH.test(entry.event)) ?? null;
   if (!last || FINISHED.test(last.event)) return null;
+
   return {
     kind: 'crashed',
+    presentation: presentation(
+      'прогон оборвался', found?.title || 'Конвейер оборвался, не дойдя до конца.',
+      'Продолжите ту же попытку с места остановки.',
+      { cause: 'Процесса демона нет, а маршрут не завершён.' },
+    ),
     stage: found?.stage || null,
     title: found?.title || 'конвейер оборвался, не дойдя до конца',
     detail: found?.detail || last.event,

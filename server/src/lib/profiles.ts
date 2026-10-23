@@ -7,6 +7,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { deletedProjectIds } from './projects/deletion.ts';
+
 import { archivedProjectIds } from './projects/archive.ts';
 
 export const PROFILE_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
@@ -32,8 +34,14 @@ export async function profileHasCapability(
   }
 }
 
-/** Профили фабрики (по наличию схемы) — используются для автопосева. */
-export async function listFactoryProfiles(profilesDir: string): Promise<string[]> {
+/**
+ * Профили фабрики определяются по наличию схемы и используются для автопосева.
+ * При фиксации корней ошибки доступа запрещают выдавать неполный каталог.
+ */
+export async function listFactoryProfiles(
+  profilesDir: string,
+  { strict = false }: { strict?: boolean } = {},
+): Promise<string[]> {
   try {
     const entries = await fs.readdir(profilesDir, { withFileTypes: true });
     const candidates = entries
@@ -42,10 +50,22 @@ export async function listFactoryProfiles(profilesDir: string): Promise<string[]
     const present = await Promise.all(candidates.map(async (name) => (
       fs.access(path.join(profilesDir, name, 'graph.json'))
         .then(() => name)
-        .catch(() => null)
+        .catch((error: NodeJS.ErrnoException) => {
+          if (strict && error.code !== 'ENOENT') {
+            throw error;
+          }
+
+          return null;
+        })
     )));
     return present.filter((name): name is string => Boolean(name));
-  } catch { return []; }
+  } catch (error) {
+    if (strict && (error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+
+    return [];
+  }
 }
 
 // Ровно то, что нужно от ещё нетипизированного стора настроек: реестр проектов.
@@ -75,6 +95,12 @@ export async function listProjects(
     ...(await listFactoryProfiles(profilesDir)),
     ...listGrigDeskProjects(prefs),
   ]);
+
+  const deleted = deletedProjectIds(prefs);
+
+  for (const id of deleted) {
+    all.delete(id);
+  }
 
   if (includeArchived) {
     return [...all].sort();

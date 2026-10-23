@@ -533,7 +533,8 @@ test('фоновый pending до done: итог и контекст приме�
   assert.equal(session.messages.at(-1).runId, 'run-bg');
   assert.equal(session.sessionId, 'session-bg');
   assert.equal(session.contextTokens, 777);
-  assert.equal(session.effort, 'high');
+  assert.equal(session.effort || '', '');
+  assert.equal(session.messages.find((message) => message.pid === 'o-bg').effort, 'high');
   assert.equal(session.sending, true);
   assert.equal(chat.runtimeFor(CHAT).active, true);
   assert.equal(gets.filter((url) => url.startsWith('/api/chat/in-turn')).length, 0);

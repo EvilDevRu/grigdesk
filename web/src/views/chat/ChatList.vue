@@ -52,6 +52,10 @@
               :size="19"
             />
             <template v-else>{{ letter(r) }}</template>
+            <ChatSleepBadge
+              v-if="r.sleep && !r.sending && !r.compacting"
+              :tasks="r.sleep.backgroundTasks"
+            />
             <span
               v-if="r.unread"
               class="udot"
@@ -94,6 +98,10 @@
               :size="19"
             />
             <template v-else>{{ letter(r) }}</template>
+            <ChatSleepBadge
+              v-if="r.sleep && !r.sending && !r.compacting"
+              :tasks="r.sleep.backgroundTasks"
+            />
             <span
               v-if="r.unread"
               class="udot"
@@ -123,25 +131,61 @@
         </UiPressable>
 
         <span v-if="editId !== r.id" class="acts">
-          <UiPopover has-popup="menu" placement="bottom-end" :aria-label="`Действия: ${r.title}`">
-            <template #trigger>
-              <UiIconButton data-context="chat-list-action" role="rail" :label="`Действия: ${r.title}`">
-                ⋯
-              </UiIconButton>
-            </template>
-            <template #default="{ close }">
-              <div class="ui-action-menu">
-                <UiButton v-if="r.archived" role="menuitem" variant="ghost"
-                          @click="close('action'); restore(r)">Достать из архива</UiButton>
-                <UiButton role="menuitem" variant="ghost"
-                          @click="close('action'); startEdit(r)">Переименовать</UiButton>
-                <UiButton role="menuitem" variant="ghost" :tone="r.archived ? 'danger' : 'neutral'"
-                          @click="close('action'); del(r)">
-                  {{ r.archived ? 'Удалить навсегда' : 'Переместить в архив' }}
-                </UiButton>
-              </div>
-            </template>
-          </UiPopover>
+          <!-- Мышь: кнопки появляются при наведении, действие — одним нажатием. -->
+          <span class="acts-quick">
+            <UiIconButton
+              v-if="r.archived"
+              data-context="chat-list-action"
+              role="rail"
+              label="Достать чат из архива"
+              v-tooltip="'Достать из архива'"
+              tone="accent"
+              @click="restore(r)"
+            >
+              ↩
+            </UiIconButton>
+            <UiIconButton
+              data-context="chat-list-action"
+              role="rail"
+              label="Переименовать чат"
+              v-tooltip="'Переименовать'"
+              @click="startEdit(r)"
+            >
+              ✎
+            </UiIconButton>
+            <UiIconButton
+              data-context="chat-list-action"
+              role="rail"
+              :label="r.archived ? 'Удалить чат навсегда' : 'Переместить чат в архив'"
+              v-tooltip="r.archived ? 'Удалить навсегда' : 'Переместить в архив'"
+              :tone="r.archived ? 'danger' : 'accent'"
+              @click="del(r)"
+            >
+              ✕
+            </UiIconButton>
+          </span>
+          <!-- Палец: наведения нет, поэтому действия собраны в меню с полными подписями. -->
+          <span class="acts-menu">
+            <UiPopover has-popup="menu" placement="bottom-end" :aria-label="`Действия: ${r.title}`">
+              <template #trigger>
+                <UiIconButton data-context="chat-list-action" role="rail" :label="`Действия: ${r.title}`">
+                  ⋯
+                </UiIconButton>
+              </template>
+              <template #default="{ close }">
+                <div class="ui-action-menu">
+                  <UiButton v-if="r.archived" role="menuitem" variant="ghost"
+                            @click="close('action'); restore(r)">Достать из архива</UiButton>
+                  <UiButton role="menuitem" variant="ghost"
+                            @click="close('action'); startEdit(r)">Переименовать</UiButton>
+                  <UiButton role="menuitem" variant="ghost" :tone="r.archived ? 'danger' : 'neutral'"
+                            @click="close('action'); del(r)">
+                    {{ r.archived ? 'Удалить навсегда' : 'Переместить в архив' }}
+                  </UiButton>
+                </div>
+              </template>
+            </UiPopover>
+          </span>
         </span>
       </div>
     </div>
@@ -151,11 +195,14 @@
 <script setup lang="ts">
 import type { ChatListRow } from '../../shared/chatContracts.ts';
 import type { UiFieldHandle } from '../../ui.ts';
+import type { ChatSleepingSession } from '../../../../shared/chat/chatBackgroundTasks.ts';
 
 import { computed, nextTick, ref, watch } from 'vue';
 import { useChatStore } from '../../stores/chat.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
+import ChatSleepBadge from './ChatSleepBadge.vue';
+import { useChatSleeping } from '../../composables/useChatSleeping.ts';
 import {
   confirmDialog,
   UiButton,
@@ -170,7 +217,7 @@ import {
 
 // Телеграм-сайдбар чатов: поиск сверху, ниже — активные либо архивные чаты.
 // Строка: аватар, название, сниппет последнего сообщения (или совпадения при поиске), время.
-type ListRow = ChatListRow & { modelName: string };
+type ListRow = ChatListRow & { modelName: string; sleep?: ChatSleepingSession };
 
 const chat = useChatStore();
 // open — «чат выбран, покажи его». Нужен мобильной раскладке, где список и чат делят одну
@@ -178,6 +225,7 @@ const chat = useChatStore();
 const emit = defineEmits(['open']);
 
 const prov = useProvidersStore();
+const { sessions: sleepingSessions } = useChatSleeping();
 
 prov.load();
 
@@ -203,6 +251,7 @@ const rows = computed(() => chat.list(q.value, showArchived.value).map((r: ChatL
     ...r,
     provider,
     modelName: model?.name || '',
+    sleep: sleepingSessions.value[r.id],
   };
 }));
 
@@ -361,16 +410,19 @@ async function del(r: ListRow) {
 .rows { flex: 1; overflow-y: auto; padding: 5px; }
 .none { padding: 12px; font-size: 12.5px; text-align: center; }
 
-.row { position: relative; display: flex; align-items: center; gap: 9px; padding: 4px 8px; min-height: var(--chat-list-row-h); border-radius: 10px; }
+/* Фон строки — непрозрачный `--row-bg` поверх фона списка (`--surface`): тем же цветом
+   кнопки действий закрывают конец названия и время, не отличаясь от самой строки. */
+.row { position: relative; display: flex; align-items: center; gap: 9px; padding: 4px 8px;
+  min-height: var(--chat-list-row-h); border-radius: 10px; --row-bg: var(--surface); background: var(--row-bg); }
 .row-hit { display: flex; flex: 1; align-items: center; gap: 9px; width: 100%; min-width: 0; text-align: left; }
-.row:hover { background: var(--surface-2); }
-.row.cur { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.row:hover { --row-bg: var(--surface-2); }
+.row.cur { --row-bg: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
 /* Чат, где агент ждёт ответа: тёплая полоска слева — видно, что строка требует действия,
    даже когда список длинный (сам чип может уехать под многоточие названия). */
-.row.wait { background: color-mix(in srgb, var(--warn, #e0a33a) 10%, transparent); }
+.row.wait { --row-bg: color-mix(in srgb, var(--warn, #e0a33a) 10%, var(--surface)); }
 .row.wait::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px;
   border-radius: 0 3px 3px 0; background: var(--warn, #e0a33a); }
-.row.wait.cur { background: color-mix(in srgb, var(--warn, #e0a33a) 18%, transparent); }
+.row.wait.cur { --row-bg: color-mix(in srgb, var(--warn, #e0a33a) 18%, var(--surface)); }
 
 .ava { flex: none; width: var(--chat-avatar-size); height: var(--chat-avatar-size); border-radius: 50%; display: grid; place-items: center;
   background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-mid);
@@ -435,8 +487,23 @@ async function del(r: ListRow) {
   white-space: nowrap; margin-top: 1px; }
 .edit { width: 100%; }
 
-/* Одно постоянное место меню не меняет ширину названия при hover и focus. */
+/* Палец: одно постоянное место меню «⋯», ширина названия не меняется при касании и фокусе. */
 .acts { display: flex; flex: none; align-items: center; }
+.acts-quick { display: none; }
+
+/* Мышь: меню не нужно, три кнопки всплывают при наведении поверх правого края строки
+   (время и подпись модели). Место под них не резервируется и отступ строки не растёт —
+   иначе название сужалось бы и прыгало при каждом проходе курсора по списку.
+   Фокус с клавиатуры показывает кнопки так же, как наведение. */
+@media (hover: hover) and (pointer: fine) {
+  .acts { position: absolute; top: 4px; right: 8px; bottom: 4px; pointer-events: none; }
+  .acts-menu { display: none; }
+  .acts-quick { display: flex; align-items: center; gap: 3px; height: 100%; padding-left: 14px;
+    background: linear-gradient(to right, transparent, var(--row-bg) 12px); opacity: 0; }
+  .row:hover .acts-quick, .row:focus-within .acts-quick { opacity: 1; }
+  /* Кликабельны только сами кнопки: полоса растушёвки слева пропускает нажатие в строку. */
+  .row:hover .acts-quick > *, .row:focus-within .acts-quick > * { pointer-events: auto; }
+}
 
 /* Планшет-альбом: список уже, но остаётся на экране рядом с чатом */
 @media (min-width: 900px) and (max-width: 1099px) { .cl { width: var(--chat-list-w, 232px); } }

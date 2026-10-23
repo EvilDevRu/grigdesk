@@ -41,6 +41,21 @@ if [[ ! -f "$DIR/release.json" && -f "$DIR/server/src/app.ts" \
   esac
 fi
 
+# Пустой человеческий TTY использует source CLI лишь при пригодном Node.
+# Без него установленный ELF сохраняет прежний автономный путь открытия окна.
+if (( $# == 0 )) && [[ -t 0 && -t 1 && ! -f "$DIR/release.json" \
+  && ! -f "$DIR/bin/bundle.json" && -f "$DIR/server/src/app.ts" \
+  && -f "$DIR/web/package.json" && -f "$DIR/desktop/package.json" ]]; then
+  if (
+    source "$DIR/deploy/lib/runtime-env.sh"
+    grigdesk_require_node source
+  ) >/dev/null 2>&1; then
+    exec node "$DIR/cli/main.ts"
+  fi
+
+  export GRIGDESK_CTL_SOURCE_FALLBACK=1
+fi
+
 # Внешний ELF сам читает раннее окружение и запускает сервер своим Node.
 # Для CLI удерживаем preparation до завершения собранного helper-а, затем освобождаем.
 if [[ "$SOURCE_COMMAND" == 0 && ( -e "$DIR/bin/grigdesk-server" || -L "$DIR/bin/grigdesk-server" ) ]]; then
@@ -221,14 +236,16 @@ developer_command() {
     local data
 
     data=$(grigdesk_data_home) || return $?
-    node "$DIR/server/scripts/ctlBuild.mts" prepare-runtime "$cache/cache" || return $?
-    npm --prefix "$DIR/server" run build:binary -- \
+    observed_step server.node node "$DIR/server/scripts/ctlBuild.mts" \
+      prepare-runtime "$cache/cache" || return $?
+    observed_step server.build npm --prefix "$DIR/server" run build:binary -- \
       --out-dir "$cache/out" --cache-dir "$cache/cache" || return $?
-    npm --prefix "$DIR/server" run install:binary -- \
+    observed_step server.install npm --prefix "$DIR/server" run install:binary -- \
       --binary "$cache/out/grigdesk-server" --target "$DIR/bin/grigdesk-server" \
       --releases-dir "$data/runtimes/server/releases" || return $?
 
     if ! node "$DIR/server/scripts/ctlBuild.mts" check-desktop "$DIR/bin/grigdesk-server"; then
+      build_event hint select-server
       printf 'Для выбора этого сервера окном: grigdesk-ctl desktop use-server %q\n' \
         "$DIR/bin/grigdesk-server"
     fi
@@ -237,8 +254,38 @@ developer_command() {
   # Упаковка берёт уже собранный web/dist, поэтому вызывающая цепочка готовит веб первой.
   # Установка заменяет файл окна, не запуская приложение и не меняя выбор сервера.
   build_window() {
-    npm --prefix "$DIR/desktop" run dist || return $?
-    "$DIR/deploy/desktop.sh" install || return $?
+    observed_step window.package npm --prefix "$DIR/desktop" run dist || return $?
+    observed_step window.install "$DIR/deploy/desktop.sh" install || return $?
+  }
+
+  # События идут отдельным каналом только по запросу родительского контроллера.
+  # Закрытый fd не должен менять старые коды или засорять stderr оболочки.
+  build_event() {
+    if [[ "${GRIGDESK_CTL_BUILD_OBSERVED:-}" == 1 ]] && { true >&3; } 2>/dev/null; then
+      {
+        printf '%s\t%s' "$1" "$2"
+
+        if (( $# >= 3 )); then
+          printf '\t%s' "$3"
+        fi
+
+        printf '\n'
+      } >&3
+    fi
+    return 0
+  }
+
+  # Наблюдатель обрамляет прежний вызов, явно сохраняя его код.
+  # Он не добавляет стадий и не меняет обработку optional зависимостей.
+  observed_step() {
+    local id=$1
+    local code=0
+    shift
+
+    build_event start "$id"
+    "$@" || code=$?
+    build_event end "$id" "$code"
+    return "$code"
   }
 
   # Каждая обязательная стадия сохраняет свой код и останавливает общую цепочку.
@@ -267,8 +314,8 @@ developer_command() {
       fi
 
       if [[ "$build_target" == all || "$build_target" == web || "$build_target" == window ]]; then
-        build_step web ensure_deps
-        build_step web build_web
+        build_step web observed_step web.dependencies ensure_deps
+        build_step web observed_step web.build build_web
       fi
 
       if [[ "$build_target" == all || "$build_target" == window ]]; then
@@ -327,6 +374,15 @@ case "$CMD" in
         exec node "$DIR/cli/main.ts" --help
       fi
     done
+
+    # Только валидная ручная сборка попадает в экран прогресса.
+    # Внутренний ребёнок и старые ошибки аргументов сохраняют обычный путь.
+    if [[ "$CMD" == build && -t 0 && -t 1 && "${GRIGDESK_CTL_BUILD_CHILD:-}" != 1 \
+      && $# -le 2 && "${2-all}" =~ ^(all|server|web|window)$ ]]; then
+      source "$DIR/deploy/lib/runtime-env.sh"
+      grigdesk_require_node source
+      exec node "$DIR/cli/main.ts" "$@"
+    fi
 
     developer_command "${@:2}"
     ;;

@@ -11,6 +11,11 @@ import { json } from './pipeServer.ts';
 import type { UpstreamState } from './upstream.ts';
 import { parseSurfaceTarget, parseMainRequest } from '../../../shared/desktop/surfaceContract.ts';
 import type { MainRequest, SurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
+import type { DesktopExitPreference } from '../desktopExitPreference.ts';
+import { desktopExitApi } from './desktopExitApi.ts';
+
+import { parseToolControl } from '../../../shared/desktop/toolWindowContract.ts';
+import type { ToolControl } from '../../../shared/desktop/toolWindowContract.ts';
 
 interface ProbeUpstream extends PipeUpstream {
   probe(): Promise<void>;
@@ -18,10 +23,12 @@ interface ProbeUpstream extends PipeUpstream {
 
 export interface NativeWindows {
   open(origin: string, target: SurfaceTarget): Promise<boolean>;
+  tool?(origin: string, request: ToolControl): Promise<unknown>;
   main(origin: string, request: MainRequest): Promise<boolean>;
 }
 
 interface ShellOptions {
+  desktopExit?: DesktopExitPreference;
   beforeSelect?(profile: DesktopProfile): Promise<void>;
   nativeWindows?: NativeWindows;
   profiles: Profiles;
@@ -98,6 +105,7 @@ export function createShellApi(options: ShellOptions) {
     address: profile.address,
     status: states.get(profile.id)?.status || 'none',
   });
+  const unsubscribeExit = options.desktopExit?.subscribe(changed);
   /**
    * Публичный снимок содержит только сведения, нужные интерфейсу.
    * Закрытый ключ, pin и внутренние порты профилей не уходят в renderer.
@@ -109,6 +117,7 @@ export function createShellApi(options: ShellOptions) {
 
     return {
       rev,
+      ...(options.desktopExit ? { desktopExit: { skipConfirmation: options.desktopExit.get() } } : {}),
       ...(options.systemLanguage === undefined ? {} : {
         locale: {
           preference: options.profiles.settings.uiLanguage ?? 'system',
@@ -345,6 +354,12 @@ export function createShellApi(options: ShellOptions) {
 
       const body = await readBody(req, locale);
 
+      if (req.method === 'POST' && pathname === '/__shell/exit-preference') {
+        await desktopExitApi(res, body, options.desktopExit, state);
+
+        return;
+      }
+
       if (req.method === 'POST' && pathname === '/__shell/locale') {
         const preference = body.preference;
 
@@ -384,7 +399,24 @@ export function createShellApi(options: ShellOptions) {
           return;
         }
 
-        const target = pathname === '/__shell/surfaces/open' ? parseSurfaceTarget(body) : null;
+        if (pathname === '/__shell/surfaces/tool') {
+          const control = parseToolControl(body);
+
+          if (!control) {
+            json(res, 400, { error: 'invalid_surface' });
+          } else if (!options.nativeWindows.tool) {
+            json(res, 404, { error: 'not_found' });
+          } else {
+            const origin = new URL('http://' + req.headers.host).origin;
+
+            json(res, 200, await options.nativeWindows.tool(origin, control));
+          }
+
+          return;
+        }
+
+        const parsed = pathname === '/__shell/surfaces/open' ? parseSurfaceTarget(body) : null;
+        const target = parsed?.kind === 'task' ? parsed : null;
         const request = pathname === '/__shell/surfaces/main' ? parseMainRequest(body) : null;
 
         if (!target && !request) {
@@ -527,6 +559,7 @@ export function createShellApi(options: ShellOptions) {
      */
     close() {
       closed = true;
+      unsubscribeExit?.();
 
       for (const cancel of retries.values()) {
         cancel();

@@ -558,3 +558,42 @@ test('сводка не выдумывает первый круг и не вк�
 
   assert.equal(wrapper.find('.loop-status').exists(), false);
 });
+
+test('подавленный баннер сохраняет арбитраж узла и полную причину в tooltip', async (t) => {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, FactoryGraph] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/views/pipeline/FactoryGraph.vue')),
+  ]);
+  const title = 'BUILD: узел вернул решение человеку';
+  const hint = 'Полная подсказка для узла остаётся доступной.';
+  const wrapper = mount(FactoryGraph, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: {
+      graph: {
+        ...GRAPH,
+        statuses: { build: 'stall' },
+        stall: {
+          node: 'build',
+          title,
+          hint,
+        },
+      },
+      showStopBanner: false,
+      arbitrating: { actor: 'auto', elapsedSec: 180 },
+    },
+  });
+
+  t.after(() => wrapper.unmount());
+
+  assert.equal(wrapper.find('.graph-stop').exists(), false, 'баннер скрыт только при встраивании');
+  assert.equal(wrapper.get('.ng').classes().includes('ns-arb'), true);
+
+  const tooltip = wrapper.get('.ng').attributes('data-ui-tooltip');
+
+  assert.ok(tooltip.includes(title));
+
+  await wrapper.setProps({ arbitrating: null });
+
+  assert.ok(wrapper.get('.ng').attributes('data-ui-tooltip').includes(hint));
+});

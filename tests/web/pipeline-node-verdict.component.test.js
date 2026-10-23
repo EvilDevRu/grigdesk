@@ -276,3 +276,29 @@ test('отброшенные по лимиту находки названы ч�
 
   assert.equal(wrapper.get('.sverdict .svmore').text().includes('6'), true);
 });
+
+test('модалка этапа сохраняет полный заголовок и подсказку остановки', async (t) => {
+  const title = 'SKEPTIC: подробная причина остановки с исходными цифрами и замечанием исполнителя';
+  const hint = 'Полная подсказка остаётся в модалке этапа; продолжите с указанием и проверьте отчёт.';
+  const { wrapper, openNode } = await mountPipeline(t, makeFixture({
+    readOnly: true,
+    stall: {
+      kind: 'human',
+      stage: 'SKEPTIC',
+      title,
+      hint,
+      presentation: {
+        reason: 'короткая причина',
+        summary: 'короткая подсказка',
+        details: { what: title, action: hint },
+      },
+    },
+  }));
+
+  await openNode();
+
+  const block = wrapper.get('.scomment.failed');
+
+  assert.ok(block.text().includes(title));
+  assert.ok(block.text().includes(hint));
+});

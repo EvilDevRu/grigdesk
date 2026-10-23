@@ -18,14 +18,14 @@ export async function mountDesktopEntry(t, options = {}) {
   for (const [key, value] of Object.entries({
     __desktopBootstrap: calls,
     __surfaceNavigation: state,
-    window: {
+    window: Object.assign(new EventTarget(), {
       sessionStorage: null,
       location: {
         origin: 'http://127.0.0.1:47101',
         href: 'http://127.0.0.1:47101/#/board',
         pathname: '/',
       },
-    },
+    }),
     location: {
       origin: 'http://127.0.0.1:47101',
       href: 'http://127.0.0.1:47101/#/board',
@@ -51,7 +51,8 @@ export async function mountDesktopEntry(t, options = {}) {
   await compileModule(webFile('src/main.ts'), {
     stubs: {
       vue: `export const createApp = () => ({ use() { return this; }, mount() {} });
-        export const nextTick = async () => {};`,
+        export const nextTick = async () => {};
+        export const watch = () => () => {};`,
       pinia: `export const createPinia = () => ({});`,
       'virtual:pwa-register': `export const registerSW = () => {
         globalThis.__desktopBootstrap.push('sw');
@@ -71,6 +72,16 @@ export async function mountDesktopEntry(t, options = {}) {
         snapshot: { rev: 1, status: 'online', profile: { id: 'fixture' } },
       });`,
       './stores/auth.ts': 'export const useAuthStore = () => ({ ready: true, authenticated: true });',
+      // Барьер проверяет прежний main handler, оконный координатор имеет свои тесты.
+      // Новые порты входа не должны затягивать Monaco и сетевые сторы в эту фикстуру.
+      './stores/toolWindows.ts': 'export const createToolWindowCoordinator = () => ({});',
+      './stores/dock.ts': 'export const useDockStore = () => ({});',
+      './stores/uiContext.ts': 'export const useUiContextStore = () => ({});',
+      './stores/chat.ts': 'export const useChatStore = () => ({});',
+      './shared/tools/toolWindowState.ts': `export const getToolPanelPorts = () => null;
+        export const nativeToolId = (id) => id;
+        export const registryToolId = (id) => id;`,
+      './shared/tools/viewport.ts': 'export const viewportCanDock = () => true;',
       './shared/apiClient.ts': `export const api = { url: (path) => path };
         export const isReportedApiError = () => false;
         export const setApiLogSink = () => {};`,

@@ -182,3 +182,75 @@ test('SG-04: новое окно смещается лесенкой и оста
     height: 800,
   });
 });
+
+test('TW-G01: отдельная geometry code/shelf/task переживает запись и не теряет соседей', async (t) => {
+  const root = await temporary(t);
+  const file = path.join(root, 'settings.json');
+  const task = {
+    x: 10,
+    y: 20,
+    width: 900,
+    height: 700,
+    maximized: false
+
+
+  };
+  const code = {
+    x: -1600,
+    y: 40,
+    width: 1500,
+    height: 950,
+    maximized: false
+
+
+  };
+  const shelf = {
+    x: 100,
+    y: 80,
+    width: 600,
+    height: 800,
+    maximized: true
+
+
+  };
+  const settings = normalizeSettings({
+
+    version: 2,
+
+    profiles: [],
+
+    selected: null,
+
+    window: {
+      width: 1280,
+      height: 860,
+      maximized: false
+
+
+    },
+
+    surfaceWindows: { task, tools: { code, shelf } },
+
+
+
+  });
+
+  await writeSettings(file, settings);
+
+  const restored = await readSettings(file);
+
+  assert.deepEqual(restored.surfaceWindows.tools, { code, shelf });
+  assert.deepEqual(restored.surfaceWindows.task, task);
+  restored.surfaceWindows.tools.code = { ...code, width: 1400 };
+  await writeSettings(file, restored);
+
+  const updated = await readSettings(file);
+
+  assert.equal(updated.version, 2);
+  assert.deepEqual(updated.surfaceWindows.tools.shelf, shelf);
+  assert.deepEqual(updated.surfaceWindows.task, task);
+  assert.equal(updated.window.width, 1280);
+  assert.equal(updated.surfaceWindows.tools.code.width, 1400);
+  assert.equal('detached' in updated, false);
+  assert.equal('openWindows' in updated, false);
+});

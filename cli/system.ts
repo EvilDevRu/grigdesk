@@ -120,13 +120,15 @@ export function run(command: string, args: readonly string[], timeoutMs = 5000):
  * Журнал подключается к терминалу без буфера и без таймаута.
  * SIGINT получает ребёнок; родитель ждёт его код и затем снимает свой listener.
  */
-export function runAttached(command: string, args: readonly string[]): Promise<number> {
+export function runAttached(
+  command: string, args: readonly string[], env: NodeJS.ProcessEnv = process.env,
+): Promise<number> {
   return new Promise((resolve) => {
     const ignore = () => {};
 
     process.on('SIGINT', ignore);
 
-    const child = spawn(command, [...args], { stdio: 'inherit' });
+    const child = spawn(command, [...args], { stdio: 'inherit', env });
 
     child.once('error', (error) => {
       process.removeListener('SIGINT', ignore);

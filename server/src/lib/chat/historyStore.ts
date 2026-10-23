@@ -282,6 +282,10 @@ export class ChatHistoryStore {
 
   readonly now: () => number;
 
+  private metaTail: Promise<unknown> = Promise.resolve();
+  private isProjectDeleted: (id: string) => boolean;
+  private guardNewChat: <T>(commit: () => Promise<T>, record?: StoredChat) => Promise<T>;
+
   private migrationPromise: Promise<{ changed: boolean; backupDir: string | null }> | null;
 
   private locks: Map<string, Promise<void>>;
@@ -302,6 +306,8 @@ export class ChatHistoryStore {
   /** `legacyPath` — старая схема «вся история в одном файле», мигрируется однократно. */
   constructor({
     chatsDir,
+    isProjectDeleted = () => false,
+    guardNewChat = (commit) => commit(),
     legacyPath = '',
     log = null,
     registryProvider = async () => ({}),
@@ -309,6 +315,8 @@ export class ChatHistoryStore {
     now = () => Date.now(),
   }: {
     chatsDir: string;
+    isProjectDeleted?: (id: string) => boolean;
+    guardNewChat?: <T>(commit: () => Promise<T>, record?: StoredChat) => Promise<T>;
     legacyPath?: string;
     log?: HistoryLog | null;
     registryProvider?: () => Promise<ModelRegistry>;
@@ -316,6 +324,8 @@ export class ChatHistoryStore {
     now?: () => number;
   }) {
     this.dir = chatsDir;
+    this.isProjectDeleted = isProjectDeleted;
+    this.guardNewChat = guardNewChat;
     this.legacyPath = legacyPath;
     this.log = log;
     this.registryProvider = registryProvider;
@@ -679,7 +689,7 @@ export class ChatHistoryStore {
     defMode?: unknown;
     defWorkdir?: unknown;
     recentWorkdirs?: unknown;
-  }, { preserveMissing = false } = {}): Promise<void> {
+  }, { preserveMissing = false, legacyImport = false } = {}): Promise<void> {
     await this.ensureMigrated();
     await this.ensureDir();
     const incoming = [
@@ -688,10 +698,11 @@ export class ChatHistoryStore {
     ];
     const existing = await this.scan();
     const seen = new Set();
+
     for (const c of incoming) {
       if (!c.id) continue;
       seen.add(c.id);
-      await this.saveOne(c, !!c.archived);
+      await this.saveOne(c, !!c.archived, { legacyImport });
     }
     for (const [id, v] of existing) {
       // Полный PUT остался миграционным compatibility endpoint-ом. Server-created
@@ -732,7 +743,11 @@ export class ChatHistoryStore {
   async saveOne(
     chat: StoredChat | null | undefined,
     archived = false,
-    { serverIdentity = '', reuseSteps }: { serverIdentity?: string; reuseSteps?: unknown } = {},
+    { serverIdentity = '', reuseSteps, legacyImport = false }: {
+      serverIdentity?: string;
+      reuseSteps?: unknown;
+      legacyImport?: boolean;
+    } = {},
   ): Promise<SaveResult> {
     if (!chat?.id) return { written: false, restored: 0, dropped: 0 };
 
@@ -744,103 +759,111 @@ export class ChatHistoryStore {
       await this.ensureDir();
       // Ищем прежний файл этого чата: он мог лежать в другом месяце (архив, ручная правка).
       const prev = await this.readEntry(incoming.id);
-      const chat = reuseSteps === undefined
-        ? incoming
-        : restoreHistorySteps(incoming, prev?.chat || null, reuseSteps);
-      const registry = await this.registry();
-      const incomingRevision = Number.isSafeInteger(chat.revision) ? chat.revision : null;
-      const currentRevision = Number.isSafeInteger(prev?.chat?.revision)
-        ? Number(prev?.chat?.revision)
-        : 0;
-      // Клиент без revision — старая версия. Историю от него по-прежнему принимаем,
-      // но server-owned выбор модели уже не откатываем.
-      const stale = !!prev && incomingRevision !== currentRevision;
-      const clean = clientChat(chat);
-      const choice = normalizeChatWorkdir(chat.workdir);
+      /**
+       * Подготовленный снимок и запись остаются под блокировкой одного разговора.
+       * Новая запись дополнительно удерживает очередь регистраций до завершения commit.
+       */
+      const commit = async () => {
+        const chat = reuseSteps === undefined
+          ? incoming
+          : restoreHistorySteps(incoming, prev?.chat || null, reuseSteps);
+        const registry = await this.registry();
+        const incomingRevision = Number.isSafeInteger(chat.revision) ? chat.revision : null;
+        const currentRevision = Number.isSafeInteger(prev?.chat?.revision)
+          ? Number(prev?.chat?.revision)
+          : 0;
+        // Клиент без revision — старая версия. Историю от него по-прежнему принимаем,
+        // но server-owned выбор модели уже не откатываем.
+        const stale = !!prev && incomingRevision !== currentRevision;
+        const clean = clientChat(chat);
+        const choice = normalizeChatWorkdir(chat.workdir);
 
-      if (Object.hasOwn(chat, 'workdir') && !choice) {
-        throw new ChatHistoryError('bad_workdir', 'Выбор папки повреждён.', { statusCode: 400 });
-      }
-      if (prev && !stale && (
-        (Object.hasOwn(chat, 'workdir') && !sameChatWorkdir(chat.workdir, prev.chat.workdir))
-        || (Object.hasOwn(chat, 'taskId') && (chat.taskId || null) !== (prev.chat.taskId || null))
-      ) && prev.chat.purpose !== COMPANION_PURPOSE) {
-        throw new ChatHistoryError('workdir_change_required', 'Папка и задача меняются отдельным переходом.');
-      }
+        if (Object.hasOwn(chat, 'workdir') && !choice) {
+          throw new ChatHistoryError('bad_workdir', 'Выбор папки повреждён.', { statusCode: 400 });
+        }
+        if (prev && !stale && (
+          (Object.hasOwn(chat, 'workdir') && !sameChatWorkdir(chat.workdir, prev.chat.workdir))
+          || (Object.hasOwn(chat, 'taskId') && (chat.taskId || null) !== (prev.chat.taskId || null))
+        ) && prev.chat.purpose !== COMPANION_PURPOSE) {
+          throw new ChatHistoryError(
+            'workdir_change_required',
+            'Папка и задача меняются отдельным переходом.',
+          );
+        }
 
-      clean.workdir = prev
-        ? (Object.hasOwn(prev.chat, 'workdir') ? prev.chat.workdir : { kind: 'grigdesk' })
-        : choice;
+        clean.workdir = prev
+          ? (Object.hasOwn(prev.chat, 'workdir') ? prev.chat.workdir : { kind: 'grigdesk' })
+          : choice;
 
-      if (prev) {
-        clean.taskId = prev.chat.taskId ?? null;
-      }
+        if (prev) {
+          clean.taskId = prev.chat.taskId ?? null;
+        }
 
-      const phase = prev?.chat.workdirState?.transition?.phase;
+        const phase = prev?.chat.workdirState?.transition?.phase;
 
-      if (phase && !['done', 'failed'].includes(phase)
-        && ['modelRef', 'mode', 'effort'].some((key) => (
-          Object.hasOwn(chat, key) && JSON.stringify(chat[key]) !== JSON.stringify(prev?.chat[key])
-        ))) {
-        throw new ChatHistoryError('chat_busy', 'Сначала дождитесь переноса разговора.');
-      }
+        if (phase && !['done', 'failed'].includes(phase)
+          && ['modelRef', 'mode', 'effort'].some((key) => (
+            Object.hasOwn(chat, key) && JSON.stringify(chat[key]) !== JSON.stringify(prev?.chat[key])
+          ))) {
+          throw new ChatHistoryError('chat_busy', 'Сначала дождитесь переноса разговора.');
+        }
 
-      const previousIdentity = companionIdentity(prev?.chat);
-      let identity: CompanionIdentity | null = null;
-      if (serverIdentity) {
-        let taskId: string | null;
-        try { taskId = normalizeCompanionTaskId(chat.taskId); } catch { throw rebindError(); }
-        const expected = companionLogicalIdentity(taskId);
-        if (chat.purpose !== COMPANION_PURPOSE || serverIdentity !== expected) throw rebindError();
-        identity = { valid: true, taskId, key: expected };
-      } else if (prev?.chat?.purpose === COMPANION_PURPOSE) {
-        if (!previousIdentity?.valid) throw identityConflict([prev.chat]);
-        if (Object.hasOwn(chat, 'purpose') && chat.purpose !== COMPANION_PURPOSE) throw rebindError();
-        if (Object.hasOwn(chat, 'taskId')) {
+        const previousIdentity = companionIdentity(prev?.chat);
+        let identity: CompanionIdentity | null = null;
+        if (serverIdentity) {
           let taskId: string | null;
           try { taskId = normalizeCompanionTaskId(chat.taskId); } catch { throw rebindError(); }
-          if (taskId !== previousIdentity.taskId) throw rebindError();
+          const expected = companionLogicalIdentity(taskId);
+          if (chat.purpose !== COMPANION_PURPOSE || serverIdentity !== expected) throw rebindError();
+          identity = { valid: true, taskId, key: expected };
+        } else if (prev?.chat?.purpose === COMPANION_PURPOSE) {
+          if (!previousIdentity?.valid) throw identityConflict([prev.chat]);
+          if (Object.hasOwn(chat, 'purpose') && chat.purpose !== COMPANION_PURPOSE) throw rebindError();
+          if (Object.hasOwn(chat, 'taskId')) {
+            let taskId: string | null;
+            try { taskId = normalizeCompanionTaskId(chat.taskId); } catch { throw rebindError(); }
+            if (taskId !== previousIdentity.taskId) throw rebindError();
+          }
+          if (Object.hasOwn(chat, 'logicalIdentity')
+            && chat.logicalIdentity !== previousIdentity.key) throw rebindError();
+          identity = previousIdentity;
+        } else if (chat.purpose === COMPANION_PURPOSE
+          || Object.hasOwn(chat, 'logicalIdentity')) {
+          throw rebindError();
         }
-        if (Object.hasOwn(chat, 'logicalIdentity')
-          && chat.logicalIdentity !== previousIdentity.key) throw rebindError();
-        identity = previousIdentity;
-      } else if (chat.purpose === COMPANION_PURPOSE
-        || Object.hasOwn(chat, 'logicalIdentity')) {
-        throw rebindError();
-      }
-      if (identity && choice?.kind !== 'grigdesk') {
-        throw new ChatHistoryError('workdir_change_required', 'Папка компаньона определяется его задачей.');
-      }
-      if (identity) {
-        clean.purpose = COMPANION_PURPOSE;
-        clean.taskId = identity.taskId;
-        clean.logicalIdentity = identity.key;
-      }
-      const surface = CHAT_SURFACES.has(String(prev?.chat?.surface))
-        ? String(prev?.chat?.surface)
-        : this.defaultSurface;
-      let prepared: StoredChat;
-      if (stale) {
-        prepared = {
-          ...clean,
-          model: prev?.chat.model,
-          modelRef: prev?.chat.modelRef,
-          modelRefState: prev?.chat.modelRefState,
-        };
-      } else {
-        prepared = migrateChatModelRecord(clean, registry, { surface }).chat;
-      }
-      const { chat: merged, restored, dropped } = mergeChat(
-        prev?.chat || null,
-        prepared,
-        { allowClear: !stale },
-      );
-      const c: StoredChat = {
-        ...merged,
-        schema: CHAT_SCHEMA,
-        surface,
-        sessionBindingState: legacySessionState(prev?.chat || merged),
-        archived: !!archived,
+        if (identity && choice?.kind !== 'grigdesk') {
+          throw new ChatHistoryError('workdir_change_required', 'Папка компаньона определяется его задачей.');
+        }
+        if (identity) {
+          clean.purpose = COMPANION_PURPOSE;
+          clean.taskId = identity.taskId;
+          clean.logicalIdentity = identity.key;
+        }
+        const surface = CHAT_SURFACES.has(String(prev?.chat?.surface))
+          ? String(prev?.chat?.surface)
+          : this.defaultSurface;
+        let prepared: StoredChat;
+        if (stale) {
+          prepared = {
+            ...clean,
+            model: prev?.chat.model,
+            modelRef: prev?.chat.modelRef,
+            modelRefState: prev?.chat.modelRefState,
+          };
+        } else {
+          prepared = migrateChatModelRecord(clean, registry, { surface }).chat;
+        }
+        const { chat: merged, restored, dropped } = mergeChat(
+          prev?.chat || null,
+          prepared,
+          { allowClear: !stale },
+        );
+        const c: StoredChat = {
+          ...merged,
+          schema: CHAT_SCHEMA,
+          surface,
+          sessionBindingState: legacySessionState(prev?.chat || merged),
+          archived: !!archived,
       };
 
       // Маркеры исполнения принадлежат серверу даже у свежего клиентского PUT.
@@ -935,6 +958,21 @@ export class ChatHistoryStore {
         chat: c,
         stepReuseAck: historyStepReuseAck(chat, c)
       };
+      };
+
+      if (prev || legacyImport) {
+        return commit();
+      }
+
+      return this.guardNewChat(async () => {
+        const choice = normalizeChatWorkdir(incoming.workdir);
+
+        if (choice?.kind === 'project' && this.isProjectDeleted(choice.projectId)) {
+          throw new ChatHistoryError('workdir_unknown_project', 'Регистрация проекта удалена.');
+        }
+
+        return commit();
+      }, incoming);
     });
   }
 
@@ -1153,34 +1191,105 @@ export class ChatHistoryStore {
   async saveMeta(meta: ChatMeta | null | undefined): Promise<ChatMeta> {
     await this.ensureMigrated();
     await this.ensureDir();
-    const prev = await this.readMetaRaw();
-    const next: Record<string, unknown> = { ...prev };
-    const source = (meta ?? {}) as Record<string, unknown>;
 
-    const metaKeys = [
-      'activeId', 'defModel', 'defModelRef', 'defEffort', 'defMode', 'defWorkdir', 'recentWorkdirs',
-    ];
+    return this.withMetaLock(async () => {
+      const prev = await this.readMetaRaw();
+      const next: Record<string, unknown> = { ...prev };
+      const source = (meta ?? {}) as Record<string, unknown>;
 
-    for (const k of metaKeys) {
-      if (source[k] !== undefined) next[k] = source[k];
-    }
+      const metaKeys = [
+        'activeId', 'defModel', 'defModelRef', 'defEffort', 'defMode', 'defWorkdir', 'recentWorkdirs',
+      ];
 
-    if (source.defWorkdir !== undefined) {
-      const workdir = normalizeChatWorkdir(source.defWorkdir);
-
-      if (!workdir) {
-        throw new ChatHistoryError('bad_workdir', 'Папка по умолчанию повреждена.', { statusCode: 400 });
+      for (const k of metaKeys) {
+        if (source[k] !== undefined) next[k] = source[k];
       }
 
-      next.defWorkdir = workdir;
+      if (source.defWorkdir !== undefined) {
+        const workdir = normalizeChatWorkdir(source.defWorkdir);
+
+        if (!workdir) {
+          throw new ChatHistoryError('bad_workdir', 'Папка по умолчанию повреждена.', { statusCode: 400 });
+        }
+
+        next.defWorkdir = workdir;
+      }
+
+      next.recentWorkdirs = normalizeRecentWorkdirs(next.recentWorkdirs);
+
+      this.filterDeletedPreferences(next);
+
+      const migrated = migrateDefaultModel(next, await this.registry()).meta;
+      migrated.schema = CHAT_SCHEMA;
+      await this.writeAtomic(path.join(this.dir, 'meta.json'), stableJson(migrated));
+      return migrated;
+    });
+  }
+
+  /**
+   * Очередь меты согласует очистку со старым PUT без захвата разговоров.
+   * Отказ записи не отравляет последующие сохранения и повтор удаления.
+   */
+  private withMetaLock<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.metaTail.then(operation, operation);
+
+    this.metaTail = result.then(() => undefined, () => undefined);
+
+    return result;
+  }
+
+  /**
+   * Новые defaults и recents не восстанавливают удалённую регистрацию.
+   * Существующие разговоры и их рабочие папки здесь не изменяются.
+   */
+  private filterDeletedPreferences(meta: Record<string, unknown>, removed?: string): void {
+    const deleted = (value: unknown) => {
+      const choice = normalizeChatWorkdir(value);
+
+      return choice?.kind === 'project'
+        && (choice.projectId === removed || this.isProjectDeleted(choice.projectId));
+    };
+
+    if (deleted(meta.defWorkdir)) {
+      meta.defWorkdir = { kind: 'grigdesk' };
     }
 
-    next.recentWorkdirs = normalizeRecentWorkdirs(next.recentWorkdirs);
+    meta.recentWorkdirs = normalizeRecentWorkdirs(meta.recentWorkdirs).filter((item) => !deleted(item));
+  }
 
-    const migrated = migrateDefaultModel(next, await this.registry()).meta;
-    migrated.schema = CHAT_SCHEMA;
-    await this.writeAtomic(path.join(this.dir, 'meta.json'), stableJson(migrated));
-    return migrated;
+  /**
+   * Только отсутствие файла считается пустой метой: повреждение запрещает финал.
+   * Финал вызывается синхронно после записи, пока поздние PUT ещё ждут очередь.
+   */
+  async withProjectPreferencesRemoved(id: string, finalize: () => void): Promise<void> {
+    await this.ensureMigrated();
+    await this.withMetaLock(async () => {
+      let meta: Record<string, unknown>;
+
+      try {
+        meta = JSON.parse(await fs.readFile(path.join(this.dir, 'meta.json'), 'utf8'));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw error;
+        }
+
+        meta = {};
+      }
+
+      if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+        throw new Error('Повреждены настройки чатов.');
+      }
+
+      const before = stableJson(meta);
+
+      this.filterDeletedPreferences(meta, id);
+
+      if (stableJson(meta) !== before) {
+        await this.writeAtomic(path.join(this.dir, 'meta.json'), stableJson(meta));
+      }
+
+      finalize();
+    });
   }
 
   async read(): Promise<Record<string, unknown>> {
@@ -1190,8 +1299,9 @@ export class ChatHistoryStore {
     if (!map.size && this.legacyPath) {
       try {
         const legacy = JSON.parse(await fs.readFile(this.legacyPath, 'utf8'));
+
         if (legacy?.sessions?.length || legacy?.archived?.length) {
-          await this.save(legacy);
+          await this.save(legacy, { legacyImport: true });
           await fs.rename(this.legacyPath, this.legacyPath + '.migrated');
           map = await this.scan();
         }

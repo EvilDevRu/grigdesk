@@ -119,6 +119,9 @@ async function mountView(t, {
     },
   };
 
+  const { reactive } = await import('../../web/node_modules/vue/index.mjs');
+
+  harness.store = reactive(harness.store);
   globalThis.__sandboxViewHarness = harness;
 
   const component = await compileVue(VIEW, {
@@ -290,6 +293,26 @@ test('итог прогона показан на карточке, а журн�
   assert.match(wrapper.find('.sandbox-card__log-text').text(), /все звенья СОВПАДАЮТ/);
 });
 
+for (const remaining of [[], [{
+  id: 'other',
+  canRaise: true,
+  reason: null
+}]]) {
+  test(`PD-raise-catalog: форма сбрасывает удалённый выбранный профиль (${remaining.length} осталось)`,
+    async (t) => {
+      const { wrapper, harness, calls, flushPromises } = await mountView(t);
+
+      harness.store.profiles = remaining;
+      harness.store.capableProfiles = remaining;
+      await flushPromises();
+      await wrapper.get('form').trigger('submit');
+      await flushPromises();
+      assert.equal(calls.some(([kind]) => kind === 'raise'), false);
+      assert.equal(wrapper.find('select').element.value, '');
+      assert.equal(wrapper.text().includes('990000'), true, 'поднятый стенд остаётся на экране');
+    });
+}
+
 test('поиск по ветке и фильтр владельца сохраняют недавние задания', async (t) => {
   const { wrapper } = await mountView(t, {
     sandboxes: [entry(), entry({
@@ -306,15 +329,15 @@ test('поиск по ветке и фильтр владельца сохран
   });
 
   await wrapper.find('[aria-label="Поиск стенда"]').setValue('ROUTE-TASK');
-  assert.equal(wrapper.findAll('.sandbox-card').length, 1);
+  assert.equal(wrapper.findAll('[data-context="workspace-catalog-row"]').length, 1);
   assert.match(wrapper.find('.sandbox-card h3').text(), /990000/);
   assert.match(wrapper.find('.sandboxes__jobs').text(), /Нет свободного слота/);
 
   await wrapper.find('[aria-label="Какие стенды показать"]').setValue('pipeline');
-  assert.equal(wrapper.findAll('.sandbox-card').length, 0);
+  assert.equal(wrapper.findAll('[data-context="workspace-catalog-row"]').length, 0);
   assert.match(wrapper.text(), /Подходящих стендов нет/);
   await wrapper.findAll('button').find((button) => button.text() === 'Сбросить').trigger('click');
-  assert.equal(wrapper.findAll('.sandbox-card').length, 2);
+  assert.equal(wrapper.findAll('[data-context="workspace-catalog-row"]').length, 2);
 });
 
 test('сворачивание формы сохраняет номер, а неправильный ввод не открывает подтверждение', async (t) => {

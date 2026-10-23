@@ -200,6 +200,20 @@ export interface ProjectsErrorBody {
   currentRevision: number | null;
 }
 
+const projectsChange = objectOf({
+  id: text,
+  revision: wholeNumber,
+  kind: oneOf('created', 'updated', 'archived', 'restored', 'deleted', 'imported'),
+});
+
+/**
+ * Событие реестра проверяется до применения к локальному выбору.
+ * Неизвестная форма остаётся поводом перечитать каталог целиком.
+ */
+export function parseProjectsChange(value: unknown) {
+  return projectsChange(value, 'projects-changed');
+}
+
 export function parseProjectSummaries(value: unknown): ProjectSummary[] {
   const source = record(value, 'projects');
   const list = source.projects;

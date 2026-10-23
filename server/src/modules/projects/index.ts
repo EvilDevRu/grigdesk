@@ -89,6 +89,18 @@ async function projectsModule(
     }
   });
 
+  fastify.delete<ProjectParams>('/api/projects/:id', async (request, reply) => {
+    const body = (request.body ?? {}) as { expectedRevision?: unknown };
+
+    try {
+      await service.remove(request.params.id, body.expectedRevision);
+
+      return reply.code(204).send();
+    } catch (err) {
+      return failure(reply, err);
+    }
+  });
+
   // Связи проекта: форма показывает их перед архивом, чтобы человек видел, что мешает.
   fastify.get<ProjectParams>('/api/projects/:id/dependencies', async (request, reply) => {
     try {

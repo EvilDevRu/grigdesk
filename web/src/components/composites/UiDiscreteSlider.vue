@@ -1,7 +1,10 @@
 <template>
-  <div class="ui-discrete-slider" :class="{ 'ui-discrete-slider--ticks': ticks }">
+  <div class="ui-discrete-slider" :class="{
+    'ui-discrete-slider--ticks': ticks,
+    'ui-discrete-slider--unselected': unselected,
+  }">
     <UiRange
-      v-model="model"
+      v-model="rangeValue"
       :min="min"
       :max="max"
       :step="step"
@@ -9,6 +12,10 @@
       :aria-disabled="readonly"
       :aria-value-text="valueText || valueLabel"
       :aria-label="label"
+      @pointerdown="beginPointer"
+      @pointerup="finishPointer"
+      @pointercancel="pointerStarted = false"
+      @keydown="selectBoundary"
     />
     <div
       v-if="points.length"
@@ -18,7 +25,7 @@
       <span
         v-for="point in points"
         :key="point.value"
-        :class="{ 'is-active': point.value === model }"
+        :class="{ 'is-active': !unselected && point.value === model }"
         >{{ point.label }}</span
       >
     </div>
@@ -31,11 +38,13 @@ import UiRange from '../primitives/UiRange.vue';
 
 const props = withDefaults(
   defineProps<{
+    modelValue: number;
     min?: number;
     max?: number;
     step?: number;
     disabled?: boolean;
     readonly?: boolean;
+    unselected?: boolean;
     ticks?: boolean;
     label?: string;
     valueText?: string;
@@ -47,13 +56,72 @@ const props = withDefaults(
     step: 1,
     disabled: false,
     readonly: false,
+    unselected: false,
     ticks: false,
     label: undefined,
     valueText: undefined,
     labels: () => ({}),
   },
 );
-const model = defineModel<number>({ required: true });
+const emit = defineEmits<{ 'update:modelValue': [value: number] }>();
+
+let pointerStarted = false;
+let pointerChanged = false;
+
+const model = computed({
+  get: () => props.modelValue,
+  set: (value: number) => emit('update:modelValue', value),
+});
+
+const rangeValue = computed({
+  get: () => model.value,
+  set: (value: number) => {
+    if (!props.disabled && !props.readonly) {
+      pointerChanged = true;
+
+      model.value = value;
+    }
+  },
+});
+
+/**
+ * Запоминаем жест из пустого выбора: на физическом min браузер может не дать input.
+ * Обычный input уже подтверждает выбор и исключает повторное событие на pointerup.
+ */
+function beginPointer(): void {
+  pointerStarted = props.unselected && !props.disabled && !props.readonly;
+  pointerChanged = false;
+}
+
+/**
+ * Тап по уже стоящему min тоже является явным выбором первой ступени.
+ * Отменённый жест и недоступный control не меняют значение.
+ */
+function finishPointer(event: PointerEvent): void {
+  const shouldSelect = pointerStarted && !pointerChanged && !props.disabled && !props.readonly;
+
+  pointerStarted = false;
+
+  if (shouldSelect) {
+    rangeValue.value = (event.target as HTMLInputElement).valueAsNumber;
+  }
+}
+
+/**
+ * Home и End подтверждают крайние значения даже при неизменном native range.
+ * Предотвращаем native input, чтобы одно нажатие давало ровно один выбор.
+ */
+function selectBoundary(event: KeyboardEvent): void {
+  if (!props.unselected || props.disabled || props.readonly
+    || (event.key !== 'Home' && event.key !== 'End')) {
+    return;
+  }
+
+  event.preventDefault();
+  pointerChanged = true;
+  rangeValue.value = event.key === 'Home' ? props.min : props.max;
+}
+
 const points = computed(() =>
   Object.entries(props.labels).map(([value, label]) => ({
     value: Number(value),

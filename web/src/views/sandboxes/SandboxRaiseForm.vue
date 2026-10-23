@@ -91,9 +91,19 @@ const profileError = computed(() => (props.options.length
 
 const canSubmit = computed(() => props.options.some((option) => option.id === profile.value) && !props.busy);
 
-// Первый доступный профиль подставляется сам: чаще всего он на машине один.
+// Первый доступный профиль подставляется при начальной загрузке.
+// После исчезновения выбора соседний профиль выбирает только человек.
+let initialProfileApplied = false;
+
 watch(() => props.options, (options) => {
-  if (!options.some((option) => option.id === profile.value)) {
+  if (profile.value && !options.some((option) => option.id === profile.value)) {
+    profile.value = '';
+
+    return;
+  }
+
+  if (!profile.value && options.length && !initialProfileApplied) {
+    initialProfileApplied = true;
     profile.value = options[0]?.id || '';
   }
 }, { immediate: true });

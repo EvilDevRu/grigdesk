@@ -197,13 +197,6 @@ export const config = {
   // connect превратился бы в SSRF/создание webhook на произвольный endpoint.
   githubWebhookBaseUrl: process.env.GRIGDESK_GITHUB_WEBHOOK_BASE_URL || '',
 
-  // База агентов (стадий конвейера) — каталог agents в папке данных (внутри свой .gitignore,
-  // как chats/): каждый агент — файл agents/<id>.md (frontmatter + промпт).
-  agentsDir: process.env.GRIGDESK_AGENTS_DIR || dataPath(dataHome, 'agents'),
-  // Версионируемый стандартный набор агентов: отсюда кнопка «Установить набор»
-  // доустанавливает отсутствующих (create-only, существующие файлы не трогает).
-  agentsSeedDir: process.env.GRIGDESK_AGENTS_SEED_DIR
-    || path.join(rootDir, 'server', 'seed', 'agents'),
   // Рабочая папка агентов: снимки, дампы, скрипты и отчёты проверок. Вне дерева кода;
   // ход чата получает её на запись, картинки и документы из неё показываются.
   artifactsDir: process.env.GRIGDESK_ARTIFACTS_DIR || dataPath(dataHome, 'artifacts'),

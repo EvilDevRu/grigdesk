@@ -2,12 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  AgentsContractError,
-  parseAgentCard,
-  parseAgentInstallResult,
-  parseAgentList,
-} from '../../shared/pipeline/agentsContracts.ts';
-import {
   FactoryGraphContractError,
   parseFactoryGraph,
 } from '../../shared/pipeline/factoryGraphContracts.ts';
@@ -22,48 +16,6 @@ import {
   DocumentsContractError,
   parseResolvedDocument,
 } from '../../shared/plugins/documents/documentsContracts.ts';
-
-const agent = {
-  id: 'recon',
-  kind: 'agent',
-  label: 'Разведка',
-  sub: 'lint · tests',
-  key: 'recon',
-  tier: 'reasoning',
-  effort: 'high',
-  timeout: 900,
-  budget: 0,
-  readonly: true,
-  optional: false,
-  prompt: 'Осмотри репозиторий',
-};
-
-test('карточка агента отбрасывает посторонние поля и требует объявленные', () => {
-  assert.deepEqual(parseAgentCard({ ...agent, ignored: 'лишнее' }), agent);
-  assert.deepEqual(parseAgentList({ agents: [agent] }), [agent]);
-  // Времена и флаги — не строки: рукописный файл базы читает сервер, а сюда он
-  // приходит уже нормализованным, и строка здесь означала бы сломанный ответ.
-  assert.throws(() => parseAgentCard({ ...agent, timeout: '900' }), AgentsContractError);
-  assert.throws(() => parseAgentCard({ ...agent, readonly: 'yes' }), AgentsContractError);
-  for (const invalid of [null, [], 'text', 12, {}]) {
-    assert.throws(() => parseAgentList(invalid), AgentsContractError);
-  }
-});
-
-test('род агента остаётся свободным: рукописная карточка не исчезает из списка', () => {
-  const custom = { ...agent, kind: 'review' };
-
-  assert.equal(parseAgentCard(custom).kind, 'review');
-});
-
-test('пустая доустановка агентов — не отказ', () => {
-  assert.deepEqual(parseAgentInstallResult({ ok: true }), {
-    ok: true,
-    created: null,
-    skipped: null,
-  });
-  assert.throws(() => parseAgentInstallResult({ created: [] }), AgentsContractError);
-});
 
 test('ступени усилия собираются без повторов и переживают исполнителя без моделей', () => {
   assert.deepEqual(parseProviderEfforts({
@@ -145,4 +97,27 @@ test('документ описывается ссылкой внутри кор
     () => parseResolvedDocument({ ...resolved, ref: { source: 'grigdesk' } }),
     DocumentsContractError,
   );
+});
+
+test('кривая presentation не роняет снимок', async () => {
+  const { decodePipelineTasks, decodePipelineViewGraph } = await import(
+    '../../web/src/shared/pipelineContracts.ts'
+  );
+  const stall = {
+    kind: 'human',
+    title: 'T',
+    hint: 'H',
+    presentation: { reason: 5, details: 'x' },
+  };
+  const snapshot = { tasks: [{ task: '1', stall }] };
+  const graph = {
+    nodes: { x: ['agent', 'Этап'] },
+    pos: { x: [0, 0] },
+    statuses: { x: 'stall' },
+    progress: { done: 0, total: 1 },
+    nodeMeta: { x: { stall } },
+  };
+
+  assert.equal(decodePipelineTasks(snapshot).tasks[0].task, '1');
+  assert.equal(decodePipelineViewGraph(graph).nodeMeta.x.stall.title, 'T');
 });

@@ -3,6 +3,10 @@
 import os from 'node:os';
 import fs from 'node:fs';
 
+import type { SystemMetrics } from '../../../shared/runtime/systemMetrics.ts';
+import { SystemResources } from '../lib/systemResources/index.ts';
+import type { ResourcesOptions } from '../lib/systemResources/ports.ts';
+
 // Снимок памяти в байтах. `null` означает, что /proc недоступен, — тогда цифры
 // берутся у os, и swap честно считается нулём.
 interface MemInfo {
@@ -43,11 +47,19 @@ export class SystemAdapter {
 
   private readonly _netTimer: ReturnType<typeof setInterval>;
 
-  constructor({ intervalMs = 2000, netIntervalMs = 60000 }: {
+  private _cache!: SystemMetrics;
+
+  private readonly _resources: SystemResources | undefined;
+
+  constructor({ intervalMs = 2000, netIntervalMs = 60000, dataHome, resourcesOptions }: {
     intervalMs?: number;
     netIntervalMs?: number;
+    dataHome?: string;
+    resourcesOptions?: ResourcesOptions;
   } = {}) {
     this._prev = this._snapshot();
+    this._refreshMetrics();
+    this._resources = dataHome ? new SystemResources(dataHome, resourcesOptions) : undefined;
     // Периодический пересчёт CPU% (unref — не держит event loop).
     this._timer = setInterval(() => this._tick(), intervalMs);
     if (this._timer.unref) this._timer.unref();
@@ -105,44 +117,85 @@ export class SystemAdapter {
     const dTotal = cur.total - this._prev.total;
     this._prev = cur;
     this.percent = dTotal > 0 ? Math.round((1 - dIdle / dTotal) * 100) : 0;
+    this._refreshMetrics();
   }
 
   /**
-   * Текущий снимок нагрузки. Цифра в шапке (totalGb/usedGb/percent) — ОЗУ вместе со swap:
-   * это общее давление на память. Всплывашке нужна разбивка, поэтому физическая память и
-   * подкачка едут ещё и по отдельности: 90% занятого ОЗУ и 90% занятого swap — совсем разные
-   * новости, в сумме они неразличимы.
+   * Прежние формулы памяти и CPU выполняются только на начальном и периодическом тике.
+   * Общая память в шапке включает swap; разбивка сохраняет старый формат и округление.
    */
-  read() {
+  private _refreshMetrics(): void {
     const mi = readMeminfo();
-    let ramTotal: number; let ramFree: number; let swapTotal: number; let swapFree: number;
+    let ramTotal: number;
+    let ramFree: number;
+    let swapTotal: number;
+    let swapFree: number;
+
     if (mi && mi.memTotal) {
-      ramTotal = mi.memTotal; ramFree = mi.memAvail;   // MemAvailable, а не MemFree: кеш отдаётся под запрос
-      swapTotal = mi.swapTotal; swapFree = mi.swapFree;
+      ramTotal = mi.memTotal;
+      ramFree = mi.memAvail;
+      swapTotal = mi.swapTotal;
+      swapFree = mi.swapFree;
     } else {
-      ramTotal = os.totalmem(); ramFree = os.freemem(); swapTotal = 0; swapFree = 0;
+      ramTotal = os.totalmem();
+      ramFree = os.freemem();
+      swapTotal = 0;
+      swapFree = 0;
     }
-    const total = ramTotal + swapTotal;   // ОЗУ + swap
+
+    const total = ramTotal + swapTotal;
     const free = ramFree + swapFree;
     const used = total - free;
-    const gb = (b: number) => +(b / 1024 ** 3).toFixed(1);
-    const pct = (u: number, t: number) => (t > 0 ? Math.round((u / t) * 100) : 0);
-    return {
-      cpu: { percent: this.percent, cores: os.cpus().length, load1: +(os.loadavg()[0] ?? 0).toFixed(2) },
+    const gb = (bytes: number) => +(bytes / 1024 ** 3).toFixed(1);
+    const pct = (used: number, total: number) => (total > 0 ? Math.round((used / total) * 100) : 0);
+
+    this._cache = {
+      cpu: {
+        percent: this.percent,
+        cores: os.cpus().length,
+        load1: +(os.loadavg()[0] ?? 0).toFixed(2),
+      },
       mem: {
-        totalGb: gb(total), usedGb: gb(used), freeGb: gb(free),
+        totalGb: gb(total),
+        usedGb: gb(used),
+        freeGb: gb(free),
         percent: pct(used, total),
-        ramTotalGb: gb(ramTotal), ramUsedGb: gb(ramTotal - ramFree), ramFreeGb: gb(ramFree),
+        ramTotalGb: gb(ramTotal),
+        ramUsedGb: gb(ramTotal - ramFree),
+        ramFreeGb: gb(ramFree),
         ramPercent: pct(ramTotal - ramFree, ramTotal),
-        swapTotalGb: gb(swapTotal), swapUsedGb: gb(swapTotal - swapFree),
+        swapTotalGb: gb(swapTotal),
+        swapUsedGb: gb(swapTotal - swapFree),
         swapPercent: pct(swapTotal - swapFree, swapTotal),
       },
-      net: this.net,
     };
   }
 
+  /**
+   * GET читает только последний готовый снимок, без файловых или системных проб.
+   * Необязательные аппаратные поля добавляются лишь при подключённом сборщике.
+   */
+  read(): SystemMetrics {
+    const resources = this._resources?.read();
+
+    return {
+      ...this._cache,
+      cpu: {
+        ...this._cache.cpu,
+        ...(resources?.temperature ? { temperature: resources.temperature } : {}),
+      },
+      net: this.net,
+      ...(resources ? { gpus: resources.gpus, disks: resources.disks } : {}),
+    };
+  }
+
+  /**
+   * Адаптер закрывает только собственные таймеры и аппаратный сборщик.
+   * Остановка также запрещает позднюю публикацию его медленных источников.
+   */
   stop(): void {
-    if (this._timer) clearInterval(this._timer);
-    if (this._netTimer) clearInterval(this._netTimer);
+    clearInterval(this._timer);
+    clearInterval(this._netTimer);
+    this._resources?.stop();
   }
 }

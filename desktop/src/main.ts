@@ -23,8 +23,10 @@ import { delayWithAbort } from '../../shared/lib/delay.ts';
 import { probeGrigDesk } from '../../shared/runtime/grigDeskReadiness.ts';
 import { desktopUserAgent } from '../../shared/desktop/desktopWindowContract.ts';
 import { createSettingsRequest } from './settingsRequest.ts';
+import { createDesktopExitController } from './desktopExitController.ts';
+import { createDesktopExitPreference } from './desktopExitPreference.ts';
 import { createSurfaceWindows } from './surfaceWindows.ts';
-import { placeSurfaceBounds } from './surfaceGeometry.ts';
+import { fitSurfaceBounds, placeSurfaceBounds } from './surfaceGeometry.ts';
 import type { SurfaceTarget } from '../../shared/desktop/surfaceContract.ts';
 
 import { windowKeyPath } from '../../shared/desktop/windowKeyPath.ts';
@@ -174,6 +176,40 @@ function createOwnSupervisor() {
 }
 
 let supervisor = createOwnSupervisor();
+let exitPreference: ReturnType<typeof createDesktopExitPreference> | null = null;
+
+function desktopExitPreference() {
+  exitPreference ??= createDesktopExitPreference({
+    settings: settings!,
+    save: () => writeSettings(settingsFile!, settings!),
+  });
+
+  return exitPreference;
+}
+
+const desktopExit = createDesktopExitController({
+  context: () => {
+    const profile = settings?.profiles.find((item) => item.id === settings?.selected);
+
+    return mainWindow && pipeOrigin && profile ? {
+      window: mainWindow,
+      origin: pipeOrigin,
+      profileId: profile.id,
+      address: profile.address,
+      local: profile.kind === 'local',
+      selectedOrigin,
+      supervisor,
+    } : null;
+  },
+  revealed: () => revealed(),
+  quitting: () => quit.stopping,
+  preference: () => desktopExitPreference(),
+  log: writeLog,
+  exit: () => {
+    exiting = true;
+    app.exit(0);
+  },
+});
 
 /**
  * Окно показано: дальше перезагрузка, 401 и потеря связи идут обычным offline-путём.
@@ -265,14 +301,16 @@ function openExternal(url: string): Promise<void> {
  * Карточки сохраняют нормальные размеры отдельно от главного окна.
  * Скрытые и уничтоженные окна не подменяют последнее видимое положение.
  */
-function captureSurfaceGeometry(window: BrowserWindow): void {
+function captureSurfaceGeometry(window: BrowserWindow, target: SurfaceTarget): void {
   if (window.isDestroyed() || !window.isVisible() || !settings) {
     return;
   }
 
-  settings.surfaceWindows = {
-    task: { ...window.getNormalBounds(), maximized: window.isMaximized() },
-  };
+  const geometry = { ...window.getNormalBounds(), maximized: window.isMaximized() };
+
+  settings.surfaceWindows = target.kind === 'task'
+    ? { ...settings.surfaceWindows, task: geometry }
+    : { ...settings.surfaceWindows, tools: { ...settings.surfaceWindows?.tools, [target.id]: geometry } };
 }
 
 /**
@@ -327,9 +365,10 @@ function prepareSurfaceShow(window: BrowserWindow): void {
  * Только встроенный документ текущей машины получает окно в стиле приложения.
  * UA и guards назначаются до первой загрузки, сессия совпадает с главным окном.
  */
-function createSurfaceWindow(url: string, _target: SurfaceTarget, index: number): BrowserWindow {
+function createSurfaceWindow(url: string, target: SurfaceTarget, index: number): BrowserWindow {
   const areas = surfaceWorkAreas();
-  const saved = settings?.surfaceWindows?.task ?? {
+  const saved = (target.kind === 'task' ? settings?.surfaceWindows?.task
+    : settings?.surfaceWindows?.tools?.[target.id]) ?? {
     x: areas[0].x,
     y: areas[0].y,
     width: 1000,
@@ -337,7 +376,8 @@ function createSurfaceWindow(url: string, _target: SurfaceTarget, index: number)
     maximized: false,
   };
   const previous = surfaceWindowOrder.findLast((other) => !other.isDestroyed());
-  const bounds = placeSurfaceBounds(saved, index, areas, previous?.getBounds());
+  const bounds = target.kind === 'task' ? placeSurfaceBounds(saved, index, areas, previous?.getBounds())
+    : fitSurfaceBounds(saved, areas);
   const options = windowOptions(path.join(__dirname, 'icon.png'), app.isPackaged, {
     width: bounds.width,
     height: bounds.height,
@@ -357,15 +397,32 @@ function createSurfaceWindow(url: string, _target: SurfaceTarget, index: number)
     },
   });
 
-  surfaceWindowOrder.push(window);
+  if (target.kind === 'task') {
+    surfaceWindowOrder.push(window);
+  }
 
-  const remember = () => captureSurfaceGeometry(window);
+  const remember = () => captureSurfaceGeometry(window, target);
 
   window.on('move', remember);
   window.on('resize', remember);
   window.on('maximize', remember);
   window.on('unmaximize', remember);
-  window.on('close', remember);
+  window.on('close', (event) => {
+    remember();
+
+    if (target.kind !== 'tool' || !settings || !settingsFile || quit.stopping) {
+      return;
+    }
+
+    event.preventDefault();
+    saving = writeSettings(settingsFile, settings);
+    void saving.catch(() => writeLog('GrigDesk: не удалось сохранить положение инструмента.'))
+      .finally(() => {
+        if (!window.isDestroyed()) {
+          window.destroy();
+        }
+      });
+  });
   window.on('closed', () => {
     const index = surfaceWindowOrder.indexOf(window);
 
@@ -376,7 +433,7 @@ function createSurfaceWindow(url: string, _target: SurfaceTarget, index: number)
     persistSurfaceGeometry();
   });
 
-  if (saved.maximized && !previous) {
+  if (saved.maximized && (target.kind === 'tool' || !previous)) {
     maximizeOnShow.add(window);
   }
 
@@ -665,9 +722,18 @@ async function createMainWindow(origin: string, stored: DesktopSettings): Promis
   });
   configureWindow(window, origin, options);
   window.on('ready-to-show', () => frames.painted());
-  window.on('close', () => {
+  window.on('close', (event) => {
+    if (desktopExit.close(event)) {
+      return;
+    }
+
     if (revealed() && !quit.stopping) {
       saveMainWindow();
+    }
+  });
+  window.webContents.on('will-prevent-unload', (event) => {
+    if (desktopExit.finishing) {
+      event.preventDefault();
     }
   });
   window.on('closed', () => {
@@ -822,10 +888,33 @@ async function prepare(signal: AbortSignal): Promise<void> {
   surfaceWindows = createSurfaceWindows({
     allowedOrigin: () => quit.stopping ? null : pipeOrigin,
     create: createSurfaceWindow,
-    beforeShow: (window) => prepareSurfaceShow(window as BrowserWindow),
+    beforeShow: (window) => {
+      const native = window as BrowserWindow;
+
+      if (surfaceWindowOrder.includes(native)) {
+        prepareSurfaceShow(native);
+      } else if (maximizeOnShow.delete(native)) {
+        native.maximize();
+      }
+    },
+    closed: (origin, target, instance) => {
+      const window = mainWindow;
+
+      if (origin !== pipeOrigin || !window || window.isDestroyed()) {
+        return;
+      }
+
+      const frame = window.webContents.mainFrame;
+      const payload = JSON.stringify({ id: target.id, instance });
+
+      if (!frame.isDestroyed() && sameOrigin(frame.url, origin)) {
+        void frame.executeJavaScript('window.grigdeskToolClosed?.(' + payload + ')').catch(() => {});
+      }
+    },
   });
 
   client = createClientRuntime({
+    desktopExit: desktopExitPreference(),
     settings: stored,
     save: () => writeSettings(settingsFile!, stored),
     uiDir,
@@ -839,7 +928,28 @@ async function prepare(signal: AbortSignal): Promise<void> {
       }, desktopLocale())));
     },
     nativeWindows: {
-      open: async (origin, target) => surfaceWindows?.open(origin, target) ?? false,
+      open: async (origin, target) => (await surfaceWindows?.open(origin, target)) === true,
+/**
+ * Закрытый native control не принимает произвольных адресов или параметров окна.
+ * Проверку origin и instance выполняет общий реестр поверхностей.
+ */
+      async tool(origin, request) {
+        if (request.action === 'status') {
+          return surfaceWindows?.status(origin) ?? [];
+        }
+
+        const target = { kind: 'tool' as const, id: request.id };
+
+        if (request.action === 'open') {
+          return surfaceWindows?.open(origin, target) ?? { opened: false };
+        }
+
+        if (request.action === 'focus') {
+          return { focused: surfaceWindows?.focus(origin, target, request.instance) ?? false };
+        }
+
+        return { closed: surfaceWindows?.close(origin, target, request.instance) ?? false };
+      },
 
       /**
        * Закрытый запрос выполняется только в текущем главном документе своей машины.
@@ -1185,6 +1295,7 @@ const startup = createStartupController({
 
 const quit = createQuitController({
   cancelStartup: () => {
+    desktopExit.cleanup();
     startup.cancel();
     surfaceWindows?.closeAll();
     lifetime.abort();
@@ -1206,6 +1317,7 @@ const quit = createQuitController({
   flushCookies: () => localSession?.cookies.flushStore() ?? Promise.resolve(),
   log: (message) => writeLog(message),
   exit: (code) => {
+    desktopExit.exited();
     exiting = true;
     app.exit(code);
   },
@@ -1243,6 +1355,7 @@ if (app.requestSingleInstanceLock()) {
     }
   });
   app.on('before-quit', (event) => {
+    desktopExit.bypass();
     settingsRequest?.dispose();
 
     if (exiting) {
@@ -1262,12 +1375,14 @@ if (app.requestSingleInstanceLock()) {
     });
   });
   process.on('SIGTERM', () => {
+    desktopExit.bypass();
     void quit.request({
       reason: 'signal',
       exitCode: 0,
     });
   });
   process.on('SIGINT', () => {
+    desktopExit.bypass();
     void quit.request({
       reason: 'signal',
       exitCode: 0,
