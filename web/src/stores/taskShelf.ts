@@ -140,6 +140,8 @@ interface ShelfRuntimeEntry {
 }
 
 export interface TaskShelfState {
+  _viewMirror: boolean;
+  _viewAction: ((action: string, taskId: string) => boolean) | null;
   scope: string;
   revision: number;
   entries: ShelfEntry[];
@@ -715,6 +717,8 @@ function errorText(error: unknown): string {
 
 export const useTaskShelfStore = defineStore('taskShelf', {
   state: (): TaskShelfState => ({
+    _viewMirror: false,
+    _viewAction: null,
     scope: '',
     revision: -1,
     entries: [],
@@ -744,6 +748,30 @@ export const useTaskShelfStore = defineStore('taskShelf', {
      * Режим принадлежит документу карточки и переживает очистку данных при выходе.
      * Главное окно строит строки полки, читает детали и отправляет оповещения.
      */
+    setViewMirror(value: boolean) {
+      this._viewMirror = value;
+      ensureController(this).passive = value;
+    },
+    setViewAction(action: ((action: string, taskId: string) => boolean) | null) {
+      this._viewAction = action;
+    },
+/**
+ * Принимает готовую проекцию Полки без reconcile и оповещений.
+ * Полные rows принадлежат main, поэтому зеркало не гидратирует портал самостоятельно.
+ */
+    applyViewSnapshot(value: Record<string, unknown>) {
+      if (!this._viewMirror) {
+        return;
+      }
+
+      this.scope = value.scope as typeof this.scope;
+      this.revision = Number(value.revision) || 0;
+      this.entries = value.entries as typeof this.entries;
+      this.rows = value.rows as typeof this.rows;
+      this.sourceIssues = value.sourceIssues as typeof this.sourceIssues;
+      this.loaded = value.loaded === true;
+      this.error = value.error as typeof this.error;
+    },
     setPassive(value: boolean) {
       ensureController(this).passive = value;
     },
@@ -789,6 +817,10 @@ export const useTaskShelfStore = defineStore('taskShelf', {
      * запроса повод перечитать превращается в один trailing-заход после текущего.
      */
     async load(force = false, { silent = false } = {}) {
+      if (this._viewMirror) {
+        return false;
+      }
+
       const controller = ensureController(this);
 
       if (!enabled(controller)) {
@@ -848,6 +880,10 @@ export const useTaskShelfStore = defineStore('taskShelf', {
      * от durable entries: событие не пишет на сервер и не может удалить запись.
      */
     reconcile({ silent = false } = {}) {
+      if (this._viewMirror) {
+        return;
+      }
+
       const controller = ensureController(this);
 
       if (!enabled(controller)) {
@@ -998,6 +1034,10 @@ export const useTaskShelfStore = defineStore('taskShelf', {
      * первая, а состояние всё равно приедет подтверждённым снимком сервера.
      */
     async remove(id: unknown) {
+      if (this._viewMirror) {
+        return this._viewAction?.('remove', taskKey(id)) ?? false;
+      }
+
       const controller = ensureController(this);
       const key = taskKey(id);
 
@@ -1057,6 +1097,10 @@ export const useTaskShelfStore = defineStore('taskShelf', {
      * Карточка передаёт намерение главному окну, не подставляя неполный pipeline-снимок.
      */
     acknowledge(id: unknown) {
+      if (this._viewMirror) {
+        return this._viewAction?.('acknowledge', taskKey(id)) ?? false;
+      }
+
       if (!this.isOnShelf(id)) {
         return false;
       }
@@ -1091,6 +1135,10 @@ export const useTaskShelfStore = defineStore('taskShelf', {
      * перечитывает полку молча: накопленный за время выключения огонь не оповещает.
      */
     start() {
+      if (this._viewMirror) {
+        return;
+      }
+
       const controller = ensureController(this);
 
       if (controller.started) {

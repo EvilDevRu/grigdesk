@@ -1,6 +1,17 @@
+import { toolWindowText } from './shared/tools/toolWindowMessages.ts';
+
 import './shared/legacyStorage.ts';
 import { bootstrapUiLocale } from './shared/uiLocale.ts';
-import { createApp, nextTick } from 'vue';
+import { createApp, nextTick, watch } from 'vue';
+import { createToolWindowCoordinator } from './stores/toolWindows.ts';
+import { useDockStore } from './stores/dock.ts';
+import { useUiContextStore } from './stores/uiContext.ts';
+import { useChatStore } from './stores/chat.ts';
+import { getToolPanelPorts, nativeToolId, registryToolId } from './shared/tools/toolWindowState.ts';
+import { shellAction } from './shared/shellClient.ts';
+import { recordOrNull } from '../../shared/lib/objects.ts';
+import { viewportCanDock } from './shared/tools/viewport.ts';
+
 import { createPinia } from 'pinia';
 import { router } from './router.ts';
 import { useDeviceStore } from './stores/device.ts';
@@ -29,6 +40,7 @@ import './plugins/index.ts';
 
 declare global {
   interface Window {
+    grigdeskToolClosed?: (value: unknown) => void;
     grigdeskSurfaceMain?: (request: unknown) => Promise<boolean>;
   }
 }
@@ -155,6 +167,112 @@ function installSurfaceMainHandler() {
 }
 
 const removeSurfaceMain = installSurfaceMainHandler();
+let toolCoordinator: ReturnType<typeof createToolWindowCoordinator> | null = null;
+
+const removeToolWatch = watch(() => {
+  const auth = useAuthStore(pinia);
+  const shell = useShellStore(pinia);
+
+  return shell.capabilities.includes('windows') && auth.ready ? auth.clientScope : null;
+}, async (scope) => {
+  if (currentDesktopMode() !== 'main') {
+    return;
+  }
+
+  toolCoordinator?.dispose();
+  toolCoordinator = null;
+
+  if (scope === null) {
+    return;
+  }
+
+  const dock = useDockStore(pinia);
+  const control = async (body: unknown) => shellAction('POST', '/surfaces/tool', body);
+
+  toolCoordinator = createToolWindowCoordinator({
+    origin: location.origin,
+    scope,
+    epoch: crypto.randomUUID(),
+    dock,
+    context: useUiContextStore(pinia),
+    channel: new BroadcastChannel('grigdesk-tool-windows-v1'),
+    router,
+    canDock: viewportCanDock,
+    chat: useChatStore(pinia),
+    allowed: () => useAuthStore(pinia).authenticated && useShellStore(pinia).status === 'online',
+    native: {
+/**
+ * Отправляет создание один раз, а потерянный ответ оставляет неизвестным исходом.
+ * Сверка native status не должна превращаться в повтор POST открытия.
+ */
+      async open(id) {
+        try {
+          return recordOrNull(await control({ action: 'open', id: nativeToolId(id) })) ?? {};
+        } catch {
+          return { status: 'unknown' };
+        }
+      },
+      async status() {
+        const result = await control({ action: 'status' });
+
+        return Array.isArray(result) ? result.flatMap((value) => {
+          const item = recordOrNull(value);
+
+          return typeof item?.id === 'string' && typeof item.instance === 'string'
+            ? [{ id: registryToolId(item.id), instance: item.instance }] : [];
+        }) : [];
+      },
+      async focus(id, instance) {
+        return recordOrNull(await control({
+          action: 'focus',
+          id: nativeToolId(id),
+          instance,
+        }))
+          ?.focused === true;
+      },
+      async close(id, instance) {
+        return recordOrNull(await control({
+          action: 'close',
+          id: nativeToolId(id),
+          instance,
+        }))
+          ?.closed === true;
+      },
+    },
+    panels: {
+      async exportState(id) {
+        const ports = getToolPanelPorts(dock);
+
+        if (!ports) {
+          throw new Error(toolWindowText('toolSourceNotReady'));
+        }
+
+        return ports.exportState(id);
+      },
+      async unmount(id) {
+        await getToolPanelPorts(dock)?.unmount(id);
+      },
+      async mount(id, state) {
+        await getToolPanelPorts(dock)?.mount(id, state);
+      },
+    },
+  });
+  await toolCoordinator.reconcile(true);
+}, { flush: 'post' });
+
+const reconcileToolWindows = () => {
+  void toolCoordinator?.reconcile();
+};
+
+window.addEventListener('focus', reconcileToolWindows);
+
+window.grigdeskToolClosed = (value) => {
+  const item = recordOrNull(value);
+
+  if (typeof item?.id === 'string' && typeof item.instance === 'string') {
+    toolCoordinator?.closed({ id: registryToolId(item.id), instance: item.instance });
+  }
+};
 
 app.use(router).mount('#app');
 import.meta.hot?.dispose(() => {
@@ -169,6 +287,10 @@ import.meta.hot?.dispose(() => {
   removeAppViewport();
   removeUiLocale();
   removeSurfaceMain();
+  removeToolWatch();
+  window.removeEventListener('focus', reconcileToolWindows);
+  toolCoordinator?.dispose();
+  delete window.grigdeskToolClosed;
   configureSseRelay('off');
 });
 

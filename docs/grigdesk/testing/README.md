@@ -32,7 +32,7 @@
 
 - [Лишнее поле прошло схему Fastify: removeAdditional требует проверки propertyNames](fastify-extra-body-fields.md)
 
-- [Единая команда: отдельная песочница, проверенное перекрытие системных команд и ветки b24](cli-sandbox.md)
+- [Единая команда: песочница, стабы, PTY, termios и ветки b24](cli-sandbox.md)
 
 - [Проверка типов UI должна видеть импортируемые JS-сторы](ui-typecheck-js-imports.md)
 - [Типизированные модули, Vite URL и lazy-компоненты в unit-загрузчиках](typed-vite-unit-loaders.md)

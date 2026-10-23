@@ -11,30 +11,7 @@ import { isRecord } from '../../../shared/lib/objects.ts';
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from '../shared/uiLocalePort.ts';
 
-interface Metrics {
-  cpu: {
-    percent: number;
-    cores?: number;
-    load1?: number;
-  };
-  mem?: {
-    percent?: number;
-    usedGb?: number;
-    totalGb?: number;
-    ramTotalGb?: number;
-    ramUsedGb?: number;
-    ramFreeGb?: number;
-    ramPercent?: number;
-    swapTotalGb?: number;
-    swapUsedGb?: number;
-    swapPercent?: number;
-  };
-  net?: {
-    ip?: string;
-    country?: string;
-    countryCode?: string;
-  };
-}
+import type { SystemMetrics as Metrics } from '../../../shared/runtime/systemMetrics.ts';
 
 interface Runtime {
   timer: ReturnType<typeof setTimeout> | null;

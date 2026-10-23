@@ -174,7 +174,6 @@ async function chatFixture(t, f) {
     chatStoreLegacyPath: path.join(f.root, 'legacy.json'),
     chatBindingsDir: path.join(f.root, 'bindings'),
     factoryHome: f.root,
-    agentsDir: path.join(f.root, 'agents'),
     port: 18143,
   };
 

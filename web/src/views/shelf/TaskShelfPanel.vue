@@ -438,7 +438,27 @@ function progressBars(row: ShelfRow): ShelfActivity[] {
   return bar ? [bar] : [];
 }
 
-defineExpose({ focus: () => panel.value?.focus?.() });
+function exportState() {
+  return { query: query.value, filter: activeFilter.value };
+}
+
+/**
+ * Восстанавливает поиск и только существующий фильтр Полки.
+ * Перенос не меняет строки или состояние просмотра задач.
+ */
+function importState(state: Record<string, unknown>) {
+  query.value = typeof state.query === 'string' ? state.query : '';
+
+  if (filters.value.some((filter) => filter.id === state.filter)) {
+    activeFilter.value = state.filter as ShelfFilter;
+  }
+}
+
+defineExpose({
+  focus: () => panel.value?.focus?.(),
+  exportState,
+  importState,
+});
 </script>
 
 <style scoped>

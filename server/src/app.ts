@@ -125,7 +125,6 @@ import mediaModule from './modules/media/index.ts';
 import chatModule from './modules/chat/index.ts';
 import settingsModule from './modules/settings/index.ts';
 import terminalModule from './modules/terminal/index.ts';
-import agentsModule from './modules/agents/index.ts';
 import routesModule from './modules/routes/index.ts';
 import providersModule from './modules/providers/index.ts';
 import usageForecastModule from './modules/usage-forecast/index.ts';
@@ -965,7 +964,12 @@ async function build(desktopParent: DesktopParent | null) {
     onChanged: notifyInboxChanged,
     log: fastify.log,
   });
-  const system = new SystemAdapter();
+  const system = new SystemAdapter({ dataHome: config.dataHome });
+
+  fastify.addHook('onClose', async () => {
+    system.stop();
+  });
+
   const taskFavoritesStore = new TaskFavoritesStore({ filePath: config.taskFavoritesPath });
   const taskFavorites = new TaskFavoritesService({ store: taskFavoritesStore, b24 });
   const taskShelfStore = new TaskShelfStore({ filePath: config.taskShelfPath });
@@ -1286,7 +1290,6 @@ async function build(desktopParent: DesktopParent | null) {
     speechRuntime,
   });
   await fastify.register(terminalModule);
-  await fastify.register(agentsModule, { config });
   await fastify.register(routesModule, { config, prefs });
   await fastify.register(providersModule, { config, claudeAuth, prefs });
   // Прогноз лимитов слушает тик providers по SSE, поэтому регистрируется следом за ним.

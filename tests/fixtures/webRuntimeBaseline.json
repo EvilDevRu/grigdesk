@@ -348,11 +348,7 @@
     },
     {
       "path": "/agents",
-      "name": "agents",
-      "meta": {
-        "title": "Агенты"
-      },
-      "component": "./views/AgentsView.vue"
+      "redirect": "/routes"
     },
     {
       "path": "/diff",

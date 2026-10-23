@@ -415,6 +415,7 @@ function hostDock() {
     isExpanded: false,
     width: 560,
     mounted: {},
+    windowOwners: {},
     runtime: {},
     intents: {},
     open(id) { this.activeTool = id; this.isOpen = true; },
@@ -476,6 +477,9 @@ async function mountToolHost(t, rows) {
         '../../stores/taskShelf.ts': [
           'export const useTaskShelfStore = () => globalThis.__taskShelfHost.shelf;',
         ].join('\n'),
+        '../../stores/shell.ts': [
+          'export const useShellStore = () => ({ capabilities: [] });',
+        ].join('\n'),
         '../../composables/useUiContextSource.ts': [
           'export const useUiContextSource = () => ({ focus() {}, update() {}, blur() {} });',
         ].join('\n'),
@@ -497,6 +501,7 @@ async function mountToolHost(t, rows) {
         ].join('\n'),
         './ToolDock.vue': 'export default { template: "<section><slot /></section>" };',
         '../../ui': ([
+          'export { default as UiInlineMessage } from "./src/components/feedback/UiInlineMessage.vue";',
           'export const UiIconButton = {',
           '  inheritAttrs: false, props: ["title", "label", "pressed"],',
           '  template: `<button v-bind="$attrs" :aria-label="label" :title="title"><slot /></button>`,',

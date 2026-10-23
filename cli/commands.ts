@@ -64,6 +64,27 @@ export async function windowStartsServer(env: NodeJS.ProcessEnv): Promise<boolea
 }
 
 /**
+ * Общий контекст читает только настройки CLI с прежним переходным поиском.
+ * Меню использует тот же источник, не копируя правила приоритета и legacy-путей.
+ */
+export async function readCliContext(root = runtimeInstallationRoot()) {
+  const input = { env: process.env, home: process.env.HOME || os.homedir() };
+  const home = dataHome(input);
+  // Переходное чтение до ручного переноса: в папке данных ещё нет токена или файла настроек,
+  // а на старом месте — настоящий каталог или файл. Пустая папка не отрезает старые.
+  const found = async (file: string) => await lstat(file).catch(() => null);
+  const legacyToken = !await found(dataPath(home, 'cliToken'))
+    && Boolean((await found(path.join(root, 'server/.state')))?.isDirectory());
+  const legacyEnv = !process.env.GRIGDESK_ENV_FILE && !await found(dataPath(home, 'env'))
+    && Boolean((await found(path.join(root, '.env')))?.isFile());
+  const envPath = legacyEnv ? path.join(root, '.env') : envFilePath(input);
+  const settings = readSettings(root, process.env, await readText(envPath),
+    legacyToken ? path.join(root, 'server/.state/cli-token') : undefined);
+
+  return { root, settings };
+}
+
+/**
  * Аргументы и сторож проверяются до любых внешних команд и запросов состояния.
  * Ошибки пользователя дают код 2, ошибки действий — код 1 с очищенной причиной.
  */
@@ -108,18 +129,7 @@ export async function runCli(argv: readonly string[]): Promise<number> {
       }
     }
 
-    const input = { env: process.env, home: process.env.HOME || os.homedir() };
-    const home = dataHome(input);
-    // Переходное чтение до ручного переноса: в папке данных ещё нет токена или файла настроек,
-    // а на старом месте — настоящий каталог или файл. Пустая папка не отрезает старые.
-    const found = async (file: string) => await lstat(file).catch(() => null);
-    const legacyToken = !await found(dataPath(home, 'cliToken'))
-      && Boolean((await found(path.join(root, 'server/.state')))?.isDirectory());
-    const legacyEnv = !process.env.GRIGDESK_ENV_FILE && !await found(dataPath(home, 'env'))
-      && Boolean((await found(path.join(root, '.env')))?.isFile());
-    const envPath = legacyEnv ? path.join(root, '.env') : envFilePath(input);
-    const settings = readSettings(root, process.env, await readText(envPath),
-      legacyToken ? path.join(root, 'server/.state/cli-token') : undefined);
+    const { settings } = await readCliContext(root);
 
     if (args.kind === 'device') {
       return await deviceCommand(args, settings);

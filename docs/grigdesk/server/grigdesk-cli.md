@@ -1,6 +1,8 @@
 # Единая команда GrigDesk
 
-`grigdesk-ctl` открывает установленное окно. Окно с `runtime.json` установки само поднимает
+`grigdesk-ctl` в человеческом терминале показывает [меню команд](cli-terminal-menu.md).
+Без двух терминальных потоков и при явном `open` команда открывает установленное окно.
+Окно с `runtime.json` установки само поднимает
 сервер ([сервер под приложением](desktop-owned-server.md)), и команда больше ничего не
 запрашивает. Без `runtime.json` (переходный режим до установки новой сборки) команда, как
 прежде, затем запрашивает запуск `grigdesk-server.service`.
@@ -14,7 +16,8 @@
 
 | Команда | Поведение |
 | --- | --- |
-| `grigdesk-ctl`, `grigdesk-ctl open [--force]` | Окно; без `runtime.json` — ещё запрос запуска службы |
+| `grigdesk-ctl` | Меню в терминале, иначе открытие окна |
+| `grigdesk-ctl open [--force]` | Окно; без `runtime.json` — ещё запрос запуска службы |
 | `grigdesk-ctl status [--json]` | Сервер, окно, локальный контейнер и связи |
 | `grigdesk-ctl server start [--wait]` | `start --no-block`; работающий сервер сохраняется |
 | `grigdesk-ctl server stop [--force]` | Остановка с ожиданием systemd |
