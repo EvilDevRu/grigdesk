@@ -10,6 +10,33 @@ import org.junit.Test;
 
 public class UpstreamTest {
   /**
+   * Потеря ответа после принятого POST не разрешает транспортный повтор.
+   * Сервер читает всё тело и фиксирует эффект, затем закрывает TLS без ответа.
+   */
+  @Test
+  public void lostResponseDoesNotReplayPost() throws Exception {
+    java.util.concurrent.atomic.AtomicInteger effects = new java.util.concurrent.atomic.AtomicInteger();
+    byte[] payload = "единственное действие".getBytes(StandardCharsets.UTF_8);
+
+    try (TlsFixture server = new TlsFixture((head, body, output) -> {
+      assertEquals("POST", head.method());
+      assertArrayEquals(payload, body.readAllBytes());
+      effects.incrementAndGet();
+    }); Upstream upstream = new Upstream(server.address(), server.pin, TlsFixture.keys("client"),
+      new VersionGate(0, 1), (status, reason) -> {})) {
+      HttpHead head = new HttpHead("POST /api/action HTTP/1.1",
+        Map.of("content-length", Integer.toString(payload.length)));
+
+      try (PipeResponse response = upstream.forward(head, new ByteArrayInputStream(payload))) {
+        assertEquals(503, response.status);
+      }
+
+      assertEquals(1, effects.get());
+      assertEquals(1, server.requests.size());
+    }
+  }
+
+  /**
    * Настоящий mTLS-стенд принимает HTTP только после совпадения pin.
    * Cookie и привилегированные заголовки WebView не передаются машине.
    */

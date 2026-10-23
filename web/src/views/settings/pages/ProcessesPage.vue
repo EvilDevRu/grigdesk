@@ -6,13 +6,11 @@
   >
     <SettingsScope :scope="t('settings.thisMachine')">{{ t('settings.processActionsTakeEffectImmediately') }}</SettingsScope>
     <div class="settings-process-actions">
-      <UiButton :disabled="busy || loading" @click="load">{{ t('settings.update') }}</UiButton>
-      <UiButton :disabled="busy || !freeCount" @click="closeFree">{{ t('settings.stopIdleProcesses') }}</UiButton>
+      <UiButton data-context="workspace-form-wrap" :disabled="busy || loading" @click="load">{{ t('settings.update') }}</UiButton>
+      <UiButton data-context="workspace-form-wrap" :disabled="busy || !freeCount" @click="closeFree">{{ t('settings.stopIdleProcesses') }}</UiButton>
     </div>
     <p v-if="!loaded">{{ t('settings.loadingProcesses') }}</p>
-    <p v-else>
-      {{ t('settings.inPool') }} {{ sessions.length }} {{ t('settings.runningATurn') }} {{ sessions.length - freeCount }} {{ t('settings.idle') }} {{ freeCount }}
-    </p>
+    <SettingsFacts v-else :items="poolFacts" />
     <p v-if="loaded && !sessions.length">{{ t('settings.noLiveProcessesRightNow') }}</p>
     <article v-for="item in sessions" :key="item.chatKey" :data-running="item.running">
       <h4>{{ resolveUiText(title(item)) }}</h4>
@@ -27,13 +25,10 @@
       </p>
       <p v-if="item.cwd">{{ item.cwd }}</p>
       <div class="settings-process-actions">
-        <UiButton :disabled="busy" @click="actions.openChat(item.chatKey)">{{ t('settings.openChat') }}</UiButton>
-        <UiButton :disabled="busy" @click="closeOne(item)">{{ t('settings.stopProcess') }}</UiButton>
+        <UiButton data-context="workspace-form-wrap" :disabled="busy" @click="actions.openChat(item.chatKey)">{{ t('settings.openChat') }}</UiButton>
+        <UiButton data-context="workspace-form-wrap" :disabled="busy" @click="closeOne(item)">{{ t('settings.stopProcess') }}</UiButton>
       </div>
     </article>
-    <p v-if="limits">
-      {{ t('settings.poolLimit') }} {{ limits.maxSessions }}{{ t('settings.autoStopAfter') }} {{ Math.round(limits.idleMs / 60000) }} {{ t('settings.minIdle') }}
-    </p>
     <p v-if="message" role="status">{{ resolveUiText(message) }}</p>
     <p v-if="error" role="alert">{{ resolveUiText(error) }}</p>
   </section>
@@ -44,6 +39,7 @@ import { t, uiLocale, messageRef, resolveUiText, type UiText } from '../../../ui
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import SettingsScope from '../SettingsScope.vue';
+import SettingsFacts from '../SettingsFacts.vue';
 import { useRouter } from 'vue-router';
 import { UiButton, confirmDialog } from '../../../ui.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
@@ -85,6 +81,18 @@ const error = ref<UiText>('');
 const message = ref<UiText>('');
 const now = ref(Date.now());
 const freeCount = computed(() => sessions.value.filter((item) => !item.running).length);
+const poolFacts = computed(() => [
+  { label: t('settings.processFactPool'), value: String(sessions.value.length) },
+  { label: t('settings.processFactRunning'), value: String(sessions.value.length - freeCount.value) },
+  { label: t('settings.processFactIdle'), value: String(freeCount.value) },
+  ...limits.value ? [{
+    label: t('settings.processFactLimit'),
+    value: t('settings.processFactLimitValue', {
+      count: limits.value.maxSessions,
+      minutes: Math.round(limits.value.idleMs / 60000),
+    }),
+  }] : [],
+]);
 const opening = settings.snapshot.sessionId;
 let timer: ReturnType<typeof setInterval> | null = null;
 let controller: AbortController | null = null;

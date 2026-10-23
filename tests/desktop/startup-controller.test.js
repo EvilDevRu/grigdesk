@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { getEventListeners } from 'node:events';
+import * as startup from '../../desktop/src/startupController.ts';
 
 import {
   createFrameTracker,
@@ -473,3 +475,151 @@ test('ST-17: удержание после показа и в отменённо
   assert.equal(await finished, 'revealed');
   assert.equal(f.clock.live(), 0, 'После показа нет ни срока, ни опроса удержания.');
 });
+
+for (const mode of ['REMOTE', 'NONE']) {
+  test(`ST-BASE-${mode}: без выбранного local сервер не задерживает минимум`, async () => {
+    let waits = 0;
+    const f = fixture({
+      localSelected: () => false,
+      waitLocal: () => {
+        waits += 1;
+
+        return new Promise(() => {});
+      },
+    });
+
+    f.controller.start();
+    await reach(f, 'none');
+    await f.clock.advance(2000);
+    assert.equal(f.controller.state, 'revealed');
+    assert.equal(f.calls.at(-1), 'reveal@2000');
+    assert.equal(waits, 0);
+    assert.equal(f.clock.live(), 0);
+  });
+}
+
+/**
+ * Местный сервер завершается отдельно от документа и кадра.
+ * Сигнал и мягкие исходы доступны тесту без запуска настоящего процесса.
+ */
+function localFixture(overrides = {}) {
+  const local = Promise.withResolvers();
+  const fallbacks = [];
+  let signal;
+
+  local.promise.catch(() => {});
+
+  const f = fixture({
+    localSelected: () => true,
+    waitLocal: (value) => {
+      signal = value;
+
+      return local.promise;
+    },
+    localFallback: (...args) => fallbacks.push(args),
+    ...overrides,
+  });
+
+  return {
+    ...f,
+    local,
+    fallbacks,
+    localSignal: () => signal,
+  };
+}
+
+test('ST-L01: местный сервер готов на 6000 мс — один показ после сервера', async () => {
+  const f = localFixture();
+
+  f.controller.start();
+  await reach(f, 'none');
+  await f.clock.advance(2000);
+  assert.equal(f.controller.state, 'booting', 'Заставка ждёт местный сервер после кадра.');
+  await f.clock.advance(4000);
+  f.local.resolve();
+  await flush();
+  assert.deepEqual(f.calls.filter((call) => call.startsWith('reveal')), ['reveal@6000']);
+  assert.deepEqual(f.fallbacks, []);
+  assert.equal(f.localSignal().aborted, true, 'Наблюдение завершено после успеха.');
+  assert.equal(getEventListeners(f.signals[0], 'abort').length, 0);
+  assert.equal(f.clock.live(), 0);
+  f.controller.focusRequest();
+  assert.equal(f.calls.at(-1), 'focusMain');
+});
+
+for (const preparationMs of [0, 10_000]) {
+  test(`ST-L02: бюджет от заставки, подготовка ${preparationMs} мс, VPN не продлевает`, async () => {
+    const f = localFixture({ holdDeadline: () => true });
+
+    f.controller.start();
+    f.steps.showSplash.resolve();
+    await flush();
+    await f.clock.advance(preparationMs);
+    f.steps.prepare.resolve();
+    f.steps.connect.resolve();
+    f.steps.waitFrame.resolve();
+    await flush();
+    await f.clock.advance(29_999 - preparationMs);
+    assert.equal(f.controller.state, 'booting', 'На 29999 мс сервер ещё ждут.');
+    await f.clock.advance(1);
+    assert.deepEqual(f.calls.filter((call) => call.startsWith('reveal')), ['reveal@30000']);
+    assert.equal(f.fallbacks.length, 1);
+    assert.equal(f.fallbacks[0][0], 'timeout');
+    assert.equal(f.signals[0].aborted, false, 'Мягкий срок не отменяет фоновую подготовку.');
+    assert.equal(startup.LOCAL_SERVER_WAIT_MS, 30_000);
+    assert.equal(f.localSignal().aborted, true);
+    assert.equal(getEventListeners(f.signals[0], 'abort').length, 0);
+    assert.equal(f.clock.live(), 0, 'После мягкого показа сняты оба срока.');
+    await f.clock.advance(65_000);
+    f.local.reject(new Error('Поздний отказ после срока'));
+    await flush();
+    assert.equal(f.calls.some((call) => call.startsWith('fail')), false);
+    assert.equal(f.fallbacks.length, 1);
+    assert.equal(f.clock.live(), 0);
+  });
+}
+
+test('ST-L03: отказ местного сервера даёт мягкий показ после минимума', async () => {
+  const f = localFixture();
+
+  f.controller.start();
+  await reach(f, 'none');
+  f.local.reject(new Error('Синтетический отказ запуска'));
+  await flush();
+  assert.deepEqual(f.fallbacks, [['failed', 'Синтетический отказ запуска']]);
+  assert.equal(f.controller.state, 'booting');
+  await f.clock.advance(1999);
+  assert.equal(f.controller.state, 'booting');
+  await f.clock.advance(1);
+  assert.deepEqual(f.calls.filter((call) => call.startsWith('reveal')), ['reveal@2000']);
+  assert.equal(f.calls.some((call) => call.startsWith('fail')), false);
+  assert.equal(f.clock.live(), 0);
+});
+
+for (const late of ['resolve', 'reject']) {
+  test(`ST-L04: отмена local, фокус заставке, поздний ${late} без эффектов`, async () => {
+    const f = localFixture();
+    const finished = f.controller.start();
+
+    await reach(f, 'none');
+    await f.clock.advance(2000);
+    f.controller.focusRequest();
+    assert.equal(f.calls.at(-1), 'focusSplash');
+    assert.ok(f.localSignal(), 'Местный адаптер должен получить отдельный сигнал.');
+    f.controller.cancel();
+    assert.equal(await finished, 'cancelled');
+    assert.equal(f.localSignal().aborted, true);
+    assert.equal(getEventListeners(f.signals[0], 'abort').length, 0);
+    assert.equal(f.clock.live(), 0);
+
+    const before = [...f.calls];
+
+    f.local[late](new Error('Поздний результат после отмены'));
+    await flush();
+    await f.clock.advance(95_000);
+    f.controller.focusRequest();
+    assert.deepEqual(f.calls, before);
+    assert.deepEqual(f.fallbacks, []);
+    assert.equal(f.clock.live(), 0);
+  });
+}

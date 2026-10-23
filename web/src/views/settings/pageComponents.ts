@@ -17,7 +17,7 @@ export const SETTINGS_PAGE_COMPONENTS: Record<string, Component> = {
   'agents.models': preferences,
   'connections.devices': asyncView(() => import('./pages/DevicesPage.vue')),
   'connections.b24': asyncView(() => import('./pages/ConnectionsPage.vue')),
-  'connections.mobile': asyncView(() => import('./pages/ConnectionsPage.vue')),
+  'connections.mobile': asyncView(() => import('./pages/DevicesPage.vue')),
   'system.startup': asyncView(() => import('./pages/SystemPage.vue')),
   'system.updates': asyncView(() => import('./pages/SystemPage.vue')),
   'system.processes': asyncView(() => import('./pages/ProcessesPage.vue')),

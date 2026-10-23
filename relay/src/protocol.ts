@@ -11,7 +11,9 @@ export const ERRORS = {
 } as const;
 
 export type Hello = {
-  v: 1;
+  v: 1 | 2;
+  target?: 'client';
+  capabilities?: string[];
   role: 'brain-control' | 'brain-data' | 'device' | 'health';
   token?: string;
   id?: string;
@@ -45,7 +47,8 @@ export function parseHello(line: string): Hello {
 
   const value = input as Record<string, unknown>;
 
-  if (value.v !== 1) {
+  if (value.v !== 1 && (value.v !== 2 || value.target !== 'client'
+    || !['device', 'brain-data'].includes(String(value.role)))) {
     throw new ProtocolError(ERRORS.badVersion);
   }
 
@@ -61,6 +64,20 @@ export function parseHello(line: string): Hello {
     value.role === 'brain-data' &&
     (typeof value.id !== 'string' || !/^[a-f0-9]{32}$/.test(value.id))
   ) {
+    throw new ProtocolError(ERRORS.badHello);
+  }
+
+  if (value.v === 2 && (value.target !== 'client'
+    || !['device', 'brain-data'].includes(String(value.role)))) {
+    throw new ProtocolError(ERRORS.badHello);
+  }
+
+  if (value.v === 1 && value.target !== undefined) {
+    throw new ProtocolError(ERRORS.badHello);
+  }
+
+  if (value.capabilities !== undefined && (!Array.isArray(value.capabilities)
+    || !value.capabilities.every((item) => typeof item === 'string'))) {
     throw new ProtocolError(ERRORS.badHello);
   }
 
@@ -120,7 +137,7 @@ export function createLineReader(maxBytes = 2048) {
  */
 export function encodeReply(
   reply:
-    | { ok: true }
+    | { ok: true; capabilities?: string[] }
     | {
         ok: false;
         error: string;

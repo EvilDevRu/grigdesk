@@ -243,15 +243,15 @@
   "installTheNewGrigDeskPackage": "Установите новый пакет GrigDesk",
   "checkPublishedReleasesFirst": "Сначала выполните проверку опубликованных релизов.",
   "aReleaseCanOnlyBeInstalledOn": "Релиз устанавливается только на ветку main.",
-  "checkoutIsInDetachedHEAD": "Checkout находится в detached HEAD.",
-  "checkoutContainsUncommittedOrUntrackedFiles": "В checkout есть незакоммиченные или untracked-файлы.",
+  "checkoutIsInDetachedHEAD": "Рабочая копия в состоянии detached HEAD.",
+  "checkoutContainsUncommittedOrUntrackedFiles": "В рабочей копии есть незакоммиченные или неотслеживаемые файлы.",
   "localMainIsAheadOfTheSelected": "Локальная main опережает выбранный релиз.",
-  "checkoutHistoryDivergesFromTheSelectedRelease": "История checkout расходится с выбранным релизом.",
-  "theSelectedReleaseIsAlreadyInThe": "Выбранный релиз уже находится в checkout; примените локальный checkout.",
+  "checkoutHistoryDivergesFromTheSelectedRelease": "История рабочей копии расходится с выбранным релизом.",
+  "theSelectedReleaseIsAlreadyInThe": "Выбранный релиз уже в рабочей копии; примените локальные изменения.",
   "thePublishedReleaseIsNotNewerThan": "Опубликованный релиз не новее запущенной версии.",
   "anotherUpdateJobIsAlreadyRunning": "Уже выполняется другое задание обновления.",
-  "versionDoesNotMatchTheCheckoutS": "VERSION не совпадает с exact-тегом checkout.",
-  "cannotApplyADirtyCheckoutAutomaticallyCommit": "Dirty checkout пока нельзя применить автоматически; сначала зафиксируйте изменения.",
+  "versionDoesNotMatchTheCheckoutS": "VERSION не совпадает с точным тегом рабочей копии.",
+  "cannotApplyADirtyCheckoutAutomaticallyCommit": "Рабочую копию с незафиксированными изменениями пока нельзя применить автоматически; сначала зафиксируйте изменения.",
   "updateBlocked": "Обновление заблокировано: {code}",
   "code": "Код",
   "shelf": "Полка",
@@ -337,6 +337,7 @@
   "openChat": "Открыть чат",
   "openTask": "Открыть задачу",
   "pairingLifetime": "Код действует ограниченное время. Если он истёк, создайте новый.",
+  "pairingStringPlaceholder": "GRIGDESK:PHONE:2:… / GRIGDESK:PAIR:1:…",
   "forecast": "Прогноз",
   "fileUnits": {
     "0": "Б",
@@ -399,6 +400,24 @@
         }
       }
     },
+    "kimi": {
+      "kimi-extra-usage": {
+        "label": "Extra Usage",
+        "controls": {
+          "enable-kimi-usage": {
+            "label": "Включить и пополнить в Kimi"
+          }
+        }
+      },
+      "kimi-monthly-volume": {
+        "label": "Месячный объём",
+        "controls": {
+          "view-kimi-monthly-volume": {
+            "label": "Посмотреть в Kimi"
+          }
+        }
+      }
+    },
     "deepseek": {
       "forecast": {
         "label": "Прогноз"
@@ -444,6 +463,9 @@
     "other": "Окно ({count} минуты)"
   },
   "usageText": {
+    "creditsUnavailable": "Нет данных о кредитах",
+    "kimiWalletUnavailable": "Не включено или не пополнено",
+    "kimiMonthlyVolumeUnavailable": "Kimi не сообщает остаток",
     "disabled": "выключено",
     "uncapped": "без месячного потолка",
     "spent": "{used} из {limit}",
@@ -535,5 +557,7 @@
     "other": "{count} активных"
   },
   "invalidPipelineSnapshot": "Сервер вернул некорректную сводку конвейера",
-  "invalidPipelineGraph": "Сервер вернул некорректный граф конвейера"
+  "invalidPipelineGraph": "Сервер вернул некорректный граф конвейера",
+  "relayAddress": "Через настроенный ретранслятор",
+  "desktopPairingPlaceholder": "GRIGDESK:PAIR:1:…"
 }

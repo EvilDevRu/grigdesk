@@ -65,3 +65,6 @@ MutableContextWrapper имеют обоснованное подавление S
 а уничтоженная Activity заменяется applicationContext. Data extraction исключает все домены
 cloud-backup/device-transfer вместе с allowBackup=false. Два lint-предупреждения по JS и своему
 TrustManager ожидаемы: UI требует JS, а mTLS доверяет только точному pin, не любому сертификату.
+
+Новый [единый доступ](phone-access.md) переносит в PHONE:2 прямые и relay-маршруты
+одного сервера. Старые строки PAIR:1 сохраняются; shell не публикует приватные маршруты.

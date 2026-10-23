@@ -6,6 +6,8 @@ import type { Device, DeviceScope, DeviceStore } from './store.ts';
 
 type Code = {
   exp: number;
+  attemptId?: string;
+  connected?: boolean;
   scope: DeviceScope;
   name?: string;
   fp?: string;
@@ -74,6 +76,59 @@ export class PairingCodes {
       code,
       exp,
     };
+  }
+
+  /**
+   * Корреляция хранится в той же ограниченной TTL-записи, что одноразовый код.
+   * Успех подтверждает только новый authenticated hello устройства результата.
+   */
+  issuePhone() {
+    const issued = this.issue({ scope: 'client', name: 'Телефон' });
+    const item = this.codes.get(issued.code)!;
+
+    item.attemptId = randomBytes(16).toString('hex');
+
+    return { ...issued, attemptId: item.attemptId };
+  }
+
+  /**
+   * Неудачная сборка конверта не оставляет действующий бесхозный секрет.
+   * Отзывается только ещё не использованный код текущей выдачи.
+   */
+  cancelPhone(code: string): void {
+    const item = this.codes.get(code);
+
+    if (item?.attemptId && !item.result) {
+      this.codes.delete(code);
+    }
+  }
+
+  /**
+   * Незнакомая либо истёкшая попытка не раскрывает сведения о чужом устройстве.
+   * Pair остаётся pending до hello сертификата, связанного с результатом кода.
+   */
+  phoneProgress(attemptId: string) {
+    const item = [...this.codes.values()].find((value) => value.attemptId === attemptId);
+
+    if (!item || item.exp <= this.now()) {
+      return { status: 'expired' };
+    }
+
+    return item.connected && item.result
+      ? { status: 'connected', device: { id: item.result.id, name: item.result.name } }
+      : { status: 'pending' };
+  }
+
+  /**
+   * Подтверждение допускается только для результата ещё действующего телефонного кода.
+   * Вызвавший модуль передаёт id из TLS principal, а не из тела клиента.
+   */
+  confirmPhone(deviceId: string): void {
+    for (const item of this.codes.values()) {
+      if (item.attemptId && item.result?.id === deviceId && item.exp > this.now()) {
+        item.connected = true;
+      }
+    }
   }
 
   /**

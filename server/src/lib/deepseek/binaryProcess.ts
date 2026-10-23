@@ -1,9 +1,18 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { setTimeout as pause } from 'node:timers/promises';
 
+import { errorMessage } from '../../../../shared/lib/errors.ts';
+
 export interface BinaryProcessExit {
   code: number | null;
   signal: NodeJS.Signals | null;
+}
+
+export interface BinaryStopDetails {
+  exit: BinaryProcessExit | null;
+  failedSpawn: boolean;
+  escalated: boolean;
+  groupGone: boolean | null;
 }
 
 export interface OwnedDeepSeekBinary {
@@ -12,9 +21,55 @@ export interface OwnedDeepSeekBinary {
   stop(): Promise<void>;
 }
 
-function cleanupFailure(): Error & { code: string } {
-  return Object.assign(new Error('Не подтверждено штатное завершение DeepSeek: cleanup'), {
+/**
+ * Вторичный отказ остановки сохраняет исходную причину и собственные факты раздельно.
+ * Код cleanup остаётся снаружи: владельцы обязаны сохранить каталог диагностики запуска.
+ */
+export function combineDeepSeekCleanupFailure(primary: unknown, cleanup: unknown): unknown {
+  if (!cleanup || typeof cleanup !== 'object' || cleanup === primary) {
+    return cleanup;
+  }
+
+  const failure = cleanup as Error & {
+    code?: unknown;
+    stopDetails?: unknown;
+    stopFailure?: unknown;
+  };
+  const stopFailure = failure.stopFailure ?? {
+    code: failure.code,
+    message: errorMessage(failure, 'Не удалось подтвердить остановку исполнителя.'),
+    ...(failure.stopDetails ? { details: failure.stopDetails } : {}),
+    ...(failure.cause ? { cause: failure.cause } : {}),
+  };
+  const stopMessage = errorMessage(stopFailure, 'Не удалось подтвердить остановку исполнителя.');
+
+  return Object.assign(failure, {
+    stopFailure,
+    ...(primary === undefined ? {} : {
+      cause: primary,
+      message: `${errorMessage(primary, String(primary))}\n\n${stopMessage}`,
+    }),
+  });
+}
+
+/**
+ * Отказ содержит факты остановки отдельно от причины завершения самого хода.
+ * Исчезнувшая группа не превращает code 75 или эскалацию в штатный выход.
+ */
+function cleanupFailure(stopDetails: BinaryStopDetails, cause?: unknown): Error & {
+  code: string;
+  stopDetails: BinaryStopDetails;
+} {
+  const exit = stopDetails.exit;
+  const group = stopDetails.groupGone === null ? 'неизвестно' : stopDetails.groupGone ? 'да' : 'нет';
+  const message = 'Не подтверждено штатное завершение DeepSeek: cleanup'
+    + ` (код: ${exit?.code ?? 'неизвестен'}, сигнал: ${exit?.signal ?? 'нет'},`
+    + ` эскалация: ${stopDetails.escalated ? 'да' : 'нет'}, группа отсутствует: ${group},`
+    + ` ошибка запуска: ${stopDetails.failedSpawn ? 'да' : 'нет'})`;
+
+  return Object.assign(new Error(message, { cause }), {
     code: 'deepseek_binary_cleanup',
+    stopDetails,
   });
 }
 
@@ -54,6 +109,8 @@ export function spawnDeepSeekBinary(
   const pgid = child.pid;
   let outcome: BinaryProcessExit | undefined;
   let failedSpawn = false;
+  let escalated = false;
+  let groupGone: boolean | null = null;
   let stopping: Promise<void> | undefined;
   const closed = new Promise<BinaryProcessExit>((resolve) => {
     child.once('error', () => {
@@ -73,14 +130,20 @@ export function spawnDeepSeekBinary(
     const deadline = performance.now() + milliseconds;
 
     do {
-      if (outcome && !signalGroup(pgid, 0)) {
-        return true;
+      if (outcome) {
+        groupGone = !signalGroup(pgid, 0);
+
+        if (groupGone) {
+          return true;
+        }
       }
 
       await pause(20);
     } while (performance.now() < deadline);
 
-    return Boolean(outcome) && !signalGroup(pgid, 0);
+    groupGone = outcome ? !signalGroup(pgid, 0) : null;
+
+    return groupGone === true;
   }
 
   /**
@@ -88,21 +151,37 @@ export function spawnDeepSeekBinary(
    * По истечении 6 с своя группа получает KILL; ещё 2 с ждём выход и честно отказываем.
    */
   async function stopProcess(signalLauncher: boolean): Promise<void> {
-    if (signalLauncher && child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGTERM');
-    }
+    const failure = (cause?: unknown) => cleanupFailure({
+      exit: outcome ?? null,
+      failedSpawn,
+      escalated,
+      groupGone,
+    }, cause);
 
-    if (!await waitForGone(6000)) {
-      signalGroup(pgid, 'SIGKILL');
-      await waitForGone(2000);
+    try {
+      // Уже отправленный через child сигнал запускает disposal без повторного TERM.
+      // После снятия обработчиков launcher второй TERM оборвал бы штатный выход 0/130.
+      if (signalLauncher && !child.killed && child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGTERM');
+      }
 
-      throw cleanupFailure();
-    }
+      if (!await waitForGone(6000)) {
+        escalated = true;
+        signalGroup(pgid, 'SIGKILL');
+        await waitForGone(2000);
+      }
 
-    const code = outcome?.code;
+      const code = outcome?.code;
 
-    if (failedSpawn || typeof code === 'number' && ![0, 130].includes(code)) {
-      throw cleanupFailure();
+      if (escalated || failedSpawn || code !== 0 && code !== 130) {
+        throw failure();
+      }
+    } catch (error) {
+      if ((error as { code?: unknown })?.code === 'deepseek_binary_cleanup') {
+        throw error;
+      }
+
+      throw failure(error);
     }
   }
 

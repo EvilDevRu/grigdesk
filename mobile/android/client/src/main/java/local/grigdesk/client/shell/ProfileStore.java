@@ -60,7 +60,15 @@ public final class ProfileStore {
     for (int index = 0; index < list.length(); index++) {
       JSONObject profile = list.getJSONObject(index);
 
-      validate(profile.getString("name"), profile.getString("address"), profile.getString("fp"), locale);
+      if (profile.has("relay") && profile.getString("address").isEmpty()) {
+        validate(profile.getString("name"), "https://profile.invalid", profile.getString("fp"), locale);
+      } else {
+        validate(profile.getString("name"), profile.getString("address"), profile.getString("fp"), locale);
+      }
+
+      if (profile.has("direct")) {
+        PhonePairingPayload.routes(profile.getJSONArray("direct"), profile.optJSONObject("relay"));
+      }
 
       if (!profile.getString("kind").equals("remote") || !ids.add(profile.getString("id"))
         || !ports.add(profile.getInt("port")) || profile.getInt("port") < 47101
@@ -127,7 +135,10 @@ public final class ProfileStore {
    * Разные машины получают отдельные постоянные порты и случайные идентификаторы.
    */
   public synchronized JSONObject add(String name, String address, String fp) throws Exception {
-    validate(name, address, fp, locale);
+    boolean relayOnly = address.isEmpty() && profiles.stream().anyMatch(item ->
+      item.optString("fp").equals(fp) && item.has("relay"));
+
+    validate(name, relayOnly ? "https://profile.invalid" : address, fp, locale);
 
     JSONObject profile = profiles.stream().filter(item -> item.optString("fp").equals(fp))
       .findFirst().orElse(null);
@@ -141,9 +152,56 @@ public final class ProfileStore {
       profiles.add(profile);
     }
 
+    if (profile.has("direct") && !address.equals(profile.optString("address"))) {
+      URI uri = URI.create(address);
+
+      if (!PhonePairingPayload.validHost(uri.getHost())) {
+        throw new IllegalArgumentException(
+          ShellLocale.text(locale, "native.invalidMachine", "Неверное имя или адрес машины."));
+      }
+
+      profile.put("direct", new JSONArray().put(new JSONObject().put("host", uri.getHost())
+        .put("port", uri.getPort() < 0 ? 443 : uri.getPort())));
+    }
+
     profile.put("name", name.trim());
     profile.put("address", address);
     profile.put("fp", fp);
+    save();
+
+    return profile;
+  }
+
+  /**
+   * Приватные маршруты сохраняются по pin в той же записи и с прежним origin.
+   * Пустая адресная проекция допустима только при проверенном relay-only профиле.
+   */
+  public synchronized JSONObject addPhone(String name, String fp, JSONArray direct,
+    JSONObject relay, String deviceId) throws Exception {
+    PhonePairingPayload.routes(direct, relay);
+
+    String address = direct.length() == 0 ? "" : "https://"
+      + direct.getJSONObject(0).getString("host") + ":" + direct.getJSONObject(0).getInt("port");
+    validate(name, address.isEmpty() ? "https://profile.invalid" : address, fp, locale);
+
+    JSONObject profile = profiles.stream().filter(item -> item.optString("fp").equals(fp))
+      .findFirst().orElse(null);
+
+    if (profile == null) {
+      profile = new JSONObject().put("id", UUID.randomUUID().toString()).put("port", freePort(null))
+        .put("createdAt", System.currentTimeMillis()).put("kind", "remote");
+      profiles.add(profile);
+    }
+
+    profile.put("name", name.trim()).put("fp", fp).put("address", address)
+      .put("direct", direct).put("deviceId", deviceId);
+
+    if (relay == null) {
+      profile.remove("relay");
+    } else {
+      profile.put("relay", relay);
+    }
+
     save();
 
     return profile;

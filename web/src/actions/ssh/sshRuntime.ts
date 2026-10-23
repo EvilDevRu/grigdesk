@@ -33,6 +33,7 @@ export interface SshRuntime {
   generation: number;
   terminal: TerminalSink | null;
   size: TerminalSize | null;
+  projectsRequest: number;
   off: (() => void) | null;
 }
 
@@ -54,6 +55,7 @@ export function runtimeOf(store: SshStore): SshRuntime {
       terminal: null,
       size: null,
       off: null,
+      projectsRequest: 0,
     };
     runtimes.set(store, runtime);
   }

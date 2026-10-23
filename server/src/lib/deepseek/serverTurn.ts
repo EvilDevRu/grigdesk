@@ -9,7 +9,7 @@ import type { InTurnAssistantEvent, InTurnPort } from '../../../../shared/chat/c
 import type { ChatModelSource, ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import { createStepSink } from '../chat/streamSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
-import type { TurnFailureSignal } from '../chat/turnFailures.ts';
+import type { TurnFailureSignal, TurnRecovery } from '../chat/turnFailures.ts';
 import { DeepSeekWebError } from './serverClient.ts';
 import { deepSeekPermissionPresentation } from './permissions.ts';
 import { openDeepSeekStream } from './serverEvents.ts';
@@ -19,6 +19,7 @@ import type { DeepSeekServerProcess, StartDeepSeekServerOptions } from './server
 import type { DeepSeekRuntimeDescriptor } from './runtimeProcess.ts';
 import { createDeepSeekServerThoughtNormalizer } from './serverThoughts.ts';
 import { dshTurnFailure } from './turnFailureRules.ts';
+import { combineDeepSeekCleanupFailure } from './binaryProcess.ts';
 import { deepSeekToolResultStep, deepSeekToolStep } from './steps.ts';
 import type { PreparedNativeSettings } from '../executorSettings/types.ts';
 import {
@@ -238,6 +239,13 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
   let promptAttempted = false;
   let cleanupSession: string | undefined;
   let cleanupSteps: ChatStep[] | undefined;
+  let turnError: unknown;
+  let turnResult: {
+    sessionId: string;
+    deliveryFailure?: boolean;
+    turnFailure?: TurnFailureSignal;
+    turnRecovery?: TurnRecovery;
+  } | undefined;
 
   try {
     checkpoint();
@@ -753,7 +761,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       if (failure) throw failure;
       await Promise.all([...writes]);
 
-      return {
+      const result = {
         ...lastContextUsage,
         reply: deliveryFailure || reply,
         assistantMessageId: deliveryFailure || !replyMessageId ? '' : storageMessageId(replyMessageId),
@@ -771,6 +779,10 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
           stopReason: 'completed', ...(reply ? {} : { emptyRun: true }),
         }),
       };
+
+      turnResult = result;
+
+      return result;
     } catch (error) {
       // Вариант не теряет полученное: sessionId и шаги едут вместе с ошибкой хода.
       if (variant && error && typeof error === 'object') {
@@ -787,15 +799,32 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       follow.close();
       remote.close();
     }
+  } catch (error) {
+    turnError = error;
+
+    throw error;
   } finally {
     try {
       await server.stop();
     } catch (error) {
       if (error && typeof error === 'object') {
+        // Сохраняем прежний отказ cleanup для владельцев launchDir. Первичный итог
+        // остаётся отдельным сигналом; отказ остановки никогда не разрешает продолжение.
+        const primary = turnError === error ? undefined : turnError ?? turnResult?.turnFailure;
+
+        combineDeepSeekCleanupFailure(primary, error);
+
+        // stopped сохраняется внутри cause: на внешнем cleanup этот флаг заставил бы
+        // ядро скрыть отказ остановки за обычным ответом «Ход остановлен».
         Object.assign(error, {
           retryState: promptAttempted ? 'post_prompt' : 'pre_prompt',
           ...(cleanupSession ? { sessionId: cleanupSession } : {}),
           ...(cleanupSteps ? { steps: cleanupSteps } : {}),
+          ...(turnResult?.deliveryFailure ? {
+            deliveryFailure: true,
+            turnFailure: turnResult.turnFailure,
+            turnRecovery: { ...turnResult.turnRecovery, canContinue: false },
+          } : {}),
         });
       }
 

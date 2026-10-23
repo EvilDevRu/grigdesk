@@ -29,7 +29,7 @@ public final class ClientPipe implements AutoCloseable {
   private final Set<Socket> sockets = ConcurrentHashMap.newKeySet();
   private final String secret;
   private final StaticAssets assets;
-  private final Supplier<Upstream> upstream;
+  private final Supplier<? extends PipeTransport> upstream;
   private final Shell shell;
   private Supplier<String> unavailable = () -> "offline";
   private volatile boolean closed;
@@ -38,7 +38,7 @@ public final class ClientPipe implements AutoCloseable {
    * Слушатель доступен только на loopback и не зависит от сети удалённой машины.
    * Разбор HTTP, SSE и туннели разделяют ограниченный пул из 32 работников.
    */
-  public ClientPipe(int port, String secret, StaticAssets assets, Supplier<Upstream> upstream,
+  public ClientPipe(int port, String secret, StaticAssets assets, Supplier<? extends PipeTransport> upstream,
     Shell shell) throws Exception {
     this.secret = secret;
     this.assets = assets;
@@ -53,7 +53,7 @@ public final class ClientPipe implements AutoCloseable {
     accept.start();
   }
 
-  public ClientPipe(int port, String secret, StaticAssets assets, Supplier<Upstream> upstream,
+  public ClientPipe(int port, String secret, StaticAssets assets, Supplier<? extends PipeTransport> upstream,
     Shell shell, Supplier<String> unavailable) throws Exception {
     this(port, secret, assets, upstream, shell);
     this.unavailable = unavailable;
@@ -136,7 +136,7 @@ public final class ClientPipe implements AutoCloseable {
         BodyFraming.Frame body = BodyFraming.input(head, input);
         String path = URI.create(head.target()).getRawPath();
         boolean api = path.startsWith("/api/") || path.equals("/api") || path.startsWith("/shots/");
-        Upstream remote = upstream.get();
+        PipeTransport remote = upstream.get();
 
         if (head.headers.getOrDefault("upgrade", "").equalsIgnoreCase("websocket")) {
           if (api && remote != null) {

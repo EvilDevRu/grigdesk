@@ -79,6 +79,7 @@
 - [Кольцо контекста, prompt cache и сжатие](context-cache-and-compaction.md)
 - [Компактный companion удалён; остался server-owned companion-чат](server-owned-companion.md)
 - [Лента хода агента (как в чате VS Code)](agent-turn-feed.md)
+- [Действия субагента под своим вызовом, включая поздние реплики (№93016)](subagent-step-placement.md)
 - [Картинка в строке Read и генерации Codex: миниатюра через маршрут картинок чата вместо «[изображение]» и base64](step-images.md)
 - [Приглушённые подписи инструментов и служебных сведений](activity-visual-hierarchy.md)
 - [Ответы среди действий: хронология и компактные реплики](conversation-timeline.md)
@@ -96,10 +97,14 @@
 - [Смена папки требует согласования истории, очереди и памяти](workdir-transition-preconditions.md)
 - [Чат (modules/chat)](chat-module.md)
 - [Рабочая папка чата: приоритет задачи, выбор проекта и границы записи](chat-workspace.md)
+- [Исчезнувший профиль задачи сохраняет прежний выбор папки разговора](task-project-fallback.md)
+- [Создание истории без стенда, строгий снимок корней и сверка default/recent](project-deletion-recovery.md)
 - [Что реально ушло в запуск (проверка модели и эффорта)](launch-model-and-effort.md)
 - [UI-контекст: чат знает, где пользователь](ui-context.md)
 
 ### Исполнители и модели
+
+- [Видимость доплаты Kimi/Codex, пустые ответы и слияние снимков](extra-usage-visibility.md)
 
 - [Gemini: отдельные точки подключения чата и Factory, offline-защита и внешние контракты](gemini-integration-boundaries.md)
 
@@ -131,6 +136,7 @@
 - [Descriptor автономного DeepSeek: metadata probe, cache-dir и безопасные отказы](deepseek-binary-descriptor.md)
 - [Async cache metadata DeepSeek: single-flight, замена файла и отмена waiter](deepseek-binary-probe-cache.md)
 - [Остановка автономного DeepSeek: IPC bootstrap, disposal и честный timeout](deepseek-binary-lifecycle.md)
+- [Сетевой сбой DeepSeek и отказ остановки: раздельные причины и безопасное продолжение](deepseek-transport-cleanup.md)
 - [Отказ запуска GLM: выход процесса прерывает ожидание URL и HTTP-авторизацию](glm-startup-failure.md)
 - [Этап фабрики на GLM: политика без вопросов, typed контекст хоста, wrapper и metadata](glm-factory-stage.md)
 - [Замена DeepSeek сохраняет heartbeat живого WebSocket](deepseek-publication-event-loop.md)
@@ -138,6 +144,7 @@
 - [Собранный DeepSeek: чат, поток, настройки и файловые границы](deepseek-compiled-chat-parity.md)
 - [Обновление upstream DeepSeek и совместимый откат журналов](deepseek-upstream-update-rollback.md)
 - [Границы сборки каталога и переключения модели](model-selection-boundaries.md)
+- [Смена модели откатывается, эффорт расходится с сервером](model-switch-revert.md)
 - [Реестр моделей: устаревший отдаётся сразу, пересборка одна и в фоне](models-registry-cache.md)
 - [Алиасы CLI отдельными пунктами НЕ показываются](cli-model-aliases.md)
 - [В кратком списке моделей — только свежая версия каждого семейства](model-shortlist.md)

@@ -1,3 +1,4 @@
+import { runtimeOf } from './dbRuntime.ts';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 
 import { dbApi } from '../../shared/dbApi.ts';
@@ -43,16 +44,28 @@ export async function loadDb(): Promise<void> {
  */
 export async function loadDbProjects(): Promise<void> {
   const store = useDbStore();
+  const runtime = runtimeOf(store);
+  const request = ++runtime.projectsRequest;
 
   store.setProjectsLoading(true);
   store.setProjectsError('');
 
   try {
-    store.setProjects(await dbApi.projects());
+    const projects = await dbApi.projects();
+
+    if (request === runtime.projectsRequest) {
+      store.setProjects(projects);
+    }
   } catch (error) {
+    if (request !== runtime.projectsRequest) {
+      return;
+    }
+
     store.setProjectsError(errorMessage(error, 'Не удалось загрузить проекты'));
   } finally {
-    store.setProjectsLoading(false);
+    if (request === runtime.projectsRequest) {
+      store.setProjectsLoading(false);
+    }
   }
 }
 

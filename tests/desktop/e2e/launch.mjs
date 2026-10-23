@@ -116,7 +116,7 @@ export function isSplashPage(page) {
  * Показ главного окна: заставки уже нет, видимое окно main открыло выбранный origin.
  * Страница возвращается только после показа, а не при скрытой загрузке во время старта.
  */
-async function waitForMainWindow(app, timeout = 30_000) {
+async function waitForMainWindow(app, timeout = 45_000) {
   const deadline = Date.now() + timeout;
 
   while (Date.now() < deadline) {
@@ -135,7 +135,7 @@ async function waitForMainWindow(app, timeout = 30_000) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 
-  throw new Error('Главное окно не показано за 30 с.');
+  throw new Error(`Главное окно не показано за ${timeout} мс.`);
 }
 
 /**

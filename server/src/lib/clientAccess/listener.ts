@@ -9,6 +9,7 @@ import { API_VERSION } from '../../../../shared/client/apiVersion.ts';
 import type { DeviceStore } from '../mobile/store.ts';
 import type { ClientListenAddress } from './config.ts';
 import { bindDevice, markRevoked } from './principal.ts';
+import { phoneAccessOwners } from './phoneAccessRegistry.ts';
 
 export interface ClientListenerState {
   state: 'disabled' | 'online' | 'error';
@@ -22,7 +23,8 @@ export interface ClientListener {
   close(): Promise<void>;
 }
 
-interface ListenerOptions {
+export interface ListenerOptions {
+  budget?: ClientBudget;
   addresses: ClientListenAddress[];
   identity: { keyPem: string; certPem: string } | null;
   devices: DeviceStore;
@@ -59,12 +61,30 @@ function denySocket(socket: tls.TLSSocket, error: string): void {
  * Сокеты принадлежат входу и закрываются им даже после передачи основному Fastify.
  */
 export async function startClientListener(options: ListenerOptions): Promise<ClientListener> {
+  const owner = phoneAccessOwners.get(options.app);
+
+  return owner ? owner.start() : bindClientListener(options);
+}
+
+export interface ClientBudget {
+  sockets: Set<Socket>;
+  unpairedSockets: Set<tls.TLSSocket>;
+  deviceSockets: Map<string, Set<tls.TLSSocket>>;
+  handshakes: Map<string, Set<string>>;
+}
+
+/**
+ * Группы входов разделяют бюджеты, но закрывают только собственные TCP-сокеты.
+ * Это сохраняет лимиты при staged bind и параллельном private relay-входе.
+ */
+export async function bindClientListener(options: ListenerOptions): Promise<ClientListener> {
   const servers: tls.Server[] = [];
   const sockets = new Set<Socket>();
-  const unpairedSockets = new Set<tls.TLSSocket>();
-  const deviceSockets = new Map<string, Set<tls.TLSSocket>>();
+  const allSockets = options.budget?.sockets ?? sockets;
+  const unpairedSockets = options.budget?.unpairedSockets ?? new Set<tls.TLSSocket>();
+  const deviceSockets = options.budget?.deviceSockets ?? new Map<string, Set<tls.TLSSocket>>();
   const addresses: string[] = [];
-  const handshakes = new Map<string, Set<number>>();
+  const handshakes = options.budget?.handshakes ?? new Map<string, Set<string>>();
   let state: ClientListenerState['state'] = options.error ? 'error' : 'disabled';
   let error = options.error ?? null;
 
@@ -181,7 +201,9 @@ export async function startClientListener(options: ListenerOptions): Promise<Cli
       secureOptions: constants.SSL_OP_NO_TICKET,
       sessionTimeout: 1,
     }, (socket) => {
-      handshakes.get(socket.remoteAddress || '')?.delete(socket.remotePort || 0);
+      handshakes.get(socket.remoteAddress || '')?.delete(
+        `${socket.localAddress}:${socket.localPort}:${socket.remotePort}`);
+
       void routeSocket(socket).catch(() => socket.destroy());
     });
 
@@ -189,22 +211,24 @@ export async function startClientListener(options: ListenerOptions): Promise<Cli
     server.on('tlsClientError', (_error, socket) => socket.destroy());
     server.on('connection', (socket) => {
       const ip = socket.remoteAddress || '';
-      const port = socket.remotePort || 0;
-      const pending = handshakes.get(ip) ?? new Set<number>();
+      const key = `${socket.localAddress}:${socket.localPort}:${socket.remotePort}`;
+      const pending = handshakes.get(ip) ?? new Set<string>();
 
-      if (sockets.size >= 256 || pending.size >= 16) {
+      if (allSockets.size >= 256 || pending.size >= 16) {
         socket.destroy();
 
         return;
       }
 
       sockets.add(socket);
-      pending.add(port);
+      allSockets.add(socket);
+      pending.add(key);
       handshakes.set(ip, pending);
       socket.on('error', () => {});
       socket.once('close', () => {
         sockets.delete(socket);
-        pending.delete(port);
+        allSockets.delete(socket);
+        pending.delete(key);
 
         if (!pending.size && handshakes.get(ip) === pending) {
           handshakes.delete(ip);

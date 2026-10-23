@@ -8,6 +8,7 @@ import type {
   ProjectDetail,
   ProjectSummary,
 } from '../../../shared/runtime/projectsContracts';
+import { createDraft, isDirty } from '../views/projects/projectDraft';
 import type { ProjectDraft } from '../views/projects/projectDraft';
 
 /** Расхождение ревизий: что показать человеку, прежде чем он решит, чья версия новее. */
@@ -24,9 +25,11 @@ export interface ProjectCheckState {
 
 interface ProjectsState {
   items: ProjectSummary[];
+  deletedIds: Set<string>;
   opened: ProjectDetail | null;
   draft: ProjectDraft | null;
   conflict: ProjectConflict | null;
+  loaded: boolean;
   loading: boolean;
   error: string;
   checks: Record<string, ProjectCheckState>;
@@ -37,9 +40,11 @@ interface ProjectsState {
 export const useProjectsStore = defineStore('projects', {
   state: (): ProjectsState => ({
     items: [],
+    deletedIds: new Set(),
     opened: null,
     draft: null,
     conflict: null,
+    loaded: false,
     loading: false,
     error: '',
     checks: {},
@@ -51,6 +56,28 @@ export const useProjectsStore = defineStore('projects', {
   actions: {
     setItems(items: ProjectSummary[]) {
       this.items = items;
+      this.loaded = true;
+    },
+
+    /**
+     * Удалённый паспорт больше не служит выбором; локальные правки остаются для чтения.
+     * Каталог и связанные проверки очищаются вместе, без обращения к сети.
+     */
+    removeRegistration(id: string) {
+      this.deletedIds.add(id);
+      this.items = this.items.filter((item) => item.id !== id);
+
+      if (this.opened?.id !== id) {
+        return;
+      }
+
+      const dirty = this.draft && isDirty(this.draft, createDraft(this.opened));
+
+      this.opened = null;
+      this.draft = dirty ? this.draft : null;
+      this.dependencies = null;
+      this.conflict = null;
+      this.checks = {};
     },
 
     setOpened(detail: ProjectDetail | null) {

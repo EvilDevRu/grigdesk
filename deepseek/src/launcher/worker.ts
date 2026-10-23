@@ -19,6 +19,11 @@ export interface WorkerResult {
   stderr: string;
 }
 
+interface WorkerExit {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}
+
 /**
  * Node loader inputs не переходят из окружения SEA в обычный Node worker.
  * Остальные runtime inputs, включая профиль и разрешённые credentials, сохраняются.
@@ -35,7 +40,7 @@ export function workerEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv 
 
 /**
  * Все режимы запускают обычный Node через IPC-bootstrap, включая служебный verify.
- * Launcher ждёт exit worker; эскалация никогда не выдаётся за успешный shutdown.
+ * Launcher ждёт close worker; успех после SIGKILL требует подтверждённого disposal.
  */
 export async function runLauncherWorker(options: {
   directory: string;
@@ -58,6 +63,9 @@ export async function runLauncherWorker(options: {
   let stdout = '';
   let stderr = '';
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let disposalTimer: ReturnType<typeof setTimeout> | undefined;
+  let disposedCode: 0 | 130 | undefined;
+  let killedAfterDisposal = false;
   let escalated = false;
   let overflow = false;
 
@@ -75,6 +83,24 @@ export async function runLauncherWorker(options: {
   const term = () => forward('SIGTERM');
   const interrupt = () => forward('SIGINT');
   const deadline = options.capture ? setTimeout(term, 60000) : undefined;
+
+  child.on('message', (message: unknown) => {
+    if (!message || typeof message !== 'object' || !('type' in message) || !('code' in message)
+      || message.type !== 'worker-disposed' || (message.code !== 0 && message.code !== 130)
+      || disposedCode !== undefined || escalated || overflow) {
+      return;
+    }
+
+    disposedCode = message.code;
+
+    // После disposal даём stdio и обычному exit 100 мс, не продлевая общий срок 4 с.
+    // Неотменяемый getaddrinfo удерживает native exit, хотя сервисы и дети уже освобождены.
+    disposalTimer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) {
+        killedAfterDisposal = child.kill('SIGKILL');
+      }
+    }, 100);
+  });
 
   child.stdout?.on('data', (bytes) => {
     if (Buffer.byteLength(stdout) + bytes.length > 65536) {
@@ -100,18 +126,20 @@ export async function runLauncherWorker(options: {
   }
 
   try {
-    const code = await new Promise<number | null>((resolve, reject) => {
+    const outcome = await new Promise<WorkerExit>((resolve, reject) => {
       child.once('error', reject);
-      child.once('close', resolve);
+      child.once('close', (code, signal) => resolve({ code, signal }));
     });
+    const confirmedCode = killedAfterDisposal && outcome.signal === 'SIGKILL' ? disposedCode : undefined;
 
     return {
-      code: escalated || overflow ? 75 : code ?? 75,
+      code: escalated || overflow ? 75 : outcome.code ?? confirmedCode ?? 75,
       stdout,
       stderr,
     };
   } finally {
     clearTimeout(timer);
+    clearTimeout(disposalTimer);
     clearTimeout(deadline);
     process.removeListener('SIGTERM', term);
     process.removeListener('SIGINT', interrupt);

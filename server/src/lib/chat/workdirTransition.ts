@@ -46,6 +46,7 @@ interface ChangeInput extends Selection {
 }
 
 interface TransitionPorts {
+  withReferences?: <T>(op: () => Promise<T>) => Promise<T>;
   history: ChatHistoryStore;
   busy: (id: string) => boolean;
   lock: <T>(id: string, run: () => Promise<T>) => Promise<T>;
@@ -437,7 +438,17 @@ export class ChatWorkdirTransitions {
    * Commit накладывает только execution-поля на актуальную историю.
    * Сбой сброса оставляет фазу resetting и seed, чтобы следующий запрос восстановил операцию.
    */
-  private async finish(record: StoredChat): Promise<StoredChat> {
+  private finish(record: StoredChat): Promise<StoredChat> {
+    const guard = this.ports.withReferences ?? ((op) => op());
+
+    return guard(() => this.finishUnderReferences(record));
+  }
+
+  /**
+   * Повторное разрешение и commit держат одну очередь с удалением регистрации.
+   * Долгая генерация выжимки завершается до входа в этот участок.
+   */
+  private async finishUnderReferences(record: StoredChat): Promise<StoredChat> {
     const id = record.id!;
     const transition = record.workdirState!.transition!;
 

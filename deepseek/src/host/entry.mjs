@@ -112,7 +112,18 @@ async function stop(code) {
 
   setTimeout(() => process.exit(75), 3000);
 
-  await context?.fiber.dispose();
+  const fiber = context?.fiber;
+
+  await fiber?.dispose();
+
+  // Подтверждаем только завершённый disposal: ошибка await не доходит до IPC.
+  // Без живого launcher подтверждения нет; callback отправки предшествует native exit.
+  if (fiber && (code === 0 || code === 130) && process.connected && process.send) {
+    await new Promise((resolve) => {
+      process.send({ type: 'worker-disposed', code }, () => resolve());
+    });
+  }
+
   process.exit(code);
 }
 

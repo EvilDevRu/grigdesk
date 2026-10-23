@@ -942,3 +942,39 @@ test('список выбора читается для ролика, котор
 
   assert.deepEqual(requests, ['/api/showcase/project-2/source']);
 });
+
+for (const event of ['projects-changed', 'hello']) {
+  test(`PD-showcase-catalog: ${event} во время общего GET требует свежий повтор`, async (t) => {
+    const slow = Promise.withResolvers();
+    let calls = 0;
+    const { store, loadShowcase, watchShowcase, emit } = await sectionFixture(t, {
+      get: async () => {
+        calls += 1;
+
+        if (calls === 2) {
+          await slow.promise;
+
+          return OVERVIEW;
+        }
+
+        return calls === 1 ? OVERVIEW : { ...OVERVIEW, targets: [] };
+      },
+    });
+
+    await loadShowcase(store);
+    watchShowcase(store);
+
+    const old = loadShowcase(store);
+
+    emit(event, {
+      id: 'parser',
+      revision: 4,
+      kind: 'deleted'
+    });
+    slow.resolve();
+    await old;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(store.targets, []);
+    assert.equal(store.projects.some((item) => item.id === PROJECT.id), true);
+  });
+}

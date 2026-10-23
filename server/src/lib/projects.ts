@@ -1,3 +1,6 @@
+import { deletedProjectIds, isProjectDeleted } from './projects/deletion.ts';
+
+export { deletedProjectIds, isProjectDeleted } from './projects/deletion.ts';
 // Паспорта проектов: откуда GrigDesk знает пути репозиториев проекта на диске.
 // Источник №1 — профиль фабрики (PROFILE_TRIAGE_REPOS, читается через loadTriageProfile):
 // пока идёт миграция, для проектов фабрики пути живут ТАМ, и второй источник тут же
@@ -28,6 +31,7 @@ type ProjectPathsConfig = TriageProfilePaths & {
 // проверяет нормализация, поэтому порт объявляет только сам факт чтения.
 export interface ProjectsPrefsReader {
   read?: () => unknown;
+  readForWrite?: () => unknown;
 }
 
 /** Метка и путь репозитория: то, что лежит в паспорте и уходит в «Код». */
@@ -270,16 +274,35 @@ async function factoryRepos(config: ProjectPathsConfig, name: string) {
  * (тогда пути GrigDesk работают и для фабричного проекта — как фолбэк, не перекрытие).
  * Пока идёт миграция, непустой профиль фабрики остаётся источником путей.
  */
-export async function projectRepos({ config, prefs, id, isFactory = null }: {
+export async function projectRepos({ config, prefs, id, isFactory = null, strict = false }: {
   config: ProjectPathsConfig;
   prefs: ProjectsPrefsReader;
   id: string;
   isFactory?: boolean | null;
+  strict?: boolean;
 }): Promise<ProjectRepo[]> {
-  const factory = isFactory ?? (await listFactoryProfiles(config.profilesDir)).includes(id);
-  if (factory) {
-    const repos = await factoryRepos(config, id);
-    if (repos.length) return normalizeProjectRepos(repos, 'factory');
+  if (strict) {
+    const snapshot = prefs.readForWrite?.() ?? prefs.read?.();
+
+    prefs = { read: () => snapshot };
+    isProjectDeleted(prefs, id);
   }
+
+  if (deletedProjectIds(prefs).has(id)) {
+    return [];
+  }
+
+  const factory = isFactory ?? (await listFactoryProfiles(config.profilesDir, { strict })).includes(id);
+
+  if (factory) {
+    const repos = strict
+      ? (await loadTriageProfile(config, id, { strict: true })).repos
+      : await factoryRepos(config, id);
+
+    if (repos.length) {
+      return normalizeProjectRepos(repos, 'factory');
+    }
+  }
+
   return normalizeProjectRepos(readProjectRecord(prefs, id)?.repos ?? [], 'grigdesk');
 }

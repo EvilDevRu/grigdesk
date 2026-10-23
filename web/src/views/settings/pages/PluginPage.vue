@@ -68,12 +68,6 @@
                     </span>
                   </span>
                 </UiButton>
-                <UiSwitch
-                  :model-value="draftEnabled(entry.id)"
-                  :disabled="recoveryBlocked"
-                  :aria-label="t('settings.enable', { entryName: entry.name })"
-                  @update:model-value="toggleEntry(entry, $event)"
-                />
               </div>
             </div>
           </section>
@@ -86,7 +80,6 @@
         <div class="settings-plugin-actions">
           <UiButton
             v-if="list.some((entry) => entry.install)"
-            variant="ghost"
             data-ui-settings-sidebar-action
             :disabled="recoveryBlocked || installer.checking"
             @click="installer.checkUpdates()"
@@ -427,29 +420,6 @@ function draftEnabled(id: string): boolean {
 }
 
 /**
- * Тумблер списка ставит намерение в свой ресурс, не меняя действующий plugin gate.
- * Фильтр состояния сбрасывается, чтобы выбранная строка не исчезла под указателем.
- */
-async function toggleEntry(entry: PluginListItem, next: boolean): Promise<void> {
-  const service = settings.sessionService(`plugin-editor:${entry.id}`, () =>
-    createPluginEditor(entry.id, settings, plugins as unknown as PluginStorePort));
-
-  const loaded = settings.snapshot.resources.some((resource) =>
-    resource.id === `pluginEnabled:${entry.id}` && resource.loaded);
-
-  if (!loaded) {
-    await service.load();
-  }
-
-  if (!settings.isOpen || settings.snapshot.applying) {
-    return;
-  }
-
-  filters.state = 'all';
-  settings.setField(`pluginEnabled:${entry.id}`, 'enabled', next);
-}
-
-/**
  * Сброс возвращает список целиком, не затрагивая выбор и параметры плагина.
  * Значения фильтров хранятся лишь до завершения текущей сессии настроек.
  */
@@ -734,9 +704,7 @@ watch([() => props.active, () => settings.pageId, () => settings.entityId, () =>
 }
 .settings-plugin-entry {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px;
+  min-width: 0;
 }
 .settings-plugin-actions {
   display: grid;

@@ -780,7 +780,7 @@
           <!-- Обычный запуск показывает только человеческое решение. Immutable-техника
                видна кратко и раскрывается отдельно для редкой ручной корректировки. -->
           <div v-if="launchForm" class="lform">
-            <div v-if="launchOpts!.profiles?.length! > 1" class="lrow">
+            <div v-if="!launchForm.profile || launchOpts!.profiles?.length! > 1" class="lrow">
               <label class="llbl" for="launch-profile">Профиль</label>
               <UiSelect
                 id="launch-profile"
@@ -790,6 +790,7 @@
                 :disabled="launchOptionsBusy || busy === 'launch'"
                 @change="changeLaunchProfile"
               >
+                <option v-if="!launchForm.profile" disabled value="">Выбери профиль</option>
                 <option v-for="p in launchOpts!.profiles" :key="p" :value="p">{{ p }}</option>
               </UiSelect>
               <span v-if="launchOptionsBusy" class="lhint">
@@ -936,7 +937,7 @@
             </details>
             <p v-if="launchValidationError" class="lerror">{{ launchValidationError }}</p>
             <div class="lbtns">
-              <UiButton :disabled="!!busy" @click="launchForm = null">
+              <UiButton :disabled="!!busy" @click="closeLaunch">
                 Отмена
               </UiButton>
               <UiButton
@@ -984,6 +985,8 @@ import { api, failureText } from '../shared/apiClient.ts';
 import { shellAction } from '../shared/shellClient.ts';
 import { leaveTaskForPipeline } from '../shared/taskWindowNavigation.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
+import { sseSubscribe } from '../composables/useSse.ts';
+import { parseProjectsChange } from '../../../shared/runtime/projectsContracts.ts';
 import {
   confirmDialog,
   showToast,
@@ -1970,6 +1973,7 @@ const launchMsg = ref<string | null>(null);
 const launchForm = ref<ReturnType<typeof makeLaunchForm> | null>(null);   // форма открыта
 const launchOpts = ref<TaskLaunchOptions | null>(null);   // ответ /launch-options
 const launchOptionsBusy = ref(false);
+const launchOptionsFailed = ref(false);
 const DIAGNOSIS_LABELS: Record<string, string> = {
   functional: 'поведение',
   performance: 'производительность',
@@ -1977,6 +1981,107 @@ const DIAGNOSIS_LABELS: Record<string, string> = {
   integration: 'интеграция',
 };
 let launchOptionsRequest = 0;
+
+/**
+ * Закрытая форма больше не принимает ответы своего каталога.
+ * Следующее открытие начинает отдельное поколение запросов.
+ */
+function closeLaunch() {
+  launchOptionsRequest += 1;
+  launchOptionsBusy.value = false;
+  launchForm.value = null;
+}
+
+/**
+ * Сбрасывает только выбор профиля и зависимые поля, сохраняя критерии человека.
+ * Соседний профиль никогда не выбирается вместо исчезнувшей регистрации.
+ */
+function clearLaunchProfile() {
+  if (!launchForm.value) {
+    return;
+  }
+
+  launchForm.value.profile = '';
+  launchForm.value.route = null;
+  launchForm.value.instrumentationFiles = '';
+  launchForm.value.diagnosisSignal = '';
+  launchForm.value.runner = '';
+}
+
+/**
+ * Общий поток инвалидирует каталог открытой формы, включая ещё летящий первый GET.
+ * После reconnect свежий список проверяет прежний выбор, не меняя критерии и соседний проект.
+ */
+async function refreshLaunchOptions() {
+  if (!taskId.value || (!launchForm.value && !launchOptionsBusy.value)) {
+    return;
+  }
+
+  const requestId = ++launchOptionsRequest;
+  const id = taskId.value;
+  const profile = launchForm.value?.profile;
+
+  launchOptionsBusy.value = true;
+  launchOptionsFailed.value = true;
+
+  try {
+    let opts = await tasks.launchOptions(id);
+
+    if (requestId !== launchOptionsRequest) {
+      return;
+    }
+
+    if (profile && opts.profiles?.includes(profile) && opts.profile !== profile) {
+      opts = await tasks.launchOptions(id, profile);
+    }
+    if (requestId !== launchOptionsRequest) {
+      return;
+    }
+
+    const previous = launchForm.value;
+
+    launchOpts.value = opts;
+    launchForm.value = makeLaunchForm(opts, previous?.criteria ?? null);
+    launchOptionsFailed.value = false;
+    err.value = opts.error ? opts.message || 'выбранный профиль сейчас нельзя запустить' : null;
+
+    if (!profile || !opts.profiles?.includes(profile) || opts.profile !== profile) {
+      clearLaunchProfile();
+    } else if (previous) {
+      launchForm.value = { ...previous };
+
+      if (!opts.routes?.includes(previous.route || '')) {
+        launchForm.value.route = null;
+      }
+    }
+  } catch (e) {
+    if (requestId === launchOptionsRequest) {
+      err.value = `Не удалось обновить параметры запуска: ${failureText(e)}`;
+    }
+  } finally {
+    if (requestId === launchOptionsRequest) {
+      launchOptionsBusy.value = false;
+    }
+  }
+}
+
+const stopLaunchEvents = sseSubscribe((name, payload) => {
+  if (name === 'projects-changed') {
+    try {
+      const change = parseProjectsChange(payload);
+
+      if (change.kind === 'deleted' && launchForm.value?.profile === change.id) {
+        clearLaunchProfile();
+      }
+    } catch {
+      return;
+    }
+  } else if (name !== 'hello') {
+    return;
+  }
+
+  void refreshLaunchOptions();
+});
 // Рекомендацию маршрута считает сервер: только он знает, из этого ли каталога пришла
 // оценка и остался ли предложенный маршрут опубликованным. Клиент её не пересчитывает.
 function preferredLaunchRoute(opts: TaskLaunchOptions) {
@@ -2030,6 +2135,7 @@ async function openLaunch() {
 
   err.value = null;
   launchMsg.value = null;
+  launchOptionsFailed.value = false;
 
   const requestId = ++launchOptionsRequest;
   let opts = null;
@@ -2103,6 +2209,7 @@ async function changeLaunchProfile() {
 
     launchOpts.value = opts;
     launchForm.value = makeLaunchForm(opts, criteria);
+    launchOptionsFailed.value = false;
 
     if (opts.error) {
     err.value = opts.message || 'выбранный профиль сейчас нельзя запустить';
@@ -2177,6 +2284,12 @@ const launchDiagnosisSummary = computed(() => (
 const launchValidationError = computed(() => {
   if (loading.value || !detail.value) {
     return 'Постановка задачи ещё загружается.';
+  }
+  if (launchOptionsFailed.value) {
+    return 'Параметры запуска не удалось обновить.';
+  }
+  if (!launchForm.value?.profile) {
+    return 'Выбери профиль.';
   }
   if (!launchForm.value?.route) {
     return 'Выбери маршрут.';
@@ -2255,7 +2368,14 @@ async function doLaunch(payload: unknown) {
       : r.note || 'Отправлено';
     await loadConveyor();
   } catch (e) {
-    err.value = launchErrorText(e);
+    const message = launchErrorText(e);
+
+    if (objectOrEmpty(objectOrEmpty(e).data).error === 'tombstoned') {
+      clearLaunchProfile();
+      await refreshLaunchOptions();
+    }
+
+    err.value = message;
   } finally {
     busy.value = null;
   }
@@ -2339,6 +2459,7 @@ function onTaskDialogOpenChange(open: boolean) {
 
 // Открытие/закрытие модалки по taskId.
 watch(taskId, (id) => {
+  closeLaunch();
   acknowledgedShelfTask = '';
   cancelTaskEdit();
   editMessage.value = null;
@@ -2434,6 +2555,9 @@ watch(
   { immediate: true },
 );
 onUnmounted(() => {
+  stopLaunchEvents();
+  closeLaunch();
+
   if (ticker) {
     clearInterval(ticker);
   }

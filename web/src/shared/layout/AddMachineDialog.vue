@@ -8,8 +8,8 @@
         <li>{{ t('core.copyThePairingStringAndPasteIt') }}</li>
       </ol>
       <UiField :label="t('settings.pairingString')" :hint="t('core.pairingLifetime')">
-        <UiTextarea v-model="pairing" placeholder="GRIGDESK:PAIR:1:…" :disabled="busy" :rows="3"
-                    spellcheck="false" autocomplete="off" />
+        <UiTextarea v-model="pairing" :placeholder="pairingPlaceholder" :disabled="busy"
+                    :rows="3" spellcheck="false" autocomplete="off" />
       </UiField>
       <UiButton v-if="shell.capabilities.includes('scan')" :disabled="busy" @click="scan">
         {{ t('core.scanQRCode') }}
@@ -27,7 +27,7 @@
 <script setup lang="ts">
 import { t } from '../../ui.ts';
 
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import { UiDialog, UiButton, UiField, UiTextarea, UiInlineMessage } from '../../ui.ts';
 import { useShellStore } from '../../stores/shell.ts';
@@ -39,8 +39,13 @@ const shell = useShellStore();
 const pairing = ref('');
 const error = ref('');
 const busy = ref(false);
+const pairingPlaceholder = computed(() => shell.capabilities.includes('scan')
+  ? t('core.pairingStringPlaceholder') : t('core.desktopPairingPlaceholder'));
+let generation = 0;
 
 watch(() => props.open, (open) => {
+  generation += 1;
+
   if (!open) {
     pairing.value = '';
     error.value = '';
@@ -49,19 +54,29 @@ watch(() => props.open, (open) => {
 
 /**
  * Секретная строка уходит только в API оболочки и очищается при закрытии диалога.
- * Неудачная привязка оставляет введённый текст для исправления человеком.
+ * После ответа, включая отказ, секрет удаляется и не становится состоянием установки.
  */
 async function add(): Promise<void> {
+  const epoch = generation;
+
   busy.value = true;
   error.value = '';
 
   try {
     await shell.addMachine(pairing.value.trim());
-    emit('update:open', false);
+
+    if (props.open && generation === epoch) {
+      emit('update:open', false);
+    }
   } catch (failure) {
-    error.value = failureText(failure, t('core.couldNotAddTheMachine'));
+    if (props.open && generation === epoch) {
+      error.value = failureText(failure, t('core.couldNotAddTheMachine'));
+    }
   } finally {
-    busy.value = false;
+    if (generation === epoch) {
+      pairing.value = '';
+      busy.value = false;
+    }
   }
 }
 
@@ -70,10 +85,18 @@ async function add(): Promise<void> {
  * Ошибка или отмена сканирования оставляет диалог открытым для ручной вставки.
  */
 async function scan(): Promise<void> {
+  const epoch = generation;
+
   try {
-    pairing.value = (await shell.scan()).pairing;
+    const result = await shell.scan();
+
+    if (props.open && generation === epoch) {
+      pairing.value = result.pairing;
+    }
   } catch (failure) {
-    error.value = failureText(failure, t('core.couldNotReadTheQRCode'));
+    if (props.open && generation === epoch) {
+      error.value = failureText(failure, t('core.couldNotReadTheQRCode'));
+    }
   }
 }
 </script>

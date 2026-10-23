@@ -46,6 +46,11 @@ export class MobileService {
   private hub: Hub | null = null;
   private identity: Awaited<ReturnType<typeof ensureBrainIdentity>> | null = null;
   private error: string | null = null;
+  private clientTarget?: () => Promise<number>;
+
+  setClientTarget(target: () => Promise<number>): void {
+    this.clientTarget = target;
+  }
 
   constructor(options: Options) {
     this.options = options;
@@ -59,7 +64,7 @@ export class MobileService {
    * До открытия TLS проверяет оба списка и согласованность пары ключ/сертификат.
    */
   async start() {
-    if (this.server) {
+    if (this.server || this.hub) {
       return;
     }
 
@@ -68,7 +73,11 @@ export class MobileService {
 
       await this.devices.list();
       this.identity = await ensureBrainIdentity(this.options.directory);
-      this.server = await (this.options.makeServer ?? startMobileServer)({
+
+      this.error = null;
+
+      try {
+        this.server = await (this.options.makeServer ?? startMobileServer)({
         identity: this.identity,
         directory: this.options.directory,
         deviceStore: this.devices,
@@ -80,13 +89,22 @@ export class MobileService {
         recoverOperation: this.options.recoverOperation,
         log: this.options.log,
       });
+      } catch (failure) {
+        if (!this.clientTarget) {
+          throw failure;
+        }
+
+        this.error = 'Прежний мобильный вход недоступен. Проверьте его порт и настройки.';
+        this.options.log?.('mobile_v1_start_failed');
+      }
+
       this.hub = (this.options.makeHub ?? ((options) => new RelayHub(options)))({
-        mobilePort: this.server.port,
+        mobilePort: this.server?.port ?? 0,
+        clientTarget: this.clientTarget,
         vpnGate: this.options.vpnGate,
         changed: this.options.changed,
       });
       this.hub.sync(relays);
-      this.error = null;
     } catch {
       await this.close();
       this.error = 'Мобильный доступ не запущен. Проверьте настройки и порт.';
@@ -108,17 +126,17 @@ export class MobileService {
           port: this.server?.port ?? this.options.port,
           error: this.error,
         },
-        relays: this.server
-          ? (await this.relays.list()).map((relay) => ({
+        relays: (await this.relays.list()).map((relay) => ({
               ...publicRelay(relay),
+              enabled: relay.enabled,
               link: this.hub?.status().find((link) => link.id === relay.id) ?? {
+                compatibility: 'unknown' as const,
                 state: 'offline',
                 since: Date.now(),
                 lastError: null,
                 pipes: 0,
               },
-            }))
-          : [],
+            })),
         devices: this.server ? await this.devices.list() : [],
       };
     } catch {
@@ -138,7 +156,7 @@ export class MobileService {
   }
 
   requireReady() {
-    if (!this.server || !this.identity) {
+    if (!this.hub || !this.identity) {
       throw new MobileInputError(
         'mobile_unavailable',
         this.error ?? 'Мобильный доступ ещё не запущен.',
@@ -182,7 +200,7 @@ export class MobileService {
 
     const device = await this.devices.revoke(id);
 
-    this.server!.disconnectDevice(device.fp);
+    this.server?.disconnectDevice(device.fp);
     this.options.disconnectClient?.(device.fp);
     this.options.changed?.();
   }
