@@ -5,6 +5,7 @@ import { API_VERSION } from '../../shared/client/apiVersion.ts';
 import type { ApiVersion } from '../../shared/client/clientShell.ts';
 import type { IdentityStore } from '../../shared/desktop/deviceIdentity.ts';
 import type { DesktopSettings } from './settings.ts';
+import type { DesktopExitPreference } from './desktopExitPreference.ts';
 import type { DesktopProfile } from './profiles.ts';
 import { Profiles } from './profiles.ts';
 import { createPairing, pinnedJson } from './pairing.ts';
@@ -14,6 +15,7 @@ import { json, startPipe } from './pipe/pipeServer.ts';
 import { createUpstream } from './pipe/upstream.ts';
 
 interface RuntimeOptions {
+  desktopExit?: DesktopExitPreference;
   nativeWindows?: NativeWindows;
   settings: DesktopSettings;
   save(): Promise<void>;
@@ -50,6 +52,7 @@ export function createClientRuntime(options: RuntimeOptions) {
     directory: options.identityDirectory,
   });
   const shell = createShellApi({
+    desktopExit: options.desktopExit,
     nativeWindows: options.nativeWindows,
     profiles,
     pairing,

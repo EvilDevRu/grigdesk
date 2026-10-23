@@ -11,6 +11,7 @@ import { recordOrNull } from '../../shared/lib/objects.ts';
 
 import { localOrigin } from './connection.ts';
 import { normalizeSurfaceGeometry } from './surfaceGeometry.ts';
+import { normalizeExitPreference } from './desktopExitPreference.ts';
 import type { SurfaceGeometry } from './surfaceGeometry.ts';
 
 import type { Connection } from './connection.ts';
@@ -24,6 +25,7 @@ export type WindowState = {
 };
 
 export type DesktopSettings = {
+  skipExitConfirmation?: boolean;
   uiLanguage?: string;
   version: 2;
   profiles: DesktopProfile[];
@@ -112,6 +114,8 @@ export function normalizeSettings(value: unknown): DesktopSettings {
     : null;
 
   return {
+    ...(supported && normalizeExitPreference(settings.skipExitConfirmation)
+      ? { skipExitConfirmation: true } : {}),
     ...(taskWindow ? { surfaceWindows: { task: taskWindow } } : {}),
     version: 2,
     ...(supported && (settings.uiLanguage === 'system'

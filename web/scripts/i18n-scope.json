@@ -73,7 +73,10 @@
     "web/src/stores/settings.ts",
     "web/src/features/providers/usageResourceText.ts",
     "web/src/views/ToolsView.vue",
-    "web/src/features/providers/providerLocale.ts"
+    "web/src/features/providers/providerLocale.ts",
+    "web/src/shared/desktopExit.ts",
+    "web/src/shared/desktopExitActivity.ts",
+    "web/src/shared/layout/DesktopExitHost.vue"
   ],
   "fragments": [
     "web/src/stores/chat.ts",

@@ -17,6 +17,7 @@ export interface MachineProfile {
 }
 
 export interface ShellState {
+  desktopExit?: { skipConfirmation: boolean };
   locale?: { preference: string; systemLanguage: string };
   rev: number;
   status: ConnectionStatus;

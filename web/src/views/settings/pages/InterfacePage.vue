@@ -19,6 +19,7 @@
         </UiSelect>
       </UiField>
     </div>
+    <DesktopExitSetting v-if="settings.pageId === 'interface.behavior'" />
     <p v-if="error" role="alert">{{ resolveUiText(error) }}</p>
     <SettingsField
       v-for="field in fields"
@@ -119,6 +120,7 @@ import { failureText } from '../../../shared/apiClient.ts';
 import { uiLanguage, uiLanguageBusy, uiLanguageError, setUiLanguage } from '../../../shared/uiLocale.ts';
 import SettingsField from '../SettingsField.vue';
 import SettingsScope from '../SettingsScope.vue';
+import DesktopExitSetting from '../DesktopExitSetting.vue';
 
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();

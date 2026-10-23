@@ -3,6 +3,7 @@
        в промежутке между созданием документа и ответом сервера. -->
   <UiDialogHost />
   <UiTooltipHost />
+  <DesktopExitHost v-if="currentDesktopMode() === 'main'" />
 
   <template v-if="shell.initialized">
     <ConnectionsView v-if="showMachines" />
@@ -48,6 +49,7 @@ import {
 import { t, uiLocale, UiDialogHost, UiTooltipHost, UiToastHost, UiInlineMessage, UiSpinner } from './ui';
 import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
+import DesktopExitHost from './shared/layout/DesktopExitHost.vue';
 import NoAccessView from './views/NoAccessView.vue';
 import TaskModal from './views/TaskModal.vue';
 import TaskWindowPage from './views/TaskWindowPage.vue';

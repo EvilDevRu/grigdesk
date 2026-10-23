@@ -23,6 +23,8 @@ import { delayWithAbort } from '../../shared/lib/delay.ts';
 import { probeGrigDesk } from '../../shared/runtime/grigDeskReadiness.ts';
 import { desktopUserAgent } from '../../shared/desktop/desktopWindowContract.ts';
 import { createSettingsRequest } from './settingsRequest.ts';
+import { createDesktopExitController } from './desktopExitController.ts';
+import { createDesktopExitPreference } from './desktopExitPreference.ts';
 import { createSurfaceWindows } from './surfaceWindows.ts';
 import { placeSurfaceBounds } from './surfaceGeometry.ts';
 import type { SurfaceTarget } from '../../shared/desktop/surfaceContract.ts';
@@ -174,6 +176,40 @@ function createOwnSupervisor() {
 }
 
 let supervisor = createOwnSupervisor();
+let exitPreference: ReturnType<typeof createDesktopExitPreference> | null = null;
+
+function desktopExitPreference() {
+  exitPreference ??= createDesktopExitPreference({
+    settings: settings!,
+    save: () => writeSettings(settingsFile!, settings!),
+  });
+
+  return exitPreference;
+}
+
+const desktopExit = createDesktopExitController({
+  context: () => {
+    const profile = settings?.profiles.find((item) => item.id === settings?.selected);
+
+    return mainWindow && pipeOrigin && profile ? {
+      window: mainWindow,
+      origin: pipeOrigin,
+      profileId: profile.id,
+      address: profile.address,
+      local: profile.kind === 'local',
+      selectedOrigin,
+      supervisor,
+    } : null;
+  },
+  revealed: () => revealed(),
+  quitting: () => quit.stopping,
+  preference: () => desktopExitPreference(),
+  log: writeLog,
+  exit: () => {
+    exiting = true;
+    app.exit(0);
+  },
+});
 
 /**
  * Окно показано: дальше перезагрузка, 401 и потеря связи идут обычным offline-путём.
@@ -665,9 +701,18 @@ async function createMainWindow(origin: string, stored: DesktopSettings): Promis
   });
   configureWindow(window, origin, options);
   window.on('ready-to-show', () => frames.painted());
-  window.on('close', () => {
+  window.on('close', (event) => {
+    if (desktopExit.close(event)) {
+      return;
+    }
+
     if (revealed() && !quit.stopping) {
       saveMainWindow();
+    }
+  });
+  window.webContents.on('will-prevent-unload', (event) => {
+    if (desktopExit.finishing) {
+      event.preventDefault();
     }
   });
   window.on('closed', () => {
@@ -826,6 +871,7 @@ async function prepare(signal: AbortSignal): Promise<void> {
   });
 
   client = createClientRuntime({
+    desktopExit: desktopExitPreference(),
     settings: stored,
     save: () => writeSettings(settingsFile!, stored),
     uiDir,
@@ -1185,6 +1231,7 @@ const startup = createStartupController({
 
 const quit = createQuitController({
   cancelStartup: () => {
+    desktopExit.cleanup();
     startup.cancel();
     surfaceWindows?.closeAll();
     lifetime.abort();
@@ -1206,6 +1253,7 @@ const quit = createQuitController({
   flushCookies: () => localSession?.cookies.flushStore() ?? Promise.resolve(),
   log: (message) => writeLog(message),
   exit: (code) => {
+    desktopExit.exited();
     exiting = true;
     app.exit(code);
   },
@@ -1243,6 +1291,7 @@ if (app.requestSingleInstanceLock()) {
     }
   });
   app.on('before-quit', (event) => {
+    desktopExit.bypass();
     settingsRequest?.dispose();
 
     if (exiting) {
@@ -1262,12 +1311,14 @@ if (app.requestSingleInstanceLock()) {
     });
   });
   process.on('SIGTERM', () => {
+    desktopExit.bypass();
     void quit.request({
       reason: 'signal',
       exitCode: 0,
     });
   });
   process.on('SIGINT', () => {
+    desktopExit.bypass();
     void quit.request({
       reason: 'signal',
       exitCode: 0,
