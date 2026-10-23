@@ -101,6 +101,8 @@
 
 ### Исполнители и модели
 
+- [Видимость доплаты Kimi/Codex, пустые ответы и слияние снимков](extra-usage-visibility.md)
+
 - [Gemini: отдельные точки подключения чата и Factory, offline-защита и внешние контракты](gemini-integration-boundaries.md)
 
 - [GigaCode CLI: документированные возможности и граница проверки](gigacode-cli-contract.md)
