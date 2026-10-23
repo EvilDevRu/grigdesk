@@ -65,17 +65,13 @@
           </span>
           <span v-else>Нет публикации</span>
         </template>
-        <template v-if="!routesStore.opened?.catalogHash && publishSupported
-          && routesStore.editorInfo?.source.mode !== 'editor'" #actions>
-          <UiButton data-context="workspace-toolbar" variant="ghost" :loading="busy === 'validate'"
-                    :disabled="!!busy && busy !== 'validate'" loading-label="Проверяю"
-                    @click="run('validate')">Проверить</UiButton>
-          <UiButton data-context="workspace-toolbar" tone="accent" variant="outline"
-                    :loading="busy === 'publish'" :disabled="!!busy && busy !== 'publish'"
-                    loading-label="Публикую" @click="run('publish')">Опубликовать</UiButton>
+        <template #actions>
+          <UiButton v-if="canEditPublishedRoute" data-test="edit-route" data-context="workspace-toolbar"
+                    tone="accent" variant="solid" :disabled="!pageReady || editEntryBusy"
+                    @click="editPublishedRoute">Редактировать</UiButton>
         </template>
       </UiPaneHeader>
-      <div class="panel-scroll">
+      <div class="panel-scroll" :class="{ 'panel-scroll--route-editor': routeWorkspaceActive }">
         <UiInlineMessage v-if="registrationDeleted" tone="warning">
           Регистрация проекта удалена. Несохранённые изменения сохранить нельзя — скопируйте нужное.
         </UiInlineMessage>
@@ -194,42 +190,51 @@
                               @change="replaceEditorDocument"
                               @prompt-change="changeBootstrapPrompt"
                               @end-history-group="endHistoryGroup" @save="saveDraft" />
-        <RoutePromptEditor v-else-if="selectedTab === 'prompt' && selectedRoute && selectedNode"
-                           :document="routesStore.localDocument" :route-id="selectedRoute"
-                           :node-id="selectedNode" :templates="templates"
-                           :focus-path="focusedProblemPath"
-                           @change="changePrompt" @save="saveDraft"
-                           @end-history-group="endHistoryGroup" />
         <div v-else-if="selectedRoute" class="route-editor-workspace">
-          <RouteCanvas :document="routesStore.localDocument"
-                       :scope="{ kind: 'route', routeId: selectedRoute }"
-                       :selected-node-id="selectedNode" :focused-issue="focusedProblem"
-                       @select-node="selectCanvasNode" @change="replaceEditorDocument" />
-          <div class="route-editor-workspace__sidebar">
-            <RouteStageList :document="routesStore.localDocument"
-                            :scope="{ kind: 'route', routeId: selectedRoute }"
-                            :selected-node-id="selectedNode"
-                            @select-node="selectCanvasNode" @change="replaceEditorDocument" />
-          <div v-if="selectedNode" class="route-editor-inspectors">
-            <RouteNodeInspector :document="routesStore.localDocument"
-                                :scope="{ kind: 'route', routeId: selectedRoute }"
-                                :node-id="selectedNode"
-                                :capabilities="routesStore.editorInfo?.capabilities ?? null"
-                                @change="replaceEditorDocument"
-                                @select-node="selectCanvasNode" />
-            <RouteTransitionInspector :document="routesStore.localDocument"
-                                      :scope="{ kind: 'route', routeId: selectedRoute }"
-                                      :node-id="selectedNode"
-                                      @change="replaceEditorDocument" />
-          </div>
-          </div>
-          <details class="ui-workspace-disclosure route-disclosure">
-            <summary>Инструкции этапов</summary>
-            <div class="ui-workspace-section__body">
-              <RouteDraftPanel :document="routesStore.localDocument" :route-id="selectedRoute"
-                               @select-node="openPrompt" />
+          <div class="route-editor-workspace__main">
+            <RouteCanvas :document="routesStore.localDocument"
+                         :scope="{ kind: 'route', routeId: selectedRoute }"
+                         :selected-node-id="selectedNode" :focused-issue="canvasFocusedProblem"
+                         @select-node="selectCanvasNode" @change="replaceEditorDocument" />
+            <div class="route-editor-workspace__stages">
+              <RouteStageList :document="routesStore.localDocument"
+                              :scope="{ kind: 'route', routeId: selectedRoute }"
+                              :selected-node-id="selectedNode"
+                              @select-node="selectCanvasNode" @change="replaceEditorDocument" />
             </div>
-          </details>
+          </div>
+          <div class="route-editor-inspectors">
+            <template v-if="selectedNode">
+              <UiTabs :model-value="selectedTab" data-ui-workspace-tabs label="Редактор этапа"
+                      @update:model-value="selectNodeTab">
+                <UiTab value="graph" controls="route-node-properties">Свойства и переходы</UiTab>
+                <UiTab value="prompt" controls="route-node-prompt">Инструкция</UiTab>
+              </UiTabs>
+              <div id="route-node-properties" v-show="selectedTab !== 'prompt'"
+                   class="route-editor-inspectors__content">
+                <RouteNodeInspector :document="routesStore.localDocument"
+                                    :scope="{ kind: 'route', routeId: selectedRoute }"
+                                    :node-id="selectedNode"
+                                    :capabilities="routesStore.editorInfo?.capabilities ?? null"
+                                    @change="replaceEditorDocument"
+                                    @select-node="selectCanvasNode" />
+                <RouteTransitionInspector :document="routesStore.localDocument"
+                                          :scope="{ kind: 'route', routeId: selectedRoute }"
+                                          :node-id="selectedNode"
+                                          @change="replaceEditorDocument" />
+              </div>
+              <div id="route-node-prompt" v-show="selectedTab === 'prompt'"
+                   class="route-editor-inspectors__content">
+                <RoutePromptEditor v-if="promptEditorOpened"
+                                   :document="routesStore.localDocument" :route-id="selectedRoute"
+                                   :node-id="selectedNode" :templates="templates"
+                                   :focus-path="focusedProblemPath"
+                                   @change="changePrompt" @save="saveDraft"
+                                   @end-history-group="endHistoryGroup" />
+              </div>
+            </template>
+            <p v-else class="muted">Выберите этап на схеме или в списке.</p>
+          </div>
         </div>
         <p v-else class="muted">Публикация недоступна: сначала добавьте маршрут и его инструкции.</p>
         <p v-if="routesStore.promptPreviewError" class="bad" role="alert">
@@ -323,6 +328,21 @@
       </details>
 
       </template>
+      <details v-if="!editingDraft && !routesStore.opened?.catalogHash && publishSupported
+                 && routesStore.editorInfo?.source.mode !== 'editor'"
+               class="ui-workspace-disclosure route-disclosure">
+        <summary>Пересборка каталога из файлов профиля</summary>
+        <div class="ui-workspace-section__body">
+          <UiButton data-context="workspace-toolbar" variant="ghost" :loading="busy === 'validate'"
+                    :disabled="!!busy && busy !== 'validate'" loading-label="Проверяю"
+                    @click="run('validate')">Проверить каталог из файлов профиля</UiButton>
+          <UiButton data-context="workspace-toolbar" tone="accent" variant="outline"
+                    :loading="busy === 'publish'" :disabled="!!busy && busy !== 'publish'"
+                    loading-label="Публикую" @click="run('publish')">
+            Опубликовать каталог из файлов профиля
+          </UiButton>
+        </div>
+      </details>
       <details v-if="revisions.length" class="ui-workspace-disclosure route-disclosure route-history" :open="!editingDraft">
         <summary>Ревизии каталога <span class="muted">{{ revisions.length }}</span></summary>
         <div class="ui-workspace-section__body">
@@ -447,6 +467,7 @@ const registrationDeleted = ref(false);
 let projectsRequest = 0;
 let pageGeneration = 0;
 let resettingCatalog = false;
+let disposed = false;
 const route = useRoute();
 const profile = ref(typeof route.query.profile === 'string'
   ? route.query.profile : localStorage.getItem(PROJECT_KEY) || '');
@@ -456,6 +477,7 @@ const loading = ref(true);
 // Создавать черновик можно после начальной загрузки проекта: иначе она, дочитав адрес
 // без черновика, закрывает документ и отбрасывает ответ только что начатого создания.
 const pageReady = ref(false);
+const editEntryBusy = ref(false);
 const error = ref('');
 const publishSupported = ref(false);
 const currentHash = ref<string | null>(null);
@@ -466,6 +488,7 @@ const mobilePane = ref(route.query.draft || route.query.catalog ? 'work' : 'cata
 const selectedNode = ref('');
 const templates = ref<AgentCard[]>([]);
 const templatesLoaded = ref(false);
+const promptEditorOpened = ref(false);
 const selectedTab = computed(() => route.query.tab === 'prompt' ? 'prompt'
   : route.query.tab === 'json' ? 'json' : 'graph');
 const selectedAgentNode = computed(() => {
@@ -564,6 +587,14 @@ const published = computed(() => Boolean(currentHash.value));
 const editingDraft = computed(() => Boolean(
   routesStore.opened?.draftId && routesStore.localDocument && !editorQueryError.value,
 ));
+const canEditPublishedRoute = computed(() => !editingDraft.value && !editorQueryError.value
+  && !error.value && !routesStore.error && Boolean(profile.value && selectedRoute.value
+    && (routesStore.opened?.catalogHash || currentHash.value))
+  && displayRouteList.value.some((entry) => entry.id === selectedRoute.value));
+const routeWorkspaceActive = computed(() => editingDraft.value && Boolean(selectedRoute.value)
+  && selectedTab.value !== 'json' && route.query.scope !== 'bootstrap');
+const canvasFocusedProblem = computed(() => focusedProblem.value?.path.includes('/prompt/')
+  ? null : focusedProblem.value);
 const workTitle = computed(() => {
   if (route.query.scope === 'bootstrap' && editingDraft.value) {
     return 'Начальная разведка';
@@ -914,8 +945,12 @@ async function openFromQuery(): Promise<void> {
   }
 }
 
-function openPrompt(nodeId: string): void {
-  if (!routesStore.opened?.draftId) {
+/**
+ * Переключает содержимое общей панели этапа, сохраняя выбор и схему.
+ * Вкладка входит в адрес, поэтому старые ссылки на инструкцию остаются рабочими.
+ */
+function selectNodeTab(tab: string | number): void {
+  if (!routesStore.opened?.draftId || !selectedNode.value) {
     return;
   }
 
@@ -923,8 +958,8 @@ function openPrompt(nodeId: string): void {
     profile: profile.value,
     draft: routesStore.opened.draftId,
     route: selectedRoute.value,
-    node: nodeId,
-    tab: 'prompt',
+    node: selectedNode.value,
+    tab: tab === 'prompt' ? 'prompt' : 'graph',
   } });
 }
 
@@ -1019,11 +1054,12 @@ function selectCanvasNode(value: { scope: RouteCommandScope; nodeId: string }): 
   } });
 }
 
-async function openDraft(id: string): Promise<void> {
+async function openDraft(id: string, routeId?: string): Promise<void> {
   mobilePane.value = 'work';
   await router.push({ path: '/routes', query: {
     profile: profile.value,
     draft: id,
+    ...(routeId ? { route: routeId } : {}),
     tab: 'graph'
   } });
 }
@@ -1081,6 +1117,84 @@ async function createEditorDraft(): Promise<void> {
     : { kind: 'empty' as const, title: 'Новый черновик' };
 
   await createAndOpenDraft(input);
+}
+
+/**
+ * Открывает последний редактируемый черновик с показанным маршрутом либо копирует публикацию.
+ * Свежий список и полные документы проверяются до создания; уход со страницы отменяет переход.
+ */
+async function editPublishedRoute(): Promise<void> {
+  if (!pageReady.value || editEntryBusy.value || !canEditPublishedRoute.value) {
+    return;
+  }
+
+  const entryProfile = profile.value;
+  const entryRoute = selectedRoute.value;
+  const catalogHash = routesStore.opened?.catalogHash ?? currentHash.value;
+
+  if (!catalogHash) {
+    return;
+  }
+
+  const entryQuery = route.query;
+  const generation = pageGeneration;
+  const contextCurrent = () => !disposed && generation === pageGeneration
+    && profile.value === entryProfile && selectedRoute.value === entryRoute
+    && route.query === entryQuery;
+
+  editEntryBusy.value = true;
+
+  try {
+    const summaries = await routesApi.drafts(entryProfile);
+
+    if (!contextCurrent()) {
+      return;
+    }
+
+    const candidates = summaries.filter((draft) => draft.profile === entryProfile
+      && draft.state === 'editing').sort((left, right) =>
+      right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
+    let draftId = '';
+
+    for (const candidate of candidates) {
+      const document = await routesApi.draft(entryProfile, candidate.id);
+
+      if (!contextCurrent()) {
+        return;
+      }
+      if (document.profile === entryProfile && document.state === 'editing'
+        && document.routes[entryRoute]) {
+        draftId = document.id;
+
+        break;
+      }
+    }
+
+    if (!draftId) {
+      const document = await routesApi.createDraft(entryProfile, {
+        kind: 'catalog',
+        title: 'Новый черновик',
+        catalogHash,
+      });
+
+      if (!contextCurrent()) {
+        return;
+      }
+
+      draftId = document.id;
+      await loadDrafts(entryProfile);
+    }
+
+    if (contextCurrent()) {
+      await openDraft(draftId, entryRoute);
+    }
+  } catch (failure) {
+    if (contextCurrent()) {
+      say(failureText(failure), true);
+    }
+  } finally {
+    editEntryBusy.value = false;
+  }
 }
 
 async function confirmDraftRebase(resolutions: RouteRebaseResolution[]): Promise<void> {
@@ -1437,6 +1551,13 @@ watch([selectedTab, () => routesStore.localDocument], () => {
   }
 }, { immediate: true });
 
+watch(selectedTab, (tab) => {
+  if (tab === 'prompt') {
+    promptEditorOpened.value = true;
+    mobilePane.value = 'inspector';
+  }
+}, { immediate: true });
+
 watch(() => route.query, async (query, previous) => {
   if (query === previous) {
     return;
@@ -1535,6 +1656,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  disposed = true;
   window.removeEventListener('beforeunload', protectBeforeUnload);
   stopWatchingRoutes();
 });
@@ -1654,16 +1776,22 @@ onUnmounted(() => {
   min-width: 0;
 }
 
-.route-editor-workspace__sidebar {
+.route-editor-workspace__main {
   display: grid;
-  grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.4fr);
-  align-items: start;
   gap: 12px;
   min-width: 0;
 }
 
 .route-editor-inspectors {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.route-editor-inspectors__content {
   display: grid;
+  align-content: start;
   gap: 16px;
   min-width: 0;
 }
@@ -1757,8 +1885,68 @@ onUnmounted(() => {
     padding: 12px;
   }
 
-  .route-editor-workspace__sidebar {
-    grid-template-columns: minmax(0, 1fr);
+}
+
+/* Высота ограничивается только в редакторе маршрута: разведка использует обычный холст. */
+
+@container routes (width > 1000px) {
+
+  .panel-scroll--route-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .panel-scroll--route-editor > * {
+    flex-shrink: 0;
+    margin-top: 0;
+  }
+
+  .panel-scroll--route-editor > .route-editor-workspace {
+    flex: 1 0 400px;
+    min-height: 400px;
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+  }
+
+  .route-editor-workspace__main {
+    grid-template-rows: minmax(160px, 1fr) minmax(96px, .45fr);
+    min-height: 0;
+  }
+
+  .route-editor-workspace__main :deep(.route-canvas) {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .route-editor-workspace__main :deep(.route-canvas__toolbar) {
+    flex-shrink: 0;
+  }
+
+  .route-editor-workspace__main :deep(.route-canvas__graph) {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .route-editor-workspace__stages {
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .route-editor-inspectors {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .route-editor-inspectors > .ui-tabs {
+    flex-shrink: 0;
+  }
+
+  .route-editor-inspectors__content {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
   }
 }
 
@@ -1792,16 +1980,11 @@ onUnmounted(() => {
     display: none;
   }
 
-  .route-editor-workspace__sidebar {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   [data-pane='work'] .route-editor-inspectors {
     display: none;
   }
 
-  [data-pane='inspector'] .route-editor-workspace > :deep(.route-canvas),
-  [data-pane='inspector'] .route-editor-workspace__sidebar > :deep(.route-stage-list),
+  [data-pane='inspector'] .route-editor-workspace__main,
   [data-pane='inspector'] .route-workflow-hint {
     display: none;
   }

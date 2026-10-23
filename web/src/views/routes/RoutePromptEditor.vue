@@ -39,12 +39,12 @@
           <span>Используют: {{ consumers.join(', ') }}</span>
           <UiButton data-test="copy-shared-block" @click="copySelectedBlock">Отдельная копия</UiButton>
         </div>
+        <RouteMarkdownInput ref="markdownInput" :model-value="selectedText" @update:model-value="changeText"
+                            @save="$emit('save')" @blur="$emit('end-history-group')" />
         <RouteContextFields :required-context="node.prompt.requiredContext"
                             :when="selectedBlock.when"
                             @update:required-context="changeRequiredContext"
                             @update:when="changeWhen" />
-        <RouteMarkdownInput ref="markdownInput" :model-value="selectedText" @update:model-value="changeText"
-                            @save="$emit('save')" @blur="$emit('end-history-group')" />
         <details open><summary>Предпросмотр Markdown</summary>
           <div class="route-prompt-preview" v-html="preview"></div>
         </details>
