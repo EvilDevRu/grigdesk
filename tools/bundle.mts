@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,7 @@ import {
   assertDeepSeekHostCompatibility, decodeDeepSeekHostContract, decodeDeepSeekRuntimeInfo,
 } from '../shared/chat/deepSeekBinary.ts';
 import { assertDeepSeekGlmApiAdmission } from '../shared/node/glmCompatibility.ts';
+import { writeBuildStepEvent } from '../shared/node/buildStepEvents.ts';
 import { executeBundle } from './bundleSteps.mts';
 import type { BundleBuildInput } from './bundleSteps.mts';
 
@@ -20,7 +21,28 @@ const root = fileURLToPath(new URL('..', import.meta.url));
  * Реальные команды сборки получают только изолированное окружение своего этапа.
  * Сборщик не вызывает install, управление службами или выбор сервера окна.
  */
-async function run(command: string, args: string[], input: BundleBuildInput): Promise<void> {
+export async function run(command: string, args: string[], input: BundleBuildInput): Promise<void> {
+  if (process.env.GRIGDESK_CTL_BUILD_OBSERVED === '1') {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(command, args, {
+        cwd: root,
+        env: input.env,
+        stdio: 'inherit',
+      });
+
+      child.once('error', reject);
+      child.once('close', (code, signal) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(Object.assign(new Error(`Сборщик завершился: ${code ?? signal}`), { code: code ?? 1 }));
+        }
+      });
+    });
+
+    return;
+  }
+
   const result = await execute(command, args, {
     cwd: root,
     env: input.env,
@@ -68,12 +90,17 @@ async function main(): Promise<void> {
 
   await executeBundle({
     root,
+    onStep: process.env.GRIGDESK_CTL_BUILD_OBSERVED === '1' ? writeBuildStepEvent : undefined,
     builders: {
       async server(input) {
         await run(process.execPath, [path.join(root, 'server/scripts/ctlBuild.mts'),
           'prepare-runtime', input.cacheDir], input);
         await run('npm', ['--prefix', path.join(root, 'server'), 'run', 'build:binary', '--',
-          '--out-dir', input.outDir, '--cache-dir', input.cacheDir], input);
+          '--out-dir', input.outDir, '--cache-dir', input.cacheDir], {
+            ...input,
+            env: process.env.GRIGDESK_CTL_BUILD_OBSERVED === '1'
+              ? { ...input.env, GRIGDESK_CTL_BUILD_OBSERVED: '1' } : input.env,
+          });
 
         return path.join(input.outDir, 'grigdesk-server');
       },
@@ -154,7 +181,10 @@ async function main(): Promise<void> {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   await main().catch((error: unknown) => {
+    const code = Number((error as { code?: unknown }).code);
+
     process.stderr.write(`Сборка комплекта не удалась: ${(error as Error).message}\n`);
-    process.exitCode = 1;
+    process.exitCode = process.env.GRIGDESK_CTL_BUILD_OBSERVED === '1'
+      && Number.isInteger(code) && code > 0 ? code : 1;
   });
 }

@@ -1,3 +1,3 @@
-import { runCli } from './commands.ts';
+import { runEntry } from './interactive.ts';
 
-process.exitCode = await runCli(process.argv.slice(2));
+process.exitCode = await runEntry(process.argv.slice(2));
