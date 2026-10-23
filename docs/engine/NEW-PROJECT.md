@@ -22,6 +22,9 @@
 
 ## Структура
 
+Значение каждого общего параметра, его формат, умолчание и место хранения перечислены
+в [справочнике профилей](../grigdesk/pipeline/project-profiles.md).
+
 Создай вручную:
 
 ~~~text
@@ -36,7 +39,8 @@ profiles/<name>/
     prompts/...
 ~~~
 
-profiles/ игнорируется Git. Не добавляй проектные пути и секреты в tracked engine-файлы.
+Содержимое профилей — локальная конфигурация вне Git исходников; ссылка на внешний каталог
+может отслеживаться отдельно. Не добавляй проектные пути и секреты в tracked engine-файлы.
 
 До публикации оставь capability выключенной:
 
@@ -71,7 +75,7 @@ PROJECT_RUNNER_FAILOVER=claude
 profile_workspace_mode         # isolated | shared
 profile_repositories TASK      # name<TAB>source<TAB>workspace
 profile_project_context        # JSON: stack[] + guardrails[]
-profile_source_branch TASK
+profile_source_branch TASK REPO # ветка указанного репозитория
 profile_container TASK
 profile_stand_alive TASK       # только health, без lifecycle
 ~~~
