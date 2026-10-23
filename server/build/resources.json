@@ -7,11 +7,6 @@
       "kind": "file"
     },
     {
-      "source": "server/seed/agents",
-      "target": "server/seed/agents",
-      "kind": "dir"
-    },
-    {
       "source": "engine/bin",
       "target": "engine/bin",
       "kind": "dir"

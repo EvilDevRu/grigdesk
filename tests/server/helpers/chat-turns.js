@@ -173,7 +173,6 @@ export async function chatAppFixture(t, {
     chatBindingsDir: path.join(root, 'bindings'),
     rootDir: root,
     factoryHome: root,
-    agentsDir: path.join(root, 'agents'),
     artifactsDir: path.join(root, 'artifacts'),
     port: 18140,
   };

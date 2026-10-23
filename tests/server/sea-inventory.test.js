@@ -85,7 +85,7 @@ test('SEA-INV-01: таблица покрывает все точки упако
 
   const paths = new Set(manifest.resources.map((resource) => resource.path));
 
-  for (const required of ['VERSION', 'server/seed/', 'server/requirements-media.txt',
+  for (const required of ['VERSION', 'server/requirements-media.txt',
     'server/package.json', 'server/package-lock.json']) {
     assert.ok(paths.has(required), `в таблице нет ресурса ${required}`);
   }

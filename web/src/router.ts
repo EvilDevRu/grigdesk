@@ -45,12 +45,7 @@ const routes: RouteRecordRaw[] = [
       title: 'Чаты',
     },
   },
-  {
-    path: '/agents',
-    name: 'agents',
-    component: () => import('./views/AgentsView.vue'),
-    meta: { title: 'Агенты', layout: 'workspace' },
-  },
+  { path: '/agents', redirect: '/routes' },
   {
     path: '/diff',
     name: 'diff',

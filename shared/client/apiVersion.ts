@@ -3,4 +3,4 @@ export const API_VERSION = {
   minor: 1,
 };
 
-export const API_CONTRACT_FINGERPRINT = 'e420a7476263c83a6cddc69414d5d85404fc80fa425dca03e3ae90711dfbac74';
+export const API_CONTRACT_FINGERPRINT = 'c9cc9ac9f54909d08fab0e41c29faa513b3be0691100a5a5baf38f586d168d22';

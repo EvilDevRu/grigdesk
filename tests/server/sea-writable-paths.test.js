@@ -78,7 +78,6 @@ test('SEA-WP-02: конфигурация source сохраняет прежни
 
   assert.equal(config.rootDir, ROOT);
   assert.equal(config.profilesDir, path.join(ROOT, 'profiles'));
-  assert.equal(config.agentsSeedDir, path.join(ROOT, 'server/seed/agents'));
   assert.equal('webDist' in config, false);
   assert.equal('uiReleasesDir' in config, false);
   assert.ok(!config.routesDir.startsWith(`${ROOT}${path.sep}`));

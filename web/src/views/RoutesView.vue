@@ -186,14 +186,13 @@
                               :selected-node-id="selectedNode"
                               :focused-issue="focusedProblem"
                               :capabilities="routesStore.editorInfo?.capabilities ?? null"
-                              :templates="templates"
                               @select-node="selectCanvasNode"
                               @change="replaceEditorDocument"
                               @prompt-change="changeBootstrapPrompt"
                               @end-history-group="endHistoryGroup" @save="saveDraft" />
         <RoutePromptEditor v-else-if="selectedTab === 'prompt' && selectedRoute && selectedNode"
                            :document="routesStore.localDocument" :route-id="selectedRoute"
-                           :node-id="selectedNode" :templates="templates"
+                           :node-id="selectedNode"
                            :focus-path="focusedProblemPath"
                            @change="changePrompt" @save="saveDraft"
                            @end-history-group="endHistoryGroup" />
@@ -340,7 +339,6 @@ import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vu
 
 import type { FactoryGraphData } from '../../../shared/pipeline/factoryGraphContracts.ts';
 import type { RouteRevision } from '../../../shared/pipeline/routesContracts.ts';
-import type { AgentCard } from '../../../shared/pipeline/agentsContracts.ts';
 import type { RouteDraft, RouteRebaseResolution,
   RouteRevisionCompareReport } from '../../../shared/pipeline/routesEditorContracts.ts';
 import type { RouteEditorIssue } from '../../../shared/pipeline/routesEditorContracts.ts';
@@ -348,7 +346,6 @@ import { publishSummary } from '../../../shared/pipeline/routesContracts.ts';
 import { failureText } from '../shared/apiClient.ts';
 import { routesApi } from '../shared/routesApi.ts';
 import type { DraftCreateRequest } from '../shared/routesApi.ts';
-import { agentsApi } from '../shared/agentsApi.ts';
 import {
   UiButton,
   UiIconButton,
@@ -456,8 +453,6 @@ const historyCompareReport = ref<RouteRevisionCompareReport | null>(null);
 const selectedRoute = ref('');
 const mobilePane = ref(route.query.draft || route.query.catalog ? 'work' : 'catalog');
 const selectedNode = ref('');
-const templates = ref<AgentCard[]>([]);
-const templatesLoaded = ref(false);
 const selectedTab = computed(() => route.query.tab === 'prompt' ? 'prompt'
   : route.query.tab === 'json' ? 'json' : 'graph');
 const selectedAgentNode = computed(() => {
@@ -824,12 +819,6 @@ async function openFromQuery(): Promise<void> {
       selectedNode.value = requestedNode || routesStore.localDocument.bootstrap.entry
         || nodes[0]?.id || '';
 
-      if (!templatesLoaded.value) {
-        templatesLoaded.value = true;
-
-        try { templates.value = await agentsApi.list(); } catch { templates.value = []; }
-      }
-
       return;
     }
     if (requestedRoute && !ids.includes(requestedRoute)) {
@@ -852,11 +841,6 @@ async function openFromQuery(): Promise<void> {
 
     selectedNode.value = requestedNode || nodes.find((node) => node.prompt)?.id || '';
 
-    if (selectedTab.value === 'prompt' && !templatesLoaded.value) {
-      templatesLoaded.value = true;
-
-      try { templates.value = await agentsApi.list(); } catch { templates.value = []; }
-    }
   } else if (typeof catalog === 'string') {
     const requestedProfile = profile.value;
 
@@ -1390,8 +1374,6 @@ async function syncQuery(query: typeof route.query): Promise<void> {
     revisions.value = [];
     historyCompareReport.value = null;
     currentHash.value = null;
-    templates.value = [];
-    templatesLoaded.value = false;
     closeDraft();
     await load();
     await loadEditor(profile.value);

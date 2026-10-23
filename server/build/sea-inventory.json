@@ -1465,14 +1465,6 @@
       "detail": "Lockfile для npm ci --omit=dev при упаковке."
     },
     {
-      "path": "server/seed/",
-      "kind": "dir",
-      "expect": "source",
-      "owner": "task-13",
-      "fate": "asset",
-      "detail": "Начальные описания агентов копируются в комплект."
-    },
-    {
       "path": "server/requirements-media.txt",
       "kind": "file",
       "expect": "source",

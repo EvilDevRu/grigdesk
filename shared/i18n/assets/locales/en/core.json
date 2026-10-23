@@ -19,7 +19,6 @@
   "board": "Board",
   "pipeline": "Pipeline",
   "sandboxes": "Sandboxes",
-  "agents": "Agents",
   "routes": "Routes",
   "projects": "Projects",
   "terminal": "Terminal",
