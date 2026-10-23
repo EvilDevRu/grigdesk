@@ -559,3 +559,59 @@ test('TW-N03: отдельный tool control, точная форма и неи
     action: 'open', id: 'code',
   })).status, 404);
 });
+
+for (const code of ['server_start_failed', 'server_start_timeout']) {
+  test(`SH-START-REASON: ${code} сохраняет причину и рабочий повтор`, async (t) => {
+    const value = fixture();
+
+    t.after(() => value.shell.close());
+    await value.shell.connect();
+    value.report('online');
+    value.report('connecting');
+
+    const detail = { code, message: 'Синтетическая причина местного запуска' };
+    const snapshot = {
+      status: 'offline',
+      detail,
+      serverApi: null,
+    };
+    const before = Date.now();
+
+    if (code === 'server_start_failed') {
+      value.shell.reportBackground(value.settings.selected, snapshot);
+    } else {
+      value.shell.report(value.settings.selected, snapshot);
+    }
+
+    const reported = value.shell.state().detail;
+
+    assert.equal(reported.code, code, 'Назначение повтора сохраняет причину запуска.');
+    assert.equal(reported.message, detail.message);
+    assert.ok(reported.retryAt >= before + 900);
+    assert.ok(reported.retryAt <= Date.now() + 1100);
+
+    const probes = value.probes();
+
+    await value.timers.at(-1).callback();
+    assert.equal(value.probes(), probes + 1, 'Повтор действительно проверяет сервер.');
+    assert.equal(value.shell.state().detail.code, 'retry_wait', 'Обычный offline сохраняет политику.');
+  });
+}
+
+test('SH-START-REASON: срок через report не меняет уже готовый online', async (t) => {
+  const value = fixture();
+
+  t.after(() => value.shell.close());
+  value.terminal('online');
+  await value.shell.connect();
+
+  const before = value.shell.state();
+
+  value.shell.report(value.settings.selected, {
+    status: before.status,
+    detail: { code: 'server_start_timeout', message: 'Поздний срок' },
+    serverApi: before.serverApi,
+  });
+  assert.deepEqual(value.shell.state(), before);
+  assert.equal(value.timers.length, 0);
+});

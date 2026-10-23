@@ -22,7 +22,10 @@
         </option>
       </UiSelect>
     </SettingsField>
-    <p v-if="details">{{ t('settings.effective') }} {{ details.effective }} {{ t('settings.source2') }} {{ details.source }}</p>
+    <p v-if="details">
+      {{ t('settings.effective') }} {{ levelLabel(details.effective) }}
+      {{ t('settings.source2') }} {{ sourceLabel(details.source) }}
+    </p>
     <SettingsSection>
       <WebLogPanel v-if="active" />
     </SettingsSection>
@@ -54,6 +57,27 @@ const fields = computed(() => getSettingsFields(uiLocale.value)
 const loaded = computed(() => settings.snapshot.resources.some((item) =>
   item.id === 'factoryDebug' && item.loaded));
 const details = computed(() => settings.resourceDetails.factoryDebug);
+
+function levelLabel(value: unknown): string {
+  return FACTORY_DEBUG_LEVELS.find((item) => item.value === value)?.label ?? String(value);
+}
+
+/**
+ * Источник уровня приходит от движка внутренним словом; известные слова переводятся,
+ * неизвестное показывается как есть, чтобы новое значение не пропадало из строки.
+ */
+function sourceLabel(value: unknown): string {
+  const labels: Record<string, string> = {
+    default: t('settings.diagnosticSourceDefault'),
+    global: t('settings.diagnosticSourceGlobal'),
+    profile: t('settings.diagnosticSourceProfile'),
+    task: t('settings.diagnosticSourceTask'),
+    env: t('settings.diagnosticSourceEnv'),
+  };
+
+  return labels[String(value)] ?? String(value);
+}
+
 const level = computed(() => {
   settings.snapshot;
 
@@ -133,6 +157,6 @@ watch(() => props.active, load, { immediate: true });
 .settings-diagnostics > p {
   margin: 0;
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
 }
 </style>

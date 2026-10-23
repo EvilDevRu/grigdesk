@@ -158,7 +158,11 @@ export function createShellApi(options: ShellOptions) {
     const current = states.get(id);
 
     if (current) {
-      states.set(id, { ...current, detail: { code: 'retry_wait', retryAt: Date.now() + duration } });
+      const previous = current.detail;
+      const detail = previous && ['server_start_failed', 'server_start_timeout'].includes(previous.code)
+        ? previous : { code: 'retry_wait' };
+
+      states.set(id, { ...current, detail: { ...detail, retryAt: Date.now() + duration } });
       changed();
     }
   };
@@ -168,6 +172,10 @@ export function createShellApi(options: ShellOptions) {
    * Любая терминальная причина отменяет ранее назначенный offline-повтор.
    */
   const report = (id: string, value: UpstreamState) => {
+    if (value.detail?.code === 'server_start_timeout' && states.get(id)?.status === 'online') {
+      return;
+    }
+
     if (JSON.stringify(states.get(id)) !== JSON.stringify(value)) {
       states.set(id, value);
       changed();

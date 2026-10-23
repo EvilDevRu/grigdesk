@@ -1083,21 +1083,17 @@ async function onModelChange(e: Event) {
   const select = e.target as HTMLSelectElement;
   const nextModelId = select.value;
 
-  if (requiresContextReset(nextModelId) && !await chat.resetContext(props.sid)) {
+  const hasTurns = sess.value?.messages.some((message) => (
+    message.role === 'user' || message.role === 'assistant'
+  )) || false;
+
+  if (requiresContextReset(nextModelId) && !await chat.resetContext(props.sid, { note: hasTurns })) {
     select.value = modelId.value;
 
     return;
   }
 
   chat.setModel(props.sid, nextModelId);
-
-  // У новой модели может не быть текущего уровня эффорта — снимаем явный выбор.
-  // Выбирать другую ступень за пользователя нельзя.
-  const lv = effortLevels.value;
-
-  if (sess.value?.effort && lv.length && !lv.includes(sess.value.effort)) {
-    chat.setEffort(props.sid, '');
-  }
 }
 
 // Реестр загружается асинхронно и может обновиться уже после открытия чата.

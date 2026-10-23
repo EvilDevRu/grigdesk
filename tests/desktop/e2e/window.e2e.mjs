@@ -222,7 +222,10 @@ async function verifyWebReload(page) {
 test('DW-E1: окно загружает выбранный origin с sandbox', options, async (t) => {
   const run = await createRun(t);
   const stub = await run.stub();
+  const started = Date.now();
   const { app, page } = await run.launch(stub.address);
+
+  assert.ok(Date.now() - started < 10_000, 'Готовая заглушка показывается быстрее 10 с.');
 
   await page.locator('#same').waitFor();
   assert.match(new URL(page.url()).origin, /^http:\/\/127\.0\.0\.1:471[0-9]{2}$/u);
@@ -1018,7 +1021,9 @@ test('SM-E03 prefs, локальная клавиша и плагин приме
   const before = await page.evaluate(() => document.querySelector('#app').__vue_app__
     .config.globalProperties.$pinia._s.get('plugins').byId('inbox').enabled);
 
-  await page.getByRole('switch', { name: 'Включить Входящие', exact: true }).first().press('Space');
+  await page.locator('[data-select-plugin="inbox"]').click();
+  await page.locator('[data-plugin-page="inbox"][data-ready="true"]').waitFor();
+  await page.getByRole('switch', { name: 'Включить Входящие', exact: true }).press('Space');
   await page.getByRole('button', { name: 'Применить', exact: true }).click();
   await waitFor(() => page.evaluate((before) => document.querySelector('#app').__vue_app__
     .config.globalProperties.$pinia._s.get('plugins').byId('inbox').enabled !== before, before));

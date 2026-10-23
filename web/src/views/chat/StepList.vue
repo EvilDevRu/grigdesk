@@ -20,16 +20,16 @@
       <span v-else class="sum">Ход агента: {{ summary }}</span>
     </UiDisclosureButton>
     <div v-if="open || live" :id="`${baseId}-list`" class="list">
-      <div v-for="(r, i) in rows" :key="i" class="step" :class="[r.k, isNested(r) ? 'nested' : '']">
+      <div v-for="r in rows" :key="r.rowKey" class="step" :class="[r.k, isNested(r) ? 'nested' : '']">
         <!-- Размышление -->
         <template v-if="r.k === 'think'">
           <UiDisclosureButton
             class="step-disclosure"
             density="compact"
-            :open="Boolean(expanded[i])"
-            :controls="`${baseId}-step-${i}`"
+            :open="Boolean(expanded[r.rowKey])"
+            :controls="`${baseId}-${r.rowKey}`"
             :disabled="!hasBody(r)"
-            @update:open="toggle(i, r)"
+            @update:open="toggle(r)"
           >
             <span class="head think">
               <span class="ico">✻</span>
@@ -38,7 +38,7 @@
               </span>
             </span>
           </UiDisclosureButton>
-          <pre v-if="expanded[i]" :id="`${baseId}-step-${i}`" class="body">{{ r.text }}</pre>
+          <pre v-if="expanded[r.rowKey]" :id="`${baseId}-${r.rowKey}`" class="body">{{ r.text }}</pre>
         </template>
 
         <!-- Промежуточный текст агента -->
@@ -49,10 +49,10 @@
           <UiDisclosureButton
             class="step-disclosure"
             density="compact"
-            :open="Boolean(expanded[i])"
-            :controls="`${baseId}-step-${i}`"
+            :open="Boolean(expanded[r.rowKey])"
+            :controls="`${baseId}-${r.rowKey}`"
             :disabled="!hasBody(r)"
-            @update:open="toggle(i, r)"
+            @update:open="toggle(r)"
           >
             <span class="head" :class="kindOf(r.name).cls">
               <span class="ico">{{ kindOf(r.name).ico }}</span>
@@ -66,7 +66,7 @@
               <span v-else-if="live" class="mark run">…</span>
             </span>
           </UiDisclosureButton>
-          <div v-if="expanded[i]" :id="`${baseId}-step-${i}`" class="body-wrap">
+          <div v-if="expanded[r.rowKey]" :id="`${baseId}-${r.rowKey}`" class="body-wrap">
             <div v-if="pathOf(r)" class="path">{{ pathOf(r) }}</div>
             <!-- Рассмотренная картинка идёт через защищённый маршрут рабочей папки чата.
                  Обычный щелчок по ней перехватывает чат и открывает общий просмотрщик. -->
@@ -110,10 +110,10 @@
           <UiDisclosureButton
             class="step-disclosure"
             density="compact"
-            :open="Boolean(expanded[i])"
-            :controls="`${baseId}-step-${i}`"
+            :open="Boolean(expanded[r.rowKey])"
+            :controls="`${baseId}-${r.rowKey}`"
             :disabled="!r.text"
-            @update:open="toggle(i, r)"
+            @update:open="toggle(r)"
           >
             <span class="head other">
               <span class="ico">•</span>
@@ -124,8 +124,8 @@
             </span>
           </UiDisclosureButton>
           <pre
-            v-if="expanded[i] && r.text"
-            :id="`${baseId}-step-${i}`"
+            v-if="expanded[r.rowKey] && r.text"
+            :id="`${baseId}-${r.rowKey}`"
             class="body res"
             :class="{ bad: !r.ok }"
           >{{ r.text }}</pre>
@@ -153,12 +153,8 @@ import { lineDiff, splitRows, unifiedDiff } from '../../shared/diff.ts';
 import { api } from '../../shared/apiClient.ts';
 import { UiDisclosureButton } from '../../ui';
 import { chatWorkdirImageHref } from './chatImages.ts';
-
-interface StepRow extends ChatStep {
-  res?: ChatStep;
-  secs?: number;
-  times?: number;
-}
+import { foldChatSteps, nestChatStepRows } from './chatStepRows.ts';
+import type { StepRow } from './chatStepRows.ts';
 
 // Лента хода агента: размышления, вызовы инструментов и их результаты —
 // то же, что видно в чате VS Code. Живая (пока агент работает) и сохранённая
@@ -180,7 +176,7 @@ const props = defineProps({
 
 // Свёрнутая по умолчанию сохранённая лента (в живой всё видно сразу).
 const open = ref(props.live);
-const expanded = ref<Record<number, boolean>>({}); // индекс шага → раскрыт ли
+const expanded = ref<Record<string, boolean>>({}); // устойчивый ключ строки → раскрыта ли
 // Адреса, которые сервер или браузер не отдали. Ключ — адрес, а не номер строки: окно
 // ленты сдвигает номера, а повторное раскрытие не перезапрашивает уже битый файл.
 const brokenImages = reactive(new Set<string>());
@@ -192,75 +188,12 @@ watch(() => props.live, (live) => {
   open.value = live;
 });
 
-// Результаты приклеиваем к своим вызовам (res приходит отдельным шагом с тем же id) —
-// строка ленты должна быть одна: «инструмент + чем закончился».
-const rows = computed(() => {
-  const out: StepRow[] = [];
-  const byId = new Map<string | undefined, StepRow>();
-  const displayed = new Set(props.displayedAssistantIds);
-
-  for (const s of props.steps || []) {
-    if (s.k === 'text' && s.id && displayed.has(s.id)) {
-      continue;
-    }
-
-    if (s.k === 'res') {
-      const tool = byId.get(s.id);
-
-      if (tool) {
-        tool.res = s;
-
-        continue;
-      }
-      // Вызов не дошёл (его вытеснило окно ленты) — результат всё равно показываем
-      // своей строкой: раньше он молча превращался в пустую строку без разметки.
-    }
-    // Исполнитель дослал подробности уже показанного вызова — обновляем ТУ ЖЕ строку.
-    // Иначе одно действие выглядело бы двумя, а свежий вариант — повтором.
-    if (s.k === 'tool' && s.id) {
-      const known = byId.get(s.id);
-
-      if (known) {
-        Object.assign(known, s);
-
-        continue;
-      }
-    }
-    // Одинаковые служебные строки подряд (ретраи сети идут сериями) — одной строкой с «×N».
-    const prev = out[out.length - 1];
-
-    if (s.k === 'note' && prev?.k === 'note' && prev.text === s.text) {
-      prev.times = (prev.times || 1) + 1;
-
-      continue;
-    }
-
-    const row = { ...s };
-
-    if (s.k === 'tool' && s.id) {
-      byId.set(s.id, row);
-    }
-
-    out.push(row);
-  }
-  // Сколько агент думал: блок размышления приходит уже готовым, поэтому его длительность —
-  // это время от ПРЕДЫДУЩЕГО шага до него (как «Thought for 49s» в VS Code).
-  for (let i = 1; i < out.length; i++) {
-    const row = out[i]!;
-
-    if (row.k !== 'think' || !row.at) {
-      continue;
-    }
-
-    const prev = out[i - 1]?.at;
-
-    if (prev && row.at > prev) {
-      row.secs = Math.round((row.at - prev) / 1000);
-    }
-  }
-
-  return out;
-});
+// Склейка и длительности используют порядок прихода, а показ собирает детей под вызовом.
+// История остаётся неизменной; ключи раскрытия не зависят от позиции в готовом списке.
+const rows = computed(() => nestChatStepRows(foldChatSteps(
+  props.steps || [],
+  new Set(props.displayedAssistantIds),
+)));
 
 const toolCount = computed(() => rows.value.filter((r) => r.k === 'tool').length);
 const summary = computed(() => {
@@ -336,13 +269,13 @@ function diffStat(row: StepRow) {
   return `+${d.added} −${d.removed}`;
 }
 
-function toggle(i: number, row: StepRow) {
+function toggle(row: StepRow) {
   // Раскрывать есть что только у шагов с телом.
   if (!hasBody(row)) {
     return;
   }
 
-  expanded.value[i] = !expanded.value[i];
+  expanded.value[row.rowKey] = !expanded.value[row.rowKey];
 }
 
 function hasBody(row: StepRow) {
@@ -380,7 +313,7 @@ function resTextOf(row: StepRow) {
   return text.trim() === STEP_IMAGE_TEXT && imageOf(row) ? '' : text;
 }
 
-// Вложенный шаг — шаг субагента: у него `parent` (id вызова Task). Старые ленты несли
+// Вложенный шаг — шаг субагента: у него `parent` (id вызова Agent/Task). Старые ленты несли
 // вместо него `sub: true` — их читаем так же, чтобы сохранённые ходы не поменяли вид.
 function isNested(row: StepRow) {
   return Boolean(row.parent) || row.sub === true;
@@ -398,6 +331,7 @@ const KIND: Record<string, { ico: string; cls: string }> = {
   NotebookEdit: { ico: '✎', cls: 'write' },
   Glob: { ico: '🔎', cls: 'find' },
   Grep: { ico: '🔎', cls: 'find' },
+  Agent: { ico: '🤖', cls: 'task' },
   Task: { ico: '🤖', cls: 'task' },
   WebFetch: { ico: '🌐', cls: 'web' },
   WebSearch: { ico: '🌐', cls: 'web' },

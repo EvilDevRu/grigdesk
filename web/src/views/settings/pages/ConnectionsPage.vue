@@ -19,7 +19,7 @@
           :model-value="value(field.key)"
           :aria-label="field.label"
           autocomplete="new-password"
-          :placeholder="t('settings.enterANewPasswordToSaveChanges')"
+          :placeholder="t('settings.newPasswordPlaceholder')"
           @update:model-value="edit(field.key, $event)"
         />
         <UiInput
@@ -30,7 +30,7 @@
           @update:model-value="edit(field.key, $event)"
         />
       </SettingsField>
-      <UiButton
+      <UiButton data-context="workspace-form-wrap"
         class="settings-connection-test"
         :disabled="!configured || dirty || testing"
         @click="testConnection"
@@ -164,9 +164,12 @@ watch([() => props.active, () => settings.pageId], load, { immediate: true });
 <style scoped>
 .settings-connections {
   display: grid;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
   align-content: start;
+}
+.settings-connections > [data-settings-field] + [data-settings-field] {
+  margin-top: -12px;
 }
 .settings-connections p {
   margin: 0;

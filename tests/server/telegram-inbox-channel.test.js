@@ -119,6 +119,7 @@ function harness({
   onMarker = null,
   botApi = null,
   nativeExtras = {},
+  isProjectDeleted = () => false,
 } = {}) {
   const byMessage = new Map(snapshots.map((snapshot) => [snapshot.messageId, snapshot]));
   const rows = positions || snapshots.map((snapshot, index) => position(snapshot, index + 1));
@@ -157,6 +158,7 @@ function harness({
   };
   const stateStore = inboxState();
   const capability = createTelegramInboxChannel({
+    isProjectDeleted,
     enabled: async () => pluginEnabled(),
     state: async () => ({
       connection,
@@ -836,4 +838,73 @@ test('flattened context не публикует bot identity, token, Bot API и�
       'botId', 'credentials', 'token', 'botApi', 'archive', 'rules', 'paths', 'botSettings', 'pollState',
     ]) assert.equal(Object.hasOwn(context, forbidden), false);
   } finally { await context.release(); }
+});
+
+
+test('PD-reconnect: tombstone не получает эффективную политику после подключения', async () => {
+  const { capability, counters, rules } = harness({
+    isProjectDeleted: (id) => id === 'grigdesk',
+  });
+  const before = await rules.read();
+  const context = await capability.acquireInboxContext();
+
+  try {
+    const batches = await context.listAuthorizedBatches({
+
+      nowMs: (T0 + 1000) * 1000,
+      limit: 100,
+      activationWindows: windows(),
+
+    });
+
+    assert.deepEqual(batches, []);
+    assert.equal(counters.read, 0, 'tombstone проверяется до чтения текста');
+    assert.deepEqual(await rules.read(), before);
+  } finally {
+    context.release();
+  }
+});
+
+test('PD-policy-race: удаление во время чтения не выдаёт batch', async () => {
+  let deleted = false;
+  const { capability } = harness({
+    isProjectDeleted: () => deleted,
+    onRead: () => {
+      deleted = true;
+    },
+  });
+  const context = await capability.acquireInboxContext();
+
+  try {
+    assert.deepEqual(await context.listAuthorizedBatches({
+
+      nowMs: (T0 + 1000) * 1000,
+      limit: 100,
+      activationWindows: windows(),
+
+    }), []);
+  } finally {
+    context.release();
+  }
+});
+
+test('PD-reconnect: ошибка предиката закрывает эффективную политику', async () => {
+  const { capability } = harness({
+    isProjectDeleted: () => {
+      throw new Error('prefs повреждены');
+    },
+  });
+  const context = await capability.acquireInboxContext();
+
+  try {
+    await assert.rejects(context.listAuthorizedBatches({
+
+      nowMs: (T0 + 1000) * 1000,
+      limit: 100,
+      activationWindows: windows(),
+
+    }), { code: 'telegram_inbox_invalid_policy' });
+  } finally {
+    context.release();
+  }
 });

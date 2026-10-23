@@ -6,7 +6,7 @@ process.env.NODE_ENV = 'test';
 
 // Общий стенд для сценариев формы запуска: happy-dom + заглушки сторов.
 // launchOptions/launch задаёт тест, остальные вызовы — безобидные пустышки.
-async function mountLaunchForm(t, { launchOptions }) {
+async function mountLaunchForm(t, { launchOptions, launch = null }) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://grigdesk.test/#/board' });
   for (const [key, value] of Object.entries({
@@ -32,6 +32,13 @@ async function mountLaunchForm(t, { launchOptions }) {
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
   ]);
   const launchCalls = [];
+  const listeners = new Set();
+
+  globalThis.__taskModalLaunchSubscribe = (handler) => {
+    listeners.add(handler);
+
+    return () => listeners.delete(handler);
+  };
   globalThis.__taskModalLaunchApi = {
     async get(url) {
       if (url.endsWith('/clarifications')) return { text: '' };
@@ -55,6 +62,11 @@ async function mountLaunchForm(t, { launchOptions }) {
       launchOptions,
       async launch(id, payload) {
         launchCalls.push([String(id), payload]);
+
+        if (launch) {
+          return launch(id, payload);
+        }
+
         return { outcome: 'launched', profile: payload.profile, route: payload.route };
       },
     },
@@ -108,11 +120,132 @@ async function mountLaunchForm(t, { launchOptions }) {
       '__taskModalLaunchAnalysisStore',
       '__taskModalLaunchFavoritesStore',
       '__taskModalLaunchSeenStore',
+      '__taskModalLaunchSubscribe',
     ]) delete globalThis[key];
   });
   await flushPromises();
-  return { wrapper, flushPromises, launchCalls };
+
+  return {
+    wrapper,
+    flushPromises,
+    launchCalls,
+    listeners,
+    emit: (name, payload) => listeners.forEach((handler) => handler(name, payload)),
+  };
 }
+
+/**
+ * Каталог содержит валидный маршрут: кнопка блокируется именно исчезнувшим профилем.
+ * Наличие соседа проверяет запрет автоматического выбора вместо удалённого проекта.
+ */
+function deletionCatalog(removed = false) {
+  return {
+    profiles: removed ? ['project-beta'] : ['project-alpha', 'project-beta'],
+    profile: removed ? 'project-beta' : 'project-alpha',
+    routes: ['feature'],
+    defaultRoute: 'feature',
+    routeOptions: { feature: { deliveryMode: 'publish', instrumentationRequired: false } },
+    repositories: [{ name: 'repo', targetBranch: 'main' }],
+  };
+}
+
+for (const event of ['projects-changed', 'hello']) {
+  test(`PD: открытая форма сверяет удаление через ${event}`, async (t) => {
+    let removed = false;
+    let reads = 0;
+    const { wrapper, flushPromises, emit, listeners } = await mountLaunchForm(t, {
+      launchOptions: async () => {
+        reads += 1;
+
+        return deletionCatalog(removed);
+      },
+    });
+
+    await wrapper.get('[data-role="task-launch-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.get('[data-role="task-launch-note"]').setValue('Критерии человека');
+    assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, false);
+    removed = true;
+    emit(event, {
+    kind: 'deleted',
+    id: 'project-alpha',
+    revision: 3,
+  });
+    await flushPromises();
+    assert.equal(reads, 2);
+    assert.equal(wrapper.get('#launch-profile').element.value, '');
+    assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, true);
+    assert.equal(wrapper.get('[data-role="task-launch-note"]').element.value, 'Критерии человека');
+    assert.equal(wrapper.get('#launch-profile').findAll('option')
+      .some((option) => option.element.value === 'project-alpha'), false);
+    wrapper.unmount();
+    assert.equal(listeners.size, 0);
+  });
+}
+
+test('PD: поздний первый launch-options не возвращает удалённый профиль', async (t) => {
+  let release;
+  let reads = 0;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const { wrapper, flushPromises, emit } = await mountLaunchForm(t, {
+    launchOptions: async () => {
+      reads += 1;
+
+      return reads === 1 ? pending : deletionCatalog(true);
+    },
+  });
+
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
+  emit('projects-changed', {
+    kind: 'deleted',
+    id: 'project-alpha',
+    revision: 3,
+  });
+  await flushPromises();
+  release(deletionCatalog());
+  await flushPromises();
+  assert.equal(reads, 2);
+  assert.equal(wrapper.get('#launch-profile').element.value, '');
+  assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, true);
+});
+
+test('PD: ошибка сверки блокирует запуск, повтор сохраняет выбор и текущие критерии', async (t) => {
+  let reads = 0;
+  let release;
+  const { wrapper, flushPromises, emit } = await mountLaunchForm(t, {
+    launchOptions: async () => {
+      reads += 1;
+
+      if (reads === 2) {
+        throw new Error('Сеть недоступна');
+      }
+      if (reads === 3) {
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      }
+
+      return deletionCatalog();
+    },
+  });
+
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
+  await flushPromises();
+  emit('hello', {});
+  await flushPromises();
+  assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, true);
+  assert.match(wrapper.text(), /Не удалось обновить параметры запуска/u);
+  emit('hello', {});
+  await wrapper.get('[data-role="task-launch-note"]').setValue('Правка во время запроса');
+  release(deletionCatalog());
+  await flushPromises();
+  assert.equal(wrapper.get('#launch-profile').element.value, 'project-alpha');
+  assert.equal(wrapper.get('[data-role="task-launch-note"]').element.value, 'Правка во время запроса');
+  assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, false);
+  assert.equal(wrapper.text().includes('Не удалось обновить параметры запуска'), false);
+});
 
 test('TaskModal выбирает project-beta, перечитывает feature и шлёт profile в launch', async (t) => {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
@@ -408,4 +541,50 @@ test('TaskModal: критерии предзаполняются объёмом 
   await flushPromises();
   assert.equal(launchCalls.length, 1);
   assert.deepEqual(launchCalls[0][1].acceptanceCriteria, ['Своя формулировка']);
+});
+
+test('PD-launch-catalog: tombstoned при старте перечитывает варианты и сохраняет причину', async (t) => {
+  let removed = false;
+  let reads = 0;
+  const { wrapper, flushPromises, launchCalls } = await mountLaunchForm(t, {
+    launchOptions: async () => {
+      reads += 1;
+
+      return {
+
+        profiles: removed ? [] : ['project-alpha'],
+
+        profile: removed ? '' : 'project-alpha',
+        routes: removed ? [] : ['feature'],
+
+        defaultRoute: removed ? '' : 'feature',
+        repositories: removed ? [] : [{ name: 'project-alpha', targetBranch: 'main' }],
+        runners: ['claude'],
+        defaultRunner: 'claude',
+
+        routeOptions: { feature: { deliveryMode: 'publish', instrumentationRequired: false } },
+
+        reason: removed ? 'Регистрация проекта удалена.' : '',
+
+      };
+    },
+    launch: async () => {
+      removed = true;
+
+      throw Object.assign(new Error('Регистрация проекта «project-alpha» удалена.'), {
+        status: 409, data: { error: 'tombstoned', message: 'Регистрация проекта «project-alpha» удалена.' },
+      });
+    },
+  });
+
+  await wrapper.get('[data-role="task-launch-open"]').trigger('click');
+  await flushPromises();
+  assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, false);
+
+  await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
+  await flushPromises();
+  assert.equal(launchCalls.length, 1, 'валидная форма отправляет запуск и получает tombstoned');
+  assert.equal(reads >= 2, true, 'после tombstoned нужен свежий каталог');
+  assert.match(wrapper.text(), /Регистрация проекта/);
+  assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, true);
 });

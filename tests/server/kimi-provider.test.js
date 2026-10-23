@@ -73,8 +73,107 @@ test('Kimi managed usage превращается в недельный/5ч ба
   const resources = parseKimiUsageResources(result);
   assert.equal(resources[0].summary, 'Баланс: ¥12.50');
   assert.equal(resources[0].percent, 20);
+  assert.equal(resources[0].note, 'В этом месяце: ¥10.00 из ¥50.00.');
+  assert.deepEqual(resources[0].balance, { amount: 12.5, currency: 'CNY' });
   assert.equal(resources[0].controls[0].href, 'https://www.kimi.com/code/console');
+  assert.equal(resources[1].key, 'kimi-monthly-volume');
+  assert.equal(resources[1].summary, 'Kimi не сообщает остаток');
+  assert.equal(resources[1].percent, undefined);
   assert.equal(classifyKimiUsageResponse({ result }).state, 'ok');
+});
+
+test('Kimi без кошелька показывает доплату и месячный объём при полученных окнах', () => {
+  for (const extra_usage of [null, undefined]) {
+    const result = {
+      kind: 'ok',
+      summary: null,
+      limits: [{
+        window: { duration: 5, unit: 'hour' },
+        used: 40,
+        limit: 100,
+      }],
+      extra_usage,
+    };
+    const usage = classifyKimiUsageResponse({ result });
+
+    assert.equal(usage.state, 'ok');
+    assert.equal(usage.bars.length, 1);
+    assert.deepEqual(usage.resources, [{
+      key: 'kimi-extra-usage',
+      label: 'Extra Usage',
+      summary: 'Не включено или не пополнено',
+      tone: 'muted',
+      controls: [{
+        id: 'enable-kimi-usage',
+        kind: 'link',
+        label: 'Включить и пополнить в Kimi',
+        href: 'https://www.kimi.com/code/console',
+      }],
+    }, {
+      key: 'kimi-monthly-volume',
+      label: 'Месячный объём',
+      summary: 'Kimi не сообщает остаток',
+      tone: 'muted',
+      controls: [{
+        id: 'view-kimi-monthly-volume',
+        kind: 'link',
+        label: 'Посмотреть в Kimi',
+        href: 'https://www.kimi.com/code/console',
+      }],
+    }]);
+  }
+});
+
+test('Kimi не выдаёт справочные карточки за данные пустого или неудачного ответа', () => {
+  for (const result of [
+    {
+      kind: 'ok',
+      summary: null,
+      limits: [],
+      extra_usage: null,
+    },
+    {
+      kind: 'ok',
+      summary: null,
+      limits: [],
+    },
+    {
+      kind: 'error',
+      status: 503,
+      message: 'Service unavailable',
+    },
+    null,
+  ]) {
+    const usage = classifyKimiUsageResponse({ result });
+
+    assert.equal(usage.state, 'unavailable');
+    assert.deepEqual(parseKimiUsageResources(result), []);
+    assert.deepEqual(usage.resources || [], []);
+
+    if (result?.kind === 'ok') {
+      assert.match(usage.message, /Kimi не вернул данные о лимитах/);
+    }
+  }
+});
+
+test('Кошелёк Kimi подтверждает данные и без окон лимитов', () => {
+  const usage = classifyKimiUsageResponse({
+    result: {
+      kind: 'ok',
+      extra_usage: {
+        balance_cents: 1250,
+        monthly_used_cents: 300,
+        currency: 'CNY',
+      },
+    },
+  });
+
+  assert.equal(usage.state, 'ok');
+  assert.deepEqual(usage.bars, []);
+  assert.equal(usage.resources[0].key, 'kimi-extra-usage');
+  assert.equal(usage.resources[0].summary, 'Баланс: ¥12.50');
+  assert.equal(usage.resources[0].note, 'В этом месяце: ¥3.00; месячный потолок не задан.');
+  assert.equal(usage.resources[1].key, 'kimi-monthly-volume');
 });
 
 test('Именованные лимиты Kimi различимы и живут своими вёдрами', () => {

@@ -4432,3 +4432,81 @@ test('TW-C02: transfer сохраняет staged gitRef; пропавшие tree
     panel.wrapper.unmount();
   }
 });
+
+for (const event of ['projects-changed', 'hello']) {
+  test(`PD-code-catalog: ${event} сбрасывает удалённый контекст и отбрасывает поздний GET`, async (t) => {
+    let removed = false;
+    const slow = deferred();
+    let repoCalls = 0;
+    const { wrapper, flushPromises } = await mountCodeView(t, {
+      api: {
+        get: async (url) => {
+          if (url === '/api/projects') {
+            return {
+              projects: removed ? [projectFixture('other', ['/other'])]
+                : [projectFixture('demo', ['/demo']), projectFixture('other', ['/other'])]
+            };
+          }
+          if (url.endsWith('/repos')) {
+            repoCalls += 1;
+
+            if (repoCalls === 2) {
+              return slow.promise;
+            }
+
+            return {
+              repos: [{
+                key: 'demo',
+                dir: '/demo',
+                trees: [mainTree('/demo')]
+              }]
+            };
+          }
+          if (url.includes('/git?')) {
+            return {
+              branch: 'main',
+              files: [],
+              staged: [],
+              hasStaged: false
+            };
+          }
+          if (url.includes('/ls?')) {
+            return { entries: [] };
+          }
+
+          throw new Error(`Неожиданный GET ${url}`);
+        },
+      },
+      storage: { 'grigdesk-project': 'demo' },
+    });
+
+    assert.equal(wrapper.get('#code-context').element.value.includes('demo'), true);
+    globalThis.__codeViewSse('hello', null);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    removed = true;
+    globalThis.__codeViewSse(event, {
+      id: 'demo',
+      revision: 4,
+      kind: 'deleted'
+    });
+    await settle(flushPromises);
+    slow.resolve({
+      repos: [{
+        key: 'demo',
+        dir: '/demo',
+        trees: [mainTree('/demo')]
+      }]
+    });
+    await settle(flushPromises);
+
+    const hasDeleted = wrapper.findAll('#code-context option')
+      .some((item) => item.attributes('value').includes('demo'));
+
+    assert.equal(hasDeleted,
+      false);
+
+    const context = wrapper.find('#code-context');
+
+    assert.equal(context.exists() ? context.element.value : '', '');
+  });
+}

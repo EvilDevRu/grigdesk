@@ -36,10 +36,7 @@
           </UiSelect>
         </SettingsField>
         <SettingsSection :heading="t('settings.sectionHowSpeechIsProcessed')">
-          <p>{{ effectivePath }}</p>
-          <p>{{ t('settings.localBrowserModel') }} {{ browserStatusLabel }}.</p>
-          <p>{{ t('settings.browserProcessingConsent') }} {{ view.browserAutoConsent ? t('settings.given') : t('settings.notGiven') }}.</p>
-          <p>{{ t('settings.dictation') }} {{ dictationModel }} {{ t('settings.video') }} {{ videoModel }}.</p>
+          <SettingsFacts :items="speechFacts" />
         </SettingsSection>
       </template>
       <template v-else-if="settings.pageId === 'speech.video'">
@@ -62,7 +59,7 @@
             @update:model-value="edit('videoInitialPrompt', $event)"
           />
         </SettingsField>
-        <UiButton @click="edit('videoInitialPrompt', null)">{{ t('settings.restoreDefaultPrompt') }}</UiButton>
+        <UiButton data-context="workspace-form-wrap" @click="edit('videoInitialPrompt', null)">{{ t('settings.restoreDefaultPrompt') }}</UiButton>
         <p v-if="value('videoInitialPrompt') === null">
           {{ t('settings.afterApplyingTheServerWillUseIts') }}
         </p>
@@ -83,7 +80,7 @@
             @update:model-value="edit('dictionary', $event)"
           />
         </SettingsField>
-        <UiButton @click="edit('dictionary', GRIGDESK_DICTIONARY)">{{ t('settings.insertGrigDeskTerms') }}</UiButton>
+        <UiButton data-context="workspace-form-wrap" @click="edit('dictionary', GRIGDESK_DICTIONARY)">{{ t('settings.insertGrigDeskTerms') }}</UiButton>
         <p v-if="view.capabilities.lastDictionaryMeasure">
           {{ t('settings.lastDictionaryMeasurement') }} {{ view.capabilities.lastDictionaryMeasure.hotwordsTokens }} {{ t('settings.tokens') }}
           {{ view.capabilities.lastDictionaryMeasure.hotwordsTruncated ? t('settings.dictionaryTruncated') : '' }}.
@@ -92,53 +89,62 @@
       <template v-else-if="settings.pageId === 'speech.models'">
         <p>{{ t('settings.downloadsCopiesAndCancellationsTakeEffectImmediately') }}</p>
         <p v-if="!view.capabilities.models.length">{{ t('settings.theServerHasNotReportedTheModel') }}</p>
-        <SettingsSection
-          v-for="model in view.capabilities.models"
-          :key="model.modelId"
-          class="settings-speech-model"
-          :heading="model.modelId"
-        >
-          <p>
-            {{ model.repo }} · {{ model.cached ? t('settings.cached') : t('settings.notDownloaded') }} · {{ modelSize(model.sizeMb) }}
-          </p>
-          <div class="settings-speech-actions">
-            <UiButton
-              :data-download="model.modelId"
-              :disabled="model.cached || modelBusy(model.modelId)"
-              @click="operations.start('download', model.modelId)"
-            >
-              {{ t('settings.download') }}
-            </UiButton>
-            <UiButton
-              v-if="!model.cached"
-              :data-copy="model.modelId"
-              :disabled="modelBusy(model.modelId)"
-              @click="operations.start('copy', model.modelId)"
-            >
-              {{ t('settings.copyFromSharedCache') }}
-            </UiButton>
-            <UiButton
-              v-if="operations.isActive(operations.jobFor(model.modelId))"
-              :data-cancel="model.modelId"
-              :disabled="operations.busy.value.includes(`cancel:${operations.jobFor(model.modelId)?.jobId}`)"
-              @click="operations.cancel(operations.jobFor(model.modelId))"
-            >
-              {{ t('settings.cancel2') }}
-            </UiButton>
-          </div>
-          <p v-if="operations.jobFor(model.modelId)">
-            {{ operations.jobFor(model.modelId)?.kind === 'copy' ? t('settings.copying') : t('settings.downloading3') }}:
-            {{ jobLabel(operations.jobFor(model.modelId)) }}
-          </p>
-          <UiProgress
-            v-if="operations.jobFor(model.modelId)?.percent != null"
-            :label="t('settings.modelProgress')"
-            :value="operations.jobFor(model.modelId)?.percent ?? undefined"
-          />
-          <p v-if="operations.jobFor(model.modelId)?.error" role="alert">
-            {{ operations.jobFor(model.modelId)?.error }}
-          </p>
-        </SettingsSection>
+        <ul v-if="view.capabilities.models.length" class="settings-speech-models">
+          <li
+            v-for="model in view.capabilities.models"
+            :key="model.modelId"
+            class="settings-speech-model"
+            :data-model="model.modelId"
+          >
+            <div class="settings-speech-model-copy">
+              <strong>{{ model.modelId }}</strong>
+              <small>{{ model.repo }} · {{ modelSize(model.sizeMb) }}</small>
+            </div>
+            <span class="settings-speech-model-status" :data-cached="model.cached">
+              {{ model.cached ? t('settings.cached') : t('settings.notDownloaded') }}
+            </span>
+            <div class="settings-speech-actions">
+              <UiButton data-context="workspace-form-wrap"
+                v-if="!model.cached"
+                :data-download="model.modelId"
+                :disabled="modelBusy(model.modelId)"
+                @click="operations.start('download', model.modelId)"
+              >
+                {{ t('settings.download') }}
+              </UiButton>
+              <UiButton data-context="workspace-form-wrap"
+                v-if="!model.cached"
+                :data-copy="model.modelId"
+                :disabled="modelBusy(model.modelId)"
+                @click="operations.start('copy', model.modelId)"
+              >
+                {{ t('settings.copyFromSharedCache') }}
+              </UiButton>
+              <UiButton data-context="workspace-form-wrap"
+                v-if="operations.isActive(operations.jobFor(model.modelId))"
+                :data-cancel="model.modelId"
+                :disabled="operations.busy.value
+                  .includes(`cancel:${operations.jobFor(model.modelId)?.jobId}`)"
+                @click="operations.cancel(operations.jobFor(model.modelId))"
+              >
+                {{ t('settings.cancel2') }}
+              </UiButton>
+            </div>
+            <p v-if="operations.jobFor(model.modelId)">
+              {{ operations.jobFor(model.modelId)?.kind === 'copy'
+                ? t('settings.copying') : t('settings.downloading3') }}:
+              {{ jobLabel(operations.jobFor(model.modelId)) }}
+            </p>
+            <UiProgress
+              v-if="operations.jobFor(model.modelId)?.percent != null"
+              :label="t('settings.modelProgress')"
+              :value="operations.jobFor(model.modelId)?.percent ?? undefined"
+            />
+            <p v-if="operations.jobFor(model.modelId)?.error" role="alert">
+              {{ operations.jobFor(model.modelId)?.error }}
+            </p>
+          </li>
+        </ul>
       </template>
       <template v-else-if="settings.pageId === 'speech.advanced'">
         <SettingsSection :heading="t('settings.sectionRecognitionModels')">
@@ -223,14 +229,14 @@
             <code>deploy/install.sh --with-cuda</code>
             .
           </p>
-          <UiButton :disabled="refreshing" @click="refresh">{{ t('settings.recheckEnvironmentAndCache') }}</UiButton>
+          <UiButton data-context="workspace-form-wrap" :disabled="refreshing" @click="refresh">{{ t('settings.recheckEnvironmentAndCache') }}</UiButton>
         </SettingsSection>
         <SettingsSection :heading="t('settings.sectionReferenceRecordingBenchmark')">
           <p>
             {{ t('settings.model') }} {{ benchmarkParameters.modelId }} · {{ benchmarkParameters.language }} ·
             {{ benchmarkParameters.device }} · {{ benchmarkParameters.computeType }}.
           </p>
-          <UiButton
+          <UiButton data-context="workspace-form-wrap"
             data-benchmark
             :disabled="benchmarkDisabled"
             @click="operations.start('benchmark')"
@@ -249,7 +255,7 @@
               :label="t('settings.benchmarkProgress')"
               :value="benchmarkJob.percent"
             />
-            <UiButton v-if="operations.isActive(benchmarkJob)" @click="operations.cancel(benchmarkJob)">
+            <UiButton data-context="workspace-form-wrap" v-if="operations.isActive(benchmarkJob)" @click="operations.cancel(benchmarkJob)">
               {{ t('settings.cancelBenchmark') }}
             </UiButton>
             <p v-if="benchmarkJob.error" role="alert">{{ benchmarkJob.error }}</p>
@@ -268,6 +274,7 @@ import { formatNumber } from '../../../../../shared/i18n/formats.ts';
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import SettingsScope from '../SettingsScope.vue';
 import SettingsSection from '../SettingsSection.vue';
+import SettingsFacts from '../SettingsFacts.vue';
 import { UiButton, UiSelect, UiTextarea, UiNumberInput, UiSwitch, UiProgress } from '../../../ui.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
@@ -379,6 +386,18 @@ const browserStatusLabel = computed(() => ({
 } as Record<string, string>)[browserStatus.value] ?? browserStatus.value);
 const dictationModel = computed(() => text('model') || QUALITY_MODELS[text('quality')] || 'medium');
 const videoModel = computed(() => text('videoModel') || QUALITY_MODELS[text('videoQuality')] || 'medium');
+const speechFacts = computed(() => [
+  { label: t('settings.speechFactPath'), value: effectivePath.value },
+  { label: t('settings.speechFactBrowserModel'), value: browserStatusLabel.value },
+  {
+    label: t('settings.speechFactConsent'),
+    value: view.value.browserAutoConsent ? t('settings.given') : t('settings.notGiven'),
+  },
+  {
+    label: t('settings.speechFactModels'),
+    value: t('settings.speechFactModelsValue', { dictation: dictationModel.value, video: videoModel.value }),
+  },
+]);
 const benchmarkParameters = computed(() => {
   const device = text('device') === 'auto' ? cudaReady.value ? 'cuda' : 'cpu' : text('device');
 
@@ -545,7 +564,7 @@ onBeforeUnmount(() => operations.setActive(false));
   line-height: 1.6;
 }
 .settings-speech > .settings-section {
-  margin-top: 24px;
+  margin-top: 16px;
 }
 .settings-speech > :deep(.ui-button) {
   justify-self: start;
@@ -556,8 +575,56 @@ onBeforeUnmount(() => operations.setActive(false));
   flex-wrap: wrap;
   gap: 8px;
 }
+/* Модель — строка списка: имя и источник слева, состояние и действия справа.
+   Ход операции и ошибка идут ниже на всю ширину строки. */
+.settings-speech-models {
+  display: grid;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
 .settings-speech-model {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px 16px;
   min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
   overflow-wrap: anywhere;
+}
+.settings-speech-model > :is(p, .ui-progress) {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.settings-speech-model-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.settings-speech-model-copy strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.settings-speech-model-copy small {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.settings-speech-model-status {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.settings-speech-model-status[data-cached='true'] {
+  color: var(--good);
+}
+@container settings-page (max-width: 480px) {
+  .settings-speech-model {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .settings-speech-model > .settings-speech-actions {
+    grid-column: 1 / -1;
+  }
 }
 </style>

@@ -1,3 +1,4 @@
+import { runtimeOf } from './projectsRuntime';
 import { projectsApi, projectsErrorData, projectsFailureText } from '../../shared/projectsApi';
 import { useProjectsStore } from '../../stores/projects';
 import { createDraft } from '../../views/projects/projectDraft';
@@ -21,11 +22,21 @@ export async function changeLifecycle(
   action: 'archive' | 'restore',
 ): Promise<ProjectLifecycleResult> {
   const store = useProjectsStore();
+  const runtime = runtimeOf(store);
+  const generation = runtime.selectionGeneration;
 
   try {
     const detail = action === 'archive'
       ? await projectsApi.archive(id, expectedRevision)
       : await projectsApi.restore(id, expectedRevision);
+
+    if (generation !== runtime.selectionGeneration) {
+      return {
+        ok: false,
+        error: 'selection_changed',
+        message: '',
+      };
+    }
 
     store.setOpened(detail);
     store.setDraft(createDraft(detail));
@@ -39,6 +50,14 @@ export async function changeLifecycle(
       message: '',
     };
   } catch (error) {
+    if (generation !== runtime.selectionGeneration) {
+      return {
+        ok: false,
+        error: 'selection_changed',
+        message: '',
+      };
+    }
+
     const body = projectsErrorData(error);
     const message = projectsFailureText(
       error,

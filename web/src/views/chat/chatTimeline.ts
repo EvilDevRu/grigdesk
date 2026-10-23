@@ -1,6 +1,7 @@
 import type { ChatMessage } from '../../shared/chatContracts.ts';
 import type { ChatInTurnRun } from '../../stores/chatInTurn.ts';
 import { isInTurnReceipt } from '../../stores/chatInTurn.ts';
+import { chatStepKey, foldChatSteps } from './chatStepRows.ts';
 
 interface TimelineStep {
   k: string;
@@ -208,6 +209,33 @@ function turnRows(turn: TimelineTurn): ChatTimelineRow[] {
     cursor += 1;
   }
 
+  // Сначала сохраняем прежние длительности внутри исходных участков, затем переносим детей.
+  // Шаги без parent и строки без найденного вызова сохраняют свой участок и порядок.
+  const sections = result.filter((row) => row.steps.length);
+  const relocated = new Map(sections.map((row) => [row, [] as TimelineStep[]]));
+  const owners = new Map<string, ChatTimelineRow>();
+
+  for (const row of sections) {
+    const thoughts = new Map(foldChatSteps(row.steps)
+      .filter((step) => step.k === 'think')
+      .map((step) => [step.rowKey, step]));
+
+    for (const source of row.steps) {
+      const step = source.k === 'think' ? thoughts.get(chatStepKey(source)) || source : source;
+      const known = step.id && (step.k === 'tool' || step.k === 'res') ? owners.get(step.id) : null;
+      const owner = known || (typeof step.parent === 'string' ? owners.get(step.parent) : null) || row;
+
+      relocated.get(owner)!.push(step);
+
+      if (step.k === 'tool' && step.id) {
+        owners.set(step.id, owner);
+      }
+    }
+  }
+  for (const row of sections) {
+    row.steps = relocated.get(row)!;
+  }
+
   // Индикатор остаётся в конце своего запуска, рядом с правой сводкой.
   // До первого шага эта строка также сохраняет шапку нового хода.
   if (turn.live) {
@@ -217,7 +245,7 @@ function turnRows(turn: TimelineTurn): ChatTimelineRow[] {
     result.push(tail);
   }
 
-  return result;
+  return result.filter((row) => !relocated.has(row) || row.steps.length);
 }
 
 /**

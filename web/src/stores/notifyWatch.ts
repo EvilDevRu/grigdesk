@@ -18,6 +18,11 @@ import {
   pipelineTopbarItems,
 } from '../shared/pipelineNavBadge.ts';
 
+import {
+  publishSandboxPipelineSnapshot,
+  markSandboxPipelineSnapshotError,
+} from '../shared/sandboxPipelineSnapshot.ts';
+
 let started = false;
 let checking = false;
 const notified = new Set<string>(); // задачи, о которых уже звонили (чтобы не звонить каждую проверку)
@@ -276,9 +281,27 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
         this.observedByTask = observedByTask;
         this.loadedAt = Date.now();
         this.error = null;
+        publishSandboxPipelineSnapshot({
+          tasks: (tasks || []).map(({ task, title, profile, readOnly, daemonAlive, result }) => ({
+            task,
+            title: title || '',
+            profile: profile || '',
+            readOnly: Boolean(readOnly),
+            daemonAlive: Boolean(daemonAlive),
+            result: result || null,
+          })),
+          waiting,
+          stalled,
+          silent: silentRuns,
+          running,
+          observedByTask,
+          loadedAt: this.loadedAt,
+          error: null,
+        });
       } catch (error) {
         // Сервер недоступен — оставляем прошлую картину и помечаем источник неизвестным.
         this.error = failureText(error) || 'Конвейер недоступен';
+        markSandboxPipelineSnapshotError(this.error);
       }
       finally { checking = false; }
     },

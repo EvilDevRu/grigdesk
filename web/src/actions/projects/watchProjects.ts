@@ -2,7 +2,8 @@ import { sseSubscribe } from '../../composables/useSse';
 import { useProjectsStore } from '../../stores/projects';
 import { loadProject } from './loadProject';
 import { loadProjects } from './loadProjects';
-import { runtimeOf } from './projectsRuntime';
+import { parseProjectsChange } from '../../../../shared/runtime/projectsContracts';
+import { forgetProject, runtimeOf } from './projectsRuntime';
 
 /**
  * Подписка раздела на общий поток событий. `projects-changed` приходит после каждой
@@ -20,21 +21,31 @@ export function watchProjects(): void {
     return;
   }
 
-  runtime.off = sseSubscribe((name) => {
+  runtime.off = sseSubscribe((name, data) => {
     if (name === 'projects-changed') {
+      try {
+        const change = parseProjectsChange(data);
+
+        if (change.kind === 'deleted') {
+          forgetProject(store, change.id);
+        }
+      } catch {
+        // Незнакомое событие не меняет выбор до успешного чтения каталога.
+      }
+
       void loadProjects();
 
       return;
     }
 
     if (name === 'hello') {
-      void loadProjects();
+      void loadProjects().then(() => {
+        const openedId = store.opened?.id;
 
-      const openedId = store.opened?.id;
-
-      if (openedId) {
-        void loadProject(openedId, { keepDraft: true });
-      }
+        if (openedId) {
+          void loadProject(openedId, { keepDraft: true });
+        }
+      });
     }
   });
 }

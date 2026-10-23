@@ -1,4 +1,7 @@
 {
+  "checkingServer": "Проверка сервера…",
+  "startingServer": "Запуск сервера…",
+  "waitingVpn": "Ожидание VPN…",
   "loading": "Загрузка…",
   "file": "Файл",
   "edit": "Правка",

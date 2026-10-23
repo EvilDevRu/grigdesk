@@ -8,18 +8,12 @@
     <p v-if="message" role="status">{{ resolveUiText(message) }}</p>
     <template v-if="settings.pageId === 'system.startup'">
       <SettingsSection :heading="t('settings.sectionGrigdeskProcess')" :description="t('settings.currentServerStatusOnThisMachine')">
-        <dl v-if="server" class="settings-system-facts">
-          <div><dt>{{ t('settings.runtimeMode') }}</dt><dd>{{ serverText.pill }}</dd></div>
-          <div><dt>{{ t('settings.uptime') }}</dt><dd>{{ uptime }}</dd></div>
-          <div><dt>{{ t('settings.process') }}</dt><dd>PID {{ server.pid }}</dd></div>
-        </dl>
+        <SettingsFacts v-if="server" :items="serverFacts" />
         <p v-if="serverText.hint">{{ serverText.hint }}</p>
-        <UiButton :disabled="busy || !server" @click="restart">{{ t('settings.restartServer') }}</UiButton>
+        <UiButton data-context="workspace-form-wrap" :disabled="busy || !server" @click="restart">{{ t('settings.restartServer') }}</UiButton>
       </SettingsSection>
       <SettingsSection :heading="t('settings.sectionAutomaticStartup')">
-        <SettingsScope :scope="t('settings.thisMachine')">
-          {{ t('settings.autostartIsSavedWithApplyTheLive') }}
-        </SettingsScope>
+        <SettingsScope :scope="t('settings.thisMachine')" />
         <SettingsField
           v-for="field in startupFields"
           :key="field.key"
@@ -48,7 +42,7 @@
           :description="t('settings.quickAccessFromTheDesktopAndApplication')"
         >
           <p>{{ t('settings.shortcut') }} {{ shortcutLabel }}</p>
-          <UiButton :disabled="busy || (!shortcutPresent && !launcher.shortcut.desktopDir)" @click="shortcut">
+          <UiButton data-context="workspace-form-wrap" :disabled="busy || (!shortcutPresent && !launcher.shortcut.desktopDir)" @click="shortcut">
             {{ shortcutPresent ? t('settings.removeShortcut') : t('settings.createShortcut') }}
           </UiButton>
         </SettingsSection>
@@ -66,25 +60,14 @@
           :message="packageCapability.message"
         />
         <template v-else-if="release">
-          <p>{{ t('settings.running2') }} {{ release.running.version }} · {{ shortSha(release.running.sha) }}</p>
-          <p>
-            {{ t('settings.checkoutLabel') }} {{ release.checkout.version }} · {{ shortSha(release.checkout.sha) }} ·
-            {{ release.checkout.branch || 'detached HEAD' }}
-            <span v-if="release.checkout.dirty">{{ t('settings.hasChanges2') }}</span>
-          </p>
-          <p>{{ t('settings.applicationInterface') }} {{ buildVersion }} · {{ shortSha(buildSha) }}</p>
-          <p v-if="release.latest">
-            {{ t('settings.stableChannel') }} {{ release.latest.tag }} · {{ shortSha(release.latest.sha) }}
-            <UiActionLink
-              v-if="release.latest.url"
-              :href="release.latest.url"
-              target="_blank"
-            >
-              {{ t('settings.whatSChanged') }}
-            </UiActionLink>
-          </p>
-          <p v-else>{{ t('settings.noReleasesFoundYet') }}</p>
-          <p>{{ t('settings.lastCheck') }} {{ release.checkedAt || t('settings.notCheckedYet') }}</p>
+          <SettingsFacts :items="versionFacts" />
+          <UiActionLink
+            v-if="release.latest?.url"
+            :href="release.latest.url"
+            target="_blank"
+          >
+            {{ t('settings.whatSChanged') }}
+          </UiActionLink>
           <p v-if="release.checkError">
             {{ release.checkError.message }} {{ t('settings.lastSuccessfulResultSaved') }}
           </p>
@@ -98,16 +81,16 @@
             <span v-if="release.job.error">{{ release.job.error.message }}</span>
           </p>
           <div class="settings-system-actions">
-            <UiButton :disabled="updates.checking || updates.active || busy" @click="updates.check()">
+            <UiButton data-context="workspace-form-wrap" :disabled="updates.checking || updates.active || busy" @click="updates.check()">
               {{ t('settings.checkForUpdates') }}
             </UiButton>
-            <UiButton
+            <UiButton data-context="workspace-form-wrap"
               :disabled="!release.canApplyCheckout || updates.actionBusy || busy"
               @click="update('apply')"
             >
               {{ t('settings.applyLocalChanges') }}
             </UiButton>
-            <UiButton
+            <UiButton data-context="workspace-form-wrap"
               v-if="release.latest"
               :disabled="!release.canInstallRelease || updates.actionBusy || busy"
               @click="update('update')"
@@ -125,7 +108,7 @@
         <p v-if="updates.error" role="alert">{{ updates.error }}</p>
       </SettingsSection>
       <SettingsSection v-if="!packageCapability" :heading="t('settings.sectionInterfaceBuild')">
-        <UiButton :disabled="busy || updates.active" @click="rebuild">{{ t('settings.rebuildWebBundle') }}</UiButton>
+        <UiButton data-context="workspace-form-wrap" :disabled="busy || updates.active" @click="rebuild">{{ t('settings.rebuildWebBundle') }}</UiButton>
         <p>
           {{ t('settings.buildingFromTheWorkingTreeIncludesUncommitted') }}
         </p>
@@ -152,6 +135,7 @@ import { sseSubscribe } from '../../../composables/useSse.ts';
 import type { LauncherState } from '../../../../../shared/runtime/launcherContracts.ts';
 import type { ReleaseStatus } from '../../../../../shared/runtime/grigDeskUpdateContracts.ts';
 import SettingsField from '../SettingsField.vue';
+import SettingsFacts from '../SettingsFacts.vue';
 import PackagedServerVersion from '../PackagedServerVersion.vue';
 
 type ServerView = {
@@ -206,6 +190,40 @@ const uptime = computed(() => {
     : seconds >= 3600 ? t('settings.h', { value1: Math.floor(seconds / 3600) })
       : seconds >= 60
       ? t('settings.min2', { value1: Math.floor(seconds / 60) }) : t('settings.s', { seconds });
+});
+const serverFacts = computed(() => server.value ? [
+  { label: t('settings.runtimeMode'), value: serverText.value.pill },
+  { label: t('settings.uptime'), value: uptime.value },
+  { label: t('settings.process'), value: `PID ${server.value.pid}` },
+] : []);
+const versionFacts = computed(() => {
+  const status = release.value;
+
+  if (!status) {
+    return [];
+  }
+
+  const checkout = [
+    status.checkout.version,
+    shortSha(status.checkout.sha),
+    status.checkout.branch || 'detached HEAD',
+  ];
+  const latest = status.latest
+    ? `${status.latest.tag} · ${shortSha(status.latest.sha)}` : t('settings.noReleasesFoundYet');
+
+  return [
+    {
+      label: t('settings.versionRunning'),
+      value: `${status.running.version} · ${shortSha(status.running.sha)}`,
+    },
+    {
+      label: t('settings.versionCheckout'),
+      value: checkout.join(' · ') + (status.checkout.dirty ? ` ${t('settings.hasChanges2')}` : ''),
+    },
+    { label: t('settings.versionInterface'), value: `${buildVersion} · ${shortSha(buildSha)}` },
+    { label: t('settings.versionStable'), value: latest },
+    { label: t('settings.versionLastCheck'), value: status.checkedAt || t('settings.notCheckedYet') },
+  ];
 });
 const autostartNote = computed(() => {
   const state = launcher.value?.autostart;
@@ -429,7 +447,7 @@ async function pollRebuild(): Promise<void> {
           ? messageRef('settings.developmentBuildIsReadyTheApplicationInterface')
           : result.rebuild?.status === 'failed'
             ? result.rebuild.error?.message || messageRef('settings.theRebuildFailed')
-            : messageRef('settings.noRebuildIsRunning');
+            : '';
 
         return;
       }
@@ -537,54 +555,29 @@ onBeforeUnmount(() => {
 <style scoped>
 .settings-system {
   display: grid;
-  gap: 28px;
+  gap: 20px;
   align-content: start;
   min-width: 0;
+  container: settings-system / inline-size;
 }
 .settings-system p, .settings-system h4 {
   margin: 0;
+}
+/* Сообщение о завершённой операции — тихий статус, а не самая яркая строка страницы. */
+.settings-system > p[role='status'] {
+  color: var(--ink-mid);
+  font-size: 12px;
 }
 .settings-system-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
-.settings-system-facts {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  width: 100%;
-  margin: 0 0 4px;
-}
-.settings-system-facts > div {
-  display: grid;
-  gap: 7px;
-  align-content: start;
-}
-.settings-system-facts dt {
-  color: var(--ink-mid);
-  font-size: 11px;
-}
-.settings-system-facts dd {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-}
 .settings-autostart-note {
   display: grid;
   gap: 6px;
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
-}
-@media (max-width: 600px) {
-  .settings-system-facts {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
-  }
-  .settings-system-facts > div {
-    grid-template-columns: 110px minmax(0, 1fr);
-    gap: 12px;
-  }
 }
 </style>

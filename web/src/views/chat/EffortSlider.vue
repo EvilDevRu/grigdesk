@@ -5,6 +5,7 @@
     <UiDiscreteSlider v-model="sliderIndex" class="eff-slider" :min="0"
                       :max="Math.max(0, levels.length - 1)" :step="1"
                       :labels="sliderLabels" :value-text="selectedDescription"
+                      :unselected="idx < 0"
                       ticks :disabled="disabled" label="Усилие рассуждения" />
     <span class="val">{{ model || '—' }}</span>
   </div>

@@ -36,6 +36,7 @@ import { toClaudeSteps } from './_claudeSteps.ts';
 import { claudeTurnFailure } from './_claudeTurnFailures.ts';
 import { defaultWorkToolDescriptors } from './work-tools/index.ts';
 import { createClaudeTokenMeter } from './_claudeTokenMeter.ts';
+import { createClaudeBackgroundTasks } from './_claudeBackgroundTasks.ts';
 
 // Служебная модель внутренних вызовов CLI: её usage к контексту разговора не относится.
 export const SYNTHETIC_MODEL = '<synthetic>';
@@ -657,6 +658,9 @@ export function openClaudeStreamSession({
   hooks?: Record<string, ((...values: never[]) => unknown) | undefined>;
 }) {
   const child = spawn(bin, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const backgroundTasks = createClaudeBackgroundTasks((tasks) => {
+    hooks.onBackgroundTasks?.(tasks as never);
+  });
 
   const state: {
     sessionId: string | null;
@@ -1067,6 +1071,10 @@ export function openClaudeStreamSession({
    * После result ждать разрешено только подтверждённую очередь без started; stop закрывает всё.
    */
   function handleEvent(ev: ClaudeEvent): void {
+    if (backgroundTasks.observe(ev)) {
+      return;
+    }
+
     if (consumeClaudeRateLimitEvent(ev, (patch) => hooks.onProviderUsage?.(patch as never))) {
       return;
     }
@@ -1247,6 +1255,7 @@ export function openClaudeStreamSession({
 
   child.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
     state.exited = true;
+    backgroundTasks.dispose();
     if (!state.exitReason) {
       state.exitReason = signal
         ? `процесс агента завершён сигналом ${signal}`

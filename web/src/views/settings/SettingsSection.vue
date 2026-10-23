@@ -20,12 +20,11 @@ defineProps<{ heading?: string; description?: string }>();
 .settings-section-heading {
   display: grid;
   gap: 5px;
-  padding: 0 0 10px;
-  border-bottom: 1px solid var(--line-2);
+  padding: 8px 0 0;
 }
 .settings-section-heading h4 {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.5;
 }
@@ -33,15 +32,20 @@ defineProps<{ heading?: string; description?: string }>();
   max-width: 70ch;
   margin: 0;
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
 }
 .settings-section-content {
   display: grid;
-  justify-items: start;
+  justify-items: stretch;
   gap: 12px;
   min-width: 0;
-  padding-top: 12px;
+  padding-top: 8px;
+}
+.settings-section-content > :deep(.ui-button),
+.settings-section-content > :deep(.ui-disclosure-button) {
+  justify-self: start;
+  max-width: 100%;
 }
 .settings-section-content > :deep(p) {
   margin: 0;

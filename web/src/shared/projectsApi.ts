@@ -64,6 +64,10 @@ export const projectsApi = {
     return parseProjectDetail(value);
   },
 
+  async remove(id: string, expectedRevision: number): Promise<void> {
+    await api.del(`/api/projects/${encodeURIComponent(id)}`, { expectedRevision });
+  },
+
   async restore(id: string, expectedRevision: number): Promise<ProjectDetail> {
     const value: unknown = await api.post(
       `/api/projects/${encodeURIComponent(id)}/restore`,

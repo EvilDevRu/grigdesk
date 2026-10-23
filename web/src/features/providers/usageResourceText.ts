@@ -13,8 +13,10 @@ interface UsageTextResource {
 const RESOURCE_TEMPLATES: Readonly<Record<string, readonly string[]>> = {
   'claude:extra-usage': ['disabled', 'uncapped', 'spent', 'extraCapReached', 'noCap', 'refusal'],
   'codex:spend-control': ['spent', 'exhausted', 'limitReached', 'spendingBlocked', 'serviceReason'],
-  'codex:chatgpt-credits': ['unlimited', 'balance', 'creditsManaged'],
+  'codex:chatgpt-credits': ['unlimited', 'balance', 'creditsManaged', 'creditsUnavailable'],
   'codex:rate-limit-resets': ['available', 'resetNote'],
+  'kimi:kimi-extra-usage': ['kimiWalletUnavailable'],
+  'kimi:kimi-monthly-volume': ['kimiMonthlyVolumeUnavailable'],
   'deepseek:balance': ['toppedUp', 'bonus', 'insufficientBalance'],
   'glm:balance': ['cash', 'bonus', 'credit'],
   'deepseek:forecast': ['forecastPending', 'stalled', 'hoursLeft', 'daysLeft',
