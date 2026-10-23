@@ -129,7 +129,10 @@ export function relayLine(socket: TLSSocket, timeoutMs = 60000): Promise<string>
  * Передаёт hello только по уже проверенному сокету и проверяет ограниченный reply.
  * Неподтверждённое соединение не передаётся локальному мобильному серверу.
  */
-export async function relayHello(socket: TLSSocket, hello: object): Promise<void> {
+export async function relayHello(socket: TLSSocket, hello: object): Promise<{
+  ok: true;
+  capabilities?: string[];
+}> {
   const answer = relayLine(socket, 15000);
 
   socket.write(`${JSON.stringify(hello)}\n`);
@@ -137,9 +140,13 @@ export async function relayHello(socket: TLSSocket, hello: object): Promise<void
   const result = JSON.parse(await answer) as {
     ok?: unknown;
     error?: unknown;
+    capabilities?: unknown;
   };
 
   if (result.ok !== true) {
     throw new Error('relay_rejected');
   }
+
+  return { ok: true, capabilities: Array.isArray(result.capabilities)
+    ? result.capabilities.filter((value): value is string => typeof value === 'string') : [] };
 }

@@ -105,6 +105,21 @@ export const archiveProject = async (id, options) => {
   globalThis.__projectsViewHarness.calls.push(['archive', id, options]);
   return globalThis.__projectsViewHarness.lifecycleResult;
 };
+export const removeProject = async (id, options) => {
+  const h = globalThis.__projectsViewHarness;
+  h.calls.push(['remove', id, options]);
+  const result = await (h.removeResult ?? h.lifecycleResult);
+  if (result.ok) {
+    if (h.store.opened?.id === id) {
+      const dirty = h.store.draft && h.isDirty(h.store.draft, h.draftOf(h.store.opened));
+
+      h.store.opened = null;
+      h.store.draft = dirty ? h.store.draft : null;
+    }
+    h.store.items = h.store.items.filter((item) => item.id !== id);
+  }
+  return result;
+};
 export const restoreProject = async (id, options) => {
   globalThis.__projectsViewHarness.calls.push(['restore', id, options]);
   return globalThis.__projectsViewHarness.lifecycleResult;
@@ -220,6 +235,13 @@ async function mountView(t, {
     draft: draft === undefined ? (opened ? draftOf(opened) : null) : draft,
     conflict: null,
     loading: false,
+    loaded: true,
+    dependencies: {
+      items: [],
+      archivable: true,
+      deletable: true,
+      reasons: []
+    },
     error,
     checks: {},
     setItems(value) {
@@ -256,7 +278,12 @@ async function mountView(t, {
     context: [],
     detail: opened,
     draftOf,
-    lifecycleResult: { ok: true, error: '', message: '' },
+    isDirty: draftModule.isDirty,
+    lifecycleResult: {
+      ok: true,
+      error: '',
+      message: ''
+    },
     leaveGuards: [],
     saveResult,
     updateGuards: [],
@@ -264,6 +291,16 @@ async function mountView(t, {
     store,
     route,
     router: {
+      /**
+       * Замена адреса очищает параметры выбранного проекта без новой записи истории.
+       * Переход сохраняется в журнале, чтобы проверить возврат к каталогу.
+       */
+      async replace(target) {
+        pushes.push(target);
+        route.path = typeof target === 'string' ? target : target.path;
+        route.params = {};
+        route.query = {};
+      },
       async push(target) {
         pushes.push(target);
         const path = typeof target === 'string' ? target : target?.path;
@@ -667,4 +704,193 @@ test('отмена восстанавливает общий черновик и
   assert.equal(wrapper.find('[data-role="project-cancel"]').exists(), false);
   assert.equal(await harness.leaveGuards[0](), true);
   assert.deepEqual(harness.confirmations, []);
+});
+
+for (const dockCapable of [false, true]) {
+  test(`PD-UI: удаление архивного проекта с общим подтверждением (${dockCapable ? 1280 : 390}px)`,
+    async (t) => {
+      const archived = { ...DETAIL, archivedAt: '2026-10-20T10:00:00.000Z' };
+      const { wrapper, harness } = await mountView(t, {
+
+        opened: archived,
+        params: { id: 'demo' },
+        dockCapable,
+        confirmed: false,
+
+      });
+      const { flushPromises, nextTick } = await import(
+        '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+      );
+      const remove = () => wrapper.findAll('button').find((item) => item.text() === 'Удалить регистрацию');
+
+      assert.equal(Boolean(remove()), true, 'архивная регистрация доступна для удаления');
+      await remove().trigger('click');
+      await flushPromises();
+      assert.deepEqual(harness.calls.filter(([kind]) => kind === 'remove'), []);
+      assert.equal(harness.confirmations[0].text,
+        'Удалить регистрацию «Демо-проект»? Файлы проекта останутся на диске.');
+      assert.equal(harness.confirmations[0].options.okText, 'Удалить регистрацию');
+      harness.confirmed = true;
+      harness.removeResult = {
+        ok: false,
+        error: 'deletion_incomplete',
+        message: 'Настройки чатов не записаны'
+      };
+      await remove().trigger('click');
+      await flushPromises();
+      assert.match(wrapper.text(), /Настройки чатов не записаны/);
+      assert.equal(harness.store.opened.id, 'demo');
+      harness.removeResult = {
+        ok: true,
+        error: '',
+        message: ''
+      };
+      await remove().trigger('click');
+      await flushPromises();
+      assert.equal(harness.store.opened, null);
+      assert.equal(harness.pushes.at(-1), '/projects');
+    });
+}
+
+test('PD-UI: удаление недоступно активному и dirty паспорту', async (t) => {
+  const { wrapper, harness } = await mountView(t, { opened: DETAIL, params: { id: 'demo' } });
+
+  assert.equal(wrapper.findAll('button').some((item) => item.text() === 'Удалить регистрацию'), false);
+  harness.detail = { ...DETAIL, archivedAt: '2026-10-20T10:00:00.000Z' };
+  harness.store.opened = harness.detail;
+  harness.store.draft.title = 'Несохранённая правка';
+
+  const { flushPromises } = await import(
+    '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+  );
+
+  await flushPromises();
+
+  const remove = wrapper.findAll('button').find((item) => item.text() === 'Удалить регистрацию');
+
+  assert.equal(Boolean(remove?.element.disabled ?? !remove), true);
+});
+
+for (const dirty of [false, true]) {
+  test(`PD-external-delete: ${dirty ? 'dirty остаётся для чтения' : 'адрес сбрасывается'}`,
+    async (t) => {
+      const { wrapper, harness } = await mountView(t, { opened: DETAIL, params: { id: 'demo' } });
+      const { flushPromises } = await import(
+        '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+      );
+
+      if (dirty) {
+        harness.store.draft.title = 'Локальный текст';
+        await flushPromises();
+      }
+
+      harness.store.items = [];
+      harness.store.opened = null;
+      await flushPromises();
+      assert.match(wrapper.text(), /Регистрация проекта удалена\./);
+
+      if (dirty) {
+        assert.equal(wrapper.find('[data-role="project-title"]').element.value, 'Локальный текст');
+        assert.equal(wrapper.find('[data-role="project-save"]').element.disabled, true);
+      } else {
+        assert.equal(harness.pushes.at(-1), '/projects');
+      }
+    });
+}
+
+test('PD-UI: ожидание DELETE блокирует повтор и другие записи', async (t) => {
+  const archived = { ...DETAIL, archivedAt: '2026-10-20T10:00:00.000Z' };
+  const { wrapper, harness } = await mountView(t, { opened: archived, params: { id: 'demo' } });
+  const { flushPromises } = await import(
+    '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+  );
+  const pending = Promise.withResolvers();
+  const remove = wrapper.findAll('button').find((item) => item.text() === 'Удалить регистрацию');
+
+  assert.equal(Boolean(remove), true);
+  harness.removeResult = pending.promise;
+
+  try {
+    await remove.trigger('click');
+    await flushPromises();
+    await remove.trigger('click');
+    await flushPromises();
+    assert.equal(harness.calls.filter(([kind]) => kind === 'remove').length, 1);
+    assert.equal(wrapper.get('[data-role="project-save"]').element.disabled, true);
+  } finally {
+    pending.resolve({
+      ok: true,
+      error: '',
+      message: '',
+    });
+    await flushPromises();
+  }
+});
+
+
+test('Поздний DELETE проекта A должен сохранять правки открытого проекта B', async (t) => {
+  const a = { ...DETAIL, archivedAt: '2026-10-20T10:00:00.000Z' };
+  const b = {
+    ...DETAIL,
+    id: 'neighbor',
+    title: 'Соседний проект',
+  };
+  const { wrapper, harness } = await mountView(t, {
+    opened: a,
+    params: { id: 'demo' },
+    items: [summary(), summary(b)],
+  });
+  const { nextTick } = await import('../../web/node_modules/vue/index.mjs');
+  const { flushPromises } = await import(
+    '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+  );
+  let release;
+
+  harness.removeResult = new Promise((resolve) => {
+    release = resolve;
+  });
+  await wrapper.find('[data-role="project-remove"]').trigger('click');
+  await flushPromises();
+  assert.equal(harness.calls.some(([kind]) => kind === 'remove'), true);
+  assert.equal(await harness.updateGuards[0](), true, 'уход во время DELETE разрешён');
+  harness.detail = b;
+  harness.route.path = '/projects/neighbor';
+  harness.route.params = { id: 'neighbor' };
+  await nextTick();
+  await flushPromises();
+  await wrapper.find('[data-role="project-title"]').setValue('Несохранённая правка соседа');
+  assert.equal(harness.store.draft.title, 'Несохранённая правка соседа');
+  release({
+    ok: true,
+    error: '',
+    message: '',
+  });
+  await flushPromises();
+  assert.equal(harness.store.draft?.title, 'Несохранённая правка соседа');
+});
+
+test('Правка удаляемого паспорта во время DELETE остаётся для чтения', async (t) => {
+  const detail = { ...DETAIL, archivedAt: '2026-10-20T10:00:00.000Z' };
+  const { wrapper, harness } = await mountView(t, { opened: detail, params: { id: 'demo' } });
+  const { flushPromises } = await import(
+    '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+  );
+  let release;
+
+  harness.removeResult = new Promise((resolve) => {
+    release = resolve;
+  });
+  await wrapper.find('[data-role="project-remove"]').trigger('click');
+  await flushPromises();
+  await wrapper.find('[data-role="project-title"]').setValue('Правка во время удаления');
+  release({
+    ok: true,
+    error: '',
+    message: '',
+  });
+  await flushPromises();
+  assert.equal(harness.store.draft?.title, 'Правка во время удаления');
+  assert.equal(harness.route.params.id, 'demo');
+  assert.equal(wrapper.find('[data-role="project-title"]').attributes('readonly'), '');
+  assert.match(wrapper.text(), /Регистрация проекта удалена/u);
 });

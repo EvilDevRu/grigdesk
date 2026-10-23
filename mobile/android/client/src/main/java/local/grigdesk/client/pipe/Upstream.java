@@ -29,7 +29,7 @@ import okhttp3.Response;
 import okio.BufferedSink;
 import org.json.JSONObject;
 
-public final class Upstream implements AutoCloseable {
+public final class Upstream implements PipeTransport {
   private static final Set<String> FORBIDDEN = Set.of("cookie", "host", "origin", "connection",
     "proxy-connection", "keep-alive", "transfer-encoding", "upgrade", "x-grigdesk-token",
     "x-grigdesk-internal", "x-grigdesk-window-key", "forwarded", "proxy-authorization");
@@ -37,6 +37,8 @@ public final class Upstream implements AutoCloseable {
   private final URI address;
   private final X509KeyManager keys;
   private final OkHttpClient client;
+  private static final int PROBE_READ_SECONDS = 10;
+  private final int probeTimeoutSeconds;
   private final PinnedSocketFactory sockets;
   private final BiConsumer<String, String> listener;
   private final Set<Call> calls = ConcurrentHashMap.newKeySet();
@@ -44,6 +46,8 @@ public final class Upstream implements AutoCloseable {
   private volatile String terminal;
   private volatile int rejection = 503;
   private volatile boolean closed;
+  private volatile boolean retiring;
+  private volatile Runnable onRetired;
 
   /**
    * Ключ передаётся извне: JVM использует программный сертификат, Android — Keystore.
@@ -51,6 +55,16 @@ public final class Upstream implements AutoCloseable {
    */
   public Upstream(String address, String pin, X509KeyManager keys, VersionGate version,
     BiConsumer<String, String> listener) {
+    this(address, pin, keys, version, listener, 3);
+  }
+
+  /**
+   * Relay включает внешний TLS и ожидание дозвона сервера перед внутренним handshake.
+   * Его ограниченный deadline больше direct, потоки API по-прежнему не имеют общего таймаута.
+   */
+  public Upstream(String address, String pin, X509KeyManager keys, VersionGate version,
+    BiConsumer<String, String> listener, int probeTimeoutSeconds) {
+    this.probeTimeoutSeconds = probeTimeoutSeconds;
     this.address = URI.create(address);
     this.keys = keys;
     this.version = version;
@@ -64,12 +78,12 @@ public final class Upstream implements AutoCloseable {
 
     PinnedTrustManager trust = new PinnedTrustManager(pin);
 
-    sockets = new PinnedSocketFactory(keys, trust);
+    sockets = new PinnedSocketFactory(keys, trust, probeTimeoutSeconds * 1000);
     client = new OkHttpClient.Builder().sslSocketFactory(sockets, trust)
       .hostnameVerifier((host, session) -> true).protocols(List.of(Protocol.HTTP_1_1))
       .proxy(Proxy.NO_PROXY).followRedirects(false).followSslRedirects(false)
       .retryOnConnectionFailure(false).connectionPool(new okhttp3.ConnectionPool(5, 60, TimeUnit.SECONDS))
-      .connectTimeout(3, TimeUnit.SECONDS)
+      .connectTimeout(probeTimeoutSeconds, TimeUnit.SECONDS)
       .readTimeout(0, TimeUnit.MILLISECONDS).writeTimeout(0, TimeUnit.MILLISECONDS).build();
   }
 
@@ -196,7 +210,7 @@ public final class Upstream implements AutoCloseable {
 
     String code = "";
 
-    if (response.code() == 401 || response.code() == 403) {
+    if (response.code() == 401 || response.code() == 403 || response.code() == 429) {
       try {
         code = new JSONObject(response.peekBody(65536).string()).optString("error");
       } catch (Exception ignored) {
@@ -206,7 +220,13 @@ public final class Upstream implements AutoCloseable {
 
     if (response.code() == 403 && code.equals("device_revoked")) {
       state("revoked", code, 403);
-    } else if (response.code() == 401 && Set.of("unpaired", "device_unknown").contains(code)) {
+    } else if (response.code() == 429 && code.equals("pair_locked")) {
+      state("unpaired", code, 429);
+    } else if ((response.code() == 401 || response.code() == 403)
+      && Set.of("device_scope_forbidden", "pair_locked").contains(code)) {
+      state("unpaired", code, response.code());
+    } else if ((response.code() == 401 || response.code() == 403)
+      && Set.of("unpaired", "device_unknown").contains(code)) {
       state("unpaired", code, 401);
     }
 
@@ -238,8 +258,14 @@ public final class Upstream implements AutoCloseable {
       return PipeResponse.error(rejection, terminal == null ? "offline" : terminal);
     }
 
-    Call call = (probe ? client.newBuilder().callTimeout(3, TimeUnit.SECONDS).build() : client)
-      .newCall(request(head, body));
+    // Длинный deadline relay нужен только новому соединению: рукопожатие ждёт дозвона
+    // сервера под soTimeout фабрики. Ответ hello по готовому соединению ограничен коротко,
+    // чтобы мёртвый сервер за relay обнаруживался за секунды, а не за минуты.
+    OkHttpClient selectedClient = probe
+      ? client.newBuilder().callTimeout(probeTimeoutSeconds, TimeUnit.SECONDS)
+        .readTimeout(Math.min(probeTimeoutSeconds, PROBE_READ_SECONDS), TimeUnit.SECONDS).build()
+      : client;
+    Call call = selectedClient.newCall(request(head, body));
 
     calls.add(call);
 
@@ -274,9 +300,11 @@ public final class Upstream implements AutoCloseable {
         response.body().contentLength(), () -> {
           response.close();
           calls.remove(call);
+          finishRetirement();
         });
     } catch (Exception exception) {
       calls.remove(call);
+      finishRetirement();
       failed(exception, false);
 
       return PipeResponse.error(rejection, terminal == null ? "offline" : terminal);
@@ -321,9 +349,8 @@ public final class Upstream implements AutoCloseable {
 
       int port = address.getPort() < 0 ? 443 : address.getPort();
 
-      socket.connect(new InetSocketAddress(address.getHost(), port),
-        3000);
-      socket.setSoTimeout(3000);
+      socket.connect(new InetSocketAddress(address.getHost(), port), probeTimeoutSeconds * 1000);
+      socket.setSoTimeout(probeTimeoutSeconds * 1000);
       socket.startHandshake();
       socket.setSoTimeout(0);
       target(head);
@@ -355,7 +382,36 @@ public final class Upstream implements AutoCloseable {
     } finally {
       if (socket != null) {
         tunnels.remove(socket);
+        finishRetirement();
         socket.close();
+      }
+    }
+  }
+
+  /**
+   * Смена маршрута закрывает child после завершения его начатых потоков.
+   * POST и upgrade продолжают работать на прежнем соединении без повторной отправки.
+   */
+  public synchronized void retire(Runnable cleanup) {
+    onRetired = cleanup;
+    retiring = true;
+    finishRetirement();
+  }
+
+  /**
+   * Очистка срабатывает один раз после последнего ответа или upgrade.
+   * Forwarder не остаётся слушать после полного дренирования старого пути.
+   */
+  private synchronized void finishRetirement() {
+    if (retiring && calls.isEmpty() && tunnels.isEmpty()) {
+      close();
+
+      Runnable cleanup = onRetired;
+
+      onRetired = null;
+
+      if (cleanup != null) {
+        cleanup.run();
       }
     }
   }

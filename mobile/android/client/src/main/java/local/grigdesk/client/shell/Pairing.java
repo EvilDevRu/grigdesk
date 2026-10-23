@@ -8,6 +8,8 @@ import local.grigdesk.client.pipe.HttpHead;
 import local.grigdesk.client.pipe.PipeResponse;
 import local.grigdesk.client.pipe.StaticAssets;
 import local.grigdesk.client.pipe.Upstream;
+import local.grigdesk.client.pipe.RoutedUpstream;
+import local.grigdesk.client.pipe.PipeTransport;
 import local.grigdesk.client.pipe.VersionGate;
 import org.json.JSONObject;
 
@@ -47,6 +49,10 @@ public final class Pairing {
    * Профиль сохраняется только после pin-проверенных pair и hello с тем же отпечатком.
    */
   public JSONObject add(String text) throws Exception {
+    if (text.startsWith("GRIGDESK:PHONE:2:")) {
+      return addPhone(text);
+    }
+
     PairingPayload payload = PairingPayload.decode(text);
     String address = "https://" + payload.host + ":" + payload.port;
 
@@ -68,6 +74,51 @@ public final class Pairing {
   }
 
   /**
+   * Один ключ установки и один код используются на всех маршрутах нового конверта.
+   * Профиль появляется только после pair и authenticated hello с ожидаемой личностью.
+   */
+  private JSONObject addPhone(String text) throws Exception {
+    JSONObject payload = PhonePairingPayload.decode(text);
+    JSONObject server = payload.getJSONObject("server");
+    JSONObject profile = new JSONObject().put("fp", server.getString("fp"))
+      .put("direct", payload.getJSONArray("direct"));
+
+    if (payload.has("relay")) {
+      profile.put("relay", payload.getJSONObject("relay"));
+    }
+
+    if (payload.getJSONObject("pair").getDouble("exp") <= System.currentTimeMillis()) {
+      throw new IllegalArgumentException(ClientFailure.message("pair_code_invalid", locale));
+    }
+
+    X509KeyManager installationKey = keys.get();
+    JSONObject paired;
+
+    try (RoutedUpstream upstream = new RoutedUpstream(profile, installationKey,
+      new VersionGate(major, minor), (status, code) -> {})) {
+      paired = json(upstream, "/api/client/pair", new JSONObject()
+        .put("code", payload.getJSONObject("pair").getString("code")));
+    }
+
+    // Bootstrap закреплён за TLS-сокетом: подтверждение всегда использует новый транспорт.
+    // Тот же ключ сохраняет личность установки и безопасный повтор потерянного pair.
+    try (RoutedUpstream upstream = new RoutedUpstream(profile, installationKey,
+      new VersionGate(major, minor), (status, code) -> {})) {
+      JSONObject hello = json(upstream, "/api/client/hello", null);
+
+      if (!server.getString("fp").equals(paired.getJSONObject("server").optString("fp"))
+        || !server.getString("fp").equals(hello.optString("fp"))
+        || hello.optJSONObject("device") == null) {
+        throw new IllegalStateException(ClientFailure.message("identityMismatch", locale));
+      }
+
+      return store.addPhone(paired.getJSONObject("server").getString("name"), server.getString("fp"),
+        payload.getJSONArray("direct"), payload.optJSONObject("relay"),
+        hello.getJSONObject("device").getString("id"));
+    }
+  }
+
+  /**
    * Смена адреса проверяет существующий pin через новый TLS-транспорт.
    * Ответ hello обязан подтвердить ту же личность до сохранения изменённого профиля.
    */
@@ -84,7 +135,7 @@ public final class Pairing {
    * Управляющий ответ ограничен, а тело привязки никогда не попадает в диагностику.
    * Любой неуспех не создаёт профиль и требует явного исправления человеком.
    */
-  private JSONObject json(Upstream upstream, String path, JSONObject value) throws Exception {
+  private JSONObject json(PipeTransport upstream, String path, JSONObject value) throws Exception {
     byte[] bytes = value == null ? new byte[0] : value.toString().getBytes(StandardCharsets.UTF_8);
     HttpHead head = new HttpHead((value == null ? "GET " : "POST ") + path + " HTTP/1.1",
       value == null ? Map.of() : Map.of("content-length", Integer.toString(bytes.length),

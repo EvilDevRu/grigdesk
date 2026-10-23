@@ -162,7 +162,7 @@ export async function createSandbox(t: TestContext): Promise<Sandbox> {
     'shared/runtime/dataHome.ts', 'shared/runtime/grigDeskReadiness.ts', 'shared/desktop/desktopRuntime.ts',
     'shared/runtime/runtimeSettings.ts', 'shared/runtime/legacyBrand.ts', 'shared/desktop/windowKeyPath.ts',
     'shared/node/bundleLayout.ts',
-    'shared/package.json', 'VERSION']) {
+    'shared/i18n', 'shared/package.json', 'VERSION']) {
     cpSync(path.join(repo, name), path.join(root, name), { recursive: true });
   }
 

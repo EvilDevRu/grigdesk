@@ -323,27 +323,6 @@ SETTINGS_FIELDS.push(...CONNECTION_FIELDS.map(([key, control, label, description
   scope: translator.t('ru', 'settings.thisMachine'),
 });
 
-SETTINGS_FIELDS.push(...[
-  [
-    'name',
-    translator.t('ru', 'settings.deviceName'),
-    translator.t('ru', 'settings.applicationNameInTheMachineAccessList'),
-  ],
-  [
-    'address',
-    translator.t('ru', 'settings.machineAddress'),
-    translator.t('ru', 'settings.optionalReachableAddressForThePairingString'),
-  ],
-].map(([key, label, description]) => ({
-  address: { pageId: 'connections.devices', fieldPath: [key!] },
-  resourceId: 'devicePairing',
-  key: key!,
-  control: 'text' as const,
-  label: label!,
-  description: description!,
-  scope: translator.t('ru', 'settings.thisMachine'),
-})));
-
 export const SETTINGS_PAGE_KEY = 'grigdesk-settings-page';
 export const DEFAULT_SETTINGS_PAGE = 'interface.behavior';
 
@@ -478,14 +457,8 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   {
     id: 'connections.devices',
     groupId: 'connections',
-    label: translator.t('ru', 'settings.applicationDevices'),
+    label: translator.t('ru', 'settings.serverAccess'),
     description: translator.t('ru', 'settings.applicationPairingQRDeviceNameAndMachine'),
-  },
-  {
-    id: 'connections.mobile',
-    groupId: 'connections',
-    label: translator.t('ru', 'settings.phoneAndAccess'),
-    description: translator.t('ru', 'settings.relaysDevicePairingAndLoginOnThis'),
   },
   {
     id: 'plugins.installed',
@@ -545,7 +518,7 @@ function migrateLegacyPage(storage: SettingsStorage): string | undefined {
     ['runs', 'automation.chats'],
     ['plugins', 'plugins.installed'],
     ['server', 'system.startup'],
-    ['access', 'connections.mobile'],
+    ['access', 'connections.devices'],
   ]);
   const tab = readStoredPage(storage, legacyKey);
   const page = legacyPages.get(tab ?? '');
@@ -579,7 +552,8 @@ export function normalizeSettingsPageId(raw: unknown): string | undefined {
 export function resolveSettingsPage(request: PageRequest = {}): string {
   const saved = request.storage ? readStoredPage(request.storage, SETTINGS_PAGE_KEY) : null;
   const migrated = request.storage && saved === null ? migrateLegacyPage(request.storage) : undefined;
-  const candidates = [request.pageId, request.queryPage, saved, migrated];
+  const candidates = [request.pageId, request.queryPage, saved, migrated].map((id) =>
+    id === 'connections.mobile' || id === 'access' ? 'connections.devices' : id);
 
   return candidates.map(normalizeSettingsPageId).find((id) => id !== undefined)
     ?? DEFAULT_SETTINGS_PAGE;
@@ -699,7 +673,7 @@ const PAGE_MESSAGES: Record<string, Record<string, string>> = {
     "description": "settings.portalCredentialsAndConnectionTesting"
   },
   "connections.devices": {
-    "label": "settings.applicationDevices",
+    "label": "settings.serverAccess",
     "description": "settings.applicationPairingQRDeviceNameAndMachine"
   },
   "connections.mobile": {

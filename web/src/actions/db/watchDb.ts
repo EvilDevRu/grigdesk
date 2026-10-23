@@ -1,6 +1,6 @@
 import { sseSubscribe } from '../../composables/useSse.ts';
 import { useDbStore } from '../../stores/db.ts';
-import { loadDb, refreshDbAudit, refreshDbQueries } from './loadDb.ts';
+import { loadDbProjects, loadDb, refreshDbAudit, refreshDbQueries } from './loadDb.ts';
 import { runtimeOf } from './dbRuntime.ts';
 
 /**
@@ -17,6 +17,10 @@ export function watchDb(): void {
   }
 
   runtime.off = sseSubscribe((name: string) => {
+    if (name === 'projects-changed' || name === 'hello') {
+      void loadDbProjects();
+    }
+
     if (name === 'db-sessions') {
       void loadDb();
     }

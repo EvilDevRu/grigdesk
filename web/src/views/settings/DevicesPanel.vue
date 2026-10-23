@@ -4,6 +4,7 @@
       <h3 id="devices-heading">{{ t('settings.devices') }}</h3>
       <UiButton data-context="workspace-form-wrap" :disabled="loading" @click="adding = true">{{ t('settings.addDevice') }}</UiButton>
     </header>
+    <p>{{ t('settings.phoneAddComputerHint') }}</p>
     <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
     <UiInlineMessage v-if="status && status.listener.state !== 'online'" tone="warning">
       {{ status.listener.error || t('settings.networkAccessIsDisabledSetGRIGDESKCLIENT') }}
@@ -22,10 +23,28 @@
         <p>{{ device.scope === 'client' ? t('settings.application') : t('settings.legacyApplication') }}</p>
         <p>{{ t('settings.lastLogin') }} {{ new Date(device.lastSeenAt).toLocaleString(intlLocale(uiLocale)) }}</p>
       </div>
+      <UiButton v-if="!device.revokedAt" variant="text" @click="edit(device)">
+        {{ t('settings.phoneRename') }}
+      </UiButton>
       <span v-if="device.revokedAt">{{ t('settings.revoked') }}</span>
       <UiButton data-context="workspace-form-wrap" v-else tone="danger" variant="text" @click="revoke(device)">{{ t('settings.revoke') }}</UiButton>
     </article>
     <PairDeviceDialog v-model:open="adding" :draft="draft" />
+    <UiDialog :open="!!editing" :title="t('settings.phoneRename')" @update:open="editing = null">
+      <UiField :label="t('settings.deviceName')"><UiInput v-model="newName" /></UiField>
+      <template #footer>
+        <UiButton :disabled="!newName.trim() || mutating" @click="rename">{{ t('settings.phoneSave') }}</UiButton>
+        <UiButton variant="text" @click="editing = null">{{ t('settings.cancel') }}</UiButton>
+      </template>
+    </UiDialog>
+    <UiDialog :open="!!revoking" :title="t('settings.revoke')" @update:open="revoking = null">
+      <p>{{ revoking?.id === status?.currentDeviceId ? t('settings.revokeCurrentDevice', {
+        deviceName: revoking?.name ?? '' }) : t('settings.revokeDevice', { deviceName: revoking?.name ?? '' }) }}</p>
+      <template #footer>
+        <UiButton tone="danger" :disabled="mutating" @click="confirmRevoke">{{ t('settings.revoke') }}</UiButton>
+        <UiButton variant="text" @click="revoking = null">{{ t('settings.cancel') }}</UiButton>
+      </template>
+    </UiDialog>
   </section>
 </template>
 
@@ -37,7 +56,8 @@ import { t } from '../../ui.ts';
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 
 import { errorMessage } from '../../../../shared/lib/errors.ts';
-import { UiButton, UiInlineMessage, confirmDialog, messageRef } from '../../ui.ts';
+import { UiButton, UiInlineMessage, UiDialog, UiField, UiInput,
+  confirmDialog, messageRef } from '../../ui.ts';
 import { api } from '../../shared/apiClient.ts';
 import PairDeviceDialog from './PairDeviceDialog.vue';
 import SettingsEmpty from './SettingsEmpty.vue';
@@ -60,13 +80,17 @@ interface DevicesStatus {
   devices: DeviceRow[];
 }
 
-defineProps<{ draft?: { name: string; address: string } }>();
+const props = defineProps<{ draft?: { name: string; address: string }; phone?: boolean }>();
 
 const status = ref<DevicesStatus | null>(null);
 const loading = ref(false);
 const error = ref('');
 const adding = ref(false);
 const controller = new AbortController();
+const editing = ref<DeviceRow | null>(null);
+const revoking = ref<DeviceRow | null>(null);
+const newName = ref('');
+const mutating = ref(false);
 
 /**
  * Публичный список не содержит пинов или ключей, ответ после unmount не используется.
@@ -91,7 +115,9 @@ async function load(): Promise<void> {
       error.value = errorMessage(cause, t('settings.couldNotLoadDevices'));
     }
   } finally {
-    loading.value = false;
+    if (!controller.signal.aborted) {
+      loading.value = false;
+    }
   }
 }
 
@@ -100,20 +126,98 @@ async function load(): Promise<void> {
  * Обновляем список после durable ответа, а отмена не отправляет мутацию.
  */
 async function revoke(device: DeviceRow): Promise<void> {
+  if (props.phone) {
+    revoking.value = device;
+
+    return;
+  }
+
   const params = { deviceName: device.name };
   const text = device.id === status.value?.currentDeviceId
     ? messageRef('settings.revokeCurrentDevice', params)
     : messageRef('settings.revokeDevice', params);
 
-  if (!await confirmDialog(text, { danger: true })) {
+  if (!await confirmDialog(text, { danger: true }) || controller.signal.aborted) {
     return;
   }
 
   try {
     await api.post(`/api/devices/${encodeURIComponent(device.id)}/revoke`);
-    await load();
+
+    if (!controller.signal.aborted) {
+      await load();
+    }
   } catch (cause) {
-    error.value = errorMessage(cause, t('settings.couldNotRevokeTheDevice'));
+    if (!controller.signal.aborted) {
+      error.value = errorMessage(cause, t('settings.couldNotRevokeTheDevice'));
+    }
+  }
+}
+
+function edit(device: DeviceRow): void {
+  editing.value = device;
+  newName.value = device.name;
+}
+
+/**
+ * Мутация остаётся у владельца списка до ответа и отбрасывается после unmount.
+ * При смене сервера старое finally не открывает диалог и не перезагружает новый список.
+ */
+async function rename(): Promise<void> {
+  const device = editing.value;
+
+  if (!device || mutating.value) {
+    return;
+  }
+
+  mutating.value = true;
+
+  try {
+    await api.patch(`/api/devices/${encodeURIComponent(device.id)}`, { name: newName.value });
+
+    if (!controller.signal.aborted) {
+      editing.value = null;
+      await load();
+    }
+  } catch {
+    if (!controller.signal.aborted) {
+      error.value = t('settings.phoneRenameFailed');
+    }
+  } finally {
+    if (!controller.signal.aborted) {
+      mutating.value = false;
+    }
+  }
+}
+
+/**
+ * Подтверждение отзыва относится к показанному устройству выбранного сервера.
+ * Уничтоженный список не применяет поздний ответ и не запускает повторную мутацию.
+ */
+async function confirmRevoke(): Promise<void> {
+  const device = revoking.value;
+
+  if (!device || mutating.value) {
+    return;
+  }
+
+  mutating.value = true;
+
+  try {
+    await api.post(`/api/devices/${encodeURIComponent(device.id)}/revoke`);
+
+    if (!controller.signal.aborted) {
+      revoking.value = null;
+      await load();
+    }
+  } catch {
+    if (!controller.signal.aborted) {
+      error.value = t('settings.couldNotRevokeTheDevice');
+    }
+  } finally {
+    if (!controller.signal.aborted) {
+      mutating.value = false;
+    }
   }
 }
 

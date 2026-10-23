@@ -1,5 +1,8 @@
 <template>
   <div class="page projects ui-page ui-workspace" data-ui-workspace>
+    <UiInlineMessage v-if="registrationDeleted" tone="warning">
+      Регистрация проекта удалена.
+    </UiInlineMessage>
     <div ref="workspace" class="workspace" :class="{ 'single-pane': !splitView }">
       <!--
         На широком экране список и паспорт стоят рядом: так видно, куда вернёшься.
@@ -45,7 +48,7 @@
               {{ currentDetail.archivedAt ? 'В архиве' : 'Активный' }}
             </span>
           </template>
-          <template v-if="!creating && currentDetail && !currentDetail.archivedAt" #actions>
+          <template v-if="!creating && currentDetail && !currentDetail.archivedAt && !registrationDeleted" #actions>
             <UiButton variant="ghost" tone="accent" data-context="workspace-toolbar"
               aria-label="Чат с проектом" @click="openChat">
               <template #leading><ProjectIcon name="chat" /></template>
@@ -65,6 +68,7 @@
             :server-errors="fieldErrors"
             :checks="store.checks"
             :busy="lifecycleBusy"
+            :readonly="registrationDeleted"
             :lifecycle-failure="lifecycleFailure"
             :dependencies="store.dependencies"
             @save="submit"
@@ -74,6 +78,8 @@
             @open-routes="openRoutes"
             @archive="archive"
             @restore="restore"
+            @remove="remove"
+            @retry-dependencies="retryDependencies"
             @open-rules="openRules"
           >
             <template #notices>
@@ -167,6 +173,8 @@ import {
   useProjectsStore,
   watchProjects,
 } from '../actions/projects';
+import * as projectActions from '../actions/projects';
+import type { ProjectDetail } from '../../../shared/runtime/projectsContracts';
 import { createDraft, isDirty } from './projects/projectDraft';
 import ProjectConflict from './projects/ProjectConflict.vue';
 import ProjectForm from './projects/ProjectForm.vue';
@@ -188,6 +196,8 @@ const saving = ref(false);
 // а отказ сервера показывается рядом с ними текстом.
 const lifecycleBusy = ref(false);
 const lifecycleFailure = ref('');
+const registrationDeleted = ref(false);
+const removedDetail = ref<ProjectDetail | null>(null);
 // Выбранный человеком репозиторий: живёт до конца открытого паспорта.
 const selectedRepo = ref('');
 const workspace = ref<HTMLElement | null>(null);
@@ -201,7 +211,11 @@ const creating = computed(() => route.query.create === '1');
 const formVisible = computed(() => creating.value || openedId.value !== '');
 const splitView = computed(() => dockCapable.value && workspaceWidth.value >= 760);
 const listVisible = computed(() => splitView.value || !formVisible.value);
-const currentDetail = computed(() => store.opened?.id === openedId.value ? store.opened : null);
+const currentDetail = computed(() => {
+  const detail = store.opened ?? removedDetail.value;
+
+  return detail?.id === openedId.value ? detail : null;
+});
 const currentDraft = computed(() => creating.value || store.draft?.id === openedId.value);
 const formTitle = computed(() => (
   creating.value ? 'Новый проект' : currentDetail.value?.title || openedId.value
@@ -225,7 +239,8 @@ async function openChat() {
 }
 
 const snapshot = computed(() => (
-  store.opened ? createDraft(store.opened) : null
+  store.opened ? createDraft(store.opened)
+    : removedDetail.value ? createDraft(removedDetail.value) : null
 ));
 
 // Правки относительно снимка: один ответ и для кнопки сохранения, и для защиты ухода.
@@ -241,10 +256,57 @@ const dirty = computed(() => {
   return isDirty(store.draft, snapshot.value);
 });
 
+let pageGeneration = 0;
+
 watch(openedId, (id) => {
+  pageGeneration += 1;
+
+  if (id) {
+    registrationDeleted.value = false;
+    removedDetail.value = null;
+  }
+
   if (id && !creating.value) {
     void loadProject(id);
     void loadDependencies(id);
+  }
+}, { immediate: true, flush: 'sync' });
+
+// Удаление приходит и до первого паспорта: адрес сверяется с реактивным запретом.
+// Загруженный снимок нужен только для сохранения локальных правок в режиме чтения.
+watch([
+  () => store.opened,
+  openedId,
+  () => store.deletedIds?.has(openedId.value) === true,
+], ([detail, id, deleted], [previous]) => {
+  if (!id || creating.value) {
+    return;
+  }
+
+  if (detail?.id === id && !deleted) {
+    registrationDeleted.value = false;
+    removedDetail.value = null;
+
+    return;
+  }
+
+  const retained = previous?.id === id ? previous
+    : removedDetail.value?.id === id ? removedDetail.value : null;
+
+  if (!deleted && !retained) {
+    return;
+  }
+
+  registrationDeleted.value = true;
+
+  if (retained && store.draft?.id === id && isDirty(store.draft, createDraft(retained))) {
+    removedDetail.value = retained;
+  } else {
+    if (store.draft?.id === id) {
+      store.setDraft(null);
+    }
+
+    void router.replace('/projects');
   }
 }, { immediate: true });
 
@@ -332,7 +394,7 @@ onMounted(() => {
 async function submit(): Promise<void> {
   const draft = store.draft;
 
-  if (!draft || saving.value) {
+  if (!draft || saving.value || lifecycleBusy.value || registrationDeleted.value) {
     return;
   }
 
@@ -386,7 +448,7 @@ async function reloadFromServer(): Promise<void> {
 async function overwriteServer(): Promise<void> {
   const draft = store.draft;
 
-  if (!draft || saving.value) {
+  if (!draft || saving.value || lifecycleBusy.value || registrationDeleted.value) {
     return;
   }
 
@@ -430,6 +492,59 @@ async function changeLifecycle(action: 'archive' | 'restore'): Promise<void> {
   } finally {
     lifecycleBusy.value = false;
   }
+}
+
+/**
+ * Общее подтверждение относится только к регистрации: файлы остаются на диске.
+ * Busy выставляется до диалога, поэтому повторное нажатие не запускает второй DELETE.
+ */
+async function remove(): Promise<void> {
+  const detail = store.opened;
+  const generation = pageGeneration;
+
+  if (!detail?.archivedAt || dirty.value || lifecycleBusy.value || saving.value) {
+    return;
+  }
+
+  lifecycleBusy.value = true;
+  lifecycleFailure.value = '';
+
+  try {
+    const confirmed = await confirmDialog(
+      `Удалить регистрацию «${detail.title}»? Файлы проекта останутся на диске.`,
+      { okText: 'Удалить регистрацию' },
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const result = await projectActions.removeProject(detail.id, { expectedRevision: detail.revision });
+
+    if (generation !== pageGeneration || openedId.value !== detail.id) {
+      return;
+    }
+
+    lifecycleFailure.value = result.ok ? '' : result.message;
+
+    if (result.ok) {
+      if (store.draft?.id === detail.id && isDirty(store.draft, createDraft(detail))) {
+        removedDetail.value = detail;
+        registrationDeleted.value = true;
+
+        return;
+      }
+
+      store.setDraft(null);
+      await router.replace('/projects');
+    }
+  } finally {
+    lifecycleBusy.value = false;
+  }
+}
+
+function retryDependencies(): void {
+  void loadDependencies(openedId.value);
 }
 
 function archive(): void {

@@ -4419,6 +4419,10 @@ function refreshWhenVisible() {
 }
 
 useSse((name) => {
+  if (name === 'projects-changed' || name === 'hello') {
+    void activate({ preserve: true });
+  }
+
   if (name === 'chat-done') {
     requestRefresh({ silent: true });
   }
@@ -4726,7 +4730,8 @@ async function activate({ preserve = false } = {}) {
     projects.value = loaded;
 
     const wanted = previous?.project || localStorage.getItem('grigdesk-project') || '';
-    const pick = pickCodeProject(projects.value, wanted);
+    const pick = preserve && previous?.project && !loaded.some((item) => item.id === previous.project)
+      ? null : pickCodeProject(projects.value, wanted);
     let revalidatedInPlace = false;
 
     if (pick && preserve && previous?.project === pick.id && project.value === pick.id) {

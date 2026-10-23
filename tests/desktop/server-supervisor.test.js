@@ -1201,3 +1201,154 @@ test('SB24-prepare-B-port: supervisor принимает ACK настоящег�
   assert.deepEqual(await exited, [0, null]);
   assert.equal((await inspectRuntimeLeases(options)).state, 'unprotected');
 });
+
+for (const stage of ['checking', 'preparing', 'vpn', 'starting', 'service']) {
+  test(`SV-STAGE: удержанный ${stage} показывает стабильный этап`, async () => {
+    const entered = Promise.withResolvers();
+    const held = Promise.withResolvers();
+    const fixture = supervisorFixture({
+      probes: stage === 'service' ? ['refused', 'grigdesk'] : undefined,
+      units: stage === 'service' ? ['activating'] : undefined,
+      gates: stage === 'vpn'
+        ? [{ code: 1, lastLine: 'Нет маршрута VPN' }, { code: 0, lastLine: '' }] : undefined,
+    });
+    const port = {
+      checking: 'probe',
+      preparing: 'loadRuntime',
+      vpn: 'runGate',
+      starting: 'probe',
+      service: 'sleep',
+    }[stage];
+    const original = fixture.adapters[port];
+    let attempts = 0;
+
+    fixture.adapters[port] = async (...args) => {
+      const hold = stage === 'starting' ? attempts++ === 2
+        : stage === 'vpn' ? attempts++ === 1 : true;
+
+      if (hold) {
+        entered.resolve();
+        await held.promise;
+      }
+
+      return original(...args);
+    };
+
+    const running = fixture.run();
+
+    try {
+      await entered.promise;
+      assert.equal(fixture.supervisor.stage, stage === 'service' ? 'starting' : stage);
+    } finally {
+      fixture.controller.abort();
+      held.resolve();
+      await running.catch(() => {});
+    }
+
+    assert.equal(fixture.supervisor.stage, null, 'Завершённый ensure очищает этап.');
+  });
+}
+
+test('SV-STAGE-VPN-STICKY: отказ ворот держит vpn через следующие probe и подготовку', async () => {
+  const secondProbe = Promise.withResolvers();
+  const secondRuntime = Promise.withResolvers();
+  const releaseProbe = Promise.withResolvers();
+  const releaseRuntime = Promise.withResolvers();
+  const childProbe = Promise.withResolvers();
+  const releaseChild = Promise.withResolvers();
+  const fixture = supervisorFixture({
+    probes: ['refused'],
+    gates: [
+      { code: 1, lastLine: 'Нет туннеля' },
+      { code: 1, lastLine: 'Другая причина ворот' },
+      { code: 0, lastLine: '' },
+    ],
+  });
+  let probeCount = 0;
+  let runtimeCount = 0;
+  const vpnStages = [];
+  const sleep = fixture.adapters.sleep;
+  const load = fixture.adapters.loadRuntime;
+
+  fixture.adapters.sleep = async (ms, signal) => {
+    if (ms === 5000) {
+      vpnStages.push(fixture.supervisor.stage);
+    }
+
+    return sleep(ms, signal);
+  };
+
+  fixture.adapters.probe = async () => {
+    probeCount += 1;
+
+    if (probeCount === 2) {
+      secondProbe.resolve();
+      await releaseProbe.promise;
+    }
+
+    if (fixture.calls.includes('spawn')) {
+      childProbe.resolve();
+      await releaseChild.promise;
+
+      return 'grigdesk';
+    }
+
+    return 'refused';
+  };
+  fixture.adapters.loadRuntime = async () => {
+    runtimeCount += 1;
+
+    if (runtimeCount === 2) {
+      secondRuntime.resolve();
+      await releaseRuntime.promise;
+    }
+
+    return load();
+  };
+
+  const running = fixture.run();
+
+  try {
+    await secondProbe.promise;
+    assert.equal(fixture.supervisor.stage, 'vpn', 'Повторный probe не сбрасывает отказ VPN.');
+    releaseProbe.resolve();
+    await secondRuntime.promise;
+    assert.equal(fixture.supervisor.stage, 'vpn', 'Повторная подготовка не меняет подпись VPN.');
+    releaseRuntime.resolve();
+    await childProbe.promise;
+    assert.equal(fixture.supervisor.stage, 'starting');
+    assert.equal(fixture.calls.filter((call) => call === 'gate').length, 3);
+    assert.deepEqual(vpnStages, ['vpn', 'vpn'], 'Разные строки отказа сохраняют один этап.');
+    releaseChild.resolve();
+    await running;
+    assert.equal(fixture.supervisor.stage, null);
+  } finally {
+    fixture.controller.abort();
+    releaseProbe.resolve();
+    releaseRuntime.resolve();
+    releaseChild.resolve();
+    await running.catch(() => {});
+  }
+});
+
+test('SV-STAGE-VPN-STICKY: исправные ворота не показывают ожидание VPN', async () => {
+  const fixture = supervisorFixture();
+  const stages = [];
+
+  for (const port of ['probe', 'loadRuntime', 'runGate', 'sleep', 'spawnServer']) {
+    const original = fixture.adapters[port];
+
+    fixture.adapters[port] = (...args) => {
+      stages.push(fixture.supervisor.stage);
+
+      return original(...args);
+    };
+  }
+
+  await fixture.run();
+  assert.ok(stages.includes('checking'));
+  assert.ok(stages.includes('preparing'));
+  assert.ok(stages.includes('starting'));
+  assert.equal(stages.includes('vpn'), false);
+  assert.equal(fixture.supervisor.stage, null);
+});

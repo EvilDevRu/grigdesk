@@ -43,7 +43,7 @@ test('машины: список и несовместимые версии до
       '../stores/shell.ts': 'export const useShellStore = () => globalThis.__testShell;',
       '../../stores/shell.ts': 'export const useShellStore = () => globalThis.__testShell;',
       '../ui.ts': `
-        export { UiButton, UiInlineMessage, UiActionLink, promptDialog } from './src/ui.ts';
+        export * from './src/ui.ts';
         export const confirmDialog = () => globalThis.__confirmMachine();
       `,
     },
@@ -80,4 +80,66 @@ test('машины: список и несовместимые версии до
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(actions.at(-1), ['add', 'GRIGDESK:PAIR:1:TEST']);
+});
+
+
+test('PHONE-R1: причины нового транспорта дают следующий шаг на RU/EN', async (t) => {
+  await installUiBrowser(t);
+
+  const { reactive, nextTick } = await import('../../web/node_modules/vue/index.mjs');
+  const { mount } = await import(
+    '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs');
+  const { connectionDetailText } = await import('../../shared/client/clientShell.ts');
+  const profile = {
+    id: 'relay-only',
+    name: 'Сервер через relay',
+    kind: 'remote',
+    address: '',
+    status: 'offline',
+  };
+
+  globalThis.__relayDiagnosticShell = reactive({
+    present: true,
+    profile,
+    profiles: [profile],
+    status: 'offline',
+    detail: { code: 'offline' },
+    localAvailable: false,
+    appApi: { major: 0, minor: 1 },
+    serverApi: { major: 0, minor: 1 },
+    capabilities: [],
+  });
+
+  // Публичная граница использует нормализованные native-коды: сеть, несовместимость, pin.
+  // Эти же коды проверяет JVM owner; новые приватные исключения не должны доходить до WebView.
+  const module = await import('./helpers/compile-vue.js');
+  const component = await module.compileModule(webFile('../tests/web/helpers/phone-diagnostics.ts'), {
+    stubs: {
+      '../stores/shell.ts': 'export const useShellStore = () => globalThis.__relayDiagnosticShell;',
+      '../../stores/shell.ts': 'export const useShellStore = () => globalThis.__relayDiagnosticShell;',
+    },
+  });
+  const wrapper = mount(component.ConnectionsView, { attachTo: document.body });
+
+  t.after(() => {
+    wrapper.unmount();
+    component.setUiLocale('ru');
+    delete globalThis.__relayDiagnosticShell;
+  });
+
+  for (const locale of ['ru', 'en']) {
+    component.setUiLocale(locale);
+
+    for (const code of ['offline', 'client_upgrade_required', 'identityMismatch', 'relay_upgrade_required']) {
+      globalThis.__relayDiagnosticShell.detail = { code };
+      await nextTick();
+
+      const detail = connectionDetailText({ code }, locale);
+
+      assert.ok(detail.trim(), `${locale}/${code}: причина не должна исчезать в mapper`);
+      assert.ok(wrapper.text().includes(detail));
+      assert.doesNotMatch(detail, /GRIGDESK_|VPN|Exception|[a-f0-9]{64}/);
+      assert.ok(wrapper.find('.machine-address').text().trim(), 'relay-only должен иметь подпись адреса');
+    }
+  }
 });

@@ -73,8 +73,12 @@ function handleEvent(profile: string, name: string, payload: unknown): void {
   const store = useRoutesStore();
   const runtime = runtimeOf(store);
 
-  if (name === 'hello') {
-    void reconcile(profile);
+  if (name === 'projects-changed' || name === 'hello') {
+    runtime.watchCatalogChanged?.(name);
+
+    if (name === 'hello') {
+      void reconcile(profile);
+    }
 
     return;
   }
@@ -131,7 +135,7 @@ function handleEvent(profile: string, name: string, payload: unknown): void {
  * Подписывает редактор на общие события текущего профиля.
  * Общий SSE-канал согласует вкладки без потери несохранённого текста.
  */
-export function watchRoutes(profile: string, onCatalogChanged?: () => void): void {
+export function watchRoutes(profile: string, onCatalogChanged?: (event?: string) => void): void {
   const runtime = runtimeOf(useRoutesStore());
 
   if (runtime.watchOff && runtime.watchProfile === profile) {

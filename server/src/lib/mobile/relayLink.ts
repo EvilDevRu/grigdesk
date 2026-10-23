@@ -82,6 +82,8 @@ export function nextDelay(attempt: number, random = Math.random): number {
 export class RelayLink {
   readonly relay: Relay;
   private mobilePort: number;
+  private clientTarget?: () => Promise<number>;
+  private compatibility: 'unknown' | 'supported' | 'unsupported' = 'unknown';
   private vpnGate: (ip: string) => Promise<boolean>;
   private changed: () => void;
   private state: RelayState = 'offline';
@@ -108,11 +110,13 @@ export class RelayLink {
   constructor(options: {
     relay: Relay;
     mobilePort: number;
+    clientTarget?: () => Promise<number>;
     vpnGate: (ip: string) => Promise<boolean>;
     changed?: () => void;
   }) {
     this.relay = options.relay;
     this.mobilePort = options.mobilePort;
+    this.clientTarget = options.clientTarget;
     this.vpnGate = options.vpnGate;
     this.changed = options.changed ?? (() => {});
   }
@@ -120,6 +124,7 @@ export class RelayLink {
   status() {
     return {
       id: this.relay.id,
+      compatibility: this.compatibility,
       state: this.state,
       since: this.since,
       lastError: this.lastError,
@@ -235,7 +240,7 @@ export class RelayLink {
    * Открывает отдельный brain-data после проверки адреса для каждого incoming.
    * Локальный connect ограничен временем; pipe не создаёт очереди копий трафика.
    */
-  private async incoming(id: string) {
+  private async incoming(id: string, destination?: string) {
     if (this.pairs.size + this.incomingCount >= 32 || !/^[a-f0-9]{32}$/.test(id)) {
       return;
     }
@@ -247,6 +252,13 @@ export class RelayLink {
     let local: Socket | null = null;
 
     try {
+      const port = destination === 'client' && this.compatibility === 'supported'
+        ? await this.clientTarget?.() : destination ? undefined : this.mobilePort;
+
+      if (!port) {
+        return;
+      }
+
       const ip = await this.address();
 
       if (this.stopped || generation !== this.generation) {
@@ -268,7 +280,8 @@ export class RelayLink {
         local?.destroy();
       });
       await relayHello(remote, {
-        v: 1,
+        v: destination === 'client' ? 2 : 1,
+        ...(destination === 'client' ? { target: 'client' } : {}),
         role: 'brain-data',
         token: this.relay.brainToken,
         id,
@@ -282,7 +295,7 @@ export class RelayLink {
 
       local = net.connect({
         host: '127.0.0.1',
-        port: this.mobilePort,
+        port,
       });
 
       const target = local;
@@ -336,8 +349,10 @@ export class RelayLink {
         fp: this.relay.fp,
         signal: this.abort.signal,
       });
-      await relayHello(socket, {
+
+      const ack = await relayHello(socket, {
         v: 1,
+        ...(this.clientTarget ? { capabilities: ['client-v2'] } : {}),
         role: 'brain-control',
         token: this.relay.brainToken,
       });
@@ -348,6 +363,7 @@ export class RelayLink {
         return;
       }
 
+      this.compatibility = ack.capabilities?.includes('client-v2') ? 'supported' : 'unsupported';
       this.control = socket;
       connectedAt = performance.now();
       this.setState('online');
@@ -357,12 +373,13 @@ export class RelayLink {
         const message = JSON.parse(await relayLine(socket)) as {
           t?: string;
           id?: string;
+          target?: string;
         };
 
         if (message.t === 'ping') {
           socket.write('{"t":"pong"}\n');
         } else if (message.t === 'incoming' && typeof message.id === 'string') {
-          void this.incoming(message.id);
+          void this.incoming(message.id, message.target);
         } else if (message.t !== 'pong') {
           throw new Error('relay_bad_reply');
         }

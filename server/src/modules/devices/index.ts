@@ -4,6 +4,8 @@ import qrcode from 'qrcode-generator';
 import { API_VERSION } from '../../../../shared/client/apiVersion.ts';
 import { encodePairing } from '../../../../shared/client/pairingPayload.ts';
 import { readClientConfig } from '../../lib/clientAccess/config.ts';
+import type { PhoneAccessOptions } from '../../lib/clientAccess/phoneAccess.ts';
+import { registerPhoneAccess } from './phoneAccess.ts';
 import type { ClientListener } from '../../lib/clientAccess/listener.ts';
 import { markRevoked } from '../../lib/clientAccess/principal.ts';
 import { deviceName, MobileInputError } from '../../lib/mobile/errors.ts';
@@ -11,6 +13,7 @@ import type { PairingCodes } from '../../lib/mobile/pairing.ts';
 import type { DeviceStore } from '../../lib/mobile/store.ts';
 
 export interface DevicesOptions {
+  access?: PhoneAccessOptions;
   devices: DeviceStore;
   pairing: PairingCodes;
   listener: () => ClientListener | null;
@@ -45,9 +48,14 @@ export default async function devicesModule(app: FastifyInstance, options: Devic
 
     return reply.code(503).send({ error: 'client_unavailable', message: 'Доступ устройств недоступен.' });
   });
+  registerPhoneAccess(app, options);
   app.get('/api/client/hello', async (request) => {
     const device = request.authPrincipal?.kind === 'device'
       ? (await options.devices.list()).find((item) => item.id === request.authPrincipal?.deviceId) : null;
+
+    if (device) {
+      options.pairing.confirmPhone(device.id);
+    }
 
     return {
       product: 'grigdesk',
@@ -80,7 +88,8 @@ export default async function devicesModule(app: FastifyInstance, options: Devic
     const state = options.listener()?.state();
 
     if (state?.state !== 'online') {
-      throw new MobileInputError('client_listener_off', 'Включите GRIGDESK_CLIENT_LISTEN.', 409);
+      throw new MobileInputError('client_listener_off',
+        'Откройте «Доступ к серверу» и включите прямой доступ.', 409);
     }
 
     const candidates = state.addresses.filter((address) => !address.startsWith('0.0.0.0:'));

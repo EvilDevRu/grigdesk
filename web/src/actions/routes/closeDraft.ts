@@ -6,7 +6,7 @@ import { cancelDraftSave } from './save.ts';
  * Закрывает черновик и очищает состояние редактора.
  * Старые ответы запросов после закрытия не должны открыть черновик снова.
  */
-export function closeDraft(): void {
+export function closeDraft({ keepDocument = false }: { keepDocument?: boolean } = {}): void {
   const store = useRoutesStore();
 
   cancelDraftSave();
@@ -14,8 +14,19 @@ export function closeDraft(): void {
   const runtime = runtimeOf(store);
 
   runtime.openRequest += 1;
+  runtime.editorRequest += 1;
+  runtime.listRequest += 1;
   runtime.savePromise = null;
   runtime.pendingDraftRevision = null;
+
+  if (keepDocument && store.opened) {
+    store.opened = { ...store.opened, readOnly: true };
+    store.loading = false;
+    store.saving = false;
+
+    return;
+  }
+
   store.opened = null;
   store.serverSnapshot = null;
   store.localDocument = null;

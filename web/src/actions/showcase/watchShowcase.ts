@@ -117,8 +117,9 @@ export function watchShowcase(store: ShowcaseStore): () => void {
 
     // Каталог целей включает ручные песочницы. После их подъёма или сноса форма
     // должна обновиться сама, даже если ни один ролик при этом не менялся.
-    if (name === 'showcase-changed' || name === 'sandboxes-changed' || name === 'hello') {
-      const refreshed = loadShowcase(store);
+    if (name === 'showcase-changed' || name === 'sandboxes-changed'
+      || name === 'projects-changed' || name === 'hello') {
+      const refreshed = loadShowcase(store, { fresh: name === 'projects-changed' || name === 'hello' });
 
       if (name === 'hello' && store.opened?.id) {
         const openedId = store.opened.id;

@@ -66,9 +66,13 @@ const now = ref(performance.now());
 const expiry = ref(0);
 const seconds = computed(() => Math.max(0, Math.ceil((expiry.value - now.value) / 1000)));
 const qrUrl = computed(() => `data:image/svg+xml,${encodeURIComponent(pairing.value?.svg ?? '')}`);
+let generation = 0;
 let timer: ReturnType<typeof setInterval> | null = null;
 
 watch(() => props.open, (open) => {
+  generation += 1;
+  busy.value = false;
+
   if (timer) {
     clearInterval(timer);
     timer = null;
@@ -85,6 +89,8 @@ watch(() => props.open, (open) => {
   }
 });
 onBeforeUnmount(() => {
+  generation += 1;
+
   if (timer) {
     clearInterval(timer);
   }
@@ -95,6 +101,8 @@ onBeforeUnmount(() => {
  * При закрытии диалога поздний ответ не возвращает секрет на экран.
  */
 async function issue(): Promise<void> {
+  const epoch = generation;
+
   busy.value = true;
   error.value = '';
 
@@ -102,19 +110,25 @@ async function issue(): Promise<void> {
     const body = { name: name.value, ...(address.value.trim() ? { address: address.value.trim() } : {}) };
     const result = await api.post('/api/devices/pairing', body) as PairingResult;
 
-    if (props.open) {
+    if (props.open && generation === epoch) {
       pairing.value = result;
       now.value = performance.now();
       expiry.value = now.value + Math.max(0, result.expiresInMs ?? 600000);
     }
   } catch (cause) {
+    if (!props.open || generation !== epoch) {
+      return;
+    }
+
     const code = (cause as { data?: { error?: string } } | null)?.data?.error;
 
     error.value = code === 'client_listener_off'
       ? t('settings.networkAccessIsDisabledSetGRIGDESKCLIENT')
       : errorMessage(cause, t('settings.couldNotGetAPairingCode'));
   } finally {
-    busy.value = false;
+    if (generation === epoch) {
+      busy.value = false;
+    }
   }
 }
 </script>

@@ -54,7 +54,7 @@
               <span v-if="profile.id === shell.profile?.id" class="machine-current">{{ t('core.current') }}</span>
             </div>
             <span class="machine-address">
-              {{ profile.kind === 'local' ? t('core.localMachine') : profile.address }}
+              {{ profile.kind === 'local' ? t('core.localMachine') : profile.address || t('core.relayAddress') }}
             </span>
             <ConnectionStatus :status="profile.id === shell.profile?.id ? shell.status : profile.status"
                               :disconnected="profile.id === shell.profile?.id && disconnected"
