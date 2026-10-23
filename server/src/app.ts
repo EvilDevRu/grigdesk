@@ -965,7 +965,12 @@ async function build(desktopParent: DesktopParent | null) {
     onChanged: notifyInboxChanged,
     log: fastify.log,
   });
-  const system = new SystemAdapter();
+  const system = new SystemAdapter({ dataHome: config.dataHome });
+
+  fastify.addHook('onClose', async () => {
+    system.stop();
+  });
+
   const taskFavoritesStore = new TaskFavoritesStore({ filePath: config.taskFavoritesPath });
   const taskFavorites = new TaskFavoritesService({ store: taskFavoritesStore, b24 });
   const taskShelfStore = new TaskShelfStore({ filePath: config.taskShelfPath });

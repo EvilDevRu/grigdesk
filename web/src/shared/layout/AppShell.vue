@@ -71,7 +71,7 @@
             <!-- Опрос не удался — цифры остаются, но честно блекнут: пустое место в шапке
                  выглядело как «метрики пропали», хотя пропала только связь. -->
             <UiPressable class="metric mono" data-context="topbar-metrics"
-                         :class="{ stale: sysStale }" :aria-label="t('core.computerResources')">
+                         :class="{ stale: sysStale }" :aria-label="sysResourcesLabel">
               <span>
                 CPU <b :class="loadClass(sys.cpu.percent)">{{ formatNumber(sys.cpu.percent, uiLocale) }}%</b>
               </span>
@@ -81,56 +81,13 @@
                   {{ formatNumber(sys.mem!.usedGb!, uiLocale) }}/{{ formatNumber(sys.mem!.totalGb!, uiLocale) }}
                 </b>
               </span>
+              <span v-if="sysResourcesAlarm" class="resources-alarm" aria-hidden="true"></span>
             </UiPressable>
           </template>
           <!-- Разбивка нагрузки полосками: одной строкой «занято 22 из 47» не видно,
                кончилась физическая память или просто лежит холодный swap. -->
           <template #default>
-            <span class="ptip">
-              <span class="pu">
-                <span class="pu-row">
-                  <span class="pu-head">
-                    <span>{{ t('core.cpu') }}</span>
-                    <b :class="loadClass(sys.cpu.percent)">{{ formatNumber(sys.cpu.percent, uiLocale) }}%</b>
-                  </span>
-                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(sys.cpu.percent)" :style="{ width: Math.min(100, sys.cpu.percent) + '%' }"></span></span>
-                  <span class="pu-reset">
-                    {{ t('core.averageLoadOverOneMinute') }} {{ formatNumber(sys.cpu.load1!, uiLocale) }}
-                  </span>
-                </span>
-                <span class="pu-row">
-                  <span class="pu-head">
-                    <span>{{ t('core.ram') }}</span>
-                    <b :class="loadClass(mem!.ramPercent)">{{ formatNumber(mem!.ramPercent, uiLocale) }}%</b>
-                  </span>
-                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(mem!.ramPercent)" :style="{ width: Math.min(100, mem!.ramPercent) + '%' }"></span></span>
-                  <span class="pu-reset">
-                    {{ t('core.used') }} {{ formatNumber(mem!.ramUsed, uiLocale) }}
-                    {{ t('settings.from') }} {{ formatNumber(mem!.ramTotal, uiLocale) }}
-                    {{ t('core.gbFree') }} {{ formatNumber(mem!.ramFree, uiLocale) }} {{ t('core.gb') }}
-                  </span>
-                </span>
-                <span v-if="mem!.swapTotal" class="pu-row">
-                  <span class="pu-head">
-                    <span>{{ t('core.swap') }}</span>
-                    <b :class="loadClass(mem!.swapPercent)">{{ formatNumber(mem!.swapPercent, uiLocale) }}%</b>
-                  </span>
-                  <span class="pu-bar"><span class="pu-fill" :class="loadClass(mem!.swapPercent)" :style="{ width: Math.min(100, mem!.swapPercent) + '%' }"></span></span>
-                  <span class="pu-reset">
-                    {{ t('core.used') }} {{ formatNumber(mem!.swapUsed, uiLocale) }}
-                    {{ t('settings.from') }} {{ formatNumber(mem!.swapTotal, uiLocale) }} {{ t('core.gb') }}
-                  </span>
-                </span>
-                <span v-else class="pu-reset">{{ t('core.swapDisabled') }}</span>
-              </span>
-              <span class="sysnote">
-                {{ t('core.theHeaderCombinesRAMAndSwapUsed') }} {{ formatNumber(sys.mem!.usedGb!, uiLocale) }}
-                {{ t('settings.from') }} {{ formatNumber(sys.mem!.totalGb!, uiLocale) }} {{ t('core.gb') }}
-              </span>
-              <span v-if="sysStale" class="sysnote stale-note">
-                {{ t('core.noFreshDataTheServerDidNot') }} {{ sysSnapshotTime }}.
-              </span>
-            </span>
+            <ComputerResourcesPanel :metrics="sys" :stale="sysStale" :snapshot-time="sysSnapshotTime" />
           </template>
         </UiTopbarPanel>
         <span v-if="sys" class="sep metric-sep" aria-hidden="true"></span>
@@ -398,6 +355,8 @@ import type { BoardTask } from '../boardContracts.ts';
 
 import { installAlertDeepLinks, openAlertTarget } from '../alertDeepLinks.ts';
 import ConnectionButton from './ConnectionButton.vue';
+import ComputerResourcesPanel from './ComputerResourcesPanel.vue';
+import { loadClass, resourcesAlarm } from './resourceMetrics.ts';
 import PhoneConnectButton from './PhoneConnectButton.vue';
 import { usePhoneAccessStore } from '../../stores/phoneAccess.ts';
 import PhoneConnectDialog from '../../views/settings/PhoneConnectDialog.vue';
@@ -600,38 +559,12 @@ function runUsageAction(action: { kind: string; command?: string } | null | unde
 
   openTerminal({ insert: action.command });
 }
-/**
- * Цвет ресурса следует прежним порогам нагрузки без округления процента.
- * Отсутствующий показатель сохраняет нейтральный класс до первого снимка.
- */
-function loadClass(p: number | undefined) {
-  return p! >= 85 ? 'lv-bad' : p! >= 60 ? 'lv-warn' : 'lv-ok';
-}
-// Разбивка памяти для всплывашки: физическая отдельно, подкачка отдельно.
-// `??` — страховка на окно между выкаткой фронта и перезапуском сервера: пока сервер
-// старой сборки, полей ram*/swapPercent нет, и без фолбэка всплывашка покажет undefined.
-const mem = computed(() => {
-  const m = sys.value?.mem;
 
-  if (!m) {
-    return null;
-  }
+const sysResourcesAlarm = computed(() => resourcesAlarm(sys.value));
+const sysResourcesLabel = computed(() => sysResourcesAlarm.value
+  ? `${t('core.computerResources')} · ${t('core.resourcesAlarm')}`
+  : t('core.computerResources'));
 
-  const swapTotal = m.swapTotalGb || 0;
-  const swapUsed = m.swapUsedGb || 0;
-  const ramTotal = m.ramTotalGb ?? +(m.totalGb! - swapTotal).toFixed(1);
-  const ramUsed = m.ramUsedGb ?? +(m.usedGb! - swapUsed).toFixed(1);
-
-  return {
-    ramTotal,
-    ramUsed,
-    ramFree: m.ramFreeGb ?? +(ramTotal - ramUsed).toFixed(1),
-    ramPercent: m.ramPercent ?? (ramTotal ? Math.round((ramUsed / ramTotal) * 100) : 0),
-    swapTotal,
-    swapUsed,
-    swapPercent: m.swapPercent ?? (swapTotal ? Math.round((swapUsed / swapTotal) * 100) : 0),
-  };
-});
 // Эмодзи-флаг из ISO-кода страны (2 буквы → региональные индикаторы).
 function flagOf(cc: string | null | undefined) {
   if (!cc || cc.length !== 2) {

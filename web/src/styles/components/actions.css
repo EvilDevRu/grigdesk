@@ -2175,6 +2175,20 @@
   opacity: .5;
 }
 
+/* Метка тревоги не занимает места рядом с цифрами ресурсов.
+   Даже при устаревшем снимке она сохраняет яркость поверх приглушённых показаний. */
+.ui-pressable[data-context='topbar-metrics'] > span.resources-alarm {
+  position: absolute;
+  top: -5px;
+  right: -8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bad);
+  opacity: 1;
+  pointer-events: none;
+}
+
 .ui-pressable[data-context='topbar-network'] {
   display: inline-flex;
   align-items: center;

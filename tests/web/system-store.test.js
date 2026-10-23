@@ -147,3 +147,77 @@ test('перезапуск опроса во время висящего GET н�
   assert.equal(system.data.cpu.percent, 20);
   system.stopPolling();
 });
+
+test('STORE-01: расширения проходят прежний store', async (t) => {
+  const calls = controlledApi();
+  const system = await systemFixture();
+  const snapshot = {
+    cpu: {
+      percent: 12,
+      cores: 4,
+      load1: 1.23,
+      temperature: { celsius: 72.8 },
+    },
+    mem: {
+      percent: 67,
+      usedGb: 16,
+      totalGb: 24,
+    },
+    net: {
+      ip: '192.0.2.1',
+      country: 'Фикстура',
+      countryCode: 'ZZ',
+    },
+    gpus: [{
+      id: 'fixture-gpu',
+      name: 'Fixture GPU',
+      percent: 24,
+      memoryUsedGb: 1.5,
+      memoryTotalGb: 8,
+      temperature: { celsius: 53 },
+    }],
+    disks: [{
+      id: 'fixture-disk',
+      device: '/dev/fixture',
+      mountpoint: '/data',
+      totalGb: 100,
+      usedGb: 80,
+      freeGb: 10,
+      percent: 80,
+      dataHome: true,
+      temperature: {
+        celsius: 41,
+        maxCelsius: 79.85,
+        critCelsius: 84.85,
+      },
+    }],
+  };
+
+  t.after(() => system.stopPolling());
+
+  const first = system.load();
+
+  assert.equal(calls[0].url, '/api/system');
+  calls[0].resolve(snapshot);
+  await first;
+  assert.deepEqual(JSON.parse(JSON.stringify(system.data)), snapshot);
+  assert.equal(system.stale, false);
+
+  const old = {
+    cpu: { percent: 3 },
+    mem: {
+      percent: 25,
+      usedGb: 4,
+      totalGb: 16,
+    },
+  };
+  const second = system.load();
+
+  calls[1].resolve(old);
+  await second;
+  assert.deepEqual(JSON.parse(JSON.stringify(system.data)), old);
+  assert.equal(system.data.gpus, undefined);
+  assert.equal(system.data.disks, undefined);
+  assert.equal(system.data.cpu.temperature, undefined);
+  assert.equal(system.stale, false);
+});
