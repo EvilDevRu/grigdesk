@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { ProviderUsagePatch } from '../providerUsage.ts';
 import type { BackgroundIdentity, BackgroundSession } from './backgroundRuns.ts';
+import type { ChatBackgroundTask } from '../../../../shared/chat/chatBackgroundTasks.ts';
 
 const DEFAULT_IDLE_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_SESSIONS = 4;
@@ -72,6 +73,7 @@ interface LiveEntry {
   sessionToken: string;
   managed: boolean;
   background: { backgroundId: string } | null;
+  backgroundTasks: ChatBackgroundTask[];
   closedNotified: boolean;
   backgroundWaiters: Array<() => void>;
   openedAt: number;
@@ -83,7 +85,7 @@ interface LiveEntry {
 // Событие состава пула для окон: сессия открылась или закрылась.
 export interface LiveSessionsEvent {
   chatKey: string;
-  event: 'opened' | 'closed' | 'busy';
+  event: 'opened' | 'closed' | 'busy' | 'tasks';
   reason?: string;
 }
 
@@ -91,6 +93,15 @@ export interface LiveSessionsEvent {
 interface LiveLog {
   info?: (fields: Record<string, unknown>, message: string) => void;
   warn?: (fields: Record<string, unknown>, message: string) => void;
+}
+
+/**
+ * Сон обещает самостоятельное пробуждение только живого процесса между ходами.
+ * Занятость ходом сохраняет прежний контракт busy и не подменяется ожиданием задач.
+ */
+function sleeping(entry: LiveEntry): boolean {
+  return !!entry.handle?.alive && entry.unsolicited && entry.backgroundTasks.length > 0
+    && !entry.managed && !entry.background;
 }
 
 function fingerprintOf(spec: LiveSessionSpec, fields: readonly string[]): string {
@@ -225,8 +236,15 @@ export class ChatLiveSessions {
       });
     }
 
+    const wasSleeping = sleeping(entry);
+
     entry.managed = true;
     this._clearIdle(entry);
+
+    if (wasSleeping) {
+      this.onChange?.({ chatKey: entry.chatKey, event: 'tasks' });
+    }
+
     // Id сессии пул узнаёт с первого события хода, а не по его итогу: по нему сессия
     // переоткроется после смерти процесса, даже если ход до result не дожил.
     const turnSpec = turn && typeof turn === 'object'
@@ -253,6 +271,10 @@ export class ChatLiveSessions {
 
       if (!entry.background && this.entries.get(entry.chatKey) === entry) {
         this._armIdle(entry);
+
+        if (sleeping(entry)) {
+          this.onChange?.({ chatKey: entry.chatKey, event: 'tasks' });
+        }
       }
     }
   }
@@ -312,6 +334,8 @@ export class ChatLiveSessions {
       alive: !!entry.handle?.alive,
       busy: !!entry.managed || !!entry.background,
       unsolicited: !!entry.unsolicited,
+      sleeping: sleeping(entry),
+      backgroundTasks: entry.backgroundTasks.map((task) => ({ ...task })),
       sessionId: entry.sessionId || null,
       model: entry.model || '',
       effort: entry.effort || '',
@@ -321,7 +345,8 @@ export class ChatLiveSessions {
       openedAt: entry.openedAt,
       lastUsed: entry.lastUsed,
       // Занятая сессия по простою не гаснет: таймер перевзводится, пока идёт ход.
-      idleAtMs: (entry.managed || entry.background) ? null : Math.max(now, entry.lastUsed + this.idleMs),
+      idleAtMs: (entry.managed || entry.background || sleeping(entry))
+        ? null : Math.max(now, entry.lastUsed + this.idleMs),
     }));
   }
 
@@ -422,6 +447,7 @@ export class ChatLiveSessions {
       sessionToken: `live-${randomUUID()}`,
       managed: false,
       background: null,
+      backgroundTasks: [],
       closedNotified: false,
       backgroundWaiters: [],
       openedAt: Date.now(),
@@ -434,6 +460,41 @@ export class ChatLiveSessions {
       ...spec,
       log: this.log,
       hooks: {
+        onBackgroundTasks: (tasks: ChatBackgroundTask[]) => {
+          const current = this.entries.get(chatKey);
+
+          if (entry.closedNotified || (current && current !== entry)) {
+            return;
+          }
+
+          const next = tasks.map(({ id, kind, description }) => ({
+            id,
+            kind,
+            description,
+          }));
+
+          if (JSON.stringify(next) === JSON.stringify(entry.backgroundTasks)) {
+            return;
+          }
+
+          const wasSleeping = sleeping(entry);
+
+          entry.backgroundTasks = next;
+
+          // Во время open снимок сохраняется до присвоения handle и события opened.
+          if (current !== entry) {
+            return;
+          }
+
+          if (sleeping(entry)) {
+            this._clearIdle(entry);
+          } else if (wasSleeping) {
+            entry.lastUsed = Date.now();
+            this._armIdle(entry);
+          }
+
+          this.onChange?.({ chatKey, event: 'tasks' });
+        },
         onProviderUsage: (patch: ProviderUsagePatch): boolean => {
           try {
             return spec.onProviderUsage?.(patch) ?? false;
@@ -551,7 +612,7 @@ export class ChatLiveSessions {
   async _enforceLimit(): Promise<void> {
     while (this.entries.size >= this.maxSessions) {
       const idle = [...this.entries.values()]
-        .filter((entry) => !entry.managed && !entry.background)
+        .filter((entry) => !entry.managed && !entry.background && !sleeping(entry))
         .sort((a, b) => a.lastUsed - b.lastUsed)[0];
       if (!idle) {
         this.log?.warn?.(
@@ -565,8 +626,17 @@ export class ChatLiveSessions {
     }
   }
 
+  /**
+   * Ожидающий задачи процесс не получает автоматического таймера гашения.
+   * После снятия защиты вызывающий начинает полный обычный интервал простоя.
+   */
   _armIdle(entry: LiveEntry): void {
     this._clearIdle(entry);
+
+    if (sleeping(entry)) {
+      return;
+    }
+
     entry.idleTimer = setTimeout(() => {
       if (entry.managed || entry.background) {
         this._armIdle(entry);
@@ -703,6 +773,7 @@ export class ChatLiveSessions {
 
     entry.closedNotified = true;
     entry.background = null;
+    entry.backgroundTasks = [];
     this._wakeBackground(entry);
     this.onSessionClosed?.({
       chatKey: entry.chatKey,

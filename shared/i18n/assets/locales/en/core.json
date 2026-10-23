@@ -549,5 +549,24 @@
   "invalidPipelineSnapshot": "The server returned an invalid pipeline summary",
   "invalidPipelineGraph": "The server returned an invalid pipeline graph",
   "relayAddress": "Via the configured relay",
-  "desktopPairingPlaceholder": "GRIGDESK:PAIR:1:…"
+  "desktopPairingPlaceholder": "GRIGDESK:PAIR:1:…",
+  "chatSleepHeading": "Agent is sleeping — waiting for background tasks",
+  "chatSleepSubagents": {
+    "one": "{count} subagent:",
+    "other": "{count} subagents:"
+  },
+  "chatSleepMonitors": {
+    "one": "{count} monitor:",
+    "other": "{count} monitors:"
+  },
+  "chatSleepCommands": {
+    "one": "{count} background command:",
+    "other": "{count} background commands:"
+  },
+  "chatSleepOther": {
+    "one": "{count} other task:",
+    "other": "{count} other tasks:"
+  },
+  "chatSleepNoDescription": "No description",
+  "chatSleepDescription": "• {description}"
 }

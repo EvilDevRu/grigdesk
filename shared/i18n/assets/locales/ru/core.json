@@ -559,5 +559,32 @@
   "invalidPipelineSnapshot": "Сервер вернул некорректную сводку конвейера",
   "invalidPipelineGraph": "Сервер вернул некорректный граф конвейера",
   "relayAddress": "Через настроенный ретранслятор",
-  "desktopPairingPlaceholder": "GRIGDESK:PAIR:1:…"
+  "desktopPairingPlaceholder": "GRIGDESK:PAIR:1:…",
+  "chatSleepHeading": "Агент спит — ждёт фоновые задачи",
+  "chatSleepSubagents": {
+    "one": "{count} субагент:",
+    "few": "{count} субагента:",
+    "many": "{count} субагентов:",
+    "other": "{count} субагента:"
+  },
+  "chatSleepMonitors": {
+    "one": "{count} монитор:",
+    "few": "{count} монитора:",
+    "many": "{count} мониторов:",
+    "other": "{count} монитора:"
+  },
+  "chatSleepCommands": {
+    "one": "{count} фоновая команда:",
+    "few": "{count} фоновые команды:",
+    "many": "{count} фоновых команд:",
+    "other": "{count} фоновые команды:"
+  },
+  "chatSleepOther": {
+    "one": "{count} прочая задача:",
+    "few": "{count} прочие задачи:",
+    "many": "{count} прочих задач:",
+    "other": "{count} прочие задачи:"
+  },
+  "chatSleepNoDescription": "Без описания",
+  "chatSleepDescription": "• {description}"
 }

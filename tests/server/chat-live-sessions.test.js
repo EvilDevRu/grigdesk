@@ -421,9 +421,17 @@ const Fastify = requireFromServer('fastify');
  * Поднимает модуль чата с синтетической живой сессией во временном каталоге.
  * Необязательный sink проверяет передачу аккаунтных квот после завершения runId.
  */
-async function apiFixture(t, { liveEnabled = true, providerUsageSink = null } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-live-api-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+async function apiFixture(t, {
+  liveEnabled = true,
+  providerUsageSink = null,
+  taskId = null,
+  root: givenRoot = '',
+} = {}) {
+  const root = givenRoot || await mkdtemp(path.join(os.tmpdir(), 'grigdesk-live-api-'));
+
+  if (!givenRoot) {
+    t.after(() => rm(root, { recursive: true, force: true }));
+  }
 
   const events = [];
   const handles = [];
@@ -484,7 +492,18 @@ async function apiFixture(t, { liveEnabled = true, providerUsageSink = null } = 
       factoryHome: root,
       port: 18140,
     },
-    factoryState: {},
+    factoryState: {
+      async readEnv() {
+        return {
+          REPO_COUNT: '1',
+          REPO_0_NAME: 'grigdesk',
+          REPO_0_SOURCE: root,
+          REPO_0_WT: root,
+          REPO_0_BRANCH: 'test-sleep',
+          WORKSPACE_MODE: 'shared',
+        };
+      },
+    },
     prefs: {
       read() {
         return {
@@ -497,7 +516,7 @@ async function apiFixture(t, { liveEnabled = true, providerUsageSink = null } = 
     },
     modelsRegistry: async () => ({ claude: [{ id: 'claude-test', efforts: [] }] }),
     executorResolver: async (provider) => (provider === 'claude' ? executor : null),
-    taskExists: async () => false,
+    taskExists: async (id) => taskId !== null && String(id) === taskId,
   });
   await app.ready();
   t.after(() => app.close());
@@ -510,6 +529,7 @@ async function apiFixture(t, { liveEnabled = true, providerUsageSink = null } = 
         chat: {
           id,
           title: 'Разговор про сборку',
+          ...(taskId ? { taskId } : {}),
           model: 'claude-test',
           modelRef: { provider: 'claude', model: 'claude-test' },
           messages: [],
@@ -525,7 +545,7 @@ async function apiFixture(t, { liveEnabled = true, providerUsageSink = null } = 
   function turn(chatKey, extra = {}) {
     return app.inject({
       method: 'POST',
-      url: '/api/chat',
+      url: taskId ? `/api/tasks/${taskId}/chat` : '/api/chat',
       payload: {
         chatKey,
         modelRef: { provider: 'claude', model: 'claude-test' },
@@ -1816,4 +1836,279 @@ test('модуль чата передаёт обработчик аккаунт
 
 test('partial-флаг включён у живой сессии Claude', () => {
   assert.equal(claudeSessionArgs({ permissionMode: 'default' }).includes('--include-partial-messages'), true);
+});
+
+// AC3–5, AC13–14: сон остаётся состоянием процесса, отдельно от занятости ходом.
+const sleepingTasks = [
+  {
+    id: 'agent-1',
+    kind: 'subagent',
+    description: 'Проверяет документ',
+  },
+];
+
+/**
+ * Сигнал идёт через тот же process hook, который получит нейтральный список адаптера.
+ * На исходнике отсутствие hook оставляет наблюдаемое состояние неизменным, без TypeError.
+ */
+function reportTasks(handle, tasks = sleepingTasks) {
+  handle.spec.hooks.onBackgroundTasks?.(structuredClone(tasks));
+}
+
+/**
+ * Снимок читается через публичный API, как в независимом окне после F5.
+ * Проверка HTTP отделяет ошибку фикстуры от отсутствующего поля сна.
+ */
+async function sleepSessions(app) {
+  const response = await app.inject({ method: 'GET', url: '/api/chat/sessions' });
+
+  assert.equal(response.statusCode, 200, response.body);
+
+  return response.json().sessions;
+}
+
+test('SLEEP-BASE-01: пустая сессия закрывается настоящим таймером простоя', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  const f = poolFixture(t, { idleMs: 60_000 });
+
+  await f.pool.run({ chatKey: 'idle', executor: f.executor }, {});
+  assert.equal(f.pool.has('idle'), true);
+  t.mock.timers.tick(60_001);
+  await Promise.resolve();
+
+  assert.equal(f.pool.has('idle'), false);
+  assert.equal(f.opened[0].closed, true);
+  assert.equal(f.closed.length, 1);
+});
+
+test('SLEEP-01: снимок переживает result, сон скрыт внутри managed и фонового хода', async (t) => {
+  const f = poolFixture(t);
+  const spec = { chatKey: 'sleep', executor: f.executor };
+
+  await f.pool.run(spec, {});
+
+  const handle = f.opened[0];
+  const during = [];
+
+  handle.send = async () => {
+    reportTasks(handle);
+    during.push(f.pool.stats()[0]);
+
+    return { reply: 'Жду результаты' };
+  };
+  await f.pool.run(spec, {});
+
+  assert.equal(during[0].sleeping, false, 'заказанный ход ещё идёт');
+  assert.deepEqual(during[0].backgroundTasks, sleepingTasks);
+  assert.equal(f.pool.stats()[0].sleeping, true, 'result не удаляет фоновые задачи');
+  assert.equal(f.pool.stats()[0].busy, false, 'сон не становится busy');
+
+  during.length = 0;
+  await f.pool.run(spec, {});
+
+  assert.equal(during[0].sleeping, false, 'следующий managed send скрывает сон до пустого снимка');
+  handle.spec.hooks.onBackgroundStart();
+  assert.equal(f.pool.stats()[0].sleeping, false, 'самопробуждение скрывает сон до []');
+  assert.equal(f.pool.stats()[0].busy, true);
+  await handle.spec.hooks.onBackground({ reply: 'Готово' });
+  assert.equal(f.pool.stats()[0].sleeping, true, 'непустой снимок сохраняется до явного обновления');
+  reportTasks(handle, []);
+  assert.equal(f.pool.stats()[0].sleeping, false);
+  assert.deepEqual(f.pool.stats()[0].backgroundTasks, []);
+});
+
+test('SLEEP-02: сон защищён от простоя и LRU, снятие задач возвращает полный idle', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 100_000 });
+
+  const f = poolFixture(t, { idleMs: 60_000, maxSessions: 2 });
+  const run = (chatKey) => f.pool.run({ chatKey, executor: f.executor }, {});
+
+  await run('sleep-a');
+  reportTasks(f.opened[0]);
+  t.mock.timers.tick(60_001);
+  await Promise.resolve();
+
+  assert.equal(f.pool.has('sleep-a'), true, 'сон не гасится настоящим idle timer');
+  assert.equal(f.pool.stats()[0].idleAtMs, null);
+  await run('ordinary');
+  await run('sleep-b');
+  reportTasks(f.opened[2]);
+  assert.equal(f.opened[1].closed, true, 'обычный свободный процесс вытеснен раньше спящего');
+  assert.equal(f.opened[0].closed, false);
+  await run('extra');
+  assert.equal(f.pool.has('sleep-a'), true);
+  assert.equal(f.pool.has('sleep-b'), true);
+  assert.equal(f.pool.has('extra'), true, 'при всех защищённых мягкий потолок разрешает новый процесс');
+
+  reportTasks(f.opened[0], []);
+
+  const awake = f.pool.stats().find((entry) => entry.chatKey === 'sleep-a');
+
+  assert.equal(awake.sleeping, false);
+  assert.equal(awake.idleAtMs, Date.now() + 60_000, 'после [] начинается полный интервал');
+  t.mock.timers.tick(30_000);
+  reportTasks(f.opened[0], []);
+  assert.equal(f.pool.stats().find((entry) => entry.chatKey === 'sleep-a').idleAtMs, awake.idleAtMs,
+    'повторное [] не продлевает жизнь обычной сессии');
+  t.mock.timers.tick(30_001);
+  await Promise.resolve();
+  assert.equal(f.pool.has('sleep-a'), false);
+  assert.equal(f.pool.has('sleep-b'), true);
+
+  reportTasks(f.opened[2], []);
+  await run('replacement');
+  await run('replacement-2');
+  assert.equal(f.opened[2].closed, true, 'после [] процесс вновь участвует в LRU');
+});
+
+test('SLEEP-03: close, exit, новое поколение и новый пул очищают сон и старые callbacks', async (t) => {
+  const f = poolFixture(t);
+  const spec = {
+    chatKey: 'sleep',
+    executor: f.executor,
+    model: 'a',
+  };
+  const open = f.executor.session.open;
+
+  f.executor.session.open = (given) => {
+    const handle = open(given);
+
+    reportTasks(handle);
+
+    return handle;
+  };
+  await f.pool.run(spec, {});
+  assert.equal(f.pool.stats()[0].sleeping, true, 'синхронный снимок во время open не потерян');
+
+  const old = f.opened[0];
+
+  f.executor.session.open = open;
+  await f.pool.run({ ...spec, model: 'b' }, {});
+  assert.equal(old.closed, true);
+  assert.equal(f.pool.stats()[0].sleeping, false);
+  assert.deepEqual(f.pool.stats()[0].backgroundTasks, []);
+
+  const changes = f.changes.length;
+
+  reportTasks(old);
+  assert.equal(f.changes.length, changes, 'поздний hook прежнего поколения не рассылает сон');
+  assert.equal(f.pool.stats()[0].sleeping, false);
+  reportTasks(f.opened[1]);
+  await f.pool.close('sleep');
+  reportTasks(f.opened[1]);
+  assert.deepEqual(f.pool.stats(), []);
+  await f.pool.run(spec, {});
+  reportTasks(f.opened[2]);
+  f.opened[2].alive = false;
+  f.opened[2].spec.hooks.onExit({ reason: 'процесс умер' });
+  assert.deepEqual(f.pool.stats(), []);
+  reportTasks(f.opened[2]);
+  assert.deepEqual(f.pool.stats(), []);
+  await f.pool.run(spec, {});
+  reportTasks(f.opened[3]);
+  await f.pool.closeAll();
+  reportTasks(f.opened[3]);
+  assert.deepEqual(f.pool.stats(), []);
+
+  const restarted = poolFixture(t);
+
+  assert.deepEqual(restarted.pool.stats(), [], 'перезапуск сервера не восстанавливает процесс или сон');
+});
+
+for (const taskId of [null, '81234']) {
+  test(`SLEEP-API-01: два окна видят сон и уведомления, taskId=${taskId}`, async (t) => {
+    const f = await apiFixture(t, { taskId });
+    const chatKey = await f.chat(`sleep-chat-${taskId || 'ordinary'}`);
+
+    assert.notEqual(chatKey, taskId);
+
+    const turn = await f.turn(chatKey);
+
+    assert.equal(turn.statusCode, 200, turn.body);
+
+    const before = f.events.filter((event) => event.event === 'chat-sessions').length;
+
+    reportTasks(f.handles[0]);
+
+    const first = (await sleepSessions(f.app))[0];
+    const second = (await sleepSessions(f.app))[0];
+
+    assert.equal(first.sleeping, true);
+    assert.deepEqual(first.backgroundTasks, sleepingTasks);
+    assert.equal(first.chatKey, chatKey);
+    assert.equal(first.taskId, taskId);
+    assert.deepEqual(first, second, 'проекция не принадлежит единственному окну');
+    assert.ok(f.events.filter((event) => event.event === 'chat-sessions').length > before);
+
+    const during = [];
+    const handle = f.handles[0];
+
+    handle.send = async () => {
+      during.push((await sleepSessions(f.app))[0]);
+
+      return {
+        reply: 'Снова жду',
+        sessionId: 'sid-live',
+        steps: [],
+      };
+    };
+
+    const beforeWake = f.events.filter((event) => event.event === 'chat-sessions').length;
+
+    assert.equal((await f.turn(chatKey)).statusCode, 200);
+    assert.equal(during[0].sleeping, false);
+    assert.equal((await sleepSessions(f.app))[0].sleeping, true);
+    assert.ok(f.events.filter((event) => event.event === 'chat-sessions').length >= beforeWake + 2,
+      'окна узнают вход и выход из сна при managed send');
+    reportTasks(handle, []);
+    assert.equal((await sleepSessions(f.app))[0].sleeping, false);
+  });
+}
+
+test('SLEEP-API-02: ручное гашение сохраняет разговор, рестарт не восстанавливает сон', async (t) => {
+  const f = await apiFixture(t);
+  const chatKey = await f.chat('sleep-manual');
+
+  await f.turn(chatKey);
+  reportTasks(f.handles[0]);
+  assert.equal((await sleepSessions(f.app))[0].sleeping, true);
+
+  const closed = await f.app.inject({ method: 'DELETE', url: `/api/chat/sessions/${chatKey}` });
+
+  assert.equal(closed.statusCode, 200, closed.body);
+  assert.equal(closed.json().forced, false);
+  assert.equal(f.handles[0].closed, true);
+  assert.deepEqual(await sleepSessions(f.app), []);
+  assert.equal((await f.app.inject({ url: `/api/chat/store/chat/${chatKey}` })).statusCode, 200);
+  await f.turn(chatKey);
+  reportTasks(f.handles[1]);
+
+  const all = await f.app.inject({ method: 'DELETE', url: '/api/chat/sessions' });
+
+  assert.equal(all.statusCode, 200, all.body);
+  assert.equal(all.json().closed, 1);
+  assert.equal(f.handles[1].closed, true);
+  assert.deepEqual(await sleepSessions(f.app), []);
+  await f.turn(chatKey);
+  reportTasks(f.handles[2]);
+  assert.equal((await sleepSessions(f.app))[0].sleeping, true);
+  await f.app.close();
+
+  const restarted = await apiFixture(t, { root: f.root });
+
+  assert.deepEqual(await sleepSessions(restarted.app), []);
+  assert.equal((await restarted.app.inject({ url: `/api/chat/store/chat/${chatKey}` })).statusCode, 200);
+});
+
+test('SLEEP-API-03: одинаковый нейтральный снимок не рассылает изменений', async (t) => {
+  const f = poolFixture(t);
+
+  await f.pool.run({ chatKey: 'sleep', executor: f.executor }, {});
+  reportTasks(f.opened[0]);
+  reportTasks(f.opened[0]);
+  assert.equal(f.changes.filter((event) => event.event === 'tasks').length, 1,
+    'равные по содержимому снимки дают одно событие');
+  reportTasks(f.opened[0], [{ ...sleepingTasks[0], description: 'Проверяет другой документ' }]);
+  assert.equal(f.changes.filter((event) => event.event === 'tasks').length, 2);
 });
