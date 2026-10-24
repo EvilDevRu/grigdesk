@@ -8,6 +8,7 @@ function uiFacadeStub(prefix) {
     ['UiDialog', 'src/components/overlays/UiDialog.vue'],
     ['UiDisclosureButton', 'src/components/composites/UiDisclosureButton.vue'],
     ['UiIconButton', 'src/components/primitives/UiIconButton.vue'],
+    ['UiLoadingState', 'src/components/feedback/UiLoadingState.vue'],
     ['UiPopover', 'src/components/overlays/UiPopover.vue'],
     ['UiSpinner', 'src/components/primitives/UiSpinner.vue'],
     ['UiTextarea', 'src/components/primitives/UiTextarea.vue'],

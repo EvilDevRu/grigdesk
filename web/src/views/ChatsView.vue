@@ -12,7 +12,8 @@
       <span></span>
     </div>
     <div class="stage">
-      <ChatSession v-if="activeId" :key="activeId" :sid="activeId" @back="pane = 'list'" />
+      <ChatLoadingPreview v-if="chat.loaded === false" />
+      <ChatSession v-else-if="activeId" :key="activeId" :sid="activeId" @back="pane = 'list'" />
     </div>
   </div>
 </template>
@@ -24,6 +25,7 @@ import { useChatStore } from '../stores/chat.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useDockViewport } from '../shared/tools/viewport.ts';
 import ChatList from './chat/ChatList.vue';
+import ChatLoadingPreview from './chat/ChatLoadingPreview.vue';
 import ChatSession from './chat/ChatSession.vue';
 import { vTooltip } from '../ui';
 

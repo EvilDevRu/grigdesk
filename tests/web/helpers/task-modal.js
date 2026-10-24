@@ -19,6 +19,7 @@ function uiFacadeStub(prefix, { stubDialog = false } = {}) {
     ['UiInput', 'src/components/primitives/UiInput.vue'],
     ['UiSelect', 'src/components/primitives/UiSelect.vue'],
     ['UiSpinner', 'src/components/primitives/UiSpinner.vue'],
+    ['UiLoadingState', 'src/components/feedback/UiLoadingState.vue'],
     ['UiTab', 'src/components/composites/UiTab.vue'],
     ['UiTabs', 'src/components/composites/UiTabs.vue'],
     ['UiTextarea', 'src/components/primitives/UiTextarea.vue'],

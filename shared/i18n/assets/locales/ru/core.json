@@ -9,9 +9,10 @@
   "workdirMethod": "Способ выбора папки",
   "workdirCatalog": "Проекты и папки",
   "workdirByPath": "По пути",
+  "workdirBackToCatalog": "К проектам и папкам",
   "workdirSearch": "Найти проект или папку",
   "workdirAvailable": "Доступные папки",
-  "workdirNoResults": "Ничего не найдено. Измените запрос или укажите путь во вкладке «По пути».",
+  "workdirNoResults": "Ничего не найдено. Измените запрос или нажмите «По пути».",
   "workdirAbsolutePath": "Абсолютный путь",
   "workdirPathHint": "Укажите папку на подключённом компьютере, где будет работать агент.",
   "workdirChoose": "Выбрать папку",
@@ -706,5 +707,15 @@
   "machineWelcomeHere": "В этом приложении",
   "machineWelcomeScan": "Нажмите «Добавить машину» и отсканируйте QR-код. Можно также вставить строку привязки.",
   "machineWelcomePaste": "Нажмите «Добавить машину» и вставьте строку привязки с компьютера.",
-  "machineWelcomeReady": "После подключения можно продолжить работу с выбранным компьютером."
+  "machineWelcomeReady": "После подключения можно продолжить работу с выбранным компьютером.",
+  "chatListLoading": "Загружаем чаты…",
+  "chatLoadingPreviewTitle": "Разговоры с агентами",
+  "chatLoadingPreviewHint": "Здесь появятся ваши чаты и история сообщений",
+  "chatListLoadFailed": "Чаты не загрузились",
+  "chatListLoadNetwork": "Нет связи с сервером",
+  "chatListLoadTimeout": "Сервер не ответил вовремя",
+  "chatListLoadServer": "Ошибка сервера",
+  "chatListLoadAccess": "Нет доступа к серверу",
+  "chatListRetry": "Повторить",
+  "chatStoreNotLoaded": "Создать чат можно после загрузки списка"
 }

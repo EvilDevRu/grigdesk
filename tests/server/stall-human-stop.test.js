@@ -240,3 +240,39 @@ test('развилка агента с обычным замечанием ос�
   assert.equal(stall.outcome, undefined);
   assert.equal(stall.title, 'PLAN: узел вернул решение человеку');
 });
+
+// Ранний отказ resume не меняет остановку и должен остаться понятным карточке.
+// Эти строки пишет проверка до lifecycle, поэтому подсказка goto — часть контракта.
+const gotoAdvice = 'сначала вернись на узел через «перейти сюда» (goto) с новой гипотезой';
+
+for (const stop of ['human', 'rewind-limit', 'no-progress']) {
+  test(`${stop}: удержанный resume сохраняет узел и подсказку возврата`, () => {
+    const stall = detectStall({
+      registry: { STALLED_HUMAN: '1', RESULT: `stopped-${stop}` },
+      logText: line('2026-10-01 12:00:00', `REVIEW: маршрут остановлен: ${stop} — ${gotoAdvice}`),
+      daemonAlive: false,
+    });
+
+    assert.equal(stall.kind, 'human');
+    assert.equal(stall.stage, 'REVIEW');
+    assert.equal(stall.stop, stop);
+    assert.doesNotMatch(stall.hint, /причина не нашлась/);
+
+    if (stop === 'human') {
+      assert.equal(stall.outcome, 'failed');
+      assert.match(stall.hint, /перейти сюда/);
+      assert.match(stall.presentation.details.action, /goto/);
+    }
+  });
+}
+
+test('новый отказ failed не подменяется прежним комментарием exhausted', () => {
+  const stall = detectStall({
+    registry: { STALLED_HUMAN: '1', REVIEW_COMMENT: 'исчерпан бюджет повторов' },
+    logText: line('2026-10-01 12:00:00', `REVIEW: маршрут остановлен: human — ${gotoAdvice}`),
+    daemonAlive: false,
+  });
+
+  assert.equal(stall.outcome, 'failed');
+  assert.match(stall.hint, /goto/);
+});

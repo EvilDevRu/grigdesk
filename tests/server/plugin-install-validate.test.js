@@ -6,7 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { validatePluginPackage } from '../../server/src/lib/pluginInstall/validatePackage.ts';
+import {
+  validatePluginPackage, validatePreparedPluginPackage,
+} from '../../server/src/lib/pluginInstall/validatePackage.ts';
 import { decodeUserPluginManifest, scanUserPlugins } from '../../server/src/lib/pluginsRegistry.ts';
 
 const expected = {
@@ -50,6 +52,7 @@ test('V1: обычный серверный пакет даёт manifest без 
     description: '',
     hasServer: true,
     webDir: null,
+    webModuleDir: null,
     npmDirs: [],
   });
 });
@@ -85,8 +88,8 @@ test('V4: id проверяется до ready и не допускает про
   });
 });
 
-test('V5: api отсутствует или ровно 1, другие значения отвергаются', async (t) => {
-  for (const api of [2, 0, '1', null]) {
+test('V5: api отсутствует или ровно 1/2, другие значения отвергаются', async (t) => {
+  for (const api of [3, 0, '1', '2', null]) {
     const { dir } = await fixture(t, {
       id: 'demo',
       version: '1.0.0',
@@ -96,9 +99,15 @@ test('V5: api отсутствует или ровно 1, другие знач�
     await assert.rejects(validatePluginPackage(dir, expected), { code: 'api_unsupported' });
   }
 
-  const { dir } = await fixture(t);
+  for (const api of [undefined, 1, 2]) {
+    const { dir } = await fixture(t, {
+      id: 'demo',
+      version: '1.0.0',
+      api,
+    });
 
-  assert.equal((await validatePluginPackage(dir, expected)).id, 'demo');
+    assert.equal((await validatePluginPackage(dir, expected)).id, 'demo');
+  }
 });
 
 test('V6: version строго совпадает с выбранной стабильной версией', async (t) => {
@@ -513,4 +522,192 @@ test('V20: общий decoder определяет одинаковые поля
   }
 
   assert.equal(scanned.web.dir, path.join(dir, decoded.webDir));
+});
+
+
+const validModule = {
+  dir: 'ui',
+  entry: 'panel.js',
+  css: ['panel.css'],
+  locales: { ru: 'ru.json', en: 'en.json' },
+};
+const moduleFiles = {
+  'ui/panel.js': 'throw new Error("Установщик не должен исполнять модуль");',
+  'ui/panel.mjs': 'throw new Error("Установщик не должен исполнять модуль");',
+  'ui/panel.css': 'body { color: red; }',
+  'ui/ru.json': '{"title":"Пример"}',
+  'ui/en.json': '{"title":"Example"}',
+};
+
+for (const [label, webModule, moduleDir] of [
+  ['без модуля', undefined, null],
+  ['null', null, null],
+  ['JS', validModule, 'ui'],
+  ['MJS и неизвестные поля', {
+    ...validModule,
+    entry: 'panel.mjs',
+    futureField: { enabled: true },
+    locales: { ...validModule.locales, futureLanguage: '../ignored.json' },
+  }, 'ui'],
+]) {
+  test(`V21-API2: ${label}`, async (t) => {
+    const { dir } = await fixture(t, {
+      id: 'demo',
+      version: '1.0.0',
+      api: 2,
+      webModule,
+    }, moduleFiles);
+    const result = await validatePluginPackage(dir, expected);
+
+    assert.equal(result.webModuleDir, moduleDir);
+    assert.equal(result.hasServer, false);
+    assert.equal(result.webDir, null);
+  });
+}
+
+test('V21-API1-BARRIER: api1 игнорирует невалидный webModule', async (t) => {
+  const { dir } = await fixture(t, {
+    id: 'demo',
+    version: '1.0.0',
+    api: 1,
+    webModule: '../invalid',
+  });
+
+  assert.equal((await validatePluginPackage(dir, expected)).id, 'demo');
+});
+
+const invalidModules = [
+  ['не объект', 'ui', /объект/u],
+  ['массив', [], /объект/u],
+  ['dir выходит из пакета', { ...validModule, dir: '../ui' }, /относительный путь/u],
+  ['скрытый dir', { ...validModule, dir: '.ui' }, /относительный путь/u],
+  ['скрытый предок dir', { ...validModule, dir: 'assets/.hidden/ui' }, /относительный путь/u],
+  ['неверный тип CSS', { ...validModule, css: 'panel.css' }, /список CSS или языков/u],
+  ['неверный тип locales', { ...validModule, locales: [] }, /список CSS или языков/u],
+  ['не JS entry', { ...validModule, entry: 'panel.css' }, /расширение entry/u],
+];
+
+for (const field of ['entry', 'css', 'ru', 'en']) {
+  for (const resource of ['../panel.js', '.hidden/panel.js', 'https://evil.test/panel.js',
+    'panel.js?query', 'panel.js#hash', 'missing.js']) {
+    const value = structuredClone(validModule);
+
+    if (field === 'css') {
+      value.css = [resource];
+    } else if (field === 'ru' || field === 'en') {
+      value.locales[field] = resource;
+    } else {
+      value.entry = resource;
+    }
+
+    invalidModules.push([`${field}: ${resource}`, value,
+      resource === 'missing.js' ? /ресурс отсутствует/u : /относительный путь/u]);
+  }
+}
+
+for (const [label, webModule, reason] of invalidModules) {
+  test(`V22-MODULE-INVALID: ${label}`, async (t) => {
+    const { dir } = await fixture(t, {
+      id: 'demo',
+      version: '1.0.0',
+      api: 2,
+      webModule,
+    }, moduleFiles);
+
+    await assert.rejects(validatePluginPackage(dir, expected), (error) => {
+      assert.equal(error.code, 'manifest_invalid');
+      assert.match(error.message, /webModule/u);
+      assert.match(error.message, reason);
+      assert.equal(error.message.includes(dir), false);
+
+      return true;
+    });
+  });
+}
+
+for (const npmDir of ['.', 'ui']) {
+  for (const field of npmDir === '.' ? ['dir', 'рядом'] : ['dir', 'entry', 'css', 'ru', 'en', 'рядом']) {
+    test(`V23-MODULE-NPM: prepared npm=${npmDir}, ресурс=${field}`, async (t) => {
+      const webModule = structuredClone(validModule);
+      const npmRoot = npmDir === '.' ? '' : `${npmDir}/`;
+      const dependency = `${npmRoot}node_modules/pkg`;
+      const files = {
+        ...moduleFiles,
+        [`${npmRoot}package.json`]: '{"name":"fixture","version":"1.0.0"}',
+        [`${npmRoot}package-lock.json`]: '{"lockfileVersion":3,"packages":{"":{}}}',
+        [`${dependency}/ui/panel.js`]: 'throw new Error("Не исполнять");',
+        [`${dependency}/panel.js`]: 'throw new Error("Не исполнять");',
+        [`${dependency}/panel.css`]: 'body {}',
+        [`${dependency}/ru.json`]: '{}',
+        [`${dependency}/en.json`]: '{}',
+      };
+
+      if (field === 'dir') {
+        webModule.dir = `${dependency}/ui`;
+        webModule.css = [];
+        webModule.locales = {};
+      } else if (field !== 'рядом') {
+        const resource = `node_modules/pkg/${field === 'entry' ? 'panel.js'
+          : field === 'css' ? 'panel.css' : `${field}.json`}`;
+
+        if (field === 'css') {
+          webModule.css = [resource];
+        } else if (field === 'entry') {
+          webModule.entry = resource;
+        } else {
+          webModule.locales[field] = resource;
+        }
+      }
+
+      const { dir } = await fixture(t, {
+        id: 'demo',
+        version: '1.0.0',
+        api: 2,
+        install: { npm: [npmDir] },
+        webModule,
+      }, files);
+
+      if (field === 'рядом') {
+        assert.equal((await validatePreparedPluginPackage(dir, expected)).webModuleDir, 'ui');
+      } else {
+        await assert.rejects(validatePreparedPluginPackage(dir, expected), {
+          code: 'manifest_invalid',
+          message: /node_modules/u,
+        });
+      }
+    });
+  }
+}
+
+for (const field of ['dir', 'entry', 'css', 'ru', 'en']) {
+  test(`V22-MODULE-LINK-BARRIER: исходная ссылка ${field} отвергается до чтения цели`, async (t) => {
+    const { root, dir } = await fixture(t, {
+      id: 'demo',
+      version: '1.0.0',
+      api: 2,
+      webModule: validModule,
+    }, moduleFiles);
+    const external = path.join(root, 'outside');
+    const oldTime = new Date('2000-01-01T00:00:00Z');
+    const relative = field === 'dir' ? 'ui' : `ui/${field === 'entry' ? 'panel.js'
+      : field === 'css' ? 'panel.css' : `${field}.json`}`;
+
+    await writeFile(external, 'Внешние байты');
+    await utimes(external, oldTime, oldTime);
+    await rm(path.join(dir, relative), { recursive: true });
+    await symlink(external, path.join(dir, relative));
+    await assert.rejects(validatePluginPackage(dir, expected), { code: 'symlink_forbidden' });
+    assert.equal((await lstat(external)).atimeMs, oldTime.getTime());
+  });
+}
+
+test('V23-MODULE-NPM-SOURCE-BARRIER: исходные node_modules запрещены до npm', async (t) => {
+  const { dir } = await fixture(t, {
+    id: 'demo',
+    version: '1.0.0',
+    api: 2,
+    webModule: { dir: 'node_modules/pkg/ui', entry: 'panel.js' },
+  }, { 'node_modules/pkg/ui/panel.js': 'throw new Error("Не исполнять");' });
+
+  await assert.rejects(validatePluginPackage(dir, expected), { code: 'package_unsupported' });
 });

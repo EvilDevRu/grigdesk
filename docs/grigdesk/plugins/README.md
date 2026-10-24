@@ -29,6 +29,8 @@ SSH, просмотр документов, «Код», стенды и песо
 
 - [Установка из git: версии, проверка пакета, обновление, откат и восстановление](user-plugin-install.md)
 
+- [Установка api2: проверка модуля, доверие, обновление и два канала каталога](plugin-module-install.md)
+
 - [Installer boot: пути, VERSION, SYSTEM, recovery до import и close](plugin-install-boot.md)
 
 - [Runtime lease, drain потоков, user dataDir и строгий HTTP установки](plugin-install-runtime.md)

@@ -385,6 +385,39 @@ function draftEvent(assistantMessageId, extra = {}) {
   };
 }
 
+test('пачка дельт не откатывается до первой буквы при задержке создания блока', async (t) => {
+  const { messages, published, publisher } = await publisherFixture(t);
+  const begin = messages.begin.bind(messages);
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+
+  messages.begin = async (input) => {
+    const block = await begin(input);
+
+    entered.resolve();
+    await release.promise;
+
+    return block;
+  };
+
+  const first = publisher.publish('fixture-run-0001', 'fixture-chat',
+    draftEvent('fixture-block-0001', { text: 'О' }));
+
+  await entered.promise;
+
+  const rest = publisher.publish('fixture-run-0001', 'fixture-chat',
+    draftEvent('fixture-block-0001', { text: 'Остаток плана прочитает критик.', sourceRevision: 29 }));
+
+  // Даём следующей дельте обогнать задержанную запись, если очереди блока нет.
+  // После снятия барьера окно всё равно должно закончить на полном тексте.
+  await new Promise((resolve) => setImmediate(resolve));
+  release.resolve();
+  await Promise.all([first, rest]);
+
+  assert.deepEqual(published.map((block) => block.text), ['О', 'Остаток плана прочитает критик.']);
+  assert.equal(messages.live('fixture-run-0001')[0].text, 'Остаток плана прочитает критик.');
+});
+
 test('после конца запуска поздний черновик не заводит блок', async (t) => {
   const { messages, published, publisher } = await publisherFixture(t);
 

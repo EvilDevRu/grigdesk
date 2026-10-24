@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { localeTranslator } from '../../shared/i18n/catalogs.ts';
+
 import { isActiveInstallJob, isTerminalInstallJob } from '../../web/src/shared/pluginInstall.ts';
 import { installJob } from '../server/helpers/pluginInstallState.js';
 
@@ -81,8 +83,9 @@ test('W4: result различает fresh/update/rollback, ошибки и ос�
   assert.equal(installResultText(fresh),
     'Плагин «Демо» v1.0.0 установлен. Включите его в каталоге и перезапустите GrigDesk.');
   assert.equal(installResultText(update),
-    'Плагин «Демо» обновлён до v1.0.0. Перезапустите GrigDesk, чтобы применить.');
-  assert.equal(installResultText(rollback), 'Версия v1.0.0 восстановлена. Перезапустите GrigDesk.');
+    'Плагин «Демо» обновлён до v1.0.0. Перезапустите GrigDesk и перезагрузите окно, чтобы применить.');
+  assert.equal(installResultText(rollback),
+    'Версия v1.0.0 восстановлена. Перезапустите GrigDesk и перезагрузите окно.');
 
   const failed = installJob('failed');
 
@@ -145,3 +148,31 @@ test('W7: short SHA и русские подписи всех этапов', asy
     dependencies: 'Установка зависимостей',
   });
 });
+
+
+for (const [locale, summary, inline, updateText, rollbackText] of [
+  ['ru', 'Затронут код, исполняемый GrigDesk, или его зависимости.',
+    'код, исполняемый GrigDesk, или его зависимости',
+    'Плагин «Демо» обновлён до v1.0.0. Перезапустите GrigDesk и перезагрузите окно, чтобы применить.',
+    'Версия v1.0.0 восстановлена. Перезапустите GrigDesk и перезагрузите окно.'],
+  ['en', 'Code executed by GrigDesk or its dependencies is affected.',
+    'code executed by GrigDesk or its dependencies',
+    'Plugin “Демо” updated to v1.0.0. Restart GrigDesk and reload the window to apply.',
+    'Version v1.0.0 restored. Restart GrigDesk and reload the window.'],
+]) {
+  test(`W8-CODE-RELOAD-LOCALES: подписи кода и оба действия ${locale}`, async () => {
+    const { installResultText } = await import('../../web/src/shared/pluginInstall.ts');
+    const t = localeTranslator(locale);
+    const update = installJob('done', 'update');
+
+    update.preview.replaces = {
+      kind: 'managed',
+      version: '0.9.0',
+      sourceChanged: false,
+    };
+    assert.equal(t('settings.serverCodeOrDependenciesAreAffected'), summary);
+    assert.equal(t('settings.serverCodeOrDependencies'), inline);
+    assert.equal(installResultText(update, locale), updateText);
+    assert.equal(installResultText(installJob('done', 'rollback'), locale), rollbackText);
+  });
+}

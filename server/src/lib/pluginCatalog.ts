@@ -42,7 +42,7 @@ function indexUrl(raw: string): URL | null {
 
     if (url.username || url.password || url.search || url.hash
       || url.protocol !== 'https:'
-      || !url.pathname.endsWith('/api/plugins/v1/index.json')) {
+      || !/\/api\/plugins\/v[12]\/index\.json$/u.test(url.pathname)) {
       return null;
     }
 
@@ -56,6 +56,8 @@ export class PluginCatalogService {
   private readonly options: CatalogOptions;
   private readonly urls: readonly URL[];
   private readonly now: () => number;
+  private readonly moduleSources: boolean;
+  private moduleCatalog: PluginCatalogService | null = null;
   private cache: {
     catalog: CatalogIndex;
     source: URL;
@@ -71,8 +73,9 @@ export class PluginCatalogService {
     flight: Promise<CatalogDetail>;
   }>();
 
-  constructor(options: CatalogOptions) {
+  constructor(options: CatalogOptions, moduleSources = false) {
     this.options = options;
+    this.moduleSources = moduleSources;
     this.urls = (options.urls ?? CATALOG_INDEX_URLS)
       .map(indexUrl).filter((url): url is URL => url !== null);
     this.now = options.now ?? Date.now;
@@ -82,9 +85,13 @@ export class PluginCatalogService {
    * Индекс запрашивается лениво и одним flight, boot не зависит от публичной сети.
    * Неудача сохраняет последний проверенный снимок и ставит короткий cooldown.
    */
-  async index(force = false): Promise<CatalogIndexResponse> {
+  async index(force = false, includeModules = false): Promise<CatalogIndexResponse> {
     if (this.closed) {
       throw new CatalogReadError(503);
+    }
+
+    if (includeModules) {
+      return this.modules().index(force);
     }
 
     if (!this.urls.length) {
@@ -117,7 +124,11 @@ export class PluginCatalogService {
    * Один ID имеет один flight на снимок: запрос нового снимка не ждёт чтение прежнего,
    * а старый index snapshot не получает позднюю карточку.
    */
-  async detail(id: string): Promise<CatalogDetail> {
+  async detail(id: string, includeModules = false): Promise<CatalogDetail> {
+    if (includeModules) {
+      return this.modules().detail(id);
+    }
+
     const deadline = Date.now() + DETAIL_TIMEOUT_MS;
     const result = await this.index();
     const snapshot = result.catalog ? this.cache?.catalog ?? null : null;
@@ -164,11 +175,40 @@ export class PluginCatalogService {
     }
 
     await Promise.allSettled([
+      this.moduleCatalog?.close(),
       this.indexFlight,
       ...[...this.detailFlights.values()].map((pending) => pending.flight),
     ]);
     this.details.clear();
     this.cache = null;
+  }
+
+  /**
+   * Новая выдача имеет собственные кеш, flights и отмену, сохраняя прежний каталог для старых окон.
+   * Оба modern-источника предшествуют прежним; после close дочерний сервис не создаётся.
+   */
+  private modules(): PluginCatalogService {
+    if (this.closed) {
+      throw new CatalogReadError(503);
+    }
+
+    if (!this.moduleCatalog) {
+      const modern = this.urls.filter((url) => url.pathname.endsWith('/api/plugins/v1/index.json'))
+        .map((url) => url.href.replace(/\/v1\/index\.json$/u, '/v2/index.json'));
+      const urls = [...new Set([...modern, ...this.urls.map((url) => url.href)])];
+
+      this.moduleCatalog = new PluginCatalogService({ ...this.options, urls }, true);
+    }
+
+    return this.moduleCatalog;
+  }
+
+  /**
+   * Корневой сервис всегда сохраняет допуск api1, даже при ошибочной настройке URL.
+   * Дочерний допускает api2 только для v2, чтобы fallback v1 оставался прежним контрактом.
+   */
+  private maximumApi(source: URL): 1 | 2 {
+    return this.moduleSources && source.pathname.endsWith('/api/plugins/v2/index.json') ? 2 : 1;
   }
 
   /**
@@ -258,7 +298,9 @@ export class PluginCatalogService {
       }
 
       try {
-        const catalog = decodeCatalogIndex(await this.read(source, DOCUMENT_LIMIT));
+        const catalog = decodeCatalogIndex(
+          await this.read(source, DOCUMENT_LIMIT), this.maximumApi(source),
+        );
 
         if (this.closed) {
           return;
@@ -320,7 +362,9 @@ export class PluginCatalogService {
 
       try {
         if (source !== active) {
-          const candidate = decodeCatalogIndex(await this.read(source, DOCUMENT_LIMIT, attemptDeadline));
+          const candidate = decodeCatalogIndex(
+            await this.read(source, DOCUMENT_LIMIT, attemptDeadline), this.maximumApi(source),
+          );
 
           if (!isDeepStrictEqual(candidate, snapshot)) {
             throw new CatalogReadError(409);
@@ -328,7 +372,9 @@ export class PluginCatalogService {
         }
 
         const address = new URL(document, source);
-        const detail = decodeCatalogDetail(await this.read(address, DOCUMENT_LIMIT, attemptDeadline));
+        const detail = decodeCatalogDetail(
+          await this.read(address, DOCUMENT_LIMIT, attemptDeadline), this.maximumApi(source),
+        );
 
         this.assertSnapshot(snapshot);
 

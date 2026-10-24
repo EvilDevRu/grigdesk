@@ -17,9 +17,8 @@
       :aria-label="t('settings.mcpServersFor', { providerName: providerName })"
       aria-live="polite"
     >
-      <p v-if="!status || (status.loading && !status.servers)" class="muted small">
-        {{ t('settings.gettingTheListFromTheProvider') }}
-      </p>
+      <UiLoadingState v-if="!status || (status.loading && !status.servers)"
+        :label="t('settings.gettingTheListFromTheProvider')" />
       <p v-else-if="status.state === 'error'" class="msg err">
         {{ t('settings.couldNotGetTheList') }} {{ status.error }}
       </p>
@@ -71,7 +70,11 @@ import { localizeProviderText } from '../../features/settings/metadataLocale.ts'
 
 import { computed } from 'vue';
 
-import { UiButton, vTooltip } from '../../ui.ts';
+import {
+  UiButton,
+  vTooltip,
+  UiLoadingState,
+} from '../../ui.ts';
 
 interface McpServer {
   name: string;

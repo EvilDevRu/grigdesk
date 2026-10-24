@@ -45,7 +45,8 @@
     <UiInlineMessage v-if="store.broken.length" tone="warning">
       Повреждённые записи: {{ store.broken.length }}
     </UiInlineMessage>
-    <div v-if="!store.models.length && !store.busy" class="studio-library-empty">
+    <UiLoadingState v-if="store.busy && !store.models.length" label="Загрузка моделей…" variant="cards" />
+    <div v-else-if="!store.models.length" class="studio-library-empty">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"
         stroke-linejoin="round" aria-hidden="true">
         <path d="M12 2l9 5v10l-9 5-9-5V7z M12 22V12 M21 7l-9 5-9-5" />
@@ -54,7 +55,8 @@
       <p>{{ filtered ? 'Измените поиск или фильтры.' : 'Создайте первую модель или добавьте готовый файл.' }}</p>
       <UiButton v-if="!filtered" @click="$emit('create')">Создать модель</UiButton>
     </div>
-    <p v-else class="studio-library-count">{{ store.busy ? 'Загрузка моделей…' : `Найдено: ${store.total}` }}</p>
+    <UiLoadingState v-else-if="store.busy" label="Загрузка моделей…" variant="inline" />
+    <p v-else class="studio-library-count">Найдено: {{ store.total }}</p>
     <div class="studio-model-grid">
       <UiPressable v-for="model in store.models" :key="model.id" data-context="studio-model-card"
         @click="$emit('open', model.id)">
@@ -93,7 +95,15 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue';
-import { UiSearchInput, UiSelect, UiField, UiPressable, UiButton, UiInlineMessage } from '../../ui.ts';
+import {
+  UiSearchInput,
+  UiSelect,
+  UiField,
+  UiPressable,
+  UiButton,
+  UiInlineMessage,
+  UiLoadingState,
+} from '../../ui.ts';
 import { useStudio3dStore } from '../../stores/studio3d.ts';
 import { projectsApi } from '../../shared/projectsApi.ts';
 import type { ProjectSummary } from '../../../../shared/runtime/projectsContracts.ts';

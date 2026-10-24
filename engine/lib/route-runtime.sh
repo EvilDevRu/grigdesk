@@ -794,6 +794,47 @@ route_v2_loop_ceiling_held() {
   return 11
 }
 
+# Провал и защитные остановки требуют явного goto с новой гипотезой: resume не
+# открывает новый визит и не может повторно открыть вмешательство человека.
+# Только чтение до lifecycle и подготовки стенда; 11 означает удержание остановки,
+# 0 — остальные случаи. Непрочитанный курсор проверит общий строгий путь resume.
+route_v2_failed_stop_held() {
+  local task attempt cursor_tmp state stop last_node last_outcome
+
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  _route_v2_load_attempt "$task" "$attempt" || return
+  cursor_tmp=$(mktemp "$(factory_control_root)/.route-v2-cursor.XXXXXX") || return 1
+
+  if ! attempt_stage_state_read_v2 "$task" "$attempt" >"$cursor_tmp" 2>/dev/null ||
+     ! IFS=$'\t' read -r state stop last_node last_outcome \
+       < <(_route_v2_json cursor-stop "$cursor_tmp" 2>/dev/null); then
+    rm -f -- "$cursor_tmp"
+    return 0
+  fi
+
+  rm -f -- "$cursor_tmp"
+  [[ "$state" == stopped && -n "$last_node" ]] || return 0
+
+  case "$stop" in
+    human)
+      [[ "$last_outcome" == failed ]] || return 0
+      ;;
+    rewind-limit|no-progress)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  if declare -F v2_log >/dev/null; then
+    v2_log "${last_node^^}: маршрут остановлен: $stop" \
+      "— сначала вернись на узел через «перейти сюда» (goto) с новой гипотезой"
+  fi
+
+  return 11
+}
+
 # Продолжение цикла после поднятого потолка кругов — только из resume человека.
 # Остановка `loop-ceiling` исполняет ТОТ ЖЕ кандидат ведущего, если потолок профиля
 # теперь больше числа исполненных кругов: это не human-rewind, серия сторожей, находки

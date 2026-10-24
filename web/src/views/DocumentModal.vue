@@ -37,10 +37,7 @@
       </div>
     </template>
 
-    <div v-if="resolving" class="document-state">
-      <UiSpinner decorative />
-      Проверяю ссылку…
-    </div>
+    <UiLoadingState v-if="resolving" label="Проверяю ссылку…" variant="document" />
     <div v-else-if="resolveError" class="document-state error">
       {{ resolveError }}
     </div>
@@ -58,7 +55,12 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { UiDialog, UiIconButton, UiSpinner, vTooltip } from '../ui';
+import {
+  UiDialog,
+  UiIconButton,
+  vTooltip,
+  UiLoadingState,
+} from '../ui';
 import { documentsApi } from '../shared/documentsApi.ts';
 import { useDocumentPreviewStore } from '../stores/documentPreview.ts';
 import DocumentPanel from '../features/documents/DocumentPanel.vue';

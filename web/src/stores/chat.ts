@@ -1,5 +1,5 @@
 import { parseProjectsChange } from '../../../shared/runtime/projectsContracts.ts';
-import { messageRef } from '../ui.ts';
+import { messageRef, t } from '../ui.ts';
 // Чат с агентами — МУЛЬТИСЕССИИ (вкладки, как в VS Code).
 // Каждая сессия: своя задача (опционально), модель, усилие, история, sessionId (--resume),
 // размер контекста. История хранится НА СЕРВЕРЕ (файл в .state GrigDesk) — общая для всех
@@ -14,7 +14,7 @@ import {
 } from '../shared/chatContracts.ts';
 import type {
   ChatAttachment, ChatEnvelope, ChatListRow, ChatMessage, ChatRecord, ChatRequest, ChatResult,
-  ChatRunEvent, ChatSession, ChatStep, ChatState, ChatStoreData, ContextCache, SpeechSnapshot,
+  ChatRunEvent, ChatSession, ChatStep, ChatState, ChatStoreData, ChatLoadError, ContextCache, SpeechSnapshot,
   WorkdirCandidate, WorkdirPreview, WorkdirProposal,
 } from '../shared/chatContracts.ts';
 import type { ChatHistorySnapshot } from '../shared/chatHistorySnapshot.ts';
@@ -274,9 +274,120 @@ function availableWorkdir(store: object, value: unknown) {
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryDelay = 0;
-let loadPromise: Promise<void> | null = null;
 // Ждёт ли записи страховочный снимок (см. _persist): изменилась переписка, а не черновик.
 let needSnapshot = false;
+
+interface ChatLoadRuntime {
+  promise: Promise<void> | null;
+  controller: AbortController | null;
+  resyncControllers: Set<AbortController>;
+  disposed: boolean;
+  timer: ReturnType<typeof setTimeout> | null;
+  delay: number;
+  listening: boolean;
+  off: Array<() => void>;
+  permOff: (() => void) | null;
+}
+
+const chatLoads = new WeakMap<object, ChatLoadRuntime>();
+
+/**
+ * Загрузка, отмена и повторы принадлежат экземпляру стора, вне сериализуемого state.
+ * Сохраняем запись после dispose, чтобы поздний callback не создал новый runtime.
+ */
+function chatLoadRuntimeFor(store: object): ChatLoadRuntime {
+  const key = toRaw(store);
+  const existing = chatLoads.get(key);
+
+  if (existing) {
+    return existing;
+  }
+
+  const runtime: ChatLoadRuntime = {
+    promise: null,
+    controller: null,
+    resyncControllers: new Set(),
+    disposed: false,
+    timer: null,
+    delay: 0,
+    listening: false,
+    off: [],
+    permOff: null,
+  };
+
+  chatLoads.set(key, runtime);
+
+  if ('$dispose' in store && typeof store.$dispose === 'function') {
+    const dispose = store.$dispose;
+
+    store.$dispose = () => {
+      runtime.disposed = true;
+      clearTimeout(runtime.timer ?? undefined);
+      runtime.controller?.abort();
+      runtime.resyncControllers.forEach((controller) => controller.abort());
+      runtime.off.forEach((off) => off());
+      runtime.permOff?.();
+      runtime.off = [];
+      runtime.permOff = null;
+      dispose.call(store);
+    };
+  }
+
+  return runtime;
+}
+
+/**
+ * В UI хранится только категория отказа; сырой ответ сервера не становится подписью.
+ * Локальные трубы сообщают потерю сервера через HTTP 503 с кодом состояния связи.
+ */
+function chatLoadFailure(error: unknown): ChatLoadError {
+  const failure = chatFailure(error);
+
+  if (failure.status === 401 || failure.status === 403) {
+    return 'access';
+  }
+  if (failure.status === 503 && ['offline', 'disconnected', 'connecting', 'no_machine']
+    .includes(String(failure.data?.error))) {
+    return 'network';
+  }
+  if (error instanceof TypeError) {
+    return 'network';
+  }
+  if (error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name)) {
+    return 'timeout';
+  }
+
+  return 'server';
+}
+
+/**
+ * Между неудачами ждём всё дольше, но ручные и сетевые события могут опередить паузу.
+ * Успех и dispose гасят таймер; отказ доступа требует нового внешнего действия.
+ */
+function scheduleChatLoad(
+  store: {
+    loaded: boolean;
+    loadError: ChatLoadError | null;
+    ensure(): Promise<void>;
+  },
+  runtime: ChatLoadRuntime,
+): void {
+  if (runtime.disposed || store.loaded || store.loadError === 'access' || runtime.timer) {
+    return;
+  }
+
+  runtime.delay = Math.min(runtime.delay ? runtime.delay * 2 : 1000, 30000);
+  runtime.timer = setTimeout(() => {
+    runtime.timer = null;
+
+    const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+
+    if (!runtime.disposed && !hidden) {
+      void store.ensure();
+    }
+  }, runtime.delay);
+  unrefTimer(runtime.timer);
+}
 
 // ── Что уже лежит на сервере ──────────────────────────────────────────────────
 // id чата → его отпечаток (fingerprintOf) на момент последней УСПЕШНОЙ записи. По этой карте шлём только
@@ -1006,7 +1117,6 @@ function stampOf(store: ChatStoreData | null) {
   return Math.max(0, ...(store?.sessions || []).map((s) => s.updatedAt || 0));
 }
 
-let permOff: (() => void) | null = null; // отписка от общего SSE (подписка одна на окно)
 // «Разрешать до конца сессии»: chatKey → Set(инструментов). Только в памяти —
 // умирает с перезагрузкой страницы, в allowlist навсегда ничего не попадает.
 const permAutoAllow: Record<string, Set<string>> = {};
@@ -1034,6 +1144,8 @@ export const useChatStore = defineStore('chat', {
   state: (): ChatState => ({
     ...pickStore(null),
     loaded: false,
+    loading: false,
+    loadError: null,
     revealRequest: '',
     pending: {},
     saveError: null,
@@ -1052,6 +1164,16 @@ export const useChatStore = defineStore('chat', {
     inTurnError: '',
   }),
   getters: {
+    loadErrorMessage: (s) => {
+      const messages = {
+        network: messageRef('core.chatListLoadNetwork'),
+        timeout: messageRef('core.chatListLoadTimeout'),
+        server: messageRef('core.chatListLoadServer'),
+        access: messageRef('core.chatListLoadAccess'),
+      };
+
+      return s.loadError ? messages[s.loadError] : null;
+    },
     // На странице «Чаты» можно открыть архивный разговор для чтения, не возвращая
     // его в активные. Поэтому выбранный чат и поиск по id смотрят в оба списка;
     // принадлежность к архиву по-прежнему задаётся только самим списком.
@@ -1420,90 +1542,180 @@ export const useChatStore = defineStore('chat', {
         return false;
       }
     },
-    // Загрузка истории с сервера (однократно). Если серверный файл пуст, а в localStorage
-    // осталась история со старой схемы хранения — мигрируем её и чистим браузер.
+    /**
+     * Только подтверждённый ответ разрешает применять копию и записывать историю.
+     * Параллельные читатели ждут один проход, а отказ освобождает его для новой попытки.
+     */
     async _load(): Promise<void> {
-      if (this.loaded) {
+      const runtime = chatLoadRuntimeFor(this);
+
+      if (runtime.promise) {
+        return runtime.promise;
+      }
+      if (runtime.disposed || this.loaded) {
         return;
       }
-      if (!loadPromise) {
-        historyPersistenceFor(this).clear();
-        selectionStateFor(this).clear();
-        persistenceProjections.get(toRaw(this))?.clear();
-        previewCaches.get(toRaw(this))?.clear();
 
-        loadPromise = (async () => {
-          let j = null;
+      clearTimeout(runtime.timer ?? undefined);
+      runtime.timer = null;
+      runtime.controller = new AbortController();
+      this.loading = true;
+      historyPersistenceFor(this).clear();
+      selectionStateFor(this).clear();
+      persistenceProjections.get(toRaw(this))?.clear();
+      previewCaches.get(toRaw(this))?.clear();
 
-          try {
-            j = decodeChatEnvelope(await api.get('/api/chat/store'));
-          } catch {
-            j = null;
+      const job = (async () => {
+        let j: ChatEnvelope;
+
+        try {
+          j = decodeChatEnvelope(await api.get('/api/chat/store', {
+            idleTimeoutMs: 30000,
+            retry: false,
+            signal: runtime.controller!.signal,
+          }));
+
+          if (!Array.isArray(j.sessions) && !Array.isArray(j.archived)) {
+            throw new Error('Ответ истории не содержит списков чатов');
           }
-          // Порог сжатия читаем из ответа сервера СРАЗУ — до возможной подмены снимком:
-          // снимок в браузере хранит только историю, настроек в нём нет.
-          this.compactWindow = Math.max(0, Number(j?.compactWindow) || 0);
-          // Возможность сервера — тоже только из его ответа: снимок в браузере её не знает.
-          this.turnProtocol = Number(j?.turnProtocol) === TURN_PROTOCOL ? TURN_PROTOCOL : 0;
-          this.workdirProtocol = Number(j?.workdirProtocol) === 1 ? 1 : 0;
-          this.historyStepReuseProtocol = j?.historyStepReuseProtocol === 1 ? 1 : 0;
+        } catch (error) {
+          if (!runtime.disposed) {
+            this.loadError = chatLoadFailure(error);
+          }
 
-          let fromServer = !!j;
-          // Настройки речи — такой же server-owned snapshot. Страховочная browser-копия
-          // содержит только историю и не вправе подменять приватностный выбор движка.
-          const speech = normalizeSpeechSnapshot(j?.speech, this.speech);
-          // Снимок свежее серверной копии — значит сервер не успел записать последнее
-          // (например, его перезапустили сразу после ответа агента): восстанавливаем из него.
-          const snap = readSnapshot();
-          const restored = snap && stampOf(snap) > stampOf(j);
+          return;
+        }
 
-          if (restored) {
+        if (runtime.disposed) {
+          return;
+        }
+        // Порог сжатия читаем из ответа сервера СРАЗУ — до возможной подмены снимком:
+        // снимок в браузере хранит только историю, настроек в нём нет.
+        this.compactWindow = Math.max(0, Number(j?.compactWindow) || 0);
+        // Возможность сервера — тоже только из его ответа: снимок в браузере её не знает.
+        this.turnProtocol = Number(j?.turnProtocol) === TURN_PROTOCOL ? TURN_PROTOCOL : 0;
+        this.workdirProtocol = Number(j?.workdirProtocol) === 1 ? 1 : 0;
+        this.historyStepReuseProtocol = j?.historyStepReuseProtocol === 1 ? 1 : 0;
+
+        let fromServer = !!j;
+        // Настройки речи — такой же server-owned snapshot. Страховочная browser-копия
+        // содержит только историю и не вправе подменять приватностный выбор движка.
+        const speech = normalizeSpeechSnapshot(j?.speech, this.speech);
+        // Снимок свежее серверной копии — значит сервер не успел записать последнее
+        // (например, его перезапустили сразу после ответа агента): восстанавливаем из него.
+        const snap = readSnapshot();
+        const restored = snap && stampOf(snap) > stampOf(j);
+
+        if (restored) {
           j = snap;
         }
-          if (!(j?.sessions?.length || j?.archived?.length)) {
-            try {
-              const ls = decodeChatEnvelope(JSON.parse(localStorage.getItem(LS_KEY) || 'null'));
+        if (!(j?.sessions?.length || j?.archived?.length)) {
+          try {
+            const ls = decodeChatEnvelope(JSON.parse(localStorage.getItem(LS_KEY) || 'null'));
 
-              if (ls?.sessions?.length || ls?.archived?.length) {
-                j = ls;
-                fromServer = false;
-                localStorage.removeItem(LS_KEY);
-              }
-            } catch { /* битый localStorage — начинаем с пустого */ }
-          }
+            if (ls?.sessions?.length || ls?.archived?.length) {
+              j = ls;
+              fromServer = false;
+              localStorage.removeItem(LS_KEY);
+            }
+          } catch { /* битый localStorage — начинаем с пустого */ }
+        }
 
-          const picked = pickStore(j);
+        const picked = pickStore(j);
 
-          this._normalize(picked.sessions);
-          this._normalize(picked.archived);
-          picked.defWorkdir = availableWorkdir(this, picked.defWorkdir) || { kind: 'grigdesk' };
-          picked.recentWorkdirs = picked.recentWorkdirs.filter((choice) => (
-            choice.kind !== 'project' || !deletedProjectChoices.get(this)?.has(choice.projectId)
-          ));
-          Object.assign(this, picked);
-          this.speech = speech;
-          this.loaded = true;
-          storeSyncedAt = Date.now();
-          // Снимок оказался свежее серверной копии — немедленно возвращаем расхождение
-          // на сервер. Если же стор пришёл с сервера как есть, слать нечего: запоминаем
-          // слепки, чтобы дальше уезжали только реальные изменения.
-          if (restored) {
-            this._persist(true);
-          } else {
-            this._markSent({ fromServer });
-          }
-          // Ответы, доехавшие пока страница была закрыта/перезагружалась.
-          await this._collectPending();
-          // Спросы агентов, висящие прямо сейчас: после F5 их некому было показать.
-          await this._loadWaiting();
-          // Агенты, работающие прямо сейчас: восстанавливаем «думает…» после F5.
-          await this._loadActive();
-          // Реплики, приём которых окно до F5 не успело подтвердить: сверка с сервером.
-          await this._reconcileDeliveries();
-        })();
+        this._normalize(picked.sessions);
+        this._normalize(picked.archived);
+        picked.defWorkdir = availableWorkdir(this, picked.defWorkdir) || { kind: 'grigdesk' };
+        picked.recentWorkdirs = picked.recentWorkdirs.filter((choice) => (
+          choice.kind !== 'project' || !deletedProjectChoices.get(this)?.has(choice.projectId)
+        ));
+        Object.assign(this, picked);
+        this.speech = speech;
+        this.loaded = true;
+        this.loadError = null;
+        runtime.delay = 0;
+        storeSyncedAt = Date.now();
+        // Снимок оказался свежее серверной копии — немедленно возвращаем расхождение
+        // на сервер. Если же стор пришёл с сервера как есть, слать нечего: запоминаем
+        // слепки, чтобы дальше уезжали только реальные изменения.
+        if (restored) {
+          this._persist(true);
+        } else {
+          this._markSent({ fromServer });
+        }
+        // Ответы, доехавшие пока страница была закрыта/перезагружалась.
+        await this._collectPending();
+        // Спросы агентов, висящие прямо сейчас: после F5 их некому было показать.
+        await this._loadWaiting();
+        // Агенты, работающие прямо сейчас: восстанавливаем «думает…» после F5.
+        await this._loadActive();
+        // Реплики, приём которых окно до F5 не успело подтвердить: сверка с сервером.
+        await this._reconcileDeliveries();
+      })().finally(() => {
+        if (runtime.promise === job) {
+          runtime.promise = null;
+          runtime.controller = null;
+          this.loading = false;
+          scheduleChatLoad(this, runtime);
+        }
+      });
+
+      runtime.promise = job;
+
+      await job;
+    },
+    /**
+     * Ручной повтор и события восстановления опережают ожидающую паузу.
+     * Уже начатая загрузка сохраняет single-flight и не отменяется новым нажатием.
+     */
+    async retryLoad(): Promise<void> {
+      const runtime = chatLoadRuntimeFor(this);
+
+      if (runtime.disposed || this.loaded) {
+        return;
+      }
+      if (runtime.promise) {
+        return runtime.promise;
       }
 
-      await loadPromise;
+      clearTimeout(runtime.timer ?? undefined);
+      runtime.timer = null;
+      await this.ensure();
+    },
+    /**
+     * Слушатели восстановления ставятся до первого ожидания и снимаются при dispose.
+     * Возврат на экран использует общий стор и единственный SSE вкладки.
+     */
+    _initLoadRecovery() {
+      const runtime = chatLoadRuntimeFor(this);
+
+      if (runtime.listening || runtime.disposed) {
+        return;
+      }
+
+      runtime.listening = true;
+
+      const retry = () => {
+        void this.retryLoad();
+      };
+
+      if (typeof window !== 'undefined') {
+        const browser = window;
+
+        browser.addEventListener('online', retry);
+        runtime.off.push(() => browser.removeEventListener('online', retry));
+      }
+      if (typeof document !== 'undefined') {
+        const page = document;
+        const visible = () => {
+          if (page.visibilityState === 'visible') {
+            retry();
+          }
+        };
+
+        page.addEventListener('visibilitychange', visible);
+        runtime.off.push(() => page.removeEventListener('visibilitychange', visible));
+      }
     },
     /**
      * Недоставленные ответы (chats/pending на сервере): раскладываем по чатам, dedup по
@@ -1535,6 +1747,10 @@ export const useChatStore = defineStore('chat', {
      * чата, которого в окне нет, не удаляется: её подберёт окно, где этот чат есть.
      */
     async _collectPendingOnce() {
+      if (!this.loaded) {
+        return;
+      }
+
       let j = null;
 
       try {
@@ -1753,6 +1969,10 @@ export const useChatStore = defineStore('chat', {
     // берётся у последнего вызова: иначе правка черновика, пришедшая в те же 300 мс дебаунса,
     // отменила бы снимок только что полученного ответа.
     _persist(flush = false, { snapshot = true } = {}) {
+      if (!this.loaded) {
+        return;
+      }
+
       clearTimeout(persistTimer ?? undefined);
 
       if (snapshot) {
@@ -1764,6 +1984,10 @@ export const useChatStore = defineStore('chat', {
        * Очереди берут свежие данные отдельно, а страховка сохраняется до отправки запросов.
        */
       const write = () => {
+        if (!this.loaded) {
+          return;
+        }
+
         const state = historyPersistenceFor(this);
 
         const cache = persistenceProjections.get(toRaw(this))!;
@@ -1948,6 +2172,10 @@ export const useChatStore = defineStore('chat', {
      * снимок, потому что нужен сам ответ (stale и ревизия для CAS).
      */
     _writeChat(id: string, { force = false } = {}): Promise<ChatEnvelope | null> {
+      if (!this.loaded) {
+        return Promise.reject(new Error(t('core.chatStoreNotLoaded')));
+      }
+
       let slot = chatSaves.get(id);
       const release = (run: Promise<ChatEnvelope | null>) => {
         run.catch(() => {}).then(() => {
@@ -2002,6 +2230,10 @@ export const useChatStore = defineStore('chat', {
      * иначе следующий снимок считался бы отличным от сервера и уехал бы повторно.
      */
     async _putChat(id: string, force: boolean, attempt = 0): Promise<ChatEnvelope | null> {
+      if (!this.loaded) {
+        throw new Error(t('core.chatStoreNotLoaded'));
+      }
+
       const live = this._find(id);
 
       if (!live) {
@@ -2010,6 +2242,10 @@ export const useChatStore = defineStore('chat', {
 
       if (this.workdirProtocol && live.workdirInitializing) {
         await this._initializeWorkdir(live);
+      }
+
+      if (!this.loaded) {
+        throw new Error(t('core.chatStoreNotLoaded'));
       }
 
       const archived = (this.archived || []).some((item) => item.id === id);
@@ -2322,6 +2558,9 @@ export const useChatStore = defineStore('chat', {
       if (opts.purpose === 'companion') {
         throw new Error('Companion-чат создаётся только атомарно на сервере.');
       }
+      if (!this.loaded) {
+        return null;
+      }
 
       const s: ChatSession = {
 
@@ -2383,12 +2622,18 @@ export const useChatStore = defineStore('chat', {
     // (ответили в другом окне, «стоп», конец хода) закрывает всплывашку везде.
     // Таймаута у спроса нет: без ответа человека агент стоит и ждёт.
     initPerms() {
-      if (permOff) {
+      const runtime = chatLoadRuntimeFor(this);
+
+      if (runtime.permOff || runtime.disposed) {
         return;
       }
       // Общий EventSource вкладки (useSse) — свой открывать НЕЛЬЗЯ: лимит браузера
       // 6 соединений на хост, лишние SSE душат все fetch (см. composables/useSse.js).
-      permOff = sseSubscribe((name, payload) => {
+      runtime.permOff = sseSubscribe((name, payload) => {
+        if (runtime.disposed) {
+          return;
+        }
+
         if (name === 'projects-changed') {
           try {
             const change = parseProjectsChange(payload);
@@ -2454,6 +2699,8 @@ export const useChatStore = defineStore('chat', {
             this._resyncSpeech();
             // История, pending, живые ходы и доставки — строго по порядку (см. _afterReconnect).
             this._afterReconnect();
+          } else {
+            void this.retryLoad();
           }
         } else if (name === 'chat-store') {
           // Историю изменило другое окно/устройство. Своё эхо пропускаем: изменение
@@ -2888,6 +3135,10 @@ export const useChatStore = defineStore('chat', {
      * из этого окна висит свой незакрытый запрос: его судьбу решит его же ответ.
      */
     async _loadActive() {
+      if (!this.loaded) {
+        return;
+      }
+
       const request = ++this.activeRequest;
       const revisions = { ...this.runRevisions };
       let active;
@@ -3207,6 +3458,22 @@ export const useChatStore = defineStore('chat', {
      * событий никто не слышал: без сверки чат, заведённый в это время, снова ждал бы F5.
      */
     async _resyncStore() {
+      if (!this.loaded) {
+        await this.ensure();
+
+        return;
+      }
+
+      const runtime = chatLoadRuntimeFor(this);
+
+      if (runtime.disposed) {
+        return;
+      }
+
+      const controller = new AbortController();
+
+      runtime.resyncControllers.add(controller);
+
       const epoch = (workdirSyncEpochs.get(this) ?? 0) + 1;
       const choices = {
         defWorkdir: JSON.stringify(this.defWorkdir),
@@ -3219,12 +3486,18 @@ export const useChatStore = defineStore('chat', {
       let j = null;
 
       try {
-        j = decodeChatEnvelope(await api.get('/api/chat/store'));
+        j = decodeChatEnvelope(await api.get('/api/chat/store', {
+          idleTimeoutMs: 30000,
+          retry: false,
+          signal: controller.signal,
+        }));
       } catch {
         return;
+      } finally {
+        runtime.resyncControllers.delete(controller);
       }
 
-      if (!j?.sessions && !j?.archived) {
+      if (runtime.disposed || (!j?.sessions && !j?.archived)) {
         return;
       }
 
@@ -3446,8 +3719,17 @@ export const useChatStore = defineStore('chat', {
      * Порядок сверки речи, миграции модели и выбора активного чата сохраняется.
      */
     async ensure() {
-      await this._load();
+      if (chatLoadRuntimeFor(this).disposed) {
+        return;
+      }
+
       this.initPerms();
+      this._initLoadRecovery();
+      await this._load();
+
+      if (!this.loaded || chatLoadRuntimeFor(this).disposed) {
+        return;
+      }
       // AppShell мог открыть общий EventSource и получить initial hello, пока _load()
       // ещё читал историю. Не полагаемся на повторный hello: сразу сверяем cold
       // publicSnapshot с полной runtime readiness, не задерживая показ чатов.
@@ -3570,7 +3852,7 @@ export const useChatStore = defineStore('chat', {
     async revealChat(id: string) {
       await this._load();
 
-      if (!this._find(id)) {
+      if (!this.loaded || !this._find(id)) {
         return false;
       }
 
@@ -4885,7 +5167,7 @@ export const useChatStore = defineStore('chat', {
      * отметку; неизвестный — «не доставлено» с кнопкой повтора того же turnId.
      */
     async _reconcileDeliveries() {
-      if (this.turnProtocol !== TURN_PROTOCOL) {
+      if (!this.loaded || this.turnProtocol !== TURN_PROTOCOL) {
         return;
       }
 
@@ -4960,6 +5242,10 @@ export const useChatStore = defineStore('chat', {
      * свои повторы доставки уходят сразу. Повторный hello во время прохода — ещё проход.
      */
     _afterReconnect(): Promise<void> {
+      if (!this.loaded) {
+        return this.ensure();
+      }
+
       if (reconnectJob) {
         reconnectAgain = true;
 

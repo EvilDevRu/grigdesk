@@ -366,7 +366,8 @@
           <span class="ssh-count">{{ store.connections?.length || 0 }}</span>
         </header>
 
-        <div v-if="store.connections?.length" class="ssh-connection-list">
+        <UiLoadingState v-if="refreshLoading && !store.connections?.length && !store.error" />
+        <div v-else-if="store.connections?.length" class="ssh-connection-list">
           <article
             v-for="connection in store.connections"
             :key="connection.id"
@@ -613,6 +614,7 @@ import {
   alertDialog,
   confirmDialog,
   vTooltip,
+  UiLoadingState,
 } from '../../ui';
 import type {
   SshAuditEntry,

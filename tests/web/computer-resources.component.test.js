@@ -46,6 +46,15 @@ test('UI-01: GPU и разделы своего устройства', TEST_OPTI
   assert.equal(await h.panel.locator('.pu-row').count(), 7,
     'на базе только CPU/RAM/swap; двух GPU и двух разделов пока нет');
 
+  const computing = await h.panel.locator('.resource-section').first().boundingBox();
+  const memory = await h.panel.locator('.resource-section').nth(1).boundingBox();
+  const disks = await h.panel.locator('.resource-disks').boundingBox();
+
+  assert.ok(memory.x >= computing.x + computing.width, 'память находится в средней колонке');
+  assert.ok(disks.x >= memory.x + memory.width, 'диски находятся в третьей колонке');
+  assert.ok(Math.abs(computing.y - memory.y) < 1 && Math.abs(memory.y - disks.y) < 1,
+    'все три раздела начинаются на одной высоте');
+
   const cpu = await resourceRow(h.panel, labels.ru.cpu);
 
   assert.ok(cpu.head.includes('72,8'));
@@ -207,6 +216,7 @@ test('BR-01: ширина метрики и доступность панели'
     for (const viewport of [{ width: 1440, height: 900 }, { width: 1000, height: 500 }]) {
       await h.page.setViewportSize(viewport);
       await h.setMetrics(oldMetrics());
+      await h.showTrigger();
 
       const before = await h.trigger.boundingBox();
       const neighbors = await h.page.locator('.topbar-actions').boundingBox();
@@ -268,8 +278,9 @@ test('BR-01: ширина метрики и доступность панели'
     }
   }
 
+  await h.page.keyboard.press('Escape');
   await h.page.setViewportSize({ width: 390, height: 844 });
-  assert.equal(await h.trigger.isVisible(), false);
+  await h.trigger.waitFor({ state: 'hidden' });
 
   const touch = await resourcesBrowser(t, extendedMetrics(), {
     hasTouch: true,
@@ -277,4 +288,29 @@ test('BR-01: ширина метрики и доступность панели'
   });
 
   assert.equal(await touch.trigger.isVisible(), false);
+  await touch.open();
+
+  for (const width of [320, 390, 600]) {
+    await touch.page.setViewportSize({ width, height: 844 });
+
+    const geometry = await touch.panel.evaluate((panel) => {
+      const computing = panel.querySelector('.resource-section').getBoundingClientRect();
+      const memory = panel.querySelectorAll('.resource-section')[1].getBoundingClientRect();
+      const [ram, swap] = [...panel.querySelectorAll('.resource-memory-grid .pu-row')]
+        .map((row) => row.getBoundingClientRect());
+      const box = panel.getBoundingClientRect();
+
+      return {
+        oneColumn: Math.abs(computing.left - memory.left) < 1 && memory.top >= computing.bottom,
+        memoryStacked: Math.abs(ram.left - swap.left) < 1 && swap.top >= ram.bottom,
+        fits: box.left >= 0 && box.right <= innerWidth && box.bottom <= innerHeight,
+        overflows: panel.scrollWidth > panel.clientWidth,
+      };
+    });
+
+    assert.equal(geometry.oneColumn, true, `${width}: блоки расположены в одну колонку`);
+    assert.equal(geometry.memoryStacked, true, `${width}: память расположена в одну колонку`);
+    assert.equal(geometry.fits, true, `${width}: панель помещается в экран`);
+    assert.equal(geometry.overflows, false, `${width}: нет горизонтальной прокрутки`);
+  }
 });

@@ -24,9 +24,6 @@
     <UiInlineMessage v-if="sandboxPipelineSnapshot.error" class="sandboxes__error" tone="warning">
       Сведения конвейера устарели: {{ sandboxPipelineSnapshot.error }}
     </UiInlineMessage>
-    <p v-if="!store.loaded && !store.error" class="sandboxes__empty" role="status">
-      Читаем состояние песочниц…
-    </p>
 
     <div class="sandboxes__tabs">
       <UiButton data-context="workspace-toolbar" :pressed="panel === 'list'"
@@ -59,6 +56,7 @@
           </span>
         </div>
 
+        <UiLoadingState v-if="!store.loaded && !store.error" label="Читаем состояние песочниц…" />
         <p v-if="store.loaded && !store.error && !store.sandboxes.length" class="sandboxes__empty">
           <template v-if="awaitingStand">Подготовка идёт. Текущий шаг — в строке стенда.</template>
           <template v-else>Стендов пока нет. Выберите профиль и поднимите первую песочницу.</template>
@@ -136,8 +134,17 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
-  UiButton, UiIconButton, UiInlineMessage, UiInput, UiPaneHeader, UiProgress, UiSelect,
-  confirmDialog, promptDialog, vTooltip,
+  UiButton,
+  UiIconButton,
+  UiInlineMessage,
+  UiInput,
+  UiPaneHeader,
+  UiProgress,
+  UiSelect,
+  confirmDialog,
+  promptDialog,
+  vTooltip,
+  UiLoadingState,
 } from '../ui';
 import {
   dismantleSandbox,

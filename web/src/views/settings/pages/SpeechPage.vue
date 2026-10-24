@@ -6,8 +6,9 @@
   >
     <SettingsScope />
     <p v-if="error || operations.message.value" role="alert">{{ error || operations.message.value }}</p>
-    <p v-if="!loaded">{{ t('settings.loadingSpeechSettings') }}</p>
-    <template v-else>
+    <UiLoadingState v-if="!loaded && !error" :label="t('settings.loadingSpeechSettings')"
+      variant="document" />
+    <template v-else-if="loaded">
       <template v-if="settings.pageId === 'speech.dictation'">
         <SettingsField :address="address('engine')">
           <UiSelect :model-value="text('engine')" @update:model-value="edit('engine', $event)">
@@ -275,7 +276,15 @@ import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import SettingsScope from '../SettingsScope.vue';
 import SettingsSection from '../SettingsSection.vue';
 import SettingsFacts from '../SettingsFacts.vue';
-import { UiButton, UiSelect, UiTextarea, UiNumberInput, UiSwitch, UiProgress } from '../../../ui.ts';
+import {
+  UiButton,
+  UiSelect,
+  UiTextarea,
+  UiNumberInput,
+  UiSwitch,
+  UiProgress,
+  UiLoadingState,
+} from '../../../ui.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
 import { useChatStore } from '../../../stores/chat.ts';

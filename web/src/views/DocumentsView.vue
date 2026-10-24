@@ -4,7 +4,7 @@
     <span class="title" v-tooltip="document?.displayPath || title">{{ title }}</span>
   </TopbarActions>
   <main class="documents-view">
-    <div v-if="resolving" class="resolve-state"><UiSpinner decorative /> Проверяю ссылку…</div>
+    <UiLoadingState v-if="resolving" label="Проверяю ссылку…" variant="document" />
     <div v-else-if="resolveError" class="resolve-state error">{{ resolveError }}</div>
     <DocumentPanel v-else :source="source" :path="documentPath" :anchor="anchor" :line="line"
                    @loaded="document = $event" />
@@ -20,7 +20,11 @@ import type { DocumentFile } from '../features/documents/contracts.ts';
 import TopbarActions from '../shared/layout/TopbarActions.vue';
 import DocumentPanel from '../features/documents/DocumentPanel.vue';
 import { documentScope } from '../features/documents/links.ts';
-import { UiIconButton, UiSpinner, vTooltip } from '../ui';
+import {
+  UiIconButton,
+  vTooltip,
+  UiLoadingState,
+} from '../ui';
 
 const route = useRoute();
 const router = useRouter();

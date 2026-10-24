@@ -13,6 +13,7 @@ const VIEW = webFile('src/views/SandboxesView.vue');
 // Элементы управления остаются настоящими: подменяется только решение человека
 // в диалоге, чтобы проверялось поведение самой страницы.
 const UI_STUB = `
+export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
 export { default as UiPaneHeader } from '${webFile('src/components/composites/UiPaneHeader.vue')}';
 export { default as UiActionLink } from '${webFile('src/components/primitives/UiActionLink.vue')}';
 export { default as UiButton } from '${webFile('src/components/primitives/UiButton.vue')}';

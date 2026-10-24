@@ -23,6 +23,7 @@ const { mount, flushPromises } = await import(
 );
 const textareaFile = webFile('src/components/primitives/UiTextarea.vue');
 const uiStub = [
+  "export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';",
   `export { default as UiButton } from ${JSON.stringify(webFile('src/components/primitives/UiButton.vue'))};`,
   `export { default as UiTextarea } from ${JSON.stringify(textareaFile)};`,
 ].join('\n');

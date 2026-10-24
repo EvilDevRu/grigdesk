@@ -116,7 +116,7 @@
       <!-- Панель — только содержимое: дерево файлов либо изменения. Проект и рабочая
            копия выбираются в шапке раздела. -->
       <aside id="code-navigator" class="panel">
-        <div v-if="contextLoading" class="pnote">Загружаю рабочую копию…</div>
+        <UiLoadingState v-if="contextLoading" label="Загружаю рабочую копию…" variant="inline" />
 
         <div v-if="error" class="perr">{{ error }}</div>
         <div v-if="!projectHasRepos" class="pnote">
@@ -302,7 +302,7 @@
             <span class="cnt mono">{{ fileHistoryEntries.length }}</span>
           </div>
           <div class="history-path mono" v-tooltip="fileHistoryPath">{{ fileHistoryPath }}</div>
-          <div v-if="fileHistoryLoading" class="pnote">Читаю историю…</div>
+          <UiLoadingState v-if="fileHistoryLoading" label="Читаю историю…" />
           <div v-else-if="fileHistoryError" class="perr">{{ fileHistoryError }}</div>
           <div v-else-if="!fileHistoryEntries.length" class="pnote">История файла пуста.</div>
           <UiPressable v-for="entry in fileHistoryEntries" :key="entry.hash"
@@ -320,7 +320,7 @@
 
         <div v-else-if="tab === 'files' && searchActive"
              class="scroll tree code-search-results">
-          <div v-if="searchLoading" class="pnote">Ищу…</div>
+          <UiLoadingState v-if="searchLoading" label="Ищу…" variant="inline" />
           <div v-else-if="searchError" class="perr">{{ searchError }}</div>
           <template v-else>
             <template v-if="searchResult?.files.length">
@@ -429,7 +429,7 @@
             </div>
           </div>
           <div class="scroll tree git-tree" :class="{ 'commit-tree': gitPane === 'commits' }">
-            <div v-if="gitLoading && !git" class="pnote">Читаю гит…</div>
+            <UiLoadingState v-if="gitLoading && !git" label="Читаю гит…" />
             <template v-if="git">
               <div v-if="gitPane === 'changes' && !changeGroups.length"
                    class="git-clean" role="status">
@@ -467,7 +467,7 @@
                     </svg>
                   </UiIconButton>
                 </div>
-                <div v-if="commitsLoading" class="pnote commits-state">Читаю коммиты…</div>
+                <UiLoadingState v-if="commitsLoading" label="Читаю коммиты…" />
                 <div v-else-if="commitsError" class="perr commits-state">{{ commitsError }}</div>
                 <div class="commit-log">
                   <UiPressable v-for="c in git.log" :key="c.hash" class="commit"
@@ -1175,6 +1175,7 @@ import {
   confirmDialog,
   promptDialog,
   vTooltip,
+  UiLoadingState,
 } from '../../ui';
 
 type CodeTab = 'files' | 'git';

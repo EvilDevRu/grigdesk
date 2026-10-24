@@ -684,6 +684,7 @@ export async function runContainedKimi({
         signal,
         onStep,
         onProgress,
+        onRunMetadata,
         onSessionCreated: async (id) => {
           await onSessionCreated?.(id);
         },

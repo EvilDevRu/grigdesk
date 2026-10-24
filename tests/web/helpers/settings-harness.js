@@ -76,6 +76,12 @@ export async function settingsHarness(t, pageId, component, options = {}) {
       return control.handlers[path](call);
     }
 
+    // Старый mock-сервер отклоняет новую пробу только после точных handlers.
+    // Остальные query не стираются: assertions видят настоящий маршрут запроса.
+    if (/^\/api\/plugin-catalog\?api=2(?:&refresh=1)?$/u.test(path)) {
+      return Response.json({ error: 'Неизвестный query api' }, { status: 400 });
+    }
+
     let value;
 
     if (path === '/api/settings/prefs') {

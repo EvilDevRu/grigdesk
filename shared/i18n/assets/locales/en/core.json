@@ -9,9 +9,10 @@
   "workdirMethod": "Folder selection method",
   "workdirCatalog": "Projects and folders",
   "workdirByPath": "By path",
+  "workdirBackToCatalog": "Back to projects and folders",
   "workdirSearch": "Find a project or folder",
   "workdirAvailable": "Available folders",
-  "workdirNoResults": "No matches. Change your search or enter a path under “By path”.",
+  "workdirNoResults": "No matches. Try another search or select “By path”.",
   "workdirAbsolutePath": "Absolute path",
   "workdirPathHint": "Enter a folder on the connected computer where the agent will work.",
   "workdirChoose": "Choose folder",
@@ -688,5 +689,15 @@
   "machineWelcomeHere": "In this app",
   "machineWelcomeScan": "Select “Add machine” and scan the QR code. You can also paste a pairing string.",
   "machineWelcomePaste": "Select “Add machine” and paste the pairing string from your computer.",
-  "machineWelcomeReady": "Once connected, you can continue working with the selected computer."
+  "machineWelcomeReady": "Once connected, you can continue working with the selected computer.",
+  "chatListLoading": "Loading chats…",
+  "chatLoadingPreviewTitle": "Conversations with agents",
+  "chatLoadingPreviewHint": "Your chats and message history will appear here",
+  "chatListLoadFailed": "Chats could not be loaded",
+  "chatListLoadNetwork": "No connection to the server",
+  "chatListLoadTimeout": "The server did not respond in time",
+  "chatListLoadServer": "Server error",
+  "chatListLoadAccess": "Server access is unavailable",
+  "chatListRetry": "Retry",
+  "chatStoreNotLoaded": "You can create a chat after the list loads"
 }

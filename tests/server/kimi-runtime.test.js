@@ -620,9 +620,11 @@ test('host runtime: вложения идут по исходным путям, 
 test('server runtime сохраняет контекст и берёт окно из каталога при отсутствии в статусе', async (t) => {
   for (const window of [undefined, 262144]) {
     const f = await fixture(t);
+    const metadata = [];
     const wire = await kimiUsageWire(t, [(send) => {
       send({
         type: 'agent.status.updated',
+        model: 'kimi-code/k3',
         contextTokens: 6000,
         maxContextTokens: window
       });
@@ -635,6 +637,7 @@ test('server runtime сохраняет контекст и берёт окно 
       message: 'Синтетический ход',
       model: 'kimi-code/k3',
       transport: 'server',
+      onRunMetadata: (event) => metadata.push(event),
       deps: {
         assertVersion: async () => '0.33.0',
         createProxy: () => ({ async start() {}, async close() {} }),
@@ -652,6 +655,8 @@ test('server runtime сохраняет контекст и берёт окно 
     assert.equal(out.contextTokens, 6000);
     assert.equal(out.contextWindow, window ?? 1048576);
     assert.equal(out.contextMetric, 'kimi-agent-status-v1');
+    assert.equal(out.actualModel, 'kimi-code/k3');
+    assert.deepEqual(metadata, [{ actualModelId: 'kimi-code/k3', modelSource: 'session' }]);
   }
 });
 

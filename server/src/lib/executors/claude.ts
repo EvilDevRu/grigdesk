@@ -13,6 +13,8 @@ import {
   claudeOauthMetadata,
 } from './_claudeCatalog.ts';
 import { npmLatest } from './_npmLatest.ts';
+import type { ProviderInstallationContext } from './index.ts';
+import { npmInstallCommand } from '../providerInstall/commands.ts';
 import { withRetry } from '../retry.ts';
 import { usagePercentOrNull } from '../providerUsage.ts';
 import type { ProviderUsagePatch } from '../providerUsage.ts';
@@ -1663,21 +1665,26 @@ export default {
   install: 'npm i -g @anthropic-ai/claude-code && claude login',
   login: 'claude login',
   /**
-   * Сервер исполняет только эту декларацию; вход остаётся отдельным действием.
-   * Обновление проверяет настроенную копию, запасная команда сохраняет прежний путь.
+   * Пользовательский npm имеет приоритет; без него сохраняются native-команды.
+   * Вход остаётся отдельным действием, npm-копия подключается после проверки версии.
    */
-  installation(config: ClaudeConfig) {
+  installation(config: ClaudeConfig, context?: ProviderInstallationContext) {
     const command = 'curl -fsSL https://claude.ai/install.sh | bash';
-    const install = {
-        executable: '/bin/bash',
-        args: ['-o', 'pipefail', '-c', command],
-        command,
-        fallbackCommand: 'npm i -g @anthropic-ai/claude-code && claude login',
+    const npm = context?.npm ? npmInstallCommand('@anthropic-ai/claude-code', context.npm, {
+      binName: 'claude',
+      configKey: 'claudeBin',
+      envKey: 'GRIGDESK_CLAUDE_BIN',
+    }) : null;
+    const install = npm || {
+      executable: '/bin/bash',
+      args: ['-o', 'pipefail', '-c', command],
+      command,
+      fallbackCommand: 'npm i -g @anthropic-ai/claude-code && claude login',
     };
 
     return {
       install,
-      update: {
+      update: npm || {
         executable: config.claudeBin,
         args: ['install', 'latest'],
         command: [config.claudeBin, ...['install', 'latest']].join(' '),
