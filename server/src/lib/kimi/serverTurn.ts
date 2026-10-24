@@ -19,6 +19,7 @@ import { openKimiEventStream } from './serverEvents.ts';
 import type { KimiRawEvent } from './serverEvents.ts';
 import type { KimiServerProcess } from './serverRuntime.ts';
 import { startKimiServer } from './serverRuntime.ts';
+import { kimiTurnError } from './turnFailure.ts';
 import type { KimiServerClient } from './serverClient.ts';
 import type { StartKimiServerOptions } from './serverRuntime.ts';
 import type { PreparedNativeSettings } from '../executorSettings/types.ts';
@@ -275,6 +276,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
         kind === 'assistant.delta' || kind === 'assistant.completed' || kind === 'thinking.delta'
         || kind === 'turn.started' || kind === 'turn.step.started' || kind === 'turn.step.completed'
         || kind === 'turn.ended' || kind === 'agent.status.updated' || kind === 'turn.step.interrupted'
+        || kind === 'prompt.aborted' || kind === 'error'
       )) {
         return;
       }
@@ -512,10 +514,10 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
         finishText(currentTextId);
         options.onInTurnAvailability?.({ available: false, reason: 'not_ready' });
 
-        if (payload.reason === 'cancelled') {
+        if (payload.reason === 'cancelled' || payload.reason === 'aborted') {
           failure = Object.assign(new Error('Ход остановлен.'), { stopped: true });
         } else if (payload.reason === 'failed' || payload.reason === 'blocked') {
-          failure = new Error(`Ход Kimi завершился: ${payload.reason}`);
+          failure = kimiTurnError(payload.error ?? payload, `Ход Kimi завершился: ${payload.reason}`);
         }
 
         finished = true;
@@ -524,10 +526,15 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
         return;
       }
 
-      if (kind === 'prompt.aborted' || kind === 'turn.step.interrupted') {
+      if (kind === 'prompt.aborted' || kind === 'turn.step.interrupted' || kind === 'error') {
+        const cancelled = kind === 'prompt.aborted'
+          || (kind === 'turn.step.interrupted' && payload.reason === 'aborted');
+
         flushThought();
         finished = true;
-        failure = Object.assign(new Error('Ход остановлен.'), { stopped: true });
+        failure = cancelled
+          ? Object.assign(new Error('Ход остановлен.'), { stopped: true })
+          : kimiTurnError(payload.error ?? payload, `Ход Kimi завершился: ${payload.reason || 'failed'}`);
         notify();
       }
     }
@@ -617,7 +624,11 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
       }
 
       if (failure) {
-        throw failure;
+        throw Object.assign(failure, {
+          sessionId: session.id,
+          steps: stepSink.steps,
+          ...lastContextUsage,
+        });
       }
 
       await Promise.all([...writes]);
