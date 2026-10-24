@@ -9,6 +9,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { npmLatest } from './_npmLatest.ts';
+import type { ProviderInstallationContext } from './index.ts';
+import { npmInstallCommand } from '../providerInstall/commands.ts';
 
 import { validateKimiWorkdir } from '../kimi/sandbox.ts';
 import type { KimiSandboxConfig } from '../kimi/sandbox.ts';
@@ -305,16 +307,16 @@ export default {
   // зависимости от системного Node.js.
   install: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
   /**
-   * Сервер исполняет только эту декларацию; вход остаётся отдельным действием.
-   * Обновление проверяет настроенную копию, запасная команда сохраняет прежний путь.
+   * Пользовательский npm имеет приоритет перед прежним официальным installer.
+   * Contained закрепляет runtime и не допускает обновления через карточку.
    */
-  installation(config: KimiConfig) {
+  installation(config: KimiConfig, context?: ProviderInstallationContext) {
     const command = 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash';
-    const install = {
-        executable: '/bin/bash',
-        args: ['-o', 'pipefail', '-c', command],
-        command,
-        fallbackCommand: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
+    const install = context?.npm ? npmInstallCommand('@moonshot-ai/kimi-code', context.npm) : {
+      executable: '/bin/bash',
+      args: ['-o', 'pipefail', '-c', command],
+      command,
+      fallbackCommand: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
     };
 
     return {

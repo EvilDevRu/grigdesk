@@ -7,8 +7,8 @@ import type { ExecutorAdapter, ProviderInstallCommand } from '../executors/index
 import { isOutdated, parseVersion } from '../executors/_npmLatest.ts';
 import { runCommand, type PluginCommandRunner } from '../pluginInstall/runCommand.ts';
 import { terminateOwnedWorker } from '../pluginInstall/workerIdentity.ts';
-import { runtimeKind, nodeExecutable } from '../runtimePaths.ts';
 import { withRetry } from '../retry.ts';
+import { findProviderNpm, resolveProviderInstallation } from './commands.ts';
 import { isTransientInstallFailure } from './networkFailure.ts';
 import { readInstallState, writeInstallState, type ProviderInstallState } from './stateStore.ts';
 import type {
@@ -227,7 +227,8 @@ export class ProviderInstallService {
         throw new ProviderInstallError(400, 'no_update', 'Обновите управляемую поставку отдельно');
       }
 
-      const declared = adapter.installation?.(this.ports.config);
+      const declared = await resolveProviderInstallation(adapter, this.ports.config,
+        this.ports.env, this.ports.runtimePaths);
       let command = declared?.[operation];
 
       if (!declared && legacy && operation === 'update' && adapter.updateCmd) {
@@ -307,7 +308,12 @@ export class ProviderInstallService {
 
     try {
       const executable = command.executable === 'npm'
-        ? await this.resolveNpm() : command.executable;
+        ? await findProviderNpm(this.ports.env, this.ports.runtimePaths) : command.executable;
+
+      if (!executable) {
+        throw new ProviderInstallError(500, 'npm_missing', 'npm не найден в пользовательском PATH сервера');
+      }
+
       const result = await this.runInstallation(executable, command, job, cwd);
 
       output = boundedOutput(result.stdout + result.stderr).trim().slice(-2000);
@@ -485,29 +491,6 @@ export class ProviderInstallService {
         }
       },
     });
-  }
-
-  /**
-   * Packaged npm нельзя использовать для глобальной установки в собственную поставку.
-   * Учитываются только абсолютные каталоги PATH, исходный порядок не переписывается.
-   */
-  private async resolveNpm(): Promise<string> {
-    const runtime = this.ports.runtimePaths || { kind: runtimeKind(), node: nodeExecutable() };
-
-    for (const directory of (this.ports.env.PATH || '').split(path.delimiter)) {
-      if (!path.isAbsolute(directory)
-        || (runtime.kind === 'packaged' && path.resolve(directory) === path.dirname(runtime.node))) {
-        continue;
-      }
-
-      const candidate = path.join(directory, 'npm');
-
-      if (await fs.access(candidate, constants.X_OK).then(() => true, () => false)) {
-        return candidate;
-      }
-    }
-
-    throw new ProviderInstallError(500, 'npm_missing', 'npm не найден в пользовательском PATH сервера');
   }
 
   /**

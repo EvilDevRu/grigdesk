@@ -1,6 +1,7 @@
 # Чат и исполнители
 
 - [Установка CLI: общее окно, серверная операция и восстановление](provider-cli-installation.md)
+- [Приоритет пользовательского npm для CLI и прежние способы без него](provider-install-npm.md)
 - [Вывод установки, обновление реестра и перевод собственных причин](provider-install-output-and-messages.md)
 - [Повтор установки и обновления CLI при плохой сети: бюджет, паузы и остановка](provider-install-network-retry.md)
 - [Кнопка «Повторить» после отказа установки или обновления CLI](provider-install-manual-retry.md)

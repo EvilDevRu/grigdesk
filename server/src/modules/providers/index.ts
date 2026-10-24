@@ -31,6 +31,7 @@ import { registerProviderNativeSettings } from './settings.ts';
 import { registerProviderCredentials } from './credentials.ts';
 import { registerProviderInstallations } from './installations.ts';
 import { ProviderInstallService, type ProviderInstallOptions } from '../../lib/providerInstall/service.ts';
+import { resolveProviderInstallation } from '../../lib/providerInstall/commands.ts';
 
 // Серверный config в объёме, который читает реестр. Полная его форма объявлена
 // в config.ts; адаптеры получают его целиком и разбирают сами.
@@ -204,7 +205,8 @@ async function providersModule(
       const { ok, version } = probe;
       const distribution = ex.distribution?.(config, probe) || null;
       const managed = distribution?.managed === true;
-      const installation = managed ? null : ex.installation?.(config);
+      const installation = managed ? null : await resolveProviderInstallation(ex, config,
+        serviceEnv, opts.providerInstall?.runtimePaths);
       // Режимы прав спрашиваем у самого CLI (как и эффорты) — список не хардкодим.
       let modes = null;
 
