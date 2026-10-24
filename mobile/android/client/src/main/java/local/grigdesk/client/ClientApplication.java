@@ -22,6 +22,8 @@ public final class ClientApplication extends Application implements Application.
       MainActivity.foreground(locked);
     }
   });
+  public final UnlockSession unlockSession = new UnlockSession(lifecycle::authenticated, this::nativeFlow);
+
   private final Handler handler = new Handler(Looper.getMainLooper());
   private int flows;
   private final Runnable checkProcess = new Runnable() {

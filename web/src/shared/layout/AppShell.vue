@@ -23,27 +23,42 @@
         </template>
         <template v-if="toolsNav.length">
           <div class="navsep"></div>
-          <UiPopover v-model:open="toolsOpen" class="tools-popover" layer="tools"
-                     placement="right-start" :aria-label="t('core.tools')">
-          <template #trigger>
-          <UiPressable class="navitem tools-trigger" data-ui-shell-nav
-                       :class="{ active: toolsActive }" :aria-label="navTitle({ to: '/tools', label: t('core.tools') })"
-                       v-tooltip.right="navTitle({ to: '/tools', label: t('core.tools') })">
-            <span class="icwrap">
-              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                   stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
-              <NavigationCount :badge="badges['/tools']" />
-            </span>
-          </UiPressable>
-          </template>
-          <template #default="{ close }">
-            <header>
-              <strong>{{ t('core.tools') }}</strong>
-              <router-link to="/tools" @click="close('action')">{{ t('core.allOnPage') }}</router-link>
-            </header>
-            <ToolsGrid :items="toolsNav" :badges="badges" @select="close('action')" />
-          </template>
-          </UiPopover>
+          <UiTopbarPanel
+            v-model:open="toolsOpen"
+            layer="tools"
+            attachment="trigger"
+            placement="right-start"
+            trigger-mode="click"
+            :title="t('core.tools')"
+          >
+            <template #trigger>
+              <UiPressable class="navitem tools-trigger" data-ui-shell-nav
+                           :class="{ active: toolsActive || toolsOpen }"
+                           :aria-label="navTitle({ to: '/tools', label: t('core.tools') })"
+                           v-tooltip.right="navTitle({ to: '/tools', label: t('core.tools') })">
+                <span class="icwrap">
+                  <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                       stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
+                  <NavigationCount :badge="badges['/tools']" />
+                </span>
+              </UiPressable>
+            </template>
+            <template #default="{ close }">
+              <ToolsGrid :items="toolsNav" :badges="badges" layout="list" @select="close('action')" />
+            </template>
+            <template #footer="{ close }">
+              <router-link v-slot="{ href, navigate }" to="/tools" custom>
+                <UiActionLink :href="href" variant="text" tone="accent"
+                              data-context="topbar-popover-resource-link"
+                              @click="
+                                navigate($event);
+                                close('action');
+                              ">
+                  {{ t('core.allOnPage') }}
+                </UiActionLink>
+              </router-link>
+            </template>
+          </UiTopbarPanel>
         </template>
       </nav>
       <nav class="nav nav-bottom dock-route-nav">
@@ -421,7 +436,6 @@ import {
   UiButton,
   UiDialog,
   UiIconButton,
-  UiPopover,
   UiTopbarPanel,
   UiPressable,
   vTooltip,

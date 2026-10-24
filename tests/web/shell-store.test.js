@@ -99,7 +99,11 @@ test('оболочка: ошибка long-poll выдерживает секун
       body: options.body ? JSON.parse(options.body) : undefined,
     });
 
-    return Response.json({ ok: true });
+    return Response.json(url === '/__shell/unlock' ? {
+      ...state,
+      rev: 4,
+      status: 'connecting',
+    } : { ok: true });
   };
 
   await store.addMachine('secret-test-pairing');
@@ -110,6 +114,9 @@ test('оболочка: ошибка long-poll выдерживает секун
   await store.connect();
   await store.disconnect();
   await store.unlock();
+  assert.equal(store.status, 'connecting');
+  store.apply({ ...state, status: 'locked' });
+  assert.equal(store.status, 'connecting', 'Старый long-poll не возвращает экран блокировки');
   await store.scan();
 
   assert.deepEqual(calls.map((call) => [call.method, call.url]), [
