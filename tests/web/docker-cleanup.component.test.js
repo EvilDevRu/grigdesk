@@ -9,6 +9,7 @@ const CLEANUP = webFile('src/views/docker/DockerCleanup.vue');
 // Публичную границу UI подменяем целиком, но настоящими примитивами: подделать нужно
 // только диалог подтверждения, иначе тест проверял бы не панель, а свои же заглушки.
 const UI_STUB = `
+export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
 export { default as UiButton } from '${webFile('src/components/primitives/UiButton.vue')}';
 export { default as UiCheckbox } from '${webFile('src/components/primitives/UiCheckbox.vue')}';
 export { default as UiInlineMessage } from '${webFile('src/components/feedback/UiInlineMessage.vue')}';

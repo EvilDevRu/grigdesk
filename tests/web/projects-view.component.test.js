@@ -15,6 +15,7 @@ const draftModule = await compileModule(webFile('src/views/projects/projectDraft
 // Элементы управления настоящие: подменяются только диалоги, чтобы проверялось
 // поведение самой страницы, а не её заглушек.
 const UI_STUB = `
+export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
 export const { t, resolveUiText, messageRef } = globalThis.__projectsViewLocale;
 export { default as UiPaneHeader } from '${webFile('src/components/composites/UiPaneHeader.vue')}';
 export { default as UiButton } from '${webFile('src/components/primitives/UiButton.vue')}';

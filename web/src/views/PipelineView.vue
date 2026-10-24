@@ -251,7 +251,7 @@
       </div>
     </div>
 
-    <p v-if="!loaded" class="muted">Загрузка…</p>
+    <UiLoadingState v-if="!loaded && !error" label="Загрузка…" variant="cards" />
     <p v-else-if="error" class="err">Ошибка: {{ error }}</p>
     <p v-else-if="!tasks.length" class="muted">Задач в состоянии фабрики нет.</p>
     <div v-else-if="!filteredTasks.length" class="filter-empty">
@@ -877,7 +877,8 @@
 
             <!-- Документ этапа: план у ворот плана, диагноз у ворот причины, отчёт на приёмке -->
             <div v-if="stageDocLoading" class="sect content-sect">
-              <div class="secth"><UiSpinner decorative /> Документ этапа</div>
+              <div class="secth">Документ этапа</div>
+              <UiLoadingState label="Документ этапа" variant="document" />
             </div>
             <div v-else-if="stageDoc" class="sect content-sect document-sect">
               <UiDisclosureButton
@@ -985,6 +986,7 @@ import {
   UiSpinner,
   UiTextarea,
   vTooltip,
+  UiLoadingState,
 } from '../ui';
 import { sandboxUrl } from '../shared/sandbox.ts';
 import { agentActivityLabel, silenceReason } from '../../../shared/pipeline/agentActivity.ts';

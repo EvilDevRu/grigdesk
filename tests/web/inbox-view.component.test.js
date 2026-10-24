@@ -106,6 +106,30 @@ test('Inbox показывает source/channel/status и отправляет e
   ]);
 });
 
+test('обновление входящих сохраняет готовые обращения до следующего снимка', async (t) => {
+  const pending = Promise.withResolvers();
+  let reads = 0;
+  const api = {
+    get() {
+      reads += 1;
+
+      return reads === 1 ? Promise.resolve(response()) : pending.promise;
+    },
+    async post() {
+      return { ok: true };
+    },
+  };
+  const { wrapper, settle } = await mountChannelView(t, 'inbox', { api });
+
+  await button(wrapper, 'Обновить').trigger('click');
+  assert.equal(reads, 2);
+  assert.equal(wrapper.find('[data-status="new"]').exists(), true);
+  assert.equal(wrapper.find('[data-ui-loading]').exists(), false);
+  pending.resolve(response({ items: [item({ title: 'Обновлённое обращение' })] }));
+  await settle();
+  assert.ok(wrapper.text().includes('Обновлённое обращение'));
+});
+
 test('выбор new/skipped не смешивается, действия контекстны, вложения и message taskUrl видны', async (t) => {
   const skippedDecision = {
     decisionId: 'decision_0000000000000002', version: 2, status: 'skipped',

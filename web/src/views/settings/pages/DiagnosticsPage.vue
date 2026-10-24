@@ -2,6 +2,7 @@
   <div class="settings-diagnostics">
     <SettingsScope />
     <p v-if="error" role="alert">{{ error }}</p>
+    <UiLoadingState v-if="!loaded && !error" :label="t('settings.loadingParameters')" variant="inline" />
     <SettingsField
       v-for="field in fields"
       :key="field.key"
@@ -36,7 +37,10 @@
 import { t, uiLocale } from '../../../ui.ts';
 
 import { computed, ref, watch } from 'vue';
-import { UiSelect } from '../../../ui.ts';
+import {
+  UiSelect,
+  UiLoadingState,
+} from '../../../ui.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import { FACTORY_DEBUG_LEVELS } from '../../../shared/factoryDebug.ts';
 import { getWebLogRuntime } from '../../../shared/webLogRuntime.ts';

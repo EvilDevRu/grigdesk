@@ -138,7 +138,7 @@
         <summary>Исполнитель и модель — из настроек проекта</summary>
         <div class="ui-workspace-section__body">
           <p class="route-node-help">Эти параметры задаются в проекте и здесь доступны только для просмотра.</p>
-          <p v-if="policyLoading" class="muted">Читаю политику запуска…</p>
+          <UiLoadingState v-if="policyLoading" label="Читаю политику запуска…" variant="document" />
           <p v-else-if="!effectivePolicy" class="muted">Политика запуска недоступна.</p>
           <template v-else>
             <p>Основной исполнитель: {{ effectivePolicy.primary || 'не указан' }}</p>
@@ -170,7 +170,14 @@ import type { NewExecutor, RouteCommandIssue, RouteCommandResult,
   RouteCommandScope } from './routeCommands.ts';
 import { changeNodeExecutor, renameNode, setNodeLabel, setNodeDescription,
   setNodeRunKey, removeEmitReference } from './routeCommands.ts';
-import { UiButton, UiField, UiInput, UiPaneHeader, UiSelect } from '../../ui';
+import {
+  UiButton,
+  UiField,
+  UiInput,
+  UiPaneHeader,
+  UiSelect,
+  UiLoadingState,
+} from '../../ui';
 import { routesApi } from '../../shared/routesApi.ts';
 import RoutePolicyFields from './RoutePolicyFields.vue';
 import RouteRetryFields from './RouteRetryFields.vue';

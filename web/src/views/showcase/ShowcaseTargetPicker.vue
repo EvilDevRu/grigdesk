@@ -1,12 +1,7 @@
 <template>
   <div class="picker">
-    <div v-if="!loaded && (loading || !error)" class="picker__state" role="status">
-      <UiSpinner decorative />
-      <div class="picker__state-copy">
-        <strong>Ищем доступные стенды…</strong>
-        <p>Постоянные стенды и поднятые песочницы появятся здесь сами.</p>
-      </div>
-    </div>
+    <UiLoadingState v-if="!loaded && (loading || !error)" label="Ищем доступные стенды…"
+      description="Постоянные стенды и поднятые песочницы появятся здесь сами." />
 
     <div v-else-if="!loaded" class="picker__state" role="status">
       <span class="picker__mark" aria-hidden="true">!</span>
@@ -140,7 +135,12 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import { UiActionLink, UiButton, UiSpinner, vTooltip } from '../../ui';
+import {
+  UiActionLink,
+  UiButton,
+  vTooltip,
+  UiLoadingState,
+} from '../../ui';
 import { sandboxUrl } from '../../shared/sandbox.ts';
 import type {
   ShowcaseOverview,

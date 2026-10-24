@@ -272,6 +272,10 @@
         value-text="3 из 7"
       />
       <UiProgress indeterminate size="line" label="Пример тонкой линии под шапкой" />
+      <UiLoadingState label="Загрузка списка…" />
+      <UiLoadingState label="Загрузка карточек…" variant="cards" />
+      <UiLoadingState label="Открываю документ…" variant="document" />
+      <UiLoadingState label="Обновляю сведения…" variant="inline" />
       <UiInlineMessage tone="warning">
         Busy региона не блокирует вложенные controls автоматически.
       </UiInlineMessage>
@@ -353,6 +357,7 @@ import {
   UiFilePicker,
   UiIconButton,
   UiInlineMessage,
+  UiLoadingState,
   UiInput,
   UiNumberField,
   UiPasswordInput,

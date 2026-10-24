@@ -81,7 +81,7 @@
         </p>
       </section>
 
-      <div v-if="loading" class="state-card"><UiSpinner decorative /> Загружаю очередь…</div>
+      <UiLoadingState v-if="loading && !payload.items.length" label="Загружаю очередь…" variant="cards" />
       <template v-else-if="payload.items.length">
         <section class="queue-head" aria-labelledby="inbox-items-title">
           <h2 id="inbox-items-title">Обращения</h2>
@@ -250,6 +250,7 @@ import {
   UiTabs,
   confirmDialog,
   promptDialog,
+  UiLoadingState,
 } from '../ui';
 import { openSettings } from '../shared/settingsNavigation.ts';
 import { usePluginsStore } from '../stores/plugins.ts';

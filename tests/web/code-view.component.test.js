@@ -67,6 +67,7 @@ async function compileCodeView() {
         export const router = globalThis.__codeViewRouter;
       `,
       '../../ui': (`
+        export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
         export { default as UiButton } from './src/components/primitives/UiButton.vue';
         export { default as UiIconButton } from './src/components/primitives/UiIconButton.vue';
         export { default as UiInlineMessage } from './src/components/feedback/UiInlineMessage.vue';

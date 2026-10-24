@@ -1,6 +1,6 @@
 <template>
   <section class="document-panel">
-    <div v-if="loading" class="state"><UiSpinner decorative /> Открываю документ…</div>
+    <UiLoadingState v-if="loading" label="Открываю документ…" variant="document" />
     <div v-else-if="error" class="state error">
       <b>Документ не открыт</b>
       <span>{{ error }}</span>
@@ -39,7 +39,10 @@ import { api, failureText } from '../../shared/apiClient.ts';
 import { parseDocumentFile, type DocumentFile } from './contracts.ts';
 import { mdToHtml } from '../../shared/md.ts';
 import { documentRefAssetHref, documentRefRouteHref } from './links.ts';
-import { UiButton, UiSpinner } from '../../ui';
+import {
+  UiButton,
+  UiLoadingState,
+} from '../../ui';
 
 const props = defineProps({
   source: { type: String, default: '' },

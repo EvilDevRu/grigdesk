@@ -138,7 +138,7 @@
                 Повторить
               </UiButton>
             </template>
-            <p v-else role="status">Загрузка проекта…</p>
+            <UiLoadingState v-else label="Загрузка проекта…" variant="document" />
           </div>
         </div>
       </section>
@@ -173,7 +173,14 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
 
 import {
-  UiButton, UiInlineMessage, UiPaneHeader, confirmDialog, vTooltip, t, resolveUiText,
+  UiButton,
+  UiInlineMessage,
+  UiPaneHeader,
+  confirmDialog,
+  vTooltip,
+  t,
+  resolveUiText,
+  UiLoadingState,
 } from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useDockViewport } from '../shared/tools/viewport.ts';
