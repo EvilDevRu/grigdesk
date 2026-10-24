@@ -1,7 +1,22 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { test } from 'node:test';
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { installUiBrowser } from './helpers/ui-components.js';
+
+/*
+ * Возвращает тело единственного CSS-правила по точному селектору.
+ * Пустая строка значит, что правила нет, и проверка размера падает с понятной причиной.
+ */
+function cssRuleBody(source, selector) {
+  const start = source.indexOf(`${selector} {`);
+
+  if (start < 0) {
+    return '';
+  }
+
+  return source.slice(start, source.indexOf('}', start));
+}
 
 test('UiButton безопасно задаёт type и блокирует loading/ariaDisabled', async (t) => {
   const browser = await installUiBrowser(t);
@@ -32,6 +47,33 @@ test('UiButton безопасно задаёт type и блокирует loadin
   await wrapper.trigger('click');
   assert.equal(clicks, 1);
   wrapper.unmount();
+});
+
+test('UiButton выбирает обычный или компактный размер параметром, а не местом', async (t) => {
+  const browser = await installUiBrowser(t);
+  const [{ mount }, UiButton] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/components/primitives/UiButton.vue')),
+  ]);
+  const wrapper = mount(UiButton, {
+    attachTo: browser.document.querySelector('#mount'),
+    slots: { default: 'Продолжить' },
+  });
+
+  assert.equal(wrapper.attributes('data-size'), 'default', 'без параметра кнопка обычная');
+
+  await wrapper.setProps({ size: 'compact' });
+  assert.equal(wrapper.attributes('data-size'), 'compact');
+
+  await wrapper.setProps({ size: 'huge' });
+  assert.equal(wrapper.attributes('data-size'), 'default', 'неизвестный размер не ломает вид');
+  wrapper.unmount();
+
+  const actions = fs.readFileSync(webFile('src/styles/components/actions.css'), 'utf8');
+  const compact = cssRuleBody(actions, ".ui-button[data-size='compact']");
+
+  assert.match(compact, /\bheight: var\(--toolbar-control-h\);/, 'компактная высота — общий токен 28/44 px');
+  assert.match(compact, /min-height: var\(--toolbar-control-h\);/);
 });
 
 test('UiActionLink остаётся ссылкой и guard снимает переход', async (t) => {

@@ -4,6 +4,8 @@ import { windowKeyPath } from '../shared/desktop/windowKeyPath.ts';
 import type { CliArgs } from './args.ts';
 import type { Settings } from './commands.ts';
 import { renderTerminalQr } from './terminalQr.ts';
+import { plainOutput } from './output.ts';
+import type { CliOutput } from './output.ts';
 
 interface PairingResponse {
   text: string;
@@ -18,7 +20,9 @@ interface DeviceList {
  * Управление устройствами обменивает локальный ключ окна на короткую сессию.
  * CLI-токен и секреты устройств не попадают ни в запросы команды, ни в её вывод.
  */
-export async function deviceCommand(args: CliArgs, settings: Settings): Promise<number> {
+export async function deviceCommand(
+  args: CliArgs, settings: Settings, output: CliOutput = plainOutput,
+): Promise<number> {
   const keyPath = windowKeyPath({
     env: {
       ...process.env,
@@ -73,18 +77,24 @@ export async function deviceCommand(args: CliArgs, settings: Settings): Promise<
   }
 
   if (args.json) {
-    process.stdout.write(JSON.stringify(body) + '\n');
+    output.write(JSON.stringify(body) + '\n');
+  } else if (args.deviceAction === 'add' && output.pairing) {
+    output.pairing(body);
+  } else if (args.deviceAction === 'list' && output.devices) {
+    output.devices(body.devices);
   } else if (args.deviceAction === 'add') {
     const color = Boolean(process.stdout.isTTY && !process.env.NO_COLOR);
 
-    process.stdout.write(renderTerminalQr(body.qr.rows, color));
-    process.stdout.write(`${body.text}\nДействует 10 минут, один раз\n`);
+    output.write(renderTerminalQr(body.qr.rows, color));
+    output.write(`${body.text}\nДействует 10 минут, один раз\n`);
   } else if (args.deviceAction === 'list') {
     for (const device of body.devices) {
-      console.log(`${device.id}\t${device.name}\t${device.scope}${device.revokedAt ? '\tотозвано' : ''}`);
+      const suffix = device.revokedAt ? '\tотозвано' : '';
+
+      output.write(`${device.id}\t${device.name}\t${device.scope}${suffix}\n`);
     }
   } else {
-    console.log('Устройство отозвано.');
+    output.write('Устройство отозвано.\n');
   }
 
   return 0;

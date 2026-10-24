@@ -3,7 +3,7 @@
     <!-- Плашка обязана согласоваться с узлом: зелёный разбираемый узел под красным
          «конвейер встал» противоречил бы сам себе, и верили бы надписи. -->
     <div
-      v-if="stallView"
+      v-if="showStopBanner && stallView"
       class="graph-stop"
       :class="{ arb: arbitrating }"
       :role="arbitrating ? 'status' : 'alert'"
@@ -332,6 +332,7 @@ const props = withDefaults(
   defineProps<{
     graph: FactoryGraphData;
     loopsOn?: boolean;
+    showStopBanner?: boolean;
     reference?: boolean;
     interactive?: boolean;
     // Идущий разбор — не свойство графа, а отдельный живой факт (`arbitrating` задачи в
@@ -348,6 +349,7 @@ const props = withDefaults(
   }>(),
   {
     loopsOn: false,
+    showStopBanner: true,
     reference: false,
     interactive: false,
     arbitrating: null,

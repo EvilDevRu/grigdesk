@@ -20,6 +20,18 @@ const t = localeTranslator(uiLocale);
 const registryReads = new WeakMap<object, Promise<void>>();
 const registryStatuses = new WeakMap<object, { ok: boolean; message?: string }>();
 
+type ProviderCliUpdate = (providerId: string) => Promise<void>;
+
+let providerCliUpdate: ProviderCliUpdate | null = null;
+
+/**
+ * Окно установки подключает действие без обратного импорта UI из реестра.
+ * Обработчик выбирает store текущей Pinia при вызове, не запоминает чужую сессию.
+ */
+export function connectProviderCliUpdate(action: ProviderCliUpdate): void {
+  providerCliUpdate = action;
+}
+
 type RegistryProvider = Omit<ProviderEntry, 'settings'> & {
   settings?: Array<Omit<ProviderSettingEntry, 'value'> & { value: unknown }>;
 };
@@ -378,64 +390,11 @@ export const useProvidersStore = defineStore('providers', {
       }
     },
     /**
-     * Установка новой версии CLI исполнителя. Живёт в сторе, а не во вьюхе: жмут и в
-     * плашке настроек, и во всплывашке топбара, а ход у операции один — пока npm ставит,
-     * второй кнопке нельзя показывать «можно жать». Версия CLI задаёт набор моделей,
-     * поэтому по итогу реестр перечитывается принудительно.
+     * Обе поверхности запускают одну подтверждённую серверную операцию.
+     * Занятость и итог приходят из её снимка, а не из длительности HTTP-запроса.
      */
-    async updateCli(providerId: string) {
-      if (this.updating) {
-        return { ok: false, error: t('settings.cliUpdateBusy') };
-      }
-
-      this.updating = providerId;
-      this.updateResults = { ...this.updateResults, [providerId]: null };
-
-      let result;
-
-      try {
-        const r = await api.post(`/api/providers/${encodeURIComponent(providerId)}/update`, {});
-
-
-        if (!isRecord(r)) {
-          throw new Error(t('settings.providerNoResponse'));
-        }
-
-        const before = typeof r.before === 'string' ? r.before : '';
-        const after = typeof r.after === 'string' ? r.after : '';
-        const output = typeof r.output === 'string' ? r.output : '';
-
-        result = r.changed
-          ? {
-            type: 'ok',
-            get text() {
-              return t('settings.providerCliUpdated', { before: before || '?', after });
-            },
-            changed: true,
-          }
-          : {
-            type: r.ok ? 'ok' : 'err',
-            get text() {
-              return r.ok
-                ? t('settings.providerCliCurrent', { version: after || before })
-                : t('settings.providerCliFailure', { reason: output.slice(-300) });
-            },
-            changed: false,
-          };
-        this.updateResults = { ...this.updateResults, [providerId]: result };
-        await this.load(true);
-      } catch (e) {
-        result = {
-          type: 'err',
-          text: failureText(e),
-          changed: false,
-        };
-        this.updateResults = { ...this.updateResults, [providerId]: result };
-      } finally {
-        this.updating = '';
-      }
-
-      return result;
+    async updateCli(providerId: string): Promise<void> {
+      await providerCliUpdate?.(providerId);
     },
     /**
      * Своя настройка исполнителя (тумблер в его плашке). Значение применяем сразу,

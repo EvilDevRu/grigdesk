@@ -177,3 +177,61 @@ test('остановка этапа GLM показывает отказ wrapper-
   await writeFile(events, `${JSON.stringify({ type: 'turn.failed', error: { message: capacity } })}\n`);
   assert.doesNotMatch((await f.adapter.getTaskDetail('49')).stall.title, /перегружена/);
 });
+
+test('provider presentation сохраняет причину модель и заходы в summary и graph', async (t) => {
+  const f = await fixture(t);
+  const detail = await f.adapter.getTaskDetail('49');
+  const graph = await f.adapter.getTaskGraph('49');
+
+  for (const stall of [detail.stall, graph.stall, graph.nodeMeta.build.stall]) {
+    assert.ok(stall.presentation, 'подтверждённая перегрузка не передана в краткий вид');
+    assert.equal(stall.presentation.attempts, 2);
+    assert.equal(stall.presentation.model, 'example-sol');
+    assert.match(stall.presentation.lastFailure, /модель перегружена/);
+    assert.doesNotMatch(stall.presentation.lastFailure, /example-sol/);
+    assert.match(JSON.stringify(stall.presentation.details), /перегруж|провайдер/i);
+    assert.doesNotMatch(stall.presentation.details.action, /подними.*врем|увелич.*врем/i);
+    assert.doesNotMatch(stall.presentation.details.cause || '', /таймаут|лимит времени|не успел/i);
+  }
+
+  assert.deepEqual(graph.stall.presentation, detail.stall.presentation);
+  assert.deepEqual(graph.nodeMeta.build.stall.presentation, detail.stall.presentation);
+});
+
+for (const [name, message, expected] of [
+  ['лимит', 'Rate limit reached. Please try again later.', /частот|лимит/i],
+  ['неизвестный подтверждённый отказ', 'Provider E_NEW: unknown field', /Provider E_NEW: unknown field/],
+]) {
+  test(`provider presentation уточняется: ${name}`, async (t) => {
+    const f = await fixture(t);
+
+    await writeFile(path.join(f.runDir, 'events.jsonl'), JSON.stringify({
+      type: 'turn.failed', error: { message },
+    }));
+
+    const detail = await f.adapter.getTaskDetail('49');
+    const graph = await f.adapter.getTaskGraph('49');
+
+    for (const stall of [detail.stall, graph.stall]) {
+      assert.ok(stall.presentation, 'нет краткого представления отказа');
+      assert.match(stall.presentation.lastFailure, expected);
+      assert.equal(stall.presentation.attempts, 2);
+      assert.equal(stall.presentation.model, 'example-sol');
+      assert.doesNotMatch(stall.presentation.lastFailure, /example-sol/);
+    }
+  });
+}
+
+test('без подходящего evidence presentation не выдумывает модель и причину провайдера', async (t) => {
+  const f = await fixture(t);
+
+  await writeFile(path.join(f.runDir, 'meta.env'), f.meta.replace('EPOCH=3', 'EPOCH=2'));
+
+  const stall = (await f.adapter.getTaskDetail('49')).stall;
+
+  assert.ok(stall.presentation, 'общая остановка тоже имеет краткое представление');
+  assert.equal(stall.presentation.attempts, 2);
+  assert.equal(stall.presentation.lastFailure, 'причина не названа');
+  assert.ok(!stall.presentation.model);
+  assert.doesNotMatch(JSON.stringify(stall.presentation), /перегружена|example-sol/);
+});

@@ -54,6 +54,10 @@ test('UiDialog централизует workspace layer, edge-to-edge body и Es
   assert.equal(browser.document.body.classList.contains('ui-modal-scroll-lock'), true);
   assert.equal(hasOpenModal(), true);
 
+  await wrapper.setProps({ mobileSheet: true });
+  assert.equal(overlay.hasAttribute('data-mobile-sheet'), true);
+  assert.equal(overlay.hasAttribute('data-mobile-fullscreen'), false);
+
   const escape = new browser.KeyboardEvent('keydown', {
     key: 'Escape',
     bubbles: true,

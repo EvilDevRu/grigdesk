@@ -7,7 +7,8 @@
         class="ui-dialog-overlay"
         data-ui-modal-root=""
         :data-size="normalizedSize"
-        :data-mobile-fullscreen="mobileFullscreen ? '' : undefined"
+        :data-mobile-fullscreen="mobileFullscreen && !mobileSheet ? '' : undefined"
+        :data-mobile-sheet="mobileSheet ? '' : undefined"
         :data-fade-only="fadeOnly ? '' : undefined"
         :data-busy="busy ? '' : undefined"
         :data-ui-layer="layerProps['data-ui-layer']"
@@ -107,6 +108,7 @@ interface Props {
   initialFocus?: UiInitialFocus;
   returnFocus?: boolean | UiInitialFocus;
   mobileFullscreen?: boolean;
+  mobileSheet?: boolean;
   fadeOnly?: boolean;
   bodyInset?: boolean;
 }
@@ -124,6 +126,7 @@ const props = withDefaults(defineProps<Props>(), {
   initialFocus: undefined,
   returnFocus: true,
   mobileFullscreen: true,
+  mobileSheet: false,
   fadeOnly: false,
   bodyInset: true,
 });
@@ -148,7 +151,7 @@ interface DialogSlotProps {
 }
 
 const VALID_ROLES = new Set<UiDialogRole>(['dialog', 'alertdialog']);
-const VALID_SIZES = new Set<UiDialogSize>(['compact', 'content', 'workspace']);
+const VALID_SIZES = new Set<UiDialogSize>(['compact', 'content', 'workspace', 'media']);
 const normalizedRole = computed<UiDialogRole>(() =>
   VALID_ROLES.has(props.role) ? props.role : 'dialog',
 );

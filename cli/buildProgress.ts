@@ -13,7 +13,9 @@ import type { BuildProcess } from './buildProcesses.ts';
 import { buildStepIds, estimateBuildProgress } from './buildState.ts';
 import type { BuildStep } from './buildState.ts';
 import { cliTranslator } from './i18n.ts';
-import { TerminalSession, terminalText } from './terminal.ts';
+import { showScreen } from './screen.ts';
+import type { ScreenLine } from './screen.ts';
+import { TerminalSession } from './terminal.ts';
 
 interface ObservedStep extends BuildStep {
   startedAt?: number;
@@ -27,25 +29,12 @@ function duration(milliseconds: number): string {
 }
 
 /**
- * Длинные пути остаются целиком видны даже в узком терминале.
- * Управляющие последовательности удаляются до разделения на экранные строки.
- */
-function wrapped(text: string, columns: number): string[] {
-  const characters = [...terminalText(text, Number.MAX_SAFE_INTEGER)];
-  const lines = [];
-
-  for (let index = 0; index < characters.length; index += columns) {
-    lines.push(characters.slice(index, index + columns).join(''));
-  }
-
-  return lines;
-}
-
-/**
  * Контроллер запускает прежнюю оболочку, читая отдельный канал фактических стадий.
  * Он владеет только своей группой и доказанными потомками, не трогая службы или окно.
  */
-async function observeBuild(root: string, variant: string, session: TerminalSession): Promise<number> {
+async function observeBuild(
+  root: string, variant: string, session: TerminalSession, returnToMenu: boolean,
+): Promise<number> {
   const { t } = cliTranslator();
   const input = { env: process.env, home: process.env.HOME || os.homedir() };
   let log: Awaited<ReturnType<typeof openBuildLog>>;
@@ -53,7 +42,12 @@ async function observeBuild(root: string, variant: string, session: TerminalSess
   try {
     log = await openBuildLog(input);
   } catch (error) {
-    session.draw(wrapped(t('logError', { reason: (error as Error).message }), session.columns));
+    showScreen(session, {
+      title: t('build'),
+      state: { text: t('screens.failed', { code: 1 }), tone: 'error' },
+      lines: [t('logError', { reason: (error as Error).message })],
+      full: true,
+    });
 
     return 1;
   }
@@ -118,27 +112,48 @@ async function observeBuild(root: string, variant: string, session: TerminalSess
 
     previousPercent = estimate.percent;
 
-    const lines = [`◇ ${t('build')}: ${t(variant === 'server' ? 'serverOnly' : variant)}`];
+    const lines: ScreenLine[] = [];
 
     for (const step of steps) {
       const marker = step.status === 'done' ? '✓' : step.status === 'failed' ? '✗'
         : step.status === 'running' ? ['◐', '◓', '◑', '◒'][frame % 4] : '○';
 
-      lines.push(`│ ${marker} ${t(`steps.${step.id}`)}  ${duration(step.elapsedMs)}`);
+      lines.push({
+        text: `${marker} ${t(`steps.${step.id}`)}  ${duration(step.elapsedMs)}`,
+        tone: step.status === 'done' ? 'success' : step.status === 'failed' ? 'error'
+          : step.status === 'running' ? 'accent' : 'muted',
+      });
     }
 
     if (!steps.some((step) => step.status !== 'pending')) {
-      lines.push(`│ ◒ ${t('preparing')}`);
+      lines.push({ text: `◒ ${t('preparing')}`, tone: 'accent' });
     }
 
     const width = Math.max(4, Math.min(30, session.columns - 12));
     const filled = Math.floor(width * estimate.percent / 100);
 
-    lines.push(`│ ${'█'.repeat(filled)}${'░'.repeat(width - filled)} ${Math.floor(estimate.percent)}%`);
-    lines.push(`│ ${duration(elapsed)} / ≈ ${duration(elapsed + estimate.remainingMs)}`);
-    lines.push(`│ › ${lastLine}`, '', ...wrapped(t('log', { path: log.path }), session.columns));
+    lines.push({ text: '' });
+    lines.push({
+      text: `${'█'.repeat(filled)}${'░'.repeat(width - filled)} ${Math.floor(estimate.percent)}%`,
+      tone: succeeded ? 'success' : 'accent',
+    });
+    lines.push({
+      text: `${duration(elapsed)} / ≈ ${duration(elapsed + estimate.remainingMs)}`,
+      tone: 'muted',
+    });
+    lines.push({ text: `› ${lastLine}`, tone: 'muted' });
+    lines.push({ text: '' }, { text: t('log', { path: log.path }), tone: 'muted' });
     frame++;
-    session.draw(lines, () => render(succeeded));
+
+    showScreen(session, {
+      title: `${t('build')}: ${t(variant === 'server' ? 'serverOnly' : variant)}`,
+      state: {
+        text: t(succeeded ? 'screens.done' : 'screens.running'),
+        tone: succeeded ? 'success' : 'accent',
+      },
+      lines,
+      footer: t('screens.cancel'),
+    });
   }
 
   /**
@@ -301,15 +316,25 @@ async function observeBuild(root: string, variant: string, session: TerminalSess
   if (result !== 0) {
     const step = steps.find((item) => item.status === 'failed' || item.status === 'running');
     const title = step ? t(`steps.${step.id}`) : t('preparing');
-    const lines = [`✗ ${t('failed', { step: title, code: result })}`,
-      ...tail, ...failure ? [failure] : [], t('log', { path: log.path })];
 
-    session.draw(lines.flatMap((line) => wrapped(line, session.columns)));
+    showScreen(session, {
+      title: `${t('build')}: ${t(variant === 'server' ? 'serverOnly' : variant)}`,
+      state: { text: `✗ ${t('failed', { step: title, code: result })}`, tone: 'error' },
+      lines: [
+        ...tail,
+        ...failure ? [failure] : [],
+        '',
+        { text: t('log', { path: log.path }), tone: 'muted' },
+      ],
+      full: true,
+    });
 
     return result;
   }
 
   render(true);
+
+  const warnings: ScreenLine[] = [];
 
   try {
     await saveBuildTimings({
@@ -318,8 +343,7 @@ async function observeBuild(root: string, variant: string, session: TerminalSess
       outcome: 'success',
     });
   } catch (error) {
-    session.output.write(wrapped(t('historyError', { reason: (error as Error).message }),
-      session.columns).join('\n') + '\n');
+    warnings.push({ text: t('historyError', { reason: (error as Error).message }), tone: 'warning' });
   }
 
   const summary = variant === 'bundle' ? 'summaryBundle'
@@ -336,7 +360,20 @@ async function observeBuild(root: string, variant: string, session: TerminalSess
     lines.push(t(variant === 'web' ? 'webHint' : 'reopen'));
   }
 
-  session.output.write(lines.flatMap((line) => wrapped(line, session.columns)).join('\n') + '\n');
+  showScreen(session, {
+    title: `${t('build')}: ${t(variant === 'server' ? 'serverOnly' : variant)}`,
+    state: { text: t('screens.done'), tone: 'success' },
+    lines: [
+      { text: '█'.repeat(30) + ' 100%', tone: 'success' },
+      '',
+      ...lines,
+      '',
+      { text: t('log', { path: log.path }), tone: 'muted' },
+      ...warnings,
+    ],
+    footer: returnToMenu ? t('continue') : undefined,
+    full: true,
+  });
 
   return 0;
 }
@@ -353,7 +390,7 @@ export async function runBuildProgress(
     session.suspend();
 
     try {
-      return await observeBuild(root, variant, session);
+      return await observeBuild(root, variant, session, Boolean(parent));
     } finally {
       session.resume();
     }

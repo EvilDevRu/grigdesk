@@ -347,6 +347,15 @@
   padding: 0 13px;
 }
 
+/* Компактный размер consumer выбирает явно, без чужого data-context: геометрия toolbar.
+   На touch токен поднимается до 44 px, поэтому площадка нажатия не сжимается. */
+.ui-button[data-size='compact'] {
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+  padding: 0 7px;
+  font-size: 12px;
+}
+
 .ui-button:hover:not(:disabled):not([aria-disabled='true']),
 .ui-action-link:hover:not([aria-disabled='true']),
 .ui-icon-button:hover:not(:disabled):not([aria-disabled='true']),
@@ -501,6 +510,19 @@
   text-overflow: ellipsis;
 }
 
+/* Длинное действие на узком экране растёт по тексту и сохраняет сенсорный минимум. */
+.ui-button--wrap {
+  height: auto;
+  padding-block: 10px;
+  white-space: normal;
+  line-height: 1.5;
+}
+
+.ui-button--wrap .ui-button__label {
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
 .ui-button__label > svg {
   flex: none;
   width: 16px;
@@ -571,6 +593,24 @@
   --ui-action-background: var(--ui-action-soft);
   --ui-action-border: color-mix(in srgb, var(--ui-action-tone) 62%, var(--control-border));
   --ui-action-color: var(--ui-action-tone);
+}
+
+/* Ссылочный вариант сохраняет геометрию и фокус действия, меняя только цвет знака.
+   Наведение и открытая панель не возвращают ему рамку или фоновую плашку. */
+:is(.ui-button, .ui-action-link, .ui-icon-button, .ui-command-button,
+    .ui-toggle-button, .ui-disclosure-button)[data-variant='link'] {
+  --ui-action-background: transparent;
+  --ui-action-background-hover: transparent;
+  --ui-action-border: transparent;
+  --ui-action-color: var(--ui-action-tone);
+}
+
+:is(
+  .ui-button, .ui-action-link, .ui-icon-button,
+  .ui-command-button, .ui-toggle-button, .ui-disclosure-button
+)[data-variant='link']:hover:not(:disabled):not([aria-disabled='true']) {
+  border-color: transparent;
+  color: color-mix(in srgb, var(--ui-action-tone) 60%, var(--ink));
 }
 
 .ui-icon-button {
@@ -706,38 +746,13 @@
   color: var(--ink);
 }
 
-.ui-icon-button[data-context='tool-rail-item'] {
-  width: calc(var(--app-rail-w) - 6px);
-  height: calc(var(--app-rail-w) - 6px);
-  min-height: calc(var(--app-rail-w) - 6px);
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--ink-mid);
-}
-
-.ui-icon-button[data-context='tool-rail-item']:hover {
-  background: var(--surface);
-  color: var(--ink);
-}
-
-.ui-icon-button[data-context='tool-rail-item'].active {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
-}
-
-.ui-icon-button[data-context='tool-rail-item']:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
 .ui-icon-button[data-context='tool-rail-item'] svg {
   width: 16px;
   height: 16px;
 }
 
-/* Рейка разделов плагина «Код» — та же плитка, что у рейки инструментов, но активный
-   раздел выражен pressed-состоянием самой кнопки, а не внешним классом. */
+/* Внутренняя рейка разделов плагина «Код» сохраняет собственную геометрию плиток.
+   Активный раздел выражен pressed-состоянием самой кнопки, а не внешним классом. */
 .ui-icon-button[data-context='code-rail-item'] {
   width: 34px;
   height: 34px;
@@ -1058,6 +1073,7 @@
   min-height: 28px;
 }
 
+.ui-icon-button[data-context='topbar-action'] svg,
 .ui-icon-button[data-context='alert-history'] svg {
   width: 16px;
   height: 16px;
@@ -1468,7 +1484,8 @@
   color: var(--accent);
 }
 
-.ui-button[data-role='pipeline-compact-action'] {
+.ui-button[data-role='pipeline-compact-action'],
+.ui-button[data-role='pipeline-stall-answer-open'] {
   height: 30px;
   min-height: 30px;
   padding: 0 10px;
@@ -2132,30 +2149,54 @@
   min-height: var(--control-height);
 }
 
-/* Общий skin навигационных ссылок и pressable оболочки. Раскладка остаётся в shell. */
-.shell [data-ui-shell-nav] {
-  width: var(--app-nav-row-h);
+/* Подложка иконки заполняет всю доступную ширину боковой рейки без скругления.
+   Обе панели сохраняют прежние плоские цвета активного пункта и наведения. */
+.shell [data-ui-shell-nav],
+.ui-icon-button[data-context='tool-rail-item'] {
+  width: 100%;
   height: var(--app-nav-row-h);
   min-height: var(--app-nav-row-h);
   padding: 0;
-  border: none;
-  border-radius: 9px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--ink-mid);
-  background: none;
-  font-size: 14px;
-  text-align: left;
-  cursor: pointer;
+  box-shadow: none;
   transition: background .12s, color .12s;
 }
 
-.shell [data-ui-shell-nav]:hover {
+/* Общий skin навигационных ссылок и pressable оболочки. Раскладка остаётся в shell. */
+.shell [data-ui-shell-nav] {
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Нижние вкладки телефона используют общий skin рейки, но вмещают подпись.
+   Высота совпадает со строкой сетки оболочки и не зависит от типа указателя. */
+@media (max-width: 600px) {
+  .shell .phone-nav [data-ui-shell-nav] {
+    height: 60px;
+    min-height: 60px;
+  }
+}
+
+.shell [data-ui-shell-nav]:hover,
+.ui-icon-button[data-context='tool-rail-item']:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--surface);
   color: var(--ink);
 }
 
-.shell [data-ui-shell-nav].active {
+.shell [data-ui-shell-nav].active,
+.ui-icon-button[data-context='tool-rail-item'].active:not(:disabled):not([aria-disabled='true']) {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
+}
+
+.shell [data-ui-shell-nav]:focus-visible,
+.ui-icon-button[data-context='tool-rail-item']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 /* Метрики и сеть топбара используют настоящие клавиатурные кнопки.
@@ -2201,8 +2242,44 @@
   line-height: 1;
 }
 
-.ui-pressable[data-context='topbar-network'] .ip {
-  letter-spacing: .01em;
+/* Сводка узкого окна показывает подписанные строки с полной площадкой нажатия.
+   Число исполнителей увеличивает высоту панели, сохраняя ширину верхней полосы. */
+.topbar-status-label {
+  display: none;
+}
+
+.shell-status-panel .topbar-status-label {
+  display: block;
+  white-space: normal;
+}
+
+.shell-status-panel .ui-button {
+  width: 100%;
+  min-height: 44px;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.shell-status-panel .ui-pressable:is([data-context='provider-status'], [data-context='topbar-network']) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+}
+
+.shell-status-panel .ui-pressable[data-context='topbar-metrics'] {
+  position: relative;
+  justify-content: center;
+  min-height: 44px;
+}
+
+.shell-status-panel .ui-pressable[data-context='topbar-metrics'] > span.resources-alarm {
+  top: 4px;
+  right: 4px;
 }
 
 /* Полное название задачи остаётся доступным в две строки узкой карточки. */
@@ -2253,4 +2330,38 @@
 .ui-button[data-context='workspace-catalog-row'][aria-pressed='true'] {
   background: color-mix(in srgb, var(--accent) 13%, var(--sidebar));
   box-shadow: inset 2px 0 var(--accent);
+}
+
+/* Строка машины и её меню наследуют общую защиту действий и сенсорную геометрию. */
+.ui-pressable[data-context='machine-choice'] {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 84px;
+  padding: 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.ui-pressable[data-context='machine-choice']:hover {
+  background: var(--surface-2);
+}
+
+.ui-button[data-context='machine-menu-action'] {
+  min-height: 48px;
+  justify-content: flex-start;
+}
+
+.ui-button[data-context='machine-menu-action'] .ui-button__content {
+  justify-content: flex-start;
+}
+
+.ui-button[data-context='machine-connection-details'] {
+  min-height: 48px;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
 }

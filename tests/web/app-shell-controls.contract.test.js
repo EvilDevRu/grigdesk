@@ -29,10 +29,14 @@ test('AppShell использует public UI controls и общую повер�
   assert.match(publicUiImport[1], /\bUiIconButton\b/u);
   assert.match(publicUiImport[1], /\bUiPressable\b/u);
   // Метрики и сеть тоже открываются с клавиатуры через общий pressable.
-  assert.equal([...source.matchAll(/<UiPressable\b/gu)].length, 4);
-  assert.equal([...source.matchAll(/<UiButton\b/gu)].length, 1);
-  assert.doesNotMatch(source, /instbar|canInstall|installDismissed/u);
-  assert.equal([...source.matchAll(/<UiIconButton\b/gu)].length, 4);
+  assert.equal([...source.matchAll(/<UiPressable\b/gu)].length, 5);
+  assert.equal([...source.matchAll(/<UiButton\b/gu)].length, 2);
+  assert.doesNotMatch(source, /instbar|installDismissed/u);
+
+  const providerSection = /<span v-if="runtimeProviders.length"[\s\S]*?class="netbox mono"/u;
+  const outsideProviders = source.replace(providerSection, '');
+
+  assert.equal([...outsideProviders.matchAll(/<UiIconButton\b/gu)].length, 1);
   assert.doesNotMatch(source, /<button\b/u);
 
   const { page } = await shellContractBrowser(t);
@@ -173,10 +177,8 @@ test('всплывашка исполнителя короткая и сама �
   assert.doesNotMatch(source, /@pointerdown="prov\.loadUsage\(\)"/u);
   // Установку новой версии начинают из самой всплывашки: раньше точка о ней только
   // сообщала. Ход один на GrigDesk, поэтому кнопка ждёт чужую установку тоже.
-  assert.match(popover, /:disabled="!!prov\.updating"/u);
-  assert.match(popover, /:loading="prov\.updating === p\.id"/u);
-  assert.match(popover, /@click="prov\.updateCli\(p\.id\)"/u);
-  assert.match(popover, /v-if="canUpdateCli\(p\)"/u);
+  assert.match(source, /<ProviderInstallDialog\b/u);
+  assert.match(source, /useProviderInstallStore/u);
   assert.doesNotMatch(source, /api\.post\(`\/api\/providers\/\$\{[^}]*\}\/update`/u);
   assert.match(
     actions,
@@ -211,8 +213,8 @@ test('TIP-MIG-01: каждая иконка постоянной рейки им
   }
 
   visit(descriptor.template.ast);
-  // Четыре навигационные цели сохраняют доступные имена без видимых подписей.
-  assert.equal(targets.length, 4);
+  // Обе раскладки сохраняют доступные имена: четыре цели рейки и две нижней навигации.
+  assert.equal(targets.length, 6);
 
   for (const node of targets) {
     const named = node.props.some((prop) => (prop.type === 6 && prop.name === 'aria-label')

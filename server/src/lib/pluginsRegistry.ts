@@ -17,6 +17,7 @@
 //   pluginSettings: { <id>: {key: value} }
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { selectPluginServerEntry } from './pluginServerEntry.ts';
 import { normalizePluginCategory } from '../../../shared/plugins/pluginsContracts.ts';
 import type {
   PluginNav,
@@ -51,6 +52,8 @@ export interface PluginManifest {
   setup?: PluginSetup | null;
   dir?: string;
   hasServer?: boolean;
+  serverEntry?: 'server.js' | 'server.ts' | null;
+  serverError?: string | null;
   // Своя страница пользовательского плагина: каталог с index.html и адрес, под которым
   // GrigDesk его раздаёт. Ядро не исполняет этот код — оно лишь показывает страницу.
   web?: PluginWebPage | null;
@@ -704,6 +707,9 @@ export async function scanUserPlugins(
         (message) => log?.warn?.({ plugin: e.name }, message),
       ) : null;
 
+      const [jsPresent, tsPresent] = await Promise.all(['server.js', 'server.ts'].map((entry) =>
+        fs.access(path.join(dir, entry)).then(() => true).catch(() => false)));
+
       out.push({
         ...fields,
         nav: fields.nav ?? (webModule && m.nav == null ? {
@@ -714,7 +720,7 @@ export async function scanUserPlugins(
         } : null),
         dir,
         webModule,
-        hasServer: await fs.access(path.join(dir, 'server.js')).then(() => true).catch(() => false),
+        ...selectPluginServerEntry(jsPresent ?? false, tsPresent ?? false),
         web: await resolvePluginWeb(dir, m.id, webDir ?? m.web, (message: string) => {
           log?.warn?.({ plugin: e.name }, message);
         }),

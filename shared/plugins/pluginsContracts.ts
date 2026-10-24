@@ -106,6 +106,7 @@ export interface PluginListItem {
   nav: PluginNav | null;
   enabled: boolean;
   needsRestart?: boolean;
+  serverError?: string | null;
   // Установка из источника; у системных и положенных руками — null.
   install?: PluginInstallInfo | null;
   settings: PluginSetting[];

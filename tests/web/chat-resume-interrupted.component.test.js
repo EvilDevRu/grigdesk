@@ -149,6 +149,7 @@ test('обрыв CLI: у плашки ошибки есть «Продолжит
   const button = resumeButton(wrapper);
   assert.ok(button.exists(), 'у оборванного CLI хода нет кнопки продолжения');
   assert.ok(wrapper.find('.msg.error .m-resume').exists(), 'кнопка стоит в плашке самой ошибки');
+  assert.equal(button.attributes('data-size'), 'compact', 'кнопка продолжения не растягивает ленту');
 
   await button.trigger('click');
   await flushPromises();

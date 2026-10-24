@@ -15,6 +15,7 @@ import { sha256 } from '../../shared/node/hash.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { createDeepSeekVendorFixture } from '../helpers/deepseekVendor.mts';
 import { verifyTestDeepSeekArtifact } from '../helpers/deepseekRuntimeArtifact.mts';
+import { prepareLegacyDeepSeekDependencies } from '../helpers/deepseekLegacyDependencies.mts';
 
 interface CommandFailure extends Error {
   code: number;
@@ -200,13 +201,16 @@ describe('vendor manifest и sync CLI принадлежат scripts пакет�
 
 describe('builder принадлежит пакету и не требует server', () => {
   it('строит из другого cwd и отказывает при изменении входов во время сборки', {
-    timeout: 300000,
+    // Холодная подготовка и две сборки делят общий срок; каждая команда ограничена отдельно.
+    timeout: 900000,
   }, async (t) => {
     const paths = deepSeekPackagePaths();
 
     assert.equal(paths.scripts.runtime, path.join(paths.root, 'scripts/buildRuntime.mts'));
 
-    const parent = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'build-input-tests');
+    const artifactsRoot = artifactsPath({ env: process.env, home: os.homedir() });
+    const parent = path.join(artifactsRoot, 'build-input-tests');
+    const dependencies = await prepareLegacyDeepSeekDependencies(artifactsRoot);
 
     await mkdir(parent, { recursive: true });
 
@@ -219,7 +223,7 @@ describe('builder принадлежит пакету и не требует ser
 
     t.after(() => rm(scratch, { recursive: true, force: true }));
 
-    // Копируются свои runtime-deps текущего ABI, без переустановки и server/node_modules.
+    // Копия builder получает отдельный автоматически подготовленный prefix текущего ABI.
     // SEA dev dependencies и промежуточный cache в исходную фикстуру не входят.
     await cp(paths.root, copiedPackage, {
       recursive: true,
@@ -244,7 +248,8 @@ describe('builder принадлежит пакету и не требует ser
       timeout: 240000,
       maxBuffer: 4 * 1024 * 1024,
     };
-    const built = await exec(process.execPath, [cli, '--output-dir', generation], options);
+    const built = await exec(process.execPath, [cli, '--runtime-deps-dir', dependencies,
+      '--output-dir', generation], options);
 
     assert.equal(built.stdout.trim(), generation);
 
@@ -255,7 +260,8 @@ describe('builder принадлежит пакету и не требует ser
       'new-package-runtime.json'), JSON.stringify(metadata));
 
     const second = path.join(output, 'changed-inputs');
-    const pending = exec(process.execPath, [cli, '--output-dir', second], options);
+    const pending = exec(process.execPath, [cli, '--runtime-deps-dir', dependencies,
+      '--output-dir', second], options);
     let finished = false;
     const outcome = pending.then((result) => {
       finished = true;

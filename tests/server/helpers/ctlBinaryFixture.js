@@ -154,6 +154,8 @@ export async function binaryFixture(t) {
     GRIGDESK_HOME: data,
     GRIGDESK_PORT: '19001',
     GRIGDESK_B24_INSTALL_PAUSE: '0',
+    // Сторож CLI читает cgroup запускающего хода; без подмены тест из агента получит отказ.
+    GRIGDESK_CLI_CGROUP_FILE: path.join(home, 'cgroup'),
     FIXTURE_NODE: process.execPath,
     FIXTURE_METADATA: path.join(temp, 'metadata.json'),
     FIXTURE_PREPARED: path.join(temp, 'prepared.json'),

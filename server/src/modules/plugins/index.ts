@@ -1,8 +1,8 @@
 // Модуль plugins — реестр плагинов GrigDesk: список, вкл/выкл, настройки.
 // Регистрируется РАНЬШЕ модулей-плагинов: декорирует fastify.pluginEnabled(id),
 // которым системные модули (media/code) гейтят свои роуты на лету — тумблер
-// действует без рестарта. Пользовательские server.js подключаются здесь же
-// (только включённые; их вкл/выкл требует рестарта — честно отражено в API).
+// действует без рестарта. Пользовательский сервер подключается только при старте;
+// загруженный runtime выключается и включается через собственный admission gate.
 import fp from 'fastify-plugin';
 import fastifyStatic from '@fastify/static';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
@@ -29,20 +29,21 @@ import type { PluginServerModule } from '../../lib/runtimeImport.ts';
 import { assertRealPackageRoot } from '../../lib/pluginInstall/packageTree.ts';
 import type { PluginInstallInfo } from '../../../../shared/plugins/pluginInstallContracts.ts';
 import { pluginModuleStaticOptions } from '../../lib/pluginWebModule.ts';
+import type { DocumentReader } from '../../lib/documents/reader.ts';
+import { createPluginCore } from './core.ts';
+import { changeError, writeUserPluginChange } from './changes.ts';
+import type { PluginTransition } from './changes.ts';
+
+export type { PluginTransition } from './changes.ts';
 
 export interface PluginsModuleOptions {
   config: Pick<GrigDeskConfig, 'userPluginsDir'> & { userPluginsDataDir?: string };
   prefs: PrefsStore;
   installs?: PluginInstallPort;
+  documentReader?: DocumentReader;
   onToggle?: (id: string, enabled: boolean) => unknown;
   prepareChange?: (id: string, change: { enabled?: boolean; values?: unknown }) =>
     Promise<PluginTransition | undefined> | PluginTransition | undefined;
-}
-
-export interface PluginTransition {
-  commit(): void;
-  rollback(): Promise<void>;
-  afterCommit(): Promise<void>;
 }
 
 /**
@@ -172,9 +173,12 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
   const PLUGIN_APIS = [1, 2];
 
   for (const m of userPlugins) {
-    if (!isEnabled(prefs.read(), m)) continue;
+    if (!isEnabled(prefs.read(), m) || m.serverError) {
+      continue;
+    }
+
     if (!PLUGIN_APIS.includes(m.api || 1)) {
-      fastify.log.warn({ plugin: m.id, api: m.api }, 'неподдерживаемая версия API плагина — пропущен');
+      fastify.log.warn({ plugin: m.id, api: m.api }, `плагин рассчитан на api=${m.api}, GrigDesk даёт api=${PLUGIN_APIS.join(', ')} — пропущен`);
       continue;
     }
 
@@ -215,7 +219,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
 
       try {
         const mod = await importRuntimeModule<PluginServerModule>(
-          path.join(String(m.dir), 'server.js'));
+          path.join(String(m.dir), m.serverEntry ?? 'server.js'));
 
         await scope.register(async (serverScope) => {
           try {
@@ -226,6 +230,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
               prefix: `/api/ext/${m.id}`,
               dataDir,
               lifecycle,
+              core: createPluginCore(fastify, m.id, opts.documentReader),
             };
 
             if (mod.default.length >= 3) {
@@ -276,6 +281,37 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
       .sort((a, b) => a.id.localeCompare(b.id));
   });
 
+  /**
+   * Перезапуск нужен только для кода, который этот процесс ещё не подключил или заменил.
+   * Ошибка пакета и несовместимый API требуют исправления причины, а не рестарта.
+   */
+  function needsRestart(manifest: PluginManifest): boolean {
+    if (manifest.system || manifest.serverError || !PLUGIN_APIS.includes(manifest.api || 1)) {
+      return false;
+    }
+
+    const gate = gates.get(manifest.id);
+
+    return !!gate?.needsRestart || (!loaded.has(manifest.id) && isEnabled(prefs.read(), manifest)
+      && (!!manifest.hasServer || !!manifest.web || !!manifest.webModule));
+  }
+
+  /**
+   * Уведомления следуют за принятой сменой допуска и не задерживают HTTP.
+   * Ошибку автора журналируем без его произвольного текста и внутренних данных.
+   */
+  function notifyEnabled(id: string, enabled: boolean): void {
+    const lifecycle = gates.get(id)?.options.lifecycle;
+    const hook = enabled ? lifecycle?.onEnable : lifecycle?.onDisable;
+
+    if (hook) {
+      void Promise.resolve().then(() => hook.call(lifecycle)).catch(() => {
+        fastify.log.warn({ plugin: id, phase: enabled ? 'enable' : 'disable' },
+          'Уведомление плагина не завершено.');
+      });
+    }
+  }
+
   fastify.get('/api/plugins', async () => {
     if (opts.installs?.health()) {
       // Commit остаётся достоверным при отказе scanner: следующее чтение повторяет refresh.
@@ -307,9 +343,8 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
           css: m.webModule.css,
           locales: m.webModule.locales,
         } : null,
-        // Пользовательский серверный код и страница подключаются на старте — тумблер
-        // подействует после рестарта.
-        needsRestart: !m.system && (m.hasServer || !!m.web || !!m.webModule),
+        serverError: m.serverError ?? null,
+        needsRestart: needsRestart(m),
         install: m.system ? null : await describeInstall(m.id),
       }))),
     };
@@ -319,6 +354,41 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
     const m = byId.get(String(request.params.id));
     if (!m) return reply.code(404).send({ error: 'not_found' });
     const enabled = !!(request.body || {}).enabled;
+
+    if (!m.system) {
+      const gate = gates.get(m.id);
+      let changed = false;
+
+      try {
+        if (enabled && m.serverError) {
+          throw changeError('plugin_server_conflict', m.serverError);
+        }
+
+        await writeUserPluginChange(gate, { enabled }, () => {
+          const current = prefs.read();
+
+          changed = isEnabled(current, m) !== enabled;
+          prefs.write({
+            plugins: { ...(current.plugins as Record<string, unknown> || {}), [m.id]: enabled },
+          });
+        }, () => {
+          gate?.setEnabled(enabled);
+
+          if (changed) {
+            notifyEnabled(m.id, enabled);
+          }
+        }, () => fastify.log.warn({ plugin: m.id }, 'Очистка изменения плагина не завершена.'));
+      } catch (error) {
+        return pluginChangeError(error, reply);
+      }
+
+      return {
+        ok: true,
+        enabled,
+        needsRestart: needsRestart(m),
+      };
+    }
+
     let transition: PluginTransition | undefined;
 
     try {
@@ -339,7 +409,12 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
       }
       throw error;
     }
-    return { ok: true, enabled: next[m.id] };
+
+    return {
+      ok: true,
+      enabled: next[m.id],
+      needsRestart: needsRestart(m),
+    };
   });
 
   fastify.put('/api/plugins/:id/settings', async (request: PluginRequest, reply) => {
@@ -377,7 +452,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
     }
     let transition: PluginTransition | undefined;
 
-    if (hasValues) {
+    if (hasValues && m.system) {
       const preparedPrefs = { ...prefs.read(), pluginSettings: { [m.id]: values } };
 
       try {
@@ -387,28 +462,51 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
       }
     }
 
-    const p = prefs.read();
-    // Тумблеры размещений — только по слотам из манифеста: чужой слот не пишется.
+    // Тумблеры размещений принимаются только по слотам из манифеста.
     const declared = new Set((m.placements || []).map((decl) => decl.slot));
     const placements: Record<string, boolean> = {};
+
     for (const [slot, on] of Object.entries((request.body || {}).placements || {})) {
-      if (declared.has(slot)) placements[slot] = !!on;
+      if (declared.has(slot)) {
+        placements[slot] = !!on;
+      }
     }
-    const storedPlacements = (p.pluginPlacements as Record<string, unknown> || {});
-    const ownPlacements = (storedPlacements[m.id] as Record<string, unknown> || {});
-    await writePluginChange(prefs, {
-      // Отсутствие values сохраняет параметры; явный values: {} возвращает их умолчания.
-      ...(hasValues && {
-        pluginSettings: { ...(p.pluginSettings as Record<string, unknown> || {}), [m.id]: values },
-      }),
-      ...(Object.keys(placements).length && {
-        pluginPlacements: { ...storedPlacements, [m.id]: { ...ownPlacements, ...placements } },
-      }),
-    }, transition);
+
+    // После асинхронной подготовки собираем patch из свежих prefs.
+    // Другие плагины и placements-only запросы могли записать свои поля во время ожидания.
+    const settingsPatch = () => {
+      const current = prefs.read();
+      const stored = (current.pluginPlacements as Record<string, unknown> || {});
+      const own = (stored[m.id] as Record<string, unknown> || {});
+
+      return {
+        ...(hasValues && {
+          pluginSettings: { ...(current.pluginSettings as Record<string, unknown> || {}), [m.id]: values },
+        }),
+        ...(Object.keys(placements).length && {
+          pluginPlacements: { ...stored, [m.id]: { ...own, ...placements } },
+        }),
+      };
+    };
+
+    if (!m.system && hasValues) {
+      const preparedPrefs = { ...prefs.read(), pluginSettings: { [m.id]: values } };
+
+      try {
+        await writeUserPluginChange(gates.get(m.id), { values: settingsValues(preparedPrefs, m) },
+          () => prefs.write(settingsPatch()), () => {},
+          () => fastify.log.warn({ plugin: m.id }, 'Очистка изменения плагина не завершена.'));
+      } catch (error) {
+        return pluginChangeError(error, reply);
+      }
+    } else {
+      await writePluginChange(prefs, settingsPatch(), transition);
+    }
+
     // Размещения в ответе — только у плагина, который их объявил: остальным поле ни к чему.
     return {
       ok: true,
-      values: hasValues ? values : settingsValues(p, m),
+      values: hasValues ? values : settingsValues(prefs.read(), m),
       ...(m.placements?.length && { placements: placementsState(prefs.read(), m) }),
     };
   });

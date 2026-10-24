@@ -41,4 +41,6 @@ SEA runtime-probe хэширует выбранный подготовленны
 Для настоящего candidate отдельно нужен проверенный snapshot Harness: порядок его явной
 подготовки описан в [README пакета](../../../deepseek/README.md).
 Standalone legacy builder сохраняет собственный prefix и ABI-контракт; эта подготовка
-его не заполняет. Остальные гейты описаны в [карте DeepSeek-проверок](deepseek-test-gates.md).
+его не заполняет. Только миграционный test helper
+[автоматически готовит отдельный prefix текущего Node](deepseek-legacy-preflight.md).
+Остальные гейты описаны в [карте DeepSeek-проверок](deepseek-test-gates.md).

@@ -7,12 +7,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { sha256 } from '../../shared/node/hash.ts';
+import { acquireDirectoryLock } from '../../shared/node/directoryLock.ts';
 
 import { deepSeekBuildInputs, hashRuntimePayload } from '../../deepseek/scripts/buildRuntime.mts';
 
 import { readDeepSeekArtifact } from '../helpers/deepseekLegacyArtifact.mts';
 import { artifactsPath, dataHome } from '../../shared/runtime/dataHome.ts';
 import { deepSeekPackagePaths } from '../../deepseek/scripts/paths.ts';
+import { prepareLegacyDeepSeekDependencies } from './deepseekLegacyDependencies.mts';
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -40,7 +42,7 @@ export async function verifyTestDeepSeekArtifact(directory: string): Promise<Rec
 
 /**
  * Один candidate строится под exclusive lock и переиспользуется по всем исходным входам.
- * Отсутствие подготовленных зависимостей является отказом, а не skip или скрытой загрузкой.
+ * Недостающий legacy prefix автоматически готовится в артефактах под ABI тестового Node.
  */
 export async function ensureTestDeepSeekArtifact(): Promise<string> {
   const explicit = process.env.GRIGDESK_TEST_DEEPSEEK_ARTIFACT;
@@ -65,62 +67,50 @@ export async function ensureTestDeepSeekArtifact(): Promise<string> {
 
   const inputs = await deepSeekBuildInputs(deepSeekPackagePaths().vendorDir);
   const identity = sha256(JSON.stringify(inputs));
-  const cache = path.join(artifactsPath({ env: process.env, home: os.homedir() }),
-    'deepseek-vendoring/test-builds');
+  const artifactsRoot = artifactsPath({ env: process.env, home: os.homedir() });
+  const cache = path.join(artifactsRoot, 'deepseek-vendoring/test-builds');
   const directory = path.join(cache, identity);
-  const lock = `${directory}.lock`;
 
   await fs.mkdir(cache, { recursive: true });
 
-  for (let attempt = 0; attempt < 180; attempt += 1) {
+  const lock = await acquireDirectoryLock(`${directory}.lock`, { waitMs: 900000 });
+
+  try {
     if (await fs.access(path.join(directory, 'runtime.json')).then(() => true, () => false)) {
       await verifyTestDeepSeekArtifact(directory);
 
       return directory;
     }
 
-    try {
-      await fs.mkdir(lock);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-        throw error;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      continue;
-    }
+    const dependencies = await prepareLegacyDeepSeekDependencies(artifactsRoot);
+    const handle = await fs.open(`${directory}.log`, 'w', 0o600);
 
     try {
-      const handle = await fs.open(`${directory}.log`, 'w', 0o600);
+      const child = spawn(process.execPath, ['--max-old-space-size=4096',
+        deepSeekPackagePaths().scripts.runtime, '--runtime-deps-dir', dependencies,
+        '--output-dir', directory], {
+        cwd: repositoryRoot,
+        stdio: ['ignore', handle.fd, handle.fd],
+      });
+      const code = await new Promise<number | null>((resolve, reject) => {
+        child.once('error', reject);
+        child.once('exit', resolve);
+      });
 
-      try {
-        const child = spawn(process.execPath, ['--max-old-space-size=4096',
-          deepSeekPackagePaths().scripts.runtime, '--output-dir', directory], {
-          cwd: repositoryRoot,
-          stdio: ['ignore', handle.fd, handle.fd],
-        });
-        const code = await new Promise<number | null>((resolve, reject) => {
-          child.once('error', reject);
-          child.once('exit', resolve);
-        });
-
-        if (code !== 0) {
-          throw new Error(`Сборка DeepSeek завершилась ${code}; журнал ${directory}.log. `
-            + 'Подготовка: npm ci --include=dev --prefix deepseek/build/runtime-deps');
-        }
-      } finally {
-        await handle.close();
+      if (code !== 0) {
+        throw new Error(`Сборка окружения теста миграции DeepSeek завершилась ${code}; `
+          + `журнал ${directory}.log`);
       }
-
-      await verifyTestDeepSeekArtifact(directory);
-
-      return directory;
     } finally {
-      await fs.rmdir(lock);
+      await handle.close();
     }
-  }
 
-  throw new Error('Таймаут ожидания сборки test DeepSeek artifact');
+    await verifyTestDeepSeekArtifact(directory);
+
+    return directory;
+  } finally {
+    await lock.release();
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

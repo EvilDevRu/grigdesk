@@ -239,3 +239,22 @@ test('CO-9 сторож окна до эффектов, force разрешает
   assert.equal((await box.run(['open', '--force'])).code, 0);
   await box.waitFor(() => box.calls().some((call) => call.startsWith('app ')));
 });
+
+test('CO-9b ход агента из scope окна не открывает окно без force', async (t) => {
+  const box = await createSandbox(t);
+
+  box.installWindow();
+  writeFileSync(path.join(box.home, 'cgroup'), '0::/user.slice/app.slice/app-grigdesk-4242.scope');
+
+  for (const argv of [[], ['open']]) {
+    const refused = await box.run(argv);
+
+    assert.equal(refused.code, 1);
+    assert.match(refused.stderr, /ход агента/);
+    assert.match(refused.stderr, /--force/);
+  }
+
+  assert.deepEqual(box.calls(), []);
+  assert.equal((await box.run(['open', '--force'])).code, 0);
+  await box.waitFor(() => box.calls().some((call) => call.startsWith('app ')));
+});

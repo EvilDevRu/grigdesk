@@ -133,6 +133,7 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
     './views/TaskModal.vue': marker('task'),
     './views/DiffModal.vue': marker('diff'),
     './views/DocumentModal.vue': marker('document'),
+    './views/MediaViewer.vue': marker('media'),
     './ui': `import { h } from 'vue';
       export { t, uiLocale } from './src/services/locale.ts';
       const Host = { render: () => h('div') };

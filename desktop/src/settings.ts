@@ -13,6 +13,7 @@ import { isToolWindowId } from '../../shared/desktop/toolWindowContract.ts';
 
 import { localOrigin } from './connection.ts';
 import { normalizeSurfaceGeometry } from './surfaceGeometry.ts';
+import { normalizeExitPreference } from './desktopExitPreference.ts';
 import type { SurfaceGeometry } from './surfaceGeometry.ts';
 
 import type { Connection } from './connection.ts';
@@ -26,6 +27,7 @@ export type WindowState = {
 };
 
 export type DesktopSettings = {
+  skipExitConfirmation?: boolean;
   uiLanguage?: string;
   version: 2;
   profiles: DesktopProfile[];
@@ -125,6 +127,8 @@ export function normalizeSettings(value: unknown): DesktopSettings {
   }
 
   return {
+    ...(supported && normalizeExitPreference(settings.skipExitConfirmation)
+      ? { skipExitConfirmation: true } : {}),
     ...(taskWindow || Object.keys(tools).length ? {
       surfaceWindows: { ...(taskWindow ? { task: taskWindow } : {}), tools },
     } : {}),

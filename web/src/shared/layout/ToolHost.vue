@@ -558,7 +558,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .tool-rail {
   grid-row: 2; grid-column: 3; z-index: 70; min-height: 0;
-  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px; overflow-y: auto; scrollbar-width: none;
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0;
+  overflow-y: auto; scrollbar-width: none;
   background: var(--sidebar); border-left: 1px solid var(--line);
 }
 .tool-rail-item { position: relative; }

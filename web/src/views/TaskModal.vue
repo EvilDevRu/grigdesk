@@ -690,7 +690,7 @@
               :tone="conveyor.stall ? 'danger' : 'accent'"
               variant="outline"
               v-tooltip="conveyor.stall
-                ? `${conveyor.stall.title} — ${conveyor.stall.hint}`
+                ? [conveyor.stall.title, conveyor.stall.hint].filter(Boolean).join(' — ')
                 : `Задача уже на конвейере (${conveyor.route || 'маршрут'}) — открыть`"
               @click="openConveyor"
             >
@@ -954,10 +954,13 @@
               </UiButton>
             </div>
           </div>
-          <div v-if="conveyor?.stall" class="convstall">
-            <b>{{ conveyor.stall.title }}</b>
-            <span>{{ conveyor.stall.hint }}</span>
-          </div>
+          <PipelineStopPanel
+            v-if="conveyor?.stall"
+            class="convstall"
+            :view="graphStallView(conveyorGraph, conveyor.stall)"
+            :identity="`${taskId}:${conveyor.attempt}:${conveyor.stall.since || ''}`"
+            :arbitrating="conveyor.arbitrating"
+          />
           <span v-if="launchMsg" class="lmsg" aria-live="polite">{{ launchMsg }}</span>
           <span v-if="sandboxMsg" class="lmsg">{{ sandboxMsg }}</span>
       </footer>
@@ -1023,6 +1026,9 @@ import { mdToHtml } from '../shared/md.ts';
 import { providerLabel } from '../shared/runnerDisplay.ts';
 import OpenDiffButton from './OpenDiffButton.vue';
 import TaskCardFrame from './TaskCardFrame.vue';
+import PipelineStopPanel from './pipeline/PipelineStopPanel.vue';
+import { graphStallView } from '../shared/graphStall.ts';
+import type { LiveGraph } from '../shared/pipelineContracts.ts';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
 
 interface ClarifyDraft {
@@ -1824,6 +1830,7 @@ watch(mtab, (t) => {
 
 // Уже ли задача на конвейере (есть в состоянии фабрики) — для защиты от повторного запуска.
 const conveyor = ref<PipelineTask | null>(null);
+const conveyorGraph = ref<LiveGraph | null>(null);
 // Живой стенд задачи ({fePort, apiPort}) — чтобы снести его прямо отсюда.
 const sandbox = ref<{ fePort: number; apiPort: number | null } | null>(null);
 /**
@@ -1832,6 +1839,7 @@ const sandbox = ref<{ fePort: number; apiPort: number | null } | null>(null);
  */
 async function loadConveyor() {
   conveyor.value = null;
+  conveyorGraph.value = null;
   sandbox.value = null;
 
   if (!taskId.value) {
@@ -1852,6 +1860,8 @@ async function loadConveyor() {
   // интерфейс не трогает.
   try {
     const g = decodeLiveGraph(await api.get(`/api/tasks/${taskId.value}/graph`));
+
+    conveyorGraph.value = g;
 
     if (typeof g.fePort === 'number' && g.fePort && !g.readOnly && g.workspaceMode !== 'shared') {
       sandbox.value = { fePort: g.fePort, apiPort: typeof g.apiPort === 'number' ? g.apiPort || null : null };
@@ -3089,11 +3099,7 @@ onUnmounted(() => {
   gap: 8px;
   min-width: 0;
 }
-.convstall { display: flex; flex-direction: column; gap: 2px; width: 100%;
-  padding: 7px 10px; border-radius: 8px; color: var(--bad);
-  background: color-mix(in srgb, var(--bad) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); font-size: 12px; }
-.convstall span { color: var(--ink-mid); }
+.convstall { width: 100%; }
 .lmsg { font-size: 12px; color: var(--good); flex-basis: 100%; }
 /* Форма запуска открывается как ограниченная по высоте панель над постоянными
    действиями: большой delivery contract не выталкивает карточку за viewport. */
