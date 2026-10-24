@@ -34,6 +34,7 @@
     :busy="busy"
     :dismissible="!busy"
     data-role="workdir-picker"
+    data-ui-workspace
   >
     <template #title>
       <span class="workdir-heading">
@@ -72,11 +73,13 @@
       </UiInlineMessage>
       <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
       <template v-if="editable">
-        <UiSegmentedControl v-model="mode" :label="t('core.workdirMethod')" :disabled="busy">
-          <UiButton variant="ghost" :pressed="mode === 'catalog'" :disabled="busy" @click="mode = 'catalog'">
+        <UiSegmentedControl v-model="mode" size="compact" :label="t('core.workdirMethod')" :disabled="busy"
+                            data-context="workdir-mode">
+          <UiButton variant="ghost" wrap :pressed="mode === 'catalog'" :disabled="busy"
+                    @click="mode = 'catalog'">
             {{ t('core.workdirCatalog') }}
           </UiButton>
-          <UiButton variant="ghost" :pressed="mode === 'path'" :disabled="busy" @click="mode = 'path'">
+          <UiButton variant="ghost" wrap :pressed="mode === 'path'" :disabled="busy" @click="mode = 'path'">
             {{ t('core.workdirByPath') }}
           </UiButton>
         </UiSegmentedControl>

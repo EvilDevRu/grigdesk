@@ -386,6 +386,23 @@
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
+/* Размер выбирается общим параметром, как у UiButton, и действует также на slot-кнопки.
+   Рамка рисуется внутри: вся группа занимает 28 px на desktop и 44 px на touch. */
+.ui-segmented-control[data-size='compact'] {
+  padding: 0;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--control-border);
+}
+
+.ui-segmented-control[data-size='compact'] > .ui-button {
+  height: auto;
+  min-height: var(--toolbar-control-h);
+  padding: 3px 7px;
+  border-radius: var(--control-radius);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .ui-tabs {
   width: max-content;
   max-width: 100%;
@@ -446,6 +463,23 @@
 
 .ui-segmented-control[data-context='plugin-state-filter'] > .ui-button {
   flex: 1 0 auto;
+}
+
+/* Способы выбора папки сохраняют равные доли, занимая ширину своих подписей.
+   Размер берётся из общего size, а контекст определяет только раскладку и акцент. */
+.ui-segmented-control[data-context='workdir-mode'] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.ui-segmented-control[data-context='workdir-mode'] > .ui-button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, var(--line));
 }
 
 /* Источник и набор параметров могут переноситься внутри узкого дока.
