@@ -524,7 +524,8 @@ onBeforeUnmount(() => {
 }
 @container docker-panel (max-width: 440px) {
   .docker-panel__mark { display: none; }
-  .docker-panel__connection { order: 0; width: auto; }
+  .docker-panel__connection { order: 3; width: 100%; white-space: normal; }
+  .docker-panel__title { flex-wrap: wrap; gap: 6px; }
   .docker-panel__heading p { display: none; }
   .docker-panel__summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .docker-summary-item { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; padding: 4px 8px; }

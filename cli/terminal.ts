@@ -7,11 +7,43 @@ export interface TerminalKey {
   text: string;
 }
 
+export type TerminalTone = 'text' | 'accent' | 'muted' | 'rule' | 'success' | 'warning' | 'error';
+
+export interface TerminalSpan {
+  text: string;
+  tone?: TerminalTone;
+  paper?: boolean;
+}
+
+export interface TerminalRow {
+  spans: readonly TerminalSpan[];
+  selected?: boolean;
+}
+
+export type TerminalLine = string | TerminalRow;
+
+interface TerminalDrawing {
+  theme?: 'dark';
+  width?: number;
+}
+
 interface ReadlineKey {
   name?: string;
   ctrl?: boolean;
   sequence?: string;
 }
+
+const darkBackground = '\x1b[48;2;27;31;38m';
+const selectedBackground = '\x1b[48;2;41;59;67m';
+const tones: Record<TerminalTone, string> = {
+  text: '\x1b[38;2;224;229;237m',
+  accent: '\x1b[38;2;140;206;206m',
+  muted: '\x1b[38;2;154;165;181m',
+  rule: '\x1b[38;2;83;97;116m',
+  success: '\x1b[38;2;142;203;167m',
+  warning: '\x1b[38;2;226;190;121m',
+  error: '\x1b[38;2;239;144;144m',
+};
 
 /**
  * Внешние строки очищаются только при показе, исходные байты журнала не меняются.
@@ -21,6 +53,67 @@ export function terminalText(value: string, columns: number): string {
   const clean = stripVTControlCharacters(value).replace(/[\x00-\x1f\x7f-\x9f]/g, '');
 
   return [...clean].slice(0, Math.max(1, columns)).join('');
+}
+
+/**
+ * Длинный текст сохраняется целиком в пределах доступной ширины каждой строки.
+ * Очистка до переноса не позволяет внешним escape-последовательностям менять экран.
+ */
+export function terminalLines(value: string, columns: number, options: { words?: boolean } = {}): string[] {
+  const characters = [...terminalText(value, Number.MAX_SAFE_INTEGER)];
+  const width = Math.max(1, columns);
+  const lines: string[] = [];
+
+  for (let index = 0; index < characters.length;) {
+    const end = Math.min(characters.length, index + width);
+    let boundary = end;
+
+    if (options.words && end < characters.length) {
+      let space = end;
+
+      while (space > index && characters[space] !== ' ') {
+        space--;
+      }
+
+      if (space - index > width / 2) {
+        boundary = space;
+      }
+    }
+
+    lines.push(characters.slice(index, boundary).join(''));
+    index = boundary + (boundary < end ? 1 : 0);
+  }
+
+  return lines;
+}
+
+/**
+ * Стили принадлежат рендеру: каждый фрагмент сначала очищается и обрезается.
+ * Подсветка заполняет строку, а завершающий reset не окрашивает следующую команду.
+ */
+function darkLine(line: TerminalLine, columns: number): string {
+  const row: TerminalRow = typeof line === 'string' ? { spans: [{ text: line }] } : line;
+  const background = row.selected ? selectedBackground : darkBackground;
+  const base = '\x1b[0m' + background;
+  let remaining = columns;
+  let rendered = base;
+
+  for (const span of row.spans) {
+    if (remaining <= 0) {
+      break;
+    }
+
+    const text = terminalText(span.text, remaining);
+    const tone = row.selected ? 'accent' : span.tone ?? 'text';
+    const bold = row.selected || span.tone === 'accent' ? '\x1b[1m' : '';
+
+    const foreground = span.paper ? '\x1b[47m\x1b[30m' : tones[tone];
+
+    rendered += base + foreground + bold + text;
+    remaining -= [...text].length;
+  }
+
+  return rendered + base + ' '.repeat(remaining) + '\x1b[0m';
 }
 
 export class TerminalSession {
@@ -40,6 +133,10 @@ export class TerminalSession {
 
   get columns(): number {
     return Math.max(1, this.output.columns || 80);
+  }
+
+  get rows(): number {
+    return Math.max(1, this.output.rows || 24);
   }
 
   private receive = (key: TerminalKey): void => {
@@ -100,7 +197,10 @@ export class TerminalSession {
       this.output.removeListener('resize', this.resize);
       process.removeListener('SIGINT', this.interrupt);
       process.removeListener('SIGTERM', this.terminate);
-      this.output.write('\x1b[?25h');
+
+      if (process.env.TERM !== 'dumb') {
+        this.output.write('\x1b[?25h');
+      }
 
       if (this.paused) {
         this.input.pause();
@@ -111,7 +211,10 @@ export class TerminalSession {
   suspend(): void {
     this.input.setRawMode?.(this.raw);
     this.input.pause();
-    this.output.write('\x1b[?25h');
+
+    if (process.env.TERM !== 'dumb') {
+      this.output.write('\x1b[?25h');
+    }
   }
 
   /**
@@ -141,16 +244,24 @@ export class TerminalSession {
    * Экран ограничивает каждую строку текущей шириной и обновляется после resize.
    * Dumb получает последовательные простые строки без позиционирования курсора.
    */
-  draw(lines: readonly string[], redraw?: () => void): void {
+  draw(lines: readonly TerminalLine[], redraw?: () => void, options: TerminalDrawing = {}): void {
     this.onResize = redraw;
 
+    const color = !process.env.NO_COLOR && process.env.TERM !== 'dumb';
+    const dark = color && options.theme === 'dark';
+    const columns = Math.max(1, Math.min(this.columns, options.width ?? this.columns));
+
     if (process.env.TERM !== 'dumb') {
-      this.output.write('\x1b[H\x1b[J');
+      this.output.write((dark ? darkBackground : '') + '\x1b[H\x1b[J');
     }
 
-    const color = !process.env.NO_COLOR && process.env.TERM !== 'dumb';
     const rendered = lines.map((line) => {
-      const text = terminalText(line, this.columns);
+      if (dark) {
+        return darkLine(line, columns);
+      }
+
+      const value = typeof line === 'string' ? line : line.spans.map((span) => span.text).join('');
+      const text = terminalText(value, columns);
 
       if (color && /^(?:✗|│ ✗)/.test(text)) {
         return `\x1b[31m${text}\x1b[0m`;
@@ -159,6 +270,6 @@ export class TerminalSession {
       return color && text.startsWith('│ ›') ? `\x1b[2m${text}\x1b[0m` : text;
     });
 
-    this.output.write(rendered.join('\n') + '\n');
+    this.output.write(rendered.join('\n') + (dark ? '\x1b[0m' : '') + '\n');
   }
 }

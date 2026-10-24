@@ -11,6 +11,7 @@
             <path d="M12 7.5v4.5l3 2 M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" />
           </svg>
           <span class="board-timers-topbar-count mono">{{ activeCount }}</span>
+          <span class="topbar-status-label">{{ t('core.taskTimers') }}</span>
         </UiButton>
       </template>
 

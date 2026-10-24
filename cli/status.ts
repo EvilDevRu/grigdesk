@@ -5,6 +5,8 @@ import { readServer } from './server.ts';
 import type { ServerState } from './server.ts';
 import { readWindow } from './window.ts';
 import type { WindowStateName } from './window.ts';
+import type { TerminalTone } from './terminal.ts';
+import { cliTranslator } from './i18n.ts';
 
 export interface StatusSnapshot {
   server?: ServerState & { url: string };
@@ -49,6 +51,24 @@ const linkWords: Record<LinkStateName, string> = {
   error: 'ошибка',
   unknown: 'неизвестно',
 };
+
+/**
+ * Меню и подробный экран одинаково различают рабочие, переходные и ошибочные состояния.
+ * Остановка или отсутствие установки остаются спокойными состояниями с явным текстом.
+ */
+export function statusTone(state: string): TerminalTone {
+  if (['ready', 'open', 'online'].includes(state)) {
+    return 'success';
+  }
+
+  if (['failed', 'conflict', 'mismatch', 'not_responding', 'unhealthy', 'docker_unavailable',
+    'error'].includes(state)) {
+    return 'error';
+  }
+
+  return ['starting', 'stopping', 'unknown', 'ambiguous', 'connecting', 'waiting_vpn'].includes(state)
+    ? 'warning' : 'muted';
+}
 
 /**
  * Причины из внешних журналов не управляют терминалом и не создают новых строк.
@@ -103,34 +123,18 @@ function row(label: string, words: [string, number], detail: string | null, colo
 export function renderText(snapshot: StatusSnapshot, options: { color: boolean }): string {
   const { server, window, relay } = snapshot;
   const lines: string[] = server && window && relay ? ['GrigDesk', ''] : [];
-  const hints: string[] = [];
+  const hints = statusHints(snapshot);
 
   if (server) {
     const detail = server.reason ?? (server.state === 'ready' ? server.url : '');
 
     lines.push(row('Сервер', serverWords[server.state]!, detail, options.color));
 
-    if (['stopped', 'failed'].includes(server.state)) {
-      hints.push('Запустить сервер: grigdesk-ctl server start');
-    }
-
-    if (['not_responding', 'failed'].includes(server.state) || server.state === 'starting' && server.reason) {
-      hints.push('Журнал сервера: grigdesk-ctl server logs');
-    }
-
-    if (server.state === 'not_installed') {
-      hints.push('Установить службу: deploy/install.sh --no-autostart');
-    }
   }
 
   if (window) {
     lines.push(row('Окно', windowWords[window.state]!, null, options.color));
 
-    if (window.state === 'not_installed') {
-      hints.push('Установить окно: grigdesk-ctl desktop install');
-    } else if (window.state === 'closed') {
-      hints.push('Открыть окно: grigdesk-ctl');
-    }
   }
 
   if (relay) {
@@ -142,16 +146,50 @@ export function renderText(snapshot: StatusSnapshot, options: { color: boolean }
       lines.push('  ' + ''.padEnd(12) + 'связь: ' + links.join('; '));
     }
 
-    if (relay.state === 'stopped') {
-      hints.push('Запустить посредника: grigdesk-ctl relay start');
-    } else if (relay.state === 'unhealthy') {
-      hints.push('Журнал посредника: grigdesk-ctl relay logs');
-    } else if (relay.state === 'ambiguous') {
-      hints.push('Выбрать посредника: GRIGDESK_RELAY_PROJECT в .env');
-    }
   }
 
   return lines.join('\n') + (hints.length ? '\n\n  ' + [...new Set(hints)].join('\n  ') : '') + '\n';
+}
+
+/**
+ * Машинный текст и терминальный экран используют одни и те же подсказки восстановления.
+ * Они вычисляются из снимка, не запрашивая состояние повторно и не меняя систему.
+ */
+export function statusHints(
+  snapshot: StatusSnapshot, t = cliTranslator({}).t,
+): string[] {
+  const { server, window, relay } = snapshot;
+  const hints: string[] = [];
+
+  if (server) {
+    if (['stopped', 'failed'].includes(server.state)) {
+      hints.push(t('screens.hints.startServer'));
+    }
+
+    if (['not_responding', 'failed'].includes(server.state) || server.state === 'starting' && server.reason) {
+      hints.push(t('screens.hints.serverLog'));
+    }
+
+    if (server.state === 'not_installed') {
+      hints.push(t('screens.hints.installServer'));
+    }
+  }
+
+  if (window?.state === 'not_installed') {
+    hints.push(t('screens.hints.installWindow'));
+  } else if (window?.state === 'closed') {
+    hints.push(t('screens.hints.openWindow'));
+  }
+
+  if (relay?.state === 'stopped') {
+    hints.push(t('screens.hints.startRelay'));
+  } else if (relay?.state === 'unhealthy') {
+    hints.push(t('screens.hints.relayLog'));
+  } else if (relay?.state === 'ambiguous') {
+    hints.push(t('screens.hints.selectRelay'));
+  }
+
+  return [...new Set(hints)];
 }
 
 /**

@@ -1,3 +1,4 @@
+import type { ProviderInstallationMetadata } from './providerInstallContracts.ts';
 // Контракт раздела «Исполнители» в том объёме, который уже кому-то нужен.
 //
 // Полная карточка исполнителя большая и принадлежит своему разделу; здесь объявлено
@@ -64,6 +65,7 @@ export interface ProviderModelEntry {
 // Исполнитель реестра: доступность решает, можно ли его выбрать, а возможности —
 // подходит ли он настройке, которая требует, например, безопасного разбора текста.
 export interface ProviderEntry {
+  installation?: ProviderInstallationMetadata;
   sessionBinding?: boolean;
   commands?: Array<{
     cmd: string;

@@ -29,7 +29,7 @@ function uiFacadeStub(prefix) {
  * PipelineView бандлится с настоящими UI-компонентами, а границы страницы остаются
  * управляемыми тестом. Так harness проверяет публичный facade без сетевых побочных эффектов.
  */
-export function compilePipelineView(prefix) {
+export function compilePipelineView(prefix, { realGraph = false } = {}) {
   return compileVue(VIEW_PATH, {
     stubs: {
       '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
@@ -71,7 +71,9 @@ export function compilePipelineView(prefix) {
       ].join('\n'),
       '../ui': (uiFacadeStub(prefix)) +
         "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
-      './pipeline/FactoryGraph.vue': `export default globalThis.${prefix}FactoryGraph;`,
+      ...(realGraph ? {} : {
+        './pipeline/FactoryGraph.vue': `export default globalThis.${prefix}FactoryGraph;`,
+      }),
       './OpenDiffButton.vue': [
         'export default {',
         '  props: ["taskId"],',

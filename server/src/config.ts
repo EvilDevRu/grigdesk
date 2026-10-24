@@ -298,6 +298,7 @@ export const config = {
     || path.join(dataStateDir, 'task-seen.json'),
   // Когда впервые увидели каждое ведро лимитов исполнителя. Серверный файл, потому что
   // метка «новое» обязана быть одинаковой во всех окнах.
+  providerInstallStatePath: path.join(dataStateDir, 'provider-installs', 'state.json'),
   providerUsageSeenPath: process.env.GRIGDESK_PROVIDER_USAGE_SEEN_PATH
     || path.join(dataStateDir, 'provider-usage-seen.json'),
 

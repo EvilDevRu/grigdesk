@@ -1,40 +1,88 @@
+import { isRecord } from '../../../shared/lib/objects.ts';
 import type { FactoryGraphData } from '../../../shared/pipeline/factoryGraphContracts.ts';
+import {
+  normalizeStallText,
+  readStallPresentation,
+} from '../../../shared/pipeline/stallPresentation.ts';
+import { runnerModelLabel, runnerNodeLabel } from './runnerDisplay.ts';
+import type { RunnerState } from './runnerDisplay.ts';
 
-interface Stall {
-  node?: string;
-  stage?: string;
-  title?: string;
-  hint?: string;
-  fails?: number;
-}
-
-// Человекочитаемое представление остановки внутри визуальной схемы.
-// Сервер уже привязывает движковый STAGE к node; клиент только готовит подписи.
+type StallGraph = Partial<Pick<FactoryGraphData, 'nodes' | 'stall' | 'nodeOrigins'>> & {
+  keys?: Record<string, string>;
+  runnerKeys?: Record<string, string>;
+  nodeMeta?: Record<string, { runner?: RunnerState }>;
+};
 
 function cleanNodeLabel(label: unknown): string {
   return String(label || '').replace(/^[^\p{L}\p{N}<]+/u, '').trim();
 }
 
 /**
- * Готовит подписи уже привязанной к узлу остановки без изменения серверного графа.
- * Отсутствующая остановка не создаёт тревожную плашку на здоровом маршруте.
+ * Сводочная остановка может не иметь node: граф уже знает точный узел стенда.
+ * Неизвестный этап не становится сырой подписью узла в интерфейсе.
  */
-export function graphStallView(graph: Pick<FactoryGraphData, 'nodes' | 'stall'> | null | undefined) {
-  const stall = graph?.stall as Stall | null | undefined;
+function stallNode(graph: StallGraph | null | undefined, stall: Record<string, unknown>): string | null {
+  if (stall.phase === 'bootstrap') {
+    return Object.entries(graph?.nodeOrigins || {}).find(([, origin]) => (
+      origin.scope === 'bootstrap' && origin.originId === 'scout'
+    ))?.[0] || null;
+  }
 
-  if (!stall) {
+  if (typeof stall.node === 'string' && graph?.nodes?.[stall.node]) {
+    return stall.node;
+  }
+
+  const graphStop = isRecord(graph?.stall) ? graph.stall : null;
+
+  if (stall.stage && graphStop?.stage === stall.stage && typeof graphStop.node === 'string') {
+    return graphStop.node;
+  }
+
+  return Object.keys(graph?.nodes || {}).find((id) => stall.stage && (
+    graph?.keys?.[id] === stall.stage || graph?.runnerKeys?.[id] === stall.stage
+    || id.toUpperCase() === stall.stage
+  )) || (typeof stall.node === 'string' ? stall.node : null);
+}
+
+/**
+ * Сохраняет полные title/hint для подсказки узла и добавляет отдельный краткий вид.
+ * Кривое необязательное расширение и старый сервер используют полную прозу без разрезания.
+ */
+export function graphStallView(graph: StallGraph | null | undefined, input: unknown = graph?.stall) {
+  if (!isRecord(input)) {
     return null;
   }
 
-  const node = stall.node || null;
-  const rawNodeLabel = node ? graph!.nodes?.[node]?.[1] : null;
+  const node = stallNode(graph, input);
+  const stage = typeof input.stage === 'string' ? input.stage : null;
+  const title = typeof input.title === 'string' && input.title ? input.title : 'Конвейер остановлен';
+  const hint = typeof input.hint === 'string' ? input.hint : '';
+  const presentation = readStallPresentation(input.presentation);
+  const reason = normalizeStallText(stage && title.startsWith(`${stage}: `)
+    ? title.slice(stage.length + 2) : title);
+  const runner = node ? graph?.nodeMeta?.[node]?.runner : undefined;
+  const actualModel = runner?.actual && runner.model ? runnerModelLabel(runner) : '';
+  const model = actualModel || presentation?.model || runnerModelLabel(runner);
 
   return {
     node,
-    stage: stall.stage || null,
-    nodeLabel: cleanNodeLabel(rawNodeLabel) || stall.stage || 'Конвейер',
-    title: stall.title || 'Конвейер остановлен',
-    hint: stall.hint || '',
-    fails: Number.isFinite(stall.fails) ? stall.fails : null,
+    stage,
+    nodeLabel: cleanNodeLabel(node ? graph?.nodes?.[node]?.[1] : '') || 'Конвейер',
+    title,
+    hint,
+    fails: typeof input.fails === 'number' && Number.isFinite(input.fails) ? input.fails : null,
+    reason: presentation?.reason || reason,
+    summary: presentation?.summary || normalizeStallText(hint),
+    details: presentation?.details || {
+      what: normalizeStallText(title),
+      ...(hint ? { action: normalizeStallText(hint) } : {}),
+    },
+    attempts: presentation?.attempts,
+    returns: presentation?.returns,
+    lastFailure: presentation?.lastFailure || '',
+    model,
+    runner: runner ? runnerNodeLabel(runner) : '',
   };
 }
+
+export type GraphStallView = NonNullable<ReturnType<typeof graphStallView>>;

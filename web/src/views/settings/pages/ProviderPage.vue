@@ -270,19 +270,34 @@
             </UiCommandButton>
           </div>
           <UiCommandButton
-            v-if="!selected.available && (selected.setupCommand || selected.install)"
+            v-if="!selected.available && (selected.installed || !selected.installation)
+              && (selected.setupCommand || selected.install)"
             @click="terminal(selected.setupCommand || selected.install || '')"
           >
             {{ selected.installed ? t('settings.authentication2') : t('settings.installation') }}:
             {{ selected.setupCommand || selected.install }}
           </UiCommandButton>
+          <UiButton
+            v-if="!selected.installed && selected.installation?.canInstall"
+            :disabled="installation.busy && installation.snapshot.active?.providerId !== selected.id"
+            @click="installation.requestInstall(selected.id, 'install')"
+          >{{ t('settings.providerInstallationInstall') }}</UiButton>
+          <UiButton
+            v-if="installation.snapshot.active?.providerId === selected.id"
+            @click="installation.show(selected.id)"
+          >{{ t('settings.providerInstallationRunning') }}</UiButton>
+          <UiButton
+            v-else-if="installation.snapshot.recent[selected.id]"
+            @click="installation.show(selected.id)"
+          >{{ t('settings.providerInstallationResult') }}</UiButton>
           <section v-if="resources.length" data-provider-usage>
             <h4>{{ t('settings.providerResources') }}</h4>
             <ProviderUsageResources :provider-id="selected.id" :resources="resources" />
           </section>
           <UiButton data-context="workspace-form-wrap"
-            v-if="selected.installed && selected.canUpdate"
-            :disabled="Boolean(providers.updating)"
+            v-if="selected.installed && selected.canUpdate
+              && installation.snapshot.active?.providerId !== selected.id"
+            :disabled="installation.busy"
             @click="providers.updateCli(selected.id)"
           >
             {{ t('settings.updateCLI') }}
@@ -360,6 +375,7 @@ import type {
 } from '../../../../../shared/chat/providersContracts.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
 import { useProvidersStore } from '../../../stores/providers.ts';
+import { useProviderInstallStore } from '../../../stores/providerInstall.ts';
 import { useProviderSettingsStore } from '../../../stores/providerSettings.ts';
 import {
   localizeProviderMetadata, localizeNativeMetadata, localizeExecutorType,
@@ -385,6 +401,7 @@ import SettingsNativeEditor from './SettingsNativeEditor.vue';
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
 const providers = useProvidersStore();
+const installation = useProviderInstallStore();
 const native = useProviderSettingsStore();
 const registry = computed(() => (providers.providers as ProviderEntry[])
   .map((entry) => localizeProviderMetadata(entry, uiLocale.value)));

@@ -3,6 +3,7 @@
        в промежутке между созданием документа и ответом сервера. -->
   <UiDialogHost />
   <UiTooltipHost />
+  <DesktopExitHost v-if="currentDesktopMode() === 'main'" />
 
   <template v-if="shell.initialized">
     <ConnectionsView v-if="showMachines" />
@@ -15,7 +16,8 @@
                       :target="surfaceTarget" :ready="surfaceStarted" />
       <TaskWindowPage v-else-if="surfaceDocument" :target="surfaceTarget" :ready="surfaceStarted" />
       <AppShell v-else :active="auth.authenticated && (!shell.present || shell.status === 'online')">
-        <div v-if="!workspaceStarted" class="workspace-waiting" role="status">
+        <MachineWelcome v-if="!workspaceStarted && shell.present && !shell.profile" />
+        <div v-else-if="!workspaceStarted" class="workspace-waiting" role="status">
           <UiInlineMessage :tone="connectionTone">
             <span class="workspace-connection-message">
               <UiSpinner v-if="shell.status === 'connecting' || shell.status === 'online'" decorative />
@@ -30,6 +32,7 @@
       <TaskModal v-if="!surfaceDocument" />
       <DiffModal />
       <DocumentModal />
+      <MediaViewer />
       <SettingsModal v-if="settings.isOpen" />
       <UiToastHost />
       </div>
@@ -50,6 +53,7 @@ import {
 import { t, uiLocale, UiDialogHost, UiTooltipHost, UiToastHost, UiInlineMessage, UiSpinner } from './ui';
 import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
+import DesktopExitHost from './shared/layout/DesktopExitHost.vue';
 import NoAccessView from './views/NoAccessView.vue';
 import TaskModal from './views/TaskModal.vue';
 import ToolWindowPage from './views/ToolWindowPage.vue';
@@ -63,6 +67,7 @@ import { startBoardRelay, startShellRelay, startShelfRelay } from './shared/wind
 import { startTaskWindowSync, createQueuedReload } from './shared/taskWindowSync.ts';
 import DiffModal from './views/DiffModal.vue';
 import DocumentModal from './views/DocumentModal.vue';
+import MediaViewer from './views/MediaViewer.vue';
 import { SpeechProvider } from './features/speech/provider.ts';
 import { useBoardStore } from './stores/board.ts';
 import { useSystemStore } from './stores/system.ts';
@@ -76,6 +81,7 @@ import { setSseEnabled, sseSubscribe } from './composables/useSse.ts';
 import { useShellStore } from './stores/shell.ts';
 import ConnectionsView from './views/ConnectionsView.vue';
 import LockOverlay from './shared/layout/LockOverlay.vue';
+import MachineWelcome from './shared/layout/MachineWelcome.vue';
 
 const surfaceDocument = currentDesktopMode() === 'surface';
 const surfaceTarget = surfaceDocument

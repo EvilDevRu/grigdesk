@@ -2,102 +2,177 @@
   <!-- Монтирование при открытии добавляет Teleport после настроек в body.
        Так общий слой dialog рисуется поверх уже открытого окна. -->
   <UiDialog v-if="phone.open" :open="phone.open" :title="t('settings.connectPhone')"
-    @update:open="phone.close()">
-    <div data-ui-touch class="phone-connect">
-      <strong>{{ phone.status?.name || shell.profile?.name }}</strong>
-      <p>{{ t('settings.phoneInstructions') }}</p>
-      <p v-if="phone.busy" role="status">{{ t('settings.loadingConnections') }}</p>
+    data-role="phone-connect" data-ui-touch class="phone-connect" @update:open="phone.close()">
+    <div class="phone-connect__content">
+      <div class="phone-connect__intro">
+        <div class="phone-connect__server">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+            aria-hidden="true">
+            <rect x="3" y="4" width="18" height="12" rx="2" />
+            <path d="M8 20h8m-4-4v4" />
+          </svg>
+          <strong>{{ phone.status?.name || shell.profile?.name }}</strong>
+        </div>
+        <p>{{ t('settings.phoneInstructions') }}</p>
+      </div>
       <UiInlineMessage v-if="phone.error || phone.progressError" tone="danger">
         {{ phone.error || phone.progressError }}
       </UiInlineMessage>
-      <UiInlineMessage v-if="phone.progress === 'connected'" tone="success">
-        {{ t('settings.phoneConnected') }}
-      </UiInlineMessage>
-      <template v-if="phone.code && phone.seconds > 0">
-        <img :src="qrUrl" :alt="t('settings.pairingQRCode')" class="phone-qr" />
-        <UiField :label="t('settings.pairingString')">
-          <UiTextarea :model-value="phone.code.text" readonly />
-        </UiField>
-        <p role="status">{{ t('settings.sLeftSingleUse', { seconds: phone.seconds }) }}</p>
-        <UiButton @click="phone.copy()">{{ t('settings.phoneCopy') }}</UiButton>
-        <p v-if="phone.copied" role="status">{{ t('settings.phoneCopied') }}</p>
-      </template>
-      <template v-if="phone.progress === 'connected'">
-        <UiField :label="t('settings.deviceName')">
-          <UiInput v-model="deviceName" maxlength="40" />
-        </UiField>
-        <UiButton :disabled="!deviceName.trim() || phone.busy" @click="phone.rename(deviceName)">
-          {{ t('settings.phoneSave') }}
-        </UiButton>
-      </template>
-      <template v-else-if="phone.status && !phone.busy">
-        <p>{{ t('settings.phoneDirect') }}: {{ phone.status.direct.error
-          || (phone.status.direct.state === 'online'
-            ? t('settings.phoneDirectEnabled') : t('settings.phoneDirectDisabled')) }}</p>
-        <UiDisclosureButton v-if="!directAttention" v-model:open="directOpen" :controls="directControls">
-          {{ t('settings.phoneDirectSettings') }}
-        </UiDisclosureButton>
-        <section v-if="directAttention || directOpen" :id="directControls" class="phone-direct">
-          <p v-if="loopbackOnly">{{ t('settings.phoneLoopbackOnly') }}</p>
-          <p v-if="phone.errorCode === 'choose_address'">{{ t('settings.phoneChooseNetworkHint') }}</p>
-          <UiInlineMessage v-if="!phone.status.networks.length" tone="warning">
-            {{ t('settings.phoneNoNetworks') }}
-            <UiButton variant="text" @click="phone.reload()">
+      <div class="phone-connect__workspace">
+        <section class="phone-code" :aria-label="t('settings.phoneCodeTitle')"
+          :aria-busy="phone.busy || undefined">
+          <h3>{{ t('settings.phoneCodeTitle') }}</h3>
+          <template v-if="phone.progress === 'connected'">
+            <div class="phone-code__stage phone-code__success">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="m8 12 3 3 5-6" />
+              </svg>
+              <p role="status">{{ t('settings.phoneConnected') }}</p>
+            </div>
+            <UiField :label="t('settings.deviceName')">
+              <UiInput v-model="deviceName" maxlength="40" :disabled="phone.busy" />
+            </UiField>
+            <UiButton :disabled="!deviceName.trim()" :loading="phone.busy" @click="phone.rename(deviceName)">
+              {{ t('settings.phoneSave') }}
+            </UiButton>
+          </template>
+          <template v-else>
+            <div class="phone-code__stage">
+              <div v-if="phone.busy" class="phone-code__placeholder" role="status">
+                <UiSpinner role="large" decorative />
+                <p>{{ t('settings.loadingConnections') }}</p>
+              </div>
+              <img v-else-if="phone.code && phone.seconds > 0" :src="qrUrl"
+                :alt="t('settings.pairingQRCode')" class="phone-qr" />
+              <div v-else class="phone-code__placeholder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                  aria-hidden="true">
+                  <path d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6" />
+                  <path d="M7 7h3v3H7zm7 0h3v3h-3zM7 14h3v3H7zm7 0h3v3h-3z" />
+                </svg>
+                <p>{{ phone.progress === 'expired'
+                  ? t('settings.codeExpired') : t('settings.phoneCodeNeedsAccess') }}</p>
+              </div>
+            </div>
+            <template v-if="phone.code && phone.seconds > 0 && !phone.busy">
+              <p class="phone-code__expiry">
+                {{ t('settings.sLeftSingleUse', { seconds: phone.seconds }) }}
+              </p>
+              <UiField :label="t('settings.pairingString')">
+                <UiTextarea :model-value="phone.code.text" readonly rows="3" spellcheck="false" />
+              </UiField>
+              <UiButton @click="phone.copy()">
+                {{ phone.copied ? t('settings.phoneCopied') : t('settings.phoneCopy') }}
+              </UiButton>
+              <span class="ui-visually-hidden" role="status">
+                {{ phone.copied ? t('settings.phoneCopied') : '' }}
+              </span>
+            </template>
+            <UiButton v-if="!phone.status && !phone.busy" @click="phone.start()">
               {{ t('settings.phoneReloadNetworks') }}
             </UiButton>
-          </UiInlineMessage>
-          <UiField :label="t('settings.phoneNetwork')">
-            <UiSelect v-model="network">
-              <option value="">{{ t('settings.phoneChooseNetwork') }}</option>
-              <option v-for="item in phone.status.networks" :key="item.host || item.address"
-                :value="item.host || item.address">
-                {{ item.name }} · {{ item.host || item.address }}
-              </option>
-            </UiSelect>
-          </UiField>
-          <UiField :label="t('settings.phonePort')">
-            <UiNumberInput v-model="port" min="1" max="65535" />
-          </UiField>
-          <p v-if="narrowsWildcard">{{ t('settings.phoneDirectNarrowWarning') }}</p>
-          <div class="phone-direct__actions">
-            <UiButton :disabled="!network" @click="phone.enable(network, Number(port))">
-              {{ phone.status.direct.state === 'online'
-                ? t('settings.phoneApplyDirect') : t('settings.phoneEnable') }}
-            </UiButton>
-            <UiButton v-if="directConfigured" tone="danger" variant="text" @click="phone.disable()">
-              {{ t('settings.phoneDisable') }}
-            </UiButton>
-          </div>
+          </template>
         </section>
-        <template v-if="!phone.code || relayOmitted">
-          <p v-if="phone.progress === 'expired'">{{ t('settings.codeExpired') }}</p>
-          <UiField :label="t('settings.machineAddressOptional')">
-            <UiInput v-model="manual" :placeholder="t('settings.forExampleDeskExample')" />
-          </UiField>
-          <UiField v-if="phone.status.relays.length > 1" :label="t('settings.phoneRelay')">
-            <UiSelect v-model="relayId">
-              <option value="">{{ t('settings.phoneChooseRelay') }}</option>
-              <option v-for="relay in phone.status.relays" :key="relay.id" :value="relay.id">
-                {{ relay.name }}
-              </option>
-            </UiSelect>
-          </UiField>
-          <UiButton @click="refreshCode">{{ t('settings.phoneRefresh') }}</UiButton>
-        </template>
-      </template>
-      <UiInlineMessage v-if="relayOmitted && phone.progress !== 'connected'" tone="warning">
-        {{ t('settings.phoneRelayOmitted') }}
-      </UiInlineMessage>
-      <p v-for="relay in phone.status?.relays ?? []" :key="relay.id">
-        {{ relay.name }}: {{ relayText(relay) }}
-        <span v-if="relayErrorText(relay)"> · {{ relayErrorText(relay) }}</span>
-      </p>
-      <p v-if="phone.status?.source === 'saved'">{{ t('settings.phoneSavedConfig') }}</p>
-      <p>{{ t('settings.phoneReachability') }}</p>
-      <UiButton variant="text" @click="configureRelay">{{ t('settings.phoneConfigureRelay') }}</UiButton>
+
+        <div class="phone-connect__access">
+          <section v-if="!phone.status && phone.busy" class="phone-connect__section phone-connect__loading"
+            role="status" aria-busy="true">
+            <UiSpinner decorative />
+            <p>{{ t('settings.loadingConnections') }}</p>
+          </section>
+          <template v-if="phone.status && phone.progress !== 'connected'">
+            <section class="phone-connect__section">
+              <h3>{{ t('settings.phoneDirect') }}</h3>
+              <p>{{ phone.status.direct.error || (phone.status.direct.state === 'online'
+                ? t('settings.phoneDirectEnabled') : t('settings.phoneDirectDisabled')) }}</p>
+              <UiDisclosureButton v-if="!directAttention" v-model:open="directOpen" :controls="directControls">
+                {{ t('settings.phoneDirectSettings') }}
+              </UiDisclosureButton>
+              <div v-if="directAttention || directOpen" :id="directControls" class="phone-direct">
+                <p v-if="loopbackOnly">{{ t('settings.phoneLoopbackOnly') }}</p>
+                <p v-if="phone.errorCode === 'choose_address'">{{ t('settings.phoneChooseNetworkHint') }}</p>
+                <UiInlineMessage v-if="!phone.status.networks.length" tone="warning">
+                  {{ t('settings.phoneNoNetworks') }}
+                  <UiButton variant="text" :disabled="phone.busy" @click="phone.reload()">
+                    {{ t('settings.phoneReloadNetworks') }}
+                  </UiButton>
+                </UiInlineMessage>
+                <div class="phone-direct__fields">
+                  <UiField :label="t('settings.phoneNetwork')">
+                    <UiSelect v-model="network" :disabled="phone.busy">
+                      <option value="">{{ t('settings.phoneChooseNetwork') }}</option>
+                      <option v-for="item in phone.status.networks" :key="item.host || item.address"
+                        :value="item.host || item.address">
+                        {{ item.name }} · {{ item.host || item.address }}
+                      </option>
+                    </UiSelect>
+                  </UiField>
+                  <UiField :label="t('settings.phonePort')">
+                    <UiNumberInput v-model="port" min="1" max="65535" :disabled="phone.busy" />
+                  </UiField>
+                </div>
+                <p v-if="narrowsWildcard">{{ t('settings.phoneDirectNarrowWarning') }}</p>
+                <div class="phone-direct__actions">
+                  <UiButton tone="accent" :disabled="!network || phone.busy"
+                    @click="phone.enable(network, Number(port))">
+                    {{ phone.status.direct.state === 'online'
+                      ? t('settings.phoneApplyDirect') : t('settings.phoneEnable') }}
+                  </UiButton>
+                  <UiButton v-if="directConfigured" tone="danger" variant="text" :disabled="phone.busy"
+                    @click="phone.disable()">
+                    {{ t('settings.phoneDisable') }}
+                  </UiButton>
+                </div>
+              </div>
+            </section>
+          </template>
+          <section v-if="phone.status?.relays.length" class="phone-connect__section">
+            <h3>{{ t('settings.phoneRelay') }}</h3>
+            <UiInlineMessage v-if="relayOmitted && phone.progress !== 'connected'" tone="warning">
+              {{ t('settings.phoneRelayOmitted') }}
+            </UiInlineMessage>
+            <div v-for="relay in phone.status.relays" :key="relay.id" class="phone-relay">
+              <strong>{{ relay.name }}</strong>
+              <div class="phone-relay__status" :aria-busy="relayPending(relay) || undefined">
+                <UiSpinner v-if="relayPending(relay)" decorative />
+                <p>
+                  {{ relayText(relay) }}
+                  <span v-if="relayErrorText(relay)"> · {{ relayErrorText(relay) }}</span>
+                </p>
+              </div>
+            </div>
+          </section>
+          <section v-if="phone.status && phone.progress !== 'connected' && (!phone.code || relayOmitted)"
+            class="phone-connect__section">
+            <h3>{{ t('settings.phoneCodeAddress') }}</h3>
+            <UiField :label="t('settings.machineAddressOptional')">
+              <UiInput v-model="manual" :placeholder="t('settings.forExampleDeskExample')"
+                :disabled="phone.busy" />
+            </UiField>
+            <UiField v-if="phone.status.relays.length > 1" :label="t('settings.phoneRelay')">
+              <UiSelect v-model="relayId" :disabled="phone.busy">
+                <option value="">{{ t('settings.phoneChooseRelay') }}</option>
+                <option v-for="relay in phone.status.relays" :key="relay.id" :value="relay.id">
+                  {{ relay.name }}
+                </option>
+              </UiSelect>
+            </UiField>
+            <UiButton :disabled="phone.busy" @click="refreshCode">{{ t('settings.phoneRefresh') }}</UiButton>
+          </section>
+          <div class="phone-connect__notes">
+            <p v-if="phone.status?.source === 'saved'">{{ t('settings.phoneSavedConfig') }}</p>
+            <p>{{ t('settings.phoneReachability') }}</p>
+          </div>
+        </div>
+      </div>
     </div>
     <template #footer>
-      <UiButton variant="text" @click="phone.close()">{{ t('settings.close') }}</UiButton>
+      <div class="phone-connect__footer">
+        <UiButton variant="link" @click="configureRelay">{{ t('settings.phoneConfigureRelay') }}</UiButton>
+        <UiButton variant="text" @click="phone.close()">{{ t('settings.close') }}</UiButton>
+      </div>
     </template>
   </UiDialog>
 </template>
@@ -106,7 +181,7 @@
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue';
 
 import { UiButton, UiDialog, UiDisclosureButton, UiField, UiInput, UiNumberInput, UiSelect,
-  UiTextarea, UiInlineMessage, t } from '../../ui.ts';
+  UiTextarea, UiInlineMessage, UiSpinner, t } from '../../ui.ts';
 import { phoneRelayReady, usePhoneAccessStore } from '../../stores/phoneAccess.ts';
 import type { PhoneAccessStatus } from '../../stores/phoneAccess.ts';
 import { useShellStore } from '../../stores/shell.ts';
@@ -215,6 +290,20 @@ function relayErrorText(relay: PhoneAccessStatus['relays'][number]): string {
 }
 
 /**
+ * Индикатор нужен только во время подключения или проверки совместимости.
+ * Выключенный, несовместимый или недоступный маршрут не изображает вечную загрузку.
+ */
+function relayPending(relay: PhoneAccessStatus['relays'][number]): boolean {
+  const compatibility = relay.link.compatibility ?? relay.compatibility;
+  const unavailable = relay.enabled === false || relay.phoneError === 'disabled'
+    || relay.phoneError === 'unsupported_address' || relay.phoneError === 'incompatible'
+    || compatibility === 'unsupported';
+
+  return !unavailable && (relay.link.state === 'connecting'
+    || (relay.link.state === 'online' && compatibility !== 'supported'));
+}
+
+/**
  * Проверка серверного маршрута отделена от действий на телефоне.
  * Причина несовместимости остаётся видимой также при работающем прямом пути.
  */
@@ -248,6 +337,10 @@ function relayText(relay: PhoneAccessStatus['relays'][number]): string {
   return t('settings.phoneRelayOffline');
 }
 
+/**
+ * Переход закрывает секретный код и открывает настройки того же выбранного сервера.
+ * Повторное открытие снова адресует раздел ретрансляторов.
+ */
 function configureRelay(): void {
   phone.close();
   settings.selectPage('connections.devices');
@@ -258,27 +351,155 @@ onBeforeUnmount(phone.close);
 </script>
 
 <style scoped>
-.phone-connect {
+.phone-connect__content {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.phone-connect p,
+.phone-connect h3 {
+  margin: 0;
+}
+.phone-connect h3 {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.phone-connect__intro {
+  display: grid;
+  gap: 10px;
+  color: var(--ink-mid);
+}
+.phone-connect__server {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+}
+.phone-connect__server svg {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+}
+.phone-connect__workspace {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+}
+.phone-code,
+.phone-connect__access,
+.phone-connect__section,
+.phone-direct,
+.phone-connect__notes {
   display: grid;
   gap: 12px;
   min-width: 0;
-  overflow-wrap: anywhere;
 }
-.phone-connect p {
-  margin: 0;
+.phone-code {
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--ground);
 }
-.phone-direct {
+.phone-code__stage {
   display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--radius);
+}
+.phone-code__placeholder,
+.phone-code__success {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 16px;
+  color: var(--ink-mid);
+  text-align: center;
+}
+.phone-code__placeholder svg,
+.phone-code__success svg {
+  width: 40px;
+  height: 40px;
+}
+.phone-code__success {
+  color: var(--good);
+}
+.phone-code__expiry {
+  min-height: 18px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.phone-connect__access {
+  gap: 20px;
+}
+.phone-connect__section + .phone-connect__section {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.phone-connect__section > p,
+.phone-direct > p,
+.phone-relay__status {
+  color: var(--ink-mid);
+}
+.phone-connect__loading,
+.phone-relay__status {
+  display: flex;
+  align-items: flex-start;
   gap: 8px;
+}
+.phone-relay {
+  display: grid;
+  gap: 4px;
+}
+.phone-direct__fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 100px;
+  align-items: end;
+  gap: 10px;
 }
 .phone-direct__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
+.phone-connect__notes {
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+.phone-connect__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  width: 100%;
+}
 .phone-qr {
   display: block;
-  width: min(100%, 320px);
-  margin: auto;
+  width: 100%;
+  height: 100%;
+  padding: 10px;
+  background: #fff;
+  object-fit: contain;
+}
+@media (max-width: 720px) {
+  .phone-connect__workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+  .phone-code {
+    width: min(100%, 320px);
+    justify-self: center;
+  }
 }
 </style>

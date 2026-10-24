@@ -273,3 +273,27 @@ test('ошибка списка задач сохраняет срочные о�
   await store.check();
   assert.deepEqual(harness.dismissed, []);
 });
+
+test('human уведомляет исходным непустым заголовком', async (t) => {
+  const { store, harness } = await makeWatch(t);
+  const title = 'SKEPTIC: проверка просит решение по спорному требованию';
+
+  await store.check(true);
+
+  harness.tasks = [task(8324, {
+    ...NO_PROGRESS,
+    title,
+    hint: 'Полная подсказка для карточки.',
+    presentation: {
+      reason: 'нужно решение человека',
+      summary: 'Откройте вопрос.',
+      details: { what: 'Вопрос исполнителя', action: 'Ответьте.' },
+    },
+  })];
+
+  await store.check();
+  await store.check();
+
+  assert.equal(harness.notifications.length, 1);
+  assert.equal(harness.notifications[0].body, title);
+});

@@ -71,7 +71,7 @@ test('оболочка: интерфейс открыт до сервера, м�
       stubs[`./stores/${file}`] = `export const ${name} = () => globalThis.__gateOther;`;
     }
 
-    for (const name of ['TaskModal', 'DiffModal', 'DocumentModal']) {
+    for (const name of ['TaskModal', 'DiffModal', 'DocumentModal', 'MediaViewer']) {
       stubs[`./views/${name}.vue`] = 'export default { template: `<div />` };';
     }
 

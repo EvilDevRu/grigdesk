@@ -11,6 +11,8 @@ import { json } from './pipeServer.ts';
 import type { UpstreamState } from './upstream.ts';
 import { parseSurfaceTarget, parseMainRequest } from '../../../shared/desktop/surfaceContract.ts';
 import type { MainRequest, SurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
+import type { DesktopExitPreference } from '../desktopExitPreference.ts';
+import { desktopExitApi } from './desktopExitApi.ts';
 
 import { parseToolControl } from '../../../shared/desktop/toolWindowContract.ts';
 import type { ToolControl } from '../../../shared/desktop/toolWindowContract.ts';
@@ -26,6 +28,7 @@ export interface NativeWindows {
 }
 
 interface ShellOptions {
+  desktopExit?: DesktopExitPreference;
   beforeSelect?(profile: DesktopProfile): Promise<void>;
   nativeWindows?: NativeWindows;
   profiles: Profiles;
@@ -102,6 +105,7 @@ export function createShellApi(options: ShellOptions) {
     address: profile.address,
     status: states.get(profile.id)?.status || 'none',
   });
+  const unsubscribeExit = options.desktopExit?.subscribe(changed);
   /**
    * Публичный снимок содержит только сведения, нужные интерфейсу.
    * Закрытый ключ, pin и внутренние порты профилей не уходят в renderer.
@@ -113,6 +117,7 @@ export function createShellApi(options: ShellOptions) {
 
     return {
       rev,
+      ...(options.desktopExit ? { desktopExit: { skipConfirmation: options.desktopExit.get() } } : {}),
       ...(options.systemLanguage === undefined ? {} : {
         locale: {
           preference: options.profiles.settings.uiLanguage ?? 'system',
@@ -349,6 +354,12 @@ export function createShellApi(options: ShellOptions) {
 
       const body = await readBody(req, locale);
 
+      if (req.method === 'POST' && pathname === '/__shell/exit-preference') {
+        await desktopExitApi(res, body, options.desktopExit, state);
+
+        return;
+      }
+
       if (req.method === 'POST' && pathname === '/__shell/locale') {
         const preference = body.preference;
 
@@ -548,6 +559,7 @@ export function createShellApi(options: ShellOptions) {
      */
     close() {
       closed = true;
+      unsubscribeExit?.();
 
       for (const cancel of retries.values()) {
         cancel();

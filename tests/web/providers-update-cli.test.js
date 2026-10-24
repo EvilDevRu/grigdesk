@@ -1,116 +1,80 @@
-// Установка новой версии CLI исполнителя. Кнопок теперь две — в плашке настроек и во
-// всплывашке топбара, — поэтому ход и его итог живут в сторе: смысл проверки в том, что
-// вторая кнопка не начнёт свою установку поверх чужой и что отказ доезжает текстом.
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { after, test } from 'node:test';
 
-import { compileModule, webFile } from './helpers/compile-vue.js';
+import { clientFixture, closeClientBrowser, card, job, snapshot } from './helpers/providerInstallFixture.js';
 
-const STORE_PATH = webFile('src/stores/providers.ts');
-
-/**
- * Проверяет настоящий стор с изолированной сетью для каждого сценария установки.
- * Общая обработка ошибок остаётся продуктовой, чтобы не менять семантику отказов.
- */
-async function providersStore(t, api) {
-  globalThis.__providersStoreApi = api;
-
-  const module = await compileModule(STORE_PATH, {
-    stubs: {
-      '../shared/apiClient.ts': `export const api = globalThis.__providersStoreApi;
-        export { failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,
-    },
-  });
-  const { createPinia, setActivePinia } = await import(
-    '../../web/node_modules/pinia/dist/pinia.mjs'
-  );
-
-  setActivePinia(createPinia());
-
-  const store = module.useProvidersStore();
-
-  t.after(() => {
-    store.$dispose();
-    delete globalThis.__providersStoreApi;
-  });
-
-  return store;
-}
+after(closeClientBrowser);
 
 test('удачная установка называет обе версии и перечитывает реестр', async (t) => {
-  const calls = [];
-  const store = await providersStore(t, {
-    async get(path) {
-      calls.push(path);
-      return { providers: [{ id: 'claude', version: '2.1.259' }] };
-    },
-    async post(path) {
-      calls.push(path);
-      return { ok: true, changed: true, before: '2.1.258', after: '2.1.259' };
-    },
-  });
+  const { providers, store, calls } = await clientFixture(t);
 
-  const result = await store.updateCli('claude');
+  await providers.updateCli(card.id);
+  assert.equal(providers.updating, 'claude');
+  store.applySnapshot(snapshot(null, 2, {
+    claude: job({
+      status: 'succeeded',
+      after: '2.0.0',
+      outcome: 'updated',
+      finishedAt: 1_700_000_001_000
+    }),
+  }));
+  await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(result, {
-    type: 'ok',
-    text: 'Обновлён: 2.1.258 → 2.1.259. Список моделей пересобран.',
-    changed: true,
-  });
-  assert.deepEqual(store.updateResults.claude, result);
-  assert.equal(store.updating, '', 'ход не закрыт — обе кнопки остались бы заблокированными');
-  assert.deepEqual(calls, ['/api/providers/claude/update', '/api/providers?refresh=1'],
-    'каталог моделей задаёт версия CLI, поэтому реестр обязан перечитаться принудительно');
+  const result = providers.updateResults.claude;
+
+  assert.equal(result.type, 'ok');
+  assert.equal(result.changed, true);
+  assert.match(result.text, /1\.0\.0.*2\.0\.0/u);
+  assert.equal(providers.updating, '');
+  assert.ok(calls.gets.includes('/api/providers?refresh=1'));
+  assert.equal(calls.posts.length, 1);
+  assert.equal(calls.posts[0].url, '/api/providers/claude/update/start');
 });
 
 test('чужая установка не начинается поверх идущей', async (t) => {
-  const posts = [];
-  let release = null;
-  const store = await providersStore(t, {
-    async get() { return { providers: [] }; },
-    async post(path) {
-      posts.push(path);
-      await new Promise((resolve) => { release = resolve; });
-      return { ok: true, changed: false, after: '1.0.0' };
-    },
-  });
+  const { providers, calls } = await clientFixture(t);
 
-  const first = store.updateCli('claude');
-
-  await Promise.resolve();
-  assert.equal(store.updating, 'claude');
-
-  const second = await store.updateCli('codex');
-
-  assert.deepEqual(second, { ok: false, error: 'другой CLI уже обновляется' });
-  assert.deepEqual(posts, ['/api/providers/claude/update'], 'вторая установка всё-таки ушла');
-
-  release();
-  await first;
-  assert.equal(store.updating, '');
+  await providers.updateCli('claude');
+  assert.equal(providers.updating, 'claude');
+  await providers.updateCli('codex');
+  assert.equal(calls.posts.length, 1, 'Вторая установка ушла поверх серверного active');
+  assert.equal(providers.updating, 'claude');
 });
 
 test('отказ установки доезжает текстом, а не молчанием', async (t) => {
-  const store = await providersStore(t, {
-    async get() { return { providers: [] }; },
-    async post() { return { ok: false, changed: false, output: 'npm ERR! code EACCES' }; },
-  });
+  const { providers, store } = await clientFixture(t);
 
-  const result = await store.updateCli('kimi');
+  await providers.updateCli('claude');
+  store.applySnapshot(snapshot(null, 2, {
+    claude: job({
+      status: 'failed',
+      error: {
+        code: 'command_failed',
+        message: 'npm ERR! code EACCES'
+      },
+      outputTail: 'npm ERR! code EACCES',
+      finishedAt: 1_700_000_001_000,
+    }),
+  }));
+
+  const result = providers.updateResults.claude;
 
   assert.equal(result.type, 'err');
   assert.match(result.text, /npm ERR! code EACCES/u);
-  assert.equal(result.changed, false, 'по этому итогу всплывашка и решает, показывать ли строку');
+  assert.equal(result.changed, false);
 });
 
 test('упавший запрос не оставляет исполнителя в состоянии установки', async (t) => {
-  const store = await providersStore(t, {
-    async get() { return { providers: [] }; },
-    async post() { throw new Error('сеть недоступна'); },
+  const { providers, calls, store } = await clientFixture(t, {
+    post: async () => {
+      throw new Error('сеть недоступна');
+    },
+    get: async () => snapshot(),
   });
 
-  const result = await store.updateCli('claude');
-
-  assert.deepEqual(result, { type: 'err', text: 'сеть недоступна', changed: false });
-  assert.equal(store.updating, '');
+  await providers.updateCli('claude');
+  assert.ok(calls.gets.includes('/api/providers/installations/current'), 'Исход POST не сверили с сервером');
+  assert.equal(providers.updating, '');
+  assert.equal(store.snapshot.active, null);
+  assert.equal(calls.posts.length, 1, 'Потерянный запрос повторён автоматически');
 });

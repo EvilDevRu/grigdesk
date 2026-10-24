@@ -503,10 +503,9 @@ test('признак разбора и вход в решение видны и 
 
   assert.equal(wrapper.get('.stalled .sarbnote').text().includes('решать тебе'), true);
   assert.equal(openAnswerButton(wrapper).exists(), true, 'вход в решение доступен и здесь');
-  // Заголовок и подсказка остановки в развёрнутом виде не повторяются: их говорит
-  // плашка над самой схемой, и вторая копия рядом была бы шумом.
-  assert.equal(wrapper.find('.stalled .stitle').exists(), false);
-  assert.equal(wrapper.find('.stalled .shint').exists(), false);
+  // Причина теперь принадлежит единственной панели карточки.
+  // Вход в отдельное решение арбитра остаётся в той же панели.
+  assert.match(wrapper.get('.stalled').text(), /замкнутый набор|исправления|замечани/);
 });
 
 // Кнопки действия — та же потеря: развернув карточку, человек лишался и «разобрать и

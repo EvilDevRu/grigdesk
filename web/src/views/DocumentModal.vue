@@ -1,6 +1,7 @@
 <template>
+  <!-- Картинки и видео показывает MediaViewer во весь экран; здесь только документы. -->
   <UiDialog
-    :open="preview.visible"
+    :open="Boolean(preview.href)"
     class="document-dialog"
     layer="document"
     initial-focus="#document-dialog-title"
@@ -15,9 +16,6 @@
       <div class="document-dialog__header">
         <div class="document-dialog__title">
           <span id="document-dialog-title" tabindex="-1">{{ title }}</span>
-          <small v-if="preview.image" class="mono">Изображение из чата</small>
-          <small v-else-if="preview.video" class="mono">Фрагмент записи</small>
-
         </div>
         <UiIconButton
           role="embedded"
@@ -39,21 +37,7 @@
       </div>
     </template>
 
-    <div v-if="preview.image" class="image-preview">
-      <img :src="preview.image.src" :alt="preview.image.name" />
-    </div>
-    <!-- Видео открывают, чтобы посмотреть, поэтому оно стартует само. Браузер вправе
-         отказать автозапуску со звуком — тогда остаются обычные controls. -->
-    <div v-else-if="preview.video" class="image-preview video-preview">
-      <video
-        :src="preview.video.src"
-        controls
-        autoplay
-        playsinline
-        preload="metadata"
-      ></video>
-    </div>
-    <div v-else-if="resolving" class="document-state">
+    <div v-if="resolving" class="document-state">
       <UiSpinner decorative />
       Проверяю ссылку…
     </div>
@@ -100,8 +84,6 @@ let generation = 0;
 
 const title = computed(
   () =>
-    preview.image?.name ||
-    preview.video?.name ||
     documentValue.value?.name ||
     documentPath.value.split('/').filter(Boolean).at(-1) ||
     'Документ',
@@ -239,38 +221,6 @@ function onDialogOpenChange(open: boolean): void {
 .document-panel {
   flex: 1;
   min-height: 0;
-}
-
-.image-preview {
-  display: grid;
-  flex: 1;
-  place-items: center;
-  min-height: 0;
-  padding: 20px;
-  overflow: auto;
-  background: color-mix(in srgb, var(--ground) 92%, #000);
-}
-
-.image-preview img {
-  display: block;
-  width: auto;
-  max-width: 100%;
-  height: auto;
-  max-height: 100%;
-  object-fit: contain;
-  border-radius: 8px;
-  box-shadow: 0 12px 44px #0008;
-}
-
-.video-preview video {
-  display: block;
-  width: auto;
-  max-width: 100%;
-  height: auto;
-  max-height: 100%;
-  border-radius: 8px;
-  background: #000;
-  box-shadow: 0 12px 44px #0008;
 }
 
 .document-state {

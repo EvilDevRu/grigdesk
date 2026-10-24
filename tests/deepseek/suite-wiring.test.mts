@@ -309,6 +309,7 @@ test('чистый run-all передаёт один ELF всем наборам
     SUITE_INPUT_CACHE: candidate.cacheDir,
     SUITE_INPUT_PAYLOAD: candidate.payloadFile,
     GRIGDESK_DEEPSEEK_NODE_CACHE: nodeCache,
+    GRIGDESK_RUN_ALL_LOCK: path.join(root, 'run-all.lock'),
     SUITE_NODE: process.execPath,
     SUITE_ROOT: root,
     SUITE_PROBE: probe,
