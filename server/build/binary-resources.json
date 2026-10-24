@@ -120,6 +120,11 @@
       "source": "deploy/require-vpn.sh",
       "target": "deploy/require-vpn.sh",
       "kind": "file"
+    },
+    {
+      "source": "server/seed/pipeline-sample",
+      "target": "server/seed/pipeline-sample",
+      "kind": "dir"
     }
   ]
 }

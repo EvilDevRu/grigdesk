@@ -412,13 +412,16 @@ PY
 
 _route_v2_require_delivery_context() {
   local context=$1 node=$2
-  python3 - "$context" "$node" <<'PY'
+  python3 - "$context" "$node" "$FACTORY_HOME/lib" <<'PY'
 import json
 import os
 import stat
 import sys
 
-path, node = sys.argv[1:]
+path, node, library = sys.argv[1:]
+sys.dont_write_bytecode = True
+sys.path.insert(0, library)
+from delivery_contract import validate as validate_strategy
 try:
     fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
     info = os.fstat(fd)
@@ -437,6 +440,13 @@ if not isinstance(delivery, dict) or delivery.get("mode") not in {"disabled", "p
 actions = delivery.get("actions")
 targets = delivery.get("targetBranches")
 allowed_actions = {"commit", "push", "pull-request", "task-comment"}
+strategy = delivery.get("strategy")
+if strategy is not None:
+    try:
+        validate_strategy(strategy, actions)
+    except (ValueError, TypeError):
+        raise SystemExit(78)
+    allowed_actions.add("merge")
 if (
     not isinstance(actions, list)
     or any(not isinstance(action, str) for action in actions)
@@ -460,7 +470,7 @@ if node == "ship":
     if (
         delivery["mode"] != "publish"
         or acceptance != "approved"
-        or not {"commit", "push", "pull-request"}.issubset(actions)
+        or (strategy is None and not {"commit", "push", "pull-request"}.issubset(actions))
         or not targets
     ):
         raise SystemExit(78)

@@ -1,6 +1,7 @@
 // Единая конфигурация сервера GrigDesk.
 // Всё, что зависит от машины/окружения, — только здесь (задел «сменный мозг»).
 import os from 'node:os';
+import { pipelineSampleDirectory } from './lib/pipelineSample.ts';
 import { dataHome as resolveDataHome, dataPath, envFilePath } from '../../shared/runtime/dataHome.ts';
 import path from 'node:path';
 import { deepSeekDistributionMode } from './lib/deepseek/distribution.ts';
@@ -84,6 +85,7 @@ export const config = {
   // Пути «мозга».
   // Корень репозитория GrigDesk — от него считаются скрипты запуска и ресурсы кода.
   rootDir,
+  pipelineSampleDir: pipelineSampleDirectory(),
   installationBin,
   dataHome,
   dataStateDir,
