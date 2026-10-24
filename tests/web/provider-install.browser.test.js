@@ -369,7 +369,13 @@ test('телефон и окно сохраняют доступность де�
 
           await action.waitFor();
 
-          for (const control of [action, dialog.getByRole('button', { name: /^(Закрыть|Close)$/iu })]) {
+          const controls = [action, dialog.getByRole('button', { name: /^(Закрыть|Close)$/iu })];
+
+          if (status === 'failed') {
+            controls.push(dialog.getByRole('button', { name: /^(Повторить|Retry)$/u }));
+          }
+
+          for (const control of controls) {
             const bounds = await control.boundingBox();
 
             assert.ok(bounds && bounds.x >= 0 && bounds.y >= 0);
@@ -382,4 +388,39 @@ test('телефон и окно сохраняют доступность де�
       });
     }
   }
+});
+
+test('Повторить в окне ошибки Kimi заново запускает обновление', { timeout: 60000 }, async (t) => {
+  const fixture = await browserFixture(t, true);
+  const page = await fixture.newPage();
+  const area = await openEntry(page, 'kimi', 'topbar');
+  const provider = fixture.cards.find((item) => item.id === 'kimi');
+
+  await confirmStart(page, area, provider, 'update', fixture.posts);
+  await fixture.publish(snapshot(null, 5, {
+    kimi: job({
+      providerId: 'kimi',
+      status: 'failed',
+      command: provider.installation.updateCommand,
+      error: { code: 'command_exit_failed', message: 'curl: (35) unexpected eof while reading' },
+      finishedAt: 1_700_000_001_000,
+    }),
+  }));
+
+  const dialog = page.locator('[data-role="provider-install-dialog"]');
+
+  await dialog.getByRole('button', { name: 'Повторить', exact: true }).click();
+
+  const confirmation = page.getByRole('dialog').last();
+
+  await confirmation.getByRole('button', { name: 'Обновить', exact: true }).waitFor();
+  assert.equal(fixture.posts.length, 1, 'Повтор запущен до подтверждения команды');
+  assert.ok((await confirmation.textContent()).includes(provider.installation.updateCommand));
+  await confirmation.getByRole('button', { name: 'Обновить', exact: true }).click();
+  await dialog.getByRole('progressbar').waitFor();
+  assert.deepEqual(fixture.posts.map((entry) => entry.pathname), [
+    '/api/providers/kimi/update/start',
+    '/api/providers/kimi/update/start',
+  ]);
+  assert.equal(await dialog.getByRole('button', { name: 'Повторить', exact: true }).count(), 0);
 });

@@ -1,5 +1,5 @@
 <template>
-  <div v-if="sess" class="cs" :class="{ frozen }" :style="composerStyle"
+  <div v-if="sess" class="cs" :class="{ frozen, 'options-open': optionsOpen }" :style="composerStyle"
        @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
     <!-- Оверлей при перетаскивании файла -->
     <div v-if="dragOver" class="drop-overlay">
@@ -73,6 +73,14 @@
           </template>
         </UiTooltip>
         <ChatWorkdir :sid="sid" />
+        <UiIconButton class="phone-options" role="rail" :label="t('core.conversationOptions')"
+                      :pressed="optionsOpen" :aria-expanded="optionsOpen"
+                      @click="optionsOpen = !optionsOpen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" aria-hidden="true">
+            <path d="M4 7h16M4 17h16M8 4v6M16 14v6" />
+          </svg>
+        </UiIconButton>
       </div>
       <div class="col bar">
         <!-- Последний завершённый запуск. «Факт» пишем только когда модель назвал сам CLI;
@@ -662,6 +670,7 @@ import ChatPermission from './ChatPermission.vue';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
 import {
   confirmDialog,
+  t,
   UiButton,
   UiFilePicker,
   UiIconButton,
@@ -686,6 +695,7 @@ const props = defineProps({
 // back — «назад к списку чатов»: кнопка живёт в шапке, но видна только на узком экране,
 // где список и чат делят одну колонку (показом управляет CSS, не JS).
 const emit = defineEmits<{ back: [] }>();
+const optionsOpen = ref(false);
 
 const chat = useChatStore();
 const tasks = useTasksStore();
@@ -2585,6 +2595,7 @@ function skipQuestion() {
 .hrow { display: flex; align-items: center; column-gap: var(--chat-head-gap); min-width: 0; }
 /* Назад к списку: на широком экране список виден всегда, кнопка нужна только на мобиле */
 .back { display: none; flex: none; margin: 0 calc(8px - var(--chat-head-gap)) 0 -6px; place-items: center; }
+.phone-options { display: none; flex: none; }
 /* Название чата — как заголовок карточки, рядом карандаш переименования */
 .ttl { display: flex; align-items: center; gap: 3px; flex: 1 1 auto; min-width: 0; }
 .ctitle { font-size: 15px; font-weight: 600; cursor: default; line-height: 1.3;
@@ -2903,5 +2914,36 @@ function skipQuestion() {
   .msg.user { max-width: 92%; }
   .msg .text { font-size: 14px; }
   .m-atts img { max-width: 62vw; }
+}
+
+/* При чтении на телефоне шапка занимает один ряд. Настройки раскрываются явно,
+   сохраняя те же экземпляры controls и все предупреждения о неизвестной модели. */
+@media (max-width: 600px) {
+  .cs-top { min-height: 56px; padding-block: 6px; flex: none; }
+  .hrow { column-gap: 6px; row-gap: 4px; }
+  .ttl { flex: 1 1 0; }
+  .ctitle { font-size: 16px; }
+  .phone-options { display: grid; order: 2; }
+  .task-tip { order: 3; }
+  .hrow > :deep([data-context='chat-workdir']) { order: 4; }
+  .cs:not(.options-open) .task-tip,
+  .cs:not(.options-open) .tedit,
+  .cs:not(.options-open) :deep([data-context='chat-workdir']) { display: none; }
+  .cs:not(.options-open) .bar > :not(.factbar) { display: none; }
+  .cs:not(.options-open) .bar:not(:has(.warn)) { display: none; }
+  .cs.options-open .ttl { flex-basis: calc(100% - 100px); }
+  .bar { gap: 6px 12px; }
+  .cs-body { min-height: 0; scrollbar-gutter: auto; padding-inline: var(--chat-gutter); }
+  .cs-input { padding: 8px var(--chat-gutter); flex: none; }
+  .cs-resize { display: none; }
+  .composer { flex-wrap: wrap; padding: 6px; }
+  .composer > :deep([data-role='chat-composer']) {
+    flex: 1 0 100%;
+    order: -1;
+  }
+  .composer > :deep([data-role='chat-attachment']) { margin-right: auto; }
+  .cs { --chat-reply-size: .9375rem; --chat-reply-heading-size: 1rem; }
+  .conversation-group.turn { padding-left: 6px; }
+  .agent-reply { gap: 4px; padding-left: 0; }
 }
 </style>

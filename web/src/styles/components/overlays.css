@@ -484,6 +484,16 @@
 }
 
 @media (max-width: 600px) {
+  /* Общая высота следует visualViewport: экранная клавиатура не перекрывает
+     footer настроек, карточки задачи или формы любого другого раздела. */
+  .ui-dialog-overlay,
+  .ui-dialog__overlay {
+    bottom: auto;
+    height: var(--app-viewport-height, 100dvh);
+  }
+
+  .ui-dialog { max-height: calc(var(--app-viewport-height, 100dvh) - 24px); }
+
   /* UiDialog выставляет пустой boolean-атрибут. Проверяем наличие: сравнение с
      'true' оставляло внешний отступ вокруг панели высотой в целый экран. */
   .ui-dialog__overlay,
@@ -494,8 +504,8 @@
   .ui-dialog__overlay .ui-dialog,
   .ui-dialog-overlay[data-mobile-fullscreen] .ui-dialog {
     width: 100%;
-    height: 100dvh;
-    max-height: 100dvh;
+    height: 100%;
+    max-height: 100%;
     border-width: 0;
     border-radius: 0;
   }
@@ -522,8 +532,8 @@
   .ui-dialog-overlay[data-size='workspace']
     .ui-dialog[data-role='settings-modal'] {
     width: 100%;
-    height: 100dvh;
-    max-height: 100dvh;
+    height: 100%;
+    max-height: 100%;
     border-width: 0;
     border-radius: 0;
   }
@@ -539,7 +549,7 @@
   .ui-dialog-overlay[data-mobile-sheet] .ui-dialog {
     width: 100%;
     height: auto;
-    max-height: calc(100dvh - max(12px, env(safe-area-inset-top)));
+    max-height: calc(var(--app-viewport-height, 100dvh) - max(12px, env(safe-area-inset-top)));
     border-radius: 14px 14px 0 0;
     border-bottom: 0;
   }

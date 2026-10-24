@@ -1325,4 +1325,33 @@ onUnmounted(() => {
   .stats-summary { display: flex; flex-wrap: wrap; }
   .board:not(.stats-expanded) .stats { display: none; }
 }
+
+/* На телефоне список принадлежит прокрутке страницы: вложенное окно в 58vh
+   мешало долистывать задачи и переходить к контролю и поручениям одним жестом. */
+@media (max-width: 600px) {
+  .board { gap: 10px; }
+  .cols { gap: 10px; }
+  .col.primary, .col.secondary { flex-basis: 100%; padding: 10px; }
+  .scroller, .related-list { max-height: none; overflow-y: visible; scrollbar-gutter: auto; }
+  .tasks .trow, .tasks .trow.without-analysis {
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 8px;
+    padding: 12px 0;
+    border-radius: 0;
+  }
+  .tasks .trow .ttext { grid-column: 1; grid-row: 1; }
+  .tasks .trow > :deep(.favbtn) { grid-column: 2; grid-row: 1; margin-top: 0; }
+  .tasks .trow .task-triage { grid-column: 1; grid-row: 2; }
+  .tasks .trow .ttime {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+  .task-name { font-size: 15px; line-height: 1.45; }
+  .task-meta { font-size: 12px; gap: 4px 8px; }
+  .active-timers { padding: 10px; }
+  .charts-head { flex-wrap: wrap; gap: 8px; }
+}
 </style>

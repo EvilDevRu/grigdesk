@@ -339,6 +339,94 @@ test('fallback сохраняет старую команду', async (t) => {
   assert.equal(fixture.calls.posts.length, 0);
 });
 
+test('Повторить сохраняет вид операции и открывает новый запуск после подтверждения', async (t) => {
+  for (const status of ['failed', 'interrupted']) {
+    for (const operation of ['install', 'update']) {
+      await t.test(`${status}/${operation}`, async (scenario) => {
+        const fixture = await dialogFixture(scenario, job({
+          status,
+          operation,
+          finishedAt: 1_700_000_001_000,
+        }), {
+          post: async () => snapshot(job({ id: 'retry-job', operation }), 4),
+        });
+
+        fixture.module.setUiLocale('en');
+        await fixture.flushPromises();
+        assert.equal(button(fixture.wrapper, /^Retry$/u).attributes('disabled'), undefined);
+        fixture.module.setUiLocale('ru');
+        await fixture.flushPromises();
+        await button(fixture.wrapper, /^Повторить$/u).trigger('click');
+        await fixture.flushPromises();
+
+        assert.equal(fixture.calls.confirmations.length, 1);
+        assert.equal(fixture.calls.confirmations[0].details.code,
+          card.installation[`${operation}Command`]);
+        assert.deepEqual(fixture.calls.posts, [{
+          url: `/api/providers/claude/${operation}/start`,
+          body: {},
+        }]);
+        assert.equal(fixture.store.snapshot.active.id, 'retry-job');
+        assert.equal(fixture.wrapper.findAll('button').some((item) => item.text() === 'Повторить'), false);
+        assert.equal(fixture.calls.terminals.length, 0);
+        fixture.wrapper.unmount();
+      });
+    }
+  }
+});
+
+test('отмена повтора сохраняет ошибку без новой команды', async (t) => {
+  const fixture = await dialogFixture(t, job({
+    status: 'failed',
+    error: { code: 'network', message: 'Обрыв соединения' },
+    finishedAt: 1_700_000_001_000,
+  }), { confirm: false });
+
+  await button(fixture.wrapper, /^Повторить$/u).trigger('click');
+  await fixture.flushPromises();
+  assert.equal(fixture.calls.confirmations.length, 1);
+  assert.equal(fixture.calls.posts.length, 0);
+  assert.match(fixture.wrapper.text(), /Обрыв соединения/u);
+  assert.equal(button(fixture.wrapper, /^Повторить$/u).attributes('disabled'), undefined);
+});
+
+test('повтор недоступен при занятой установке, блокировке, неизвестном исходе и отправке POST', async (t) => {
+  const final = job({ status: 'failed', finishedAt: 1_700_000_001_000 });
+  const fixture = await dialogFixture(t, final);
+
+  fixture.store.applySnapshot(snapshot(job({ providerId: 'codex' }), 4, { claude: final }));
+  await fixture.flushPromises();
+  assert.equal(button(fixture.wrapper, /^Повторить$/u).attributes('disabled'), '');
+  await button(fixture.wrapper, /^Повторить$/u).trigger('click');
+  fixture.store.applySnapshot(snapshot(null, 5, { claude: final }, 'Состояние недоступно'));
+  await fixture.flushPromises();
+  assert.equal(button(fixture.wrapper, /^Повторить$/u).attributes('disabled'), '');
+  await button(fixture.wrapper, /^Повторить$/u).trigger('click');
+  fixture.store.applySnapshot(snapshot(null, 6, { claude: final }));
+  fixture.store.uncertain = true;
+  await fixture.flushPromises();
+  assert.equal(button(fixture.wrapper, /^Повторить$/u).attributes('disabled'), '');
+  await button(fixture.wrapper, /^Повторить$/u).trigger('click');
+  fixture.store.uncertain = false;
+  fixture.store.pending = 'claude';
+  await fixture.flushPromises();
+  assert.equal(button(fixture.wrapper, /^Повторить$/u).attributes('disabled'), '');
+  await button(fixture.wrapper, /^Повторить$/u).trigger('click');
+  assert.equal(fixture.calls.confirmations.length, 0);
+  assert.equal(fixture.calls.posts.length, 0);
+});
+
+test('успешный итог не предлагает повтор установки', async (t) => {
+  const fixture = await dialogFixture(t, job({
+    status: 'succeeded',
+    outcome: 'updated',
+    after: '2.0.0',
+    finishedAt: 1_700_000_001_000,
+  }));
+
+  assert.equal(fixture.wrapper.findAll('button').some((item) => item.text() === 'Повторить'), false);
+});
+
 test('dirty-настройки могут отменить переход', async (t) => {
   let requested = 0;
   const settings = {

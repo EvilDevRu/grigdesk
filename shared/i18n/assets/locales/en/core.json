@@ -1,4 +1,7 @@
 {
+  "sections": "Sections",
+  "systemStatus": "System status",
+  "conversationOptions": "Conversation settings",
   "toolReturnNarrow": "Expand the main window to return the tool to its column.",
   "toolReturnFailed": "Could not return the panel.",
   "toolUnavailable": "The tool is unavailable. Check plugin settings.",

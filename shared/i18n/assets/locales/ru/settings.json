@@ -1561,6 +1561,7 @@
   "providerInstallationOldTerminal": "Если ранее открытый терминал пишет «команда не найдена», его нужно закрыть и открыть снова.",
   "providerInstallationUnknown": "Состояние установки недоступно. Обновите состояние перед новым запуском.",
   "providerInstallationRefresh": "Обновить состояние",
+  "providerInstallationRetryAction": "Повторить",
   "providerInstallationOutput": "Вывод команды",
   "providerInstallationBackground": "Окно можно закрыть — установка продолжится",
   "providerInstallationBusy": "Уже идёт установка исполнителя",

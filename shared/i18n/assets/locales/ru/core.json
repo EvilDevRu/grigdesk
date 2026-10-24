@@ -1,4 +1,7 @@
 {
+  "sections": "Разделы",
+  "systemStatus": "Состояние системы",
+  "conversationOptions": "Настройки чата",
   "toolReturnNarrow": "Расширьте главное окно для возврата в колонку.",
   "toolReturnFailed": "Не удалось вернуть панель.",
   "toolUnavailable": "Инструмент недоступен. Проверьте настройки плагинов.",

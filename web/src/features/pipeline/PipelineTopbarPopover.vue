@@ -26,6 +26,7 @@
               {{ issueCount }}
             </span>
           </span>
+          <span class="topbar-status-label">{{ t('core.pipelines') }}</span>
         </UiButton>
       </template>
 

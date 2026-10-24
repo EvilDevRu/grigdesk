@@ -100,10 +100,17 @@
         </UiButton>
         <UiButton
           v-if="fallbackCommand"
-          variant="solid"
+          :variant="retryOperation ? 'outline' : 'solid'"
           tone="accent"
           @click="openTerminal(fallbackCommand)"
         >{{ t('settings.providerInstallationTerminal') }}</UiButton>
+        <UiButton
+          v-if="retryOperation"
+          variant="solid"
+          tone="accent"
+          :disabled="install.busy"
+          @click="install.requestInstall(install.providerId, retryOperation)"
+        >{{ t('settings.providerInstallationRetryAction') }}</UiButton>
         <UiButton
           v-if="loginCommand"
           variant="solid"
@@ -180,6 +187,8 @@ const brandStyle = computed(() => provider.value?.color
   ? { '--provider-install-brand': provider.value.color } : undefined);
 const fallbackCommand = computed(() => install.selectedFailure?.fallbackCommand
   || (job.value && ['failed', 'interrupted'].includes(job.value.status) ? job.value.fallbackCommand : ''));
+const retryOperation = computed(() => install.selectedFailure?.operation
+  || (job.value && ['failed', 'interrupted'].includes(job.value.status) ? job.value.operation : null));
 const loginCommand = computed(() => {
   const finished = job.value?.status === 'succeeded' ? job.value : null;
   const needsLogin = finished?.operation === 'install' || provider.value?.available === false;

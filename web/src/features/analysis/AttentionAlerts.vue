@@ -31,6 +31,7 @@
         </template>
 
         <span class="mono">{{ items.length }}</span>
+        <span class="topbar-status-label">{{ t('core.interruptedEvaluations') }}</span>
       </UiButton>
     </template>
 
