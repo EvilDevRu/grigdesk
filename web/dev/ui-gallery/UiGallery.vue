@@ -271,6 +271,7 @@
         label="Пример прогресса на остановке"
         value-text="3 из 7"
       />
+      <UiProgress indeterminate size="line" label="Пример тонкой линии под шапкой" />
       <UiInlineMessage tone="warning">
         Busy региона не блокирует вложенные controls автоматически.
       </UiInlineMessage>
@@ -372,7 +373,7 @@ import {
 
 const touch = new URLSearchParams(location.search).has('touch');
 
-const variants: UiActionVariant[] = ['solid', 'outline', 'ghost', 'text'];
+const variants: UiActionVariant[] = ['solid', 'outline', 'ghost', 'text', 'link'];
 const tones: UiActionTone[] = ['neutral', 'accent', 'success', 'warning', 'danger'];
 const text = ref('GrigDesk');
 const invalidText = ref('');

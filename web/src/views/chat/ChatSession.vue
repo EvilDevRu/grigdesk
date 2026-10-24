@@ -359,6 +359,7 @@
               <UiButton
                 variant="outline"
                 tone="accent"
+                size="compact"
                 data-role="chat-resume-interrupted"
                 @click="resumeInterrupted"
               >
@@ -713,7 +714,7 @@ function onMarkdownClick(event: MouseEvent) {
       src: image.currentSrc || image.getAttribute('src') || '',
       name: image.getAttribute('alt') || image.getAttribute('title') || 'Изображение',
       mime: '',
-    });
+    }, feedImages(image));
 
     return;
   }
@@ -742,6 +743,10 @@ function isPlainClick(event: MouseEvent) {
     && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 }
 
+/**
+ * Картинка-вложение открывается в просмотре вместе с соседними картинками ленты.
+ * Остальные вложения и клики с модификаторами остаются обычной ссылкой браузера.
+ */
 function onAttachmentClick(event: MouseEvent, attachment: HistoryAttachment) {
   if (!isImg(attachment) || !isPlainClick(event)) {
     return;
@@ -752,7 +757,20 @@ function onAttachmentClick(event: MouseEvent, attachment: HistoryAttachment) {
     src: api.url(attachment.url || ''),
     name: attachment.name || '',
     mime: attachment.mime || '',
-  });
+  }, event.currentTarget instanceof Element ? feedImages(event.currentTarget) : []);
+}
+
+/**
+ * Картинки той же ленты в порядке показа — вложения, картинки ответов и шагов — для
+ * стрелок просмотра. Лента ищется от нажатого элемента, поэтому соседний чат не смешивается.
+ */
+function feedImages(target: Element) {
+  const feed = target.closest('.conversation-group')?.parentElement;
+
+  return feed ? [...feed.querySelectorAll<HTMLImageElement>('.conversation-group img')].map((item) => ({
+    src: item.currentSrc || item.getAttribute('src') || '',
+    name: item.getAttribute('alt') || item.getAttribute('title') || '',
+  })) : [];
 }
 
 // Архивный разговор открывается для чтения прямо из архива. Отправка сообщения

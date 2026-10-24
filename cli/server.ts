@@ -11,7 +11,9 @@ import type { GrigDeskProbe } from '../shared/runtime/grigDeskReadiness.ts';
 import type { CliArgs } from './args.ts';
 import type { Settings } from './commands.ts';
 import { printable, renderText } from './status.ts';
-import { run, runAttached } from './system.ts';
+import { run } from './system.ts';
+import { plainOutput } from './output.ts';
+import type { CliOutput } from './output.ts';
 
 export interface UnitInfo {
   load: string;
@@ -209,20 +211,20 @@ export async function readServer(
  * Ожидает подтверждённый ответ схемы, сохраняя последнее состояние для диагностики срока.
  * Срок проверяется после каждого снимка; падение службы даёт отдельный отказ.
  */
-async function waitForServer(root: string, settings: Settings): Promise<number> {
+async function waitForServer(root: string, settings: Settings, output: CliOutput): Promise<number> {
   const seconds = Number(process.env.GRIGDESK_WAIT_SEC) || 90;
   const deadline = Date.now() + seconds * 1000;
   let state = await readServer(root, settings);
 
   while (true) {
     if (state.state === 'ready') {
-      console.log('Сервер работает');
+      output.write('Сервер работает\n');
 
       return 0;
     }
 
     if (state.state === 'failed') {
-      console.error(printable(state.reason ?? 'Служба упала'));
+      output.error(printable(state.reason ?? 'Служба упала') + '\n');
 
       return 1;
     }
@@ -230,7 +232,7 @@ async function waitForServer(root: string, settings: Settings): Promise<number> 
     if (Date.now() >= deadline) {
       const last = renderText({ server: state }, { color: false }).trim();
 
-      console.error(`Сервер не ответил за ${seconds} с. ${last}`);
+      output.error(`Сервер не ответил за ${seconds} с. ${last}\n`);
 
       return 3;
     }
@@ -244,7 +246,9 @@ async function waitForServer(root: string, settings: Settings): Promise<number> 
  * Управляет только проверенной службой этой копии и не трогает владельца HTTP-порта.
  * Сторож вызывается уровнем команд до чтения состояния и любых внешних эффектов.
  */
-export async function serverCommand(args: CliArgs, root: string, settings: Settings): Promise<number> {
+export async function serverCommand(
+  args: CliArgs, root: string, settings: Settings, output: CliOutput = plainOutput,
+): Promise<number> {
   const action = args.action;
 
   if (action === 'logs') {
@@ -252,8 +256,8 @@ export async function serverCommand(args: CliArgs, root: string, settings: Setti
     const unit = show.code === 0 ? parseShow(show.stdout) : null;
 
     if (unit?.load === 'not-found') {
-      console.error('Служба сервера не установлена; журнал ручного запуска: ' + (process.env.GRIGDESK_LOG
-        || dataPath(dataHome({ env: process.env, home: process.env.HOME || os.homedir() }), 'log')));
+      output.error(('Служба сервера не установлена; журнал ручного запуска: ' + (process.env.GRIGDESK_LOG
+        || dataPath(dataHome({ env: process.env, home: process.env.HOME || os.homedir() }), 'log'))) + '\n');
 
       return 1;
     }
@@ -266,12 +270,12 @@ export async function serverCommand(args: CliArgs, root: string, settings: Setti
     });
 
     if (!unit || unit.load !== 'loaded' || state.state === 'mismatch') {
-      console.error(printable(state.reason ?? 'systemd недоступен'));
+      output.error(printable(state.reason ?? 'systemd недоступен') + '\n');
 
       return 1;
     }
 
-    return runAttached('journalctl', [
+    return output.attached('journalctl', [
       '--user', '-u', UNIT, '-n', String(args.lines), '--no-pager', ...(args.follow ? ['-f'] : []),
     ]);
   }
@@ -279,40 +283,40 @@ export async function serverCommand(args: CliArgs, root: string, settings: Setti
   const state = await readServer(root, settings);
 
   if (action === 'start' && state.state === 'ready') {
-    console.log('Сервер уже работает');
+    output.write('Сервер уже работает\n');
 
     return 0;
   }
 
   if (action === 'start' && state.state === 'starting') {
-    console.log('Сервер уже запускается');
+    output.write('Сервер уже запускается\n');
 
-    return args.wait ? waitForServer(root, settings) : 0;
+    return args.wait ? waitForServer(root, settings, output) : 0;
   }
 
   // Вне службы порт держит сервер приложения GrigDesk или ручной запуск: systemd им не владеет.
   if (state.state === 'ready' && state.managed === false) {
-    console.error('Сервер работает вне службы (приложение GrigDesk или ручной запуск); '
-      + 'systemd им не управляет');
+    output.error(('Сервер работает вне службы (приложение GrigDesk или ручной запуск); '
+      + 'systemd им не управляет') + '\n');
 
     return 1;
   }
 
   if (state.state === 'not_responding' && action === 'start') {
-    console.error('Сервер не отвечает: grigdesk-ctl server restart');
+    output.error('Сервер не отвечает: grigdesk-ctl server restart\n');
 
     return 1;
   }
 
   if (['conflict', 'not_installed', 'mismatch', 'unknown'].includes(state.state) ||
     state.managed !== true) {
-    console.error(printable(state.reason ?? 'Служба сервера недоступна для управления'));
+    output.error(printable(state.reason ?? 'Служба сервера недоступна для управления') + '\n');
 
     return 1;
   }
 
   if (action === 'stop' && state.state === 'stopped') {
-    console.log('Сервер уже остановлен');
+    output.write('Сервер уже остановлен\n');
 
     return 0;
   }
@@ -320,7 +324,7 @@ export async function serverCommand(args: CliArgs, root: string, settings: Setti
   // Слив ходов уже идёт: повторный stop ничего не добавит, а start и restart systemd поставит
   // в очередь за остановкой.
   if (action === 'stop' && state.state === 'stopping') {
-    console.log('Сервер уже останавливается');
+    output.write('Сервер уже останавливается\n');
 
     return 0;
   }
@@ -328,20 +332,20 @@ export async function serverCommand(args: CliArgs, root: string, settings: Setti
   if (action === 'stop' || action === 'restart') {
     const verb = action === 'stop' ? 'Останавливаю' : 'Перезапускаю';
 
-    console.error(`${verb} сервер: идущим ходам агентов дают закончить (до 45 с)…`);
+    output.error(`${verb} сервер: идущим ходам агентов дают закончить (до 45 с)…\n`);
   }
 
   const argv = action === 'start' ? ['--user', 'start', '--no-block', UNIT] : ['--user', action!, UNIT];
   const result = await run('systemctl', argv, action === 'start' ? 10000 : 120000);
 
   if (result.code !== 0) {
-    console.error(printable(result.stderr.trim() || 'systemd отказал в выполнении команды'));
+    output.error(printable(result.stderr.trim() || 'systemd отказал в выполнении команды') + '\n');
 
     return 1;
   }
 
-  console.log(action === 'start' ? 'Запуск сервера запрошен'
-    : action === 'stop' ? 'Сервер остановлен' : 'Сервер перезапущен');
+  output.write((action === 'start' ? 'Запуск сервера запрошен'
+    : action === 'stop' ? 'Сервер остановлен' : 'Сервер перезапущен') + '\n');
 
-  return args.wait ? waitForServer(root, settings) : 0;
+  return args.wait ? waitForServer(root, settings, output) : 0;
 }

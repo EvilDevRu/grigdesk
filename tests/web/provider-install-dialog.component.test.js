@@ -97,6 +97,20 @@ test('общая фаза и live output без выдуманного проц�
   assert.equal(calls.posts.length, 0, 'Закрытие отправляет abort или cancel');
 });
 
+test('номер сетевого повтора переводится и исчезает после фазы установки', async (t) => {
+  const active = job({ retry: { attempt: 2, attempts: 3 } });
+  const fixture = await dialogFixture(t, active);
+
+  assert.match(fixture.wrapper.get('[role="status"]').text(), /Сбой сети.*2 из 3/u);
+  fixture.module.setUiLocale('en');
+  await fixture.flushPromises();
+  assert.match(fixture.wrapper.get('[role="status"]').text(), /Network error.*2 of 3/u);
+  assert.equal(fixture.calls.posts.length, 0, 'Перевод запустил новый installer');
+  fixture.store.applySnapshot(snapshot({ ...active, stage: 'version' }, 4));
+  await fixture.flushPromises();
+  assert.equal(fixture.wrapper.find('[role="status"]').exists(), false);
+});
+
 test('четыре исхода и interrupted видны на RU и EN', async (t) => {
   const cases = [
     {

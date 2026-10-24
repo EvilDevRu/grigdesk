@@ -53,7 +53,8 @@ def main():
     """
     config = json.loads(sys.stdin.readline())
     master, slave = os.openpty()
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, config['columns'], 0, 0))
+    rows = config.get('rows', 24)
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', rows, config['columns'], 0, 0))
     before = snapshot(slave)
 
     def terminal_child():
@@ -103,7 +104,7 @@ def main():
                         os.write(master, base64.b64decode(command['write']))
                     if 'resize' in command:
                         fcntl.ioctl(slave, termios.TIOCSWINSZ,
-                                    struct.pack('HHHH', 24, command['resize'], 0, 0))
+                                    struct.pack('HHHH', rows, command['resize'], 0, 0))
                         os.kill(child.pid, signal.SIGWINCH)
                     if 'signal' in command and child.poll() is None:
                         os.kill(child.pid, getattr(signal, command['signal']))

@@ -6,6 +6,8 @@ import { isPortableBundle } from '../shared/node/bundleLayout.ts';
 import type { Settings } from './commands.ts';
 import { printable } from './status.ts';
 import { executable, pidAlive, readLink, spawnDetached } from './system.ts';
+import { plainOutput } from './output.ts';
+import type { CliOutput } from './output.ts';
 
 export type WindowStateName = 'open' | 'closed' | 'not_installed' | 'unknown';
 
@@ -74,9 +76,11 @@ export async function readWindow(root: string, env: NodeJS.ProcessEnv): Promise<
  * Открывает установленное окно, не дожидаясь сети или состояния systemd.
  * Из .env передаётся только путь ключа; прочее окружение остаётся окружением CLI.
  */
-export async function openWindow(root: string, settings: Settings, env: NodeJS.ProcessEnv): Promise<number> {
+export async function openWindow(
+  root: string, settings: Settings, env: NodeJS.ProcessEnv, output: CliOutput = plainOutput,
+): Promise<number> {
   if (!env.DISPLAY && !env.WAYLAND_DISPLAY) {
-    console.error('Нет графического сеанса');
+    output.error('Нет графического сеанса\n');
 
     return 1;
   }
@@ -84,7 +88,7 @@ export async function openWindow(root: string, settings: Settings, env: NodeJS.P
   const app = windowAppPath(root);
 
   if (!await executable(app)) {
-    console.error('Окно GrigDesk не установлено: grigdesk-ctl desktop install');
+    output.error('Окно GrigDesk не установлено: grigdesk-ctl desktop install\n');
 
     return 1;
   }
@@ -99,11 +103,11 @@ export async function openWindow(root: string, settings: Settings, env: NodeJS.P
     const args = await isPortableBundle(root) ? [] : [`--grigdesk-url=${settings.origin}/`];
 
     await spawnDetached(app, args, childEnv);
-    console.log('Окно открывается');
+    output.write('Окно открывается\n');
 
     return 0;
   } catch (error) {
-    console.error(printable(error instanceof Error ? error.message : String(error)));
+    output.error(printable(error instanceof Error ? error.message : String(error)) + '\n');
 
     return 1;
   }

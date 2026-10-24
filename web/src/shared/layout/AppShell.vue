@@ -1,6 +1,6 @@
 <template>
-  <div class="shell">
-    <aside class="sidebar">
+  <div class="shell" :class="{ 'without-machine': !hasMachine }">
+    <aside v-if="hasMachine" class="sidebar">
       <nav class="nav">
         <router-link v-for="item in nav" :key="item.to" :to="item.to" class="navitem" data-ui-shell-nav active-class="active"
                      :aria-label="navTitle(item)"
@@ -322,7 +322,6 @@
           <template #trigger>
             <UiPressable class="netbox mono" data-context="topbar-network" :aria-label="t('core.networkInformation')">
               <span class="flag">{{ flagOf(sys.net!.countryCode) }}</span>
-              <span class="ip">{{ sys.net!.ip }}</span>
             </UiPressable>
           </template>
           <template #default>
@@ -336,7 +335,8 @@
         <ConnectionButton :icon="ICONS.connection" />
         <PhoneConnectButton />
         <AlertHistoryPopover />
-        <UiIconButton :label="t('settings.settings')" v-tooltip="t('settings.settings')"
+        <UiIconButton v-if="active" variant="link" role="rail" data-context="topbar-action"
+          :label="t('settings.settings')" v-tooltip="t('settings.settings')"
           aria-haspopup="dialog" :pressed="settings.isOpen"
           @click="openSettings()">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
@@ -348,8 +348,10 @@
       </div>
     </header>
 
-    <main class="content" :class="{ 'is-workspace': route.meta.layout === 'workspace' }" :inert="toolDock.isExpanded"
-          :aria-hidden="toolDock.isExpanded ? 'true' : undefined"><slot /></main>
+    <main class="content" :class="{ 'is-workspace': !hasMachine || route.meta.layout === 'workspace' }"
+          :inert="toolDock.isExpanded" :aria-hidden="toolDock.isExpanded ? 'true' : undefined">
+      <slot />
+    </main>
     <ToolHost v-if="workspaceStarted" />
     <PhoneConnectDialog />
     <ProviderInstallDialog />
@@ -437,6 +439,7 @@ import { toolById } from '../tools/registry.ts';
 import { useToolLauncher } from '../tools/launcher.ts';
 import { openSettings } from '../settingsNavigation.ts';
 import { useSettingsStore } from '../../stores/settings.ts';
+import { useShellStore } from '../../stores/shell.ts';
 import { currentDesktopMode } from '../desktopSettings.ts';
 
 const props = defineProps({
@@ -453,6 +456,8 @@ const workspaceStarted = ref(props.active);
 const isDesktopMain = currentDesktopMode() === 'main';
 
 const settings = useSettingsStore();
+const shell = useShellStore();
+const hasMachine = computed(() => !shell.present || Boolean(shell.profile));
 const route = useRoute();
 const router = useRouter();
 const ui = useUiStore();
@@ -947,11 +952,15 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
   grid-template-rows: max(var(--app-topbar-h), env(titlebar-area-height, 0px)) minmax(0, 1fr);
 }
 
+.shell.without-machine {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+}
+
 /* ── Сайдбар ── */
 .sidebar {
   grid-row: 2; grid-column: 1;
   background: var(--sidebar); border-right: 1px solid var(--line);
-  display: flex; flex-direction: column; padding: 4px 2px; scrollbar-width: none;
+  display: flex; flex-direction: column; padding: 4px 0; scrollbar-width: none;
   min-height: 0; overflow-y: auto;
 }
 .nav { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: none; padding-block: 0; }
@@ -1102,7 +1111,7 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 @media (max-width: 899px) {
   .shell { grid-template-columns: var(--app-rail-w) minmax(0, 1fr); }
   .dock-route-nav { display: flex; }
-  .metric, .metric-sep, .netbox .ip { display: none; }
+  .metric, .metric-sep { display: none; }
   .status { min-width: 0; overflow: hidden; }
 }
 </style>

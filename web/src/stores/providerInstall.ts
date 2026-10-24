@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue';
+import { computed, h, markRaw, ref, watch } from 'vue';
 import { defineStore } from 'pinia';
 
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
@@ -13,6 +13,7 @@ import { isRecord } from '../../../shared/lib/objects.ts';
 import { api, ApiError, failureText } from '../shared/apiClient.ts';
 import { uiLocalePort } from '../shared/uiLocalePort.ts';
 import { confirmDialog } from '../ui.ts';
+import ProviderIcon from '../shared/ProviderIcon.vue';
 import { useAuthStore } from './auth.ts';
 import { connectProviderCliUpdate, useProvidersStore } from './providers.ts';
 
@@ -80,6 +81,14 @@ function failureNotice(failure: unknown): string | ProviderInstallNotice {
 }
 
 /**
+ * CLI печатает версию с подписью продукта, например «2.1.310 (Claude Code)»: в итоге остаётся номер.
+ * Строка без распознанного номера показывается как получена.
+ */
+function versionLabel(value: string): string {
+  return value.match(/\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?/u)?.[0] || value;
+}
+
+/**
  * Результат CLI отделён от результата каталога моделей и переводится при чтении.
  * Коды собственных причин переводятся, а сырой вывод остаётся данными.
  */
@@ -93,11 +102,14 @@ export function providerInstallResultText(job: ProviderInstallJob): string {
       reason: providerInstallNoticeText(job.error) || job.outputTail,
     });
   } else if (job.outcome === 'installed') {
-    text = t('settings.providerInstallationInstalled', { version: job.after });
+    text = t('settings.providerInstallationInstalled', { version: versionLabel(job.after) });
   } else if (job.outcome === 'updated') {
-    text = t('settings.providerInstallationUpdated', { before: job.before, after: job.after });
+    text = t('settings.providerInstallationUpdated', {
+      before: versionLabel(job.before),
+      after: versionLabel(job.after),
+    });
   } else {
-    text = t('settings.providerInstallationCurrent', { version: job.after || job.before });
+    text = t('settings.providerInstallationCurrent', { version: versionLabel(job.after || job.before) });
   }
 
   return [text, ...job.warnings.map(providerInstallNoticeText)].join('\n');
@@ -310,14 +322,16 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
     try {
       const action = t(operation === 'install'
         ? 'settings.providerInstallationInstall' : 'settings.providerInstallationUpdate');
-      const confirmation = legacy
-        ? t('settings.providerInstallationLegacyConfirm', { name: provider.name })
-        : t('settings.providerInstallationConfirm', {
-          action,
-          name: provider.name,
-          command: command || '',
-        });
-      const confirmed = await confirmDialog(confirmation, { okText: action });
+      const mark = { id: provider.id, name: provider.name };
+      const confirmed = await confirmDialog(legacy
+        ? t('settings.providerInstallationLegacyConfirm', { name: provider.name }) : '', {
+        title: t('settings.providerInstallationConfirmTitle', { action, name: provider.name }),
+        subtitle: legacy ? undefined : t('settings.providerInstallationConfirmSubtitle'),
+        icon: markRaw(() => h(ProviderIcon, { provider: mark, size: 20 })),
+        iconColor: provider.color,
+        code: legacy ? undefined : command || '',
+        okText: action,
+      });
 
       if (!confirmed || scope !== generation) {
         return;

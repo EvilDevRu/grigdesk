@@ -1,6 +1,6 @@
 import type { UiText } from '../../../shared/i18n/core.ts';
 
-import type { ComponentPublicInstance, Ref, VNode } from 'vue';
+import type { Component, ComponentPublicInstance, Ref, VNode } from 'vue';
 import type { UiLayerName } from './uiLayers';
 
 export type UiOverlayPlacement =
@@ -24,7 +24,8 @@ export type UiPopoverTriggerMode = 'click' | 'hover' | 'both';
 export type UiPopoverCloseReason = 'escape' | 'outside' | 'trigger' | 'action' | 'programmatic';
 
 export type UiDialogCloseReason = 'escape' | 'backdrop' | 'action' | 'programmatic';
-export type UiDialogSize = 'compact' | 'content' | 'workspace';
+// media — просмотр картинки или видео во весь экран: без поверхности окна, с глубоким затемнением.
+export type UiDialogSize = 'compact' | 'content' | 'workspace' | 'media';
 export type UiDialogRole = 'dialog' | 'alertdialog';
 
 export interface UiFocusableHandle {
@@ -66,8 +67,18 @@ export interface UiPopoverSlots {
 
 export type DialogAction<Value> = (value: Value) => void | Promise<void>;
 
+export type UiDialogIconName = 'ask' | 'alert' | 'trash' | 'download';
+
 export interface ConfirmDialogOptions {
   title?: UiText;
+  // Строка под заголовком: что произойдёт после согласия.
+  subtitle?: UiText;
+  // Значок слева от заголовка: имя из набора kit или компонент потребителя, например знак исполнителя.
+  icon?: UiDialogIconName | Component;
+  // Цвет значка-компонента, например фирменный цвет исполнителя из реестра.
+  iconColor?: string;
+  // Команда или путь показываются моноширинным блоком как данные, без перевода.
+  code?: string;
   okText?: UiText;
   cancelText?: UiText;
   danger?: boolean;

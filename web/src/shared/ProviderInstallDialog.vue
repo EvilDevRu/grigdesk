@@ -10,32 +10,30 @@
     @close="install.visible = false"
   >
     <div class="provider-install" :data-tone="tone">
-      <div class="provider-install-scroll">
-        <div class="provider-install-hero">
-          <span class="provider-install-logo" aria-hidden="true">
-            <ProviderIcon :provider="iconProvider" :size="30" />
-            <span v-if="badge" class="provider-install-badge">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="3"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path :d="badge" />
-              </svg>
-            </span>
-          </span>
+      <header class="provider-install-head">
+        <span class="provider-install-logo" :style="brandStyle" aria-hidden="true">
+          <ProviderIcon :provider="iconProvider" :size="20" />
+        </span>
+        <div class="provider-install-titles">
           <h2 class="provider-install-heading">{{ heading }}</h2>
           <code v-if="job" class="provider-install-command">{{ job.command }}</code>
         </div>
+      </header>
+      <UiProgress v-if="job?.status === 'running'" size="line" indeterminate :label="currentStage" />
 
+      <div class="provider-install-body">
         <template v-if="job">
-          <p v-if="job.status !== 'running'" class="provider-install-result" role="status">
-            {{ resultText }}
+          <p v-if="job.status !== 'running'" class="provider-install-status" role="status">
+            <svg class="provider-install-status-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" />
+              <path :d="tone === 'success' ? STATUS_CHECK_PATH : STATUS_ALERT_PATH" />
+            </svg>
+            <span class="provider-install-status-text">
+              {{ resultLines[0] }}
+              <span v-if="resultLines[1]" class="provider-install-status-detail">{{ resultLines[1] }}</span>
+            </span>
           </p>
-          <ol class="provider-install-stages">
+          <ol class="provider-install-steps">
             <li
               v-for="entry in stages"
               :key="entry.stage"
@@ -44,30 +42,35 @@
             >
               <span class="provider-install-mark" aria-hidden="true">
                 <UiSpinner v-if="entry.state === 'current'" decorative />
-                <svg
-                  v-else-if="entry.state !== 'pending'"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="3"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path :d="entry.state === 'done' ? CHECK_PATH : ALERT_PATH" />
-                </svg>
-                <template v-else>{{ entry.number }}</template>
+                <svg v-else viewBox="0 0 24 24"><path :d="STAGE_ICONS[entry.state]" /></svg>
               </span>
               {{ entry.label }}
             </li>
           </ol>
-          <UiProgress v-if="job.status === 'running'" indeterminate :label="currentStage" />
-          <section v-if="job.outputTail" class="provider-install-log" :aria-labelledby="outputLabelId">
-            <p :id="outputLabelId" class="provider-install-log-label">
-              {{ t('settings.providerInstallationOutput') }}
-            </p>
-            <pre ref="outputElement" class="provider-install-output">{{ job.outputTail }}</pre>
+          <p
+            v-if="job.status === 'running' && job.stage === 'download-install' && job.retry"
+            class="provider-install-note"
+            role="status"
+          >
+            {{ t('settings.providerInstallationRetry', job.retry) }}
+          </p>
+          <section v-if="job.outputTail" class="provider-install-log">
+            <UiDisclosureButton
+              v-if="job.status === 'succeeded'"
+              v-model:open="outputOpen"
+              class="provider-install-log-toggle"
+              density="compact"
+              :controls="outputId"
+            >{{ t('settings.providerInstallationOutput') }}</UiDisclosureButton>
+            <pre
+              v-show="outputVisible"
+              :id="outputId"
+              ref="outputElement"
+              class="provider-install-output"
+              :aria-label="t('settings.providerInstallationOutput')"
+            >{{ job.outputTail }}</pre>
           </section>
-          <p v-if="job.status === 'succeeded' && job.operation === 'install'" class="provider-install-hint">
+          <p v-if="job.status === 'succeeded' && job.operation === 'install'" class="provider-install-note">
             {{ t('settings.providerInstallationOldTerminal') }}
           </p>
         </template>
@@ -82,39 +85,32 @@
           {{ providerInstallNoticeText(install.snapshot.blockedReason) }}
         </UiInlineMessage>
         <UiInlineMessage v-if="install.error" tone="danger">{{ install.error }}</UiInlineMessage>
-
-        <div v-if="hasActions" class="provider-install-actions">
-          <UiButton
-            v-if="install.error || install.uncertain"
-            @click="install.load()"
-          >{{ t('settings.providerInstallationRefresh') }}</UiButton>
-          <UiButton
-            v-if="fallbackCommand"
-            @click="openTerminal(fallbackCommand)"
-          >{{ t('settings.providerInstallationTerminal') }}</UiButton>
-          <UiButton
-            v-if="loginCommand"
-            variant="solid"
-            tone="accent"
-            @click="openTerminal(loginCommand)"
-          >{{ t('settings.providerInstallationLogin') }}</UiButton>
-        </div>
       </div>
 
-      <!-- Крестик стоит в разметке последним: первый фокус получает действие итога, а не закрытие. -->
-      <div class="provider-install-close">
-        <UiIconButton :label="t('settings.providerInstallationClose')" @click="install.visible = false">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.7"
-            aria-hidden="true"
-          >
-            <path d="m6 6 12 12M6 18 18 6" />
-          </svg>
-        </UiIconButton>
-      </div>
+      <footer class="provider-install-foot">
+        <p v-if="job?.status === 'running'" class="provider-install-note provider-install-foot-note">
+          {{ t('settings.providerInstallationBackground') }}
+        </p>
+        <UiButton
+          v-if="install.error || install.uncertain"
+          @click="install.load()"
+        >{{ t('settings.providerInstallationRefresh') }}</UiButton>
+        <UiButton variant="ghost" @click="install.visible = false">
+          {{ t('settings.providerInstallationClose') }}
+        </UiButton>
+        <UiButton
+          v-if="fallbackCommand"
+          variant="solid"
+          tone="accent"
+          @click="openTerminal(fallbackCommand)"
+        >{{ t('settings.providerInstallationTerminal') }}</UiButton>
+        <UiButton
+          v-if="loginCommand"
+          variant="solid"
+          tone="accent"
+          @click="openTerminal(loginCommand)"
+        >{{ t('settings.providerInstallationLogin') }}</UiButton>
+      </footer>
     </div>
   </UiDialog>
 </template>
@@ -127,7 +123,7 @@ import type { MessageKey } from '../../../shared/i18n/catalogs.ts';
 import {
   UiButton,
   UiDialog,
-  UiIconButton,
+  UiDisclosureButton,
   UiInlineMessage,
   UiProgress,
   UiSpinner,
@@ -150,8 +146,14 @@ import ProviderIcon from './ProviderIcon.vue';
 
 type StageState = 'done' | 'current' | 'warning' | 'failed' | 'pending';
 
-const CHECK_PATH = 'M5 12.5l4.5 4.5L19 7.5';
-const ALERT_PATH = 'M12 6.5v7M12 17.5v.01';
+const STATUS_CHECK_PATH = 'M7.5 12.3l3 3 6-6.3';
+const STATUS_ALERT_PATH = 'M12 7.5v5.5M12 16.5v.01';
+const STAGE_ICONS: Readonly<Record<Exclude<StageState, 'current'>, string>> = {
+  done: 'M5 12.5l4.5 4.5L19 7.5',
+  warning: 'M12 6.5v7M12 17.5v.01',
+  failed: 'M12 6.5v7M12 17.5v.01',
+  pending: 'M12 5a7 7 0 1 1 0 14a7 7 0 1 1 0-14',
+};
 const STAGES: readonly ProviderInstallStage[] = ['download-install', 'version', 'models'];
 const STAGE_LABELS: Readonly<Record<ProviderInstallStage, MessageKey>> = {
   'download-install': 'settings.providerInstallationDownloadInstall',
@@ -164,8 +166,9 @@ const providers = useProvidersStore();
 const settings = useSettingsStore();
 const auth = useAuthStore();
 const launcher = useToolLauncher();
-const outputLabelId = `provider-install-output-${useId().replaceAll(':', '')}`;
+const outputId = `provider-install-output-${useId().replaceAll(':', '')}`;
 const outputElement = ref<HTMLElement | null>(null);
+const outputOpen = ref(false);
 
 const job = computed(() => install.selectedJob);
 const provider = computed(() => providers.providers.find((entry) => entry.id === install.providerId));
@@ -173,11 +176,17 @@ const iconProvider = computed(() => ({
   id: install.providerId,
   name: provider.value?.name || install.providerId || '?',
 }));
+const brandStyle = computed(() => provider.value?.color
+  ? { '--provider-install-brand': provider.value.color } : undefined);
 const fallbackCommand = computed(() => install.selectedFailure?.fallbackCommand
   || (job.value && ['failed', 'interrupted'].includes(job.value.status) ? job.value.fallbackCommand : ''));
-const loginCommand = computed(() => job.value?.status === 'succeeded' ? job.value.loginCommand : '');
-const hasActions = computed(() => Boolean(fallbackCommand.value || loginCommand.value
-  || install.error || install.uncertain));
+const loginCommand = computed(() => {
+  const finished = job.value?.status === 'succeeded' ? job.value : null;
+  const needsLogin = finished?.operation === 'install' || provider.value?.available === false;
+
+  return finished && needsLogin ? finished.loginCommand : '';
+});
+const outputVisible = computed(() => job.value?.status !== 'succeeded' || outputOpen.value);
 const heading = computed(() => {
   const name = provider.value?.name;
   const operation = job.value?.operation || install.selectedFailure?.operation;
@@ -203,19 +212,11 @@ const tone = computed(() => {
 
   return job.value.status === 'interrupted' ? 'warning' : 'danger';
 });
-const badge = computed(() => {
-  if (tone.value === 'success') {
-    return CHECK_PATH;
-  }
-
-  return tone.value === 'warning' || tone.value === 'danger' ? ALERT_PATH : '';
-});
 const stages = computed(() => {
   const current = job.value ? STAGES.indexOf(job.value.stage) : -1;
 
   return STAGES.map((stage, index) => ({
     stage,
-    number: index + 1,
     label: t(STAGE_LABELS[stage]),
     state: stageState(index, current),
   }));
@@ -223,7 +224,12 @@ const stages = computed(() => {
 const modelsWarning = computed(() => Boolean(job.value?.warnings.some((warning) =>
   typeof warning !== 'string' && warning.code === 'models_refresh_failed')));
 const currentStage = computed(() => t(STAGE_LABELS[job.value?.stage || 'download-install']));
-const resultText = computed(() => job.value ? providerInstallResultText(job.value) : '');
+// Первая строка — итог операции, остальное (предупреждения, длинная причина) — пояснение под ним.
+const resultLines = computed(() => {
+  const [head = '', ...rest] = (job.value ? providerInstallResultText(job.value) : '').split('\n');
+
+  return [head, rest.join('\n')];
+});
 const actions = createSettingsActions({
   requestAction: (run) => settings.isOpen ? settings.requestAction(run) : run(),
   notify: (text) => {
@@ -282,12 +288,18 @@ watch(() => [auth.clientScope, auth.authenticated], () => {
   }
 });
 
+// Свёрнутый после успеха вывод не наследует раскрытие от прошлой операции.
+watch(() => job.value?.id, () => {
+  outputOpen.value = false;
+});
+
 /**
- * Хвост вывода показывает последние строки при открытии и следует за новыми строками.
+ * Хвост вывода показывает последние строки при открытии, раскрытии и новых строках.
  * Положение меряется до обновления DOM: отмотанный вверх вывод новые строки не сдёргивают.
  */
-watch([() => job.value?.outputTail, outputElement], async ([, element], [, previous]) => {
-  const follow = !element || element !== previous
+watch([() => job.value?.outputTail, outputElement, outputVisible], async (current, previous) => {
+  const [, element, visible] = current;
+  const follow = !element || element !== previous[1] || visible !== previous[2]
     || element.scrollHeight - element.scrollTop - element.clientHeight < 24;
 
   await nextTick();
@@ -302,17 +314,14 @@ watch([() => job.value?.outputTail, outputElement], async ([, element], [, previ
 .provider-install {
   --provider-install-tone: var(--ink-mid);
 
-  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
   width: 100%;
   min-width: 0;
   min-height: 0;
-}
-
-.provider-install[data-tone='running'] {
-  --provider-install-tone: var(--accent);
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 
 .provider-install[data-tone='success'] {
@@ -327,263 +336,230 @@ watch([() => job.value?.outputTail, outputElement], async ([, element], [, previ
   --provider-install-tone: var(--bad);
 }
 
-.provider-install-scroll {
+.provider-install-head {
   display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 1rem;
-  min-width: 0;
-  min-height: 0;
-  padding: 1.75rem 1.5rem 1.5rem;
-  overflow: auto;
-  overscroll-behavior: contain;
-  font-size: 0.875rem;
-  line-height: 1.5;
-}
-
-.provider-install-scroll > * {
-  flex-shrink: 0;
-}
-
-.provider-install-close {
-  position: absolute;
-  top: 0.625rem;
-  right: 0.625rem;
-}
-
-.provider-install-hero {
-  display: flex;
-  flex-direction: column;
+  flex: none;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
   min-width: 0;
-  padding-inline: 1.5rem;
-  text-align: center;
+  padding: 1.125rem 1.25rem 1rem;
 }
 
 .provider-install-logo {
-  position: relative;
+  --provider-install-brand: var(--ink-mid);
+
   display: grid;
   place-items: center;
-  width: 4rem;
-  height: 4rem;
-  margin-bottom: 0.5rem;
-  border: 1px solid color-mix(in srgb, var(--provider-install-tone) 40%, var(--line-2));
-  border-radius: 1.125rem;
-  background: radial-gradient(
-    circle at 50% 0%,
-    color-mix(in srgb, var(--provider-install-tone) 24%, var(--surface-2)),
-    var(--surface-2) 75%
-  );
-  color: var(--ink);
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--provider-install-tone) 9%, transparent);
+  flex: none;
+  width: 2.375rem;
+  height: 2.375rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--provider-install-brand) 16%, transparent);
+  color: var(--provider-install-brand);
 }
 
-.provider-install[data-tone='running'] .provider-install-logo::after {
-  position: absolute;
-  inset: -1px;
-  border: 1px solid var(--provider-install-tone);
-  border-radius: inherit;
-  content: '';
-  animation: provider-install-pulse 1.8s ease-out infinite;
-}
-
-.provider-install-badge {
-  position: absolute;
-  right: -0.375rem;
-  bottom: -0.375rem;
+.provider-install-titles {
   display: grid;
-  place-items: center;
-  width: 1.375rem;
-  height: 1.375rem;
-  border: 2px solid var(--surface);
-  border-radius: 50%;
-  background: var(--provider-install-tone);
-  color: var(--surface);
-}
-
-.provider-install-badge svg {
-  width: 0.75rem;
-  height: 0.75rem;
+  gap: 0.125rem;
+  min-width: 0;
 }
 
 .provider-install-heading {
   margin: 0;
-  font-size: 1.0625rem;
-  font-weight: 600;
-  line-height: 1.35;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.3;
   overflow-wrap: anywhere;
 }
 
 .provider-install-command {
-  max-width: 100%;
-  padding: 0.125rem 0.5rem;
-  border-radius: 0.375rem;
-  background: var(--surface-2);
-  color: var(--ink-mid);
+  color: var(--ink-low);
   font-family: var(--mono);
   font-size: 0.75rem;
   overflow-wrap: anywhere;
 }
 
-.provider-install-result {
-  max-height: 8rem;
-  margin: 0;
-  padding: 0.625rem 0.875rem;
+.provider-install-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.875rem;
+  min-height: 0;
+  padding: 0.875rem 1.25rem 0;
   overflow: auto;
-  border: 1px solid color-mix(in srgb, var(--provider-install-tone) 35%, transparent);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--provider-install-tone) 10%, transparent);
-  white-space: pre-line;
+  overscroll-behavior: contain;
+}
+
+.provider-install-body > * {
+  flex-shrink: 0;
+}
+
+.provider-install-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  margin: 0;
+  font-weight: 500;
+}
+
+.provider-install-status-icon {
+  flex: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: 0.0625rem;
+  color: var(--provider-install-tone);
+}
+
+.provider-install-status-icon circle {
+  fill: currentColor;
+  opacity: 0.16;
+}
+
+.provider-install-status-icon path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.provider-install-status-text {
+  max-height: 7.5em;
+  min-width: 0;
+  overflow: auto;
   overflow-wrap: anywhere;
 }
 
-.provider-install-stages {
+.provider-install-status-detail {
+  display: block;
+  color: var(--ink-mid);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  white-space: pre-line;
+}
+
+.provider-install-steps {
   display: grid;
   gap: 0.125rem;
   margin: 0;
-  padding: 0.375rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--ground);
+  padding: 0;
   list-style: none;
 }
 
-.provider-install-stages li {
+.provider-install-steps li {
   display: flex;
   align-items: center;
   gap: 0.625rem;
-  min-height: 2.125rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.5rem;
-  color: var(--ink-low);
-}
-
-.provider-install-stages [data-state='done'] {
+  min-height: 1.625rem;
   color: var(--ink-mid);
+  font-size: 0.8125rem;
 }
 
-.provider-install-stages [data-state='current'] {
-  background: var(--surface-2);
+.provider-install-steps [data-state='current'] {
   color: var(--ink);
-  font-weight: 600;
 }
 
-.provider-install-stages [data-state='failed'] {
-  color: var(--bad);
+.provider-install-steps [data-state='pending'] {
+  color: var(--ink-low);
 }
 
 .provider-install-mark {
   display: grid;
   place-items: center;
   flex: none;
-  width: 1.25rem;
-  height: 1.25rem;
-  border: 1px solid var(--line-2);
-  border-radius: 50%;
-  font-size: 0.6875rem;
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
+  width: 1rem;
+  height: 1rem;
 }
 
 .provider-install-mark svg {
-  width: 0.75rem;
-  height: 0.75rem;
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 [data-state='current'] .provider-install-mark {
-  border-color: transparent;
   color: var(--accent);
 }
 
 [data-state='done'] .provider-install-mark {
-  border-color: transparent;
-  background: color-mix(in srgb, var(--good) 16%, transparent);
   color: var(--good);
 }
 
 [data-state='warning'] .provider-install-mark {
-  border-color: transparent;
-  background: color-mix(in srgb, var(--warn) 16%, transparent);
   color: var(--warn);
 }
 
 [data-state='failed'] .provider-install-mark {
-  border-color: transparent;
-  background: color-mix(in srgb, var(--bad) 16%, transparent);
   color: var(--bad);
+}
+
+[data-state='pending'] .provider-install-mark {
+  color: var(--line-2);
+}
+
+[data-state='pending'] .provider-install-mark svg {
+  stroke-width: 1.6;
 }
 
 .provider-install-log {
   display: grid;
-  gap: 0.375rem;
+  justify-items: start;
+  gap: 0.5rem;
   min-width: 0;
 }
 
-.provider-install-log-label {
-  margin: 0;
-  color: var(--ink-low);
-  font-size: 0.6875rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+/* Компактная кнопка раскрытия имеет поле 4 px и рамку 1 px: текст встаёт на линию значков шагов. */
+.provider-install-log-toggle {
+  margin-inline-start: -0.3125rem;
 }
 
 .provider-install-output {
+  justify-self: stretch;
   max-height: min(30vh, 12rem);
   margin: 0;
-  padding: 0.75rem 0.875rem;
+  padding: 0.625rem 0.75rem;
   overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--ground);
   color: var(--ink-mid);
   font-family: var(--mono);
   font-size: 0.75rem;
-  line-height: 1.55;
+  line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.provider-install-hint {
+.provider-install-note {
   margin: 0;
-  color: var(--ink-mid);
-  font-size: 0.8125rem;
+  color: var(--ink-low);
+  font-size: 0.75rem;
 }
 
-.provider-install-actions {
+.provider-install-foot {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 0.5rem;
-  margin-top: auto;
+  padding: 1.125rem 1.25rem;
 }
 
-@keyframes provider-install-pulse {
-  from {
-    opacity: 0.8;
-    transform: scale(1);
-  }
-
-  to {
-    opacity: 0;
-    transform: scale(1.3);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .provider-install[data-tone='running'] .provider-install-logo::after {
-    animation: none;
-  }
+.provider-install-foot-note {
+  flex: 1 1 12rem;
 }
 
 @media (max-width: 600px) {
-  .provider-install-scroll {
-    padding-top: max(2.5rem, calc(env(safe-area-inset-top) + 1.5rem));
-    padding-bottom: max(1.5rem, calc(env(safe-area-inset-bottom) + 1rem));
+  .provider-install-head {
+    padding-top: max(1.125rem, calc(env(safe-area-inset-top) + 0.75rem));
   }
 
-  .provider-install-close {
-    top: max(0.625rem, env(safe-area-inset-top));
+  .provider-install-foot {
+    padding-bottom: max(1.125rem, calc(env(safe-area-inset-bottom) + 0.75rem));
   }
 }
 </style>

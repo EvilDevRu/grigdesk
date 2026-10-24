@@ -31,6 +31,10 @@ export interface ProviderInstallJob {
   outcome: ProviderInstallOutcome | null;
   error: ProviderInstallNotice | null;
   warnings: (string | ProviderInstallNotice)[];
+  retry?: {
+    attempt: number;
+    attempts: number;
+  };
   outputTail: string;
   command: string;
   fallbackCommand: string;
@@ -52,6 +56,11 @@ const finite = (value: unknown): value is number =>
 
 const isNotice = (value: unknown): value is ProviderInstallNotice =>
   isRecord(value) && typeof value.code === 'string' && typeof value.message === 'string';
+
+const isRetry = (value: unknown): boolean => isRecord(value)
+  && typeof value.attempt === 'number' && Number.isInteger(value.attempt) && value.attempt >= 2
+  && typeof value.attempts === 'number' && Number.isInteger(value.attempts)
+  && value.attempts >= value.attempt && value.attempts <= 3;
 
 /**
  * Команды публичной карточки служат только для объяснения действия человеку.
@@ -84,6 +93,7 @@ export function isProviderInstallJob(value: unknown): value is ProviderInstallJo
     && (value.error === null || isNotice(value.error))
     && Array.isArray(value.warnings)
     && value.warnings.every((item) => typeof item === 'string' || isNotice(item))
+    && (value.retry === undefined || isRetry(value.retry))
     && finite(value.startedAt) && finite(value.updatedAt)
     && (value.finishedAt === null || finite(value.finishedAt))
     && typeof value.outputTail === 'string' && value.outputTail.split('\n').length <= 200

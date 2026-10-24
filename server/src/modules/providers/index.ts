@@ -608,7 +608,10 @@ async function providersModule(
       if (typeof ex.latestVersion !== 'function') continue;
       let latest = '';
       try { latest = String(await ex.latestVersion(config) || ''); } catch { latest = ''; }
-      if (!latest) continue; // сеть молчит — оставляем прошлый результат
+      // Сеть молчит — свежая версия CLI сравнивается с последней известной: иначе после
+      // установки индикатор «устарел» висел бы до следующего удачного ответа реестра.
+      latest ||= updates.get(ex.id)?.latest || '';
+      if (!latest) continue;
       const current = (await ex.probe(config))?.version || '';
       const outdated = isOutdated(current, latest);
       const prev = updates.get(ex.id);

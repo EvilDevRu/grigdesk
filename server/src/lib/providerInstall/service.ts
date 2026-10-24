@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs, constants } from 'node:fs';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import type { ExecutorAdapter, ProviderInstallCommand } from '../executors/index.ts';
 import { isOutdated, parseVersion } from '../executors/_npmLatest.ts';
 import { runCommand, type PluginCommandRunner } from '../pluginInstall/runCommand.ts';
 import { terminateOwnedWorker } from '../pluginInstall/workerIdentity.ts';
 import { runtimeKind, nodeExecutable } from '../runtimePaths.ts';
+import { withRetry } from '../retry.ts';
+import { isTransientInstallFailure } from './networkFailure.ts';
 import { readInstallState, writeInstallState, type ProviderInstallState } from './stateStore.ts';
 import type {
   ProviderInstallJob,
@@ -18,7 +21,11 @@ import type {
 export interface ProviderInstallOptions {
   runCommand?: PluginCommandRunner;
   runtimePaths?: { kind: string; node: string };
+  retrySleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
+
+const INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
+const RETRY_DELAYS_MS = [2000, 5000];
 
 interface ServicePorts extends ProviderInstallOptions {
   statePath?: string;
@@ -301,24 +308,7 @@ export class ProviderInstallService {
     try {
       const executable = command.executable === 'npm'
         ? await this.resolveNpm() : command.executable;
-      const result = await (this.ports.runCommand || runCommand)(executable, command.args, {
-        cwd,
-        env: this.ports.env,
-        timeoutMs: 10 * 60 * 1000,
-        signal: this.controller!.signal,
-        onStdout: (chunk) => this.append(job, chunk),
-        onStderr: (chunk) => this.append(job, chunk),
-        ownership: {
-          started: async (worker) => {
-            this.state.worker = worker;
-            await this.publish();
-          },
-          finished: async () => {
-            this.state.worker = null;
-            await this.publish();
-          },
-        },
-      });
+      const result = await this.runInstallation(executable, command, job, cwd);
 
       output = boundedOutput(result.stdout + result.stderr).trim().slice(-2000);
 
@@ -435,6 +425,66 @@ export class ProviderInstallService {
       changed: job.status === 'succeeded' && job.outcome === 'updated',
       output,
     };
+  }
+
+  /**
+   * Повторяется только установка того же CLI, без повторного запуска проверок и моделей.
+   * Общий срок и admission сохраняются; новый worker допустим лишь после остановки прежнего.
+   */
+  private async runInstallation(executable: string, command: ProviderInstallCommand,
+    job: ProviderInstallJob, cwd: string | undefined) {
+    const signal = this.controller!.signal;
+    const deadline = Date.now() + INSTALL_TIMEOUT_MS;
+    let attempt = 0;
+
+    return withRetry(async (index) => {
+      attempt = index;
+      signal.throwIfAborted();
+
+      if (Date.now() >= deadline) {
+        throw new ProviderInstallError(500, 'timeout', 'Истёк срок ожидания команды (timeout)');
+      }
+
+      return (this.ports.runCommand || runCommand)(executable, command.args, {
+        cwd,
+        env: this.ports.env,
+        timeoutMs: Math.max(1, deadline - Date.now()),
+        signal,
+        onStdout: (chunk) => this.append(job, chunk),
+        onStderr: (chunk) => this.append(job, chunk),
+        ownership: {
+          started: async (worker) => {
+            this.state.worker = worker;
+            await this.publish();
+          },
+          finished: async () => {
+            this.state.worker = null;
+            await this.publish();
+          },
+        },
+      });
+    }, {
+      attempts: RETRY_DELAYS_MS.length + 1,
+      delaysMs: RETRY_DELAYS_MS,
+      retryOnError: () => false,
+      retryWhen: (result) => !this.closing && !signal.aborted && !this.state.worker
+        && !this.state.blockedReason && Date.now() + (RETRY_DELAYS_MS[attempt] ?? 0) < deadline
+        && isTransientInstallFailure(result),
+      sleep: async (ms) => {
+        job.retry = {
+          attempt: attempt + 2,
+          attempts: RETRY_DELAYS_MS.length + 1,
+        };
+        job.updatedAt = Date.now();
+        await this.publish();
+
+        if (this.ports.retrySleep) {
+          await this.ports.retrySleep(ms, signal);
+        } else {
+          await sleep(ms, undefined, { signal });
+        }
+      },
+    });
   }
 
   /**

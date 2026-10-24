@@ -2,6 +2,7 @@
 
 - [Установка CLI: общее окно, серверная операция и восстановление](provider-cli-installation.md)
 - [Вывод установки, обновление реестра и перевод собственных причин](provider-install-output-and-messages.md)
+- [Повтор установки и обновления CLI при плохой сети: бюджет, паузы и остановка](provider-install-network-retry.md)
 
 - [Самостоятельная поставка DeepSeek: установка, память и границы](deepseek-binary.md)
 
@@ -51,6 +52,7 @@
 
 - [Серверная лента Kimi: цельные размышления, подписи инструментов и границы](kimi-server-steps.md)
 - [Kimi host: проверка команд, native Bash и сохранение пользовательских ограничений](kimi-command-policy.md)
+- [Перевод host-политики Kimi: одна точная подпись для двух мест адаптера](kimi-host-policy-translation.md)
 - [Kimi host: причина прежней блокировки ходов с плагином БД](kimi-db-policy.md)
 - [Дополнительные workspace-каталоги для kimi-чатов (паритет с codex --add-dir)](kimi-workspace-extra-dirs.md)
 - [Kimi ACP: результаты contract spike](kimi-acp-spike.md)

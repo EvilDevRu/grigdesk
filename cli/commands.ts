@@ -19,8 +19,14 @@ import { collectStatus, printable, renderText, toJson } from './status.ts';
 import { readText, realPath } from './system.ts';
 import { openWindow } from './window.ts';
 import { deviceCommand } from './device.ts';
+import { plainOutput } from './output.ts';
+import type { CliOutput } from './output.ts';
 
 export type { Settings } from '../shared/runtime/runtimeSettings.ts';
+
+// Electron сам переносит окно в scope app-<build.executableName>-<pid>.scope
+// (desktop/package.json); сервер окна и ходы его агентов наследуют этот scope.
+const WINDOW_SCOPE = /^app-grigdesk-\d+\.scope$/u;
 
 /**
  * Читает .env как данные без экспорта его содержимого в процесс CLI или окно.
@@ -38,16 +44,32 @@ export function readSettings(
 }
 
 /**
+ * Сегменты путей cgroup из всех строк: v2 даёт одну строку, v1 — по строке на контроллер.
+ * Строка без двух двоеточий не разбирается и сегментов не добавляет.
+ */
+function cgroupSegments(cgroupText: string): string[] {
+  return cgroupText.split('\n').flatMap((line) => {
+    const first = line.indexOf(':');
+    const second = line.indexOf(':', first + 1);
+
+    return first >= 0 && second >= 0 ? line.slice(second + 1).split('/') : [];
+  });
+}
+
+/**
  * Принадлежность службе определяется только точным сегментом пути cgroup.
  * Несколько контроллеров v1 проверяются независимо, сходное имя не подходит.
  */
 export function insideUnit(cgroupText: string, unit: string): boolean {
-  return cgroupText.split('\n').some((line) => {
-    const first = line.indexOf(':');
-    const second = line.indexOf(':', first + 1);
+  return cgroupSegments(cgroupText).includes(unit);
+}
 
-    return first >= 0 && second >= 0 && line.slice(second + 1).split('/').includes(unit);
-  });
+/**
+ * Сервер, поднятый окном, работает не в службе systemd, а в scope окна; агенты — там же.
+ * Терминал человека живёт в своём scope, поэтому сторож его не задевает.
+ */
+export function insideWindowScope(cgroupText: string): boolean {
+  return cgroupSegments(cgroupText).some((segment) => WINDOW_SCOPE.test(segment));
 }
 
 /**
@@ -88,20 +110,20 @@ export async function readCliContext(root = runtimeInstallationRoot()) {
  * Аргументы и сторож проверяются до любых внешних команд и запросов состояния.
  * Ошибки пользователя дают код 2, ошибки действий — код 1 с очищенной причиной.
  */
-export async function runCli(argv: readonly string[]): Promise<number> {
+export async function runCli(argv: readonly string[], output: CliOutput = plainOutput): Promise<number> {
   let args: CliArgs;
 
   try {
     args = parseArgs(argv);
   } catch (error) {
-    console.error(printable(error instanceof Error ? error.message : String(error)));
+    output.error(printable(error instanceof Error ? error.message : String(error)) + '\n');
 
     return 2;
   }
 
   try {
     if (args.kind === 'help') {
-      process.stdout.write(HELP_TEXT);
+      output.write(HELP_TEXT);
 
       return 0;
     }
@@ -111,7 +133,7 @@ export async function runCli(argv: readonly string[]): Promise<number> {
     if (args.kind === 'version') {
       const version = await readText(path.join(runtimeRoot(), 'VERSION'));
 
-      console.log(`GrigDesk ${version?.trim() ?? ''}`);
+      output.write(`GrigDesk ${version?.trim() ?? ''}\n`);
 
       return 0;
     }
@@ -122,8 +144,8 @@ export async function runCli(argv: readonly string[]): Promise<number> {
     if (guarded && !args.force) {
       const cgroup = await readText(process.env.GRIGDESK_CLI_CGROUP_FILE || '/proc/self/cgroup');
 
-      if (insideUnit(cgroup ?? '', UNIT)) {
-        console.error('Команда прервёт ход агента или откроет окно из него. Используйте --force.');
+      if (insideUnit(cgroup ?? '', UNIT) || insideWindowScope(cgroup ?? '')) {
+        output.error('Команда прервёт ход агента или откроет окно из него. Используйте --force.\n');
 
         return 1;
       }
@@ -132,11 +154,11 @@ export async function runCli(argv: readonly string[]): Promise<number> {
     const { settings } = await readCliContext(root);
 
     if (args.kind === 'device') {
-      return await deviceCommand(args, settings);
+      return await deviceCommand(args, settings, output);
     }
 
     if (args.kind === 'open') {
-      const windowCode = await openWindow(root, settings, process.env);
+      const windowCode = await openWindow(root, settings, process.env, output);
 
       if (await isPortableBundle(root) || await windowStartsServer(process.env)) {
         return windowCode;
@@ -146,7 +168,7 @@ export async function runCli(argv: readonly string[]): Promise<number> {
         ...args,
         kind: 'server',
         action: 'start',
-      }, root, settings);
+      }, root, settings, output);
 
       return windowCode || serverCode;
     }
@@ -167,18 +189,22 @@ export async function runCli(argv: readonly string[]): Promise<number> {
 
       const color = Boolean(process.stdout.isTTY && !process.env.NO_COLOR && process.env.TERM !== 'dumb');
 
-      process.stdout.write(args.json ? toJson(snapshot) : renderText(snapshot, { color }));
+      if (!args.json && output.status) {
+        output.status(snapshot);
+      } else {
+        output.write(args.json ? toJson(snapshot) : renderText(snapshot, { color }));
+      }
 
       return 0;
     }
 
     if (args.kind === 'server') {
-      return await serverCommand(args, root, settings);
+      return await serverCommand(args, root, settings, output);
     }
 
-    return await relayCommand(args, root, settings);
+    return await relayCommand(args, root, settings, output);
   } catch (error) {
-    console.error(printable(error instanceof Error ? error.message : String(error)));
+    output.error(printable(error instanceof Error ? error.message : String(error)) + '\n');
 
     return 1;
   }

@@ -3,9 +3,11 @@
     ref="dialog"
     :open="Boolean(request)"
     :role="dialogRole"
+    class="ui-dialog-host"
     layer="confirm"
     size="compact"
-    :title="dialogTitle"
+    :mobile-fullscreen="false"
+    :title="request?.kind === 'confirm' ? undefined : dialogTitle"
     :data-ui-touch="request?.kind === 'confirm' && request.options.touchTargets ? '' : undefined"
     :label="dialogTitle"
     :persistent="busy"
@@ -14,7 +16,28 @@
     @close="onDialogClose"
     @keydown="onDialogKeydown"
   >
+    <template v-if="request?.kind === 'confirm'" #header>
+      <div class="ui-dialog-host__head">
+        <span
+          class="ui-dialog-host__icon"
+          :data-tone="danger ? 'danger' : 'accent'"
+          :style="iconStyle"
+          aria-hidden="true"
+        >
+          <component :is="customIcon" v-if="customIcon" />
+          <svg v-else class="ui-dialog-host__glyph" viewBox="0 0 24 24">
+            <path :d="DIALOG_ICONS[iconName]" />
+          </svg>
+        </span>
+        <div class="ui-dialog-host__heading">
+          <div class="ui-dialog__title">{{ dialogTitle }}</div>
+          <p v-if="dialogSubtitle" class="ui-dialog-host__subtitle">{{ dialogSubtitle }}</p>
+        </div>
+      </div>
+    </template>
+
     <p v-if="dialogText" class="ui-dialog-host__message">{{ dialogText }}</p>
+    <code v-if="dialogCode" class="ui-dialog-host__code">{{ dialogCode }}</code>
 
     <UiInput
       v-if="request?.kind === 'prompt' && request.options.multiline === false"
@@ -49,6 +72,7 @@
         <UiButton
           v-if="request?.kind !== 'alert'"
           ref="cancelButton"
+          variant="link"
           :disabled="busy"
           @click="cancel"
         >
@@ -74,11 +98,13 @@ import { t, resolveUiText } from '../../services/locale.ts';
 
 import {
   computed,
+  markRaw,
   nextTick,
   onBeforeUnmount,
   onMounted,
   ref,
   shallowRef,
+  type Component,
 } from 'vue';
 import UiButton from '../primitives/UiButton.vue';
 import UiInput from '../primitives/UiInput.vue';
@@ -94,12 +120,21 @@ import type {
   DialogHostRequest,
   DialogResult,
   UiDialogCloseReason,
+  UiDialogIconName,
   UiDialogRole,
 } from '../../types/uiOverlays';
 
 interface FocusHandle {
   focus(options?: FocusOptions): void;
 }
+
+// Штриховые знаки 24×24: вопрос по умолчанию, предупреждение для danger, удаление и загрузка.
+const DIALOG_ICONS: Readonly<Record<UiDialogIconName, string>> = {
+  ask: 'M12 21a9 9 0 1 0 0-18a9 9 0 0 0 0 18ZM9.6 9.4a2.5 2.5 0 0 1 4.8 1c0 1.7-2.4 2.1-2.4 3.6M12 17.2v.01',
+  alert: 'M12 4 2.8 19.5h18.4L12 4Z M12 10v4.2 M12 16.9v.01',
+  trash: 'M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13M10 11v5M14 11v5',
+  download: 'M12 4v11M7 10.5l5 5 5-5M5 20h14',
+};
 
 const request = shallowRef<DialogHostRequest | null>(null);
 const promptValue = ref('');
@@ -140,6 +175,28 @@ const dialogText = computed(() => {
     ? (current.options.text ?? '')
     : current.text);
 });
+const dialogSubtitle = computed(() => request.value?.kind === 'confirm'
+  ? resolveUiText(request.value.options.subtitle ?? '') : '');
+const customIcon = computed<Component | null>(() => {
+  const icon = request.value?.kind === 'confirm' ? request.value.options.icon : undefined;
+
+  return icon && typeof icon !== 'string' ? markRaw(icon) : null;
+});
+const iconName = computed<UiDialogIconName>(() => {
+  const icon = request.value?.kind === 'confirm' ? request.value.options.icon : undefined;
+
+  if (typeof icon === 'string' && Object.hasOwn(DIALOG_ICONS, icon)) {
+    return icon;
+  }
+
+  return request.value?.options.danger ? 'alert' : 'ask';
+});
+const iconStyle = computed(() => {
+  const color = request.value?.kind === 'confirm' && customIcon.value ? request.value.options.iconColor : '';
+
+  return color ? { '--ui-dialog-host-icon': color } : undefined;
+});
+const dialogCode = computed(() => request.value?.kind === 'confirm' ? request.value.options.code ?? '' : '');
 const okText = computed(() => {
   const current = request.value;
 

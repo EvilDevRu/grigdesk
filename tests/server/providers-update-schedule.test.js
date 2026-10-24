@@ -3,7 +3,7 @@ import { access } from 'node:fs/promises';
 import { setImmediate as tick } from 'node:timers/promises';
 import test from 'node:test';
 
-import { installFixture } from './helpers/providerInstallFixture.js';
+import { completed, installFixture, start } from './helpers/providerInstallFixture.js';
 
 /**
  * Асинхронная проверка таймера завершается цепочкой микрозадач настоящего модуля.
@@ -56,4 +56,47 @@ test('проверки через 30 секунд и 6 часов не запу�
   assert.equal(manual.json().updates[0].latest, first.latest);
   assert.equal(next.calls.commands.length, 0);
   await assert.rejects(access(fixture.marker), { code: 'ENOENT' });
+});
+
+/**
+ * Перепроверка после установки идёт в сеть, а сеть флапает: без ответа реестра индикатор
+ * сравнивает свежую версию CLI с последней известной, а не оставляет прежний «устарел».
+ */
+test('успешное обновление гасит индикатор и без ответа реестра', async (t) => {
+  const fixture = await installFixture(t);
+  const before = await fixture.app.inject({ method: 'POST', url: '/api/providers/check-updates' });
+
+  assert.equal(before.json().updates[0].outdated, true);
+
+  fixture.provider.latestVersion = async () => null;
+
+  const response = await start(fixture.app, 'claude', 'update');
+
+  assert.equal(response.statusCode, 202, response.body);
+  fixture.gate.resolve();
+  assert.equal((await completed(fixture.app)).recent.claude.status, 'succeeded');
+
+  const card = (await fixture.app.inject('/api/providers')).json().providers[0];
+
+  assert.equal(card.updateAvailable, false);
+  assert.equal(card.latest, '2.0.0');
+});
+
+// Первая установка тоже перепроверяет версии: свежий CLI без ответа реестра не получает индикатор.
+test('первая установка не оставляет индикатор обновления', async (t) => {
+  const fixture = await installFixture(t, { installed: false });
+
+  await fixture.app.inject({ method: 'POST', url: '/api/providers/check-updates' });
+  fixture.provider.latestVersion = async () => null;
+
+  const response = await start(fixture.app, 'claude', 'install');
+
+  assert.equal(response.statusCode, 202, response.body);
+  fixture.gate.resolve();
+  assert.equal((await completed(fixture.app)).recent.claude.status, 'succeeded');
+
+  const card = (await fixture.app.inject('/api/providers')).json().providers[0];
+
+  assert.equal(card.installed, true);
+  assert.equal(card.updateAvailable, false);
 });

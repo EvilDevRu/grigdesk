@@ -10,6 +10,10 @@
 
 ## Грабли
 
+- [Автоподготовка legacy fixture DeepSeek: отдельный ABI-кэш, lock и восстановление](deepseek-legacy-preflight.md)
+
+- [Унаследованный ELF меняет установку CLI-фикстуры после переноса helper-а](cli-helper-binary-environment.md)
+
 - [Таймаут reload в Vite-фикстуре не доказывает сбой восстановления операции](browser-navigation-timeout.md)
 
 - [Типы тестов установки: реестр без UI и общие расширения Fastify](provider-install-type-boundaries.md)
@@ -83,6 +87,7 @@
 - [Удалённый JS-файл валит снимок миграции, хотя код рабочий](migration-inventory-snapshot.md)
 - [Тест проходит из корня, но падает из папки своего пакета](package-test-working-directory.md)
 - [Настройки роняют вкладку headless-проверки = нужен полный Chromium](headless-shell-settings-crash.md)
+- [Живой замер production-сборки: посредник с CLI-токеном и что под ним не открывается](live-ui-cli-proxy.md)
 - [Тест ждёт `OK`, а утилита пишет `ЦЕЛ` = вывод coreutils переведён на язык машины](coreutils-locale.md)
 
 - [settings-modal-browser-fixture.md](settings-modal-browser-fixture.md) — изолированный стенд общего модала настроек.
