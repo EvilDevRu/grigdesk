@@ -1534,6 +1534,8 @@
   "marketplaceResults": "Плагинов: {count}",
   "marketplaceLicense": "Лицензия",
   "providerInstallationTitle": "Установка и обновление исполнителя",
+  "providerInstallationHeadingInstall": "Установка {name}",
+  "providerInstallationHeadingUpdate": "Обновление {name}",
   "providerInstallationInstall": "Установить",
   "providerInstallationUpdate": "Обновить",
   "providerInstallationConfirm": "{action}: {name}. Команда: {command}",

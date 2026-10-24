@@ -193,13 +193,13 @@
                     </svg>
                   </UiIconButton>
                   <UiIconButton
-                    v-if="installation.snapshot.recent[p.id]
-                      && installation.snapshot.active?.providerId !== p.id"
+                    v-if="installResultNeedsAttention(p)"
                     role="embedded"
+                    tone="warning"
                     :label="t('settings.providerInstallationResult')"
                     v-tooltip="t('settings.providerInstallationResult')"
                     @click="showProviderInstallation(p.id, close)"
-                  ><span aria-hidden="true">✓</span></UiIconButton>
+                  ><span aria-hidden="true">!</span></UiIconButton>
                   <!-- Проверка «прямо сейчас»: фон ходит к вендору раз в пять минут, а
                        человеку иногда нужна цифра этой минуты. Пока идёт пауза после
                        отказа вендора, кнопка гаснет и называет время: клик всё равно
@@ -585,6 +585,22 @@ function startProviderInstallation(p: TopbarProvider, close: () => void): void {
 function showProviderInstallation(id: string, close: () => void): void {
   close();
   installation.show(id);
+}
+
+/**
+ * Сервер хранит последний итог бессрочно, поэтому кнопка итога во всплывашке видна только
+ * пока итог требует действия: отказ, прерывание, предупреждение или вход после первой установки.
+ * Удачное обновление объявлять нечем — оно закончено, а полный итог остаётся в настройках.
+ */
+function installResultNeedsAttention(p: TopbarProvider): boolean {
+  const result = installation.snapshot.recent[p.id];
+
+  if (!result || installation.snapshot.active?.providerId === p.id) {
+    return false;
+  }
+
+  return result.status !== 'succeeded' || result.warnings.length > 0
+    || (result.operation === 'install' && !p.available);
 }
 
 function canUpdateCli(p: TopbarProvider) {

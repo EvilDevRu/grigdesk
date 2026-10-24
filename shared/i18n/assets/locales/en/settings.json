@@ -1534,6 +1534,8 @@
   "marketplaceResults": "Plugins: {count}",
   "marketplaceLicense": "License",
   "providerInstallationTitle": "Executor installation and update",
+  "providerInstallationHeadingInstall": "{name} installation",
+  "providerInstallationHeadingUpdate": "{name} update",
   "providerInstallationInstall": "Install",
   "providerInstallationUpdate": "Update",
   "providerInstallationConfirm": "{action}: {name}. Command: {command}",
