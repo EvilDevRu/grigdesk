@@ -37,6 +37,7 @@ async function mountWorkdir(t, browser, store) {
   const wrapper = mount(Component, {
     props: { sid: 'chat' },
     attachTo: browser.document.querySelector('#mount'),
+    global: { stubs: { transition: false } },
   });
 
   t.after(() => {
@@ -114,6 +115,7 @@ test('папка открывается одним кликом, выбор и �
   const field = browser.document.querySelector('input[placeholder="/home/user/project"]');
 
   assert.ok(field, 'диалог открыт, поле папки доступно');
+  assert.equal(browser.document.activeElement === field, true, 'ручной ввод получает фокус по запросу');
   field.value = '/workspace/next';
   field.dispatchEvent(new browser.Event('input', { bubbles: true }));
   await nextTick();
@@ -321,6 +323,45 @@ test('пустой поиск и отказ сервера остаются в �
   await flushPromises();
   assert.equal(browser.document.querySelector('input[type="search"]').value, '');
   assert.equal(Boolean(browser.document.querySelector('form')), false);
+});
+
+test('возврат из ручного ввода сохраняет фильтр, черновик пути и фокус действия', async (t) => {
+  const browser = await browserHarness();
+  const { nextTick } = await import('../../web/node_modules/vue/index.mjs');
+  const session = await workdirSession();
+  const { wrapper, flushPromises } = await mountWorkdir(t, browser, {
+    workdirProtocol: 1,
+    sessions: [session],
+    archived: [],
+    recentWorkdirs: [{ kind: 'path', path: '/workspace/example' }],
+    previewWorkdir: async () => session.workdirPreview,
+  });
+
+  await wrapper.get('[data-context="chat-workdir"]').trigger('click');
+  await flushPromises();
+
+  const search = browser.document.querySelector('input[type="search"]');
+
+  search.value = 'example';
+  search.dispatchEvent(new browser.Event('input', { bubbles: true }));
+  await nextTick();
+  buttonByText(browser, 'По пути').click();
+  await flushPromises();
+
+  const field = browser.document.querySelector('input[placeholder="/home/user/project"]');
+
+  field.value = '/workspace/draft';
+  field.dispatchEvent(new browser.Event('input', { bubbles: true }));
+  await nextTick();
+  buttonByText(browser, 'К проектам и папкам').click();
+  await flushPromises();
+  assert.equal(browser.document.querySelector('input[type="search"]').value, 'example');
+  assert.equal(browser.document.querySelectorAll('.workdir-choice').length, 1);
+  assert.equal(browser.document.activeElement === buttonByText(browser, 'По пути'), true);
+  buttonByText(browser, 'По пути').click();
+  await flushPromises();
+  assert.equal(browser.document.querySelector('input[placeholder="/home/user/project"]').value,
+    '/workspace/draft');
 });
 
 test('папка задачи доступна для просмотра без каталога и ручного ввода', async (t) => {

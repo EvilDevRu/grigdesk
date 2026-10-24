@@ -465,23 +465,6 @@
   flex: 1 0 auto;
 }
 
-/* Способы выбора папки сохраняют равные доли, занимая ширину своих подписей.
-   Размер берётся из общего size, а контекст определяет только раскладку и акцент. */
-.ui-segmented-control[data-context='workdir-mode'] {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
-  align-self: flex-start;
-  width: fit-content;
-  max-width: 100%;
-}
-
-.ui-segmented-control[data-context='workdir-mode'] > .ui-button[aria-pressed='true'] {
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
-  color: var(--accent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, var(--line));
-}
-
 /* Источник и набор параметров могут переноситься внутри узкого дока.
    Высота каждого действия по-прежнему принадлежит общей геометрии controls. */
 .ui-segmented-control[data-ui-studio-choice] {
