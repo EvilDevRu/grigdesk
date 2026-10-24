@@ -78,7 +78,7 @@ async function serverJob(t, options) {
   return (await completed(server.app)).recent.claude;
 }
 
-test('общая фаза и live output без выдуманного процента', async (t) => {
+test('общая фаза и свёрнутый live output без выдуманного процента', async (t) => {
   const { wrapper, store, flushPromises, calls } = await dialogFixture(t, job());
 
   assert.equal(wrapper.get('[role="progressbar"]').attributes('aria-valuenow'), undefined);
@@ -87,14 +87,30 @@ test('общая фаза и live output без выдуманного проц�
   assert.match(wrapper.text(), /[Пп]роверк.*верси/u);
   assert.match(wrapper.text(), /[Оо]бновлен.*модел/u);
   assert.match(wrapper.text(), /строка из stdout/u);
+  assert.equal(wrapper.get('pre').isVisible(), false);
+  assert.equal(button(wrapper, /^Детали/u).attributes('aria-expanded'), 'false');
+  await button(wrapper, /^Детали/u).trigger('click');
+  assert.equal(wrapper.get('pre').isVisible(), true);
+  assert.equal(button(wrapper, /^Детали/u).attributes('aria-expanded'), 'true');
+
   store.applySnapshot(snapshot(job({ outputTail: '<img src=x onerror="alert(1)">\nживой вывод' }), 4));
   await flushPromises();
   assert.match(wrapper.text(), /<img src=x/u);
   assert.equal(wrapper.find('img').exists(), false);
   assert.match(wrapper.text(), /живой вывод/u);
+  assert.equal(wrapper.get('pre').isVisible(), true);
   await button(wrapper, /^Закрыть$/u).trigger('click');
+  await flushPromises();
   assert.equal(store.snapshot.active.id, 'fixture-job-1');
   assert.equal(calls.posts.length, 0, 'Закрытие отправляет abort или cancel');
+
+  store.show('claude');
+  await flushPromises();
+  assert.equal(wrapper.get('pre').isVisible(), false);
+  await button(wrapper, /^Детали/u).trigger('click');
+  store.applySnapshot(snapshot(job({ id: 'fixture-job-2' }), 5));
+  await flushPromises();
+  assert.equal(wrapper.get('pre').isVisible(), false);
 });
 
 test('номер сетевого повтора переводится и исчезает после фазы установки', async (t) => {
@@ -230,6 +246,16 @@ test('четыре исхода и interrupted видны на RU и EN', async 
 
         assert.equal(output, finalJob.outputTail,
           'Сырой вывод команды должен оставаться данными при смене языка');
+
+        if (finalJob.outputTail) {
+          const details = button(fixture.wrapper, locale === 'ru' ? /^Детали/u : /^Details/u);
+
+          assert.equal(fixture.wrapper.get('pre').isVisible(), false);
+          await details.trigger('click');
+          assert.equal(fixture.wrapper.get('pre').isVisible(), true);
+          await details.trigger('click');
+          assert.equal(fixture.wrapper.get('pre').isVisible(), false);
+        }
       }
 
       fixture.wrapper.unmount();
