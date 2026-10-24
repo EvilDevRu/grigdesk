@@ -1,3 +1,4 @@
+import { selectPluginServerEntry } from '../pluginServerEntry.ts';
 import { lstat, open, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { isRecord } from '../../../../shared/lib/objects.ts';
@@ -8,7 +9,7 @@ import {
   normalizePluginPackagePath,
 } from '../pluginsRegistry.ts';
 import { compareSemVer, parseSemVer } from '../releaseCommon.ts';
-import { installError } from './errors.ts';
+import { PluginInstallError, installError } from './errors.ts';
 import { assertRealPackageRoot, readPackageTree } from './packageTree.ts';
 import type { PackageEntry } from './packageTree.ts';
 import { validateNpmDeclarations, validateNpmLock } from './npmPolicy.ts';
@@ -160,14 +161,20 @@ async function validatePackageTree(
 
   await validateGitControls(dir, tree);
 
-  const server = await lstat(path.join(dir, 'server.js')).catch(() => null);
+  const [js, ts] = await Promise.all(['server.js', 'server.ts'].map((entry) =>
+    lstat(path.join(dir, entry)).catch(() => null)));
+  const server = selectPluginServerEntry(js?.isFile() ?? false, ts?.isFile() ?? false);
+
+  if (server.serverError) {
+    throw new PluginInstallError('manifest_invalid', server.serverError, 422);
+  }
 
   return {
     id,
     name: fields.name,
     version,
     description: fields.description,
-    hasServer: server?.isFile() ?? false,
+    hasServer: server.hasServer,
     webDir,
     npmDirs,
   };

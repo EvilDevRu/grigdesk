@@ -36,7 +36,7 @@ export function sameSource(left: PluginSourceRef, right: PluginSourceRef): boole
 export function sensitivePluginFile(file: string, webDir: string | null): boolean {
   const basename = file.split('/').at(-1) ?? '';
 
-  if (['plugin.json', 'server.js', 'package.json', 'package-lock.json'].includes(basename)) {
+  if (['plugin.json', 'server.js', 'server.ts', 'package.json', 'package-lock.json'].includes(basename)) {
     return true;
   }
 

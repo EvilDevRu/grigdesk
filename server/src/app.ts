@@ -1098,6 +1098,7 @@ async function build(desktopParent: DesktopParent | null) {
     config,
     prefs,
     installs: pluginInstalls,
+    documentReader,
     prepareChange: (id, change) => id === 'studio3d' ? fastify.studio3d?.prepareChange(change) : undefined,
     onToggle: async (id, enabled) => {
       if (id === 'ssh' && !enabled) {

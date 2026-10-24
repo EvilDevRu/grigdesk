@@ -1,5 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { installError } from '../../lib/pluginInstall/errors.ts';
+import { changeError } from './changes.ts';
+import type { PluginChange, PluginTransition } from './changes.ts';
 
 export interface ReplacementLease {
   finish(outcome: 'installed' | 'reverted' | 'blocked'): Promise<void>;
@@ -8,6 +10,10 @@ export interface ReplacementLease {
 export interface PluginLifecycle {
   busyReason: null | (() => unknown);
   prepareReplace: null | ((signal: AbortSignal) => Promise<ReplacementLease>);
+  onEnable?: () => unknown;
+  onDisable?: () => unknown;
+  prepareChange?: (change: PluginChange, signal: AbortSignal) =>
+    PluginTransition | undefined | Promise<PluginTransition | undefined>;
 }
 
 export const BUSY_UNKNOWN = 'Не удалось подтвердить, что плагин свободен.';
@@ -68,10 +74,41 @@ export class PluginAdmission {
   private phase: 'open' | 'replacing' | 'installed' | 'blocked' = 'open';
   private active = 0;
   private hookPending = false;
+  private enabled = true;
+  private changePending = false;
   private readonly drained = new Set<() => void>();
 
   constructor(options: PluginAdmissionOptions) {
     this.options = options;
+  }
+
+  get obsolete(): boolean {
+    return this.phase === 'installed' || this.phase === 'blocked';
+  }
+
+  get needsRestart(): boolean {
+    return this.phase === 'installed' || !!this.options.stopRequired;
+  }
+
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+  }
+
+  /**
+   * Reservation не ставит HTTP в очередь и не меняет текущий допуск плагина.
+   * До освобождения она запрещает другую подготовку настроек и замену файлов.
+   */
+  beginChange(): () => void {
+    if (this.phase !== 'open' || this.changePending) {
+      throw changeError('plugin_change_busy',
+        'Изменение плагина ещё не завершено. Если ожидание не заканчивается, перезапустите GrigDesk.');
+    }
+
+    this.changePending = true;
+
+    return () => {
+      this.changePending = false;
+    };
   }
 
   /**
@@ -84,6 +121,12 @@ export class PluginAdmission {
         : this.phase === 'blocked' ? 'recovery_required' : 'plugin_replacing';
 
       reply.code(this.phase === 'blocked' ? 503 : 409).send({ error: code });
+
+      return;
+    }
+
+    if (!this.enabled) {
+      reply.code(404).send({ error: 'plugin_disabled', message: 'Плагин выключен.' });
 
       return;
     }
@@ -127,7 +170,7 @@ export class PluginAdmission {
    * Возобновление допуска возможно лишь после подтверждённого reverted outcome.
    */
   async prepare(signal: AbortSignal): Promise<ReplacementLease> {
-    if (this.phase !== 'open') {
+    if (this.phase !== 'open' || this.changePending) {
       throw installError('plugin_busy');
     }
 
