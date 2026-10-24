@@ -103,7 +103,7 @@
   "exitStoppingHint": "Saving chats and stopping pipelines. The window will close when this finishes.",
   "exitChats": "Chats",
   "exitPipelines": "Pipelines",
-  "exitRemember": "Remember",
+  "exitRemember": "Don't ask again",
   "exitConfirm": "Quit",
   "exitCancel": "Cancel",
   "exitChatFallback": "Chat {id}",
