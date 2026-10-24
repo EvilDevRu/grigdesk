@@ -186,7 +186,7 @@ test('плитки топбара: стык, переключение, клав�
   assert.equal(wrapper.get('#one').attributes('aria-expanded'), 'false');
   assert.equal(wrapper.get('#rail').attributes('data-ui-topbar-trigger'), undefined);
   assert.equal(surface.style.top, '140px', 'панель рейки привязана к своей кнопке');
-  assert.equal(surface.style.left, '40px');
+  assert.equal(surface.style.left, '32px', 'панель примыкает к правому краю кнопки без зазора');
   assert.equal(surface.dataset.placement, 'right-start');
 
   await wrapper.get('#two').trigger('mouseenter');

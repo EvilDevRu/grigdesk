@@ -6,7 +6,7 @@
     :class="{ 'ui-topbar-panel--wide': size === 'wide' }"
     :attachment="attachment === 'topbar' ? 'topbar' : undefined"
     :placement="placement"
-    :offset="attachment === 'topbar' ? 0 : 8"
+    :offset="0"
     :trigger-mode="triggerMode"
     :hover-delay="160"
     :aria-label="label || title"
