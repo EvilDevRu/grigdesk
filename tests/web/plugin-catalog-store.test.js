@@ -4,6 +4,8 @@ import test from 'node:test';
 import { createPinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
 import { compileModule, webFile } from './helpers/compile-vue.js';
 import { catalogFixture } from '../helpers/pluginCatalog.js';
+import { moduleCatalogFixture, catalogResponse } from '../helpers/pluginCatalogModules.js';
+import { ApiError } from '../../web/src/shared/apiClient.ts';
 
 test('CAT-W1: checked response, stale при отказе и поздний detail после dispose', async (t) => {
   const module = await compileModule(webFile('src/stores/pluginCatalog.ts'));
@@ -182,4 +184,146 @@ test('CAT-W6: карточка, сброшенная новым снимком, 
   assert.equal(store.detailError, true);
   await store.loadDetail('demo');
   assert.equal(store.detailError, true, 'карточка старого снимка не публикуется');
+});
+
+
+test('CAT-W7-NEGOTIATION: same-origin api2, refresh, detail и точный SHA', async (t) => {
+  const module = await compileModule(webFile('src/stores/pluginCatalog.ts'));
+  const { modern } = moduleCatalogFixture();
+  const calls = [];
+  const store = module.definePluginCatalogStore({
+    get: async (url, options) => {
+      calls.push({ url, timeoutMs: options.timeoutMs });
+
+      return url.includes('/demo') ? modern.detail : catalogResponse(modern);
+    },
+  }, 'catalog-modern')(createPinia());
+
+  t.after(() => store.$dispose());
+  await store.loadIndex();
+  assert.equal(store.state, 'fresh');
+  assert.equal(store.index.plugins[0].latest.api, 2);
+  await store.loadIndex(true);
+  await store.loadDetail('demo');
+  assert.equal(store.detail.plugin.versions[0].sha, modern.version.sha);
+  assert.deepEqual(calls, [
+    { url: '/api/plugin-catalog?api=2', timeoutMs: 25000 },
+    { url: '/api/plugin-catalog?api=2&refresh=1', timeoutMs: 25000 },
+    { url: '/api/plugin-catalog/demo?api=2', timeoutMs: 15000 },
+  ]);
+});
+
+test('CAT-W8-OLD-SERVER: один HTTP400 выбирает прежний режим для refresh/detail', async (t) => {
+  const module = await compileModule(webFile('src/stores/pluginCatalog.ts'));
+  const fixture = catalogFixture();
+  const calls = [];
+  const store = module.definePluginCatalogStore({
+    get: async (url, options) => {
+      calls.push({
+        url,
+        signal: options.signal,
+        timeoutMs: options.timeoutMs,
+      });
+
+      if (url.includes('api=2')) {
+        throw new ApiError('Неизвестный query', 400, {});
+      }
+
+      return url.includes('/demo') ? fixture.detail : catalogResponse(fixture);
+    },
+  }, 'catalog-old-server')(createPinia());
+
+  t.after(() => store.$dispose());
+  await store.loadIndex();
+  assert.equal(store.state, 'fresh');
+  await store.loadIndex(true);
+  await store.loadDetail('demo');
+  assert.equal(store.detail.plugin.id, 'demo');
+  assert.deepEqual(calls.map((item) => item.url), [
+    '/api/plugin-catalog?api=2', '/api/plugin-catalog',
+    '/api/plugin-catalog?refresh=1', '/api/plugin-catalog/demo',
+  ]);
+  assert.equal(calls[0].signal, calls[1].signal);
+  assert.equal(calls[0].signal.aborted, true, 'refresh завершил прежний epoch');
+  assert.deepEqual(calls.map((item) => item.timeoutMs), [25000, 15000, 15000, 15000]);
+});
+
+for (const [label, failure] of [
+  ['401', new ApiError('Сессия истекла', 401, {})],
+  ['503', new ApiError('Временно недоступно', 503, {})],
+  ['невалидный 200', null],
+  ['cancel', new DOMException('Отменено', 'AbortError')],
+]) {
+  test(`CAT-W9-NO-DOWNGRADE: ${label} не пробует legacy`, async (t) => {
+    const module = await compileModule(webFile('src/stores/pluginCatalog.ts'));
+    const calls = [];
+    const store = module.definePluginCatalogStore({
+      get: async (url) => {
+        calls.push(url);
+
+        if (failure) {
+          throw failure;
+        }
+
+        return { state: 'fresh', catalog: {} };
+      },
+    }, `catalog-failure-${label}`)(createPinia());
+
+    t.after(() => store.$dispose());
+    await store.loadIndex();
+    assert.equal(store.state, 'unavailable');
+    assert.equal(store.error, true);
+    assert.deepEqual(calls, ['/api/plugin-catalog?api=2']);
+  });
+}
+
+test('CAT-W9-NO-DOWNGRADE: поздний HTTP400 старого epoch не меняет modern snapshot', async (t) => {
+  const module = await compileModule(webFile('src/stores/pluginCatalog.ts'));
+  const { modern } = moduleCatalogFixture();
+  const old = Promise.withResolvers();
+  const calls = [];
+  const store = module.definePluginCatalogStore({
+    get: async (url) => {
+      calls.push(url);
+
+      if (calls.length === 1) {
+        return old.promise;
+      }
+
+      return url.includes('/demo') ? modern.detail : catalogResponse(modern);
+    },
+  }, 'catalog-late-400')(createPinia());
+
+  t.after(() => store.$dispose());
+
+  const pending = store.loadIndex();
+
+  await store.loadIndex(true);
+  old.reject(new ApiError('Старая проба', 400, {}));
+  await pending;
+  await store.loadDetail('demo');
+  assert.equal(store.state, 'fresh');
+  assert.equal(store.detail.plugin.versions[0].sha, modern.version.sha);
+  assert.deepEqual(calls, ['/api/plugin-catalog?api=2', '/api/plugin-catalog?api=2&refresh=1',
+    '/api/plugin-catalog/demo?api=2']);
+});
+
+test('CAT-W9-NO-DOWNGRADE: HTTP400 после dispose не запускает legacy запрос', async () => {
+  const module = await compileModule(webFile('src/stores/pluginCatalog.ts'));
+  const pending = Promise.withResolvers();
+  const calls = [];
+  const store = module.definePluginCatalogStore({
+    get: async (url) => {
+      calls.push(url);
+
+      return pending.promise;
+    },
+  }, 'catalog-disposed-400')(createPinia());
+  const reading = store.loadIndex();
+
+  store.$dispose();
+  pending.reject(new ApiError('Закрыто', 400, {}));
+  await reading;
+  assert.deepEqual(calls, ['/api/plugin-catalog?api=2']);
+  assert.equal(store.index, null);
 });

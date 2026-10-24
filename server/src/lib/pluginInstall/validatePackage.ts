@@ -1,4 +1,5 @@
 import { selectPluginServerEntry } from '../pluginServerEntry.ts';
+import { resolvePluginWebModule } from '../pluginWebModule.ts';
 import { lstat, open, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { isRecord } from '../../../../shared/lib/objects.ts';
@@ -40,6 +41,7 @@ export interface ValidatedPackage {
   description: string;
   hasServer: boolean;
   webDir: string | null;
+  webModuleDir: string | null;
   npmDirs: string[];
 }
 
@@ -129,7 +131,7 @@ async function validatePackageTree(
     throw installError('id_mismatch');
   }
 
-  if (Object.hasOwn(manifest, 'api') && manifest.api !== 1) {
+  if (Object.hasOwn(manifest, 'api') && manifest.api !== 1 && manifest.api !== 2) {
     throw installError('api_unsupported');
   }
 
@@ -158,6 +160,12 @@ async function validatePackageTree(
   const fields = decodeUserPluginManifest(manifest);
   const webDir = await validateWeb(dir, manifest.web);
   const npmDirs = await validateNpmDirs(dir, manifest);
+  const webModule = manifest.api === 2
+    ? resolvePluginWebModule(dir, id, manifest.webModule, normalizeModulePath, (message) => {
+      const reason = message.replace(/^webModule пропущен: /u, '');
+
+      throw new PluginInstallError('manifest_invalid', `Некорректный webModule: ${reason}`, 422);
+    }) : null;
 
   await validateGitControls(dir, tree);
 
@@ -176,8 +184,23 @@ async function validatePackageTree(
     description: fields.description,
     hasServer: server.hasServer,
     webDir,
+    webModuleDir: webModule ? path.relative(dir, webModule.dir).split(path.sep).join('/') : null,
     npmDirs,
   };
+}
+
+/**
+ * Исполняемые ресурсы принадлежат самому пакету, а не установленным npm-зависимостям.
+ * Остальные ограничения путей и файлов остаются в общем валидаторе модуля.
+ */
+function normalizeModulePath(raw: unknown, rootAllowed: boolean): string | null {
+  const relative = normalizePluginPackagePath(raw, rootAllowed);
+
+  if (relative?.split('/').includes('node_modules')) {
+    throw new Error('ресурс модуля не может находиться в node_modules');
+  }
+
+  return relative;
 }
 
 /**

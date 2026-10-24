@@ -82,7 +82,7 @@ export const PLUGIN_INSTALL_ERRORS: Record<string, { status: number; message: st
   },
   api_unsupported: {
     status: 422,
-    message: "Плагин рассчитан на другую версию контракта (api). Этот GrigDesk поддерживает api 1.",
+    message: "Плагин рассчитан на другую версию контракта (api). Этот GrigDesk поддерживает api 1 и 2.",
   },
   version_invalid: {
     status: 422,

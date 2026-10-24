@@ -144,8 +144,9 @@ test('Проекция: done install, update и rollback сохраняют ра
   assert.equal(install.resultText,
     'Плагин «Демо» v1.0.0 установлен. Включите его в каталоге и перезапустите GrigDesk.');
   assert.equal(update.resultText,
-    'Плагин «Демо» обновлён до v1.0.0. Перезапустите GrigDesk, чтобы применить.');
-  assert.equal(rollback.resultText, 'Версия v1.0.0 восстановлена. Перезапустите GrigDesk.');
+    'Плагин «Демо» обновлён до v1.0.0. Перезапустите GrigDesk и перезагрузите окно, чтобы применить.');
+  assert.equal(rollback.resultText,
+    'Версия v1.0.0 восстановлена. Перезапустите GrigDesk и перезагрузите окно.');
   assert.equal(rollback.completed, true);
   assert.equal(rollback.footer.primary.label, 'Готово');
 });
