@@ -10,7 +10,7 @@ import { startPty, assertRestored } from './helpers/pty.mts';
 import { menuTitle } from './helpers/menuFixture.mts';
 
 for (const [inputTTY, outputTTY] of [[false, false], [true, false], [false, true]]) {
-  test(`COMP-01 барьер: open без меню, TTY=${inputTTY}/${outputTTY}`, async (t) => {
+  test(`COMP-01 барьер: справка без меню, TTY=${inputTTY}/${outputTTY}`, async (t) => {
     const box = await createSandbox(t);
 
     box.installWindow();
@@ -27,12 +27,13 @@ for (const [inputTTY, outputTTY] of [[false, false], [true, false], [false, true
     assert.equal(result.code, 0, session.output());
     assertRestored(result, session.output());
     assert.doesNotMatch(session.output(), menuTitle);
-    await box.waitFor(() => box.calls().some((call) => call.startsWith('app ')));
-    assert.ok(box.calls().includes(`app --grigdesk-url=http://127.0.0.1:${box.port}/`));
+    assert.match(session.output(), /grigdesk-ctl server start/u);
+    assert.deepEqual(box.calls(), []);
+    assert.deepEqual(box.requests(), []);
   });
 }
 
-test('COMP-02 барьер: два TTY в cgroup службы отказывают до эффектов', async (t) => {
+test('COMP-02 барьер: два TTY в cgroup службы показывают справку без эффектов', async (t) => {
   const box = await createSandbox(t);
 
   await writeFile(path.join(box.home, 'cgroup'), '0::/user.slice/grigdesk-server.service');
@@ -43,8 +44,8 @@ test('COMP-02 барьер: два TTY в cgroup службы отказываю
   });
   const result = await session.done;
 
-  assert.equal(result.code, 1);
-  assert.match(session.output(), /--force/u);
+  assert.equal(result.code, 0);
+  assert.match(session.output(), /grigdesk-ctl server start/u);
   assert.doesNotMatch(session.output(), menuTitle);
   assert.deepEqual(box.calls(), []);
   assertRestored(result, session.output());
@@ -108,7 +109,7 @@ test('COMP-03 барьер: точные help, ошибка, status JSON и plai
   });
 });
 
-test('COMP-04 барьер: исходники с ELF и Node 20 сохраняют прежний helper/open', async (t) => {
+test('COMP-04 барьер: исходники с ELF и Node 20 показывают справку через helper', async (t) => {
   const { binaryFixture } = await import('../server/helpers/ctlBinaryFixture.js');
   const { mkdir, readFile } = await import('node:fs/promises');
   const box = await binaryFixture(t);
@@ -142,7 +143,22 @@ test('COMP-04 барьер: исходники с ELF и Node 20 сохраня�
   assert.equal(result.code, 0, session.output());
   assert.doesNotMatch(session.output(), menuTitle);
   assert.doesNotMatch(session.output(), /node не найден|требует Node/u);
-  assert.match(await readFile(box.env.STUB_LOG, 'utf8'), /fixture-open/u);
+  assert.match(session.output(), /grigdesk-ctl server start/u);
+  assert.doesNotMatch(await readFile(box.env.STUB_LOG, 'utf8'), /fixture-open|systemctl/u);
   assert.match(await box.calls(), /elf --prepare/u);
   assertRestored(result, session.output());
+});
+
+test('COMP-05 барьер: оболочка явно просит справку у ранее собранного helper', async (t) => {
+  const { binaryFixture } = await import('../server/helpers/ctlBinaryFixture.js');
+  const box = await binaryFixture(t);
+  const helper = path.join(box.runtime, 'server/runtime/helpers/grigdesk-cli.mjs');
+
+  await writeFile(helper, 'process.stdout.write(JSON.stringify(process.argv.slice(2)));\n');
+
+  const result = await box.run('bin/grigdesk-ctl');
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), ['--help']);
+  assert.doesNotMatch(await box.calls(), /systemctl/u);
 });

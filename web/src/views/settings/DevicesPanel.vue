@@ -10,7 +10,7 @@
       {{ status.listener.error || t('settings.networkAccessIsDisabledSetGRIGDESKCLIENT') }}
     </UiInlineMessage>
     <p v-else-if="status">{{ t('settings.connectionAddresses') }} {{ status.listener.addresses.join(', ') }}</p>
-    <p v-if="loading" role="status">{{ t('settings.loadingDevices') }}</p>
+    <UiLoadingState v-if="loading" :label="t('settings.loadingDevices')" />
     <SettingsEmpty
       v-else-if="status && !status.devices.length"
       class="devices-empty"
@@ -56,8 +56,16 @@ import { t } from '../../ui.ts';
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 
 import { errorMessage } from '../../../../shared/lib/errors.ts';
-import { UiButton, UiInlineMessage, UiDialog, UiField, UiInput,
-  confirmDialog, messageRef } from '../../ui.ts';
+import {
+  UiButton,
+  UiInlineMessage,
+  UiDialog,
+  UiField,
+  UiInput,
+  confirmDialog,
+  messageRef,
+  UiLoadingState,
+} from '../../ui.ts';
 import { api } from '../../shared/apiClient.ts';
 import PairDeviceDialog from './PairDeviceDialog.vue';
 import SettingsEmpty from './SettingsEmpty.vue';

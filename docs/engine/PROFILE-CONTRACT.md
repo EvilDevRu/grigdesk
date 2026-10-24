@@ -128,6 +128,22 @@ Topology и prompt-файлы не задаются shell-массивами и�
 
 ## Опциональные route hooks
 
+Поставляемый [образец](../grigdesk/pipeline/profile-sample.md) использует два opt-in hook:
+
+- `profile_stand_mode TASK` → `services|none`. Без hook действует прежний services и прежний
+  TSV. Явное значение закрепляется строкой stand-mode в profile-contract.tsv; none допустим
+  только для isolated, требует существующих пустых FE_PORT/API_PORT в env и даёт unavailable
+  services. Health проверяет готовность копий, граф не содержит sandbox и progress стенда не создаётся.
+- `profile_delivery_strategy TASK` → `commit|merge|pull-request`. Выбирается только при start,
+  закрепляется вместе с точными actions в delivery.tsv и передаётся optional delivery.strategy.
+  Resume читает pin. Соответствие действий: commit; commit+merge; commit+push+pull-request.
+  Новая стратегия не выдаёт task-comment. Без hook сохраняется прежний publish-контракт;
+  disabled/no-ship не получает стратегию, actions или targets.
+
+Эти hooks не устанавливают профиль и не поднимают стенд. Команды проекта принадлежат
+локальной конфигурации. В образце единственный ввод — project.json; shared требует оба
+URL с одним хостом вида `http://<host>:<port>` без пути. UI без стенда требует человека.
+
 | Хук | Назначение |
 |---|---|
 | `profile_timeout_class <CLASS>` | переопределить секунды класса времени из бандла маршрута |

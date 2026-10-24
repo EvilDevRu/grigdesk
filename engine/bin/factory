@@ -806,6 +806,18 @@ V2_WORKSPACE_MODE=$(profile_workspace_mode) ||
 [[ "$V2_WORKSPACE_MODE" == isolated || "$V2_WORKSPACE_MODE" == shared ]] ||
   die "profile_workspace_mode: допускается только isolated или shared"
 
+# Только явно объявленный hook расширяет pin и допускает пустые порты.
+# Прежние профили сохраняют контракт сервисов без новых строк в манифесте.
+V2_STAND_MODE=services
+V2_STAND_OPT_IN=0
+if declare -F profile_stand_mode >/dev/null; then
+  V2_STAND_OPT_IN=1
+  V2_STAND_MODE=$(profile_stand_mode "$TASK") || die "profile_stand_mode отказал"
+  [[ "$V2_STAND_MODE" == services ||
+     ( "$V2_STAND_MODE" == none && "$V2_WORKSPACE_MODE" == isolated ) ]] ||
+    die "profile_stand_mode: none допускается только для isolated"
+fi
+
 v2_repo_seen() {
   local requested=$1 known
   for known in "${V2_REPO_NAMES[@]}"; do
@@ -1330,6 +1342,9 @@ v2_materialize_profile_contract() {
     printf 'schema\t1\n'
     printf 'repos-mode\tgeneric\n'
     printf 'workspace-mode\t%s\n' "$V2_WORKSPACE_MODE"
+    if [[ "$V2_STAND_OPT_IN" == 1 ]]; then
+      printf 'stand-mode\t%s\n' "$V2_STAND_MODE"
+    fi
     printf 'stand-ownership\t%s\n' "$([[ "$V2_WORKSPACE_MODE" == shared ]] && printf external || printf task)"
     printf 'source-branch\t%s\n' "$V2_SOURCE_BRANCH"
     printf 'container\t%s\n' "$V2_CONTAINER"
@@ -1638,6 +1653,7 @@ v2_detect_delivery_contract() {
 
 v2_install_delivery_spec() {
   local destination tmp action target parsed
+  V2_DELIVERY_STRATEGY=""
   destination="$(v2_attempt_artifacts)/delivery.tsv"
   if [[ "$V2_HAS_SHIP" == 0 ]]; then
     # У no-ship маршрута нет даже пустого delivery-контракта: отсутствие файла,
@@ -1661,7 +1677,15 @@ v2_install_delivery_spec() {
       return 2
     fi
     tmp=$(mktemp "$(dirname "$destination")/.delivery.XXXXXX") || return 1
-    for action in commit push pull-request; do
+    local -a delivery_actions=(commit push pull-request)
+    if declare -F profile_delivery_strategy >/dev/null; then
+      V2_DELIVERY_STRATEGY=$(profile_delivery_strategy "$TASK") || return 78
+      parsed=$(python3 "$FACTORY_HOME/lib/delivery_contract.py" "$V2_DELIVERY_STRATEGY") || return 78
+      mapfile -t delivery_actions <<<"$parsed"
+      printf 'strategy\t%s\n' "$V2_DELIVERY_STRATEGY" >>"$tmp"
+      (( TASK_COMMENT == 0 )) || return 78
+    fi
+    for action in "${delivery_actions[@]}"; do
       printf 'action\t%s\n' "$action" >>"$tmp"
     done
     (( TASK_COMMENT == 0 )) || printf 'action\ttask-comment\n' >>"$tmp"
@@ -1686,7 +1710,8 @@ v2_install_delivery_spec() {
   TASK_COMMENT=0
   while IFS=$'\t' read -r action target; do
     case "$action:$target" in
-      action:commit|action:push|action:pull-request) ;;
+      action:commit|action:push|action:pull-request|action:merge) ;;
+      strategy:*) V2_DELIVERY_STRATEGY=$target ;;
       action:task-comment) TASK_COMMENT=1 ;;
       target:*)
         parsed=$(v2_delivery_target_valid "$target") || return 78
@@ -1698,6 +1723,11 @@ v2_install_delivery_spec() {
     esac
   done <"$destination"
   (( ${#DELIVERY_TARGETS[@]} > 0 )) || return 78
+  if [[ -n "$V2_DELIVERY_STRATEGY" ]]; then
+    python3 "$FACTORY_HOME/lib/delivery_contract.py" "$V2_DELIVERY_STRATEGY" "$destination"
+    return
+  fi
+  ! grep -Fxq $'action\tmerge' "$destination" || return 78
   grep -Fxq $'action\tcommit' "$destination" &&
     grep -Fxq $'action\tpush' "$destination" &&
     grep -Fxq $'action\tpull-request' "$destination"
@@ -1801,9 +1831,15 @@ v2_read_sandbox() {
   sb_k=$(v2_env_get SB_K)
   V2_API_PORT=$(v2_env_get API_PORT)
   V2_FE_PORT=$(v2_env_get FE_PORT)
-  [[ "$task" == "$TASK" && "$sb_k" =~ ^[0-9]+$ &&
-     "$V2_API_PORT" =~ ^[1-9][0-9]{3,4}$ &&
-     "$V2_FE_PORT" =~ ^[1-9][0-9]{3,4}$ ]] || return 78
+  [[ "$task" == "$TASK" && "$sb_k" =~ ^[0-9]+$ ]] || return 78
+  if [[ "$V2_STAND_MODE" == none ]]; then
+    [[ -z "$V2_API_PORT" && -z "$V2_FE_PORT" ]] || return 78
+    grep -q '^API_PORT=' "$V2_SANDBOX_ENV" &&
+      grep -q '^FE_PORT=' "$V2_SANDBOX_ENV" || return 78
+  else
+    [[ "$V2_API_PORT" =~ ^[1-9][0-9]{3,4}$ &&
+       "$V2_FE_PORT" =~ ^[1-9][0-9]{3,4}$ ]] || return 78
+  fi
   if [[ "$V2_WORKSPACE_MODE" == shared ]]; then
     protocol=$(v2_env_get PROTOCOL)
     workspace_mode=$(v2_env_get WORKSPACE_MODE)
@@ -2176,10 +2212,21 @@ route_v2_context_for_node() {
     done <"$V2_SCOPE_FILE"
   fi
   if [[ "$V2_HAS_SHIP" == 1 ]]; then
-    for action in commit push pull-request; do
-      args+=(--delivery-action "$action")
-    done
-    (( TASK_COMMENT == 0 )) || args+=(--delivery-action task-comment)
+    if [[ -n "${V2_DELIVERY_STRATEGY:-}" ]]; then
+      args+=(--delivery-strategy "$V2_DELIVERY_STRATEGY")
+      local selected_actions
+      selected_actions=$(
+        python3 "$FACTORY_HOME/lib/delivery_contract.py" "$V2_DELIVERY_STRATEGY"
+      ) || return 78
+      while IFS= read -r action; do
+        args+=(--delivery-action "$action")
+      done <<<"$selected_actions"
+    else
+      for action in commit push pull-request; do
+        args+=(--delivery-action "$action")
+      done
+      (( TASK_COMMENT == 0 )) || args+=(--delivery-action task-comment)
+    fi
     for target in "${DELIVERY_TARGETS[@]}"; do
       args+=(--delivery-target "$target")
     done
@@ -2966,6 +3013,15 @@ v2_main() {
       elif (( rc != 0 )); then
         return "$rc"
       fi
+      # Failed и защитные остановки также ждут goto: пустой resume сохраняет
+      # открытое вмешательство человека и реестр до любых lifecycle-эффектов.
+      route_v2_failed_stop_held "$TASK" "$attempt"
+      rc=$?
+      if (( rc == 11 )); then
+        return 0
+      elif (( rc != 0 )); then
+        return "$rc"
+      fi
     fi
     v2_lifecycle_begin_session \
       "$attempt" resume "$ROUTE" "$route_hash" || {
@@ -3186,7 +3242,11 @@ v2_main() {
         return 0
       fi
       set_st "$TASK" STALLED_HUMAN 1 RESULT "stopped-$stop"
-      v2_lifecycle_begin_human_for_stop "$attempt" "$stop" || return
+      v2_lifecycle_begin_human_for_stop "$attempt" "$stop" || {
+        rc=$?
+        v2_log "маршрут остановлен: $stop; lifecycle вмешательства человека не открыт (код $rc)"
+        return "$rc"
+      }
       if [[ "$stop" == no-progress || "$stop" == rewind-limit || "$stop" == loop-ceiling ]]; then
         stop_node=$(json_value lastCommit.node <<<"$cursor") || return 78
         [[ "$stop_node" =~ ^[a-z0-9][a-z0-9_]{0,40}$ ]] || return 78

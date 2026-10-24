@@ -11,6 +11,8 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
+import { ownTask, seedTasks } from './helpers/grigdesk-tasks.js';
+
 import factoryModule from '../../server/src/modules/factory/index.ts';
 import { parsePipeline } from '../../server/src/lib/pipelineParse.ts';
 import authPlugin from '../../server/src/plugins/auth.ts';
@@ -22,7 +24,14 @@ const ROUTE_HASH = 'a'.repeat(64);
 
 const missing = (file) => access(file).then(() => false, () => true);
 
+/**
+ * HTTP-запуск пользуется изолированными тикетами, профилем и подменным движком.
+ * Необязательный портал меняет только источник контекста, прежние defaults сохранены.
+ */
 async function fixture(t, {
+  b24 = null,
+  clarifications = null,
+  openQuestions = null,
   publishRegistry = true,
   withAuth = false,
   unitActive = true,
@@ -147,6 +156,7 @@ exit 0
     factoryControlDir: path.join(root, 'control'),
     routesDir: path.join(root, 'routes'),
     ticketsDir: path.join(root, 'tickets'),
+    grigdeskTasksPath: path.join(root, 'tasks.json'),
     stateDir,
     profilesDir,
     factoryProfile: 'demo',
@@ -189,8 +199,14 @@ exit 0
     },
     config,
     prefs: { read: () => ({}) },
-    b24: null,
-    analyzer: { readClarifications: async () => null, readOpenQuestions: async () => null, async get() { return null; } },
+    b24,
+    analyzer: {
+      readClarifications: async () => clarifications,
+      readOpenQuestions: async () => openQuestions,
+      async get() {
+        return null;
+      },
+    },
     internalToken: withAuth ? auth.internalToken : '',
   });
   await app.ready();
@@ -202,8 +218,14 @@ exit 0
     }
     await rm(root, { recursive: true, force: true });
   });
+
   return {
-    app, root, factoryCalls, systemdCalls, auth,
+    app,
+    root,
+    config,
+    factoryCalls,
+    systemdCalls,
+    auth,
   };
 }
 
@@ -366,4 +388,93 @@ test('runner_preflight_failed marker остаётся fail-closed', async (t) =>
   const clause = guard.slice(0, guard.indexOf(';'));
   assert.match(clause, /runner_preflight_unavailable/);
   assert.doesNotMatch(clause, /runner_preflight_failed/);
+});
+
+test('B24-SOURCE-01: запуск сохраняет портальную ссылку, комментарии и уточнения', async (t) => {
+  const { app, config } = await fixture(t, {
+    b24: {
+      async accountIdentity() {
+        return { baseUrl: 'https://portal.test/', userId: 17 };
+      },
+      async taskPageData() {
+        return { comments: [
+          {
+            text: 'Комментарий человека',
+            author: 'Автор',
+            isSystem: false
+          },
+          {
+            text: 'Служебный комментарий',
+            author: 'Система',
+            isSystem: true
+          },
+        ] };
+      },
+    },
+    clarifications: 'Уточнение человека',
+  });
+  const { sourceUrl, ...payload } = LAUNCH_PAYLOAD;
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/tasks/48/launch',
+    payload
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().outcome, 'launched');
+
+  const ticket = JSON.parse(await readFile(path.join(config.ticketsDir, 't48.ticket.json'), 'utf8'));
+
+  assert.equal(ticket.title, payload.title);
+  assert.match(ticket.description, /Запуск с явным runnerPrimary/);
+  assert.equal(ticket.sourceUrl, 'https://portal.test/company/personal/user/17/tasks/task/view/48/');
+  assert.match(ticket.description, /Комментарий человека/);
+  assert.match(ticket.description, /Уточнение человека/);
+  assert.doesNotMatch(ticket.description, /Служебный комментарий/);
+});
+
+test('LOCAL-LAUNCH-01: собственная постановка сильнее body, без обращений к Б24', async (t) => {
+  const portalCalls = [];
+  const { app, config } = await fixture(t, {
+    b24: {
+      async accountIdentity() {
+        portalCalls.push('identity');
+
+        return { baseUrl: 'https://portal.test', userId: 17 };
+      },
+      async taskPageData() {
+        portalCalls.push('comments');
+
+        return { comments: [{ text: 'Чужой комментарий портала', author: 'Портал' }] };
+      },
+    },
+    clarifications: 'Ответ человека на вопрос',
+    openQuestions: { questions: ['Открытый вопрос'], unknowns: ['Проверить контракт'] },
+  });
+  const task = ownTask();
+
+  await seedTasks(config, [task]);
+
+  const response = await app.inject({
+    method: 'POST',
+    url: `/api/tasks/${task.id}/launch`,
+    payload: {
+      ...LAUNCH_PAYLOAD,
+      title: 'Поддельное название',
+      description: 'Поддельный текст'
+    },
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().outcome, 'launched');
+
+  const ticket = JSON.parse(await readFile(path.join(config.ticketsDir, `t${task.id}.ticket.json`), 'utf8'));
+
+  assert.equal(ticket.title, task.title);
+  assert.equal(ticket.sourceUrl, task.sourceUrl);
+  assert.ok(ticket.description.includes(task.description));
+  assert.match(ticket.description, /Ответ человека на вопрос/);
+  assert.match(ticket.description, /Открытый вопрос/);
+  assert.doesNotMatch(ticket.description, /Поддельный|Чужой комментарий портала/);
+  assert.deepEqual(portalCalls, []);
 });

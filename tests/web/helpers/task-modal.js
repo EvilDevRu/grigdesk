@@ -19,6 +19,7 @@ function uiFacadeStub(prefix, { stubDialog = false } = {}) {
     ['UiInput', 'src/components/primitives/UiInput.vue'],
     ['UiSelect', 'src/components/primitives/UiSelect.vue'],
     ['UiSpinner', 'src/components/primitives/UiSpinner.vue'],
+    ['UiLoadingState', 'src/components/feedback/UiLoadingState.vue'],
     ['UiTab', 'src/components/composites/UiTab.vue'],
     ['UiTabs', 'src/components/composites/UiTabs.vue'],
     ['UiTextarea', 'src/components/primitives/UiTextarea.vue'],
@@ -47,6 +48,7 @@ function uiFacadeStub(prefix, { stubDialog = false } = {}) {
   return [
     ...imports,
     ...dialogStub,
+    `export { t } from ${JSON.stringify(webFile('src/services/locale.ts'))};`,
     `export { useUiLayer } from ${JSON.stringify(webFile('src/composables/useUiLayer.ts'))};`,
     `export const showToast = (...args) => globalThis.${prefix}ShowToast?.(...args);`,
     `export { ${names} };`,

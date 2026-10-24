@@ -73,7 +73,7 @@ test('PHONE-NATIVE: JVM-барьеры и телефонные сценарии 
   for (const name of [
     'pipe.UpstreamTest', 'pipe.StreamingTest', 'pipe.PairingTest', 'shell.PairingPayloadTest',
     'shell.ShellApiTest', 'shell.ProfileStoreTest', 'shell.ShellLocaleTest',
-    'AppLifecycleTest', 'KeyFailureTest', 'WebPolicyTest',
+    'AppLifecycleTest', 'UnlockSessionTest', 'KeyFailureTest', 'WebPolicyTest',
     'shell.PhonePairingPayloadTest', 'pipe.PhonePairingTest', 'pipe.RoutedUpstreamTest',
     'pipe.PhoneRouteRecoveryTest',
   ]) {

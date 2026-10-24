@@ -45,7 +45,9 @@ import { isDeepStrictEqual } from 'node:util';
 import { terminateOwnedWorker } from './workerIdentity.ts';
 import type { ApplyFs } from './applyPackage.ts';
 import { applyIntent, createApplyFs, recoverApply } from './applyPackage.ts';
-import { installedSnapshot, sameSource, sensitivePluginFile } from './serviceSnapshots.ts';
+import {
+  installedSnapshot, installedWebModuleDir, sameSource, sensitivePluginFile,
+} from './serviceSnapshots.ts';
 import { compareSemVer } from '../releaseCommon.ts';
 import { workspaceWithinBudget } from './workspaceBudget.ts';
 
@@ -1218,7 +1220,7 @@ export class PluginInstallService {
         version: validated.version,
         description: validated.description,
         hasServer: validated.hasServer,
-        hasWeb: validated.webDir !== null,
+        hasWeb: validated.webDir !== null || validated.webModuleDir !== null,
         replaces: record ? {
           kind: 'managed',
           version: record.version,
@@ -1228,12 +1230,23 @@ export class PluginInstallService {
         warnings: validated.hasServer ? ['Код плагина выполняется с правами GrigDesk.'] : [],
       };
 
+      if (validated.webModuleDir !== null) {
+        preview.warnings.push('Модуль интерфейса исполняется в главном окне GrigDesk '
+          + 'с вашей сессией и может обращаться к любому API GrigDesk.');
+      }
+
       if (record) {
         const changes = await source.changes(directory, record.sha, target.sha);
+        const previousModuleDir = await installedWebModuleDir(
+          path.join(this.options.pluginsDir, validated.id),
+        );
+        const moduleDirs = [validated.webModuleDir, previousModuleDir]
+          .filter((dir): dir is string => dir !== null);
 
         preview.changes = changes ? {
           ...changes,
-          sensitive: changes.files.filter((file) => sensitivePluginFile(file.path, validated.webDir))
+          sensitive: changes.files.filter((file) =>
+            sensitivePluginFile(file.path, validated.webDir, moduleDirs))
             .map((file) => file.path),
         } : null;
       }

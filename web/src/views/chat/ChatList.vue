@@ -14,6 +14,7 @@
           label="Новый чат"
           v-tooltip="'Новый чат'"
           tone="accent"
+          :disabled="!chat.loaded"
           @click="newChat"
         >
           ＋
@@ -25,7 +26,46 @@
     </div>
 
     <div class="rows">
-      <div v-if="!rows.length" class="none muted">{{ emptyLabel }}</div>
+      <div v-if="!chat.loaded" class="list-pending">
+        <section class="load-state" :class="{ 'load-state-error': chat.loadError }">
+          <div class="load-status" role="status" aria-live="polite" aria-atomic="true">
+            <span class="load-mark" aria-hidden="true">
+              <UiSpinner v-if="!chat.loadError || chat.loading" decorative />
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <path d="M12 8v5m0 3v.1" stroke-linecap="round" />
+                <circle cx="12" cy="12" r="9" />
+              </svg>
+            </span>
+            <div class="load-copy">
+              <strong class="load-title">
+                {{ t(chat.loadError ? 'core.chatListLoadFailed' : 'core.chatListLoading') }}
+              </strong>
+              <p v-if="chat.loadError" class="load-reason">
+                {{ resolveUiText(chat.loadErrorMessage || '') }}
+              </p>
+              <p v-if="chat.loadError && chat.loading" class="load-retry-status">
+                {{ t('core.chatListLoading') }}
+              </p>
+            </div>
+          </div>
+          <p class="load-hint">{{ t('core.chatStoreNotLoaded') }}</p>
+          <UiButton v-if="chat.loadError" :disabled="chat.loading" @click="chat.retryLoad()">
+            {{ t('core.chatListRetry') }}
+          </UiButton>
+        </section>
+
+        <div v-if="!chat.loadError" class="list-skeleton" aria-hidden="true">
+          <div v-for="index in 6" :key="index" class="skeleton-row">
+            <span class="skeleton-avatar" />
+            <span class="skeleton-copy">
+              <span class="skeleton-title" />
+              <span class="skeleton-snippet" />
+            </span>
+            <span class="skeleton-time" />
+          </div>
+        </div>
+      </div>
+      <div v-else-if="!rows.length" class="none muted">{{ emptyLabel }}</div>
       <div
         v-for="r in rows"
         :key="r.id"
@@ -211,7 +251,10 @@ import {
   UiInput,
   UiPressable,
   UiSearchInput,
+  UiSpinner,
   UiSwitch,
+  t,
+  resolveUiText,
   vTooltip,
 } from '../../ui';
 
@@ -244,16 +287,22 @@ const emptyLabel = computed(() => {
 
 // Строки уже с моделью чата: кто отвечает (иконка исполнителя) и короткое имя модели.
 // Резолвим здесь, а не в шаблоне — иначе поиск по реестру шёл бы на каждый рендер каждой строки.
-const rows = computed(() => chat.list(q.value, showArchived.value).map((r: ChatListRow) => {
-  const { model, provider } = prov.modelOf(r.modelRef || r.model);
+const rows = computed(() => {
+  if (!chat.loaded) {
+    return [];
+  }
 
-  return {
-    ...r,
-    provider,
-    modelName: model?.name || '',
-    sleep: sleepingSessions.value[r.id],
-  };
-}));
+  return chat.list(q.value, showArchived.value).map((r: ChatListRow) => {
+    const { model, provider } = prov.modelOf(r.modelRef || r.model);
+
+    return {
+      ...r,
+      provider,
+      modelName: model?.name || '',
+      sleep: sleepingSessions.value[r.id],
+    };
+  });
+});
 
 // Отправка из архивного разговора сама возвращает его в активные. В этот момент
 // переключаем и левый список: иначе открытый чат уже активный, а сайдбар продолжает
@@ -351,9 +400,16 @@ function commitEdit() {
   editId.value = null;
 }
 
+/**
+ * Создание разрешено только после подтверждённого списка с сервера.
+ * Мобильная область открывается, когда стор действительно создал разговор.
+ */
 function newChat() {
+  if (!chat.loaded || !chat.newSession()) {
+    return;
+  }
+
   showArchived.value = false;
-  chat.newSession();
   emit('open');
 }
 
@@ -409,6 +465,124 @@ async function del(r: ListRow) {
 
 .rows { flex: 1; overflow-y: auto; padding: 5px; }
 .none { padding: 12px; font-size: 12.5px; text-align: center; }
+
+.list-pending {
+  padding-top: 12px;
+}
+.load-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px 20px;
+}
+.load-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.load-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--accent);
+}
+.load-mark svg {
+  width: 20px;
+  height: 20px;
+}
+.load-state-error .load-mark {
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+}
+.load-copy {
+  min-width: 0;
+}
+.load-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.load-hint,
+.load-reason,
+.load-retry-status {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.load-reason,
+.load-retry-status {
+  margin-top: 3px;
+}
+.list-skeleton {
+  padding: 0 8px;
+  pointer-events: none;
+  mask-image: linear-gradient(to bottom, #000 15%, transparent 100%);
+  animation: list-pulse 2.4s ease-in-out infinite;
+}
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--chat-list-row-h);
+  padding: 8px 6px;
+}
+.skeleton-avatar,
+.skeleton-title,
+.skeleton-snippet,
+.skeleton-time {
+  display: block;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink-mid) 12%, transparent);
+}
+.skeleton-avatar {
+  width: var(--chat-avatar-size);
+  height: var(--chat-avatar-size);
+  flex: none;
+  border-radius: 50%;
+}
+.skeleton-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 9px;
+}
+.skeleton-title {
+  width: 68%;
+  height: 9px;
+}
+.skeleton-snippet {
+  width: 90%;
+  height: 7px;
+}
+.skeleton-time {
+  align-self: flex-start;
+  width: 22px;
+  height: 6px;
+  margin-top: 8px;
+}
+.skeleton-row:nth-child(even) .skeleton-title {
+  width: 50%;
+}
+.skeleton-row:nth-child(3n) .skeleton-snippet {
+  width: 65%;
+}
+@keyframes list-pulse {
+  0%, 100% { opacity: .55; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .list-skeleton { animation: none; }
+}
 
 /* Фон строки — непрозрачный `--row-bg` поверх фона списка (`--surface`): тем же цветом
    кнопки действий закрывают конец названия и время, не отличаясь от самой строки. */

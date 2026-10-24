@@ -77,6 +77,14 @@
   margin-bottom: 12px;
 }
 
+.ui-popover.ui-topbar-panel--wide {
+  width: min(1008px, calc(100vw - 16px));
+}
+
+.ui-topbar-panel--wide .ui-topbar-panel__body {
+  container-type: inline-size;
+}
+
 .ui-topbar-panel__title {
   display: flex;
   align-items: center;
@@ -227,6 +235,17 @@
 .ui-dialog[data-size='content'],
 .ui-dialog-overlay[data-size='content'] .ui-dialog {
   width: min(680px, calc(100vw - 40px));
+}
+
+/* Выбор каталога использует общую модальную оболочку и нижнюю панель телефона.
+   В низком окне тело прокручивается целиком, сохраняя доступ к поиску и вводу пути. */
+.ui-dialog-overlay .ui-dialog[data-role='workdir-picker'] {
+  width: min(480px, calc(100vw - 40px));
+}
+
+.ui-dialog[data-role='workdir-picker'][data-body-inset='false'] .ui-dialog__body {
+  flex-direction: column;
+  overflow-y: auto;
 }
 
 .ui-dialog--workspace,
@@ -553,6 +572,10 @@
     border-radius: 14px 14px 0 0;
     border-bottom: 0;
   }
+
+  .ui-dialog-overlay[data-mobile-sheet] .ui-dialog[data-role='workdir-picker'] {
+    width: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -569,30 +592,12 @@
   overflow: hidden;
 }
 
-/* Меню рейки использует общую поверхность и её ограничение видимой областью.
-   Сетка принадлежит меню; координаты и возврат фокуса остаются у UiPopover. */
-.ui-popover.tools-popover {
-  width: 360px;
-  min-width: 0;
-  padding: 12px;
-  overscroll-behavior: contain;
-}
-
-.ui-popover.tools-popover header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 12px;
-}
-
-.ui-popover.tools-popover header strong { font-size: 13px; }
-.ui-popover.tools-popover header a { color: var(--accent); font-size: 11px; }
-.ui-popover.tools-popover .tools-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.ui-popover.tools-popover .tool-tile { min-height: 86px; }
-
 /* Слот заголовка машины занимает всю шапку, чтобы закрытие оставалось у правого края. */
-.ui-dialog:is([data-role='add-machine'], [data-role='machine-actions']) .ui-dialog__title {
+.ui-dialog:is(
+  [data-role='add-machine'],
+  [data-role='machine-actions'],
+  [data-role='workdir-picker']
+) .ui-dialog__title {
   flex: 1;
   min-width: 0;
 }

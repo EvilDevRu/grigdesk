@@ -90,9 +90,14 @@ export function compareCatalogVersions(left: string, right: string): number {
  * Неизвестный minimum виден отдельной подписью, но не объявляется несовместимостью.
  * Новейший неподходящий релиз не скрывает старые подходящие стабильные версии.
  */
-export function compatibleVersions(plugin: CatalogPlugin, current: string) {
-  return plugin.versions.filter((item) => item.minGrigDeskVersion === null
-    || compareCatalogVersions(current, item.minGrigDeskVersion) >= 0)
+export function compatibleVersions(
+  plugin: CatalogPlugin,
+  current: string,
+  supportedApis: readonly number[] = [1, 2],
+) {
+  return plugin.versions.filter((item) => supportedApis.includes(item.api)
+    && (item.minGrigDeskVersion === null
+      || compareCatalogVersions(current, item.minGrigDeskVersion) >= 0))
     .sort((left, right) => compareCatalogVersions(right.version, left.version));
 }
 

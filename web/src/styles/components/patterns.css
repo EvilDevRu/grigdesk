@@ -386,6 +386,23 @@
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
+/* Размер выбирается общим параметром, как у UiButton, и действует также на slot-кнопки.
+   Рамка рисуется внутри: вся группа занимает 28 px на desktop и 44 px на touch. */
+.ui-segmented-control[data-size='compact'] {
+  padding: 0;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--control-border);
+}
+
+.ui-segmented-control[data-size='compact'] > .ui-button {
+  height: auto;
+  min-height: var(--toolbar-control-h);
+  padding: 3px 7px;
+  border-radius: var(--control-radius);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .ui-tabs {
   width: max-content;
   max-width: 100%;

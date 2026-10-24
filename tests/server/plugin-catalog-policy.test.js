@@ -80,3 +80,39 @@ test('CAT-P3: detail обязан совпасть со snapshot и latest ин�
   detail.plugin.versions[0].sha = 'b'.repeat(40);
   assert.equal(detailMatchesIndex(index, detail, 'demo'), false);
 });
+
+
+test('CAT-P4-API-SUPPORT: minimum и список api фильтруются до выбора target', () => {
+  const { detail, version } = catalogFixture();
+
+  detail.plugin.versions = [
+    {
+      ...version,
+      version: '9.0.0',
+      tag: 'v9.0.0',
+      api: 99,
+      minGrigDeskVersion: null,
+    },
+    {
+      ...version,
+      version: '3.0.0',
+      tag: 'v3.0.0',
+      api: 2,
+      minGrigDeskVersion: '9.0.0',
+    },
+    {
+      ...version,
+      version: '2.0.0',
+      tag: 'v2.0.0',
+      api: 2,
+    },
+    version,
+  ];
+
+  assert.deepEqual(compatibleVersions(detail.plugin, '1.0.0', [1]).map((item) => item.version),
+    ['1.1.0']);
+  assert.deepEqual(compatibleVersions(detail.plugin, '1.0.0', [1, 2]).map((item) => item.version),
+    ['2.0.0', '1.1.0']);
+  assert.equal(catalogAction(detail.plugin, '1.0.0', null).target.version, '2.0.0');
+  assert.equal(catalogAction(detail.plugin, '1.0.0', null, '9.0.0').target, null);
+});

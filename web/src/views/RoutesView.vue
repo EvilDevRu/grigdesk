@@ -28,7 +28,7 @@
           <span>{{ displayRouteList.length }}</span>
           <UiTooltip :text="helpPanel" />
         </div>
-        <div v-if="loading && !revisions.length" class="pad muted"><UiSpinner decorative /> Загружаю…</div>
+        <UiLoadingState v-if="loading && !revisions.length" label="Загружаю…" />
         <div v-else-if="error" class="pad bad" role="alert">{{ error }}</div>
         <p v-else-if="!displayRouteList.length" class="pad muted">
           {{ editingDraft ? 'В черновике пока нет маршрутов' : 'Каталог не опубликован' }}
@@ -289,7 +289,7 @@
 
       </template>
       <template v-else-if="routesStore.opened?.catalogHash && routesStore.publishedSnapshot && !editorQueryError">
-        <div v-if="graphLoading" class="mid muted"><UiSpinner decorative /> Схема…</div>
+        <UiLoadingState v-if="graphLoading" label="Схема…" variant="document" />
         <div v-else-if="graphError" class="mid bad" role="alert">{{ graphError }}</div>
         <div v-else-if="graph" class="published-canvas"><FactoryGraph :graph="graph" reference /></div>
         <details v-if="selectedRoute" class="ui-workspace-disclosure route-disclosure">
@@ -314,7 +314,7 @@
 
       <!-- Схема выбранного маршрута — ровно та, по которой пойдёт попытка -->
       <div v-else class="published-canvas">
-        <div v-if="graphLoading" class="mid muted"><UiSpinner decorative /> Схема…</div>
+        <UiLoadingState v-if="graphLoading" label="Схема…" variant="document" />
         <div v-else-if="graphError" class="mid bad">{{ graphError }}</div>
         <FactoryGraph v-else-if="graph" :graph="graph" reference />
         <div v-else class="mid muted">Выбери маршрут слева</div>
@@ -377,10 +377,10 @@ import {
   UiTabs,
   UiTab,
   UiSelectableRow,
-  UiSpinner,
   UiTooltip,
   confirmDialog,
   vTooltip,
+  UiLoadingState,
 } from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import ProjectSwitcher from '../features/projects/ProjectSwitcher.vue';

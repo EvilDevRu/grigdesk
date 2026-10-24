@@ -47,10 +47,7 @@
       </UiField>
     </div>
 
-    <div v-if="loading && !options" class="source__state" role="status">
-      <UiSpinner decorative />
-      <span>Читаю историю репозиториев стенда…</span>
-    </div>
+    <UiLoadingState v-if="loading && !options" label="Читаю историю репозиториев стенда…" />
     <UiInlineMessage v-else-if="error" tone="warning">{{ error }}</UiInlineMessage>
     <p v-else-if="options && !options.repos.length" class="source__hint">
       У стенда нет репозиториев — разбор пойдёт по задаче и вашему тексту.
@@ -170,8 +167,8 @@ import {
   UiCheckbox,
   UiField,
   UiInlineMessage,
-  UiSpinner,
   UiTextarea,
+  UiLoadingState,
 } from '../../ui';
 import {
   normalizeShowcaseSource,
@@ -510,14 +507,6 @@ function apply(): void {
   flex-direction: column;
   gap: 8px;
   min-width: 0;
-}
-
-.source__state {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--ink-mid);
-  font-size: 12.5px;
 }
 
 .source__repo {

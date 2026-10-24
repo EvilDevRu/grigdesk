@@ -670,6 +670,32 @@ export class B24Client {
     }
 
     /**
+     * Проверка номера допускает только доказанное отсутствие задачи.
+     * Ошибка сети, доступа или незнакомое тело не делают номер свободным.
+     */
+    async probeTaskNumber(taskId: string): Promise<'exists' | 'absent' | 'unknown'> {
+        try {
+            const result = await this.apiGet2(
+                '/local/ajax/dashboard.php',
+                `action=getTaskDetails&taskId=${encodeURIComponent(taskId)}`,
+            );
+
+            if (result.success === false
+                && ['Задача не найдена', 'TASK_NOT_FOUND'].includes(String(result.error))) {
+                return 'absent';
+            }
+
+            if (result.success === true && String(nested(result, 'data').id) === taskId) {
+                return 'exists';
+            }
+
+            return 'unknown';
+        } catch {
+            return 'unknown';
+        }
+    }
+
+    /**
      * Полные детали задачи (getTaskDetails).
      */
     async taskDetails(taskId: unknown): Promise<Payload> {

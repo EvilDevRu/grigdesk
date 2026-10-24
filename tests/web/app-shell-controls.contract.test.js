@@ -52,7 +52,9 @@ test('AppShell использует public UI controls и общую повер�
   assert.match(gear, /aria-haspopup="dialog"/u);
   assert.match(gear, /:pressed="settings.isOpen"/u);
   assert.doesNotMatch(source, /<router-link to="\/settings"/u);
-  assert.match(source, /<UiPopover[^>]*v-model:open="toolsOpen"[^>]*layer="tools"/u);
+  assert.match(source, /<UiTopbarPanel[^>]*v-model:open="toolsOpen"[^>]*layer="tools"/u);
+  assert.match(source, /attachment="trigger"\s+placement="right-start"/u);
+  assert.match(source, /<ToolsGrid[^>]*layout="list"/u);
   assert.doesNotMatch(source, /placeToolsPopover|toolsOutside/u);
   assert.doesNotMatch(source, /\.pu-state button|\.ptip-go button|\.instbar button/u);
   assert.match(source, /data-context="topbar-popover-action"/u);

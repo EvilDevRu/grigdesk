@@ -143,8 +143,7 @@ const barWidth = (value: number | undefined) => `${Math.max(0, Math.min(100, val
 
 <style scoped>
 .computer-resources {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 16px;
   min-width: 0;
   text-align: left;
@@ -165,10 +164,8 @@ const barWidth = (value: number | undefined) => `${Math.max(0, Math.min(100, val
 .resource-section h3 {
   margin: 0;
   color: var(--ink-mid);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .pu-row {
@@ -246,23 +243,7 @@ const barWidth = (value: number | undefined) => `${Math.max(0, Math.min(100, val
 
 .resource-memory-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.resource-memory-grid > :last-child {
-  padding-left: 16px;
-  border-left: 1px solid var(--line);
-}
-
-.resource-memory-grid .pu-head {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.resource-memory-grid .pu-name {
-  min-height: 18px;
+  gap: 12px;
 }
 
 .resource-memory-total {
@@ -311,10 +292,30 @@ const barWidth = (value: number | undefined) => `${Math.max(0, Math.min(100, val
 }
 
 .stale-note {
+  grid-column: 1 / -1;
   padding: 10px 12px;
   border-left: 2px solid var(--warn);
   background: color-mix(in srgb, var(--warn) 8%, transparent);
   color: var(--warn);
   font-size: 11px;
+}
+
+@container (min-width: 840px) {
+  .computer-resources {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+    gap: 20px;
+  }
+
+  .resource-section + .resource-section {
+    padding-top: 0;
+    padding-left: 20px;
+    border-top: 0;
+    border-left: 1px solid var(--line);
+  }
+
+  .pu-head {
+    min-height: 41px;
+  }
 }
 </style>

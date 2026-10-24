@@ -1,0 +1,94 @@
+{
+  "schema": 2,
+  "kind": "bootstrap",
+  "profile": "sample-profile",
+  "id": "scout",
+  "title": "Выбор маршрута",
+  "entry": "scout",
+  "sequence": {
+    "bootstrap": [
+      "scout"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "scout",
+      "executor": "agent",
+      "phase": "bootstrap",
+      "runKey": "SCOUT",
+      "emits": [],
+      "prompt": {
+        "blocks": [
+          {
+            "file": "bootstrap/prompts/scout.base.md"
+          }
+        ],
+        "requiredContext": [
+          "task",
+          "routeCatalog"
+        ]
+      },
+      "policy": {
+        "filesystem": "state-only",
+        "timeoutClass": "browser",
+        "budgetClass": "standard",
+        "browser": "forbid"
+      },
+      "fanout": {
+        "mode": "single",
+        "maxExecutors": 1,
+        "degrade": "forbid"
+      },
+      "retry": {
+        "noResult": 1,
+        "providerFailure": {
+          "attempts": 1,
+          "strategy": "runner-failover"
+        },
+        "productFailure": 0
+      },
+      "on": {
+        "done": {
+          "escalate": {
+            "routes": [
+              "small",
+              "feature",
+              "debug"
+            ]
+          }
+        },
+        "skipped": {
+          "stop": "human"
+        },
+        "failed": {
+          "stop": "human"
+        },
+        "exhausted": {
+          "stop": "human"
+        }
+      },
+      "onFailure": {
+        "plan": {
+          "stop": "human"
+        },
+        "tests": {
+          "stop": "human"
+        },
+        "build": {
+          "stop": "human"
+        },
+        "human": {
+          "stop": "human"
+        },
+        "environment": {
+          "stop": "human"
+        }
+      }
+    }
+  ],
+  "escalation": [
+    {
+      "from": "scout", "allowedRoutes": ["small", "feature", "debug"], "requiresHumanWhenPinned": true
+    }
+  ]
+}

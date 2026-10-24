@@ -44,6 +44,7 @@ async function trustedLedger({
   workspaceMode = 'shared', sourceBranch, repoLines,
   attemptSchema = 1, queueDispatchId = null, runnerPrimaryOverride = '',
   terminalState = null, terminalReason = null,
+  standMode = null,
 }) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-branch-pin-'));
   const controlDir = path.join(root, 'control');
@@ -102,10 +103,12 @@ async function trustedLedger({
         : (terminalReason ?? 'operator closed attempt'),
     });
   }
+
   await writeFile(path.join(attemptDir, 'artifacts', 'profile-contract.tsv'), [
     'schema\t1',
     'repos-mode\tgeneric',
     `workspace-mode\t${workspaceMode}`,
+    ...(standMode === null ? [] : [`stand-mode\t${standMode}`]),
     `stand-ownership\t${workspaceMode === 'shared' ? 'external' : 'task'}`,
     `source-branch\t${sourceBranch}`,
     'container\tdemo',
@@ -215,6 +218,61 @@ test('в isolated расхождение веток недопустимо', asy
     read(dirs, { ...REGISTRY, WORKSPACE_MODE: 'isolated', STAND_OWNERSHIP: 'task' }),
     /more than one branch/,
   );
+});
+
+test('SAMPLE-MODES-02: server reads exact no-stand contract', async () => {
+  const dirs = await trustedLedger({
+    workspaceMode: 'isolated',
+    sourceBranch: 'task-4242',
+    standMode: 'none',
+    repoLines: ['repo\tapp\t/srv/app\t/srv/app-task\ttask-4242'],
+  });
+  const trusted = await read(dirs, {
+    ...REGISTRY,
+    WORKSPACE_MODE: 'isolated',
+    STAND_OWNERSHIP: 'task',
+  });
+  const env = {
+    WORKSPACE_MODE: 'isolated',
+    STAND_OWNERSHIP: 'task',
+    SOURCE_BRANCH: 'task-4242',
+    FE_PORT: '',
+    API_PORT: '',
+    REPO_COUNT: '1',
+    REPO_0_NAME: 'app',
+    REPO_0_SOURCE: '/srv/app',
+    REPO_0_WT: '/srv/app-task',
+    REPO_0_BRANCH: 'task-4242',
+  };
+
+  assert.equal(trusted.standMode, 'none');
+  assert.equal(verifyFactoryAttemptEnvironment(trusted, env), true);
+
+  for (const field of ['FE_PORT', 'API_PORT']) {
+    assert.throws(() => verifyFactoryAttemptEnvironment(trusted, { ...env, [field]: '5173' }));
+
+    const missing = { ...env };
+
+    delete missing[field];
+    assert.throws(() => verifyFactoryAttemptEnvironment(trusted, missing));
+  }
+});
+
+test('SAMPLE-MODES-02: unknown stand mode and shared none are rejected', async () => {
+  for (const [workspaceMode, standMode] of [['isolated', 'unknown'], ['shared', 'none']]) {
+    const dirs = await trustedLedger({
+      workspaceMode,
+      standMode,
+      sourceBranch: 'main',
+      repoLines: ['repo\tapp\t/srv/app\t/srv/app\tmain'],
+    });
+
+    await assert.rejects(read(dirs, {
+      ...REGISTRY,
+      WORKSPACE_MODE: workspaceMode,
+      STAND_OWNERSHIP: workspaceMode === 'shared' ? 'external' : 'task',
+    }));
+  }
 });
 
 test('EC-05: attempt schema 2 round-trip проверяет queue provenance и exact runner override', async () => {

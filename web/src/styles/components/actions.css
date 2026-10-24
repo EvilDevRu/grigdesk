@@ -258,6 +258,17 @@
   overflow-wrap: anywhere;
 }
 
+/* Название собственной задачи остаётся целиком доступным в узкой группе доски. */
+.ui-button[data-context='grigdesk-task-title'] {
+  height: auto;
+  max-width: 100%;
+  padding-block: 5px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
 .ui-icon-button[data-context='workspace-form'][data-role] {
   width: var(--control-height);
   height: var(--control-height);
@@ -636,6 +647,14 @@
   width: var(--control-height);
   height: var(--control-height);
   min-height: var(--control-height);
+}
+
+.ui-icon-button[data-context='window-control'] {
+  width: var(--app-topbar-h);
+  height: var(--app-topbar-h);
+  min-height: var(--app-topbar-h);
+  border-radius: 0;
+  color: var(--ink-mid);
 }
 
 .ui-icon-button--embedded,
@@ -1122,6 +1141,101 @@
 .ui-pressable[data-context='active-timer-card']:hover {
   border-color: color-mix(in srgb, var(--good) 46%, var(--line));
   background: color-mix(in srgb, var(--good) 7%, var(--surface-2));
+}
+
+/* Каталог и меню используют одну ссылку; геометрия выбирается контекстом.
+   Оформление наведения, фокуса и выбранного раздела остаётся внутри UI-kit. */
+.ui-action-link[data-context='tool-tile'] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  height: auto;
+  min-height: 104px;
+  padding: 14px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink-mid);
+  font-size: 13px;
+  text-align: center;
+  white-space: normal;
+}
+
+.ui-action-link[data-context='tool-tile']:hover:not([aria-disabled='true']) {
+  border-color: var(--line-2);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.ui-action-link[data-context='tool-tile'][aria-current='page'] {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  color: var(--accent);
+}
+
+.ui-action-link[data-context='tool-tile'] .tool-icon {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+}
+
+.ui-action-link[data-context='tool-tile'] .tool-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.ui-action-link[data-context='tool-menu-item'] {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 44px;
+  padding: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+}
+
+.ui-action-link[data-context='tool-menu-item'] .tool-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+}
+
+.ui-action-link[data-context='tool-menu-item'] .tool-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ui-action-link:is([data-context='tool-menu-item'], [data-context='tool-tile']) .tool-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-action-link[data-context='tool-menu-item'] .tool-label {
+  flex: 1;
+}
+
+.ui-action-link[data-context='tool-menu-item']:hover:not([aria-disabled='true']) {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ui-action-link[data-context='tool-menu-item'][aria-current='page'] {
+  background: color-mix(in srgb, var(--accent) 9%, var(--topbar-panel));
+  color: var(--accent);
 }
 
 /* Таймеры и конвейеры выглядят как статусы topbar, а не как отдельные кнопки.

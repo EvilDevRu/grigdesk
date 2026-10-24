@@ -13,6 +13,8 @@ import { parseSurfaceTarget, parseMainRequest } from '../../../shared/desktop/su
 import type { MainRequest, SurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
 import type { DesktopExitPreference } from '../desktopExitPreference.ts';
 import { desktopExitApi } from './desktopExitApi.ts';
+import { isWindowControlAction } from '../../../shared/desktop/windowControls.ts';
+import type { WindowControls } from '../windowControls.ts';
 
 import { parseToolControl } from '../../../shared/desktop/toolWindowContract.ts';
 import type { ToolControl } from '../../../shared/desktop/toolWindowContract.ts';
@@ -28,6 +30,7 @@ export interface NativeWindows {
 }
 
 interface ShellOptions {
+  windowControls?: WindowControls;
   desktopExit?: DesktopExitPreference;
   beforeSelect?(profile: DesktopProfile): Promise<void>;
   nativeWindows?: NativeWindows;
@@ -106,6 +109,7 @@ export function createShellApi(options: ShellOptions) {
     status: states.get(profile.id)?.status || 'none',
   });
   const unsubscribeExit = options.desktopExit?.subscribe(changed);
+  const unsubscribeWindow = options.windowControls?.subscribe(changed);
   /**
    * Публичный снимок содержит только сведения, нужные интерфейсу.
    * Закрытый ключ, pin и внутренние порты профилей не уходят в renderer.
@@ -117,6 +121,7 @@ export function createShellApi(options: ShellOptions) {
 
     return {
       rev,
+      ...(options.windowControls ? { windowControls: options.windowControls.state() } : {}),
       ...(options.desktopExit ? { desktopExit: { skipConfirmation: options.desktopExit.get() } } : {}),
       ...(options.systemLanguage === undefined ? {} : {
         locale: {
@@ -354,6 +359,21 @@ export function createShellApi(options: ShellOptions) {
 
       const body = await readBody(req, locale);
 
+      if (req.method === 'POST' && pathname === '/__shell/window') {
+        if (!options.windowControls) {
+          json(res, 404, { error: 'not_found' });
+        } else if (!body || Object.keys(body).length !== 1 || !isWindowControlAction(body.action)) {
+          json(res, 400, { error: 'invalid_window_action' });
+        } else {
+          const origin = new URL('http://' + req.headers.host).origin;
+          const accepted = options.windowControls.control(origin, body.action);
+
+          json(res, accepted ? 200 : 409, { accepted });
+        }
+
+        return;
+      }
+
       if (req.method === 'POST' && pathname === '/__shell/exit-preference') {
         await desktopExitApi(res, body, options.desktopExit, state);
 
@@ -560,6 +580,7 @@ export function createShellApi(options: ShellOptions) {
     close() {
       closed = true;
       unsubscribeExit?.();
+      unsubscribeWindow?.();
 
       for (const cancel of retries.values()) {
         cancel();

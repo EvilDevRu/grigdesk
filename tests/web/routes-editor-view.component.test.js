@@ -7,6 +7,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 
 const VIEW = webFile('src/views/RoutesView.vue');
 const UI_STUB = `
+export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
 import { defineComponent, h } from 'vue';
 export { default as UiIconButton } from './src/components/primitives/UiIconButton.vue';
 export const UiButton = defineComponent({

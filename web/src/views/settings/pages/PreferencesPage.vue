@@ -1,8 +1,8 @@
 <template>
   <div class="settings-preferences">
     <p v-if="error" role="alert">{{ error }}</p>
-    <p v-if="!loaded">{{ t('settings.loadingParameters') }}</p>
-    <template v-else>
+    <UiLoadingState v-if="!loaded && !error" :label="t('settings.loadingParameters')" variant="document" />
+    <template v-else-if="loaded">
       <SettingsScope />
       <SettingsField
         v-for="field in fields"
@@ -71,7 +71,12 @@
 import { t, uiLocale } from '../../../ui.ts';
 
 import { computed, ref, watch } from 'vue';
-import { UiSwitch, UiNumberInput, UiSelect } from '../../../ui.ts';
+import {
+  UiSwitch,
+  UiNumberInput,
+  UiSelect,
+  UiLoadingState,
+} from '../../../ui.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import { SETTINGS_FIELDS, getSettingsFields } from '../../../features/settings/catalog.ts';
 import { createPreferencesAdapter } from '../../../features/settings/resources/preferences.ts';

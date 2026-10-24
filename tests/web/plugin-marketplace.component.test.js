@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { catalogFixture } from '../helpers/pluginCatalog.js';
+import { moduleCatalogFixture, catalogResponse } from '../helpers/pluginCatalogModules.js';
 import { webInstallInfo } from './helpers/pluginInstallFixtures.js';
 import { settingsHarness } from './helpers/settings-harness.js';
 
@@ -326,4 +327,33 @@ test('CAT-UI8: версия ниже установленной называет
   await h.wrapper.get('.catalog-card select').setValue('1.0.0');
   assert.equal(button().text(), 'Установлена версия 1.1.0');
   assert.equal(button().attributes('disabled'), '');
+});
+
+
+test('CAT-UI-API2: modern карточка создаёт точный install intent без автоматического apply', async (t) => {
+  const { modern } = moduleCatalogFixture();
+  const h = await settingsHarness(t, 'plugins.installed', 'PluginCatalogPanel', {
+    prepare({ control }) {
+      control.handlers['/api/plugin-catalog?api=2'] = () => Response.json(catalogResponse(modern));
+      control.handlers['/api/plugin-catalog?api=2&refresh=1'] = () => Response.json(catalogResponse(modern));
+      control.handlers['/api/plugin-catalog/demo?api=2'] = () => Response.json(modern.detail);
+    },
+  });
+
+  assert.equal(h.wrapper.findAll('[data-catalog-id]').length, 2);
+  await h.wrapper.get('[data-catalog-id="demo"]').trigger('click');
+  await h.flushPromises();
+  assert.equal(h.wrapper.get('[data-catalog-action]').element.disabled, false);
+  await h.wrapper.get('[data-catalog-action]').trigger('click');
+  await h.flushPromises();
+
+  const [selection, installed] = h.wrapper.emitted('install')[0];
+
+  assert.deepEqual(selection, {
+    id: 'demo',
+    source: modern.entry.source,
+    target: modern.version,
+  });
+  assert.equal(installed, null);
+  assert.equal(h.writes().length, 0);
 });

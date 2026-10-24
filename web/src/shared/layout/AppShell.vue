@@ -23,27 +23,42 @@
         </template>
         <template v-if="toolsNav.length">
           <div class="navsep"></div>
-          <UiPopover v-model:open="toolsOpen" class="tools-popover" layer="tools"
-                     placement="right-start" :aria-label="t('core.tools')">
-          <template #trigger>
-          <UiPressable class="navitem tools-trigger" data-ui-shell-nav
-                       :class="{ active: toolsActive }" :aria-label="navTitle({ to: '/tools', label: t('core.tools') })"
-                       v-tooltip.right="navTitle({ to: '/tools', label: t('core.tools') })">
-            <span class="icwrap">
-              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                   stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
-              <NavigationCount :badge="badges['/tools']" />
-            </span>
-          </UiPressable>
-          </template>
-          <template #default="{ close }">
-            <header>
-              <strong>{{ t('core.tools') }}</strong>
-              <router-link to="/tools" @click="close('action')">{{ t('core.allOnPage') }}</router-link>
-            </header>
-            <ToolsGrid :items="toolsNav" :badges="badges" @select="close('action')" />
-          </template>
-          </UiPopover>
+          <UiTopbarPanel
+            v-model:open="toolsOpen"
+            layer="tools"
+            attachment="trigger"
+            placement="right-start"
+            trigger-mode="click"
+            :title="t('core.tools')"
+          >
+            <template #trigger>
+              <UiPressable class="navitem tools-trigger" data-ui-shell-nav
+                           :class="{ active: toolsActive || toolsOpen }"
+                           :aria-label="navTitle({ to: '/tools', label: t('core.tools') })"
+                           v-tooltip.right="navTitle({ to: '/tools', label: t('core.tools') })">
+                <span class="icwrap">
+                  <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                       stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
+                  <NavigationCount :badge="badges['/tools']" />
+                </span>
+              </UiPressable>
+            </template>
+            <template #default="{ close }">
+              <ToolsGrid :items="toolsNav" :badges="badges" layout="list" @select="close('action')" />
+            </template>
+            <template #footer="{ close }">
+              <router-link v-slot="{ href, navigate }" to="/tools" custom>
+                <UiActionLink :href="href" variant="text" tone="accent"
+                              data-context="topbar-popover-resource-link"
+                              @click="
+                                navigate($event);
+                                close('action');
+                              ">
+                  {{ t('core.allOnPage') }}
+                </UiActionLink>
+              </router-link>
+            </template>
+          </UiTopbarPanel>
         </template>
       </nav>
       <nav class="nav nav-bottom dock-route-nav">
@@ -86,7 +101,10 @@
       </template>
     </UiDialog>
 
-    <header data-ui-topbar class="topbar" :class="{ 'window-titlebar': isDesktopMain }">
+    <header data-ui-topbar class="topbar" :class="{
+      'window-titlebar': isDesktopMain,
+      'window-titlebar--controls': isDesktopMain && shell.snapshot?.windowControls,
+    }">
       <span class="app-mark" aria-label="GrigDesk"><GrigDeskMark class="logo" /></span>
       <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
       <div id="tb-slot" class="tb-slot"></div>
@@ -95,7 +113,7 @@
       <div class="status">
         <!-- CPU/RAM — самые «дёргающиеся» цифры, поэтому левее всех: их ширина меняется,
              не сдвигая остальные элементы (правый край статуса зафиксирован) -->
-        <UiTopbarPanel v-if="sys" :title="t('core.computerResources')">
+        <UiTopbarPanel v-if="sys" :title="t('core.computerResources')" size="wide">
           <template #meta>{{ t('core.cores', { count: sys.cpu.cores }) }}</template>
           <template #trigger>
             <!-- Опрос не удался — цифры остаются, но честно блекнут: пустое место в шапке
@@ -421,7 +439,6 @@ import {
   UiButton,
   UiDialog,
   UiIconButton,
-  UiPopover,
   UiTopbarPanel,
   UiPressable,
   vTooltip,
@@ -1009,7 +1026,7 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .shell {
   display: grid; height: 100%; min-width: 0; overflow: hidden;
   grid-template-columns: var(--app-rail-w) minmax(0, 1fr) var(--app-rail-w);
-  grid-template-rows: max(var(--app-topbar-h), env(titlebar-area-height, 0px)) minmax(0, 1fr);
+  grid-template-rows: var(--app-topbar-h) minmax(0, 1fr);
 }
 
 .shell.without-machine {
@@ -1047,13 +1064,14 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
     color-mix(in srgb, var(--accent) 10%, var(--topbar)) 0%,
     var(--topbar) 42%, var(--surface) 100%);
 }
-/* Геометрия системных кнопок приходит от Electron с учётом стороны и масштаба.
-   Свободная часть шапки двигает окно; группы с действиями сохраняют события мыши. */
+/* Свободная часть шапки двигает окно; группы с действиями сохраняют события мыши.
+   Кнопки окна рисует общий UI: они затемняются вместе с фоном любого модального слоя. */
 .window-titlebar {
-  padding-left: env(titlebar-area-x, 0px);
-  padding-right: max(0px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%)));
   -webkit-app-region: drag;
   user-select: none;
+}
+.window-titlebar--controls {
+  padding-right: calc(3 * var(--app-topbar-h));
 }
 .window-titlebar :is(.tb-slot, .status, .topbar-actions) {
   -webkit-app-region: no-drag;

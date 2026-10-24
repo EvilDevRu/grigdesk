@@ -28,8 +28,8 @@ test('плитки топбара: стык, переключение, клав�
    * Два настоящих компонента делят один реестр открытой плитки.
    * Содержимое с кнопкой позволяет проверить перенос и восстановление фокуса.
    */
-  function panel(id) {
-    return h(UiTopbarPanel, { title: id }, {
+  function panel(id, options = {}) {
+    return h(UiTopbarPanel, { title: id, ...options }, {
       trigger: () => h('button', { id }, id),
       default: ({ close }) => h('button', {
         class: 'panel-action',
@@ -39,7 +39,15 @@ test('плитки топбара: стык, переключение, клав�
   }
 
   const wrapper = mount({
-    render: () => h('header', { 'data-ui-topbar': '' }, [panel('one'), panel('two')]),
+    render: () => h('header', { 'data-ui-topbar': '' }, [
+      panel('one'),
+      panel('two'),
+      panel('rail', {
+        attachment: 'trigger',
+        placement: 'right-start',
+        triggerMode: 'click',
+      }),
+    ]),
   }, {
     attachTo: browser.document.querySelector('#mount'),
     global: { stubs: { transition: true } },
@@ -148,4 +156,43 @@ test('плитки топбара: стык, переключение, клав�
   browser.document.body.dispatchEvent(new browser.Event('pointerdown', { bubbles: true }));
   await nextTick();
   assert.equal(browser.document.querySelectorAll('.ui-topbar-panel').length, 0);
+
+  Object.assign(viewport, {
+    width: 1000,
+    height: 600,
+    offsetTop: 0,
+    offsetLeft: 0,
+  });
+  wrapper.get('#rail').element.getBoundingClientRect = () => ({
+    top: 140,
+    bottom: 164,
+    height: 24,
+    left: 8,
+    right: 32,
+    width: 24,
+  });
+
+  await wrapper.get('#one').trigger('mouseenter');
+  await wrapper.get('#rail').trigger('click');
+  await nextTick();
+
+  surface = browser.document.querySelector('.ui-topbar-panel');
+  Object.defineProperty(surface, 'offsetWidth', { configurable: true, value: 352 });
+  Object.defineProperty(surface, 'offsetHeight', { configurable: true, value: 148 });
+  browser.dispatchEvent(new browser.Event('resize'));
+  await nextTick();
+
+  assert.equal(browser.document.querySelectorAll('.ui-topbar-panel').length, 1);
+  assert.equal(wrapper.get('#one').attributes('aria-expanded'), 'false');
+  assert.equal(wrapper.get('#rail').attributes('data-ui-topbar-trigger'), undefined);
+  assert.equal(surface.style.top, '140px', 'панель рейки привязана к своей кнопке');
+  assert.equal(surface.style.left, '40px');
+  assert.equal(surface.dataset.placement, 'right-start');
+
+  await wrapper.get('#two').trigger('mouseenter');
+  await nextTick();
+
+  assert.equal(browser.document.querySelectorAll('.ui-topbar-panel').length, 1);
+  assert.equal(wrapper.get('#rail').attributes('aria-expanded'), 'false');
+  assert.equal(wrapper.get('#two').attributes('aria-expanded'), 'true');
 });

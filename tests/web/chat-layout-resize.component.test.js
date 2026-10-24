@@ -243,8 +243,15 @@ test('строка чата: знак исполнителя красится ц
     { id: 'b', title: 'Про парсер', snippet: '', ts: Date.now(), model: 'gpt-5.6', sending: true },
     { id: 'c', title: 'Без модели', snippet: '', ts: Date.now(), model: 'ктотоещё' },
   ];
+
   globalThis.__chatListStore = defineStore(`chat-list-brand-${nonce}`, {
-    state: () => ({ activeId: 'a', archived: [] }),
+    state: () => ({
+      loaded: true,
+      loading: false,
+      loadError: null,
+      activeId: 'a',
+      archived: [],
+    }),
     actions: { list: () => rows, selectChat() {}, newSession() {}, renameChat() {}, deleteChat() {}, restoreArchived() {} },
   });
   globalThis.__chatListProviders = defineStore(`chat-list-prov-${nonce}`, {

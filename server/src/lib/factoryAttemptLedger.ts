@@ -65,6 +65,7 @@ export interface ContractRepository {
 // Контракт профиля попытки: что за стенд, чья ветка и какие репозитории закреплены.
 export interface TrustedProfileContract {
   workspaceMode: string;
+  standMode?: 'services' | 'none';
   standOwnership: string;
   sourceBranch: string;
   container: string;
@@ -326,6 +327,17 @@ function parseProfileContract(text: string): TrustedProfileContract {
     'container', 'service-host',
   ];
   const workspaceMode = singleton.get('workspace-mode') ?? '';
+  const standMode = singleton.get('stand-mode');
+
+  if (standMode !== undefined) {
+    required.push('stand-mode');
+
+    if (!['services', 'none'].includes(standMode)
+        || (standMode === 'none' && workspaceMode !== 'isolated')) {
+      fail('profile contract: invalid stand mode');
+    }
+  }
+
   if (workspaceMode === 'shared') required.push('frontend-port', 'api-port');
   if ([...singleton.keys()].sort().join('\0') !== required.sort().join('\0')
       || singleton.get('schema') !== '1' || singleton.get('repos-mode') !== 'generic'
@@ -366,8 +378,10 @@ function parseProfileContract(text: string): TrustedProfileContract {
     }
     names.add(repo.name);
   }
+
   return {
     workspaceMode,
+    ...(standMode === undefined ? {} : { standMode: standMode as 'services' | 'none' }),
     standOwnership,
     sourceBranch,
     container: singleton.get('container') ?? '',
@@ -688,6 +702,10 @@ export function verifyFactoryAttemptEnvironment(
       ))) {
     fail('sandbox env disagrees with trusted profile contract');
   }
+  if (trusted.standMode === 'none' && (env.FE_PORT !== '' || env.API_PORT !== '')) {
+    fail('sandbox env: none requires explicit empty ports');
+  }
+
   const expectedRepoKeys = new Set(['REPO_COUNT']);
   for (let index = 0; index < trusted.repositories.length; index += 1) {
     const repo = trusted.repositories[index];

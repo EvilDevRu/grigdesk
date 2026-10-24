@@ -49,7 +49,11 @@ LOOP_FINDINGS_BUDGET = {"closed": 16 * 1024, "deferred": 16 * 1024}
 # короткой истории ключа нет, и контекст побайтно прежний.
 STAGE_RESULTS_LIMIT = 1000
 STAGE_RESULTS_IN_CONTEXT = 120
-DELIVERY_ACTIONS = {"commit", "push", "pull-request", "task-comment"}
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "../lib"))
+from delivery_contract import ACTIONS as STRATEGY_ACTIONS, validate as validate_strategy
+
+DELIVERY_ACTIONS = {"commit", "merge", "push", "pull-request", "task-comment"}
 WORKSPACE_RESERVED_KEYS = {"mode", "generation", "repos", "stateDir", "containerName"}
 
 
@@ -665,7 +669,16 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
     actions = list(dict.fromkeys(args.delivery_action))
     if any(action not in DELIVERY_ACTIONS for action in actions):
         fail("delivery-action: неизвестное действие")
-    if args.delivery_mode == "publish" and not {
+    if args.delivery_strategy is None and "merge" in actions:
+        fail("delivery-action: merge требует явную стратегию")
+    if args.delivery_strategy is not None:
+        try:
+            validate_strategy(args.delivery_strategy, args.delivery_action)
+        except ValueError as error:
+            fail(str(error))
+        if args.delivery_mode != "publish":
+            fail("delivery-strategy: требуется publish")
+    if args.delivery_strategy is None and args.delivery_mode == "publish" and not {
         "commit",
         "push",
         "pull-request",
@@ -794,6 +807,7 @@ def build_context(args: argparse.Namespace) -> dict[str, Any]:
             ),
         },
         "delivery": {
+            **({"strategy": args.delivery_strategy} if args.delivery_strategy is not None else {}),
             "mode": args.delivery_mode,
             "actions": actions,
             "targetBranches": targets,
@@ -872,6 +886,7 @@ def parser() -> argparse.ArgumentParser:
             default="pending",
         )
         result.add_argument(f"--{name}-comment", default="")
+    result.add_argument("--delivery-strategy", choices=sorted(STRATEGY_ACTIONS))
     result.add_argument(
         "--delivery-mode",
         choices=["disabled", "publish"],

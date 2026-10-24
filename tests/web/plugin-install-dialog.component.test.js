@@ -5,6 +5,7 @@ import { createUiBrowser } from './helpers/ui-components.js';
 import { compileVue, webFile, singletonUrl } from './helpers/compile-vue.js';
 import { pluginInstallUiDouble } from './helpers/pluginInstallUiFixture.js';
 import { webInstallJob, webInstallInfo } from './helpers/pluginInstallFixtures.js';
+import { moduleWarning } from '../server/helpers/pluginModuleFixture.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -160,11 +161,11 @@ test('D6: ready показывает полный preview/diff/warnings и яв�
     version: '0.9.0',
     sourceChanged: true,
   };
-  job.preview.warnings = ['Пакет исполняет серверный код.'];
+  job.preview.warnings = [moduleWarning];
   job.preview.changes = {
     commits: [{ sha: 'c'.repeat(40), subject: 'Изменение фикстуры' }],
-    files: [{ status: 'M', path: 'server.js' }, { status: 'M', path: 'web/index.html' }],
-    sensitive: ['server.js'],
+    files: ['ui/panel.css', 'ui/ru.json', 'web/index.html'].map((path) => ({ status: 'M', path })),
+    sensitive: ['ui/panel.css', 'ui/ru.json'],
     truncated: true,
   };
 
@@ -174,7 +175,8 @@ test('D6: ready показывает полный preview/diff/warnings и яв�
   assert.equal(wrapper.find('[data-role="install-preview"]').exists(), true);
 
   assert.equal(wrapper.find('[data-role="install-file"]').exists(), false);
-  assert.match(wrapper.get('[data-role="install-preview"]').text(), /серверная часть или зависимости/u);
+  assert.match(wrapper.get('[data-role="install-preview"]').text(),
+    /код, исполняемый GrigDesk, или его зависимости/u);
   await wrapper.get('[data-role="install-changes-toggle"]').trigger('click');
 
   const text = wrapper.get('[data-role="install-preview"]').text();
@@ -193,8 +195,9 @@ test('D6: ready показывает полный preview/diff/warnings и яв�
   const sensitive = wrapper.findAll('[data-role="install-file"]')
     .map((file) => file.attributes('data-sensitive'));
 
-  assert.deepEqual(sensitive, ['true', 'false']);
-  assert.match(text, /серверная часть или зависимости/u);
+  assert.deepEqual(sensitive, ['true', 'true', 'false']);
+  assert.equal(wrapper.get('[data-role="install-warning"]').text(), moduleWarning);
+  assert.match(text, /код, исполняемый GrigDesk, или его зависимости/u);
   assert.match(text, /Список сокращён/u);
   assert.match(text, /Код плагина выполняется внутри GrigDesk с его правами/u);
   assert.equal(wrapper.get('[data-role="install-apply"]').text(), 'Установить из этого источника');
@@ -232,11 +235,12 @@ test('D8: done managed и rollback показывают различимый и�
   const { wrapper, state } = await mountInstallDialog(t, { job });
 
   assert.equal(wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'result');
-  assert.match(wrapper.get('[data-role="install-result"]').text(), /обновлён до v1\.0\.0.*Перезапустите/u);
+  assert.match(wrapper.get('[data-role="install-result"]').text(),
+    /обновлён до v1\.0\.0.*Перезапустите GrigDesk и перезагрузите окно/u);
   state.job = webInstallJob('done', 'rollback');
   await nextTick();
   assert.equal(wrapper.get('[data-role="install-result"]').text(),
-    'Версия v1.0.0 восстановлена. Перезапустите GrigDesk.');
+    'Версия v1.0.0 восстановлена. Перезапустите GrigDesk и перезагрузите окно.');
   assert.equal(wrapper.find('[data-role="install-close"]').exists(), true);
 });
 

@@ -1,6 +1,7 @@
 // Единая конфигурация сервера GrigDesk.
 // Всё, что зависит от машины/окружения, — только здесь (задел «сменный мозг»).
 import os from 'node:os';
+import { pipelineSampleDirectory } from './lib/pipelineSample.ts';
 import { dataHome as resolveDataHome, dataPath, envFilePath } from '../../shared/runtime/dataHome.ts';
 import path from 'node:path';
 import { deepSeekDistributionMode } from './lib/deepseek/distribution.ts';
@@ -84,6 +85,7 @@ export const config = {
   // Пути «мозга».
   // Корень репозитория GrigDesk — от него считаются скрипты запуска и ресурсы кода.
   rootDir,
+  pipelineSampleDir: pipelineSampleDirectory(),
   installationBin,
   dataHome,
   dataStateDir,
@@ -222,6 +224,8 @@ export const config = {
   // Постановки задач для immutable route-прогонов. Хранилище GrigDesk, а НЕ
   // рабочее дерево задачи: дерево принадлежит агенту, и файл постановки в нём агент
   // может переписать. Движок делает себе доверенную копию сам.
+  grigdeskTasksPath: process.env.GRIGDESK_TASKS_PATH || path.join(dataStateDir, 'grigdesk-tasks.json'),
+
   ticketsDir: process.env.GRIGDESK_TICKETS_DIR || path.join(dataStateDir, 'tickets'),
 
   // Ручные песочницы: журнал подъёмов GrigDesk и служебный диапазон номеров стендов,

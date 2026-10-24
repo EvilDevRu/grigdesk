@@ -14,7 +14,7 @@
     <template v-else>
       <p v-if="error" class="banner bad" role="alert">{{ error }}</p>
       <p v-if="notice" class="banner good" role="status">{{ notice }}</p>
-      <section v-if="loading" class="card"><UiSpinner decorative /> Проверяю GitHub…</section>
+      <UiLoadingState v-if="loading" label="Проверяю GitHub…" variant="cards" />
 
       <div v-else class="grid">
         <section class="card connection-card">
@@ -67,7 +67,7 @@
           <h2>Разрешённые источники Inbox</h2>
           <p v-if="!verified" class="hint">Сначала подключите и проверьте репозиторий.
           </p>
-          <p v-else-if="!rulesLoaded" class="hint"><UiSpinner decorative /> Загружаю правило…</p>
+          <UiLoadingState v-else-if="!rulesLoaded" label="Загружаю правило…" variant="inline" />
           <template v-else-if="!rules.length && !editingRule">
             <div class="empty-allowlist" data-state="empty-allowlist">
               <strong>Allowlist пуст</strong>
@@ -146,8 +146,8 @@ import {
   UiInput,
   UiPasswordInput,
   UiSelect,
-  UiSpinner,
   confirmDialog,
+  UiLoadingState,
 } from '../ui';
 
 const emptyStatus: GitHubStatus = Object.freeze({

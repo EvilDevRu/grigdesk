@@ -1,7 +1,7 @@
 import { computed, onScopeDispose, ref, shallowRef } from 'vue';
 import { defineStore } from 'pinia';
 
-import { api, type ApiClient } from '../shared/apiClient.ts';
+import { api, ApiError, type ApiClient } from '../shared/apiClient.ts';
 import {
   decodeCatalogResponse, decodeCatalogDetail,
   type CatalogDetail, type CatalogIndexResponse,
@@ -27,6 +27,7 @@ export function definePluginCatalogStore(transport: Pick<ApiClient, 'get'>, id =
     let indexEpoch = 0;
     let detailEpoch = 0;
     let disposed = false;
+    let catalogApi: 1 | 2 = 2;
     let indexController: AbortController | null = null;
     let detailController: AbortController | null = null;
     let indexFlight: Promise<void> | null = null;
@@ -42,22 +43,36 @@ export function definePluginCatalogStore(transport: Pick<ApiClient, 'get'>, id =
       detailController?.abort();
       detailEpoch += 1;
       detailLoading.value = false;
-      indexController = new AbortController();
+
+      const controller = new AbortController();
+
+      indexController = controller;
       loading.value = true;
       error.value = false;
 
       try {
-        const raw = await transport.get(`/api/plugin-catalog${force ? '?refresh=1' : ''}`, {
-          signal: indexController.signal,
-          retry: false,
-          timeoutMs: 15000,
-        });
-        const next = decodeCatalogResponse(raw);
+        let nextApi = catalogApi;
+        let raw: unknown;
 
-        if (disposed || epoch !== indexEpoch) {
+        try {
+          raw = await requestIndex(nextApi, force, controller.signal);
+        } catch (failure) {
+          if (!(failure instanceof ApiError) || failure.status !== 400 || nextApi !== 2
+            || disposed || epoch !== indexEpoch || controller.signal.aborted) {
+            throw failure;
+          }
+
+          nextApi = 1;
+          raw = await requestIndex(nextApi, force, controller.signal);
+        }
+
+        const next = decodeCatalogResponse(raw, nextApi);
+
+        if (disposed || epoch !== indexEpoch || controller.signal.aborted) {
           return;
         }
 
+        catalogApi = nextApi;
         snapshot.value = next;
 
         if (!next.catalog || detail.value
@@ -86,6 +101,20 @@ export function definePluginCatalogStore(transport: Pick<ApiClient, 'get'>, id =
           }
         }
       }
+    }
+
+    /**
+     * Согласование меняет только query и бюджет чтения через общий same-origin транспорт.
+     * Повтор старого запроса сохраняет signal и явное намерение обновить каталог.
+     */
+    function requestIndex(mode: 1 | 2, force: boolean, signal: AbortSignal) {
+      const query = mode === 2 ? `?api=2${force ? '&refresh=1' : ''}` : force ? '?refresh=1' : '';
+
+      return transport.get(`/api/plugin-catalog${query}`, {
+        signal,
+        retry: false,
+        timeoutMs: mode === 2 ? 25000 : 15000,
+      });
     }
 
     /**
@@ -125,6 +154,7 @@ export function definePluginCatalogStore(transport: Pick<ApiClient, 'get'>, id =
 
       const epoch = ++detailEpoch;
       const openingIndex = indexEpoch;
+      const openingApi = catalogApi;
       const snapshot = index.value;
 
       detailController?.abort();
@@ -143,12 +173,12 @@ export function definePluginCatalogStore(transport: Pick<ApiClient, 'get'>, id =
       detailLoading.value = true;
 
       try {
-        const path = `/api/plugin-catalog/${encodeURIComponent(id)}`;
+        const path = `/api/plugin-catalog/${encodeURIComponent(id)}${openingApi === 2 ? '?api=2' : ''}`;
         const next = decodeCatalogDetail(await transport.get(path, {
           signal: detailController.signal,
           retry: false,
           timeoutMs: 15000,
-        }));
+        }), openingApi);
 
         if (disposed || epoch !== detailEpoch || openingIndex !== indexEpoch) {
           return;
