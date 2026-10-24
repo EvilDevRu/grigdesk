@@ -690,6 +690,8 @@
   "machineWelcomePaste": "Select “Add machine” and paste the pairing string from your computer.",
   "machineWelcomeReady": "Once connected, you can continue working with the selected computer.",
   "chatListLoading": "Loading chats…",
+  "chatLoadingPreviewTitle": "Conversations with agents",
+  "chatLoadingPreviewHint": "Your chats and message history will appear here",
   "chatListLoadFailed": "Chats could not be loaded",
   "chatListLoadNetwork": "No connection to the server",
   "chatListLoadTimeout": "The server did not respond in time",

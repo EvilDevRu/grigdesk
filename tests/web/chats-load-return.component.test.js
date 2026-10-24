@@ -6,7 +6,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 
 test('CHATS-RETURN-01', async (t) => {
   const browser = await installUiBrowser(t);
-  const [{ mount }, { createPinia, defineStore }, { ref }] = await Promise.all([
+  const [{ mount }, { createPinia, defineStore }, { nextTick, ref }] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
     import('../../web/node_modules/vue/index.mjs'),
@@ -16,7 +16,11 @@ test('CHATS-RETURN-01', async (t) => {
 
   globalThis.__returnDock = ref(true);
   globalThis.__returnStore = defineStore('chat-return', {
-    state: () => ({ activeId: '', revealRequest: '' }),
+    state: () => ({
+      loaded: false,
+      activeId: 'saved-chat',
+      revealRequest: '',
+    }),
     actions: {
       ensure() {
         ensures += 1;
@@ -62,6 +66,10 @@ test('CHATS-RETURN-01', async (t) => {
   });
 
   for (const count of [1, 2]) {
+    const chat = globalThis.__returnStore(pinia);
+
+    chat.loaded = false;
+
     const wrapper = mount(component, {
       attachTo: browser.document.querySelector('#mount'),
       global: { plugins: [pinia] },
@@ -69,6 +77,12 @@ test('CHATS-RETURN-01', async (t) => {
 
     wrappers.push(wrapper);
     assert.equal(ensures, count, 'каждое возвращение на экран зовёт ensure');
+    assert.equal(wrapper.find('.chat-loading-preview').exists(), true);
+    assert.equal(wrapper.find('section').exists(), false, 'сохранённый activeId ждёт подтверждения списка');
+    chat.loaded = true;
+    await nextTick();
+    assert.equal(wrapper.find('.chat-loading-preview').exists(), false);
+    assert.equal(wrapper.find('section').exists(), true, 'после загрузки открывается сохранённый чат');
     wrapper.unmount();
     assert.equal(disposed, count);
   }
