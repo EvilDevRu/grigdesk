@@ -101,7 +101,10 @@
       </template>
     </UiDialog>
 
-    <header data-ui-topbar class="topbar" :class="{ 'window-titlebar': isDesktopMain }">
+    <header data-ui-topbar class="topbar" :class="{
+      'window-titlebar': isDesktopMain,
+      'window-titlebar--controls': isDesktopMain && shell.snapshot?.windowControls,
+    }">
       <span class="app-mark" aria-label="GrigDesk"><GrigDeskMark class="logo" /></span>
       <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
       <div id="tb-slot" class="tb-slot"></div>
@@ -1023,7 +1026,7 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .shell {
   display: grid; height: 100%; min-width: 0; overflow: hidden;
   grid-template-columns: var(--app-rail-w) minmax(0, 1fr) var(--app-rail-w);
-  grid-template-rows: max(var(--app-topbar-h), env(titlebar-area-height, 0px)) minmax(0, 1fr);
+  grid-template-rows: var(--app-topbar-h) minmax(0, 1fr);
 }
 
 .shell.without-machine {
@@ -1061,13 +1064,14 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
     color-mix(in srgb, var(--accent) 10%, var(--topbar)) 0%,
     var(--topbar) 42%, var(--surface) 100%);
 }
-/* Геометрия системных кнопок приходит от Electron с учётом стороны и масштаба.
-   Свободная часть шапки двигает окно; группы с действиями сохраняют события мыши. */
+/* Свободная часть шапки двигает окно; группы с действиями сохраняют события мыши.
+   Кнопки окна рисует общий UI: они затемняются вместе с фоном любого модального слоя. */
 .window-titlebar {
-  padding-left: env(titlebar-area-x, 0px);
-  padding-right: max(0px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%)));
   -webkit-app-region: drag;
   user-select: none;
+}
+.window-titlebar--controls {
+  padding-right: calc(3 * var(--app-topbar-h));
 }
 .window-titlebar :is(.tb-slot, .status, .topbar-actions) {
   -webkit-app-region: no-drag;

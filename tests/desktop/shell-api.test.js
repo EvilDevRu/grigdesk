@@ -388,6 +388,62 @@ async function invokeSurface(shell, path, body) {
   return { status, result };
 }
 
+test('управление окном принимает закрытый набор команд и публикует изменения через shell', async () => {
+  const calls = [];
+  let maximized = false;
+  let changed;
+  let subscribed = true;
+  let accepted = true;
+  const f = fixture({
+    windowControls: {
+      state: () => ({ maximized }),
+      subscribe(listener) {
+        changed = listener;
+
+        return () => {
+          subscribed = false;
+        };
+      },
+      control(origin, action) {
+        calls.push({ origin, action });
+
+        return accepted;
+      },
+    },
+  });
+  const before = f.shell.state();
+
+  assert.deepEqual(before.windowControls, { maximized: false });
+  maximized = true;
+  changed();
+  assert.deepEqual(f.shell.state().windowControls, { maximized: true });
+  assert.equal(f.shell.state().rev, before.rev + 1);
+
+  for (const action of ['minimize', 'toggle-maximize', 'close']) {
+    const response = await invokeSurface(f.shell, '/__shell/window', { action });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls.at(-1), { origin: 'http://127.0.0.1:47101', action });
+  }
+
+  for (const body of [{}, null, { action: 'destroy' }, { action: 'close', extra: true }]) {
+    const response = await invokeSurface(f.shell, '/__shell/window', body);
+
+    assert.equal(response.status, 400);
+  }
+
+  assert.equal(calls.length, 3);
+  accepted = false;
+  assert.equal((await invokeSurface(f.shell, '/__shell/window', { action: 'close' })).status, 409);
+  f.shell.close();
+  assert.equal(subscribed, false);
+
+  const unsupported = fixture();
+
+  assert.equal((await invokeSurface(unsupported.shell, '/__shell/window', { action: 'close' })).status, 404);
+  unsupported.shell.close();
+});
+
 test('SA-01: capability и закрытые действия поверхностей', async (t) => {
   const calls = [];
   let opened = true;

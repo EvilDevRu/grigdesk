@@ -38,6 +38,7 @@
     </SpeechProvider>
     <LockOverlay v-if="shell.present && shell.status === 'locked'" />
   </template>
+  <DesktopWindowControls v-if="currentDesktopMode() === 'main'" />
 </template>
 
 <script setup lang="ts">
@@ -61,6 +62,7 @@ import {
 import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
 import DesktopExitHost from './shared/layout/DesktopExitHost.vue';
+import DesktopWindowControls from './shared/layout/DesktopWindowControls.vue';
 import NoAccessView from './views/NoAccessView.vue';
 import TaskModal from './views/TaskModal.vue';
 import ToolWindowPage from './views/ToolWindowPage.vue';

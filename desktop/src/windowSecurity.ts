@@ -64,12 +64,7 @@ export function windowOptions(
     minWidth: 600,
     minHeight: 600,
     title: 'GrigDesk',
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      height: 36,
-      color: '#00000000',
-      symbolColor: '#8a93a3',
-    },
+    frame: false,
     show: false,
     autoHideMenuBar: false,
     backgroundColor: '#0b0d11',
@@ -261,6 +256,7 @@ export function guardContents(contents: ContentsLike, options: ContentsGuardOpti
           // Произвольный документ потомка не обязан иметь топбар и область перетаскивания.
           titleBarStyle: 'default',
           titleBarOverlay: false,
+          frame: true,
           webPreferences: {
             ...options.childOptions.webPreferences,
             partition: LOCAL_PARTITION,

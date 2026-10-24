@@ -1,4 +1,9 @@
 {
+  "windowMinimize": "Свернуть окно",
+  "windowMaximize": "Развернуть окно",
+  "windowRestore": "Восстановить размер окна",
+  "windowClose": "Закрыть приложение",
+  "windowActionFailed": "Не удалось выполнить действие с окном.",
   "checkingServer": "Проверка сервера…",
   "startingServer": "Запуск сервера…",
   "waitingVpn": "Ожидание VPN…",

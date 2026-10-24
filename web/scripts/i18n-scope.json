@@ -6,6 +6,7 @@
     "web/src/pluginRuntime",
     "web/src/features/settings",
     "web/src/shared/layout/AppShell.vue",
+    "web/src/shared/layout/DesktopWindowControls.vue",
     "web/src/shared/layout/ToolsGrid.vue",
     "web/src/shared/layout/ToolDock.vue",
     "web/src/shared/layout/ToolHost.vue",
