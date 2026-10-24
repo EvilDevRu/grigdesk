@@ -6,8 +6,12 @@
 порядок внутри группы. При разнесённом rollout новый web восстанавливает group/order
 старых серверных manifest только для известных встроенных `system: true` плагинов;
 пользовательский legacy-manifest остаётся в `rail`. Реестр: `server/src/lib/pluginsRegistry.ts` (SYSTEM =
-video, code, analysis, shelf, inbox, telegram, github, ssh, db, docker, showcase, studio3d) + скан пользовательских `plugins/<id>/plugin.json` (+опц. `server.js`, роуты
-в ЖЁСТКОМ префиксе `/api/ext/<id>/` (механика Fastify, перекрыть системное нельзя), контракт версионирован полем `api` (=1), регистрация на старте — вкл/выкл требует рестарта, у системных нет).
+video, code, analysis, shelf, inbox, telegram, github, ssh, db, docker, showcase, studio3d) + скан
+пользовательских `plugins/<id>/plugin.json` (опционально один из `server.js` / `server.ts`).
+Роуты заперты в префиксе `/api/ext/<id>/` механикой Fastify; контракт версионирован полем `api` (1 или 2).
+Регистрация идёт на старте: загруженный пользовательский плагин выключается и включается сразу,
+первое включение dormant требует рестарта. Функции ядра, hooks и проверка настроек —
+[серверный набор](server-core-api.md).
 Состояние — prefs (`plugins`, `pluginSettings`). Модуль `modules/plugins/` декорирует
 `fastify.pluginEnabled(id)` / `fastify.pluginSettings(id)` — регистрируется ДО модулей-плагинов;
 системные модули (media, code, task-shelf, inbox, telegram, github) гейтят каждый роут живой проверкой (тумблер без рестарта → 404
@@ -22,9 +26,9 @@ server-owned сессии и ожидания без рестарта. Полн�
 Telegram и GitHub системные, но выключены: их страницы просят provider credentials и не
 должны появляться сами у каждой установки.
 
-Серверный manifest отвечает только за размещение ссылки. Встроить Vue-компонент в правый
-док может лишь явная запись клиентского `shared/tools/registry.ts`: произвольный user plugin
-не получает frontend runtime одним JSON-полем. Фронт: `stores/plugins.ts`, VideoView,
+Для api1 серверный manifest отвечает за размещение ссылки, а пользовательская страница
+открывается в iframe. Api2 допускает доверенный готовый модуль через `webModule` и общие
+фасады Vue/UI: [модульные панели](plugin-ui-modules.md). Фронт: `stores/plugins.ts`, VideoView,
 InboxView, TelegramView, GitHubView и `ToolHost` для Code/Shelf показывают заглушку при выключенном плагине
 (по `plugins.loaded && !plugins.enabled(id)`, а `404 plugin_disabled` от сервера в этом
 случае НЕ показывается красной плашкой — это состояние, а не поломка). Выключение Code

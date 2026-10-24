@@ -18,7 +18,8 @@ const report = {
 async function main() {
   const fileRequire = createRequire(path.join(R, 'server', 'package.json'));
   const bridge = fileRequire(path.join(R, 'server', 'runtime', 'esmBridge.cjs'));
-  const pluginUrl = pathToFileURL(path.join(R, 'plugins', 'demo plugin', 'server.js')).href;
+  const entry = process.env.PROBE_ENTRY || 'server.js';
+  const pluginUrl = pathToFileURL(path.join(R, 'plugins', 'demo plugin', entry)).href;
   const plugin = await bridge.importUrl(pluginUrl);
 
   report.relative = plugin.value;

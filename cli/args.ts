@@ -15,9 +15,9 @@ export type CliArgs = {
 
 export const HELP_TEXT = `GrigDesk — окно и управление локальными компонентами
 
-grigdesk-ctl                     Открыть окно GrigDesk; сервер поднимает само окно
+grigdesk-ctl                     Меню в терминале, иначе справка
+grigdesk-ctl open [--force]       Открыть окно GrigDesk; сервер поднимает само окно
                                 (без runtime.json — через службу)
-grigdesk-ctl open [--force]
 grigdesk-ctl status [--json]
 grigdesk-ctl server start [--wait]
 grigdesk-ctl server stop [--force]
@@ -51,14 +51,14 @@ const HELP_HINT = 'Справка: grigdesk-ctl --help';
  */
 export function parseArgs(argv: readonly string[]): CliArgs {
   const args: CliArgs = {
-    kind: 'open',
+    kind: 'help',
     force: false,
     wait: false,
     json: false,
     lines: 100,
     follow: false,
   };
-  const command = argv[0] ?? 'open';
+  const command = argv[0] ?? 'help';
 
   // Справку просят и после подкоманды: --help или -h в любом месте важнее остальных аргументов.
   if (command === 'help' || argv.some((arg) => arg === '--help' || arg === '-h')) {

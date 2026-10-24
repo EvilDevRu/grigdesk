@@ -9,9 +9,34 @@ import { HELP_TEXT, parseArgs } from '../../cli/args.ts';
 import { completed, createSandbox } from './helpers/sandbox.mts';
 
 test('CE-1 пустой argv и force', () => {
-  assert.equal(parseArgs([]).kind, 'open');
+  assert.equal(parseArgs([]).kind, 'help');
   assert.equal(parseArgs([]).force, false);
   assert.equal(parseArgs(['open', '--force']).force, true);
+});
+
+test('CE-DEFAULT: пустой вызов показывает справку без окна и запросов к серверу', async (t) => {
+  const box = await createSandbox(t);
+
+  box.installWindow();
+  box.installRuntime();
+  await box.serve('grigdesk');
+
+  for (const cgroup of ['test.scope', 'grigdesk-server.service', 'app-grigdesk-4242.scope']) {
+    writeFileSync(path.join(box.home, 'cgroup'), `0::/user.slice/${cgroup}`);
+
+    for (const display of [':99', undefined]) {
+      const result = await box.run([], { DISPLAY: display, WAYLAND_DISPLAY: undefined });
+
+      assert.deepEqual(result, {
+        code: 0,
+        stdout: HELP_TEXT,
+        stderr: '',
+      });
+    }
+  }
+
+  assert.deepEqual(box.calls(), []);
+  assert.deepEqual(box.requests(), []);
 });
 
 test('CE-2 сервер, посредник и журнал', () => {

@@ -368,7 +368,8 @@ function onHotkey(event: KeyboardEvent) {
 }
 
 function canDetach(id: string) {
-  return desktopWindowRole(navigator.userAgent) === 'main' && shell.capabilities.includes('windows')
+  return toolById(plugins, id)?.detachable !== false
+    && desktopWindowRole(navigator.userAgent) === 'main' && shell.capabilities.includes('windows')
     && !['terminal', 'studio3d'].includes(id);
 }
 

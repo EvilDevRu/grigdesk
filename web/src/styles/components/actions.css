@@ -1124,6 +1124,101 @@
   background: color-mix(in srgb, var(--good) 7%, var(--surface-2));
 }
 
+/* Каталог и меню используют одну ссылку; геометрия выбирается контекстом.
+   Оформление наведения, фокуса и выбранного раздела остаётся внутри UI-kit. */
+.ui-action-link[data-context='tool-tile'] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  height: auto;
+  min-height: 104px;
+  padding: 14px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink-mid);
+  font-size: 13px;
+  text-align: center;
+  white-space: normal;
+}
+
+.ui-action-link[data-context='tool-tile']:hover:not([aria-disabled='true']) {
+  border-color: var(--line-2);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.ui-action-link[data-context='tool-tile'][aria-current='page'] {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  color: var(--accent);
+}
+
+.ui-action-link[data-context='tool-tile'] .tool-icon {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+}
+
+.ui-action-link[data-context='tool-tile'] .tool-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.ui-action-link[data-context='tool-menu-item'] {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 44px;
+  padding: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+}
+
+.ui-action-link[data-context='tool-menu-item'] .tool-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+}
+
+.ui-action-link[data-context='tool-menu-item'] .tool-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ui-action-link:is([data-context='tool-menu-item'], [data-context='tool-tile']) .tool-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-action-link[data-context='tool-menu-item'] .tool-label {
+  flex: 1;
+}
+
+.ui-action-link[data-context='tool-menu-item']:hover:not([aria-disabled='true']) {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ui-action-link[data-context='tool-menu-item'][aria-current='page'] {
+  background: color-mix(in srgb, var(--accent) 9%, var(--topbar-panel));
+  color: var(--accent);
+}
+
 /* Таймеры и конвейеры выглядят как статусы topbar, а не как отдельные кнопки.
    Интерактивный элемент сохраняем для клавиатуры и тач-экрана; список открывается
    наведением или нажатием. */
@@ -2172,6 +2267,15 @@
   cursor: pointer;
 }
 
+/* Нижние вкладки телефона используют общий skin рейки, но вмещают подпись.
+   Высота совпадает со строкой сетки оболочки и не зависит от типа указателя. */
+@media (max-width: 600px) {
+  .shell .phone-nav [data-ui-shell-nav] {
+    height: 60px;
+    min-height: 60px;
+  }
+}
+
 .shell [data-ui-shell-nav]:hover,
 .ui-icon-button[data-context='tool-rail-item']:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--surface);
@@ -2231,6 +2335,46 @@
 .ui-pressable[data-context='topbar-network'] .flag {
   font-size: 14px;
   line-height: 1;
+}
+
+/* Сводка узкого окна показывает подписанные строки с полной площадкой нажатия.
+   Число исполнителей увеличивает высоту панели, сохраняя ширину верхней полосы. */
+.topbar-status-label {
+  display: none;
+}
+
+.shell-status-panel .topbar-status-label {
+  display: block;
+  white-space: normal;
+}
+
+.shell-status-panel .ui-button {
+  width: 100%;
+  min-height: 44px;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.shell-status-panel .ui-pressable:is([data-context='provider-status'], [data-context='topbar-network']) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+}
+
+.shell-status-panel .ui-pressable[data-context='topbar-metrics'] {
+  position: relative;
+  justify-content: center;
+  min-height: 44px;
+}
+
+.shell-status-panel .ui-pressable[data-context='topbar-metrics'] > span.resources-alarm {
+  top: 4px;
+  right: 4px;
 }
 
 /* Полное название задачи остаётся доступным в две строки узкой карточки. */

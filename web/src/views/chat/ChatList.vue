@@ -543,4 +543,13 @@ async function del(r: ListRow) {
   .cl { width: 100%; border-right: none; }
   .rows { padding: 5px 5px calc(6px + env(safe-area-inset-bottom, 0px)); }
 }
+
+@media (max-width: 600px) {
+  .top { min-height: 108px; padding: 8px 12px; gap: 6px; }
+  .rows { padding: 4px 6px; }
+  .row { gap: 8px; padding: 8px 6px; }
+  .name { font-size: 15px; }
+  .t2 { font-size: 13px; margin-top: 4px; }
+  .mdl { max-width: 72px; }
+}
 </style>

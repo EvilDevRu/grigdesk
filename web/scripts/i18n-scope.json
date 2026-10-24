@@ -2,6 +2,8 @@
   "version": 1,
   "include": [
     "web/src/views/settings",
+    "web/src/views/ext/PluginModulePanel.vue",
+    "web/src/pluginRuntime",
     "web/src/features/settings",
     "web/src/shared/layout/AppShell.vue",
     "web/src/shared/layout/ToolsGrid.vue",
@@ -85,6 +87,26 @@
   ],
   "dynamicKeys": {},
   "technicalTokens": [
+    {
+      "text": "invalid-api-path",
+      "file": "web/src/pluginRuntime/context.ts",
+      "reason": "Внутренний код отказа API; панель показывает локализованное сообщение вместо исключения"
+    },
+    {
+      "text": "invalid-module-descriptor",
+      "file": "web/src/pluginRuntime/context.ts",
+      "reason": "Внутренний код отказа DTO; панель показывает локализованное сообщение"
+    },
+    {
+      "text": "invalid-module-dictionary",
+      "file": "web/src/pluginRuntime/context.ts",
+      "reason": "Внутренний код отказа словаря; панель показывает локализованное сообщение"
+    },
+    {
+      "text": "load-failed",
+      "file": "web/src/pluginRuntime/styles.ts",
+      "reason": "Внутренний код отказа CSS; панель показывает локализованное сообщение"
+    },
     {
       "text": "GrigDesk",
       "reason": "Название продукта, протокола или технической единицы"

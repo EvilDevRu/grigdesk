@@ -1561,6 +1561,7 @@
   "providerInstallationOldTerminal": "If an existing terminal reports “command not found”, close it and open it again.",
   "providerInstallationUnknown": "Installation state is unavailable. Refresh the state before starting again.",
   "providerInstallationRefresh": "Refresh state",
+  "providerInstallationRetryAction": "Retry",
   "providerInstallationOutput": "Command output",
   "providerInstallationBackground": "You can close this window — the installation will continue",
   "providerInstallationBusy": "An executor installation is already running",

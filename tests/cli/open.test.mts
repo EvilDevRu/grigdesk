@@ -95,7 +95,7 @@ test('CO-4 с descriptor: окно запущено, systemctl не вызыва
   box.installRuntime();
   await box.serve('grigdesk');
 
-  const result = await box.run([]);
+  const result = await box.run(['open']);
 
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Окно открывается/);
@@ -138,7 +138,7 @@ test('CO-6 без descriptor: готовый сервер не стартует 
   ready.unit({ ActiveState: 'active' });
   await ready.serve('grigdesk');
 
-  assert.equal((await ready.run([])).code, 0);
+  assert.equal((await ready.run(['open'])).code, 0);
   assert.ok(!ready.calls().some((call) => call.includes(' start ')));
   assert.ok(ready.requests().includes('/api/auth/state'), 'без descriptor сервер спрошен');
 
@@ -153,7 +153,7 @@ test('CO-6 без descriptor: готовый сервер не стартует 
 
   t.after(release);
 
-  const output = completed(stopped.spawn([]));
+  const output = completed(stopped.spawn(['open']));
 
   await stopped.waitFor(() => stopped.calls().some((call) => call.startsWith('app ')));
   await stopped.waitFor(() => stopped.calls().some((call) => call.startsWith('systemctl ')));
@@ -178,7 +178,7 @@ test('CO-7 нет окна: с descriptor — ошибка без запроса
   described.installRuntime();
   await described.serve('grigdesk');
 
-  const refused = await described.run([]);
+  const refused = await described.run(['open']);
 
   assert.equal(refused.code, 1);
   assert.match(refused.stderr, /grigdesk-ctl desktop install/);
@@ -186,7 +186,7 @@ test('CO-7 нет окна: с descriptor — ошибка без запроса
   assert.deepEqual(described.requests(), []);
 
   const legacy = await createSandbox(t);
-  const result = await legacy.run([]);
+  const result = await legacy.run(['open']);
 
   assert.equal(result.code, 1);
   assert.match(result.stderr, /grigdesk-ctl desktop install/);
@@ -205,7 +205,7 @@ test('CO-8 нет графического сеанса: с descriptor — ош�
   described.installRuntime();
   await described.serve('grigdesk');
 
-  const refused = await described.run([], headless);
+  const refused = await described.run(['open'], headless);
 
   assert.equal(refused.code, 1);
   assert.match(refused.stderr, /Нет графического сеанса/);
@@ -216,7 +216,7 @@ test('CO-8 нет графического сеанса: с descriptor — ош�
 
   legacy.installWindow();
 
-  const result = await legacy.run([], headless);
+  const result = await legacy.run(['open'], headless);
 
   assert.equal(result.code, 1);
   assert.match(result.stderr, /Нет графического сеанса/);
@@ -230,7 +230,7 @@ test('CO-9 сторож окна до эффектов, force разрешает
   box.installWindow();
   writeFileSync(path.join(box.home, 'cgroup'), '0::/user.slice/grigdesk-server.service');
 
-  const refused = await box.run([]);
+  const refused = await box.run(['open']);
 
   assert.equal(refused.code, 1);
   assert.match(refused.stderr, /ход агента/);
@@ -246,13 +246,11 @@ test('CO-9b ход агента из scope окна не открывает ок
   box.installWindow();
   writeFileSync(path.join(box.home, 'cgroup'), '0::/user.slice/app.slice/app-grigdesk-4242.scope');
 
-  for (const argv of [[], ['open']]) {
-    const refused = await box.run(argv);
+  const refused = await box.run(['open']);
 
-    assert.equal(refused.code, 1);
-    assert.match(refused.stderr, /ход агента/);
-    assert.match(refused.stderr, /--force/);
-  }
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /ход агента/);
+  assert.match(refused.stderr, /--force/);
 
   assert.deepEqual(box.calls(), []);
   assert.equal((await box.run(['open', '--force'])).code, 0);

@@ -87,7 +87,7 @@ test('страница включённого плагина раздаётся 
   const sleeper = list.find((plugin) => plugin.id === 'sleeper');
 
   assert.equal(viewer.web, '/api/ext/viewer/web/');
-  assert.equal(viewer.needsRestart, true, 'страница подключается на старте — тумблер ждёт рестарта');
+  assert.equal(viewer.needsRestart, false, 'загруженная страница переключается без рестарта');
   assert.equal(sleeper.web, '/api/ext/sleeper/web/');
   assert.equal(sleeper.enabled, false);
 

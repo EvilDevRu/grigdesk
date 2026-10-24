@@ -110,6 +110,7 @@
             :plugin="setupPlugin"
             :active="active"
           />
+          <UiInlineMessage v-if="plugin.serverError" tone="danger">{{ plugin.serverError }}</UiInlineMessage>
           <SettingsScope>{{ t('settings.valuesAndPlacementsAreSavedWithApply') }}</SettingsScope>
           <SettingsField :address="address('enabled')">
             <UiSwitch
@@ -304,7 +305,7 @@ import SettingsScope from '../SettingsScope.vue';
 import SettingsIcon from '../SettingsIcon.vue';
 import { computed, reactive, ref, watch, onMounted } from 'vue';
 import {
-  UiSwitch, UiCheckbox, UiInput, UiNumberInput, UiSelect, UiPasswordInput, UiButton,
+  UiSwitch, UiCheckbox, UiInput, UiNumberInput, UiSelect, UiPasswordInput, UiButton, UiInlineMessage,
 } from '../../../ui.ts';
 import type {
   PluginListItem, PluginModelValue, PluginSetting,

@@ -29,8 +29,8 @@ test('AppShell использует public UI controls и общую повер�
   assert.match(publicUiImport[1], /\bUiIconButton\b/u);
   assert.match(publicUiImport[1], /\bUiPressable\b/u);
   // Метрики и сеть тоже открываются с клавиатуры через общий pressable.
-  assert.equal([...source.matchAll(/<UiPressable\b/gu)].length, 4);
-  assert.equal([...source.matchAll(/<UiButton\b/gu)].length, 1);
+  assert.equal([...source.matchAll(/<UiPressable\b/gu)].length, 5);
+  assert.equal([...source.matchAll(/<UiButton\b/gu)].length, 2);
   assert.doesNotMatch(source, /instbar|installDismissed/u);
 
   const providerSection = /<span v-if="runtimeProviders.length"[\s\S]*?class="netbox mono"/u;
@@ -52,7 +52,9 @@ test('AppShell использует public UI controls и общую повер�
   assert.match(gear, /aria-haspopup="dialog"/u);
   assert.match(gear, /:pressed="settings.isOpen"/u);
   assert.doesNotMatch(source, /<router-link to="\/settings"/u);
-  assert.match(source, /<UiPopover[^>]*v-model:open="toolsOpen"[^>]*layer="tools"/u);
+  assert.match(source, /<UiTopbarPanel[^>]*v-model:open="toolsOpen"[^>]*layer="tools"/u);
+  assert.match(source, /attachment="trigger"\s+placement="right-start"/u);
+  assert.match(source, /<ToolsGrid[^>]*layout="list"/u);
   assert.doesNotMatch(source, /placeToolsPopover|toolsOutside/u);
   assert.doesNotMatch(source, /\.pu-state button|\.ptip-go button|\.instbar button/u);
   assert.match(source, /data-context="topbar-popover-action"/u);
@@ -213,8 +215,8 @@ test('TIP-MIG-01: каждая иконка постоянной рейки им
   }
 
   visit(descriptor.template.ast);
-  // Четыре навигационные цели сохраняют доступные имена без видимых подписей.
-  assert.equal(targets.length, 4);
+  // Обе раскладки сохраняют доступные имена: четыре цели рейки и две нижней навигации.
+  assert.equal(targets.length, 6);
 
   for (const node of targets) {
     const named = node.props.some((prop) => (prop.type === 6 && prop.name === 'aria-label')
