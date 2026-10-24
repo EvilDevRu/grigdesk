@@ -9,7 +9,7 @@ import type { Sandbox } from './sandbox.mts';
 import { startPty } from './pty.mts';
 
 export const repository = fileURLToPath(new URL('../../../', import.meta.url));
-export const menuTitle = /Что сделать\?|What (?:would you like to do|to do)\?/iu;
+export const menuTitle = /↑↓[^\r\n]*Esc (?:выход|exit)[^\r\n]*\r?\n/iu;
 export const down = '\x1b[B';
 export const up = '\x1b[A';
 

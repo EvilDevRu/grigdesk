@@ -66,7 +66,7 @@ async function pinnedRuntime(): Promise<{ runtime: NodeRuntime; archive: string 
  * Собирает layout R с пробелом в пути: bridge из шаблона сборщика, плагин в D/plugins,
  * внешний Fastify из server/node_modules и вложенный Node из архива.
  */
-async function prepareLayout(root: string, runtime: NodeRuntime, archive: string):
+async function prepareLayout(root: string, runtime: NodeRuntime, archive: string, extension = 'js'):
   Promise<{ R: string; out: string }> {
   const R = path.join(root, 'R with space');
   const out = path.join(root, 'probe out');
@@ -91,10 +91,10 @@ async function prepareLayout(root: string, runtime: NodeRuntime, archive: string
     path.join(R, 'server/runtime/esmBridge.cjs'));
   await copyFile(path.join(FIXTURES, 'plugin/package.json'),
     path.join(R, 'plugins/demo plugin/package.json'));
-  await copyFile(path.join(FIXTURES, 'plugin/server.js'),
-    path.join(R, 'plugins/demo plugin/server.js'));
-  await copyFile(path.join(FIXTURES, 'plugin/lib/value.js'),
-    path.join(R, 'plugins/demo plugin/lib/value.js'));
+  await copyFile(path.join(FIXTURES, `plugin/server.${extension}`),
+    path.join(R, `plugins/demo plugin/server.${extension}`));
+  await copyFile(path.join(FIXTURES, `plugin/lib/value.${extension}`),
+    path.join(R, `plugins/demo plugin/lib/value.${extension}`));
 
   const { directory } = nodeArchive(runtime);
 
@@ -137,7 +137,7 @@ async function waitForFile(file: string, timeoutMs = 30000): Promise<boolean> {
  * Запускает готовый бинарник из временного пути рядом с целью и проверяет плагин.
  * Системный Node в PATH недоступен, cwd посторонний; завершение — SIGTERM.
  */
-function probeFixture(R: string, out: string) {
+function probeFixture(R: string, out: string, extension = 'js') {
   return async (binary: string): Promise<void> => {
     const reportFile = path.join(out, 'report.json');
     const child = spawn(binary, [], {
@@ -145,6 +145,7 @@ function probeFixture(R: string, out: string) {
       env: {
         PATH: '/nonexistent',
         PROBE_OUT: out,
+        PROBE_ENTRY: `server.${extension}`,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -197,10 +198,10 @@ function probeFixture(R: string, out: string) {
  * Собирает SEA с настоящим внешним bridge и ESM-плагином из отдельного каталога.
  * Это медленная проверка: она поднимает HTTP и проходит полный путь плагина.
  */
-test('SEA-PLUGIN-01: SEA грузит ESM-плагин через внешний bridge и отдаёт маршрут', async (t) => {
+async function checkSeaPlugin(t: TestContext, extension: string): Promise<void> {
   const root = await scratch(t);
   const { runtime, archive } = await pinnedRuntime();
-  const { R, out } = await prepareLayout(root, runtime, archive);
+  const { R, out } = await prepareLayout(root, runtime, archive, extension);
   const cache = path.join(root, 'cache');
   const target = path.join(R, 'server/grigdesk-server');
 
@@ -218,9 +219,17 @@ test('SEA-PLUGIN-01: SEA грузит ESM-плагин через внешний
     download: async () => {
       throw new Error('сеть запрещена: архив обязан браться из кэша');
     },
-    probe: probeFixture(R, out),
+    probe: probeFixture(R, out, extension),
   });
 
   assert.equal(result.binary, target);
   assert.equal((await readFile(target)).subarray(1, 4).toString(), 'ELF');
+}
+
+test('SEA-PLUGIN-01: SEA грузит ESM-плагин через внешний bridge и отдаёт маршрут', async (t) => {
+  await checkSeaPlugin(t, 'js');
+});
+
+test('SEA-PLUGIN-TS: SEA грузит native TS с относительным импортом и TLA', async (t) => {
+  await checkSeaPlugin(t, 'ts');
 });

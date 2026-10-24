@@ -295,7 +295,22 @@ export interface ExecutorSessionBinding {
 // Контракт адаптера исполнителя — ровно то, что перечислено в шапке файла. Обязательны
 // только идентичность, бинарь и две проверки установки; всё остальное объявляет сам
 // адаптер, и ядро спрашивает наличие метода, а не вендора.
+export interface ProviderInstallCommand {
+  executable: string;
+  args: string[];
+  command: string;
+  fallbackCommand: string;
+}
+
+export interface ProviderInstallation {
+  install: ProviderInstallCommand;
+  update: ProviderInstallCommand | null;
+  loginCommand: string;
+  nativeBinDirs?: string[];
+}
+
 export interface ExecutorAdapter {
+  installation?: (config: unknown) => ProviderInstallation;
   studio3d?: Studio3dProvider;
   type?: string;
   kind?: string;

@@ -28,7 +28,7 @@ async function scratch(t) {
  * Готовит ESM-плагин с относительным импортом и top-level await.
  * Имя каталога содержит пробел: путь обязан переживать file URL.
  */
-async function pluginFixture(root) {
+async function pluginFixture(root, extension = 'js') {
   const directory = path.join(root, 'plugins', 'demo plugin');
 
   await mkdir(path.join(directory, 'lib'), {
@@ -38,11 +38,12 @@ async function pluginFixture(root) {
     name: 'demo-plugin',
     type: 'module',
   }));
-  await writeFile(path.join(directory, 'lib/value.js'), "export const value = 'из соседнего файла';\n");
-  await writeFile(path.join(directory, 'server.js'), [
-    "import { value } from './lib/value.js';",
+  await writeFile(path.join(directory, `lib/value.${extension}`),
+    `export const value${extension === 'ts' ? ': string' : ''} = 'из соседнего файла';\n`);
+  await writeFile(path.join(directory, `server.${extension}`), [
+    `import { value } from './lib/value.${extension}';`,
     '',
-    "const marker = await Promise.resolve('relative-import+tla');",
+    `const marker${extension === 'ts' ? ': string' : ''} = await Promise.resolve('relative-import+tla');`,
     '',
     'export default async function plugin(app) {',
     '  app.get("/demo", async () => ({ value, marker }));',
@@ -53,7 +54,7 @@ async function pluginFixture(root) {
 
   return {
     directory,
-    server: path.join(directory, 'server.js')
+    server: path.join(directory, `server.${extension}`)
   };
 }
 
@@ -189,3 +190,20 @@ test('SEA-PLUG-05: новый bare или вычисляемый import не о�
   assert.ok(points.some((point) => point.file === 'server/src/lib/runtimeImport.ts'
     && point.target === '<computed>'));
 });
+
+for (const packaged of [false, true]) {
+  test(`NTS-0${packaged ? 2 : 1}: native TS, относительный import и TLA, bridge=${packaged}`, async (t) => {
+    const root = await scratch(t);
+    const plugin = await pluginFixture(root, 'ts');
+    const runtime = packaged ? { kind: 'packaged', root: await packagedRoot(root) } : undefined;
+    const module = await importRuntimeModule(plugin.server, runtime);
+    const app = fakeApp();
+
+    await module.default(app);
+    assert.equal(app.route.url, '/demo');
+    assert.deepEqual(await app.route.handler(), {
+      value: 'из соседнего файла',
+      marker: 'relative-import+tla',
+    });
+  });
+}

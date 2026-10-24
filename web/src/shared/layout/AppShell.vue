@@ -1,6 +1,6 @@
 <template>
-  <div class="shell">
-    <aside class="sidebar">
+  <div class="shell" :class="{ 'without-machine': !hasMachine }">
+    <aside v-if="hasMachine" class="sidebar">
       <nav class="nav">
         <router-link v-for="item in nav" :key="item.to" :to="item.to" class="navitem" data-ui-shell-nav active-class="active"
                      :aria-label="navTitle(item)"
@@ -23,27 +23,42 @@
         </template>
         <template v-if="toolsNav.length">
           <div class="navsep"></div>
-          <UiPopover v-model:open="toolsOpen" class="tools-popover" layer="tools"
-                     placement="right-start" :aria-label="t('core.tools')">
-          <template #trigger>
-          <UiPressable class="navitem tools-trigger" data-ui-shell-nav
-                       :class="{ active: toolsActive }" :aria-label="navTitle({ to: '/tools', label: t('core.tools') })"
-                       v-tooltip.right="navTitle({ to: '/tools', label: t('core.tools') })">
-            <span class="icwrap">
-              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                   stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
-              <NavigationCount :badge="badges['/tools']" />
-            </span>
-          </UiPressable>
-          </template>
-          <template #default="{ close }">
-            <header>
-              <strong>{{ t('core.tools') }}</strong>
-              <router-link to="/tools" @click="close('action')">{{ t('core.allOnPage') }}</router-link>
-            </header>
-            <ToolsGrid :items="toolsNav" :badges="badges" @select="close('action')" />
-          </template>
-          </UiPopover>
+          <UiTopbarPanel
+            v-model:open="toolsOpen"
+            layer="tools"
+            attachment="trigger"
+            placement="right-start"
+            trigger-mode="click"
+            :title="t('core.tools')"
+          >
+            <template #trigger>
+              <UiPressable class="navitem tools-trigger" data-ui-shell-nav
+                           :class="{ active: toolsActive || toolsOpen }"
+                           :aria-label="navTitle({ to: '/tools', label: t('core.tools') })"
+                           v-tooltip.right="navTitle({ to: '/tools', label: t('core.tools') })">
+                <span class="icwrap">
+                  <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                       stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS.tools" /></svg>
+                  <NavigationCount :badge="badges['/tools']" />
+                </span>
+              </UiPressable>
+            </template>
+            <template #default="{ close }">
+              <ToolsGrid :items="toolsNav" :badges="badges" layout="list" @select="close('action')" />
+            </template>
+            <template #footer="{ close }">
+              <router-link v-slot="{ href, navigate }" to="/tools" custom>
+                <UiActionLink :href="href" variant="text" tone="accent"
+                              data-context="topbar-popover-resource-link"
+                              @click="
+                                navigate($event);
+                                close('action');
+                              ">
+                  {{ t('core.allOnPage') }}
+                </UiActionLink>
+              </router-link>
+            </template>
+          </UiTopbarPanel>
         </template>
       </nav>
       <nav class="nav nav-bottom dock-route-nav">
@@ -58,10 +73,40 @@
       </nav>
     </aside>
 
+    <nav v-if="hasMachine" class="phone-nav" :aria-label="t('core.sections')">
+      <router-link v-for="item in phoneNav" :key="item.to" :to="item.to"
+                   class="navitem" data-ui-shell-nav active-class="active" :aria-label="navTitle(item)">
+        <span class="icwrap">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path :d="ICONS[item.icon]" />
+          </svg>
+          <NavigationCount :badge="badges[item.to]" />
+        </span>
+        <span class="phone-nav-label">{{ item.label }}</span>
+      </router-link>
+      <UiPressable class="navitem" data-ui-shell-nav :class="{ active: phoneMoreActive }"
+                   :aria-label="t('core.sections')" aria-haspopup="dialog" :aria-expanded="phoneMenuOpen"
+                   @click="phoneMenuOpen = true">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+        <span class="phone-nav-label">{{ t('core.sections') }}</span>
+      </UiPressable>
+    </nav>
+
+    <UiDialog v-model:open="phoneMenuOpen" :title="t('core.sections')" mobile-sheet>
+      <ToolsGrid :items="phoneMenuItems" :badges="badges" @select="phoneMenuOpen = false" />
+      <template #footer>
+        <UiButton variant="outline" @click="phoneMenuOpen = false">{{ t('core.close') }}</UiButton>
+      </template>
+    </UiDialog>
+
     <header data-ui-topbar class="topbar" :class="{ 'window-titlebar': isDesktopMain }">
       <span class="app-mark" aria-label="GrigDesk"><GrigDeskMark class="logo" /></span>
       <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
       <div id="tb-slot" class="tb-slot"></div>
+      <TopbarStatus v-if="hasMachine" v-model:open="statusOpen" :attention="statusAttention"
+                    @close="runtimeProviders.forEach((p) => usageWatch.close(p.id))">
       <div class="status">
         <!-- CPU/RAM — самые «дёргающиеся» цифры, поэтому левее всех: их ширина меняется,
              не сдвигая остальные элементы (правый край статуса зафиксирован) -->
@@ -140,7 +185,11 @@
                 <UiPressable
                   class="prov"
                   data-context="provider-status"
-                  :class="[p.id, { off: !p.available, upd: p.updateAvailable }]"
+                  :class="[p.id, {
+                    off: !p.available,
+                    upd: p.updateAvailable,
+                    installing: installation.snapshot.active?.providerId === p.id,
+                  }]"
                   :aria-label="provTitle(p)"
                   :style="p.available ? { color: p.color } : null"
                 >
@@ -151,7 +200,10 @@
                       equal-height
                     />
                     <span v-if="p.updateAvailable" class="updot" aria-hidden="true"></span>
+                    <span v-if="installation.snapshot.active?.providerId === p.id"
+                      :aria-label="t('settings.providerInstallationRunning')">⟳</span>
                   </span>
+                  <span class="status-label">{{ p.name }}</span>
                 </UiPressable>
               </template>
               <template #title>
@@ -172,21 +224,28 @@
                        за ней приходилось в настройки. Ход один на весь GrigDesk, поэтому
                        пока ставится один CLI, кнопки соседей заблокированы. -->
                   <UiIconButton
-                    v-if="canUpdateCli(p)"
+                    v-if="!p.installed && p.installation?.canInstall
+                      || canUpdateCli(p) || installation.snapshot.active?.providerId === p.id"
                     data-context="topbar-popover-update"
                     role="embedded"
-                    :label="t('core.updateTo', { pLatest: p.latest })"
-                    v-tooltip="t('core.updateCLIToTheModelCatalogWill', { pLatest: p.latest })"
-                    :disabled="!!prov.updating"
-                    :loading="prov.updating === p.id"
-                    :loading-label="t('core.updating')"
-                    @click="prov.updateCli(p.id)"
+                    :label="providerInstallationLabel(p)"
+                    v-tooltip="providerInstallationLabel(p)"
+                    :disabled="installation.busy && installation.snapshot.active?.providerId !== p.id"
+                    @click="startProviderInstallation(p, close)"
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M12 3v12 M7 10l5 5 5-5 M4 20h16" />
                     </svg>
                   </UiIconButton>
+                  <UiIconButton
+                    v-if="installResultNeedsAttention(p)"
+                    role="embedded"
+                    tone="warning"
+                    :label="t('settings.providerInstallationResult')"
+                    v-tooltip="t('settings.providerInstallationResult')"
+                    @click="showProviderInstallation(p.id, close)"
+                  ><span aria-hidden="true">!</span></UiIconButton>
                   <!-- Проверка «прямо сейчас»: фон ходит к вендору раз в пять минут, а
                        человеку иногда нужна цифра этой минуты. Пока идёт пауза после
                        отказа вендора, кнопка гаснет и называет время: клик всё равно
@@ -309,7 +368,7 @@
           <template #trigger>
             <UiPressable class="netbox mono" data-context="topbar-network" :aria-label="t('core.networkInformation')">
               <span class="flag">{{ flagOf(sys.net!.countryCode) }}</span>
-              <span class="ip">{{ sys.net!.ip }}</span>
+              <span class="status-label">{{ t('core.network') }}</span>
             </UiPressable>
           </template>
           <template #default>
@@ -318,12 +377,14 @@
           </template>
         </UiTopbarPanel>
       </div>
+      </TopbarStatus>
       <!-- Колокольчик — над стопкой тостов: ушедшее само оповещение можно найти здесь. -->
       <div class="topbar-actions">
         <ConnectionButton :icon="ICONS.connection" />
         <PhoneConnectButton />
         <AlertHistoryPopover />
-        <UiIconButton :label="t('settings.settings')" v-tooltip="t('settings.settings')"
+        <UiIconButton v-if="active" variant="link" role="rail" data-context="topbar-action"
+          :label="t('settings.settings')" v-tooltip="t('settings.settings')"
           aria-haspopup="dialog" :pressed="settings.isOpen"
           @click="openSettings()">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
@@ -335,10 +396,13 @@
       </div>
     </header>
 
-    <main class="content" :class="{ 'is-workspace': route.meta.layout === 'workspace' }" :inert="toolDock.isExpanded"
-          :aria-hidden="toolDock.isExpanded ? 'true' : undefined"><slot /></main>
+    <main class="content" :class="{ 'is-workspace': !hasMachine || route.meta.layout === 'workspace' }"
+          :inert="toolDock.isExpanded" :aria-hidden="toolDock.isExpanded ? 'true' : undefined">
+      <slot />
+    </main>
     <ToolHost v-if="workspaceStarted" />
     <PhoneConnectDialog />
+    <ProviderInstallDialog />
 
   </div>
 </template>
@@ -355,9 +419,12 @@ import type { BoardTask } from '../boardContracts.ts';
 
 import { installAlertDeepLinks, openAlertTarget } from '../alertDeepLinks.ts';
 import ConnectionButton from './ConnectionButton.vue';
+import TopbarStatus from './TopbarStatus.vue';
 import ComputerResourcesPanel from './ComputerResourcesPanel.vue';
 import { loadClass, resourcesAlarm } from './resourceMetrics.ts';
 import PhoneConnectButton from './PhoneConnectButton.vue';
+import ProviderInstallDialog from '../ProviderInstallDialog.vue';
+import { useProviderInstallStore } from '../../stores/providerInstall.ts';
 import { usePhoneAccessStore } from '../../stores/phoneAccess.ts';
 import PhoneConnectDialog from '../../views/settings/PhoneConnectDialog.vue';
 import { setAlertTargetOpener } from '../alerts.ts';
@@ -367,8 +434,8 @@ import { useRoute, useRouter } from 'vue-router';
 import {
   UiActionLink,
   UiButton,
+  UiDialog,
   UiIconButton,
-  UiPopover,
   UiTopbarPanel,
   UiPressable,
   vTooltip,
@@ -382,6 +449,7 @@ import { usePluginsStore } from '../../stores/plugins.ts';
 import { useStudio3dStore } from '../../stores/studio3d.ts';
 import { useAuthStore } from '../../stores/auth.ts';
 import { useNotifyWatchStore } from '../../stores/notifyWatch.ts';
+import { useAnalysisStore } from '../../stores/analysis.ts';
 import { useGrigDeskUpdateStore } from '../../stores/grigdeskUpdate.ts';
 import { useChatStore } from '../../stores/chat.ts';
 import { useBoardStore } from '../../stores/board.ts';
@@ -421,6 +489,7 @@ import { toolById } from '../tools/registry.ts';
 import { useToolLauncher } from '../tools/launcher.ts';
 import { openSettings } from '../settingsNavigation.ts';
 import { useSettingsStore } from '../../stores/settings.ts';
+import { useShellStore } from '../../stores/shell.ts';
 import { currentDesktopMode } from '../desktopSettings.ts';
 
 const props = defineProps({
@@ -437,6 +506,8 @@ const workspaceStarted = ref(props.active);
 const isDesktopMain = currentDesktopMode() === 'main';
 
 const settings = useSettingsStore();
+const shell = useShellStore();
+const hasMachine = computed(() => !shell.present || Boolean(shell.profile));
 const route = useRoute();
 const router = useRouter();
 const ui = useUiStore();
@@ -452,6 +523,7 @@ const grigDeskUpdate = useGrigDeskUpdateStore();
 
 // Реестр LLM-исполнителей — иконки доступных агентов в топбаре.
 const prov = useProvidersStore();
+const installation = useProviderInstallStore();
 // Setup-only карточки (сейчас Kimi) живут в настройках, но не изображают работающего
 // чат-исполнителя в шапке до появления transport-а и каталога моделей.
 const runtimeProviders = computed(() => prov.providers.filter(isTopbarProvider));
@@ -537,6 +609,55 @@ onUnmounted(() => usageWatch.stop());
 // Кнопка установки во всплывашке: только у отставшего CLI, который GrigDesk умеет ставить
 // сам. Пока идёт установка, кнопка остаётся на месте — иначе она исчезла бы вместе с
 // ходом, который сама и начала, и человек не понял бы, ставится ли ещё.
+/**
+ * Первая установка ещё не имеет latest, поэтому её подпись не подставляет пустую версию.
+ * Активный статус остаётся доступным действием повторного открытия общего окна.
+ */
+function providerInstallationLabel(p: TopbarProvider): string {
+  if (installation.snapshot.active?.providerId === p.id) {
+    return t('settings.providerInstallationRunning');
+  }
+  if (!p.installed) {
+    return t('settings.providerInstallationInstall');
+  }
+
+  return p.latest ? t('core.updateTo', { pLatest: p.latest }) : t('settings.providerInstallationUpdate');
+}
+
+/**
+ * Всплывашка закрывается до подтверждения и открытия установки.
+ * Её верхний слой не должен закрывать команду и шаги нового окна на телефоне.
+ */
+function startProviderInstallation(p: TopbarProvider, close: () => void): void {
+  close();
+  void installation.requestInstall(p.id, p.installed ? 'update' : 'install');
+}
+
+/**
+ * Просмотр уже сохранённого результата открывает то же окно без нового запуска.
+ * Исходная всплывашка освобождает экран, как и при первом открытии.
+ */
+function showProviderInstallation(id: string, close: () => void): void {
+  close();
+  installation.show(id);
+}
+
+/**
+ * Сервер хранит последний итог бессрочно, поэтому кнопка итога во всплывашке видна только
+ * пока итог требует действия: отказ, прерывание, предупреждение или вход после первой установки.
+ * Удачное обновление объявлять нечем — оно закончено, а полный итог остаётся в настройках.
+ */
+function installResultNeedsAttention(p: TopbarProvider): boolean {
+  const result = installation.snapshot.recent[p.id];
+
+  if (!result || installation.snapshot.active?.providerId === p.id) {
+    return false;
+  }
+
+  return result.status !== 'succeeded' || result.warnings.length > 0
+    || (result.operation === 'install' && !p.available);
+}
+
 function canUpdateCli(p: TopbarProvider) {
   return Boolean(p.installed && p.canUpdate && (p.updateAvailable || prov.updating === p.id));
 }
@@ -836,11 +957,35 @@ const dockRouteNav = computed(() => [
     .localeCompare(('sourceLabel' in b ? b.sourceLabel : '') || b.label, 'ru')));
 
 const toolsOpen = ref(false);
+const phoneMenuOpen = ref(false);
+const statusOpen = ref(false);
+const analysis = useAnalysisStore();
+const statusAttention = computed(() => sysResourcesAlarm.value
+  || notifyWatch.badgeSummary.attentionCount > 0 || analysis.issues.length > 0);
+const phoneNav = computed(() => [nav[0]!, nav[3]!, nav[1]!]);
+const phoneMoreActive = computed(() => !phoneNav.value.some((item) => item.to === route.path));
+const phoneMenuItems = computed(() => {
+  const items = [
+    ...nav,
+    ...pluginNav.value,
+    ...toolsNav.value,
+    ...dockRouteNav.value,
+    {
+      to: '/tools',
+      label: t('core.tools'),
+      icon: 'tools',
+    },
+  ];
+
+  return items.filter((item, index) => items.findIndex((candidate) => candidate.to === item.to) === index);
+});
 const toolsActive = computed(() => route.path === '/tools'
   || toolsNav.value.some((item) => item.to === route.path));
 
 watch(() => route.fullPath, () => {
   toolsOpen.value = false;
+  phoneMenuOpen.value = false;
+  statusOpen.value = false;
 });
 
 const phoneAccess = usePhoneAccessStore();
@@ -881,12 +1026,16 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
   grid-template-rows: max(var(--app-topbar-h), env(titlebar-area-height, 0px)) minmax(0, 1fr);
 }
 
+.shell.without-machine {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+}
+
 /* ── Сайдбар ── */
 .sidebar {
   grid-row: 2; grid-column: 1;
-  background: var(--sidebar); border-right: 1px solid var(--line);
-  display: flex; flex-direction: column; padding: 4px 2px; scrollbar-width: none;
-  min-height: 0; overflow-y: auto;
+  background: var(--sidebar); box-shadow: inset -1px 0 0 var(--line);
+  display: flex; flex-direction: column; padding: 4px 0; scrollbar-width: none;
+  min-height: 0; overflow-y: auto; overflow-x: hidden;
 }
 .nav { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: none; padding-block: 0; }
 .navsep { width: 14px; height: 1px; margin: 6px 8px; background: var(--line); }
@@ -899,6 +1048,7 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .icwrap { display: grid; justify-items: center; align-content: center; gap: 1px; }
 .nav-bottom { margin-top: auto; }
 .dock-route-nav { display: none; }
+.phone-nav { display: none; }
 /* ── Топбар ── */
 .topbar {
   grid-row: 1; grid-column: 1 / -1;
@@ -942,6 +1092,7 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
   white-space: nowrap;
 }
 .topbar-actions { display: flex; align-items: center; flex: none; gap: 0; }
+.status-label { display: none; }
 .stale-note { color: var(--warn); border-top: 0; padding-top: 4px; }
 /* Разделитель не зависит от шрифта: центр и отступы задаёт та же flex-строка.
    Внутри метрик и между группами используется одна геометрия без отрицательных полей. */
@@ -1036,7 +1187,65 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 @media (max-width: 899px) {
   .shell { grid-template-columns: var(--app-rail-w) minmax(0, 1fr); }
   .dock-route-nav { display: flex; }
-  .metric, .metric-sep, .netbox .ip { display: none; }
-  .status { min-width: 0; overflow: hidden; }
+}
+
+/* На узком экране сводка открывается целиком: имя исполнителя и каждая панель
+   доступны без горизонтальной прокрутки и обрезанных сенсорных кнопок. */
+@media (max-width: 1100px) {
+  .tb-slot { flex: 1; }
+  .topbar :deep([data-shell-status-trigger]) { margin-left: auto; }
+  .without-machine .topbar-actions { margin-left: auto; }
+  .shell-status-panel .status {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    margin: 0;
+    height: auto;
+    white-space: normal;
+  }
+  .shell-status-panel .status > .sep { display: none; }
+  .shell-status-panel .provbox {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+  .shell-status-panel .prov-tip { display: flex; min-width: 0; }
+  .shell-status-panel .status-label {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+}
+
+/* Телефон отдаёт всю ширину содержимому. Нижняя навигация занимает свою строку
+   сетки, поэтому не перекрывает поле чата и действия постоянного ToolHost. */
+@media (max-width: 600px) {
+  .shell, .shell.without-machine {
+    grid-template-columns: 0 minmax(0, 1fr) 0;
+    grid-template-rows: var(--app-topbar-h) minmax(0, 1fr) 60px;
+  }
+  .shell.without-machine { grid-template-rows: var(--app-topbar-h) minmax(0, 1fr); }
+  .sidebar { display: none; }
+  .phone-nav {
+    grid-row: 3;
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-top: 1px solid var(--line);
+    background: var(--sidebar);
+  }
+  .phone-nav .navitem { flex-direction: column; gap: 3px; min-width: 0; }
+  .phone-nav .icwrap { position: relative; }
+  .phone-nav :deep(.navigation-count) { position: absolute; left: 16px; top: -4px; }
+  .phone-nav-label { font-size: 11px; line-height: 1.25; }
+  .topbar { gap: 4px; }
+  .tb-slot { flex: 1; }
+  .content { scrollbar-gutter: auto; }
 }
 </style>

@@ -152,7 +152,7 @@ export function pendingDialogCount(): number {
 function snapshotOptions<T extends object>(options: T): Readonly<T> {
   const copy = { ...options };
 
-  for (const key of ['title', 'text', 'placeholder', 'okText', 'cancelText']) {
+  for (const key of ['title', 'subtitle', 'text', 'placeholder', 'okText', 'cancelText']) {
     const value = (copy as Record<string, unknown>)[key];
 
     if (value !== undefined) {

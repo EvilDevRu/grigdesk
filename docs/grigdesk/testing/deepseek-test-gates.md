@@ -10,7 +10,9 @@
 чтобы холодные сборки не пересекались с unit-файлами, требующими много памяти. Путь основного
 проверенного ELF, выбранный cache и reusable payload передаются всем наборам. Package unit,
 SEA и host compiled parity имеют отдельные ступени. Только fixtures перехода дополнительно
-получают legacy Node22 generation. Отказ любой ступени сохраняет ошибочный итог прогона.
+получают legacy Node22 generation. Её отсутствующие зависимости
+[автоматически готовятся в отдельном кэше](deepseek-legacy-preflight.md).
+Отказ любой ступени сохраняет ошибочный итог прогона.
 
 Source-sync gate `server/scripts/verifyDeepSeekCandidate.mts --vendor-dir <каталог>` строит
 ELF именно из переданного vendor, затем проверяет пакет и host parity на нём. Builder

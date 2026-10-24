@@ -7,10 +7,11 @@ import { classifyWriteError } from '../features/settings/contracts.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import type { PluginListItem, PluginPlacementState } from '../../../shared/plugins/pluginsContracts.ts';
 import { defineStore } from 'pinia';
-import { api, failureText } from '../shared/apiClient.ts';
+import { ApiError, api, failureText } from '../shared/apiClient.ts';
 import { pluginPageRoute } from '../shared/tools/catalog.ts';
 import { normalizePluginCategory } from '../../../shared/plugins/pluginsContracts.ts';
 import { decodeOptionalInstall } from '../shared/pluginInstallApi.ts';
+import { isPluginModuleDescriptor } from '../pluginRuntime/descriptor.ts';
 
 type PluginCard = Partial<PluginListItem> & Pick<PluginListItem, 'id' | 'name' | 'enabled'>;
 type NavItem = {
@@ -32,7 +33,7 @@ function isPlugin(value: unknown): value is PluginCard {
     return false;
   }
 
-  return ['version', 'description', 'category', 'web'].every((key) => (
+  return ['version', 'description', 'category', 'web', 'serverError'].every((key) => (
     value[key] == null || typeof value[key] === 'string'
   )) && ['system', 'needsRestart'].every((key) => value[key] == null || typeof value[key] === 'boolean')
     && (value.nav == null || (isRecord(value.nav)
@@ -41,7 +42,8 @@ function isPlugin(value: unknown): value is PluginCard {
       )) && (value.nav.order == null || typeof value.nav.order === 'number')))
     && (value.settings == null || (Array.isArray(value.settings) && value.settings.every(isRecord)))
     && (value.values == null || isRecord(value.values))
-    && (value.placements == null || isPlacements(value.placements));
+    && (value.placements == null || isPlacements(value.placements))
+    && (value.webModule == null || isPluginModuleDescriptor(value.id, value.webModule));
 }
 
 /**
@@ -52,6 +54,22 @@ function isPlacements(value: unknown): value is PluginPlacementState[] {
   return Array.isArray(value) && value.every((item) => isRecord(item)
     && typeof item.slot === 'string' && typeof item.enabled === 'boolean'
     && (item.label == null || typeof item.label === 'string'));
+}
+
+/**
+ * Отказ проверки плагина не означает внешнего изменения настроек.
+ * Только код revision_conflict сохраняет смысл конфликта версий; HTTP-код и причина не меняются.
+ */
+function pluginWriteFailure(error: unknown): ReturnType<typeof classifyWriteError> {
+  const failure = { ...classifyWriteError(error, uiLocale), message: failureText(error) };
+
+  if (error instanceof ApiError && error.status === 409 && isRecord(error.data)
+    && typeof error.data.error === 'string'
+    && error.data.error !== 'revision_conflict') {
+    return { ...failure, outcome: 'failed' };
+  }
+
+  return failure;
 }
 
 export const NAV_GROUPS = ['rail', 'tools', 'dock'];
@@ -115,7 +133,7 @@ export function normalizeNavItem(plugin: PluginCard): NavItem | null {
 
   return {
     id: plugin.id,
-    to: !plugin.system && plugin.web ? pluginPageRoute(plugin.id) : plugin.nav.path,
+    to: !plugin.system && (plugin.web || plugin.webModule) ? pluginPageRoute(plugin.id) : plugin.nav.path,
     label: plugin.nav.label,
     icon: plugin.nav.icon || 'plugin',
     group,
@@ -173,6 +191,15 @@ export const usePluginsStore = defineStore('plugins', {
         order: typeof p.nav!.order === 'number' ? p.nav!.order : Number.MAX_SAFE_INTEGER,
         group: NAV_GROUPS.includes(p.nav!.group) ? p.nav!.group : 'rail',
       })),
+    modulePages: (s) => s.list
+      .filter((p) => p.enabled && !p.system && p.webModule && p.nav)
+      .map((p) => ({
+        id: p.id,
+        descriptor: p.webModule!,
+        label: p.nav!.label || p.name,
+        icon: p.nav!.icon || 'plugin',
+        order: typeof p.nav!.order === 'number' ? p.nav!.order : Number.MAX_SAFE_INTEGER,
+      })),
     byId: (s) => (id: string) => s.list.find((p) => p.id === id) || null,
     enabled: (s) => (id: string) => !!s.list.find((p) => p.id === id)?.enabled,
     // Включено ли размещение плагина в слоте. Незаявленное в манифесте место — выключено:
@@ -200,6 +227,15 @@ export const usePluginsStore = defineStore('plugins', {
           ...(Object.hasOwn(plugin, 'install') ? { install: decodeOptionalInstall(plugin.install) } : {}),
         }));
 
+        const restartPending = { ...this.restartPending };
+
+        for (const plugin of checked) {
+          if (typeof plugin.needsRestart === 'boolean') {
+            restartPending[plugin.id] = plugin.needsRestart;
+          }
+        }
+
+        this.restartPending = restartPending;
         this.list = checked;
         this.loaded = true;
         this.loadError = null;
@@ -224,8 +260,6 @@ export const usePluginsStore = defineStore('plugins', {
 
       const before = p.enabled;
 
-      p.enabled = enabled;
-
       try {
         const reply = await api.post(`/api/plugins/${encodeURIComponent(id)}/toggle`, { enabled });
 
@@ -241,9 +275,13 @@ export const usePluginsStore = defineStore('plugins', {
 
         p.enabled = reply.enabled;
 
-        if (p.needsRestart) {
+        if (typeof reply.needsRestart === 'boolean') {
+          p.needsRestart = reply.needsRestart;
+          this.restartPending = { ...this.restartPending, [id]: reply.needsRestart };
+        } else if (p.needsRestart) {
           this.restartPending = { ...this.restartPending, [id]: true };
         }
+
         if (id === 'analysis') {
           const { useAnalysisStore } = await import('./analysis.ts');
           const analysis = useAnalysisStore() as ReturnType<typeof useAnalysisStore> & {
@@ -262,7 +300,7 @@ export const usePluginsStore = defineStore('plugins', {
       } catch (error) {
         p.enabled = before;
 
-        return { ...classifyWriteError(error, uiLocale), message: failureText(error) };
+        return pluginWriteFailure(error);
       }
     },
     /**
@@ -308,7 +346,7 @@ export const usePluginsStore = defineStore('plugins', {
           placements: reply.placements,
         };
       } catch (error) {
-        return { ...classifyWriteError(error, uiLocale), message: failureText(error) };
+        return pluginWriteFailure(error);
       }
     },
     // Готовность плагина: ручку объявляет манифест, форму ответа — общий контракт.

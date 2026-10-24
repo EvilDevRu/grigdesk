@@ -17,6 +17,7 @@
 //   pluginSettings: { <id>: {key: value} }
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { selectPluginServerEntry } from './pluginServerEntry.ts';
 import { normalizePluginCategory } from '../../../shared/plugins/pluginsContracts.ts';
 import type {
   PluginNav,
@@ -26,6 +27,8 @@ import type {
   PluginSetup,
 } from '../../../shared/plugins/pluginsContracts.ts';
 import { PLUGIN_SLOT_LABELS, isPluginSlotName } from '../../../shared/plugins/slots/index.ts';
+import { resolvePluginWebModule } from './pluginWebModule.ts';
+import type { ResolvedPluginWebModule } from './pluginWebModule.ts';
 
 export type { PluginNav, PluginPlacementDecl, PluginPlacementState, PluginSetting, PluginSetup };
 
@@ -49,9 +52,12 @@ export interface PluginManifest {
   setup?: PluginSetup | null;
   dir?: string;
   hasServer?: boolean;
+  serverEntry?: 'server.js' | 'server.ts' | null;
+  serverError?: string | null;
   // Своя страница пользовательского плагина: каталог с index.html и адрес, под которым
   // GrigDesk его раздаёт. Ядро не исполняет этот код — оно лишь показывает страницу.
   web?: PluginWebPage | null;
+  webModule?: ResolvedPluginWebModule | null;
 }
 
 export interface PluginWebPage {
@@ -696,11 +702,25 @@ export async function scanUserPlugins(
         log?.warn?.({ plugin: e.name }, message);
       });
       const { webDir, ...fields } = decoded;
+      const webModule = fields.api === 2 ? resolvePluginWebModule(
+        dir, m.id, m.webModule, normalizePluginPackagePath,
+        (message) => log?.warn?.({ plugin: e.name }, message),
+      ) : null;
+
+      const [jsPresent, tsPresent] = await Promise.all(['server.js', 'server.ts'].map((entry) =>
+        fs.access(path.join(dir, entry)).then(() => true).catch(() => false)));
 
       out.push({
         ...fields,
+        nav: fields.nav ?? (webModule && m.nav == null ? {
+          path: `/ext/${m.id}`,
+          label: fields.name,
+          icon: 'plugin',
+          group: 'dock',
+        } : null),
         dir,
-        hasServer: await fs.access(path.join(dir, 'server.js')).then(() => true).catch(() => false),
+        webModule,
+        ...selectPluginServerEntry(jsPresent ?? false, tsPresent ?? false),
         web: await resolvePluginWeb(dir, m.id, webDir ?? m.web, (message: string) => {
           log?.warn?.({ plugin: e.name }, message);
         }),

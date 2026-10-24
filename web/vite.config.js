@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import pluginRuntimePlugin from './scripts/pluginRuntimePlugin.mjs';
 
 const envDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -44,7 +45,7 @@ export default defineConfig(({ command }) => {
   const metadata = buildMetadata();
 
   return {
-    plugins: [vue()],
+    plugins: [vue(), pluginRuntimePlugin()],
     base: './',
     define: {
       __GRIGDESK_VERSION__: JSON.stringify(metadata.version),

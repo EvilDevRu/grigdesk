@@ -15,6 +15,7 @@ const EVENT_NAMES = [
   'hello',
   'state-change',
   'providers-update',
+  'provider-install',
   'providers-usage',
   'grigdesk-update',
   'chat-permission',

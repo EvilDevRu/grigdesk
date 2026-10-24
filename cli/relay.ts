@@ -3,7 +3,9 @@ import path from 'node:path';
 import type { CliArgs } from './args.ts';
 import type { Settings } from './commands.ts';
 import { printable } from './status.ts';
-import { fetchJson, readText, run, runAttached } from './system.ts';
+import { fetchJson, readText, run } from './system.ts';
+import { plainOutput } from './output.ts';
+import type { CliOutput } from './output.ts';
 import type { RunResult } from './system.ts';
 
 export interface RelayContainer {
@@ -216,30 +218,32 @@ export async function readLinks(settings: Settings): Promise<RelayStatus['links'
  * Управляет существующим выбранным контейнером только прямыми командами Docker.
  * Отсутствие, неоднозначность и отказ daemon прекращают команду до управляющего действия.
  */
-export async function relayCommand(args: CliArgs, root: string, settings: Settings): Promise<number> {
+export async function relayCommand(
+  args: CliArgs, root: string, settings: Settings, output: CliOutput = plainOutput,
+): Promise<number> {
   const relay = await readRelay(root, settings);
   const name = relay.container;
 
   if (!name || relay.state === 'docker_unavailable') {
-    console.error(printable(relay.reason ?? 'Локальный посредник не найден'));
+    output.error(printable(relay.reason ?? 'Локальный посредник не найден') + '\n');
 
     return 1;
   }
 
   if (args.action === 'logs') {
-    return runAttached('docker', [
+    return output.attached('docker', [
       'logs', '--tail', String(args.lines), ...(args.follow ? ['--follow'] : []), name,
     ]);
   }
 
   if (args.action === 'start' && relay.state !== 'stopped') {
-    console.log('Посредник уже работает');
+    output.write('Посредник уже работает\n');
 
     return 0;
   }
 
   if (args.action === 'stop' && relay.state === 'stopped') {
-    console.log('Посредник уже остановлен');
+    output.write('Посредник уже остановлен\n');
 
     return 0;
   }
@@ -247,14 +251,14 @@ export async function relayCommand(args: CliArgs, root: string, settings: Settin
   const result = await run('docker', [args.action!, name], 60000);
 
   if (result.code !== 0) {
-    console.error(printable(result.stderr.trim() || 'Docker отказал в выполнении команды'));
+    output.error(printable(result.stderr.trim() || 'Docker отказал в выполнении команды') + '\n');
 
     return 1;
   }
 
   const word = args.action === 'start' ? 'запущен' : args.action === 'stop' ? 'остановлен' : 'перезапущен';
 
-  console.log(`Посредник ${word}`);
+  output.write(`Посредник ${word}\n`);
 
   return 0;
 }

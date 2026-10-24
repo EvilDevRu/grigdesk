@@ -37,3 +37,26 @@ test('общий viewer переключается между документо
   assert.equal(preview.image, null);
   assert.equal(preview.video, null);
 });
+
+// Стрелки просмотра листают только набор той же ленты и не перескакивают через края.
+test('картинки ленты листаются по порядку и без перескока', () => {
+  setActivePinia(createPinia());
+
+  const preview = useDocumentPreviewStore();
+  const gallery = ['a', 'b', 'c'].map((name) => ({ src: `/api/chat/files/${name}.png`, name }));
+
+  preview.showImage({ src: '/api/chat/files/b.png', name: 'b' }, gallery);
+  assert.equal(preview.galleryIndex, 1);
+  preview.stepImage(1);
+  assert.equal(preview.image.name, 'c');
+  preview.stepImage(1);
+  assert.equal(preview.image.name, 'c', 'на последней картинке шаг вперёд ничего не делает');
+  preview.stepImage(-2);
+  assert.equal(preview.image.name, 'a');
+
+  preview.showImage({ src: '/api/chat/files/other.png' }, gallery);
+  assert.deepEqual(preview.gallery, [], 'чужой набор без открытой картинки не принимается');
+  preview.showImage({ src: '/api/chat/files/a.png' }, gallery);
+  preview.showVideo({ src: '/api/video/clip.mp4' });
+  assert.deepEqual(preview.gallery, [], 'видео не наследует стрелки картинок');
+});

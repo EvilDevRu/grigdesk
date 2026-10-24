@@ -1,107 +1,118 @@
 <template>
   <main class="connections" aria-labelledby="connections-title">
-    <UiButton class="connections-back" variant="text"
-              @click="shell.showConnections = false">
-      <template #leading>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-             aria-hidden="true"><path d="M19 12H5 m5-5-5 5 5 5" /></svg>
-      </template>
-      {{ t('core.returnToWork') }}
-    </UiButton>
-    <header class="connections-heading">
-      <div>
-        <h1 id="connections-title">{{ t('core.machines') }}</h1>
-        <p>{{ t('core.chooseTheComputerToWorkWith') }}</p>
-      </div>
-      <UiButton variant="solid" tone="accent" :disabled="busy" @click="adding = true">
-        <template #leading>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-               aria-hidden="true"><path d="M12 5v14 M5 12h14" /></svg>
-        </template>
-        {{ t('core.addMachine') }}
+    <header class="connections-navigation">
+      <UiButton variant="text" @click="back">
+        <template #leading><MachineGlyph name="back" /></template>
+        {{ recovery ? t('core.machines') : t('core.returnToWork') }}
       </UiButton>
     </header>
-    <UiInlineMessage v-if="error" tone="danger">{{ resolveUiText(error) }}</UiInlineMessage>
-    <div class="connections-state" role="status">
-      <ConnectionStatus :status="shell.status" :disconnected="disconnected"
-                        :text="disconnected ? t('core.disconnected') : undefined" />
-      <span v-if="shell.profile">{{ machineProfileName(shell.profile, uiLocale) }}</span>
-      <span v-if="detailText">{{ detailText }}</span>
-    </div>
-    <section v-if="shell.status === 'incompatible'" class="connection-versions">
-      <p>{{ versionHint }}</p>
-      <p>{{ t('core.application2') }} {{ shell.appApi.major }}.{{ shell.appApi.minor }}</p>
-      <p v-if="shell.serverApi">{{ t('core.server2') }} {{ shell.serverApi.major }}.{{ shell.serverApi.minor }}</p>
-      <UiActionLink v-if="RELEASES_URL" :href="RELEASES_URL" target="_blank">{{ t('core.downloadFromGitHub') }}</UiActionLink>
-    </section>
-    <div v-if="!shell.profiles.length" class="connections-empty">
-      <strong>{{ t('core.yourComputersWillAppearHere') }}</strong>
-      <p>{{ t('core.addAMachineUsingAPairingString') }}</p>
-    </div>
-    <div class="machines-list">
-      <article v-for="profile in shell.profiles" :key="profile.id" class="machine-row"
-               :data-current="profile.id === shell.profile?.id">
-        <div class="machine-summary">
-          <span class="machine-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path v-if="profile.kind === 'local'" d="M3 4h18v12H3z M8 20h8 M12 16v4" />
-              <path v-else d="M5 3h14v18H5z M5 12h14 M8 7h2 M8 16h2" />
-            </svg>
-          </span>
-          <div class="machine-copy">
-            <div class="machine-title">
-              <strong>{{ machineProfileName(profile, uiLocale) }}</strong>
-              <span v-if="profile.id === shell.profile?.id" class="machine-current">{{ t('core.current') }}</span>
-            </div>
-            <span class="machine-address">
-              {{ profile.kind === 'local' ? t('core.localMachine') : profile.address || t('core.relayAddress') }}
-            </span>
-            <ConnectionStatus :status="profile.id === shell.profile?.id ? shell.status : profile.status"
-                              :disconnected="profile.id === shell.profile?.id && disconnected"
-                              :text="profile.id === shell.profile?.id && disconnected ? t('core.disconnected') : undefined" />
+    <div class="connections-scroll">
+      <header class="connections-heading">
+        <h1 id="connections-title">{{ recovery ? t('core.machineConnectionTitle') : t('core.machines') }}</h1>
+        <p>{{ recovery ? t('core.machineConnectionIntro') : t('core.machineChooseIntro') }}</p>
+      </header>
+      <UiInlineMessage v-if="error" tone="danger">{{ resolveUiText(error) }}</UiInlineMessage>
+      <MachineConnection v-if="shell.profile" :recovery="recovery" :busy="busy"
+                         @menu="menuProfile = shell.profile"
+                         @open="shell.showConnections = false" @connect="connect"
+                         @add="adding = true" @unlock="run(() => shell.unlock())"
+                         @list="listRequested = true" @address="changeAddress(shell.profile)" />
+      <section v-if="shell.status === 'incompatible'" class="connection-versions">
+        <p>{{ versionHint }}</p>
+        <p>{{ t('core.application2') }} {{ shell.appApi.major }}.{{ shell.appApi.minor }}</p>
+        <p v-if="shell.serverApi">{{ t('core.server2') }} {{ shell.serverApi.major }}.{{ shell.serverApi.minor }}</p>
+        <UiActionLink v-if="RELEASES_URL" :href="RELEASES_URL" target="_blank">
+          {{ t('core.downloadFromGitHub') }}
+        </UiActionLink>
+      </section>
+      <p v-if="!shell.profile && detailText" class="connections-detail" role="status">{{ detailText }}</p>
+      <template v-if="!recovery">
+        <section v-if="!shell.profiles.length" class="connections-empty">
+          <span class="connections-empty-icon"><MachineGlyph name="machine" /></span>
+          <h2>{{ t('core.yourComputersWillAppearHere') }}</h2>
+          <p>{{ t('core.addAMachineUsingAPairingString') }}</p>
+        </section>
+        <section v-if="otherProfiles.length" aria-labelledby="other-machines-title">
+          <div class="machines-heading">
+            <h2 id="other-machines-title">{{ t('core.machineOtherMachines') }}</h2>
+            <span>{{ otherProfiles.length }}</span>
           </div>
+          <div class="machines-list">
+            <article v-for="profile in otherProfiles" :key="profile.id" class="machine-row">
+              <UiPressable data-context="machine-choice" :disabled="busy"
+                           :aria-label="t('core.machineSelectMachine', {
+                             name: machineProfileName(profile, uiLocale),
+                           })" @click="select(profile.id)">
+                <span class="machine-list-icon"><MachineGlyph name="machine" /></span>
+                <span class="machine-list-copy">
+                  <strong>{{ machineProfileName(profile, uiLocale) }}</strong>
+                  <span>{{ t('core.machineNotSelected') }}</span>
+                </span>
+              </UiPressable>
+              <UiIconButton :label="t('core.machineMachineSettings', {
+                              name: machineProfileName(profile, uiLocale),
+                            })" :disabled="busy" @click="menuProfile = profile">
+                <MachineGlyph name="more" />
+              </UiIconButton>
+            </article>
+          </div>
+          <p class="machines-hint">{{ t('core.machineSwitchHint') }}</p>
+        </section>
+        <div v-if="canAddLocal" class="connections-local">
+          <p>{{ t('core.grigdeskIsRunningOnThisDevice') }}</p>
+          <UiButton :disabled="busy" @click="run(() => shell.addLocal())">
+            {{ t('core.localComputer') }}
+          </UiButton>
         </div>
-        <div class="machine-actions">
-          <UiButton v-if="profile.id !== shell.profile?.id" :disabled="busy"
-                    @click="run(() => shell.selectProfile(profile.id))">{{ t('core.select') }}</UiButton>
-          <UiButton v-else-if="disconnected || shell.status !== 'online'" tone="accent"
-                    :disabled="busy" @click="connect(profile.id)">{{ t('core.connect') }}</UiButton>
-          <UiButton v-else :disabled="busy" @click="run(() => shell.disconnect())">{{ t('core.disconnect') }}</UiButton>
-          <UiButton v-if="profile.kind === 'remote'" :disabled="busy" variant="text"
-                    @click="changeAddress(profile)">{{ t('core.changeAddress') }}</UiButton>
-          <UiButton tone="danger" variant="text" :disabled="busy" @click="remove(profile)">{{ t('settings.delete') }}</UiButton>
-        </div>
-      </article>
+      </template>
     </div>
-    <div v-if="shell.localAvailable && !shell.profiles.some(profile => profile.kind === 'local')"
-         class="connections-local">
-      <span>{{ t('core.grigdeskIsRunningOnThisDevice') }}</span>
-      <UiButton :disabled="busy" @click="run(() => shell.addLocal())">{{ t('core.localComputer') }}</UiButton>
-    </div>
+    <footer class="connections-footer">
+      <p v-if="recovery && autoRetry" class="connections-footer-hint">
+        {{ t('core.machineAutoReconnect') }}
+      </p>
+      <UiButton v-else-if="!recovery" block wrap :disabled="busy" @click="adding = true">
+        <template #leading><MachineGlyph name="plus" /></template>
+        {{ t('core.addMachine') }}
+      </UiButton>
+    </footer>
+    <MachineActionsDialog :open="menuProfile !== null" :profile="menuProfile" :busy="busy"
+                          :current="menuProfile?.id === shell.profile?.id"
+                          :disconnected="disconnected" @update:open="closeMenu" @action="menuAction" />
     <AddMachineDialog v-model:open="adding" />
   </main>
 </template>
 
 <script setup lang="ts">
-import { t, uiLocale, messageRef, resolveUiText, type UiText } from '../ui.ts';
-
-import { computed, ref } from 'vue';
-
+import { computed, ref, watch } from 'vue';
 import {
-  RELEASES_URL, connectionDetailText, machineProfileName,
+  UiButton, UiIconButton, UiPressable, UiInlineMessage, UiActionLink,
+  confirmDialog, promptDialog, t, uiLocale, messageRef, resolveUiText, type UiText,
+} from '../ui.ts';
+import {
+  RELEASES_URL, connectionDetailText, machineProfileName, type MachineProfile,
 } from '../../../shared/client/clientShell.ts';
-import type { MachineProfile } from '../../../shared/client/clientShell.ts';
-import { UiButton, UiInlineMessage, UiActionLink, confirmDialog, promptDialog } from '../ui.ts';
 import { useShellStore } from '../stores/shell.ts';
 import { failureText } from '../shared/apiClient.ts';
 import AddMachineDialog from '../shared/layout/AddMachineDialog.vue';
-import ConnectionStatus from '../shared/layout/ConnectionStatus.vue';
+import MachineActionsDialog from '../shared/layout/MachineActionsDialog.vue';
+import MachineConnection from '../shared/layout/MachineConnection.vue';
+import MachineGlyph from '../shared/layout/MachineGlyph.vue';
 
 const shell = useShellStore();
 const adding = ref(false);
 const busy = ref(false);
+const listRequested = ref(false);
+const menuProfile = ref<MachineProfile | null>(null);
+const error = ref<UiText>('');
+let actionProfile: MachineProfile | null = null;
+
 const disconnected = computed(() => typeof shell.detail !== 'string'
   && shell.detail?.code === 'disconnected');
+const recovery = computed(() => Boolean(shell.profile) && shell.status !== 'online' && !listRequested.value);
+const otherProfiles = computed(() => shell.profiles.filter((profile) => profile.id !== shell.profile?.id));
+const canAddLocal = computed(() => shell.localAvailable
+  && !shell.profiles.some((profile) => profile.kind === 'local'));
+const autoRetry = computed(() => !disconnected.value && ['offline', 'connecting'].includes(shell.status));
 const detailText = computed(() => disconnected.value
   ? '' : connectionDetailText(shell.detail, uiLocale.value));
 const versionHint = computed(() => {
@@ -111,16 +122,33 @@ const versionHint = computed(() => {
 
   return t('core.requiredVersionAtLeast', {
     value1: upgradeServer ? t('core.server') : t('core.application'),
-  })
-    + `${version.major}.${version.minor}.`;
+  }) + `${version.major}.${version.minor}.`;
 });
-const error = ref<UiText>('');
+
+watch(() => shell.profile?.id, () => {
+  listRequested.value = false;
+  menuProfile.value = null;
+});
+
+function back(): void {
+  if (recovery.value) {
+    listRequested.value = true;
+
+    return;
+  }
+
+  shell.showConnections = false;
+}
 
 /**
  * Экран подключения остаётся доступным при любом отказе удалённой машины.
- * Ошибка действия показывается рядом со списком, не закрывая его и не перезагружая документ.
+ * Ошибка действия показывается рядом со списком без перезагрузки документа.
  */
 async function run(work: () => Promise<unknown>): Promise<void> {
+  if (busy.value) {
+    return;
+  }
+
   busy.value = true;
   error.value = '';
 
@@ -133,24 +161,73 @@ async function run(work: () => Promise<unknown>): Promise<void> {
   }
 }
 
-async function connect(id: string): Promise<void> {
-  await run(async () => {
-    await shell.selectProfile(id);
-    await shell.connect();
-  });
+async function connect(): Promise<void> {
+  listRequested.value = false;
+  await run(() => shell.connect());
 }
 
-async function remove(profile: MachineProfile): Promise<void> {
-  if (await confirmDialog(messageRef('core.deleteMachine', { profileName: profile.name }))) {
-    await run(() => shell.removeProfile(profile.id));
+async function select(id: string): Promise<void> {
+  listRequested.value = false;
+  await run(() => shell.selectProfile(id));
+}
+
+/**
+ * Запоминаем профиль до закрытия меню: событие действия приходит следующим.
+ * Снимок оболочки может обновиться, но действие остаётся привязано к выбранной машине.
+ */
+function closeMenu(open: boolean): void {
+  if (!open) {
+    actionProfile = menuProfile.value;
+    menuProfile.value = null;
   }
 }
 
 /**
- * Адрес меняется только у уже привязанной машины, её пин хранится в оболочке.
- * Оболочка проверит hello новым адресом до сохранения, а отмена не отправляет запрос.
+ * Меню делегирует действия владельцу списка и использует общие подтверждения.
+ * Идентификатор машины берётся из закрытого меню, а не из текущего профиля после переключения.
  */
-async function changeAddress(profile: MachineProfile): Promise<void> {
+async function menuAction(action: string): Promise<void> {
+  const profile = actionProfile;
+
+  actionProfile = null;
+
+  if (!profile) {
+    return;
+  }
+  if (action === 'select') {
+    await select(profile.id);
+  } else if (action === 'disconnect') {
+    await run(() => shell.disconnect());
+  } else if (action === 'address') {
+    await changeAddress(profile);
+  } else if (action === 'rename') {
+    const name = await promptDialog({
+      title: messageRef('core.machineRename'),
+      value: profile.name,
+    });
+
+    if (name !== null && name.trim()) {
+      await run(() => shell.editProfile(profile.id, { name: name.trim() }));
+    }
+  } else if (action === 'remove') {
+    if (await confirmDialog(messageRef('core.deleteMachine', { profileName: profile.name }), {
+      danger: true,
+      touchTargets: true,
+    })) {
+      await run(() => shell.removeProfile(profile.id));
+    }
+  }
+}
+
+/**
+ * Адрес меняется только у существующего профиля, его pin хранится в оболочке.
+ * Оболочка проверяет hello новым адресом до сохранения, отмена не отправляет запрос.
+ */
+async function changeAddress(profile: MachineProfile | null): Promise<void> {
+  if (!profile) {
+    return;
+  }
+
   const address = await promptDialog({
     title: messageRef('core.changeAddress'),
     value: profile.address,
@@ -164,167 +241,177 @@ async function changeAddress(profile: MachineProfile): Promise<void> {
 
 <style scoped>
 .connections {
-  display: grid;
-  align-content: start;
-  gap: 24px;
-  width: 100%;
-  max-width: 960px;
-  margin: 48px auto;
-  padding: 0 24px;
-}
-
-.connections-heading, .machine-actions {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  width: 100%;
+  max-width: 600px;
+  height: 100%;
+  min-height: 0;
+  margin: 0 auto;
+  padding: 20px 24px 0;
 }
 
-.connections-back {
-  justify-self: start;
+.connections-navigation {
+  flex: none;
+  margin: 0 0 18px;
 }
 
-.connections-heading {
-  justify-content: space-between;
-  gap: 16px;
+.connections-scroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 26px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 2px 20px;
+  scrollbar-width: thin;
 }
 
 .connections-heading h1 {
-  margin: 0;
-  font-size: 26px;
+  margin: 0 0 8px;
+  font-size: 28px;
   font-weight: 600;
-}
-
-.connections-heading p {
-  margin: 4px 0 0;
-  color: var(--ink-mid);
-  font-size: 13px;
-}
-
-.connections-state {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--ink-mid);
-  font-size: 12px;
+  letter-spacing: -0.5px;
   overflow-wrap: anywhere;
 }
 
+.connections-heading p {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.machines-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  color: var(--ink-mid);
+}
+
+.machines-heading h2 {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 1px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.machines-heading > span {
+  font-size: 12px;
+}
+
 .machines-list {
-  display: grid;
-  gap: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--sidebar);
 }
 
 .machine-row {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 16px;
   align-items: center;
-  padding: 20px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding-right: 6px;
 }
 
-.machine-row[data-current='true'] {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+.machine-row + .machine-row {
+  border-top: 1px solid var(--line);
 }
 
-.machine-summary {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-}
-
-.machine-icon {
+.machine-list-icon, .connections-empty-icon {
   display: grid;
-  flex: none;
   place-items: center;
+  flex: none;
   width: 44px;
   height: 44px;
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--surface-2);
   color: var(--ink-mid);
 }
 
-.machine-icon svg {
-  width: 24px;
-  height: 24px;
-}
-
-.machine-copy {
+.machine-list-copy {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
-}
-
-.machine-title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
   overflow-wrap: anywhere;
 }
 
-.machine-title strong {
-  font-weight: 500;
+.machine-list-copy strong {
+  font-size: 14px;
+  font-weight: 600;
 }
 
-.machine-current {
-  color: var(--accent);
-  font-size: 11px;
-}
-
-.machine-address {
+.machine-list-copy > span, .machines-hint {
   color: var(--ink-mid);
   font-size: 12px;
-  overflow-wrap: anywhere;
+  line-height: 1.7;
 }
 
-.connections-local {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--ink-mid);
-  font-size: 13px;
+.machines-hint {
+  margin: 12px 3px 0;
 }
 
 .connections-empty {
-  padding: 40px 20px;
-  border: 1px dashed var(--line-2);
-  border-radius: var(--radius);
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  padding: 32px 12px;
   text-align: center;
 }
 
-.connections-empty p {
-  margin: 8px 0 0;
-  color: var(--ink-mid);
+.connections-empty-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+}
+
+.connections-empty-icon svg {
+  width: 32px;
+  height: 32px;
+}
+
+.connections-empty h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.connections-empty p, .connections-detail, .connections-local p, .connection-versions p {
+  margin: 0;
   font-size: 13px;
+  line-height: 1.8;
+  color: var(--ink-mid);
+  overflow-wrap: anywhere;
+}
+
+.connection-versions {
+  display: grid;
+  gap: 8px;
+}
+
+.connections-local {
+  display: grid;
+  gap: 12px;
+}
+
+.connections-footer {
+  flex: none;
+  padding: 16px 0 max(20px, env(safe-area-inset-bottom));
+}
+
+.connections-footer-hint {
+  margin: 0;
+  text-align: center;
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 1.7;
 }
 
 @media (max-width: 600px) {
   .connections {
-    gap: 20px;
-    margin: 24px auto;
-    padding: 0 16px;
-  }
-
-  .machine-row {
-    padding: 16px;
-  }
-
-  .machine-actions {
-    width: 100%;
-    padding-top: 12px;
-    border-top: 1px solid var(--line);
+    padding: max(12px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 0
+      max(18px, env(safe-area-inset-left));
   }
 }
 </style>

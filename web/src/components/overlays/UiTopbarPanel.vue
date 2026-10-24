@@ -3,9 +3,9 @@
     ref="popover"
     v-bind="$attrs"
     class="ui-topbar-panel"
-    attachment="topbar"
-    placement="bottom-end"
-    :offset="0"
+    :attachment="attachment === 'topbar' ? 'topbar' : undefined"
+    :placement="placement"
+    :offset="attachment === 'topbar' ? 0 : 8"
     :trigger-mode="triggerMode"
     :hover-delay="160"
     :aria-label="label || title"
@@ -42,6 +42,7 @@ import UiPopover from './UiPopover.vue';
 import { claimTopbarPanel, releaseTopbarPanel } from '../../services/topbarPanels';
 import type {
   UiOverlayContentSlotProps,
+  UiOverlayPlacement,
   UiOverlayTriggerSlotProps,
   UiPopoverCloseReason,
   UiPopoverTriggerMode,
@@ -54,10 +55,14 @@ withDefaults(defineProps<{
   title?: string;
   label?: string;
   triggerMode?: UiPopoverTriggerMode;
+  attachment?: 'topbar' | 'trigger';
+  placement?: UiOverlayPlacement;
 }>(), {
   title: '',
   label: '',
   triggerMode: 'both',
+  attachment: 'topbar',
+  placement: 'bottom-end',
 });
 
 defineSlots<{

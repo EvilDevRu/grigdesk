@@ -8,7 +8,7 @@ import {
   sourceMenu, launchMenu, menuTitle, requiredApi, visibleLines,
 } from './helpers/menuFixture.mts';
 
-const menuScreenEnd = /└ [^\r\n]*Esc[^\r\n]*\r?\n/u;
+const menuScreenEnd = menuTitle;
 
 /**
  * Сопоставляет листья и параметры двух общих каталогов, не дублируя переводы в тесте.
@@ -60,12 +60,15 @@ test('CM-LOCALE: ru/en одинаковы, приоритет LC_ALL → LC_MESS
   }
 });
 
-test('CM-HEADER: знак, версия своей поставки и короткие состояния без открытия', async (t) => {
+test('CM-HEADER: компактная шапка, версия и короткие состояния без открытия', async (t) => {
   const box = await sourceMenu(t);
   const session = launchMenu(t, box);
 
   await session.wait(menuTitle);
-  assert.match(session.output(), /█/u);
+  assert.doesNotMatch(session.output(), /█/u);
+  assert.match(session.output(), /GrigDesk/u);
+  assert.match(session.output(), /ПРИЛОЖЕНИЕ/u);
+  assert.match(session.output(), /РАЗРАБОТЧИКУ/u);
   assert.ok(session.output().includes((await readFile(path.join(box.root, 'VERSION'), 'utf8')).trim()));
   assert.match(session.output(), /исходник/iu);
   assert.match(session.output(), /сервер/iu);
@@ -160,6 +163,8 @@ for (const mode of ['NO_COLOR', 'dumb', 'normal']) {
     const compact = session.output().slice(before);
 
     assert.match(compact, /GrigDesk/u);
+    assert.match(compact, /Сервер/u);
+    assert.match(compact, /Окно/u);
     assert.ok(visibleLines(compact).every((line) => [...line].length <= 40), compact);
 
     if (mode !== 'normal') {

@@ -132,7 +132,7 @@ test('PLUGIN-DOCS-04: реестр отдаёт документацию вкл�
   await pluginDir(root, 'zeta', { name: 'Зета', description: 'Последний' }, { 'docs/README.md': '# Зета' });
   await pluginDir(root, 'alpha', { name: 'Альфа', description: 'Первый' }, { 'docs/README.md': '# Альфа' });
   await pluginDir(root, 'sleeper', { name: 'Спящий' }, { 'docs/README.md': '# Спящий' });
-  await pluginDir(root, 'future', { name: 'Будущий', api: 2 }, { 'docs/README.md': '# api 2' });
+  await pluginDir(root, 'future', { name: 'Будущий', api: 99 }, { 'docs/README.md': '# api 99' });
   await pluginDir(root, 'plain', { name: 'Без документации' });
 
   let prefsData = {

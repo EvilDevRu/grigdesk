@@ -122,17 +122,32 @@ export function run(command: string, args: readonly string[], timeoutMs = 5000):
  */
 export function runAttached(
   command: string, args: readonly string[], env: NodeJS.ProcessEnv = process.env,
+  output?: (text: string, error: boolean) => void,
 ): Promise<number> {
   return new Promise((resolve) => {
     const ignore = () => {};
 
     process.on('SIGINT', ignore);
 
-    const child = spawn(command, [...args], { stdio: 'inherit', env });
+    const child = spawn(command, [...args], {
+      stdio: output ? ['inherit', 'pipe', 'pipe'] : 'inherit',
+      env,
+    });
+
+    if (output) {
+      child.stdout!.setEncoding('utf8').on('data', (text: string) => output(text, false));
+      child.stderr!.setEncoding('utf8').on('data', (text: string) => output(text, true));
+    }
 
     child.once('error', (error) => {
       process.removeListener('SIGINT', ignore);
-      console.error(error.message);
+
+      if (output) {
+        output(error.message + '\n', true);
+      } else {
+        console.error(error.message);
+      }
+
       resolve(1);
     });
     child.once('close', (code, signal) => {

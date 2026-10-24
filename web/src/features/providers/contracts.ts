@@ -1,3 +1,4 @@
+import { isProviderInstallationMetadata } from '../../../../shared/chat/providerInstallContracts.ts';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import type { ProviderEntry, ProviderModelEntry } from '../../../../shared/chat/providersContracts.ts';
 
@@ -96,6 +97,7 @@ function fields(value: unknown, texts: string[] = [], numbers: string[] = [], fl
  */
 function isModel(value: unknown): value is ProviderModelEntry {
   return isRecord(value) && typeof value.id === 'string'
+    && (value.installation == null || isProviderInstallationMetadata(value.installation))
     && fields(value, ['name', 'family'], ['context'],
       ['extra', 'hidden', 'unknown', 'contextRuntimeOnly', 'contextUnverified'])
     && ['efforts', 'aliases', 'modelRefAliases'].every((key) => value[key] == null
@@ -108,6 +110,7 @@ function isModel(value: unknown): value is ProviderModelEntry {
  */
 export function isProvider(value: unknown): value is ProviderEntry {
   return isRecord(value) && typeof value.id === 'string'
+    && (value.installation == null || isProviderInstallationMetadata(value.installation))
     && fields(value, ['name', 'type', 'vendor', 'kind', 'statusPage', 'version', 'auth', 'authLabel',
       'setupCommand', 'install', 'color', 'latest'], [],
     ['available', 'installed', 'mcp', 'chatEnabled', 'canUpdate',

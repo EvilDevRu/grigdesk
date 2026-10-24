@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Единый офлайн-прогон проекта: не запускает GrigDesk и не вызывает реальные ИИ.
+# Единый прогон проекта: не запускает GrigDesk и не вызывает реальные ИИ.
+# Холодная legacy fixture сама устанавливает exact зависимости; прогретая работает без npm.
 set -uo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -65,7 +66,8 @@ export GRIGDESK_TEST_DEEPSEEK_BINARY GRIGDESK_TEST_DEEPSEEK_CACHE_DIR GRIGDESK_T
 export GRIGDESK_RELEASE_PUBLISH_CONTRACT=2
 export GRIGDESK_TEST_GLM_DELIVERY=binary
 
-# Только cutover сценарии используют проверенную legacy Node22 fixture, не production resolver.
+# Cutover fixture сама готовит отдельные зависимости под ABI тестового Node.
+# Рабочую поставку и подготовленный pinned prefix эта установка не меняет.
 if ! GRIGDESK_TEST_DEEPSEEK_ARTIFACT=$(NODE_TEST_MAX_RSS_MB=4096 \
   bash "$PROJECT_ROOT/tests/run-node-tests-safe.sh" "$PROJECT_ROOT/tests/helpers/deepseekRuntimeArtifact.mts"); then
   exit 1
