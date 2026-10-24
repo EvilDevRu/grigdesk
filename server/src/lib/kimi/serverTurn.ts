@@ -5,6 +5,7 @@
 // `prompts:steer`, а видимый ответ приходит событиями `assistant.delta`/`assistant.completed`.
 import { normalizeContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
 import type { ChatContextUsage } from '../../../../shared/chat/chatContextUsage.ts';
+import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import { recordOrEmpty } from '../../../../shared/lib/objects.ts';
 import { textOr, trimmedText } from '../../../../shared/lib/text.ts';
 
@@ -42,6 +43,7 @@ export interface KimiServerTurnOptions {
   onCommandContext?: (client: KimiServerClient, sessionId: string) => void | Promise<void>;
   onStep?: (step: ChatStep) => void;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
+  onRunMetadata?: (metadata: ChatRunMetadata) => void;
   onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
   onInTurnReady?: (port: InTurnPort) => void;
   onInTurnAvailability?: (status: { available: boolean; reason?: InTurnUnavailableReason }) => void;
@@ -74,6 +76,7 @@ export interface KimiServerTurnOptions {
 
 export interface KimiServerTurnResult extends ChatContextUsage {
   reply: string;
+  actualModel?: string;
   assistantMessageId?: string;
   sessionId: string;
   steps: ChatStep[];
@@ -152,6 +155,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
     const completed = new Map<string, string>();
     let reply = '';
     let replyMessageId = '';
+    let actualModel = '';
     let lastContextUsage: ChatContextUsage = {};
     let awaitingAnswer = false;
     let finished = false;
@@ -203,13 +207,13 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
     };
 
     /**
-     * Реальный поток Kimi завершает текст на границе шага, а тестовый сервер может
-     * прислать assistant.completed. Оба пути сохраняют один и тот же id блока.
+     * Реплика закрывается до исполнения инструмента, не ожидая конца долгого шага.
+     * Граница шага и assistant.completed сохраняют тот же id и не дублируют блок.
      */
     const finishText = (id: string, explicitText = '') => {
       const text = explicitText || drafts.get(id) || '';
 
-      if (!id || !text || completed.has(id)) {
+      if (!id || !text.trim() || completed.has(id)) {
         return;
       }
 
@@ -332,6 +336,13 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
       }
 
       if (kind === 'agent.status.updated') {
+        const model = trimmedText(payload.model);
+
+        if (model) {
+          actualModel = model;
+          options.onRunMetadata?.({ actualModelId: model, modelSource: 'session' });
+        }
+
         const patch = normalizeContextUsage({
           contextTokens: payload.contextTokens,
           contextWindow: payload.maxContextTokens,
@@ -385,6 +396,11 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
 
         currentTextId = id;
         drafts.set(id, text);
+
+        if (!text.trim() || completed.has(id)) {
+          return;
+        }
+
         emit({
           k: 'text',
           id,
@@ -416,6 +432,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
 
       if (kind === 'tool.call.started') {
         flushThought();
+        finishText(currentTextId);
 
         const id = String(payload.toolCallId || payload.tool_call_id || '');
         const name = trimmedText(payload.name) || trimmedText(payload.tool_name) || 'Инструмент';
@@ -636,6 +653,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
       return {
         ...lastContextUsage,
         reply,
+        ...(actualModel ? { actualModel } : {}),
         assistantMessageId: replyMessageId,
         sessionId: session.id,
         steps: stepSink.steps,
