@@ -1666,11 +1666,15 @@ export default {
   login: 'claude login',
   /**
    * Пользовательский npm имеет приоритет; без него сохраняются native-команды.
-   * Вход остаётся отдельным действием, итог проверяет настроенную копию CLI.
+   * Вход остаётся отдельным действием, npm-копия подключается после проверки версии.
    */
   installation(config: ClaudeConfig, context?: ProviderInstallationContext) {
     const command = 'curl -fsSL https://claude.ai/install.sh | bash';
-    const npm = context?.npm ? npmInstallCommand('@anthropic-ai/claude-code', context.npm) : null;
+    const npm = context?.npm ? npmInstallCommand('@anthropic-ai/claude-code', context.npm, {
+      binName: 'claude',
+      configKey: 'claudeBin',
+      envKey: 'GRIGDESK_CLAUDE_BIN',
+    }) : null;
     const install = npm || {
       executable: '/bin/bash',
       args: ['-o', 'pipefail', '-c', command],

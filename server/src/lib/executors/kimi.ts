@@ -312,7 +312,11 @@ export default {
    */
   installation(config: KimiConfig, context?: ProviderInstallationContext) {
     const command = 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash';
-    const install = context?.npm ? npmInstallCommand('@moonshot-ai/kimi-code', context.npm) : {
+    const install = context?.npm ? npmInstallCommand('@moonshot-ai/kimi-code', context.npm, {
+      binName: 'kimi',
+      configKey: 'kimiBin',
+      envKey: 'GRIGDESK_KIMI_BIN',
+    }) : {
       executable: '/bin/bash',
       args: ['-o', 'pipefail', '-c', command],
       command,

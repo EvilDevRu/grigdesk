@@ -8,7 +8,8 @@ import { isOutdated, parseVersion } from '../executors/_npmLatest.ts';
 import { runCommand, type PluginCommandRunner } from '../pluginInstall/runCommand.ts';
 import { terminateOwnedWorker } from '../pluginInstall/workerIdentity.ts';
 import { withRetry } from '../retry.ts';
-import { findProviderNpm, resolveProviderInstallation } from './commands.ts';
+import { applyEnvChanges, updateEnvFile } from '../envFile.ts';
+import { findProviderNpm, installedNpmBinary, resolveProviderInstallation } from './commands.ts';
 import { isTransientInstallFailure } from './networkFailure.ts';
 import { readInstallState, writeInstallState, type ProviderInstallState } from './stateStore.ts';
 import type {
@@ -298,7 +299,8 @@ export class ProviderInstallService {
   }
 
   /**
-   * Сначала проверяется код команды, затем версия именно настроенного CLI.
+   * Сначала проверяется код команды, затем версия установленного CLI.
+   * Проверенная npm-копия сохраняется в настройке bin до обновления каталога моделей.
    * Сбой каталога моделей даёт предупреждение после уже доказанного успеха установки.
    */
   private async execute(adapter: ExecutorAdapter, command: ProviderInstallCommand,
@@ -336,7 +338,8 @@ export class ProviderInstallService {
       job.stage = 'version';
       await this.publish();
 
-      const probe = await adapter.probe(this.ports.config);
+      const binding = await this.prepareNpmBinding(command, executable);
+      const probe = await adapter.probe(binding?.config || this.ports.config);
 
       job.after = String(probe.version || '');
 
@@ -347,6 +350,10 @@ export class ProviderInstallService {
       if (job.operation === 'update' && isOutdated(job.after, this.ports.latestOf(job.providerId))) {
         throw new ProviderInstallError(500, 'version_stale',
           'Действующая копия исполнителя не обновилась до доступной версии');
+      }
+
+      if (binding) {
+        await this.activateNpmBinding(command, binding.binary);
       }
 
       job.outcome = job.operation === 'install' ? 'installed'
@@ -431,6 +438,55 @@ export class ProviderInstallService {
       changed: job.status === 'succeeded' && job.outcome === 'updated',
       output,
     };
+  }
+
+  /**
+   * Новая копия проверяется через временную конфигурацию адаптера.
+   * До успешного probe действующий bin и окружение сервера не меняются.
+   */
+  private async prepareNpmBinding(command: ProviderInstallCommand, executable: string) {
+    if (!command.npmBinding) {
+      return null;
+    }
+
+    try {
+      const binary = await installedNpmBinary(executable, command.npmBinding.binName,
+        this.ports.env, this.controller!.signal);
+
+      return {
+        binary,
+        config: { ...this.ports.config as object, [command.npmBinding.configKey]: binary },
+      };
+    } catch {
+      throw new ProviderInstallError(500, 'npm_binary_missing',
+        'Не удалось найти установленную npm-копию исполнителя');
+    }
+  }
+
+  /**
+   * Общий писатель сохраняет bin для перезапуска, затем меняется текущий config.
+   * При отказе записи прежний исполнитель остаётся выбранным и успех не объявляется.
+   */
+  private async activateNpmBinding(command: ProviderInstallCommand, binary: string): Promise<void> {
+    const { configKey, envKey } = command.npmBinding!;
+    const config = this.ports.config as Record<string, unknown>;
+    const changes = { [envKey]: binary };
+
+    this.controller!.signal.throwIfAborted();
+
+    try {
+      if (typeof config.envPath !== 'string' || !config.envPath) {
+        throw new Error('Не задан файл настроек исполнителя');
+      }
+
+      await updateEnvFile(config.envPath, changes);
+    } catch {
+      throw new ProviderInstallError(500, 'npm_binding_failed',
+        'Не удалось сохранить путь установленной npm-копии исполнителя');
+    }
+
+    config[configKey] = binary;
+    applyEnvChanges(changes, this.ports.env);
   }
 
   /**

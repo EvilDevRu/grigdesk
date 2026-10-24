@@ -2837,7 +2837,11 @@ export default {
    */
   installation(config: CodexConfig, context?: ProviderInstallationContext) {
     const command = 'npm i -g @openai/codex';
-    const npm = context?.npm ? npmInstallCommand('@openai/codex', context.npm) : null;
+    const npm = context?.npm ? npmInstallCommand('@openai/codex', context.npm, {
+      binName: 'codex',
+      configKey: 'codexBin',
+      envKey: 'GRIGDESK_CODEX_BIN',
+    }) : null;
     const install = npm || {
       executable: 'npm',
       args: ['i', '-g', '@openai/codex'],

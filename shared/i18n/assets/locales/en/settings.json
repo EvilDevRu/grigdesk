@@ -1563,6 +1563,8 @@
   "providerInstallationRefresh": "Refresh state",
   "providerInstallationRetryAction": "Retry",
   "providerInstallationOutput": "Command output",
+  "providerInstallationNpmBinaryMissing": "Could not find the executor installed by npm",
+  "providerInstallationNpmBindingFailed": "Could not save the path to the executor installed by npm",
   "providerInstallationBackground": "You can close this window — the installation will continue",
   "providerInstallationBusy": "An executor installation is already running",
   "providerInstallationUnknownProvider": "Executor not found",

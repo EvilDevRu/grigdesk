@@ -300,6 +300,11 @@ export interface ProviderInstallCommand {
   args: string[];
   command: string;
   fallbackCommand: string;
+  npmBinding?: {
+    binName: string;
+    configKey: string;
+    envKey: string;
+  };
 }
 
 export interface ProviderInstallation {

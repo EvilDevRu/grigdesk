@@ -1563,6 +1563,8 @@
   "providerInstallationRefresh": "Обновить состояние",
   "providerInstallationRetryAction": "Повторить",
   "providerInstallationOutput": "Вывод команды",
+  "providerInstallationNpmBinaryMissing": "Не удалось найти установленную npm-копию исполнителя",
+  "providerInstallationNpmBindingFailed": "Не удалось сохранить путь установленной npm-копии исполнителя",
   "providerInstallationBackground": "Окно можно закрыть — установка продолжится",
   "providerInstallationBusy": "Уже идёт установка исполнителя",
   "providerInstallationUnknownProvider": "Исполнитель не найден",
