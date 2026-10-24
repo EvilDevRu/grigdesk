@@ -276,7 +276,7 @@ test('устройство: отзыв распространяется на в�
 });
 
 test('DEVICE-B24-DETAIL-01: устройство читает карточку Б24 без cookie', async (t) => {
-  const telegram = { links: [{ url: 'https://t.me/test/42', text: 'Обсуждение' }] };
+  const telegram = { links: [{ url: 'https://t.me/example_channel/42', text: 'Обсуждение' }] };
   const fx = await principalFixture(t, async (app) => {
     app.decorate('telegramDiscussion', async () => telegram);
     await app.register(b24Module, {
@@ -314,7 +314,9 @@ test('LOCAL-DETAIL-03: устройство читает own и прежний �
 
   const fx = await principalFixture(t, async (app) => {
     await registerTasksModule(app, storage.moduleOptions);
-    app.decorate('telegramDiscussion', async () => ({ links: [{ url: 'https://t.me/test/42' }] }));
+    app.decorate('telegramDiscussion', async () => ({
+      links: [{ url: 'https://t.me/example_channel/42' }],
+    }));
     await app.register(b24Module, { b24: storage.moduleOptions.b24 });
   });
   const missing = await request(fx, '/api/grigdesk-tasks/42');
