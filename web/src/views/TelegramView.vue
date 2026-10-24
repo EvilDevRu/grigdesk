@@ -15,7 +15,8 @@
       <header class="tg-hero ui-page-head">
         <div>
           <h1>Телеграм</h1>
-          <p>{{ loading ? 'Загружаю состояние бота…' : connected ? `Подключён @${bot?.username}` : 'Подключите бота токеном от @BotFather.' }}</p>
+          <p v-if="!loading">{{ connected ? `Подключён @${bot?.username}`
+            : 'Подключите бота токеном от @BotFather.' }}</p>
         </div>
         <UiActionLink v-if="connected" href="#/inbox">Общая очередь</UiActionLink>
       </header>
@@ -26,7 +27,8 @@
       </div>
 
       <!-- Подключённый бот: native provider lifecycle и его account-scoped настройки. -->
-      <template v-if="!loading && connected">
+      <UiLoadingState v-if="loading" label="Загружаю состояние бота…" variant="cards" />
+      <template v-else-if="connected">
         <nav class="setup-path" aria-label="Настройка Телеграма">
           <a class="path-step done" href="#tg-bot">
             <span class="path-mark">1</span>
@@ -825,6 +827,7 @@ import {
   UiSelect,
   UiSpinner,
   vTooltip,
+  UiLoadingState,
 } from '../ui';
 import { api } from '../shared/apiClient.ts';
 import { telegramApi, telegramPluginDisabled } from '../shared/telegramApi.ts';

@@ -33,7 +33,7 @@ public class MainActivity extends AppCompatActivity {
   private static volatile String startupFailure;
   private static volatile ClientRuntime runtime;
   private static java.util.concurrent.CompletableFuture<String> scanning;
-  private static java.util.concurrent.CompletableFuture<Void> unlocking;
+  private androidx.biometric.BiometricPrompt unlockPrompt;
   private static final String ENTRY = "http://127.0.0.1:47100";
   private static final Set<String> ORIGINS = ConcurrentHashMap.newKeySet();
   private static final String SECRET = createSecret();
@@ -71,6 +71,7 @@ public class MainActivity extends AppCompatActivity {
   public void onCreate(Bundle state) {
     super.onCreate(state);
     current = new java.lang.ref.WeakReference<>(this);
+    attachUnlockPrompt();
     ORIGINS.add(ENTRY);
     if (retainedWeb == null) {
       webContext = new android.content.MutableContextWrapper(this);
@@ -246,44 +247,58 @@ public class MainActivity extends AppCompatActivity {
   }
 
   /**
-   * Аутентификация разрешает Keystore использовать ключ в течение 600 секунд.
-   * Сильная биометрия и код устройства равноправны; обхода через программный ключ нет.
+   * AndroidX переносит системный диалог при повороте, но требует новый callback в onCreate.
+   * Результат принадлежит приложению, поэтому новая Activity завершает прежний запрос.
+   */
+  private void attachUnlockPrompt() {
+    UnlockSession session = ((ClientApplication) getApplication()).unlockSession;
+
+    unlockPrompt = new androidx.biometric.BiometricPrompt(this, getMainExecutor(),
+      new androidx.biometric.BiometricPrompt.AuthenticationCallback() {
+        @Override
+        public void onAuthenticationSucceeded(
+          @NonNull androidx.biometric.BiometricPrompt.AuthenticationResult authentication) {
+          session.succeeded();
+        }
+
+        @Override
+        public void onAuthenticationError(int code, @NonNull CharSequence message) {
+          session.failed(new IllegalStateException(ClientLocale.text("unlockCancelled")));
+        }
+      });
+  }
+
+  /**
+   * Сильная биометрия и код устройства разрешают использование Keystore на 600 секунд.
+   * Повторное нажатие присоединяется к текущему запросу вместо ошибки «уже открыта».
    */
   public java.util.concurrent.CompletableFuture<Void> unlock() {
     java.util.concurrent.CompletableFuture<Void> result = new java.util.concurrent.CompletableFuture<>();
 
     runOnUiThread(() -> {
-      if (unlocking != null) {
-        result.completeExceptionally(new IllegalStateException(ClientLocale.text("unlockOpen")));
+      MainActivity visible = current.get();
+
+      if (visible == null || visible.isFinishing() || visible.isDestroyed()
+        || visible.getSupportFragmentManager().isStateSaved()) {
+        result.completeExceptionally(new IllegalStateException(ClientLocale.text("unlockCancelled")));
+
         return;
       }
 
-      unlocking = result;
-      ((ClientApplication) getApplication()).nativeFlow(true);
+      UnlockSession session = ((ClientApplication) getApplication()).unlockSession;
 
-      androidx.biometric.BiometricPrompt prompt = new androidx.biometric.BiometricPrompt(this,
-        getMainExecutor(), new androidx.biometric.BiometricPrompt.AuthenticationCallback() {
-          @Override
-          public void onAuthenticationSucceeded(
-            @NonNull androidx.biometric.BiometricPrompt.AuthenticationResult authentication) {
-            ((ClientApplication) getApplication()).lifecycle.authenticated();
-            ((ClientApplication) getApplication()).nativeFlow(false);
-            result.complete(null);
-            unlocking = null;
-          }
-
-          @Override
-          public void onAuthenticationError(int code, @NonNull CharSequence message) {
-            ((ClientApplication) getApplication()).nativeFlow(false);
-            result.completeExceptionally(new IllegalStateException(ClientLocale.text("unlockCancelled")));
-            unlocking = null;
-          }
-        });
-
-      prompt.authenticate(new androidx.biometric.BiometricPrompt.PromptInfo.Builder()
-        .setTitle(ClientLocale.text("unlockTitle"))
-        .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
-          | androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL).build());
+      session.request(() -> visible.unlockPrompt.authenticate(
+        new androidx.biometric.BiometricPrompt.PromptInfo.Builder()
+          .setTitle(ClientLocale.text("unlockTitle"))
+          .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
+            | androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL).build()
+      )).whenComplete((value, failure) -> {
+        if (failure == null) {
+          result.complete(null);
+        } else {
+          result.completeExceptionally(failure);
+        }
+      });
     });
 
     return result;
@@ -479,6 +494,12 @@ public class MainActivity extends AppCompatActivity {
    */
   @Override
   protected void onDestroy() {
+    if (current.get() == this && !isChangingConfigurations()) {
+      unlockPrompt.cancelAuthentication();
+      ((ClientApplication) getApplication()).unlockSession.failed(
+        new IllegalStateException(ClientLocale.text("unlockCancelled")));
+    }
+
     if (current.get() == this) {
       current.clear();
       webContext.setBaseContext(getApplicationContext());

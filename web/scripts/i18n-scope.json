@@ -24,6 +24,7 @@
     "web/src/components/composites/UiPasswordInput.vue",
     "web/src/components/composites/UiSearchInput.vue",
     "web/src/components/feedback/UiToastHost.vue",
+    "web/src/components/feedback/UiLoadingState.vue",
     "web/src/components/overlays/UiDialog.vue",
     "web/src/components/overlays/UiDialogHost.vue",
     "web/src/components/overlays/UiFloatingDialog.vue",

@@ -196,7 +196,8 @@
               :id="nativePanelId"
               class="settings-native-panel"
             >
-              <p v-if="nativeState.loading">{{ t('settings.loadingCatalog') }}</p>
+              <UiLoadingState v-if="nativeState.loading" :label="t('settings.loadingCatalog')"
+                variant="document" />
               <p v-if="nativeState.error" role="alert">{{ nativeState.error }}</p>
               <template v-if="nativeState.catalog">
                 <p>{{ nativeState.catalog.scope.label }} {{ t('settings.savedForTheNextRun') }}</p>
@@ -324,7 +325,7 @@
         <p v-else-if="ready">{{ t('settings.theProviderDoesNotDeclareThisCapability') }}</p>
       </template>
       <p v-else-if="settings.entityId">{{ t('settings.theProviderIsNoLongerAvailableIn') }}</p>
-      <p v-else-if="!providers.loaded" role="status">{{ t('settings.loadingProviders') }}</p>
+      <UiLoadingState v-else-if="!providers.loaded" :label="t('settings.loadingProviders')" />
       <div v-else class="settings-provider-empty">
         <h4>{{ t('settings.noProvidersFound') }}</h4>
         <p>{{ t('settings.clickRecheckToGetTheListOf') }}</p>
@@ -346,7 +347,14 @@
 </template>
 
 <script setup lang="ts">
-import { t, uiLocale, messageRef, resolveUiText, type UiText } from '../../../ui.ts';
+import {
+  t,
+  uiLocale,
+  messageRef,
+  resolveUiText,
+  type UiText,
+  UiLoadingState,
+} from '../../../ui.ts';
 
 import { computed, ref, useId, watch } from 'vue';
 import ProviderIcon from '../../../shared/ProviderIcon.vue';

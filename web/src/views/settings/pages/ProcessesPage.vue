@@ -9,8 +9,8 @@
       <UiButton data-context="workspace-form-wrap" :disabled="busy || loading" @click="load">{{ t('settings.update') }}</UiButton>
       <UiButton data-context="workspace-form-wrap" :disabled="busy || !freeCount" @click="closeFree">{{ t('settings.stopIdleProcesses') }}</UiButton>
     </div>
-    <p v-if="!loaded">{{ t('settings.loadingProcesses') }}</p>
-    <SettingsFacts v-else :items="poolFacts" />
+    <UiLoadingState v-if="!loaded && !error" :label="t('settings.loadingProcesses')" />
+    <SettingsFacts v-else-if="loaded" :items="poolFacts" />
     <p v-if="loaded && !sessions.length">{{ t('settings.noLiveProcessesRightNow') }}</p>
     <article v-for="item in sessions" :key="item.chatKey" :data-running="item.running">
       <h4>{{ resolveUiText(title(item)) }}</h4>
@@ -35,7 +35,14 @@
 </template>
 
 <script setup lang="ts">
-import { t, uiLocale, messageRef, resolveUiText, type UiText } from '../../../ui.ts';
+import {
+  t,
+  uiLocale,
+  messageRef,
+  resolveUiText,
+  type UiText,
+  UiLoadingState,
+} from '../../../ui.ts';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import SettingsScope from '../SettingsScope.vue';

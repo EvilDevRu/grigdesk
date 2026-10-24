@@ -17,12 +17,11 @@
       <TaskWindowPage v-else-if="surfaceDocument" :target="surfaceTarget" :ready="surfaceStarted" />
       <AppShell v-else :active="auth.authenticated && (!shell.present || shell.status === 'online')">
         <MachineWelcome v-if="!workspaceStarted && shell.present && !shell.profile" />
-        <div v-else-if="!workspaceStarted" class="workspace-waiting" role="status">
-          <UiInlineMessage :tone="connectionTone">
-            <span class="workspace-connection-message">
-              <UiSpinner v-if="shell.status === 'connecting' || shell.status === 'online'" decorative />
-              {{ connectionMessage }}
-            </span>
+        <div v-else-if="!workspaceStarted" class="workspace-waiting">
+          <UiLoadingState v-if="shell.status === 'connecting' || shell.status === 'online'"
+            :label="connectionMessage" variant="cards" />
+          <UiInlineMessage v-else :tone="connectionTone">
+            {{ connectionMessage }}
           </UiInlineMessage>
         </div>
         <router-view v-else v-slot="{ Component }">
@@ -50,7 +49,15 @@ import {
   connectionDetailText,
   machineProfileName,
 } from '../../shared/client/clientShell.ts';
-import { t, uiLocale, UiDialogHost, UiTooltipHost, UiToastHost, UiInlineMessage, UiSpinner } from './ui';
+import {
+  t,
+  uiLocale,
+  UiDialogHost,
+  UiTooltipHost,
+  UiToastHost,
+  UiInlineMessage,
+  UiLoadingState,
+} from './ui';
 import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
 import DesktopExitHost from './shared/layout/DesktopExitHost.vue';
@@ -368,9 +375,4 @@ watch(() => auth.authenticated, (on, was) => {
   padding: var(--page-gutter);
 }
 
-.workspace-connection-message {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 </style>

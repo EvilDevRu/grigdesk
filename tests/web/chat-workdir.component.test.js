@@ -29,7 +29,9 @@ async function mountWorkdir(t, browser, store) {
   const Component = await compileVue(webFile('src/views/chat/ChatWorkdir.vue'), {
     stubs: {
       '../../stores/chat.ts': 'export const useChatStore = () => globalThis.__workdirChat;',
-      '../../shared/apiClient.ts': 'export const api = { get: async () => ({ projects: [] }) };',
+      '../../shared/apiClient.ts': `export const api = { get: async () => ({
+        projects: globalThis.__workdirProjects || [],
+      }) };`,
     }
   });
   const wrapper = mount(Component, {
@@ -40,6 +42,7 @@ async function mountWorkdir(t, browser, store) {
   t.after(() => {
     wrapper.unmount();
     delete globalThis.__workdirChat;
+    delete globalThis.__workdirProjects;
   });
   await flushPromises();
 
@@ -105,9 +108,12 @@ test('папка открывается одним кликом, выбор и �
   await flushPromises();
   assert.match(browser.document.querySelector('.workdir-path').textContent, /\/workspace\/current/u);
 
-  const field = browser.document.querySelector('input[placeholder="Абсолютный путь"]');
+  buttonByText(browser, 'По пути').click();
+  await flushPromises();
 
-  assert.ok(field, 'popover открыт, поле папки доступно');
+  const field = browser.document.querySelector('input[placeholder="/home/user/project"]');
+
+  assert.ok(field, 'диалог открыт, поле папки доступно');
   field.value = '/workspace/next';
   field.dispatchEvent(new browser.Event('input', { bubbles: true }));
   await nextTick();
@@ -158,7 +164,10 @@ test('относительный путь объясняется на месте
   await wrapper.get('[data-context="chat-workdir"]').trigger('click');
   await flushPromises();
 
-  const field = browser.document.querySelector('input[placeholder="Абсолютный путь"]');
+  buttonByText(browser, 'По пути').click();
+  await flushPromises();
+
+  const field = browser.document.querySelector('input[placeholder="/home/user/project"]');
 
   field.value = '~/projects/demo';
   field.dispatchEvent(new browser.Event('input', { bubbles: true }));
@@ -200,4 +209,133 @@ test('после обрыва связи окно предлагает повт�
   buttonByText(browser, 'Повторить').click();
   await flushPromises();
   assert.deepEqual(calls, [{ id: 'chat', transfer: 'resume' }]);
+});
+
+test('каталог объединяет проекты и недавние без повторов, поиск сохраняет реальный выбор', async (t) => {
+  const browser = await browserHarness();
+  const { nextTick } = await import('../../web/node_modules/vue/index.mjs');
+  const project = {
+    kind: 'project',
+    projectId: 'demo',
+    repoKey: null,
+  };
+  const session = await workdirSession({ workdir: project });
+  const calls = [];
+
+  globalThis.__workdirProjects = [
+    { id: 'demo', title: 'Демо' },
+    { id: 'other', title: 'Второй проект' },
+    {
+      id: 'archived',
+      title: 'Архивный',
+      archivedAt: '2026-01-01',
+    },
+  ];
+
+  const { wrapper, flushPromises } = await mountWorkdir(t, browser, {
+    workdirProtocol: 1,
+    sessions: [session],
+    archived: [],
+    recentWorkdirs: [project, { kind: 'path', path: '/workspace/other' }, { kind: 'grigdesk' }],
+    previewWorkdir: async () => session.workdirPreview,
+    proposeWorkdir: async (...args) => {
+      calls.push(args);
+
+      return true;
+    },
+  });
+
+  await wrapper.get('[data-context="chat-workdir"]').trigger('click');
+  await flushPromises();
+
+  const dialog = browser.document.querySelector('[data-role="workdir-picker"]');
+
+  assert.equal(Boolean(dialog.closest('[data-mobile-sheet]')), true);
+  assert.equal(dialog.querySelectorAll('.workdir-choice').length, 4);
+  assert.equal(dialog.querySelectorAll('.is-selected').length, 1);
+  assert.match(dialog.textContent, /Папки на подключённом компьютере/u);
+  assert.match(dialog.textContent, /Папка приложения GrigDesk/u);
+  assert.doesNotMatch(dialog.textContent, /Архивный/u);
+
+  const search = dialog.querySelector('input[type="search"]');
+
+  search.value = 'ВТОРОЙ';
+  search.dispatchEvent(new browser.Event('input', { bubbles: true }));
+  await nextTick();
+  assert.equal(dialog.querySelectorAll('.workdir-choice').length, 1);
+  dialog.querySelector('.ui-selectable-row__primary').click();
+  await flushPromises();
+  assert.deepEqual(calls, [['chat', {
+    taskId: null,
+    workdir: {
+      kind: 'project',
+      projectId: 'other',
+      repoKey: null,
+    },
+  }, true]]);
+  assert.equal(wrapper.get('[data-context="chat-workdir"]').attributes('aria-expanded'), 'false');
+});
+
+test('пустой поиск и отказ сервера остаются в диалоге, новый вход очищает поиск', async (t) => {
+  const browser = await browserHarness();
+  const { nextTick } = await import('../../web/node_modules/vue/index.mjs');
+  const session = await workdirSession();
+  const { wrapper, flushPromises } = await mountWorkdir(t, browser, {
+    workdirProtocol: 1,
+    sessions: [session],
+    archived: [],
+    recentWorkdirs: [{ kind: 'path', path: '/workspace/missing' }],
+    previewWorkdir: async () => session.workdirPreview,
+    proposeWorkdir: async () => {
+      session.error = 'Каталог не найден';
+
+      return false;
+    },
+  });
+
+  await wrapper.get('[data-context="chat-workdir"]').trigger('click');
+  await flushPromises();
+
+  const search = browser.document.querySelector('input[type="search"]');
+
+  search.value = 'unknown';
+  search.dispatchEvent(new browser.Event('input', { bubbles: true }));
+  await nextTick();
+  assert.match(browser.document.querySelector('[role="status"]').textContent, /Ничего не найдено/u);
+  buttonByText(browser, 'По пути').click();
+  await flushPromises();
+
+  const field = browser.document.querySelector('input[placeholder="/home/user/project"]');
+
+  field.value = '/workspace/missing';
+  field.dispatchEvent(new browser.Event('input', { bubbles: true }));
+  await nextTick();
+  field.closest('form').dispatchEvent(new browser.Event('submit', { bubbles: true, cancelable: true }));
+  await flushPromises();
+  assert.equal(wrapper.get('[data-context="chat-workdir"]').attributes('aria-expanded'), 'true');
+  assert.match(browser.document.querySelector('[data-role="workdir-picker"]').textContent,
+    /Каталог не найден/u);
+  browser.document.querySelector('[data-role="workdir-picker"] button[aria-label="Закрыть"]').click();
+  await flushPromises();
+  await wrapper.get('[data-context="chat-workdir"]').trigger('click');
+  await flushPromises();
+  assert.equal(browser.document.querySelector('input[type="search"]').value, '');
+  assert.equal(Boolean(browser.document.querySelector('form')), false);
+});
+
+test('папка задачи доступна для просмотра без каталога и ручного ввода', async (t) => {
+  const browser = await browserHarness();
+  const session = await workdirSession({ taskId: 'task' });
+  const { wrapper, flushPromises } = await mountWorkdir(t, browser, {
+    workdirProtocol: 1,
+    sessions: [session],
+    archived: [],
+    previewWorkdir: async () => session.workdirPreview,
+  });
+
+  await wrapper.get('[data-context="chat-workdir"]').trigger('click');
+  await flushPromises();
+  assert.match(browser.document.querySelector('[data-role="workdir-picker"]').textContent,
+    /Папка определяется задачей/u);
+  assert.equal(Boolean(browser.document.querySelector('input')), false);
 });

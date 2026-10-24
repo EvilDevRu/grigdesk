@@ -39,7 +39,7 @@
       <UiButton variant="text" data-role="project-retry" @click="emit('retry')">Повторить</UiButton>
     </div>
 
-    <div v-if="loading && !items.length" class="empty" role="status">Загрузка…</div>
+    <UiLoadingState v-if="loading && !items.length" label="Загрузка…" />
     <div v-else-if="!items.length && !error" class="empty">
       <strong>Проектов пока нет.</strong>
       <span>Создайте первый, чтобы собрать его настройки и репозитории вместе.</span>
@@ -86,8 +86,16 @@
 // готовым, а открытие паспорта — событие наружу.
 import { computed, ref } from 'vue';
 
-import { UiButton, UiInlineMessage, UiPressable, UiSearchInput,
-  UiIconButton, UiPaneHeader, vTooltip } from '../../ui';
+import {
+  UiButton,
+  UiInlineMessage,
+  UiPressable,
+  UiSearchInput,
+  UiIconButton,
+  UiPaneHeader,
+  vTooltip,
+  UiLoadingState,
+} from '../../ui';
 import ProjectIcon from './ProjectIcon.vue';
 import type { ProjectSummary } from '../../../../shared/runtime/projectsContracts';
 

@@ -38,6 +38,7 @@ export { default as UiTabs } from './components/composites/UiTabs.vue';
 export { default as UiToggleButton } from './components/composites/UiToggleButton.vue';
 
 export { default as UiInlineMessage } from './components/feedback/UiInlineMessage.vue';
+export { default as UiLoadingState } from './components/feedback/UiLoadingState.vue';
 export { default as UiProgress } from './components/feedback/UiProgress.vue';
 
 export { default as UiDialog } from './components/overlays/UiDialog.vue';

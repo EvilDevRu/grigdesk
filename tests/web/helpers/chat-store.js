@@ -51,8 +51,8 @@ export function setChatProviders(providers) {
 function storeStubs() {
   return {
     '../ui.ts': `
-      import { messageRef, resolveUiText } from ${JSON.stringify(LOCALE_PATH)};
-      export { messageRef };
+      import { messageRef, resolveUiText, t } from ${JSON.stringify(LOCALE_PATH)};
+      export { messageRef, t };
       globalThis.__chatResolveText = resolveUiText;
     `,
     '../shared/alerts.ts': `
@@ -93,11 +93,17 @@ function storeStubs() {
  * `api` — свой транспорт окна (например, настоящий модуль чата через inject): так два
  * экземпляра стора в одном тесте ведут себя как два окна со своими сетями.
  * `fromServer` — окно грузит историю само, как после F5, а не из готового состояния.
+ * `unloaded` — возвращает исходный store без чтения API и без установки loaded;
+ * тест сам начинает управляемую загрузку и проверяет состояния до её завершения.
  *
  * @param {{ sessions?: object[], archived?: object[], activeId?: string }} state
- * @param {{ api?: object, fromServer?: boolean }} options
+ * @param {{ api?: object, fromServer?: boolean, unloaded?: boolean }} options
  */
-export async function chatStoreFixture(state = {}, { api = null, fromServer = false } = {}) {
+export async function chatStoreFixture(state = {}, {
+  api = null,
+  fromServer = false,
+  unloaded = false,
+} = {}) {
   globalThis.__chatNotifications = [];
   globalThis.__chatDismissed = [];
   globalThis.__chatProviders = defaultProviders();
@@ -127,6 +133,10 @@ export async function chatStoreFixture(state = {}, { api = null, fromServer = fa
     apiHarness.put = async () => ({});
     apiHarness.del = async () => ({});
   }
+  if (unloaded) {
+    return chat;
+  }
+
   if (fromServer) {
     await chat._load();
 

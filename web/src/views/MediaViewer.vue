@@ -186,7 +186,9 @@ watch(() => media.value?.src, () => {
 
 .media-viewer__bar {
   position: absolute;
-  inset: 0 0 auto;
+  top: 0;
+  right: max(0px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%)));
+  left: env(titlebar-area-x, 0px);
   z-index: 1;
   display: flex;
   align-items: center;

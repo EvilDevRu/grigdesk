@@ -2,6 +2,7 @@ import { defineAsyncComponent } from 'vue';
 import type { AsyncComponentLoader, Component } from 'vue';
 
 import LoadFailure from './LoadFailure.vue';
+import { UiLoadingState } from '../ui';
 
 /**
  * Панель обязана завершать ожидание видимым результатом, даже если chunk не загрузился.
@@ -18,7 +19,7 @@ export function asyncView(
       onLoadError(error);
       fail();
     } : undefined,
-    loadingComponent,
+    loadingComponent: loadingComponent || UiLoadingState,
     errorComponent: LoadFailure,
     delay: 0,
     timeout: 30000,

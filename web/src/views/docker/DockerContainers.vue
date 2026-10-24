@@ -20,10 +20,8 @@
       {{ message.text }}
     </UiInlineMessage>
 
-    <div v-if="store.loading && !store.containers.length" class="docker-containers__empty">
-      <strong>Получаем контейнеры…</strong>
-      <p>Здесь появятся проекты и состояние их сервисов.</p>
-    </div>
+    <UiLoadingState v-if="store.loading && !store.containers.length"
+      label="Получаем контейнеры…" description="Здесь появятся проекты и состояние их сервисов." />
     <div v-else-if="!groups.length" class="docker-containers__empty">
       <strong>{{ store.containers.length ? 'Контейнеры не найдены' : 'Контейнеров пока нет' }}</strong>
       <p v-if="store.containers.length">Измените запрос или включите показ незапущенных контейнеров.</p>
@@ -222,6 +220,7 @@ import {
   UiSearchInput,
   confirmDialog,
   vTooltip,
+  UiLoadingState,
 } from '../../ui';
 import { formatPort, formatSize, stateLabel, stateTone } from './format';
 import { dockerSettings } from './settings';

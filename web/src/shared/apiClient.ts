@@ -113,6 +113,14 @@ async function handle(res: Response, path: string): Promise<unknown> {
   const text = await res.text();
   const data: unknown = text ? JSON.parse(text) : null;
 
+  return handleData(res, path, data);
+}
+
+/**
+ * Проверка статуса общая для обычного и потокового чтения.
+ * Авторизация получает тот же ответ, даже если тело ошибки не было JSON.
+ */
+function handleData(res: Response, path: string, data: unknown): unknown {
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith('/api/auth/')) {
       notifyUnauthorized(data);
@@ -236,6 +244,8 @@ async function observed<T>(method: Method, path: string, work: () => Promise<T>)
 export interface RequestOptions {
   // Таймаут попытки в миллисекундах; 0 — без таймаута.
   timeoutMs?: number;
+  // Вместо общего предела ждём указанное время без заголовков или непустых байтов.
+  idleTimeoutMs?: number;
   // Встроенный повтор чтения после обрыва. Опрос, который сам себе повтор, его выключает.
   retry?: boolean;
   // Отмена consumer-а сильнее таймаута и не разрешает встроенный повтор.
@@ -244,6 +254,93 @@ export interface RequestOptions {
 
 // Таймаут чтения по умолчанию: покрывает даже медленный B24-портал.
 const DEFAULT_GET_TIMEOUT_MS = 30000;
+
+/**
+ * Полная история может передаваться долго: отменяем только молчащее соединение.
+ * UTF-8 декодируется по частям, без дополнительной полной копии массива байтов.
+ */
+async function requestWhileReceiving(
+  path: string,
+  opts: RequestInit,
+  idleTimeoutMs: number,
+  consumer?: AbortSignal,
+): Promise<unknown> {
+  const controller = new AbortController();
+  const { signal } = controller;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+  const reset = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      controller.abort(new DOMException('Сервер перестал передавать данные', 'TimeoutError'));
+    }, idleTimeoutMs);
+  };
+  const cancel = () => controller.abort(consumer?.reason);
+  const cancelBody = () => {
+    void reader?.cancel(signal.reason).catch(() => {});
+  };
+
+  consumer?.addEventListener('abort', cancel, { once: true });
+  signal.addEventListener('abort', cancelBody, { once: true });
+
+  try {
+    reset();
+
+    if (consumer?.aborted) {
+      cancel();
+    }
+
+    const res = await fetch(url(path), { ...opts, signal });
+
+    reset();
+
+    let text = '';
+
+    if (res.body) {
+      reader = res.body.getReader();
+
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const part = await reader.read();
+
+        if (part.done) {
+          break;
+        }
+        if (part.value.byteLength) {
+          reset();
+          text += decoder.decode(part.value, { stream: true });
+        }
+      }
+
+      text += decoder.decode();
+    }
+
+    clearTimeout(timer);
+
+    if (signal.aborted) {
+      throw signal.reason;
+    }
+
+    let data: unknown = null;
+
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch (error) {
+      if (res.ok) {
+        throw error;
+      }
+    }
+
+    return handleData(res, path, data);
+  } finally {
+    clearTimeout(timer);
+    consumer?.removeEventListener('abort', cancel);
+    signal.removeEventListener('abort', cancelBody);
+    reader?.releaseLock();
+  }
+}
 
 /**
  * Один запрос к серверу: тело сериализуется JSON-ом, ответ отдаётся как `unknown`.
@@ -304,7 +401,9 @@ async function request(
     const start = performance.now();
 
     try {
-      const result = await handle(await attempt(), path);
+      const result = isGet && options.idleTimeoutMs && options.idleTimeoutMs > 0
+        ? await requestWhileReceiving(path, opts, options.idleTimeoutMs, options.signal)
+        : await handle(await attempt(), path);
 
       reportAttempt(method, path, elapsed(start), number);
 

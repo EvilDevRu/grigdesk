@@ -309,8 +309,12 @@ export interface ProviderInstallation {
   nativeBinDirs?: string[];
 }
 
+export interface ProviderInstallationContext {
+  npm: string | null;
+}
+
 export interface ExecutorAdapter {
-  installation?: (config: unknown) => ProviderInstallation;
+  installation?: (config: unknown, context?: ProviderInstallationContext) => ProviderInstallation;
   studio3d?: Studio3dProvider;
   type?: string;
   kind?: string;

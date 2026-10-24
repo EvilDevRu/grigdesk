@@ -74,7 +74,7 @@ for (const kind of ['portable', 'release', 'installed']) {
   }
 }
 
-test('MP-MOVED барьер: собранный helper без TTY сохраняет open после переноса', async (t) => {
+test('MP-MOVED барьер: собранный helper без TTY показывает справку после переноса', async (t) => {
   const box = await sourceMenu(t);
   const initial = path.join(box.home, 'initial-runtime');
   const moved = path.join(box.home, 'moved-runtime');
@@ -101,5 +101,7 @@ test('MP-MOVED барьер: собранный helper без TTY сохраня
 
   assert.equal(result.code, 0, session.output());
   assert.doesNotMatch(session.output(), menuTitle);
-  await box.waitFor(() => box.calls().some((call) => call.startsWith('app ')));
+  assert.match(session.output(), /grigdesk-ctl server start/u);
+  assert.deepEqual(box.calls(), []);
+  assert.deepEqual(box.requests(), []);
 });

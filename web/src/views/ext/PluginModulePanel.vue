@@ -8,7 +8,8 @@
       :compact="compact"
       :presentation="presentation"
     />
-    <UiInlineMessage v-else :tone="state === 'loading' ? 'neutral' : 'warning'">
+    <UiLoadingState v-else-if="state === 'loading'" :label="message" />
+    <UiInlineMessage v-else tone="warning">
       {{ message }}
     </UiInlineMessage>
   </section>
@@ -18,7 +19,11 @@
 import { computed, onBeforeUnmount, onErrorCaptured, shallowRef, ref, watch } from 'vue';
 import type { Component } from 'vue';
 import type { PluginWebModule } from '../../../../shared/plugins/pluginsContracts.ts';
-import { UiInlineMessage, t } from '../../ui.ts';
+import {
+  UiInlineMessage,
+  t,
+  UiLoadingState,
+} from '../../ui.ts';
 import { usePluginsStore } from '../../stores/plugins.ts';
 import { loadPluginModule } from '../../pluginRuntime/loader.ts';
 import { createPluginContext } from '../../pluginRuntime/context.ts';

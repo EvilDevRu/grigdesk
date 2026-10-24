@@ -6,7 +6,7 @@
         <span>GrigDesk · Задача Битрикс24</span>
         <UiIconButton label="Закрыть окно" @click="closeWindow">✕</UiIconButton>
       </header>
-      <p v-if="target" class="task-window-waiting" role="status">Подключаемся к GrigDesk…</p>
+      <UiLoadingState v-if="target" label="Подключаемся к GrigDesk…" variant="document" />
       <p v-else class="task-window-waiting" role="alert">
         Не удалось определить задачу. Закройте окно и откройте карточку снова.
       </p>
@@ -21,7 +21,7 @@ import { useAuthStore } from '../stores/auth.ts';
 import { useChatStore } from '../stores/chat.ts';
 import type { SurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
 import { useUiStore } from '../stores/ui.ts';
-import { UiIconButton } from '../ui';
+import { UiIconButton, UiLoadingState } from '../ui';
 import TaskModal from './TaskModal.vue';
 
 const props = defineProps<{

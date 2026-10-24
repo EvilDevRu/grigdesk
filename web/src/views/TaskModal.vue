@@ -17,7 +17,6 @@
             <span class="mid mono">#{{ taskId }}</span>
           </div>
           <h3 id="task-modal-title" class="mtitle" tabindex="-1">
-            <UiSpinner v-if="loading && !detail" decorative />
             {{ detail?.title || (loading ? 'Загрузка…' : 'Задача') }}
           </h3>
         </div>
@@ -93,7 +92,8 @@
             </UiButton>
           </div>
           <div class="brief-scroll">
-            <div v-if="editForm" class="task-edit" aria-label="Редактирование задачи">
+            <UiLoadingState v-if="loading && !detail" label="Читаю данные задачи…" variant="document" />
+            <div v-else-if="editForm" class="task-edit" aria-label="Редактирование задачи">
               <UiField
                 label="Заголовок"
                 required
@@ -169,9 +169,8 @@
                 </UiField>
               </div>
 
-              <div v-if="editOptionsBusy" class="edit-options-state">
-                <UiSpinner decorative /> Загружаю исполнителей и проекты…
-              </div>
+              <UiLoadingState v-if="editOptionsBusy" label="Загружаю исполнителей и проекты…"
+                variant="inline" />
               <div v-else-if="editOptionsError" class="edit-options-state bad">
                 <span>{{ editOptionsError }}</span>
                 <UiButton data-role="task-edit-options-retry" @click="loadEditOptions">
@@ -619,9 +618,7 @@
           role="tabpanel"
           aria-labelledby="task-tab-comments"
         >
-          <div v-if="comLoading && comments === null" class="tmuted">
-            <UiSpinner decorative /> загрузка комментариев…
-          </div>
+          <UiLoadingState v-if="comLoading && comments === null" label="загрузка комментариев…" />
           <div v-else-if="comments && !comments.length" class="tmuted">Комментариев нет.</div>
           <div v-else-if="comments" class="comlist">
             <div v-for="c in comments" :key="c.mid" class="com">
@@ -1009,6 +1006,7 @@ import {
   UiTextarea,
   UiTooltip,
   vTooltip,
+  UiLoadingState,
 } from '../ui';
 import { useUiStore } from '../stores/ui.ts';
 import { useTasksStore } from '../stores/tasks.ts';
