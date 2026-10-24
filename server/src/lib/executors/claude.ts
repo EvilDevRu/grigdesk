@@ -1661,6 +1661,33 @@ export default {
   scopedWorkspace: true,
   workToolsTransport: 'mcp',
   install: 'npm i -g @anthropic-ai/claude-code && claude login',
+  login: 'claude login',
+  /**
+   * Сервер исполняет только эту декларацию; вход остаётся отдельным действием.
+   * Обновление проверяет настроенную копию, запасная команда сохраняет прежний путь.
+   */
+  installation(config: ClaudeConfig) {
+    const command = 'curl -fsSL https://claude.ai/install.sh | bash';
+    const install = {
+        executable: '/bin/bash',
+        args: ['-o', 'pipefail', '-c', command],
+        command,
+        fallbackCommand: 'npm i -g @anthropic-ai/claude-code && claude login',
+    };
+
+    return {
+      install,
+      update: {
+        executable: config.claudeBin,
+        args: ['install', 'latest'],
+        command: [config.claudeBin, ...['install', 'latest']].join(' '),
+        fallbackCommand: [config.claudeBin, ...['install', 'latest']].join(' '),
+      },
+      loginCommand: 'claude login',
+      nativeBinDirs: [path.join(os.homedir(), '.local', 'bin')],
+    };
+  },
+
   // Официальная страница состояния вендора. Всплывашка ведёт туда, когда лимиты не
   // пришли не по нашей вине: иначе сбой Anthropic человек разбирает как поломку GrigDesk.
   statusPage: 'https://status.claude.com',

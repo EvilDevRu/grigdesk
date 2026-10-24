@@ -1,11 +1,5 @@
-// Только встроенные инструменты могут монтировать Vue-панель. Серверный manifest
-// выбирает место ссылки (`nav.group`), но не исполняет произвольный frontend-код.
-// Состав и подписи живут в catalog.js; здесь к каждому инструменту добавляется его
-// панель, поэтому импорт этого модуля означает готовность грузить Monaco и терминал.
-//
-// Страница пользовательского плагина — тоже инструмент, но без своего Vue: ядро
-// показывает её одной общей панелью-iframe, а сам плагин рисует, что хочет, и ходит
-// в API сам. Такие инструменты собираются из стора плагинов на лету (`toolsOf`).
+// Встроенные панели, страницы api1 и доверенные модули api2 имеют один реестр дока.
+// Manifest задаёт навигацию; исполнение модуля изолирует отдельная ленивая панель.
 import { uiLocale } from '../../ui.ts';
 import { translator } from '../../../../shared/i18n/catalogs.ts';
 import { asyncView } from '../asyncView.ts';
@@ -13,6 +7,7 @@ import type { Component } from 'vue';
 import CodePanelLoading from '../../views/code/codePanelLoading.ts';
 import { TOOL_CATALOG, pluginPageRoute } from './catalog.ts';
 import type { ToolMeta } from './catalog.ts';
+import type { PluginWebModule } from '../../../../shared/plugins/pluginsContracts.ts';
 
 export interface ToolEntry extends ToolMeta {
   // Встроенный инструмент без панели (терминал ведёт своя страница) остаётся в реестре
@@ -21,6 +16,7 @@ export interface ToolEntry extends ToolMeta {
   // Пропсы панели сверх общих (active/compact/presentation/intents): у панели-iframe
   // это адрес страницы плагина.
   panelProps?: Record<string, unknown>;
+  detachable?: boolean;
 }
 
 // Страница плагина в объёме, который читает реестр: то, что отдаёт стор плагинов.
@@ -34,6 +30,7 @@ export interface PluginWebPage {
 
 interface PluginsPagesPort {
   webPages: PluginWebPage[];
+  modulePages?: Array<Omit<PluginWebPage, 'src'> & { descriptor: PluginWebModule }>;
 }
 
 // Панель на инструмент. Ключи совпадают с `id` каталога — это и есть условие
@@ -49,6 +46,7 @@ const PANELS: Record<string, Component> = {
 };
 
 const PluginFramePanel = asyncView(() => import('../../views/ext/PluginFramePanel.vue'));
+const PluginModulePanel = asyncView(() => import('../../views/ext/PluginModulePanel.vue'));
 
 export const TOOL_REGISTRY: ToolEntry[] = TOOL_CATALOG.map((item) => ({
   ...item,
@@ -67,7 +65,9 @@ export const TOOL_BY_ROUTE = new Map(TOOL_REGISTRY.map((item) => [item.route, it
  * встроенные. Горячей клавиши нет: сочетания раздаёт каталог встроенных.
  */
 export function pluginTools(plugins: PluginsPagesPort): ToolEntry[] {
-  return plugins.webPages.map((page) => ({
+  const modules = plugins.modulePages ?? [];
+  const moduleIds = new Set(modules.map((page) => page.id));
+  const frames = plugins.webPages.filter((page) => !moduleIds.has(page.id)).map((page) => ({
     id: page.id,
     route: pluginPageRoute(page.id),
     label: page.label,
@@ -78,6 +78,23 @@ export function pluginTools(plugins: PluginsPagesPort): ToolEntry[] {
     component: PluginFramePanel,
     panelProps: { src: page.src, label: page.label },
   }));
+
+  return [...frames, ...modules.map((page) => ({
+    id: page.id,
+    route: pluginPageRoute(page.id),
+    label: page.label,
+    icon: page.icon,
+    order: page.order,
+    hotkey: '',
+    plugin: page.id,
+    component: PluginModulePanel,
+    panelProps: {
+      pluginId: page.id,
+      descriptor: page.descriptor,
+      label: page.label,
+    },
+    detachable: false,
+  }))];
 }
 
 /**

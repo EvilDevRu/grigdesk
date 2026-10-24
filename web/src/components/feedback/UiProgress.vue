@@ -1,7 +1,7 @@
 <template>
   <div
     class="ui-progress"
-    :class="`ui-progress--${normalizedTone}`"
+    :class="[`ui-progress--${normalizedTone}`, { 'ui-progress--line': size === 'line' }]"
     role="progressbar"
     :aria-label="label"
     :aria-valuemin="min"
@@ -31,6 +31,8 @@ const props = withDefaults(
     valueText?: string;
     indeterminate?: boolean;
     tone?: UiActionTone;
+    // line — тонкая линия во всю ширину под шапкой окна или панели, без скругления.
+    size?: 'default' | 'line';
   }>(),
   {
     value: 0,
@@ -39,6 +41,7 @@ const props = withDefaults(
     valueText: undefined,
     indeterminate: false,
     tone: 'accent',
+    size: 'default',
   },
 );
 

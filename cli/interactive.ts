@@ -8,6 +8,7 @@ import { UNIT } from './server.ts';
 import { readText, runAttached } from './system.ts';
 import { runMenu } from './menu.ts';
 import { runBuildProgress } from './buildProgress.ts';
+import { runPresentedCommand } from './presentation.ts';
 
 /**
  * Наличие обоих терминальных потоков необходимо даже при явном build.
@@ -57,5 +58,5 @@ export async function runEntry(argv: readonly string[]): Promise<number> {
     });
   }
 
-  return runCli(argv);
+  return interactive && !argv.includes('--json') ? runPresentedCommand(root, argv) : runCli(argv);
 }

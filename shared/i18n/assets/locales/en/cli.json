@@ -1,6 +1,15 @@
 {
   "question": "What would you like to do?",
   "navigation": "↑↓ select · Enter run · Esc back",
+  "rootNavigation": "↑↓ select · Enter run · Esc exit",
+  "compactNavigation": "↑↓ select · Enter · Esc back",
+  "compactRootNavigation": "↑↓ select · Enter · Esc exit",
+  "menuServerState": "Server {marker} {state}",
+  "menuWindowState": "Window {marker} {state}",
+  "menuGroups": {
+    "application": "APPLICATION",
+    "developer": "DEVELOPER TOOLS"
+  },
   "continue": "Enter or Esc — back",
   "open": "Open window",
   "openDescription": "start GrigDesk",
@@ -108,5 +117,51 @@
       "pack": "Bundle: pack",
       "publish": "Bundle: publish"
     }
+  },
+  "screens": {
+    "command": "Command result",
+    "help": "Help",
+    "version": "Version",
+    "running": "◐ Running…",
+    "done": "✓ Done",
+    "failed": "✗ Command exited with code {code}",
+    "cancel": "Ctrl+C cancel",
+    "inputNavigation": "Enter confirm · Esc cancel",
+    "resultNavigation": "↑↓ / PgUp / PgDn — scroll · Enter / Esc — back",
+    "page": "{first}–{last} of {total} · ↑↓ / PgUp / PgDn",
+    "omitted": "Showing the log tail; omitted lines: {count}",
+    "window": "Window",
+    "links": "LINKS",
+    "next": "NEXT",
+    "noDevices": "No paired devices yet.",
+    "deviceId": "ID: {id}",
+    "deviceScope": "Access: {scope}",
+    "revoked": "○ Access revoked",
+    "active": "● Access enabled",
+    "scanQr": "Scan the QR in the app or use the pairing string.",
+    "qrSize": "For QR, enlarge the terminal to at least {columns}×{rows}. Pairing string below.",
+    "pairingExpiry": "Valid for 10 minutes, one use",
+    "states": {
+      "ambiguous": "multiple containers",
+      "unhealthy": "health check failed",
+      "docker_unavailable": "Docker unavailable",
+      "not_deployed": "not deployed",
+      "online": "online",
+      "connecting": "connecting",
+      "waiting_vpn": "waiting for VPN",
+      "offline": "offline",
+      "error": "error"
+    },
+    "hints": {
+      "startServer": "Start server: grigdesk-ctl server start",
+      "serverLog": "Server log: grigdesk-ctl server logs",
+      "installServer": "Install service: deploy/install.sh --no-autostart",
+      "installWindow": "Install window: grigdesk-ctl desktop install",
+      "openWindow": "Open window: grigdesk-ctl",
+      "startRelay": "Start relay: grigdesk-ctl relay start",
+      "relayLog": "Relay log: grigdesk-ctl relay logs",
+      "selectRelay": "Select relay: GRIGDESK_RELAY_PROJECT in .env"
+    },
+    "windowMissing": "not installed"
   }
 }

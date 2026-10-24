@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { insideUnit, readSettings } from '../../cli/commands.ts';
+import { insideUnit, insideWindowScope, readSettings } from '../../cli/commands.ts';
 import { deriveServerState, gateReason, parseShow } from '../../cli/server.ts';
 import type { UnitInfo } from '../../cli/server.ts';
 import type { GrigDeskProbe } from '../../shared/runtime/grigDeskReadiness.ts';
@@ -88,6 +89,20 @@ test('CS-4 точный сегмент cgroup и несколько строк v
   assert.equal(insideUnit('0::/app-gnome-terminal.scope', unitName), false);
   assert.equal(insideUnit(`0::/${unitName}-x`, unitName), false);
   assert.equal(insideUnit(`1:cpu:/other\n2:memory:/${unitName}`, unitName), true);
+});
+
+test('CS-4b scope окна Electron: только app-<executableName>-<pid>.scope', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../../desktop/package.json', import.meta.url), 'utf8'));
+  const name = manifest.build.executableName;
+  const slice = '0::/user.slice/user-1000.slice/user@1000.service/app.slice';
+
+  assert.equal(insideWindowScope(`${slice}/app-${name}-4242.scope`), true);
+  assert.equal(insideWindowScope(`1:cpu:/other\n2:memory:/app.slice/app-${name}-7.scope`), true);
+  assert.equal(insideWindowScope(`${slice}/app-org.gnome.Terminal.slice/vte-spawn-1f.scope`), false);
+  assert.equal(insideWindowScope(`${slice}/app-${name}-4242.scope-x`), false);
+  assert.equal(insideWindowScope(`${slice}/app-${name}x-4242.scope`), false);
+  assert.equal(insideWindowScope(`${slice}/app-${name}-pid.scope`), false);
+  assert.equal(insideWindowScope(''), false);
 });
 
 test('CS-5 настройки: приоритет env, данные файла и defaults', () => {
@@ -290,6 +305,22 @@ test('CS-15 сторож раньше внешних вызовов, force ра�
 
   assert.equal((await box.run(['server', 'stop', '--force'])).code, 0);
   assert.ok(box.calls().includes(`systemctl --user stop ${unitName}`));
+});
+
+test('CS-15b сторож видит ход агента сервера, поднятого окном', async (t) => {
+  const box = await createSandbox(t);
+
+  writeFileSync(path.join(box.home, 'cgroup'), '0::/user.slice/app.slice/app-grigdesk-4242.scope');
+
+  for (const action of ['stop', 'restart']) {
+    const result = await box.run(['server', action]);
+
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /ход агента/);
+    assert.match(result.stderr, /--force/);
+  }
+
+  assert.deepEqual(box.calls(), []);
 });
 
 test('CS-16 отказ systemd передаёт stderr', async (t) => {

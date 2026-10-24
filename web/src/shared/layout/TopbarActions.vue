@@ -13,5 +13,7 @@
 </script>
 
 <style scoped>
-.tba { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tba { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
+
+.tba :deep(.title) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

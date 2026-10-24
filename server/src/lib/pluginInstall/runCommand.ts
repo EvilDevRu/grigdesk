@@ -44,6 +44,7 @@ export interface PluginCommandOptions {
   timeoutMs: number;
   signal?: AbortSignal;
   onStderr?: (chunk: string) => void;
+  onStdout?: (chunk: string) => void;
   ownership?: CommandOwnership;
   workspaceBudget?: PluginWorkspaceBudget;
 }
@@ -122,6 +123,7 @@ export const runCommand: PluginCommandRunner = (file, args, options) => new Prom
   const stdout = new OutputTail();
   const stderr = new OutputTail();
   const decoder = new StringDecoder('utf8');
+  const stdoutDecoder = new StringDecoder('utf8');
   let aborted = false;
   let timedOut = false;
   let failed = false;
@@ -146,9 +148,9 @@ export const runCommand: PluginCommandRunner = (file, args, options) => new Prom
    * Чужой callback не может бросить из обработчика потока и оставить writer живым.
    * Диагностика callback остаётся за безопасной границей результата.
    */
-  const deliver = (chunk: string) => {
+  const deliver = (chunk: string, callback: ((chunk: string) => void) | undefined) => {
     try {
-      options.onStderr?.(chunk);
+      callback?.(chunk);
     } catch {
       failed = true;
       stop();
@@ -160,16 +162,26 @@ export const runCommand: PluginCommandRunner = (file, args, options) => new Prom
   }, options.timeoutMs);
 
   options.signal?.addEventListener('abort', onAbort, { once: true });
-  child.stdout?.on('data', (chunk: Buffer) => stdout.append(chunk));
+  child.stdout?.on('data', (chunk: Buffer) => {
+    stdout.append(chunk);
+    deliver(stdoutDecoder.write(chunk), options.onStdout);
+  });
+  child.stdout?.once('end', () => {
+    const tail = stdoutDecoder.end();
+
+    if (tail) {
+      deliver(tail, options.onStdout);
+    }
+  });
   child.stderr?.on('data', (chunk: Buffer) => {
     stderr.append(chunk);
-    deliver(decoder.write(chunk));
+    deliver(decoder.write(chunk), options.onStderr);
   });
   child.stderr?.once('end', () => {
     const tail = decoder.end();
 
     if (tail) {
-      deliver(tail);
+      deliver(tail, options.onStderr);
     }
   });
   child.on('message', (raw) => {

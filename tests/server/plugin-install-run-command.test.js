@@ -164,3 +164,53 @@ test('RC12-IPC: быстрый native exit не теряет outcome до зак
     assert.equal(result.code, 0, `быстрое завершение ${index}`);
   }
 });
+
+test('stdout callback приходит до выхода и сохраняет разрезанный UTF-8', async (t) => {
+  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = await mkdtemp(join(tmpdir(), 'provider-stdout-'));
+  const release = join(root, 'release');
+  const stdout = [];
+  const stderr = [];
+  let closed = false;
+  let callbacksAfterClose = 0;
+  const script = `
+    const fs = require('node:fs');
+    process.stdout.write(Buffer.from([0xd1]));
+    setTimeout(() => {
+      process.stdout.write(Buffer.from([0x8f]));
+      process.stderr.write('диагностика');
+      const timer = setInterval(() => {
+        if (fs.existsSync(${JSON.stringify(release)})) {
+          clearInterval(timer);
+        }
+      }, 5);
+    }, 25);
+  `;
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const result = await runCommand(process.execPath, ['-e', script], {
+    env: {},
+    timeoutMs: 1000,
+    onStdout(chunk) {
+      stdout.push(chunk);
+      callbacksAfterClose += Number(closed);
+
+      if (stdout.join('') === 'я') {
+        void writeFile(release, 'выход разрешён');
+      }
+    },
+    onStderr: (chunk) => stderr.push(chunk),
+  });
+
+  closed = true;
+  assert.equal(stdout.join(''), 'я', 'Живой stdout callback не вызван, child ждал его барьера');
+  assert.equal(result.timedOut, false, 'Выход разрешает callback, а не таймаут');
+  assert.equal(result.code, 0);
+  assert.equal(result.stdout, 'я');
+  assert.equal(stderr.join(''), 'диагностика');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(callbacksAfterClose, 0);
+});

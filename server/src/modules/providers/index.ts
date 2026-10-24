@@ -6,7 +6,6 @@
 import { resolveWorkdirCapability } from '../../lib/chat/workdir.ts';
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { execFile } from 'node:child_process';
 import { getProviderAdapters, isChatExecutor, supportsScopedWorkspace } from '../../lib/executors/index.ts';
 import { normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts';
 import type { ExecutorAdapter } from '../../lib/executors/index.ts';
@@ -30,12 +29,15 @@ import type { LiveUsage } from '../../lib/providerUsageLive.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
 import { registerProviderNativeSettings } from './settings.ts';
 import { registerProviderCredentials } from './credentials.ts';
+import { registerProviderInstallations } from './installations.ts';
+import { ProviderInstallService, type ProviderInstallOptions } from '../../lib/providerInstall/service.ts';
 
 // Серверный config в объёме, который читает реестр. Полная его форма объявлена
 // в config.ts; адаптеры получают его целиком и разбирают сами.
 type ProvidersConfig = {
   modelsPath: string;
   providerUsageSeenPath: string;
+  providerInstallStatePath?: string;
   // Корневой .env: туда окно «Ключи доступа» пишет объявленные исполнителем ключи.
   envPath?: string;
 };
@@ -49,6 +51,7 @@ export interface ProvidersModuleOptions {
   getModelsRegistry?: typeof getModelsRegistry;
   // Период фонового чтения лимитов; офлайн-тесты укорачивают его до миллисекунд.
   usageTickMs?: number;
+  providerInstall?: ProviderInstallOptions;
   // Окружение, которое видят исполнители. Тесты подменяют его, чтобы не трогать process.env.
   env?: NodeJS.ProcessEnv;
 }
@@ -201,6 +204,7 @@ async function providersModule(
       const { ok, version } = probe;
       const distribution = ex.distribution?.(config, probe) || null;
       const managed = distribution?.managed === true;
+      const installation = managed ? null : ex.installation?.(config);
       // Режимы прав спрашиваем у самого CLI (как и эффорты) — список не хардкодим.
       let modes = null;
 
@@ -251,7 +255,18 @@ async function providersModule(
         // Установка и login могут быть разными сценариями. Старые адаптеры пока
         // объявляют одной строкой install, поэтому для них сохраняем прежнее поведение.
         setupCommand: managed ? null : ok ? (ex.login || ex.install || null) : (ex.install || null),
-        canUpdate: !managed && !!ex.updateCmd,
+        canUpdate: !managed && (installation ? !!installation.update : !!ex.updateCmd),
+        ...(installation ? {
+          installation: {
+            installCommand: installation.install.command,
+            updateCommand: installation.update?.command || null,
+            fallbackInstallCommand: installation.install.fallbackCommand,
+            fallbackUpdateCommand: installation.update?.fallbackCommand || null,
+            loginCommand: installation.loginCommand,
+            canInstall: !ok,
+            canUpdate: !!ok && !!installation.update,
+          },
+        } : {}),
         // Сообщает ли исполнитель о своих MCP-серверах. Сам список сюда НЕ кладём:
         // адаптер может делать health-check или читать конфиг, UI ходит отдельным маршрутом.
         mcp: typeof ex.mcpStatus === 'function',
@@ -593,7 +608,10 @@ async function providersModule(
       if (typeof ex.latestVersion !== 'function') continue;
       let latest = '';
       try { latest = String(await ex.latestVersion(config) || ''); } catch { latest = ''; }
-      if (!latest) continue; // сеть молчит — оставляем прошлый результат
+      // Сеть молчит — свежая версия CLI сравнивается с последней известной: иначе после
+      // установки индикатор «устарел» висел бы до следующего удачного ответа реестра.
+      latest ||= updates.get(ex.id)?.latest || '';
+      if (!latest) continue;
       const current = (await ex.probe(config))?.version || '';
       const outdated = isOutdated(current, latest);
       const prev = updates.get(ex.id);
@@ -814,42 +832,22 @@ async function providersModule(
     refreshModels: () => modelsOf(config, { refresh: true }),
   });
 
-  /**
-   * Обновление CLI исполнителя (кнопка в настройках). Команда — свойство исполнителя
-   * (`updateCmd`), ядро про вендоров не знает. После обновления сбрасываем кэши:
-   * список моделей пересобирается из НОВОГО бинаря — так «вышел Opus 5» доезжает
-   * до GrigDesk без правок кода.
-   */
-  fastify.post<ProviderRoute>('/api/providers/:id/update', async (request, reply) => {
-    const ex = (await adaptersOf()).get(String(request.params.id));
-    if (!ex) return reply.code(404).send({ error: 'unknown_provider' });
-    if (ex.distribution?.(config)?.managed === true) {
-      return reply.code(400).send({ error: 'no_update', message: 'Обновите управляемую поставку отдельно' });
-    }
-    if (!ex.updateCmd) {
-      return reply.code(400).send({
-        error: 'no_update', message: `у исполнителя ${ex.name} нет команды обновления`,
-      });
-    }
-    const before = (await ex.probe(config))?.version || '';
-    const updateCmd = ex.updateCmd;
-    const out = await new Promise<{ ok: boolean; text: string }>((resolve) => {
-      execFile(String(ex.bin(config)), updateCmd, {
-        timeout: 10 * 60 * 1000,
-        maxBuffer: 8 * 1024 * 1024,
-      }, (err, stdout, stderr) => {
-        resolve({ ok: !err, text: ((stdout || '') + (stderr || '')).trim().slice(-2000) });
-      });
-    });
-
-    registryCache.clear();
-    const after = (await ex.probe(config))?.version || '';
-    // Версия сменилась → каталог моделей нового CLI (скан бинаря) подхватится сразу.
-    await modelsOf(config, { refresh: true }).catch(() => null);
-    // И индикатор «доступно обновление» должен погаснуть сразу, а не через 6 часов.
-    await checkUpdates().catch(() => null);
-    return { ok: out.ok, before, after, changed: before !== after, output: out.text };
+  const installationService = new ProviderInstallService({
+    ...opts.providerInstall,
+    statePath: config.providerInstallStatePath,
+    config,
+    env: serviceEnv,
+    adaptersOf,
+    latestOf: (id) => updates.get(id)?.latest,
+    refreshModels: () => modelsOf(config, { refresh: true }),
+    invalidate: async () => {
+      registryCache.clear();
+      await checkUpdates().catch(() => null);
+    },
+    broadcast: (snapshot) => fastify.sse?.broadcast?.('provider-install', snapshot),
   });
+
+  registerProviderInstallations(fastify, installationService);
 }
 
 export default fp(providersModule, { name: 'module-providers' });

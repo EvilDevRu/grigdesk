@@ -50,7 +50,7 @@ export async function clientBrowser(t, options = {}) {
     configFile: false,
     envFile: false,
     cacheDir,
-    plugins: [{
+    plugins: [...(options.vitePlugins || []), {
       name: 'client-fixture-api',
       configureServer(vite) {
         vite.middlewares.use((req, res, next) => {
@@ -158,7 +158,7 @@ export async function clientBrowser(t, options = {}) {
       host: '127.0.0.1',
       port: await freePort(),
       strictPort: true,
-      hmr: false,
+      hmr: options.hmr ?? false,
       watch: null,
       fs: { allow: [root] },
     },
@@ -187,6 +187,7 @@ export async function clientBrowser(t, options = {}) {
 
   return {
     browser,
+    server,
     origin: server.resolvedUrls.local[0],
     cacheDir: server.config.cacheDir,
     artifacts,

@@ -9,6 +9,7 @@
       <UiIconButton
         class="alert-bell"
         data-context="alert-history"
+        variant="link"
         role="rail"
         :label="triggerLabel"
         v-tooltip="t('core.notificationHistory')"

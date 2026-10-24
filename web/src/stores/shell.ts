@@ -124,8 +124,16 @@ export const useShellStore = defineStore('shell', {
     disconnect() {
       return shellAction('POST', '/disconnect');
     },
-    unlock() {
-      return shellAction('POST', '/unlock');
+    /**
+     * Успешная разблокировка возвращает свежий снимок, сразу снимающий блокирующий слой.
+     * Ревизия защищает его от запоздалого long-poll со старым состоянием locked.
+     */
+    async unlock() {
+      const state = await shellAction('POST', '/unlock') as ShellState;
+
+      this.apply(state);
+
+      return state;
     },
     scan() {
       return shellAction('POST', '/scan') as Promise<{ pairing: string }>;

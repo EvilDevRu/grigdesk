@@ -114,6 +114,13 @@
   background: color-mix(in srgb, var(--ink-mid) 38%, transparent);
 }
 
+/* Линия под шапкой окна: занимает место разделителя, поэтому дорожка совпадает с линией границ. */
+.ui-progress--line {
+  height: 2px;
+  border-radius: 0;
+  background: var(--line);
+}
+
 .ui-progress__value,
 .ui-progress__bar {
   display: block;

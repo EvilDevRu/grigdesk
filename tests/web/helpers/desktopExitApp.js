@@ -124,7 +124,7 @@ export async function desktopExitApp(t, options = {}) {
     stubs[`./stores/${name}.ts`] = `export const ${exported} = () => globalThis.__desktopExitApp.other;`;
   }
 
-  for (const name of ['TaskModal', 'DiffModal', 'DocumentModal']) {
+  for (const name of ['TaskModal', 'DiffModal', 'DocumentModal', 'MediaViewer']) {
     stubs[`./views/${name}.vue`] = 'export default { render: () => null };';
   }
 

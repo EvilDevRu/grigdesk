@@ -56,12 +56,21 @@ test('машины: список и несовместимые версии до
   assert.match(wrapper.text(), /1\.0/);
   assert.match(wrapper.text(), /Этот компьютер/);
 
-  const remove = wrapper.findAll('button').find((button) => button.text() === 'Удалить');
+  const menu = wrapper.findAll('button').find((button) =>
+    button.attributes('aria-label') === 'Параметры машины «Домашний ПК»');
 
-  await remove.trigger('click');
+  await menu.trigger('click');
+  await nextTick();
+
+  const remove = () => [...document.querySelectorAll('button')]
+    .find((button) => button.textContent.trim() === 'Удалить');
+
+  remove().click();
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(actions, []);
-  await remove.trigger('click');
+  await menu.trigger('click');
+  await nextTick();
+  remove().click();
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(actions, [['remove', 'machine']]);
   await wrapper.findAll('button').find((button) => button.text() === 'Добавить машину').trigger('click');
@@ -127,6 +136,9 @@ test('PHONE-R1: причины нового транспорта дают сле
     delete globalThis.__relayDiagnosticShell;
   });
 
+  await wrapper.find('[data-context="machine-connection-details"]').trigger('click');
+  await nextTick();
+
   for (const locale of ['ru', 'en']) {
     component.setUiLocale(locale);
 
@@ -137,7 +149,8 @@ test('PHONE-R1: причины нового транспорта дают сле
       const detail = connectionDetailText({ code }, locale);
 
       assert.ok(detail.trim(), `${locale}/${code}: причина не должна исчезать в mapper`);
-      assert.ok(wrapper.text().includes(detail));
+      assert.ok(code === 'offline'
+        ? wrapper.find('.machine-recovery').exists() : wrapper.text().includes(detail));
       assert.doesNotMatch(detail, /GRIGDESK_|VPN|Exception|[a-f0-9]{64}/);
       assert.ok(wrapper.find('.machine-address').text().trim(), 'relay-only должен иметь подпись адреса');
     }

@@ -1,6 +1,15 @@
 {
   "question": "Что сделать?",
   "navigation": "↑↓ выбор · Enter выполнить · Esc назад",
+  "rootNavigation": "↑↓ выбор · Enter выполнить · Esc выход",
+  "compactNavigation": "↑↓ выбор · Enter · Esc назад",
+  "compactRootNavigation": "↑↓ выбор · Enter · Esc выход",
+  "menuServerState": "Сервер {marker} {state}",
+  "menuWindowState": "Окно {marker} {state}",
+  "menuGroups": {
+    "application": "ПРИЛОЖЕНИЕ",
+    "developer": "РАЗРАБОТЧИКУ"
+  },
   "continue": "Enter или Esc — назад",
   "open": "Открыть окно",
   "openDescription": "запустить GrigDesk",
@@ -108,5 +117,51 @@
       "pack": "Комплект: архив",
       "publish": "Комплект: публикация"
     }
+  },
+  "screens": {
+    "command": "Результат команды",
+    "help": "Справка",
+    "version": "Версия",
+    "running": "◐ Выполняется…",
+    "done": "✓ Готово",
+    "failed": "✗ Команда завершилась с кодом {code}",
+    "cancel": "Ctrl+C прервать",
+    "inputNavigation": "Enter подтвердить · Esc отмена",
+    "resultNavigation": "↑↓ / PgUp / PgDn — просмотр · Enter / Esc — назад",
+    "page": "{first}–{last} из {total} · ↑↓ / PgUp / PgDn",
+    "omitted": "Показан хвост журнала, пропущено строк: {count}",
+    "window": "Окно",
+    "links": "СВЯЗИ",
+    "next": "ДАЛЬШЕ",
+    "noDevices": "Привязанных устройств пока нет.",
+    "deviceId": "ID: {id}",
+    "deviceScope": "Доступ: {scope}",
+    "revoked": "○ Доступ отозван",
+    "active": "● Доступ разрешён",
+    "scanQr": "Отсканируйте QR в приложении или используйте строку привязки.",
+    "qrSize": "Для QR увеличьте окно минимум до {columns}×{rows}. Строка привязки ниже.",
+    "pairingExpiry": "Действует 10 минут, один раз",
+    "states": {
+      "ambiguous": "несколько контейнеров",
+      "unhealthy": "не проходит проверку",
+      "docker_unavailable": "Docker недоступен",
+      "not_deployed": "не развёрнут",
+      "online": "на связи",
+      "connecting": "подключается",
+      "waiting_vpn": "ждёт VPN",
+      "offline": "нет связи",
+      "error": "ошибка"
+    },
+    "hints": {
+      "startServer": "Запустить сервер: grigdesk-ctl server start",
+      "serverLog": "Журнал сервера: grigdesk-ctl server logs",
+      "installServer": "Установить службу: deploy/install.sh --no-autostart",
+      "installWindow": "Установить окно: grigdesk-ctl desktop install",
+      "openWindow": "Открыть окно: grigdesk-ctl",
+      "startRelay": "Запустить посредника: grigdesk-ctl relay start",
+      "relayLog": "Журнал посредника: grigdesk-ctl relay logs",
+      "selectRelay": "Выбрать посредника: GRIGDESK_RELAY_PROJECT в .env"
+    },
+    "windowMissing": "не установлено"
   }
 }

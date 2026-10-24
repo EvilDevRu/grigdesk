@@ -29,8 +29,14 @@ test('MA-NAV: порядок, описания, стрелки, Enter и Esc м�
   }
 
   assert.match(first, /запустить.*GrigDesk/iu);
-  assert.match(first, /сервер.*окно.*посредник/iu);
-  session.write(down.repeat(5) + '\r');
+  assert.doesNotMatch(first, /привязать телефон по QR/iu);
+
+  const statusStart = session.output().length;
+
+  session.write(down);
+  await session.wait(/сервер, окно, посредник, связи/iu, 4000, statusStart);
+  assert.doesNotMatch(session.output().slice(statusStart), /запустить.*GrigDesk/iu);
+  session.write(up + down.repeat(5) + '\r');
   await session.wait(/Переносимый комплект/u);
 
   const build = session.output().slice(first.length);
@@ -40,7 +46,11 @@ test('MA-NAV: порядок, описания, стрелки, Enter и Esc м�
   }
 
   assert.match(build, /сервер.*веб.*окно/iu);
-  assert.match(build, /release\/|архив/iu);
+
+  const bundleStart = session.output().length;
+
+  session.write(down.repeat(4));
+  await session.wait(/release\/.*архив/iu, 4000, bundleStart);
 
   const before = session.output().length;
 

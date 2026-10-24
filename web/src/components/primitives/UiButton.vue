@@ -8,12 +8,14 @@
       `ui-button--${normalizedTone}`,
       {
         'ui-button--block': block,
+        'ui-button--wrap': wrap,
         'is-loading': loading,
         'is-pressed': pressed,
       },
     ]"
     :data-variant="normalizedVariant"
     :data-tone="normalizedTone"
+    :data-size="normalizedSize"
     :type="type"
     :disabled="disabled"
     :aria-disabled="guarded || undefined"
@@ -45,11 +47,13 @@ import { t } from '../../services/locale.ts';
 
 import { computed, ref } from 'vue';
 import type {
+  UiActionSize,
   UiActionTone,
   UiActionVariant,
   UiButtonType,
 } from '../../types/uiActions';
 import {
+  normalizeActionSize,
   normalizeActionTone,
   normalizeActionVariant,
 } from '../../types/uiActions';
@@ -62,23 +66,27 @@ const props = withDefaults(
     type?: UiButtonType;
     variant?: UiActionVariant;
     tone?: UiActionTone;
+    size?: UiActionSize;
     loading?: boolean;
     loadingLabel?: string;
     disabled?: boolean;
     ariaDisabled?: boolean;
     pressed?: boolean;
     block?: boolean;
+    wrap?: boolean;
   }>(),
   {
     type: 'button',
     variant: 'outline',
     tone: 'neutral',
+    size: 'default',
     loading: false,
     loadingLabel: undefined,
     disabled: false,
     ariaDisabled: false,
     pressed: undefined,
     block: false,
+    wrap: false,
   },
 );
 
@@ -92,6 +100,7 @@ const emit = defineEmits<{ click: [event: MouseEvent] }>();
 const element = ref<HTMLButtonElement | null>(null);
 const normalizedVariant = computed(() => normalizeActionVariant(props.variant));
 const normalizedTone = computed(() => normalizeActionTone(props.tone));
+const normalizedSize = computed(() => normalizeActionSize(props.size));
 const guarded = computed(() => props.loading || props.ariaDisabled);
 
 function onClick(event: MouseEvent): void {

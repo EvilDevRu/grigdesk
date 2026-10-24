@@ -7,6 +7,8 @@
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { npmLatest } from './_npmLatest.ts';
 
 import { validateKimiWorkdir } from '../kimi/sandbox.ts';
 import type { KimiSandboxConfig } from '../kimi/sandbox.ts';
@@ -302,6 +304,27 @@ export default {
   // Основной официальный способ: отдельный бинарник с проверкой SHA-256, без
   // зависимости от системного Node.js.
   install: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
+  /**
+   * Сервер исполняет только эту декларацию; вход остаётся отдельным действием.
+   * Обновление проверяет настроенную копию, запасная команда сохраняет прежний путь.
+   */
+  installation(config: KimiConfig) {
+    const command = 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash';
+    const install = {
+        executable: '/bin/bash',
+        args: ['-o', 'pipefail', '-c', command],
+        command,
+        fallbackCommand: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
+    };
+
+    return {
+      install,
+      update: config.kimiLaunchMode === 'contained' ? null : { ...install },
+      loginCommand: 'kimi login',
+      nativeBinDirs: [path.join(os.homedir(), '.local', 'bin')],
+    };
+  },
+
   login: 'kimi login',
   // У kimi.com своей страницы состояния нет — сбои публикует Moonshot AI.
   statusPage: 'https://status.moonshot.cn',
@@ -468,7 +491,11 @@ export default {
     return runContainedKimi({ ...options, transport: 'server' });
   },
 
-  // updateCmd и latestVersion намеренно отсутствуют: версия запинена в contract gate
-  // (runtime.js REQUIRED_KIMI_VERSION), самовольное обновление сломает запуск. Новая
-  // версия допускается только через повторный ACP contract gate и security matrix.
+  /**
+   * Native release использует версию официального npm-пакета.
+   * В contained закреплённый runtime не предлагает host-обновление.
+   */
+  latestVersion(config: KimiConfig) {
+    return config.kimiLaunchMode === 'contained' ? null : npmLatest('@moonshot-ai/kimi-code');
+  },
 };

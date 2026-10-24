@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
 DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
-CMD="${1:-open}"
+CMD="${1:-help}"
 
 # Справка и ошибки bundle обрабатываются до Node и подготовки установленного ELF.
 # Сборщик работает только с исходниками и не использует ветвь build с установкой.
@@ -42,7 +42,7 @@ if [[ ! -f "$DIR/release.json" && -f "$DIR/server/src/app.ts" \
 fi
 
 # Пустой человеческий TTY использует source CLI лишь при пригодном Node.
-# Без него установленный ELF сохраняет прежний автономный путь открытия окна.
+# Без него установленный ELF показывает справку своим автономным Node.
 if (( $# == 0 )) && [[ -t 0 && -t 1 && ! -f "$DIR/release.json" \
   && ! -f "$DIR/bin/bundle.json" && -f "$DIR/server/src/app.ts" \
   && -f "$DIR/web/package.json" && -f "$DIR/desktop/package.json" ]]; then
@@ -54,6 +54,12 @@ if (( $# == 0 )) && [[ -t 0 && -t 1 && ! -f "$DIR/release.json" \
   fi
 
   export GRIGDESK_CTL_SOURCE_FALLBACK=1
+fi
+
+# Без терминала или пригодного source Node пустой вызов явно просит справку.
+# Это исключает открытие окна даже через helper ранее установленного ELF.
+if (( $# == 0 )) && [[ ! -t 0 || ! -t 1 || "${GRIGDESK_CTL_SOURCE_FALLBACK:-}" == 1 ]]; then
+  set -- --help
 fi
 
 # Внешний ELF сам читает раннее окружение и запускает сервер своим Node.

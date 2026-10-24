@@ -46,9 +46,10 @@ test('Code, Shelf, Terminal, SSH, DB и Докер лениво загружаю
     source('web/src/shared/asyncView.ts'),
   ]);
 
-  // Семь встроенных панелей плюс одна общая панель-iframe для страниц плагинов.
-  assert.equal(count(registry, /asyncView\(/g), 8);
+  // Семь встроенных панелей плюс панель модуля и общая панель-iframe для страниц плагинов.
+  assert.equal(count(registry, /asyncView\(/g), 9);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/ext\/PluginFramePanel\.vue'\)/);
+  assert.match(registry, /import\('\.\.\/\.\.\/views\/ext\/PluginModulePanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/studio3d\/Studio3dPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/code\/CodePanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/shelf\/TaskShelfPanel\.vue'\)/);

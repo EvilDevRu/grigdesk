@@ -16,6 +16,7 @@ interface PtyOptions {
   env: NodeJS.ProcessEnv;
   cwd?: string;
   columns?: number;
+  rows?: number;
   inputTTY?: boolean;
   outputTTY?: boolean;
 }
@@ -94,6 +95,7 @@ export function startPty(t: TestContext, options: PtyOptions) {
     cwd: options.cwd ?? '/',
     env: options.env,
     columns: options.columns ?? 100,
+    rows: options.rows ?? 24,
     inputTTY: options.inputTTY ?? true,
     outputTTY: options.outputTTY ?? true,
   });

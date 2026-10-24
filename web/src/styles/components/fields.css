@@ -547,8 +547,8 @@
 .ui-file-picker[data-role='chat-attachment'] {
   display: inline-grid;
   flex: none;
-  grid-template-columns: 36px;
-  width: 36px;
+  grid-template-columns: var(--control-height);
+  width: var(--control-height);
 }
 
 .ui-file-picker[data-role='chat-attachment'] .ui-file-picker__trigger {
@@ -609,6 +609,17 @@
 .ui-textarea[data-role='chat-composer']:focus-visible {
   outline: none;
   box-shadow: none;
+}
+
+@media (max-width: 600px) {
+  .ui-input, .ui-textarea, .ui-select {
+    font-size: 16px;
+  }
+  .ui-textarea[data-role='chat-composer'] {
+    height: auto;
+    max-height: min(160px, 28vh);
+    font-size: 16px;
+  }
 }
 
 @media (max-width: 600px) {

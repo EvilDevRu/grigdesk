@@ -88,6 +88,13 @@ export interface PluginSetupStatus {
   checkedAt: string;
 }
 
+// Публичные адреса модуля; файловые пути сервера в каталог не попадают.
+export interface PluginWebModule {
+  entry: string;
+  css: string[];
+  locales: { ru?: string; en?: string };
+}
+
 // Запись списка `/api/plugins`: манифест плюс состояние этой установки.
 export interface PluginListItem {
   id: string;
@@ -99,6 +106,7 @@ export interface PluginListItem {
   nav: PluginNav | null;
   enabled: boolean;
   needsRestart?: boolean;
+  serverError?: string | null;
   // Установка из источника; у системных и положенных руками — null.
   install?: PluginInstallInfo | null;
   settings: PluginSetting[];
@@ -108,6 +116,7 @@ export interface PluginListItem {
   // Адрес своей страницы пользовательского плагина (GrigDesk показывает её панелью или
   // страницей по nav.path); у плагинов без страницы поля нет.
   web?: string | null;
+  webModule?: PluginWebModule | null;
 }
 
 export interface PluginCategory {
