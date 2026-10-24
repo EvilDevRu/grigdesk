@@ -1,3 +1,4 @@
+import { GrigdeskTaskStore, readGrigdeskTask } from '../../lib/grigdeskTasks/store.ts';
 import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
 import { isProjectDeleted, deletedProjectIds } from '../../lib/projects/deletion.ts';
 // Модуль factory (read-only, M0) — отдаёт состояние конвейера в чистом JSON,
@@ -203,6 +204,7 @@ type FactoryModuleConfig = RouteConfig & LaunchConfig & Pick<
   GrigDeskConfig, 'ticketsDir' | 'modelsPath' | 'factoryProfile' | 'sandboxDownCmd'
 > & {
   factoryStandsDir?: string;
+  grigdeskTasksPath?: string;
 };
 
 export interface FactoryModuleOptions {
@@ -602,13 +604,23 @@ async function factoryModule(
   // Список всех задач с картой статусов этапов.
   fastify.get<FactoryRoute>('/api/tasks', async () => {
     const tasks = await factoryState.listTasks();
-    const titledTasks = await Promise.all(tasks.map(async (task) => ({
-      ...task,
-      title: await storedTicketTitle(task.task),
-      // Пока идёт разбор, задача снаружи выглядит вставшей: тот же затык, та же кнопка.
-      // Без этого признака человек берётся за неё руками параллельно с арбитром.
-      arbitrating: arbiterLive?.read(task.task) || null,
-    })));
+    // Названия берём из одного снимка: полный файл не перечитывается для каждой строки.
+    // Карта живёт только в этом запросе, поэтому следующий увидит новые задачи и правки.
+    const ownTasks = tasks.length ? (await new GrigdeskTaskStore({ config }).list()).tasks : [];
+    const ownById = new Map(ownTasks.map((task) => [task.id, task]));
+
+    const titledTasks = await Promise.all(tasks.map(async (task) => {
+      const own = ownById.get(String(task.task));
+
+      return {
+        ...task,
+        title: own?.title || await storedTicketTitle(task.task),
+        ...(own ? { source: own.source } : {}),
+        // Пока идёт разбор, задача снаружи выглядит вставшей: тот же затык, та же кнопка.
+        // Без этого признака человек берётся за неё руками параллельно с арбитром.
+        arbitrating: arbiterLive?.read(task.task) || null,
+      };
+    }));
     // Порог молчания едет вместе со списком: «этот ход завис» обязаны считать одинаково
     // чип в навигации, оповещение и карточка задачи, а хранится он в настройках.
     return { tasks: titledTasks, silenceWindow: Math.max(0, Number(prefs.read().runSilenceWindow) || 0) };
@@ -813,10 +825,11 @@ async function factoryModule(
   // из B24. Без них конвейер стартует слепее триажа и переспрашивает отвеченное.
   // Уточнения режутся тем же пределом, что и в промпте триажа: описание тикета
   // вмещает на порядок больше, а разный объём у двух читателей — разная постановка.
-  async function ticketSections(id: string, { profile = null, title = '', description = '' }: {
+  async function ticketSections(id: string, { profile = null, title = '', description = '', own = false }: {
     profile?: string | null;
     title?: string;
     description?: string;
+    own?: boolean;
   } = {}) {
     const sections: Array<{ title: string; text: string }> = [];
     const clarify = await analyzer.readClarifications(id);
@@ -848,7 +861,7 @@ async function factoryModule(
         text: lines.join('\n').slice(0, 4000),
       });
     }
-    if (b24) {
+    if (b24 && !own) {
       try {
         const page = await b24.taskPageData(id);
         const comments = (page.comments || []) as Array<{
@@ -1180,14 +1193,23 @@ async function factoryModule(
       }
     } else {
       try {
+        const own = await readGrigdeskTask(config, id);
+        const ticketTitle = own?.title ?? title;
+        const ticketDescription = own?.description ?? description;
+
         built = buildTicket({
           task: id,
-          title,
-          description,
+          title: ticketTitle,
+          description: ticketDescription,
           acceptanceCriteria: Array.isArray(acceptanceCriteria) ? acceptanceCriteria : [],
-          sourceUrl: sourceUrl || (await taskSourceUrl(id)),
+          sourceUrl: own?.sourceUrl || sourceUrl || (await taskSourceUrl(id)),
           sections: dynamicSections
-            ? await ticketSections(id, { profile, title, description })
+            ? await ticketSections(id, {
+              profile,
+              title: ticketTitle,
+              description: ticketDescription,
+              own: Boolean(own),
+            })
             : [],
         });
       } catch (e) {

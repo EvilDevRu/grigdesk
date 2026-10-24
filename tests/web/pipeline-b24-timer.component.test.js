@@ -69,7 +69,7 @@ function timerSnapshot(card) {
  * Страница получает три фабричные карточки и один внешний таймер через те же store/API
  * границы, что и в приложении. Часы и единственный секундный interval управляются тестом.
  */
-async function mountScenario(t) {
+async function mountScenario(t, { own = false } = {}) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
   const browserGlobals = {
@@ -104,6 +104,11 @@ async function mountScenario(t) {
     factoryTask(202, 'Остановленный B24-таймер'),
     factoryTask(303, 'Ручной тикет'),
   ];
+
+  if (own) {
+    tasks.push({ ...factoryTask('100000000001', 'Своя задача'), source: 'grigdesk' });
+  }
+
   const graphs = new Map([
     [101, graph({
       workSec: 60 * 60,
@@ -113,6 +118,7 @@ async function mountScenario(t) {
     })],
     [202, graph()],
     [303, graph()],
+    [100000000001, graph()],
   ]);
   const boardTasks = [
     {
@@ -138,6 +144,8 @@ async function mountScenario(t) {
     },
   ];
   const getCalls = [];
+  const loadedTasks = [];
+  const openedTasks = [];
   let boardLoads = 0;
 
   globalThis.__pipelineB24Api = {
@@ -170,12 +178,18 @@ async function mountScenario(t) {
     template: '<div class="fg-stub"></div>',
   };
   globalThis.__pipelineB24UiStore = defineStore('pipeline-b24-ui', {
-    actions: { openTask() {} },
+    actions: { openTask(id) {
+      openedTasks.push(String(id));
+    } },
   });
   globalThis.__pipelineB24TasksStore = defineStore('pipeline-b24-tasks', {
     actions: {
-      async load() {},
-      title() { return null; },
+      async load(id) {
+        loadedTasks.push(String(id));
+      },
+      title() {
+        return null;
+      },
     },
   });
   globalThis.__pipelineB24BoardStore = defineStore('pipeline-b24-board', {
@@ -245,6 +259,8 @@ async function mountScenario(t) {
     wrapper,
     flushPromises,
     getCalls,
+    loadedTasks,
+    openedTasks,
     intervals,
     clearedIntervals,
     boardLoads: () => boardLoads,
@@ -370,4 +386,29 @@ test('карточки конвейера различают три состоя
       '/api/tasks/303/graph',
     ],
   });
+});
+
+test('LOCAL-PIPELINE-01: собственное название открывает карточку без гидратации Б24', async (t) => {
+  const fx = await mountScenario(t, { own: true });
+  const card = cardByTask(fx.wrapper, '100000000001');
+
+  assert.ok(card, 'Собственная задача видна в смешанном списке');
+  assert.equal(fx.loadedTasks.includes('100000000001'), false);
+
+  const title = card.find('[data-role="pipeline-title"]');
+
+  assert.ok(title.exists(), 'Название собственной задачи доступно как действие');
+  assert.equal(title.text(), 'Своя задача');
+  await title.trigger('click');
+  assert.deepEqual(fx.openedTasks, ['100000000001']);
+  assert.equal(cardByTask(fx.wrapper, 303).find('[data-role="pipeline-title"]').exists(), false);
+
+  // Управляем только отложенным чтением: существующий throttle проходит без реального ожидания.
+  // Часы B24-таймера и интервалы сценария остаются под управлением общей фикстуры.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  globalThis.__pipelineB24SseHandler('state-change', {});
+  t.mock.timers.tick(1000);
+  await fx.flushPromises();
+  assert.equal(fx.loadedTasks.includes('100000000001'), false);
+  assert.ok(fx.getCalls.filter((url) => url === '/api/tasks').length >= 2);
 });

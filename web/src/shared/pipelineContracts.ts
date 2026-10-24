@@ -9,6 +9,7 @@ const t = localeTranslator(uiLocalePort);
 
 export interface PipelineTask extends Record<string, unknown> {
   task: string | number;
+  source?: 'grigdesk';
   title?: string;
   profile?: string;
   route?: string;
@@ -78,6 +79,7 @@ export interface TaskObservation {
  */
 function isPipelineTask(value: unknown): value is PipelineTask {
   return isRecord(value) && ['string', 'number'].includes(typeof value.task)
+    && (value.source == null || value.source === 'grigdesk')
     && (value.title == null || typeof value.title === 'string')
     && (value.daemonAlive == null || typeof value.daemonAlive === 'boolean')
     && (value.attempt == null || ['string', 'number'].includes(typeof value.attempt))

@@ -284,7 +284,7 @@
         </UiButton>
         <span class="route">{{ ROUTE_ICON[t.route || ''] || '•' }} {{ t.route }}</span>
         <UiButton
-          v-if="b24Title(t.task)"
+          v-if="t.source === 'grigdesk' || b24Title(t.task)"
           class="ctitle"
           data-role="pipeline-title"
           v-tooltip="title(t)"
@@ -1054,7 +1054,7 @@ function title(taskOrNum: PipelineViewTask | TaskId) {
     ? taskOrNum
     : tasks.value.find((item) => Number(item.task) === Number(taskNum));
 
-  return b24Title(taskNum) || task?.title || null;
+  return task?.source === 'grigdesk' ? task.title || null : b24Title(taskNum) || task?.title || null;
 }
 
 const boardTasksById = computed(() => new Map(
@@ -2961,7 +2961,8 @@ async function loadSnapshot() {
       return graph ? [{ ...task, graph }] : [];
     });
     // Названия задач из B24 (для заголовка) + доска (для «таймеров вне фабрики»).
-    tasks.value.forEach((t) => taskStore.load(t.task).catch(() => {}));
+    tasks.value.filter((task) => task.source !== 'grigdesk')
+      .forEach((task) => taskStore.load(task.task).catch(() => {}));
     board.load();
     error.value = null;
   } catch (e) {

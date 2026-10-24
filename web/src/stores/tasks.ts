@@ -1,7 +1,9 @@
+import { isRecord } from '../../../shared/lib/objects.ts';
+import { decodeGrigdeskTask } from '../../../shared/tasks/grigdeskTaskContracts.ts';
 // Кеш деталей B24 и действия через GrigDesk без открытия стороннего портала.
 // Подтверждённые мутации обновляют доску прежним порядком.
 import { defineStore } from 'pinia';
-import { api } from '../shared/apiClient.ts';
+import { api, ApiError } from '../shared/apiClient.ts';
 import { useBoardStore } from './board.ts';
 import {
   decodeTaskDetail, decodeTaskLaunchOptions, decodeTaskLaunchResult,
@@ -21,7 +23,8 @@ export const useTasksStore = defineStore('tasks', {
   actions: {
     /**
      * Детали используют прежний кеш на тридцать секунд с принудительным обновлением.
-     * Проверка сетевого ответа происходит до замены записи.
+     * Номера вне диапазона собственных задач читаются прежним запросом Б24.
+     * Внутри диапазона источник подтверждает запись; ответ проверяется до замены кеша.
      */
     async load(id: TaskId, force = false): Promise<TaskDetail> {
       const cached = this.details[id];
@@ -30,7 +33,25 @@ export const useTasksStore = defineStore('tasks', {
         return cached.data;
       }
 
-      const data = decodeTaskDetail(await api.get(`/api/b24/task/${id}`));
+      let response: unknown;
+      let portal = !/^[1-9]\d{11}$/u.test(String(id));
+
+      if (!portal) {
+        try {
+          response = await api.get(`/api/grigdesk-tasks/${id}`);
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 404
+            || !isRecord(error.data) || error.data.error !== 'grigdesk_task_not_found') {
+            throw error;
+          }
+
+          portal = true;
+        }
+      }
+
+      const data = portal
+        ? decodeTaskDetail(await api.get(`/api/b24/task/${id}`))
+        : decodeTaskDetail(decodeGrigdeskTask(response, String(id)));
 
       this.details[id] = { data, loadedAt: Date.now() };
 

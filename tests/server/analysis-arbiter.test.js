@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -252,4 +252,75 @@ test('арбитр не берётся за вопрос, переформули
     outcome: 'nothing_to_do',
     calls: 0,
   });
+});
+
+test('LOCAL-ARBITER-01: factual использует beta, продуктовый выбор остаётся человеку', async (t) => {
+  const reply = JSON.stringify({ answers: [
+    {
+      questionId: 'q-code',
+      kind: 'factual',
+      status: 'answered',
+      text: 'Поле есть в beta.',
+      proof: ['src/beta.ts:1'],
+    },
+    {
+      questionId: 'q-product',
+      kind: 'product_choice',
+      status: 'answered',
+      text: 'Автоматический режим',
+      proof: [],
+    },
+  ] });
+  const fx = await fixture(t, { reply });
+  const { ownTask, seedTasks } = await import('./helpers/grigdesk-tasks.js');
+  const task = ownTask();
+  const config = fx.analyzer.config;
+
+  config.grigdeskTasksPath = path.join(config.factoryHome, 'tasks.json');
+  config.factoryProfile = 'alpha';
+  await seedTasks(config, [task]);
+
+  for (const name of ['alpha', 'beta']) {
+    const directory = path.join(config.profilesDir, name);
+
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, 'profile.sh'), `PROFILE_CTX='Контекст ${name}'\n`);
+  }
+
+  await writeFile(path.join(fx.analyzer.dir, `t${task.id}.analysis.json`), JSON.stringify({
+    task: Number(task.id),
+    questions: [
+      {
+        id: 'q-code',
+        text: 'Есть ли поле?',
+        options: []
+      },
+      {
+        id: 'q-product',
+        text: 'Какой режим?',
+        options: []
+      },
+    ],
+  }));
+
+  const profiles = [];
+
+  fx.analyzer._sources.acquire = async (profile) => {
+    profiles.push(profile.name);
+
+    return {
+      repos: [],
+      roots: [],
+      async release() {}
+    };
+  };
+
+  await fx.arbiter.arbitrate(task.id, { automatic: false });
+
+  const entries = markerEntries(await fx.analyzer.readClarifications(task.id));
+
+  assert.deepEqual(profiles, ['beta']);
+  assert.equal(entries.find((entry) => entry.questionId === 'q-code').status, 'answered');
+  assert.equal(entries.find((entry) => entry.questionId === 'q-product').status, 'human_required');
+  assert.equal(fx.reevaluations(), 1);
 });
