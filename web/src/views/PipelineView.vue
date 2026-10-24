@@ -283,10 +283,6 @@
           #{{ t.task }}
         </UiButton>
         <span class="route">{{ ROUTE_ICON[t.route || ''] || '•' }} {{ t.route }}</span>
-        <span v-if="t.graph.runnerPolicy?.chain?.length" class="runner-policy"
-              v-tooltip="`Аварийная цепочка проекта: ${runnerChainLabel(t.graph.runnerPolicy)}`">
-          ИИ {{ runnerChainLabel(t.graph.runnerPolicy) }}
-        </span>
         <UiButton
           v-if="b24Title(t.task)"
           class="ctitle"
@@ -1005,7 +1001,6 @@ import {
   attemptResultLabel,
   providerLabel,
   runnerAttemptModelLabel,
-  runnerChainLabel,
   runnerModelEffortLabel,
   runnerNodeLabel,
   runnerReasonLabel,
@@ -3409,8 +3404,6 @@ function cardState(g: PipelineViewGraph) {
 .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .route { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 2px 8px; border-radius: 999px; }
-.runner-policy { font-size: 11px; color: var(--ink-mid); border: 1px solid var(--line);
-  background: var(--surface-2); padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .spacer { flex: 1; }
 .daemon { font-size: 12px; white-space: nowrap; }
 .daemon.alive { color: var(--good); }
