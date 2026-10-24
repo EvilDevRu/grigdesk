@@ -110,7 +110,7 @@
       <div class="status">
         <!-- CPU/RAM — самые «дёргающиеся» цифры, поэтому левее всех: их ширина меняется,
              не сдвигая остальные элементы (правый край статуса зафиксирован) -->
-        <UiTopbarPanel v-if="sys" :title="t('core.computerResources')">
+        <UiTopbarPanel v-if="sys" :title="t('core.computerResources')" size="wide">
           <template #meta>{{ t('core.cores', { count: sys.cpu.cores }) }}</template>
           <template #trigger>
             <!-- Опрос не удался — цифры остаются, но честно блекнут: пустое место в шапке

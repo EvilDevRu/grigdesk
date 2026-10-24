@@ -3,6 +3,7 @@
     ref="popover"
     v-bind="$attrs"
     class="ui-topbar-panel"
+    :class="{ 'ui-topbar-panel--wide': size === 'wide' }"
     :attachment="attachment === 'topbar' ? 'topbar' : undefined"
     :placement="placement"
     :offset="attachment === 'topbar' ? 0 : 8"
@@ -54,12 +55,14 @@ defineOptions({ inheritAttrs: false });
 withDefaults(defineProps<{
   title?: string;
   label?: string;
+  size?: 'default' | 'wide';
   triggerMode?: UiPopoverTriggerMode;
   attachment?: 'topbar' | 'trigger';
   placement?: UiOverlayPlacement;
 }>(), {
   title: '',
   label: '',
+  size: 'default',
   triggerMode: 'both',
   attachment: 'topbar',
   placement: 'bottom-end',
