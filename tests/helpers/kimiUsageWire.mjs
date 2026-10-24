@@ -35,12 +35,13 @@ export async function kimiUsageWire(t, scripts) {
       },
     }));
   };
+  const close = (code, reason) => socket.close(code, reason);
   const client = {
     createSession: async () => ({ id: 'usage-session' }),
     submitPrompt: async () => {
       const script = scripts[nextScript++];
 
-      setTimeout(() => script(send), 0);
+      setTimeout(() => script(send, close), 0);
 
       return { prompt_id: `prompt-${nextScript}` };
     },

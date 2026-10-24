@@ -54,6 +54,7 @@
 
 ### Kimi
 
+- [Heartbeat WebSocket: ping/pong, тайминги и причина закрытия в ошибке хода](kimi-ws-heartbeat.md)
 - [Окружение MCP для kimi web: ACP-массив превращается в объект](kimi-web-mcp-env.md)
 - [Отказ пятичасовой квоты и другие ошибки сохраняют причину вместо «Ход остановлен»](kimi-turn-failures.md)
 - [Первая буква вместо реплики, «Пишет…» перед долгим Agent и подтверждение модели](kimi-reply-presentation.md)

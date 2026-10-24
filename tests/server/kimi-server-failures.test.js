@@ -121,6 +121,43 @@ test('Kimi: родная отмена сохраняет признак оста
   }
 });
 
+for (const scenario of [
+  {
+    name: 'heartbeat timeout сохраняет код и причину закрытия',
+    code: 1001,
+    reason: 'heartbeat timeout',
+    message: 'Поток событий Kimi закрылся до завершения хода (код 1001: heartbeat timeout).',
+  },
+  {
+    name: 'закрытие только с кодом сохраняет код',
+    code: 1001,
+    message: 'Поток событий Kimi закрылся до завершения хода (код 1001).',
+  },
+  {
+    name: 'закрытие без кода и причины сохраняет прежний текст',
+    message: 'Поток событий Kimi закрылся до завершения хода.',
+  },
+]) {
+  test(`Kimi: ${scenario.name}`, async (t) => {
+    const wire = await kimiUsageWire(t, [(send, close) => {
+      send({ type: 'assistant.delta', delta: 'Начало ответа' });
+      close(scenario.code, scenario.reason);
+    }]);
+
+    await assert.rejects(runKimiServerTurn({
+      bin: '/bin/true',
+      home: '/tmp',
+      message: 'Продолжай',
+      ...wire,
+    }), (error) => {
+      assert.notEqual(error.stopped, true);
+      assert.equal(error.message, scenario.message);
+
+      return true;
+    });
+  });
+}
+
 test('Kimi: отмена субагента не останавливает основной ход', async (t) => {
   const wire = await kimiUsageWire(t, [(send) => {
     send({
