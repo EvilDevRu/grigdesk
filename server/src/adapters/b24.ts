@@ -73,6 +73,18 @@ export class B24Adapter {
     return this.credsStore.read() !== null;
   }
 
+  /**
+   * Проверка номера пользуется той же очередью, что и остальные операции портала.
+   * Отсутствие настройки не создаёт клиент и не делает сетевых запросов.
+   */
+  async probeTaskNumber(id: string): Promise<'exists' | 'absent' | 'unknown'> {
+    if (!this.isConfigured()) {
+      return 'unknown';
+    }
+
+    return this._run(() => this.client().probeTaskNumber(id));
+  }
+
   /** Текущая область пользовательских B24-данных; кеш сбрасывается вместе с credentials. */
   async accountIdentity(): Promise<B24AccountIdentity | null> {
     return this._run(async () => {

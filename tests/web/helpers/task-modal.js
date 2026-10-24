@@ -47,6 +47,7 @@ function uiFacadeStub(prefix, { stubDialog = false } = {}) {
   return [
     ...imports,
     ...dialogStub,
+    `export { t } from ${JSON.stringify(webFile('src/services/locale.ts'))};`,
     `export { useUiLayer } from ${JSON.stringify(webFile('src/composables/useUiLayer.ts'))};`,
     `export const showToast = (...args) => globalThis.${prefix}ShowToast?.(...args);`,
     `export { ${names} };`,

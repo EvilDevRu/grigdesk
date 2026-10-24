@@ -117,6 +117,7 @@ import staticPlugin from './plugins/static.ts';
 import healthModule from './modules/health/index.ts';
 import factoryModule from './modules/factory/index.ts';
 import b24Module from './modules/b24/index.ts';
+import grigdeskTasksModule from './modules/grigdesk-tasks/index.ts';
 import taskFavoritesModule from './modules/task-favorites/index.ts';
 import taskShelfModule from './modules/task-shelf/index.ts';
 import taskSeenModule from './modules/task-seen/index.ts';
@@ -1259,6 +1260,12 @@ async function build(desktopParent: DesktopParent | null) {
   });
 
   await fastify.register(projectsModule, { config, prefs, service: projectsService });
+  await fastify.register(grigdeskTasksModule, {
+    config,
+    b24,
+    factoryState,
+    projectsService,
+  });
   await fastify.register<SshModuleOptions>(sshModule, { service: asPort(sshService) });
   await fastify.register(dbModule, { service: dbService });
   await fastify.register(dockerModule, { service: dockerService });

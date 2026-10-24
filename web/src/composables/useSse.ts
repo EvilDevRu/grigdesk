@@ -45,6 +45,7 @@ const EVENT_NAMES = [
   'telegram-status',
   'mobile-changed',
   'task-shelf-changed',
+  'grigdesk-tasks-changed',
   'arbiter-live',
   'sandboxes-changed',
   'sandbox-progress',

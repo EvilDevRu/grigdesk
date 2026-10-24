@@ -1,4 +1,4 @@
-import { loadProductModule } from './helpers/compile-vue.js';
+import { loadProductModule, webFile } from './helpers/compile-vue.js';
 import { migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -401,7 +401,10 @@ test('tasks.setStageRunner шлёт POST /api/tasks/:id/runner/override (пус�
   const [{ createPinia, setActivePinia }, { useTasksStore }] = await Promise.all([
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
     loadProductModule('src/stores/tasks.ts', {
-      '../shared/apiClient.ts': 'export const api = globalThis.__pipelineRunnerStoreApi;',
+      '../shared/apiClient.ts': [
+        'export const api = globalThis.__pipelineRunnerStoreApi;',
+        `export { ApiError } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,
+      ].join('\n'),
       './board.ts': 'export const useBoardStore = () => ({load: async () => {}});',
     }),
   ]);

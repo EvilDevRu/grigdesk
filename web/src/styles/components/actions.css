@@ -258,6 +258,17 @@
   overflow-wrap: anywhere;
 }
 
+/* Название собственной задачи остаётся целиком доступным в узкой группе доски. */
+.ui-button[data-context='grigdesk-task-title'] {
+  height: auto;
+  max-width: 100%;
+  padding-block: 5px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
 .ui-icon-button[data-context='workspace-form'][data-role] {
   width: var(--control-height);
   height: var(--control-height);

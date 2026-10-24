@@ -607,5 +607,21 @@
     "other": "{count} прочие задачи:"
   },
   "chatSleepNoDescription": "Без описания",
-  "chatSleepDescription": "• {description}"
+  "chatSleepDescription": "• {description}",
+  "grigdeskTasks": "Задачи GrigDesk",
+  "grigdeskNewTask": "Новая задача",
+  "grigdeskTaskTitle": "Название",
+  "grigdeskTaskDescription": "Описание",
+  "grigdeskTaskProject": "Проект",
+  "grigdeskChooseProject": "Выберите проект",
+  "grigdeskNoProjects": "Нет проектов с доступным конвейером",
+  "grigdeskCancel": "Отмена",
+  "grigdeskCreate": "Создать",
+  "grigdeskRequiredFields": "Введите название и выберите проект",
+  "grigdeskB24Disconnected": "Б24 не подключён",
+  "grigdeskTaskPipeline": "На конвейере",
+  "grigdeskTaskLabel": "Задача GrigDesk",
+  "grigdeskGenericTask": "Задача",
+  "grigdeskEmptyDescription": "Описание не добавлено.",
+  "grigdeskTaskCard": "Карточка задачи"
 }

@@ -69,7 +69,11 @@ function runnerDeps(overrides = {}) {
     log: null,
     pluginEnabled: () => true,
     pluginSettings: () => ({
-      triageModel: { provider: 'codex', model: 'gpt-5.6-sol', effort: 'high' },
+      triageModel: {
+        provider: 'codex',
+        model: 'gpt-5.6-sol',
+        effort: 'high'
+      },
       autoArbitrate: false,
     }),
     providerRegistry: async () => ({
@@ -152,7 +156,11 @@ test('каждый запуск берёт выбранные provider/model/eff
     log: null,
     pluginEnabled: () => true,
     pluginSettings: () => ({
-      triageModel: { provider: 'codex', model: 'gpt-5.6-sol', effort: 'high' },
+      triageModel: {
+        provider: 'codex',
+        model: 'gpt-5.6-sol',
+        effort: 'high'
+      },
       autoArbitrate: false,
     }),
     providerRegistry: async () => registry,
@@ -480,4 +488,128 @@ test('раннер открывает на чтение cwd, dirs, repos и inpu
     writableCount: 1,
     writableInsideAnalysis: true,
   });
+});
+
+/**
+ * Профили читаются из profile.sh, как в настоящем Analyzer; значения в других файлах не участвуют.
+ * Временные корни профилей передаются настоящему lease; выбор профиля и prompt не подменяются.
+ */
+async function localAnalysis(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'analysis-own-'));
+  const config = runnerConfig(root, {
+    factoryProfile: 'alpha',
+    grigdeskTasksPath: path.join(root, 'tasks.json'),
+  });
+  const { ownTask, seedTasks } = await import('./helpers/grigdesk-tasks.js');
+  const tasks = [ownTask('100000000001', 'beta'), ownTask('100000000002', 'gamma')];
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  for (const name of ['alpha', 'beta', 'gamma']) {
+    const directory = path.join(config.profilesDir, name);
+
+    await mkdir(directory, { recursive: true });
+
+    const code = path.join(root, `code-${name}`);
+
+    await mkdir(code);
+    await writeFile(path.join(directory, 'profile.sh'), [
+      `PROFILE_CTX='Контекст ${name}'`,
+      `PROFILE_TRIAGE_REPOS='${name}:${code}'`,
+      '',
+    ].join('\n'));
+  }
+
+  await seedTasks(config, tasks);
+
+  const calls = [];
+  const portals = [];
+  const profiles = [];
+  const analyzer = new Analyzer({
+    config,
+    ...runnerDeps({
+      b24: {
+        async taskDetail() {
+          portals.push('detail');
+
+          return { title: 'Чужая задача портала', description: 'Чужой текст' };
+        },
+        async taskPageData() {
+          portals.push('comments');
+
+          return { comments: [{ text: 'Чужой комментарий портала' }] };
+        },
+      },
+      executorFor: async () => ({
+        id: 'codex',
+        scopedWorkspace: true,
+        async run(options) {
+          calls.push(options);
+          await writeRunFiles(options);
+
+          return { reply: 'ok' };
+        },
+      }),
+    }),
+  });
+
+  await analyzer._ready;
+
+  const acquire = analyzer._sources.acquire.bind(analyzer._sources);
+
+  analyzer._sources.acquire = async (profile) => {
+    profiles.push(profile.name);
+
+    return acquire(profile);
+  };
+
+  return {
+    analyzer,
+    calls,
+    portals,
+    profiles,
+    tasks
+  };
+}
+
+test('LOCAL-TRIAGE-01: полный анализ читает свой текст и профиль beta без Б24', async (t) => {
+  const fx = await localAnalysis(t);
+  const result = await fx.analyzer.analyze(fx.tasks[0].id);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(fx.profiles, ['beta']);
+  assert.deepEqual(fx.portals, []);
+
+  const prompt = String(fx.calls[0].message || fx.calls[0].prompt);
+
+  assert.ok(prompt.includes(fx.tasks[0].title));
+  assert.ok(prompt.includes(fx.tasks[0].description));
+  assert.match(prompt, /Контекст beta/);
+  assert.match(prompt, /code-beta/);
+  assert.doesNotMatch(prompt, /code-alpha|code-gamma/);
+  assert.doesNotMatch(prompt, /Чужой текст|Чужой комментарий портала/);
+});
+
+test('LOCAL-TRIAGE-02: beta → gamma → beta не смешивает профиль и сохраняет ответ', async (t) => {
+  const fx = await localAnalysis(t);
+  const id = fx.tasks[0].id;
+
+  await fx.analyzer.analyze(id);
+  await fx.analyzer.analyze(fx.tasks[1].id);
+  await writeFile(path.join(fx.analyzer.dir, `t${id}.analysis.json`), JSON.stringify({
+    ...RESULT,
+    task: Number(id),
+    questions: [{
+      id: 'q-mode',
+      text: 'Какой режим?',
+      options: [{ id: 'manual', label: 'Ручной' }]
+    }],
+  }));
+  await fx.analyzer.appendClarificationBatch(id, [{ questionId: 'q-mode', optionIds: ['manual'] }]);
+  await fx.analyzer.analyze(id);
+
+  assert.deepEqual(fx.profiles, ['beta', 'gamma', 'beta']);
+  assert.equal(fx.calls.length, 3);
+  assert.match(String(fx.calls[2].message || fx.calls[2].prompt), /Ручной/);
+  assert.deepEqual(fx.portals, []);
 });

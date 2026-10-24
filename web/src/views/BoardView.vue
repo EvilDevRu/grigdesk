@@ -1,5 +1,26 @@
 <template>
   <div class="board" :class="{ 'stats-expanded': statsExpanded }">
+    <section class="own-tasks" :aria-label="t('core.grigdeskTasks')">
+      <div class="own-tasks-heading">
+        <h3>{{ t('core.grigdeskTasks') }}</h3>
+        <UiButton tone="accent" @click="newTaskOpen = true">{{ t('core.grigdeskNewTask') }}</UiButton>
+      </div>
+      <p v-if="ownTasks.error" class="err" role="alert">{{ ownTasks.error }}</p>
+      <p v-if="ownTasks.b24Configured === false" class="muted">{{ t('core.grigdeskB24Disconnected') }}</p>
+      <ul class="own-tasks-list">
+        <li v-for="task in sortedOwnTasks" :key="task.id">
+          <UiButton variant="text" data-context="grigdesk-task-title" @click="ui.openTask(task.id)">
+            <span class="mono">#{{ task.id }}</span> {{ task.title }}
+          </UiButton>
+          <span class="muted">{{ task.projectTitle }}</span>
+          <TriageBadge v-if="analysisEnabled" :row="analysis.byTask[task.id] || null" />
+          <span v-if="conveyor.has(task.id)" class="muted">{{ t('core.grigdeskTaskPipeline') }}</span>
+        </li>
+      </ul>
+    </section>
+    <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen" @created="ui.openTask($event)" />
+
+    <template v-if="ownTasks.b24Configured !== false">
     <p v-if="!data && !error" class="muted"><UiSpinner decorative /> Загрузка доски…</p>
     <div v-else-if="error" class="err">
       Ошибка B24: {{ error }}
@@ -425,10 +446,13 @@
         </div>
       </section>
     </template>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
+import NewGrigdeskTaskDialog from './board/NewGrigdeskTaskDialog.vue';
+import { useGrigdeskTasksStore } from '../stores/grigdeskTasks.ts';
 import type { BoardTask } from '../shared/boardContracts.ts';
 import type { UiFieldHandle } from '../ui.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
@@ -452,6 +476,7 @@ import { api } from '../shared/apiClient.ts';
 import { useSse } from '../composables/useSse.ts';
 import { boardTaskListResetKey, matchesBoardTask, selectBoardTasks } from '../shared/boardTaskList.ts';
 import {
+  t,
   confirmDialog,
   UiButton,
   UiPressable,
@@ -466,6 +491,11 @@ import {
 } from '../ui';
 
 const ui = useUiStore();
+const ownTasks = useGrigdeskTasksStore();
+const newTaskOpen = ref(false);
+const sortedOwnTasks = computed(() => [...ownTasks.tasks].sort((left, right) =>
+  right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
+));
 
 // Данные — из кеш-стора (мгновенный показ при переходе + фоновое обновление).
 const board = useBoardStore();
@@ -508,6 +538,10 @@ async function loadConveyor() {
 }
 
 useSse((name) => {
+  if (name === 'grigdesk-tasks-changed' || name === 'hello') {
+    void ownTasks.load();
+  }
+
   if (name === 'state-change') {
     loadConveyor();
   }
@@ -854,7 +888,13 @@ const chart = computed(() => data.value?.charts?.[period.value] || null);
 
 let ticker: ReturnType<typeof setInterval> | null = null;
 
+function refreshOwnTasks() {
+  void ownTasks.load();
+}
+
 onMounted(() => {
+  refreshOwnTasks();
+  window.addEventListener('focus', refreshOwnTasks);
   board.load();
   favorites.load(true);
   seen.load(true);
@@ -869,6 +909,8 @@ onMounted(() => {
   }, 1000);
 });
 onUnmounted(() => {
+  window.removeEventListener('focus', refreshOwnTasks);
+
   if (ticker) {
     clearInterval(ticker);
   }
@@ -876,6 +918,25 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.own-tasks-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.own-tasks-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+.own-tasks-list li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .board {
   display: flex;
   flex-direction: column;

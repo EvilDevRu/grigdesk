@@ -589,5 +589,21 @@
     "other": "{count} other tasks:"
   },
   "chatSleepNoDescription": "No description",
-  "chatSleepDescription": "• {description}"
+  "chatSleepDescription": "• {description}",
+  "grigdeskTasks": "GrigDesk tasks",
+  "grigdeskNewTask": "New task",
+  "grigdeskTaskTitle": "Title",
+  "grigdeskTaskDescription": "Description",
+  "grigdeskTaskProject": "Project",
+  "grigdeskChooseProject": "Choose a project",
+  "grigdeskNoProjects": "No projects with an available pipeline",
+  "grigdeskCancel": "Cancel",
+  "grigdeskCreate": "Create",
+  "grigdeskRequiredFields": "Enter a title and choose a project",
+  "grigdeskB24Disconnected": "B24 is not connected",
+  "grigdeskTaskPipeline": "In pipeline",
+  "grigdeskTaskLabel": "GrigDesk task",
+  "grigdeskGenericTask": "Task",
+  "grigdeskEmptyDescription": "No description added.",
+  "grigdeskTaskCard": "Task card"
 }

@@ -106,3 +106,28 @@ test('TWP-01: карточка ждёт запуска синхронизаци�
   wrapper.unmount();
   assert.equal(calls.at(-1), 'unsubscribe');
 });
+
+test('TWP-LOCAL-01: документ собственной задачи ждёт соединения с нейтральной подписью', async (t) => {
+  await installUiBrowser(t);
+
+  const { mount } = await import(
+    '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+  );
+  const component = await compileVue(webFile('src/views/TaskWindowPage.vue'), {
+    stubs: {
+      '../composables/useSse.ts': 'export const sseSubscribe = () => () => {};',
+      '../stores/auth.ts': 'export const useAuthStore = () => ({ authenticated: false });',
+      '../stores/chat.ts': 'export const useChatStore = () => ({ syncSpeech() {} });',
+      '../stores/ui.ts': 'export const useUiStore = () => ({ taskId: null, openTaskInline() {} });',
+      './TaskModal.vue': 'export default { template: "<section>Своя задача</section>" };',
+    },
+  });
+  const wrapper = mount(component, {
+    props: { target: { kind: 'task', id: '100000000001' }, ready: false },
+  });
+
+  t.after(() => wrapper.unmount());
+  assert.doesNotMatch(wrapper.text(), /Битрикс24/);
+  assert.doesNotMatch(wrapper.attributes('aria-label') || '', /Битрикс24/);
+  assert.equal(document.title, 'Задача #100000000001 — GrigDesk');
+});
