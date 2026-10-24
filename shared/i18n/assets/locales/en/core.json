@@ -1,4 +1,8 @@
 {
+  "pluginModuleLoading": "Loading panel “{name}”…",
+  "pluginModuleUnsupported": "This window cannot load the module for “{name}”. Update GrigDesk and reload the window.",
+  "pluginModuleLoadFailed": "Could not load panel “{name}”. Check the plugin files and reload the window.",
+  "pluginModuleRenderFailed": "Could not display panel “{name}”. Reload the window after fixing the plugin.",
   "toolReturnNarrow": "Expand the main window to return the tool to its column.",
   "toolReturnFailed": "Could not return the panel.",
   "toolUnavailable": "The tool is unavailable. Check plugin settings.",

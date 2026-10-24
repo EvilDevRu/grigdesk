@@ -1,0 +1,12 @@
+{
+  "id": "ui-module",
+  "name": "Модуль проверки",
+  "api": 2,
+  "version": "1.0.0",
+  "webModule": {
+    "dir": "ui",
+    "entry": "panel.js",
+    "css": ["panel.css"],
+    "locales": {"ru": "ru.json", "en": "en.json"}
+  }
+}

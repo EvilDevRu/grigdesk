@@ -28,6 +28,7 @@ import { importRuntimeModule } from '../../lib/runtimeImport.ts';
 import type { PluginServerModule } from '../../lib/runtimeImport.ts';
 import { assertRealPackageRoot } from '../../lib/pluginInstall/packageTree.ts';
 import type { PluginInstallInfo } from '../../../../shared/plugins/pluginInstallContracts.ts';
+import { pluginModuleStaticOptions } from '../../lib/pluginWebModule.ts';
 
 export interface PluginsModuleOptions {
   config: Pick<GrigDeskConfig, 'userPluginsDir'> & { userPluginsDataDir?: string };
@@ -168,11 +169,12 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
   // ВАЖНО: регистрация с prefix — роуты плагина ЖЁСТКО заперты в /api/ext/<id>/ (это не
   // конвенция, а механика Fastify: перекрыть системный путь плагин не может). Контракт
   // манифеста версионирован полем api — несовместимый плагин не поднимаем, а честно жалуемся.
-  const PLUGIN_API = 1;
+  const PLUGIN_APIS = [1, 2];
+
   for (const m of userPlugins) {
     if (!isEnabled(prefs.read(), m)) continue;
-    if ((m.api || 1) !== PLUGIN_API) {
-      fastify.log.warn({ plugin: m.id, api: m.api }, `плагин рассчитан на api=${m.api}, GrigDesk даёт api=${PLUGIN_API} — пропущен`);
+    if (!PLUGIN_APIS.includes(m.api || 1)) {
+      fastify.log.warn({ plugin: m.id, api: m.api }, 'неподдерживаемая версия API плагина — пропущен');
       continue;
     }
 
@@ -195,6 +197,11 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
           cacheControl: true,
           maxAge: 0,
         });
+        loaded.add(m.id);
+      }
+
+      if (m.webModule) {
+        await scope.register(fastifyStatic, pluginModuleStaticOptions(m.webModule, m.id));
         loaded.add(m.id);
       }
 
@@ -248,7 +255,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
   fastify.decorate('pluginDocs', async () => {
     const p = prefs.read();
     const available = all.filter((m) => !m.system && m.dir && isEnabled(p, m)
-      && (m.api || 1) === PLUGIN_API);
+      && PLUGIN_APIS.includes(m.api || 1));
     const found = await Promise.all(available.map(async (m): Promise<PluginDocsEntry | null> => {
       const docs = await resolvePluginDocs(String(m.dir));
 
@@ -295,9 +302,14 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
         placements: placementsState(p, m),
         setup: m.setup || null,
         web: m.web?.url ?? null,
+        webModule: m.webModule ? {
+          entry: m.webModule.entry,
+          css: m.webModule.css,
+          locales: m.webModule.locales,
+        } : null,
         // Пользовательский серверный код и страница подключаются на старте — тумблер
         // подействует после рестарта.
-        needsRestart: !m.system && (m.hasServer || !!m.web),
+        needsRestart: !m.system && (m.hasServer || !!m.web || !!m.webModule),
         install: m.system ? null : await describeInstall(m.id),
       }))),
     };

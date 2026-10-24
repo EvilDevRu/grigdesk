@@ -26,6 +26,8 @@ import type {
   PluginSetup,
 } from '../../../shared/plugins/pluginsContracts.ts';
 import { PLUGIN_SLOT_LABELS, isPluginSlotName } from '../../../shared/plugins/slots/index.ts';
+import { resolvePluginWebModule } from './pluginWebModule.ts';
+import type { ResolvedPluginWebModule } from './pluginWebModule.ts';
 
 export type { PluginNav, PluginPlacementDecl, PluginPlacementState, PluginSetting, PluginSetup };
 
@@ -52,6 +54,7 @@ export interface PluginManifest {
   // Своя страница пользовательского плагина: каталог с index.html и адрес, под которым
   // GrigDesk его раздаёт. Ядро не исполняет этот код — оно лишь показывает страницу.
   web?: PluginWebPage | null;
+  webModule?: ResolvedPluginWebModule | null;
 }
 
 export interface PluginWebPage {
@@ -696,10 +699,21 @@ export async function scanUserPlugins(
         log?.warn?.({ plugin: e.name }, message);
       });
       const { webDir, ...fields } = decoded;
+      const webModule = fields.api === 2 ? resolvePluginWebModule(
+        dir, m.id, m.webModule, normalizePluginPackagePath,
+        (message) => log?.warn?.({ plugin: e.name }, message),
+      ) : null;
 
       out.push({
         ...fields,
+        nav: fields.nav ?? (webModule && m.nav == null ? {
+          path: `/ext/${m.id}`,
+          label: fields.name,
+          icon: 'plugin',
+          group: 'dock',
+        } : null),
         dir,
+        webModule,
         hasServer: await fs.access(path.join(dir, 'server.js')).then(() => true).catch(() => false),
         web: await resolvePluginWeb(dir, m.id, webDir ?? m.web, (message: string) => {
           log?.warn?.({ plugin: e.name }, message);

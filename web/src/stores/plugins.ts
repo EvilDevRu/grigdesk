@@ -11,6 +11,7 @@ import { api, failureText } from '../shared/apiClient.ts';
 import { pluginPageRoute } from '../shared/tools/catalog.ts';
 import { normalizePluginCategory } from '../../../shared/plugins/pluginsContracts.ts';
 import { decodeOptionalInstall } from '../shared/pluginInstallApi.ts';
+import { isPluginModuleDescriptor } from '../pluginRuntime/descriptor.ts';
 
 type PluginCard = Partial<PluginListItem> & Pick<PluginListItem, 'id' | 'name' | 'enabled'>;
 type NavItem = {
@@ -41,7 +42,8 @@ function isPlugin(value: unknown): value is PluginCard {
       )) && (value.nav.order == null || typeof value.nav.order === 'number')))
     && (value.settings == null || (Array.isArray(value.settings) && value.settings.every(isRecord)))
     && (value.values == null || isRecord(value.values))
-    && (value.placements == null || isPlacements(value.placements));
+    && (value.placements == null || isPlacements(value.placements))
+    && (value.webModule == null || isPluginModuleDescriptor(value.id, value.webModule));
 }
 
 /**
@@ -115,7 +117,7 @@ export function normalizeNavItem(plugin: PluginCard): NavItem | null {
 
   return {
     id: plugin.id,
-    to: !plugin.system && plugin.web ? pluginPageRoute(plugin.id) : plugin.nav.path,
+    to: !plugin.system && (plugin.web || plugin.webModule) ? pluginPageRoute(plugin.id) : plugin.nav.path,
     label: plugin.nav.label,
     icon: plugin.nav.icon || 'plugin',
     group,
@@ -172,6 +174,15 @@ export const usePluginsStore = defineStore('plugins', {
         icon: p.nav!.icon || 'plugin',
         order: typeof p.nav!.order === 'number' ? p.nav!.order : Number.MAX_SAFE_INTEGER,
         group: NAV_GROUPS.includes(p.nav!.group) ? p.nav!.group : 'rail',
+      })),
+    modulePages: (s) => s.list
+      .filter((p) => p.enabled && !p.system && p.webModule && p.nav)
+      .map((p) => ({
+        id: p.id,
+        descriptor: p.webModule!,
+        label: p.nav!.label || p.name,
+        icon: p.nav!.icon || 'plugin',
+        order: typeof p.nav!.order === 'number' ? p.nav!.order : Number.MAX_SAFE_INTEGER,
       })),
     byId: (s) => (id: string) => s.list.find((p) => p.id === id) || null,
     enabled: (s) => (id: string) => !!s.list.find((p) => p.id === id)?.enabled,

@@ -43,17 +43,19 @@ export async function hostFixture(t, { width = 1280, mode = 'main', windows = tr
   const unmounts = [];
   const imports = [];
   const contexts = {};
-  const ids = ['code', 'shelf', 'ssh', 'db', 'docker', 'terminal', 'studio3d', 'example'];
-  const names = ['Код', 'Полка', 'SSH', 'БД', 'Докер', 'Терминал', '3D', 'Пример'];
+  const ids = ['code', 'shelf', 'ssh', 'db', 'docker', 'terminal', 'studio3d', 'example', 'module-example'];
+  const names = ['Код', 'Полка', 'SSH', 'БД', 'Докер', 'Терминал', '3D', 'Пример', 'Модуль'];
   const tools = ids.map((id, index) => ({
 
     id,
 
     label: names[index],
 
-    route: id === 'example' ? '/ext/example' : '/' + id,
+    route: ['example', 'module-example'].includes(id) ? '/ext/' + id : '/' + id,
 
-    plugin: id === 'example',
+    plugin: id === 'module-example' ? 'module-example' : id === 'example',
+
+    ...(id === 'module-example' ? { detachable: false } : {}),
 
     component: vue.markRaw(vue.defineComponent({
 
@@ -91,7 +93,7 @@ export async function hostFixture(t, { width = 1280, mode = 'main', windows = tr
       nav: [],
       installed: [],
       list: [],
-      dockNav: [{ id: 'example' }],
+      dockNav: [{ id: 'example' }, { id: 'module-example' }],
       enabled: () => true
 
     }),
@@ -125,7 +127,7 @@ export async function hostFixture(t, { width = 1280, mode = 'main', windows = tr
     history: createMemoryHistory(),
     routes: [
       { path: '/chats', component: { render: () => null } },
-      ...tools.map((item) => ({
+      ...tools.filter((item) => item.id !== 'module-example').map((item) => ({
 
         path: item.route,
 
@@ -135,6 +137,12 @@ export async function hostFixture(t, { width = 1280, mode = 'main', windows = tr
 
       })),
     ],
+  });
+
+  router.addRoute({
+    path: '/ext/:id',
+    component: { render: () => null },
+    meta: { tool: 'ext' },
   });
 
   await router.push('/chats');
