@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DIRECT_SSH_HOOK_PATH } from '../executors/_directSshPolicy.ts';
+import { mcpEnvironmentRecord } from '../mcpEnvironment.ts';
 import { helperCommand, runtimeKind } from '../runtimePaths.ts';
 import { shellQuote as quoteShellArgument } from '../../../../shared/lib/shellQuote.ts';
 import {
@@ -313,7 +314,7 @@ export async function buildLaunchFiles(
           transport: 'stdio',
           command: server.command,
           args: [...server.args],
-          env: Object.fromEntries(server.env.map((entry) => [entry.name, entry.value])),
+          env: mcpEnvironmentRecord(server.env),
           ...variant?.mcpConfig,
         },
       }))],

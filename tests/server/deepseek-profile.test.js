@@ -156,3 +156,45 @@ test('profile builder отклоняет относительные пути и 
     hooks: { ...valid.hooks, bashToolName: 'Bash' },
   }), /bashToolName/u);
 });
+
+test('DeepSeek web: ACP env становится объектом, повтор имени и пустое окружение допустимы', async (t) => {
+  const f = await fixture(t);
+  const result = await buildLaunchFiles({
+    launchDir: f.launchDir,
+    cwd: f.cwd,
+    workspaceRoot: f.cwd,
+    mode: 'workspace-write',
+    approval: 'ask',
+    transport: 'web',
+    mcpServers: [
+      {
+        name: 'with-env',
+        command: '/bin/true',
+        args: [],
+        env: [
+          { name: 'A', value: '1' },
+          { name: 'B', value: '' },
+          { name: 'A', value: '2' },
+        ],
+      },
+      {
+        name: 'empty-env',
+        command: '/bin/true',
+        args: [],
+        env: [],
+      },
+    ],
+    hooks: {
+      bashToolName: DEEPSEEK_BASH_TOOL,
+      ssh: false,
+      db: false,
+      strictDb: false,
+      instructions: { projectRoot: f.projectRoot },
+    },
+  });
+  const overlay = await fs.readFile(result.overlayPath, 'utf8');
+
+  assert.match(overlay, /serverName: "with-env"[\s\S]*env:\n\s+A: "2"\n\s+B: ""\n/u);
+  assert.doesNotMatch(overlay, /A: "1"/u);
+  assert.match(overlay, /serverName: "empty-env"[\s\S]*env:\n$/u);
+});

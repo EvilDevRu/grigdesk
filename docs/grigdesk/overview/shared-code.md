@@ -63,6 +63,7 @@
 
 | Модуль | Назначение |
 |---|---|
+| `server/src/lib/mcpEnvironment.ts` | Окружение MCP: ACP-пары → объект, готовый объект без изменений; используют Kimi host и DeepSeek, пустое поле решает адаптер |
 | `lib/errors.ts` | Строковый code, message с fallback и отдельное преобразование Error/String |
 | `lib/delay.ts` | Пауза с отменой самим signal.reason; обычная Node-пауза — node:timers/promises |
 | `lib/text.ts` | UTF-16 границы, лексический порядок, текст unknown, URI и JSON Pointer |
