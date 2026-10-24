@@ -13,6 +13,7 @@ import type { RelayChannel } from '../shared/windowRelay.ts';
 // становится ошибкой сборки, а не молчащей веткой (та же грабля, что уже стоила отладки).
 const EVENT_NAMES = [
   'hello',
+  'plugin-event',
   'state-change',
   'providers-update',
   'provider-install',

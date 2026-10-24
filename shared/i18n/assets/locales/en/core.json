@@ -1,4 +1,12 @@
 {
+  "pluginModuleRuntimeMissing": "Could not prepare plugins. Reload the window.",
+  "pluginModuleAccessRevoked": "Plugin access was revoked. Sign in again or enable the plugin.",
+  "pluginAskAgentInvalidInput": "Provide a working folder, title and chat draft.",
+  "pluginAskAgentChooseModel": "Select a model in chat before asking the agent.",
+  "pluginAskAgentPreviewFailed": "Could not validate the working folder for a new chat.",
+  "pluginAskAgentUnsupported": "The selected executor does not support a chat working folder.",
+  "pluginAskAgentModelChanged": "The model changed while validating the folder. Try again.",
+  "openPluginPanel": "Open panel",
   "pluginModuleLoading": "Loading panel “{name}”…",
   "pluginModuleUnsupported": "This window cannot load the module for “{name}”. Update GrigDesk and reload the window.",
   "pluginModuleLoadFailed": "Could not load panel “{name}”. Check the plugin files and reload the window.",

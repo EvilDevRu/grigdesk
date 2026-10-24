@@ -1,4 +1,12 @@
 {
+  "pluginModuleRuntimeMissing": "Не удалось подготовить плагины. Перезагрузите окно.",
+  "pluginModuleAccessRevoked": "Доступ плагина отозван. Войдите снова или включите плагин.",
+  "pluginAskAgentInvalidInput": "Укажите рабочую папку, заголовок и черновик чата.",
+  "pluginAskAgentChooseModel": "Выберите модель в чате, прежде чем спросить агента.",
+  "pluginAskAgentPreviewFailed": "Не удалось проверить рабочую папку для нового чата.",
+  "pluginAskAgentUnsupported": "Выбранный исполнитель не поддерживает рабочую папку чата.",
+  "pluginAskAgentModelChanged": "Модель изменилась во время проверки папки. Повторите действие.",
+  "openPluginPanel": "Открыть панель",
   "pluginModuleLoading": "Загружаем панель «{name}»…",
   "pluginModuleUnsupported": "Окно не поддерживает модуль панели «{name}». Обновите GrigDesk и перезагрузите окно.",
   "pluginModuleLoadFailed": "Не удалось загрузить панель «{name}». Проверьте файлы плагина и перезагрузите окно.",

@@ -124,3 +124,84 @@ for (const [file, key] of [
     await healthyCore(f.page);
   });
 }
+
+for (const width of [390, 899, 900, 1280]) {
+  for (const mode of ['main', 'page'] as const) {
+    test(`PM-B1-E2E: bootstrap/services в production ${mode} ${width}px`, async (t) => {
+      const built = await builtPromise;
+      const f = await runtimeBrowser(t, {
+        built,
+        width,
+        mode,
+        b1: true
+      });
+
+      await f.page.waitForFunction('window.__pluginHost.fixtureState().plugins.loaded');
+      assert.equal(await f.page.evaluate('window.__pluginHost.currentDesktopMode()'), mode);
+      await f.page.waitForFunction('window.__pluginB1?.starts === 1', undefined, {
+        timeout: 5_000,
+      }).catch(() => {});
+      assert.equal(await f.page.evaluate('window.__pluginB1?.starts || 0'), 1,
+        'Настоящий main должен запустить opt-in при закрытой панели');
+      assert.equal(await f.page.locator('link[href*="/module/panel.css"]').count(), 0);
+      await f.page.evaluate('window.__pluginBackgroundContext.panel.open()');
+      await f.page.getByRole('button', { name: 'Уведомление B1', exact: true }).waitFor();
+
+      const sameContext = await f.page.evaluate(
+        'window.__pluginPanelContext === window.__pluginBackgroundContext',
+      );
+
+      assert.equal(sameContext, true);
+      assert.equal(await f.page.locator('link[href*="/module/panel.css"]').count(), 1);
+      await f.page.getByRole('textbox', { name: 'Ввод плагина' }).fill('Сохранить B1');
+      f.emitPlugin('other', 'fixture-progress', 'Чужое');
+      f.emitPlugin('ui-module', 'fixture-progress', 'Своё');
+      await f.page.waitForFunction('document.querySelector("[data-plugin-event]")?.textContent === "Своё"');
+      f.emitPlugin('other', 'fixture-progress', 'Чужое после своего');
+      f.emitPlugin('ui-module', 'panel-progress', 'Панель');
+      await f.page.waitForFunction(
+        'document.querySelector("[data-plugin-panel-event]")?.textContent === "Панель"',
+      );
+      assert.equal(await f.page.locator('[data-plugin-event]').textContent(), 'Своё');
+      assert.equal(await f.page.evaluate('window.__eventSourceCount'), 1);
+      await f.page.getByRole('button', { name: 'Уведомление B1', exact: true }).click();
+      await f.page.getByRole('button', { name: 'Закрыть B1', exact: true }).click();
+      await f.page.getByRole('button', { name: 'Открыть панель', exact: true }).click();
+      await f.page.getByRole('textbox', { name: 'Ввод плагина' }).waitFor();
+
+      if (width >= 900) {
+        for (const compact of [false, true]) {
+          await f.page.evaluate((compact: boolean) => {
+            const host = (window as any).__pluginHost;
+
+            host.fixtureState().dock.setExpanded(compact);
+          }, compact);
+          assert.equal(await f.page.getByRole('textbox', { name: 'Ввод плагина' }).inputValue(),
+            'Сохранить B1');
+        }
+
+        await f.page.getByRole('button', { name: 'Развернуть B1', exact: true }).click();
+        assert.equal(await f.page.evaluate('window.__pluginHost.fixtureState().dock.isExpanded'), true);
+      }
+
+      await f.page.getByRole('button', { name: 'Снять B1', exact: true }).click();
+      assert.equal(await f.page.getByRole('button', { name: 'Открыть панель', exact: true }).count(), 0);
+      await f.page.getByRole('button', { name: 'Спросить B1', exact: true }).click();
+      await f.page.waitForFunction(`window.__pluginHost.fixtureState().chat.sessions
+        .some((session) => session.title === 'Проверка B1' && session.draft === 'Черновик B1')`);
+
+      const created = await f.page.evaluate(`window.__pluginHost.fixtureState().chat.sessions
+        .find((session) => session.title === 'Проверка B1')`);
+
+      await f.page.waitForFunction(`Array.from(document.querySelectorAll('textarea,input'))
+        .some((element) => element.value === 'Черновик B1')`);
+      assert.deepEqual(created.messages, []);
+      assert.deepEqual(created.workdir, { kind: 'grigdesk' });
+      assert.equal(f.requests.some((item) => item.method === 'POST' && item.path === '/api/chat'), false);
+      await f.page.evaluate('window.__pluginHost.fixtureState().plugins.list[0].enabled = false');
+      await f.page.waitForFunction('window.__pluginB1.cleanups === 1');
+      assert.equal(await f.page.evaluate('window.__pluginB1.starts'), 1);
+      assert.equal(await f.page.locator('link[href*="/module/panel.css"]').count(), 0);
+    });
+  }
+}

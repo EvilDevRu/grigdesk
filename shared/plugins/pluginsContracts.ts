@@ -93,6 +93,7 @@ export interface PluginWebModule {
   entry: string;
   css: string[];
   locales: { ru?: string; en?: string };
+  startOnLogin?: boolean;
 }
 
 // Запись списка `/api/plugins`: манифест плюс состояние этой установки.

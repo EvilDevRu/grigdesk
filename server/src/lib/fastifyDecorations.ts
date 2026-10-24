@@ -10,6 +10,11 @@
 
 import 'fastify';
 
+// Изолированные HTTP-фикстуры не импортируют сборку приложения, регистрирующую плагины.
+// Их расширения нужны и в таком графе типов; runtime-регистрация остаётся в приложении.
+import type {} from '@fastify/multipart';
+import type {} from '@fastify/websocket';
+
 import type { ProviderUsagePatch } from './providerUsage.ts';
 import type { ShutdownCoordinator } from './shutdown.ts';
 import type { ProjectsService } from '../modules/projects/service.ts';

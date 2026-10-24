@@ -7,6 +7,7 @@ import { classifyWriteError } from '../features/settings/contracts.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import type { PluginListItem, PluginPlacementState } from '../../../shared/plugins/pluginsContracts.ts';
 import { defineStore } from 'pinia';
+import { toRaw } from 'vue';
 import { ApiError, api, failureText } from '../shared/apiClient.ts';
 import { pluginPageRoute } from '../shared/tools/catalog.ts';
 import { normalizePluginCategory } from '../../../shared/plugins/pluginsContracts.ts';
@@ -14,6 +15,11 @@ import { decodeOptionalInstall } from '../shared/pluginInstallApi.ts';
 import { isPluginModuleDescriptor } from '../pluginRuntime/descriptor.ts';
 
 type PluginCard = Partial<PluginListItem> & Pick<PluginListItem, 'id' | 'name' | 'enabled'>;
+type CatalogResult = { outcome: 'accepted'; plugins: PluginCard[] }
+  | { outcome: 'superseded' | 'failed' };
+
+const catalogAttempts = new WeakMap<object, number>();
+
 type NavItem = {
   id: string;
   to: string;
@@ -213,9 +219,21 @@ export const usePluginsStore = defineStore('plugins', {
      * Полный ответ проверяется до публикации install capabilities в каталоге.
      * Повреждённая карточка сохраняет прежний список целиком, без смешения DTO.
      */
-    async load() {
+    async load(options: { signal?: AbortSignal } = {}): Promise<CatalogResult> {
+      const identity = toRaw(this);
+      const attempt = (catalogAttempts.get(identity) ?? 0) + 1;
+      const superseded = () => options.signal?.aborted
+        || options.signal !== undefined && catalogAttempts.get(identity) !== attempt;
+
+      catalogAttempts.set(identity, attempt);
+
       try {
-        const reply = await api.get('/api/plugins');
+        const reply = await api.get('/api/plugins', options);
+
+        if (superseded()) {
+          return { outcome: 'superseded' };
+        }
+
         const plugins = isRecord(reply) ? reply.plugins : undefined;
 
         if (!Array.isArray(plugins) || !plugins.every(isPlugin)) {
@@ -239,8 +257,16 @@ export const usePluginsStore = defineStore('plugins', {
         this.list = checked;
         this.loaded = true;
         this.loadError = null;
+
+        return { outcome: 'accepted', plugins: checked };
       } catch (error) {
+        if (superseded()) {
+          return { outcome: 'superseded' };
+        }
+
         this.loadError = error instanceof Error ? error.message : t('settings.pluginCatalogFailure');
+
+        return { outcome: 'failed' };
       }
     },
     /**

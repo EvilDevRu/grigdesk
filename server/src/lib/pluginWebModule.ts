@@ -28,6 +28,9 @@ export function resolvePluginWebModule(
     if (!isRecord(raw)) {
       throw new Error('webModule должен быть объектом');
     }
+    if (Object.hasOwn(raw, 'startOnLogin') && typeof raw.startOnLogin !== 'boolean') {
+      throw new Error('startOnLogin должен быть boolean');
+    }
 
     const dirPath = modulePath(raw.dir, normalize);
     const dir = path.join(root, dirPath);
@@ -64,6 +67,7 @@ export function resolvePluginWebModule(
       entry: url(entry),
       css: css.map(url),
       locales: Object.fromEntries(Object.entries(locales).map(([language, file]) => [language, url(file)])),
+      ...(Object.hasOwn(raw, 'startOnLogin') ? { startOnLogin: raw.startOnLogin as boolean } : {}),
     };
   } catch (error) {
     warn(`webModule пропущен: ${(error as Error).message}`);

@@ -17,6 +17,7 @@
 - [Таймаут reload в Vite-фикстуре не доказывает сбой восстановления операции](browser-navigation-timeout.md)
 
 - [Типы тестов установки: реестр без UI и общие расширения Fastify](provider-install-type-boundaries.md)
+- [Изолированные HTTP-фикстуры чата: типы multipart и WebSocket без импорта приложения](http-fixture-fastify-types.md)
 
 - [Source-фикстуры с установленным ELF и trusted файлы legacy /gate](source-runtime-fixtures.md)
 - [Подготовленные dependencies source-проверок GLM и SEA без legacy prefix](source-runtime-dependencies.md)
