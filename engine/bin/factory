@@ -2966,6 +2966,15 @@ v2_main() {
       elif (( rc != 0 )); then
         return "$rc"
       fi
+      # Failed и защитные остановки также ждут goto: пустой resume сохраняет
+      # открытое вмешательство человека и реестр до любых lifecycle-эффектов.
+      route_v2_failed_stop_held "$TASK" "$attempt"
+      rc=$?
+      if (( rc == 11 )); then
+        return 0
+      elif (( rc != 0 )); then
+        return "$rc"
+      fi
     fi
     v2_lifecycle_begin_session \
       "$attempt" resume "$ROUTE" "$route_hash" || {
@@ -3186,7 +3195,11 @@ v2_main() {
         return 0
       fi
       set_st "$TASK" STALLED_HUMAN 1 RESULT "stopped-$stop"
-      v2_lifecycle_begin_human_for_stop "$attempt" "$stop" || return
+      v2_lifecycle_begin_human_for_stop "$attempt" "$stop" || {
+        rc=$?
+        v2_log "маршрут остановлен: $stop; lifecycle вмешательства человека не открыт (код $rc)"
+        return "$rc"
+      }
       if [[ "$stop" == no-progress || "$stop" == rewind-limit || "$stop" == loop-ceiling ]]; then
         stop_node=$(json_value lastCommit.node <<<"$cursor") || return 78
         [[ "$stop_node" =~ ^[a-z0-9][a-z0-9_]{0,40}$ ]] || return 78
