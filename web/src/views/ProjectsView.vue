@@ -50,7 +50,7 @@
           </template>
           <template v-if="!creating && currentDetail && !currentDetail.archivedAt && !registrationDeleted" #actions>
             <UiButton variant="ghost" tone="accent" data-context="workspace-toolbar"
-              aria-label="Чат с проектом" @click="openChat">
+              aria-label="Чат с проектом" :disabled="!chat.loaded" @click="openChat">
               <template #leading><ProjectIcon name="chat" /></template>
               <span class="chat-full">Чат с проектом</span><span class="chat-short">Чат</span>
             </UiButton>
@@ -58,6 +58,20 @@
         </UiPaneHeader>
 
         <div class="form-content">
+          <UiInlineMessage
+            v-if="!chat.loaded && !creating && currentDetail && !currentDetail.archivedAt && !registrationDeleted"
+            :tone="chat.loadError ? 'warning' : 'neutral'"
+          >
+            <template v-if="chat.loadError">
+              <strong>{{ t('core.chatListLoadFailed') }}</strong>
+              <div>{{ resolveUiText(chat.loadErrorMessage || '') }}</div>
+              <UiButton :disabled="chat.loading" @click="chat.retryLoad()">
+                {{ t('core.chatListRetry') }}
+              </UiButton>
+            </template>
+            <div v-if="!chat.loadError || chat.loading">{{ t('core.chatListLoading') }}</div>
+            <div>{{ t('core.chatStoreNotLoaded') }}</div>
+          </UiInlineMessage>
           <ProjectForm
             v-if="currentDraft && store.draft"
             v-model="store.draft"
@@ -158,7 +172,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
 
-import { UiButton, UiInlineMessage, UiPaneHeader, confirmDialog, vTooltip } from '../ui';
+import {
+  UiButton, UiInlineMessage, UiPaneHeader, confirmDialog, vTooltip, t, resolveUiText,
+} from '../ui';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useDockViewport } from '../shared/tools/viewport.ts';
 import { useChatStore } from '../stores/chat.ts';
@@ -227,7 +243,12 @@ const formTitle = computed(() => (
  */
 async function openChat() {
   await chat._load();
-  chat.newSession({
+
+  if (!chat.loaded) {
+    return;
+  }
+
+  const id = chat.newSession({
     workdir: {
       kind: 'project',
       projectId: openedId.value,
@@ -235,6 +256,11 @@ async function openChat() {
     },
     title: `Проект · ${formTitle.value}`,
   });
+
+  if (!id) {
+    return;
+  }
+
   await router.push('/chats');
 }
 

@@ -15,6 +15,7 @@ const draftModule = await compileModule(webFile('src/views/projects/projectDraft
 // Элементы управления настоящие: подменяются только диалоги, чтобы проверялось
 // поведение самой страницы, а не её заглушек.
 const UI_STUB = `
+export const { t, resolveUiText, messageRef } = globalThis.__projectsViewLocale;
 export { default as UiPaneHeader } from '${webFile('src/components/composites/UiPaneHeader.vue')}';
 export { default as UiButton } from '${webFile('src/components/primitives/UiButton.vue')}';
 export { default as UiIconButton } from '${webFile('src/components/primitives/UiIconButton.vue')}';
@@ -198,11 +199,18 @@ async function mountView(t, {
   params = {},
   query = {},
   dockCapable = true,
+  chatState = {},
   confirmed = true,
   saveResult = { ok: true, error: '', fieldErrors: [] },
 } = {}) {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/projects');
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
+  const locale = await import('../../web/src/services/locale.ts');
+
+  locale.setUiLocale('ru');
+  globalThis.__projectsViewLocale = locale;
+  t.after(() => locale.setUiLocale('ru'));
+
   const route = reactive({ path: '/projects', params: {}, query: {} });
 
   for (const [key, value] of Object.entries(params)) {
@@ -316,6 +324,35 @@ async function mountView(t, {
     },
   };
 
+  harness.chatId = 'chat-id';
+  harness.chat = reactive({
+    loaded: true,
+    loading: false,
+    loadError: null,
+    ...chatState,
+    get loadErrorMessage() {
+      const keys = {
+        network: 'core.chatListLoadNetwork',
+        timeout: 'core.chatListLoadTimeout',
+        server: 'core.chatListLoadServer',
+      };
+
+      return this.loadError ? locale.messageRef(keys[this.loadError]) : null;
+    },
+    async _load() {
+      harness.calls.push(['chat-load']);
+      await harness.chatLoad;
+    },
+    retryLoad() {
+      harness.calls.push(['chat-retry']);
+      this.loading = true;
+    },
+    newSession(options) {
+      harness.calls.push(['chat', options]);
+
+      return harness.chatId;
+    },
+  });
   globalThis.__projectsViewHarness = harness;
   Object.defineProperty(browser.window, 'matchMedia', {
     configurable: true,
@@ -329,10 +366,9 @@ async function mountView(t, {
 
   const component = await compileVue(VIEW, {
     stubs: {
-      '../stores/chat.ts': `export const useChatStore = () => ({
-        async _load() {},
-        newSession: (options) => globalThis.__projectsViewHarness.calls.push(['chat', options]),
-      });`,
+      '../stores/chat.ts': `
+        export const useChatStore = () => globalThis.__projectsViewHarness.chat;
+      `,
       '../actions/projects': ACTIONS_STUB,
       '../../actions/projects': ACTIONS_STUB,
       '../ui': (UI_STUB) +
@@ -893,4 +929,143 @@ test('Правка удаляемого паспорта во время DELETE 
   assert.equal(harness.route.params.id, 'demo');
   assert.equal(wrapper.find('[data-role="project-title"]').attributes('readonly'), '');
   assert.match(wrapper.text(), /Регистрация проекта удалена/u);
+});
+
+
+const CHAT_LOAD_TEXT = {
+  ru: {
+    loading: 'Загружаем чаты…',
+    failed: 'Чаты не загрузились',
+    network: 'Нет связи с сервером',
+    timeout: 'Сервер не ответил вовремя',
+    server: 'Ошибка сервера',
+    retry: 'Повторить',
+    blocked: 'Создать чат можно после загрузки списка',
+  },
+  en: {
+    loading: 'Loading chats…',
+    failed: 'Chats could not be loaded',
+    network: 'No connection to the server',
+    timeout: 'The server did not respond in time',
+    server: 'Server error',
+    retry: 'Retry',
+    blocked: 'You can create a chat after the list loads',
+  },
+};
+
+test('PROJECT-CHAT-LOAD-01', async (t) => {
+  for (const dockCapable of [false, true]) {
+    for (const reason of [null, 'network', 'timeout', 'server']) {
+      await t.test(`${dockCapable ? 'широкий' : 'телефон'} ${reason ?? 'loading'}`, async (sub) => {
+        const { wrapper, harness } = await mountView(sub, {
+          dockCapable,
+          opened: DETAIL,
+          params: { id: 'demo' },
+          chatState: {
+            loaded: false,
+            loading: !reason,
+            loadError: reason,
+          },
+        });
+        const locale = await import('../../web/src/services/locale.ts');
+        const { nextTick } = await import('../../web/node_modules/vue/index.mjs');
+        const button = wrapper.find('[aria-label="Чат с проектом"]');
+
+        assert.equal(button.element.disabled, true);
+        assert.ok(wrapper.find('[data-role="project-form"]').isVisible());
+
+        for (const language of ['ru', 'en']) {
+          locale.setUiLocale(language);
+          await nextTick();
+
+          const text = CHAT_LOAD_TEXT[language];
+
+          assert.ok(wrapper.text().includes(text.blocked), 'объяснение видно рядом с действием');
+          assert.ok(wrapper.text().includes(reason ? text.failed : text.loading));
+
+          if (reason) {
+            assert.ok(wrapper.text().includes(text[reason]));
+            assert.equal(wrapper.findAll('button').some((item) => item.text() === text.retry), true);
+          }
+        }
+
+        assert.equal(harness.calls.some(([kind]) => kind === 'chat'), false);
+        assert.equal(harness.calls.some(([kind]) => kind === 'chat-load'), false);
+
+        if (reason) {
+          const retry = wrapper.findAll('button').find((item) => item.text() === CHAT_LOAD_TEXT.en.retry);
+
+          await retry.trigger('click');
+          assert.equal(harness.calls.filter(([kind]) => kind === 'chat-retry').length, 1);
+          await nextTick();
+          assert.equal(retry.element.disabled, true);
+        }
+      });
+    }
+  }
+});
+
+test('PROJECT-CHAT-LOAD-02', async (t) => {
+  await t.test('готовность потеряна во время await', async (sub) => {
+    const { wrapper, harness } = await mountView(sub, { opened: DETAIL, params: { id: 'demo' } });
+    const { flushPromises } = await import(
+      '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+    );
+    const gate = Promise.withResolvers();
+
+    sub.after(() => gate.resolve());
+    harness.chatLoad = gate.promise;
+    await wrapper.find('[aria-label="Чат с проектом"]').trigger('click');
+    harness.chat.loaded = false;
+    gate.resolve();
+    await flushPromises();
+    assert.equal(harness.calls.some(([kind]) => kind === 'chat'), false);
+    assert.deepEqual(harness.pushes, []);
+  });
+
+  await t.test('готовый стор сохраняет project/repo', async (sub) => {
+    const detail = {
+      ...DETAIL,
+      repos: [...DETAIL.repos, {
+        key: 'ui',
+        dir: '/srv/demo/ui',
+        exists: true,
+      }],
+    };
+    const selectedKey = detail.repos[1].key;
+    const { wrapper, harness } = await mountView(sub, { opened: detail, params: { id: 'demo' } });
+    const { flushPromises } = await import(
+      '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+    );
+
+    await wrapper.find(`[data-role="project-repo-default"][data-repo-key="${selectedKey}"]`)
+      .trigger('change');
+    await wrapper.find('[aria-label="Чат с проектом"]').trigger('click');
+    await flushPromises();
+    assert.deepEqual(harness.calls.filter(([kind]) => kind === 'chat'), [[
+      'chat',
+      {
+        workdir: {
+          kind: 'project',
+          projectId: DETAIL.id,
+          repoKey: selectedKey,
+        },
+        title: `Проект · ${DETAIL.title}`,
+      },
+    ]]);
+    assert.deepEqual(harness.pushes, ['/chats']);
+  });
+
+  await t.test('null id не открывает чаты', async (sub) => {
+    const { wrapper, harness } = await mountView(sub, { opened: DETAIL, params: { id: 'demo' } });
+    const { flushPromises } = await import(
+      '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
+    );
+
+    harness.chatId = null;
+    await wrapper.find('[aria-label="Чат с проектом"]').trigger('click');
+    await flushPromises();
+    assert.equal(harness.calls.filter(([kind]) => kind === 'chat').length, 1);
+    assert.deepEqual(harness.pushes, []);
+  });
 });

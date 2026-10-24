@@ -668,5 +668,13 @@
   "machineWelcomeHere": "В этом приложении",
   "machineWelcomeScan": "Нажмите «Добавить машину» и отсканируйте QR-код. Можно также вставить строку привязки.",
   "machineWelcomePaste": "Нажмите «Добавить машину» и вставьте строку привязки с компьютера.",
-  "machineWelcomeReady": "После подключения можно продолжить работу с выбранным компьютером."
+  "machineWelcomeReady": "После подключения можно продолжить работу с выбранным компьютером.",
+  "chatListLoading": "Загружаем чаты…",
+  "chatListLoadFailed": "Чаты не загрузились",
+  "chatListLoadNetwork": "Нет связи с сервером",
+  "chatListLoadTimeout": "Сервер не ответил вовремя",
+  "chatListLoadServer": "Ошибка сервера",
+  "chatListLoadAccess": "Нет доступа к серверу",
+  "chatListRetry": "Повторить",
+  "chatStoreNotLoaded": "Создать чат можно после загрузки списка"
 }

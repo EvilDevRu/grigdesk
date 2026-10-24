@@ -14,6 +14,7 @@
           label="Новый чат"
           v-tooltip="'Новый чат'"
           tone="accent"
+          :disabled="!chat.loaded"
           @click="newChat"
         >
           ＋
@@ -22,10 +23,23 @@
       <div class="archive-toggle">
         <UiSwitch v-model="showArchived">{{ archiveLabel }}</UiSwitch>
       </div>
+      <UiInlineMessage v-if="!chat.loaded">
+        {{ t('core.chatStoreNotLoaded') }}
+      </UiInlineMessage>
     </div>
 
     <div class="rows">
-      <div v-if="!rows.length" class="none muted">{{ emptyLabel }}</div>
+      <UiInlineMessage v-if="!chat.loaded" :tone="chat.loadError ? 'warning' : 'neutral'">
+        <template v-if="chat.loadError">
+          <strong>{{ t('core.chatListLoadFailed') }}</strong>
+          <div>{{ resolveUiText(chat.loadErrorMessage || '') }}</div>
+          <UiButton :disabled="chat.loading" @click="chat.retryLoad()">
+            {{ t('core.chatListRetry') }}
+          </UiButton>
+        </template>
+        <div v-if="!chat.loadError || chat.loading">{{ t('core.chatListLoading') }}</div>
+      </UiInlineMessage>
+      <div v-else-if="!rows.length" class="none muted">{{ emptyLabel }}</div>
       <div
         v-for="r in rows"
         :key="r.id"
@@ -209,9 +223,12 @@ import {
   UiPopover,
   UiIconButton,
   UiInput,
+  UiInlineMessage,
   UiPressable,
   UiSearchInput,
   UiSwitch,
+  t,
+  resolveUiText,
   vTooltip,
 } from '../../ui';
 
@@ -244,16 +261,22 @@ const emptyLabel = computed(() => {
 
 // Строки уже с моделью чата: кто отвечает (иконка исполнителя) и короткое имя модели.
 // Резолвим здесь, а не в шаблоне — иначе поиск по реестру шёл бы на каждый рендер каждой строки.
-const rows = computed(() => chat.list(q.value, showArchived.value).map((r: ChatListRow) => {
-  const { model, provider } = prov.modelOf(r.modelRef || r.model);
+const rows = computed(() => {
+  if (!chat.loaded) {
+    return [];
+  }
 
-  return {
-    ...r,
-    provider,
-    modelName: model?.name || '',
-    sleep: sleepingSessions.value[r.id],
-  };
-}));
+  return chat.list(q.value, showArchived.value).map((r: ChatListRow) => {
+    const { model, provider } = prov.modelOf(r.modelRef || r.model);
+
+    return {
+      ...r,
+      provider,
+      modelName: model?.name || '',
+      sleep: sleepingSessions.value[r.id],
+    };
+  });
+});
 
 // Отправка из архивного разговора сама возвращает его в активные. В этот момент
 // переключаем и левый список: иначе открытый чат уже активный, а сайдбар продолжает
@@ -351,9 +374,16 @@ function commitEdit() {
   editId.value = null;
 }
 
+/**
+ * Создание разрешено только после подтверждённого списка с сервера.
+ * Мобильная область открывается, когда стор действительно создал разговор.
+ */
 function newChat() {
+  if (!chat.loaded || !chat.newSession()) {
+    return;
+  }
+
   showArchived.value = false;
-  chat.newSession();
   emit('open');
 }
 

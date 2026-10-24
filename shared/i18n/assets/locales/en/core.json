@@ -650,5 +650,13 @@
   "machineWelcomeHere": "In this app",
   "machineWelcomeScan": "Select “Add machine” and scan the QR code. You can also paste a pairing string.",
   "machineWelcomePaste": "Select “Add machine” and paste the pairing string from your computer.",
-  "machineWelcomeReady": "Once connected, you can continue working with the selected computer."
+  "machineWelcomeReady": "Once connected, you can continue working with the selected computer.",
+  "chatListLoading": "Loading chats…",
+  "chatListLoadFailed": "Chats could not be loaded",
+  "chatListLoadNetwork": "No connection to the server",
+  "chatListLoadTimeout": "The server did not respond in time",
+  "chatListLoadServer": "Server error",
+  "chatListLoadAccess": "Server access is unavailable",
+  "chatListRetry": "Retry",
+  "chatStoreNotLoaded": "You can create a chat after the list loads"
 }
