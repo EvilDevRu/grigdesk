@@ -32,6 +32,8 @@ const noticeKeys: Readonly<Record<string, string>> = {
   version_unverified: 'settings.providerInstallationVersionUnverified',
   version_stale: 'settings.providerInstallationVersionStale',
   npm_missing: 'settings.providerInstallationNpmMissing',
+  npm_binary_missing: 'settings.providerInstallationNpmBinaryMissing',
+  npm_binding_failed: 'settings.providerInstallationNpmBindingFailed',
   worker_unconfirmed: 'settings.providerInstallationWorkerUnconfirmed',
   state_unavailable: 'settings.providerInstallationStateUnavailable',
   state_write_failed: 'settings.providerInstallationStateWriteFailed',

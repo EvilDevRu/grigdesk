@@ -3,6 +3,9 @@ import type {
   PluginInstalledVersion,
   PluginSourceRef,
 } from '../../../../shared/plugins/pluginInstallContracts.ts';
+import { isRecord } from '../../../../shared/lib/objects.ts';
+import { normalizePluginPackagePath } from '../pluginsRegistry.ts';
+import { readPluginManifest } from './validatePackage.ts';
 
 /**
  * Previous удерживает самодостаточную версию без mutable bookkeeping current.
@@ -33,8 +36,16 @@ export function sameSource(left: PluginSourceRef, right: PluginSourceRef): boole
  * Sensitive показывает только эвристику путей, не аудит безопасности кода.
  * Manifest/сервер/dependencies важны даже внутри пользовательского web.
  */
-export function sensitivePluginFile(file: string, webDir: string | null): boolean {
+export function sensitivePluginFile(
+  file: string,
+  webDir: string | null,
+  moduleDirs: readonly string[] = [],
+): boolean {
   const basename = file.split('/').at(-1) ?? '';
+
+  if (moduleDirs.some((dir) => file.startsWith(`${dir}/`))) {
+    return true;
+  }
 
   if (['plugin.json', 'server.js', 'server.ts', 'package.json', 'package-lock.json'].includes(basename)) {
     return true;
@@ -42,4 +53,19 @@ export function sensitivePluginFile(file: string, webDir: string | null): boolea
 
   return !(webDir && file.startsWith(`${webDir}/`))
     && !/^docs?\//iu.test(file) && !/\.(md|txt|rst)$/iu.test(file);
+}
+
+/**
+ * Прежняя папка нужна только для подписи удалённых или перемещённых файлов модуля.
+ * Повреждённая установленная копия не мешает принудительной замене и не исполняется.
+ */
+export async function installedWebModuleDir(directory: string): Promise<string | null> {
+  try {
+    const manifest = await readPluginManifest(directory);
+
+    return manifest.api === 2 && isRecord(manifest.webModule)
+      ? normalizePluginPackagePath(manifest.webModule.dir, false) : null;
+  } catch {
+    return null;
+  }
 }

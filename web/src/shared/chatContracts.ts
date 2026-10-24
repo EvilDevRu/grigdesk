@@ -394,6 +394,8 @@ export interface ChatEnvelope extends ChatStoreData, ChatResult {
   textDelivered?: boolean;
 }
 
+export type ChatLoadError = 'network' | 'timeout' | 'server' | 'access';
+
 export interface ChatState {
   sessions: ChatSession[];
   archived: ChatSession[];
@@ -405,6 +407,8 @@ export interface ChatState {
   defWorkdir: ChatWorkdir | null;
   recentWorkdirs: ChatWorkdir[];
   loaded: boolean;
+  loading: boolean;
+  loadError: ChatLoadError | null;
   revealRequest: string;
   pending: Record<string, ChatRequest>;
   saveError: string | null;

@@ -300,6 +300,11 @@ export interface ProviderInstallCommand {
   args: string[];
   command: string;
   fallbackCommand: string;
+  npmBinding?: {
+    binName: string;
+    configKey: string;
+    envKey: string;
+  };
 }
 
 export interface ProviderInstallation {
@@ -309,8 +314,12 @@ export interface ProviderInstallation {
   nativeBinDirs?: string[];
 }
 
+export interface ProviderInstallationContext {
+  npm: string | null;
+}
+
 export interface ExecutorAdapter {
-  installation?: (config: unknown) => ProviderInstallation;
+  installation?: (config: unknown, context?: ProviderInstallationContext) => ProviderInstallation;
   studio3d?: Studio3dProvider;
   type?: string;
   kind?: string;

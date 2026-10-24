@@ -30,6 +30,160 @@
   border-width: 3px;
 }
 
+/* Загрузка сохраняет форму будущего содержимого; декоративные строки не изображают
+   прогресс и не попадают в дерево доступности. Размер задаёт контейнер потребителя. */
+.ui-loading-state {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  min-width: 0;
+  width: 100%;
+  padding: 24px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.ui-loading-state__status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ui-loading-state__mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--control-radius);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--accent);
+}
+
+.ui-loading-state__copy {
+  min-width: 0;
+}
+
+.ui-loading-state__label {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ui-loading-state__description {
+  max-width: 480px;
+  margin: 5px 0 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.ui-loading-state__skeleton {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  max-width: 640px;
+  pointer-events: none;
+  mask-image: linear-gradient(to bottom, #000 10%, transparent 100%);
+  animation: ui-loading-state-pulse 2.4s ease-in-out infinite;
+}
+
+.ui-loading-state__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 8px 0;
+}
+
+.ui-loading-state__avatar,
+.ui-loading-state__line {
+  display: block;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink-mid) 13%, transparent);
+}
+
+.ui-loading-state__avatar {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+.ui-loading-state__lines {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 9px;
+}
+
+.ui-loading-state__line {
+  width: 74%;
+  height: 8px;
+}
+
+.ui-loading-state__line--short {
+  width: 54%;
+  height: 6px;
+}
+
+.ui-loading-state__item:nth-child(even) .ui-loading-state__line {
+  width: 61%;
+}
+
+.ui-loading-state__item:nth-child(even) .ui-loading-state__line--short {
+  width: 85%;
+}
+
+.ui-loading-state[data-variant='cards'] .ui-loading-state__skeleton {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 12px;
+}
+
+.ui-loading-state[data-variant='cards'] .ui-loading-state__item {
+  min-height: 94px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.ui-loading-state[data-variant='document'] .ui-loading-state__avatar {
+  display: none;
+}
+
+.ui-loading-state[data-variant='document'] .ui-loading-state__item {
+  min-height: 40px;
+}
+
+.ui-loading-state[data-variant='inline'] {
+  gap: 0;
+  padding: 8px 12px;
+}
+
+.ui-loading-state[data-variant='inline'] .ui-loading-state__mark {
+  width: 20px;
+  height: 24px;
+  background: transparent;
+}
+
+@keyframes ui-loading-state-pulse {
+  0%, 100% { opacity: .55; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-loading-state__skeleton,
+  .ui-loading-state .ui-spinner {
+    animation: none;
+  }
+}
+
 .ui-inline-message {
   --ui-message-tone: var(--ink-mid);
   padding: 9px 11px;

@@ -21,7 +21,7 @@
     <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen" @created="ui.openTask($event)" />
 
     <template v-if="ownTasks.b24Configured !== false">
-    <p v-if="!data && !error" class="muted"><UiSpinner decorative /> Загрузка доски…</p>
+    <UiLoadingState v-if="!data && !error" label="Загрузка доски…" variant="cards" />
     <div v-else-if="error" class="err">
       Ошибка B24: {{ error }}
       <UiButton variant="text" @click="openSettings({ pageId: 'connections.b24' })">→ Настройки</UiButton>
@@ -483,11 +483,11 @@ import {
   UiSearchInput,
   UiSegmentedControl,
   UiSelect,
-  UiSpinner,
   UiTab,
   UiTabs,
   UiToggleButton,
   vTooltip,
+  UiLoadingState,
 } from '../ui';
 
 const ui = useUiStore();

@@ -23,11 +23,10 @@
       {{ store.usageError }}
     </UiInlineMessage>
 
+    <UiLoadingState v-else-if="!store.usage && store.usageLoading" variant="inline"
+      label="Демон считает размеры слоёв, это занимает несколько секунд…" />
     <p v-else-if="!store.usage" class="docker-cleanup__empty">
-      <template v-if="store.usageLoading">
-        Демон считает размеры слоёв, это занимает несколько секунд…
-      </template>
-      <template v-else>Нажмите «Пересчитать», чтобы узнать занятое место.</template>
+      Нажмите «Пересчитать», чтобы узнать занятое место.
     </p>
 
     <table v-else class="docker-usage" aria-label="Выбор ресурсов для очистки">
@@ -107,7 +106,13 @@ import type { DockerPruneTarget } from '../../../../shared/plugins/docker/docker
 
 import { useDockerStore } from '../../stores/docker';
 import { usePluginsStore } from '../../stores/plugins.ts';
-import { UiButton, UiCheckbox, UiInlineMessage, confirmDialog } from '../../ui';
+import {
+  UiButton,
+  UiCheckbox,
+  UiInlineMessage,
+  confirmDialog,
+  UiLoadingState,
+} from '../../ui';
 import { formatAge, formatSize } from './format';
 import { dockerSettings } from './settings';
 

@@ -1,7 +1,7 @@
 <template>
   <section class="sect" data-role="pipeline-deferred-findings">
     <div class="secth">Замечания на будущее</div>
-    <p v-if="loading">Читаю замечания попытки…</p>
+    <UiLoadingState v-if="loading" label="Читаю замечания попытки…" variant="document" />
     <div v-else-if="error" role="alert">
       <p>{{ error }}</p>
       <UiButton variant="text" @click="load">Повторить чтение</UiButton>
@@ -27,7 +27,10 @@ import { onBeforeUnmount, ref, watch } from 'vue';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { api } from '../../shared/apiClient.ts';
-import { UiButton } from '../../ui';
+import {
+  UiButton,
+  UiLoadingState,
+} from '../../ui';
 
 interface DeferredFindingView {
   id: string;

@@ -251,7 +251,7 @@
       </div>
     </div>
 
-    <p v-if="!loaded" class="muted">Загрузка…</p>
+    <UiLoadingState v-if="!loaded && !error" label="Загрузка…" variant="cards" />
     <p v-else-if="error" class="err">Ошибка: {{ error }}</p>
     <p v-else-if="!tasks.length" class="muted">Задач в состоянии фабрики нет.</p>
     <div v-else-if="!filteredTasks.length" class="filter-empty">
@@ -283,10 +283,6 @@
           #{{ t.task }}
         </UiButton>
         <span class="route">{{ ROUTE_ICON[t.route || ''] || '•' }} {{ t.route }}</span>
-        <span v-if="t.graph.runnerPolicy?.chain?.length" class="runner-policy"
-              v-tooltip="`Аварийная цепочка проекта: ${runnerChainLabel(t.graph.runnerPolicy)}`">
-          ИИ {{ runnerChainLabel(t.graph.runnerPolicy) }}
-        </span>
         <UiButton
           v-if="t.source === 'grigdesk' || b24Title(t.task)"
           class="ctitle"
@@ -877,7 +873,8 @@
 
             <!-- Документ этапа: план у ворот плана, диагноз у ворот причины, отчёт на приёмке -->
             <div v-if="stageDocLoading" class="sect content-sect">
-              <div class="secth"><UiSpinner decorative /> Документ этапа</div>
+              <div class="secth">Документ этапа</div>
+              <UiLoadingState label="Документ этапа" variant="document" />
             </div>
             <div v-else-if="stageDoc" class="sect content-sect document-sect">
               <UiDisclosureButton
@@ -985,6 +982,7 @@ import {
   UiSpinner,
   UiTextarea,
   vTooltip,
+  UiLoadingState,
 } from '../ui';
 import { sandboxUrl } from '../shared/sandbox.ts';
 import { agentActivityLabel, silenceReason } from '../../../shared/pipeline/agentActivity.ts';
@@ -1003,7 +1001,6 @@ import {
   attemptResultLabel,
   providerLabel,
   runnerAttemptModelLabel,
-  runnerChainLabel,
   runnerModelEffortLabel,
   runnerNodeLabel,
   runnerReasonLabel,
@@ -3408,8 +3405,6 @@ function cardState(g: PipelineViewGraph) {
 .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .route { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 2px 8px; border-radius: 999px; }
-.runner-policy { font-size: 11px; color: var(--ink-mid); border: 1px solid var(--line);
-  background: var(--surface-2); padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .spacer { flex: 1; }
 .daemon { font-size: 12px; white-space: nowrap; }
 .daemon.alive { color: var(--good); }

@@ -1,4 +1,9 @@
 {
+  "windowMinimize": "Minimize window",
+  "windowMaximize": "Maximize window",
+  "windowRestore": "Restore window size",
+  "windowClose": "Close application",
+  "windowActionFailed": "Could not perform the window action.",
   "checkingServer": "Checking server…",
   "startingServer": "Starting server…",
   "waitingVpn": "Waiting for VPN…",

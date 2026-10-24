@@ -128,6 +128,9 @@ async function fixture(t, { defer = false, sessions = [session()] } = {}) {
   const selected = [];
   const renamed = [];
   const state = vue.reactive({
+    loaded: true,
+    loading: false,
+    loadError: null,
     activeId: '',
     archived: [],
     rows: providers.map((provider) => ({

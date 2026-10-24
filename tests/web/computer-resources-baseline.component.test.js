@@ -77,6 +77,7 @@ test('PRES-02: исходная панель, старый mem и stale', { time
     assert.deepEqual(after, before);
     await h.page.keyboard.press('Escape');
     await h.page.setViewportSize({ width: 390, height: 844 });
-    assert.equal(await h.trigger.isVisible(), false, 'узкий экран сохраняет прежнее скрытие');
+    await h.trigger.waitFor({ state: 'hidden' });
+    assert.equal(await h.page.locator('[data-shell-status-trigger]').isVisible(), true);
   }
 });

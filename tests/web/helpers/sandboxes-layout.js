@@ -7,7 +7,7 @@ const controls = {
     composites: ['UiPaneHeader', 'UiField', 'UiFormActions', 'UiDisclosureButton'],
     primitives: ['UiActionLink', 'UiButton', 'UiIconButton', 'UiInput', 'UiSelect',
         'UiSwitch'],
-    feedback: ['UiInlineMessage', 'UiProgress'],
+    feedback: ['UiInlineMessage', 'UiLoadingState', 'UiProgress'],
 };
 const ui = Object.entries(controls).flatMap(([folder, names]) => names.map((name) => {
     const path = webFile(`src/components/${folder}/${name}.vue`);

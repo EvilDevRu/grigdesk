@@ -61,9 +61,7 @@
             :key="settings.pageId"
             :active="true"
           />
-          <div v-else class="settings-page-loading" role="status">
-            <UiSpinner :label="t('settings.loadingSection')" /> {{ t('settings.loadingSection2') }}
-          </div>
+          <UiLoadingState v-else :label="t('settings.loadingSection2')" variant="document" />
         </div>
       </div>
     </section>
@@ -74,7 +72,13 @@
 import { t, uiLocale } from '../../ui.ts';
 
 import { computed, ref } from 'vue';
-import { UiButton, UiSearchInput, UiPressable, UiInlineMessage, UiSpinner } from '../../ui.ts';
+import {
+  UiButton,
+  UiSearchInput,
+  UiPressable,
+  UiInlineMessage,
+  UiLoadingState,
+} from '../../ui.ts';
 import { useSettingsStore } from '../../stores/settings.ts';
 import { getSettingsGroups, getSettingsPages } from '../../features/settings/catalog.ts';
 import { searchSettings, type SettingsSearchResult } from '../../features/settings/search.ts';
@@ -224,12 +228,6 @@ function openResult(result: SettingsSearchResult): void {
   color: var(--ink-mid);
   font-size: 12px;
   line-height: 1.6;
-}
-.settings-page-loading {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--ink-mid);
 }
 .settings-sections {
   display: none;

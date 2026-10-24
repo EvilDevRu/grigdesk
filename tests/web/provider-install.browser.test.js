@@ -369,6 +369,17 @@ test('телефон и окно сохраняют доступность де�
 
           await action.waitFor();
 
+          const details = dialog.getByRole('button', { name: /^(Детали|Details)$/u });
+          const output = dialog.locator('pre');
+
+          assert.equal(await details.getAttribute('aria-expanded'), 'false');
+          assert.equal(await output.isVisible(), false);
+          await details.click();
+          assert.equal(await details.getAttribute('aria-expanded'), 'true');
+          assert.equal(await output.isVisible(), true);
+          await details.click();
+          assert.equal(await output.isVisible(), false);
+
           const controls = [action, dialog.getByRole('button', { name: /^(Закрыть|Close)$/iu })];
 
           if (status === 'failed') {

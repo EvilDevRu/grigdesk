@@ -649,6 +649,14 @@
   min-height: var(--control-height);
 }
 
+.ui-icon-button[data-context='window-control'] {
+  width: var(--app-topbar-h);
+  height: var(--app-topbar-h);
+  min-height: var(--app-topbar-h);
+  border-radius: 0;
+  color: var(--ink-mid);
+}
+
 .ui-icon-button--embedded,
 .ui-icon-button[data-role='embedded'] {
   width: 30px;

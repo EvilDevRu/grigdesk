@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { decodeCatalogIndex, decodeCatalogDetail } from '../../shared/plugins/pluginCatalogContracts.ts';
+import {
+  decodeCatalogIndex, decodeCatalogDetail, decodeCatalogResponse,
+} from '../../shared/plugins/pluginCatalogContracts.ts';
 import { catalogFixture } from '../helpers/pluginCatalog.js';
+import { moduleCatalogFixture, catalogResponse } from '../helpers/pluginCatalogModules.js';
 
 test('CAT-D1: v1, пустой начальный индекс, safe projection и полные детали', () => {
   const fixture = catalogFixture();
@@ -70,4 +73,47 @@ test('CAT-D2: повреждённый элемент не публикует ч
 
   detail.plugin.versions.push(structuredClone(detail.plugin.versions[0]));
   assert.throws(() => decodeCatalogDetail(detail), /Каталог/u);
+});
+
+
+test('CAT-D3-API2-OPT-IN: mixed index/detail/response требуют явного maximumApi=2', () => {
+  const { modern } = moduleCatalogFixture();
+  const response = catalogResponse(modern);
+
+  assert.deepEqual(decodeCatalogIndex(modern.index, 2), modern.index);
+  assert.deepEqual(decodeCatalogDetail(modern.detail, 2), modern.detail);
+  assert.deepEqual(decodeCatalogResponse(response, 2), response);
+  assert.throws(() => decodeCatalogIndex(modern.index), /Каталог/u);
+  assert.throws(() => decodeCatalogDetail(modern.detail), /Каталог/u);
+  assert.throws(() => decodeCatalogResponse(response), /Каталог/u);
+});
+
+test('CAT-D3-STRICT-BARRIER: maximumApi=2 не ослабляет api, SHA, identity и оболочку', () => {
+  const { legacy } = moduleCatalogFixture();
+  const mutations = [
+    (data) => {
+      data.index.plugins[0].latest.api = 3;
+      data.detail.plugin.versions[0].api = 3;
+    },
+    (data) => {
+      data.index.plugins[0].latest.sha = 'bad';
+      data.detail.plugin.versions[0].sha = 'bad';
+    },
+    (data) => {
+      data.index.plugins[0].source.url = 'https://github.com/other/demo.git';
+      data.detail.plugin.source.url = 'https://github.com/other/demo.git';
+    },
+  ];
+
+  for (const mutate of mutations) {
+    const data = structuredClone(legacy);
+
+    mutate(data);
+    assert.throws(() => decodeCatalogIndex(data.index, 2), /Каталог/u);
+    assert.throws(() => decodeCatalogDetail(data.detail, 2), /Каталог/u);
+    assert.throws(() => decodeCatalogResponse(catalogResponse(data), 2), /Каталог/u);
+  }
+
+  assert.throws(() => decodeCatalogResponse({ ...catalogResponse(legacy), state: 'unavailable' }, 2),
+    /Каталог/u);
 });

@@ -278,7 +278,9 @@
                     </UiIconButton>
                   </header>
 
-                  <ul v-if="schemaItems.length" class="db-schema__list">
+                  <UiLoadingState v-if="schemaLoadingIds.has(selectedSessionId) && !schemaLoaded"
+                    variant="document" />
+                  <ul v-else-if="schemaItems.length" class="db-schema__list">
                     <li v-for="(item, index) in schemaItems" :key="`${item}-${index}`">
                       <svg
                         viewBox="0 0 24 24"
@@ -496,7 +498,8 @@
               <span class="db-count">{{ store.profiles?.length || 0 }}</span>
             </header>
 
-            <div v-if="store.profiles?.length" class="db-profile-list">
+            <UiLoadingState v-if="refreshLoading && !store.profiles?.length && !store.error" />
+            <div v-else-if="store.profiles?.length" class="db-profile-list">
               <article
                 v-for="profile in store.profiles"
                 :key="profile.id"
@@ -752,6 +755,7 @@ import {
   UiTextarea,
   alertDialog,
   vTooltip,
+  UiLoadingState,
 } from '../../ui';
 import type {
   DbEngine,

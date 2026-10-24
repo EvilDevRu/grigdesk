@@ -13,6 +13,8 @@ const VIEW = webFile('src/views/ProjectsView.vue');
 const draftModule = await compileModule(webFile('src/views/projects/projectDraft.ts'));
 
 const UI_STUB = `
+export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
+export { t, resolveUiText, messageRef } from '${webFile('src/services/locale.ts')}';
 export { default as UiPaneHeader } from '${webFile('src/components/composites/UiPaneHeader.vue')}';
 export { default as UiButton } from '${webFile('src/components/primitives/UiButton.vue')}';
 export { default as UiIconButton } from '${webFile('src/components/primitives/UiIconButton.vue')}';
@@ -162,7 +164,15 @@ async function mountForm(t, {
 
   const component = await compileVue(VIEW, {
     stubs: {
-      '../stores/chat.ts': 'export const useChatStore = () => ({ _load: async () => {} });',
+      '../stores/chat.ts': `export const useChatStore = () => ({
+        loaded: true,
+        loading: false,
+        loadError: null,
+        loadErrorMessage: null,
+        retryLoad() {},
+        newSession: () => 'chat-id',
+        _load: async () => {},
+      });`,
       '../actions/projects': ACTIONS_STUB,
       '../../actions/projects': ACTIONS_STUB,
       '../ui': (UI_STUB) +

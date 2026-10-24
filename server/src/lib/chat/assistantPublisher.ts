@@ -21,6 +21,8 @@ export class ChatAssistantPublisher {
 
   private readonly writes = new Map<string, Set<Promise<void>>>();
 
+  private readonly blockWrites = new Map<string, Promise<void>>();
+
   private readonly errors = new Map<string, Error>();
 
   // Запуски, чей конец уже начался: их поздние черновики не заводят открытых блоков.
@@ -42,10 +44,10 @@ export class ChatAssistantPublisher {
     if (this.closed.has(runId)) {
       const late = event.complete ? event : { ...event, abandoned: true };
 
-      return this.writeMessage(runId, chatKey, late).catch(() => {});
+      return this.queueMessage(runId, chatKey, late).catch(() => {});
     }
 
-    const job = this.writeMessage(runId, chatKey, event);
+    const job = this.queueMessage(runId, chatKey, event);
     const jobs = this.writes.get(runId) || new Set<Promise<void>>();
 
     jobs.add(job);
@@ -138,6 +140,28 @@ export class ChatAssistantPublisher {
         this.closed.delete(oldest);
       }
     }
+  }
+
+  /**
+   * Дельты одного блока публикуются в порядке приёма, включая ожидание первой записи.
+   * Иначе задержанный begin возвращал первую букву поверх полного черновика в окне.
+   */
+  private queueMessage(runId: string, chatKey: string, event: InTurnAssistantEvent): Promise<void> {
+    const key = JSON.stringify([runId, event.assistantMessageId]);
+    const previous = this.blockWrites.get(key);
+    const job = previous
+      ? previous.catch(() => {}).then(() => this.writeMessage(runId, chatKey, event))
+      : this.writeMessage(runId, chatKey, event);
+    const clear = () => {
+      if (this.blockWrites.get(key) === job) {
+        this.blockWrites.delete(key);
+      }
+    };
+
+    this.blockWrites.set(key, job);
+    void job.then(clear, clear);
+
+    return job;
   }
 
   /**

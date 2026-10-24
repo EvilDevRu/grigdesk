@@ -56,14 +56,13 @@
           </p>
           <section v-if="job.outputTail" class="provider-install-log">
             <UiDisclosureButton
-              v-if="job.status === 'succeeded'"
               v-model:open="outputOpen"
               class="provider-install-log-toggle"
               density="compact"
               :controls="outputId"
-            >{{ t('settings.providerInstallationOutput') }}</UiDisclosureButton>
+            >{{ t('settings.providerInstallationDetails') }}</UiDisclosureButton>
             <pre
-              v-show="outputVisible"
+              v-show="outputOpen"
               :id="outputId"
               ref="outputElement"
               class="provider-install-output"
@@ -195,7 +194,6 @@ const loginCommand = computed(() => {
 
   return finished && needsLogin ? finished.loginCommand : '';
 });
-const outputVisible = computed(() => job.value?.status !== 'succeeded' || outputOpen.value);
 const heading = computed(() => {
   const name = provider.value?.name;
   const operation = job.value?.operation || install.selectedFailure?.operation;
@@ -297,8 +295,8 @@ watch(() => [auth.clientScope, auth.authenticated], () => {
   }
 });
 
-// Свёрнутый после успеха вывод не наследует раскрытие от прошлой операции.
-watch(() => job.value?.id, () => {
+// Каждое открытие окна и новая операция начинают со свёрнутых деталей.
+watch([() => job.value?.id, () => install.visible], () => {
   outputOpen.value = false;
 });
 
@@ -306,7 +304,7 @@ watch(() => job.value?.id, () => {
  * Хвост вывода показывает последние строки при открытии, раскрытии и новых строках.
  * Положение меряется до обновления DOM: отмотанный вверх вывод новые строки не сдёргивают.
  */
-watch([() => job.value?.outputTail, outputElement, outputVisible], async (current, previous) => {
+watch([() => job.value?.outputTail, outputElement, outputOpen], async (current, previous) => {
   const [, element, visible] = current;
   const follow = !element || element !== previous[1] || visible !== previous[2]
     || element.scrollHeight - element.scrollTop - element.clientHeight < 24;

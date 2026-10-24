@@ -108,25 +108,42 @@ export async function resourcesBrowser(t, initial = oldMetrics(), options = {}) 
 
   await page.route('**/api/system', (route) => offline
     ? route.abort('failed') : route.fulfill({ json: snapshot }));
-  await page.goto(origin + '#/chats');
+  await page.goto(origin + '#/chats', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.locator('.agents').waitFor({ state: 'attached', timeout: 60000 });
 
   const trigger = page.locator('[data-context="topbar-metrics"]');
 
-  await trigger.waitFor({ state: 'attached' });
+  await page.waitForFunction(() => document.querySelector('#app').__vue_app__
+    ?.config.globalProperties.$pinia._s.get('system')?.data);
   await page.evaluate(() => {
     document.querySelector('#app').__vue_app__.config.globalProperties.$pinia
       ._s.get('system').stopPolling();
   });
 
-  const panel = page.locator('.ui-topbar-panel');
+  const panel = page.locator('.ui-topbar-panel--wide');
+  const activate = (button) => options.hasTouch ? button.tap() : button.click();
+
+  /**
+   * На узком экране метрики находятся внутри сводки состояния системы.
+   * Подробная панель открывается тем же пользовательским путём, что и на телефоне.
+   */
+  async function showTrigger() {
+    if (!await trigger.isVisible()) {
+      await activate(page.locator('[data-shell-status-trigger]'));
+    }
+
+    await trigger.waitFor({ state: 'visible' });
+  }
 
   return {
     page,
     context,
     trigger,
     panel,
+    showTrigger,
     async open() {
-      await trigger.click();
+      await showTrigger();
+      await activate(trigger);
       await panel.waitFor();
     },
     /**
@@ -149,8 +166,7 @@ export async function resourcesBrowser(t, initial = oldMetrics(), options = {}) 
 
         await setUiLanguage(locale);
       }, value);
-      await page.waitForFunction((name) => document.querySelector('[data-context="topbar-metrics"]')
-        ?.getAttribute('aria-label')?.includes(name), labels[value].computerResources);
+      await page.waitForFunction((locale) => document.documentElement.lang.startsWith(locale), value);
     },
   };
 }

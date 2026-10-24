@@ -12,6 +12,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { npmLatest } from './_npmLatest.ts';
+import type { ProviderInstallationContext } from './index.ts';
+import { npmInstallCommand } from '../providerInstall/commands.ts';
 import { withRetry } from '../retry.ts';
 import { usagePercentOrNull } from '../providerUsage.ts';
 import type { ProviderUsagePatch, UsageBar } from '../providerUsage.ts';
@@ -2830,21 +2832,26 @@ export default {
   install: 'npm i -g @openai/codex && codex login',
   login: 'codex login',
   /**
-   * Сервер исполняет только эту декларацию; вход остаётся отдельным действием.
-   * Обновление проверяет настроенную копию, запасная команда сохраняет прежний путь.
+   * Доступный пользовательский npm устанавливает latest и при обновлении.
+   * Без npm сохраняются прежние команды; вход запускается отдельным действием.
    */
-  installation(config: CodexConfig) {
+  installation(config: CodexConfig, context?: ProviderInstallationContext) {
     const command = 'npm i -g @openai/codex';
-    const install = {
-        executable: 'npm',
-        args: ['i', '-g', '@openai/codex'],
-        command,
-        fallbackCommand: 'npm i -g @openai/codex && codex login',
+    const npm = context?.npm ? npmInstallCommand('@openai/codex', context.npm, {
+      binName: 'codex',
+      configKey: 'codexBin',
+      envKey: 'GRIGDESK_CODEX_BIN',
+    }) : null;
+    const install = npm || {
+      executable: 'npm',
+      args: ['i', '-g', '@openai/codex'],
+      command,
+      fallbackCommand: 'npm i -g @openai/codex && codex login',
     };
 
     return {
       install,
-      update: {
+      update: npm || {
         executable: config.codexBin,
         args: ['update'],
         command: [config.codexBin, ...['update']].join(' '),

@@ -2,7 +2,7 @@
   <section class="settings-plugin-setup" data-plugin-setup>
     <h4>{{ t('settings.readiness') }}</h4>
     <p v-if="error" role="alert">{{ error }}</p>
-    <p v-if="loading && !status">{{ t('settings.checkingWhatIsOnTheMachine') }}</p>
+    <UiLoadingState v-if="loading && !status" :label="t('settings.checkingWhatIsOnTheMachine')" />
     <div v-for="item in status?.items ?? []" :key="item.id">
       <b>{{ item.title }}</b>
       <p>{{ item.reason }}</p>
@@ -31,7 +31,10 @@
 import { t } from '../../../ui.ts';
 
 import { ref, watch, onBeforeUnmount } from 'vue';
-import { UiButton } from '../../../ui.ts';
+import {
+  UiButton,
+  UiLoadingState,
+} from '../../../ui.ts';
 import { usePluginsStore } from '../../../stores/plugins.ts';
 import { failureText } from '../../../shared/apiClient.ts';
 import type {

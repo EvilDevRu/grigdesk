@@ -141,6 +141,7 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
       export const UiTooltipHost = Host;
       export const UiToastHost = Host;
       export const UiInlineMessage = Host;
+      export const UiLoadingState = Host;
       export const UiSpinner = Host;`,
     './shared/alerts.ts': `
       export const clearAlertHistory = () => {};

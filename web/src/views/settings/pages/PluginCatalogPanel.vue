@@ -27,7 +27,8 @@
         </svg>
       </UiIconButton>
     </div>
-    <p v-if="catalog.loading" class="catalog-note" role="status">{{ t('settings.marketplaceLoading') }}</p>
+    <UiLoadingState v-if="catalog.loading" :label="t('settings.marketplaceLoading')"
+      :variant="catalog.index ? 'inline' : 'cards'" />
     <UiInlineMessage v-if="catalog.state !== 'fresh' && !catalog.loading" tone="warning" data-catalog-status>
       {{ t(statusKey) }}
     </UiInlineMessage>
@@ -65,7 +66,8 @@
       </aside>
       <article class="catalog-card">
         <UiButton class="catalog-back" data-context="workspace-form" variant="ghost" @click="back">{{ t('settings.marketplaceBack') }}</UiButton>
-        <p v-if="catalog.detailLoading" role="status">{{ t('settings.marketplaceLoading') }}</p>
+        <UiLoadingState v-if="catalog.detailLoading" :label="t('settings.marketplaceLoading')"
+          variant="document" />
         <UiInlineMessage v-else-if="catalog.detailError" tone="warning">
           {{ t('settings.marketplaceDetailError') }}
         </UiInlineMessage>
@@ -167,8 +169,21 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 
-import { UiActionLink, UiButton, UiIconButton, UiField, UiInput, UiSelect, UiInlineMessage, UiTabs, UiTab,
-  t, uiLocale, vTooltip } from '../../../ui.ts';
+import {
+  UiActionLink,
+  UiButton,
+  UiIconButton,
+  UiField,
+  UiInput,
+  UiSelect,
+  UiInlineMessage,
+  UiTabs,
+  UiTab,
+  t,
+  uiLocale,
+  vTooltip,
+  UiLoadingState,
+} from '../../../ui.ts';
 import { formatDate } from '../../../../../shared/i18n/formats.ts';
 import { usePluginCatalogStore } from '../../../stores/pluginCatalog.ts';
 import { usePluginsStore } from '../../../stores/plugins.ts';

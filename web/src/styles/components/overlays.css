@@ -77,6 +77,14 @@
   margin-bottom: 12px;
 }
 
+.ui-popover.ui-topbar-panel--wide {
+  width: min(1008px, calc(100vw - 16px));
+}
+
+.ui-topbar-panel--wide .ui-topbar-panel__body {
+  container-type: inline-size;
+}
+
 .ui-topbar-panel__title {
   display: flex;
   align-items: center;

@@ -1,6 +1,6 @@
 <template>
   <div class="diff-core">
-    <div v-if="showLoading" class="state"><UiSpinner role="large" label="Считаю диф" /><p class="muted">Считаю диф…</p></div>
+    <UiLoadingState v-if="showLoading" label="Считаю диф…" variant="document" />
     <div v-else-if="error && !repos.length" class="state"><p class="bad">{{ error }}</p><UiButton variant="solid" tone="accent" @click="load">Повторить</UiButton></div>
     <div v-else-if="!files.length" class="state">
       <p>Несохранённых изменений нет</p>
@@ -72,9 +72,9 @@ import {
   UiButton,
   UiIconButton,
   UiPressable,
-  UiSpinner,
   UiToggleButton,
   vTooltip,
+  UiLoadingState,
 } from '../../ui';
 
 interface DiffFile {

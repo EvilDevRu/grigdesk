@@ -29,7 +29,7 @@
       </div>
     </header>
 
-    <p v-if="shelf.loading && !shelf.loaded" class="shelf-state">Загружаю полку…</p>
+    <UiLoadingState v-if="shelf.loading && !shelf.loaded" label="Загружаю полку…" />
     <p v-if="shelf.error" class="shelf-state error" role="alert">{{ shelf.error }}</p>
     <div v-if="shelf.sourceIssues?.length" class="source-issues" role="status">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -225,6 +225,7 @@ import {
   UiSearchInput,
   UiSelectableRow,
   vTooltip,
+  UiLoadingState,
 } from '../../ui';
 import type { UiActionTone } from '../../ui';
 
