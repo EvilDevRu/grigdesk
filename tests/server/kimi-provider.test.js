@@ -45,6 +45,44 @@ test('Kimi setup-карточка проверяет системный CLI и l
   assert.equal(kimi.login, 'kimi login');
 });
 
+test('Kimi setup-карточка признаёт scoped credential кастомного OAuth-окружения', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-scoped-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const kimiHome = path.join(root, '.kimi-code');
+  const credentials = path.join(kimiHome, 'credentials');
+  await fs.mkdir(credentials, { recursive: true });
+
+  const config = { kimiBin: 'kimi', kimiHome };
+
+  // Похожие имена (каталог, чужой файл, hash не из hex) авторизацией не считаются.
+  await fs.mkdir(path.join(credentials, 'kimi-code-env-aa11bb22cc33dd44.json.d'));
+  await fs.writeFile(path.join(credentials, 'kimi-code-env.json'), 'не читать');
+  await fs.writeFile(path.join(credentials, 'kimi-code.json.bak'), 'не читать');
+  assert.deepEqual(await kimi.auth(config), {
+    mode: 'none',
+    label: 'не авторизован (kimi login)',
+    available: false,
+  });
+
+  await fs.writeFile(
+    path.join(credentials, 'kimi-code-env-0e4f99c69cc27850.json'), 'не читать',
+  );
+  assert.deepEqual(await kimi.auth(config), {
+    mode: 'cli',
+    label: 'CLI хоста (kimi login)',
+    available: true,
+  });
+
+  // Официальный слот важнее scoped: удаление scoped не роняет авторизацию.
+  await fs.writeFile(path.join(credentials, 'kimi-code.json'), 'не читать');
+  await fs.rm(path.join(credentials, 'kimi-code-env-0e4f99c69cc27850.json'));
+  assert.deepEqual(await kimi.auth(config), {
+    mode: 'cli',
+    label: 'CLI хоста (kimi login)',
+    available: true,
+  });
+});
+
 test('Kimi виден и в setup-, и в runtime-реестре чатов', async () => {
   assert.equal((await getProviderAdapters()).get('kimi'), kimi);
   assert.equal(await getExecutor('kimi'), kimi);

@@ -26,6 +26,7 @@ import { COMMAND_NAME, hasUserShellPolicy } from './commandProfile.ts';
 import { checkKimiNativeShellPolicy } from './commandNativePolicy.ts';
 import type { KimiServerClient } from './serverClient.ts';
 import { runKimiServerTurn } from './serverTurn.ts';
+import { kimiServerApprovalInput } from './serverApproval.ts';
 import { startKimiServer } from './serverRuntime.ts';
 import type { PreparedNativeSettings } from '../executorSettings/types.ts';
 import type {
@@ -702,11 +703,7 @@ export async function runContainedKimi({
 
           const answer = await onPermission?.({
             tool,
-            input: {
-              command: String(approval.tool_input_display || approval.command || ''),
-              description: String(approval.description || approval.tool_input_display || ''),
-              kind: String(approval.kind || approval.action || ''),
-            },
+            input: kimiServerApprovalInput(approval),
             acceptsComment: true,
             canRemember: true,
             raw: approval,
