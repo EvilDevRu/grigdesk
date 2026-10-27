@@ -54,6 +54,15 @@
           >
             {{ t('settings.providerInstallationRetry', job.retry) }}
           </p>
+          <p
+            v-if="job.status !== 'running' && terminalNote"
+            class="provider-install-note"
+            :data-terminal="job.terminal?.status"
+          >{{ terminalNote }}</p>
+          <p
+            v-if="job.status !== 'running' && migrationNote"
+            class="provider-install-note"
+          >{{ migrationNote }}</p>
           <section v-if="job.outputTail" class="provider-install-log">
             <UiDisclosureButton
               v-model:open="outputOpen"
@@ -78,12 +87,14 @@
           {{ t('settings.providerInstallationUnknown') }}
         </UiInlineMessage>
         <UiInlineMessage v-if="install.selectedFailure" tone="danger">
-          {{ install.selectedFailure.message }}
+          {{ selectedFailureText }}
         </UiInlineMessage>
         <UiInlineMessage v-if="install.snapshot.blockedReason" tone="danger">
           {{ providerInstallNoticeText(install.snapshot.blockedReason) }}
         </UiInlineMessage>
-        <UiInlineMessage v-if="install.error" tone="danger">{{ install.error }}</UiInlineMessage>
+        <UiInlineMessage v-if="install.error && !install.selectedFailure" tone="danger">
+          {{ install.error }}
+        </UiInlineMessage>
       </div>
 
       <footer class="provider-install-foot">
@@ -142,6 +153,8 @@ import {
   useProviderInstallStore,
   providerInstallResultText,
   providerInstallNoticeText,
+  providerInstallTerminalText,
+  providerInstallVisibleWarnings,
 } from '../stores/providerInstall.ts';
 import { useProvidersStore } from '../stores/providers.ts';
 import { useAuthStore } from '../stores/auth.ts';
@@ -160,10 +173,12 @@ const STAGE_ICONS: Readonly<Record<Exclude<StageState, 'current'>, string>> = {
   failed: 'M12 6.5v7M12 17.5v.01',
   pending: 'M12 5a7 7 0 1 1 0 14a7 7 0 1 1 0-14',
 };
-const STAGES: readonly ProviderInstallStage[] = ['download-install', 'version', 'models'];
+const STAGES: readonly ProviderInstallStage[] = ['download-install', 'version', 'terminal',
+  'models'];
 const STAGE_LABELS: Readonly<Record<ProviderInstallStage, MessageKey>> = {
   'download-install': 'settings.providerInstallationDownloadInstall',
   version: 'settings.providerInstallationVersion',
+  terminal: 'settings.providerInstallationTerminalStage',
   models: 'settings.providerInstallationModels',
 };
 
@@ -186,6 +201,19 @@ const brandStyle = computed(() => provider.value?.color
   ? { '--provider-install-brand': provider.value.color } : undefined);
 const fallbackCommand = computed(() => install.selectedFailure?.fallbackCommand
   || (job.value && ['failed', 'interrupted'].includes(job.value.status) ? job.value.fallbackCommand : ''));
+// Отказ подготовки означает, что команда ещё не запускалась. Неизвестный исход
+// запроса старта этим обещанием не заменяется: он сверяется с серверным job.
+const selectedFailureText = computed(() => {
+  const failure = install.selectedFailure;
+
+  if (!failure || failure.phase !== 'prepare') {
+    return failure?.message || '';
+  }
+
+  return t(failure.operation === 'install'
+    ? 'settings.providerInstallationNotStarted'
+    : 'settings.providerInstallationUpdateNotStarted', { reason: failure.message });
+});
 const retryOperation = computed(() => install.selectedFailure?.operation
   || (job.value && ['failed', 'interrupted'].includes(job.value.status) ? job.value.operation : null));
 const loginCommand = computed(() => {
@@ -214,7 +242,7 @@ const tone = computed(() => {
     return 'running';
   }
   if (job.value.status === 'succeeded') {
-    return job.value.warnings.length ? 'warning' : 'success';
+    return providerInstallVisibleWarnings(job.value).length ? 'warning' : 'success';
   }
 
   return job.value.status === 'interrupted' ? 'warning' : 'danger';
@@ -230,6 +258,12 @@ const stages = computed(() => {
 });
 const modelsWarning = computed(() => Boolean(job.value?.warnings.some((warning) =>
   typeof warning !== 'string' && warning.code === 'models_refresh_failed')));
+const terminalNote = computed(() => job.value && job.value.status !== 'running'
+  ? providerInstallTerminalText(job.value.terminal) : '');
+const migrationNote = computed(() => job.value?.migration
+  ? t('settings.providerInstallationMigrated', {
+    from: job.value.migration.from, to: job.value.migration.to,
+  }) : '');
 const currentStage = computed(() => t(STAGE_LABELS[job.value?.stage || 'download-install']));
 // Первая строка — итог операции, остальное (предупреждения, длинная причина) — пояснение под ним.
 const resultLines = computed(() => {
@@ -253,7 +287,15 @@ const actions = createSettingsActions({
  */
 function stageState(index: number, current: number): StageState {
   if (job.value?.status === 'succeeded') {
-    return STAGES[index] === 'models' && modelsWarning.value ? 'warning' : 'done';
+    if (STAGES[index] === 'models' && modelsWarning.value) {
+      return 'warning';
+    }
+    if (STAGES[index] === 'terminal' && job.value.terminal
+      && job.value.terminal.status !== 'ready') {
+      return 'warning';
+    }
+
+    return 'done';
   }
   if (index < current) {
     return 'done';

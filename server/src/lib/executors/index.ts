@@ -301,6 +301,7 @@ export interface ProviderInstallCommand {
   command: string;
   fallbackCommand: string;
   npmBinding?: {
+    packageId: string;
     binName: string;
     configKey: string;
     envKey: string;
@@ -312,6 +313,8 @@ export interface ProviderInstallation {
   update: ProviderInstallCommand | null;
   loginCommand: string;
   nativeBinDirs?: string[];
+  // Аргументы входа объявлены списком: shell-строка loginCommand не разбирается.
+  loginArgs?: string[];
 }
 
 export interface ProviderInstallationContext {

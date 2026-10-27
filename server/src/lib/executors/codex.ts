@@ -2858,6 +2858,7 @@ export default {
         fallbackCommand: [config.codexBin, ...['update']].join(' '),
       },
       loginCommand: 'codex login',
+      loginArgs: ['login'],
     };
   },
 

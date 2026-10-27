@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { readFile, access } from 'node:fs/promises';
+import * as fs from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
-  installFixture, current, start, completed, until, cookie,
+  installFixture, installNpmFixture, current, start, completed, until, cookie,
+  prepare, startWithToken,
 } from './helpers/providerInstallFixture.js';
 
 test('start отвечает 202 до окончания и GET возвращает тот же job', async (t) => {
@@ -200,4 +204,260 @@ test('progress не перечитывает реестр', async (t) => {
   assert.ok(snapshots.every((entry, index) => index === 0
     || entry.data.revision > snapshots[index - 1].data.revision));
   assert.doesNotMatch(JSON.stringify(snapshots), /"(?:env|pid|worker|credential)":/u);
+});
+
+/**
+ * Подготовка ничего не устанавливает и не пишет shell: тест сравнивает байты
+ * файла настройки до и после и убеждается, что команда не запускалась.
+ */
+test('prepare возвращает reviewable DTO, но не запускает npm и не пишет shell', async (t) => {
+  const fixture = await installNpmFixture(t, { installed: true });
+  const bashrc = path.join(fixture.root, '.bashrc');
+  const before = await readFile(bashrc, 'utf8');
+
+  const response = await prepare(fixture.app, 'claude', 'update');
+
+  assert.equal(response.statusCode, 200, response.body);
+
+  const preparation = response.json();
+  const { isProviderInstallPreparation } = await import(
+    '../../shared/chat/providerInstallContracts.ts');
+
+  assert.equal(isProviderInstallPreparation(preparation), true);
+  assert.equal(preparation.prefix, fixture.prefix);
+  assert.equal(preparation.terminalSetup, 'bash');
+  assert.ok(preparation.command.includes(`--prefix ${fixture.prefix}`));
+  assert.deepEqual(preparation.shellChanges.map((change) => path.basename(change.file)),
+    ['.bashrc', '.bash_profile']);
+  assert.ok(preparation.shellChanges.every((change) => change.block.includes(fixture.prefix)));
+  assert.equal(fixture.calls.commands.length, 0, 'prepare запустил команду');
+  assert.equal(await readFile(bashrc, 'utf8'), before, 'prepare изменил shell rc');
+});
+
+test('token связывает preview со стартом, а чужой token отвергается', async (t) => {
+  const fixture = await installNpmFixture(t, { installed: true });
+  const preparation = (await prepare(fixture.app, 'claude', 'update')).json();
+  const forged = await startWithToken(fixture.app, 'forged-token', 'claude', 'update');
+
+  assert.equal(forged.statusCode, 409, forged.body);
+  assert.equal(forged.json().error, 'preparation_invalid');
+  assert.equal(fixture.calls.commands.length, 0);
+
+  const started = await startWithToken(fixture.app, preparation.token, 'claude', 'update');
+
+  assert.equal(started.statusCode, 202, started.body);
+  assert.equal(started.json().active.command, preparation.command);
+  fixture.gate.resolve();
+
+  const job = (await completed(fixture.app)).recent.claude;
+
+  assert.equal(job.status, 'succeeded');
+  assert.equal(job.terminal.status, 'ready', JSON.stringify(job.terminal));
+  assert.equal(job.terminal.binDirectory, path.join(fixture.prefix, 'bin'));
+  assert.equal(fixture.config.claudeBin, fixture.npmBinary);
+  assert.equal((await readFile(fixture.config.envPath, 'utf8')).includes(fixture.npmBinary), true);
+});
+
+test('истёкшая подготовка требует нового preview', async (t) => {
+  const fixture = await installNpmFixture(t, {
+    installed: true,
+    providerInstall: { preparationTtlMs: 1 },
+  });
+  const preparation = (await prepare(fixture.app, 'claude', 'update')).json();
+
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  const started = await startWithToken(fixture.app, preparation.token, 'claude', 'update');
+
+  assert.equal(started.statusCode, 409, started.body);
+  assert.equal(started.json().error, 'preparation_expired');
+  assert.equal(fixture.calls.commands.length, 0);
+});
+
+test('один token запускает не более одного job', async (t) => {
+  const fixture = await installNpmFixture(t, { installed: true });
+  const preparation = (await prepare(fixture.app, 'claude', 'update')).json();
+  const first = await startWithToken(fixture.app, preparation.token, 'claude', 'update');
+
+  assert.equal(first.statusCode, 202, first.body);
+  fixture.gate.resolve();
+  await completed(fixture.app);
+
+  const second = await startWithToken(fixture.app, preparation.token, 'claude', 'update');
+
+  assert.equal(second.statusCode, 409, second.body);
+  assert.equal(second.json().error, 'preparation_consumed');
+  assert.equal(fixture.calls.commands.length, 1);
+});
+
+test('token не принимается для другой учётной записи', async (t) => {
+  const fixture = await installNpmFixture(t, {
+    installed: true,
+    auth: true,
+    sessions: ['provider-install-fixture', 'second-account'],
+  });
+  const preparation = (await prepare(fixture.app, 'claude', 'update',
+    { cookie })).json();
+  const started = await startWithToken(fixture.app, preparation.token, 'claude', 'update',
+    { cookie: 'grigdesk_sid=second-account' });
+
+  assert.equal(started.statusCode, 409, started.body);
+  assert.equal(started.json().error, 'preparation_invalid');
+  assert.equal(fixture.calls.commands.length, 0);
+});
+
+test('token другого исполнителя не запускает установку', async (t) => {
+  const fixture = await installFixture(t, { installed: false });
+  const second = {
+    ...fixture.provider,
+    id: 'codex',
+    name: 'Второй исполнитель',
+    installation: () => structuredClone(fixture.descriptor),
+  };
+
+  fixture.adapters.set('codex', second);
+
+  const preparation = (await prepare(fixture.app, 'claude', 'install')).json();
+  const started = await startWithToken(fixture.app, preparation.token, 'codex', 'install');
+
+  assert.equal(started.statusCode, 409, started.body);
+  assert.equal(started.json().error, 'preparation_invalid');
+  assert.equal(fixture.calls.commands.length, 0);
+});
+
+test('изменение shell rc между prepare и start требует нового preview', async (t) => {
+  const fixture = await installNpmFixture(t, { installed: true });
+  const preparation = (await prepare(fixture.app, 'claude', 'update')).json();
+
+  await appendFile(path.join(fixture.root, '.bashrc'), '# человек дописал\nexport NEW=1\n');
+
+  const started = await startWithToken(fixture.app, preparation.token, 'claude', 'update');
+
+  assert.equal(started.statusCode, 409, started.body);
+  assert.equal(started.json().error, 'preparation_changed');
+  assert.equal(fixture.calls.commands.length, 0);
+});
+
+test('изменение effective prefix между prepare и start требует нового preview', async (t) => {
+  const fixture = await installNpmFixture(t, { installed: true });
+  const preparation = (await prepare(fixture.app, 'claude', 'update')).json();
+  const other = path.join(fixture.root, 'other-prefix');
+
+  await mkdir(other, { recursive: true });
+  await writeFile(fixture.npm,
+    `#!/bin/sh\nif [ "$1" = "prefix" ]; then printf '%s\\n' ${JSON.stringify(other)}; fi\n`,
+    { mode: 0o755 });
+
+  const started = await startWithToken(fixture.app, preparation.token, 'claude', 'update');
+
+  assert.equal(started.statusCode, 409, started.body);
+  assert.equal(started.json().error, 'preparation_changed');
+  assert.equal(fixture.calls.commands.length, 0);
+});
+
+test('появление чужого объекта в цели блокирует старт', async (t) => {
+  const fixture = await installNpmFixture(t, { installed: true });
+  const preparation = (await prepare(fixture.app, 'claude', 'update')).json();
+
+  await mkdir(path.dirname(fixture.npmBinary), { recursive: true });
+  await writeFile(fixture.npmBinary, '#!/bin/sh\n', { mode: 0o755 });
+
+  const started = await startWithToken(fixture.app, preparation.token, 'claude', 'update');
+
+  assert.equal(started.statusCode, 409, started.body);
+  assert.equal(started.json().error, 'preparation_changed');
+  assert.equal(fixture.calls.commands.length, 0);
+});
+
+test('занятость не тратит token: старт после завершения проходит', async (t) => {
+  const fixture = await installFixture(t, { installed: false });
+  const second = {
+    ...fixture.provider,
+    id: 'codex',
+    name: 'Второй исполнитель',
+    installation: () => structuredClone(fixture.descriptor),
+    probe: async () => ({ ok: false, version: '' }),
+  };
+
+  fixture.adapters.set('codex', second);
+
+  const preparation = (await prepare(fixture.app, 'codex', 'install')).json();
+  const busyStart = await start(fixture.app, 'claude', 'install');
+
+  assert.equal(busyStart.statusCode, 202, busyStart.body);
+
+  const blocked = await startWithToken(fixture.app, preparation.token, 'codex', 'install');
+
+  assert.equal(blocked.statusCode, 409, blocked.body);
+  assert.equal(blocked.json().error, 'busy');
+
+  fixture.gate.resolve();
+  await completed(fixture.app, 'claude');
+
+  const started = await startWithToken(fixture.app, preparation.token, 'codex', 'install');
+
+  assert.equal(started.statusCode, 202, started.body);
+  fixture.gate.resolve();
+  await completed(fixture.app, 'codex');
+});
+
+test('перезапуск сервера делает подготовку недействительной', async (t) => {
+  const fixture = await installNpmFixture(t, { installed: true });
+  const preparation = (await prepare(fixture.app, 'claude', 'update')).json();
+  const { ProviderInstallService } = await import(
+    '../../server/src/lib/providerInstall/service.ts');
+  const restarted = new ProviderInstallService({
+    statePath: fixture.config.providerInstallStatePath,
+    config: fixture.config,
+    env: fixture.env,
+    adaptersOf: async () => fixture.adapters,
+    latestOf: () => '2.0.0',
+    refreshModels: async () => ({}),
+    invalidate: async () => {},
+    broadcast: () => {},
+  });
+
+  await assert.rejects(restarted.start('claude', 'update', {
+    token: preparation.token,
+    scope: 'restarted',
+  }), { code: 'preparation_invalid' });
+  assert.equal(fixture.calls.commands.length, 0);
+});
+
+test('неподдержанная оболочка даёт установку без изменения rc', async (t) => {
+  const fixture = await installNpmFixture(t, { installed: true, shell: '/bin/zsh' });
+  const bashrc = path.join(fixture.root, '.bashrc');
+  const before = await readFile(bashrc, 'utf8');
+  const preparation = (await prepare(fixture.app, 'claude', 'update')).json();
+
+  assert.equal(preparation.terminalSetup, 'manual');
+  assert.deepEqual(preparation.shellChanges, []);
+  assert.ok(preparation.warnings.some((warning) => warning.code === 'terminal_setup_required'));
+
+  const started = await startWithToken(fixture.app, preparation.token, 'claude', 'update');
+
+  assert.equal(started.statusCode, 202, started.body);
+  fixture.gate.resolve();
+
+  const job = (await completed(fixture.app)).recent.claude;
+
+  assert.equal(job.status, 'succeeded');
+  assert.equal(job.terminal.status, 'needs_setup');
+  assert.equal(job.terminal.shell, 'other');
+  assert.equal(await readFile(bashrc, 'utf8'), before);
+});
+
+test('зависший Bash не блокирует установку и помечает shell probe', async (t) => {
+  const fixture = await installNpmFixture(t, {
+    installed: true,
+    providerInstall: { bashTimeoutMs: 200 },
+  });
+
+  await writeFile(path.join(fixture.root, '.bashrc'), 'exec sleep 30\n');
+
+  const preparation = await prepare(fixture.app, 'claude', 'update');
+
+  assert.equal(preparation.statusCode, 200, preparation.body);
+  assert.ok(preparation.json().warnings.some((warning) => warning.code === 'shell_probe_failed'));
+  assert.equal(preparation.json().terminalSetup, 'manual');
 });

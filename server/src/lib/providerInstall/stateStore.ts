@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 
 import { writeDurableFile } from '../durableFile.ts';
 import type { CommandWorker } from '../pluginInstall/runCommand.ts';
+import { isMigrationJournal, type MigrationJournal } from './legacyBinMigration.ts';
 import {
   isProviderInstallSnapshot,
   type ProviderInstallSnapshot,
@@ -9,6 +10,8 @@ import {
 
 export interface ProviderInstallState extends ProviderInstallSnapshot {
   worker: CommandWorker | null;
+  // Узкий журнал одной доказанной legacy-ссылки; в публичный снимок не входит.
+  migration?: MigrationJournal | null;
 }
 
 /**
@@ -49,7 +52,17 @@ export async function readInstallState(file: string): Promise<ProviderInstallSta
     throw new Error('Повреждено владение процессом установки');
   }
 
-  return { ...parsed, worker: worker ?? null };
+  const migration = (parsed as ProviderInstallState).migration ?? null;
+
+  if (migration !== null && !isMigrationJournal(migration)) {
+    throw new Error('Повреждён журнал миграции bin-ссылки');
+  }
+
+  return {
+    ...parsed,
+    worker: worker ?? null,
+    migration,
+  };
 }
 
 /**

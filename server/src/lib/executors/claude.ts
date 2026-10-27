@@ -1691,6 +1691,7 @@ export default {
         fallbackCommand: [config.claudeBin, ...['install', 'latest']].join(' '),
       },
       loginCommand: 'claude login',
+      loginArgs: ['login'],
       nativeBinDirs: [path.join(os.homedir(), '.local', 'bin')],
     };
   },

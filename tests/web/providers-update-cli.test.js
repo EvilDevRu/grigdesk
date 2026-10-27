@@ -27,8 +27,12 @@ test('удачная установка называет обе версии и 
   assert.match(result.text, /1\.0\.0.*2\.0\.0/u);
   assert.equal(providers.updating, '');
   assert.ok(calls.gets.includes('/api/providers?refresh=1'));
-  assert.equal(calls.posts.length, 1);
-  assert.equal(calls.posts[0].url, '/api/providers/claude/update/start');
+
+  const starts = calls.posts.filter((entry) => entry.url.endsWith('/start'));
+
+  assert.equal(starts.length, 1);
+  assert.equal(starts[0].url, '/api/providers/claude/update/start');
+  assert.deepEqual(starts[0].body, { preparationToken: 'fixture-preparation-token' });
 });
 
 test('чужая установка не начинается поверх идущей', async (t) => {
@@ -37,7 +41,8 @@ test('чужая установка не начинается поверх ид�
   await providers.updateCli('claude');
   assert.equal(providers.updating, 'claude');
   await providers.updateCli('codex');
-  assert.equal(calls.posts.length, 1, 'Вторая установка ушла поверх серверного active');
+  assert.equal(calls.posts.filter((entry) => entry.url.endsWith('/start')).length, 1,
+    'Вторая установка ушла поверх серверного active');
   assert.equal(providers.updating, 'claude');
 });
 
@@ -76,5 +81,6 @@ test('упавший запрос не оставляет исполнителя
   assert.ok(calls.gets.includes('/api/providers/installations/current'), 'Исход POST не сверили с сервером');
   assert.equal(providers.updating, '');
   assert.equal(store.snapshot.active, null);
-  assert.equal(calls.posts.length, 1, 'Потерянный запрос повторён автоматически');
+  assert.equal(calls.posts.filter((entry) => entry.url.endsWith('/start')).length, 1,
+    'Потерянный запрос повторён автоматически');
 });

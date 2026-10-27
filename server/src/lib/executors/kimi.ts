@@ -14,6 +14,7 @@ import { npmInstallCommand } from '../providerInstall/commands.ts';
 
 import { validateKimiWorkdir } from '../kimi/sandbox.ts';
 import type { KimiSandboxConfig } from '../kimi/sandbox.ts';
+import { findKimiCredentialFile } from '../kimi/credentials.ts';
 
 import { KIMI_RETRY_CONTRACT } from '../chat/retryContract.ts';
 import {
@@ -327,6 +328,7 @@ export default {
       install,
       update: config.kimiLaunchMode === 'contained' ? null : { ...install },
       loginCommand: 'kimi login',
+      loginArgs: ['login'],
       nativeBinDirs: [path.join(os.homedir(), '.local', 'bin')],
     };
   },
@@ -388,15 +390,18 @@ export default {
 
   probe(config: KimiConfig) { return probe(config.kimiBin); },
 
-  // Проверяем только наличие credential-файла. Его содержимое GrigDesk не читает,
-  // не копирует и не логирует; самой авторизацией по-прежнему владеет `kimi login`.
+  // Проверяем только наличие credential-файла: официального kimi-code.json либо
+  // scoped kimi-code-env-<hash>.json от входа через кастомное OAuth-окружение.
+  // Содержимое GrigDesk не читает, не копирует и не логирует; самой авторизацией
+  // по-прежнему владеет `kimi login`.
   async auth(config: KimiConfig) {
-    try {
-      await fs.access(path.join(config.kimiHome, 'credentials', 'kimi-code.json'));
+    const credential = await findKimiCredentialFile(path.join(config.kimiHome, 'credentials'));
+
+    if (credential) {
       return { mode: 'cli', label: 'CLI хоста (kimi login)', available: true };
-    } catch {
-      return { mode: 'none', label: 'не авторизован (kimi login)', available: false };
     }
+
+    return { mode: 'none', label: 'не авторизован (kimi login)', available: false };
   },
 
   /**

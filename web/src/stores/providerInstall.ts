@@ -3,11 +3,14 @@ import { defineStore } from 'pinia';
 
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import {
+  decodeProviderInstallPreparation,
   decodeProviderInstallSnapshot,
   type ProviderInstallJob,
   type ProviderInstallNotice,
   type ProviderInstallOperation,
+  type ProviderInstallPreparation,
   type ProviderInstallSnapshot,
+  type ProviderInstallTerminal,
 } from '../../../shared/chat/providerInstallContracts.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { api, ApiError, failureText } from '../shared/apiClient.ts';
@@ -39,12 +42,27 @@ const noticeKeys: Readonly<Record<string, string>> = {
   state_write_failed: 'settings.providerInstallationStateWriteFailed',
   models_refresh_failed: 'settings.providerInstallationModelsFailed',
   updates_check_failed: 'settings.providerInstallationUpdatesFailed',
+  npm_runtime_missing: 'settings.providerInstallationNpmRuntimeMissing',
+  npm_prefix_invalid: 'settings.providerInstallationPrefixInvalid',
+  npm_prefix_unwritable: 'settings.providerInstallationPrefixUnwritable',
+  npm_prefix_nvm_scoped: 'settings.providerInstallationPrefixNvmScoped',
+  npm_bin_conflict: 'settings.providerInstallationBinConflict',
+  shell_probe_failed: 'settings.providerInstallationShellProbeFailed',
+  terminal_setup_required: 'settings.providerInstallationTerminalSetupRequired',
+  terminal_command_conflict: 'settings.providerInstallationTerminalCommandConflict',
+  migration_recovery_required: 'settings.providerInstallationMigrationRecoveryRequired',
+  preparation_changed: 'settings.providerInstallationPreparationChanged',
+  preparation_expired: 'settings.providerInstallationPreparationExpired',
+  preparation_invalid: 'settings.providerInstallationPreparationInvalid',
+  preparation_consumed: 'settings.providerInstallationPreparationConsumed',
+  server_restart_required: 'settings.providerInstallationServerRestart',
 };
 
 type StartFailure = {
   providerId: string;
   previousJobId: string;
   operation: ProviderInstallOperation;
+  phase: 'prepare' | 'start';
   message: string | ProviderInstallNotice;
   fallbackCommand: string;
 };
@@ -70,6 +88,18 @@ export function providerInstallNoticeText(notice: string | ProviderInstallNotice
   return key ? t(key) : notice.message;
 }
 
+// Справочные коды остаются в job для диагностики, но человеку их не показываем:
+// управляемый блок PATH держит абсолютный каталог, и смена версии nvm копию не теряет.
+const quietNoticeCodes: ReadonlySet<string> = new Set(['npm_prefix_nvm_scoped']);
+
+/**
+ * Предупреждения, которые видит человек и которые делают итог «требующим внимания».
+ * Справочные коды отбрасываются одинаково для окна, всплывашки и строки итога.
+ */
+export function providerInstallVisibleWarnings(job: ProviderInstallJob): ProviderInstallJob['warnings'] {
+  return job.warnings.filter((warning) => typeof warning === 'string' || !quietNoticeCodes.has(warning.code));
+}
+
 /**
  * Отказ API сохраняет код до момента показа и следующей смены языка.
  * Транспортные ошибки не объявляются собственными причинами сервера.
@@ -88,6 +118,47 @@ function failureNotice(failure: unknown): string | ProviderInstallNotice {
  */
 function versionLabel(value: string): string {
   return value.match(/\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?/u)?.[0] || value;
+}
+
+/**
+ * Итог терминала не смешивается с успехом CLI: установленная копия может
+ * работать в GrigDesk и не находиться по имени в обычной оболочке.
+ */
+export function providerInstallTerminalText(terminal: ProviderInstallTerminal | undefined): string {
+  if (!terminal) {
+    return '';
+  }
+  if (terminal.status === 'ready') {
+    return t('settings.providerInstallationTerminalReady');
+  }
+  if (terminal.status === 'conflict') {
+    return t('settings.providerInstallationTerminalConflict');
+  }
+
+  return t('settings.providerInstallationTerminalSetup', { directory: terminal.binDirectory });
+}
+
+/**
+ * Перенос копии при равной версии объясняется отдельно от смены версии.
+ * Старые снимки без этих полей остаются читаемыми и не обещают готовность.
+ */
+function providerInstallExtraLines(job: ProviderInstallJob): string[] {
+  const lines: string[] = [];
+
+  if (job.migration) {
+    lines.push(t('settings.providerInstallationMigrated', {
+      from: job.migration.from,
+      to: job.migration.to,
+    }));
+  }
+
+  const terminal = providerInstallTerminalText(job.terminal);
+
+  if (terminal) {
+    lines.push(terminal);
+  }
+
+  return lines;
 }
 
 /**
@@ -114,7 +185,11 @@ export function providerInstallResultText(job: ProviderInstallJob): string {
     text = t('settings.providerInstallationCurrent', { version: versionLabel(job.after || job.before) });
   }
 
-  return [text, ...job.warnings.map(providerInstallNoticeText)].join('\n');
+  return [
+    text,
+    ...providerInstallExtraLines(job),
+    ...providerInstallVisibleWarnings(job).map(providerInstallNoticeText),
+  ].join('\n');
 }
 
 export const useProviderInstallStore = defineStore('provider-install', () => {
@@ -174,6 +249,18 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
       }
     }
 
+    const failure = startFailure.value;
+
+    if (failure) {
+      results[failure.providerId] = {
+        type: 'err',
+        get text() {
+          return providerInstallNoticeText(failure.message);
+        },
+        changed: false,
+      };
+    }
+
     providers.updateResults = results;
   }
 
@@ -199,8 +286,11 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
       const resolvedJob = failure && (next.active?.providerId === failure.providerId
         ? next.active : next.recent[failure.providerId]);
 
+      // После prepare команды ещё не было: впервые загруженная старая история
+      // не может подтвердить её старт. Для потерянного start остаётся сверка итога.
       if (failure && resolvedJob && resolvedJob.id !== failure.previousJobId
-        && resolvedJob.operation === failure.operation) {
+        && resolvedJob.operation === failure.operation
+        && (failure.phase === 'start' || resolvedJob.status === 'running')) {
         startFailure.value = null;
       }
 
@@ -295,8 +385,60 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
   }
 
   /**
-   * Подтверждение показывает серверную команду, но браузер отправляет только URL id.
-   * Повторный клик открывает текущий ход и не создаёт второй confirm или POST.
+   * Подготовка — серверный preview выбранного каталога и будущих правок оболочки.
+   * Ответ другой машины отбрасывается по generation и не открывает подтверждение.
+   */
+  async function prepareInstall(id: string, operation: ProviderInstallOperation, scope: number):
+    Promise<ProviderInstallPreparation | null> {
+    try {
+      const response = await api.post(
+        `/api/providers/${encodeURIComponent(id)}/${operation}/prepare`, {});
+
+      if (scope !== generation) {
+        return null;
+      }
+
+      return decodeProviderInstallPreparation(response);
+    } catch (failure) {
+      if (scope === generation) {
+        // 404 на этом маршруте означает старый сервер без подготовки: окно уже
+        // новее сервера, и честный следующий шаг — перезапуск, а не повтор.
+        const notice = failure instanceof ApiError && failure.status === 404
+          ? { code: 'server_restart_required', message: 'Сервер ещё не обновлён' }
+          : failureNotice(failure);
+
+        errorNotice.value = notice;
+        startFailure.value = {
+          providerId: id,
+          previousJobId: snapshot.value.recent[id]?.id || '',
+          operation,
+          phase: 'prepare',
+          message: notice,
+          fallbackCommand: '',
+        };
+
+        // Отказ подготовки виден у самой карточки: молчащий клик неотличим
+        // от неработающей кнопки, например при сервере без нового маршрута.
+        providers.updateResults = {
+          ...providers.updateResults,
+          [id]: {
+            type: 'err',
+            text: providerInstallNoticeText(notice),
+            changed: false,
+          },
+        };
+        show(id);
+      }
+
+      return null;
+    }
+  }
+
+  /**
+   * Подтверждение показывает конкретный результат подготовки: выбранный каталог,
+   * команду и имена файлов оболочки, куда допишется PATH. Текст блока человеку не нужен.
+   * Старт получает только token. Повторный клик открывает текущий ход и не создаёт
+   * второй confirm или POST.
    */
   async function requestInstall(id: string, operation: ProviderInstallOperation): Promise<void> {
     if (snapshot.value.active?.providerId === id) {
@@ -325,17 +467,32 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
       const action = t(operation === 'install'
         ? 'settings.providerInstallationInstall' : 'settings.providerInstallationUpdate');
       const mark = { id: provider.id, name: provider.name };
+      const preparation = legacy ? null : await prepareInstall(id, operation, scope);
+
+      if (!legacy && (!preparation || scope !== generation)) {
+        return;
+      }
+
+      const shellFiles = preparation?.shellChanges
+        .map((change) => change.file.split('/').pop() || change.file).join(', ') || '';
+      const body = [
+        preparation?.prefix ? t('settings.providerInstallationPrefixLine',
+          { prefix: preparation.prefix }) : '',
+        shellFiles ? t('settings.providerInstallationShellFiles', { files: shellFiles }) : '',
+        preparation?.terminalSetup === 'manual'
+          ? t('settings.providerInstallationManualSetup') : '',
+      ].filter(Boolean).join('\n');
       const confirmed = await confirmDialog(legacy
-        ? t('settings.providerInstallationLegacyConfirm', { name: provider.name }) : '', {
+        ? t('settings.providerInstallationLegacyConfirm', { name: provider.name }) : body, {
         title: t('settings.providerInstallationConfirmTitle', { action, name: provider.name }),
         subtitle: legacy ? undefined : t('settings.providerInstallationConfirmSubtitle'),
         icon: markRaw(() => h(ProviderIcon, { provider: mark, size: 20 })),
         iconColor: provider.color,
-        code: legacy ? undefined : command || '',
+        code: legacy ? undefined : preparation?.command || undefined,
         okText: action,
       });
 
-      if (!confirmed || scope !== generation) {
+      if (!confirmed || scope !== generation || (!legacy && !preparation)) {
         return;
       }
 
@@ -352,7 +509,9 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
       providers.updating = id;
 
       try {
-        const response = await api.post(`/api/providers/${encodeURIComponent(id)}/${operation}/start`, {});
+        const response = await api.post(
+          `/api/providers/${encodeURIComponent(id)}/${operation}/start`,
+          { preparationToken: preparation!.token });
 
         if (scope === generation && !applySnapshot(response) && error.value) {
           uncertain.value = true;
@@ -369,6 +528,7 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
           providerId: id,
           previousJobId,
           operation,
+          phase: 'start',
           message: failureNotice(failure),
           fallbackCommand: (operation === 'install'
             ? metadata?.fallbackInstallCommand : metadata?.fallbackUpdateCommand) || '',
