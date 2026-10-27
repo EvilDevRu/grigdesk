@@ -1,137 +1,139 @@
 <template>
-  <div class="perm" :class="{ plan: isPlan }">
-    <div class="col">
-      <div class="p-row">
-        <span class="p-t">
-          <template v-if="isPlan">План готов — утвердить?</template>
-          <template v-else-if="isSsh">Выполнить команду на сервере?</template>
-          <template v-else-if="isDb">Выполнить запрос к базе?</template>
-          <template v-else-if="isExternalUrl">
-            Открыть внешнюю страницу для <span class="p-tool">{{ req.tool }}</span>?
-          </template>
-          <template v-else>
-            Разрешить <span class="p-tool">{{ req.tool }}</span>?
-          </template>
-        </span>
+  <ChatIntervention
+    class="perm"
+    :heading="title"
+    :source="req.tool"
+    :tone="isPlan ? 'question' : 'permission'"
+  >
+    <div v-if="description" class="p-desc">{{ description }}</div>
 
-        <UiFormActions v-if="isExternalUrl" class="p-act">
-          <UiActionLink
-            v-if="externalUrl"
-            :href="externalUrl"
-            target="_blank"
-            variant="solid"
-            tone="accent"
-          >
-            {{ externalLinkLabel }}
-          </UiActionLink>
-          <UiButton
-            variant="solid"
-            tone="success"
-            :disabled="!externalUrl"
-            @click="emit('answer', true, false)"
-          >
-            {{ externalApproveLabel }}
-          </UiButton>
-          <UiButton tone="danger" @click="reject()">
-            {{ externalRejectLabel }}
-          </UiButton>
-        </UiFormActions>
-
-        <UiFormActions v-else-if="!choices.length" class="p-act">
-          <UiButton
-            variant="solid"
-            tone="success"
-            @click="emit('answer', true, remember)"
-          >
-            {{ isPlan ? 'Утвердить' : 'Разрешить' }}
-          </UiButton>
-          <UiButton tone="danger" @click="reject()">
-            {{ isPlan ? 'Доработать' : 'Отклонить' }}
-          </UiButton>
-        </UiFormActions>
+    <div v-if="isSsh" class="p-ssh-meta">
+      <div data-ssh-server>
+        {{ req.server?.label }} — {{ req.server?.host }}:{{ req.server?.port }}
       </div>
-
-      <UiChoiceList
-        v-if="choices.length"
-        v-model="selectedChoice"
-        class="p-choices"
-        label="Вариант решения"
-        :options="choiceOptions"
-        @update:model-value="chooseById"
-      />
-
-      <div v-if="isSsh" class="p-ssh-meta">
-        <div data-ssh-server>
-          {{ req.server?.label }} — {{ req.server?.host }}:{{ req.server?.port }}
-        </div>
-        <div>
-          Пользователь: <strong data-ssh-user>{{ req.user }}</strong>
-          <span v-if="req.isRoot" class="p-ssh-badge" data-ssh-privilege>root</span>
-          <span v-if="req.usesSudo" class="p-ssh-badge" data-ssh-privilege>sudo</span>
-        </div>
-      </div>
-
-      <div v-if="isDb" class="p-db-meta">
-        <div>
-          <strong data-db-profile>{{ req.profile?.label }} — {{ dbRole }}</strong>
-          <span v-if="req.prod" class="p-db-prod" data-db-prod>прод</span>
-        </div>
-        <div>Движок: <strong data-db-engine>{{ req.engine?.label || req.engine?.id }}</strong></div>
-        <div>Класс: <strong data-db-class>{{ dbQueryClass }}</strong></div>
-        <div>Таблицы: <span data-db-tables>{{ dbTables }}</span></div>
-        <div v-if="req.rowEstimate != null">
-          Оценка строк: <strong data-db-row-estimate>{{ req.rowEstimate }}</strong>
-        </div>
-        <div v-if="dbSpecial" data-db-special>
-          Особые конструкции: <strong>{{ dbSpecial }}</strong>
-        </div>
-        <pre class="p-in cmd" data-db-query>{{ req.query }}</pre>
-        <div v-if="req.autoReadReason?.message" class="p-db-reason" data-db-auto-read-reason>
-          {{ req.autoReadReason.message }}
-        </div>
-      </div>
-
-      <div v-if="description" class="p-desc">{{ description }}</div>
-      <div v-if="isExternalUrl && externalUrl" class="p-url-host">
-        Внешний сайт: {{ externalHost }}. После завершения вернись и нажми «{{ externalApproveLabel }}».
-      </div>
-      <div v-else-if="isExternalUrl" class="p-url-bad">
-        Ссылка отклонена как небезопасная. Продолжить через неё нельзя.
-      </div>
-      <div v-if="filePath" class="p-path">{{ filePath }}</div>
-      <pre
-        v-if="command"
-        class="p-in cmd"
-        :class="{ ssh: isSsh }"
-        :data-ssh-command="isSsh ? '' : undefined"
-      >{{ command }}</pre>
-      <pre v-if="plan" class="p-in big">{{ plan }}</pre>
-
-      <div v-if="diff" class="p-diff">
-        <div class="dhead">
-          <span>было</span>
-          <span>стало {{ diff.stat }}</span>
-        </div>
-        <div v-for="(row, index) in diff.split" :key="index" class="drow">
-          <div class="dcell" :class="row.l?.t || 'nil'">
-            {{ row.l ? row.l.text || ' ' : '' }}
-          </div>
-          <div class="dcell" :class="row.r?.t || 'nil'">
-            {{ row.r ? row.r.text || ' ' : '' }}
-          </div>
-        </div>
-      </div>
-
-      <pre v-if="details" class="p-in">{{ details }}</pre>
-      <pre v-if="rest" class="p-in">{{ rest }}</pre>
-
-      <div v-if="canRemember" class="p-rem">
-        <UiCheckbox v-model="remember">
-          не спрашивать про «{{ req.tool }}» до конца сессии
-        </UiCheckbox>
+      <div>
+        Пользователь: <strong data-ssh-user>{{ req.user }}</strong>
+        <span v-if="req.isRoot" class="p-ssh-badge" data-ssh-privilege>root</span>
+        <span v-if="req.usesSudo" class="p-ssh-badge" data-ssh-privilege>sudo</span>
       </div>
     </div>
-  </div>
+
+    <div v-if="isDb" class="p-db-meta">
+      <div>
+        <strong data-db-profile>{{ req.profile?.label }} — {{ dbRole }}</strong>
+        <span v-if="req.prod" class="p-db-prod" data-db-prod>прод</span>
+      </div>
+      <div>Движок: <strong data-db-engine>{{ req.engine?.label || req.engine?.id }}</strong></div>
+      <div>Класс: <strong data-db-class>{{ dbQueryClass }}</strong></div>
+      <div>Таблицы: <span data-db-tables>{{ dbTables }}</span></div>
+      <div v-if="req.rowEstimate != null">
+        Оценка строк: <strong data-db-row-estimate>{{ req.rowEstimate }}</strong>
+      </div>
+      <div v-if="dbSpecial" data-db-special>
+        Особые конструкции: <strong>{{ dbSpecial }}</strong>
+      </div>
+      <pre class="p-in cmd" data-db-query>{{ req.query }}</pre>
+      <div v-if="req.autoReadReason?.message" class="p-db-reason" data-db-auto-read-reason>
+        {{ req.autoReadReason.message }}
+      </div>
+    </div>
+
+    <div v-if="isExternalUrl && externalUrl" class="p-url-host">
+      Внешний сайт: {{ externalHost }}. После завершения вернись и нажми «{{ externalApproveLabel }}».
+    </div>
+    <div v-else-if="isExternalUrl" class="p-url-bad">
+      Ссылка отклонена как небезопасная. Продолжить через неё нельзя.
+    </div>
+    <div v-if="filePath" class="p-section">
+      <div class="p-label">{{ t('core.interventionFile') }}</div>
+      <div class="p-path">{{ filePath }}</div>
+    </div>
+    <div v-if="command" class="p-label p-section">{{ t('core.interventionCommand') }}</div>
+    <pre
+      v-if="command"
+      class="p-in cmd"
+      :class="{ ssh: isSsh }"
+      :data-ssh-command="isSsh ? '' : undefined"
+    >{{ command }}</pre>
+    <pre v-if="plan" class="p-in big">{{ plan }}</pre>
+
+    <div v-if="diff" class="p-diff">
+      <div class="dhead">
+        <span>было</span>
+        <span>стало {{ diff.stat }}</span>
+      </div>
+      <div v-for="(row, index) in diff.split" :key="index" class="drow">
+        <div class="dcell" :class="row.l?.t || 'nil'">
+          {{ row.l ? row.l.text || ' ' : '' }}
+        </div>
+        <div class="dcell" :class="row.r?.t || 'nil'">
+          {{ row.r ? row.r.text || ' ' : '' }}
+        </div>
+      </div>
+    </div>
+
+    <div v-if="details || rest" class="p-section">
+      <div class="p-label">{{ t('core.interventionDetails') }}</div>
+      <pre v-if="details" class="p-in">{{ details }}</pre>
+      <pre v-if="rest" class="p-in">{{ rest }}</pre>
+    </div>
+
+    <template #footer>
+      <div class="p-footer">
+        <div v-if="canRemember" class="p-rem">
+          <UiCheckbox v-model="remember">
+            не спрашивать про «{{ req.tool }}» до конца сессии
+          </UiCheckbox>
+        </div>
+
+        <UiChoiceList
+          v-if="choices.length"
+          v-model="selectedChoice"
+          class="p-choices"
+          label="Вариант решения"
+          :options="choiceOptions"
+          @update:model-value="chooseById"
+        />
+
+        <UiFormActions v-else class="p-act">
+          <template v-if="isExternalUrl">
+            <UiActionLink
+              v-if="externalUrl"
+              :href="externalUrl"
+              target="_blank"
+              variant="outline"
+              tone="accent"
+            >
+              {{ externalLinkLabel }}
+            </UiActionLink>
+            <UiButton size="compact" tone="danger" @click="reject()">{{ externalRejectLabel }}</UiButton>
+            <UiButton
+              size="compact"
+              variant="solid"
+              tone="accent"
+              :disabled="!externalUrl"
+              @click="emit('answer', true, false)"
+            >
+              {{ externalApproveLabel }}
+            </UiButton>
+          </template>
+          <template v-else>
+            <UiButton size="compact" tone="neutral" @click="reject()">
+              {{ isPlan ? 'Доработать' : 'Отклонить' }}
+            </UiButton>
+            <UiButton
+              size="compact"
+              variant="solid"
+              tone="accent"
+              @click="emit('answer', true, remember)"
+            >
+              {{ isPlan ? 'Утвердить' : 'Разрешить' }}
+            </UiButton>
+          </template>
+        </UiFormActions>
+      </div>
+    </template>
+  </ChatIntervention>
 </template>
 
 <script setup lang="ts">
@@ -139,7 +141,9 @@ import { computed, ref, watch } from 'vue';
 import type { PropType } from 'vue';
 import type { ChatPermission, PermissionChoice } from '../../shared/chatContracts.ts';
 import { lineDiff, splitRows } from '../../shared/diff.ts';
+import ChatIntervention from './ChatIntervention.vue';
 import {
+  t,
   promptDialog,
   UiActionLink,
   UiButton,
@@ -176,14 +180,35 @@ const isExternalUrl = computed(() => input.value.kind === 'external_url');
 const isPlan = computed(() => (
   Boolean(input.value.plan) || props.req?.tool === 'ExitPlanMode'
 ));
-const plan = computed(() => String(input.value.plan || ''));
-const command = computed(() => String(isSsh.value ? props.req?.command || '' : input.value.command || ''));
-const filePath = computed(() => String(input.value.file_path || ''));
-const details = computed(() => String(input.value.details || ''));
-const description = computed(() => String(input.value.description || ''));
+const title = computed(() => {
+  if (isPlan.value) {
+    return t('core.interventionPlanTitle');
+  }
+  if (isSsh.value) {
+    return 'Выполнить команду на сервере?';
+  }
+  if (isDb.value) {
+    return 'Выполнить запрос к базе?';
+  }
+
+  return t(isExternalUrl.value ? 'core.interventionExternalTitle' : 'core.interventionPermissionTitle');
+});
+const plan = computed(() => displayText(input.value.plan));
+const command = computed(() => displayText(isSsh.value ? props.req.command : input.value.command));
+const filePath = computed(() => displayText(input.value.file_path));
+const details = computed(() => displayText(input.value.details));
+const description = computed(() => {
+  const text = displayText(input.value.description);
+
+  return text === command.value || text === details.value ? '' : text;
+});
 const externalUrl = computed(() => safeExternalUrl(input.value.url));
 const externalHost = computed(() => {
-  try { return new URL(externalUrl.value).host; } catch { return ''; }
+  try {
+    return new URL(externalUrl.value).host;
+  } catch {
+    return '';
+  }
 });
 const externalLinkLabel = computed(() => String(input.value.link_label || 'Открыть страницу'));
 const externalApproveLabel = computed(() => String(input.value.approve_label || 'Готово'));
@@ -273,24 +298,23 @@ const rest = computed(() => {
   );
 
   if (Object.keys(extra).length) {
-    return JSON.stringify(extra);
+    return JSON.stringify(extra, null, 2);
   }
 
-  const shown = plan.value
-    || command.value
-    || filePath.value
-    || details.value
-    || description.value
-    || diff.value;
+  return '';
+});
 
-  if (shown) {
+/**
+ * Незнакомое структурное поле остаётся читаемым JSON вместо строки object Object.
+ * Исходные строки сохраняют пробелы и переводы строк команды или содержимого файла.
+ */
+function displayText(value: unknown): string {
+  if (value == null) {
     return '';
   }
 
-  const serialized = JSON.stringify(input.value);
-
-  return serialized === '{}' ? '' : serialized;
-});
+  return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+}
 
 /**
  * Отказ спрашивает пояснение до emit: отмена диалога должна оставить permission
@@ -367,55 +391,181 @@ function chooseById(value: unknown) {
 </script>
 
 <style scoped>
-/* Плашка не расширяет страницу: длинная команда переносится внутри bounded-region. */
-.perm { padding: 8px 22px 9px; border-top: 1px solid color-mix(in srgb, var(--warn, #e0a33a) 45%, var(--line));
-  background: color-mix(in srgb, var(--warn, #e0a33a) 7%, transparent); overflow: hidden;
-  max-height: 38vh; overflow-y: auto; }
-.col { width: 100%; min-width: 0; }
-.p-row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  min-width: 0; flex-wrap: wrap; }
-.p-t { min-width: 0; font-size: 13px; }
-.p-tool { color: var(--warn, #e0a33a); font-family: var(--mono, monospace); }
-.p-act { margin-left: auto; }
-.p-choices { margin-top: 7px; }
-.p-desc { margin-top: 5px; color: var(--ink); font-size: 12.5px; overflow-wrap: anywhere; }
-.p-url-host { margin-top: 5px; color: var(--ink-mid); font-size: 11.5px; overflow-wrap: anywhere; }
-.p-url-bad { margin-top: 5px; color: var(--bad); font-size: 11.5px; }
-.p-path { margin-top: 4px; color: var(--ink-mid); font-family: var(--mono, monospace);
-  font-size: 11.5px; overflow-wrap: anywhere; }
-.p-in { margin: 6px 0 0; padding: 7px 10px; background: var(--ground); border: 1px solid var(--line);
-  border-radius: 8px; color: var(--ink-mid); font-size: 11.5px; line-height: 1.5;
-  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 132px; overflow-y: auto; }
-.p-in.cmd { color: var(--ink); font-family: var(--mono, monospace); }
-.p-in.cmd.ssh { max-height: none; min-width: 0; max-width: 100%; word-break: break-word; }
-.p-ssh-meta { display: grid; gap: 4px; margin-top: 6px; min-width: 0; overflow-wrap: anywhere; }
-.p-db-meta { display: grid; gap: 4px; margin-top: 6px; min-width: 0; overflow-wrap: anywhere; }
-.p-db-prod { margin-left: 6px; color: var(--bad); }
-.p-db-reason { color: var(--ink-mid); font-size: 11.5px; }
-.p-ssh-badge { margin-left: 5px; padding: 1px 6px; border-radius: 999px;
-  background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
-.p-in.big { max-height: 320px; color: var(--ink); font-size: 12px;
-  word-break: normal; overflow-wrap: anywhere; }
-.perm.plan { border-top-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-  background: color-mix(in srgb, var(--accent) 7%, transparent); }
-.p-rem { margin-top: 7px; color: var(--ink-mid); font-size: 11.5px; }
+.p-desc {
+  margin-bottom: 10px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
-/* Дифф правки — те же две колонки, что в ленте хода. */
-.p-diff { margin-top: 6px; border: 1px solid var(--line); border-radius: 8px;
-  overflow: auto; max-height: 240px; background: var(--ground); }
-.dhead, .drow { display: grid; grid-template-columns: 1fr 1fr; }
-.dhead { position: sticky; top: 0; z-index: 1; background: var(--surface-2);
-  color: var(--ink-mid); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
-.dhead span { padding: 3px 10px; }
-.dhead span + span, .drow .dcell + .dcell { border-left: 1px solid var(--line); }
-.dcell { min-width: 0; padding: 0 10px; color: var(--ink-mid);
-  font-family: var(--mono, monospace); font-size: 11.5px; line-height: 1.5;
-  white-space: pre-wrap; word-break: break-word; }
-.dcell.del { background: color-mix(in srgb, var(--bad) 14%, transparent);
-  color: color-mix(in srgb, var(--bad) 85%, var(--ink)); }
-.dcell.add { background: color-mix(in srgb, var(--good) 14%, transparent);
-  color: color-mix(in srgb, var(--good) 85%, var(--ink)); }
-.dcell.nil { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
-.dcell.del::before { content: '− '; opacity: .7; }
-.dcell.add::before { content: '+ '; opacity: .7; }
+.p-section {
+  margin-top: 10px;
+}
+
+.p-label {
+  margin-bottom: 5px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.p-url-host,
+.p-url-bad,
+.p-db-reason {
+  margin-top: 6px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.p-url-bad {
+  color: var(--bad);
+}
+
+.p-path {
+  color: var(--ink);
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.p-in {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--control-background);
+  color: var(--ink-mid);
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.p-in + .p-in {
+  margin-top: 8px;
+}
+
+.p-in.cmd,
+.p-in.big {
+  color: var(--ink);
+}
+
+.p-ssh-meta,
+.p-db-meta {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.p-db-prod {
+  margin-left: 6px;
+  color: var(--bad);
+}
+
+.p-ssh-badge {
+  margin-left: 5px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+  color: var(--bad);
+}
+
+.p-rem {
+  flex: 1 1 240px;
+  min-width: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.p-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.p-choices {
+  flex: 1 0 100%;
+}
+
+.p-act {
+  margin-left: auto;
+}
+
+/* Дифф сохраняет две колонки; длинные строки переносятся внутри своей ячейки.
+   Вся правка прокручивается вместе с телом карточки, оставляя действия на месте. */
+.p-diff {
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--ground);
+}
+
+.dhead,
+.drow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.dhead {
+  background: var(--surface-2);
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+
+.dhead span {
+  padding: 6px 10px;
+}
+
+.dhead span + span,
+.drow .dcell + .dcell {
+  border-left: 1px solid var(--line);
+}
+
+.dcell {
+  min-width: 0;
+  padding: 1px 10px;
+  color: var(--ink-mid);
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dcell.del {
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+  color: color-mix(in srgb, var(--bad) 85%, var(--ink));
+}
+
+.dcell.add {
+  background: color-mix(in srgb, var(--good) 14%, transparent);
+  color: color-mix(in srgb, var(--good) 85%, var(--ink));
+}
+
+.dcell.nil {
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+}
+
+.dcell.del::before {
+  content: '− ';
+  opacity: .7;
+}
+
+.dcell.add::before {
+  content: '+ ';
+  opacity: .7;
+}
 </style>

@@ -55,7 +55,11 @@
             @update:open="toggle(r)"
           >
             <span class="head" :class="kindOf(r.name).cls">
-              <span class="ico">{{ kindOf(r.name).ico }}</span>
+              <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                   stroke-linejoin="round" aria-hidden="true">
+                <path :d="kindOf(r.name).ico" />
+              </svg>
               <span class="nm">{{ toolLabel(r.name) }}</span>
               <span class="ttl">{{ r.title }}</span>
               <span v-if="r.diff || hasRichDiff(r)" class="stat">{{ diffStat(r) }}</span>
@@ -151,6 +155,7 @@ import { ref, reactive, computed, useId, watch } from 'vue';
 import { STEP_IMAGE_TEXT } from '../../../../shared/chat/chatSteps.ts';
 import { lineDiff, splitRows, unifiedDiff } from '../../shared/diff.ts';
 import { api } from '../../shared/apiClient.ts';
+import { NAV_ICONS } from '../../shared/navIcons.ts';
 import { UiDisclosureButton } from '../../ui';
 import { chatWorkdirImageHref } from './chatImages.ts';
 import { foldChatSteps, nestChatStepRows } from './chatStepRows.ts';
@@ -321,36 +326,56 @@ function isNested(row: StepRow) {
 
 const IMAGE_STEPS = new Set(['Read', 'GenerateImage']);
 
-// Иконка и подпись вида шага.
+// Контуры наследуют нейтральный цвет ленты: системный emoji-шрифт не участвует.
+// Общие знаки терминала, агента и настроек совпадают с навигацией приложения.
+const ICON = {
+  bash: NAV_ICONS.terminal,
+  read: 'M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0',
+  image: 'M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z '
+    + 'M3 16l5-5 5 5 3-3 5 5 M16 7h.01',
+  write: 'M16 3l5 5-12 12-6 1 1-6L16 3z M13 6l5 5',
+  find: 'M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0 M15 15l6 6',
+  task: NAV_ICONS.agents,
+  web: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M3 12h18 '
+    + 'M12 3c5 5 5 13 0 18-5-5-5-13 0-18z',
+  todo: 'M9 5h12 M9 12h12 M9 19h12 M3 5l1 1 2-2 M3 12l1 1 2-2 M3 19l1 1 2-2',
+  ask: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M9 9a3 3 0 1 1 5 2c-2 1-2 1-2 3 M12 17h.01',
+  plan: 'M9 5H5v16h14V5h-4 M9 3h6v4H9z M8 12h8 M8 16h5',
+  skill: NAV_ICONS.settings,
+  mcp: 'M9 3v5 M15 3v5 M6 8h12v3a6 6 0 0 1-12 0V8z M12 17v4',
+  other: 'M13 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0',
+};
+
+// Иконка и вид строки инструмента не зависят от исполнителя или темы окна.
 const KIND: Record<string, { ico: string; cls: string }> = {
-  Bash: { ico: '❯', cls: 'bash' },
-  Read: { ico: '👁', cls: 'read' },
-  GenerateImage: { ico: '🖼', cls: 'read' },
-  Write: { ico: '✎', cls: 'write' },
-  Edit: { ico: '✎', cls: 'write' },
-  NotebookEdit: { ico: '✎', cls: 'write' },
-  Glob: { ico: '🔎', cls: 'find' },
-  Grep: { ico: '🔎', cls: 'find' },
-  Agent: { ico: '🤖', cls: 'task' },
-  Task: { ico: '🤖', cls: 'task' },
-  WebFetch: { ico: '🌐', cls: 'web' },
-  WebSearch: { ico: '🌐', cls: 'web' },
-  TodoWrite: { ico: '☑', cls: 'todo' },
-  AskUserQuestion: { ico: '❓', cls: 'ask' },
-  ExitPlanMode: { ico: '📋', cls: 'plan' },
-  Skill: { ico: '⚙', cls: 'skill' },
+  Bash: { ico: ICON.bash, cls: 'bash' },
+  Read: { ico: ICON.read, cls: 'read' },
+  GenerateImage: { ico: ICON.image, cls: 'read' },
+  Write: { ico: ICON.write, cls: 'write' },
+  Edit: { ico: ICON.write, cls: 'write' },
+  NotebookEdit: { ico: ICON.write, cls: 'write' },
+  Glob: { ico: ICON.find, cls: 'find' },
+  Grep: { ico: ICON.find, cls: 'find' },
+  Agent: { ico: ICON.task, cls: 'task' },
+  Task: { ico: ICON.task, cls: 'task' },
+  WebFetch: { ico: ICON.web, cls: 'web' },
+  WebSearch: { ico: ICON.web, cls: 'web' },
+  TodoWrite: { ico: ICON.todo, cls: 'todo' },
+  AskUserQuestion: { ico: ICON.ask, cls: 'ask' },
+  ExitPlanMode: { ico: ICON.plan, cls: 'plan' },
+  Skill: { ico: ICON.skill, cls: 'skill' },
 };
 
 /**
- * Знакомое имя инструмента выбирает его прежнюю иконку.
- * Неизвестный MCP-вызов сохраняет общую подпись подключения.
+ * Имя инструмента выбирает монохромный контур из фиксированного набора.
+ * Неизвестный MCP-вызов получает знак подключения, прочие вызовы — нейтральную точку.
  */
 function kindOf(name: string | undefined) {
   if (name && KIND[name]) {
     return KIND[name];
   }
 
-  return name?.startsWith('mcp__') ? { ico: '🔌', cls: 'mcp' } : { ico: '•', cls: 'other' };
+  return name?.startsWith('mcp__') ? { ico: ICON.mcp, cls: 'mcp' } : { ico: ICON.other, cls: 'other' };
 }
 
 function toolLabel(name: string | undefined) {
@@ -393,7 +418,13 @@ function toolLabel(name: string | undefined) {
   min-width: 0;
   text-align: left;
 }
-.head .ico { flex: none; width: 15px; text-align: center; font-size: 12px; }
+.head .ico {
+  flex: none;
+  width: 15px;
+  color: var(--ink-mid);
+  text-align: center;
+  font-size: 12px;
+}
 .head .nm { flex: none; color: var(--ink-mid); font-weight: 500; font-size: 12px; }
 .head .ttl { color: var(--ink-low); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
   font-family: var(--mono, monospace); font-size: 11.5px; }
@@ -402,11 +433,6 @@ function toolLabel(name: string | undefined) {
 .head .mark { flex: none; color: var(--good); font-size: 11px; }
 .head .mark.bad { color: var(--bad); }
 .head .mark.run { color: var(--accent); }
-.head.bash .ico { color: color-mix(in srgb, var(--accent) 70%, var(--ink-low)); }
-.head.write .ico { color: color-mix(in srgb, var(--warn) 70%, var(--ink-low)); }
-.head.read .ico, .head.find .ico { color: var(--ink-mid); }
-.head.task .ico, .head.mcp .ico { color: color-mix(in srgb, var(--accent) 70%, var(--ink-low)); }
-.head.ask .ico { color: var(--warn, #e0a33a); }
 
 .body-wrap { padding: 2px 0 6px 26px; display: flex; flex-direction: column; gap: 4px; }
 .path { font-size: 11px; color: var(--ink-mid); font-family: var(--mono, monospace); word-break: break-all; }

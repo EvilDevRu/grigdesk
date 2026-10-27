@@ -45,6 +45,43 @@ function button(wrapper, label) {
   return wrapper.findAll('button').find((entry) => entry.text() === label);
 }
 
+test('вопрос без вариантов сразу принимает многострочный ответ через Ctrl+Enter', async (t) => {
+  const wrapper = await mountQuestion(t, [{
+    header: 'Пояснение',
+    question: 'Что изменить?',
+  }]);
+  const field = wrapper.get('textarea');
+
+  assert.equal(wrapper.find('.ui-choice-list').exists(), false);
+  assert.equal(button(wrapper, 'Ответить').attributes('disabled'), '');
+  await field.setValue('  Первая строка\nВторая строка  ');
+  await field.trigger('keydown', { key: 'Enter' });
+  assert.equal(wrapper.emitted('answer'), undefined);
+  await field.trigger('keydown', { key: 'Enter', ctrlKey: true });
+
+  assert.equal(wrapper.emitted('answer')[0][0][0].text, 'Первая строка\nВторая строка');
+});
+
+test('счётчик ответов обновляется, новый запрос очищает выбор и текст', async (t) => {
+  const questions = [
+    { question: 'Первый?', options: [{ label: 'Да' }] },
+    { question: 'Второй?' },
+  ];
+  const wrapper = await mountQuestion(t, questions);
+
+  assert.equal(wrapper.get('.q-progress').text(), 'Ответов: 0 из 2');
+  await wrapper.get('.ui-choice-list__option').trigger('click');
+  await wrapper.get('textarea').setValue('Ответ');
+  assert.equal(wrapper.get('.q-progress').text(), 'Ответов: 2 из 2');
+
+  await wrapper.setProps({ req: { pid: 'next-request', questions } });
+
+  assert.equal(wrapper.get('.q-progress').text(), 'Ответов: 0 из 2');
+  assert.equal(wrapper.get('textarea').element.value, '');
+  assert.equal(wrapper.get('.ui-choice-list__option').attributes('aria-selected'), 'false');
+  assert.equal(wrapper.emitted('answer'), undefined);
+});
+
 test('single-вопрос заменяет выбор и отправляет прежний массив selected', async (t) => {
   const wrapper = await mountQuestion(t, [{
     header: 'Способ',
@@ -118,7 +155,8 @@ test('multiple-вопрос и свой текст сохраняются одн
   await choices[0].trigger('click');
   await choices[1].trigger('click');
   await button(wrapper, 'свой ответ…').trigger('click');
-  await wrapper.get('input[placeholder="напиши своими словами"]').setValue('  И typecheck  ');
+  assert.equal(wrapper.get('textarea').element === document.activeElement, true);
+  await wrapper.get('textarea[placeholder="напиши своими словами"]').setValue('  И typecheck  ');
   await button(wrapper, 'Ответить').trigger('click');
 
   assert.deepEqual(wrapper.emitted('answer')[0][0][0], {

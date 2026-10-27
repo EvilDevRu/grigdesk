@@ -1,69 +1,71 @@
 <template>
-  <div class="q">
-    <div class="col">
-      <div v-if="structured && (source || prompt)" class="q-intro">
-        <span v-if="source" class="q-source">{{ source }}</span>
-        <div v-if="prompt" class="q-prompt">{{ prompt }}</div>
+  <ChatIntervention class="q" :heading="t('core.interventionQuestionTitle')" :source="source">
+    <div v-if="structured && prompt" class="q-intro">
+      <div v-if="prompt" class="q-prompt">{{ prompt }}</div>
+    </div>
+
+    <div
+      v-for="(question, questionIndex) in questions"
+      :key="question.key || questionIndex"
+      class="q-item"
+    >
+      <div v-if="question.header || questions.length > 1" class="q-topic">
+        <span v-if="questions.length > 1" class="q-number">{{ questionIndex + 1 }}</span>
+        {{ question.header }}
+      </div>
+      <div class="q-text">
+        {{ question.question }}
+        <span v-if="structured && question.required" class="q-required">обязательно</span>
+        <span v-if="question.multiSelect" class="q-multi">можно несколько</span>
       </div>
 
-      <div
-        v-for="(question, questionIndex) in questions"
-        :key="question.key || questionIndex"
-        class="q-item"
-      >
-        <div class="q-text">
-          <span class="q-ico">?</span>
-          {{ question.question }}
-          <span v-if="structured && question.required" class="q-required">обязательно</span>
-          <span v-if="question.multiSelect" class="q-multi">можно несколько</span>
-        </div>
+      <div v-if="question.hint" class="q-hint">{{ question.hint }}</div>
 
-        <div v-if="question.hint" class="q-hint">{{ question.hint }}</div>
+      <template v-if="structured">
+        <UiInput
+          v-if="question.inputType === 'text'"
+          v-model="state[questionIndex]!.value as string"
+          class="q-own"
+          :type="textInputType(question)"
+          :required="question.required"
+          :minlength="question.minLength"
+          :maxlength="question.maxLength ?? 4000"
+          :placeholder="question.placeholder || ''"
+          :aria-label="question.header || question.question"
+          @keydown.enter.prevent="ready && submitStructured('accept')"
+        />
 
-        <template v-if="structured">
-          <UiInput
-            v-if="question.inputType === 'text'"
-            v-model="state[questionIndex]!.value as string"
-            class="q-own"
-            :type="textInputType(question)"
-            :required="question.required"
-            :minlength="question.minLength"
-            :maxlength="question.maxLength ?? 4000"
-            :placeholder="question.placeholder || ''"
-            :aria-label="question.header || question.question"
-            @keydown.enter.prevent="ready && submitStructured('accept')"
-          />
+        <UiNumberInput
+          v-else-if="question.inputType === 'number' || question.inputType === 'integer'"
+          v-model="state[questionIndex]!.value as number | null"
+          class="q-own"
+          :required="question.required"
+          :min="question.minimum"
+          :max="question.maximum"
+          :step="question.inputType === 'integer' ? 1 : 'any'"
+          :aria-label="question.header || question.question"
+          @keydown.enter.prevent="ready && submitStructured('accept')"
+        />
 
-          <UiNumberInput
-            v-else-if="question.inputType === 'number' || question.inputType === 'integer'"
-            v-model="state[questionIndex]!.value as number | null"
-            class="q-own"
-            :required="question.required"
-            :min="question.minimum"
-            :max="question.maximum"
-            :step="question.inputType === 'integer' ? 1 : 'any'"
-            :aria-label="question.header || question.question"
-            @keydown.enter.prevent="ready && submitStructured('accept')"
-          />
-
-          <UiChoiceList
-            v-else-if="structuredChoices(question)"
-            class="q-opts"
-            :label="question.header || question.question"
-            :mode="question.inputType === 'multi-choice' ? 'multiple' : 'single'"
-            :model-value="structuredValue(questionIndex)"
-            :options="structuredOptions(question)"
-            selection-indicator
-            @update:model-value="setStructuredValue(questionIndex, $event as QuestionValue | undefined)"
-          />
-
-          <div v-if="constraintText(question)" class="q-rule">
-            {{ constraintText(question) }}
-          </div>
-        </template>
-
-        <template v-else>
         <UiChoiceList
+          v-else-if="structuredChoices(question)"
+          class="q-opts"
+          :label="question.header || question.question"
+          :mode="question.inputType === 'multi-choice' ? 'multiple' : 'single'"
+          :model-value="structuredValue(questionIndex)"
+          :options="structuredOptions(question)"
+          selection-indicator
+          @update:model-value="setStructuredValue(questionIndex, $event as QuestionValue | undefined)"
+        />
+
+        <div v-if="constraintText(question)" class="q-rule">
+          {{ constraintText(question) }}
+        </div>
+      </template>
+
+      <template v-else>
+        <UiChoiceList
+          v-if="question.options?.length"
           class="q-opts"
           :label="question.header || question.question"
           :mode="question.multiSelect ? 'multiple' : 'single'"
@@ -74,76 +76,98 @@
         />
 
         <UiButton
-          v-if="freeText(question)"
+          size="compact"
+          v-if="freeText(question) && question.options?.length"
           class="q-own-toggle"
-          variant="text"
+          variant="link"
           tone="neutral"
           :pressed="state[questionIndex]!.own"
-          block
           @click="toggleOwn(questionIndex)"
         >
           свой ответ…
         </UiButton>
 
-        <UiInput
+        <UiTextarea
           v-if="freeText(question) && state[questionIndex]!.own"
+          :ref="(field) => setOwnField(questionIndex, field)"
           v-model="state[questionIndex]!.text"
           class="q-own"
+          data-context="workspace-note"
           placeholder="напиши своими словами"
-          @keydown.enter.prevent="ready && submit()"
+          :aria-label="question.header || question.question"
+          :rows="2"
+          @keydown.ctrl.enter.prevent="ready && submit()"
+          @keydown.meta.enter.prevent="ready && submit()"
         />
-        </template>
-      </div>
-
-      <UiFormActions class="q-act" align="start">
-        <template v-if="structured">
-          <UiButton
-            v-for="entry in acceptingActions"
-            :key="entry.action"
-            :variant="entry.action === 'accept' ? 'solid' : 'outline'"
-            tone="accent"
-            :disabled="!ready"
-            @click="submitStructured(entry.action)"
-          >
-            {{ entry.label || actionLabel(entry.action) }}
-          </UiButton>
-          <UiButton
-            v-if="hasAction('decline')"
-            tone="danger"
-            @click="submitStructured('decline')"
-          >
-            {{ actionLabel('decline') }}
-          </UiButton>
-          <UiButton v-if="hasAction('cancel')" @click="submitStructured('cancel')">
-            {{ actionLabel('cancel') }}
-          </UiButton>
-        </template>
-        <template v-else>
-          <UiButton
-            variant="solid"
-            tone="accent"
-            :disabled="!ready"
-            @click="submit"
-          >
-            Ответить
-          </UiButton>
-          <UiButton @click="emit('skip')">Пропустить</UiButton>
-        </template>
-      </UiFormActions>
+      </template>
     </div>
-  </div>
+
+    <template #footer>
+      <div class="q-footer">
+        <span v-if="questions.length > 1" class="q-progress">
+          {{ t('core.interventionProgress', { answered, total: questions.length }) }}
+        </span>
+        <UiFormActions class="q-act">
+          <template v-if="structured">
+            <UiButton
+              size="compact"
+              v-for="entry in acceptingActions"
+              :key="entry.action"
+              :variant="entry.action === 'accept' ? 'solid' : 'outline'"
+              tone="accent"
+              :disabled="!ready"
+              @click="submitStructured(entry.action)"
+            >
+              {{ entry.label || actionLabel(entry.action) }}
+            </UiButton>
+            <UiButton
+              size="compact"
+              v-if="hasAction('decline')"
+              tone="danger"
+              @click="submitStructured('decline')"
+            >
+              {{ actionLabel('decline') }}
+            </UiButton>
+            <UiButton
+              v-if="hasAction('cancel')"
+              size="compact"
+              variant="link"
+              @click="submitStructured('cancel')"
+            >
+              {{ actionLabel('cancel') }}
+            </UiButton>
+          </template>
+          <template v-else>
+            <UiButton size="compact" variant="link" @click="emit('skip')">Пропустить</UiButton>
+            <UiButton
+              size="compact"
+              variant="solid"
+              tone="accent"
+              :disabled="!ready"
+              @click="submit"
+            >
+              Ответить
+            </UiButton>
+          </template>
+        </UiFormActions>
+      </div>
+    </template>
+  </ChatIntervention>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type { PropType } from 'vue';
 import type { ChatQuestion, ChatQuestionItem, QuestionValue } from '../../shared/chatContracts.ts';
+import ChatIntervention from './ChatIntervention.vue';
 import {
+  t,
   UiButton,
   UiChoiceList,
   UiFormActions,
   UiInput,
   UiNumberInput,
+  UiTextarea,
 } from '../../ui';
 
 // Диалог агента: он спросил по существу, а не запросил разрешение на действие.
@@ -163,6 +187,7 @@ interface QuestionState {
 }
 
 const state = ref<QuestionState[]>([]);
+const ownFields = new Map<number, { focus(): void }>();
 
 watch(
   () => props.req?.pid,
@@ -170,7 +195,7 @@ watch(
     state.value = (props.req?.questions || []).map((question) => ({
       picked: [],
       text: '',
-      own: false,
+      own: !question.options?.length,
       value: initialValue(question),
     }));
   },
@@ -184,6 +209,16 @@ const prompt = computed(() => String(props.req?.prompt || ''));
 const ready = computed(() => (structured.value
   ? questions.value.every((question, index) => validStructured(question, state.value[index]?.value))
   : state.value.some((item) => item.picked.length || item.text.trim())));
+const answered = computed(() => questions.value.filter((question, index) => {
+  const item = state.value[index];
+
+  return structured.value
+    ? item?.value !== ''
+      && (!Array.isArray(item?.value) || item.value.length > 0)
+      && hasStructuredValue(question, item?.value)
+      && validStructured(question, item?.value)
+    : Boolean(item?.picked.length || item?.text.trim());
+}).length);
 
 const DEFAULT_ACTIONS = Object.freeze(['accept', 'cancel']);
 const ACTION_LABELS: Readonly<Record<string, string>> = Object.freeze({
@@ -511,11 +546,30 @@ function setPicked(questionIndex: number, value: unknown) {
   item.picked = selected.map((entry) => String(entry));
 }
 
-function toggleOwn(questionIndex: number) {
+function setOwnField(questionIndex: number, field: unknown) {
+  if (field) {
+    ownFields.set(questionIndex, field as { focus(): void });
+  } else {
+    ownFields.delete(questionIndex);
+  }
+}
+
+/**
+ * Открытое поле сразу получает фокус, чтобы можно было начать писать с клавиатуры.
+ * Браузер прокручивает его внутри карточки после появления в DOM.
+ */
+async function toggleOwn(questionIndex: number) {
   const item = state.value[questionIndex];
 
-  if (item) {
-    item.own = !item.own;
+  if (!item) {
+    return;
+  }
+
+  item.own = !item.own;
+
+  if (item.own) {
+    await nextTick();
+    ownFields.get(questionIndex)?.focus();
   }
 }
 
@@ -563,38 +617,104 @@ function submitStructured(action: string) {
 </script>
 
 <style scoped>
-/* Плашка живёт над композером и скроллится сама, если вопросов много. */
-.q { padding: 9px 22px 10px; border-top: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
-  background: color-mix(in srgb, var(--accent) 7%, transparent); max-height: 38vh; overflow-y: auto; }
-.col { width: 100%; min-width: 0; }
-.q-item + .q-item { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); }
+.q-item + .q-item {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.q-topic {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.q-number {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+}
+
 .q-text {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
-  margin-bottom: 7px;
+  margin-bottom: 10px;
+  color: var(--ink);
   font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.q-ico { flex: none; color: var(--accent); font-weight: 700; }
-.q-intro { margin-bottom: 10px; }
-.q-source { color: var(--accent); font-size: 11px; font-weight: 650; }
-.q-prompt { margin-top: 3px; color: var(--ink); font-size: 13px; line-height: 1.45;
-  overflow-wrap: anywhere; }
-.q-required { color: var(--bad); font-size: 10.5px; }
-.q-multi { padding: 0 5px; border: 1px solid var(--line); border-radius: 5px;
-  color: var(--ink-mid); font-size: 10.5px; }
-.q-hint {
-  margin: -3px 0 7px 18px;
+
+.q-intro {
+  margin-bottom: 14px;
+}
+
+.q-prompt {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.q-required {
+  color: var(--bad);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.q-multi {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   color: var(--ink-mid);
   font-size: 11px;
-  line-height: 1.45;
+  font-weight: 400;
+}
+
+.q-hint,
+.q-rule {
+  margin: 6px 0 10px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.q-rule { margin: 5px 0 0 18px; color: var(--ink-mid); font-size: 10.5px; }
-.q-own-toggle { margin-top: 3px; }
-.q-own { margin-top: 5px; }
-.q-act { margin-top: 9px; }
+
+.q-own-toggle {
+  margin-top: 6px;
+}
+
+.q-own {
+  margin-top: 6px;
+}
+
+.q-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.q-progress {
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+
+.q-act {
+  margin-left: auto;
+}
 </style>

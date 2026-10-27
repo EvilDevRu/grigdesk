@@ -333,7 +333,7 @@ test('StepList собирает досланных детей под Agent и с
         [main, thinking, result].map((row) => row.get('button').attributes('aria-controls')),
         controls,
     );
-    assert.equal(wrapper.findAll('.step.tool')[0].get('.ico').text(), '🤖');
+    assert.equal(wrapper.findAll('.step.tool')[0].get('svg.ico').attributes('stroke'), 'currentColor');
     await wrapper.findAll('.step.tool')[0].get('button').trigger('click');
     assert.equal(wrapper.get('.path').text(), 'Explore');
     assert.equal(wrapper.get('.body-wrap .body').text(), 'Найди причину');

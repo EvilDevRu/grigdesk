@@ -1,6 +1,7 @@
 // Карточка разрешения сохраняет payload решения и использует public UI facade.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { kimiServerApprovalInput } from '../../server/src/lib/kimi/serverApproval.ts';
 import {
   compileVue,
   webFile,
@@ -64,6 +65,43 @@ async function mountPermission(t, req = PLAN_REQ) {
 function button(wrapper, label) {
   return wrapper.findAll('button').find((entry) => entry.text() === label);
 }
+
+test('структурные подробности сохраняют вложенные поля и переводы строк', async (t) => {
+  const details = {
+    operation: 'write',
+    payload: { path: 'report.md', content: 'Первая строка\nВторая строка' },
+  };
+  const { wrapper } = await mountPermission(t, {
+    pid: 'structured-details',
+    tool: 'Write',
+    input: { details },
+  });
+
+  assert.equal(wrapper.text().includes('[object Object]'), false);
+  assert.deepEqual(JSON.parse(wrapper.get('.p-in').text()), details);
+});
+
+test('одинаковое описание и команда показываются один раз', async (t) => {
+  const { wrapper } = await mountPermission(t, {
+    pid: 'duplicate-command',
+    tool: 'Bash',
+    input: { command: 'npm test', description: 'npm test' },
+  });
+
+  assert.equal(wrapper.find('.p-desc').exists(), false);
+  assert.equal(wrapper.get('.p-in.cmd').text(), 'npm test');
+});
+
+test('external URL без описания не попадает в текст карточки', async (t) => {
+  const { wrapper } = await mountPermission(t, {
+    pid: 'external-without-description',
+    tool: 'MCP',
+    input: { kind: 'external_url', url: 'https://example.test/setup?token=secret' },
+  });
+
+  assert.equal(wrapper.text().includes('token=secret'), false);
+  assert.equal(wrapper.get('a').attributes('href'), 'https://example.test/setup?token=secret');
+});
 
 test('«Доработать» отправляет пояснение третьим аргументом answer', async (t) => {
   const { wrapper, flushPromises } = await mountPermission(t);
@@ -137,6 +175,33 @@ test('запрос Kimi показывает команду и путь вмес
   assert.equal(wrapper.find('.p-in.cmd').text(), 'npm test -- --run');
   assert.equal(wrapper.find('.p-path').text(), '/home/u/project/package.json');
   assert.equal(text.includes('{"kind"'), false);
+});
+
+test('структурный Write Kimi показывает путь и содержимое вместо object Object', async (t) => {
+  const { wrapper } = await mountPermission(t, {
+    pid: 'kimi-write',
+    chatKey: 'c1',
+    tool: 'Write',
+    input: kimiServerApprovalInput({
+      action: 'Записать итог проверки',
+      tool_input_display: {
+        kind: 'file_io',
+        operation: 'write',
+        path: 'review.md',
+        content: '# Проверка\nОшибки исправлены.\n',
+      },
+    }),
+  });
+
+  assert.equal(wrapper.get('.p-desc').text(), 'Записать итог проверки');
+  assert.equal(wrapper.get('.p-path').text(), 'review.md');
+  assert.match(wrapper.get('pre.p-in').text(), /# Проверка\nОшибки исправлены\./);
+  assert.equal(wrapper.find('.p-in.cmd').exists(), false);
+  assert.equal(wrapper.text().includes('[object Object]'), false);
+
+  await button(wrapper, 'Разрешить').trigger('click');
+
+  assert.deepEqual(wrapper.emitted('answer'), [[true, false]]);
 });
 
 test('правка файла показывается двухколоночным диффом', async (t) => {
