@@ -78,6 +78,8 @@
   "reopen": "Close the window and open it again to run the new code.",
   "webHint": "The window will show the new web after grigdesk-ctl build window.",
   "selectServer": "To select this server: grigdesk-ctl desktop use-server {path}",
+  "serverQueued": "The window will select this build's server on its next launch.",
+  "serverNotSelected": "The window keeps a different server installation selected; the new server is not selected yet.",
   "historyError": "Cannot save build timings: {reason}",
   "states": {
     "ready": "running",

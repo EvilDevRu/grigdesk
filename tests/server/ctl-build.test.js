@@ -87,6 +87,9 @@ test('build: all по умолчанию и отдельные цели собл
     if (target === 'web') {
       assert.match(result.stdout, /Окно покажет новый веб после grigdesk-ctl build window/);
       assert.doesNotMatch(result.stdout, /Закройте окно/);
+    } else if (target === 'server') {
+      assert.match(result.stdout, /Окно сохраняет выбор другой установки сервера/);
+      assert.doesNotMatch(result.stdout, /откройте снова — запустится новый код/);
     } else {
       assert.match(result.stdout, /Закройте окно и откройте снова — запустится новый код/);
     }
@@ -201,4 +204,76 @@ test('build server: подсказка выбора только для друг
       await assert.rejects(fs.stat(file), { code: 'ENOENT' });
     }
   }
+});
+
+test('build all: прежний release/bin заменяется отложенной привязкой после всей установки', async (t) => {
+  const box = await fixture(t);
+  const file = path.join(box.env.XDG_DATA_HOME, 'grigdesk/desktop/runtime.json');
+  const previous = JSON.stringify({
+    version: 4,
+    kind: 'binary',
+    binary: path.join(box.root, 'release/bin/grigdesk-server'),
+    home: box.env.GRIGDESK_HOME,
+    cliPaths: ['/user/node/bin'],
+  });
+
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, previous);
+
+  const result = await box.run(['build', 'all']);
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(await box.calls(), expectedBuildCalls(box));
+  assert.equal(await fs.readFile(file, 'utf8'), previous);
+
+  const pending = JSON.parse(await fs.readFile(`${file}.build-selection`, 'utf8'));
+
+  assert.equal(pending.binary, path.join(box.root, 'bin/grigdesk-server'));
+  assert.equal(pending.previous, previous);
+  assert.equal((await fs.stat(`${file}.build-selection`)).mode & 0o777, 0o600);
+  assert.match(result.stdout, /При следующем запуске окно выберет сервер этой сборки/);
+  assert.doesNotMatch(result.stdout, /grigdesk-ctl desktop use-server/);
+});
+
+test('build all: отказ установки окна не публикует новую привязку', async (t) => {
+  const box = await fixture(t);
+  const file = path.join(box.env.XDG_DATA_HOME, 'grigdesk/desktop/runtime.json');
+  const previous = JSON.stringify({
+    version: 1,
+    root: box.root,
+    node: process.execPath,
+  });
+
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, previous);
+  await box.fail('desktop', 'install', 25);
+
+  const result = await box.run(['build', 'all']);
+
+  assert.equal(result.code, 25, result.stderr);
+  assert.equal(await fs.readFile(file, 'utf8'), previous);
+  await assert.rejects(fs.stat(`${file}.build-selection`), { code: 'ENOENT' });
+});
+
+test('build all: другая установка сохраняется без обещания нового сервера после открытия', async (t) => {
+  const box = await fixture(t);
+  const file = path.join(box.env.XDG_DATA_HOME, 'grigdesk/desktop/runtime.json');
+  const previous = JSON.stringify({
+    version: 4,
+    kind: 'binary',
+    binary: '/another/bin/grigdesk-server',
+    home: box.env.GRIGDESK_HOME,
+    cliPaths: [],
+  });
+
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, previous);
+
+  const result = await box.run(['build', 'all']);
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(await fs.readFile(file, 'utf8'), previous);
+  await assert.rejects(fs.stat(`${file}.build-selection`), { code: 'ENOENT' });
+  assert.match(result.stdout, /Окно сохраняет выбор другой установки сервера/);
+  assert.doesNotMatch(result.stdout, /откройте снова — запустится новый код/);
 });

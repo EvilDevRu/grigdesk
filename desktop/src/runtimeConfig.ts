@@ -1,5 +1,6 @@
 import { desktopText } from './locale.ts';
 import { assertServerBinaryFile, recoverRuntimeSelection } from '../../server/src/lib/selectSeaServer.ts';
+import { applyBuiltServer } from '../../server/src/lib/builtServerSelection.ts';
 import { readTextOrNull } from '../../shared/node/files.ts';
 import { verifySeaRuntime } from '../../shared/node/seaRuntime.ts';
 import { packagedChildEnvironment } from '../../shared/node/packagedEnvironment.ts';
@@ -75,6 +76,7 @@ interface RuntimeLoadInput {
 }
 
 export interface RuntimeDependencies {
+  applyBuildSelection?(input: { env: EnvMap; home: string }): Promise<void>;
   readText(path: string): Promise<string | null>;
   exists(path: string, kind: 'file' | 'dir' | 'exec'): Promise<boolean>;
   nodeVersion(node: string): Promise<string | null>;
@@ -110,6 +112,9 @@ const PACKAGED_ENV_KEYS = new Set([
 const PACKAGED_PATH_KEYS = ['PATH', 'LD_LIBRARY_PATH', 'XDG_DATA_DIRS', 'GSETTINGS_SCHEMA_DIR'];
 
 export const runtimeDependencies: RuntimeDependencies = {
+  async applyBuildSelection(input) {
+    await applyBuiltServer(input);
+  },
   prepareBinary,
   releasePreparation,
   /**
@@ -487,6 +492,7 @@ export async function loadServerRuntime(input: RuntimeLoadInput): Promise<Runtim
   let text: string | null;
 
   try {
+    await input.deps.applyBuildSelection?.({ env: input.env, home: input.home });
     text = await input.deps.readText(descriptorPath);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;

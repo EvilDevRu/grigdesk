@@ -65,7 +65,7 @@ for (const [target, steps] of [
     assert.doesNotMatch(result.stdout + result.stderr, /start\t|end\t|hint\t/u);
 
     if (steps.includes('server.install')) {
-      assert.match(result.events, /hint\tselect-server\n/u);
+      assert.match(result.events, target === 'all' ? /hint\tqueued-server\n/u : /hint\tselect-server\n/u);
     }
   });
 }

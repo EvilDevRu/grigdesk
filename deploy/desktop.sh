@@ -9,6 +9,7 @@ source "$ROOT/deploy/lib/desktop-app.sh"
 desktop_temporary=''
 desktop_data_home=''
 desktop_explicit_home=0
+desktop_keep_runtime=0
 
 # Окно ставится в bin/ настоящего каталога копии: путь не зависит от ссылки, через которую
 # вызвана установка, и совпадает с корнем в runtime.json.
@@ -41,9 +42,14 @@ write_runtime_descriptor() {
     import { pathToFileURL } from "node:url";
     const { parseRuntimeDescriptor } = await import(pathToFileURL(process.argv[2]).href);
     const descriptor = parseRuntimeDescriptor(readFileSync(process.argv[1], "utf8"));
-    process.exit([3, 4].includes(descriptor?.version) ? 0 : 1);
-  ' -- "$runtime" "$ROOT/shared/desktop/desktopRuntime.ts"; then
-    echo 'Выбор сервера SEA/ELF сохранён; для смены используйте grigdesk-ctl desktop use-server <ELF|R>.'
+    process.exit(descriptor && (process.argv[3] === "1" || [3, 4].includes(descriptor.version)) ? 0 : 1);
+  ' -- "$runtime" "$ROOT/shared/desktop/desktopRuntime.ts" "$desktop_keep_runtime"; then
+    if [[ "$desktop_keep_runtime" == 1 ]]; then
+      echo 'Текущий выбор сервера сохранён до завершения полной установки.'
+    else
+      echo 'Выбор сервера SEA/ELF сохранён; для смены используйте grigdesk-ctl desktop use-server <ELF|R>.'
+    fi
+
     return 0
   fi
 
@@ -168,6 +174,13 @@ desktop_status() {
 
 case "${1:-}" in
   install)
+    if [[ $# == 2 && "$2" == --keep-runtime ]]; then
+      desktop_keep_runtime=1
+    elif [[ $# != 1 ]]; then
+      echo 'Использование: desktop install [--keep-runtime]' >&2
+      exit 2
+    fi
+
     install_desktop
     ;;
   remove)

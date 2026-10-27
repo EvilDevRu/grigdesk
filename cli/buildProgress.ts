@@ -72,6 +72,7 @@ async function observeBuild(
   let previousPercent = 0;
   let frame = 0;
   let selectServer = false;
+  let queuedServer = false;
   let interrupted = 0;
   let cancellation: Promise<void> | undefined;
   let known: BuildProcess[] = [];
@@ -247,6 +248,11 @@ async function observeBuild(
           selectServer = true;
         }
 
+        if (type === 'hint' && id === 'queued-server') {
+          queuedServer = true;
+          selectServer = false;
+        }
+
         const step = steps.find((item) => item.id === id);
 
         if (step && type === 'start') {
@@ -356,8 +362,12 @@ async function observeBuild(
     lines.push(t('selectServer', { path: path.join(root, 'bin/grigdesk-server') }));
   }
 
+  if (queuedServer) {
+    lines.push(t('serverQueued'));
+  }
+
   if (variant !== 'bundle') {
-    lines.push(t(variant === 'web' ? 'webHint' : 'reopen'));
+    lines.push(t(variant === 'web' ? 'webHint' : selectServer ? 'serverNotSelected' : 'reopen'));
   }
 
   showScreen(session, {

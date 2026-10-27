@@ -35,7 +35,7 @@ const metadata = {
  * Команды пишут структурированный argv вместо сборки или управления процессами.
  * Сбой задаётся файлом внутри фикстуры и не требует новых переменных продукта.
  */
-async function commandStub(file, command, calls, failure) {
+async function commandStub(file, command, calls, failure, effect = []) {
   await fs.writeFile(file, [
     `#!${process.execPath}`,
     'const fs = require("node:fs");',
@@ -44,6 +44,8 @@ async function commandStub(file, command, calls, failure) {
     'const event = { command, args, cwd: process.cwd() };',
     `fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(event) + "\\n");`,
     `const failure = JSON.parse(fs.readFileSync(${JSON.stringify(failure)}, "utf8"));`,
+    'const failed = failure.command === command && args.includes(failure.argument);',
+    ...effect,
     'process.exit(failure.command === command && args.includes(failure.argument) ? failure.code : 0);',
   ].join('\n'), { mode: 0o755 });
 }
@@ -65,7 +67,7 @@ export async function fixture(t, { source = true, binary = true, release = false
 
   for (const directory of ['bin', 'cli', 'tools', 'server/src', 'server/node_modules',
     'web/node_modules', 'desktop', 'shared/desktop', 'shared/runtime', 'shared/node',
-    'server/scripts', 'server/build']) {
+    'server/scripts', 'server/build', 'server/src/lib']) {
     await fs.mkdir(path.join(root, directory), { recursive: true });
   }
 
@@ -76,9 +78,11 @@ export async function fixture(t, { source = true, binary = true, release = false
   await fs.cp(path.join(repository, 'bin/grigdesk-ctl'), path.join(root, 'bin/grigdesk-ctl'));
   await fs.writeFile(path.join(root, 'cli/main.ts'), 'console.log("СПРАВКА");\n');
 
-  for (const name of ['shared/desktop/desktopRuntime.ts', 'shared/runtime/legacyBrand.ts',
-    'shared/node/hash.ts', 'shared/node/nodeRuntime.ts', 'shared/node/seaBuild.ts',
-    'server/scripts/ctlBuild.mts']) {
+  await fs.cp(path.join(repository, 'shared'), path.join(root, 'shared'), { recursive: true });
+
+  for (const name of ['server/scripts/ctlBuild.mts', 'server/src/lib/selectSeaServer.ts',
+    'server/src/lib/builtServerSelection.ts', 'server/src/lib/dataHomeBoot.ts',
+    'server/src/lib/helperEntry.ts', 'server/src/lib/nodeVersion.ts']) {
     await fs.copyFile(path.join(repository, name), path.join(root, name));
   }
 
@@ -88,7 +92,9 @@ export async function fixture(t, { source = true, binary = true, release = false
     }
   }
 
-  if (binary) {
+  const template = path.join(temporary, 'server-fixture');
+
+  {
     const entry = path.join(temporary, 'server.c');
 
     await fs.writeFile(entry, [
@@ -102,7 +108,11 @@ export async function fixture(t, { source = true, binary = true, release = false
       '  return 96;',
       '}',
     ].join('\n'));
-    await execute('cc', [entry, '-o', path.join(root, 'bin/grigdesk-server')]);
+    await execute('cc', [entry, '-o', template]);
+  }
+
+  if (binary) {
+    await fs.copyFile(template, path.join(root, 'bin/grigdesk-server'));
   }
 
   if (release) {
@@ -113,14 +123,31 @@ export async function fixture(t, { source = true, binary = true, release = false
   }
 
   for (const command of ['npm', 'systemctl', 'kill', 'xdg-open']) {
-    await commandStub(path.join(stubs, command), command, callsFile, failure);
+    const effect = command === 'npm' ? [
+      'if (!failed && args.includes("install:binary")) {',
+      '  const target = args[args.indexOf("--target") + 1];',
+      `  fs.copyFileSync(${JSON.stringify(template)}, target);`,
+      '}',
+    ] : [];
+
+    await commandStub(path.join(stubs, command), command, callsFile, failure, effect);
   }
 
   for (const command of ['mobile', 'release']) {
     await commandStub(path.join(root, 'tools', command), command, callsFile, failure);
   }
 
-  await commandStub(path.join(root, 'deploy/desktop.sh'), 'desktop', callsFile, failure);
+  await commandStub(path.join(root, 'deploy/desktop.sh'), 'desktop', callsFile, failure, [
+    'if (!failed && args.includes("install")) {',
+    '  const path = require("node:path");',
+    '  const file = path.join(process.env.XDG_DATA_HOME, "grigdesk/desktop/runtime.json");',
+    '  if (!fs.existsSync(file)) {',
+    '    fs.mkdirSync(path.dirname(file), { recursive: true });',
+    `    fs.writeFileSync(file, JSON.stringify({ version: 1, root: ${JSON.stringify(root)},`,
+    '      node: process.execPath }));',
+    '  }',
+    '}',
+  ]);
 
   const env = {
     PATH: `${stubs}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
@@ -220,7 +247,7 @@ export function expectedBuildCalls(box, target = 'all') {
     {
       command: 'desktop',
       cwd: '/',
-      args: ['install'],
+      args: target === 'all' ? ['install', '--keep-runtime'] : ['install'],
     },
   ];
 

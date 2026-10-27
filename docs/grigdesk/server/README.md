@@ -28,6 +28,8 @@
 
 - [Сборка и установка сервера, веба и окна одной командой из исходников](ctl-build.md)
 
+- [Полная сборка привязывает окно к новому серверу при следующем запуске](build-server-selection.md)
+
 - [E0 без baseline: функциональные ворота, cold-порог и явная пометка отчёта](server-binary-smoke-baseline.md)
 
 - [Выбор ELF/R/source и владение preparation в окне](server-binary-desktop.md)
