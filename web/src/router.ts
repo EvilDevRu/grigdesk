@@ -147,7 +147,7 @@ const routes: RouteRecordRaw[] = [
     path: '/inbox',
     name: 'inbox',
     component: () => import('./views/InboxView.vue'),
-    meta: { title: 'Входящие' },
+    meta: { title: 'Входящие', layout: 'workspace' },
   },
   {
     path: '/github',

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { i18nBrowser } from './helpers/i18nBrowser.js';
-import { card, job, snapshot } from './helpers/providerInstallFixture.js';
+import { card, job, preparation, snapshot } from './helpers/providerInstallFixture.js';
 
 /**
  * Два browser context разделяют серверный снимок, но не Pinia или localStorage.
@@ -107,6 +107,20 @@ async function browserFixture(t, installed = false, viewport = {
       if (pathname === '/api/providers/installations/current') {
         reads.push(pathname);
         await route.fulfill({ json: remote });
+
+        return;
+      }
+      if (/\/providers\/([^/]+)\/(install|update)\/prepare$/u.test(pathname)) {
+        const [, id, operation] = pathname.match(
+          /providers\/([^/]+)\/(install|update)\/prepare/u);
+        const provider = cards.find((item) => item.id === id);
+
+        await route.fulfill({ json: preparation({
+          providerId: id,
+          operation,
+          command: provider.installation[`${operation}Command`],
+          loginCommand: `${id} login`,
+        }) });
 
         return;
       }
@@ -248,7 +262,7 @@ test('три исполнителя открывают одно окно из о
 
           await confirmStart(page, area, provider, installed ? 'update' : 'install', fixture.posts);
           assert.equal(fixture.posts.length, 1);
-          assert.ok(fixture.posts[0].body == null || Object.keys(fixture.posts[0].body).length === 0);
+          assert.deepEqual(fixture.posts[0].body, { preparationToken: 'fixture-preparation-token' });
           assert.equal(await page.evaluate(() => window.__providerSources.length), 1);
         });
       }

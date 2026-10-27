@@ -292,7 +292,7 @@
                   <span
                     v-if="updateNoteOf(p)"
                     class="pu-state"
-                    :class="updateNoteOf(p)!.type === 'err' ? 'is-bad' : 'is-warn'"
+                    :class="['pu-note', updateNoteOf(p)!.type === 'err' ? 'is-bad' : 'is-warn']"
                   >{{ updateNoteOf(p)!.text }}</span>
                   <!-- Беда лимитов — СВЕРХУ и со ссылкой на состояние вендора: снизу её
                        читали уже после того, как начинали гадать о причине сбоя. -->
@@ -427,7 +427,7 @@ import ComputerResourcesPanel from './ComputerResourcesPanel.vue';
 import { loadClass, resourcesAlarm } from './resourceMetrics.ts';
 import PhoneConnectButton from './PhoneConnectButton.vue';
 import ProviderInstallDialog from '../ProviderInstallDialog.vue';
-import { useProviderInstallStore } from '../../stores/providerInstall.ts';
+import { useProviderInstallStore, providerInstallVisibleWarnings } from '../../stores/providerInstall.ts';
 import { usePhoneAccessStore } from '../../stores/phoneAccess.ts';
 import PhoneConnectDialog from '../../views/settings/PhoneConnectDialog.vue';
 import { setAlertTargetOpener } from '../alerts.ts';
@@ -657,7 +657,7 @@ function installResultNeedsAttention(p: TopbarProvider): boolean {
     return false;
   }
 
-  return result.status !== 'succeeded' || result.warnings.length > 0
+  return result.status !== 'succeeded' || providerInstallVisibleWarnings(result).length > 0
     || (result.operation === 'install' && !p.available);
 }
 
@@ -1170,6 +1170,9 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
   padding-top: 7px; border-top: 1px solid var(--line);
   font-size: 11px; line-height: 1.45; color: var(--ink-mid);
 }
+/* Итог установки собран из строк (причина, терминал, предупреждения): без переноса
+   они слипались в одно предложение без точки. */
+.pu-note { white-space: pre-line; }
 .pu-state.is-bad { color: var(--bad); }
 .pu-state.is-warn { color: var(--warn); }
 /* Полоски нагрузки «мозга» — те же пороги, что и у цифр в шапке (60% / 85%).

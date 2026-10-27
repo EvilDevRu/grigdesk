@@ -1,10 +1,14 @@
 # Чат и исполнители
 
-- [Установка CLI: общее окно, серверная операция и восстановление](provider-cli-installation.md)
-- [Приоритет пользовательского npm для CLI и прежние способы без него](provider-install-npm.md)
-- [Проверка и подключение npm-копии вместо закреплённого старого CLI](provider-install-npm-binding.md)
+- [Установка CLI: preview-подготовка, token старта, фаза терминала и восстановление](provider-cli-installation.md)
+- [Внешний Node/npm и пользовательский prefix вместо папки данных](provider-install-npm.md)
+- [Проверка и подключение npm-копии, перенос прежней bin-ссылки](provider-install-npm-binding.md)
+- [Проверка нативного Linux ELF и JavaScript в npm-пакетах исполнителей](provider-install-native-bin.md)
+- [Настройка Bash PATH: независимый probe, управляемый блок и честный terminal](provider-install-shell-path.md)
 - [Вывод установки, обновление реестра и перевод собственных причин](provider-install-output-and-messages.md)
+- [Отказ подготовки установки не подменяется прошлым успешным результатом](provider-install-prepare-failure.md)
 - [Вывод команды скрыт под «Детали» при любом исходе установки](provider-install-details.md)
+- [Постоянная высота окна установки, прокрутка деталей и доступность действий](provider-install-height.md)
 - [Повтор установки и обновления CLI при плохой сети: бюджет, паузы и остановка](provider-install-network-retry.md)
 - [Кнопка «Повторить» после отказа установки или обновления CLI](provider-install-manual-retry.md)
 
@@ -54,6 +58,7 @@
 
 ### Kimi
 
+- [Предпросмотр разрешений: команды, файлы и дифф вместо object Object](kimi-approval-display.md)
 - [Heartbeat WebSocket: ping/pong, тайминги и причина закрытия в ошибке хода](kimi-ws-heartbeat.md)
 - [Окружение MCP для kimi web: ACP-массив превращается в объект](kimi-web-mcp-env.md)
 - [Отказ пятичасовой квоты и другие ошибки сохраняют причину вместо «Ход остановлен»](kimi-turn-failures.md)
@@ -65,6 +70,7 @@
 - [Дополнительные workspace-каталоги для kimi-чатов (паритет с codex --add-dir)](kimi-workspace-extra-dirs.md)
 - [Kimi ACP: результаты contract spike](kimi-acp-spike.md)
 - [KimiRuntime: security gate](kimi-runtime-security.md)
+- [Авторизация Kimi: официальный и scoped credential](kimi-scoped-credentials.md)
 
 ### Чат
 
@@ -78,6 +84,8 @@
 - [Вложения (фото) и диктовка](attachments-and-dictation.md)
 - [Типизированные границы старых ответов: MIME, revision папки и сетевые ошибки](typed-legacy-responses.md)
 - [Всплывашка разрешений (аналог permission prompt Claude Code)](permission-prompt.md)
+- [Карточки разрешений и вопросов: содержимое, постоянные действия и свой ответ](intervention-cards.md)
+- [Поля запросов: общий фон, компактные действия, ссылки и выравнивание](intervention-controls.md)
 - [Диалог: агент задаёт вопрос (AskUserQuestion)](agent-questions.md)
 - [Доставка хода: приём по turnId, журнал ходов, итог через pending](turn-delivery.md)
 - [Автопродолжение хода после сбоя исполнителя: допуск, паузы, бюджет и приоритет человека](auto-continue.md)
@@ -98,6 +106,7 @@
 - [Действия субагента под своим вызовом, включая поздние реплики (№93016)](subagent-step-placement.md)
 - [Картинка в строке Read и генерации Codex: миниатюра через маршрут картинок чата вместо «[изображение]» и base64](step-images.md)
 - [Приглушённые подписи инструментов и служебных сведений](activity-visual-hierarchy.md)
+- [Монохромные SVG-иконки инструментов в живой и сохранённой ленте](activity-icons.md)
 - [Ответы среди действий: хронология и компактные реплики](conversation-timeline.md)
 - [Общая линия хода, иконки ответов и выравнивание](turn-rail.md)
 - [Сведения о запуске и лимитах справа на существующей линии](run-status-placement.md)
