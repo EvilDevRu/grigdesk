@@ -254,6 +254,12 @@ export async function runMenu(root: string): Promise<number> {
             return code;
           }
 
+          if (item.variant && item.variant !== 'bundle') {
+            render();
+
+            continue;
+          }
+
           while (true) {
             const result = await session.nextKey();
             const resultExit = exitKey(result);

@@ -13,8 +13,9 @@ import type { BuildProcess } from './buildProcesses.ts';
 import { buildStepIds, estimateBuildProgress } from './buildState.ts';
 import type { BuildStep } from './buildState.ts';
 import { cliTranslator } from './i18n.ts';
+import { runPresentedCommand } from './presentation.ts';
 import { showScreen } from './screen.ts';
-import type { ScreenLine } from './screen.ts';
+import type { ScreenLine, ScreenOptions } from './screen.ts';
 import { TerminalSession } from './terminal.ts';
 
 interface ObservedStep extends BuildStep {
@@ -26,6 +27,53 @@ function duration(milliseconds: number): string {
   const seconds = Math.floor(milliseconds / 1000);
 
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Успешная сборка предлагает явный выбор запуска с отказом по умолчанию.
+ * Открытие использует общий диспетчер open, сохраняя его проверки и код завершения.
+ */
+async function offerOpenWindow(
+  root: string, session: TerminalSession, summary: ScreenOptions,
+): Promise<number> {
+  const { t } = cliTranslator();
+  let open = false;
+  const render = () => showScreen(session, {
+    ...summary,
+    lines: (width) => [
+      ...typeof summary.lines === 'function' ? summary.lines(width) : summary.lines,
+      '',
+      { text: t('openWindowQuestion'), tone: 'accent' },
+      { text: `${open ? '›' : ' '} ${t('open')}`, selected: open },
+      { text: `${open ? ' ' : '›'} ${t('skipOpen')}`, selected: !open },
+    ],
+    footer: t('openWindowNavigation'),
+  });
+
+  session.resume();
+  render();
+
+  while (true) {
+    const key = await session.nextKey();
+    const letter = key.text?.toLowerCase() ?? '';
+
+    if (['interrupt', 'terminate'].includes(key.name)) {
+      return key.name === 'interrupt' ? 130 : 143;
+    }
+
+    if (['escape', 'eof'].includes(key.name) || ['n', 'н'].includes(letter)) {
+      return 0;
+    }
+
+    if (['y', 'д'].includes(letter) || key.name === 'return') {
+      return open || ['y', 'д'].includes(letter) ? runPresentedCommand(root, ['open'], session) : 0;
+    }
+
+    if (['up', 'down', 'left', 'right'].includes(key.name)) {
+      open = !open;
+      render();
+    }
+  }
 }
 
 /**
@@ -154,6 +202,7 @@ async function observeBuild(
       },
       lines,
       footer: t('screens.cancel'),
+      incremental: true,
     });
   }
 
@@ -370,7 +419,7 @@ async function observeBuild(
     lines.push(t(variant === 'web' ? 'webHint' : selectServer ? 'serverNotSelected' : 'reopen'));
   }
 
-  showScreen(session, {
+  const summaryScreen: ScreenOptions = {
     title: `${t('build')}: ${t(variant === 'server' ? 'serverOnly' : variant)}`,
     state: { text: t('screens.done'), tone: 'success' },
     lines: [
@@ -383,13 +432,19 @@ async function observeBuild(
     ],
     footer: returnToMenu ? t('continue') : undefined,
     full: true,
-  });
+  };
 
-  return 0;
+  if (variant === 'bundle') {
+    showScreen(session, summaryScreen);
+
+    return 0;
+  }
+
+  return offerOpenWindow(root, session, summaryScreen);
 }
 
 /**
- * Меню передаёт свою сессию, явный build создаёт временную без ожидания клавиши.
+ * Меню передаёт свою сессию, явный build создаёт временную с выбором открытия после успеха.
  * Cooked-режим направляет настоящий Ctrl+C контроллеру, после выхода всё восстанавливается.
  */
 export async function runBuildProgress(
