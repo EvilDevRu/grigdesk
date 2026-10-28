@@ -1,5 +1,7 @@
 # Сервер и доступ
 
+- [Условная правка .env: сверка прежнего значения под очередью писателя](env-file-expected-value.md)
+
 - [Подтверждение TLS-привязки, готовность relay и диагностика отказов](phone-pairing-confirmation.md)
 
 - [Управляемый direct-вход, PHONE:2 и общий client relay](phone-access.md)
