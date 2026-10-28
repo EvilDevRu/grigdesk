@@ -60,6 +60,8 @@ _route_v2_require_runner_invariant() {
   fi
 }
 
+# Проверяет форму доверенных JSON и возвращает только сведения для диспетчера.
+# Охват preflight вычисляется здесь из бандла, без отдельной копии топологии в launcher.
 _route_v2_json() {
   python3 - "$@" <<'PY'
 import json
@@ -174,6 +176,45 @@ elif op == "cursor-stop":
         }:
             fail()
     print(state, stop or "", last_node, last_outcome, sep="\t")
+elif op == "coverage-stages":
+    # Охват берётся из проверенного бандла: при старте все агенты, при resume
+    # только достижимые из курсора. Командные узлы и ворота исполнителей не требуют.
+    machine = value.get("machine") if isinstance(value, dict) else None
+    if not isinstance(machine, dict) or not isinstance(machine.get("nodes"), list):
+        fail()
+    nodes = {node["id"]: node for node in machine["nodes"]}
+    scope = args[0] if args else "*"
+    pending = list(nodes) if scope == "*" else ([] if scope == "-" else [scope])
+    visited = set()
+    stages = set()
+
+    # Переходы next/rewind встречаются как в on, так и в таблице onFailure.
+    # Рекурсивный обход включает ветки исправления, сохраняя границу достижимости.
+    def targets(action):
+        if not isinstance(action, dict):
+            return
+        for key, target in action.items():
+            if key in {"next", "rewind"} and isinstance(target, str):
+                yield target
+            elif isinstance(target, dict):
+                yield from targets(target)
+
+    while pending:
+        node_id = pending.pop()
+        if node_id in visited:
+            continue
+        if node_id not in nodes:
+            fail()
+        visited.add(node_id)
+        node = nodes[node_id]
+        if node.get("executor") == "agent":
+            run_key = node.get("runKey", "")
+            if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", run_key):
+                fail()
+            stages.add(run_key)
+        pending.extend(targets(node.get("on", {})))
+        pending.extend(targets(node.get("onFailure", {})))
+    print("\n".join(sorted(stages)))
 elif op == "node":
     node_id = args[0]
     machine = value.get("machine") if isinstance(value, dict) else None

@@ -2856,6 +2856,97 @@ v2_on_exit() {
   exit "$rc"
 }
 
+# Проверка использует тот же immutable-каталог, что будет закреплён за попыткой.
+# На resume курсор ограничивает достижимость; уже завершённая разведка не включается.
+v2_runner_preflight_stages() (
+  local description cursor_file catalog routes route scope='*' state node sequence rc
+  description=$(mktemp "$(factory_control_root)/.preflight-route.XXXXXX") || return 78
+  cursor_file=$(mktemp "$(factory_control_root)/.preflight-cursor.XXXXXX") || {
+    rm -f -- "$description"
+    return 78
+  }
+  trap 'rm -f -- "$description" "$cursor_file"' EXIT
+  if [[ "$MODE" == start ]]; then
+    catalog=$CURRENT_CATALOG
+    routes=$ROUTES_DIR
+    route=$ROUTE
+    printf '%s\n' "$CURRENT_ROUTE_JSON" >"$description" || return 78
+  else
+    _route_v2_load_attempt "$TASK" "$EXPECTED_ATTEMPT" || return
+    catalog=$ROUTE_V2_CATALOG
+    routes=$ROUTE_V2_ROUTES_DIR
+    route=$ROUTE_V2_ROUTE
+    "$FACTORY_HOME/bin/factory-route" --routes-dir "$routes" --profile "$PROFILE" \
+      describe-route --catalog-hash "$catalog" --route "$route" >"$description" || return
+    attempt_stage_state_read_v2 "$TASK" "$EXPECTED_ATTEMPT" >"$cursor_file"
+    rc=$?
+    if (( rc == 0 )); then
+      IFS=$'\t' read -r state node sequence < <(_route_v2_json cursor "$cursor_file") || return 78
+      scope=$node
+      [[ "$state" != stopped ]] || scope='-'
+    elif (( rc != 73 )); then
+      return "$rc"
+    fi
+  fi
+  _route_v2_json coverage-stages "$description" "$scope" || return
+  if [[ "$(_route_v2_json bootstrap-policy "$description")" == required &&
+        ( "$MODE" == start || ! -f "$ROUTE_V2_ATTEMPT_DIR/artifacts/bootstrap.json" ) ]]; then
+    "$FACTORY_HOME/bin/factory-route" --routes-dir "$routes" --profile "$PROFILE" \
+      describe-bootstrap --catalog-hash "$catalog" >"$description" || return
+    _route_v2_json coverage-stages "$description" || return
+  fi
+)
+
+# Полный опрос остаётся диагностикой профиля, но допуск вычисляется по цепочкам
+# исполняемых узлов с тем же routing_resolve, что использует runtime-диспетчер.
+v2_runner_preflight() {
+  local stages stage route primary failover chain revision rc=0 unavailable=''
+  local coverage_dir="$STATE_DIR/coverage/$PROFILE"
+  V2_PREFLIGHT_UNAVAILABLE_RUNNERS=''
+  stages=$(v2_runner_preflight_stages) || return
+  if [[ "$MODE" != start ]]; then
+    v2_load_attempt_launch_identity "$EXPECTED_ATTEMPT" || return
+  fi
+  profile_runner_host_preflight "$PROFILE" || rc=$?
+  (( rc == 0 || rc == 1 )) || return "$rc"
+  revision=$(sha256sum "$RUNNER_CONFIG_FILE" | awk '{print substr($1,1,16)}')
+  # Даже маршрут без оставшихся агентов требует валидного свежего снимка.
+  coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
+    "$revision" "$(date +%s)" '' || return 78
+  while IFS= read -r stage; do
+    [[ -n "$stage" ]] || continue
+    if [[ "$MODE" == start ]]; then
+      # Новый start не наследует оверрайды прежней задачи: реестр ещё не создан.
+      route=$(routing_resolve "$RUNNER_CONFIG_FILE" <(
+        printf 'RUNNER_OVERRIDE_PRIMARY=%s\nRUNNER_OVERRIDE_FAILOVER=%s\n' \
+          "$RUNNER_PRIMARY_OVERRIDE" "$RUNNER_FAILOVER_OVERRIDE"
+      ) "$stage") || return 78
+    else
+      # Resume восстановит primary из trusted launch identity перед запуском узлов.
+      # Сверяем ту же будущую проекцию без записи реестра до успешного preflight.
+      route=$(routing_resolve "$RUNNER_CONFIG_FILE" <(
+        cat -- "$(_pf "$TASK")" 2>/dev/null
+        printf '\nRUNNER_OVERRIDE_PRIMARY=%s\n' "$V2_ATTEMPT_RUNNER_PRIMARY_OVERRIDE"
+      ) "$stage") || return 78
+    fi
+    primary=$(awk -F= '$1=="PRIMARY"{print $2}' <<<"$route")
+    failover=$(awk -F= '$1=="FAILOVER"{print $2}' <<<"$route")
+    chain="$primary${failover:+,$failover}"
+    if ! coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
+      "$revision" "$(date +%s)" "$chain"; then
+      [[ "$COVERAGE_GATE_REASON" == unavailable ]] || return 78
+      unavailable+="${unavailable:+,}$COVERAGE_UNAVAILABLE_RUNNERS"
+    fi
+  done <<<"$stages"
+  [[ -n "$unavailable" ]] || return 0
+  V2_PREFLIGHT_UNAVAILABLE_RUNNERS=$(
+    tr ',' '\n' <<<"$unavailable" | LC_ALL=C sort -u | paste -sd,
+  )
+  return 1
+}
+
+# Допуск к исполнению предшествует созданию attempt и любым lifecycle-эффектам.
+# Запись решения ворот остаётся отдельным CAS без проверки готовности исполнителей.
 v2_main() {
   local attempt route_hash rc pinned_profile pinned_route pinned_routes route_task_root
   local unavailable_runners preflight_message
@@ -2901,14 +2992,13 @@ v2_main() {
   # Продолжение маршрута идёт отдельным resume — там preflight на месте, и
   # недоступный раннер по-прежнему не пустит агентов в работу.
   if [[ "$MODE" != gate || "$GATE_COMMIT_ONLY" != 1 ]]; then
-    profile_runner_host_preflight "$PROFILE" || {
+    v2_runner_preflight || {
       rc=$?
       unavailable_runners=""
       # Только rc=1 означает свежий полноценный preflight с недоступным runner.
       # При storage/contract-ошибке старый host.env нельзя выдавать за причину.
       if (( rc == 1 )); then
-        unavailable_runners=$(coverage_artifact_get \
-          "$STATE_DIR/coverage/$PROFILE/host.env" UNAVAILABLE_RUNNERS)
+        unavailable_runners=$V2_PREFLIGHT_UNAVAILABLE_RUNNERS
       fi
       if [[ -n "$unavailable_runners" ]]; then
         preflight_message="runner preflight не пройден: недоступны $unavailable_runners"
@@ -2953,7 +3043,7 @@ v2_main() {
     # current мог смениться после него. При mismatch begin не публикует attempt,
     # а pending shared lease снимает EXIT-cleanup, поэтому task остаётся чистой.
     attempt=$(attempt_state_begin_v2 \
-      "$TASK" "$PROFILE" "$ROUTES_DIR" "$EXPECTED_CATALOG_HASH" \
+      "$TASK" "$PROFILE" "$ROUTES_DIR" "${EXPECTED_CATALOG_HASH:-$CURRENT_CATALOG}" \
       "$QUEUE_DISPATCH_ID" "$RUNNER_PRIMARY_OVERRIDE") || {
       rc=$?
       v2_log "attempt не создан (код $rc)"

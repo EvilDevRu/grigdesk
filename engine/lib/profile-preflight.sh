@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Host-dependent readiness for an already configured profile. Probe methods may
-# inspect CLI version/auth metadata, but this module never calls runner_*_run.
+# Готовность настроенного профиля на этом хосте проверяется только по metadata.
+# Пробы читают версию и авторизацию CLI; runner_*_run здесь никогда не вызывается.
 
 # shellcheck disable=SC1091
 source "${FACTORY_HOME:?}/lib/profile-config.sh"
@@ -68,6 +68,8 @@ profile_preflight_ttl() {
   printf '%s\n' "$ttl"
 }
 
+# Единственный профильный писатель снимает статусы всех настроенных провайдеров.
+# Строгий результат нужен factory-check; runtime отдельно проверяет свои цепочки.
 profile_runner_host_preflight() {
   local profile=$1 now=${2:-$(date +%s)} ttl
   ttl=$(profile_preflight_ttl "${3:-}") || return
@@ -192,11 +194,13 @@ profile_runner_host_preflight() {
     return 78
   }
   {
-    printf 'SCHEMA=1\nKIND=host\nHASH=%s\nSTRUCTURAL_HASH=%s\n' \
+    printf 'SCHEMA=2\nKIND=host\nHASH=%s\nSTRUCTURAL_HASH=%s\n' \
       "$host_hash" "$structural_hash"
     printf 'CATALOG_REVISION=%s\nTOTAL=%s\nUNAVAILABLE=%s\nUNAVAILABLE_RUNNERS=%s\n' \
       "$revision" "$total" "$unavailable" "$unavailable_runners"
     printf 'FETCHED_AT=%s\nEXPIRES_AT=%s\n' "$now" "$((now + ttl))"
+    printf 'PROVIDERS=%s\n' "$(paste -sd, "$providers")"
+    awk -F '\t' '$1 == "runner" { print "PROVIDER_" $2 "=" $3 }' "$results"
     while IFS= read -r provider; do
       [[ -z "${preflight_runtime_versions[$provider]:-}" ]] ||
         printf 'RUNTIME_VERSION_%s=%s\n' "$provider" "${preflight_runtime_versions[$provider]}"
