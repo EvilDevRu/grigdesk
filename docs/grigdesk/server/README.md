@@ -44,6 +44,7 @@
 
 - [Установка, private receipt и откат серверного ELF](server-binary-install.md)
 
+- [Пересборка проверяет совместимость сервера с установленными DeepSeek/GLM до замены](server-executor-install-guard.md)
 
 - [PATH одиночного ELF: пользовательские CLI и nvm без ссылок](server-binary-path.md)
 

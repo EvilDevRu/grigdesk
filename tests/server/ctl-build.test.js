@@ -7,6 +7,16 @@ import { fixture, expectedBuildCalls } from './helpers/ctlBuildFixture.js';
 
 const sourceMarkers = ['server/src/app.ts', 'web/package.json', 'desktop/package.json'];
 
+test('build: явный путь исполнителя передаётся проверке пары при установке сервера', async (t) => {
+  const box = await fixture(t);
+  const binary = path.join(box.root, 'custom executor');
+  const result = await box.run(['build', 'server'], { GRIGDESK_DEEPSEEK_BIN: binary });
+  const install = (await box.calls()).find((call) => call.args.includes('install:binary'));
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(install.args.slice(-2), ['--deepseek-binary', binary]);
+});
+
 test('build: исходники с установленным ELF сохраняют путь разработчика', async (t) => {
   const box = await fixture(t);
   const result = await box.run(['build', 'web']);

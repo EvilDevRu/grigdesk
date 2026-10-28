@@ -10,6 +10,7 @@ import { sha256File } from '../../../shared/node/hash.ts';
 import { decodeServerBinaryInfo } from '../../../shared/runtime/serverBinary.ts';
 import { copyInstallCandidate, removeInstallStage } from './installFiles.mts';
 import { approveInstall, previousInstall, savePrevious } from './installOwnership.mts';
+import { guardInstalledDeepSeek } from './installDeepSeekGuard.mts';
 
 const run = promisify(execFile);
 const snapshotPolicy = {
@@ -20,6 +21,7 @@ export interface InstallOptions {
   binary: string;
   target: string;
   releasesDir: string;
+  deepseekBinary?: string;
 }
 
 interface ProbeContext {
@@ -64,6 +66,7 @@ export async function installBinary(options: InstallOptions, hooks: InstallHooks
   const lock = await acquireInstallLock(target);
   let stage: string | undefined;
   let probeRoot: string | undefined;
+  let deepseek: Awaited<ReturnType<typeof guardInstalledDeepSeek>> | undefined;
 
   try {
     stage = await fs.mkdtemp(path.join(parent, '.grigdesk-server-install-'));
@@ -119,10 +122,25 @@ export async function installBinary(options: InstallOptions, hooks: InstallHooks
 
     await assertInstallFileUnchanged(staged, stamp, digest, snapshotPolicy);
 
+    deepseek = await guardInstalledDeepSeek({
+      binary: options.deepseekBinary ?? path.join(parent, 'deepseek'),
+      serverBinary: staged,
+      packageId: info.packageId,
+      home: context.env.GRIGDESK_HOME,
+      required: options.deepseekBinary !== undefined,
+      run: async (file, args, probeOptions) => ({
+        stdout: JSON.stringify(await check(file, args, {
+          ...context,
+          timeout: probeOptions.timeout,
+        })),
+      }),
+    });
+
     const old = await previousInstall(target, stage);
     const previous = await savePrevious(old, options.releasesDir);
 
     await assertInstallFileUnchanged(staged, stamp, digest, snapshotPolicy);
+    await deepseek.assertUnchanged();
     await approveInstall(old, digest, stage);
     await (hooks.publish ?? fs.rename)(staged, target);
     await syncDirectory(parent);
@@ -143,7 +161,11 @@ export async function installBinary(options: InstallOptions, hooks: InstallHooks
           await removeInstallStage(probeRoot);
         }
       } finally {
-        await lock.release();
+        try {
+          await deepseek?.release();
+        } finally {
+          await lock.release();
+        }
       }
     }
   }

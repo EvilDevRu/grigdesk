@@ -240,6 +240,11 @@ developer_command() {
   build_server() {
     local cache="${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/server-binary"
     local data
+    local -a executor_args=()
+
+    if [[ -n "${GRIGDESK_DEEPSEEK_BIN:-}" ]]; then
+      executor_args=(--deepseek-binary "$GRIGDESK_DEEPSEEK_BIN")
+    fi
 
     data=$(grigdesk_data_home) || return $?
     observed_step server.node node "$DIR/server/scripts/ctlBuild.mts" \
@@ -248,7 +253,7 @@ developer_command() {
       --out-dir "$cache/out" --cache-dir "$cache/cache" || return $?
     observed_step server.install npm --prefix "$DIR/server" run install:binary -- \
       --binary "$cache/out/grigdesk-server" --target "$DIR/bin/grigdesk-server" \
-      --releases-dir "$data/runtimes/server/releases" || return $?
+      --releases-dir "$data/runtimes/server/releases" "${executor_args[@]}" || return $?
 
     if [[ "$build_target" != all ]] \
       && ! node "$DIR/server/scripts/ctlBuild.mts" check-desktop "$DIR/bin/grigdesk-server"; then

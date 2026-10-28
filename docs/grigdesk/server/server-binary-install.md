@@ -30,6 +30,11 @@ staging на filesystem target. Копия закрывается, получа�
 Пробы получают отдельные HOME/D/tmp/cache вне установки и окружение без ключей и loaders.
 SHA и файловый отпечаток staged inode проверяются повторно после проб и backup.
 
+До backup и публикации проверяется [совместимость с установленным DeepSeek/GLM](server-executor-install-guard.md)
+по контракту из payload кандидата сервера. При несовместимости прежний сервер и receipt
+сохраняются. Для нестандартного пути исполнителя есть `--deepseek-binary <ELF>`;
+по умолчанию проверяется соседний `bin/deepseek`, если он установлен.
+
 Чужие target, symlink и неправильные receipt отклоняются. Private receipt
 `grigdesk-server.grigdesk-server.json` имеет режим 0600 и привязан к абсолютному target.
 Старый target копируется без исполнения и сверяется с approved SHA; резерв лежит по пути
