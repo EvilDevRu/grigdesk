@@ -80,3 +80,27 @@ test('сообщение ограничено одной строкой и не 
   assert.ok(message.length <= 500);
   assert.match(message, /FAIL/);
 });
+
+test('native Auto-review denial не становится отказом провайдера или поводом для failover', () => {
+  const raw = stream(
+    { type: 'item.autoApprovalReview.completed', review: { status: 'denied' } },
+    { type: 'item.completed', item: {
+      type: 'command_execution',
+      exit_code: 1,
+      aggregated_output: 'sandbox_denied: Тестовый отказ reviewer',
+    } },
+    { type: 'item.completed', item: {
+      type: 'agent_message',
+      text: 'Выполнена разрешённая альтернатива; первый запрос denied.',
+    } },
+    { type: 'turn.completed', usage: {} },
+  );
+
+  assert.equal(inspectCodexFailure(raw).failure, null);
+  assert.equal(classifyCodexFailure(raw, 0, true), 'ok');
+  assert.equal(classifyCodexFailure(raw, 1, true), 'unknown');
+  assert.equal(classifyCodexFailure(stream({
+    type: 'turn.failed',
+    error: { type: 'sandbox_denied' },
+  }), 1, true), 'denied');
+});

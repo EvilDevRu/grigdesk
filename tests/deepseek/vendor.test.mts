@@ -71,6 +71,28 @@ test('offline snapshot отвергает порчу и неизвестный �
   await assert.rejects(fs.stat(path.join(directory, 'upstream/unknown.txt')), { code: 'ENOENT' });
 });
 
+test('upstream link-platform загрязняет только копию vendor и обнаруживается verifier-ом', async (t) => {
+  const input = await createDeepSeekVendorFixture(t);
+  const original = deepSeekPackagePaths().vendorDir;
+  const directory = path.join(input.root, 'native-vendor');
+
+  await fs.cp(original, directory, { recursive: true });
+
+  const before = await verifyDeepSeekSnapshot(directory);
+  const native = path.join(directory, 'upstream/native/system');
+  const generated = path.join(native, 'packages/entry/node_modules');
+  const packageName = `node-addon-system-${process.platform}-${process.arch}`;
+
+  await exec(process.execPath, [path.join(native, 'test/link-platform.mjs')], { env: {} });
+
+  assert.equal(await fs.readlink(path.join(generated, '@deepseek-ai', packageName)),
+    path.join(native, `packages/${process.platform}-${process.arch}`));
+  await assert.rejects(verifyDeepSeekSnapshot(directory), /Небезопасный путь снимка: .*node_modules/u);
+  await fs.rm(generated, { recursive: true });
+  assert.deepEqual(await verifyDeepSeekSnapshot(directory), before);
+  await verifyDeepSeekSnapshot(original);
+});
+
 test('отсутствующий commit и конфликт патча сохраняют исходный snapshot и source', async (t) => {
   const input = await createDeepSeekVendorFixture(t);
   const candidate = await prepareDeepSeekSync({ ...input, commit: input.sha });

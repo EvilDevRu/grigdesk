@@ -21,7 +21,8 @@
   внутри самой всплывашки.
 - Codex: `codex app-server` по stdio JSON-RPC; новый чат использует `thread/start`, продолжение —
   `thread/resume`, затем `turn/start`. `sandboxPolicy` задаёт `workspaceWrite`, writable roots
-  и сеть, `approvalPolicy` равен `never`. Notifications нормализуются в ленту в реальном
+  и сеть. Обычный чат задаёт `on-request/auto_review`, служебный `workspaceAccess` —
+  `never/user`. Notifications нормализуются в ленту в реальном
   времени; summary рассуждений виден, если его отдал сам CLI. Авторизация = наличие
   `~/.codex/auth.json`.
 

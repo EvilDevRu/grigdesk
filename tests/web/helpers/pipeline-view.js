@@ -21,6 +21,7 @@ function uiFacadeStub(prefix) {
   return [
     ...imports,
     `export { ${names} };`,
+    'export { t } from "./src/services/locale.ts";',
     `export const confirmDialog = (...args) => globalThis.${prefix}ConfirmDialog(...args);`,
     `export const alertDialog = (...args) => globalThis.${prefix}AlertDialog(...args);`,
   ].join('\n');
@@ -33,9 +34,12 @@ function uiFacadeStub(prefix) {
 export function compilePipelineView(prefix, { realGraph = false } = {}) {
   return compileVue(VIEW_PATH, {
     stubs: {
-      '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
-      '../../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
+      '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`
+        + '\nexport { ApiError } from "./src/shared/apiClient.ts";',
+      '../../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`
+        + '\nexport { ApiError } from "./src/shared/apiClient.ts";',
       '../composables/useSse.ts': [
+        'export const sseSubscribe = () => () => {};',
         'export function useSse(onEvent) {',
         `  globalThis.${prefix}SseHandler = onEvent;`,
         '  return { connected: { value: true } };',

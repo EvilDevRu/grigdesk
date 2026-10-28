@@ -5,11 +5,13 @@ import { createHash } from 'node:crypto';
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import nativeSettingsDescription from '../executor-settings/deepseek.json' with { type: 'json' };
+import { glmNativeProtocol } from './glmNativeProtocol.mjs';
 
 const requireServer = createRequire(new URL('../../../server/package.json', import.meta.url));
 const Fastify = requireServer('fastify');
 const websocket = requireServer('@fastify/websocket');
 const args = process.argv.slice(2);
+const glmNative = await glmNativeProtocol(args);
 const arg = (name, fallback = '') => args[args.indexOf(name) + 1] || fallback;
 const port = Number(arg('--port', '0'));
 const scenarioFile = arg('--scenario');
@@ -19,12 +21,14 @@ await app.register(websocket);
 let follow;
 let events;
 let turn = 0;
-let seq = 0;
+let seq = -1;
 let pendingApproval = null;
 let pendingQuestion = null;
 let pendingCancel = false;
 let pendingSteer = false;
 let selection = null;
+let rootSessionId = '';
+const eventAgentId = () => args.includes('--grigdesk-tool-policy') ? rootSessionId : 'fake-agent';
 const nativeSettings = structuredClone(nativeSettingsDescription);
 const log = async (value) => appendFile(logFile, `${JSON.stringify(value)}\n`);
 const send = (socket, streamId, value) => {
@@ -162,14 +166,22 @@ function playUpdates(scenario) {
 
   if (scenario.question && events) {
     const eventId = `question-${turn}`;
+    const callId = `question-call-${turn}`;
+    const input = { questions: scenario.question.questions };
+    const proof = glmNative?.proof(turn, callId, 'ask_user_question', input);
+
+    if (proof) {
+      emit('tool/call', { turn, step: 1, callId, name: 'ask_user_question', arguments: JSON.stringify(input) });
+      emit('grigdesk/glm-policy', proof);
+    }
 
     pendingQuestion = { eventId };
     send(events.socket, events.streamId, {
       type: 'waterfall',
       event: 'user-questions/request',
       eventId,
-      agentId: 'fake-agent',
-      request: { questions: scenario.question.questions },
+      agentId: eventAgentId(),
+      request: { ...input, ...(proof ? { grigdeskGlm: proof } : {}) },
     });
 
     return true;
@@ -209,6 +221,12 @@ function playUpdate(update, describe) {
   }
 
   if (update.sessionUpdate === 'tool_call' && describe) {
+    if (glmNative) {
+      emit('grigdesk/glm-policy', glmNative.proof(
+        turn, update.toolCallId, update.title, update.rawInput || {},
+      ));
+    }
+
     hookResult('PreToolUse', {
       event: 'PreToolUse',
       tool_use_id: update.toolCallId,
@@ -251,7 +269,7 @@ function playUpdate(update, describe) {
  * Snapshot follow с проекцией выбора модели — обратное чтение до prompt.
  * Сценарий может задержать его или подменить подтверждённый выбор.
  */
-async function sendSnapshot(socket, streamId) {
+async function sendSnapshot(socket, streamId, address) {
   const options = await readScenario().catch(() => ({}));
   const delay = Number(options.delay?.['session/follow'] || 0);
   const next = options.readback === undefined ? selection : options.readback;
@@ -262,10 +280,15 @@ async function sendSnapshot(socket, streamId) {
 
   send(socket, streamId, {
     type: 'snapshot',
-    cursor: 0,
+    header: { id: address.sessionId },
+    cursor: seq,
     records: [],
     projections: { values: { modelSelection: { lastUsed: null, next } } },
   });
+
+  if (glmNative && options.hooks !== 'no-marker') {
+    emit('grigdesk/glm-ready', glmNative.ready(address.sessionId));
+  }
 }
 
 /**
@@ -330,6 +353,7 @@ app.post('/api/*', async (request) => {
     value = namespace;
   } else if (method === 'session/create') {
     value = { sessionId: params.request.sessionId || `fake-session-${Date.now()}-${Math.random()}` };
+    rootSessionId = value.sessionId;
     await writeJournal(params.request.cwd, value.sessionId);
   } else if (method === 'session/selectModel') {
     const { sessionId: _sessionId, ...selected } = params.request;
@@ -379,7 +403,7 @@ app.post('/api/*', async (request) => {
           type: 'waterfall',
           event: 'approval/request',
           eventId,
-          agentId: 'fake-agent',
+          agentId: eventAgentId(),
           request: {
             toolName: scenario.permission.toolName || 'bash',
             callId: scenario.permission.toolCallId,
@@ -430,7 +454,7 @@ app.get('/api/remote.mux', { websocket: true }, (socket) => {
 
     if (frame.endpoint === 'session/follow') {
       follow = { socket, streamId: frame.streamId };
-      void sendSnapshot(socket, frame.streamId);
+      void sendSnapshot(socket, frame.streamId, frame.payload.args.request.address);
     } else if (frame.endpoint === '$events') {
       events = { socket, streamId: frame.streamId };
       send(socket, frame.streamId, { type: 'ready', clientId: 'fake-client' });

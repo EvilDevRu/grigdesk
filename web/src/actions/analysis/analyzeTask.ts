@@ -31,9 +31,13 @@ async function shelveAnalyzed(id: string | number): Promise<void> {
 
 /**
  * Ставит задачу в очередь триажа. Дедуп живёт на сервере: повторное нажатие вернёт
- * already_queued, а не заведёт вторую оценку.
+ * already_queued, а не заведёт вторую оценку. Собственные задачи не получают
+ * account-scoped меток полки; источник передаёт уже загруженная карточка.
  */
-export async function analyzeTask(id: string | number): Promise<AnalysisQueueResponse> {
+export async function analyzeTask(
+  id: string | number,
+  { source = 'b24' }: { source?: 'b24' | 'grigdesk' } = {},
+): Promise<AnalysisQueueResponse> {
   const store = useAnalysisStore();
 
   if (store.disabled) {
@@ -45,7 +49,11 @@ export async function analyzeTask(id: string | number): Promise<AnalysisQueueRes
   const result = await analysisApi.enqueue(id);
 
   store.markQueued(id);
-  await shelveAnalyzed(id);
+
+  if (source === 'b24') {
+    await shelveAnalyzed(id);
+  }
+
   scheduleAnalysisPolling();
 
   return result;

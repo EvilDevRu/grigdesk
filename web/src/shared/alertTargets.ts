@@ -5,6 +5,9 @@ export const ALERT_CHAT_QUERY = 'openChat';
 export const ALERT_TASK_QUERY = 'openTask';
 
 export type AlertTarget = {
+  kind: 'plugin';
+  pluginId: string;
+} | {
   kind: 'chat';
   chatId: string;
 } | {
@@ -24,6 +27,9 @@ export type AlertTarget = {
  * Отдельные query-ключи не пересекаются с параметрами страницы «Диф».
  */
 export function alertTargetHash(target: AlertTarget): string {
+  if (target.kind === 'plugin') {
+    return `#/ext/${encodeURIComponent(target.pluginId)}`;
+  }
   if (target.kind === 'studio') {
     return `#/3d?model=${encodeURIComponent(target.modelId)}&version=${encodeURIComponent(target.versionId)}`;
   }
@@ -53,6 +59,7 @@ export function alertTargetLabel(target: AlertTarget, locale: LocaleSource = 'ru
  */
 export function alertTargetMessage(target: AlertTarget): MessageRef {
   const keys = {
+    plugin: 'core.openPluginPanel',
     studio: 'core.openModel',
     chat: 'core.openChat',
     task: 'core.openTask',

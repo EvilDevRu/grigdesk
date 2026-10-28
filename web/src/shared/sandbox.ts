@@ -1,22 +1,27 @@
 // Адреса живых стендов: обычные HTTP-серверы на прямых портах машины.
-// Хост берётся из окна GrigDesk; отдельная настройка адреса не нужна.
+// Профиль задаёт хост явно; без него используется хост окна GrigDesk.
+import { normalizeServiceHost } from '../../../shared/plugins/sandboxes/serviceHost.ts';
 
 /**
- * Стенды и GrigDesk работают на одной машине, поэтому используют один hostname.
- * Без браузерного location ссылки сохраняют прежний fallback localhost.
+ * На локальной машине localhost сохраняет локальную авторизацию приложений.
+ * Удалённый hostname окна остаётся прежним, чтобы ссылка не вела на машину клиента.
  */
 function brainHostname() {
-  return typeof location !== 'undefined' ? location.hostname || 'localhost' : 'localhost';
+  const host = typeof location !== 'undefined' ? location.hostname || 'localhost' : 'localhost';
+
+  return ['127.0.0.1', '[::1]'].includes(host) ? 'localhost' : host;
 }
 
 /**
  * Порт живого стенда открывается отдельной вкладкой по HTTP.
- * Пустой порт означает, что адреса ещё нет; завершающий слеш сохраняется.
+ * Явный хост профиля важнее origin окна; старый сервер может его не передать.
  */
-export function sandboxUrl(port: unknown): string | null {
+export function sandboxUrl(port: unknown, serviceHost?: unknown): string | null {
   if (!port) {
     return null;
   }
 
-  return `http://${brainHostname()}:${port}/`;
+  const host = normalizeServiceHost(serviceHost) ?? brainHostname();
+
+  return `http://${host}:${port}/`;
 }

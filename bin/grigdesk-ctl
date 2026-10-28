@@ -240,6 +240,11 @@ developer_command() {
   build_server() {
     local cache="${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/server-binary"
     local data
+    local -a executor_args=()
+
+    if [[ -n "${GRIGDESK_DEEPSEEK_BIN:-}" ]]; then
+      executor_args=(--deepseek-binary "$GRIGDESK_DEEPSEEK_BIN")
+    fi
 
     data=$(grigdesk_data_home) || return $?
     observed_step server.node node "$DIR/server/scripts/ctlBuild.mts" \
@@ -248,9 +253,11 @@ developer_command() {
       --out-dir "$cache/out" --cache-dir "$cache/cache" || return $?
     observed_step server.install npm --prefix "$DIR/server" run install:binary -- \
       --binary "$cache/out/grigdesk-server" --target "$DIR/bin/grigdesk-server" \
-      --releases-dir "$data/runtimes/server/releases" || return $?
+      --releases-dir "$data/runtimes/server/releases" "${executor_args[@]}" || return $?
 
-    if ! node "$DIR/server/scripts/ctlBuild.mts" check-desktop "$DIR/bin/grigdesk-server"; then
+    if [[ "$build_target" != all ]] \
+      && ! node "$DIR/server/scripts/ctlBuild.mts" check-desktop "$DIR/bin/grigdesk-server"; then
+      desktop_requires_selection=1
       build_event hint select-server
       printf 'Для выбора этого сервера окном: grigdesk-ctl desktop use-server %q\n' \
         "$DIR/bin/grigdesk-server"
@@ -261,7 +268,12 @@ developer_command() {
   # Установка заменяет файл окна, не запуская приложение и не меняя выбор сервера.
   build_window() {
     observed_step window.package npm --prefix "$DIR/desktop" run dist || return $?
-    observed_step window.install "$DIR/deploy/desktop.sh" install || return $?
+
+    if [[ "$build_target" == all ]]; then
+      observed_step window.install "$DIR/deploy/desktop.sh" install --keep-runtime || return $?
+    else
+      observed_step window.install "$DIR/deploy/desktop.sh" install || return $?
+    fi
   }
 
   # События идут отдельным каналом только по запросу родительского контроллера.
@@ -315,6 +327,8 @@ developer_command() {
       prepare_deepseek
       ;;
     build)
+      desktop_requires_selection=0
+
       if [[ "$build_target" == all || "$build_target" == server ]]; then
         build_step server build_server
       fi
@@ -328,6 +342,31 @@ developer_command() {
         build_step window build_window
       fi
 
+      # Полная установка связывает окно с её ELF только после успеха всех компонентов.
+      # Живой сервер продолжает работу: общий selector применит намерение при новом запуске.
+      if [[ "$build_target" == all ]]; then
+        desktop_build_selection=$(build_step window node "$DIR/server/scripts/ctlBuild.mts" \
+          queue-desktop "$DIR/bin/grigdesk-server") || return $?
+
+        case "$desktop_build_selection" in
+          queued)
+            build_event hint queued-server
+            echo 'При следующем запуске окно выберет сервер этой сборки.'
+            ;;
+          foreign)
+            desktop_requires_selection=1
+            build_event hint select-server
+            printf 'Для выбора этого сервера окном: grigdesk-ctl desktop use-server %q\n' \
+              "$DIR/bin/grigdesk-server"
+            ;;
+          current) ;;
+          *)
+            echo 'Не удалось определить привязку окна после полной установки.' >&2
+            return 1
+            ;;
+        esac
+      fi
+
       case "$build_target" in
         all) echo 'Поставлены сервер, веб и окно.' ;;
         server) echo "Поставлен сервер: $DIR/bin/grigdesk-server" ;;
@@ -337,6 +376,8 @@ developer_command() {
 
       if [[ "$build_target" == web ]]; then
         echo 'Окно покажет новый веб после grigdesk-ctl build window.'
+      elif [[ "$desktop_requires_selection" == 1 ]]; then
+        echo 'Окно сохраняет выбор другой установки сервера; новый сервер ещё не выбран.'
       else
         echo 'Закройте окно и откройте снова — запустится новый код.'
       fi

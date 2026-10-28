@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const root = path.resolve(process.argv[2]);
@@ -25,6 +25,38 @@ assert.equal(descriptor.kind, 'binary');
 assert.equal(descriptor.generationDir, null);
 assert.equal(descriptor.metadata.packageId, input.packageId);
 
+let diagnostics = '';
+
+/**
+ * Тест сохраняет ограниченный stderr только своего синтетического процесса.
+ * На отказе стадия и хвост объясняют startup, успешный протокол остаётся чистым.
+ */
+function observedSpawn(...args) {
+  const child = spawn(...args);
+
+  child.stderr?.on('data', (chunk) => {
+    diagnostics = (diagnostics + String(chunk)).slice(-16_384);
+  });
+
+  return child;
+}
+
+/**
+ * Различает запуск DeepSeek и GLM в общей изолированной проверке.
+ * Исходная ошибка и cleanup остаются в cause; URL-токены исключены из диагностики.
+ */
+async function stage(label, operation) {
+  diagnostics = '';
+
+  try {
+    return await operation();
+  } catch (error) {
+    const details = diagnostics.replace(/token=\S+/gu, 'token=<redacted>');
+
+    throw new Error(`${label}: ${error.message}\n${details}`, { cause: error });
+  }
+}
+
 /**
  * Изолированный consumer сохраняет production overlay; только модель указывает на loopback.
  * Все импорты этого процесса разрешены от копии server/shared, не от исходного checkout.
@@ -35,10 +67,14 @@ async function startServer(options) {
   await fs.writeFile(combined, await fs.readFile(options.overlayPath, 'utf8')
     + await fs.readFile(input.deepseekPatch, 'utf8'), { mode: 0o600 });
 
-  return startDeepSeekServer({ ...options, overlayPath: combined });
+  return startDeepSeekServer({
+    ...options,
+    overlayPath: combined,
+    spawnProcess: observedSpawn,
+  });
 }
 
-const first = await deepseek.run({
+const first = await stage('DeepSeek first', () => deepseek.run({
   config,
   cwd: path.join(root, 'project'),
   chatKey: 'boundary-deepseek',
@@ -47,8 +83,8 @@ const first = await deepseek.run({
   message: 'boundary-deepseek-first',
   env: { PATH: process.env.PATH, DEEPSEEK_API_KEY: 'synthetic-loopback-key' },
   startServer,
-});
-const second = await deepseek.run({
+}));
+const second = await stage('DeepSeek resume', () => deepseek.run({
   config,
   cwd: path.join(root, 'project'),
   chatKey: 'boundary-deepseek',
@@ -58,7 +94,7 @@ const second = await deepseek.run({
   sessionId: first.sessionId,
   env: { PATH: process.env.PATH, DEEPSEEK_API_KEY: 'synthetic-loopback-key' },
   startServer,
-});
+}));
 const glm = createGlmAdapter({
   env: {
     PATH: process.env.PATH,
@@ -68,6 +104,7 @@ const glm = createGlmAdapter({
   modelEndpoint: input.glmEndpoint,
   egressGuard: input.egressGuard,
   catalog: [{ id: '["zai","glm-5.3"]', efforts: ['high'] }],
+  spawn: observedSpawn,
 });
 const runGlm = (options = {}) => glm.run({
   config,
@@ -79,8 +116,11 @@ const runGlm = (options = {}) => glm.run({
   onSessionCreated: async () => {},
   ...options,
 });
-const glmFirst = await runGlm();
-const glmSecond = await runGlm({ sessionId: glmFirst.sessionId, message: 'boundary-glm-second' });
+const glmFirst = await stage('GLM first', () => runGlm());
+const glmSecond = await stage('GLM resume', () => runGlm({
+  sessionId: glmFirst.sessionId,
+  message: 'boundary-glm-second',
+}));
 const execute = promisify(execFile);
 const probe = await execute('/bin/bash', ['-c', [
   'source "$FACTORY_HOME/lib/runners/deepseek.sh"',

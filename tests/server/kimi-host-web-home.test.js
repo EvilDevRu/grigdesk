@@ -41,6 +41,60 @@ test('Kimi host web сохраняет сессии и конфигурацию,
   assert.equal(await readFile(path.join(kimiHome, 'config.toml'), 'utf8'), 'default_model = "k3"\n');
 });
 
+for (const scenario of [
+  {
+    name: 'пустой ACP env исключается из записи',
+    env: [],
+    expected: {},
+  },
+  {
+    name: 'ACP env преобразуется в объект',
+    env: [{ name: 'A', value: '1' }],
+    expected: { env: { A: '1' } },
+  },
+  {
+    name: 'env объектом сохраняется',
+    env: { A: '1' },
+    expected: { env: { A: '1' } },
+  },
+  {
+    name: 'пустой env объектом сохраняется',
+    env: {},
+    expected: { env: {} },
+  },
+]) {
+  test(`Kimi host web: ${scenario.name}`, async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'kimi-web-mcp-env-'));
+    const kimiHome = path.join(root, 'user');
+    const userServers = { 'user-tool': { command: '/bin/true', env: { USER_VALUE: 'saved' } } };
+
+    t.after(() => rm(root, { recursive: true, force: true }));
+    await mkdir(kimiHome);
+    await writeFile(path.join(kimiHome, 'mcp.json'), JSON.stringify({ mcpServers: userServers }));
+
+    const overlay = await buildKimiHostWebHome({
+      kimiHome,
+      runtimeHome: path.join(root, 'runtime'),
+      mcpServers: [{
+        name: 'grigdesk-work',
+        command: '/bin/true',
+        env: scenario.env,
+      }],
+    });
+    const merged = JSON.parse(await readFile(path.join(overlay.home, 'mcp.json'), 'utf8'));
+
+    assert.deepEqual(merged.mcpServers['grigdesk-work'], {
+      command: '/bin/true',
+      args: [],
+      ...scenario.expected,
+    });
+    assert.deepEqual(merged.mcpServers['user-tool'], userServers['user-tool']);
+    assert.deepEqual(JSON.parse(await readFile(path.join(kimiHome, 'mcp.json'), 'utf8')), {
+      mcpServers: userServers,
+    });
+  });
+}
+
 test('контролируемый host получает собственный config и сохраняет пользовательские сессии', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'kimi-command-overlay-'));
   const kimiHome = path.join(root, 'user');

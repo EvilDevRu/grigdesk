@@ -4,6 +4,9 @@
 // складывается промежуточный ответ. Токен сервер ждёт не заголовком (браузерный WebSocket
 // их не умеет), а подпротоколом `kimi-code.bearer.<token>`; подписка на сессии — кадром
 // `{type:'subscribe', payload:{session_ids}}`.
+// Контракт: 0.33.0 + heartbeat протокола v2 (2.3.1). На серверный ping отвечаем pong
+// с тем же nonce; служебный heartbeat не попадает к подписчику событий хода.
+
 // Кадр сервера: тип события, номер в потоке, сессия и полезная нагрузка. Форма намеренно
 // открытая — протокол принадлежит серверу, а разбором конкретных типов занимается драйвер.
 export interface KimiRawEvent {
@@ -102,7 +105,21 @@ export function openKimiEventStream({
     }
 
     try {
-      onEvent(JSON.parse(raw) as KimiRawEvent);
+      const frame = JSON.parse(raw) as KimiRawEvent;
+
+      if (frame.type === 'ping') {
+        const nonce = typeof frame.payload?.nonce === 'string' ? frame.payload.nonce : '';
+
+        try {
+          socket.send(JSON.stringify({ type: 'pong', payload: { nonce } }));
+        } catch {
+          // Сокет мог начать закрываться между получением ping и отправкой pong.
+        }
+
+        return;
+      }
+
+      onEvent(frame);
     } catch {
       // Нераспознанный кадр не рвёт поток: сервер может добавить служебные сообщения.
     }

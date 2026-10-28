@@ -1,4 +1,9 @@
 {
+  "windowMinimize": "Свернуть окно",
+  "windowMaximize": "Развернуть окно",
+  "windowRestore": "Восстановить размер окна",
+  "windowClose": "Закрыть приложение",
+  "windowActionFailed": "Не удалось выполнить действие с окном.",
   "checkingServer": "Проверка сервера…",
   "startingServer": "Запуск сервера…",
   "waitingVpn": "Ожидание VPN…",
@@ -98,7 +103,7 @@
   "exitStoppingHint": "Сохраняем чаты и останавливаем конвейеры. Окно закроется после остановки.",
   "exitChats": "Чаты",
   "exitPipelines": "Конвейеры",
-  "exitRemember": "Запомнить",
+  "exitRemember": "Больше не спрашивать",
   "exitConfirm": "Выйти",
   "exitCancel": "Отмена",
   "exitChatFallback": "Чат {id}",

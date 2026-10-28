@@ -139,7 +139,7 @@
           </UiSelect>
         </div>
         <!-- Режим прав: как агент поступает с действиями (спрашивать / сам / только план) -->
-        <div v-if="modes.length" class="sel mode">
+        <div v-if="modes.length || modeUnavailable" class="sel mode">
           <span class="lbl">режим</span>
           <UiSelect
             compact
@@ -150,6 +150,9 @@
             @change="chat.setMode(sid, ($event.target as HTMLSelectElement).value)"
           >
             <option v-for="m in modes" :key="m.id" :value="m.id" :title="m.hint">{{ m.label }}</option>
+            <option v-if="!modeState.available" :value="currentMode" disabled>
+              {{ currentMode }} · {{ t('core.chatModeUnavailable') }}
+            </option>
           </UiSelect>
         </div>
         <EffortSlider v-if="effortLevels.length" :model-value="effortValue" :levels="effortLevels"
@@ -429,8 +432,20 @@
         <!-- Чипы ещё не отправленных вложений -->
         <div v-if="pending.length || attachBusy" class="pend">
           <div v-for="(a, i) in pending" :key="a.file" class="chip">
-            <img v-if="isImg(a)" :src="api.url(a.url || '')" alt="" />
-            <span class="nm">{{ a.name }}</span>
+            <UiButton
+              v-if="isImg(a)"
+              variant="text"
+              size="compact"
+              data-context="chat-pending-preview"
+              v-tooltip="a.name"
+              @click="onAttachmentClick($event, a)"
+            >
+              <template #leading>
+                <img :src="api.url(a.url || '')" :alt="a.name" aria-hidden="true" />
+              </template>
+              <span class="nm">{{ a.name }}</span>
+            </UiButton>
+            <span v-else class="nm">{{ a.name }}</span>
             <UiIconButton
               class="x"
               role="stepper"
@@ -620,13 +635,13 @@
             role="peer"
             variant="solid"
             tone="accent"
-            :disabled="frozen || speechBusy || (!input.trim() && !pending.length)"
-            :label="speechBusy ? 'Сначала заверши диктовку'
+            :disabled="frozen || speechBusy || modeUnavailable || (!input.trim() && !pending.length)"
+            :label="modeUnavailable ? t('core.chatModeUnavailable') : speechBusy ? 'Сначала заверши диктовку'
               : frozen ? frozenHint
               : sess.sending ? (inTurnComposer.ready
                 ? 'Уточнить сейчас (Enter)' : 'Отправить после текущего хода (Enter)')
               : 'Отправить (Enter)'"
-            v-tooltip="speechBusy ? 'Сначала заверши диктовку'
+            v-tooltip="modeUnavailable ? t('core.chatModeUnavailable') : speechBusy ? 'Сначала заверши диктовку'
               : frozen ? frozenHint
               : sess.sending ? (inTurnComposer.ready
                 ? 'Уточнить сейчас (Enter)' : 'Отправить после текущего хода (Enter)')
@@ -651,6 +666,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api } from '../../shared/apiClient.ts';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { decodeChatAttachment } from '../../shared/chatContracts.ts';
+import { resolvePermissionMode } from '../../shared/chatPermissionMode.ts';
 import { decodePipelineTasks } from '../../shared/pipelineContracts.ts';
 import type {
   ChatAttachment, HistoryAttachment, ChatMessage, ContextCache,
@@ -673,6 +689,7 @@ import ChatStatusBar from './ChatStatusBar.vue';
 import { messageDeliveryMark } from './messageDeliveryMark.ts';
 import { chatStatus } from './chatStatus.ts';
 import { providerUsageSummary } from '../../features/providers/providerUsageSummary.ts';
+import { providerUsageFreshness } from '../../../../shared/chat/providerUsageFreshness.ts';
 import ChatQuestion from './ChatQuestion.vue';
 import ChatPermission from './ChatPermission.vue';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
@@ -762,8 +779,8 @@ function isPlainClick(event: MouseEvent) {
 }
 
 /**
- * Картинка-вложение открывается в просмотре вместе с соседними картинками ленты.
- * Остальные вложения и клики с модификаторами остаются обычной ссылкой браузера.
+ * Картинка-вложение открывается с соседними картинками ленты или черновика.
+ * Клики по файлам и клики с модификаторами сохраняют поведение исходного элемента.
  */
 function onAttachmentClick(event: MouseEvent, attachment: HistoryAttachment) {
   if (!isImg(attachment) || !isPlainClick(event)) {
@@ -779,13 +796,14 @@ function onAttachmentClick(event: MouseEvent, attachment: HistoryAttachment) {
 }
 
 /**
- * Картинки той же ленты в порядке показа — вложения, картинки ответов и шагов — для
- * стрелок просмотра. Лента ищется от нажатого элемента, поэтому соседний чат не смешивается.
+ * Собирает картинки в порядке показа для стрелок просмотра внутри ленты или черновика.
+ * Область ищется от нажатого элемента: неотправленные вложения не смешиваются с историей.
  */
 function feedImages(target: Element) {
-  const feed = target.closest('.conversation-group')?.parentElement;
+  const feed = target.closest('.pend') || target.closest('.conversation-group')?.parentElement;
+  const images = feed?.querySelectorAll<HTMLImageElement>('.conversation-group img, .pend img');
 
-  return feed ? [...feed.querySelectorAll<HTMLImageElement>('.conversation-group img')].map((item) => ({
+  return images ? [...images].map((item) => ({
     src: item.currentSrc || item.getAttribute('src') || '',
     name: item.getAttribute('alt') || item.getAttribute('title') || '',
   })) : [];
@@ -907,6 +925,12 @@ function scheduleUsageReset() {
   const future = statusUsage.value.windows
     .map((item) => item.resetsAt ? Date.parse(item.resetsAt) : NaN)
     .filter((at) => Number.isFinite(at) && at > usageNow.value);
+  const freshness = providerUsageFreshness(prov.usage?.[status.value.providerId], usageNow.value);
+
+  if (freshness.enabled && freshness.expiresAt !== null && freshness.expiresAt >= usageNow.value) {
+    future.push(freshness.expiresAt + 1);
+  }
+
   const nearest = Math.min(...future);
 
   if (Number.isFinite(nearest)) {
@@ -981,18 +1005,23 @@ const effortLevels = computed(() => currentModel.value?.efforts || []);
 // Режимы прав исполнителя (список даёт его CLI). Пока чат не выбрал свой — показываем
 // «вручную»: именно так работает чат по умолчанию (спрашивает разрешение на действия).
 const modes = computed(() => prov.modesOf(sess.value?.modelRef || sess.value?.model));
-const currentMode = computed(() => {
-  const want = sess.value?.mode;
-  const list = modes.value;
-
-  if (want && list.some((m) => m.id === want)) {
-    return want;
-  }
-
-  return list.some((m) => m.id === 'manual') ? 'manual' : (list[0]?.id || '');
-});
+const modeState = computed(() => resolvePermissionMode(sess.value?.mode, modes.value,
+  prov.modelOf(sess.value?.modelRef || sess.value?.model).provider
+    || { permissionModeSelectionPolicy: 'preserve-explicit' },
+  sess.value?.modeSelection, sess.value?.id));
+const currentMode = computed(() => modeState.value.mode);
+const modeUnavailable = computed(() => !modeState.value.available
+  && prov.modelOf(sess.value?.modelRef || sess.value?.model).provider
+    ?.permissionModeSelectionPolicy === 'preserve-explicit');
+const activeModeLabel = computed(() => (
+  modes.value.find((mode) => mode.id === runtime.value?.snapshot?.permissionMode)?.label
+    || runtime.value?.snapshot?.permissionMode || '…'
+));
 const modeHint = computed(() => (
-  modes.value.find((m) => m.id === currentMode.value)?.hint || 'Режим прав агента'
+  !modeState.value.available ? t('core.chatModeUnavailable')
+    : `${modes.value.find((m) => m.id === currentMode.value)?.hint || 'Режим прав агента'}${
+      sess.value?.sending ? ` ${t('core.chatModeCurrent', { mode: activeModeLabel.value })} ${
+        t('core.chatModeNextTurn')}` : ''}`
 ));
 // Codex сообщает эффективное окно только в token usage конкретной сессии (например,
 // 272k × 95% = 258.4k). Каталог его не обещает; 200k ниже — только внутренний fallback,
@@ -1882,7 +1911,7 @@ async function submit() {
   const t = input.value.trim();
   const atts = pending.value.slice();
 
-  if ((!t && !atts.length) || !sess.value || frozen.value) {
+  if ((!t && !atts.length) || !sess.value || frozen.value || modeUnavailable.value) {
     return;
   }
 
@@ -2851,7 +2880,15 @@ function skipQuestion() {
 .pend { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .chip { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }
 .chip img { width: 30px; height: 30px; object-fit: cover; border-radius: 5px; }
-.chip .nm { font-size: 11.5px; color: var(--ink-mid); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip .nm {
+  display: inline-block;
+  font-size: 11.5px;
+  color: var(--ink-mid);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .in-err { margin-top: 6px; font-size: 12px; color: var(--bad); }
 .speech-interim, .speech-note { font-size: 12px; color: var(--ink-mid); }
 .speech-interim { margin-bottom: 6px; font-style: italic; }

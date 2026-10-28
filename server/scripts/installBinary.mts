@@ -10,7 +10,7 @@ import { installBinary, type InstallOptions } from './binary/installSteps.mts';
  */
 function parseArguments(args: string[]): InstallOptions {
   const flags = new Map<string, string>();
-  const allowed = ['--binary', '--target', '--releases-dir'];
+  const allowed = ['--binary', '--target', '--releases-dir', '--deepseek-binary'];
 
   for (let index = 0; index < args.length; index += 2) {
     const name = args[index]!;
@@ -33,6 +33,7 @@ function parseArguments(args: string[]): InstallOptions {
     releasesDir: flags.get('--releases-dir') ?? path.join(
       dataPath(dataHome({ env: process.env, home: os.homedir() }), 'serverRuntime'), 'releases',
     ),
+    ...(flags.has('--deepseek-binary') ? { deepseekBinary: flags.get('--deepseek-binary')! } : {}),
   };
 }
 
@@ -47,7 +48,7 @@ async function main(): Promise<void> {
     options = parseArguments(process.argv.slice(2));
   } catch {
     process.stderr.write('Использование: install:binary -- --binary <ELF> --target <путь> '
-      + '[--releases-dir <каталог>]\n');
+      + '[--releases-dir <каталог>] [--deepseek-binary <ELF>]\n');
     process.exitCode = 2;
 
     return;

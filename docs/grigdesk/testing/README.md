@@ -1,14 +1,22 @@
 # Тесты и проверка
 
+- [Native-пробы режимов Codex: loopback, маркеры и граница вложенной песочницы](codex-permission-mode-fixtures.md)
+
+- [Изолированный Codex: необязательный вопрос при точном наборе host tools](codex-untrusted-optional-question.md)
+
 - [Гейты DeepSeek: unit, SEA, source candidate и host parity](deepseek-test-gates.md)
 
 Веб-тесты на happy-dom, Playwright и ловушки, из-за которых тест врёт.
+
+- [Подтверждение установки: прежняя всплывашка тоже имеет role=dialog](provider-confirmation-target.md)
 
 Читай перед правкой: `tests`.
 
 - [Проверки единого приложения и границы автоматической приёмки](unified-client-checks.md)
 
 ## Грабли
+
+- [Вложенный node_modules в снимке Harness: одна причина vendor/buildInputs и отказа общего preflight](deepseek-vendor-node-modules.md)
 
 - [Автоподготовка legacy fixture DeepSeek: отдельный ABI-кэш, lock и восстановление](deepseek-legacy-preflight.md)
 
@@ -17,6 +25,7 @@
 - [Таймаут reload в Vite-фикстуре не доказывает сбой восстановления операции](browser-navigation-timeout.md)
 
 - [Типы тестов установки: реестр без UI и общие расширения Fastify](provider-install-type-boundaries.md)
+- [Изолированные HTTP-фикстуры чата: типы multipart и WebSocket без импорта приложения](http-fixture-fastify-types.md)
 
 - [Source-фикстуры с установленным ELF и trusted файлы legacy /gate](source-runtime-fixtures.md)
 - [Подготовленные dependencies source-проверок GLM и SEA без legacy prefix](source-runtime-dependencies.md)

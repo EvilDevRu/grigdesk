@@ -38,3 +38,24 @@ test('Арбитр: потерянная модель, opaque model id и effort
   assert.equal(h.control.data.prefs.arbiter.effort, '');
   assert.deepEqual(h.control.data.prefs.arbiter.modelRef, { provider: 'fixture', model: 'no-effort' });
 });
+
+test('сохранённый auto=true остаётся включённым; RU/EN явно объясняют новый выбор исправления', async (t) => {
+  const h = await settingsHarness(t, 'automation.arbiter', 'PreferencesPage', {
+    prepare({ control }) {
+      control.data.prefs.arbiter.auto = true;
+    },
+  });
+
+  assert.equal(h.wrapper.get('[role="switch"]').attributes('aria-checked'), 'true');
+  assert.match(h.wrapper.text(), /После обновления он больше не продолжает конвейер автоматически/);
+  h.module.setUiLocale('en');
+  await h.flushPromises();
+
+  try {
+    assert.match(h.wrapper.text(), /you choose the correction/);
+    assert.equal(h.control.data.prefs.arbiter.auto, true);
+    assert.equal(h.writes().length, 0);
+  } finally {
+    h.module.setUiLocale('ru');
+  }
+});

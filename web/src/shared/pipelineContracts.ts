@@ -4,11 +4,13 @@ import { isRecord } from '../../../shared/lib/objects.ts';
 import type { StallPresentation } from '../../../shared/pipeline/stallPresentation.ts';
 import type { AgentSilence } from '../../../shared/pipeline/agentActivity.ts';
 import type { PipelineGraph } from '../../../shared/pipeline/pipelineWait.ts';
+import type { ArbiterConversationSummary } from '../../../shared/pipeline/arbiterConversation.ts';
 
 const t = localeTranslator(uiLocalePort);
 
 export interface PipelineTask extends Record<string, unknown> {
   task: string | number;
+  source?: 'grigdesk';
   title?: string;
   profile?: string;
   route?: string;
@@ -34,6 +36,7 @@ export interface PipelineTask extends Record<string, unknown> {
     comment?: string | null;
     arbitrable?: boolean;
     arbiter?: ArbiterCard | null;
+    conversation?: ArbiterConversationSummary | null;
   } | null;
 }
 
@@ -78,6 +81,7 @@ export interface TaskObservation {
  */
 function isPipelineTask(value: unknown): value is PipelineTask {
   return isRecord(value) && ['string', 'number'].includes(typeof value.task)
+    && (value.source == null || value.source === 'grigdesk')
     && (value.title == null || typeof value.title === 'string')
     && (value.daemonAlive == null || typeof value.daemonAlive === 'boolean')
     && (value.attempt == null || ['string', 'number'].includes(typeof value.attempt))
@@ -212,12 +216,14 @@ export interface PipelineViewGraphSource extends LiveGraph {
   nodeMeta?: Record<string, NodeMetadata>;
   nodeOrigins?: Record<string, import('../../../shared/pipeline/factoryGraphContracts.ts').GraphNodeOrigin>;
   arbiterLog?: ArbiterCard[];
+  arbiterConversations?: ArbiterConversationSummary[];
   daemonAlive?: boolean;
   readOnly?: boolean;
   halted?: string | null;
   runnerPolicy?: import('./runnerDisplay.ts').RunnerState;
   fePort?: number | null;
   apiPort?: number | null;
+  serviceHost?: string | null;
   sandbox?: {
     step: number;
     total: number;

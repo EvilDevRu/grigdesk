@@ -13,10 +13,11 @@ import {
 } from './helpers/buildFixture.mts';
 
 const totalTime = /(?:Общее время|Всего|Total (?:time|elapsed))\s*:/iu;
+const openQuestion = /Открыть окно GrigDesk\?|Open the GrigDesk window\?/u;
 
 /**
- * Меню сохраняет успешный итог до клавиши, затем возвращает выбор команд.
- * Явная сборка проверяется отдельно и никогда не получает завершающий Enter.
+ * Меню сохраняет успешный итог вместе с предложением открыть окно до выбора человека.
+ * Esc отклоняет запуск и возвращает подменю, у bundle сохраняется обычный экран результата.
  */
 async function leaveSuccessfulMenu(session: ReturnType<typeof launchBuild>) {
   await session.wait(totalTime, 10000);
@@ -54,6 +55,13 @@ for (const target of ['all', 'server', 'web', 'window', 'bundle']) {
       assert.match(output, locale.startsWith('ru') ? /Журнал/u : /Log/u);
       assert.match(output, locale.startsWith('ru') ? /Сборка/u : /Build/iu);
 
+      if (target !== 'bundle') {
+        assert.match(output, locale.startsWith('ru')
+          ? /Открыть окно GrigDesk\?/u : /Open the GrigDesk window\?/u);
+      } else {
+        assert.doesNotMatch(output, openQuestion);
+      }
+
       const log = await buildLog(box);
 
       if (target === 'bundle') {
@@ -69,12 +77,20 @@ for (const target of ['all', 'server', 'web', 'window', 'bundle']) {
 
         if (target === 'all' || target === 'server') {
           assert.match(log.text, /inner-elf-line/u);
-          assert.match(output, /grigdesk-ctl desktop use-server/u);
+
+          if (target === 'server') {
+            assert.match(output, /grigdesk-ctl desktop use-server/u);
+          } else {
+            assert.match(output, locale.startsWith('ru') ? /следующем запуске/u : /next launch/u);
+            assert.doesNotMatch(output, /grigdesk-ctl desktop use-server/u);
+          }
         }
 
         if (target === 'web') {
           assert.match(output, /grigdesk-ctl build window/u);
           assert.doesNotMatch(output, /Закройте окно|Close the window/iu);
+        } else if (target === 'server') {
+          assert.match(output, locale.startsWith('ru') ? /новый сервер ещё не выбран/u : /not selected yet/u);
         } else {
           assert.match(output, locale.startsWith('ru') ? /Закройте окно/iu : /Close.*window/iu);
         }
@@ -151,7 +167,7 @@ for (const [command, argument, code] of [
 }
 
 for (const failure of [false, true]) {
-  test(`BS-DIRECT/BS-DIRECT-EXIT: явный build сам выходит без ввода, отказ=${failure}`, async (t) => {
+  test(`BS-DIRECT: явный build предлагает открыть окно только после успеха, отказ=${failure}`, async (t) => {
     const box = await terminalBuildFixture(t);
 
     if (failure) {
@@ -159,9 +175,16 @@ for (const failure of [false, true]) {
     }
 
     const session = launchBuild(t, box, 'web');
+
+    if (!failure) {
+      await session.wait(openQuestion, 10000);
+      assert.equal(session.finished(), false);
+      session.write('\r');
+    }
+
     const result = await session.done;
 
-    assert.equal(result.timedOut, false, 'Явная сборка ждёт Enter после завершения');
+    assert.equal(result.timedOut, false, 'CLI не завершился после выбора');
     assert.equal(result.code, failure ? 23 : 0);
     assert.match(session.output(), /Журнал/u, 'TTY build должен использовать экран прогресса');
     assert.match(session.output(), failure ? /✗/u : /100%/u);
@@ -169,10 +192,91 @@ for (const failure of [false, true]) {
     if (!failure) {
       assert.match(session.output(), /grigdesk-ctl build window/u);
       assert.match(session.output(), totalTime);
+      assert.doesNotMatch(await readFile(path.join(box.env.HOME, 'menu-calls'), 'utf8')
+        .catch(() => ''), /fixture-open/u, 'Enter по умолчанию не открывает окно');
+    } else {
+      assert.doesNotMatch(session.output(), openQuestion);
     }
 
     assertRestored(result, session.output());
     await buildLog(box);
+  });
+}
+
+for (const menu of [false, true]) {
+  test(`BS-OPEN: подтверждение после сборки открывает окно ровно один раз, меню=${menu}`, async (t) => {
+    const box = await terminalBuildFixture(t);
+    const session = launchBuild(t, box, 'window', menu);
+
+    if (menu) {
+      await chooseBuild(session, 'window');
+    }
+
+    await session.wait(openQuestion, 10000);
+    session.write('\x1b[A\r');
+
+    if (menu) {
+      await session.wait(/Переносимый комплект/u, 4000, session.output().length);
+      await exitMenus(session);
+    }
+
+    const result = await session.done;
+    const file = path.join(box.env.HOME, 'menu-calls');
+    const deadline = Date.now() + 2000;
+    let calls = '';
+
+    while (!calls.includes('fixture-open') && Date.now() < deadline) {
+      calls = await readFile(file, 'utf8').catch(() => '');
+      await pause(20);
+    }
+
+    assert.equal(result.code, 0, session.output());
+    assert.equal(calls.match(/fixture-open/gu)?.length, 1, calls);
+    assertRestored(result, session.output());
+  });
+}
+
+test('BS-OPEN: отказ штатного открытия сохраняет его код и успешный журнал сборки', async (t) => {
+  const box = await terminalBuildFixture(t);
+  const session = launchBuild(t, box, 'web', false, {
+    env: {
+      ...box.env,
+      DISPLAY: '',
+      WAYLAND_DISPLAY: '',
+    },
+  });
+
+  await session.wait(openQuestion, 10000);
+  session.write('Д');
+
+  const result = await session.done;
+
+  assert.equal(result.code, 1, session.output());
+  assert.match(session.output(), /Нет графического сеанса/u);
+  assert.match(session.output(), /100%/u);
+  assertRestored(result, session.output());
+  await buildLog(box);
+});
+
+for (const [key, code] of [['\x1b', 0], ['н', 0], ['\x03', 130], ['SIGTERM', 143]] as const) {
+  test(`BS-OPEN: отказ или прерывание предложения не открывает окно, код=${code}`, async (t) => {
+    const box = await terminalBuildFixture(t);
+    const session = launchBuild(t, box, 'web');
+
+    await session.wait(openQuestion, 10000);
+
+    if (key === 'SIGTERM') {
+      session.signal(key);
+    } else {
+      session.write(key);
+    }
+
+    const result = await session.done;
+    const calls = await readFile(path.join(box.env.HOME, 'menu-calls'), 'utf8').catch(() => '');
+
+    assert.equal(result.code, code, session.output());
+    assert.doesNotMatch(calls, /fixture-open/u);
+    assertRestored(result, session.output());
   });
 }
 
@@ -407,6 +511,10 @@ test('BS-SUMMARY: свой descriptor v4 не порождает подсказ�
   await writeFile(file, descriptor);
 
   const session = launchBuild(t, box, 'server');
+
+  await session.wait(openQuestion, 10000);
+  session.write('n');
+
   const result = await session.done;
 
   assert.equal(result.code, 0, session.output());

@@ -13,7 +13,8 @@
       <header class="mhead" :class="{ 'mhead-window': presentation === 'document' }">
         <div class="mheading">
           <div class="midentity">
-            <span class="meyebrow">Задача Битрикс24</span>
+            <span class="meyebrow">{{ ownTask ? t('core.grigdeskTaskLabel')
+              : isB24Task ? 'Задача Битрикс24' : t('core.grigdeskGenericTask') }}</span>
             <span class="mid mono">#{{ taskId }}</span>
           </div>
           <h3 id="task-modal-title" class="mtitle" tabindex="-1">
@@ -21,7 +22,7 @@
           </h3>
         </div>
         <div class="mhead-actions" role="group" aria-label="Действия с карточкой">
-          <TaskFavoriteButton :active="favorites.isFavorite(taskId)"
+          <TaskFavoriteButton v-if="isB24Task" :active="favorites.isFavorite(taskId)"
                               :pending="!favorites.loaded || favorites.loading || favorites.isPending(taskId)"
                               :task-title="detail?.title || boardTask?.title || `Задача #${taskId}`"
                               @toggle="toggleFavorite" />
@@ -47,10 +48,10 @@
         </div>
       </header>
 
-      <div v-if="err || favorites.error || shelf.error" class="malerts" aria-live="polite">
+      <div v-if="err || (isB24Task && (favorites.error || shelf.error))" class="malerts" aria-live="polite">
         <p v-if="err" class="err">{{ err }}</p>
-        <p v-if="favorites.error" class="err">Избранное: {{ favorites.error }}</p>
-        <p v-if="shelf.error" class="err">Полка: {{ shelf.error }}</p>
+        <p v-if="isB24Task && favorites.error" class="err">Избранное: {{ favorites.error }}</p>
+        <p v-if="isB24Task && shelf.error" class="err">Полка: {{ shelf.error }}</p>
       </div>
 
       <div class="mcontext" aria-label="Состояние задачи">
@@ -82,7 +83,7 @@
               <h4 id="task-brief-title" class="pane-title">Описание задачи</h4>
             </div>
             <UiButton
-              v-if="detail && !editForm"
+              v-if="isB24Task && detail && !editForm"
               data-role="task-edit-open"
               v-tooltip="'Редактировать задачу'"
               :disabled="loading || busy === 'edit'"
@@ -246,7 +247,8 @@
                 </div>
               </section>
               <div v-if="!cleanDesc && !tgLinks.length" class="brief-empty">
-                Постановка пока не загружена или в задаче нет описания.
+                {{ ownTask ? t('core.grigdeskEmptyDescription')
+                  : 'Постановка пока не загружена или в задаче нет описания.' }}
               </div>
             </template>
           </div>
@@ -268,6 +270,7 @@
                 Оценка
               </UiTab>
               <UiTab
+                v-if="isB24Task"
                 id="task-tab-comments"
                 data-context="task-modal-tab"
                 value="comments"
@@ -303,6 +306,7 @@
             <UiButton
               data-role="task-compact-action"
               tone="accent"
+              :disabled="!canAnalyzeTask"
               @click="analyzeNow"
             >
               {{ triage?.analysis ? 'Переоценить' : 'Оценить задачу' }}
@@ -612,6 +616,7 @@
 
         <!-- Комментарии задачи (таб): список из B24 + добавление -->
         <div
+          v-if="isB24Task"
           v-show="mtab === 'comments'"
           id="task-panel-comments"
           class="comtab"
@@ -658,7 +663,7 @@
 
       <!-- Управление -->
       <footer class="controls" aria-label="Действия с задачей">
-          <div class="timer-group" role="group" aria-label="Учёт времени">
+          <div v-if="isB24Task" class="timer-group" role="group" aria-label="Учёт времени">
             <div class="timer" :class="{ run: running }">
               <span class="tclock mono">{{ elapsed !== null ? secToHMS(elapsed) : '—' }}</span>
               <span class="tstate">{{ running ? 'Идёт учёт' : 'Учёт остановлен' }}</span>
@@ -701,7 +706,7 @@
               tone="accent"
               variant="outline"
               :loading="busy === 'launch' || launchOptionsBusy"
-              :disabled="busy === 'launch' || launchOptionsBusy || !!launchForm"
+              :disabled="!detail || loading || busy === 'launch' || launchOptionsBusy || !!launchForm"
               loading-label="Читаю параметры запуска"
               v-tooltip="launchOpenHint"
               @click="openLaunch"
@@ -709,7 +714,7 @@
               🏭 На конвейер
             </UiButton>
             <UiButton
-              v-if="completed"
+              v-if="isB24Task && completed"
               data-context="task-footer-action"
               tone="success"
               variant="solid"
@@ -721,7 +726,7 @@
               ↺ Возобновить
             </UiButton>
             <UiButton
-              v-else
+              v-else-if="isB24Task"
               data-context="task-footer-action"
               tone="success"
               variant="solid"
@@ -732,12 +737,12 @@
             >
               ✓ Завершить
             </UiButton>
-            <UiPopover placement="top-end" aria-label="Другие действия с задачей">
+            <UiPopover v-if="isB24Task || sandbox" placement="top-end" aria-label="Другие действия с задачей">
               <template #trigger><UiButton>Ещё</UiButton></template>
               <template #default="{ close }">
                 <div class="ui-action-menu">
             <UiButton
-              v-if="shelfEnabled"
+              v-if="isB24Task && shelfEnabled"
               data-context="task-footer-action"
               data-role="task-shelf-toggle"
               tone="neutral"
@@ -994,6 +999,7 @@ import {
   UiPopover,
   UiChoiceList,
   UiDisclosureButton,
+  t,
   UiField,
   UiFilePicker,
   UiFormActions,
@@ -1053,7 +1059,15 @@ const seen = useTaskSeenStore();
 const { taskId } = storeToRefs(ui);
 
 const detail = ref<TaskDetail | null>(null);
+const ownTask = computed(() => detail.value?.source === 'grigdesk');
+// Как и в tasks.load, номер вне собственного диапазона сразу подтверждает источник Б24.
+// Внутри диапазона до ответа карточки портальные действия и личные эффекты скрыты.
+const isB24Task = computed(() => detail.value !== null
+  ? !ownTask.value
+  : Boolean(taskId.value) && !/^[1-9]\d{11}$/u.test(String(taskId.value)));
+let detailRequest = 0;
 const loading = ref(false);
+const canAnalyzeTask = computed(() => isB24Task.value || (ownTask.value && !loading.value));
 const busy = ref<string | null>(null);   // какое действие выполняется
 const err = ref<string | null>(null);
 const commentText = ref('');
@@ -1065,7 +1079,7 @@ let ticker: ReturnType<typeof setInterval> | null = null;
 const boardTask = computed(() => {
   const d = board.data;
 
-  if (!d || !taskId.value) {
+  if (!d || !taskId.value || ownTask.value) {
     return null;
   }
 
@@ -1094,7 +1108,9 @@ const completed = computed(() => detail.value?.status === COMPLETED_STATUS);
 const timerStartBlocked = computed(() => completed.value && !running.value);
 const elapsed = computed(() => (boardTask.value ? liveTimerSec(boardTask.value, now.value) : null));
 const shelfEnabled = computed(() => plugins.enabled('shelf'));
-const taskProject = computed(() => detail.value?.group_name || boardTask.value?.group || '');
+const taskProject = computed(() => ownTask.value
+  ? detail.value?.projectTitle || ''
+  : detail.value?.group_name || boardTask.value?.group || '');
 const taskResponsible = computed(() => detail.value?.responsible?.name || boardTask.value?.responsible || '');
 
 // B24 отдаёт описание с HTML/entities — чистим до читаемого текста.
@@ -1109,7 +1125,9 @@ function htmlToText(s: string | null | undefined) {
     .replace(/\n{3,}/g, '\n\n').trim();
 }
 
-const cleanDesc = computed(() => htmlToText(detail.value?.description));
+const cleanDesc = computed(() => ownTask.value
+  ? detail.value?.description || ''
+  : htmlToText(detail.value?.description));
 
 // Описание — текстом, но URL в нём должны жить: экранируем и оборачиваем ссылки.
 function linkify(s: string) {
@@ -1373,15 +1391,36 @@ async function loadDetail(force = false) {
     return;
   }
 
+  const id = taskId.value;
+  const request = ++detailRequest;
+
   loading.value = true;
   err.value = null;
 
   try {
-    detail.value = await tasks.load(taskId.value!, force);
+    const loaded = await tasks.load(id, force);
+
+    if (request !== detailRequest || taskId.value !== id) {
+      return;
+    }
+
+    detail.value = loaded;
+
+    if (isB24Task.value) {
+      favorites.load(true);
+      acknowledgeShelfOnOpen(id);
+      // Личные отметки принадлежат только подтверждённой карточке Б24.
+      // До определения источника запросы account-scoped служб запрещены.
+      seen.markSeen([id]);
+    }
   } catch (e) {
-    err.value = failureText(e);
+    if (request === detailRequest && taskId.value === id) {
+      err.value = failureText(e);
+    }
   } finally {
-    loading.value = false;
+    if (request === detailRequest) {
+      loading.value = false;
+    }
   }
 }
 
@@ -1638,11 +1677,11 @@ async function loadTriage() {
 }
 
 const analyzeNow = () => act('analyze', async () => {
-  if (!analysisEnabled.value) {
+  if (!analysisEnabled.value || !canAnalyzeTask.value) {
     return;
   }
 
-  await analyzeTask(taskId.value!);
+  await analyzeTask(taskId.value!, ownTask.value ? { source: 'grigdesk' } : undefined);
   await loadTriage();
 });
 
@@ -1754,7 +1793,7 @@ const sendClarify = () => act('clarify', async () => {
   clarifyEntries.value = r.entries || clarifyEntries.value;
   clarifyDrafts.value = {};
   syncClarifyDrafts();
-  await analyzeTask(taskId.value!);
+  await analyzeTask(taskId.value!, ownTask.value ? { source: 'grigdesk' } : undefined);
   await loadTriage();
 });
 
@@ -1804,24 +1843,41 @@ async function startClarifyDictation(questionId: string) {
 const mtab = ref('triage');
 const comments = ref<TaskComment[] | null>(null);    // null = ещё не загружали
 const comLoading = ref(false);
+let commentsRequest = 0;
+
 /**
  * Список комментариев проверяется до публикации в шаблоне карточки.
  * Ошибка формы использует прежнее пустое состояние и снимает индикатор загрузки.
  */
 async function loadComments() {
+  if (!isB24Task.value) {
+    return;
+  }
+
+  const id = taskId.value;
+  const request = ++commentsRequest;
+
   comLoading.value = true;
 
   try {
-    comments.value = decodeTaskComments(await api.get(`/api/b24/task/${taskId.value}/comments`));
+    const result = decodeTaskComments(await api.get(`/api/b24/task/${id}/comments`));
+
+    if (taskId.value === id && request === commentsRequest && isB24Task.value) {
+      comments.value = result;
+    }
   } catch {
-    comments.value = [];
+    if (taskId.value === id && request === commentsRequest) {
+      comments.value = [];
+    }
   } finally {
-    comLoading.value = false;
+    if (taskId.value === id && request === commentsRequest) {
+      comLoading.value = false;
+    }
   }
 }
 
 watch(mtab, (t) => {
-  if (t === 'comments' && comments.value === null) {
+  if (isB24Task.value && t === 'comments' && comments.value === null) {
     loadComments();
   }
 });
@@ -2027,13 +2083,13 @@ async function refreshLaunchOptions() {
 
   const requestId = ++launchOptionsRequest;
   const id = taskId.value;
-  const profile = launchForm.value?.profile;
+  const profile = launchForm.value?.profile || (ownTask.value ? detail.value?.projectId : undefined);
 
   launchOptionsBusy.value = true;
   launchOptionsFailed.value = true;
 
   try {
-    let opts = await tasks.launchOptions(id);
+    let opts = await tasks.launchOptions(id, ownTask.value ? profile : undefined);
 
     if (requestId !== launchOptionsRequest) {
       return;
@@ -2131,6 +2187,9 @@ function makeLaunchForm(opts: TaskLaunchOptions, criteria: string | null = null)
  * Поколение запроса защищает её от ответа предыдущей карточки.
  */
 async function openLaunch() {
+  if (!taskId.value || !detail.value || loading.value) {
+    return;
+  }
 
   if (conveyor.value) {
     launchMsg.value = 'Уже на конвейере';
@@ -2151,7 +2210,7 @@ async function openLaunch() {
   launchOptionsBusy.value = true;
 
   try {
-    opts = await tasks.launchOptions(taskId.value!);
+    opts = await tasks.launchOptions(taskId.value!, ownTask.value ? detail.value?.projectId : undefined);
   } catch (e) {
     if (requestId === launchOptionsRequest) {
       err.value = `Не удалось узнать параметры запуска: ${failureText(e)}`;
@@ -2432,9 +2491,14 @@ const sendComment = () => act('comment', async () => {
   commentText.value = '';
   loadComments();
 });
-const refresh = () => {
-  loadDetail(true);
-  board.load(true);
+const refresh = async () => {
+  const id = taskId.value;
+
+  await loadDetail(true);
+
+  if (taskId.value === id && isB24Task.value) {
+    board.load(true);
+  }
 };
 const toggleFavorite = () => favorites.toggle(taskId.value!);
 const toggleShelf = () => shelf.toggle(taskId.value!);
@@ -2446,7 +2510,7 @@ let acknowledgedShelfTask = '';
 function acknowledgeShelfOnOpen(id = taskId.value!) {
   const key = String(id || '');
 
-  if (!key || !shelfEnabled.value || !shelf.loaded || !shelf.isOnShelf(key)
+  if (!isB24Task.value || !key || !shelfEnabled.value || !shelf.loaded || !shelf.isOnShelf(key)
     || acknowledgedShelfTask === key) {
     return;
   }
@@ -2467,6 +2531,11 @@ function onTaskDialogOpenChange(open: boolean) {
 
 // Открытие/закрытие модалки по taskId.
 watch(taskId, (id) => {
+  detailRequest += 1;
+  commentsRequest += 1;
+  comLoading.value = false;
+  detail.value = null;
+  loading.value = false;
   closeLaunch();
   acknowledgedShelfTask = '';
   cancelTaskEdit();
@@ -2501,11 +2570,6 @@ watch(taskId, (id) => {
     }
 
     loadDetail();
-    favorites.load(true);
-    acknowledgeShelfOnOpen(id);
-    // Задачу открыли — она больше не новая. Отметка серверная, поэтому метка гаснет
-    // и в других окнах; ошибка отметки на показ задачи не влияет.
-    seen.markSeen([id]);
     loadConveyor();
     loadTriage();
 
@@ -2563,6 +2627,8 @@ watch(
   { immediate: true },
 );
 onUnmounted(() => {
+  detailRequest += 1;
+  commentsRequest += 1;
   stopLaunchEvents();
   closeLaunch();
 

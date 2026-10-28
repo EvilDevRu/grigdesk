@@ -1,1 +1,13 @@
-{"greeting":"Привет, {name}","onlyRussian":"Запасной перевод"}
+{
+  "greeting": "Привет, {name}",
+  "onlyRussian": "Запасной перевод",
+  "b1": {
+    "notify": "Уведомление B1",
+    "dismiss": "Снять B1",
+    "open": "Открыть B1",
+    "close": "Закрыть B1",
+    "expand": "Развернуть B1",
+    "ask": "Спросить B1",
+    "notification": "Оповещение B1"
+  }
+}

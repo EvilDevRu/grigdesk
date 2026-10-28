@@ -1408,13 +1408,13 @@ async function layoutState(page) {
 }
 
 /**
- * Проверяет фактическую область системных кнопок: её нельзя перекрыть настройками
- * или статусами при ресайзе и масштабе, а drag-зоны не должны поглощать их клики.
+ * Проверяет кнопки окна внутри страницы: топбар оставляет им место при любом масштабе.
+ * Модальные слои должны затемнять эти кнопки и отключать их вместе с остальным фоном.
  */
 async function titlebarGeometry(page) {
   return page.evaluate(() => {
     const overlay = navigator.windowControlsOverlay;
-    const safe = overlay.getTitlebarAreaRect();
+    const controls = document.querySelector('[data-role=desktop-window-controls]');
     const header = document.querySelector('.topbar');
     const settings = document.querySelector('[aria-label=Настройки]');
     const mark = document.querySelector('.app-mark');
@@ -1424,13 +1424,13 @@ async function titlebarGeometry(page) {
     const markBox = mark.getBoundingClientRect();
 
     return {
-      visible: overlay.visible,
-      safe: safe.toJSON(),
+      nativeOverlay: overlay.visible,
+      controls: controls.getBoundingClientRect().toJSON(),
       header: headerBox.toJSON(),
       settings: settingsBox.toJSON(),
       mark: markBox.toJSON(),
       drag: getComputedStyle(header).getPropertyValue('-webkit-app-region'),
-      statusDrag: getComputedStyle(status).getPropertyValue('-webkit-app-region'),
+      statusDrag: status ? getComputedStyle(status).getPropertyValue('-webkit-app-region') : null,
       actionsDrag: getComputedStyle(settings.parentElement).getPropertyValue('-webkit-app-region'),
       viewport: innerWidth,
       overflow: document.documentElement.scrollWidth > innerWidth,
@@ -1438,7 +1438,7 @@ async function titlebarGeometry(page) {
   });
 }
 
-test('WT-E01 системные кнопки встроены в топбар при ресайзе и масштабе', options, async (t) => {
+test('WT-E01 кнопки окна находятся под модальными слоями при ресайзе и масштабе', options, async (t) => {
   const run = await launchSettingsGrigDesk(t);
 
   if (!run) {
@@ -1489,23 +1489,30 @@ test('WT-E01 системные кнопки встроены в топбар п
     await waitFor(async () => {
       const state = await titlebarGeometry(run.page);
 
-      return state.visible && state.safe.width > 0 && state.safe.right < state.viewport
-        && state.settings.right <= state.safe.right + 1;
+      return !state.nativeOverlay && state.controls.width > 0
+        && state.settings.right <= state.controls.left + 1;
     });
 
     const state = await titlebarGeometry(run.page);
 
     assert.equal(state.header.top, 0);
-    assert.equal(state.mark.left >= state.safe.left, true);
-    assert.equal(state.header.height >= state.safe.height, true);
+    assert.equal(state.mark.left >= 0, true);
+    assert.equal(state.header.height >= state.controls.height, true);
+    assert.equal(state.controls.right <= state.viewport, true);
     assert.equal(state.overflow, false);
     assert.equal(state.drag, 'drag');
-    assert.equal(state.statusDrag, 'no-drag');
+
+    if (state.statusDrag !== null) {
+      assert.equal(state.statusDrag, 'no-drag');
+    }
+
     assert.equal(state.actionsDrag, 'no-drag');
 
     const child = await openSettings(run);
 
-    assert.equal(await child.evaluate(() => navigator.windowControlsOverlay.visible), true);
+    assert.equal(await child.evaluate(() => navigator.windowControlsOverlay.visible), false);
+    assert.equal(await child.locator('[data-role=desktop-window-controls]').evaluate((element) =>
+      Boolean(element.closest('[inert]'))), true);
     await closeSettings(child);
   }
 
@@ -1518,7 +1525,26 @@ test('WT-E01 системные кнопки встроены в топбар п
   await run.page.waitForFunction(() => innerWidth === 1280);
   await settingsScreenshot(run.page, 'window-titlebar.png');
 
-  // Скриншот renderer не включает системные кнопки: снимается собственный Xvfb-дисплей.
+  await run.page.evaluate(() => {
+    const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+
+    pinia._s.get('document-preview').showImage({
+      src: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="100"/%3E',
+      name: 'Проверка слоя.png',
+      mime: 'image/png',
+    });
+  });
+  await run.page.locator('.media-viewer__bar').waitFor();
+  assert.equal(await run.page.locator('[data-role=desktop-window-controls]').evaluate((element) =>
+    Boolean(element.closest('[inert]'))), true);
+  assert.equal(await run.page.locator('.media-viewer__bar').evaluate((element) =>
+    Math.round(element.getBoundingClientRect().width)), 1280);
+  await run.page.getByRole('button', { name: 'Закрыть', exact: true }).click();
+  await run.page.locator('.media-viewer__bar').waitFor({ state: 'hidden' });
+  assert.equal(await run.page.locator('[data-role=desktop-window-controls]').evaluate((element) =>
+    Boolean(element.closest('[inert]'))), false);
+
+  // Снимок дисплея подтверждает отсутствие второго набора кнопок вне страницы.
   const nativeImage = await run.app.evaluate(async ({ desktopCapturer }) => {
     const sources = await desktopCapturer.getSources({
       types: ['screen'],

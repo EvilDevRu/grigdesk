@@ -1,6 +1,7 @@
 // Карточка разрешения сохраняет payload решения и использует public UI facade.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { kimiServerApprovalInput } from '../../server/src/lib/kimi/serverApproval.ts';
 import {
   compileVue,
   webFile,
@@ -64,6 +65,43 @@ async function mountPermission(t, req = PLAN_REQ) {
 function button(wrapper, label) {
   return wrapper.findAll('button').find((entry) => entry.text() === label);
 }
+
+test('структурные подробности сохраняют вложенные поля и переводы строк', async (t) => {
+  const details = {
+    operation: 'write',
+    payload: { path: 'report.md', content: 'Первая строка\nВторая строка' },
+  };
+  const { wrapper } = await mountPermission(t, {
+    pid: 'structured-details',
+    tool: 'Write',
+    input: { details },
+  });
+
+  assert.equal(wrapper.text().includes('[object Object]'), false);
+  assert.deepEqual(JSON.parse(wrapper.get('.p-in').text()), details);
+});
+
+test('одинаковое описание и команда показываются один раз', async (t) => {
+  const { wrapper } = await mountPermission(t, {
+    pid: 'duplicate-command',
+    tool: 'Bash',
+    input: { command: 'npm test', description: 'npm test' },
+  });
+
+  assert.equal(wrapper.find('.p-desc').exists(), false);
+  assert.equal(wrapper.get('.p-in.cmd').text(), 'npm test');
+});
+
+test('external URL без описания не попадает в текст карточки', async (t) => {
+  const { wrapper } = await mountPermission(t, {
+    pid: 'external-without-description',
+    tool: 'MCP',
+    input: { kind: 'external_url', url: 'https://example.test/setup?token=secret' },
+  });
+
+  assert.equal(wrapper.text().includes('token=secret'), false);
+  assert.equal(wrapper.get('a').attributes('href'), 'https://example.test/setup?token=secret');
+});
 
 test('«Доработать» отправляет пояснение третьим аргументом answer', async (t) => {
   const { wrapper, flushPromises } = await mountPermission(t);
@@ -137,6 +175,117 @@ test('запрос Kimi показывает команду и путь вмес
   assert.equal(wrapper.find('.p-in.cmd').text(), 'npm test -- --run');
   assert.equal(wrapper.find('.p-path').text(), '/home/u/project/package.json');
   assert.equal(text.includes('{"kind"'), false);
+});
+
+test('GLM показывает обоснование, доступ и таймаут отдельными полями вместо JSON', async (t) => {
+  const input = {
+    kind: 'execute',
+    command: 'node ./check-install.mjs 2>&1',
+    description: 'Проверить установщик',
+    timeoutMs: 30000,
+    sandbox_permissions: 'danger-full-access',
+    justification: 'Скрипт пишет кэш и временные файлы в папке артефактов.',
+  };
+  const original = JSON.stringify(input);
+  const { wrapper } = await mountPermission(t, {
+    pid: 'glm-bash',
+    tool: 'bash',
+    canRemember: false,
+    input,
+  });
+
+  assert.equal(wrapper.get('.p-in.cmd').text(), input.command);
+  assert.equal(wrapper.get('.p-desc').text(), input.description);
+  assert.equal(wrapper.get('[data-permission-justification]').text(), input.justification);
+  assert.match(wrapper.get('[data-permission-access]').text(), /Уровень доступа:\s+Полный доступ/u);
+  assert.match(wrapper.get('[data-permission-timeout]').text(), /Ограничение времени:\s+30 с/u);
+  assert.equal(wrapper.findAll('pre').length, 1);
+  assert.equal(wrapper.find('input[type="checkbox"]').exists(), false);
+  assert.equal(JSON.stringify(input), original);
+
+  await button(wrapper, 'Разрешить').trigger('click');
+
+  assert.deepEqual(wrapper.emitted('answer'), [[true, false]]);
+});
+
+test('обоснование не дублирует описание, неизвестные параметры сохраняются в подробностях', async (t) => {
+  const { wrapper } = await mountPermission(t, {
+    pid: 'permission-extras',
+    tool: 'bash',
+    input: {
+      command: 'npm test',
+      description: 'Нужен запуск проверки',
+      justification: 'Нужен запуск проверки',
+      sandbox_permissions: 'toString',
+      timeoutMs: 1250,
+      extra: { retries: 2 },
+    },
+  });
+
+  assert.equal(wrapper.find('[data-permission-justification]').exists(), false);
+  assert.match(wrapper.get('[data-permission-access]').text(), /toString/u);
+  assert.match(wrapper.get('[data-permission-timeout]').text(), /1,25 с/u);
+  assert.deepEqual(JSON.parse(wrapper.findAll('pre').at(-1).text()), { extra: { retries: 2 } });
+});
+
+test('неверные типы параметров остаются в JSON, нулевой таймаут сохраняется при обновлении', async (t) => {
+  const input = {
+    command: 'npm test',
+    justification: { reason: 'проверка' },
+    sandbox_permissions: ['danger-full-access'],
+    timeoutMs: -1,
+  };
+  const { wrapper } = await mountPermission(t, {
+    pid: 'permission-invalid',
+    tool: 'bash',
+    input,
+  });
+
+  assert.equal(wrapper.find('.p-permission-meta').exists(), false);
+  assert.equal(wrapper.find('[data-permission-justification]').exists(), false);
+  assert.deepEqual(JSON.parse(wrapper.findAll('pre').at(-1).text()), {
+    justification: input.justification,
+    sandbox_permissions: input.sandbox_permissions,
+    timeoutMs: -1,
+  });
+
+  await wrapper.setProps({
+    req: {
+      pid: 'permission-zero',
+      tool: 'bash',
+      input: { command: 'npm test', timeoutMs: 0 },
+    },
+  });
+
+  assert.match(wrapper.get('[data-permission-timeout]').text(), /0 с/u);
+  assert.equal(wrapper.findAll('pre').length, 1);
+});
+
+test('структурный Write Kimi показывает путь и содержимое вместо object Object', async (t) => {
+  const { wrapper } = await mountPermission(t, {
+    pid: 'kimi-write',
+    chatKey: 'c1',
+    tool: 'Write',
+    input: kimiServerApprovalInput({
+      action: 'Записать итог проверки',
+      tool_input_display: {
+        kind: 'file_io',
+        operation: 'write',
+        path: 'review.md',
+        content: '# Проверка\nОшибки исправлены.\n',
+      },
+    }),
+  });
+
+  assert.equal(wrapper.get('.p-desc').text(), 'Записать итог проверки');
+  assert.equal(wrapper.get('.p-path').text(), 'review.md');
+  assert.match(wrapper.get('pre.p-in').text(), /# Проверка\nОшибки исправлены\./);
+  assert.equal(wrapper.find('.p-in.cmd').exists(), false);
+  assert.equal(wrapper.text().includes('[object Object]'), false);
+
+  await button(wrapper, 'Разрешить').trigger('click');
+
+  assert.deepEqual(wrapper.emitted('answer'), [[true, false]]);
 });
 
 test('правка файла показывается двухколоночным диффом', async (t) => {

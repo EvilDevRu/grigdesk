@@ -68,6 +68,10 @@ export interface ProviderUsage {
   dataCheckedAt: number;
   stale: boolean;
   retryAt?: number;
+  lastSuccessfulAt?: number | null;
+  runtimeGeneration?: string;
+  usageSchema?: string;
+  pollIntervalMs?: number;
 }
 
 /**
@@ -278,6 +282,22 @@ export function createUsageReadCache<Value>(
   const invalidationWaiters = new Set<() => void>();
 
   /**
+   * Меняет поколение и отпускает старых читателей без отмены чужой read-only операции.
+   * При замене проекции возраст замера сохраняется: доставка не продлевает TTL данных.
+   */
+  function invalidate(replacement: { value: Value } | null) {
+    generation += 1;
+    cache = replacement ? { at: cache?.at ?? now(), value: replacement.value } : null;
+    inFlight = null;
+
+    for (const notify of invalidationWaiters) {
+      notify();
+    }
+
+    invalidationWaiters.clear();
+  }
+
+  /**
    * Делит загрузку актуального поколения между всеми читателями.
    * Запоздавший результат после clear присоединяется к новому чтению, включая отказ.
    */
@@ -363,17 +383,11 @@ export function createUsageReadCache<Value>(
      * Начатый read-only запрос может завершиться, но его результат уже никому не отдаётся.
      */
     clear() {
-      generation += 1;
-      cache = null;
-      // Уже начатую read-only операцию не убиваем, но после явного сброса новый
-      // читатель не должен получить её потенциально устаревший результат.
-      inFlight = null;
+      invalidate(null);
+    },
 
-      for (const invalidate of invalidationWaiters) {
-        invalidate();
-      }
-
-      invalidationWaiters.clear();
+    replace(value: Value) {
+      invalidate({ value });
     },
   };
 }

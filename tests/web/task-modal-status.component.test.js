@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { compileModule, webFile } from './helpers/compile-vue.js';
+import { compileModule, migrationHarness, webFile } from './helpers/compile-vue.js';
 import { compileTaskModal } from './helpers/task-modal.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
@@ -68,6 +68,10 @@ async function mountCard(t, browser, {
     // Детали копируются как сетевой ответ, чтобы кеш не менялся вместе с порталом.
     // Остальные запросы карточки получают пустые независимые ответы.
     async get(url) {
+      if (url.startsWith('/api/grigdesk-tasks/')) {
+        throw new migrationHarness.ApiError('Нет своей задачи', 404, { error: 'grigdesk_task_not_found' });
+      }
+
       if (url === '/api/b24/task/42') {
         calls.push(`GET:${url}`);
 
@@ -129,14 +133,19 @@ async function mountCard(t, browser, {
   t.after(() => {
     wrapper?.unmount();
 
-    for (const suffix of [...Object.keys(globals), 'TasksStore']) {
+    for (const suffix of [...Object.keys(globals), 'TasksStore', 'ApiError']) {
       delete globalThis[`${prefix}${suffix}`];
     }
   });
 
+  globalThis[`${prefix}ApiError`] = migrationHarness.ApiError;
+
   const module = await compileModule(webFile('src/stores/tasks.ts'), {
     stubs: {
-      '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
+      '../shared/apiClient.ts': [
+        `export const api = globalThis.${prefix}Api;`,
+        `export const ApiError = globalThis.${prefix}ApiError;`,
+      ].join('\n'),
       './board.ts': `export const useBoardStore = globalThis.${prefix}BoardStore;`,
     },
   });

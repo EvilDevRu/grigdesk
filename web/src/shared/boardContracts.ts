@@ -18,6 +18,9 @@ export interface BoardTask extends Record<string, unknown> {
 }
 
 export interface TaskDetail extends Record<string, unknown> {
+  source?: 'grigdesk' | 'b24';
+  projectId?: string;
+  projectTitle?: string;
   id?: string | number;
   title?: string;
   description?: string;
@@ -228,6 +231,8 @@ export function decodeTaskDetail(value: unknown): TaskDetail {
     || (value.telegram != null && (!isRecord(value.telegram)
       || (value.telegram.links != null && (!Array.isArray(value.telegram.links)
         || !value.telegram.links.every(isTelegramLink)))))
+    || (value.source != null && !['grigdesk', 'b24'].includes(String(value.source)))
+    || !['projectId', 'projectTitle'].every((key) => value[key] == null || typeof value[key] === 'string')
     || (value.status != null && !['string', 'number'].includes(typeof value.status))) {
     throw new Error(t('core.invalidTaskDetails'));
   }

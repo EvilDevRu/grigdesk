@@ -27,7 +27,7 @@ function uiFacadeStub(prefix) {
 
   return [
     ...imports,
-    `export { t, messageRef, resolveUiText } from ${JSON.stringify(webFile('src/services/locale.ts'))};`,
+    'export { t, messageRef, resolveUiText } from "./src/services/locale.ts";',
     'export { vTooltip } from "./src/services/tooltipDirective.ts";',
     `export { ${names} };`,
     'export const confirmDialog = (...args) => {',

@@ -5,7 +5,8 @@ import { DEEPSEEK_PIN } from '../deepseek/contract.ts';
 import {
   probeDeepSeekRuntime,
 } from '../deepseek/runtimeProcess.ts';
-import { prepareDeepSeekRuntime, preparedDeepSeekRuntime } from '../deepseek/preparedRuntime.ts';
+import { prepareDeepSeekChatRuntime, preparedDeepSeekRuntime } from '../deepseek/preparedRuntime.ts';
+import { normalizeDeepSeekPermissionMode } from '../deepseek/toolPermissionPolicy.ts';
 import type { PreparedExecutorRuntime } from '../executorSettings/types.ts';
 import type { DeepSeekRuntimeConfig } from '../deepseek/runtimeProcess.ts';
 import { selectedDeepSeekBinary } from '../deepseek/distribution.ts';
@@ -86,7 +87,8 @@ export default {
     max: 'Максимальное усилие рассуждения для самых трудных задач.',
   },
   nativeSettings: deepSeekNativeSettings,
-  prepareRuntime: prepareDeepSeekRuntime,
+  prepareRuntime: prepareDeepSeekChatRuntime,
+  normalizePermissionMode: normalizeDeepSeekPermissionMode,
   name: 'DeepSeek',
   vendor: 'DeepSeek',
   color: '#4D6BFE',
@@ -192,20 +194,26 @@ export default {
       {
         id: 'default',
         order: 1,
-        label: 'Правки в проекте',
-        hint: 'Обычные правки внутри проекта уже разрешены; запрос нужен только для выхода за границу.',
+        label: 'Спрашивать',
+        hint: 'Чтение свободно; правки, команды и внешние инструменты требуют разрешения.',
+        labelKey: 'core.agentModeAsk',
+        hintKey: 'core.agentModeAskHint',
       },
       {
         id: 'auto',
         order: 2,
         label: 'Авто',
-        hint: 'Правки внутри проекта уже разрешены; опасное расширение границы решает человек.',
+        hint: 'Работает в песочнице рабочей папки; расширение доступа подтверждает человек.',
+        labelKey: 'core.agentModeAuto',
+        hintKey: 'core.agentModeAutoHint',
       },
       {
         id: 'read-only',
         order: 3,
         label: 'Только чтение',
-        hint: 'Исходники защищены от записи; запросы расширить sandbox автоматически отклоняются.',
+        hint: 'Читает и отвечает; изменения исходников, команды и расширение прав запрещены.',
+        labelKey: 'core.agentModeReadOnly',
+        hintKey: 'core.agentModeReadOnlyHint',
       },
     ];
   },
@@ -225,8 +233,13 @@ export default {
   },
 
   // Проектные и служебные MCP входят в одноразовый overlay web-профиля до старта хода.
+  /**
+   * Подготавливает серверный набор инструментов перед запуском хода.
+   * Режим чтения исключает проектные MCP ещё до запуска их процессов.
+   */
   async run(options: Parameters<typeof runDeepSeekWebTurn>[0]) {
-    const project = options.cwd ? await readProjectMcpServers(options.cwd) : { file: null, servers: [], warnings: [] };
+    const project = options.cwd && (options.factory || options.permissionMode !== 'read-only')
+      ? await readProjectMcpServers(options.cwd) : { file: null, servers: [], warnings: [] };
     for (const warning of project.warnings) {
       options.log?.warn?.({ file: project.file, warning }, 'DeepSeek: запись .mcp.json пропущена');
     }

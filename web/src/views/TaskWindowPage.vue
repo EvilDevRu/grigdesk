@@ -1,9 +1,9 @@
 <template>
-  <main class="task-window-page" aria-label="Карточка задачи Битрикс24">
+  <main class="task-window-page" :aria-label="t('core.grigdeskTaskCard')">
     <TaskModal v-if="target && ready" presentation="document" />
     <template v-else>
       <header class="task-window-titlebar">
-        <span>GrigDesk · Задача Битрикс24</span>
+        <span>GrigDesk · {{ t('core.grigdeskGenericTask') }}</span>
         <UiIconButton label="Закрыть окно" @click="closeWindow">✕</UiIconButton>
       </header>
       <UiLoadingState v-if="target" label="Подключаемся к GrigDesk…" variant="document" />
@@ -21,7 +21,7 @@ import { useAuthStore } from '../stores/auth.ts';
 import { useChatStore } from '../stores/chat.ts';
 import type { SurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
 import { useUiStore } from '../stores/ui.ts';
-import { UiIconButton, UiLoadingState } from '../ui';
+import { t, UiIconButton, UiLoadingState } from '../ui';
 import TaskModal from './TaskModal.vue';
 
 const props = defineProps<{

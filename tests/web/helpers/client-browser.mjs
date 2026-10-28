@@ -89,7 +89,21 @@ export async function clientBrowser(t, options = {}) {
             return;
           }
 
+          if (url.pathname === '/api/grigdesk-tasks/11') {
+            req.resume();
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: 'grigdesk_task_not_found' }));
+
+            return;
+          }
+
           const responses = {
+            '/api/grigdesk-tasks': {
+              tasks: [],
+              revision: 0,
+              b24Configured: true
+            },
+            '/api/grigdesk-tasks/projects': { projects: [] },
             '/__shell/state': options.shell || shell,
             '/api/auth/state': {
               authenticated: true,

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  localizeUsageBar,
   localizeUsageResource,
   providerStatusHint,
   providerUsageView,
@@ -12,6 +13,33 @@ import {
   prepareUsageControl,
   usageControlConfirmation,
 } from '../../web/src/features/providers/providerUsageActions.ts';
+
+test('Новые месячные квоты Kimi переводятся без выдуманной длительности окна', () => {
+  const bar = {
+    key: 'kimi:monthTotal',
+    label: 'Месяц',
+    pct: 40,
+    resetsAt: null,
+  };
+  const resource = {
+    key: 'kimi-monthly-volume',
+    label: 'Месячный объём',
+    summary: 'Израсходовано за месяц: 40%',
+    note: 'Из них код: 20% месячной квоты',
+  };
+  const translated = localizeUsageResource('kimi', resource, 'en');
+
+  assert.equal(localizeUsageBar('kimi', bar, 'en').label, 'Month');
+  assert.equal('windowMinutes' in localizeUsageBar('kimi', bar, 'en'), false);
+  assert.equal(localizeUsageBar('kimi', {
+    key: 'kimi:1:5:hour',
+    label: 'Сессия (5ч)',
+    pct: 0,
+  }, 'en').label, 'Session (5h)');
+  assert.equal(translated.summary, 'Used this month: 40%');
+  assert.equal(translated.note, 'Code accounts for 20% of the monthly quota');
+  assert.deepEqual(localizeUsageBar('kimi', bar, 'ru'), bar);
+});
 
 test('Новые состояния доплаты переводятся на RU/EN без изменения данных и ссылок', () => {
   const cases = [
@@ -96,6 +124,27 @@ test('missing usage data has visible loading copy', () => {
   assert.equal(view.state, 'loading');
   assert.match(view.message, /ещё не получены/i);
   assert.deepEqual(view.bars, []);
+});
+
+test('popover freshness включается capability и сохраняет проценты истёкшего окна', () => {
+  const entry = {
+    state: 'ok',
+    lastSuccessfulAt: 100_000,
+    runtimeGeneration: 'runtime-1',
+    pollIntervalMs: 300_000,
+    bars: [{
+      key: 'session',
+      pct: 13,
+      resetsAt: '1970-01-01T00:03:00.000Z',
+    }],
+  };
+  const provider = { id: 'fixture', usagePresentation: { freshness: true, spentLabel: true } };
+  const view = providerUsageView(entry, provider, 'ru', { now: 200_000 });
+
+  assert.equal(view.stale, true);
+  assert.equal(view.measuredAt, 100_000);
+  assert.equal(view.bars[0].pct, 13);
+  assert.equal(providerUsageView(entry, { id: 'managed-fixture' }, 'ru', { now: 200_000 }).stale, undefined);
 });
 
 test('auth failure offers claude login instead of an empty tooltip', () => {

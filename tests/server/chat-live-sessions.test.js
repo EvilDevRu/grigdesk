@@ -19,6 +19,7 @@ import claude, { claudeProviderSettingsArgs } from '../../server/src/lib/executo
 import { ChatBackgroundRuns, visibleExtraDirs } from '../../server/src/lib/chat/backgroundRuns.ts';
 import { ChatLiveSessions } from '../../server/src/lib/chat/liveSessions.ts';
 import chatModule from '../../server/src/modules/chat/index.ts';
+import { ExecutorRuntimeError } from '../../server/src/lib/executors/errors.ts';
 
 const FAKE_CLI = `
 import readline from 'node:readline';
@@ -426,6 +427,7 @@ async function apiFixture(t, {
   providerUsageSink = null,
   taskId = null,
   root: givenRoot = '',
+  prepareRuntime = null,
 } = {}) {
   const root = givenRoot || await mkdtemp(path.join(os.tmpdir(), 'grigdesk-live-api-'));
 
@@ -447,6 +449,7 @@ async function apiFixture(t, {
   // временем жизни процесса, а не его протокол.
   const executor = {
     id: 'claude',
+    ...(prepareRuntime ? { prepareRuntime } : {}),
     async modes() { return [{ id: 'default' }, { id: 'plan' }]; },
     async run() { throw new Error('разовый запуск не ожидается: сессия живая'); },
     session: {
@@ -595,6 +598,26 @@ test('список живых процессов показывает, что и
 
   // Открытие сессии обязано будить окна: список не опрашивается по таймеру.
   assert.ok(fixture.events.some((e) => e.event === 'chat-sessions'));
+});
+
+test('общий route сохраняет typed отказ режима и передаёт server-owned context до open', async (t) => {
+  let context;
+  const f = await apiFixture(t, {
+    prepareRuntime: async (_config, options) => {
+      context = options.permissionModeContext;
+
+      throw new ExecutorRuntimeError('mode_unavailable', 'Профиль не прошёл допуск.');
+    },
+  });
+  const chatKey = await f.chat();
+  const response = await f.turn(chatKey);
+
+  assert.equal(response.statusCode, 409, response.body);
+  assert.equal(response.json().error, 'mode_unavailable');
+  assert.equal(context.provider, 'claude');
+  assert.equal(context.chatId, chatKey);
+  assert.equal(context.mode, 'plan');
+  assert.equal(f.handles.length, 0);
 });
 
 test('погашение процесса не трогает разговор, а идущий ход требует подтверждения', async (t) => {

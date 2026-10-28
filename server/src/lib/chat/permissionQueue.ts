@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
-const DEFAULT_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+export const PERMISSION_WAIT_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = PERMISSION_WAIT_MS;
 
 // Запрос разрешения в том виде, в каком его ставит исполнитель. Форма открытая:
 // поля карточки объявляет тот, кто спрашивает, очередь их только переносит.

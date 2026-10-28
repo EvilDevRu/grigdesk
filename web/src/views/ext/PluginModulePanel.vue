@@ -19,34 +19,37 @@
 import { computed, onBeforeUnmount, onErrorCaptured, shallowRef, ref, watch } from 'vue';
 import type { Component } from 'vue';
 import type { PluginWebModule } from '../../../../shared/plugins/pluginsContracts.ts';
-import {
-  UiInlineMessage,
-  t,
-  UiLoadingState,
-} from '../../ui.ts';
-import { usePluginsStore } from '../../stores/plugins.ts';
-import { loadPluginModule } from '../../pluginRuntime/loader.ts';
-import { createPluginContext } from '../../pluginRuntime/context.ts';
-import type { PluginContext } from '../../pluginRuntime/context.ts';
+import { UiInlineMessage, UiLoadingState, t } from '../../ui.ts';
+import { pluginRuntimeFor } from '../../pluginRuntime/bootstrap.ts';
+import { loadPluginStyles } from '../../pluginRuntime/styles.ts';
+import type { PluginModuleContext } from '../../pluginRuntime/contextServices.ts';
+import type { PluginRuntime } from '../../pluginRuntime/runtime.ts';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   pluginId: string;
   descriptor: PluginWebModule;
   label: string;
   active?: boolean;
   compact?: boolean;
   presentation?: string;
-}>();
+}>(), { active: true });
 
 type PanelState = 'loading' | 'ready' | 'unsupported' | 'load-failed' | 'render-failed';
 
-const plugins = usePluginsStore();
+type PanelLease = Awaited<ReturnType<PluginRuntime['acquirePanel']>>;
+
+const runtime = pluginRuntimeFor();
 const state = ref<PanelState>('loading');
 const component = shallowRef<Component | null>(null);
-const context = shallowRef<PluginContext | null>(null);
+const context = shallowRef<PluginModuleContext | null>(null);
 let generation = 0;
 let controller: AbortController | null = null;
 let releaseStyles: (() => void) | null = null;
+let lease: PanelLease | null = null;
+let removeRuntimeAbort: (() => void) | null = null;
+let suspended = false;
+let panelKey = '';
+let panelOwner: string | null | undefined;
 
 const message = computed(() => {
   const params = { name: props.label };
@@ -60,15 +63,28 @@ const message = computed(() => {
 });
 
 /**
- * Смена ресурсов и размонтирование отменяют только текущую попытку.
+ * Отмена подготовки и lease не обязана удалять уже показанный компонент.
+ * При обрыве оболочки его DOM и готовый CSS остаются до восстановления того же владельца.
+ */
+function releaseLease(): void {
+  generation += 1;
+  removeRuntimeAbort?.();
+  removeRuntimeAbort = null;
+  controller?.abort();
+  controller = null;
+  lease?.release();
+  lease = null;
+}
+
+/**
+ * Смена владельца, ресурсов и размонтирование освобождают всю панель.
  * Удаление компонента перед освобождением CSS сохраняет границу панели.
  */
 function dispose(): void {
-  generation += 1;
-  controller?.abort();
-  controller = null;
   component.value = null;
   context.value = null;
+  suspended = false;
+  releaseLease();
   releaseStyles?.();
   releaseStyles = null;
 }
@@ -77,37 +93,61 @@ function dispose(): void {
  * Поздний import не должен вернуть предыдущую панель после смены id.
  * Ресурсы сохраняются до подготовки контекста и освобождаются при любом отказе.
  */
-async function prepare(): Promise<void> {
-  dispose();
-  state.value = 'loading';
+async function prepare(preserve = false): Promise<void> {
+  if (preserve) {
+    releaseLease();
+  } else {
+    dispose();
+    state.value = 'loading';
+  }
+
+  suspended = false;
+  panelKey = JSON.stringify([props.pluginId, props.descriptor]);
+  panelOwner = runtime.access?.value.owner;
 
   const current = generation;
   const attempt = new AbortController();
+  const timer = setTimeout(() => attempt.abort(), 30_000);
 
   controller = attempt;
 
   try {
-    const loaded = await loadPluginModule(props.pluginId, props.descriptor, { signal: attempt.signal });
-
-    if (generation !== current) {
-      loaded.releaseStyles();
-
-      return;
-    }
-
-    releaseStyles = loaded.releaseStyles;
-
-    const prepared = await createPluginContext(props.pluginId, props.descriptor, plugins, {
+    const loaded = await runtime.acquirePanel(props.pluginId, props.descriptor, {
       signal: attempt.signal,
+      active: props.active !== false,
     });
 
     if (generation !== current) {
+      loaded.release();
+
       return;
     }
 
-    context.value = prepared;
+    lease = loaded;
+    lease.setActive(props.active !== false);
+
+    const revoked = () => {
+      dispose();
+      state.value = 'load-failed';
+    };
+
+    loaded.context.signal?.addEventListener('abort', revoked, { once: true });
+    removeRuntimeAbort = () => loaded.context.signal?.removeEventListener('abort', revoked);
+    loaded.context.signal?.throwIfAborted();
+
+    const styles = releaseStyles ?? await loadPluginStyles(props.descriptor.css, attempt.signal);
+
+    if (generation !== current) {
+      styles();
+
+      return;
+    }
+
+    releaseStyles = styles;
+    context.value = loaded.context;
     component.value = loaded.component;
     state.value = 'ready';
+    controller = null;
   } catch (error) {
     if (generation !== current) {
       return;
@@ -116,6 +156,8 @@ async function prepare(): Promise<void> {
     dispose();
     state.value = error && typeof error === 'object' && 'code' in error && error.code === 'unsupported'
       ? 'unsupported' : 'load-failed';
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -126,7 +168,33 @@ onErrorCaptured(() => {
   return false;
 });
 
-watch(() => JSON.stringify([props.pluginId, props.descriptor]), () => void prepare(), { immediate: true });
+/**
+ * Только временная потеря связи того же владельца сохраняет смонтированный UI.
+ * Свежий каталог возвращает панели общий с фоном context без повторного setup.
+ */
+function syncPanel(): void {
+  const access = runtime.access?.value;
+  const samePanel = panelKey === JSON.stringify([props.pluginId, props.descriptor])
+    && panelOwner === access?.owner;
+
+  if (access && access.status !== 'ready') {
+    if (samePanel && (access.status === 'suspended' || suspended && access.status === 'waiting')) {
+      suspended = true;
+      releaseLease();
+    } else {
+      dispose();
+      state.value = 'loading';
+    }
+
+    return;
+  }
+
+  void prepare(suspended && samePanel);
+}
+
+watch(() => JSON.stringify([props.pluginId, props.descriptor]), syncPanel, { immediate: true });
+watch(() => JSON.stringify(runtime.access?.value), syncPanel, { flush: 'sync' });
+watch(() => props.active, (active) => lease?.setActive(active !== false), { flush: 'sync' });
 onBeforeUnmount(dispose);
 </script>
 

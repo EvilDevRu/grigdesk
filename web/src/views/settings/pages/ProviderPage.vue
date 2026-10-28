@@ -278,32 +278,41 @@
             {{ selected.installed ? t('settings.authentication2') : t('settings.installation') }}:
             {{ selected.setupCommand || selected.install }}
           </UiCommandButton>
-          <UiButton
-            v-if="!selected.installed && selected.installation?.canInstall"
-            :disabled="installation.busy && installation.snapshot.active?.providerId !== selected.id"
-            @click="installation.requestInstall(selected.id, 'install')"
-          >{{ t('settings.providerInstallationInstall') }}</UiButton>
-          <UiButton
-            v-if="installation.snapshot.active?.providerId === selected.id"
-            @click="installation.show(selected.id)"
-          >{{ t('settings.providerInstallationRunning') }}</UiButton>
-          <UiButton
-            v-else-if="installation.snapshot.recent[selected.id]"
-            @click="installation.show(selected.id)"
-          >{{ t('settings.providerInstallationResult') }}</UiButton>
           <section v-if="resources.length" data-provider-usage>
             <h4>{{ t('settings.providerResources') }}</h4>
             <ProviderUsageResources :provider-id="selected.id" :resources="resources" />
           </section>
-          <UiButton data-context="workspace-form-wrap"
-            v-if="selected.installed && selected.canUpdate
-              && installation.snapshot.active?.providerId !== selected.id"
-            :disabled="installation.busy"
-            @click="providers.updateCli(selected.id)"
-          >
-            {{ t('settings.updateCLI') }}
-          </UiButton>
-          <p v-if="updateResult">{{ updateResult.text }}</p>
+          <div class="settings-provider-install-actions">
+            <UiButton
+              v-if="!selected.installed && selected.installation?.canInstall"
+              :disabled="installation.busy && installation.snapshot.active?.providerId !== selected.id"
+              @click="installation.requestInstall(selected.id, 'install')"
+            >{{ t('settings.providerInstallationInstall') }}</UiButton>
+            <UiButton
+              v-if="installation.snapshot.active?.providerId === selected.id"
+              @click="installation.show(selected.id)"
+            >{{ t('settings.providerInstallationRunning') }}</UiButton>
+            <UiButton
+              v-if="cliActions.canUpdate
+                && installation.snapshot.active?.providerId !== selected.id"
+              :disabled="installation.busy"
+              @click="providers.updateCli(selected.id)"
+            >{{ t('settings.updateCLI') }}</UiButton>
+            <UiButton
+              v-if="selected.installation?.lifecycleProtocol === 2 && selected.installation.canReinstall"
+              :disabled="installation.busy"
+              @click="installation.requestInstall(selected.id, 'reinstall')"
+            >{{ t('settings.providerLifecycleReinstall') }}</UiButton>
+            <UiButton
+              v-if="selected.installation?.lifecycleProtocol === 2 && selected.installation.canUninstall"
+              variant="solid"
+              tone="danger"
+              :disabled="installation.busy"
+              @click="installation.requestInstall(selected.id, 'uninstall')"
+            >{{ t('settings.providerLifecycleUninstall') }}</UiButton>
+          </div>
+          <p v-if="removalResult" data-provider-removal-result>{{ removalResult }}</p>
+          <p v-else-if="updateResult">{{ updateResult.text }}</p>
         </template>
         <template v-else-if="ready && tab === 'models'">
           <p>{{ t('settings.providerCatalogReadOnlySharedVisibilityIs') }}</p>
@@ -401,6 +410,7 @@ import { createSettingsActions } from '../../../features/settings/actions.ts';
 import { useToolLauncher } from '../../../shared/tools/launcher.ts';
 import ProviderMcpStatus from '../ProviderMcpStatus.vue';
 import ProviderUsageResources from '../../../features/providers/ProviderUsageResources.vue';
+import { providerCliActions } from '../../../features/providers/providerCliActions.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import type { FieldAddress } from '../../../features/settings/contracts.ts';
 import SettingsField from '../SettingsField.vue';
@@ -414,6 +424,23 @@ const native = useProviderSettingsStore();
 const registry = computed(() => (providers.providers as ProviderEntry[])
   .map((entry) => localizeProviderMetadata(entry, uiLocale.value)));
 const selected = computed(() => registry.value.find((entry) => entry.id === settings.entityId));
+const cliActions = computed(() => selected.value ? providerCliActions(selected.value) : {
+  selectedCopy: undefined,
+  canUpdate: false,
+});
+const removalResult = computed(() => {
+  const provider = selected.value;
+  const job = provider && installation.snapshot.recent[provider.id];
+
+  if (!provider?.installed || job?.status !== 'succeeded' || job.outcome !== 'uninstalled') {
+    return '';
+  }
+
+  return t('settings.providerLifecycleAnotherCopy', {
+    removedVersion: job.before || '?',
+    currentVersion: provider.version || '?',
+  });
+});
 const ready = ref(false);
 const showNative = ref(false);
 const nativeQuery = ref('');
@@ -834,6 +861,19 @@ watch(showNative, async (open) => {
 .settings-provider-actions {
   display: grid;
   gap: 8px;
+}
+.settings-provider-install-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  align-items: center;
+  justify-content: start;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+}
+.settings-provider-install-actions:empty {
+  display: none;
 }
 .settings-provider-editor {
   display: grid;

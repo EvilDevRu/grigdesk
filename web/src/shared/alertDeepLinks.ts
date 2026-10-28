@@ -3,6 +3,22 @@ import type { LocationQueryRaw } from 'vue-router';
 import { ALERT_CHAT_QUERY, ALERT_TASK_QUERY, firstQueryValue } from './alertTargets.ts';
 import type { AlertTarget } from './alertTargets.ts';
 
+let pluginOpener: ((pluginId: string) => unknown) | null = null;
+
+/**
+ * Runtime главного окна открывает только доступную панель её владельца.
+ * Снятие старой регистрации не затрагивает более новую открывалку.
+ */
+export function setPluginAlertOpener(open: (pluginId: string) => unknown): () => void {
+  pluginOpener = open;
+
+  return () => {
+    if (pluginOpener === open) {
+      pluginOpener = null;
+    }
+  };
+}
+
 export interface AlertLinkDeps {
   route: {
     path: string;
@@ -31,7 +47,9 @@ export interface AlertLinkDeps {
  * Чат использует тот же query-контракт, что и щелчок по системному уведомлению.
  */
 export function openAlertTarget(target: AlertTarget, deps: AlertLinkDeps): void {
-  if (target.kind === 'studio') {
+  if (target.kind === 'plugin') {
+    void pluginOpener?.(target.pluginId);
+  } else if (target.kind === 'studio') {
     void deps.router.push({
       path: '/3d',
       query: { model: target.modelId, version: target.versionId }

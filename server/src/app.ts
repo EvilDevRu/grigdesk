@@ -35,6 +35,7 @@ import type { WindowAuthState } from './lib/windowKey.ts';
 import { windowKeyPath } from '../../shared/desktop/windowKeyPath.ts';
 import { FactoryStateAdapter } from './adapters/factoryState.ts';
 import { ArbiterCardsStore } from './lib/arbiterCards.ts';
+import { ArbiterConversationStore } from './lib/arbiterConversationStore.ts';
 import { B24Adapter } from './adapters/b24.ts';
 import { SystemAdapter } from './adapters/system.ts';
 import { MediaAdapter } from './adapters/media.ts';
@@ -117,6 +118,7 @@ import staticPlugin from './plugins/static.ts';
 import healthModule from './modules/health/index.ts';
 import factoryModule from './modules/factory/index.ts';
 import b24Module from './modules/b24/index.ts';
+import grigdeskTasksModule from './modules/grigdesk-tasks/index.ts';
 import taskFavoritesModule from './modules/task-favorites/index.ts';
 import taskShelfModule from './modules/task-shelf/index.ts';
 import taskSeenModule from './modules/task-seen/index.ts';
@@ -270,6 +272,13 @@ async function build(desktopParent: DesktopParent | null) {
   // человеческую формулировку. Раньше он показывался одноразовым диалогом, а у
   // автоматического пути пропадал совсем — теперь переживает перезапуск и виден в карточке.
   const arbiterCards = new ArbiterCardsStore(config.arbiterCardsPath);
+  const arbiterConversations = new ArbiterConversationStore(config.arbiterConversationsDir, (doc) => {
+    fastify.sse?.broadcast?.('arbiter-conversation', {
+      task: doc.identity.task,
+      conversationId: doc.id,
+      revision: doc.revision,
+    });
+  });
   // Идущий разбор виден всем окнам, а не только нажавшему кнопку: пока арбитр работает,
   // задача снаружи неотличима от вставшей, и человек берётся за неё руками. Событие шины
   // шлём ленивой ссылкой — плагин sse регистрируется позже этого места.
@@ -283,6 +292,7 @@ async function build(desktopParent: DesktopParent | null) {
     controlDir: config.factoryControlDir,
     workTimeReader: (identity) => readRouteWorkTime(config, identity),
     arbiterCards,
+    arbiterConversations,
   });
   const projectsService = createProjectsService({
     config,
@@ -1061,6 +1071,7 @@ async function build(desktopParent: DesktopParent | null) {
     internalToken,
     arbiterCards,
     arbiterLive,
+    arbiterConversations,
   });
   await fastify.register(b24Module, { b24 });
   await fastify.register(taskFavoritesModule, { favorites: taskFavorites });
@@ -1260,6 +1271,12 @@ async function build(desktopParent: DesktopParent | null) {
   });
 
   await fastify.register(projectsModule, { config, prefs, service: projectsService });
+  await fastify.register(grigdeskTasksModule, {
+    config,
+    b24,
+    factoryState,
+    projectsService,
+  });
   await fastify.register<SshModuleOptions>(sshModule, { service: asPort(sshService) });
   await fastify.register(dbModule, { service: dbService });
   await fastify.register(dockerModule, { service: dockerService });
@@ -1505,7 +1522,8 @@ async function build(desktopParent: DesktopParent | null) {
       return false;
     },
     arbitrate: asPort(
-      (task: string, reply: unknown) => fastify.factoryArbitrate?.(task, reply, { actor: 'auto' }),
+      (task: string, reply: Parameters<NonNullable<typeof fastify.factoryArbitrate>>[1]) =>
+        fastify.factoryArbitrate?.(task, reply, { actor: 'auto' }),
     ),
     log: fastify.log,
   });

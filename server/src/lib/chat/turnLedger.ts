@@ -12,6 +12,7 @@ import path from 'node:path';
 
 import type { ResolvedWorkdir } from './workdir.ts';
 import { writeDurableFile } from '../durableFile.ts';
+import type { ChatModeSelection } from '../../../../shared/chat/chatPermissionModes.ts';
 
 export type MobileTurnOwner = {
   deviceId: string;
@@ -35,6 +36,8 @@ export interface TurnEntry {
   userSentAt?: number;
   hadAttachments?: boolean;
   workspace?: ResolvedWorkdir;
+  permissionMode?: string;
+  modeSelection?: ChatModeSelection;
   // Назначает только серверный порт mobileChat; HTTP-тело не переносит это поле.
   mobileOwner?: MobileTurnOwner;
   runId?: string;

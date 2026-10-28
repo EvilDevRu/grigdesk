@@ -429,6 +429,34 @@ function planText(params: { plan?: unknown } | null | undefined): string {
 }
 
 /**
+ * Из native action сохраняем краткое описание действия без полного payload.
+ * Все поля — данные Codex; они не интерпретируются как команды или ключи перевода.
+ */
+function autoReviewAction(value: unknown): string {
+  const action = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+
+  switch (action.type) {
+    case 'command':
+      return textOf(action.command);
+    case 'execve':
+      return [textOf(action.program), ...(Array.isArray(action.argv) ? action.argv.map(textOf) : [])]
+        .filter(Boolean).join(' ');
+    case 'writeStdin':
+      return `writeStdin: ${textOf(action.processId)}`;
+    case 'applyPatch':
+      return `applyPatch: ${textOf(action.files)}`;
+    case 'networkAccess':
+      return `networkAccess: ${textOf(action.target) || textOf(action.host)}`;
+    case 'mcpToolCall':
+      return `MCP: ${textOf(action.server)}/${textOf(action.toolName)}`;
+    case 'requestPermissions':
+      return `requestPermissions${action.reason ? `: ${textOf(action.reason)}` : ''}`;
+    default:
+      return textOf(action.type);
+  }
+}
+
+/**
  * Создаёт stateful normalizer одного Codex-хода. Stateful-часть нужна только для
  * склейки item.started/item.completed и единственного start; наружу всегда уходит
  * provider-neutral массив шагов.
@@ -444,6 +472,7 @@ export function createCodexStepNormalizer({
   const commandOutputs = new Map<string, string>();
   const reasoningSummaries = new Map<string, string>();
   const fileChanges = new Map<string, unknown[]>();
+  const completedReviews = new Set<string>();
 
   function begin(
     event: { model?: unknown; thread?: { model?: unknown } } | null | undefined,
@@ -577,6 +606,31 @@ export function createCodexStepNormalizer({
     const params = (event.params && typeof event.params === 'object'
       ? event.params
       : {}) as Record<string, unknown>;
+
+    if (method === 'item/autoApprovalReview/completed') {
+      const reviewId = typeof params.reviewId === 'string' ? params.reviewId : '';
+      const review = (params.review && typeof params.review === 'object'
+        ? params.review : {}) as { status?: unknown; rationale?: unknown };
+      const status = textOf(review.status);
+
+      if (!reviewId || completedReviews.has(reviewId)
+        || !['approved', 'denied', 'timedOut', 'aborted'].includes(status)) {
+        return out;
+      }
+
+      completedReviews.add(reviewId);
+      out.push({
+        k: 'note',
+        ...(status === 'approved' ? {} : { level: 'warn' }),
+        text: cut([
+          `Auto-review: ${status}`,
+          cut(autoReviewAction(params.action), 1_000),
+          textOf(review.rationale),
+        ].filter(Boolean).join('\n')),
+      });
+
+      return out;
+    }
 
     if ([
       'thread/started', 'turn/started', 'item/started', 'item/completed',

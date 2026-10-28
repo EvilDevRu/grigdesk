@@ -1,4 +1,4 @@
-import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { localeTranslator, translator } from '../../../shared/i18n/catalogs.ts';
 
 import { uiLocalePort as uiLocale } from '../shared/uiLocalePort.ts';
 // Реестр LLM-исполнителей (GET /api/providers): топбар рисует иконки доступных,
@@ -67,6 +67,7 @@ export const useProvidersStore = defineStore('providers', {
     usageAt: 0,
     usageVersion: 0,
     usageRequest: 0,
+    usageRecoveryAfter: {} as Record<string, number>,
     usageTransport: {
       status: 'idle',
       receivedAt: 0,
@@ -155,7 +156,11 @@ export const useProvidersStore = defineStore('providers', {
      * или ещё не опрошен: тогда чат просто не показывает выбор.
      */
     modesOf(): (selection: ModelSelection) => NonNullable<ProviderEntry['modes']> {
-      return (sessionModel) => this.modelOf(sessionModel).provider?.modes || [];
+      return (sessionModel) => (this.modelOf(sessionModel).provider?.modes || []).map((mode) => ({
+        ...mode,
+        label: mode.labelKey ? translator.t(uiLocale.value, mode.labelKey, {}, mode.label) : mode.label,
+        hint: mode.hintKey ? translator.t(uiLocale.value, mode.hintKey, {}, mode.hint) : mode.hint,
+      }));
     },
     /**
      * Всё про модель чата одним вызовом: `{ id, model, provider }`. Пустое значение
@@ -274,6 +279,7 @@ export const useProvidersStore = defineStore('providers', {
       const next = { ...this.usage };
 
       delete next[providerId];
+      delete this.usageRecoveryAfter[providerId];
       this.usage = next;
       this.usageVersion += 1;
       this.usageRequest += 1;
@@ -325,6 +331,7 @@ export const useProvidersStore = defineStore('providers', {
         this.usageTransport.status = 'error';
         this.usageTransport.error = failureText(error) || t('settings.usageLoadFailure');
         this.usageTransport.deliveryStale = this.usageTransport.receivedAt > 0;
+        this.markUsageRecovery();
       }
     },
     /**
@@ -336,7 +343,21 @@ export const useProvidersStore = defineStore('providers', {
         return false;
       }
 
-      this.usage = usage;
+      const next: Record<string, UsageEntry> = {};
+
+      for (const [id, entry] of Object.entries(usage)) {
+        const boundary = this.usageRecoveryAfter[id];
+        const recovered = boundary !== undefined && entry.state === 'ok' && !entry.stale
+          && typeof entry.lastSuccessfulAt === 'number' && entry.lastSuccessfulAt > boundary;
+
+        if (recovered && (!this.usageTransport.everConnected || this.usageTransport.connected)) {
+          delete this.usageRecoveryAfter[id];
+        }
+
+        next[id] = this.usageRecoveryAfter[id] === undefined ? entry : { ...entry, stale: true };
+      }
+
+      this.usage = next;
       this.usageAt = Date.now();
       this.usageVersion += 1;
       this.usageTransport.status = 'success';
@@ -348,6 +369,18 @@ export const useProvidersStore = defineStore('providers', {
       return true;
     },
     /**
+     * Запоминает последний замер до разрыва: повтор кэша не подтверждает восстановление.
+     * Старые исполнители без metadata сохраняют прежний контракт доставки.
+     */
+    markUsageRecovery() {
+      for (const [id, entry] of Object.entries(this.usage)) {
+        if (Object.hasOwn(entry, 'lastSuccessfulAt')) {
+          this.usageRecoveryAfter[id] = Math.max(this.usageRecoveryAfter[id] || 0,
+            entry.lastSuccessfulAt || 0);
+        }
+      }
+    },
+    /**
      * Потеря общего SSE помечает доставку устаревшей для всех читателей.
      * Сам reconnect метку не снимает: нужен новый принятый снимок usage.
      */
@@ -357,6 +390,7 @@ export const useProvidersStore = defineStore('providers', {
 
       if (transport.everConnected && transport.connected && !connected) {
         transport.deliveryStale = true;
+        this.markUsageRecovery();
       }
 
       transport.connected = connected;

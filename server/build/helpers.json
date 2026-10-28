@@ -2,6 +2,15 @@
   "schema": 1,
   "helpers": [
     {
+      "id": "external-cli-lease",
+      "entry": "server/scripts/externalCliLease.mts",
+      "entryKind": "main",
+      "exports": [
+        "main"
+      ],
+      "description": "Внешний CLI удерживает reader установки до выхода процесса и потомков."
+    },
+    {
       "id": "factory-runtime-pin",
       "entry": "server/scripts/factoryRuntimePin.mts",
       "entryKind": "main",

@@ -1,10 +1,11 @@
 import type { DeepSeekRuntimeInfo } from '../../shared/chat/deepSeekBinary.ts';
+import { GLM_PROFILE_REVISION, GLM_POLICY_REVISION } from '../../server/src/lib/glm/contract.ts';
 
 /**
  * Описание не привязано к текущей upstream-версии и ABI сервера.
  * Синтетические отпечатки имеют настоящий формат SHA256, но не дают допуска GLM.
  */
-export function runtimeInfoFixture(): DeepSeekRuntimeInfo {
+export function runtimeInfoFixture(options: { toolPermissions?: boolean } = {}): DeepSeekRuntimeInfo {
   return {
     format: 1,
     binaryVersion: '0.1.0',
@@ -29,6 +30,8 @@ export function runtimeInfoFixture(): DeepSeekRuntimeInfo {
       acp: true,
       settingsWeb: true,
       settingsAcp: true,
+      glmNativeGate: true,
+      ...(options.toolPermissions === undefined ? {} : { toolPermissions: options.toolPermissions }),
     },
     glm: {
       inputs: {
@@ -46,8 +49,8 @@ export function runtimeInfoFixture(): DeepSeekRuntimeInfo {
           patches: [{ path: 'host.patch', sha256: 'f'.repeat(64) }],
         },
       },
-      profileRevision: 'grigdesk-glm-profile-v2',
-      policyRevision: 'grigdesk-glm-policy-v1',
+      profileRevision: GLM_PROFILE_REVISION,
+      policyRevision: GLM_POLICY_REVISION,
       admission: [{ mode: 'api', compatibility: '1'.repeat(64) }],
     },
   };

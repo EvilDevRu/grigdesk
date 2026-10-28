@@ -244,9 +244,16 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
           options.log?.warn?.({ err: (error as Error)?.message }, 'чат: сбой разбора события Kimi');
         }
       },
-      onClose: () => {
+      onClose: ({ code, reason }) => {
         if (!finished) {
-          failure = new Error('Поток событий Kimi закрылся до завершения хода.');
+          // Код 1005 обозначает отсутствие статуса в close-кадре, а не причину сервера.
+          // Если подробностей нет, сохраняем прежний текст ошибки.
+          const codeText = code && code !== 1005 ? `код ${code}` : '';
+          const details = [codeText, reason].filter(Boolean).join(': ');
+
+          failure = new Error(`Поток событий Kimi закрылся до завершения хода${
+            details ? ` (${details})` : ''
+          }.`);
           finished = true;
           notify();
         }

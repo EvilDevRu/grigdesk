@@ -41,6 +41,7 @@ import {
 } from '../shared/chatPersistenceProjection.ts';
 import { createChatHistoryStepReuseState, mayRetryFullHistory } from '../shared/chatHistoryStepReuse.ts';
 import { createChatSelectionState } from '../shared/chatSelectionState.ts';
+import { effectivePermissionMode, permissionModeRequest } from '../shared/chatPermissionMode.ts';
 import { chatVisibility } from '../shared/chatVisibility.ts';
 import { normalizeContextUsage } from '../../../shared/chat/chatContextUsage.ts';
 import { normalizeChatRunSnapshot } from '../../../shared/chat/chatRun.ts';
@@ -836,6 +837,7 @@ function slimOf(s: ChatRecord) {
 
     effort: s.effort,
     mode: s.mode || '',
+    modeSelection: s.modeSelection,
 
     messages: s.messages,
     sessionId: s.sessionId,
@@ -3091,6 +3093,10 @@ export const useChatStore = defineStore('chat', {
         return null;
       }
 
+      const defaultProvider = useProvidersStore().modelOf(this.defModelRef || this.defModel).provider;
+      const initialMode = defaultProvider
+        ? effectivePermissionMode(this.defMode, defaultProvider.modes || [], defaultProvider)
+        : this.defMode;
       const s: ChatSession = {
 
         id: uid(),
@@ -3111,7 +3117,7 @@ export const useChatStore = defineStore('chat', {
         model: this.defModel,
         modelRef: this.defModelRef,
         effort: this.defEffort,
-        mode: this.defMode,
+        mode: initialMode,
 
         schema: 2,
         revision: 0,
@@ -4825,9 +4831,39 @@ export const useChatStore = defineStore('chat', {
         return;
       }
 
-      selectionStateFor(this).change(id, 'mode', s, { ...s, mode: m });
+      const provider = useProvidersStore().modelOf(selectedModel(s)).provider;
+      const descriptor = provider?.modes?.find((entry) => entry.id === m);
+
+      if (provider?.permissionModeSelectionPolicy === 'preserve-explicit' && !descriptor) {
+        return;
+      }
+
+      const modeSelection = descriptor?.requiresExplicitSelection && provider
+        ? {
+          provider: provider.id,
+          id: m,
+          revision: 1,
+          chatId: id
+        } : undefined;
+
+      selectionStateFor(this).change(id, 'mode', s, {
+        ...s,
+        mode: m,
+        modeSelection
+      });
       s.mode = m;
-      this.defMode = m;
+      s.modeSelection = modeSelection;
+
+      for (const message of s.messages) {
+        if (message.delivery === 'sending' && message.outbox?.modeSelection) {
+          message.outbox.modeSelectionRevoked = true;
+        }
+      }
+
+      if (descriptor?.persistAsDefault !== false) {
+        this.defMode = m;
+      }
+
       this._persist();
     },
 
@@ -4858,6 +4894,19 @@ export const useChatStore = defineStore('chat', {
       s.modelRef = resolved.provider && resolved.model
         ? { provider: resolved.provider.id, model: resolved.model.id }
         : null;
+
+      if (s.modeSelection && s.modeSelection.provider !== resolved.provider?.id) {
+        const nextMode = resolved.provider?.defaultPermissionMode || '';
+
+        selectionStateFor(this).change(id, 'mode', s,
+          {
+            ...s,
+            mode: nextMode,
+            modeSelection: undefined
+          });
+        s.mode = nextMode;
+        s.modeSelection = undefined;
+      }
 
       const modelGeneration = selectionStateFor(this).change(id, 'model', before, s);
 
@@ -5095,6 +5144,9 @@ export const useChatStore = defineStore('chat', {
 
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
+
+        const permissionRequest = permissionModeRequest(s, resolvedModel.provider);
+
         await this._saveChatNow(s);
         await this.prepareWorkdirSend(s);
 
@@ -5105,7 +5157,7 @@ export const useChatStore = defineStore('chat', {
 
           effort: effortLevels.includes(s.effort || '') ? s.effort || '' : '',
 
-          mode: s.mode || '',
+          ...permissionRequest,
           sessionId: s.sessionId,
           chatKey: id,
 
@@ -5315,6 +5367,8 @@ export const useChatStore = defineStore('chat', {
 
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
+
+        const permissionRequest = permissionModeRequest(s, resolvedModel.provider);
         // Пока реестр не сообщил уровни или старый выбор исчез из свежего каталога,
         // явный effort не отправляем: CLI применит собственный актуальный дефолт.
         const requestEffort = effortLevels.includes(s.effort || '') ? s.effort || '' : '';
@@ -5336,7 +5390,7 @@ export const useChatStore = defineStore('chat', {
 
           effort: requestEffort,
 
-          mode: s.mode || '',
+          ...permissionRequest,
 
           sessionId: s.sessionId,
           context,
@@ -5529,6 +5583,8 @@ export const useChatStore = defineStore('chat', {
 
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
+        Object.assign(outbox, permissionModeRequest(s, resolvedModel.provider));
+        message.outbox = outbox;
         await this._saveChatNow(s);
         await this.prepareWorkdirSend(s, message);
       } catch (caught) {
@@ -5548,6 +5604,11 @@ export const useChatStore = defineStore('chat', {
      * выжимка, слэш-команда и вложения берутся у самой реплики, модель и режим — у чата.
      */
     _turnRequest(s: ChatSession, m: ChatMessage) {
+      if (m.outbox?.modeSelectionRevoked || (m.outbox?.modeSelection && JSON.stringify(m.outbox.modeSelection)
+        !== JSON.stringify(s.modeSelection))) {
+        throw new Error(t('core.chatModeSelectionRevoked'));
+      }
+
       const resolvedModel = useProvidersStore().modelOf(selectedModel(s));
 
       if (!resolvedModel.provider || !resolvedModel.model) {
@@ -5571,7 +5632,12 @@ export const useChatStore = defineStore('chat', {
           model: resolvedModel.id,
           modelRef: { provider: resolvedModel.provider.id, model: resolvedModel.model.id },
           effort: effortLevels.includes(s.effort || '') ? s.effort || '' : '',
-          mode: s.mode || '',
+          ...permissionModeRequest({
+            id: s.id,
+            mode: m.outbox?.mode ?? s.mode,
+            modeSelection: m.outbox?.mode !== undefined ? m.outbox.modeSelection : s.modeSelection
+          },
+          resolvedModel.provider),
           sessionId: s.sessionId,
           context,
           chatKey: s.id,

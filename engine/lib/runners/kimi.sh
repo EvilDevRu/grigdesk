@@ -4,9 +4,10 @@
 source "${FACTORY_HOME:?}/lib/executor.sh"
 
 runner_kimi_probe() {
-  local version
-  command -v kimi >/dev/null 2>&1 || return 4
-  version=$(factory_exec provider kimi --version) || return
+  local version cli
+  cli=$(factory_external_bin kimi kimi)
+  command -v -- "$cli" >/dev/null 2>&1 || return 4
+  version=$(factory_external_exec kimi kimi --version) || return
   # Версия — диагностика конкретного run, а не допуск. Совместимость Kimi
   # обеспечивают terminal CAS и fail-closed classify: незнакомый отказ остаётся
   # unknown и не запускает стадию повторно только из-за смены semver.
@@ -144,13 +145,14 @@ runner_kimi_run() {
   local bridge="${FACTORY_HOME:?}/lib/runners/kimi-wire.py"
   # -k: см. комментарий в runners/claude.sh — TERM без последующего KILL оставляет
   # застрявшего провайдера жить с занятым слотом.
+  factory_external_launch kimi kimi "${args[@]}" || return $?
   if [[ -f "$bridge" ]] && command -v python3 >/dev/null 2>&1; then
-    KIMI_CODE_HOME="$run_home" factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}" \
+    KIMI_CODE_HOME="$run_home" factory_exec provider timeout -k 30 "$timeout_s" "${FACTORY_EXTERNAL_LAUNCH[@]}" \
       | python3 "$bridge" --merge "$run_home"
     # Исход хода — только у CLI: сбой моста не имеет права стать отказом стадии.
     return "${PIPESTATUS[0]}"
   fi
-  KIMI_CODE_HOME="$run_home" factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}"
+  KIMI_CODE_HOME="$run_home" factory_exec provider timeout -k 30 "$timeout_s" "${FACTORY_EXTERNAL_LAUNCH[@]}"
 }
 
 _runner_kimi_meta() {

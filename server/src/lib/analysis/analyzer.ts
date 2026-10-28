@@ -1,3 +1,4 @@
+import { readGrigdeskTask } from '../grigdeskTasks/store.ts';
 // Триаж задач: очередь + одиночный headless-запуск выбранной модели (read-only разведка
 // кода, без стенда). Агент сам пишет результат в каталог анализа (t<ID>.analysis.json +
 // t<ID>.md), раннер валидирует и обогащает (SHA репозиториев, стоимость, время).
@@ -42,6 +43,7 @@ import type {
 // то, что от них зовёт, и не выводит их формы из подсказок редактора.
 export interface AnalyzerConfig extends Record<string, unknown> {
   analysisDir: string;
+  grigdeskTasksPath?: string;
   factoryHome?: string;
   profilesDir?: string;
   factoryProfile?: string;
@@ -605,7 +607,20 @@ export class Analyzer {
     try { return JSON.parse(await fs.readFile(p, 'utf8')); } catch { return null; }
   }
 
-  async profile() {
+  /**
+   * Собственная задача оценивается по выбранному проекту без общего кеша профиля.
+   * Старые задачи и вызовы без номера сохраняют прежний выбор глобального профиля.
+   */
+  async profile(id?: string | number) {
+    const own = id == null ? null : await readGrigdeskTask(this.config, id);
+
+    if (own) {
+      return {
+        name: own.projectId,
+        ...await loadTriageProfile(this.config, own.projectId, { strict: true }),
+      };
+    }
+
     if (!this._profile) {
       const name = this.config.factoryProfile
         || (await this.factoryState.primaryProfile().catch(() => '')) || '';
@@ -826,7 +841,8 @@ export class Analyzer {
       if (!selected.ok) {
         throw Object.assign(new Error(selected.error), { analysisCode: selected.error });
       }
-      const profile = await this.profile();
+
+      const profile = await this.profile(id);
       const gitRefresh = await this._refreshBeforeRun(id, profile);
       // Оцениваем тот код, с которого начнёт конвейер: у isolated-профиля это снимок
       // интеграционной ветки, а не рабочая копия человека (lib/analysis/triageSource.ts).
@@ -1071,8 +1087,21 @@ export class Analyzer {
     return sanitized;
   }
 
-  /** Тикет из B24: заголовок + описание + несистемные комментарии. Комментарии — best effort. */
+  /**
+   * Собственная запись отдаёт исходный текст без HTML-очистки и обращения к порталу.
+   * Для Б24 сохраняются прежние детали и несистемные комментарии с best effort чтением.
+   */
   async _fetchTicket(id: string | number): Promise<any> {
+    const own = await readGrigdeskTask(this.config, id);
+
+    if (own) {
+      return {
+        title: own.title,
+        description: own.description,
+        comments: [],
+      };
+    }
+
     const detail = await this.b24.taskDetail(id);
     let comments = [];
     try {
@@ -1133,6 +1162,12 @@ export class Analyzer {
    * что сейчас бежит на конвейере.
    */
   async _taskProject(id: string | number): Promise<any> {
+    const own = await readGrigdeskTask(this.config, id);
+
+    if (own) {
+      return own.projectId;
+    }
+
     try {
       const { registry } = await this.factoryState.readRegistry(id);
       return String(registry?.PROFILE || '').trim() || null;

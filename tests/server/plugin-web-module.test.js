@@ -66,7 +66,7 @@ async function startApp(t, root, enabled = ['ui-module']) {
   const prefs = {
     read: () => data,
     write: (patch) => {
-       data = { ...data, ...patch }; 
+       data = { ...data, ...patch };
     },
   };
 
@@ -137,10 +137,10 @@ test('PM-SCAN: entry-ссылка наружу отвергнута, явная 
   await symlink(path.join(root, 'outside.js'), path.join(dir, 'ui/panel.js'));
   await packageAt(root, 'nav', {
     nav: {
-       path: '/custom', 
-      label: 'Своё имя', 
-      group: 'tools', 
-      order: 7 
+       path: '/custom',
+      label: 'Своё имя',
+      group: 'tools',
+      order: 7
     },
   });
 
@@ -199,9 +199,9 @@ test('PM-HTTP: каталог, MIME, helper и прежний prefix server.js; 
 
   assert.equal(probe.statusCode, 200);
   assert.deepEqual(probe.json(), {
-     pluginId: 'ui-module', 
-    hasConfig: true, 
-    hasPrefs: true 
+     pluginId: 'ui-module',
+    hasConfig: true,
+    hasPrefs: true
   });
 
   for (const id of ['off', 'future']) {
@@ -245,3 +245,46 @@ test('PM-DOCS-V2: документация api2 доступна, api99 искл
 
   assert.deepEqual((await app.pluginDocs()).map((item) => item.id), ['ui-module']);
 });
+
+for (const startOnLogin of [true, false]) {
+  test(`PM-START-DTO: scanner и HTTP сохраняют startOnLogin=${startOnLogin}`, async (t) => {
+    const root = await fixture(t);
+
+    await packageAt(root, 'ui-module', { webModule: { ...declaration, startOnLogin } });
+
+    const list = await scanUserPlugins(path.join(root, 'plugins'));
+
+    assert.equal(list[0].webModule.startOnLogin, startOnLogin);
+
+    const { app, headers } = await startApp(t, root);
+    const response = await app.inject({ url: '/api/plugins', headers });
+
+    assert.equal(response.statusCode, 200);
+
+    const card = response.json().plugins.find((item) => item.id === 'ui-module');
+
+    assert.ok(card, 'HTTP-каталог содержит тестовый плагин');
+    assert.equal(card.webModule.startOnLogin, startOnLogin);
+  });
+}
+
+for (const startOnLogin of ['true', 1, null]) {
+  test(`PM-START-DTO: ${JSON.stringify(startOnLogin)} отбрасывает только модуль`, async (t) => {
+    const root = await fixture(t);
+
+    await packageAt(root, 'bad', { webModule: { ...declaration, startOnLogin } });
+    await packageAt(root, 'healthy');
+    await packageAt(root, 'legacy', { api: 1, webModule: { ...declaration, startOnLogin } });
+
+    const warnings = [];
+    const list = await scanUserPlugins(path.join(root, 'plugins'), {
+      warn: (meta) => warnings.push(meta.plugin),
+    });
+
+    assert.equal(list.length, 3);
+    assert.equal(list.find((item) => item.id === 'bad').webModule ?? null, null);
+    assert.ok(warnings.includes('bad'));
+    assert.ok(list.find((item) => item.id === 'healthy').webModule);
+    assert.equal(list.find((item) => item.id === 'legacy').webModule ?? null, null);
+  });
+}

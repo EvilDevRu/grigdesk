@@ -10,6 +10,9 @@ import tls from 'node:tls';
 
 import { AuthStore } from '../../server/src/lib/authStore.ts';
 import { bindDevice, deviceOf, markRevoked } from '../../server/src/lib/clientAccess/principal.ts';
+import b24Module from '../../server/src/modules/b24/index.ts';
+import { ownTask, registerTasksModule, seedTasks, tasksFixture } from './helpers/grigdesk-tasks.js';
+
 import authModule from '../../server/src/modules/auth/index.ts';
 import authPlugin, { isLocalRequest, isSecureRequest } from '../../server/src/plugins/auth.ts';
 import { makeCert, temporary } from '../relay/helpers.js';
@@ -22,7 +25,7 @@ const windowKey = 'TEST_WINDOW_KEY'.padEnd(43, '_');
  * Настоящий TLS-вход отдаёт расшифрованный сокет основному HTTP-серверу Fastify.
  * Все сертификаты, сессии и порты изолированы; сборка app.ts и живой сервер не используются.
  */
-async function principalFixture(t) {
+async function principalFixture(t, registerModules = null) {
   const directory = await temporary(t);
   const identity = await makeCert(directory, 'server');
   const client = await makeCert(directory, 'client');
@@ -85,6 +88,11 @@ async function principalFixture(t) {
     local: isLocalRequest(request),
     secure: isSecureRequest(request),
   }));
+
+  if (registerModules) {
+    await registerModules(app);
+  }
+
   await app.listen({ host: '127.0.0.1', port: 0 });
   listener.listen(0, '127.0.0.1');
   await once(listener, 'listening');
@@ -265,4 +273,67 @@ test('устройство: отзыв распространяется на в�
   }
 
   assert.equal((await request(fixture)).body.error, 'device_revoked');
+});
+
+test('DEVICE-B24-DETAIL-01: устройство читает карточку Б24 без cookie', async (t) => {
+  const telegram = { links: [{ url: 'https://t.me/example_channel/42', text: 'Обсуждение' }] };
+  const fx = await principalFixture(t, async (app) => {
+    app.decorate('telegramDiscussion', async () => telegram);
+    await app.register(b24Module, {
+      b24: {
+        async taskDetail(id) {
+          assert.equal(String(id), '42');
+
+          return {
+            id: 42,
+            title: 'Портальная задача',
+            description: '<p>Исходный текст</p>'
+          };
+        },
+      },
+    });
+  });
+  const response = await request(fx, '/api/b24/task/42');
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.description, '<p>Исходный текст</p>');
+  assert.deepEqual(response.body.telegram, telegram);
+
+  const anonymous = await request(fx, '/api/b24/task/42', { key: undefined, cert: undefined });
+
+  assert.equal(anonymous.status, 401);
+  markRevoked(fx.client.fp);
+  assert.equal((await request(fx, '/api/b24/task/42')).status, 403);
+});
+
+test('LOCAL-DETAIL-03: устройство читает own и прежний Б24 по исходному TLS-транспорту', async (t) => {
+  const storage = await tasksFixture(t, { configured: true });
+  const task = ownTask();
+
+  await seedTasks(storage.config, [task]);
+
+  const fx = await principalFixture(t, async (app) => {
+    await registerTasksModule(app, storage.moduleOptions);
+    app.decorate('telegramDiscussion', async () => ({
+      links: [{ url: 'https://t.me/example_channel/42' }],
+    }));
+    await app.register(b24Module, { b24: storage.moduleOptions.b24 });
+  });
+  const missing = await request(fx, '/api/grigdesk-tasks/42');
+
+  assert.equal(missing.status, 404);
+  assert.equal(missing.body.error, 'grigdesk_task_not_found');
+
+  const portal = await request(fx, '/api/b24/task/42');
+
+  assert.equal(portal.status, 200);
+  assert.equal(portal.body.title, 'Задача портала');
+  assert.equal(portal.body.telegram.links.length, 1);
+  storage.portalCalls.length = 0;
+
+  const own = await request(fx, `/api/grigdesk-tasks/${task.id}`);
+
+  assert.equal(own.status, 200);
+  assert.deepEqual(own.body, task);
+  assert.deepEqual(storage.portalCalls, []);
 });

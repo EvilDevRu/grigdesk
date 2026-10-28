@@ -60,6 +60,8 @@ _route_v2_require_runner_invariant() {
   fi
 }
 
+# Проверяет форму доверенных JSON и возвращает только сведения для диспетчера.
+# Охват preflight вычисляется здесь из бандла, без отдельной копии топологии в launcher.
 _route_v2_json() {
   python3 - "$@" <<'PY'
 import json
@@ -174,6 +176,45 @@ elif op == "cursor-stop":
         }:
             fail()
     print(state, stop or "", last_node, last_outcome, sep="\t")
+elif op == "coverage-stages":
+    # Охват берётся из проверенного бандла: при старте все агенты, при resume
+    # только достижимые из курсора. Командные узлы и ворота исполнителей не требуют.
+    machine = value.get("machine") if isinstance(value, dict) else None
+    if not isinstance(machine, dict) or not isinstance(machine.get("nodes"), list):
+        fail()
+    nodes = {node["id"]: node for node in machine["nodes"]}
+    scope = args[0] if args else "*"
+    pending = list(nodes) if scope == "*" else ([] if scope == "-" else [scope])
+    visited = set()
+    stages = set()
+
+    # Переходы next/rewind встречаются как в on, так и в таблице onFailure.
+    # Рекурсивный обход включает ветки исправления, сохраняя границу достижимости.
+    def targets(action):
+        if not isinstance(action, dict):
+            return
+        for key, target in action.items():
+            if key in {"next", "rewind"} and isinstance(target, str):
+                yield target
+            elif isinstance(target, dict):
+                yield from targets(target)
+
+    while pending:
+        node_id = pending.pop()
+        if node_id in visited:
+            continue
+        if node_id not in nodes:
+            fail()
+        visited.add(node_id)
+        node = nodes[node_id]
+        if node.get("executor") == "agent":
+            run_key = node.get("runKey", "")
+            if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", run_key):
+                fail()
+            stages.add(run_key)
+        pending.extend(targets(node.get("on", {})))
+        pending.extend(targets(node.get("onFailure", {})))
+    print("\n".join(sorted(stages)))
 elif op == "node":
     node_id = args[0]
     machine = value.get("machine") if isinstance(value, dict) else None
@@ -412,13 +453,16 @@ PY
 
 _route_v2_require_delivery_context() {
   local context=$1 node=$2
-  python3 - "$context" "$node" <<'PY'
+  python3 - "$context" "$node" "$FACTORY_HOME/lib" <<'PY'
 import json
 import os
 import stat
 import sys
 
-path, node = sys.argv[1:]
+path, node, library = sys.argv[1:]
+sys.dont_write_bytecode = True
+sys.path.insert(0, library)
+from delivery_contract import validate as validate_strategy
 try:
     fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
     info = os.fstat(fd)
@@ -437,6 +481,13 @@ if not isinstance(delivery, dict) or delivery.get("mode") not in {"disabled", "p
 actions = delivery.get("actions")
 targets = delivery.get("targetBranches")
 allowed_actions = {"commit", "push", "pull-request", "task-comment"}
+strategy = delivery.get("strategy")
+if strategy is not None:
+    try:
+        validate_strategy(strategy, actions)
+    except (ValueError, TypeError):
+        raise SystemExit(78)
+    allowed_actions.add("merge")
 if (
     not isinstance(actions, list)
     or any(not isinstance(action, str) for action in actions)
@@ -460,7 +511,7 @@ if node == "ship":
     if (
         delivery["mode"] != "publish"
         or acceptance != "approved"
-        or not {"commit", "push", "pull-request"}.issubset(actions)
+        or (strategy is None and not {"commit", "push", "pull-request"}.issubset(actions))
         or not targets
     ):
         raise SystemExit(78)
@@ -781,6 +832,47 @@ route_v2_loop_ceiling_held() {
   declare -F v2_log >/dev/null && v2_log \
     "${last_node^^}: потолок кругов цикла не поднят (PROFILE_LOOP_MAX_ROUNDS=${max_rounds})" \
     "— задача остаётся на остановке"
+  return 11
+}
+
+# Провал и защитные остановки требуют явного goto с новой гипотезой: resume не
+# открывает новый визит и не может повторно открыть вмешательство человека.
+# Только чтение до lifecycle и подготовки стенда; 11 означает удержание остановки,
+# 0 — остальные случаи. Непрочитанный курсор проверит общий строгий путь resume.
+route_v2_failed_stop_held() {
+  local task attempt cursor_tmp state stop last_node last_outcome
+
+  task=$(_attempt_state_task_id "${1:-}") || return
+  attempt=$(_attempt_state_attempt_id "${2:-}") || return
+  _route_v2_load_attempt "$task" "$attempt" || return
+  cursor_tmp=$(mktemp "$(factory_control_root)/.route-v2-cursor.XXXXXX") || return 1
+
+  if ! attempt_stage_state_read_v2 "$task" "$attempt" >"$cursor_tmp" 2>/dev/null ||
+     ! IFS=$'\t' read -r state stop last_node last_outcome \
+       < <(_route_v2_json cursor-stop "$cursor_tmp" 2>/dev/null); then
+    rm -f -- "$cursor_tmp"
+    return 0
+  fi
+
+  rm -f -- "$cursor_tmp"
+  [[ "$state" == stopped && -n "$last_node" ]] || return 0
+
+  case "$stop" in
+    human)
+      [[ "$last_outcome" == failed ]] || return 0
+      ;;
+    rewind-limit|no-progress)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  if declare -F v2_log >/dev/null; then
+    v2_log "${last_node^^}: маршрут остановлен: $stop" \
+      "— сначала вернись на узел через «перейти сюда» (goto) с новой гипотезой"
+  fi
+
   return 11
 }
 

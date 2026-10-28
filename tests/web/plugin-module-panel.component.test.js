@@ -34,12 +34,27 @@ async function panelFixture(t, options = {}) {
     load: options.load,
 
     context: options.context,
+    styles: options.styles ?? (async () => () => {}),
+    listeners: new Set(),
+    backgroundStarts: 0,
+    backgroundCleanups: 0,
+    usingRegistry: false,
+    panelActive: vue.ref(true),
 
   };
   const child = {
     props: ['context', 'active', 'compact', 'presentation'],
+    /**
+     * Локальный ввод и счётчик mount различают скрытие панели и пересоздание компонента.
+     * Событие регистрируется в Vue scope, чтобы проверять настоящий путь снятия подписки.
+     */
     setup(props) {
       const text = vue.ref('');
+
+      state.mounts = (state.mounts || 0) + 1;
+      props.context.events?.on('tick', () => {
+        state.deliveries = (state.deliveries || 0) + 1;
+      });
 
       return () => vue.h('section', { 'data-module-child': props.context.pluginId }, [
         vue.h(ui.UiInput, {
@@ -58,6 +73,11 @@ async function panelFixture(t, options = {}) {
   state.load ??= async (id) => ({
     component: child,
     releaseStyles: () => state.releases.push(id),
+    start: () => {
+      state.backgroundStarts += 1;
+
+      return () => state.backgroundCleanups += 1;
+    },
   });
   state.context ??= async (id) => ({
 
@@ -74,6 +94,101 @@ async function panelFixture(t, options = {}) {
   });
   globalThis.__modulePanelTest = state;
 
+  const eventStubs = {
+    '../composables/useSse.ts': `
+      export const sseSubscribe = (listener) => {
+        const listeners = globalThis.__modulePanelTest.listeners;
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      };
+    `,
+  };
+
+  if (options.events) {
+    const exists = await access(webFile('src/pluginRuntime/events.ts')).then(() => true, () => false);
+
+    assert.equal(exists, true, 'Не реализована доставка событий скрытой панели');
+
+    const { createPluginEvents } = await compileModule(webFile('src/pluginRuntime/events.ts'), {
+      stubs: eventStubs,
+    });
+    const baseContext = state.context;
+
+    state.context = async (...args) => ({
+      ...await baseContext(...args),
+      events: createPluginEvents(args[0], {
+        signal: args[3].signal,
+        panelActive: state.panelActive,
+        backgroundActive: vue.ref(false),
+      }),
+    });
+  }
+
+  state.runtime = {
+    acquirePanel: async (id, value, init) => {
+      state.calls.push([id, value, init]);
+
+      const loaded = await state.load(id, value, init);
+      let released = false;
+      const release = () => {
+        if (!released) {
+          released = true;
+          loaded.releaseStyles();
+        }
+      };
+
+      try {
+        const context = await state.context(id, value, state.store, init);
+
+        return {
+          component: loaded.component,
+          context,
+          release,
+          setActive: (active) => state.panelActive.value = active,
+        };
+      } catch (error) {
+        release();
+
+        throw error;
+      }
+    },
+    stop: () => state.backgroundCleanups += 1,
+    dispose: () => state.backgroundCleanups += 1,
+  };
+
+  if (options.realRuntime) {
+    const exists = await access(webFile('src/pluginRuntime/runtime.ts')).then(() => true, () => false);
+
+    assert.equal(exists, true, 'Не реализован общий registry фонового модуля и панели');
+
+    const { createPluginRuntime } = await compileModule(webFile('src/pluginRuntime/runtime.ts'), {
+      stubs: eventStubs,
+    });
+
+    state.store.card.webModule = options.descriptor;
+    state.runtime = createPluginRuntime({
+      plugins: { byId: () => state.store.card },
+      router: { currentRoute: vue.ref({
+        path: '/chats',
+        meta: {},
+        params: {}
+      }), push: async () => {} },
+      dock: {
+        isOpen: false,
+        activeTool: null,
+        runtime: {}
+      },
+      loadPluginModule: (...args) => {
+        state.calls.push(args);
+
+        return state.load(...args);
+      },
+      createPluginContext: state.context,
+    });
+    t.after(() => state.runtime.dispose());
+    await state.runtime.startBackground('ui-module', options.descriptor);
+  }
+
   const facade = Object.keys(ui).map((name) =>
     `export const ${name} = globalThis.__modulePanelTest.ui.${name};`).join('\n');
   const panel = await compileVue(webFile('src/views/ext/PluginModulePanel.vue'), {
@@ -84,6 +199,17 @@ async function panelFixture(t, options = {}) {
           globalThis.__modulePanelTest.calls.push(args);
           return globalThis.__modulePanelTest.load(...args);
         };
+      `,
+
+      '../../pluginRuntime/bootstrap.ts': `
+        export const pluginRuntimeFor = () => {
+          globalThis.__modulePanelTest.usingRegistry = true;
+          return globalThis.__modulePanelTest.runtime;
+        };
+      `,
+
+      '../../pluginRuntime/styles.ts': `
+        export const loadPluginStyles = (...args) => globalThis.__modulePanelTest.styles(...args);
       `,
 
       '../../pluginRuntime/context.ts': `
@@ -103,7 +229,7 @@ async function panelFixture(t, options = {}) {
 
      pluginId: 'ui-module',
 
-    descriptor,
+    descriptor: options.descriptor ?? descriptor,
 
     label: 'Модуль проверки'
 
@@ -194,12 +320,16 @@ for (const variant of ['unsupported', 'import', 'empty-default', 'css', 'json', 
       } };
     const f = await panelFixture(t, {
       load: async () => {
-        if (['unsupported', 'import', 'empty-default', 'css'].includes(variant)) {
+        if (['unsupported', 'import', 'empty-default'].includes(variant)
+          || variant === 'css' && !globalThis.__modulePanelTest.usingRegistry) {
           throw failure;
         }
 
         return { component: broken, releaseStyles: () => releases.push('css') };
       },
+      ...(variant === 'css' ? { styles: async () => {
+        throw failure;
+      } } : {}),
       ...(variant === 'json' ? { context: async () => {
          throw failure;
       } } : {}),
@@ -285,3 +415,93 @@ test('PM-PANEL-RACE: смена id и unmount игнорируют старый 
   assert.deepEqual(released.sort(), ['last', 'new', 'old']);
   assert.equal(document.querySelectorAll('[data-ui-modal-root]').length, 0);
 });
+
+
+test('PM-PANEL-HIDDEN-STATE: active=false → true сохраняет DOM, ввод и один mount', async (t) => {
+  const f = await panelFixture(t);
+  const input = f.wrapper.get('input');
+
+  await input.setValue('Скрытый черновик');
+  await f.updateProps({ active: false });
+  assert.equal(f.wrapper.get('input').element === input.element, true);
+  await f.updateProps({ active: true });
+  assert.equal(f.wrapper.get('input').element === input.element, true);
+  assert.equal(f.wrapper.get('input').element.value, 'Скрытый черновик');
+  assert.equal(f.state.mounts, 1);
+  assert.equal(f.state.calls.length, 1);
+});
+
+
+test('PM-PANEL-VISIBILITY: active=false снимает доставку, DOM и ввод сохраняются', async (t) => {
+  const f = await panelFixture(t, { events: true });
+  const input = f.wrapper.get('input');
+  const emit = () => {
+    for (const listener of f.state.listeners) {
+      listener('plugin-event', {
+        pluginId: 'ui-module',
+        event: 'tick',
+        data: 1
+      });
+    }
+  };
+
+  await input.setValue('Черновик с подпиской');
+  emit();
+  assert.equal(f.state.deliveries, 1);
+  await f.updateProps({ active: false });
+  emit();
+  assert.equal(f.state.deliveries, 1);
+  assert.equal(f.wrapper.get('input').element === input.element, true);
+  await f.updateProps({ active: true });
+  emit();
+  assert.equal(f.state.deliveries, 2);
+  assert.equal(f.wrapper.get('input').element.value, 'Черновик с подпиской');
+  assert.equal(f.state.mounts, 1);
+});
+
+for (const failed of [false, true]) {
+  test(`PM-PANEL-CSS-ORDER: стили до mount, отказ локален (failed=${failed})`, async (t) => {
+    const pending = deferred();
+    const stylesCalls = [];
+    const f = await panelFixture(t, {
+      realRuntime: true,
+      descriptor: { ...descriptor, startOnLogin: true },
+      styles: async (urls, signal) => {
+        stylesCalls.push([urls, signal]);
+        await pending.promise;
+
+        if (failed) {
+          throw new Error('CSS панели недоступен');
+        }
+
+        return () => stylesCalls.push('released');
+      },
+    });
+
+    assert.equal(f.wrapper.find('[data-module-child]').exists(), false,
+      'Компонент не должен монтироваться до завершения CSS');
+    assert.equal(stylesCalls.length, 1);
+    assert.deepEqual(stylesCalls[0][0], descriptor.css);
+    pending.resolve();
+    await f.settle();
+
+    if (failed) {
+      assert.equal(f.wrapper.find('[data-module-child]').exists(), false);
+
+      for (const locale of ['ru', 'en']) {
+        f.ui.setUiLocale(locale);
+        await f.settle();
+        assert.ok(f.wrapper.text().includes(f.ui.t('core.pluginModuleLoadFailed', {
+          name: 'Модуль проверки',
+        })));
+      }
+    } else {
+      assert.equal(f.wrapper.find('[data-module-child]').exists(), true);
+      f.root.unmount();
+      assert.equal(stylesCalls.at(-1), 'released');
+    }
+
+    assert.equal(f.state.backgroundStarts, 1);
+    assert.equal(f.state.backgroundCleanups, 0);
+  });
+}

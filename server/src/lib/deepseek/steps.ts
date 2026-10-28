@@ -24,13 +24,30 @@ function textContent(value: unknown): string {
   }).filter(Boolean).join('\n');
 }
 
+/**
+ * Известные инструменты Harness получают общий вид строки ленты.
+ * Чтение текста и изображения сохраняет путь в Read, прочие имена остаются в fallback.
+ */
 function kindFor(title: string): string {
-  if (title === 'bash') return 'execute';
-  if (title === 'read') return 'read';
-  if (title === 'write') return 'write';
-  if (title === 'edit') return 'edit';
-  if (title === 'grep' || title === 'glob') return 'search';
-  if (title.startsWith('mcp__')) return 'mcp';
+  if (title === 'bash') {
+    return 'execute';
+  }
+  if (title === 'read' || title === 'read_image') {
+    return 'read';
+  }
+  if (title === 'write') {
+    return 'write';
+  }
+  if (title === 'edit') {
+    return 'edit';
+  }
+  if (title === 'grep' || title === 'glob') {
+    return 'search';
+  }
+  if (title.startsWith('mcp__')) {
+    return 'mcp';
+  }
+
   return 'other';
 }
 

@@ -53,7 +53,8 @@ export async function launchTool(
   }
 
   const item = TOOL_META_BY_ID.get(id)
-    ?? (getActivePinia() && usePluginsStore().webPages.some((page) => page.id === id)
+    ?? (getActivePinia() && [...usePluginsStore().modulePages, ...usePluginsStore().webPages]
+      .some((page) => page.id === id)
       ? { route: pluginPageRoute(id) } : null);
 
   if (!item) {
@@ -68,7 +69,7 @@ export async function launchTool(
 
     dock.setRuntime(id, { focusNonce: nonce });
   };
-  const routeTool = route.meta?.tool || null;
+  const routeTool = route.meta?.tool === 'ext' ? route.params.id : route.meta?.tool || null;
 
   if (routeTool) {
     if (routeTool === id) {

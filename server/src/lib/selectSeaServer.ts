@@ -9,6 +9,7 @@ import { parseEnv, promisify } from 'node:util';
 import { desktopRuntimePath, parseRuntimeDescriptor } from '../../../shared/desktop/desktopRuntime.ts';
 import { acquireDirectoryLock, type DirectoryLock } from '../../../shared/node/directoryLock.ts';
 import { readTextOrNull, syncDirectory } from '../../../shared/node/files.ts';
+import { sha256File } from '../../../shared/node/hash.ts';
 import { probeServerBinary, verifyServerBinary } from '../../../shared/node/serverBinaryRuntime.ts';
 import { isNodeVersionSupported } from './nodeVersion.ts';
 import { isDirectRun } from './helperEntry.ts';
@@ -20,6 +21,8 @@ export interface SelectSeaServerInput {
   root: string;
   windowVersion?: 4;
   expectedPrevious?: string | null;
+  expectedBuildSelection?: string;
+  expectedBinarySha256?: string;
   signal?: AbortSignal;
   env?: NodeJS.ProcessEnv;
   home?: string;
@@ -63,7 +66,9 @@ export async function assertDataIdle(home: string): Promise<void> {
   });
 
   if (current === owner.starttime || exists && !current) {
-    throw new Error(`Папкой данных уже пользуется сервер (pid ${owner.pid}); закройте его перед выбором.`);
+    throw Object.assign(new Error(
+      `Папкой данных уже пользуется сервер (pid ${owner.pid}); закройте его перед выбором.`,
+    ), { code: 'server_selection_data_busy' });
   }
 }
 
@@ -194,6 +199,25 @@ async function writePrivate(file: string, text: string): Promise<void> {
 }
 
 /**
+ * Primary и намерение полной сборки проверяются до проб и непосредственно перед commit.
+ * Смена любого входа сохраняет выбор, сделанный другим writer во время проверки ELF.
+ */
+async function assertSelectionUnchanged(
+  runtimePath: string, previous: string | null, expectedBuildSelection?: string,
+): Promise<void> {
+  if (await readTextOrNull(runtimePath) !== previous) {
+    throw new Error('Описание сервера изменилось во время проверки; повторите выбор.');
+  }
+
+  if (expectedBuildSelection !== undefined
+    && await readTextOrNull(`${runtimePath}.build-selection`) !== expectedBuildSelection) {
+    throw Object.assign(new Error('Отложенный выбор сервера изменился; повторите запуск окна.'), {
+      code: 'server_selection_conflict',
+    });
+  }
+}
+
+/**
  * Выбор ELF, прежнего R и source использует общий lock/CAS/backup protocol.
  * Проверки обеих папок данных и профилей выполняются до первой публикации.
  */
@@ -227,9 +251,7 @@ export async function selectSeaServer(input: SelectSeaServerInput): Promise<stri
   try {
     await recoverSelectionLocked(runtimePath);
 
-    if (await readTextOrNull(runtimePath) !== previous) {
-      throw new Error('Описание сервера изменилось во время проверки; повторите выбор.');
-    }
+    await assertSelectionUnchanged(runtimePath, previous, input.expectedBuildSelection);
 
     const descriptor = previous === null ? null : parseRuntimeDescriptor(previous);
 
@@ -276,8 +298,18 @@ export async function selectSeaServer(input: SelectSeaServerInput): Promise<stri
       };
     } else if (binary) {
       await assertServerBinaryFile(root);
+
+      if (input.expectedBinarySha256 && await sha256File(root) !== input.expectedBinarySha256) {
+        throw new Error('Сервер изменился после полной сборки; повторите полную сборку.');
+      }
+
       await (input.verifyBinary ?? verifyBinary)(root, { ...env, GRIGDESK_HOME: selectedHome },
         input.signal);
+
+      if (input.expectedBinarySha256 && await sha256File(root) !== input.expectedBinarySha256) {
+        throw new Error('Сервер изменился во время проверки отложенного выбора.');
+      }
+
       next = {
         version: 4,
         kind: 'binary',
@@ -306,11 +338,12 @@ export async function selectSeaServer(input: SelectSeaServerInput): Promise<stri
 
     input.signal?.throwIfAborted();
 
-    if (await readTextOrNull(runtimePath) !== previous) {
-      throw new Error('Описание сервера изменилось во время проверки; повторите выбор.');
-    }
+    await assertSelectionUnchanged(runtimePath, previous, input.expectedBuildSelection);
 
     if (JSON.stringify(descriptor) === JSON.stringify(next)) {
+      await rm(`${runtimePath}.build-selection`, { force: true });
+      await syncDirectory(directory);
+
       return runtimePath;
     }
 
@@ -334,6 +367,7 @@ export async function selectSeaServer(input: SelectSeaServerInput): Promise<stri
     await input.afterRename?.('primary');
     await syncDirectory(directory);
     await rm(`${runtimePath}.transaction`);
+    await rm(`${runtimePath}.build-selection`, { force: true });
     await syncDirectory(directory);
   } finally {
     await rm(temporary, { force: true });
@@ -449,10 +483,22 @@ async function recoverSelectionLocked(runtimePath: string): Promise<void> {
  * Только доказанно мёртвый owner reclaimed общим directoryLock, без ручного обхода.
  */
 export async function recoverRuntimeSelection(runtimePath: string): Promise<void> {
+  await withRuntimeSelectionLock(runtimePath, async () => {});
+}
+
+/**
+ * Очередь полной сборки разделяет блокировку и восстановление с обычным выбором.
+ * Callback не должен повторно вызывать selector, удерживающий эту же блокировку.
+ */
+export async function withRuntimeSelectionLock<T>(
+  runtimePath: string, action: () => Promise<T>,
+): Promise<T> {
   const lock = await acquireSelectionLock(runtimePath);
 
   try {
     await recoverSelectionLocked(runtimePath);
+
+    return await action();
   } finally {
     await lock.release();
   }

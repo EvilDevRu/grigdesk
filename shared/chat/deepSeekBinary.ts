@@ -76,7 +76,11 @@ const decodeHost = objectOf({
   }),
 });
 
-export type DeepSeekRuntimeInfo = ReturnType<typeof decodeInfo>;
+type BaseRuntimeInfo = ReturnType<typeof decodeInfo>;
+
+export type DeepSeekRuntimeInfo = Omit<BaseRuntimeInfo, 'capabilities'> & {
+  capabilities: BaseRuntimeInfo['capabilities'] & { toolPermissions?: boolean; glmNativeGate?: boolean };
+};
 export type DeepSeekHostContract = ReturnType<typeof decodeHost>;
 
 /**
@@ -136,7 +140,21 @@ function positiveInteger(value: unknown, path: string): number {
  * Дополнительные поля не ограничивают совместимые upstream-версии и ABI worker.
  */
 export function decodeDeepSeekRuntimeInfo(value: unknown): DeepSeekRuntimeInfo {
-  const result = decodeInfo(value, 'runtime-info');
+  const result: DeepSeekRuntimeInfo = decodeInfo(value, 'runtime-info');
+  const source = decoders.record(value, 'runtime-info');
+  const sourceCapabilities = decoders.record(source.capabilities, 'runtime-info.capabilities');
+
+  if (Object.hasOwn(sourceCapabilities, 'toolPermissions')) {
+    result.capabilities.toolPermissions = boolean(
+      sourceCapabilities.toolPermissions, 'runtime-info.capabilities.toolPermissions',
+    );
+  }
+
+  if (Object.hasOwn(sourceCapabilities, 'glmNativeGate')) {
+    result.capabilities.glmNativeGate = boolean(
+      sourceCapabilities.glmNativeGate, 'runtime-info.capabilities.glmNativeGate',
+    );
+  }
 
   if (!result.journal.read.includes(result.journal.write)) {
     invalidMetadata('runtime-info.journal');

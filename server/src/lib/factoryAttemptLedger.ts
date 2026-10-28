@@ -65,6 +65,7 @@ export interface ContractRepository {
 // Контракт профиля попытки: что за стенд, чья ветка и какие репозитории закреплены.
 export interface TrustedProfileContract {
   workspaceMode: string;
+  standMode?: 'services' | 'none';
   standOwnership: string;
   sourceBranch: string;
   container: string;
@@ -326,6 +327,17 @@ function parseProfileContract(text: string): TrustedProfileContract {
     'container', 'service-host',
   ];
   const workspaceMode = singleton.get('workspace-mode') ?? '';
+  const standMode = singleton.get('stand-mode');
+
+  if (standMode !== undefined) {
+    required.push('stand-mode');
+
+    if (!['services', 'none'].includes(standMode)
+        || (standMode === 'none' && workspaceMode !== 'isolated')) {
+      fail('profile contract: invalid stand mode');
+    }
+  }
+
   if (workspaceMode === 'shared') required.push('frontend-port', 'api-port');
   if ([...singleton.keys()].sort().join('\0') !== required.sort().join('\0')
       || singleton.get('schema') !== '1' || singleton.get('repos-mode') !== 'generic'
@@ -366,8 +378,10 @@ function parseProfileContract(text: string): TrustedProfileContract {
     }
     names.add(repo.name);
   }
+
   return {
     workspaceMode,
+    ...(standMode === undefined ? {} : { standMode: standMode as 'services' | 'none' }),
     standOwnership,
     sourceBranch,
     container: singleton.get('container') ?? '',
@@ -674,6 +688,132 @@ export async function readFactoryAttemptLedger({ controlDir, stateDir, task, reg
   };
 }
 
+export interface FactoryStageEvent {
+  schema: number;
+  protocolVersion: number;
+  taskId: string;
+  attemptId: string;
+  profile: string;
+  catalogHash: string;
+  route: string;
+  routeHash: string;
+  sequence: number;
+  at: string;
+  kind: string;
+  node: string;
+  reason: string | null;
+  outcome: string | null;
+  previousEventHash: string | null;
+  actor?: string;
+  action: {
+    rewind?: string;
+    reset?: string[];
+    stop?: string;
+  };
+  verdict?: {
+    owner?: string | null;
+    findings?: {
+      id?: string;
+      summary?: string;
+      anchor?: string;
+    }[];
+  };
+  before: unknown;
+  after: unknown;
+  eventHash: string;
+}
+
+type StageEventAuthority = Pick<Awaited<ReturnType<typeof readFactoryAttemptLedger>>,
+  'task' | 'attempt' | 'profile' | 'catalogHash' | 'route' | 'routeHash' | 'stageIdentity'>;
+
+/**
+ * Проверяет content-addressed события и всю цепочку до уже trusted текущего head.
+ * Runtime projection, совпавший node и неподтверждённый JSON не заменяют эту проверку.
+ */
+export async function readFactoryStageEvents(controlDir: string, trusted: StageEventAuthority) {
+  if (!path.isAbsolute(controlDir) || !TASK_RE.test(trusted.task) || !ATTEMPT_RE.test(trusted.attempt)
+    || !trusted.stageIdentity) {
+    fail('stage event: missing trusted identity');
+  }
+
+  const dir = path.join(controlDir, 'protocol-v2/tasks', `t${trusted.task}`,
+    'attempts', trusted.attempt, 'stage-results');
+
+  await trustedDirectory(dir, 'stage results');
+
+  const entries = await fs.readdir(dir);
+  const bySequence = new Map<number, { file: string; hash: string }>();
+
+  for (const file of entries) {
+    const match = /^event\.(\d{20})\.([a-f0-9]{64})\.json$/.exec(file);
+
+    if (!match || Number(match[1]) > trusted.stageIdentity.sequence) {
+      continue;
+    }
+
+    const sequence = Number(match[1]);
+
+    if (bySequence.has(sequence)) {
+      fail('stage event: duplicate sequence');
+    }
+
+    bySequence.set(sequence, { file, hash: match[2]! });
+  }
+
+  const events: FactoryStageEvent[] = [];
+  let previousHash: string | null = null;
+
+  for (let sequence = 0; sequence <= trusted.stageIdentity.sequence; sequence += 1) {
+    const name = bySequence.get(sequence);
+
+    if (!name) {
+      fail('stage event: missing sequence');
+    }
+
+    const { bytes, value } = await regularJson<Omit<FactoryStageEvent, 'eventHash'>>(
+      path.join(dir, name.file), 'stage event',
+    );
+
+    if (createHash('sha256').update(bytes).digest('hex') !== name.hash
+      || value.schema !== 1 || value.protocolVersion !== 2 || value.sequence !== sequence
+      || value.taskId !== trusted.task || value.attemptId !== trusted.attempt
+      || value.profile !== trusted.profile || value.catalogHash !== trusted.catalogHash
+      || value.route !== trusted.route || value.routeHash !== trusted.routeHash
+      || value.previousEventHash !== previousHash || !NODE_ID_RE.test(value.node)
+      || !['init', 'pause', 'commit', 'human-rewind', 'rewind-limit', 'no-progress',
+        'loop-ceiling', 'loop-continue'].includes(value.kind)) {
+      fail('stage event: content or chain identity mismatch');
+    }
+
+    events.push({ ...value, eventHash: name.hash });
+    previousHash = name.hash;
+  }
+
+  if (previousHash !== trusted.stageIdentity.headEventHash) {
+    fail('stage event: trusted head mismatch');
+  }
+
+  return events;
+}
+
+/**
+ * Возвращает exact событие лишь после проверки связи с текущим trusted head.
+ * Более поздние корректные события не отменяют уже доказанный receipt решения.
+ */
+export async function readFactoryStageEvent(
+  controlDir: string,
+  trusted: StageEventAuthority,
+  sequence: number,
+): Promise<FactoryStageEvent | null> {
+  if (!Number.isSafeInteger(sequence) || sequence < 0) {
+    fail('stage event: invalid sequence');
+  }
+
+  const events = await readFactoryStageEvents(controlDir, trusted);
+
+  return events.find((event) => event.sequence === sequence) || null;
+}
+
 /** Exact mutable env projection check against the immutable profile contract. */
 export function verifyFactoryAttemptEnvironment(
   trusted: TrustedProfileContract | null | undefined,
@@ -688,6 +828,10 @@ export function verifyFactoryAttemptEnvironment(
       ))) {
     fail('sandbox env disagrees with trusted profile contract');
   }
+  if (trusted.standMode === 'none' && (env.FE_PORT !== '' || env.API_PORT !== '')) {
+    fail('sandbox env: none requires explicit empty ports');
+  }
+
   const expectedRepoKeys = new Set(['REPO_COUNT']);
   for (let index = 0; index < trusted.repositories.length; index += 1) {
     const repo = trusted.repositories[index];

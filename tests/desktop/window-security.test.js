@@ -47,6 +47,8 @@ test('DW-12: окно получает безопасные опции', () => {
   assert.equal(options.minHeight, 600);
   assert.equal(options.title, 'GrigDesk');
   assert.equal(options.show, false);
+  assert.equal(options.frame, false);
+  assert.equal(options.titleBarOverlay, undefined);
   assert.equal(options.autoHideMenuBar, false);
   assert.equal(options.backgroundColor, '#0b0d11');
   assert.equal(options.icon, '/app/icon.png');
@@ -415,6 +417,7 @@ test('DW-18: window.open получает безопасный видимый ch
   assert.equal(response.overrideBrowserWindowOptions.show, true);
   assert.equal(response.overrideBrowserWindowOptions.titleBarStyle, 'default');
   assert.equal(response.overrideBrowserWindowOptions.titleBarOverlay, false);
+  assert.equal(response.overrideBrowserWindowOptions.frame, true);
   assert.equal(response.overrideBrowserWindowOptions.webPreferences.session, session);
   assert.deepEqual(response.overrideBrowserWindowOptions.webPreferences, childOptions.webPreferences);
   assert.equal(response.overrideBrowserWindowOptions.webPreferences.partition, LOCAL_PARTITION);

@@ -342,6 +342,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
           entry: m.webModule.entry,
           css: m.webModule.css,
           locales: m.webModule.locales,
+          ...(m.webModule.startOnLogin === undefined ? {} : { startOnLogin: m.webModule.startOnLogin }),
         } : null,
         serverError: m.serverError ?? null,
         needsRestart: needsRestart(m),
@@ -382,6 +383,10 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
         return pluginChangeError(error, reply);
       }
 
+      if (changed) {
+        fastify.sse?.broadcast?.('state-change', { plugins: true });
+      }
+
       return {
         ok: true,
         enabled,
@@ -408,6 +413,10 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
         prefs.write({ plugins: (p.plugins as Record<string, unknown>) || {} });
       }
       throw error;
+    }
+
+    if (isEnabled(p, m) !== enabled) {
+      fastify.sse?.broadcast?.('state-change', { plugins: true });
     }
 
     return {

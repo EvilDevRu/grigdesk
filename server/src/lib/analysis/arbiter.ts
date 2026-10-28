@@ -136,7 +136,7 @@ export class AnalysisArbiter {
     const effort = efforts.includes(triageModel?.effort)
       ? triageModel?.effort
       : null;
-    const profile = await this.analyzer.profile();
+    const profile = await this.analyzer.profile(id);
     let lease: TriageSourceLease | null = null;
     let staging = '';
 

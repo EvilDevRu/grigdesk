@@ -252,6 +252,13 @@
   padding-right: 42px;
 }
 
+/* У составного поиска уже есть доступная кнопка очистки.
+   Браузерный крестик скрываем только здесь, чтобы не дублировать действие. */
+.ui-search-input .ui-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 .ui-password-input__action,
 .ui-search-input__action,
 .ui-input-composite > .ui-icon-button {

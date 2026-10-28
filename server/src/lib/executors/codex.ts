@@ -4,7 +4,7 @@
 // `thread/resume`, затем `turn/start`. Песочница workspace-write: текущий cwd и явно
 // дополнительные рабочие корни доступны для правок, сеть включена для gh/git/package CLI,
 // остальная файловая система закрыта.
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn } from '../providerInstall/externalCliProcess.ts';
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -22,7 +22,7 @@ import { CODEX_TURN_FAILURE_RULES, codexTurnFailure } from './_codexTurnFailures
 import { contextCacheStatus, reportedContextCache } from '../chat/contextCache.ts';
 import { createCodexStepNormalizer } from './_codexSteps.ts';
 import { CODEX_UNTRUSTED_INPUT, runCodexUntrusted } from './_codexUntrusted.ts';
-import type { PreparedNativeSettings } from '../executorSettings/types.ts';
+import type { PreparedExecutorRuntime, PreparedNativeSettings } from '../executorSettings/types.ts';
 import { codexNativeSettings } from '../executorSettings/codex.ts';
 import { nativeSettingsTomlArgs } from '../executorSettings/toml.ts';
 import { verifyNativeSettings } from '../executorSettings/capability.ts';
@@ -46,6 +46,14 @@ import type {
   InTurnReceiptEvent,
   InTurnUnavailableReason,
 } from '../../../../shared/chat/chatInTurnContracts.ts';
+
+import {
+  assertCodexRuntime, assertCodexRuntimeBeforeSpawn, codexModeProfile, availableCodexPermissionModes,
+  codexRuntimeFingerprint, normalizeCodexPermissionMode, prepareCodexPermissionRuntime,
+} from './_codexPermissionModes.ts';
+import { createCodexInteractionWaiters } from './_codexApprovals.ts';
+import { ExecutorRuntimeError } from './errors.ts';
+import { codexQuestionPresentation, codexQuestionResponse } from './_codexQuestions.ts';
 
 const APP_SERVER_TIMEOUT_MS = 15_000;
 const SCOPED_WORKSPACE_CACHE_MS = 60_000;
@@ -1251,7 +1259,7 @@ function codexDynamicToolResponse(value: unknown) {
 export function openCodexSession({
   config, env, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
   providerSettings, nativeSettings, log, hooks = {}, tokenInfoReader = readCodexThreadTokenInfo, workTools,
-  workspaceAccess,
+  workspaceAccess, permissionMode, modeSelection, preparedRuntime, runtimeProfileFingerprint,
 }: {
   config: CodexConfig;
   env?: NodeJS.ProcessEnv;
@@ -1271,6 +1279,10 @@ export function openCodexSession({
   tokenInfoReader?: typeof readCodexThreadTokenInfo;
   workTools?: CodexWorkToolsPort | null;
   workspaceAccess?: CodexWorkspaceAccess | null;
+  permissionMode?: string;
+  modeSelection?: unknown;
+  preparedRuntime?: PreparedExecutorRuntime;
+  runtimeProfileFingerprint?: string;
 }) {
   const roots = workspaceAccess
     ? codexWorkspaceRoots(cwd, workspaceAccess.readableRoots)
@@ -1278,6 +1290,67 @@ export function openCodexSession({
   const writableRoots = workspaceAccess
     ? codexWorkspaceRoots('', workspaceAccess.writableRoots)
     : roots;
+  const runtimeInput = {
+    config,
+    cwd,
+    extraDirs,
+    workspaceAccess,
+    permissionMode,
+    modeSelection,
+    runtimeProfileFingerprint
+  };
+
+  assertCodexRuntimeBeforeSpawn(preparedRuntime, runtimeInput);
+
+  const modeProfile = codexModeProfile(permissionMode, workspaceAccess);
+  const { approvalPolicy, approvalsReviewer } = modeProfile;
+  const sandboxPolicy = modeProfile.sandbox === 'danger-full-access'
+    ? { type: 'dangerFullAccess' }
+    : {
+      type: 'workspaceWrite',
+      writableRoots,
+      ...(workspaceAccess ? { readOnlyAccess: {
+        type: 'restricted',
+        includePlatformDefaults: true,
+        readableRoots: roots,
+      } } : {}),
+      networkAccess: workspaceAccess?.networkAccess ?? true,
+      excludeTmpdirEnvVar: workspaceAccess?.excludeTmpdirEnvVar ?? false,
+      excludeSlashTmp: workspaceAccess?.excludeSlashTmp ?? false,
+    };
+  const newMode = !!permissionMode && permissionMode !== 'auto' && !workspaceAccess;
+
+  /**
+   * Новые профили подтверждают полную sandbox, включая roots, сеть и временные пути.
+   * Legacy Auto сохраняет прежний effective handshake для совместимости версий CLI.
+   */
+  function assertEffectiveProfile(value: unknown) {
+    const opened = value as {
+      approvalPolicy?: unknown;
+      approvalsReviewer?: unknown;
+      sandbox?: Record<string, unknown>
+    } | null;
+    const actual = opened?.sandbox;
+    const expected = sandboxPolicy as Record<string, unknown>;
+    // Native readback не перечисляет cwd в writableRoots: он разрешён неявно.
+    // Сверяем полное множество и не теряем проверку лишних внешних grants.
+    const actualRoots = Array.isArray(actual?.writableRoots)
+      ? [...new Set([...(cwd ? [cwd] : []), ...actual.writableRoots])].sort() : null;
+    const expectedRoots = [...writableRoots].sort();
+    const mismatch = opened?.approvalPolicy !== approvalPolicy
+      || opened?.approvalsReviewer !== approvalsReviewer || actual?.type !== expected.type
+      || (newMode && Object.keys(expected).some((key) => (
+        key === 'writableRoots'
+          ? JSON.stringify(actualRoots) !== JSON.stringify(expectedRoots)
+          : JSON.stringify(actual?.[key]) !== JSON.stringify(expected[key])
+      )));
+
+    if (mismatch) {
+      throw new ExecutorRuntimeError('mode_unavailable',
+        'Codex не принял политику, reviewer или sandbox выбранного режима.');
+    }
+  }
+
   const rateLimitSnapshots = new Map<string, CodexBucket>();
   const pending = new Map<number, {
     method: string;
@@ -1299,6 +1372,7 @@ export function openCodexSession({
   let exited = false;
   let exitReason = '';
   let turn: CodexTurn | null = null;
+  let turnsStarted = 0;
   const elicitationControllers = new Map<string, {
     controller: AbortController;
     current: CodexTurn;
@@ -1325,6 +1399,14 @@ export function openCodexSession({
     if (exited || child.stdin?.destroyed) throw new Error('Codex app-server stdin уже закрыт');
     child.stdin?.write(`${JSON.stringify(payload)}\n`);
   }
+
+  const interactions = createCodexInteractionWaiters({
+    send(id, result) {
+      if (!exited) {
+        send({ id, result });
+      }
+    },
+  });
 
   function request(method: string, params?: unknown, owner: CodexTurn | null = null) {
     return new Promise<unknown>((requestResolve, requestReject) => {
@@ -1414,6 +1496,7 @@ export function openCodexSession({
    * объявляем канал уточнений закрытым, чтобы поздний текст не прилип к следующему ходу.
    */
   function closeTurn(current: CodexTurn) {
+    interactions.cancel(current);
     clearTimeout(current.interruptTimer ?? undefined);
     abandonMessages(current);
     // Ход закрыт — канал уточнений больше не принимает: позднее сообщение не должно
@@ -2135,6 +2218,44 @@ export function openCodexSession({
 
     if (messageObject?.method) {
       protocol = 'app-server';
+
+      if (messageObject.method === 'serverRequest/resolved') {
+        const params = messageObject.params as { threadId?: unknown; requestId?: unknown } | null;
+
+        if (params?.threadId === threadId) {
+          interactions.resolved(params.requestId);
+        }
+      }
+      if (messageObject.id !== undefined && messageObject.method === 'item/tool/requestUserInput') {
+        const id = messageObject.id;
+        const params = messageObject.params as {
+          threadId?: unknown;
+          turnId?: unknown;
+          itemId?: unknown;
+        } | null;
+
+        if (typeof id !== 'string' && (typeof id !== 'number' || !Number.isSafeInteger(id))) {
+          send({ id, error: { code: -32602, message: 'Некорректный ID вопроса Codex' } });
+
+          return;
+        }
+
+        const presentation = codexQuestionPresentation(params);
+        const current = turn;
+
+        if (!presentation || !current || current.settled || !current.turnId
+          || params?.threadId !== threadId || params?.turnId !== current.turnId
+          || typeof params?.itemId !== 'string' || !params.itemId) {
+          interactions.replyOnce(id, { answers: {} }, current || undefined);
+
+          return;
+        }
+
+        interactions.ask(id, current, presentation, current.onPermission,
+          (decision) => codexQuestionResponse(presentation, decision), { answers: {} });
+
+        return;
+      }
       if (messageObject.id !== undefined
         && messageObject.method === 'mcpServer/elicitation/request') {
         consumeElicitationRequest(messageObject);
@@ -2144,8 +2265,8 @@ export function openCodexSession({
         consumeWorkToolRequest(messageObject);
         return;
       }
-      // При policy=never запросов разрешения быть не должно. Не оставляем
-      // неожиданный server request висеть бесконечно — завершаем ход fail-closed.
+      // Native Auto-review решает разрешения внутри Codex. Ручной запрос здесь
+      // неподдерживаем: отвечаем ошибкой и останавливаем собственный native ход.
       if (messageObject.id !== undefined) {
         try {
           send({
@@ -2153,7 +2274,21 @@ export function openCodexSession({
             error: { code: -32601, message: `GrigDesk не поддерживает server request ${messageObject.method}` },
           });
         } catch { /* основной отказ ниже */ }
+
+        const params = messageObject.params as { threadId?: unknown; turnId?: unknown } | null;
+        const requestThreadId = params?.threadId;
+        const requestTurnId = params?.turnId;
+        const foreignThread = typeof requestThreadId === 'string' && requestThreadId
+          && threadId && requestThreadId !== threadId;
+        const foreignTurn = typeof requestTurnId === 'string' && requestTurnId
+          && turn?.turnId && requestTurnId !== turn.turnId;
+
+        if (foreignThread || foreignTurn) {
+          return;
+        }
+
         finishTurnError(turn, new Error(`Codex запросил неподдерживаемое действие: ${messageObject.method}`));
+        void closeSession(true);
         return;
       }
       consumeAppNotification(messageObject);
@@ -2259,14 +2394,23 @@ export function openCodexSession({
     const common = {
       ...(model && { model }),
       cwd,
-      approvalPolicy: 'never',
-      sandbox: 'workspace-write',
+      approvalPolicy,
+      approvalsReviewer,
+      sandbox: modeProfile.sandbox,
       // Доверенные каталоги «Настройки → Исполнители» обязаны быть рабочими корнями,
       // а не только writable-песочницей: `codex exec --add-dir` давал агенту именно
       // рабочую область, и после переезда на app-server она сузилась до cwd.
       runtimeWorkspaceRoots: roots,
-      config: { ...(nativeSettings?.payload as Record<string, unknown> ?? {}),
-        ...codexAppServerConfig(compactWindow) },
+      config: {
+        ...(nativeSettings?.payload as Record<string, unknown> ?? {}),
+        ...codexAppServerConfig(compactWindow),
+        ...(newMode && modeProfile.sandbox === 'workspace-write' ? {
+          'sandbox_workspace_write.writable_roots': writableRoots,
+          'sandbox_workspace_write.network_access': true,
+          'sandbox_workspace_write.exclude_tmpdir_env_var': false,
+          'sandbox_workspace_write.exclude_slash_tmp': false,
+        } : {}),
+      },
     };
     const opened = (threadId
       ? await request('thread/resume', { threadId, ...common })
@@ -2274,20 +2418,67 @@ export function openCodexSession({
         ...common,
         serviceName: 'grigdesk',
         ...(dynamicTools.length ? { dynamicTools } : {}),
-      })) as { thread?: { id?: string; sessionId?: string }; model?: unknown } | null;
+      })) as {
+        thread?: { id?: string; sessionId?: string };
+        model?: unknown;
+        approvalPolicy?: unknown;
+        approvalsReviewer?: unknown;
+        sandbox?: { type?: unknown };
+      } | null;
+
+    // Проверяем effective ответ до отправки turn: managed requirements или другая
+    // версия CLI могут отклонить режим, и тихо продолжать с иной политикой нельзя.
+    const mismatch = opened?.approvalPolicy !== approvalPolicy
+      ? 'политику approvalPolicy'
+      : opened?.approvalsReviewer !== approvalsReviewer
+        ? 'reviewer approvalsReviewer'
+        : opened?.sandbox?.type !== (modeProfile.sandbox === 'danger-full-access'
+          ? 'dangerFullAccess' : 'workspaceWrite')
+          ? 'sandbox workspaceWrite'
+          : '';
+
+    if (mismatch) {
+      throw new Error(`Codex не принял ${mismatch}. Проверьте версию CLI и управляемую политику.`);
+    }
+
+    assertEffectiveProfile(opened);
+
     threadId = opened?.thread?.id || opened?.thread?.sessionId || threadId;
     actualModel = String(opened?.model || model || '');
     confirmedSessionModel = typeof opened?.model === 'string' ? opened.model : '';
     return threadId;
   })();
 
-  /** Гасим процесс: stdin закрывается, ребёнок убивается, `alive` сразу false. */
-  async function closeSession() {
+  /**
+   * Закрываем принадлежащий сессии процесс, сохраняя thread для следующего resume.
+   * Неподдерживаемый запрос требует SIGKILL: native процесс может игнорировать TERM.
+   */
+  async function closeSession(force = false) {
+    interactions.cancel();
+
     if (exited) return;
     try { lines.close(); } catch { /* уже закрыт */ }
     try { child.stdin?.end(); } catch { /* уже закрыт */ }
-    try { child.kill(); } catch { /* уже завершён */ }
+
+    const closed = new Promise<void>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        resolve();
+      } else {
+        child.once('close', () => resolve());
+      }
+    });
+
+    try { child.kill(force ? 'SIGKILL' : 'SIGTERM'); } catch { /* уже завершён */ }
+
+    const killTimer = setTimeout(() => child.kill('SIGKILL'), 750);
+
     exited = true;
+
+    try {
+      await closed;
+    } finally {
+      clearTimeout(killTimer);
+    }
   }
 
   // Отказ handshake разбирает тот, кто делает первый ход: без этого он остался бы
@@ -2314,8 +2505,14 @@ export function openCodexSession({
     async send({
       message, onStep, onProgress, onPermission, onSessionCreated,
       onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onRunMetadata,
+      preparedRuntime: turnRuntime, runtimeProfileFingerprint: turnFingerprint,
+      permissionMode: turnMode, modeSelection: turnSelection,
     }: {
       message?: unknown;
+      preparedRuntime?: PreparedExecutorRuntime;
+      runtimeProfileFingerprint?: string;
+      permissionMode?: string;
+      modeSelection?: unknown;
       onStep?: (step: ChatStep) => void;
       onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onRunMetadata?: (metadata: ChatRunMetadata) => void;
@@ -2353,6 +2550,40 @@ export function openCodexSession({
 
       try {
         await ready;
+
+        const freshRuntime = turnRuntime ?? (permissionMode && permissionMode !== 'auto'
+          ? undefined : preparedRuntime);
+        const freshInput = {
+          ...runtimeInput,
+          permissionMode: turnMode ?? permissionMode,
+          modeSelection: turnSelection ?? modeSelection,
+          runtimeProfileFingerprint: turnFingerprint ?? runtimeProfileFingerprint
+        };
+
+        if (freshInput.runtimeProfileFingerprint !== runtimeProfileFingerprint) {
+          throw new Error('Профиль Codex изменился: требуется новая сессия.');
+        }
+
+        await assertCodexRuntime(freshRuntime, freshInput, true);
+
+        if (newMode && turnsStarted > 0) {
+          assertEffectiveProfile(await request('thread/resume', {
+            threadId,
+            cwd,
+            approvalPolicy,
+            approvalsReviewer,
+            sandbox: modeProfile.sandbox,
+            runtimeWorkspaceRoots: roots,
+            ...(model ? { model } : {}),
+            config: {
+              'sandbox_workspace_write.writable_roots': writableRoots,
+              'sandbox_workspace_write.network_access': true,
+              'sandbox_workspace_write.exclude_tmpdir_env_var': false,
+              'sandbox_workspace_write.exclude_slash_tmp': false,
+            },
+          }));
+        }
+
         if (current.settled) return result;
         if (confirmedSessionModel) {
           onRunMetadata?.({ actualModelId: confirmedSessionModel, modelSource: 'session' });
@@ -2374,24 +2605,15 @@ export function openCodexSession({
           threadId,
           input: [{ type: 'text', text: String(message || ''), text_elements: [] }],
           cwd,
-          approvalPolicy: 'never',
-          sandboxPolicy: {
-            type: 'workspaceWrite',
-            writableRoots,
-            ...(workspaceAccess ? { readOnlyAccess: {
-              type: 'restricted',
-              includePlatformDefaults: true,
-              readableRoots: roots,
-            } } : {}),
-            networkAccess: workspaceAccess?.networkAccess ?? true,
-            excludeTmpdirEnvVar: workspaceAccess?.excludeTmpdirEnvVar ?? false,
-            excludeSlashTmp: workspaceAccess?.excludeSlashTmp ?? false,
-          },
+          approvalPolicy,
+          approvalsReviewer,
+          sandboxPolicy,
           ...(model && { model }),
           ...(effort && { effort }),
           summary: 'detailed',
         }, current) as { turn?: { id?: string } } | null;
         current.turnId = started?.turn?.id || current.turnId;
+        turnsStarted += 1;
         announceInTurn(current);
         maybeInterrupt(current);
       } catch (error) {
@@ -2400,15 +2622,53 @@ export function openCodexSession({
       return result;
     },
 
-    /** «Стоп» человека: прерываем ход штатным turn/interrupt, thread остаётся живым. */
+    /**
+     * «Стоп» сразу отменяет callbacks человека перед штатным turn/interrupt.
+     * Thread остаётся живым, поздний ответ не разрешает работу остановленного хода.
+     */
     async interrupt() {
       const current = turn;
       if (!current || current.settled) return;
+
+      interactions.cancel(current);
       current.abortRequested = true;
       maybeInterrupt(current);
       if (!current.interruptTimer && protocol !== 'legacy') {
         // Если стоп пришёл до turn/started, даём app-server короткое окно сообщить id.
         current.interruptTimer = setTimeout(() => finishTurnStopped(current), 3_000);
+      }
+    },
+
+    /**
+     * Сужение ждёт штатной очистки подтверждённых native terminal sessions.
+     * Неизвестный ответ или остаток работы не разрешают пулу открыть новый профиль.
+     */
+    async prepareTransition(next: { permissionMode?: unknown }) {
+      if (!newMode && (!next.permissionMode || next.permissionMode === 'auto')) {
+        return;
+      }
+
+      await ready;
+
+      let timer: ReturnType<typeof setTimeout>;
+      const deadline = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new ExecutorRuntimeError('mode_unavailable',
+          'Codex не подтвердил остановку прежних инструментов.')), 3000);
+      });
+
+      try {
+        await Promise.race([request('thread/backgroundTerminals/clean', { threadId }), deadline]);
+
+        const response = await Promise.race([
+          request('thread/backgroundTerminals/list', { threadId }), deadline,
+        ]) as { data?: unknown; nextCursor?: unknown } | null;
+
+        if (!Array.isArray(response?.data) || response.data.length || response.nextCursor !== null) {
+          throw new ExecutorRuntimeError('mode_unavailable',
+            'Сначала завершите прежние фоновые инструменты Codex.');
+        }
+      } finally {
+        clearTimeout(timer!);
       }
     },
 
@@ -2425,7 +2685,7 @@ export async function runCodexAppServer({
   providerSettings, nativeSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
   workTools, workspaceAccess, onPermission, log, onSessionCreated,
   onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onRunMetadata,
-  onProviderUsage,
+  onProviderUsage, permissionMode, modeSelection, preparedRuntime, runtimeProfileFingerprint,
 }: {
   config: CodexConfig;
   env?: NodeJS.ProcessEnv;
@@ -2446,6 +2706,10 @@ export async function runCodexAppServer({
   tokenInfoReader?: typeof readCodexThreadTokenInfo;
   workTools?: CodexWorkToolsPort | null;
   workspaceAccess?: CodexWorkspaceAccess | null;
+  permissionMode?: string;
+  modeSelection?: unknown;
+  preparedRuntime?: PreparedExecutorRuntime;
+  runtimeProfileFingerprint?: string;
   onPermission?: (ask: Record<string, unknown>) => unknown;
   log?: CodexLog;
   onSessionCreated?: (sessionId: string) => unknown;
@@ -2470,6 +2734,10 @@ export async function runCodexAppServer({
     tokenInfoReader,
     workTools,
     workspaceAccess,
+    permissionMode,
+    modeSelection,
+    preparedRuntime,
+    runtimeProfileFingerprint,
     log,
     hooks: { onProviderUsage },
   });
@@ -2479,6 +2747,10 @@ export async function runCodexAppServer({
 
   try {
     return await session.send({
+      permissionMode,
+      modeSelection,
+      preparedRuntime,
+      runtimeProfileFingerprint,
       message,
       onStep,
       onProgress,
@@ -2805,6 +3077,18 @@ function readCodexMcpInventory(bin: string, cwd: string | undefined, {
 }
 
 export default {
+  defaultPermissionMode: 'auto',
+  permissionModeSelectionPolicy: 'preserve-explicit',
+  permissionModesRequiringExplicitSelection: ['bypassPermissions'],
+  normalizePermissionMode: normalizeCodexPermissionMode,
+  modes: availableCodexPermissionModes,
+  prepareRuntime: prepareCodexPermissionRuntime,
+  runtimeProfileFingerprint: codexRuntimeFingerprint,
+  workToolPolicy(mode: string) {
+    return mode === 'plan' ? Object.freeze({ revision: 1,
+      allowedActions: Object.freeze({ supervised_ssh: Object.freeze(['list']),
+        supervised_db: Object.freeze(['list', 'schema']) }) }) : undefined;
+  },
   id: 'codex',
   // Виды сбоя хода объявляет сам адаптер: ядро не знает имён вендора. Общие признаки
   // (статусы, слова) добавляет реестр — здесь только коды CodexErrorInfo.
@@ -2831,13 +3115,30 @@ export default {
   },
   install: 'npm i -g @openai/codex && codex login',
   login: 'codex login',
+  usagePresentation: { freshness: true, spentLabel: true },
+  /**
+   * Декларация npm-пакета позволяет найти повреждённую копию без запуска её entry.
+   * Managed-провайдеры этого opt-in не имеют и в общий lifecycle не попадают.
+   */
+  externalCli() {
+    return {
+      packageId: '@openai/codex',
+      binName: 'codex',
+      configKey: 'codexBin',
+      envKey: 'GRIGDESK_CODEX_BIN',
+    };
+  },
   /**
    * Доступный пользовательский npm устанавливает latest и при обновлении.
    * Без npm сохраняются прежние команды; вход запускается отдельным действием.
    */
   installation(config: CodexConfig, context?: ProviderInstallationContext) {
     const command = 'npm i -g @openai/codex';
-    const npm = context?.npm ? npmInstallCommand('@openai/codex', context.npm) : null;
+    const npm = context?.npm ? npmInstallCommand('@openai/codex', context.npm, {
+      binName: 'codex',
+      configKey: 'codexBin',
+      envKey: 'GRIGDESK_CODEX_BIN',
+    }) : null;
     const install = npm || {
       executable: 'npm',
       args: ['i', '-g', '@openai/codex'],
@@ -2854,6 +3155,7 @@ export default {
         fallbackCommand: [config.codexBin, ...['update']].join(' '),
       },
       loginCommand: 'codex login',
+      loginArgs: ['login'],
     };
   },
 
@@ -3011,7 +3313,7 @@ export default {
     providerSettings, nativeSettings, signal, onProgress, onStep, tokenInfoReader = readCodexThreadTokenInfo,
     workTools, workspaceAccess, onPermission, log, onSessionCreated,
     onInTurnReady, onInTurnAvailability, onInTurnReceipt, onAssistantMessage, onRunMetadata,
-    onProviderUsage,
+    onProviderUsage, permissionMode, modeSelection, preparedRuntime, runtimeProfileFingerprint,
   }: Parameters<typeof runCodexAppServer>[0]) {
     return runCodexAppServer({
       config,
@@ -3032,6 +3334,10 @@ export default {
       tokenInfoReader,
       workTools,
       workspaceAccess,
+      permissionMode,
+      modeSelection,
+      preparedRuntime,
+      runtimeProfileFingerprint,
       onPermission,
       log,
       onSessionCreated,
@@ -3074,11 +3380,15 @@ export default {
       'nativeSettingsFingerprint',
       'workToolScopeKey',
       'workspaceAccess',
+      'permissionMode',
+      'modeSelection',
+      'runtimeProfileFingerprint',
     ],
 
     open({
       config, env, cwd, extraDirs = [], model, effort, sessionId, compactWindow,
       providerSettings, nativeSettings, log, hooks, workTools, workspaceAccess,
+      permissionMode, modeSelection, preparedRuntime, runtimeProfileFingerprint,
     }: Parameters<typeof openCodexSession>[0]) {
       return openCodexSession({
         config,
@@ -3095,6 +3405,10 @@ export default {
         hooks,
         workTools,
         workspaceAccess,
+        permissionMode,
+        modeSelection,
+        preparedRuntime,
+        runtimeProfileFingerprint,
       });
     },
   },

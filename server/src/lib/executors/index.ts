@@ -194,9 +194,11 @@ import type {
   PreparedExecutorRuntime,
 } from '../executorSettings/types.ts';
 import type { Studio3dProvider } from '../studio3d/provider.ts';
+import type { ExternalCliDefinition } from '../providerInstall/inventoryTypes.ts';
 
 import { createWorkToolRegistry } from './work-tools/index.ts';
 import { executorLoaders } from './registryTable.ts';
+import { externalCliAdapter } from '../providerInstall/externalCliAdapter.ts';
 import { normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts';
 
 // Ответ проверки установки: найден ли бинарь и какую версию он назвал сам.
@@ -233,6 +235,8 @@ export interface ExecutorRunInput {
   effort?: string;
   sessionId?: string | null;
   permissionMode?: string;
+  modeSelection?: import('../../../../shared/chat/chatPermissionModes.ts').ChatModeSelection;
+  runtimeProfileFingerprint?: string;
   signal?: AbortSignal;
   nativeSettings?: PreparedNativeSettings;
   preparedRuntime?: PreparedExecutorRuntime;
@@ -300,6 +304,12 @@ export interface ProviderInstallCommand {
   args: string[];
   command: string;
   fallbackCommand: string;
+  npmBinding?: {
+    packageId: string;
+    binName: string;
+    configKey: string;
+    envKey: string;
+  };
 }
 
 export interface ProviderInstallation {
@@ -307,13 +317,36 @@ export interface ProviderInstallation {
   update: ProviderInstallCommand | null;
   loginCommand: string;
   nativeBinDirs?: string[];
+  // Аргументы входа объявлены списком: shell-строка loginCommand не разбирается.
+  loginArgs?: string[];
 }
 
 export interface ProviderInstallationContext {
   npm: string | null;
 }
 
+export interface PermissionModeContext {
+  mode: string;
+  modeSelection?: unknown;
+  provider: string;
+  chatId: string;
+  cwd: string;
+  extraDirs: readonly string[];
+  workspaceAccess?: unknown;
+  providerSettings?: unknown;
+  settingsRevision?: unknown;
+  workToolPolicy?: import('../../../../shared/chat/chatPermissionModes.ts').WorkToolPolicy;
+}
+
 export interface ExecutorAdapter {
+  defaultPermissionMode?: string;
+  permissionModeSelectionPolicy?: 'preserve-explicit';
+  permissionModesRequiringExplicitSelection?: readonly string[];
+  workToolPolicy?: (mode: string) =>
+    import('../../../../shared/chat/chatPermissionModes.ts').WorkToolPolicy | undefined;
+  runtimeProfileFingerprint?: (preparedRuntime: PreparedExecutorRuntime) => string;
+  externalCli?: (config: unknown, home: string) => ExternalCliDefinition | null;
+  usagePresentation?: { freshness: boolean; spentLabel: boolean };
   installation?: (config: unknown, context?: ProviderInstallationContext) => ProviderInstallation;
   studio3d?: Studio3dProvider;
   type?: string;
@@ -360,7 +393,7 @@ export interface ExecutorAdapter {
   nativeSettings?: NativeSettingsCapability;
   prepareRuntime?: (
     config: unknown,
-    options: { signal: AbortSignal },
+    options: { signal: AbortSignal; permissionModeContext?: PermissionModeContext },
   ) => Promise<PreparedExecutorRuntime>;
   sessionBinding?: ExecutorSessionBinding;
   session?: Record<string, unknown>;
@@ -377,6 +410,8 @@ export interface ExecutorAdapter {
   // Краткие русские объяснения уровней; состав доступных ступеней задаёт каталог модели.
   effortHints?: Record<string, string>;
   modes?: (config: unknown) => unknown;
+  normalizePermissionMode?: (value: unknown) =>
+    { ok: true; mode: string } | { ok: false; message: string };
   seedModels?: () => unknown[];
   catalog?: (config: unknown) => unknown;
   catalogCacheKey?: (config: unknown) => unknown;
@@ -409,6 +444,7 @@ export function createWorkTools({
   invoke,
   pluginEnabled,
   dbInvoke,
+  workToolPolicy,
 }: Record<string, unknown> = {}) {
   return createWorkToolRegistry({
     projectId,
@@ -417,6 +453,7 @@ export function createWorkTools({
     invoke,
     pluginEnabled,
     dbInvoke,
+    workToolPolicy: workToolPolicy as import('../../../../shared/chat/chatPermissionModes.ts').WorkToolPolicy,
   });
 }
 
@@ -446,8 +483,9 @@ export async function getProviderAdapters(): Promise<Map<string, ExecutorAdapter
 
     const mod = await loader.load();
     const adapter = mod.default as ExecutorAdapter | undefined;
+
     if (adapter?.id && typeof adapter.probe === 'function' && typeof adapter.auth === 'function') {
-      map.set(adapter.id, adapter);
+      map.set(adapter.id, externalCliAdapter(adapter));
     }
   }
   loadedAdapters = new Map(

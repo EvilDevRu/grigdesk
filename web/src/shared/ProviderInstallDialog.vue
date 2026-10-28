@@ -9,20 +9,32 @@
     data-role="provider-install-dialog"
     @close="install.visible = false"
   >
-    <div class="provider-install" :data-tone="tone">
+    <div class="provider-install" :data-tone="tone" :data-phase="install.selectedRequest?.phase || job?.stage">
       <header class="provider-install-head">
         <span class="provider-install-logo" :style="brandStyle" aria-hidden="true">
           <ProviderIcon :provider="iconProvider" :size="20" />
         </span>
         <div class="provider-install-titles">
           <h2 class="provider-install-heading">{{ heading }}</h2>
-          <code v-if="job" class="provider-install-command">{{ job.command }}</code>
         </div>
       </header>
-      <UiProgress v-if="job?.status === 'running'" size="line" indeterminate :label="currentStage" />
+      <UiProgress
+        v-if="job?.status === 'running' || install.selectedRequest && install.selectedRequest.phase !== 'confirming'"
+        size="line"
+        indeterminate
+        :label="currentStage"
+      />
 
       <div class="provider-install-body">
-        <template v-if="job">
+        <ol v-if="install.selectedRequest && !job" class="provider-install-steps">
+          <li data-state="current" aria-current="step" role="status">
+            <span class="provider-install-mark" aria-hidden="true">
+              <UiSpinner v-if="install.selectedRequest.phase !== 'confirming'" decorative />
+            </span>
+            {{ currentStage }}
+          </li>
+        </ol>
+        <template v-else-if="job">
           <p v-if="job.status !== 'running'" class="provider-install-status" role="status">
             <svg class="provider-install-status-icon" viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="10" />
@@ -54,16 +66,25 @@
           >
             {{ t('settings.providerInstallationRetry', job.retry) }}
           </p>
-          <section v-if="job.outputTail" class="provider-install-log">
+          <p
+            v-if="job.status !== 'running' && terminalNote"
+            class="provider-install-note"
+            :data-terminal="job.terminal?.status"
+          >{{ terminalNote }}</p>
+          <p
+            v-if="job.status !== 'running' && migrationNote"
+            class="provider-install-note"
+          >{{ migrationNote }}</p>
+          <section v-if="job.command || job.outputTail" class="provider-install-log">
             <UiDisclosureButton
-              v-if="job.status === 'succeeded'"
               v-model:open="outputOpen"
               class="provider-install-log-toggle"
               density="compact"
               :controls="outputId"
-            >{{ t('settings.providerInstallationOutput') }}</UiDisclosureButton>
+            >{{ t('settings.providerInstallationDetails') }}</UiDisclosureButton>
+            <code v-show="outputOpen" class="provider-install-command">{{ job.command }}</code>
             <pre
-              v-show="outputVisible"
+              v-show="outputOpen"
               :id="outputId"
               ref="outputElement"
               class="provider-install-output"
@@ -79,12 +100,14 @@
           {{ t('settings.providerInstallationUnknown') }}
         </UiInlineMessage>
         <UiInlineMessage v-if="install.selectedFailure" tone="danger">
-          {{ install.selectedFailure.message }}
+          {{ selectedFailureText }}
         </UiInlineMessage>
         <UiInlineMessage v-if="install.snapshot.blockedReason" tone="danger">
           {{ providerInstallNoticeText(install.snapshot.blockedReason) }}
         </UiInlineMessage>
-        <UiInlineMessage v-if="install.error" tone="danger">{{ install.error }}</UiInlineMessage>
+        <UiInlineMessage v-if="install.error && !install.selectedFailure" tone="danger">
+          {{ install.error }}
+        </UiInlineMessage>
       </div>
 
       <footer class="provider-install-foot">
@@ -125,7 +148,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useId, watch } from 'vue';
 
-import type { ProviderInstallStage } from '../../../shared/chat/providerInstallContracts.ts';
+import type { ProviderLifecycleOperation, ProviderLifecyclePhase }
+  from '../../../shared/chat/providerLifecycleContracts.ts';
 import type { MessageKey } from '../../../shared/i18n/catalogs.ts';
 import {
   UiButton,
@@ -143,6 +167,8 @@ import {
   useProviderInstallStore,
   providerInstallResultText,
   providerInstallNoticeText,
+  providerInstallTerminalText,
+  providerInstallVisibleWarnings,
 } from '../stores/providerInstall.ts';
 import { useProvidersStore } from '../stores/providers.ts';
 import { useAuthStore } from '../stores/auth.ts';
@@ -161,11 +187,24 @@ const STAGE_ICONS: Readonly<Record<Exclude<StageState, 'current'>, string>> = {
   failed: 'M12 6.5v7M12 17.5v.01',
   pending: 'M12 5a7 7 0 1 1 0 14a7 7 0 1 1 0-14',
 };
-const STAGES: readonly ProviderInstallStage[] = ['download-install', 'version', 'models'];
-const STAGE_LABELS: Readonly<Record<ProviderInstallStage, MessageKey>> = {
+const STAGES: readonly ProviderLifecyclePhase[] = ['download-install', 'version', 'terminal',
+  'models'];
+const STAGE_LABELS: Readonly<Record<ProviderLifecyclePhase, MessageKey>> = {
   'download-install': 'settings.providerInstallationDownloadInstall',
   version: 'settings.providerInstallationVersion',
+  terminal: 'settings.providerInstallationTerminalStage',
   models: 'settings.providerInstallationModels',
+  preparing: 'settings.providerLifecyclePreparing',
+  backup: 'settings.providerLifecycleBackup',
+  activation: 'settings.providerLifecycleActivation',
+  cleanup: 'settings.providerLifecycleCleanup',
+};
+const PREPARE_FAILURE_LABELS: Readonly<Record<ProviderLifecycleOperation, MessageKey>> = {
+  install: 'settings.providerInstallationNotStarted',
+  update: 'settings.providerInstallationUpdateNotStarted',
+  reinstall: 'settings.providerLifecycleReinstallNotStarted',
+  uninstall: 'settings.providerLifecycleUninstallNotStarted',
+  migrate: 'settings.providerLifecycleMigrationNotStarted',
 };
 
 const install = useProviderInstallStore();
@@ -186,7 +225,19 @@ const iconProvider = computed(() => ({
 const brandStyle = computed(() => provider.value?.color
   ? { '--provider-install-brand': provider.value.color } : undefined);
 const fallbackCommand = computed(() => install.selectedFailure?.fallbackCommand
-  || (job.value && ['failed', 'interrupted'].includes(job.value.status) ? job.value.fallbackCommand : ''));
+  || (job.value && ['failed', 'interrupted', 'needs_attention'].includes(job.value.status)
+    ? job.value.fallbackCommand : ''));
+// Отказ подготовки означает, что команда ещё не запускалась. Неизвестный исход
+// запроса старта этим обещанием не заменяется: он сверяется с серверным job.
+const selectedFailureText = computed(() => {
+  const failure = install.selectedFailure;
+
+  if (!failure || failure.phase !== 'prepare') {
+    return failure?.message || '';
+  }
+
+  return t(PREPARE_FAILURE_LABELS[failure.operation], { reason: failure.message });
+});
 const retryOperation = computed(() => install.selectedFailure?.operation
   || (job.value && ['failed', 'interrupted'].includes(job.value.status) ? job.value.operation : null));
 const loginCommand = computed(() => {
@@ -195,12 +246,16 @@ const loginCommand = computed(() => {
 
   return finished && needsLogin ? finished.loginCommand : '';
 });
-const outputVisible = computed(() => job.value?.status !== 'succeeded' || outputOpen.value);
 const heading = computed(() => {
   const name = provider.value?.name;
-  const operation = job.value?.operation || install.selectedFailure?.operation;
+  const operation = install.selectedRequest?.operation
+    || job.value?.operation || install.selectedFailure?.operation;
 
   if (name && operation) {
+    if (['reinstall', 'uninstall', 'migrate'].includes(operation)) {
+      return t('settings.providerLifecycleHeading', { name });
+    }
+
     return t(operation === 'install'
       ? 'settings.providerInstallationHeadingInstall'
       : 'settings.providerInstallationHeadingUpdate', { name });
@@ -209,6 +264,9 @@ const heading = computed(() => {
   return `${t('settings.providerInstallationTitle')}${name ? ` · ${name}` : ''}`;
 });
 const tone = computed(() => {
+  if (install.selectedRequest) {
+    return 'running';
+  }
   if (!job.value) {
     return install.selectedFailure || install.snapshot.blockedReason || install.error ? 'danger' : 'neutral';
   }
@@ -216,15 +274,18 @@ const tone = computed(() => {
     return 'running';
   }
   if (job.value.status === 'succeeded') {
-    return job.value.warnings.length ? 'warning' : 'success';
+    return providerInstallVisibleWarnings(job.value).length ? 'warning' : 'success';
   }
 
   return job.value.status === 'interrupted' ? 'warning' : 'danger';
 });
 const stages = computed(() => {
-  const current = job.value ? STAGES.indexOf(job.value.stage) : -1;
+  const sequence: readonly ProviderLifecyclePhase[] = job.value && 'targets' in job.value
+    ? ['preparing', 'backup', 'download-install', 'version',
+      ...(job.value.operation === 'uninstall' ? [] : ['terminal' as const]), 'cleanup'] : STAGES;
+  const current = job.value ? sequence.indexOf(job.value.stage) : -1;
 
-  return STAGES.map((stage, index) => ({
+  return sequence.map((stage, index) => ({
     stage,
     label: t(STAGE_LABELS[stage]),
     state: stageState(index, current),
@@ -232,7 +293,20 @@ const stages = computed(() => {
 });
 const modelsWarning = computed(() => Boolean(job.value?.warnings.some((warning) =>
   typeof warning !== 'string' && warning.code === 'models_refresh_failed')));
-const currentStage = computed(() => t(STAGE_LABELS[job.value?.stage || 'download-install']));
+const terminalNote = computed(() => job.value && job.value.status !== 'running'
+  ? providerInstallTerminalText(job.value.terminal) : '');
+const migrationNote = computed(() => job.value?.migration
+  ? t('settings.providerInstallationMigrated', {
+    from: job.value.migration.from, to: job.value.migration.to,
+  }) : '');
+const currentStage = computed(() => {
+  if (install.selectedRequest) {
+    return t(install.selectedRequest.phase === 'confirming'
+      ? 'settings.providerLifecycleConfirming' : 'settings.providerLifecyclePreparing');
+  }
+
+  return t(STAGE_LABELS[job.value?.stage || 'download-install']);
+});
 // Первая строка — итог операции, остальное (предупреждения, длинная причина) — пояснение под ним.
 const resultLines = computed(() => {
   const [head = '', ...rest] = (job.value ? providerInstallResultText(job.value) : '').split('\n');
@@ -255,7 +329,15 @@ const actions = createSettingsActions({
  */
 function stageState(index: number, current: number): StageState {
   if (job.value?.status === 'succeeded') {
-    return STAGES[index] === 'models' && modelsWarning.value ? 'warning' : 'done';
+    if (STAGES[index] === 'models' && modelsWarning.value) {
+      return 'warning';
+    }
+    if (STAGES[index] === 'terminal' && job.value.terminal
+      && job.value.terminal.status !== 'ready') {
+      return 'warning';
+    }
+
+    return 'done';
   }
   if (index < current) {
     return 'done';
@@ -278,7 +360,7 @@ async function openTerminal(command: string): Promise<void> {
 }
 
 useSse((name, data) => {
-  if (name === 'provider-install') {
+  if (name === 'provider-install' || name === 'provider-install-v2') {
     install.applySnapshot(data);
   } else if (name === 'hello') {
     void install.load();
@@ -297,8 +379,8 @@ watch(() => [auth.clientScope, auth.authenticated], () => {
   }
 });
 
-// Свёрнутый после успеха вывод не наследует раскрытие от прошлой операции.
-watch(() => job.value?.id, () => {
+// Каждое открытие окна и новая операция начинают со свёрнутых деталей.
+watch([() => job.value?.id, () => install.visible], () => {
   outputOpen.value = false;
 });
 
@@ -306,7 +388,7 @@ watch(() => job.value?.id, () => {
  * Хвост вывода показывает последние строки при открытии, раскрытии и новых строках.
  * Положение меряется до обновления DOM: отмотанный вверх вывод новые строки не сдёргивают.
  */
-watch([() => job.value?.outputTail, outputElement, outputVisible], async (current, previous) => {
+watch([() => job.value?.outputTail, outputElement, outputOpen], async (current, previous) => {
   const [, element, visible] = current;
   const follow = !element || element !== previous[1] || visible !== previous[2]
     || element.scrollHeight - element.scrollTop - element.clientHeight < 24;

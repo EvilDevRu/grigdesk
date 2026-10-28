@@ -14,7 +14,7 @@ import { copyInstallCandidate, removeInstallStage } from '../../deepseek/scripts
 import { sha256File } from '../../shared/node/hash.ts';
 import { runtimeInfoFixture } from '../helpers/deepseekMetadataFixture.mts';
 import {
-  deepSeekTestArtifactsRoot, ensureTestAdmittedDeepSeekBinary, ensureTestDeepSeekBinary,
+  deepSeekTestArtifactsRoot, ensureTestAdmittedDeepSeekBinary, ensureTestUnadmittedDeepSeekBinary,
 } from '../helpers/deepseekBinary.mts';
 
 const artifacts = path.join(deepSeekTestArtifactsRoot(), 's16');
@@ -414,7 +414,7 @@ if (require('node:path').basename(__filename) === 'previous') {
   assert.equal(await sha256File(options.target), a.sha256);
 });
 
-test('настоящий ELF проходит staged verify; неизменённый production admission остаётся закрыт', async (t) => {
+test('настоящий ELF проходит staged verify; отдельный ELF без admission отвергается', async (t) => {
   const { options } = await fixture(t);
   const candidate = await ensureTestAdmittedDeepSeekBinary();
   const result = await installBinary({ ...options, binary: candidate.binary });
@@ -427,9 +427,10 @@ test('настоящий ELF проходит staged verify; неизменён�
   assert.equal(await sha256File(options.target), await sha256File(candidate.binary));
   assert.equal(result.memory, 'unknown');
 
-  const production = await ensureTestDeepSeekBinary();
+  const unadmitted = await ensureTestUnadmittedDeepSeekBinary();
 
-  await assert.rejects(installBinary({ ...options, binary: production.binary }), {
+  assert.deepEqual(unadmitted.info.glm.admission, []);
+  await assert.rejects(installBinary({ ...options, binary: unadmitted.binary }), {
     code: 'deepseek_glm_unadmitted',
   });
   assert.equal(await sha256File(options.target), result.sha256);

@@ -97,6 +97,7 @@ const sandboxEntry = objectOf({
   slot: nullable(numeric),
   fePort: nullable(numeric),
   apiPort: nullable(numeric),
+  serviceHost: optional(text),
   repos: listOf(sandboxRepo),
   standAlive: nullable(boolean),
   // Новые признаки необязательны на проводе: старый сервер и сохранённые fixtures

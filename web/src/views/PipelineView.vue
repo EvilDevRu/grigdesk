@@ -284,7 +284,7 @@
         </UiButton>
         <span class="route">{{ ROUTE_ICON[t.route || ''] || '•' }} {{ t.route }}</span>
         <UiButton
-          v-if="b24Title(t.task)"
+          v-if="t.source === 'grigdesk' || b24Title(t.task)"
           class="ctitle"
           data-role="pipeline-title"
           v-tooltip="title(t)"
@@ -346,6 +346,7 @@
         :arbiter-note="t.stall.arbiter ? arbiterCardLabel(t.stall.arbiter) : ''"
         :arbiter-model="t.stall.arbiter?.model"
         :arbiter-verdict="t.stall.arbiter?.verdict"
+        :conversation="t.stall.conversation"
       >
         <PipelineCardActions :actions="cardActions(t)" @action="(id) => runCardAction(t, id)" />
       </PipelineStopPanel>
@@ -365,8 +366,10 @@
         <template v-if="!isCollapsed(t.task)">
         <span v-if="t.graph.fePort" class="chunk">
           <span class="sdot" :class="t.daemonAlive ? 'on' : 'off'"></span>
-          стенд · <a :href="sandboxUrl(t.graph.fePort) || undefined" target="_blank" rel="noopener">фронт :{{ t.graph.fePort }}</a>
-          <a v-if="t.graph.apiPort" :href="sandboxUrl(t.graph.apiPort) || undefined" target="_blank" rel="noopener">API :{{ t.graph.apiPort }}</a>
+          стенд · <a :href="sandboxUrl(t.graph.fePort, t.graph.serviceHost) || undefined"
+                     target="_blank" rel="noopener">фронт :{{ t.graph.fePort }}</a>
+          <a v-if="t.graph.apiPort" :href="sandboxUrl(t.graph.apiPort, t.graph.serviceHost) || undefined"
+             target="_blank" rel="noopener">API :{{ t.graph.apiPort }}</a>
         </span>
         <!-- Стенд ещё строится: живой прогресс сборки песочницы из t*.stage -->
         <span v-else-if="t.graph.sandbox" class="chunk building">
@@ -447,7 +450,7 @@
              не дожидаться, но делать это следует осознанно. -->
         <div v-if="stageArbitrating" class="sarbrun sarbnode">
           <span class="sarbspin" aria-hidden="true"></span>
-          <span class="sarbtxt">Арбитр разбирает эту остановку — руками браться не нужно</span>
+          <span class="sarbtxt">Арбитр разбирает эту остановку — ожидается результат</span>
           <span class="sarbmeta mono">{{ arbiterRunLabel(stageArbitrating) }}</span>
         </div>
 
@@ -462,10 +465,11 @@
           <div class="stage-stand-context">
             <span class="stage-context-label">Стенд</span>
             <template v-if="stageGraph?.fePort">
-              <a class="stage-stand-link" :href="sandboxUrl(stageGraph.fePort) || undefined" target="_blank" rel="noopener">
+              <a class="stage-stand-link" :href="sandboxUrl(stageGraph.fePort, stageGraph.serviceHost) || undefined"
+                 target="_blank" rel="noopener">
                 Фронт <b class="mono">:{{ stageGraph.fePort }}</b> <span aria-hidden="true">↗</span>
               </a>
-              <a v-if="stageGraph.apiPort" class="stage-stand-link" :href="sandboxUrl(stageGraph.apiPort) || undefined"
+              <a v-if="stageGraph.apiPort" class="stage-stand-link" :href="sandboxUrl(stageGraph.apiPort, stageGraph.serviceHost) || undefined"
                  target="_blank" rel="noopener">
                 API <b class="mono">:{{ stageGraph.apiPort }}</b> <span aria-hidden="true">↗</span>
               </a>
@@ -478,7 +482,13 @@
           </div>
         </div>
 
-        <div v-if="stageHasMain || stageHasRail" class="sworkspace"
+        <div v-if="stageUsesConversation" class="sconversation">
+          <ArbiterConversation :task="String(stage!.task)" :node="stage!.id"
+                               :conversation-id="stageConversationId" :legacy-card="stageArbiterCard"
+                               :history="stageGraph?.arbiterConversations"
+                               @current-stop="openStallStage(stageTask!)" />
+        </div>
+        <div v-else-if="stageHasMain || stageHasRail" class="sworkspace"
              :class="{ 'main-only': stageHasMain && !stageHasRail, 'rail-only': stageHasRail && !stageHasMain }">
           <!-- Управление стоит первым в DOM: в мобильной колонке решение человека не
                прячется под длинной телеметрией. На широком экране CSS ставит его справа. -->
@@ -906,15 +916,6 @@
         </footer>
     </UiDialog>
 
-    <!-- Разбор арбитра и ответ на него. Отдельная модалка: у неё один вопрос к человеку
-         и вся ширина под текст, тогда как модалка узла отвечает за телеметрию захода. -->
-    <ArbiterDecision
-      :open="Boolean(arbiterDecision)"
-      :decision="arbiterDecision"
-      :busy="arbiterDecisionBusy"
-      @close="arbiterDecision = null"
-      @submit="sendArbiterDecision"
-    />
   </div>
 </template>
 
@@ -955,14 +956,6 @@ interface StageNode {
   subtitle?: string;
   status: string;
 }
-interface ArbiterDecisionState {
-  task: TaskId;
-  node: string;
-  key: string;
-  label: string;
-  card: ArbiterCard;
-  questions: ReturnType<typeof rewindQuestionsOf>;
-}
 
 import { useSse } from '../composables/useSse.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
@@ -983,6 +976,7 @@ import {
   UiTextarea,
   vTooltip,
   UiLoadingState,
+  t as translate,
 } from '../ui';
 import { sandboxUrl } from '../shared/sandbox.ts';
 import { agentActivityLabel, silenceReason } from '../../../shared/pipeline/agentActivity.ts';
@@ -1005,7 +999,7 @@ import {
   runnerNodeLabel,
   runnerReasonLabel,
 } from '../shared/runnerDisplay.ts';
-import ArbiterDecision from './pipeline/ArbiterDecision.vue';
+import ArbiterConversation from './pipeline/ArbiterConversation.vue';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 import PipelineStopPanel from './pipeline/PipelineStopPanel.vue';
 import PipelineCardActions from './pipeline/PipelineCardActions.vue';
@@ -1054,7 +1048,7 @@ function title(taskOrNum: PipelineViewTask | TaskId) {
     ? taskOrNum
     : tasks.value.find((item) => Number(item.task) === Number(taskNum));
 
-  return b24Title(taskNum) || task?.title || null;
+  return task?.source === 'grigdesk' ? task.title || null : b24Title(taskNum) || task?.title || null;
 }
 
 const boardTasksById = computed(() => new Map(
@@ -1755,6 +1749,10 @@ function openStage(t: PipelineViewTask, node: StageNode) {
   }
 
   const nodeId = origin?.originId || node.id;
+  const currentStop = t.stall?.arbitrable && stallNodeId(t) === nodeId;
+
+  stageConversationId.value = currentStop ? t.stall?.conversation?.conversationId
+    : t.graph.arbiterConversations?.find((row) => row.identity.node === nodeId)?.conversationId;
 
   stage.value = {
     task: t.task,
@@ -1926,6 +1924,7 @@ const gateArbiterLog = computed(() => {
 
 const stageHasRewind = computed(() => Boolean(
   stage.value && !stage.value!.readOnly && !stage.value!.isGate
+  && !stageUsesConversation.value
   && stageTask.value?.graph?.nodeOrigins?.[stage.value!.id]?.scope !== 'bootstrap',
 ));
 // Вопросом к человеку является только БЛОКИРУЮЩАЯ находка: правило общее с отдельной
@@ -2001,6 +2000,18 @@ const stageTaskTitle = computed(() => (
   stage.value ? title(stageTask.value || stage.value!.task) : null
 ));
 const stageGraph = computed(() => stageTask.value?.graph || null);
+const stageConversationId = ref<string | undefined>();
+const stageUsesConversation = computed(() => {
+  const opened = stage.value;
+  const task = stageTask.value;
+
+  if (!opened || !task || opened.isGate || task.stall?.phase === 'bootstrap') {
+    return false;
+  }
+
+  return Boolean(stageConversationId.value || stageArbiterCard.value
+    || task.stall?.arbitrable && stallNodeId(task) === opened.id);
+});
 // Пояснение — часть ОТКЛОНЕНИЯ, а не ворот вообще: при «Принять» движок его выбрасывает
 // (`route_v2_gate_decide`: reject_feedback обнуляется на любом исходе кроме rejected).
 // Пока поле висело всегда, интерфейс обещал доставку текста, которой при принятии нет.
@@ -2499,103 +2510,19 @@ function arbiterCardFor(task: PipelineViewTask | null, nodeId: string) {
 }
 
 /**
- * Открывает отдельный разбор арбитра по узлу: его текст целиком и поле решения.
- *
- * Вопросы берутся у вердикта того же узла — ответ уедет тем же указанием, что и обычный
- * возврат, поэтому и склейка текста общая. Разбора нет — открывать нечего: молчаливая
- * пустая модалка читалась бы как поломка.
- */
-function openArbiterDecision(task: PipelineViewTask | null, nodeId?: string) {
-  if (!task || !nodeId) {
-    return;
-  }
-
-  const key = task.graph.keys?.[nodeId];
-  const card = arbiterCardFor(task, nodeId);
-
-  if (!key || !card) {
-    return;
-  }
-
-  const definition = task.graph?.nodes?.[nodeId] || [];
-
-  arbiterDecision.value = {
-    task: task.task,
-    node: nodeId,
-    key,
-    label: stripEmoji(definition[1] || nodeId),
-    card,
-    questions: rewindQuestionsOf(task.graph?.nodeMeta?.[nodeId]?.verdict),
-  };
-}
-
-/** Вход в разбор из модалки узла: одну модалку поверх другой не держим. */
-
-/**
- * Открывает разбор из текущего узла с сохранением его идентификатора.
- * Предыдущая модалка закрывается до открытия следующей.
+ * Вход из узла фокусирует тот же блок, сохраняя окно и черновик.
+ * Отдельная форма применения поверх окна этапа больше не создаётся.
  */
 function openArbiterFromStage() {
-  const task = stageTask.value;
-  const nodeId = stage.value?.id;
-
-  closeStage();
-  openArbiterDecision(task, nodeId);
+  document.querySelector<HTMLElement>('[data-role="arbiter-conversation"] textarea')?.focus();
 }
 
 /**
- * Отправляет решение человека и продолжает прогон.
- *
- * Тот же эндпоинт, что и обычный возврат курсора: сервер кладёт текст в журнал попытки
- * причиной human-rewind, движок подмешивает его в промпт захода. Подтверждение остаётся —
- * возврат сбрасывает не только этот узел, но и весь хвост маршрута за ним.
+ * Все входы остановки открывают один и тот же узел и его диалог.
+ * У ворот и разведки сохраняется существующий порядок ответа.
  */
-async function sendArbiterDecision(note: string) {
-  const target = arbiterDecision.value;
-
-  if (!target || arbiterDecisionBusy.value) {
-    return;
-  }
-
-  const question = `Вернуть конвейер на «${target.label}»? Результаты этого узла и всех`
-    + ' следующих за ним будут сброшены.';
-
-  if (!await confirmDialog(question, { okText: 'Вернуть' })) {
-    return;
-  }
-
-  arbiterDecisionBusy.value = true;
-
-  try {
-    const res = decodePipelineReply(await api.post(`/api/tasks/${target.task}/stage/${target.key}/running`,
-      { comment: note }));
-
-    arbiterDecision.value = null;
-    await load();
-    await warnIfNotResumed(res);
-  }
-  catch (e) {
-    alertDialog(`Ошибка: ${errorMessage(e, '')}`);
-  }
-  finally {
-    arbiterDecisionBusy.value = false;
-  }
-}
-
-/**
- * Вход из плашки затыка.
- *
- * Разбор арбитра ведёт в свою модалку — там его текст и поле решения; обычный затык без
- * разбора ведёт в узел, где кроме возврата человеку нужны и телеметрия, и вердикт.
- */
-function openStallAnswer(t: PipelineViewTask) {
-  if (arbiterAsksHuman(t)) {
-    openArbiterDecision(t, stallNodeId(t));
-
-    return;
-  }
-
-  openStallStage(t);
+function openStallAnswer(task: PipelineViewTask) {
+  openStallStage(task);
 }
 
 /** Открывает узел, на котором стоит остановка: решение принимают там. */
@@ -2623,8 +2550,6 @@ function openStallStage(t: PipelineViewTask) {
 
 // Отдельный разбор арбитра: узел, его карточка и вопросы. Живёт рядом с модалкой узла,
 // а не внутри неё — вопрос у него один, и ширина нужна вся.
-const arbiterDecision = ref<ArbiterDecisionState | null>(null);
-const arbiterDecisionBusy = ref(false);
 
 const arbiterBusy = ref(new Set<TaskId>());
 
@@ -2663,55 +2588,32 @@ const stageArbitrating = computed(() => {
 
 
 /**
- * Передаёт остановку арбитру после явного подтверждения человека.
- * Показывает разный итог для разрешённого спора и решения на человеке.
+ * Передаёт остановку читающему арбитру по нажатию человека.
+ * Открывает диалог узла после сохранения операции разбора.
  */
 async function arbitrate(task: TaskId) {
   if (arbiterBusy.value.has(task)) {
-    return;
-  }
-  if (!await confirmDialog(
-    `Отдать тупик задачи #${task} арбитру? Он прочитает оба вердикта, `
-      + 'проверит спорное по коду рабочего дерева и вернёт узел с указанием. '
-      + 'Решение будет записано в журнал как машинное.',
-    { okText: 'Разобрать' },
-  )) {
     return;
   }
 
   arbiterBusy.value = new Set([...arbiterBusy.value, task]);
 
   try {
-    const r = decodePipelineReply(await api.post(`/api/tasks/${task}/arbitrate`));
-
+    await api.post(`/api/tasks/${task}/arbitrate`);
     await load();
-    // Два разных исхода, и путать их нельзя. `resolved: false` — не отказ: арбитр
-    // отработал и вернул то, что обязан вернуть, когда решение меняет границу задачи.
-    if (r.resolved) {
-      alertDialog(`Арбитр вернул узел «${r.node}».
 
-${r.card!.what}
+    const current = tasks.value.find((row) => Number(row.task) === Number(task));
 
-Почему: ${r.card!.why}
-Чем доказал: ${r.card!.proof}
-Чем грозит ошибка: ${r.card!.risk}`);
-    } else {
-      alertDialog(`Это решает человек, а не арбитр.
-
-${r.card!.what}
-
-Почему: ${r.card!.why}
-Чем доказал: ${r.card!.proof}
-Чем грозит ошибка: ${r.card!.risk}`);
+    if (current) {
+      openStallStage(current);
     }
-  } catch (e) {
-    alertDialog(`Арбитр не разобрал: ${errorMessage(e, '')}`);
-
+  } catch (error) {
+    await alertDialog(`Разбор не удалось начать: ${errorMessage(error, '')}`);
   } finally {
-    const s = new Set(arbiterBusy.value);
+    const remaining = new Set(arbiterBusy.value);
 
-    s.delete(task);
-    arbiterBusy.value = s;
+    remaining.delete(task);
+    arbiterBusy.value = remaining;
   }
 }
 
@@ -2775,9 +2677,12 @@ function cardActions(t: PipelineViewTask): PipelineCardAction[] {
   };
 
   if (canAnswerStall(t)) {
+    const dialogEntry = t.stall?.phase !== 'bootstrap'
+      && Boolean(t.stall?.arbitrable || t.stall?.conversation || arbiterAsksHuman(t));
+
     add(
-      'answer', arbiterAsksHuman(t) ? '⚖ разбор и решение' : '✍ ответить и продолжить',
-      arbiterAsksHuman(t) ? 'Разбор арбитра целиком и поле для твоего решения.'
+      'answer', dialogEntry ? translate('core.arbiterDialogTitle') : '✍ ответить и продолжить',
+      dialogEntry ? translate('core.arbiterEntryHint')
         : t.stall?.phase === 'bootstrap' ? 'Откроет вопрос разведки и поле ответа следующему SCOUT.'
           : 'Откроет узел: там указание агенту и возврат конвейера на него.',
       'Открываю решение', 'sbretry',
@@ -2786,9 +2691,9 @@ function cardActions(t: PipelineViewTask): PipelineCardAction[] {
 
   if (canArbitrate(t)) {
     add(
-      'arbitrate', '⚖ разобрать и продолжить',
+      'arbitrate', `⚖ ${translate('core.arbiterAnalyzeStop')}`,
       arbiterAsksHuman(t) ? 'Арбитр уже отдал решение тебе; повтор нужен, только если условия изменились.'
-        : 'Арбитр проверит спор по коду и вернёт узел с указанием; границу задачи он менять не вправе.',
+        : 'Арбитр изучит остановку и предложит следующий шаг. Исправление выбираете вы.',
       'Арбитр разбирает', 'sbretry',
     );
   }
@@ -2961,7 +2866,8 @@ async function loadSnapshot() {
       return graph ? [{ ...task, graph }] : [];
     });
     // Названия задач из B24 (для заголовка) + доска (для «таймеров вне фабрики»).
-    tasks.value.forEach((t) => taskStore.load(t.task).catch(() => {}));
+    tasks.value.filter((task) => task.source !== 'grigdesk')
+      .forEach((task) => taskStore.load(task.task).catch(() => {}));
     board.load();
     error.value = null;
   } catch (e) {
@@ -3555,6 +3461,7 @@ function cardState(g: PipelineViewGraph) {
 
 /* Рабочая область: информация слева, действия справа. Обе колонки скроллятся внутри
    viewport-рамки, поэтому шапка и нижние действия всегда остаются на экране. */
+.sconversation { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 18px; }
 .sworkspace { min-width: 0; min-height: 0; flex: 1; display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(380px, 470px); grid-template-areas: "main rail";
   overflow: hidden; background: var(--surface); }

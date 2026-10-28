@@ -13,6 +13,10 @@ import {
   approveInstall, previousInstall, savePrevious,
 } from '../../server/scripts/binary/installOwnership.mts';
 import { sha256File } from '../../shared/node/hash.ts';
+import { glmCompatibilityHash } from '../../shared/node/glmCompatibility.ts';
+import { acquireInstallLock } from '../../shared/node/binaryInstall.ts';
+import { runtimeInfoFixture } from '../helpers/deepseekMetadataFixture.mts';
+import hostContract from '../../server/deepseek-host-contract.json' with { type: 'json' };
 
 const run = promisify(execFile);
 const info = {
@@ -83,6 +87,148 @@ function probes(calls = [], metadata = info) {
       };
   };
 }
+
+/**
+ * Кандидат выдаёт свой контракт через prepare, установленный исполнитель отвечает процессом.
+ * Source-контракт намеренно не участвует в пробе: тест может менять ревизию только кандидата.
+ */
+async function executorFixture(options, { host = hostContract, admitted = true, verify = true } = {}) {
+  const binary = path.join(path.dirname(options.target), 'deepseek');
+  const metadata = runtimeInfoFixture();
+
+  metadata.glm.admission = admitted ? [{
+    mode: 'api',
+    compatibility: glmCompatibilityHash(metadata.glm.inputs, 'api', {
+      profile: metadata.glm.profileRevision,
+      policy: metadata.glm.policyRevision,
+    }),
+  }] : [];
+  await fs.writeFile(binary, [
+    `#!${process.execPath}`,
+    `const info = ${JSON.stringify(metadata)};`,
+    'if (process.argv.includes("--runtime-info")) console.log(JSON.stringify(info));',
+    'else if (process.argv.includes("--verify")) console.log(JSON.stringify({',
+    `  verified: ${verify}, glmPlugin: true, packageId: info.packageId,`,
+    '}));',
+    'else process.exitCode = 9;',
+  ].join('\n'), { mode: 0o755 });
+
+  const calls = [];
+  const base = probes(calls);
+
+  /**
+   * Только prepare публикует контракт кандидата в одноразовый runtime установки.
+   * Release фиксируется отдельно, чтобы отказ совместимости не скрывал утечку preparation.
+   */
+  const probe = async (file, args, context) => {
+    if (args.includes('--prepare')) {
+      const root = path.join(context.env.GRIGDESK_HOME, 'packages', info.packageId);
+
+      await fs.mkdir(path.join(root, 'server'), { recursive: true });
+      await fs.writeFile(path.join(root, 'server/deepseek-host-contract.json'), JSON.stringify(host));
+      calls.push({ args });
+
+      return {
+        packageId: info.packageId,
+        root,
+        node: path.join(root, 'runtime/node/bin/node'),
+        engine: path.join(root, 'engine/bin/factory'),
+        installationBin: path.dirname(file),
+        preparationToken: '12345678-1234-1234-1234-123456789abc',
+      };
+    }
+
+    if (args.includes('--release-preparation')) {
+      calls.push({ args });
+
+      return { ok: true };
+    }
+
+    return base(file, args, context);
+  };
+
+  return {
+    binary,
+    probe,
+    calls,
+  };
+}
+
+test('SB-пара: несовместимость и отсутствие допуска сохраняют сервер и receipt', async (t) => {
+  for (const failure of ['profile', 'policy', 'admission', 'verify']) {
+    const { options } = await fixture(t);
+    const previous = await installBinary(options, { probe: probes() });
+    const receipt = `${options.target}.grigdesk-server.json`;
+    const receiptBefore = await fs.readFile(receipt, 'utf8');
+    const host = structuredClone(hostContract);
+
+    if (failure === 'profile') {
+      host.glm.profileRevision = 'next-profile';
+    } else if (failure === 'policy') {
+      host.glm.policyRevision = 'next-policy';
+    }
+
+    const executor = await executorFixture(options, {
+      host,
+      admitted: failure !== 'admission',
+      verify: failure !== 'verify',
+    });
+
+    await fs.writeFile(options.binary, '\x7fELF-next-server');
+    await assert.rejects(installBinary(options, { probe: executor.probe }), /Совместимость/u);
+    assert.equal(await sha256File(options.target), previous.sha256);
+    assert.equal(await fs.readFile(receipt, 'utf8'), receiptBefore);
+    assert.ok(executor.calls.some(({ args }) => args.includes('--release-preparation')));
+
+    const lock = await acquireInstallLock(executor.binary);
+
+    await lock.release();
+  }
+});
+
+test('SB-пара: повторная совместимая сборка сохраняет исполнитель и публикует сервер', async (t) => {
+  const { options } = await fixture(t);
+  const executor = await executorFixture(options);
+  const digest = await sha256File(executor.binary);
+
+  for (const revision of ['A', 'B']) {
+    await fs.writeFile(options.binary, `\x7fELF-server-${revision}`);
+
+    const result = await installBinary(options, { probe: executor.probe });
+
+    assert.equal(await sha256File(options.target), result.sha256);
+    assert.equal(await sha256File(executor.binary), digest);
+  }
+});
+
+test('SB-пара: подмена исполнителя после проверки запрещает публикацию', async (t) => {
+  const { options } = await fixture(t);
+  const previous = await installBinary(options, { probe: probes() });
+  const executor = await executorFixture(options);
+
+  await fs.writeFile(options.binary, '\x7fELF-next-server');
+  await assert.rejects(installBinary(options, {
+    probe: async (file, args, context) => {
+      const result = await executor.probe(file, args, context);
+
+      if (args.includes('--release-preparation')) {
+        await fs.appendFile(executor.binary, '\n// changed');
+      }
+
+      return result;
+    },
+  }), /Совместимость/u);
+  assert.equal(await sha256File(options.target), previous.sha256);
+});
+
+test('SB-пара: явный отсутствующий executable не считается optional исполнителем', async (t) => {
+  const { options, root } = await fixture(t);
+
+  await assert.rejects(installBinary({ ...options, deepseekBinary: path.join(root, 'missing') }, {
+    probe: probes(),
+  }), /Совместимость/u);
+  assert.equal(await fs.stat(options.target).catch(() => null), null);
+});
 
 test('SB23-copy: закрытая staged копия и отдельный probe HOME/D до публикации', async (t) => {
   const { options } = await fixture(t);

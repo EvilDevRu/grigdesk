@@ -389,6 +389,7 @@ test('SB10: обычный чат сохраняет политику grigdesk-w
     ssh: true,
     db: false,
     strictDb: false,
+    delegation: 'foreground-v1',
   });
   assert.deepEqual(rowsById(launch.overlay).get('approval')?.config, { policy: 'ask' });
 });

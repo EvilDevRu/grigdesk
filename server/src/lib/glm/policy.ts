@@ -13,6 +13,7 @@ export interface GlmToolPolicy {
   ssh: boolean;
   db: boolean;
   strictDb: boolean;
+  delegation?: 'foreground-v1';
 }
 
 export type GlmToolKind = 'read' | 'search' | 'edit' | 'execute' | 'question' | 'plan' | 'mcp' | 'other';
@@ -83,7 +84,8 @@ export function parseGlmToolPolicy(value: unknown): GlmToolPolicy {
   if (!policy || typeof policy !== 'object' || !Array.isArray(policy.workTools)
     || policy.workTools.some((name) => typeof name !== 'string' || !name)
     || typeof policy.ssh !== 'boolean' || typeof policy.db !== 'boolean'
-    || typeof policy.strictDb !== 'boolean') {
+    || typeof policy.strictDb !== 'boolean'
+    || policy.delegation !== undefined && policy.delegation !== 'foreground-v1') {
     throw new TypeError('Политика инструментов GLM повреждена');
   }
 
@@ -92,6 +94,7 @@ export function parseGlmToolPolicy(value: unknown): GlmToolPolicy {
     ssh: policy.ssh,
     db: policy.db,
     strictDb: policy.strictDb,
+    ...(policy.delegation ? { delegation: policy.delegation } : {}),
   };
 }
 
@@ -109,6 +112,22 @@ export function decideGlmTool(name: string, input: unknown, policy: GlmToolPolic
       allow: allowed,
       kind,
       reason: allowed ? '' : 'MCP-инструмент не входит в инвентарь этого запуска',
+    };
+  }
+
+  const delegation = policy.delegation === 'foreground-v1'
+    && ['subagent', 'subagent_fork'].includes(name);
+
+  if (delegation) {
+    const args = input as Record<string, unknown> | null;
+    const invalid = !args || typeof args !== 'object' || Array.isArray(args)
+      || args.run_in_background !== undefined && args.run_in_background !== false
+      || ['provider', 'model', 'reasoning_effort'].some((key) => Object.hasOwn(args, key));
+
+    return {
+      allow: !invalid,
+      kind,
+      reason: invalid ? 'Делегирование GLM допускает только foreground с моделью родителя' : '',
     };
   }
 
@@ -144,4 +163,17 @@ export function decideGlmTool(name: string, input: unknown, policy: GlmToolPolic
     kind,
     reason: '',
   };
+}
+
+/**
+ * Factory использует фиксированный базовый набор даже при чатовых additions.
+ * Параметры consumer не проходят через расширяемую политику чата.
+ */
+export function decideGlmBaseTool(name: string, input: unknown, policy: GlmToolPolicy): GlmToolDecision {
+  return decideGlmTool(name, input, {
+    workTools: policy.workTools,
+    ssh: policy.ssh,
+    db: policy.db,
+    strictDb: policy.strictDb,
+  });
 }

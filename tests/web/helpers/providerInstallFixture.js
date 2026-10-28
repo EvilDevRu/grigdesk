@@ -59,6 +59,37 @@ export function job(overrides = {}) {
 }
 
 /**
+ * Подготовка соответствует публичному DTO: token, выбранный каталог, точные
+ * правки оболочки и будущая команда. Человеку показываются имена файлов, не текст блока.
+ */
+export function preparation(overrides = {}) {
+  const operation = overrides.operation ?? 'update';
+
+  return {
+    token: 'fixture-preparation-token',
+    expiresAt: 1_700_000_300_000,
+    providerId: 'claude',
+    operation,
+    command: operation === 'install'
+      ? card.installation.installCommand : card.installation.updateCommand,
+    prefix: '/home/fixture/.local',
+    shellChanges: [{
+      file: '/home/fixture/.bashrc',
+      action: 'update',
+      block: [
+        '# >>> GrigDesk external CLI PATH >>>',
+        'export PATH="/home/fixture/.local/bin:$PATH"',
+        '# <<< GrigDesk external CLI PATH <<<',
+        '',
+      ].join('\n'),
+    }],
+    terminalSetup: 'bash',
+    warnings: [],
+    ...overrides,
+  };
+}
+
+/**
  * Ревизия относится ко всему атомарному снимку установки.
  * Последние исходы индексируются исполнителем, активная работа одна.
  */
@@ -110,14 +141,22 @@ export async function clientFixture(t, options = {}) {
       return structuredClone(remote);
     },
     /**
-     * Только явный POST создаёт работу, ответ ещё не означает её завершение.
-     * Тест потери ответа может бросить после синтетического допуска.
+     * Подготовка отвечает отдельным DTO и не создаёт работу. Тест подменяет
+     * только старт: потеря ответа старта не должна отменять preview.
      */
     async post(url, body) {
       calls.posts.push({
         url,
         body
       });
+
+      if (url.endsWith('/prepare')) {
+        if (options.prepare) {
+          return options.prepare(url, body);
+        }
+
+        return preparation({ operation: url.includes('/install/') ? 'install' : 'update' });
+      }
 
       if (options.post) {
         return options.post(url, body);

@@ -1,9 +1,9 @@
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
-import { execFile } from 'node:child_process';
+import { execFile } from '../providerInstall/externalCliProcess.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn } from '../providerInstall/externalCliProcess.ts';
 
 import type { ChildProcess } from 'node:child_process';
 
@@ -26,6 +26,7 @@ import { COMMAND_NAME, hasUserShellPolicy } from './commandProfile.ts';
 import { checkKimiNativeShellPolicy } from './commandNativePolicy.ts';
 import type { KimiServerClient } from './serverClient.ts';
 import { runKimiServerTurn } from './serverTurn.ts';
+import { kimiServerApprovalInput } from './serverApproval.ts';
 import { startKimiServer } from './serverRuntime.ts';
 import type { PreparedNativeSettings } from '../executorSettings/types.ts';
 import type {
@@ -702,11 +703,7 @@ export async function runContainedKimi({
 
           const answer = await onPermission?.({
             tool,
-            input: {
-              command: String(approval.tool_input_display || approval.command || ''),
-              description: String(approval.description || approval.tool_input_display || ''),
-              kind: String(approval.kind || approval.action || ''),
-            },
+            input: kimiServerApprovalInput(approval),
             acceptsComment: true,
             canRemember: true,
             raw: approval,

@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   alertTargetHash,
   alertTargetLabel,
+  alertTargetMessage,
   firstQueryValue
 } from '../../web/src/shared/alertTargets.ts';
 
@@ -58,4 +59,17 @@ test('цель studio ведёт к версии и называет модел�
 
   assert.equal(alertTargetHash(target), '#/3d?model=model%20%231&version=v01-model');
   assert.equal(alertTargetLabel(target), 'Открыть модель');
+});
+
+test('PM-PLUGIN-TARGET: системный адрес кодирует pluginId', () => {
+  assert.equal(alertTargetHash({ kind: 'plugin', pluginId: 'a #/b' }), '#/ext/a%20%23%2Fb');
+});
+
+test('PM-PLUGIN-TARGET: подпись открытия панели переведена в общем каталоге RU/EN', () => {
+  const target = { kind: 'plugin', pluginId: 'ui-module' };
+
+  assert.equal(typeof alertTargetMessage(target).key, 'string',
+    'Не определена подпись открытия панели плагина');
+  assert.equal(alertTargetLabel(target, 'ru'), 'Открыть панель');
+  assert.equal(alertTargetLabel(target, 'en'), 'Open panel');
 });

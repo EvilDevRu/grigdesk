@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "id": "<profile-id>",
+  "repositories": [
+    {
+      "name": "app",
+      "source": "<absolute-repository>",
+      "baseBranch": "main",
+      "targetBranch": "main",
+      "productRules": "PRODUCT.md"
+    }
+  ],
+  "workspace": {
+    "mode": "isolated",
+    "root": "<absolute-workspaces>",
+    "prepare": []
+  },
+  "checks": {
+    "tests": [
+      {
+        "repo": "app",
+        "match": "tests/**/*.test.mjs",
+        "argv": [
+          "<safe-test-wrapper>",
+          "{files}"
+        ],
+        "timeoutSeconds": 300
+      }
+    ],
+    "style": [],
+    "build": []
+  },
+  "stand": {
+    "hasInterface": false,
+    "frontendUrl": null,
+    "apiUrl": null,
+    "health": [],
+    "entryInstructions": ""
+  },
+  "stack": [
+    "<project-stack>"
+  ],
+  "guardrails": [],
+  "permissions": {
+    "allow": [],
+    "deny": []
+  },
+  "volatilePaths": [],
+  "delivery": {
+    "strategy": "commit",
+    "remote": "origin",
+    "pullRequestCommand": [
+      "<pr-command>"
+    ]
+  },
+  "executors": {
+    "author": {
+      "provider": "<provider>",
+      "model": "<author-model>",
+      "effort": "medium",
+      "failover": []
+    },
+    "reviewer": {
+      "provider": "<provider>",
+      "model": "<reviewer-model>",
+      "effort": "medium",
+      "failover": []
+    }
+  }
+}

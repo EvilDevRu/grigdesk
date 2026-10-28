@@ -7,7 +7,8 @@
 с target `<корень>/bin/grigdesk-server` и releases в папке данных. `grigdesk-ctl build`
 после сервера собирает веб и ставит окно; работающие компоненты команда не перезапускает.
 Если descriptor уже v4 на этот ELF, новый packageId подхватится при следующем открытии окна.
-Иначе печатается подсказка `grigdesk-ctl desktop use-server <ELF>`, выбор не выполняется:
+Для отдельной цели `server` иначе печатается подсказка `grigdesk-ctl desktop use-server <ELF>`.
+Полная сборка дополнительно сохраняет [отложенную привязку окна](build-server-selection.md):
 [сборка одной командой](ctl-build.md).
 
 Сборка, установка, выбор окна и перезапуск — отдельные действия. Установщик запускается
@@ -28,6 +29,11 @@ staging на filesystem target. Копия закрывается, получа�
 проходит runtime-info и полный verify (SHA самого ELF, Node/ABI, два native bindings).
 Пробы получают отдельные HOME/D/tmp/cache вне установки и окружение без ключей и loaders.
 SHA и файловый отпечаток staged inode проверяются повторно после проб и backup.
+
+До backup и публикации проверяется [совместимость с установленным DeepSeek/GLM](server-executor-install-guard.md)
+по контракту из payload кандидата сервера. При несовместимости прежний сервер и receipt
+сохраняются. Для нестандартного пути исполнителя есть `--deepseek-binary <ELF>`;
+по умолчанию проверяется соседний `bin/deepseek`, если он установлен.
 
 Чужие target, symlink и неправильные receipt отклоняются. Private receipt
 `grigdesk-server.grigdesk-server.json` имеет режим 0600 и привязан к абсолютному target.

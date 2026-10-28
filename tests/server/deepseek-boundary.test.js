@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { ensureTestAdmittedDeepSeekBinary } from '../helpers/deepseekBinary.mts';
+import { createGlmBinaryFixtureRoot } from '../helpers/glmBinary.mts';
 import { removePrivateTree } from '../../shared/node/files.ts';
 import { startDeepSeekLoopback, writeDeepSeekLoopbackOverlay } from '../helpers/deepseekLoopback.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
@@ -23,7 +23,7 @@ test('изолированный server и Factory работают через �
   timeout: 900000,
 }, async (t) => {
   const candidate = await ensureTestAdmittedDeepSeekBinary();
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'deepseek-boundary-'));
+  const root = await createGlmBinaryFixtureRoot('deepseek-boundary-');
   const deepseek = await startDeepSeekLoopback();
   const glm = await startGlmLoopback({
     expectedKey: 'synthetic-zai-service-key',

@@ -134,7 +134,7 @@ test('идущий разбор виден в модалке узла и в её
   const plate = wrapper.find('.sarbrun.sarbnode');
 
   assert.equal(plate.exists(), true, 'плашка разбора показана');
-  assert.match(plate.text(), /руками браться не нужно/);
+  assert.match(plate.text(), /ожидается результат/);
   assert.match(plate.text(), /сам · 3 мин/, 'видно, что задача едет сама и сколько уже');
 
   const badge = wrapper.find('.sbadge');

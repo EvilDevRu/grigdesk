@@ -19,8 +19,11 @@ printf '%s\n' \
   RUNNERS_COVERAGE=required \
   PROJECT_RUNNER_PRIMARY=alpha \
   PROJECT_RUNNER_FAILOVER= \
+  STAGE_REVIEW_PRIMARY=beta \
   MODEL_DEFAULT_ALPHA_FAMILY=fixture \
   MODEL_DEFAULT_ALPHA_VERSION=latest \
+  MODEL_DEFAULT_BETA_FAMILY=fixture \
+  MODEL_DEFAULT_BETA_VERSION=latest \
   >"$profile_dir/runners.env"
 printf '%s\n' '{"capabilities":["route-v2"]}' >"$profile_dir/graph.json"
 
@@ -344,7 +347,7 @@ preflight_task=9003
 preflight_ticket="$TEST_ROOT/ticket-${preflight_task}.json"
 sed "s/\"taskId\": \"$fixture_task\"/\"taskId\": \"$preflight_task\"/" \
   "$ticket" >"$preflight_ticket"
-blocked_start=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_PROBE=missing \
+blocked_start=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_PROBE=missing FAKE_BETA_PROBE=missing \
   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
   "$tool" "$preflight_task" start --profile "$profile_id" \
     --route feature \
@@ -356,6 +359,8 @@ blocked_start=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_PROBE=missing \
 assert_rc 1 "$?" "start remains fail-closed when a configured runner is unavailable"
 assert_contains "$blocked_start" 'FACTORY_ERROR=runner_preflight_unavailable RUNNERS=alpha' \
   "failed start returns a typed preflight reason with the runner id"
+[[ "$blocked_start" != *RUNNERS=alpha,beta* ]]
+assert_rc 0 "$?" "start не включает недоступного исполнителя вне узлов маршрута"
 assert_file_missing "$shared_state/t${preflight_task}.pipeline" \
   "failed runner preflight creates no route projection"
 
@@ -767,7 +772,8 @@ assert_eq "$attempt" "$(awk -F= '$1=="ATTEMPT"{print $2}' "$lease_dir"/*.owner |
 # То же состояние с тем же сломанным probe: решение уже записано, но resume
 # обязан остановиться до нового agent run. Именно эта асимметрия потерялась в
 # инциденте, когда общий preflight ошибочно стоял перед gate --commit-only.
-blocked_resume=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_PROBE=missing FAKE_ALPHA_RESULT=done \
+blocked_resume=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_PROBE=missing FAKE_BETA_PROBE=missing \
+  FAKE_ALPHA_RESULT=done \
   FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners" \
   "$tool" "$fixture_task" resume --profile "$profile_id" --attempt "$attempt" \
     --routes-dir "$routes" \
@@ -776,6 +782,8 @@ blocked_resume=$(FACTORY_FORBID_LIVE=0 FAKE_ALPHA_PROBE=missing FAKE_ALPHA_RESUL
 assert_rc 1 "$?" "resume remains fail-closed after a commit-only gate"
 assert_contains "$blocked_resume" 'FACTORY_ERROR=runner_preflight_unavailable RUNNERS=alpha' \
   "failed resume returns a typed preflight reason with the runner id"
+[[ "$blocked_resume" != *RUNNERS=alpha,beta* ]]
+assert_rc 0 "$?" "resume не включает недоступного исполнителя вне достижимых узлов"
 assert_eq approved "$(awk -F= '$1=="GATE_PLAN"{print $2}' "$shared_state/t${fixture_task}.pipeline")" \
   "failed resume preserves the already committed human decision"
 

@@ -258,6 +258,17 @@
   overflow-wrap: anywhere;
 }
 
+/* Название собственной задачи остаётся целиком доступным в узкой группе доски. */
+.ui-button[data-context='grigdesk-task-title'] {
+  height: auto;
+  max-width: 100%;
+  padding-block: 5px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
 .ui-icon-button[data-context='workspace-form'][data-role] {
   width: var(--control-height);
   height: var(--control-height);
@@ -636,6 +647,14 @@
   width: var(--control-height);
   height: var(--control-height);
   min-height: var(--control-height);
+}
+
+.ui-icon-button[data-context='window-control'] {
+  width: var(--app-topbar-h);
+  height: var(--app-topbar-h);
+  min-height: var(--app-topbar-h);
+  border-radius: 0;
+  color: var(--ink-mid);
 }
 
 .ui-icon-button--embedded,
@@ -1357,6 +1376,7 @@
    кнопка ростом с ручку панели перевешивала само имя, ради которого шапку и сократили. */
 .ui-icon-button[data-context='topbar-popover-settings'],
 .ui-icon-button[data-context='topbar-popover-refresh'],
+.ui-icon-button[data-context='topbar-popover-result'],
 .ui-icon-button[data-context='topbar-popover-update'] {
   width: 22px;
   height: 22px;
@@ -1916,6 +1936,13 @@
 .ui-button[data-context='chat-workdir'] .ui-button__trailing > svg {
   width: 12px;
   height: 12px;
+}
+
+.ui-button[data-context='chat-pending-preview'] {
+  height: auto;
+  min-height: max(30px, var(--toolbar-control-h));
+  padding: 0;
+  cursor: zoom-in;
 }
 
 .ui-icon-button[data-context='chat-pending-remove'] {

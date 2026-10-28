@@ -25,6 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 
 import { createWorkTools, getExecutor } from '../../lib/executors/index.ts';
+import { ExecutorRuntimeError } from '../../lib/executors/errors.ts';
 import { prepareChatNativeSettings } from '../../lib/executorSettings/launch.ts';
 import { NativeSettingsError } from '../../lib/executorSettings/errors.ts';
 import { createWorkIpc } from '../../lib/executors/workIpc.ts';
@@ -148,6 +149,8 @@ import type { PermissionQueue } from '../../lib/chat/permissionQueue.ts';
 import type { StructuredQuestion, StructuredAnswer } from '../../lib/chat/structuredAnswers.ts';
 import type { WorkIpc, WorkToolsPort } from '../../lib/executors/workIpc.ts';
 import type { ExecutorAdapter, ExecutorRunInput, ExecutorRunResult } from '../../lib/executors/index.ts';
+import { isChatModeSelection } from '../../../../shared/chat/chatPermissionModes.ts';
+import { PERMISSION_WAIT_MS } from '../../lib/chat/permissionQueue.ts';
 import type { SshBroker, BrokerScope, BrokerInput } from '../../lib/ssh/broker.ts';
 import type { DbBroker, DbBrokerScope, DbBrokerInput } from '../../lib/db/broker.ts';
 import type { SpeechRuntime } from '../../lib/speech/runtime.ts';
@@ -160,6 +163,7 @@ interface ChatTurnInput {
   modelRef?: unknown;
   effort?: string;
   mode?: string;
+  modeSelection?: unknown;
   sessionId?: string | null;
   context?: unknown;
   attachments?: Array<{ file?: unknown }>;
@@ -235,6 +239,7 @@ type ChatRequest = FastifyRequest<ChatRoute>;
 
 // Интерактивный канал дополняет общую очередь полями самой карточки вопроса.
 interface InteractionPresentation {
+  blocking?: boolean;
   isQuestion?: boolean;
   actions?: string[];
   questions?: StructuredQuestion[];
@@ -297,6 +302,8 @@ interface ChatExecutor {
   bin?: ExecutorAdapter['bin'];
   nativeSettings?: ExecutorAdapter['nativeSettings'];
   prepareRuntime?: ExecutorAdapter['prepareRuntime'];
+  runtimeProfileFingerprint?: ExecutorAdapter['runtimeProfileFingerprint'];
+  workToolPolicy?: ExecutorAdapter['workToolPolicy'];
   // Канал ввода в активный ход объявляет сам адаптер; отсутствие — честное «не умею».
   inTurnInput?: ExecutorAdapter['inTurnInput'];
   workToolsTransport?: string;
@@ -305,6 +312,7 @@ interface ChatExecutor {
   // Таблицу видов сбоя объявляет адаптер; отсутствие — работают общие признаки.
   turnFailureRules?: ExecutorAdapter['turnFailureRules'];
   modes?: (config: GrigDeskConfig) => Promise<Array<{ id: string }> | null>;
+  normalizePermissionMode?: ExecutorAdapter['normalizePermissionMode'];
   commands?: (config: GrigDeskConfig) => Promise<Array<{ cmd: string; run?: string }>>;
   run: NonNullable<ExecutorAdapter['run']>;
   sessionBinding?: ExecutorAdapter['sessionBinding'];
@@ -1239,6 +1247,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       model: target.model,
       effort: String(record.effort || ''),
       mode: String(record.mode || ''),
+      modeSelection: record.modeSelection,
       sessionId,
       target,
       queued: false,
@@ -1841,7 +1850,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // Ждём ответ СКОЛЬКО НУЖНО: «не успел за 4 минуты» — не повод продолжать без человека.
   // Сутки — верхняя граница здравого смысла, столько же держит вызов сам CLI
   // (MCP_TOOL_TIMEOUT, см. runChat). Раньше снимает только «стоп» или конец хода.
-  const PERM_WAIT_MS = 24 * 60 * 60 * 1000;
+  const PERM_WAIT_MS = PERMISSION_WAIT_MS;
 
   permissionQueue.subscribe?.((event) => {
     const origin = event.origin || event.entry?.origin;
@@ -1883,7 +1892,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const pid = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
     const at = Date.now();
     const isQuestion = !!presentation?.isQuestion;
-    const releaseQuestion = isQuestion ? holdInTurnForQuestion(chatKey) : () => {};
+    const releaseQuestion = isQuestion && presentation.blocking !== false
+      ? holdInTurnForQuestion(chatKey) : () => {};
     const presentationActions = Array.isArray(presentation?.actions)
       && presentation.actions.length
       ? presentation.actions
@@ -2849,6 +2859,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           model: String(record.model || ''),
           effort: String(record.effort || ''),
           mode: String(record.mode || ''),
+          modeSelection: record.modeSelection,
           workdir: record.workdir,
           sessionId: record.sessionId || null,
           requestTitle: !record.title && !(record.messages || []).some((message) => message.role === 'user'),
@@ -2877,6 +2888,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         userText: opts.message || '',
         hadAttachments: !!opts.attachments?.length,
         workspace: prepared.target.workspace,
+        permissionMode: opts.mode,
+        ...(isChatModeSelection(opts.modeSelection) ? { modeSelection: { ...opts.modeSelection } } : {}),
         ...(opts.mobileOwner ? {
           mobileOwner: { ...opts.mobileOwner },
           mobileHistoryEpoch: Number(prepared.target.record?.mobileHistoryEpoch || 0),
@@ -3064,7 +3077,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    * решает канал: ответом на запрос или записью в pending (принятый ход, оборванный сокет).
    */
   async function runChatTurn(channel: TurnChannel, {
-    id, message, model, effort, mode: wantMode, sessionId, context, attachments,
+    id, message, model, effort, mode: wantMode, modeSelection, sessionId, context, attachments,
     chatKey, queued, requestTitle, sentAt, compact, slashCommand, target, summaryWorkspace, workspaceKey,
     mobileOwner,
   }: ChatTurnInput & {
@@ -3225,7 +3238,24 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       );
     // Режим прав выбирает только пользователь в чате. UI-context не является
     // authorization surface и не даёт ни cwd, ни fallback permission mode.
-    const permissionMode = await allowedMode(executor, wantMode);
+    const normalizedMode = executor?.normalizePermissionMode?.(wantMode);
+
+    if (normalizedMode && !normalizedMode.ok) {
+      return channel.refuse(400, {
+        error: 'invalid_permission_mode',
+        message: normalizedMode.message,
+      });
+    }
+
+    const permissionMode = normalizedMode?.ok
+      ? normalizedMode.mode : await allowedMode(executor, wantMode);
+
+    if (modeSelection !== undefined && !isChatModeSelection(modeSelection)) {
+      return channel.refuse(400, {
+        error: 'invalid_permission_mode',
+        message: 'Некорректный маркер выбора режима.',
+      });
+    }
 
     if (!executor) {
       return channel.refuse(400, {
@@ -3235,15 +3265,18 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }
 
     const workProjectId = await trustedWorkProject(id);
+    const workToolPolicy = executor.workToolPolicy?.(permissionMode);
     const workToolScopeKey = [
       workProjectId || 'none',
       chatKey || id || 'free',
       permissionMode,
+      JSON.stringify(workToolPolicy || null),
     ].join(':');
     const workToolsValue = createWorkTools({
       projectId: workProjectId,
       chatKey,
       permissionMode,
+      workToolPolicy,
       invoke: (scope: BrokerScope, input: BrokerInput) => (sshBroker
         ? sshBroker.invoke(scope, input)
         : Promise.resolve({ ok: false, error: 'not_available' })),
@@ -3282,20 +3315,40 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     };
     let nativeSettings: ExecutorRunInput['nativeSettings'];
     let preparedRuntime: ExecutorRunInput['preparedRuntime'];
+    let runtimeProfileFingerprint: string | undefined;
 
     // Подготовка принадлежит серверу: тело HTTP не выбирает handle или descriptor.
     // Один объект проходит settings, binding и запуск даже при пустых overrides.
     if (executor.prepareRuntime) {
       try {
-        preparedRuntime = await executor.prepareRuntime(config, { signal: AbortSignal.timeout(15_000) });
+        preparedRuntime = await executor.prepareRuntime(config, {
+          signal: AbortSignal.timeout(15_000),
+          permissionModeContext: {
+            mode: permissionMode,
+            ...(modeSelection !== undefined ? { modeSelection } : {}),
+            provider: executor.id,
+            chatId: String(target.record?.id || chatKey || ''),
+            cwd,
+            extraDirs: uniqueExtraDirs,
+            providerSettings,
+            settingsRevision: savedSettings,
+            workToolPolicy,
+          },
+        });
 
         if (!preparedRuntime || typeof preparedRuntime !== 'object' || Array.isArray(preparedRuntime)) {
           throw new TypeError('Адаптер вернул некорректный runtime handle');
         }
-      } catch {
-        return channel.refuse(503, {
-          error: 'executor_unavailable',
-          message: 'Не удалось подготовить runtime исполнителя',
+
+        runtimeProfileFingerprint = executor.runtimeProfileFingerprint?.(preparedRuntime);
+      } catch (error) {
+        const code = error instanceof ExecutorRuntimeError ? error.code : 'executor_unavailable';
+        const status = code === 'invalid_permission_mode' ? 400 : code === 'mode_unavailable' ? 409 : 503;
+
+        return channel.refuse(status, {
+          error: status === 503 ? 'executor_unavailable' : code,
+          message: error instanceof ExecutorRuntimeError
+            ? error.message : 'Не удалось подготовить runtime исполнителя',
         });
       }
     }
@@ -3462,6 +3515,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         ...(channel.turnId ? { turnId: channel.turnId } : {}),
         providerId: executor.id,
         requestedModelId: model,
+        permissionMode,
         cwd,
         extraDirs: visibleExtraDirs(uniqueExtraDirs, [attachDir, ...artifactsDirs]),
       },
@@ -3664,6 +3718,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // называет оглавления, а рабочая папка разговора может лежать вне каталога плагинов.
         pluginDocsDirs: pluginDocs.map((entry) => entry.dir),
         permissionMode,
+        modeSelection,
+        runtimeProfileFingerprint,
         mcpConfig,
         mcpServers: workIpc ? [{ name: 'grigdesk-work', ...workIpc.mcpServer }] : [],
         permissionPromptTool: 'mcp__grigdesk-perm__approve',
@@ -3877,6 +3933,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
         return liveTurn
           ? liveSessions.run({ ...attemptArgs, executor }, {
+            permissionMode: attemptArgs.permissionMode,
+            modeSelection: attemptArgs.modeSelection,
+            preparedRuntime: attemptArgs.preparedRuntime,
+            runtimeProfileFingerprint: attemptArgs.runtimeProfileFingerprint,
             message: attemptArgs.message,
             onStep: attemptArgs.onStep,
             onProgress: attemptArgs.onProgress,
@@ -4876,6 +4936,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       modelRef: body.modelRef,
       effort: body.effort,
       mode: body.mode,
+      modeSelection: body.modeSelection,
       sessionId: body.sessionId,
       context: body.context,
       attachments: body.attachments,

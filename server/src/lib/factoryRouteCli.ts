@@ -14,6 +14,7 @@
 //    и появился ли ORCH_PID; текст отказа — из журнала запуска.
 import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -22,8 +23,12 @@ import { config as runtimeConfig } from '../config.ts';
 import { factoryUnitArgs, prepareFactoryRouteLaunch } from './factoryLaunch.ts';
 import type { FactoryRuntimeSelection } from './factoryRuntimePins.ts';
 import { grigDeskCliPath } from './cliPath.ts';
+import { getProviderAdapters } from './executors/index.ts';
 import { parseGlmAccessMode } from './glm/contract.ts';
 import { GLM_ROUTE_KEY_ENV } from './glm/env.ts';
+import {
+  buildFactoryExternalCliDescriptor, factoryExternalCliDescriptorPath,
+} from './providerInstall/factoryExternalCli.ts';
 import { nodeExecutable } from './runtimePaths.ts';
 
 /**
@@ -86,6 +91,7 @@ export interface RouteConfig {
   deepseekRuntimeHome?: string;
   prefsPath?: string;
   decisionTimeoutMs?: number;
+  externalCliDescriptor?: string;
   runtime?: FactoryRuntimeSelection & { cacheDir: string };
   runtimeNode?: string;
   runtimeHostEnv?: Record<string, string>;
@@ -275,13 +281,17 @@ export function routeGateArgs(config: RouteConfig, {
   return [...args, ...routePathArgs(config)];
 }
 
-/** `goto` — доверенный возврат курсора человеком на пройденный узел. */
+/**
+ * Строит доверенный возврат человека с полным текстом указания и exact identity попытки.
+ * Новый диалог передаёт expectedStage для CAS; прежние входы сохраняют свой контракт.
+ */
 export function routeGotoArgs(config: RouteConfig, {
-  task, profile, attempt, node, reason, actor = '',
+  task, profile, attempt, node, reason, actor = '', expectedStage,
 }: RouteIdentityArgs & {
   node: string;
   reason: string;
   actor?: string;
+  expectedStage?: { sequence: number; headEventHash: string };
 }): string[] {
   const args = [String(task), 'goto', '--profile', profile, '--attempt', attempt,
     '--node', node, '--reason', reason];
@@ -289,6 +299,9 @@ export function routeGotoArgs(config: RouteConfig, {
   // прежним байт в байт. Машинное решение обязано называть себя, иначе журнал попытки
   // утверждает, что курсор вернул человек.
   if (actor) args.push('--actor', actor);
+  if (expectedStage) {
+    args.push('--expected-stage', `${expectedStage.sequence}:${expectedStage.headEventHash}`);
+  }
   return [...args, ...routePathArgs(config)];
 }
 
@@ -390,6 +403,8 @@ export function routeLaunchEnv(
     FACTORY_HOME: config.factoryHome,
     FACTORY_PROFILES_DIR: config.profilesDir,
     FACTORY_CONFIG_ROOT: config.factoryConfigRoot,
+    ...(config.externalCliDescriptor
+      ? { FACTORY_EXTERNAL_CLI_DESCRIPTOR: config.externalCliDescriptor } : {}),
     // Transient-юнит env сервера не наследует, а движок закреплённого поколения лежит в R:
     // без явного запрета первый импорт Python пишет туда __pycache__ и ломает prepare.
     PYTHONDONTWRITEBYTECODE: '1',
@@ -551,6 +566,11 @@ export async function readRouteWorkTime(
  */
 export function routeFailure(output: string | null | undefined): RouteFailure | null {
   const text = String(output || '');
+
+  if (/FACTORY_ERROR=stale_stage\b/u.test(text)) {
+    return { error: 'stale_stage', message: 'Остановка уже изменилась; решение не применено.' };
+  }
+
   const pinned = /FACTORY_ERROR=(factory_runtime_[a-z_]+)/u.exec(text);
 
   if (pinned) {
@@ -833,6 +853,39 @@ function detachedRouteEnv(
   };
 }
 
+/**
+ * Стадия получает закрытый descriptor выбранных внешних копий, а не PATH оркестратора.
+ * Отказ построения не отменяет маршрут: раннер честно упадёт на своём probe.
+ */
+async function prepareRouteExternalCliDescriptor(config: RouteConfig): Promise<string> {
+  const dataHome = config.dataHome;
+
+  if (!dataHome || !path.isAbsolute(dataHome)) {
+    return '';
+  }
+
+  try {
+    const adapters = await getProviderAdapters();
+    const home = process.env.HOME && path.isAbsolute(process.env.HOME)
+      ? process.env.HOME : os.homedir();
+    const descriptorPath = factoryExternalCliDescriptorPath(dataHome);
+
+    await buildFactoryExternalCliDescriptor({
+      adapters,
+      config: runtimeConfig,
+      env: process.env,
+      home,
+      scratch: path.join(dataHome, 'artifacts', 'provider-install-probes', 'factory'),
+      leaseDirectory: path.join(dataHome, 'provider-cli-leases'),
+      descriptorPath,
+    });
+
+    return descriptorPath;
+  } catch {
+    return '';
+  }
+}
+
 export async function spawnRouteEngine(config: RouteConfig, { task, args, extraEnv = {} }: {
   task: string | number;
   args: string[];
@@ -884,6 +937,13 @@ export async function spawnRouteEngine(config: RouteConfig, { task, args, extraE
 
   config = prepared.config;
   args = prepared.args;
+
+  const externalCliDescriptor = await prepareRouteExternalCliDescriptor(config);
+
+  if (externalCliDescriptor) {
+    config = { ...config, externalCliDescriptor };
+  }
+
   await fs.mkdir(config.stateDir, { recursive: true });
 
   const env = routeLaunchEnv(config, extraEnv);

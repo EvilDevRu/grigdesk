@@ -1,8 +1,8 @@
 # Снимок исходников DeepSeek
 
 `deepseek/vendor/deepseek-harness/` закрепляет выбранный набор DeepSeek Harness `0.1.5-rc.2`,
-commit `c291e7961a515f6d7af9304e7fd1d257929aef26`: 181 выбранный корень, 2490 файлов,
-22 726 718 байт. Состав и настоящая host-сборка описаны в
+commit `c291e7961a515f6d7af9304e7fd1d257929aef26`: 183 выбранных корня, 2540 файлов,
+23 339 155 байт. Состав и настоящая host-сборка описаны в
 [отчёте композиции](deepseek-vendored-composition.md). Чаты и конвейеры используют
 автономный ELF, который включает проверенное поколение.
 
@@ -51,6 +51,11 @@ node deepseek/scripts/syncDeepSeekHarness.mts --commit "$upstream_sha" \
 байты сверяются с Git blob: `export-subst` не может незаметно изменить исходник.
 Пустой каталог патчей может отсутствовать в чистом checkout; наличие записей патчей
 в manifest требует всех соответствующих файлов.
+
+Исходный `upstream/` не является рабочей папкой для native/ABI-экспериментов.
+В частности, `native/system/test/link-platform.mjs` создаёт в нём `node_modules`,
+который нарушает manifest. Запускайте такие проверки только в отдельной копии;
+[разбор и регрессии](../testing/deepseek-vendor-node-modules.md).
 
 Патчи проверяются и применяются только в отдельной копии. Публикация использует
 writer lock и replacement directory; конфликт не меняет прежний snapshot. При

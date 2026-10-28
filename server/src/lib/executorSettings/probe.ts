@@ -1,7 +1,7 @@
 // Probe владеет отдельным процессом и ограничивает только его время и вывод.
 // Ошибки не включают stdout/stderr или приватные ответы протокола.
 
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn } from '../providerInstall/externalCliProcess.ts';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promisify } from 'node:util';
 

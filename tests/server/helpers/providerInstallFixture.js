@@ -75,6 +75,7 @@ export async function installFixture(t, options = {}) {
   };
   const gate = deferred();
   const modelGate = deferred();
+  const hooks = { afterRun: options.afterRun };
   let installed = options.installed ?? true;
   let version = options.before || '1.0.0';
   let latest = '2.0.0';
@@ -102,6 +103,7 @@ export async function installFixture(t, options = {}) {
       fallbackCommand: command
     },
     loginCommand: 'fixture login',
+    ...options.descriptor,
   };
   const provider = {
     id: 'claude',
@@ -125,6 +127,7 @@ export async function installFixture(t, options = {}) {
     latestVersion: async () => latest,
     updateCmd: ['--fixture-update'],
     installation: () => descriptor,
+    ...options.provider,
   };
   const adapters = options.adapters || new Map([[provider.id, provider]]);
   const runner = options.runner || (async (bin, args, runOptions) => {
@@ -154,6 +157,7 @@ export async function installFixture(t, options = {}) {
     installed = true;
     executed = true;
     version = options.after || '2.0.0';
+    await hooks.afterRun?.(result);
 
     return result;
   });
@@ -179,14 +183,15 @@ export async function installFixture(t, options = {}) {
     await app.register(authPlugin, {
       authStore: {
         isConfigured: () => true,
-        isValidSession: (value) => value === 'provider-install-fixture',
+        isValidSession: (value) => (options.sessions ?? ['provider-install-fixture']).includes(value),
       },
     });
   }
 
   const serviceEnv = {
     PATH: root,
-    HOME: root
+    HOME: root,
+    ...options.env,
   };
 
   await app.register(providersModule, {
@@ -224,6 +229,7 @@ export async function installFixture(t, options = {}) {
     calls,
     gate,
     modelGate,
+    hooks,
     provider,
     descriptor,
     adapters,
@@ -271,4 +277,140 @@ export function start(app, id = 'claude', operation = 'update', payload) {
  */
 export function completed(app, id = 'claude') {
   return until(() => current(app), (snapshot) => !snapshot.active && Boolean(snapshot.recent[id]));
+}
+
+/**
+ * npm-стенд собирает внешние Node/npm, пользовательский prefix и shell-файлы
+ * в собственных временных каталогах. Настоящий npm машины не участвует, а
+ * установленная копия появляется только после разрешённой команды runner-а.
+ */
+export async function installNpmFixture(t, options = {}) {
+  const packageId = options.packageId ?? '@fixture/cli';
+  const binName = options.binName ?? 'fixture-cli';
+  const configKey = options.configKey ?? 'claudeBin';
+  const envKey = options.envKey ?? 'GRIGDESK_CLAUDE_BIN';
+  const command = `npm i -g ${packageId}@latest`;
+  const binding = {
+    packageId,
+    binName,
+    configKey,
+    envKey,
+  };
+  const descriptor = {
+    install: {
+      executable: 'npm',
+      args: ['i', '-g', `${packageId}@latest`],
+      command,
+      fallbackCommand: command,
+      npmBinding: binding,
+    },
+    update: {
+      executable: 'npm',
+      args: ['i', '-g', `${packageId}@latest`],
+      command,
+      fallbackCommand: command,
+      npmBinding: binding,
+    },
+    loginCommand: `${binName} login`,
+    loginArgs: ['login'],
+    ...options.descriptor,
+  };
+  const fixture = await installFixture(t, {
+    ...options,
+    installed: options.installed ?? true,
+    descriptor,
+    env: { SHELL: options.shell ?? '/bin/bash', ...options.env },
+  });
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'provider-npm-stand-'));
+  const prefix = options.prefixInHome ? path.join(fixture.root, '.local')
+    : path.join(base, 'prefix');
+  const effectivePrefix = options.prefix ?? prefix;
+  const external = path.join(base, 'external');
+  const npmBinary = path.join(prefix, 'bin', binName);
+  const home = fixture.root;
+
+  t.after(() => fs.rm(base, { recursive: true, force: true }));
+  await fs.mkdir(external, { recursive: true });
+  await fs.mkdir(prefix, { recursive: true });
+  await fs.symlink(process.execPath, path.join(external, 'node'));
+
+  const npmScript = ['#!/bin/sh',
+    `if [ "$1" = "prefix" ]; then printf '%s\\n' ${JSON.stringify(effectivePrefix)}; exit 0; fi`,
+    'exit 0', ''].join('\n');
+
+  await fs.writeFile(path.join(external, 'npm'), npmScript, { mode: 0o755 });
+  fixture.env.PATH = external;
+  fixture.config[configKey] = options.configuredBin ?? '/fixture/configured-cli';
+  fixture.config.envPath = path.join(home, '.env');
+  await fs.writeFile(fixture.config.envPath, '# Настройки фикстуры\nOTHER=value\n');
+  await fs.writeFile(path.join(home, '.bashrc'), `export PATH="${external}:$PATH"\n`);
+  await fs.writeFile(path.join(home, '.bash_profile'), 'source "$HOME/.bashrc"\n');
+
+  const version = options.afterVersion ?? '2.0.0';
+  /**
+   * Новая копия появляется только после разрешённой команды runner-а.
+   * При `linkBin` создаётся ссылка в пакет prefix, как это делает настоящий npm.
+   */
+  const createBin = async () => {
+    if (options.createBin === false) {
+      return;
+    }
+
+    await fs.mkdir(path.dirname(npmBinary), { recursive: true });
+
+    if (options.linkBin) {
+      // Как настоящий npm: bin — ссылка в установленный пакет выбранного prefix.
+      const packageRoot = path.join(prefix, 'lib', 'node_modules', ...packageId.split('/'));
+      const entry = path.join(packageRoot, 'bin', 'cli.js');
+
+      await fs.mkdir(path.dirname(entry), { recursive: true });
+      await fs.writeFile(path.join(packageRoot, 'package.json'),
+        JSON.stringify({ name: packageId, version }));
+      await fs.writeFile(entry, `#!${process.execPath}\nconsole.log(${JSON.stringify(version)});\n`,
+        { mode: 0o755 });
+      await fs.rm(npmBinary, { force: true });
+      await fs.symlink(entry, npmBinary);
+
+      return;
+    }
+
+    await fs.writeFile(npmBinary,
+      `#!${process.execPath}\nconsole.log(${JSON.stringify(version)});\n`, { mode: 0o755 });
+  };
+
+  fixture.hooks.afterRun = createBin;
+  fixture.prefix = prefix;
+  fixture.npmBinary = npmBinary;
+  fixture.npm = path.join(external, 'npm');
+  fixture.binName = binName;
+  fixture.packageId = packageId;
+
+  return fixture;
+}
+
+/**
+ * Подготовка — отдельный read-only маршрут: тело пусто, а ответ связывает
+ * показанный prefix и файлы настройки с последующим стартом.
+ */
+export function prepare(app, id = 'claude', operation = 'update', headers) {
+  return app.inject({
+    method: 'POST',
+    url: `/api/providers/${id}/${operation}/prepare`,
+    payload: {},
+    ...(headers ? { headers } : {}),
+  });
+}
+
+/** Старт нового контракта передаёт ровно выданный непрозрачный token. */
+/**
+ * Старт нового контракта передаёт ровно выданный непрозрачный token.
+ * Заголовки нужны только проверкам области авторизации.
+ */
+export function startWithToken(app, token, id = 'claude', operation = 'update', headers) {
+  return app.inject({
+    method: 'POST',
+    url: `/api/providers/${id}/${operation}/start`,
+    payload: { preparationToken: token },
+    ...(headers ? { headers } : {}),
+  });
 }

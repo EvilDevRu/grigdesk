@@ -40,8 +40,16 @@ async function sharedRuntime(importModule: ImportModule): Promise<void> {
 export async function loadPluginModule(
   pluginId: string,
   descriptor: PluginWebModule,
-  options: { signal: AbortSignal; importModule?: ImportModule },
-): Promise<{ component: Component; releaseStyles: () => void }> {
+  options: {
+    signal: AbortSignal;
+    importModule?: ImportModule;
+    styles?: boolean;
+  },
+): Promise<{
+  component: Component;
+  start: unknown;
+  releaseStyles: () => void;
+}> {
   if (!isPluginModuleDescriptor(pluginId, descriptor)) {
     throw new PluginModuleError('load-failed');
   }
@@ -69,7 +77,11 @@ export async function loadPluginModule(
   const load = async () => {
     await sharedRuntime(importModule);
     controller.signal.throwIfAborted();
-    releaseStyles = await loadPluginStyles(descriptor.css, controller.signal);
+
+    if (options.styles !== false) {
+      releaseStyles = await loadPluginStyles(descriptor.css, controller.signal);
+    }
+
     controller.signal.throwIfAborted();
 
     const module = await importModule(descriptor.entry);
@@ -82,7 +94,11 @@ export async function loadPluginModule(
       throw new PluginModuleError('load-failed');
     }
 
-    return { component: component as Component, releaseStyles };
+    return {
+      component: component as Component,
+      start: module.start,
+      releaseStyles,
+    };
   };
 
   try {
