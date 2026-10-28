@@ -65,6 +65,12 @@
           </div>
         </div>
       </div>
+      <div v-else-if="q.trim() && (chat.search?.loading || chat.search?.error)" class="load-state">
+        <p role="status">{{ chat.search.error || t('core.chatSearchLoading') }}</p>
+        <UiButton v-if="chat.search.error" @click="chat.searchChats(q, showArchived)">
+          {{ t('core.chatListRetry') }}
+        </UiButton>
+      </div>
       <div v-else-if="!rows.length" class="none muted">{{ emptyLabel }}</div>
       <div
         v-for="r in rows"
@@ -237,7 +243,7 @@ import type { ChatListRow } from '../../shared/chatContracts.ts';
 import type { UiFieldHandle } from '../../ui.ts';
 import type { ChatSleepingSession } from '../../../../shared/chat/chatBackgroundTasks.ts';
 
-import { computed, nextTick, ref, watch } from 'vue';
+import { onUnmounted, computed, nextTick, ref, watch } from 'vue';
 import { useChatStore } from '../../stores/chat.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
@@ -274,6 +280,22 @@ prov.load();
 
 const q = ref('');
 const showArchived = ref(false);
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+watch([q, showArchived], ([query, archived]) => {
+  clearTimeout(searchTimer ?? undefined);
+
+  // Поколение меняется сразу: ответ прошлого запроса не рисуется во время debounce.
+  void chat.searchChats('', archived);
+
+  if (query.trim()) {
+    chat.search.loading = true;
+    searchTimer = setTimeout(() => void chat.searchChats(query, archived), 250);
+  }
+});
+
+onUnmounted(() => clearTimeout(searchTimer ?? undefined));
+
 const archiveLabel = computed(() => (
   `Показывать архив${chat.archived.length ? ` · ${chat.archived.length}` : ''}`
 ));

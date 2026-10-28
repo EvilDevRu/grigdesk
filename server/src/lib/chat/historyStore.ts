@@ -2,7 +2,9 @@
 // Каждый чат — свой файл chats/YYYY-MM/<id>.json (месяц СОЗДАНИЯ чата, файл не переезжает),
 // мета (активный чат, дефолты модели/усилия) — chats/meta.json. Битый файл одного чата
 // не валит остальную историю: он пропускается с предупреждением.
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { projectWebChatHead, chatSearchSnippet } from '../../../../shared/chat/chatListProjection.ts';
+import type { WebChatHead } from '../../../../shared/chat/chatListProjection.ts';
 import { chatPreview } from './chatPreview.ts';
 import { writeDurableFile } from '../durableFile.ts';
 import { promises as fs } from 'node:fs';
@@ -301,6 +303,7 @@ export class ChatHistoryStore {
     size: number;
     mtimeMs: number;
     head: ChatHead | null;
+    web: WebChatHead | null;
   }>();
 
   /** `legacyPath` — старая схема «вся история в одном файле», мигрируется однократно. */
@@ -495,7 +498,8 @@ export class ChatHistoryStore {
       return cached.head;
     }
 
-    const chat = JSON.parse(await fs.readFile(file, 'utf8')) as StoredChat;
+    const json = await fs.readFile(file, 'utf8');
+    const chat = JSON.parse(json) as StoredChat;
     const head: ChatHead | null = chat?.id
       ? {
         id: chat.id,
@@ -518,9 +522,124 @@ export class ChatHistoryStore {
       size: stat.size,
       mtimeMs: stat.mtimeMs,
       head,
+      web: chat?.id ? projectWebChatHead(chat, this.versionOf(json)) : null,
     });
 
     return head;
+  }
+
+  /**
+   * Версия относится к прочитанным байтам, поэтому совпадает у головы и полной ленты.
+   * Время обновления не используется: внешняя правка может сохранить прежнюю дату.
+   */
+  versionOf(json: string): string {
+    return createHash('sha256').update(json).digest('hex');
+  }
+
+  private preparation: Promise<void> | null = null;
+
+  private legacyImport: Promise<void> | null = null;
+
+  /**
+   * Общая подготовка импортирует старую историю и прогревает короткие проекции.
+   * Неудача освобождает singleflight, чтобы следующий запрос мог повторить подготовку.
+   */
+  prepareWeb(): Promise<void> {
+    if (!this.preparation) {
+      this.preparation = (async () => {
+        await this.ensureMigrated();
+        await this.importLegacy();
+        await this.heads();
+      })().catch((error) => {
+        this.preparation = null;
+
+        throw error;
+      });
+    }
+
+    return this.preparation;
+  }
+
+  /**
+   * Каталог перечисляет и проверяет файлы, не перечитывая неизменные сообщения.
+   * Полные объекты освобождаются после построения двух коротких проекций.
+   */
+  async webHeads(): Promise<WebChatHead[]> {
+    await this.prepareWeb();
+    await this.heads();
+
+    return [...this.headCache.values()].flatMap((entry) => entry.web ? [entry.web] : []);
+  }
+
+  /**
+   * Поиск читает выбранную группу последовательно без полнотекстового кэша.
+   * Число совпадений не ограничивается: окно сохраняет полный состав списка.
+   */
+  async searchWeb(query: string, archived: boolean): Promise<Array<{ id: string; snippetSource: string }>> {
+    const matches: Array<{ id: string; snippetSource: string }> = [];
+    const normalized = query.trim().toLowerCase();
+
+    if (!normalized) {
+      return matches;
+    }
+
+    for (const head of await this.webHeads()) {
+      if (!!head.archived !== archived) {
+        continue;
+      }
+
+      const chat = await this.peek(head.id);
+      const snippetSource = chat ? chatSearchSnippet(chat, normalized) : null;
+
+      if (snippetSource !== null) {
+        matches.push({ id: head.id, snippetSource });
+      }
+    }
+
+    return matches;
+  }
+
+  /**
+   * Импорт прежнего общего файла разделяется полной выдачей и подготовкой каталога.
+   * Сама миграция формата остаётся в существующем save с legacyImport.
+   */
+  private importLegacy(): Promise<void> {
+    if (!this.legacyImport) {
+      this.legacyImport = this.importLegacyOnce().catch((error) => {
+        this.legacyImport = null;
+
+        throw error;
+      });
+    }
+
+    return this.legacyImport;
+  }
+
+  /**
+   * Только владелец singleflight переносит прежний файл и переименовывает источник.
+   * Параллельные полная выдача и каталог ждут завершённый импорт, а не гоняются за rename.
+   */
+  private async importLegacyOnce(): Promise<void> {
+    if (!this.legacyPath || (await this.heads()).length) {
+      return;
+    }
+
+    let legacy;
+
+    try {
+      legacy = JSON.parse(await fs.readFile(this.legacyPath, 'utf8'));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return;
+      }
+
+      throw error;
+    }
+
+    if (legacy?.sessions?.length || legacy?.archived?.length) {
+      await this.save(legacy, { legacyImport: true });
+      await fs.rename(this.legacyPath, this.legacyPath + '.migrated');
+    }
   }
 
   /**
@@ -644,7 +763,13 @@ export class ChatHistoryStore {
   }
 
   async ensureMigrated(): Promise<{ changed: boolean; backupDir: string | null }> {
-    if (!this.migrationPromise) this.migrationPromise = this.migrateSchema();
+    if (!this.migrationPromise) {
+      this.migrationPromise = this.migrateSchema().catch((error) => {
+        this.migrationPromise = null;
+
+        throw error;
+      });
+    }
     return this.migrationPromise;
   }
 
@@ -1292,21 +1417,15 @@ export class ChatHistoryStore {
     });
   }
 
+  /**
+   * Полная совместимая выдача читает историю после общей миграции старого файла.
+   * Новый каталог использует отдельные короткие проекции, не изменяя этот контракт.
+   */
   async read(): Promise<Record<string, unknown>> {
     await this.ensureMigrated();
-    let map = await this.scan();
-    // Одноразовая миграция со старой схемы «всё в одном файле».
-    if (!map.size && this.legacyPath) {
-      try {
-        const legacy = JSON.parse(await fs.readFile(this.legacyPath, 'utf8'));
+    await this.importLegacy();
 
-        if (legacy?.sessions?.length || legacy?.archived?.length) {
-          await this.save(legacy, { legacyImport: true });
-          await fs.rename(this.legacyPath, this.legacyPath + '.migrated');
-          map = await this.scan();
-        }
-      } catch { /* старого файла нет — начинаем с пустого */ }
-    }
+    const map = await this.scan();
     const meta = await this.readMetaRaw();
     const all = [...map.values()].map((v) => v.chat).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
     return {

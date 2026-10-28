@@ -90,6 +90,7 @@ function windowApi(app, log = []) {
       get: (url) => call('GET', url),
       post: (url, body) => call('POST', url, body),
       put: (url, body) => call('PUT', url, body),
+      patch: (url, body) => call('PATCH', url, body),
       del: (url, body) => call('DELETE', url, body),
     },
   };
@@ -102,6 +103,15 @@ function windowApi(app, log = []) {
 async function world(t) {
   const windows = new Set();
   const control = controlledExecutor();
+
+  t.after(() => {
+    for (const view of windows) {
+      view.surface?.dispose();
+      view.chat.$dispose();
+      view.transport.net.dead = true;
+    }
+  });
+
   const fixture = await chatAppFixture(t, {
     executor: control.executor,
     // Раздать событие окнам на связи: копия JSON, как у настоящего SSE, и доставка
@@ -119,7 +129,7 @@ async function world(t) {
 
   // Новое окно: свой транспорт, история с сервера и подписка на общий поток событий.
   // Окно сразу «на связи» — его можно отключить полем online.
-  async function openWindow() {
+  async function openWindow(chatId) {
     const transport = windowApi(fixture.app);
     const chat = await chatStoreFixture({}, { api: transport.api, fromServer: true });
     const view = {
@@ -131,6 +141,11 @@ async function world(t) {
 
     windows.add(view);
 
+    if (chatId) {
+      view.surface = chat.registerSurface(view, { chatId, visible: true });
+      await chat.ensureChatMessages?.(chatId);
+    }
+
     return view;
   }
 
@@ -138,8 +153,14 @@ async function world(t) {
     ...fixture,
     ...control,
     openWindow,
+    /**
+     * Закрытие окна снимает поверхность и таймеры до остановки тестового сервера.
+     * Прежняя сеть становится недоступна и не возобновляет доставку после F5.
+     */
     closeWindow(view) {
       windows.delete(view);
+      view.surface?.dispose();
+      view.chat.$dispose();
       view.transport.net.dead = true;
     },
   };
@@ -166,7 +187,7 @@ test('F5 между записью реплики и приёмом: видно 
 
   await saveChat(w.app, 'f5-chat');
 
-  const first = await w.openWindow();
+  const first = await w.openWindow('f5-chat');
 
   first.transport.net.cut = (method, url) => (method === 'POST' && url === '/api/chat' ? 'before' : null);
 
@@ -182,7 +203,7 @@ test('F5 между записью реплики и приёмом: видно 
   // F5: прежнее окно исчезло вместе со своими повторами.
   w.closeWindow(first);
 
-  const reloaded = await w.openWindow();
+  const reloaded = await w.openWindow('f5-chat');
   const session = reloaded.chat.session('f5-chat');
 
   assert.equal(session.sending, false, 'исполнителя нет — «думает…» не рисуем');
@@ -226,7 +247,7 @@ test('потерянный ACK при оборванном SSE: повтор т�
 
   await saveChat(w.app, 'ack-chat');
 
-  const view = await w.openWindow();
+  const view = await w.openWindow('ack-chat');
   let posts = 0;
   const turnIds = [];
 
@@ -277,7 +298,7 @@ test('потерянный ответ на приём при живом SSE: с�
 
   await saveChat(w.app, 'ack-sse-chat');
 
-  const view = await w.openWindow();
+  const view = await w.openWindow('ack-sse-chat');
   let posts = 0;
 
   view.transport.net.cut = (method, url) => {
@@ -310,7 +331,7 @@ test('ход кончился при оборванном SSE: переподк�
 
   await saveChat(w.app, 'sse-chat');
 
-  const view = await w.openWindow();
+  const view = await w.openWindow('sse-chat');
 
   await view.chat.send('sse-chat', 'Длинная задача');
   await w.waitForRuns(1);
@@ -349,8 +370,8 @@ test('несколько сообщений одного чата и второ�
 
   await saveChat(w.app, 'seq-chat');
 
-  const left = await w.openWindow();
-  const right = await w.openWindow();
+  const left = await w.openWindow('seq-chat');
+  const right = await w.openWindow('seq-chat');
 
   for (const text of ['раз', 'два', 'три']) {
     await left.chat.send('seq-chat', text);

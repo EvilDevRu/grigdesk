@@ -1,6 +1,12 @@
 <template>
   <div v-if="sess" class="cs" :class="{ frozen, 'options-open': optionsOpen }" :style="composerStyle"
        @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
+    <section v-if="!messagesReady" class="load-state" role="status">
+      <p>{{ messageLoad?.error || t('core.chatMessagesLoading') }}</p>
+      <UiButton v-if="messageLoad?.state === 'error'" @click="retryMessages">
+        {{ t('core.chatListRetry') }}
+      </UiButton>
+    </section>
     <!-- Оверлей при перетаскивании файла -->
     <div v-if="dragOver" class="drop-overlay">
       <div class="drop-box">📎 Отпусти, чтобы приложить</div>
@@ -534,6 +540,7 @@
             data-role="chat-attachment"
             density="compact"
             multiple
+            :disabled="!messagesReady"
             :busy="attachBusy"
             :show-summary="false"
             :show-reset="false"
@@ -549,6 +556,7 @@
             </template>
           </UiFilePicker>
           <UiTextarea
+            :disabled="!messagesReady"
             ref="taEl"
             v-model="input"
             rows="2"
@@ -785,6 +793,9 @@ function feedImages(target: Element) {
 
 // Архивный разговор открывается для чтения прямо из архива. Отправка сообщения
 // сама перенесёт тот же объект в активные (stores/chat.ts), отдельной копии нет.
+const messagesReady = computed(() => chat.isChatMessagesLoaded?.(props.sid) ?? true);
+const messageLoad = computed(() => chat.messageLoads?.[props.sid]);
+
 const sess = computed(() => chat.sessions.find((s) => s.id === props.sid)
   || (chat.archived || []).find((s) => s.id === props.sid)
   || null);
@@ -1127,6 +1138,10 @@ async function onModelChange(e: Event) {
 // Реестр загружается асинхронно и может обновиться уже после открытия чата.
 // Когда он принёс достоверный список, старое неподдерживаемое значение не сохраняем.
 watch(effortLevels, (levels) => {
+  if (!messagesReady.value) {
+    return;
+  }
+
   if (sess.value?.effort && levels.length && !levels.includes(sess.value.effort)) {
     chat.setEffort(props.sid, '');
   }
@@ -1585,7 +1600,8 @@ async function onCtxClick(e: { altKey: boolean }) {
 // Сжатие или server-owned reset замораживают управление: менять модель/задачу/права
 // посреди перехода нельзя. Поле ввода, вложения и диктовка остаются живыми; сама кнопка
 // отправки ждёт завершения перехода.
-const frozen = computed(() => !!sess.value?.compacting || !!sess.value?.sessionResetting
+const frozen = computed(() => !messagesReady.value
+  || !!sess.value?.compacting || !!sess.value?.sessionResetting
   || !!sess.value?.workdirChanging || !!sess.value?.workdirProposal
   || ['preparing', 'ready', 'resetting'].includes(sess.value?.workdirState?.transition?.phase || ''));
 const frozenHint = computed(() => (sess.value?.sessionResetting
@@ -1593,6 +1609,14 @@ const frozenHint = computed(() => (sess.value?.sessionResetting
   : sess.value?.compacting
     ? 'Идёт сжатие контекста — отправка будет доступна сразу после него'
     : 'Подтвердите перенос и дождитесь смены рабочей папки'));
+
+/**
+ * Повтор присоединяется к единственной загрузке выбранной ленты.
+ * Отказ отображается состоянием стора и не превращается в пустой разговор.
+ */
+function retryMessages() {
+  void chat.ensureChatMessages(props.sid).catch(() => {});
+}
 
 // ── «Прочитано» ──
 // Открытый на экране чат читается сам: компонент рисуется ровно тогда, когда на чат
@@ -1807,7 +1831,7 @@ watch(() => [
   chat.questionFor(props.sid)?.pid,
 ], autoScroll);
 // Переключение на другой чат: подставляем его черновик и — в конец истории.
-watch(() => props.sid, async () => {
+watch(() => [props.sid, messagesReady.value], async () => {
   input.value = sess.value?.draft || '';
   atBottom.value = true; // новый чат открываем в конце истории
   await nextTick();
@@ -1822,12 +1846,23 @@ watch(input, (v) => {
 
   const sid = props.sid;
 
-  draftTimer = setTimeout(() => chat.setDraft(sid, v), 400);
+  if (!messagesReady.value) {
+    return;
+  }
+
+  draftTimer = setTimeout(() => {
+    if (sid === props.sid && messagesReady.value) {
+      chat.setDraft(sid, v);
+    }
+  }, 400);
 });
 // Уход со страницы/закрытие вкладки — дописываем черновик немедленно, дебаунс не успел бы.
 function flushDraft() {
   clearTimeout(draftTimer ?? undefined);
-  chat.setDraft(props.sid, input.value);
+
+  if (messagesReady.value) {
+    chat.setDraft(props.sid, input.value);
+  }
 }
 
 window.addEventListener('beforeunload', flushDraft);
@@ -1840,7 +1875,7 @@ onUnmounted(() => {
  * Отказ уже начатой передачи сохраняет черновик и не создаёт второй запрос другим путём.
  */
 async function submit() {
-  if (speechBusy.value) {
+  if (!messagesReady.value || speechBusy.value) {
     return;
   }
 

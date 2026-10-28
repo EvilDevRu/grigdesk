@@ -5,6 +5,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { reconcileWith } from './helpers/chat-protocol.js';
+
 import { apiHarness, chatStoreFixture, sseOf } from './helpers/chat-store.js';
 
 // Второе устройство: история уже загружена, своих запросов нет — только SSE и сверки.
@@ -132,6 +134,7 @@ test('WEB-07: вопрос из pending восстанавливается бе�
       }],
     }
     : { active: [] });
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
 
   await chat._collectPending();
 
@@ -152,6 +155,7 @@ test('WEB-08: потерянный вместе с окном вопрос во�
       }],
     }
     : { active: [] });
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
 
   await chat._collectPending();
 
@@ -174,6 +178,7 @@ test('WEB-09: итог сжатия из pending засевает новую с�
       }],
     }
     : { active: [] });
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
   apiHarness.del = async (url) => { deleted.push(url); return {}; };
 
   await chat._collectPending();

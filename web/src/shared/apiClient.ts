@@ -401,7 +401,7 @@ async function request(
     const start = performance.now();
 
     try {
-      const result = isGet && options.idleTimeoutMs && options.idleTimeoutMs > 0
+      const result = options.idleTimeoutMs && options.idleTimeoutMs > 0
         ? await requestWhileReceiving(path, opts, options.idleTimeoutMs, options.signal)
         : await handle(await attempt(), path);
 

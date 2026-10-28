@@ -6,6 +6,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { protocolHead, reconcileWith } from './helpers/chat-protocol.js';
+
 import { apiHarness, chatStoreFixture, sseOf } from './helpers/chat-store.js';
 
 const SEED = 'Сделано: план, тесты. Осталось: сборка.';
@@ -71,6 +73,7 @@ test('итог-отказ хода из очереди снимает «ждёт
       }],
     };
   };
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
   apiHarness.put = async () => ack(4);
   apiHarness.del = async (url) => {
     deleted.push(url);
@@ -109,6 +112,7 @@ test('pending подтверждается только после того, к�
       at: 7,
     }],
   });
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
   apiHarness.put = (url, body) => {
     order.push(`PUT:${body.chat.messages.at(-1).text}`);
 
@@ -135,6 +139,14 @@ test('pending подтверждается только после того, к�
 test('ответ для чата, которого в окне ещё нет, не выбрасывается: чат подтягивается с сервера', async () => {
   const chat = await chatStoreFixture({ sessions: [chatWith([])] });
   const deleted = [];
+  const remote = {
+    id: 'from-tablet',
+    title: 'С планшета',
+    messages: [userTurn('вопрос с планшета', 'turn-res-000004')],
+    revision: 2,
+    createdAt: 2,
+    updatedAt: 2,
+  };
 
   apiHarness.get = async (url) => {
     if (url === '/api/chat/pending') {
@@ -151,19 +163,15 @@ test('ответ для чата, которого в окне ещё нет, н
       };
     }
 
+    if (url === '/api/chat/store/head/from-tablet') {
+      return { head: protocolHead(remote) };
+    }
+
     assert.equal(url, '/api/chat/store/chat/from-tablet');
 
-    return {
-      chat: {
-        id: 'from-tablet',
-        title: 'С планшета',
-        messages: [userTurn('вопрос с планшета', 'turn-res-000004')],
-        revision: 2,
-        createdAt: 2,
-        updatedAt: 2,
-      },
-    };
+    return { chat: remote, version: protocolHead(remote).version };
   };
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
   apiHarness.put = async () => ack(3);
   apiHarness.del = async (url) => {
     deleted.push(url);
@@ -171,6 +179,8 @@ test('ответ для чата, которого в окне ещё нет, н
     return { ok: true };
   };
 
+  await chat._pullChat('from-tablet', false);
+  await chat.ensureChatMessages('from-tablet');
   await chat._collectPending();
 
   const tablet = chat.session('from-tablet');
@@ -221,6 +231,7 @@ test('ответ на приём, опоздавший к концу корот�
 
     return { active: [], queued: [] };
   };
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
   apiHarness.del = async () => ({ ok: true });
 
   const sending = chat.send('res-chat', 'быстро');

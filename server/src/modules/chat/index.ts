@@ -1,3 +1,5 @@
+import { projectWebChatHead } from '../../../../shared/chat/chatListProjection.ts';
+import { applyWebPending } from '../../lib/chat/webPendingHistory.ts';
 import { ChatProjectWorkspaces } from '../../lib/chat/projectWorkspaces.ts';
 import { isProjectDeleted, readProjectsMeta, readProjectRecord, projectRepos } from '../../lib/projects.ts';
 import type { ProjectsService } from '../projects/service.ts';
@@ -9,6 +11,12 @@ import { projectDeletionError } from '../projects/errors.ts';
 // Интерактивные права реализованы Claude executor-ом через permission-prompt-tool
 // (lib/chat/permission-mcp.js): запрос показывается всплывашкой в браузере.
 import fp from 'fastify-plugin';
+
+// Расширения Fastify нужны и при отдельном импорте модуля из веб-фикстуры.
+// Импорты типов не регистрируют плагины: это по-прежнему делает серверное приложение.
+import type {} from '@fastify/multipart';
+import type {} from '@fastify/websocket';
+
 import { promises as fs, createWriteStream, rmSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
@@ -212,6 +220,10 @@ interface ChatBody extends ChatTurnInput, ChatMeta {
   archived?: StoredChat[] | boolean;
   chat?: StoredChat;
   reuseSteps?: unknown;
+  known?: Record<string, unknown>;
+  patch?: Record<string, unknown>;
+  loadedIds?: unknown;
+  deliveryIds?: unknown;
 }
 
 type ChatRoute = {
@@ -5065,7 +5077,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // Вместе с историей отдаём порог сжатия из настроек: по нему кольцо контекста решает,
   // где желтеть и краснеть. Своего эндпоинта порогу не завели — клиент чата этот и так
   // тянет при загрузке, а меняется порог только в «Настройках» (оттуда же обновляется стор).
-  fastify.get<ChatRoute>('/api/chat/store', async () => {
+  /**
+   * Настройки и возможности одинаковы для прежней выдачи и лёгкого каталога.
+   * История подставляется вызывающим маршрутом без изменения прежних полей.
+   */
+  async function storeOptions() {
     const settings = prefs.read().speech;
     const storedRevision = prefs.readStored?.().speech?._revision || null;
     // История чата не должна ждать Python/CUDA diagnostics на cold start. Sync
@@ -5076,7 +5092,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       : await speechRuntime?.publicSnapshotAsync?.(settings);
 
     return {
-      ...(await history.read()),
       // Сервер принимает ходы по turnId: окно шлёт короткий приём с повтором вместо
       // POST, висящего весь ход. Старый сервер поля не знает, и окно остаётся на
       // синхронном запуске — повтор без идемпотентности там означал бы второй запуск.
@@ -5092,6 +5107,247 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         revision: speechSettingsRevision(settings, storedRevision),
       },
     };
+  }
+
+  fastify.get<ChatRoute>('/api/chat/store', async () => ({
+    ...(await history.read()),
+    ...(await storeOptions()),
+  }));
+
+  /**
+   * Каталог и дельта имеют одну оболочку и возвращают только короткие проекции.
+   * Отсутствующие known id передаются явно, без привязки к времени или процессу.
+   */
+  async function listStore(known?: Record<string, unknown>) {
+    const heads = await history.webHeads();
+    const selected = known ? heads.filter((head) => known[head.id] !== head.version) : heads;
+    const meta = await history.readMetaRaw();
+
+    return {
+      ...meta,
+      activeId: meta.activeId ?? null,
+      ...(await storeOptions()),
+      listProtocol: 1,
+      sessions: selected.filter((head) => !head.archived),
+      archived: selected.filter((head) => head.archived),
+      ...(known ? { gone: Object.keys(known).filter((id) => !heads.some((head) => head.id === id)) } : {}),
+    };
+  }
+
+  fastify.get<ChatRoute>('/api/chat/store/list', () => listStore());
+  fastify.post<ChatRoute>('/api/chat/store/changes', async (request, reply) => {
+    const known = request.body?.known;
+
+    if (!known || typeof known !== 'object' || Array.isArray(known)
+      || Object.values(known).some((version) => typeof version !== 'string')) {
+      return reply.code(400).send({ error: 'bad_known' });
+    }
+
+    return listStore(known);
+  });
+  fastify.get<ChatRoute>('/api/chat/store/head/:id', async (request, reply) => {
+    const head = (await history.webHeads()).find((entry) => entry.id === request.params.id);
+
+    return head ? { head } : reply.code(404).send({ error: 'no_chat' });
+  });
+  fastify.get<ChatRoute>('/api/chat/store/search', async (request) => ({
+    matches: await history.searchWeb(String(request.query?.q || ''), request.query?.archived === '1'),
+  }));
+
+  fastify.patch<ChatRoute>('/api/chat/store/chat/:id', async (request, reply) => {
+    const id = String(request.params.id);
+    const patch = request.body?.patch;
+    const allowed = ['title', 'unread', 'archived', 'closedAt'];
+
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)
+      || Object.entries(patch).some(([key, value]) => !allowed.includes(key)
+        || (key === 'title' ? typeof value !== 'string'
+          : key === 'closedAt' ? value !== null && (typeof value !== 'number' || !Number.isFinite(value))
+            : typeof value !== 'boolean'))) {
+      return reply.code(400).send({ error: 'bad_patch' });
+    }
+    if (deletingChats.has(id)) {
+      return reply.code(409).send({ error: 'chat_busy' });
+    }
+
+    const release = beginChatSaves([id]);
+    let changed = false;
+
+    try {
+      const saved = await history.patchExecution(id, (current) => {
+        changed = Object.entries(patch).some(([key, value]) => (current[key] ?? null) !== value);
+
+        return {
+          archived: !!current.archived,
+          ...patch,
+          ...(patch.closedAt === null ? { closedAt: undefined } : {}),
+        };
+      }, { skipUnchanged: true });
+
+      if (changed) {
+        fastify.sse.broadcast('chat-store', {
+          id,
+          origin: request.body?.origin || '',
+          at: Date.now(),
+        });
+      }
+
+      const entry = await history.readEntry(id);
+
+      return { head: projectWebChatHead(saved, history.versionOf(entry!.json)) };
+    } catch (error) {
+      if (error instanceof ChatHistoryError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+
+      throw error;
+    } finally {
+      release();
+    }
+  });
+
+  let reconcileTail: Promise<unknown> = Promise.resolve();
+
+  fastify.post<ChatRoute>('/api/chat/store/reconcile', async (request, reply) => {
+    const body = request.body;
+    const validIds = (ids: unknown): ids is string[] => Array.isArray(ids)
+      && ids.every((id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id));
+
+    if (!body || Object.keys(body).some((key) => !['loadedIds', 'deliveryIds'].includes(key))
+      || !validIds(body.loadedIds) || !validIds(body.deliveryIds)) {
+      return reply.code(400).send({ error: 'bad_reconcile' });
+    }
+
+    const loadedIds = body.loadedIds;
+    const deliveryIds = body.deliveryIds;
+    const job = reconcileTail.catch(() => {}).then(async () => {
+      await history.prepareWeb();
+      await turnLedger.load();
+      await mobileHistory.reconcile();
+
+      const pending = [];
+      const heads = [];
+      const gone: string[] = [];
+      const deliveries: Array<{
+        chatId: string;
+        turnId: string;
+        state: 'accepting' | 'unknown';
+        sentAt: number;
+      }> = [];
+
+      for (const result of await readPendingRecords()) {
+        const id = String(result.chatKey || '');
+        const pid = String(result.id || '');
+
+        if (loadedIds.includes(id)) {
+          pending.push(result);
+          continue;
+        }
+        if (!/^[A-Za-z0-9_.-]{1,100}$/.test(pid) || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) {
+          continue;
+        }
+        if (deletingChats.has(id)) {
+          throw new Error('Чат удаляется');
+        }
+
+        const release = beginChatSaves([id]);
+
+        try {
+          const current = await history.readEntry(id);
+          const turn = turnLedger.get(String(result.turnId || pid));
+
+          if (!current) {
+            gone.push(id);
+          } else {
+            let previousRevision = 0;
+            const saved = await history.patchExecution(id, (chat) => {
+              previousRevision = Number(chat.revision || 0);
+
+              return applyWebPending(chat, result, inTurnHistory, activeRuns.get(id)?.runId || null);
+            }, { durable: true, skipUnchanged: true });
+
+            if (turn && turn.chatKey === id) {
+              await turnLedger.update(turn.turnId, {
+                state: 'done',
+                finishedAt: Number(result.at || Date.now()),
+                outcome: result.interruptedBy ? 'interrupted' : result.stopped ? 'stopped'
+                  : result.role === 'error' ? 'error' : 'reply',
+              });
+            }
+
+            const entry = await history.readEntry(id);
+
+            heads.push(projectWebChatHead(entry!.chat, history.versionOf(entry!.json)));
+
+            if (Number(saved.revision || 0) !== previousRevision) {
+              fastify.sse.broadcast('chat-store', {
+                id,
+                origin: '',
+                at: Date.now(),
+              });
+            }
+          }
+
+          await fs.rm(path.join(pendingDir, `${pid}.json`), { force: true });
+        } finally {
+          release();
+        }
+      }
+
+      for (const id of deliveryIds) {
+        const current = await history.readEntry(id);
+
+        if (!current) {
+          gone.push(id);
+          continue;
+        }
+
+        await history.patchExecution(id, (chat) => {
+          const messages = (chat.messages || []).map((message) => ({ ...message }));
+
+          for (const message of messages) {
+            if (message.delivery !== 'sending' || !message.turnId) {
+              continue;
+            }
+
+            const turn = turnLedger.get(String(message.turnId));
+
+            if (turn && turn.chatKey === id && !acceptingTurns.has(String(message.turnId))) {
+              delete message.delivery;
+              delete message.outbox;
+
+              if (turn.state === 'done') {
+                delete message.queued;
+              }
+            } else {
+              deliveries.push({
+                chatId: id,
+                turnId: String(message.turnId),
+                state: acceptingTurns.has(String(message.turnId)) ? 'accepting' : 'unknown',
+                sentAt: Number(message.sentAt || 0),
+              });
+            }
+          }
+
+          return { messages };
+        }, { durable: true, skipUnchanged: true });
+
+        const entry = await history.readEntry(id);
+
+        heads.push(projectWebChatHead(entry!.chat, history.versionOf(entry!.json)));
+      }
+
+      return {
+        pending,
+        heads,
+        gone,
+        deliveries,
+      };
+    });
+
+    reconcileTail = job;
+
+    return job;
   });
 
   // Атомарное создание или восстановление по логической идентичности, принадлежащей серверу. Тело намеренно
@@ -5268,9 +5524,22 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   fastify.put<ChatRoute>(HISTORY_STEP_REUSE_ROUTE, (request, reply) => saveChat(request, reply, true));
 
   fastify.get<ChatRoute>('/api/chat/store/chat/:id', async (request, reply) => {
-    const chat = await history.readOne(String(request.params.id));
-    if (!chat) return reply.code(404).send({ error: 'no_chat' });
-    return { chat };
+    if (deletingChats.has(String(request.params.id))) {
+      return reply.code(404).send({ error: 'no_chat' });
+    }
+
+    await history.prepareWeb();
+
+    const entry = await history.readEntry(String(request.params.id));
+
+    if (!entry) {
+      return reply.code(404).send({ error: 'no_chat' });
+    }
+
+    return {
+      chat: entry.chat,
+      version: history.versionOf(entry.json),
+    };
   });
 
   fastify.delete<ChatRoute>('/api/chat/store/chat/:id', async (request, reply) => {
@@ -5369,6 +5638,12 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // Первая сверка запускает разовую миграцию чатов и сборку реестра моделей с пробами всех
   // исполнителей — это дольше лимита старта модуля, и сервер падал по кругу. Поэтому старт
   // её не ждёт: сверки сериализованы, а сбой оставляет pending до следующего прохода.
+  const catalogPreparation = history.prepareWeb().catch(() => {});
+
+  fastify.addHook('onClose', async () => {
+    await catalogPreparation;
+  });
+
   const startupReconcile = mobileHistory.reconcile().catch(() => {
     fastify.log.warn('чат: восстановление мобильной истории оставило pending для повторной сверки');
   });

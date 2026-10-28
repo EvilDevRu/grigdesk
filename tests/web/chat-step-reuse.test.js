@@ -1,10 +1,24 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { afterEach, test } from 'node:test';
 
 import { chatStoreFixture } from './helpers/chat-store.js';
+import {
+  protocolChanges,
+  protocolHead,
+  protocolList,
+  protocolReconcile,
+} from './helpers/chat-protocol.js';
 import { applyAssistantFinal } from '../../web/src/stores/chatInTurn.ts';
 import { messageKey } from '../../shared/chat/chatMessageIdentity.ts';
 import { historyStepReuseAck, restoreHistorySteps } from '../../server/src/lib/chat/historyStepReuse.ts';
+
+const cleanups = [];
+
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0).reverse()) {
+    cleanup();
+  }
+});
 
 const baseChat = () => ({
   id: 'reuse-chat',
@@ -57,16 +71,22 @@ async function setup({
      * Управляемая замена базы проверяет GET, который нельзя принять поверх dirty-правки.
      */
     async get(url) {
-      if (url === '/api/chat/store') {
-        return {
+      if (url === '/api/chat/store' || url === '/api/chat/store/list') {
+        const store = {
           sessions: [structuredClone(stored)],
           archived: [],
           historyStepReuseProtocol: capability
         };
+
+        return url.endsWith('/list') ? protocolList(store) : store;
+      }
+      if (url.startsWith('/api/chat/store/head/')) {
+        return { head: protocolHead(stored) };
       }
       if (url.startsWith('/api/chat/store/chat/')) {
         return {
-          chat: structuredClone(stored)
+          chat: structuredClone(stored),
+          version: protocolHead(stored).version,
         };
       }
 
@@ -75,6 +95,24 @@ async function setup({
         pending: [],
         waiting: []
       };
+    },
+    /**
+     * Сверка использует ту же серверную копию, что каталог и адресная лента.
+     * Пустая очередь не добавляет записей в журнал PUT, проверяемый барьерами refs.
+     */
+    async post(url, body) {
+      if (url === '/api/chat/store/changes') {
+        return protocolChanges({
+          sessions: [structuredClone(stored)],
+          archived: [],
+          historyStepReuseProtocol: capability,
+        }, body.known);
+      }
+      if (url === '/api/chat/store/reconcile') {
+        return protocolReconcile();
+      }
+
+      throw new Error(`Неожиданный POST: ${url}`);
     },
     /**
      * Сериализация фиксирует данные до ожидания ответа управляемого сервера.
@@ -101,9 +139,16 @@ async function setup({
        * Управляемые поля ответа позволяют отдельно проверить отсутствие или повреждение ACK.
        */
       const finish = (extra = {}) => {
-        const incoming = sent.reuseSteps ?
-          restoreHistorySteps(sent.chat, stored, sent.reuseSteps) :
-          sent.chat;
+        let incoming;
+
+        try {
+          incoming = sent.reuseSteps ?
+            restoreHistorySteps(sent.chat, stored, sent.reuseSteps) :
+            sent.chat;
+        } catch (error) {
+          // Настоящий HTTP-адаптер передаёт status/data, по которым разрешён full fallback.
+          throw Object.assign(error, { status: error.statusCode, data: { error: error.code } });
+        }
 
         stored = {
           ...incoming,
@@ -149,6 +194,16 @@ async function setup({
     api,
     fromServer: loaded
   });
+
+  cleanups.push(() => chat.$dispose());
+
+  if (loaded) {
+    const surface = chat.registerSurface({}, { chatId: stored.id, visible: true });
+
+    cleanups.push(() => surface.dispose());
+    // В исходном протоколе лента уже полная после _load; в новом ждём то же состояние.
+    await chat.ensureChatMessages?.(stored.id);
+  }
 
   chat.historyStepReuseProtocol = capability;
 

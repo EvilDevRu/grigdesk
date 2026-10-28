@@ -29,7 +29,7 @@ test('LOAD-KEEP-01', async (t) => {
   assert.equal(chat.activeId, chat.sessions[0].id);
   await chat.ensure();
   assert.equal(chat.sessions.length, 1);
-  assert.equal(calls.filter(([method, url]) => method === 'GET' && url === '/api/chat/store').length, 1);
+  assert.equal(calls.filter(([method, url]) => method === 'GET' && url === '/api/chat/store/list').length, 1);
 });
 
 test('LOAD-KEEP-02', async (t) => {
@@ -44,7 +44,7 @@ test('LOAD-KEEP-02', async (t) => {
     speech: { engine: 'browser', language: 'en' },
   };
   const server = {
-    sessions: [SERVER_CHAT],
+    sessions: [{ ...SERVER_CHAT, messages: [] }],
     archived: [],
     turnProtocol: 1,
     workdirProtocol: 1,
@@ -92,6 +92,11 @@ test('LOAD-KEEP-03', async (t) => {
       isolatePersistenceTimers(sub, chat);
       await chat._load();
       assert.equal(chat.sessions[0].id, populated ? SERVER_CHAT.id : 'legacy');
+
+      if (populated) {
+        await chat.ensureChatMessages(SERVER_CHAT.id);
+      }
+
       assert.deepEqual(chat.sessions[0].messages, SERVER_CHAT.messages);
       assert.equal(storage.values.get(LEGACY_KEY), populated ? encoded : undefined);
     });

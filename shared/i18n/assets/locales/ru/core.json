@@ -716,5 +716,7 @@
   "chatListLoadServer": "Ошибка сервера",
   "chatListLoadAccess": "Нет доступа к серверу",
   "chatListRetry": "Повторить",
-  "chatStoreNotLoaded": "Создать чат можно после загрузки списка"
+  "chatStoreNotLoaded": "Создать чат можно после загрузки списка",
+  "chatMessagesLoading": "Загружаем сообщения…",
+  "chatSearchLoading": "Ищем в чатах…"
 }

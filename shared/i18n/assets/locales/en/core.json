@@ -698,5 +698,7 @@
   "chatListLoadServer": "Server error",
   "chatListLoadAccess": "Server access is unavailable",
   "chatListRetry": "Retry",
-  "chatStoreNotLoaded": "You can create a chat after the list loads"
+  "chatStoreNotLoaded": "You can create a chat after the list loads",
+  "chatMessagesLoading": "Loading messages…",
+  "chatSearchLoading": "Searching chats…"
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createChatListPreviewCache } from '../../web/src/shared/chatListPreview.ts';
-import { chatStoreFixture } from './helpers/chat-store.js';
+import { apiHarness, chatStoreFixture } from './helpers/chat-store.js';
 
 test('80 неизменённых превью разбираются один раз, фрагменты и память ограничены', () => {
   let calls = 0;
@@ -63,7 +63,7 @@ test('реальный Markdown остаётся читаемым на обре�
   }
 });
 
-test('поиск читает весь текст; порядок, ожидание, архив и черновик остаются актуальными', async () => {
+test('серверный поиск по всему тексту; порядок, ожидание, архив и черновик актуальны', async (t) => {
   const chat = await chatStoreFixture({
     sessions: [{
         id: 'a',
@@ -91,6 +91,14 @@ test('поиск читает весь текст; порядок, ожидан�
     }]
   });
 
+  t.after(() => chat.$dispose());
+  apiHarness.get = async (url) => {
+    assert.equal(url, '/api/chat/store/search?q=' + encodeURIComponent('редкая строка') + '&archived=0');
+
+    return { matches: [{ id: 'a', snippetSource: '…начало начало начало редкая строка' }] };
+  };
+  // Старый стор уже имеет текст для поиска, новый получает управляемый серверный ответ.
+  await chat.searchChats?.('редкая строка');
   assert.deepEqual(chat.list('редкая строка').map((row) => row.id), ['a']);
   assert.deepEqual(chat.list('').map((row) => row.id), ['a', 'b']);
   chat.pending = {

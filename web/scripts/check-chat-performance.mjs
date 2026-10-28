@@ -284,14 +284,55 @@ async function receiver() {
           method: 'GET',
           route
         });
+      } else if (request.method === 'GET' && route === '/api/chat/store/list') {
+        const heads = await store.webHeads();
+
+        result = {
+          listProtocol: 1,
+          sessions: heads.filter((head) => !head.archived),
+          archived: heads.filter((head) => head.archived),
+          activeId: 'fixture-0',
+          historyStepReuseProtocol: label === 'before' ? 0 : 1
+        };
+        received.push({ method: 'GET', route });
+      } else if (request.method === 'POST' && route === '/api/chat/store/changes') {
+        const buffers = [];
+
+        for await (const buffer of request) {
+          buffers.push(buffer);
+        }
+
+        const { known = {} } = JSON.parse(Buffer.concat(buffers).toString('utf8'));
+        const heads = await store.webHeads();
+        const changed = heads.filter((head) => known[head.id] !== head.version);
+
+        result = {
+          listProtocol: 1,
+          sessions: changed.filter((head) => !head.archived),
+          archived: changed.filter((head) => head.archived),
+          gone: Object.keys(known).filter((id) => !heads.some((head) => head.id === id)),
+          historyStepReuseProtocol: label === 'before' ? 0 : 1
+        };
+        received.push({ method: 'POST', route });
+      } else if (request.method === 'POST' && route === '/api/chat/store/reconcile') {
+        result = {
+          pending: [],
+          heads: [],
+          gone: [],
+          deliveries: []
+        };
+        received.push({ method: 'POST', route });
+      } else if (request.method === 'GET' && route.startsWith('/api/chat/store/head/')) {
+        result = { head: (await store.webHeads()).find((head) => head.id === route.split('/').at(-1)) };
+        received.push({ method: 'GET', route });
       } else if (request.method === 'GET' && route.startsWith('/api/chat/store/chat/')) {
+        const entry = await store.readEntry(route.split('/').at(-1));
+
         received.push({
           method: 'GET',
           route
         });
-        result = {
-          chat: await store.readOne(route.split('/').at(-1))
-        };
+        result = { chat: entry?.chat, version: entry ? store.versionOf(entry.json) : '' };
       } else if (request.method === 'PUT' && ['/api/chat/store/chat',
           '/api/chat/store/chat/step-reuse'
         ].includes(route)) {
@@ -739,8 +780,11 @@ async function measureBoundaries(browser, backend, errors) {
  * Устойчивое событие не разбирает старый Markdown, ленты и подтверждённые тела.
  */
 function checkCachedBehavior(result) {
-  const historyReads = result.network.filter((item) => item.method === 'GET'
-    && (item.route === '/api/chat/store' || item.route.startsWith('/api/chat/store/chat/')));
+  const historyReads = result.network.filter((item) => (
+    item.method === 'GET' && (['/api/chat/store', '/api/chat/store/list'].includes(item.route)
+      || item.route.startsWith('/api/chat/store/chat/') || item.route.startsWith('/api/chat/store/head/'))
+  ) || (item.method === 'POST' && ['/api/chat/store/changes', '/api/chat/store/reconcile']
+    .includes(item.route)));
 
   assert.equal(historyReads.length, 0, 'Устойчивая запись перечитывает всю историю');
 
