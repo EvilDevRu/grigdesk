@@ -862,6 +862,7 @@
       "tests/web/chat-model-availability.component.test.js",
       "tests/web/chat-model-ref.test.js",
       "tests/web/chat-model-run.test.js",
+      "tests/web/chat-permission-mode.test.js",
       "tests/web/chat-permission.component.test.js",
       "tests/web/chat-persist-coalesce.test.js",
       "tests/web/chat-persistence-projection.test.js",

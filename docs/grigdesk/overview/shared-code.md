@@ -63,6 +63,7 @@
 
 | Модуль | Назначение |
 |---|---|
+| `chat/chatPermissionModes.ts` | Маркер явного выбора режима конкретного чата и server-owned action-матрица work tools |
 | `server/src/lib/mcpEnvironment.ts` | Окружение MCP: ACP-пары → объект, готовый объект без изменений; используют Kimi host и DeepSeek, пустое поле решает адаптер |
 | `lib/errors.ts` | Строковый code, message с fallback и отдельное преобразование Error/String |
 | `lib/delay.ts` | Пауза с отменой самим signal.reason; обычная Node-пауза — node:timers/promises |

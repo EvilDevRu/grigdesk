@@ -61,6 +61,17 @@
         <div v-if="constraintText(question)" class="q-rule">
           {{ constraintText(question) }}
         </div>
+        <UiTextarea
+          v-if="question.inputType === 'choice-or-text'"
+          v-model="state[questionIndex]!.value as string"
+          class="q-own"
+          data-context="workspace-note"
+          :maxlength="question.maxLength ?? 4000"
+          :aria-label="question.header || question.question"
+          :rows="2"
+          @keydown.ctrl.enter.prevent="ready && submitStructured('accept')"
+          @keydown.meta.enter.prevent="ready && submitStructured('accept')"
+        />
       </template>
 
       <template v-else>
@@ -277,7 +288,7 @@ function optionsOf(question: ChatQuestionItem) {
 }
 
 function structuredChoices(question: ChatQuestionItem) {
-  return ['choice', 'multi-choice', 'boolean'].includes(question?.inputType || '');
+  return ['choice', 'choice-or-text', 'multi-choice', 'boolean'].includes(question?.inputType || '');
 }
 
 function structuredOptions(question: ChatQuestionItem) {
@@ -312,7 +323,7 @@ function setStructuredValue(questionIndex: number, value: QuestionValue | undefi
  * Пустая строка остаётся значением текстового поля, как в прежней форме.
  */
 function hasStructuredValue(question: ChatQuestionItem, value: QuestionValue | undefined) {
-  if (question?.inputType === 'text') {
+  if (question?.inputType === 'text' || question?.inputType === 'choice-or-text') {
     return typeof value === 'string';
   }
   if (question?.inputType === 'multi-choice') {
@@ -342,7 +353,7 @@ function validStructured(question: ChatQuestionItem, value: QuestionValue | unde
     return true;
   }
 
-  if (question?.inputType === 'text') {
+  if (question?.inputType === 'text' || question?.inputType === 'choice-or-text') {
     if (typeof value !== 'string' || value.length > 4_000) {
       return false;
     }

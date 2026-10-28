@@ -802,7 +802,7 @@ export class ChatHistoryStore {
         const phase = prev?.chat.workdirState?.transition?.phase;
 
         if (phase && !['done', 'failed'].includes(phase)
-          && ['modelRef', 'mode', 'effort'].some((key) => (
+          && ['modelRef', 'mode', 'modeSelection', 'effort'].some((key) => (
             Object.hasOwn(chat, key) && JSON.stringify(chat[key]) !== JSON.stringify(prev?.chat[key])
           ))) {
           throw new ChatHistoryError('chat_busy', 'Сначала дождитесь переноса разговора.');
@@ -921,6 +921,7 @@ export class ChatHistoryStore {
         c.modelRefState = prev.chat.modelRefState;
         c.effort = prev.chat.effort;
         c.mode = prev.chat.mode;
+        c.modeSelection = prev.chat.modeSelection;
         c.unread = prev.chat.unread;
       }
       if (prev?.chat.workdirState) {

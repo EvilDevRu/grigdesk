@@ -1,4 +1,4 @@
-import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { localeTranslator, translator } from '../../../shared/i18n/catalogs.ts';
 
 import { uiLocalePort as uiLocale } from '../shared/uiLocalePort.ts';
 // Реестр LLM-исполнителей (GET /api/providers): топбар рисует иконки доступных,
@@ -156,7 +156,11 @@ export const useProvidersStore = defineStore('providers', {
      * или ещё не опрошен: тогда чат просто не показывает выбор.
      */
     modesOf(): (selection: ModelSelection) => NonNullable<ProviderEntry['modes']> {
-      return (sessionModel) => this.modelOf(sessionModel).provider?.modes || [];
+      return (sessionModel) => (this.modelOf(sessionModel).provider?.modes || []).map((mode) => ({
+        ...mode,
+        label: mode.labelKey ? translator.t(uiLocale.value, mode.labelKey, {}, mode.label) : mode.label,
+        hint: mode.hintKey ? translator.t(uiLocale.value, mode.hintKey, {}, mode.hint) : mode.hint,
+      }));
     },
     /**
      * Всё про модель чата одним вызовом: `{ id, model, provider }`. Пустое значение

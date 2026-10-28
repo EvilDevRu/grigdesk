@@ -1,3 +1,4 @@
+import type { ChatModeSelection } from '../../../shared/chat/chatPermissionModes.ts';
 // Клиентские формы подтверждений и вопросов: расширения исполнителя остаются данными.
 // Сетевой envelope проверяется владельцем состояния перед публикацией этих форм.
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
@@ -138,6 +139,7 @@ export interface ChatStep extends Record<string, unknown> {
   title?: string;
   model?: string;
   mode?: string;
+  modeSelection?: ChatModeSelection;
   level?: string;
   command?: string;
   preview?: string;
@@ -187,6 +189,9 @@ export interface ChatMessage extends Record<string, unknown> {
   steps?: ChatStep[];
   receipt?: Partial<InTurnReceipt>;
   outbox?: {
+    mode?: string;
+    modeSelection?: ChatModeSelection;
+    modeSelectionRevoked?: boolean;
     seed?: string;
     slashCommand?: string;
     requestTitle?: boolean;
@@ -242,6 +247,7 @@ export interface ChatRecord extends Record<string, unknown>, ChatContextUsage {
   revision?: number;
   effort?: string;
   mode?: string;
+  modeSelection?: ChatModeSelection;
   sessionId?: string | null;
   totalInputTokens?: number;
   cachedInputTokens?: number;

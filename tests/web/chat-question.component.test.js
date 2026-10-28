@@ -45,6 +45,24 @@ function button(wrapper, label) {
   return wrapper.findAll('button').find((entry) => entry.text() === label);
 }
 
+test('structured choice-or-text сохраняет native key и принимает свободный текст', async (t) => {
+  const wrapper = await mountQuestion(t, [{
+    key: 'native-question-id',
+    header: 'Тема',
+    question: 'Как продолжать?',
+    inputType: 'choice-or-text',
+    required: true,
+    minLength: 1,
+    options: [{ value: 'Первый', label: 'Первый' }],
+  }], { structured: true, actions: ['accept', 'cancel'] });
+
+  await wrapper.get('textarea').setValue('Своя формулировка');
+  await wrapper.get('textarea').trigger('keydown', { key: 'Enter', ctrlKey: true });
+  assert.deepEqual(wrapper.emitted('answer')[0][0], {
+    action: 'accept', answers: [{ key: 'native-question-id', value: 'Своя формулировка' }],
+  });
+});
+
 test('вопрос без вариантов сразу принимает многострочный ответ через Ctrl+Enter', async (t) => {
   const wrapper = await mountQuestion(t, [{
     header: 'Пояснение',

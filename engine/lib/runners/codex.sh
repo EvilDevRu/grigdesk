@@ -127,7 +127,17 @@ runner_codex_run() {
       -c "hooks.PreToolUse=$hook_policy"
     )
   else
-    args+=(--sandbox "$sandbox")
+    # Auto-review не меняет права неизвестной route policy или explicit sandbox.
+    # Флаг сам выбирает workspace-write и конфликтует с legacy --sandbox.
+    if [[ "${FACTORY_ROUTE_FILESYSTEM_POLICY:-}" == workspace-write &&
+          "$sandbox" == workspace-write ]]; then
+      args+=(--approve-for-me)
+    else
+      args+=(--sandbox "$sandbox")
+      if [[ "${FACTORY_ROUTE_FILESYSTEM_POLICY:-}" == state-only ]]; then
+        args+=(-c 'approval_policy="never"')
+      fi
+    fi
     if [[ "$sandbox" == workspace-write ]]; then
       args+=(-c 'sandbox_workspace_write.network_access=true')
     fi

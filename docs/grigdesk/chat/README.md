@@ -1,8 +1,13 @@
 # Чат и исполнители
 
+- [Режимы Codex: admission, явный выбор чата, native-вопросы и предел проверки](codex-permission-modes.md)
 
+- [Границы подготовки внешнего CLI и reuse живого процесса](executor-preparation-boundaries.md)
+- [Срок прямого вопроса: callback не наследует таймер enqueue](direct-interaction-lifetime.md)
 
+- [Codex: ask-hook, повторный stdin и границы строгих ручных подтверждений](codex-hook-approval-limits.md)
 
+- [Auto-review Codex: запуск, native события, остановка запросов и граница проверки](codex-auto-review-runtime.md)
 
 - [Удаление CLI: снятие привязки, оставшиеся копии и обновление карточки](provider-uninstall-state.md)
 - [Оставшаяся копия после удаления npm: версии и обычные действия](provider-native-after-uninstall.md)
@@ -219,7 +224,9 @@
 - [Пустой и выбранный уровни эффорта: оформление зависит только от текущего выбора (№93021)](effort-slider-states.md)
 - [Claude: ступень ultracode запрашивает workflow; discovery, модельный допуск и ограничения](claude-ultracode.md)
 - [MCP-серверы исполнителя — блок в той же плашке](mcp-server-controls.md)
-- [Codex: принудительный never и отказ MCP-инструментов, требующих подтверждения](codex-mcp-approvals.md)
+- [Codex: native Auto-review, ручные requests и intentional never служебных запусков](codex-mcp-approvals.md)
+- [Codex: штатные подтверждения, Auto-review, правила команд и проверка протокола 0.164.0](codex-native-approvals.md)
+- [Codex: граница записи в Git и отличие чата от этапов конвейера](codex-git-and-pipeline-permissions.md)
 - [DeepSeek: MCP в запуске и списке настроек](deepseek-mcp-visibility.md)
 - [DeepSeek: безопасный список проектных MCP, состояния и общие границы](deepseek-mcp-status.md)
 

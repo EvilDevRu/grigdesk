@@ -356,6 +356,9 @@ async function providersModule(
         checkedAt: updates.get(ex.id)?.at || null,
         models: chatEnabled ? models[ex.id] || [] : [],
         modes: modes || [],
+        defaultPermissionMode: ex.defaultPermissionMode,
+        permissionModeSelectionPolicy: ex.permissionModeSelectionPolicy,
+        permissionModesRequiringExplicitSelection: ex.permissionModesRequiringExplicitSelection,
         commands,
         // Свои ручки исполнителя для его плашки в настройках (см. контракт в executors/index.js).
         settings: await settingsOf(ex),

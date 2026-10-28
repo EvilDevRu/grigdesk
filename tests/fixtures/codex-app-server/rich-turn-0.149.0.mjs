@@ -29,7 +29,12 @@ const UPDATE_DIFF = '@@ -1 +1 @@\n-export const answer = 41;\n+export const answ
 const ADD_CONTENT = 'export function ready() {\n  return true;\n}\n';
 const ADD_DIFF = '@@ -0,0 +1,3 @@\n+export function ready() {\n+  return true;\n+}\n';
 
-function runFixture() {
+/**
+ * Общий transport сохраняет старые rich-сценарии и допускает отдельные native события.
+ * Расширения новых версий задают callback, не выдавая их за события исходной 0.149.
+ */
+export function runFixture({ onTurn, onBeforeTurn, effectiveSettings } = {}) {
+  const { omitReviewer, ...settings } = effectiveSettings || {};
   const traceFile = process.env.GRIGDESK_CODEX_FIXTURE_TRACE || '';
   const scenario = process.env.GRIGDESK_CODEX_FIXTURE_SCENARIO || 'rich';
   // Базовая fixture остаётся снимком 0.149, а dynamic tool сценарии могут
@@ -829,14 +834,15 @@ function runFixture() {
       if (scenario === 'early-thread-notification') {
         send({ method: 'thread/started', params: { thread } });
       }
+
       send({ id: message.id, result: {
         thread,
         model: 'gpt-contract-0.149',
         modelProvider: 'openai',
         cwd: process.cwd(),
         instructionSources: [],
-        approvalPolicy: 'never',
-        approvalsReviewer: 'user',
+        approvalPolicy: message.params?.approvalPolicy,
+        approvalsReviewer: omitReviewer ? undefined : message.params?.approvalsReviewer ?? 'user',
         sandbox: {
           type: 'workspaceWrite', writableRoots: [process.cwd()], networkAccess: true,
           excludeTmpdirEnvVar: false, excludeSlashTmp: false,
@@ -844,6 +850,7 @@ function runFixture() {
         activePermissionProfile: null,
         reasoningEffort: 'medium',
         multiAgentMode: 'explicitRequestOnly',
+        ...settings,
         ...(resumed && {
           initialTurnsPage: null, turnsBackwardsCursor: null, itemsBackwardsCursor: null,
         }),
@@ -885,7 +892,7 @@ function runFixture() {
       // Номер хода внутри разговора: процесс поднимается на каждый ход, поэтому
       // считать его в памяти нельзя. Второй ход того же thread приходит резюмом —
       // по нему и видно, что это продолжение, а не новый разговор.
-      turnsStarted = resumed ? 2 : 1;
+      turnsStarted = turnsStarted ? turnsStarted + 1 : resumed ? 2 : 1;
 
       const activeTurn = turnsStarted === 1
         ? runningTurn
@@ -893,8 +900,25 @@ function runFixture() {
 
       // Ответ на turn/start идёт ПЕРВЫМ: до него ход ещё не авторитетен, и уведомление
       // с незнакомым turn id адаптер справедливо отбрасывает как чужое.
+      onBeforeTurn?.({
+        send,
+        activeTurn,
+        threadId: THREAD_ID,
+      });
       send({ id: message.id, result: { turn: activeTurn } });
       send({ method: 'turn/started', params: { threadId: THREAD_ID, turn: activeTurn } });
+
+      if (onTurn) {
+        phase = 'turn';
+        onTurn({
+          send,
+          activeTurn,
+          threadId: THREAD_ID,
+          resumed,
+        });
+
+        return;
+      }
 
       // Ход кончается окончательным сетевым сбоем, а следующий принимает просьбу
       // продолжить в ТОМ ЖЕ thread: так проверяется реальное автопродолжение.

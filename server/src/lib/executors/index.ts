@@ -235,6 +235,8 @@ export interface ExecutorRunInput {
   effort?: string;
   sessionId?: string | null;
   permissionMode?: string;
+  modeSelection?: import('../../../../shared/chat/chatPermissionModes.ts').ChatModeSelection;
+  runtimeProfileFingerprint?: string;
   signal?: AbortSignal;
   nativeSettings?: PreparedNativeSettings;
   preparedRuntime?: PreparedExecutorRuntime;
@@ -323,7 +325,26 @@ export interface ProviderInstallationContext {
   npm: string | null;
 }
 
+export interface PermissionModeContext {
+  mode: string;
+  modeSelection?: unknown;
+  provider: string;
+  chatId: string;
+  cwd: string;
+  extraDirs: readonly string[];
+  workspaceAccess?: unknown;
+  providerSettings?: unknown;
+  settingsRevision?: unknown;
+  workToolPolicy?: import('../../../../shared/chat/chatPermissionModes.ts').WorkToolPolicy;
+}
+
 export interface ExecutorAdapter {
+  defaultPermissionMode?: string;
+  permissionModeSelectionPolicy?: 'preserve-explicit';
+  permissionModesRequiringExplicitSelection?: readonly string[];
+  workToolPolicy?: (mode: string) =>
+    import('../../../../shared/chat/chatPermissionModes.ts').WorkToolPolicy | undefined;
+  runtimeProfileFingerprint?: (preparedRuntime: PreparedExecutorRuntime) => string;
   externalCli?: (config: unknown, home: string) => ExternalCliDefinition | null;
   usagePresentation?: { freshness: boolean; spentLabel: boolean };
   installation?: (config: unknown, context?: ProviderInstallationContext) => ProviderInstallation;
@@ -372,7 +393,7 @@ export interface ExecutorAdapter {
   nativeSettings?: NativeSettingsCapability;
   prepareRuntime?: (
     config: unknown,
-    options: { signal: AbortSignal },
+    options: { signal: AbortSignal; permissionModeContext?: PermissionModeContext },
   ) => Promise<PreparedExecutorRuntime>;
   sessionBinding?: ExecutorSessionBinding;
   session?: Record<string, unknown>;
@@ -389,6 +410,8 @@ export interface ExecutorAdapter {
   // Краткие русские объяснения уровней; состав доступных ступеней задаёт каталог модели.
   effortHints?: Record<string, string>;
   modes?: (config: unknown) => unknown;
+  normalizePermissionMode?: (value: unknown) =>
+    { ok: true; mode: string } | { ok: false; message: string };
   seedModels?: () => unknown[];
   catalog?: (config: unknown) => unknown;
   catalogCacheKey?: (config: unknown) => unknown;
@@ -421,6 +444,7 @@ export function createWorkTools({
   invoke,
   pluginEnabled,
   dbInvoke,
+  workToolPolicy,
 }: Record<string, unknown> = {}) {
   return createWorkToolRegistry({
     projectId,
@@ -429,6 +453,7 @@ export function createWorkTools({
     invoke,
     pluginEnabled,
     dbInvoke,
+    workToolPolicy: workToolPolicy as import('../../../../shared/chat/chatPermissionModes.ts').WorkToolPolicy,
   });
 }
 

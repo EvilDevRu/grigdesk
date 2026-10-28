@@ -1,6 +1,8 @@
 # Тесты и проверка
 
+- [Native-пробы режимов Codex: loopback, маркеры и граница вложенной песочницы](codex-permission-mode-fixtures.md)
 
+- [Изолированный Codex: необязательный вопрос при точном наборе host tools](codex-untrusted-optional-question.md)
 
 - [Гейты DeepSeek: unit, SEA, source candidate и host parity](deepseek-test-gates.md)
 

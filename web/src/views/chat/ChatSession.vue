@@ -133,7 +133,7 @@
           </UiSelect>
         </div>
         <!-- Режим прав: как агент поступает с действиями (спрашивать / сам / только план) -->
-        <div v-if="modes.length" class="sel mode">
+        <div v-if="modes.length || modeUnavailable" class="sel mode">
           <span class="lbl">режим</span>
           <UiSelect
             compact
@@ -144,6 +144,9 @@
             @change="chat.setMode(sid, ($event.target as HTMLSelectElement).value)"
           >
             <option v-for="m in modes" :key="m.id" :value="m.id" :title="m.hint">{{ m.label }}</option>
+            <option v-if="!modeState.available" :value="currentMode" disabled>
+              {{ currentMode }} · {{ t('core.chatModeUnavailable') }}
+            </option>
           </UiSelect>
         </div>
         <EffortSlider v-if="effortLevels.length" :model-value="effortValue" :levels="effortLevels"
@@ -612,13 +615,13 @@
             role="peer"
             variant="solid"
             tone="accent"
-            :disabled="frozen || speechBusy || (!input.trim() && !pending.length)"
-            :label="speechBusy ? 'Сначала заверши диктовку'
+            :disabled="frozen || speechBusy || modeUnavailable || (!input.trim() && !pending.length)"
+            :label="modeUnavailable ? t('core.chatModeUnavailable') : speechBusy ? 'Сначала заверши диктовку'
               : frozen ? frozenHint
               : sess.sending ? (inTurnComposer.ready
                 ? 'Уточнить сейчас (Enter)' : 'Отправить после текущего хода (Enter)')
               : 'Отправить (Enter)'"
-            v-tooltip="speechBusy ? 'Сначала заверши диктовку'
+            v-tooltip="modeUnavailable ? t('core.chatModeUnavailable') : speechBusy ? 'Сначала заверши диктовку'
               : frozen ? frozenHint
               : sess.sending ? (inTurnComposer.ready
                 ? 'Уточнить сейчас (Enter)' : 'Отправить после текущего хода (Enter)')
@@ -643,6 +646,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api } from '../../shared/apiClient.ts';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { decodeChatAttachment } from '../../shared/chatContracts.ts';
+import { resolvePermissionMode } from '../../shared/chatPermissionMode.ts';
 import { decodePipelineTasks } from '../../shared/pipelineContracts.ts';
 import type {
   ChatAttachment, HistoryAttachment, ChatMessage, ContextCache,
@@ -977,18 +981,23 @@ const effortLevels = computed(() => currentModel.value?.efforts || []);
 // Режимы прав исполнителя (список даёт его CLI). Пока чат не выбрал свой — показываем
 // «вручную»: именно так работает чат по умолчанию (спрашивает разрешение на действия).
 const modes = computed(() => prov.modesOf(sess.value?.modelRef || sess.value?.model));
-const currentMode = computed(() => {
-  const want = sess.value?.mode;
-  const list = modes.value;
-
-  if (want && list.some((m) => m.id === want)) {
-    return want;
-  }
-
-  return list.some((m) => m.id === 'manual') ? 'manual' : (list[0]?.id || '');
-});
+const modeState = computed(() => resolvePermissionMode(sess.value?.mode, modes.value,
+  prov.modelOf(sess.value?.modelRef || sess.value?.model).provider
+    || { permissionModeSelectionPolicy: 'preserve-explicit' },
+  sess.value?.modeSelection, sess.value?.id));
+const currentMode = computed(() => modeState.value.mode);
+const modeUnavailable = computed(() => !modeState.value.available
+  && prov.modelOf(sess.value?.modelRef || sess.value?.model).provider
+    ?.permissionModeSelectionPolicy === 'preserve-explicit');
+const activeModeLabel = computed(() => (
+  modes.value.find((mode) => mode.id === runtime.value?.snapshot?.permissionMode)?.label
+    || runtime.value?.snapshot?.permissionMode || '…'
+));
 const modeHint = computed(() => (
-  modes.value.find((m) => m.id === currentMode.value)?.hint || 'Режим прав агента'
+  !modeState.value.available ? t('core.chatModeUnavailable')
+    : `${modes.value.find((m) => m.id === currentMode.value)?.hint || 'Режим прав агента'}${
+      sess.value?.sending ? ` ${t('core.chatModeCurrent', { mode: activeModeLabel.value })} ${
+        t('core.chatModeNextTurn')}` : ''}`
 ));
 // Codex сообщает эффективное окно только в token usage конкретной сессии (например,
 // 272k × 95% = 258.4k). Каталог его не обещает; 200k ниже — только внутренний fallback,
@@ -1854,7 +1863,7 @@ async function submit() {
   const t = input.value.trim();
   const atts = pending.value.slice();
 
-  if ((!t && !atts.length) || !sess.value || frozen.value) {
+  if ((!t && !atts.length) || !sess.value || frozen.value || modeUnavailable.value) {
     return;
   }
 

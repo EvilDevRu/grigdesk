@@ -27,6 +27,23 @@ const refOf = (model) => ({
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const effortOf = (chat) => chat.effort || '';
 
+test('сохранённый Claude plan не уходит в запрос DeepSeek, явный readonly сохраняется', async (t) => {
+  const f = await fixture(t, { initial: {
+    model: 'ds-test', modelRef: refOf('ds-test'), mode: 'plan',
+  } });
+
+  await f.chat.send(f.live.id, 'Первый вопрос');
+  let request = f.requests.filter((entry) => entry.url === '/api/chat').at(-1);
+
+  assert.equal(request.body.mode, 'default');
+  f.chat.setMode(f.live.id, 'read-only');
+  await f.chat.send(f.live.id, 'Следующий вопрос');
+  request = f.requests.filter((entry) => entry.url === '/api/chat').at(-1);
+
+  assert.equal(request.body.mode, 'read-only');
+  assert.equal((await f.read()).mode, 'read-only');
+});
+
 /**
  * Каталог окна берёт уровни из тех же записей, что реестр серверного хранилища.
  * Неизвестная модель остаётся неизвестной, а не превращается в модель без уровней.
@@ -45,7 +62,12 @@ function installProviders() {
       return {
         id,
         model,
-        provider: provider ? { id: provider, sessionBinding: provider === 'deepseek' } : null,
+        provider: provider ? {
+          id: provider,
+          sessionBinding: provider === 'deepseek',
+          modes: (provider === 'deepseek' ? ['default', 'auto', 'read-only'] : ['manual', 'auto', 'plan'])
+            .map((mode) => ({ id: mode, label: mode })),
+        } : null,
       };
     },
   });
