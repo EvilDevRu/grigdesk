@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import { dataHome, dataPath } from '../runtime/dataHome.ts';
 import { userCliPath, type PackagedCliInput } from './cliPathOrder.ts';
+import { captureUserCliParent, USER_CLI_PARENT_KEY } from './userCliParentEnvironment.ts';
 
 /**
  * Дети используют Node пользователя, вложенный Node остаётся последним запасным.
@@ -19,6 +20,8 @@ export function packagedChildEnvironment(input: {
     .filter((entry): entry is [string, string] => entry[1] !== undefined));
   const nodeDirectory = path.dirname(input.node);
   const root = path.resolve(nodeDirectory, '../../..');
+
+  env[USER_CLI_PARENT_KEY] = captureUserCliParent(env);
 
   if (input.cli) {
     env.PATH = userCliPath({

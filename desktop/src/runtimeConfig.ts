@@ -4,6 +4,7 @@ import { applyBuiltServer } from '../../server/src/lib/builtServerSelection.ts';
 import { readTextOrNull } from '../../shared/node/files.ts';
 import { verifySeaRuntime } from '../../shared/node/seaRuntime.ts';
 import { packagedChildEnvironment } from '../../shared/node/packagedEnvironment.ts';
+import { captureUserCliParent, USER_CLI_PARENT_KEY } from '../../shared/node/userCliParentEnvironment.ts';
 import { discoverUserCliDirectories, type PackagedCliInput } from '../../shared/node/userCliPaths.ts';
 import {
   decodePreparedRuntime,
@@ -411,6 +412,8 @@ export function buildServerEnv(input: {
   })
     .filter((entry): entry is [string, string] => entry[1] !== undefined));
   const appDirs = [env.APPDIR, input.appDir].filter((value): value is string => Boolean(value));
+
+  env[USER_CLI_PARENT_KEY] = captureUserCliParent(env);
 
   for (const key of Object.keys(env)) {
     if (PACKAGED_ENV_KEYS.has(key) || key.startsWith('ELECTRON_')) {

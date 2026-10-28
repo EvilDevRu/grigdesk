@@ -1,6 +1,6 @@
 # Сервер и доступ
-
 - [Условная правка .env: сверка прежнего значения под очередью писателя](env-file-expected-value.md)
+- [Исходный PATH/prefix и приватная проверка Bash для внешних CLI](user-cli-parent-environment.md)
 
 - [Подтверждение TLS-привязки, готовность relay и диагностика отказов](phone-pairing-confirmation.md)
 
