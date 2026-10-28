@@ -40,6 +40,14 @@ async function compileView(view) {
   if (!componentPromises.has(view)) {
     componentPromises.set(view, compileVue(VIEWS[view], {
       stubs: {
+        '../ui': `
+          export * from ${JSON.stringify(webFile('src/ui.ts'))};
+          export const showToast = (options) => {
+            globalThis.__channelToasts.push(options);
+
+            return true;
+          };
+        `,
         '../shared/apiClient.ts': API_STUB,
         '../shared/settingsNavigation.ts': `
           export const openSettings = (request) => globalThis.__channelSettingsRequests.push(request);
@@ -112,6 +120,7 @@ export async function mountChannelView(t, view, {
   globalThis.__channelPrompt = prompt;
   globalThis.__channelSse = [];
   globalThis.__channelSettingsRequests = [];
+  globalThis.__channelToasts = [];
   const [{ mount, flushPromises }, component] = await Promise.all([
     import(TEST_UTILS),
     compileView(view),
@@ -125,12 +134,14 @@ export async function mountChannelView(t, view, {
     delete globalThis.__channelPrompt;
     delete globalThis.__channelSse;
     delete globalThis.__channelSettingsRequests;
+    delete globalThis.__channelToasts;
   });
   await settle(flushPromises);
 
   return {
     browser,
     settingsRequests: globalThis.__channelSettingsRequests,
+    toasts: globalThis.__channelToasts,
     wrapper,
     flushPromises,
     settle: (cycles) => settle(flushPromises, cycles),

@@ -753,25 +753,28 @@ test('недоставленный ответ в чат виден челове�
     async get() { return response(); },
     async post() { return { taskId: '8422', notification: notifications.shift() }; },
   };
-  const { wrapper, settle } = await mountChannelView(t, 'inbox', { api });
+  const { wrapper, settle, toasts } = await mountChannelView(t, 'inbox', { api });
   const create = async () => {
     await button(wrapper.get('[data-status="new"]'), 'Создать задачу').trigger('click');
     await settle();
-    return wrapper.findAll('.banner').find((entry) => /Задача создана/.test(entry.text()));
+
+    return toasts.at(-1);
   };
 
   // Повтора у ответа нет по замыслу, поэтому сообщить в чат придётся человеку —
   // раньше он узнавал об этом только из журнала сервера.
   const warned = await create();
-  assert.match(warned.text(), /ответ в исходный чат не отправлен \(связь с Telegram оборвалась\)/u);
-  assert.match(warned.text(), /сообщите там сами/u);
-  assert.equal(warned.classes().includes('warn'), true);
-  assert.equal(warned.classes().includes('good'), false);
+
+  assert.match(warned.title, /ответ в исходный чат не отправлен \(связь с Telegram оборвалась\)/u);
+  assert.match(warned.title, /сообщите там сами/u);
+  assert.equal(warned.tone, 'warning');
+  assert.equal(warned.durationMs, 0);
 
   for (const quiet of ['доставленный ответ', 'выключенное правило']) {
-    const banner = await create();
-    assert.equal(banner.text().trim(), 'Задача создана', quiet);
-    assert.equal(banner.classes().includes('good'), true, quiet);
+    const toast = await create();
+
+    assert.equal(toast.title, 'Задача создана', quiet);
+    assert.equal(toast.tone, 'accent', quiet);
   }
 });
 

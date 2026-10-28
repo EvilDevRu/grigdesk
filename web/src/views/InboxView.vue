@@ -17,7 +17,6 @@
     <template v-else>
       <div class="inbox-notices">
         <p v-if="error" class="banner bad" role="alert">{{ error }}</p>
-        <p v-if="notice" class="banner" :class="noticeKind" role="status">{{ notice }}</p>
         <p v-if="automationNotice" class="banner" :class="automationNotice.kind"
           data-state="automation-notice" role="status">
           {{ automationNotice.text }}
@@ -340,6 +339,7 @@ import {
   UiTabs,
   confirmDialog,
   promptDialog,
+  showToast,
   UiLoadingState,
   UiPaneHeader,
   UiSearchInput,
@@ -356,11 +356,6 @@ import { useSse } from '../composables/useSse.ts';
 const loading = ref(true);
 const unavailable = ref(false);
 const error = ref('');
-const notice = ref('');
-// Успех бывает неполным: задача создана, а ответ в исходный чат не ушёл. Это
-// не ошибка действия (повторять его нельзя — будет вторая задача), поэтому
-// плашка та же, но цветом честно предупреждает.
-const noticeKind = ref('good');
 const busy = ref('');
 const activeSection = ref('review');
 const search = ref('');
@@ -844,6 +839,20 @@ function notificationFailure(notification: InboxDecisionResult['notification']):
 }
 
 /**
+ * Результат действия показывается поверх очереди, чтобы её содержимое не сдвигалось.
+ * Неполный успех требует внимания человека и остаётся до закрытия или следующего результата.
+ */
+function showNotice(text: string, warning = false): void {
+  showToast({
+    id: 'inbox-action-result',
+    scope: 'inbox',
+    title: text,
+    tone: warning ? 'warning' : 'accent',
+    durationMs: warning ? 0 : 8000,
+  });
+}
+
+/**
  * Одно решение по карточке: задача, пропуск или возврат к разбору.
  *
  * Ревизия карточки и версия решения уезжают в теле — это оптимистичная блокировка.
@@ -880,21 +889,18 @@ async function mutateItem(
 
   busy.value = `${item.ref}:${action}`;
   error.value = '';
-  notice.value = '';
-  noticeKind.value = 'good';
   delete itemAlerts[item.ref];
 
   try {
     const done = await inboxApi.decide(item.ref, action, body);
     const undelivered = action === 'task' && notificationFailure(done.notification);
 
-    if (undelivered) {
-      noticeKind.value = 'warn';
-    }
-
-    notice.value = action === 'task' ? `Задача создана${undelivered}`
-      : action === 'dismiss' ? 'Обращение пропущено и перенесено в историю'
-        : 'Обращение возвращено к разбору';
+    showNotice(
+      action === 'task' ? `Задача создана${undelivered}`
+        : action === 'dismiss' ? 'Обращение пропущено и перенесено в историю'
+          : 'Обращение возвращено к разбору',
+      Boolean(undelivered),
+    );
     delete selection[item.ref];
     delete noteDrafts[item.ref];
     await load();
@@ -910,7 +916,7 @@ async function mutateItem(
       if (visibleItems.value.some((entry) => entry.ref === item.ref)) {
         itemAlerts[item.ref] = { kind: 'warn', text };
       } else {
-        notice.value = text;
+        showNotice(text, true);
       }
     } else if (action === 'task' && !operatorNote
         && ['attachment_analysis_required', 'attachments_skipped'].includes(code)) {
@@ -1026,9 +1032,9 @@ async function changeParticipation(channel: InboxChannel, action: string): Promi
 
   try {
     await inboxApi.changeParticipation(channel.id, action, channel.activationVersion);
-    notice.value = action === 'activate'
+    showNotice(action === 'activate'
       ? `${channel.label}: приём новых обращений включён.`
-      : `${channel.label}: приём остановлен; пауза не станет backlog.`;
+      : `${channel.label}: приём остановлен; пауза не станет backlog.`);
     await load();
   } catch (err) {
     error.value = errorMessage(err, 'Не удалось изменить приём канала.');
@@ -1408,8 +1414,7 @@ onBeforeUnmount(() => {
 .pill.connected,
 .pill.active,
 .status.task,
-.queue-status.task,
-.good {
+.queue-status.task {
   color: var(--good);
 }
 
