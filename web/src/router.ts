@@ -91,7 +91,11 @@ const routes: RouteRecordRaw[] = [
     path: '/docker',
     name: 'docker',
     component: () => import('./views/DockerView.vue'),
-    meta: { title: 'Докер', tool: 'docker' },
+    meta: {
+      title: 'Докер',
+      tool: 'docker',
+      layout: 'workspace',
+    },
   },
   {
     path: '/routes',

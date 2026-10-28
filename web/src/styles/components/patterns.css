@@ -494,30 +494,31 @@
   font-size: 12px;
 }
 
-/* Навигация панели Docker: разделы отделены от строки фильтров и не слипаются со счётчиками. */
+/* Вкладки Docker занимают свою область рядом со сводкой.
+   Границу всей навигационной полосы задаёт её контейнер, а не каждый блок отдельно. */
 .ui-tabs[data-ui-docker-tabs] {
   flex: none;
+  flex-wrap: wrap;
   width: 100%;
   padding: 0;
   border: 0;
-  border-bottom: 1px solid var(--line);
   border-radius: 0;
   background: transparent;
-  gap: 8px;
+  gap: 4px;
 }
 
 .ui-tabs[data-ui-docker-tabs] > .ui-tab {
   display: inline-flex;
-  height: 42px;
-  min-height: 42px;
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
   flex: none;
   align-items: center;
   justify-content: center;
-  padding: 0 14px;
+  padding: 0 12px;
   border-bottom: 2px solid transparent;
   border-radius: 0;
   gap: 8px;
-  font-size: 13px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -543,6 +544,12 @@
     padding-inline: 9px;
     gap: 5px;
     font-size: 12px;
+  }
+}
+
+@container docker-panel (max-width: 360px) {
+  .ui-tabs[data-ui-docker-tabs] > .ui-tab {
+    flex-basis: 50%;
   }
 }
 

@@ -44,6 +44,7 @@
 
         <UiIconButton
           role="embedded"
+          data-context="workspace-toolbar"
           :label="`Удалить образ ${formatTags(image)}`"
           v-tooltip="image.inUse ? 'Образ используется контейнером' : 'Удалить образ'"
           tone="danger"
@@ -150,7 +151,7 @@ onBeforeUnmount(() => {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .docker-images__head h3 {
@@ -158,14 +159,11 @@ onBeforeUnmount(() => {
   align-items: center;
   margin: 0;
   gap: 8px;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
 }
 
 .docker-images__head h3 span {
-  padding: 2px 7px;
-  border-radius: 6px;
-  background: var(--surface-2);
   color: var(--ink-mid);
   font-size: 12px;
   font-weight: 500;
@@ -192,8 +190,6 @@ onBeforeUnmount(() => {
 .docker-images__empty {
   margin: 0;
   padding: 28px 16px;
-  border: 1px dashed var(--line-2);
-  border-radius: var(--radius);
   color: var(--ink-mid);
   font-size: 13px;
   text-align: center;
@@ -202,9 +198,6 @@ onBeforeUnmount(() => {
 .docker-list {
   margin: 0;
   padding: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
   list-style: none;
   overflow: hidden;
 }
@@ -213,13 +206,13 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  padding: 14px 16px;
+  padding: 10px 0;
   border-top: 1px solid var(--line);
   gap: 12px;
 }
 
 .docker-image:first-child {
-  border-top: none;
+  border-top: 1px solid var(--line);
 }
 
 .docker-image__main {
@@ -238,7 +231,7 @@ onBeforeUnmount(() => {
 .docker-image__meta {
   display: flex;
   flex-wrap: wrap;
-  margin-top: 6px;
+  margin-top: 4px;
   gap: 4px 12px;
   color: var(--ink-mid);
   font-size: 12px;
@@ -295,7 +288,7 @@ onBeforeUnmount(() => {
 
   .docker-image {
     grid-template-columns: minmax(0, 1fr) auto;
-    padding: 12px;
+    padding: 10px 0;
     gap: 10px;
   }
 
