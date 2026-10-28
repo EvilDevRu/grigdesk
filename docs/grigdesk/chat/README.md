@@ -112,6 +112,7 @@
 - [Типизированные границы старых ответов: MIME, revision папки и сетевые ошибки](typed-legacy-responses.md)
 - [Всплывашка разрешений (аналог permission prompt Claude Code)](permission-prompt.md)
 - [Карточки разрешений и вопросов: содержимое, постоянные действия и свой ответ](intervention-cards.md)
+- [Параметры разрешения GLM: обоснование, доступ и таймаут вместо сырого JSON](permission-parameters.md)
 - [Длинный запрос: нижняя панель сохраняет высоту кнопок решения](intervention-footer-layout.md)
 - [Поля запросов: общий фон, компактные действия, ссылки и выравнивание](intervention-controls.md)
 - [Диалог: агент задаёт вопрос (AskUserQuestion)](agent-questions.md)

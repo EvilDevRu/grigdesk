@@ -72,6 +72,20 @@
       </div>
     </div>
 
+    <div v-if="justification" class="p-section">
+      <div class="p-label">{{ t('core.interventionJustification') }}</div>
+      <div class="p-desc" data-permission-justification>{{ justification }}</div>
+    </div>
+
+    <div v-if="sandboxPermissions || timeout" class="p-permission-meta p-section">
+      <div v-if="sandboxPermissions" data-permission-access>
+        <span class="p-label">{{ t('core.interventionAccess') }}:</span> {{ sandboxPermissions }}
+      </div>
+      <div v-if="timeout" data-permission-timeout>
+        <span class="p-label">{{ t('core.interventionTimeout') }}:</span> {{ timeout }}
+      </div>
+    </div>
+
     <div v-if="details || rest" class="p-section">
       <div class="p-label">{{ t('core.interventionDetails') }}</div>
       <pre v-if="details" class="p-in">{{ details }}</pre>
@@ -139,11 +153,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { PropType } from 'vue';
+import { formatNumber } from '../../../../shared/i18n/formats.ts';
 import type { ChatPermission, PermissionChoice } from '../../shared/chatContracts.ts';
 import { lineDiff, splitRows } from '../../shared/diff.ts';
 import ChatIntervention from './ChatIntervention.vue';
 import {
   t,
+  uiLocale,
   promptDialog,
   UiActionLink,
   UiButton,
@@ -202,6 +218,33 @@ const description = computed(() => {
 
   return text === command.value || text === details.value ? '' : text;
 });
+const justification = computed(() => {
+  const text = typeof input.value.justification === 'string' ? input.value.justification : '';
+
+  return [description.value, command.value, details.value].includes(text) ? '' : text;
+});
+const accessLabels = computed<Record<string, string>>(() => ({
+  'read-only': t('core.interventionAccessReadOnly'),
+  'workspace-write': t('core.interventionAccessWorkspaceWrite'),
+  'danger-full-access': t('core.interventionAccessFull'),
+}));
+const sandboxPermissions = computed(() => {
+  const value = input.value.sandbox_permissions;
+
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return Object.hasOwn(accessLabels.value, value) ? accessLabels.value[value] : value;
+});
+const timeoutMs = computed(() => {
+  const value = input.value.timeoutMs;
+
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+});
+const timeout = computed(() => timeoutMs.value === null ? '' : t('core.interventionTimeoutSeconds', {
+  seconds: formatNumber(timeoutMs.value / 1000, uiLocale, { maximumFractionDigits: 6 }),
+}));
 const externalUrl = computed(() => safeExternalUrl(input.value.url));
 const externalHost = computed(() => {
   try {
@@ -291,9 +334,21 @@ const KNOWN_FIELDS = new Set([
 ]);
 
 const rest = computed(() => {
+  const knownFields = new Set(KNOWN_FIELDS);
+
+  if (typeof input.value.justification === 'string') {
+    knownFields.add('justification');
+  }
+  if (typeof input.value.sandbox_permissions === 'string') {
+    knownFields.add('sandbox_permissions');
+  }
+  if (timeoutMs.value !== null) {
+    knownFields.add('timeoutMs');
+  }
+
   const extra = Object.fromEntries(
     Object.entries(input.value).filter(([key, value]) => (
-      !KNOWN_FIELDS.has(key) && value !== '' && value != null
+      !knownFields.has(key) && value !== '' && value != null
     )),
   );
 
@@ -457,7 +512,8 @@ function chooseById(value: unknown) {
 }
 
 .p-ssh-meta,
-.p-db-meta {
+.p-db-meta,
+.p-permission-meta {
   display: grid;
   gap: 6px;
   min-width: 0;

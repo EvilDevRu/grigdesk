@@ -177,6 +177,90 @@ test('запрос Kimi показывает команду и путь вмес
   assert.equal(text.includes('{"kind"'), false);
 });
 
+test('GLM показывает обоснование, доступ и таймаут отдельными полями вместо JSON', async (t) => {
+  const input = {
+    kind: 'execute',
+    command: 'node ./check-install.mjs 2>&1',
+    description: 'Проверить установщик',
+    timeoutMs: 30000,
+    sandbox_permissions: 'danger-full-access',
+    justification: 'Скрипт пишет кэш и временные файлы в папке артефактов.',
+  };
+  const original = JSON.stringify(input);
+  const { wrapper } = await mountPermission(t, {
+    pid: 'glm-bash',
+    tool: 'bash',
+    canRemember: false,
+    input,
+  });
+
+  assert.equal(wrapper.get('.p-in.cmd').text(), input.command);
+  assert.equal(wrapper.get('.p-desc').text(), input.description);
+  assert.equal(wrapper.get('[data-permission-justification]').text(), input.justification);
+  assert.match(wrapper.get('[data-permission-access]').text(), /Уровень доступа:\s+Полный доступ/u);
+  assert.match(wrapper.get('[data-permission-timeout]').text(), /Ограничение времени:\s+30 с/u);
+  assert.equal(wrapper.findAll('pre').length, 1);
+  assert.equal(wrapper.find('input[type="checkbox"]').exists(), false);
+  assert.equal(JSON.stringify(input), original);
+
+  await button(wrapper, 'Разрешить').trigger('click');
+
+  assert.deepEqual(wrapper.emitted('answer'), [[true, false]]);
+});
+
+test('обоснование не дублирует описание, неизвестные параметры сохраняются в подробностях', async (t) => {
+  const { wrapper } = await mountPermission(t, {
+    pid: 'permission-extras',
+    tool: 'bash',
+    input: {
+      command: 'npm test',
+      description: 'Нужен запуск проверки',
+      justification: 'Нужен запуск проверки',
+      sandbox_permissions: 'toString',
+      timeoutMs: 1250,
+      extra: { retries: 2 },
+    },
+  });
+
+  assert.equal(wrapper.find('[data-permission-justification]').exists(), false);
+  assert.match(wrapper.get('[data-permission-access]').text(), /toString/u);
+  assert.match(wrapper.get('[data-permission-timeout]').text(), /1,25 с/u);
+  assert.deepEqual(JSON.parse(wrapper.findAll('pre').at(-1).text()), { extra: { retries: 2 } });
+});
+
+test('неверные типы параметров остаются в JSON, нулевой таймаут сохраняется при обновлении', async (t) => {
+  const input = {
+    command: 'npm test',
+    justification: { reason: 'проверка' },
+    sandbox_permissions: ['danger-full-access'],
+    timeoutMs: -1,
+  };
+  const { wrapper } = await mountPermission(t, {
+    pid: 'permission-invalid',
+    tool: 'bash',
+    input,
+  });
+
+  assert.equal(wrapper.find('.p-permission-meta').exists(), false);
+  assert.equal(wrapper.find('[data-permission-justification]').exists(), false);
+  assert.deepEqual(JSON.parse(wrapper.findAll('pre').at(-1).text()), {
+    justification: input.justification,
+    sandbox_permissions: input.sandbox_permissions,
+    timeoutMs: -1,
+  });
+
+  await wrapper.setProps({
+    req: {
+      pid: 'permission-zero',
+      tool: 'bash',
+      input: { command: 'npm test', timeoutMs: 0 },
+    },
+  });
+
+  assert.match(wrapper.get('[data-permission-timeout]').text(), /0 с/u);
+  assert.equal(wrapper.findAll('pre').length, 1);
+});
+
 test('структурный Write Kimi показывает путь и содержимое вместо object Object', async (t) => {
   const { wrapper } = await mountPermission(t, {
     pid: 'kimi-write',
