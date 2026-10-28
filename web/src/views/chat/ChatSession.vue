@@ -426,8 +426,20 @@
         <!-- Чипы ещё не отправленных вложений -->
         <div v-if="pending.length || attachBusy" class="pend">
           <div v-for="(a, i) in pending" :key="a.file" class="chip">
-            <img v-if="isImg(a)" :src="api.url(a.url || '')" alt="" />
-            <span class="nm">{{ a.name }}</span>
+            <UiButton
+              v-if="isImg(a)"
+              variant="text"
+              size="compact"
+              data-context="chat-pending-preview"
+              v-tooltip="a.name"
+              @click="onAttachmentClick($event, a)"
+            >
+              <template #leading>
+                <img :src="api.url(a.url || '')" :alt="a.name" aria-hidden="true" />
+              </template>
+              <span class="nm">{{ a.name }}</span>
+            </UiButton>
+            <span v-else class="nm">{{ a.name }}</span>
             <UiIconButton
               class="x"
               role="stepper"
@@ -759,8 +771,8 @@ function isPlainClick(event: MouseEvent) {
 }
 
 /**
- * Картинка-вложение открывается в просмотре вместе с соседними картинками ленты.
- * Остальные вложения и клики с модификаторами остаются обычной ссылкой браузера.
+ * Картинка-вложение открывается с соседними картинками ленты или черновика.
+ * Клики по файлам и клики с модификаторами сохраняют поведение исходного элемента.
  */
 function onAttachmentClick(event: MouseEvent, attachment: HistoryAttachment) {
   if (!isImg(attachment) || !isPlainClick(event)) {
@@ -776,13 +788,14 @@ function onAttachmentClick(event: MouseEvent, attachment: HistoryAttachment) {
 }
 
 /**
- * Картинки той же ленты в порядке показа — вложения, картинки ответов и шагов — для
- * стрелок просмотра. Лента ищется от нажатого элемента, поэтому соседний чат не смешивается.
+ * Собирает картинки в порядке показа для стрелок просмотра внутри ленты или черновика.
+ * Область ищется от нажатого элемента: неотправленные вложения не смешиваются с историей.
  */
 function feedImages(target: Element) {
-  const feed = target.closest('.conversation-group')?.parentElement;
+  const feed = target.closest('.pend') || target.closest('.conversation-group')?.parentElement;
+  const images = feed?.querySelectorAll<HTMLImageElement>('.conversation-group img, .pend img');
 
-  return feed ? [...feed.querySelectorAll<HTMLImageElement>('.conversation-group img')].map((item) => ({
+  return images ? [...images].map((item) => ({
     src: item.currentSrc || item.getAttribute('src') || '',
     name: item.getAttribute('alt') || item.getAttribute('title') || '',
   })) : [];
@@ -2832,7 +2845,15 @@ function skipQuestion() {
 .pend { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .chip { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }
 .chip img { width: 30px; height: 30px; object-fit: cover; border-radius: 5px; }
-.chip .nm { font-size: 11.5px; color: var(--ink-mid); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip .nm {
+  display: inline-block;
+  font-size: 11.5px;
+  color: var(--ink-mid);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .in-err { margin-top: 6px; font-size: 12px; color: var(--bad); }
 .speech-interim, .speech-note { font-size: 12px; color: var(--ink-mid); }
 .speech-interim { margin-bottom: 6px; font-style: italic; }

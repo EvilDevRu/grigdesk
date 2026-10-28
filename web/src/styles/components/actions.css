@@ -1938,6 +1938,13 @@
   height: 12px;
 }
 
+.ui-button[data-context='chat-pending-preview'] {
+  height: auto;
+  min-height: max(30px, var(--toolbar-control-h));
+  padding: 0;
+  cursor: zoom-in;
+}
+
 .ui-icon-button[data-context='chat-pending-remove'] {
   width: 20px;
   height: 20px;

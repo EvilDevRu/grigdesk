@@ -129,7 +129,9 @@ const titleId = `chat-intervention-${useId()}`;
 }
 
 .intervention-footer {
-  flex: 0 1 auto;
+  /* Длинное содержимое сжимает только тело карточки.
+     Панель сохраняет высоту действий, иначе кнопки уходят под её прокрутку. */
+  flex: none;
   min-width: 0;
   min-height: 0;
   max-height: 190px;
