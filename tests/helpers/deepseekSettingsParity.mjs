@@ -334,6 +334,7 @@ export function registerDeepSeekSettingsParity(mode = 'binary') {
           launchDir: home,
           dshHome: home,
           overlayPath,
+          toolPolicyPath: path.join(home, 'tool-policy.json'),
         }),
         spawn: () => {
           spawnedWorkers += 1;

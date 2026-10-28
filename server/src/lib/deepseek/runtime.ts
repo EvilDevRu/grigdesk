@@ -23,7 +23,12 @@ import type { DeepSeekUpdate } from './steps.ts';
 import { DEEPSEEK_BASH_TOOL } from './contract.ts';
 import { buildLaunchFiles } from './profile.ts';
 import type { PreparedExecutorRuntime, PreparedNativeSettings } from '../executorSettings/types.ts';
-import { preparedDeepSeekRuntime } from './preparedRuntime.ts';
+import {
+  preparedDeepSeekRuntime,
+  requireDeepSeekToolPermissions,
+  requireDeepSeekToolPolicy,
+} from './preparedRuntime.ts';
+import { deepSeekWorkActions, normalizeDeepSeekPermissionMode } from './toolPermissionPolicy.ts';
 import {
   assertDeepSeekPreparedRuntime,
   resolveDeepSeekRuntimeAsync,
@@ -75,7 +80,13 @@ interface RuntimeDeps {
     providerSettings?: DeepSeekProviderSettings | null;
     nativeSettings?: PreparedNativeSettings;
     transport?: 'acp' | 'web';
-  }) => Promise<{ launchDir: string; dshHome: string; overlayPath: string }>;
+    toolPermissions?: import('./profile.ts').DeepSeekLaunchFilesOptions['toolPermissions'];
+  }) => Promise<{
+    launchDir: string;
+    dshHome: string;
+    overlayPath: string;
+    toolPolicyPath?: string;
+  }>;
   closeTimeoutMs?: number;
   termTimeoutMs?: number;
 }
@@ -140,6 +151,7 @@ export async function prepareDeepSeekLaunch({
   mcpServers,
   nativeSettings,
   runtime: preparedRuntime,
+  toolPermissions,
 }: {
   config: DeepSeekConfig;
   cwd: string;
@@ -153,6 +165,7 @@ export async function prepareDeepSeekLaunch({
   mcpServers?: readonly DeepSeekMcpServer[];
   nativeSettings?: PreparedNativeSettings;
   runtime?: import('./runtimeProcess.ts').DeepSeekRuntimeDescriptor;
+  toolPermissions?: import('./profile.ts').DeepSeekLaunchFilesOptions['toolPermissions'];
 }) {
   const runtime = preparedRuntime || await resolveDeepSeekRuntimeAsync(config);
   const runtimeHome = runtime.kind !== 'binary' && runtime.buildId
@@ -225,6 +238,7 @@ export async function prepareDeepSeekLaunch({
     transport,
     mcpServers,
     nativeSettingsDocument,
+    toolPermissions,
     hooks: {
       bashToolName: DEEPSEEK_BASH_TOOL,
       ssh: providerSettings?.blockDirectSsh !== false,
@@ -435,8 +449,19 @@ export async function runDeepSeekTurn({
     ? await fs.realpath(projectRoot)
     : await nearestProjectRoot(realCwd);
   const approval = factory ? 'never' : 'ask';
-  const sessionMcpServers = validateMcpServers(mcpServers);
+  const sessionMcpServers = validateMcpServers(mcpServers).filter((server) => (
+    factory || permissionMode !== 'read-only' || server.name === 'grigdesk-work'
+  ));
   const runtime = await preparedDeepSeekRuntime(config, preparedRuntime);
+  const selectedMode = normalizeDeepSeekPermissionMode(permissionMode);
+
+  if (!factory) {
+    requireDeepSeekToolPermissions(runtime);
+
+    if (!selectedMode.ok) {
+      throw new TypeError(selectedMode.message);
+    }
+  }
 
   assertDeepSeekPreparedRuntime(runtime, nativeSettings);
   signal?.throwIfAborted();
@@ -453,6 +478,9 @@ export async function runDeepSeekTurn({
     nativeSettings,
     transport: 'acp',
     runtime,
+    ...(!factory && selectedMode.ok ? {
+      toolPermissions: { mode: selectedMode.mode, workActions: deepSeekWorkActions(workTools) },
+    } : {}),
   });
   let owned: OwnedDeepSeekBinary | undefined;
   let cleanupFailed = false;
@@ -465,6 +493,10 @@ export async function runDeepSeekTurn({
     let preparation: Awaited<ReturnType<typeof startDeepSeekAcpSettings>> | undefined;
 
     try {
+      if (!factory) {
+        requireDeepSeekToolPolicy(launch.toolPolicyPath);
+      }
+
       const childEnv = buildDeepSeekChildEnv({ source: env, dshHome: launch.dshHome });
 
       if (nativeSettings?.accepted.length) {
@@ -487,6 +519,7 @@ export async function runDeepSeekTurn({
 
       const args = [
         ...runtime.prefixArgs, '--profile', 'acp', '--patch', launch.overlayPath,
+        ...(launch.toolPolicyPath ? ['--grigdesk-tool-policy', launch.toolPolicyPath] : []),
       ];
       const spawnOptions: SpawnOptions = {
         cwd: launch.launchDir,
@@ -623,9 +656,11 @@ export async function runDeepSeekTurn({
         context,
         mode,
         factory,
+        toolPermissions: Boolean(launch.toolPolicyPath),
         workToolNames: knownWorkTools,
         onPermission,
         cancelled: () => aborted,
+        signal,
       });
       onPermissionResolved?.({ params, context, outcome });
       return outcome;

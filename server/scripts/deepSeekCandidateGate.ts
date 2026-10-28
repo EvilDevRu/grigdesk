@@ -17,7 +17,7 @@ const COMPILED = [
   'provider-settings-consumers', 'providers-native-settings-route',
   'glm-vendored-build', 'glm-vendored-protocol', 'glm-vendored-profile', 'glm-vendored-turn',
   'glm-vendored-policy', 'glm-vendored-mcp', 'glm-vendored-catalog', 'glm-vendored-session',
-  'glm-vendored-stop',
+  'glm-vendored-stop', 'glm-vendored-gate', 'glm-vendored-subagents',
 ];
 
 /**

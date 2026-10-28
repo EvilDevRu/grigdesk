@@ -16,7 +16,13 @@ import type { runDeepSeekTurn } from './runtime.ts';
 import { runDeepSeekServerTurn } from './serverTurn.ts';
 import type { DeepSeekServerProcess, StartDeepSeekServerOptions } from './serverRuntime.ts';
 import { assertDeepSeekPreparedRuntime, verifyDeepSeekRuntimeDescriptorAsync } from './runtimeProcess.ts';
-import { preparedDeepSeekRuntime } from './preparedRuntime.ts';
+import {
+  preparedDeepSeekRuntime,
+  requireDeepSeekToolPermissions,
+  requireDeepSeekToolPolicy,
+} from './preparedRuntime.ts';
+import { deepSeekWorkActions, normalizeDeepSeekPermissionMode } from './toolPermissionPolicy.ts';
+import { createDeepSeekToolPermissionObserver } from './toolPermissionContext.ts';
 import type { PreparedExecutorRuntime } from '../executorSettings/types.ts';
 import { inspectSessionJournal } from './journal.ts';
 import { deepSeekRuntimeError } from './runtimeArtifact.ts';
@@ -41,8 +47,19 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
   const projectRoot = options.projectRoot
     ? await fs.realpath(options.projectRoot) : await nearestProjectRoot(cwd);
   const mode = options.permissionMode === 'read-only' ? 'read-only' : 'workspace-write';
-  const mcpServers = validateMcpServers(options.mcpServers || []);
+  const mcpServers = validateMcpServers(options.mcpServers || []).filter((server) => (
+    options.factory || options.permissionMode !== 'read-only' || server.name === 'grigdesk-work'
+  ));
   const runtime = await preparedDeepSeekRuntime(options.config, options.preparedRuntime);
+  const selectedMode = normalizeDeepSeekPermissionMode(options.permissionMode);
+
+  if (!options.factory) {
+    requireDeepSeekToolPermissions(runtime);
+
+    if (!selectedMode.ok) {
+      throw new TypeError(selectedMode.message);
+    }
+  }
 
   assertDeepSeekPreparedRuntime(runtime, options.nativeSettings);
   await verifyDeepSeekRuntimeDescriptorAsync(runtime);
@@ -53,11 +70,18 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
     providerSettings: options.providerSettings,
     nativeSettings: options.nativeSettings,
     transport: 'web', mcpServers,
+    ...(!options.factory && selectedMode.ok ? {
+      toolPermissions: { mode: selectedMode.mode, workActions: deepSeekWorkActions(options.workTools) },
+    } : {}),
     runtime,
   });
   let cleanupFailed = false;
 
   try {
+    if (!options.factory) {
+      requireDeepSeekToolPolicy(launch.toolPolicyPath);
+    }
+
     let sessionId = options.sessionId;
     let journalNote: ChatStep | undefined;
 
@@ -90,6 +114,12 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
       runtime,
       bin: options.config.deepseekBin,
       overlayPath: launch.overlayPath,
+      toolPolicyPath: launch.toolPolicyPath,
+      ...(launch.toolPolicyPath && selectedMode.ok ? {
+        createObserver: ({ sessionId: rootSessionId }) => createDeepSeekToolPermissionObserver(
+          rootSessionId, selectedMode.mode,
+        ),
+      } : {}),
       cwd,
       env,
       nativeSettings: options.nativeSettings,

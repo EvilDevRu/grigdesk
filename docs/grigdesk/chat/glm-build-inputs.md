@@ -3,7 +3,9 @@
 Состав host-overlay включает `@deepseek-ai/dsh-llm-pi-ai`. Композиция исключает
 его строку из base YAML: наличие пакета в сборочном замыкании само по себе
 не монтирует плагин в процесс DeepSeek. Ревизия композиции —
-`grigdesk-host-web-acp-v3`. Проверка обхода manifests и исключения строки
+`grigdesk-host-web-acp-v4`. В runtime metadata к ней добавляется SHA256 входов сборки:
+изменение native gate, протокола или preset меняет compatibility без ручного переноса старого допуска.
+Проверка обхода manifests и исключения строки
 выполняется на малом синтетическом дереве исходников.
 
 Функция `llmPiAiExternalDependencies` выводит внешние зависимости из importer

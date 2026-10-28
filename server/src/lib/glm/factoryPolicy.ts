@@ -1,4 +1,4 @@
-import { decideGlmTool, glmMcpToolName } from './policy.ts';
+import { decideGlmBaseTool, glmMcpToolName } from './policy.ts';
 import type { GlmToolDecision } from './policy.ts';
 
 export type GlmFactoryFilesystem = 'state-only' | 'workspace-write';
@@ -111,7 +111,7 @@ export function decideGlmFactoryTool(
     };
   }
 
-  return decideGlmTool(name, input, {
+  return decideGlmBaseTool(name, input, {
     workTools: [],
     ssh: true,
     db: true,

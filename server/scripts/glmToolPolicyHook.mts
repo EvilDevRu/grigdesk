@@ -4,6 +4,8 @@
 // который DSH публикует в событии hook/result. Аргументы вызова в stderr не попадают.
 import { readFileSync } from 'node:fs';
 
+import { glmGateHash, parseGlmGateBinding } from '../../shared/node/glmGateProtocol.ts';
+
 import { decideGlmFactoryTool, parseGlmFactoryToolPolicy } from '../src/lib/glm/factoryPolicy.ts';
 import { decideGlmTool, glmArgumentsHash, parseGlmToolPolicy } from '../src/lib/glm/policy.ts';
 
@@ -55,6 +57,42 @@ const factoryPolicy = document && typeof document === 'object' && Object.hasOwn(
   ? parseGlmFactoryToolPolicy(document) : null;
 const policy = factoryPolicy ? null : parseGlmToolPolicy(document);
 const payload = JSON.parse(await stdin()) as Record<string, unknown> | null;
+
+if (process.argv.includes('--native-gate')) {
+  if (!policy || factoryPolicy || !payload || typeof payload !== 'object') {
+    deny('повреждена native политика чата');
+  }
+
+  const policyHash = glmGateHash(document);
+  const preflight = payload!.preflight as { launchId?: unknown; policyHash?: unknown } | undefined;
+
+  if (preflight) {
+    if (typeof preflight.launchId !== 'string' || !preflight.launchId
+      || preflight.policyHash !== policyHash) {
+      deny('не совпала identity native gate');
+    }
+
+    process.stdout.write(JSON.stringify({ ready: true, ...preflight }));
+    process.exit(0);
+  }
+
+  const binding = parseGlmGateBinding(payload!.binding);
+
+  if (binding.policyHash !== policyHash || binding.sha256 !== glmGateHash(payload!.arguments)) {
+    deny('аргументы native gate не совпали');
+  }
+
+  const decision = decideGlmTool(binding.name, payload!.arguments, policy!);
+
+  process.stdout.write(JSON.stringify({
+    ...binding,
+    decision: decision.allow ? 'allow' : 'deny',
+    kind: decision.kind,
+    reason: decision.reason,
+  }));
+  process.exit(0);
+}
+
 
 if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
   deny('вход hook повреждён');

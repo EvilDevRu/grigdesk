@@ -27,5 +27,12 @@
   до GrigDesk не доходит, всплывашка перестаёт появляться и классификатору нечего решать.
   Полное соответствие режимов и цена каждого — в
   [kimi-runtime-security.md](kimi-runtime-security.md). У Claude список прочитан из CLI.
+- У DeepSeek список задаёт адаптер GrigDesk: **«Спрашивать»** (`default`), **«Авто»** (`auto`),
+  **«Только чтение»** (`read-only`). Auto сам правит обычные файлы и запускает команды
+  в штатной workspace-write песочнице; её расширение требует человека.
+  Default спрашивает перед правками и командами. Native gate обязателен до инструмента.
+  Неизвестный ID отвергается через optional `normalizePermissionMode` адаптера до общего
+  fallback. Меню и HTTP используют один effective mode текущего провайдера.
+  [Полный контракт DeepSeek](deepseek-tool-permissions.md).
 
 Источник до переноса: docs/grigdesk/chat-agents.md § Режимы прав (--permission-mode)

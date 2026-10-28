@@ -20,11 +20,13 @@ server-owned overlay. Overlay и hooks строит общий `buildLaunchFiles
   каждый даёт предупреждение, запуск продолжается.
 
 Тесты подменяют только адрес модели и добавляют строку сторожа внешнего fetch через
-зависимости запуска; production-overlay отличается от тестового ровно этими двумя местами.
+зависимости запуска; production-overlay отличается этими подменами; у каждого запуска также свой случайный launchId gate.
 
-## Hooks
+## Hooks и native gate
 
-- `PreToolUse` с matcher `*` — `server/scripts/glmToolPolicyHook.mts`, таймаут 30 с. Hook
+- Web chat v3 монтирует [native gate](glm-native-gate.md) и preset `grigdesk-glm`;
+  `PreToolUse` и прежний policy-маркер `UserPromptSubmit` в этом варианте удалены.
+- Factory и ACP сохраняют `PreToolUse` с matcher `*` — `server/scripts/glmToolPolicyHook.mts`, таймаут 30 с. Hook
   исполняется в песочнице процесса и наружу сообщает только stderr (событие `hook/result`);
   любая ошибка внутри hook — exit 2. Ключа маршрута в его окружении нет.
 - `UserPromptSubmit` — hook импортов инструкций, общий с DeepSeek. AGENTS.md, CLAUDE.md и

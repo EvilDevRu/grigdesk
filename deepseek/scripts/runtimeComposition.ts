@@ -23,7 +23,7 @@ export function assertRuntimeClosure(
   }
 }
 
-export const COMPOSITION_REVISION = 'grigdesk-host-web-acp-v3';
+export const COMPOSITION_REVISION = 'grigdesk-host-web-acp-v4';
 
 export const RUNTIME_WORKER_PACKAGES: ReadonlySet<string> = new Set([
   '@deepseek-ai/dsh-code-runtime-worker-thread',
@@ -314,6 +314,50 @@ export async function indexWorkspacePackages(sourceDir: string): Promise<Map<str
         throw error;
       }
     }
+  }
+
+  return result;
+}
+
+/**
+ * Копия закреплённого standard меняет только foreground-контракт делегирования GLM.
+ * Точная пара строк обязательна: изменение upstream не должно молча вернуть фон.
+ */
+export function glmForegroundPreset(rows: any[]): any[] {
+  let count = 0;
+
+  /**
+   * Сохраняет дерево закреплённого preset и заменяет только два известных инструмента.
+   * Копирование исключает изменение standard для остальных потребителей runtime.
+   */
+  const visit = (row: any): any => {
+    if (!row || typeof row !== 'object') {
+      return row;
+    }
+
+    if (Array.isArray(row)) {
+      return row.map(visit);
+    }
+
+    const next = Object.fromEntries(Object.entries(row).map(([key, value]) => [key, visit(value)]));
+
+    if (['tool-subagent', 'tool-subagent-fork'].includes(row.id)) {
+      count += 1;
+      next.config = {
+        ...row.config,
+        enableRunInBackground: false,
+        backgroundMode: 'one-shot',
+        modelSelectionSettings: false,
+        maxDepth: 3,
+      };
+    }
+
+    return next;
+  };
+  const result = visit(rows);
+
+  if (count !== 2) {
+    throw new Error('GLM preset требует ровно spawn и fork закреплённого standard');
   }
 
   return result;

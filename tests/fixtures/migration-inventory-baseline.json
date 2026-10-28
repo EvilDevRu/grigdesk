@@ -4,6 +4,9 @@
       "deepseek/src/host/acpSettingsBridge.mjs",
       "deepseek/src/host/entry.mjs",
       "deepseek/src/host/presetsHost.mjs",
+      "deepseek/src/host/toolPermissionGate.mjs",
+      "deepseek/src/host/toolPermissionPaths.mjs",
+      "deepseek/src/host/toolPermissionPolicy.mjs",
       "deepseek/src/host/webHost.mjs"
     ],
     "engine": [
@@ -99,6 +102,8 @@
       "tests/fixtures/deepseek-harness/isolatedConsumer.mjs",
       "tests/fixtures/deepseek-harness/legacyPublishContract.mjs",
       "tests/fixtures/deepseek-harness/liveSmoke.mjs",
+      "tests/fixtures/deepseek-harness/toolPermissionMcp.mjs",
+      "tests/fixtures/deepseek-harness/toolPermissionRegistry.mjs",
       "tests/fixtures/executor-settings/syntheticProvider.js",
       "tests/fixtures/kimi-server/fake-kimi-relay.mjs",
       "tests/fixtures/kimi-server/fake-kimi-turn.mjs",
@@ -303,6 +308,9 @@
       "tests/server/deepseek-server-thoughts.test.js",
       "tests/server/deepseek-steps.test.js",
       "tests/server/deepseek-tariff.test.js",
+      "tests/server/deepseek-tool-permission-context.test.js",
+      "tests/server/deepseek-tool-permission-parity.test.js",
+      "tests/server/deepseek-tool-permission-policy.test.js",
       "tests/server/deepseek-upstream-update.test.js",
       "tests/server/deepseek-usage.test.js",
       "tests/server/deepseek-vendor-build.test.js",

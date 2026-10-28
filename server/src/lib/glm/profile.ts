@@ -1,7 +1,10 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { glmGateHash } from '../../../../shared/node/glmGateProtocol.ts';
+import type { NativeGateIdentity } from './nativeGuard.ts';
 
 import { DEEPSEEK_PIN } from '../deepseek/contract.ts';
 import { buildLaunchFiles } from '../deepseek/profile.ts';
@@ -82,11 +85,15 @@ export function glmLaunchFingerprint({
 /**
  * Overlay и hooks процесса GLM поверх штатного профиля DSH (Р5): DeepSeek-провайдер и
  * заголовки выключены, модель по умолчанию — zai, маршрут llm-pi-ai вставлен overlay.
- * Политику любого инструмента решает server-owned PreToolUse hook с matcher `*`.
+ * Web chat использует native gate; Factory и ACP сохраняют свой hook-контракт.
  */
-export async function buildGlmLaunchFiles(options: GlmLaunchFilesOptions): Promise<DeepSeekLaunchFiles> {
+export async function buildGlmLaunchFiles(
+  options: GlmLaunchFilesOptions,
+): Promise<DeepSeekLaunchFiles & { nativeGate?: NativeGateIdentity }> {
   // Режим и approval этапа выбирает только проверенная функция политики, до записи файлов.
   const factory = options.factory ? glmFactoryPolicy(options.factory.filesystem) : null;
+  const nativeGate = !factory && options.transport === 'web';
+  const launchId = randomUUID();
   const route = {
     ...buildGlmRoute(options.accessMode),
     ...(options.modelEndpoint ? { baseURL: options.modelEndpoint } : {}),
@@ -98,11 +105,11 @@ export async function buildGlmLaunchFiles(options: GlmLaunchFilesOptions): Promi
   // В payload команда берётся из каталога, пути и аргументы экранируются общим serializer.
   const policyCommand = runtimeKind() === 'packaged'
     ? [policyHelper.command, ...policyHelper.args].map(quoteShellArgument).join(' ') : [
-    shellQuote(process.execPath),
-    shellQuote(GLM_POLICY_HOOK_PATH),
-    '--policy',
-    shellQuote(policyFile),
-  ].join(' ');
+      shellQuote(process.execPath),
+      shellQuote(GLM_POLICY_HOOK_PATH),
+      '--policy',
+      shellQuote(policyFile),
+    ].join(' ');
   const files = await buildLaunchFiles({
     launchDir: options.launchDir,
     cwd: options.cwd,
@@ -122,6 +129,11 @@ export async function buildGlmLaunchFiles(options: GlmLaunchFilesOptions): Promi
   }, {
     pin: `${DEEPSEEK_PIN.version}\0${factory ? GLM_FACTORY_PROFILE_REVISION : GLM_PROFILE_REVISION}`,
     rows: [
+      ...(nativeGate ? [{
+        id: 'agent-presets', config: {
+          default: 'grigdesk-glm', includeUserRoot: false,
+        }
+      }] : []),
       { id: 'llm-deepseek', disabled: true },
       { id: 'session-title-llm', disabled: true },
       options.transport === 'web'
@@ -129,6 +141,15 @@ export async function buildGlmLaunchFiles(options: GlmLaunchFilesOptions): Promi
         : { id: 'acp', config: defaultModel },
     ],
     insert: [
+      ...(nativeGate ? [{
+        id: 'grigdesk-glm-gate',
+        name: 'grigdesk:glm-gate',
+        config: {
+          command: `${policyCommand} --native-gate`,
+          policyFile,
+          launchId
+        },
+      }] : []),
       {
         id: 'llm-pi-ai',
         name: '@deepseek-ai/dsh-llm-pi-ai',
@@ -160,10 +181,27 @@ export async function buildGlmLaunchFiles(options: GlmLaunchFilesOptions): Promi
     ssh: options.hooks.ssh,
     db: options.hooks.db,
     strictDb: options.hooks.strictDb,
+    ...(nativeGate ? { delegation: 'foreground-v1' } : {}),
   };
 
   await fs.writeFile(policyFile, `${JSON.stringify(policy)}\n`, { mode: 0o600 });
   await fs.chmod(policyFile, 0o600);
 
-  return files;
+  if (nativeGate) {
+    const hooks = JSON.parse(await fs.readFile(files.hooksPath, 'utf8'));
+
+    delete hooks.hooks.PreToolUse;
+    hooks.hooks.UserPromptSubmit[0].hooks = hooks.hooks.UserPromptSubmit[0].hooks.slice(0, 1);
+    await fs.writeFile(files.hooksPath, `${JSON.stringify(hooks, null, 2)}\n`, { mode: 0o600 });
+
+    const overlay = await fs.readFile(files.overlayPath, 'utf8');
+
+    files.fingerprint = glmLaunchFingerprint({
+      revision: GLM_PROFILE_REVISION,
+      overlay,
+      hooks: JSON.stringify(hooks, null, 2) + '\n',
+    });
+  }
+
+  return { ...files, ...(nativeGate ? { nativeGate: { launchId, policyHash: glmGateHash(policy) } } : {}) };
 }

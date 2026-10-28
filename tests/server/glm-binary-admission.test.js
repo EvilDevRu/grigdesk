@@ -94,11 +94,16 @@ test('допуск выпуска требует точные входы, рев
 
   coding.glm.admission = [{ mode: 'coding-plan', compatibility: codingIdentity }];
 
-  const closed = await describe(coding);
+  const admitted = await describe(coding);
 
-  assert.throws(() => assertGlmGenerationAdmission(closed, 'coding-plan'), { code: 'glm_mode_not_admitted' });
-  assert.throws(() => assertGlmGenerationAdmission(closed, 'coding-plan', coding.glm.admission), {
-    code: 'glm_mode_not_admitted',
+  assert.equal(assertGlmGenerationAdmission(admitted, 'coding-plan'), codingIdentity);
+  assert.equal(assertGlmGenerationAdmission(admitted, 'coding-plan', coding.glm.admission), codingIdentity);
+  coding.glm.admission = [{ mode: 'api', compatibility: identity }];
+
+  const unadmitted = await describe(coding);
+
+  assert.throws(() => assertGlmGenerationAdmission(unadmitted, 'coding-plan'), {
+    code: 'glm_runtime_not_admitted',
   });
 });
 
@@ -132,7 +137,7 @@ test('без admission в deps способность run определяетс
   });
 
   assert.equal(typeof api.run, 'function');
-  assert.equal(coding.run, undefined);
+  assert.equal(typeof coding.run, 'function');
 });
 
 test('GLM probe принимает настоящий ELF с точным test admission без legacy generation', {

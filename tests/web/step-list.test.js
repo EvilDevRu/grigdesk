@@ -5,6 +5,7 @@ import { after, before, test } from 'node:test';
 import { readFile } from 'node:fs/promises';
 
 import { STEP_IMAGE_TEXT } from '../../shared/chat/chatSteps.ts';
+import { deepSeekToolResultStep, deepSeekToolStep } from '../../server/src/lib/deepseek/steps.ts';
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { createUiBrowser } from './helpers/ui-components.js';
 
@@ -209,6 +210,45 @@ test('StepList показывает картинку только у Read с у�
     await wrapper.get('.step-disclosure').trigger('click');
     assert.equal(wrapper.find('.step-image').exists(), false, name);
     assert.equal(wrapper.find('.step-image-missing').exists(), false, name);
+  }
+});
+
+test('StepList показывает read_image DeepSeek как картинку и сохраняет отказ инструмента', async (t) => {
+  const file = '/work/artifacts/снимок экрана.png';
+  const callId = 'deepseek-image';
+  const tool = deepSeekToolStep('read_image', { file_path: file }, callId);
+
+  for (const isError of [false, true]) {
+    const result = deepSeekToolResultStep({
+      message: {
+        source: { callId },
+        content: [{
+          type: 'tool-result',
+          toolCallId: callId,
+          isError,
+          content: isError
+            ? [{ type: 'text', text: 'Файл не найден' }]
+            : [{ type: 'image', data: 'байты не должны попадать в ленту' }],
+        }],
+      },
+    });
+    const wrapper = await mountStepList(t, [tool, result], { chatId: 'deepseek-chat' });
+
+    assert.equal(wrapper.find('.step-image').exists(), false);
+    await wrapper.get('.step-disclosure').trigger('click');
+    assert.equal(wrapper.get('.path').text(), file);
+    assert.equal(wrapper.find('.step-image').exists(), !isError);
+    assert.equal(wrapper.text().includes('байты не должны попадать в ленту'), false);
+
+    if (isError) {
+      assert.equal(wrapper.get('.body.res').text(), 'Файл не найден');
+    } else {
+      const src = `/api/chat/deepseek-chat/image?path=${encodeURIComponent(file)}`;
+
+      assert.equal(wrapper.get('.step-image img').attributes('src'), src);
+      assert.equal(wrapper.get('.step-image img').attributes('alt'), 'снимок экрана.png');
+      assert.equal(wrapper.find('.body.res').exists(), false);
+    }
   }
 });
 
