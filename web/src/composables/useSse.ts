@@ -50,6 +50,7 @@ const EVENT_NAMES = [
   'task-shelf-changed',
   'grigdesk-tasks-changed',
   'arbiter-live',
+  'arbiter-conversation',
   'sandboxes-changed',
   'sandbox-progress',
   'projects-changed',

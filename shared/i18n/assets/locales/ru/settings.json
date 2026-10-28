@@ -626,7 +626,7 @@
   "turnSilenceThresholdMinutes": "Порог молчания хода, минуты",
   "disableAlertsForAStalledPipelineTurn": "0 — выключить оповещение о зависшем ходе конвейера.",
   "analyzeAutomatically": "Разбирать автоматически",
-  "theArbiterAnalyzesPipelineStopsOnThe": "Арбитр разбирает остановки конвейера на сервере.",
+  "theArbiterAnalyzesPipelineStopsOnThe": "Арбитр сам разбирает остановки. После обновления он больше не продолжает конвейер автоматически: исправление выбираете вы",
   "arbiterModel": "Модель арбитра",
   "providerAndModelAreSavedTogetherWith": "Исполнитель и модель сохраняются вместе с усилием.",
   "arbiterEffort": "Усилие арбитра",

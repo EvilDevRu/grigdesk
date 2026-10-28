@@ -281,13 +281,17 @@ export function routeGateArgs(config: RouteConfig, {
   return [...args, ...routePathArgs(config)];
 }
 
-/** `goto` — доверенный возврат курсора человеком на пройденный узел. */
+/**
+ * Строит доверенный возврат человека с полным текстом указания и exact identity попытки.
+ * Новый диалог передаёт expectedStage для CAS; прежние входы сохраняют свой контракт.
+ */
 export function routeGotoArgs(config: RouteConfig, {
-  task, profile, attempt, node, reason, actor = '',
+  task, profile, attempt, node, reason, actor = '', expectedStage,
 }: RouteIdentityArgs & {
   node: string;
   reason: string;
   actor?: string;
+  expectedStage?: { sequence: number; headEventHash: string };
 }): string[] {
   const args = [String(task), 'goto', '--profile', profile, '--attempt', attempt,
     '--node', node, '--reason', reason];
@@ -295,6 +299,9 @@ export function routeGotoArgs(config: RouteConfig, {
   // прежним байт в байт. Машинное решение обязано называть себя, иначе журнал попытки
   // утверждает, что курсор вернул человек.
   if (actor) args.push('--actor', actor);
+  if (expectedStage) {
+    args.push('--expected-stage', `${expectedStage.sequence}:${expectedStage.headEventHash}`);
+  }
   return [...args, ...routePathArgs(config)];
 }
 
@@ -559,6 +566,11 @@ export async function readRouteWorkTime(
  */
 export function routeFailure(output: string | null | undefined): RouteFailure | null {
   const text = String(output || '');
+
+  if (/FACTORY_ERROR=stale_stage\b/u.test(text)) {
+    return { error: 'stale_stage', message: 'Остановка уже изменилась; решение не применено.' };
+  }
+
   const pinned = /FACTORY_ERROR=(factory_runtime_[a-z_]+)/u.exec(text);
 
   if (pinned) {

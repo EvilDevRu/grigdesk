@@ -4,6 +4,7 @@ import { isRecord } from '../../../shared/lib/objects.ts';
 import type { StallPresentation } from '../../../shared/pipeline/stallPresentation.ts';
 import type { AgentSilence } from '../../../shared/pipeline/agentActivity.ts';
 import type { PipelineGraph } from '../../../shared/pipeline/pipelineWait.ts';
+import type { ArbiterConversationSummary } from '../../../shared/pipeline/arbiterConversation.ts';
 
 const t = localeTranslator(uiLocalePort);
 
@@ -35,6 +36,7 @@ export interface PipelineTask extends Record<string, unknown> {
     comment?: string | null;
     arbitrable?: boolean;
     arbiter?: ArbiterCard | null;
+    conversation?: ArbiterConversationSummary | null;
   } | null;
 }
 
@@ -214,6 +216,7 @@ export interface PipelineViewGraphSource extends LiveGraph {
   nodeMeta?: Record<string, NodeMetadata>;
   nodeOrigins?: Record<string, import('../../../shared/pipeline/factoryGraphContracts.ts').GraphNodeOrigin>;
   arbiterLog?: ArbiterCard[];
+  arbiterConversations?: ArbiterConversationSummary[];
   daemonAlive?: boolean;
   readOnly?: boolean;
   halted?: string | null;

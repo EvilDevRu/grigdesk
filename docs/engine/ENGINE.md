@@ -905,6 +905,14 @@ usage означает missing, не ноль. Cache read, 5-minute write, 1-hou
 
 ## Бандлы маршрутов v2
 
+`factory capabilities --format json` читает возможности до профиля и state: schema 1,
+feature `goto-expected-stage-v1`. `goto --expected-stage sequence:hash` сравнивает head
+внутри task lock `attempt_stage_state_human_rewind_v2` до append. Mismatch даёт код 75
+и `FACTORY_ERROR=stale_stage`, не добавляя событий. Прежний goto без флага сохраняет контракт.
+Это защита явного выбора человека в [диалоге остановки](../grigdesk/pipeline/arbiter-stop-dialog.md),
+а не разрешение автоматического решения модели. Человеческое событие по-прежнему не пишет
+actor; отсутствие поля означает human. Schema существующих событий не меняется.
+
 Server публикует route и catalog как content-addressed каталоги
 `revisions/<sha256(manifest)>`. Engine не доверяет HTTP-ответу или имени каталога:
 `factory-route` повторно проверяет типы файлов, отсутствие symlink/лишних каталогов,

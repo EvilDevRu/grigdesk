@@ -49,10 +49,11 @@
 
 ### Данные фабрики
 
+- [Диалог разбора остановки: история, явный выбор, CAS и восстановление](arbiter-stop-dialog.md)
 
 - [Результат отдельной разведки: checkpoint, deferred, вопрос и exact ответ](bootstrap-results.md)
 
-- [вердикт human — вопрос человеку, и у ответа на него СВОЯ модалка](human-verdict-dialog.md)
+- [Вердикт human и история отдельной модалки](human-verdict-dialog.md)
 - [вердикт human закрывает автоматический повтор по этой остановке](human-verdict-retry-boundary.md)
 - [границу задачи арбитр менять не вправе](arbiter-task-scope.md)
 - [Данные фабрики](factory-data.md)
@@ -76,7 +77,7 @@
 - [Импорт общего API из вложенных компонентов конвейера](client-api-imports.md)
 - [Модель и effort в модалке узла](node-model-and-effort.md)
 - [Раскладка модалки: шапка называет этап, колонки отвечают на вопрос](stage-dialog-layout.md)
-- [Решение человека принимается в СВОЕЙ модалке, остальные места только ведут туда](human-decision-dialog.md)
+- [Разбор и решение внутри окна проблемного этапа](human-decision-dialog.md)
 - [Текст человека в модалке: у ворот и у возврата он разный](gate-and-rewind-comments.md)
 - [Токены попытки: meta.env — зеркало, а не источник правды](attempt-token-accounting.md)
 

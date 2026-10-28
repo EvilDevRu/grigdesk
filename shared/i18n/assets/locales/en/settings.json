@@ -626,7 +626,7 @@
   "turnSilenceThresholdMinutes": "Turn silence threshold, minutes",
   "disableAlertsForAStalledPipelineTurn": "0 — disable alerts for a stalled pipeline turn.",
   "analyzeAutomatically": "Analyze automatically",
-  "theArbiterAnalyzesPipelineStopsOnThe": "The arbiter analyzes pipeline stops on the server.",
+  "theArbiterAnalyzesPipelineStopsOnThe": "The arbiter analyzes stops automatically. After this update it no longer continues the pipeline automatically: you choose the correction",
   "arbiterModel": "Arbiter model",
   "providerAndModelAreSavedTogetherWith": "Provider and model are saved together with effort.",
   "arbiterEffort": "Arbiter effort",

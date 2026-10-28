@@ -285,7 +285,9 @@ export function stallIsArbitrable(
   // стал бы вторым управляющим циклом поверх ведущего — ни кнопки, ни вотчера.
   if (loop) return false;
   if (stop === 'human' && !verdict) return false;
-  return stopIsArbitrable(stop, verdict?.owner || null);
+  // Читающий диалог допускает диагностику среды, сборки и тестов.
+  // Прежний gate машинного исправления остаётся отдельно для legacy audit.
+  return ARBITRABLE_STOPS.has(stop);
 }
 
 /** Разбирает ли арбитр эту остановку. Ответ словами: он уезжает человеку. */

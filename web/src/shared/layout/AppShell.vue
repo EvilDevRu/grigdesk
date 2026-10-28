@@ -462,6 +462,7 @@ import { isTopbarProvider } from '../../../../shared/chat/executorTypes.ts';
 import { localizeProviderAuthLabel } from '../../features/providers/providerLocale.ts';
 import { usePluginsStore } from '../../stores/plugins.ts';
 import { useStudio3dStore } from '../../stores/studio3d.ts';
+import { useArbiterConversationsStore } from '../../stores/arbiterConversations.ts';
 import { useAuthStore } from '../../stores/auth.ts';
 import { useNotifyWatchStore } from '../../stores/notifyWatch.ts';
 import { useAnalysisStore } from '../../stores/analysis.ts';
@@ -546,6 +547,16 @@ const plugins = usePluginsStore();
 
 const studio3d = useStudio3dStore();
 const studioAuth = useAuthStore();
+const arbiterConversations = useArbiterConversationsStore();
+
+watch(() => [studioAuth.authenticated, studioAuth.clientScope], ([authenticated, clientScope]) => {
+  if (authenticated && clientScope) {
+    arbiterConversations.start(String(clientScope));
+  } else {
+    arbiterConversations.stop();
+  }
+}, { immediate: true });
+onUnmounted(() => arbiterConversations.stop());
 
 // Подписка живёт вместе с авторизованной оболочкой, включая переходы между страницами.
 // Disable и logout закрывают requests; повторный start не создаёт вторую SSE подписку.

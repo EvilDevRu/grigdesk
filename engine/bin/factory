@@ -7,6 +7,17 @@
 # своим up.sh, shared-профиль использует только заранее существующие checkout и стенд.
 set -uo pipefail
 
+# Read-only возможности доступны до загрузки профиля и открытия любого state.
+# Старый закреплённый runtime честно откажет на этой команде вместо чужого probe сервера.
+if [[ "${1:-}" == capabilities ]]; then
+  if [[ $# -ne 3 || "${2:-}" != --format || "${3:-}" != json ]]; then
+    printf '%s\n' 'factory: capabilities требует --format json' >&2
+    exit 78
+  fi
+  printf '%s\n' '{"schema":1,"features":["goto-expected-stage-v1"]}'
+  exit 0
+fi
+
 FACTORY_HOME="$(cd "$(dirname "$0")/.." && pwd)"
 FACTORY_PROFILES_DIR="${FACTORY_PROFILES_DIR:-$(cd "$FACTORY_HOME/.." && pwd)/profiles}"
 FACTORY_RUNNERS_DIR="${FACTORY_RUNNERS_DIR:-$FACTORY_HOME/lib/runners}"
@@ -15,6 +26,8 @@ export FACTORY_HOME FACTORY_PROFILES_DIR FACTORY_RUNNERS_DIR
 usage() {
   cat <<'EOF'
 Использование:
+  factory capabilities --format json
+
   factory check --profile PROFILE [--route ROUTE]
                    [--expected-catalog-hash SHA256]
                    [--routes-dir ABS]
@@ -502,11 +515,12 @@ done
    "$MODE" == goto || "$MODE" == work-time || "$MODE" == findings-export ||
    "$MODE" == bootstrap-answer ]] ||
   die "укажи check, start, resume, gate, abandon, recover, goto или work-time/findings-export"
-# Exact stage CAS адресует только gate; старые CLI без флага сохраняют прежний контракт.
+# Exact stage CAS адресует gate и goto; старые CLI без флага сохраняют прежний контракт.
 # Значение передаётся durable commit, где сравнивается под task lock.
 if [[ -n "$EXPECTED_STAGE" ]]; then
-  [[ "$MODE" == gate && "$EXPECTED_STAGE" =~ ^(0|[1-9][0-9]{0,11}):[a-f0-9]{64}$ ]] ||
-    die "--expected-stage допустим только у gate, формат sequence:sha256"
+  [[ ( "$MODE" == gate || "$MODE" == goto ) &&
+     "$EXPECTED_STAGE" =~ ^(0|[1-9][0-9]{0,11}):[a-f0-9]{64}$ ]] ||
+    die "--expected-stage допустим только у gate и goto, формат sequence:sha256"
 fi
 
 # Task-level override исполнителя рождается только вместе с новой попыткой;
@@ -3425,7 +3439,8 @@ v2_admin_main() {
       return 2
     }
     attempt_stage_state_human_rewind_v2 \
-      "$TASK" "$EXPECTED_ATTEMPT" "$GATE_NODE" "$reset" "$REASON" "${ACTOR:-human}" || {
+      "$TASK" "$EXPECTED_ATTEMPT" "$GATE_NODE" "$reset" "$REASON" "${ACTOR:-human}" \
+      "${EXPECTED_STAGE%%:*}" "${EXPECTED_STAGE#*:}" || {
       rc=$?
       v2_log "goto $GATE_NODE не принят (код $rc)"
       return "$rc"

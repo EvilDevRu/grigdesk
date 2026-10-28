@@ -33,6 +33,7 @@ import type { ProfileGraphDef, LoopFacts } from '../lib/factoryGraph.ts';
 import type { RouteGraphDef } from '../lib/routeGraph.ts';
 import type { StallInfo, StallEvent } from '../lib/stall.ts';
 import type { ArbiterCardsStore } from '../lib/arbiterCards.ts';
+import type { ArbiterConversationStore } from '../lib/arbiterConversationStore.ts';
 
 // Реестр задачи — плоская провайдерская проекция `tNNNN.pipeline`.
 type Registry = Record<string, string>;
@@ -106,6 +107,7 @@ export interface FactoryStateAdapterOptions {
   controlDir?: string | null;
   workTimeReader?: WorkTimeReader | null;
   arbiterCards?: ArbiterCardsStore | null;
+  arbiterConversations?: ArbiterConversationStore | null;
 }
 
 export class FactoryStateAdapter {
@@ -120,6 +122,8 @@ export class FactoryStateAdapter {
   // Разбор арбитра последней остановки. Только чтение: пишет его модуль factory после
   // хода, а карточка задачи и модалка узла обязаны его видеть, а не терять.
   readonly arbiterCards: ArbiterCardsStore | null;
+
+  readonly arbiterConversations: ArbiterConversationStore | null;
 
   readonly workTimeReader: WorkTimeReader | null;
 
@@ -137,13 +141,14 @@ export class FactoryStateAdapter {
 
   constructor({
     stateDir, profilesDir, routesDir = null, controlDir = null, workTimeReader = null,
-    arbiterCards = null,
+    arbiterCards = null, arbiterConversations = null,
   }: FactoryStateAdapterOptions) {
     this.stateDir = stateDir;
     this.profilesDir = profilesDir;
     this.routesDir = routesDir;
     this.controlDir = controlDir;
     this.arbiterCards = arbiterCards;
+    this.arbiterConversations = arbiterConversations;
     this.workTimeReader = workTimeReader;
   }
 
@@ -612,6 +617,10 @@ export class FactoryStateAdapter {
         loop: registry.LOOP_MODE === '1',
       }),
       arbiter: this.arbiterCards?.read(task, trusted.attempt) || null,
+      conversation: this.arbiterConversations?.readSummary(
+        String(task), trusted.attempt, trusted.stageIdentity,
+      ) || null,
+      conversationHistory: Boolean(this.arbiterConversations?.history(String(task), trusted.attempt).length),
     };
   }
 
@@ -750,6 +759,7 @@ export class FactoryStateAdapter {
       node: string | null;
       arbitrable: boolean;
       arbiter: unknown;
+      conversation?: unknown;
     }) | null = detectedStall
       ? {
         ...detectedStall,
@@ -757,6 +767,9 @@ export class FactoryStateAdapter {
         arbitrable: bootstrap ? false : arbitrable,
         // Человеческая формулировка того же затыка, если арбитр его уже разбирал.
         arbiter: this.arbiterCards?.read(task, trusted?.attempt) || null,
+        conversation: trusted ? this.arbiterConversations?.readSummary(
+          String(task), trusted.attempt, trusted.stageIdentity,
+        ) || null : null,
       }
       : null;
     // Реестр остаётся `running`, когда движок после исчерпания попыток ставит
@@ -900,6 +913,8 @@ export class FactoryStateAdapter {
       // нет: без этой сводки человек принимал бы план и результат, не зная, сколько раз
       // конвейер разворачивался сам и какие развилки закрыли за него.
       arbiterLog: this.arbiterCards?.read(task, trusted?.attempt)?.history || [],
+      arbiterConversations: trusted
+        ? this.arbiterConversations?.history(String(task), trusted.attempt) || [] : [],
       updatedAt: mtime,
     };
   }

@@ -20,6 +20,7 @@ import type { ShutdownCoordinator } from './shutdown.ts';
 import type { ProjectsService } from '../modules/projects/service.ts';
 import type { StudioRuntime } from '../modules/studio3d/runtime.ts';
 import type { PluginDocsEntry } from './pluginDocs.ts';
+import type { ConversationAck } from './arbiterConversationService.ts';
 
 // Чем именно подтверждён запрос. Различать обязательно: внутренний токен процесса и
 // сессия человека дают разные права, а CLI-токен не должен открывать чужие ручки.
@@ -64,7 +65,11 @@ declare module 'fastify' {
     providerUsageSink?(providerId: string): (patch: ProviderUsagePatch) => boolean;
     // Обслуживание внешнего CLI сохраняет паузу аккаунта и отвергает старые callbacks.
     invalidateProviderRuntime?(providerId: string, options?: { removed?: boolean }): Promise<boolean>;
-    factoryArbitrate?(...args: unknown[]): Promise<unknown>;
+    factoryArbitrate?(
+      task: string,
+      reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+      options?: { actor?: string },
+    ): Promise<ConversationAck | null>;
     telegramDiscussion?(text: unknown, options?: Record<string, unknown>): Promise<unknown>;
     // Сервис раздела «Проекты»: им пользуется и сам раздел, и ручка /api/profiles.
     projects?: ProjectsService;

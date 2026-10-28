@@ -67,6 +67,7 @@ export interface GraphLoopProgress {
 // Остановка приходит из соседнего контракта и разбирается своим модулем: здесь она
 // остаётся непроверенной, чтобы форма остановки не была объявлена дважды.
 export interface FactoryGraphData {
+  serviceHost?: string | null;
   pos: Record<string, GraphPosition>;
   nodes: Record<string, GraphNodeDefinition>;
   edges: GraphEdge[];

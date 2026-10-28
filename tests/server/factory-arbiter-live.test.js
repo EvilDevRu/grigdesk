@@ -67,6 +67,41 @@ test('две задачи разбираются независимо друг �
   assert.equal(live.read('2').actor, 'human');
 });
 
+test('завершение старого runId не снимает отметку нового хода', () => {
+  const live = new FactoryArbiterLive();
+  const oldDone = live.begin('7', { runId: 'old' });
+  const newDone = live.begin('7', { runId: 'new' });
+
+  oldDone();
+  assert.equal(live.size, 1);
+  newDone();
+  assert.equal(live.size, 0);
+});
+
+test('watcher ждёт completion после 202 и сохраняет один глобальный auto job', async () => {
+  const { FactoryArbiterWatch } = await import('../../server/src/lib/factoryArbiterWatch.ts');
+  let finish;
+  const completion = new Promise((resolve) => { finish = resolve; });
+  const calls = [];
+  const watch = new FactoryArbiterWatch({
+    sse: { subscribe: () => () => {} },
+    prefs: { read: () => ({ arbiter: { auto: true } }) },
+    listTasks: async () => ['7', '8'].map((task) => ({ task, stall: { arbitrable: true } })),
+    arbitrate: async (task) => {
+      calls.push(task);
+      return { conversationId: 'conversation', completion };
+    },
+    log: { info() {}, warn() {} },
+  });
+  const tick = watch.tick();
+  await new Promise((resolve) => setImmediate(resolve));
+  await watch.tick();
+
+  assert.deepEqual(calls, ['7']);
+  finish();
+  await tick;
+});
+
 // Обход вотчера дорогой: он читает журналы попыток и вердикты каждой задачи. Пока
 // остановленных задач нет, короткая пауза не должна превращаться в такой обход — иначе
 // вернётся грабля, убившая карточку «Слоты запуска».
