@@ -297,23 +297,23 @@ test('подключённый сервер открывает живую сес
     },
   });
   const card = wrapper.get('.ssh-connection');
-  const loginPanel = card.get('.ssh-connection__login-panel');
+  const selected = wrapper.get('.ssh-selected');
 
   assert.deepEqual({
-    button: card.get('[aria-label="Открыть терминал Production"]').text(),
-    loginOpen: loginPanel.attributes('open'),
+    button: selected.get('[aria-label="Открыть терминал Production"]').text(),
+    loginOpen: selected.find('.ssh-connection__login').exists(),
   }, {
     button: 'Открыть терминал',
-    loginOpen: undefined,
+    loginOpen: false,
   });
 
-  await card.get('[aria-label="Открыть терминал Production"]').trigger('click');
+  await card.trigger('click');
   await flushPromises();
 
   assert.deepEqual({
     activeId: store.activeId,
     current: card.classes().includes('is-current'),
-    button: card.get('[aria-label="Открыть терминал Production"]').text(),
+    button: selected.get('[aria-label="Открыть терминал Production"]').text(),
     probes,
     terminals: globalThis.__sshPanelTerminals.length,
   }, {
@@ -645,4 +645,350 @@ test('архивный проект не предлагается новой с�
   assert.deepEqual(options, ['grigdesk']);
   // Архив ничего не рвёт: уже заведённая связь остаётся на месте вместе со своим проектом.
   assert.equal(wrapper.text().includes('Старый сервер'), true);
+});
+
+const layoutConnections = [
+  {
+    id: 'app',
+    projectId: 'demo-app',
+    label: 'Production',
+    role: 'backend',
+    host: 'app.example.test',
+    port: 22,
+    user: 'deploy',
+  },
+  {
+    id: 'db',
+    projectId: 'demo-data',
+    label: 'Database',
+    role: 'db',
+    host: 'db.example.test',
+    port: 2222,
+    user: 'admin',
+  },
+];
+
+test('каталог группирует серверы и показывает только один вход для выбранной строки', async (t) => {
+  const { wrapper, flushPromises } = await mountPanel(t, {
+    store: {
+      connections: layoutConnections,
+      sessions: [],
+      activeId: '',
+    },
+  });
+
+  assert.deepEqual(wrapper.findAll('.ssh-project-heading strong').map((item) => item.text()),
+    ['demo-app', 'demo-data']);
+  assert.equal(wrapper.findAll('.ssh-connection__login').length, 1);
+
+  await wrapper.get('input[type="password"]').setValue('одноразовый');
+  await wrapper.get('[data-connection-id="db"]').trigger('click');
+  await flushPromises();
+
+  assert.equal(wrapper.get('.ssh-selected__heading strong').text(), 'Database');
+  assert.equal(wrapper.get('input[type="password"]').element.value, '');
+
+  await wrapper.get('[data-connection-id="app"]').trigger('click');
+  await flushPromises();
+
+  assert.equal(wrapper.get('input[type="password"]').element.value, '');
+});
+
+test('поиск учитывает проект, адрес и роль без сброса выбранного входа', async (t) => {
+  const { wrapper, flushPromises } = await mountPanel(t, {
+    store: {
+      connections: layoutConnections,
+      sessions: [],
+      activeId: '',
+    },
+  });
+  const search = wrapper.get('[aria-label="Поиск сервера"]');
+
+  for (const query of ['DEMO-DATA', 'db.example.test', 'admin', '2222']) {
+    await search.setValue(query);
+    await flushPromises();
+
+    assert.deepEqual(wrapper.findAll('.ssh-connection').map((row) => row.attributes('data-connection-id')),
+      ['db']);
+  }
+
+  await search.setValue('missing');
+  await flushPromises();
+
+  assert.equal(wrapper.findAll('.ssh-connection').length, 0);
+  assert.equal(wrapper.get('.ssh-selected__heading strong').text(), 'Production');
+  assert.equal(wrapper.text().includes('Подходящих серверов нет.'), true);
+});
+
+test('форма сохраняет черновик и один xterm при открытии и возврате к терминалу', async (t) => {
+  const { wrapper, flushPromises } = await mountPanel(t);
+  const toggle = wrapper.get('[aria-controls="ssh-create"]');
+
+  await toggle.trigger('click');
+  await wrapper.get('[aria-label="Метка сервера"]').setValue('Новый сервер');
+  await toggle.trigger('click');
+  await toggle.trigger('click');
+  await flushPromises();
+
+  assert.equal(wrapper.get('[aria-label="Метка сервера"]').element.value, 'Новый сервер');
+  assert.equal(wrapper.get('#ssh-create').isVisible(), true);
+  assert.equal(wrapper.get('.ssh-console').isVisible(), false);
+  assert.equal(globalThis.__sshPanelTerminals.length, 1);
+
+  await wrapper.get('[aria-controls="ssh-connections"]').trigger('click');
+  await wrapper.get('[aria-controls="ssh-workspace"]').trigger('click');
+  await flushPromises();
+
+  assert.equal(wrapper.get('[aria-label="Метка сервера"]').element.value, 'Новый сервер');
+  assert.equal(globalThis.__sshPanelTerminals.length, 1);
+});
+
+test('обновление реестра сохраняет выбранный сервер, удаление выбирает оставшийся', async (t) => {
+  const { wrapper, store, flushPromises } = await mountPanel(t, {
+    store: {
+      connections: layoutConnections,
+      sessions: [],
+      activeId: '',
+    },
+  });
+
+  await wrapper.get('[data-connection-id="db"]').trigger('click');
+  store.connections = layoutConnections.map((connection) => ({ ...connection }));
+  await flushPromises();
+
+  assert.equal(wrapper.get('.ssh-selected__heading strong').text(), 'Database');
+
+  store.connections = [layoutConnections[0]];
+  await flushPromises();
+
+  assert.equal(wrapper.get('.ssh-selected__heading strong').text(), 'Production');
+});
+
+test('гармошка открывает один проект, сохраняя выбранный сервер и его вход', async (t) => {
+  const { wrapper, flushPromises } = await mountPanel(t, {
+    store: {
+      connections: layoutConnections,
+      sessions: [],
+      activeId: '',
+    },
+  });
+  const app = wrapper.get('[data-ssh-project="demo-app"]');
+  const data = wrapper.get('[data-ssh-project="demo-data"]');
+  const password = wrapper.get('input[type="password"]');
+
+  assert.equal(app.attributes('aria-expanded'), 'true');
+  assert.equal(data.attributes('aria-expanded'), 'false');
+  assert.equal(wrapper.get('[data-connection-id="db"]').isVisible(), false);
+
+  await password.setValue('одноразовый');
+  await data.trigger('click');
+  await flushPromises();
+
+  assert.equal(app.attributes('aria-expanded'), 'false');
+  assert.equal(data.attributes('aria-expanded'), 'true');
+  assert.equal(wrapper.get('[data-connection-id="app"]').isVisible(), false);
+  assert.equal(wrapper.get('[data-connection-id="db"]').isVisible(), true);
+  assert.equal(wrapper.get('.ssh-selected__heading strong').text(), 'Production');
+  assert.equal(password.element.value, 'одноразовый');
+
+  await data.trigger('click');
+  await flushPromises();
+
+  assert.equal(data.attributes('aria-expanded'), 'false');
+  assert.equal(wrapper.get('.ssh-connection__login').isVisible(), true);
+  assert.equal(globalThis.__sshPanelTerminals.length, 0);
+});
+
+test('поиск раскрывает совпадения и возвращает прежнее раскрытие после очистки', async (t) => {
+  const { wrapper, flushPromises } = await mountPanel(t, {
+    store: {
+      connections: layoutConnections,
+      sessions: [],
+      activeId: '',
+    },
+  });
+
+  await wrapper.get('[data-ssh-project="demo-data"]').trigger('click');
+  await wrapper.get('[aria-label="Поиск сервера"]').setValue('demo-');
+  await flushPromises();
+
+  assert.equal(wrapper.findAll('[data-ssh-project][aria-expanded="true"]').length, 2);
+  assert.equal(wrapper.findAll('.ssh-connection').every((row) => row.isVisible()), true);
+  assert.equal(wrapper.get('[data-ssh-project="demo-app"]').attributes('disabled'), '');
+
+  await wrapper.get('[aria-label="Поиск сервера"]').setValue('');
+  await flushPromises();
+
+  assert.equal(wrapper.get('[data-ssh-project="demo-app"]').attributes('aria-expanded'), 'false');
+  assert.equal(wrapper.get('[data-ssh-project="demo-data"]').attributes('aria-expanded'), 'true');
+});
+
+test('обновление сохраняет ручное сворачивание, выбор связи раскрывает её проект', async (t) => {
+  const { wrapper, store, flushPromises } = await mountPanel(t, {
+    store: {
+      connections: layoutConnections,
+      sessions: [],
+      activeId: '',
+    },
+  });
+
+  await wrapper.get('[data-ssh-project="demo-app"]').trigger('click');
+  store.connections = layoutConnections.map((connection) => ({ ...connection }));
+  await flushPromises();
+
+  assert.equal(wrapper.get('[data-ssh-project="demo-app"]').attributes('aria-expanded'), 'false');
+
+  await wrapper.get('[data-ssh-project="demo-data"]').trigger('click');
+  await wrapper.get('[data-connection-id="db"]').trigger('click');
+  await wrapper.get('[data-ssh-project="demo-app"]').trigger('click');
+  await flushPromises();
+
+  assert.equal(wrapper.get('[data-ssh-project="demo-data"]').attributes('aria-expanded'), 'false');
+  assert.equal(wrapper.get('.ssh-selected__heading strong').text(), 'Database');
+
+  store.connections = [layoutConnections[1]];
+  await flushPromises();
+
+  assert.equal(wrapper.get('[data-ssh-project="demo-data"]').attributes('aria-expanded'), 'true');
+});
+
+test('каталог подписывает серверы и живые сессии словами, а не сокращением', async (t) => {
+  const { wrapper } = await mountPanel(t, {
+    store: {
+      connections: [
+        {
+          id: 'c-app',
+          projectId: 'demo-app',
+          label: 'Production',
+          role: 'backend',
+          host: 'app.example.test',
+          port: 22,
+          user: 'deploy',
+        },
+        {
+          id: 'c-db',
+          projectId: 'demo-app',
+          label: 'Database',
+          role: 'db',
+          host: 'db.example.test',
+          port: 22,
+          user: 'admin',
+        },
+      ],
+      sessions: [
+        {
+          id: 's-app-1',
+          connectionId: 'c-app',
+          label: 'Production',
+          role: 'backend',
+        },
+        {
+          id: 's-app-2',
+          connectionId: 'c-app',
+          label: 'Production',
+          role: 'backend',
+        },
+      ],
+      activeId: '',
+    },
+  });
+
+  assert.deepEqual({
+    total: wrapper.get('[data-ssh-server-count]').text(),
+    group: wrapper.get('[data-ssh-project="demo-app"]').attributes('aria-label'),
+    serverTotal: wrapper.get('.ssh-project-heading .ssh-server-total').text(),
+    groupPill: wrapper.get('.ssh-project-heading .ssh-session-pill')
+      .attributes('aria-label'),
+    groupPillText: wrapper.get('.ssh-project-heading .ssh-session-pill').text(),
+    pill: wrapper.get('[data-connection-id="c-app"] .ssh-session-pill')
+      .attributes('aria-label'),
+    idle: wrapper.find('[data-connection-id="c-db"] .ssh-session-pill').exists(),
+  }, {
+    total: '2',
+    group: 'Проект demo-app, 2 сервера, 2 живые сессии',
+    serverTotal: '2 сервера',
+    groupPill: '2 живые сессии',
+    groupPillText: '2',
+    pill: '2 живые сессии',
+    idle: false,
+  });
+});
+
+test('пустой каталог ведёт в форму нового сервера', async (t) => {
+  const { wrapper, flushPromises } = await mountPanel(t, {
+    store: {
+      connections: [],
+      sessions: [],
+      activeId: '',
+    },
+  });
+  const empty = wrapper.get('.ssh-catalog-empty');
+  const create = empty.findAll('button').find((button) => button.text() === 'Добавить сервер');
+
+  assert.equal(empty.get('strong').text(), 'Серверов пока нет');
+
+  await create.trigger('click');
+  await flushPromises();
+
+  assert.equal(wrapper.get('#ssh-create').isVisible(), true);
+});
+
+test('промах поиска предлагает сброс и сохраняет карточку выбранного сервера', async (t) => {
+  const { wrapper, flushPromises } = await mountPanel(t, {
+    store: {
+      connections: layoutConnections,
+      sessions: [],
+      activeId: '',
+    },
+  });
+
+  await wrapper.get('[aria-label="Поиск сервера"]').setValue('missing');
+  await flushPromises();
+
+  const reset = wrapper.get('.ssh-catalog-empty')
+    .findAll('button')
+    .find((button) => button.text() === 'Сбросить поиск');
+
+  assert.equal(wrapper.get('.ssh-selected__heading strong').text(), 'Production');
+  assert.equal(Boolean(reset), true);
+
+  await reset.trigger('click');
+  await flushPromises();
+
+  assert.equal(wrapper.findAll('.ssh-connection').length, 2);
+  assert.equal(wrapper.find('[aria-label="Поиск сервера"]').element.value, '');
+});
+
+test('новая сессия раскрывает пароль в карточке выбранного сервера', async (t) => {
+  const { wrapper, flushPromises } = await mountPanel(t, {
+    store: {
+      connections: [layoutConnections[0]],
+      sessions: [
+        {
+          id: 's-app',
+          connectionId: 'app',
+          projectId: 'demo-app',
+          label: 'Production',
+          role: 'backend',
+        },
+      ],
+      activeId: '',
+    },
+  });
+  const toggle = wrapper.get('[aria-controls="ssh-login"]');
+
+  assert.equal(wrapper.find('.ssh-connection__login').exists(), false);
+
+  await toggle.trigger('click');
+  await flushPromises();
+
+  assert.deepEqual({
+    expanded: wrapper.get('[aria-controls="ssh-login"]').attributes('aria-expanded'),
+    login: wrapper.get('.ssh-connection__login').isVisible(),
+    fields: wrapper.findAll('input[type="password"]').length,
+  }, {
+    expanded: 'true',
+    login: true,
+    fields: 1,
+  });
 });
