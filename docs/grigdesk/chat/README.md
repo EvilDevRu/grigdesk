@@ -23,7 +23,7 @@
 - [Lifecycle внешних CLI: четыре операции, PTY/factory и восстановление](external-cli-lifecycle.md)
 - [Переустановка сохраняет старый prefix вместо текущего каталога пользовательского npm](provider-reinstall-prefix.md)
 - [Установка после удаления: отсутствующая привязка и оставшаяся npm-копия](provider-install-stale-binding.md)
-- [Свежая версия CLI не проходит проверку installer-хуков](provider-install-hooks-review-gate.md)
+- [Проверка installer-хуков: точная версия или прежние байты](provider-install-hooks-review-gate.md)
 
 - [Установка CLI: краткое подтверждение, подробности, token и восстановление](provider-cli-installation.md)
 - [Внешний Node/npm и пользовательский prefix вместо папки данных](provider-install-npm.md)

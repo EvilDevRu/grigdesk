@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { sha256 } from '../../shared/node/hash.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
+import reviewed from '../../server/src/lib/providerInstall/npmReviewedHooks.json' with { type: 'json' };
 
 import {
   prepareNpmStrategy, revalidateNpmStrategy, executeNpmStrategy,
@@ -28,7 +30,7 @@ const result = (stdout = '') => ({
  * Поддельный transport меняет только изолированный prefix штатной формы npm.
  * Поведение repair проверяет файлы зависимости, а не последовательность внутренних вызовов.
  */
-async function fixture(t, operation = 'reinstall') {
+async function fixture(t, operation = 'reinstall', options = {}) {
   await fs.mkdir(base, { recursive: true });
 
   const directory = await fs.mkdtemp(path.join(base, 'case-'));
@@ -37,6 +39,7 @@ async function fixture(t, operation = 'reinstall') {
   const alias = path.join(prefix, 'bin/fixture');
   const node = path.join(directory, 'node');
   const npm = path.join(directory, 'npm');
+  const version = options.version ?? '1.2.3';
 
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   await fs.writeFile(node, 'node');
@@ -52,11 +55,18 @@ async function fixture(t, operation = 'reinstall') {
     await fs.mkdir(targetRoot, { recursive: true });
     await fs.writeFile(path.join(targetRoot, 'package.json'), JSON.stringify({
       name: '@fixture/cli',
-      version: '1.2.3',
+      version,
       bin: { fixture: 'cli.js' },
+      scripts: options.profile?.lifecycle,
     }));
     await fs.writeFile(path.join(targetRoot, 'cli.js'), 'ok');
     await fs.writeFile(path.join(targetRoot, 'dependency.js'), 'intact');
+
+    for (const [file, bytes] of Object.entries(options.files ?? {})) {
+      await fs.mkdir(path.dirname(path.join(targetRoot, file)), { recursive: true });
+      await fs.writeFile(path.join(targetRoot, file), bytes);
+    }
+
     await fs.mkdir(path.join(target, 'bin'), { recursive: true });
     await fs.symlink('../lib/node_modules/@fixture/cli/cli.js', path.join(target, 'bin/fixture'))
       .catch((error) => {
@@ -82,7 +92,7 @@ async function fixture(t, operation = 'reinstall') {
       source: 'npm',
       root,
       prefix,
-      version: '1.2.3',
+      version,
       path: alias,
       aliases: [alias],
       resourceKey: 'a'.repeat(64),
@@ -96,7 +106,7 @@ async function fixture(t, operation = 'reinstall') {
       env: { HOME: directory, PATH: path.join(prefix, 'bin') },
     },
     prefix,
-    version: '1.2.3',
+    version,
     scratch: path.join(directory, 'scratch'),
     /**
      * Транспорт имитирует только файловые эффекты npm в изолированной папке.
@@ -106,10 +116,10 @@ async function fixture(t, operation = 'reinstall') {
       calls.push([file, ...args]);
 
       if (file === alias) {
-        return result('fixture 1.2.3');
+        return result(`fixture ${version}`);
       }
       if (args[1] === 'view') {
-        return result(JSON.stringify('sha512-Zml4dHVyZQ=='));
+        return result(JSON.stringify(options.integrity ?? 'sha512-Zml4dHVyZQ=='));
       }
 
       const target = args[args.indexOf('--prefix') + 1];
@@ -129,6 +139,12 @@ async function fixture(t, operation = 'reinstall') {
     },
   };
 
+  if (operation === 'install') {
+    await fs.rm(root, { recursive: true });
+    await fs.unlink(alias);
+    input.selected = null;
+  }
+
   return {
     input,
     root,
@@ -136,6 +152,31 @@ async function fixture(t, operation = 'reinstall') {
     directory,
     calls,
   };
+}
+
+/**
+ * Искусственный проверенный hook отделяет допуск байтов от integrity всего tarball.
+ * Новые версии получают другой registry integrity, сохраняя те же команды и файлы.
+ */
+async function reviewedFixture(t, version = '1.2.4', integrity = 'sha512-bmV3LXZlcnNpb24=') {
+  const files = { 'scripts/postinstall.cjs': '// проверенный hook\n' };
+  const profile = {
+    name: '@fixture/cli',
+    reviewedVersion: '1.2.3',
+    integrity: 'sha512-cmV2aWV3ZWQ=',
+    lifecycle: { postinstall: 'node scripts/postinstall.cjs' },
+    files: Object.fromEntries(Object.entries(files).map(([file, bytes]) => [file, sha256(bytes)])),
+  };
+
+  reviewed.push(profile);
+  t.after(() => reviewed.splice(reviewed.indexOf(profile), 1));
+
+  return fixture(t, 'install', {
+    version,
+    integrity,
+    profile,
+    files,
+  });
 }
 
 test('repair сохраняет версию, восстанавливает dependency и оставляет backup до postcheck', async (t) => {
@@ -198,4 +239,66 @@ test('offline-прогон перед mutation замечает изменивш
   };
 
   await assert.rejects(revalidateNpmStrategy(prepared), { code: 'npm_graph_changed' });
+});
+
+test('новая версия с прежними хуками закрепляет свой integrity в preview и проходит start', async (t) => {
+  const { input, root, calls } = await reviewedFixture(t);
+  const prepared = await prepareNpmStrategy(input);
+
+  assert.deepEqual(prepared.graph, [{
+    relative: '',
+    name: '@fixture/cli',
+    version: '1.2.4',
+    integrity: 'sha512-bmV3LXZlcnNpb24=',
+  }]);
+  assert.equal(await fs.lstat(root).then(() => true, () => false), false);
+  await revalidateNpmStrategy(prepared);
+  await executeNpmStrategy(prepared, {
+    async phase() {},
+  });
+  assert.equal(JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')).version, '1.2.4');
+  assert.ok(calls.some((call) => call[2] === 'install'
+    && call.includes('--offline') && !call.includes('--ignore-scripts')));
+});
+
+test('точная проверенная версия по-прежнему требует integrity своего tarball', async (t) => {
+  const { input } = await reviewedFixture(t, '1.2.3');
+
+  await assert.rejects(prepareNpmStrategy(input), { code: 'installer_strategy_unverified' });
+});
+
+test('точная версия с совпавшими хуками и integrity проходит подготовку', async (t) => {
+  const { input } = await reviewedFixture(t, '1.2.3', 'sha512-cmV2aWV3ZWQ=');
+  const prepared = await prepareNpmStrategy(input);
+
+  assert.equal(prepared.graph[0].integrity, 'sha512-cmV2aWV3ZWQ=');
+});
+
+test('допуск по байтам не разрешает отсутствующий registry integrity', async (t) => {
+  const { input } = await reviewedFixture(t, '1.2.4', '');
+
+  await assert.rejects(prepareNpmStrategy(input), { code: 'npm_graph_invalid' });
+});
+
+test('новый hook-файл в offline-прогоне запрещает start после допуска по байтам', async (t) => {
+  const { input, root, calls } = await reviewedFixture(t);
+  const prepared = await prepareNpmStrategy(input);
+  const original = input.run;
+
+  input.run = async (file, args) => {
+    const value = await original(file, args);
+    const target = args[args.indexOf('--prefix') + 1] ?? '';
+
+    if (args[1] === 'install' && target.includes('rehearsal')) {
+      await fs.writeFile(path.join(target, 'lib/node_modules/@fixture/cli/scripts/extra.cjs'),
+        '// непроверенный модуль\n');
+    }
+
+    return value;
+  };
+
+  await assert.rejects(revalidateNpmStrategy(prepared), { code: 'installer_strategy_unverified' });
+  assert.equal(await fs.lstat(root).then(() => true, () => false), false);
+  assert.equal(calls.some((call) => call[2] === 'install'
+    && call.includes('--offline') && !call.includes('--ignore-scripts')), false);
 });

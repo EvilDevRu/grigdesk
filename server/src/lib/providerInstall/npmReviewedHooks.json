@@ -82,5 +82,32 @@
       "scripts/postinstall/takeover.mjs": "e7dc15c7fa6dcbfac8193630b7a44732473d3002b6b404789fae0c34202b1cfc",
       "scripts/postinstall/ui.mjs": "5153a04c77b92e8c274c1b559812880b74b83a915f84e5ad34e4cc62b7c49766"
     }
+  },
+  {
+    "name": "@moonshot-ai/kimi-code",
+    "reviewedVersion": "2.4.0",
+    "integrity": "sha512-EugvJSkGbfWYHgPgVmpIyEPyxtyhGptbWI+ItPoWLu6yDTkcZ1LYE3dhWzNu2+InMmpmgNMrW7Yj25qg9TEN6Q==",
+    "lifecycle": {
+      "postinstall": "node scripts/postinstall.mjs"
+    },
+    "files": {
+      "scripts/postinstall.mjs": "d60df1c0a647242764337c6b675c5c214f4028d74b7db7df3ef5b5f40c4c43ce",
+      "scripts/postinstall/migrate.mjs": "3d38c1587e06cccddcabbc1aa74c8af873f03f7b8d2a427cc849eeed6cbd708e",
+      "scripts/postinstall/platform.mjs": "d125b833ca70a12eb0247a2f445a518bdc1f112147d24da4648ab658a0d7cf88",
+      "scripts/postinstall/reach.mjs": "4ea25193b7f8f498788b87f119b03c69ef9ff3ebf6b58e75abbbdad8d45fdad8",
+      "scripts/postinstall/takeover.mjs": "e7dc15c7fa6dcbfac8193630b7a44732473d3002b6b404789fae0c34202b1cfc",
+      "scripts/postinstall/ui.mjs": "5153a04c77b92e8c274c1b559812880b74b83a915f84e5ad34e4cc62b7c49766"
+    }
+  },
+  {
+    "name": "@anthropic-ai/claude-code",
+    "reviewedVersion": "2.1.312",
+    "integrity": "sha512-/gx8byG8VOm4YoNuT5tal/Ov5Z5oydJzZkmHCJcBFLbNGGpyYDbKA/CNdB+iIKwcLQC8pVwBoj6Dt7H3L2J5bw==",
+    "lifecycle": {
+      "postinstall": "node install.cjs"
+    },
+    "files": {
+      "install.cjs": "32a7b2429d7447c5aa043e383bcf9a72e0b233dff66336ea4b5b32531da981ad"
+    }
   }
 ]

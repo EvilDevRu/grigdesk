@@ -124,7 +124,7 @@ export async function assertNoLegacyKimiShim(input: NpmStrategyInput): Promise<v
 
 /**
  * Граф фиксирует integrity каждого разрешённого узла, включая optional/transitive пакеты.
- * Чтение из того же cache не выбирает новую версию и не доверяет integrity от клиента.
+ * Точный профиль закрепляет tarball; допуск новой версии по байтам закрепляет integrity в preview.
  */
 async function graphIdentity(input: NpmStrategyInput, cache: string, graph: NpmGraphPackage[]) {
   const result: PreparedNpmStrategy['graph'] = [];
@@ -140,7 +140,7 @@ async function graphIdentity(input: NpmStrategyInput, cache: string, graph: NpmG
     const profile = reviewed.find((item) => item.name === entry.name
       && item.reviewedVersion === entry.version);
 
-    if (Object.keys(entry.scripts).length && profile?.integrity !== value) {
+    if ((Object.keys(entry.scripts).length || entry.bindingGyp) && profile && profile.integrity !== value) {
       throw new InstallEnvironmentError('installer_strategy_unverified', 'Изменились байты installer hook');
     }
 

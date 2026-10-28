@@ -1,8 +1,10 @@
-import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { sha256File } from '../../../../shared/node/hash.ts';
 import reviewed from './npmReviewedHooks.json' with { type: 'json' };
+
+type ReviewedNpmHookProfile = (typeof reviewed)[number];
 
 export interface NpmGraphPackage {
   directory: string;
@@ -125,8 +127,83 @@ export async function inspectNpmGraph(packageRoot: string): Promise<NpmGraphPack
 }
 
 /**
- * Неизвестный hook может писать вне prefix, поэтому не получает разрешение автоматически.
- * Проверенные profiles сравниваются по exact bytes и командам, а не только имени пакета.
+ * Совпадение команд не заменяет проверку всех файлов, включая вложенные модули и native build.
+ * Повреждение или отсутствие файла закрывает профиль, позволяя проверить следующий вариант.
+ */
+async function matchesReviewedNpmHooks(entry: NpmGraphPackage,
+  profile: ReviewedNpmHookProfile): Promise<boolean> {
+  if (Object.keys(profile.lifecycle).length !== Object.keys(entry.scripts).length
+    || Object.entries(profile.lifecycle).some(([key, command]) => entry.scripts[key] !== command)
+    || entry.bindingGyp !== Object.hasOwn(profile.files, 'binding.gyp')) {
+    return false;
+  }
+
+  for (const [relative, expected] of Object.entries(profile.files)) {
+    const file = path.join(entry.directory, relative);
+    const stat = await fs.lstat(file).catch(() => null);
+
+    if (!stat?.isFile() || stat.size > 8 * 1024 * 1024) {
+      return false;
+    }
+
+    const actual = await sha256File(file).catch(() => null);
+
+    if (actual !== expected) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * При переносе допуска между версиями каталоги хуков должны содержать только проверенные файлы.
+ * Корень пакета не считается каталогом хуков: CLI и прочие ресурсы вправе меняться отдельно.
+ */
+async function hasReviewedHookLayout(entry: NpmGraphPackage,
+  profile: ReviewedNpmHookProfile): Promise<boolean> {
+  const files = new Set(Object.keys(profile.files));
+  const directories = new Set<string>();
+
+  for (const file of files) {
+    let directory = path.dirname(file);
+
+    while (directory !== '.') {
+      directories.add(directory);
+      directory = path.dirname(directory);
+    }
+  }
+
+  for (const directory of directories) {
+    const absolute = path.join(entry.directory, directory);
+    const stat = await fs.lstat(absolute).catch(() => null);
+
+    if (!stat?.isDirectory()) {
+      return false;
+    }
+
+    const children = await fs.readdir(absolute, { withFileTypes: true }).catch(() => null);
+
+    if (!children) {
+      return false;
+    }
+
+    for (const child of children) {
+      const relative = path.join(directory, child.name);
+
+      if (!(child.isFile() && files.has(relative))
+        && !(child.isDirectory() && directories.has(relative))) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Точная версия имеет приоритет; её повреждённые хуки не прикрываются другим профилем.
+ * Новая версия допускается только по командам, всем байтам и составу каталогов хуков того же пакета.
  */
 export async function assertReviewedNpmHooks(graph: NpmGraphPackage[]): Promise<void> {
   for (const entry of graph) {
@@ -134,27 +211,28 @@ export async function assertReviewedNpmHooks(graph: NpmGraphPackage[]): Promise<
       continue;
     }
 
-    const profile = reviewed.find((item) => item.name === entry.name
+    const exact = reviewed.find((item) => item.name === entry.name
       && item.reviewedVersion === entry.version);
 
-    if (!profile || Object.keys(profile.lifecycle).length !== Object.keys(entry.scripts).length
-      || Object.entries(profile.lifecycle).some(([key, command]) => entry.scripts[key] !== command)) {
-      throw failure('installer_strategy_unverified');
+    if (exact) {
+      if (!await matchesReviewedNpmHooks(entry, exact)) {
+        throw failure('installer_strategy_unverified');
+      }
+
+      continue;
     }
 
-    for (const [relative, expected] of Object.entries(profile.files)) {
-      const file = path.join(entry.directory, relative);
-      const stat = await fs.lstat(file).catch(() => null);
+    let accepted = false;
 
-      if (!stat?.isFile() || stat.size > 8 * 1024 * 1024) {
-        throw failure('installer_strategy_unverified');
+    for (const profile of reviewed.filter((item) => item.name === entry.name)) {
+      if (await matchesReviewedNpmHooks(entry, profile) && await hasReviewedHookLayout(entry, profile)) {
+        accepted = true;
+        break;
       }
+    }
 
-      const actual = createHash('sha256').update(await fs.readFile(file)).digest('hex');
-
-      if (actual !== expected) {
-        throw failure('installer_strategy_unverified');
-      }
+    if (!accepted) {
+      throw failure('installer_strategy_unverified');
     }
   }
 }
