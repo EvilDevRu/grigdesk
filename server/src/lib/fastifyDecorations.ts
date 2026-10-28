@@ -62,6 +62,8 @@ declare module 'fastify' {
     refreshProvidersUsage?(): Promise<void>;
     // Обработчик живёт вместе с процессом и принимает только поколение своего аккаунта.
     providerUsageSink?(providerId: string): (patch: ProviderUsagePatch) => boolean;
+    // Обслуживание внешнего CLI сохраняет паузу аккаунта и отвергает старые callbacks.
+    invalidateProviderRuntime?(providerId: string, options?: { removed?: boolean }): Promise<boolean>;
     factoryArbitrate?(...args: unknown[]): Promise<unknown>;
     telegramDiscussion?(text: unknown, options?: Record<string, unknown>): Promise<unknown>;
     // Сервис раздела «Проекты»: им пользуется и сам раздел, и ручка /api/profiles.

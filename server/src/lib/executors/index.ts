@@ -194,9 +194,11 @@ import type {
   PreparedExecutorRuntime,
 } from '../executorSettings/types.ts';
 import type { Studio3dProvider } from '../studio3d/provider.ts';
+import type { ExternalCliDefinition } from '../providerInstall/inventoryTypes.ts';
 
 import { createWorkToolRegistry } from './work-tools/index.ts';
 import { executorLoaders } from './registryTable.ts';
+import { externalCliAdapter } from '../providerInstall/externalCliAdapter.ts';
 import { normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts';
 
 // Ответ проверки установки: найден ли бинарь и какую версию он назвал сам.
@@ -322,6 +324,8 @@ export interface ProviderInstallationContext {
 }
 
 export interface ExecutorAdapter {
+  externalCli?: (config: unknown, home: string) => ExternalCliDefinition | null;
+  usagePresentation?: { freshness: boolean; spentLabel: boolean };
   installation?: (config: unknown, context?: ProviderInstallationContext) => ProviderInstallation;
   studio3d?: Studio3dProvider;
   type?: string;
@@ -454,8 +458,9 @@ export async function getProviderAdapters(): Promise<Map<string, ExecutorAdapter
 
     const mod = await loader.load();
     const adapter = mod.default as ExecutorAdapter | undefined;
+
     if (adapter?.id && typeof adapter.probe === 'function' && typeof adapter.auth === 'function') {
-      map.set(adapter.id, adapter);
+      map.set(adapter.id, externalCliAdapter(adapter));
     }
   }
   loadedAdapters = new Map(

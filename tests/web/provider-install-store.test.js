@@ -9,6 +9,167 @@ import { ApiError } from '../../web/src/shared/apiClient.ts';
 
 after(closeClientBrowser);
 
+test('prepare сразу открывает окно, скрывает прошлый итог и блокирует повторные клики', async (t) => {
+  for (const [protocol, operation] of [[1, 'install'], [2, 'install'], [2, 'update'], [2, 'uninstall']]) {
+    await t.test(`${protocol}: ${operation}`, async (scenario) => {
+      const prepare = deferred();
+      const confirm = deferred();
+      const fixture = await clientFixture(scenario, {
+        prepare: () => prepare.promise,
+        confirm: confirm.promise,
+      });
+      const previous = job({
+        status: 'succeeded',
+        outcome: 'updated',
+        finishedAt: 1_700_000_001_000,
+      });
+
+      fixture.providers.providers[0].installation.lifecycleProtocol = protocol;
+      fixture.store.applySnapshot(snapshot(null, 1, { claude: previous }));
+
+      const request = fixture.store.requestInstall(card.id, operation);
+
+      assert.equal(fixture.store.visible, true);
+      assert.equal(fixture.store.selectedRequest.phase, 'preparing');
+      assert.equal(fixture.store.selectedRequest.operation, operation);
+      assert.equal(fixture.store.selectedJob, null);
+      assert.equal(fixture.providers.updating, card.id);
+      assert.equal(fixture.providers.updateResults[card.id], null);
+      assert.equal(fixture.store.busy, true);
+      await fixture.store.requestInstall(card.id, operation);
+      await fixture.store.requestInstall('codex', 'update');
+      assert.equal(fixture.calls.posts.length, 1);
+      assert.equal(fixture.calls.confirmations.length, 0);
+
+      prepare.resolve(preparation({
+        ...(protocol === 2 ? {
+          schemaVersion: 2,
+          installationId: null,
+          method: 'npm',
+          affectedProviderIds: [card.id],
+          fromVersion: '1.0.0',
+          targetVersion: operation === 'uninstall' ? null : '2.0.0',
+          footprint: [],
+          shellChanges: [],
+        } : {}),
+        operation,
+      }));
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(fixture.store.selectedRequest.phase, 'confirming');
+      assert.equal(fixture.store.visible, true);
+      assert.equal(fixture.calls.confirmations.length, 1);
+      await fixture.store.requestInstall(card.id, operation);
+      assert.equal(fixture.calls.posts.length, 1);
+      confirm.resolve(false);
+      await request;
+      assert.equal(fixture.store.selectedRequest, null);
+      assert.equal(fixture.store.visible, false);
+      assert.equal(fixture.store.busy, false);
+      assert.equal(fixture.calls.posts.length, 1);
+    });
+  }
+});
+
+test('известные коды сохраняют message сервера в отказах и снимках', async (t) => {
+  const message = 'Не подтверждена версия конкретного файла /fixture/bin/cli';
+  const fixture = await clientFixture(t, {
+    prepare: async () => {
+      throw new ApiError('Общая ошибка', 409, { error: 'version_unverified', message });
+    },
+  });
+
+  await fixture.store.requestInstall(card.id, 'update');
+  assert.equal(fixture.store.error, message);
+  assert.equal(fixture.store.selectedFailure.message, message);
+  assert.equal(fixture.providers.updateResults[card.id].text, message);
+
+  const failed = job({
+    status: 'failed',
+    error: { code: 'version_unverified', message },
+    finishedAt: 1_700_000_001_000,
+    warnings: [{ code: 'shell_cleanup_conflict', message: 'Файл оболочки изменён: /fixture/.bashrc' }],
+  });
+  const second = await clientFixture(t);
+
+  second.store.show(card.id);
+  second.store.applySnapshot(snapshot(null, 1, { claude: failed }));
+
+  for (const locale of ['ru', 'en']) {
+    second.module.setUiLocale(locale);
+    assert.ok(second.providers.updateResults[card.id].text.includes(message));
+    assert.ok(second.providers.updateResults[card.id].text.includes(failed.warnings[0].message));
+  }
+});
+
+test('известный код без message использует переводимый запасной текст', async (t) => {
+  const fixture = await clientFixture(t, {
+    prepare: async () => {
+      throw new ApiError('version_unverified', 409, { error: 'version_unverified' });
+    },
+  });
+
+  await fixture.store.requestInstall(card.id, 'update');
+  assert.match(fixture.store.error, /верси/iu);
+  fixture.module.setUiLocale('en');
+  assert.match(fixture.store.error, /version/iu);
+});
+
+test('native отказ по правам показывает точную причину сервера при любом языке UI', async (t) => {
+  const message = 'Каталог программы доступен чужой записи: проверьте права на /home/fixture/.kimi-code/bin';
+  const { store, providers, calls, module } = await clientFixture(t, {
+    prepare: async () => {
+      throw new ApiError(message, 409, { error: 'native_ownership_unverified', message });
+    },
+  });
+
+  providers.providers[0].installation.lifecycleProtocol = 2;
+  await store.requestInstall(card.id, 'uninstall');
+
+  for (const locale of ['ru', 'en']) {
+    module.setUiLocale(locale);
+    assert.equal(store.error, message);
+    assert.equal(store.selectedFailure.message, message);
+    assert.equal(providers.updateResults[card.id].text, message);
+  }
+
+  assert.equal(calls.posts.some((post) => post.url.endsWith('/start')), false);
+  assert.equal(calls.confirmations.length, 0);
+});
+
+test('installation_conflict сохраняет причину сервера, включая реальный конфликт имени', async (t) => {
+  let message = 'Изменились пути выбранной программы';
+  const { store, providers } = await clientFixture(t, {
+    prepare: async () => {
+      throw new ApiError(message, 409, { error: 'installation_conflict', message });
+    },
+  });
+
+  providers.providers[0].installation.lifecycleProtocol = 2;
+  await store.requestInstall(card.id, 'update');
+  assert.equal(store.error, message);
+
+  message = 'Имя команды занято другой установкой';
+  await store.requestInstall(card.id, 'update');
+  assert.equal(store.error, message);
+});
+
+test('конфликт выбора CLI не подменяется сообщением о занятом имени команды', async (t) => {
+  const { store, providers, calls } = await clientFixture(t, {
+    prepare: async () => {
+      throw new ApiError('GrigDesk и терминал выбирают разные копии', 409, {
+        error: 'cli_selection_conflict',
+        message: 'GrigDesk и терминал выбирают разные копии',
+      });
+    },
+  });
+
+  providers.providers[0].installation.lifecycleProtocol = 2;
+  await store.requestInstall(card.id, 'install');
+  assert.equal(store.error, 'GrigDesk и терминал выбирают разные копии');
+  assert.doesNotMatch(store.error, /Имя команды занято/u);
+  assert.equal(calls.posts.some((post) => post.url.endsWith('/start')), false);
+});
+
 test('отмена подтверждения не отправляет старт', async (t) => {
   const { store, calls } = await clientFixture(t, { confirm: false });
 
@@ -18,6 +179,57 @@ test('отмена подтверждения не отправляет стар
   assert.ok(JSON.stringify(calls.confirmations[0]).includes(card.installation.updateCommand));
   assert.equal(calls.posts.filter((post) => post.url.endsWith('/prepare')).length, 1);
   assert.equal(calls.posts.filter((post) => post.url.endsWith('/start')).length, 0);
+});
+
+test('удаление показывает опасное подтверждение и запускается только после согласия', async (t) => {
+  const options = {
+    confirm: false,
+    prepare: async () => preparation({
+      schemaVersion: 2,
+      operation: 'uninstall',
+      affectedProviderIds: ['claude'],
+      installationId: null,
+      method: 'npm',
+      fromVersion: '1.0.0',
+      targetVersion: null,
+      command: 'npm uninstall -g fixture-cli',
+      footprint: [{
+        path: '/home/fixture/.local/lib/node_modules/fixture-cli',
+        action: 'remove',
+        reason: 'Выбранная программа',
+      }],
+      shellChanges: [],
+    }),
+    post: async () => ({ ...snapshot(null, 1), schemaVersion: 2 }),
+  };
+  const { store, providers, calls } = await clientFixture(t, options);
+
+  providers.providers[0].installation.lifecycleProtocol = 2;
+  await store.requestInstall(card.id, 'uninstall');
+
+  const confirmation = calls.confirmations[0];
+
+  assert.equal(calls.confirmations.length, 1);
+  assert.equal(confirmation.details.danger, true);
+  assert.equal(confirmation.details.icon, 'trash');
+  assert.match(confirmation.details.title, /Удалить программу.*Claude фикстуры/u);
+  assert.equal(confirmation.details.code, undefined);
+  assert.match(confirmation.details.details.text, /npm uninstall -g fixture-cli/u);
+  assert.match(confirmation.text, /1\.0\.0/u);
+  assert.doesNotMatch(confirmation.text, /\/home\/fixture/u);
+  assert.match(confirmation.details.details.text, /\/home\/fixture/u);
+  assert.match(confirmation.text, /Авторизация, настройки и история сохранятся/u);
+  assert.equal(calls.posts.filter((post) => post.url.endsWith('/start')).length, 0);
+
+  options.confirm = true;
+  await store.requestInstall(card.id, 'uninstall');
+
+  const starts = calls.posts.filter((post) => post.url.endsWith('/start'));
+
+  assert.equal(calls.confirmations.length, 2);
+  assert.equal(starts.length, 1);
+  assert.equal(starts[0].url, '/api/providers/installations/v2/claude/uninstall/start');
+  assert.deepEqual(starts[0].body, { preparationToken: 'fixture-preparation-token' });
 });
 
 test('подтверждение показывает каталог и файлы оболочки без текста блока', async (t) => {
@@ -30,7 +242,7 @@ test('подтверждение показывает каталог и файл
   assert.match(shown, /Каталог установки: \/home\/fixture\/.local/u);
   assert.match(shown, /Каталог добавится в PATH терминала: \.bashrc/u);
   assert.ok(!shown.includes('GrigDesk external CLI PATH'), 'текст блока показан человеку');
-  assert.equal(calls.confirmations[0].details.code, card.installation.updateCommand);
+  assert.equal(calls.confirmations[0].details.details.text.split('\n')[0], card.installation.updateCommand);
 });
 
 test('202 не завершает установку', async (t) => {
@@ -61,7 +273,8 @@ test('prepare предшествует подтверждению и перед�
     '/api/providers/claude/install/start',
   ]);
   assert.equal(calls.confirmations.length, 1);
-  assert.equal(calls.confirmations[0].details.code.startsWith(card.installation.installCommand), true);
+  assert.equal(calls.confirmations[0].details.details.text
+    .startsWith(card.installation.installCommand), true);
 });
 
 test('изменение подготовки показывается как ошибка и не запускает старт', async (t) => {
@@ -263,13 +476,9 @@ test('models warning сохраняет смену версии без обещ�
     assert.equal(result.type, 'ok');
     assert.equal(result.changed, true);
     assert.match(result.text, /1\.0\.0.*2\.0\.0/u);
-    assert.match(result.text, locale === 'ru' ? /модел.*не обнов/iu
-      : /model.*(?:not|fail|unavailable)|(?:not|could|fail|unable).*model/iu);
+    assert.ok(result.text.includes(final.warnings[0].message));
     assert.doesNotMatch(result.text, /Список моделей пересобран|model list (?:was )?rebuilt/iu);
 
-    if (locale === 'en') {
-      assert.doesNotMatch(result.text, /[А-Яа-яЁё]/u);
-    }
   }
 });
 
@@ -371,7 +580,7 @@ test('старый сервер без маршрута подготовки п�
 
   assert.equal(calls.posts.filter((post) => post.url.endsWith('/start')).length, 0);
   assert.equal(providers.updateResults.claude?.type, 'err');
-  assert.match(providers.updateResults.claude.text, /Сервер ещё не обновлён/u);
+  assert.match(providers.updateResults.claude.text, /Перезапустите GrigDesk/u);
   assert.match(store.error, /Перезапустите GrigDesk/u);
 });
 
@@ -406,4 +615,59 @@ test('первое чтение старого job не отменяет отк�
   assert.match(fixture.store.selectedFailure.message, /Подготовка недействительна/u);
   assert.equal(fixture.providers.updateResults.claude.type, 'err');
   assert.equal(fixture.calls.posts.filter((post) => post.url.endsWith('/start')).length, 0);
+});
+
+test('v2 удаление не превращается в update и поздний v1 не откатывает состояние', async (t) => {
+  const { store, providers } = await clientFixture(t);
+
+  providers.providers[0].installation.lifecycleProtocol = 2;
+
+  const active = {
+    ...job(),
+    operation: 'uninstall',
+    stage: 'backup',
+    affectedProviderIds: ['claude'],
+    targets: [{
+      providerId: 'claude',
+      installationId: null,
+      phase: 'backup',
+      outcome: null,
+      error: null,
+    }],
+  };
+
+  assert.equal(store.applySnapshot({ ...snapshot(active, 1), schemaVersion: 2 }), true);
+  assert.equal(store.snapshot.active.operation, 'uninstall');
+  assert.equal(store.applySnapshot(snapshot(job(), 900)), false);
+  assert.equal(store.snapshot.active.operation, 'uninstall');
+});
+
+test('финал удаления перечитывает карточки после пропущенного active и не повторяет refresh', async (t) => {
+  const fixture = await clientFixture(t);
+
+  fixture.providers.providers[0].installation.lifecycleProtocol = 2;
+  fixture.store.applySnapshot({ ...snapshot(null, 1), schemaVersion: 2 });
+
+  const final = {
+    ...job(),
+    operation: 'uninstall',
+    stage: 'cleanup',
+    status: 'succeeded',
+    outcome: 'uninstalled',
+    finishedAt: 1_700_000_001_000,
+    affectedProviderIds: ['claude'],
+    targets: [{
+      providerId: 'claude',
+      installationId: null,
+      phase: 'cleanup',
+      outcome: 'uninstalled',
+      error: null,
+    }],
+  };
+  const response = { ...snapshot(null, 3, { claude: final }), schemaVersion: 2 };
+
+  assert.equal(fixture.store.applySnapshot(response), true);
+  fixture.store.applySnapshot(response);
+  assert.equal(fixture.calls.gets.filter((url) => url === '/api/providers?refresh=1').length, 1);
+  assert.match(fixture.providers.updateResults.claude.text, /удалена/u);
 });

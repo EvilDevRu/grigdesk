@@ -1,4 +1,6 @@
 import { isRecord } from '../lib/objects.ts';
+import { isExternalCliInventory } from './providerInstallationInventory.ts';
+import type { ExternalCliInventory } from './providerInstallationInventory.ts';
 
 export type ProviderInstallOperation = 'install' | 'update';
 export type ProviderInstallStage = 'download-install' | 'version' | 'terminal' | 'models';
@@ -57,6 +59,11 @@ export interface ProviderInstallPreparation {
 }
 
 export interface ProviderInstallationMetadata {
+  lifecycleProtocol?: 2;
+  canReinstall?: boolean;
+  canUninstall?: boolean;
+  inventory?: ExternalCliInventory;
+  manualInstallCommand?: string;
   installCommand: string;
   updateCommand: string | null;
   fallbackInstallCommand: string;
@@ -186,7 +193,12 @@ export function isProviderInstallationMetadata(value: unknown): value is Provide
       .every((key) => typeof value[key] === 'string')
     && ['updateCommand', 'fallbackUpdateCommand']
       .every((key) => value[key] === null || typeof value[key] === 'string')
-    && typeof value.canInstall === 'boolean' && typeof value.canUpdate === 'boolean';
+    && typeof value.canInstall === 'boolean' && typeof value.canUpdate === 'boolean'
+    && (value.manualInstallCommand === undefined || typeof value.manualInstallCommand === 'string')
+    && (value.inventory === undefined || isExternalCliInventory(value.inventory))
+    && (value.lifecycleProtocol === undefined || value.lifecycleProtocol === 2)
+    && ['canReinstall', 'canUninstall'].every((key) => value[key] === undefined
+      || typeof value[key] === 'boolean');
 }
 
 /**

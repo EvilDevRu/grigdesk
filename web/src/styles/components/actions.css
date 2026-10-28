@@ -1376,6 +1376,7 @@
    кнопка ростом с ручку панели перевешивала само имя, ради которого шапку и сократили. */
 .ui-icon-button[data-context='topbar-popover-settings'],
 .ui-icon-button[data-context='topbar-popover-refresh'],
+.ui-icon-button[data-context='topbar-popover-result'],
 .ui-icon-button[data-context='topbar-popover-update'] {
   width: 22px;
   height: 22px;

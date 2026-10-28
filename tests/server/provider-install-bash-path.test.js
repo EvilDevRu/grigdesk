@@ -35,6 +35,8 @@ async function fixture(t, options = {}) {
     await fs.mkdir(directory, { recursive: true });
   }
 
+  // Системный /etc/bash.bashrc печатает sudo-hint, если HOME не помечен.
+  await fs.writeFile(path.join(home, '.sudo_as_admin_successful'), '');
   await fs.symlink(process.execPath, path.join(external, 'node'));
 
   return {

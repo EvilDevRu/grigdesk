@@ -1162,9 +1162,9 @@
 }
 [data-ui-settings-tabs] > .ui-tab {
   flex: 0 1 auto;
+  height: auto;
   min-height: 36px;
   padding: 8px 10px;
-  margin-bottom: -1px;
   border: 0;
   border-bottom: 2px solid transparent;
   border-radius: 0;

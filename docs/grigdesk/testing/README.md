@@ -1,14 +1,19 @@
 # Тесты и проверка
 
+
+
 - [Гейты DeepSeek: unit, SEA, source candidate и host parity](deepseek-test-gates.md)
 
 Веб-тесты на happy-dom, Playwright и ловушки, из-за которых тест врёт.
+
+- [Подтверждение установки: прежняя всплывашка тоже имеет role=dialog](provider-confirmation-target.md)
 
 Читай перед правкой: `tests`.
 
 - [Проверки единого приложения и границы автоматической приёмки](unified-client-checks.md)
 
 ## Грабли
+
 
 - [Автоподготовка legacy fixture DeepSeek: отдельный ABI-кэш, lock и восстановление](deepseek-legacy-preflight.md)
 

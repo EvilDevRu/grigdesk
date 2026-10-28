@@ -3,6 +3,7 @@ import { type LocaleSource, localeTranslator, translator } from '../../../../sha
 import { translate as t } from '../../../../shared/i18n/catalogs.ts';
 import { localizeUsageAmount, localizeUsageResourceText } from './usageResourceText.ts';
 import { localizeProviderAction } from './providerLocale.ts';
+import { providerUsageFreshness } from '../../../../shared/chat/providerUsageFreshness.ts';
 
 import type { UsageEntry, UsageBar, UsageResource } from './contracts.ts';
 
@@ -11,6 +12,7 @@ interface ProviderView {
   statusPage?: string;
   vendor?: string;
   name?: string;
+  usagePresentation?: { freshness: boolean; spentLabel: boolean };
 }
 
 type ResourceConfirmation = NonNullable<import('./contracts.ts').UsageControl['confirm']>;
@@ -245,6 +247,7 @@ export function providerStatusHint(provider: ProviderView = {}, usage: UsageEntr
 // даже пока данные грузятся или CLI не предоставляет API потребления.
 export function providerUsageView(entry: UsageEntry | null | undefined, provider: ProviderView = {},
   locale: LocaleSource = 'ru',
+  context: { now?: number; deliveryStale?: boolean } = {},
 ) {
   const t = localeTranslator(locale);
 
@@ -256,6 +259,7 @@ export function providerUsageView(entry: UsageEntry | null | undefined, provider
       message: t("core.limitDataHasNotBeenReceivedYet"),
       tone: 'muted',
       action: null,
+      measuredAt: null,
     };
   }
 
@@ -274,6 +278,8 @@ export function providerUsageView(entry: UsageEntry | null | undefined, provider
 
   return {
     ...entry,
+    ...(provider.usagePresentation?.freshness ? providerUsageFreshness(entry,
+      context.now ?? Date.now(), context.deliveryStale, true) : {}),
     bars: withGroupBreaks((Array.isArray(entry.bars) ? entry.bars : [])
       .map((bar) => localizeUsageBar(provider.id, bar, locale))),
     resources: (Array.isArray(entry.resources) ? entry.resources : [])
@@ -294,7 +300,10 @@ export function localizeUsageBar<T extends UsageBar>(
 ): T {
   const id = typeof locale === 'string' ? locale : locale.value;
   const key = String(bar.key || '');
+  const kimiWindow = providerId === 'kimi' && ['kimi:monthTotal', 'kimi:1:5:hour', 'kimi:0:1:week']
+    .includes(key);
   const owned = providerId === 'codex' || providerId === 'glm' && key.startsWith('zai:')
+    || kimiWindow
     || providerId === 'claude' && ['session', 'weekly_all', 'weekly_scoped']
       .some((kind) => key.startsWith(kind));
 
@@ -303,8 +312,10 @@ export function localizeUsageBar<T extends UsageBar>(
   }
 
   const t = localeTranslator(locale);
-  const minutes = bar.windowMinutes;
-  const label = key === 'zai:mcp' ? t('core.usageMonthlyMcp')
+  const minutes = bar.windowMinutes ?? (kimiWindow && key.endsWith(':5:hour') ? 300
+    : kimiWindow && key.endsWith(':1:week') ? 10080 : undefined);
+  const label = kimiWindow && key === 'kimi:monthTotal' ? t('core.usageMonth')
+    : key === 'zai:mcp' ? t('core.usageMonthlyMcp')
     : minutes === 300 ? t('core.usageSession') : minutes === 10080 ? t('core.usageWeek')
     : Number.isFinite(minutes) && minutes! > 0 ? t('core.usageMinutes', { count: minutes! })
       : providerId === 'glm' ? t('core.usageTokenWindow') : t('core.limits');

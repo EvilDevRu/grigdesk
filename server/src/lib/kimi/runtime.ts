@@ -1,9 +1,9 @@
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
-import { execFile } from 'node:child_process';
+import { execFile } from '../providerInstall/externalCliProcess.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn } from '../providerInstall/externalCliProcess.ts';
 
 import type { ChildProcess } from 'node:child_process';
 

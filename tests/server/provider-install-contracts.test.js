@@ -6,7 +6,42 @@ import {
   isProviderInstallJob,
   isProviderInstallPreparation,
   isProviderInstallSnapshot,
+  isProviderInstallationMetadata,
 } from '../../shared/chat/providerInstallContracts.ts';
+
+test('optional inventory не пропускает повреждённый снимок и сохраняет старый metadata DTO', () => {
+  const metadata = {
+    installCommand: 'fixture install',
+    updateCommand: null,
+    fallbackInstallCommand: '',
+    fallbackUpdateCommand: null,
+    loginCommand: 'fixture login',
+    canInstall: true,
+    canUpdate: false,
+  };
+  const inventory = {
+    installations: [],
+    selectedId: null,
+    terminalId: null,
+    conflict: false,
+  };
+
+  assert.equal(isProviderInstallationMetadata(metadata), true);
+  assert.equal(isProviderInstallationMetadata({
+    ...metadata, manualInstallCommand: 'official installer',
+  }), true);
+  assert.equal(isProviderInstallationMetadata({ ...metadata, manualInstallCommand: ['unexpected'] }), false);
+  assert.equal(isProviderInstallationMetadata({ ...metadata, inventory }), true);
+  assert.equal(isProviderInstallationMetadata({
+    ...metadata, inventory: { ...inventory, conflict: 'no' },
+  }), false);
+  assert.equal(isProviderInstallationMetadata({
+    ...metadata, inventory: { ...inventory, installations: {} },
+  }), false);
+  assert.equal(isProviderInstallationMetadata({
+    ...metadata, inventory: { ...inventory, selectedId: 'absent' },
+  }), false);
+});
 
 /**
  * Канонический job фикстуры: только известные поля старого контракта.

@@ -1,13 +1,33 @@
 # Чат и исполнители
 
-- [Установка CLI: preview-подготовка, token старта, фаза терминала и восстановление](provider-cli-installation.md)
+
+
+
+
+- [Удаление CLI: снятие привязки, оставшиеся копии и обновление карточки](provider-uninstall-state.md)
+- [Оставшаяся копия после удаления npm: версии и обычные действия](provider-native-after-uninstall.md)
+
+- [Копия официального установщика: своя группа при 0775, причины отказов, удаление и восстановление](provider-native-lifecycle.md)
+- [Окно обслуживания: немедленная проверка подготовки, подтверждение и отказ](provider-lifecycle-preparation.md)
+
+- [Две формы Bash: ссылки на один CLI не блокируют переустановку](provider-shell-symlink-identity.md)
+
+- [Опись внешних CLI, успешное время замера и границы прогноза](external-cli-diagnostics.md)
+- [Проверка лимитов Kimi сохраняет путь к пользовательскому Node.js](kimi-usage-node-path.md)
+- [Окружение запуска и источники лимитов всех встроенных исполнителей](provider-runtime-environments.md)
+- [Lifecycle внешних CLI: четыре операции, PTY/factory и восстановление](external-cli-lifecycle.md)
+- [Переустановка сохраняет старый prefix вместо текущего каталога пользовательского npm](provider-reinstall-prefix.md)
+- [Установка после удаления: отсутствующая привязка и оставшаяся npm-копия](provider-install-stale-binding.md)
+- [Свежая версия CLI не проходит проверку installer-хуков](provider-install-hooks-review-gate.md)
+
+- [Установка CLI: краткое подтверждение, подробности, token и восстановление](provider-cli-installation.md)
 - [Внешний Node/npm и пользовательский prefix вместо папки данных](provider-install-npm.md)
 - [Проверка и подключение npm-копии, перенос прежней bin-ссылки](provider-install-npm-binding.md)
 - [Проверка нативного Linux ELF и JavaScript в npm-пакетах исполнителей](provider-install-native-bin.md)
 - [Настройка Bash PATH: независимый probe, управляемый блок и честный terminal](provider-install-shell-path.md)
-- [Вывод установки, обновление реестра и перевод собственных причин](provider-install-output-and-messages.md)
+- [Вывод установки, обновление реестра и исходные сообщения причин](provider-install-output-and-messages.md)
 - [Отказ подготовки установки не подменяется прошлым успешным результатом](provider-install-prepare-failure.md)
-- [Вывод команды скрыт под «Детали» при любом исходе установки](provider-install-details.md)
+- [Команда и вывод скрыты под «Детали», подтверждение — под «Подробности»](provider-install-details.md)
 - [Постоянная высота окна установки, прокрутка деталей и доступность действий](provider-install-height.md)
 - [Повтор установки и обновления CLI при плохой сети: бюджет, паузы и остановка](provider-install-network-retry.md)
 - [Кнопка «Повторить» после отказа установки или обновления CLI](provider-install-manual-retry.md)
@@ -130,6 +150,7 @@
 ### Исполнители и модели
 
 - [Видимость доплаты Kimi/Codex, пустые ответы и слияние снимков](extra-usage-visibility.md)
+- [Два формата квот Kimi: окна, календарный месяц, разбивка кода и кошелёк](kimi-quota-format.md)
 
 - [Gemini: отдельные точки подключения чата и Factory, offline-защита и внешние контракты](gemini-integration-boundaries.md)
 

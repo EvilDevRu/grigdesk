@@ -4,6 +4,9 @@
 // ПОДКЛЮЧЕНИЕ НОВОГО ИИ — МОДУЛЬНОЕ: один файл в server/src/lib/executors/ (контракт там),
 // этот модуль ничего не знает про конкретных вендоров.
 import { resolveWorkdirCapability } from '../../lib/chat/workdir.ts';
+import os from 'node:os';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getProviderAdapters, isChatExecutor, supportsScopedWorkspace } from '../../lib/executors/index.ts';
@@ -11,7 +14,7 @@ import { normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts'
 import type { ExecutorAdapter } from '../../lib/executors/index.ts';
 import { getModelsRegistry } from '../../lib/modelsRegistry.ts';
 import { parseInTurnCapability } from '../../../../shared/chat/chatInTurnContracts.ts';
-import { isOutdated } from '../../lib/executors/_npmLatest.ts';
+import { isOutdated, parseVersion } from '../../lib/executors/_npmLatest.ts';
 import { applyProviderSetting, resolveProviderSettings } from '../../lib/providerSettings.ts';
 import { credentialViews, declaredCredentials, envFileNames } from '../../lib/executorCredentials.ts';
 import {
@@ -32,6 +35,12 @@ import { registerProviderCredentials } from './credentials.ts';
 import { registerProviderInstallations } from './installations.ts';
 import { ProviderInstallService, type ProviderInstallOptions } from '../../lib/providerInstall/service.ts';
 import { resolveProviderInstallation } from '../../lib/providerInstall/commands.ts';
+import { discoverExternalCli } from '../../lib/providerInstall/inventory.ts';
+import { runtimeInstallationRoot, runtimeRoot } from '../../lib/runtimePaths.ts';
+import { isRecord } from '../../../../shared/lib/objects.ts';
+import { artifactsPath } from '../../../../shared/runtime/dataHome.ts';
+import { resolveUserCliEnvironment } from '../../lib/providerInstall/userCliEnvironment.ts';
+import type { ExternalCliInventory } from '../../../../shared/chat/providerInstallationInventory.ts';
 
 // Серверный config в объёме, который читает реестр. Полная его форма объявлена
 // в config.ts; адаптеры получают его целиком и разбирают сами.
@@ -205,8 +214,65 @@ async function providersModule(
       const { ok, version } = probe;
       const distribution = ex.distribution?.(config, probe) || null;
       const managed = distribution?.managed === true;
-      const installation = managed ? null : await resolveProviderInstallation(ex, config,
+      let installation = managed ? null : await resolveProviderInstallation(ex, config,
         serviceEnv, opts.providerInstall?.runtimePaths);
+      const home = serviceEnv.HOME || os.homedir();
+      const external = managed ? null : ex.externalCli?.(config, home);
+      let inventory: ExternalCliInventory | undefined;
+
+      if (external) {
+        let env: NodeJS.ProcessEnv = { ...serviceEnv, PATH: '' };
+        let environment: ExternalCliInventory['environment'];
+
+        try {
+          const shell = await resolveUserCliEnvironment({
+            env: serviceEnv,
+            cliName: external.binName,
+            scratch: path.join(opts.providerInstall?.artifactsDir
+              ?? artifactsPath({ env: serviceEnv, home }), 'provider-install-probes'),
+          });
+
+          env = shell.env;
+          environment = { state: 'ready' };
+        } catch {
+          environment = { state: 'unavailable', reason: 'shell_probe_failed' };
+        }
+
+        const legacyRoots = [
+          path.join(opts.providerInstall?.roots?.dataHome
+            ?? path.join(home, '.grigdesk'), 'state', 'npm-global'),
+          opts.providerInstall?.roots?.installationRoot ?? runtimeInstallationRoot(),
+          opts.providerInstall?.roots?.runtimeRoot ?? runtimeRoot(),
+        ];
+
+        inventory = {
+          ...await discoverExternalCli({
+            providerId: ex.id,
+            definition: external,
+            configuredBin: String(ex.bin(config)),
+            env,
+            home,
+            legacyRoots,
+          }),
+          environment,
+        };
+      }
+
+      const selectedCopy = inventory?.installations.find((entry) =>
+        entry.installationId === inventory.selectedId);
+
+      if (selectedCopy?.source === 'native') {
+        const declared = ex.installation?.(config);
+
+        installation = declared ? { ...declared, update: declared.update ? declared.install : null }
+          : installation;
+        selectedCopy.version = parseVersion(version)?.join('.') ?? null;
+      }
+
+      const canServiceCopy = !external || selectedCopy?.source === 'npm'
+        || selectedCopy?.source === 'native';
+      const canUpdate = !!ok && !!installation?.update && canServiceCopy;
+
       // Режимы прав спрашиваем у самого CLI (как и эффорты) — список не хардкодим.
       let modes = null;
 
@@ -254,19 +320,29 @@ async function providersModule(
         // Куда смотреть при сбое вендора. Какой домен «свой» — знает только адаптер,
         // поэтому Vue домены не перечисляет и по вендорам не ветвится.
         statusPage: ex.statusPage || null,
+        ...(ex.usagePresentation ? { usagePresentation: ex.usagePresentation } : {}),
         // Установка и login могут быть разными сценариями. Старые адаптеры пока
         // объявляют одной строкой install, поэтому для них сохраняем прежнее поведение.
         setupCommand: managed ? null : ok ? (ex.login || ex.install || null) : (ex.install || null),
-        canUpdate: !managed && (installation ? !!installation.update : !!ex.updateCmd),
+        canUpdate: !managed && (external ? canUpdate : installation ? !!installation.update : !!ex.updateCmd),
         ...(installation ? {
           installation: {
+            ...(inventory ? { inventory } : {}),
+            ...(external ? {
+              lifecycleProtocol: 2,
+              canReinstall: inventory?.installations.some((entry) =>
+                entry.installationId === inventory.selectedId
+                  && ['npm', 'native'].includes(entry.source) && !!entry.version),
+              canUninstall: inventory?.installations.some((entry) =>
+                entry.installationId === inventory.selectedId && ['npm', 'native'].includes(entry.source)),
+            } : {}),
             installCommand: installation.install.command,
             updateCommand: installation.update?.command || null,
             fallbackInstallCommand: installation.install.fallbackCommand,
             fallbackUpdateCommand: installation.update?.fallbackCommand || null,
             loginCommand: installation.loginCommand,
-            canInstall: !ok,
-            canUpdate: !!ok && !!installation.update,
+            canInstall: !ok && (!selectedCopy || selectedCopy.state === 'missing'),
+            canUpdate,
           },
         } : {}),
         // Сообщает ли исполнитель о своих MCP-серверах. Сам список сюда НЕ кладём:
@@ -364,6 +440,8 @@ async function providersModule(
   const usagePrevious = new Map<string, ProviderUsage>();
   const usageGenerations = new Map<string, number>();
   const liveUsage = new Map<string, LiveUsage>();
+  const usageBootId = randomUUID();
+  const removedRuntimes = new Set<string>();
   let usageProviderIds: string[] = [];
 
   /**
@@ -484,7 +562,7 @@ async function providersModule(
       // Идёт пауза после «стучитесь реже»: отдаём прошлый снимок как есть. Он уже несёт
       // и слова вендора, и последние полосы — новых мы честно не знаем, а сходить за
       // ними значит повторить ровно то, о чём нас попросили не делать.
-      if (held && held.until > checkedAt && previous) {
+      if ((held && held.until > checkedAt || removedRuntimes.has(ex.id)) && previous) {
         return [ex.id, previous] as const;
       }
 
@@ -496,10 +574,18 @@ async function providersModule(
       } else {
         try {
           startSeq = liveUsage.get(ex.id)?.seq ?? 0;
-          current = normalizeProviderUsage(await ex.usage(config as never, deps as never), {
+
+          const response: unknown = await ex.usage(config as never, deps as never);
+
+          current = normalizeProviderUsage(response, {
             providerName: String(ex.name),
             checkedAt,
           });
+
+          if (ex.usagePresentation?.freshness && isRecord(response)
+            && typeof response.usageSchema === 'string' && response.usageSchema.length <= 128) {
+            current.usageSchema = response.usageSchema;
+          }
         } catch {
           if (context.isCurrent()) {
             fastify.log.warn({ provider: ex.id }, 'usage исполнителя не получен');
@@ -529,6 +615,16 @@ async function providersModule(
         previous,
         markFreshBuckets(ex.id, current),
       ) as ProviderUsage);
+
+      if (ex.usagePresentation?.freshness) {
+        const succeeded = current.state === 'ok' && !current.stale
+          && (current.bars.length > 0 || current.resources.length > 0);
+
+        merged.lastSuccessfulAt = succeeded ? current.dataCheckedAt : previous?.lastSuccessfulAt ?? null;
+        merged.runtimeGeneration = `${usageBootId}:${generation}`;
+        merged.pollIntervalMs = usageTickMs;
+        merged.usageSchema = current.usageSchema ?? previous?.usageSchema ?? '1';
+      }
 
       if (!VENDOR_FAULT_USAGE_STATES.has(merged.state) || !ex.statusPage) {
         usagePrevious.set(ex.id, merged);
@@ -560,6 +656,61 @@ async function providersModule(
 
     return Object.fromEntries(entries);
   }, { maxAgeMs: usageTickMs });
+
+  /**
+   * Смена файлов CLI не меняет аккаунтный Retry-After и не запускает внеочередной poll.
+   * Сохранённые цифры становятся stale; старое поколение HTTP/live больше не публикуется.
+   */
+  async function invalidateProviderRuntime(id: string, options: { removed?: boolean } = {}) {
+    const adapter = (await adaptersOf()).get(id);
+
+    registryCache.clear();
+
+    if (!adapter?.usagePresentation?.freshness) {
+      return false;
+    }
+
+    const generation = (usageGenerations.get(id) ?? 0) + 1;
+    const previous = usagePrevious.get(id);
+
+    usageGenerations.set(id, generation);
+    liveUsage.delete(id);
+
+    if (options.removed) {
+      removedRuntimes.add(id);
+    } else {
+      removedRuntimes.delete(id);
+    }
+
+    const retained = previous || normalizeProviderUsage({ state: 'unavailable' });
+
+    usagePrevious.set(id, {
+      ...retained,
+      ...(options.removed ? {
+        state: 'unavailable',
+        message: 'Программа исполнителя удалена. Установи CLI для проверки лимитов.',
+        bars: [],
+        resources: [],
+      } : {}),
+      stale: true,
+      lastSuccessfulAt: previous?.lastSuccessfulAt ?? null,
+      runtimeGeneration: `${usageBootId}:${generation}`,
+      pollIntervalMs: usageTickMs,
+    });
+
+    if (usageProviderIds.every((providerId) => usagePrevious.has(providerId))) {
+      usageCache.replace(Object.fromEntries(usagePrevious));
+      fastify.sse?.broadcast?.('providers-usage', {
+        usage: projectUsageMap(Object.fromEntries(usagePrevious)),
+      });
+    } else {
+      usageCache.clear();
+    }
+
+    return true;
+  }
+
+  fastify.decorate('invalidateProviderRuntime', invalidateProviderRuntime);
 
   /**
    * Проверяет актуальность непосредственно перед выходом HTTP/SSE.
@@ -847,6 +998,10 @@ async function providersModule(
       await checkUpdates().catch(() => null);
     },
     broadcast: (snapshot) => fastify.sse?.broadcast?.('provider-install', snapshot),
+    broadcastLifecycle: (snapshot) => fastify.sse?.broadcast?.('provider-install-v2', snapshot),
+    invalidateRuntime: async (id, options) => {
+      await invalidateProviderRuntime(id, options);
+    },
   });
 
   registerProviderInstallations(fastify, installationService);

@@ -12,6 +12,7 @@ export interface UsageSample {
   at: number;
   pct: number;
   resetsAt: number | null;
+  segment?: string;
 }
 
 // Ряд замеров одной полосы одного исполнителя. Длина окна приходит с полосой; у старых
@@ -21,6 +22,7 @@ export interface BarSeries {
   barKey: string;
   label: string;
   windowMinutes?: number | null;
+  suspended?: boolean;
   samples: UsageSample[];
 }
 
@@ -38,12 +40,18 @@ interface UsageBarLike {
   pct?: unknown;
   resetsAt?: unknown;
   windowMinutes?: unknown;
+  windowKind?: unknown;
 }
 
 // Снимок лимитов исполнителя — ровно те поля общего контракта, что нужны ряду.
 interface ProviderUsageLike {
   bars?: unknown;
   dataCheckedAt?: unknown;
+  lastSuccessfulAt?: unknown;
+  runtimeGeneration?: unknown;
+  usageSchema?: unknown;
+  state?: unknown;
+  stale?: unknown;
 }
 
 export interface IngestOptions {
@@ -108,6 +116,7 @@ interface ParsedBar {
   label: string;
   windowMinutes: number | null;
   sample: UsageSample;
+  calendarMonth: boolean;
 }
 
 function sampleOf(bar: unknown, checkedAt: number): ParsedBar | null {
@@ -125,6 +134,7 @@ function sampleOf(bar: unknown, checkedAt: number): ParsedBar | null {
     key,
     label: String(raw.label || key),
     windowMinutes: Number.isFinite(windowMinutes) && windowMinutes > 0 ? windowMinutes : null,
+    calendarMonth: raw.windowKind === 'calendar-month',
     sample: {
       at: checkedAt,
       pct: Math.max(0, Math.min(100, pct)),
@@ -183,13 +193,35 @@ export function ingestUsage(
   for (const [providerId, entry] of Object.entries(usage)) {
     const snapshot = (entry && typeof entry === 'object' ? entry : null) as ProviderUsageLike | null;
     const bars = Array.isArray(snapshot?.bars) ? snapshot.bars : [];
-    const checkedAt = epochOf(snapshot?.dataCheckedAt) ?? options.now;
+    const external = typeof snapshot?.runtimeGeneration === 'string';
+    const measuredAt = epochOf(snapshot?.lastSuccessfulAt);
+
+    if (external) {
+      for (const row of series.filter((item) => item.providerId === providerId)) {
+        row.suspended = true;
+      }
+    }
+
+    if (external && (snapshot?.state !== 'ok' || snapshot?.stale === true || measuredAt === null)) {
+      continue;
+    }
+
+    const checkedAt = external ? measuredAt! : epochOf(snapshot?.dataCheckedAt) ?? options.now;
 
     for (const bar of bars) {
       const parsed = sampleOf(bar, checkedAt);
 
       if (!parsed) {
         continue;
+      }
+
+      if (external) {
+        parsed.sample.segment = JSON.stringify([
+          snapshot?.runtimeGeneration,
+          typeof snapshot?.usageSchema === 'string' ? snapshot.usageSchema : '',
+          parsed.windowMinutes,
+          parsed.calendarMonth ? new Date(checkedAt).toISOString().slice(0, 7) : '',
+        ]);
       }
 
       let row = series.find((item) => item.providerId === providerId && item.barKey === parsed.key);
@@ -211,11 +243,16 @@ export function ingestUsage(
       row.windowMinutes = parsed.windowMinutes ?? row.windowMinutes ?? null;
 
       const previous = row.samples.at(-1);
+      const sameSegment = previous?.segment === parsed.sample.segment;
 
-      if (previous && previous.at >= parsed.sample.at) {
+      if (external && (!previous || previous.at <= parsed.sample.at)) {
+        row.suspended = false;
+      }
+
+      if (previous && (previous.at > parsed.sample.at || sameSegment && previous.at === parsed.sample.at)) {
         continue;
       }
-      if (previous && isReset(previous, parsed.sample)) {
+      if (previous && sameSegment && isReset(previous, parsed.sample)) {
         resets.push({
           providerId,
           barKey: parsed.key,
@@ -254,7 +291,8 @@ export function forecastSeries(series: BarSeries, options: ForecastOptions): Usa
   const windowMs = options.windowMs ?? RATE_WINDOW_MS;
   const minSpanMs = options.minSpanMs ?? MIN_SPAN_MS;
   const last = series.samples.at(-1);
-  const recent = series.samples.filter((sample) => sample.at >= options.now - windowMs);
+  const recent = series.samples.filter((sample) => sample.at >= options.now - windowMs
+    && sample.segment === last?.segment);
 
   let start = 0;
 
@@ -270,11 +308,11 @@ export function forecastSeries(series: BarSeries, options: ForecastOptions): Usa
   const window = recent.slice(start);
   const first = window[0];
   const spanMs = first && last ? last.at - first.at : 0;
-  const hasRate = Boolean(first && last) && window.length >= 2 && spanMs >= minSpanMs;
+  const hasRate = !series.suspended && Boolean(first && last) && window.length >= 2 && spanMs >= minSpanMs;
   const ratePerHour = hasRate && first && last
     ? Math.max(0, Math.round(((last.pct - first.pct) / (spanMs / 3_600_000)) * 100) / 100)
     : null;
-  const average = last ? averageSince(series, last) : null;
+  const average = last && !series.suspended ? averageSince(series, last) : null;
   const base = {
     providerId: series.providerId,
     barKey: series.barKey,

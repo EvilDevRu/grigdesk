@@ -1,0 +1,86 @@
+[
+  {
+    "name": "@moonshot-ai/kimi-code",
+    "reviewedVersion": "2.3.1",
+    "integrity": "sha512-Ikk41ROPta1eQ6gCXOZd7Ag7fg8B0vawjwA0+MVMi8CphFBbvAz8emr7Lc9cI2dAbBSmvAX16U7Jc/+mPVw7Cg==",
+    "lifecycle": {
+      "postinstall": "node scripts/postinstall.mjs"
+    },
+    "files": {
+      "scripts/postinstall.mjs": "d60df1c0a647242764337c6b675c5c214f4028d74b7db7df3ef5b5f40c4c43ce",
+      "scripts/postinstall/migrate.mjs": "3d38c1587e06cccddcabbc1aa74c8af873f03f7b8d2a427cc849eeed6cbd708e",
+      "scripts/postinstall/platform.mjs": "d125b833ca70a12eb0247a2f445a518bdc1f112147d24da4648ab658a0d7cf88",
+      "scripts/postinstall/reach.mjs": "4ea25193b7f8f498788b87f119b03c69ef9ff3ebf6b58e75abbbdad8d45fdad8",
+      "scripts/postinstall/takeover.mjs": "e7dc15c7fa6dcbfac8193630b7a44732473d3002b6b404789fae0c34202b1cfc",
+      "scripts/postinstall/ui.mjs": "5153a04c77b92e8c274c1b559812880b74b83a915f84e5ad34e4cc62b7c49766"
+    }
+  },
+  {
+    "name": "@anthropic-ai/claude-code",
+    "reviewedVersion": "2.1.311",
+    "integrity": "sha512-7SgBitii1ZscdbRJXLcub7Vv2pfvH3wo7RrCKg4vZpklIfz9HgigJFFJGIjCY6jzoPDvbQcwwugvm3A8PTejzw==",
+    "lifecycle": {
+      "postinstall": "node install.cjs"
+    },
+    "files": {
+      "install.cjs": "32a7b2429d7447c5aa043e383bcf9a72e0b233dff66336ea4b5b32531da981ad"
+    }
+  },
+  {
+    "name": "@moonshot-ai/kimi-code",
+    "reviewedVersion": "2.3.3",
+    "integrity": "sha512-3V8bycucf9KgPRH27S8De2u0ip84/Ry3FpNn6gi5z9JmoEHt9vxiYHHZqiMdyDf5nPm4bv+YKGwKEQL4oYpRTw==",
+    "lifecycle": {
+      "postinstall": "node scripts/postinstall.mjs"
+    },
+    "files": {
+      "scripts/postinstall.mjs": "d60df1c0a647242764337c6b675c5c214f4028d74b7db7df3ef5b5f40c4c43ce",
+      "scripts/postinstall/migrate.mjs": "3d38c1587e06cccddcabbc1aa74c8af873f03f7b8d2a427cc849eeed6cbd708e",
+      "scripts/postinstall/platform.mjs": "d125b833ca70a12eb0247a2f445a518bdc1f112147d24da4648ab658a0d7cf88",
+      "scripts/postinstall/reach.mjs": "4ea25193b7f8f498788b87f119b03c69ef9ff3ebf6b58e75abbbdad8d45fdad8",
+      "scripts/postinstall/takeover.mjs": "e7dc15c7fa6dcbfac8193630b7a44732473d3002b6b404789fae0c34202b1cfc",
+      "scripts/postinstall/ui.mjs": "5153a04c77b92e8c274c1b559812880b74b83a915f84e5ad34e4cc62b7c49766"
+    }
+  },
+  {
+    "name": "node-pty",
+    "reviewedVersion": "1.1.0",
+    "integrity": "sha512-20JqtutY6JPXTUnL0ij1uad7Qe1baT46lyolh2sSENDd4sTzKZ4nmAFkeAARDKwmlLjPx6XKRlwRUxwjOy+lUg==",
+    "lifecycle": {
+      "install": "node scripts/prebuild.js || node-gyp rebuild",
+      "postinstall": "node scripts/post-install.js"
+    },
+    "files": {
+      "scripts/prebuild.js": "7e604b10f7769d7dc95947d3481c00513b9e3bb6c561d5264506350a16a0381a",
+      "scripts/post-install.js": "b15bb24cd3388b05392eeb200aa805e2827356818d111b93847e1b0f6a6ada46",
+      "binding.gyp": "2e6fdfd713f8b3485dd4e2f4efe93bf5436a5ff4eec4deb45533b09b6932efff"
+    }
+  },
+  {
+    "name": "@anthropic-ai/claude-code",
+    "reviewedVersion": "2.1.310",
+    "integrity": "sha512-EySpBwaocdU1nc9r7JH+GOlnMsbXc764d3HX7NL8fr7qqdxz2MiXI9hqf/rzeE/XgU23HHFltIqhb+Fq6G1CVw==",
+    "lifecycle": {
+      "postinstall": "node install.cjs"
+    },
+    "files": {
+      "install.cjs": "32a7b2429d7447c5aa043e383bcf9a72e0b233dff66336ea4b5b32531da981ad"
+    }
+  },
+  {
+    "name": "@moonshot-ai/kimi-code",
+    "reviewedVersion": "2.3.2",
+    "integrity": "sha512-FMVJ2e+kdnJuU/XWw7nr2n77gt6DZ5y8PJ9f8QJDUrX2nCus3tDJ5HvkqjvvnzthazcFCqVqa217oPfYDLvt3g==",
+    "lifecycle": {
+      "postinstall": "node scripts/postinstall.mjs"
+    },
+    "files": {
+      "scripts/postinstall.mjs": "d60df1c0a647242764337c6b675c5c214f4028d74b7db7df3ef5b5f40c4c43ce",
+      "scripts/postinstall/migrate.mjs": "3d38c1587e06cccddcabbc1aa74c8af873f03f7b8d2a427cc849eeed6cbd708e",
+      "scripts/postinstall/platform.mjs": "d125b833ca70a12eb0247a2f445a518bdc1f112147d24da4648ab658a0d7cf88",
+      "scripts/postinstall/reach.mjs": "4ea25193b7f8f498788b87f119b03c69ef9ff3ebf6b58e75abbbdad8d45fdad8",
+      "scripts/postinstall/takeover.mjs": "e7dc15c7fa6dcbfac8193630b7a44732473d3002b6b404789fae0c34202b1cfc",
+      "scripts/postinstall/ui.mjs": "5153a04c77b92e8c274c1b559812880b74b83a915f84e5ad34e4cc62b7c49766"
+    }
+  }
+]

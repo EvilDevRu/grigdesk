@@ -66,6 +66,7 @@ export interface ProviderModelEntry {
 // подходит ли он настройке, которая требует, например, безопасного разбора текста.
 export interface ProviderEntry {
   installation?: ProviderInstallationMetadata;
+  usagePresentation?: { freshness: boolean; spentLabel: boolean };
   sessionBinding?: boolean;
   commands?: Array<{
     cmd: string;

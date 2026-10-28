@@ -228,7 +228,8 @@
                        пока ставится один CLI, кнопки соседей заблокированы. -->
                   <UiIconButton
                     v-if="!p.installed && p.installation?.canInstall
-                      || canUpdateCli(p) || installation.snapshot.active?.providerId === p.id"
+                      || canUpdateCli(p)
+                      || installation.snapshot.active?.providerId === p.id"
                     data-context="topbar-popover-update"
                     role="embedded"
                     :label="providerInstallationLabel(p)"
@@ -243,6 +244,7 @@
                   </UiIconButton>
                   <UiIconButton
                     v-if="installResultNeedsAttention(p)"
+                    data-context="topbar-popover-result"
                     role="embedded"
                     tone="warning"
                     :label="t('settings.providerInstallationResult')"
@@ -287,12 +289,11 @@
               </template>
               <template #default="{ close }">
                 <span class="ptip">
-                  <!-- Итог установки виден, только когда он что-то значит: успех и так
-                       виден пропавшим предложением обновиться. -->
+                  <!-- В сводке остаются ошибки установки; успешный результат и готовность
+                       терминала доступны в общем окне установки и настройках. -->
                   <span
                     v-if="updateNoteOf(p)"
-                    class="pu-state"
-                    :class="['pu-note', updateNoteOf(p)!.type === 'err' ? 'is-bad' : 'is-warn']"
+                    class="pu-state pu-note is-bad"
                   >{{ updateNoteOf(p)!.text }}</span>
                   <!-- Беда лимитов — СВЕРХУ и со ссылкой на состояние вендора: снизу её
                        читали уже после того, как начинали гадать о причине сбоя. -->
@@ -320,6 +321,16 @@
                     </UiButton>
                   </span>
                   <span v-if="usageOf(p)!.stale" class="pu-reset">{{ t('core.limitDataIsStale') }}</span>
+                  <span v-if="p.usagePresentation?.freshness" class="pu-reset"
+                    data-testid="provider-usage-measured">
+                    {{ usageOf(p).measuredAt ? t('core.usageMeasuredAt', {
+                      time: formatDate(new Date(usageOf(p).measuredAt!), uiLocale,
+                        { dateStyle: 'short', timeStyle: 'short' }),
+                    }) : t('core.usageMeasuredUnknown') }}
+                  </span>
+                  <span v-if="p.usagePresentation?.spentLabel && usageOf(p).bars.length" class="pu-reset">
+                    {{ t('core.usageSpentLabel') }}
+                  </span>
                   <!-- Потребление лимитов подписки — как /usage в CLI -->
                   <span class="pu">
                     <span
@@ -411,7 +422,7 @@
 </template>
 
 <script setup lang="ts">
-import { formatNumber, intlLocale } from '../../../../shared/i18n/formats.ts';
+import { formatDate, formatNumber, intlLocale } from '../../../../shared/i18n/formats.ts';
 import { uiLocale } from '../../ui.ts';
 
 import { t } from '../../ui.ts';
@@ -428,6 +439,7 @@ import { loadClass, resourcesAlarm } from './resourceMetrics.ts';
 import PhoneConnectButton from './PhoneConnectButton.vue';
 import ProviderInstallDialog from '../ProviderInstallDialog.vue';
 import { useProviderInstallStore, providerInstallVisibleWarnings } from '../../stores/providerInstall.ts';
+import { providerCliActions } from '../../features/providers/providerCliActions.ts';
 import { usePhoneAccessStore } from '../../stores/phoneAccess.ts';
 import PhoneConnectDialog from '../../views/settings/PhoneConnectDialog.vue';
 import { setAlertTargetOpener } from '../alerts.ts';
@@ -593,7 +605,11 @@ function toProviders() {
   openSettings({ pageId: 'agents.providers' });
 }
 
-const usageOf = (p: TopbarProvider) => providerUsageView(prov.usage[p.id], p, uiLocale);
+const usageNow = ref(Date.now());
+const usageOf = (p: TopbarProvider) => providerUsageView(prov.usage[p.id], p, uiLocale, {
+  now: usageNow.value,
+  deliveryStale: prov.usageTransport.deliveryStale,
+});
 // Пауза после «стучитесь реже»: сервер кладёт её срок в retryAt снимка. Пока она идёт,
 // принудительная проверка вернёт прошлый снимок — кнопка гаснет и называет время. Формат
 // тот же, что у сброса полосы: «сегодня 03:45», и в прошлом он пуст — пауза снята.
@@ -606,7 +622,11 @@ const usagePauseOf = (p: TopbarProvider) => {
 // всплывашка перечитывает лимиты сама на случай оборванного потока: force обходит
 // минутный троттл стора, а серверный кэш остаётся — он и стережёт частоту походов
 // в API вендора, поэтому такое чтение к вендору не ходит.
-const usageWatch = createUsageWatch(() => prov.loadUsage(true));
+const usageWatch = createUsageWatch(() => {
+  usageNow.value = Date.now();
+
+  return prov.loadUsage(true);
+});
 
 onUnmounted(() => usageWatch.stop());
 // Кнопка установки во всплывашке: только у отставшего CLI, который GrigDesk умеет ставить
@@ -633,6 +653,7 @@ function providerInstallationLabel(p: TopbarProvider): string {
  */
 function startProviderInstallation(p: TopbarProvider, close: () => void): void {
   close();
+
   void installation.requestInstall(p.id, p.installed ? 'update' : 'install');
 }
 
@@ -662,15 +683,14 @@ function installResultNeedsAttention(p: TopbarProvider): boolean {
 }
 
 function canUpdateCli(p: TopbarProvider) {
-  return Boolean(p.installed && p.canUpdate && (p.updateAvailable || prov.updating === p.id));
+  return providerCliActions(p).canUpdate && (p.updateAvailable || prov.updating === p.id);
 }
-// Итог установки во всплывашке: показываем отказ и «ничего не изменилось». Удачную
-// установку объявлять нечем — предложение обновиться просто исчезает, а полный текст
-// («Обновлён: X → Y») живёт в плашке настроек, где у него есть своя строка.
+// Всплывашка показывает только ошибки установки, независимо от смены версии.
+// Успешные итоги, включая готовность терминала, остаются в окне установки и настройках.
 function updateNoteOf(p: TopbarProvider) {
   const result = prov.updateResults[p.id];
 
-  return result && (result.type === 'err' || result.changed === false) ? result : null;
+  return result?.type === 'err' ? result : null;
 }
 // Куда смотреть при сбое вендора. Домен объявляет адаптер исполнителя, поэтому
 // всплывашка не знает ни одного вендорского адреса.

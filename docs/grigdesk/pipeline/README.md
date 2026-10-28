@@ -1,5 +1,6 @@
 # Конвейер
 
+
 - [Offline-граница DeepSeek: metadata как provider, код 126 и denylist](deepseek-offline-guard.md)
 
 Фабрика и движок маршрутов, граф попытки, ворота, арбитр и триаж.
@@ -47,6 +48,7 @@
 
 ### Данные фабрики
 
+
 - [Результат отдельной разведки: checkpoint, deferred, вопрос и exact ответ](bootstrap-results.md)
 
 - [вердикт human — вопрос человеку, и у ответа на него СВОЯ модалка](human-verdict-dialog.md)
@@ -78,6 +80,7 @@
 - [Токены попытки: meta.env — зеркало, а не источник правды](attempt-token-accounting.md)
 
 ## Грабли
+
 
 - [«Продолжить» после failed: остановка ждёт goto без побочных эффектов](failed-resume.md)
 

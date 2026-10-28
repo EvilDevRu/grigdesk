@@ -4,8 +4,10 @@
 source "${FACTORY_HOME:?}/lib/executor.sh"
 
 runner_codex_probe() {
-  command -v codex >/dev/null 2>&1 || return 4
-  factory_exec provider codex --version
+  local cli
+  cli=$(factory_external_bin codex codex)
+  command -v -- "$cli" >/dev/null 2>&1 || return 4
+  factory_external_exec codex codex --version
 }
 
 # Нормализуем локальный каталог без запроса к модели. Числовая версия может быть
@@ -159,7 +161,8 @@ runner_codex_run() {
     PATH="$codex_alias_dir:$PATH" CODEX_NATIVE_BIN="$codex_native" \
       factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}" <<<"$prompt"
   else
-    factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}" <<<"$prompt"
+    factory_external_launch codex codex "${args[@]}" || return $?
+    factory_exec provider timeout -k 30 "$timeout_s" "${FACTORY_EXTERNAL_LAUNCH[@]}" <<<"$prompt"
   fi
 }
 

@@ -1,5 +1,7 @@
 # Сервер и доступ
+
 - [Условная правка .env: сверка прежнего значения под очередью писателя](env-file-expected-value.md)
+
 - [Исходный PATH/prefix и приватная проверка Bash для внешних CLI](user-cli-parent-environment.md)
 
 - [Подтверждение TLS-привязки, готовность relay и диагностика отказов](phone-pairing-confirmation.md)
@@ -15,6 +17,7 @@
 Читай перед правкой: `server/src/app.ts`, `server/src/plugins`, `server/src/modules/auth`, `bin`, `deploy`.
 
 ## Устройство
+
 
 - [Пустой вызов CLI: меню или справка, открытие окна только по явному действию](cli-default-command.md)
 
@@ -39,6 +42,7 @@
 - [Сервер одним ELF: I/D/R, argv, launcher, приёмка и действия владельца](server-binary.md)
 
 - [Установка, private receipt и откат серверного ELF](server-binary-install.md)
+
 
 - [PATH одиночного ELF: пользовательские CLI и nvm без ссылок](server-binary-path.md)
 

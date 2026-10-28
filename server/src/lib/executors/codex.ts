@@ -4,7 +4,7 @@
 // `thread/resume`, затем `turn/start`. Песочница workspace-write: текущий cwd и явно
 // дополнительные рабочие корни доступны для правок, сеть включена для gh/git/package CLI,
 // остальная файловая система закрыта.
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn } from '../providerInstall/externalCliProcess.ts';
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -2831,6 +2831,19 @@ export default {
   },
   install: 'npm i -g @openai/codex && codex login',
   login: 'codex login',
+  usagePresentation: { freshness: true, spentLabel: true },
+  /**
+   * Декларация npm-пакета позволяет найти повреждённую копию без запуска её entry.
+   * Managed-провайдеры этого opt-in не имеют и в общий lifecycle не попадают.
+   */
+  externalCli() {
+    return {
+      packageId: '@openai/codex',
+      binName: 'codex',
+      configKey: 'codexBin',
+      envKey: 'GRIGDESK_CODEX_BIN',
+    };
+  },
   /**
    * Доступный пользовательский npm устанавливает latest и при обновлении.
    * Без npm сохраняются прежние команды; вход запускается отдельным действием.

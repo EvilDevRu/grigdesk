@@ -4,7 +4,7 @@
 // host config/skills/plugins/MCP процесс чата не видит. Откат: GRIGDESK_KIMI_LAUNCH_MODE=contained.
 // Режимный securityProfile для session bindings вычисляет chat-модуль
 // (kimiSecurityProfile), статичное поле ниже — каталожная подпись contained-профиля.
-import { execFile } from 'node:child_process';
+import { execFile } from '../providerInstall/externalCliProcess.ts';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -307,6 +307,26 @@ export default {
   // Основной официальный способ: отдельный бинарник с проверкой SHA-256, без
   // зависимости от системного Node.js.
   install: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
+  usagePresentation: { freshness: true, spentLabel: true },
+  /**
+   * Host CLI имеет обычную npm/native identity; contained runtime обслуживается отдельно.
+   * Корни относятся только к программе и не разрешают удаление KIMI_CODE_HOME целиком.
+   */
+  externalCli(config: KimiConfig, home: string) {
+    if (config.kimiLaunchMode === 'contained') {
+      return null;
+    }
+
+    const root = path.join(home, '.kimi-code/bin');
+
+    return {
+      packageId: '@moonshot-ai/kimi-code',
+      binName: 'kimi',
+      configKey: 'kimiBin',
+      envKey: 'GRIGDESK_KIMI_BIN',
+      native: [{ entry: path.join(root, 'kimi'), root }],
+    };
+  },
   /**
    * Пользовательский npm имеет приоритет перед прежним официальным installer.
    * Contained закрепляет runtime и не допускает обновления через карточку.

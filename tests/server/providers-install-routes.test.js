@@ -10,6 +10,213 @@ import {
   prepare, startWithToken,
 } from './helpers/providerInstallFixture.js';
 
+test('реестр после удаления npm сохраняет обычные действия оставшейся native-копии', async (t) => {
+  const fixture = await installNpmFixture(t);
+  const nativeRoot = path.join(fixture.root, 'native');
+  const native = path.join(nativeRoot, fixture.binName);
+  const packageRoot = path.join(fixture.prefix, 'lib/node_modules', fixture.packageId);
+  const alias = path.join(fixture.prefix, 'bin', fixture.binName);
+  const definition = {
+    packageId: fixture.packageId,
+    binName: fixture.binName,
+    configKey: 'claudeBin',
+    envKey: 'GRIGDESK_CLAUDE_BIN',
+    native: [{ entry: native, root: nativeRoot }],
+  };
+
+  fixture.provider.externalCli = () => definition;
+  fixture.provider.bin = (config) => config.claudeBin;
+  fixture.config.claudeBin = fixture.binName;
+  await fs.mkdir(nativeRoot, { recursive: true });
+  await fs.writeFile(native, Buffer.from([0x7f, 0x45, 0x4c, 0x46]), { mode: 0o755 });
+  await fs.mkdir(packageRoot, { recursive: true });
+  await fs.mkdir(path.dirname(alias), { recursive: true });
+  await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({
+    name: fixture.packageId,
+    version: '1.0.0',
+    bin: { [fixture.binName]: 'cli.js' },
+  }));
+  await fs.writeFile(path.join(packageRoot, 'cli.js'), '#!/bin/sh\necho 1.0.0\n', { mode: 0o755 });
+  await fs.symlink(path.join(packageRoot, 'cli.js'), alias);
+  await fs.writeFile(path.join(fixture.root, '.bashrc'),
+    `export PATH="${fixture.prefix}/bin:${nativeRoot}:${path.dirname(fixture.npm)}:/usr/bin:/bin"\n`);
+
+  const installed = (await fixture.app.inject('/api/providers')).json().providers[0];
+
+  assert.equal(installed.canUpdate, true);
+  assert.equal(installed.installation.canUpdate, true);
+  assert.equal(installed.installation.canUninstall, true);
+  assert.equal(installed.installation.manualInstallCommand, undefined);
+
+  await fs.unlink(alias);
+  await fs.rm(packageRoot, { recursive: true });
+
+  const remaining = (await fixture.app.inject('/api/providers?refresh=1')).json().providers[0];
+
+  assert.equal(remaining.installed, true);
+  assert.equal(remaining.canUpdate, true);
+  assert.equal(remaining.installation.canUpdate, true);
+  assert.equal(remaining.installation.canInstall, false);
+  assert.equal(remaining.installation.canUninstall, true);
+  assert.equal(remaining.installation.canReinstall, true);
+  assert.equal(remaining.installation.manualInstallCommand, undefined);
+  assert.equal(remaining.installation.inventory.installations[0].source, 'native');
+
+  fixture.setInstalled(false);
+
+  const broken = (await fixture.app.inject('/api/providers?refresh=1')).json().providers[0];
+
+  assert.equal(broken.installation.canInstall, false);
+  assert.equal(broken.installation.manualInstallCommand, undefined);
+
+  await fs.unlink(native);
+
+  const missing = (await fixture.app.inject('/api/providers?refresh=1')).json().providers[0];
+
+  assert.equal(missing.installed, false);
+  assert.equal(missing.installation.canInstall, true);
+  assert.equal(missing.installation.manualInstallCommand, undefined);
+});
+
+/**
+ * Настоящие routes и discovery работают с ELF-маркером в изолированном HOME.
+ * Installer и version probe подменены на границе worker, без сети и auth владельца.
+ */
+async function nativeFixture(t) {
+  let native;
+  let version = '1.0.0';
+  const commands = [];
+  const fixture = await installFixture(t, {
+    /**
+     * Транспорт различает чтение версии и запуск объявленного installer.
+     * Только запуск меняет искусственную программу и публикует прогресс.
+     */
+    async runner(file, args, options) {
+      if (file !== native) {
+        commands.push({ file, args });
+        version = '2.0.0';
+        await fs.writeFile(native, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2]), { mode: 0o755 });
+        options.onStdout?.('fixture installer\n');
+      }
+
+      return {
+        code: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        stdout: file === native ? version : 'fixture installer',
+        stderr: '',
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        workspaceLimitExceeded: false,
+      };
+    },
+  });
+  const root = path.join(fixture.root, '.kimi-code/bin');
+
+  native = path.join(root, 'fixture');
+  fixture.provider.bin = (config) => config.claudeBin;
+  fixture.provider.externalCli = () => ({
+    packageId: '@fixture/cli',
+    binName: 'fixture',
+    configKey: 'claudeBin',
+    envKey: 'GRIGDESK_CLAUDE_BIN',
+    native: [{ entry: native, root }],
+  });
+  fixture.provider.probe = async () => ({
+    ok: await fs.lstat(native).then(() => true, () => false),
+    version,
+  });
+  fixture.env.SHELL = '/bin/bash';
+  fixture.config.claudeBin = native;
+  fixture.config.envPath = path.join(fixture.root, '.env');
+  await fs.mkdir(root, { recursive: true, mode: 0o700 });
+  await fs.writeFile(native, Buffer.from([0x7f, 0x45, 0x4c, 0x46]), { mode: 0o755 });
+  await fs.writeFile(fixture.config.envPath, `GRIGDESK_CLAUDE_BIN=${native}\n`);
+  await fs.writeFile(path.join(fixture.root, '.bashrc'), `export PATH="${root}:/usr/bin:/bin"\n`);
+  await fs.writeFile(path.join(fixture.root, '.bash_profile'), 'source "$HOME/.bashrc"\n');
+
+  return {
+    ...fixture,
+    root,
+    native,
+    commands,
+  };
+}
+
+test('native v2 update использует официальный installer, а uninstall сохраняет auth', async (t) => {
+  const fixture = await nativeFixture(t);
+  const auth = path.join(path.dirname(fixture.root), 'credentials.json');
+  const route = '/api/providers/installations/v2/claude';
+
+  await fs.writeFile(auth, 'fixture credentials');
+  await fs.chmod(fixture.root, 0o775);
+
+  for (const operation of ['update', 'uninstall']) {
+    const prepared = await fixture.app.inject({
+      method: 'POST',
+      url: `${route}/${operation}/prepare`,
+      payload: {},
+    });
+
+    assert.equal(prepared.statusCode, 200, prepared.body);
+    assert.equal(prepared.json().method, 'native');
+    assert.equal(fixture.commands.length, operation === 'update' ? 0 : 1);
+
+    const started = await fixture.app.inject({
+      method: 'POST',
+      url: `${route}/${operation}/start`,
+      payload: { preparationToken: prepared.json().token },
+    });
+
+    assert.equal(started.statusCode, 202, started.body);
+
+    const finished = await until(async () =>
+      (await fixture.app.inject('/api/providers/installations/v2/current')).json(),
+    (snapshot) => snapshot.recent.claude?.operation === operation && !snapshot.active);
+
+    assert.equal(finished.recent.claude.status, 'succeeded');
+    assert.equal(await fs.readFile(auth, 'utf8'), 'fixture credentials');
+  }
+
+  assert.equal(fixture.commands.length, 1);
+  assert.deepEqual(fixture.commands[0].args, fixture.descriptor.install.args);
+  assert.equal(fixture.config.claudeBin, 'fixture');
+  assert.equal(await fs.lstat(fixture.root).then(() => true, () => false), false);
+});
+
+test('native HTTP prepare возвращает причину отказа по правам с проблемным путём', async (t) => {
+  const fixture = await nativeFixture(t);
+
+  await fs.chmod(fixture.root, 0o777);
+
+  const response = await fixture.app.inject({
+    method: 'POST',
+    url: '/api/providers/installations/v2/claude/uninstall/prepare',
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 409, response.body);
+  assert.equal(response.json().error, 'native_ownership_unverified');
+  assert.ok(response.json().message.includes(fixture.root));
+  assert.doesNotMatch(response.json().message, /Имя команды занято/u);
+  assert.equal(fixture.commands.length, 0);
+});
+
+test('прежний POST update продолжает обслуживать native-копию', async (t) => {
+  const fixture = await nativeFixture(t);
+  const response = await fixture.app.inject({
+    method: 'POST',
+    url: '/api/providers/claude/update',
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().ok, true);
+  assert.equal(response.json().after, '2.0.0');
+  assert.equal(fixture.commands.length, 1);
+});
+
 test('start отвечает 202 до окончания и GET возвращает тот же job', async (t) => {
   const { app, config, gate, calls } = await installFixture(t);
   const response = await start(app);
@@ -460,4 +667,51 @@ test('зависший Bash не блокирует установку и пом
   assert.equal(preparation.statusCode, 200, preparation.body);
   assert.ok(preparation.json().warnings.some((warning) => warning.code === 'shell_probe_failed'));
   assert.equal(preparation.json().terminalSetup, 'manual');
+});
+
+test('v2 требует auth, проверяет payload и не публикует отдельную миграцию', async (t) => {
+  const { app, calls } = await installFixture(t, { auth: true });
+
+  for (const [method, url] of [
+    ['GET', '/api/providers/installations/v2/current'],
+    ['POST', '/api/providers/installations/v2/claude/install/prepare'],
+    ['POST', '/api/providers/installations/v2/claude/install/start'],
+  ]) {
+    const result = await app.inject({
+      method,
+      url,
+      payload: {},
+    });
+
+    assert.equal(result.statusCode, 401, `${url}: ${result.body}`);
+  }
+
+  assert.equal(calls.adapters, 0);
+
+  for (const [url, payload] of [
+    ['/api/providers/installations/v2/claude/install/prepare', { path: '/tmp/claude' }],
+    ['/api/providers/installations/v2/claude/install/start', { preparationToken: 'x', path: '/x' }],
+  ]) {
+    const result = await app.inject({
+      method: 'POST',
+      url,
+      payload,
+      headers: { cookie },
+    });
+
+    assert.equal(result.statusCode, 400, `${url}: ${result.body}`);
+  }
+
+  for (const action of ['prepare', 'start']) {
+    const result = await app.inject({
+      method: 'POST',
+      url: `/api/providers/installations/v2/migrations/${action}`,
+      payload: {},
+      headers: { cookie },
+    });
+
+    assert.equal(result.statusCode, 404);
+  }
+
+  assert.equal(calls.commands.length, 0);
 });

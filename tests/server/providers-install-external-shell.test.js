@@ -72,6 +72,8 @@ async function offlineFixture(t, options = {}) {
   await fs.symlink(realNode, path.join(external, 'node'));
   await fs.symlink(realNpm, path.join(external, 'npm'));
   await fs.mkdir(path.join(roots.dataHome, 'state'), { recursive: true });
+  // Системный /etc/bash.bashrc печатает sudo-hint, если HOME не помечен.
+  await fs.writeFile(path.join(base, '.sudo_as_admin_successful'), '');
 
   const packageId = packageDir;
   const command = `${realNpm} i -g ${packageId} --prefix ${prefix ?? ''}`;

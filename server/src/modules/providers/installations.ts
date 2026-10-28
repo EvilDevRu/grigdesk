@@ -36,6 +36,85 @@ export function registerProviderInstallations(fastify: FastifyInstance,
   service: ProviderInstallService): void {
   fastify.get('/api/providers/installations/current', () => service.current());
 
+  fastify.get('/api/providers/installations/v2/current', () => service.currentLifecycle());
+
+  for (const operation of ['install', 'update', 'reinstall', 'uninstall'] as const) {
+    const route = `/api/providers/installations/v2/:id/${operation}`;
+
+    fastify.post<{ Params: { id: string }; Body: { installationId?: string } }>(`${route}/prepare`, {
+      schema: {
+        body: {
+          type: 'object',
+          propertyNames: { enum: ['installationId'] },
+          properties: { installationId: { type: 'string', pattern: '^[0-9a-f]{64}$' } },
+          additionalProperties: false,
+        },
+      },
+    }, async (request, reply) => {
+      try {
+        return await service.prepareLifecycle(request.params.id, operation, authScopeOf(request),
+          request.body.installationId);
+      } catch (error) {
+        if (!(error instanceof ProviderInstallError)) {
+          throw error;
+        }
+
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+    });
+
+    fastify.post<StartRoute>(`${route}/start`, {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['preparationToken'],
+          propertyNames: { enum: ['preparationToken'] },
+          properties: {
+            preparationToken: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 128,
+            },
+          },
+          additionalProperties: false,
+        },
+      },
+    }, async (request, reply) => {
+      try {
+        const started = await service.startLifecycle(request.params.id, operation,
+          request.body.preparationToken!, authScopeOf(request));
+
+        return reply.code(202).send(started.snapshot);
+      } catch (error) {
+        if (!(error instanceof ProviderInstallError)) {
+          throw error;
+        }
+
+        return reply.code(error.statusCode).send({
+          error: error.code,
+          message: error.message,
+          snapshot: await service.currentLifecycle(),
+        });
+      }
+    });
+  }
+
+  fastify.post('/api/providers/installations/v2/recovery/resolve', async (_request, reply) => {
+    try {
+      return await service.resolveLifecycleRecovery();
+    } catch (error) {
+      if (!(error instanceof ProviderInstallError)) {
+        throw error;
+      }
+
+      return reply.code(error.statusCode).send({
+        error: error.code,
+        message: error.message,
+        snapshot: await service.currentLifecycle(),
+      });
+    }
+  });
+
   for (const operation of ['install', 'update'] as const) {
     fastify.post<{ Params: { id: string } }>(`/api/providers/:id/${operation}/prepare`, {
       preValidation: async (request) => {

@@ -665,6 +665,7 @@ import ChatStatusBar from './ChatStatusBar.vue';
 import { messageDeliveryMark } from './messageDeliveryMark.ts';
 import { chatStatus } from './chatStatus.ts';
 import { providerUsageSummary } from '../../features/providers/providerUsageSummary.ts';
+import { providerUsageFreshness } from '../../../../shared/chat/providerUsageFreshness.ts';
 import ChatQuestion from './ChatQuestion.vue';
 import ChatPermission from './ChatPermission.vue';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
@@ -896,6 +897,12 @@ function scheduleUsageReset() {
   const future = statusUsage.value.windows
     .map((item) => item.resetsAt ? Date.parse(item.resetsAt) : NaN)
     .filter((at) => Number.isFinite(at) && at > usageNow.value);
+  const freshness = providerUsageFreshness(prov.usage?.[status.value.providerId], usageNow.value);
+
+  if (freshness.enabled && freshness.expiresAt !== null && freshness.expiresAt >= usageNow.value) {
+    future.push(freshness.expiresAt + 1);
+  }
+
   const nearest = Math.min(...future);
 
   if (Number.isFinite(nearest)) {
