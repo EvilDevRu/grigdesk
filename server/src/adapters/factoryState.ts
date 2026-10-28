@@ -15,6 +15,7 @@ import { buildRouteDef, routeStageKeys } from '../lib/routeGraph.ts';
 import { readLoopProgress } from '../lib/factoryLoopProgress.ts';
 import { RoutesStore } from '../modules/routes/store.ts';
 import { parseSandboxRepositories } from '../lib/sandboxEnv.ts';
+import { readProfileServiceHost } from '../lib/profileServiceHost.ts';
 import { routeInstrumentationMode } from '../lib/factoryLaunchContract.ts';
 import { bootstrapNodeVerdict, readNodeVerdicts, stopVerdictOf } from '../lib/factoryNodeVerdicts.ts';
 import { stallIsArbitrable } from '../lib/factoryArbiter.ts';
@@ -901,6 +902,7 @@ export class FactoryStateAdapter {
       stall,
       fePort: env.FE_PORT || null,
       apiPort: env.API_PORT || null,
+      serviceHost: await readProfileServiceHost(this.profilesDir, profile),
       // Стенд ещё строится (портов нет) — отдаём прогресс сборки для футера карточки.
       sandbox,
       progress: { done: doneCount, total: chain.length, current: cur },

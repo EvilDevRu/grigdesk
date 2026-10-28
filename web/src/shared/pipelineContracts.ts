@@ -223,6 +223,7 @@ export interface PipelineViewGraphSource extends LiveGraph {
   runnerPolicy?: import('./runnerDisplay.ts').RunnerState;
   fePort?: number | null;
   apiPort?: number | null;
+  serviceHost?: string | null;
   sandbox?: {
     step: number;
     total: number;

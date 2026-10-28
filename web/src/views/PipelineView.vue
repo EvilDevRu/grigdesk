@@ -366,8 +366,10 @@
         <template v-if="!isCollapsed(t.task)">
         <span v-if="t.graph.fePort" class="chunk">
           <span class="sdot" :class="t.daemonAlive ? 'on' : 'off'"></span>
-          стенд · <a :href="sandboxUrl(t.graph.fePort) || undefined" target="_blank" rel="noopener">фронт :{{ t.graph.fePort }}</a>
-          <a v-if="t.graph.apiPort" :href="sandboxUrl(t.graph.apiPort) || undefined" target="_blank" rel="noopener">API :{{ t.graph.apiPort }}</a>
+          стенд · <a :href="sandboxUrl(t.graph.fePort, t.graph.serviceHost) || undefined"
+                     target="_blank" rel="noopener">фронт :{{ t.graph.fePort }}</a>
+          <a v-if="t.graph.apiPort" :href="sandboxUrl(t.graph.apiPort, t.graph.serviceHost) || undefined"
+             target="_blank" rel="noopener">API :{{ t.graph.apiPort }}</a>
         </span>
         <!-- Стенд ещё строится: живой прогресс сборки песочницы из t*.stage -->
         <span v-else-if="t.graph.sandbox" class="chunk building">
@@ -463,10 +465,11 @@
           <div class="stage-stand-context">
             <span class="stage-context-label">Стенд</span>
             <template v-if="stageGraph?.fePort">
-              <a class="stage-stand-link" :href="sandboxUrl(stageGraph.fePort) || undefined" target="_blank" rel="noopener">
+              <a class="stage-stand-link" :href="sandboxUrl(stageGraph.fePort, stageGraph.serviceHost) || undefined"
+                 target="_blank" rel="noopener">
                 Фронт <b class="mono">:{{ stageGraph.fePort }}</b> <span aria-hidden="true">↗</span>
               </a>
-              <a v-if="stageGraph.apiPort" class="stage-stand-link" :href="sandboxUrl(stageGraph.apiPort) || undefined"
+              <a v-if="stageGraph.apiPort" class="stage-stand-link" :href="sandboxUrl(stageGraph.apiPort, stageGraph.serviceHost) || undefined"
                  target="_blank" rel="noopener">
                 API <b class="mono">:{{ stageGraph.apiPort }}</b> <span aria-hidden="true">↗</span>
               </a>
