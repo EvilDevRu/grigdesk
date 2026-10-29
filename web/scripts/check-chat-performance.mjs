@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { cpus, homedir, loadavg } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMainThread, parentPort, Worker } from 'node:worker_threads';
 
 import { build } from '../node_modules/vite/dist/node/index.js';
 import vue from '../node_modules/@vitejs/plugin-vue/dist/index.mjs';
@@ -276,10 +277,10 @@ async function buildIdentity() {
 }
 
 /**
- * Приёмник работает с настоящим файловым хранилищем в отдельном процессе от страницы.
+ * Приёмник работает с настоящим файловым хранилищем в отдельном потоке от Playwright.
  * Начальный seed создаётся вне замера; полные тела и UTF-8 размеры проверяются на сервере.
  */
-async function receiver() {
+async function localReceiver() {
   const chatsDir = path.join(artifacts, `receiver-${label}`);
   const store = new ChatHistoryStore({
     chatsDir,
@@ -560,6 +561,131 @@ async function receiver() {
 }
 
 /**
+ * Управление браузером не делит event loop с JSON и файловыми записями приёмника.
+ * Иначе длительность press включает остановку самого драйвера, даже когда страница отзывчива.
+ */
+async function receiver() {
+  const worker = new Worker(new URL(import.meta.url));
+  const pending = new Map();
+  let sequence = 0;
+  let generation = 0;
+  let failure = null;
+
+  worker.on('message', ({ id, result, error }) => {
+    const request = pending.get(id);
+
+    if (!request) {
+      return;
+    }
+
+    pending.delete(id);
+
+    if (error) {
+      request.reject(Object.assign(new Error(error.message), { stack: error.stack }));
+    } else {
+      request.resolve(result);
+    }
+  });
+
+  const rejectPending = (error) => {
+    failure = error;
+
+    for (const request of pending.values()) {
+      request.reject(error);
+    }
+
+    pending.clear();
+  };
+
+  worker.on('error', rejectPending);
+  worker.on('exit', (code) => rejectPending(new Error(`Приёмник завершился с кодом ${code}`)));
+
+  const call = (method, ...args) => new Promise((resolve, reject) => {
+    if (failure) {
+      reject(failure);
+
+      return;
+    }
+
+    const id = ++sequence;
+
+    pending.set(id, { resolve, reject });
+    worker.postMessage({
+      id,
+      method,
+      args
+    });
+  });
+
+  try {
+    const address = await call('address');
+
+    return {
+      address,
+      get generation() {
+        return generation;
+      },
+      async reset(legacy) {
+        generation = await call('reset', legacy);
+      },
+      received: (clear = false) => call('received', clear),
+      readOne: (id) => call('readOne', id),
+      patch: (id, patch) => call('patch', id, patch),
+      armConflict: (index) => call('armConflict', index),
+      async close() {
+        await worker.terminate();
+      },
+    };
+  } catch (error) {
+    await worker.terminate();
+
+    throw error;
+  }
+}
+
+/**
+ * Команды фикстуры сериализованы; reset не обгоняет чтение и предыдущий PUT.
+ * Через границу потока проходят только синтетические данные и завершённые сетевые журналы.
+ */
+async function serveReceiver() {
+  const backend = await localReceiver();
+  let tail = Promise.resolve();
+
+  parentPort.on('message', ({ id, method, args }) => {
+    tail = tail.then(async () => {
+      try {
+        let result;
+
+        if (method === 'address') {
+          result = backend.address;
+        } else if (method === 'reset') {
+          await backend.reset(...args);
+          result = backend.generation;
+        } else if (method === 'received') {
+          result = [...backend.received];
+
+          if (args[0]) {
+            backend.received.length = 0;
+          }
+        } else if (method === 'readOne') {
+          result = await backend.store.readOne(...args);
+        } else if (method === 'patch') {
+          result = await backend.store.patchExecution(args[0], () => args[1]);
+        } else if (method === 'armConflict') {
+          backend.armConflict(...args);
+        } else {
+          throw new Error(`Неизвестная команда приёмника: ${method}`);
+        }
+
+        parentPort.postMessage({ id, result });
+      } catch (error) {
+        parentPort.postMessage({ id, error: { message: error.message, stack: error.stack } });
+      }
+    });
+  });
+}
+
+/**
  * Ожидаемый 409 разрешён только на sparse URI выделенной страницы проверки.
  * Число таких сообщений затем сверяется с реальными отказами приёмника.
  */
@@ -589,8 +715,13 @@ function collectErrors(page, backend, errors, expectedConflicts = null) {
  * В отчёт попадают все образцы: первый ввод и паузы сериализации не отбрасываются.
  */
 async function measureConflict(page, backend, index) {
-  backend.armConflict(index);
+  await backend.armConflict(index);
 
+  const textarea = page.locator('.cs textarea');
+
+  await textarea.focus();
+
+  const initialLength = (await textarea.inputValue()).length;
   let finished = false;
   const pending = page.evaluate((sequence) => window.__chatPerformance.event('conflict', sequence), index);
 
@@ -602,16 +733,18 @@ async function measureConflict(page, backend, index) {
 
   const input = [];
   const started = performance.now();
-  const textarea = page.locator('.cs textarea');
 
   while (!finished || input.length < 20) {
     assert.ok(performance.now() - started < 30000, 'Конфликт не получил ACK за 30 секунд');
 
     const inputStarted = performance.now();
 
-    await textarea.press('a');
+    await page.keyboard.press('a');
     input.push(performance.now() - inputStarted);
   }
+
+  assert.equal((await textarea.inputValue()).length, initialLength + input.length,
+    'Каждое нажатие должно попасть в поле ввода');
 
   return {
     ...await pending,
@@ -621,18 +754,19 @@ async function measureConflict(page, backend, index) {
 }
 
 /**
- * Одна серверная запись должна вызвать один named409 и не более одного полного PUT.
+ * Серверный новый блок не меняет старые refs: CAS stale разрешается лёгкой head.
  * Проверки сети и ввода независимы, чтобы отчёт сохранял обе причины регрессии.
  */
-function checkConflict(measurement, network) {
+function checkConflict(network) {
   const writes = network.filter((request) => request.method === 'PUT');
   const conflicts = writes.filter((request) => request.status === 409);
   const fullPuts = writes.filter((request) => !request.sparse);
 
-  assert.equal(conflicts.length, 1, 'conflict: смена основания не дала ровно один 409');
-  assert.equal(conflicts[0].error, 'chat_steps_changed');
-  assert.ok(conflicts[0].serverRevision > conflicts[0].baseRevision);
-  assert.ok(fullPuts.length <= 1, `conflict: ${fullPuts.length} полных PUT на одну смену основания`);
+  assert.equal(conflicts.length, 0, 'conflict: серверный блок ошибочно инвалидировал старые refs');
+  assert.equal(fullPuts.length, 0, 'conflict: серверный блок вызвал полный PUT');
+  assert.ok(writes.some((request) => request.serverRevision > request.baseRevision));
+  assert.ok(writes.every((request) => request.status === 200));
+  assert.ok(writes.every((request) => request.refs === 50 && request.historicalBodies === 0));
 }
 
 /**
@@ -692,14 +826,21 @@ async function measureInteraction(browser, backend, errors) {
           }, 30);
         });
 
+        const textarea = page.locator('.cs textarea');
+
+        await textarea.focus();
+
+        const initialLength = (await textarea.inputValue()).length;
         const input = [];
 
         for (let index = 0; index < 20; index += 1) {
           const started = performance.now();
 
-          await page.locator('.cs textarea').press('a');
+          await page.keyboard.press('a');
           input.push(performance.now() - started);
         }
+
+        assert.equal((await textarea.inputValue()).length, initialLength + input.length);
 
         const started = performance.now();
 
@@ -857,7 +998,7 @@ async function measureBoundaries(browser, backend, errors) {
         assert.ok(initial.parseMs > 0 || initial.jsonReadMs > 0, 'Декодирование GET не измерено');
         assert.ok(initial.mountMs > 0 && initial.paintMs > 0, 'Первый монтаж и кадр не измерены');
 
-        backend.received.length = 0;
+        await backend.received(true);
 
         const large = await page.evaluate(async () => {
           const {
@@ -898,20 +1039,19 @@ async function measureBoundaries(browser, backend, errors) {
             put: structuredClone(window.__chatPerformanceStats.put),
           };
         });
-        const savedLarge = await backend.store.readOne('fixture-0');
+        const savedLarge = await backend.readOne('fixture-0');
         const firstNew = savedLarge.messages.find((message) => message.assistantMessageId ===
           'large-answer');
 
         assert.equal(firstNew.steps.length, 150);
-        assert.equal(backend.received.filter((request) => request.method === 'PUT').length, 1);
-        assert.ok(backend.received.find((request) => request.method === 'PUT').stepBytes > 150000);
 
-        const largeNetwork = [...backend.received];
+        const largeNetwork = await backend.received();
 
-        await backend.store.patchExecution('fixture-0', () => ({
-          contextTokens: 123
-        }));
-        backend.received.length = 0;
+        assert.equal(largeNetwork.filter((request) => request.method === 'PUT').length, 1);
+        assert.ok(largeNetwork.find((request) => request.method === 'PUT').stepBytes > 150000);
+
+        await backend.patch('fixture-0', { contextTokens: 123 });
+        await backend.received(true);
         expectConflict = true;
 
         const fallback = await page.evaluate(async () => {
@@ -932,23 +1072,68 @@ async function measureBoundaries(browser, backend, errors) {
             put: structuredClone(window.__chatPerformanceStats.put)
           };
         });
-        const durable = await backend.store.readOne('fixture-0');
+        const durable = await backend.readOne('fixture-0');
         const original = performanceData(legacy).sessions[0].messages;
 
         assert.deepEqual(durable.messages.slice(0, original.length), original);
         assert.deepEqual(durable.messages.find((message) => message.assistantMessageId === 'large-answer'),
           firstNew);
 
-        const fallbackNetwork = [...backend.received];
+        const fallbackNetwork = await backend.received();
 
         const fallbackWrites = fallbackNetwork.filter((request) => request.method === 'PUT');
 
         assert.deepEqual(fallbackWrites.map((request) => request.status),
-          label === 'before' ? [200] : [409, 200, 200]);
+          label === 'before' ? [200] : [200, 200]);
 
         if (label !== 'before') {
-          assert.equal(fallbackNetwork[0].error, 'chat_steps_changed');
-          assert.equal(expectedConsole.length, 1);
+          assert.equal(expectedConsole.length, 0);
+          assert.ok(fallbackWrites.every((request) => request.sparse));
+        }
+
+        // Настоящее несовпадение refs меняет длину ранее подтверждённого массива.
+        // Серверная canonical-копия должна пережить полный fallback старого окна.
+        const changedIndex = durable.messages.findIndex((message) => (
+          message.assistantMessageId === 'large-answer'
+        ));
+        const changedMessages = durable.messages.map((message, index) => index === changedIndex ? {
+          ...message,
+          steps: [...message.steps, { k: 'note', text: 'Сервер дополнил сохранённую ленту' }],
+          serverCanonical: true,
+        } : message);
+
+        await backend.patch('fixture-0', { messages: changedMessages });
+        await backend.received(true);
+        expectConflict = true;
+
+        const refsConflict = await page.evaluate(async () => {
+          const { chat, resetStats } = window.__chatPerformance;
+
+          resetStats();
+          chat.session('fixture-0').draft = 'После настоящего конфликта refs';
+
+          const started = performance.now();
+
+          await chat._writeChat('fixture-0');
+
+          return {
+            ackMs: performance.now() - started,
+            put: structuredClone(window.__chatPerformanceStats.put),
+          };
+        });
+        const refsConflictNetwork = await backend.received();
+        const refsWrites = refsConflictNetwork.filter((request) => request.method === 'PUT');
+        const changedDurable = await backend.readOne('fixture-0');
+
+        assert.deepEqual(changedDurable.messages, changedMessages);
+        assert.deepEqual(refsWrites.map((request) => request.status),
+          label === 'before' ? [200] : [409, 409, 200, 200]);
+        assert.equal(refsWrites.filter((request) => !request.sparse).length, 1);
+
+        if (label !== 'before') {
+          assert.equal(expectedConsole.length, 2);
+          assert.ok(refsWrites.filter((request) => request.status === 409)
+            .every((request) => request.error === 'chat_steps_changed'));
         }
 
         results.push({
@@ -958,6 +1143,8 @@ async function measureBoundaries(browser, backend, errors) {
           largeNetwork,
           fallback,
           fallbackNetwork,
+          refsConflict,
+          refsConflictNetwork,
           expectedConsole,
         });
       } finally {
@@ -1092,6 +1279,14 @@ async function main() {
     phase,
     scenarios: selectedScenarios,
     build: await buildIdentity(),
+    receiverThread: 'отдельный worker_threads',
+    inputDriver: 'keyboard.press после однократного focus',
+    runtimeSources: Object.fromEntries(await Promise.all([
+      'web/scripts/check-chat-performance.mjs',
+      'server/src/lib/chat/historyStore.ts',
+      'server/src/lib/chat/historySerialization.ts',
+    ].map(async (file) => [file, createHash('sha256').update(await readFile(path.join(root, file)))
+      .digest('hex')]))),
   };
 
   try {
@@ -1185,20 +1380,20 @@ async function main() {
             await page.goto(backend.address);
             await page.waitForFunction(() => !!window.__chatPerformance);
             await page.evaluate((type) => window.__chatPerformance.event(type, 0), kind);
-            backend.received.length = 0;
+            await backend.received(true);
 
             for (let index = 1; index <= samples; index += 1) {
               if (kind === 'conflict') {
-                const offset = backend.received.length;
+                const offset = (await backend.received()).length;
                 const measurement = await measureConflict(page, backend, index);
 
-                measurement.network = backend.received.slice(offset);
+                measurement.network = (await backend.received()).slice(offset);
                 measurement.fullPuts = measurement.network
                   .filter((request) => request.method === 'PUT' && !request.sparse).length;
                 measurements.push(measurement);
 
                 try {
-                  checkConflict(measurement, measurement.network);
+                  checkConflict(measurement.network);
                 } catch (error) {
                   const location = `${legacy ? 'legacy' : 'modern'}, повтор ${repeat}, образец ${index}`;
 
@@ -1215,19 +1410,19 @@ async function main() {
             }
 
             if (expectedConflicts) {
-              if (expectedConflicts.length !== samples) {
+              if (expectedConflicts.length !== 0) {
                 const actual = expectedConflicts.length;
 
-                errors.push(`conflict: ожидалось ${samples} сообщений 409, получено ${actual}`);
+                errors.push(`conflict: ожидалось 0 сообщений 409, получено ${actual}`);
               }
             }
 
             // Полная сверка вне потока страницы обнаруживает повреждение любого тела шага.
-            const saved = await backend.store.readOne('fixture-0');
+            const saved = await backend.readOne('fixture-0');
             const seeded = performanceData(legacy).sessions[0].messages;
 
             assert.deepEqual(saved.messages.slice(0, seeded.length), seeded);
-            network.push(...backend.received);
+            network.push(...await backend.received());
           } finally {
             await context.close();
           }
@@ -1303,11 +1498,11 @@ async function main() {
     throw error;
   } finally {
     await browser?.close();
-    await new Promise((resolve) => backend.app.close(resolve));
+    await backend.close();
   }
 }
 
-main().catch((error) => {
+(isMainThread ? main() : serveReceiver()).catch((error) => {
   process.stderr.write(`${error.stack}\n`);
   process.exitCode = 1;
 });

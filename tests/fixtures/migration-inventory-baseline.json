@@ -199,6 +199,7 @@
       "tests/server/chat-context-cache.test.js",
       "tests/server/chat-delivery-failure-resume.test.js",
       "tests/server/chat-delivery-failure.test.js",
+      "tests/server/chat-history-serialization.test.js",
       "tests/server/chat-history-store.test.js",
       "tests/server/chat-image-hint.test.js",
       "tests/server/chat-images.test.js",

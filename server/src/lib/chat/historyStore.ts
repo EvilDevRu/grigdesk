@@ -24,6 +24,7 @@ import { mergeChat } from './mergeChat.ts';
 import type { ChatRecord } from './mergeChat.ts';
 import { messageKey } from './messageIdentity.ts';
 import { historyStepReuseAck, restoreHistorySteps } from './historyStepReuse.ts';
+import { serializeHistoryChat } from './historySerialization.ts';
 import type { HistoryStepReuseAck } from '../../../../shared/chat/chatHistoryStepReuse.ts';
 import type { ModelRegistry } from './modelRef.ts';
 import {
@@ -547,7 +548,7 @@ export class ChatHistoryStore {
    * Запоминает две короткие проекции ровно тех байтов, которые были прочитаны.
    * Признаки до чтения не позволяют приписать старые байты более новой записи.
    */
-  private cacheHead(
+  private async cacheHead(
     file: string,
     chat: StoredChat,
     json: string,
@@ -557,7 +558,7 @@ export class ChatHistoryStore {
     const state = chat?.workdirState;
     const phase = state?.transition?.phase;
     const checked = migrationChecked || !!chat?.id && this.catalogRegistry !== null
-      && stableJson(this.migratedChat(chat, this.catalogRegistry)) === json;
+      && (await serializeHistoryChat(this.migratedChat(chat, this.catalogRegistry))).json === json;
     const head: ChatHead | null = chat?.id ? {
       id: chat.id,
       title: chat.title,
@@ -601,7 +602,7 @@ export class ChatHistoryStore {
     const json = await fs.readFile(file, 'utf8');
     const chat = JSON.parse(json) as StoredChat;
 
-    this.cacheHead(file, chat, json, stat);
+    await this.cacheHead(file, chat, json, stat);
 
     return this.headCache.get(file)!.head;
   }
@@ -928,7 +929,7 @@ export class ChatHistoryStore {
         }
 
         const migrated = this.migratedChat(chat, registry);
-        const json = stableJson(migrated);
+        const json = (await serializeHistoryChat(migrated)).json;
 
         if (json !== originalJson) {
           changes.push({
@@ -939,7 +940,7 @@ export class ChatHistoryStore {
             originalJson,
           });
         } else {
-          this.cacheHead(file, chat, originalJson, stat, true);
+          await this.cacheHead(file, chat, originalJson, stat, true);
         }
       } catch (error) {
         this.headCache.delete(file);
@@ -965,7 +966,7 @@ export class ChatHistoryStore {
 
       const stat = await fs.stat(change.path);
 
-      this.cacheHead(change.path, change.migrated as StoredChat, change.json, stat, true);
+      await this.cacheHead(change.path, change.migrated as StoredChat, change.json, stat, true);
       await yieldToLoop();
     }
 
@@ -1276,8 +1277,9 @@ export class ChatHistoryStore {
       const target = this.fileOf(c);
       // Нет семантического изменения — revision не накручиваем из-за повторного PUT.
       const currentShape = prev ? { ...c, revision: currentRevision } : null;
+      const serialized = await serializeHistoryChat(currentShape || c);
 
-      if (prev && prev.path === target && stableJson(currentShape) === prev.json) {
+      if (prev && prev.path === target && serialized.json === prev.json) {
         return {
           written: false,
           restored,
@@ -1288,7 +1290,8 @@ export class ChatHistoryStore {
         };
       }
       c.revision = currentRevision + 1;
-      const json = stableJson(c);
+
+      const json = serialized.withRevision(c.revision);
       await this.writeAtomic(target, json);
       if (prev && prev.path !== target) await fs.rm(prev.path, { force: true });
 
@@ -1337,13 +1340,15 @@ export class ChatHistoryStore {
         throw new ChatHistoryError('unknown_chat', 'Чат не найден.', { statusCode: 404 });
       }
 
-      const before = stableJson(entry.chat);
+      const before = options.skipUnchanged ? (await serializeHistoryChat(entry.chat)).json : '';
       const next = {
         ...entry.chat,
         ...await patch(entry.chat),
       };
 
-      if (options.skipUnchanged && stableJson(next) === before) {
+      const serialized = await serializeHistoryChat(next);
+
+      if (options.skipUnchanged && serialized.json === before) {
         if (options.durable) {
           await this.writeAtomic(entry.path, entry.json, true);
         }
@@ -1353,7 +1358,7 @@ export class ChatHistoryStore {
 
       next.revision = Number(entry.chat.revision || 0) + 1;
 
-      await this.writeAtomic(entry.path, stableJson(next), options.durable);
+      await this.writeAtomic(entry.path, serialized.withRevision(next.revision), options.durable);
 
       return next;
     });

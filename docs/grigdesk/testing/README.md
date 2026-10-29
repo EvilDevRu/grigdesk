@@ -16,6 +16,8 @@
 
 ## Грабли
 
+- [Замер press включает остановку драйвера, если HTTP-приёмник делит его Node event loop](chat-performance-isolation.md)
+
 - [Вложенный node_modules в снимке Harness: одна причина vendor/buildInputs и отказа общего preflight](deepseek-vendor-node-modules.md)
 
 - [Автоподготовка legacy fixture DeepSeek: отдельный ABI-кэш, lock и восстановление](deepseek-legacy-preflight.md)
