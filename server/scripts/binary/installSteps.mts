@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import type { DeepSeekHostContract } from '../../../shared/chat/deepSeekBinary.ts';
 import { acquireInstallLock, assertInstallFileUnchanged } from '../../../shared/node/binaryInstall.ts';
 import { syncDirectory } from '../../../shared/node/files.ts';
 import { sha256File } from '../../../shared/node/hash.ts';
@@ -22,6 +23,7 @@ export interface InstallOptions {
   target: string;
   releasesDir: string;
   deepseekBinary?: string;
+  glmMode?: DeepSeekHostContract['glm']['mode'];
 }
 
 interface ProbeContext {
@@ -55,7 +57,13 @@ async function probe(binary: string, args: string[], context: ProbeContext): Pro
  * Данные проб не попадают внутрь установки, где серверный guard запрещает размещать D.
  */
 export async function installBinary(options: InstallOptions, hooks: InstallHooks = {}) {
-  for (const value of Object.values(options)) {
+  const { glmMode, ...paths } = options;
+
+  if (glmMode !== undefined && !['api', 'coding-plan'].includes(glmMode)) {
+    throw new Error('Неизвестный режим GLM установщика');
+  }
+
+  for (const value of Object.values(paths)) {
     if (!path.isAbsolute(value) || value.includes('\0')) {
       throw new Error('Пути установщика сервера должны быть абсолютными');
     }
@@ -128,6 +136,7 @@ export async function installBinary(options: InstallOptions, hooks: InstallHooks
       packageId: info.packageId,
       home: context.env.GRIGDESK_HOME,
       required: options.deepseekBinary !== undefined,
+      glmMode,
       run: async (file, args, probeOptions) => ({
         stdout: JSON.stringify(await check(file, args, {
           ...context,

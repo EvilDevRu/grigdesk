@@ -301,6 +301,50 @@ if (process.argv.includes('--verify')) {
   }
 });
 
+test('режим потребителя GLM заменяет требуемый admission', async (t) => {
+  const box = await fixture(t);
+  const plugin = box.info.glm.inputs.llmPiAi;
+
+  assert.ok(plugin, 'fixture гарантирует входы плагина GLM');
+
+  const codingPlan = {
+    ...box.info,
+    glm: {
+      ...box.info.glm,
+      admission: [{
+        mode: 'coding-plan' as const,
+        compatibility: glmCompatibilityIdentity(
+          { ...box.info.glm.inputs, llmPiAi: plugin }, 'coding-plan',
+        ),
+      }],
+    },
+  };
+
+  await writeStub(box.options.binary, codingPlan);
+
+  // Контракт требует api: без явного режима потребителя поставка не допущена.
+  await assert.rejects(installBinary(box.options), { code: 'deepseek_glm_unadmitted' });
+
+  // Фактический режим потребителя coding-plan допускает ту же поставку.
+  const installed = await installBinary({ ...box.options, glmMode: 'coding-plan' });
+
+  assert.match(installed.sha256, /^[a-f0-9]{64}$/u);
+});
+
+test('CLI принимает --glm-mode и отвергает неизвестный режим до эффектов', async (t) => {
+  const box = await fixture(t);
+  const args = ['--binary', box.options.binary, '--target', box.options.target,
+    '--host-contract', box.options.hostContract, '--releases-dir', box.options.releasesDir];
+  const admitted = await run(process.execPath, [cli, ...args, '--glm-mode', 'api']);
+
+  assert.equal(JSON.parse(admitted.stdout).memory, 'unknown');
+  await assert.rejects(run(process.execPath, [cli, ...args, '--glm-mode', 'bogus']), { code: 2 });
+  await assert.equal(
+    await sha256File(box.options.target),
+    (await installBinary(box.options)).sha256,
+  );
+});
+
 test('CLI требует аргументы и предупреждает только о несовместимой памяти', async (t) => {
   const { options, info } = await fixture(t);
   const args = ['--binary', options.binary, '--target', options.target,

@@ -7,8 +7,15 @@ npm --prefix deepseek run install:binary -- \
   --binary /path/to/candidate \
   --target /installed/grigdesk/bin/deepseek \
   --host-contract /installed/grigdesk/server/deepseek-host-contract.json \
-  --releases-dir /private/deepseek/releases
+  --releases-dir /private/deepseek/releases \
+  --glm-mode api
 ```
+
+Опциональный `--glm-mode api|coding-plan` задаёт фактический режим GLM потребителя:
+admission сверяется для него вместо режима из host-контракта. Рантайм службы всё равно
+проверяет admission выбранного режима на каждом запуске, поэтому требование
+неиспользуемого режима избыточно; `grigdesk-ctl build deepseek` передаёт режим сам
+из настроек потребителя.
 
 Первые три аргумента обязательны. Каталог target уже должен существовать. Если не передан
 `--releases-dir`, резервные ELF лежат в `runtimes/deepseek/releases` папки данных.

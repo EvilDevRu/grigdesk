@@ -223,7 +223,8 @@ export function expectedBuildCalls(box, target = 'all') {
       args: ['--prefix', path.join(box.root, 'server'), 'run', 'install:binary', '--',
         '--binary', path.join(cache, 'out/grigdesk-server'),
         '--target', path.join(box.root, 'bin/grigdesk-server'),
-        '--releases-dir', path.join(box.env.GRIGDESK_HOME, 'runtimes/server/releases')],
+        '--releases-dir', path.join(box.env.GRIGDESK_HOME, 'runtimes/server/releases'),
+        '--glm-mode', 'api'],
     },
   ];
   const web = [
@@ -250,6 +251,60 @@ export function expectedBuildCalls(box, target = 'all') {
       args: target === 'all' ? ['install', '--keep-runtime'] : ['install'],
     },
   ];
+
+  if (target === 'deepseek') {
+    const deepseekCache = path.join(box.env.XDG_CACHE_HOME, 'grigdesk/deepseek-binary');
+
+    return [
+      {
+        command: 'npm',
+        cwd: '/',
+        args: ['--prefix', path.join(box.root, 'deepseek'), 'install', '--no-audit', '--no-fund'],
+      },
+      {
+        command: 'npm',
+        cwd: '/',
+        args: ['--prefix', path.join(box.root, 'deepseek'), 'run', '--silent', 'prepare:runtime', '--',
+          '--node-cache-dir', path.join(deepseekCache, 'cache')],
+      },
+      {
+        command: 'npm',
+        cwd: '/',
+        args: ['--prefix', path.join(box.root, 'deepseek'), 'run', 'build', '--',
+          '--out-dir', path.join(deepseekCache, 'out'),
+          '--node-cache-dir', path.join(deepseekCache, 'cache')],
+      },
+      {
+        command: 'npm',
+        cwd: '/',
+        args: ['--prefix', path.join(box.root, 'deepseek'), 'run', 'verify', '--',
+          '--binary', path.join(deepseekCache, 'out/deepseek')],
+      },
+      {
+        command: 'npm',
+        cwd: '/',
+        args: ['--prefix', path.join(box.root, 'deepseek'), 'run', '--silent', 'admission:check', '--',
+          '--binary', path.join(deepseekCache, 'out/deepseek'), '--mode', 'api',
+          '--host-contract', path.join(box.root, 'server/deepseek-host-contract.json')],
+      },
+      {
+        command: 'npm',
+        cwd: '/',
+        args: ['--prefix', path.join(box.root, 'deepseek'), 'run', '--silent', 'install:binary', '--',
+          '--binary', path.join(deepseekCache, 'out/deepseek'),
+          '--target', path.join(box.root, 'bin/deepseek'),
+          '--host-contract', path.join(box.root, 'server/deepseek-host-contract.json'),
+          '--releases-dir', path.join(box.env.GRIGDESK_HOME, 'runtimes/deepseek/releases'),
+          '--glm-mode', 'api'],
+      },
+      {
+        command: 'npm',
+        cwd: '/',
+        args: ['--prefix', path.join(box.root, 'deepseek'), 'run', '--silent', 'prune:cache', '--',
+          '--cache-dir', path.join(box.env.GRIGDESK_HOME, 'runtimes/deepseek')],
+      },
+    ];
+  }
 
   if (target === 'server') {
     return server;

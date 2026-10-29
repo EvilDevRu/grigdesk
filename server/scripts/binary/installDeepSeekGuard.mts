@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import type { DeepSeekHostContract } from '../../../shared/chat/deepSeekBinary.ts';
 import { acquireInstallLock, lstatOrNull } from '../../../shared/node/binaryInstall.ts';
 import { sha256File } from '../../../shared/node/hash.ts';
 import {
@@ -16,6 +17,7 @@ interface GuardOptions {
   packageId: string;
   home: string;
   required: boolean;
+  glmMode?: DeepSeekHostContract['glm']['mode'];
   run?: ServerBinaryProbeOptions['run'];
 }
 
@@ -41,7 +43,9 @@ async function checkPair(options: GuardOptions): Promise<string> {
     }
 
     const result = await assertDeepSeekBinaryReady(
-      options.binary, path.join(root, 'server/deepseek-host-contract.json'),
+      options.binary, path.join(root, 'server/deepseek-host-contract.json'), {
+        glmMode: options.glmMode,
+      },
     );
 
     return result.sha256;
@@ -103,6 +107,7 @@ export async function guardInstalledDeepSeek(options: GuardOptions) {
 
     throw new Error('Совместимость сервера с установленными DeepSeek/GLM не подтверждена. '
       + 'Сервер сохранён. Подготовьте совместимую пару и установите исполнитель через '
-      + 'npm --prefix deepseek run install:binary с --host-contract целевого сервера.', { cause });
+      + 'npm --prefix deepseek run install:binary с --host-contract целевого сервера '
+      + 'и --glm-mode фактического режима потребителя.', { cause });
   }
 }

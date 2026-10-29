@@ -28,3 +28,12 @@ fallback. Cache key каталога включает packageId, mode и отп�
 Offline-тесты могут явно передать test admission, loopback endpoint и egress guard.
 Они не меняют список выпуска. Production default использует только admission из metadata,
 а тесты отказа задают пустой список или несовпадающую запись явно.
+
+Установщик и updater сверяют допуск фактического режима потребителя: `--glm-mode`
+передаёт установившая сторона (`grigdesk-ctl build deepseek` берёт его из настроек
+службы). Рантайм по-прежнему требует admission выбранного режима на каждом запуске,
+поэтому требование режима, которым машина не пользуется, не добавляет защиты.
+Живой smoke `server/scripts/glmLiveSmoke.mts` запускается человеком для любого
+разрешённого режима (`--mode api|coding-plan --confirm-live`); флаг `--admit` после
+полного успеха дописывает проверенную запись в `deepseek/compatibility/glm.json`
+той же рабочей копии, а следующая сборка замораживает новый список в metadata.

@@ -34,6 +34,9 @@ SHA и файловый отпечаток staged inode проверяются �
 по контракту из payload кандидата сервера. При несовместимости прежний сервер и receipt
 сохраняются. Для нестандартного пути исполнителя есть `--deepseek-binary <ELF>`;
 по умолчанию проверяется соседний `bin/deepseek`, если он установлен.
+Флаг `--glm-mode api|coding-plan` выбирает фактический режим admission потребителя;
+без него проверяется режим host-контракта. `grigdesk-ctl build` передаёт режим сам:
+[правило выбора](server-install-glm-mode.md).
 
 Чужие target, symlink и неправильные receipt отклоняются. Private receipt
 `grigdesk-server.grigdesk-server.json` имеет режим 0600 и привязан к абсолютному target.

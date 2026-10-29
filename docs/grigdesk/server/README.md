@@ -1,5 +1,7 @@
 # Сервер и доступ
 
+- [Единый режим допуска GLM при установке сервера и DeepSeek](server-install-glm-mode.md)
+
 - [Условная правка .env: сверка прежнего значения под очередью писателя](env-file-expected-value.md)
 
 - [Исходный PATH/prefix и приватная проверка Bash для внешних CLI](user-cli-parent-environment.md)

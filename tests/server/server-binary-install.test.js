@@ -92,13 +92,18 @@ function probes(calls = [], metadata = info) {
  * Кандидат выдаёт свой контракт через prepare, установленный исполнитель отвечает процессом.
  * Source-контракт намеренно не участвует в пробе: тест может менять ревизию только кандидата.
  */
-async function executorFixture(options, { host = hostContract, admitted = true, verify = true } = {}) {
+async function executorFixture(options, {
+  host = hostContract,
+  admitted = true,
+  verify = true,
+  mode = 'api',
+} = {}) {
   const binary = path.join(path.dirname(options.target), 'deepseek');
   const metadata = runtimeInfoFixture();
 
   metadata.glm.admission = admitted ? [{
-    mode: 'api',
-    compatibility: glmCompatibilityHash(metadata.glm.inputs, 'api', {
+    mode,
+    compatibility: glmCompatibilityHash(metadata.glm.inputs, mode, {
       profile: metadata.glm.profileRevision,
       policy: metadata.glm.policyRevision,
     }),
@@ -199,6 +204,53 @@ test('SB-пара: повторная совместимая сборка сох
     assert.equal(await sha256File(options.target), result.sha256);
     assert.equal(await sha256File(executor.binary), digest);
   }
+});
+
+test('SB-пара: допуск проверяется для режима потребителя с ревизиями кандидата', async (t) => {
+  const { options } = await fixture(t);
+  const previous = await installBinary(options, { probe: probes() });
+  const receipt = `${options.target}.grigdesk-server.json`;
+  const receiptBefore = await fs.readFile(receipt, 'utf8');
+  const executor = await executorFixture(options, { mode: 'coding-plan' });
+  const digest = await sha256File(executor.binary);
+
+  await fs.writeFile(options.binary, '\x7fELF-next-server');
+  await assert.rejects(installBinary(options, { probe: executor.probe }), /Совместимость/u);
+  assert.equal(await sha256File(options.target), previous.sha256);
+  assert.equal(await fs.readFile(receipt, 'utf8'), receiptBefore);
+
+  const result = await installBinary({ ...options, glmMode: 'coding-plan' }, { probe: executor.probe });
+
+  assert.equal(await sha256File(options.target), result.sha256);
+  assert.equal(await sha256File(executor.binary), digest);
+
+  const incompatible = structuredClone(hostContract);
+
+  incompatible.glm.profileRevision = 'next-profile';
+
+  const changed = await executorFixture(options, { host: incompatible, mode: 'coding-plan' });
+
+  await assert.rejects(installBinary({ ...options, glmMode: 'coding-plan' }, {
+    probe: changed.probe,
+  }), /Совместимость/u);
+  assert.equal(await sha256File(options.target), result.sha256);
+});
+
+test('SB CLI: неизвестный режим GLM отклоняется до установки', async (t) => {
+  const { options } = await fixture(t);
+  const script = path.resolve(import.meta.dirname, '../../server/scripts/installBinary.mts');
+
+  await assert.rejects(run(process.execPath, [script,
+    '--binary', options.binary,
+    '--target', options.target,
+    '--glm-mode', 'experimental',
+  ]), (error) => {
+    assert.equal(error.code, 2);
+    assert.match(error.stderr, /--glm-mode api\|coding-plan/u);
+
+    return true;
+  });
+  assert.deepEqual(await fs.readdir(path.dirname(options.target)), []);
 });
 
 test('SB-пара: подмена исполнителя после проверки запрещает публикацию', async (t) => {

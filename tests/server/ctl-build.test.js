@@ -112,8 +112,146 @@ test('build: неизвестная цель и лишний аргумент д
     const result = await box.run(['build', ...tail]);
 
     assert.equal(result.code, 2, `${JSON.stringify(tail)}: ${result.stderr}`);
-    assert.match(result.stderr, /build \[all\|server\|web\|window\]/);
+    assert.match(result.stderr, /build \[all\|server\|web\|window\|deepseek\]/);
     assert.deepEqual(await box.calls(), []);
+  }
+});
+
+test('build deepseek: отдельная цель собирает, проверяет и ставит поставку', async (t) => {
+  const box = await fixture(t);
+  const result = await box.run(['build', 'deepseek']);
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(await box.calls(), expectedBuildCalls(box, 'deepseek'));
+  assert.match(result.stdout, /Поставлен DeepSeek: .*bin\/deepseek/u);
+  assert.match(result.stdout, /Новый ELF получит следующий ход DeepSeek/u);
+  assert.doesNotMatch(result.stdout, /Закройте окно/u);
+});
+
+test('build deepseek: установленные зависимости не переустанавливаются', async (t) => {
+  const box = await fixture(t);
+
+  await fs.mkdir(path.join(box.root, 'deepseek/node_modules'), { recursive: true });
+
+  const result = await box.run(['build', 'deepseek']);
+  const calls = await box.calls();
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(calls.length, 6);
+  assert.ok(!calls.some((call) => call.args.includes('install') && call.args.includes('--no-fund')));
+  assert.ok(calls[0].args.includes('prepare:runtime'));
+});
+
+test('build deepseek: без допуска и без smoke сборка зелёная, установка отложена', async (t) => {
+  const box = await fixture(t);
+
+  await box.fail('npm', 'admission:check', 3);
+
+  const result = await box.run(['build', 'deepseek']);
+  const calls = await box.calls();
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Установка не выполнена: не хватает живого допуска GLM \(api\)/u);
+  assert.match(result.stdout, /Повторите сборку, выбрав живой smoke/u);
+  assert.match(result.stdout, /glmLiveSmoke\.mts --mode api --admit/u);
+  assert.doesNotMatch(result.stdout, /Поставлен DeepSeek/u);
+  assert.doesNotMatch(result.stdout, /Новый ELF получит следующий ход/u);
+  assert.ok(!calls.some((call) => call.args.includes('install:binary')));
+  assert.ok(!calls.some((call) => call.args.includes('prune:cache')));
+});
+
+test('build deepseek: выбранный smoke запускается для режима без допуска', async (t) => {
+  const box = await fixture(t);
+
+  await box.fail('npm', 'admission:check', 3);
+
+  const result = await box.run(['build', 'deepseek'], { GRIGDESK_DEEPSEEK_SMOKE: 'consumer' });
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /не удалось: deepseek/u);
+  assert.match(result.stderr, /Живой smoke GLM \(api\) не пройден/u);
+  assert.ok((await box.calls()).some((call) => call.args.includes('admission:check')));
+});
+
+test('build deepseek: отказ установки сохраняет путь кандидата и код стадии', async (t) => {
+  const box = await fixture(t);
+
+  await box.fail('npm', 'install:binary', 26);
+
+  const result = await box.run(['build', 'deepseek']);
+
+  assert.equal(result.code, 26, result.stderr);
+  assert.match(result.stderr, /не удалось: deepseek/u);
+  assert.match(result.stderr, /DeepSeek собран и проверен: /u);
+  assert.match(result.stderr, /Установка не выполнена/u);
+  assert.doesNotMatch(result.stdout, /Поставлен DeepSeek/u);
+  assert.ok(!(await box.calls()).some((call) => call.args.includes('prune:cache')));
+});
+
+test('build deepseek: отказ чистки не отменяет успешную установку', async (t) => {
+  const box = await fixture(t);
+
+  await box.fail('npm', 'prune:cache', 31);
+
+  const result = await box.run(['build', 'deepseek']);
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stderr, /Чистка кэша DeepSeek не выполнена/u);
+  assert.match(result.stdout, /Поставлен DeepSeek: .*bin\/deepseek/u);
+  assert.deepEqual(await box.calls(), expectedBuildCalls(box, 'deepseek'));
+});
+
+test('build: сервер и DeepSeek получают фактический режим GLM потребителя', async (t) => {
+  const envFile = async (box, content) => {
+    await fs.mkdir(box.env.GRIGDESK_HOME, { recursive: true });
+    await fs.writeFile(path.join(box.env.GRIGDESK_HOME, '.env'), content);
+  };
+  const installMode = async (box) => {
+    const install = (await box.calls()).find((call) => call.args.includes('install:binary'));
+    const flag = install.args.indexOf('--glm-mode');
+
+    return install.args[flag + 1];
+  };
+
+  for (const target of ['server', 'all', 'deepseek']) {
+    await t.test(target, async (t) => {
+      const fromEnv = await fixture(t);
+      const fromEnvResult = await fromEnv.run(['build', target], {
+        GRIGDESK_GLM_API_MODE: 'coding-plan',
+      });
+
+      assert.equal(fromEnvResult.code, 0, fromEnvResult.stderr);
+      assert.equal(await installMode(fromEnv), 'coding-plan');
+
+      const fromFile = await fixture(t);
+
+      await envFile(fromFile, 'GRIGDESK_GLM_API_MODE=coding-plan\n');
+
+      const fromFileResult = await fromFile.run(['build', target]);
+
+      assert.equal(fromFileResult.code, 0, fromFileResult.stderr);
+      assert.equal(await installMode(fromFile), 'coding-plan');
+
+      const overrideBeatsFile = await fixture(t);
+
+      await envFile(overrideBeatsFile, 'GRIGDESK_GLM_API_MODE=coding-plan\n');
+
+      const overrideResult = await overrideBeatsFile.run(['build', target], {
+        GRIGDESK_GLM_API_MODE: 'api',
+      });
+
+      assert.equal(overrideResult.code, 0, overrideResult.stderr);
+      assert.equal(await installMode(overrideBeatsFile), 'api');
+
+      const unknownFallsBack = await fixture(t);
+
+      await envFile(unknownFallsBack, 'GRIGDESK_GLM_API_MODE=experimental\n');
+
+      const unknownResult = await unknownFallsBack.run(['build', target]);
+
+      assert.equal(unknownResult.code, 0, unknownResult.stderr);
+      assert.equal(await installMode(unknownFallsBack), 'api');
+    });
   }
 });
 

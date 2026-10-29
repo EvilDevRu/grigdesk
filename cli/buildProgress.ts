@@ -77,6 +77,52 @@ async function offerOpenWindow(
 }
 
 /**
+ * Живой smoke допуска GLM — осознанный выбор человека: он расходует квоту живого API.
+ * Выбор передаётся сборке окружением и применяется только к режимам без действующего
+ * допуска; Esc или Enter оставляют пропуск по умолчанию.
+ */
+async function askDeepSeekSmoke(
+  session: TerminalSession,
+): Promise<'none' | 'consumer' | 'both' | null> {
+  const { t } = cliTranslator();
+  const choices: Array<'none' | 'consumer' | 'both'> = ['none', 'consumer', 'both'];
+  let selected = 0;
+  const render = () => showScreen(session, {
+    title: `${t('build')}: ${t('deepseek')}`,
+    state: { text: t('smokeQuestion'), tone: 'accent' },
+    lines: choices.map((choice, index) => ({
+      text: `${index === selected ? '›' : ' '} ${t(`smokeChoice.${choice}`)}`,
+      selected: index === selected,
+    })),
+    footer: t('smokeNavigation'),
+  });
+
+  session.resume();
+  render();
+
+  while (true) {
+    const key = await session.nextKey();
+
+    if (['interrupt', 'terminate'].includes(key.name)) {
+      session.suspend();
+
+      return null;
+    }
+
+    if (['escape', 'eof', 'return'].includes(key.name)) {
+      session.suspend();
+
+      return choices[selected]!;
+    }
+
+    if (key.name === 'down' || key.name === 'up') {
+      selected = (selected + (key.name === 'down' ? 1 : -1) + choices.length) % choices.length;
+      render();
+    }
+  }
+}
+
+/**
  * Контроллер запускает прежнюю оболочку, читая отдельный канал фактических стадий.
  * Он владеет только своей группой и доказанными потомками, не трогая службы или окно.
  */
@@ -85,6 +131,16 @@ async function observeBuild(
 ): Promise<number> {
   const { t } = cliTranslator();
   const input = { env: process.env, home: process.env.HOME || os.homedir() };
+
+  // Выбор живого smoke спрашивается до журнала и запуска оболочки: отмена
+  // на вопросе не оставляет открытых ресурсов, а квота живого API тратится
+  // только по явному решению человека.
+  const smokeChoice = variant === 'deepseek' ? await askDeepSeekSmoke(session) : undefined;
+
+  if (variant === 'deepseek' && smokeChoice === null) {
+    return 130;
+  }
+
   let log: Awaited<ReturnType<typeof openBuildLog>>;
 
   try {
@@ -132,6 +188,7 @@ async function observeBuild(
     cwd: root,
     env: {
       ...process.env,
+      ...smokeChoice ? { GRIGDESK_DEEPSEEK_SMOKE: smokeChoice } : {},
       GRIGDESK_CTL_BUILD_CHILD: '1',
       GRIGDESK_CTL_BUILD_OBSERVED: '1',
     },
@@ -404,7 +461,8 @@ async function observeBuild(
   const summary = variant === 'bundle' ? 'summaryBundle'
     : `summary${variant[0]!.toUpperCase()}${variant.slice(1)}`;
   const target = variant === 'server' ? 'bin/grigdesk-server'
-    : variant === 'window' ? 'bin/grigdesk-app' : 'web/dist';
+    : variant === 'window' ? 'bin/grigdesk-app'
+    : variant === 'deepseek' ? 'bin/deepseek' : 'web/dist';
   const lines = [t(summary, { path: path.join(root, target) }), t('total', { time: duration(elapsed) })];
 
   if (selectServer) {
@@ -416,7 +474,8 @@ async function observeBuild(
   }
 
   if (variant !== 'bundle') {
-    lines.push(t(variant === 'web' ? 'webHint' : selectServer ? 'serverNotSelected' : 'reopen'));
+    lines.push(t(variant === 'web' ? 'webHint'
+      : variant === 'deepseek' ? 'deepseekHint' : selectServer ? 'serverNotSelected' : 'reopen'));
   }
 
   const summaryScreen: ScreenOptions = {
@@ -434,7 +493,7 @@ async function observeBuild(
     full: true,
   };
 
-  if (variant === 'bundle') {
+  if (variant === 'bundle' || variant === 'deepseek') {
     showScreen(session, summaryScreen);
 
     return 0;

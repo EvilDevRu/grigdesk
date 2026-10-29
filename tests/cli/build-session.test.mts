@@ -28,7 +28,7 @@ async function leaveSuccessfulMenu(session: ReturnType<typeof launchBuild>) {
   assertRestored(result, session.output());
 }
 
-for (const target of ['all', 'server', 'web', 'window', 'bundle']) {
+for (const target of ['all', 'server', 'web', 'window', 'deepseek', 'bundle']) {
   for (const locale of ['ru_RU.UTF-8', 'en_US.UTF-8']) {
     test(`BS-RESULTS/SUMMARY: меню ${target}, ${locale}, шаги, прогресс, полный журнал и итог`, async (t) => {
       const box = await terminalBuildFixture(t);
@@ -42,6 +42,13 @@ for (const target of ['all', 'server', 'web', 'window', 'bundle']) {
       });
 
       await chooseBuild(session, target);
+
+      // Цель deepseek сначала спрашивает про живой smoke; Enter оставляет пропуск.
+      if (target === 'deepseek') {
+        await session.wait(/smoke/iu, 4000);
+        session.write('\r');
+      }
+
       await session.wait(totalTime, 10000);
 
       const output = session.output();
@@ -55,7 +62,7 @@ for (const target of ['all', 'server', 'web', 'window', 'bundle']) {
       assert.match(output, locale.startsWith('ru') ? /Журнал/u : /Log/u);
       assert.match(output, locale.startsWith('ru') ? /Сборка/u : /Build/iu);
 
-      if (target !== 'bundle') {
+      if (target !== 'bundle' && target !== 'deepseek') {
         assert.match(output, locale.startsWith('ru')
           ? /Открыть окно GrigDesk\?/u : /Open the GrigDesk window\?/u);
       } else {
@@ -91,6 +98,11 @@ for (const target of ['all', 'server', 'web', 'window', 'bundle']) {
           assert.doesNotMatch(output, /Закройте окно|Close the window/iu);
         } else if (target === 'server') {
           assert.match(output, locale.startsWith('ru') ? /новый сервер ещё не выбран/u : /not selected yet/u);
+        } else if (target === 'deepseek') {
+          assert.match(output, locale.startsWith('ru')
+            ? /Поставлен DeepSeek: /u : /Installed DeepSeek: /u);
+          assert.match(output, locale.startsWith('ru')
+            ? /Новый ELF получит следующий ход DeepSeek/u : /next DeepSeek turn/u);
         } else {
           assert.match(output, locale.startsWith('ru') ? /Закройте окно/iu : /Close.*window/iu);
         }

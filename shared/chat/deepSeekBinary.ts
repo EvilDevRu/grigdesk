@@ -70,7 +70,7 @@ const decodeHost = objectOf({
   hostContract: positiveInteger,
   requiredCapabilities: listOf(oneOf('web', 'acp', 'settingsWeb', 'settingsAcp')),
   glm: objectOf({
-    mode: oneOf('api'),
+    mode: oneOf('api', 'coding-plan'),
     profileRevision: nonemptyText,
     policyRevision: nonemptyText,
   }),

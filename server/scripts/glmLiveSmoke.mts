@@ -92,8 +92,8 @@ function answered(status: number, body: Record<string, any>): boolean {
  * стоп во время approval, повтор принятого хода по turnId. Возвращает шаги отчёта.
  */
 export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
-  if (options.mode !== 'api') {
-    throw glmAccessError('glm_mode_not_admitted', 'Живая проверка разрешает временный допуск только api.');
+  if (options.mode !== 'api' && options.mode !== 'coding-plan') {
+    throw glmAccessError('glm_mode_not_admitted', 'Живая проверка разрешает только известные режимы GLM.');
   }
   if (!path.isAbsolute(options.binary) || !path.isAbsolute(options.cacheDir)) {
     throw new TypeError('Smoke требует абсолютные --binary и --cache-dir');
@@ -308,18 +308,45 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
 }
 
 /**
+ * Успешная живая проверка дописывает проверенный допуск в выпускную копию
+ * compatibility-файла той же рабочей tree, откуда запущен скрипт. Запись режима
+ * заменяется целиком, остальные режимы и ревизии не меняются. Следующая сборка
+ * замораживает новый список в metadata ELF.
+ */
+async function admitSmokeCompatibility(mode: GlmAccessMode, compatibility: string): Promise<void> {
+  const file = fileURLToPath(new URL('../../deepseek/compatibility/glm.json', import.meta.url));
+  const current = JSON.parse(await fs.readFile(file, 'utf8')) as {
+    admission?: Array<{ mode: string; compatibility: string }>;
+  };
+
+  if (!Array.isArray(current.admission)) {
+    throw new TypeError('Файл compatibility не содержит список admission');
+  }
+
+  current.admission = [
+    ...current.admission.filter((entry) => entry.mode !== mode),
+    { mode, compatibility },
+  ];
+
+  await fs.writeFile(file, `${JSON.stringify(current, null, 2)}\n`);
+  process.stdout.write(`ADMIT ${mode} ${compatibility}\n`);
+}
+
+/**
  * Точка входа человека: режим и явное подтверждение живого запуска обязательны.
  * Отчёт пишется в каталог артефактов этапа, временные homes удаляются.
+ * `--admit` дописывает допуск только после полностью успешного сценария.
  */
 async function main(): Promise<void> {
   const mode = parseGlmAccessMode(shellArgument('--mode'));
   const binary = shellArgument('--binary');
   const cacheDir = shellArgument('--cache-dir');
 
-  if (mode !== 'api' || !process.argv.includes('--confirm-live')
+  if (!mode || !process.argv.includes('--confirm-live')
     || !path.isAbsolute(binary) || !path.isAbsolute(cacheDir)) {
-    process.stderr.write('Использование: node server/scripts/glmLiveSmoke.mts --mode api '
-      + '--confirm-live --binary <абсолютный ELF> --cache-dir <отдельный cache> [--model glm-5.3]\n');
+    process.stderr.write('Использование: node server/scripts/glmLiveSmoke.mts --mode api|coding-plan '
+      + '--confirm-live --binary <абсолютный ELF> --cache-dir <отдельный cache> '
+      + '[--model glm-5.3] [--admit]\n');
     process.exitCode = 2;
 
     return;
@@ -350,6 +377,11 @@ async function main(): Promise<void> {
     await fs.writeFile(file, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
     process.stdout.write(`${report.ok ? 'OK' : 'FAIL'} ${file}\n`);
     process.exitCode = report.ok ? 0 : 1;
+
+    if (report.ok && process.argv.includes('--admit')) {
+      await admitSmokeCompatibility(mode, report.compatibility);
+      process.stdout.write('Повторите сборку поставки, чтобы заморозить новый допуск в metadata.\n');
+    }
   } finally {
     await fs.rm(work, { recursive: true, force: true });
   }
