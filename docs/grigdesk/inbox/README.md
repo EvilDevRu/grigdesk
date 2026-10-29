@@ -15,6 +15,7 @@
 - [GitHub Issues](github-issues.md)
 - [HTTP и real-time](http-and-realtime.md)
 - [Identity, leases и stores](identity-leases-and-stores.md)
+- [Каркас первого чтения очереди: каталог, вкладки и переписка](loading-layout.md)
 - [Telegram](telegram.md)
 
 ## Грабли

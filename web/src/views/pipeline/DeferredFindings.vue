@@ -5,7 +5,9 @@
       <span v-if="items.length" class="deferred-count">{{ items.length }}</span>
     </header>
 
-    <UiLoadingState v-if="loading" label="Читаю замечания попытки…" variant="document" />
+    <UiLoadingState v-if="loading" label="Читаю замечания попытки…" variant="document">
+      <div class="findings-loading"><UiSkeletonLayout layout="text" :header="false" /></div>
+    </UiLoadingState>
     <div v-else-if="error" class="deferred-error" role="alert">
       <p>{{ error }}</p>
       <UiButton variant="text" size="compact" @click="load">Повторить чтение</UiButton>
@@ -42,6 +44,7 @@ import { api } from '../../shared/apiClient.ts';
 import {
   UiButton,
   UiLoadingState,
+  UiSkeletonLayout,
 } from '../../ui';
 
 interface DeferredFindingView {
@@ -135,6 +138,10 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.findings-loading {
+  --skeleton-row-height: 20px;
+}
+
 /* Отложенные находки — решение человека на приёмке, поэтому раздел читается
    карточкой: заголовок со счётчиком, затем короткие нумерованные пункты.
    Раньше это был сплошной абзац с маркированным списком, и в колонке 400 px

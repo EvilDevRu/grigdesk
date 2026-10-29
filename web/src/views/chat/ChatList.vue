@@ -37,7 +37,7 @@
               </svg>
             </span>
             <div class="load-copy">
-              <strong class="load-title">
+              <strong class="load-title" :class="{ 'ui-loading-state__hidden': !chat.loadError }">
                 {{ t(chat.loadError ? 'core.chatListLoadFailed' : 'core.chatListLoading') }}
               </strong>
               <p v-if="chat.loadError" class="load-reason">
@@ -56,12 +56,13 @@
 
         <div v-if="!chat.loadError" class="list-skeleton" aria-hidden="true">
           <div v-for="index in 6" :key="index" class="skeleton-row">
-            <span class="skeleton-avatar" />
+            <UiSkeleton shape="circle" class="skeleton-avatar"
+                        width="var(--chat-avatar-size)" height="var(--chat-avatar-size)" />
             <span class="skeleton-copy">
-              <span class="skeleton-title" />
-              <span class="skeleton-snippet" />
+              <UiSkeleton class="skeleton-title" height="9px" />
+              <UiSkeleton class="skeleton-snippet" height="7px" />
             </span>
-            <span class="skeleton-time" />
+            <UiSkeleton class="skeleton-time" height="6px" />
           </div>
         </div>
       </div>
@@ -244,6 +245,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeleton } from '../../ui';
+
 import type { ChatListRow } from '../../shared/chatContracts.ts';
 import type { UiFieldHandle } from '../../ui.ts';
 import type { ChatSleepingSession } from '../../../../shared/chat/chatBackgroundTasks.ts';
@@ -556,7 +559,6 @@ async function del(r: ListRow) {
   padding: 0 8px;
   pointer-events: none;
   mask-image: linear-gradient(to bottom, #000 15%, transparent 100%);
-  animation: list-pulse 2.4s ease-in-out infinite;
 }
 .skeleton-row {
   display: flex;
@@ -565,19 +567,9 @@ async function del(r: ListRow) {
   min-height: var(--chat-list-row-h);
   padding: 8px 6px;
 }
-.skeleton-avatar,
-.skeleton-title,
-.skeleton-snippet,
-.skeleton-time {
-  display: block;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--ink-mid) 12%, transparent);
-}
 .skeleton-avatar {
   width: var(--chat-avatar-size);
-  height: var(--chat-avatar-size);
   flex: none;
-  border-radius: 50%;
 }
 .skeleton-copy {
   display: flex;
@@ -588,16 +580,13 @@ async function del(r: ListRow) {
 }
 .skeleton-title {
   width: 68%;
-  height: 9px;
 }
 .skeleton-snippet {
   width: 90%;
-  height: 7px;
 }
 .skeleton-time {
   align-self: flex-start;
   width: 22px;
-  height: 6px;
   margin-top: 8px;
 }
 .skeleton-row:nth-child(even) .skeleton-title {
@@ -606,14 +595,6 @@ async function del(r: ListRow) {
 .skeleton-row:nth-child(3n) .skeleton-snippet {
   width: 65%;
 }
-@keyframes list-pulse {
-  0%, 100% { opacity: .55; }
-  50% { opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .list-skeleton { animation: none; }
-}
-
 /* Фон строки — непрозрачный `--row-bg` поверх фона списка (`--surface`): тем же цветом
    кнопки действий закрывают конец названия и время, не отличаясь от самой строки. */
 .row { position: relative; display: flex; align-items: center; gap: 9px; padding: 4px 8px;

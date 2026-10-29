@@ -438,7 +438,9 @@
         </div>
 
         <div class="ssh-connections__body">
-          <UiLoadingState v-if="refreshLoading && !store.connections?.length && !store.error" />
+          <UiLoadingState v-if="refreshLoading && !store.connections?.length && !store.error">
+            <UiSkeletonLayout layout="list" :header="false" />
+          </UiLoadingState>
           <div v-else-if="store.connections?.length" class="ssh-connection-list">
             <section
               v-for="group in connectionGroups"
@@ -665,6 +667,7 @@ import {
   confirmDialog,
   vTooltip,
   UiLoadingState,
+  UiSkeletonLayout,
 } from '../../ui';
 import type {
   SshAuditEntry,

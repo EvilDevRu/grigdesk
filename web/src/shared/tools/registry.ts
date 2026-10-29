@@ -4,7 +4,7 @@ import { uiLocale } from '../../ui.ts';
 import { translator } from '../../../../shared/i18n/catalogs.ts';
 import { asyncView } from '../asyncView.ts';
 import type { Component } from 'vue';
-import CodePanelLoading from '../../views/code/codePanelLoading.ts';
+import { panelLoading } from './panelLoading.ts';
 import { TOOL_CATALOG, pluginPageRoute } from './catalog.ts';
 import type { ToolMeta } from './catalog.ts';
 import type { PluginWebModule } from '../../../../shared/plugins/pluginsContracts.ts';
@@ -36,17 +36,21 @@ interface PluginsPagesPort {
 // Панель на инструмент. Ключи совпадают с `id` каталога — это и есть условие
 // «только встроенный инструмент монтирует Vue».
 const PANELS: Record<string, Component> = {
-  code: asyncView(() => import('../../views/code/CodePanel.vue'), CodePanelLoading),
-  shelf: asyncView(() => import('../../views/shelf/TaskShelfPanel.vue')),
-  studio3d: asyncView(() => import('../../views/studio3d/Studio3dPanel.vue')),
-  terminal: asyncView(() => import('../../views/terminal/TerminalPanel.vue')),
-  ssh: asyncView(() => import('../../views/ssh/SshPanel.vue')),
-  db: asyncView(() => import('../../views/db/DbPanel.vue')),
-  docker: asyncView(() => import('../../views/docker/DockerPanel.vue')),
+  code: asyncView(() => import('../../views/code/CodePanel.vue'), panelLoading('code')),
+  shelf: asyncView(() => import('../../views/shelf/TaskShelfPanel.vue'), panelLoading('shelf')),
+  studio3d: asyncView(() => import('../../views/studio3d/Studio3dPanel.vue'), panelLoading('studio3d')),
+  terminal: asyncView(() => import('../../views/terminal/TerminalPanel.vue'), panelLoading('terminal')),
+  ssh: asyncView(() => import('../../views/ssh/SshPanel.vue'), panelLoading('ssh')),
+  db: asyncView(() => import('../../views/db/DbPanel.vue'), panelLoading('db')),
+  docker: asyncView(() => import('../../views/docker/DockerPanel.vue'), panelLoading('docker')),
 };
 
-const PluginFramePanel = asyncView(() => import('../../views/ext/PluginFramePanel.vue'));
-const PluginModulePanel = asyncView(() => import('../../views/ext/PluginModulePanel.vue'));
+const PluginFramePanel = asyncView(
+  () => import('../../views/ext/PluginFramePanel.vue'), panelLoading('external'),
+);
+const PluginModulePanel = asyncView(
+  () => import('../../views/ext/PluginModulePanel.vue'), panelLoading('external'),
+);
 
 export const TOOL_REGISTRY: ToolEntry[] = TOOL_CATALOG.map((item) => ({
   ...item,

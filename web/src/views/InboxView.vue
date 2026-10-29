@@ -98,7 +98,7 @@
         </p>
       </section>
 
-      <UiLoadingState v-if="loading && !payload.items.length" label="Загружаю очередь…" variant="cards" />
+      <InboxLoading v-if="loading && !payload.items.length" label="Загружаю очередь…" :failed="Boolean(error)" />
       <template v-else-if="payload.items.length">
         <div class="inbox-workspace" :data-panel="panel">
           <aside ref="catalog" class="inbox-catalog" :aria-label="t('core.inboxQueueLabel')">
@@ -310,6 +310,8 @@
 </template>
 
 <script setup lang="ts">
+import InboxLoading from './InboxLoading.vue';
+
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 
@@ -340,7 +342,6 @@ import {
   confirmDialog,
   promptDialog,
   showToast,
-  UiLoadingState,
   UiPaneHeader,
   UiSearchInput,
   UiSelect,

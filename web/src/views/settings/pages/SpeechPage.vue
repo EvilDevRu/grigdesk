@@ -7,7 +7,9 @@
     <SettingsScope />
     <p v-if="error || operations.message.value" role="alert">{{ error || operations.message.value }}</p>
     <UiLoadingState v-if="!loaded && !error" :label="t('settings.loadingSpeechSettings')"
-      variant="document" />
+      variant="document" >
+      <UiSkeletonLayout layout="form" :header="false" />
+    </UiLoadingState>
     <template v-else-if="loaded">
       <template v-if="settings.pageId === 'speech.dictation'">
         <SettingsField :address="address('engine')">
@@ -269,6 +271,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../../ui';
+
 import { t, uiLocale } from '../../../ui.ts';
 import { formatNumber } from '../../../../../shared/i18n/formats.ts';
 

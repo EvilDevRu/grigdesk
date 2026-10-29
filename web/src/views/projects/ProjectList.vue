@@ -39,7 +39,9 @@
       <UiButton variant="text" data-role="project-retry" @click="emit('retry')">Повторить</UiButton>
     </div>
 
-    <UiLoadingState v-if="loading && !items.length" label="Загрузка…" />
+    <UiLoadingState v-if="loading && !items.length" label="Загрузка…" :failed="Boolean(error)" >
+      <div class="project-loading"><UiSkeletonLayout layout="list" :header="false" /></div>
+    </UiLoadingState>
     <div v-else-if="!items.length && !error" class="empty">
       <strong>Проектов пока нет.</strong>
       <span>Создайте первый, чтобы собрать его настройки и репозитории вместе.</span>
@@ -81,6 +83,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../ui';
+
 // Список проектов: строка отвечает на «что это за проект и где его код», а поиск
 // и фильтр — на «как его найти». Сети и состояния здесь нет: список приходит
 // готовым, а открытие паспорта — событие наружу.
@@ -151,6 +155,10 @@ const visible = computed(() => {
 </script>
 
 <style scoped>
+.project-loading {
+  --skeleton-row-height: max(34px, var(--control-height));
+  --skeleton-list-gap: 0px; padding: 0 6px 10px; }
+
 .list {
   min-width: 0;
 }

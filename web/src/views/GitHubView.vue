@@ -14,7 +14,7 @@
     <template v-else>
       <p v-if="error" class="banner bad" role="alert">{{ error }}</p>
       <p v-if="notice" class="banner good" role="status">{{ notice }}</p>
-      <UiLoadingState v-if="loading" label="Проверяю GitHub…" variant="cards" />
+      <GitHubLoading v-if="loading" label="Проверяю GitHub…"  :failed="Boolean(error)" />
 
       <div v-else class="grid">
         <section class="card connection-card">
@@ -127,6 +127,8 @@
 </template>
 
 <script setup lang="ts">
+import GitHubLoading from './GitHubLoading.vue';
+
 import { computed, onMounted, reactive, ref } from 'vue';
 
 import { errorMessage } from '../../../shared/lib/errors.ts';

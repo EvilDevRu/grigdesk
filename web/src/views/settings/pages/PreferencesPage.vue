@@ -1,7 +1,9 @@
 <template>
   <div class="settings-preferences">
     <p v-if="error" role="alert">{{ error }}</p>
-    <UiLoadingState v-if="!loaded && !error" :label="t('settings.loadingParameters')" variant="document" />
+    <UiLoadingState v-if="!loaded && !error" :label="t('settings.loadingParameters')" variant="document" >
+      <UiSkeletonLayout layout="form" :header="false" />
+    </UiLoadingState>
     <template v-else-if="loaded">
       <SettingsScope />
       <SettingsField
@@ -68,6 +70,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../../ui';
+
 import { t, uiLocale } from '../../../ui.ts';
 
 import { computed, ref, watch } from 'vue';

@@ -302,7 +302,7 @@
       </div>
     </div>
 
-    <UiLoadingState v-if="!loaded && !error" label="Загрузка…" variant="cards" />
+    <PipelineLoading v-if="!loaded && !error" label="Загрузка…" :compact="compact" :loops-on="loopsOn" />
     <p v-else-if="error" class="err">Ошибка: {{ error }}</p>
     <p v-else-if="!tasks.length" class="muted">Задач в состоянии фабрики нет.</p>
     <div v-else-if="!filteredTasks.length" class="filter-empty">
@@ -832,7 +832,9 @@
               <!-- Документ этапа: план у ворот плана, диагноз у ворот причины, отчёт на приёмке -->
               <div v-if="stageDocLoading" class="sect content-sect">
                 <div class="secth">Документ этапа</div>
-                <UiLoadingState label="Документ этапа" variant="document" />
+                <UiLoadingState label="Документ этапа" variant="document">
+                  <UiSkeletonLayout layout="text" :header="false" />
+                </UiLoadingState>
               </div>
               <div v-else-if="stageDoc" class="sect content-sect document-sect">
                 <UiDisclosureButton
@@ -1069,6 +1071,8 @@
 </template>
 
 <script setup lang="ts">
+import PipelineLoading from './PipelineLoading.vue';
+
 import DeferredFindings from './pipeline/DeferredFindings.vue';
 import StageExecutorFields from './pipeline/StageExecutorFields.vue';
 import BootstrapDecision from './pipeline/BootstrapDecision.vue';
@@ -1132,6 +1136,7 @@ import {
   UiTabs,
   vTooltip,
   UiLoadingState,
+  UiSkeletonLayout,
   t as translate,
 } from '../ui';
 import { sandboxUrl } from '../shared/sandbox.ts';

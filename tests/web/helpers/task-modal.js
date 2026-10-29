@@ -46,6 +46,7 @@ function uiFacadeStub(prefix, { stubDialog = false } = {}) {
     : [];
 
   return [
+    "export * from './src/ui.ts';",
     ...imports,
     ...dialogStub,
     `export { t } from ${JSON.stringify(webFile('src/services/locale.ts'))};`,

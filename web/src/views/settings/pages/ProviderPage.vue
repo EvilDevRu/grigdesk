@@ -197,7 +197,9 @@
               class="settings-native-panel"
             >
               <UiLoadingState v-if="nativeState.loading" :label="t('settings.loadingCatalog')"
-                variant="document" />
+                variant="document" :failed="Boolean(nativeState.error)" >
+                <UiSkeletonLayout layout="form" :header="false" />
+              </UiLoadingState>
               <p v-if="nativeState.error" role="alert">{{ nativeState.error }}</p>
               <template v-if="nativeState.catalog">
                 <p>{{ nativeState.catalog.scope.label }} {{ t('settings.savedForTheNextRun') }}</p>
@@ -334,7 +336,10 @@
         <p v-else-if="ready">{{ t('settings.theProviderDoesNotDeclareThisCapability') }}</p>
       </template>
       <p v-else-if="settings.entityId">{{ t('settings.theProviderIsNoLongerAvailableIn') }}</p>
-      <UiLoadingState v-else-if="!providers.loaded" :label="t('settings.loadingProviders')" />
+      <UiLoadingState v-else-if="!providers.loaded" :label="t('settings.loadingProviders')"
+                      :failed="Boolean(error)">
+        <UiSkeletonLayout layout="form" :header="false" />
+      </UiLoadingState>
       <div v-else class="settings-provider-empty">
         <h4>{{ t('settings.noProvidersFound') }}</h4>
         <p>{{ t('settings.clickRecheckToGetTheListOf') }}</p>
@@ -356,6 +361,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../../ui';
+
 import {
   t,
   uiLocale,

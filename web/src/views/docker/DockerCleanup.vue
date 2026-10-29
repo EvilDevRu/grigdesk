@@ -23,8 +23,8 @@
       {{ store.usageError }}
     </UiInlineMessage>
 
-    <UiLoadingState v-else-if="!store.usage && store.usageLoading" variant="inline"
-      label="Демон считает размеры слоёв, это занимает несколько секунд…" />
+    <DockerLoading v-else-if="!store.usage && store.usageLoading"
+      label="Демон считает размеры слоёв, это занимает несколько секунд…"  area="usage" />
     <p v-else-if="!store.usage" class="docker-cleanup__empty">
       Нажмите «Пересчитать», чтобы узнать занятое место.
     </p>
@@ -100,6 +100,8 @@
 </template>
 
 <script setup lang="ts">
+import DockerLoading from './DockerLoading.vue';
+
 import { computed, reactive, ref } from 'vue';
 
 import type { DockerPruneTarget } from '../../../../shared/plugins/docker/dockerContracts';
@@ -111,7 +113,6 @@ import {
   UiCheckbox,
   UiInlineMessage,
   confirmDialog,
-  UiLoadingState,
 } from '../../ui';
 import { formatAge, formatSize } from './format';
 import { dockerSettings } from './settings';

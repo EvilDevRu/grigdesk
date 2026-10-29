@@ -21,7 +21,7 @@
     <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen" @created="ui.openTask($event)" />
 
     <template v-if="ownTasks.b24Configured !== false">
-    <UiLoadingState v-if="!data && !error" label="Загрузка доски…" variant="cards" />
+    <BoardLoading v-if="!data && !error" label="Загрузка доски…" />
     <div v-else-if="error" class="err">
       Ошибка B24: {{ error }}
       <UiButton variant="text" @click="openSettings({ pageId: 'connections.b24' })">→ Настройки</UiButton>
@@ -451,6 +451,8 @@
 </template>
 
 <script setup lang="ts">
+import BoardLoading from './BoardLoading.vue';
+
 import NewGrigdeskTaskDialog from './board/NewGrigdeskTaskDialog.vue';
 import { useGrigdeskTasksStore } from '../stores/grigdeskTasks.ts';
 import type { BoardTask } from '../shared/boardContracts.ts';
@@ -487,7 +489,6 @@ import {
   UiTabs,
   UiToggleButton,
   vTooltip,
-  UiLoadingState,
 } from '../ui';
 
 const ui = useUiStore();
