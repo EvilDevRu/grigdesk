@@ -14,6 +14,63 @@ import {
   usageControlConfirmation,
 } from '../../web/src/features/providers/providerUsageActions.ts';
 
+test('окна всех исполнителей имеют общие подписи в RU/EN, включая старые и именованные квоты', () => {
+  const cases = [
+    ['codex', 'codex:primary', 300, 'Сессия (5ч)', '5 часов', '5 hours'],
+    ['codex', 'spark:primary', 300,
+      'Сессия · Spark · резерв', '5 часов · Spark · резерв', '5 hours · Spark · резерв'],
+    ['codex', 'codex:secondary', 10080, 'Неделя (7д)', 'Неделя', 'Week'],
+    ['claude', 'session', null, 'Сессия (5ч)', '5 часов', '5 hours'],
+    ['claude', 'five_hour', null, 'five hour', '5 часов', '5 hours'],
+    ['claude', 'seven_day', null, 'seven day', 'Неделя', 'Week'],
+    ['claude', 'weekly_scopedSonnet', null, 'Неделя · Sonnet', 'Неделя · Sonnet', 'Week · Sonnet'],
+    ['kimi', 'kimi:1:5:hour', null, 'Сессия (5ч)', '5 часов', '5 hours'],
+    ['kimi', 'kimi:4:5:hour', null, 'Сессия · код', '5 часов · код', '5 hours · код'],
+    ['kimi', 'kimi:2:1:week', null, 'Неделя (7д)', 'Неделя', 'Week'],
+    ['kimi', 'kimi:monthTotal', null, 'Месяц', 'Месяц', 'Month'],
+    ['glm', 'zai:5h', 300, '5 часов', '5 часов', '5 hours'],
+    ['glm', 'zai:week', 10080, 'Неделя', 'Неделя', 'Week'],
+    ['glm', 'zai:mcp', null, 'MCP за месяц', 'MCP за месяц', 'Monthly MCP'],
+  ];
+
+  for (const [providerId, key, minutes, oldLabel, russian, english] of cases) {
+    const source = {
+      key,
+      label: oldLabel,
+      pct: 34,
+      resetsAt: '2026-11-04T09:40:00.000Z',
+      ...(minutes === null ? {} : { windowMinutes: minutes }),
+    };
+    const original = structuredClone(source);
+
+    for (const [locale, label] of [['ru', russian], ['en', english]]) {
+      const view = providerUsageView({
+        state: 'ok',
+        bars: [source],
+      }, { id: providerId }, locale);
+      const { separated, ...actual } = view.bars[0];
+
+      assert.deepEqual(actual, {
+        ...original,
+        label,
+      });
+    }
+
+    assert.deepEqual(source, original);
+  }
+
+  for (const [providerId, key] of [['custom', 'session'], ['kimi', 'kimi:3:2:day']]) {
+    const bar = {
+      key,
+      windowMinutes: 300,
+      label: 'Собственное окно',
+    };
+
+    assert.equal(localizeUsageBar(providerId, bar, 'ru'), bar);
+    assert.equal(localizeUsageBar(providerId, bar, 'en'), bar);
+  }
+});
+
 test('Новые месячные квоты Kimi переводятся без выдуманной длительности окна', () => {
   const bar = {
     key: 'kimi:monthTotal',
@@ -35,7 +92,7 @@ test('Новые месячные квоты Kimi переводятся без 
     key: 'kimi:1:5:hour',
     label: 'Сессия (5ч)',
     pct: 0,
-  }, 'en').label, 'Session (5h)');
+  }, 'en').label, '5 hours');
   assert.equal(translated.summary, 'Used this month: 40%');
   assert.equal(translated.note, 'Code accounts for 20% of the monthly quota');
   assert.deepEqual(localizeUsageBar('kimi', bar, 'ru'), bar);

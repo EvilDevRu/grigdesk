@@ -548,8 +548,8 @@
       }
     }
   },
-  "usageSession": "Сессия (5ч)",
-  "usageWeek": "Неделя (7д)",
+  "usageFiveHours": "5 часов",
+  "usageWeek": "Неделя",
   "usageMonth": "Месяц",
   "usageMeasuredAt": "Данные на {time}",
   "usageMeasuredUnknown": "Время успешного замера неизвестно",

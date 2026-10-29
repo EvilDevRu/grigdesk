@@ -24,7 +24,7 @@ function bar(overrides = {}) {
   return {
     providerId: 'codex',
     barKey: 'codex:primary',
-    label: 'Неделя (7д)',
+    label: 'Сессия (5ч)',
     pct: 63,
     resetsAt: new Date(2026, 8, 19, 18, 30).toISOString(),
     ratePerHour: 6.2,
@@ -48,7 +48,7 @@ test('ряды прогноза: момент, давность, темп с в�
 
   assert.deepEqual(barRowOf(bar(), NOW), {
     key: 'codex:primary',
-    label: 'Неделя (7д)',
+    label: 'Сессия (5ч)',
     value: '6.2 %/ч',
     tone: 'bad',
     sub: { label: '100 % — сегодня 18:00', text: 'до сброса не хватит', tone: 'bad' },
@@ -62,6 +62,7 @@ test('ряды прогноза: момент, давность, темп с в�
 
   // Неделя судится по среднему: справа средний темп, под ним ожидаемый процент и текущий темп.
   const weekly = bar({
+    label: 'Неделя (7д)',
     windowMinutes: 10_080,
     basis: 'average',
     averagePerHour: 0.58,
@@ -117,7 +118,7 @@ test('компонент показывает блок своему исполн
   t.after(() => codex.unmount());
 
   assert.match(codex.text(), /Прогноз/);
-  assert.match(codex.text(), /Неделя \(7д\)\s*6.2 %\/ч/);
+  assert.match(codex.text(), /5 часов\s*6.2 %\/ч/);
   assert.match(codex.text(), /до сброса не хватит/);
   assert.doesNotMatch(codex.text(), /Сброс окна|сбросил вендор/);
   assert.doesNotMatch(codex.text(), /расход стоит/);

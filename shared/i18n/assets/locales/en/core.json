@@ -546,8 +546,8 @@
       }
     }
   },
-  "usageSession": "Session (5h)",
-  "usageWeek": "Week (7d)",
+  "usageFiveHours": "5 hours",
+  "usageWeek": "Week",
   "usageMonth": "Month",
   "usageMeasuredAt": "Data as of {time}",
   "usageMeasuredUnknown": "Successful measurement time is unknown",
