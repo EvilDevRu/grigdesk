@@ -1238,10 +1238,11 @@
   color: var(--accent);
 }
 
-/* Таймеры и конвейеры выглядят как статусы topbar, а не как отдельные кнопки.
+/* Таймеры, конвейеры и прерванные оценки используют общую геометрию статусов topbar.
    Интерактивный элемент сохраняем для клавиатуры и тач-экрана; список открывается
    наведением или нажатием. */
 .ui-button[data-context='board-timers-topbar'],
+.ui-button[data-context='analysis-attention-topbar'],
 .ui-button[data-context='pipeline-topbar'] {
   display: inline-flex;
   align-items: center;
@@ -1258,11 +1259,19 @@
 
 .ui-button[data-context='board-timers-topbar'] > .ui-button__content,
 .ui-button[data-context='board-timers-topbar'] .ui-button__label,
+.ui-button[data-context='analysis-attention-topbar'] > .ui-button__content,
+.ui-button[data-context='analysis-attention-topbar'] .ui-button__label,
 .ui-button[data-context='pipeline-topbar'] > .ui-button__content,
 .ui-button[data-context='pipeline-topbar'] .ui-button__label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.ui-button[data-context='analysis-attention-topbar'] {
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 650;
 }
 
 .ui-button[data-context='board-timers-topbar']:hover:not(:disabled),
