@@ -1,19 +1,13 @@
 import { normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts';
 import type { AccountSnapshot, Studio3dProvider } from '../../lib/studio3d/provider.ts';
 
-export type PluginAccountSnapshot = Readonly<Pick<AccountSnapshot, 'accountKey' | 'billingUrl'>>;
+import type {
+  PluginAccountSnapshot, PluginProvider,
+} from '../../../../packages/plugin-types/src/provider.ts';
 
-type SnapshotMethod = 'isCurrent' | 'balance' | 'history' | 'prepare' | 'send' | 'poll';
-type PublicArguments<Args extends unknown[]> = {
-  [Index in keyof Args]: Args[Index] extends AccountSnapshot | undefined
-    ? PluginAccountSnapshot | Extract<Args[Index], undefined> : Args[Index];
-};
-type PublicMethod<Key extends SnapshotMethod> = NonNullable<Studio3dProvider[Key]> extends
-  (...args: infer Args) => infer Result ? (...args: PublicArguments<Args>) => Result : never;
-
-export type PluginProvider = Readonly<Omit<Studio3dProvider, SnapshotMethod | 'snapshot'> & {
-  snapshot?: () => PluginAccountSnapshot;
-} & { [Key in SnapshotMethod]?: PublicMethod<Key> }>;
+export type {
+  PluginAccountSnapshot, PluginProvider,
+} from '../../../../packages/plugin-types/src/provider.ts';
 
 interface CapabilityAdapter {
   type?: unknown;

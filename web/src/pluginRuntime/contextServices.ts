@@ -1,4 +1,5 @@
 import type { Ref } from 'vue';
+import type { PluginModuleContext } from '../../../packages/plugin-types/src/web.js';
 import { t } from '../ui.ts';
 import { askAgent } from '../shared/askAgent.ts';
 import type { AskAgentInput, AskAgentOptions } from '../shared/askAgent.ts';
@@ -19,7 +20,9 @@ export interface PluginServiceOptions extends PluginPanelOptions {
  * Базовые пять полей сохраняют прежние значения и реактивность.
  * Все новые возможности замыкают одного владельца и его отзываемый signal.
  */
-export function createPluginContextServices(base: PluginContext, options: PluginServiceOptions) {
+export function createPluginContextServices(
+  base: PluginContext, options: PluginServiceOptions,
+): { context: PluginModuleContext; clearPanel: () => void } {
   const events = createPluginEvents(base.pluginId, options);
   const context = {
     ...base,
@@ -47,4 +50,4 @@ export function createPluginContextServices(base: PluginContext, options: Plugin
   return { context, clearPanel: events.clearPanel };
 }
 
-export type PluginModuleContext = ReturnType<typeof createPluginContextServices>['context'];
+export type { PluginModuleContext } from '../../../packages/plugin-types/src/web.js';

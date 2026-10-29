@@ -1,3 +1,4 @@
+import type { PluginModuleStart } from '../../../packages/plugin-types/src/web.js';
 import { reactive, ref } from 'vue';
 import type { Component } from 'vue';
 import { UiButton, confirmDialog, useUiLayer } from '../ui.ts';
@@ -47,7 +48,7 @@ export async function loadPluginModule(
   },
 ): Promise<{
   component: Component;
-  start: unknown;
+  start: PluginModuleStart | undefined;
   releaseStyles: () => void;
 }> {
   if (!isPluginModuleDescriptor(pluginId, descriptor)) {
@@ -96,7 +97,7 @@ export async function loadPluginModule(
 
     return {
       component: component as Component,
-      start: module.start,
+      start: module.start as PluginModuleStart | undefined,
       releaseStyles,
     };
   };

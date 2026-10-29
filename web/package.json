@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:plugin-types": "node scripts/buildPluginTypes.mjs",
     "preview": "vite preview",
     "typecheck:ui": "vue-tsc -p tsconfig.ui.json --noEmit",
     "check:readability": "node scripts/check-code-readability.mjs",

@@ -23,6 +23,7 @@ import { UiInlineMessage, UiLoadingState, t } from '../../ui.ts';
 import { pluginRuntimeFor } from '../../pluginRuntime/bootstrap.ts';
 import { loadPluginStyles } from '../../pluginRuntime/styles.ts';
 import type { PluginModuleContext } from '../../pluginRuntime/contextServices.ts';
+import type { PluginPresentation } from '../../../../packages/plugin-types/src/web.js';
 import type { PluginRuntime } from '../../pluginRuntime/runtime.ts';
 
 const props = withDefaults(defineProps<{
@@ -31,7 +32,7 @@ const props = withDefaults(defineProps<{
   label: string;
   active?: boolean;
   compact?: boolean;
-  presentation?: string;
+  presentation?: PluginPresentation;
 }>(), { active: true });
 
 type PanelState = 'loading' | 'ready' | 'unsupported' | 'load-failed' | 'render-failed';

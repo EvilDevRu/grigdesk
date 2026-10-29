@@ -16,6 +16,7 @@
     // объявлено ровно то же место — иначе проверка «не нашла vue» там, где он есть.
     "baseUrl": ".",
     "paths": {
+      "fastify": ["../server/node_modules/fastify"],
       "vue": ["node_modules/vue"],
       "vue/*": ["node_modules/vue/*"],
       "pinia": ["node_modules/pinia"],
