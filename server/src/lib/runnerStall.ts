@@ -1,8 +1,7 @@
 // Диагностическое дополнение остановки: читаем только exact завершившийся run.
 // Текст ошибки не изменяет курсор, вердикт, разрешение повтора или арбитраж.
-import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
-import type { FileHandle } from 'node:fs/promises';
+import { openRunDirectory, readRunFile } from './runnerArtifacts.ts';
+import { runnerModelName } from './runnerModel.ts';
 
 import { parsePipeline } from './pipelineParse.ts';
 import {
@@ -26,65 +25,6 @@ interface RunnerStallInput {
 interface RunFailure {
   failure: RunnerFailure;
   model: string;
-}
-
-const DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
-const FILE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
-const MAX_TAIL_BYTES = 256 * 1024;
-
-/**
- * Каждый дочерний каталог открывается относительно удерживаемого родителя.
- * Подмена пути ссылкой не позволяет карточке читать файлы за пределами run-каталога.
- */
-async function openRunDirectory(root: string, parts: string[]): Promise<FileHandle> {
-  let directory = await open(root, DIRECTORY_FLAGS);
-
-  try {
-    for (const part of parts) {
-      const child = await open(`/proc/self/fd/${directory.fd}/${part}`, DIRECTORY_FLAGS);
-
-      await directory.close();
-      directory = child;
-    }
-
-    return directory;
-  } catch (error) {
-    await directory.close();
-
-    throw error;
-  }
-}
-
-/**
- * Метаданные читаются целиком, журнал — только с конца. Не принимаем ссылку, FIFO,
- * hardlink или файл, изменившийся во время чтения; крупная первая строка хвоста отбрасывается.
- */
-async function readRunFile(directory: FileHandle, name: string, tail = false): Promise<string> {
-  const file = await open(`/proc/self/fd/${directory.fd}/${name}`, FILE_FLAGS);
-
-  try {
-    const before = await file.stat();
-    const limit = tail ? MAX_TAIL_BYTES : 64 * 1024;
-
-    if (!before.isFile() || before.nlink !== 1 || (!tail && before.size > limit)) {
-      throw new Error('unsupported run file');
-    }
-
-    const start = Math.max(0, before.size - limit);
-    const bytes = Buffer.alloc(Math.min(before.size, limit));
-    const { bytesRead } = await file.read(bytes, 0, bytes.length, start);
-    const after = await file.stat();
-
-    if (bytesRead !== bytes.length || before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
-      throw new Error('unstable run file');
-    }
-
-    const text = bytes.toString('utf8');
-
-    return start > 0 ? text.slice(text.indexOf('\n') + 1) : text;
-  } finally {
-    await file.close();
-  }
 }
 
 // Раннеры с доказанным разбором терминального отказа в retained-потоке. Остальные
@@ -147,7 +87,7 @@ async function readFailure(input: RunnerStallInput): Promise<RunFailure | null> 
       ? { code: meta.FAILURE_CODE, message: cleanRunnerFailureMessage(meta.FAILURE_MESSAGE) }
       : RUNNER_FAILURE_READERS[meta.RUNNER || '']!(await readRunFile(directory, 'events.jsonl', true));
 
-    return failure ? { failure, model: meta.RESOLVED_MODEL || meta.MODEL || '' } : null;
+    return failure ? { failure, model: runnerModelName(meta.RESOLVED_MODEL || meta.MODEL) || '' } : null;
   } finally {
     await directory.close();
   }

@@ -941,8 +941,9 @@
                     success: a.result === 'ok',
                     switched: a.result === 'manual_switch',
                     failed: a.result && !['ok', 'manual_switch'].includes(a.result),
+                    'runner-result-detail': Boolean(a.failureDetail),
                   }">
-                    {{ attemptResultLabel(a.result) }}
+                    {{ a.failureDetail || attemptResultLabel(a.result) }}
                   </span>
                 </div>
               </div>
@@ -3858,6 +3859,13 @@ function cardState(g: PipelineViewGraph) {
 .runner-attempt-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runner-attempt-cost { justify-self: end; white-space: nowrap; color: var(--ink-low); }
 .runner-result { justify-self: end; white-space: nowrap; }
+.runner-result.runner-result-detail {
+  grid-column: 1 / -1;
+  grid-row: auto;
+  justify-self: stretch;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .runner-result.success { color: var(--good); }
 .runner-result.switched { color: var(--accent); }
 .runner-result.failed { color: var(--warn); }

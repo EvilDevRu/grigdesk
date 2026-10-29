@@ -4,12 +4,25 @@ import test from 'node:test';
 import {
   classifyCodexFailure,
   inspectCodexFailure,
+  inspectGlmFactoryFailure,
   runnerFailureDetail,
 } from '../../server/src/lib/runnerFailure.ts';
 
 const capacity = 'Selected model is at capacity. Please try a different model.';
 const failed = (message) => JSON.stringify({ type: 'turn.failed', error: { message } });
 const stream = (...events) => events.map((event) => JSON.stringify(event)).join('\n');
+
+test('код GLM дополняет исходную причину, а секреты не попадают в подпись ошибки', () => {
+  const failure = inspectGlmFactoryFailure(stream({
+    event: 'wrapper_error',
+    code: 'glm_key_missing',
+    message: 'GLM недоступен: проверь карточку api_key=private-value',
+  }));
+
+  assert.match(runnerFailureDetail(failure), /GLM недоступен: проверь карточку/);
+  assert.match(runnerFailureDetail(failure), /\(glm_key_missing\)$/);
+  assert.doesNotMatch(runnerFailureDetail(failure), /private-value/);
+});
 
 test('перегрузка после работы остаётся transient и получает понятное пояснение', () => {
   const raw = stream(

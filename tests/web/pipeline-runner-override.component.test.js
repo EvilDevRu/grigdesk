@@ -338,6 +338,60 @@ test('модалка показывает policy effort до запуска и �
   assert.match(wrapper.get('.runner-attempt').text(), /gpt-5\.6-sol · effort xhigh/);
 });
 
+test('журнал попыток GLM показывает конкретную причину вместо unknown', async (t) => {
+  const fixture = makeFixture({ status: 'failed', actual: 'glm' });
+
+  Object.assign(fixture.graph.nodeMeta.plan.runner, {
+    primary: 'glm',
+    chain: ['glm'],
+    model: 'glm-5.3',
+    models: { glm: {
+      family: 'default',
+      label: 'glm-5.3',
+      effort: 'high',
+    } },
+    attempts: [{
+      id: 'run-glm',
+      epoch: 1,
+      runner: 'glm',
+      model: 'glm-5.3',
+      effort: 'high',
+      result: 'unknown',
+      failureDetail: 'GLM недоступен: проверь карточку (glm_key_missing)',
+    }],
+  });
+  fixture.factoryTask.stall = {
+    kind: 'human',
+    stop: 'human',
+    outcome: 'exhausted',
+    node: 'plan',
+    stage: 'PLAN',
+    title: 'PLAN: GLM недоступен: проверь карточку (glm_key_missing)',
+    hint: 'Проверьте сообщение провайдера.',
+    presentation: {
+      reason: 'агент не вернул результат',
+      summary: 'Проверьте сообщение провайдера перед повтором этапа.',
+      details: { what: 'Результат этапа не получен.' },
+      attempts: 1,
+      lastFailure: 'GLM недоступен: проверь карточку (glm_key_missing)',
+      model: 'glm-5.3',
+    },
+  };
+
+  const { wrapper, openPlanStage } = await mountPipeline(t, { ...fixture, runners: ['glm'] });
+
+  assert.equal(wrapper.get('.stop-failure').text(),
+    'GLM недоступен: проверь карточку (glm_key_missing)');
+  assert.equal(wrapper.get('.stop-model').text(), 'glm-5.3');
+
+  await openPlanStage('failed');
+
+  assert.equal(wrapper.get('.runner-result').text(),
+    'GLM недоступен: проверь карточку (glm_key_missing)');
+  assert.match(wrapper.get('.runner-attempt').text(), /glm-5\.3 · effort high/);
+  assert.doesNotMatch(wrapper.get('.runner-attempt').text(), /неизвестная ошибка|\["zai"/);
+});
+
 test('ручной запуск без Bitrix показывает заголовок сохранённого тикета', async (t) => {
   const fixture = makeFixture();
 

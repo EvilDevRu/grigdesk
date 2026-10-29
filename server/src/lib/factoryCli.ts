@@ -5,6 +5,8 @@ import path from 'node:path';
 import { JOURNAL_FRESH_SEC } from '../../../shared/pipeline/agentActivity.ts';
 import { readProcessIdentity } from './speech/modelJobsProcess.ts';
 import { parseStagesLog } from './stagesParse.ts';
+import { runnerModelName } from './runnerModel.ts';
+import { inspectGlmFactoryFailure, runnerFailureDetail } from './runnerFailure.ts';
 
 // Реестр задачи — плоская проекция t<TASK>.pipeline.
 type Registry = Record<string, string | undefined>;
@@ -90,6 +92,16 @@ interface LiveEvent {
   usage?: { total_tokens?: number; tool_uses?: number };
   message?: { model?: string; content?: LiveBlock[] };
   item?: CodexItem;
+}
+
+// Wrapper GLM оставляет только имя инструмента и безопасную причину отказа, без аргументов.
+interface GlmLiveEvent {
+  event: string;
+  model?: string;
+  name?: string;
+  timestamp?: string;
+  code?: string;
+  message?: string;
 }
 
 export function readInstruction({ stateDir, task }: {
@@ -296,11 +308,20 @@ function readTail(logFile: string, maxBytes: number): { raw: string; truncated: 
   } catch { return null; }
 }
 
+/**
+ * Телеметрия называет фактическую модель; modelRef преобразуется общим серверным помощником.
+ * Пустой или ещё не записанный meta.env не мешает читать действия работающего агента.
+ */
 function readRunModel(runDir: string | null | undefined): string | null {
-  if (!runDir) return null;
+  if (!runDir) {
+    return null;
+  }
+
   try {
-    const match = fs.readFileSync(path.join(runDir, 'meta.env'), 'utf8').match(/^MODEL=(.*)$/m);
-    return match?.[1]?.trim() || null;
+    const meta = fs.readFileSync(path.join(runDir, 'meta.env'), 'utf8');
+    const match = meta.match(/^RESOLVED_MODEL=(.+)$/m) || meta.match(/^MODEL=(.*)$/m);
+
+    return runnerModelName(match?.[1]);
   } catch { return null; }
 }
 
@@ -372,7 +393,7 @@ function indexed(actions: AgentAction[], index: number | undefined): AgentAction
 }
 
 /**
- * Живая лента действий агента: парсит events.jsonl активного run (Claude или Codex)
+ * Живая лента действий агента: парсит events.jsonl активного run (Claude, Codex или GLM)
  * и выдаёт последние N событий. Для legacy-прогонов читает общий orch.log.
  * Читает только последние TAIL_BYTES байт — файл может быть десятки МБ.
  */
@@ -400,16 +421,64 @@ export function readAgentLive({ stateDir, task, registry = {} }: {
   const pendingTools = new Map<string, number>(); // tool_use_id → index in actions
   const subagents = new Map<string, number>();   // tool_use_id → index in actions
   const pendingCodex = new Map<string, number>(); // item id → index in actions
+  const pendingGlm: number[] = [];
   let model = readRunModel(active?.runDir);
 
   for (const line of lines) {
     const t = line.trim();
     if (!t.startsWith('{')) continue;
-    let ev: LiveEvent;
+
+    let ev: LiveEvent | GlmLiveEvent;
     try { ev = JSON.parse(t); } catch { continue; }
 
+    if (!ev || typeof ev !== 'object') {
+      continue;
+    }
+
+    if ('event' in ev) {
+      const ts = ev.timestamp || null;
+
+      if (ev.event === 'glm_start') {
+        model = runnerModelName(ev.model) || model;
+      } else if (ev.event === 'tool_call' && typeof ev.name === 'string') {
+        actions.push({
+          type: 'tool',
+          ts,
+          name: ev.name,
+          status: 'run',
+        });
+        pendingGlm.push(actions.length - 1);
+      } else if (ev.event === 'tool_result') {
+        const pending = indexed(actions, pendingGlm.pop());
+
+        if (pending) {
+          pending.status = 'done';
+
+          if (ts) {
+            pending.doneAt = ts;
+          }
+        }
+      } else if (ev.event === 'wrapper_error') {
+        const failure = inspectGlmFactoryFailure(t);
+
+        if (failure) {
+          actions.push({
+            type: 'error',
+            ts,
+            status: 'error',
+            text: runnerFailureDetail(failure),
+          });
+        }
+      }
+
+      continue;
+    }
+
     if (ev.type === 'assistant' && ev.message?.content) {
-      if (!model && ev.message.model) model = ev.message.model;
+      if (!model && ev.message.model) {
+        model = runnerModelName(ev.message.model);
+      }
+
       const ts = ev.timestamp || null;
       for (const block of ev.message.content) {
         if (block.type === 'tool_use') {
@@ -465,6 +534,7 @@ export function readAgentLive({ stateDir, task, registry = {} }: {
       pendingTools.clear();
       subagents.clear();
       pendingCodex.clear();
+      pendingGlm.length = 0;
       model = null;
     } else if ((ev.type === 'item.started' || ev.type === 'item.completed') && ev.item) {
       const item = ev.item;

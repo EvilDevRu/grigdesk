@@ -857,8 +857,8 @@ export class FactoryStateAdapter {
       // Только agent-узлы запускаются через multi-runner. Для code/human цепочка
       // выглядела бы обещанием запуска ИИ там, где работает shell или ждёт человек.
       if (def.nodes[nid]?.[0] === 'agent') {
-        const runner = resolveRunnerState(runnerConfig, registry, runnerKey);
         const attempts = await readRunnerAttempts(stateDir, task, runnerKey);
+        const runner = resolveRunnerState(runnerConfig, registry, runnerKey, attempts);
         // Этап и попытки — проекция для UI поверх политики runner-а, а не её поля.
         nodeMeta[nid] = {
           ...nodeMeta[nid],
