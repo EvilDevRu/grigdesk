@@ -115,8 +115,20 @@ reject_before_wrapper "неизвестная модель zai" '["zai","not-rea
 reject_before_wrapper "уровень вне списка модели" '["zai","glm-4.7"]' max
 reject_before_wrapper "неизвестный уровень" "$model" impossible
 : >"$info_calls"
-GRIGDESK_GLM_API_MODE=coding-plan reject_before_wrapper "Coding Plan" "$model" high
-assert_eq '' "$(cat "$info_calls")" "Coding Plan отвергается до metadata и ключа"
+: >"$capture"
+# Coding Plan допущен с factory-policy-v2 (29.10.2026): шлюз режима проходится, этап
+# упирается в сверку поставки — старая версия раннера ловится тем же runtime_changed.
+GRIGDESK_GLM_API_MODE=coding-plan FACTORY_RUNNER_VERSION=old-runner-version \
+  runner_glm_run 42 reject CHECK "$model" high 5 "$TEST_ROOT/run" \
+  2>"$TEST_ROOT/coding-plan.err"
+assert_rc 4 "$?" "Coding Plan проходит шлюз режима и ловится на смене поставки"
+assert_contains "$(cat "$TEST_ROOT/coding-plan.err")" 'FACTORY_ERROR=runtime_changed RUNNERS=glm' \
+  "Coding Plan допущен до сверки версии раннера"
+if [[ -n "$(cat "$info_calls")" ]]; then
+  test_ok "Coding Plan доходит до metadata helper"
+else
+  test_fail "Coding Plan доходит до metadata helper" "info-calls пуст"
+fi
 
 : >"$capture"
 FACTORY_RUNNER_VERSION=old-runner-version runner_glm_run 42 reject CHECK "$model" high 5 \

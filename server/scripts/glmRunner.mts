@@ -105,9 +105,11 @@ export async function runGlmFactory(
   const args = await validateRunnerPaths(parseArguments(argv), LABEL);
   const identity = factoryRunIdentity(env, LABEL);
 
-  // Этап объявлен только для Обычного API: ключ Coding Plan не подставляется ни в каком режиме.
-  if (env.GRIGDESK_GLM_API_MODE !== 'api') {
-    throw glmAccessError('glm_factory_mode_unsupported', `${LABEL}: этап поддерживает только Обычный API`);
+  // Этап идёт в режиме службы (api или coding-plan — policy-v2, 29.10.2026): ключ
+  // активного режима подставит runGlmTurn через buildGlmChildEnv, допуск по metadata DSH
+  // сверяет resolveGlmAccess. Здесь только валидация значения до похода в runtime.
+  if (env.GRIGDESK_GLM_API_MODE !== 'api' && env.GRIGDESK_GLM_API_MODE !== 'coding-plan') {
+    throw glmAccessError('glm_factory_mode_unsupported', `${LABEL}: нужен режим доступа api или coding-plan`);
   }
 
   const config = {

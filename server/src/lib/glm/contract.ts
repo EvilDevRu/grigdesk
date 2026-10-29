@@ -15,7 +15,11 @@ export const GLM_POLICY_REVISION = 'grigdesk-glm-policy-v2';
 // Ревизии отвязанного этапа фабрики отдельны от чата: смена Factory профиля или политики
 // не меняет отпечаток, допуск и память обычного чата GLM.
 export const GLM_FACTORY_PROFILE_REVISION = 'grigdesk-glm-factory-profile-v1';
-export const GLM_FACTORY_POLICY_REVISION = 'grigdesk-glm-factory-policy-v1';
+// policy-v2 (29.10.2026, решение владельца): этапу разрешены оба режима доступа службы —
+// api и coding-plan; ключ активного режима доезжает до этапов файлом route-secrets.env.
+// До этого этап был объявлен только для Обычного API, чтобы марафоны конвейера не выжигали
+// окна Coding Plan, на которых живут чаты; ограничение владелец принял на себя.
+export const GLM_FACTORY_POLICY_REVISION = 'grigdesk-glm-factory-policy-v2';
 export const GLM_DEFAULT_EFFORT = 'high';
 export const GLM_ALLOWED_MODES: readonly GlmAccessMode[] = Object.freeze(['api', 'coding-plan']);
 

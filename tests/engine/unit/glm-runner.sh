@@ -44,13 +44,18 @@ version=$(runner_call glm probe)
 assert_rc 0 "$?" "probe Обычного API проходит без ключа модели"
 assert_contains "$version" '9.2.0-grigdesk.' "probe сохраняет upstream и observed identity"
 assert_contains "$version" ".p$package_a." "версия раннера различает packageId DSH"
-assert_contains "$version" '.grigdesk-glm-factory-profile-v1.grigdesk-glm-factory-policy-v1' \
+assert_contains "$version" '.grigdesk-glm-factory-profile-v1.grigdesk-glm-factory-policy-v2' \
   "версия раннера включает ревизии профиля и политики этапа"
 
-GRIGDESK_GLM_API_MODE=coding-plan runner_call glm probe >/dev/null 2>&1
-assert_rc 4 "$?" "Coding Plan не объявляет этап GLM доступным"
+# Coding Plan допущен с factory-policy-v2 (29.10.2026): probe проходит тем же фикстурным DSH.
+GRIGDESK_GLM_API_MODE=coding-plan version_cp=$(runner_call glm probe)
+assert_rc 0 "$?" "probe Coding Plan проходит без ключа модели"
+assert_contains "$version_cp" '.grigdesk-glm-factory-policy-v2' \
+  "probe Coding Plan отдаёт ту же ревизию политики"
 GRIGDESK_GLM_API_MODE='' runner_call glm probe >/dev/null 2>&1
 assert_rc 4 "$?" "без режима доступа этап GLM недоступен"
+GRIGDESK_GLM_API_MODE=team-plan runner_call glm probe >/dev/null 2>&1
+assert_rc 4 "$?" "неизвестный режим доступа этап GLM не допускает"
 GRIGDESK_DEEPSEEK_BIN="$TEST_ROOT/missing-elf" runner_call glm probe >/dev/null 2>&1
 assert_rc 4 "$?" "отсутствующий DSH ELF даёт штатный код недоступности"
 

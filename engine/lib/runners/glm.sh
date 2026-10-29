@@ -88,11 +88,17 @@ runner_glm_run() {
   local mode node wrapper prompt_dir prompt_file runtime_home cwd descriptor
   local bin runtime_identity runtime_version runner_version cache_dir
 
-  # Этап объявлен только для Обычного API: Coding Plan отвергается до metadata и ключа.
-  if [[ "${GRIGDESK_GLM_API_MODE:-}" != api ]]; then
-    printf 'GLM Factory: этап поддерживает только Обычный API\n' >&2
-    return 4
-  fi
+  # Этап идёт в режиме службы (api или coding-plan — factory-policy-v2, 29.10.2026):
+  # допуск режима по metadata DSH проверяет probe, ключ активного режима подставляет
+  # wrapper через buildGlmChildEnv; здесь только валидация значения до похода в descriptor.
+  case "${GRIGDESK_GLM_API_MODE:-}" in
+    api|coding-plan) ;;
+    *)
+      printf 'GLM Factory: нужен режим доступа api или coding-plan (получен: %s)\n' \
+        "${GRIGDESK_GLM_API_MODE:-<пусто>}" >&2
+      return 4
+      ;;
+  esac
   case "${FACTORY_ROUTE_FILESYSTEM_POLICY:-}" in
     state-only) mode=read-only ;;
     workspace-write) mode=workspace-write ;;

@@ -38,12 +38,13 @@ import { nodeExecutable } from './runtimePaths.ts';
 export const ROUTE_DECISION_TIMEOUT_MS = 180_000;
 
 // Модельные ключи, которые этапы получают от сервера: только файлом EnvironmentFile 0600
-// и в detached-ветке — окружением процесса, никогда аргументом systemd-run.
-const ROUTE_SECRET_NAMES = ['DEEPSEEK_API_KEY', 'ZAI_API_KEY'] as const;
+// и в detached-ветке — окружением процесса, никогда аргументом systemd-run. Ключ Coding
+// Plan передаётся с 29.10.2026 (решение владельца): этап GLM допущен и в подписке.
+const ROUTE_SECRET_NAMES = ['DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'ZAI_CODING_API_KEY'] as const;
 
-// Ключ Coding Plan и служебный ключ маршрута GLM этапам не передаются ни в одной ветке:
-// этап GLM объявлен только для Обычного API.
-const ROUTE_WITHHELD_NAMES = ['ZAI_CODING_API_KEY', GLM_ROUTE_KEY_ENV];
+// Служебный ключ маршрута GLM этапам не передаётся ни в одной ветке: wrapper этапа
+// выводит его сам из ключа активного режима (buildGlmChildEnv), этапу нужен только исходный.
+const ROUTE_WITHHELD_NAMES = [GLM_ROUTE_KEY_ENV];
 
 // Имена, которыми владеет хост. Значение из extraEnv их не подменяет, даже если сам
 // хост переменную не задал (необязательные пути не открываются вызывающему).

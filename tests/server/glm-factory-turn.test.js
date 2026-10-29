@@ -299,14 +299,27 @@ test('SB10: неполный host context, чужой MCP и неподдерж�
       JSON.stringify(Object.keys(overrides)));
   }
 
+  // Coding Plan допущен с factory-policy-v2 (29.10.2026): ход этапа идёт тем же путём,
+  // ключ режима подставляет buildGlmChildEnv из ZAI_CODING_API_KEY.
   const coding = await fixture(t, { updates: [] }, {
     GRIGDESK_GLM_API_MODE: 'coding-plan',
     ZAI_CODING_API_KEY: 'synthetic-coding-key',
   });
 
-  await assert.rejects(coding.run(), { code: 'glm_factory_mode_unsupported' });
-  assert.equal(f.children.length + coding.children.length, 0);
-  assert.equal(await f.prompts() + await coding.prompts(), 0);
+  await coding.run();
+
+  assert.equal(await coding.prompts(), 1);
+  assert.equal(coding.launches.length, 1);
+  assert.equal(coding.children.length, 1);
+
+  const brokenMode = await fixture(t, { updates: [] }, {
+    GRIGDESK_GLM_API_MODE: 'team-plan',
+    ZAI_CODING_API_KEY: 'synthetic-coding-key',
+  });
+
+  await assert.rejects(brokenMode.run(), (error) => String(error.code).startsWith('glm_'));
+  assert.equal(brokenMode.children.length, 0);
+  assert.equal(await brokenMode.prompts(), 0);
 });
 
 test('SB10: вопрос и approval этапа отклоняются сразу, без человека', async (t) => {

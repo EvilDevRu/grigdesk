@@ -51,12 +51,15 @@ try {
   const runnerVersion = glmFactoryRunnerVersion(runtime.runtimeVersion, runtime.metadata!.packageId);
 
   if (operation === 'probe') {
-    // Этап объявлен только для Обычного API; ключ здесь не читается, допуск — по metadata ELF.
-    if (process.env.GRIGDESK_GLM_API_MODE !== 'api') {
-      throw glmAccessError('glm_factory_mode_unsupported', 'Этап GLM поддерживает только Обычный API');
+    // Этап идёт в режиме службы (api или coding-plan — policy-v2, 29.10.2026); ключ здесь
+    // не читается, допуск режима — по metadata ELF.
+    const mode = process.env.GRIGDESK_GLM_API_MODE;
+
+    if (mode !== 'api' && mode !== 'coding-plan') {
+      throw glmAccessError('glm_factory_mode_unsupported', 'Этапу GLM нужен режим доступа api или coding-plan');
     }
 
-    assertGlmGenerationAdmission(generation, 'api');
+    assertGlmGenerationAdmission(generation, mode);
     console.log(runnerVersion);
   } else if (operation === 'catalog') {
     for (const [index, model] of GLM_FACTORY_MODELS.entries()) {

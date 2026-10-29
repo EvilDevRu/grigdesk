@@ -181,10 +181,9 @@ function preflight(options: GlmTurnOptions, deps: GlmRuntimeDeps) {
     throw glmAccessError(access.reason || 'glm_access_mode_missing', 'GLM недоступен: проверь карточку.');
   }
 
-  // Этап фабрики объявлен только для Обычного API: Coding Plan сюда не подставляется.
-  if (factory && access.mode !== 'api') {
-    throw glmAccessError('glm_factory_mode_unsupported', 'Этап GLM поддерживает только Обычный API.');
-  }
+  // Этап фабрики идёт в режиме службы (api или coding-plan — policy-v2, решение владельца
+  // 29.10.2026): ключ режима подставляет buildGlmChildEnv, допуск сверяет resolveGlmAccess
+  // по metadata DSH. Отдельной привязки этапа к «только api» больше нет.
 
   const model = modelPair(options.model);
   // Каталог адаптера — сам DSH: без списка в зависимостях принадлежность модели и уровня
