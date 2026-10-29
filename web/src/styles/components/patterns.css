@@ -635,6 +635,35 @@
   background: var(--surface-2);
 }
 
+/* Строка исполнителя наследует выбор, наведение и фокус общей составной строки.
+   Контекст задаёт только место параметров справа и их перенос на узком экране. */
+.ui-selectable-row[data-context='pipeline-executor'] {
+  display: grid;
+  grid-template-columns: minmax(150px, .7fr) minmax(0, 1.3fr);
+  gap: 12px;
+}
+
+.ui-selectable-row[data-context='pipeline-executor'] .ui-selectable-row__primary {
+  padding: 8px 10px;
+}
+
+.ui-selectable-row[data-context='pipeline-executor'] .ui-selectable-row__actions {
+  display: block;
+  min-width: 0;
+  padding: 8px 10px 8px 0;
+}
+
+@media (max-width: 700px) {
+  .ui-selectable-row[data-context='pipeline-executor'] {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .ui-selectable-row[data-context='pipeline-executor'] .ui-selectable-row__actions {
+    padding: 0 10px 10px;
+  }
+}
+
 .ui-control-group[data-context='workspace-project'] { flex-wrap: nowrap; align-items: center; }
 .ui-control-group[data-context='workspace-project'] > .ui-select-wrap { flex: 1; width: 0; min-width: 0; }
 

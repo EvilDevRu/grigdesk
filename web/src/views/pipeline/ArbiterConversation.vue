@@ -1,10 +1,13 @@
 <template>
-  <section class="ac" data-role="arbiter-conversation" :aria-label="t('core.arbiterDialogTitle')">
-    <h3>{{ t('core.arbiterDialogTitle') }}</h3>
-    <p v-if="doc?.automatic" class="ac-notice">{{ t('core.arbiterAutomaticNotice') }}</p>
-    <p class="ac-status" role="status" aria-live="polite">{{ status }}</p>
-    <p v-if="error" class="ac-error" role="alert">{{ error }}</p>
-
+  <section class="ac ui-workspace" data-ui-workspace data-role="arbiter-conversation" :aria-label="t('core.arbiterDialogTitle')">
+    <div class="ac-layout">
+      <div class="ac-thread">
+        <header class="ac-heading">
+          <span class="ac-eyebrow">{{ t('core.stageAnalysisConversation') }}</span>
+          <h3>{{ t('core.arbiterDialogTitle') }}</h3>
+          <p class="ac-status" role="status" aria-live="polite">{{ status }}</p>
+        </header>
+        <p v-if="error" class="ac-error" role="alert">{{ error }}</p>
     <div v-if="historyChoices.length" class="ac-history">
       <label :for="`${inputId}-history`">{{ t('core.arbiterHistory') }}</label>
       <UiSelect :id="`${inputId}-history`" :model-value="selectedHistory" @update:model-value="selectHistory">
@@ -29,26 +32,23 @@
       <p v-for="(text, key) in legacyCard.card" :key="key">{{ text }}</p>
     </section>
 
-    <div v-if="store.pending[task]" class="ac-pending">
-      <p>{{ t('core.arbiterPending') }}</p>
-      <UiButton :disabled="busy" @click="reload">{{ t('core.arbiterCheckState') }}</UiButton>
-      <UiButton :disabled="busy" @click="retryRequest">{{ t('core.arbiterRetryRequest') }}</UiButton>
-    </div>
 
-    <template v-if="identity && !readOnly">
-      <UiButton v-if="!doc || doc.state === 'idle' || doc.state === 'interrupted'"
-                :disabled="busy || pending" data-role="arbiter-start" @click="send('start')">
-        {{ doc && doc.state !== 'idle' ? t('core.arbiterRetryAnalysis') : t('core.arbiterStart') }}
-      </UiButton>
-      <p v-if="capabilities?.message" class="ac-notice">{{ capabilities.message }}</p>
-      <UiButton v-if="capabilities?.status !== 'supported'" :disabled="busy" @click="reload">
-        {{ t('core.arbiterCheckSupport') }}
-      </UiButton>
-
+        <div v-if="!doc?.messages.length && !doc?.result?.summary && !legacyCard?.card" class="ac-empty">
+          <span class="ac-empty-icon" aria-hidden="true">↳</span>
+          <h4>{{ t('core.stageAnalysisEmptyTitle') }}</h4>
+          <p>{{ t('core.stageAnalysisEmptyHint') }}</p>
+        </div>
+        <template v-if="identity && !readOnly">
+          <div v-if="!doc || doc.state === 'idle' || doc.state === 'interrupted'" class="ac-start">
+            <UiButton wrap data-context="workspace-form-wrap" :disabled="busy || pending" data-role="arbiter-start"
+                      variant="solid" tone="accent" @click="send('start')">
+              {{ doc && doc.state !== 'idle' ? t('core.arbiterRetryAnalysis') : t('core.arbiterStart') }}
+            </UiButton>
+          </div>
       <section v-for="question in doc?.result?.questions || []" :key="question.id" class="ac-question">
         <h4>{{ question.text }}</h4>
         <div class="ac-actions">
-          <UiButton v-for="option in question.options" :key="option.id" :disabled="!canDiscuss"
+          <UiButton wrap data-context="workspace-form-wrap" v-for="option in question.options" :key="option.id" :disabled="!canDiscuss"
                     @click="send('discuss', { questionId: question.id, optionId: option.id })">
             {{ option.label }}
           </UiButton>
@@ -56,39 +56,20 @@
         <label :for="`${inputId}-${question.id}`">{{ t('core.arbiterCustomAnswer') }}</label>
         <UiTextarea :id="`${inputId}-${question.id}`" v-model="draft.answers[question.id]" rows="2"
                     :maxlength="ARBITER_LIMITS.humanText" />
-        <UiButton :disabled="!canDiscuss || !draft.answers[question.id]?.trim()"
+        <UiButton wrap data-context="workspace-form-wrap" :disabled="!canDiscuss || !draft.answers[question.id]?.trim()"
                   @click="answerQuestion(question.id)">{{ t('core.arbiterSend') }}</UiButton>
-      </section>
-
-      <section v-for="proposal in doc?.result?.proposals || []" :key="proposal.id" class="ac-proposal">
-        <h4>{{ proposal.label }} <span v-if="proposal.recommended">· {{ t('core.arbiterRecommended') }}</span></h4>
-        <p>{{ proposal.explanation }}</p>
-        <p>{{ proposal.expectedResult }}</p>
-        <p v-if="proposal.kind === 'apply'" class="ac-consequences">{{ consequences(proposal.action) }}</p>
-        <div class="ac-actions">
-          <UiButton :disabled="proposal.kind === 'apply' ? !canApply : !canDiscuss"
-                    :data-role="`arbiter-${proposal.kind}`"
-                    @click="send(proposal.kind, { proposalId: proposal.id })">
-            {{ proposal.kind === 'apply' ? `${t('core.arbiterApply')} · ${targetLabel(proposal.action)}`
-              : proposal.label }}
-          </UiButton>
-          <UiButton v-if="proposal.kind === 'apply' && proposal.action.kind !== 'retry_command'"
-                    :disabled="busy || !canApply" variant="text" @click="edit(proposal)">
-            {{ t('core.arbiterEditProposal') }}
-          </UiButton>
-        </div>
       </section>
 
       <div v-if="doc && draft" class="ac-composer">
         <label :for="inputId">{{ t('core.arbiterDiscuss') }}</label>
         <UiTextarea :id="inputId" ref="composer" v-model="draft.text" rows="3"
-                    data-role="arbiter-discuss-input" :maxlength="ARBITER_LIMITS.humanText"
+                    data-role="arbiter-discuss-input" :placeholder="t('core.stageInstructionPlaceholder')" :maxlength="ARBITER_LIMITS.humanText"
                     @keydown.ctrl.enter.prevent="discuss" />
         <div class="ac-actions">
-          <UiButton :disabled="!canDiscuss || !draft.text.trim()" data-role="arbiter-discuss" @click="discuss">
+          <UiButton wrap data-context="workspace-form-wrap" :disabled="!canDiscuss || !draft.text.trim()" data-role="arbiter-discuss" variant="solid" tone="accent" @click="discuss">
             {{ t('core.arbiterSend') }}
           </UiButton>
-          <UiButton v-if="capabilities?.status === 'supported'" :disabled="busy || pending"
+          <UiButton wrap data-context="workspace-form-wrap" v-if="capabilities?.status === 'supported'" :disabled="busy || pending"
                     variant="text" @click="draft.custom = !draft.custom">
             {{ t('core.arbiterCustomInstruction') }}
           </UiButton>
@@ -105,18 +86,13 @@
           <UiTextarea :id="`${inputId}-instruction`" v-model="draft.instruction" rows="4"
                       data-role="arbiter-custom-input" :maxlength="ARBITER_LIMITS.instruction" />
           <p v-if="customAction" class="ac-consequences">{{ consequences(customAction) }}</p>
-          <UiButton :disabled="!canApply || !customAction" data-role="arbiter-custom-apply"
+          <UiButton wrap data-context="workspace-form-wrap" :disabled="!canApply || !customAction" data-role="arbiter-custom-apply"
                     @click="applyCustom">{{ t('core.arbiterApply') }}</UiButton>
         </div>
       </div>
-    </template>
 
-    <UiButton v-if="resumable" :disabled="busy || pending" data-role="arbiter-resume" @click="resume">
-      {{ t('core.arbiterResumeOnly') }}
-    </UiButton>
-    <UiButton v-if="readOnly" variant="text" @click="openCurrent">
-      {{ t('core.arbiterNewStop') }}
-    </UiButton>
+        </template>
+        <div v-if="doc" class="ac-technical-section">
     <UiDisclosureButton v-if="doc" v-model:open="technicalOpen"
                         :controls="`${inputId}-technical`">{{ t('core.arbiterTechnical') }}</UiDisclosureButton>
     <div v-if="technicalOpen && doc" :id="`${inputId}-technical`">
@@ -125,6 +101,62 @@
         {{ t('core.arbiterFullJournal') }}
       </a>
       <p>{{ t('core.arbiterJournalScope') }}</p>
+    </div>
+
+        </div>
+      </div>
+      <aside class="ac-decisions">
+        <div class="ac-decision-heading">
+          <span class="ac-decision-icon" aria-hidden="true">↗</span>
+          <h4>{{ t('core.stageAnalysisDecision') }}</h4>
+        </div>
+        <p v-if="!doc?.result?.proposals.length" class="ac-decision-empty">
+          {{ t('core.stageAnalysisDecisionHint') }}
+        </p>
+        <p v-if="doc?.automatic" class="ac-notice">{{ t('core.arbiterAutomaticNotice') }}</p>
+    <div v-if="store.pending[task]" class="ac-pending">
+      <p>{{ t('core.arbiterPending') }}</p>
+      <UiButton wrap data-context="workspace-form-wrap" :disabled="busy" @click="reload">{{ t('core.arbiterCheckState') }}</UiButton>
+      <UiButton wrap data-context="workspace-form-wrap" :disabled="busy" @click="retryRequest">{{ t('core.arbiterRetryRequest') }}</UiButton>
+    </div>
+
+
+        <template v-if="identity && !readOnly">
+          <div v-if="capabilities?.message || capabilities?.status !== 'supported'" class="ac-compatibility">
+            <p v-if="capabilities?.message" class="ac-notice">{{ capabilities.message }}</p>
+            <UiButton wrap data-context="workspace-form-wrap" v-if="capabilities?.status !== 'supported'" :disabled="busy" variant="text" @click="reload">
+              {{ t('core.arbiterCheckSupport') }}
+            </UiButton>
+          </div>
+      <section v-for="proposal in doc?.result?.proposals || []" :key="proposal.id" class="ac-proposal">
+        <h4>{{ proposal.label }} <span v-if="proposal.recommended">· {{ t('core.arbiterRecommended') }}</span></h4>
+        <p>{{ proposal.explanation }}</p>
+        <p>{{ proposal.expectedResult }}</p>
+        <p v-if="proposal.kind === 'apply'" class="ac-consequences">{{ consequences(proposal.action) }}</p>
+        <div class="ac-actions">
+          <UiButton wrap data-context="workspace-form-wrap" :disabled="proposal.kind === 'apply' ? !canApply : !canDiscuss"
+                    :data-role="`arbiter-${proposal.kind}`"
+                    @click="send(proposal.kind, { proposalId: proposal.id })">
+            {{ proposal.kind === 'apply' ? `${t('core.arbiterApply')} · ${targetLabel(proposal.action)}`
+              : proposal.label }}
+          </UiButton>
+          <UiButton wrap data-context="workspace-form-wrap" v-if="proposal.kind === 'apply' && proposal.action.kind !== 'retry_command'"
+                    :disabled="busy || !canApply" variant="text" @click="edit(proposal)">
+            {{ t('core.arbiterEditProposal') }}
+          </UiButton>
+        </div>
+      </section>
+
+
+        </template>
+    <UiButton wrap data-context="workspace-form-wrap" v-if="resumable" :disabled="busy || pending" data-role="arbiter-resume" @click="resume">
+      {{ t('core.arbiterResumeOnly') }}
+    </UiButton>
+    <UiButton wrap data-context="workspace-form-wrap" v-if="readOnly" variant="text" @click="openCurrent">
+      {{ t('core.arbiterNewStop') }}
+    </UiButton>
+
+      </aside>
     </div>
   </section>
 </template>
@@ -218,7 +250,7 @@ const status = computed(() => {
   }
 
   const labels = {
-    idle: t('core.arbiterDialogTitle'),
+    idle: t('core.stageAnalysisReady'),
     analyzing: t('core.arbiterAnalyzing'),
     awaiting_user: t('core.arbiterAwaiting'),
     applying: t('core.arbiterApplying'),
@@ -395,21 +427,255 @@ watch(() => doc.value?.id, (id) => {
 </script>
 
 <style scoped>
-.ac { min-width: 0; width: 100%; display: flex; flex-direction: column; gap: 14px; overflow-wrap: anywhere; }
-.ac h3, .ac h4, .ac p { margin: 0; }
-.ac p { white-space: pre-wrap; line-height: 1.55; }
-.ac-status, .ac-author { color: var(--ink-mid); font-size: 12px; }
-.ac-error { color: var(--bad); }
-.ac-notice, .ac-consequences { padding: 10px 12px; background: var(--surface-2); }
-.ac-messages { display: flex; flex-direction: column; gap: 16px; list-style: none; padding: 0; margin: 0; }
-.ac-messages li { min-width: 0; border-left: 2px solid var(--line); padding-left: 12px; }
-.ac-messages li[data-author="human"] { border-color: var(--accent); }
-.ac-composer, .ac-custom, .ac-question, .ac-proposal, .ac-pending, .ac-legacy {
-  display: flex; flex-direction: column; gap: 10px; min-width: 0;
+.ac {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  min-height: 100%;
+  overflow-wrap: anywhere;
 }
-.ac-proposal, .ac-question { border-top: 1px solid var(--line); padding-top: 14px; }
-.ac-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.ac-actions > * { max-width: 100%; white-space: normal; }
-.ac-technical { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
-@media (max-width: 480px) { .ac-actions { flex-direction: column; align-items: stretch; } }
+.ac-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  min-height: inherit;
+}
+.ac-thread {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+  padding: 18px;
+}
+.ac-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ac-eyebrow {
+  color: var(--ink-mid);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+}
+.ac h3, .ac h4, .ac p {
+  margin: 0;
+}
+.ac h3 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -.025em;
+}
+.ac p {
+  white-space: pre-wrap;
+  line-height: 1.65;
+}
+.ac-status, .ac-author {
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+.ac-error {
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+  color: var(--bad);
+  font-size: 12px;
+}
+.ac-decisions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px 16px;
+  border-left: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ground) 46%, var(--surface));
+}
+.ac-decision-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ac-decision-heading h4 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.ac-decision-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-mid);
+  font-size: 18px;
+}
+.ac-notice, .ac-decision-empty {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.ac-compatibility {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.ac-consequences {
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--warn) 7%, transparent);
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+.ac-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 14px 24px 0;
+  text-align: center;
+}
+.ac-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  color: var(--accent);
+  font-size: 22px;
+}
+.ac-empty h4 {
+  font-size: 16px;
+  font-weight: 550;
+}
+.ac-empty p {
+  max-width: 47ch;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.ac-start {
+  display: flex;
+  justify-content: center;
+}
+.ac-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.ac-messages:empty {
+  display: none;
+}
+.ac-messages li {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.ac-messages li[data-author="human"] {
+  margin-left: 28px;
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--line));
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+.ac-author {
+  display: block;
+  margin-bottom: 7px;
+  font-weight: 600;
+}
+.ac-summary {
+  font-size: 13px;
+}
+.ac-composer, .ac-custom, .ac-question, .ac-proposal, .ac-pending, .ac-legacy, .ac-history {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.ac-composer {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.ac-composer label, .ac-question label, .ac-history label {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.ac-proposal {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.ac-proposal h4, .ac-question h4 {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.ac-proposal p {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.ac-question {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.ac-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ac-technical-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ac-technical {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+@media (max-width: 980px) {
+  .ac-layout {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+  .ac-thread {
+    padding: 16px;
+  }
+  .ac-decisions {
+    padding: 14px 12px;
+  }
+}
+@media (max-width: 700px) {
+  .ac-layout {
+    display: flex;
+    flex-direction: column;
+  }
+  .ac-thread, .ac-decisions {
+    padding: 14px 12px;
+  }
+  .ac-decisions {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .ac-empty {
+    padding: 10px 0 0;
+  }
+  .ac-composer {
+    margin-top: 0;
+  }
+}
 </style>

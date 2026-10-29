@@ -11,7 +11,10 @@ function uiFacadeStub(prefix) {
     ['UiLoadingState', 'src/components/feedback/UiLoadingState.vue'],
     ['UiPopover', 'src/components/overlays/UiPopover.vue'],
     ['UiSpinner', 'src/components/primitives/UiSpinner.vue'],
+    ['UiSelectableRow', 'src/components/composites/UiSelectableRow.vue'],
     ['UiTextarea', 'src/components/primitives/UiTextarea.vue'],
+    ['UiTab', 'src/components/composites/UiTab.vue'],
+    ['UiTabs', 'src/components/composites/UiTabs.vue'],
   ];
   const imports = componentImports.map(([name, file]) => (
     `import ${name} from ${JSON.stringify(webFile(file))};`

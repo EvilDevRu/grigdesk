@@ -1,21 +1,33 @@
 <template>
-  <section class="sect" data-role="pipeline-deferred-findings">
-    <div class="secth">Замечания на будущее</div>
+  <section class="sect deferred-sect" data-role="pipeline-deferred-findings">
+    <header class="deferred-head">
+      <span class="deferred-title">Замечания на будущее</span>
+      <span v-if="items.length" class="deferred-count">{{ items.length }}</span>
+    </header>
+
     <UiLoadingState v-if="loading" label="Читаю замечания попытки…" variant="document" />
-    <div v-else-if="error" role="alert">
+    <div v-else-if="error" class="deferred-error" role="alert">
       <p>{{ error }}</p>
-      <UiButton variant="text" @click="load">Повторить чтение</UiButton>
+      <UiButton variant="text" size="compact" @click="load">Повторить чтение</UiButton>
     </div>
     <template v-else>
-      <p v-if="!items.length">Отложенных замечаний нет.</p>
+      <p v-if="!items.length" class="deferred-empty">Отложенных замечаний нет.</p>
       <template v-else>
-        <p>Эти замечания ждут твоего решения на приёмке. Маршрут их не исправлял.</p>
-        <ul>
-          <li v-for="item in items" :key="findingKey(item)">
-            <b>{{ item.id }}</b> — {{ item.summary }}
-            <span class="source">{{ sourceLabel(item) }}</span>
+        <p class="deferred-note">
+          Эти замечания ждут твоего решения на приёмке. Маршрут их не исправлял.
+        </p>
+        <ol class="deferred-list">
+          <li v-for="(item, index) in items" :key="findingKey(item)" class="deferred-item">
+            <span class="deferred-num" aria-hidden="true">{{ index + 1 }}</span>
+            <div class="deferred-body">
+              <p class="deferred-summary">{{ item.summary }}</p>
+              <div class="deferred-meta">
+                <code class="deferred-id">{{ item.id }}</code>
+                <span class="deferred-source">{{ sourceLabel(item) }}</span>
+              </div>
+            </div>
           </li>
-        </ul>
+        </ol>
       </template>
     </template>
   </section>
@@ -123,6 +135,142 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.source { display: block; color: var(--ink-mid); font-size: 0.85em; }
-li { margin-block: 0.5rem; overflow-wrap: anywhere; }
+/* Отложенные находки — решение человека на приёмке, поэтому раздел читается
+   карточкой: заголовок со счётчиком, затем короткие нумерованные пункты.
+   Раньше это был сплошной абзац с маркированным списком, и в колонке 400 px
+   разные замечания сливались в один текст. */
+.deferred-sect {
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--ground);
+}
+
+.deferred-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.deferred-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.deferred-count {
+  flex: none;
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  line-height: 16px;
+  text-align: center;
+}
+
+.deferred-note,
+.deferred-empty {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.deferred-empty {
+  color: var(--ink-low);
+}
+
+.deferred-error {
+  display: grid;
+  gap: 6px;
+  color: var(--bad);
+  font-size: 12.5px;
+}
+
+.deferred-error p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.deferred-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.deferred-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.deferred-item:first-child {
+  border-top: 0;
+  padding-top: 2px;
+}
+
+.deferred-num {
+  padding-top: 1px;
+  color: var(--ink-low);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  text-align: right;
+}
+
+.deferred-body {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.deferred-summary {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.deferred-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.deferred-id {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--ink-mid);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deferred-source {
+  color: var(--ink-low);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+}
 </style>

@@ -1650,42 +1650,36 @@
   font-size: 12.5px;
 }
 
-.ui-button[data-role='pipeline-runner'] {
-  flex: 1 1 150px;
-  justify-content: flex-start;
-  min-width: 126px;
-  height: auto;
-  min-height: 58px;
-  padding: 8px 10px;
-  text-align: left;
-  white-space: normal;
+.ui-tabs:has(.ui-tab[data-context='pipeline-stage-tab']) {
+  min-width: 0;
+  gap: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
-.ui-button[data-role='pipeline-runner'] > .ui-button__content,
-.ui-button[data-role='pipeline-runner'] .ui-button__label {
-  width: 100%;
-  align-items: flex-start;
+.ui-tab[data-context='pipeline-stage-tab'] {
+  min-height: 49px;
+  gap: 7px;
+  padding-inline: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font-size: 12px;
 }
 
-.ui-button[data-role='pipeline-runner'] .ui-button__label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ui-button[data-role='pipeline-runner'] b {
+.ui-tab[data-context='pipeline-stage-tab'][aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  background: transparent;
   color: var(--ink);
-  font-weight: 600;
+  box-shadow: none;
 }
 
-.ui-button[data-role='pipeline-runner'] small {
-  color: var(--ink-mid);
-  font: 10.5px/1.4 var(--mono);
-  overflow-wrap: anywhere;
-}
-
-.ui-button[data-role='pipeline-runner'][aria-pressed='true'] b {
-  color: var(--accent);
+.ui-tab[data-context='pipeline-stage-tab']:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
 }
 
 .ui-button[data-role='pipeline-section-disclosure'] {
@@ -2256,11 +2250,6 @@
     padding-inline: 8px;
   }
 
-  .ui-button[data-role='pipeline-runner'] {
-    flex-basis: 100%;
-    min-width: 0;
-    min-height: 44px;
-  }
 }
 
 /* Шапки диалогов следуют высоте controls и в узком desktop-окне. */
