@@ -680,8 +680,14 @@ export class B24Client {
                 `action=getTaskDetails&taskId=${encodeURIComponent(taskId)}`,
             );
 
-            if (result.success === false
-                && ['Задача не найдена', 'TASK_NOT_FOUND'].includes(String(result.error))) {
+            // Портал отвечает сообщением из своей локали: кроме русского «Задача не
+            // найдена» и кода TASK_NOT_FOUND встречается английское «Task not found».
+            // Сравнение — по нормализованной строке, но строгое равенство: «Задача не
+            // найдена или нет доступа» остаётся unknown (номер не становится свободным).
+            const notFoundError = String(result.error).trim().toLowerCase();
+            const notFoundVariants = ['задача не найдена', 'task not found', 'task_not_found'];
+
+            if (result.success === false && notFoundVariants.includes(notFoundError)) {
                 return 'absent';
             }
 
