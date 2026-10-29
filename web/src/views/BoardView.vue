@@ -1,5 +1,5 @@
 <template>
-  <div class="board" :class="{ 'stats-expanded': statsExpanded }">
+  <div class="board ui-workspace" data-ui-workspace :class="{ 'stats-expanded': statsExpanded }">
     <section class="own-tasks" :aria-label="t('core.grigdeskTasks')">
       <div class="own-tasks-heading">
         <h3>{{ t('core.grigdeskTasks') }}</h3>
