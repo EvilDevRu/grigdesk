@@ -6,11 +6,18 @@
 </template>
 
 <script setup>
+import { onUnmounted, watch } from 'vue';
 import ChatList from '../../../../web/src/views/chat/ChatList.vue';
 import ChatSession from '../../../../web/src/views/chat/ChatSession.vue';
 import { useChatStore } from '../../../../web/src/stores/chat.ts';
 
 const chat = useChatStore();
+const surface = chat.registerSurface('performance-fixture');
+
+watch(() => chat.activeId, (chatId) => {
+  surface.update({ chatId, visible: true });
+}, { immediate: true });
+onUnmounted(() => surface.dispose());
 </script>
 
 <style>

@@ -187,6 +187,7 @@
 - [Задачи 3D: childId, ручной разбор unknown и честная недельная сводка](studio3d-tasks.md)
 - [Настоящий 3D viewer: parsers, animation, compare, bounded ресурсы и dispose](studio3d-viewer.md)
 - [Исправление фризов: функциональные проверки, полная серия до/после и остаточные задержки](chat-freeze-fix-results.md)
+- [Стенд производительности: полная lazy-история, счётчики и конфликт step-reuse/409](chat-performance-conflict.md)
 - [Чаты на отдельном полном сервере: production UI, SSE, запись, reload и архив](chat-runtime-smoke-check.md)
 - [История чата: Blob уменьшает синхронную стоимость передачи большого JSON в fetch](chat-history-request-body.md)
 - [Настройки исполнителей раскрываются по одному](executor-settings-accordion.md)
