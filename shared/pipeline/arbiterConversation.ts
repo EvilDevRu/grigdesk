@@ -84,6 +84,14 @@ export interface ArbiterResult {
   technicalDetails: string;
 }
 
+/**
+ * Публичная реплика не содержит обрамляющих маркеров и пустых строк от них.
+ * Известная опечатка GLM убирается также при показе ранее сохранённой истории.
+ */
+export function arbiterMessageText(text: string): string {
+  return text.replace(/<\/?arb(?:r)?iter-message>/gu, '').trim();
+}
+
 export interface ArbiterMessage {
   id: string;
   sequence: number;

@@ -810,6 +810,8 @@
   "arbiterAwaiting": "Analysis is ready; choose the next step",
   "arbiterApplying": "Sending the instruction to the stage",
   "arbiterInterrupted": "Analysis did not finish; history is saved",
+  "arbiterAnalysisFailed": "Could not prepare decision options",
+  "arbiterAnalysisRecovery": "Retry the analysis or send a clarification. The pipeline remains paused until your decision.",
   "arbiterResolved": "The decision was accepted; the observed result is shown in the history",
   "arbiterStale": "The pipeline has changed; this analysis belongs to an earlier stop",
   "arbiterSourceNode": "Stage executor",

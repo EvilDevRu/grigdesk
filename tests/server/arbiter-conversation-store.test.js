@@ -185,6 +185,30 @@ test('повреждённые вложенные поля операции за
   await assert.rejects(store.read('123', doc.id), { code: 'storage_failed' });
 });
 
+test('причина отказа сохраняется строкой с ограничением длины', async (t) => {
+  const { store } = await fixture(t);
+  const doc = await store.create(identity, capabilities);
+  const operation = {
+    id: 'read-turn',
+    requestId: 'request',
+    fingerprint: 'a'.repeat(64),
+    kind: 'start',
+    outcome: 'failed',
+    createdAt: doc.createdAt,
+    updatedAt: doc.createdAt,
+  };
+
+  for (const message of [null, { detail: 'bad' }, 'x'.repeat(2001)]) {
+    doc.operations = [{ ...operation, message }];
+    await fs.writeFile(store.file('123', doc.id), JSON.stringify(doc));
+    await assert.rejects(store.read('123', doc.id), { code: 'storage_failed' });
+  }
+
+  doc.operations = [{ ...operation, message: 'Итог не принят.' }];
+  await fs.writeFile(store.file('123', doc.id), JSON.stringify(doc));
+  assert.equal((await store.read('123', doc.id)).operations[0].message, 'Итог не принят.');
+});
+
 test('startup сохраняет реальные активные и архивные данные; удаляет только подтверждённую сироту',
   async (t) => {
     const { createRequire } = await import('node:module');

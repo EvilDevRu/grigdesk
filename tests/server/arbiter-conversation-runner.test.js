@@ -53,7 +53,21 @@ test('ошибочный result внутри публичного кадра н�
     assert.equal(exposed, false);
   }
 
-  assert.equal(projectArbiterFrames(text).messages[0].text, 'Проверяю. ');
+  assert.equal(projectArbiterFrames(text).messages[0].text, 'Проверяю.');
+  assert.equal(projectArbiterFrames(text).resultText, JSON.stringify(result));
+});
+
+test('публичные кадры убирают пустые края и опечатку закрывающего тега GLM', () => {
+  const text = '<arbiter-message>\n\nПричина найдена.\n</arbriter-message>SECRET'
+    + framedResult;
+
+  for (let end = 1; end <= text.length; end += 1) {
+    const frames = projectArbiterFrames(text.slice(0, end));
+
+    assert.equal(frames.messages.some((row) => /<|arbriter-message|summary|SECRET/u.test(row.text)), false);
+  }
+
+  assert.deepEqual(projectArbiterFrames(text).messages, [{ text: 'Причина найдена.', complete: true }]);
   assert.equal(projectArbiterFrames(text).resultText, JSON.stringify(result));
 });
 
@@ -204,6 +218,50 @@ test('GLM выполняет разбор в auto через настоящий 
   assert.ok(runtime.children.length > 0, 'Адаптер должен запустить процесс GLM');
 });
 
+test('отклонения оформления GLM сохраняют вопросы и предложения без повтора модели', async (t) => {
+  const fx = await fixture(t);
+  let calls = 0;
+  const reply = {
+    ...result,
+    questions: [{
+      ...result.questions[0],
+      options: [{
+        id: 'known',
+        label: 'Причина известна',
+        description: 'Есть журнал.',
+      }],
+    }],
+    proposals: [{
+      id: 'diagnose',
+      kind: 'diagnose',
+      label: 'Проверить журнал',
+      recommended: true,
+      expectedResult: 'Подтверждение причины.',
+      diagnosticInstruction: 'Прочитай журнал.',
+    }],
+  };
+
+  await runArbiterConversation({
+    ...fx,
+    operationId: 'turn',
+    input: {},
+    executor: { run: async () => {
+      calls += 1;
+
+      return { reply: `<arbiter-result>${JSON.stringify(reply)}</arbiter-result>` };
+    } },
+    readCurrent: async () => fx.context,
+  });
+
+  const saved = await fx.store.read('7', fx.doc.id);
+
+  assert.equal(calls, 1);
+  assert.equal(saved.state, 'awaiting_user');
+  assert.equal(saved.operations[0].outcome, 'completed');
+  assert.deepEqual(saved.result.questions[0].options, [{ id: 'known', label: 'Причина известна' }]);
+  assert.equal(saved.result.proposals[0].explanation, 'Подтверждение причины.');
+});
+
 test('публичный текст сохранён до завершения executor; fallback не повторяет кадр', async (t) => {
   const fx = await fixture(t);
   let finish;
@@ -285,6 +343,12 @@ test('невалидный result и timeout сохраняют публичны
             text: '<arbiter-message>Успел прочитать часть журнала.</arbiter-message>',
             complete: true
           });
+          input.onAssistantMessage({
+            assistantMessageId: 'partial',
+            sourceRevision: 1,
+            text: '<arbiter-message>Начал следующую проверку',
+            complete: false,
+          });
 
           return timeout ? new Promise(() => { }) : { reply: '<arbiter-result>{"shell":"rm"}' };
         }
@@ -296,6 +360,9 @@ test('невалидный result и timeout сохраняют публичны
 
     assert.equal(final.state, 'interrupted');
     assert.equal(final.result, null);
+    assert.equal(final.messages.find((row) => row.sourceId === 'source').status, 'complete');
+    assert.equal(final.messages.find((row) => row.sourceId === 'partial').status, 'interrupted');
+    assert.equal(typeof final.operations[0].message, 'string');
     assert.match(final.messages.map((row) => row.text).join('\n'), /Успел прочитать часть/);
     assert.equal(final.messages.some((row) => row.text.includes('"shell"')), false);
   }

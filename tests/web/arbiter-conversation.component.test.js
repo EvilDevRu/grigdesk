@@ -204,6 +204,56 @@ test('unsupported сохраняет обсуждение, но не разре�
   assert.equal(wrapper.find('[data-role="pipeline-arbiter-decision"]').exists(), false);
 });
 
+test('сбой разбора виден рядом с ручным повтором и не оставляет обещания будущих вариантов', async (t) => {
+  const { wrapper, doc, calls, flushPromises } = await fixture(t);
+
+  doc.result = null;
+  doc.state = 'interrupted';
+  doc.operations.push({
+    id: 'failed-turn',
+    kind: 'start',
+    outcome: 'failed',
+    message: 'Арбитр прислал некорректные варианты решения.',
+  });
+  await flushPromises();
+
+  assert.match(wrapper.get('[data-role="arbiter-analysis-failure"]').text(), /некорректные варианты/);
+  assert.match(wrapper.get('[data-role="arbiter-analysis-failure"]').text(), /Конвейер остаётся на паузе/);
+  assert.equal(wrapper.find('.ac-decision-empty').exists(), false);
+  assert.equal(wrapper.find('[data-role="arbiter-apply"]').exists(), false);
+  await wrapper.get('.ac-decisions [data-role="arbiter-start"]').trigger('click');
+  assert.deepEqual(calls.map((row) => row[2]), ['start']);
+
+  doc.state = 'analyzing';
+  await flushPromises();
+  assert.equal(wrapper.find('[data-role="arbiter-analysis-failure"]').exists(), false);
+  assert.equal(wrapper.find('[data-role="arbiter-start"]').exists(), false);
+});
+
+test('старый сбой берёт причину из истории, служебная опечатка исчезает только у арбитра', async (t) => {
+  const { wrapper, doc, flushPromises } = await fixture(t, { readOnly: true });
+
+  doc.result = null;
+  doc.state = 'interrupted';
+  doc.messages[1].text = '\nПричина найдена.\n</arbriter-message>\n';
+  doc.messages.push({
+    id: 'system',
+    author: 'system',
+    text: 'Прежний итог не соответствует контракту.',
+  });
+  doc.messages.push({
+    id: 'human',
+    author: 'human',
+    text: 'Проверь тег </arbriter-message>',
+  });
+  await flushPromises();
+
+  assert.match(wrapper.get('[data-role="arbiter-analysis-failure"]').text(), /не соответствует контракту/);
+  assert.equal(wrapper.get('[data-author="arbiter"] p').text(), 'Причина найдена.');
+  assert.equal(wrapper.get('[data-author="human"] p').text(), 'Проверь тег </arbriter-message>');
+  assert.equal(wrapper.find('[data-role="arbiter-start"]').exists(), false);
+});
+
 test('история не содержит активных apply; resume_failed предлагает только повтор запуска', async (t) => {
   const { wrapper, doc, calls, flushPromises } = await fixture(t, { readOnly: true });
 

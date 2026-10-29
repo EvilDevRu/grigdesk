@@ -21,7 +21,7 @@
       <li v-for="message in doc.messages" :key="message.id" :data-author="message.author">
         <span class="ac-author">{{ message.author === 'node' && message.sourceKind === 'command'
           ? t('core.arbiterSourceCommand') : authorLabels[message.author] }}</span>
-        <p>{{ message.text }}</p>
+        <p>{{ message.author === 'arbiter' ? arbiterMessageText(message.text) : message.text }}</p>
       </li>
     </ol>
     <p v-if="doc?.result?.summary && !doc.messages.some((row) => row.text === doc?.result?.summary)"
@@ -39,12 +39,6 @@
           <p>{{ t('core.stageAnalysisEmptyHint') }}</p>
         </div>
         <template v-if="identity && !readOnly">
-          <div v-if="!doc || doc.state === 'idle' || doc.state === 'interrupted'" class="ac-start">
-            <UiButton wrap data-context="workspace-form-wrap" :disabled="busy || pending" data-role="arbiter-start"
-                      variant="solid" tone="accent" @click="send('start')">
-              {{ doc && doc.state !== 'idle' ? t('core.arbiterRetryAnalysis') : t('core.arbiterStart') }}
-            </UiButton>
-          </div>
       <section v-for="question in doc?.result?.questions || []" :key="question.id" class="ac-question">
         <h4>{{ question.text }}</h4>
         <div class="ac-actions">
@@ -110,9 +104,22 @@
           <span class="ac-decision-icon" aria-hidden="true">↗</span>
           <h4>{{ t('core.stageAnalysisDecision') }}</h4>
         </div>
-        <p v-if="!doc?.result?.proposals.length" class="ac-decision-empty">
+        <div v-if="analysisFailure" ref="failurePanel" class="ac-failure" role="alert"
+             data-role="arbiter-analysis-failure">
+          <strong>{{ t('core.arbiterAnalysisFailed') }}</strong>
+          <p>{{ analysisFailure }}</p>
+          <p>{{ t('core.arbiterAnalysisRecovery') }}</p>
+        </div>
+        <p v-else-if="!doc?.result" class="ac-decision-empty">
           {{ t('core.stageAnalysisDecisionHint') }}
         </p>
+        <div v-if="identity && !readOnly && (!doc || doc.state === 'idle' || doc.state === 'interrupted')"
+             class="ac-start">
+          <UiButton wrap data-context="workspace-form-wrap" :disabled="busy || pending" data-role="arbiter-start"
+                    variant="solid" tone="accent" @click="send('start')">
+            {{ doc && doc.state !== 'idle' ? t('core.arbiterRetryAnalysis') : t('core.arbiterStart') }}
+          </UiButton>
+        </div>
         <p v-if="doc?.automatic" class="ac-notice">{{ t('core.arbiterAutomaticNotice') }}</p>
     <div v-if="store.pending[task]" class="ac-pending">
       <p>{{ t('core.arbiterPending') }}</p>
@@ -131,7 +138,7 @@
       <section v-for="proposal in doc?.result?.proposals || []" :key="proposal.id" class="ac-proposal">
         <h4>{{ proposal.label }} <span v-if="proposal.recommended">· {{ t('core.arbiterRecommended') }}</span></h4>
         <p>{{ proposal.explanation }}</p>
-        <p>{{ proposal.expectedResult }}</p>
+        <p v-if="proposal.expectedResult !== proposal.explanation">{{ proposal.expectedResult }}</p>
         <p v-if="proposal.kind === 'apply'" class="ac-consequences">{{ consequences(proposal.action) }}</p>
         <div class="ac-actions">
           <UiButton wrap data-context="workspace-form-wrap" :disabled="proposal.kind === 'apply' ? !canApply : !canDiscuss"
@@ -165,7 +172,9 @@
 import { computed, nextTick, ref, useId, watch } from 'vue';
 
 import { UiButton, UiDisclosureButton, UiSelect, UiTextarea, t } from '../../ui.ts';
-import { ARBITER_LIMITS, sameStop } from '../../../../shared/pipeline/arbiterConversation.ts';
+import {
+  ARBITER_LIMITS, arbiterMessageText, sameStop,
+} from '../../../../shared/pipeline/arbiterConversation.ts';
 import type {
   ArbiterAction,
   ArbiterProposal,
@@ -187,6 +196,7 @@ const inputId = `arbiter-${useId()}`;
 const technicalOpen = ref(false);
 const localError = ref('');
 const composer = ref<InstanceType<typeof UiTextarea> | null>(null);
+const failurePanel = ref<HTMLElement | null>(null);
 const openedId = ref(props.conversationId || '');
 const current = computed(() => store.currentByTask[props.task]);
 const historyChoices = computed(() => (props.history || [])
@@ -215,6 +225,22 @@ const instructionTargets = computed(() => capabilities.value?.targets
   .filter((target) => target.acceptsInstruction)
   || []);
 const error = computed(() => localError.value || store.errors[props.task] || store.storageError);
+const analysisFailure = computed(() => {
+  if (doc.value?.state !== 'interrupted') {
+    return '';
+  }
+
+  const operation = doc.value.operations.at(-1);
+
+  if (operation && !['start', 'discuss', 'diagnose'].includes(operation.kind)) {
+    return '';
+  }
+
+  const message = [...doc.value.messages].reverse()
+    .find((row) => row.author === 'system' && (!row.turnId || row.turnId === operation?.id));
+
+  return operation?.message || message?.text || t('core.arbiterInterrupted');
+});
 const resumable = computed(() => [...(doc.value?.operations
   || [])].reverse().find((row) => row.kind === 'apply'
 
@@ -424,6 +450,15 @@ watch(() => [props.task, props.node, props.conversationId], async () => {
 watch(() => doc.value?.id, (id) => {
   openedId.value ||= id || '';
 });
+
+// Ошибка нового хода остаётся видимой и после чтения длинной истории.
+// Прокрутка не забирает клавиатурный фокус у черновика обсуждения.
+watch(analysisFailure, async (message) => {
+  if (message) {
+    await nextTick();
+    failurePanel.value?.scrollIntoView({ block: 'start' });
+  }
+}, { immediate: true });
 </script>
 
 <style scoped>
@@ -484,6 +519,9 @@ watch(() => doc.value?.id, (id) => {
   font-size: 12px;
 }
 .ac-decisions {
+  position: sticky;
+  top: 0;
+  align-self: start;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -491,6 +529,13 @@ watch(() => doc.value?.id, (id) => {
   padding: 18px 16px;
   border-left: 1px solid var(--line);
   background: color-mix(in srgb, var(--ground) 46%, var(--surface));
+}
+.ac-failure {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--bad);
+  font-size: 12px;
 }
 .ac-decision-heading {
   display: flex;
@@ -561,7 +606,7 @@ watch(() => doc.value?.id, (id) => {
 }
 .ac-start {
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
 }
 .ac-messages {
   display: flex;
@@ -668,8 +713,11 @@ watch(() => doc.value?.id, (id) => {
     padding: 14px 12px;
   }
   .ac-decisions {
+    order: -1;
+    position: static;
+    align-self: stretch;
     border-left: 0;
-    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
   }
   .ac-empty {
     padding: 10px 0 0;

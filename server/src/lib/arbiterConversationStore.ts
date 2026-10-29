@@ -126,6 +126,10 @@ function decodeDocument(value: unknown): ArbiterConversation {
     requestIds.add(operation.requestId);
     operationIds.add(operation.id);
 
+    if (operation.message !== undefined) {
+      arbiterText(operation.message, ARBITER_LIMITS.summary, true);
+    }
+
     if (operation.action) {
       decodeArbiterAction(operation.action, doc.capabilities.targets, doc.identity.node);
     }

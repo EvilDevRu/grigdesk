@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   ARBITER_LIMITS,
   ArbiterConversationError,
-  decodeArbiterResult,
+  arbiterMessageText,
   sameStop,
 } from '../../../shared/pipeline/arbiterConversation.ts';
 import type { ArbiterConversation, ArbiterMessage } from '../../../shared/pipeline/arbiterConversation.ts';
@@ -11,9 +11,11 @@ import type { InTurnAssistantEvent } from '../../../shared/chat/chatInTurnContra
 import type { ArbiterConversationStore } from './arbiterConversationStore.ts';
 import type { ArbiterStopContext } from './arbiterStopContext.ts';
 import type { ArbiterExecutor, ArbiterRunInput } from './factoryArbiter.ts';
+import { parseArbiterModelResult } from './arbiterModelResult.ts';
 
 const OPEN_MESSAGE = '<arbiter-message>';
 const CLOSE_MESSAGE = '</arbiter-message>';
+const CLOSE_MESSAGE_TYPO = '</arbriter-message>';
 const OPEN_RESULT = '<arbiter-result>';
 const CLOSE_RESULT = '</arbiter-result>';
 
@@ -32,7 +34,8 @@ export const ARBITER_TURN_LIMIT_MS = 20 * 60_000;
 function withoutMarkerPrefix(text: string) {
   let held = 0;
 
-  for (const marker of [OPEN_MESSAGE, CLOSE_MESSAGE, OPEN_RESULT, CLOSE_RESULT]) {
+  for (const marker of [OPEN_MESSAGE, CLOSE_MESSAGE, OPEN_RESULT, CLOSE_RESULT,
+    '<arbriter-message>', CLOSE_MESSAGE_TYPO]) {
     for (let length = 1; length < marker.length; length += 1) {
       if (text.endsWith(marker.slice(0, length))) {
         held = Math.max(held, length);
@@ -74,7 +77,13 @@ export function projectArbiterFrames(text: string) {
       offset = close + CLOSE_RESULT.length;
     } else {
       const start = messageAt + OPEN_MESSAGE.length;
-      const close = text.indexOf(CLOSE_MESSAGE, start);
+      // Известная опечатка закрывает только уже открытый публичный кадр.
+      // Неразмеченный текст после неё не получает права попасть в ленту.
+      const closing = [CLOSE_MESSAGE, CLOSE_MESSAGE_TYPO]
+        .map((marker) => ({ at: text.indexOf(marker, start), length: marker.length }))
+        .filter((marker) => marker.at >= 0)
+        .sort((left, right) => left.at - right.at)[0];
+      const close = closing?.at ?? -1;
       const content = text.slice(start, close < 0 ? undefined : close).split(OPEN_MESSAGE).join('');
       const resultInMessage = content.indexOf(OPEN_RESULT);
       // Служебный итог не становится публичным даже при ошибочном вложении моделью.
@@ -82,10 +91,10 @@ export function projectArbiterFrames(text: string) {
       const publicText = resultInMessage < 0 ? content : content.slice(0, resultInMessage);
 
       messages.push({
-        text: close < 0 ? withoutMarkerPrefix(publicText) : publicText,
+        text: arbiterMessageText(close < 0 ? withoutMarkerPrefix(publicText) : publicText),
         complete: close >= 0,
       });
-      offset = close < 0 ? text.length : close + CLOSE_MESSAGE.length;
+      offset = close < 0 ? text.length : close + closing!.length;
     }
   }
 
@@ -127,13 +136,33 @@ export function buildConversationPrompt(
     'Публичные реплики обрамляй <arbiter-message>текст</arbiter-message>. Вложенных маркеров нет.',
     ("Произвольный текст вне кадров не показывается. В конце ровно один " +
       "<arbiter-result>JSON</arbiter-result>."),
-    'JSON: {summary, questions:[{id,text,options:[{id,label}],allowCustom:true}],',
-    'proposals:[{id,kind,label,explanation,recommended,expectedResult,diagnosticInstruction ИЛИ action}],',
-    ("technicalDetails}. Никаких лишних полей. summary до 2000 знаков, вопросы и " +
+    'Пример формы итогового JSON; содержание выбирай по фактам текущей остановки:',
+    JSON.stringify({
+      summary: 'Причина остановки пока неизвестна.',
+      questions: [{
+        id: 'q1',
+        text: 'Сохранился журнал проверки?',
+        options: [{ id: 'yes', label: 'Да' }],
+        allowCustom: true,
+      }],
+      proposals: [{
+        id: 'p1',
+        kind: 'diagnose',
+        label: 'Изучить журнал',
+        explanation: 'Нужно подтвердить причину остановки.',
+        recommended: true,
+        expectedResult: 'Будет известен шаг, на котором прервалась проверка.',
+        diagnosticInstruction: 'Прочитай журнал и сопоставь его с вердиктом этапа.',
+      }],
+      technicalDetails: '',
+    }),
+    'У каждого предложения обязательно explanation. У варианта вопроса только id и label, без description.',
+    ("Никаких лишних полей. summary до 2000 знаков, вопросы и " +
       "предложения до 4, варианты до 6."),
     'Нужен хотя бы вопрос или предложение. Один конкретный вопрос без предложений допустим.',
     'kind=diagnose: diagnosticInstruction для нового ЧИТАЮЩЕГО разбора. Запуск тестов это не обещает.',
-    'kind=apply: action={kind:replay_current|return_to_node,targetNode,instruction} только для agent.',
+    'Для agent kind=apply: вместо diagnosticInstruction поле action='
+      + '{kind:replay_current|return_to_node,targetNode,instruction}.',
     'Для текущего command action={kind:retry_command,targetNode}, без instruction: повтор прежней команды.',
     'Цели только из targets; не обещай прав, которых нет в policy. Исправление выбирает человек.',
     ("Обсуждение не является согласием применить действие. Технические пути и " +
@@ -310,7 +339,7 @@ export async function runArbiterConversation(options: RunnerOptions) {
       );
     }
 
-    const result = decodeArbiterResult(JSON.parse(final.resultText), context.targets, context.identity.node);
+    const result = parseArbiterModelResult(final.resultText, context.targets, context.identity.node);
     const current = await readCurrent();
     const stale = !sameStop(current?.identity, context.identity);
 
@@ -358,9 +387,11 @@ export async function runArbiterConversation(options: RunnerOptions) {
 
       operation.outcome = 'failed';
       operation.error = code;
+      operation.message = reason.slice(0, ARBITER_LIMITS.summary);
       operation.updatedAt = new Date().toISOString();
 
-      for (const message of latest.messages.filter((row) => row.turnId === operationId)) {
+      for (const message of latest.messages.filter((row) => row.turnId === operationId
+        && row.status === 'partial')) {
         message.status = 'interrupted';
         message.revision = latest.revision + 1;
       }

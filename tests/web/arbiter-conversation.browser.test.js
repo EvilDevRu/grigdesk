@@ -63,10 +63,20 @@ test('остановка → поток → F5 → обсуждение → ди
     fx.failNext('invalid');
     await page.locator('[data-role="arbiter-start"]').click();
     await page.getByText(/Разбор не завершён; сохранено то, что удалось получить/).waitFor();
+    await page.locator('[data-role="arbiter-analysis-failure"]').waitFor();
+    assert.equal(await page.locator('.ac-decision-empty').count(), 0);
     assert.equal(await page.locator('[data-role="arbiter-apply"]').count(), 0);
+    await page.screenshot({ path: path.join(fx.artifacts, 'analysis-failure-mobile.png'), fullPage: true });
+
+    const retryBox = await page.locator('[data-role="arbiter-start"]').boundingBox();
+
+    assert.equal(retryBox !== null && retryBox.y >= 0 && retryBox.y + retryBox.height <= 820, true);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.screenshot({ path: path.join(fx.artifacts, 'analysis-failure-desktop.png'), fullPage: true });
     fx.failNext('timeout');
     await page.locator('[data-role="arbiter-start"]').click();
-    await page.getByText(/Истёк лимит времени разбора/).waitFor();
+    await page.locator('[data-role="arbiter-analysis-failure"]')
+      .getByText('Истёк лимит времени разбора.', { exact: true }).waitFor();
     assert.equal(fx.gotoCalls(), 1);
     await page.goto(`${fx.url}/?lang=en`);
     await page.getByRole('heading', { name: 'Stop analysis', exact: true }).waitFor();
