@@ -1001,6 +1001,45 @@ _route_v2_transaction_active_id() {
   _instrumentation_tx_get "$active" TRANSACTION_ID
 }
 
+# Контекст и begin выбирают один ID под блокировкой оркестратора задачи. Номер
+# начинается с позиции журнала и пропускает только завершённые транзакции: после
+# no-result или resume журнал ещё не сдвинулся, а история cleanup уже сохранена.
+_route_v2_transaction_id() {
+  local task=$1 attempt=$2 sequence=$3 txid dir state rc
+  txid=$(_route_v2_transaction_active_id "$task")
+  rc=$?
+  if (( rc == 0 )); then
+    [[ "$txid" =~ ^v2-${attempt#*_}-s[0-9]+$ ]] || return 75
+    printf '%s\n' "$txid"
+    return 0
+  fi
+  (( rc == 3 )) || return "$rc"
+  [[ "$sequence" =~ ^[0-9]{1,18}$ ]] || return 78
+  sequence=$((10#$sequence))
+  while :; do
+    txid="v2-${attempt#*_}-s${sequence}"
+    dir=$(instrumentation_tx_dir "$task" "$txid") || return
+    if [[ ! -e "$dir" && ! -L "$dir" ]]; then
+      printf '%s\n' "$txid"
+      return 0
+    fi
+    [[ -d "$dir" && ! -L "$dir" &&
+       -f "$dir/state.env" && ! -L "$dir/state.env" ]] || return 78
+    state=$(_instrumentation_tx_get "$dir/state.env" STATE)
+    case "$state" in
+      completed)
+        sequence=$((sequence + 1))
+        ;;
+      active|cleaning|stalled)
+        return 75
+        ;;
+      *)
+        return 78
+        ;;
+    esac
+  done
+}
+
 _route_v2_transaction_before() {
   local task=$1 attempt=$2 node=$3 sequence=$4 txid scope isolation
   txid=$(_route_v2_transaction_active_id "$task")
@@ -1013,7 +1052,7 @@ _route_v2_transaction_before() {
         "$task" "$attempt" "$scope" || return 75
     fi
     _route_v2_workspace_roots_array || return
-    txid="v2-${attempt#*_}-s${sequence}"
+    txid=$(_route_v2_transaction_id "$task" "$attempt" "$sequence") || return
     isolation=exclusive-worktree-v1
     if declare -F route_v2_instrumentation_isolation >/dev/null; then
       isolation=$(route_v2_instrumentation_isolation) || return 78

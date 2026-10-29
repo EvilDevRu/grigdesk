@@ -2140,7 +2140,8 @@ route_v2_context_for_node() {
 
   if [[ "$context_node" == instrument || "$context_node" == trace ]]; then
     v2_prepare_scope || return
-    transaction_id="v2-${context_attempt#*_}-s${event_count}"
+    transaction_id=$(_route_v2_transaction_id \
+      "$context_task" "$context_attempt" "$event_count") || return
     instrumentation_phase=active
   elif [[ -f "$V2_SCOPE_FILE" && ! -L "$V2_SCOPE_FILE" ]]; then
     V2_SCOPE_EXPECTED_HASH=$(sha256sum -- "$V2_SCOPE_FILE" | awk '{print $1}') ||

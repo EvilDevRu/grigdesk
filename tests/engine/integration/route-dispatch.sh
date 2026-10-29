@@ -106,6 +106,9 @@ route_v2_context_for_node() {
 FAKE_EPOCH=0
 FAKE_AGENT_CALLS=0
 SHIP_CALLED=0
+INSTRUMENT_FAILURES_LEFT=1
+INSTRUMENT_TRANSACTIONS="$TEST_ROOT/instrument-transactions.log"
+INSTRUMENT_BASELINES="$TEST_ROOT/instrument-baselines.log"
 # Статус узла в реестре на момент, когда агента ТОЛЬКО ЗОВУТ. Файл, а не переменная:
 # dispatch запускается через command substitution, и сабшелл наружу ничего не отдаёт.
 STATUS_AT_START="$TEST_ROOT/status-at-agent-start.log"
@@ -118,7 +121,19 @@ run_agent() {
   FAKE_EPOCH=$((FAKE_EPOCH + 1))
   case "$stage" in
     INSTRUMENT)
+      _route_v2_transaction_active_id "$task" >>"$INSTRUMENT_TRANSACTIONS"
+      cat "$scope" >>"$INSTRUMENT_BASELINES"
       printf '# %s temporary\n' "$instrumentation_marker" >>"$scope"
+      if (( INSTRUMENT_FAILURES_LEFT > 0 )); then
+        INSTRUMENT_FAILURES_LEFT=$((INSTRUMENT_FAILURES_LEFT - 1))
+        file=$(run_state_active_file "$task" "$stage") || return
+        MULTI_LAST_RUN_ID="fake-${stage}-${FAKE_EPOCH}"
+        MULTI_LAST_RUN_EPOCH=$FAKE_EPOCH
+        _run_state_write "$file" "$MULTI_LAST_RUN_ID" "$FAKE_EPOCH" \
+          aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa active
+        DISPATCH_RESULT_KIND=transient
+        return 1
+      fi
       ;;
     TESTS)
       printf 'changed\n' >"$worktree/product-change.txt"
@@ -151,7 +166,25 @@ assert_rc 0 "$?" "trusted route cursor initializes after bootstrap"
 route_v2_dispatch_next "$debug_task" "$attempt" >/dev/null
 assert_rc 0 "$?" "state-only reproduction commits"
 route_v2_dispatch_next "$debug_task" "$attempt" >/dev/null
-assert_rc 0 "$?" "transactional instrumentation commits"
+instrument_rc=$?
+assert_rc 0 "$instrument_rc" "инструментация повторяется после временного отказа раннера"
+if (( instrument_rc != 0 )); then
+  finish_tests
+  exit 1
+fi
+assert_eq 2 "$(wc -l <"$INSTRUMENT_TRANSACTIONS")" \
+  "после временного отказа агент вызывается повторно"
+assert_eq 2 "$(sort -u "$INSTRUMENT_TRANSACTIONS" | wc -l)" \
+  "повтор получает отдельную транзакцию"
+assert_eq $'baseline\nbaseline' "$(cat "$INSTRUMENT_BASELINES")" \
+  "повтор инструментации начинает с восстановленного исходника"
+first_tx=$(head -1 "$INSTRUMENT_TRANSACTIONS")
+second_tx=$(tail -1 "$INSTRUMENT_TRANSACTIONS")
+first_tx_dir=$(instrumentation_tx_dir "$debug_task" "$first_tx")
+assert_eq completed "$(_instrumentation_tx_get "$first_tx_dir/state.env" STATE)" \
+  "закрытая транзакция первого захода сохранена"
+assert_eq "$second_tx" "$(_route_v2_transaction_active_id "$debug_task")" \
+  "proof наследует транзакцию успешного повтора"
 assert_contains "$(cat "$scope")" "$instrumentation_marker" \
   "instrumentation remains visible through the proof window"
 
