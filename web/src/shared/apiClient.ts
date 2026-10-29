@@ -1,3 +1,6 @@
+import { delayWithAbort } from '../../../shared/lib/delay.ts';
+import { acquireB24Read, b24ReadRoute, shouldLogB24Failure } from './b24ReadBackoff.ts';
+
 // Единый клиент к серверу GrigDesk.
 //
 // Граница сети: наружу отсюда уходит `unknown`. Ответ сервера — это JSON, а не
@@ -111,7 +114,15 @@ function failureMessage(data: unknown, status: number): string {
  */
 async function handle(res: Response, path: string): Promise<unknown> {
   const text = await res.text();
-  const data: unknown = text ? JSON.parse(text) : null;
+  let data: unknown = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch (error) {
+    if (res.ok) {
+      throw error;
+    }
+  }
 
   return handleData(res, path, data);
 }
@@ -207,6 +218,14 @@ function reportAttempt(
 
   if (typeof error === 'object' && error !== null) {
     reportedErrors.add(error);
+  }
+
+  const b24Route = b24ReadRoute(path);
+
+  const transient = status === undefined || [502, 503, 504].includes(status);
+
+  if (method === 'GET' && b24Route && transient && !shouldLogB24Failure(b24Route)) {
+    return;
   }
 
   reportApi('api.fail', {
@@ -383,6 +402,7 @@ async function request(
   const isGet = method === 'GET';
   const timeoutMs = options.timeoutMs ?? (isGet ? DEFAULT_GET_TIMEOUT_MS : 0);
   const attempts = isGet && options.retry !== false ? 2 : 1;
+  const b24Route = isGet ? b24ReadRoute(path) : null;
   // Consumer отмена объединяется с deadline: оба охватывают fetch и чтение body.
   // Отдельный signal не должен незаметно выключать прежний timeout GET.
   const attempt = () => {
@@ -398,6 +418,9 @@ async function request(
   };
 
   for (let number = 1; number <= attempts; number += 1) {
+    options.signal?.throwIfAborted();
+
+    const complete = b24Route ? await acquireB24Read(b24Route, options.signal) : null;
     const start = performance.now();
 
     try {
@@ -406,6 +429,7 @@ async function request(
         : await handle(await attempt(), path);
 
       reportAttempt(method, path, elapsed(start), number);
+      complete?.('success');
 
       return result;
     } catch (error) {
@@ -415,11 +439,23 @@ async function request(
       // жив — GET безопасно повторить один раз. Мутации не повторяем: неизвестно,
       // дошла ли первая (риск дубля).
       const name = (error as { name?: string } | null)?.name;
+      const transient = error instanceof TypeError || name === 'TimeoutError' || name === 'AbortError'
+        || (b24Route && error instanceof ApiError && [502, 503, 504].includes(error.status));
+      const cancelled = options.signal?.aborted;
+
+      complete?.(cancelled ? 'cancelled' : transient ? 'failure' : 'success');
+
+      if (cancelled) {
+        if (typeof error === 'object' && error !== null) {
+          reportedErrors.add(error);
+        }
+
+        throw error;
+      }
 
       const willRetry =
         number < attempts &&
-        !options.signal?.aborted &&
-        (error instanceof TypeError || name === 'TimeoutError' || name === 'AbortError');
+        !!transient;
 
       reportAttempt(method, path, elapsed(start), number, error, willRetry);
 
@@ -427,9 +463,9 @@ async function request(
         throw error;
       }
 
-      await new Promise((resolve) => {
-        setTimeout(resolve, 700);
-      });
+      if (!b24Route) {
+        await delayWithAbort(700, options.signal);
+      }
     }
   }
 

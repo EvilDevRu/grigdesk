@@ -1382,6 +1382,9 @@ function tgPlural(n: number) {
   return 'сообщений';
 }
 
+let detailAbort: AbortController | null = null;
+let commentsAbort: AbortController | null = null;
+
 /**
  * Загружает карточку через общий кеш задач с прежним принудительным обновлением.
  * Отказ остаётся в открытой карточке и не превращается в пустой успешный ответ.
@@ -1394,11 +1397,13 @@ async function loadDetail(force = false) {
   const id = taskId.value;
   const request = ++detailRequest;
 
+  detailAbort?.abort();
+  detailAbort = new AbortController();
   loading.value = true;
   err.value = null;
 
   try {
-    const loaded = await tasks.load(id, force);
+    const loaded = await tasks.load(id, force, detailAbort.signal);
 
     if (request !== detailRequest || taskId.value !== id) {
       return;
@@ -1857,10 +1862,14 @@ async function loadComments() {
   const id = taskId.value;
   const request = ++commentsRequest;
 
+  commentsAbort?.abort();
+  commentsAbort = new AbortController();
   comLoading.value = true;
 
   try {
-    const result = decodeTaskComments(await api.get(`/api/b24/task/${id}/comments`));
+    const result = decodeTaskComments(await api.get(`/api/b24/task/${id}/comments`, {
+      signal: commentsAbort.signal,
+    }));
 
     if (taskId.value === id && request === commentsRequest && isB24Task.value) {
       comments.value = result;
@@ -2531,6 +2540,8 @@ function onTaskDialogOpenChange(open: boolean) {
 
 // Открытие/закрытие модалки по taskId.
 watch(taskId, (id) => {
+  detailAbort?.abort();
+  commentsAbort?.abort();
   detailRequest += 1;
   commentsRequest += 1;
   comLoading.value = false;
@@ -2627,6 +2638,8 @@ watch(
   { immediate: true },
 );
 onUnmounted(() => {
+  detailAbort?.abort();
+  commentsAbort?.abort();
   detailRequest += 1;
   commentsRequest += 1;
   stopLaunchEvents();

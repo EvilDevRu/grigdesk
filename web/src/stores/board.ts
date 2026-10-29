@@ -10,6 +10,7 @@ import { decodeBoardDashboard, isBoardDashboard } from '../shared/boardContracts
 import type { BoardDashboard } from '../shared/boardContracts.ts';
 
 const mirrors = new WeakMap<object, () => void>();
+const reads = new WeakMap<object, AbortController>();
 
 export const useBoardStore = defineStore('board', {
   state: () => ({
@@ -51,13 +52,18 @@ export const useBoardStore = defineStore('board', {
       }
 
       const readAt = Math.max(Date.now(), this.readAt + 1);
+      const controller = new AbortController();
 
+      reads.set(this, controller);
       this.loading = true;
 
       try {
-        const dashboard = decodeBoardDashboard(await api.get('/api/b24/dashboard'));
+        const dashboard = decodeBoardDashboard(await api.get('/api/b24/dashboard', {
+          signal: controller.signal,
+          retry: false,
+        }));
 
-        if (readAt <= this.readAt) {
+        if (controller.signal.aborted || readAt <= this.readAt) {
           return;
         }
 
@@ -69,10 +75,11 @@ export const useBoardStore = defineStore('board', {
 
         return readAt;
       } catch (e) {
-        if (readAt >= this.readAt) {
+        if (!controller.signal.aborted && readAt >= this.readAt) {
           this.error = errorMessage(e, 'Доска недоступна');
         }
       } finally {
+        reads.delete(this);
         this.loading = false;
       }
     },
@@ -140,8 +147,13 @@ export const useBoardStore = defineStore('board', {
         timer.unref();
       }
     },
-    // Нужен при потере сессии: иначе поллинг молотит в закрытый API и сыпет 401 в консоль.
+    /**
+     * Потеря сессии снимает и таймер, и ожидание текущего чтения в общей очереди.
+     * Отменённый запрос не обновляет доску и не оставляет повтор после остановки.
+     */
     stopPolling() {
+      reads.get(this)?.abort();
+
       if (this._timer) {
         clearInterval(this._timer);
       }
