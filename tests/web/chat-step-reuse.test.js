@@ -65,12 +65,15 @@ async function setup({
   let stored = baseChat();
   const requests = [];
   let rejectNext = null;
+  const reads = [];
   const api = {
     /**
      * Чтение возвращает отдельную серверную копию и объявляет текущую capability.
      * Управляемая замена базы проверяет GET, который нельзя принять поверх dirty-правки.
      */
     async get(url) {
+      reads.push(url);
+
       if (url === '/api/chat/store' || url === '/api/chat/store/list') {
         const store = {
           sessions: [structuredClone(stored)],
@@ -211,6 +214,7 @@ async function setup({
     chat,
     session: chat.sessions[0],
     requests,
+    reads,
     api,
     replaceStored(next) {
       stored = structuredClone(next);
@@ -300,7 +304,7 @@ test('замена массива той же длины и copy-on-write тел
   assert.equal(chat._dirty(session), false);
 });
 
-test('неприменённый GET сохраняет локальную revision и сбрасывает основание refs', async () => {
+test('неприменённый GET сохраняет локальную revision и доказанное основание refs', async () => {
   for (const wholeStore of [false, true]) {
     const {
       chat,
@@ -326,9 +330,9 @@ test('неприменённый GET сохраняет локальную revis
     assert.equal(session.draft, 'Местная несохранённая правка');
     assert.equal(chat._dirty(session), true);
     await chat._writeChat(session.id);
-    assert.equal(requests[0].url, '/api/chat/store/chat');
+    assert.equal(requests[0].url, '/api/chat/store/chat/step-reuse');
     assert.equal(requests[0].sent.chat.revision, 1);
-    assert.deepEqual(requests[0].sent.chat.messages[0].steps, baseChat().messages[0].steps);
+    assert.equal(Object.hasOwn(requests[0].sent.chat.messages[0], 'steps'), false);
   }
 });
 
@@ -449,7 +453,7 @@ test('ACK до финализации оставляет новые receipt, ste
   assert.equal(chat._dirty(session), false);
 });
 
-test('named409 и исчезнувший URI дают один полный retry со старым телом и прежней CAS', async () => {
+test('named409 сверяет head и повторяет sparse; исчезнувший URI даёт один full retry', async () => {
   for (const status of [409, 404, 405]) {
     const {
       chat,
@@ -463,11 +467,98 @@ test('named409 и исчезнувший URI дают один полный retr
     await chat._writeChat(session.id);
     assert.equal(requests.length, 2);
     assert.equal(requests[0].url.endsWith('/step-reuse'), true);
-    assert.equal(requests[1].url, '/api/chat/store/chat');
+    assert.equal(requests[1].url, status === 409
+      ? '/api/chat/store/chat/step-reuse' : '/api/chat/store/chat');
     assert.equal(requests[1].sent.chat.revision, 1);
-    assert.equal(requests[1].sent.chat.messages[0].steps[0].text, 'Первое тело');
+    assert.equal(Object.hasOwn(requests[1].sent.chat.messages[0], 'steps'), status !== 409);
     assert.equal(chat.historyStepReuseProtocol, status === 409 ? 1 : 0);
   }
+});
+
+test('повторный 409 подтверждает несовпадение refs; новая полная база записывается один раз', async () => {
+  const { chat, session, requests, reads, replaceStored } = await setup();
+  const changed = baseChat();
+
+  changed.revision = 9;
+  changed.messages[0].steps.push({ k: 'tool', text: 'Серверная замена основания' });
+  replaceStored(changed);
+  reads.length = 0;
+  session.draft = 'Правка';
+  await chat._writeChat(session.id);
+  assert.deepEqual(requests.map((request) => request.url), [
+    '/api/chat/store/chat/step-reuse',
+    '/api/chat/store/chat/step-reuse',
+    '/api/chat/store/chat',
+  ]);
+  assert.deepEqual(reads, [`/api/chat/store/head/${session.id}`]);
+  assert.equal(requests[1].sent.reuseSteps.baseRevision, 9);
+  assert.equal(requests[2].sent.chat.revision, 1, 'head не выдаёт локальным настройкам новую CAS');
+  session.draft = 'Следующая правка';
+  await chat._writeChat(session.id);
+  assert.equal(requests.at(-1).url.endsWith('/step-reuse'), true);
+});
+
+test('отказ head после named409 не отправляет full и сохраняет refs для штатного повтора', async () => {
+  const { chat, session, requests, api, rejectNext } = await setup();
+  const get = api.get;
+
+  api.get = async (url) => {
+    if (url.includes('/head/')) {
+      throw new TypeError('Head недоступна');
+    }
+
+    return get(url);
+  };
+  session.draft = 'Правка';
+  rejectNext(conflict());
+  await assert.rejects(chat._writeChat(session.id), /Head недоступна/);
+  assert.equal(requests.length, 1);
+  api.get = get;
+  await chat._writeChat(session.id);
+  assert.equal(requests[1].url.endsWith('/step-reuse'), true);
+});
+
+test('head в chat-store обновляет dirty-каталог без detail и сброса refs', async () => {
+  const { chat, session, requests, reads } = await setup();
+
+  session.draft = 'Несохранённый черновик';
+  reads.length = 0;
+  await chat._pullChat(session.id, false, protocolHead({ ...baseChat(), revision: 9 }));
+  assert.deepEqual(reads, []);
+  assert.equal(session.revision, 1);
+  assert.equal(session.draft, 'Несохранённый черновик');
+  await chat._writeChat(session.id);
+  assert.equal(requests[0].url.endsWith('/step-reuse'), true);
+});
+
+test('старая head без настроек требует полный GET для CAS, сохраняя sparse PUT', async () => {
+  const { chat, session, requests, reads, api } = await setup({ slow: true });
+  const get = api.get;
+
+  api.get = async (url) => {
+    const result = await get(url);
+
+    if (url.includes('/head/')) {
+      delete result.head.effort;
+      delete result.head.mode;
+    }
+
+    return result;
+  };
+  session.effort = 'high';
+  session.mode = 'plan';
+  session.draft = 'Правка';
+
+  const saving = chat._writeChat(session.id);
+
+  requests[0].finish({ stale: true });
+  await tick();
+  assert.equal(requests[1].url.endsWith('/step-reuse'), true);
+  requests[1].finish();
+  await saving;
+  assert.equal(session.effort, 'high');
+  assert.equal(session.mode, 'plan');
+  assert.ok(reads.includes(`/api/chat/store/chat/${session.id}`));
 });
 
 test('между sparse, отказом и full retry copy-on-write сохраняет прежнее тело снимка', async () => {
@@ -492,12 +583,15 @@ test('между sparse, отказом и full retry copy-on-write сохран
 
   requests[0].reject(conflict());
   await tick();
-  assert.equal(requests[1].sent.chat.messages[0].steps[0].text, 'Первое тело');
-  requests[1].finish();
+  assert.equal(requests[1].url.endsWith('/step-reuse'), true);
+  requests[1].reject(conflict());
+  await tick();
+  assert.equal(requests[2].sent.chat.messages[0].steps[0].text, 'Первое тело');
+  requests[2].finish();
   await first;
   await tick();
-  assert.equal(requests[2].sent.chat.messages[0].steps[0].text, 'Новое тело');
-  requests[2].finish();
+  assert.equal(requests[3].sent.chat.messages[0].steps[0].text, 'Новое тело');
+  requests[3].finish();
   await next;
 });
 
@@ -617,6 +711,26 @@ test('неполный ACK подтверждает только свои поз
   await third;
 });
 
+test('точные confirmed сохраняют refs после restored и dropped серверного слияния', async () => {
+  for (const flag of ['restored', 'dropped']) {
+    const { chat, session, requests } = await setup({ slow: true });
+
+    session.draft = 'До слияния';
+
+    const first = chat._writeChat(session.id);
+
+    requests[0].finish({ [flag]: 1 });
+    await first;
+    session.draft = 'После слияния';
+
+    const second = chat._writeChat(session.id);
+
+    assert.equal(requests[1].url.endsWith('/step-reuse'), true);
+    requests[1].finish();
+    await second;
+  }
+});
+
 test('подтверждённые тела не читаются при sparse; второй store не разделяет подтверждения', async () => {
   const {
     chat,
@@ -662,15 +776,17 @@ test('ошибка полного fallback завершает попытку; с
 
   requests[0].reject(conflict());
   await tick();
-  requests[1].reject(new Error('Полный PUT упал'));
+  requests[1].reject(conflict());
+  await tick();
+  requests[2].reject(new Error('Полный PUT упал'));
   await failure;
 
   const next = chat._writeChat(session.id);
 
   await tick();
-  assert.equal(requests.length, 3);
-  assert.equal(requests[2].url, '/api/chat/store/chat');
-  requests[2].finish();
+  assert.equal(requests.length, 4);
+  assert.equal(requests[3].url, '/api/chat/store/chat');
+  requests[3].finish();
   await next;
 });
 

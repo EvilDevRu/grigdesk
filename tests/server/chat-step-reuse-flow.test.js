@@ -140,7 +140,17 @@ async function exercise(t, legacy) {
     api: transport.api,
     fromServer: true
   });
+
+  t.after(() => {
+    onSse = null;
+    chat.$dispose();
+  });
+
   const session = chat.session('flow-chat');
+  const surface = chat.registerSurface({}, { chatId: session.id, visible: true });
+
+  await chat.ensureChatMessages(session.id);
+  t.after(() => surface.dispose());
 
   onSse = sseOf(chat);
 
@@ -268,6 +278,9 @@ async function exercise(t, legacy) {
     fromServer: true
   });
 
+  t.after(() => reloaded.$dispose());
+  await reloaded.ensureChatMessages(session.id);
+
   assert.deepEqual(reloaded.session(session.id).messages, (await external.readOne(session.id)).messages);
   assert.equal(reloaded.session(session.id).modelRef.provider, TEST_MODEL_REF.provider);
   // Окна теста больше не реагируют на поздние уведомления закрываемого сервера.
@@ -307,6 +320,11 @@ test('после GET нового сервера старый HTTP-маршру�
     fromServer: true
   });
   const session = chat.session('rollback-chat');
+  const surface = chat.registerSurface({}, { chatId: session.id, visible: true });
+
+  await chat.ensureChatMessages(session.id);
+  t.after(() => surface.dispose());
+
   const history = new ChatHistoryStore({
     chatsDir: fixture.config.chatsDir,
     registryProvider: async () => ({

@@ -45,7 +45,9 @@ export function applyWebPending(
       pid: id,
       role: pending.role || 'assistant',
       text: pending.reply || '(пусто)',
-      steps: Array.isArray(pending.steps) ? pending.steps : [],
+      // Уже сохранённая лента неизменяема: повтор pending дополняет метаданные финала,
+      // а полную ленту назначает только новому сообщению без собственных steps.
+      steps: Array.isArray(final.steps) ? final.steps : Array.isArray(pending.steps) ? pending.steps : [],
       cost: pending.cost ?? null,
       model: pending.model || '',
       actualModel: pending.actualModel || '',

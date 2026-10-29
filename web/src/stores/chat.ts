@@ -39,7 +39,7 @@ import {
   createChatPersistenceProjectionCache,
   stringifyChatStoreSnapshot,
 } from '../shared/chatPersistenceProjection.ts';
-import { createChatHistoryStepReuseState, mayRetryFullHistory } from '../shared/chatHistoryStepReuse.ts';
+import { createChatHistoryStepReuseState, isHistoryStepsChanged } from '../shared/chatHistoryStepReuse.ts';
 import { createChatSelectionState } from '../shared/chatSelectionState.ts';
 import { effectivePermissionMode, permissionModeRequest } from '../shared/chatPermissionMode.ts';
 import { chatVisibility } from '../shared/chatVisibility.ts';
@@ -2901,26 +2901,67 @@ export const useChatStore = defineStore('chat', {
           ...(request.reuseSteps ? { reuseSteps: request.reuseSteps } : {}),
         }));
       } catch (caught) {
-          const error = chatFailure(caught);
+        let error: ReturnType<typeof chatFailure> | null = chatFailure(caught);
 
-        if (!request.reuseSteps || !mayRetryFullHistory(error)) {
+        if (!request.reuseSteps || (!isHistoryStepsChanged(error)
+          && error.status !== 404 && error.status !== 405)) {
           throw error;
         }
 
-        state.resetBase(id);
+        if (isHistoryStepsChanged(error)) {
+          const result = await api.get(`/api/chat/store/head/${id}`, { retry: false });
+          const head = decodeChatHead(isRecord(result) ? result.head : null);
 
-        if (error.status === 404 || error.status === 405) {
-          this.historyStepReuseProtocol = 0;
-          state.clearBases();
+          if (head.id !== id || !Number.isSafeInteger(head.revision) || !head.revision) {
+            throw chatRevisionConflict();
+          }
+          if (chatLoadRuntimeFor(this).disposed || this._find(id) !== live
+            || state.generation(id) !== generation) {
+            return null;
+          }
+
+          try {
+            response = decodeChatEnvelope(await api.put(request.route, {
+              chat: request.chat,
+              archived,
+              origin: WINDOW_ID,
+              reuseSteps: { ...request.reuseSteps, baseRevision: head.revision },
+            }));
+            error = null;
+          } catch (retryError) {
+            error = chatFailure(retryError);
+
+            if (!isHistoryStepsChanged(error) && error.status !== 404 && error.status !== 405) {
+              throw error;
+            }
+          }
         }
 
-        // Полный retry использует тот же логический снимок и прежнюю CAS-revision.
-        // Поздняя правка истории не меняет fallback и остаётся для следующей записи.
-        response = decodeChatEnvelope(await api.put('/api/chat/store/chat', {
-          chat: snapshot,
-          archived,
-          origin: WINDOW_ID
-        }));
+        if (error) {
+          if (chatLoadRuntimeFor(this).disposed || this._find(id) !== live
+            || state.generation(id) !== generation) {
+            return null;
+          }
+
+          state.resetBase(id);
+
+          if (error.status === 404 || error.status === 405) {
+            this.historyStepReuseProtocol = 0;
+            state.clearBases();
+          }
+
+          // Повторный named409 подтверждает несовпадение refs после свежей головы.
+          // Полный retry сохраняет исходный снимок и CAS; поздние правки остаются для следующей записи.
+          response = decodeChatEnvelope(await api.put('/api/chat/store/chat', {
+            chat: snapshot,
+            archived,
+            origin: WINDOW_ID
+          }));
+        }
+      }
+
+      if (!response) {
+        throw chatRevisionConflict();
       }
 
       const current = this._find(id);
@@ -2931,19 +2972,35 @@ export const useChatStore = defineStore('chat', {
         return response;
       }
 
+      if (this.historyStepReuseProtocol === 1) {
+        state.acceptAck(snapshot, response, steps);
+      } else {
+        state.resetBase(id);
+      }
+
       if (response?.stale && !force) {
         // До GET нельзя выдавать старым настройкам свежую CAS-базу или менять селект.
         // Служебные поля памяти и папки по прежнему принадлежат серверу.
         applySaveAck(current, response, { runtimeOnly: true });
-        state.resetBase(id);
 
-        const remote = decodeChatEnvelope(await api.get(`/api/chat/store/chat/${id}`)).chat;
+        const raw = await api.get(this.historyStepReuseProtocol === 1
+          ? `/api/chat/store/head/${id}` : `/api/chat/store/chat/${id}`);
+        let remote = this.historyStepReuseProtocol === 1
+          ? decodeChatHead(isRecord(raw) ? raw.head : null) : decodeChatEnvelope(raw).chat;
+
+        // Старые серверы с protocol 1 не включали effort/mode в head.
+        // Их отсутствие не доказывает default: полный GET нужен только для такого контракта.
+        if (remote && this.historyStepReuseProtocol === 1
+          && (!Object.hasOwn(remote, 'effort') || !Object.hasOwn(remote, 'mode'))) {
+          remote = decodeChatEnvelope(await api.get(`/api/chat/store/chat/${id}`)).chat;
+        }
+
         const latest = this._find(id);
 
         if (!latest || state.generation(id) !== generation) {
           return response;
         }
-        if (!remote || !Number.isSafeInteger(remote.revision)) {
+        if (!remote || remote.id !== id || !Number.isSafeInteger(remote.revision)) {
           throw chatRevisionConflict();
         }
         if ((latest.revision || 0) > (remote.revision || 0)) {
@@ -2981,12 +3038,6 @@ export const useChatStore = defineStore('chat', {
       }
 
       state.markSent(acknowledged, fingerprintOf(acknowledged), steps);
-
-      if (this.historyStepReuseProtocol === 1) {
-        state.acceptAck(snapshot, response, steps);
-      } else {
-        state.resetBase(id);
-      }
 
       chatLoadRuntimeFor(this).epochs.set(id, (chatLoadRuntimeFor(this).epochs.get(id) || 0) + 1);
       this._refreshChatSearch();
@@ -3363,7 +3414,7 @@ export const useChatStore = defineStore('chat', {
           if (d.gone) {
             this._dropRemoteChat(d.id!);
           } else {
-            this._pullChat(d.id!, !!d.archived);
+            this._pullChat(d.id!, !!d.archived, d.head);
           }
         } else if (name === 'chat-store-meta') {
           // Дефолты новых чатов общие, а вот activeId НЕ применяем: у каждого устройства
@@ -3942,13 +3993,29 @@ export const useChatStore = defineStore('chat', {
      * Чат изменили в другом окне (в т.ч. на другом устройстве) — забираем именно его.
      * Тянем по одному чату, а не всю историю: меняется всегда один, а история растёт.
      */
-    async _pullChat(id: string, archived = false) {
+    async _pullChat(id: string, archived = false, headValue?: unknown) {
       if (!id) {
         return;
       }
 
       const local = this._find(id);
       const runtime = chatLoadRuntimeFor(this);
+
+      if (runtime.disposed) {
+        return;
+      }
+      if (headValue && local && this._dirty(local)) {
+        try {
+          const head = decodeChatHead(headValue);
+
+          if (head.id === id) {
+            this._applyChatHead(head);
+
+            return;
+          }
+        } catch { /* Повреждённая шапка требует обычной адресной сверки. */ }
+      }
+
       const epoch = (runtime.epochs.get(id) || 0) + 1;
 
       runtime.epochs.set(id, epoch);
@@ -3987,8 +4054,6 @@ export const useChatStore = defineStore('chat', {
         return;
       }
       if (local && this._dirty(local)) {
-        historyPersistenceFor(this).resetBase(chat.id);
-
         // Серверная сверка головы могла уже записать и подтвердить pending другого окна.
         // Его окончательный ответ дополняет dirty-ленту, не подменяя локальный черновик.
         for (const message of chat.messages) {
@@ -4284,7 +4349,7 @@ export const useChatStore = defineStore('chat', {
         const full = this.isChatMessagesLoaded(head.id);
 
         if (local && this._dirty(local)) {
-          historyPersistenceFor(this).resetBase(head.id);
+          this._applyChatHead(head);
 
           continue;
         }

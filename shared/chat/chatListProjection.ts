@@ -49,7 +49,8 @@ export function projectWebChatHead(chat: Record<string, unknown>, version: strin
   };
 
   for (const key of ['title', 'purpose', 'taskId', 'logicalIdentity', 'model', 'modelRef',
-    'unread', 'archived', 'createdAt', 'updatedAt', 'closedAt', 'revision']) {
+    'effort', 'mode', 'modeSelection', 'unread', 'archived', 'createdAt', 'updatedAt', 'closedAt',
+    'revision']) {
     if (chat[key] !== undefined) {
       head[key] = chat[key];
     }
@@ -71,6 +72,8 @@ export function projectWebChatHead(chat: Record<string, unknown>, version: strin
   }
 
   head.model ??= (chat.modelRef as Message | undefined)?.model || '';
+  head.effort ??= '';
+  head.mode ??= '';
 
   return head;
 }

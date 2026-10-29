@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { withChatImageHint } from '../../server/src/lib/chat/imageHint.ts';
+import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
 
 import { chatStoreFixture, sseOf } from '../web/helpers/chat-store.js';
 import {
@@ -35,18 +36,21 @@ function windowApi(app, log = []) {
       .filter((message) => message.role === 'assistant' && message.pid)
       .map((message) => message.pid);
 
-    log.push({
+    const entry = {
       method,
       url,
       verdict,
       replyIds,
-    });
+    };
+
+    log.push(entry);
 
     if (verdict === 'before') {
       throw new TypeError('Failed to fetch');
     }
 
     let response;
+    const started = performance.now();
 
     try {
       response = await app.inject({
@@ -69,6 +73,9 @@ function windowApi(app, log = []) {
     }
 
     const data = response.body ? JSON.parse(response.body) : null;
+
+    entry.ackMs = performance.now() - started;
+    entry.status = response.statusCode;
 
     if (response.statusCode >= 400) {
       const error = new Error(data?.message || data?.error || `HTTP ${response.statusCode}`);
@@ -180,6 +187,84 @@ function replies(chat, id) {
 
 const settle = () => new Promise((resolve) => {
   setTimeout(resolve, 20);
+});
+
+test('20 завершённых блоков с серверными записями сохраняются sparse без лишних full PUT', async (t) => {
+  const w = await world(t);
+  const id = 'live-reuse-chat';
+  const historical = [{
+    role: 'assistant',
+    text: 'Прошлый ответ',
+    runId: 'history-run',
+    assistantMessageId: 'history-answer',
+    steps: [{
+      k: 'tool',
+      text: 'Неизменяемое тело',
+      input: { command: 'history' },
+    }],
+  }];
+
+  await saveChat(w.app, id, { messages: historical });
+
+  const view = await w.openWindow(id);
+  const session = view.chat.session(id);
+
+  await view.chat.send(id, 'Длинный ход с инструментами');
+  await w.waitForRuns(1);
+
+  let serverWrite = false;
+  let writes = 0;
+  const save = ChatHistoryStore.prototype.saveOne;
+
+  t.mock.method(ChatHistoryStore.prototype, 'saveOne', async function (chat, archived, options) {
+    if (chat.id === id && serverWrite) {
+      serverWrite = false;
+      writes += 1;
+
+      // Обе операции используют настоящий per-chat lock того же экземпляра сервера.
+      // Метрики становятся durable, пока клиент сохраняет законченный блок.
+      const pending = this.patchExecution(id, () => ({ contextTokens: writes }));
+      const [, result] = await Promise.all([pending, save.call(this, chat, archived, options)]);
+
+      return result;
+    }
+
+    return save.call(this, chat, archived, options);
+  });
+
+  const start = view.transport.log.length;
+
+  for (let index = 0; index < 20; index += 1) {
+    w.runs[0].options.onStep({
+      k: 'tool',
+      text: `Инструмент ${index}`,
+      at: Date.now(),
+    });
+    await w.runs[0].options.onAssistantMessage({
+      assistantMessageId: `live-block-${String(index).padStart(8, '0')}`,
+      text: `Завершённый блок ${index}`,
+      sourceRevision: 1,
+      complete: true,
+    });
+    await waitFor(() => session.messages.some((message) => message.text === `Завершённый блок ${index}`));
+    serverWrite = true;
+    await view.chat._writeChat(id);
+  }
+
+  const puts = view.transport.log.slice(start)
+    .filter((entry) => entry.method === 'PUT' && entry.url !== '/api/chat/store/meta');
+  const durations = puts.map((entry) => entry.ackMs).sort((left, right) => left - right);
+
+  assert.equal(writes, 20);
+  assert.ok(puts.length >= 20);
+  assert.equal(puts.every((entry) => entry.url === '/api/chat/store/chat/step-reuse'), true);
+  assert.equal(puts.every((entry) => entry.status === 200), true);
+  assert.deepEqual((await serverChat(w.app, id)).messages[0].steps, historical[0].steps);
+  t.diagnostic(`sparse ACK: n=${durations.length}, p95=${durations[Math.ceil(durations.length * 0.95) - 1]
+    .toFixed(2)} мс, max=${durations.at(-1).toFixed(2)} мс`);
+
+  w.runs[0].release('Итог');
+  await waitFor(() => replies(view.chat, id).some((message) => message.text === 'Итог'));
 });
 
 test('F5 между записью реплики и приёмом: видно «не доставлено», запуск ровно один', async (t) => {
@@ -344,7 +429,8 @@ test('ход кончился при оборванном SSE: переподк�
 
   view.online = true;
   view.sse('hello', { at: Date.now(), bootId: 'boot-same-0001' });
-  await waitFor(() => replies(view.chat, 'sse-chat').length === 1, { what: 'ответ после переподключения' });
+  await waitFor(() => replies(view.chat, 'sse-chat').length === 1
+    && !view.chat.session('sse-chat').sending, { what: 'ответ и завершение хода после переподключения' });
   view.sse('hello', { at: Date.now(), bootId: 'boot-same-0001' });
   view.sse('hello', { at: Date.now(), bootId: 'boot-same-0001' });
   await settle();
@@ -393,7 +479,8 @@ test('несколько сообщений одного чата и второ�
   }
 
   for (const view of [left, right]) {
-    await waitFor(() => replies(view.chat, 'seq-chat').length === 4, { what: 'четыре ответа в окне' });
+    await waitFor(() => replies(view.chat, 'seq-chat').length === 4
+      && !view.chat.session('seq-chat').sending, { what: 'четыре ответа и завершение хода в окне' });
   }
 
   await settle();

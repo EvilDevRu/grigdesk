@@ -311,7 +311,8 @@ export class MobileHistory {
             turnId: entry.turnId,
             clientId: entry.mobileOwner!.clientId,
             cost: pending.cost ?? null,
-            steps: Array.isArray(pending.steps) ? pending.steps : [],
+            steps: Array.isArray(final.steps) ? final.steps
+              : Array.isArray(pending.steps) ? pending.steps : [],
             model: pending.model || '',
             actualModel: pending.actualModel || '',
             effort: pending.effort || '',

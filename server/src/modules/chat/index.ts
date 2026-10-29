@@ -5341,11 +5341,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
             const entry = await history.readEntry(id);
 
-            heads.push(projectWebChatHead(entry!.chat, history.versionOf(entry!.json)));
+            const head = projectWebChatHead(entry!.chat, history.versionOf(entry!.json));
+
+            heads.push(head);
 
             if (Number(saved.revision || 0) !== previousRevision) {
               fastify.sse.broadcast('chat-store', {
                 id,
+                head,
                 origin: '',
                 at: Date.now(),
               });
