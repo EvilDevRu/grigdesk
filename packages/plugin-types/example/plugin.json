@@ -1,0 +1,16 @@
+{
+  "id": "typed-example",
+  "name": "Пример TypeScript",
+  "version": "1.0.0",
+  "api": 2,
+  "description": "Проверяемый сервер и панель Vue с публичными типами GrigDesk",
+  "minGrigDeskVersion": "0.1.0",
+  "settings": [{ "key": "greeting", "type": "string", "default": "Привет" }],
+  "webModule": {
+    "dir": "ui",
+    "entry": "panel.js",
+    "css": ["panel.css"],
+    "startOnLogin": true
+  },
+  "install": { "npm": [] }
+}

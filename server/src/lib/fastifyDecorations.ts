@@ -9,6 +9,7 @@
 // augmentation действует на всю программу.
 
 import 'fastify';
+import type { AuthKind } from '../../../packages/plugin-types/src/server.ts';
 
 // Изолированные HTTP-фикстуры не импортируют сборку приложения, регистрирующую плагины.
 // Их расширения нужны и в таком графе типов; runtime-регистрация остаётся в приложении.
@@ -24,7 +25,7 @@ import type { ConversationAck } from './arbiterConversationService.ts';
 
 // Чем именно подтверждён запрос. Различать обязательно: внутренний токен процесса и
 // сессия человека дают разные права, а CLI-токен не должен открывать чужие ручки.
-export type AuthKind = 'session' | 'internal' | 'cli' | null;
+export type { AuthKind } from '../../../packages/plugin-types/src/server.ts';
 
 export interface AuthPrincipal {
   kind: 'device';

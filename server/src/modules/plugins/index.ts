@@ -1,3 +1,6 @@
+import type {
+  PluginServerOptions, PluginServerCallback, PluginServerAsync,
+} from '../../../../packages/plugin-types/src/server.ts';
 // Модуль plugins — реестр плагинов GrigDesk: список, вкл/выкл, настройки.
 // Регистрируется РАНЬШЕ модулей-плагинов: декорирует fastify.pluginEnabled(id),
 // которым системные модули (media/code) гейтят свои роуты на лету — тумблер
@@ -223,7 +226,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
 
         await scope.register(async (serverScope) => {
           try {
-            const options = {
+            const options: PluginServerOptions = {
               config,
               prefs,
               plugin: m,
@@ -235,10 +238,11 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
 
             if (mod.default.length >= 3) {
               await new Promise<void>((resolve, reject) => {
-                mod.default(serverScope, options, (error?: Error) => error ? reject(error) : resolve());
+                (mod.default as PluginServerCallback)(serverScope, options,
+                  (error?: Error) => error ? reject(error) : resolve());
               });
             } else {
-              await mod.default(serverScope, options);
+              await (mod.default as PluginServerAsync)(serverScope, options);
             }
           } catch (error) {
             gate.options.stopRequired = true;
