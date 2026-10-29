@@ -53,6 +53,21 @@ export default defineComponent({
 });
 `;
 
+const CANVAS_STUB = `
+      import { defineComponent, h } from 'vue';
+      export default defineComponent({ props: ['scope'], emits: ['select-node'],
+        setup(props, { emit }) { return () => h('button', {
+          'data-test': 'choose-check', onClick: () => emit('select-node',
+            { scope: props.scope, nodeId: 'check' }),
+        }, 'Схема маршрута'); } });`;
+const STAGE_LIST_STUB = `
+      import { defineComponent, h } from 'vue';
+      export default defineComponent({ props: ['scope'], emits: ['select-node'],
+        setup(props, { emit }) { return () => h('button', {
+          'data-test': 'stage-choose-build', onClick: () => emit('select-node',
+            { scope: props.scope, nodeId: 'build' }),
+        }, 'Список этапов'); } });`;
+
 function summaryOf(draft) {
   const { id, profile, title, revision, baseCatalogHash, state, updatedAt } = draft;
 
@@ -278,20 +293,12 @@ async function fixture(t, {
           'data-test': 'bootstrap-choose-scout', onClick: () => emit('select-node',
             { scope: { kind: 'bootstrap' }, nodeId: 'scout' }),
         }, 'Начальная разведка'); } });`,
-    ...(!realCanvas ? { './routes/RouteCanvas.vue': `
-      import { defineComponent, h } from 'vue';
-      export default defineComponent({ props: ['scope'], emits: ['select-node'],
-        setup(props, { emit }) { return () => h('button', {
-          'data-test': 'choose-check', onClick: () => emit('select-node',
-            { scope: props.scope, nodeId: 'check' }),
-        }, 'Схема маршрута'); } });` } : {}),
-    './routes/RouteStageList.vue': `
-      import { defineComponent, h } from 'vue';
-      export default defineComponent({ props: ['scope'], emits: ['select-node'],
-        setup(props, { emit }) { return () => h('button', {
-          'data-test': 'stage-choose-build', onClick: () => emit('select-node',
-            { scope: props.scope, nodeId: 'build' }),
-        }, 'Список этапов'); } });`,
+    ...(!realCanvas ? {
+      './routes/RouteCanvas.vue': CANVAS_STUB,
+      './RouteCanvas.vue': CANVAS_STUB,
+    } : {}),
+    './routes/RouteStageList.vue': STAGE_LIST_STUB,
+    './RouteStageList.vue': STAGE_LIST_STUB,
     './routes/RouteNodeInspector.vue': `
       export default { props: ['nodeId'], template: '<div data-test="node-inspector">{{ nodeId }}</div>' };`,
     './routes/RouteTransitionInspector.vue':

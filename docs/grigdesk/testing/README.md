@@ -10,6 +10,9 @@
 
 ## Грабли
 
+- [Отказ запуска браузера оставляет Vite открытым](browser-fixture-startup-cleanup.md) —
+  поздняя регистрация очистки превращает отсутствие браузера в таймаут всего прогона.
+
 - [Автоподготовка legacy fixture DeepSeek: отдельный ABI-кэш, lock и восстановление](deepseek-legacy-preflight.md)
 
 - [Унаследованный ELF меняет установку CLI-фикстуры после переноса helper-а](cli-helper-binary-environment.md)

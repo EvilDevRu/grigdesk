@@ -147,3 +147,6 @@
 - [ttNNNN.pipeline — призраки](legacy-pipeline-artifacts.md)
 - [VERIFY встал «ESLint не стартовал: No files matching the pattern» = в diff удалённый файл, статика линтовала его](eslint-deleted-file-filter.md)
 - [VERIFY дважды вернул исправную сборку: помощник теста ушёл в Pest как тест](verify-test-helper-targets.md)
+
+- [Контракт каталога ролей, подготовки и атомарной вставки этапа](stage-wizard.md)
+- [Ответы мастера о правах и проблемах этапа](stage-wizard-answers.md)

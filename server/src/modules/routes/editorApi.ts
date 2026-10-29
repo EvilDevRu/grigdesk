@@ -9,6 +9,8 @@ import type {
 import type { ProjectsPrefsPort } from '../../lib/profiles.ts';
 import { loadRunnerConfig, resolveRunnerState } from '../../lib/runnerState.ts';
 
+import { loadStageRoleCatalog } from './stageRoleCatalog.ts';
+
 import { DraftStore, RoutesEditorStoreError } from './draftStore.ts';
 import type { CatalogObserver } from './catalogObserver.ts';
 import { RoutesEditorModelError } from './draftModel.ts';
@@ -37,6 +39,7 @@ type EditorRequest = FastifyRequest<{
 export interface RoutesEditorApiOptions {
   routesStore: RoutesStore;
   authoringDir: string;
+  pipelineSampleDir?: string;
   profilesDir: string;
   prefs: ProjectsPrefsPort;
   draftStore?: DraftStore;
@@ -157,6 +160,13 @@ export async function registerRoutesEditorApi(
       profile, catalogHash, sourceRevision,
     });
   };
+
+  fastify.get('/api/routes/:profile/editor/stage-roles', guarded(fastify, async (request, reply) => {
+    await service.ensureProject(request.params.profile);
+    reply.header('cache-control', 'no-store');
+
+    return loadStageRoleCatalog(options.pipelineSampleDir);
+  }));
 
   fastify.get('/api/routes/:profile/editor', guarded(fastify, async (request, reply) => {
     reply.header('cache-control', 'no-store');

@@ -29,7 +29,10 @@ export interface RoutesPrefsPort extends ProjectsPrefsPort {
 }
 
 export interface RoutesModuleOptions {
-  config: Pick<GrigDeskConfig, 'routesDir' | 'profilesDir'> & { routesAuthoringDir?: string };
+  config: Pick<GrigDeskConfig, 'routesDir' | 'profilesDir'> & {
+    routesAuthoringDir?: string;
+    pipelineSampleDir?: string;
+  };
   prefs: RoutesPrefsPort;
   catalogScheduler?: CatalogObserverScheduler;
 }
@@ -55,6 +58,7 @@ async function routesModule(fastify: FastifyInstance, opts: RoutesModuleOptions)
     authoringDir: config.routesAuthoringDir ?? `${config.routesDir}.authoring`,
     profilesDir: config.profilesDir,
     prefs,
+    pipelineSampleDir: config.pipelineSampleDir,
   });
 
   // ── Проекты ──

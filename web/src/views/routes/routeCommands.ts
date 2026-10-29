@@ -1,9 +1,14 @@
+import type { PreparedStageRole, WizardCapabilities } from './routeWizardTemplates.ts';
+import { stageCommandIdentity } from './routeWizardTemplates.ts';
 import type {
   DraftMachine,
   DraftNode,
   RouteTransitionDoc,
 } from '../../../../shared/pipeline/routeDefinition.ts';
 import type { RouteDraft } from '../../../../shared/pipeline/routesEditorContracts.ts';
+import { stagePromptLimitExceeded } from '../../../../shared/pipeline/routeStageWizardContracts.ts';
+
+export { prepareStageRole } from './routeWizardTemplates.ts';
 
 export type RouteCommandScope = { kind: 'route'; routeId: string } | { kind: 'bootstrap' };
 export type RunKeyFactory = (suggested: string, used: ReadonlySet<string>) => string;
@@ -1164,4 +1169,244 @@ export function setEscalation(draft: RouteDraft, scope: RouteCommandScope,
     issues: [],
     createdNodeIds: []
   };
+}
+
+/**
+ * Проверяет доступность роли и места по текущему снимку.
+ * Даже прямой вызов команды не обходит защиту хостовых имён и пары цикла.
+ */
+function stagePlaceReason(machine: DraftMachine, afterId: string,
+  prepared: PreparedStageRole, capabilities: WizardCapabilities): string {
+  const order = [...(machine.sequence.main ?? []), ...(machine.sequence.tail ?? [])];
+  const after = machine.nodes.find((node) => node.id === afterId);
+  const success = after?.on?.[after.executor === 'gate' ? 'approved' : 'done'];
+  const ship = order.indexOf('ship');
+
+  if (!after || after.executor === 'status' || afterId === 'ship'
+    || (ship >= 0 && order.indexOf(afterId) >= ship)) {
+    return 'after_delivery';
+  }
+  if (machine.loop?.worker === afterId) {
+    return 'loop_pair';
+  }
+  if (!success || (!success.next && success.stop !== 'done')) {
+    return 'success_required';
+  }
+
+  const role = prepared.roleId;
+  const canonical = role === 'command' ? prepared.nodes[0]?.id : role;
+
+  if (['tests', 'browser', 'command'].includes(role)
+    && machine.nodes.some((node) => node.id.toLowerCase() === canonical?.toLowerCase()
+      || node.runKey?.toLowerCase() === canonical?.toLowerCase()
+      || (role === 'command' && node.executor === 'command'))) {
+    return 'role_duplicate';
+  }
+  if (role === 'review' && !findStageReviewCheck(machine, afterId, prepared, capabilities)) {
+    return 'recheck_unavailable';
+  }
+
+  return '';
+}
+
+/**
+ * Ищет проверку по успешному продолжению, не угадывая команды стороннего профиля.
+ * Если её нет, companion допустим только со свободными каноническими именами.
+ */
+export function findStageReviewCheck(machine: DraftMachine, afterId: string,
+  prepared: PreparedStageRole, capabilities: WizardCapabilities): DraftNode | null {
+  const after = machine.nodes.find((node) => node.id === afterId);
+  let next = after?.on?.[after.executor === 'gate' ? 'approved' : 'done']?.next;
+  const visited = new Set<string>();
+
+  while (next && !visited.has(next)) {
+    visited.add(next);
+
+    const node = machine.nodes.find((item) => item.id === next);
+
+    if (node?.executor === 'command'
+      && capabilities.commands.some((command) => command.id === node.commandId)) {
+      return node;
+    }
+
+    next = node?.on?.[node.executor === 'gate' ? 'approved' : 'done']?.next;
+  }
+
+  const command = capabilities.commands.find((item) =>
+    item.id === (prepared.answers.commandId ?? 'recheck') && item.filesystem.includes('state-only'));
+
+  if (!command) {
+    return null;
+  }
+
+  const identity = stageCommandIdentity(command.id);
+
+  if ([...machine.nodes, ...prepared.nodes].some((node) => node.id.toLowerCase() === identity.id
+    || node.runKey === identity.runKey || node.commandId === command.id)) {
+    return null;
+  }
+
+  const template = prepared.companion ?? prepared.nodes[0];
+
+  if (!template) {
+    return null;
+  }
+
+  const node = structuredClone(template);
+
+  Object.assign(node, identity);
+  node.executor = 'command';
+  node.commandId = command.id;
+  delete node.prompt;
+  node.policy = safeExecutionFields().policy;
+  node.fanout = safeExecutionFields().fanout;
+  node.retry = safeExecutionFields().retry;
+
+  return node;
+}
+
+/**
+ * Возвращает все места, включая недоступные с причиной.
+ * Схема и список мастера используют один и тот же результат.
+ */
+export function listStageInsertionPlaces(draft: RouteDraft, scope: RouteCommandScope,
+  prepared: PreparedStageRole, capabilities: WizardCapabilities) {
+  const machine = scope.kind === 'route' ? draft.routes[scope.routeId]?.route : null;
+
+  return machine?.nodes.map((node) => ({
+    afterId: node.id,
+    label: node.label || node.id,
+    disabledReason: stagePlaceReason(machine, node.id, prepared, capabilities),
+  })) ?? [];
+}
+
+/**
+ * Вставляет весь пакет одним независимым снимком и сшивает успешное продолжение.
+ * Полный пересчёт возвратов использует ту же семантику, что перестановка этапа.
+ */
+export function insertStageRole(draft: RouteDraft, scope: RouteCommandScope, afterId: string,
+  prepared: PreparedStageRole, capabilities: WizardCapabilities): RouteCommandResult {
+  if (scope.kind !== 'route' || prepared.issues.length || !prepared.nodes.length) {
+    return unchanged(draft, 'role_invalid', prepared.issues[0]?.message ?? 'role_invalid');
+  }
+
+  const copy = structuredClone(draft);
+  const bundle = copy.routes[scope.routeId];
+
+  if (!bundle) {
+    return unchanged(draft, 'route_missing', 'route_missing');
+  }
+
+  const machine = bundle.route;
+  const reason = stagePlaceReason(machine, afterId, prepared, capabilities);
+
+  if (reason) {
+    return unchanged(draft, reason, reason);
+  }
+
+  const after = machine.nodes.find((node) => node.id === afterId)!;
+  const outcome = after.executor === 'gate' ? 'approved' : 'done';
+  const successor = structuredClone(after.on![outcome]!);
+  const phase = after.phase as 'main' | 'tail';
+  const sequence = machine.sequence[phase]!;
+  const position = sequence.indexOf(afterId) + 1;
+  const nodes = structuredClone(prepared.nodes);
+  const prompts = { ...prepared.prompts };
+  const check = prepared.roleId === 'review'
+    ? findStageReviewCheck(machine, afterId, prepared, capabilities) : null;
+
+  if (check && !machine.nodes.includes(check)) {
+    nodes.push(check);
+  }
+
+  for (const node of nodes) {
+    const base = node.id;
+    let suffix = 1;
+
+    while (machine.nodes.some((item) => item.id === node.id || item.runKey === node.runKey)) {
+      suffix += 1;
+      node.id = `${base}_${suffix}`;
+      node.runKey = node.id.toUpperCase();
+    }
+
+    node.phase = phase;
+    node.emits = [];
+
+    if (node.prompt) {
+      for (const [index, block] of node.prompt.blocks.entries()) {
+        const original = block.file;
+        let file = `prompts/${node.id}.wizard-${index}.md`;
+
+        while (Object.hasOwn(bundle.prompts, file)) {
+          file = file.replace('.md', '-new.md');
+        }
+
+        const bytes = prompts[original];
+
+        if (bytes === undefined) {
+          return unchanged(draft, 'prompt_missing', 'prompt_missing');
+        }
+
+        bundle.prompts[file] = bytes;
+        block.file = file;
+      }
+
+      if (check) {
+        const file = `prompts/${node.id}.wizard-recheck.md`;
+
+        bundle.prompts[file] = `Перепроверка RECHECK: этап ${check.id}, ключ ${check.runKey}.`;
+        node.prompt.blocks.push({ file });
+      }
+    }
+
+    machine.nodes.push(node);
+  }
+
+  const ids = nodes.map((node) => node.id);
+
+  sequence.splice(position, 0, ...ids);
+  after.on![outcome] = { next: ids[0]! };
+
+  for (const [index, node] of nodes.entries()) {
+    const done = index + 1 < nodes.length ? { next: ids[index + 1] } : successor;
+    const stop = { stop: 'human' };
+
+    node.on = node.executor === 'gate' ? { approved: done, rejected: { ...stop } } : {
+      done,
+      skipped: { ...stop },
+      failed: { ...stop },
+      exhausted: { ...stop },
+    };
+
+    if (node.executor !== 'gate') {
+      const order = [...(machine.sequence.main ?? []), ...(machine.sequence.tail ?? [])];
+      const target = machine.nodes.find((item) => item.id === prepared.answers.returnTargetId);
+      const canReturn = !machine.loop && target && target.executor !== 'status'
+        && order.indexOf(target.id) < order.indexOf(node.id)
+        && prepared.answers.failure !== 'ask';
+      const action = canReturn ? {
+        rewind: target.id,
+        reset: order.slice(order.indexOf(target.id), order.indexOf(node.id) + 1),
+      } : stop;
+
+      node.onFailure = Object.fromEntries(['plan', 'tests', 'build', 'human', 'environment']
+        .map((owner) => [owner, ['human', 'environment'].includes(owner) ? { ...stop } : { ...action }]));
+    }
+  }
+
+  if (stagePromptLimitExceeded(bundle.prompts)) {
+    return unchanged(draft, 'prompt_limit_exceeded', 'prompt_limit_exceeded');
+  }
+
+  const recalculated = moveStage(copy, scope, ids[0]!, phase, position);
+
+  if (recalculated.issues.length) {
+    return {
+      draft,
+      issues: recalculated.issues,
+      createdNodeIds: [],
+    };
+  }
+
+  return { ...recalculated, createdNodeIds: ids };
 }

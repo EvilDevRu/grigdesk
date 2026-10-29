@@ -30,7 +30,7 @@
                  @update:model-value="searchTerm = String($event ?? '')"
                  @keydown.enter="searchNode" />
       </label>
-      <details class="route-canvas__connections">
+      <details v-if="!chooseMode" class="route-canvas__connections">
         <summary>Соединения</summary>
         <div class="route-canvas__connection-fields">
       <label>Источник
@@ -57,7 +57,8 @@
     </div>
     <div ref="viewport" class="route-canvas__graph">
       <FactoryGraph v-if="graph" :graph="graph" reference interactive
-                    :selected-node="selectedNodeId || null" :scale="scale" @node="activateNode" />
+                    :selected-node="selectedNodeId || null" :scale="scale"
+                    :highlight-selected-edges="highlightSelectedEdges" @node="activateNode" />
     </div>
   </section>
 </template>
@@ -85,6 +86,8 @@ const props = defineProps<{
   scope: RouteCommandScope;
   selectedNodeId?: string;
   focusedIssue?: RouteEditorIssue | null;
+  chooseMode?: boolean;
+  highlightSelectedEdges?: boolean;
 }>();
 const emit = defineEmits<{
   'select-node': [value: { scope: RouteCommandScope; nodeId: string }];
@@ -94,6 +97,7 @@ const emit = defineEmits<{
     path: string;
   }];
   change: [document: RouteDraft];
+  'choose-place': [nodeId: string];
 }>();
 
 // Шаг и пределы масштаба: ниже половины натурального размера текст узлов не читается.
@@ -192,6 +196,11 @@ function scrollToNode(nodeId: string): void {
 function activateNode(node: ActivatedNode): void {
   const nodeId = node.originId ?? node.id;
 
+  if (props.chooseMode) {
+    emit('choose-place', nodeId);
+
+    return;
+  }
   if (connecting.value) {
     connectTo(nodeId);
 

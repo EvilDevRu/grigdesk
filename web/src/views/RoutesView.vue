@@ -190,18 +190,11 @@
                               @prompt-change="changeBootstrapPrompt"
                               @end-history-group="endHistoryGroup" @save="saveDraft" />
         <div v-else-if="selectedRoute" class="route-editor-workspace">
-          <div class="route-editor-workspace__main">
-            <RouteCanvas :document="routesStore.localDocument"
-                         :scope="{ kind: 'route', routeId: selectedRoute }"
-                         :selected-node-id="selectedNode" :focused-issue="canvasFocusedProblem"
-                         @select-node="selectCanvasNode" @change="replaceEditorDocument" />
-            <div class="route-editor-workspace__stages">
-              <RouteStageList :document="routesStore.localDocument"
-                              :scope="{ kind: 'route', routeId: selectedRoute }"
-                              :selected-node-id="selectedNode"
-                              @select-node="selectCanvasNode" @change="replaceEditorDocument" />
-            </div>
-          </div>
+          <RouteStageWorkspace :document="routesStore.localDocument"
+                               :scope="{ kind: 'route', routeId: selectedRoute }"
+                               :selected-node-id="selectedNode" :focused-issue="canvasFocusedProblem"
+                               :capabilities="routesStore.editorInfo?.capabilities ?? null"
+                               @select-node="selectCanvasNode" @change="replaceEditorDocument" />
           <div class="route-editor-inspectors">
             <template v-if="selectedNode">
               <UiTabs :model-value="selectedTab" data-ui-workspace-tabs label="Редактор этапа"
@@ -400,8 +393,7 @@ import RouteSimulation from './routes/RouteSimulation.vue';
 import RouteTransferDialog from './routes/RouteTransferDialog.vue';
 import RouteJsonEditor from './routes/RouteJsonEditor.vue';
 import RoutePublishDialog from './routes/RoutePublishDialog.vue';
-import RouteCanvas from './routes/RouteCanvas.vue';
-import RouteStageList from './routes/RouteStageList.vue';
+import RouteStageWorkspace from './routes/RouteStageWorkspace.vue';
 import RouteNodeInspector from './routes/RouteNodeInspector.vue';
 import RouteTransitionInspector from './routes/RouteTransitionInspector.vue';
 import type { RouteCommandScope } from './routes/routeCommands.ts';
