@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { ExecutorAdapter } from '../executors/index.ts';
 import { helperCommand } from '../runtimePaths.ts';
 import { writeDurableFile } from '../durableFile.ts';
+import { executableIdentity } from './executableIdentity.ts';
 import { discoverExternalCli } from './inventory.ts';
 import { resolveUserCliEnvironment } from './userCliEnvironment.ts';
 
@@ -110,7 +111,13 @@ export async function buildFactoryExternalCliDescriptor(input: {
 
       providers[adapter.id] = {
         bin: selected.realpath,
-        identity: selected.installationId,
+        // Хелпер лизы сверяет это поле со СВОЕЙ формулой executableIdentity(bin)
+        // (realpath+dev+ino+size+mtime+ctime) — той же, что и штатный запуск executor-а
+        // (externalCliRuntime). installationId сюда не подходит: это композитный digest
+        // resourceKey+stat+манифеста, он не совпадает никогда — 29.10.2026 такая запись
+        // закрывала ВСЕМ провайдерам пробы префлайта «Выбранная программа изменилась»
+        // и блокировала любой запуск конвейера после обновления 31957c4a.
+        identity: await executableIdentity(selected.realpath),
         providerId: adapter.id,
         resourceKey: selected.resourceKey,
         leaseDirectory: input.leaseDirectory,
