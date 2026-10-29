@@ -434,7 +434,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         : { available: true });
     };
     /**
-     * Часть live-потока попытки: размышление, дельта и конец блока ответа, итог расхода.
+     * Часть live-потока попытки: размышление, текст, граница инструмента и итог расхода.
      * Id блока — попытка и индекс, поэтому разные попытки и блоки не склеиваются.
      */
     const handleChunk = (frame: Record<string, unknown>) => {
@@ -469,6 +469,14 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         const { tokens, tokensIsEstimate } = output.total();
 
         options.onProgress?.(tokens, { tokensIsEstimate });
+      } else if (chunk.type === 'block-start' && chunk.blockType === 'tool-call') {
+        // DSH завершает блоки после всех аргументов; текст готов уже в начале вызова.
+        // Чужая попытка и поздние границы не меняют завершённые реплики.
+        for (const [draftId, text] of drafts) {
+          if (draftId.startsWith(`${attempt}-`)) {
+            emitText(draftId, text, true);
+          }
+        }
       } else if (chunk.type === 'block-end') {
         const text = blockText(chunk.block) || drafts.get(id) || '';
         if (text) emitText(id, text, true);

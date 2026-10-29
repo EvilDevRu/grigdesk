@@ -200,6 +200,10 @@ interface ClaudeEvent {
   subtype?: string;
   session_id?: string;
   parent_tool_use_id?: string | null;
+  event?: {
+    type?: string;
+    content_block?: { type?: string };
+  };
   model?: string;
   compactMetadata?: unknown;
   message?: {
@@ -1152,6 +1156,11 @@ export function openClaudeStreamSession({
     if (activeTurn && !ev.parent_tool_use_id) {
       if (ev.type === 'assistant') {
         rememberAssistantMessage(ev);
+      } else if (ev.type === 'stream_event' && ev.event?.type === 'content_block_start'
+        && ev.event.content_block?.type === 'tool_use') {
+        // Начало блока приходит до аргументов: ждать целого assistant уже поздно.
+        // Частичный вызов закрывает текст, но ещё не создаёт шаг инструмента в ленте.
+        finishAssistantMessage();
       } else if (ev.type === 'result' || (ev.type === 'user'
         && Array.isArray(ev.message?.content)
         && ev.message.content.some((block) => block?.type === 'tool_result'))) {

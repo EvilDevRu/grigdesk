@@ -207,7 +207,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
     };
 
     /**
-     * Реплика закрывается до исполнения инструмента, не ожидая конца долгого шага.
+     * Реплика закрывается при подготовке инструмента, не ожидая его аргументов и разрешения.
      * Граница шага и assistant.completed сохраняют тот же id и не дублируют блок.
      */
     const finishText = (id: string, explicitText = '') => {
@@ -437,9 +437,20 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
         return;
       }
 
+      if (kind === 'tool.call.delta') {
+        if (agentId === 'main') {
+          finishText(currentTextId);
+        }
+
+        return;
+      }
+
       if (kind === 'tool.call.started') {
         flushThought();
-        finishText(currentTextId);
+
+        if (agentId === 'main') {
+          finishText(currentTextId);
+        }
 
         const id = String(payload.toolCallId || payload.tool_call_id || '');
         const name = trimmedText(payload.name) || trimmedText(payload.tool_name) || 'Инструмент';
@@ -490,6 +501,11 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
 
       if (kind === 'approval.requested' || kind === 'question.requested') {
         flushThought();
+
+        if (kind === 'approval.requested' && agentId === 'main') {
+          finishText(currentTextId);
+        }
+
         // Пока человек не ответил, уточнение не должно выглядеть как ответ на спрос.
         awaitingAnswer = true;
         options.onInTurnAvailability?.({ available: false, reason: 'awaiting_answer' });
