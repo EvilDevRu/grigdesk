@@ -64,6 +64,10 @@ test('SB12a: GLM-раннер проходит общий контракт, prob
   ]);
 });
 
+test('GLM modelRef проходит строгую lifecycle-схему на всех границах записи', async (t) => {
+  await assertEngineTests(t, ['tests/engine/contract/lifecycle-model-id.sh']);
+});
+
 test('SB12b: запуск, классификация, делегирование и остановка этапа GLM', async (t) => {
   await assertEngineTests(t, [
     'tests/engine/unit/glm-runner-launch.sh',

@@ -92,6 +92,9 @@
 
 ## Грабли
 
+- [Составной modelRef GLM требует представления маршрут/модель в lifecycle](lifecycle-model-id.md)
+
+
 - [Codex на SHIP: native Auto-review, защищённый Git и границы сдачи](codex-delivery-permissions.md)
 
 - [«Продолжить» после failed: остановка ждёт goto без побочных эффектов](failed-resume.md)
