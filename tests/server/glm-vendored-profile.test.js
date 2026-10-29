@@ -250,7 +250,7 @@ test('настоящий запуск из пути с пробелами и ч�
 test('настоящий hook политики запрещает инструменты вне политики до эффекта', async (t) => {
   const calls = [
     ['bash', { command: 'ssh -p 9 x@127.0.0.1; echo effect > bash-effect.txt', description: 'ssh' }],
-    ['skill', { name: 'fixture-skill' }],
+    ['web_fetch', { url: 'http://127.0.0.1/' }],
   ];
   const f = await fixture(t, { respond: (_payload, index) => index < calls.length
     ? glmToolCall(calls[index][0], calls[index][1], `call-${index}`)
@@ -265,7 +265,7 @@ test('настоящий hook политики запрещает инструм
 
   assert.deepEqual(entries.map((entry) => [entry.name, entry.decision]), [
     ['bash', 'deny'],
-    ['skill', 'deny'],
+    ['web_fetch', 'deny'],
   ]);
   await assert.rejects(fs.stat(path.join(f.cwd, 'bash-effect.txt')), { code: 'ENOENT' });
 });

@@ -33,6 +33,13 @@ const KINDS: Readonly<Record<string, GlmToolKind>> = Object.freeze({
   write: 'edit',
   edit: 'edit',
   bash: 'execute',
+  // Загрузчик навыка читает инструкции в контекст сессии: тип read, а не other,
+  // чтобы вызов не требовал обязательного ручного подтверждения человека.
+  skill: 'read',
+  // Фоновые задачи процесса: чтение состояния и вывода, остановка своей задачи.
+  job_list: 'read',
+  job_output: 'read',
+  job_kill: 'execute',
   ask_user_question: 'question',
   todo_write: 'plan',
 });

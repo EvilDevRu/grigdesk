@@ -13,8 +13,13 @@ SSH/БД чата) он читает из файла `glm-policy.json` ката�
 ## Что пропускается
 
 - Инструменты профиля по точному имени: `read`, `write`, `edit`, `glob`, `grep`, `bash`,
-  `todo_write`, `ask_user_question`. Делегирующие, субагентные, workflow, jobs, goal, plan,
-  skill, `present`, `read_image`, `web_search`, `web_fetch` и любое неизвестное имя — отказ.
+  `skill`, `job_list`, `job_output`, `job_kill`, `todo_write`, `ask_user_question`.
+  `skill` — нативный загрузчик инструкций навыка: чтение `SKILL.md` в контекст без файловых
+  и сетевых эффектов, тип действия `read`. `job_*` — фоновые задачи самого процесса: запуск
+  идёт через `bash`, `job_list`/`job_output` читают состояние и вывод (тип `read`),
+  `job_kill` останавливает свою задачу (тип `execute`). Делегирующие, субагентные, workflow,
+  goal, plan, `present`, `read_image`, `web_search`, `web_fetch` и любое неизвестное имя —
+  отказ.
 - `bash` — через общую политику прямых команд: SSH при запрете — отказ; удалённый клиент БД
   при `blockDirectDb` — отказ, клиент с непроверяемым хостом — отказ при `strictUnknownDbClient`.
 - MCP — только инструменты служебного `grigdesk-work` этого запуска, по имени формулы DSH;

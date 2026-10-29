@@ -24,7 +24,11 @@ export const GLM_DEFAULT_EFFORT = 'high';
 export const GLM_ALLOWED_MODES: readonly GlmAccessMode[] = Object.freeze(['api', 'coding-plan']);
 
 // Факты G2 на настоящей generation. Инструменты профиля, которые hook разрешает по точному
-// имени: без делегирующих, субагентных, workflow, jobs, goal, plan, skill и web-инструментов.
+// имени: без делегирующих, субагентных, workflow, goal, plan и web-инструментов.
+// skill — нативный загрузчик инструкций навыка из каталога пользователя: чтение без
+// файловых и сетевых эффектов. job_* — фоновые задачи самого процесса: запуск идёт через
+// bash, job_list/job_output читают состояние и вывод, job_kill останавливает своё.
+// Всё перечисленное действует и в чате, и на этапах Factory.
 export const GLM_NATIVE_TOOLS: readonly string[] = Object.freeze([
   'read',
   'write',
@@ -32,6 +36,10 @@ export const GLM_NATIVE_TOOLS: readonly string[] = Object.freeze([
   'glob',
   'grep',
   'bash',
+  'skill',
+  'job_list',
+  'job_output',
+  'job_kill',
   'todo_write',
   'ask_user_question',
 ]);

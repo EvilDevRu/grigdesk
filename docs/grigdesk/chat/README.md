@@ -196,6 +196,7 @@
 - [Кеш Z.ai и цена хода GLM: 97–98% входа из кеша, цену делают шаги × контекст, как сверить по журналу](glm-cache-cost.md)
 - [Native gate и foreground-делегирование GLM](glm-native-gate.md) — proof до эффекта, точная связь ребёнка, журнал resume и remote ownership.
 - [Политика инструментов GLM: native gate чата и прежний hook Factory/ACP](glm-tool-policy.md)
+- [Навыки GLM: каталог пользователя и разрешённый загрузчик skill типом read](glm-skill-policy.md)
 - [Субагенты GLM: исследование наследования и пробелов прежнего корневого сторожа](glm-subagent-boundaries.md)
 - [Native-контракты делегирования GLM: child never, окончательный guard, каталог, страницы истории и remote owner](glm-delegation-contracts.md)
 - [MCP у GLM: только grigdesk-work, готовность до prompt, потеря без переподключения](glm-mcp.md)
