@@ -1,7 +1,9 @@
 <template>
   <div class="picker">
     <UiLoadingState v-if="!loaded && (loading || !error)" label="Ищем доступные стенды…"
-      description="Постоянные стенды и поднятые песочницы появятся здесь сами." />
+      description="Постоянные стенды и поднятые песочницы появятся здесь сами." :failed="Boolean(error)" >
+      <UiSkeletonLayout layout="list" :header="false" />
+    </UiLoadingState>
 
     <div v-else-if="!loaded" class="picker__state" role="status">
       <span class="picker__mark" aria-hidden="true">!</span>
@@ -133,6 +135,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../ui';
+
 import { computed } from 'vue';
 
 import {
@@ -205,10 +209,12 @@ function choiceKey(target: TargetChoice): string {
   return `${target.ref.kind}:${target.ref.id}`;
 }
 
-// Постоянный стенд публикует готовую ссылку; у песочницы наружу идёт только порт,
-// и адрес строится относительно хоста, на котором открыт GrigDesk.
+// Постоянный стенд публикует готовую ссылку; у песочницы хост задаёт профиль.
+// Ответ старого сервера сохраняет локальный fallback общего генератора ссылок.
 function urlOf(target: TargetChoice): string | null {
-  return target.ref.kind === 'sandbox' ? sandboxUrl(target.viewPort) : target.viewUrl;
+  return target.ref.kind === 'sandbox'
+    ? sandboxUrl(target.viewPort, target.serviceHost)
+    : target.viewUrl;
 }
 
 // Первая строка цели: название задачи, когда портал его дал; иначе — подпись стенда.

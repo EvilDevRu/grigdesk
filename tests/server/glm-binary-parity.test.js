@@ -83,6 +83,6 @@ test('один ELF: DeepSeek не монтирует GLM plugin в своём pr
 // Дочерних test-runner и другой реализации Harness этот entrypoint не создаёт.
 process.env.GRIGDESK_TEST_GLM_DELIVERY = 'binary';
 
-for (const part of ['profile', 'turn', 'policy', 'mcp', 'catalog', 'session', 'stop']) {
+for (const part of ['profile', 'turn', 'policy', 'mcp', 'catalog', 'session', 'stop', 'gate', 'subagents']) {
   await import(`./glm-vendored-${part}.test.js`);
 }

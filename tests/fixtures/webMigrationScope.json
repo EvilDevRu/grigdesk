@@ -53,7 +53,6 @@
     "web/src/views/chat/EffortSlider.vue",
     "web/src/views/chat/StepList.vue",
     "web/src/views/diff/DiffPanel.vue",
-    "web/src/views/pipeline/ArbiterDecision.vue",
     "web/src/views/pipeline/BootstrapDecision.vue",
     "web/src/views/pipeline/DeferredFindings.vue",
     "web/src/views/terminal/TerminalPanel.vue"

@@ -402,6 +402,7 @@ test('каталог связывает постоянный стенд и ру�
     taskTitle: null,
     viewUrl: 'http://127.0.0.1:5173',
     viewPort: null,
+    serviceHost: null,
     status: 'ready',
     reason: '',
     screenCount: 0,
@@ -410,6 +411,7 @@ test('каталог связывает постоянный стенд и ру�
   assert.equal(manual.profileBinding, 'verified');
   assert.equal(manual.viewUrl, null);
   assert.equal(manual.viewPort, 5199);
+  assert.equal(manual.serviceHost, 'localhost');
   assert.equal(manual.status, 'ready');
   assert.equal(manual.screenCount, 0);
 

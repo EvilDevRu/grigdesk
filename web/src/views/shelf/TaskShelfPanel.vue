@@ -29,7 +29,10 @@
       </div>
     </header>
 
-    <UiLoadingState v-if="shelf.loading && !shelf.loaded" label="Загружаю полку…" />
+    <UiLoadingState v-if="shelf.loading && !shelf.loaded" label="Загружаю полку…"
+                    :failed="Boolean(shelf.error)">
+      <div class="shelf-loading"><UiSkeletonLayout layout="list" :header="true" /></div>
+    </UiLoadingState>
     <p v-if="shelf.error" class="shelf-state error" role="alert">{{ shelf.error }}</p>
     <div v-if="shelf.sourceIssues?.length" class="source-issues" role="status">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -213,6 +216,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../ui';
+
 import { computed, nextTick, ref } from 'vue';
 import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import type { ShelfActivity, ShelfActivityProgress, ShelfRow } from '../../stores/taskShelf.ts';
@@ -463,6 +468,11 @@ defineExpose({
 </script>
 
 <style scoped>
+.shelf-loading { padding: 18px 16px 24px; }
+@container task-shelf (max-width: 380px) {
+  .shelf-loading { padding-inline: 12px; }
+}
+
 .task-shelf-panel {
   container: task-shelf / inline-size;
   min-height: 100%;

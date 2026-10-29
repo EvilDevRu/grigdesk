@@ -305,7 +305,7 @@ test(RUNTIME_TEST_3,
     assert.equal(f.children.length, started);
   });
 
-const RUNTIME_TEST_4 = 'factory, workspaceAccess, untrustedInput, scopedWorkspace'
+const RUNTIME_TEST_4 = 'factory, untrustedInput и произвольный scopedWorkspace'
   + ' — glm_consumer_unsupported без процесса';
 
 test(RUNTIME_TEST_4, async (t) => {
@@ -313,7 +313,6 @@ test(RUNTIME_TEST_4, async (t) => {
 
   for (const consumer of [
     { factory: true },
-    { workspaceAccess: { mode: 'write' } },
     { untrustedInput: { text: 'x' } },
     { scopedWorkspace: true },
     { chatKey: '' },
@@ -322,6 +321,13 @@ test(RUNTIME_TEST_4, async (t) => {
     await assert.rejects(f.run(consumer), { code: 'glm_consumer_unsupported' }, JSON.stringify(consumer));
   }
 
+  assert.equal(f.children.length, 0);
+});
+
+test('некорректные корни триажа отклоняются до процесса', async (t) => {
+  const f = await fixture(t);
+
+  await assert.rejects(f.run({ workspaceAccess: { mode: 'write' } }), /Корни триажа/u);
   assert.equal(f.children.length, 0);
 });
 
@@ -552,22 +558,22 @@ test(RUNTIME_TEST_7, async (t) => {
   assert.deepEqual(calls, ['ready']);
 });
 
-test('tool/call без маркера hooks-alive этого хода — cancel и glm_policy_hook_missing', async (t) => {
+test('отсутствие native ready останавливает запуск до prompt', async (t) => {
   const f = await fixture(t, {
     hooks: 'no-marker',
     waitForCancel: true,
     updates: [READ_CALL],
   });
 
-  await assert.rejects(f.run({ signal: AbortSignal.timeout(10_000) }), { code: 'glm_policy_hook_missing' });
+  await assert.rejects(f.run({ signal: AbortSignal.timeout(15_000) }), { code: 'glm_policy_gate_missing' });
 
   const methods = (await f.log()).map((entry) => entry.message?.method);
 
-  assert.ok(methods.includes('session/cancel'));
-  assert.equal(await f.prompts(), 1);
+  assert.equal(methods.includes('session/prompt'), false);
+  assert.equal(await f.prompts(), 0);
 });
 
-test('результат инструмента без записи журнала по callId — cancel и glm_policy_hook_missing', async (t) => {
+test('результат инструмента без native proof — cancel и glm_policy_gate_failed', async (t) => {
   const f = await fixture(t, {
     hooks: 'no-descriptor',
     waitForCancel: true,
@@ -578,7 +584,7 @@ test('результат инструмента без записи журнал
     }],
   });
 
-  await assert.rejects(f.run({ signal: AbortSignal.timeout(10_000) }), { code: 'glm_policy_hook_missing' });
+  await assert.rejects(f.run({ signal: AbortSignal.timeout(10_000) }), { code: 'glm_policy_gate_failed' });
   assert.ok((await f.log()).some((entry) => entry.message?.method === 'session/cancel'));
 });
 

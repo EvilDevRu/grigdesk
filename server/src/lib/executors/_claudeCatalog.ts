@@ -6,7 +6,7 @@
 //
 // Файл начинается с `_` — загрузчик исполнителей его пропускает (это не исполнитель).
 import { createReadStream, promises as fs } from 'node:fs';
-import { execFile } from 'node:child_process';
+import { execFile } from '../providerInstall/externalCliProcess.ts';
 import path from 'node:path';
 
 // claude-opus-5, claude-opus-4-8, claude-sonnet-4-6[1m], claude-fable-5 …

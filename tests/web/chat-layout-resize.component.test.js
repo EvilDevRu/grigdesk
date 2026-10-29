@@ -3,6 +3,7 @@ import test from 'node:test';
 
 globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { api } from '../../web/src/shared/apiClient.ts';
@@ -316,12 +317,16 @@ test('строка чата: знак исполнителя красится ц
 });
 
 test('раскладка чата: JS и CSS считают одни и те же границы', async (t) => {
+  const layoutPath = webFile('src/views/chat/chatLayout.ts');
+
   const [list, session, fields, actions] = await Promise.all([
     readFile(CHAT_LIST_PATH, 'utf8'),
     readFile(CHAT_SESSION_PATH, 'utf8'),
     readFile(CHAT_FIELDS_PATH, 'utf8'),
     readFile(CHAT_ACTIONS_PATH, 'utf8'),
   ]);
+  const layout = existsSync(layoutPath) ? await readFile(layoutPath, 'utf8') : session;
+
   void t;
 
   // Ширину списка задаёт страница, но применяет её ChatList — через ту же переменную.
@@ -346,10 +351,10 @@ test('раскладка чата: JS и CSS считают одни и те ж�
   assert.match(session, /class="cs-resize" role="separator" aria-orientation="horizontal"/);
   assert.match(fields, /data-role='chat-composer'\][^{]*\{[^}]*height: var\(--composer-h, auto\);/);
   assert.match(fields, /data-role='chat-composer'\][^{]*\{[^}]*max-height: 46vh;/);
-  assert.match(session, /const COMPOSER_MAX_VH = 0\.46;/);
+  assert.match(layout, /const COMPOSER_MAX_VH = 0\.46;/);
   // После удаления floating panel у полноразмерного composer остались один минимум и
   // один device-key; legacy key здесь даже не читается.
-  assert.match(session, /const COMPOSER_MIN = 48;/);
+  assert.match(layout, /const COMPOSER_MIN = 48;/);
   assert.match(fields, /data-role='chat-composer'\][^{]*\{[^}]*min-height: 48px;/);
   assert.match(
     fields,
@@ -369,8 +374,8 @@ test('раскладка чата: JS и CSS считают одни и те ж�
     actions,
     /data-context='chat-list-action'\]\s*\{[^}]*background:\s*var\(--ground\);/,
   );
-  assert.match(session, /'grigdesk-chat-composer-h'/);
-  assert.doesNotMatch(session, /grigdesk-chat-panel-composer-h/);
+  assert.match(layout, /'grigdesk-chat-composer-h'/);
+  assert.doesNotMatch(layout, /grigdesk-chat-panel-composer-h/);
 });
 
 test('COMP-ALERT: ссылка раскрывает сам чат на узком экране', async (t) => {

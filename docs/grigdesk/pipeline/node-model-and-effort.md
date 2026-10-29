@@ -1,5 +1,9 @@
 # Модель и effort в модалке узла
 
+На [вкладке «Исполнители»](node-dialog-design.md) модель и effort показаны отдельными
+отключёнными полями. Их редактирование пока не подключено: визуал не создаёт локальный
+выбор и не отправляет модель или effort в API. История запусков находится в «Журнале».
+
 Маршрут не несёт model policy: его `runKey` только выбирает stage, а
 `server/src/lib/runnerState.ts` резолвит `MODEL_<STAGE>_<PROVIDER>_*` →
 `MODEL_DEFAULT_<PROVIDER>_*` из `profiles/<profile>/runners.env`. API отдаёт результат в

@@ -65,7 +65,11 @@ export interface ProviderModelEntry {
 // Исполнитель реестра: доступность решает, можно ли его выбрать, а возможности —
 // подходит ли он настройке, которая требует, например, безопасного разбора текста.
 export interface ProviderEntry {
+  defaultPermissionMode?: string;
+  permissionModeSelectionPolicy?: 'preserve-explicit';
+  permissionModesRequiringExplicitSelection?: readonly string[];
   installation?: ProviderInstallationMetadata;
+  usagePresentation?: { freshness: boolean; spentLabel: boolean };
   sessionBinding?: boolean;
   commands?: Array<{
     cmd: string;
@@ -90,6 +94,10 @@ export interface ProviderEntry {
     id: string;
     label: string;
     hint?: string;
+    labelKey?: string;
+    hintKey?: string;
+    persistAsDefault?: boolean;
+    requiresExplicitSelection?: boolean;
   }>;
   canUpdate?: boolean;
   updateAvailable?: boolean;

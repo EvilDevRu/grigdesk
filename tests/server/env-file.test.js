@@ -210,6 +210,17 @@ test('не UTF-8 файл не правится', async (t) => {
   assert.ok((await fs.readFile(file)).equals(bytes));
 });
 
+test('условное удаление не стирает новую привязку, а совпавшую снимает вместе с дублями', async (t) => {
+  const { file } = await envFixture(t, 'BIN=/old\nBIN=/new\nKEEP=1\n');
+
+  await rejectsWith(updateEnvFile(file, { BIN: null }, { expected: { BIN: '/old' } }), 'env_file_conflict');
+  assert.equal(await fs.readFile(file, 'utf8'), 'BIN=/old\nBIN=/new\nKEEP=1\n');
+  await updateEnvFile(file, { BIN: null }, { expected: { BIN: '/new' } });
+  assert.equal(await fs.readFile(file, 'utf8'), 'KEEP=1\n');
+  await updateEnvFile(file, { BIN: null }, { expected: { BIN: null } });
+  assert.equal(await fs.readFile(file, 'utf8'), 'KEEP=1\n');
+});
+
 test('чтение файла и перенос правок в окружение процесса', async (t) => {
   const { file } = await envFixture(t, 'A=1\nB="два"\n');
   const env = { A: 'old', KEEP: 'yes' };

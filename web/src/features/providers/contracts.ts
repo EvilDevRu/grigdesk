@@ -59,6 +59,10 @@ export interface UsageBar {
 }
 
 export interface UsageEntry {
+  lastSuccessfulAt?: number | null;
+  runtimeGeneration?: string;
+  pollIntervalMs?: number;
+  usageSchema?: string;
   stale?: boolean;
   state?: string;
   bars?: UsageBar[];
@@ -130,6 +134,12 @@ export function isProvider(value: unknown): value is ProviderEntry {
  */
 function isUsage(value: unknown): value is UsageEntry {
   if (!isRecord(value) || !fields(value, ['state', 'message'], [], ['stale'])
+    || (value.lastSuccessfulAt !== undefined && value.lastSuccessfulAt !== null
+      && (typeof value.lastSuccessfulAt !== 'number' || !Number.isFinite(value.lastSuccessfulAt)))
+    || (value.runtimeGeneration !== undefined && typeof value.runtimeGeneration !== 'string')
+    || (value.pollIntervalMs !== undefined
+      && (typeof value.pollIntervalMs !== 'number' || !Number.isFinite(value.pollIntervalMs)
+        || value.pollIntervalMs <= 0))
     || (value.retryAt != null && !['string', 'number'].includes(typeof value.retryAt))) {
     return false;
   }

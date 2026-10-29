@@ -9,6 +9,7 @@ const CONTAINERS = webFile('src/views/docker/DockerContainers.vue');
 // Элементы управления остаются настоящими. Подменяем только решение человека
 // в диалоге и внешние данные, чтобы проверять действия самой панели.
 const UI_STUB = `
+export * from './src/ui.ts';
 export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
 export { default as UiButton } from '${webFile('src/components/primitives/UiButton.vue')}';
 export { default as UiCheckbox } from '${webFile('src/components/primitives/UiCheckbox.vue')}';

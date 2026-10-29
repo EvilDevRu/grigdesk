@@ -224,22 +224,57 @@ function startAssistantBlocks() {
 }
 
 /**
- * Долгая команда: реплика и вызов инструмента с тем же id приходят сразу, а результат
- * ждёт файла-барьера, как Bash на минуты. Реплика обязана закрыться до результата.
+ * Долгая команда держит результат за барьером; частичный режим держит и целый вызов.
+ * Начало tool_use уже известно, хотя модель ещё не дописала аргументы команды.
  */
-function startHeldTool() {
+function startHeldTool(partial = false) {
   send({
     type: 'system',
     subtype: 'init',
     session_id: SESSION_ID,
   });
-  assistant('held-tool-message', [{ type: 'text', text: 'Ветки нет — создам.' }]);
-  assistant('held-tool-message', [{
+
+  const tool = {
     type: 'tool_use',
     id: 'synthetic-held-tool',
     name: 'Bash',
     input: { command: 'sleep 600' },
-  }]);
+  };
+
+  if (partial) {
+    assistant('held-tool-message', [{ type: 'text', text: 'Ветки нет.' }]);
+    send({
+      type: 'stream_event',
+      parent_tool_use_id: 'child-tool',
+      event: {
+        type: 'content_block_start',
+        index: 1,
+        content_block: tool,
+      },
+    });
+    assistant('held-tool-message', [{ type: 'text', text: 'Создам.' }]);
+    send({
+      type: 'stream_event',
+      parent_tool_use_id: null,
+      event: {
+        type: 'content_block_start',
+        index: 1,
+        content_block: { ...tool, input: {} },
+      },
+    });
+    send({
+      type: 'stream_event',
+      parent_tool_use_id: null,
+      event: {
+        type: 'content_block_delta',
+        index: 1,
+        delta: { type: 'input_json_delta', partial_json: '{"command":' },
+      },
+    });
+  } else {
+    assistant('held-tool-message', [{ type: 'text', text: 'Ветки нет — создам.' }]);
+    assistant('held-tool-message', [tool]);
+  }
 
   const barrier = setInterval(() => {
     if (!existsSync(process.env.CLAUDE_BLOCKS_RELEASE)) {
@@ -247,8 +282,13 @@ function startHeldTool() {
     }
 
     clearInterval(barrier);
+
+    if (partial) {
+      assistant('held-tool-message', [tool]);
+    }
+
     toolResult('synthetic-held-tool');
-    assistant('held-tool-final', [{ type: 'text', text: 'Ветка создана.' }]);
+    assistant(partial ? 'held-tool-message' : 'held-tool-final', [{ type: 'text', text: 'Ветка создана.' }]);
     send({
       type: 'result',
       session_id: SESSION_ID,
@@ -272,9 +312,9 @@ function handle(message, index) {
 
     return;
   }
-  if (process.env.GRIGDESK_CLAUDE_FIXTURE_BLOCKS === 'held-tool') {
+  if (['held-tool', 'partial-tool'].includes(process.env.GRIGDESK_CLAUDE_FIXTURE_BLOCKS)) {
     if (index === 1) {
-      startHeldTool();
+      startHeldTool(process.env.GRIGDESK_CLAUDE_FIXTURE_BLOCKS === 'partial-tool');
     }
 
     return;

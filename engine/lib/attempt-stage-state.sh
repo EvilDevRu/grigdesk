@@ -1343,8 +1343,16 @@ elif OP == "prepare-pause":
     dump(event)
 
 elif OP == "prepare-human-rewind":
-    runtime_path, results_dir, node, reset_csv, rewind_reason, at, actor = ARGS
+    runtime_path, results_dir, node, reset_csv, rewind_reason, at, actor, expected_sequence_raw, expected_hash = ARGS
     runtime = regular_json(runtime_path)
+    # Проверка выполняется внутри task lock до дедупа и append.
+    # Даже повтор того же указания не может подтвердить чужой head.
+    if expected_sequence_raw or expected_hash:
+        expected_sequence = decimal(expected_sequence_raw, 10**12)
+        identifier(expected_hash, HASH_RE)
+        if runtime.get("sequence") != expected_sequence or runtime.get("headEventHash") != expected_hash:
+            print("FACTORY_ERROR=stale_stage", file=sys.stderr)
+            fail(75)
     cursor = runtime.get("cursor")
     if not isinstance(cursor, dict):
         fail()
@@ -2606,6 +2614,7 @@ attempt_stage_state_human_rewind_v2() {
   if (( rc == 0 )); then
     _attempt_stage_state_json prepare-human-rewind \
       "$runtime_tmp" "$ASTAGE_RESULTS_DIR" "$node" "$reset" "$reason" "$now" "$actor" \
+      "${7:-}" "${8:-}" \
       >"$event_tmp"
     rc=$?
     if (( rc == 10 )); then

@@ -48,22 +48,23 @@ export function glmCompatibilityHash(
 }
 
 /**
- * Installer и updater требуют допуск API по фактическим входам проверяемого ELF.
- * Ревизии задаёт установленный потребитель; наличия плагина или строки режима недостаточно.
+ * Installer и updater требуют допуск выбранного режима по фактическим входам ELF.
+ * Потребитель может заменить режим; ревизии и остальные требования остаются у host.
  */
 export function assertDeepSeekGlmApiAdmission(
   info: DeepSeekRuntimeInfo,
   host: DeepSeekHostContract,
+  mode: DeepSeekHostContract['glm']['mode'] = host.glm.mode,
 ): string {
   const plugin = info.glm.inputs.llmPiAi;
-  const identity = plugin ? glmCompatibilityHash({ ...info.glm.inputs, llmPiAi: plugin }, host.glm.mode, {
+  const identity = plugin ? glmCompatibilityHash({ ...info.glm.inputs, llmPiAi: plugin }, mode, {
     profile: host.glm.profileRevision,
     policy: host.glm.policyRevision,
   }) : null;
 
-  if (!identity || !info.glm.admission.some((entry) => entry.mode === host.glm.mode
+  if (!identity || !info.glm.admission.some((entry) => entry.mode === mode
     && entry.compatibility === identity)) {
-    throw Object.assign(new Error('Поставка DeepSeek не имеет требуемого допуска GLM API'), {
+    throw Object.assign(new Error(`Поставка DeepSeek не имеет требуемого допуска GLM (${mode})`), {
       code: 'deepseek_glm_unadmitted',
     });
   }

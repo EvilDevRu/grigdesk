@@ -95,13 +95,30 @@ test('после F5 SSH-подтверждение восстанавливае�
   const gets = [];
   const restored = sshPending('ssh-restored');
   const store = await chatStore(t, {
+    async post(path) {
+      assert.equal(path, '/api/chat/store/reconcile');
+
+      return {
+        pending: [],
+        heads: [],
+        gone: [],
+        deliveries: [],
+      };
+    },
+    /**
+     * После F5 список и waiting проходят через прежний сценарий восстановления.
+     * Полная история не нужна для показа карточки разрешения.
+     */
     async get(path) {
       gets.push(path);
-      if (path === '/api/chat/store') {
-        return { sessions: [], archived: [], activeId: null };
-      }
-      if (path === '/api/chat/pending') {
-        return { pending: [] };
+
+      if (path === '/api/chat/store/list') {
+        return {
+          listProtocol: 1,
+          sessions: [],
+          archived: [],
+          activeId: null,
+        };
       }
       if (path === '/api/chat/waiting?include=ssh,db') {
         return { waiting: [restored] };

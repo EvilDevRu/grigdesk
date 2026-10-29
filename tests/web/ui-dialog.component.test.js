@@ -163,4 +163,42 @@ async function checkPromptFields(browser, t) {
   await new DOMWrapper(cancel).trigger('click');
   await flushPromises();
   assert.deepEqual(results.at(-1), [2, null]);
+
+  for (const id of [3, 4]) {
+    controller.show({
+      id,
+      kind: 'confirm',
+      text: 'Будет удалена программа. Авторизация, настройки и история сохранятся.',
+      options: {
+        title: 'Удалить программу',
+        details: {
+          label: 'Подробности',
+          text: '/fixture/long/path\nbackup-fixture\nfixture uninstall',
+        },
+      },
+    });
+    await flushPromises();
+
+    const disclosure = browser.document.querySelector('button[aria-expanded]');
+
+    assert.ok(disclosure);
+    assert.equal(disclosure.getAttribute('aria-expanded'), 'false');
+    assert.equal(browser.document.querySelector('.ui-dialog-host__code'), null);
+    await new DOMWrapper(disclosure).trigger('keydown', { key: 'Enter' });
+    assert.equal(results.length, 2, 'Enter на раскрытии не подтверждает удаление');
+    await new DOMWrapper(disclosure).trigger('click');
+    await flushPromises();
+    assert.equal(disclosure.getAttribute('aria-expanded'), 'true');
+    assert.match(browser.document.querySelector('.ui-dialog-host__code').textContent, /fixture uninstall/u);
+
+    if (id === 3) {
+      controller.hide(id);
+    } else {
+      await new DOMWrapper(disclosure).trigger('click');
+      await flushPromises();
+      assert.equal(disclosure.getAttribute('aria-expanded'), 'false');
+      assert.equal(results.length, 2, 'Раскрытие не запускает операцию');
+      controller.hide(id);
+    }
+  }
 }

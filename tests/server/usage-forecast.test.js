@@ -63,6 +63,80 @@ test('повтор того же снимка ряд не удлиняет, но
   assert.deepEqual(next.resets, []);
 });
 
+test('runtime/schema segment сохраняет историю и не выдаёт смену программы за сброс квоты', () => {
+  const snapshot = (pct, at, generation, schema = 'v1') => ({
+    codex: {
+      ...usageOf(pct, { at }).codex,
+      lastSuccessfulAt: at,
+      runtimeGeneration: generation,
+      usageSchema: schema,
+    },
+  });
+  let { state } = ingestUsage(emptyForecastState(), snapshot(80, T0, 'copy-a'), { now: T0 });
+
+  ({ state } = ingestUsage(state, snapshot(90, T0 + HOUR, 'copy-a'), { now: T0 + HOUR }));
+
+  const replaced = ingestUsage(state, snapshot(20, T0 + 2 * HOUR, 'copy-b'), { now: T0 + 2 * HOUR });
+
+  assert.equal(replaced.state.series[0].samples.length, 3, 'история прежней копии сохранена');
+  assert.deepEqual(replaced.resets, [], 'новый runtime не доказывает vendor reset');
+  assert.equal(forecastSeries(replaced.state.series[0], { now: T0 + 2 * HOUR }).ratePerHour, null);
+
+  const changedSchema = ingestUsage(replaced.state,
+    snapshot(25, T0 + 3 * HOUR, 'copy-b', 'v2'), { now: T0 + 3 * HOUR });
+
+  assert.equal(forecastSeries(changedSchema.state.series[0], { now: T0 + 3 * HOUR }).ratePerHour, null);
+  assert.equal(changedSchema.state.series[0].samples.length, 4);
+});
+
+test('после удаления runtime история остаётся, активный прогноз ждёт новый замер', () => {
+  const state = ramp(70, 3, 4);
+  const invalidated = ingestUsage(state, {
+    codex: {
+      state: 'unavailable',
+      stale: true,
+      runtimeGeneration: 'new',
+      lastSuccessfulAt: T0,
+      bars: [],
+    },
+  }, { now: T0 + HOUR });
+  const forecast = forecastSeries(invalidated.state.series[0], { now: T0 + HOUR });
+
+  assert.equal(invalidated.state.series[0].samples.length, 4);
+  assert.equal(forecast.ratePerHour, null);
+  assert.equal(forecast.verdict, 'unknown');
+});
+
+test('external forecast пропускает stale и неизвестное успешное время, месяц разрывает ряд', () => {
+  const at = Date.parse('2030-01-31T23:00:00Z');
+  const snapshot = (time, overrides = {}) => ({
+    kimi: {
+      state: 'ok',
+      lastSuccessfulAt: time,
+      dataCheckedAt: time,
+      runtimeGeneration: 'same-runtime',
+      bars: [{
+        key: 'month',
+        pct: 40,
+        windowKind: 'calendar-month',
+      }],
+      ...overrides,
+    },
+  });
+  const first = ingestUsage(emptyForecastState(), snapshot(at), { now: at });
+  const stale = ingestUsage(first.state, snapshot(at + HOUR, { stale: true }), { now: at + HOUR });
+  const failed = ingestUsage(stale.state,
+    snapshot(at + HOUR, { lastSuccessfulAt: null }), { now: at + HOUR });
+
+  assert.equal(failed.state.series[0].samples.length, 1);
+
+  const next = ingestUsage(failed.state, snapshot(at + 2 * HOUR), { now: at + 2 * HOUR });
+
+  assert.equal(next.state.series[0].samples.length, 2);
+  assert.equal(forecastSeries(next.state.series[0], { now: at + 2 * HOUR }).ratePerHour, null);
+  assert.deepEqual(next.resets, []);
+});
+
 test('падение процента при уехавшем окне — сброс, и его природа читается по срокам', () => {
   const resetsAt = T0 + 2 * HOUR;
   const base = ingestUsage(emptyForecastState(), usageOf(91, { at: T0, resetsAt }), { now: T0 });

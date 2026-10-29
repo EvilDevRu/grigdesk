@@ -4,6 +4,7 @@ import { chromium } from '../../../desktop/node_modules/playwright-core/index.mj
 import path from 'node:path';
 import os from 'node:os';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { protocolRoutes, protocolSearch } from './chat-protocol.js';
 import { freePort } from '../../server/helpers/pluginBootFixture.js';
 
 export const chatSession = {
@@ -144,8 +145,18 @@ export async function clientBrowser(t, options = {}) {
             },
           };
 
+          const chatStore = options.chatStore || options.responses?.['/api/chat/store']
+            || responses['/api/chat/store'];
+          const chatRoutes = protocolRoutes(chatStore);
+
+          if (url.pathname === '/api/chat/store/search') {
+            chatRoutes[url.pathname] = protocolSearch(chatStore,
+              url.searchParams.get('q') || '', url.searchParams.get('archived') === '1');
+          }
+
           req.resume();
-          res.end(JSON.stringify(options.responses?.[url.pathname] || responses[url.pathname]
+          res.end(JSON.stringify(options.responses?.[url.pathname] || chatRoutes[url.pathname]
+            || responses[url.pathname]
             || (url.pathname.startsWith("/api/b24/task-seen/") ? responses["/api/b24/task-seen"] : {})));
         });
       },

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+
+import { reconcileWith } from './helpers/chat-protocol.js';
 import { apiHarness, chatStoreFixture, sseOf } from './helpers/chat-store.js';
 import { materializeInTurnMessages } from '../../web/src/stores/chatInTurn.ts';
 
@@ -154,6 +156,7 @@ test('FLOW-20: seen pid waits for every in-turn page and durable chat write', as
 
     throw new Error(url);
   };
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
   apiHarness.del = async (url) => {
     deleted.push(url);
 

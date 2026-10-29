@@ -43,10 +43,14 @@ structural="$TEST_ROOT/structural.env"
 coverage_structural_write "$structural" "$hash1" r1+r2 "$inputs/plans"
 assert_rc 0 "$?" "structural artifact is written"
 assert_eq 0 "$(coverage_artifact_get "$structural" UNAVAILABLE)" "covered plan has no unavailable rows"
+assert_eq adapted "$(coverage_artifact_get "$structural" PROVIDER_codex)" \
+  "именной уровень сводит планы провайдера к худшему покрытию"
 
 printf 'feature\tPLAN\tcodex\tunavailable\n' >>"$inputs/plans"
 coverage_structural_write "$TEST_ROOT/structural-bad.env" bad r1+r2 "$inputs/plans"
 assert_eq 1 "$(coverage_artifact_get "$TEST_ROOT/structural-bad.env" UNAVAILABLE)" \
   "unavailable row is counted"
+assert_eq unavailable "$(coverage_artifact_get "$TEST_ROOT/structural-bad.env" PROVIDER_codex)" \
+  "недоступный план закрывает покрытие только своего провайдера"
 
 finish_tests

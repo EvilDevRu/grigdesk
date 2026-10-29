@@ -28,7 +28,9 @@
           <span>{{ displayRouteList.length }}</span>
           <UiTooltip :text="helpPanel" />
         </div>
-        <UiLoadingState v-if="loading && !revisions.length" label="Загружаю…" />
+        <UiLoadingState v-if="loading && !revisions.length" label="Загружаю…" >
+          <UiSkeletonLayout layout="list" :header="false" />
+        </UiLoadingState>
         <div v-else-if="error" class="pad bad" role="alert">{{ error }}</div>
         <p v-else-if="!displayRouteList.length" class="pad muted">
           {{ editingDraft ? 'В черновике пока нет маршрутов' : 'Каталог не опубликован' }}
@@ -282,7 +284,7 @@
 
       </template>
       <template v-else-if="routesStore.opened?.catalogHash && routesStore.publishedSnapshot && !editorQueryError">
-        <UiLoadingState v-if="graphLoading" label="Схема…" variant="document" />
+        <RouteLoading v-if="graphLoading" label="Схема…"  />
         <div v-else-if="graphError" class="mid bad" role="alert">{{ graphError }}</div>
         <div v-else-if="graph" class="published-canvas"><FactoryGraph :graph="graph" reference /></div>
         <details v-if="selectedRoute" class="ui-workspace-disclosure route-disclosure">
@@ -307,7 +309,7 @@
 
       <!-- Схема выбранного маршрута — ровно та, по которой пойдёт попытка -->
       <div v-else class="published-canvas">
-        <UiLoadingState v-if="graphLoading" label="Схема…" variant="document" />
+        <RouteLoading v-if="graphLoading" label="Схема…"  />
         <div v-else-if="graphError" class="mid bad">{{ graphError }}</div>
         <FactoryGraph v-else-if="graph" :graph="graph" reference />
         <div v-else class="mid muted">Выбери маршрут слева</div>
@@ -350,6 +352,10 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../ui';
+
+import RouteLoading from './routes/RouteLoading.vue';
+
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 

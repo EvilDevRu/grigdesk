@@ -91,7 +91,11 @@ const routes: RouteRecordRaw[] = [
     path: '/docker',
     name: 'docker',
     component: () => import('./views/DockerView.vue'),
-    meta: { title: 'Докер', tool: 'docker' },
+    meta: {
+      title: 'Докер',
+      tool: 'docker',
+      layout: 'workspace',
+    },
   },
   {
     path: '/routes',
@@ -107,6 +111,12 @@ const routes: RouteRecordRaw[] = [
       title: 'Проекты',
       layout: 'workspace',
     },
+  },
+  {
+    path: '/onboarding',
+    name: 'onboarding',
+    component: () => import('./views/OnboardingView.vue'),
+    meta: { title: 'Мастер настройки', layout: 'workspace' },
   },
   {
     path: '/code',
@@ -147,7 +157,7 @@ const routes: RouteRecordRaw[] = [
     path: '/inbox',
     name: 'inbox',
     component: () => import('./views/InboxView.vue'),
-    meta: { title: 'Входящие' },
+    meta: { title: 'Входящие', layout: 'workspace' },
   },
   {
     path: '/github',

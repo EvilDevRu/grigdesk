@@ -1,6 +1,6 @@
 <template>
   <div class="diff-core">
-    <UiLoadingState v-if="showLoading" label="Считаю диф…" variant="document" />
+    <DiffLoading v-if="showLoading" label="Считаю диф…"  :side-by-side="sideBySide" />
     <div v-else-if="error && !repos.length" class="state"><p class="bad">{{ error }}</p><UiButton variant="solid" tone="accent" @click="load">Повторить</UiButton></div>
     <div v-else-if="!files.length" class="state">
       <p>Несохранённых изменений нет</p>
@@ -62,6 +62,8 @@
 </template>
 
 <script setup lang="ts">
+import DiffLoading from './DiffLoading.vue';
+
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, useId } from 'vue';
 import type { editor } from 'monaco-editor';
 
@@ -74,7 +76,6 @@ import {
   UiPressable,
   UiToggleButton,
   vTooltip,
-  UiLoadingState,
 } from '../../ui';
 
 interface DiffFile {

@@ -8,6 +8,91 @@ import path from 'node:path';
 import { readActivity, readAgentLive, readRunSilence } from '../../server/src/lib/factoryCli.ts';
 import { readProcessIdentity } from '../../server/src/lib/speech/modelJobsProcess.ts';
 
+test('лента GLM показывает инструменты, завершение и конкретный отказ wrapper-а', async (t) => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-activity-glm.'));
+
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+
+  const runDir = path.join(stateDir, 'logs', 'runs', 't46', 'BUILD', 'run-glm');
+  const registry = {
+    RUN_PROTOCOL: '2',
+    BUILD: 'running',
+    ACTIVE_RUN_BUILD: 'run-glm',
+  };
+  const modelRef = '["zai","glm-5.3"]';
+  const input = {
+    stateDir,
+    task: '46',
+    registry,
+  };
+
+  await mkdir(runDir, { recursive: true });
+  await writeFile(path.join(runDir, 'meta.env'), `RUNNER=glm\nMODEL=${modelRef}\n`);
+  await writeFile(path.join(runDir, 'events.jsonl'), '');
+
+  // Даже до первой записи wrapper-а подпись модели приходит из meta.env.
+  assert.equal(readAgentLive(input).model, 'glm-5.3');
+
+  const events = [
+    { event: 'glm_start', model: modelRef },
+    { event: 'tool_result' },
+    { event: 'tool_call', name: 'read' },
+    { event: 'tool_call', name: 'shell' },
+    { event: 'tool_result' },
+  ];
+  const writeEvents = () => writeFile(path.join(runDir, 'events.jsonl'),
+    events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+
+  await writeEvents();
+
+  assert.deepEqual(readAgentLive(input).actions.map(({ name, status }) => ({ name, status })), [
+    { name: 'read', status: 'run' },
+    { name: 'shell', status: 'done' },
+  ]);
+
+  events.push(
+    { event: 'tool_result' },
+    {
+      event: 'wrapper_error',
+      code: 'glm_key_missing',
+      message: 'GLM недоступен: проверь карточку',
+    },
+  );
+  await writeEvents();
+
+  const live = readAgentLive(input);
+
+  assert.equal(live.model, 'glm-5.3');
+  assert.deepEqual(live.actions, [
+    {
+      type: 'tool',
+      ts: null,
+      name: 'read',
+      status: 'done',
+    },
+    {
+      type: 'tool',
+      ts: null,
+      name: 'shell',
+      status: 'done',
+    },
+    {
+      type: 'error',
+      ts: null,
+      status: 'error',
+      text: 'GLM недоступен: проверь карточку (glm_key_missing)',
+    },
+  ]);
+
+  // Начальное событие называет модель и в окне между созданием run и записью meta.env.
+  await rm(path.join(runDir, 'meta.env'));
+  assert.equal(readAgentLive(input).model, 'glm-5.3');
+
+  events.push({ event: 'result', stopReason: 'end_turn' });
+  await writeEvents();
+  assert.equal(readAgentLive(input).actions.length, 3);
+});
+
 test('activity follows the active run and renders Codex JSONL events', async (t) => {
   const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-activity.'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));

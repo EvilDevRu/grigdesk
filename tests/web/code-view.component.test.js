@@ -47,6 +47,8 @@ function query(url) {
 
 async function compileCodeView() {
   return compileVue(VIEW_PATH, {
+    expose: ['tab', 'gitPane', 'git', 'gitLoading', 'commitsLoading', 'commitsError',
+      'fileHistoryOrigin', 'fileHistoryLoading', 'fileHistoryError', 'fileHistoryEntries'],
     stubs: {
       './apiClient.ts': 'export const api = globalThis.__codeViewApi;',
       '../../shared/monaco': `
@@ -67,6 +69,7 @@ async function compileCodeView() {
         export const router = globalThis.__codeViewRouter;
       `,
       '../../ui': (`
+        export * from './src/ui.ts';
         export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
         export { default as UiButton } from './src/components/primitives/UiButton.vue';
         export { default as UiIconButton } from './src/components/primitives/UiIconButton.vue';
@@ -4509,5 +4512,164 @@ for (const event of ['projects-changed', 'hello']) {
     const context = wrapper.find('#code-context');
 
     assert.equal(context.exists() ? context.element.value : '', '');
+  });
+}
+
+test('LOAD-KEEP-inline-code: рабочая копия и поиск сохраняют маленький spinner', async (t) => {
+    const repos = deferred();
+    const search = deferred();
+    const calls = [];
+    let listings = 0;
+    const h = await mountCodeView(t, {
+        api: {
+            /**
+             * Удерживает смену рабочей копии и последующий поиск независимо друг от друга.
+             * Остальные адреса явно проверяются, неизвестный запрос отвергает фикстуру.
+             */
+            async get(url) {
+                calls.push(url);
+
+                if (url === '/api/projects') {
+                    return {
+                        projects: [projectFixture('demo', ['/demo'])]
+                    };
+                }
+                if (url === '/api/code/demo/repos') {
+                    return {
+                        repos: [{
+                                key: 'demo',
+                          dir: '/demo',
+                          trees: [
+                                    mainTree('/demo'), worktree('/demo-other', 'Вторая копия', 'fixture'),
+                                ]
+                            }]
+                    };
+                }
+                if (url.includes('/ls?')) {
+                    listings += 1;
+
+                    return listings === 1 ? {
+                        entries: []
+                    } : repos.promise;
+                }
+                if (url.includes('/search?')) {
+                    return search.promise;
+                }
+
+                throw new Error(`Неожиданный API Кода: ${url}`);
+            },
+        }
+    });
+    const options = h.wrapper.get('#code-context').findAll('option');
+
+    await h.wrapper.get('#code-context').setValue(options[1].attributes('value'));
+    await settle(h.flushPromises);
+    assert.equal(h.wrapper.find('[data-variant="inline"] .ui-spinner').exists(), true);
+    assert.equal(h.wrapper.find('[data-ui-skeleton]').exists(), false);
+    repos.resolve({
+        entries: []
+    });
+    await settle(h.flushPromises);
+
+    const panel = h.wrapper.get('#code-navigator').element;
+
+    await h.wrapper.get('input[data-action="code-search"]').setValue('needle');
+    await new Promise((resolve) => setTimeout(resolve, 340));
+    assert.ok(calls.some((url) => url.includes('/search?')), 'поиск начался');
+    await settle(h.flushPromises);
+    assert.equal(h.wrapper.find('.code-search-results [data-variant="inline"] .ui-spinner').exists(), true);
+    assert.equal(h.wrapper.find('[data-ui-skeleton]').exists(), false);
+    assert.ok(h.wrapper.get('#code-navigator').element === panel);
+    search.resolve({
+        files: [],
+      matches: [],
+      truncated: false
+    });
+    await settle(h.flushPromises);
+    assert.equal(h.wrapper.find('[data-ui-loading]').exists(), false);
+});
+
+for (const area of ['history', 'git', 'commits']) {
+  test(`LOAD-SURFACE-code-${area}: настоящее вложенное ожидание объявлено и снимается`, async (t) => {
+    const h = await mountCodeView(t, { api: {
+      /**
+       * Подтверждает контекст настоящей рабочей копии до вложенного ожидания.
+       * Любой неописанный адрес отклоняется, чтобы ошибка порта не стала RED.
+       */
+      async get(url) {
+        if (url === '/api/projects') {
+          return { projects: [projectFixture('demo', ['/demo'])] };
+        }
+
+        if (url === '/api/code/demo/repos') {
+          return { repos: [{
+            key: 'demo',
+            dir: '/demo',
+            trees: [mainTree('/demo')]
+          }] };
+        }
+
+        if (url.includes('/ls?')) {
+          return { entries: [] };
+        }
+
+        if (url.includes('/git?')) {
+          return {
+            branch: 'main',
+            files: [],
+            staged: [],
+            log: [],
+            stat: '',
+            headMessage: ''
+          };
+        }
+
+        assert.fail(`Неожиданный API: ${url}`);
+      },
+    } });
+
+    if (area === 'history') {
+      h.wrapper.vm.fileHistoryOrigin = { path: 'fixture.txt' };
+      h.wrapper.vm.fileHistoryLoading = true;
+    } else {
+      await selectCodeTab(h.wrapper, area === 'git' ? 'changes' : 'commits');
+      await settle(h.flushPromises);
+
+      if (area === 'git') {
+        h.wrapper.vm.git = null;
+        h.wrapper.vm.gitLoading = true;
+      } else {
+        h.wrapper.vm.git = {
+          branch: 'main',
+          files: [],
+          staged: [],
+          log: [],
+          stat: '',
+          tracking: {
+            detached: false,
+            upstream: '',
+            ahead: 0,
+            behind: 0
+          }
+        };
+        await settle(h.flushPromises);
+        h.wrapper.vm.gitPane = 'commits';
+        h.wrapper.vm.commitsLoading = true;
+      }
+    }
+
+    await h.wrapper.vm.$nextTick();
+
+    const scope = h.wrapper.get(area === 'history' ? '.file-history' : '.git-tree');
+    const bricks = scope.findAll('[data-ui-skeleton]').length;
+    const announced = scope.find('[role="status"]').exists();
+
+    h.wrapper.vm.fileHistoryLoading = false;
+    h.wrapper.vm.gitLoading = false;
+    h.wrapper.vm.commitsLoading = false;
+    await h.wrapper.vm.$nextTick();
+    assert.equal(scope.find('[data-ui-loading]').exists(), false);
+    assert.ok(announced, 'вложенное ожидание объявлено');
+    assert.ok(bricks > 0, `${area}: общий каркас списка вместо одинаковой заглушки`);
   });
 }

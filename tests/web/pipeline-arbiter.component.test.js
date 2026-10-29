@@ -141,7 +141,7 @@ async function mountPipeline(t, { factoryTask, graph }, { response, compact = tr
 }
 
 const arbiterButton = (wrapper) => wrapper.findAll('.stalled button')
-  .find((button) => /разобрать и продолжить/.test(button.text()));
+  .find((button) => /разобрать остановку/.test(button.text()));
 const openAnswerButton = (wrapper) => wrapper.find('[data-role="pipeline-stall-answer-open"]');
 const sendButton = (wrapper) => wrapper.find('[data-role="pipeline-arbiter-send"]');
 const answerField = (wrapper) => wrapper.find('[data-role="pipeline-arbiter-answer"]');
@@ -155,32 +155,23 @@ const openStageNode = async (wrapper, flushPromises, node) => {
 // прогон той же попыткой без указания, то есть заехать в ту же остановку. Пишется оно в
 // СВОЕЙ модалке: узел отвечает на другой вопрос — чем занят исполнитель и чем кончился
 // заход, — и вместе с четырьмя абзацами разбора на один экран они не поместились.
-test('кнопка плашки открывает отдельный разбор и отправляет решение', async (t) => {
-  const { wrapper, flushPromises, bodies, dialogs } = await mountPipeline(t, makeFixture({
+test('кнопка плашки открывает исторический разбор в том же окне узла без применения', async (t) => {
+  const { wrapper, flushPromises, bodies } = await mountPipeline(t, makeFixture({
     stall: { ...NO_PROGRESS_STALL, arbiter: ARBITER_CARD },
   }));
 
   await openAnswerButton(wrapper).trigger('click');
   await flushPromises();
+  const block = wrapper.get('[data-role="arbiter-conversation"]');
 
-  const dialog = wrapper.get('[data-role="pipeline-arbiter-decision"]');
-  assert.equal(dialog.text().includes('удешевить рендер строки'), true);
-  assert.equal(dialog.text().includes('оба измеренных рычага'), true);
-
-  await answerField(wrapper).setValue('берём monkey-patch вендора, критерий приёмки не меняем');
-  await sendButton(wrapper).trigger('click');
-  await flushPromises();
-
-  assert.deepEqual(bodies, [{
-    url: '/api/tasks/42/stage/SKEPTIC/running',
-    body: { comment: 'берём monkey-patch вендора, критерий приёмки не меняем' },
-  }]);
-  assert.equal(/сброшены/.test(dialogs.join(' ')), true);
+  assert.match(block.text(), /удешевить рендер строки/);
+  assert.match(block.text(), /оба измеренных рычага/);
+  assert.equal(wrapper.find('.smodal').exists(), true);
+  assert.equal(wrapper.find('[data-role="pipeline-arbiter-decision"]').exists(), false);
+  assert.deepEqual(bodies, []);
 });
-
 // Модалка узла осталась про заход: разбор в ней — признак со входом, а не текст.
-test('в модалке узла от разбора остаётся вход, а не текст', async (t) => {
-  // Схему рисует только развёрнутая карточка, а узел открывают кликом по ней.
+test('в модалке узла разбор занимает общий блок без второй формы возврата', async (t) => {
   const { wrapper, flushPromises } = await mountPipeline(t, makeFixture({
     stall: { ...NO_PROGRESS_STALL, arbiter: ARBITER_CARD },
   }), { compact: false });
@@ -188,26 +179,45 @@ test('в модалке узла от разбора остаётся вход, 
   await openStageNode(wrapper, flushPromises, {
     id: 'skeptic', label: '🕵 Скептик', subtitle: '', status: 'stall',
   });
-  const note = wrapper.get('.smodal .sarbopen');
-  assert.equal(note.text().includes('решать тебе'), true);
-  assert.equal(note.text().includes('оба измеренных рычага'), false);
 
-  await wrapper.get('[data-role="pipeline-stage-arbiter-open"]').trigger('click');
-  await flushPromises();
-  // Одну модалку поверх другой не держим: узел закрывается, остаётся разбор.
-  assert.equal(wrapper.find('.smodal').exists(), false);
-  assert.equal(
-    wrapper.get('[data-role="pipeline-arbiter-decision"]').text().includes('оба измеренных рычага'),
-    true,
-  );
+  assert.match(wrapper.get('.smodal [data-role="arbiter-conversation"]').text(), /оба измеренных рычага/);
+  assert.equal(wrapper.find('.rewind-sect').exists(), false);
+  assert.equal(wrapper.find('[data-role="pipeline-arbiter-decision"]').exists(), false);
+});
+// Кнопка обязана называть то, что за ней стоит: разбор, который человек ещё не читал.
+test('новая остановка того же узла открывает текущий диалог вместо предыдущего', async (t) => {
+  const fx = makeFixture({ stall: NO_PROGRESS_STALL });
+  const oldId = `c_${'a'.repeat(32)}`;
+
+  fx.graph.arbiterConversations = [{
+    conversationId: oldId,
+    identity: {
+      task: '42',
+      profile: 'project-alpha',
+      attempt: `a_${'a'.repeat(32)}`,
+      node: 'skeptic',
+      stop: 'no-progress',
+      stageSequence: 3,
+      stageHeadHash: 'b'.repeat(64),
+    },
+    state: 'resolved',
+  }];
+
+  const { wrapper, flushPromises } = await mountPipeline(t, fx, { compact: false });
+
+  await openStageNode(wrapper, flushPromises, {
+    id: 'skeptic', label: 'Скептик', status: 'stall',
+  });
+  assert.equal(globalThis.__pipelineArbiterApiCalls
+    .some((url) => url.includes(`/arbiter-conversations/${oldId}`)), false);
+  assert.equal(wrapper.get('[data-role="arbiter-conversation"]').text().includes('Предыдущие разборы'), true);
 });
 
-// Кнопка обязана называть то, что за ней стоит: разбор, который человек ещё не читал.
 test('вход в решение назван разбором, когда арбитр отдал вопрос человеку', async (t) => {
   const { wrapper } = await mountPipeline(t, makeFixture({
     stall: { ...NO_PROGRESS_STALL, arbiter: ARBITER_CARD },
   }));
-  assert.equal(/разбор и решение/.test(openAnswerButton(wrapper).text()), true);
+  assert.equal(/разбор остановки/i.test(openAnswerButton(wrapper).text()), true);
 });
 
 // В ленте от разбора остаётся ОДНА строка-признак: четыре абзаца человек читает один
@@ -231,25 +241,27 @@ test('разбор чужого узла не выдаётся за разбор
     stall: { ...NO_PROGRESS_STALL, arbiter: { ...ARBITER_CARD, node: 'plan' } },
   }));
 
-  assert.equal(/ответить и продолжить/.test(openAnswerButton(wrapper).text()), true);
+  assert.equal(/разбор остановки/i.test(openAnswerButton(wrapper).text()), true);
   await openAnswerButton(wrapper).trigger('click');
   await flushPromises();
   assert.equal(wrapper.find('.smodal .sarbopen').exists(), false);
+  assert.equal(wrapper.get('.smodal [data-role="arbiter-conversation"]')
+    .text().includes(ARBITER_CARD.card.what), false);
   assert.equal(wrapper.find('[data-role="pipeline-arbiter-decision"]').exists(), false);
 });
 
 // «Поехать дальше без слов» — это соседняя кнопка «продолжить прогон». Пустой возврат
 // сбросил бы хвост маршрута, ничего не ответив на заданный арбитром вопрос.
-test('на вопрос арбитра нельзя ответить пустым указанием', async (t) => {
+test('у исторического разбора нет активного применения', async (t) => {
   const { wrapper, flushPromises } = await mountPipeline(t, makeFixture({
     stall: { ...NO_PROGRESS_STALL, arbiter: ARBITER_CARD },
   }));
 
   await openAnswerButton(wrapper).trigger('click');
   await flushPromises();
-  assert.equal(sendButton(wrapper).attributes('disabled') !== undefined, true);
+  assert.equal(wrapper.find('[data-role="arbiter-apply"]').exists(), false);
+  assert.equal(wrapper.find('[data-role="arbiter-custom-apply"]').exists(), false);
 });
-
 // Оборвавшийся прогон узлом не лечится: там нужен resume той же попытки.
 test('оборвавшемуся прогону вход в решение не предлагается', async (t) => {
   const { wrapper } = await mountPipeline(t, makeFixture({
@@ -319,65 +331,31 @@ test('затык без машинного вида арбитру не отда
   assert.equal(Boolean(arbiterButton(wrapper)), false);
 });
 
-test('нажатие спрашивает подтверждение и зовёт арбитра', async (t) => {
-  const { wrapper, flushPromises, posts, dialogs } = await mountPipeline(
-    t,
-    makeFixture({ stall: NO_PROGRESS_STALL }),
-    {
-      response: {
-        ok: true,
-        resolved: true,
-        node: 'plan',
-        card: {
-          what: 'выбрал аудит вместо общего модуля',
-          why: 'общий модуль ломает плоский каталог',
-          proof: 'запустил импорт обеими формами',
-          risk: 'замер покажет ноль дублей там, где их не считали',
-        },
-      },
-    },
-  );
+test('нажатие начинает читающий разбор и открывает узел без подтверждения движения', async (t) => {
+  const { wrapper, flushPromises, posts, dialogs } = await mountPipeline(t,
+    makeFixture({ stall: NO_PROGRESS_STALL }), {
+      response: { conversationId: 'conversation', operationId: 'operation', revision: 1 },
+    });
+
   await arbiterButton(wrapper).trigger('click');
   await flushPromises();
 
   assert.deepEqual(posts, ['/api/tasks/42/arbitrate']);
-  // Подтверждение обязано сказать, что решение уедет в журнал машинным: человек должен
-  // понимать, что подписывает не своё суждение.
-  assert.ok(dialogs.some((text) => /записано в журнал как машинное/.test(text)));
-  assert.ok(dialogs.some((text) => /выбрал аудит вместо общего модуля/.test(text)));
-  assert.ok(dialogs.some((text) => /Чем грозит ошибка/.test(text)));
+  assert.deepEqual(dialogs, []);
+  assert.equal(wrapper.find('.smodal [data-role="arbiter-conversation"]').exists(), true);
 });
+test('короткий ответ запуска не выдаётся за принятое исправление', async (t) => {
+  const { wrapper, flushPromises, posts, dialogs } = await mountPipeline(t,
+    makeFixture({ stall: NO_PROGRESS_STALL }), {
+      response: { conversationId: 'conversation', operationId: 'operation', revision: 1 },
+    });
 
-test('решение о границе задачи возвращается человеку, а не выдаётся за отказ', async (t) => {
-  const { wrapper, flushPromises, posts, dialogs } = await mountPipeline(
-    t,
-    makeFixture({ stall: NO_PROGRESS_STALL }),
-    {
-      response: {
-        ok: true,
-        resolved: false,
-        verdict: 'human',
-        scopeChange: true,
-        card: {
-          what: 'критерий 5 недоказуем на этих данных',
-          why: 'в реестре эталонов нет дефектных чертежей',
-          proof: 'прочитал реестр и прогон',
-          risk: 'задача уедет без проверки на реальных данных',
-        },
-      },
-    },
-  );
   await arbiterButton(wrapper).trigger('click');
   await flushPromises();
 
   assert.deepEqual(posts, ['/api/tasks/42/arbitrate']);
-  assert.ok(
-    dialogs.some((text) => /Это решает человек/.test(text)),
-    'исход показан как работа арбитра, а не как его поломка',
-  );
-  assert.ok(dialogs.some((text) => /критерий 5 недоказуем/.test(text)));
+  assert.equal(dialogs.some((text) => /Арбитр вернул узел|исправлено/.test(text)), false);
 });
-
 // Разбор арбитра — единственное место, где машинный жаргон вердиктов («Д9/T1 опровергнут»,
 // «П1 вычитает ноль кадров») превращается в человеческую формулировку. Раньше он
 // показывался одноразовым диалогом нажавшему кнопку, а у автоматического пути пропадал
@@ -397,7 +375,7 @@ const ARBITER_CARD = {
   },
 };
 
-test('разбор целиком показывает отдельная модалка', async (t) => {
+test('разбор целиком показан внутри проблемного узла', async (t) => {
   const { wrapper, flushPromises } = await mountPipeline(t, makeFixture({
     stall: { ...NO_PROGRESS_STALL, arbiter: ARBITER_CARD },
   }));
@@ -405,7 +383,7 @@ test('разбор целиком показывает отдельная мод
   await openAnswerButton(wrapper).trigger('click');
   await flushPromises();
 
-  const block = wrapper.get('[data-role="pipeline-arbiter-decision"]');
+  const block = wrapper.get('.smodal [data-role="arbiter-conversation"]');
   assert.equal(block.text().includes('удешевить рендер строки'), true);
   assert.equal(block.text().includes('оба измеренных рычага'), true);
   assert.equal(block.text().includes('прочитал замеры узла'), true);
@@ -457,7 +435,7 @@ test('идущий разбор виден плашкой и убирает кн
   assert.equal(run.text().includes('сам'), true);
   assert.equal(run.text().includes('1 мин'), true);
   const arbiterButton = wrapper.findAll('.sbretry')
-    .find((button) => button.text().includes('разобрать и продолжить'));
+    .find((button) => button.text().includes('разобрать остановку'));
 
   assert.equal(Boolean(arbiterButton), false, 'второй арбитраж спорил бы за исполнителя');
 });

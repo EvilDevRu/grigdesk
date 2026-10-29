@@ -10,7 +10,9 @@
       {{ status.listener.error || t('settings.networkAccessIsDisabledSetGRIGDESKCLIENT') }}
     </UiInlineMessage>
     <p v-else-if="status">{{ t('settings.connectionAddresses') }} {{ status.listener.addresses.join(', ') }}</p>
-    <UiLoadingState v-if="loading" :label="t('settings.loadingDevices')" />
+    <UiLoadingState v-if="loading" :label="t('settings.loadingDevices')" :failed="Boolean(error)" >
+      <UiSkeletonLayout layout="list" :header="false" />
+    </UiLoadingState>
     <SettingsEmpty
       v-else-if="status && !status.devices.length"
       class="devices-empty"
@@ -49,6 +51,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../ui';
+
 import { intlLocale } from '../../../../shared/i18n/formats.ts';
 import { uiLocale } from '../../ui.ts';
 import { t } from '../../ui.ts';

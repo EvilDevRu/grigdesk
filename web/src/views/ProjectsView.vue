@@ -18,6 +18,14 @@
           @retry="retry"
         >
           <template #actions>
+            <UiIconButton data-context="workspace-toolbar" :label="t('core.onboardingOpen')"
+              v-tooltip="t('core.onboardingOpen')"
+              @click="router.push('/onboarding?new=1')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m3 18 12-12 3 3L6 21ZM5 2v6M2 5h6M19 15v6M16 18h6M17 2v3M15.5 3.5h3" />
+              </svg>
+            </UiIconButton>
             <UiButton
               v-if="!creating"
               data-role="project-create"
@@ -138,7 +146,11 @@
                 Повторить
               </UiButton>
             </template>
-            <UiLoadingState v-else label="Загрузка проекта…" variant="document" />
+            <UiLoadingState v-else label="Загрузка проекта…" variant="document">
+              <div class="passport-loading">
+                <UiSkeletonLayout layout="form" :header="false" />
+              </div>
+            </UiLoadingState>
           </div>
         </div>
       </section>
@@ -164,6 +176,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../ui';
+
 // Раздел «Проекты»: список паспортов слева, паспорт открытого проекта справа.
 //
 // Страница — только каркас: она читает адрес (`/projects/:id?`, `?create=1`),
@@ -174,6 +188,7 @@ import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vu
 
 import {
   UiButton,
+  UiIconButton,
   UiInlineMessage,
   UiPaneHeader,
   confirmDialog,
@@ -727,6 +742,36 @@ function retryProject(): void {
 .form-content > .form-notice {
   padding: 20px;
   overflow: auto;
+}
+
+.passport-loading {
+  --skeleton-form-columns: var(--workspace-label-column) minmax(0, 1fr);
+  --skeleton-form-column-gap: var(--workspace-column-gap);
+  max-width: calc(940px - var(--workspace-selection-column) - var(--workspace-actions-column)
+    - 2 * var(--workspace-column-gap));
+  width: calc(100% - var(--workspace-selection-column) - var(--workspace-actions-column)
+    - 2 * var(--workspace-column-gap));
+}
+
+.passport-loading :deep(.ui-skeleton-layout__copy) {
+  grid-template-columns: var(--skeleton-form-columns);
+  column-gap: var(--skeleton-form-column-gap);
+}
+
+@container project-detail (max-width: 660px) {
+  .passport-loading {
+    width: 100%;
+  }
+}
+
+@container project-detail (max-width: 480px) {
+  .passport-loading {
+    --skeleton-form-columns: minmax(0, 1fr);
+  }
+
+  .form-content > .form-notice:has(.passport-loading) {
+    padding: 16px 12px;
+  }
 }
 
 .welcome {

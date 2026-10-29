@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | `api` | `GET biz/customerService/zaiUserInfo` | номер клиента (`customerNumber`) |
 | `api` | `POST platform-charge-zai/business/accountBalance` с `{ customerId }` | `totalBalance` и `accountList`: тип 10 — наличные, 11 — бонус, 12 — кредит |
-| `coding-plan` | `GET monitor/usage/quota/limit` | `level` и `limits`: `TOKENS_LIMIT` unit 3/number 5 — окно 5 часов, unit 6/number 1 — неделя, `TIME_LIMIT` — MCP за месяц; `percentage`, `nextResetTime` в мс |
+| `coding-plan` | `GET monitor/usage/quota/limit` | `level` и `limits`: `CREDIT_LIMIT` или прежний `TOKENS_LIMIT`, unit 3/number 5 — окно 5 часов, unit 6/number 1 — неделя; `TIME_LIMIT` — MCP за месяц; `percentage`, `nextResetTime` в мс |
 
 Без номера клиента адрес баланса отвечает «The current user can only view their own data!».
 Адрес квот для ключа без подписки отвечает кодом 500 «当前用户不存在coding plan». Ответы — конверт
@@ -27,7 +27,9 @@
 - `coding-plan`: полоски «5 часов», «Неделя», «MCP за месяц» со временем сброса и ресурс уровня
   подписки со ссылкой на её страницу. После уровня идёт [ресурс «Тариф»](glm-tariff.md): фаза,
   местное время следующей смены, расписание и обе цены пика. Разбор квот сверен с публичными
-  утилитами, а не с живой подпиской.
+  утилитами; 28.10.2026 оба кредитных окна подтверждены живым ответом подписки V3.
+  Дополнительные поля, округление счётчиков и граница Extra Usage описаны в
+  [кредитных окнах](glm-credit-windows.md).
 - Номер клиента и почта из ответа кабинета наружу не выходят.
 
 ## Сбои
@@ -47,7 +49,7 @@
 
 ## Отсутствующий процент
 
-Окна `TOKENS_LIMIT` и `TIME_LIMIT` без конечного неотрицательного `percentage`
+Окна `CREDIT_LIMIT`, `TOKENS_LIMIT` и `TIME_LIMIT` без конечного неотрицательного `percentage`
 пропускаются. `null`, пустая строка, boolean и строки `NaN`/`Infinity` не означают
 свободную квоту. Явный ноль сохраняется; непустые числовые строки принимаются.
 Общая нормализация сохраняет сотые процента и ограничивает верхнюю границу 100.

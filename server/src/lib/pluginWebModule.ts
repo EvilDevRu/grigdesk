@@ -1,11 +1,10 @@
+import type { PluginWebModule } from '../../../shared/plugins/pluginsContracts.ts';
 import { lstatSync } from 'node:fs';
 import path from 'node:path';
-import type { PluginWebModule } from '../../../shared/plugins/pluginsContracts.ts';
+import type { ResolvedPluginWebModule } from '../../../packages/plugin-types/src/manifest.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 
-export interface ResolvedPluginWebModule extends PluginWebModule {
-  dir: string;
-}
+export type { ResolvedPluginWebModule } from '../../../packages/plugin-types/src/manifest.ts';
 
 type NormalizePath = (raw: unknown, rootAllowed: boolean) => string | null;
 

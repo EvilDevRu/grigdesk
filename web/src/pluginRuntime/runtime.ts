@@ -1,3 +1,4 @@
+import type { PluginModuleStart } from '../../../packages/plugin-types/src/web.js';
 import { ref } from 'vue';
 import type { Component, Ref } from 'vue';
 import type { PluginWebModule, PluginListItem } from '../../../shared/plugins/pluginsContracts.ts';
@@ -11,7 +12,7 @@ type Cleanup = () => void;
 type Prepared = {
   component: Component;
   context: PluginModuleContext;
-  start: unknown;
+  start: PluginModuleStart | undefined;
 };
 type PanelOwner = { active: boolean; release: Cleanup };
 

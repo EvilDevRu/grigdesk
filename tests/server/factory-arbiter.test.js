@@ -24,6 +24,7 @@ import {
 } from '../../server/src/lib/factoryArbiter.ts';
 import { routeGotoArgs } from '../../server/src/lib/factoryRouteCli.ts';
 import { LEGACY_VALUES } from '../../shared/runtime/legacyBrand.ts';
+import { ARBITER_TURN_LIMIT_MS, buildConversationPrompt } from '../../server/src/lib/arbiterConversationRunner.ts';
 
 const TASK = '900022';
 const ATTEMPT = 'a_0123456789abcdef0123456789abcdef';
@@ -156,7 +157,7 @@ test('остановка human без вердикта арбитру не пр�
   assert.equal(stallIsArbitrable('human', null), false);
   assert.equal(stallIsArbitrable('human', { owner: null }), true);
   assert.equal(stallIsArbitrable('human', { owner: 'human' }), true);
-  assert.equal(stallIsArbitrable('human', { owner: 'environment' }), false);
+  assert.equal(stallIsArbitrable('human', { owner: 'environment' }), true);
   // Остановки движка вердикта в событии остановки могут и не нести — правило прежнее.
   assert.equal(stallIsArbitrable('no-progress', null), true);
   assert.equal(stallIsArbitrable('rewind-limit', null), true);
@@ -641,17 +642,14 @@ test('промпт не врёт про возможности и называе
   assert.match(prompt, /verdict = "human" с тем, что успел/);
 });
 
-// Число живёт в одном месте (`ARBITER_TURN_LIMIT_MIN` рядом с самим таймаутом): вторая
+// Число живёт в одном месте (`ARBITER_TURN_LIMIT_MS` рядом с самим таймаутом): вторая
 // копия в тексте промпта разошлась бы с резаком, и агент планировал бы не тот бюджет.
 test('бюджет промпта берётся из лимита хода, а не из второй копии числа', async () => {
-  const source = await readFile(
-    new URL('../../server/src/modules/factory/index.ts', import.meta.url),
-    'utf8',
-  );
+  const prompt = buildConversationPrompt({ messages: [], result: null },
+    { identity: {}, evidence: {}, targets: [], policies: [] }, 'start');
 
-  assert.match(source, /const ARBITER_TURN_LIMIT_MIN = (\d+);/);
-  assert.match(source, /ARBITER_TURN_LIMIT_MS = ARBITER_TURN_LIMIT_MIN \* 60 \* 1000/);
-  assert.match(source, /budgetMin: ARBITER_TURN_LIMIT_MIN/);
+  assert.equal(ARBITER_TURN_LIMIT_MS, 20 * 60_000);
+  assert.equal(prompt.includes(`У тебя ${ARBITER_TURN_LIMIT_MS / 60_000} минут`), true);
 });
 
 test('возврат арбитра со старым actor тоже считается', async () => {

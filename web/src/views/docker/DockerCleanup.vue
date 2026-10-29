@@ -23,8 +23,8 @@
       {{ store.usageError }}
     </UiInlineMessage>
 
-    <UiLoadingState v-else-if="!store.usage && store.usageLoading" variant="inline"
-      label="Демон считает размеры слоёв, это занимает несколько секунд…" />
+    <DockerLoading v-else-if="!store.usage && store.usageLoading"
+      label="Демон считает размеры слоёв, это занимает несколько секунд…"  area="usage" />
     <p v-else-if="!store.usage" class="docker-cleanup__empty">
       Нажмите «Пересчитать», чтобы узнать занятое место.
     </p>
@@ -100,6 +100,8 @@
 </template>
 
 <script setup lang="ts">
+import DockerLoading from './DockerLoading.vue';
+
 import { computed, reactive, ref } from 'vue';
 
 import type { DockerPruneTarget } from '../../../../shared/plugins/docker/dockerContracts';
@@ -111,7 +113,6 @@ import {
   UiCheckbox,
   UiInlineMessage,
   confirmDialog,
-  UiLoadingState,
 } from '../../ui';
 import { formatAge, formatSize } from './format';
 import { dockerSettings } from './settings';
@@ -293,7 +294,7 @@ async function clean(): Promise<void> {
 
 .docker-cleanup__head h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -315,8 +316,6 @@ async function clean(): Promise<void> {
 .docker-cleanup__empty {
   margin: 0;
   padding: 24px 16px;
-  border: 1px dashed var(--line-2);
-  border-radius: var(--radius);
   color: var(--ink-mid);
   font-size: 13px;
   line-height: 1.5;
@@ -325,16 +324,13 @@ async function clean(): Promise<void> {
 
 .docker-usage {
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
   border-spacing: 0;
-  background: var(--surface);
   overflow: hidden;
 }
 
 .docker-usage th {
-  padding: 12px;
-  background: var(--surface-2);
+  padding: 8px;
+  background: transparent;
   color: var(--ink-mid);
   font-size: 12px;
   font-weight: 500;
@@ -342,7 +338,7 @@ async function clean(): Promise<void> {
 }
 
 .docker-usage td {
-  padding: 14px 12px;
+  padding: 10px 8px;
   border-top: 1px solid var(--line);
   vertical-align: middle;
 }
@@ -410,11 +406,9 @@ async function clean(): Promise<void> {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  gap: 12px;
 }
 
 .docker-cleanup__summary {
@@ -454,7 +448,7 @@ async function clean(): Promise<void> {
   .docker-usage tbody tr {
     display: grid;
     grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr);
-    padding: 14px 12px;
+    padding: 10px 8px;
     border-top: 1px solid var(--line);
     gap: 12px;
   }

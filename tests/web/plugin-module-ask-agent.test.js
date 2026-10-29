@@ -316,6 +316,15 @@ test('PM-ASK-NO-MODEL: после ensure понятная ошибка RU/EN б�
   f.ui.setUiLocale('ru');
 });
 
+test('PM-ASK-NO-SESSION: отказ newSession не открывает URL без идентификатора', async (t) => {
+  const f = await askFixture(t);
+
+  f.chat.newSession = () => null;
+
+  await assert.rejects(f.run(), (error) => error.message === f.ui.t('core.chatStoreNotLoaded'));
+  assert.equal(f.calls.some(([kind]) => kind === 'push'), false);
+});
+
 test('PM-ASK-FAILURES: настоящий сервер сохраняет запреты root/home и adapter denial', async (t) => {
   const executor = {
     id: TEST_MODEL_REF.provider,

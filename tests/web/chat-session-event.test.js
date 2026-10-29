@@ -4,6 +4,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { reconcileWith } from './helpers/chat-protocol.js';
+
 import { apiHarness, chatStoreFixture, sseOf } from './helpers/chat-store.js';
 
 function fixture(session = {}) {
@@ -47,6 +49,7 @@ test('WEB: pending-ответ прерванного перезапуском х
       }],
     }
     : { active: [] });
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
   apiHarness.del = async (url) => { deleted.push(url); return {}; };
 
   await chat._collectPending();

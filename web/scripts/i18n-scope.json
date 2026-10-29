@@ -381,6 +381,14 @@
     ]
   },
   "dynamicExpressions": {
+    "web/src/stores/providers.ts": {
+      "mode.labelKey": [
+        "core.agentModeAsk", "core.agentModeAuto", "core.agentModeReadOnly"
+      ],
+      "mode.hintKey": [
+        "core.agentModeAskHint", "core.agentModeAutoHint", "core.agentModeReadOnlyHint"
+      ]
+    },
     "web/src/features/settings/catalog.ts": {
       "GROUP_MESSAGES[group.id]!.label!": [
         "settings.*"

@@ -538,8 +538,8 @@ test('NET-chat-pending', async () => {
   const chat = await chatStoreFixture({ sessions: [{ id: 'chat', messages: [] }] });
   const calls: string[] = [];
 
-  apiHarness.get = async (url: string) => {
-    calls.push(`GET ${url}`);
+  apiHarness.post = async (url: string) => {
+    calls.push(`POST ${url}`);
 
     return { pending: 'bad' };
   };
@@ -550,7 +550,7 @@ test('NET-chat-pending', async () => {
   };
   await chat._collectPending();
   assert.deepEqual(chat.sessions[0].messages, []);
-  assert.deepEqual(calls, ['GET /api/chat/pending']);
+  assert.deepEqual(calls, ['POST /api/chat/store/reconcile']);
   chat.$dispose();
 });
 
@@ -616,8 +616,12 @@ test('NET-chat-storage', async (t) => {
 
   chat.loaded = false;
   apiHarness.get = async (url: string) => {
-    if (url === '/api/chat/store') {
-      return { sessions: [], archived: [] };
+    if (url === '/api/chat/store/list') {
+      return {
+        listProtocol: 1,
+        sessions: [],
+        archived: [],
+      };
     }
 
     return {

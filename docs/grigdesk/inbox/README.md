@@ -6,6 +6,8 @@
 
 ## Устройство
 
+- [Экран очереди: список и переписка, поиск, выбор и адаптив](workspace-layout.md)
+- [Результаты действий в тостах без сдвига очереди](action-toasts.md)
 - [Общий автомат](state-machine.md)
 - [Разбиение карточки на несколько задач](task-splitting.md)
 - [Три независимых состояния](independent-states.md)
@@ -13,6 +15,7 @@
 - [GitHub Issues](github-issues.md)
 - [HTTP и real-time](http-and-realtime.md)
 - [Identity, leases и stores](identity-leases-and-stores.md)
+- [Каркас первого чтения очереди: каталог, вкладки и переписка](loading-layout.md)
 - [Telegram](telegram.md)
 
 ## Грабли

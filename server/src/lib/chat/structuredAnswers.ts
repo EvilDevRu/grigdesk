@@ -58,7 +58,15 @@ function validFormat(format: string | undefined, value: string): boolean {
   return false;
 }
 
+/**
+ * Значение проверяется только по серверной схеме, а не по присланным UI-подписям.
+ * Свободный текст рядом с choice имеет отдельный ограниченный codec без ослабления enum.
+ */
 function validValue(question: StructuredQuestion, value: unknown): boolean {
+  if (question.inputType === 'choice-or-text') {
+    return typeof value === 'string' && value.length > 0 && value.length <= MAX_TEXT_LENGTH
+      && (question.maxLength === undefined || value.length <= question.maxLength);
+  }
   if (question.inputType === 'text') {
     if (typeof value !== 'string' || value.length > MAX_TEXT_LENGTH) return false;
     if (question.minLength !== undefined && value.length < question.minLength) return false;

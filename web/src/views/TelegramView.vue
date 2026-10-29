@@ -27,7 +27,8 @@
       </div>
 
       <!-- Подключённый бот: native provider lifecycle и его account-scoped настройки. -->
-      <UiLoadingState v-if="loading" label="Загружаю состояние бота…" variant="cards" />
+      <TelegramLoading v-if="loading" label="Загружаю состояние бота…"
+                       :failed="Boolean(error)" :connected="connected" />
       <template v-else-if="connected">
         <nav class="setup-path" aria-label="Настройка Телеграма">
           <a class="path-step done" href="#tg-bot">
@@ -795,6 +796,8 @@
 </template>
 
 <script setup lang="ts">
+import TelegramLoading from './TelegramLoading.vue';
+
 // Native-раздел канала Telegram: подключение бота, услышанные чаты, служебная
 // личка и allowlist «чат/тема → проект». Общая очередь и её activation живут
 // отдельно на `/inbox`; Telegram не владеет её карточками, решениями и моделью.
@@ -827,7 +830,6 @@ import {
   UiSelect,
   UiSpinner,
   vTooltip,
-  UiLoadingState,
 } from '../ui';
 import { api } from '../shared/apiClient.ts';
 import { telegramApi, telegramPluginDisabled } from '../shared/telegramApi.ts';

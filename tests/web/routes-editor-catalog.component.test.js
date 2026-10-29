@@ -13,6 +13,7 @@ import { createRoute, cloneRoute, renameRoute, removeRoute,
 const bootstrapScope = { kind: 'bootstrap' };
 
 const UI_STUB = `
+export * from './src/ui.ts';
 import { defineComponent, h } from 'vue';
 export { default as UiField } from './src/components/composites/UiField.vue';
 export const UiButton = defineComponent({ emits: ['click'],

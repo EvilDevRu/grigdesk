@@ -40,6 +40,7 @@ export interface KimiServerTurnOptions {
   signal?: AbortSignal;
   nativeSettings?: PreparedNativeSettings;
   controlledCommands?: boolean;
+  verifyTools?: (client: KimiServerClient, sessionId: string) => Promise<void>;
   onCommandContext?: (client: KimiServerClient, sessionId: string) => void | Promise<void>;
   onStep?: (step: ChatStep) => void;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
@@ -105,7 +106,8 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
   const server: KimiServerProcess = await (options.startServer || startKimiServer)({
     bin: options.bin,
     home: options.home,
-    debugEndpoints: options.controlledCommands === true,
+    debugEndpoints: options.controlledCommands === true || Boolean(options.verifyTools),
+    signal: options.signal,
     ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.env ? { env: options.env } : {}),
     log: options.log || null,
@@ -149,6 +151,8 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
     if (options.controlledCommands) {
       await options.onCommandContext?.(server.client, session.id);
     }
+
+    await options.verifyTools?.(server.client, session.id);
 
     const stepSink = createStepSink(options.onStep);
     const drafts = new Map<string, string>();
@@ -207,7 +211,7 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
     };
 
     /**
-     * Реплика закрывается до исполнения инструмента, не ожидая конца долгого шага.
+     * Реплика закрывается при подготовке инструмента, не ожидая его аргументов и разрешения.
      * Граница шага и assistant.completed сохраняют тот же id и не дублируют блок.
      */
     const finishText = (id: string, explicitText = '') => {
@@ -437,9 +441,20 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
         return;
       }
 
+      if (kind === 'tool.call.delta') {
+        if (agentId === 'main') {
+          finishText(currentTextId);
+        }
+
+        return;
+      }
+
       if (kind === 'tool.call.started') {
         flushThought();
-        finishText(currentTextId);
+
+        if (agentId === 'main') {
+          finishText(currentTextId);
+        }
 
         const id = String(payload.toolCallId || payload.tool_call_id || '');
         const name = trimmedText(payload.name) || trimmedText(payload.tool_name) || 'Инструмент';
@@ -490,6 +505,11 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
 
       if (kind === 'approval.requested' || kind === 'question.requested') {
         flushThought();
+
+        if (kind === 'approval.requested' && agentId === 'main') {
+          finishText(currentTextId);
+        }
+
         // Пока человек не ответил, уточнение не должно выглядеть как ответ на спрос.
         awaitingAnswer = true;
         options.onInTurnAvailability?.({ available: false, reason: 'awaiting_answer' });

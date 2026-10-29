@@ -2,6 +2,7 @@ import { intlLocale } from '../../../../shared/i18n/formats.ts';
 import { localeTranslator, type LocaleSource } from '../../../../shared/i18n/catalogs.ts';
 import { translate as t } from '../../../../shared/i18n/catalogs.ts';
 import { localizeUsageBar, localizeUsageResource } from './providerUsage.ts';
+import { providerUsageFreshness } from '../../../../shared/chat/providerUsageFreshness.ts';
 
 export interface UsageDelivery {
   status?: string;
@@ -115,6 +116,7 @@ export function providerUsageSummary(
   const t = localeTranslator(locale);
 
   const raw = entry && typeof entry === 'object' ? entry as Record<string, unknown> : null;
+  const freshness = providerUsageFreshness(raw, now, delivery.deliveryStale);
   const bars = Array.isArray(raw?.bars) ? raw.bars : [];
   const resources = (Array.isArray(raw?.resources) ? raw.resources : [])
     .filter((resource): resource is Record<string, unknown> => !!resource && typeof resource === 'object')
@@ -161,8 +163,9 @@ export function providerUsageSummary(
     label: '',
     detail: typeof raw?.message === 'string' ? raw.message : '',
     tone: 'muted',
-    stale: raw?.stale === true || delivery.deliveryStale === true || windows.some((item) => item.expired),
-    measuredAt: typeof raw?.dataCheckedAt === 'number' && Number.isFinite(raw.dataCheckedAt)
+    stale: freshness.stale || delivery.deliveryStale === true || windows.some((item) => item.expired),
+    measuredAt: freshness.enabled ? freshness.measuredAt
+      : typeof raw?.dataCheckedAt === 'number' && Number.isFinite(raw.dataCheckedAt)
       && raw.dataCheckedAt > 0 ? raw.dataCheckedAt : null,
   };
 

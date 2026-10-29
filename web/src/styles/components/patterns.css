@@ -419,6 +419,23 @@
   min-width: 0;
 }
 
+/* Переключатель связанных задач использует поверхность рабочих полей доски.
+   Вложенная вкладка сохраняет отступ и скругление внутри общей рамки. */
+.ui-tabs:has(.ui-tab[data-context='board-related-tab']) {
+  gap: 2px;
+  border-radius: var(--control-radius);
+  background: var(--control-background);
+}
+
+.ui-tab[data-context='board-related-tab'] {
+  border-radius: max(2px, calc(var(--control-radius) - 2px));
+}
+
+.ui-tab[data-context='board-related-tab'][aria-selected='true'] {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--control-border);
+}
+
 /* Подписанные вкладки 3D занимают одну полосу в доке и в развёрнутой студии.
    Общий UI-kit владеет состояниями control, экран задаёт только место навигации. */
 .ui-tabs[data-ui-studio-tabs] {
@@ -494,30 +511,31 @@
   font-size: 12px;
 }
 
-/* Навигация панели Docker: разделы отделены от строки фильтров и не слипаются со счётчиками. */
+/* Вкладки Docker занимают свою область рядом со сводкой.
+   Границу всей навигационной полосы задаёт её контейнер, а не каждый блок отдельно. */
 .ui-tabs[data-ui-docker-tabs] {
   flex: none;
+  flex-wrap: wrap;
   width: 100%;
   padding: 0;
   border: 0;
-  border-bottom: 1px solid var(--line);
   border-radius: 0;
   background: transparent;
-  gap: 8px;
+  gap: 4px;
 }
 
 .ui-tabs[data-ui-docker-tabs] > .ui-tab {
   display: inline-flex;
-  height: 42px;
-  min-height: 42px;
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
   flex: none;
   align-items: center;
   justify-content: center;
-  padding: 0 14px;
+  padding: 0 12px;
   border-bottom: 2px solid transparent;
   border-radius: 0;
   gap: 8px;
-  font-size: 13px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -543,6 +561,12 @@
     padding-inline: 9px;
     gap: 5px;
     font-size: 12px;
+  }
+}
+
+@container docker-panel (max-width: 360px) {
+  .ui-tabs[data-ui-docker-tabs] > .ui-tab {
+    flex-basis: 50%;
   }
 }
 
@@ -626,6 +650,35 @@
 
 .ui-selectable-row[data-context='workspace-catalog']:hover:not(.is-disabled) {
   background: var(--surface-2);
+}
+
+/* Строка исполнителя наследует выбор, наведение и фокус общей составной строки.
+   Контекст задаёт только место параметров справа и их перенос на узком экране. */
+.ui-selectable-row[data-context='pipeline-executor'] {
+  display: grid;
+  grid-template-columns: minmax(150px, .7fr) minmax(0, 1.3fr);
+  gap: 12px;
+}
+
+.ui-selectable-row[data-context='pipeline-executor'] .ui-selectable-row__primary {
+  padding: 8px 10px;
+}
+
+.ui-selectable-row[data-context='pipeline-executor'] .ui-selectable-row__actions {
+  display: block;
+  min-width: 0;
+  padding: 8px 10px 8px 0;
+}
+
+@media (max-width: 700px) {
+  .ui-selectable-row[data-context='pipeline-executor'] {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .ui-selectable-row[data-context='pipeline-executor'] .ui-selectable-row__actions {
+    padding: 0 10px 10px;
+  }
 }
 
 .ui-control-group[data-context='workspace-project'] { flex-wrap: nowrap; align-items: center; }
@@ -1162,9 +1215,9 @@
 }
 [data-ui-settings-tabs] > .ui-tab {
   flex: 0 1 auto;
+  height: auto;
   min-height: 36px;
   padding: 8px 10px;
-  margin-bottom: -1px;
   border: 0;
   border-bottom: 2px solid transparent;
   border-radius: 0;

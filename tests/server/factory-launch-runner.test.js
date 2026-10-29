@@ -338,8 +338,8 @@ test('launch с битым форматом runnerPrimary отказан до в
 });
 
 test('отказ runner preflight не запирает задачу: следующий запуск проходит', async (t) => {
-  // Живой случай: обновление чужого CLI убрало из каталога вендора семейство модели,
-  // которое требует профиль. Движок честно встал fail-closed ДО создания попытки —
+  // Отказ относится к выбранной цепочке: task override требует только codex,
+  // хотя профиль также называет claude. Движок встал fail-closed ДО создания попытки —
   // ни реестра, ни control-записи, только launch.log с типизированным маркером.
   // Раньше pending-marker после такого отказа не снимался, и задача отвечала
   // `run_exists` до перезапуска сервера, хотя запускать её было совершенно нечем.
@@ -348,11 +348,12 @@ test('отказ runner preflight не запирает задачу: следу
   const refused = await app.inject({
     method: 'POST',
     url: '/api/tasks/47/launch',
-    payload: LAUNCH_PAYLOAD,
+    payload: { ...LAUNCH_PAYLOAD, runnerPrimary: 'codex' },
   });
   assert.equal(refused.statusCode, 500, refused.body);
   assert.equal(refused.json().error, 'runner_preflight_unavailable');
   assert.deepEqual(refused.json().runners, ['codex']);
+  assert.equal(refused.json().runners.includes('claude'), false);
   assert.equal(
     await missing(path.join(root, 'state', 't47.pipeline')),
     true,
@@ -362,10 +363,11 @@ test('отказ runner preflight не запирает задачу: следу
   // Человек починил профиль (или вернул CLI) и запускает снова.
   await rm(path.join(root, 'preflight-fails'), { force: true });
   await rm(path.join(root, 'state', 't47.launch.log'), { force: true });
+
   const retried = await app.inject({
     method: 'POST',
     url: '/api/tasks/47/launch',
-    payload: LAUNCH_PAYLOAD,
+    payload: { ...LAUNCH_PAYLOAD, runnerPrimary: 'codex' },
   });
   assert.notEqual(
     retried.json().error,

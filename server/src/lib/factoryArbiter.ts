@@ -18,14 +18,9 @@
 // рабочее дерево), и предъявляет решение карточкой. Границы описаны у каждой проверки
 // ниже; главная в том, что границу самой задачи арбитр менять не вправе.
 //
-// ЧТО АРБИТР МОЖЕТ, названо по замеру, а не по замыслу. Он идёт в режиме `plan`, и этот
-// режим (проверено живым `claude -p`: агент отвечает «режим планирования не разрешает
-// выполнение команд») даёт чтение, поиск и обход файлов, но НЕ запуск команд. Для
-// разобранного случая этого хватает: вопрос «есть ли между модулями общий импорт»
-// решается поиском по коду, и именно поиском он и был решён — в отличие от человека,
-// который ответил по комментарию рядом. Но опыт запуском арбитру недоступен, и обещать
-// его нельзя. Чтобы дать — нужен канал прав в контракте `executor.run` (сейчас туда
-// уезжает только `fastMode`); это отдельная работа, а не забытая строка.
+// Исполнитель арбитра работает в своём режиме `auto`; каталог проверяется до запуска.
+// Назначение хода — разобрать остановку и предложить действия. Ограничения этого
+// назначения задаёт prompt, а выбор и применение возврата принадлежат диалогу человека.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -285,7 +280,9 @@ export function stallIsArbitrable(
   // стал бы вторым управляющим циклом поверх ведущего — ни кнопки, ни вотчера.
   if (loop) return false;
   if (stop === 'human' && !verdict) return false;
-  return stopIsArbitrable(stop, verdict?.owner || null);
+  // Читающий диалог допускает диагностику среды, сборки и тестов.
+  // Прежний gate машинного исправления остаётся отдельно для legacy audit.
+  return ARBITRABLE_STOPS.has(stop);
 }
 
 /** Разбирает ли арбитр эту остановку. Ответ словами: он уезжает человеку. */
@@ -593,6 +590,7 @@ export function formatArbiterReason(decision: ArbiterDecision): string {
 
 const PROVIDER_RE = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 const MODEL_MAX = 200;
+const ARBITER_PERMISSION_MODE = 'auto';
 
 // Ссылка на модель арбитра: провайдер и точное имя модели.
 export interface ArbiterModelRef {
@@ -616,7 +614,7 @@ export interface ArbiterRunInput extends ExecutorRunInput {
   extraDirs: string[];
   model: string;
   effort?: string;
-  permissionMode: 'plan';
+  permissionMode: typeof ARBITER_PERMISSION_MODE;
   providerSettings: Record<string, unknown>;
   log: unknown;
 }
@@ -648,7 +646,7 @@ export interface ArbiterTargetDeps {
   log?: unknown;
 }
 
-// Куда уедет разбор: модель, её исполнитель и режим только чтения.
+// Куда уедет разбор: модель, её исполнитель и проверенный режим auto.
 export type ArbiterTarget =
   | {
     ok: true;
@@ -656,6 +654,7 @@ export type ArbiterTarget =
     model: unknown;
     effort: string;
     executor: ArbiterExecutor;
+    permissionMode: typeof ARBITER_PERMISSION_MODE;
     log: unknown;
   }
   | { ok: false; error: string; message: string };
@@ -709,8 +708,8 @@ export function normalizeArbiterSettings(value: unknown): ArbiterSettings {
  * Здесь, в отличие от разбора недоверенного ввода, нужен обычный `executor.run` с
  * инструментами: арбитр обязан проверить спорное утверждение в коде, а не рассудить о нём.
  * Ровно этого не хватило в живом случае — и проверяющему узлу (запретили права), и
- * человеку (не пошёл смотреть). Читающий режим `plan` обязателен и проверяется по живому
- * каталогу исполнителя: молча уйти в режим с правом записи арбитр не должен.
+ * человеку (не пошёл смотреть). Режим `auto` проверяется по каталогу исполнителя и
+ * передаётся вызывающему коду: проверка и запуск обязаны использовать один режим.
  */
 export async function resolveArbiterTarget({
   modelRef, config = {}, modelsRegistry, executorResolver, resolveRef, log = console,
@@ -736,28 +735,35 @@ export async function resolveArbiterTarget({
   if (!executor || typeof executor.run !== 'function') {
     return { ok: false, error: 'executor_unavailable', message: 'исполнитель арбитра недоступен' };
   }
-  let planDeclared = false;
+
+  let autoDeclared = false;
+
   try {
     if (typeof executor.modes === 'function') {
       const catalog = await Promise.resolve(executor.modes(config));
-      planDeclared = Array.isArray(catalog) && catalog.some((mode) => mode?.id === 'plan');
+
+      autoDeclared = Array.isArray(catalog)
+        && catalog.some((mode) => mode?.id === ARBITER_PERMISSION_MODE);
     }
   } catch {
-    planDeclared = false;
+    autoDeclared = false;
   }
-  if (!planDeclared) {
+
+  if (!autoDeclared) {
     return {
       ok: false,
-      error: 'arbiter_plan_unavailable',
-      message: 'исполнитель арбитра не объявил режим только чтения',
+      error: 'arbiter_auto_unavailable',
+      message: 'исполнитель арбитра не поддерживает режим «Авто»',
     };
   }
+
   return {
     ok: true,
     ref: resolved.modelRef,
     model: resolved.model,
     effort: cleanString(modelRef?.effort, 32) || '',
     executor,
+    permissionMode: ARBITER_PERMISSION_MODE,
     log,
   };
 }

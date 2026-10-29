@@ -16,8 +16,9 @@
 После каждого ожидания до prompt проверяется abort: остановленный ход до модели не доходит,
 процесс и каталог запуска закрываются. Предполётная проверка идёт до любого процесса:
 
-- нужен `chatKey` и `onSessionCreated`; Factory, `workspaceAccess`, `untrustedInput`,
-  `scopedWorkspace` — `glm_consumer_unsupported`;
+- для чата нужен `chatKey` и `onSessionCreated`; Factory, `untrustedInput` и произвольный
+  `scopedWorkspace` — `glm_consumer_unsupported`. `workspaceAccess` отдельно направляется в
+  [ограниченный режим триажа](../pipeline/triage-executors.md), без чатовой сессии;
 - режим чата: пустой — «Правки в проекте», `auto` — «Авто»; `plan`, `bypass`, «Только чтение»
   и неизвестное — `glm_mode_unsupported`;
 - модель — пара `["zai","<модель>"]` из каталога; иначе `glm_model_mismatch`; effort без выбора —

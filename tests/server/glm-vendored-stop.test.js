@@ -196,7 +196,9 @@ test(KILL_TEST, async (t) => {
     code: crashed.code,
     tail: f.mock.requests.at(-1).payload.messages.slice(-3),
   }));
-  assert.equal(crashed.code, 'glm_ambiguous_outcome');
+  assert.equal(crashed.code, 'deepseek_binary_cleanup');
+  assert.ok(crashed.cause, 'cleanup сохраняет первичный отказ хода');
+  assert.equal(crashed.stopDetails.exit.signal, 'SIGKILL');
   assert.equal(next.reply, 'continued');
   assert.equal(await f.marker(), 1, 'эффект не повторён runtime');
   // Восстановление DSH дописывает модели исход «неизвестен» вместо повтора вызова.

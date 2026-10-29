@@ -2,6 +2,7 @@
 import * as fs from 'node:fs';
 import os from 'node:os';
 import { packagedChildEnvironment } from '../../shared/node/packagedEnvironment.ts';
+import { captureUserCliParent, USER_CLI_PARENT_KEY } from '../../shared/node/userCliParentEnvironment.ts';
 import {
   nodeExecutable, runtimeInstallationRoot, runtimeKind, runtimeRoot,
 } from './lib/runtimePaths.ts';
@@ -43,6 +44,8 @@ try {
   });
 
   process.on('exit', () => releaseDataHomeLock(prepared.lockPath, owner, fs));
+
+  process.env[USER_CLI_PARENT_KEY] = captureUserCliParent(process.env);
 
   if (runtimeKind() === 'packaged') {
     Object.assign(process.env, packagedChildEnvironment({

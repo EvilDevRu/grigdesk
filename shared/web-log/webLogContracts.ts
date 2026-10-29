@@ -4,6 +4,8 @@
 import { recordOrNull } from '../lib/objects.ts';
 
 import { isApiRouteTemplate } from './webLogApiRoutes.ts';
+import { WEB_PERFORMANCE_OPERATIONS } from './webPerformance.ts';
+import type { WebPerformanceBlock, WebPerformanceCounts, WebPerformanceOperation } from './webPerformance.ts';
 
 export const WEB_LOG_LIMITS = {
   ringEntries: 500,
@@ -47,6 +49,9 @@ export const WEB_LOG_EVENTS = {
   'store.error': 'error',
   'ui.layer': 'debug',
   'ui.focus': 'debug',
+  'perf.ready': 'info',
+  'perf.operation': 'info',
+  'perf.block': 'warn',
   mark: 'warn',
   'log.transport': 'warn',
   'log.loss': 'warn',
@@ -148,6 +153,37 @@ export type WebLogData = {
     depth: number;
   };
   'ui.focus': { target: SafeDescriptor };
+  'perf.ready': {
+    tag: 'AGENT-DBG';
+    longTasks: boolean;
+    longFrames: boolean;
+  };
+  'perf.operation': WebPerformanceCounts & {
+    tag: 'AGENT-DBG';
+    operation: WebPerformanceOperation;
+    view: string;
+    ms: number;
+    totalMs: number;
+    periodMs?: number;
+    count: number;
+  };
+  'perf.block': {
+    tag: 'AGENT-DBG';
+    kind: WebPerformanceBlock;
+    view: string;
+    ms: number;
+    totalMs: number;
+    periodMs?: number;
+    count: number;
+    startMs: number;
+    operation?: WebPerformanceOperation;
+    operationMs?: number;
+    scriptMs?: number;
+    layoutMs?: number;
+    renderMs?: number;
+    source?: string | null;
+    position?: number;
+  };
   mark: { text: string };
   'log.transport': {
     status?: number;
@@ -204,7 +240,8 @@ export type ProjectOptions = {
 type FieldKind = 'bool' | 'number' | 'count' | 'id' | 'route' | 'api' | 'method'
   | 'error' | 'failureName' | 'descriptor' | 'text' | 'source' | 'vueSource' | 'component'
   | 'store' | 'action' | 'signature' | 'browser' | 'os' | 'sw' | 'tag' | 'category'
-  | 'result' | 'authReason' | 'transportReason' | 'visibility' | 'operation' | 'layer';
+  | 'result' | 'authReason' | 'transportReason' | 'visibility' | 'operation' | 'layer'
+  | 'performanceOperation' | 'performanceBlock' | 'diagnosticTag';
 
 type FieldSchema = Record<string, FieldKind>;
 
@@ -290,6 +327,41 @@ const DATA_FIELDS: Record<WebLogEvent, FieldSchema> = {
     depth: 'count',
   },
   'ui.focus': { target: 'descriptor' },
+  'perf.ready': {
+    tag: 'diagnosticTag',
+    longTasks: 'bool',
+    longFrames: 'bool',
+  },
+  'perf.operation': {
+    tag: 'diagnosticTag',
+    operation: 'performanceOperation',
+    view: 'route',
+    ms: 'number',
+    totalMs: 'number',
+    periodMs: 'number',
+    count: 'count',
+    chats: 'count',
+    messages: 'count',
+    steps: 'count',
+    chars: 'count',
+  },
+  'perf.block': {
+    tag: 'diagnosticTag',
+    kind: 'performanceBlock',
+    view: 'route',
+    ms: 'number',
+    totalMs: 'number',
+    periodMs: 'number',
+    count: 'count',
+    startMs: 'number',
+    operation: 'performanceOperation',
+    operationMs: 'number',
+    scriptMs: 'number',
+    layoutMs: 'number',
+    renderMs: 'number',
+    source: 'source',
+    position: 'count',
+  },
   mark: { text: 'text' },
   'log.transport': {
     status: 'count',
@@ -327,6 +399,9 @@ const REQUIRED_FIELDS: Partial<Record<WebLogEvent, string[]>> = {
   'store.error': ['store', 'action', 'error'],
   'ui.layer': ['op', 'kind', 'id', 'depth'],
   'ui.focus': ['target'],
+  'perf.ready': ['tag', 'longTasks', 'longFrames'],
+  'perf.operation': ['tag', 'operation', 'view', 'ms', 'totalMs', 'count'],
+  'perf.block': ['tag', 'kind', 'view', 'ms', 'totalMs', 'count', 'startMs'],
   mark: ['text'],
   'log.transport': ['pending', 'reason'],
   'log.loss': ['queueEvicted', 'storageFailed', 'invalid', 'quotaDropped'],
@@ -620,6 +695,9 @@ const ENUMS: Partial<Record<FieldKind, readonly string[]>> = {
   transportReason: ['timeout', 'offline', 'http', 'invalid-ack', 'policy', '401'],
   vueSource: VUE_SOURCE_NAMES,
   failureName: ['Error', 'AbortError', 'TimeoutError', 'TypeError', 'NetworkError', 'HTTPError'],
+  performanceOperation: WEB_PERFORMANCE_OPERATIONS,
+  performanceBlock: ['longtask', 'event-loop', 'animation-frame'],
+  diagnosticTag: ['AGENT-DBG'],
 };
 
 /**

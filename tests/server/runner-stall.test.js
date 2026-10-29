@@ -164,7 +164,22 @@ test('остановка этапа GLM показывает отказ wrapper-
 
   await writeFile(path.join(f.runDir, 'meta.env'), `${glm}\nFAILURE_CODE=glm_key_missing\n`
     + 'FAILURE_MESSAGE=GLM: нет ключа Обычного API\n');
-  assert.match((await f.adapter.getTaskDetail('49')).stall.title, /нет ключа Обычного API/);
+
+  const detail = await f.adapter.getTaskDetail('49');
+  const graph = await f.adapter.getTaskGraph('49');
+
+  for (const stall of [detail.stall, graph.stall, graph.nodeMeta.build.stall]) {
+    assert.match(stall.title, /GLM: нет ключа Обычного API \(glm_key_missing\)/);
+    assert.equal(stall.presentation.lastFailure, 'GLM: нет ключа Обычного API (glm_key_missing)');
+    assert.equal(stall.presentation.model, 'glm-5.3');
+    assert.doesNotMatch(stall.title, /unknown/);
+  }
+
+  const [lastAttempt] = graph.nodeMeta.build.runner.attempts;
+
+  assert.equal(lastAttempt.result, 'unknown');
+  assert.equal(lastAttempt.failureDetail, 'GLM: нет ключа Обычного API (glm_key_missing)');
+  assert.equal(lastAttempt.model, 'glm-5.3');
 
   await writeFile(path.join(f.runDir, 'meta.env'), glm);
   await writeFile(events, `${JSON.stringify({
@@ -172,10 +187,29 @@ test('остановка этапа GLM показывает отказ wrapper-
     code: 'glm_turn_failed',
     message: 'GLM: сеть оборвалась',
   })}\n`);
-  assert.match((await f.adapter.getTaskDetail('49')).stall.title, /сеть оборвалась/);
+  assert.match((await f.adapter.getTaskDetail('49')).stall.title, /сеть оборвалась \(glm_turn_failed\)/);
+  assert.equal((await f.adapter.getTaskGraph('49')).nodeMeta.build.runner.attempts[0].failureDetail,
+    'GLM: сеть оборвалась (glm_turn_failed)');
 
   await writeFile(events, `${JSON.stringify({ type: 'turn.failed', error: { message: capacity } })}\n`);
   assert.doesNotMatch((await f.adapter.getTaskDetail('49')).stall.title, /перегружена/);
+});
+
+test('граф GLM передаёт подпись последней попытки даже без actual в реестре', async (t) => {
+  const f = await fixture(t);
+
+  await writeFile(path.join(path.dirname(f.stateDir), 'profiles/demo/runners.env'), [
+    'PROJECT_RUNNER_PRIMARY=glm',
+    'MODEL_DEFAULT_GLM_FAMILY=default',
+  ].join('\n'));
+  await writeFile(path.join(f.runDir, 'meta.env'), f.meta.replace('RUNNER=codex', 'RUNNER=glm')
+    .replace('MODEL=example-sol', 'MODEL=["zai","glm-5.3-flash"]'));
+
+  const graph = await f.adapter.getTaskGraph('49');
+
+  assert.equal(graph.nodeMeta.build.runner.actual, null);
+  assert.equal(graph.nodeMeta.build.runner.models.glm.label, 'glm-5.3-flash');
+  assert.equal(graph.nodeMeta.build.runner.attempts[0].model, 'glm-5.3-flash');
 });
 
 test('provider presentation сохраняет причину модель и заходы в summary и graph', async (t) => {

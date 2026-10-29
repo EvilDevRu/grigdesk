@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { protocolRoutes } from './chat-protocol.js';
 import { clientBrowser, chatSession } from './client-browser.mjs';
 import data from '../fixtures/settings-modal/data.json' with { type: 'json' };
 
@@ -15,9 +16,24 @@ export async function i18nBrowser(t, options = {}) {
 
   t.after(() => rm(artifacts, { recursive: true, force: true }));
 
+  const chatStore = {
+    sessions: [{
+      ...chatSession,
+      messages: [
+        ...chatSession.messages,
+        ...Array.from({ length: 40 }, (_, index) => ({
+          role: 'assistant',
+          text: `Непереведённый ответ ${index + 1}. Текст для прокрутки настоящего чата.`,
+        })),
+      ],
+    }],
+    activeId: chatSession.id,
+  };
+
   const result = await clientBrowser(t, {
     artifacts,
     shell: null,
+    chatStore,
     ...options,
     responses: {
       '/api/settings/prefs': structuredClone(data.prefs),
@@ -25,19 +41,7 @@ export async function i18nBrowser(t, options = {}) {
       '/api/providers': structuredClone(data.providers),
       '/api/plugins': structuredClone(data.plugins),
       '/api/plugin-installs/jobs/current': { job: null, recoveryError: null },
-      '/api/chat/store': {
-        sessions: [{
-          ...chatSession,
-          messages: [
-            ...chatSession.messages,
-            ...Array.from({ length: 40 }, (_, index) => ({
-              role: 'assistant',
-              text: `Непереведённый ответ ${index + 1}. Текст для прокрутки настоящего чата.`,
-            })),
-          ],
-        }],
-        activeId: chatSession.id,
-      },
+      ...protocolRoutes(chatStore),
       ...options.responses,
     },
   });

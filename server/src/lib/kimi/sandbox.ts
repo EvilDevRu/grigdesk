@@ -5,11 +5,11 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { assertKimiRuntimeEnv, buildKimiRuntimeEnv } from './env.ts';
+import { findKimiCredentialFile } from './credentials.ts';
 import { assertUnixSocketPath } from './egressProxy.ts';
 import { ensureContainedKimiHome } from './profile.ts';
 
 const execFileAsync = promisify(execFile);
-const CREDENTIAL_FILE = 'kimi-code.json';
 // Имя является частью границы между host proxy и bridge внутри net namespace.
 // Оно намеренно короткое из-за лимита Linux sun_path и обязано совпадать с runtime.js.
 export const KIMI_EGRESS_SOCKET_FILE = 'e.sock';
@@ -131,12 +131,23 @@ function isWithin(root: string, candidate: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+/**
+ * Проверяет фактический credential-файл логина: официальный kimi-code.json либо
+ * scoped kimi-code-env-<hash>.json от кастомного OAuth-окружения. Все границы
+ * (владелец, права 0600, не ссылка, внутри home) применяются к найденному файлу.
+ */
 async function assertPrivateCredentialDir(
   kimiHome: unknown,
 ): Promise<{ credentialDir: string; credentialPath: string }> {
   const homeReal = await fs.realpath(String(kimiHome));
   const credentialDir = path.join(homeReal, 'credentials');
-  const credentialPath = path.join(credentialDir, CREDENTIAL_FILE);
+  const found = await findKimiCredentialFile(credentialDir);
+
+  if (!found) {
+    throw new Error('kimi_credentials_file_invalid');
+  }
+
+  const credentialPath = found;
   const [dirInfo, fileInfo] = await Promise.all([fs.lstat(credentialDir), fs.lstat(credentialPath)]);
   if (!dirInfo.isDirectory() || dirInfo.isSymbolicLink()) throw new Error('kimi_credentials_dir_invalid');
   if (!fileInfo.isFile() || fileInfo.isSymbolicLink()) throw new Error('kimi_credentials_file_invalid');

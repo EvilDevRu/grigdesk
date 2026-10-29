@@ -7,6 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { reserveFactoryRuntime, bindFactoryRuntime } from '../../server/src/lib/factoryRuntimePins.ts';
+import { probeFactoryGotoCapability } from '../../server/src/lib/factoryRuntimeCapabilities.ts';
 import {
   routeGateArgs, routeResumeArgs, runRouteEngine, spawnRouteEngine,
 } from '../../server/src/lib/factoryRouteCli.ts';
@@ -67,6 +68,9 @@ async function fixture(t) {
     }), { mode: 0o444 });
     await fs.writeFile(engineBin, `#!/bin/bash\n` +
       `printf '%s\\n' '${label}' >> '${path.join(root, 'markers')}'\n` +
+      'if [[ "$1" == capabilities ]]; then\n' +
+      `  printf '%s\\n' '{"schema":1,"features":${label === 'A' ? '[]' : '["goto-expected-stage-v1"]'}}'\n` +
+      '  exit 0\nfi\n' +
       `printf '%s\\n' "$FACTORY_HOME|$NODE_BIN|$GRIGDESK_DEEPSEEK_NODE_BIN"\n`, { mode: 0o555 });
 
     variants[label] = {
@@ -132,6 +136,44 @@ async function pinA(input) {
 
   return bindFactoryRuntime({ ...input, reservation: reservation.reservation });
 }
+
+test('capabilities читает существующий pin A при сервере B без миграции control/cache', async (t) => {
+  const input = await fixture(t);
+
+  await pinA(input);
+
+  /**
+   * Сравнивает имена и bytes authority, registry, reservation и index до и после probe.
+   * Маркер вызванного CLI лежит снаружи этих roots и служит только наблюдением теста.
+   */
+  const snapshot = async () => {
+    const roots = [input.controlRoot, input.variants.A.cacheDir];
+    const files = [];
+
+    for (const root of roots) {
+      for (const name of (await fs.readdir(root, { recursive: true })).sort()) {
+        const file = path.join(root, name);
+        const stat = await fs.lstat(file);
+
+        if (stat.isFile()) {
+          files.push([file, createHash('sha256').update(await fs.readFile(file)).digest('hex')]);
+        }
+      }
+    }
+
+    return files;
+  };
+  const before = await snapshot();
+  const capability = await probeFactoryGotoCapability(input.configFor('B'), {
+    task: input.task,
+    attempt: input.attempt,
+    profile: 'sample',
+  });
+
+  assert.equal(capability.status, 'unsupported');
+  assert.equal(await fs.readFile(path.join(input.root, 'markers'), 'utf8'), 'A\n');
+  assert.deepEqual(await snapshot(), before);
+});
 
 test('SB18 serverB gate/resume используют engine и helper Node A; rollback тоже', async (t) => {
   const input = await fixture(t);

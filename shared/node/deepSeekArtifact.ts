@@ -32,6 +32,8 @@ export interface DeepSeekArtifactContract {
     acp: boolean;
     settingsWeb: boolean;
     settingsAcp: boolean;
+    toolPermissions?: boolean;
+    glmNativeGate?: boolean;
   };
 }
 

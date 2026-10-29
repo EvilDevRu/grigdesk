@@ -61,7 +61,9 @@
             :key="settings.pageId"
             :active="true"
           />
-          <UiLoadingState v-else :label="t('settings.loadingSection2')" variant="document" />
+          <UiLoadingState v-else :label="t('settings.loadingSection2')" variant="document" >
+            <UiSkeletonLayout layout="form" :header="false" />
+          </UiLoadingState>
         </div>
       </div>
     </section>
@@ -69,6 +71,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../ui';
+
 import { t, uiLocale } from '../../ui.ts';
 
 import { computed, ref } from 'vue';

@@ -45,9 +45,51 @@ test('Kimi setup-карточка проверяет системный CLI и l
   assert.equal(kimi.login, 'kimi login');
 });
 
+test('Kimi setup-карточка признаёт scoped credential кастомного OAuth-окружения', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-kimi-scoped-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const kimiHome = path.join(root, '.kimi-code');
+  const credentials = path.join(kimiHome, 'credentials');
+  await fs.mkdir(credentials, { recursive: true });
+
+  const config = { kimiBin: 'kimi', kimiHome };
+
+  // Похожие имена (каталог, чужой файл, hash не из hex) авторизацией не считаются.
+  await fs.mkdir(path.join(credentials, 'kimi-code-env-aa11bb22cc33dd44.json.d'));
+  await fs.writeFile(path.join(credentials, 'kimi-code-env.json'), 'не читать');
+  await fs.writeFile(path.join(credentials, 'kimi-code.json.bak'), 'не читать');
+  assert.deepEqual(await kimi.auth(config), {
+    mode: 'none',
+    label: 'не авторизован (kimi login)',
+    available: false,
+  });
+
+  await fs.writeFile(
+    path.join(credentials, 'kimi-code-env-0e4f99c69cc27850.json'), 'не читать',
+  );
+  assert.deepEqual(await kimi.auth(config), {
+    mode: 'cli',
+    label: 'CLI хоста (kimi login)',
+    available: true,
+  });
+
+  // Официальный слот важнее scoped: удаление scoped не роняет авторизацию.
+  await fs.writeFile(path.join(credentials, 'kimi-code.json'), 'не читать');
+  await fs.rm(path.join(credentials, 'kimi-code-env-0e4f99c69cc27850.json'));
+  assert.deepEqual(await kimi.auth(config), {
+    mode: 'cli',
+    label: 'CLI хоста (kimi login)',
+    available: true,
+  });
+});
+
 test('Kimi виден и в setup-, и в runtime-реестре чатов', async () => {
-  assert.equal((await getProviderAdapters()).get('kimi'), kimi);
-  assert.equal(await getExecutor('kimi'), kimi);
+  const registered = (await getProviderAdapters()).get('kimi');
+
+  assert.equal(registered.id, kimi.id);
+  assert.equal(registered.externalCli, kimi.externalCli);
+  assert.equal(typeof registered.run, 'function');
+  assert.equal(await getExecutor('kimi'), registered);
 });
 
 test('Kimi managed usage превращается в недельный/5ч бары и Extra Usage', () => {
@@ -319,4 +361,107 @@ test('Kimi не превращает отсутствующий расход и 
 
     assert.equal(bars.some((bar) => bar.key === 'kimi:0:0:limit'), false, String(limit));
   }
+});
+
+test('Kimi quota.usages сохраняет ноль, календарный месяц и единицы кошелька', () => {
+  const result = {
+    kind: 'ok',
+    quota: {
+      usages: {
+        limit5h: { usedRatio: 0, resetAt: '2030-01-01T10:00:00Z' },
+        limit7d: { usedRatio: 0.125, resetAt: 'invalid' },
+        monthTotal: { usedRatio: 0.4 },
+        monthCode: { usedRatio: 0.2 },
+      },
+      extraUsage: {
+        balanceCents: 1250,
+        totalCents: 2000,
+        monthlyChargeLimitEnabled: true,
+        monthlyChargeLimitCents: 5000,
+        monthlyUsedCents: 300,
+        currency: 'USD',
+      },
+    },
+  };
+  const usage = classifyKimiUsageResponse({ result });
+  const bars = parseKimiUsageBars(result);
+  const resources = parseKimiUsageResources(result);
+
+  assert.equal(usage.state, 'ok');
+  assert.deepEqual(bars.map((bar) => [bar.label, bar.pct]), [
+    ['Сессия (5ч)', 0],
+    ['Неделя (7д)', 12.5],
+    ['Месяц', 40],
+  ]);
+  assert.equal(bars[0].resetsAt, '2030-01-01T10:00:00.000Z');
+  assert.equal(bars[1].resetsAt, null);
+  assert.equal(bars[2].windowMinutes, undefined);
+  assert.deepEqual(resources[0].balance, { amount: 12.5, currency: 'USD' });
+  assert.equal(resources[0].percent, 6);
+  assert.equal(resources[1].summary, 'Израсходовано за месяц: 40%');
+  assert.equal(resources[1].note, 'Из них код: 20% месячной квоты');
+  assert.equal(resources[1].percent, undefined);
+});
+
+test('Kimi новая quota имеет приоритет без дублирования старых полос и баланса', () => {
+  const result = {
+    kind: 'ok',
+    summary: {
+      used: 99,
+      limit: 100,
+      window: { duration: 1, unit: 'week' },
+    },
+    limits: [{
+      used: 88,
+      limit: 100,
+      window: { duration: 5, unit: 'hour' },
+    }],
+    extra_usage: { balance_cents: 9900, currency: 'CNY' },
+    quota: {
+      usages: { limit7d: { usedRatio: 0.3 }, limit5h: { usedRatio: 0.2 } },
+      extraUsage: null,
+    },
+  };
+
+  assert.deepEqual(parseKimiUsageBars(result).map((bar) => bar.pct), [20, 30]);
+  assert.deepEqual(parseKimiUsageBars(result).map((bar) => bar.key), [
+    'kimi:1:5:hour', 'kimi:0:1:week',
+  ]);
+  assert.equal(parseKimiUsageResources(result)[0].kind, undefined);
+});
+
+test('Kimi отвергает нечисловые ratios и не выдаёт пустую новую quota за успех', () => {
+  for (const usedRatio of [undefined, null, '0.5', -1, Number.NaN, Infinity]) {
+    const result = { kind: 'ok', quota: { usages: { limit5h: { usedRatio } }, extraUsage: {} } };
+
+    assert.deepEqual(parseKimiUsageBars(result), []);
+    assert.deepEqual(parseKimiUsageResources(result), []);
+    assert.equal(classifyKimiUsageResponse({ result }).state, 'unavailable');
+  }
+
+  const over = { kind: 'ok', quota: { usages: { limit5h: { usedRatio: 1.4 } } } };
+
+  assert.equal(parseKimiUsageBars(over)[0].pct, 100);
+  assert.deepEqual(parseKimiUsageBars({ ...over, kind: 'error' }), []);
+});
+
+test('Kimi принимает новый кошелёк без полос и старый ответ при неизвестной quota', () => {
+  const wallet = {
+    kind: 'ok',
+    quota: { extraUsage: {
+      balanceCents: 0,
+      monthlyUsedCents: 0,
+      currency: 'USD',
+    } },
+  };
+  const legacy = {
+    kind: 'ok',
+    quota: { futureShape: true },
+    summary: { used: 2, limit: 10 },
+  };
+
+  assert.equal(classifyKimiUsageResponse({ result: wallet }).state, 'ok');
+  assert.deepEqual(parseKimiUsageBars(wallet), []);
+  assert.deepEqual(parseKimiUsageResources(wallet)[0].balance, { amount: 0, currency: 'USD' });
+  assert.equal(parseKimiUsageBars(legacy)[0].pct, 20);
 });

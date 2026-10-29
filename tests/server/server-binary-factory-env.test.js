@@ -147,8 +147,8 @@ async function readCapture(file) {
 }
 
 /**
- * Общие требования обеих веток: host-owned пути, режим GLM и ключи режима API,
- * без ключа Coding Plan и без подмены через extraEnv.
+ * Общие требования обеих веток: host-owned пути, режим GLM и ключи обоих режимов Z.ai
+ * (Coding Plan передаётся с 29.10.2026 — factory-policy-v2), без подмены через extraEnv.
  */
 function assertHostEnvironment(env, { config, userCli }) {
   const entries = env.PATH.split(':');
@@ -167,7 +167,7 @@ function assertHostEnvironment(env, { config, userCli }) {
   assert.equal(env.GRIGDESK_GLM_API_MODE, 'api');
   assert.equal(env.DEEPSEEK_API_KEY, KEYS.DEEPSEEK_API_KEY);
   assert.equal(env.ZAI_API_KEY, KEYS.ZAI_API_KEY);
-  assert.equal(env.ZAI_CODING_API_KEY, undefined);
+  assert.equal(env.ZAI_CODING_API_KEY, KEYS.ZAI_CODING_API_KEY);
   assert.equal(env.FACTORY_STAGE_AUTO_COMPACT, '0');
   // Движок закреплённого поколения живёт в R: Python не должен писать туда __pycache__.
   assert.equal(env.PYTHONDONTWRITEBYTECODE, '1');
@@ -198,7 +198,7 @@ test('SB13: transient-юнит получает host env, режим GLM и кл
 
   const names = (await readFile(secrets, 'utf8')).trim().split('\n').map((line) => line.split('=')[0]);
 
-  assert.deepEqual(names.sort(), ['DEEPSEEK_API_KEY', 'ZAI_API_KEY']);
+  assert.deepEqual(names.sort(), ['DEEPSEEK_API_KEY', 'ZAI_API_KEY', 'ZAI_CODING_API_KEY']);
 });
 
 test('SB13: повтор без ключей не оставляет прежний файл секретов и не передаёт ключи', async (t) => {
@@ -245,13 +245,14 @@ test('SB13: перевод строки или NUL в ключе отверга�
   const allowed = routeSecrets({
     DEEPSEEK_API_KEY: 'a',
     ZAI_CODING_API_KEY: 'b',
+    ZAI_API_KEY: 'z',
     OTHER: 'c',
   });
 
-  assert.deepEqual(allowed, { DEEPSEEK_API_KEY: 'a' });
+  assert.deepEqual(allowed, { DEEPSEEK_API_KEY: 'a', ZAI_API_KEY: 'z', ZAI_CODING_API_KEY: 'b' });
 });
 
-test('SB13: detached fallback получает тот же разрешённый набор без ключа Coding Plan', async (t) => {
+test('SB13: detached fallback получает тот же разрешённый набор ключей', async (t) => {
   const f = await routeFixture(t, { systemd: false });
   const result = await spawnRouteEngine(f.config, {
     task: 80,

@@ -13,6 +13,7 @@
 // чата в `activeRuns` (та же грабля, из-за которой их сверяют на каждом `hello`).
 // Один идущий разбор: кто его начал, какой моделью и когда.
 interface ArbiterRun {
+  runId: string;
   task: string;
   actor: string;
   model: unknown;
@@ -33,24 +34,36 @@ export class FactoryArbiterLive {
    * `finally` вызывающего: потерянная отметка держала бы задачу «в разборе» навсегда.
    *
    * `actor` различает две одинаковых по цене дороги: нажатую человеком кнопку и обход
-   * вотчера. Человеку важна вторая — она объясняет, почему задача едет сама.
+   * вотчера. Человеку важна вторая — она объясняет, почему разбор начался сам.
    */
-  begin(task: unknown, { actor = 'human', model = null }: {
+  begin(task: unknown, { actor = 'human', model = null, runId = crypto.randomUUID() }: {
     actor?: string;
     model?: unknown;
+    runId?: string;
   } = {}): () => void {
     const id = String(task || '');
     if (!id) return () => {};
 
-    this.runs.set(id, { task: id, actor, model, startedAt: Date.now() });
+    this.runs.set(id, {
+      task: id,
+      runId,
+      actor,
+      model,
+      startedAt: Date.now(),
+    });
     this.onChange(id);
 
     let done = false;
+
     return () => {
       if (done) return;
+
       done = true;
-      this.runs.delete(id);
-      this.onChange(id);
+
+      if (this.runs.get(id)?.runId === runId) {
+        this.runs.delete(id);
+        this.onChange(id);
+      }
     };
   }
 

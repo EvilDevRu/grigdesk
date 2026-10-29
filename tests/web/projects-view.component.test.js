@@ -15,6 +15,7 @@ const draftModule = await compileModule(webFile('src/views/projects/projectDraft
 // Элементы управления настоящие: подменяются только диалоги, чтобы проверялось
 // поведение самой страницы, а не её заглушек.
 const UI_STUB = `
+export * from './src/ui.ts';
 export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
 export const { t, resolveUiText, messageRef } = globalThis.__projectsViewLocale;
 export { default as UiPaneHeader } from '${webFile('src/components/composites/UiPaneHeader.vue')}';
@@ -1069,4 +1070,19 @@ test('PROJECT-CHAT-LOAD-02', async (t) => {
     assert.equal(harness.calls.filter(([kind]) => kind === 'chat').length, 1);
     assert.deepEqual(harness.pushes, []);
   });
+});
+
+test('LOAD-SURFACE-projects-passport: ожидание сменяется настоящей формой под той же шапкой', async (t) => {
+  const { wrapper, harness } = await mountView(t, { params: { id: 'demo' } });
+  const header = wrapper.get('[data-role="project-form"] .ui-pane-header').element;
+  const pending = wrapper.findAll('[data-ui-skeleton]').length;
+  const { nextTick } = await import('../../web/node_modules/vue/index.mjs');
+
+  harness.store.opened = structuredClone(DETAIL);
+  harness.store.draft = harness.draftOf(DETAIL);
+  await nextTick();
+  assert.equal(wrapper.findComponent({ name: 'ProjectForm' }).exists(), true);
+  assert.ok(wrapper.get('[data-role="project-form"] .ui-pane-header').element === header);
+  assert.equal(wrapper.find('[data-ui-loading]').exists(), false);
+  assert.ok(pending > 0, 'паспорт показывает form из общих кирпичиков');
 });

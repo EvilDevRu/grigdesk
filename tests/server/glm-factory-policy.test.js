@@ -75,7 +75,7 @@ async function overlayRows(files) {
 
 test('SB07: headless GLM сохраняет ФС-политику и не ждёт вопросов', () => {
   assert.deepEqual(glmFactoryPolicy('state-only'), {
-    mode: 'read-only',
+    mode: 'workspace-write',
     approval: 'never',
     allowQuestions: false,
   });
@@ -90,7 +90,7 @@ test('SB07: headless GLM сохраняет ФС-политику и не ждё
 test('SB07-profile: factory context выбирает preset без вопросов и свою ревизию', async (t) => {
   const f = await fixture(t);
   const expected = {
-    'state-only': { mode: 'read-only', preset: 'factory-state-only' },
+    'state-only': { mode: 'workspace-write', preset: 'factory-workspace-write' },
     'workspace-write': { mode: 'workspace-write', preset: 'factory-workspace-write' },
   };
 
@@ -114,6 +114,7 @@ test('SB07-profile: factory context выбирает preset без вопрос�
       format: 1,
       consumer: 'factory',
       filesystem,
+      ...(filesystem === 'state-only' ? { stateDir: f.cwd } : {}),
       rawTools: STATUS_TOOLS,
     });
   }
@@ -214,9 +215,14 @@ test('SB07b: factory parser принимает только точный ста�
   }
 });
 
-test('SB07b: решение этапа — статус по точному имени, без вопросов и записи в state-only', () => {
+test('SB07b: решение этапа — точный статус, без вопросов и с записью только в STATE_DIR', async (t) => {
+  const f = await fixture(t);
   const write = parseGlmFactoryToolPolicy(FACTORY_POLICY);
-  const state = parseGlmFactoryToolPolicy({ ...FACTORY_POLICY, filesystem: 'state-only' });
+  const state = parseGlmFactoryToolPolicy({
+    ...FACTORY_POLICY,
+    filesystem: 'state-only',
+    stateDir: f.cwd,
+  });
 
   for (const policy of [write, state]) {
     for (const name of STATUS_TOOLS) {
@@ -238,7 +244,42 @@ test('SB07b: решение этапа — статус по точному им
 
   for (const name of ['write', 'edit']) {
     assert.equal(decideGlmFactoryTool(name, { file_path: 'a' }, write).allow, true, name);
-    assert.equal(decideGlmFactoryTool(name, { file_path: 'a' }, state).allow, false, name);
+    assert.equal(decideGlmFactoryTool(name, { file_path: 'a' }, state).allow, true, name);
+    assert.equal(decideGlmFactoryTool(name, { file_path: path.join(f.project, 'a') }, state).allow,
+      false, name);
+  }
+});
+
+test('SB07b: state-only требует физический корень и запрещает обход файловой границы', async (t) => {
+  const f = await fixture(t);
+  const state = {
+    ...FACTORY_POLICY,
+    filesystem: 'state-only',
+    stateDir: f.cwd,
+  };
+
+  await fs.symlink(f.project, path.join(f.cwd, 'escape'));
+  await fs.symlink(path.join(f.project, 'missing'), path.join(f.cwd, 'dangling'));
+
+  for (const stateDir of [undefined, '', 'relative', path.join(f.root, 'missing'),
+    path.join(f.cwd, 'escape'), `${f.cwd}/../nested`]) {
+    assert.throws(() => parseGlmFactoryToolPolicy({ ...state, stateDir }),
+      { code: 'glm_factory_policy_invalid' });
+  }
+
+  const policy = parseGlmFactoryToolPolicy(state);
+
+  for (const name of ['write', 'edit']) {
+    for (const file of ['artifact.md', 'new/nested/artifact.md', path.join(f.cwd, 'artifact.md')]) {
+      assert.equal(decideGlmFactoryTool(name, { file_path: file }, policy).allow, true, file);
+    }
+
+    for (const input of [{}, { file_path: null }, { file_path: '' }, { file_path: 'bad\0path' },
+      { file_path: '../outside.md' }, { file_path: `${f.cwd}-other/artifact.md` },
+      { file_path: 'escape/../outside.md' },
+      { file_path: 'escape/outside.md' }, { file_path: 'dangling' }]) {
+      assert.equal(decideGlmFactoryTool(name, input, policy).allow, false, JSON.stringify(input));
+    }
   }
 });
 
@@ -252,6 +293,18 @@ test('SB07b: настоящий hook различает потребителя �
   assert.equal(status.descriptor.decision, 'allow');
   assert.equal(status.descriptor.name, STATUS_TOOLS[1]);
   assert.equal(status.descriptor.sha256, glmArgumentsHash({ result: 'done' }));
+
+  const f = await fixture(t);
+  const state = {
+    ...FACTORY_POLICY,
+    filesystem: 'state-only',
+    stateDir: f.cwd,
+  };
+
+  for (const name of ['write', 'edit']) {
+    assert.equal((await runHook(t, state, preToolUse(name, { file_path: 'artifact.md' }))).code, 0);
+    assert.equal((await runHook(t, state, preToolUse(name, { file_path: '../outside.md' }))).code, 2);
+  }
 
   for (const [policy, payload] of [
     [FACTORY_POLICY, preToolUse('mcp__factory-status-extra__stage_result')],

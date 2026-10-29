@@ -1,6 +1,6 @@
 import { computed, readonly } from 'vue';
 import { api } from '../shared/apiClient.ts';
-import type { ApiClient } from '../shared/apiClient.ts';
+import type { PluginApi, PluginBaseContext } from '../../../packages/plugin-types/src/web.js';
 import { uiLocale, locales } from '../ui.ts';
 import { createTranslator } from '../../../shared/i18n/core.ts';
 import type { Messages, MessageParams } from '../../../shared/i18n/core.ts';
@@ -12,7 +12,7 @@ interface PluginsContextPort {
   byId(id: string): { values?: Record<string, unknown> } | null;
 }
 
-type ContextApi = Pick<ApiClient, 'get' | 'post' | 'put' | 'patch' | 'del'>;
+type ContextApi = PluginApi;
 
 /**
  * API плагина разделяет с окном сессию и обработчик 401.
@@ -55,7 +55,7 @@ export async function createPluginContext(
   descriptor: PluginWebModule,
   plugins: PluginsContextPort,
   options: { signal: AbortSignal },
-) {
+): Promise<PluginBaseContext> {
   if (!isPluginModuleDescriptor(pluginId, descriptor)) {
     throw new Error('invalid-module-descriptor');
   }
@@ -88,4 +88,4 @@ export async function createPluginContext(
   };
 }
 
-export type PluginContext = Awaited<ReturnType<typeof createPluginContext>>;
+export type PluginContext = PluginBaseContext;

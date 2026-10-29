@@ -1,6 +1,6 @@
 // Живая проверка режима GLM до допуска (G12). Запускает человек, когда выбран режим, ключ
 // режима лежит в окружении службы; отдельный DI-допуск разрешён только для обычного api.
-// Скрипт не меняет GLM_ADMISSION, не читает и не печатает ключ, ограничивает число ходов
+// Скрипт не меняет GLM_ADMISSION, не печатает ключ, ограничивает число ходов
 // сценарием и пишет очищенный отчёт в glm/G12/ папки артефактов.
 //
 // Запуск: node server/scripts/glmLiveSmoke.mts --mode api --confirm-live --binary <ELF> --cache-dir <cache>
@@ -24,6 +24,12 @@ import { assertGlmGenerationAdmission, describeGlmGenerationAsync } from '../src
 import { glmAccessError } from '../src/lib/glm/env.ts';
 import { resolveDeepSeekRuntimeAsync } from '../src/lib/deepseek/runtimeProcess.ts';
 import chatModule from '../src/modules/chat/index.ts';
+import {
+  cleanGlmSmokeDiagnostic,
+  glmSmokeSecrets,
+  readGlmSmokeHttpErrors,
+  writeGlmSmokeHttpObserver,
+} from './glmSmokeDiagnostics.mts';
 
 const requireServer = createRequire(new URL('../package.json', import.meta.url));
 const Fastify = requireServer('fastify');
@@ -62,10 +68,10 @@ function shellArgument(name: string): string {
 
 /**
  * Очищенный текст для отчёта: временные пути заменены, длина ограничена.
- * Ключа в тексте быть не может: скрипт его не читает, а ход его не видит.
+ * Известные секреты вырезаются до ограничения длины, включая ошибки провайдера.
  */
-function clean(value: unknown, root: string): string {
-  return String(value ?? '').replaceAll(root, '<tmp>').slice(0, 400);
+function clean(value: unknown, root: string, secrets: readonly string[]): string {
+  return cleanGlmSmokeDiagnostic(value, secrets, [root, os.homedir()]).slice(0, 400);
 }
 
 /**
@@ -86,14 +92,15 @@ function answered(status: number, body: Record<string, any>): boolean {
  * стоп во время approval, повтор принятого хода по turnId. Возвращает шаги отчёта.
  */
 export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
-  if (options.mode !== 'api') {
-    throw glmAccessError('glm_mode_not_admitted', 'Живая проверка разрешает временный допуск только api.');
+  if (options.mode !== 'api' && options.mode !== 'coding-plan') {
+    throw glmAccessError('glm_mode_not_admitted', 'Живая проверка разрешает только известные режимы GLM.');
   }
   if (!path.isAbsolute(options.binary) || !path.isAbsolute(options.cacheDir)) {
     throw new TypeError('Smoke требует абсолютные --binary и --cache-dir');
   }
 
   const root = await fs.mkdtemp(path.join(options.workRoot, 'live-'));
+  const secrets = glmSmokeSecrets(options.env);
   const project = path.join(root, 'project');
   const marker = `GLM-SMOKE-${randomUUID().slice(0, 8)}`;
   const model = JSON.stringify(['zai', options.model ?? 'glm-5.3']);
@@ -119,8 +126,14 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
   const endpoint = options.adapterDeps?.modelEndpoint;
   const kind = endpoint && ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(endpoint).hostname)
     ? 'loopback' : 'live';
+  const observer = await writeGlmSmokeHttpObserver(
+    root,
+    endpoint,
+    options.adapterDeps?.egressGuard,
+  );
   const adapter = createGlmAdapter({
     ...options.adapterDeps,
+    egressGuard: observer.plugin,
     env: { ...options.env, GRIGDESK_GLM_API_MODE: options.mode },
     admission,
   });
@@ -172,7 +185,7 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
     steps.push({
       name,
       ok,
-      detail: clean(detail, root),
+      detail: clean(detail, root, secrets),
     });
   };
 
@@ -192,7 +205,12 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
 
     const first = await chat('Ответь одним словом: готово.');
 
-    step('ответ', answered(first.status, first.body), first.body.reply ?? first.body.error);
+    step('ответ', answered(first.status, first.body),
+      first.body.reply ?? first.body.message ?? first.body.error);
+
+    if (!answered(first.status, first.body)) {
+      throw new Error('Первый ответ модели не получен; дальнейшие ходы smoke не выполнялись.');
+    }
 
     const tools = await chat('Прочитай marker.txt, замени в нём маркер на тот же текст с суффиксом -EDITED '
       + 'и выполни команду `wc -c marker.txt`. Коротко подтверди.');
@@ -206,6 +224,25 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
 
     step('второй ход и resume', answered(memory.status, memory.body)
       && String(memory.body.reply).includes(marker), memory.body.reply);
+
+    const delegated = await chat('Запусти foreground критика инструментом subagent. '
+      + 'Поручи ему прочитать marker.txt и проверить наличие суффикса -EDITED. '
+      + 'Дождись результата и коротко сообщи его. Не читай файл сам.');
+    const delegationSteps = delegated.body.steps ?? [];
+    const parentCalls = new Set(delegationSteps.filter((item: Record<string, unknown>) =>
+      item.k === 'tool' && item.name === 'subagent').map((item: Record<string, unknown>) => item.id));
+    const childRead = delegationSteps.some((item: Record<string, unknown>) =>
+      item.k === 'tool' && item.name === 'Read' && parentCalls.has(item.parent));
+
+    step('foreground критик и дочерняя лента', answered(delegated.status, delegated.body)
+      && childRead, childRead ? delegated.body.reply : JSON.stringify(delegationSteps
+        .filter((item: Record<string, unknown>) => item.k === 'tool' || item.k === 'res')
+        .map((item: Record<string, unknown>) => ({
+          k: item.k,
+          name: item.name,
+          parent: Boolean(item.parent),
+          text: item.k === 'res' ? item.text : undefined,
+        }))));
 
     const refusal = await chat('Выполни команду `ssh -p 9 smoke@127.0.0.1 true` и сообщи результат.');
     const refusedSteps = JSON.stringify(refusal.body.steps ?? []);
@@ -254,6 +291,8 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
     await app.close();
   }
 
+  const modelErrors = await readGlmSmokeHttpErrors(observer.file, options.env, root);
+
   return {
     kind,
     mode: options.mode,
@@ -264,22 +303,50 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
     turns,
     ok: steps.every((item) => item.ok),
     steps,
+    modelErrors,
   };
+}
+
+/**
+ * Успешная живая проверка дописывает проверенный допуск в выпускную копию
+ * compatibility-файла той же рабочей tree, откуда запущен скрипт. Запись режима
+ * заменяется целиком, остальные режимы и ревизии не меняются. Следующая сборка
+ * замораживает новый список в metadata ELF.
+ */
+async function admitSmokeCompatibility(mode: GlmAccessMode, compatibility: string): Promise<void> {
+  const file = fileURLToPath(new URL('../../deepseek/compatibility/glm.json', import.meta.url));
+  const current = JSON.parse(await fs.readFile(file, 'utf8')) as {
+    admission?: Array<{ mode: string; compatibility: string }>;
+  };
+
+  if (!Array.isArray(current.admission)) {
+    throw new TypeError('Файл compatibility не содержит список admission');
+  }
+
+  current.admission = [
+    ...current.admission.filter((entry) => entry.mode !== mode),
+    { mode, compatibility },
+  ];
+
+  await fs.writeFile(file, `${JSON.stringify(current, null, 2)}\n`);
+  process.stdout.write(`ADMIT ${mode} ${compatibility}\n`);
 }
 
 /**
  * Точка входа человека: режим и явное подтверждение живого запуска обязательны.
  * Отчёт пишется в каталог артефактов этапа, временные homes удаляются.
+ * `--admit` дописывает допуск только после полностью успешного сценария.
  */
 async function main(): Promise<void> {
   const mode = parseGlmAccessMode(shellArgument('--mode'));
   const binary = shellArgument('--binary');
   const cacheDir = shellArgument('--cache-dir');
 
-  if (mode !== 'api' || !process.argv.includes('--confirm-live')
+  if (!mode || !process.argv.includes('--confirm-live')
     || !path.isAbsolute(binary) || !path.isAbsolute(cacheDir)) {
-    process.stderr.write('Использование: node server/scripts/glmLiveSmoke.mts --mode api '
-      + '--confirm-live --binary <абсолютный ELF> --cache-dir <отдельный cache> [--model glm-5.3]\n');
+    process.stderr.write('Использование: node server/scripts/glmLiveSmoke.mts --mode api|coding-plan '
+      + '--confirm-live --binary <абсолютный ELF> --cache-dir <отдельный cache> '
+      + '[--model glm-5.3] [--admit]\n');
     process.exitCode = 2;
 
     return;
@@ -310,6 +377,11 @@ async function main(): Promise<void> {
     await fs.writeFile(file, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
     process.stdout.write(`${report.ok ? 'OK' : 'FAIL'} ${file}\n`);
     process.exitCode = report.ok ? 0 : 1;
+
+    if (report.ok && process.argv.includes('--admit')) {
+      await admitSmokeCompatibility(mode, report.compatibility);
+      process.stdout.write('Повторите сборку поставки, чтобы заморозить новый допуск в metadata.\n');
+    }
   } finally {
     await fs.rm(work, { recursive: true, force: true });
   }

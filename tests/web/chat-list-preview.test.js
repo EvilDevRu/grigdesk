@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createChatListPreviewCache } from '../../web/src/shared/chatListPreview.ts';
-import { chatStoreFixture } from './helpers/chat-store.js';
+import { apiHarness, chatStoreFixture } from './helpers/chat-store.js';
 
 test('80 неизменённых превью разбираются один раз, фрагменты и память ограничены', () => {
   let calls = 0;
@@ -33,22 +33,36 @@ test('80 неизменённых превью разбираются один �
   assert.equal(cache.size, 0);
 });
 
-test('кэш не обещает попадания при последовательном обходе 300 чатов', () => {
+test('текущий каталог больше 256 чатов не вытесняет собственные превью по кругу', () => {
   let calls = 0;
   const cache = createChatListPreviewCache((source) => {
     calls += 1;
 
     return source;
   });
+  const ids = Array.from({ length: 310 }, (_, index) => String(index));
+
+  cache.retain(ids);
 
   for (let pass = 0; pass < 2; pass += 1) {
-    for (let index = 0; index < 300; index += 1) {
-      cache.get(String(index), 'текст');
+    for (const id of ids) {
+      cache.get(id, 'текст');
     }
   }
 
-  assert.equal(calls, 600);
-  assert.equal(cache.size, 256);
+  assert.equal(calls, 310);
+  assert.equal(cache.size, 310);
+  cache.get('0', 'правка');
+  assert.equal(calls, 311);
+  cache.retain(['0', '1']);
+  assert.equal(cache.size, 2, 'смена списка освобождает прежний каталог');
+  cache.clear();
+
+  for (const id of ids) {
+    cache.get(id, 'текст');
+  }
+
+  assert.equal(cache.size, 256, 'без владельца остаётся прежний предел LRU');
 });
 
 test('реальный Markdown остаётся читаемым на обрезанном источнике', () => {
@@ -63,7 +77,7 @@ test('реальный Markdown остаётся читаемым на обре�
   }
 });
 
-test('поиск читает весь текст; порядок, ожидание, архив и черновик остаются актуальными', async () => {
+test('серверный поиск по всему тексту; порядок, ожидание, архив и черновик актуальны', async (t) => {
   const chat = await chatStoreFixture({
     sessions: [{
         id: 'a',
@@ -91,6 +105,14 @@ test('поиск читает весь текст; порядок, ожидан�
     }]
   });
 
+  t.after(() => chat.$dispose());
+  apiHarness.get = async (url) => {
+    assert.equal(url, '/api/chat/store/search?q=' + encodeURIComponent('редкая строка') + '&archived=0');
+
+    return { matches: [{ id: 'a', snippetSource: '…начало начало начало редкая строка' }] };
+  };
+  // Старый стор уже имеет текст для поиска, новый получает управляемый серверный ответ.
+  await chat.searchChats?.('редкая строка');
   assert.deepEqual(chat.list('редкая строка').map((row) => row.id), ['a']);
   assert.deepEqual(chat.list('').map((row) => row.id), ['a', 'b']);
   chat.pending = {

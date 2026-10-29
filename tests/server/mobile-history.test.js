@@ -645,7 +645,7 @@ test('MC-34: отказ preflight без ledger сохраняет собств�
   assert.notEqual(result.body.error, 'turn_conflict');
 });
 
-test('MC-35: финал веба получает canonical metadata даже после reset', async (t) => {
+test('MC-35: финал веба получает canonical metadata после reset, сохраняя steps', async (t) => {
   const fixture = await heldResult(t, 'mobile-mutated');
   const { app } = fixture;
 
@@ -686,7 +686,9 @@ test('MC-35: финал веба получает canonical metadata даже п
   assert.equal(final.serverCanonical, true);
   assert.equal(final.clientId, owner.clientId);
   assert.equal(final.cost, 0);
-  assert.equal(final.steps.length, 1);
+  // Уже durable-массив не меняется при серверном reconcile, даже если он пуст.
+  // Метаданные финала по-прежнему дополняются без замены основания refs окна.
+  assert.deepEqual(final.steps, []);
   assert.equal(chat.sessionId, null);
 });
 
