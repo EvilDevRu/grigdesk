@@ -95,6 +95,7 @@ async function routeFixture(t, extraAdapters = []) {
     claudeAuth: null,
     prefs,
     getProviderAdapters: async () => new Map(adapters.map((item) => [item.id, item])),
+    getModelsRegistry: async () => ({}),
   });
   t.after(() => app.close());
   return { app, writes, read: () => snapshot };

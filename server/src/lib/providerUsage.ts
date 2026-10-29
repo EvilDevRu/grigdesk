@@ -279,6 +279,7 @@ export function createUsageReadCache<Value>(
   let cache: { at: number; value: Value } | null = null;
   let inFlight: Promise<Value> | null = null;
   let generation = 0;
+  let notifiedSnapshot: { at: number; value: Value } | null = null;
   const invalidationWaiters = new Set<() => void>();
 
   /**
@@ -361,6 +362,50 @@ export function createUsageReadCache<Value>(
 
   return {
     read,
+
+    /**
+     * Отдаёт прежний успешный снимок, пока единственная общая загрузка обновляет его.
+     * Без снимка ограничивает ожидание; поздний успех уведомляет уже отпущенных читателей.
+     */
+    async readStale(waitMs: number, fallback: Value, onReady: () => void): Promise<Value> {
+      const version = generation;
+      const snapshot = cache;
+      let deferred = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const loading = read().then((value) => {
+        if (deferred && generation === version && cache !== notifiedSnapshot) {
+          notifiedSnapshot = cache;
+          onReady();
+        }
+
+        return value;
+      }).catch((error: unknown) => {
+        if (snapshot || deferred) {
+          return snapshot?.value ?? fallback;
+        }
+
+        throw error;
+      });
+
+      if (snapshot) {
+        deferred = now() - snapshot.at >= maxAgeMs;
+
+        return snapshot.value;
+      }
+
+      const timeout = new Promise<Value>((resolve) => {
+        timer = setTimeout(() => {
+          deferred = true;
+          resolve(fallback);
+        }, waitMs);
+      });
+
+      try {
+        return await Promise.race([loading, timeout]);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
 
     async refresh() {
       if (inFlight) return inFlight;

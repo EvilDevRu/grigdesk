@@ -88,6 +88,7 @@ interface ProvidersListRoute {
 
 // Список меняется редко — кэшируем, чтобы не гонять probe-подпроцессы на каждый запрос.
 const CACHE_MS = 60_000;
+const REGISTRY_READ_BUDGET_MS = 1_200;
 
 // Период чтения лимитов у вендора — СВОЙ, и он намеренно длиннее реестра. Реестр — это
 // probe локальных бинарей, они ничего не стоят; лимиты — запрос к API аккаунта, и минутный
@@ -378,10 +379,15 @@ async function providersModule(
    */
   async function readRegistry<Result>(
     consume: (providers: Awaited<ReturnType<typeof buildRegistry>>) => Result,
+    background = false,
   ): Promise<Result> {
     for (;;) {
       const version = registryCache.version();
-      const providers = await registryCache.read();
+      const providers = await (background
+        ? registryCache.readStale(REGISTRY_READ_BUDGET_MS, [], () => {
+          fastify.sse?.broadcast?.('providers-update', {});
+        })
+        : registryCache.read());
 
       if (version === registryCache.version()) {
         return consume(providers);
@@ -943,7 +949,7 @@ async function providersModule(
       registryCache.clear();
     }
 
-    return readRegistry((providers) => reply.send({ providers, showAllModels }));
+    return readRegistry((providers) => reply.send({ providers, showAllModels }), !force);
   });
 
   /**
