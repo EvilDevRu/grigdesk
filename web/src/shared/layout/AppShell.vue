@@ -1038,7 +1038,7 @@ const { connected } = useSse((name, data) => {
     if (isRecord(data) && typeof data.credentials === 'string' && data.credentials) {
       void prov.invalidateCredentials(data.credentials);
     } else {
-      void prov.load();
+      void prov.load(false, { invalidate: true });
     }
   }
   // Фоновый тик сервера принёс свежие лимиты — полосы в шапке идут за ними без наведения.

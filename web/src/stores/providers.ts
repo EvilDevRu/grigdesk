@@ -4,6 +4,7 @@ import { uiLocalePort as uiLocale } from '../shared/uiLocalePort.ts';
 // Реестр LLM-исполнителей (GET /api/providers): топбар рисует иконки доступных,
 // схемы/маршруты смогут выбирать исполнителя по стабильному id из этого списка.
 import { defineStore } from 'pinia';
+import { toRaw } from 'vue';
 import { classifyWriteError } from '../features/settings/contracts.ts';
 
 import { isRecord } from '../../../shared/lib/objects.ts';
@@ -17,7 +18,13 @@ import { familyModels } from '../../../shared/chat/modelFamily.ts';
 
 const t = localeTranslator(uiLocale);
 
-const registryReads = new WeakMap<object, Promise<void>>();
+interface RegistryRead {
+  promise: Promise<void>;
+  version: number;
+  refresh: boolean;
+}
+
+const registryReads = new WeakMap<object, RegistryRead>();
 const registryStatuses = new WeakMap<object, { ok: boolean; message?: string }>();
 
 type ProviderCliUpdate = (providerId: string) => Promise<void>;
@@ -214,12 +221,27 @@ export const useProvidersStore = defineStore('providers', {
   },
   actions: {
     /**
-     * Только последний запрос текущей проекции может заменить карточки.
-     * Смена credentials отсеивает поздний GET прежнего аккаунта вместе с его ошибкой.
+     * Читатели одной версии разделяют GET; монтирование использует готовый снимок.
+     * SSE/credentials инвалидируют летящий ответ, а явный refresh сильнее обычного чтения.
      */
-    load(refresh = false): Promise<void> {
-      const request = ++this.registryRequest;
+    load(refresh = false, { cached = false, invalidate = false } = {}): Promise<void> {
+      const key = toRaw(this);
+
+      if (invalidate) {
+        this.registryVersion += 1;
+      }
+
       const version = this.registryVersion;
+      const previous = registryReads.get(key);
+
+      if (previous?.version === version && (!refresh || previous.refresh)) {
+        return previous.promise;
+      }
+      if (cached && this.loaded && !refresh && !invalidate) {
+        return Promise.resolve();
+      }
+
+      const request = ++this.registryRequest;
       const pending = (async () => {
         try {
           const reply = await api.get(`/api/providers${refresh ? '?refresh=1' : ''}`);
@@ -238,10 +260,10 @@ export const useProvidersStore = defineStore('providers', {
 
           this.providers = providers || [];
           this.showAllModels = !!showAllModels;
-          registryStatuses.set(this, { ok: true });
+          registryStatuses.set(key, { ok: true });
         } catch (error) {
           if (request === this.registryRequest && version === this.registryVersion) {
-            registryStatuses.set(this, {
+            registryStatuses.set(key, {
               ok: false,
               message: failureText(error) || t('settings.providerRegistryFailure'),
             });
@@ -251,9 +273,17 @@ export const useProvidersStore = defineStore('providers', {
         if (request === this.registryRequest && version === this.registryVersion) {
           this.loaded = true;
         }
-      })();
+      })().finally(() => {
+        if (registryReads.get(key)?.promise === pending) {
+          registryReads.delete(key);
+        }
+      });
 
-      registryReads.set(this, pending);
+      registryReads.set(key, {
+        promise: pending,
+        version,
+        refresh,
+      });
 
       return pending;
     },
@@ -262,14 +292,15 @@ export const useProvidersStore = defineStore('providers', {
      * Сам ACK доменного store остаётся быстрым и не ждёт usage-проверку.
      */
     async whenRegistryReady(): Promise<{ ok: boolean; message?: string }> {
+      const key = toRaw(this);
       let pending;
 
       do {
-        pending = registryReads.get(this);
-        await pending;
-      } while (pending !== registryReads.get(this));
+        pending = registryReads.get(key);
+        await pending?.promise;
+      } while (pending !== registryReads.get(key));
 
-      return registryStatuses.get(this) || { ok: true };
+      return registryStatuses.get(key) || { ok: true };
     },
     /**
      * Сбрасывает счёт изменённого аккаунта сразу при ACK или общем SSE-событии.

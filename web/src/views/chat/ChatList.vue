@@ -281,7 +281,7 @@ const emit = defineEmits(['open']);
 const prov = useProvidersStore();
 const { sessions: sleepingSessions } = useChatSleeping();
 
-prov.load();
+prov.load(false, { cached: true });
 
 const q = ref('');
 const showArchived = ref(false);
