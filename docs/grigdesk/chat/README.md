@@ -1,5 +1,7 @@
 # Чат и исполнители
 
+- [Повторная сверка пика, кредитных квот и коэффициентов GLM, 29.10.2026](glm-quota-recheck.md)
+
 - [Режимы Codex: admission, явный выбор чата, native-вопросы и предел проверки](codex-permission-modes.md)
 
 - [Границы подготовки внешнего CLI и reuse живого процесса](executor-preparation-boundaries.md)
