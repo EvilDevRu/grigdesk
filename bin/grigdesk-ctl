@@ -170,8 +170,8 @@ developer_command() {
 
   if [[ "$CMD" == build ]]; then
     if (( $# > 1 )) || [[ "$build_target" != all && "$build_target" != server \
-      && "$build_target" != web && "$build_target" != window ]]; then
-      echo 'Справка: grigdesk-ctl build [all|server|web|window]' >&2
+      && "$build_target" != web && "$build_target" != window && "$build_target" != deepseek ]]; then
+      echo 'Справка: grigdesk-ctl build [all|server|web|window|deepseek]' >&2
       return 2
     fi
   fi
@@ -240,17 +240,27 @@ developer_command() {
   build_server() {
     local cache="${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/server-binary"
     local data
+    local glm_mode
+    local -a executor_args=()
+
+    if [[ -n "${GRIGDESK_DEEPSEEK_BIN:-}" ]]; then
+      executor_args=(--deepseek-binary "$GRIGDESK_DEEPSEEK_BIN")
+    fi
 
     data=$(grigdesk_data_home) || return $?
+    glm_mode=$(node "$DIR/server/scripts/ctlBuild.mts" glm-mode "$data/.env") || return $?
     observed_step server.node node "$DIR/server/scripts/ctlBuild.mts" \
       prepare-runtime "$cache/cache" || return $?
     observed_step server.build npm --prefix "$DIR/server" run build:binary -- \
       --out-dir "$cache/out" --cache-dir "$cache/cache" || return $?
     observed_step server.install npm --prefix "$DIR/server" run install:binary -- \
       --binary "$cache/out/grigdesk-server" --target "$DIR/bin/grigdesk-server" \
-      --releases-dir "$data/runtimes/server/releases" || return $?
+      --releases-dir "$data/runtimes/server/releases" --glm-mode "$glm_mode" \
+      "${executor_args[@]}" || return $?
 
-    if ! node "$DIR/server/scripts/ctlBuild.mts" check-desktop "$DIR/bin/grigdesk-server"; then
+    if [[ "$build_target" != all ]] \
+      && ! node "$DIR/server/scripts/ctlBuild.mts" check-desktop "$DIR/bin/grigdesk-server"; then
+      desktop_requires_selection=1
       build_event hint select-server
       printf 'Для выбора этого сервера окном: grigdesk-ctl desktop use-server %q\n' \
         "$DIR/bin/grigdesk-server"
@@ -261,7 +271,124 @@ developer_command() {
   # Установка заменяет файл окна, не запуская приложение и не меняя выбор сервера.
   build_window() {
     observed_step window.package npm --prefix "$DIR/desktop" run dist || return $?
-    observed_step window.install "$DIR/deploy/desktop.sh" install || return $?
+
+    if [[ "$build_target" == all ]]; then
+      observed_step window.install "$DIR/deploy/desktop.sh" install --keep-runtime || return $?
+    else
+      observed_step window.install "$DIR/deploy/desktop.sh" install || return $?
+    fi
+  }
+
+  # Цель deepseek стоит отдельно от all: сборке нужны сеть (worker Node, npm-зависимости)
+  # и материализованный vendor, а установке — живой допуск GLM. Кандидат собирается
+  # и проверяется в общем кэше; публикует его штатный установщик с резервом и atomic rename.
+  build_deepseek() {
+    local cache="${XDG_CACHE_HOME:-$HOME/.cache}/grigdesk/deepseek-binary"
+    local data
+    local code
+    local glm_mode
+
+    data=$(grigdesk_data_home) || return $?
+
+    glm_mode=$(node "$DIR/server/scripts/ctlBuild.mts" glm-mode "$data/.env") || return $?
+
+    # Зависимости ставятся только при их отсутствии, как у server/web; повторный
+    # запуск на живом дереве их не трогает. Событие стадии эмитится всегда,
+    # чтобы наблюдатель видел полный набор шагов без зависших pending.
+    if [ ! -d "$DIR/deepseek/node_modules" ]; then
+      observed_step deepseek.deps npm --prefix "$DIR/deepseek" install --no-audit --no-fund \
+        || return $?
+    else
+      build_event start deepseek.deps
+      build_event end deepseek.deps 0
+    fi
+
+    observed_step deepseek.prepare npm --prefix "$DIR/deepseek" run --silent prepare:runtime -- \
+      --node-cache-dir "$cache/cache" || return $?
+    observed_step deepseek.build npm --prefix "$DIR/deepseek" run build -- \
+      --out-dir "$cache/out" --node-cache-dir "$cache/cache" || return $?
+    observed_step deepseek.verify npm --prefix "$DIR/deepseek" run verify -- \
+      --binary "$cache/out/deepseek" || return $?
+
+    # Живой smoke выбирается человеком на старте сборки (none|consumer|both) или
+    # задаётся окружением. Пропущенная smoke-стадия закрывается мгновенным событием,
+    # чтобы наблюдатель видел полный набор шагов без зависших pending.
+    local smoke="${GRIGDESK_DEEPSEEK_SMOKE:-none}"
+    local mode
+
+    for mode in api coding-plan; do
+      local wanted=0
+      [[ "$smoke" == both ]] && wanted=1
+      [[ "$smoke" == consumer && "$mode" == "$glm_mode" ]] && wanted=1
+
+      if [[ "$wanted" == 1 ]] \
+        && ! observed_step "deepseek.admission-$mode" npm --prefix "$DIR/deepseek" run --silent admission:check -- \
+          --binary "$cache/out/deepseek" --mode "$mode" \
+          --host-contract "$DIR/server/deepseek-host-contract.json"; then
+        observed_step "deepseek.smoke-$mode" \
+          env GRIGDESK_HOME="$data" node "$DIR/server/scripts/glmLiveSmoke.mts" \
+          --mode "$mode" --confirm-live --binary "$cache/out/deepseek" \
+          --cache-dir "$cache/smoke" --admit || {
+            code=$?
+            echo "Живой smoke GLM ($mode) не пройден; отчёт — в папке артефактов glm/G12." >&2
+            return "$code"
+          }
+
+        # Допуск вписан в compatibility-файл: metadata кандидата пересобирается
+        # с новым списком и снова проходит полную проверку.
+        observed_step deepseek.build npm --prefix "$DIR/deepseek" run build -- \
+          --out-dir "$cache/out" --node-cache-dir "$cache/cache" || return $?
+        observed_step deepseek.verify npm --prefix "$DIR/deepseek" run verify -- \
+          --binary "$cache/out/deepseek" || return $?
+      else
+        build_event start "deepseek.admission-$mode"
+        build_event end "deepseek.admission-$mode" 0
+        build_event start "deepseek.smoke-$mode"
+        build_event end "deepseek.smoke-$mode" 0
+      fi
+    done
+
+    # Установка выполняется только с допуском фактического режима потребителя.
+    # Без него сборка завершается зелёным итогом с явным статусом и путём кандидата:
+    # живая проверка — осознанное действие человека, а не сбой цепочки.
+    if ! observed_step "deepseek.admission-$glm_mode" npm --prefix "$DIR/deepseek" run --silent admission:check -- \
+      --binary "$cache/out/deepseek" --mode "$glm_mode" \
+      --host-contract "$DIR/server/deepseek-host-contract.json"; then
+      echo "DeepSeek собран и проверен: $cache/out/deepseek"
+      echo "Установка не выполнена: не хватает живого допуска GLM ($glm_mode)."
+      echo "Повторите сборку, выбрав живой smoke на старте, или прогоните"
+      echo "glmLiveSmoke.mts --mode $glm_mode --admit и соберите снова."
+      return 0
+    fi
+
+    # Отказ установки не отменяет собранный и проверенный кандидат: человек получает
+    # путь и причину отказа, чтобы повторить после устранения.
+    observed_step deepseek.install npm --prefix "$DIR/deepseek" run --silent install:binary -- \
+      --binary "$cache/out/deepseek" \
+      --target "$DIR/bin/deepseek" \
+      --host-contract "$DIR/server/deepseek-host-contract.json" \
+      --releases-dir "$data/runtimes/deepseek/releases" \
+      --glm-mode "$glm_mode" || {
+        code=$?
+        echo "DeepSeek собран и проверен: $cache/out/deepseek" >&2
+        echo 'Установка не выполнена; причина — в журнале выше.' >&2
+        return "$code"
+      }
+
+    # Кандидат опубликован установщиком и больше не нужен; резервы и старые поколения
+    # чистятся отдельно: свежая и предыдущая поставки остаются для идущих ходов и отката.
+    rm -f "$cache/out/deepseek"
+
+    # Чистка — хозяйственная операция: её отказ не отменяет успешную установку.
+    observed_step deepseek.prune npm --prefix "$DIR/deepseek" run --silent prune:cache -- \
+      --cache-dir "$data/runtimes/deepseek" || {
+      echo "⚠ Чистка кэша DeepSeek не выполнена; поколения и резервы остаются." >&2
+    }
+
+    # Итог принадлежит самой цели: мягкий финал без допуска не печатает
+    # «Поставлен», чтобы человек не принял отложенную установку за завершённую.
+    echo "Поставлен DeepSeek: $DIR/bin/deepseek"
+    echo 'Новый ELF получит следующий ход DeepSeek; перезапуск сервера не нужен.'
   }
 
   # События идут отдельным каналом только по запросу родительского контроллера.
@@ -315,6 +442,16 @@ developer_command() {
       prepare_deepseek
       ;;
     build)
+      desktop_requires_selection=0
+
+      # Цель deepseek не собирает веб/окно и не меняет привязку сервера:
+      # установленный ELF подхватывает следующий ход без перезапуска.
+      # Итоговые сообщения печатает сама цель — включая мягкий финал без допуска.
+      if [[ "$build_target" == deepseek ]]; then
+        build_step deepseek build_deepseek
+        return 0
+      fi
+
       if [[ "$build_target" == all || "$build_target" == server ]]; then
         build_step server build_server
       fi
@@ -328,6 +465,31 @@ developer_command() {
         build_step window build_window
       fi
 
+      # Полная установка связывает окно с её ELF только после успеха всех компонентов.
+      # Живой сервер продолжает работу: общий selector применит намерение при новом запуске.
+      if [[ "$build_target" == all ]]; then
+        desktop_build_selection=$(build_step window node "$DIR/server/scripts/ctlBuild.mts" \
+          queue-desktop "$DIR/bin/grigdesk-server") || return $?
+
+        case "$desktop_build_selection" in
+          queued)
+            build_event hint queued-server
+            echo 'При следующем запуске окно выберет сервер этой сборки.'
+            ;;
+          foreign)
+            desktop_requires_selection=1
+            build_event hint select-server
+            printf 'Для выбора этого сервера окном: grigdesk-ctl desktop use-server %q\n' \
+              "$DIR/bin/grigdesk-server"
+            ;;
+          current) ;;
+          *)
+            echo 'Не удалось определить привязку окна после полной установки.' >&2
+            return 1
+            ;;
+        esac
+      fi
+
       case "$build_target" in
         all) echo 'Поставлены сервер, веб и окно.' ;;
         server) echo "Поставлен сервер: $DIR/bin/grigdesk-server" ;;
@@ -337,6 +499,8 @@ developer_command() {
 
       if [[ "$build_target" == web ]]; then
         echo 'Окно покажет новый веб после grigdesk-ctl build window.'
+      elif [[ "$desktop_requires_selection" == 1 ]]; then
+        echo 'Окно сохраняет выбор другой установки сервера; новый сервер ещё не выбран.'
       else
         echo 'Закройте окно и откройте снова — запустится новый код.'
       fi
@@ -384,7 +548,7 @@ case "$CMD" in
     # Только валидная ручная сборка попадает в экран прогресса.
     # Внутренний ребёнок и старые ошибки аргументов сохраняют обычный путь.
     if [[ "$CMD" == build && -t 0 && -t 1 && "${GRIGDESK_CTL_BUILD_CHILD:-}" != 1 \
-      && $# -le 2 && "${2-all}" =~ ^(all|server|web|window)$ ]]; then
+      && $# -le 2 && "${2-all}" =~ ^(all|server|web|window|deepseek)$ ]]; then
       source "$DIR/deploy/lib/runtime-env.sh"
       grigdesk_require_node source
       exec node "$DIR/cli/main.ts" "$@"

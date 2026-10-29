@@ -1,3 +1,4 @@
+import type { PluginServerModule } from '../../../packages/plugin-types/src/server.ts';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -23,14 +24,7 @@ export interface RuntimeImportBridge {
   importUrl(url: string): Promise<unknown>;
 }
 
-/** Форма серверного модуля плагина: default вызывается хостом регистрации. */
-export interface PluginServerModule {
-  default: (
-    app: unknown,
-    options: unknown,
-    done?: (error?: Error) => void,
-  ) => unknown;
-}
+export type { PluginServerModule } from '../../../packages/plugin-types/src/server.ts';
 
 const bridges = new Map<string, RuntimeImportBridge>();
 

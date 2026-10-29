@@ -660,6 +660,238 @@ test('server runtime сохраняет контекст и берёт окно 
   }
 });
 
+test('server runtime переводит структурные разрешения в поля карточки и сохраняет ответы', async (t) => {
+  const f = await fixture(t);
+  const scenarios = [
+    {
+      tool: 'Bash',
+      kind: 'execute',
+      action: 'Запустить проверку',
+      display: {
+        kind: 'command',
+        command: 'npm test\n',
+        description: 'Проверить проект',
+      },
+      input: {
+        kind: 'execute',
+        description: 'Проверить проект',
+        command: 'npm test\n',
+      },
+      answer: {
+        allow: true,
+        remember: true,
+      },
+      response: {
+        decision: 'approved',
+        scope: 'session',
+      },
+    },
+    {
+      tool: 'Write',
+      action: 'Записать файл',
+      display: {
+        kind: 'file_io',
+        operation: 'write',
+        path: ' notes.md ',
+        content: '# Итог\n',
+      },
+      input: {
+        kind: 'Записать файл',
+        description: 'Записать файл',
+        file_path: ' notes.md ',
+        details: '# Итог\n',
+      },
+      answer: {
+        allow: false,
+        comment: 'Уточни вывод',
+      },
+      response: {
+        decision: 'rejected',
+        feedback: 'Уточни вывод',
+      },
+    },
+    {
+      tool: 'Edit',
+      action: 'Удалить строку',
+      display: {
+        kind: 'diff',
+        path: 'notes.md',
+        before: 'лишнее\n',
+        after: '',
+      },
+      input: {
+        kind: 'Удалить строку',
+        description: 'Удалить строку',
+        file_path: 'notes.md',
+        diff: {
+          old: 'лишнее\n',
+          new: '',
+        },
+      },
+      answer: { allow: true },
+      response: { decision: 'approved' },
+    },
+    {
+      tool: 'Edit',
+      action: 'Изменить файл',
+      display: {
+        kind: 'file_io',
+        operation: 'edit',
+        path: 'notes.md',
+        before: '',
+        after: 'новое\n',
+      },
+      input: {
+        kind: 'Изменить файл',
+        description: 'Изменить файл',
+        file_path: 'notes.md',
+        diff: {
+          old: '',
+          new: 'новое\n',
+        },
+      },
+    },
+    {
+      tool: 'MCP',
+      action: 'Выполнить действие',
+      display: {
+        kind: 'generic',
+        summary: 'Запрос инструмента',
+        detail: { nested: { value: 1 } },
+      },
+      input: {
+        kind: 'Выполнить действие',
+        description: 'Запрос инструмента',
+        details: '{\n  "nested": {\n    "value": 1\n  }\n}',
+      },
+    },
+    {
+      tool: 'Bash',
+      display: 'npm test',
+      input: {
+        kind: '',
+        description: 'npm test',
+        command: 'npm test',
+      },
+    },
+    {
+      tool: 'Unknown',
+      action: 'Новый формат',
+      display: {
+        kind: 'future',
+        value: { flag: true },
+      },
+      input: {
+        kind: 'Новый формат',
+        description: 'Новый формат',
+        details: '{\n  "kind": "future",\n  "value": {\n    "flag": true\n  }\n}',
+      },
+    },
+    {
+      tool: 'Unknown',
+      action: 'Нет предпросмотра',
+      display: null,
+      input: {
+        kind: 'Нет предпросмотра',
+        description: 'Нет предпросмотра',
+      },
+    },
+  ];
+  const asks = [];
+  const responses = [];
+  let publish;
+  let index = 0;
+  const next = () => {
+    const scenario = scenarios[index];
+
+    if (!scenario) {
+      publish({
+        type: 'turn.ended',
+        reason: 'completed',
+      });
+
+      return;
+    }
+
+    publish({
+      type: 'approval.requested',
+      approval_id: `approval-${index}`,
+      tool_name: scenario.tool,
+      kind: scenario.kind,
+      action: scenario.action,
+      tool_input_display: scenario.display,
+    });
+  };
+  const wire = await kimiUsageWire(t, [(send) => {
+    publish = send;
+    next();
+  }]);
+
+  await runContainedKimi({
+    config: f.config,
+    chatKey: 'approval-runtime',
+    cwd: f.cwd,
+    model: 'kimi-code/k3',
+    message: 'Синтетические разрешения',
+    transport: 'server',
+    onPermission: async (ask) => {
+      asks.push(ask);
+
+      return scenarios[index].answer;
+    },
+    deps: {
+      assertVersion: async () => '0.33.0',
+      createProxy: () => ({
+        async start() {},
+        async close() {},
+      }),
+      preflight: async () => ({
+        decision: 'GO_CONTAINED_MVP',
+        checks: {},
+      }),
+      buildLaunch: async () => ({
+        command: 'fake',
+        args: [],
+        cwdReal: f.cwd,
+      }),
+      stopUnit: async () => {},
+      startServer: async () => {
+        const server = await wire.startServer();
+
+        server.client.respondApproval = async (_sessionId, approvalId, response) => {
+          responses.push({
+            approvalId,
+            response,
+          });
+          publish({
+            type: 'approval.resolved',
+            approval_id: approvalId,
+          });
+          index += 1;
+          next();
+
+          return {};
+        };
+
+        return server;
+      },
+    },
+  });
+
+  assert.deepEqual(asks.map((ask) => ({
+    tool: ask.tool,
+    input: ask.input,
+  })), scenarios.map((scenario) => ({
+    tool: scenario.tool,
+    input: scenario.input,
+  })));
+  assert.ok(asks.every((ask) => ask.acceptsComment === true && ask.canRemember === true));
+  assert.deepEqual(responses, scenarios.map((scenario, position) => ({
+    approvalId: `approval-${position}`,
+    response: scenario.response || { decision: 'rejected' },
+  })));
+});
+
 test('host server отвечает при DB-политике и сохраняет закрытый Bash в каждом режиме', async (t) => {
   const scenarios = [
     ...['manual', 'auto', 'plan', 'yolo'].map((permissionMode) => ({ permissionMode, brokerFails: false })),

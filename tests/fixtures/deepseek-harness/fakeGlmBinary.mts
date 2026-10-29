@@ -16,9 +16,13 @@ if (packageAt >= 0) {
 }
 
 // Fixture всегда несёт llmPiAi, поэтому входы удовлетворяют полному контракту допуска.
+// Оба режима доступа: с 29.10.2026 (factory-policy-v2) этап GLM допущен и в Coding Plan.
 const inputs = info.glm.inputs as GlmCompatibilityRuntime;
 
-info.glm.admission = [{ mode: 'api', compatibility: glmCompatibilityIdentity(inputs, 'api') }];
+info.glm.admission = [
+  { mode: 'api', compatibility: glmCompatibilityIdentity(inputs, 'api') },
+  { mode: 'coding-plan', compatibility: glmCompatibilityIdentity(inputs, 'coding-plan') },
+];
 
 if (args.includes('--runtime-info')) {
   process.stdout.write(`${JSON.stringify(info)}\n`);

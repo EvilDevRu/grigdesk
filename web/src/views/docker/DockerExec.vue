@@ -274,9 +274,9 @@ onBeforeUnmount(() => {
 .docker-exec__bar {
   display: flex;
   align-items: center;
-  min-height: 44px;
+  min-height: 36px;
   flex-wrap: wrap;
-  padding: 8px 12px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--line);
   gap: 10px 12px;
 }
@@ -302,7 +302,12 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   flex: 1;
-  padding: 8px;
   background: var(--ground);
+}
+
+.docker-exec__host :deep(.xterm) {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 8px;
 }
 </style>

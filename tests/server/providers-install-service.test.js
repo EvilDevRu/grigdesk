@@ -6,7 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { runCommand } from '../../server/src/lib/pluginInstall/runCommand.ts';
-import { installFixture, current, start, completed, until } from './helpers/providerInstallFixture.js';
+import {
+  installFixture, installNpmFixture, current, start, completed, until, prepare, startWithToken,
+} from './helpers/providerInstallFixture.js';
 
 test('строки stdout и stderr остаются однократными после успеха и отказа', async (t) => {
   for (const runner of ['fixture', 'child']) {
@@ -455,4 +457,60 @@ test('новый native каталог: npm выбирается из польз
       assert.equal(fixture.env.PATH.startsWith('relative-bin'), true, 'Общий порядок PATH переписан');
     });
   }
+});
+
+/**
+ * Core commit предшествует настройке Bash: отказ `.env` не оставляет записанного
+ * rc, а отказ writer-а после commit сохраняет новую рабочую привязку и needs_setup.
+ */
+test('отказ .env до commit сохраняет прежнюю привязку и не пишет shell', async (t) => {
+  const fixture = await installNpmFixture(t, { installed: true });
+  const bashrc = path.join(fixture.root, '.bashrc');
+  const before = await fs.readFile(bashrc, 'utf8');
+
+  await fs.rm(fixture.config.envPath);
+  await fs.mkdir(fixture.config.envPath);
+
+  const preparation = (await prepare(fixture.app, 'claude', 'update')).json();
+  const started = await startWithToken(fixture.app, preparation.token, 'claude', 'update');
+
+  assert.equal(started.statusCode, 202, started.body);
+  fixture.gate.resolve();
+
+  const job = (await completed(fixture.app)).recent.claude;
+
+  assert.equal(job.status, 'failed');
+  assert.equal(job.error.code, 'npm_binding_failed');
+  assert.equal(fixture.config.claudeBin, '/fixture/configured-cli');
+  assert.equal(await fs.readFile(bashrc, 'utf8'), before, 'rc записан до commit');
+});
+
+test('отказ настройки shell после commit сохраняет новую привязку и needs_setup', async (t) => {
+  const fixture = await installNpmFixture(t, { installed: true });
+  const dotfiles = path.join(fixture.root, 'dotfiles-profile');
+
+  await fs.writeFile(dotfiles,
+    'source "$HOME/.bashrc"\n# ссылка на dotfiles\nexport FROM_DOTFILES=1\n');
+  await fs.rm(path.join(fixture.root, '.bash_profile'));
+  await fs.symlink(dotfiles, path.join(fixture.root, '.bash_profile'));
+
+  const preparation = (await prepare(fixture.app, 'claude', 'update')).json();
+
+  assert.equal(preparation.terminalSetup, 'manual');
+  assert.deepEqual(preparation.shellChanges, []);
+
+  const started = await startWithToken(fixture.app, preparation.token, 'claude', 'update');
+
+  assert.equal(started.statusCode, 202, started.body);
+  fixture.gate.resolve();
+
+  const job = (await completed(fixture.app)).recent.claude;
+
+  assert.equal(job.status, 'succeeded', JSON.stringify(job.error));
+  assert.equal(job.terminal.status, 'needs_setup');
+  assert.equal(job.terminal.reason, 'shell_rc_symlink');
+  assert.equal(fixture.config.claudeBin, fixture.npmBinary);
+  assert.ok(job.warnings.some((warning) => warning.code === 'terminal_setup_required'));
+  assert.equal(await fs.readFile(dotfiles, 'utf8'),
+    'source "$HOME/.bashrc"\n# ссылка на dotfiles\nexport FROM_DOTFILES=1\n');
 });

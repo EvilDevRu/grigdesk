@@ -132,7 +132,11 @@ npx esbuild src/panel.js --bundle --format=esm --outfile=ui/panel.js --external:
 
 Default-компонент, пример и полный контракт автора — [plugins/README.md](../../../plugins/README.md).
 CSS и ru/en JSON кладутся в ui отдельно. SFC предварительно компилируется сборкой
-автора с теми же external; runtime template compiler и пакет типов не предоставляются.
+автора с теми же external; runtime template compiler не предоставляется.
+Пакет `@grigdesk/plugin-types` собирается в отдельную папку для dev-проекта автора:
+подключение, mapping `@grigdesk/ui`, версии Vue и правило пересборки описаны в
+[контракте типов](plugin-types.md). Он содержит и типы полного UI-фасада, включая
+служебные экспорты с пометкой `@internal`; готовый плагин пакет типов не загружает.
 
 Сначала обновляют сервер и пакеты desktop/Android, затем устанавливают и включают api2
 с ручным перезапуском. После обновления или отката плагина перезагружают каждое окно,

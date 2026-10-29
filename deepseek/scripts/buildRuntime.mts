@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 
 import { sha256 } from '../../shared/node/hash.ts';
 import { makeReadOnlyTree } from '../../shared/node/files.ts';
+import { GLM_SESSION_EVENTS } from '../../shared/node/glmGateProtocol.ts';
 import { deepSeekPackagePaths } from './paths.ts';
 
 import {
@@ -25,6 +26,8 @@ import {
   COMPOSITION_REVISION,
   RUNTIME_WORKER_PACKAGES,
   discoverRuntimeClosure,
+  glmForegroundPreset,
+  runtimeYaml,
   readRuntimeComposition,
 } from './runtimeComposition.ts';
 
@@ -61,7 +64,11 @@ export async function deepSeekBuildInputs(
     'deepseek/scripts/deepseekBuildLicenses.ts',
     'deepseek/scripts/runtimeComposition.ts', 'deepseek/src/host/entry.mjs', 'deepseek/src/host/webHost.mjs',
     'deepseek/src/host/acpSettingsBridge.mjs',
-    'deepseek/src/host/presetsHost.mjs',
+    'deepseek/src/host/presetsHost.mjs', 'deepseek/src/host/glmGate.mjs',
+    'deepseek/src/host/toolPermissionGate.mjs',
+    'deepseek/src/host/toolPermissionPolicy.mjs',
+    'deepseek/src/host/toolPermissionPaths.mjs',
+    'shared/node/glmGateProtocol.ts', 'shared/lib/canonicalJson.ts',
     'deepseek/build/runtime-deps/package.json', 'deepseek/build/runtime-deps/package-lock.json',
     'deepseek/build/dynamic-imports.json', 'deepseek/build/licenses/sources.json',
     'deepseek/build/licenses/xterm-6.0.0-LICENSE.txt',
@@ -388,6 +395,19 @@ export async function buildDeepSeekRuntime(options: {
     });
     await fs.writeFile(path.join(staging, 'package.json'), '{"private":true,"type":"module"}\n');
 
+    // Каталог persistence статический: append неизвестного имени работает лишь до resume.
+    // В staging добавляем ровно vocabulary host gate; upstream cache остаётся неизменным.
+    const eventCatalog = path.join(staging, 'packages/core/session/src/known-event-types.ts');
+    const catalogSource = await fs.readFile(eventCatalog, 'utf8');
+    const catalogAnchor = 'export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([';
+
+    if (catalogSource.split(catalogAnchor).length !== 2) {
+      throw new Error('Изменился статический каталог событий Harness');
+    }
+
+    await fs.writeFile(eventCatalog, catalogSource.replace(catalogAnchor,
+      `${catalogAnchor}\n${GLM_SESSION_EVENTS.map((name) => `  '${name}',`).join('\n')}`));
+
     const closure = await discoverRuntimeClosure(staging, dependencyRoot);
     const composition = await readRuntimeComposition(staging, dependencyRoot);
     const dynamicImports = JSON.parse(await fs.readFile(
@@ -407,6 +427,19 @@ export async function buildDeepSeekRuntime(options: {
         runtimeYaml(dependencyRoot).dump(patches));
     }
 
+    const presetRoot = path.join(staging, 'packages/preset/agent-presets/presets');
+    const glmPreset = path.join(presetRoot, 'grigdesk-glm');
+    const yaml = runtimeYaml(dependencyRoot);
+    const standard = yaml.load(await fs.readFile(path.join(presetRoot, 'standard/agent.cordis.yml'), 'utf8'));
+
+    await fs.mkdir(glmPreset);
+    await fs.writeFile(path.join(glmPreset, 'agent.cordis.yml'), yaml.dump(glmForegroundPreset(standard)));
+    await fs.writeFile(path.join(glmPreset, 'preset.yml'), yaml.dump({
+      name: 'GLM GrigDesk',
+      description: 'Синхронное делегирование в границах чата',
+      order: 10,
+    }));
+
     await linkWorkspace(staging, closure, dependencyRoot);
     await compileWorkspace(staging, closure, dependencyRoot);
     await exec(process.execPath, ['native/system/scripts/build.ts', '--host-addon-only'], {
@@ -425,6 +458,22 @@ export async function buildDeepSeekRuntime(options: {
       path.join(staging, 'acpSettingsBridge.mjs'));
     await fs.copyFile(deepSeekPackagePaths().hostFiles.presetsHost,
       path.join(staging, 'presetsHost.mjs'));
+
+    for (const role of ['toolPermissionGate', 'toolPermissionPolicy', 'toolPermissionPaths'] as const) {
+      await fs.copyFile(deepSeekPackagePaths().hostFiles[role], path.join(staging, `${role}.mjs`));
+    }
+
+    await fs.copyFile(path.join(deepSeekPackagePaths().root, 'src/host/glmGate.mjs'),
+      path.join(staging, 'glmGate.mjs'));
+    await createRequire(path.join(dependencyRoot, 'package.json'))('esbuild').build({
+      entryPoints: [path.join(repositoryRoot, 'shared/node/glmGateProtocol.ts')],
+      outfile: path.join(staging, 'glmGateProtocol.mjs'),
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      target: 'node24',
+      logLevel: 'silent',
+    });
 
     // Compiler и bundler уже завершили работу; runtime не получает их executable dependencies.
     for (const name of ['typescript', 'esbuild', '@esbuild']) {
@@ -470,13 +519,17 @@ export async function buildDeepSeekRuntime(options: {
         acp: true,
         settingsWeb: true,
         settingsAcp: true,
+        toolPermissions: true,
+        glmNativeGate: true,
       },
       ...(llmPiAi ? { llmPiAi } : {}),
     };
     const inputIdentity = {
       contract,
       source: sha256(JSON.stringify(originalInputs.source)),
-      composition: COMPOSITION_REVISION,
+      // Admission связывает также bytes host gate и преобразования preset.
+      // Изменение helper bridge не сохраняет допуск по одной текстовой ревизии.
+      composition: `${COMPOSITION_REVISION}:${sha256(JSON.stringify(originalInputs.hashes))}`,
       compositionSource: sha256(await fs.readFile(
         deepSeekPackagePaths().scripts.composition,
       )),

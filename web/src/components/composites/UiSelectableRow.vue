@@ -6,7 +6,7 @@
     <UiPressable
       class="ui-selectable-row__primary"
       :disabled="disabled"
-      :aria-pressed="pressed === undefined ? undefined : String(pressed)"
+      :pressed="pressed"
       :aria-selected="selected === undefined ? undefined : String(selected)"
       @click="$emit('select', $event)"
       ><slot

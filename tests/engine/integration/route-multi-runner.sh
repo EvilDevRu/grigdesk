@@ -154,6 +154,38 @@ assert_eq alpha "$(cat "$TEST_ROOT/invocations")" \
 assert_eq 1 "$(get 46 STALLED_HUMAN)" \
   "sandbox denial requests human action"
 
+# Эти сценарии проверяют семантику движка через stage-result, а не native права.
+# Отказ одной команды не мешает разрешённой альтернативе; код 0 без статуса не done.
+for fixture_result in review-alternative human no-status; do
+  case "$fixture_result" in
+    review-alternative) review_task=461 ;;
+    human) review_task=462 ;;
+    no-status) review_task=463 ;;
+  esac
+  init_registry "$review_task"
+  : >"$TEST_ROOT/invocations"
+  export FAKE_ALPHA_RESULT="$fixture_result"
+  run_agent "$review_task" 'route review fixture' BUILD >/dev/null 2>&1
+  review_rc=$?
+  assert_eq alpha "$(cat "$TEST_ROOT/invocations")" "$fixture_result не переключает provider"
+
+  if [[ "$fixture_result" == no-status ]]; then
+    assert_rc 0 "$review_rc" "transport возвращает код завершившегося провайдера"
+    assert_eq running "$(get "$review_task" BUILD)" "rc=0 без stage-result не становится done"
+    source "$FACTORY_HOME/lib/route-runtime.sh"
+    _route_v2_active_result "$(run_state_active_file "$review_task" BUILD)" >/dev/null 2>&1
+    assert_rc 78 "$?" "route reader отвергает отсутствие terminal status"
+  else
+    assert_rc 0 "$review_rc" "$fixture_result доставляет семантический результат"
+    if [[ "$fixture_result" == human ]]; then
+      assert_eq failed "$(get "$review_task" BUILD)" "отказ сдачи остаётся failed"
+    else
+      assert_eq done "$(get "$review_task" BUILD)" "разрешённая альтернатива завершает этап"
+      assert_file_exists "$TEST_ROOT/alternative-effect" "done подтверждён эффектом альтернативы"
+    fi
+  fi
+done
+
 breaker_clear alpha "$alpha_fingerprint" provider "" ""
 init_registry 47
 : >"$TEST_ROOT/invocations"

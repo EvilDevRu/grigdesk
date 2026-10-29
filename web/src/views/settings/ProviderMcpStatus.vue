@@ -18,7 +18,9 @@
       aria-live="polite"
     >
       <UiLoadingState v-if="!status || (status.loading && !status.servers)"
-        :label="t('settings.gettingTheListFromTheProvider')" />
+        :label="t('settings.gettingTheListFromTheProvider')" :failed="Boolean(status?.state === 'error')" >
+        <div class="mcp-loading"><UiSkeletonLayout layout="list" :header="false" /></div>
+      </UiLoadingState>
       <p v-else-if="status.state === 'error'" class="msg err">
         {{ t('settings.couldNotGetTheList') }} {{ status.error }}
       </p>
@@ -63,6 +65,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../ui';
+
 import { t, uiLocale } from '../../ui.ts';
 import { intlLocale } from '../../../../shared/i18n/formats.ts';
 import { translator } from '../../../../shared/i18n/catalogs.ts';
@@ -246,6 +250,11 @@ function mcpState(server: McpServer): McpState {
 </script>
 
 <style scoped>
+.mcp-loading {
+  --skeleton-row-height: 26px;
+  --skeleton-avatar-size: 8px;
+}
+
 .provider-mcp-slot {
   display: flex;
   flex-direction: column;

@@ -133,6 +133,8 @@ test('установленный Codex сохраняет необходимый
     'item/commandExecution/outputDelta',
     'item/fileChange/patchUpdated',
     'turn/diff/updated',
+    'item/autoApprovalReview/started',
+    'item/autoApprovalReview/completed',
   ]) {
     assertMethod(serverNotification, method, version, 'ServerNotification');
   }
@@ -190,14 +192,65 @@ test('установленный Codex сохраняет необходимый
     'InitializeCapabilities');
   assertField(initializeCapabilities, 'requestAttestation', 'boolean', version,
     'InitializeCapabilities');
+
   for (const [source, name] of [
     [threadStartParams, 'ThreadStartParams'],
     [threadResumeParams, 'ThreadResumeParams'],
   ]) {
-    for (const field of ['model', 'cwd', 'approvalPolicy', 'sandbox', 'config']) {
+    for (const field of ['model', 'cwd', 'approvalPolicy', 'approvalsReviewer', 'sandbox', 'config']) {
       assertSchemaPattern(source, new RegExp(`\\b${field}\\?\\s*:`), field, version, name);
     }
   }
+  for (const name of ['ThreadStartResponse', 'ThreadResumeResponse']) {
+    const source = await schema(`v2/${name}.ts`);
+
+    assertField(source, 'approvalPolicy', 'AskForApproval', version, name);
+    assertField(source, 'approvalsReviewer', 'ApprovalsReviewer', version, name);
+    assertField(source, 'sandbox', 'SandboxPolicy', version, name);
+  }
+
+  const reviewer = await schema('v2/ApprovalsReviewer.ts');
+
+  assert.match(reviewer, /"auto_review"/);
+
+  const completedReview = await schema('v2/ItemGuardianApprovalReviewCompletedNotification.ts');
+
+  for (const field of ['threadId', 'turnId', 'reviewId']) {
+    assertField(completedReview, field, 'string', version, 'AutoApprovalReview.completed');
+  }
+
+  assertField(completedReview, 'targetItemId', 'string | null', version, 'AutoApprovalReview.completed');
+  assertField(completedReview, 'review', 'GuardianApprovalReview', version, 'AutoApprovalReview.completed');
+  assertField(completedReview, 'action', 'GuardianApprovalReviewAction', version,
+    'AutoApprovalReview.completed');
+  assertField(completedReview, 'decisionSource', 'AutoReviewDecisionSource', version,
+    'AutoApprovalReview.completed');
+
+  const review = await schema('v2/GuardianApprovalReview.ts');
+
+  assertField(review, 'status', 'GuardianApprovalReviewStatus', version, 'GuardianApprovalReview');
+  assertField(review, 'rationale', 'string | null', version, 'GuardianApprovalReview');
+
+  const reviewStatus = await schema('v2/GuardianApprovalReviewStatus.ts');
+
+  for (const status of ['approved', 'denied', 'timedOut', 'aborted']) {
+    assert.match(reviewStatus, new RegExp(`"${status}"`));
+  }
+
+  const action = await schema('v2/GuardianApprovalReviewAction.ts');
+
+  for (const type of [
+    'command', 'execve', 'writeStdin', 'applyPatch', 'networkAccess', 'mcpToolCall', 'requestPermissions',
+  ]) {
+    assertSchemaPattern(action, new RegExp(`"type"\\s*:\\s*"${type}"`), type, version, 'ReviewAction');
+  }
+  for (const field of ['command', 'program', 'processId', 'target', 'host', 'server', 'toolName']) {
+    assertField(action, field, 'string', version, 'ReviewAction');
+  }
+
+  assertField(action, 'argv', 'Array<string>', version, 'ReviewAction');
+  assertField(action, 'files', 'Array<LegacyAppPathString>', version, 'ReviewAction');
+  assertField(action, 'reason', 'string | null', version, 'ReviewAction');
   assertField(threadResumeParams, 'threadId', 'string', version, 'ThreadResumeParams');
   assertSchemaPattern(
     threadStartParams,
@@ -235,7 +288,10 @@ test('установленный Codex сохраняет необходимый
   );
   assertField(turnStartParams, 'threadId', 'string', version, 'TurnStartParams');
   assertField(turnStartParams, 'input', 'Array<UserInput>', version, 'TurnStartParams');
-  for (const field of ['cwd', 'approvalPolicy', 'sandboxPolicy', 'model', 'effort', 'summary']) {
+
+  for (const field of [
+    'cwd', 'approvalPolicy', 'approvalsReviewer', 'sandboxPolicy', 'model', 'effort', 'summary',
+  ]) {
     assertSchemaPattern(turnStartParams, new RegExp(`\\b${field}\\?\\s*:`), field, version,
       'TurnStartParams');
   }
@@ -253,7 +309,9 @@ test('установленный Codex сохраняет необходимый
   }
   assert.equal(
     await codex.scopedWorkspace({ codexBin: CODEX_BIN }),
-    /\breadOnlyAccess\b/.test(sandboxPolicy),
+    /\breadOnlyAccess\b/.test(sandboxPolicy)
+      || [threadStartParams, threadResumeParams, turnStartParams]
+        .every((source) => /\bpermissions\?\s*:\s*string\b/u.test(source)),
     `Codex ${version}: capability scopedWorkspace не совпадает с живой схемой`,
   );
 
@@ -322,7 +380,14 @@ function startThread({ capabilities, params, codexHome }) {
         send({ method: 'initialized' });
         send({ method: 'thread/start', id: 2, params });
       } else if (message.id === 2) {
-        finish({ error: message.error ?? null, thread: message.result?.thread ?? null, stderr });
+        finish({
+          error: message.error ?? null,
+          thread: message.result?.thread ?? null,
+          approvalPolicy: message.result?.approvalPolicy,
+          approvalsReviewer: message.result?.approvalsReviewer,
+          sandbox: message.result?.sandbox,
+          stderr,
+        });
       }
     });
     send({ method: 'initialize', id: 1, params: {
@@ -419,6 +484,38 @@ test('установленный Codex принимает runtimeWorkspaceRoots 
     /experimentalApi/,
     'без experimentalApi app-server обязан отказать, а не принять поле тихо',
   );
+});
+
+test('установленный Codex принимает on-request/auto_review без модели и без изменения песочницы', {
+  timeout: 30_000,
+}, async (t) => {
+  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-review-state-'));
+
+  t.after(() => fs.rm(codexHome, { recursive: true, force: true }));
+
+  const response = await startThread({
+    capabilities: { experimentalApi: true, requestAttestation: false },
+    codexHome,
+    params: {
+      cwd: codexHome,
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
+      sandbox: 'workspace-write',
+      ephemeral: true,
+      serviceName: 'grigdesk',
+    },
+  });
+
+  if (response.spawnError?.code === 'ENOENT') {
+    return t.skip(`Codex CLI не установлен (${CODEX_BIN})`);
+  }
+
+  assert.equal(response.timeout, undefined, 'app-server не ответил на thread/start Auto-review');
+  assert.equal(response.error, null, JSON.stringify(response.error));
+  assert.ok(response.thread?.id);
+  assert.equal(response.approvalPolicy, 'on-request');
+  assert.equal(response.approvalsReviewer, 'auto_review');
+  assert.equal(response.sandbox?.type, 'workspaceWrite');
 });
 
 test('установленный Codex объявляет process hook как enabled sessionFlags без model call', {

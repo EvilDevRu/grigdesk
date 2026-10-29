@@ -12,6 +12,7 @@ import { TerminalSession } from '../../cli/terminal.ts';
  */
 function terminalOutput(t: TestContext, mode: string, columns = 40) {
   const original = { TERM: process.env.TERM, NO_COLOR: process.env.NO_COLOR };
+  const writes: string[] = [];
   let value = '';
 
   process.env.TERM = mode === 'dumb' ? 'dumb' : 'xterm-256color';
@@ -34,6 +35,7 @@ function terminalOutput(t: TestContext, mode: string, columns = 40) {
   const output = {
     columns,
     write(chunk: string) {
+      writes.push(chunk);
       value += chunk;
 
       return true;
@@ -43,6 +45,7 @@ function terminalOutput(t: TestContext, mode: string, columns = 40) {
   return {
     session: new TerminalSession({ output }),
     output: () => value,
+    writes: () => writes,
   };
 }
 
@@ -67,7 +70,46 @@ test('терминальные стили очищают внешние escape �
   assert.doesNotMatch(output, /malicious|\x1b\]52/u);
   assert.equal(text, '› Открыть окно данные'.padEnd(32) + '\n');
   assert.ok(output.endsWith('\x1b[0m\n'));
+  assert.equal(box.writes().length, 1, 'Очистка и содержимое должны записываться одним кадром');
 });
+
+for (const mode of ['color', 'NO_COLOR']) {
+  test(`прогресс меняет только нужные строки и пропускает одинаковые кадры: ${mode}`, (t) => {
+    const box = terminalOutput(t, mode);
+    const options = {
+      theme: 'dark',
+      width: 32,
+      incremental: true,
+    } as const;
+
+    box.session.draw(['Заголовок', '10%', 'Стадия сборки'], undefined, options);
+    box.session.draw(['Заголовок', '10%', 'Стадия сборки'], undefined, options);
+    assert.equal(box.writes().length, 1);
+
+    box.session.draw(['Заголовок', '11%', 'Стадия сборки'], undefined, options);
+
+    const update = box.writes()[1]!;
+
+    assert.match(update, /\x1b\[2;1H/u);
+    assert.match(update, /11%/u);
+    assert.doesNotMatch(update, /Заголовок|Стадия|\x1b\[J/u);
+    assert.equal(box.writes().length, 2);
+
+    box.session.draw(['Заголовок', '11%'], undefined, options);
+    assert.match(box.writes()[2]!, /\x1b\[3;1H(?:\x1b\[[\d;]*m)*\x1b\[J/u,
+      'Остаток прежнего кадра удаляется');
+
+    box.session.output.columns = 36;
+    box.session.draw(['Заголовок', '11%'], undefined, options);
+    assert.match(box.writes()[3]!, /\x1b\[H\x1b\[J/u, 'После resize нужен полный кадр');
+    box.session.suspend();
+
+    const before = box.writes().length;
+
+    box.session.draw(['Заголовок', '11%'], undefined, options);
+    assert.match(box.writes()[before]!, /\x1b\[H\x1b\[J/u, 'Внешний вывод сбрасывает снимок');
+  });
+}
 
 for (const mode of ['NO_COLOR', 'dumb']) {
   test(`терминальные стили сохраняют выбор и границы без цвета: ${mode}`, (t) => {

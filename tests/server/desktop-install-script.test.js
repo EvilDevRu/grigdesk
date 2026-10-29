@@ -86,7 +86,10 @@ function sandbox(t, { build = true } = {}) {
     XDG_CONFIG_HOME: path.join(home, 'config'),
     GRIGDESK_NODE_DIR: nodeDir,
   };
-  const runVia = (script, action, overrides = {}) => spawnSync('/bin/bash', [script, action], {
+  const runVia = (script, action, overrides = {}) => spawnSync('/bin/bash', [
+    script,
+    ...Array.isArray(action) ? action : [action],
+  ], {
     env: {
       ...env,
       ...overrides,
@@ -855,4 +858,23 @@ test('REVIEW-P11: source desktop install сохраняет выбранный S
     assert.equal(readFileSync(box.destination, 'utf8'), 'сборка 9.9.9');
     assert.match(result.stdout, /выбор.*SEA.*сохранён/i);
   }
+});
+
+test('build all: установка окна с --keep-runtime сохраняет source другой установки', (t) => {
+  const box = sandbox(t);
+  const previous = JSON.stringify({
+    version: 2,
+    root: path.join(box.root, 'другие исходники'),
+    node: process.execPath,
+    home: path.join(box.home, 'другие данные'),
+  }) + '\n';
+
+  mkdirSync(path.dirname(box.runtime), { recursive: true });
+  writeFileSync(box.runtime, previous, { mode: 0o600 });
+
+  const result = box.run(['install', '--keep-runtime']);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(box.runtime, 'utf8'), previous);
+  assert.equal(readFileSync(box.destination, 'utf8'), 'сборка 9.9.9');
 });

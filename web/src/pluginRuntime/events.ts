@@ -3,9 +3,9 @@ import type { Ref } from 'vue';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { sseSubscribe } from '../composables/useSse.ts';
 
-export interface PluginEventOptions {
-  lifetime?: 'panel' | 'background';
-}
+import type { PluginEventOptions } from '../../../packages/plugin-types/src/web.js';
+
+export type { PluginEventOptions } from '../../../packages/plugin-types/src/web.js';
 
 type Subscribe = (event: string, listener: (data: unknown) => void, init: PluginEventOptions) => () => void;
 

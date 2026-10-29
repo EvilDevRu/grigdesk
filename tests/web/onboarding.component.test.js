@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { card, job, snapshot } from './helpers/providerInstallFixture.js';
+import { card, job, preparation, snapshot } from './helpers/providerInstallFixture.js';
 import {
   atProject, atWorkspace, fillProject, names, repository, request, requireWizard,
   token, waitState, wizardBrowser,
@@ -103,11 +103,17 @@ test('ONB-AI-01: статусы, общий installer, login без Enter и н�
   const { page } = f;
   const refreshed = [];
   const installationPosts = [];
+  const prepared = preparation({ operation: 'install' });
   let installation = snapshot();
 
   await page.route('**/api/providers/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname;
 
+    if (pathname === '/api/providers/claude/install/prepare') {
+      await route.fulfill({ json: prepared });
+
+      return;
+    }
     if (pathname === '/api/providers/claude/install/start') {
       installationPosts.push(route.request().postDataJSON());
       installation = snapshot(null, 1, {
@@ -140,15 +146,23 @@ test('ONB-AI-01: статусы, общий installer, login без Enter и н�
     'setup-only не объявлен готовым для чатов');
   await page.getByRole('button', { name: /установить.*Claude|установить/i }).last().click();
 
-  const confirmation = page.getByRole('dialog').last();
+  const confirmation = page.getByRole('dialog').filter({
+    has: page.locator('.ui-dialog-host__message'),
+  }).last();
 
   await confirmation.waitFor();
   assert.equal(installationPosts.length, 0);
+
+  const details = confirmation.getByRole('button', { name: 'Подробности', exact: true });
+
+  assert.equal(await details.getAttribute('aria-expanded'), 'false');
+  await details.click();
   assert.ok((await confirmation.innerText()).includes(cards[0].installation.installCommand));
   await confirmation.getByRole('button', { name: /^(Установить|Install)$/ }).click();
   await page.locator('[data-role="provider-install-dialog"]').waitFor();
   assert.equal(await page.locator('[data-role="provider-install-dialog"]').count(), 1);
-  assert.deepEqual(installationPosts, [{}], 'Команда берётся сервером, браузер посылает пустое тело');
+  assert.deepEqual(installationPosts, [{ preparationToken: prepared.token }],
+    'Команда берётся сервером, браузер посылает только токен подготовки');
   await page.keyboard.press('Escape');
 
 

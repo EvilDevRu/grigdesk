@@ -19,6 +19,7 @@ export interface StartDeepSeekServerOptions {
   bin: string;
   runtime?: DeepSeekRuntimeDescriptor;
   overlayPath: string;
+  toolPolicyPath?: string;
   cwd: string;
   env: NodeJS.ProcessEnv;
   spawnProcess?: typeof spawn;
@@ -91,6 +92,7 @@ export async function startDeepSeekServer(options: StartDeepSeekServerOptions): 
   const args = [
     ...(options.runtime?.prefixArgs || []),
     '--profile', 'web', '--patch', options.overlayPath,
+    ...(options.toolPolicyPath ? ['--grigdesk-tool-policy', options.toolPolicyPath] : []),
     '--host', '127.0.0.1', '--port', String(port), '--no-open',
   ];
   const spawnOptions: SpawnOptions = {

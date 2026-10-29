@@ -119,19 +119,20 @@ test('overlay вставляет llm-pi-ai с маршрутом режима, �
   }
 });
 
-test('PreToolUse с matcher * ведёт на GLM policy hook; UserPromptSubmit — на hook инструкций', async (t) => {
+test('web использует native gate, UserPromptSubmit сохраняет только инструкции', async (t) => {
   const f = await fixture(t);
   const files = await buildGlmLaunchFiles(launchOptions(f));
   const hooks = JSON.parse(await fs.readFile(files.hooksPath, 'utf8')).hooks;
   const rows = await overlayRows(files);
   const bridge = insertRows(rows).find((row) => row.id === 'hooks-claude-code');
 
-  assert.deepEqual(Object.keys(hooks).sort(), ['PreToolUse', 'UserPromptSubmit']);
-  assert.equal(hooks.PreToolUse.length, 1);
-  assert.equal(hooks.PreToolUse[0].matcher, '*');
-  assert.equal(hooks.PreToolUse[0].hooks.length, 1);
-  assert.match(hooks.PreToolUse[0].hooks[0].command, /glmToolPolicyHook\.mts/u);
-  assert.equal(hooks.PreToolUse[0].hooks[0].timeout, 30);
+  const gate = insertRows(rows).find((row) => row.id === 'grigdesk-glm-gate');
+
+  assert.deepEqual(Object.keys(hooks), ['UserPromptSubmit']);
+  assert.equal(hooks.UserPromptSubmit[0].hooks.length, 1);
+  assert.match(gate.config.command, /glmToolPolicyHook\.mts.*--native-gate/u);
+  assert.equal(gate.config.launchId, files.nativeGate.launchId);
+  assert.equal(rows.find((row) => row.id === 'agent-presets').config.default, 'grigdesk-glm');
   assert.match(hooks.UserPromptSubmit[0].hooks[0].command, /deepseekInstructionsHook\.mts/u);
   assert.equal(bridge?.config.configPath, files.hooksPath);
   assert.equal(bridge?.config.projectDir, f.cwd);
@@ -229,6 +230,12 @@ test('overlay с подменой адреса отличается от product
   const right = normalize(substituted);
   const leftInsert = insertRows(left);
   const rightInsert = insertRows(right);
+  const leftGate = leftInsert.find((row) => row.id === 'grigdesk-glm-gate');
+  const rightGate = rightInsert.find((row) => row.id === 'grigdesk-glm-gate');
+
+  assert.notEqual(leftGate.config.launchId, rightGate.config.launchId);
+  rightGate.config.launchId = leftGate.config.launchId;
+
   const guard = rightInsert.filter((row) => !leftInsert.some((other) => other.id === row.id));
 
   assert.deepEqual(guard.map((row) => row.id), ['grigdesk-glm-egress-guard']);

@@ -612,12 +612,15 @@ _runner_lifecycle_started_v2() {
   local runner_id=$1 run_id=$2 epoch=$3 model=$4 effort=$5 family=$6
   local pid=$7 pgid=$8 session=$9 starttime=${10} provider_mode=${11}
   local requested_scope=${12} parent_ref=${13} reservation=${14} generation=${15}
-  local ordinal=${FACTORY_LIFECYCLE_CANDIDATE_ORDINAL:-0} run_reason details process span
+  local ordinal=${FACTORY_LIFECYCLE_CANDIDATE_ORDINAL:-0} run_reason details process span lifecycle_model
   runtime_lifecycle_enabled_v2 || {
     runtime_analytics_hash_string_v2 "standalone-runner-started:$runner_id:$run_id:$epoch"
     return
   }
   [[ -n "${FACTORY_LIFECYCLE_DISPATCH_ID:-}" ]] || return 78
+
+  lifecycle_model=$(runtime_lifecycle_model_id_v2 "$model") || return
+
   export FACTORY_LIFECYCLE_RUN_ID=$run_id FACTORY_LIFECYCLE_EPOCH=$epoch
   run_reason=${FACTORY_LIFECYCLE_RUN_REASON:-primary}
   case "$run_reason" in
@@ -633,8 +636,8 @@ _runner_lifecycle_started_v2() {
   local -a fields=(
     candidateOrdinal integer "$ordinal"
     provider string "$runner_id"
-    requestedModel string "$model"
-    resolvedModel string "$model"
+    requestedModel string "$lifecycle_model"
+    resolvedModel string "$lifecycle_model"
     effort string "$effort"
     family string "${family:-exact}"
     runReason string "$run_reason"

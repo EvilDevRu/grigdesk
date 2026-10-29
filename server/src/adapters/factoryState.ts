@@ -15,6 +15,7 @@ import { buildRouteDef, routeStageKeys } from '../lib/routeGraph.ts';
 import { readLoopProgress } from '../lib/factoryLoopProgress.ts';
 import { RoutesStore } from '../modules/routes/store.ts';
 import { parseSandboxRepositories } from '../lib/sandboxEnv.ts';
+import { readProfileServiceHost } from '../lib/profileServiceHost.ts';
 import { routeInstrumentationMode } from '../lib/factoryLaunchContract.ts';
 import { bootstrapNodeVerdict, readNodeVerdicts, stopVerdictOf } from '../lib/factoryNodeVerdicts.ts';
 import { stallIsArbitrable } from '../lib/factoryArbiter.ts';
@@ -33,6 +34,7 @@ import type { ProfileGraphDef, LoopFacts } from '../lib/factoryGraph.ts';
 import type { RouteGraphDef } from '../lib/routeGraph.ts';
 import type { StallInfo, StallEvent } from '../lib/stall.ts';
 import type { ArbiterCardsStore } from '../lib/arbiterCards.ts';
+import type { ArbiterConversationStore } from '../lib/arbiterConversationStore.ts';
 
 // Реестр задачи — плоская провайдерская проекция `tNNNN.pipeline`.
 type Registry = Record<string, string>;
@@ -106,6 +108,7 @@ export interface FactoryStateAdapterOptions {
   controlDir?: string | null;
   workTimeReader?: WorkTimeReader | null;
   arbiterCards?: ArbiterCardsStore | null;
+  arbiterConversations?: ArbiterConversationStore | null;
 }
 
 export class FactoryStateAdapter {
@@ -120,6 +123,8 @@ export class FactoryStateAdapter {
   // Разбор арбитра последней остановки. Только чтение: пишет его модуль factory после
   // хода, а карточка задачи и модалка узла обязаны его видеть, а не терять.
   readonly arbiterCards: ArbiterCardsStore | null;
+
+  readonly arbiterConversations: ArbiterConversationStore | null;
 
   readonly workTimeReader: WorkTimeReader | null;
 
@@ -137,13 +142,14 @@ export class FactoryStateAdapter {
 
   constructor({
     stateDir, profilesDir, routesDir = null, controlDir = null, workTimeReader = null,
-    arbiterCards = null,
+    arbiterCards = null, arbiterConversations = null,
   }: FactoryStateAdapterOptions) {
     this.stateDir = stateDir;
     this.profilesDir = profilesDir;
     this.routesDir = routesDir;
     this.controlDir = controlDir;
     this.arbiterCards = arbiterCards;
+    this.arbiterConversations = arbiterConversations;
     this.workTimeReader = workTimeReader;
   }
 
@@ -612,6 +618,10 @@ export class FactoryStateAdapter {
         loop: registry.LOOP_MODE === '1',
       }),
       arbiter: this.arbiterCards?.read(task, trusted.attempt) || null,
+      conversation: this.arbiterConversations?.readSummary(
+        String(task), trusted.attempt, trusted.stageIdentity,
+      ) || null,
+      conversationHistory: Boolean(this.arbiterConversations?.history(String(task), trusted.attempt).length),
     };
   }
 
@@ -750,6 +760,7 @@ export class FactoryStateAdapter {
       node: string | null;
       arbitrable: boolean;
       arbiter: unknown;
+      conversation?: unknown;
     }) | null = detectedStall
       ? {
         ...detectedStall,
@@ -757,6 +768,9 @@ export class FactoryStateAdapter {
         arbitrable: bootstrap ? false : arbitrable,
         // Человеческая формулировка того же затыка, если арбитр его уже разбирал.
         arbiter: this.arbiterCards?.read(task, trusted?.attempt) || null,
+        conversation: trusted ? this.arbiterConversations?.readSummary(
+          String(task), trusted.attempt, trusted.stageIdentity,
+        ) || null : null,
       }
       : null;
     // Реестр остаётся `running`, когда движок после исчерпания попыток ставит
@@ -843,8 +857,8 @@ export class FactoryStateAdapter {
       // Только agent-узлы запускаются через multi-runner. Для code/human цепочка
       // выглядела бы обещанием запуска ИИ там, где работает shell или ждёт человек.
       if (def.nodes[nid]?.[0] === 'agent') {
-        const runner = resolveRunnerState(runnerConfig, registry, runnerKey);
         const attempts = await readRunnerAttempts(stateDir, task, runnerKey);
+        const runner = resolveRunnerState(runnerConfig, registry, runnerKey, attempts);
         // Этап и попытки — проекция для UI поверх политики runner-а, а не её поля.
         nodeMeta[nid] = {
           ...nodeMeta[nid],
@@ -888,6 +902,7 @@ export class FactoryStateAdapter {
       stall,
       fePort: env.FE_PORT || null,
       apiPort: env.API_PORT || null,
+      serviceHost: await readProfileServiceHost(this.profilesDir, profile),
       // Стенд ещё строится (портов нет) — отдаём прогресс сборки для футера карточки.
       sandbox,
       progress: { done: doneCount, total: chain.length, current: cur },
@@ -900,6 +915,8 @@ export class FactoryStateAdapter {
       // нет: без этой сводки человек принимал бы план и результат, не зная, сколько раз
       // конвейер разворачивался сам и какие развилки закрыли за него.
       arbiterLog: this.arbiterCards?.read(task, trusted?.attempt)?.history || [],
+      arbiterConversations: trusted
+        ? this.arbiterConversations?.history(String(task), trusted.attempt) || [] : [],
       updatedAt: mtime,
     };
   }

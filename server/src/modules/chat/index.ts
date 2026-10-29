@@ -1,3 +1,5 @@
+import { projectWebChatHead } from '../../../../shared/chat/chatListProjection.ts';
+import { applyWebPending } from '../../lib/chat/webPendingHistory.ts';
 import { ChatProjectWorkspaces } from '../../lib/chat/projectWorkspaces.ts';
 import { isProjectDeleted, readProjectsMeta, readProjectRecord, projectRepos } from '../../lib/projects.ts';
 import type { ProjectsService } from '../projects/service.ts';
@@ -9,6 +11,12 @@ import { projectDeletionError } from '../projects/errors.ts';
 // Интерактивные права реализованы Claude executor-ом через permission-prompt-tool
 // (lib/chat/permission-mcp.js): запрос показывается всплывашкой в браузере.
 import fp from 'fastify-plugin';
+
+// Расширения Fastify нужны и при отдельном импорте модуля из веб-фикстуры.
+// Импорты типов не регистрируют плагины: это по-прежнему делает серверное приложение.
+import type {} from '@fastify/multipart';
+import type {} from '@fastify/websocket';
+
 import { promises as fs, createWriteStream, rmSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
@@ -17,6 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 
 import { createWorkTools, getExecutor } from '../../lib/executors/index.ts';
+import { ExecutorRuntimeError } from '../../lib/executors/errors.ts';
 import { prepareChatNativeSettings } from '../../lib/executorSettings/launch.ts';
 import { NativeSettingsError } from '../../lib/executorSettings/errors.ts';
 import { createWorkIpc } from '../../lib/executors/workIpc.ts';
@@ -140,6 +149,8 @@ import type { PermissionQueue } from '../../lib/chat/permissionQueue.ts';
 import type { StructuredQuestion, StructuredAnswer } from '../../lib/chat/structuredAnswers.ts';
 import type { WorkIpc, WorkToolsPort } from '../../lib/executors/workIpc.ts';
 import type { ExecutorAdapter, ExecutorRunInput, ExecutorRunResult } from '../../lib/executors/index.ts';
+import { isChatModeSelection } from '../../../../shared/chat/chatPermissionModes.ts';
+import { PERMISSION_WAIT_MS } from '../../lib/chat/permissionQueue.ts';
 import type { SshBroker, BrokerScope, BrokerInput } from '../../lib/ssh/broker.ts';
 import type { DbBroker, DbBrokerScope, DbBrokerInput } from '../../lib/db/broker.ts';
 import type { SpeechRuntime } from '../../lib/speech/runtime.ts';
@@ -152,6 +163,7 @@ interface ChatTurnInput {
   modelRef?: unknown;
   effort?: string;
   mode?: string;
+  modeSelection?: unknown;
   sessionId?: string | null;
   context?: unknown;
   attachments?: Array<{ file?: unknown }>;
@@ -212,6 +224,10 @@ interface ChatBody extends ChatTurnInput, ChatMeta {
   archived?: StoredChat[] | boolean;
   chat?: StoredChat;
   reuseSteps?: unknown;
+  known?: Record<string, unknown>;
+  patch?: Record<string, unknown>;
+  loadedIds?: unknown;
+  deliveryIds?: unknown;
 }
 
 type ChatRoute = {
@@ -223,6 +239,7 @@ type ChatRequest = FastifyRequest<ChatRoute>;
 
 // Интерактивный канал дополняет общую очередь полями самой карточки вопроса.
 interface InteractionPresentation {
+  blocking?: boolean;
   isQuestion?: boolean;
   actions?: string[];
   questions?: StructuredQuestion[];
@@ -285,6 +302,8 @@ interface ChatExecutor {
   bin?: ExecutorAdapter['bin'];
   nativeSettings?: ExecutorAdapter['nativeSettings'];
   prepareRuntime?: ExecutorAdapter['prepareRuntime'];
+  runtimeProfileFingerprint?: ExecutorAdapter['runtimeProfileFingerprint'];
+  workToolPolicy?: ExecutorAdapter['workToolPolicy'];
   // Канал ввода в активный ход объявляет сам адаптер; отсутствие — честное «не умею».
   inTurnInput?: ExecutorAdapter['inTurnInput'];
   workToolsTransport?: string;
@@ -293,6 +312,7 @@ interface ChatExecutor {
   // Таблицу видов сбоя объявляет адаптер; отсутствие — работают общие признаки.
   turnFailureRules?: ExecutorAdapter['turnFailureRules'];
   modes?: (config: GrigDeskConfig) => Promise<Array<{ id: string }> | null>;
+  normalizePermissionMode?: ExecutorAdapter['normalizePermissionMode'];
   commands?: (config: GrigDeskConfig) => Promise<Array<{ cmd: string; run?: string }>>;
   run: NonNullable<ExecutorAdapter['run']>;
   sessionBinding?: ExecutorAdapter['sessionBinding'];
@@ -1227,6 +1247,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       model: target.model,
       effort: String(record.effort || ''),
       mode: String(record.mode || ''),
+      modeSelection: record.modeSelection,
       sessionId,
       target,
       queued: false,
@@ -1271,24 +1292,25 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }),
   });
 
-  // До появления новых ходов завершаем durable фазы прошлого процесса. Выжимку
-  // повторно не заказываем; один повреждённый путь не мешает загрузить остальные чаты.
-  const startupChats = await history.scan();
-
-  for (const { chat: record } of startupChats.values()) {
-    const state = record.workdirState;
-    const phase = state?.transition?.phase;
-
-    if (!state?.seedClaim && (!phase || ['done', 'failed'].includes(phase))) {
-      continue;
-    }
-
-    try {
-      await workdirTransitions.recover(record.id!);
-    } catch (error) {
-      fastify.log.warn({ err: (error as Error).message }, 'восстановление рабочей папки не завершено');
+  /**
+   * Незавершённые переходы выбираются из общей подготовки коротких шапок.
+   * Полные чаты читает только recover; остальные API доступны во время прогрева.
+   */
+  async function recoverCatalogWorkdirs() {
+    for (const id of await history.workdirRecoveryIds()) {
+      try {
+        await workdirTransitions.recover(id);
+      } catch (error) {
+        fastify.log.warn({ err: (error as Error).message }, 'восстановление рабочей папки не завершено');
+      }
     }
   }
+
+  fastify.addHook('onRequest', async (request) => {
+    if (/^\/api\/chat\/(?:store|workdir|sessions?)(?:\/|\?|$)/.test(request.url)) {
+      await catalogPreparation;
+    }
+  });
 
   /**
    * Ошибка workspace всегда является отказом до запуска исполнителя.
@@ -1829,7 +1851,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // Ждём ответ СКОЛЬКО НУЖНО: «не успел за 4 минуты» — не повод продолжать без человека.
   // Сутки — верхняя граница здравого смысла, столько же держит вызов сам CLI
   // (MCP_TOOL_TIMEOUT, см. runChat). Раньше снимает только «стоп» или конец хода.
-  const PERM_WAIT_MS = 24 * 60 * 60 * 1000;
+  const PERM_WAIT_MS = PERMISSION_WAIT_MS;
 
   permissionQueue.subscribe?.((event) => {
     const origin = event.origin || event.entry?.origin;
@@ -1871,7 +1893,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const pid = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
     const at = Date.now();
     const isQuestion = !!presentation?.isQuestion;
-    const releaseQuestion = isQuestion ? holdInTurnForQuestion(chatKey) : () => {};
+    const releaseQuestion = isQuestion && presentation.blocking !== false
+      ? holdInTurnForQuestion(chatKey) : () => {};
     const presentationActions = Array.isArray(presentation?.actions)
       && presentation.actions.length
       ? presentation.actions
@@ -2512,6 +2535,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    * означает «исполнитель точно не запускался».
    */
   async function prepareTurn(opts: ChatTurnInput): Promise<PreparedTurn | (TurnReply & { ok: false })> {
+    await catalogPreparation;
+
     const chatKey = String(opts.chatKey || '');
     const strict = await companionScopePreflight(opts);
 
@@ -2837,6 +2862,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           model: String(record.model || ''),
           effort: String(record.effort || ''),
           mode: String(record.mode || ''),
+          modeSelection: record.modeSelection,
           workdir: record.workdir,
           sessionId: record.sessionId || null,
           requestTitle: !record.title && !(record.messages || []).some((message) => message.role === 'user'),
@@ -2865,6 +2891,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         userText: opts.message || '',
         hadAttachments: !!opts.attachments?.length,
         workspace: prepared.target.workspace,
+        permissionMode: opts.mode,
+        ...(isChatModeSelection(opts.modeSelection) ? { modeSelection: { ...opts.modeSelection } } : {}),
         ...(opts.mobileOwner ? {
           mobileOwner: { ...opts.mobileOwner },
           mobileHistoryEpoch: Number(prepared.target.record?.mobileHistoryEpoch || 0),
@@ -3052,7 +3080,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    * решает канал: ответом на запрос или записью в pending (принятый ход, оборванный сокет).
    */
   async function runChatTurn(channel: TurnChannel, {
-    id, message, model, effort, mode: wantMode, sessionId, context, attachments,
+    id, message, model, effort, mode: wantMode, modeSelection, sessionId, context, attachments,
     chatKey, queued, requestTitle, sentAt, compact, slashCommand, target, summaryWorkspace, workspaceKey,
     mobileOwner,
   }: ChatTurnInput & {
@@ -3213,7 +3241,24 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       );
     // Режим прав выбирает только пользователь в чате. UI-context не является
     // authorization surface и не даёт ни cwd, ни fallback permission mode.
-    const permissionMode = await allowedMode(executor, wantMode);
+    const normalizedMode = executor?.normalizePermissionMode?.(wantMode);
+
+    if (normalizedMode && !normalizedMode.ok) {
+      return channel.refuse(400, {
+        error: 'invalid_permission_mode',
+        message: normalizedMode.message,
+      });
+    }
+
+    const permissionMode = normalizedMode?.ok
+      ? normalizedMode.mode : await allowedMode(executor, wantMode);
+
+    if (modeSelection !== undefined && !isChatModeSelection(modeSelection)) {
+      return channel.refuse(400, {
+        error: 'invalid_permission_mode',
+        message: 'Некорректный маркер выбора режима.',
+      });
+    }
 
     if (!executor) {
       return channel.refuse(400, {
@@ -3223,15 +3268,18 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }
 
     const workProjectId = await trustedWorkProject(id);
+    const workToolPolicy = executor.workToolPolicy?.(permissionMode);
     const workToolScopeKey = [
       workProjectId || 'none',
       chatKey || id || 'free',
       permissionMode,
+      JSON.stringify(workToolPolicy || null),
     ].join(':');
     const workToolsValue = createWorkTools({
       projectId: workProjectId,
       chatKey,
       permissionMode,
+      workToolPolicy,
       invoke: (scope: BrokerScope, input: BrokerInput) => (sshBroker
         ? sshBroker.invoke(scope, input)
         : Promise.resolve({ ok: false, error: 'not_available' })),
@@ -3270,20 +3318,40 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     };
     let nativeSettings: ExecutorRunInput['nativeSettings'];
     let preparedRuntime: ExecutorRunInput['preparedRuntime'];
+    let runtimeProfileFingerprint: string | undefined;
 
     // Подготовка принадлежит серверу: тело HTTP не выбирает handle или descriptor.
     // Один объект проходит settings, binding и запуск даже при пустых overrides.
     if (executor.prepareRuntime) {
       try {
-        preparedRuntime = await executor.prepareRuntime(config, { signal: AbortSignal.timeout(15_000) });
+        preparedRuntime = await executor.prepareRuntime(config, {
+          signal: AbortSignal.timeout(15_000),
+          permissionModeContext: {
+            mode: permissionMode,
+            ...(modeSelection !== undefined ? { modeSelection } : {}),
+            provider: executor.id,
+            chatId: String(target.record?.id || chatKey || ''),
+            cwd,
+            extraDirs: uniqueExtraDirs,
+            providerSettings,
+            settingsRevision: savedSettings,
+            workToolPolicy,
+          },
+        });
 
         if (!preparedRuntime || typeof preparedRuntime !== 'object' || Array.isArray(preparedRuntime)) {
           throw new TypeError('Адаптер вернул некорректный runtime handle');
         }
-      } catch {
-        return channel.refuse(503, {
-          error: 'executor_unavailable',
-          message: 'Не удалось подготовить runtime исполнителя',
+
+        runtimeProfileFingerprint = executor.runtimeProfileFingerprint?.(preparedRuntime);
+      } catch (error) {
+        const code = error instanceof ExecutorRuntimeError ? error.code : 'executor_unavailable';
+        const status = code === 'invalid_permission_mode' ? 400 : code === 'mode_unavailable' ? 409 : 503;
+
+        return channel.refuse(status, {
+          error: status === 503 ? 'executor_unavailable' : code,
+          message: error instanceof ExecutorRuntimeError
+            ? error.message : 'Не удалось подготовить runtime исполнителя',
         });
       }
     }
@@ -3450,6 +3518,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         ...(channel.turnId ? { turnId: channel.turnId } : {}),
         providerId: executor.id,
         requestedModelId: model,
+        permissionMode,
         cwd,
         extraDirs: visibleExtraDirs(uniqueExtraDirs, [attachDir, ...artifactsDirs]),
       },
@@ -3652,6 +3721,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         // называет оглавления, а рабочая папка разговора может лежать вне каталога плагинов.
         pluginDocsDirs: pluginDocs.map((entry) => entry.dir),
         permissionMode,
+        modeSelection,
+        runtimeProfileFingerprint,
         mcpConfig,
         mcpServers: workIpc ? [{ name: 'grigdesk-work', ...workIpc.mcpServer }] : [],
         permissionPromptTool: 'mcp__grigdesk-perm__approve',
@@ -3865,6 +3936,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
         return liveTurn
           ? liveSessions.run({ ...attemptArgs, executor }, {
+            permissionMode: attemptArgs.permissionMode,
+            modeSelection: attemptArgs.modeSelection,
+            preparedRuntime: attemptArgs.preparedRuntime,
+            runtimeProfileFingerprint: attemptArgs.runtimeProfileFingerprint,
             message: attemptArgs.message,
             onStep: attemptArgs.onStep,
             onProgress: attemptArgs.onProgress,
@@ -4864,6 +4939,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       modelRef: body.modelRef,
       effort: body.effort,
       mode: body.mode,
+      modeSelection: body.modeSelection,
       sessionId: body.sessionId,
       context: body.context,
       attachments: body.attachments,
@@ -5065,7 +5141,11 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // Вместе с историей отдаём порог сжатия из настроек: по нему кольцо контекста решает,
   // где желтеть и краснеть. Своего эндпоинта порогу не завели — клиент чата этот и так
   // тянет при загрузке, а меняется порог только в «Настройках» (оттуда же обновляется стор).
-  fastify.get<ChatRoute>('/api/chat/store', async () => {
+  /**
+   * Настройки и возможности одинаковы для прежней выдачи и лёгкого каталога.
+   * История подставляется вызывающим маршрутом без изменения прежних полей.
+   */
+  async function storeOptions() {
     const settings = prefs.read().speech;
     const storedRevision = prefs.readStored?.().speech?._revision || null;
     // История чата не должна ждать Python/CUDA diagnostics на cold start. Sync
@@ -5076,7 +5156,6 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       : await speechRuntime?.publicSnapshotAsync?.(settings);
 
     return {
-      ...(await history.read()),
       // Сервер принимает ходы по turnId: окно шлёт короткий приём с повтором вместо
       // POST, висящего весь ход. Старый сервер поля не знает, и окно остаётся на
       // синхронном запуске — повтор без идемпотентности там означал бы второй запуск.
@@ -5092,6 +5171,250 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         revision: speechSettingsRevision(settings, storedRevision),
       },
     };
+  }
+
+  fastify.get<ChatRoute>('/api/chat/store', async () => ({
+    ...(await history.read()),
+    ...(await storeOptions()),
+  }));
+
+  /**
+   * Каталог и дельта имеют одну оболочку и возвращают только короткие проекции.
+   * Отсутствующие known id передаются явно, без привязки к времени или процессу.
+   */
+  async function listStore(known?: Record<string, unknown>) {
+    const heads = await history.webHeads();
+    const selected = known ? heads.filter((head) => known[head.id] !== head.version) : heads;
+    const meta = await history.readMetaRaw();
+
+    return {
+      ...meta,
+      activeId: meta.activeId ?? null,
+      ...(await storeOptions()),
+      listProtocol: 1,
+      sessions: selected.filter((head) => !head.archived),
+      archived: selected.filter((head) => head.archived),
+      ...(known ? { gone: Object.keys(known).filter((id) => !heads.some((head) => head.id === id)) } : {}),
+    };
+  }
+
+  fastify.get<ChatRoute>('/api/chat/store/list', () => listStore());
+  fastify.post<ChatRoute>('/api/chat/store/changes', async (request, reply) => {
+    const known = request.body?.known;
+
+    if (!known || typeof known !== 'object' || Array.isArray(known)
+      || Object.values(known).some((version) => typeof version !== 'string')) {
+      return reply.code(400).send({ error: 'bad_known' });
+    }
+
+    return listStore(known);
+  });
+  fastify.get<ChatRoute>('/api/chat/store/head/:id', async (request, reply) => {
+    const head = (await history.webHeads()).find((entry) => entry.id === request.params.id);
+
+    return head ? { head } : reply.code(404).send({ error: 'no_chat' });
+  });
+  fastify.get<ChatRoute>('/api/chat/store/search', async (request) => ({
+    matches: await history.searchWeb(String(request.query?.q || ''), request.query?.archived === '1'),
+  }));
+
+  fastify.patch<ChatRoute>('/api/chat/store/chat/:id', async (request, reply) => {
+    const id = String(request.params.id);
+    const patch = request.body?.patch;
+    const allowed = ['title', 'unread', 'archived', 'closedAt'];
+
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)
+      || Object.entries(patch).some(([key, value]) => !allowed.includes(key)
+        || (key === 'title' ? typeof value !== 'string'
+          : key === 'closedAt' ? value !== null && (typeof value !== 'number' || !Number.isFinite(value))
+            : typeof value !== 'boolean'))) {
+      return reply.code(400).send({ error: 'bad_patch' });
+    }
+    if (deletingChats.has(id)) {
+      return reply.code(409).send({ error: 'chat_busy' });
+    }
+
+    const release = beginChatSaves([id]);
+    let changed = false;
+
+    try {
+      const saved = await history.patchExecution(id, (current) => {
+        changed = Object.entries(patch).some(([key, value]) => (current[key] ?? null) !== value);
+
+        return {
+          archived: !!current.archived,
+          ...patch,
+          ...(patch.closedAt === null ? { closedAt: undefined } : {}),
+        };
+      }, { skipUnchanged: true });
+
+      if (changed) {
+        fastify.sse.broadcast('chat-store', {
+          id,
+          origin: request.body?.origin || '',
+          at: Date.now(),
+        });
+      }
+
+      const entry = await history.readEntry(id);
+
+      return { head: projectWebChatHead(saved, history.versionOf(entry!.json)) };
+    } catch (error) {
+      if (error instanceof ChatHistoryError) {
+        return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+      }
+
+      throw error;
+    } finally {
+      release();
+    }
+  });
+
+  let reconcileTail: Promise<unknown> = Promise.resolve();
+
+  fastify.post<ChatRoute>('/api/chat/store/reconcile', async (request, reply) => {
+    const body = request.body;
+    const validIds = (ids: unknown): ids is string[] => Array.isArray(ids)
+      && ids.every((id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id));
+
+    if (!body || Object.keys(body).some((key) => !['loadedIds', 'deliveryIds'].includes(key))
+      || !validIds(body.loadedIds) || !validIds(body.deliveryIds)) {
+      return reply.code(400).send({ error: 'bad_reconcile' });
+    }
+
+    const loadedIds = body.loadedIds;
+    const deliveryIds = body.deliveryIds;
+    const job = reconcileTail.catch(() => {}).then(async () => {
+      await history.prepareWeb();
+      await turnLedger.load();
+      await mobileHistory.reconcile();
+
+      const pending = [];
+      const heads = [];
+      const gone: string[] = [];
+      const deliveries: Array<{
+        chatId: string;
+        turnId: string;
+        state: 'accepting' | 'unknown';
+        sentAt: number;
+      }> = [];
+
+      for (const result of await readPendingRecords()) {
+        const id = String(result.chatKey || '');
+        const pid = String(result.id || '');
+
+        if (loadedIds.includes(id)) {
+          pending.push(result);
+          continue;
+        }
+        if (!/^[A-Za-z0-9_.-]{1,100}$/.test(pid) || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) {
+          continue;
+        }
+        if (deletingChats.has(id)) {
+          throw new Error('Чат удаляется');
+        }
+
+        const release = beginChatSaves([id]);
+
+        try {
+          const current = await history.readEntry(id);
+          const turn = turnLedger.get(String(result.turnId || pid));
+
+          if (!current) {
+            gone.push(id);
+          } else {
+            let previousRevision = 0;
+            const saved = await history.patchExecution(id, (chat) => {
+              previousRevision = Number(chat.revision || 0);
+
+              return applyWebPending(chat, result, inTurnHistory, activeRuns.get(id)?.runId || null);
+            }, { durable: true, skipUnchanged: true });
+
+            if (turn && turn.chatKey === id) {
+              await turnLedger.update(turn.turnId, {
+                state: 'done',
+                finishedAt: Number(result.at || Date.now()),
+                outcome: result.interruptedBy ? 'interrupted' : result.stopped ? 'stopped'
+                  : result.role === 'error' ? 'error' : 'reply',
+              });
+            }
+
+            const entry = await history.readEntry(id);
+
+            const head = projectWebChatHead(entry!.chat, history.versionOf(entry!.json));
+
+            heads.push(head);
+
+            if (Number(saved.revision || 0) !== previousRevision) {
+              fastify.sse.broadcast('chat-store', {
+                id,
+                head,
+                origin: '',
+                at: Date.now(),
+              });
+            }
+          }
+
+          await fs.rm(path.join(pendingDir, `${pid}.json`), { force: true });
+        } finally {
+          release();
+        }
+      }
+
+      for (const id of deliveryIds) {
+        const current = await history.readEntry(id);
+
+        if (!current) {
+          gone.push(id);
+          continue;
+        }
+
+        await history.patchExecution(id, (chat) => {
+          const messages = (chat.messages || []).map((message) => ({ ...message }));
+
+          for (const message of messages) {
+            if (message.delivery !== 'sending' || !message.turnId) {
+              continue;
+            }
+
+            const turn = turnLedger.get(String(message.turnId));
+
+            if (turn && turn.chatKey === id && !acceptingTurns.has(String(message.turnId))) {
+              delete message.delivery;
+              delete message.outbox;
+
+              if (turn.state === 'done') {
+                delete message.queued;
+              }
+            } else {
+              deliveries.push({
+                chatId: id,
+                turnId: String(message.turnId),
+                state: acceptingTurns.has(String(message.turnId)) ? 'accepting' : 'unknown',
+                sentAt: Number(message.sentAt || 0),
+              });
+            }
+          }
+
+          return { messages };
+        }, { durable: true, skipUnchanged: true });
+
+        const entry = await history.readEntry(id);
+
+        heads.push(projectWebChatHead(entry!.chat, history.versionOf(entry!.json)));
+      }
+
+      return {
+        pending,
+        heads,
+        gone,
+        deliveries,
+      };
+    });
+
+    reconcileTail = job;
+
+    return job;
   });
 
   // Атомарное создание или восстановление по логической идентичности, принадлежащей серверу. Тело намеренно
@@ -5268,9 +5591,22 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   fastify.put<ChatRoute>(HISTORY_STEP_REUSE_ROUTE, (request, reply) => saveChat(request, reply, true));
 
   fastify.get<ChatRoute>('/api/chat/store/chat/:id', async (request, reply) => {
-    const chat = await history.readOne(String(request.params.id));
-    if (!chat) return reply.code(404).send({ error: 'no_chat' });
-    return { chat };
+    if (deletingChats.has(String(request.params.id))) {
+      return reply.code(404).send({ error: 'no_chat' });
+    }
+
+    await history.prepareWeb();
+
+    const entry = await history.readEntry(String(request.params.id));
+
+    if (!entry) {
+      return reply.code(404).send({ error: 'no_chat' });
+    }
+
+    return {
+      chat: entry.chat,
+      version: history.versionOf(entry.json),
+    };
   });
 
   fastify.delete<ChatRoute>('/api/chat/store/chat/:id', async (request, reply) => {
@@ -5369,7 +5705,15 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // Первая сверка запускает разовую миграцию чатов и сборку реестра моделей с пробами всех
   // исполнителей — это дольше лимита старта модуля, и сервер падал по кругу. Поэтому старт
   // её не ждёт: сверки сериализованы, а сбой оставляет pending до следующего прохода.
-  const startupReconcile = mobileHistory.reconcile().catch(() => {
+  const catalogPreparation = history.prepareWeb().then(recoverCatalogWorkdirs).catch((error) => {
+    fastify.log.warn({ err: (error as Error).message }, 'чат: подготовка каталога требует повтора');
+  });
+
+  fastify.addHook('onClose', async () => {
+    await catalogPreparation;
+  });
+
+  const startupReconcile = catalogPreparation.then(() => mobileHistory.reconcile()).catch(() => {
     fastify.log.warn('чат: восстановление мобильной истории оставило pending для повторной сверки');
   });
 

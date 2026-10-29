@@ -45,6 +45,7 @@ test('таблица tool names даёт канонические шаги и о
   const calls = [
     ['bash', { command: 'printf ok' }, 'Bash'],
     ['read', { file_path: 'src/a.ts' }, 'Read'],
+    ['read_image', { file_path: '/work/artifacts/снимок экрана.png' }, 'Read'],
     ['write', { file_path: 'src/b.ts', content: 'const b = 1;\n' }, 'Write'],
     ['edit', { file_path: 'src/c.ts', old_string: 'a', new_string: 'b' }, 'Edit'],
     ['grep', { pattern: 'needle' }, 'Grep'],

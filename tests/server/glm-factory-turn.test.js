@@ -76,6 +76,7 @@ function statusServer(root, overrides = {}) {
 async function fixture(t, scenario = { updates: [] }, envOverrides = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'glm-factory-turn-'));
   const project = path.join(root, 'project');
+  const stateDir = path.join(root, 'state');
   const runDir = path.join(root, 'run');
   const scenarioFile = path.join(root, 'scenario.json');
   const logFile = path.join(root, 'fake.ndjson');
@@ -85,6 +86,7 @@ async function fixture(t, scenario = { updates: [] }, envOverrides = {}) {
 
   await fs.mkdir(path.join(project, '.git'), { recursive: true });
   await fs.mkdir(runDir, { recursive: true });
+  await fs.mkdir(stateDir, { recursive: true });
   await fs.writeFile(scenarioFile, JSON.stringify(scenario));
   await fs.writeFile(logFile, '');
   await writeGlmArtifactFixture(artifact, {
@@ -151,6 +153,7 @@ async function fixture(t, scenario = { updates: [] }, envOverrides = {}) {
   return {
     root,
     project,
+    stateDir,
     runDir,
     config,
     deps,
@@ -217,7 +220,7 @@ function toolResult(id, text = 'ok', isError = false) {
 }
 
 test('SB10: factory ход доходит до транспорта с host status MCP и политикой этапа', async (t) => {
-  for (const [filesystem, mode] of [['workspace-write', 'workspace-write'], ['state-only', 'read-only']]) {
+  for (const filesystem of ['workspace-write', 'state-only']) {
     const f = await fixture(t, {
       hooks: true,
       updates: [
@@ -232,6 +235,7 @@ test('SB10: factory ход доходит до транспорта с host stat
       factoryContext: {
         ...IDENTITY,
         filesystem,
+        ...(filesystem === 'state-only' ? { stateDir: f.stateDir } : {}),
         statusServer: statusServer(f.root),
       },
     });
@@ -248,11 +252,13 @@ test('SB10: factory ход доходит до транспорта с host stat
       format: 1,
       consumer: 'factory',
       filesystem,
+      ...(filesystem === 'state-only' ? { stateDir: await fs.realpath(f.stateDir) } : {}),
       rawTools: [...GLM_FACTORY_STATUS_TOOLS],
     });
     assert.deepEqual(rows.get('approval')?.config, { policy: 'never' });
-    assert.equal(rows.get('sandbox-policy')?.config.mode, mode);
-    assert.equal(rows.get('sandbox-policy')?.config.workspaceRoot, await fs.realpath(f.project));
+    assert.equal(rows.get('sandbox-policy')?.config.mode, 'workspace-write');
+    assert.equal(rows.get('sandbox-policy')?.config.workspaceRoot,
+      await fs.realpath(filesystem === 'state-only' ? f.stateDir : f.project));
     assert.deepEqual(mounted.map((row) => row.config.serverName), ['factory-status']);
     assert.equal(mounted[0].config.env.FACTORY_RUN_ID, IDENTITY.runId);
     assert.equal(mounted[0].config.failOnStartupError, true);
@@ -281,6 +287,12 @@ test('SB10: неполный host context, чужой MCP и неподдерж�
     { factoryContext: { ...base, epoch: '0' } },
     { factoryContext: { ...base, stage: 'lower' } },
     { factoryContext: { ...base, filesystem: 'full-access' } },
+    { factoryContext: { ...base, filesystem: 'state-only' } },
+    { factoryContext: {
+      ...base,
+      filesystem: 'state-only',
+      stateDir: 'relative',
+    } },
     { factoryContext: { ...base, statusServer: undefined } },
     { factoryContext: { ...base, statusServer: mismatch } },
     { factoryContext: { ...base, statusServer: { ...status, name: 'grigdesk-work' } } },
@@ -299,14 +311,27 @@ test('SB10: неполный host context, чужой MCP и неподдерж�
       JSON.stringify(Object.keys(overrides)));
   }
 
+  // Coding Plan допущен с factory-policy-v2 (29.10.2026): ход этапа идёт тем же путём,
+  // ключ режима подставляет buildGlmChildEnv из ZAI_CODING_API_KEY.
   const coding = await fixture(t, { updates: [] }, {
     GRIGDESK_GLM_API_MODE: 'coding-plan',
     ZAI_CODING_API_KEY: 'synthetic-coding-key',
   });
 
-  await assert.rejects(coding.run(), { code: 'glm_factory_mode_unsupported' });
-  assert.equal(f.children.length + coding.children.length, 0);
-  assert.equal(await f.prompts() + await coding.prompts(), 0);
+  await coding.run();
+
+  assert.equal(await coding.prompts(), 1);
+  assert.equal(coding.launches.length, 1);
+  assert.equal(coding.children.length, 1);
+
+  const brokenMode = await fixture(t, { updates: [] }, {
+    GRIGDESK_GLM_API_MODE: 'team-plan',
+    ZAI_CODING_API_KEY: 'synthetic-coding-key',
+  });
+
+  await assert.rejects(brokenMode.run(), (error) => String(error.code).startsWith('glm_'));
+  assert.equal(brokenMode.children.length, 0);
+  assert.equal(await brokenMode.prompts(), 0);
 });
 
 test('SB10: вопрос и approval этапа отклоняются сразу, без человека', async (t) => {
@@ -389,6 +414,7 @@ test('SB10: обычный чат сохраняет политику grigdesk-w
     ssh: true,
     db: false,
     strictDb: false,
+    delegation: 'foreground-v1',
   });
   assert.deepEqual(rowsById(launch.overlay).get('approval')?.config, { policy: 'ask' });
 });

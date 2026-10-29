@@ -725,6 +725,41 @@ for (const mode of ['session', 'run']) {
   });
 }
 
+for (const mode of ['session', 'run']) {
+  test(`Claude: ${mode} закрывает текст в начале аргументов tool_use`, async (t) => {
+    const f = await startFixture(t, { mode, blocks: 'partial-tool' });
+
+    await waitFor(() => f.events.some((event) => event.complete), 'раннее завершение текста');
+    await f.publisher.flush(runId);
+
+    assert.deepEqual(f.events.map((event) => [event.text, event.complete]), [
+      ['Ветки нет.', false],
+      ['Ветки нет.\nСоздам.', false],
+      ['Ветки нет.\nСоздам.', true],
+    ], 'субагент не закрывает растущий текст, главная граница сохраняет весь блок');
+    assert.equal(f.steps.some((step) => step.k === 'tool' && step.id === 'synthetic-held-tool'), false);
+    assert.equal(f.messages.live(runId).length, 0);
+
+    const restored = new ChatAssistantMessages({ dir: f.journalDir });
+
+    await restored.load();
+    assert.deepEqual(restored.byRun(runId).map((block) => [block.text, block.complete]),
+      [['Ветки нет.\nСоздам.', true]], 'журнал восстанавливает законченный текст ещё до вызова');
+
+    await writeFile(f.release, '');
+    await f.run;
+    await f.publisher.flush(runId);
+
+    assert.equal(f.events.filter((event) => event.assistantMessageId === 'held-tool-message'
+      && event.complete).length, 1);
+    assert.equal(f.events.some((event) => event.abandoned), false);
+    assert.deepEqual(f.messages.byRun(runId).map((block) => [block.assistantMessageId, block.text]), [
+      ['held-tool-message', 'Ветки нет.\nСоздам.'],
+      ['held-tool-message-2', 'Ветка создана.'],
+    ]);
+  });
+}
+
 /** Настройки, которые адаптер передал процессу фикстуры флагом --settings. */
 async function settingsOfProcess(trace) {
   const argv = (await readTrace(trace)).find((entry) => entry.direction === 'process').argv;

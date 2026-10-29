@@ -4,7 +4,7 @@ GLM объявляет `sessionBinding` и `workdir: { switch: 'reseed', roots: 
 привязки, ротация и сброс памяти — общие механизмы чата.
 
 - `authProfileId` — `glm-env-key:<16 hex>` от режима доступа и ключа; ключ наружу не выходит.
-- `securityProfile` — `grigdesk-glm-profile-v2:<sha256>` от ревизий профиля и политики,
+- `securityProfile` — `grigdesk-glm-profile-v3:<sha256>` от ревизий профиля и политики,
   режима, endpoint и флагов SSH/БД. Сборка проверяется для допуска, её identity в профиль
   прав не входит. Недоступная сборка — отказ с кодом `glm_*`, который чат показывает.
 - Смена ключа, режима, флагов или cwd начинает новую сессию. Binary home чата —
@@ -12,6 +12,8 @@ GLM объявляет `sessionBinding` и `workdir: { switch: 'reseed', roots: 
   Совместимые обновление и откат сохраняют home и sessionId. Первый переход переносит
   прежний `<корень homes>/<compatibility[:16]>/<sha256(chatKey)>` по compatibility
   установленной legacy поставки; обратно на embedded новые homes не переносятся.
+- Переход v2 → v3 с native gate меняет security profile и ротирует привязку штатным CAS/seed.
+  Совместимый resume внутри v3 сохраняет сессию и дочерние шаги; старые дети не запускаются заново.
 - DSH на `session/create` с неизвестным id молча создаёт новую сессию с этим id. Поэтому перед
   resume GLM проверяет журнал `sessions/<projectKey(cwd)>/<id>/session.v*.jsonl[.zstd]` в home
   чата: нет журнала (чужой чат, другая папка, небезопасный id) — `glm_session_missing` до

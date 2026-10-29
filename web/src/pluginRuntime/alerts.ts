@@ -1,9 +1,7 @@
 import { alertUser, dismissAlert, dismissAlertScope } from '../shared/alerts.ts';
-import type { AlertInput } from '../shared/alerts.ts';
+import type { PluginAlertInput } from '../../../packages/plugin-types/src/web.js';
 
-export type PluginAlertInput = Pick<AlertInput, 'id' | 'title' | 'body' | 'detail' | 'tone' | 'sticky'> & {
-  openPanel?: boolean;
-};
+export type { PluginAlertInput } from '../../../packages/plugin-types/src/web.js';
 
 /**
  * Идентификатор, область и цель всегда принадлежат текущему плагину.

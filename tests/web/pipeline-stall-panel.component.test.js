@@ -137,9 +137,9 @@ const actions = [
   ['human', human, {}, {}, ['ответить и продолжить', 'продолжить прогон', 'закрыть задачу']],
   ['exhausted', exhaustedStop, {}, {}, ['ответить и продолжить', 'продолжить прогон', 'закрыть задачу']],
   ['no-progress', noProgress, {}, {},
-    ['ответить и продолжить', 'разобрать и продолжить', 'продолжить прогон', 'закрыть задачу']],
+    ['Разбор остановки', 'разобрать остановку', 'продолжить прогон', 'закрыть задачу']],
   ['решение арбитра', { ...noProgress, arbiter }, {}, {},
-    ['разбор и решение', 'разобрать и продолжить', 'продолжить прогон', 'закрыть задачу']],
+    ['Разбор остановки', 'разобрать остановку', 'продолжить прогон', 'закрыть задачу']],
   ['SANDBOX isolated', sandbox, {}, {}, ['перезапустить стенд', 'продолжить прогон', 'закрыть задачу']],
   ['SANDBOX shared', sandbox, { workspaceMode: 'shared' }, { fePort: 13000 },
     ['продолжить прогон', 'закрыть задачу']],
@@ -163,7 +163,8 @@ const actions = [
 ];
 const allActions = [
   'ответить и продолжить', 'разбор и решение', 'разобрать и продолжить', 'перезапустить стенд',
-  'продолжить прогон', 'остановить', 'снести стенд', 'закрыть задачу',
+  'Разбор остановки', 'разобрать остановку', 'продолжить прогон', 'остановить',
+  'снести стенд', 'закрыть задачу',
 ];
 
 for (const [name, stop, task, graph, expected] of actions) {
@@ -183,8 +184,8 @@ for (const [name, stop, task, graph, expected] of actions) {
 
       const primary = name.startsWith('bootstrap') || name === 'human'
         ? 'ответить и продолжить'
-        : name === 'решение арбитра' ? 'разбор и решение'
-          : name === 'no-progress' ? 'разобрать и продолжить'
+        : name === 'решение арбитра' ? 'Разбор остановки'
+          : name === 'no-progress' ? 'разобрать остановку'
             : name === 'SANDBOX isolated' ? 'перезапустить стенд' : 'продолжить прогон';
       const primaryButtons = wrapper.findAll('.stalled button').filter((button) => (
         button.attributes('data-variant') === 'solid'
@@ -208,7 +209,7 @@ test('tooltip и одно главное действие', async (t) => {
 
   assert.equal(panel.find('.sfixhint').exists(), false);
   assert.equal(buttons.filter((button) => button.attributes('data-variant') === 'solid').length, 1);
-  assert.equal(actionButtons(wrapper, 'разобрать и продолжить')[0].attributes('data-variant'), 'solid');
+  assert.equal(actionButtons(wrapper, 'разобрать остановку')[0].attributes('data-variant'), 'solid');
 
   for (const button of buttons) {
     assert.ok(button.attributes('data-ui-tooltip')?.trim(), button.text());
@@ -241,7 +242,7 @@ for (const [actor, mode] of ['auto', 'human'].flatMap((actor) => (
     assert.match(wrapper.get('.stalled').text(), actor === 'auto' ? /сам/ : /по кнопке/);
     assert.match(wrapper.get('.stalled').text(), /1 мин/);
     assert.match(wrapper.get('.stalled').text(), /нужно решение человека/);
-    assert.equal(actionButtons(wrapper, 'разобрать и продолжить').length, 0);
+    assert.equal(actionButtons(wrapper, 'разобрать остановку').length, 0);
   });
 }
 
@@ -276,8 +277,8 @@ for (const [name, task, graph, absent] of [
   ['нет attempt', { attempt: null }, {}, ['продолжить прогон']],
   ['completed', { result: 'completed' }, {}, ['продолжить прогон']],
   ['abandoned', { result: 'abandoned' }, {}, ['продолжить прогон']],
-  ['daemonAlive', { daemonAlive: true }, {}, ['ответить и продолжить', 'разобрать и продолжить',
-    'продолжить прогон']],
+  ['daemonAlive', { daemonAlive: true }, {}, ['ответить и продолжить', 'разбор и решение',
+    'Разбор остановки', 'разобрать остановку', 'продолжить прогон']],
   ['стенд строится', {}, { sandbox: {
     step: 1,
     total: 3,

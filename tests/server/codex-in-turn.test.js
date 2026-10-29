@@ -281,6 +281,28 @@ test('Codex: итоговый ответ завершает свой блок и
   assert.equal(result.assistantMessageId, 'answer-1');
 });
 
+test('Codex: commentary завершён до начала инструмента, растущие дельты остаются открыты', async (t) => {
+  const f = await fixture(t, 'rich');
+  const assistant = [];
+  let beforeTool;
+
+  await codex.run(runOptions(f, {
+    onAssistantMessage: (event) => assistant.push(event),
+    onStep: (step) => {
+      if (step.k === 'tool' && beforeTool === undefined) {
+        beforeTool = assistant.filter((event) => event.assistantMessageId === 'commentary-1');
+      }
+    },
+  }));
+
+  assert.deepEqual(beforeTool.map((event) => event.complete), [false, false, true]);
+  assert.equal(beforeTool.at(-1).text, 'Проверяю файлы перед правкой.');
+  assert.equal(assistant.filter((event) => event.assistantMessageId === 'commentary-1'
+    && event.complete).length, 1);
+  assert.equal(assistant.some((event) => event.abandoned), false);
+  assert.notEqual(assistant.at(-1).assistantMessageId, 'commentary-1');
+});
+
 test('Codex: обрыв потока с повтором бросает начатую реплику', async (t) => {
   const f = await fixture(t, 'stream-retry');
   const assistant = [];

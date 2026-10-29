@@ -60,6 +60,8 @@ _route_v2_require_runner_invariant() {
   fi
 }
 
+# Проверяет форму доверенных JSON и возвращает только сведения для диспетчера.
+# Охват preflight вычисляется здесь из бандла, без отдельной копии топологии в launcher.
 _route_v2_json() {
   python3 - "$@" <<'PY'
 import json
@@ -174,6 +176,45 @@ elif op == "cursor-stop":
         }:
             fail()
     print(state, stop or "", last_node, last_outcome, sep="\t")
+elif op == "coverage-stages":
+    # Охват берётся из проверенного бандла: при старте все агенты, при resume
+    # только достижимые из курсора. Командные узлы и ворота исполнителей не требуют.
+    machine = value.get("machine") if isinstance(value, dict) else None
+    if not isinstance(machine, dict) or not isinstance(machine.get("nodes"), list):
+        fail()
+    nodes = {node["id"]: node for node in machine["nodes"]}
+    scope = args[0] if args else "*"
+    pending = list(nodes) if scope == "*" else ([] if scope == "-" else [scope])
+    visited = set()
+    stages = set()
+
+    # Переходы next/rewind встречаются как в on, так и в таблице onFailure.
+    # Рекурсивный обход включает ветки исправления, сохраняя границу достижимости.
+    def targets(action):
+        if not isinstance(action, dict):
+            return
+        for key, target in action.items():
+            if key in {"next", "rewind"} and isinstance(target, str):
+                yield target
+            elif isinstance(target, dict):
+                yield from targets(target)
+
+    while pending:
+        node_id = pending.pop()
+        if node_id in visited:
+            continue
+        if node_id not in nodes:
+            fail()
+        visited.add(node_id)
+        node = nodes[node_id]
+        if node.get("executor") == "agent":
+            run_key = node.get("runKey", "")
+            if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", run_key):
+                fail()
+            stages.add(run_key)
+        pending.extend(targets(node.get("on", {})))
+        pending.extend(targets(node.get("onFailure", {})))
+    print("\n".join(sorted(stages)))
 elif op == "node":
     node_id = args[0]
     machine = value.get("machine") if isinstance(value, dict) else None
@@ -960,6 +1001,45 @@ _route_v2_transaction_active_id() {
   _instrumentation_tx_get "$active" TRANSACTION_ID
 }
 
+# Контекст и begin выбирают один ID под блокировкой оркестратора задачи. Номер
+# начинается с позиции журнала и пропускает только завершённые транзакции: после
+# no-result или resume журнал ещё не сдвинулся, а история cleanup уже сохранена.
+_route_v2_transaction_id() {
+  local task=$1 attempt=$2 sequence=$3 txid dir state rc
+  txid=$(_route_v2_transaction_active_id "$task")
+  rc=$?
+  if (( rc == 0 )); then
+    [[ "$txid" =~ ^v2-${attempt#*_}-s[0-9]+$ ]] || return 75
+    printf '%s\n' "$txid"
+    return 0
+  fi
+  (( rc == 3 )) || return "$rc"
+  [[ "$sequence" =~ ^[0-9]{1,18}$ ]] || return 78
+  sequence=$((10#$sequence))
+  while :; do
+    txid="v2-${attempt#*_}-s${sequence}"
+    dir=$(instrumentation_tx_dir "$task" "$txid") || return
+    if [[ ! -e "$dir" && ! -L "$dir" ]]; then
+      printf '%s\n' "$txid"
+      return 0
+    fi
+    [[ -d "$dir" && ! -L "$dir" &&
+       -f "$dir/state.env" && ! -L "$dir/state.env" ]] || return 78
+    state=$(_instrumentation_tx_get "$dir/state.env" STATE)
+    case "$state" in
+      completed)
+        sequence=$((sequence + 1))
+        ;;
+      active|cleaning|stalled)
+        return 75
+        ;;
+      *)
+        return 78
+        ;;
+    esac
+  done
+}
+
 _route_v2_transaction_before() {
   local task=$1 attempt=$2 node=$3 sequence=$4 txid scope isolation
   txid=$(_route_v2_transaction_active_id "$task")
@@ -972,7 +1052,7 @@ _route_v2_transaction_before() {
         "$task" "$attempt" "$scope" || return 75
     fi
     _route_v2_workspace_roots_array || return
-    txid="v2-${attempt#*_}-s${sequence}"
+    txid=$(_route_v2_transaction_id "$task" "$attempt" "$sequence") || return
     isolation=exclusive-worktree-v1
     if declare -F route_v2_instrumentation_isolation >/dev/null; then
       isolation=$(route_v2_instrumentation_isolation) || return 78

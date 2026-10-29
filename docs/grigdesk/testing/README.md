@@ -2,15 +2,25 @@
 
 - [Готовность маршрутизатора перед повторной навигацией](router-ready-navigation.md)
 
+- [Native-пробы режимов Codex: loopback, маркеры и граница вложенной песочницы](codex-permission-mode-fixtures.md)
+
+- [Изолированный Codex: необязательный вопрос при точном наборе host tools](codex-untrusted-optional-question.md)
+
 - [Гейты DeepSeek: unit, SEA, source candidate и host parity](deepseek-test-gates.md)
 
 Веб-тесты на happy-dom, Playwright и ловушки, из-за которых тест врёт.
+
+- [Подтверждение установки: прежняя всплывашка тоже имеет role=dialog](provider-confirmation-target.md)
 
 Читай перед правкой: `tests`.
 
 - [Проверки единого приложения и границы автоматической приёмки](unified-client-checks.md)
 
 ## Грабли
+
+- [Замер press включает остановку драйвера, если HTTP-приёмник делит его Node event loop](chat-performance-isolation.md)
+
+- [Вложенный node_modules в снимке Harness: одна причина vendor/buildInputs и отказа общего preflight](deepseek-vendor-node-modules.md)
 
 - [Автоподготовка legacy fixture DeepSeek: отдельный ABI-кэш, lock и восстановление](deepseek-legacy-preflight.md)
 

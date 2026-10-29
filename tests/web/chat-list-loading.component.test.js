@@ -88,6 +88,13 @@ async function fixture(t, initial = {}) {
     loadError: null,
     activeId: '',
     archived: [{ id: 'archived-copy' }],
+    search: {
+      query: '',
+      archived: false,
+      loading: false,
+      error: '',
+      matches: {},
+    },
     ...initial,
     get loadErrorMessage() {
       return this.loadError ? locale.messageRef(ERROR_KEYS[this.loadError]) : null;
@@ -102,6 +109,15 @@ async function fixture(t, initial = {}) {
         ts: 200,
         model: '',
       }];
+    },
+    async searchChats(query, archived = false) {
+      this.search = {
+        query: query.trim(),
+        archived,
+        loading: false,
+        error: '',
+        matches: {},
+      };
     },
     retryLoad() {
       calls.retry += 1;

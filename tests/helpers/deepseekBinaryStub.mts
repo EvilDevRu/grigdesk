@@ -25,11 +25,12 @@ export async function writeDeepSeekBinaryStub(
  * Unit transport получает совместимый metadata double, сохраняя собственный spawn seam.
  * Этот helper не используется для настоящих SEA/native/parity сценариев.
  */
-export async function writeDeepSeekMetadataStub(t: TestContext) {
+export async function writeDeepSeekMetadataStub(t: TestContext, toolPermissions = true) {
   const { runtimeInfoFixture } = await import('./deepseekMetadataFixture.mts');
+  const metadata = JSON.stringify(JSON.stringify(runtimeInfoFixture({ toolPermissions })) + '\n');
 
   return writeDeepSeekBinaryStub(t, [
     'if (!process.argv.includes("--runtime-info")) throw new Error("Только metadata double");',
-    `process.stdout.write(${JSON.stringify(JSON.stringify(runtimeInfoFixture()) + '\n')});`,
+    `process.stdout.write(${metadata});`,
   ].join('\n'));
 }

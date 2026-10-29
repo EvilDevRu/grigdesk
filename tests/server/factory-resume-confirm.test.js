@@ -237,6 +237,27 @@ test('typed preflight прошлого запуска не типизирует 
   assert.equal(routeFailure(current), null);
 });
 
+// Сервер сохраняет охват движка: после оверрайда цепочки список содержит только
+// проверенных кандидатов, а исполнители остальных этапов профиля в него не добавляются.
+test('отказ resume сохраняет scoped-список исполнителей цепочки', async () => {
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => null,
+    unitAlive: async () => false,
+    reason: async () => 'FACTORY_ERROR=runner_preflight_unavailable RUNNERS=codex',
+    settleMs: 20,
+    stepMs: 4,
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.outcome, 'exited');
+  assert.deepEqual(routeFailure(res.message), {
+    error: 'runner_preflight_unavailable',
+    runners: ['codex'],
+    message: 'недоступны исполнители профиля: codex',
+  });
+});
+
 test('пустой журнал не оставляет отказ без текста', async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-resume-log-'));
   t.after(() => rm(dir, { recursive: true, force: true }));

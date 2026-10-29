@@ -1,6 +1,6 @@
 <template>
   <section class="document-panel">
-    <UiLoadingState v-if="loading" label="Открываю документ…" variant="document" />
+    <DocumentLoading v-if="loading" label="Открываю документ…"  />
     <div v-else-if="error" class="state error">
       <b>Документ не открыт</b>
       <span>{{ error }}</span>
@@ -32,6 +32,8 @@
 </template>
 
 <script setup lang="ts">
+import DocumentLoading from './DocumentLoading.vue';
+
 // Переиспользуемое ядро viewer-а: route-страница — лишь одна оболочка. Компонент
 // получает стабильный DocumentRef, читает API и не сохраняет содержимое в store/localStorage.
 import { computed, nextTick, ref, watch } from 'vue';
@@ -41,7 +43,6 @@ import { mdToHtml } from '../../shared/md.ts';
 import { documentRefAssetHref, documentRefRouteHref } from './links.ts';
 import {
   UiButton,
-  UiLoadingState,
 } from '../../ui';
 
 const props = defineProps({

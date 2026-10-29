@@ -4,12 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import type { DeepSeekHostContract } from '../../../shared/chat/deepSeekBinary.ts';
 import { acquireInstallLock, assertInstallFileUnchanged } from '../../../shared/node/binaryInstall.ts';
 import { syncDirectory } from '../../../shared/node/files.ts';
 import { sha256File } from '../../../shared/node/hash.ts';
 import { decodeServerBinaryInfo } from '../../../shared/runtime/serverBinary.ts';
 import { copyInstallCandidate, removeInstallStage } from './installFiles.mts';
 import { approveInstall, previousInstall, savePrevious } from './installOwnership.mts';
+import { guardInstalledDeepSeek } from './installDeepSeekGuard.mts';
 
 const run = promisify(execFile);
 const snapshotPolicy = {
@@ -20,6 +22,8 @@ export interface InstallOptions {
   binary: string;
   target: string;
   releasesDir: string;
+  deepseekBinary?: string;
+  glmMode?: DeepSeekHostContract['glm']['mode'];
 }
 
 interface ProbeContext {
@@ -53,7 +57,13 @@ async function probe(binary: string, args: string[], context: ProbeContext): Pro
  * Данные проб не попадают внутрь установки, где серверный guard запрещает размещать D.
  */
 export async function installBinary(options: InstallOptions, hooks: InstallHooks = {}) {
-  for (const value of Object.values(options)) {
+  const { glmMode, ...paths } = options;
+
+  if (glmMode !== undefined && !['api', 'coding-plan'].includes(glmMode)) {
+    throw new Error('Неизвестный режим GLM установщика');
+  }
+
+  for (const value of Object.values(paths)) {
     if (!path.isAbsolute(value) || value.includes('\0')) {
       throw new Error('Пути установщика сервера должны быть абсолютными');
     }
@@ -64,6 +74,7 @@ export async function installBinary(options: InstallOptions, hooks: InstallHooks
   const lock = await acquireInstallLock(target);
   let stage: string | undefined;
   let probeRoot: string | undefined;
+  let deepseek: Awaited<ReturnType<typeof guardInstalledDeepSeek>> | undefined;
 
   try {
     stage = await fs.mkdtemp(path.join(parent, '.grigdesk-server-install-'));
@@ -119,10 +130,26 @@ export async function installBinary(options: InstallOptions, hooks: InstallHooks
 
     await assertInstallFileUnchanged(staged, stamp, digest, snapshotPolicy);
 
+    deepseek = await guardInstalledDeepSeek({
+      binary: options.deepseekBinary ?? path.join(parent, 'deepseek'),
+      serverBinary: staged,
+      packageId: info.packageId,
+      home: context.env.GRIGDESK_HOME,
+      required: options.deepseekBinary !== undefined,
+      glmMode,
+      run: async (file, args, probeOptions) => ({
+        stdout: JSON.stringify(await check(file, args, {
+          ...context,
+          timeout: probeOptions.timeout,
+        })),
+      }),
+    });
+
     const old = await previousInstall(target, stage);
     const previous = await savePrevious(old, options.releasesDir);
 
     await assertInstallFileUnchanged(staged, stamp, digest, snapshotPolicy);
+    await deepseek.assertUnchanged();
     await approveInstall(old, digest, stage);
     await (hooks.publish ?? fs.rename)(staged, target);
     await syncDirectory(parent);
@@ -143,7 +170,11 @@ export async function installBinary(options: InstallOptions, hooks: InstallHooks
           await removeInstallStage(probeRoot);
         }
       } finally {
-        await lock.release();
+        try {
+          await deepseek?.release();
+        } finally {
+          await lock.release();
+        }
       }
     }
   }

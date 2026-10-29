@@ -36,10 +36,19 @@ export function createWorkMcpHandler({ workTools }) {
         String(message.params?.name || ''),
         message.params?.arguments || {},
       );
+      const rich = result?.format === 'grigdesk-work-content-v1';
+
+      if (rich && (!Array.isArray(result.content) || result.content.length > 20
+        || result.content.some((block) => block?.type !== 'image'
+          || !['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(block.mimeType)
+          || typeof block.data !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/u.test(block.data)))) {
+        throw new Error('Некорректный результат изображения рабочего инструмента');
+      }
+
       return {
         ...base,
         result: {
-          content: [{ type: 'text', text: JSON.stringify(result) }],
+          content: rich ? result.content : [{ type: 'text', text: JSON.stringify(result) }],
           isError: false,
         },
       };

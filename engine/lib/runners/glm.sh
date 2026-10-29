@@ -88,13 +88,19 @@ runner_glm_run() {
   local mode node wrapper prompt_dir prompt_file runtime_home cwd descriptor
   local bin runtime_identity runtime_version runner_version cache_dir
 
-  # Этап объявлен только для Обычного API: Coding Plan отвергается до metadata и ключа.
-  if [[ "${GRIGDESK_GLM_API_MODE:-}" != api ]]; then
-    printf 'GLM Factory: этап поддерживает только Обычный API\n' >&2
-    return 4
-  fi
+  # Этап идёт в режиме службы (api или coding-plan — factory-policy-v2, 29.10.2026):
+  # допуск режима по metadata DSH проверяет probe, ключ активного режима подставляет
+  # wrapper через buildGlmChildEnv; здесь только валидация значения до похода в descriptor.
+  case "${GRIGDESK_GLM_API_MODE:-}" in
+    api|coding-plan) ;;
+    *)
+      printf 'GLM Factory: нужен режим доступа api или coding-plan (получен: %s)\n' \
+        "${GRIGDESK_GLM_API_MODE:-<пусто>}" >&2
+      return 4
+      ;;
+  esac
   case "${FACTORY_ROUTE_FILESYSTEM_POLICY:-}" in
-    state-only) mode=read-only ;;
+    state-only) mode=state-only ;;
     workspace-write) mode=workspace-write ;;
     *)
       printf 'GLM Factory: filesystem policy не поддерживается: %s\n' \
@@ -133,7 +139,14 @@ runner_glm_run() {
   fi
   wrapper="$FACTORY_HOME/../server/scripts/glmRunner.mts"
   [[ -f "$wrapper" ]] || return 4
-  cwd=$(realpath -e -- "$PWD" 2>/dev/null) || return 4
+  if [[ "$mode" == state-only ]]; then
+    # DSH пишет только в workspaceRoot, который обязан содержать cwd. Для проверяющего
+    # узла оба пути указывают в STATE_DIR; репозитории остаются доступны для чтения.
+    [[ "${STATE_DIR:-}" == /* && -d "$STATE_DIR" ]] || return 4
+    cwd=$(realpath -e -- "$STATE_DIR" 2>/dev/null) || return 4
+  else
+    cwd=$(realpath -e -- "$PWD" 2>/dev/null) || return 4
+  fi
 
   prompt_dir="$run_dir/glm"
   prompt_file="$prompt_dir/prompt.md"

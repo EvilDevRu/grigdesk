@@ -14,6 +14,7 @@ const ui = Object.entries(controls).flatMap(([folder, names]) => names.map((name
 
     return `export { default as ${name} } from '${path}';`;
 })).join('\n') + `
+export * from './src/ui.ts';
 export { vTooltip } from './src/services/tooltipDirective.ts';
 export const confirmDialog = async (text, options) => {
   const h = globalThis.__sandboxLayoutHarness;

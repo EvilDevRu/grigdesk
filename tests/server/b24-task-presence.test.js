@@ -7,6 +7,8 @@ const cases = [
   ['exists', { success: true, data: { id: '100000000001', title: 'Занята' } }, 'exists'],
   ['absent-text', { success: false, error: 'Задача не найдена' }, 'absent'],
   ['absent-code', { success: false, error: 'TASK_NOT_FOUND' }, 'absent'],
+  ['absent-en', { success: false, error: 'Task not found' }, 'absent'],
+  ['absent-en с пробелами', { success: false, error: '  Task not found  ' }, 'absent'],
   ['чужой номер', { success: true, data: { id: '42' } }, 'unknown'],
   ['пустые детали', { success: true, data: {} }, 'unknown'],
   ['права', { success: false, error: 'Задача не найдена или нет доступа' }, 'unknown'],

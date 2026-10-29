@@ -4,9 +4,10 @@
 source "${FACTORY_HOME:?}/lib/executor.sh"
 
 runner_claude_probe() {
-  local version
-  command -v claude >/dev/null 2>&1 || return 4
-  version=$(factory_exec provider claude --version) || return
+  local version cli
+  cli=$(factory_external_bin claude claude)
+  command -v -- "$cli" >/dev/null 2>&1 || return 4
+  version=$(factory_external_exec claude claude --version) || return
   # Границу диска держат флаги запуска (пустой --setting-sources, --strict-mcp-config
   # без конфига, --disable-slash-commands), а НЕ список разрешённых версий CLI.
   # Список приходилось дописывать руками на каждое обновление: он успел разойтись с
@@ -169,7 +170,8 @@ runner_claude_run() {
   # вызове, пережил бы его и остался висеть с занятым слотом; KILL через 30 с закрывает
   # эту дыру. Код возврата остаётся 124 (GNU timeout не меняет его из-за KILL), поэтому
   # классификация timeout в runner_claude_classify работает как прежде.
-  factory_exec provider timeout -k 30 "$timeout_s" "${args[@]}"
+  factory_external_launch claude claude "${args[@]}" || return $?
+  factory_exec provider timeout -k 30 "$timeout_s" "${FACTORY_EXTERNAL_LAUNCH[@]}"
 }
 
 _runner_fixture_meta() {

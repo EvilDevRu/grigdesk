@@ -1,6 +1,11 @@
 # Политика инструментов GLM и разрешения
 
-Каждый вызов инструмента процесса GLM проходит server-owned PreToolUse hook с matcher `*`
+В web-чате профиля `grigdesk-glm-profile-v3` каждый вызов проходит [native gate](glm-native-gate.md), включая
+окончательный guard перед эффектом. Chat policy дополнительно разрешает только foreground
+`subagent` и `subagent_fork` без смены модели и прав ребёнка.
+
+Ниже описан прежний контракт hook, который сохраняется у Factory и ACP-каталога.
+В этой ветке каждый вызов проходит server-owned PreToolUse hook с matcher `*`
 (`server/scripts/glmToolPolicyHook.mts`, таймаут 30 с). Hook решает чистой локальной функцией
 по точному имени и аргументам, без сети; политику запуска (инвентарь `grigdesk-work` и флаги
 SSH/БД чата) он читает из файла `glm-policy.json` каталога запуска (0600).
@@ -8,8 +13,13 @@ SSH/БД чата) он читает из файла `glm-policy.json` ката�
 ## Что пропускается
 
 - Инструменты профиля по точному имени: `read`, `write`, `edit`, `glob`, `grep`, `bash`,
-  `todo_write`, `ask_user_question`. Делегирующие, субагентные, workflow, jobs, goal, plan,
-  skill, `present`, `read_image`, `web_search`, `web_fetch` и любое неизвестное имя — отказ.
+  `skill`, `job_list`, `job_output`, `job_kill`, `todo_write`, `ask_user_question`.
+  `skill` — нативный загрузчик инструкций навыка: чтение `SKILL.md` в контекст без файловых
+  и сетевых эффектов, тип действия `read`. `job_*` — фоновые задачи самого процесса: запуск
+  идёт через `bash`, `job_list`/`job_output` читают состояние и вывод (тип `read`),
+  `job_kill` останавливает свою задачу (тип `execute`). Делегирующие, субагентные, workflow,
+  goal, plan, `present`, `read_image`, `web_search`, `web_fetch` и любое неизвестное имя —
+  отказ.
 - `bash` — через общую политику прямых команд: SSH при запрете — отказ; удалённый клиент БД
   при `blockDirectDb` — отказ, клиент с непроверяемым хостом — отказ при `strictUnknownDbClient`.
 - MCP — только инструменты служебного `grigdesk-work` этого запуска, по имени формулы DSH;

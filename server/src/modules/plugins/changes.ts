@@ -1,15 +1,8 @@
 import type { PluginAdmission } from './lifecycle.ts';
 
-export interface PluginChange {
-  enabled?: boolean;
-  values?: Record<string, unknown>;
-}
+import type { PluginChange, PluginTransition } from '../../../../packages/plugin-types/src/server.ts';
 
-export interface PluginTransition {
-  commit(): void;
-  rollback(): Promise<void>;
-  afterCommit(): Promise<void>;
-}
+export type { PluginChange, PluginTransition } from '../../../../packages/plugin-types/src/server.ts';
 
 const CHANGE_TIMEOUT_MS = 5000;
 

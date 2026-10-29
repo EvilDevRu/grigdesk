@@ -47,7 +47,10 @@
       </UiField>
     </div>
 
-    <UiLoadingState v-if="loading && !options" label="Читаю историю репозиториев стенда…" />
+    <UiLoadingState v-if="loading && !options" label="Читаю историю репозиториев стенда…"
+                    :failed="Boolean(error)">
+      <div class="source-loading"><UiSkeletonLayout layout="list" :header="false" /></div>
+    </UiLoadingState>
     <UiInlineMessage v-else-if="error" tone="warning">{{ error }}</UiInlineMessage>
     <p v-else-if="options && !options.repos.length" class="source__hint">
       У стенда нет репозиториев — разбор пойдёт по задаче и вашему тексту.
@@ -159,6 +162,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../ui';
+
 import { computed, ref, watch } from 'vue';
 
 import {
@@ -487,6 +492,11 @@ function apply(): void {
 </script>
 
 <style scoped>
+.source-loading {
+  --skeleton-row-height: 20px;
+  --skeleton-copy-gap: 4px;
+  --skeleton-avatar-display: none; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; }
+
 .source {
   display: flex;
   flex-direction: column;

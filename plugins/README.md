@@ -190,8 +190,11 @@ npx esbuild src/panel.js --bundle --format=esm --outfile=ui/panel.js --external:
 ошибки загрузки — тоже.
 
 Перед включением api2 обновите сервер и пакеты окон desktop/Android. Обнаружение и
-включение с перезапуском остаются прежними. Слоты, отдельное окно и пакет типов автора
-сюда не входят. Полный UI-фасад, включая прежние raw toast API, сохранён для доверенного
+включение с перезапуском остаются прежними. Слоты и отдельное окно сюда не входят.
+Для TypeScript и Vue SFC доступен пакет `@grigdesk/plugin-types`: готовую папку подключают
+только в dev-проекте автора. Команда сборки, `import type`, mapping `@grigdesk/ui`,
+совместимость и пример описаны в [контракте пакета типов](../docs/grigdesk/plugins/plugin-types.md).
+Полный UI-фасад, включая прежние raw toast API, сохранён для доверенного
 кода; сервис alerts предоставляет удобную область плагина, а не sandbox. Устройство ядра —
 [модульные панели](../docs/grigdesk/plugins/plugin-ui-modules.md), подробный контракт —
 [сервисы модуля](../docs/grigdesk/plugins/plugin-module-services.md).

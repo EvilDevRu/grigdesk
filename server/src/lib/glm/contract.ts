@@ -10,17 +10,27 @@ export type GlmAccessMode = 'api' | 'coding-plan';
 
 export type { GlmCompatibilityRuntime };
 
-export const GLM_PROFILE_REVISION = 'grigdesk-glm-profile-v2';
-export const GLM_POLICY_REVISION = 'grigdesk-glm-policy-v1';
+export const GLM_PROFILE_REVISION = 'grigdesk-glm-profile-v3';
+export const GLM_POLICY_REVISION = 'grigdesk-glm-policy-v2';
 // Ревизии отвязанного этапа фабрики отдельны от чата: смена Factory профиля или политики
 // не меняет отпечаток, допуск и память обычного чата GLM.
-export const GLM_FACTORY_PROFILE_REVISION = 'grigdesk-glm-factory-profile-v1';
-export const GLM_FACTORY_POLICY_REVISION = 'grigdesk-glm-factory-policy-v1';
+export const GLM_FACTORY_PROFILE_REVISION = 'grigdesk-glm-factory-profile-v2';
+// policy-v2 (29.10.2026, решение владельца): этапу разрешены оба режима доступа службы —
+// api и coding-plan; ключ активного режима доезжает до этапов файлом route-secrets.env.
+// До этого этап был объявлен только для Обычного API, чтобы марафоны конвейера не выжигали
+// окна Coding Plan, на которых живут чаты; ограничение владелец принял на себя.
+// policy-v3: state-only разрешает файловые артефакты только в STATE_DIR;
+// read-only рабочих деревьев обеспечивается границей workspace песочницы DSH.
+export const GLM_FACTORY_POLICY_REVISION = 'grigdesk-glm-factory-policy-v3';
 export const GLM_DEFAULT_EFFORT = 'high';
-export const GLM_ALLOWED_MODES: readonly GlmAccessMode[] = Object.freeze(['api']);
+export const GLM_ALLOWED_MODES: readonly GlmAccessMode[] = Object.freeze(['api', 'coding-plan']);
 
 // Факты G2 на настоящей generation. Инструменты профиля, которые hook разрешает по точному
-// имени: без делегирующих, субагентных, workflow, jobs, goal, plan, skill и web-инструментов.
+// имени: без делегирующих, субагентных, workflow, goal, plan и web-инструментов.
+// skill — нативный загрузчик инструкций навыка из каталога пользователя: чтение без
+// файловых и сетевых эффектов. job_* — фоновые задачи самого процесса: запуск идёт через
+// bash, job_list/job_output читают состояние и вывод, job_kill останавливает своё.
+// Всё перечисленное действует и в чате, и на этапах Factory.
 export const GLM_NATIVE_TOOLS: readonly string[] = Object.freeze([
   'read',
   'write',
@@ -28,6 +38,10 @@ export const GLM_NATIVE_TOOLS: readonly string[] = Object.freeze([
   'glob',
   'grep',
   'bash',
+  'skill',
+  'job_list',
+  'job_output',
+  'job_kill',
   'todo_write',
   'ask_user_question',
 ]);

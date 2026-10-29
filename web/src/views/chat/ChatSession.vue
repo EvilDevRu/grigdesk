@@ -1,6 +1,12 @@
 <template>
   <div v-if="sess" class="cs" :class="{ frozen, 'options-open': optionsOpen }" :style="composerStyle"
        @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
+    <section v-if="!messagesReady" class="load-state" role="status">
+      <p>{{ messageLoad?.error || t('core.chatMessagesLoading') }}</p>
+      <UiButton v-if="messageLoad?.state === 'error'" @click="retryMessages">
+        {{ t('core.chatListRetry') }}
+      </UiButton>
+    </section>
     <!-- Оверлей при перетаскивании файла -->
     <div v-if="dragOver" class="drop-overlay">
       <div class="drop-box">📎 Отпусти, чтобы приложить</div>
@@ -133,7 +139,7 @@
           </UiSelect>
         </div>
         <!-- Режим прав: как агент поступает с действиями (спрашивать / сам / только план) -->
-        <div v-if="modes.length" class="sel mode">
+        <div v-if="modes.length || modeUnavailable" class="sel mode">
           <span class="lbl">режим</span>
           <UiSelect
             compact
@@ -144,6 +150,9 @@
             @change="chat.setMode(sid, ($event.target as HTMLSelectElement).value)"
           >
             <option v-for="m in modes" :key="m.id" :value="m.id" :title="m.hint">{{ m.label }}</option>
+            <option v-if="!modeState.available" :value="currentMode" disabled>
+              {{ currentMode }} · {{ t('core.chatModeUnavailable') }}
+            </option>
           </UiSelect>
         </div>
         <EffortSlider v-if="effortLevels.length" :model-value="effortValue" :levels="effortLevels"
@@ -423,8 +432,20 @@
         <!-- Чипы ещё не отправленных вложений -->
         <div v-if="pending.length || attachBusy" class="pend">
           <div v-for="(a, i) in pending" :key="a.file" class="chip">
-            <img v-if="isImg(a)" :src="api.url(a.url || '')" alt="" />
-            <span class="nm">{{ a.name }}</span>
+            <UiButton
+              v-if="isImg(a)"
+              variant="text"
+              size="compact"
+              data-context="chat-pending-preview"
+              v-tooltip="a.name"
+              @click="onAttachmentClick($event, a)"
+            >
+              <template #leading>
+                <img :src="api.url(a.url || '')" :alt="a.name" aria-hidden="true" />
+              </template>
+              <span class="nm">{{ a.name }}</span>
+            </UiButton>
+            <span v-else class="nm">{{ a.name }}</span>
             <UiIconButton
               class="x"
               role="stepper"
@@ -534,6 +555,7 @@
             data-role="chat-attachment"
             density="compact"
             multiple
+            :disabled="!messagesReady"
             :busy="attachBusy"
             :show-summary="false"
             :show-reset="false"
@@ -549,6 +571,7 @@
             </template>
           </UiFilePicker>
           <UiTextarea
+            :disabled="!messagesReady"
             ref="taEl"
             v-model="input"
             rows="2"
@@ -612,13 +635,13 @@
             role="peer"
             variant="solid"
             tone="accent"
-            :disabled="frozen || speechBusy || (!input.trim() && !pending.length)"
-            :label="speechBusy ? 'Сначала заверши диктовку'
+            :disabled="frozen || speechBusy || modeUnavailable || (!input.trim() && !pending.length)"
+            :label="modeUnavailable ? t('core.chatModeUnavailable') : speechBusy ? 'Сначала заверши диктовку'
               : frozen ? frozenHint
               : sess.sending ? (inTurnComposer.ready
                 ? 'Уточнить сейчас (Enter)' : 'Отправить после текущего хода (Enter)')
               : 'Отправить (Enter)'"
-            v-tooltip="speechBusy ? 'Сначала заверши диктовку'
+            v-tooltip="modeUnavailable ? t('core.chatModeUnavailable') : speechBusy ? 'Сначала заверши диктовку'
               : frozen ? frozenHint
               : sess.sending ? (inTurnComposer.ready
                 ? 'Уточнить сейчас (Enter)' : 'Отправить после текущего хода (Enter)')
@@ -637,12 +660,15 @@
 </template>
 
 <script setup lang="ts">
+import { COMPOSER_KEY, COMPOSER_MIN, COMPOSER_MAX_VH, storedComposerHeight } from './chatLayout.ts';
+
 import ChatWorkdir from './ChatWorkdir.vue';
 import { chatWorkdirLabel } from '../../../../shared/chat/chatWorkdir.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api } from '../../shared/apiClient.ts';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 import { decodeChatAttachment } from '../../shared/chatContracts.ts';
+import { resolvePermissionMode } from '../../shared/chatPermissionMode.ts';
 import { decodePipelineTasks } from '../../shared/pipelineContracts.ts';
 import type {
   ChatAttachment, HistoryAttachment, ChatMessage, ContextCache,
@@ -652,6 +678,7 @@ import type { ProviderEntry, ProviderModelEntry } from '../../../../shared/chat/
 
 import { useDictationController } from '../../features/speech/provider.ts';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.ts';
+import { startChatPerformance } from '../../shared/chatPerformance.ts';
 import { contextFill } from '../../../../shared/chat/chatContext.ts';
 import { writeClipboardText } from '../../shared/clipboard.ts';
 import { useTasksStore } from '../../stores/tasks.ts';
@@ -665,6 +692,7 @@ import ChatStatusBar from './ChatStatusBar.vue';
 import { messageDeliveryMark } from './messageDeliveryMark.ts';
 import { chatStatus } from './chatStatus.ts';
 import { providerUsageSummary } from '../../features/providers/providerUsageSummary.ts';
+import { providerUsageFreshness } from '../../../../shared/chat/providerUsageFreshness.ts';
 import ChatQuestion from './ChatQuestion.vue';
 import ChatPermission from './ChatPermission.vue';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
@@ -754,8 +782,8 @@ function isPlainClick(event: MouseEvent) {
 }
 
 /**
- * Картинка-вложение открывается в просмотре вместе с соседними картинками ленты.
- * Остальные вложения и клики с модификаторами остаются обычной ссылкой браузера.
+ * Картинка-вложение открывается с соседними картинками ленты или черновика.
+ * Клики по файлам и клики с модификаторами сохраняют поведение исходного элемента.
  */
 function onAttachmentClick(event: MouseEvent, attachment: HistoryAttachment) {
   if (!isImg(attachment) || !isPlainClick(event)) {
@@ -771,13 +799,14 @@ function onAttachmentClick(event: MouseEvent, attachment: HistoryAttachment) {
 }
 
 /**
- * Картинки той же ленты в порядке показа — вложения, картинки ответов и шагов — для
- * стрелок просмотра. Лента ищется от нажатого элемента, поэтому соседний чат не смешивается.
+ * Собирает картинки в порядке показа для стрелок просмотра внутри ленты или черновика.
+ * Область ищется от нажатого элемента: неотправленные вложения не смешиваются с историей.
  */
 function feedImages(target: Element) {
-  const feed = target.closest('.conversation-group')?.parentElement;
+  const feed = target.closest('.pend') || target.closest('.conversation-group')?.parentElement;
+  const images = feed?.querySelectorAll<HTMLImageElement>('.conversation-group img, .pend img');
 
-  return feed ? [...feed.querySelectorAll<HTMLImageElement>('.conversation-group img')].map((item) => ({
+  return images ? [...images].map((item) => ({
     src: item.currentSrc || item.getAttribute('src') || '',
     name: item.getAttribute('alt') || item.getAttribute('title') || '',
   })) : [];
@@ -785,6 +814,9 @@ function feedImages(target: Element) {
 
 // Архивный разговор открывается для чтения прямо из архива. Отправка сообщения
 // сама перенесёт тот же объект в активные (stores/chat.ts), отдельной копии нет.
+const messagesReady = computed(() => chat.isChatMessagesLoaded?.(props.sid) ?? true);
+const messageLoad = computed(() => chat.messageLoads?.[props.sid]);
+
 const sess = computed(() => chat.sessions.find((s) => s.id === props.sid)
   || (chat.archived || []).find((s) => s.id === props.sid)
   || null);
@@ -851,7 +883,7 @@ function commitTitle() {
 // новая модель/уровень появляется из реестра сама. ──
 const prov = useProvidersStore();
 
-prov.load();
+prov.load(false, { cached: true });
 // Модель чата: пустая = «по умолчанию»; сохранённый алиас (`opus`) резолвится в ту модель,
 // на которую он указывает у текущего CLI. Решаем здесь, а не при создании чата: реестр
 // к тому моменту может быть не загружен, да и бинарь потом обновится.
@@ -896,6 +928,12 @@ function scheduleUsageReset() {
   const future = statusUsage.value.windows
     .map((item) => item.resetsAt ? Date.parse(item.resetsAt) : NaN)
     .filter((at) => Number.isFinite(at) && at > usageNow.value);
+  const freshness = providerUsageFreshness(prov.usage?.[status.value.providerId], usageNow.value);
+
+  if (freshness.enabled && freshness.expiresAt !== null && freshness.expiresAt >= usageNow.value) {
+    future.push(freshness.expiresAt + 1);
+  }
+
   const nearest = Math.min(...future);
 
   if (Number.isFinite(nearest)) {
@@ -970,18 +1008,23 @@ const effortLevels = computed(() => currentModel.value?.efforts || []);
 // Режимы прав исполнителя (список даёт его CLI). Пока чат не выбрал свой — показываем
 // «вручную»: именно так работает чат по умолчанию (спрашивает разрешение на действия).
 const modes = computed(() => prov.modesOf(sess.value?.modelRef || sess.value?.model));
-const currentMode = computed(() => {
-  const want = sess.value?.mode;
-  const list = modes.value;
-
-  if (want && list.some((m) => m.id === want)) {
-    return want;
-  }
-
-  return list.some((m) => m.id === 'manual') ? 'manual' : (list[0]?.id || '');
-});
+const modeState = computed(() => resolvePermissionMode(sess.value?.mode, modes.value,
+  prov.modelOf(sess.value?.modelRef || sess.value?.model).provider
+    || { permissionModeSelectionPolicy: 'preserve-explicit' },
+  sess.value?.modeSelection, sess.value?.id));
+const currentMode = computed(() => modeState.value.mode);
+const modeUnavailable = computed(() => !modeState.value.available
+  && prov.modelOf(sess.value?.modelRef || sess.value?.model).provider
+    ?.permissionModeSelectionPolicy === 'preserve-explicit');
+const activeModeLabel = computed(() => (
+  modes.value.find((mode) => mode.id === runtime.value?.snapshot?.permissionMode)?.label
+    || runtime.value?.snapshot?.permissionMode || '…'
+));
 const modeHint = computed(() => (
-  modes.value.find((m) => m.id === currentMode.value)?.hint || 'Режим прав агента'
+  !modeState.value.available ? t('core.chatModeUnavailable')
+    : `${modes.value.find((m) => m.id === currentMode.value)?.hint || 'Режим прав агента'}${
+      sess.value?.sending ? ` ${t('core.chatModeCurrent', { mode: activeModeLabel.value })} ${
+        t('core.chatModeNextTurn')}` : ''}`
 ));
 // Codex сообщает эффективное окно только в token usage конкретной сессии (например,
 // 272k × 95% = 258.4k). Каталог его не обещает; 200k ниже — только внутренний fallback,
@@ -1127,6 +1170,10 @@ async function onModelChange(e: Event) {
 // Реестр загружается асинхронно и может обновиться уже после открытия чата.
 // Когда он принёс достоверный список, старое неподдерживаемое значение не сохраняем.
 watch(effortLevels, (levels) => {
+  if (!messagesReady.value) {
+    return;
+  }
+
   if (sess.value?.effort && levels.length && !levels.includes(sess.value.effort)) {
     chat.setEffort(props.sid, '');
   }
@@ -1585,7 +1632,8 @@ async function onCtxClick(e: { altKey: boolean }) {
 // Сжатие или server-owned reset замораживают управление: менять модель/задачу/права
 // посреди перехода нельзя. Поле ввода, вложения и диктовка остаются живыми; сама кнопка
 // отправки ждёт завершения перехода.
-const frozen = computed(() => !!sess.value?.compacting || !!sess.value?.sessionResetting
+const frozen = computed(() => !messagesReady.value
+  || !!sess.value?.compacting || !!sess.value?.sessionResetting
   || !!sess.value?.workdirChanging || !!sess.value?.workdirProposal
   || ['preparing', 'ready', 'resetting'].includes(sess.value?.workdirState?.transition?.phase || ''));
 const frozenHint = computed(() => (sess.value?.sessionResetting
@@ -1593,6 +1641,14 @@ const frozenHint = computed(() => (sess.value?.sessionResetting
   : sess.value?.compacting
     ? 'Идёт сжатие контекста — отправка будет доступна сразу после него'
     : 'Подтвердите перенос и дождитесь смены рабочей папки'));
+
+/**
+ * Повтор присоединяется к единственной загрузке выбранной ленты.
+ * Отказ отображается состоянием стора и не превращается в пустой разговор.
+ */
+function retryMessages() {
+  void chat.ensureChatMessages(props.sid).catch(() => {});
+}
 
 // ── «Прочитано» ──
 // Открытый на экране чат читается сам: компонент рисуется ровно тогда, когда на чат
@@ -1614,36 +1670,17 @@ const body = ref<HTMLElement | null>(null);
 
 function scrollDown() {
   if (body.value) {
+    const finish = startChatPerformance('chat.scroll');
+
     body.value.scrollTop = body.value.scrollHeight;
+    finish();
   }
 }
 
 // ── Высота поля ввода ───────────────────────────────────────────────────────────
 // Настройка устройства (localStorage, как ширина дока и списка чатов). Пусто =
 // высоту решает CSS, как раньше.
-const COMPOSER_KEY = 'grigdesk-chat-composer-h';
-// Минимум совпадает с CSS (`[data-role='chat-composer'] { min-height: 48px }`): иначе
-// нижняя часть хода разделителя мертва — тянешь, число меняется, поле стоит.
-const COMPOSER_MIN = 48;
-// Потолок тот же, что в CSS (`max-height: 46vh`) — вторая цифра рядом с первой
-// разъезжается, и разделитель снова получает мёртвый ход.
-const COMPOSER_MAX_VH = 0.46;
 const taEl = ref<InstanceType<typeof UiTextarea> | null>(null);
-
-
-/**
- * Читает сохранённую положительную высоту поля ввода.
- * Отказ storage и неверное число оставляют управление размером CSS.
- */
-function storedComposerHeight() {
-  try {
-    const raw = Number(localStorage.getItem(COMPOSER_KEY));
-
-    return Number.isFinite(raw) && raw > 0 ? raw : null;
-  } catch {
-    return null;
-  }
-}
 
 const composerH = ref<number | null>(storedComposerHeight());
 const composerStyle = computed(() => (
@@ -1807,7 +1844,7 @@ watch(() => [
   chat.questionFor(props.sid)?.pid,
 ], autoScroll);
 // Переключение на другой чат: подставляем его черновик и — в конец истории.
-watch(() => props.sid, async () => {
+watch(() => [props.sid, messagesReady.value], async () => {
   input.value = sess.value?.draft || '';
   atBottom.value = true; // новый чат открываем в конце истории
   await nextTick();
@@ -1822,12 +1859,23 @@ watch(input, (v) => {
 
   const sid = props.sid;
 
-  draftTimer = setTimeout(() => chat.setDraft(sid, v), 400);
+  if (!messagesReady.value) {
+    return;
+  }
+
+  draftTimer = setTimeout(() => {
+    if (sid === props.sid && messagesReady.value) {
+      chat.setDraft(sid, v);
+    }
+  }, 400);
 });
 // Уход со страницы/закрытие вкладки — дописываем черновик немедленно, дебаунс не успел бы.
 function flushDraft() {
   clearTimeout(draftTimer ?? undefined);
-  chat.setDraft(props.sid, input.value);
+
+  if (messagesReady.value) {
+    chat.setDraft(props.sid, input.value);
+  }
 }
 
 window.addEventListener('beforeunload', flushDraft);
@@ -1840,14 +1888,14 @@ onUnmounted(() => {
  * Отказ уже начатой передачи сохраняет черновик и не создаёт второй запрос другим путём.
  */
 async function submit() {
-  if (speechBusy.value) {
+  if (!messagesReady.value || speechBusy.value) {
     return;
   }
 
   const t = input.value.trim();
   const atts = pending.value.slice();
 
-  if ((!t && !atts.length) || !sess.value || frozen.value) {
+  if ((!t && !atts.length) || !sess.value || frozen.value || modeUnavailable.value) {
     return;
   }
 
@@ -2816,7 +2864,15 @@ function skipQuestion() {
 .pend { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .chip { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }
 .chip img { width: 30px; height: 30px; object-fit: cover; border-radius: 5px; }
-.chip .nm { font-size: 11.5px; color: var(--ink-mid); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip .nm {
+  display: inline-block;
+  font-size: 11.5px;
+  color: var(--ink-mid);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .in-err { margin-top: 6px; font-size: 12px; color: var(--bad); }
 .speech-interim, .speech-note { font-size: 12px; color: var(--ink-mid); }
 .speech-interim { margin-bottom: 6px; font-style: italic; }

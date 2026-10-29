@@ -2,6 +2,10 @@ import { compileVue, webFile } from './compile-vue.js';
 
 const VIEW_PATH = webFile('src/views/PipelineView.vue');
 
+/**
+ * Сохраняет настоящие controls, заменяя только внешние диалоги тестовыми ответами.
+ * Перевод и подсказки используют те же сервисы, что рабочий интерфейс.
+ */
 function uiFacadeStub(prefix) {
   const componentImports = [
     ['UiButton', 'src/components/primitives/UiButton.vue'],
@@ -11,7 +15,10 @@ function uiFacadeStub(prefix) {
     ['UiLoadingState', 'src/components/feedback/UiLoadingState.vue'],
     ['UiPopover', 'src/components/overlays/UiPopover.vue'],
     ['UiSpinner', 'src/components/primitives/UiSpinner.vue'],
+    ['UiSelectableRow', 'src/components/composites/UiSelectableRow.vue'],
     ['UiTextarea', 'src/components/primitives/UiTextarea.vue'],
+    ['UiTab', 'src/components/composites/UiTab.vue'],
+    ['UiTabs', 'src/components/composites/UiTabs.vue'],
   ];
   const imports = componentImports.map(([name, file]) => (
     `import ${name} from ${JSON.stringify(webFile(file))};`
@@ -19,8 +26,10 @@ function uiFacadeStub(prefix) {
   const names = componentImports.map(([name]) => name).join(', ');
 
   return [
+    "export * from './src/ui.ts';",
     ...imports,
     `export { ${names} };`,
+    'export { t } from "./src/services/locale.ts";',
     `export const confirmDialog = (...args) => globalThis.${prefix}ConfirmDialog(...args);`,
     `export const alertDialog = (...args) => globalThis.${prefix}AlertDialog(...args);`,
   ].join('\n');
@@ -30,12 +39,16 @@ function uiFacadeStub(prefix) {
  * PipelineView бандлится с настоящими UI-компонентами, а границы страницы остаются
  * управляемыми тестом. Так harness проверяет публичный facade без сетевых побочных эффектов.
  */
-export function compilePipelineView(prefix, { realGraph = false } = {}) {
+export function compilePipelineView(prefix, { realGraph = false, expose = [] } = {}) {
   return compileVue(VIEW_PATH, {
+    expose,
     stubs: {
-      '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
-      '../../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
+      '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`
+        + '\nexport { ApiError } from "./src/shared/apiClient.ts";',
+      '../../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`
+        + '\nexport { ApiError } from "./src/shared/apiClient.ts";',
       '../composables/useSse.ts': [
+        'export const sseSubscribe = () => () => {};',
         'export function useSse(onEvent) {',
         `  globalThis.${prefix}SseHandler = onEvent;`,
         '  return { connected: { value: true } };',

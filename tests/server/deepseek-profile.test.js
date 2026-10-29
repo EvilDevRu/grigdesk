@@ -101,6 +101,40 @@ test('profile builder записывает переданный workspaceRoot в
   assert.equal(policyLine?.trim(), `workspaceRoot: ${JSON.stringify(f.projectRoot)}`);
 });
 
+test('профиль прав хранится приватно и входит в fingerprint запуска', async (t) => {
+  const f = await fixture(t);
+  const options = {
+    launchDir: f.launchDir,
+    cwd: f.cwd,
+    workspaceRoot: f.cwd,
+    mode: 'workspace-write',
+    approval: 'ask',
+    hooks: {
+      bashToolName: DEEPSEEK_BASH_TOOL,
+      ssh: false,
+      db: false,
+      strictDb: false,
+      instructions: { projectRoot: f.projectRoot },
+    },
+  };
+  const first = await buildLaunchFiles({
+    ...options,
+    toolPermissions: { mode: 'default', workActions: {} },
+  });
+  const document = JSON.parse(await fs.readFile(first.toolPolicyPath, 'utf8'));
+
+  assert.equal(document.mode, 'default');
+  assert.equal(document.workspaceRoot, f.cwd);
+  assert.equal((await fs.stat(first.toolPolicyPath)).mode & 0o777, 0o600);
+
+  const second = await buildLaunchFiles({
+    ...options,
+    toolPermissions: { mode: 'auto', workActions: {} },
+  });
+
+  assert.notEqual(first.fingerprint, second.fingerprint);
+});
+
 test('profile builder убирает PreToolUse, если обе command-policy выключены', async (t) => {
   const f = await fixture(t);
   const result = await buildLaunchFiles({

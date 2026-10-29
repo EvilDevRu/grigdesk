@@ -24,6 +24,7 @@ async function fixture(t, boot = false) {
   const launchDir = path.join(root, 'launch');
   const home = path.join(root, 'home');
   const overlayPath = path.join(launchDir, 'overlay.yml');
+  const toolPolicyPath = path.join(root, 'tool-policy.json');
   const plugin = path.join(root, 'startup.mjs');
   const barrier = path.join(root, 'boot.ready');
   let child;
@@ -39,6 +40,14 @@ async function fixture(t, boot = false) {
   });
   await fs.mkdir(launchDir);
   await fs.mkdir(home);
+  await fs.writeFile(toolPolicyPath, JSON.stringify({
+    format: 1,
+    consumer: 'deepseek-chat',
+    revision: 'grigdesk-tool-permissions-v1',
+    mode: 'default',
+    workspaceRoot: root,
+    workActions: {},
+  }));
   await fs.writeFile(plugin, boot
     ? `import { writeFileSync } from 'node:fs';
 writeFileSync(${JSON.stringify(barrier)}, String(process.pid));
@@ -79,6 +88,7 @@ await new Promise(() => {});
   return {
     root,
     home,
+    toolPolicyPath,
     config,
     options,
     barrier,
@@ -186,6 +196,7 @@ for (const owner of ['settings', 'catalog', 'acp']) {
             launchDir,
             dshHome: input.home,
             overlayPath: options.overlayPath,
+            toolPolicyPath: input.toolPolicyPath,
           }),
         },
       });
@@ -217,6 +228,7 @@ test('ACP сохраняет первичную ошибку prompt при от�
         launchDir: path.dirname(input.options.overlayPath),
         dshHome: input.home,
         overlayPath: input.options.overlayPath,
+        toolPolicyPath: input.toolPolicyPath,
       }),
       spawn: (_command, _args, options) => {
         const child = input.options.spawnProcess(process.execPath,

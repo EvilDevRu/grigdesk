@@ -9,6 +9,7 @@
 // augmentation действует на всю программу.
 
 import 'fastify';
+import type { AuthKind } from '../../../packages/plugin-types/src/server.ts';
 
 // Изолированные HTTP-фикстуры не импортируют сборку приложения, регистрирующую плагины.
 // Их расширения нужны и в таком графе типов; runtime-регистрация остаётся в приложении.
@@ -20,10 +21,11 @@ import type { ShutdownCoordinator } from './shutdown.ts';
 import type { ProjectsService } from '../modules/projects/service.ts';
 import type { StudioRuntime } from '../modules/studio3d/runtime.ts';
 import type { PluginDocsEntry } from './pluginDocs.ts';
+import type { ConversationAck } from './arbiterConversationService.ts';
 
 // Чем именно подтверждён запрос. Различать обязательно: внутренний токен процесса и
 // сессия человека дают разные права, а CLI-токен не должен открывать чужие ручки.
-export type AuthKind = 'session' | 'internal' | 'cli' | null;
+export type { AuthKind } from '../../../packages/plugin-types/src/server.ts';
 
 export interface AuthPrincipal {
   kind: 'device';
@@ -62,7 +64,13 @@ declare module 'fastify' {
     refreshProvidersUsage?(): Promise<void>;
     // Обработчик живёт вместе с процессом и принимает только поколение своего аккаунта.
     providerUsageSink?(providerId: string): (patch: ProviderUsagePatch) => boolean;
-    factoryArbitrate?(...args: unknown[]): Promise<unknown>;
+    // Обслуживание внешнего CLI сохраняет паузу аккаунта и отвергает старые callbacks.
+    invalidateProviderRuntime?(providerId: string, options?: { removed?: boolean }): Promise<boolean>;
+    factoryArbitrate?(
+      task: string,
+      reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+      options?: { actor?: string },
+    ): Promise<ConversationAck | null>;
     telegramDiscussion?(text: unknown, options?: Record<string, unknown>): Promise<unknown>;
     // Сервис раздела «Проекты»: им пользуется и сам раздел, и ручка /api/profiles.
     projects?: ProjectsService;

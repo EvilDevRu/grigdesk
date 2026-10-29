@@ -2,7 +2,10 @@
   <section class="settings-plugin-setup" data-plugin-setup>
     <h4>{{ t('settings.readiness') }}</h4>
     <p v-if="error" role="alert">{{ error }}</p>
-    <UiLoadingState v-if="loading && !status" :label="t('settings.checkingWhatIsOnTheMachine')" />
+    <UiLoadingState v-if="loading && !status" :label="t('settings.checkingWhatIsOnTheMachine')"
+                    :failed="Boolean(error)">
+      <UiSkeletonLayout layout="list" :header="false" />
+    </UiLoadingState>
     <div v-for="item in status?.items ?? []" :key="item.id">
       <b>{{ item.title }}</b>
       <p>{{ item.reason }}</p>
@@ -28,6 +31,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../../ui';
+
 import { t } from '../../../ui.ts';
 
 import { ref, watch, onBeforeUnmount } from 'vue';

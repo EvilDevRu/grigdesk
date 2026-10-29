@@ -45,7 +45,8 @@
     <UiInlineMessage v-if="store.broken.length" tone="warning">
       Повреждённые записи: {{ store.broken.length }}
     </UiInlineMessage>
-    <UiLoadingState v-if="store.busy && !store.models.length" label="Загрузка моделей…" variant="cards" />
+    <Studio3dLoading v-if="store.busy && !store.models.length" label="Загрузка моделей…"
+                     area="library" :failed="Boolean(error)" />
     <div v-else-if="!store.models.length" class="studio-library-empty">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"
         stroke-linejoin="round" aria-hidden="true">
@@ -94,6 +95,8 @@
 </template>
 
 <script setup lang="ts">
+import Studio3dLoading from './Studio3dLoading.vue';
+
 import { computed, ref, onMounted, onUnmounted } from 'vue';
 import {
   UiSearchInput,

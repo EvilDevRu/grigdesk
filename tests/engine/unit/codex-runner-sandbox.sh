@@ -11,7 +11,8 @@ export RUNNER_CODEX_ADD_DIRS="$state_root $project_extra"
 
 factory_exec() {
   printf '%s\n' "$@" >"$TEST_ROOT/codex-argv"
-  return 0
+  cat >"$TEST_ROOT/codex-stdin"
+  return "${FIXTURE_CODEX_RC:-0}"
 }
 
 runner_codex_run 42 "prompt" BUILD gpt-fixture high 30 "$run_dir"
@@ -27,6 +28,61 @@ assert_contains "$argv" "sandbox_workspace_write.network_access=true" \
 
 grep -q '^danger-full-access$' "$TEST_ROOT/codex-argv"
 assert_rc 1 "$?" "Codex runner never disables the sandbox for extra roots"
+
+# Auto-review определяется точным сочетанием route policy и native sandbox,
+# поэтому SHIP и BUILD имеют одинаковые права, а неизвестные политики не расширяются.
+for stage in BUILD SHIP; do
+  FACTORY_ROUTE_FILESYSTEM_POLICY=workspace-write RUNNER_AUTO_COMPACT_WINDOW=120000 \
+    runner_codex_run 42 "prompt" "$stage" gpt-fixture high 30 "$run_dir"
+  assert_rc 0 "$?" "$stage workspace-write запускается через штатный reviewer"
+  argv=$(cat "$TEST_ROOT/codex-argv")
+  approve_count=$(grep -c '^--approve-for-me$' "$TEST_ROOT/codex-argv" || true)
+  assert_eq 1 "$approve_count" "$stage задаёт ровно один approve-for-me"
+
+  for forbidden in --sandbox --yolo --dangerously-bypass-approvals-and-sandbox danger-full-access; do
+    grep -Fxq -- "$forbidden" "$TEST_ROOT/codex-argv"
+    assert_rc 1 "$?" "$stage не смешивает Auto-review с $forbidden"
+  done
+  grep -Fq -- 'approval_policy="never"' "$TEST_ROOT/codex-argv"
+  assert_rc 1 "$?" "$stage не выключает native approvals"
+
+  for exact in provider timeout -k 30 codex exec --json --skip-git-repo-check -m gpt-fixture \
+    'model_reasoning_effort="high"' model_auto_compact_token_limit=120000 \
+    sandbox_workspace_write.network_access=true "$state_root" "$project_extra" "$run_dir/last.md" -; do
+    grep -Fxq -- "$exact" "$TEST_ROOT/codex-argv"
+    assert_rc 0 "$?" "$stage сохраняет аргумент $exact"
+  done
+  assert_eq prompt "$(cat "$TEST_ROOT/codex-stdin")" "$stage сохраняет prompt в stdin"
+done
+
+for policy in state-only transactional-write unset unknown; do
+  route_policy=$policy
+  [[ "$policy" != unset ]] || route_policy=''
+  FACTORY_ROUTE_FILESYSTEM_POLICY="$route_policy" \
+    runner_codex_run 42 "prompt" SHIP gpt-fixture high 30 "$run_dir"
+  assert_rc 0 "$?" "$policy сохраняет старую файловую политику"
+  grep -Fxq -- '--approve-for-me' "$TEST_ROOT/codex-argv"
+  assert_rc 1 "$?" "$policy не получает Auto-review даже на SHIP"
+  grep -Fxq -- '--sandbox' "$TEST_ROOT/codex-argv"
+  assert_rc 0 "$?" "$policy сохраняет native sandbox"
+  if [[ "$policy" == state-only ]]; then
+    grep -Fxq -- 'approval_policy="never"' "$TEST_ROOT/codex-argv"
+    assert_rc 0 "$?" "state-only явно запрещает escalation"
+  fi
+done
+
+for sandbox in read-only danger-full-access; do
+  FACTORY_ROUTE_FILESYSTEM_POLICY=workspace-write RUNNER_CODEX_SANDBOX="$sandbox" \
+    runner_codex_run 42 "prompt" SHIP gpt-fixture high 30 "$run_dir"
+  grep -Fxq -- '--approve-for-me' "$TEST_ROOT/codex-argv"
+  assert_rc 1 "$?" "explicit $sandbox не подменяется Auto-review"
+  grep -Fxq -- "$sandbox" "$TEST_ROOT/codex-argv"
+  assert_rc 0 "$?" "explicit $sandbox сохраняется как прежний вход"
+done
+
+FACTORY_ROUTE_FILESYSTEM_POLICY=workspace-write FIXTURE_CODEX_RC=17 \
+  runner_codex_run 42 "prompt" SHIP gpt-fixture high 30 "$run_dir"
+assert_rc 17 "$?" "Auto-review сохраняет exit code провайдера"
 
 # Shared stand получает не общий workspace-write/network, а самодостаточный
 # permission profile: exact control dir read-only, network полностью выключен.
@@ -51,11 +107,18 @@ printf '#!/usr/bin/env bash\nexit 0\n' >"$codex_native"
 chmod +x "$codex_entry" "$codex_native"
 export PATH="$codex_runtime/bin:$PATH"
 
-runner_codex_run 42 "prompt" BUILD gpt-fixture high 30 "$run_dir"
+FACTORY_ROUTE_FILESYSTEM_POLICY=workspace-write \
+  runner_codex_run 42 "prompt" SHIP gpt-fixture high 30 "$run_dir"
 restricted_rc=$?
 assert_rc 0 "$restricted_rc" "shared-stand Codex policy can be inspected without a model call"
 
 restricted=$(cat "$TEST_ROOT/codex-argv")
+for exact in '--approve-for-me' '--sandbox'; do
+  grep -Fxq -- "$exact" "$TEST_ROOT/codex-argv"
+  assert_rc 1 "$?" "restricted SHIP не получает $exact"
+done
+grep -Fxq -- 'approval_policy="never"' "$TEST_ROOT/codex-argv"
+assert_rc 0 "$?" "restricted SHIP сохраняет never"
 for exact in --ignore-user-config --strict-config --dangerously-bypass-hook-trust; do
   grep -Fxq -- "$exact" "$TEST_ROOT/codex-argv"
   assert_rc 0 "$?" "shared-stand runner emits $exact"

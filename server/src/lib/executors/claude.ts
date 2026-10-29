@@ -2,7 +2,7 @@
 import { setTimeout as wait } from 'node:timers/promises';
 
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
-import { execFile } from 'node:child_process';
+import { execFile } from '../providerInstall/externalCliProcess.ts';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -1664,6 +1664,23 @@ export default {
   workToolsTransport: 'mcp',
   install: 'npm i -g @anthropic-ai/claude-code && claude login',
   login: 'claude login',
+  usagePresentation: { freshness: true, spentLabel: true },
+  /**
+   * Происхождение внешней программы объявлено независимо от наличия npm в серверном PATH.
+   * Native launcher и version store остаются одной установкой без чтения пользовательских данных.
+   */
+  externalCli(_config: ClaudeConfig, home: string) {
+    return {
+      packageId: '@anthropic-ai/claude-code',
+      binName: 'claude',
+      configKey: 'claudeBin',
+      envKey: 'GRIGDESK_CLAUDE_BIN',
+      native: [{
+        entry: path.join(home, '.local/bin/claude'),
+        root: path.join(home, '.local/share/claude/versions'),
+      }],
+    };
+  },
   /**
    * Пользовательский npm имеет приоритет; без него сохраняются native-команды.
    * Вход остаётся отдельным действием, npm-копия подключается после проверки версии.
@@ -1691,6 +1708,7 @@ export default {
         fallbackCommand: [config.claudeBin, ...['install', 'latest']].join(' '),
       },
       loginCommand: 'claude login',
+      loginArgs: ['login'],
       nativeBinDirs: [path.join(os.homedir(), '.local', 'bin')],
     };
   },

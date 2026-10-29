@@ -193,7 +193,7 @@ test('security profile, catalog key и native context разделяют async d
   assert.equal((await fs.readFile(f.counter, 'utf8')).trim().split('\n').length, 1);
   assert.equal(typeof profile.then, 'function');
   assert.equal(typeof key.then, 'function');
-  assert.match(profileValue, /^deepseek-host-sandbox-v5:/u);
+  assert.match(profileValue, /^deepseek-host-sandbox-v6:/u);
   assert.ok(keyValue.includes(f.info.upstreamVersion));
   assert.equal(contextValue.runtimeIdentity, `deepseek-package:${f.info.packageId}`);
 });

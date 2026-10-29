@@ -1,3 +1,4 @@
+import { chatReplyKey, chatSearchSnippet } from '../../../shared/chat/chatListProjection.ts';
 import { parseProjectsChange } from '../../../shared/runtime/projectsContracts.ts';
 import { messageRef, t } from '../ui.ts';
 // Чат с агентами — МУЛЬТИСЕССИИ (вкладки, как в VS Code).
@@ -6,10 +7,12 @@ import { messageRef, t } from '../ui.ts';
 // окон/устройств и переживает чистку браузера. Это единый источник истории для
 // полноразмерной страницы «Чаты» и Telegram-пульта.
 import { defineStore } from 'pinia';
+import { measureChatPerformance, startChatPerformance } from '../shared/chatPerformance.ts';
 import { toRaw } from 'vue';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 import {
+  decodeChatHead, decodeChatList, decodeChatReconcile, isChatSession,
   decodeChatEnvelope, decodeChatEvent, decodeWorkdirPreview, decodeInTurnReceipt, decodeInTurnPage,
 } from '../shared/chatContracts.ts';
 import type {
@@ -37,8 +40,9 @@ import {
   createChatPersistenceProjectionCache,
   stringifyChatStoreSnapshot,
 } from '../shared/chatPersistenceProjection.ts';
-import { createChatHistoryStepReuseState, mayRetryFullHistory } from '../shared/chatHistoryStepReuse.ts';
+import { createChatHistoryStepReuseState, isHistoryStepsChanged } from '../shared/chatHistoryStepReuse.ts';
 import { createChatSelectionState } from '../shared/chatSelectionState.ts';
+import { effectivePermissionMode, permissionModeRequest } from '../shared/chatPermissionMode.ts';
 import { chatVisibility } from '../shared/chatVisibility.ts';
 import { normalizeContextUsage } from '../../../shared/chat/chatContextUsage.ts';
 import { normalizeChatRunSnapshot } from '../../../shared/chat/chatRun.ts';
@@ -90,6 +94,22 @@ export const DEFAULT_SPEECH = Object.freeze<SpeechSnapshot>({
   }),
   revision: '',
 });
+
+/**
+ * Индекс читает только состав списка и id, поэтому текст и runtime чата его не инвалидируют.
+ * При повторном id сохраняется первый объект, как у прежнего Array.find.
+ */
+function indexChats(sessions: ChatSession[]): Map<string, ChatSession> {
+  const index = new Map<string, ChatSession>();
+
+  for (const session of sessions) {
+    if (!index.has(session.id)) {
+      index.set(session.id, session);
+    }
+  }
+
+  return index;
+}
 
 /**
  * Речь приезжает и внутри chat-store snapshot, и отдельным settings/SSE-ответом.
@@ -278,6 +298,24 @@ let retryDelay = 0;
 let needSnapshot = false;
 
 interface ChatLoadRuntime {
+  heads: Map<string, ChatSession>;
+  versions: Map<string, string>;
+  headOnly: Set<string>;
+  epochs: Map<string, number>;
+  patchEpochs: Map<string, number>;
+  details: Map<string, Promise<void>>;
+  snapshots: Map<string, ChatSession>;
+  snapshotJobs: Map<string, Promise<void>>;
+  snapshotTimer: ReturnType<typeof setTimeout> | null;
+  snapshotDelays: Map<string, number>;
+  mergedSnapshots: Set<string>;
+  importedLegacy: boolean;
+  resync: Promise<void> | null;
+  resyncedAt: number;
+  deliverySeen: Map<string, { chatId: string; at: number }>;
+  deleting: Set<string>;
+  searchEpoch: number;
+  patches: Map<string, Promise<ChatEnvelope | null>>;
   promise: Promise<void> | null;
   controller: AbortController | null;
   resyncControllers: Set<AbortController>;
@@ -304,6 +342,24 @@ function chatLoadRuntimeFor(store: object): ChatLoadRuntime {
   }
 
   const runtime: ChatLoadRuntime = {
+    heads: new Map(),
+    versions: new Map(),
+    headOnly: new Set(),
+    epochs: new Map(),
+    patchEpochs: new Map(),
+    details: new Map(),
+    snapshots: new Map(),
+    snapshotJobs: new Map(),
+    snapshotTimer: null,
+    snapshotDelays: new Map(),
+    mergedSnapshots: new Set(),
+    importedLegacy: false,
+    resync: null,
+    resyncedAt: 0,
+    deliverySeen: new Map(),
+    deleting: new Set(),
+    searchEpoch: 0,
+    patches: new Map(),
     promise: null,
     controller: null,
     resyncControllers: new Set(),
@@ -323,6 +379,7 @@ function chatLoadRuntimeFor(store: object): ChatLoadRuntime {
     store.$dispose = () => {
       runtime.disposed = true;
       clearTimeout(runtime.timer ?? undefined);
+      clearTimeout(runtime.snapshotTimer ?? undefined);
       runtime.controller?.abort();
       runtime.resyncControllers.forEach((controller) => controller.abort());
       runtime.off.forEach((off) => off());
@@ -570,11 +627,7 @@ function rememberReplyNotice(key: string) {
 }
 
 function messageNoticeKey(chatId: string, message: ChatMessage, index: number) {
-  if (message?.pid) {
-    return `${chatId}:pid:${message.pid}`;
-  }
-
-  return `${chatId}:message:${index}:${message?.role || ''}:${message?.text || ''}`;
+  return chatReplyKey(chatId, message, index);
 }
 
 // Промежуточная реплика идущего хода — блок без итога: ни ленты шагов, ни прикреплённого финала.
@@ -585,9 +638,6 @@ function isIntermediateReply(message: ChatMessage) {
     && !message.finalAssistantMessageId && !Array.isArray(message.steps);
 }
 
-// Когда историю последний раз сверяли с сервером целиком. Нужно, чтобы первое `hello`
-// (оно приходит сразу после загрузки) не тянуло всю историю по второму разу.
-let storeSyncedAt = 0;
 // EventSource может прислать несколько hello подряд. Пропущенный за время
 // разрыва speech-settings восстанавливаем одним shared GET, а не по запросу на hello.
 let speechSyncPromise: Promise<SpeechSnapshot | null> | null = null;
@@ -815,6 +865,7 @@ function slimOf(s: ChatRecord) {
 
     effort: s.effort,
     mode: s.mode || '',
+    modeSelection: s.modeSelection,
 
     messages: s.messages,
     sessionId: s.sessionId,
@@ -874,11 +925,16 @@ function stripSteps(chat: ChatHistorySnapshot) {
  * копию тех же строк в карте `sentChats`.
  */
 function fingerprintOf(chat: ChatHistorySnapshot) {
+  const finish = startChatPerformance('chat.fingerprint', () => ({ messages: chat.messages?.length || 0 }));
   const messages = (chat.messages || []).map((m) => (Array.isArray(m.steps) && m.steps.length
     ? { ...m, steps: m.steps.length }
     : m));
 
-  return JSON.stringify({ ...chat, messages });
+  const result = JSON.stringify({ ...chat, messages });
+
+  finish();
+
+  return result;
 }
 
 
@@ -1074,6 +1130,10 @@ function writeSnapshot(payload: Record<string, unknown> & { sessions: ChatHistor
     sessions: Array<{ snapshot: { value: string } }>;
     archived: Array<{ snapshot: { value: string } }>;
   }) {
+  const finish = startChatPerformance('chat.snapshot', () => ({
+    chats: projections.sessions.length + projections.archived.length,
+    chars: [...sessions, ...archived].reduce((sum, json) => sum + json.length, 0),
+  }));
   const sessions = projections.sessions.map((entry) => entry.snapshot.value);
   const archived = projections.archived.map((entry) => entry.snapshot.value);
 
@@ -1094,6 +1154,8 @@ function writeSnapshot(payload: Record<string, unknown> & { sessions: ChatHistor
       // localStorage недоступен — работаем без страховки.
     }
   }
+
+  finish();
 }
 
 
@@ -1143,12 +1205,21 @@ export const useChatStore = defineStore('chat', {
   // Только для рендера этого окна: в историю едет лишь `delivery` у самой реплики.
   state: (): ChatState => ({
     ...pickStore(null),
+    messageLoads: {},
+    search: {
+      query: '',
+      archived: false,
+      loading: false,
+      error: '',
+      matches: {},
+    },
     loaded: false,
     loading: false,
     loadError: null,
     revealRequest: '',
     pending: {},
     saveError: null,
+    snapshotRecovery: {},
     compactWindow: 0,
     speech: normalizeSpeechSnapshot(null),
     turnProtocol: 0,
@@ -1164,6 +1235,8 @@ export const useChatStore = defineStore('chat', {
     inTurnError: '',
   }),
   getters: {
+    _sessionsById: (s) => indexChats(s.sessions),
+    _archivedById: (s) => indexChats(s.archived || []),
     loadErrorMessage: (s) => {
       const messages = {
         network: messageRef('core.chatListLoadNetwork'),
@@ -1177,15 +1250,17 @@ export const useChatStore = defineStore('chat', {
     // На странице «Чаты» можно открыть архивный разговор для чтения, не возвращая
     // его в активные. Поэтому выбранный чат и поиск по id смотрят в оба списка;
     // принадлежность к архиву по-прежнему задаётся только самим списком.
-    active: (s) => s.sessions.find((x) => x.id === s.activeId)
-      || (s.archived || []).find((x) => x.id === s.activeId)
-      || null,
-    session: (s) => (id: string) => s.sessions.find((x) => x.id === id)
-      || (s.archived || []).find((x) => x.id === id)
-      || null,
+    active(): ChatSession | null {
+      return this.session(this.activeId || '');
+    },
+    session(): (id: string) => ChatSession | null {
+      return (id) => this._sessionsById.get(id) || this._archivedById.get(id) || null;
+    },
     inTurnFor: (s) => (id: string) => s.inTurnRuns[id] || null,
     runtimeFor: (s) => (id: string) => s.runtimeRuns[id] || null,
-    isArchived: (s) => (id: string) => (s.archived || []).some((x) => x.id === id),
+    isArchived(): (id: string) => boolean {
+      return (id) => this._archivedById.has(id);
+    },
     // Заголовок вкладки: название задачи → #номер → «Новый чат».
     tabLabel: () => (sess: ChatRecord) => sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат'),
     // Непрочитанные: агент ответил, а мы на этот чат ещё не смотрели. Считаем и архивные —
@@ -1210,6 +1285,8 @@ export const useChatStore = defineStore('chat', {
     // режим архива — только архивные. Без запроса показываем сниппет последнего
     // сообщения; с запросом фильтруем по названию и тексту переписки.
     list(s): (q: string, showArchived?: boolean) => ChatListRow[] { return (q, showArchived = false) => {
+      const finish = startChatPerformance('chat.list', () => ({ chats: source.length }));
+
       historyPersistenceFor(this);
 
       let previews = previewCaches.get(toRaw(this));
@@ -1232,16 +1309,20 @@ export const useChatStore = defineStore('chat', {
         let snippet = '';
 
         if (t) {
-          const m = msgs.find((x) => (x.text || '').toLowerCase().includes(t));
+          const remote = this.search.query.trim().toLowerCase() === t
+            && this.search.archived === archived ? this.search.matches[sess.id] : undefined;
+          const local = !chatLoadRuntimeFor(this).headOnly.has(sess.id)
+            && !historyPersistenceFor(this).isSent(sess,
+              fingerprintOf(archived ? archivedSlimOf(sess) : slimOf(sess)))
+            ? chatSearchSnippet(sess as unknown as Record<string, unknown>, t) : null;
 
-          if (!title.toLowerCase().includes(t) && !m) {
+          if (remote === undefined && local === null) {
             return null;
           }
-          if (m) {
-            const i = (m.text || '').toLowerCase().indexOf(t);
 
-            snippet = (i > 24 ? '…' : '') + (m.text || '').slice(Math.max(0, i - 24), i + 72);
-          }
+          snippet = local ?? remote ?? '';
+        } else if (!!chatLoadRuntimeFor(this).headOnly.has(sess.id)) {
+          snippet = sess.previewSource || '';
         } else if ((sess.draft || '').trim()) {
           // Неотправленный текст показываем вместо последнего сообщения — как в телеграме.
           snippet = sess.draft || '';
@@ -1258,7 +1339,8 @@ export const useChatStore = defineStore('chat', {
           title,
           snippet: previews.get(sess.id, snippet),
           archived,
-          draft: !t && (!!(sess.draft || '').trim() || !!sess.draftAttachments?.length),
+          draft: !t && (!chatLoadRuntimeFor(this).headOnly.has(sess.id)
+            ? !!(sess.draft || '').trim() || !!sess.draftAttachments?.length : !!sess.hasDraft),
           // Модель чата — для иконки исполнителя и подписи в строке списка.
           model: sess.model || sess.modelRef?.model || '',
           modelRef: sess.modelRef || null,
@@ -1278,6 +1360,7 @@ export const useChatStore = defineStore('chat', {
       const out: ChatListRow[] = [];
       const source = showArchived ? (s.archived || []) : s.sessions;
 
+      previews.retain(source.map((chat) => chat.id));
       source.forEach((x) => {
         const h = row(x, showArchived);
 
@@ -1288,10 +1371,478 @@ export const useChatStore = defineStore('chat', {
       // Ждущие ответа — наверх: пока не ответишь, работа в них стоит.
       out.sort((a, b) => (Number(b.waiting) - Number(a.waiting)) || (b.ts - a.ts));
 
+      finish();
+
       return out;
     }; },
   },
   actions: {
+    /**
+     * Полноту подтверждает только адресный ответ сервера или локальное создание чата.
+     * Placeholder и число сообщений не участвуют в решении о допустимости записи.
+     */
+    isChatMessagesLoaded(id: string): boolean {
+      return !!this._find(id) && (this.messageLoads[id]?.state === 'loaded'
+        || !chatLoadRuntimeFor(this).headOnly.has(id));
+    },
+    /**
+     * Видимость проверяется для каждого exact id после регистрации и загрузки каталога.
+     * Ошибка остаётся в реактивном состоянии ленты для явного повтора пользователем.
+     */
+    _loadVisibleChats() {
+      if (!this.loaded) {
+        return;
+      }
+
+      for (const chat of [...this.sessions, ...this.archived]) {
+        if (this._visible(chat.id) && !this.isChatMessagesLoaded(chat.id)) {
+          void this.ensureChatMessages(chat.id).catch(() => {});
+        }
+      }
+    },
+    /**
+     * Удаление инвалидирует поздние ответы, не отменяя чужие запросы и процессы.
+     * Контроллеры освобождаются общим dispose экземпляра стора.
+     */
+    _invalidateChatDetail(id: string) {
+      const runtime = chatLoadRuntimeFor(this);
+
+      runtime.epochs.set(id, (runtime.epochs.get(id) || 0) + 1);
+      runtime.snapshots.delete(id);
+      runtime.snapshotDelays.delete(id);
+      runtime.mergedSnapshots.delete(id);
+      delete this.snapshotRecovery[id];
+      delete this.messageLoads[id];
+    },
+    /**
+     * Метаданные отделены от полной истории и сравниваются с подтверждённой шапкой.
+     * Принадлежность архиву определяется списком, null явно удаляет closedAt.
+     */
+    _headMetadata(id: string, head?: ChatSession) {
+      const chat = head || this._find(id);
+
+      return {
+        title: chat?.title || '',
+        unread: !!chat?.unread,
+        archived: head ? !!head.archived : this.isArchived(id),
+        closedAt: chat?.closedAt ?? null,
+      };
+    },
+    /**
+     * Локальные метаданные сравниваются с последней подтверждённой шапкой.
+     * Разница нужна и для PATCH, и для сохранения правок поверх загруженной ленты.
+     */
+    _headMetadataPatch(id: string, head?: ChatSession) {
+      const next = this._headMetadata(id);
+      const before = this._headMetadata(id, head || chatLoadRuntimeFor(this).heads.get(id));
+
+      return Object.fromEntries(Object.entries(next)
+        .filter(([key, value]) => value !== before[key as keyof typeof before]));
+    },
+    /**
+     * Шапка обновляет строку на месте, сохраняя runtime и локальную правку метаданных.
+     * Она никогда не подтверждает steps и не превращает placeholder в полную ленту.
+     */
+    _applyChatHead(head: ChatSession, notify = true) {
+      const runtime = chatLoadRuntimeFor(this);
+      const previous = runtime.heads.get(head.id);
+      const local = this._find(head.id);
+      const full = !!local && !runtime.headOnly.has(head.id);
+      const dirty = !!local && this._dirty(local);
+
+      runtime.heads.set(head.id, { ...head });
+      runtime.versions.set(head.id, head.version!);
+      runtime.epochs.set(head.id, (runtime.epochs.get(head.id) || 0) + 1);
+
+      if (full || dirty) {
+        return;
+      }
+
+      const target = head.archived ? this.archived : this.sessions;
+      const source = head.archived ? this.sessions : this.archived;
+      const position = source.findIndex((chat) => chat.id === head.id);
+
+      if (position >= 0) {
+        source.splice(position, 1);
+      }
+
+      const live = local || { ...head, messages: [] };
+
+      Object.assign(live, head, runtimeOf(live));
+      delete live.archived;
+      runtime.headOnly.add(head.id);
+
+      if (!target.some((chat) => chat.id === head.id)) {
+        insertByCreated(target, live);
+      }
+      if (notify && head.lastReply && head.lastReply.key !== previous?.lastReply?.key) {
+        this._notifyReply(live, head.lastReply.text, head.lastReply.key);
+      }
+
+      this._refreshChatSearch();
+    },
+    /**
+     * Одна очередь PATCH сохраняет только изменённые разрешённые метаданные головы.
+     * Подтверждение не откатывает правки, набранные во время сетевого запроса.
+     */
+    _patchChatHead(id: string): Promise<ChatEnvelope | null> {
+      const runtime = chatLoadRuntimeFor(this);
+      const prior = runtime.patches.get(id) || Promise.resolve(null);
+      const job = prior.catch(() => null).then(async () => {
+        const live = this._find(id);
+        const base = runtime.heads.get(id);
+
+        if (!live || !base || runtime.disposed) {
+          return null;
+        }
+
+        const patch = this._headMetadataPatch(id);
+
+        if (!Object.keys(patch).length) {
+          return null;
+        }
+
+        const response = await api.patch(`/api/chat/store/chat/${id}`, { patch, origin: WINDOW_ID });
+        const head = decodeChatHead(isRecord(response) ? response.head : null);
+
+        if (runtime.disposed || this._find(id) !== live) {
+          return null;
+        }
+
+        runtime.heads.set(id, head);
+        runtime.versions.set(id, head.version!);
+
+        const epoch = (runtime.epochs.get(id) || 0) + 1;
+
+        runtime.epochs.set(id, epoch);
+        runtime.patchEpochs.set(id, epoch);
+        live.revision = head.revision;
+        this._refreshChatSearch();
+
+        return {};
+      }).finally(() => {
+        if (runtime.patches.get(id) === job) {
+          runtime.patches.delete(id);
+        }
+      });
+
+      runtime.patches.set(id, job);
+
+      return job;
+    },
+    /**
+     * Адресная загрузка делится между потребителями и проверяет сырую полноту ответа.
+     * Поздний ответ после удаления, dispose или новой шапки не становится базой записи.
+     */
+    ensureChatMessages(id: string): Promise<void> {
+      const runtime = chatLoadRuntimeFor(this);
+
+      if (runtime.details.has(id)) {
+        return runtime.details.get(id)!;
+      }
+      if (runtime.disposed || !this._find(id) || this.isChatMessagesLoaded(id)) {
+        return Promise.resolve();
+      }
+
+      let epoch = runtime.epochs.get(id) || 0;
+      let reloadAfterPatch = false;
+      const controller = new AbortController();
+
+      runtime.resyncControllers.add(controller);
+      this.messageLoads[id] = { state: 'loading', error: '' };
+
+      const job = (async () => {
+        try {
+          while (true) {
+            const raw = await api.get(`/api/chat/store/chat/${id}`, {
+              idleTimeoutMs: 30000,
+              retry: false,
+              signal: controller.signal,
+            });
+
+            if (!isRecord(raw) || !isRecord(raw.chat) || !Array.isArray(raw.chat.messages)
+              || raw.chat.id !== id || typeof raw.version !== 'string' || !isChatSession(raw.chat)) {
+              throw new Error('Ответ не содержит полную ленту чата');
+            }
+
+            const patch = runtime.patches.get(id);
+
+            if (patch) {
+              await patch.catch(() => null);
+            }
+            if (runtime.disposed || !this._find(id)) {
+              return;
+            }
+
+            const currentEpoch = runtime.epochs.get(id) || 0;
+
+            // Собственный PATCH меняет версию файла, сохраняя сообщения. Принимаем
+            // совпавший detail, а старую ленту перечитываем в той же singleflight-загрузке.
+            if (currentEpoch !== epoch && runtime.patchEpochs.get(id) === currentEpoch) {
+              epoch = currentEpoch;
+
+              if (raw.version !== runtime.versions.get(id)) {
+                reloadAfterPatch = true;
+
+                continue;
+              }
+            }
+
+            const metadataBase = runtime.heads.get(id);
+
+            if (!reloadAfterPatch && (runtime.epochs.get(id) || 0) === epoch
+              && raw.version !== runtime.versions.get(id)) {
+              // Detail мог увидеть свежий PUT, событие которого ещё не пришло в окно.
+              // Проверяем короткую голову, не скачивая полную историю второй раз.
+              const response = await api.get(`/api/chat/store/head/${id}`);
+              const head = decodeChatHead(isRecord(response) ? response.head : null);
+
+              if (!runtime.disposed && this._find(id) && (runtime.epochs.get(id) || 0) === epoch
+                && head.version === raw.version) {
+                runtime.heads.set(id, head);
+                runtime.versions.set(id, raw.version);
+              }
+            }
+            if (runtime.disposed || !this._find(id)) {
+              return;
+            }
+            if ((runtime.epochs.get(id) || 0) !== epoch
+              || raw.version !== runtime.versions.get(id)) {
+              this.messageLoads[id] = { state: 'error', error: 'Чат изменился. Повторите загрузку.' };
+
+              return;
+            }
+
+            const metadata = this._headMetadataPatch(id, metadataBase);
+
+            runtime.headOnly.delete(id);
+            this._applyRemoteChat(raw.chat, this.isArchived(id), { notifyReply: false });
+
+            const live = this._find(id)!;
+
+            Object.assign(live, metadata);
+            delete live.archived;
+
+            if (metadata.closedAt === null) {
+              delete live.closedAt;
+            }
+
+            runtime.versions.set(id, raw.version);
+            this.messageLoads[id] = { state: 'loaded', error: '' };
+
+            const run = this.inTurnRuns[id];
+
+            if (run) {
+              this._materializeInTurn(run);
+              await this._reconcileInTurn(id, run.runId);
+            }
+
+            await this._reconcileDeliveries();
+
+            return;
+          }
+        } catch (error) {
+          if (!runtime.disposed && this._find(id)) {
+            this.messageLoads[id] = {
+              state: 'error',
+              error: errorMessage(error, 'Не загрузились сообщения'),
+            };
+          }
+
+          throw error;
+        } finally {
+          runtime.resyncControllers.delete(controller);
+          runtime.details.delete(id);
+        }
+      })();
+
+      runtime.details.set(id, job);
+
+      return job;
+    },
+    /**
+     * Страховка каждого чата восстанавливает ответ и черновик поверх серверной ленты.
+     * До успешного PUT единственная копия остаётся в карте и прежнем localStorage.
+     */
+    async _restoreChatSnapshot(id: string) {
+      const runtime = chatLoadRuntimeFor(this);
+      const copy = runtime.snapshots.get(id);
+
+      if (!copy || runtime.disposed) {
+        return;
+      }
+
+      this.snapshotRecovery[id] = {
+        state: 'restoring',
+        error: '',
+        retryAt: 0,
+      };
+
+      try {
+        if (this._find(id) && !runtime.mergedSnapshots.has(id)) {
+          await this.ensureChatMessages(id);
+
+          if (!this.isChatMessagesLoaded(id)) {
+            throw new Error(this.messageLoads[id]?.error || 'Не загрузилась история для восстановления');
+          }
+          if (runtime.disposed || runtime.snapshots.get(id) !== copy) {
+            return;
+          }
+
+          const live = this._find(id)!;
+          const messages = live.messages.slice();
+          const keys = new Set(messages.map((message, index) => messageNoticeKey(id, message, index)));
+
+          for (const [index, message] of copy.messages.entries()) {
+            const key = messageNoticeKey(id, message, index);
+
+            if (!keys.has(key)) {
+              messages.push(message);
+              keys.add(key);
+            }
+          }
+
+          live.messages = messages;
+          live.draft = copy.draft;
+          live.draftAttachments = copy.draftAttachments;
+          live.updatedAt = Math.max(live.updatedAt || 0, copy.updatedAt || 0);
+        } else if (!this._find(id)) {
+          this._normalize([copy]);
+          (copy.archived ? this.archived : this.sessions).push(copy);
+        }
+
+        runtime.mergedSnapshots.add(id);
+        historyPersistenceFor(this).resetBase(id);
+
+        const response = await this._writeChat(id, { force: true });
+
+        if (runtime.disposed || runtime.snapshots.get(id) !== copy) {
+          return;
+        }
+        if (!response) {
+          throw new Error('Сервер не подтвердил восстановление истории');
+        }
+
+        runtime.snapshots.delete(id);
+        runtime.snapshotDelays.delete(id);
+        runtime.mergedSnapshots.delete(id);
+        delete this.snapshotRecovery[id];
+      } catch (error) {
+        if (runtime.disposed || runtime.snapshots.get(id) !== copy) {
+          return;
+        }
+
+        const delay = Math.min((runtime.snapshotDelays.get(id) || 500) * 2, 30000);
+
+        runtime.snapshotDelays.set(id, delay);
+        this.snapshotRecovery[id] = {
+          state: 'error',
+          error: errorMessage(error, 'Не удалось восстановить страховочную копию'),
+          retryAt: Date.now() + delay,
+        };
+      }
+    },
+    /**
+     * Страховки восстанавливаются отдельно от первого списка, максимум по две сразу.
+     * Неуспех сохраняет исходную копию и повторяется с паузой; dispose выключает очередь.
+     */
+    _restoreChatSnapshots() {
+      const runtime = chatLoadRuntimeFor(this);
+
+      if (runtime.disposed) {
+        return;
+      }
+
+      clearTimeout(runtime.snapshotTimer ?? undefined);
+      runtime.snapshotTimer = null;
+
+      for (const id of runtime.snapshots.keys()) {
+        if (runtime.snapshotJobs.size >= 2) {
+          break;
+        }
+        if (runtime.snapshotJobs.has(id) || (this.snapshotRecovery[id]?.retryAt || 0) > Date.now()) {
+          continue;
+        }
+
+        const job = this._restoreChatSnapshot(id).finally(() => {
+          runtime.snapshotJobs.delete(id);
+          this._restoreChatSnapshots();
+        });
+
+        runtime.snapshotJobs.set(id, job);
+      }
+
+      const retries = [...runtime.snapshots.keys()]
+        .filter((id) => !runtime.snapshotJobs.has(id))
+        .map((id) => this.snapshotRecovery[id]?.retryAt || 0)
+        .filter((at) => at > Date.now());
+
+      if (retries.length) {
+        runtime.snapshotTimer = setTimeout(() => {
+          this._restoreChatSnapshots();
+        }, Math.max(1, Math.min(...retries) - Date.now()));
+        unrefTimer(runtime.snapshotTimer);
+      }
+      if (runtime.importedLegacy && !runtime.snapshots.size) {
+        localStorage.removeItem(LS_KEY);
+        runtime.importedLegacy = false;
+      }
+    },
+    /**
+     * Поиск работает по всему серверному каталогу, даже когда сообщения не открывали.
+     * Поколение запроса защищает результат от старого текста и архивного scope.
+     */
+    async searchChats(query: string, archived = false) {
+      const runtime = chatLoadRuntimeFor(this);
+      const epoch = ++runtime.searchEpoch;
+      const value = query.trim();
+
+      this.search = {
+        query: value,
+        archived,
+        loading: !!value,
+        error: '',
+        matches: {},
+      };
+
+      if (!value) {
+        return;
+      }
+
+      try {
+        const result = await api.get(`/api/chat/store/search?q=${encodeURIComponent(value)}`
+          + `&archived=${archived ? 1 : 0}`);
+
+        if (!isRecord(result) || !Array.isArray(result.matches)
+          || !result.matches.every((match) => isRecord(match) && typeof match.id === 'string'
+            && typeof match.snippetSource === 'string')) {
+          throw new Error('Некорректный ответ поиска');
+        }
+        if (!runtime.disposed && epoch === runtime.searchEpoch) {
+          this.search.matches = Object.fromEntries(result.matches.map((match) => [
+            (match as Record<string, unknown>).id, (match as Record<string, unknown>).snippetSource,
+          ]));
+        }
+      } catch (error) {
+        if (epoch === runtime.searchEpoch) {
+          this.search.error = errorMessage(error, 'Не загрузились результаты поиска');
+        }
+      } finally {
+        if (epoch === runtime.searchEpoch) {
+          this.search.loading = false;
+        }
+      }
+    },
+    /**
+     * Принятое изменение каталога обновляет действующий серверный поиск.
+     * Пустой запрос не создаёт фоновых чтений истории.
+     */
+    _refreshChatSearch() {
+      if (this.search.query) {
+        void this.searchChats(this.search.query, this.search.archived);
+      }
+    },
+
     /**
      * Любое принятое изменение запуска инвалидирует летящий снимок active.
      * Счётчик живёт вне истории и не запускает её сохранение.
@@ -1395,12 +1946,13 @@ export const useChatStore = defineStore('chat', {
     _materializeInTurn(run: ChatInTurnRun) {
       const session = this._find(run.chatKey);
 
-      if (!session) {
+      if (!session || !this.isChatMessagesLoaded(run.chatKey)) {
         return;
       }
 
       const previous = session.messages || [];
-      const messages = materializeInTurnMessages(previous, run);
+      const messages = measureChatPerformance('chat.materialize',
+        () => materializeInTurnMessages(previous, run), () => ({ messages: previous.length }));
 
       if (messages === previous) {
         return;
@@ -1415,7 +1967,7 @@ export const useChatStore = defineStore('chat', {
      * Только полный проход разрешает удалить pending после сохранения истории.
      */
     async _reconcileInTurn(chatKey: string, runId: string): Promise<boolean> {
-      if (!chatKey || !runId) {
+      if (!chatKey || !runId || !this.isChatMessagesLoaded(chatKey)) {
         return false;
       }
 
@@ -1566,18 +2118,14 @@ export const useChatStore = defineStore('chat', {
       previewCaches.get(toRaw(this))?.clear();
 
       const job = (async () => {
-        let j: ChatEnvelope;
+        let j;
 
         try {
-          j = decodeChatEnvelope(await api.get('/api/chat/store', {
+          j = decodeChatList(await api.get('/api/chat/store/list', {
             idleTimeoutMs: 30000,
             retry: false,
             signal: runtime.controller!.signal,
           }));
-
-          if (!Array.isArray(j.sessions) && !Array.isArray(j.archived)) {
-            throw new Error('Ответ истории не содержит списков чатов');
-          }
         } catch (error) {
           if (!runtime.disposed) {
             this.loadError = chatLoadFailure(error);
@@ -1589,68 +2137,83 @@ export const useChatStore = defineStore('chat', {
         if (runtime.disposed) {
           return;
         }
-        // Порог сжатия читаем из ответа сервера СРАЗУ — до возможной подмены снимком:
-        // снимок в браузере хранит только историю, настроек в нём нет.
-        this.compactWindow = Math.max(0, Number(j?.compactWindow) || 0);
-        // Возможность сервера — тоже только из его ответа: снимок в браузере её не знает.
-        this.turnProtocol = Number(j?.turnProtocol) === TURN_PROTOCOL ? TURN_PROTOCOL : 0;
-        this.workdirProtocol = Number(j?.workdirProtocol) === 1 ? 1 : 0;
-        this.historyStepReuseProtocol = j?.historyStepReuseProtocol === 1 ? 1 : 0;
 
-        let fromServer = !!j;
-        // Настройки речи — такой же server-owned snapshot. Страховочная browser-копия
-        // содержит только историю и не вправе подменять приватностный выбор движка.
-        const speech = normalizeSpeechSnapshot(j?.speech, this.speech);
-        // Снимок свежее серверной копии — значит сервер не успел записать последнее
-        // (например, его перезапустили сразу после ответа агента): восстанавливаем из него.
-        const snap = readSnapshot();
-        const restored = snap && stampOf(snap) > stampOf(j);
+        this.compactWindow = Math.max(0, Number(j.compactWindow) || 0);
+        this.turnProtocol = Number(j.turnProtocol) === TURN_PROTOCOL ? TURN_PROTOCOL : 0;
+        this.workdirProtocol = Number(j.workdirProtocol) === 1 ? 1 : 0;
+        this.historyStepReuseProtocol = j.historyStepReuseProtocol === 1 ? 1 : 0;
 
-        if (restored) {
-          j = snap;
-        }
-        if (!(j?.sessions?.length || j?.archived?.length)) {
-          try {
-            const ls = decodeChatEnvelope(JSON.parse(localStorage.getItem(LS_KEY) || 'null'));
+        const picked = pickStore({
+          ...j,
+          sessions: [],
+          archived: [],
+        });
 
-            if (ls?.sessions?.length || ls?.archived?.length) {
-              j = ls;
-              fromServer = false;
-              localStorage.removeItem(LS_KEY);
-            }
-          } catch { /* битый localStorage — начинаем с пустого */ }
-        }
-
-        const picked = pickStore(j);
-
-        this._normalize(picked.sessions);
-        this._normalize(picked.archived);
-        picked.defWorkdir = availableWorkdir(this, picked.defWorkdir) || { kind: 'grigdesk' };
-        picked.recentWorkdirs = picked.recentWorkdirs.filter((choice) => (
-          choice.kind !== 'project' || !deletedProjectChoices.get(this)?.has(choice.projectId)
-        ));
         Object.assign(this, picked);
-        this.speech = speech;
+        this.speech = normalizeSpeechSnapshot(j.speech, this.speech);
+
+        for (const head of [...j.sessions, ...j.archived]) {
+          this._applyChatHead(head, false);
+        }
+
         this.loaded = true;
         this.loadError = null;
         runtime.delay = 0;
-        storeSyncedAt = Date.now();
-        // Снимок оказался свежее серверной копии — немедленно возвращаем расхождение
-        // на сервер. Если же стор пришёл с сервера как есть, слать нечего: запоминаем
-        // слепки, чтобы дальше уезжали только реальные изменения.
-        if (restored) {
-          this._persist(true);
-        } else {
-          this._markSent({ fromServer });
+        this._markSent({ fromServer: true });
+
+        const snapshot = readSnapshot();
+
+        for (const copy of [...(snapshot?.sessions || []), ...(snapshot?.archived || [])]) {
+          const current = this._find(copy.id);
+
+          if (!current || (copy.updatedAt || 0) > (current.updatedAt || 0)) {
+            runtime.snapshots.set(copy.id, copy);
+          }
         }
-        // Ответы, доехавшие пока страница была закрыта/перезагружалась.
-        await this._collectPending();
-        // Спросы агентов, висящие прямо сейчас: после F5 их некому было показать.
-        await this._loadWaiting();
-        // Агенты, работающие прямо сейчас: восстанавливаем «думает…» после F5.
-        await this._loadActive();
-        // Реплики, приём которых окно до F5 не успело подтвердить: сверка с сервером.
-        await this._reconcileDeliveries();
+
+        if (!j.sessions.length && !j.archived.length && !runtime.snapshots.size) {
+          try {
+            const legacy = decodeChatEnvelope(JSON.parse(localStorage.getItem(LS_KEY) || 'null'));
+
+            for (const copy of [...(legacy.sessions || []), ...(legacy.archived || [])]) {
+              runtime.snapshots.set(copy.id, copy);
+              runtime.importedLegacy = true;
+            }
+          } catch { /* Повреждённая прежняя копия не заменяет каталог. */ }
+        }
+
+        this._loadVisibleChats();
+
+        /**
+         * Pending ждёт первую попытку восстановления, сохраняя порядок записи и ACK.
+         * Наличие страховок отделяет эту работу от готовности списка и завершения ensure.
+         */
+        const recover = async () => {
+          this._restoreChatSnapshots();
+
+          while (runtime.snapshotJobs.size && !runtime.disposed) {
+            await Promise.all([...runtime.snapshotJobs.values()]);
+          }
+
+          if (runtime.disposed) {
+            return;
+          }
+
+          await this._collectPending();
+          await this._loadWaiting();
+          await this._loadActive();
+          await this._reconcileDeliveries();
+        };
+
+        if (runtime.snapshots.size) {
+          void recover().catch((error) => {
+            if (!runtime.disposed) {
+              this._saveFailed(true, errorMessage(error, 'Не удалось сверить историю'));
+            }
+          });
+        } else {
+          await recover();
+        }
       })().finally(() => {
         if (runtime.promise === job) {
           runtime.promise = null;
@@ -1710,6 +2273,7 @@ export const useChatStore = defineStore('chat', {
         const visible = () => {
           if (page.visibilityState === 'visible') {
             retry();
+            this._loadVisibleChats();
           }
         };
 
@@ -1751,11 +2315,78 @@ export const useChatStore = defineStore('chat', {
         return;
       }
 
+      const runtime = chatLoadRuntimeFor(this);
+      const epochs = new Map(runtime.epochs);
+      const isCurrent = (id: string) => !runtime.disposed
+        && (runtime.epochs.get(id) || 0) === (epochs.get(id) || 0);
       let j = null;
 
       try {
-        j = decodeChatEnvelope(await api.get('/api/chat/pending'));
+        j = decodeChatReconcile(await api.post('/api/chat/store/reconcile', {
+          loadedIds: [...this.sessions, ...this.archived]
+            .filter((chat) => this.isChatMessagesLoaded(chat.id)).map((chat) => chat.id),
+          deliveryIds: [...chatLoadRuntimeFor(this).heads.values()]
+            .filter((head) => head.pendingDelivery && !this.isChatMessagesLoaded(head.id))
+            .map((head) => head.id),
+        }));
+
+        for (const head of j.heads) {
+          if (!isCurrent(head.id)) {
+            continue;
+          }
+
+          this._applyChatHead(head);
+
+          // Принятая шапка сама меняет поколение; receipt относится к ней же.
+          // Более позднее открытие или запись по-прежнему отменяет этот ответ.
+          epochs.set(head.id, runtime.epochs.get(head.id)!);
+
+          if (!head.pendingDelivery && !this.isChatMessagesLoaded(head.id)) {
+            for (const [turnId, entry] of runtime.deliverySeen) {
+              if (entry.chatId === head.id) {
+                runtime.deliverySeen.delete(turnId);
+                this._forgetDelivery(turnId);
+              }
+            }
+          }
+        }
+        for (const id of j.gone) {
+          if (isCurrent(id)) {
+            this._dropRemoteChat(id);
+          }
+        }
+        for (const receipt of j.deliveries) {
+          if (!isCurrent(receipt.chatId) || !this._find(receipt.chatId)
+            || this.isChatMessagesLoaded(receipt.chatId)) {
+            continue;
+          }
+
+          const firstSeen = runtime.deliverySeen.get(receipt.turnId)?.at || Date.now();
+          const at = receipt.sentAt || firstSeen;
+
+          runtime.deliverySeen.set(receipt.turnId, { chatId: receipt.chatId, at });
+
+          if (receipt.state !== 'unknown') {
+            continue;
+          }
+
+          const remaining = FOREIGN_DELIVERY_GRACE_MS - (Date.now() - at);
+
+          if (remaining <= 0) {
+            this.deliveries[receipt.turnId] = deliveryOf(receipt.chatId, 'lost', 0);
+          } else if (!reconcileTimer) {
+            reconcileTimer = setTimeout(() => {
+              reconcileTimer = null;
+              void this._reconcileDeliveries();
+            }, remaining);
+            unrefTimer(reconcileTimer);
+          }
+        }
       } catch {
+        return;
+      }
+
+      if (runtime.disposed) {
         return;
       }
 
@@ -1772,13 +2403,8 @@ export const useChatStore = defineStore('chat', {
           continue;
         }
 
-        const place = await this._chatForPending(p.chatKey);
+        const place = p.chatKey && this.isChatMessagesLoaded(p.chatKey) ? this._find(p.chatKey) : null;
 
-        if (place === 'gone') {
-          // Чата нет и на сервере — ответ класть некуда, запись только копилась бы.
-          await api.del(`/api/chat/pending/${p.id}`).catch(() => { /* подберём в следующий раз */ });
-          continue;
-        }
         if (!place) {
           continue;
         }
@@ -1817,6 +2443,10 @@ export const useChatStore = defineStore('chat', {
      */
     async _chatForPending(chatKey?: string) {
       const local = this._find(chatKey);
+
+      if (!chatKey || !this.isChatMessagesLoaded(chatKey)) {
+        return null;
+      }
 
       if (local) {
         return local;
@@ -1969,7 +2599,7 @@ export const useChatStore = defineStore('chat', {
     // берётся у последнего вызова: иначе правка черновика, пришедшая в те же 300 мс дебаунса,
     // отменила бы снимок только что полученного ответа.
     _persist(flush = false, { snapshot = true } = {}) {
-      if (!this.loaded) {
+      if (!this.loaded || chatLoadRuntimeFor(this).disposed) {
         return;
       }
 
@@ -1984,45 +2614,55 @@ export const useChatStore = defineStore('chat', {
        * Очереди берут свежие данные отдельно, а страховка сохраняется до отправки запросов.
        */
       const write = () => {
-        if (!this.loaded) {
+        if (!this.loaded || chatLoadRuntimeFor(this).disposed) {
           return;
         }
 
+        const finish = startChatPerformance('chat.persist', () => ({
+          chats: this.sessions.length + (this.archived?.length || 0),
+        }));
         const state = historyPersistenceFor(this);
 
         const cache = persistenceProjections.get(toRaw(this))!;
+        const loadedSessions = this.sessions.filter((chat) => this.isChatMessagesLoaded(chat.id));
+        const loadedArchived = (this.archived || [])
+          .filter((chat) => this.isChatMessagesLoaded(chat.id));
+        const allChats = [...this.sessions, ...(this.archived || [])];
         const projections = {
-          sessions: this.sessions.map((chat) => cache.get(chat)),
-          archived: (this.archived || []).map((chat) => cache.get(chat, true)),
+          sessions: loadedSessions.map((chat) => cache.get(chat)),
+          archived: loadedArchived.map((chat) => cache.get(chat, true)),
         };
-        const slim = this.sessions.map(slimOf);
-        const archivedSlim = (this.archived || []).map(archivedSlimOf);
-        const payload = {
-
-          sessions: slim,
-          archived: archivedSlim,
+        const meta = {
           activeId: this.activeId,
-
           defModel: this.defModel,
           defModelRef: this.defModelRef,
-
           defEffort: this.defEffort,
           defMode: this.defMode,
-
           defWorkdir: this.defWorkdir,
           recentWorkdirs: this.recentWorkdirs,
-
         };
         // Страховочный снимок в браузере: переживает падение и перезапуск сервера.
         // Без него ответ, пришедший последним, терялся насовсем — «следующего изменения»,
         // на котором он бы сохранился, могло и не быть.
-        if (needSnapshot) {
-          writeSnapshot(payload, projections);
+        if (needSnapshot && !chatLoadRuntimeFor(this).snapshots.size) {
+          writeSnapshot({
+            ...meta,
+            sessions: loadedSessions.map(slimOf),
+            archived: loadedArchived.map(archivedSlimOf),
+          }, projections);
           needSnapshot = false;
         }
         // Каждый чат — свой запрос, и только если он реально изменился.
         const jobs = [];
-        const alive = new Set();
+        const alive = new Set(allChats.map((chat) => chat.id));
+
+        for (const id of chatLoadRuntimeFor(this).headOnly) {
+          const head = this._find(id);
+
+          if (head && this._dirty(head)) {
+            jobs.push(this._writeChat(id));
+          }
+        }
         // Чат, которого нет на сервере в этом виде, ставится в очередь записи; чаты,
         // попавшие в alive, переживут сверку удалённых ниже.
         const push = (c: ChatRecord, projection: { fingerprint: { value: string } }) => {
@@ -2052,38 +2692,29 @@ export const useChatStore = defineStore('chat', {
           jobs.push(send);
         };
 
-        slim.forEach((c, index) => push(c, projections.sessions[index]!));
-        archivedSlim.forEach((c, index) => push(c, projections.archived[index]!));
-        cache.prune([...this.sessions, ...(this.archived || [])]);
+        // Dirty-сигнатуре нужны только id и messages; JSON-отпечаток уже есть в проекции.
+        loadedSessions.forEach((c, index) => push(c, projections.sessions[index]!));
+        loadedArchived.forEach((c, index) => push(c, projections.archived[index]!));
+        cache.prune(allChats);
         // Чат исчез из стора (удалили, вытеснили из архива) — убираем и на сервере.
-        for (const id of [...historyPersistenceFor(this).sentChats.keys()]) {
-          if (alive.has(id)) {
+        for (const id of new Set([
+          ...historyPersistenceFor(this).sentChats.keys(), ...chatLoadRuntimeFor(this).versions.keys(),
+        ])) {
+          if (alive.has(id) || chatLoadRuntimeFor(this).deleting.has(id)) {
           continue;
         }
 
+          chatLoadRuntimeFor(this).deleting.add(id);
           jobs.push(api.del(`/api/chat/store/chat/${id}?origin=${WINDOW_ID}`)
             .then(() => {
+              chatLoadRuntimeFor(this).versions.delete(id);
+              chatLoadRuntimeFor(this).heads.delete(id);
+              chatLoadRuntimeFor(this).headOnly.delete(id);
               historyPersistenceFor(this).forget(id);
               selectionStateFor(this).forget(id);
-            }));
+            }).finally(() => chatLoadRuntimeFor(this).deleting.delete(id)));
         }
 
-        const meta = {
-
-          activeId: this.activeId,
-
-          defModel: this.defModel,
-
-          defModelRef: this.defModelRef,
-
-          defEffort: this.defEffort,
-
-          defMode: this.defMode,
-
-          defWorkdir: this.defWorkdir,
-          recentWorkdirs: this.recentWorkdirs,
-
-        };
         const metaJson = JSON.stringify(meta);
 
         if (metaJson !== sentMeta) {
@@ -2093,15 +2724,25 @@ export const useChatStore = defineStore('chat', {
           }));
         }
         if (!jobs.length) {
+          finish();
+
           return;
         }
 
         Promise.all(jobs)
           .then(() => {
+          if (chatLoadRuntimeFor(this).disposed) {
+            return;
+          }
+
           retryDelay = 0;
           this._saveFailed(false);
         })
           .catch((e) => {
+            if (chatLoadRuntimeFor(this).disposed) {
+              return;
+            }
+
             // Сервер недоступен (перезапускается) — повторяем с нарастающей паузой.
             // Успевшие запросы уже отметились в sentChats, повтор их не тронет.
             retryDelay = Math.min(retryDelay ? retryDelay * 2 : 1000, 15000);
@@ -2109,6 +2750,8 @@ export const useChatStore = defineStore('chat', {
             retryTimer = setTimeout(write, retryDelay);
             this._saveFailed(true, e?.message || '');
           });
+
+        finish();
       };
 
       if (flush) {
@@ -2172,6 +2815,9 @@ export const useChatStore = defineStore('chat', {
      * снимок, потому что нужен сам ответ (stale и ревизия для CAS).
      */
     _writeChat(id: string, { force = false } = {}): Promise<ChatEnvelope | null> {
+      if (!this.isChatMessagesLoaded(id) && this.loaded) {
+        return this._patchChatHead(id);
+      }
       if (!this.loaded) {
         return Promise.reject(new Error(t('core.chatStoreNotLoaded')));
       }
@@ -2234,6 +2880,10 @@ export const useChatStore = defineStore('chat', {
         throw new Error(t('core.chatStoreNotLoaded'));
       }
 
+      if (!this.isChatMessagesLoaded(id)) {
+        throw new Error('Сообщения чата ещё не загружены');
+      }
+
       const live = this._find(id);
 
       if (!live) {
@@ -2250,7 +2900,9 @@ export const useChatStore = defineStore('chat', {
 
       const archived = (this.archived || []).some((item) => item.id === id);
       const state = historyPersistenceFor(this);
-      const snapshot = captureChatHistorySnapshot(archived ? archivedSlimOf(live) : slimOf(live));
+      const snapshot = measureChatPerformance('chat.put.prepare', () => (
+        captureChatHistorySnapshot(archived ? archivedSlimOf(live) : slimOf(live))
+      ), () => ({ messages: live.messages?.length || 0, steps: live.steps?.length || 0 }));
 
       if (live.revision && !normalizeChatWorkdir(snapshot.workdir)) {
         delete snapshot.workdir;
@@ -2277,26 +2929,67 @@ export const useChatStore = defineStore('chat', {
           ...(request.reuseSteps ? { reuseSteps: request.reuseSteps } : {}),
         }));
       } catch (caught) {
-          const error = chatFailure(caught);
+        let error: ReturnType<typeof chatFailure> | null = chatFailure(caught);
 
-        if (!request.reuseSteps || !mayRetryFullHistory(error)) {
+        if (!request.reuseSteps || (!isHistoryStepsChanged(error)
+          && error.status !== 404 && error.status !== 405)) {
           throw error;
         }
 
-        state.resetBase(id);
+        if (isHistoryStepsChanged(error)) {
+          const result = await api.get(`/api/chat/store/head/${id}`, { retry: false });
+          const head = decodeChatHead(isRecord(result) ? result.head : null);
 
-        if (error.status === 404 || error.status === 405) {
-          this.historyStepReuseProtocol = 0;
-          state.clearBases();
+          if (head.id !== id || !Number.isSafeInteger(head.revision) || !head.revision) {
+            throw chatRevisionConflict();
+          }
+          if (chatLoadRuntimeFor(this).disposed || this._find(id) !== live
+            || state.generation(id) !== generation) {
+            return null;
+          }
+
+          try {
+            response = decodeChatEnvelope(await api.put(request.route, {
+              chat: request.chat,
+              archived,
+              origin: WINDOW_ID,
+              reuseSteps: { ...request.reuseSteps, baseRevision: head.revision },
+            }));
+            error = null;
+          } catch (retryError) {
+            error = chatFailure(retryError);
+
+            if (!isHistoryStepsChanged(error) && error.status !== 404 && error.status !== 405) {
+              throw error;
+            }
+          }
         }
 
-        // Полный retry использует тот же логический снимок и прежнюю CAS-revision.
-        // Поздняя правка истории не меняет fallback и остаётся для следующей записи.
-        response = decodeChatEnvelope(await api.put('/api/chat/store/chat', {
-          chat: snapshot,
-          archived,
-          origin: WINDOW_ID
-        }));
+        if (error) {
+          if (chatLoadRuntimeFor(this).disposed || this._find(id) !== live
+            || state.generation(id) !== generation) {
+            return null;
+          }
+
+          state.resetBase(id);
+
+          if (error.status === 404 || error.status === 405) {
+            this.historyStepReuseProtocol = 0;
+            state.clearBases();
+          }
+
+          // Повторный named409 подтверждает несовпадение refs после свежей головы.
+          // Полный retry сохраняет исходный снимок и CAS; поздние правки остаются для следующей записи.
+          response = decodeChatEnvelope(await api.put('/api/chat/store/chat', {
+            chat: snapshot,
+            archived,
+            origin: WINDOW_ID
+          }));
+        }
+      }
+
+      if (!response) {
+        throw chatRevisionConflict();
       }
 
       const current = this._find(id);
@@ -2307,19 +3000,35 @@ export const useChatStore = defineStore('chat', {
         return response;
       }
 
+      if (this.historyStepReuseProtocol === 1) {
+        state.acceptAck(snapshot, response, steps);
+      } else {
+        state.resetBase(id);
+      }
+
       if (response?.stale && !force) {
         // До GET нельзя выдавать старым настройкам свежую CAS-базу или менять селект.
         // Служебные поля памяти и папки по прежнему принадлежат серверу.
         applySaveAck(current, response, { runtimeOnly: true });
-        state.resetBase(id);
 
-        const remote = decodeChatEnvelope(await api.get(`/api/chat/store/chat/${id}`)).chat;
+        const raw = await api.get(this.historyStepReuseProtocol === 1
+          ? `/api/chat/store/head/${id}` : `/api/chat/store/chat/${id}`);
+        let remote = this.historyStepReuseProtocol === 1
+          ? decodeChatHead(isRecord(raw) ? raw.head : null) : decodeChatEnvelope(raw).chat;
+
+        // Старые серверы с protocol 1 не включали effort/mode в head.
+        // Их отсутствие не доказывает default: полный GET нужен только для такого контракта.
+        if (remote && this.historyStepReuseProtocol === 1
+          && (!Object.hasOwn(remote, 'effort') || !Object.hasOwn(remote, 'mode'))) {
+          remote = decodeChatEnvelope(await api.get(`/api/chat/store/chat/${id}`)).chat;
+        }
+
         const latest = this._find(id);
 
         if (!latest || state.generation(id) !== generation) {
           return response;
         }
-        if (!remote || !Number.isSafeInteger(remote.revision)) {
+        if (!remote || remote.id !== id || !Number.isSafeInteger(remote.revision)) {
           throw chatRevisionConflict();
         }
         if ((latest.revision || 0) > (remote.revision || 0)) {
@@ -2358,11 +3067,8 @@ export const useChatStore = defineStore('chat', {
 
       state.markSent(acknowledged, fingerprintOf(acknowledged), steps);
 
-      if (this.historyStepReuseProtocol === 1) {
-        state.acceptAck(snapshot, response, steps);
-      } else {
-        state.resetBase(id);
-      }
+      chatLoadRuntimeFor(this).epochs.set(id, (chatLoadRuntimeFor(this).epochs.get(id) || 0) + 1);
+      this._refreshChatSearch();
 
       return response;
     },
@@ -2378,6 +3084,10 @@ export const useChatStore = defineStore('chat', {
 
       for (const [sessions, archived] of [[this.sessions, false], [this.archived || [], true]] as const) {
         for (const session of sessions) {
+          if (!this.isChatMessagesLoaded(session.id)) {
+            continue;
+          }
+
           const snapshot = archived ? archivedSlimOf(session) : slimOf(session);
 
           state.markSent(snapshot, fingerprintOf(snapshot));
@@ -2433,10 +3143,10 @@ export const useChatStore = defineStore('chat', {
       });
     },
     _get(id?: string | null): ChatSession | null {
-      return this.sessions.find((s) => s.id === id) || null;
+      return this._sessionsById.get(id ?? '') || null;
     },
     _find(id?: string | null): ChatSession | null {
-      return this._get(id) || (this.archived || []).find((s) => s.id === id) || null;
+      return this.session(id ?? '');
     },
 
     /**
@@ -2488,8 +3198,25 @@ export const useChatStore = defineStore('chat', {
     _visible(id?: string) {
       return chatVisibility.isVisible(id);
     },
-    registerSurface(owner: unknown, initial = {}) {
-      return chatVisibility.register(owner, initial);
+    /**
+     * Поверхность сообщает реальную видимость, включая скрытую телефонную колонку.
+     * Выбор activeId сам по себе не разрешает загрузку истории.
+     */
+    registerSurface(owner: unknown, initial: { chatId?: unknown; visible?: unknown } = {}) {
+      const surface = chatVisibility.register(owner, initial);
+
+      this._loadVisibleChats();
+
+      return {
+        update: (next: { chatId?: unknown; visible?: unknown } = {}) => {
+          const updated = surface.update(next);
+
+          this._loadVisibleChats();
+
+          return updated;
+        },
+        dispose: () => surface.dispose(),
+      };
     },
     /**
      * Видимая поверхность гасит оповещения чата даже без метки непрочитанного.
@@ -2562,6 +3289,10 @@ export const useChatStore = defineStore('chat', {
         return null;
       }
 
+      const defaultProvider = useProvidersStore().modelOf(this.defModelRef || this.defModel).provider;
+      const initialMode = defaultProvider
+        ? effectivePermissionMode(this.defMode, defaultProvider.modes || [], defaultProvider)
+        : this.defMode;
       const s: ChatSession = {
 
         id: uid(),
@@ -2582,7 +3313,7 @@ export const useChatStore = defineStore('chat', {
         model: this.defModel,
         modelRef: this.defModelRef,
         effort: this.defEffort,
-        mode: this.defMode,
+        mode: initialMode,
 
         schema: 2,
         revision: 0,
@@ -2711,7 +3442,7 @@ export const useChatStore = defineStore('chat', {
           if (d.gone) {
             this._dropRemoteChat(d.id!);
           } else {
-            this._pullChat(d.id!, !!d.archived);
+            this._pullChat(d.id!, !!d.archived, d.head);
           }
         } else if (name === 'chat-store-meta') {
           // Дефолты новых чатов общие, а вот activeId НЕ применяем: у каждого устройства
@@ -3276,7 +4007,15 @@ export const useChatStore = defineStore('chat', {
      * и победит, а принятая сейчас серверная версия стёрла бы набранное.
      */
     _dirty(chat: ChatSession) {
-      const archived = (this.archived || []).some((c) => c.id === chat.id);
+      if (!this.isChatMessagesLoaded(chat.id)) {
+        const next = this._headMetadata(chat.id);
+        const before = this._headMetadata(chat.id, chatLoadRuntimeFor(this).heads.get(chat.id));
+
+        return next.title !== before.title || next.unread !== before.unread
+          || next.archived !== before.archived || next.closedAt !== before.closedAt;
+      }
+
+      const archived = this.isArchived(chat.id);
       const snapshot = archived ? archivedSlimOf(chat) : slimOf(chat);
 
       return !historyPersistenceFor(this).isSent(snapshot, fingerprintOf(snapshot));
@@ -3285,26 +4024,89 @@ export const useChatStore = defineStore('chat', {
      * Чат изменили в другом окне (в т.ч. на другом устройстве) — забираем именно его.
      * Тянем по одному чату, а не всю историю: меняется всегда один, а история растёт.
      */
-    async _pullChat(id: string, archived = false) {
+    async _pullChat(id: string, archived = false, headValue?: unknown) {
       if (!id) {
         return;
       }
 
       const local = this._find(id);
+      const runtime = chatLoadRuntimeFor(this);
+
+      if (runtime.disposed) {
+        return;
+      }
+      if (headValue && local && this._dirty(local)) {
+        try {
+          const head = decodeChatHead(headValue);
+
+          if (head.id === id) {
+            this._applyChatHead(head);
+
+            return;
+          }
+        } catch { /* Повреждённая шапка требует обычной адресной сверки. */ }
+      }
+
+      const epoch = (runtime.epochs.get(id) || 0) + 1;
+
+      runtime.epochs.set(id, epoch);
+
+      if (!this.isChatMessagesLoaded(id)) {
+        try {
+          const response = await api.get(`/api/chat/store/head/${id}`);
+
+          if (!runtime.disposed && runtime.epochs.get(id) === epoch && isRecord(response)) {
+            this._applyChatHead(decodeChatHead(response.head));
+
+            if (!local && this._find(id)) {
+              await this._loadActive();
+            }
+          }
+        } catch { /* Следующая сверка восстановит строку без скачивания сообщений. */ }
+
+        return;
+      }
+
       let chat = null;
+      let version: string | null = null;
 
       try {
-        ({ chat } = decodeChatEnvelope(await api.get(`/api/chat/store/chat/${id}`)));
+        const response = await api.get(`/api/chat/store/chat/${id}`);
+
+        ({ chat } = decodeChatEnvelope(response));
+        version = isRecord(response) && typeof response.version === 'string' ? response.version : null;
       } catch {
         // Чат уже успели удалить — придёт отдельным событием.
         return;
       }
 
-      if (!chat?.id) {
+      if (!chat?.id || chat.id !== id || runtime.disposed || runtime.epochs.get(id) !== epoch
+        || this._find(id) !== local) {
         return;
       }
       if (local && this._dirty(local)) {
-        historyPersistenceFor(this).resetBase(chat.id);
+        // Серверная сверка головы могла уже записать и подтвердить pending другого окна.
+        // Его окончательный ответ дополняет dirty-ленту, не подменяя локальный черновик.
+        for (const message of chat.messages) {
+          if (!message.pid || local.messages.some((item) => item.pid === message.pid)) {
+            continue;
+          }
+
+          applyAssistantFinal(local.messages, message, message);
+
+          if (message.role === 'assistant') {
+            this._notifyReply(local, message.text || '',
+              messageNoticeKey(id, message, local.messages.indexOf(message)));
+          }
+        }
+        for (const message of local.messages) {
+          const confirmed = chat.messages.find((item) => item.turnId && item.turnId === message.turnId);
+
+          if (confirmed && !confirmed.delivery) {
+            delete message.delivery;
+            delete message.outbox;
+          }
+        }
 
         // Набранный текст остаётся локальным, но server-owned execution-состояние
         // нельзя откладывать: другая вкладка могла уже перенести разговор.
@@ -3318,6 +4120,10 @@ export const useChatStore = defineStore('chat', {
       }
 
       this._applyRemoteChat(chat, archived);
+
+      if (version) {
+        runtime.versions.set(id, version);
+      }
       // Чат появился в окне впервые — в нём может уже идти ход (его завели и сразу
       // отправили сообщение на другом устройстве). Своих SSE-событий мы не видели,
       // поэтому живое состояние берём у сервера.
@@ -3332,6 +4138,10 @@ export const useChatStore = defineStore('chat', {
      */
     _applyRemoteChat(chat: ChatSession, archived: boolean, { notifyReply = true } = {}) {
       this.archived ||= [];
+
+      const runtime = chatLoadRuntimeFor(this);
+
+      runtime.epochs.set(chat.id, (runtime.epochs.get(chat.id) || 0) + 1);
 
       const localBefore = this._find(chat.id);
       const knownMessages = new Set((localBefore?.messages || [])
@@ -3411,6 +4221,18 @@ export const useChatStore = defineStore('chat', {
         }
       }
 
+      this._invalidateChatDetail(id);
+      chatLoadRuntimeFor(this).versions.delete(id);
+      chatLoadRuntimeFor(this).heads.delete(id);
+      chatLoadRuntimeFor(this).headOnly.delete(id);
+
+      for (const [turnId, entry] of chatLoadRuntimeFor(this).deliverySeen) {
+        if (entry.chatId === id) {
+          chatLoadRuntimeFor(this).deliverySeen.delete(turnId);
+          this._forgetDelivery(turnId);
+        }
+      }
+
       historyPersistenceFor(this).forget(id);
       selectionStateFor(this).forget(id);
       persistenceProjections.get(toRaw(this))?.remove(id);
@@ -3457,7 +4279,22 @@ export const useChatStore = defineStore('chat', {
      * закрывают обычную жизнь, но пока планшет спал (или пока сервер перезапускали),
      * событий никто не слышал: без сверки чат, заведённый в это время, снова ждал бы F5.
      */
-    async _resyncStore() {
+    _resyncStore(): Promise<void> {
+      const runtime = chatLoadRuntimeFor(this);
+
+      if (!runtime.resync) {
+        runtime.resync = this._resyncStoreOnce().finally(() => {
+          runtime.resync = null;
+        });
+      }
+
+      return runtime.resync;
+    },
+    /**
+     * Один проход передаёт версии, а не историю, и сохраняет локальные dirty-правки.
+     * Неизменившаяся полная лента остаётся тем же объектом и массивом сообщений.
+     */
+    async _resyncStoreOnce() {
       if (!this.loaded) {
         await this.ensure();
 
@@ -3486,11 +4323,13 @@ export const useChatStore = defineStore('chat', {
       let j = null;
 
       try {
-        j = decodeChatEnvelope(await api.get('/api/chat/store', {
+        j = decodeChatList(await api.post('/api/chat/store/changes', {
+          known: Object.fromEntries(runtime.versions),
+        }, {
           idleTimeoutMs: 30000,
           retry: false,
           signal: controller.signal,
-        }));
+        }), true);
       } catch {
         return;
       } finally {
@@ -3526,7 +4365,7 @@ export const useChatStore = defineStore('chat', {
         }
       }
 
-      storeSyncedAt = Date.now();
+      runtime.resyncedAt = Date.now();
       // Сервер мог смениться за время разрыва (перезапуск с новой версией).
       this.turnProtocol = Number(j?.turnProtocol) === TURN_PROTOCOL ? TURN_PROTOCOL : 0;
       this.workdirProtocol = Number(j?.workdirProtocol) === 1 ? 1 : 0;
@@ -3536,49 +4375,27 @@ export const useChatStore = defineStore('chat', {
         historyPersistenceFor(this).clearBases();
       }
 
-      const onServer = new Set();
+      for (const head of [...j.sessions, ...j.archived]) {
+        const local = this._find(head.id);
+        const full = this.isChatMessagesLoaded(head.id);
 
-      for (const [list, archived] of [[j.sessions || [], false], [j.archived || [], true]] as const) {
-        for (const chat of list) {
-          if (!chat?.id) {
-            continue;
-          }
+        if (local && this._dirty(local)) {
+          this._applyChatHead(head);
 
-          onServer.add(chat.id);
+          continue;
+        }
 
-          const local = this._find(chat.id);
+        this._applyChatHead(head);
 
-          if (local && this._dirty(local)) {
-            historyPersistenceFor(this).resetBase(chat.id);
-
-            continue;
-          }
-
-          const next = { ...chat };
-
-          delete next.archived;
-          // Ровно это у нас и лежит — не трогаем объект, иначе каждое переподключение
-          // подменяло бы массивы сообщений и перерисовывало открытый чат на ровном месте.
-          const same = historyPersistenceFor(this).sentChats.get(chat.id)
-            === fingerprintOf(archived ? archivedSlimOf(next) : slimOf(next));
-
-          if (local && same && (!this.historyStepReuseProtocol
-            || historyPersistenceFor(this).hasBase(local))) {
-            continue;
-          }
-
-          this._applyRemoteChat(chat, archived);
+        if (full) {
+          await this._pullChat(head.id, !!head.archived);
         }
       }
-      // Чата нет на сервере, хотя мы его туда писали — значит его стёрли на другом
-      // устройстве. Тот, которого сервер и не видел (новый, ещё не уехал), — оставляем.
-      for (const list of [this.sessions, this.archived || []]) {
-        for (const c of [...list]) {
-          if (onServer.has(c.id) || !historyPersistenceFor(this).sentChats.has(c.id) || this._dirty(c)) {
-            continue;
-          }
+      for (const id of j.gone) {
+        const local = this._find(id);
 
-          this._dropRemoteChat(c.id);
+        if (!local || !this._dirty(local)) {
+          this._dropRemoteChat(id);
         }
       }
     },
@@ -3745,7 +4562,7 @@ export const useChatStore = defineStore('chat', {
       });
       // Миграция: алиаса «fable» в CLI нет — только полный ID.
       this.sessions.forEach((s) => {
-        if (s.model === 'fable') {
+        if (this.isChatMessagesLoaded(s.id) && s.model === 'fable') {
           s.model = 'claude-fable-5';
         }
       });
@@ -3779,7 +4596,8 @@ export const useChatStore = defineStore('chat', {
 
       const s = this.sessions.splice(i, 1)[0]!;
       // Черновик — тоже содержимое: закрытие вкладки не должно молча его терять.
-      if (keepEmpty || s.messages?.length || (s.draft || '').trim() || s.draftAttachments?.length) {
+      if (keepEmpty || chatLoadRuntimeFor(this).heads.get(id)?.hasContent || s.messages?.length
+        || (s.draft || '').trim() || s.draftAttachments?.length) {
         delete s.archived;
         s.closedAt = Date.now();
         this.archived.unshift(s);
@@ -3902,6 +4720,7 @@ export const useChatStore = defineStore('chat', {
       }
 
       this.archived.splice(j, 1);
+      this._invalidateChatDetail(id);
       previewCaches.get(toRaw(this))?.remove(id);
       historyPersistenceFor(this).resetBase(id);
 
@@ -4215,15 +5034,49 @@ export const useChatStore = defineStore('chat', {
      */
 
     setMode(id: string, m: string) {
+      if (!this.isChatMessagesLoaded(id)) {
+        return;
+      }
+
       const s = this._find(id);
 
       if (!s) {
         return;
       }
 
-      selectionStateFor(this).change(id, 'mode', s, { ...s, mode: m });
+      const provider = useProvidersStore().modelOf(selectedModel(s)).provider;
+      const descriptor = provider?.modes?.find((entry) => entry.id === m);
+
+      if (provider?.permissionModeSelectionPolicy === 'preserve-explicit' && !descriptor) {
+        return;
+      }
+
+      const modeSelection = descriptor?.requiresExplicitSelection && provider
+        ? {
+          provider: provider.id,
+          id: m,
+          revision: 1,
+          chatId: id
+        } : undefined;
+
+      selectionStateFor(this).change(id, 'mode', s, {
+        ...s,
+        mode: m,
+        modeSelection
+      });
       s.mode = m;
-      this.defMode = m;
+      s.modeSelection = modeSelection;
+
+      for (const message of s.messages) {
+        if (message.delivery === 'sending' && message.outbox?.modeSelection) {
+          message.outbox.modeSelectionRevoked = true;
+        }
+      }
+
+      if (descriptor?.persistAsDefault !== false) {
+        this.defMode = m;
+      }
+
       this._persist();
     },
 
@@ -4232,6 +5085,10 @@ export const useChatStore = defineStore('chat', {
      * В историю уходит согласованная пара model и modelRef.
      */
     setModel(id: string, m: string) {
+      if (!this.isChatMessagesLoaded(id)) {
+        return;
+      }
+
 
       const s = this._find(id);
 
@@ -4251,6 +5108,19 @@ export const useChatStore = defineStore('chat', {
         ? { provider: resolved.provider.id, model: resolved.model.id }
         : null;
 
+      if (s.modeSelection && s.modeSelection.provider !== resolved.provider?.id) {
+        const nextMode = resolved.provider?.defaultPermissionMode || '';
+
+        selectionStateFor(this).change(id, 'mode', s,
+          {
+            ...s,
+            mode: nextMode,
+            modeSelection: undefined
+          });
+        s.mode = nextMode;
+        s.modeSelection = undefined;
+      }
+
       const modelGeneration = selectionStateFor(this).change(id, 'model', before, s);
 
       if (resolved.model && s.effort && !(resolved.model.efforts || []).includes(s.effort)) {
@@ -4269,6 +5139,10 @@ export const useChatStore = defineStore('chat', {
      * updatedAt НЕ трогаем: набор текста не должен поднимать чат в списке.
      */
     setDraft(id: string, text: string) {
+      if (!this.isChatMessagesLoaded(id)) {
+        return;
+      }
+
       const s = this._find(id);
 
       if (!s || (s.draft || '') === text) {
@@ -4287,6 +5161,10 @@ export const useChatStore = defineStore('chat', {
      * дешёвым путём без снимка, что и текст.
      */
     setDraftAttachments(id: string, list: unknown) {
+      if (!this.isChatMessagesLoaded(id)) {
+        return;
+      }
+
       const s = this._find(id);
 
       if (!s) {
@@ -4301,6 +5179,10 @@ export const useChatStore = defineStore('chat', {
      * чат. Вложение дописывается туда, где его начали прикладывать, а не в открытый чат.
      */
     addDraftAttachment(id: string, attachment: ChatAttachment) {
+      if (!this.isChatMessagesLoaded(id)) {
+        return;
+      }
+
       const s = this._find(id);
 
       if (!s) {
@@ -4315,6 +5197,10 @@ export const useChatStore = defineStore('chat', {
      * Набор допустимых уровней по прежнему определяет вызывающий интерфейс.
      */
     setEffort(id: string, e: string) {
+      if (!this.isChatMessagesLoaded(id)) {
+        return;
+      }
+
 
       const s = this._find(id);
 
@@ -4332,6 +5218,10 @@ export const useChatStore = defineStore('chat', {
      * Подтверждения старых лент больше не принадлежат пустой истории.
      */
     clearChat(id: string) {
+      if (!this.isChatMessagesLoaded(id)) {
+        return;
+      }
+
       const session = this._find(id);
 
       if (!session) {
@@ -4467,6 +5357,9 @@ export const useChatStore = defineStore('chat', {
 
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
+
+        const permissionRequest = permissionModeRequest(s, resolvedModel.provider);
+
         await this._saveChatNow(s);
         await this.prepareWorkdirSend(s);
 
@@ -4477,7 +5370,7 @@ export const useChatStore = defineStore('chat', {
 
           effort: effortLevels.includes(s.effort || '') ? s.effort || '' : '',
 
-          mode: s.mode || '',
+          ...permissionRequest,
           sessionId: s.sessionId,
           chatKey: id,
 
@@ -4553,6 +5446,12 @@ export const useChatStore = defineStore('chat', {
     async send(
       id: string, text: string, attachments: ChatAttachment[] = [], opts: { slashCommand?: string } = {},
     ): Promise<boolean | undefined> {
+
+      await this.ensureChatMessages(id);
+
+      if (!this.isChatMessagesLoaded(id)) {
+        return false;
+      }
 
       let s = this._find(id);
 
@@ -4681,6 +5580,8 @@ export const useChatStore = defineStore('chat', {
 
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
+
+        const permissionRequest = permissionModeRequest(s, resolvedModel.provider);
         // Пока реестр не сообщил уровни или старый выбор исчез из свежего каталога,
         // явный effort не отправляем: CLI применит собственный актуальный дефолт.
         const requestEffort = effortLevels.includes(s.effort || '') ? s.effort || '' : '';
@@ -4702,7 +5603,7 @@ export const useChatStore = defineStore('chat', {
 
           effort: requestEffort,
 
-          mode: s.mode || '',
+          ...permissionRequest,
 
           sessionId: s.sessionId,
           context,
@@ -4895,6 +5796,8 @@ export const useChatStore = defineStore('chat', {
 
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
+        Object.assign(outbox, permissionModeRequest(s, resolvedModel.provider));
+        message.outbox = outbox;
         await this._saveChatNow(s);
         await this.prepareWorkdirSend(s, message);
       } catch (caught) {
@@ -4914,6 +5817,11 @@ export const useChatStore = defineStore('chat', {
      * выжимка, слэш-команда и вложения берутся у самой реплики, модель и режим — у чата.
      */
     _turnRequest(s: ChatSession, m: ChatMessage) {
+      if (m.outbox?.modeSelectionRevoked || (m.outbox?.modeSelection && JSON.stringify(m.outbox.modeSelection)
+        !== JSON.stringify(s.modeSelection))) {
+        throw new Error(t('core.chatModeSelectionRevoked'));
+      }
+
       const resolvedModel = useProvidersStore().modelOf(selectedModel(s));
 
       if (!resolvedModel.provider || !resolvedModel.model) {
@@ -4937,7 +5845,12 @@ export const useChatStore = defineStore('chat', {
           model: resolvedModel.id,
           modelRef: { provider: resolvedModel.provider.id, model: resolvedModel.model.id },
           effort: effortLevels.includes(s.effort || '') ? s.effort || '' : '',
-          mode: s.mode || '',
+          ...permissionModeRequest({
+            id: s.id,
+            mode: m.outbox?.mode ?? s.mode,
+            modeSelection: m.outbox?.mode !== undefined ? m.outbox.modeSelection : s.modeSelection
+          },
+          resolvedModel.provider),
           sessionId: s.sessionId,
           context,
           chatKey: s.id,
@@ -5171,6 +6084,17 @@ export const useChatStore = defineStore('chat', {
         return;
       }
 
+      const runtime = chatLoadRuntimeFor(this);
+      const receipts = [...runtime.deliverySeen.entries()];
+      const needsHeads = [...runtime.heads.values()].some((head) => head.pendingDelivery
+        && !this.isChatMessagesLoaded(head.id) && (!receipts.some(([, entry]) => entry.chatId === head.id)
+          || receipts.some(([turnId, entry]) => entry.chatId === head.id && !this.deliveries[turnId]
+            && Date.now() - entry.at >= FOREIGN_DELIVERY_GRACE_MS)));
+
+      if (needsHeads) {
+        await this._collectPending();
+      }
+
       const open = [];
 
       for (const s of [...this.sessions, ...(this.archived || [])]) {
@@ -5204,7 +6128,8 @@ export const useChatStore = defineStore('chat', {
 
         for (const { s, m } of batch) {
           // За время запроса реплику могли подтвердить или начать повтор.
-          if (m.delivery !== 'sending' || postingTurns.has(m.turnId!)) {
+          if (runtime.disposed || this._find(s.id) !== s || !s.messages.includes(m)
+            || m.delivery !== 'sending' || postingTurns.has(m.turnId!)) {
             continue;
           }
 
@@ -5256,7 +6181,9 @@ export const useChatStore = defineStore('chat', {
         do {
           reconnectAgain = false;
 
-          if (Date.now() - storeSyncedAt > 2000) {
+          // Повторный hello сразу после успешной дельты разделяет свежий каталог.
+          // После первой загрузки сверка всё равно ловит правки за время её передачи.
+          if (Date.now() - chatLoadRuntimeFor(this).resyncedAt > 2000) {
             await this._resyncStore();
           }
 

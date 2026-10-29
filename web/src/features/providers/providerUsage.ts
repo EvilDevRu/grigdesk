@@ -3,6 +3,7 @@ import { type LocaleSource, localeTranslator, translator } from '../../../../sha
 import { translate as t } from '../../../../shared/i18n/catalogs.ts';
 import { localizeUsageAmount, localizeUsageResourceText } from './usageResourceText.ts';
 import { localizeProviderAction } from './providerLocale.ts';
+import { providerUsageFreshness } from '../../../../shared/chat/providerUsageFreshness.ts';
 
 import type { UsageEntry, UsageBar, UsageResource } from './contracts.ts';
 
@@ -11,6 +12,7 @@ interface ProviderView {
   statusPage?: string;
   vendor?: string;
   name?: string;
+  usagePresentation?: { freshness: boolean; spentLabel: boolean };
 }
 
 type ResourceConfirmation = NonNullable<import('./contracts.ts').UsageControl['confirm']>;
@@ -245,6 +247,7 @@ export function providerStatusHint(provider: ProviderView = {}, usage: UsageEntr
 // даже пока данные грузятся или CLI не предоставляет API потребления.
 export function providerUsageView(entry: UsageEntry | null | undefined, provider: ProviderView = {},
   locale: LocaleSource = 'ru',
+  context: { now?: number; deliveryStale?: boolean } = {},
 ) {
   const t = localeTranslator(locale);
 
@@ -256,6 +259,7 @@ export function providerUsageView(entry: UsageEntry | null | undefined, provider
       message: t("core.limitDataHasNotBeenReceivedYet"),
       tone: 'muted',
       action: null,
+      measuredAt: null,
     };
   }
 
@@ -274,6 +278,8 @@ export function providerUsageView(entry: UsageEntry | null | undefined, provider
 
   return {
     ...entry,
+    ...(provider.usagePresentation?.freshness ? providerUsageFreshness(entry,
+      context.now ?? Date.now(), context.deliveryStale, true) : {}),
     bars: withGroupBreaks((Array.isArray(entry.bars) ? entry.bars : [])
       .map((bar) => localizeUsageBar(provider.id, bar, locale))),
     resources: (Array.isArray(entry.resources) ? entry.resources : [])
@@ -285,8 +291,8 @@ export function providerUsageView(entry: UsageEntry | null | undefined, provider
 }
 
 /**
- * Подпись собственного окна определяется ID источника и длительностью из данных.
- * Суффикс имени ведра остаётся исходным; порядок, проценты и даты не меняются.
+ * Известные окна получают общую подпись на любом языке, включая русский.
+ * Старые снимки и прогноз проходят ту же проекцию; имя ведра и данные сохраняются.
  * @param {import('../../../../shared/i18n/catalogs.ts').LocaleSource} [locale]
  */
 export function localizeUsageBar<T extends UsageBar>(
@@ -294,20 +300,37 @@ export function localizeUsageBar<T extends UsageBar>(
 ): T {
   const id = typeof locale === 'string' ? locale : locale.value;
   const key = String(bar.key || '');
+  const kimiWindow = providerId === 'kimi' && (
+    key === 'kimi:monthTotal' || /^kimi:\d+:(?:5:hour|1:week)$/.test(key)
+  );
+  const claudeWindow = providerId === 'claude' && (
+    ['session', 'weekly_all', 'weekly_scoped'].some((kind) => key.startsWith(kind))
+    || key === 'five_hour' || key === 'seven_day'
+  );
   const owned = providerId === 'codex' || providerId === 'glm' && key.startsWith('zai:')
-    || providerId === 'claude' && ['session', 'weekly_all', 'weekly_scoped']
-      .some((kind) => key.startsWith(kind));
+    || kimiWindow || claudeWindow;
 
-  if (id === 'ru' || !owned) {
+  if (!owned) {
     return bar;
   }
 
   const t = localeTranslator(locale);
-  const minutes = bar.windowMinutes;
-  const label = key === 'zai:mcp' ? t('core.usageMonthlyMcp')
-    : minutes === 300 ? t('core.usageSession') : minutes === 10080 ? t('core.usageWeek')
+  const minutes = bar.windowMinutes ?? (kimiWindow && key.endsWith(':5:hour') ? 300
+    : kimiWindow && key.endsWith(':1:week') ? 10080
+    : claudeWindow && (key === 'session' || key === 'five_hour') ? 300
+    : claudeWindow && (key === 'weekly_all' || key.startsWith('weekly_scoped') || key === 'seven_day')
+      ? 10080 : undefined);
+  const label = kimiWindow && key === 'kimi:monthTotal' ? t('core.usageMonth')
+    : key === 'zai:mcp' ? t('core.usageMonthlyMcp')
+    : minutes === 300 ? t('core.usageFiveHours') : minutes === 10080 ? t('core.usageWeek')
+    : id === 'ru' ? null
     : Number.isFinite(minutes) && minutes! > 0 ? t('core.usageMinutes', { count: minutes! })
       : providerId === 'glm' ? t('core.usageTokenWindow') : t('core.limits');
+
+  if (!label) {
+    return bar;
+  }
+
   const suffix = String(bar.label || '').split(' · ').slice(1).join(' · ');
 
   return { ...bar, label: suffix ? `${label} · ${suffix}` : label };

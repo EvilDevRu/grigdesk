@@ -505,3 +505,27 @@ for (const failed of [false, true]) {
     assert.equal(f.state.backgroundCleanups, 0);
   });
 }
+
+test('PM-PUBLIC-PROPS: четыре presentation и compact сохраняют props, DOM и один mount', async (t) => {
+  const f = await panelFixture(t);
+  const input = f.wrapper.get('input');
+
+  await input.setValue('Черновик всех режимов');
+
+  for (const presentation of ['page', 'dock', 'hidden', 'placeholder']) {
+    for (const compact of [false, true]) {
+      for (const active of [false, true]) {
+        await f.updateProps({
+          active,
+          compact,
+          presentation,
+        });
+        assert.ok(f.wrapper.text().includes(`${active}/${compact}/${presentation}`));
+        assert.equal(f.wrapper.get('input').element === input.element, true);
+        assert.equal(f.wrapper.get('input').element.value, 'Черновик всех режимов');
+        assert.equal(f.state.mounts, 1);
+        assert.equal(f.state.calls.length, 1);
+      }
+    }
+  }
+});

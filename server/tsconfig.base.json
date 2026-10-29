@@ -2,6 +2,7 @@
 {
   "compilerOptions": {
     "resolveJsonModule": true,
+    "paths": { "fastify": ["./node_modules/fastify/fastify.d.ts"] },
     // Node 22 — минимум проекта, поэтому библиотеке разрешён весь ES2023
     // (findLast, toSorted и соседи): downlevel-эмита здесь нет, noEmit включён.
     "target": "ES2023",

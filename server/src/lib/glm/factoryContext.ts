@@ -11,6 +11,7 @@ export interface GlmFactoryTurnContext {
   runId: string;
   epoch: string;
   filesystem: GlmFactoryFilesystem;
+  stateDir?: string;
   statusServer: GlmMcpServer;
 }
 
@@ -73,6 +74,11 @@ export function assertGlmFactoryContext(value: unknown): GlmFactoryTurnContext {
 
   glmFactoryPolicy(String(context.filesystem));
 
+  if (context.filesystem === 'state-only'
+    && (!cleanText(context.stateDir) || !path.isAbsolute(context.stateDir))) {
+    throw invalidContext();
+  }
+
   const server = statusServer(context.statusServer);
   const env = new Map(server.env.map((entry) => [entry.name, entry.value]));
 
@@ -88,6 +94,7 @@ export function assertGlmFactoryContext(value: unknown): GlmFactoryTurnContext {
     runId: context.runId!,
     epoch: context.epoch!,
     filesystem: context.filesystem!,
+    ...(context.filesystem === 'state-only' ? { stateDir: context.stateDir! } : {}),
     statusServer: server,
   };
 }

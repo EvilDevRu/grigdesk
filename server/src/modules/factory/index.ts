@@ -1,5 +1,7 @@
 import { GrigdeskTaskStore, readGrigdeskTask } from '../../lib/grigdeskTasks/store.ts';
 import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
+import { ArbiterConversationStore } from '../../lib/arbiterConversationStore.ts';
+import { registerArbiterConversationRuntime } from './arbiterConversationRuntime.ts';
 import { isProjectDeleted, deletedProjectIds } from '../../lib/projects/deletion.ts';
 // Модуль factory (read-only, M0) — отдаёт состояние конвейера в чистом JSON,
 // которого нет у Python-дашборда (там server-rendered HTML). Мутации (ворота/запуск)
@@ -61,19 +63,7 @@ import { parseSandboxRepositories } from '../../lib/sandboxEnv.ts';
 import { restoreTaskStand } from '../../lib/factoryStandRestore.ts';
 import { parsePipeline } from '../../lib/pipelineParse.ts';
 import { archiveTaskFiles } from '../../lib/taskArtifacts.ts';
-import {
-  ARBITER_ACTOR,
-  arbitrationGate,
-  buildArbiterPrompt,
-  formatArbiterReason,
-  normalizeArbiterSettings,
-  parseArbiterDecision,
-  readArbitrationContext,
-  resolveArbiterTarget,
-} from '../../lib/factoryArbiter.ts';
-import { resolveModelRef } from '../../lib/chat/modelRef.ts';
 import { getExecutor } from '../../lib/executors/index.ts';
-import { getModelsRegistry } from '../../lib/modelsRegistry.ts';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { FactoryStateAdapter } from '../../adapters/factoryState.ts';
 import type { ArbiterCardsStore } from '../../lib/arbiterCards.ts';
@@ -86,7 +76,7 @@ import type {
   TriageAnalysis,
 } from '../../lib/factoryLaunchContract.ts';
 import type { RouteTicket } from '../../lib/factoryTicket.ts';
-import type { ArbiterExecutor, ArbiterRunOutput } from '../../lib/factoryArbiter.ts';
+import type { ArbiterExecutor } from '../../lib/factoryArbiter.ts';
 import type { SlotDecision } from '../../lib/sandboxSlots.ts';
 import type { GrigDeskConfig } from '../../config.ts';
 import type { RunnerState } from '../../lib/runnerState.ts';
@@ -205,6 +195,7 @@ type FactoryModuleConfig = RouteConfig & LaunchConfig & Pick<
 > & {
   factoryStandsDir?: string;
   grigdeskTasksPath?: string;
+  arbiterConversationsDir?: string;
 };
 
 export interface FactoryModuleOptions {
@@ -216,25 +207,12 @@ export interface FactoryModuleOptions {
   internalToken?: string;
   arbiterCards?: ArbiterCardsStore | null;
   arbiterLive?: FactoryArbiterLive | null;
+  arbiterConversations?: ArbiterConversationStore;
   // Подмена инспектора очереди в тестах: та же форма ответа, что у собственного.
   inspectLaunchState?: (id: string) => Promise<LaunchInspection>;
 }
 
 const RUNNER_PRIMARY_RE = /^[a-z][a-z0-9_-]{0,63}$/;
-// Лимит хода арбитра. `executor.run` своего таймаута не имеет by design — в чате его
-// считает watchdog, который знает, что агент ждёт ответа человека. Арбитр человека не
-// ждёт вовсе, поэтому лимит здесь простой и жёсткий.
-//
-// Десяти минут оказалось мало на реальной остановке (замер 28.08.2026, задача с
-// перф-регрессией в чужой библиотеке): арбитр честно прочитал отчёт, диагностику и
-// исходники — 34 команды, — и был оборван на десятой минуте, не дав ничего. Худший из
-// возможных исходов: время живого агента потрачено, конвейер стоит, задача ушла в
-// часовой cooldown. Двадцать минут против часов человеческого ожидания дёшевы, а
-// главная защита от бесконечного чтения теперь не резак, а объявленный агенту бюджет
-// (`budgetMin` в промпте): знающий свой лимит начинает формулировать заранее.
-const ARBITER_TURN_LIMIT_MIN = 20;
-const ARBITER_TURN_LIMIT_MS = ARBITER_TURN_LIMIT_MIN * 60 * 1000;
-
 const registryIsMissing = (error: unknown) => (error as { code?: unknown } | null)?.code === 'ENOENT';
 
 function errorMessage(error: unknown): string {
@@ -2119,251 +2097,24 @@ async function factoryModule(
     }
   });
 
-  // Арбитр типизированной остановки: снимает тупик вместо человека и предъявляет решение.
-  //
-  // Механика ровно та, которую человек выполняет руками, и заменяется здесь именно его
-  // КУРЬЕРСКАЯ часть: собрать оба вердикта дуги, посмотреть артефакты и рабочее дерево,
-  // сформулировать указание и вернуть курсор. Замер по журналам: 28 типизированных
-  // остановок, сумма ожидания 59.7 часа, из них 53 — пять ночных стоянок.
-  //
-  // Три границы, каждая проверяется до побочного действия:
-  //   1. разбирается ТОЛЬКО `no-progress`; `human` — прямой вызов человека, не топтание;
-  //   2. решение, меняющее границу задачи, арбитр принять не вправе и отдаёт человеку;
-  //   3. потолок арбитражей на попытку, потому что возврат арбитра (как и человеческий)
-  //      обнуляет замкнутый набор дуги.
-  // Событие журнала помечается `--actor`, поэтому машинное решение не выдаёт себя за
-  // человеческое ни в ленте попытки, ни в промпте узла.
-  //
-  // Тело вынесено из роута, потому что зовут его ДВОЕ: кнопка человека и автоматический
-  // вотчер. Одно тело — одни границы: у автоматического пути не должно быть ни своей
-  // проверки остановки, ни своего потолка арбитражей.
-  // `actor` не влияет на границы разбора — он только объясняет человеку, ПОЧЕМУ задача
-  // едет сама: нажатую кнопку он и так помнит, а обход вотчера выглядит самодвижением.
-  const runArbitration = async (
-    id: string,
-    reply: RejectionReply,
-    { actor = 'human' }: { actor?: string } = {},
-  ) => {
-    const managed = await managedRegistry(id, reply);
-    if (!managed) return null;
-    const { trusted } = managed;
-    if (trusted.terminal) {
-      reply.code(409).send({
-        error: 'attempt_terminal',
-        message: `попытка закрыта (${trusted.terminal})`,
-      });
-      return null;
-    }
+  // Читающий разбор и явное применение имеют одного владельца admission.
+  // Старый адрес /arbitrate подтверждает запуск диалога, не двигая курсор.
+  const conversationStore = opts.arbiterConversations || new ArbiterConversationStore(
+    config.arbiterConversationsDir || path.join(path.dirname(config.stateDir), 'arbiter-conversations'),
+    (doc) => fastify.sse?.broadcast?.('arbiter-conversation', {
+      task: doc.identity.task,
+      conversationId: doc.id,
+      revision: doc.revision,
+    }),
+  );
 
-    const context = await readArbitrationContext({
-      controlDir: config.factoryControlDir, task: id, attempt: trusted.attempt,
-    });
-    const gate = arbitrationGate(context, trusted.cursor, {
-      loop: managed.registry.LOOP_MODE === '1',
-    });
-    if (!gate.ok || !context.ok || !context.target) {
-      reply.code(409).send({ error: gate.error, message: gate.message });
-      return null;
-    }
-
-    const settings = normalizeArbiterSettings(prefs?.read()?.arbiter);
-    const target = await resolveArbiterTarget({
-      modelRef: { ...(settings.modelRef || {}), effort: settings.effort },
-      config,
-      modelsRegistry: () => getModelsRegistry(config),
-      executorResolver: arbiterExecutor,
-      resolveRef: resolveModelRef,
-      log: fastify.log,
-    });
-    if (!target.ok) {
-      reply.code(409).send({ error: target.error, message: target.message });
-      return null;
-    }
-
-    // Рабочее дерево задачи. Пустой или повреждённый реестр worktree — отказ: арбитр без
-    // дерева видит только вердикты, то есть ровно ту слепоту, ради снятия которой он есть.
-    const parsed = parseSandboxRepositories(await factoryState.readEnv(id));
-    const primaryRepo = parsed.repos[0];
-    if (parsed.kind === 'invalid' || !primaryRepo) {
-      reply.code(409).send({
-        error: 'arbiter_workspace_unavailable',
-        message: 'у задачи нет рабочего дерева — арбитру нечего проверять',
-      });
-      return null;
-    }
-    const cwd = primaryRepo.path;
-    const extraDirs = [...parsed.repos.slice(1).map((repo) => repo.path), config.stateDir];
-
-    // Своего таймаута у `executor.run` НЕТ: лимит хода считает watchdog модуля чата, а у
-    // арбитра его нет. Без ограничения зависший ход держал бы и HTTP-запрос, и процесс CLI
-    // без конца. Десять минут — с запасом на чтение артефактов и пару опытов.
-    const ac = new AbortController();
-    const deadline = setTimeout(() => ac.abort(), ARBITER_TURN_LIMIT_MS);
-    // Отметку ставим здесь, а не в начале: до этой строки идут дешёвые проверки, и
-    // мигать «разбирается» на отказе за миллисекунду нечестно. Снимаем в `finally` —
-    // потерянная отметка держала бы задачу «в разборе» до перезапуска сервера.
-    const doneLive = arbiterLive?.begin(id, {
-      actor,
-      model: `${target.ref.provider}/${target.ref.model}`,
-    }) || (() => {});
-    // Передача хода начинается только с возврата курсора; до него снимать нечего.
-    let doneHandoff = () => {};
-    let output: ArbiterRunOutput;
-    try {
-      const providerSettings = prefs?.read()?.providerSettings as
-        Record<string, Record<string, unknown> | undefined> | undefined;
-      output = await target.executor.run({
-        signal: ac.signal,
-        config,
-        message: buildArbiterPrompt({
-          task: id,
-          node: context.node,
-          target: context.target,
-          reason: context.reason,
-          series: context.series,
-          stateDir: config.stateDir,
-          stop: context.stop,
-          budgetMin: ARBITER_TURN_LIMIT_MIN,
-        }),
-        cwd,
-        extraDirs,
-        model: target.ref.model,
-        effort: target.effort || undefined,
-        permissionMode: 'plan',
-        providerSettings: providerSettings?.[target.ref.provider] || {},
-        log: fastify.log,
-      });
-    } catch (err) {
-      if (ac.signal.aborted) {
-        fastify.log.warn(
-          { task: id, limitMin: ARBITER_TURN_LIMIT_MIN, steps: errorStepCount(err) },
-          'арбитр: ход оборван по лимиту времени',
-        );
-      }
-      else fastify.log.warn({ err, task: id }, 'арбитр: ход не состоялся');
-      reply.code(409).send({
-        error: 'arbiter_run_failed',
-        message: ac.signal.aborted ? 'арбитр не уложился в лимит хода' : 'арбитр не отработал',
-      });
-      // Эта ветка уходит мимо общего `finally` ниже, поэтому отметку снимаем здесь:
-      // забытая запись держала бы задачу «в разборе» до перезапуска сервера.
-      doneLive();
-      return null;
-    } finally {
-      clearTimeout(deadline);
-    }
-
-    // Разбор ответа и возврат курсора идут ПОСЛЕ хода, но занимают ещё секунды:
-    // `factory goto` — это отдельный процесс движка. Пока он работает, задача обязана
-    // оставаться «в разборе», иначе в это окно вклинится вотчер или второе окно.
-    try {
-      const decision = parseArbiterDecision(output?.reply);
-      if (!decision.ok) {
-        reply.code(409).send({ error: decision.error, message: decision.message });
-        return null;
-      }
-      if (decision.verdict === 'human') {
-        // Не отказ и не ошибка: арбитр отработал и вернул то, что обязан вернуть, когда
-        // решение меняет границу задачи. Карточку СОХРАНЯЕМ, а не только возвращаем в ответ:
-        // у автоматического пути ответа некому показать, и разбор пропадал вместе с
-        // потраченным ходом живого агента.
-        await arbiterCards?.save(id, {
-          attempt: trusted.attempt,
-          verdict: 'human',
-          card: decision.card,
-          scopeChange: decision.scopeChange,
-          model: `${target.ref.provider}/${target.ref.model}`,
-          node: context.node,
-          stop: context.stop,
-        });
-        return {
-          ok: true,
-          resolved: false,
-          verdict: 'human',
-          card: decision.card,
-          scopeChange: decision.scopeChange,
-          model: `${target.ref.provider}/${target.ref.model}`,
-        };
-      }
-
-      const sanitized = humanComment(formatArbiterReason(decision), { fallback: '' });
-      if (!sanitized.ok) {
-        reply.code(409).send({ error: 'comment_too_long', message: sanitized.message });
-        return null;
-      }
-
-      doneHandoff = factoryState.beginHandoff(id);
-
-      const rewound = await runRouteDecision(config, routeGotoArgs(config, {
-        task: id,
-        profile: trusted.profile,
-        attempt: trusted.attempt,
-        node: context.target,
-        reason: sanitized.value,
-        actor: ARBITER_ACTOR,
-      }));
-
-      if (rewound.timedOut) {
-        const recorded = await reconcileRouteDecisionTimeout(id, trusted, {
-          kind: 'goto',
-          node: context.target,
-        }, reply);
-
-        if (!recorded) {
-          return null;
-        }
-      } else if (!rewound.ok) {
-        reply.code(409).send({ error: 'goto_rejected', message: rewound.message });
-
-        return null;
-      }
-
-      const resumed = await resumeRouteAttempt(id, {
-        profile: trusted.profile,
-        attempt: trusted.attempt,
-        why: 'после арбитража',
-        standOwnership: trusted.standOwnership,
-      });
-      // Снятый тупик тоже объясняется человеку: он увидит на схеме возврат курсора и обязан
-      // понимать, кто и почему его сделал, — иначе машинное решение неотличимо от сбоя.
-      // `deferred` — то же самое движение курсора, но решение задело границу задачи, и
-      // арбитр выбрал минимальный вариант вместо остановки. Разница только в пометке:
-      // человек увидит такое решение сводкой в воротах, а не будильником посреди работы.
-      await arbiterCards?.save(id, {
-        attempt: trusted.attempt,
-        verdict: decision.verdict,
-        card: decision.card,
-        scopeChange: decision.scopeChange,
-        model: `${target.ref.provider}/${target.ref.model}`,
-        node: context.target,
-        stop: context.stop,
-      });
-      return {
-        ok: true,
-        resolved: true,
-        verdict: decision.verdict,
-        scopeChange: decision.scopeChange,
-        node: context.target,
-        card: decision.card,
-        model: `${target.ref.provider}/${target.ref.model}`,
-        resumed: resumed.ok,
-        resumeError: resumed.message || null,
-        resumeFailure: resumed.failure || null,
-        ...(rewound.timedOut ? { engineTimedOut: true } : {}),
-      };
-    } finally {
-      doneHandoff();
-      doneLive();
-    }
-  };
-
-  fastify.post<FactoryRoute>('/api/tasks/:id/arbitrate', async (request, reply) => {
-    const id = String(request.params.id).replace(/[^0-9]/g, '');
-    if (!id) return reply.code(400).send({ error: 'bad_input' });
-    const result = await runArbitration(id, reply);
-    return result === null ? reply : result;
-  });
-  fastify.decorate('factoryArbitrate', runArbitration);
+  await registerArbiterConversationRuntime(fastify, opts, conversationStore, arbiterExecutor,
+    (trusted) => resumeRouteAttempt(trusted.task, {
+      profile: trusted.profile || '',
+      attempt: trusted.attempt,
+      why: 'после выбранного исправления',
+      standOwnership: trusted.standOwnership,
+    }));
 
   // Ручное переключение ТОЛЬКО активной попытки и ТОЛЬКО на provider из уже
   // разрешённой цепочки этого этапа. Сам engine применяет CAS к run/epoch и завершает

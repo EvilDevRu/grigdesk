@@ -1,9 +1,9 @@
 # GLM parity на автономном ELF
 
 `tests/server/glm-binary-parity.test.js` выбирает бинарную fixture и регистрирует те же
-сценарии из семи файлов `glm-vendored-{profile,turn,policy,mcp,catalog,session,stop}`.
-Их отдельные запуски сохраняют legacy fixture. Меняется подготовка runtime; существующие
-assert-проверки одинаковы для обоих способов доставки.
+сценарии из файлов `glm-vendored-{profile,turn,policy,mcp,catalog,session,stop,gate,subagents}`.
+Отдельные запуски тоже выбирают ELF по умолчанию; legacy fixture доступна только явным
+`GRIGDESK_TEST_GLM_DELIVERY=embedded`. Проверки общих сценариев одинаковы для обоих способов доставки.
 
 `ensureGlmTestRuntime` проверяет настоящий candidate один раз на процесс. Binary-ветка
 задаёт ELF и cache-dir явно и оставляет legacy artifact недоступным. Production adapter,
@@ -13,7 +13,7 @@ loopback и fetch guard. Тестовый допуск вычисляется п
 Набор проверяет ответ/reasoning, реальные инструменты, файловые и командные запреты,
 MCP readiness/loss/current tools, каталог без prompt, resume, остановку и обрыв после
 эффекта. Запреты проверяются отсутствием sentinel и счётчиками вызовов. После crash
-предыдущий эффект не повторяется автоматически; новый вызов модели проходит hook заново.
+предыдущий эффект не повторяется автоматически; новый вызов проходит gate текущего запуска заново.
 
 Таблица `web и GLM на настоящем ELF проходят полную таблицу исходов остановки` в
 `tests/server/deepseek-binary-stop.test.js` проверяет по девять исходов для каждого caller:

@@ -69,6 +69,8 @@ interface WatchedTask {
     node?: unknown;
     stop?: unknown;
     arbiter?: { verdict?: unknown; node?: unknown; stop?: unknown } | null;
+    conversation?: { started?: boolean } | null;
+    conversationHistory?: boolean;
   } | null;
 }
 
@@ -92,6 +94,8 @@ export interface FactoryArbiterWatchDeps {
   arbitrate: (taskId: string, reply: ArbitrationReply) => Promise<{
     resolved?: unknown;
     node?: unknown;
+    conversationId?: string;
+    completion?: Promise<void>;
   } | null>;
   hasStopped?: (() => Promise<unknown>) | null;
   log?: WatchLog;
@@ -200,6 +204,9 @@ export class FactoryArbiterWatch {
         // правилом вместе с гейтом арбитра. Своя копия сравнения с `no-progress`
         // разъехалась бы с ними при первом же расширении набора остановок.
         if (!task?.stall?.arbitrable) continue;
+        if (task.stall.conversation?.started) {
+          continue;
+        }
         // Арбитр уже разбирал ЭТУ остановку и честно вернул решение человеку. Второй
         // заход не бесплатен и не безобиден: вход не изменился, а ответ у модели не
         // детерминирован. Замер 28.08.2026 (задача 8507, узел `build`, остановка `human`):
@@ -217,9 +224,13 @@ export class FactoryArbiterWatch {
         const decided = stall?.arbiter;
         const otherNode = Boolean(decided?.node && stall?.node
           && decided.node !== stall.node);
-        if (decided?.verdict === 'human'
+
+        if (!stall.conversationHistory && decided?.verdict === 'human'
           && decided.stop === stall?.stop
-          && !otherNode) continue;
+          && !otherNode) {
+          continue;
+        }
+
         const id = String(task.task || '');
         if (!id) continue;
         const until = this.cooldown.get(id) || 0;
@@ -251,8 +262,13 @@ export class FactoryArbiterWatch {
       send(body: unknown) { refusal = body as { error?: unknown } | null; return this; },
     };
     let result: Awaited<ReturnType<FactoryArbiterWatchDeps['arbitrate']>> = null;
+
     try {
       result = await this.arbitrate(id, reply);
+
+      if (result?.completion) {
+        await result.completion;
+      }
     } catch (err) {
       this.log?.warn?.({ err, task: id }, 'арбитр: разбор упал');
       this.cooldown.set(id, Date.now() + FAILURE_COOLDOWN_MS);
@@ -263,6 +279,12 @@ export class FactoryArbiterWatch {
       this.log?.info?.({ task: id, code }, 'арбитр: разбор не состоялся');
       this.cooldown.set(id, Date.now() + FAILURE_COOLDOWN_MS);
       return PRE_MODEL_REFUSALS.has(code) ? 'cheap-skip' : 'failed';
+    }
+    if (result.conversationId) {
+      this.cooldown.set(id, Date.now() + FAILURE_COOLDOWN_MS);
+      this.log?.info?.({ task: id }, 'арбитр: результат и состояние разбора сохранены в диалоге');
+
+      return 'human';
     }
     if (!result.resolved) {
       // Решение о границе задачи. Оно принадлежит человеку, и повторять его нечем.
