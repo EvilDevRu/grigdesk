@@ -29,6 +29,7 @@
         </router-view>
       </AppShell>
       <TaskModal v-if="!surfaceDocument" />
+      <OnboardingHost v-if="!surfaceDocument" />
       <DiffModal />
       <DocumentModal />
       <MediaViewer />
@@ -63,6 +64,7 @@ import {
 } from './ui';
 import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
+import OnboardingHost from './shared/onboarding/OnboardingHost.vue';
 import DesktopExitHost from './shared/layout/DesktopExitHost.vue';
 import DesktopWindowControls from './shared/layout/DesktopWindowControls.vue';
 import NoAccessView from './views/NoAccessView.vue';

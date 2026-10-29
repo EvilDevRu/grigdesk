@@ -1,5 +1,7 @@
 # Тесты и проверка
 
+- [Готовность маршрутизатора перед повторной навигацией](router-ready-navigation.md)
+
 - [Native-пробы режимов Codex: loopback, маркеры и граница вложенной песочницы](codex-permission-mode-fixtures.md)
 
 - [Изолированный Codex: необязательный вопрос при точном наборе host tools](codex-untrusted-optional-question.md)

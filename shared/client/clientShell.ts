@@ -34,7 +34,7 @@ export interface ShellState {
   localAvailable: boolean;
   serverApi: ApiVersion | null;
   appApi: ApiVersion;
-  capabilities: ('scan' | 'save' | 'unlock' | 'windows')[];
+  capabilities: ('scan' | 'save' | 'unlock' | 'windows' | 'selectDirectory')[];
 }
 
 export const RELEASES_URL = '';

@@ -16,6 +16,7 @@ import { json, startPipe } from './pipe/pipeServer.ts';
 import { createUpstream } from './pipe/upstream.ts';
 
 interface RuntimeOptions {
+  selectDirectory?(origin: string): Promise<string | null>;
   windowControls?: WindowControls;
   desktopExit?: DesktopExitPreference;
   nativeWindows?: NativeWindows;
@@ -54,6 +55,7 @@ export function createClientRuntime(options: RuntimeOptions) {
     directory: options.identityDirectory,
   });
   const shell = createShellApi({
+    selectDirectory: options.selectDirectory,
     windowControls: options.windowControls,
     desktopExit: options.desktopExit,
     nativeWindows: options.nativeWindows,

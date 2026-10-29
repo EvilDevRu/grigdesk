@@ -1,0 +1,27 @@
+# Серверное состояние мастера
+
+`onboarding.json` в `config.dataStateDir` хранит schemaVersion=1, revision,
+autoOpenDisabled, active и answersByProject. Только отсутствие файла означает пустое состояние;
+порча, неизвестная версия и ошибки доступа не сбрасывают его. Мутации используют directory lock,
+CAS по expectedRevision и атомарную запись tmp0600 → rename. `onboarding-changed` следует за записью.
+
+`GET /api/onboarding` возвращает снимок и shouldOpen. `POST /start` принимает mode=auto|manual
+и expectedRevision; результат содержит open. PATCH сохраняет draft. POST `/advance` и `/dismiss`
+принимают sessionId и expectedRevision; skipAi разрешён только на шаге ai. POST `/repository`
+принимает dir и только читает локальный Git. Все пути начинаются с `/api/onboarding`, закрыты
+общим auth, возвращают no-store, отклоняют лишние поля. Конфликт даёт 409 с текущим снимком.
+
+Происхождение session.origin задаётся сервером один раз. Manual возобновляется кнопкой без
+автоперехода. Auto может продолжаться после собственного проекта; завершение и отказ выключают
+автозапуск. Проверка пустоты читает ID реестра и каталогов с graph.json, включает архив,
+исключает tombstones и не исполняет profile.sh. Ошибка чтения не означает пустую установку.
+
+Перед созданием паспорта сохраняется точный projectIntent. После сбоя повтор допускает только
+точное совпадение с собственным обычным паспортом; чужой, архивный или удалённый проект не
+перезаписывается. Сам паспорт пишет существующий ProjectsService, включая projects-changed.
+После создания PATCH меняет только workspace.mode; форму паспорта и профиль мастер не меняет.
+
+answersByProject сохраняет repositories[].name/source/baseBranch, workspace.mode, aiSkipped,
+projectRevision и complete. Это исходные ответы для будущего образца, не действующий профиль.
+Итог сохраняет complete=true; отказ после создания тоже оставляет ответы. Последующий ручной
+проход не удаляет историю других проектов. Данные исполнителей и секреты сюда не записываются.

@@ -55,6 +55,7 @@ const EVENT_NAMES = [
   'sandboxes-changed',
   'sandbox-progress',
   'projects-changed',
+  'onboarding-changed',
   'routes-draft-changed',
   'routes-catalog-changed',
   'showcase-changed',

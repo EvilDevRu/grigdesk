@@ -136,6 +136,7 @@ import pluginsModule from './modules/plugins/index.ts';
 import pluginCatalogModule from './modules/plugin-catalog/index.ts';
 import { PluginCatalogService } from './lib/pluginCatalog.ts';
 import projectsModule from './modules/projects/index.ts';
+import onboardingModule from './modules/onboarding/index.ts';
 import { createProjectsService } from './modules/projects/service.ts';
 import {
   countGitHubRules,
@@ -1271,6 +1272,11 @@ async function build(desktopParent: DesktopParent | null) {
   });
 
   await fastify.register(projectsModule, { config, prefs, service: projectsService });
+  await fastify.register(onboardingModule, {
+    config,
+    prefs,
+    projectsService,
+  });
   await fastify.register(grigdeskTasksModule, {
     config,
     b24,
