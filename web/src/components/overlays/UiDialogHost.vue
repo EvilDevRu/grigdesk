@@ -38,6 +38,16 @@
 
     <p v-if="dialogText" class="ui-dialog-host__message">{{ dialogText }}</p>
     <code v-if="dialogCode" class="ui-dialog-host__code">{{ dialogCode }}</code>
+    <section v-if="request?.kind === 'confirm' && request.options.details" @keydown.enter.stop>
+      <UiDisclosureButton
+        v-model:open="detailsOpen"
+        density="compact"
+        :controls="detailsId"
+      >{{ resolveUiText(request.options.details.label) }}</UiDisclosureButton>
+      <code v-if="detailsOpen" :id="detailsId" class="ui-dialog-host__code">
+        {{ request.options.details.text }}
+      </code>
+    </section>
 
     <UiInput
       v-if="request?.kind === 'prompt' && request.options.multiline === false"
@@ -104,9 +114,11 @@ import {
   onMounted,
   ref,
   shallowRef,
+  useId,
   type Component,
 } from 'vue';
 import UiButton from '../primitives/UiButton.vue';
+import UiDisclosureButton from '../composites/UiDisclosureButton.vue';
 import UiInput from '../primitives/UiInput.vue';
 import UiTextarea from '../primitives/UiTextarea.vue';
 import UiInlineMessage from '../feedback/UiInlineMessage.vue';
@@ -140,6 +152,8 @@ const request = shallowRef<DialogHostRequest | null>(null);
 const promptValue = ref('');
 const busy = ref(false);
 const actionError = ref('');
+const detailsOpen = ref(false);
+const detailsId = `confirm-details-${useId().replaceAll(':', '')}`;
 const dialog = ref<FocusHandle | null>(null);
 const promptInput = ref<FocusHandle | null>(null);
 const cancelButton = ref<FocusHandle | null>(null);
@@ -244,6 +258,7 @@ function initialFocusTarget(): FocusHandle | null {
  */
 function show(nextRequest: DialogHostRequest): void {
   request.value = nextRequest;
+  detailsOpen.value = false;
   promptValue.value =
     nextRequest.kind === 'prompt' &&
     typeof nextRequest.options.value === 'string'

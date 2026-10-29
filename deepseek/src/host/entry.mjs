@@ -13,6 +13,7 @@ import {
 } from '@deepseek-ai/dsh-launch-environment';
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths';
 import yaml from 'js-yaml';
+import { validateToolPermissionPolicy } from './toolPermissionGate.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const metadata = JSON.parse(await readFile(path.join(root, 'runtime.json'), 'utf8'));
@@ -24,6 +25,7 @@ if (args.length === 1 && ['-V', '--version'].includes(args[0])) {
 }
 
 let profile;
+let toolPolicy;
 const overlays = [];
 const inner = [];
 
@@ -38,6 +40,14 @@ for (let index = 0; index < args.length; index += 1) {
     }
 
     overlays.push(patch);
+  } else if (args[index] === '--grigdesk-tool-policy') {
+    const file = args[++index];
+
+    if (toolPolicy || !file || !path.isAbsolute(file)) {
+      throw new Error('--grigdesk-tool-policy требует единственный абсолютный путь');
+    }
+
+    toolPolicy = validateToolPermissionPolicy(JSON.parse(await readFile(file, 'utf8')));
   } else {
     inner.push(args[index]);
   }
@@ -81,7 +91,25 @@ if (profile === 'web') {
 }
 
 for (const overlay of overlays) {
-  layers.push(...loadOverlayPatches('dsh', overlay));
+  const patches = loadOverlayPatches('dsh', overlay);
+
+  for (const patch of patches) {
+    for (const row of patch.insert || []) {
+      if (row.name === 'grigdesk:glm-gate') {
+        row.name = new URL('./glmGate.mjs', import.meta.url).href;
+      }
+    }
+  }
+
+  layers.push(...patches);
+}
+
+if (toolPolicy) {
+  layers.push({ insert: [{
+    id: 'grigdesk-tool-permissions',
+    name: new URL('./toolPermissionGate.mjs', import.meta.url).href,
+    config: toolPolicy,
+  }] });
 }
 
 if (process.env.DSH_TELEMETRY_DISABLED) {
@@ -152,6 +180,11 @@ try {
       },
     });
   }, new URL('./', import.meta.url).href);
+
+  if (toolPolicy && context.get('grigdeskToolPermissions')?.ready !== true) {
+    throw new Error('Обязательная проверка разрешений DeepSeek не установлена');
+  }
+
   ready = true;
 
   for (const listener of readyListeners) {

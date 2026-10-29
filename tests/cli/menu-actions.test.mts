@@ -40,8 +40,10 @@ test('MA-NAV: порядок, описания, стрелки, Enter и Esc м�
   await session.wait(/Переносимый комплект/u);
 
   const build = session.output().slice(first.length);
+  const buildTitles = [/Всё/u, /Только сервер/u, /Только веб/u, /Окно/u, /DeepSeek/u,
+    /Переносимый комплект/u];
 
-  for (const title of [/Всё/u, /Только сервер/u, /Только веб/u, /Окно/u, /Переносимый комплект/u]) {
+  for (const title of buildTitles) {
     assert.match(build, title);
   }
 
@@ -49,7 +51,7 @@ test('MA-NAV: порядок, описания, стрелки, Enter и Esc м�
 
   const bundleStart = session.output().length;
 
-  session.write(down.repeat(4));
+  session.write(down.repeat(5));
   await session.wait(/release\/.*архив/iu, 4000, bundleStart);
 
   const before = session.output().length;

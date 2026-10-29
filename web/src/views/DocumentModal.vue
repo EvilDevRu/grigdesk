@@ -37,7 +37,9 @@
       </div>
     </template>
 
-    <UiLoadingState v-if="resolving" label="Проверяю ссылку…" variant="document" />
+    <UiLoadingState v-if="resolving" label="Проверяю ссылку…" variant="document" >
+      <UiSkeletonLayout layout="text" :header="false" />
+    </UiLoadingState>
     <div v-else-if="resolveError" class="document-state error">
       {{ resolveError }}
     </div>
@@ -54,6 +56,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../ui';
+
 import { computed, ref, watch } from 'vue';
 import {
   UiDialog,

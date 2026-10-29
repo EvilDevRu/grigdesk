@@ -118,11 +118,15 @@ provider/model/effort и проверяется по свежему provider reg
 `POST /api/tasks/:id/analysis/arbitrate` используют живой gate `plugin_disabled`; off
 останавливает новые dispatch, но сохраняет очередь, оценки и `t<id>.clarify.md`.
 
-Claude и версии Codex с `workspaceWrite.readOnlyAccess` объявляют `scopedWorkspace`:
+Claude, Codex с restricted read или именованными permission profiles, GLM, Kimi и DeepSeek
+объявляют `scopedWorkspace` ([выбор модели триажа](../pipeline/triage-model-selection.md)):
 `PROFILE_AGENT_CWD`, все `PROFILE_AGENT_DIRS`,
 `PROFILE_TRIAGE_REPOS` и per-run input — read-only, единственный writable root/cwd — output
-staging анализа. Сеть, temp roots, общий Bash и внешние MCP закрыты; bounded `git log/show`
-идут через единственный private `repo_history`. Выбранные изображения сначала проверяются
+staging анализа. Сеть, общие temp-каталоги и внешние MCP закрыты. Claude не получает общий
+Bash; команды Codex ограничивает файловый профиль. GLM, Kimi и DeepSeek используют
+[файловый брокер и проверку инструментов](../pipeline/triage-executors.md).
+Bounded `git log/show` идут через
+единственный private `repo_history`. Выбранные изображения сначала проверяются
 server-owned token resolver-ом и копируются в input запуска, общий каталог вложений модели
 не выдаётся. Это ограничивает последствия prompt injection из B24/Telegram, но не делает
 машинную оценку достоверной само по себе.

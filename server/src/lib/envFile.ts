@@ -476,7 +476,8 @@ async function replaceFile(target: string, text: string, snapshot: EnvSnapshot):
  * чьи строки действительно изменились; без изменений файл не переписывается.
  * Параллельную правку другим процессом распознаёт и повторяет чтение, затем отказывает.
  */
-export async function updateEnvFile(envPath: string, changes: EnvFileChanges): Promise<EnvFileUpdate> {
+export async function updateEnvFile(envPath: string, changes: EnvFileChanges,
+  options: { expected?: Readonly<Record<string, string | null>> } = {}): Promise<EnvFileUpdate> {
   const planned = validateChanges(changes);
   const target = await resolveTarget(envPath);
 
@@ -484,6 +485,13 @@ export async function updateEnvFile(envPath: string, changes: EnvFileChanges): P
     for (let attempt = 0; attempt < CONFLICT_ATTEMPTS; attempt += 1) {
       const snapshot = await readSnapshot(target);
       const { text, changed } = planText(snapshot.bytes, planned);
+      const current = parseEnv(snapshot.bytes?.toString('utf8') ?? '');
+
+      for (const [name, expected] of Object.entries(options.expected ?? {})) {
+        if ((current[name] ?? null) !== expected) {
+          throw new EnvFileError('env_file_conflict', 'Настройка изменилась после подготовки правки.');
+        }
+      }
 
       if (!changed.length) {
         return { path: target, changed };

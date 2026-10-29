@@ -28,7 +28,9 @@
       </UiIconButton>
     </div>
     <UiLoadingState v-if="catalog.loading" :label="t('settings.marketplaceLoading')"
-      :variant="catalog.index ? 'inline' : 'cards'" />
+      :variant="catalog.index ? 'inline' : 'cards'" :failed="Boolean(catalog.error)">
+      <UiSkeletonLayout layout="list" />
+    </UiLoadingState>
     <UiInlineMessage v-if="catalog.state !== 'fresh' && !catalog.loading" tone="warning" data-catalog-status>
       {{ t(statusKey) }}
     </UiInlineMessage>
@@ -67,7 +69,9 @@
       <article class="catalog-card">
         <UiButton class="catalog-back" data-context="workspace-form" variant="ghost" @click="back">{{ t('settings.marketplaceBack') }}</UiButton>
         <UiLoadingState v-if="catalog.detailLoading" :label="t('settings.marketplaceLoading')"
-          variant="document" />
+          variant="document"  :failed="Boolean(catalog.detailError)">
+          <UiSkeletonLayout layout="form" :header="false" />
+        </UiLoadingState>
         <UiInlineMessage v-else-if="catalog.detailError" tone="warning">
           {{ t('settings.marketplaceDetailError') }}
         </UiInlineMessage>
@@ -167,6 +171,9 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../../ui';
+
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 
 import {

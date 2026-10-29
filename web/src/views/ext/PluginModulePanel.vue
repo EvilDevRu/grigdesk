@@ -8,7 +8,7 @@
       :compact="compact"
       :presentation="presentation"
     />
-    <UiLoadingState v-else-if="state === 'loading'" :label="message" />
+    <PluginPanelLoading v-else-if="state === 'loading'" :label="message" />
     <UiInlineMessage v-else tone="warning">
       {{ message }}
     </UiInlineMessage>
@@ -16,13 +16,16 @@
 </template>
 
 <script setup lang="ts">
+import PluginPanelLoading from './PluginPanelLoading.vue';
+
 import { computed, onBeforeUnmount, onErrorCaptured, shallowRef, ref, watch } from 'vue';
 import type { Component } from 'vue';
 import type { PluginWebModule } from '../../../../shared/plugins/pluginsContracts.ts';
-import { UiInlineMessage, UiLoadingState, t } from '../../ui.ts';
+import { UiInlineMessage, t } from '../../ui.ts';
 import { pluginRuntimeFor } from '../../pluginRuntime/bootstrap.ts';
 import { loadPluginStyles } from '../../pluginRuntime/styles.ts';
 import type { PluginModuleContext } from '../../pluginRuntime/contextServices.ts';
+import type { PluginPresentation } from '../../../../packages/plugin-types/src/web.js';
 import type { PluginRuntime } from '../../pluginRuntime/runtime.ts';
 
 const props = withDefaults(defineProps<{
@@ -31,7 +34,7 @@ const props = withDefaults(defineProps<{
   label: string;
   active?: boolean;
   compact?: boolean;
-  presentation?: string;
+  presentation?: PluginPresentation;
 }>(), { active: true });
 
 type PanelState = 'loading' | 'ready' | 'unsupported' | 'load-failed' | 'render-failed';

@@ -13,8 +13,9 @@ import type { BuildProcess } from './buildProcesses.ts';
 import { buildStepIds, estimateBuildProgress } from './buildState.ts';
 import type { BuildStep } from './buildState.ts';
 import { cliTranslator } from './i18n.ts';
+import { runPresentedCommand } from './presentation.ts';
 import { showScreen } from './screen.ts';
-import type { ScreenLine } from './screen.ts';
+import type { ScreenLine, ScreenOptions } from './screen.ts';
 import { TerminalSession } from './terminal.ts';
 
 interface ObservedStep extends BuildStep {
@@ -29,6 +30,99 @@ function duration(milliseconds: number): string {
 }
 
 /**
+ * Успешная сборка предлагает явный выбор запуска с отказом по умолчанию.
+ * Открытие использует общий диспетчер open, сохраняя его проверки и код завершения.
+ */
+async function offerOpenWindow(
+  root: string, session: TerminalSession, summary: ScreenOptions,
+): Promise<number> {
+  const { t } = cliTranslator();
+  let open = false;
+  const render = () => showScreen(session, {
+    ...summary,
+    lines: (width) => [
+      ...typeof summary.lines === 'function' ? summary.lines(width) : summary.lines,
+      '',
+      { text: t('openWindowQuestion'), tone: 'accent' },
+      { text: `${open ? '›' : ' '} ${t('open')}`, selected: open },
+      { text: `${open ? ' ' : '›'} ${t('skipOpen')}`, selected: !open },
+    ],
+    footer: t('openWindowNavigation'),
+  });
+
+  session.resume();
+  render();
+
+  while (true) {
+    const key = await session.nextKey();
+    const letter = key.text?.toLowerCase() ?? '';
+
+    if (['interrupt', 'terminate'].includes(key.name)) {
+      return key.name === 'interrupt' ? 130 : 143;
+    }
+
+    if (['escape', 'eof'].includes(key.name) || ['n', 'н'].includes(letter)) {
+      return 0;
+    }
+
+    if (['y', 'д'].includes(letter) || key.name === 'return') {
+      return open || ['y', 'д'].includes(letter) ? runPresentedCommand(root, ['open'], session) : 0;
+    }
+
+    if (['up', 'down', 'left', 'right'].includes(key.name)) {
+      open = !open;
+      render();
+    }
+  }
+}
+
+/**
+ * Живой smoke допуска GLM — осознанный выбор человека: он расходует квоту живого API.
+ * Выбор передаётся сборке окружением и применяется только к режимам без действующего
+ * допуска; Esc или Enter оставляют пропуск по умолчанию.
+ */
+async function askDeepSeekSmoke(
+  session: TerminalSession,
+): Promise<'none' | 'consumer' | 'both' | null> {
+  const { t } = cliTranslator();
+  const choices: Array<'none' | 'consumer' | 'both'> = ['none', 'consumer', 'both'];
+  let selected = 0;
+  const render = () => showScreen(session, {
+    title: `${t('build')}: ${t('deepseek')}`,
+    state: { text: t('smokeQuestion'), tone: 'accent' },
+    lines: choices.map((choice, index) => ({
+      text: `${index === selected ? '›' : ' '} ${t(`smokeChoice.${choice}`)}`,
+      selected: index === selected,
+    })),
+    footer: t('smokeNavigation'),
+  });
+
+  session.resume();
+  render();
+
+  while (true) {
+    const key = await session.nextKey();
+
+    if (['interrupt', 'terminate'].includes(key.name)) {
+      session.suspend();
+
+      return null;
+    }
+
+    if (['escape', 'eof', 'return'].includes(key.name)) {
+      session.suspend();
+
+      return choices[selected]!;
+    }
+
+    if (key.name === 'down' || key.name === 'up') {
+      selected = (selected + (key.name === 'down' ? 1 : -1) + choices.length) % choices.length;
+      render();
+    }
+  }
+}
+
+/**
  * Контроллер запускает прежнюю оболочку, читая отдельный канал фактических стадий.
  * Он владеет только своей группой и доказанными потомками, не трогая службы или окно.
  */
@@ -37,6 +131,16 @@ async function observeBuild(
 ): Promise<number> {
   const { t } = cliTranslator();
   const input = { env: process.env, home: process.env.HOME || os.homedir() };
+
+  // Выбор живого smoke спрашивается до журнала и запуска оболочки: отмена
+  // на вопросе не оставляет открытых ресурсов, а квота живого API тратится
+  // только по явному решению человека.
+  const smokeChoice = variant === 'deepseek' ? await askDeepSeekSmoke(session) : undefined;
+
+  if (variant === 'deepseek' && smokeChoice === null) {
+    return 130;
+  }
+
   let log: Awaited<ReturnType<typeof openBuildLog>>;
 
   try {
@@ -72,6 +176,7 @@ async function observeBuild(
   let previousPercent = 0;
   let frame = 0;
   let selectServer = false;
+  let queuedServer = false;
   let interrupted = 0;
   let cancellation: Promise<void> | undefined;
   let known: BuildProcess[] = [];
@@ -83,6 +188,7 @@ async function observeBuild(
     cwd: root,
     env: {
       ...process.env,
+      ...smokeChoice ? { GRIGDESK_DEEPSEEK_SMOKE: smokeChoice } : {},
       GRIGDESK_CTL_BUILD_CHILD: '1',
       GRIGDESK_CTL_BUILD_OBSERVED: '1',
     },
@@ -153,6 +259,7 @@ async function observeBuild(
       },
       lines,
       footer: t('screens.cancel'),
+      incremental: true,
     });
   }
 
@@ -245,6 +352,11 @@ async function observeBuild(
 
         if (type === 'hint' && id === 'select-server') {
           selectServer = true;
+        }
+
+        if (type === 'hint' && id === 'queued-server') {
+          queuedServer = true;
+          selectServer = false;
         }
 
         const step = steps.find((item) => item.id === id);
@@ -349,18 +461,24 @@ async function observeBuild(
   const summary = variant === 'bundle' ? 'summaryBundle'
     : `summary${variant[0]!.toUpperCase()}${variant.slice(1)}`;
   const target = variant === 'server' ? 'bin/grigdesk-server'
-    : variant === 'window' ? 'bin/grigdesk-app' : 'web/dist';
+    : variant === 'window' ? 'bin/grigdesk-app'
+    : variant === 'deepseek' ? 'bin/deepseek' : 'web/dist';
   const lines = [t(summary, { path: path.join(root, target) }), t('total', { time: duration(elapsed) })];
 
   if (selectServer) {
     lines.push(t('selectServer', { path: path.join(root, 'bin/grigdesk-server') }));
   }
 
-  if (variant !== 'bundle') {
-    lines.push(t(variant === 'web' ? 'webHint' : 'reopen'));
+  if (queuedServer) {
+    lines.push(t('serverQueued'));
   }
 
-  showScreen(session, {
+  if (variant !== 'bundle') {
+    lines.push(t(variant === 'web' ? 'webHint'
+      : variant === 'deepseek' ? 'deepseekHint' : selectServer ? 'serverNotSelected' : 'reopen'));
+  }
+
+  const summaryScreen: ScreenOptions = {
     title: `${t('build')}: ${t(variant === 'server' ? 'serverOnly' : variant)}`,
     state: { text: t('screens.done'), tone: 'success' },
     lines: [
@@ -373,13 +491,19 @@ async function observeBuild(
     ],
     footer: returnToMenu ? t('continue') : undefined,
     full: true,
-  });
+  };
 
-  return 0;
+  if (variant === 'bundle' || variant === 'deepseek') {
+    showScreen(session, summaryScreen);
+
+    return 0;
+  }
+
+  return offerOpenWindow(root, session, summaryScreen);
 }
 
 /**
- * Меню передаёт свою сессию, явный build создаёт временную без ожидания клавиши.
+ * Меню передаёт свою сессию, явный build создаёт временную с выбором открытия после успеха.
  * Cooked-режим направляет настоящий Ctrl+C контроллеру, после выхода всё восстанавливается.
  */
 export async function runBuildProgress(

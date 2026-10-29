@@ -106,6 +106,84 @@ async function waitFor(check, limitMs = 3000) {
   return true;
 }
 
+test('external freshness отличает первый отказ от успешного замера и не освежается patch', async (t) => {
+  const initial = Date.UTC(2030, 0, 1);
+
+  t.mock.timers.enable({ apis: ['Date'], now: initial });
+
+  let state = 'unavailable';
+  const fixture = await tickFixture(t, {
+    clients: 0,
+    usageTickMs: 300_000,
+    adapter: (onUsage) => ({
+      ...tickingAdapter(onUsage),
+      usagePresentation: { freshness: true, spentLabel: true },
+      usage: async () => ({ state, bars: state === 'ok' ? [liveBar(13)] : [] }),
+    }),
+  });
+  const read = async () =>
+    (await fixture.app.inject('/api/providers/usage')).json().usage['ticking-provider'];
+  const failed = await read();
+
+  assert.equal(failed.lastSuccessfulAt, null);
+  state = 'ok';
+  t.mock.timers.setTime(initial + 300_001);
+
+  const success = await read();
+  const sink = fixture.app.providerUsageSink('ticking-provider');
+
+  assert.equal(success.lastSuccessfulAt, initial + 300_001);
+  assert.equal(success.pollIntervalMs, 300_000);
+  assert.equal(sink({ bars: [liveBar(14)] }), true);
+  assert.equal((await read()).lastSuccessfulAt, success.lastSuccessfulAt);
+  state = 'unavailable';
+  t.mock.timers.setTime(initial + 600_002);
+
+  const later = await read();
+
+  assert.equal(later.lastSuccessfulAt, success.lastSuccessfulAt);
+  assert.equal(later.stale, true);
+});
+
+test('runtime invalidation сохраняет свой 429, отклоняет старый sink и не меняет managed DTO', async (t) => {
+  const initial = Date.UTC(2030, 0, 1);
+
+  t.mock.timers.enable({ apis: ['Date'], now: initial });
+
+  let neighborReads = 0;
+  const neighbor = { ...tickingAdapter(() => {
+    neighborReads += 1;
+  }), id: 'managed-fixture' };
+  const fixture = await tickFixture(t, {
+    clients: 0,
+    usageTickMs: 300_000,
+    adapter: (onUsage) => ({
+      ...rateLimitedAdapter(onUsage, { retryAfterMs: 1_200_000 }),
+      usagePresentation: { freshness: true, spentLabel: true },
+    }),
+    extraAdapters: [neighbor],
+  });
+  const before = (await fixture.app.inject('/api/providers/usage')).json().usage;
+  const sink = fixture.app.providerUsageSink('ticking-provider');
+
+  assert.equal(typeof fixture.app.invalidateProviderRuntime, 'function');
+  assert.equal(await fixture.app.invalidateProviderRuntime('ticking-provider'), true);
+  assert.equal(await fixture.app.invalidateProviderRuntime('managed-fixture'), false);
+  assert.equal(sink({ bars: [liveBar(13)] }), false);
+
+  const after = (await fixture.app.inject('/api/providers/usage')).json().usage;
+
+  assert.equal(fixture.reads(), 1, 'переустановка не отменяет собственный Retry-After');
+  assert.equal(neighborReads, 1, 'инвалидация внешнего CLI не сбрасывает TTL managed-соседа');
+  assert.equal(after['ticking-provider'].retryAt, before['ticking-provider'].retryAt);
+  assert.notEqual(after['ticking-provider'].runtimeGeneration, before['ticking-provider'].runtimeGeneration);
+  assert.equal('lastSuccessfulAt' in after['managed-fixture'], false);
+  assert.equal('runtimeGeneration' in after['managed-fixture'], false);
+  t.mock.timers.setTime(initial + 1_200_000);
+  await fixture.app.inject('/api/providers/usage');
+  assert.equal(fixture.reads(), 2, 'на границе Retry-After новый poll разрешён');
+});
+
 test('каталог объявляет поддержку порога только по контракту адаптера', async (t) => {
   for (const capability of [{}, { chatAutoCompact: true }, { autoCompactEnv: 'FIXTURE_COMPACT_WINDOW' }]) {
     const fixture = await tickFixture(t, {

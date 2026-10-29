@@ -32,12 +32,14 @@ export interface RunnerAttempt {
   runner?: string;
   model?: unknown;
   effort?: unknown;
+  failureDetail?: string;
   tokens?: AttemptTokens | null;
 }
 
 // Политика модели для одного исполнителя.
 interface RunnerModelPolicy {
   exact?: string;
+  label?: string;
   family?: string;
   version?: string;
   effort?: unknown;
@@ -126,6 +128,10 @@ export function runnerModelLabel(
 
   if (!policy) {
     return '';
+  }
+
+  if (policy.label) {
+    return policy.label;
   }
 
   if (policy.exact) {

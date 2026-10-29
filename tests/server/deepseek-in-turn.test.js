@@ -63,6 +63,7 @@ async function fixture(t, { askQuestion = false, expectedSteers = 1 } = {}) {
               type: 'item', streamId: sockets.get('$events'),
               value: {
                 type: 'waterfall', event: 'user-questions/request', eventId: 'question-fixture',
+                agentId: 'fixture-session',
                 request: { questions: [{ id: 'q1', question: 'Как продолжить проверку?', options: [] }] },
               },
             }));

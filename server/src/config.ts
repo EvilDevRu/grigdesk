@@ -293,6 +293,8 @@ export const config = {
   // перекрывает следующая остановка той же задачи.
   arbiterCardsPath: process.env.GRIGDESK_ARBITER_CARDS_PATH
     || path.join(dataStateDir, 'arbiter-cards.json'),
+  arbiterConversationsDir: process.env.GRIGDESK_ARBITER_CONVERSATIONS_DIR
+    || path.join(dataStateDir, 'arbiter-conversations'),
   // Личная полка B24-задач с серверными снимками наблюдаемого состояния.
   taskShelfPath: process.env.GRIGDESK_TASK_SHELF_PATH
     || path.join(dataStateDir, 'task-shelf.json'),

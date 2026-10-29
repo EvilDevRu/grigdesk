@@ -256,10 +256,10 @@ function resetIso(value: unknown): string | null {
 }
 
 /**
- * Окно токенов Coding Plan по unit/number кабинета: 5 часов, неделя или незнакомое окно,
+ * Окно моделей Coding Plan по unit/number кабинета: 5 часов, неделя или незнакомое окно,
  * которое показывается своими числами, а не прячется.
  */
-function tokenWindow(limit: Record<string, unknown>): Record<string, unknown> {
+function modelWindow(limit: Record<string, unknown>): Record<string, unknown> {
   if (limit.unit === 3 && limit.number === 5) {
     return {
       key: 'zai:5h',
@@ -284,7 +284,7 @@ function tokenWindow(limit: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
- * Строка лимита Coding Plan в полоску общего контракта: окна токенов и месячная квота MCP.
+ * Строка лимита Coding Plan в общую полоску: кредитные/токенные окна и месячная квота MCP.
  * Строки других типов пропускаются: их смысл кабинет не объявляет.
  */
 function quotaBar(limit: Record<string, unknown>): Record<string, unknown> | null {
@@ -307,12 +307,12 @@ function quotaBar(limit: Record<string, unknown>): Record<string, unknown> | nul
     };
   }
 
-  if (limit.type !== 'TOKENS_LIMIT') {
+  if (limit.type !== 'TOKENS_LIMIT' && limit.type !== 'CREDIT_LIMIT') {
     return null;
   }
 
   return {
-    ...tokenWindow(limit),
+    ...modelWindow(limit),
     group: 'zai',
     pct,
     resetsAt,

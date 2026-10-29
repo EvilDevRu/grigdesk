@@ -159,3 +159,8 @@
   .ui-gallery { padding: 10px; }
   .ui-gallery__section { padding: 12px; }
 }
+
+
+.ui-gallery__loading-chat { display: flex; flex-direction: column; gap: 24px; }
+.ui-gallery__loading-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.ui-gallery__loading-reduce .ui-skeleton { animation: none; }

@@ -5,7 +5,7 @@
   "requiredCapabilities": ["web", "acp", "settingsWeb", "settingsAcp"],
   "glm": {
     "mode": "api",
-    "profileRevision": "grigdesk-glm-profile-v2",
-    "policyRevision": "grigdesk-glm-policy-v1"
+    "profileRevision": "grigdesk-glm-profile-v3",
+    "policyRevision": "grigdesk-glm-policy-v2"
   }
 }

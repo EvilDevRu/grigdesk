@@ -88,77 +88,7 @@
   width: 100%;
   max-width: 640px;
   pointer-events: none;
-  mask-image: linear-gradient(to bottom, #000 10%, transparent 100%);
-  animation: ui-loading-state-pulse 2.4s ease-in-out infinite;
-}
 
-.ui-loading-state__item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  min-height: 48px;
-  padding: 8px 0;
-}
-
-.ui-loading-state__avatar,
-.ui-loading-state__line {
-  display: block;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--ink-mid) 13%, transparent);
-}
-
-.ui-loading-state__avatar {
-  flex: none;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-}
-
-.ui-loading-state__lines {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-  gap: 9px;
-}
-
-.ui-loading-state__line {
-  width: 74%;
-  height: 8px;
-}
-
-.ui-loading-state__line--short {
-  width: 54%;
-  height: 6px;
-}
-
-.ui-loading-state__item:nth-child(even) .ui-loading-state__line {
-  width: 61%;
-}
-
-.ui-loading-state__item:nth-child(even) .ui-loading-state__line--short {
-  width: 85%;
-}
-
-.ui-loading-state[data-variant='cards'] .ui-loading-state__skeleton {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
-  gap: 12px;
-}
-
-.ui-loading-state[data-variant='cards'] .ui-loading-state__item {
-  min-height: 94px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-
-.ui-loading-state[data-variant='document'] .ui-loading-state__avatar {
-  display: none;
-}
-
-.ui-loading-state[data-variant='document'] .ui-loading-state__item {
-  min-height: 40px;
 }
 
 .ui-loading-state[data-variant='inline'] {
@@ -172,13 +102,104 @@
   background: transparent;
 }
 
-@keyframes ui-loading-state-pulse {
+@keyframes ui-skeleton-pulse {
   0%, 100% { opacity: .55; }
   50% { opacity: 1; }
 }
 
+
+
+/* Скрытая подпись остаётся частью единственного статуса и не занимает строку.
+   Композиция экрана самостоятельно задаёт отступы и размеры заменяемой области. */
+.ui-loading-state__hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.ui-loading-state__status:not(:has(.ui-loading-state__description)):has(.ui-loading-state__hidden) {
+  position: absolute;
+}
+.ui-loading-state--custom {
+  display: block;
+  padding: 0;
+}
+.ui-loading-state--custom > .ui-loading-state__skeleton {
+  max-width: none;
+  height: 100%;
+}
+.ui-skeleton {
+  display: block;
+  flex-shrink: 0;
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink-mid) 13%, transparent);
+  animation: ui-skeleton-pulse 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+.ui-skeleton[data-shape='block'] {
+  height: 64px;
+}
+.ui-skeleton[data-shape='circle'] {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+.ui-skeleton-layout {
+  display: grid;
+  gap: var(--skeleton-list-gap, 16px);
+  min-width: 0;
+}
+.ui-skeleton-layout__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--skeleton-row-height, 48px);
+}
+.ui-skeleton-layout__copy {
+  display: grid;
+  flex: 1;
+  gap: var(--skeleton-copy-gap, 10px);
+  min-width: 0;
+}
+.ui-skeleton-layout__row > .ui-skeleton[data-shape='circle'] {
+  display: var(--skeleton-avatar-display, block);
+  width: var(--skeleton-avatar-size, 32px);
+  height: var(--skeleton-avatar-size, 32px);
+}
+.ui-skeleton-layout[data-layout='form'] .ui-skeleton-layout__row {
+  min-height: var(--skeleton-form-row-height, 57px);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ui-skeleton-layout[data-layout='form'] {
+  container: skeleton-form / inline-size;
+  gap: 0;
+}
+.ui-skeleton-layout[data-layout='form'] .ui-skeleton-layout__copy {
+  gap: 6px;
+}
+/* Широкая форма повторяет строку «название — поле», узкая переносит поле вниз.
+   Паспорт проекта передаёт размеры своих колонок без изменения общего оформления. */
+@container skeleton-form (min-width: 480px) {
+  .ui-skeleton-layout[data-layout='form'] .ui-skeleton-layout__copy {
+    grid-template-columns: var(--skeleton-form-columns, minmax(0, 1fr) minmax(160px, 260px));
+    align-items: center;
+    column-gap: var(--skeleton-form-column-gap, 24px);
+  }
+}
+.ui-skeleton-layout[data-layout='text'] .ui-skeleton-layout__row {
+  min-height: 40px;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .ui-loading-state__skeleton,
+  .ui-skeleton,
   .ui-loading-state .ui-spinner {
     animation: none;
   }

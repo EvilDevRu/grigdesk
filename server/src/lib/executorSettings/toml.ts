@@ -69,11 +69,19 @@ export function nativeSettingsTomlArgs(plan?: PreparedNativeSettings): string[] 
     return [];
   }
 
-  if (!plan.payload || typeof plan.payload !== 'object' || Array.isArray(plan.payload)) {
+  return settingsTomlArgs(plan.payload);
+}
+
+/**
+ * Служебные профили и пользовательский нативный слой используют одно TOML-кодирование.
+ * Каждый аргумент передаётся прямо в spawn; точки внутри вложенных ключей остаются буквальными.
+ */
+export function settingsTomlArgs(payload: JsonValue): string[] {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Нативный слой Codex должен быть объектом');
   }
 
-  return Object.entries(plan.payload)
+  return Object.entries(payload)
     .filter(([, value]) => value !== null)
     .flatMap(([key, value]) => {
       if (!/^[A-Za-z0-9_-]+$/.test(key)) {

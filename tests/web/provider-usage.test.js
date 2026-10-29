@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  localizeUsageBar,
   localizeUsageResource,
   providerStatusHint,
   providerUsageView,
@@ -12,6 +13,90 @@ import {
   prepareUsageControl,
   usageControlConfirmation,
 } from '../../web/src/features/providers/providerUsageActions.ts';
+
+test('окна всех исполнителей имеют общие подписи в RU/EN, включая старые и именованные квоты', () => {
+  const cases = [
+    ['codex', 'codex:primary', 300, 'Сессия (5ч)', '5 часов', '5 hours'],
+    ['codex', 'spark:primary', 300,
+      'Сессия · Spark · резерв', '5 часов · Spark · резерв', '5 hours · Spark · резерв'],
+    ['codex', 'codex:secondary', 10080, 'Неделя (7д)', 'Неделя', 'Week'],
+    ['claude', 'session', null, 'Сессия (5ч)', '5 часов', '5 hours'],
+    ['claude', 'five_hour', null, 'five hour', '5 часов', '5 hours'],
+    ['claude', 'seven_day', null, 'seven day', 'Неделя', 'Week'],
+    ['claude', 'weekly_scopedSonnet', null, 'Неделя · Sonnet', 'Неделя · Sonnet', 'Week · Sonnet'],
+    ['kimi', 'kimi:1:5:hour', null, 'Сессия (5ч)', '5 часов', '5 hours'],
+    ['kimi', 'kimi:4:5:hour', null, 'Сессия · код', '5 часов · код', '5 hours · код'],
+    ['kimi', 'kimi:2:1:week', null, 'Неделя (7д)', 'Неделя', 'Week'],
+    ['kimi', 'kimi:monthTotal', null, 'Месяц', 'Месяц', 'Month'],
+    ['glm', 'zai:5h', 300, '5 часов', '5 часов', '5 hours'],
+    ['glm', 'zai:week', 10080, 'Неделя', 'Неделя', 'Week'],
+    ['glm', 'zai:mcp', null, 'MCP за месяц', 'MCP за месяц', 'Monthly MCP'],
+  ];
+
+  for (const [providerId, key, minutes, oldLabel, russian, english] of cases) {
+    const source = {
+      key,
+      label: oldLabel,
+      pct: 34,
+      resetsAt: '2026-11-04T09:40:00.000Z',
+      ...(minutes === null ? {} : { windowMinutes: minutes }),
+    };
+    const original = structuredClone(source);
+
+    for (const [locale, label] of [['ru', russian], ['en', english]]) {
+      const view = providerUsageView({
+        state: 'ok',
+        bars: [source],
+      }, { id: providerId }, locale);
+      const { separated, ...actual } = view.bars[0];
+
+      assert.deepEqual(actual, {
+        ...original,
+        label,
+      });
+    }
+
+    assert.deepEqual(source, original);
+  }
+
+  for (const [providerId, key] of [['custom', 'session'], ['kimi', 'kimi:3:2:day']]) {
+    const bar = {
+      key,
+      windowMinutes: 300,
+      label: 'Собственное окно',
+    };
+
+    assert.equal(localizeUsageBar(providerId, bar, 'ru'), bar);
+    assert.equal(localizeUsageBar(providerId, bar, 'en'), bar);
+  }
+});
+
+test('Новые месячные квоты Kimi переводятся без выдуманной длительности окна', () => {
+  const bar = {
+    key: 'kimi:monthTotal',
+    label: 'Месяц',
+    pct: 40,
+    resetsAt: null,
+  };
+  const resource = {
+    key: 'kimi-monthly-volume',
+    label: 'Месячный объём',
+    summary: 'Израсходовано за месяц: 40%',
+    note: 'Из них код: 20% месячной квоты',
+  };
+  const translated = localizeUsageResource('kimi', resource, 'en');
+
+  assert.equal(localizeUsageBar('kimi', bar, 'en').label, 'Month');
+  assert.equal('windowMinutes' in localizeUsageBar('kimi', bar, 'en'), false);
+  assert.equal(localizeUsageBar('kimi', {
+    key: 'kimi:1:5:hour',
+    label: 'Сессия (5ч)',
+    pct: 0,
+  }, 'en').label, '5 hours');
+  assert.equal(translated.summary, 'Used this month: 40%');
+  assert.equal(translated.note, 'Code accounts for 20% of the monthly quota');
+  assert.deepEqual(localizeUsageBar('kimi', bar, 'ru'), bar);
+});
 
 test('Новые состояния доплаты переводятся на RU/EN без изменения данных и ссылок', () => {
   const cases = [
@@ -96,6 +181,27 @@ test('missing usage data has visible loading copy', () => {
   assert.equal(view.state, 'loading');
   assert.match(view.message, /ещё не получены/i);
   assert.deepEqual(view.bars, []);
+});
+
+test('popover freshness включается capability и сохраняет проценты истёкшего окна', () => {
+  const entry = {
+    state: 'ok',
+    lastSuccessfulAt: 100_000,
+    runtimeGeneration: 'runtime-1',
+    pollIntervalMs: 300_000,
+    bars: [{
+      key: 'session',
+      pct: 13,
+      resetsAt: '1970-01-01T00:03:00.000Z',
+    }],
+  };
+  const provider = { id: 'fixture', usagePresentation: { freshness: true, spentLabel: true } };
+  const view = providerUsageView(entry, provider, 'ru', { now: 200_000 });
+
+  assert.equal(view.stale, true);
+  assert.equal(view.measuredAt, 100_000);
+  assert.equal(view.bars[0].pct, 13);
+  assert.equal(providerUsageView(entry, { id: 'managed-fixture' }, 'ru', { now: 200_000 }).stale, undefined);
 });
 
 test('auth failure offers claude login instead of an empty tooltip', () => {

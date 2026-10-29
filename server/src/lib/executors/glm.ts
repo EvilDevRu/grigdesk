@@ -112,6 +112,11 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
     // того же хода, а хук приёма запроса снова отмечает этот ход, и политика его не обрывает.
     ...(admitted ? {
       run: (input: GlmTurnOptions) => runGlmTurn(input, deps),
+      async scopedWorkspace(config: GlmConfig) {
+        const runtime = await preparedGlmRuntime(config);
+
+        return process.platform === 'linux' && runtime.metadata?.capabilities.toolPermissions === true;
+      },
       inTurnInput: {
         protocol: 1,
         text: true,

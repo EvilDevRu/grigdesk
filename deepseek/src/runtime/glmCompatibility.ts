@@ -2,7 +2,9 @@ import compatibility from '../../compatibility/glm.json' with { type: 'json' };
 
 // Допуск выпуска принадлежит пакету и остаётся неизменяемым после загрузки.
 // Сервер получает эту запись из metadata выбранного ELF, без импорта данного файла.
-export const GLM_ADMISSION = Object.freeze(compatibility.admission.map((entry) => Object.freeze({
+const admission: ReadonlyArray<{ mode: string; compatibility: string }> = compatibility.admission;
+
+export const GLM_ADMISSION = Object.freeze(admission.map((entry) => Object.freeze({
   mode: entry.mode,
   compatibility: entry.compatibility,
 })));

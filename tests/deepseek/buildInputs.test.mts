@@ -11,6 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { deepSeekPackagePaths } from '../../deepseek/scripts/paths.ts';
 import { deepSeekBuildInputs } from '../../deepseek/scripts/buildRuntime.mts';
 import { assertKnownDynamicReferences } from '../../deepseek/scripts/deepseekBuildInputs.ts';
+import { verifyDeepSeekSnapshot } from '../../deepseek/scripts/deepseekVendorManifest.ts';
 import { sha256 } from '../../shared/node/hash.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { createDeepSeekVendorFixture } from '../helpers/deepseekVendor.mts';
@@ -100,6 +101,12 @@ describe('ACP settings bridge перенесён без изменения со�
   it('builder читает ACP bridge из пакета', () => assertHostInput('acpSettingsBridge'));
 });
 
+describe('обязательная policy прав входит в fingerprint пакета', () => {
+  for (const role of ['toolPermissionPolicy', 'toolPermissionPaths', 'toolPermissionGate'] as const) {
+    it(`builder учитывает ${role}`, () => assertHostInput(role));
+  }
+});
+
 describe('runtime composition принадлежит scripts пакета', () => {
   it('новый модуль проверяет peer/resource/native closure и сохраняет revision', async () => {
     const paths = deepSeekPackagePaths();
@@ -108,7 +115,7 @@ describe('runtime composition принадлежит scripts пакета', () =
 
     const composition = await import(pathToFileURL(paths.scripts.composition).href);
 
-    assert.equal(composition.COMPOSITION_REVISION, 'grigdesk-host-web-acp-v3');
+    assert.equal(composition.COMPOSITION_REVISION, 'grigdesk-host-web-acp-v4');
     assert.throws(() => composition.assertRuntimeClosure(new Set(), [
       {
         owner: 'package',
@@ -238,6 +245,8 @@ describe('builder принадлежит пакету и не требует ser
     await assert.rejects(access(path.join(source, 'server')), { code: 'ENOENT' });
 
     const cli = path.join(copiedPackage, 'scripts/buildRuntime.mts');
+    const copiedVendor = path.join(copiedPackage, 'vendor/deepseek-harness');
+    const snapshotBefore = await verifyDeepSeekSnapshot(copiedVendor);
     const options = {
       cwd,
       env: {
@@ -255,6 +264,8 @@ describe('builder принадлежит пакету и не требует ser
 
     const metadata = await verifyTestDeepSeekArtifact(generation);
 
+    assert.deepEqual(await verifyDeepSeekSnapshot(copiedVendor), snapshotBefore,
+      'Успешная сборка не создаёт зависимости или compiled-файлы в vendor');
     assert.equal(metadata.inputIdentity.nativeAbi, process.versions.modules);
     await writeFile(path.join(artifactsPath({ env: process.env, home: os.homedir() }),
       'new-package-runtime.json'), JSON.stringify(metadata));
@@ -303,6 +314,9 @@ describe('builder принадлежит пакету и не требует ser
         pending.child.kill('SIGTERM');
         await outcome;
       }
+
+      assert.deepEqual(await verifyDeepSeekSnapshot(copiedVendor), snapshotBefore,
+        'Отказ сборки также оставляет vendor неизменным');
     }
   });
 });

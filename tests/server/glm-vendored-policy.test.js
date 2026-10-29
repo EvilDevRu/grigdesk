@@ -14,7 +14,6 @@ import { runGlmTurn } from '../helpers/glmDriver.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
 import {
   GLM_SERVICE_KEY,
-  glmHookEntries,
   glmTextReply,
   glmToolCall,
   startGlmProductionProcess,
@@ -186,7 +185,7 @@ test('настоящий запрещённый инструмент не вып
   const url = `http://127.0.0.1:${counter.address().port}/effect`;
   const f = await fixture(t, { respond: scripted([['web_fetch', { url }]]) });
   const turn = await f.events('forbidden');
-  const entry = glmHookEntries(turn.events).find((item) => item.point === 'PreToolUse');
+  const entry = turn.events.find((event) => event.type === 'grigdesk/glm-policy')?.data;
 
   assert.equal(entry.name, 'web_fetch');
   assert.equal(entry.decision, 'deny');
@@ -302,26 +301,26 @@ test('настоящий hook с испорченным входом даёт о
   });
 
   // Факт G6: тот же hook на UserPromptSubmit отказывает первым — ход блокируется до модели.
-  await assert.rejects(f.run(), { code: 'glm_turn_blocked' });
+  await assert.rejects(f.run(), (error) => ['glm_runtime_start_failed', 'deepseek_binary_cleanup']
+    .includes(error.code));
   assert.equal(f.mock.requests.length, 0);
   assert.equal(await exists(path.join(f.project, 'corrupt.txt')), false);
 });
 
-test('настоящий испорченный hooks.json останавливает ход до эффекта инструмента или сразу после него',
-  async (t) => {
-    const calls = [['write', { file_path: 'unhooked.txt', content: 'x' }]];
-    const f = await fixture(t, { respond: scripted(calls) }, {
-      beforeSpawn: (launchDir) => {
-        writeFileSync(path.join(launchDir, 'hooks.json'), '{"hooks": [');
-      },
-    });
-
-    await assert.rejects(f.run(), { code: 'glm_policy_hook_missing' });
-    // Остаточный риск fail-open DSH: вызов мог успеть выполниться до cancel, но не больше одного.
-    assert.ok(f.mock.requests.length <= 1);
+test('повреждение старого hooks.json не обходит native gate', async (t) => {
+  const f = await fixture(t, { respond: scripted([
+    ['bash', { command: 'ssh forbidden; echo effect > unhooked.txt', description: 'ssh' }],
+  ]) }, {
+    beforeSpawn: (launchDir) => {
+      writeFileSync(path.join(launchDir, 'hooks.json'), '{"hooks": [');
+    },
   });
 
-test('настоящие правка, команда и MCP-вызов проходят тот же hook', async (t) => {
+  await f.run();
+  assert.equal(await exists(path.join(f.project, 'unhooked.txt')), false);
+});
+
+test('настоящие правка, команда и MCP-вызов проходят native gate', async (t) => {
   const f = await fixture(t, { respond: scripted([
     ['read', { file_path: 'note.txt' }],
     ['edit', {
@@ -336,7 +335,7 @@ test('настоящие правка, команда и MCP-вызов прох
   await fs.writeFile(path.join(f.project, 'note.txt'), 'before\n');
 
   const turn = await f.events('same-hook');
-  const entries = glmHookEntries(turn.events).filter((item) => item.point === 'PreToolUse');
+  const entries = turn.events.filter((event) => event.type === 'grigdesk/glm-policy').map((event) => event.data);
 
   assert.deepEqual(entries.map((entry) => [entry.name, entry.decision]), [
     ['read', 'allow'],

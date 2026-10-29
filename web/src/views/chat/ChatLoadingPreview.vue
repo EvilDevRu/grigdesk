@@ -1,117 +1,72 @@
 <template>
-  <div class="chat-loading-preview">
-    <div class="preview-art" aria-hidden="true">
-      <div class="preview-halo" />
-      <div class="preview-message preview-message-back">
-        <span class="preview-line" />
-        <span class="preview-line preview-line-short" />
+  <div class="chat-loading-preview" :style="composerStyle">
+  <UiLoadingState :label="label" :failed="failed" style="height: 100%">
+    <div class="conversation">
+      <div class="header" data-loading-region="header">
+        <UiSkeleton width="38%" height="16px" />
+        <UiSkeleton width="64%" />
       </div>
-      <div class="preview-message preview-message-front">
-        <svg class="preview-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M20 11.5a8 8 0 0 1-8 8H5l-4 3v-11a8 8 0 0 1 8-8h3a8 8 0 0 1 8 8Z" />
-          <path d="M7 10h7M7 14h4" stroke-linecap="round" />
-        </svg>
-        <span class="preview-dots"><i /><i /><i /></span>
+      <div class="body" data-loading-region="body">
+        <UiSkeleton v-for="index in 4" :key="index" class="message"
+                    :class="{ outgoing: index % 2 === 0 }" shape="block" />
+      </div>
+      <div class="conversation-input" data-loading-region="input">
+        <div class="composer">
+          <UiSkeleton shape="circle" />
+          <div class="composer-field" data-loading-region="composer">
+            <UiSkeleton shape="block" height="100%" />
+          </div>
+          <UiSkeleton shape="circle" />
+          <UiSkeleton shape="circle" />
+        </div>
       </div>
     </div>
-    <h2>{{ t('core.chatLoadingPreviewTitle') }}</h2>
-    <p>{{ t('core.chatLoadingPreviewHint') }}</p>
+  </UiLoadingState>
   </div>
 </template>
 
 <script setup lang="ts">
-import { t } from '../../ui';
+import { UiLoadingState, UiSkeleton, UiSkeletonLayout } from '../../ui';
+import { computed } from 'vue';
+import { storedComposerHeight } from './chatLayout.ts';
+
+defineOptions({ inheritAttrs: false });
+
+withDefaults(defineProps<{
+  label?: string;
+  description?: string;
+  failed?: boolean;
+}>(), {
+  label: undefined,
+  description: undefined,
+  failed: false,
+});
+
+const composerHeight = storedComposerHeight();
+const composerStyle = computed(() => (
+  composerHeight == null ? undefined : { '--composer-h': `${composerHeight}px` }
+));
 </script>
 
 <style scoped>
-.chat-loading-preview {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 32px 24px;
-  text-align: center;
+ .chat-loading-preview { flex: 1; height: 100%; min-width: 0; min-height: 0; }
+.conversation { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.header { display: flex; flex-direction: column; justify-content: center; gap: 12px;
+  min-height: var(--chat-head-h); padding: 4px var(--chat-gutter); border-bottom: 1px solid var(--line); }
+.body { display: flex; flex: 1; flex-direction: column; gap: 24px; min-height: 0;
+  overflow: hidden; padding: 24px var(--chat-gutter); }
+.message { width: 64%; }
+.outgoing { align-self: flex-end; width: 48%; }
+.conversation-input { padding: 12px var(--chat-gutter) 16px; border-top: 1px solid var(--line); }
+.composer { display: flex; align-items: flex-end; gap: 6px; padding: 8px;
+  border: 1px solid var(--line); border-radius: 12px; }
+.composer-field { flex: 1; height: var(--composer-h, 53px); min-height: 48px; max-height: 46vh; }
+@media (max-width: 899px) {
+  .conversation-input { padding: 8px var(--chat-gutter); }
+  .composer { flex-wrap: wrap; padding: 6px; }
+  .composer-field { flex: 1 0 100%; order: -1; }
 }
-.preview-art {
-  position: relative;
-  flex: none;
-  width: 200px;
-  height: 150px;
-  margin-bottom: 24px;
-}
-.preview-halo {
-  position: absolute;
-  inset: -32px;
-  border-radius: 50%;
-  background: radial-gradient(ellipse, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%);
-}
-.preview-message {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 12px;
-  width: 140px;
-  height: 82px;
-  padding: 20px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
-}
-.preview-message-back {
-  top: 6px;
-  right: 0;
-  transform: rotate(7deg);
-  background: var(--surface-2);
-}
-.preview-message-front {
-  left: 0;
-  bottom: 8px;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  border-color: color-mix(in srgb, var(--accent) 25%, var(--line));
-  transform: rotate(-6deg);
-}
-.preview-line {
-  width: 90%;
-  height: 6px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--ink-mid) 15%, transparent);
-}
-.preview-line-short {
-  width: 60%;
-}
-.preview-icon {
-  width: 30px;
-  height: 30px;
-  color: var(--accent);
-}
-.preview-dots {
-  display: flex;
-  gap: 5px;
-  color: var(--ink-mid);
-}
-.preview-dots i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-}
-h2 {
-  margin: 0;
-  color: var(--ink);
-  font-size: 17px;
-  font-weight: 600;
-  line-height: 1.5;
-}
-p {
-  max-width: 260px;
-  margin: 8px 0 0;
-  color: var(--ink-mid);
-  font-size: 13px;
-  line-height: 1.7;
+@media (max-width: 600px) {
+  .composer-field { height: 58px; max-height: min(160px, 28vh); }
 }
 </style>

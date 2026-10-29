@@ -212,7 +212,8 @@ test('Codex run использует app-server и не теряет rich events
   assert.equal(start.params.cwd, f.dir);
   assert.equal(start.params.model, 'gpt-contract-0.149');
   assert.equal(start.params.sandbox, 'workspace-write');
-  assert.equal(start.params.approvalPolicy, 'never');
+  assert.equal(start.params.approvalPolicy, 'on-request');
+  assert.equal(start.params.approvalsReviewer, 'auto_review');
   assert.equal(start.params.config?.sandbox_workspace_write?.network_access, true);
   assert.equal(start.params.config?.model_auto_compact_token_limit, 120_000);
 
@@ -220,7 +221,8 @@ test('Codex run использует app-server и не теряет rich events
   assert.equal(resume.params.threadId, first.sessionId);
   assert.equal(resume.params.cwd, f.dir);
   assert.equal(resume.params.sandbox, 'workspace-write');
-  assert.equal(resume.params.approvalPolicy, 'never');
+  assert.equal(resume.params.approvalPolicy, 'on-request');
+  assert.equal(resume.params.approvalsReviewer, 'auto_review');
 
   // Доверенные каталоги «Настройки → Исполнители» — рабочая область агента, а не
   // только writable-песочница: `codex exec --add-dir` давал именно это, и без явного
@@ -260,6 +262,7 @@ test('Codex разделяет читаемые и writable roots триажа �
 
   await codex.run(runOptions(f, {
     cwd: output,
+    env: { ...f.env, GRIGDESK_CODEX_FIXTURE_EXPECT_HOOK: '0' },
     extraDirs: [],
     workspaceAccess: {
       readableRoots: [repo, input, output],

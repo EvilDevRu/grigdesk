@@ -501,6 +501,7 @@ async function mountToolHost(t, rows) {
         ].join('\n'),
         './ToolDock.vue': 'export default { template: "<section><slot /></section>" };',
         '../../ui': ([
+          "export * from './src/ui.ts';",
           'export { default as UiInlineMessage } from "./src/components/feedback/UiInlineMessage.vue";',
           'export const UiIconButton = {',
           '  inheritAttrs: false, props: ["title", "label", "pressed"],',

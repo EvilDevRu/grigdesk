@@ -17,6 +17,53 @@ const quota = (pct = 25) => ({ state: 'ok', bars: [{
   pct,
 }] });
 
+test('reconnect external CLI ждёт нового замера, а не повторной доставки кэша', async (t) => {
+  setActivePinia(createPinia());
+
+  const store = useProvidersStore();
+  const entry = { ...quota(13), lastSuccessfulAt: 100_000 };
+
+  t.mock.method(api, 'get', async () => ({ providers: [], usage: { external: entry } }));
+  store.noteUsageConnection(true);
+  store.applyUsage({ external: entry, managed: quota() });
+  store.noteUsageConnection(false);
+  store.noteUsageConnection(true);
+  await store.loadUsage(true);
+  assert.equal(store.usage.external.stale, true);
+  store.applyUsage({ external: entry, managed: quota() });
+  assert.equal(store.usage.external.stale, true);
+  assert.equal(store.usage.managed.stale, undefined);
+  store.applyUsage({ external: { ...entry, lastSuccessfulAt: 100_001 } });
+  assert.notEqual(store.usage.external.stale, true);
+
+  t.mock.method(api, 'get', async () => {
+    throw new Error('offline');
+  });
+  await store.loadUsage(true);
+  store.applyUsage({ external: { ...entry, lastSuccessfulAt: 100_001 } });
+  assert.equal(store.usage.external.stale, true);
+});
+
+test('external freshness использует успешный замер и возраст, а не время ошибки/доставки', () => {
+  const entry = {
+    ...quota(13),
+    dataCheckedAt: 900_000,
+    checkedAt: 900_000,
+    lastSuccessfulAt: 100_000,
+    runtimeGeneration: 'runtime-1',
+    pollIntervalMs: 300_000,
+  };
+  const stale = providerUsageSummary('codex', entry, { ...fresh, receivedAt: 900_000 }, true, 900_000);
+
+  assert.equal(stale.measuredAt, 100_000);
+  assert.equal(stale.stale, true);
+  assert.equal(stale.windows[0].value, '87%');
+  assert.equal(providerUsageSummary('codex', {
+    ...entry, lastSuccessfulAt: null,
+  }, fresh, true, 100_000).measuredAt, null);
+  assert.equal(providerUsageSummary('codex', entry, fresh, true, 200_000).stale, false);
+});
+
 test('остаток отличает ноль, дробь и неизвестность без приведения мусора к числу', () => {
   assert.equal(remainingUsagePercent(0), '100%');
   assert.equal(remainingUsagePercent(100), '0%');

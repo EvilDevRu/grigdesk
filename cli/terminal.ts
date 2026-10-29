@@ -25,6 +25,13 @@ export type TerminalLine = string | TerminalRow;
 interface TerminalDrawing {
   theme?: 'dark';
   width?: number;
+  incremental?: boolean;
+}
+
+interface TerminalFrame {
+  lines: string[];
+  columns: number;
+  rows: number;
 }
 
 interface ReadlineKey {
@@ -125,6 +132,7 @@ export class TerminalSession {
   private paused = true;
   private active = false;
   private onResize: (() => void) | undefined;
+  private previousFrame: TerminalFrame | undefined;
 
   constructor(options: { input?: ReadStream; output?: WriteStream } = {}) {
     this.input = options.input ?? process.stdin;
@@ -169,7 +177,10 @@ export class TerminalSession {
   private end = (): void => this.receive({ name: 'eof', text: '' });
   private interrupt = (): void => this.receive({ name: 'interrupt', text: '' });
   private terminate = (): void => this.receive({ name: 'terminate', text: '' });
-  private resize = (): void => this.onResize?.();
+  private resize = (): void => {
+    this.previousFrame = undefined;
+    this.onResize?.();
+  };
 
   /**
    * Одна сессия владеет raw mode и своими listeners до завершения callback.
@@ -208,7 +219,12 @@ export class TerminalSession {
     }
   }
 
+  /**
+   * Внешняя команда получает обычный ввод и видимый курсор.
+   * После её вывода сохранённые позиции строк больше не считаются достоверными.
+   */
   suspend(): void {
+    this.previousFrame = undefined;
     this.input.setRawMode?.(this.raw);
     this.input.pause();
 
@@ -241,8 +257,8 @@ export class TerminalSession {
   }
 
   /**
-   * Экран ограничивает каждую строку текущей шириной и обновляется после resize.
-   * Dumb получает последовательные простые строки без позиционирования курсора.
+   * Кадр пишется целиком; частое обновление меняет только отличающиеся строки без очистки экрана.
+   * Resize и внешний вывод сбрасывают снимок, dumb сохраняет простые последовательные строки.
    */
   draw(lines: readonly TerminalLine[], redraw?: () => void, options: TerminalDrawing = {}): void {
     this.onResize = redraw;
@@ -250,10 +266,6 @@ export class TerminalSession {
     const color = !process.env.NO_COLOR && process.env.TERM !== 'dumb';
     const dark = color && options.theme === 'dark';
     const columns = Math.max(1, Math.min(this.columns, options.width ?? this.columns));
-
-    if (process.env.TERM !== 'dumb') {
-      this.output.write((dark ? darkBackground : '') + '\x1b[H\x1b[J');
-    }
 
     const rendered = lines.map((line) => {
       if (dark) {
@@ -270,6 +282,41 @@ export class TerminalSession {
       return color && text.startsWith('│ ›') ? `\x1b[2m${text}\x1b[0m` : text;
     });
 
-    this.output.write(rendered.join('\n') + (dark ? '\x1b[0m' : '') + '\n');
+    const positioned = process.env.TERM !== 'dumb';
+    const cacheable = positioned && options.incremental && columns < this.columns
+      && rendered.length < this.rows;
+    const previous = cacheable ? this.previousFrame : undefined;
+    const eraseStyle = dark ? darkBackground : '';
+    const resetStyle = dark ? '\x1b[0m' : '';
+    let frame = '';
+
+    if (previous && previous.columns === this.columns && previous.rows === this.rows) {
+      for (let index = 0; index < rendered.length; index++) {
+        if (rendered[index] !== previous.lines[index]) {
+          frame += `\x1b[${index + 1};1H${rendered[index]}${eraseStyle}\x1b[K${resetStyle}`;
+        }
+      }
+
+      if (rendered.length < previous.lines.length) {
+        frame += `\x1b[${rendered.length + 1};1H${eraseStyle}\x1b[J${resetStyle}`;
+      }
+
+      if (frame) {
+        frame += `\x1b[${rendered.length + 1};1H`;
+      }
+    } else {
+      frame = (positioned ? (dark ? darkBackground : '') + '\x1b[H\x1b[J' : '')
+        + rendered.join('\n') + (dark ? '\x1b[0m' : '') + '\n';
+    }
+
+    this.previousFrame = cacheable ? {
+      lines: rendered,
+      columns: this.columns,
+      rows: this.rows,
+    } : undefined;
+
+    if (frame) {
+      this.output.write(frame);
+    }
   }
 }

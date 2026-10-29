@@ -1,20 +1,10 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { installError } from '../../lib/pluginInstall/errors.ts';
 import { changeError } from './changes.ts';
-import type { PluginChange, PluginTransition } from './changes.ts';
 
-export interface ReplacementLease {
-  finish(outcome: 'installed' | 'reverted' | 'blocked'): Promise<void>;
-}
+import type { PluginLifecycle, ReplacementLease } from '../../../../packages/plugin-types/src/server.ts';
 
-export interface PluginLifecycle {
-  busyReason: null | (() => unknown);
-  prepareReplace: null | ((signal: AbortSignal) => Promise<ReplacementLease>);
-  onEnable?: () => unknown;
-  onDisable?: () => unknown;
-  prepareChange?: (change: PluginChange, signal: AbortSignal) =>
-    PluginTransition | undefined | Promise<PluginTransition | undefined>;
-}
+export type { PluginLifecycle, ReplacementLease } from '../../../../packages/plugin-types/src/server.ts';
 
 export const BUSY_UNKNOWN = 'Не удалось подтвердить, что плагин свободен.';
 

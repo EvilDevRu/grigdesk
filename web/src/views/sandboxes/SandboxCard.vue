@@ -233,8 +233,8 @@ const logTruncated = ref(false);
 
 const actions = computed(() => props.entry.actions ?? []);
 
-const feHref = computed(() => sandboxUrl(props.entry.fePort));
-const apiHref = computed(() => sandboxUrl(props.entry.apiPort));
+const feHref = computed(() => sandboxUrl(props.entry.fePort, props.entry.serviceHost));
+const apiHref = computed(() => sandboxUrl(props.entry.apiPort, props.entry.serviceHost));
 
 // Пока подъём не дошёл до портов, строке адресов нечего сказать: у неё не остаётся
 // ни ссылок, ни состояния, и вместо неё говорит полоса прогресса.

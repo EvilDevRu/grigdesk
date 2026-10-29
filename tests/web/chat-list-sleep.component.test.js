@@ -294,6 +294,53 @@ for (const editing of [false, true]) {
   });
 }
 
+test('LIST-MEMO-01: копия строк сохраняет DOM, видимые поля и редактор обновляются', async (t) => {
+  const f = await fixture(t, { sessions: [] });
+  const catalog = vue.reactive(Object.fromEntries(providers.map((id) => [id, {
+    model: { name: id },
+    provider: { id, color: '#d97757' },
+  }])));
+
+  globalThis.__sleepProviders.modelOf = (id) => catalog[id];
+
+  const wrapper = await f.mountList();
+  const element = wrapper.find('.row').element;
+
+  f.state.rows = f.state.rows.map((row) => ({ ...row }));
+  await settle();
+  assert.equal(wrapper.find('.row').element, element);
+
+  const row = f.state.rows[0];
+
+  row.title = 'Изменённое название';
+  row.snippet = 'Изменённое превью';
+  row.draft = true;
+  row.ts = Date.now() - 120_000;
+  row.model = 'codex';
+  await settle();
+  assert.equal(wrapper.find('.name').text(), row.title);
+  assert.ok(wrapper.find('.t2').text().includes(row.snippet));
+  assert.equal(wrapper.find('.dr').exists(), true);
+  assert.equal(wrapper.find('.ago').text(), '2м');
+  assert.equal(wrapper.find('.mdl').text(), 'codex');
+  catalog.codex.provider.color = '';
+  await settle();
+  assert.equal(wrapper.find('.ava').classes().includes('brand'), false);
+  await wrapper.find('.row-hit').trigger('click');
+  await settle();
+  assert.equal(wrapper.find('.row').classes().includes('cur'), true);
+  await wrapper.find('.row-hit').trigger('dblclick');
+  await settle();
+
+  const input = wrapper.find('input[aria-label="Название чата"]');
+
+  await input.setValue('Новое имя из редактора');
+  await settle();
+  assert.equal(input.element.value, 'Новое имя из редактора');
+  await input.trigger('keydown', { key: 'Enter' });
+  assert.deepEqual(f.renamed, [{ id: row.id, title: 'Новое имя из редактора' }]);
+});
+
 test('LIST-SLEEP-01: знак сна в двух аватарах скрывается при ходе, сжатии, [] и смерти', async (t) => {
   const f = await fixture(t);
   const wrapper = await f.mountList();

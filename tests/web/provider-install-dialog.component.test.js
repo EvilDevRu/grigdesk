@@ -4,7 +4,9 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 import { clientFixture, closeClientBrowser, card, job, snapshot } from './helpers/providerInstallFixture.js';
-import { installFixture, current, start, completed } from '../server/helpers/providerInstallFixture.js';
+import {
+  deferred, installFixture, current, start, completed,
+} from '../server/helpers/providerInstallFixture.js';
 import { ApiError } from '../../web/src/shared/apiClient.ts';
 
 after(closeClientBrowser);
@@ -77,6 +79,48 @@ async function serverJob(t, options) {
 
   return (await completed(server.app)).recent.claude;
 }
+
+test('окно сразу показывает preparing со спиннером, затем точный отказ prepare', async (t) => {
+  for (const operation of ['install', 'uninstall']) {
+    await t.test(operation, async (scenario) => {
+      const prepare = deferred();
+      const message = 'Каталог программы доступен чужой записи: /fixture/.kimi-code/bin';
+      const fixture = await dialogFixture(scenario, job({
+        status: 'succeeded',
+        outcome: 'updated',
+        finishedAt: 1_700_000_001_000,
+      }), { prepare: () => prepare.promise });
+
+      fixture.providers.providers[0].installation.lifecycleProtocol = 2;
+      fixture.store.visible = false;
+      await fixture.flushPromises();
+      assert.equal(fixture.wrapper.find('[data-role="provider-install-dialog"]').exists(), false);
+
+      const request = fixture.store.requestInstall(card.id, operation);
+
+      await fixture.flushPromises();
+      assert.equal(fixture.wrapper.get('.provider-install').attributes('data-phase'), 'preparing');
+      assert.equal(fixture.wrapper.get('[role="progressbar"]').attributes('aria-valuenow'), undefined);
+      assert.equal(fixture.wrapper.get('[aria-current="step"]').text(), 'Проверка подготовки');
+      assert.equal(fixture.wrapper.find('[aria-current="step"] .ui-spinner').exists(), true);
+      assert.equal(fixture.wrapper.find('pre').exists(), false);
+      assert.doesNotMatch(fixture.wrapper.text(), /Обновлён|Войти/u);
+      await fixture.store.requestInstall(card.id, operation);
+      assert.equal(fixture.calls.posts.length, 1);
+
+      prepare.reject(new ApiError(message, 409, { error: 'installation_conflict', message }));
+      await request;
+      await fixture.flushPromises();
+      assert.equal(fixture.wrapper.find('[role="progressbar"]').exists(), false);
+      assert.equal(fixture.wrapper.find('[aria-current="step"]').exists(), false);
+      assert.ok(fixture.wrapper.get('[role="alert"]').text().includes(message));
+      fixture.module.setUiLocale('en');
+      await fixture.flushPromises();
+      assert.ok(fixture.wrapper.get('[role="alert"]').text().includes(message));
+      assert.equal(fixture.calls.confirmations.length, 0);
+    });
+  }
+});
 
 test('общая фаза и свёрнутый live output без выдуманного процента', async (t) => {
   const { wrapper, store, flushPromises, calls } = await dialogFixture(t, job());
@@ -227,7 +271,14 @@ test('четыре исхода и interrupted видны на RU и EN', async 
         const result = fixture.wrapper.get('[role="status"]').text();
         const unresolved = /settings\.providerInstallation|\{(?:before|after|version)\}/u;
 
-        assert.match(result, entry[locale], `${entry.status}, ${locale}, ${index}`);
+        if (entry.ownText) {
+          const notice = finalJob.error || finalJob.warnings[0];
+
+          assert.ok(result.includes(notice.message));
+        } else {
+          assert.match(result, entry[locale], `${entry.status}, ${locale}, ${index}`);
+        }
+
         assert.doesNotMatch(fixture.wrapper.text(), unresolved);
 
         if (entry.outcome === 'updated') {
@@ -237,9 +288,6 @@ test('четыре исхода и interrupted видны на RU и EN', async 
           const rebuiltClaim = /Список моделей пересобран|model list (?:was )?rebuilt/iu;
 
           assert.doesNotMatch(result, rebuiltClaim);
-        }
-        if (entry.ownText && locale === 'en') {
-          assert.doesNotMatch(result, /[А-Яа-яЁё]/u, 'Собственная причина сервера не переведена');
         }
 
         const output = fixture.wrapper.findAll('pre').map((item) => item.element.textContent).join('');
@@ -263,7 +311,7 @@ test('четыре исхода и interrupted видны на RU и EN', async 
   }
 });
 
-test('блокировка сервиса переводится при показе на RU и EN', async (t) => {
+test('блокировка сервиса сохраняет message на RU и EN', async (t) => {
   const server = await installFixture(t);
 
   await fs.mkdir(path.dirname(server.config.providerInstallStatePath), { recursive: true });
@@ -281,21 +329,19 @@ test('блокировка сервиса переводится при пока
 
     const reason = fixture.wrapper.findAll('[role="alert"]').map((item) => item.text()).join('\n');
 
-    assert.match(reason, locale === 'ru' ? /состояни/iu : /state/iu);
-
-    if (locale === 'en') {
-      assert.doesNotMatch(reason, /[А-Яа-яЁё]/u);
-    }
+    assert.ok(reason.includes(blocked.blockedReason.message));
   }
 
   assert.equal(fixture.store.busy, true);
   assert.equal(fixture.calls.posts.length, 0);
 });
 
-test('отказ старта переводится на RU и EN и сохраняет запасную команду', async (t) => {
+test('отказ старта сохраняет message на RU и EN и запасную команду', async (t) => {
   const server = await installFixture(t);
 
   server.descriptor.update = null;
+
+  let message = '';
 
   const fixture = await dialogFixture(t, null, {
     get: async () => current(server.app),
@@ -304,6 +350,7 @@ test('отказ старта переводится на RU и EN и сохра
       const body = response.json();
 
       assert.equal(response.statusCode, 400, response.body);
+      message = body.message;
 
       throw new ApiError(body.message, response.statusCode, body);
     },
@@ -317,19 +364,92 @@ test('отказ старта переводится на RU и EN и сохра
 
     const reason = fixture.wrapper.findAll('[role="alert"]').map((item) => item.text()).join('\n');
 
-    assert.match(reason, locale === 'ru'
-      ? /не поддерживает|недоступ/iu : /not support|unsupported|not available|unavailable/iu);
-
-    if (locale === 'en') {
-      assert.doesNotMatch(reason, /[А-Яа-яЁё]/u);
-    }
+    assert.ok(reason.includes(message));
   }
 
   await button(fixture.wrapper, /^Open in terminal$/iu).trigger('click');
   await fixture.flushPromises();
   assert.deepEqual(fixture.calls.terminals, [{ insert: card.installation.fallbackUpdateCommand }]);
   assert.equal(server.calls.commands.length, 0);
-  assert.equal(fixture.calls.posts.length, 1);
+  assert.equal(fixture.calls.posts.filter((post) => post.url.endsWith('/start')).length, 1);
+});
+
+/**
+ * Подготовка не запускает installer: её отказ должен объяснять новый клик.
+ * Сохранённые версия, лог и вход прошлого обновления не относятся к этой попытке.
+ */
+test('отказ подготовки показывает незапущенную установку вместо прошлого обновления', async (t) => {
+  const previous = job({
+    id: 'previous-update',
+    status: 'succeeded',
+    stage: 'models',
+    outcome: 'updated',
+    after: '2.1.310',
+    outputTail: 'вывод прошлого обновления',
+    finishedAt: 1_700_000_001_000,
+  });
+  const remote = snapshot(null, 3, { claude: previous });
+  const fixture = await dialogFixture(t, previous, {
+    get: async () => structuredClone(remote),
+    prepare: async () => {
+      throw new ApiError('Маршрут подготовки не найден', 404, { error: 'not_found' });
+    },
+  });
+
+  await fixture.store.requestInstall('claude', 'install');
+  await fixture.store.load();
+
+  for (const locale of ['ru', 'en']) {
+    fixture.module.setUiLocale(locale);
+    await fixture.flushPromises();
+
+    const text = fixture.wrapper.text();
+
+    assert.match(text, locale === 'ru' ? /Установка Claude/u : /Claude.*installation/u);
+    assert.match(text, locale === 'ru' ? /Установка не началась/u : /Installation did not start/u);
+    assert.match(text, locale === 'ru' ? /Перезапустите GrigDesk/u : /Restart GrigDesk/u);
+    assert.doesNotMatch(text, /2\.1\.310|вывод прошлого обновления/u);
+    assert.equal(fixture.wrapper.find('.provider-install-steps').exists(), false);
+    assert.equal(fixture.wrapper.find('pre').exists(), false);
+    assert.equal(fixture.wrapper.find('[role="progressbar"]').exists(), false);
+
+    const loginButtons = fixture.wrapper.findAll('button')
+      .filter((item) => /^(Войти|Log in|Sign in)$/u.test(item.text()));
+
+    assert.equal(loginButtons.length, 0);
+    assert.equal(fixture.wrapper.find('.provider-install').attributes('data-tone'), 'danger');
+  }
+
+  assert.equal(fixture.calls.confirmations.length, 0);
+  assert.equal(fixture.calls.posts.filter((post) => post.url.endsWith('/start')).length, 0);
+  assert.equal(fixture.store.snapshot.recent.claude.id, previous.id);
+});
+
+test('отказ подготовки называет выбранную lifecycle-операцию на RU и EN', async (t) => {
+  const fixture = await dialogFixture(t, null, {
+    prepare: async () => {
+      throw new ApiError('shell conflict', 409, { error: 'shell_conflict' });
+    },
+  });
+  const cases = [
+    ['reinstall', /Переустановка не началась/u, /Reinstallation did not start/u],
+    ['uninstall', /Удаление не началось/u, /Uninstallation did not start/u],
+  ];
+
+  fixture.providers.providers[0].installation.lifecycleProtocol = 2;
+
+  for (const [operation, ru, en] of cases) {
+    await fixture.store.requestInstall('claude', operation);
+
+    for (const [locale, expected] of [['ru', ru], ['en', en]]) {
+      fixture.module.setUiLocale(locale);
+      await fixture.flushPromises();
+      assert.match(fixture.wrapper.text(), expected);
+    }
+  }
+
+  assert.equal(fixture.calls.confirmations.length, 0);
+  assert.equal(fixture.calls.posts.filter((post) => post.url.endsWith('/start')).length, 0);
 });
 
 test('Войти не исполняет installer', async (t) => {
@@ -386,12 +506,14 @@ test('Повторить сохраняет вид операции и откр�
         await fixture.flushPromises();
 
         assert.equal(fixture.calls.confirmations.length, 1);
-        assert.equal(fixture.calls.confirmations[0].details.code,
-          card.installation[`${operation}Command`]);
-        assert.deepEqual(fixture.calls.posts, [{
-          url: `/api/providers/claude/${operation}/start`,
-          body: {},
-        }]);
+        assert.ok(fixture.calls.confirmations[0].details.details.text
+          .startsWith(card.installation[`${operation}Command`]));
+        assert.deepEqual(fixture.calls.posts.map((post) => post.url), [
+          `/api/providers/claude/${operation}/prepare`,
+          `/api/providers/claude/${operation}/start`,
+        ]);
+        assert.deepEqual(fixture.calls.posts[1].body,
+          { preparationToken: 'fixture-preparation-token' });
         assert.equal(fixture.store.snapshot.active.id, 'retry-job');
         assert.equal(fixture.wrapper.findAll('button').some((item) => item.text() === 'Повторить'), false);
         assert.equal(fixture.calls.terminals.length, 0);
@@ -411,7 +533,7 @@ test('отмена повтора сохраняет ошибку без нов�
   await button(fixture.wrapper, /^Повторить$/u).trigger('click');
   await fixture.flushPromises();
   assert.equal(fixture.calls.confirmations.length, 1);
-  assert.equal(fixture.calls.posts.length, 0);
+  assert.equal(fixture.calls.posts.filter((post) => post.url.endsWith('/start')).length, 0);
   assert.match(fixture.wrapper.text(), /Обрыв соединения/u);
   assert.equal(button(fixture.wrapper, /^Повторить$/u).attributes('disabled'), undefined);
 });
@@ -500,4 +622,137 @@ test('первая установка предупреждает о старом
   await button(fixture.wrapper, /^Log in$|^Sign in$/iu).trigger('click');
   await fixture.flushPromises();
   assert.deepEqual(fixture.calls.terminals, [{ insert: 'claude login' }]);
+});
+
+/**
+ * Стадия терминала — собственная подпись в ходе и отдельная честная строка итога.
+ * Старый job без поля terminal не объявляется проверенным.
+ */
+test('стадия terminal показывается своей подписью на RU и EN', async (t) => {
+  const fixture = await dialogFixture(t, job({ stage: 'terminal' }));
+
+  assert.match(fixture.wrapper.text(), /Настройка терминала/u);
+  fixture.module.setUiLocale('en');
+  await fixture.flushPromises();
+  assert.match(fixture.wrapper.text(), /Terminal setup/u);
+});
+
+test('итог терминала отделён от успеха CLI на RU и EN', async (t) => {
+  const cases = [
+    {
+      terminal: {
+        status: 'ready',
+        reason: null,
+        binDirectory: '/home/fixture/.local/bin',
+        shell: 'bash',
+      },
+      ru: /доступна в новом терминале/u,
+      en: /available in a new terminal/iu,
+    },
+    {
+      terminal: {
+        status: 'needs_setup',
+        reason: 'terminal_setup_required',
+        binDirectory: '/home/fixture/.local/bin',
+        shell: 'bash',
+      },
+      ru: /не находится.*\/home\/fixture\/\.local\/bin/su,
+      en: /not find the command.*\/home\/fixture\/\.local\/bin/isu,
+    },
+    {
+      terminal: {
+        status: 'conflict',
+        reason: 'terminal_command_conflict',
+        binDirectory: '/home/fixture/.local/bin',
+        shell: 'other',
+      },
+      ru: /имя уже занято/u,
+      en: /name is already taken/iu,
+    },
+  ];
+
+  for (const entry of cases) {
+    await t.test(entry.terminal.status, async (scenario) => {
+      const finalJob = job({
+        status: 'succeeded',
+        outcome: 'updated',
+        after: '2.0.0',
+        terminal: entry.terminal,
+        finishedAt: 1_700_000_001_000,
+      });
+      const fixture = await dialogFixture(scenario, finalJob);
+
+      for (const locale of ['ru', 'en']) {
+        fixture.module.setUiLocale(locale);
+        await fixture.flushPromises();
+
+        const result = fixture.wrapper.get('[role="status"]').text();
+
+        assert.match(result, entry[locale], `${entry.terminal.status} ${locale}`);
+        assert.match(result, /Обновлён|Updated/u, 'итог CLI потерян');
+        assert.doesNotMatch(result, /settings\.providerInstallation/u);
+      }
+    });
+  }
+});
+
+test('справочное предупреждение nvm-scoped не показывается и не меняет тон успеха', async (t) => {
+  const fixture = await dialogFixture(t, job({
+    status: 'succeeded',
+    outcome: 'updated',
+    after: '2.0.0',
+    warnings: [{ code: 'npm_prefix_nvm_scoped', message: 'Сырой текст сервера' }],
+    finishedAt: 1_700_000_001_000,
+  }));
+
+  assert.doesNotMatch(fixture.wrapper.text(), /nvm/iu);
+  assert.doesNotMatch(fixture.wrapper.text(), /Сырой текст сервера/u);
+  assert.equal(fixture.wrapper.find('.provider-install').attributes('data-tone'), 'success');
+});
+
+test('перенос копии при равной версии виден отдельно', async (t) => {
+  const finalJob = job({
+    status: 'succeeded',
+    operation: 'update',
+    outcome: 'current',
+    before: '2.0.0',
+    after: '2.0.0',
+    migration: { from: '/data/state/npm-global/bin/claude', to: '/home/fixture/.local/bin/claude' },
+    finishedAt: 1_700_000_001_000,
+  });
+  const fixture = await dialogFixture(t, finalJob);
+
+  assert.match(fixture.wrapper.text(), /Копия перенесена/u);
+  assert.match(fixture.wrapper.text(), /\.local\/bin\/claude/u);
+  fixture.module.setUiLocale('en');
+  await fixture.flushPromises();
+  assert.match(fixture.wrapper.text(), /Copy moved/iu);
+});
+
+test('старый job без terminal не выдаётся за готовый терминал', async (t) => {
+  const fixture = await dialogFixture(t, job({
+    status: 'succeeded',
+    outcome: 'updated',
+    after: '2.0.0',
+    finishedAt: 1_700_000_001_000,
+  }));
+
+  assert.doesNotMatch(fixture.wrapper.text(), /доступна в новом терминале|manual|ручн/iu);
+  assert.equal(fixture.wrapper.find('[data-terminal]').exists(), false);
+});
+
+test('Войти передаёт абсолютный bin без Enter', async (t) => {
+  const fixture = await dialogFixture(t, job({
+    operation: 'install',
+    status: 'succeeded',
+    outcome: 'installed',
+    after: '2.0.0',
+    loginCommand: '/home/fixture/.local/bin/claude login',
+    finishedAt: 1_700_000_001_000,
+  }));
+
+  await button(fixture.wrapper, /^Войти$/u).trigger('click');
+  await fixture.flushPromises();
+
+  assert.deepEqual(fixture.calls.terminals, [{ insert: '/home/fixture/.local/bin/claude login' }]);
 });

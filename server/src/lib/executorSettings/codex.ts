@@ -9,7 +9,7 @@ import { settingsFingerprint } from './fingerprint.ts';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile } from '../providerInstall/externalCliProcess.ts';
 import { promisify } from 'node:util';
 import { createNativeSettingsCapability } from './capability.ts';
 import { readSettingsCliVersion, withSettingsStdioProbe } from './probe.ts';

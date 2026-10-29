@@ -12,7 +12,7 @@
 //
 // Разбор потока здесь общий с разовым `run()`: событие CLI одно и то же, и вторая
 // копия правил про usage, компакт и пустой ответ разошлась бы с первой.
-import { spawn } from 'node:child_process';
+import { spawn } from '../providerInstall/externalCliProcess.ts';
 import { randomUUID } from 'node:crypto';
 
 import { usagePercentOrNull } from '../providerUsage.ts';

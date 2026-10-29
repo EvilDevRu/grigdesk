@@ -20,7 +20,11 @@ compatibility, packageId и SHA выбранного файла. Offline-тес�
 loopback модель и fetch guard; ветка main, читающая env-файл, не вызывается. Этот результат
 проверяет инструмент и протокол, живого допуска выпуска он не выдаёт.
 
+`modelErrors[]` содержит [HTTP-статус и полный очищенный текст модельного отказа](glm-smoke-http-errors.md).
+Сетевому исключению соответствует `httpStatus: null`. После неуспешного первого ответа
+smoke останавливается; оставшиеся ходы не выполняются.
+
 `tests/server/glm-live-binary.test.js` использует настоящий ELF: ответ, read/write/bash,
-reasoning, resume, запрет SSH, остановка в approval и duplicate turnId. У model fixture
+reasoning, resume, foreground критика с дочерней лентой, запрет SSH, остановка в approval и duplicate turnId. У model fixture
 отдельные callId, а путь для approval извлекается из строки перед добавленной подсказкой
 GrigDesk. Проверка CLI с неполными аргументами не запускает модель и не читает env.

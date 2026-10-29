@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { protocolList, protocolReconcile } from './helpers/chat-protocol.js';
+
 import { api as realApi } from '../../web/src/shared/apiClient.ts';
 import { chatStoreFixture, sseOf } from './helpers/chat-store.js';
 import {
@@ -68,18 +70,24 @@ test('LOAD-02', async (t) => {
   const gate = Promise.withResolvers();
   const { api, calls } = loadApi(() => gate.promise);
   const originalGet = api.get;
+  const originalPost = api.post;
 
-  api.get = async (url, options) => {
-    if (url === '/api/chat/pending') {
-      calls.push(['GET', url, options]);
+  api.post = async (url, body, options) => {
+    if (url === '/api/chat/store/reconcile') {
+      calls.push(['POST', url, body, options]);
 
-      return { pending: [{
+      return protocolReconcile({ pending: [{
         id: 'pending-1',
         chatKey: SERVER_CHAT.id,
         reply: 'Поздний ответ',
         at: 400,
-      }] };
+      }] }, body.loadedIds);
     }
+
+    return originalPost(url, body, options);
+  };
+
+  api.get = async (url, options) => {
     if (url.startsWith('/api/chat/turns?')) {
       calls.push(['GET', url, options]);
 
@@ -166,7 +174,7 @@ test('LOAD-02: уже запланированная запись повторн
 });
 
 test('LOAD-03', async (t) => {
-  const snapshot = JSON.stringify({ sessions: [{ ...SERVER_CHAT, id: 'snapshot' }], archived: [] });
+  const snapshot = JSON.stringify({ sessions: [{ ...SERVER_CHAT }], archived: [] });
   const legacy = JSON.stringify({ sessions: [{ ...SERVER_CHAT, id: 'legacy' }], archived: [] });
   const storage = memoryStorage(t, { [SNAPSHOT_KEY]: snapshot, [LEGACY_KEY]: legacy });
   let failed = true;
@@ -202,31 +210,33 @@ test('LOAD-04', async (t) => {
   const jobs = [chat.ensure(), chat.revealChat(SERVER_CHAT.id), chat._load(), chat._load()];
 
   t.after(async () => {
-    chat.$dispose();
     gate.resolve({ sessions: [SERVER_CHAT], archived: [] });
     await Promise.all(jobs);
+    await drain();
+    chat.loaded = false;
+    chat.$dispose();
   });
   await drain();
-  assert.equal(calls.filter(([, url]) => url === '/api/chat/store').length, 1);
+  assert.equal(calls.filter(([, url]) => url === '/api/chat/store/list').length, 1);
   gate.reject(new TypeError('Нет связи'));
   await Promise.all(jobs);
   gate = Promise.withResolvers();
   jobs.push(chat.ensure(), chat.revealChat(SERVER_CHAT.id), chat._load(), chat._load());
   await drain();
-  assert.equal(calls.filter(([, url]) => url === '/api/chat/store').length, 2,
+  assert.equal(calls.filter(([, url]) => url === '/api/chat/store/list').length, 2,
     'после отказа single-flight освобождается для новой попытки');
   gate.resolve({ sessions: [SERVER_CHAT], archived: [] });
   await Promise.all(jobs);
   assert.equal(chat.loaded, true);
   assert.equal(chat.activeId, SERVER_CHAT.id);
   assert.equal(chat.revealRequest, SERVER_CHAT.id);
-  assert.equal(calls.filter(([, url]) => url === '/api/chat/pending').length, 1);
+  assert.equal(calls.filter(([, url]) => url === '/api/chat/store/reconcile').length, 1);
   assert.equal(calls.filter(([, url]) => url === '/api/chat/waiting?include=ssh,db').length, 1);
   assert.equal(calls.filter(([, url]) => url === '/api/chat/active').length, 1);
 });
 
 test('LOAD-05', async (t) => {
-  await t.test('оба полных GET и соседние чтения', async (sub) => {
+  await t.test('список и сверка с watchdog, соседние чтения без него', async (sub) => {
     memoryStorage(sub);
 
     const { api, calls } = loadApi();
@@ -238,18 +248,21 @@ test('LOAD-05', async (t) => {
     await clock.tick(2001);
     await chat._resyncStore();
 
-    const full = calls.filter(([method, url]) => method === 'GET' && url === '/api/chat/store');
+    const full = calls.filter(([method, url]) => (method === 'GET' && url === '/api/chat/store/list')
+      || (method === 'POST' && url === '/api/chat/store/changes'));
 
     assert.equal(full.length, 2);
 
-    for (const [, , options] of full) {
+    for (const [method, , bodyOrOptions, postOptions] of full) {
+      const options = method === 'POST' ? postOptions : bodyOrOptions;
+
       assert.equal(options?.idleTimeoutMs, 30000);
       assert.equal(options?.retry, false);
       assert.ok(options?.signal instanceof AbortSignal);
     }
 
     for (const [method, url, options] of calls) {
-      if (method === 'GET' && url !== '/api/chat/store') {
+      if (method === 'GET' && url !== '/api/chat/store/list') {
         assert.equal(options?.idleTimeoutMs, undefined);
       }
     }
@@ -261,14 +274,15 @@ test('LOAD-05', async (t) => {
     const harness = loadApi();
     const ordinaryGet = harness.api.get;
 
-    harness.api.get = (url, options) => url === '/api/chat/store'
+    harness.api.get = (url, options) => url === '/api/chat/store/list'
       ? realApi.get(url, options) : ordinaryGet(url, options);
 
     const chat = await chatStoreFixture({}, { api: harness.api, unloaded: true });
     const clock = loadClock(sub);
     const requests = streamFetch(sub);
     const loading = chat._load();
-    const bytes = new TextEncoder().encode(JSON.stringify({ sessions: [SERVER_CHAT], archived: [] }));
+    const envelope = protocolList({ sessions: [SERVER_CHAT], archived: [] });
+    const bytes = new TextEncoder().encode(JSON.stringify(envelope));
 
     sub.after(() => chat.$dispose());
     requests[0].push(bytes.slice(0, 20));

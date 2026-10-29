@@ -41,6 +41,20 @@ runtime_analytics_json_get_v2() {
   runtime_analytics_python_v2 get "${1:-}" "${2:-}"
 }
 
+# Представляет составную ссылку [маршрут, модель] строгим идентификатором lifecycle.
+# Остальные значения сохраняются для проверки схемой; контракт запуска раннера не меняется.
+runtime_lifecycle_model_id_v2() {
+  jq -nr --arg model "${1-}" '
+    ($model | try fromjson catch null) as $reference
+    | if ($reference | type) == "array"
+        and ($reference | length) == 2
+        and all($reference[]; type == "string")
+      then $reference | join("/")
+      else $model
+      end
+  '
+}
+
 runtime_lifecycle_enabled_v2() {
   [[ -n "${FACTORY_LIFECYCLE_TASK_ID:-}" &&
      -n "${FACTORY_LIFECYCLE_ATTEMPT_ID:-}" &&
@@ -495,6 +509,10 @@ runtime_lifecycle_dispatch_candidate_selected_v2() {
   local details resolved_type=null effort_type=null family_type=null
   runtime_lifecycle_enabled_v2 || return 0
   [[ "$ordinal" =~ ^[0-9]+$ ]] || return 2
+
+  requested=$(runtime_lifecycle_model_id_v2 "$requested") || return
+  resolved=$(runtime_lifecycle_model_id_v2 "$resolved") || return
+
   [[ -n "$resolved" ]] && resolved_type=string
   [[ -n "$effort" ]] && effort_type=string
   [[ -n "$family" ]] && family_type=string
@@ -515,6 +533,10 @@ runtime_lifecycle_dispatch_candidate_skipped_v2() {
   local evidence=${11:-} details resolved_type=null effort_type=null family_type=null evidence_type=null
   runtime_lifecycle_enabled_v2 || return 0
   [[ "$ordinal" =~ ^[0-9]+$ ]] || return 2
+
+  requested=$(runtime_lifecycle_model_id_v2 "$requested") || return
+  resolved=$(runtime_lifecycle_model_id_v2 "$resolved") || return
+
   [[ -n "$resolved" ]] && resolved_type=string
   [[ -n "$effort" ]] && effort_type=string
   [[ -n "$family" ]] && family_type=string

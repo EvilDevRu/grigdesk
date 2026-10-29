@@ -200,12 +200,15 @@ async function mountPipeline(t, {
     wrapper.findComponent(globalThis.__pipelineRunnerFactoryGraph).vm.$emit('node', node);
     await flushPromises();
   };
-  const openPlanStage = (status) => openStage({
-    id: 'plan',
-    label: '📋 План',
-    subtitle: '',
-    status,
-  });
+  const openPlanStage = async (status) => {
+    await openStage({
+      id: 'plan',
+      label: '📋 План',
+      subtitle: '',
+      status,
+    });
+    await wrapper.get('#stage-executors-tab').trigger('click');
+  };
 
   return {
     wrapper,
@@ -226,7 +229,7 @@ test('небегущий этап: карточки всех исполните�
 
   assert.match(block.text(), /Исполнитель этапа/);
   // Все установленные исполнители — карточками, а не пунктами скрытого списка.
-  const picks = wrapper.findAll('.runner-pick');
+  const picks = wrapper.findAll('.executor-row .ui-selectable-row__primary');
 
   assert.deepEqual(picks.map((pick) => pick.get('b').text()), ['Claude', 'Codex']);
   // Текущее эффективное значение — runner.primary, источник виден рядом (RUNNER_SOURCE).
@@ -234,7 +237,7 @@ test('небегущий этап: карточки всех исполните�
     picks.map((pick) => pick.attributes('aria-pressed')),
     ['true', 'false'],
   );
-  assert.ok(picks[0].classes('on'));
+  assert.equal(picks[0].attributes('aria-selected'), 'true');
   assert.match(wrapper.get('.runner-sect').text(), /политика этапа/);
   // Список исполнителей приехал из /api/factory/runners.
   assert.ok(getCalls.includes('/api/factory/runners'));
@@ -252,17 +255,17 @@ test('выбор исполнителя не закрывает модалку, 
 
   await openPlanStage('wait');
 
-  await wrapper.findAll('.runner-pick')[1].trigger('click');
+  await wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
   assert.deepEqual(runnerCalls, [[42, 'PLAN', 'codex']]);
   assert.ok(wrapper.find('.smodal').exists(), 'модалка этапа осталась открытой');
 
   await flushPromises();
   assert.ok(wrapper.find('.smodal').exists(), 'модалка не закрылась и после ответа сервера');
   // Новое состояние узла приезжает обычным путём: load() → watch(stageLive) → stage.meta.
-  const picks = wrapper.findAll('.runner-pick');
+  const picks = wrapper.findAll('.executor-row .ui-selectable-row__primary');
 
-  assert.equal(picks[0].classes('on'), false);
-  assert.ok(picks[1].classes('on'));
+  assert.equal(picks[0].attributes('aria-selected'), 'false');
+  assert.equal(picks[1].attributes('aria-selected'), 'true');
   assert.match(wrapper.get('.runner-sect').text(), /переопределение этапа задачи/);
   assert.ok(wrapper.find('.runner-reset').exists(), 'появилась кнопка сброса override');
 });
@@ -272,7 +275,39 @@ test('карточка текущего исполнителя запроса н
 
   await openPlanStage('wait');
 
-  await wrapper.findAll('.runner-pick')[0].trigger('click');
+  await wrapper.findAll('.executor-row .ui-selectable-row__primary')[0].trigger('click');
+  assert.deepEqual(runnerCalls, []);
+});
+
+test('модель и effort показывают политику, но остаются недоступны для изменения', async (t) => {
+  const { wrapper, runnerCalls, openPlanStage } = await mountPipeline(t, makeFixture());
+
+  await openPlanStage('wait');
+
+  const fields = wrapper.findAll('.executor-fields select');
+
+  assert.deepEqual(fields.map((field) => field.element.value), ['opus', 'max', 'sol', 'ultra']);
+  assert.ok(fields.every((field) => field.element.disabled));
+  assert.match(wrapper.get('#stage-executor-preview').text(), /Выбор модели и effort появится позже/);
+  assert.deepEqual(runnerCalls, []);
+});
+
+test('результат открывается первым, переход между вкладками сохраняет указание агенту', async (t) => {
+  const { wrapper, runnerCalls, openStage } = await mountPipeline(t, makeFixture());
+
+  await openStage({
+    id: 'plan',
+    label: '📋 План',
+    status: 'done',
+  });
+
+  assert.equal(wrapper.get('#stage-result-tab').attributes('aria-selected'), 'true');
+  await wrapper.get('#rewind-free').setValue('Повтори проверку с новым условием');
+  await wrapper.get('#stage-executors-tab').trigger('click');
+  assert.equal(wrapper.get('.srail').isVisible(), false);
+  assert.equal(wrapper.get('#stage-executors-panel').isVisible(), true);
+  await wrapper.get('#stage-result-tab').trigger('click');
+  assert.equal(wrapper.get('#rewind-free').element.value, 'Повтори проверку с новым условием');
   assert.deepEqual(runnerCalls, []);
 });
 
@@ -301,6 +336,60 @@ test('модалка показывает policy effort до запуска и �
   // У уже запущенного Codex telemetry xhigh важнее обновлённой policy ultra.
   assert.match(hops[1].text(), /gpt-5\.6-sol · effort xhigh/);
   assert.match(wrapper.get('.runner-attempt').text(), /gpt-5\.6-sol · effort xhigh/);
+});
+
+test('журнал попыток GLM показывает конкретную причину вместо unknown', async (t) => {
+  const fixture = makeFixture({ status: 'failed', actual: 'glm' });
+
+  Object.assign(fixture.graph.nodeMeta.plan.runner, {
+    primary: 'glm',
+    chain: ['glm'],
+    model: 'glm-5.3',
+    models: { glm: {
+      family: 'default',
+      label: 'glm-5.3',
+      effort: 'high',
+    } },
+    attempts: [{
+      id: 'run-glm',
+      epoch: 1,
+      runner: 'glm',
+      model: 'glm-5.3',
+      effort: 'high',
+      result: 'unknown',
+      failureDetail: 'GLM недоступен: проверь карточку (glm_key_missing)',
+    }],
+  });
+  fixture.factoryTask.stall = {
+    kind: 'human',
+    stop: 'human',
+    outcome: 'exhausted',
+    node: 'plan',
+    stage: 'PLAN',
+    title: 'PLAN: GLM недоступен: проверь карточку (glm_key_missing)',
+    hint: 'Проверьте сообщение провайдера.',
+    presentation: {
+      reason: 'агент не вернул результат',
+      summary: 'Проверьте сообщение провайдера перед повтором этапа.',
+      details: { what: 'Результат этапа не получен.' },
+      attempts: 1,
+      lastFailure: 'GLM недоступен: проверь карточку (glm_key_missing)',
+      model: 'glm-5.3',
+    },
+  };
+
+  const { wrapper, openPlanStage } = await mountPipeline(t, { ...fixture, runners: ['glm'] });
+
+  assert.equal(wrapper.get('.stop-failure').text(),
+    'GLM недоступен: проверь карточку (glm_key_missing)');
+  assert.equal(wrapper.get('.stop-model').text(), 'glm-5.3');
+
+  await openPlanStage('failed');
+
+  assert.equal(wrapper.get('.runner-result').text(),
+    'GLM недоступен: проверь карточку (glm_key_missing)');
+  assert.match(wrapper.get('.runner-attempt').text(), /glm-5\.3 · effort high/);
+  assert.doesNotMatch(wrapper.get('.runner-attempt').text(), /неизвестная ошибка|\["zai"/);
 });
 
 test('ручной запуск без Bitrix показывает заголовок сохранённого тикета', async (t) => {
@@ -374,7 +463,7 @@ test('остановленный run: вместо live-switch показыва�
   assert.match(block.text(), /Прогон остановлен/);
   assert.match(block.text(), /Продолжить прогон/);
 
-  await wrapper.findAll('.runner-pick')[1].trigger('click');
+  await wrapper.findAll('.executor-row .ui-selectable-row__primary')[1].trigger('click');
   assert.deepEqual(runnerCalls, [[42, 'PLAN', 'codex']]);
 });
 

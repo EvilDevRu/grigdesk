@@ -279,7 +279,9 @@
                   </header>
 
                   <UiLoadingState v-if="schemaLoadingIds.has(selectedSessionId) && !schemaLoaded"
-                    variant="document" />
+                    variant="document" >
+                    <UiSkeletonLayout layout="list" :header="false" />
+                  </UiLoadingState>
                   <ul v-else-if="schemaItems.length" class="db-schema__list">
                     <li v-for="(item, index) in schemaItems" :key="`${item}-${index}`">
                       <svg
@@ -498,7 +500,9 @@
               <span class="db-count">{{ store.profiles?.length || 0 }}</span>
             </header>
 
-            <UiLoadingState v-if="refreshLoading && !store.profiles?.length && !store.error" />
+            <UiLoadingState v-if="refreshLoading && !store.profiles?.length && !store.error" >
+              <UiSkeletonLayout layout="list" :header="false" />
+            </UiLoadingState>
             <div v-else-if="store.profiles?.length" class="db-profile-list">
               <article
                 v-for="profile in store.profiles"
@@ -734,6 +738,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../ui';
+
 import { toolWindowText } from '../../shared/tools/toolWindowMessages.ts';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { errorMessage } from '../../../../shared/lib/errors.ts';

@@ -14,7 +14,7 @@ export interface AskAgentOptions {
   chat: {
     defModelRef: unknown;
     ensure(): Promise<unknown>;
-    newSession(input: AskAgentInput): string;
+    newSession(input: AskAgentInput): string | null;
   };
   router: {
     push(location: { path: string; query: Record<string, string> }): unknown;
@@ -92,6 +92,10 @@ export async function askAgent(input: AskAgentInput, options: AskAgentOptions): 
     title: input.title,
     draft: input.draft,
   });
+
+  if (!id) {
+    throw new Error(t('core.chatStoreNotLoaded'));
+  }
 
   await router.push({ path: '/chats', query: { openChat: id } });
 

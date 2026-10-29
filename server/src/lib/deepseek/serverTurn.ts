@@ -11,6 +11,8 @@ import { createStepSink } from '../chat/streamSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 import type { TurnFailureSignal, TurnRecovery } from '../chat/turnFailures.ts';
 import { DeepSeekWebError } from './serverClient.ts';
+import type { DeepSeekWebClient } from './serverClient.ts';
+import { createScopedRemote, remoteQuestions } from './scopedRemote.ts';
 import { deepSeekPermissionPresentation } from './permissions.ts';
 import { openDeepSeekStream } from './serverEvents.ts';
 import type { DeepSeekWireFrame } from './serverEvents.ts';
@@ -37,6 +39,7 @@ export interface DeepSeekServerTurnOptions {
   bin: string;
   runtime?: DeepSeekRuntimeDescriptor;
   overlayPath: string;
+  toolPolicyPath?: string;
   cwd: string;
   env: NodeJS.ProcessEnv;
   nativeSettings?: PreparedNativeSettings;
@@ -59,10 +62,31 @@ export interface DeepSeekServerTurnOptions {
   startServer?: (options: StartDeepSeekServerOptions) => Promise<DeepSeekServerProcess>;
   onPromptAttempted?: () => void;
   variant?: DeepSeekTurnVariant;
+  createObserver?: DeepSeekTurnVariant['createObserver'];
+}
+
+export interface DeepSeekSessionObserver {
+  observe: (item: DeepSeekWireFrame) => void | Promise<void>;
+  ready: () => Promise<void>;
+  drain: () => Promise<void>;
+  close: () => void;
+  approve: (frame: DeepSeekWireFrame, signal: AbortSignal) => Promise<{
+    allow?: boolean;
+    question?: boolean;
+    presentation?: Record<string, unknown>;
+  }>;
 }
 
 // Ход другого исполнителя на той же сборке DSH. Без варианта поведение DeepSeek прежнее.
 export interface DeepSeekTurnVariant {
+  createObserver?: (options: {
+    client: DeepSeekWebClient;
+    sessionId: string;
+    signal: AbortSignal;
+    onStep: (step: ChatStep) => void;
+    onProgress: (tokens: number) => void;
+    onFailure: (error: Error) => void;
+  }) => DeepSeekSessionObserver;
   labels: {
     stopped: string;
     blocked: string;
@@ -231,6 +255,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
     runtime: options.runtime,
     bin: options.bin,
     overlayPath: options.overlayPath,
+    toolPolicyPath: options.toolPolicyPath,
     cwd: options.cwd,
     env: options.env,
     signal: options.signal,
@@ -411,6 +436,8 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       sink.emitAll(thoughts.flush());
       failure = error;
       finished = true;
+      scopedRemote?.close();
+      observerController.abort();
       notify();
     };
     /**
@@ -424,6 +451,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
 
       sink.emitAll(thoughts.flush());
       finished = true;
+      scopedRemote?.close();
       options.onInTurnAvailability?.({ available: false, reason: 'not_ready' });
       notify();
     };
@@ -434,8 +462,20 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         : { available: true });
     };
     /**
-     * Часть live-потока попытки: размышление, текст, граница инструмента и итог расхода.
-     * Id блока — попытка и индекс, поэтому разные попытки и блоки не склеиваются.
+     * Суммирует выход дерева, сохраняя сведения о контексте только корня.
+     * Отдельный callback ребёнка не сбрасывает последний корневой замер.
+     */
+    let descendantTokens = 0;
+    let lastRootTokens = 0;
+    let lastRootInfo: Record<string, unknown> = {};
+    const reportProgress = (tokens: number, info: Record<string, unknown>) => {
+      lastRootTokens = tokens;
+      lastRootInfo = info;
+      options.onProgress?.(tokens + descendantTokens, info);
+    };
+    /**
+     * Дельты и usage относятся только к корневой попытке.
+     * Расход потомков прибавляется reportProgress отдельно от контекста корня.
      */
     const handleChunk = (frame: Record<string, unknown>) => {
       const chunk = recordOrEmpty(frame.chunk);
@@ -468,7 +508,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
 
         const { tokens, tokensIsEstimate } = output.total();
 
-        options.onProgress?.(tokens, { tokensIsEstimate });
+        reportProgress(tokens, { tokensIsEstimate });
       } else if (chunk.type === 'block-start' && chunk.blockType === 'tool-call') {
         // DSH завершает блоки после всех аргументов; текст готов уже в начале вызова.
         // Чужая попытка и поздние границы не меняют завершённые реплики.
@@ -511,14 +551,14 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
           lastContextUsage = context;
         }
 
-        options.onProgress?.(tokens, { tokensIsEstimate, ...context });
+        reportProgress(tokens, { tokensIsEstimate, ...context });
       }
     };
     /**
      * Сводит live chunks и события DSH в общую ленту и блоки ответов.
      * Граница попытки или действия закрывает накопленное размышление до следующего шага.
      */
-    const handleFollow = (item: DeepSeekWireFrame) => {
+    const processFollow = (item: DeepSeekWireFrame) => {
       if (item.type === 'snapshot') {
         const mismatch = variant?.verifySnapshot?.(item);
 
@@ -622,9 +662,34 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         }
       }
     };
+    let followQueue: Promise<void> = Promise.resolve();
+    // Native audit должен завершиться раньше terminal того же потока:
+    // иначе отмена из guard маскирует инфраструктурный отказ обычным stop.
+    const handleFollow = (item: DeepSeekWireFrame) => {
+      if (!observer) {
+        processFollow(item);
+
+        return;
+      }
+
+      followQueue = followQueue.then(async () => {
+        await observer.observe(item);
+        processFollow(item);
+      }).catch(fail);
+    };
+    /**
+     * GLM использует проверку владельца и pending по remote generation.
+     * Прежний carrier остальных потребителей сохраняет свой контракт.
+     */
     const handleRemote = (item: DeepSeekWireFrame) => {
+      if (scopedRemote) {
+        scopedRemote.observe(item);
+
+        return;
+      }
       if (item.type === 'ready') {
         eventClientId = String(item.clientId || '');
+
         return;
       }
       if (item.type !== 'waterfall') return;
@@ -669,17 +734,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
 
           outcome = { kind: 'result', value: answer?.allow === true ? 'allowed-once' : 'rejected' };
         } else {
-          const questions = Array.isArray(request.questions) ? request.questions.map((value, index) => {
-            const question = recordOrEmpty(value);
-            return {
-              key: String(question.id || `q_${index}`),
-              header: String(question.header || `Вопрос ${index + 1}`),
-              question: String(question.question || ''),
-              options: Array.isArray(question.options) ? question.options : [],
-              multiSelect: question.multiSelect === true,
-              allowFreeText: true,
-            };
-          }) : [];
+          const questions = remoteQuestions(request);
           const answer = await options.onPermission?.({
             tool: 'Вопрос агента',
             isQuestion: true,
@@ -702,6 +757,34 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         setAwaiting(false);
       })().catch(fail);
     };
+    const observerController = new AbortController();
+    const observerSignal = options.signal
+      ? AbortSignal.any([options.signal, observerController.signal]) : observerController.signal;
+    const observer = (options.createObserver || variant?.createObserver)?.({
+      client: server.client,
+      sessionId,
+      signal: observerSignal,
+      onStep: (step) => {
+        sink.emit(step);
+      },
+      onProgress: (tokens) => {
+        descendantTokens = tokens;
+        reportProgress(lastRootTokens, lastRootInfo);
+      },
+      onFailure: (error) => {
+        fail(error);
+        cancellation ||= server.client.cancel(sessionId).catch(() => {});
+      },
+    });
+    const scopedRemote = observer ? createScopedRemote({
+      client: server.client,
+      signal: observerSignal,
+      source: labels.source,
+      approve: observer.approve,
+      onPermission: options.onPermission,
+      onAwaiting: setAwaiting,
+      onFailure: fail,
+    }) : undefined;
     const follow = openDeepSeekStream({
       client: server.client, endpoint: 'session/follow',
       args: { request: { address: { kind: 'session', sessionId }, assistantStream: true } },
@@ -719,6 +802,9 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
 
     try {
       await Promise.all([follow.ready, remote.ready]);
+      await observer?.ready().catch((error) => {
+        throw failure ?? error;
+      });
       if (options.signal?.aborted) abort();
       if (failure) throw failure;
 
@@ -767,6 +853,8 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         await new Promise<void>((resolve) => { wake = resolve; setTimeout(resolve, 200); });
       }
       if (failure) throw failure;
+
+      await observer?.drain();
       await Promise.all([...writes]);
 
       const result = {
@@ -804,6 +892,10 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
     } finally {
       options.signal?.removeEventListener('abort', abort);
       if (cancellation) await cancellation;
+
+      observerController.abort();
+      scopedRemote?.close();
+      observer?.close();
       follow.close();
       remote.close();
     }

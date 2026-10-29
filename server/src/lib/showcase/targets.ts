@@ -20,6 +20,7 @@ import { contractDecoders } from '../../../../shared/lib/contractDecoders.ts';
 
 import { parsePipeline } from '../pipelineParse.ts';
 import { PROFILE_RE } from '../profiles.ts';
+import { readProfileServiceHost } from '../profileServiceHost.ts';
 import { readPipelineHold, readSandboxRegistry } from '../sandboxes/registry.ts';
 import { readLoginCredentials } from './loginCredentials.ts';
 import type { LoginCredentials } from './loginCredentials.ts';
@@ -278,24 +279,6 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
     }
   }
 
-  /**
-   * Хост ручной песочницы читается как простое присваивание, без исполнения
-   * profile.sh. Динамическое выражение здесь не вычисляется и даёт loopback.
-   */
-  async function sandboxHost(profile: string): Promise<string> {
-    try {
-      const raw = await fs.readFile(path.join(profilesDir, profile, 'profile.sh'), 'utf8');
-      const match = /^PROFILE_SERVICE_HOST=(?:"([^"]+)"|'([^']+)'|([^\s#]+))\s*$/m.exec(raw);
-      const value = String(match?.[1] ?? match?.[2] ?? match?.[3] ?? '');
-
-      return /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,61}[A-Za-z0-9])?$/.test(value)
-        ? value
-        : '127.0.0.1';
-    } catch {
-      return '127.0.0.1';
-    }
-  }
-
   /** Сколько экранов профиль объявил явно; отсутствующая карта допустима. */
   async function declaredScreens(profile: string) {
     return readContract(profile, 'screens.json', screenContract);
@@ -376,6 +359,7 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
         taskTitle: null,
         viewUrl: url,
         viewPort: null,
+        serviceHost: null,
         status: policy.reason ? 'blocked' : 'ready',
         reason: policy.reason,
         screenCount: policy.screenCount,
@@ -465,10 +449,13 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
       label,
       // Название задачи дописывает служба: связь с порталом держит она, а не каталог.
       taskTitle: null,
-      // localhost здесь относится к машине сервера и не является ссылкой для
-      // удалённого браузера. Клиент построит её из порта и своего grigdesk host.
+      // Адрес записи остаётся на сервере. Для пользовательской ссылки клиент
+      // получает порт и отдельно проверенный хост профиля.
       viewUrl: null,
       viewPort: sandbox.fePort,
+      serviceHost: profileBinding === 'verified'
+        ? await readProfileServiceHost(profilesDir, profile)
+        : null,
       status: reason || policy.reason ? 'blocked' : 'ready',
       reason: reason || policy.reason,
       screenCount: policy.screenCount,
@@ -832,7 +819,9 @@ export function createShowcaseTargets(options: ShowcaseTargetsOptions) {
 
         // Недоказанный профиль не управляет даже hostname: базовая запись идёт
         // только на loopback. Проверенный profile.sh читается без исполнения.
-        const host = profilePolicyTrusted ? await sandboxHost(profile) : 'localhost';
+        const host = profilePolicyTrusted
+          ? await readProfileServiceHost(profilesDir, profile) ?? '127.0.0.1'
+          : 'localhost';
 
         recordUrl = `http://${host}:${sandbox.fePort}`;
         viewUrl = null;

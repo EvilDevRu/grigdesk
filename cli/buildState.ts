@@ -13,6 +13,16 @@ const seconds: Record<string, number> = {
   'web.build': 45,
   'window.package': 180,
   'window.install': 10,
+  'deepseek.deps': 120,
+  'deepseek.prepare': 60,
+  'deepseek.build': 240,
+  'deepseek.verify': 60,
+  'deepseek.admission-api': 15,
+  'deepseek.admission-coding-plan': 15,
+  'deepseek.smoke-api': 120,
+  'deepseek.smoke-coding-plan': 120,
+  'deepseek.install': 30,
+  'deepseek.prune': 15,
   'bundle.server': 300,
   'bundle.b24': 120,
   'bundle.relay': 60,
@@ -66,6 +76,12 @@ export function buildStepIds(variant: string): string[] {
   if (variant === 'bundle') {
     return ['server', 'b24', 'relay', 'deepseek', 'window', 'verify', 'pack', 'publish']
       .map((name) => `bundle.${name}`);
+  }
+
+  if (variant === 'deepseek') {
+    return ['deepseek.deps', 'deepseek.prepare', 'deepseek.build', 'deepseek.verify',
+      'deepseek.admission-api', 'deepseek.smoke-api', 'deepseek.admission-coding-plan',
+      'deepseek.smoke-coding-plan', 'deepseek.install', 'deepseek.prune'];
   }
 
   return [

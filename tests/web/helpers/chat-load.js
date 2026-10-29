@@ -1,5 +1,7 @@
 import { setImmediate } from 'node:timers/promises';
 
+import { protocolChanges, protocolHead, protocolList, protocolReconcile } from './chat-protocol.js';
+
 export const SNAPSHOT_KEY = 'grigdesk-chat-snapshot';
 export const LEGACY_KEY = 'grigdesk-chat-v2';
 
@@ -59,23 +61,30 @@ export function memoryStorage(t, initial = {}) {
 
 /**
  * API записывает наблюдаемые обращения и возвращает корректные пустые служебные списки.
- * Только полный GET меняется сценарием; ни один запрос не выходит в настоящий сервер.
+ * Сценарий управляет каталогом; ни один запрос не выходит в настоящий сервер.
  */
 export function loadApi(read = async () => ({ sessions: [SERVER_CHAT], archived: [] })) {
   const calls = [];
+  let store = { sessions: [], archived: [] };
   const api = {
     /**
-     * Служебные чтения имеют корректную пустую оболочку, а полный GET управляется сценарием.
+     * Каталог управляется сценарием; detail возвращает полную запись из того же ответа.
      * Журнал сохраняет options для проверки opt-in только загрузки истории.
      */
     async get(url, options) {
       calls.push(['GET', url, options]);
 
-      if (url === '/api/chat/store') {
-        return structuredClone(await read(options));
+      if (url === '/api/chat/store/list') {
+        store = structuredClone(await read(options));
+
+        return protocolList(store);
       }
-      if (url === '/api/chat/pending') {
-        return { pending: [] };
+      if (url.startsWith('/api/chat/store/head/') || url.startsWith('/api/chat/store/chat/')) {
+        const id = decodeURIComponent(url.split('/').at(-1));
+        const chat = [...store.sessions, ...store.archived].find((entry) => entry.id === id);
+
+        return url.includes('/head/') ? { head: protocolHead(chat) }
+          : { chat: structuredClone(chat), version: protocolHead(chat).version };
       }
       if (url === '/api/chat/waiting?include=ssh,db') {
         return { waiting: [] };
@@ -88,8 +97,19 @@ export function loadApi(read = async () => ({ sessions: [SERVER_CHAT], archived:
 
       return { ok: true };
     },
-    async post(url, body) {
-      calls.push(['POST', url, body]);
+    /**
+     * Сверка получает версии или очередь полной ленты в отдельных оболочках.
+     * POST мутаций сохраняет прежний ответ и не получает read-only options.
+     */
+    async post(url, body, options) {
+      calls.push(['POST', url, body, options]);
+
+      if (url === '/api/chat/store/changes') {
+        return protocolChanges(store, body.known);
+      }
+      if (url === '/api/chat/store/reconcile') {
+        return protocolReconcile();
+      }
 
       return { ok: true };
     },

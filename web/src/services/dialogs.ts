@@ -151,6 +151,14 @@ export function pendingDialogCount(): number {
  */
 function snapshotOptions<T extends object>(options: T): Readonly<T> {
   const copy = { ...options };
+  const details = (copy as ConfirmDialogOptions).details;
+
+  if (details) {
+    (copy as ConfirmDialogOptions).details = Object.freeze({
+      label: snapshotText(details.label),
+      text: details.text,
+    });
+  }
 
   for (const key of ['title', 'subtitle', 'text', 'placeholder', 'okText', 'cancelText']) {
     const value = (copy as Record<string, unknown>)[key];

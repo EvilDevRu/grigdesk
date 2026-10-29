@@ -237,7 +237,7 @@ test('настоящий инструмент grigdesk-work, объявленн�
   t.diagnostic(JSON.stringify(f.mock.requests.map((request) => request.payload.tools
     .map((tool) => tool.function.name).filter((name) => name.startsWith('mcp__')))));
   assert.deepEqual(calls, ['call:echo']);
-  assert.match(JSON.stringify(f.mock.requests[2].payload.messages), /запрещён политикой GrigDesk/u);
+  assert.match(JSON.stringify(f.mock.requests[2].payload.messages), /не входит в инвентарь этого запуска/u);
 });
 
 // Факт G2 (F13): проектные MCP в поставку не входят, поэтому их поздних инструментов тоже нет.

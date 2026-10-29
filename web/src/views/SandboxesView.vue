@@ -56,7 +56,9 @@
           </span>
         </div>
 
-        <UiLoadingState v-if="!store.loaded && !store.error" label="Читаем состояние песочниц…" />
+        <UiLoadingState v-if="!store.loaded && !store.error" label="Читаем состояние песочниц…" >
+          <div class="sandboxes-loading"><UiSkeletonLayout layout="list" :header="true" /></div>
+        </UiLoadingState>
         <p v-if="store.loaded && !store.error && !store.sandboxes.length" class="sandboxes__empty">
           <template v-if="awaitingStand">Подготовка идёт. Текущий шаг — в строке стенда.</template>
           <template v-else>Стендов пока нет. Выберите профиль и поднимите первую песочницу.</template>
@@ -132,6 +134,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../ui';
+
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
   UiButton,
@@ -437,6 +441,8 @@ async function run(payload: { task: string; action: SandboxActionDecl }) {
 </script>
 
 <style scoped>
+.sandboxes-loading { padding: 8px 12px; }
+
 .sandboxes {
   display: flex;
   flex-direction: column;

@@ -92,6 +92,7 @@ interface ShelfController {
   detailByTask: Map<string, { data: ShelfTaskDetail; loadedAt: number }>;
   detailLoads: Map<string, Promise<unknown>>;
   detailFailures: Map<string, number>;
+  detailAbort: AbortController;
   started: boolean;
   enabled: boolean;
   stops: (() => void)[];
@@ -234,6 +235,7 @@ function ensureController(store: object): ShelfController {
     detailByTask: new Map(),
     detailLoads: new Map(),
     detailFailures: new Map(),
+    detailAbort: new AbortController(),
     started: false,
     enabled: false,
     stops: [],
@@ -248,6 +250,8 @@ function ensureController(store: object): ShelfController {
  * целиком: чужие названия и проекты не имеют права пережить смену области.
  */
 function resetTaskDetails(controller: ShelfController, scope = ''): void {
+  controller.detailAbort.abort();
+  controller.detailAbort = new AbortController();
   controller.detailScope = scope;
   controller.detailByTask.clear();
   controller.detailLoads.clear();
@@ -315,7 +319,11 @@ async function hydrateTaskDetail(
 
   const scope = store.scope;
   const epoch = store._epoch;
-  const request: Promise<unknown> = api.get(`/api/b24/task/${encodeURIComponent(taskId)}`);
+  const signal = controller.detailAbort.signal;
+  const request: Promise<unknown> = api.get(`/api/b24/task/${encodeURIComponent(taskId)}`, {
+    signal,
+    retry: false,
+  });
 
   controller.detailLoads.set(taskId, request);
 
@@ -323,7 +331,7 @@ async function hydrateTaskDetail(
     const detail = await request;
     const entryExists = store.entries.some((entry) => entry.taskId === taskId);
 
-    if (store._epoch !== epoch || store.scope !== scope || !entryExists) {
+    if (signal.aborted || store._epoch !== epoch || store.scope !== scope || !entryExists) {
       return;
     }
 
@@ -333,7 +341,7 @@ async function hydrateTaskDetail(
     controller.detailFailures.delete(taskId);
     store.reconcile({ silent: true });
   } catch {
-    if (store._epoch === epoch && store.scope === scope) {
+    if (!signal.aborted && store._epoch === epoch && store.scope === scope) {
       controller.detailFailures.set(taskId, Date.now());
     }
   } finally {
@@ -1210,6 +1218,8 @@ export const useTaskShelfStore = defineStore('taskShelf', {
 
       controller.started = false;
       controller.enabled = false;
+      controller.detailAbort.abort();
+      controller.detailAbort = new AbortController();
     },
 
     /**

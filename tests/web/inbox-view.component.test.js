@@ -611,10 +611,108 @@ test('Inbox объясняет окно тишины, отсутствие мо�
   const notice = wrapper.get('[data-state="automation-notice"]');
   assert.match(notice.text(), /не выбрана модель/);
   assert.match(wrapper.get(`[data-status="new"] .auto-state`).text(), /Авторазбор через/);
-  assert.ok(wrapper.findAll('.auto-state').some((entry) => /Автосоздание выключено/.test(entry.text())));
+  await wrapper.findAll('[data-inbox-row]')[1].trigger('click');
+  assert.match(wrapper.get('.item-card .auto-state').text(), /Автосоздание выключено/);
 
   await notice.get('a').trigger('click');
   assert.deepEqual(settingsRequests, [{ pageId: 'plugins.installed', entityId: 'synthetic-inbox' }]);
+});
+
+test('очередь открывает одну переписку и сохраняет её выбор при навигации и SSE', async (t) => {
+  let data = response({ items: [item(), item({ ref: REF_SKIPPED, title: 'Второе обращение' })] });
+  const { wrapper, emitSse, settle } = await mountChannelView(t, 'inbox', {
+    api: {
+      async get() {
+        return data;
+      },
+    },
+  });
+
+  assert.equal(wrapper.findAll('.item-card').length, 1);
+  assert.equal(wrapper.findAll('[data-inbox-row]').length, 2);
+  await wrapper.findAll('.item-card input[type="checkbox"]')[1].setValue(false);
+  await wrapper.findAll('[data-inbox-row]')[1].trigger('click');
+  assert.equal(wrapper.get('.item-card h2').text(), 'Второе обращение');
+  assert.equal(wrapper.get('.inbox-workspace').attributes('data-panel'), 'detail');
+  await button(wrapper, '← К обращениям').trigger('click');
+  assert.equal(wrapper.get('.inbox-workspace').attributes('data-panel'), 'list');
+  await wrapper.findAll('[data-inbox-row]')[0].trigger('click');
+  assert.equal(wrapper.findAll('.item-card input[type="checkbox"]')[1].element.checked, false);
+
+  data = response({ items: [item({ ref: REF_SKIPPED }), item({ title: 'Новая версия первого' })] });
+  emitSse('inbox-changed', {});
+  await settle();
+  assert.equal(wrapper.get('.item-card h2').text(), 'Новая версия первого');
+  assert.equal(wrapper.findAll('.item-card input[type="checkbox"]')[1].element.checked, false);
+  assert.equal(wrapper.findAll('[data-inbox-row]')[1].attributes('aria-current'), 'page');
+});
+
+test('поиск находит автора и содержимое, фильтр канала и история работают вместе', async (t) => {
+  const telegram = item({
+    ref: REF_SKIPPED,
+    channel: { id: 'telegram', label: 'Telegram' },
+    title: 'Проверка формы',
+    messages: [message(MESSAGE_SKIPPED, { author: { name: 'Василий' }, text: 'Пропадает сортировка' })],
+  });
+  const data = response({
+    items: [item(), telegram],
+    channels: [channel(), channel({ id: 'telegram', label: 'Telegram' })],
+  });
+  let reads = 0;
+  const { wrapper } = await mountChannelView(t, 'inbox', {
+    api: {
+      async get() {
+        reads += 1;
+
+        return data;
+      },
+    },
+  });
+  const search = wrapper.get('input[type="search"]');
+
+  await search.setValue('ВАСИЛИЙ');
+  assert.equal(wrapper.findAll('[data-inbox-row]').length, 1);
+  assert.equal(wrapper.get('.item-card h2').text(), telegram.title);
+  await search.setValue('сортировка');
+  assert.equal(wrapper.findAll('[data-inbox-row]').length, 1);
+  await wrapper.get('select').setValue('github');
+  assert.equal(wrapper.findAll('[data-inbox-row]').length, 0);
+  assert.equal(wrapper.find('.item-card').exists(), false);
+  assert.match(wrapper.get('[data-state="section-empty"]').text(), /Ничего не найдено/);
+  await button(wrapper, 'Сбросить фильтры').trigger('click');
+  assert.equal(wrapper.findAll('[data-inbox-row]').length, 2);
+  await wrapper.get('[data-section="history"]').trigger('click');
+  assert.match(wrapper.get('[data-state="section-empty"]').text(), /История пуста/);
+  assert.equal(reads, 1, 'локальный поиск и навигация не перечитывают API');
+});
+
+test('после разбора открывается соседнее обращение, описание источника свёрнуто', async (t) => {
+  const url = 'https://example.test/ticket/42';
+  const first = item({
+    title: url,
+    messages: [message(MESSAGE_A, { text: `${url}\n\nПосле сохранения пропадает фильтр` })],
+  });
+  const second = item({ ref: REF_SKIPPED, title: 'Следующая просьба' });
+  let data = response({ items: [first, second] });
+  const { wrapper, settle } = await mountChannelView(t, 'inbox', {
+    api: {
+      async get() {
+        return data;
+      },
+      async post() {
+        data = response({ items: [second] });
+
+        return { ok: true };
+      },
+    },
+  });
+
+  assert.equal(wrapper.get('.item-card h2').text(), 'После сохранения пропадает фильтр');
+  assert.equal(wrapper.get('.source-description').element.open, false);
+  assert.ok(wrapper.get('.message-text').text().includes(url), 'ссылка сохранена в сообщении');
+  await button(wrapper.get('.item-card'), 'Пропустить').trigger('click');
+  await settle();
+  assert.equal(wrapper.get('.item-card h2').text(), second.title);
 });
 
 test('Inbox явно показывает несовместимую с безопасным разбором модель', async (t) => {
@@ -655,25 +753,28 @@ test('недоставленный ответ в чат виден челове�
     async get() { return response(); },
     async post() { return { taskId: '8422', notification: notifications.shift() }; },
   };
-  const { wrapper, settle } = await mountChannelView(t, 'inbox', { api });
+  const { wrapper, settle, toasts } = await mountChannelView(t, 'inbox', { api });
   const create = async () => {
     await button(wrapper.get('[data-status="new"]'), 'Создать задачу').trigger('click');
     await settle();
-    return wrapper.findAll('.banner').find((entry) => /Задача создана/.test(entry.text()));
+
+    return toasts.at(-1);
   };
 
   // Повтора у ответа нет по замыслу, поэтому сообщить в чат придётся человеку —
   // раньше он узнавал об этом только из журнала сервера.
   const warned = await create();
-  assert.match(warned.text(), /ответ в исходный чат не отправлен \(связь с Telegram оборвалась\)/u);
-  assert.match(warned.text(), /сообщите там сами/u);
-  assert.equal(warned.classes().includes('warn'), true);
-  assert.equal(warned.classes().includes('good'), false);
+
+  assert.match(warned.title, /ответ в исходный чат не отправлен \(связь с Telegram оборвалась\)/u);
+  assert.match(warned.title, /сообщите там сами/u);
+  assert.equal(warned.tone, 'warning');
+  assert.equal(warned.durationMs, 0);
 
   for (const quiet of ['доставленный ответ', 'выключенное правило']) {
-    const banner = await create();
-    assert.equal(banner.text().trim(), 'Задача создана', quiet);
-    assert.equal(banner.classes().includes('good'), true, quiet);
+    const toast = await create();
+
+    assert.equal(toast.title, 'Задача создана', quiet);
+    assert.equal(toast.tone, 'accent', quiet);
   }
 });
 

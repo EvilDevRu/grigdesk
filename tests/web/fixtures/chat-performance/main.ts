@@ -75,11 +75,13 @@ function resetStats(): void {
 
 resetStats();
 await chat._load();
+await chat.ensureChatMessages('fixture-0');
 
 const loadedSession = chat.session('fixture-0');
 
-if (!loadedSession) {
-  throw new Error('В фикстуре производительности отсутствует чат fixture-0');
+if (!loadedSession || !chat.isChatMessagesLoaded('fixture-0')
+  || loadedSession.messages.reduce((count, message) => count + (message.steps?.length || 0), 0) !== 7500) {
+  throw new Error('Фикстура производительности должна загрузить полную историю из 7500 шагов');
 }
 
 const target = loadedSession;
@@ -108,7 +110,7 @@ function dispatch(kind: string, index: number): void {
   const chatKey = 'fixture-0';
   const runId = 'current-run';
 
-  if (['block', 'draft', 'duplicate'].includes(kind)) {
+  if (['block', 'draft', 'duplicate', 'conflict'].includes(kind)) {
     host.__performanceSse('chat-assistant-message', {
       chatKey,
       runId,
@@ -176,7 +178,7 @@ async function event(kind: string, index: number) {
 
   const frameMs = performance.now() - started;
 
-  if (['block', 'save'].includes(kind)) {
+  if (['block', 'save', 'conflict'].includes(kind)) {
     await pause(420);
     await chat._writeChat(target.id);
   }
@@ -193,6 +195,20 @@ async function event(kind: string, index: number) {
     stats: structuredClone(host.__chatPerformanceStats),
     longTasks: [...longTasks],
   };
+}
+
+/**
+ * Контроль обязан упасть с именем исчезнувшего узла при изменении шаблона.
+ * Поиск ограничен текущей репликой, чтобы старая история не дала ложный успех.
+ */
+function requiredElement<T extends Element>(parent: ParentNode, selector: string): T {
+  const element = parent.querySelector<T>(selector);
+
+  if (!element) {
+    throw new Error(`Positive control: отсутствует ${selector}`);
+  }
+
+  return element;
 }
 
 /**
@@ -224,19 +240,24 @@ async function control() {
   };
 
   resetStats();
+  dispatch('step', 0);
   mdToHtml('Контроль HTML');
   mdToText('Контроль превью');
   await send(open, 1);
 
-  const reply = [...document.querySelectorAll('.chat-in-turn-reply')].at(-1)!;
+  const reply = [...document.querySelectorAll('.cs .msg.assistant .agent-reply')].at(-1);
+
+  if (!reply?.textContent?.includes('const control = 1;')) {
+    throw new Error('Positive control: текущая реплика агента не появилась');
+  }
 
   (reply.querySelector('[data-role="chat-reply-expand"]') as HTMLElement)?.click();
   await nextTick();
 
-  const code = reply.querySelector('.md-fence[data-lang="ts"]')!;
+  const code = requiredElement(reply, '.md-fence[data-lang="ts"]');
 
   code.setAttribute('data-perf-kept', 'yes');
-  (reply.querySelector('[data-context="md-fence-expand"]') as HTMLElement).click();
+  requiredElement<HTMLElement>(reply, '[data-context="md-fence-expand"]').click();
   await nextTick();
 
   const initial = structuredClone(host.__chatPerformanceStats);
@@ -250,7 +271,7 @@ async function control() {
 
   const closed = structuredClone(host.__chatPerformanceStats);
 
-  (reply.querySelector('[data-context="md-diagram-code"]') as HTMLElement).click();
+  requiredElement<HTMLElement>(reply, '[data-context="md-diagram-code"]').click();
   await nextTick();
   resetStats();
   await send(`${open}\n${fence}\n\nХвост`, 3);
@@ -260,7 +281,7 @@ async function control() {
     closed,
     tail: structuredClone(host.__chatPerformanceStats),
     kept: reply.querySelector('.md-fence[data-lang="ts"]') === code,
-    expanded: !reply.querySelector('.md-fence[data-lang="text"]')!.classList
+    expanded: !requiredElement(reply, '.md-fence[data-lang="text"]').classList
       .contains('md-fence--collapsed'),
     showingCode: !!reply.querySelector('[data-context="md-diagram-show"]'),
   };

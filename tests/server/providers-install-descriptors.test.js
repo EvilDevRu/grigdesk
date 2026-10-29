@@ -4,6 +4,7 @@ import test from 'node:test';
 import claude from '../../server/src/lib/executors/claude.ts';
 import codex from '../../server/src/lib/executors/codex.ts';
 import kimi from '../../server/src/lib/executors/kimi.ts';
+import { getProviderAdapters } from '../../server/src/lib/executors/index.ts';
 
 const config = {
   claudeBin: '/fixture/custom-claude',
@@ -17,6 +18,33 @@ const commands = new Map([
   [codex, 'npm i -g @openai/codex'],
   [kimi, 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash'],
 ]);
+
+test('внешний inventory и свежесть явно объявляют только три CLI, contained сохраняет запрет', async () => {
+  const expected = new Map([
+    [claude, '@anthropic-ai/claude-code'],
+    [codex, '@openai/codex'],
+    [kimi, '@moonshot-ai/kimi-code'],
+  ]);
+
+  for (const [adapter, packageId] of expected) {
+    assert.equal(typeof adapter.externalCli, 'function');
+
+    const declaration = adapter.externalCli(config, '/fixture/home');
+
+    assert.equal(declaration.packageId, packageId);
+    assert.equal(declaration.binName, adapter.id);
+    assert.deepEqual(adapter.usagePresentation, { freshness: true, spentLabel: true });
+  }
+
+  assert.equal(kimi.externalCli({ ...config, kimiLaunchMode: 'contained' }, '/fixture/home'), null);
+
+  for (const id of ['deepseek', 'glm', 'tripo']) {
+    const adapter = (await getProviderAdapters()).get(id);
+
+    assert.equal(adapter.externalCli, undefined);
+    assert.equal(adapter.usagePresentation, undefined);
+  }
+});
 
 test('три адаптера разделяют installer, login и fallback', async (t) => {
   for (const [adapter, command] of commands) {

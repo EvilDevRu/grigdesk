@@ -112,7 +112,7 @@ export function launchBuild(t: TestContext, box: Awaited<ReturnType<typeof termi
 }
 
 /**
- * Порядок пунктов совпадает с заданием: all/server/web/window/bundle.
+ * Порядок пунктов совпадает с заданием: all/server/web/window/deepseek/bundle.
  * Ожидание подменю не зависит от скорости запуска Node или системных команд.
  */
 export async function chooseBuild(session: ReturnType<typeof startPty>, target: string) {
@@ -122,7 +122,7 @@ export async function chooseBuild(session: ReturnType<typeof startPty>, target: 
 
   session.write(down.repeat(5) + '\r');
   await session.wait(/Переносимый комплект|Portable bundle/iu, 4000, before);
-  session.write(down.repeat(['all', 'server', 'web', 'window', 'bundle'].indexOf(target)) + '\r');
+  session.write(down.repeat(['all', 'server', 'web', 'window', 'deepseek', 'bundle'].indexOf(target)) + '\r');
 }
 
 /**

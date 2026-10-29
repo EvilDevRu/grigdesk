@@ -4,7 +4,9 @@
     <span class="title" v-tooltip="document?.displayPath || title">{{ title }}</span>
   </TopbarActions>
   <main class="documents-view">
-    <UiLoadingState v-if="resolving" label="Проверяю ссылку…" variant="document" />
+    <UiLoadingState v-if="resolving" label="Проверяю ссылку…" variant="document" >
+      <UiSkeletonLayout layout="text" :header="false" />
+    </UiLoadingState>
     <div v-else-if="resolveError" class="resolve-state error">{{ resolveError }}</div>
     <DocumentPanel v-else :source="source" :path="documentPath" :anchor="anchor" :line="line"
                    @loaded="document = $event" />
@@ -12,6 +14,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../ui';
+
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, failureText } from '../shared/apiClient.ts';

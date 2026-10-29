@@ -279,7 +279,10 @@ export function registerDeepSeekChatParity(mode = 'binary') {
           target = path.join(f.cwd, 'escape', 'outside.txt');
         }
 
-        const result = await f.run({ permissionMode: kind === 'read-only' ? 'read-only' : 'default' });
+        const result = await f.run({
+          permissionMode: kind === 'read-only' ? 'read-only' : 'auto',
+          onPermission: async () => ({ allow: true }),
+        });
 
         assert.equal(result.reply, 'loopback-ok');
         assert.equal(f.mock.payloads.length, 2);
@@ -427,7 +430,12 @@ export function registerDeepSeekChatParity(mode = 'binary') {
       '});',
     ].join('\n'), { mode: 0o600 });
 
-    const result = await f.run({ mcpServers: [{
+    let questions = 0;
+    const result = await f.run({ onPermission: async () => {
+      questions += 1;
+
+      return { allow: true };
+    }, mcpServers: [{
       name: 'fixture',
       command: process.execPath,
       args: [server, envProof],
@@ -435,6 +443,7 @@ export function registerDeepSeekChatParity(mode = 'binary') {
     }] });
 
     assert.ok(advertised, 'MCP tool присутствует в фактическом HTTP payload');
+    assert.equal(questions, 1);
     assert.equal(result.reply, 'loopback-ok');
     assert.match(JSON.stringify(f.mock.payloads[1].messages), /fixture-mcp-result/);
     assert.deepEqual(JSON.parse(await fs.readFile(envProof, 'utf8')), { hasKey: false, hasPrefs: false });

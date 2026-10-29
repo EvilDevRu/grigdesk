@@ -12,7 +12,6 @@ import { runGlmTurn } from '../helpers/glmDriver.mts';
 import { startGlmLoopback } from '../helpers/glmLoopback.mts';
 import {
   GLM_SERVICE_KEY,
-  glmHookEntries,
   glmTextReply,
   glmToolCall,
   startGlmProductionProcess,
@@ -165,25 +164,23 @@ test('настоящий процесс GLM не применяет retryPolicy,
     assert.equal(f.mock.requests[0].headerNames.includes('x-grigdesk-hijack'), false);
   });
 
-test('настоящий hook процесса GLM не видит GRIGDESK_GLM_ROUTE_KEY', async (t) => {
+test('native gate пишет proof текущего запуска до результата инструмента', async (t) => {
   const f = await fixture(t, { respond: (_payload, index) => index === 0
-    ? glmToolCall('read', { file_path: 'note.txt' })
-    : glmTextReply() });
-  const { server } = await f.start({ source: { DEEPSEEK_API_KEY: 'synthetic-deepseek' } });
+    ? glmToolCall('read', { file_path: 'note.txt' }) : glmTextReply() });
+  const { server, launch } = await f.start();
   const turn = await runGlmTurn(server, {
     cwd: f.cwd,
-    message: 'hook-env',
+    message: 'native-proof',
     model: 'glm-5.3',
   });
-  // Маркер политики несёт имена окружения hook (G6: полный hook вместо заглушки).
-  const entries = glmHookEntries(turn.events).filter((entry) => entry.marker === 'hooks-alive');
+  const index = turn.events.findIndex((event) => event.type === 'grigdesk/glm-policy');
+  const proof = turn.events[index].data;
 
-  assert.equal(entries.length, 1);
-  assert.ok(entries[0].envNames.includes('CLAUDE_PROJECT_DIR'), 'положительный контроль окружения hook');
-
-  for (const name of ['GRIGDESK_GLM_ROUTE_KEY', 'ZAI_API_KEY', 'ZAI_CODING_API_KEY', 'DEEPSEEK_API_KEY']) {
-    assert.equal(entries[0].envNames.includes(name), false, name);
-  }
+  assert.equal(proof.launchId, launch.nativeGate.launchId);
+  assert.equal(proof.policyHash, launch.nativeGate.policyHash);
+  assert.equal(proof.name, 'read');
+  assert.equal(proof.decision, 'allow');
+  assert.ok(index < turn.events.findIndex((event) => event.type === 'tool/result'));
 });
 
 test('настоящие инструкции AGENTS.md, CLAUDE.md и @CLAUDE.local.md попадают в запрос один раз и по порядку',
@@ -253,7 +250,7 @@ test('настоящий запуск из пути с пробелами и ч�
 test('настоящий hook политики запрещает инструменты вне политики до эффекта', async (t) => {
   const calls = [
     ['bash', { command: 'ssh -p 9 x@127.0.0.1; echo effect > bash-effect.txt', description: 'ssh' }],
-    ['skill', { name: 'fixture-skill' }],
+    ['web_fetch', { url: 'http://127.0.0.1/' }],
   ];
   const f = await fixture(t, { respond: (_payload, index) => index < calls.length
     ? glmToolCall(calls[index][0], calls[index][1], `call-${index}`)
@@ -264,11 +261,11 @@ test('настоящий hook политики запрещает инструм
     message: 'stub',
     model: 'glm-5.3',
   });
-  const entries = glmHookEntries(turn.events).filter((entry) => entry.point === 'PreToolUse');
+  const entries = turn.events.filter((event) => event.type === 'grigdesk/glm-policy').map((event) => event.data);
 
-  assert.deepEqual(entries.map((entry) => [entry.name, entry.decision, entry.exitCode]), [
-    ['bash', 'deny', 2],
-    ['skill', 'deny', 2],
+  assert.deepEqual(entries.map((entry) => [entry.name, entry.decision]), [
+    ['bash', 'deny'],
+    ['web_fetch', 'deny'],
   ]);
   await assert.rejects(fs.stat(path.join(f.cwd, 'bash-effect.txt')), { code: 'ENOENT' });
 });

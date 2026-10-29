@@ -7,6 +7,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 
 const VIEW = webFile('src/views/RoutesView.vue');
 const UI_STUB = `
+export * from './src/ui.ts';
 export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
 import { defineComponent, h } from 'vue';
 export { default as UiIconButton } from './src/components/primitives/UiIconButton.vue';
@@ -74,7 +75,7 @@ function summaryOf(draft) {
 async function fixture(t, {
   query = {}, drafts = [], currentCatalogHash = null, createResponse = null,
   publishSupported = false, revisions = [], catalogInput = null, rebasePreview = null,
-  editorGate = null,
+  editorGate = null, graphGate = null, revisionsGate = null,
   sourceMode = 'editor', documents = [], realCanvas = false,
   profiles = () => ['sample', 'other'],
 } = {}) {
@@ -105,6 +106,9 @@ async function fixture(t, {
 
       if (url === '/api/profiles') {
         return { profiles: await profiles() };
+      }
+      if (url.endsWith('/revisions')) {
+        await revisionsGate;
       }
       if (url.endsWith('/revisions')) return {
         profile: url.includes('/other/') ? 'other' : 'sample',
@@ -143,6 +147,8 @@ async function fixture(t, {
       }
       if (url.includes('/drafts/')) throw new Error('Черновик не найден');
       if (catalogInput && (url.includes('/graph?route=') || url.includes('/graph?c='))) {
+        await graphGate;
+
         return { graph: { nodes: { build: ['agent', 'Сборка', ''] },
           pos: { build: [140, 55] }, edges: [['_start', 'build', '', 'plain', 'h']] } };
       }
@@ -244,7 +250,7 @@ async function fixture(t, {
   };
   setActivePinia(createPinia());
 
-  const component = await compileVue(VIEW, { expose: ['closeDraft'], stubs: {
+  const component = await compileVue(VIEW, { expose: ['closeDraft', 'load', 'loadGraph'], stubs: {
     '../ui': (UI_STUB) +
       "\nexport { vTooltip } from \"./src/services/tooltipDirective.ts\";",
     '../shared/apiClient.ts': 'export const api = globalThis.__routesViewHarness.api;'
@@ -1196,3 +1202,81 @@ test('RE93027-I3: переход к проблеме инструкции ост
   assert.equal(prompt.props('focusPath'), path);
   assert.equal(prompt.props('nodeId'), 'build');
 });
+
+for (const area of ['catalog', 'current-graph', 'snapshot-graph']) {
+  test(`LOAD-SURFACE-routes-${area}: первое чтение объявлено и сменяется готовой областью`, async (t) => {
+    const gate = Promise.withResolvers();
+    const hash = 'a'.repeat(64);
+    const h = await fixture(t, {
+      query: area === 'snapshot-graph' ? { catalog: hash, route: 'quick' } : { route: 'quick' },
+      sourceMode: 'files',
+      currentCatalogHash: hash,
+      revisions: [{
+        catalogHash: hash,
+        createdAt: '2026-01-01T00:00:00Z',
+        isCurrent: true,
+        routes: { quick: 'c'.repeat(64) },
+        integrity: 'ok'
+      }],
+      catalogInput: makeCatalogInput(),
+      revisionsGate: area === 'catalog' ? gate.promise : null,
+      graphGate: area === 'catalog' ? null : gate.promise,
+    });
+
+    for (let cycle = 0; cycle < 8; cycle += 1) {
+      await h.flushPromises();
+    }
+
+    const scope = h.wrapper.get(area === 'catalog' ? '.catalog-content' : '.panel-scroll');
+    const bricks = scope.findAll('[data-ui-skeleton]').length;
+    const announced = scope.find('[role="status"]').exists();
+
+    gate.resolve();
+
+    for (let cycle = 0; cycle < 8; cycle += 1) {
+      await h.flushPromises();
+    }
+
+    assert.equal(h.wrapper.find('[data-ui-loading]').exists(), false);
+    assert.equal(h.wrapper.find('.published-canvas').exists(), true);
+    assert.equal(h.wrapper.find('[role="alert"]').exists(), false);
+    assert.ok(announced, 'статус чтения объявлен');
+    assert.ok(bricks > 0, `${area}: используется каркас соответствующей области`);
+  });
+}
+
+for (const area of ['catalog', 'current-graph', 'snapshot-graph']) {
+  test(`LOAD-KEEP-routes-error-${area}: отказ чтения снимает каркас и сохраняет причину`, async (t) => {
+    const gate = Promise.withResolvers();
+    const hash = 'a'.repeat(64);
+    const h = await fixture(t, {
+      query: area === 'snapshot-graph' ? { catalog: hash, route: 'quick' } : { route: 'quick' },
+      sourceMode: 'files',
+      currentCatalogHash: hash,
+      revisions: [{
+        catalogHash: hash,
+        createdAt: '2026-01-01T00:00:00Z',
+        isCurrent: true,
+        routes: { quick: 'c'.repeat(64) },
+        integrity: 'ok',
+      }],
+      catalogInput: makeCatalogInput(),
+      revisionsGate: area === 'catalog' ? gate.promise : null,
+      graphGate: area === 'catalog' ? null : gate.promise,
+    });
+
+    for (let cycle = 0; cycle < 8; cycle += 1) {
+      await h.flushPromises();
+    }
+
+    gate.reject(new Error('Синтетический отказ маршрута'));
+
+    for (let cycle = 0; cycle < 8; cycle += 1) {
+      await h.flushPromises();
+    }
+
+    assert.match(h.wrapper.text(), /Синтетический отказ маршрута/);
+    assert.equal(h.wrapper.find('[data-ui-loading]').exists(), false);
+    assert.equal(h.wrapper.find('[data-ui-skeleton]').exists(), false);
+  });
+}

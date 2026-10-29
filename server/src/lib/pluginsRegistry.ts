@@ -15,6 +15,9 @@
 //   plugins:        { <id>: true|false }   — отсутствие ключа = дефолт манифеста
 //                                            (defaultEnabled, иначе системный вкл / пользовательский выкл)
 //   pluginSettings: { <id>: {key: value} }
+import type {
+  PluginMetadata as PluginManifest, PluginWebPage,
+} from '../../../packages/plugin-types/src/manifest.ts';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { selectPluginServerEntry } from './pluginServerEntry.ts';
@@ -28,42 +31,12 @@ import type {
 } from '../../../shared/plugins/pluginsContracts.ts';
 import { PLUGIN_SLOT_LABELS, isPluginSlotName } from '../../../shared/plugins/slots/index.ts';
 import { resolvePluginWebModule } from './pluginWebModule.ts';
-import type { ResolvedPluginWebModule } from './pluginWebModule.ts';
 
 export type { PluginNav, PluginPlacementDecl, PluginPlacementState, PluginSetting, PluginSetup };
 
-// Манифест плагина: системного из SYSTEM или пользовательского из plugin.json.
-export interface PluginManifest {
-  id: string;
-  system?: boolean;
-  defaultEnabled?: boolean;
-  name: string;
-  api?: number;
-  version: string;
-  description: string;
-  // Род работы для раздела настроек; значения — из общего контракта категорий.
-  category?: string;
-  nav: PluginNav | null;
-  settings: PluginSetting[];
-  // Слоты, которые плагин умеет занимать; тумблер на каждое место — в его настройках.
-  placements?: PluginPlacementDecl[];
-  // Ручка готовности: что плагину нужно на машине и что он ставит сам. Объявляют
-  // только системные плагины — у пользовательского серверной части такого рода нет.
-  setup?: PluginSetup | null;
-  dir?: string;
-  hasServer?: boolean;
-  serverEntry?: 'server.js' | 'server.ts' | null;
-  serverError?: string | null;
-  // Своя страница пользовательского плагина: каталог с index.html и адрес, под которым
-  // GrigDesk его раздаёт. Ядро не исполняет этот код — оно лишь показывает страницу.
-  web?: PluginWebPage | null;
-  webModule?: ResolvedPluginWebModule | null;
-}
-
-export interface PluginWebPage {
-  dir: string;
-  url: string;
-}
+// Нормализованные метаданные отличаются от входного plugin.json автора.
+export type { PluginMetadata as PluginManifest, PluginWebPage } from
+  '../../../packages/plugin-types/src/manifest.ts';
 
 // Журнал сервера в том минимуме, который использует скан.
 interface RegistryLog {

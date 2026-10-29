@@ -1,9 +1,10 @@
-import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { localeTranslator, translator } from '../../../shared/i18n/catalogs.ts';
 
 import { uiLocalePort as uiLocale } from '../shared/uiLocalePort.ts';
 // Реестр LLM-исполнителей (GET /api/providers): топбар рисует иконки доступных,
 // схемы/маршруты смогут выбирать исполнителя по стабильному id из этого списка.
 import { defineStore } from 'pinia';
+import { toRaw } from 'vue';
 import { classifyWriteError } from '../features/settings/contracts.ts';
 
 import { isRecord } from '../../../shared/lib/objects.ts';
@@ -17,7 +18,13 @@ import { familyModels } from '../../../shared/chat/modelFamily.ts';
 
 const t = localeTranslator(uiLocale);
 
-const registryReads = new WeakMap<object, Promise<void>>();
+interface RegistryRead {
+  promise: Promise<void>;
+  version: number;
+  refresh: boolean;
+}
+
+const registryReads = new WeakMap<object, RegistryRead>();
 const registryStatuses = new WeakMap<object, { ok: boolean; message?: string }>();
 
 type ProviderCliUpdate = (providerId: string) => Promise<void>;
@@ -67,6 +74,7 @@ export const useProvidersStore = defineStore('providers', {
     usageAt: 0,
     usageVersion: 0,
     usageRequest: 0,
+    usageRecoveryAfter: {} as Record<string, number>,
     usageTransport: {
       status: 'idle',
       receivedAt: 0,
@@ -155,7 +163,11 @@ export const useProvidersStore = defineStore('providers', {
      * или ещё не опрошен: тогда чат просто не показывает выбор.
      */
     modesOf(): (selection: ModelSelection) => NonNullable<ProviderEntry['modes']> {
-      return (sessionModel) => this.modelOf(sessionModel).provider?.modes || [];
+      return (sessionModel) => (this.modelOf(sessionModel).provider?.modes || []).map((mode) => ({
+        ...mode,
+        label: mode.labelKey ? translator.t(uiLocale.value, mode.labelKey, {}, mode.label) : mode.label,
+        hint: mode.hintKey ? translator.t(uiLocale.value, mode.hintKey, {}, mode.hint) : mode.hint,
+      }));
     },
     /**
      * Всё про модель чата одним вызовом: `{ id, model, provider }`. Пустое значение
@@ -209,12 +221,27 @@ export const useProvidersStore = defineStore('providers', {
   },
   actions: {
     /**
-     * Только последний запрос текущей проекции может заменить карточки.
-     * Смена credentials отсеивает поздний GET прежнего аккаунта вместе с его ошибкой.
+     * Читатели одной версии разделяют GET; монтирование использует готовый снимок.
+     * SSE/credentials инвалидируют летящий ответ, а явный refresh сильнее обычного чтения.
      */
-    load(refresh = false): Promise<void> {
-      const request = ++this.registryRequest;
+    load(refresh = false, { cached = false, invalidate = false } = {}): Promise<void> {
+      const key = toRaw(this);
+
+      if (invalidate) {
+        this.registryVersion += 1;
+      }
+
       const version = this.registryVersion;
+      const previous = registryReads.get(key);
+
+      if (previous?.version === version && (!refresh || previous.refresh)) {
+        return previous.promise;
+      }
+      if (cached && this.loaded && !refresh && !invalidate) {
+        return Promise.resolve();
+      }
+
+      const request = ++this.registryRequest;
       const pending = (async () => {
         try {
           const reply = await api.get(`/api/providers${refresh ? '?refresh=1' : ''}`);
@@ -233,10 +260,10 @@ export const useProvidersStore = defineStore('providers', {
 
           this.providers = providers || [];
           this.showAllModels = !!showAllModels;
-          registryStatuses.set(this, { ok: true });
+          registryStatuses.set(key, { ok: true });
         } catch (error) {
           if (request === this.registryRequest && version === this.registryVersion) {
-            registryStatuses.set(this, {
+            registryStatuses.set(key, {
               ok: false,
               message: failureText(error) || t('settings.providerRegistryFailure'),
             });
@@ -246,9 +273,17 @@ export const useProvidersStore = defineStore('providers', {
         if (request === this.registryRequest && version === this.registryVersion) {
           this.loaded = true;
         }
-      })();
+      })().finally(() => {
+        if (registryReads.get(key)?.promise === pending) {
+          registryReads.delete(key);
+        }
+      });
 
-      registryReads.set(this, pending);
+      registryReads.set(key, {
+        promise: pending,
+        version,
+        refresh,
+      });
 
       return pending;
     },
@@ -257,14 +292,15 @@ export const useProvidersStore = defineStore('providers', {
      * Сам ACK доменного store остаётся быстрым и не ждёт usage-проверку.
      */
     async whenRegistryReady(): Promise<{ ok: boolean; message?: string }> {
+      const key = toRaw(this);
       let pending;
 
       do {
-        pending = registryReads.get(this);
-        await pending;
-      } while (pending !== registryReads.get(this));
+        pending = registryReads.get(key);
+        await pending?.promise;
+      } while (pending !== registryReads.get(key));
 
-      return registryStatuses.get(this) || { ok: true };
+      return registryStatuses.get(key) || { ok: true };
     },
     /**
      * Сбрасывает счёт изменённого аккаунта сразу при ACK или общем SSE-событии.
@@ -274,6 +310,7 @@ export const useProvidersStore = defineStore('providers', {
       const next = { ...this.usage };
 
       delete next[providerId];
+      delete this.usageRecoveryAfter[providerId];
       this.usage = next;
       this.usageVersion += 1;
       this.usageRequest += 1;
@@ -325,6 +362,7 @@ export const useProvidersStore = defineStore('providers', {
         this.usageTransport.status = 'error';
         this.usageTransport.error = failureText(error) || t('settings.usageLoadFailure');
         this.usageTransport.deliveryStale = this.usageTransport.receivedAt > 0;
+        this.markUsageRecovery();
       }
     },
     /**
@@ -336,7 +374,21 @@ export const useProvidersStore = defineStore('providers', {
         return false;
       }
 
-      this.usage = usage;
+      const next: Record<string, UsageEntry> = {};
+
+      for (const [id, entry] of Object.entries(usage)) {
+        const boundary = this.usageRecoveryAfter[id];
+        const recovered = boundary !== undefined && entry.state === 'ok' && !entry.stale
+          && typeof entry.lastSuccessfulAt === 'number' && entry.lastSuccessfulAt > boundary;
+
+        if (recovered && (!this.usageTransport.everConnected || this.usageTransport.connected)) {
+          delete this.usageRecoveryAfter[id];
+        }
+
+        next[id] = this.usageRecoveryAfter[id] === undefined ? entry : { ...entry, stale: true };
+      }
+
+      this.usage = next;
       this.usageAt = Date.now();
       this.usageVersion += 1;
       this.usageTransport.status = 'success';
@@ -348,6 +400,18 @@ export const useProvidersStore = defineStore('providers', {
       return true;
     },
     /**
+     * Запоминает последний замер до разрыва: повтор кэша не подтверждает восстановление.
+     * Старые исполнители без metadata сохраняют прежний контракт доставки.
+     */
+    markUsageRecovery() {
+      for (const [id, entry] of Object.entries(this.usage)) {
+        if (Object.hasOwn(entry, 'lastSuccessfulAt')) {
+          this.usageRecoveryAfter[id] = Math.max(this.usageRecoveryAfter[id] || 0,
+            entry.lastSuccessfulAt || 0);
+        }
+      }
+    },
+    /**
      * Потеря общего SSE помечает доставку устаревшей для всех читателей.
      * Сам reconnect метку не снимает: нужен новый принятый снимок usage.
      */
@@ -357,6 +421,7 @@ export const useProvidersStore = defineStore('providers', {
 
       if (transport.everConnected && transport.connected && !connected) {
         transport.deliveryStale = true;
+        this.markUsageRecovery();
       }
 
       transport.connected = connected;

@@ -1,12 +1,14 @@
 // Read-only статистика подписки Kimi. Сам GrigDesk не открывает OAuth credentials:
 // официальный `kimi web` кратковременно выступает credential broker и отдаёт
 // типизированный `/api/v1/oauth/usage`. Model session/turn при этом не создаётся.
-import { spawn } from 'node:child_process';
+import { spawn } from '../providerInstall/externalCliProcess.ts';
 import type { ChildProcess } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { isRecord } from '../../../../shared/lib/objects.ts';
 import { usagePercentOrNull } from '../providerUsage.ts';
+import type { UsageBar } from '../providerUsage.ts';
 
 const START_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -22,6 +24,7 @@ export interface KimiUsageResult {
   summary?: unknown;
   limits?: unknown;
   extra_usage?: unknown;
+  quota?: unknown;
 }
 
 // Адрес поднятого loopback-брокера и его одноразовый token.
@@ -51,7 +54,6 @@ function waitForExit(child: ChildProcess, timeoutMs = EXIT_TIMEOUT_MS): Promise<
 }
 
 function usageBrokerEnv(config: Record<string, unknown>): Record<string, string> {
-  const binDir = path.dirname(String(config.kimiBin));
   // Native binary распаковывает встроенные web-assets перед стартом API. Держим
   // этот технический кэш в runtime-каталоге GrigDesk: systemd unit может не иметь
   // права писать в host ~/.cache, а OAuth home Kimi остаётся отдельным read-only
@@ -64,7 +66,9 @@ function usageBrokerEnv(config: Record<string, unknown>): Record<string, string>
     KIMI_DISABLE_TELEMETRY: '1',
     KIMI_CODE_NO_AUTO_UPDATE: '1',
     NO_COLOR: '1',
-    PATH: `${binDir}:/usr/local/bin:/usr/bin:/bin`,
+    // npm-entry запускает Node через env: пользовательский каталог Node нельзя терять.
+    // Неизменённый PATH также сохраняет shell-снимок в слое externalCliProcess.
+    PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
   };
 }
 
@@ -96,9 +100,11 @@ function parseReadyUrl(output: unknown): BrokerReady | null {
 export async function requestKimiManagedUsage(config: Record<string, unknown>, {
   spawnProcess = spawn,
   fetchImpl = globalThis.fetch,
+  startupTimeoutMs = START_TIMEOUT_MS,
 }: {
   spawnProcess?: typeof spawn;
   fetchImpl?: typeof fetch;
+  startupTimeoutMs?: number;
 } = {}): Promise<KimiUsageAttempt> {
   // `kimi web` индексирует cwd как workspace ещё до ready-banner. Если запускать
   // его из корня GrigDesk, read-only проверка лимитов превращается в долгий обход
@@ -131,9 +137,10 @@ export async function requestKimiManagedUsage(config: Record<string, unknown>, {
   let stdout = '';
   let stderr = '';
   let ready: BrokerReady | null = null;
+  let startupFailure: string | null = null;
   let resolveReady: (value: BrokerReady | null) => void = () => {};
   const readyPromise = new Promise<BrokerReady | null>((resolve) => { resolveReady = resolve; });
-  const timer = setTimeout(() => resolveReady(null), START_TIMEOUT_MS);
+  const timer = setTimeout(() => resolveReady(null), startupTimeoutMs);
   timer.unref?.();
 
   child.stdout?.on('data', (chunk: Buffer) => {
@@ -144,16 +151,26 @@ export async function requestKimiManagedUsage(config: Record<string, unknown>, {
   child.stderr?.on('data', (chunk: Buffer) => {
     stderr = `${stderr}${String(chunk || '')}`.slice(-MAX_PROCESS_OUTPUT);
   });
-  child.once('error', () => resolveReady(null));
-  child.once('close', () => resolveReady(null));
+  child.once('error', (error: Error) => {
+    startupFailure = error.message;
+    resolveReady(null);
+  });
+  child.once('close', (code: number | null, signal: NodeJS.Signals | null) => {
+    const outcome = signal ? `сигнал ${signal}` : `код ${code ?? '?'}`;
+
+    startupFailure ??= `Kimi usage broker завершился до готовности: ${outcome}`;
+    resolveReady(null);
+  });
 
   try {
     ready = await readyPromise;
     clearTimeout(timer);
+
     if (!ready) {
       return {
-        reason: 'startup_timeout',
-        error: stderr.trim().slice(-500) || 'Kimi usage broker не поднялся за отведённое время',
+        reason: startupFailure === null ? 'startup_timeout' : 'spawn_failed',
+        error: stderr.trim().slice(-500) || startupFailure
+          || 'Kimi usage broker не поднялся за отведённое время',
       };
     }
     let response: Response;
@@ -241,6 +258,104 @@ function resetIso(value: unknown): string | null {
   return Number.isFinite(time) ? new Date(time).toISOString() : null;
 }
 
+const ratioPercent = (value: unknown): number | null => isRecord(value)
+  && typeof value.usedRatio === 'number' ? usagePercentOrNull(value.usedRatio * 100) : null;
+
+/**
+ * Новый кошелёк переводит только числовые cents и известную валюту в прежний контракт.
+ * Пустой объект не доказывает получение баланса и не превращается в бесплатную квоту.
+ */
+function quotaWallet(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value) || typeof value.currency !== 'string'
+    || !/^[A-Z]{3}$/u.test(value.currency.toUpperCase())) {
+    return null;
+  }
+
+  const fields = {
+    balanceCents: 'balance_cents',
+    totalCents: 'total_cents',
+    monthlyChargeLimitCents: 'monthly_charge_limit_cents',
+    monthlyUsedCents: 'monthly_used_cents',
+  };
+  const extra: Record<string, unknown> = {};
+
+  for (const [source, target] of Object.entries(fields)) {
+    if (typeof value[source] === 'number' && Number.isFinite(value[source])) {
+      extra[target] = value[source];
+    }
+  }
+
+  if (!Object.keys(extra).length) {
+    return null;
+  }
+
+  return {
+    ...extra,
+    currency: value.currency.toUpperCase(),
+    monthly_charge_limit_enabled: value.monthlyChargeLimitEnabled === true,
+  };
+}
+
+/**
+ * quota.usages имеет три самостоятельных окна; monthCode является частью месячного.
+ * Валидная новая форма целиком приоритетнее legacy, чтобы не склеить разные замеры.
+ */
+function quotaData(result: KimiUsageResult) {
+  if (!isRecord(result.quota)) {
+    return null;
+  }
+
+  const usages = isRecord(result.quota.usages) ? result.quota.usages : {};
+  const windows = [
+    {
+      field: 'limit5h',
+      key: 'kimi:1:5:hour',
+      label: 'Сессия (5ч)',
+      minutes: 300,
+    },
+    {
+      field: 'limit7d',
+      key: 'kimi:0:1:week',
+      label: 'Неделя (7д)',
+      minutes: 10080,
+    },
+    {
+      field: 'monthTotal',
+      key: 'kimi:monthTotal',
+      label: 'Месяц',
+      minutes: null,
+    },
+  ];
+  const bars: UsageBar[] = [];
+
+  for (const window of windows) {
+    const raw = usages[window.field];
+    const pct = ratioPercent(raw);
+
+    if (pct !== null && isRecord(raw)) {
+      bars.push({
+        key: window.key,
+        group: 'subscription',
+        label: window.label,
+        pct,
+        resetsAt: resetIso(raw.resetAt),
+        ...(window.minutes === null ? { windowKind: 'calendar-month' } : { windowMinutes: window.minutes }),
+      });
+    }
+  }
+
+  const extra = quotaWallet(result.quota.extraUsage);
+  const monthPct = ratioPercent(usages.monthTotal);
+  const codePct = ratioPercent(usages.monthCode);
+
+  return bars.length || extra || codePct !== null ? {
+    bars,
+    extra,
+    monthPct,
+    codePct,
+  } : null;
+}
+
 /**
  * Полосы приходят массивом (`summary` плюс `limits`), поэтому порядок сервиса стабилен
  * и своей сортировки не требует — в отличие от Codex, где вёдра лежат в объекте.
@@ -251,6 +366,13 @@ function resetIso(value: unknown): string | null {
  */
 export function parseKimiUsageBars(result: KimiUsageResult | null | undefined) {
   if (!result || result.kind !== 'ok') return [];
+
+  const quota = quotaData(result);
+
+  if (quota) {
+    return quota.bars;
+  }
+
   const rows = [result.summary, ...(Array.isArray(result.limits) ? result.limits : [])]
     .filter(Boolean) as Array<Record<string, unknown>>;
 
@@ -291,17 +413,21 @@ export function parseKimiUsageResources(result: KimiUsageResult | null | undefin
     return [];
   }
 
-  const raw = result.extra_usage;
+  const quota = quotaData(result);
+  const raw = quota ? quota.extra : result.extra_usage;
   const hasWallet = raw && typeof raw === 'object';
 
-  if (!hasWallet && !parseKimiUsageBars(result).length) {
+  if (!hasWallet && !quota && !parseKimiUsageBars(result).length) {
     return [];
   }
 
   const monthlyVolume = {
     key: 'kimi-monthly-volume',
     label: 'Месячный объём',
-    summary: 'Kimi не сообщает остаток',
+    summary: quota?.monthPct !== undefined && quota.monthPct !== null
+      ? `Израсходовано за месяц: ${quota.monthPct}%` : 'Kimi не сообщает остаток',
+    ...(quota?.codePct !== undefined && quota.codePct !== null
+      ? { note: `Из них код: ${quota.codePct}% месячной квоты` } : {}),
     tone: 'muted',
     controls: [{
       id: 'view-kimi-monthly-volume',
@@ -405,7 +531,17 @@ export function classifyKimiUsageResponse({ result = null, error = '', status = 
   if (result?.kind === 'ok') {
     const bars = parseKimiUsageBars(result);
     const resources = parseKimiUsageResources(result);
-    if (bars.length || resources.length) return { state: 'ok', bars, resources, message: '', action: null };
+
+    if (bars.length || resources.length) {
+      return {
+        state: 'ok',
+        bars,
+        resources,
+        message: '',
+        action: null,
+        usageSchema: quotaData(result) ? 'kimi-quota-v2' : 'kimi-summary-v1',
+      };
+    }
     return { state: 'unavailable', bars: [], resources: [], message: 'Kimi не вернул данные о лимитах.', action: null };
   }
   if (status === 401) return { state: 'auth_required', bars: [], message: 'Авторизация Kimi недействительна.', action: login };

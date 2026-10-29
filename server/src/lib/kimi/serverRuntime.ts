@@ -3,7 +3,7 @@
 // ACP-процесс живёт ровно на ход, а серверу нужен свой жизненный цикл: он слушает порт,
 // печатает токен в KIMI_CODE_HOME/server.token и обслуживает REST/WS. Модуль владеет только
 // процессом и готовностью; канал уточнений и события — у клиента и потока событий.
-import { spawn } from 'node:child_process';
+import { spawn } from '../providerInstall/externalCliProcess.ts';
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';

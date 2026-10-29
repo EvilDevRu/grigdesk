@@ -56,10 +56,11 @@ test('GLM передаёт approval человеку после resume наст�
  * Содержимое ответов инструментов остаётся в реальном журнале Harness и HTTP payload.
  */
 function lastUser(payload) {
-  const message = payload.messages.filter((item) => item.role === 'user').at(-1);
+  const messages = payload.messages.filter((item) => item.role === 'user').map((item) =>
+    typeof item.content === 'string' ? item.content
+      : (item.content ?? []).map((block) => block.text ?? '').join('\n'));
 
-  return typeof message?.content === 'string' ? message.content
-    : (message?.content ?? []).map((item) => item.text ?? '').join('\n');
+  return messages.findLast((message) => !message.startsWith('Current runtime context.')) ?? '';
 }
 
 /**
@@ -75,6 +76,15 @@ function smokeModel() {
     const index = calls.get(message) ?? 0;
 
     calls.set(message, index + 1);
+
+    if (message.includes('Запусти foreground критика') && index === 0) {
+      return glmToolCall('subagent', {
+        description: 'Smoke-критик', prompt: 'GLM_SMOKE_CHILD: прочитай marker.txt и проверь суффикс.',
+      }, 'smoke-delegation');
+    }
+    if (message.includes('GLM_SMOKE_CHILD') && index === 0) {
+      return glmToolCall('read', { file_path: 'marker.txt' }, 'smoke-child-read');
+    }
 
     if (message.includes('Прочитай marker.txt')) {
       marker ??= /GLM-SMOKE-[a-f0-9]+/u.exec(JSON.stringify(payload.messages))?.[0];
@@ -170,6 +180,10 @@ test('smoke выбирает явный ELF/cache, отчёт loopback и не �
     },
   });
 
+  if (!report.ok) {
+    t.diagnostic(JSON.stringify(mock.requests.map(({ payload }) => lastUser(payload).slice(0, 80))));
+  }
+
   assert.equal(report.ok, true, JSON.stringify(report.steps));
   assert.equal(report.kind, 'loopback');
   assert.equal(report.mode, 'api');
@@ -206,9 +220,20 @@ test('smoke выбирает явный ELF/cache, отчёт loopback и не �
     onSessionCreated: async () => {},
   };
 
-  assert.ok(candidate.info.glm.admission.some((entry) => entry.mode === 'api'
-    && entry.compatibility === report.compatibility));
-  assert.equal((await production.run(input)).reply, 'готово');
+  const after = await ensureTestDeepSeekBinary();
+
+  assert.deepEqual(after.info.glm.admission, candidate.info.glm.admission,
+    'smoke не выдаёт постоянный допуск до проверки отчёта');
+
+  if (candidate.info.glm.admission.some((entry) => entry.mode === 'api'
+    && entry.compatibility === report.compatibility)) {
+    assert.equal((await production.run(input)).reply, 'готово');
+  } else {
+    const before = mock.requests.length;
+
+    await assert.rejects(production.run(input), { code: 'glm_runtime_not_admitted' });
+    assert.equal(mock.requests.length, before, 'временный smoke admission не открыл production');
+  }
 
   const requests = mock.requests.length;
   const denied = createGlmAdapter({
@@ -233,6 +258,50 @@ test('smoke не выдаёт DI admission для Coding Plan', async () => {
     cacheDir: '/missing',
     workRoot: '/missing',
   }), { code: 'glm_mode_not_admitted' });
+});
+
+test('smoke сохраняет HTTP-статус и тело 1113 из настоящего ELF и останавливается на первом отказе', {
+  timeout: 900000,
+}, async (t) => {
+  const candidate = await ensureTestDeepSeekBinary();
+  const root = await createGlmBinaryFixtureRoot('glm-live-error-');
+  const mock = await startGlmLoopback({
+    expectedKey: GLM_SERVICE_KEY,
+    scenarios: [{
+      kind: 'http-error',
+      status: 429,
+      code: '1113',
+      message: 'Insufficient balance or no resource package. Please recharge.',
+    }],
+  });
+
+  t.after(async () => {
+    await mock.stop();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  const report = await runGlmLiveSmoke({
+    mode: 'api',
+    env: { PATH: process.env.PATH, ZAI_API_KEY: GLM_SERVICE_KEY },
+    config: serviceConfig,
+    binary: candidate.binary,
+    cacheDir: candidate.cacheDir,
+    workRoot: root,
+    adapterDeps: {
+      modelEndpoint: mock.endpoint,
+      egressGuard: await writeGlmEgressGuard(root),
+    },
+  });
+
+  assert.equal(report.kind, 'loopback');
+  assert.equal(report.ok, false);
+  assert.equal(report.turns, 1);
+  assert.match(report.steps.find((step) => step.name === 'ответ').detail, /код 1113/u);
+  assert.equal(report.modelErrors.length, 1);
+  assert.equal(report.modelErrors[0].httpStatus, 429);
+  assert.equal(JSON.parse(report.modelErrors[0].errorText).error.code, '1113');
+  assert.equal(mock.requests.length, 1, 'Терминальный отказ не расходует оставшиеся ходы smoke');
+  assert.equal(JSON.stringify(report).includes(GLM_SERVICE_KEY), false);
 });
 
 test('CLI без confirm-live отказывает до чтения env и запуска модели', async () => {

@@ -8,20 +8,22 @@
           aria-label="Поиск контейнера"
         />
       </div>
-      <UiCheckbox v-model="showStopped">Показывать незапущенные</UiCheckbox>
-    </div>
-
-    <div class="docker-containers__caption" aria-live="polite">
-      <span>Контейнеры: {{ visible.length }} из {{ store.containers.length }}</span>
-      <span>Сгруппированы по проектам</span>
+      <div class="docker-containers__filter-options">
+        <UiCheckbox v-model="showStopped">Показывать незапущенные</UiCheckbox>
+        <span class="docker-containers__caption" aria-live="polite"
+              :aria-label="`Показано контейнеров: ${visible.length} из ${store.containers.length}`">
+          {{ visible.length }} из {{ store.containers.length }}
+        </span>
+      </div>
     </div>
 
     <UiInlineMessage v-if="message" :tone="message.tone" class="docker-containers__message">
       {{ message.text }}
     </UiInlineMessage>
 
-    <UiLoadingState v-if="store.loading && !store.containers.length"
-      label="Получаем контейнеры…" description="Здесь появятся проекты и состояние их сервисов." />
+    <DockerLoading v-if="store.loading && !store.containers.length"
+      label="Получаем контейнеры…" description="Здесь появятся проекты и состояние их сервисов."
+      area="containers" :failed="Boolean(store.error)" />
     <div v-else-if="!groups.length" class="docker-containers__empty">
       <strong>{{ store.containers.length ? 'Контейнеры не найдены' : 'Контейнеров пока нет' }}</strong>
       <p v-if="store.containers.length">Измените запрос или включите показ незапущенных контейнеров.</p>
@@ -32,6 +34,7 @@
       <header class="docker-group__head">
         <UiIconButton
           role="embedded"
+          data-context="workspace-toolbar"
           :label="`${collapsed.has(group.key) ? 'Развернуть' : 'Свернуть'} проект ${group.title}`"
           v-tooltip="collapsed.has(group.key) ? 'Развернуть проект' : 'Свернуть проект'"
           :aria-expanded="!collapsed.has(group.key)"
@@ -60,6 +63,7 @@
           <UiIconButton
             v-if="group.running"
             role="embedded"
+            data-context="workspace-toolbar"
             :label="`Остановить проект ${group.title}`"
             v-tooltip="'Остановить весь проект'"
             :disabled="projectBusy(group)"
@@ -89,14 +93,14 @@
               <div class="docker-row__name">
                 <span class="docker-row__dot" aria-hidden="true"></span>
                 <strong v-tooltip="container.name">{{ container.compose?.service || container.name }}</strong>
+                <div class="docker-row__state">
+                  <span v-tooltip="container.status">{{ stateLabel(container.state) }}</span>
+                  <span v-if="container.health" class="docker-row__health" :data-health="container.health">
+                    {{ healthLabel(container.health) }}
+                  </span>
+                </div>
               </div>
               <small class="docker-row__image" v-tooltip="container.image">{{ container.image }}</small>
-              <div class="docker-row__state">
-                <span v-tooltip="container.status">{{ stateLabel(container.state) }}</span>
-                <span v-if="container.health" class="docker-row__health" :data-health="container.health">
-                  {{ healthLabel(container.health) }}
-                </span>
-              </div>
             </div>
 
             <div class="docker-row__ports">
@@ -129,6 +133,7 @@
             <div class="docker-row__actions">
               <UiIconButton
                 role="embedded"
+                data-context="workspace-toolbar"
                 :label="`Логи ${container.name}`"
                 v-tooltip="'Логи'"
                 @click="emit('logs', container)"
@@ -139,6 +144,7 @@
               </UiIconButton>
               <UiIconButton
                 role="embedded"
+                data-context="workspace-toolbar"
                 :label="`Терминал в контейнере ${container.name}`"
                 v-tooltip="allowExec ? 'Терминал' : 'Терминал выключен в настройках плагина'"
                 :disabled="container.state !== 'running' || !allowExec"
@@ -150,6 +156,7 @@
               </UiIconButton>
               <UiIconButton
                 role="embedded"
+                data-context="workspace-toolbar"
                 :label="`${container.state === 'running' ? 'Перезапустить' : 'Запустить'} ${container.name}`"
                 v-tooltip="container.state === 'running' ? 'Перезапустить' : 'Запустить'"
                 :disabled="store.isBusy(group.project)"
@@ -167,6 +174,7 @@
               <UiIconButton
                 v-if="container.state === 'running'"
                 role="embedded"
+                data-context="workspace-toolbar"
                 :label="`Остановить ${container.name}`"
                 v-tooltip="'Остановить'"
                 :disabled="store.isBusy(group.project)"
@@ -177,6 +185,7 @@
               </UiIconButton>
               <UiIconButton
                 role="embedded"
+                data-context="workspace-toolbar"
                 :label="`Удалить контейнер ${container.name}`"
                 v-tooltip="'Удалить контейнер'"
                 tone="danger"
@@ -197,6 +206,8 @@
 </template>
 
 <script setup lang="ts">
+import DockerLoading from './DockerLoading.vue';
+
 import { computed, onBeforeUnmount, ref } from 'vue';
 import type { SVGAttributes } from 'vue';
 
@@ -220,7 +231,6 @@ import {
   UiSearchInput,
   confirmDialog,
   vTooltip,
-  UiLoadingState,
 } from '../../ui';
 import { formatPort, formatSize, stateLabel, stateTone } from './format';
 import { dockerSettings } from './settings';
@@ -464,42 +474,47 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .docker-containers {
+  container: docker-containers / inline-size;
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .docker-containers__filters {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px 20px;
+  justify-content: space-between;
+  gap: 12px 24px;
 }
 
 .docker-containers__search {
   min-width: 0;
-  flex: 1 1 280px;
+  flex: 0 1 420px;
+}
+
+.docker-containers__filter-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
 }
 
 .docker-containers__caption {
-  display: flex;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 6px 12px;
+  flex: none;
   color: var(--ink-mid);
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .docker-containers__empty {
-  padding: 40px 20px;
-  border: 1px dashed var(--line-2);
-  border-radius: var(--radius);
+  padding: 32px 12px;
   text-align: center;
 }
 
 .docker-containers__empty strong {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .docker-containers__empty p {
@@ -509,18 +524,16 @@ onBeforeUnmount(() => {
 }
 
 .docker-group {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  overflow: hidden;
+  min-width: 0;
 }
 
 .docker-group__head {
   display: flex;
   align-items: center;
-  padding: 12px;
-  gap: 10px;
-  background: var(--surface-2);
+  min-width: 0;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  gap: 8px;
 }
 
 .docker-group__title {
@@ -531,7 +544,7 @@ onBeforeUnmount(() => {
 .docker-group__title strong {
   display: block;
   overflow: hidden;
-  font-size: 14px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -541,7 +554,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   margin-top: 3px;
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -574,7 +587,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: 10px;
+  margin-left: 0;
 }
 
 .docker-list {
@@ -586,17 +599,17 @@ onBeforeUnmount(() => {
 .docker-group__columns,
 .docker-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(170px, 0.8fr) 54px 84px 158px;
+  grid-template-columns: minmax(180px, 1fr) minmax(130px, 0.7fr) 54px 84px 156px;
   align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
+  gap: 12px;
+  padding: 10px;
   border-top: 1px solid var(--line);
 }
 
 .docker-group__columns {
-  padding-block: 8px;
+  padding-block: 6px;
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .docker-group__columns > :nth-child(3),
@@ -627,10 +640,13 @@ onBeforeUnmount(() => {
 .docker-row__name {
   display: flex;
   align-items: center;
+  min-width: 0;
   gap: 8px;
 }
 
 .docker-row__name strong {
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
   font-size: 13px;
   font-weight: 600;
@@ -641,20 +657,23 @@ onBeforeUnmount(() => {
 .docker-row__image {
   display: block;
   overflow: hidden;
-  margin: 4px 0;
+  margin: 2px 0 0;
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .docker-row__state {
   display: flex;
+  flex: 0 1 auto;
+  max-width: 70%;
+  justify-content: flex-end;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 8px;
   color: var(--ink-mid);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .docker-row__health {
@@ -679,22 +698,21 @@ onBeforeUnmount(() => {
 }
 
 .docker-port {
-  padding: 3px 7px;
-  border: 1px solid var(--line-2);
-  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--toolbar-control-h);
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   text-decoration: none;
   white-space: nowrap;
 }
 
 .docker-port:hover {
-  border-color: var(--accent);
+  text-decoration: underline;
 }
 
 .docker-port.is-internal {
-  border-color: var(--line);
   color: var(--ink-mid);
 }
 
@@ -716,7 +734,7 @@ onBeforeUnmount(() => {
   display: none;
   color: var(--ink-mid);
   font-family: var(--sans);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .docker-row__actions {
@@ -729,7 +747,7 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
-@container docker-panel (max-width: 960px) {
+@container docker-containers (max-width: 960px) {
   .docker-group__columns {
     display: none;
   }
@@ -765,19 +783,30 @@ onBeforeUnmount(() => {
   }
 
   .docker-row__metric-label {
-    display: block;
-    margin-bottom: 4px;
+    display: inline;
+    margin-right: 6px;
   }
 }
 
-@container docker-panel (max-width: 600px) {
+@container docker-containers (max-width: 720px) {
+  .docker-containers__filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .docker-containers__filter-options {
+    justify-content: space-between;
+  }
+}
+
+@container docker-containers (max-width: 600px) {
   .docker-group__head {
     flex-wrap: wrap;
     gap: 8px;
   }
 
   .docker-group__title {
-    flex-basis: calc(100% - 44px);
+    flex-basis: calc(100% - 60px);
   }
 
   .docker-group__count {
@@ -790,8 +819,8 @@ onBeforeUnmount(() => {
 
   .docker-row {
     grid-template-columns: 1fr 1fr;
-    padding: 14px 12px;
-    gap: 12px;
+    padding: 10px 0;
+    gap: 8px;
   }
 
   .docker-row__main {
@@ -825,9 +854,11 @@ onBeforeUnmount(() => {
   }
 }
 @media (max-height: 500px) {
-  .docker-containers { gap: 8px; }
-  .docker-containers__caption > :last-child { display: none; }
-  .docker-group__head { padding: 6px 12px; }
-  .docker-row { padding-block: 8px; }
+  .docker-containers {
+    gap: 8px;
+  }
+  .docker-row {
+    padding-block: 8px;
+  }
 }
 </style>

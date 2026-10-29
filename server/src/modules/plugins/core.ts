@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { PluginCore } from '../../../../packages/plugin-types/src/server.ts';
 import type { DocumentReader } from '../../lib/documents/reader.ts';
 import { getProviderAdapters } from '../../lib/executors/index.ts';
 import { acquireKernelFileLock } from '../../lib/kernelLock.ts';
@@ -10,7 +11,9 @@ import { createProviderCapabilities } from './providerCapabilities.ts';
  * Набор замыкает идентификатор плагина и использует экземпляры сервисов приложения.
  * Читатель выдаётся только на чтение; отсутствие зависимости обнаруживается при вызове.
  */
-export function createPluginCore(fastify: FastifyInstance, pluginId: string, reader?: DocumentReader) {
+export function createPluginCore(
+  fastify: FastifyInstance, pluginId: string, reader?: DocumentReader,
+): PluginCore {
   const capabilities = createProviderCapabilities();
   const documents = () => {
     if (!reader) {

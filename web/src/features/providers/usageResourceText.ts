@@ -16,7 +16,7 @@ const RESOURCE_TEMPLATES: Readonly<Record<string, readonly string[]>> = {
   'codex:chatgpt-credits': ['unlimited', 'balance', 'creditsManaged', 'creditsUnavailable'],
   'codex:rate-limit-resets': ['available', 'resetNote'],
   'kimi:kimi-extra-usage': ['kimiWalletUnavailable'],
-  'kimi:kimi-monthly-volume': ['kimiMonthlyVolumeUnavailable'],
+  'kimi:kimi-monthly-volume': ['kimiMonthlyVolumeUnavailable', 'kimiMonthlySpent', 'kimiMonthlyCode'],
   'deepseek:balance': ['toppedUp', 'bonus', 'insufficientBalance'],
   'glm:balance': ['cash', 'bonus', 'credit'],
   'deepseek:forecast': ['forecastPending', 'stalled', 'hoursLeft', 'daysLeft',

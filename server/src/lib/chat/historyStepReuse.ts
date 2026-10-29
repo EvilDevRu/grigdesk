@@ -24,7 +24,9 @@ export function restoreHistorySteps(
       statusCode: 400
     });
   }
-  if (!base || request.baseRevision !== base.revision || incoming.revision !== base.revision) {
+  // Общая revision меняется и от серверных метрик/новых блоков. Безопасность refs
+  // определяется источником под lock; CAS настроек ниже по-прежнему использует incoming.revision.
+  if (!base) {
     throw new ChatHistoryError('chat_steps_changed', 'База сохранённых шагов изменилась.');
   }
 
