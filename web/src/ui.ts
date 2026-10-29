@@ -79,3 +79,6 @@ export {
   uiLocale, setUiLocale, snapshotText, t, resolveUiText, messageRef, locales,
 } from './services/locale.ts';
 export type { UiText, MessageRef } from './services/locale.ts';
+
+export { default as UiSkeleton } from './components/feedback/UiSkeleton.vue';
+export { default as UiSkeletonLayout } from './components/feedback/UiSkeletonLayout.vue';

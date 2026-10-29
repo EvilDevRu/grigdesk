@@ -14,17 +14,18 @@
                ref="panel" v-bind="item.panelProps || {}" :active="true" :compact="false"
                presentation="page" :intents="intents"
                @consume-intent="consume" @context="receiver?.context($event)" />
-    <UiLoadingState v-else-if="!error" :label="t('core.toolWaiting')" />
+    <component :is="panelLoading(id)" v-else-if="!error" :label="t('core.toolWaiting')" />
   </main>
 </template>
 
 <script setup lang="ts">
+import { panelLoading } from '../shared/tools/panelLoading.ts';
+
 import { toolWindowText } from '../shared/tools/toolWindowMessages.ts';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import {
   UiButton,
   t,
-  UiLoadingState,
 } from '../ui.ts';
 import { useAuthStore } from '../stores/auth.ts';
 import { usePluginsStore } from '../stores/plugins.ts';

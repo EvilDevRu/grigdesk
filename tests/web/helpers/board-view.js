@@ -118,6 +118,7 @@ const DEFAULT_TASKS = [
  */
 export async function mountBoardView(t, {
   prefix = 'board',
+  pending = false,
   tasks = DEFAULT_TASKS,
   toReview = [],
   created = [],
@@ -148,7 +149,7 @@ export async function mountBoardView(t, {
   const stores = {
     board: defineStore(`board-view-board-${nonce}`, {
       state: () => ({
-        data: {
+        data: pending ? null : {
           userId: 7,
           today: { hours: 0, tasks_count: 0, avg_time: 0 },
           dynamics: {},
@@ -159,7 +160,7 @@ export async function mountBoardView(t, {
           created,
         },
         error: null,
-        loading: false,
+        loading: pending,
       }),
       actions: { async load() {} },
     }),

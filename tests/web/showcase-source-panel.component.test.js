@@ -15,6 +15,7 @@ process.env.NODE_ENV = 'test';
 const PANEL = webFile('src/views/showcase/ShowcaseSourcePanel.vue');
 
 const UI_STUB = `
+export * from './src/ui.ts';
 export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
 export { default as UiButton } from '${webFile('src/components/primitives/UiButton.vue')}';
 export { default as UiCheckbox } from '${webFile('src/components/primitives/UiCheckbox.vue')}';

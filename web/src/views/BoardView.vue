@@ -1,6 +1,6 @@
 <template>
   <div class="board" :class="{ 'stats-expanded': statsExpanded }">
-    <UiLoadingState v-if="!data && !error" label="Загрузка доски…" variant="cards" />
+    <BoardLoading v-if="!data && !error" label="Загрузка доски…"  />
     <div v-else-if="error" class="err">
       Ошибка B24: {{ error }}
       <UiButton variant="text" @click="openSettings({ pageId: 'connections.b24' })">→ Настройки</UiButton>
@@ -429,6 +429,8 @@
 </template>
 
 <script setup lang="ts">
+import BoardLoading from './BoardLoading.vue';
+
 import type { BoardTask } from '../shared/boardContracts.ts';
 import type { UiFieldHandle } from '../ui.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
@@ -462,7 +464,6 @@ import {
   UiTabs,
   UiToggleButton,
   vTooltip,
-  UiLoadingState,
 } from '../ui';
 
 const ui = useUiStore();

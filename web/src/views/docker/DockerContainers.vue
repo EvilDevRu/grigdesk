@@ -20,8 +20,9 @@
       {{ message.text }}
     </UiInlineMessage>
 
-    <UiLoadingState v-if="store.loading && !store.containers.length"
-      label="Получаем контейнеры…" description="Здесь появятся проекты и состояние их сервисов." />
+    <DockerLoading v-if="store.loading && !store.containers.length"
+      label="Получаем контейнеры…" description="Здесь появятся проекты и состояние их сервисов."
+      area="containers" :failed="Boolean(store.error)" />
     <div v-else-if="!groups.length" class="docker-containers__empty">
       <strong>{{ store.containers.length ? 'Контейнеры не найдены' : 'Контейнеров пока нет' }}</strong>
       <p v-if="store.containers.length">Измените запрос или включите показ незапущенных контейнеров.</p>
@@ -197,6 +198,8 @@
 </template>
 
 <script setup lang="ts">
+import DockerLoading from './DockerLoading.vue';
+
 import { computed, onBeforeUnmount, ref } from 'vue';
 import type { SVGAttributes } from 'vue';
 
@@ -220,7 +223,6 @@ import {
   UiSearchInput,
   confirmDialog,
   vTooltip,
-  UiLoadingState,
 } from '../../ui';
 import { formatPort, formatSize, stateLabel, stateTone } from './format';
 import { dockerSettings } from './settings';

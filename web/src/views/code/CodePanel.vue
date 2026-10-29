@@ -302,7 +302,9 @@
             <span class="cnt mono">{{ fileHistoryEntries.length }}</span>
           </div>
           <div class="history-path mono" v-tooltip="fileHistoryPath">{{ fileHistoryPath }}</div>
-          <UiLoadingState v-if="fileHistoryLoading" label="Читаю историю…" />
+          <UiLoadingState v-if="fileHistoryLoading" label="Читаю историю…" >
+            <UiSkeletonLayout layout="list" :header="false" />
+          </UiLoadingState>
           <div v-else-if="fileHistoryError" class="perr">{{ fileHistoryError }}</div>
           <div v-else-if="!fileHistoryEntries.length" class="pnote">История файла пуста.</div>
           <UiPressable v-for="entry in fileHistoryEntries" :key="entry.hash"
@@ -429,7 +431,9 @@
             </div>
           </div>
           <div class="scroll tree git-tree" :class="{ 'commit-tree': gitPane === 'commits' }">
-            <UiLoadingState v-if="gitLoading && !git" label="Читаю гит…" />
+            <UiLoadingState v-if="gitLoading && !git" label="Читаю гит…" >
+              <UiSkeletonLayout layout="list" :header="false" />
+            </UiLoadingState>
             <template v-if="git">
               <div v-if="gitPane === 'changes' && !changeGroups.length"
                    class="git-clean" role="status">
@@ -467,7 +471,9 @@
                     </svg>
                   </UiIconButton>
                 </div>
-                <UiLoadingState v-if="commitsLoading" label="Читаю коммиты…" />
+                <UiLoadingState v-if="commitsLoading" label="Читаю коммиты…" >
+                  <UiSkeletonLayout layout="list" :header="false" />
+                </UiLoadingState>
                 <div v-else-if="commitsError" class="perr commits-state">{{ commitsError }}</div>
                 <div class="commit-log">
                   <UiPressable v-for="c in git.log" :key="c.hash" class="commit"
@@ -1105,6 +1111,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../ui';
+
 import { toolWindowText } from '../../shared/tools/toolWindowMessages.ts';
 import { sendCodeWindowAction } from '../../shared/tools/toolWindowActions.ts';
 import { parseToolWindowState } from '../../shared/tools/toolWindowState.ts';

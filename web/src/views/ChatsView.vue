@@ -12,7 +12,7 @@
       <span></span>
     </div>
     <div class="stage">
-      <ChatLoadingPreview v-if="chat.loaded === false" />
+      <ChatLoadingPreview v-if="chat.loaded === false" :failed="Boolean(chat.loadError)" />
       <ChatSession v-else-if="activeId" :key="activeId" :sid="activeId" @back="pane = 'list'" />
     </div>
   </div>

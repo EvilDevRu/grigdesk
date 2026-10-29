@@ -92,7 +92,7 @@
             </UiButton>
           </div>
           <div class="brief-scroll">
-            <UiLoadingState v-if="loading && !detail" label="Читаю данные задачи…" variant="document" />
+            <TaskLoading v-if="loading && !detail" label="Читаю данные задачи…"  area="description" />
             <div v-else-if="editForm" class="task-edit" aria-label="Редактирование задачи">
               <UiField
                 label="Заголовок"
@@ -169,8 +169,8 @@
                 </UiField>
               </div>
 
-              <UiLoadingState v-if="editOptionsBusy" label="Загружаю исполнителей и проекты…"
-                variant="inline" />
+              <TaskLoading v-if="editOptionsBusy" label="Загружаю исполнителей и проекты…"
+                           area="options" :failed="Boolean(editOptionsError)" />
               <div v-else-if="editOptionsError" class="edit-options-state bad">
                 <span>{{ editOptionsError }}</span>
                 <UiButton data-role="task-edit-options-retry" @click="loadEditOptions">
@@ -618,7 +618,8 @@
           role="tabpanel"
           aria-labelledby="task-tab-comments"
         >
-          <UiLoadingState v-if="comLoading && comments === null" label="загрузка комментариев…" />
+          <TaskLoading v-if="comLoading && comments === null"
+                       label="загрузка комментариев…" area="comments" />
           <div v-else-if="comments && !comments.length" class="tmuted">Комментариев нет.</div>
           <div v-else-if="comments" class="comlist">
             <div v-for="c in comments" :key="c.mid" class="com">
@@ -965,6 +966,8 @@
 </template>
 
 <script setup lang="ts">
+import TaskLoading from './TaskLoading.vue';
+
 import type {
   BoardNamedItem, TaskComment, TaskDetail, TaskLaunchOptions,
 } from '../shared/boardContracts.ts';
@@ -1006,7 +1009,6 @@ import {
   UiTextarea,
   UiTooltip,
   vTooltip,
-  UiLoadingState,
 } from '../ui';
 import { useUiStore } from '../stores/ui.ts';
 import { useTasksStore } from '../stores/tasks.ts';

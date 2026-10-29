@@ -13,6 +13,7 @@ const VIEW = webFile('src/views/SandboxesView.vue');
 // Элементы управления остаются настоящими: подменяется только решение человека
 // в диалоге, чтобы проверялось поведение самой страницы.
 const UI_STUB = `
+export * from './src/ui.ts';
 export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
 export { default as UiPaneHeader } from '${webFile('src/components/composites/UiPaneHeader.vue')}';
 export { default as UiActionLink } from '${webFile('src/components/primitives/UiActionLink.vue')}';
@@ -309,7 +310,7 @@ for (const remaining of [[], [{
       await wrapper.get('form').trigger('submit');
       await flushPromises();
       assert.equal(calls.some(([kind]) => kind === 'raise'), false);
-      assert.equal(wrapper.find('select').element.value, '');
+      assert.equal(wrapper.get('form.sandbox-raise select').element.value, '');
       assert.equal(wrapper.text().includes('990000'), true, 'поднятый стенд остаётся на экране');
     });
 }

@@ -14,6 +14,7 @@ import { createUiBrowser } from './helpers/ui-components.js';
 const VIEW = webFile('src/views/ShowcaseView.vue');
 
 const UI_STUB = `
+export * from './src/ui.ts';
 export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
 export { default as UiActionLink } from '${webFile('src/components/primitives/UiActionLink.vue')}';
 export { default as UiAudio } from '${webFile('src/components/primitives/UiAudio.vue')}';

@@ -18,8 +18,8 @@
       <AppShell v-else :active="auth.authenticated && (!shell.present || shell.status === 'online')">
         <MachineWelcome v-if="!workspaceStarted && shell.present && !shell.profile" />
         <div v-else-if="!workspaceStarted" class="workspace-waiting">
-          <UiLoadingState v-if="shell.status === 'connecting' || shell.status === 'online'"
-            :label="connectionMessage" variant="cards" />
+          <WorkspaceLoading v-if="shell.status === 'connecting' || shell.status === 'online'"
+            :label="connectionMessage" :route-name="String($route.name || '')" />
           <UiInlineMessage v-else :tone="connectionTone">
             {{ connectionMessage }}
           </UiInlineMessage>
@@ -41,6 +41,9 @@
 </template>
 
 <script setup lang="ts">
+import WorkspaceLoading from './shared/layout/WorkspaceLoading.vue';
+import SettingsModalLoading from './views/settings/SettingsModalLoading.vue';
+
 import { asyncView } from './shared/asyncView.ts';
 import { showSectionLoadFailure } from './shared/sectionLoadFailure.ts';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -56,7 +59,6 @@ import {
   UiTooltipHost,
   UiToastHost,
   UiInlineMessage,
-  UiLoadingState,
 } from './ui';
 import { clearAlertHistory, dismissAllAlerts } from './shared/alerts.ts';
 import AppShell from './shared/layout/AppShell.vue';
@@ -134,10 +136,14 @@ const connectionMessage = computed(() => {
   return `${name}: ${status}.`;
 });
 const settings = useSettingsStore();
-const SettingsModal = asyncView(() => import('./views/settings/SettingsModal.vue'), undefined, () => {
-  settings.dispose('load-failed');
-  showSectionLoadFailure();
-});
+const SettingsModal = asyncView(
+  () => import('./views/settings/SettingsModal.vue'),
+  SettingsModalLoading,
+  () => {
+    settings.dispose('load-failed');
+    showSectionLoadFailure();
+  },
+);
 
 let pollingStarted = false;
 let pollingGeneration = 0;
@@ -372,7 +378,8 @@ watch(() => auth.authenticated, (on, was) => {
 }
 
 .workspace-waiting {
-  padding: var(--page-gutter);
+  height: 100%;
+  min-height: 0;
 }
 
 </style>

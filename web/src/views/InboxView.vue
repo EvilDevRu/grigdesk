@@ -81,7 +81,7 @@
         </p>
       </section>
 
-      <UiLoadingState v-if="loading && !payload.items.length" label="Загружаю очередь…" variant="cards" />
+      <InboxLoading v-if="loading && !payload.items.length" label="Загружаю очередь…"  />
       <template v-else-if="payload.items.length">
         <section class="queue-head" aria-labelledby="inbox-items-title">
           <h2 id="inbox-items-title">Обращения</h2>
@@ -221,6 +221,8 @@
 </template>
 
 <script setup lang="ts">
+import InboxLoading from './InboxLoading.vue';
+
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { errorMessage } from '../../../shared/lib/errors.ts';
 
@@ -250,7 +252,6 @@ import {
   UiTabs,
   confirmDialog,
   promptDialog,
-  UiLoadingState,
 } from '../ui';
 import { openSettings } from '../shared/settingsNavigation.ts';
 import { usePluginsStore } from '../stores/plugins.ts';

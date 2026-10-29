@@ -1,7 +1,9 @@
 <template>
   <section class="sect" data-role="pipeline-deferred-findings">
     <div class="secth">Замечания на будущее</div>
-    <UiLoadingState v-if="loading" label="Читаю замечания попытки…" variant="document" />
+    <UiLoadingState v-if="loading" label="Читаю замечания попытки…" variant="document" >
+      <div class="findings-loading"><UiSkeletonLayout layout="text" :header="false" /></div>
+    </UiLoadingState>
     <div v-else-if="error" role="alert">
       <p>{{ error }}</p>
       <UiButton variant="text" @click="load">Повторить чтение</UiButton>
@@ -22,6 +24,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../ui';
+
 import { onBeforeUnmount, ref, watch } from 'vue';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
@@ -123,6 +127,9 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.findings-loading {
+  --skeleton-row-height: 20px; padding-left: 40px; }
+
 .source { display: block; color: var(--ink-mid); font-size: 0.85em; }
 li { margin-block: 0.5rem; overflow-wrap: anywhere; }
 </style>

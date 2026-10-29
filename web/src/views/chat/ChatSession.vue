@@ -637,6 +637,8 @@
 </template>
 
 <script setup lang="ts">
+import { COMPOSER_KEY, COMPOSER_MIN, COMPOSER_MAX_VH, storedComposerHeight } from './chatLayout.ts';
+
 import ChatWorkdir from './ChatWorkdir.vue';
 import { chatWorkdirLabel } from '../../../../shared/chat/chatWorkdir.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
@@ -1621,29 +1623,7 @@ function scrollDown() {
 // ── Высота поля ввода ───────────────────────────────────────────────────────────
 // Настройка устройства (localStorage, как ширина дока и списка чатов). Пусто =
 // высоту решает CSS, как раньше.
-const COMPOSER_KEY = 'grigdesk-chat-composer-h';
-// Минимум совпадает с CSS (`[data-role='chat-composer'] { min-height: 48px }`): иначе
-// нижняя часть хода разделителя мертва — тянешь, число меняется, поле стоит.
-const COMPOSER_MIN = 48;
-// Потолок тот же, что в CSS (`max-height: 46vh`) — вторая цифра рядом с первой
-// разъезжается, и разделитель снова получает мёртвый ход.
-const COMPOSER_MAX_VH = 0.46;
 const taEl = ref<InstanceType<typeof UiTextarea> | null>(null);
-
-
-/**
- * Читает сохранённую положительную высоту поля ввода.
- * Отказ storage и неверное число оставляют управление размером CSS.
- */
-function storedComposerHeight() {
-  try {
-    const raw = Number(localStorage.getItem(COMPOSER_KEY));
-
-    return Number.isFinite(raw) && raw > 0 ? raw : null;
-  } catch {
-    return null;
-  }
-}
 
 const composerH = ref<number | null>(storedComposerHeight());
 const composerStyle = computed(() => (

@@ -19,6 +19,7 @@ function uiFacadeStub(prefix) {
   const names = componentImports.map(([name]) => name).join(', ');
 
   return [
+    "export * from './src/ui.ts';",
     ...imports,
     `export { ${names} };`,
     `export const confirmDialog = (...args) => globalThis.${prefix}ConfirmDialog(...args);`,
@@ -30,8 +31,9 @@ function uiFacadeStub(prefix) {
  * PipelineView бандлится с настоящими UI-компонентами, а границы страницы остаются
  * управляемыми тестом. Так harness проверяет публичный facade без сетевых побочных эффектов.
  */
-export function compilePipelineView(prefix, { realGraph = false } = {}) {
+export function compilePipelineView(prefix, { realGraph = false, expose = [] } = {}) {
   return compileVue(VIEW_PATH, {
+    expose,
     stubs: {
       '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
       '../../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,

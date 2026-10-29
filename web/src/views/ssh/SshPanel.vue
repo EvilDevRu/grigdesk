@@ -366,7 +366,9 @@
           <span class="ssh-count">{{ store.connections?.length || 0 }}</span>
         </header>
 
-        <UiLoadingState v-if="refreshLoading && !store.connections?.length && !store.error" />
+        <UiLoadingState v-if="refreshLoading && !store.connections?.length && !store.error" >
+          <UiSkeletonLayout layout="list" :header="false" />
+        </UiLoadingState>
         <div v-else-if="store.connections?.length" class="ssh-connection-list">
           <article
             v-for="connection in store.connections"
@@ -589,6 +591,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../ui';
+
 import { toolWindowText } from '../../shared/tools/toolWindowMessages.ts';
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { Terminal } from '@xterm/xterm';

@@ -1,7 +1,9 @@
 <template>
   <div class="picker">
     <UiLoadingState v-if="!loaded && (loading || !error)" label="Ищем доступные стенды…"
-      description="Постоянные стенды и поднятые песочницы появятся здесь сами." />
+      description="Постоянные стенды и поднятые песочницы появятся здесь сами." :failed="Boolean(error)" >
+      <UiSkeletonLayout layout="list" :header="false" />
+    </UiLoadingState>
 
     <div v-else-if="!loaded" class="picker__state" role="status">
       <span class="picker__mark" aria-hidden="true">!</span>
@@ -133,6 +135,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../ui';
+
 import { computed } from 'vue';
 
 import {

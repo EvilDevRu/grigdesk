@@ -2,7 +2,9 @@
   <div class="settings-diagnostics">
     <SettingsScope />
     <p v-if="error" role="alert">{{ error }}</p>
-    <UiLoadingState v-if="!loaded && !error" :label="t('settings.loadingParameters')" variant="inline" />
+    <UiLoadingState v-if="!loaded && !error" :label="t('settings.loadingParameters')" variant="document" >
+      <UiSkeletonLayout layout="form" :header="false" />
+    </UiLoadingState>
     <SettingsField
       v-for="field in fields"
       :key="field.key"
@@ -34,6 +36,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../../ui';
+
 import { t, uiLocale } from '../../../ui.ts';
 
 import { computed, ref, watch } from 'vue';

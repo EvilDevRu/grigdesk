@@ -36,9 +36,12 @@ export function apiError(status, data) {
   return error;
 }
 
-async function compileView(view) {
-  if (!componentPromises.has(view)) {
-    componentPromises.set(view, compileVue(VIEWS[view], {
+async function compileView(view, expose = []) {
+  const key = `${view}:${expose.join(',')}`;
+
+  if (!componentPromises.has(key)) {
+    componentPromises.set(key, compileVue(VIEWS[view], {
+      expose,
       stubs: {
         '../shared/apiClient.ts': API_STUB,
         '../shared/settingsNavigation.ts': `
@@ -59,7 +62,7 @@ async function compileView(view) {
     }));
   }
 
-  return componentPromises.get(view);
+  return componentPromises.get(key);
 }
 
 async function installBrowser(t, view) {
@@ -99,8 +102,13 @@ export async function settle(flushPromises, cycles = 8) {
   for (let i = 0; i < cycles; i += 1) await flushPromises();
 }
 
+/**
+ * Монтирует настоящий экран с синтетическими API и контролируемыми диалогами.
+ * Дополнительный expose открывает тесту действие, не меняя его реализацию и шаблон.
+ */
 export async function mountChannelView(t, view, {
   api,
+  expose = [],
   confirm = async () => true,
   // По умолчанию — отмена: тест, который не ждал модалку с полем, не должен
   // случайно «ответить» за человека и создать задачу.
@@ -112,9 +120,10 @@ export async function mountChannelView(t, view, {
   globalThis.__channelPrompt = prompt;
   globalThis.__channelSse = [];
   globalThis.__channelSettingsRequests = [];
+
   const [{ mount, flushPromises }, component] = await Promise.all([
     import(TEST_UTILS),
-    compileView(view),
+    compileView(view, expose),
   ]);
   const wrapper = mount(component, { attachTo: browser.document.querySelector('#mount') });
 
