@@ -39,7 +39,7 @@ async function fixture(t) {
   const bin = path.join(root, 'dsh');
   await fs.mkdir(path.join(root, '.git'));
 
-  const info = { ...runtimeInfoFixture(), journal: { write: 3, read: [0, 1, 2, 3] } };
+  const info = { ...runtimeInfoFixture({ toolPermissions: true }), journal: { write: 3, read: [0, 1, 2, 3] } };
 
   await fs.writeFile(bin, [
     `#!${process.execPath}`,
@@ -130,6 +130,28 @@ function turn(app, message = 'synthetic prompt') {
     },
   });
 }
+
+test('неизвестный mode отвергается до запуска, старый ELF требует обновления', async (t) => {
+  const f = await fixture(t);
+  const invalid = await f.app.inject({
+    method: 'POST', url: '/api/chat',
+    payload: { chatKey: 'deepseek-chat', modelRef: { provider: 'deepseek', model: MODEL },
+      model: MODEL, mode: 'bypassPermissions', message: 'test' },
+  });
+
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.json().error, 'invalid_permission_mode');
+  const binary = path.join(f.root, 'dsh');
+  const source = await fs.readFile(binary, 'utf8');
+
+  assert.match(source, /"toolPermissions":true/u);
+  await fs.writeFile(binary, source.replace('"toolPermissions":true', '"toolPermissions":false'));
+  const unavailable = await turn(f.app);
+
+  assert.equal(unavailable.statusCode, 503);
+  assert.match(unavailable.json().message, /Обновите бинарник DeepSeek/u);
+  assert.equal((await entries(f.logFile)).some((item) => item.method === 'session/prompt'), false);
+});
 
 test('полный fake-чат: permission → binding → resume, шаги видны в SSE', async (t) => {
   const f = await fixture(t);

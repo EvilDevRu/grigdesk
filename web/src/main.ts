@@ -11,13 +11,14 @@ import { getToolPanelPorts, nativeToolId, registryToolId } from './shared/tools/
 import { shellAction } from './shared/shellClient.ts';
 import { recordOrNull } from '../../shared/lib/objects.ts';
 import { viewportCanDock } from './shared/tools/viewport.ts';
+import { installPluginRuntime } from './pluginRuntime/bootstrap.ts';
 
 import { createPinia } from 'pinia';
 import { router } from './router.ts';
 import { useDeviceStore } from './stores/device.ts';
 import { useAuthStore } from './stores/auth.ts';
 import { api, isReportedApiError, setApiLogSink } from './shared/apiClient.ts';
-import { setSseLogSink, configureSseRelay } from './composables/useSse.ts';
+import { setSseLogSink, configureSseRelay, sseSubscribe } from './composables/useSse.ts';
 import { currentDesktopMode } from './shared/desktopSettings.ts';
 import { parseMainRequest } from '../../shared/desktop/surfaceContract.ts';
 import { useUiStore } from './stores/ui.ts';
@@ -91,6 +92,12 @@ setSseLogSink((event, data) => {
   webLog.log.record(event, data);
 });
 app.use(pinia);
+
+const removePluginRuntime = installPluginRuntime(pinia, router, {
+  chat: useChatStore(pinia),
+  subscribe: sseSubscribe,
+});
+
 setUiDownloadAdapter({ available: canSaveInShell, save: saveLinkedFile });
 webLog.attachAuthStore(useAuthStore(pinia));
 
@@ -276,6 +283,7 @@ window.grigdeskToolClosed = (value) => {
 
 app.use(router).mount('#app');
 import.meta.hot?.dispose(() => {
+  removePluginRuntime();
   setApiLogSink(null);
   setUiDownloadAdapter(null);
   setSseLogSink(null);

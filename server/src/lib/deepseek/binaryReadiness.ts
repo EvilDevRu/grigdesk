@@ -4,7 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { decodeDeepSeekHostContract } from '../../../../shared/chat/deepSeekBinary.ts';
+import {
+  decodeDeepSeekHostContract,
+  type DeepSeekHostContract,
+} from '../../../../shared/chat/deepSeekBinary.ts';
 import { assertDeepSeekGlmApiAdmission } from '../../../../shared/node/glmCompatibility.ts';
 import { removePrivateTree } from '../../../../shared/node/files.ts';
 import { sha256File } from '../../../../shared/node/hash.ts';
@@ -19,7 +22,10 @@ const run = promisify(execFile);
 export async function assertDeepSeekBinaryReady(
   binary: string,
   hostFile: string,
-  { fullVerify = true }: { fullVerify?: boolean } = {},
+  { fullVerify = true, glmMode }: {
+    fullVerify?: boolean;
+    glmMode?: DeepSeekHostContract['glm']['mode'];
+  } = {},
 ) {
   let stage: string | undefined;
 
@@ -28,7 +34,7 @@ export async function assertDeepSeekBinaryReady(
     const digest = await sha256File(binary);
     const info = await probeDeepSeekBinary(binary, { hostContract: host });
 
-    assertDeepSeekGlmApiAdmission(info, host);
+    assertDeepSeekGlmApiAdmission(info, host, glmMode);
 
     if (fullVerify) {
       stage = await fs.mkdtemp(path.join(os.tmpdir(), 'deepseek-readiness-'));

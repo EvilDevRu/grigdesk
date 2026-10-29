@@ -14,7 +14,7 @@ import { copyInstallCandidate, removeInstallStage } from '../../deepseek/scripts
 import { sha256File } from '../../shared/node/hash.ts';
 import { runtimeInfoFixture } from '../helpers/deepseekMetadataFixture.mts';
 import {
-  deepSeekTestArtifactsRoot, ensureTestAdmittedDeepSeekBinary, ensureTestDeepSeekBinary,
+  deepSeekTestArtifactsRoot, ensureTestAdmittedDeepSeekBinary, ensureTestUnadmittedDeepSeekBinary,
 } from '../helpers/deepseekBinary.mts';
 
 const artifacts = path.join(deepSeekTestArtifactsRoot(), 's16');
@@ -301,6 +301,50 @@ if (process.argv.includes('--verify')) {
   }
 });
 
+test('режим потребителя GLM заменяет требуемый admission', async (t) => {
+  const box = await fixture(t);
+  const plugin = box.info.glm.inputs.llmPiAi;
+
+  assert.ok(plugin, 'fixture гарантирует входы плагина GLM');
+
+  const codingPlan = {
+    ...box.info,
+    glm: {
+      ...box.info.glm,
+      admission: [{
+        mode: 'coding-plan' as const,
+        compatibility: glmCompatibilityIdentity(
+          { ...box.info.glm.inputs, llmPiAi: plugin }, 'coding-plan',
+        ),
+      }],
+    },
+  };
+
+  await writeStub(box.options.binary, codingPlan);
+
+  // Контракт требует api: без явного режима потребителя поставка не допущена.
+  await assert.rejects(installBinary(box.options), { code: 'deepseek_glm_unadmitted' });
+
+  // Фактический режим потребителя coding-plan допускает ту же поставку.
+  const installed = await installBinary({ ...box.options, glmMode: 'coding-plan' });
+
+  assert.match(installed.sha256, /^[a-f0-9]{64}$/u);
+});
+
+test('CLI принимает --glm-mode и отвергает неизвестный режим до эффектов', async (t) => {
+  const box = await fixture(t);
+  const args = ['--binary', box.options.binary, '--target', box.options.target,
+    '--host-contract', box.options.hostContract, '--releases-dir', box.options.releasesDir];
+  const admitted = await run(process.execPath, [cli, ...args, '--glm-mode', 'api']);
+
+  assert.equal(JSON.parse(admitted.stdout).memory, 'unknown');
+  await assert.rejects(run(process.execPath, [cli, ...args, '--glm-mode', 'bogus']), { code: 2 });
+  await assert.equal(
+    await sha256File(box.options.target),
+    (await installBinary(box.options)).sha256,
+  );
+});
+
 test('CLI требует аргументы и предупреждает только о несовместимой памяти', async (t) => {
   const { options, info } = await fixture(t);
   const args = ['--binary', options.binary, '--target', options.target,
@@ -414,7 +458,7 @@ if (require('node:path').basename(__filename) === 'previous') {
   assert.equal(await sha256File(options.target), a.sha256);
 });
 
-test('настоящий ELF проходит staged verify; неизменённый production admission остаётся закрыт', async (t) => {
+test('настоящий ELF проходит staged verify; отдельный ELF без admission отвергается', async (t) => {
   const { options } = await fixture(t);
   const candidate = await ensureTestAdmittedDeepSeekBinary();
   const result = await installBinary({ ...options, binary: candidate.binary });
@@ -427,9 +471,10 @@ test('настоящий ELF проходит staged verify; неизменён�
   assert.equal(await sha256File(options.target), await sha256File(candidate.binary));
   assert.equal(result.memory, 'unknown');
 
-  const production = await ensureTestDeepSeekBinary();
+  const unadmitted = await ensureTestUnadmittedDeepSeekBinary();
 
-  await assert.rejects(installBinary({ ...options, binary: production.binary }), {
+  assert.deepEqual(unadmitted.info.glm.admission, []);
+  await assert.rejects(installBinary({ ...options, binary: unadmitted.binary }), {
     code: 'deepseek_glm_unadmitted',
   });
   assert.equal(await sha256File(options.target), result.sha256);

@@ -32,6 +32,9 @@ export interface LiveSessionSpec {
   model?: string;
   effort?: string;
   permissionMode?: string;
+  modeSelection?: import('../../../../shared/chat/chatPermissionModes.ts').ChatModeSelection;
+  preparedRuntime?: object;
+  runtimeProfileFingerprint?: string;
   cwd?: string;
   extraDirs?: string[];
   signal?: AbortSignal;
@@ -41,6 +44,7 @@ export interface LiveSessionSpec {
 
 // Живой процесс исполнителя: пул владеет только его временем жизни.
 export interface LiveHandle {
+  prepareTransition?: (next: LiveSessionSpec) => Promise<void>;
   pid?: number | null;
   alive: boolean;
   send: (turn: unknown) => Promise<{ sessionId?: string } | null>;
@@ -413,6 +417,8 @@ export class ChatLiveSessions {
       } else if (foreignSession) {
         reason = 'сменился id сессии';
       }
+
+      await existing.handle.prepareTransition?.(spec);
       this._forget(existing, reason);
       const inherited = sameExecutor ? existing.sessionId : null;
       spec = { ...spec, sessionId: spec.sessionId || inherited };

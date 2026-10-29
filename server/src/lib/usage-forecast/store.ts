@@ -19,6 +19,9 @@ function isForecastState(value: unknown): value is ForecastState {
   return !!raw && typeof raw === 'object'
     && raw.version === 1
     && Array.isArray(raw.series)
+    && raw.series.every((row) => Array.isArray(row?.samples) && row.samples.every((sample) =>
+      sample && (sample.segment === undefined
+        || typeof sample.segment === 'string' && sample.segment.length <= 1024)))
     && Array.isArray(raw.resets);
 }
 

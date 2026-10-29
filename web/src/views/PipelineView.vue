@@ -1,6 +1,57 @@
 <template>
   <div class="pipeline">
     <div class="toolbar">
+      <div class="pipeline-run-controls" role="group" :aria-label="translate('core.pipelineRunControls')">
+        <UiPopover
+          v-for="action in bulkActions"
+          :key="action.id"
+          has-popup="menu"
+          placement="bottom-start"
+          :aria-label="translate(action.label)"
+          :style="{ width: 'min(300px, calc(100vw - 20px))' }"
+        >
+          <template #trigger>
+            <UiIconButton
+              :data-option="action.id"
+              data-context="pipeline-view"
+              variant="ghost"
+              :label="translate(action.label)"
+              v-tooltip="translate(action.label)"
+              :loading="bulkBusy === action.id"
+              :loading-label="translate(action.loading)"
+              :disabled="!loaded || !!error || bulkBusy !== null"
+            >
+              <svg class="toolbar-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path v-if="action.id === 'resume'" d="m8 5 11 7-11 7Z" />
+                <rect v-else x="6" y="6" width="12" height="12" rx="1" />
+              </svg>
+            </UiIconButton>
+          </template>
+
+          <template #default="{ close }">
+            <div class="pipeline-run-menu">
+              <UiButton
+                v-for="scope in bulkScopes"
+                :key="scope"
+                :data-bulk-action="action.id"
+                :data-bulk-scope="scope"
+                role="menuitem"
+                block
+                variant="ghost"
+                :disabled="bulkBusy !== null || !bulkCandidates(action.id, scope).length"
+                @click="close('action'); runBulkAction(action.id, scope)"
+              >
+                <span class="pipeline-run-option">
+                  <span>{{ translate(action[scope]) }}</span>
+                  <b class="mono">{{ bulkCandidates(action.id, scope).length }}</b>
+                </span>
+              </UiButton>
+            </div>
+          </template>
+        </UiPopover>
+        <span class="pipeline-run-separator" aria-hidden="true"></span>
+      </div>
+
       <!-- Проекты — главный уровень панели. Натуральные ширины кнопок измеряются в
            невидимом ряду; непоместившийся хвост уезжает в список справа. -->
       <div
@@ -251,7 +302,7 @@
       </div>
     </div>
 
-    <PipelineLoading v-if="!loaded && !error" label="Загрузка…"  :compact="compact" :loops-on="loopsOn" />
+    <PipelineLoading v-if="!loaded && !error" label="Загрузка…" :compact="compact" :loops-on="loopsOn" />
     <p v-else-if="error" class="err">Ошибка: {{ error }}</p>
     <p v-else-if="!tasks.length" class="muted">Задач в состоянии фабрики нет.</p>
     <div v-else-if="!filteredTasks.length" class="filter-empty">
@@ -284,7 +335,7 @@
         </UiButton>
         <span class="route">{{ ROUTE_ICON[t.route || ''] || '•' }} {{ t.route }}</span>
         <UiButton
-          v-if="b24Title(t.task)"
+          v-if="t.source === 'grigdesk' || b24Title(t.task)"
           class="ctitle"
           data-role="pipeline-title"
           v-tooltip="title(t)"
@@ -346,6 +397,7 @@
         :arbiter-note="t.stall.arbiter ? arbiterCardLabel(t.stall.arbiter) : ''"
         :arbiter-model="t.stall.arbiter?.model"
         :arbiter-verdict="t.stall.arbiter?.verdict"
+        :conversation="t.stall.conversation"
       >
         <PipelineCardActions :actions="cardActions(t)" @action="(id) => runCardAction(t, id)" />
       </PipelineStopPanel>
@@ -365,8 +417,10 @@
         <template v-if="!isCollapsed(t.task)">
         <span v-if="t.graph.fePort" class="chunk">
           <span class="sdot" :class="t.daemonAlive ? 'on' : 'off'"></span>
-          стенд · <a :href="sandboxUrl(t.graph.fePort) || undefined" target="_blank" rel="noopener">фронт :{{ t.graph.fePort }}</a>
-          <a v-if="t.graph.apiPort" :href="sandboxUrl(t.graph.apiPort) || undefined" target="_blank" rel="noopener">API :{{ t.graph.apiPort }}</a>
+          стенд · <a :href="sandboxUrl(t.graph.fePort, t.graph.serviceHost) || undefined"
+                     target="_blank" rel="noopener">фронт :{{ t.graph.fePort }}</a>
+          <a v-if="t.graph.apiPort" :href="sandboxUrl(t.graph.apiPort, t.graph.serviceHost) || undefined"
+             target="_blank" rel="noopener">API :{{ t.graph.apiPort }}</a>
         </span>
         <!-- Стенд ещё строится: живой прогресс сборки песочницы из t*.stage -->
         <span v-else-if="t.graph.sandbox" class="chunk building">
@@ -406,8 +460,9 @@
     <!-- Модалка этапа (клик по узлу графа): инфо + управление -->
     <UiDialog
       :open="Boolean(stage)"
-      class="smodal"
+      class="smodal ui-workspace"
       data-role="pipeline-stage"
+      data-ui-workspace
       size="workspace"
       :label="stage?.label || 'Этап конвейера'"
       :body-inset="false"
@@ -416,8 +471,14 @@
     >
         <header class="sh">
           <div class="shead-copy">
-            <span class="shead-kicker">Этап конвейера</span>
+            <span class="shead-kicker">{{ translate('core.stageWorkspace') }}
+              <span aria-hidden="true">/</span> <span class="mono">{{ stage!.key }}</span>
+            </span>
             <h3 id="stage-modal-title">{{ stage!.label }}</h3>
+            <span v-if="stage!.meta.runner" class="shead-executor">
+              {{ runnerNodeLabel(stage!.meta.runner) }}
+              <span class="shead-model mono">{{ runnerModelEffortLabel(stage!.meta.runner) }}</span>
+            </span>
           </div>
           <!-- Статус этапа и признак жизни хода — один вопрос человека («этап идёт
                или встал?»), поэтому они стоят рядом. Раньше ответ был разнесён по двум
@@ -447,7 +508,7 @@
              не дожидаться, но делать это следует осознанно. -->
         <div v-if="stageArbitrating" class="sarbrun sarbnode">
           <span class="sarbspin" aria-hidden="true"></span>
-          <span class="sarbtxt">Арбитр разбирает эту остановку — руками браться не нужно</span>
+          <span class="sarbtxt">Арбитр разбирает эту остановку — ожидается результат</span>
           <span class="sarbmeta mono">{{ arbiterRunLabel(stageArbitrating) }}</span>
         </div>
 
@@ -462,10 +523,11 @@
           <div class="stage-stand-context">
             <span class="stage-context-label">Стенд</span>
             <template v-if="stageGraph?.fePort">
-              <a class="stage-stand-link" :href="sandboxUrl(stageGraph.fePort) || undefined" target="_blank" rel="noopener">
+              <a class="stage-stand-link" :href="sandboxUrl(stageGraph.fePort, stageGraph.serviceHost) || undefined"
+                 target="_blank" rel="noopener">
                 Фронт <b class="mono">:{{ stageGraph.fePort }}</b> <span aria-hidden="true">↗</span>
               </a>
-              <a v-if="stageGraph.apiPort" class="stage-stand-link" :href="sandboxUrl(stageGraph.apiPort) || undefined"
+              <a v-if="stageGraph.apiPort" class="stage-stand-link" :href="sandboxUrl(stageGraph.apiPort, stageGraph.serviceHost) || undefined"
                  target="_blank" rel="noopener">
                 API <b class="mono">:{{ stageGraph.apiPort }}</b> <span aria-hidden="true">↗</span>
               </a>
@@ -478,18 +540,46 @@
           </div>
         </div>
 
-        <div v-if="stageHasMain || stageHasRail" class="sworkspace"
-             :class="{ 'main-only': stageHasMain && !stageHasRail, 'rail-only': stageHasRail && !stageHasMain }">
+        <div class="stage-navigation">
+          <UiTabs v-model="stageTab" :label="translate('core.stageSections')">
+            <UiTab data-context="pipeline-stage-tab" id="stage-result-tab"
+                   value="result" controls="stage-result-panel">
+              {{ translate(stageUsesConversation ? 'core.stageAnalysis' : 'core.stageResult') }}
+            </UiTab>
+            <UiTab data-context="pipeline-stage-tab" v-if="stage!.meta.runner" id="stage-executors-tab"
+                   value="executors" controls="stage-executors-panel">
+              {{ translate('core.stageExecutors') }}
+              <span class="stage-tab-count">{{ stageRunnerOptions.length }}</span>
+            </UiTab>
+            <UiTab data-context="pipeline-stage-tab" id="stage-activity-tab"
+                   value="activity" controls="stage-activity-panel">
+              {{ translate('core.stageActivity') }}
+            </UiTab>
+          </UiTabs>
+          <span v-if="stage!.readOnly" class="stage-readonly">{{ translate('core.stageReadOnly') }}</span>
+        </div>
+
+        <div v-if="stageUsesConversation && stageTab === 'result'" id="stage-result-panel"
+             class="sconversation" role="tabpanel" aria-labelledby="stage-result-tab">
+          <ArbiterConversation :task="String(stage!.task)" :node="stage!.id"
+                               :conversation-id="stageConversationId" :legacy-card="stageArbiterCard"
+                               :history="stageGraph?.arbiterConversations"
+                               @current-stop="openStallStage(stageTask!)" />
+        </div>
+        <div v-else class="sworkspace"
+             :class="{ 'main-only': !stageHasRail || stageUsesConversation || stageTab !== 'result',
+                       'rail-only': stageHasRail && !stageHasMain && stageTab === 'result' }">
           <!-- Управление стоит первым в DOM: в мобильной колонке решение человека не
                прячется под длинной телеметрией. На широком экране CSS ставит его справа. -->
-          <aside v-if="stageHasRail" class="srail">
+          <aside v-if="stageHasRail && !stageUsesConversation" v-show="stageTab === 'result'" class="srail">
+            <div class="stage-rail-heading">{{ translate('core.stageDecision') }}</div>
             <!-- Ситуация: чем закончился заход и что от человека нужно. Стоит В ОДНОЙ
                  колонке с решением и прямо над ним — это его условие, а не справка.
                  Раньше причина занимала три полосы шапки, у каждой был свой потолок высоты
                  и свой скролл: замер модалки 1230x898 показал 409 px преамбулы против 430 px
                  рабочей области, причём «почему этап остановился» обрезалось посреди фразы. -->
             <div v-if="stageHasSituation" class="sect situation-sect">
-              <div class="secth">Что случилось</div>
+              <div class="secth">{{ translate('core.stageSummary') }}</div>
               <!-- Разбор арбитра здесь — ПРИЗНАК со входом, а не текст. Узел отвечает на
                    вопрос «чем занят исполнитель и чем кончился заход», разбор — на «что мне
                    решить»; вместе они не поместились: четыре его абзаца делили колонку с
@@ -647,8 +737,14 @@
 
             <!-- Возврат на узел. Своя секция рядом с отправляющей его кнопкой. -->
             <div v-if="stageHasRewind" class="sect rewind-sect">
-              <div class="secth">Вернуть конвейер сюда</div>
-              <p class="gate-hint">Результаты этого узла и всех следующих за ним будут сброшены. Указание движок подмешает в промпт захода.</p>
+              <div class="rewind-heading">
+                <span class="rewind-symbol" aria-hidden="true">↶</span>
+                <div>
+                  <div class="secth">{{ translate('core.stageRestartTitle') }}</div>
+                  <span class="rewind-caption">{{ translate('core.stageRestartCaption') }}</span>
+                </div>
+              </div>
+              <p class="gate-hint">{{ translate('core.stageRestartHint') }}</p>
               <!-- Вопросы узла — своими полями. Агент вернул их СТРУКТУРНО (у каждого свой
                    id и формулировка), а ответить можно было только сплошным текстом: человек
                    руками восстанавливал нумерацию, а агент получал сплошняк вместо ответа,
@@ -682,7 +778,7 @@
                 id="rewind-free"
                 v-model="rewindComment"
                 data-role="pipeline-stage-note"
-                :rows="rewindQuestions.length ? 4 : 8"
+                :rows="rewindQuestions.length ? 4 : 5"
                 :placeholder="rewindQuestions.length
                   ? 'Необязательно: остальное по задаче'
                   : 'Указание агенту — что сделать иначе (необязательно)'"
@@ -690,115 +786,205 @@
               <UiButton
                 class="btn play"
                 tone="warning"
-                variant="outline"
+                variant="solid"
                 block
                 :loading="stageBusy === 'force'"
                 :disabled="stageBusy === 'force'"
                 loading-label="Возвращаю конвейер"
                 @click="forceStatus('running')"
               >
-                ▶ Перейти сюда
+                {{ translate('core.stageRestartAction') }}
               </UiButton>
             </div>
           </aside>
 
-          <main v-if="stageHasMain" class="smain">
-            <!-- Телеметрия захода: время, длительность, расход. Живёт рядом с исполнителем,
-                 которому принадлежит, а не полосой в шапке — вопрос «что от меня хотят»
-                 она не решает, а место занимала всегда, даже когда сообщать было нечего. -->
-            <div v-if="stageHasMeta" class="smeta" aria-label="Показатели этапа">
-              <span v-if="stage!.meta.at" class="smchip mono">{{ stage!.meta.at.slice(11, 16) || stage!.meta.at }}</span>
-              <span v-if="stage!.meta.dur != null" class="smchip">{{ stage!.meta.dur }} мин</span>
-              <!-- Ноль субагентов не сообщает ничего: заход без них — обычное дело, а чип
-                   ради нуля занимал всю полосу метаданных. То же правило, что у отказов прав. -->
-              <span v-if="stage!.meta.fanout" class="smchip">{{ stage!.meta.fanout }} субаг.</span>
-              <!-- Отказ политики прав показываем ТОЛЬКО когда он был: ноль и «не знаем»
-                   одинаково означают «беспокоиться не о чем», а нулевой чип в каждой строке
-                   обесценил бы ненулевой. Он предупреждает о подмене проверки: агент, которому
-                   запретили нужный запуск, склонен подобрать похожий и выдать его результат за
-                   доказательство. -->
-              <span v-if="stage!.meta.denials" class="smchip failed"
-                v-tooltip="'Отказов политики прав внутри хода. Проверь, не подменил ли агент запрещённую проверку похожей.'">
-                {{ stage!.meta.denials }} отказ. прав</span>
-              <span v-if="stage!.meta.tokens" class="smchip mono">{{ stage!.meta.tokens.toLocaleString('ru') }} ток.</span>
-              <span v-if="stage!.meta.fails" class="smchip failed">{{ stage!.meta.fails }} возвр.</span>
-              <span v-if="stage!.sub" class="smchip">{{ stage!.sub }}</span>
-              <span v-if="stage!.meta.verdict?.reviewed?.length" class="smchip"
-                v-tooltip="stage!.meta.verdict!.reviewed.join('\n')">
-                просм. файлов: {{ stage!.meta.verdict!.reviewed.length }}</span>
+          <main v-if="stageHasMain || stageTab !== 'result' || !stageHasRail" class="smain">
+            <div v-show="stageTab === 'result'" id="stage-result-panel" class="stage-tab-panel"
+                 role="tabpanel" aria-labelledby="stage-result-tab">
+              <div class="stage-section-heading">
+                <h4>{{ stage!.status === 'done' ? translate('core.stageCompleted') : stage!.label }}</h4>
+              </div>
+              <!-- Телеметрия захода: время, длительность, расход. Живёт рядом с исполнителем,
+                   которому принадлежит, а не полосой в шапке — вопрос «что от меня хотят»
+                   она не решает, а место занимала всегда, даже когда сообщать было нечего. -->
+              <div v-if="stageHasMeta" class="smeta" aria-label="Показатели этапа">
+                <span v-if="stage!.meta.at" class="smchip mono">{{ stage!.meta.at.slice(11, 16) || stage!.meta.at }}</span>
+                <span v-if="stage!.meta.dur != null" class="smchip">{{ stage!.meta.dur }} мин</span>
+                <!-- Ноль субагентов не сообщает ничего: заход без них — обычное дело, а чип
+                     ради нуля занимал всю полосу метаданных. То же правило, что у отказов прав. -->
+                <span v-if="stage!.meta.fanout" class="smchip">{{ stage!.meta.fanout }} субаг.</span>
+                <!-- Отказ политики прав показываем ТОЛЬКО когда он был: ноль и «не знаем»
+                     одинаково означают «беспокоиться не о чем», а нулевой чип в каждой строке
+                     обесценил бы ненулевой. Он предупреждает о подмене проверки: агент, которому
+                     запретили нужный запуск, склонен подобрать похожий и выдать его результат за
+                     доказательство. -->
+                <span v-if="stage!.meta.denials" class="smchip failed"
+                  v-tooltip="'Отказов политики прав внутри хода. Проверь, не подменил ли агент запрещённую проверку похожей.'">
+                  {{ stage!.meta.denials }} отказ. прав</span>
+                <span v-if="stage!.meta.tokens" class="smchip mono">{{ stage!.meta.tokens.toLocaleString('ru') }} ток.</span>
+                <span v-if="stage!.meta.fails" class="smchip failed">{{ stage!.meta.fails }} возвр.</span>
+                <span v-if="stage!.sub" class="smchip">{{ stage!.sub }}</span>
+                <span v-if="stage!.meta.verdict?.reviewed?.length" class="smchip"
+                  v-tooltip="stage!.meta.verdict!.reviewed.join('\n')">
+                  просм. файлов: {{ stage!.meta.verdict!.reviewed.length }}</span>
+              </div>
+
+              <!-- Документ этапа: план у ворот плана, диагноз у ворот причины, отчёт на приёмке -->
+              <div v-if="stageDocLoading" class="sect content-sect">
+                <div class="secth">Документ этапа</div>
+                <UiLoadingState label="Документ этапа" variant="document">
+                  <UiSkeletonLayout layout="text" :header="false" />
+                </UiLoadingState>
+              </div>
+              <div v-else-if="stageDoc" class="sect content-sect document-sect">
+                <UiDisclosureButton
+                  class="stage-disclosure"
+                  data-role="pipeline-section-disclosure"
+                  controls="pipeline-stage-document"
+                  density="compact"
+                  :open="stageDocOpen"
+                  @update:open="stageDocOpen = $event"
+                >
+                  Документ этапа
+                </UiDisclosureButton>
+                <div
+                  v-if="stageDocOpen"
+                  id="pipeline-stage-document"
+                  class="sdoc md"
+                  v-html="mdToHtml(stageDoc)"
+                ></div>
+              </div>
+              <div v-if="!stageDoc && !stageDocLoading" class="stage-empty">
+                <span class="stage-empty-symbol" aria-hidden="true">≡</span>
+                <h4>{{ translate('core.stageNoDocument') }}</h4>
+                <p>{{ translate('core.stageNoDocumentHint') }}</p>
+              </div>
             </div>
 
-            <!-- Выбор исполнителя этапа + та runner-chain, по которой движок принимает решение. -->
-            <div v-if="stage!.meta.runner" class="sect runner-sect">
-              <div class="secth">
-                Исполнитель
-                <span class="runner-source">{{ RUNNER_SOURCE[stage!.meta.runner.source || ''] || stage!.meta.runner.source }}</span>
+            <div v-show="stageTab === 'executors'" id="stage-executors-panel" class="stage-tab-panel"
+                 role="tabpanel" aria-labelledby="stage-executors-tab">
+              <div class="stage-section-heading">
+                <h4>{{ translate('core.stageExecutors') }}</h4>
+                <p>{{ translate('core.stageExecutorsHint') }}</p>
               </div>
-              <!-- Главное действие узла: выбрать исполнителя одним кликом, не закрывая модалку. -->
-              <div v-if="!stage!.readOnly && !stageRunnerLive && stageRunnerOptions.length" class="runner-override">
-                <div class="runner-override-row">
+              <!-- Выбор исполнителя этапа + та runner-chain, по которой движок принимает решение. -->
+              <div v-if="stage!.meta.runner" class="sect runner-sect">
+                <div v-if="stage!.readOnly || stageRunnerLive" class="runner-override-row">
                   <span class="runner-override-lbl">Исполнитель этапа</span>
-                  <UiButton
-                    v-if="stage!.meta.runner.source === 'task-stage'"
-                    class="btn runner-reset"
-                    data-role="pipeline-compact-action"
-                    variant="text"
-                    tone="warning"
-                    :disabled="stageBusy === 'runner-override'"
-                    @click="setStageRunner('')"
-                  >
-                    Сбросить
-                  </UiButton>
+                  <span class="runner-source">{{ RUNNER_SOURCE[stage!.meta.runner.source || '']
+                    || stage!.meta.runner.source }}</span>
                 </div>
-                <div class="runner-picks">
+                <!-- Главное действие узла: выбрать исполнителя одним кликом, не закрывая модалку. -->
+                <div v-if="!stage!.readOnly && !stageRunnerLive && stageRunnerOptions.length" class="runner-override">
+                  <div class="runner-override-row">
+                    <span class="runner-override-lbl">Исполнитель этапа</span>
+                    <span class="runner-source">{{ RUNNER_SOURCE[stage!.meta.runner.source || '']
+                      || stage!.meta.runner.source }}</span>
+                    <UiButton
+                      v-if="stage!.meta.runner.source === 'task-stage'"
+                      class="btn runner-reset"
+                      data-role="pipeline-compact-action"
+                      variant="text"
+                      tone="warning"
+                      :disabled="stageBusy === 'runner-override'"
+                      @click="setStageRunner('')"
+                    >
+                      Сбросить
+                    </UiButton>
+                  </div>
+                  <p id="stage-executor-preview" class="runner-preview-notice">
+                    <span class="stage-soon">{{ translate('core.stageSoon') }}</span>
+                    {{ translate('core.stageModelPreviewHint') }}
+                  </p>
+                  <div class="runner-picks">
+                    <UiSelectableRow
+                      v-for="id in stageRunnerOptions"
+                      :key="id"
+                      class="executor-row"
+                      data-context="pipeline-executor"
+                      data-role="pipeline-runner"
+                      :selected="id === stageRunnerActive"
+                      :pressed="id === stageRunnerActive"
+                      :aria-busy="runnerPending === id"
+                      :disabled="stageBusy === 'runner-override'"
+                      @select="pickStageRunner(id)"
+                    >
+                      <span class="executor-identity">
+                        <span class="executor-monogram" aria-hidden="true">{{ providerLabel(id).slice(0, 1) }}</span>
+                        <span class="executor-name">
+                          <b>{{ providerLabel(id) }}</b>
+                          <small>{{ translate(id === stageRunnerActive
+                            ? 'core.stageSelectedExecutor' : 'core.stageChooseExecutor') }}</small>
+                        </span>
+                        <UiSpinner v-if="runnerPending === id" decorative />
+                        <span v-else-if="id === stageRunnerActive" class="executor-check" aria-hidden="true">✓</span>
+                      </span>
+                      <template #actions>
+                        <StageExecutorFields :runner="stage!.meta.runner" :provider="id"
+                                             description-id="stage-executor-preview" />
+                      </template>
+                    </UiSelectableRow>
+                  </div>
+                  <p v-if="stage!.meta.runner.source === 'task-stage'" class="runner-hint">
+                    Сброс вернёт этап к исполнителю, заданному при запуске задачи, а без него — к политике профиля.
+                  </p>
+                  <p v-if="stage!.status === 'run' && !stage!.daemonAlive" class="runner-hint">
+                    Прогон остановлен — выбранный исполнитель запустится после «Продолжить прогон».
+                  </p>
+                </div>
+                <!-- Цепочка вторична: она объясняет, кто подхватит этап при аварии, и решения не требует. -->
+                <div class="runner-chain">
+                  <span class="runner-chain-lbl">цепочка</span>
+                  <template v-for="(id, i) in stage!.meta.runner.chain" :key="id">
+                    <span v-if="i" class="runner-arrow">→</span>
+                    <span class="runner-hop"
+                          :class="{ actual: id === stage!.meta.runner.actual, reserve: i > 0 }"
+                          v-tooltip="i
+                            ? 'резерв: подхватит этап, если основной отпадёт'
+                            : 'основной исполнитель'">
+                      {{ providerLabel(id) }}
+                      <small v-if="runnerModelEffortLabel(stage!.meta.runner, id)">{{ runnerModelEffortLabel(stage!.meta.runner, id) }}</small>
+                    </span>
+                  </template>
+                </div>
+                <div v-if="stage!.meta.runner.actual" class="runner-current"
+                     :class="{ switched: stage!.meta.runner.switched }">
+                  Сейчас: <b>{{ runnerNodeLabel(stage!.meta.runner) }}</b>
+                  <span v-if="stage!.meta.runner.reason"> · {{ runnerReasonLabel(stage!.meta.runner.reason) }}</span>
+                </div>
+                <div v-if="!stage!.readOnly && stageRunnerLive" class="runner-switches">
                   <UiButton
-                    v-for="id in stageRunnerOptions"
+                    v-for="id in stage!.meta.runner.chain.filter((x) => x !== stage!.meta.runner!.actual)"
                     :key="id"
-                    class="runner-pick"
-                    :class="{ on: id === stageRunnerActive, busy: runnerPending === id }"
-                    data-role="pipeline-runner"
-                    tone="accent"
+                    class="btn runner-switch"
+                    tone="warning"
                     variant="outline"
-                    :pressed="id === stageRunnerActive"
-                    :loading="runnerPending === id"
-                    :disabled="stageBusy === 'runner-override'"
-                    :loading-label="`Выбираю ${providerLabel(id)}`"
-                    @click="pickStageRunner(id)"
+                    :loading="stageBusy === 'runner-switch'"
+                    :disabled="stageBusy === 'runner-switch'"
+                    :loading-label="`Переключаю на ${providerLabel(id)}`"
+                    @click="switchRunner(id)"
                   >
-                    <b>{{ providerLabel(id) }}</b>
-                    <small v-if="runnerModelEffortLabel(stage!.meta.runner, id)">{{ runnerModelEffortLabel(stage!.meta.runner, id) }}</small>
+                    Переключить сейчас на {{ providerLabel(id) }}
                   </UiButton>
                 </div>
-                <p v-if="stage!.meta.runner.source === 'task-stage'" class="runner-hint">
-                  Сброс вернёт этап к исполнителю, заданному при запуске задачи, а без него — к политике профиля.
-                </p>
-                <p v-if="stage!.status === 'run' && !stage!.daemonAlive" class="runner-hint">
-                  Прогон остановлен — выбранный исполнитель запустится после «Продолжить прогон».
-                </p>
               </div>
-              <!-- Цепочка вторична: она объясняет, кто подхватит этап при аварии, и решения не требует. -->
-              <div class="runner-chain">
-                <span class="runner-chain-lbl">цепочка</span>
-                <template v-for="(id, i) in stage!.meta.runner.chain" :key="id">
-                  <span v-if="i" class="runner-arrow">→</span>
-                  <span class="runner-hop"
-                        :class="{ actual: id === stage!.meta.runner.actual, reserve: i > 0 }"
-                        v-tooltip="i
-                          ? 'резерв: подхватит этап, если основной отпадёт'
-                          : 'основной исполнитель'">
-                    {{ providerLabel(id) }}
-                    <small v-if="runnerModelEffortLabel(stage!.meta.runner, id)">{{ runnerModelEffortLabel(stage!.meta.runner, id) }}</small>
-                  </span>
-                </template>
+
+            </div>
+
+            <div v-show="stageTab === 'activity'" id="stage-activity-panel" class="stage-tab-panel"
+                 role="tabpanel" aria-labelledby="stage-activity-tab">
+              <div class="stage-section-heading">
+                <h4>{{ translate('core.stageActivityTitle') }}</h4>
               </div>
-              <div v-if="stage!.meta.runner.actual" class="runner-current"
-                   :class="{ switched: stage!.meta.runner.switched }">
-                Сейчас: <b>{{ runnerNodeLabel(stage!.meta.runner) }}</b>
-                <span v-if="stage!.meta.runner.reason"> · {{ runnerReasonLabel(stage!.meta.runner.reason) }}</span>
+              <div v-if="!stageActivity?.live && !stageActivity?.tail?.length
+                         && !stage!.meta.runner?.attempts?.length" class="stage-empty">
+                <span class="stage-empty-symbol" aria-hidden="true">⋯</span>
+                <h4>{{ translate('core.stageNoActivity') }}</h4>
+                <p>{{ translate('core.stageNoActivityHint') }}</p>
               </div>
-              <div v-if="stage!.meta.runner.attempts?.length" class="runner-attempts">
+              <div v-if="stage!.meta.runner?.attempts?.length" class="runner-attempts">
                 <div class="runner-attempt-title">Попытки запуска</div>
-                <div v-for="a in stage!.meta.runner.attempts" :key="a.id" class="runner-attempt">
+                <div v-for="a in stage!.meta.runner!.attempts" :key="a.id" class="runner-attempt">
                   <span class="mono">#{{ a.epoch ?? '—' }}</span>
                   <b>{{ providerLabel(a.runner) }}</b>
                   <span v-if="runnerAttemptModelLabel(a)" class="runner-attempt-model mono">{{ runnerAttemptModelLabel(a) }}</span>
@@ -808,124 +994,87 @@
                     success: a.result === 'ok',
                     switched: a.result === 'manual_switch',
                     failed: a.result && !['ok', 'manual_switch'].includes(a.result),
+                    'runner-result-detail': Boolean(a.failureDetail),
                   }">
-                    {{ attemptResultLabel(a.result) }}
+                    {{ a.failureDetail || attemptResultLabel(a.result) }}
                   </span>
                 </div>
               </div>
-              <div v-if="!stage!.readOnly && stageRunnerLive" class="runner-switches">
-                <UiButton
-                  v-for="id in stage!.meta.runner.chain.filter((x) => x !== stage!.meta.runner!.actual)"
-                  :key="id"
-                  class="btn runner-switch"
-                  tone="warning"
-                  variant="outline"
-                  :loading="stageBusy === 'runner-switch'"
-                  :disabled="stageBusy === 'runner-switch'"
-                  :loading-label="`Переключаю на ${providerLabel(id)}`"
-                  @click="switchRunner(id)"
+              <!-- Живая лента действий агента (для идущего этапа) -->
+              <div v-if="stage!.status === 'run' && stageActivity?.live" class="sect content-sect">
+                <div class="secth"><span class="live-dot"></span> Агент сейчас</div>
+                <div v-if="stageActivity.live.actions.length" class="live-feed" ref="liveFeed">
+                  <div v-for="(a, i) in stageActivity.live.actions" :key="i" class="lf-row" :class="a.status">
+                    <span class="lf-icon">{{ liveIcon(a) }}</span>
+                    <span class="lf-body">
+                      <template v-if="a.type === 'tool' || a.type === 'subagent'">
+                        <span class="lf-name">{{ a.name }}</span>
+                        <span v-if="a.desc" class="lf-desc">{{ a.desc }}</span>
+                        <span v-if="a.type === 'subagent' && a.tokens" class="lf-sub mono">{{ (a.tokens / 1000).toFixed(1) }}k ток · {{ a.tools }} инстр.{{ a.lastTool ? ' · ' + a.lastTool : '' }}</span>
+                      </template>
+                      <template v-else>
+                        <span class="lf-text">{{ a.text }}</span>
+                      </template>
+                    </span>
+                    <span class="lf-st" :class="a.status">{{ a.status === 'run' ? '●' : a.status === 'error' ? '✗' : '✓' }}</span>
+                  </div>
+                </div>
+                <p v-else class="muted small">Ожидание действий агента…</p>
+                <div v-if="stageActivity.live.model" class="lf-model mono">{{ stageActivity.live.model }}</div>
+              </div>
+
+              <!-- Журнал этапов (stages.log) — сворачиваемый -->
+              <div v-if="stage!.status === 'run' && stageActivity?.tail?.length" class="sect content-sect">
+                <UiDisclosureButton
+                  class="stage-disclosure"
+                  data-role="pipeline-section-disclosure"
+                  controls="pipeline-stage-log"
+                  density="compact"
+                  :open="stageLogOpen"
+                  @update:open="stageLogOpen = $event"
                 >
-                  Переключить сейчас на {{ providerLabel(id) }}
-                </UiButton>
-              </div>
-            </div>
-
-            <!-- Живая лента действий агента (для идущего этапа) -->
-            <div v-if="stage!.status === 'run' && stageActivity?.live" class="sect content-sect">
-              <div class="secth"><span class="live-dot"></span> Агент сейчас</div>
-              <div v-if="stageActivity.live.actions.length" class="live-feed" ref="liveFeed">
-                <div v-for="(a, i) in stageActivity.live.actions" :key="i" class="lf-row" :class="a.status">
-                  <span class="lf-icon">{{ liveIcon(a) }}</span>
-                  <span class="lf-body">
-                    <template v-if="a.type === 'tool' || a.type === 'subagent'">
-                      <span class="lf-name">{{ a.name }}</span>
-                      <span v-if="a.desc" class="lf-desc">{{ a.desc }}</span>
-                      <span v-if="a.type === 'subagent' && a.tokens" class="lf-sub mono">{{ (a.tokens / 1000).toFixed(1) }}k ток · {{ a.tools }} инстр.{{ a.lastTool ? ' · ' + a.lastTool : '' }}</span>
-                    </template>
-                    <template v-else>
-                      <span class="lf-text">{{ a.text }}</span>
-                    </template>
-                  </span>
-                  <span class="lf-st" :class="a.status">{{ a.status === 'run' ? '●' : a.status === 'error' ? '✗' : '✓' }}</span>
+                  Журнал этапов
+                  <span class="muted small" style="margin-left:auto">{{ stageActivity.tail.length }}</span>
+                </UiDisclosureButton>
+                <div v-if="stageLogOpen" id="pipeline-stage-log" class="log">
+                  <div v-for="(l, i) in stageActivity.tail" :key="i" class="logline"><span class="mono muted">{{ l.ts.slice(11) }}</span> {{ l.event }}</div>
                 </div>
               </div>
-              <p v-else class="muted small">Ожидание действий агента…</p>
-              <div v-if="stageActivity.live.model" class="lf-model mono">{{ stageActivity.live.model }}</div>
-            </div>
 
-            <!-- Журнал этапов (stages.log) — сворачиваемый -->
-            <div v-if="stage!.status === 'run' && stageActivity?.tail?.length" class="sect content-sect">
-              <UiDisclosureButton
-                class="stage-disclosure"
-                data-role="pipeline-section-disclosure"
-                controls="pipeline-stage-log"
-                density="compact"
-                :open="stageLogOpen"
-                @update:open="stageLogOpen = $event"
-              >
-                Журнал этапов
-                <span class="muted small" style="margin-left:auto">{{ stageActivity.tail.length }}</span>
-              </UiDisclosureButton>
-              <div v-if="stageLogOpen" id="pipeline-stage-log" class="log">
-                <div v-for="(l, i) in stageActivity.tail" :key="i" class="logline"><span class="mono muted">{{ l.ts.slice(11) }}</span> {{ l.event }}</div>
-              </div>
-            </div>
-
-            <!-- Документ этапа: план у ворот плана, диагноз у ворот причины, отчёт на приёмке -->
-            <div v-if="stageDocLoading" class="sect content-sect">
-              <div class="secth">Документ этапа</div>
-              <UiLoadingState label="Документ этапа" variant="document" >
-                <UiSkeletonLayout layout="text" :header="false" />
-              </UiLoadingState>
-            </div>
-            <div v-else-if="stageDoc" class="sect content-sect document-sect">
-              <UiDisclosureButton
-                class="stage-disclosure"
-                data-role="pipeline-section-disclosure"
-                controls="pipeline-stage-document"
-                density="compact"
-                :open="stageDocOpen"
-                @update:open="stageDocOpen = $event"
-              >
-                Документ этапа
-              </UiDisclosureButton>
-              <div
-                v-if="stageDocOpen"
-                id="pipeline-stage-document"
-                class="sdoc md"
-                v-html="mdToHtml(stageDoc)"
-              ></div>
             </div>
           </main>
         </div>
 
         <!-- Универсальные действия закреплены внизу и не уезжают за длинным документом. -->
         <footer class="sactions">
-          <span class="sactions-context"><b class="mono">#{{ stage!.task }}</b> · действия с задачей</span>
+          <span class="sactions-context">
+            <span class="stage-footer-dot" :class="stage!.status" aria-hidden="true"></span>
+            {{ stageStatusHint(stage!) }}
+          </span>
           <div class="sactions-buttons">
+            <!-- Задачу открываем поверх этапа: она нужна как справка, а не вместо узла.
+                 Нижняя модалка не закрывается, и человек возвращается к тому же этапу. -->
+            <UiButton
+              class="sactions-task"
+              data-role="pipeline-stage-task-open"
+              variant="text"
+              @click="ui.openTask(stage!.task)"
+            >
+              Открыть задачу
+            </UiButton>
             <OpenDiffButton :task-id="stage!.task" />
           </div>
         </footer>
     </UiDialog>
 
-    <!-- Разбор арбитра и ответ на него. Отдельная модалка: у неё один вопрос к человеку
-         и вся ширина под текст, тогда как модалка узла отвечает за телеметрию захода. -->
-    <ArbiterDecision
-      :open="Boolean(arbiterDecision)"
-      :decision="arbiterDecision"
-      :busy="arbiterDecisionBusy"
-      @close="arbiterDecision = null"
-      @submit="sendArbiterDecision"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout } from '../ui';
-
 import PipelineLoading from './PipelineLoading.vue';
 
 import DeferredFindings from './pipeline/DeferredFindings.vue';
+import StageExecutorFields from './pipeline/StageExecutorFields.vue';
 import BootstrapDecision from './pipeline/BootstrapDecision.vue';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api } from '../shared/apiClient.ts';
@@ -942,6 +1091,9 @@ import type {
 import type { BoardTask } from '../shared/boardContracts.ts';
 
 type TaskId = string | number;
+type BulkAction = 'resume' | 'stop';
+type BulkScope = 'all' | 'project';
+
 interface Stage {
   task: TaskId;
   id: string;
@@ -961,14 +1113,6 @@ interface StageNode {
   subtitle?: string;
   status: string;
 }
-interface ArbiterDecisionState {
-  task: TaskId;
-  node: string;
-  key: string;
-  label: string;
-  card: ArbiterCard;
-  questions: ReturnType<typeof rewindQuestionsOf>;
-}
 
 import { useSse } from '../composables/useSse.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
@@ -986,9 +1130,14 @@ import {
   UiIconButton,
   UiPopover,
   UiSpinner,
+  UiSelectableRow,
   UiTextarea,
+  UiTab,
+  UiTabs,
   vTooltip,
   UiLoadingState,
+  UiSkeletonLayout,
+  t as translate,
 } from '../ui';
 import { sandboxUrl } from '../shared/sandbox.ts';
 import { agentActivityLabel, silenceReason } from '../../../shared/pipeline/agentActivity.ts';
@@ -1011,7 +1160,7 @@ import {
   runnerNodeLabel,
   runnerReasonLabel,
 } from '../shared/runnerDisplay.ts';
-import ArbiterDecision from './pipeline/ArbiterDecision.vue';
+import ArbiterConversation from './pipeline/ArbiterConversation.vue';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 import PipelineStopPanel from './pipeline/PipelineStopPanel.vue';
 import PipelineCardActions from './pipeline/PipelineCardActions.vue';
@@ -1060,7 +1209,7 @@ function title(taskOrNum: PipelineViewTask | TaskId) {
     ? taskOrNum
     : tasks.value.find((item) => Number(item.task) === Number(taskNum));
 
-  return b24Title(taskNum) || task?.title || null;
+  return task?.source === 'grigdesk' ? task.title || null : b24Title(taskNum) || task?.title || null;
 }
 
 const boardTasksById = computed(() => new Map(
@@ -1607,6 +1756,7 @@ const stageLogOpen = ref(false);
 const pipelineContext = useUiContextSource('pipeline', { layer: 'overlay', active: false });
 const liveFeed = ref<HTMLElement | null>(null);
 const stageDocLoading = ref(false);
+const stageTab = ref('result');
 let actPoll: ReturnType<typeof setInterval> | null = null;
 // Какой документ показывать на каком узле: у ворот плана — сам план, у приёмки — отчёт.
 const NODE_DOC: Record<string, string> = {
@@ -1653,8 +1803,11 @@ function pipelineContextDetails() {
     return null;
   }
 
-  const document = stageDocOpen.value ? NODE_DOC[stage.value!.id] || null : null;
-  const tab = stageLogOpen.value ? 'activity' : document ? 'document' : 'overview';
+  const document = stageTab.value === 'result' && !stageUsesConversation.value && stageDocOpen.value
+    ? NODE_DOC[stage.value!.id] || null : null;
+  const tab = stageTab.value === 'result'
+    ? document ? 'document' : 'overview'
+    : stageTab.value;
   const details = {
     taskId: String(stage.value!.task),
     stageId: String(stage.value!.id),
@@ -1689,7 +1842,7 @@ watch(pipelineContextIdentity, (identity, previous) => {
   }
 }, { immediate: true });
 watch(
-  () => [pipelineContextIdentity.value, stageDocOpen.value, stageLogOpen.value],
+  () => [pipelineContextIdentity.value, stageTab.value, stageDocOpen.value, stageLogOpen.value],
   () => {
     if (stage.value) {
       pipelineContext.update({ details: pipelineContextDetails() });
@@ -1761,6 +1914,10 @@ function openStage(t: PipelineViewTask, node: StageNode) {
   }
 
   const nodeId = origin?.originId || node.id;
+  const currentStop = t.stall?.arbitrable && stallNodeId(t) === nodeId;
+
+  stageConversationId.value = currentStop ? t.stall?.conversation?.conversationId
+    : t.graph.arbiterConversations?.find((row) => row.identity.node === nodeId)?.conversationId;
 
   stage.value = {
     task: t.task,
@@ -1777,6 +1934,7 @@ function openStage(t: PipelineViewTask, node: StageNode) {
     status: node.status,
     meta: t.graph.nodeMeta?.[nodeId] || {},
   };
+  stageTab.value = 'result';
   loadFactoryRunners();
   gateComment.value = '';
   gateRejecting.value = false;
@@ -1932,6 +2090,7 @@ const gateArbiterLog = computed(() => {
 
 const stageHasRewind = computed(() => Boolean(
   stage.value && !stage.value!.readOnly && !stage.value!.isGate
+  && !stageUsesConversation.value
   && stageTask.value?.graph?.nodeOrigins?.[stage.value!.id]?.scope !== 'bootstrap',
 ));
 // Вопросом к человеку является только БЛОКИРУЮЩАЯ находка: правило общее с отдельной
@@ -2007,6 +2166,18 @@ const stageTaskTitle = computed(() => (
   stage.value ? title(stageTask.value || stage.value!.task) : null
 ));
 const stageGraph = computed(() => stageTask.value?.graph || null);
+const stageConversationId = ref<string | undefined>();
+const stageUsesConversation = computed(() => {
+  const opened = stage.value;
+  const task = stageTask.value;
+
+  if (!opened || !task || opened.isGate || task.stall?.phase === 'bootstrap') {
+    return false;
+  }
+
+  return Boolean(stageConversationId.value || stageArbiterCard.value
+    || task.stall?.arbitrable && stallNodeId(task) === opened.id);
+});
 // Пояснение — часть ОТКЛОНЕНИЯ, а не ворот вообще: при «Принять» движок его выбрасывает
 // (`route_v2_gate_decide`: reject_feedback обнуляется на любом исходе кроме rejected).
 // Пока поле висело всегда, интерфейс обещал доставку текста, которой при принятии нет.
@@ -2027,7 +2198,7 @@ function gateErrorText(e: unknown) {
   const base = `Решение не принято: ${errorMessage(e, '')}`;
 
   return /нельзя доставить/.test(errorMessage(e, '') || '')
-    ? `${base}\n\nОтклони без текста либо верни конвейер кнопкой «▶ Перейти сюда» `
+    ? `${base}\n\nОтклони без текста либо верни конвейер кнопкой «${translate('core.stageRestartAction')}» `
       + 'на тот узел, чей агент должен прочитать указание.'
     : base;
 }
@@ -2505,103 +2676,19 @@ function arbiterCardFor(task: PipelineViewTask | null, nodeId: string) {
 }
 
 /**
- * Открывает отдельный разбор арбитра по узлу: его текст целиком и поле решения.
- *
- * Вопросы берутся у вердикта того же узла — ответ уедет тем же указанием, что и обычный
- * возврат, поэтому и склейка текста общая. Разбора нет — открывать нечего: молчаливая
- * пустая модалка читалась бы как поломка.
- */
-function openArbiterDecision(task: PipelineViewTask | null, nodeId?: string) {
-  if (!task || !nodeId) {
-    return;
-  }
-
-  const key = task.graph.keys?.[nodeId];
-  const card = arbiterCardFor(task, nodeId);
-
-  if (!key || !card) {
-    return;
-  }
-
-  const definition = task.graph?.nodes?.[nodeId] || [];
-
-  arbiterDecision.value = {
-    task: task.task,
-    node: nodeId,
-    key,
-    label: stripEmoji(definition[1] || nodeId),
-    card,
-    questions: rewindQuestionsOf(task.graph?.nodeMeta?.[nodeId]?.verdict),
-  };
-}
-
-/** Вход в разбор из модалки узла: одну модалку поверх другой не держим. */
-
-/**
- * Открывает разбор из текущего узла с сохранением его идентификатора.
- * Предыдущая модалка закрывается до открытия следующей.
+ * Вход из узла фокусирует тот же блок, сохраняя окно и черновик.
+ * Отдельная форма применения поверх окна этапа больше не создаётся.
  */
 function openArbiterFromStage() {
-  const task = stageTask.value;
-  const nodeId = stage.value?.id;
-
-  closeStage();
-  openArbiterDecision(task, nodeId);
+  document.querySelector<HTMLElement>('[data-role="arbiter-conversation"] textarea')?.focus();
 }
 
 /**
- * Отправляет решение человека и продолжает прогон.
- *
- * Тот же эндпоинт, что и обычный возврат курсора: сервер кладёт текст в журнал попытки
- * причиной human-rewind, движок подмешивает его в промпт захода. Подтверждение остаётся —
- * возврат сбрасывает не только этот узел, но и весь хвост маршрута за ним.
+ * Все входы остановки открывают один и тот же узел и его диалог.
+ * У ворот и разведки сохраняется существующий порядок ответа.
  */
-async function sendArbiterDecision(note: string) {
-  const target = arbiterDecision.value;
-
-  if (!target || arbiterDecisionBusy.value) {
-    return;
-  }
-
-  const question = `Вернуть конвейер на «${target.label}»? Результаты этого узла и всех`
-    + ' следующих за ним будут сброшены.';
-
-  if (!await confirmDialog(question, { okText: 'Вернуть' })) {
-    return;
-  }
-
-  arbiterDecisionBusy.value = true;
-
-  try {
-    const res = decodePipelineReply(await api.post(`/api/tasks/${target.task}/stage/${target.key}/running`,
-      { comment: note }));
-
-    arbiterDecision.value = null;
-    await load();
-    await warnIfNotResumed(res);
-  }
-  catch (e) {
-    alertDialog(`Ошибка: ${errorMessage(e, '')}`);
-  }
-  finally {
-    arbiterDecisionBusy.value = false;
-  }
-}
-
-/**
- * Вход из плашки затыка.
- *
- * Разбор арбитра ведёт в свою модалку — там его текст и поле решения; обычный затык без
- * разбора ведёт в узел, где кроме возврата человеку нужны и телеметрия, и вердикт.
- */
-function openStallAnswer(t: PipelineViewTask) {
-  if (arbiterAsksHuman(t)) {
-    openArbiterDecision(t, stallNodeId(t));
-
-    return;
-  }
-
-  openStallStage(t);
+function openStallAnswer(task: PipelineViewTask) {
+  openStallStage(task);
 }
 
 /** Открывает узел, на котором стоит остановка: решение принимают там. */
@@ -2629,8 +2716,6 @@ function openStallStage(t: PipelineViewTask) {
 
 // Отдельный разбор арбитра: узел, его карточка и вопросы. Живёт рядом с модалкой узла,
 // а не внутри неё — вопрос у него один, и ширина нужна вся.
-const arbiterDecision = ref<ArbiterDecisionState | null>(null);
-const arbiterDecisionBusy = ref(false);
 
 const arbiterBusy = ref(new Set<TaskId>());
 
@@ -2669,55 +2754,32 @@ const stageArbitrating = computed(() => {
 
 
 /**
- * Передаёт остановку арбитру после явного подтверждения человека.
- * Показывает разный итог для разрешённого спора и решения на человеке.
+ * Передаёт остановку читающему арбитру по нажатию человека.
+ * Открывает диалог узла после сохранения операции разбора.
  */
 async function arbitrate(task: TaskId) {
   if (arbiterBusy.value.has(task)) {
-    return;
-  }
-  if (!await confirmDialog(
-    `Отдать тупик задачи #${task} арбитру? Он прочитает оба вердикта, `
-      + 'проверит спорное по коду рабочего дерева и вернёт узел с указанием. '
-      + 'Решение будет записано в журнал как машинное.',
-    { okText: 'Разобрать' },
-  )) {
     return;
   }
 
   arbiterBusy.value = new Set([...arbiterBusy.value, task]);
 
   try {
-    const r = decodePipelineReply(await api.post(`/api/tasks/${task}/arbitrate`));
-
+    await api.post(`/api/tasks/${task}/arbitrate`);
     await load();
-    // Два разных исхода, и путать их нельзя. `resolved: false` — не отказ: арбитр
-    // отработал и вернул то, что обязан вернуть, когда решение меняет границу задачи.
-    if (r.resolved) {
-      alertDialog(`Арбитр вернул узел «${r.node}».
 
-${r.card!.what}
+    const current = tasks.value.find((row) => Number(row.task) === Number(task));
 
-Почему: ${r.card!.why}
-Чем доказал: ${r.card!.proof}
-Чем грозит ошибка: ${r.card!.risk}`);
-    } else {
-      alertDialog(`Это решает человек, а не арбитр.
-
-${r.card!.what}
-
-Почему: ${r.card!.why}
-Чем доказал: ${r.card!.proof}
-Чем грозит ошибка: ${r.card!.risk}`);
+    if (current) {
+      openStallStage(current);
     }
-  } catch (e) {
-    alertDialog(`Арбитр не разобрал: ${errorMessage(e, '')}`);
-
+  } catch (error) {
+    await alertDialog(`Разбор не удалось начать: ${errorMessage(error, '')}`);
   } finally {
-    const s = new Set(arbiterBusy.value);
+    const remaining = new Set(arbiterBusy.value);
 
-    s.delete(task);
-    arbiterBusy.value = s;
+    remaining.delete(task);
+    arbiterBusy.value = remaining;
   }
 }
 
@@ -2781,9 +2843,12 @@ function cardActions(t: PipelineViewTask): PipelineCardAction[] {
   };
 
   if (canAnswerStall(t)) {
+    const dialogEntry = t.stall?.phase !== 'bootstrap'
+      && Boolean(t.stall?.arbitrable || t.stall?.conversation || arbiterAsksHuman(t));
+
     add(
-      'answer', arbiterAsksHuman(t) ? '⚖ разбор и решение' : '✍ ответить и продолжить',
-      arbiterAsksHuman(t) ? 'Разбор арбитра целиком и поле для твоего решения.'
+      'answer', dialogEntry ? translate('core.arbiterDialogTitle') : '✍ ответить и продолжить',
+      dialogEntry ? translate('core.arbiterEntryHint')
         : t.stall?.phase === 'bootstrap' ? 'Откроет вопрос разведки и поле ответа следующему SCOUT.'
           : 'Откроет узел: там указание агенту и возврат конвейера на него.',
       'Открываю решение', 'sbretry',
@@ -2792,9 +2857,9 @@ function cardActions(t: PipelineViewTask): PipelineCardAction[] {
 
   if (canArbitrate(t)) {
     add(
-      'arbitrate', '⚖ разобрать и продолжить',
+      'arbitrate', `⚖ ${translate('core.arbiterAnalyzeStop')}`,
       arbiterAsksHuman(t) ? 'Арбитр уже отдал решение тебе; повтор нужен, только если условия изменились.'
-        : 'Арбитр проверит спор по коду и вернёт узел с указанием; границу задачи он менять не вправе.',
+        : 'Арбитр изучит остановку и предложит следующий шаг. Исправление выбираете вы.',
       'Арбитр разбирает', 'sbretry',
     );
   }
@@ -2896,6 +2961,91 @@ function canStop(t: PipelineViewTask) {
   return !t.readOnly && t.daemonAlive;
 }
 
+const bulkScopes = ['all', 'project'] as const;
+const bulkActions = [
+  {
+    id: 'resume',
+    label: 'core.startPipelines',
+    loading: 'core.startingPipelines',
+    all: 'core.startAllPipelines',
+    project: 'core.startTabPipelines',
+  },
+  {
+    id: 'stop',
+    label: 'core.stopPipelines',
+    loading: 'core.stoppingPipelines',
+    all: 'core.stopAllPipelines',
+    project: 'core.stopTabPipelines',
+  },
+] as const;
+const bulkBusy = ref<BulkAction | null>(null);
+
+/**
+ * Область команды берётся из вкладки проекта, независимо от фильтра состояния.
+ * Общие гейты карточек исключают историю, завершённые и уже занятые прогоны.
+ */
+function bulkCandidates(action: BulkAction, scope: BulkScope) {
+  const source = scope === 'all' ? tasks.value : projectTasks.value;
+  const eligible = action === 'resume' ? canResume : canStop;
+
+  return source.filter((task) => eligible(task) && !sandboxBusy.value.has(task.task));
+}
+
+/**
+ * Фиксирует выбранные задачи до первого запроса и блокирует повторные команды.
+ * Отказ одной задачи не мешает остальным; итоговый снимок перечитывается один раз.
+ */
+async function runBulkAction(action: BulkAction, scope: BulkScope) {
+  if (bulkBusy.value !== null || !loaded.value || error.value) {
+    return;
+  }
+
+  const selected = bulkCandidates(action, scope);
+
+  if (!selected.length) {
+    return;
+  }
+
+  const failures: string[] = [];
+  const eligible = action === 'resume' ? canResume : canStop;
+
+  bulkBusy.value = action;
+  sandboxBusy.value = new Set([...sandboxBusy.value, ...selected.map((task) => task.task)]);
+
+  try {
+    for (const selectedTask of selected) {
+      const task = tasks.value.find((item) => item.task === selectedTask.task);
+
+      if (!task || task.attempt !== selectedTask.attempt || !eligible(task)) {
+        continue;
+      }
+
+      try {
+        const body = action === 'resume' ? { attempt: task.attempt, profile: task.profile } : undefined;
+
+        await api.post(`/api/tasks/${task.task}/${action}`, body);
+      } catch (e) {
+        failures.push(`#${task.task}: ${errorMessage(e, '')}`);
+      }
+    }
+
+    await load();
+  } finally {
+    const busy = new Set(sandboxBusy.value);
+
+    for (const task of selected) {
+      busy.delete(task.task);
+    }
+
+    sandboxBusy.value = busy;
+    bulkBusy.value = null;
+  }
+
+  if (failures.length) {
+    await alertDialog(translate('core.pipelineBulkFailures', { failures: failures.join('\n') }));
+  }
+}
+
 
 /**
  * Останавливает работающий прогон после подтверждения человека.
@@ -2967,7 +3117,8 @@ async function loadSnapshot() {
       return graph ? [{ ...task, graph }] : [];
     });
     // Названия задач из B24 (для заголовка) + доска (для «таймеров вне фабрики»).
-    tasks.value.forEach((t) => taskStore.load(t.task).catch(() => {}));
+    tasks.value.filter((task) => task.source !== 'grigdesk')
+      .forEach((task) => taskStore.load(task.task).catch(() => {}));
     board.load();
     error.value = null;
   } catch (e) {
@@ -3095,7 +3246,7 @@ function cardState(g: PipelineViewGraph) {
   top: calc(var(--pipeline-content-gutter) * -1);
   z-index: 30;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   min-height: calc(var(--toolbar-control-h) + 8px);
@@ -3105,6 +3256,34 @@ function cardState(g: PipelineViewGraph) {
   padding: 3px var(--pipeline-content-gutter) 4px;
   border-bottom: 1px solid var(--line);
   background: var(--topbar);
+}
+
+.pipeline-run-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pipeline-run-separator {
+  flex: none;
+  width: 1px;
+  height: 12px;
+  margin-left: 8px;
+  background: var(--line-2);
+}
+
+.pipeline-run-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pipeline-run-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
 }
 
 .status-filter-copy {
@@ -3453,46 +3632,228 @@ function cardState(g: PipelineViewGraph) {
 .oid { color: var(--ink-mid); font-size: 13px; flex: none; }
 .otimer { color: var(--good); font-size: 15px; flex: none; }
 
-/* Модалка этапа */
-.sh { min-height: 64px; flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center; gap: 14px; padding: 10px 14px 10px 18px; border-bottom: 1px solid var(--line);
-  background: var(--topbar); }
-.shead-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.shead-kicker { color: var(--ink-mid); font-size: 10.5px; line-height: 1.25; text-transform: uppercase;
-  letter-spacing: .08em; }
-.sh h3 { min-width: 0; margin: 0; overflow: hidden; color: var(--ink); font-size: 17px; font-weight: 650;
-  line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
-.shead-state { min-width: 0; display: flex; align-items: center; justify-content: flex-end;
-  gap: 8px; flex-wrap: wrap; }
-
-/* Контекст открытого решения: название задачи слева, прямой вход на её стенд справа. */
-.stage-context { min-height: 56px; flex: none; display: grid;
-  grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px;
-  padding: 8px 18px; border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--ground) 72%, var(--surface)); }
-.stage-task-context { min-width: 0; display: flex; align-items: baseline; gap: 10px; }
-.stage-context-label { flex: none; color: var(--ink-mid); font-size: 10px; line-height: 1.3;
-  text-transform: uppercase; letter-spacing: .065em; white-space: nowrap; }
-.stage-context-label b { color: var(--ink); font-weight: 600; letter-spacing: 0; }
-.stage-task-title { min-width: 0; overflow: hidden; color: var(--ink); font-size: 13.5px; font-weight: 600;
-  line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.stage-stand-context { min-width: 0; display: flex; align-items: center; justify-content: flex-end;
-  gap: 7px; }
-.stage-stand-link { min-height: 30px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 7px;
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); color: var(--accent);
-  font-size: 11.5px; text-decoration: none; white-space: nowrap; }
-.stage-stand-link:hover { border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); }
-.stage-stand-link b { color: inherit; font-weight: 550; }
-.stage-stand-state { max-width: 310px; color: var(--ink-mid); font-size: 12px; line-height: 1.35;
-  overflow-wrap: anywhere; }
-.stage-stand-state.building { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); }
+/* Окно узла разделяет чтение результата, настройку и решение человека.
+   Шапка и вкладки постоянны; документ получает собственную спокойную поверхность. */
+.sh {
+  min-height: 78px;
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
+  gap: 20px;
+  padding: 12px 16px 10px 18px;
+  background: var(--surface);
+}
+.shead-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.shead-kicker {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 14px;
+}
+.shead-kicker > span:first-child {
+  opacity: .4;
+}
+.sh h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -.035em;
+  overflow-wrap: anywhere;
+}
+.shead-executor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 14px;
+}
+.shead-model {
+  opacity: .75;
+  font-size: 11px;
+}
+.shead-state {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+.stage-context {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  min-height: 36px;
+  padding: 7px 18px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ground) 45%, var(--surface));
+}
+.stage-task-context {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.stage-context-label {
+  flex: none;
+  color: var(--ink-mid);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.stage-context-label b {
+  color: var(--ink);
+  font-size: 11px;
+}
+.stage-task-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stage-stand-context {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.stage-stand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-size: 11px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.stage-stand-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.stage-stand-link b {
+  color: inherit;
+  font-weight: 500;
+}
+.stage-stand-state {
+  max-width: 260px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.stage-stand-state.building {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+}
+.stage-navigation {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.stage-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--ink-mid);
+  font: 10px var(--mono);
+}
+.stage-readonly {
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+.stage-tab-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.stage-section-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.stage-section-heading h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -.025em;
+}
+.stage-section-heading p {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.stage-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 160px;
+  padding: 20px 14px;
+  text-align: center;
+}
+.stage-empty-symbol {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink-mid);
+  font-size: 26px;
+}
+.stage-empty h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 550;
+}
+.stage-empty p {
+  max-width: 36ch;
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.65;
+}
 
 /* Компактная строка метаданных */
 .smeta { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.sbadge { flex: none; padding: 5px 11px; border-radius: 999px; font-size: 10.5px; font-weight: 650;
-  line-height: 1.15; text-transform: uppercase; letter-spacing: .055em; white-space: nowrap; }
+.sbadge { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px;
+  border-radius: 999px; font-size: 10px; font-weight: 650;
+  line-height: 1.15; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+/* Точка статуса: цвет и слово читаются одним знаком, как у узлов на графе. */
+.sbadge::before { content: ''; flex: none; width: 5px; height: 5px; border-radius: 50%;
+  background: currentColor; }
 .sbadge.run { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 .sbadge.done { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
 /* Разбор идёт: цвет тот же, что у узла на схеме, но со своим словом — «done» и
@@ -3559,26 +3920,86 @@ function cardState(g: PipelineViewGraph) {
   background: var(--surface-2); text-transform: none; letter-spacing: 0; margin-left: auto; }
 .jf.on { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
 
-/* Рабочая область: информация слева, действия справа. Обе колонки скроллятся внутри
-   viewport-рамки, поэтому шапка и нижние действия всегда остаются на экране. */
-.sworkspace { min-width: 0; min-height: 0; flex: 1; display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(380px, 470px); grid-template-areas: "main rail";
-  overflow: hidden; background: var(--surface); }
-.sworkspace.main-only { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main"; }
-.sworkspace.rail-only { grid-template-columns: minmax(0, 1fr); grid-template-areas: "rail"; }
-.smain, .srail { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 14px;
-  overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 16px 18px; }
-.smain { grid-area: main; }
-.srail { grid-area: rail; border-left: 1px solid var(--line);
-  background: color-mix(in srgb, var(--ground) 45%, var(--surface)); }
-.sworkspace.rail-only .srail { border-left: 0; background: var(--surface); }
-.sect { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-.secth { min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--ink-mid); font-size: 11px;
-  font-weight: 600; line-height: 1.3; text-transform: uppercase; letter-spacing: .08em; }
-.content-sect { padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--ground); }
+/* Две смысловые области вместо стопки карточек: содержимое и управление.
+   Прокрутка каждой области сохраняет вкладки и нижние действия на месте. */
+.sconversation {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.sworkspace {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-areas: "main rail";
+  overflow: hidden;
+  background: var(--surface);
+}
+.sworkspace.main-only {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "main";
+}
+.sworkspace.rail-only {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "rail";
+}
+.smain, .srail {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.smain {
+  grid-area: main;
+  padding: 18px;
+}
+.srail {
+  grid-area: rail;
+  padding: 18px 16px;
+  border-left: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ground) 46%, var(--surface));
+}
+.stage-rail-heading {
+  color: var(--ink-mid);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+}
+.sworkspace.rail-only .srail {
+  border-left: 0;
+}
+.sect {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.secth {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.content-sect {
+  padding: 0;
+}
 
 /* Фактическая multi-AI цепочка этапа и история аварийных переключений. */
-.runner-sect { padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--ground); }
+.runner-sect {
+  gap: 16px;
+}
 .runner-source { margin-left: auto; font-size: 10.5px; text-transform: none;
   letter-spacing: 0; font-weight: 400; text-align: right; opacity: .8; }
 /* Цепочка — справка, а не выбор: одна мелкая строка чипов, без заливки и веса. */
@@ -3594,8 +4015,13 @@ function cardState(g: PipelineViewGraph) {
 .runner-current { padding: 7px 9px; border-radius: 8px; background: var(--surface-2); color: var(--ink-mid);
   font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .runner-current.switched { color: var(--warn); }
-.runner-attempts { max-height: min(250px, 30vh); display: flex; flex-direction: column; gap: 2px;
-  overflow-y: auto; padding-top: 9px; border-top: 1px solid var(--line); }
+.runner-attempts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
 .runner-attempt-title { position: sticky; top: 0; z-index: 1; padding: 0 4px 5px; background: var(--ground);
   color: var(--ink-mid); font-size: 10px; text-transform: uppercase; letter-spacing: .065em; }
 .runner-attempt { min-height: 27px; display: grid;
@@ -3605,6 +4031,13 @@ function cardState(g: PipelineViewGraph) {
 .runner-attempt-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runner-attempt-cost { justify-self: end; white-space: nowrap; color: var(--ink-low); }
 .runner-result { justify-self: end; white-space: nowrap; }
+.runner-result.runner-result-detail {
+  grid-column: 1 / -1;
+  grid-row: auto;
+  justify-self: stretch;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .runner-result.success { color: var(--good); }
 .runner-result.switched { color: var(--accent); }
 .runner-result.failed { color: var(--warn); }
@@ -3613,7 +4046,64 @@ function cardState(g: PipelineViewGraph) {
 .runner-override { display: flex; flex-direction: column; gap: 8px; }
 .runner-override-lbl { color: var(--ink-mid); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
 .runner-override-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.runner-picks { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
+.runner-picks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.executor-identity {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-width: 0;
+}
+.executor-monogram {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-mid);
+  font-size: 16px;
+}
+.executor-name {
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.executor-name b {
+  font-weight: 600;
+}
+.executor-name small {
+  color: var(--ink-mid);
+  font-size: 10px;
+}
+.executor-check {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 12px;
+}
+.runner-preview-notice {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin: 0 0 8px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.stage-soon {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--accent);
+  font-size: 10px;
+}
 .runner-reset { align-self: center; margin-left: auto; }
 .runner-hint { margin: 0; font-size: 11.5px; color: var(--ink-mid); line-height: 1.4; }
 
@@ -3643,16 +4133,54 @@ function cardState(g: PipelineViewGraph) {
   border-radius: 8px; background: color-mix(in srgb, var(--ground) 88%, #000); }
 .logline { padding: 2px 0; font-size: 12px; overflow-wrap: anywhere; }
 .small { font-size: 12px; }
-.sdoc { min-width: 0; overflow-x: auto; overflow-wrap: anywhere; padding: 12px 14px;
-  border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb, var(--ground) 88%, #000);
-  font-size: 13px; line-height: 1.55; }
-.sdoc :deep(h1) { font-size: 15px; margin: 4px 0 8px; }
-.sdoc :deep(h2) { font-size: 13.5px; margin: 12px 0 6px; }
-.sdoc :deep(h3) { font-size: 12.5px; margin: 10px 0 4px; }
-.sdoc :deep(code) { background: var(--surface-2); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
-.sdoc :deep(pre) { background: var(--surface-2); border-radius: 8px; padding: 10px; overflow-x: auto; }
-.sdoc :deep(table) { border-collapse: collapse; }
-.sdoc :deep(td), .sdoc :deep(th) { border: 1px solid var(--line); padding: 4px 8px; font-size: 12px; }
+/* Документ этапа — главный читаемый слой модалки. Внутренней карточки больше нет:
+   документ живёт в одной поверхности, мера строки ограничена, а широкие таблицы
+   прокручиваются внутри себя, вместо того чтобы ломать слова посреди строки. */
+.document-sect {
+  gap: 14px;
+  padding: 0;
+}
+.sdoc { min-width: 0; padding: 0 0 16px; color: var(--ink); font-size: 13px;
+  line-height: 1.65; overflow-wrap: normal; }
+.sdoc :deep(p), .sdoc :deep(ul), .sdoc :deep(ol), .sdoc :deep(blockquote) { max-width: 76ch; }
+.sdoc :deep(p) { margin: 0 0 11px; }
+.sdoc :deep(h1) { margin: 8px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line);
+  font-size: 18px; font-weight: 650; line-height: 1.3; }
+.sdoc :deep(h2) { margin: 22px 0 9px; font-size: 14.5px; font-weight: 650; line-height: 1.35; }
+.sdoc :deep(h3) { margin: 16px 0 7px; font-size: 13px; font-weight: 650; line-height: 1.4; }
+.sdoc :deep(h4) { margin: 14px 0 6px; color: var(--ink-mid); font-size: 12.5px; font-weight: 650; }
+.sdoc :deep(ul), .sdoc :deep(ol) { margin: 0 0 12px; padding-left: 22px; }
+.sdoc :deep(li) { margin: 3px 0; }
+.sdoc :deep(li > p) { margin: 0 0 4px; }
+.sdoc :deep(strong) { color: var(--ink); font-weight: 600; }
+.sdoc :deep(hr) { margin: 20px 0; border: 0; border-top: 1px solid var(--line); }
+.sdoc :deep(blockquote) { margin: 14px 0; padding: 8px 14px; border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--accent) 7%, transparent);
+  color: var(--ink-mid); }
+.sdoc :deep(blockquote p:last-child) { margin-bottom: 0; }
+.sdoc :deep(a) { color: var(--accent); text-decoration: none; }
+.sdoc :deep(a:hover) { text-decoration: underline; text-underline-offset: 2px; }
+.sdoc :deep(code) { padding: 1px 5px; border-radius: 4px; background: var(--surface-2);
+  font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.sdoc :deep(pre) { margin: 12px 0; padding: 12px 14px; overflow-x: auto; border: 1px solid var(--line);
+  border-radius: 9px; background: color-mix(in srgb, var(--ground) 60%, #000); }
+.sdoc :deep(pre code) { padding: 0; background: transparent; font-size: 12px; line-height: 1.6; }
+.sdoc :deep(img) { max-width: 100%; height: auto; border-radius: 8px; }
+.sdoc :deep(table) { display: block; width: 100%; max-width: 100%; margin: 14px 0; overflow-x: auto;
+  border: 1px solid var(--line); border-radius: 10px; border-collapse: separate; border-spacing: 0;
+  font-size: 12.5px; }
+.sdoc :deep(thead) { background: var(--surface-2); }
+.sdoc :deep(th) { padding: 8px 10px; border-bottom: 1px solid var(--line-2);
+  background: var(--surface-2); color: var(--ink-mid); font-size: 10.5px; font-weight: 600;
+  letter-spacing: .04em; line-height: 1.35; text-align: left; text-transform: uppercase;
+  vertical-align: bottom; }
+.sdoc :deep(td) { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top;
+  line-height: 1.5; overflow-wrap: break-word; }
+.sdoc :deep(tbody tr:last-child td) { border-bottom: 0; }
+.sdoc :deep(tbody tr:nth-child(even) td) {
+  background: color-mix(in srgb, var(--surface-2) 42%, transparent);
+}
+.sdoc :deep(td code) { font-size: 11.5px; overflow-wrap: anywhere; }
 /* Вопросы узла. Номер и формулировка стоят НАД полем, а не сбоку: вопрос агента бывает
    в две строки, и боковая колонка сжимала бы поле ответа до нечитаемого. */
 .rwq { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
@@ -3678,69 +4206,222 @@ function cardState(g: PipelineViewGraph) {
 .gwrow.deferred .gwtag { background: color-mix(in srgb, var(--warn) 20%, transparent);
   color: var(--warn); }
 .gwwhat { flex: 1; min-width: 0; color: var(--ink); }
-/* Ситуация — условие решения, поэтому она в той же колонке и в том же ритме, что кнопки,
-   но тише их: рамка нейтральная, тревожность несут сами блоки внутри. */
-.situation-sect { padding: 14px; border: 1px solid var(--line); border-radius: 11px;
-  background: var(--ground); }
-.gate-sect, .rewind-sect { padding: 14px; border-radius: 11px; }
-.gate-sect { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line));
-  background: color-mix(in srgb, var(--warn) 7%, var(--ground)); }
-.gate-sect .secth { color: var(--warn); }
-.rewind-sect { border: 1px solid color-mix(in srgb, var(--warn) 22%, var(--line));
-  background: color-mix(in srgb, var(--warn) 4%, var(--ground)); }
+/* Итог читается перед действием, а возврат обозначен самостоятельным шагом.
+   Цвет предупреждения принадлежит кнопке и последствиям, без рамки вокруг всей формы. */
+.situation-sect {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.gate-sect, .rewind-sect {
+  gap: 16px;
+}
+.rewind-heading {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.rewind-symbol {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+  font-size: 24px;
+}
+.rewind-caption {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-mid);
+  font-size: 10px;
+}
+
 .gate-lbl { font-size: 12.5px; color: var(--ink); }
 .gate-hint { margin: 0; color: var(--ink-mid); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .gbtns { display: flex; flex-wrap: wrap; gap: 8px; }
 
-/* Чат и диф закреплены в подвале модалки. */
-.sactions { min-height: 58px; flex: none; display: flex; align-items: center; justify-content: space-between;
-  gap: 14px; margin-top: auto; padding: 9px 16px 9px 18px; border-top: 1px solid var(--line); background: var(--topbar); }
-.sactions-context { color: var(--ink-mid); font-size: 11.5px; white-space: nowrap; }
-.sactions-context b { color: var(--ink); font-weight: 550; }
-.sactions-buttons { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-
-/* Планшет: одна внутренняя колонка; управление идёт первым благодаря порядку DOM. */
-@media (max-width: 980px) {
-  .sworkspace, .sworkspace.main-only, .sworkspace.rail-only { display: flex; flex-direction: column;
-    gap: 12px; overflow-y: auto; padding: 12px; }
-  .smain, .srail { flex: none; overflow: visible; padding: 0; border: 0; background: transparent;
-    scrollbar-gutter: auto; }
+/* Справочные действия всегда доступны под рабочей областью. */
+.sactions {
+  min-height: 46px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: auto;
+  padding: 6px 16px 6px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.sactions-context {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+.stage-footer-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink-mid);
+}
+.stage-footer-dot.done {
+  background: var(--good);
+}
+.stage-footer-dot.run {
+  background: var(--accent);
+}
+.stage-footer-dot.stall {
+  background: var(--warn);
+}
+.sactions-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
-/* Телефон: тот же fullscreen-паттерн, что у просмотра документа. */
+@media (max-width: 980px) {
+  .sworkspace {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+  .smain {
+    padding: 16px;
+  }
+  .srail {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 700px) {
+  .sworkspace, .sworkspace.main-only, .sworkspace.rail-only {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .smain, .srail {
+    flex: none;
+    overflow: visible;
+    scrollbar-gutter: auto;
+  }
+  .srail {
+    border-left: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
 @media (max-width: 600px) {
-  .sh { min-height: 66px; grid-template-columns: minmax(0, 1fr) var(--control-height); grid-template-rows: auto auto;
-    column-gap: 10px; row-gap: 5px; padding: 8px 10px 8px 14px; }
-  .shead-copy { grid-column: 1; grid-row: 1; }
-  .shead-state { grid-column: 1; grid-row: 2; justify-content: flex-start; }
-  .sx { grid-column: 2; grid-row: 1 / span 2; }
-  .sh h3 { font-size: 15px; }
-  .shead-kicker { font-size: 9.5px; }
-  .stage-context { min-height: 0; grid-template-columns: minmax(0, 1fr); gap: 7px; padding: 8px 12px 9px; }
-  .stage-task-context { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
-  .stage-task-title { display: -webkit-box; overflow: hidden; font-size: 13px; white-space: normal;
-    overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-  .stage-stand-context { justify-content: flex-start; gap: 6px; overflow-x: auto; }
-  .stage-stand-link { min-height: 34px; }
-  .stage-stand-state { max-width: none; }
-  .jf { margin-left: 0; }
-  .sworkspace, .sworkspace.main-only, .sworkspace.rail-only { gap: 10px; padding: 10px; }
-  .smain, .srail { gap: 10px; }
-  .runner-sect, .content-sect, .gate-sect, .rewind-sect, .situation-sect { padding: 12px; }
-  .secth { flex-wrap: wrap; }
-  .runner-source { width: 100%; margin-left: 0; text-align: left; }
-  .runner-attempt { grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-rows: auto auto;
-    align-items: baseline; gap: 2px 7px; padding: 5px 6px; }
-  .runner-attempt-model { grid-column: 2 / 3; grid-row: 2; white-space: normal; overflow-wrap: anywhere; }
-  /* Цена — под результатом своей же попытки: колонки узкие, и в первой строке
-     она вытолкнула бы имя исполнителя за край. */
-  .runner-attempt-cost { grid-column: 3; grid-row: 2; }
-  .runner-result { grid-column: 3; grid-row: 1; }
-  .gbtns .btn { flex: 1 1 140px; }
-  .sactions { min-height: 62px; padding: 9px 10px calc(9px + env(safe-area-inset-bottom)); }
-  .sactions-context { display: none; }
-  .sactions-buttons { width: 100%; }
-  .sactions-buttons > .btn, .sactions :deep(.oc) { flex: 1; }
+  .sh {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    padding: 14px 12px;
+  }
+  .shead-copy {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .shead-state {
+    grid-column: 1;
+    grid-row: 2;
+    justify-content: flex-start;
+    padding-top: 0;
+  }
+  .sx {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+  .sh h3 {
+    font-size: 18px;
+  }
+  .shead-executor {
+    font-size: 11px;
+    gap: 5px;
+  }
+  .stage-context {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+    padding: 8px 12px;
+  }
+  .stage-task-context {
+    align-items: baseline;
+    gap: 8px;
+  }
+  .stage-task-title {
+    display: -webkit-box;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .stage-stand-context {
+    flex-wrap: wrap;
+  }
+  .stage-stand-link {
+    min-height: 28px;
+  }
+  .stage-navigation {
+    gap: 0;
+    padding: 0 12px;
+  }
+  .stage-readonly {
+    display: none;
+  }
+  .smain, .srail {
+    padding: 14px 12px;
+    gap: 20px;
+  }
+  .stage-tab-panel {
+    gap: 16px;
+  }
+  .stage-section-heading h4 {
+    font-size: 16px;
+  }
+  .runner-source {
+    font-size: 10px;
+  }
+  .runner-attempt {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    gap: 4px 6px;
+  }
+  .runner-attempt-model {
+    grid-column: 2;
+    grid-row: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .runner-attempt-cost {
+    grid-column: 3;
+    grid-row: 2;
+  }
+  .runner-result {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .sdoc {
+    font-size: 13px;
+  }
+  .sdoc :deep(h1) {
+    font-size: 17px;
+  }
+  .sdoc :deep(td) {
+    padding: 7px 8px;
+  }
+  .gbtns .btn {
+    flex: 1 1 120px;
+  }
+  .sactions {
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  }
+  .sactions-context {
+    display: none;
+  }
+  .sactions-buttons {
+    width: 100%;
+  }
 }
 
 @media (max-height: 700px) and (min-width: 601px) {

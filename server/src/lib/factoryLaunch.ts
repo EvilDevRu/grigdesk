@@ -69,6 +69,28 @@ export interface FactoryRouteLaunchPaths extends FactoryLaunchPaths {
 }
 
 /**
+ * Один выбранный runtime задаёт и engine, и helper Node, и host environment.
+ * Читающий probe использует тот же конструктор без reservation или resolver с миграцией.
+ */
+export function selectedFactoryRuntimeConfig<T extends FactoryRouteLaunchPaths>(
+  config: T,
+  selected: FactoryRuntimeSelection,
+) {
+  return {
+    ...config,
+    rootDir: selected.runtimeRoot,
+    factoryHome: selected.engineHome,
+    factoryBin: selected.engineBin,
+    runtimeNode: selected.node,
+    runtimeHostEnv: {
+      GRIGDESK_SERVER_RUNTIME_RESERVATION: '',
+      GRIGDESK_SERVER_RUNTIME_NODE: '',
+      GRIGDESK_SERVER_RUNTIME_PIN_HELPER: '',
+    },
+  };
+}
+
+/**
  * Команда helper-а строится по каталогу выбранного A, а не по текущему процессу B.
  * Таким образом его Node, ресурсы и движок принадлежат одному закреплённому runtime.
  */
@@ -163,18 +185,7 @@ export async function prepareFactoryRouteLaunch<T extends FactoryRouteLaunchPath
     current,
     cacheDir: current.cacheDir,
   }) : current;
-  const prepared = {
-    ...config,
-    rootDir: selected.runtimeRoot,
-    factoryHome: selected.engineHome,
-    factoryBin: selected.engineBin,
-    runtimeNode: selected.node,
-    runtimeHostEnv: {
-      GRIGDESK_SERVER_RUNTIME_RESERVATION: '',
-      GRIGDESK_SERVER_RUNTIME_NODE: '',
-      GRIGDESK_SERVER_RUNTIME_PIN_HELPER: '',
-    },
-  };
+  const prepared = selectedFactoryRuntimeConfig(config, selected);
 
   if (selected.packageId === null) {
     return {

@@ -27,6 +27,24 @@ test('runtime-info принимает совместимый manifest без о�
   assert.deepEqual(decodeDeepSeekRuntimeInfo(value), value);
 });
 
+test('capability подтверждения сохраняется без изменения формы старого metadata', () => {
+  const legacy = runtimeInfoFixture();
+
+  assert.deepEqual(decodeDeepSeekRuntimeInfo(legacy), legacy);
+
+  for (const toolPermissions of [true, false]) {
+    const value = { ...legacy, capabilities: { ...legacy.capabilities, toolPermissions } };
+
+    assert.deepEqual(decodeDeepSeekRuntimeInfo(value), value);
+  }
+
+  for (const toolPermissions of [null, 'true', 1, {}]) {
+    assert.throws(() => decodeDeepSeekRuntimeInfo({
+      ...legacy, capabilities: { ...legacy.capabilities, toolPermissions },
+    }), { code: 'deepseek_metadata_invalid' });
+  }
+});
+
 test('runtime-info отвергает отсутствующие поля, неверные hashes и неизвестные contracts', () => {
   for (const field of Object.keys(runtimeInfoFixture())) {
     const value = runtimeInfoFixture();
@@ -117,7 +135,8 @@ test('требования host соответствуют адаптерам и
 
   assert.equal(host.glm.profileRevision, GLM_PROFILE_REVISION);
   assert.equal(host.glm.policyRevision, GLM_POLICY_REVISION);
-  assert.deepEqual(GLM_ALLOWED_MODES, [host.glm.mode]);
+  assert.ok(GLM_ALLOWED_MODES.includes(host.glm.mode));
+  assert.deepEqual(GLM_ALLOWED_MODES, ['api', 'coding-plan']);
   assert.deepEqual(host.requiredCapabilities, ['web', 'acp', 'settingsWeb', 'settingsAcp']);
   assert.doesNotThrow(() => assertDeepSeekHostCompatibility(info, host));
 

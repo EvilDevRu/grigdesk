@@ -6,7 +6,10 @@ import test from 'node:test';
 
 import { messageKey } from '../../shared/chat/chatMessageIdentity.ts';
 import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
+import { InTurnHistory } from '../../server/src/lib/chat/inTurnHistory.ts';
+import { applyWebPending } from '../../server/src/lib/chat/webPendingHistory.ts';
 import { chatAppFixture, saveChat } from './helpers/chat-turns.js';
+import { putPending } from './helpers/chat-list.js';
 
 const ROUTE = '/api/chat/store/chat/step-reuse';
 const messages = () => [{
@@ -146,12 +149,6 @@ test('повреждённые refs отказывают без записи и 
     [409, (body) => {
       body.reuseSteps.refs[0].expectedLength = 9;
     }],
-    [409, (body) => {
-      body.chat.revision += 1;
-    }],
-    [409, (body) => {
-      body.reuseSteps.baseRevision += 1;
-    }],
   ];
   const eventCount = events.length;
 
@@ -215,7 +212,9 @@ test('конфликт revision не обходит stale CAS; архив, но�
     payload: sparse(original)
   });
 
-  assert.equal(conflict.statusCode, 409);
+  assert.equal(conflict.statusCode, 200);
+  assert.equal(conflict.json().stale, true);
+  assert.equal(conflict.json().stepReuseAck.confirmed.length, 2);
 
   const full = await app.inject({
     method: 'PUT',
@@ -346,4 +345,85 @@ test('ошибка durable write и отсутствие базы не созд�
   }), {
     code: 'chat_steps_changed'
   });
+});
+
+test('pending дополняет новые сообщения, сохраняя steps существующего финала и прошлых ответов', () => {
+  const projection = new InTurnHistory({
+    ledger: { byRun: () => [], byChat: () => [] },
+    assistant: { byRun: () => [] },
+  });
+  const steps = [{ k: 'tool', text: 'Уже сохранённое тело' }];
+  const final = {
+    role: 'assistant',
+    runId: 'pending-run',
+    assistantMessageId: 'pending-answer',
+    text: 'Промежуточный текст',
+    steps,
+  };
+  const current = {
+    id: 'pending-reuse',
+    messages: [...messages(), final],
+  };
+  const pending = {
+    id: 'pending-final',
+    chatKey: current.id,
+    runId: final.runId,
+    assistantMessageId: final.assistantMessageId,
+    reply: 'Полный текст',
+    steps: [{ k: 'tool', text: 'Другое тело той же длины' }],
+  };
+  const applied = applyWebPending(current, pending, projection, null);
+
+  assert.equal(applied.messages.at(-1).text, 'Полный текст');
+  assert.equal(applied.messages.at(-1).steps, steps);
+  assert.equal(applied.messages[0].steps, current.messages[0].steps);
+  assert.equal(current.messages.at(-1).text, 'Промежуточный текст');
+
+  const repeated = applyWebPending({ ...current, ...applied }, pending, projection, null);
+  const appended = applyWebPending(current, {
+    ...pending,
+    id: 'new-pending',
+    assistantMessageId: 'new-answer',
+  }, projection, null);
+
+  assert.equal(repeated.messages.at(-1).steps, steps);
+  assert.deepEqual(appended.messages.at(-1).steps, pending.steps);
+});
+
+test('reconcile публикует свежую head и не заменяет сохранённые steps финала', async (t) => {
+  const fixture = await chatAppFixture(t);
+  const id = 'head-reuse';
+  const final = {
+    role: 'assistant',
+    text: 'Ранее сохранённый блок',
+    runId: 'head-run',
+    assistantMessageId: 'head-answer',
+    steps: [{ k: 'tool', text: 'Сохранённое тело' }],
+  };
+
+  await saveChat(fixture.app, id, { messages: [final] });
+  await putPending(fixture, {
+    id: 'head-pending',
+    chatKey: id,
+    runId: final.runId,
+    assistantMessageId: final.assistantMessageId,
+    reply: 'Полный текст',
+    steps: [{ k: 'tool', text: 'Сервер не заменяет это тело' }],
+  });
+
+  const result = await fixture.app.inject({
+    method: 'POST',
+    url: '/api/chat/store/reconcile',
+    payload: { loadedIds: [], deliveryIds: [] },
+  });
+  const saved = (await fixture.app.inject(`/api/chat/store/chat/${id}`)).json().chat;
+  const event = fixture.events.findLast((entry) => entry.event === 'chat-store' && entry.data.head);
+
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(saved.messages[0].steps, final.steps);
+  assert.equal(saved.messages[0].text, 'Полный текст');
+  assert.equal(event.data.head.id, id);
+  assert.equal(event.data.head.revision, saved.revision);
+  assert.deepEqual(event.data.head, result.json().heads[0]);
+  assert.equal(Object.hasOwn(event.data.head, 'messages'), false);
 });

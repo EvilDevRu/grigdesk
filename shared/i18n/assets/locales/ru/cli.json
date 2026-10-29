@@ -13,6 +13,16 @@
   "continue": "Enter или Esc — назад",
   "open": "Открыть окно",
   "openDescription": "запустить GrigDesk",
+  "openWindowQuestion": "Открыть окно GrigDesk?",
+  "skipOpen": "Не открывать",
+  "openWindowNavigation": "↑↓ выбор · Enter подтвердить · Д/Н · Esc не открывать",
+  "smokeQuestion": "Живой smoke допуска GLM после сборки?",
+  "smokeNavigation": "↑↓ выбор · Enter подтвердить · Esc пропустить",
+  "smokeChoice": {
+    "none": "Пропустить (по умолчанию)",
+    "consumer": "Режим потребителя (нужен допуск)",
+    "both": "Оба режима: api и coding-plan"
+  },
   "status": "Состояние",
   "statusDescription": "сервер, окно, посредник, связи",
   "server": "Сервер",
@@ -21,7 +31,7 @@
   "devices": "Устройства",
   "devicesDescription": "привязать телефон по QR, список, отозвать",
   "build": "Сборка",
-  "buildDescription": "сервер, веб, окно, переносимый комплект",
+  "buildDescription": "сервер, веб, окно, DeepSeek, переносимый комплект",
   "development": "Разработка",
   "developmentDescription": "dev-режим, зависимости, run",
   "exit": "Выход",
@@ -50,6 +60,8 @@
   "webDescription": "подготовить зависимости и собрать веб",
   "window": "Окно вместе с вебом",
   "windowDescription": "собрать веб, упаковать и установить окно",
+  "deepseek": "DeepSeek",
+  "deepseekDescription": "собрать, проверить и установить поставку DeepSeek",
   "bundle": "Переносимый комплект",
   "bundleDescription": "папка release/ и архив без установки",
   "dev": "Dev-режим",
@@ -74,10 +86,14 @@
   "summaryServer": "Поставлен сервер: {path}",
   "summaryWeb": "Собран веб: {path}",
   "summaryWindow": "Поставлено окно: {path}; веб собран.",
+  "summaryDeepseek": "Поставлен DeepSeek: {path}",
   "summaryBundle": "Готовы release/ и release.tar.gz без установки.",
   "reopen": "Закройте окно и откройте снова — запустится новый код.",
   "webHint": "Окно покажет новый веб после grigdesk-ctl build window.",
+  "deepseekHint": "Новый ELF получит следующий ход DeepSeek; перезапуск сервера не нужен.",
   "selectServer": "Для выбора этого сервера окном: grigdesk-ctl desktop use-server {path}",
+  "serverQueued": "При следующем запуске окно выберет сервер этой сборки.",
+  "serverNotSelected": "Окно сохраняет выбор другой установки сервера; новый сервер ещё не выбран.",
   "historyError": "Не удалось сохранить длительности: {reason}",
   "states": {
     "ready": "работает",
@@ -106,6 +122,18 @@
     "window": {
       "package": "Окно: упаковка",
       "install": "Окно: установка"
+    },
+    "deepseek": {
+      "deps": "DeepSeek: зависимости",
+      "prepare": "DeepSeek: подготовка среды",
+      "build": "DeepSeek: сборка",
+      "verify": "DeepSeek: проверка",
+      "admission-api": "DeepSeek: допуск api",
+      "admission-coding-plan": "DeepSeek: допуск coding-plan",
+      "smoke-api": "DeepSeek: живой smoke (api)",
+      "smoke-coding-plan": "DeepSeek: живой smoke (coding-plan)",
+      "install": "DeepSeek: установка",
+      "prune": "DeepSeek: чистка кэша"
     },
     "bundle": {
       "server": "Комплект: сервер",

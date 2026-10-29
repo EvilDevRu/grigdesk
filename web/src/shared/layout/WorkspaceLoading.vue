@@ -8,7 +8,7 @@
       </div>
       <div class="conversation"><ChatLoadingPreview /></div>
     </div>
-    <div v-else-if="routeName === 'board'" class="board"><BoardLoading /></div>
+    <div v-else-if="routeName === 'board'" class="board"><BoardLoading include-own-tasks /></div>
     <div v-else-if="routeName === 'pipeline'" class="pipeline">
       <div class="toolbar" data-loading-region="toolbar">
         <UiSkeleton shape="block" width="120px" height="var(--toolbar-control-h)" />

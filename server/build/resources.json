@@ -130,6 +130,11 @@
       "source": "server/deepseek-host-contract.json",
       "target": "server/deepseek-host-contract.json",
       "kind": "file"
+    },
+    {
+      "source": "server/seed/pipeline-sample",
+      "target": "server/seed/pipeline-sample",
+      "kind": "dir"
     }
   ]
 }

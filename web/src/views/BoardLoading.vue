@@ -1,6 +1,13 @@
 <template>
   <UiLoadingState :label="label" :description="description" :failed="failed">
-    <div class="board-loading">
+    <div class="board-loading" :class="{ 'ui-workspace': includeOwnTasks }">
+      <div v-if="includeOwnTasks" class="own-tasks" data-loading-region="own-tasks">
+        <div class="own-heading">
+          <h3><UiSkeleton width="130px" height="20px" /></h3>
+          <UiSkeleton width="150px" height="32px" />
+        </div>
+        <div class="own-list" />
+      </div>
       <div class="summary" data-loading-region="summary">
         <div v-for="index in 4" :key="index" class="stat">
           <UiSkeleton width="62%" height="16px" />
@@ -30,15 +37,19 @@ withDefaults(defineProps<{
   label?: string;
   description?: string;
   failed?: boolean;
+  includeOwnTasks?: boolean;
 }>(), {
   label: undefined,
   description: undefined,
   failed: false,
+  includeOwnTasks: false,
 });
 </script>
 
 <style scoped>
 .board-loading { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.own-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.own-list { display: grid; margin-block: 1em; }
 .summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .stat { display: flex; flex-direction: column; justify-content: space-between; gap: 7px;
   padding: 12px 16px; height: 132px; border: 1px solid var(--line); border-radius: var(--radius); }
@@ -59,6 +70,6 @@ withDefaults(defineProps<{
 @media (max-width: 600px) {
   .board-loading { gap: 10px; }
   .primary { padding: 10px; }
-  .header { height: 82px; }
+  .header { height: 74px; }
 }
 </style>

@@ -19,7 +19,16 @@ const hostId = '\0plugin-test-host-probe';
 const probeSource = `
   import * as Vue from 'vue';
   import * as UI from ${JSON.stringify(path.join(root, 'web/src/ui.ts'))};
+  import { usePluginsStore } from ${JSON.stringify(path.join(root, 'web/src/stores/plugins.ts'))};
+  import { useDockStore } from ${JSON.stringify(path.join(root, 'web/src/stores/dock.ts'))};
+  import { useChatStore } from ${JSON.stringify(path.join(root, 'web/src/stores/chat.ts'))};
+  import { useAuthStore } from ${JSON.stringify(path.join(root, 'web/src/stores/auth.ts'))};
+  export function fixtureState() {
+    return { plugins: usePluginsStore(), dock: useDockStore(), chat: useChatStore(), auth: useAuthStore() };
+  }
+
   export { Vue, UI };
+  export { currentDesktopMode } from ${JSON.stringify(path.join(root, 'web/src/shared/desktopSettings.ts'))};
   export const runtimeProbe = {
     ref: Vue.ref, reactive: Vue.reactive, UiButton: UI.UiButton,
     confirmDialog: UI.confirmDialog, useUiLayer: UI.useUiLayer,
@@ -340,12 +349,42 @@ function assetsPlugin(built, variant = 'valid') {
  * Изменён только каталог и статика пакета; дополнительные hosts и SSE не создаются.
  * @param {import('node:test').TestContext} t
  * @param {{built?: Awaited<ReturnType<typeof buildRuntime>> | null, variant?: string,
- * entry?: string, width?: number, hmr?: boolean}} [options]
+ * entry?: string, width?: number, hmr?: boolean, b1?: boolean, mode?: 'main' | 'page'}} [options]
  */
 export async function runtimeBrowser(t, { built = null, variant = 'valid', entry = descriptor.entry,
-  width = 1280, hmr = false } = {}) {
+  width = 1280, hmr = false, b1 = false, mode = 'page' } = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-plugin-browser-'));
-  const plugins = [assetsPlugin(built, variant), hostProbePlugin()];
+  const streams = new Set();
+  const requests = [];
+  const eventPlugin = {
+    name: 'plugin-b1-events',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = new URL(req.url, 'http://fixture');
+
+        if (url.pathname.startsWith('/api/')) {
+          requests.push({ method: req.method, path: url.pathname });
+        }
+        if (url.pathname === '/api/events') {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.write('event: hello\ndata: {"boot":"fixture"}\n\n');
+          streams.add(res);
+          res.on('close', () => streams.delete(res));
+
+          return;
+        }
+
+        next();
+      });
+    },
+  };
+  const plugins = [assetsPlugin(built, variant), ...(b1 ? [eventPlugin] : []), hostProbePlugin()];
+
+  t.after(() => {
+    for (const stream of streams) {
+      stream.destroy();
+    }
+  });
 
   t.after(() => rm(directory, { recursive: true, force: true }));
 
@@ -373,11 +412,43 @@ export async function runtimeBrowser(t, { built = null, variant = 'valid', entry
     vitePlugins: plugins,
 
 
-    responses: { '/api/plugins': { plugins: [pluginCard({ webModule: { ...descriptor, entry } })] } },
+    responses: {
+      '/api/plugins': { plugins: [pluginCard({
+        webModule: {
+          ...descriptor,
+          entry,
+          ...(b1 ? { startOnLogin: true } : {})
+        },
+      })] },
+      ...(b1 ? {
+        '/api/chat/store': {
+          sessions: [{
+            id: 'existing-chat',
+            messages: [],
+            createdAt: 1
+          }],
+          activeId: 'existing-chat',
+          defModelRef: { provider: 'fixture-provider', model: 'fixture-model' },
+        },
+        '/api/chat/workdir/preview': {
+          capability: { switch: 'resume', roots: 'multi' },
+          target: { cwd: directory, workdir: { kind: 'grigdesk' } },
+        },
+      } : {}),
+    },
 
 
   });
   const page = await fixture.browser.newPage({ viewport: { width, height: 900 } });
+
+  if (mode === 'main') {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'userAgent', {
+        value: 'GrigDeskSettings/1 GrigDeskWindow/main',
+        configurable: true,
+      });
+    });
+  }
 
   await page.context().addCookies([{
 
@@ -435,8 +506,19 @@ export async function runtimeBrowser(t, { built = null, variant = 'valid', entry
     page,
 
 
-    probeUrl
+    probeUrl,
+    requests,
+    emitPlugin: (pluginId, event, data) => {
+      const body = JSON.stringify({
+        pluginId,
+        event,
+        data
+      });
 
+      for (const stream of streams) {
+        stream.write(`event: plugin-event\ndata: ${body}\n\n`);
+      }
+    },
 
   };
 }

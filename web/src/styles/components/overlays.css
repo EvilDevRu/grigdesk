@@ -243,6 +243,25 @@
   width: min(480px, calc(100vw - 40px));
 }
 
+/* Создание задачи остаётся короткой формой: ширина поддерживает длину строки,
+   а действия живут в footer и доступны при прокрутке тела в низком окне. */
+.ui-dialog-overlay .ui-dialog[data-role='new-grigdesk-task'] {
+  width: min(560px, calc(100vw - 40px));
+}
+
+.ui-dialog[data-role='new-grigdesk-task'] .ui-dialog__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-dialog[data-role='new-grigdesk-task'] > .ui-dialog__description {
+  padding-top: 8px;
+}
+
+.ui-dialog[data-role='new-grigdesk-task'] .ui-dialog__body {
+  padding-top: 24px;
+}
+
 .ui-dialog[data-role='workdir-picker'][data-body-inset='false'] .ui-dialog__body {
   flex-direction: column;
   overflow-y: auto;
@@ -325,8 +344,12 @@
   overflow-wrap: anywhere;
 }
 
+/* Длинная команда прокручивается внутри плашки: подтверждение не растягивается
+   на всю высоту экрана и сохраняет кнопки рядом с текстом. */
 .ui-dialog-host__code {
   display: block;
+  max-height: 168px;
+  overflow-y: auto;
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -475,6 +498,12 @@
    Размер окна и нижние действия остаются на месте, включая первый запрос current. */
 .ui-dialog[data-role='plugin-install-dialog'] {
   height: min(600px, calc(100dvh - 40px));
+}
+
+/* Фазы, итог и раскрытый вывод установки меняют только прокручиваемое тело.
+   Постоянная высота удерживает окно и нижние действия на месте. */
+.ui-dialog[data-role='provider-install-dialog'] {
+  height: min(480px, calc(var(--app-viewport-height, 100dvh) - 40px));
 }
 
 /* Доступ, выпуск QR и подтверждение меняют только тело диалога телефона.

@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../../shared/chatContracts.ts';
+import { startChatPerformance } from '../../shared/chatPerformance.ts';
 import type { ChatInTurnRun } from '../../stores/chatInTurn.ts';
 import { isInTurnReceipt } from '../../stores/chatInTurn.ts';
 import { chatStepKey, foldChatSteps } from './chatStepRows.ts';
@@ -438,6 +439,10 @@ export function createChatTimelineProjector() {
       run: ChatInTurnRun | null,
       activeRunId = '',
     ): ChatTimelineRow[] {
+      const finish = startChatPerformance('chat.timeline', () => ({
+        messages: messages.length,
+        steps: steps.length,
+      }));
       const alive = new Set<string>();
       /**
        * Текущий запуск остаётся живым, а исторический разворачивается один раз на набор зависимостей.
@@ -487,6 +492,8 @@ export function createChatTimelineProjector() {
           cache.delete(key);
         }
       }
+
+      finish();
 
       return result;
     },

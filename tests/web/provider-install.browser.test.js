@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
+import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 import { i18nBrowser } from './helpers/i18nBrowser.js';
-import { card, job, snapshot } from './helpers/providerInstallFixture.js';
+import { card, job, preparation, snapshot } from './helpers/providerInstallFixture.js';
 
 /**
  * Два browser context разделяют серверный снимок, но не Pinia или localStorage.
@@ -104,9 +108,37 @@ async function browserFixture(t, installed = false, viewport = {
       const request = route.request();
       const pathname = new URL(request.url()).pathname;
 
-      if (pathname === '/api/providers/installations/current') {
+      if (pathname === '/api/providers/installations/current'
+        || pathname === '/api/providers/installations/v2/current') {
         reads.push(pathname);
         await route.fulfill({ json: remote });
+
+        return;
+      }
+
+      const lifecycle = pathname.includes('/installations/v2/');
+      const providerPath = pathname.replace('/providers/installations/v2/', '/providers/');
+
+      if (/\/providers\/([^/]+)\/(install|update)\/prepare$/u.test(providerPath)) {
+        const [, id, operation] = providerPath.match(
+          /providers\/([^/]+)\/(install|update)\/prepare/u);
+        const provider = cards.find((item) => item.id === id);
+
+        await route.fulfill({ json: preparation({
+          providerId: id,
+          operation,
+          command: provider.installation[`${operation}Command`],
+          ...(lifecycle ? {
+            schemaVersion: 2,
+            affectedProviderIds: [id],
+            installationId: provider.installation.inventory.selectedId,
+            method: 'native',
+            fromVersion: '1.0.0',
+            targetVersion: '2.0.0',
+            footprint: [],
+            shellChanges: [],
+          } : {}),
+        }) });
 
         return;
       }
@@ -125,7 +157,7 @@ async function browserFixture(t, installed = false, viewport = {
           return;
         }
 
-        const [, id, operation] = pathname.match(/providers\/([^/]+)\/(install|update)\/start/u);
+        const [, id, operation] = providerPath.match(/providers\/([^/]+)\/(install|update)\/start/u);
         const provider = cards.find((item) => item.id === id);
 
         remote = snapshot(job({
@@ -221,12 +253,23 @@ async function confirmStart(page, area, provider, operation, posts) {
     name: operation === 'install' ? /Установить|Install/iu : /Обновить|Update/iu,
   }).first().click();
 
-  const confirmation = page.getByRole('dialog').last();
+  const confirmation = page.getByRole('dialog').filter({
+    has: page.locator('.ui-dialog-host__message'),
+  }).last();
 
   await confirmation.waitFor();
   assert.equal(posts.length, 0, 'Команда запущена раньше подтверждения');
   assert.ok((await confirmation.textContent()).includes(provider.name));
-  assert.ok((await confirmation.textContent()).includes(provider.installation[`${operation}Command`]));
+
+  const details = confirmation.getByRole('button', { name: /Подробности|Details/u, exact: true });
+
+  assert.equal(await details.getAttribute('aria-expanded'), 'false');
+  assert.equal(await confirmation.locator('.ui-dialog-host__code').count(), 0);
+  await details.click();
+
+  const confirmationText = await confirmation.textContent();
+
+  assert.ok(confirmationText.includes(provider.installation[`${operation}Command`]), confirmationText);
 
   const accept = /Установить|Обновить|Продолжить|Install|Update|Confirm/iu;
 
@@ -235,6 +278,49 @@ async function confirmStart(page, area, provider, operation, posts) {
   await page.locator('[data-role="provider-install-dialog"]').waitFor();
   assert.equal(await page.locator('[data-role="provider-install-dialog"]').count(), 1);
 }
+
+test('медленный prepare сразу открывает окно, а подтверждение располагается поверх него', {
+  timeout: 60000,
+}, async (t) => {
+  const fixture = await browserFixture(t);
+  const page = await fixture.newPage();
+  const prepare = Promise.withResolvers();
+
+  t.after(() => prepare.resolve(preparation({ operation: 'install' })));
+  await page.route('**/api/providers/claude/install/prepare', async (route) => {
+    await route.fulfill({ json: await prepare.promise });
+  });
+
+  const area = await openEntry(page, 'claude', 'settings');
+
+  await area.getByRole('button', { name: 'Установить', exact: true }).click();
+
+  const dialog = page.locator('[data-role="provider-install-dialog"]');
+
+  await dialog.locator('[data-phase="preparing"]').waitFor();
+  assert.equal(await dialog.getByRole('progressbar').getAttribute('aria-valuenow'), null);
+  assert.equal(await dialog.locator('[aria-current="step"]').textContent().then((text) => text.trim()),
+    'Проверка подготовки');
+  assert.equal(await dialog.locator('.ui-spinner').count(), 1);
+  assert.equal(fixture.posts.length, 0);
+
+  const artifacts = path.join(artifactsPath({ env: process.env, home: os.homedir() }),
+    'provider-lifecycle-fixes');
+
+  await mkdir(artifacts, { recursive: true });
+  await page.screenshot({ path: path.join(artifacts, 'preparing.png') });
+  prepare.resolve(preparation({ operation: 'install' }));
+
+  const confirmation = page.getByRole('dialog').filter({
+    has: page.locator('.ui-dialog-host__message'),
+  });
+
+  await confirmation.waitFor();
+  await page.screenshot({ path: path.join(artifacts, 'confirmation.png') });
+  await confirmation.getByRole('button', { name: 'Отмена', exact: true }).click();
+  await dialog.waitFor({ state: 'hidden' });
+  assert.equal(fixture.posts.length, 0);
+});
 
 test('три исполнителя открывают одно окно из обоих мест', { timeout: 120000 }, async (t) => {
   for (const installed of [false, true]) {
@@ -248,11 +334,56 @@ test('три исполнителя открывают одно окно из о
 
           await confirmStart(page, area, provider, installed ? 'update' : 'install', fixture.posts);
           assert.equal(fixture.posts.length, 1);
-          assert.ok(fixture.posts[0].body == null || Object.keys(fixture.posts[0].body).length === 0);
+          assert.deepEqual(fixture.posts[0].body, { preparationToken: 'fixture-preparation-token' });
           assert.equal(await page.evaluate(() => window.__providerSources.length), 1);
         });
       }
     }
+  }
+});
+
+test('оставшаяся native-копия обновляется в окне GrigDesk из настроек и топбара', {
+  timeout: 60000,
+}, async (t) => {
+  for (const entry of ['settings', 'topbar']) {
+    await t.test(entry, async (scenario) => {
+      const fixture = await browserFixture(scenario, true);
+      const provider = fixture.cards.find((item) => item.id === 'kimi');
+      const nativeId = 'a'.repeat(64);
+      const command = 'official-installer --fixture';
+
+      Object.assign(provider.installation, {
+        lifecycleProtocol: 2,
+        canReinstall: true,
+        canUninstall: true,
+        updateCommand: command,
+        inventory: {
+          selectedId: nativeId,
+          terminalId: nativeId,
+          conflict: false,
+          installations: [{
+            installationId: nativeId,
+            resourceKey: nativeId,
+            source: 'native',
+            state: 'unverified',
+            path: '/fixture/native/bin/kimi',
+            realpath: '/fixture/native/bin/kimi',
+            root: '/fixture/native/bin',
+            prefix: null,
+            version: '1.0.0',
+            aliases: ['/fixture/native/bin/kimi'],
+          }],
+        },
+      });
+
+      const page = await fixture.newPage();
+      const area = await openEntry(page, 'kimi', entry);
+
+      assert.doesNotMatch(await area.textContent(), /нативная|Установить \/ обновить в терминале/iu);
+      await confirmStart(page, area, provider, 'update', fixture.posts);
+      assert.equal(fixture.posts[0].pathname, '/api/providers/installations/v2/kimi/update/start');
+      assert.equal(await page.locator('[data-role="provider-install-dialog"]').count(), 1);
+    });
   }
 });
 
@@ -327,9 +458,12 @@ test('close/reload и второе окно показывают тот же job
       finishedAt: 1_700_000_001_000
     }),
   }));
-  await settingsArea.getByRole('button', { name: /Показать результат/u }).click();
-  await second.locator('[data-role="provider-install-dialog"]').waitFor();
-  assert.equal(fixture.posts.length, 1, 'Просмотр результата повторно запустил установку');
+  await second.waitForFunction(() => document.querySelector('#app').__vue_app__
+    .config.globalProperties.$pinia._s.get('provider-install').snapshot.recent.claude?.status
+      === 'succeeded');
+  assert.equal(await settingsArea.getByRole('button', { name: /Показать результат/u }).count(), 0);
+  assert.equal(await second.locator('[data-role="provider-install-dialog"]').count(), 0);
+  assert.equal(fixture.posts.length, 1, 'Получение результата повторно запустило установку');
 });
 
 test('телефон и окно сохраняют доступность действий', { timeout: 120000 }, async (t) => {
@@ -368,6 +502,17 @@ test('телефон и окно сохраняют доступность де�
           });
 
           await action.waitFor();
+
+          const details = dialog.getByRole('button', { name: /^(Детали|Details)$/u });
+          const output = dialog.locator('pre');
+
+          assert.equal(await details.getAttribute('aria-expanded'), 'false');
+          assert.equal(await output.isVisible(), false);
+          await details.click();
+          assert.equal(await details.getAttribute('aria-expanded'), 'true');
+          assert.equal(await output.isVisible(), true);
+          await details.click();
+          assert.equal(await output.isVisible(), false);
 
           const controls = [action, dialog.getByRole('button', { name: /^(Закрыть|Close)$/iu })];
 
@@ -411,10 +556,13 @@ test('Повторить в окне ошибки Kimi заново запуск
 
   await dialog.getByRole('button', { name: 'Повторить', exact: true }).click();
 
-  const confirmation = page.getByRole('dialog').last();
+  const confirmation = page.getByRole('dialog').filter({
+    has: page.locator('.ui-dialog-host__message'),
+  }).last();
 
   await confirmation.getByRole('button', { name: 'Обновить', exact: true }).waitFor();
   assert.equal(fixture.posts.length, 1, 'Повтор запущен до подтверждения команды');
+  await confirmation.getByRole('button', { name: 'Подробности', exact: true }).click();
   assert.ok((await confirmation.textContent()).includes(provider.installation.updateCommand));
   await confirmation.getByRole('button', { name: 'Обновить', exact: true }).click();
   await dialog.getByRole('progressbar').waitFor();

@@ -38,7 +38,10 @@
   >
     <template #title>
       <span class="workdir-heading">
-        <span>{{ t('core.workdirTitle') }}</span>
+        <span class="workdir-heading-copy">
+          <span>{{ t('core.workdirTitle') }}</span>
+          <span class="workdir-caption">{{ t('core.workdirOnComputer') }}</span>
+        </span>
         <UiIconButton :label="t('core.close')" :disabled="busy" @click="closePicker">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                stroke-linecap="round" aria-hidden="true">
@@ -48,50 +51,31 @@
       </span>
     </template>
     <div class="workdir-content">
-      <p class="workdir-location">
-        <svg class="workdir-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="3" y="4" width="18" height="13" rx="2" />
-          <path d="M8 21h8m-4-4v4" />
-        </svg>
-        {{ t('core.workdirOnComputer') }}
-      </p>
-      <div class="workdir-current">
-        <span class="workdir-caption">{{ t('core.workdirCurrent') }}</span>
-        <code class="workdir-path">{{ directory }}</code>
-        <span v-if="sourceLabel" class="workdir-caption">{{ sourceLabel }}</span>
-      </div>
-      <div v-if="additionalCopies.length" class="workdir-copies">
-        <span class="workdir-caption">{{ t('core.workdirExtraRepos') }}</span>
-        <div v-for="copy in additionalCopies" :key="copy.key" class="workdir-copy">
-          <span>{{ copy.key }}</span>
-          <code class="workdir-path">{{ copy.path }}</code>
-        </div>
-      </div>
       <UiInlineMessage v-for="warning in preview?.target?.warnings || []" :key="warning" tone="warning">
         {{ warning }}
       </UiInlineMessage>
       <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
       <template v-if="editable">
-        <UiSegmentedControl v-model="mode" size="compact" :label="t('core.workdirMethod')" :disabled="busy"
-                            data-context="workdir-mode">
-          <UiButton variant="ghost" wrap :pressed="mode === 'catalog'" :disabled="busy"
-                    @click="mode = 'catalog'">
-            {{ t('core.workdirCatalog') }}
-          </UiButton>
-          <UiButton variant="ghost" wrap :pressed="mode === 'path'" :disabled="busy" @click="mode = 'path'">
-            {{ t('core.workdirByPath') }}
-          </UiButton>
-        </UiSegmentedControl>
-        <template v-if="mode === 'catalog'">
-          <UiInput v-model="search" type="search" :aria-label="t('core.workdirSearch')"
-                   :placeholder="t('core.workdirSearch')" autocomplete="off" :spellcheck="false" />
-          <div class="workdir-list-heading">
-            <span class="workdir-caption">{{ t('core.workdirAvailable') }}</span>
-            <UiSpinner v-if="loadingProjects" :label="t('core.loading')" />
-            <span v-else class="workdir-caption">{{ choices.length }}</span>
+        <div v-if="mode === 'catalog'" class="workdir-catalog">
+          <div class="workdir-toolbar">
+            <UiSearchInput v-model="search" :aria-label="t('core.workdirSearch')" :disabled="busy"
+                           :placeholder="t('core.search')" autocomplete="off" :spellcheck="false" />
+            <UiButton ref="pathModeButton" :disabled="busy" @click="showPathInput">
+              <template #leading>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m8 6-5 6 5 6m8-12 5 6-5 6M14 4l-4 16" />
+                </svg>
+              </template>
+              {{ t('core.workdirByPath') }}
+            </UiButton>
           </div>
-          <div class="workdir-choices" :aria-label="t('core.workdirAvailable')" :aria-busy="loadingProjects">
+          <div class="workdir-list-heading">
+            <span class="workdir-caption">{{ t('core.workdirCatalog') }}</span>
+            <UiSpinner v-if="loadingProjects" :label="t('core.loading')" />
+          </div>
+          <div class="workdir-choices" role="group" :aria-label="t('core.workdirAvailable')"
+               :aria-busy="loadingProjects">
             <UiSelectableRow
               v-for="option in choices"
               :key="option.key"
@@ -108,12 +92,13 @@
                 </svg>
                 <span class="workdir-choice-copy">
                   <span class="workdir-choice-title">{{ option.title }}</span>
-                  <span class="workdir-choice-detail">{{ option.detail }}</span>
+                  <span v-if="option.workdir.kind !== 'project' || option.workdir.repoKey"
+                        class="workdir-choice-detail">{{ option.detail }}</span>
                 </span>
                 <svg v-if="option.selected" class="workdir-check" viewBox="0 0 24 24" fill="none"
                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
                      :aria-label="t('core.workdirCurrent')" role="img">
-                  <path d="m5 12 4 4L19 6" />
+                  <path d="m5 13 4 4L19 7" />
                 </svg>
               </span>
             </UiSelectableRow>
@@ -121,18 +106,48 @@
               {{ t('core.workdirNoResults') }}
             </p>
           </div>
-        </template>
-        <form v-else class="workdir-form" @submit.prevent="choosePath">
-          <UiField :label="t('core.workdirAbsolutePath')" :hint="t('core.workdirPathHint')">
-            <UiInput v-model="pathInput" placeholder="/home/user/project" :disabled="busy"
-                     autocomplete="off" autocapitalize="off" :spellcheck="false" />
-          </UiField>
-          <UiButton type="submit" variant="solid" tone="accent" :disabled="busy || !pathInput.trim()" block>
-            {{ t('core.workdirChoose') }}
+        </div>
+        <div v-else class="workdir-path-editor">
+          <UiButton variant="ghost" size="compact" :disabled="busy" @click="showCatalog">
+            <template #leading>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m10 6-6 6 6 6M4 12h16" />
+              </svg>
+            </template>
+            {{ t('core.workdirBackToCatalog') }}
           </UiButton>
-        </form>
+          <form class="workdir-form" @submit.prevent="choosePath">
+            <UiField :label="t('core.workdirAbsolutePath')" :hint="t('core.workdirPathHint')">
+              <UiInput ref="pathField" v-model="pathInput" placeholder="/home/user/project" :disabled="busy"
+                       autocomplete="off" autocapitalize="off" :spellcheck="false" />
+            </UiField>
+            <UiButton type="submit" variant="solid" tone="accent" :disabled="busy || !pathInput.trim()">
+              {{ t('core.workdirChoose') }}
+            </UiButton>
+          </form>
+        </div>
       </template>
-      <span v-else class="workdir-caption">{{ t('core.workdirManaged') }}</span>
+      <div class="workdir-current">
+        <svg class="workdir-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path :d="NAV_ICONS.projects" />
+        </svg>
+        <div class="workdir-current-copy">
+          <span class="workdir-caption">
+            {{ t('core.workdirCurrent') }}<template v-if="sourceLabel"> · {{ sourceLabel }}</template>
+          </span>
+          <code class="workdir-path">{{ directory }}</code>
+        </div>
+      </div>
+      <div v-if="additionalCopies.length" class="workdir-copies">
+        <span class="workdir-caption">{{ t('core.workdirExtraRepos') }}</span>
+        <div v-for="copy in additionalCopies" :key="copy.key" class="workdir-copy">
+          <span>{{ copy.key }}</span>
+          <code class="workdir-path">{{ copy.path }}</code>
+        </div>
+      </div>
+      <span v-if="!editable" class="workdir-caption">{{ t('core.workdirManaged') }}</span>
       <UiButton v-if="needsTransfer" :disabled="busy" @click="confirmCurrent">
         {{ t('core.workdirTransfer') }}
       </UiButton>
@@ -171,7 +186,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 
 import {
   UiButton,
@@ -180,9 +195,9 @@ import {
   UiIconButton,
   UiInlineMessage,
   UiInput,
+  UiSearchInput,
   UiSpinner,
   UiSelectableRow,
-  UiSegmentedControl,
   t,
   vTooltip,
 } from '../../ui.ts';
@@ -238,6 +253,8 @@ const pickerOpen = ref(false);
 const mode = ref<'catalog' | 'path'>('catalog');
 const search = ref('');
 const pathInput = ref('');
+const pathField = ref<InstanceType<typeof UiInput> | null>(null);
+const pathModeButton = ref<InstanceType<typeof UiButton> | null>(null);
 const loadingProjects = ref(false);
 const projects = ref<ProjectOption[]>([]);
 const error = ref('');
@@ -371,6 +388,26 @@ function closePicker(): void {
   pickerOpen.value = false;
 }
 
+/**
+ * Явный переход к ручному вводу сразу переносит фокус в поле.
+ * При обычном открытии окна клавиатура по-прежнему не вызывается.
+ */
+async function showPathInput(): Promise<void> {
+  mode.value = 'path';
+  await nextTick();
+  pathField.value?.focus();
+}
+
+/**
+ * Возврат восстанавливает фокус у действия, которое открыло ручной ввод.
+ * Поиск и черновик пути сохраняются до закрытия окна.
+ */
+async function showCatalog(): Promise<void> {
+  mode.value = 'catalog';
+  await nextTick();
+  pathModeButton.value?.focus();
+}
+
 function retry(): void {
   void chat.commitWorkdir(props.sid, proposal.value?.transfer || '');
 }
@@ -466,10 +503,11 @@ watch(() => JSON.stringify([
   display: flex;
   flex: 1 0 auto;
   flex-direction: column;
-  gap: 14px;
+  align-items: stretch;
+  gap: 12px;
   min-width: 0;
   min-height: 0;
-  padding: 0 20px 20px;
+  padding: 16px 20px 20px;
   overflow-wrap: anywhere;
 }
 
@@ -481,23 +519,47 @@ watch(() => JSON.stringify([
   gap: 12px;
 }
 
-.workdir-location {
+.workdir-heading-copy,
+.workdir-current-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.workdir-heading-copy .workdir-caption {
+  font-weight: 400;
+}
+
+.workdir-catalog,
+.workdir-path-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.workdir-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0;
-  color: var(--ink-mid);
-  font-size: 12px;
-  line-height: 1.5;
+  min-width: 0;
+}
+
+.workdir-toolbar > :first-child {
+  flex: 1;
+  min-width: 0;
 }
 
 .workdir-current {
-  display: grid;
-  gap: 4px;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-2);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.workdir-current > .workdir-icon {
+  margin-top: 2px;
 }
 
 .workdir-copies,
@@ -505,6 +567,13 @@ watch(() => JSON.stringify([
   display: grid;
   gap: 12px;
   min-width: 0;
+}
+
+.workdir-form > :last-child,
+.workdir-path-editor > .ui-button,
+.workdir-content > .ui-button {
+  justify-self: start;
+  align-self: flex-start;
 }
 
 .workdir-caption,
@@ -528,25 +597,28 @@ watch(() => JSON.stringify([
 }
 
 .workdir-list-heading {
-  margin-bottom: -8px;
+  padding: 2px 10px 0;
+  margin-bottom: -6px;
 }
 
 .workdir-choices {
   display: grid;
   grid-auto-rows: max-content;
   align-content: start;
-  gap: 4px;
+  gap: 2px;
   min-height: 72px;
-  max-height: 252px;
+  max-height: 340px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-low) transparent;
 }
 
 .workdir-choice {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -559,7 +631,7 @@ watch(() => JSON.stringify([
 
 .workdir-choice-title {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1.5;
 }
 

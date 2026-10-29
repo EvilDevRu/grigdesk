@@ -101,7 +101,10 @@
       </template>
     </UiDialog>
 
-    <header data-ui-topbar class="topbar" :class="{ 'window-titlebar': isDesktopMain }">
+    <header data-ui-topbar class="topbar" :class="{
+      'window-titlebar': isDesktopMain,
+      'window-titlebar--controls': isDesktopMain && shell.snapshot?.windowControls,
+    }">
       <span class="app-mark" aria-label="GrigDesk"><GrigDeskMark class="logo" /></span>
       <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
       <div id="tb-slot" class="tb-slot"></div>
@@ -225,7 +228,8 @@
                        пока ставится один CLI, кнопки соседей заблокированы. -->
                   <UiIconButton
                     v-if="!p.installed && p.installation?.canInstall
-                      || canUpdateCli(p) || installation.snapshot.active?.providerId === p.id"
+                      || canUpdateCli(p)
+                      || installation.snapshot.active?.providerId === p.id"
                     data-context="topbar-popover-update"
                     role="embedded"
                     :label="providerInstallationLabel(p)"
@@ -240,6 +244,7 @@
                   </UiIconButton>
                   <UiIconButton
                     v-if="installResultNeedsAttention(p)"
+                    data-context="topbar-popover-result"
                     role="embedded"
                     tone="warning"
                     :label="t('settings.providerInstallationResult')"
@@ -284,12 +289,11 @@
               </template>
               <template #default="{ close }">
                 <span class="ptip">
-                  <!-- Итог установки виден, только когда он что-то значит: успех и так
-                       виден пропавшим предложением обновиться. -->
+                  <!-- В сводке остаются ошибки установки; успешный результат и готовность
+                       терминала доступны в общем окне установки и настройках. -->
                   <span
                     v-if="updateNoteOf(p)"
-                    class="pu-state"
-                    :class="updateNoteOf(p)!.type === 'err' ? 'is-bad' : 'is-warn'"
+                    class="pu-state pu-note is-bad"
                   >{{ updateNoteOf(p)!.text }}</span>
                   <!-- Беда лимитов — СВЕРХУ и со ссылкой на состояние вендора: снизу её
                        читали уже после того, как начинали гадать о причине сбоя. -->
@@ -317,6 +321,16 @@
                     </UiButton>
                   </span>
                   <span v-if="usageOf(p)!.stale" class="pu-reset">{{ t('core.limitDataIsStale') }}</span>
+                  <span v-if="p.usagePresentation?.freshness" class="pu-reset"
+                    data-testid="provider-usage-measured">
+                    {{ usageOf(p).measuredAt ? t('core.usageMeasuredAt', {
+                      time: formatDate(new Date(usageOf(p).measuredAt!), uiLocale,
+                        { dateStyle: 'short', timeStyle: 'short' }),
+                    }) : t('core.usageMeasuredUnknown') }}
+                  </span>
+                  <span v-if="p.usagePresentation?.spentLabel && usageOf(p).bars.length" class="pu-reset">
+                    {{ t('core.usageSpentLabel') }}
+                  </span>
                   <!-- Потребление лимитов подписки — как /usage в CLI -->
                   <span class="pu">
                     <span
@@ -408,7 +422,7 @@
 </template>
 
 <script setup lang="ts">
-import { formatNumber, intlLocale } from '../../../../shared/i18n/formats.ts';
+import { formatDate, formatNumber, intlLocale } from '../../../../shared/i18n/formats.ts';
 import { uiLocale } from '../../ui.ts';
 
 import { t } from '../../ui.ts';
@@ -424,7 +438,8 @@ import ComputerResourcesPanel from './ComputerResourcesPanel.vue';
 import { loadClass, resourcesAlarm } from './resourceMetrics.ts';
 import PhoneConnectButton from './PhoneConnectButton.vue';
 import ProviderInstallDialog from '../ProviderInstallDialog.vue';
-import { useProviderInstallStore } from '../../stores/providerInstall.ts';
+import { useProviderInstallStore, providerInstallVisibleWarnings } from '../../stores/providerInstall.ts';
+import { providerCliActions } from '../../features/providers/providerCliActions.ts';
 import { usePhoneAccessStore } from '../../stores/phoneAccess.ts';
 import PhoneConnectDialog from '../../views/settings/PhoneConnectDialog.vue';
 import { setAlertTargetOpener } from '../alerts.ts';
@@ -447,6 +462,7 @@ import { isTopbarProvider } from '../../../../shared/chat/executorTypes.ts';
 import { localizeProviderAuthLabel } from '../../features/providers/providerLocale.ts';
 import { usePluginsStore } from '../../stores/plugins.ts';
 import { useStudio3dStore } from '../../stores/studio3d.ts';
+import { useArbiterConversationsStore } from '../../stores/arbiterConversations.ts';
 import { useAuthStore } from '../../stores/auth.ts';
 import { useNotifyWatchStore } from '../../stores/notifyWatch.ts';
 import { useAnalysisStore } from '../../stores/analysis.ts';
@@ -531,6 +547,16 @@ const plugins = usePluginsStore();
 
 const studio3d = useStudio3dStore();
 const studioAuth = useAuthStore();
+const arbiterConversations = useArbiterConversationsStore();
+
+watch(() => [studioAuth.authenticated, studioAuth.clientScope], ([authenticated, clientScope]) => {
+  if (authenticated && clientScope) {
+    arbiterConversations.start(String(clientScope));
+  } else {
+    arbiterConversations.stop();
+  }
+}, { immediate: true });
+onUnmounted(() => arbiterConversations.stop());
 
 // Подписка живёт вместе с авторизованной оболочкой, включая переходы между страницами.
 // Disable и logout закрывают requests; повторный start не создаёт вторую SSE подписку.
@@ -590,7 +616,11 @@ function toProviders() {
   openSettings({ pageId: 'agents.providers' });
 }
 
-const usageOf = (p: TopbarProvider) => providerUsageView(prov.usage[p.id], p, uiLocale);
+const usageNow = ref(Date.now());
+const usageOf = (p: TopbarProvider) => providerUsageView(prov.usage[p.id], p, uiLocale, {
+  now: usageNow.value,
+  deliveryStale: prov.usageTransport.deliveryStale,
+});
 // Пауза после «стучитесь реже»: сервер кладёт её срок в retryAt снимка. Пока она идёт,
 // принудительная проверка вернёт прошлый снимок — кнопка гаснет и называет время. Формат
 // тот же, что у сброса полосы: «сегодня 03:45», и в прошлом он пуст — пауза снята.
@@ -603,7 +633,11 @@ const usagePauseOf = (p: TopbarProvider) => {
 // всплывашка перечитывает лимиты сама на случай оборванного потока: force обходит
 // минутный троттл стора, а серверный кэш остаётся — он и стережёт частоту походов
 // в API вендора, поэтому такое чтение к вендору не ходит.
-const usageWatch = createUsageWatch(() => prov.loadUsage(true));
+const usageWatch = createUsageWatch(() => {
+  usageNow.value = Date.now();
+
+  return prov.loadUsage(true);
+});
 
 onUnmounted(() => usageWatch.stop());
 // Кнопка установки во всплывашке: только у отставшего CLI, который GrigDesk умеет ставить
@@ -630,6 +664,7 @@ function providerInstallationLabel(p: TopbarProvider): string {
  */
 function startProviderInstallation(p: TopbarProvider, close: () => void): void {
   close();
+
   void installation.requestInstall(p.id, p.installed ? 'update' : 'install');
 }
 
@@ -654,20 +689,19 @@ function installResultNeedsAttention(p: TopbarProvider): boolean {
     return false;
   }
 
-  return result.status !== 'succeeded' || result.warnings.length > 0
+  return result.status !== 'succeeded' || providerInstallVisibleWarnings(result).length > 0
     || (result.operation === 'install' && !p.available);
 }
 
 function canUpdateCli(p: TopbarProvider) {
-  return Boolean(p.installed && p.canUpdate && (p.updateAvailable || prov.updating === p.id));
+  return providerCliActions(p).canUpdate && (p.updateAvailable || prov.updating === p.id);
 }
-// Итог установки во всплывашке: показываем отказ и «ничего не изменилось». Удачную
-// установку объявлять нечем — предложение обновиться просто исчезает, а полный текст
-// («Обновлён: X → Y») живёт в плашке настроек, где у него есть своя строка.
+// Всплывашка показывает только ошибки установки, независимо от смены версии.
+// Успешные итоги, включая готовность терминала, остаются в окне установки и настройках.
 function updateNoteOf(p: TopbarProvider) {
   const result = prov.updateResults[p.id];
 
-  return result && (result.type === 'err' || result.changed === false) ? result : null;
+  return result?.type === 'err' ? result : null;
 }
 // Куда смотреть при сбое вендора. Домен объявляет адаптер исполнителя, поэтому
 // всплывашка не знает ни одного вендорского адреса.
@@ -1004,7 +1038,7 @@ const { connected } = useSse((name, data) => {
     if (isRecord(data) && typeof data.credentials === 'string' && data.credentials) {
       void prov.invalidateCredentials(data.credentials);
     } else {
-      void prov.load();
+      void prov.load(false, { invalidate: true });
     }
   }
   // Фоновый тик сервера принёс свежие лимиты — полосы в шапке идут за ними без наведения.
@@ -1023,7 +1057,7 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .shell {
   display: grid; height: 100%; min-width: 0; overflow: hidden;
   grid-template-columns: var(--app-rail-w) minmax(0, 1fr) var(--app-rail-w);
-  grid-template-rows: max(var(--app-topbar-h), env(titlebar-area-height, 0px)) minmax(0, 1fr);
+  grid-template-rows: var(--app-topbar-h) minmax(0, 1fr);
 }
 
 .shell.without-machine {
@@ -1061,13 +1095,14 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
     color-mix(in srgb, var(--accent) 10%, var(--topbar)) 0%,
     var(--topbar) 42%, var(--surface) 100%);
 }
-/* Геометрия системных кнопок приходит от Electron с учётом стороны и масштаба.
-   Свободная часть шапки двигает окно; группы с действиями сохраняют события мыши. */
+/* Свободная часть шапки двигает окно; группы с действиями сохраняют события мыши.
+   Кнопки окна рисует общий UI: они затемняются вместе с фоном любого модального слоя. */
 .window-titlebar {
-  padding-left: env(titlebar-area-x, 0px);
-  padding-right: max(0px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%)));
   -webkit-app-region: drag;
   user-select: none;
+}
+.window-titlebar--controls {
+  padding-right: calc(3 * var(--app-topbar-h));
 }
 .window-titlebar :is(.tb-slot, .status, .topbar-actions) {
   -webkit-app-region: no-drag;
@@ -1166,6 +1201,9 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
   padding-top: 7px; border-top: 1px solid var(--line);
   font-size: 11px; line-height: 1.45; color: var(--ink-mid);
 }
+/* Итог установки собран из строк (причина, терминал, предупреждения): без переноса
+   они слипались в одно предложение без точки. */
+.pu-note { white-space: pre-line; }
 .pu-state.is-bad { color: var(--bad); }
 .pu-state.is-warn { color: var(--warn); }
 /* Полоски нагрузки «мозга» — те же пороги, что и у цифр в шапке (60% / 85%).

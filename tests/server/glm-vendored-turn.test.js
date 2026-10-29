@@ -117,7 +117,14 @@ test('настоящий ход: нехватка баланса даёт оди
     scenarios: [httpError(429, 'Insufficient balance or no resource package. Please recharge.', '1113')],
   });
 
-  await assert.rejects(f.run(), { code: 'glm_quota_exhausted' });
+  await assert.rejects(f.run(), (error) => {
+    assert.equal(error.code, 'glm_quota_exhausted');
+    assert.match(error.message, /код 1113/u);
+    assert.match(error.message, /HTTP 429/u);
+    assert.match(error.message, /не подтверждает исчерпание подписки/u);
+
+    return true;
+  });
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.equal(f.mock.requests.length, 1);
 });

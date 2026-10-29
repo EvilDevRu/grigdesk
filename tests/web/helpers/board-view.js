@@ -65,10 +65,30 @@ export async function compileBoardView() {
         };
       `,
       '../shared/apiClient.ts': `
-        export const api = { get: async () => ({ tasks: [] }) };
+        export { ApiError, failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};
+        export const api = {
+          get: async (url) => globalThis.__boardViewOwnApi?.get(url) || (
+            url === '/api/grigdesk-tasks/projects' ? { projects: [] }
+              : { tasks: [], revision: 0, b24Configured: true }
+          ),
+          post: async (url, payload) => globalThis.__boardViewOwnApi?.post(url, payload),
+        };
       `,
       '../composables/useSse.ts': `
-        export const useSse = () => ({});
+        import { onUnmounted } from 'vue';
+        export const sseSubscribe = (listener) => {
+          globalThis.__boardViewOwnListeners?.add(listener);
+
+          return () => globalThis.__boardViewOwnListeners?.delete(listener);
+        };
+        export const useSse = (listener) => {
+          if (listener) {
+            const unsubscribe = sseSubscribe(listener);
+            onUnmounted(unsubscribe);
+          }
+
+          return {};
+        };
       `,
     },
   });
@@ -118,8 +138,10 @@ const DEFAULT_TASKS = [
  */
 export async function mountBoardView(t, {
   prefix = 'board',
-  pending = false,
   tasks = DEFAULT_TASKS,
+  pending = false,
+  boardError = null,
+  ownApi = null,
   toReview = [],
   created = [],
   analysis = {},
@@ -159,7 +181,7 @@ export async function mountBoardView(t, {
           toReview,
           created,
         },
-        error: null,
+        error: boardError,
         loading: pending,
       }),
       actions: { async load() {} },
@@ -226,6 +248,10 @@ export async function mountBoardView(t, {
       },
     }),
   };
+  const listeners = new Set();
+
+  globalThis.__boardViewOwnListeners = listeners;
+  globalThis.__boardViewOwnApi = ownApi;
   globalThis.__boardViewStores = stores;
   const pinia = createPinia();
   const BoardView = await compileBoardView();
@@ -233,13 +259,27 @@ export async function mountBoardView(t, {
     attachTo: browser.document.querySelector('#mount'),
     global: {
       plugins: [pinia],
-      stubs: { RouterLink: { template: '<a><slot /></a>' } },
+      stubs: {
+        RouterLink: { template: '<a><slot /></a>' },
+        teleport: true,
+      },
     },
   });
+
   t.after(() => {
     wrapper.unmount();
     delete globalThis.__boardViewStores;
+    delete globalThis.__boardViewOwnApi;
+    delete globalThis.__boardViewOwnListeners;
   });
   await flushPromises();
-  return { browser, wrapper, flushPromises, calls, stores };
+
+  return {
+    browser,
+    wrapper,
+    flushPromises,
+    calls,
+    stores,
+    listeners
+  };
 }

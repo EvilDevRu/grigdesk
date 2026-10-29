@@ -61,6 +61,84 @@ function providersFixture() {
   return providers;
 }
 
+test('реестр объединяет читателей, а монтирование использует готовый снимок', async (t) => {
+  const { store, gets } = credentialFixture(t);
+  const jobs = [store.load(), store.load(false, { cached: true }), store.load()];
+  const ready = store.whenRegistryReady();
+
+  assert.equal(gets.length, 1);
+  gets[0].resolve({ providers: [{ id: 'current' }] });
+  await Promise.all(jobs);
+  assert.deepEqual(await ready, { ok: true });
+  await store.load(false, { cached: true });
+  assert.equal(gets.length, 1, 'повторное монтирование не перечитывает готовый каталог');
+
+  const next = store.load();
+
+  assert.equal(gets.length, 2, 'обычное фоновое обновление продолжает читать сервер');
+  gets[1].resolve({ providers: [{ id: 'updated' }] });
+  await next;
+  assert.equal(store.providers[0].id, 'updated');
+});
+
+test('refresh сильнее обычного чтения и объединяет читателей своей версии', async (t) => {
+  const { store, gets } = credentialFixture(t);
+  const normal = store.load();
+  const refresh = store.load(true);
+  const joined = store.load(true);
+
+  assert.deepEqual(gets.map((entry) => entry.url), ['/api/providers', '/api/providers?refresh=1']);
+  gets[1].resolve({ providers: [{ id: 'refreshed' }] });
+  await Promise.all([refresh, joined]);
+  gets[0].resolve({ providers: [{ id: 'old' }] });
+  await normal;
+  assert.equal(store.providers[0].id, 'refreshed');
+});
+
+test('SSE-инвалидация не теряется внутри летящего GET и ожидания настроек', async (t) => {
+  const { store, gets } = credentialFixture(t);
+  const old = store.load();
+  const ready = store.whenRegistryReady();
+  const fresh = store.load(false, { invalidate: true });
+
+  assert.equal(gets.length, 2);
+  gets[0].resolve({ providers: [{ id: 'old' }] });
+  await old;
+  gets[1].resolve({ providers: [{ id: 'new' }] });
+  await fresh;
+  assert.deepEqual(await ready, { ok: true });
+  assert.equal(store.providers[0].id, 'new');
+});
+
+test('отказ общего GET освобождает чтение и виден координатору настроек', async (t) => {
+  setActivePinia(createPinia());
+
+  const store = useProvidersStore();
+  const original = api.get;
+  let failed = true;
+  let requests = 0;
+
+  api.get = async () => {
+    requests += 1;
+
+    if (failed) {
+      throw new Error('Нет реестра');
+    }
+
+    return { providers: [] };
+  };
+  t.after(() => {
+    api.get = original;
+  });
+  await Promise.all([store.load(), store.load()]);
+  assert.equal(requests, 1);
+  assert.equal((await store.whenRegistryReady()).ok, false);
+  failed = false;
+  await store.load();
+  assert.equal(requests, 2);
+  assert.deepEqual(await store.whenRegistryReady(), { ok: true });
+});
+
 test('versioned modelRef канонизирует только retired exact alias того же provider', () => {
   const providers = providersFixture();
 

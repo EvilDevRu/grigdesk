@@ -1,3 +1,4 @@
+import type { ChatModeSelection } from '../../../shared/chat/chatPermissionModes.ts';
 // Клиентские формы подтверждений и вопросов: расширения исполнителя остаются данными.
 // Сетевой envelope проверяется владельцем состояния перед публикацией этих форм.
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
@@ -138,6 +139,7 @@ export interface ChatStep extends Record<string, unknown> {
   title?: string;
   model?: string;
   mode?: string;
+  modeSelection?: ChatModeSelection;
   level?: string;
   command?: string;
   preview?: string;
@@ -187,6 +189,9 @@ export interface ChatMessage extends Record<string, unknown> {
   steps?: ChatStep[];
   receipt?: Partial<InTurnReceipt>;
   outbox?: {
+    mode?: string;
+    modeSelection?: ChatModeSelection;
+    modeSelectionRevoked?: boolean;
     seed?: string;
     slashCommand?: string;
     requestTitle?: boolean;
@@ -242,6 +247,7 @@ export interface ChatRecord extends Record<string, unknown>, ChatContextUsage {
   revision?: number;
   effort?: string;
   mode?: string;
+  modeSelection?: ChatModeSelection;
   sessionId?: string | null;
   totalInputTokens?: number;
   cachedInputTokens?: number;
@@ -287,6 +293,12 @@ export interface ChatRecord extends Record<string, unknown>, ChatContextUsage {
 }
 
 export interface ChatSession extends ChatRecord {
+  version?: string;
+  previewSource?: string;
+  hasDraft?: boolean;
+  hasContent?: boolean;
+  pendingDelivery?: boolean;
+  lastReply?: { key: string; text: string } | null;
   id: string;
   messages: ChatMessage[];
 }
@@ -372,6 +384,7 @@ export interface ChatResult extends ChatContextUsage, Record<string, unknown> {
 }
 
 export interface ChatEnvelope extends ChatStoreData, ChatResult {
+  version?: string;
   chat?: ChatSession;
   pending?: ChatResult[];
   waiting?: ChatRequest[];
@@ -397,6 +410,14 @@ export interface ChatEnvelope extends ChatStoreData, ChatResult {
 export type ChatLoadError = 'network' | 'timeout' | 'server' | 'access';
 
 export interface ChatState {
+  messageLoads: Record<string, { state: 'loading' | 'loaded' | 'error'; error: string }>;
+  search: {
+    query: string;
+    archived: boolean;
+    loading: boolean;
+    error: string;
+    matches: Record<string, string>;
+  };
   sessions: ChatSession[];
   archived: ChatSession[];
   activeId: string | null;
@@ -412,6 +433,11 @@ export interface ChatState {
   revealRequest: string;
   pending: Record<string, ChatRequest>;
   saveError: string | null;
+  snapshotRecovery: Record<string, {
+    state: 'restoring' | 'error';
+    error: string;
+    retryAt: number;
+  }>;
   compactWindow: number;
   speech: SpeechSnapshot;
   turnProtocol: number;
@@ -747,4 +773,76 @@ export function decodeInTurnPage(value: unknown): InTurnPage & { availability?: 
   }
 
   return value;
+}
+
+/**
+ * Каталог имеет отдельный строгий контракт и не проходит fallback полной сессии.
+ * Пустой messages создаётся только как placeholder, без подтверждения полноты.
+ */
+export function decodeChatHead(value: unknown): ChatSession {
+  if (!isRecord(value) || typeof value.id !== 'string' || !value.id
+    || typeof value.version !== 'string' || !value.version
+    || typeof value.previewSource !== 'string'
+    || typeof value.hasContent !== 'boolean' || typeof value.hasDraft !== 'boolean'
+    || typeof value.pendingDelivery !== 'boolean'
+    || (value.lastReply !== null && (!isRecord(value.lastReply)
+      || typeof value.lastReply.key !== 'string' || typeof value.lastReply.text !== 'string'))
+    || Object.hasOwn(value, 'messages') || Object.hasOwn(value, 'steps')) {
+    throw new Error('Некорректная шапка чата');
+  }
+
+  return {
+    ...value,
+    id: value.id,
+    messages: [],
+  } as ChatSession;
+}
+
+/**
+ * Успех списка требует обе группы и версию протокола, дельта также требует удаления.
+ * Мета проверяется прежним decoder отдельно от неполных шапок.
+ */
+export function decodeChatList(value: unknown, changes = false) {
+  if (!isRecord(value) || value.listProtocol !== 1
+    || !Array.isArray(value.sessions) || !Array.isArray(value.archived)
+    || (changes && (!Array.isArray(value.gone)
+      || !value.gone.every((id) => typeof id === 'string')))) {
+    throw new Error('Ответ списка не содержит каталог чатов');
+  }
+
+  const { sessions, archived, ...meta } = value;
+
+  return {
+    ...decodeChatEnvelope(meta),
+    sessions: sessions.map(decodeChatHead),
+    archived: archived.map(decodeChatHead),
+    gone: changes ? value.gone as string[] : [],
+  };
+}
+
+/**
+ * Сервер возвращает полные pending только для явно загруженных клиентом лент.
+ * Неверный ответ не даёт подтверждать pending или считать шапку полной.
+ */
+export function decodeChatReconcile(value: unknown) {
+  if (!isRecord(value) || !Array.isArray(value.pending) || !value.pending.every(isChatResult)
+    || !Array.isArray(value.heads) || !Array.isArray(value.gone)
+    || !value.gone.every((id) => typeof id === 'string') || !Array.isArray(value.deliveries)
+    || !value.deliveries.every((item) => isRecord(item) && typeof item.chatId === 'string'
+      && typeof item.turnId === 'string' && ['unknown', 'accepting'].includes(String(item.state))
+      && typeof item.sentAt === 'number')) {
+    throw new Error('Некорректный ответ сверки чатов');
+  }
+
+  return {
+    pending: value.pending as ChatResult[],
+    heads: value.heads.map(decodeChatHead),
+    gone: value.gone as string[],
+    deliveries: value.deliveries as Array<{
+      chatId: string;
+      turnId: string;
+      state: string;
+      sentAt: number;
+    }>,
+  };
 }

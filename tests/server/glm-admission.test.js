@@ -153,11 +153,11 @@ test('загрузчик в новом процессе видит run толь�
       timeout: 60_000,
     });
 
-    // Поставка допускает только api: в новом процессе run и исполнитель есть только у него.
+    // Оба режима разрешены политикой; точный admission выпуска проверяется перед запуском.
     assert.deepEqual(JSON.parse(stdout.trim().split('\n').at(-1)), {
       card: true,
-      run: mode === 'api' ? 'function' : 'undefined',
-      executor: mode === 'api',
+      run: 'function',
+      executor: true,
     }, mode);
   }
 
@@ -165,10 +165,10 @@ test('загрузчик в новом процессе видит run толь�
   assert.equal(f.adapter('coding-plan', [{ mode: 'api', compatibility: f.identity('api') }]).run, undefined);
 });
 
-test('допущенный api использует свой маршрут; DI не расширяет политику Coding Plan', async (t) => {
+test('допущенные api и Coding Plan используют свой маршрут и ключ', async (t) => {
   const f = await fixture(t);
 
-  for (const mode of ['api']) {
+  for (const mode of ['api', 'coding-plan']) {
     const result = await f.run(f.adapter(mode, [{ mode, compatibility: f.identity(mode) }]));
     const launch = f.launches.at(-1);
     const insert = launch.overlay.find((row) => Array.isArray(row.insert)).insert;
@@ -183,12 +183,6 @@ test('допущенный api использует свой маршрут; DI 
     }
   }
 
-  const launches = f.launches.length;
-
-  await assert.rejects(f.run(f.adapter('coding-plan', [{
-    mode: 'coding-plan', compatibility: f.identity('coding-plan'),
-  }])), { code: 'glm_mode_not_admitted' });
-  assert.equal(f.launches.length, launches);
   assert.notEqual(f.identity('api'), f.identity('coding-plan'));
 });
 

@@ -66,10 +66,21 @@
           </div>
         </div>
       </div>
+      <div v-else-if="q.trim() && (chat.search?.loading || chat.search?.error)" class="load-state">
+        <p role="status">{{ chat.search.error || t('core.chatSearchLoading') }}</p>
+        <UiButton v-if="chat.search.error" @click="chat.searchChats(q, showArchived)">
+          {{ t('core.chatListRetry') }}
+        </UiButton>
+      </div>
       <div v-else-if="!rows.length" class="none muted">{{ emptyLabel }}</div>
       <div
         v-for="r in rows"
         :key="r.id"
+        v-memo="[
+          r.title, r.snippet, r.modelName, r.provider, r.provider?.color, r.taskId,
+          r.archived, r.draft, r.sending, r.compacting, r.unread, r.waiting, r.sleep,
+          r.id === chat.activeId, r.id === editId, r.id === editId ? editVal : '', ago(r.ts),
+        ]"
         class="row"
         :class="{
           archived: r.archived,
@@ -240,7 +251,7 @@ import type { ChatListRow } from '../../shared/chatContracts.ts';
 import type { UiFieldHandle } from '../../ui.ts';
 import type { ChatSleepingSession } from '../../../../shared/chat/chatBackgroundTasks.ts';
 
-import { computed, nextTick, ref, watch } from 'vue';
+import { onUnmounted, computed, nextTick, ref, watch } from 'vue';
 import { useChatStore } from '../../stores/chat.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
@@ -273,10 +284,26 @@ const emit = defineEmits(['open']);
 const prov = useProvidersStore();
 const { sessions: sleepingSessions } = useChatSleeping();
 
-prov.load();
+prov.load(false, { cached: true });
 
 const q = ref('');
 const showArchived = ref(false);
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+watch([q, showArchived], ([query, archived]) => {
+  clearTimeout(searchTimer ?? undefined);
+
+  // Поколение меняется сразу: ответ прошлого запроса не рисуется во время debounce.
+  void chat.searchChats('', archived);
+
+  if (query.trim()) {
+    chat.search.loading = true;
+    searchTimer = setTimeout(() => void chat.searchChats(query, archived), 250);
+  }
+});
+
+onUnmounted(() => clearTimeout(searchTimer ?? undefined));
+
 const archiveLabel = computed(() => (
   `Показывать архив${chat.archived.length ? ` · ${chat.archived.length}` : ''}`
 ));
@@ -306,6 +333,9 @@ const rows = computed(() => {
     };
   });
 });
+
+// Memo строки перечисляет всё, что рисует её поддерево, включая выбор и инлайн-редактор.
+// Копия строки при обновлении другого чата не должна пересоздавать все controls списка.
 
 // Отправка из архивного разговора сама возвращает его в активные. В этот момент
 // переключаем и левый список: иначе открытый чат уже активный, а сайдбар продолжает

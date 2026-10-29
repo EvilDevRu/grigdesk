@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { withChatImageHint } from '../../server/src/lib/chat/imageHint.ts';
+import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
 
 import { chatStoreFixture, sseOf } from '../web/helpers/chat-store.js';
 import {
@@ -35,18 +36,21 @@ function windowApi(app, log = []) {
       .filter((message) => message.role === 'assistant' && message.pid)
       .map((message) => message.pid);
 
-    log.push({
+    const entry = {
       method,
       url,
       verdict,
       replyIds,
-    });
+    };
+
+    log.push(entry);
 
     if (verdict === 'before') {
       throw new TypeError('Failed to fetch');
     }
 
     let response;
+    const started = performance.now();
 
     try {
       response = await app.inject({
@@ -70,6 +74,9 @@ function windowApi(app, log = []) {
 
     const data = response.body ? JSON.parse(response.body) : null;
 
+    entry.ackMs = performance.now() - started;
+    entry.status = response.statusCode;
+
     if (response.statusCode >= 400) {
       const error = new Error(data?.message || data?.error || `HTTP ${response.statusCode}`);
 
@@ -90,6 +97,7 @@ function windowApi(app, log = []) {
       get: (url) => call('GET', url),
       post: (url, body) => call('POST', url, body),
       put: (url, body) => call('PUT', url, body),
+      patch: (url, body) => call('PATCH', url, body),
       del: (url, body) => call('DELETE', url, body),
     },
   };
@@ -102,6 +110,15 @@ function windowApi(app, log = []) {
 async function world(t) {
   const windows = new Set();
   const control = controlledExecutor();
+
+  t.after(() => {
+    for (const view of windows) {
+      view.surface?.dispose();
+      view.chat.$dispose();
+      view.transport.net.dead = true;
+    }
+  });
+
   const fixture = await chatAppFixture(t, {
     executor: control.executor,
     // Раздать событие окнам на связи: копия JSON, как у настоящего SSE, и доставка
@@ -119,7 +136,7 @@ async function world(t) {
 
   // Новое окно: свой транспорт, история с сервера и подписка на общий поток событий.
   // Окно сразу «на связи» — его можно отключить полем online.
-  async function openWindow() {
+  async function openWindow(chatId) {
     const transport = windowApi(fixture.app);
     const chat = await chatStoreFixture({}, { api: transport.api, fromServer: true });
     const view = {
@@ -131,6 +148,11 @@ async function world(t) {
 
     windows.add(view);
 
+    if (chatId) {
+      view.surface = chat.registerSurface(view, { chatId, visible: true });
+      await chat.ensureChatMessages?.(chatId);
+    }
+
     return view;
   }
 
@@ -138,8 +160,14 @@ async function world(t) {
     ...fixture,
     ...control,
     openWindow,
+    /**
+     * Закрытие окна снимает поверхность и таймеры до остановки тестового сервера.
+     * Прежняя сеть становится недоступна и не возобновляет доставку после F5.
+     */
     closeWindow(view) {
       windows.delete(view);
+      view.surface?.dispose();
+      view.chat.$dispose();
       view.transport.net.dead = true;
     },
   };
@@ -161,12 +189,90 @@ const settle = () => new Promise((resolve) => {
   setTimeout(resolve, 20);
 });
 
+test('20 завершённых блоков с серверными записями сохраняются sparse без лишних full PUT', async (t) => {
+  const w = await world(t);
+  const id = 'live-reuse-chat';
+  const historical = [{
+    role: 'assistant',
+    text: 'Прошлый ответ',
+    runId: 'history-run',
+    assistantMessageId: 'history-answer',
+    steps: [{
+      k: 'tool',
+      text: 'Неизменяемое тело',
+      input: { command: 'history' },
+    }],
+  }];
+
+  await saveChat(w.app, id, { messages: historical });
+
+  const view = await w.openWindow(id);
+  const session = view.chat.session(id);
+
+  await view.chat.send(id, 'Длинный ход с инструментами');
+  await w.waitForRuns(1);
+
+  let serverWrite = false;
+  let writes = 0;
+  const save = ChatHistoryStore.prototype.saveOne;
+
+  t.mock.method(ChatHistoryStore.prototype, 'saveOne', async function (chat, archived, options) {
+    if (chat.id === id && serverWrite) {
+      serverWrite = false;
+      writes += 1;
+
+      // Обе операции используют настоящий per-chat lock того же экземпляра сервера.
+      // Метрики становятся durable, пока клиент сохраняет законченный блок.
+      const pending = this.patchExecution(id, () => ({ contextTokens: writes }));
+      const [, result] = await Promise.all([pending, save.call(this, chat, archived, options)]);
+
+      return result;
+    }
+
+    return save.call(this, chat, archived, options);
+  });
+
+  const start = view.transport.log.length;
+
+  for (let index = 0; index < 20; index += 1) {
+    w.runs[0].options.onStep({
+      k: 'tool',
+      text: `Инструмент ${index}`,
+      at: Date.now(),
+    });
+    await w.runs[0].options.onAssistantMessage({
+      assistantMessageId: `live-block-${String(index).padStart(8, '0')}`,
+      text: `Завершённый блок ${index}`,
+      sourceRevision: 1,
+      complete: true,
+    });
+    await waitFor(() => session.messages.some((message) => message.text === `Завершённый блок ${index}`));
+    serverWrite = true;
+    await view.chat._writeChat(id);
+  }
+
+  const puts = view.transport.log.slice(start)
+    .filter((entry) => entry.method === 'PUT' && entry.url !== '/api/chat/store/meta');
+  const durations = puts.map((entry) => entry.ackMs).sort((left, right) => left - right);
+
+  assert.equal(writes, 20);
+  assert.ok(puts.length >= 20);
+  assert.equal(puts.every((entry) => entry.url === '/api/chat/store/chat/step-reuse'), true);
+  assert.equal(puts.every((entry) => entry.status === 200), true);
+  assert.deepEqual((await serverChat(w.app, id)).messages[0].steps, historical[0].steps);
+  t.diagnostic(`sparse ACK: n=${durations.length}, p95=${durations[Math.ceil(durations.length * 0.95) - 1]
+    .toFixed(2)} мс, max=${durations.at(-1).toFixed(2)} мс`);
+
+  w.runs[0].release('Итог');
+  await waitFor(() => replies(view.chat, id).some((message) => message.text === 'Итог'));
+});
+
 test('F5 между записью реплики и приёмом: видно «не доставлено», запуск ровно один', async (t) => {
   const w = await world(t);
 
   await saveChat(w.app, 'f5-chat');
 
-  const first = await w.openWindow();
+  const first = await w.openWindow('f5-chat');
 
   first.transport.net.cut = (method, url) => (method === 'POST' && url === '/api/chat' ? 'before' : null);
 
@@ -182,7 +288,7 @@ test('F5 между записью реплики и приёмом: видно 
   // F5: прежнее окно исчезло вместе со своими повторами.
   w.closeWindow(first);
 
-  const reloaded = await w.openWindow();
+  const reloaded = await w.openWindow('f5-chat');
   const session = reloaded.chat.session('f5-chat');
 
   assert.equal(session.sending, false, 'исполнителя нет — «думает…» не рисуем');
@@ -226,7 +332,7 @@ test('потерянный ACK при оборванном SSE: повтор т�
 
   await saveChat(w.app, 'ack-chat');
 
-  const view = await w.openWindow();
+  const view = await w.openWindow('ack-chat');
   let posts = 0;
   const turnIds = [];
 
@@ -277,7 +383,7 @@ test('потерянный ответ на приём при живом SSE: с�
 
   await saveChat(w.app, 'ack-sse-chat');
 
-  const view = await w.openWindow();
+  const view = await w.openWindow('ack-sse-chat');
   let posts = 0;
 
   view.transport.net.cut = (method, url) => {
@@ -310,7 +416,7 @@ test('ход кончился при оборванном SSE: переподк�
 
   await saveChat(w.app, 'sse-chat');
 
-  const view = await w.openWindow();
+  const view = await w.openWindow('sse-chat');
 
   await view.chat.send('sse-chat', 'Длинная задача');
   await w.waitForRuns(1);
@@ -323,7 +429,8 @@ test('ход кончился при оборванном SSE: переподк�
 
   view.online = true;
   view.sse('hello', { at: Date.now(), bootId: 'boot-same-0001' });
-  await waitFor(() => replies(view.chat, 'sse-chat').length === 1, { what: 'ответ после переподключения' });
+  await waitFor(() => replies(view.chat, 'sse-chat').length === 1
+    && !view.chat.session('sse-chat').sending, { what: 'ответ и завершение хода после переподключения' });
   view.sse('hello', { at: Date.now(), bootId: 'boot-same-0001' });
   view.sse('hello', { at: Date.now(), bootId: 'boot-same-0001' });
   await settle();
@@ -349,8 +456,8 @@ test('несколько сообщений одного чата и второ�
 
   await saveChat(w.app, 'seq-chat');
 
-  const left = await w.openWindow();
-  const right = await w.openWindow();
+  const left = await w.openWindow('seq-chat');
+  const right = await w.openWindow('seq-chat');
 
   for (const text of ['раз', 'два', 'три']) {
     await left.chat.send('seq-chat', text);
@@ -372,7 +479,8 @@ test('несколько сообщений одного чата и второ�
   }
 
   for (const view of [left, right]) {
-    await waitFor(() => replies(view.chat, 'seq-chat').length === 4, { what: 'четыре ответа в окне' });
+    await waitFor(() => replies(view.chat, 'seq-chat').length === 4
+      && !view.chat.session('seq-chat').sending, { what: 'четыре ответа и завершение хода в окне' });
   }
 
   await settle();

@@ -1,102 +1,13 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { readFile, stat } from 'node:fs/promises';
+import { rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const THIS_FILE = path.relative(ROOT, fileURLToPath(import.meta.url));
-const execFileAsync = promisify(execFile);
+import { scanText, scanRepository } from './helpers/privateIdentifiers.mjs';
+import { ROOT, scratch, put, repository, run, ok } from '../fixtures/pipelineSample.mjs';
 
-// Публичное происхождение upstream допустимо только там, где оно является частью release UX.
+const THIS_FILE = path.relative(ROOT, import.meta.filename);
 const PUBLIC_UPSTREAM = ['Evil', 'DevRu'].join('');
-const PUBLIC_UPSTREAM_FILES = new Set([
-  'README.md',
-  'tests/server/grigdesk-release.test.js',
-]);
-
-// Эти значения выбраны как очевидно синтетические и используются общими Telegram fixtures.
-// Новый id сначала добавляется сюда с объяснимым synthetic pattern, а не копируется из runtime.
-const SYNTHETIC_TELEGRAM_CHAT_IDS = new Set([
-  '-1001000000042',
-  '-1001234567890',
-  '-1009876543210',
-  '-1009999999999',
-]);
-const SYNTHETIC_HOME_USERS = new Set(['kimi', 'private', 'test', 'u', 'user']);
-const SYNTHETIC_PROFILE_DIRS = new Set(['demo', 'demo-profile', 'fixture', 'sample-profile']);
-const TELEGRAM_CONTROL_PATHS = new Set(['addstickers', 'c', 'joinchat', 'share']);
-
-function isSyntheticUuid(value) {
-  const lower = value.toLowerCase();
-  if (/^00000000-0000-4000-8000-0000000000[0-9a-f]{2}$/.test(lower)) return true;
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-7000-8000-0000000000[0-9a-f]{2}$/.test(lower)) return true;
-  if (/^([0-9a-f])\1{7}-\1{4}-[47]\1{3}-[89ab]\1{3}-\1{12}$/.test(lower)) return true;
-  return new Set([
-    '01234567-89ab-4def-8abc-0123456789ab',
-    '12345678-1234-5678-9abc-123456789abc',
-  ]).has(lower);
-}
-
-function lineAt(source, index) {
-  return source.slice(0, index).split('\n').length;
-}
-
-function scanText(file, source) {
-  const hits = [];
-  const lower = source.toLocaleLowerCase('ru-RU');
-
-  const upstreamIndex = lower.indexOf(PUBLIC_UPSTREAM.toLowerCase());
-  if (upstreamIndex !== -1 && !PUBLIC_UPSTREAM_FILES.has(file)) {
-    hits.push(`${file}:${lineAt(source, upstreamIndex)}: upstream identity outside provenance allowlist`);
-  }
-
-  for (const match of source.matchAll(/-100\d{10}\b/g)) {
-    if (!SYNTHETIC_TELEGRAM_CHAT_IDS.has(match[0])) {
-      hits.push(`${file}:${lineAt(source, match.index)}: non-synthetic Telegram chat id`);
-    }
-  }
-
-  for (const match of source.matchAll(/\/home\/([A-Za-z0-9._-]+)(?=\/|\b)/g)) {
-    if (!SYNTHETIC_HOME_USERS.has(match[1])) {
-      hits.push(`${file}:${lineAt(source, match.index)}: non-synthetic home path`);
-    }
-  }
-
-  for (const match of source.matchAll(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/giu)) {
-    if (!isSyntheticUuid(match[0])) {
-      hits.push(`${file}:${lineAt(source, match.index)}: UUID fixture is not visibly synthetic`);
-    }
-  }
-
-  for (const match of source.matchAll(/(?:^|[^A-Za-z0-9_$<])profiles\/([a-z][a-z0-9._-]*)/giu)) {
-    if (!SYNTHETIC_PROFILE_DIRS.has(match[1].toLowerCase())) {
-      hits.push(`${file}:${lineAt(source, match.index)}: concrete profile directory in shared repository`);
-    }
-  }
-
-  if (file.startsWith('tests/')) {
-    for (const match of source.matchAll(/https?:\/\/t\.me\/([A-Za-z][A-Za-z0-9_]{2,})/g)) {
-      const name = match[1].toLowerCase();
-      if (!name.startsWith('example_') && !TELEGRAM_CONTROL_PATHS.has(name)) {
-        hits.push(`${file}:${lineAt(source, match.index)}: Telegram URL fixture is not visibly synthetic`);
-      }
-    }
-  }
-
-  return hits;
-}
-
-async function trackedTextFiles() {
-  const { stdout } = await execFileAsync(
-    'git',
-    ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
-    { cwd: ROOT, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 },
-  );
-  return stdout.split('\0').filter(Boolean);
-}
 
 test('detector distinguishes private values from documented synthetic fixtures', () => {
   const privateHome = '/home/operator-name/project';
@@ -112,6 +23,7 @@ test('detector distinguishes private values from documented synthetic fixtures',
   assert.deepEqual(scanText('tests/example.js', '00000000-0000-4000-8000-000000000001'), []);
   assert.deepEqual(scanText('README.md', PUBLIC_UPSTREAM), []);
   assert.equal(scanText('web/example.vue', PUBLIC_UPSTREAM).length, 1);
+  assert.equal(scanText('docs/x.md', 'profiles/Customer-Project/profile.sh').length, 1);
 });
 
 // Живые ссылки карт снятой базы знаний несли runtime UUID законно; карт больше нет, и
@@ -129,23 +41,67 @@ test('detector ловит runtime UUID и в бывшей ссылке карт�
   );
 });
 
-test('tracked text contains no private profile, account, host or runtime identifiers', async () => {
-  const hits = [];
+test('Д2: имя с заглавной буквой ловится, символ Profiles не считается путём', () => {
+  // План называет эти значения искусственными fixtures. Неизвестные соседи
+  // остаются под прежними положительными assertions detector-теста выше.
+  const synthetic = [
+    'Profiles/clientRuntime',
+    '12345678-1234-4234-8234-123456789abc',
+    '11111111-2222-4333-8444-555555555555',
+    'profiles/private.json',
+    'profiles/sentinel',
+    'profiles/s27-sentinel',
+  ];
 
-  for (const file of await trackedTextFiles()) {
-    if (file === THIS_FILE) continue;
-    const absolute = path.join(ROOT, file);
-    let source;
-    try {
-      if ((await stat(absolute)).size > 4 * 1024 * 1024) continue;
-      source = await readFile(absolute, 'utf8');
-    } catch (error) {
-      if (error?.code === 'ENOENT') continue;
-      throw error;
-    }
-    if (source.includes('\0')) continue;
-    hits.push(...scanText(file, source));
+  assert.deepEqual(synthetic.map((source) => scanText('docs/x.md', source).length), [0, 0, 0, 0, 0, 0]);
+});
+
+test('regular-file scan skips links and still checks untracked sample files', async (t) => {
+  const root = await scratch(t);
+  const source = await repository(root);
+  const outside = await put(root, 'outside/private.md', '/home/operator-name/project');
+
+  await symlink(path.dirname(outside), path.join(source, 'directory-link'));
+  await symlink(outside, path.join(source, 'file-link'));
+  await symlink(path.join(root, 'missing'), path.join(source, 'broken-link'));
+  await put(source, 'tracked.md', '/home/operator-name/tracked');
+  await put(source, 'vanished.md', 'Исчезающий tracked файл');
+  ok(run('git', ['-C', source, 'add', '.']));
+  await rm(path.join(source, 'vanished.md'));
+  await put(source, 'server/seed/pipeline-sample/untracked.md', '/home/operator-name/untracked');
+  await put(source, 'binary.bin', '/home/operator-name/binary\0');
+  await put(source, 'oversized.md', `${'x'.repeat(4 * 1024 * 1024)}/home/operator-name/oversized`);
+
+  const hits = await scanRepository(source);
+
+  assert.equal(hits.length, 2);
+  assert.ok(hits.some((hit) => hit.startsWith('tracked.md:1:')));
+  assert.ok(hits.some((hit) => hit.startsWith('server/seed/pipeline-sample/untracked.md:1:')));
+  assert.ok(hits.every((hit) => !hit.includes('-link')));
+});
+
+test('sample injection detects a concrete profile name and home path', async (t) => {
+  const root = await scratch(t);
+  const source = await repository(root);
+  const relative = 'server/seed/pipeline-sample/README.md';
+  const file = await put(source, relative, 'Общий образец.\n');
+
+  assert.deepEqual(await scanRepository(source), []);
+
+  for (const injection of ['профиль customer-project', '/home/operator-name/project',
+    'https://customer-project.example.org']) {
+    await writeFile(file, `Общий образец.\n${injection}\n`);
+
+    const hits = await scanRepository(source);
+
+    assert.equal(hits.length, 1, injection);
+    assert.ok(hits[0].startsWith(`${relative}:2:`));
   }
 
-  assert.deepEqual(hits, []);
+  await writeFile(file, 'Общий образец.\n');
+  assert.deepEqual(await scanRepository(source), []);
+});
+
+test('tracked text contains no private profile, account, host or runtime identifiers', async () => {
+  assert.deepEqual(await scanRepository(ROOT, [THIS_FILE]), []);
 });

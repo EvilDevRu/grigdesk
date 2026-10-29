@@ -258,6 +258,17 @@
   overflow-wrap: anywhere;
 }
 
+/* Название собственной задачи остаётся целиком доступным в узкой группе доски. */
+.ui-button[data-context='grigdesk-task-title'] {
+  height: auto;
+  max-width: 100%;
+  padding-block: 5px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
 .ui-icon-button[data-context='workspace-form'][data-role] {
   width: var(--control-height);
   height: var(--control-height);
@@ -636,6 +647,14 @@
   width: var(--control-height);
   height: var(--control-height);
   min-height: var(--control-height);
+}
+
+.ui-icon-button[data-context='window-control'] {
+  width: var(--app-topbar-h);
+  height: var(--app-topbar-h);
+  min-height: var(--app-topbar-h);
+  border-radius: 0;
+  color: var(--ink-mid);
 }
 
 .ui-icon-button--embedded,
@@ -1219,10 +1238,11 @@
   color: var(--accent);
 }
 
-/* Таймеры и конвейеры выглядят как статусы topbar, а не как отдельные кнопки.
+/* Таймеры, конвейеры и прерванные оценки используют общую геометрию статусов topbar.
    Интерактивный элемент сохраняем для клавиатуры и тач-экрана; список открывается
    наведением или нажатием. */
 .ui-button[data-context='board-timers-topbar'],
+.ui-button[data-context='analysis-attention-topbar'],
 .ui-button[data-context='pipeline-topbar'] {
   display: inline-flex;
   align-items: center;
@@ -1239,11 +1259,19 @@
 
 .ui-button[data-context='board-timers-topbar'] > .ui-button__content,
 .ui-button[data-context='board-timers-topbar'] .ui-button__label,
+.ui-button[data-context='analysis-attention-topbar'] > .ui-button__content,
+.ui-button[data-context='analysis-attention-topbar'] .ui-button__label,
 .ui-button[data-context='pipeline-topbar'] > .ui-button__content,
 .ui-button[data-context='pipeline-topbar'] .ui-button__label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.ui-button[data-context='analysis-attention-topbar'] {
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 650;
 }
 
 .ui-button[data-context='board-timers-topbar']:hover:not(:disabled),
@@ -1357,6 +1385,7 @@
    кнопка ростом с ручку панели перевешивала само имя, ради которого шапку и сократили. */
 .ui-icon-button[data-context='topbar-popover-settings'],
 .ui-icon-button[data-context='topbar-popover-refresh'],
+.ui-icon-button[data-context='topbar-popover-result'],
 .ui-icon-button[data-context='topbar-popover-update'] {
   width: 22px;
   height: 22px;
@@ -1630,42 +1659,36 @@
   font-size: 12.5px;
 }
 
-.ui-button[data-role='pipeline-runner'] {
-  flex: 1 1 150px;
-  justify-content: flex-start;
-  min-width: 126px;
-  height: auto;
-  min-height: 58px;
-  padding: 8px 10px;
-  text-align: left;
-  white-space: normal;
+.ui-tabs:has(.ui-tab[data-context='pipeline-stage-tab']) {
+  min-width: 0;
+  gap: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
-.ui-button[data-role='pipeline-runner'] > .ui-button__content,
-.ui-button[data-role='pipeline-runner'] .ui-button__label {
-  width: 100%;
-  align-items: flex-start;
+.ui-tab[data-context='pipeline-stage-tab'] {
+  min-height: 49px;
+  gap: 7px;
+  padding-inline: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font-size: 12px;
 }
 
-.ui-button[data-role='pipeline-runner'] .ui-button__label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ui-button[data-role='pipeline-runner'] b {
+.ui-tab[data-context='pipeline-stage-tab'][aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  background: transparent;
   color: var(--ink);
-  font-weight: 600;
+  box-shadow: none;
 }
 
-.ui-button[data-role='pipeline-runner'] small {
-  color: var(--ink-mid);
-  font: 10.5px/1.4 var(--mono);
-  overflow-wrap: anywhere;
-}
-
-.ui-button[data-role='pipeline-runner'][aria-pressed='true'] b {
-  color: var(--accent);
+.ui-tab[data-context='pipeline-stage-tab']:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
 }
 
 .ui-button[data-role='pipeline-section-disclosure'] {
@@ -1916,6 +1939,13 @@
 .ui-button[data-context='chat-workdir'] .ui-button__trailing > svg {
   width: 12px;
   height: 12px;
+}
+
+.ui-button[data-context='chat-pending-preview'] {
+  height: auto;
+  min-height: max(30px, var(--toolbar-control-h));
+  padding: 0;
+  cursor: zoom-in;
 }
 
 .ui-icon-button[data-context='chat-pending-remove'] {
@@ -2229,11 +2259,6 @@
     padding-inline: 8px;
   }
 
-  .ui-button[data-role='pipeline-runner'] {
-    flex-basis: 100%;
-    min-width: 0;
-    min-height: 44px;
-  }
 }
 
 /* Шапки диалогов следуют высоте controls и в узком desktop-окне. */

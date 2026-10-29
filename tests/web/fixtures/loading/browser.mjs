@@ -1,5 +1,6 @@
 import { extraStubs } from './extraCases.mjs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 import { createServer } from '../../../../web/node_modules/vite/dist/node/index.js';
 import { propCases, portCases } from './cases.mjs';
@@ -10,7 +11,7 @@ import { chromium } from '../../../../desktop/node_modules/playwright-core/index
  * Реальные SFC и production CSS используют только синтетические порты без proxy к серверу.
  */
 export async function startLoadingBrowser(t, { additionalMocks = {}, entry = '', replies = {} } = {}) {
-    const root = process.cwd();
+    const root = fileURLToPath(new URL('../../../../', import.meta.url));
     const artifacts = path.join(process.env.GRIGDESK_ARTIFACTS_DIR, 'loading-browser');
     const fixture = path.join(root, 'tests/web/fixtures/loading');
     const ports = JSON.stringify(path.join(fixture, 'ports.mjs'));

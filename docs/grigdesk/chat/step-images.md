@@ -18,7 +18,9 @@ PNG, JPEG, GIF или WebP и итог вызова успешен. Миниат
 ошибка декодирования оставляют подпись «Изображение недоступно».
 
 Правило не зависит от исполнителя: лента знает только имена шагов `Read`/`GenerateImage`
-и путь `sub`. Claude, DeepSeek/GLM и Kimi присылают `Read` сами. Элемент Codex `imageView`
+и путь `sub`. Адаптер DSH приводит `read` и `read_image` к `Read`, сохраняя `file_path`
+в `sub`; подробнее — [просмотр изображений DeepSeek](deepseek-step-images.md).
+Claude и Kimi тоже присылают `Read`. Элемент Codex `imageView`
 нормализатор приводит к нему же. Элемент Codex `imageGeneration` становится строкой
 `GenerateImage`: заголовок — `revisedPrompt`, `sub` — `savedPath`, итог — заглушка картинки.
 Поле `result` с base64 в ленту не попадает; при неудаче итог несёт текст ошибки. Codex

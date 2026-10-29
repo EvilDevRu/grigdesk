@@ -1,5 +1,7 @@
 import { translator } from '../i18n/catalogs.ts';
 
+import type { WindowControlsState } from '../desktop/windowControls.ts';
+
 export type ConnectionStatus = 'none' | 'connecting' | 'online' | 'offline' | 'locked'
   | 'unpaired' | 'revoked' | 'identityMismatch' | 'incompatible';
 
@@ -17,6 +19,7 @@ export interface MachineProfile {
 }
 
 export interface ShellState {
+  windowControls?: WindowControlsState;
   desktopExit?: { skipConfirmation: boolean };
   locale?: { preference: string; systemLanguage: string };
   rev: number;

@@ -2,6 +2,7 @@
 // Ни descriptor, ни пути и metadata не сериализуются в сам handle.
 
 import type { PreparedExecutorRuntime } from '../executorSettings/types.ts';
+import path from 'node:path';
 import {
   resolveDeepSeekRuntimeAsync,
   verifyDeepSeekRuntimeDescriptorAsync,
@@ -9,6 +10,7 @@ import {
 import type { DeepSeekRuntimeConfig, DeepSeekRuntimeDescriptor } from './runtimeProcess.ts';
 import { deepSeekRuntimeError } from './runtimeArtifact.ts';
 import { selectedDeepSeekBinary, usesDeepSeekBinary } from './distribution.ts';
+import { ExecutorRuntimeError } from '../executors/errors.ts';
 
 /**
  * Handle нельзя перенести на другую выбранную поставку или cache через замену config.
@@ -94,3 +96,45 @@ const scope = createDeepSeekRuntimeScope();
 
 export const prepareDeepSeekRuntime = scope.prepare;
 export const preparedDeepSeekRuntime = scope.read;
+
+/**
+ * Новый чат допускается только на ELF с обязательной native проверкой инструментов.
+ * Общий runtime scope остаётся совместимым с metadata, Factory и GLM.
+ */
+export function requireDeepSeekToolPermissions(runtime: DeepSeekRuntimeDescriptor): void {
+  if (runtime.capabilities.toolPermissions !== true) {
+    throw new ExecutorRuntimeError(
+      'deepseek_tool_permissions_unavailable',
+      'Обновите бинарник DeepSeek: установленная версия не поддерживает подтверждение действий.',
+    );
+  }
+}
+
+/**
+ * Capability бинарника не заменяет обязательный флаг запуска конкретного чата.
+ * Отсутствующая policy останавливает ход до подготовки native настроек и spawn.
+ */
+export function requireDeepSeekToolPolicy(policyPath: unknown): asserts policyPath is string {
+  if (typeof policyPath !== 'string' || !path.isAbsolute(policyPath)) {
+    throw new ExecutorRuntimeError(
+      'deepseek_tool_permissions_unavailable',
+      'Не создана обязательная политика разрешений DeepSeek.',
+    );
+  }
+}
+
+/**
+ * Preflight проверяет capability до подготовки настроек и изменения session binding.
+ * Handle по-прежнему принадлежит единственному descriptor текущего запуска.
+ */
+export async function prepareDeepSeekChatRuntime(
+  config: DeepSeekRuntimeConfig,
+  options: { signal: AbortSignal },
+): Promise<PreparedExecutorRuntime> {
+  const handle = await scope.prepare(config, options);
+  const runtime = await scope.read(config, handle);
+
+  requireDeepSeekToolPermissions(runtime);
+
+  return handle;
+}

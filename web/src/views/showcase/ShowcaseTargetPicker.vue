@@ -209,10 +209,12 @@ function choiceKey(target: TargetChoice): string {
   return `${target.ref.kind}:${target.ref.id}`;
 }
 
-// Постоянный стенд публикует готовую ссылку; у песочницы наружу идёт только порт,
-// и адрес строится относительно хоста, на котором открыт GrigDesk.
+// Постоянный стенд публикует готовую ссылку; у песочницы хост задаёт профиль.
+// Ответ старого сервера сохраняет локальный fallback общего генератора ссылок.
 function urlOf(target: TargetChoice): string | null {
-  return target.ref.kind === 'sandbox' ? sandboxUrl(target.viewPort) : target.viewUrl;
+  return target.ref.kind === 'sandbox'
+    ? sandboxUrl(target.viewPort, target.serviceHost)
+    : target.viewUrl;
 }
 
 // Первая строка цели: название задачи, когда портал его дал; иначе — подпись стенда.

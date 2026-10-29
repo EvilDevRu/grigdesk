@@ -13,6 +13,80 @@ import {
   readRunnerWorkTime,
   resolveRunnerState,
 } from '../../server/src/lib/runnerState.ts';
+import { GLM_FACTORY_MODELS } from '../../server/src/lib/glm/factoryCatalog.ts';
+import { runnerModelName } from '../../server/src/lib/runnerModel.ts';
+
+test('модель GLM нормализуется на сервере, default берётся из каталога или телеметрии', () => {
+  const profile = {
+    PROJECT_RUNNER_PRIMARY: 'glm',
+    MODEL_DEFAULT_GLM_FAMILY: 'default',
+  };
+  const before = resolveRunnerState(profile, {}, 'BUILD');
+
+  assert.equal(before.models.glm.label, runnerModelName(GLM_FACTORY_MODELS[0].id));
+  assert.notEqual(before.models.glm.label, 'default');
+  assert.equal(resolveRunnerState({ PROJECT_RUNNER_PRIMARY: 'glm' }, {}, 'BUILD').models.glm.label,
+    before.models.glm.label);
+  assert.equal(runnerModelName(' ["zai", "glm-5.3"] '), 'glm-5.3');
+  assert.equal(runnerModelName('gpt-5.6-sol'), 'gpt-5.6-sol');
+  assert.equal(runnerModelName('["zai",'), null);
+  assert.equal(runnerModelName('["zai", {}]'), null);
+
+  const attempts = [
+    { runner: 'glm', model: 'glm-5.2' },
+    { runner: 'glm', model: 'glm-5.3-flash' },
+    { runner: 'codex', model: 'gpt-5.6-sol' },
+  ];
+  const pending = resolveRunnerState(profile, {}, 'BUILD', attempts);
+
+  assert.equal(pending.models.glm.label, 'glm-5.3-flash');
+
+  const actual = resolveRunnerState(profile, {
+    RUNNER_ACTUAL_BUILD: 'glm',
+    MODEL_ACTUAL_BUILD: '["zai","glm-5.3"]',
+  }, 'BUILD', attempts);
+
+  assert.equal(actual.model, 'glm-5.3');
+  assert.equal(resolveRunnerState({
+    ...profile, MODEL_BUILD_GLM_EXACT: '["zai","glm-5.2"]',
+  }, {}, 'BUILD').models.glm.label, 'glm-5.2');
+});
+
+test('попытки GLM сохраняют resolved-модель и конкретную причину старого и нового запуска', async (t) => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-attempt-glm.'));
+
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+
+  for (const [index, result] of ['unknown', 'unknown', 'ok', 'timeout', 'manual_switch'].entries()) {
+    const runDir = path.join(stateDir, 'logs/runs/t46/BUILD', `run-${index}`);
+    const meta = [
+      'RUNNER=glm', `EPOCH=${index + 1}`, 'MODEL=["zai","glm-5.2"]',
+      'RESOLVED_MODEL=["zai","glm-5.3"]', `RESULT_CLASS=${result}`,
+      `RC=${index === 2 ? 0 : index === 3 ? 124 : 1}`,
+    ];
+
+    if (index !== 0) {
+      meta.push('FAILURE_CODE=glm_key_missing', 'FAILURE_MESSAGE=GLM недоступен: проверь карточку');
+    }
+
+    await mkdir(runDir, { recursive: true });
+    await writeFile(path.join(runDir, 'meta.env'), meta.join('\n'));
+    await writeFile(path.join(runDir, 'events.jsonl'), JSON.stringify({
+      event: 'wrapper_error',
+      code: 'glm_key_missing',
+      message: 'GLM недоступен: проверь карточку',
+    }) + '\n');
+  }
+
+  const attempts = await readRunnerAttempts(stateDir, '46', 'BUILD');
+
+  assert.deepEqual(attempts.map((attempt) => attempt.model), Array(5).fill('glm-5.3'));
+  assert.deepEqual(attempts.slice(0, 2).map((attempt) => attempt.failureDetail), [
+    'GLM недоступен: проверь карточку (glm_key_missing)',
+    'GLM недоступен: проверь карточку (glm_key_missing)',
+  ]);
+  assert.deepEqual(attempts.slice(2).map((attempt) => attempt.failureDetail), Array(3).fill(undefined));
+});
 
 test('runner state follows engine precedence and exposes an emergency switch', () => {
   const profile = {

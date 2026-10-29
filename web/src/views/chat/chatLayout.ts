@@ -18,4 +18,3 @@ export function storedComposerHeight() {
     return null;
   }
 }
-

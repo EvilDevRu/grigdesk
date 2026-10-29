@@ -44,6 +44,45 @@ export interface FactoryRuntimeSelection {
   node: string;
 }
 
+/**
+ * Probe читает только уже опубликованную authority exact попытки.
+ * Missing pin не создаёт registry, reservation, index или совместимую миграцию.
+ */
+export async function readExistingFactoryRuntimePin(input: FactoryRuntimeRoots & {
+  cacheDir: string;
+  task: string;
+  attempt: string;
+  profile: string;
+}): Promise<FactoryRuntimePin | null> {
+  await validateFactoryRuntimeRoots(input);
+
+  const scope = factoryRuntimeScope(input);
+  const file = path.join(input.controlRoot, 'server-runtimes', scope, `${input.attempt}.json`);
+  let value: unknown;
+
+  try {
+    value = await readRuntimeJson(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+
+    throw runtimeError('factory_runtime_pin_invalid');
+  }
+
+  const pin = decodeFactoryRuntimePin(value);
+  const identity = await readFactoryRuntimeAttempt(input, input.task, input.attempt);
+
+  if (identity.profile !== input.profile || pin.scope !== scope
+    || pin.task !== input.task || pin.attempt !== input.attempt) {
+    throw runtimeError('factory_runtime_attempt_invalid');
+  }
+
+  await validateFactoryRuntime(pin, input.cacheDir);
+
+  return pin;
+}
+
 export interface FactoryRuntimeReservation extends FactoryRuntimeRoots, FactoryRuntimeSelection {
   format: 1;
   token: string;

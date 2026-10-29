@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { compileModule, webFile } from './helpers/compile-vue.js';
+import { compileModule, migrationHarness, webFile } from './helpers/compile-vue.js';
 import { compileTaskModal } from './helpers/task-modal.js';
 import { installUiBrowser } from './helpers/ui-components.js';
 
@@ -40,6 +40,7 @@ async function mountCard(t, browser, {
     status_label: LABELS[status],
   };
   const calls = [];
+  const detailSignals = [];
   const confirmations = [];
   const useBoardStore = defineStore(`task-status-board-${nonce}`, {
     state: () => ({
@@ -67,9 +68,14 @@ async function mountCard(t, browser, {
   const api = {
     // Детали копируются как сетевой ответ, чтобы кеш не менялся вместе с порталом.
     // Остальные запросы карточки получают пустые независимые ответы.
-    async get(url) {
+    async get(url, options) {
+      if (url.startsWith('/api/grigdesk-tasks/')) {
+        throw new migrationHarness.ApiError('Нет своей задачи', 404, { error: 'grigdesk_task_not_found' });
+      }
+
       if (url === '/api/b24/task/42') {
         calls.push(`GET:${url}`);
+        detailSignals.push(options?.signal);
 
         return { ...task };
       }
@@ -129,14 +135,19 @@ async function mountCard(t, browser, {
   t.after(() => {
     wrapper?.unmount();
 
-    for (const suffix of [...Object.keys(globals), 'TasksStore']) {
+    for (const suffix of [...Object.keys(globals), 'TasksStore', 'ApiError']) {
       delete globalThis[`${prefix}${suffix}`];
     }
   });
 
+  globalThis[`${prefix}ApiError`] = migrationHarness.ApiError;
+
   const module = await compileModule(webFile('src/stores/tasks.ts'), {
     stubs: {
-      '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`,
+      '../shared/apiClient.ts': [
+        `export const api = globalThis.${prefix}Api;`,
+        `export const ApiError = globalThis.${prefix}ApiError;`,
+      ].join('\n'),
       './board.ts': `export const useBoardStore = globalThis.${prefix}BoardStore;`,
     },
   });
@@ -170,6 +181,7 @@ async function mountCard(t, browser, {
     wrapper,
     calls,
     confirmations,
+    detailSignals,
     flushPromises,
     reopen,
     tasks: module.useTasksStore(pinia),
@@ -179,6 +191,24 @@ async function mountCard(t, browser, {
 
 const footerButton = (wrapper, text) => wrapper.findAll('footer.controls button')
   .find((button) => button.text().trim() === text);
+
+test('закрытие и unmount карточки отменяют переданный в API сигнал чтения', async (t) => {
+  const browser = await installUiBrowser(t);
+
+  const card = await mountCard(t, browser);
+
+  assert.equal(card.detailSignals[0]?.aborted, false);
+  card.ui.close();
+  await card.flushPromises();
+  assert.equal(card.detailSignals[0].aborted, true);
+  card.tasks.details[42].loadedAt = 0;
+  card.ui.taskId = 42;
+  await card.flushPromises();
+  assert.equal(card.detailSignals.length, 2);
+  assert.equal(card.detailSignals[1].aborted, false);
+  card.wrapper.unmount();
+  assert.equal(card.detailSignals[1].aborted, true);
+});
 
 test('Действия карточки учитывают завершение и обновляют кеш после смены статуса', async (t) => {
   const browser = await installUiBrowser(t);

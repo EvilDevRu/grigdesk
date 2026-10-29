@@ -164,3 +164,35 @@ test('D4: остановленная подписка не открывает н
   await new Promise(setImmediate);
   assert.deepEqual(h.calls.revealed, []);
 });
+
+test('PM-PLUGIN-OPEN: без открывалки plugin-цель не уходит в конвейер', () => {
+  const h = deps(reactive, '/chats', {});
+
+  api.openAlertTarget({ kind: 'plugin', pluginId: 'ui-module' }, h.deps);
+  assert.deepEqual(h.calls.push, []);
+});
+
+test('PM-PLUGIN-OPEN: bridge открывает свой инструмент, cleanup не снимает чужой callback', () => {
+  assert.equal(typeof api.setPluginAlertOpener, 'function', 'Не реализован bridge plugin-цели');
+
+  const h = deps(reactive, '/chats', {});
+  const opened = [];
+  const old = api.setPluginAlertOpener((id) => opened.push(['old', id]));
+  const current = api.setPluginAlertOpener((id) => {
+    if (id === 'ui-module') {
+      opened.push(['new', id]);
+
+      return true;
+    }
+
+    return false;
+  });
+
+  old();
+  api.openAlertTarget({ kind: 'plugin', pluginId: 'ui-module' }, h.deps);
+  api.openAlertTarget({ kind: 'plugin', pluginId: 'disabled' }, h.deps);
+  current();
+  api.openAlertTarget({ kind: 'plugin', pluginId: 'ui-module' }, h.deps);
+  assert.deepEqual(opened, [['new', 'ui-module']]);
+  assert.deepEqual(h.calls.push, []);
+});

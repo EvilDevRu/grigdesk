@@ -13,6 +13,16 @@
   "continue": "Enter or Esc — back",
   "open": "Open window",
   "openDescription": "start GrigDesk",
+  "openWindowQuestion": "Open the GrigDesk window?",
+  "skipOpen": "Do not open",
+  "openWindowNavigation": "↑↓ select · Enter confirm · Y/N · Esc do not open",
+  "smokeQuestion": "Run a live GLM admission smoke after the build?",
+  "smokeNavigation": "↑↓ select · Enter confirm · Esc skip",
+  "smokeChoice": {
+    "none": "Skip (default)",
+    "consumer": "Consumer mode (needs admission)",
+    "both": "Both modes: api and coding-plan"
+  },
   "status": "Status",
   "statusDescription": "server, window, relay, links",
   "server": "Server",
@@ -21,7 +31,7 @@
   "devices": "Devices",
   "devicesDescription": "pair with QR, list, revoke",
   "build": "Build",
-  "buildDescription": "server, web, window, portable bundle",
+  "buildDescription": "server, web, window, DeepSeek, portable bundle",
   "development": "Development",
   "developmentDescription": "dev mode, dependencies, run",
   "exit": "Exit",
@@ -50,6 +60,8 @@
   "webDescription": "prepare dependencies and build web",
   "window": "Window with web",
   "windowDescription": "build web, package and install window",
+  "deepseek": "DeepSeek",
+  "deepseekDescription": "build, verify and install the DeepSeek binary",
   "bundle": "Portable bundle",
   "bundleDescription": "release/ directory and archive, without installation",
   "dev": "Dev mode",
@@ -74,10 +86,14 @@
   "summaryServer": "Installed server: {path}",
   "summaryWeb": "Built web: {path}",
   "summaryWindow": "Installed window: {path}; web built.",
+  "summaryDeepseek": "Installed DeepSeek: {path}",
   "summaryBundle": "Built release/ and release.tar.gz without installation.",
   "reopen": "Close the window and open it again to run the new code.",
   "webHint": "The window will show the new web after grigdesk-ctl build window.",
+  "deepseekHint": "The next DeepSeek turn picks up the new binary; no server restart needed.",
   "selectServer": "To select this server: grigdesk-ctl desktop use-server {path}",
+  "serverQueued": "The window will select this build's server on its next launch.",
+  "serverNotSelected": "The window keeps a different server installation selected; the new server is not selected yet.",
   "historyError": "Cannot save build timings: {reason}",
   "states": {
     "ready": "running",
@@ -106,6 +122,18 @@
     "window": {
       "package": "Window: package",
       "install": "Window: install"
+    },
+    "deepseek": {
+      "deps": "DeepSeek: dependencies",
+      "prepare": "DeepSeek: prepare runtime",
+      "build": "DeepSeek: build",
+      "verify": "DeepSeek: verify",
+      "admission-api": "DeepSeek: api admission",
+      "admission-coding-plan": "DeepSeek: coding-plan admission",
+      "smoke-api": "DeepSeek: live smoke (api)",
+      "smoke-coding-plan": "DeepSeek: live smoke (coding-plan)",
+      "install": "DeepSeek: install",
+      "prune": "DeepSeek: prune cache"
     },
     "bundle": {
       "server": "Bundle: server",

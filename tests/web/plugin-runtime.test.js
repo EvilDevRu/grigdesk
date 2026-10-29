@@ -5,12 +5,12 @@ import { descriptor, pluginCard } from './helpers/pluginModuleContract.js';
 import { deferred, importer, runtimeFixture, settle } from './helpers/pluginRuntimeUnit.js';
 
 const withoutResources = {
-  
-   ...descriptor, 
-  
-  css: [], 
-  
-  locales: {} 
+
+   ...descriptor,
+
+  css: [],
+
+  locales: {}
 
 };
 
@@ -35,7 +35,7 @@ for (const variant of ['missing-map', 'wrong-vue', 'wrong-ui']) {
     const runtime = await runtimeFixture(t);
     const overrides = variant === 'missing-map'
       ? { vue: async () => {
-         throw new TypeError('bare specifier'); 
+         throw new TypeError('bare specifier');
       } }
       : variant === 'wrong-vue'
         ? { vue: async () => ({ ...runtime.vue, ref: () => ({ value: null }) }) }
@@ -56,7 +56,7 @@ for (const variant of ['import-reject', 'invalid-default', 'css-error']) {
     const imports = importer(runtime, variant === 'invalid-default' ? {} : { render: () => null },
       variant === 'import-reject' ? {
       [descriptor.entry]: async () => {
-         throw new TypeError('import 404'); 
+         throw new TypeError('import 404');
       },
     } : {});
     const pending = runtime.loadPluginModule('ui-module', {
@@ -229,7 +229,7 @@ test('PM-CONTEXT: API с сессией/401, ru/en, readonly live locale и valu
 
   let unauthorized = 0;
   const unsubscribe = api.onUnauthorized(() => {
-     unauthorized += 1; 
+     unauthorized += 1;
   });
 
   t.after(unsubscribe);
@@ -281,4 +281,71 @@ test('PM-CONTEXT: пустые словари возвращают ключ', as
   }, { signal: new AbortController().signal });
 
   assert.equal(context.t('unknown'), 'unknown');
+});
+
+test('PM-LEGACY-NAMED-START: загрузка без opt-in сохраняет default и не выполняет start', async (t) => {
+  const runtime = await runtimeFixture(t);
+  const component = { render: () => null };
+  let starts = 0;
+  const imports = importer(runtime, component, {
+    [descriptor.entry]: async () => ({ default: component, start: () => starts += 1 }),
+  });
+  const result = await runtime.loadPluginModule('ui-module', withoutResources, {
+    signal: new AbortController().signal,
+    importModule: imports.importModule,
+  });
+
+  assert.equal(result.component, component);
+  assert.equal(starts, 0);
+  result.releaseStyles();
+});
+
+test('PM-BACKGROUND-LOAD: styles=false сохраняет default/start без links и исполнения hook', async (t) => {
+  const runtime = await runtimeFixture(t);
+  const controller = new AbortController();
+  const component = { render: () => null };
+  let starts = 0;
+  const start = () => starts += 1;
+  const imports = importer(runtime, component, {
+    [descriptor.entry]: async () => ({ default: component, start }),
+  });
+  const pending = runtime.loadPluginModule('ui-module', descriptor, {
+    signal: controller.signal,
+    styles: false,
+    importModule: imports.importModule,
+  });
+
+  pending.catch(() => {});
+  t.after(() => controller.abort());
+  await settle();
+  assert.equal(document.querySelectorAll('link[rel="stylesheet"]').length, 0,
+    'Фоновая загрузка не должна подключать CSS панели');
+
+  const result = await pending;
+
+  assert.equal(result.component, component);
+  assert.equal(result.start, start);
+  assert.equal(starts, 0);
+  result.releaseStyles();
+});
+
+test('PM-BACKGROUND-LOAD: поздний import после abort не выполняет named start', async (t) => {
+  const runtime = await runtimeFixture(t);
+  const late = deferred();
+  const abort = new AbortController();
+  let starts = 0;
+  const imports = importer(runtime, undefined, { [descriptor.entry]: () => late.promise });
+  const pending = runtime.loadPluginModule('ui-module', withoutResources, {
+    signal: abort.signal,
+    styles: false,
+    importModule: imports.importModule,
+  });
+  const rejected = assert.rejects(pending);
+
+  await settle();
+  abort.abort();
+  late.resolve({ default: { render: () => null }, start: () => starts += 1 });
+  await rejected;
+  assert.equal(starts, 0);
+  assert.equal(document.querySelectorAll('link[rel="stylesheet"]').length, 0);
 });

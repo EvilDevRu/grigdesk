@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { DIRECT_SSH_HOOK_PATH } from '../executors/_directSshPolicy.ts';
+import { mcpEnvironmentRecord } from '../mcpEnvironment.ts';
 import { helperCommand, runtimeKind } from '../runtimePaths.ts';
 import { shellQuote as quoteShellArgument } from '../../../../shared/lib/shellQuote.ts';
 import {
@@ -18,6 +19,10 @@ export interface DeepSeekLaunchFilesOptions {
   workspaceRoot: string;
   mode: 'read-only' | 'workspace-write';
   approval: 'ask' | 'never';
+  toolPermissions?: {
+    mode: string;
+    workActions: Record<string, Record<string, 'read' | 'broker'>>;
+  };
   transport?: 'acp' | 'web';
   mcpServers?: readonly {
     name: string;
@@ -39,6 +44,7 @@ export interface DeepSeekLaunchFiles {
   launchDir: string;
   overlayPath: string;
   hooksPath: string;
+  toolPolicyPath?: string;
   fingerprint: string;
   version: string;
 }
@@ -87,7 +93,7 @@ const DISABLED_ROWS = Object.freeze([
 
 // Входит в persisted cache/session fingerprint. Менять при любом смысловом изменении
 // overlay, hooks или их enforcement, даже если версия DSH осталась прежней.
-export const DEEPSEEK_PROFILE_REVISION = 'deepseek-host-sandbox-v5';
+export const DEEPSEEK_PROFILE_REVISION = 'deepseek-host-sandbox-v6';
 
 const INSTRUCTIONS_HOOK_PATH = fileURLToPath(
   new URL('../../../scripts/deepseekInstructionsHook.mts', import.meta.url),
@@ -202,6 +208,7 @@ export async function buildLaunchFiles(
   await fs.chmod(launchDir, 0o700);
   const hooksPath = path.join(launchDir, 'hooks.json');
   const overlayPath = path.join(launchDir, 'overlay.yml');
+  const toolPolicyPath = options.toolPermissions ? path.join(launchDir, 'tool-policy.json') : undefined;
   const commandFlags = [
     ...(hooks.ssh ? ['--ssh'] : ['--no-ssh']),
     ...(hooks.db ? ['--db'] : []),
@@ -284,9 +291,12 @@ export async function buildLaunchFiles(
         presets: {
           'read-only': { sandbox: 'read-only', approval: 'ask' },
           'workspace-write': { sandbox: 'workspace-write', approval: 'ask' },
-          'danger-full-access': { sandbox: 'danger-full-access', approval: 'never' },
-          'factory-state-only': { sandbox: 'read-only', approval: 'never' },
-          'factory-workspace-write': { sandbox: 'workspace-write', approval: 'never' },
+          ...(!options.toolPermissions
+            ? {
+              'danger-full-access': { sandbox: 'danger-full-access', approval: 'never' },
+              'factory-state-only': { sandbox: 'read-only', approval: 'never' },
+              'factory-workspace-write': { sandbox: 'workspace-write', approval: 'never' },
+            } : {}),
         },
         defaultPreset: permissionPreset(mode, approval),
       },
@@ -313,16 +323,25 @@ export async function buildLaunchFiles(
           transport: 'stdio',
           command: server.command,
           args: [...server.args],
-          env: Object.fromEntries(server.env.map((entry) => [entry.name, entry.value])),
+          env: mcpEnvironmentRecord(server.env),
           ...variant?.mcpConfig,
         },
       }))],
     },
   ], options.transport === 'web' ? 'web' : 'acp');
 
+  const toolPolicyJson = toolPolicyPath ? JSON.stringify({
+    format: 1,
+    consumer: 'deepseek-chat',
+    revision: 'grigdesk-tool-permissions-v1',
+    workspaceRoot,
+    ...options.toolPermissions,
+  }) : '';
+
   await Promise.all([
     privateFile(hooksPath, hooksJson),
     privateFile(overlayPath, overlay),
+    ...(toolPolicyPath ? [privateFile(toolPolicyPath, toolPolicyJson)] : []),
   ]);
 
   const fingerprint = createHash('sha256')
@@ -331,11 +350,14 @@ export async function buildLaunchFiles(
     .update(overlay)
     .update('\0')
     .update(hooksJson)
+    .update(toolPolicyJson)
     .digest('hex');
+
   return {
     launchDir,
     overlayPath,
     hooksPath,
+    ...(toolPolicyPath ? { toolPolicyPath } : {}),
     fingerprint,
     version: DEEPSEEK_PIN.version,
   };

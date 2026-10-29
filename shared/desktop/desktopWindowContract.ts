@@ -55,7 +55,7 @@ export function desktopWindowRole(userAgent: string): DesktopWindowRole | null {
 }
 
 /**
- * Только полная роль главного окна включает системный заголовок.
+ * Только полная роль главного окна включает управление окном внутри интерфейса.
  * Старый query настроек остаётся обычным адресом того же документа.
  */
 export function desktopDocumentMode(userAgent: string, _search: string): DesktopDocumentMode {

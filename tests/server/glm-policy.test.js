@@ -77,10 +77,10 @@ test('исключение внутри политики — exit 2', async (t) 
   }
 });
 
-test('делегирующие, субагентные, workflow, jobs и web-инструменты — exit 2', async (t) => {
+test('делегирующие, субагентные, workflow и web-инструменты — exit 2', async (t) => {
   const forbidden = [
     'subagent', 'subagent_fork', 'send_message', 'interrupt_agent', 'list_agents', 'workflow', 'ralph',
-    'job_kill', 'job_list', 'job_output', 'web_fetch', 'web_search', 'skill', 'present', 'create_goal',
+    'web_fetch', 'web_search', 'present', 'create_goal',
     'exit_plan_mode', 'read_image',
   ];
 
@@ -137,6 +137,32 @@ test('инструмент вопросов агента — exit 0', async (t) 
 
   assert.equal(result.code, 0);
   assert.equal(result.descriptor.kind, 'question');
+});
+
+test('загрузчик навыков — exit 0 с типом read', async (t) => {
+  const result = await runHook(t, preToolUse('skill', { name: 'debug' }));
+
+  assert.equal(result.code, 0);
+  assert.equal(result.descriptor.name, 'skill');
+  assert.equal(result.descriptor.kind, 'read');
+  assert.equal(result.descriptor.decision, 'allow');
+});
+
+test('фоновые задачи — exit 0: чтение состояния и вывода, остановка своей задачи', async (t) => {
+  const calls = [
+    ['job_list', {}, 'read'],
+    ['job_output', { job_id: 'bash-1', wait: true }, 'read'],
+    ['job_kill', { job_id: 'bash-1' }, 'execute'],
+  ];
+
+  for (const [name, input, kind] of calls) {
+    const result = await runHook(t, preToolUse(name, input));
+
+    assert.equal(result.code, 0, name);
+    assert.equal(result.descriptor.name, name);
+    assert.equal(result.descriptor.kind, kind);
+    assert.equal(result.descriptor.decision, 'allow');
+  }
 });
 
 test('hook пишет дескриптор с хэшем канонического JSON аргументов в stderr для hook/result', async (t) => {

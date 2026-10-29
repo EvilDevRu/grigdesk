@@ -58,6 +58,15 @@ if [[ "${1:-}" == "--one" ]]; then
     GRIGDESK_DEEPSEEK_RUNTIME_MODE=installed \
     bash --noprofile --norc "$test_file" >"$out_buf" 2>&1
   test_rc=$?
+
+  # Одиночный запуск из профильных test.sh/verify.py не передаёт lock.
+  # Блокировка вывода нужна только параллельной очереди.
+  if [[ -z "${OFFLINE_OUT_LOCK:-}" ]]; then
+    printf '── %s\n' "${test_file#"$PROJECT_ROOT/"}"
+    cat -- "$out_buf"
+    exit "$test_rc"
+  fi
+
   # Вывод файла печатается одним куском под общим flock: иначе строки соседних
   # прогонов перемешались бы и TAP стал бы нечитаемым.
   {

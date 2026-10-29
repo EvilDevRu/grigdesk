@@ -30,7 +30,7 @@ Light-режим (debug, small, fix) берёт тесты из diff, полны
   непроверенным. Теперь pint в VERIFY идёт с собственным `TMPDIR` на каждый прогон, а
   ненулевой код без итоговой строки `FAIL … N files` — отказ окружения, а не снятие.
 
-Проверка — `profiles/arsenkin/tests/feature-verify-check.sh` (помощник закреплён и не
+Проверка — `profiles/<имя>/tests/feature-verify-check.sh` (помощник закреплён и не
 исполняется, manifest из одних помощников отвергнут, падение сводки Pint — `environment`).
 
 Как продолжить живую задачу: «перейти сюда» на `verify` (command-узел, агента нет),

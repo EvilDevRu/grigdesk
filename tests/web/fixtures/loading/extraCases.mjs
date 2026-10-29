@@ -379,7 +379,7 @@ extraPorts.push({
           attachments: []
             }],
     },
-    readySelector: '.item-card',
-    geometry: ['header', '.queue-head', ['y', 'height']],
+    readySelector: '.queue-row',
+    geometry: ['header', '.catalog-tools', ['y', 'height']],
     browserOnly: true,
 });

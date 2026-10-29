@@ -76,8 +76,8 @@ test('LOAD-KEEP-data-inbox: повторное чтение сохраняет �
     await h.wrapper.findAll('button').find((button) => button.text() === 'Обновить').trigger('click');
     await h.settle();
     assert.equal(calls, 2, 'обновление действительно началось');
-    assert.equal(h.wrapper.get('[data-status="new"]').element, item);
-    assert.equal(h.wrapper.get('h1').element, heading);
+    assert.equal(h.wrapper.get('[data-status="new"]').element === item, true);
+    assert.equal(h.wrapper.get('h1').element === heading, true);
     assert.equal(h.wrapper.find('[data-ui-skeleton]').exists(), false);
     pending.resolve(structuredClone(SNAPSHOT));
     await h.settle();
@@ -125,7 +125,7 @@ test('LOAD-KEEP-inline-github: обновление правил остаётс�
     assert.equal(inline.exists(), true);
     assert.equal(inline.find('.ui-spinner').exists(), true);
     assert.equal(inline.find('[data-ui-skeleton]').exists(), false);
-    assert.equal(h.wrapper.get('h1').element, heading);
+    assert.equal(h.wrapper.get('h1').element === heading, true);
     pending.resolve({ rules: [] });
     await reading;
     await h.settle();
@@ -170,7 +170,7 @@ test('LOAD-KEEP-inline-studio3d: обновление сохраняет нас�
     });
     state.busy = 1;
     await nextTick();
-    assert.equal(wrapper.get('[data-context="studio-model-card"]').element, card);
+    assert.equal(wrapper.get('[data-context="studio-model-card"]').element === card, true);
     assert.match(wrapper.text(), /Сохранённый куб/);
     assert.equal(wrapper.find('[data-ui-skeleton]').exists(), false);
     assert.equal(
@@ -191,12 +191,12 @@ for (const kind of ['ssh', 'db']) {
         const calls = [...h.calls];
 
         await h.refreshing(true);
-        assert.equal(h.wrapper.get(h.selector).element, row);
+        assert.equal(h.wrapper.get(h.selector).element === row, true);
         assert.equal(h.wrapper.find('[data-ui-skeleton]').exists(), false);
         assert.equal(h.wrapper.find('[data-ui-loading]').exists(), false);
         assert.deepEqual(h.calls, calls, 'смена визуального состояния не запускает загрузку');
         await h.refreshing(false);
-        assert.equal(h.wrapper.get(h.selector).element, row);
+        assert.equal(h.wrapper.get(h.selector).element === row, true);
     });
 }
 

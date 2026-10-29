@@ -1,5 +1,6 @@
 // Терминальная ошибка провайдера имеет отдельный смысл от stdout инструмента.
 // Общий разбор используется классификатором движка и диагностикой остановок.
+import { translate } from '../../../shared/i18n/catalogs.ts';
 
 type Row = Record<string, unknown>;
 
@@ -203,6 +204,13 @@ export function classifyCodexFailure(raw: string, rc: number, verified: boolean)
  * сохраняет сообщение человеку, тогда как подтверждённые причины переводятся на русский.
  */
 export function runnerFailureDetail(failure: RunnerFailure, model = ''): string {
+  if (/^glm_[a-z0-9_]{1,60}$/u.test(failure.code)) {
+    return translate('core.runnerFailureWithCode', {
+      message: cleanRunnerFailureMessage(failure.message),
+      code: failure.code,
+    });
+  }
+
   const name = cleanRunnerFailureMessage(model).slice(0, 80);
   const modelLabel = name ? `модель «${name}»` : 'модель';
   const labels: Record<string, string> = {

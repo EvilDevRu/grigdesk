@@ -23,6 +23,7 @@ import { delayWithAbort } from '../../shared/lib/delay.ts';
 import { probeGrigDesk } from '../../shared/runtime/grigDeskReadiness.ts';
 import { desktopUserAgent } from '../../shared/desktop/desktopWindowContract.ts';
 import { createSettingsRequest } from './settingsRequest.ts';
+import { createWindowControls } from './windowControls.ts';
 import { createDesktopExitController } from './desktopExitController.ts';
 import { createDesktopExitPreference } from './desktopExitPreference.ts';
 import { createSurfaceWindows } from './surfaceWindows.ts';
@@ -90,6 +91,11 @@ let selectedOrigin: string | null = null;
 let mainDocumentCode: number | null = null;
 let bootStartedAt = 0;
 let exiting = false;
+const windowControls = createWindowControls({
+  getWindow: () => mainWindow,
+  origin: () => pipeOrigin,
+  stopping: () => quit.stopping,
+});
 
 const configuredWindows = new WeakSet<BrowserWindow>();
 const frames = createFrameTracker();
@@ -713,6 +719,9 @@ async function createMainWindow(origin: string, stored: DesktopSettings): Promis
 
   mainWindow = window;
   pipeOrigin = origin;
+  window.on('maximize', windowControls.changed);
+  window.on('unmaximize', windowControls.changed);
+  windowControls.changed();
   window.webContents.setUserAgent(desktopUserAgent(window.webContents.getUserAgent(), 'main'));
   installSettingsShortcut(window);
   settingsRequest = createSettingsRequest({
@@ -914,6 +923,7 @@ async function prepare(signal: AbortSignal): Promise<void> {
   });
 
   client = createClientRuntime({
+    windowControls,
     desktopExit: desktopExitPreference(),
     settings: stored,
     save: () => writeSettings(settingsFile!, stored),

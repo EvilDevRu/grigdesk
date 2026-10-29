@@ -196,7 +196,9 @@ cwd была запрещена. Product-hook не должен рассчиты
 Исходное расхождение сохранено в `raw/c-write-allow.ndjson` и
 `raw/c-write-reject.ndjson`: при `workspace-write + approval: ask` обычный `write` внутри
 cwd не создаёт `session/request_permission`, поэтому заранее подготовленный reject не мог
-остановить файл. Это теперь принятый контракт, а не обещание всплывашки.
+остановить файл. Это поведение штатного DSH без дополнительного host gate. Чат DeepSeek
+теперь ставит обязательную проверку перед инструментом; обычный default write спрашивает
+человека. [Текущий контракт](../grigdesk/chat/deepseek-tool-permissions.md).
 
 Настоящий permission request получен после явного повторного вызова `write` за cwd с
 `sandbox_permissions: danger-full-access` и `justification`. Reverse request содержит
@@ -207,19 +209,18 @@ input восстанавливаются из предшествующего `to
 - `reject-once` вернул модели отказ, и целевой файл не появился;
 - без явного `sandbox_permissions` нарушение границы только возвращает sandbox error.
 
-Для `default` допускается показать такой редкий запрос человеку. Для `auto` запрос на
+Для `default` и `auto` запрос на
 `danger-full-access` тоже требует явного человека и не может быть автоматически разрешён.
 Для `read-only` он всегда отклоняется. Неизвестный reverse method и неожиданный Factory
 permission request также отклоняются fail-closed.
 
 ## Режимы чата и Factory
 
-- `default` — «Правки в проекте»: file tools и shell могут менять cwd без отдельной
-  всплывашки; реальная эскалация за границу требует явного решения человека.
-- `auto` — та же writable-граница; безопасные provider-neutral решения допустимы, но не
-  `danger-full-access`.
-- `read-only` — «Только чтение»: все запросы расширить sandbox автоматически
-  отклоняются, поэтому исходники остаются неизменными.
+- `default` — «Спрашивать»: чтение свободно, правки и shell требуют разового разрешения.
+- `auto` — обычные файлы в cwd правит самостоятельно; все shell-команды, чувствительные
+  файлы и внешние инструменты подтверждает человек. Модельного классификатора команд нет.
+- `read-only` — «Только чтение»: исходники, shell и расширение sandbox запрещены,
+  проектные MCP не запускаются. Внутренние todo/goal и вопросы сохраняют собственный UI.
 - Factory `workspace-write` разрешает изменения проекта; `state-only` использует
   подтверждённый `read-only` + `approval: never`; `transactional-write` не поддерживается.
   Любой неожиданный Factory permission request получает `reject-once`.

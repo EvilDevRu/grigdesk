@@ -11,10 +11,12 @@ import { Profiles } from './profiles.ts';
 import { createPairing, pinnedJson } from './pairing.ts';
 import { createShellApi } from './pipe/shellApi.ts';
 import type { NativeWindows } from './pipe/shellApi.ts';
+import type { WindowControls } from './windowControls.ts';
 import { json, startPipe } from './pipe/pipeServer.ts';
 import { createUpstream } from './pipe/upstream.ts';
 
 interface RuntimeOptions {
+  windowControls?: WindowControls;
   desktopExit?: DesktopExitPreference;
   nativeWindows?: NativeWindows;
   settings: DesktopSettings;
@@ -52,6 +54,7 @@ export function createClientRuntime(options: RuntimeOptions) {
     directory: options.identityDirectory,
   });
   const shell = createShellApi({
+    windowControls: options.windowControls,
     desktopExit: options.desktopExit,
     nativeWindows: options.nativeWindows,
     profiles,

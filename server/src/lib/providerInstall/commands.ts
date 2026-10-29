@@ -52,7 +52,9 @@ export async function resolveProviderInstallation(adapter: ExecutorAdapter, conf
  * Установка latest одинаково подходит первой установке и явному обновлению CLI.
  * Вход в аккаунт остаётся отдельным действием и не запускается вместе с npm.
  */
-export function npmInstallCommand(packageId: string, executable: string): ProviderInstallCommand {
+export function npmInstallCommand(packageId: string, executable: string,
+  npmBinding: Omit<NonNullable<ProviderInstallCommand['npmBinding']>, 'packageId'>):
+  ProviderInstallCommand {
   const target = `${packageId}@latest`;
   const command = `npm i -g ${target}`;
 
@@ -61,5 +63,6 @@ export function npmInstallCommand(packageId: string, executable: string): Provid
     args: ['i', '-g', target],
     command,
     fallbackCommand: command,
+    npmBinding: { ...npmBinding, packageId },
   };
 }

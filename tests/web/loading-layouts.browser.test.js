@@ -351,13 +351,18 @@ test('LOAD-A11Y: подпись объявляется без занимаемо
 });
 
 for (const width of [1280, 390]) {
-  test(`LOAD-GEO-inbox-structure-${width}: шапка, вкладки и карточка совпадают с очередью`, async (t) => {
+  test(`LOAD-GEO-inbox-structure-${width}: каталог, вкладки и переписка совпадают с очередью`, async (t) => {
     const h = await browser.open(t, { mode: 'inbox', viewport: { width, height: 844 } });
     const pairs = [
-      ['header', '.queue-head', ['y', 'height']],
+      ['header', '.catalog-tools', ['y', 'height']],
       ['tabs', '.section-tabs', ['x', 'width', 'height']],
-      ['card', '.item-card', ['x', 'width']],
+      ['catalog', '.inbox-catalog', ['x', 'width', 'height']],
     ];
+
+    if (width > 900) {
+      pairs.push(['detail', '.inbox-detail', ['x', 'width', 'height']]);
+    }
+
     const pending = [];
 
     for (const [region] of pairs) {
@@ -370,7 +375,7 @@ for (const width of [1280, 390]) {
 
     await h.release();
     await h.page.evaluate(() => window.loadingFixture.ready());
-    await h.page.locator('.item-card').waitFor({ state: 'visible' });
+    await h.page.locator('.queue-row').waitFor({ state: 'visible' });
     await frames(h.page);
     assert.deepEqual(h.errors, []);
     assert.deepEqual(h.unexpected, []);

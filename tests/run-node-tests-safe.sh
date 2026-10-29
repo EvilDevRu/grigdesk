@@ -8,6 +8,56 @@
 # (контракт tests/server|web/test-runner-memory.contract.test.js).
 set -uo pipefail
 
+# Объёмный замер старого API требует отдельного heap, но не повышает лимиты соседей.
+# VERIFY передаёт явный список файлов: разделяем его здесь, сохраняя общий код выхода.
+BENCHMARK_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/server/chat-list-benchmark.test.mjs"
+BENCHMARK_REQUESTED=0
+REGULAR_TEST_COUNT=0
+TEST_MODE=0
+REGULAR_ARGS=()
+BENCHMARK_ARGS=()
+
+for argument in "$@"; do
+  if [[ "$argument" == --test ]]; then
+    TEST_MODE=1
+  fi
+
+  if [[ "$argument" -ef "$BENCHMARK_FILE" ]]; then
+    if (( ! BENCHMARK_REQUESTED )); then
+      BENCHMARK_ARGS+=("$argument")
+    fi
+
+    BENCHMARK_REQUESTED=1
+  elif [[ "$argument" =~ \.test\.(js|mjs|mts|ts)$ && -f "$argument" ]]; then
+    REGULAR_TEST_COUNT=$((REGULAR_TEST_COUNT + 1))
+    REGULAR_ARGS+=("$argument")
+  else
+    REGULAR_ARGS+=("$argument")
+    BENCHMARK_ARGS+=("$argument")
+  fi
+done
+
+if (( TEST_MODE && BENCHMARK_REQUESTED )); then
+  if (( REGULAR_TEST_COUNT > 0 )); then
+    bash "${BASH_SOURCE[0]}" "${REGULAR_ARGS[@]}"
+    REGULAR_STATUS=$?
+
+    NODE_TEST_HEAP_MB=2048 NODE_TEST_MAX_RSS_MB=4096 \
+      bash "${BASH_SOURCE[0]}" "${BENCHMARK_ARGS[@]}"
+    BENCHMARK_STATUS=$?
+
+    if (( REGULAR_STATUS != 0 )); then
+      exit "$REGULAR_STATUS"
+    fi
+
+    exit "$BENCHMARK_STATUS"
+  fi
+
+  export NODE_TEST_HEAP_MB=2048 NODE_TEST_MAX_RSS_MB=4096
+  set -- "${BENCHMARK_ARGS[@]}"
+  echo "node-test-watchdog: отдельный benchmark; heap=2048MB RSS=4096MB" >&2
+fi
+
 HEAP_MB="${NODE_TEST_HEAP_MB:-1024}"
 MAX_RSS_MB="${NODE_TEST_MAX_RSS_MB:-2048}"
 POLL_SECONDS="${NODE_TEST_POLL_SECONDS:-0.25}"

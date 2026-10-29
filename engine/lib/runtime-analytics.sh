@@ -41,6 +41,20 @@ runtime_analytics_json_get_v2() {
   runtime_analytics_python_v2 get "${1:-}" "${2:-}"
 }
 
+# Представляет составную ссылку [маршрут, модель] строгим идентификатором lifecycle.
+# Остальные значения сохраняются для проверки схемой; контракт запуска раннера не меняется.
+runtime_lifecycle_model_id_v2() {
+  jq -nr --arg model "${1-}" '
+    ($model | try fromjson catch null) as $reference
+    | if ($reference | type) == "array"
+        and ($reference | length) == 2
+        and all($reference[]; type == "string")
+      then $reference | join("/")
+      else $model
+      end
+  '
+}
+
 runtime_lifecycle_enabled_v2() {
   [[ -n "${FACTORY_LIFECYCLE_TASK_ID:-}" &&
      -n "${FACTORY_LIFECYCLE_ATTEMPT_ID:-}" &&
@@ -495,6 +509,10 @@ runtime_lifecycle_dispatch_candidate_selected_v2() {
   local details resolved_type=null effort_type=null family_type=null
   runtime_lifecycle_enabled_v2 || return 0
   [[ "$ordinal" =~ ^[0-9]+$ ]] || return 2
+
+  requested=$(runtime_lifecycle_model_id_v2 "$requested") || return
+  resolved=$(runtime_lifecycle_model_id_v2 "$resolved") || return
+
   [[ -n "$resolved" ]] && resolved_type=string
   [[ -n "$effort" ]] && effort_type=string
   [[ -n "$family" ]] && family_type=string
@@ -515,6 +533,10 @@ runtime_lifecycle_dispatch_candidate_skipped_v2() {
   local evidence=${11:-} details resolved_type=null effort_type=null family_type=null evidence_type=null
   runtime_lifecycle_enabled_v2 || return 0
   [[ "$ordinal" =~ ^[0-9]+$ ]] || return 2
+
+  requested=$(runtime_lifecycle_model_id_v2 "$requested") || return
+  resolved=$(runtime_lifecycle_model_id_v2 "$resolved") || return
+
   [[ -n "$resolved" ]] && resolved_type=string
   [[ -n "$effort" ]] && effort_type=string
   [[ -n "$family" ]] && family_type=string
@@ -1040,10 +1062,20 @@ runtime_lifecycle_gate_decided_v2() {
       "$RUNTIME_LIFECYCLE_GATE_SPAN_ID"
 }
 
+# Вмешательство человека связывается с визитом, на котором возникла остановка.
+# Отсутствие визита — отказ контракта с видимой причиной, без записи события lifecycle.
 runtime_lifecycle_human_begin_v2() {
   local reason=$1 evidence=${2:-} at mono boot details evidence_type=null
   runtime_lifecycle_enabled_v2 || return 0
-  [[ -n "${FACTORY_LIFECYCLE_NODE_VISIT_ID:-}" ]] || return 78
+  if [[ -z "${FACTORY_LIFECYCLE_NODE_VISIT_ID:-}" ]]; then
+    if declare -F v2_log >/dev/null; then
+      v2_log "lifecycle: вмешательство человека не открыто — нет визита узла (причина: $reason)"
+    else
+      printf 'lifecycle: вмешательство человека не открыто — нет визита узла (причина: %s)\n' \
+        "$reason" >&2
+    fi
+    return 78
+  fi
   [[ -n "$evidence" ]] && evidence_type=string
   RUNTIME_LIFECYCLE_HUMAN_SPAN_ID=$(runtime_analytics_id_v2 sp \
     "$FACTORY_LIFECYCLE_NODE_VISIT_ID" human-intervention) || return

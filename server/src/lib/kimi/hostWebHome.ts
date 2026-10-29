@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { mcpEnvironmentRecord } from '../mcpEnvironment.ts';
+import type { McpEnvironment } from '../mcpEnvironment.ts';
 import { buildCommandProfile, COMMAND_MCP } from './commandProfile.ts';
 import type { CommandProfile } from './commandProfile.ts';
 
@@ -11,7 +13,7 @@ interface McpSpec {
   name?: string;
   command?: string;
   args?: string[];
-  env?: Record<string, string>;
+  env?: McpEnvironment;
   toolTimeoutMs?: number;
 }
 
@@ -105,11 +107,14 @@ export async function buildKimiHostWebHome(input: {
         continue;
       }
 
+      const env = server.env ? mcpEnvironmentRecord(server.env) : undefined;
+      const omitEnv = Array.isArray(server.env) && server.env.length === 0;
+
       merged[server.name] = {
         command: server.command,
         args: Array.isArray(server.args) ? server.args : [],
         ...(server.toolTimeoutMs ? { toolTimeoutMs: server.toolTimeoutMs } : {}),
-        ...(server.env ? { env: server.env } : {}),
+        ...(env && !omitEnv ? { env } : {}),
       };
     }
 

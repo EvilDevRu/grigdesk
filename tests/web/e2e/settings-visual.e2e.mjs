@@ -415,3 +415,36 @@ test('V14: тексты без внутренних значений и обре
   assert.deepEqual(fixture.errors, []);
   assert.deepEqual(fixture.unexpected, []);
 });
+
+test('V15: вкладки исполнителя помещаются без внутренней прокрутки', async (t) => {
+  const fixture = await openSettings(t);
+
+  await showPage(fixture, 'agents.providers', '[data-provider-page="fixture"][data-ready="true"]');
+
+  for (const width of [1280, 768, 390]) {
+    await fixture.page.setViewportSize({ width, height: 844 });
+
+    const geometry = await fixture.page.locator('[data-ui-settings-tabs]').evaluate((element) => {
+      const tabs = [...element.querySelectorAll('[role="tab"]')];
+
+      return {
+        horizontalOverflow: element.scrollWidth - element.clientWidth,
+        verticalOverflow: element.scrollHeight - element.clientHeight,
+        labelsFit: tabs.every((tab) => tab.scrollHeight <= tab.clientHeight),
+      };
+    });
+
+    assert.deepEqual(geometry, {
+      horizontalOverflow: 0,
+      verticalOverflow: 0,
+      labelsFit: true,
+    }, `Вкладки без переполнения при ширине ${width} px`);
+
+    await fixture.page.screenshot({
+      path: `${fixture.artifacts}/settings-tabs-${width}.png`,
+    });
+  }
+
+  assert.deepEqual(fixture.errors, []);
+  assert.deepEqual(fixture.unexpected, []);
+});

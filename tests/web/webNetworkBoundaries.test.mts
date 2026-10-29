@@ -27,6 +27,10 @@ async function fixture(oldName: string, newName: string, exported: string) {
     async get(url: string) {
       calls.push({ method: 'GET', url });
 
+      if (url.startsWith('/api/grigdesk-tasks/')) {
+        throw new migrationHarness.ApiError('Нет своей задачи', 404, { error: 'grigdesk_task_not_found' });
+      }
+
       return server.reply;
     },
     async post(url: string, body: unknown) {
@@ -272,7 +276,7 @@ test('NET-b24-task', async () => {
   server.reply = { id: '42', title: [] };
   await Promise.resolve(store.load('42', true)).catch(() => {});
   assert.equal(store.details['42'], previous, 'неверный title не кешируется');
-  assert.equal(calls.length, 2);
+  assert.equal(calls.filter((call) => call.url.startsWith('/api/b24/task/')).length, 2);
 });
 
 test('NET-chat', async () => {
@@ -534,8 +538,8 @@ test('NET-chat-pending', async () => {
   const chat = await chatStoreFixture({ sessions: [{ id: 'chat', messages: [] }] });
   const calls: string[] = [];
 
-  apiHarness.get = async (url: string) => {
-    calls.push(`GET ${url}`);
+  apiHarness.post = async (url: string) => {
+    calls.push(`POST ${url}`);
 
     return { pending: 'bad' };
   };
@@ -546,7 +550,7 @@ test('NET-chat-pending', async () => {
   };
   await chat._collectPending();
   assert.deepEqual(chat.sessions[0].messages, []);
-  assert.deepEqual(calls, ['GET /api/chat/pending']);
+  assert.deepEqual(calls, ['POST /api/chat/store/reconcile']);
   chat.$dispose();
 });
 
@@ -612,8 +616,12 @@ test('NET-chat-storage', async (t) => {
 
   chat.loaded = false;
   apiHarness.get = async (url: string) => {
-    if (url === '/api/chat/store') {
-      return { sessions: [], archived: [] };
+    if (url === '/api/chat/store/list') {
+      return {
+        listProtocol: 1,
+        sessions: [],
+        archived: [],
+      };
     }
 
     return {

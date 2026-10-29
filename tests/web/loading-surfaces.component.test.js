@@ -183,7 +183,7 @@ for (const area of ['description', 'comments']) {
         assert.equal(h.wrapper.findAll('[data-role="task-comment"]').length, 1);
 
         if (area === 'comments') {
-            assert.equal(h.wrapper.get('[data-role="task-comment"]').element, composer);
+            assert.equal(h.wrapper.get('[data-role="task-comment"]').element === composer, true);
         }
 
         assert.ok(pendingBricks > 0, `${area}: свой каркас заменяет первое ожидание`);
@@ -291,7 +291,7 @@ for (const view of ['inbox', 'github']) {
         await h.settle();
         assert.equal(h.wrapper.find('[role="alert"]').exists(), false);
         assert.equal(h.wrapper.find('[data-ui-loading]').exists(), false);
-        assert.equal(h.wrapper.get('h1').element, header);
+        assert.equal(h.wrapper.get('h1').element === header, true);
         assert.equal(h.wrapper.find(view === 'inbox' ? '.channels-disclosure' : '.grid').exists(), true);
         assert.ok(pendingBricks > 0, `${view}: первое чтение показывает свой каркас`);
     });
@@ -517,10 +517,10 @@ for (const outcome of ['ready', 'error']) {
     t.after(() => delete globalThis.__loadingPluginModule);
 
     const component = await compileVue(webFile('src/views/ext/PluginModulePanel.vue'), { stubs: {
-      '../../stores/plugins.ts': 'export const usePluginsStore = () => ({});',
-      '../../pluginRuntime/loader.ts': `export const loadPluginModule = () =>
-        globalThis.__loadingPluginModule.promise;`,
-      '../../pluginRuntime/context.ts': 'export const createPluginContext = async () => ({});',
+      '../../pluginRuntime/bootstrap.ts': `export const pluginRuntimeFor = () => ({
+        acquirePanel: () => globalThis.__loadingPluginModule.promise,
+      });`,
+      '../../pluginRuntime/styles.ts': 'export const loadPluginStyles = async () => () => {};',
     } });
     const wrapper = mount(component, { props: {
       pluginId: 'fixture',
@@ -534,8 +534,12 @@ for (const outcome of ['ready', 'error']) {
     const announced = wrapper.find('[role="status"]').text();
 
     if (outcome === 'ready') {
-      pending.resolve({ component: { template: '<article data-plugin-ready>Готовый модуль</article>' },
-        releaseStyles() {} });
+      pending.resolve({
+        component: { template: '<article data-plugin-ready>Готовый модуль</article>' },
+        context: {},
+        release() {},
+        setActive() {},
+      });
     } else {
       pending.reject(new Error('Синтетический отказ модуля'));
     }
@@ -629,7 +633,7 @@ test('LOAD-SURFACE-settings-fallback: незагруженный раздел о
   assert.match(wrapper.get('[role="status"]').text(), /Раздел загружается/);
   pages['automation.chats'] = { render: () => null };
   await wrapper.vm.$nextTick();
-  assert.equal(wrapper.get('#settings-page-title').element, title);
+  assert.equal(wrapper.get('#settings-page-title').element === title, true);
   assert.equal(wrapper.find('[data-ui-loading]').exists(), false);
   assert.ok(bricks > 0, 'fallback содержит общую форму из UiSkeleton');
 });

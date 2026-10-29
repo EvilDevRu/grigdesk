@@ -294,7 +294,7 @@ async function clean(): Promise<void> {
 
 .docker-cleanup__head h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -316,8 +316,6 @@ async function clean(): Promise<void> {
 .docker-cleanup__empty {
   margin: 0;
   padding: 24px 16px;
-  border: 1px dashed var(--line-2);
-  border-radius: var(--radius);
   color: var(--ink-mid);
   font-size: 13px;
   line-height: 1.5;
@@ -326,16 +324,13 @@ async function clean(): Promise<void> {
 
 .docker-usage {
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
   border-spacing: 0;
-  background: var(--surface);
   overflow: hidden;
 }
 
 .docker-usage th {
-  padding: 12px;
-  background: var(--surface-2);
+  padding: 8px;
+  background: transparent;
   color: var(--ink-mid);
   font-size: 12px;
   font-weight: 500;
@@ -343,7 +338,7 @@ async function clean(): Promise<void> {
 }
 
 .docker-usage td {
-  padding: 14px 12px;
+  padding: 10px 8px;
   border-top: 1px solid var(--line);
   vertical-align: middle;
 }
@@ -411,11 +406,9 @@ async function clean(): Promise<void> {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  gap: 12px;
 }
 
 .docker-cleanup__summary {
@@ -455,7 +448,7 @@ async function clean(): Promise<void> {
   .docker-usage tbody tr {
     display: grid;
     grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr);
-    padding: 14px 12px;
+    padding: 10px 8px;
     border-top: 1px solid var(--line);
     gap: 12px;
   }

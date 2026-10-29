@@ -6,6 +6,7 @@
     "web/src/pluginRuntime",
     "web/src/features/settings",
     "web/src/shared/layout/AppShell.vue",
+    "web/src/shared/layout/DesktopWindowControls.vue",
     "web/src/shared/layout/ToolsGrid.vue",
     "web/src/shared/layout/ToolDock.vue",
     "web/src/shared/layout/ToolHost.vue",
@@ -380,6 +381,14 @@
     ]
   },
   "dynamicExpressions": {
+    "web/src/stores/providers.ts": {
+      "mode.labelKey": [
+        "core.agentModeAsk", "core.agentModeAuto", "core.agentModeReadOnly"
+      ],
+      "mode.hintKey": [
+        "core.agentModeAskHint", "core.agentModeAutoHint", "core.agentModeReadOnlyHint"
+      ]
+    },
     "web/src/features/settings/catalog.ts": {
       "GROUP_MESSAGES[group.id]!.label!": [
         "settings.*"

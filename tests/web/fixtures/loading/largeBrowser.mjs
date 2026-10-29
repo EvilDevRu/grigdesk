@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import ts from '../../../../web/node_modules/typescript/lib/typescript.js';
 import { startLoadingBrowser } from './browser.mjs';
@@ -8,7 +9,8 @@ import { startLoadingBrowser } from './browser.mjs';
  * AppShell сохраняет настоящую геометрию; дочерние сетевые виджеты не открывают ресурсы.
  */
 export async function startLargeBrowser(t) {
-  const ports = JSON.stringify(path.resolve('tests/web/fixtures/loading/largePorts.mjs'));
+  const root = fileURLToPath(new URL('../../../../', import.meta.url));
+  const ports = JSON.stringify(path.join(root, 'tests/web/fixtures/loading/largePorts.mjs'));
   const empty = 'export default { render: () => null };';
   const mocks = {
     'features/speech/provider.ts': `import { h } from 'vue';
@@ -40,7 +42,7 @@ export async function startLargeBrowser(t) {
     'stores/settings.ts': `export { passive as useSettingsStore } from ${ports};`,
     'stores/videoSession.ts': `export { passive as useVideoSessionStore } from ${ports};`,
   };
-  const appShell = await readFile('web/src/shared/layout/AppShell.vue', 'utf8');
+  const appShell = await readFile(path.join(root, 'web/src/shared/layout/AppShell.vue'), 'utf8');
   const shellScript = appShell.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
   const shellAst = ts.createSourceFile('AppShell.ts', shellScript, ts.ScriptTarget.Latest, true);
 
@@ -67,6 +69,8 @@ export async function startLargeBrowser(t) {
     mocks[`stores/${file}.ts`] = `export { passive as ${name} } from ${ports};`;
   }
 
+  mocks['stores/providerInstall.ts'] += '\nexport const providerInstallVisibleWarnings = () => [];';
+
   mocks['stores/studio3d.ts'] = `export { passive as useStudio3dStore } from ${ports};`;
   mocks['stores/providers.ts'] = `export const useProvidersStore = () => ({
     providers: [], load() {}, loadUsage() {}, noteUsageConnection() {}, usage: {},
@@ -78,7 +82,7 @@ export async function startLargeBrowser(t) {
   mocks['actions/inbox'] = `export { passive as useInboxStore } from ${ports};
     export const startInboxSummary = () => {}; export const stopInboxSummary = () => {};`;
 
-  const raw = await readFile('web/src/App.vue', 'utf8');
+  const raw = await readFile(path.join(root, 'web/src/App.vue'), 'utf8');
   const script = raw.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
   const ast = ts.createSourceFile('App.ts', script, ts.ScriptTarget.Latest, true);
 
@@ -98,6 +102,11 @@ export async function startLargeBrowser(t) {
     additionalMocks: mocks,
     entry: 'large.html',
     replies: {
+      '/api/grigdesk-tasks': {
+        revision: 1,
+        b24Configured: true,
+        tasks: [],
+      },
       '/api/tasks': { tasks: [{
         task: 42,
         profile: 'fixture',

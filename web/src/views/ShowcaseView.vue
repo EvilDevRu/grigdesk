@@ -293,7 +293,7 @@ const openedTargetUrl = computed(() => {
     target.ref.kind === opened.ref.kind && target.ref.id === opened.ref.id
   ));
 
-  return option ? sandboxUrl(option.viewPort) : null;
+  return option ? sandboxUrl(option.viewPort, option.serviceHost) : null;
 });
 
 let stopWatching: (() => void) | null = null;

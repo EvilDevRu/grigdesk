@@ -670,6 +670,38 @@ export class B24Client {
     }
 
     /**
+     * Проверка номера допускает только доказанное отсутствие задачи.
+     * Ошибка сети, доступа или незнакомое тело не делают номер свободным.
+     */
+    async probeTaskNumber(taskId: string): Promise<'exists' | 'absent' | 'unknown'> {
+        try {
+            const result = await this.apiGet2(
+                '/local/ajax/dashboard.php',
+                `action=getTaskDetails&taskId=${encodeURIComponent(taskId)}`,
+            );
+
+            // Портал отвечает сообщением из своей локали: кроме русского «Задача не
+            // найдена» и кода TASK_NOT_FOUND встречается английское «Task not found».
+            // Сравнение — по нормализованной строке, но строгое равенство: «Задача не
+            // найдена или нет доступа» остаётся unknown (номер не становится свободным).
+            const notFoundError = String(result.error).trim().toLowerCase();
+            const notFoundVariants = ['задача не найдена', 'task not found', 'task_not_found'];
+
+            if (result.success === false && notFoundVariants.includes(notFoundError)) {
+                return 'absent';
+            }
+
+            if (result.success === true && String(nested(result, 'data').id) === taskId) {
+                return 'exists';
+            }
+
+            return 'unknown';
+        } catch {
+            return 'unknown';
+        }
+    }
+
+    /**
      * Полные детали задачи (getTaskDetails).
      */
     async taskDetails(taskId: unknown): Promise<Payload> {
