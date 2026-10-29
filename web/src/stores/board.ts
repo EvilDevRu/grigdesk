@@ -2,6 +2,7 @@
 // обновление идёт в фоне + периодический поллинг (не тормозит навигацию).
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
+import { measureChatPerformance } from '../shared/chatPerformance.ts';
 import { boardActivity, boardTaskIds } from '../shared/boardActivity.ts';
 import { useTaskSeenStore } from './taskSeen.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
@@ -58,19 +59,29 @@ export const useBoardStore = defineStore('board', {
       this.loading = true;
 
       try {
-        const dashboard = decodeBoardDashboard(await api.get('/api/b24/dashboard', {
+        const raw = await api.get('/api/b24/dashboard', {
           signal: controller.signal,
           retry: false,
-        }));
+        });
+        const accepted = measureChatPerformance('board.apply', () => {
+          const dashboard = decodeBoardDashboard(raw);
 
-        if (controller.signal.aborted || readAt <= this.readAt) {
+          if (controller.signal.aborted || readAt <= this.readAt) {
+            return false;
+          }
+
+          this.data = dashboard;
+          this.loadedAt = Date.now();
+          this.readAt = readAt;
+          this.error = null;
+
+          return true;
+        });
+
+        if (!accepted) {
           return;
         }
 
-        this.data = dashboard;
-        this.loadedAt = Date.now();
-        this.readAt = readAt;
-        this.error = null;
         await this.markBaselineSeen();
 
         return readAt;

@@ -7,6 +7,7 @@ import { messageRef, t } from '../ui.ts';
 // окон/устройств и переживает чистку браузера. Это единый источник истории для
 // полноразмерной страницы «Чаты» и Telegram-пульта.
 import { defineStore } from 'pinia';
+import { measureChatPerformance, startChatPerformance } from '../shared/chatPerformance.ts';
 import { toRaw } from 'vue';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
@@ -908,11 +909,16 @@ function stripSteps(chat: ChatHistorySnapshot) {
  * копию тех же строк в карте `sentChats`.
  */
 function fingerprintOf(chat: ChatHistorySnapshot) {
+  const finish = startChatPerformance('chat.fingerprint', () => ({ messages: chat.messages?.length || 0 }));
   const messages = (chat.messages || []).map((m) => (Array.isArray(m.steps) && m.steps.length
     ? { ...m, steps: m.steps.length }
     : m));
 
-  return JSON.stringify({ ...chat, messages });
+  const result = JSON.stringify({ ...chat, messages });
+
+  finish();
+
+  return result;
 }
 
 
@@ -1108,6 +1114,10 @@ function writeSnapshot(payload: Record<string, unknown> & { sessions: ChatHistor
     sessions: Array<{ snapshot: { value: string } }>;
     archived: Array<{ snapshot: { value: string } }>;
   }) {
+  const finish = startChatPerformance('chat.snapshot', () => ({
+    chats: projections.sessions.length + projections.archived.length,
+    chars: [...sessions, ...archived].reduce((sum, json) => sum + json.length, 0),
+  }));
   const sessions = projections.sessions.map((entry) => entry.snapshot.value);
   const archived = projections.archived.map((entry) => entry.snapshot.value);
 
@@ -1128,6 +1138,8 @@ function writeSnapshot(payload: Record<string, unknown> & { sessions: ChatHistor
       // localStorage недоступен — работаем без страховки.
     }
   }
+
+  finish();
 }
 
 
@@ -1253,6 +1265,8 @@ export const useChatStore = defineStore('chat', {
     // режим архива — только архивные. Без запроса показываем сниппет последнего
     // сообщения; с запросом фильтруем по названию и тексту переписки.
     list(s): (q: string, showArchived?: boolean) => ChatListRow[] { return (q, showArchived = false) => {
+      const finish = startChatPerformance('chat.list', () => ({ chats: source.length }));
+
       historyPersistenceFor(this);
 
       let previews = previewCaches.get(toRaw(this));
@@ -1335,6 +1349,8 @@ export const useChatStore = defineStore('chat', {
       });
       // Ждущие ответа — наверх: пока не ответишь, работа в них стоит.
       out.sort((a, b) => (Number(b.waiting) - Number(a.waiting)) || (b.ts - a.ts));
+
+      finish();
 
       return out;
     }; },
@@ -1914,7 +1930,8 @@ export const useChatStore = defineStore('chat', {
       }
 
       const previous = session.messages || [];
-      const messages = materializeInTurnMessages(previous, run);
+      const messages = measureChatPerformance('chat.materialize',
+        () => materializeInTurnMessages(previous, run), () => ({ messages: previous.length }));
 
       if (messages === previous) {
         return;
@@ -2580,6 +2597,9 @@ export const useChatStore = defineStore('chat', {
           return;
         }
 
+        const finish = startChatPerformance('chat.persist', () => ({
+          chats: this.sessions.length + (this.archived?.length || 0),
+        }));
         const state = historyPersistenceFor(this);
 
         const cache = persistenceProjections.get(toRaw(this))!;
@@ -2702,6 +2722,8 @@ export const useChatStore = defineStore('chat', {
           }));
         }
         if (!jobs.length) {
+          finish();
+
           return;
         }
 
@@ -2726,6 +2748,8 @@ export const useChatStore = defineStore('chat', {
             retryTimer = setTimeout(write, retryDelay);
             this._saveFailed(true, e?.message || '');
           });
+
+        finish();
       };
 
       if (flush) {
@@ -2874,7 +2898,9 @@ export const useChatStore = defineStore('chat', {
 
       const archived = (this.archived || []).some((item) => item.id === id);
       const state = historyPersistenceFor(this);
-      const snapshot = captureChatHistorySnapshot(archived ? archivedSlimOf(live) : slimOf(live));
+      const snapshot = measureChatPerformance('chat.put.prepare', () => (
+        captureChatHistorySnapshot(archived ? archivedSlimOf(live) : slimOf(live))
+      ), () => ({ messages: live.messages?.length || 0, steps: live.steps?.length || 0 }));
 
       if (live.revision && !normalizeChatWorkdir(snapshot.workdir)) {
         delete snapshot.workdir;

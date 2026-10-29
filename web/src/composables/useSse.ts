@@ -6,6 +6,7 @@
 // навсегда — выглядело как «GrigDesk завис», хотя сервер отвечал за миллисекунды.
 import { ref, onMounted, onUnmounted } from 'vue';
 import { api } from '../shared/apiClient.ts';
+import { measureChatPerformance, startChatPerformance } from '../shared/chatPerformance.ts';
 import type { RelayChannel } from '../shared/windowRelay.ts';
 
 // Все именованные события сервера — новые добавлять сюда (иначе подписчик их не увидит).
@@ -216,6 +217,8 @@ function closeRelay(): void {
  * hello обновляет метку запуска сервера для журнала окна в обоих режимах.
  */
 function deliver(name: SseEventName, data: unknown): void {
+  const finish = startChatPerformance('sse.dispatch');
+
   if (name === 'hello') {
     const hello = data && typeof data === 'object' ? (data as { bootId?: unknown }) : {};
     const value =
@@ -235,6 +238,8 @@ function deliver(name: SseEventName, data: unknown): void {
       /* один сломанный подписчик не мешает остальным */
     }
   }
+
+  finish();
 }
 
 /**
@@ -344,7 +349,8 @@ function ensure(): void {
       let data: unknown = null;
 
       try {
-        data = JSON.parse(e.data);
+        data = measureChatPerformance('sse.decode', () => JSON.parse(e.data),
+          () => ({ chars: e.data.length }));
       } catch {
         /* событие без тела */
       }

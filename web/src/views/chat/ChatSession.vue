@@ -676,6 +676,7 @@ import type { ProviderEntry, ProviderModelEntry } from '../../../../shared/chat/
 
 import { useDictationController } from '../../features/speech/provider.ts';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.ts';
+import { startChatPerformance } from '../../shared/chatPerformance.ts';
 import { contextFill } from '../../../../shared/chat/chatContext.ts';
 import { writeClipboardText } from '../../shared/clipboard.ts';
 import { useTasksStore } from '../../stores/tasks.ts';
@@ -1667,7 +1668,10 @@ const body = ref<HTMLElement | null>(null);
 
 function scrollDown() {
   if (body.value) {
+    const finish = startChatPerformance('chat.scroll');
+
     body.value.scrollTop = body.value.scrollHeight;
+    finish();
   }
 }
 

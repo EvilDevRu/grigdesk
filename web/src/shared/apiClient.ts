@@ -1,4 +1,5 @@
 import { delayWithAbort } from '../../../shared/lib/delay.ts';
+import { startChatPerformance } from './chatPerformance.ts';
 import { acquireB24Read, b24ReadRoute, shouldLogB24Failure } from './b24ReadBackoff.ts';
 
 // Единый клиент к серверу GrigDesk.
@@ -109,12 +110,24 @@ function failureMessage(data: unknown, status: number): string {
 }
 
 /**
+ * Диагностика разделяет разбор каталога исполнителей, чатов и остальных JSON-ответов.
+ * В журнал попадают только закрытое имя операции и число символов, без пути и тела.
+ */
+function startResponseParse(path: string, chars: number): () => void {
+  const operation = path.startsWith('/api/chat/store/') ? 'chat.load.parse'
+    : path.split(/[?#]/u, 1)[0] === '/api/providers' ? 'providers.parse' : 'api.parse';
+
+  return startChatPerformance(operation, () => ({ chars }));
+}
+
+/**
  * Разбор ответа + единая обработка 401. Пути входа исключаем: там 401 — это «неверный
  * пароль», а не «сессия истекла», и сбрасывать состояние по нему нельзя.
  */
 async function handle(res: Response, path: string): Promise<unknown> {
   const text = await res.text();
   let data: unknown = null;
+  const finish = startResponseParse(path, text.length);
 
   try {
     data = text ? JSON.parse(text) : null;
@@ -122,6 +135,8 @@ async function handle(res: Response, path: string): Promise<unknown> {
     if (res.ok) {
       throw error;
     }
+  } finally {
+    finish();
   }
 
   return handleData(res, path, data);
@@ -343,6 +358,7 @@ async function requestWhileReceiving(
     }
 
     let data: unknown = null;
+    const finish = startResponseParse(path, text.length);
 
     try {
       data = text ? JSON.parse(text) : null;
@@ -350,6 +366,8 @@ async function requestWhileReceiving(
       if (res.ok) {
         throw error;
       }
+    } finally {
+      finish();
     }
 
     return handleData(res, path, data);
@@ -381,17 +399,26 @@ async function request(
 
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
-    opts.body = JSON.stringify(body);
 
-    // Chromium синхронно копирует большое строковое тело при fetch; Blob передаёт готовые байты.
-    // JSON фиксируется до ожидания сети, а сервер получает прежнее UTF-8 тело с тем же Content-Type.
     const chatHistoryPut = method === 'PUT' && [
       '/api/chat/store/chat',
       '/api/chat/store/chat/step-reuse',
     ].includes(path.split(/[?#]/u, 1)[0] ?? '');
+    const finishEncode = chatHistoryPut ? startChatPerformance('chat.put.encode', () => ({
+      chars: typeof opts.body === 'string' ? opts.body.length : 0,
+    })) : null;
 
+    opts.body = JSON.stringify(body);
+    finishEncode?.();
+
+    // Chromium синхронно копирует большое строковое тело при fetch; Blob передаёт готовые байты.
+    // JSON фиксируется до ожидания сети, а сервер получает прежнее UTF-8 тело с тем же Content-Type.
     if (chatHistoryPut && typeof opts.body === 'string') {
+      const chars = opts.body.length;
+      const finishBlob = startChatPerformance('chat.put.blob', () => ({ chars }));
+
       opts.body = new Blob([opts.body], { type: 'application/json' });
+      finishBlob();
     }
   }
 

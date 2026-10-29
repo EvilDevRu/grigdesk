@@ -2,6 +2,7 @@
 // По умолчанию raw HTML показывается текстом. Только read-only viewer документов может
 // включить allowHtml: тогда итог всё равно проходит строгий allowlist перед v-html.
 import { marked, Renderer } from 'marked';
+import { measureChatPerformance, startChatPerformance } from './chatPerformance.ts';
 import type { Token, Tokens } from 'marked';
 
 // Расширение ссылок вызывающим кодом. Строгий `false` — вердикт «ведёт в никуда»:
@@ -238,7 +239,8 @@ const MARKDOWN_OPTIONS = {
  * Готовые токены можно передавать рендереру частями без повторного разбора текста.
  */
 export function lexMarkdown(src: unknown): Token[] {
-  return marked.lexer(String(src || ''), MARKDOWN_OPTIONS);
+  return measureChatPerformance('markdown.lex', () => marked.lexer(String(src || ''), MARKDOWN_OPTIONS),
+    () => ({ chars: typeof src === 'string' ? src.length : 0 }));
 }
 
 /**
@@ -246,6 +248,7 @@ export function lexMarkdown(src: unknown): Token[] {
  * Raw HTML включается только явно и только при наличии документа для санитизации.
  */
 export function mdTokensToHtml(tokens: Token[], options: MarkdownOptions = {}): string {
+  const finish = startChatPerformance('markdown.render');
   const sanitizerDocument = options.sanitizerDocument || globalThis.document;
   const allowHtml = !!options.allowHtml && !!sanitizerDocument?.createElement;
   const html = marked.parser(tokens, {
@@ -254,7 +257,11 @@ export function mdTokensToHtml(tokens: Token[], options: MarkdownOptions = {}): 
     async: false,
   });
 
-  return allowHtml ? sanitizeRenderedHtml(html, options) : html;
+  const result = allowHtml ? sanitizeRenderedHtml(html, options) : html;
+
+  finish();
+
+  return result;
 }
 
 /**

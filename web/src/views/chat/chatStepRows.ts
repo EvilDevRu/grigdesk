@@ -1,4 +1,5 @@
 import type { ChatStep } from '../../shared/chatContracts.ts';
+import { startChatPerformance } from '../../shared/chatPerformance.ts';
 
 export interface StepRow extends ChatStep {
   rowKey: string;
@@ -40,6 +41,7 @@ export function foldChatSteps(
   steps: ChatStep[],
   displayed = new Set<string | undefined>(),
 ): StepRow[] {
+  const finish = startChatPerformance('chat.steps.fold', () => ({ steps: steps.length }));
   const out: StepRow[] = [];
   const byId = new Map<string, StepRow>();
 
@@ -90,6 +92,8 @@ export function foldChatSteps(
     }
   }
 
+  finish();
+
   return out;
 }
 
@@ -98,6 +102,7 @@ export function foldChatSteps(
  * Без видимого родителя строка остаётся на месте, а защита от циклов не даёт потерять шаги.
  */
 export function nestChatStepRows(rows: StepRow[]): StepRow[] {
+  const finish = startChatPerformance('chat.steps.nest', () => ({ steps: rows.length }));
   const tools = new Map(rows.filter((row) => row.k === 'tool' && row.id)
     .map((row) => [row.id, row]));
   const children = new Map<StepRow, StepRow[]>();
@@ -143,6 +148,8 @@ export function nestChatStepRows(rows: StepRow[]): StepRow[] {
   for (const row of rows) {
     append(row);
   }
+
+  finish();
 
   return out;
 }
