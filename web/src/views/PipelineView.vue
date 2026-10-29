@@ -1,6 +1,57 @@
 <template>
   <div class="pipeline">
     <div class="toolbar">
+      <div class="pipeline-run-controls" role="group" :aria-label="translate('core.pipelineRunControls')">
+        <UiPopover
+          v-for="action in bulkActions"
+          :key="action.id"
+          has-popup="menu"
+          placement="bottom-start"
+          :aria-label="translate(action.label)"
+          :style="{ width: 'min(300px, calc(100vw - 20px))' }"
+        >
+          <template #trigger>
+            <UiIconButton
+              :data-option="action.id"
+              data-context="pipeline-view"
+              variant="ghost"
+              :label="translate(action.label)"
+              v-tooltip="translate(action.label)"
+              :loading="bulkBusy === action.id"
+              :loading-label="translate(action.loading)"
+              :disabled="!loaded || !!error || bulkBusy !== null"
+            >
+              <svg class="toolbar-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path v-if="action.id === 'resume'" d="m8 5 11 7-11 7Z" />
+                <rect v-else x="6" y="6" width="12" height="12" rx="1" />
+              </svg>
+            </UiIconButton>
+          </template>
+
+          <template #default="{ close }">
+            <div class="pipeline-run-menu">
+              <UiButton
+                v-for="scope in bulkScopes"
+                :key="scope"
+                :data-bulk-action="action.id"
+                :data-bulk-scope="scope"
+                role="menuitem"
+                block
+                variant="ghost"
+                :disabled="bulkBusy !== null || !bulkCandidates(action.id, scope).length"
+                @click="close('action'); runBulkAction(action.id, scope)"
+              >
+                <span class="pipeline-run-option">
+                  <span>{{ translate(action[scope]) }}</span>
+                  <b class="mono">{{ bulkCandidates(action.id, scope).length }}</b>
+                </span>
+              </UiButton>
+            </div>
+          </template>
+        </UiPopover>
+        <span class="pipeline-run-separator" aria-hidden="true"></span>
+      </div>
+
       <!-- Проекты — главный уровень панели. Натуральные ширины кнопок измеряются в
            невидимом ряду; непоместившийся хвост уезжает в список справа. -->
       <div
@@ -1036,6 +1087,9 @@ import type {
 import type { BoardTask } from '../shared/boardContracts.ts';
 
 type TaskId = string | number;
+type BulkAction = 'resume' | 'stop';
+type BulkScope = 'all' | 'project';
+
 interface Stage {
   task: TaskId;
   id: string;
@@ -2902,6 +2956,91 @@ function canStop(t: PipelineViewTask) {
   return !t.readOnly && t.daemonAlive;
 }
 
+const bulkScopes = ['all', 'project'] as const;
+const bulkActions = [
+  {
+    id: 'resume',
+    label: 'core.startPipelines',
+    loading: 'core.startingPipelines',
+    all: 'core.startAllPipelines',
+    project: 'core.startTabPipelines',
+  },
+  {
+    id: 'stop',
+    label: 'core.stopPipelines',
+    loading: 'core.stoppingPipelines',
+    all: 'core.stopAllPipelines',
+    project: 'core.stopTabPipelines',
+  },
+] as const;
+const bulkBusy = ref<BulkAction | null>(null);
+
+/**
+ * Область команды берётся из вкладки проекта, независимо от фильтра состояния.
+ * Общие гейты карточек исключают историю, завершённые и уже занятые прогоны.
+ */
+function bulkCandidates(action: BulkAction, scope: BulkScope) {
+  const source = scope === 'all' ? tasks.value : projectTasks.value;
+  const eligible = action === 'resume' ? canResume : canStop;
+
+  return source.filter((task) => eligible(task) && !sandboxBusy.value.has(task.task));
+}
+
+/**
+ * Фиксирует выбранные задачи до первого запроса и блокирует повторные команды.
+ * Отказ одной задачи не мешает остальным; итоговый снимок перечитывается один раз.
+ */
+async function runBulkAction(action: BulkAction, scope: BulkScope) {
+  if (bulkBusy.value !== null || !loaded.value || error.value) {
+    return;
+  }
+
+  const selected = bulkCandidates(action, scope);
+
+  if (!selected.length) {
+    return;
+  }
+
+  const failures: string[] = [];
+  const eligible = action === 'resume' ? canResume : canStop;
+
+  bulkBusy.value = action;
+  sandboxBusy.value = new Set([...sandboxBusy.value, ...selected.map((task) => task.task)]);
+
+  try {
+    for (const selectedTask of selected) {
+      const task = tasks.value.find((item) => item.task === selectedTask.task);
+
+      if (!task || task.attempt !== selectedTask.attempt || !eligible(task)) {
+        continue;
+      }
+
+      try {
+        const body = action === 'resume' ? { attempt: task.attempt, profile: task.profile } : undefined;
+
+        await api.post(`/api/tasks/${task.task}/${action}`, body);
+      } catch (e) {
+        failures.push(`#${task.task}: ${errorMessage(e, '')}`);
+      }
+    }
+
+    await load();
+  } finally {
+    const busy = new Set(sandboxBusy.value);
+
+    for (const task of selected) {
+      busy.delete(task.task);
+    }
+
+    sandboxBusy.value = busy;
+    bulkBusy.value = null;
+  }
+
+  if (failures.length) {
+    await alertDialog(translate('core.pipelineBulkFailures', { failures: failures.join('\n') }));
+  }
+}
+
 
 /**
  * Останавливает работающий прогон после подтверждения человека.
@@ -3102,7 +3241,7 @@ function cardState(g: PipelineViewGraph) {
   top: calc(var(--pipeline-content-gutter) * -1);
   z-index: 30;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   min-height: calc(var(--toolbar-control-h) + 8px);
@@ -3112,6 +3251,34 @@ function cardState(g: PipelineViewGraph) {
   padding: 3px var(--pipeline-content-gutter) 4px;
   border-bottom: 1px solid var(--line);
   background: var(--topbar);
+}
+
+.pipeline-run-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pipeline-run-separator {
+  flex: none;
+  width: 1px;
+  height: 12px;
+  margin-left: 8px;
+  background: var(--line-2);
+}
+
+.pipeline-run-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pipeline-run-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
 }
 
 .status-filter-copy {

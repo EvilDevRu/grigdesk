@@ -2,6 +2,10 @@ import { compileVue, webFile } from './compile-vue.js';
 
 const VIEW_PATH = webFile('src/views/PipelineView.vue');
 
+/**
+ * Сохраняет настоящие controls, заменяя только внешние диалоги тестовыми ответами.
+ * Перевод и подсказки используют те же сервисы, что рабочий интерфейс.
+ */
 function uiFacadeStub(prefix) {
   const componentImports = [
     ['UiButton', 'src/components/primitives/UiButton.vue'],

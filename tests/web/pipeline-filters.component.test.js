@@ -44,7 +44,17 @@ const FIXTURE = [
   { task: 900028, profile: 'beta', daemonAlive: true, result: null, graph: graphOf() },
 ];
 
-async function mountPipeline(t, { project = 'all', status = 'all' } = {}) {
+/**
+ * Монтирует настоящий экран с управляемыми снимками и ответами команд.
+ * Каждая проверка получает отдельный DOM и очищает границы после завершения.
+ */
+async function mountPipeline(t, {
+  project = 'all',
+  status = 'all',
+  fixtures = FIXTURE,
+  post = async () => ({ ok: true }),
+  onGet = () => {},
+} = {}) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
   for (const [key, value] of Object.entries({
@@ -76,22 +86,28 @@ async function mountPipeline(t, { project = 'all', status = 'all' } = {}) {
   globalThis.__pipelineFiltersConfirmDialog = async () => true;
   globalThis.__pipelineFiltersAlertDialog = async () => {};
   globalThis.__pipelineFiltersApi = {
+    /**
+     * Возвращает согласованные список и графы из фикстуры текущей проверки.
+     * Наблюдатель считает перечитывания без доступа к состоянию компонента.
+     */
     async get(url) {
+      onGet(url);
+
       if (url === '/api/tasks') {
         return {
           silenceWindow: 0,
-          tasks: FIXTURE.map(({ graph, ...task }) => ({ ...task, readOnly: false })),
+          tasks: fixtures.map(({ graph, ...task }) => ({ readOnly: false, ...task })),
         };
       }
 
       const graphMatch = /^\/api\/tasks\/(\d+)\/graph$/.exec(url);
       if (graphMatch) {
-        return FIXTURE.find((task) => String(task.task) === graphMatch[1]).graph;
+        return fixtures.find((task) => String(task.task) === graphMatch[1]).graph;
       }
 
       return { runners: [] };
     },
-    async post() { return { ok: true }; },
+    post,
   };
   globalThis.__pipelineFiltersFactoryGraph = {
     name: 'FactoryGraph',
@@ -186,9 +202,10 @@ test('проекты занимают свободный левый участо
     'utf8',
   );
 
-  assert.equal(groups.length, 2);
-  assert.equal(groups[0], 'project-strip');
-  assert.equal(groups[1], 'toolbar-secondary');
+  assert.equal(groups.length, 3);
+  assert.equal(groups[0], 'pipeline-run-controls');
+  assert.equal(groups[1], 'project-strip');
+  assert.equal(groups[2], 'toolbar-secondary');
   assert.equal(toolbar.find('.secondary-status-filters').exists(), true);
   assert.deepEqual(options.map((button) => button.attributes('data-option')), ['loops', 'compact']);
   assert.ok(options.every((button) => button.attributes('data-variant') === 'ghost'));
@@ -196,7 +213,7 @@ test('проекты занимают свободный левый участо
   assert.ok(options.every((button) => button.text().trim() === ''));
   assert.match(
     style,
-    /\.toolbar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto;/su,
+    /\.toolbar\s*\{[^}]*grid-template-columns:\s*auto minmax\(0, 1fr\) auto;/su,
   );
   assert.match(
     style,
@@ -315,4 +332,271 @@ test('каждому тону чипа отвечает своё правило 
       `нет правила точки для тона ${tone}`,
     );
   }
+});
+
+const BULK_FIXTURE = [
+  {
+    task: 1101,
+    profile: 'alpha',
+    attempt: 'one',
+    daemonAlive: false,
+  },
+  {
+    task: 1102,
+    profile: 'beta',
+    attempt: 'two',
+    daemonAlive: false,
+    result: 'stopped-human',
+  },
+  {
+    task: 1103,
+    profile: 'alpha',
+    attempt: 'three',
+    daemonAlive: true,
+  },
+  {
+    task: 1104,
+    profile: 'beta',
+    attempt: 'four',
+    daemonAlive: true,
+  },
+  {
+    task: 1105,
+    profile: 'alpha',
+    attempt: 'five',
+    daemonAlive: false,
+    result: 'completed',
+  },
+  {
+    task: 1106,
+    profile: 'alpha',
+    attempt: 'six',
+    daemonAlive: false,
+    result: 'abandoned',
+  },
+  {
+    task: 1107,
+    profile: 'alpha',
+    daemonAlive: false,
+  },
+  {
+    task: 1108,
+    profile: 'alpha',
+    attempt: 'eight',
+    daemonAlive: false,
+    readOnly: true,
+  },
+  {
+    task: 1109,
+    profile: 'beta',
+    attempt: 'nine',
+    daemonAlive: true,
+    readOnly: true,
+  },
+  {
+    task: 1110,
+    profile: 'alpha',
+    attempt: 'ten',
+    daemonAlive: false,
+    result: 'failed',
+  },
+].map((task) => ({ ...task, graph: graphOf() }));
+
+async function chooseBulk(wrapper, action, scope) {
+  await wrapper.get(`.pipeline-run-controls [data-option="${action}"]`).trigger('click');
+  await wrapper.get(`[data-bulk-action="${action}"][data-bulk-scope="${scope}"]`).trigger('click');
+}
+
+test('Плей и Стоп стоят перед вкладками, за ними разделитель; нажатие открывает меню', async (t) => {
+  const calls = [];
+  const { wrapper } = await mountPipeline(t, {
+    fixtures: BULK_FIXTURE,
+    post: async (url) => calls.push(url),
+  });
+  const controls = wrapper.get('.pipeline-run-controls');
+  const buttons = controls.findAll('button');
+
+  assert.deepEqual(buttons.map((button) => button.attributes('data-option')), ['resume', 'stop']);
+  assert.equal(controls.element.lastElementChild.className, 'pipeline-run-separator');
+  assert.ok(buttons.every((button) => button.attributes('aria-haspopup') === 'menu'));
+
+  await buttons[0].trigger('click');
+
+  assert.deepEqual(
+    wrapper.findAll('[data-bulk-action="resume"] .pipeline-run-option > span')
+      .map((label) => label.text()),
+    ['Запустить все', 'Запустить все во вкладке'],
+  );
+  assert.deepEqual(calls, []);
+});
+
+for (const scenario of [
+  {
+    action: 'resume',
+    scope: 'all',
+    expected: [1101, 1102, 1110],
+    status: 'running',
+  },
+  {
+    action: 'resume',
+    scope: 'project',
+    expected: [1101, 1110],
+    status: 'running',
+  },
+  {
+    action: 'stop',
+    scope: 'all',
+    expected: [1103, 1104],
+    status: 'inactive',
+  },
+  {
+    action: 'stop',
+    scope: 'project',
+    expected: [1103],
+    status: 'inactive',
+  },
+]) {
+  test(`${scenario.action}/${scenario.scope}: только подходящие прогоны независимо от фильтра`, async (t) => {
+    const calls = [];
+    const { wrapper, flushPromises } = await mountPipeline(t, {
+      project: 'alpha',
+      status: scenario.status,
+      fixtures: BULK_FIXTURE,
+      post: async (url, body) => calls.push({ url, body }),
+    });
+
+    await chooseBulk(wrapper, scenario.action, scenario.scope);
+    await flushPromises();
+
+    assert.deepEqual(calls.map((call) => call.url), scenario.expected.map((task) => (
+      `/api/tasks/${task}/${scenario.action}`
+    )));
+
+    if (scenario.action === 'resume') {
+      assert.deepEqual(calls[0].body, { attempt: 'one', profile: 'alpha' });
+    }
+
+    assert.equal(wrapper.find('[data-bulk-action]').exists(), false);
+  });
+}
+
+test('во вкладке «Все» команда охватывает оба проекта', async (t) => {
+  const calls = [];
+  const { wrapper, flushPromises } = await mountPipeline(t, {
+    fixtures: BULK_FIXTURE,
+    post: async (url) => calls.push(url),
+  });
+
+  await chooseBulk(wrapper, 'stop', 'project');
+  await flushPromises();
+
+  assert.deepEqual(calls, ['/api/tasks/1103/stop', '/api/tasks/1104/stop']);
+});
+
+test('команда без подходящих прогонов недоступна и не отправляет запросов', async (t) => {
+  const calls = [];
+  const { wrapper } = await mountPipeline(t, {
+    fixtures: BULK_FIXTURE.filter((task) => task.result === 'completed' || task.readOnly),
+    post: async (url) => calls.push(url),
+  });
+
+  await wrapper.get('.pipeline-run-controls [data-option="resume"]').trigger('click');
+
+  const options = wrapper.findAll('[data-bulk-action="resume"]');
+
+  assert.equal(options.length, 2);
+  assert.ok(options.every((option) => option.element.disabled));
+
+  await options[0].trigger('click');
+
+  assert.deepEqual(calls, []);
+});
+
+test('пакет блокирует повторы, продолжает после ошибки и перечитывает список один раз', async (t) => {
+  const calls = [];
+  const alerts = [];
+  const snapshots = [];
+  let releaseFirst;
+  const pending = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const { wrapper, flushPromises } = await mountPipeline(t, {
+    project: 'alpha',
+    fixtures: BULK_FIXTURE,
+    onGet: (url) => {
+      if (url === '/api/tasks') {
+        snapshots.push(url);
+      }
+    },
+    post: async (url) => {
+      calls.push(url);
+
+      if (url === '/api/tasks/1101/resume') {
+        await pending;
+      }
+      if (url === '/api/tasks/1102/resume') {
+        throw new Error('Отказ запуска');
+      }
+
+      return { ok: true };
+    },
+  });
+
+  globalThis.__pipelineFiltersAlertDialog = async (message) => alerts.push(message);
+
+  await chooseBulk(wrapper, 'resume', 'all');
+
+  const triggers = wrapper.findAll('.pipeline-run-controls button');
+
+  assert.ok(triggers.every((button) => button.element.disabled));
+
+  await triggers[0].trigger('click');
+  await triggers[1].trigger('click');
+
+  assert.deepEqual(calls, ['/api/tasks/1101/resume']);
+
+  releaseFirst();
+  await flushPromises();
+  await flushPromises();
+
+  assert.deepEqual(calls, [
+    '/api/tasks/1101/resume',
+    '/api/tasks/1102/resume',
+    '/api/tasks/1110/resume',
+  ]);
+  assert.equal(snapshots.length, 2);
+  assert.equal(alerts.length, 1);
+  assert.match(alerts[0], /#1102: Отказ запуска/u);
+  assert.ok(wrapper.findAll('.pipeline-run-controls button').every((button) => !button.element.disabled));
+});
+
+test('пакет пропускает уже запущенную задачу и сменившуюся попытку после SSE', async (t) => {
+  const fixtures = structuredClone(BULK_FIXTURE);
+  const calls = [];
+  let releaseFirst;
+  const pending = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const { wrapper, flushPromises } = await mountPipeline(t, {
+    fixtures,
+    post: async (url) => {
+      calls.push(url);
+      await pending;
+
+      return { ok: true };
+    },
+  });
+
+  t.after(() => releaseFirst());
+  await chooseBulk(wrapper, 'resume', 'all');
+
+  fixtures.find((task) => task.task === 1102).daemonAlive = true;
+  fixtures.find((task) => task.task === 1110).attempt = 'replacement';
+  globalThis.__pipelineFiltersSseHandler('state-change');
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  await flushPromises();
+  releaseFirst();
+  await flushPromises();
+
+  assert.deepEqual(calls, ['/api/tasks/1101/resume']);
 });
