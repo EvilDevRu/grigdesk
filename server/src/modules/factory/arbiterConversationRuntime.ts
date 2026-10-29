@@ -176,7 +176,7 @@ export async function registerArbiterConversationRuntime(
           extraDirs: [...repos.slice(1).map((repo) => repo.workspace), config.stateDir],
           model: target.ref.model,
           effort: target.effort || undefined,
-          permissionMode: 'plan' as const,
+          permissionMode: target.permissionMode,
           providerSettings: providerSettings?.[target.ref.provider] || {},
           log: fastify.log,
         },

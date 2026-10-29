@@ -4,6 +4,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ArbiterConversationStore } from '../../server/src/lib/arbiterConversationStore.ts';
+import { resolveArbiterTarget } from '../../server/src/lib/factoryArbiter.ts';
+import { resolveModelRef } from '../../server/src/lib/chat/modelRef.ts';
+import { createGlmFakeRuntime } from '../helpers/glmFakeRuntime.mts';
 import {
   projectArbiterFrames,
   runArbiterConversation
@@ -128,6 +131,78 @@ async function fixture(t) {
     }
   };
 }
+
+test('проверенный auto доходит до исполнителя и разбор сохраняет результат', async (t) => {
+  const fx = await fixture(t);
+  const modes = [];
+  const target = await resolveArbiterTarget({
+    modelRef: { provider: 'test', model: 'arbiter' },
+    modelsRegistry: async () => ({ test: [{ id: 'arbiter' }] }),
+    resolveRef: resolveModelRef,
+    executorResolver: async () => ({
+      modes: () => [{ id: 'auto' }],
+      run: async (input) => {
+        assert.equal(input.chatKey, `arbiter:${fx.doc.id}:turn`);
+        assert.equal(input.sessionId, null);
+        await input.onSessionCreated('service-session');
+        modes.push(input.permissionMode);
+
+        return { reply: framedResult };
+      },
+    }),
+  });
+
+  assert.equal(target.ok, true);
+
+  await runArbiterConversation({
+    ...fx,
+    operationId: 'turn',
+    input: { permissionMode: target.permissionMode },
+    executor: target.executor,
+    readCurrent: async () => fx.context,
+  });
+
+  assert.deepEqual(modes, ['auto']);
+  assert.equal((await fx.store.read('7', fx.doc.id)).state, 'awaiting_user');
+});
+
+test('GLM выполняет разбор в auto через настоящий адаптер и процесс фикстуры', async (t) => {
+  const fx = await fixture(t);
+  const runtime = await createGlmFakeRuntime(t, {
+    updates: [{ sessionUpdate: 'agent_message_chunk', content: { text: framedResult } }],
+  });
+  const model = '["zai","glm-5.3"]';
+  const target = await resolveArbiterTarget({
+    config: runtime.config,
+    modelRef: { provider: 'glm', model },
+    modelsRegistry: async () => ({ glm: [{ id: model }] }),
+    resolveRef: resolveModelRef,
+    executorResolver: async () => runtime.adapter,
+  });
+
+  assert.equal(target.ok, true);
+
+  await runArbiterConversation({
+    ...fx,
+    operationId: 'turn',
+    input: {
+      config: runtime.config,
+      cwd: runtime.project,
+      extraDirs: [],
+      model: target.ref.model,
+      permissionMode: target.permissionMode,
+      providerSettings: {},
+    },
+    executor: target.executor,
+    readCurrent: async () => fx.context,
+  });
+
+  const saved = await fx.store.read('7', fx.doc.id);
+
+  assert.equal(saved.state, 'awaiting_user', JSON.stringify(saved.messages));
+  assert.equal(saved.result.summary, result.summary);
+  assert.ok(runtime.children.length > 0, 'Адаптер должен запустить процесс GLM');
+});
 
 test('публичный текст сохранён до завершения executor; fallback не повторяет кадр', async (t) => {
   const fx = await fixture(t);

@@ -347,6 +347,7 @@
       "tests/server/executor-types.test.js",
       "tests/server/factory-activity.test.js",
       "tests/server/factory-arbiter-live.test.js",
+      "tests/server/factory-arbiter-mode.test.js",
       "tests/server/factory-arbiter.test.js",
       "tests/server/factory-attempt-branch-pin.test.js",
       "tests/server/factory-bootstrap.test.js",

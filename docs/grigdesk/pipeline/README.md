@@ -94,6 +94,8 @@
 
 ## Грабли
 
+- [Арбитр требует отсутствующий plan: запуск использует режим «Авто»](arbiter-auto-mode.md)
+
 - [Составной modelRef GLM требует представления маршрут/модель в lifecycle](lifecycle-model-id.md)
 
 - [Повтор INSTRUMENT после временного отказа упирался в завершённую транзакцию](instrumentation-retry.md)

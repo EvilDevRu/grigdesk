@@ -265,6 +265,13 @@ export async function runArbiterConversation(options: RunnerOptions) {
     const output = await Promise.race([
       executor.run({
         ...input,
+        // Каждый durable ход получает отдельную сессию: весь контекст уже в prompt.
+        // Resume и привязка к пользовательскому чату здесь не используются.
+        chatKey: `arbiter:${doc.id}:${operationId}`,
+        sessionId: null,
+        onSessionCreated: () => {
+          controller.signal.throwIfAborted();
+        },
         message: prompt,
         signal: controller.signal,
         onAssistantMessage: receive
