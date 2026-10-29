@@ -433,6 +433,11 @@ export interface ChatState {
   revealRequest: string;
   pending: Record<string, ChatRequest>;
   saveError: string | null;
+  snapshotRecovery: Record<string, {
+    state: 'restoring' | 'error';
+    error: string;
+    retryAt: number;
+  }>;
   compactWindow: number;
   speech: SpeechSnapshot;
   turnProtocol: number;

@@ -288,6 +288,11 @@ interface ChatLoadRuntime {
   patchEpochs: Map<string, number>;
   details: Map<string, Promise<void>>;
   snapshots: Map<string, ChatSession>;
+  snapshotJobs: Map<string, Promise<void>>;
+  snapshotTimer: ReturnType<typeof setTimeout> | null;
+  snapshotDelays: Map<string, number>;
+  mergedSnapshots: Set<string>;
+  importedLegacy: boolean;
   resync: Promise<void> | null;
   resyncedAt: number;
   deliverySeen: Map<string, { chatId: string; at: number }>;
@@ -327,6 +332,11 @@ function chatLoadRuntimeFor(store: object): ChatLoadRuntime {
     patchEpochs: new Map(),
     details: new Map(),
     snapshots: new Map(),
+    snapshotJobs: new Map(),
+    snapshotTimer: null,
+    snapshotDelays: new Map(),
+    mergedSnapshots: new Set(),
+    importedLegacy: false,
     resync: null,
     resyncedAt: 0,
     deliverySeen: new Map(),
@@ -352,6 +362,7 @@ function chatLoadRuntimeFor(store: object): ChatLoadRuntime {
     store.$dispose = () => {
       runtime.disposed = true;
       clearTimeout(runtime.timer ?? undefined);
+      clearTimeout(runtime.snapshotTimer ?? undefined);
       runtime.controller?.abort();
       runtime.resyncControllers.forEach((controller) => controller.abort());
       runtime.off.forEach((off) => off());
@@ -1180,6 +1191,7 @@ export const useChatStore = defineStore('chat', {
     revealRequest: '',
     pending: {},
     saveError: null,
+    snapshotRecovery: {},
     compactWindow: 0,
     speech: normalizeSpeechSnapshot(null),
     turnProtocol: 0,
@@ -1359,6 +1371,10 @@ export const useChatStore = defineStore('chat', {
       const runtime = chatLoadRuntimeFor(this);
 
       runtime.epochs.set(id, (runtime.epochs.get(id) || 0) + 1);
+      runtime.snapshots.delete(id);
+      runtime.snapshotDelays.delete(id);
+      runtime.mergedSnapshots.delete(id);
+      delete this.snapshotRecovery[id];
       delete this.messageLoads[id];
     },
     /**
@@ -1615,15 +1631,24 @@ export const useChatStore = defineStore('chat', {
       const runtime = chatLoadRuntimeFor(this);
       const copy = runtime.snapshots.get(id);
 
-      if (!copy) {
+      if (!copy || runtime.disposed) {
         return;
       }
 
+      this.snapshotRecovery[id] = {
+        state: 'restoring',
+        error: '',
+        retryAt: 0,
+      };
+
       try {
-        if (this._find(id)) {
+        if (this._find(id) && !runtime.mergedSnapshots.has(id)) {
           await this.ensureChatMessages(id);
 
           if (!this.isChatMessagesLoaded(id)) {
+            throw new Error(this.messageLoads[id]?.error || 'Не загрузилась история для восстановления');
+          }
+          if (runtime.disposed || runtime.snapshots.get(id) !== copy) {
             return;
           }
 
@@ -1644,16 +1669,87 @@ export const useChatStore = defineStore('chat', {
           live.draft = copy.draft;
           live.draftAttachments = copy.draftAttachments;
           live.updatedAt = Math.max(live.updatedAt || 0, copy.updatedAt || 0);
-        } else {
+        } else if (!this._find(id)) {
           this._normalize([copy]);
           (copy.archived ? this.archived : this.sessions).push(copy);
         }
 
+        runtime.mergedSnapshots.add(id);
         historyPersistenceFor(this).resetBase(id);
 
-        await this._writeChat(id, { force: true });
+        const response = await this._writeChat(id, { force: true });
+
+        if (runtime.disposed || runtime.snapshots.get(id) !== copy) {
+          return;
+        }
+        if (!response) {
+          throw new Error('Сервер не подтвердил восстановление истории');
+        }
+
         runtime.snapshots.delete(id);
-      } catch { /* Неудача не стирает исходный страховочный ответ. */ }
+        runtime.snapshotDelays.delete(id);
+        runtime.mergedSnapshots.delete(id);
+        delete this.snapshotRecovery[id];
+      } catch (error) {
+        if (runtime.disposed || runtime.snapshots.get(id) !== copy) {
+          return;
+        }
+
+        const delay = Math.min((runtime.snapshotDelays.get(id) || 500) * 2, 30000);
+
+        runtime.snapshotDelays.set(id, delay);
+        this.snapshotRecovery[id] = {
+          state: 'error',
+          error: errorMessage(error, 'Не удалось восстановить страховочную копию'),
+          retryAt: Date.now() + delay,
+        };
+      }
+    },
+    /**
+     * Страховки восстанавливаются отдельно от первого списка, максимум по две сразу.
+     * Неуспех сохраняет исходную копию и повторяется с паузой; dispose выключает очередь.
+     */
+    _restoreChatSnapshots() {
+      const runtime = chatLoadRuntimeFor(this);
+
+      if (runtime.disposed) {
+        return;
+      }
+
+      clearTimeout(runtime.snapshotTimer ?? undefined);
+      runtime.snapshotTimer = null;
+
+      for (const id of runtime.snapshots.keys()) {
+        if (runtime.snapshotJobs.size >= 2) {
+          break;
+        }
+        if (runtime.snapshotJobs.has(id) || (this.snapshotRecovery[id]?.retryAt || 0) > Date.now()) {
+          continue;
+        }
+
+        const job = this._restoreChatSnapshot(id).finally(() => {
+          runtime.snapshotJobs.delete(id);
+          this._restoreChatSnapshots();
+        });
+
+        runtime.snapshotJobs.set(id, job);
+      }
+
+      const retries = [...runtime.snapshots.keys()]
+        .filter((id) => !runtime.snapshotJobs.has(id))
+        .map((id) => this.snapshotRecovery[id]?.retryAt || 0)
+        .filter((at) => at > Date.now());
+
+      if (retries.length) {
+        runtime.snapshotTimer = setTimeout(() => {
+          this._restoreChatSnapshots();
+        }, Math.max(1, Math.min(...retries) - Date.now()));
+        unrefTimer(runtime.snapshotTimer);
+      }
+      if (runtime.importedLegacy && !runtime.snapshots.size) {
+        localStorage.removeItem(LS_KEY);
+        runtime.importedLegacy = false;
+      }
     },
     /**
      * Поиск работает по всему серверному каталогу, даже когда сообщения не открывали.
@@ -2037,36 +2133,49 @@ export const useChatStore = defineStore('chat', {
           }
         }
 
-        let importedLegacy = false;
-
         if (!j.sessions.length && !j.archived.length && !runtime.snapshots.size) {
           try {
             const legacy = decodeChatEnvelope(JSON.parse(localStorage.getItem(LS_KEY) || 'null'));
 
             for (const copy of [...(legacy.sessions || []), ...(legacy.archived || [])]) {
               runtime.snapshots.set(copy.id, copy);
-              importedLegacy = true;
+              runtime.importedLegacy = true;
             }
           } catch { /* Повреждённая прежняя копия не заменяет каталог. */ }
         }
 
-        for (const id of runtime.snapshots.keys()) {
-          await this._restoreChatSnapshot(id);
-        }
-
-        if (importedLegacy && !runtime.snapshots.size) {
-          localStorage.removeItem(LS_KEY);
-        }
-
         this._loadVisibleChats();
-        // Ответы, доехавшие пока страница была закрыта/перезагружалась.
-        await this._collectPending();
-        // Спросы агентов, висящие прямо сейчас: после F5 их некому было показать.
-        await this._loadWaiting();
-        // Агенты, работающие прямо сейчас: восстанавливаем «думает…» после F5.
-        await this._loadActive();
-        // Реплики, приём которых окно до F5 не успело подтвердить: сверка с сервером.
-        await this._reconcileDeliveries();
+
+        /**
+         * Pending ждёт первую попытку восстановления, сохраняя порядок записи и ACK.
+         * Наличие страховок отделяет эту работу от готовности списка и завершения ensure.
+         */
+        const recover = async () => {
+          this._restoreChatSnapshots();
+
+          while (runtime.snapshotJobs.size && !runtime.disposed) {
+            await Promise.all([...runtime.snapshotJobs.values()]);
+          }
+
+          if (runtime.disposed) {
+            return;
+          }
+
+          await this._collectPending();
+          await this._loadWaiting();
+          await this._loadActive();
+          await this._reconcileDeliveries();
+        };
+
+        if (runtime.snapshots.size) {
+          void recover().catch((error) => {
+            if (!runtime.disposed) {
+              this._saveFailed(true, errorMessage(error, 'Не удалось сверить историю'));
+            }
+          });
+        } else {
+          await recover();
+        }
       })().finally(() => {
         if (runtime.promise === job) {
           runtime.promise = null;
@@ -2452,7 +2561,7 @@ export const useChatStore = defineStore('chat', {
     // берётся у последнего вызова: иначе правка черновика, пришедшая в те же 300 мс дебаунса,
     // отменила бы снимок только что полученного ответа.
     _persist(flush = false, { snapshot = true } = {}) {
-      if (!this.loaded) {
+      if (!this.loaded || chatLoadRuntimeFor(this).disposed) {
         return;
       }
 
@@ -2467,7 +2576,7 @@ export const useChatStore = defineStore('chat', {
        * Очереди берут свежие данные отдельно, а страховка сохраняется до отправки запросов.
        */
       const write = () => {
-        if (!this.loaded) {
+        if (!this.loaded || chatLoadRuntimeFor(this).disposed) {
           return;
         }
 
@@ -2598,10 +2707,18 @@ export const useChatStore = defineStore('chat', {
 
         Promise.all(jobs)
           .then(() => {
+          if (chatLoadRuntimeFor(this).disposed) {
+            return;
+          }
+
           retryDelay = 0;
           this._saveFailed(false);
         })
           .catch((e) => {
+            if (chatLoadRuntimeFor(this).disposed) {
+              return;
+            }
+
             // Сервер недоступен (перезапускается) — повторяем с нарастающей паузой.
             // Успевшие запросы уже отметились в sentChats, повтор их не тронет.
             retryDelay = Math.min(retryDelay ? retryDelay * 2 : 1000, 15000);

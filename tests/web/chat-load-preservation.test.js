@@ -91,6 +91,7 @@ test('LOAD-KEEP-03', async (t) => {
 
       isolatePersistenceTimers(sub, chat);
       await chat._load();
+      await drain();
       assert.equal(chat.sessions[0].id, populated ? SERVER_CHAT.id : 'legacy');
 
       if (populated) {

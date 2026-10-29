@@ -281,3 +281,137 @@ test('LOAD-RETRY-04', async (t) => {
   assert.equal(chat.sessions[0].messages.at(-1).text, 'Доставлен');
   assert.equal(chat.sessions[0].messages[0].delivery, undefined);
 });
+
+test('страховки не задерживают ensure и восстанавливаются максимум по две одновременно', async (t) => {
+  const sessions = Array.from({ length: 5 }, (_, index) => ({ ...SERVER_CHAT, id: `snapshot-${index}` }));
+  const snapshot = JSON.stringify({
+    sessions: sessions.map((chat) => ({
+      ...chat,
+      updatedAt: 300,
+      draft: 'Спасённый черновик',
+    })),
+    archived: [],
+  });
+
+  memoryStorage(t, { [SNAPSHOT_KEY]: snapshot });
+
+  const { api } = loadApi(async () => ({ sessions, archived: [] }));
+  const gates = [];
+  let active = 0;
+  let maximum = 0;
+
+  api.put = async (url) => {
+    if (url !== '/api/chat/store/chat') {
+      return { ok: true };
+    }
+
+    const gate = Promise.withResolvers();
+
+    gates.push(gate);
+    active += 1;
+    maximum = Math.max(maximum, active);
+    await gate.promise;
+    active -= 1;
+
+    return { ok: true };
+  };
+
+  const chat = await chatStoreFixture({}, { api, unloaded: true });
+
+  loadClock(t);
+  t.after(() => {
+    chat.$dispose();
+    gates.forEach((gate) => gate.resolve());
+  });
+  await chat.ensure();
+  await drain();
+  assert.equal(chat.loaded, true);
+  assert.equal(chat.loading, false);
+  assert.equal(chat.sessions.length, 5);
+  assert.equal(gates.length, 2, 'ensure завершён при двух ещё не подтверждённых PUT');
+
+  for (let index = 0; index < 5; index += 1) {
+    gates[index].resolve();
+    await drain();
+  }
+
+  assert.equal(gates.length, 5);
+  assert.equal(maximum, 2);
+  assert.deepEqual(chat.snapshotRecovery, {});
+});
+
+test('отказ PUT страховки виден в state, повторяется с паузой и выключается при dispose', async (t) => {
+  const snapshot = JSON.stringify({
+    sessions: [{
+      ...SERVER_CHAT,
+      updatedAt: 300,
+      draft: 'Единственная копия',
+    }],
+    archived: [],
+  });
+  const storage = memoryStorage(t, { [SNAPSHOT_KEY]: snapshot });
+  const { api } = loadApi();
+  let puts = 0;
+  const drafts = [];
+
+  api.put = async (_url, body) => {
+    puts += 1;
+    drafts.push(body.chat.draft);
+
+    if (puts <= 2) {
+      throw new TypeError('PUT страховки недоступен');
+    }
+
+    return { ok: true };
+  };
+
+  const chat = await chatStoreFixture({}, { api, unloaded: true });
+  const clock = loadClock(t);
+
+  t.after(() => chat.$dispose());
+  await chat.ensure();
+  await drain();
+  assert.equal(chat.snapshotRecovery[SERVER_CHAT.id].state, 'error');
+  assert.match(chat.snapshotRecovery[SERVER_CHAT.id].error, /PUT страховки недоступен/);
+  assert.equal(storage.values.get(SNAPSHOT_KEY), snapshot);
+  chat.session(SERVER_CHAT.id).draft = 'Правка человека после отказа';
+  await clock.tick(999);
+  assert.equal(puts, 1);
+  await clock.tick(1);
+  assert.equal(puts, 2);
+  await clock.tick(1999);
+  assert.equal(puts, 2);
+  await clock.tick(1);
+  assert.equal(puts, 3);
+  assert.equal(drafts.at(-1), 'Правка человека после отказа');
+  assert.deepEqual(chat.snapshotRecovery, {});
+
+  const stopped = await chatStoreFixture({}, { api, unloaded: true });
+
+  puts = 0;
+  await stopped.ensure();
+  await drain();
+  assert.equal(puts, 1);
+  stopped.$dispose();
+  await clock.tick(60000);
+  assert.equal(puts, 1);
+});
+
+test('debounce старого стора после dispose не перезаписывает страховку нового окна', async (t) => {
+  const storage = memoryStorage(t);
+  const clock = loadClock(t);
+  const { api, calls } = loadApi();
+  const chat = await chatStoreFixture({ sessions: [{ ...SERVER_CHAT }] }, { api });
+
+  t.after(() => chat.$dispose());
+  chat.session(SERVER_CHAT.id).draft = 'Поздняя запись закрытого стора';
+  chat._persist();
+  chat.$dispose();
+
+  const fresh = JSON.stringify({ sessions: [{ ...SERVER_CHAT, draft: 'Свежая страховка' }], archived: [] });
+
+  storage.values.set(SNAPSHOT_KEY, fresh);
+  await clock.tick(300);
+  assert.equal(storage.values.get(SNAPSHOT_KEY), fresh);
+  assert.equal(calls.some(([method]) => method === 'PUT'), false);
+});
