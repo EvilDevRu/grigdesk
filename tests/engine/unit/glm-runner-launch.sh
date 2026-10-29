@@ -63,7 +63,7 @@ assert_eq 17 "${argv[4]}" "срок маршрута сохранён"
 assert_eq "$NODE_BIN" "${argv[5]}" "wrapper запускает host Node поставки DSH"
 assert_eq "$FACTORY_HOME/../server/scripts/glmRunner.mts" "${argv[6]}" \
   "раннер вызывает отдельный wrapper GLM, не DeepSeek"
-assert_eq read-only "$(argv_value --mode)" "state-only переводится в read-only песочницу DSH"
+assert_eq state-only "$(argv_value --mode)" "wrapper получает файловую политику state-only"
 assert_eq "$fake_bin" "$(argv_value --bin)" "wrapper получает тот же ELF, что прошёл descriptor"
 assert_eq "$model" "$(argv_value --model)" "непрозрачный id модели передаётся как есть"
 assert_eq high "$(argv_value --effort)" "уровень передаётся wrapper-у"
@@ -72,7 +72,8 @@ assert_eq "deepseek-package:$package_a" "$(argv_value --runtime-identity)" \
 assert_eq '9.2.0.grigdesk.bbbbbbbbbbbbbbbbb' "$(argv_value --runtime-version)" \
   "wrapper сверяет runtimeVersion из preflight"
 assert_eq "$TEST_ROOT/dsh cache" "$(argv_value --cache-dir)" "кэш DSH с пробелом передаётся целым"
-assert_eq "$TEST_ROOT/project" "$(argv_value --cwd)" "cwd этапа — физический каталог задачи"
+assert_eq "$(realpath "$STATE_DIR")" "$(argv_value --cwd)" \
+  "cwd и writable root проверяющего узла — STATE_DIR"
 assert_eq "$TEST_ROOT/run/glm/runtime" "$(argv_value --runtime-home)" \
   "home этапа живёт в RUN_DIR, не в доме чата"
 for secret in "$prompt" synthetic-glm-factory-key synthetic-coding-plan-key; do
@@ -92,6 +93,7 @@ export FACTORY_ROUTE_FILESYSTEM_POLICY=workspace-write
 runner_glm_run 42 write BUILD '["zai","glm-5.2"]' off 19 "$TEST_ROOT/run"
 assert_rc 0 "$?" "workspace-write запуск доходит до wrapper"
 assert_eq workspace-write "$(argv_value --mode)" "workspace-write сохраняет запись в проект"
+assert_eq "$TEST_ROOT/project" "$(argv_value --cwd)" "workspace-write сохраняет cwd проекта"
 assert_eq off "$(argv_value --effort)" "уровень off допустим только у модели с ним"
 runner_glm_run 42 write BUILD '["zai","glm-4.7"]' '' 19 "$TEST_ROOT/run"
 assert_rc 0 "$?" "пустой уровень оставляет выбор штатному high wrapper-а"
@@ -104,6 +106,11 @@ reject_before_wrapper() {
   assert_rc 4 "$?" "$name: отказ до prompt"
   assert_eq '' "$(cat "$capture")" "$name: wrapper не запускается"
 }
+
+export FACTORY_ROUTE_FILESYSTEM_POLICY=state-only
+for invalid_state in '' relative "$TEST_ROOT/no-state" "$capture"; do
+  STATE_DIR="$invalid_state" reject_before_wrapper "неверный STATE_DIR '$invalid_state'" "$model" high
+done
 
 for unsupported in transactional-write ''; do
   export FACTORY_ROUTE_FILESYSTEM_POLICY="$unsupported"

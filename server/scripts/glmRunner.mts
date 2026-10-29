@@ -2,6 +2,9 @@
 // закрепляет DSH ELF и запускает настоящий web-ход GLM со статусным MCP хоста.
 // Ключ модели и текст prompt не попадают ни в argv статуса, ни в события wrapper-а.
 
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+
 import type { ChatStep } from '../src/lib/chat/streamSteps.ts';
 import { glmAccessError } from '../src/lib/glm/env.ts';
 import { GLM_FACTORY_MODELS, glmFactoryModel } from '../src/lib/glm/factoryCatalog.ts';
@@ -51,7 +54,7 @@ function parseArguments(argv: readonly string[]): Arguments {
   ]);
   const mode = required('--mode');
 
-  if (mode !== 'read-only' && mode !== 'workspace-write') {
+  if (mode !== 'state-only' && mode !== 'workspace-write') {
     throw new Error(`${LABEL}: режим не поддерживается: ${mode}`);
   }
 
@@ -70,7 +73,7 @@ function parseArguments(argv: readonly string[]): Arguments {
     promptFile: required('--prompt-file'),
     model,
     effort,
-    filesystem: mode === 'read-only' ? 'state-only' : 'workspace-write',
+    filesystem: mode,
     runtimeIdentity: values.get('--runtime-identity'),
     runtimeVersion: values.get('--runtime-version'),
     cacheDir: values.get('--cache-dir'),
@@ -104,6 +107,12 @@ export async function runGlmFactory(
 ): Promise<void> {
   const args = await validateRunnerPaths(parseArguments(argv), LABEL);
   const identity = factoryRunIdentity(env, LABEL);
+
+  if (args.filesystem === 'state-only'
+    && (!env.STATE_DIR || !path.isAbsolute(env.STATE_DIR)
+      || await fs.realpath(env.STATE_DIR) !== args.cwd)) {
+    throw glmAccessError('glm_factory_context_invalid', `${LABEL}: cwd должен совпадать с STATE_DIR`);
+  }
 
   // Этап идёт в режиме службы (api или coding-plan — policy-v2, 29.10.2026): ключ
   // активного режима подставит runGlmTurn через buildGlmChildEnv, допуск по metadata DSH
@@ -162,6 +171,7 @@ export async function runGlmFactory(
       factoryContext: {
         ...identity,
         filesystem: args.filesystem,
+        ...(args.filesystem === 'state-only' ? { stateDir: args.cwd } : {}),
         statusServer: {
           name: 'factory-status',
           command: status.command,

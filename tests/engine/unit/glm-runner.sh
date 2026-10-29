@@ -44,13 +44,13 @@ version=$(runner_call glm probe)
 assert_rc 0 "$?" "probe Обычного API проходит без ключа модели"
 assert_contains "$version" '9.2.0-grigdesk.' "probe сохраняет upstream и observed identity"
 assert_contains "$version" ".p$package_a." "версия раннера различает packageId DSH"
-assert_contains "$version" '.grigdesk-glm-factory-profile-v1.grigdesk-glm-factory-policy-v2' \
+assert_contains "$version" '.grigdesk-glm-factory-profile-v2.grigdesk-glm-factory-policy-v3' \
   "версия раннера включает ревизии профиля и политики этапа"
 
 # Coding Plan допущен с factory-policy-v2 (29.10.2026): probe проходит тем же фикстурным DSH.
 GRIGDESK_GLM_API_MODE=coding-plan version_cp=$(runner_call glm probe)
 assert_rc 0 "$?" "probe Coding Plan проходит без ключа модели"
-assert_contains "$version_cp" '.grigdesk-glm-factory-policy-v2' \
+assert_contains "$version_cp" '.grigdesk-glm-factory-policy-v3' \
   "probe Coding Plan отдаёт ту же ревизию политики"
 GRIGDESK_GLM_API_MODE='' runner_call glm probe >/dev/null 2>&1
 assert_rc 4 "$?" "без режима доступа этап GLM недоступен"

@@ -176,7 +176,8 @@ export async function buildGlmLaunchFiles(
   });
 
   // Hook различает потребителя по форме документа: у чата прежний JSON без consumer.
-  const policy = options.factory ? glmFactoryToolPolicy(options.factory.filesystem) : {
+  const policy = options.factory
+    ? glmFactoryToolPolicy(options.factory.filesystem, options.workspaceRoot) : {
     workTools: [...options.workTools ?? []],
     ssh: options.hooks.ssh,
     db: options.hooks.db,

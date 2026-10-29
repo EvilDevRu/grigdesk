@@ -298,11 +298,14 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
 
   const identity = assertGlmGenerationAdmission(generation, selected.accessMode, deps.admission);
 
-  const cwd = await fs.realpath(options.cwd!);
+  // STATE_DIR — единственный workspace проверяющего узла. Рабочие деревья читаются
+  // по абсолютным путям, а native write/edit и shell остаются в одной песочнице DSH.
+  const factory = selected.factory;
+  const cwd = await fs.realpath(factory?.context.filesystem === 'state-only'
+    ? factory.context.stateDir! : options.cwd!);
   const runtimeHome = assertGlmRuntimeHome(String(options.config.glmRuntimeHome ?? ''));
   const home = runtime.kind === 'binary' ? glmChatHome(runtimeHome, options.chatKey!)
     : glmChatHome(runtimeHome, identity, options.chatKey!);
-  const factory = selected.factory;
   let sessionId = options.sessionId;
   let journalNote: ChatStep | undefined;
 

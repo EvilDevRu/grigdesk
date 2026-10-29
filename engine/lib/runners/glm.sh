@@ -100,7 +100,7 @@ runner_glm_run() {
       ;;
   esac
   case "${FACTORY_ROUTE_FILESYSTEM_POLICY:-}" in
-    state-only) mode=read-only ;;
+    state-only) mode=state-only ;;
     workspace-write) mode=workspace-write ;;
     *)
       printf 'GLM Factory: filesystem policy не поддерживается: %s\n' \
@@ -139,7 +139,14 @@ runner_glm_run() {
   fi
   wrapper="$FACTORY_HOME/../server/scripts/glmRunner.mts"
   [[ -f "$wrapper" ]] || return 4
-  cwd=$(realpath -e -- "$PWD" 2>/dev/null) || return 4
+  if [[ "$mode" == state-only ]]; then
+    # DSH пишет только в workspaceRoot, который обязан содержать cwd. Для проверяющего
+    # узла оба пути указывают в STATE_DIR; репозитории остаются доступны для чтения.
+    [[ "${STATE_DIR:-}" == /* && -d "$STATE_DIR" ]] || return 4
+    cwd=$(realpath -e -- "$STATE_DIR" 2>/dev/null) || return 4
+  else
+    cwd=$(realpath -e -- "$PWD" 2>/dev/null) || return 4
+  fi
 
   prompt_dir="$run_dir/glm"
   prompt_file="$prompt_dir/prompt.md"

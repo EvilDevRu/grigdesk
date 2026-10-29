@@ -17,6 +17,8 @@
 
 ## Устройство
 
+- [GLM: обязательные артефакты state-only и граница записи STATE_DIR](glm-state-artifacts.md)
+
 - [Массовый запуск и остановка: области, гейты и блокировка повторов](bulk-run-controls.md)
 
 - [Выбор модели триажа и профили доступа Codex](triage-model-selection.md)

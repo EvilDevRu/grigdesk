@@ -1,22 +1,25 @@
 # Этап фабрики на GLM: политика, ход и host-wrapper
 
-Обычный чат GLM не меняется: прежний JSON политики без поля `consumer`, approval `ask`,
-ревизии `grigdesk-glm-profile-v2`/`grigdesk-glm-policy-v1` и golden профиля байт в байт.
+Обычный чат GLM не меняется: прежний JSON политики без поля `consumer`, approval `ask`
+и собственные ревизии профиля и политики.
 Этап фабрики — отдельный потребитель со своими ревизиями
-`grigdesk-glm-factory-profile-v1`/`grigdesk-glm-factory-policy-v1`; допуск сборки DSH
+`grigdesk-glm-factory-profile-v2`/`grigdesk-glm-factory-policy-v3`; допуск сборки DSH
 проверяется прежней формулой identity для режима `api`.
 
 ## Политика этапа
 
-- `glmFactoryPolicy`: `state-only` → sandbox `read-only`, `workspace-write` → `workspace-write`;
-  approval всегда `never`, вопросов нет. Другой режим — `glm_factory_policy_unsupported`.
+- `glmFactoryPolicy`: оба файловых режима используют sandbox `workspace-write`;
+  у `state-only` cwd и workspaceRoot равны физическому `STATE_DIR`, у `workspace-write` — cwd проекта.
+  Approval всегда `never`, вопросов нет. Другой режим — `glm_factory_policy_unsupported`.
 - Документ политики hook пишет только хост: `{format:1, consumer:'factory', filesystem,
   rawTools}`, где rawTools — ровно `mcp__factory-status__stage_progress` и `stage_result`.
+  Только у `state-only` обязательно дополнительное поле `stateDir` — физический корень записи.
   Hook различает потребителя до разбора: документ с ключом `consumer` идёт только в строгий
   parser этапа; лишний ключ, неполный или повторный inventory — отказ (exit 2).
 - Решение этапа: статус — по точному имени (похожий префикс `factory-status-extra` запрещён),
-  `ask_user_question` запрещён, в `state-only` запрещены `write`/`edit`, shell проходит
-  строгую политику прямого SSH и клиентов БД.
+  `ask_user_question` запрещён, в `state-only` разрешены `write`/`edit` только внутри
+  `stateDir` без символических ссылок, shell проходит строгую политику прямого SSH и клиентов БД
+  и файловую песочницу DSH. Контракт — [GLM и артефакты state-only](../pipeline/glm-state-artifacts.md).
 
 ## Ход этапа
 
@@ -27,6 +30,8 @@
   scoped или untrusted — отказ до процесса и prompt. С 29.10.2026 (factory-policy-v2,
   решение владельца) этапу разрешены оба режима службы — `api` и `coding-plan`: конвейер
   работает и на подписке, ключ активного режима подставляет `buildGlmChildEnv`.
+- У `state-only` в контексте обязателен абсолютный `stateDir`, полученный wrapper-ом от
+  раннера. Runtime выбирает его как рабочий каталог, даже если исходный cwd указывает на проект.
 - Монтируется только `factory-status` (`failOnStartupError`, без переподключения); его
   потеря — `glm_mcp_not_ready`, вызов без дескриптора hook — `glm_policy_hook_missing`.
 - Вопрос и approval этапа получают отказ сразу, обработчик человека не вызывается.
