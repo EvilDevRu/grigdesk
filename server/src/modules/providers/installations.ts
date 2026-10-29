@@ -93,11 +93,39 @@ export function registerProviderInstallations(fastify: FastifyInstance,
         return reply.code(error.statusCode).send({
           error: error.code,
           message: error.message,
+          holders: error.holders ?? [],
           snapshot: await service.currentLifecycle(),
         });
       }
     });
   }
+
+  // Подтверждённое закрытие живых сессий исполнителя перед повтором операции.
+  // Тело пустое: цель закрывается адресом провайдера, а процессы — записями lease-журнала.
+  fastify.post<{ Params: { id: string } }>(
+    '/api/providers/installations/v2/:id/sessions/close',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          propertyNames: false,
+          additionalProperties: false,
+        },
+      },
+    }, async (request, reply) => {
+      try {
+        return await service.closeLifecycleSessions(request.params.id);
+      } catch (error) {
+        if (!(error instanceof ProviderInstallError)) {
+          throw error;
+        }
+
+        return reply.code(error.statusCode).send({
+          error: error.code,
+          message: error.message,
+        });
+      }
+    });
 
   fastify.post('/api/providers/installations/v2/recovery/resolve', async (_request, reply) => {
     try {

@@ -41,11 +41,43 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
   }
 
-  const [directoryFlag, directory, providerFlag, providerId, resourceFlag, resourceKey,
-    separator, command, ...args] = argv;
+  // Флаги читаются парно до «--»: метка разговора приходит только от живой
+  // сессии чата, а probe и usage запускают helper без неё.
+  let directory = '';
+  let providerId = '';
+  let resourceKey = '';
+  let chatKey: string | null = null;
+  let index = 0;
 
-  if (directoryFlag !== '--lease-dir' || !directory || !path.isAbsolute(directory)
-    || providerFlag !== '--provider' || !providerId || resourceFlag !== '--resource' || !resourceKey
+  for (; index < argv.length; index += 2) {
+    const flag = argv[index];
+    const value = argv[index + 1];
+
+    if (flag === '--' || flag === undefined) {
+      break;
+    }
+    if (!['--lease-dir', '--provider', '--resource', '--job'].includes(flag)
+      || typeof value !== 'string') {
+      return 2;
+    }
+    if (flag === '--job') {
+      if (!/^[a-zA-Z0-9_-]{1,64}$/u.test(value)) {
+        return 2;
+      }
+
+      chatKey = value;
+    } else if (flag === '--lease-dir') {
+      directory = value;
+    } else if (flag === '--provider') {
+      providerId = value;
+    } else {
+      resourceKey = value;
+    }
+  }
+
+  const [separator, command, ...args] = argv.slice(index);
+
+  if (!directory || !path.isAbsolute(directory) || !providerId || !resourceKey
     || separator !== '--' || !command || !path.isAbsolute(command)) {
     return 2;
   }
@@ -58,6 +90,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     resourceKey,
     mode: 'reader',
     sessionId: sessionId === process.pid ? sessionId : undefined,
+    jobId: chatKey ?? undefined,
   });
 
   if (expectedIdentity && await executableIdentity(command).catch(() => null) !== expectedIdentity) {
@@ -130,6 +163,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       clearTimeout(killTimer);
     }
 
+    // Осиротевший потомок CLI может держать сессию сколь угодно долго: без верхней
+    // границы helper сам становился бы вечным процессом. Запись при таймауте
+    // остаётся и снимается следующим inspect/acquire либо подтверждённым закрытием.
+    const releaseDeadline = Date.now() + 120_000;
+
     for (;;) {
       try {
         await lease.release();
@@ -137,6 +175,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       } catch (error) {
         if (!(error instanceof InstallEnvironmentError) || error.code !== 'provider_in_use') {
           throw error;
+        }
+        if (Date.now() >= releaseDeadline) {
+          process.stderr.write('GrigDesk: cli_lease_release_timeout\n');
+          break;
         }
 
         await pause(100);

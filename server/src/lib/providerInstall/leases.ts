@@ -19,6 +19,14 @@ export interface CliLeaseInput {
   jobId?: string;
 }
 
+export interface CliLeaseHolder {
+  ownerPid: number;
+  childPid: number | null;
+  sessionId: number | null;
+  chatKey: string | null;
+  ageSeconds: number;
+}
+
 interface LeaseRecord {
   resourceKey: string;
   owner: DirectoryLockOwner;
@@ -334,4 +342,149 @@ export async function acquireCliLease(input: CliLeaseInput): Promise<CliLease> {
       }
     },
   };
+}
+
+function leasePaths(input: { directory: string; providerId: string }): {
+  directory: string;
+  mutexPath: string;
+  file: string;
+} {
+  const directory = path.join(input.directory,
+    createHash('sha256').update(input.providerId).digest('hex'));
+
+  return {
+    directory,
+    mutexPath: path.join(directory, 'mutex'),
+    file: path.join(directory, 'records.json'),
+  };
+}
+
+/**
+ * Возраст процесса считается по полю starttime из /proc и общему uptime системы.
+ * Недоступный /proc даёт ноль: подтверждение закрывающего окна не должно падать
+ * из-за возраста, даже если цифра окажется заниженной.
+ */
+async function ownerAgeSeconds(owner: DirectoryLockOwner): Promise<number> {
+  try {
+    const uptime = Number((await fs.readFile('/proc/uptime', 'utf8')).split(/\s+/u)[0]);
+    const seconds = uptime - Number(owner.starttime) / 100;
+
+    return Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Живые readers провайдера для подтверждения человека перед обслуживанием копии.
+ * Проход выполняется под mutex и заодно вычищает протухшие записи из журнала:
+ * до появления этой проверки мёртвый holder мог блокировать exclusive до первого acquire.
+ */
+export async function inspectCliLeases(input: {
+  directory: string;
+  providerId: string;
+}): Promise<CliLeaseHolder[]> {
+  if (!path.isAbsolute(input.directory) || !/^[a-zA-Z0-9_-]{1,64}$/u.test(input.providerId)) {
+    throw new Error('Неверная цель CLI lease');
+  }
+
+  const { directory, mutexPath, file } = leasePaths(input);
+
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+
+  const lock = await acquireDirectoryLock(mutexPath, { waitMs: 2000 });
+
+  try {
+    const records = await retainRecords(await readRecords(file));
+
+    await writeDurableFile(file, JSON.stringify(records));
+
+    return Promise.all(records.filter((record) => record.mode === 'reader').map(async (record) => ({
+      ownerPid: record.owner.pid,
+      childPid: record.child?.pid ?? null,
+      sessionId: record.sessionId,
+      chatKey: record.jobId,
+      ageSeconds: await ownerAgeSeconds(record.owner),
+    })));
+  } finally {
+    await lock.release();
+  }
+}
+
+/**
+ * Подтверждённое человеком закрытие живых readers: сигнал получает вся группа
+ * владельца записи, включая CLI и его потомков. Свою группу сервер пропускает:
+ * его записи не являются живыми сессиями исполнителя. Перед каждым сигналом
+ * сверяется starttime, чтобы переиспользованный PID не получил чужой SIGKILL.
+ */
+export async function terminateCliLeaseHolders(input: {
+  directory: string;
+  providerId: string;
+}): Promise<void> {
+  if (!path.isAbsolute(input.directory) || !/^[a-zA-Z0-9_-]{1,64}$/u.test(input.providerId)) {
+    throw new Error('Неверная цель CLI lease');
+  }
+
+  const { mutexPath, file } = leasePaths(input);
+
+  const lock = await acquireDirectoryLock(mutexPath, { waitMs: 2000 });
+
+  try {
+    const records = await retainRecords(await readRecords(file));
+    const targets = records.filter((record) => record.mode === 'reader'
+      && record.owner.pid !== process.pid);
+
+    await writeDurableFile(file, JSON.stringify(records));
+    await Promise.all(targets.map((record) => terminateHolderGroup(record)));
+  } finally {
+    await lock.release();
+  }
+}
+
+/**
+ * Дожидается выхода и holder, и записанного child: мёртвый holder ещё не означает
+ * мёртвый CLI, а живой CLI продлевает запись через сессию своих потомков.
+ * Неизвестное состояние процесса держит ожидание до верхней границы и SIGKILL.
+ */
+async function terminateHolderGroup(record: LeaseRecord): Promise<void> {
+  const alive = async () => (await processOwnerState(record.owner)) !== 'dead'
+    || (!!record.child && (await processOwnerState(record.child)) !== 'dead');
+
+  await signalHolderProcesses(record, 'SIGTERM');
+
+  const deadline = Date.now() + 5000;
+
+  while (await alive()) {
+    if (Date.now() >= deadline) {
+      await signalHolderProcesses(record, 'SIGKILL');
+
+      return;
+    }
+
+    await sleep(100);
+  }
+}
+
+/**
+ * Сигнал адресуется и группе, и самому процессу: собственная группа CLI покрывает
+ * его потомков, а убитый раньше holder не должен оставлять живым записанный child.
+ * Свёрка starttime перед каждым сигналом исключает переиспользованный PID.
+ */
+async function signalHolderProcesses(record: LeaseRecord, signal: NodeJS.Signals): Promise<void> {
+  for (const owner of [record.owner, ...(record.child ? [record.child] : [])]) {
+    const stat = await fs.readFile(`/proc/${owner.pid}/stat`, 'utf8').catch(() => null);
+    const starttime = stat ? fieldsOf(stat)[19] : null;
+
+    if (!starttime || starttime !== owner.starttime) {
+      continue;
+    }
+
+    for (const pid of [-owner.pid, owner.pid]) {
+      try {
+        process.kill(pid, signal);
+      } catch {
+        // Группа или процесс уже завершились: следующая проверка зафиксирует смерть.
+      }
+    }
+  }
 }

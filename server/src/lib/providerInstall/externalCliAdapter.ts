@@ -2,7 +2,7 @@ import { isRecord } from '../../../../shared/lib/objects.ts';
 import type { ExecutorAdapter } from '../executors/index.ts';
 import type { NativeSettingsContext } from '../executorSettings/types.ts';
 import { prepareExternalCliRuntime, type ExternalCliRuntime } from './externalCliRuntime.ts';
-import { withExternalCliProcess } from './externalCliProcess.ts';
+import { withExternalCliProcess, withExternalCliLeaseJob } from './externalCliProcess.ts';
 import { settingsFingerprint } from '../executorSettings/fingerprint.ts';
 
 /**
@@ -126,7 +126,12 @@ export function externalCliAdapter(adapter: ExecutorAdapter, parent = process.en
        * Иначе проверка runtime при reuse обращалась бы к другому окружению и CLI.
        */
       async open(input: Record<string, unknown>, ...rest: unknown[]) {
-        const handle = await open(input, ...rest) as Record<string, unknown>;
+        const chatKey = typeof input.chatKey === 'string' ? input.chatKey : '';
+        const spawn = () => open(input, ...rest);
+        const opened = await (chatKey
+          ? withExternalCliLeaseJob(chatKey, spawn)
+          : spawn());
+        const handle = opened as Record<string, unknown>;
         const runtime = input.preparedRuntime && typeof input.preparedRuntime === 'object'
           ? runtimeByHandle.get(input.preparedRuntime) : undefined;
 

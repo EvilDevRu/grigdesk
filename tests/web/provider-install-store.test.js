@@ -70,6 +70,112 @@ test('prepare сразу открывает окно, скрывает прош�
   }
 });
 
+test('живые сессии показываются подтверждением закрытия до старта операции', async (t) => {
+  const holders = [
+    {
+      ownerPid: 2049269,
+      childPid: 2049280,
+      sessionId: 2049269,
+      chatKey: 'smvsh2vwj3uw',
+      ageSeconds: 2596,
+    },
+    {
+      ownerPid: 2042617,
+      childPid: 2042632,
+      sessionId: 2042617,
+      chatKey: null,
+      ageSeconds: 121,
+    },
+  ];
+  const lifecyclePreparation = () => preparation({
+    schemaVersion: 2,
+    installationId: null,
+    method: 'npm',
+    affectedProviderIds: [card.id],
+    fromVersion: '1.0.0',
+    targetVersion: '2.0.0',
+    footprint: [],
+    shellChanges: [],
+    operation: 'update',
+    holders,
+  });
+
+  await t.test('подтверждение закрывает сессии и продолжает операцию', async (scenario) => {
+    const fixture = await clientFixture(scenario, {
+      prepare: lifecyclePreparation,
+      post: async (url) => {
+        if (url.endsWith('/sessions/close')) {
+          return { holders: [] };
+        }
+
+        return structuredClone(snapshot(job(), 1));
+      },
+    });
+
+    fixture.providers.providers[0].installation.lifecycleProtocol = 2;
+
+    await fixture.store.requestInstall(card.id, 'update');
+
+    const urls = fixture.calls.posts.map((call) => call.url);
+
+    assert.deepEqual(urls, [
+      `/api/providers/installations/v2/${card.id}/update/prepare`,
+      `/api/providers/installations/v2/${card.id}/sessions/close`,
+      `/api/providers/installations/v2/${card.id}/update/start`,
+    ]);
+    assert.equal(fixture.calls.confirmations.length, 2);
+    assert.ok(fixture.calls.confirmations[0].text.includes('smvsh2vwj3uw'));
+    assert.ok(fixture.calls.confirmations[0].text.includes('2042617'));
+    assert.equal(fixture.calls.confirmations[0].details.danger, true);
+    assert.ok(fixture.store.snapshot.active, 'операция стартовала и идёт');
+  });
+
+  await t.test('отказ закрывать сессии отменяет операцию без старта', async (scenario) => {
+    const fixture = await clientFixture(scenario, {
+      prepare: lifecyclePreparation,
+      confirm: false,
+    });
+
+    fixture.providers.providers[0].installation.lifecycleProtocol = 2;
+
+    await fixture.store.requestInstall(card.id, 'update');
+
+    const urls = fixture.calls.posts.map((call) => call.url);
+
+    assert.deepEqual(urls, [`/api/providers/installations/v2/${card.id}/update/prepare`]);
+    assert.equal(fixture.calls.confirmations.length, 1);
+    assert.equal(fixture.store.visible, false);
+    assert.equal(fixture.store.busy, false);
+  });
+
+  await t.test('оставшиеся живые сессии останавливают операцию понятным отказом', async (scenario) => {
+    const fixture = await clientFixture(scenario, {
+      prepare: lifecyclePreparation,
+      post: async (url) => {
+        if (url.endsWith('/sessions/close')) {
+          return { holders };
+        }
+
+        return structuredClone(snapshot(job(), 1));
+      },
+    });
+
+    fixture.providers.providers[0].installation.lifecycleProtocol = 2;
+
+    await fixture.store.requestInstall(card.id, 'update');
+
+    const urls = fixture.calls.posts.map((call) => call.url);
+
+    assert.deepEqual(urls, [
+      `/api/providers/installations/v2/${card.id}/update/prepare`,
+      `/api/providers/installations/v2/${card.id}/sessions/close`,
+    ]);
+    assert.equal(fixture.calls.confirmations.length, 1);
+    assert.ok(fixture.store.selectedFailure);
+    assert.equal(fixture.store.busy, false);
+  });
+});
+
 test('известные коды сохраняют message сервера в отказах и снимках', async (t) => {
   const message = 'Не подтверждена версия конкретного файла /fixture/bin/cli';
   const fixture = await clientFixture(t, {

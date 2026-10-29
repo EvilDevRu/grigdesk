@@ -566,6 +566,41 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
         throw new Error(t('settings.providerNoResponse'));
       }
 
+      // Живые сессии закрываются только явным подтверждением: владелец видит,
+      // какие разговоры прервутся, до запуска операции вместо загадочного 409.
+      const holders = response.holders ?? [];
+
+      if (holders.length) {
+        const minutesOf = (seconds: number) => Math.max(1, Math.round(seconds / 60));
+        const holderLines = holders.map((holder) => holder.chatKey
+          ? t('settings.providerSessionHoldersChatLine',
+            { chat: holder.chatKey, minutes: minutesOf(holder.ageSeconds) })
+          : t('settings.providerSessionHoldersProcessLine',
+            { pid: String(holder.ownerPid), minutes: minutesOf(holder.ageSeconds) }));
+        const closeConfirmed = await confirmDialog(
+          `${t('settings.providerSessionHoldersBody')}\n${holderLines.join('\n')}`, {
+            title: t('settings.providerSessionHoldersTitle', { name: provider.name }),
+            okText: t('settings.providerSessionHoldersAction'),
+            danger: true,
+          });
+
+        if (!closeConfirmed || scope !== generation) {
+          if (scope === generation) {
+            restoreView();
+          }
+
+          return;
+        }
+
+        const closed = await api.post(
+          `/api/providers/installations/v2/${encodeURIComponent(id)}/sessions/close`, {});
+        const remaining = isRecord(closed) && Array.isArray(closed.holders) ? closed.holders : [];
+
+        if (remaining.length) {
+          throw new Error(t('settings.providerSessionHoldersCloseFailed'));
+        }
+      }
+
       const actionKeys = {
         install: 'settings.providerInstallationInstall',
         update: 'settings.providerInstallationUpdate',

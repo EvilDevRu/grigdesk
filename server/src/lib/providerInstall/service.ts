@@ -37,7 +37,7 @@ import {
 import { setupBashTerminal } from './terminalSetup.ts';
 import {
   projectLifecycleV1, type ProviderLifecycleJob, type ProviderLifecycleOperation,
-  type ProviderLifecycleSnapshot, type ProviderMigrationEntry,
+  type ProviderLifecycleSnapshot, type ProviderMigrationEntry, type ProviderSessionHolder,
 } from '../../../../shared/chat/providerLifecycleContracts.ts';
 import {
   prepareLifecycleContext, lifecycleEnvironmentHash, type LifecycleRecord,
@@ -55,7 +55,8 @@ import {
 } from './migration.ts';
 import { resolveUserCliNpm, resolveUserCliEnvironment } from './userCliEnvironment.ts';
 import { clearRemovedCliBinding } from './lifecycleBinding.ts';
-import { acquireCliLease, type CliLease } from './leases.ts';
+import { acquireCliLease, inspectCliLeases, terminateCliLeaseHolders,
+  type CliLease } from './leases.ts';
 import { assertNoExternalCliProcess } from './externalProcesses.ts';
 import { InstallEnvironmentError } from './npmEnvironment.ts';
 import type {
@@ -142,11 +143,14 @@ interface InstallResult {
 export class ProviderInstallError extends Error {
   readonly statusCode: number;
   readonly code: string;
+  readonly holders?: ProviderSessionHolder[];
 
-  constructor(statusCode: number, code: string, message: string) {
+  constructor(statusCode: number, code: string, message: string,
+    holders?: ProviderSessionHolder[]) {
     super(message);
     this.statusCode = statusCode;
     this.code = code;
+    this.holders = holders;
   }
 }
 
@@ -747,7 +751,56 @@ export class ProviderInstallService {
 
       this.lifecyclePreparations.set(record.preview.token, record);
 
-      return structuredClone(record.preview);
+      // Живые сессии видно уже на подготовке: окно спрашивает подтверждение
+      // закрытия до старта, а не после отказа exclusive по таймауту.
+      return { ...structuredClone(record.preview), holders: await this.sessionHolders(id) };
+    } catch (error) {
+      throw this.lifecycleFailure(error);
+    }
+  }
+
+  /**
+   * Живые readers провайдера из lease-журнала: чат по метке записи, возраст по
+   * времени старта процесса. Недоступный журнал не блокирует подготовку — окно
+   * просто не покажет шаг подтверждения и получит прежний отказ старта.
+   */
+  private async sessionHolders(id: string): Promise<ProviderSessionHolder[]> {
+    try {
+      return await inspectCliLeases({
+        directory: path.join(this.roots.dataHome, 'provider-cli-leases'),
+        providerId: id,
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Подтверждённое человеком закрытие живых сессий исполнителя перед обслуживанием.
+   * Сигнал получают только группы процессов, доказанно записанные в lease-журнал
+   * этого провайдера; ответ отдаёт остаток живых для повторного шага в окне.
+   */
+  async closeLifecycleSessions(id: string): Promise<{ holders: ProviderSessionHolder[] }> {
+    await this.initialize();
+    this.assertNotBlocked();
+
+    if (this.admitted || this.closing) {
+      throw new ProviderInstallError(409, 'busy', 'Уже идёт обслуживание исполнителя');
+    }
+
+    const adapter = (await this.ports.adaptersOf()).get(id);
+
+    if (!adapter) {
+      throw new ProviderInstallError(404, 'unknown_provider', 'Исполнитель не найден');
+    }
+
+    try {
+      await terminateCliLeaseHolders({
+        directory: path.join(this.roots.dataHome, 'provider-cli-leases'),
+        providerId: id,
+      });
+
+      return { holders: await this.sessionHolders(id) };
     } catch (error) {
       throw this.lifecycleFailure(error);
     }
@@ -867,7 +920,14 @@ export class ProviderInstallService {
       await lease?.release();
       this.admitted = false;
 
-      throw this.lifecycleFailure(error);
+      const failure = this.lifecycleFailure(error);
+
+      // Отказ по занятой копии показывает живые сессии сразу в окне повтора,
+      // а не после нового прохода prepare.
+      throw failure.code === 'provider_in_use'
+        ? new ProviderInstallError(failure.statusCode, failure.code, failure.message,
+          await this.sessionHolders(id))
+        : failure;
     }
   }
 

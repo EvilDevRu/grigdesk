@@ -18,6 +18,16 @@ export interface ExternalCliProcessContext {
 }
 
 const contexts = new AsyncLocalStorage<ExternalCliProcessContext>();
+const leaseJobs = new AsyncLocalStorage<string>();
+
+/**
+ * Открытие живой сессии чата помечает spawns своего вызова разговором.
+ * Метка попадает в lease-запись хелпера и позволяет окну установки показать,
+ * какой именно чат держит копию исполнителя, не раскрывая окружение CLI.
+ */
+export function withExternalCliLeaseJob<T>(job: string, action: () => T): T {
+  return leaseJobs.run(job, action);
+}
 
 /**
  * Runtime учитывает выбранную программу и окружение, включая маршрут авторизации.
@@ -84,11 +94,13 @@ function launchArguments(file: string, rest: unknown[], mode: 'spawn' | 'execFil
   const index = hasArgs ? 1 : 0;
   const options = isRecord(rest[index]) ? rest[index] : {};
   const tail = rest.slice(index + (isRecord(rest[index]) ? 1 : 0));
+  const job = leaseJobs.getStore();
   const helper = helperCommand('external-cli-lease', [
     ...(context.executableIdentity ? ['--identity', context.executableIdentity] : []),
     '--lease-dir', context.leaseDirectory,
     '--provider', context.providerId,
     '--resource', context.resourceKey,
+    ...(job ? ['--job', job] : []),
     '--', file, ...args,
   ]);
 

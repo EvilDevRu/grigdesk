@@ -50,6 +50,14 @@ export interface ProviderLifecycleShellChange {
   block: string;
 }
 
+export interface ProviderSessionHolder {
+  ownerPid: number;
+  childPid: number | null;
+  sessionId: number | null;
+  chatKey: string | null;
+  ageSeconds: number;
+}
+
 export interface ProviderLifecyclePreparation {
   schemaVersion: 2;
   token: string;
@@ -66,6 +74,7 @@ export interface ProviderLifecyclePreparation {
   footprint: ProviderLifecycleFootprint[];
   shellChanges: ProviderLifecycleShellChange[];
   warnings: ProviderInstallNotice[];
+  holders?: ProviderSessionHolder[];
 }
 
 export interface ProviderMigrationEntry {
@@ -186,6 +195,20 @@ export function projectLifecycleV1(snapshot: ProviderLifecycleSnapshot): Provide
 }
 
 /**
+ * Живой holder — процесс исполнителя с доказанным владельцем в lease-журнале.
+ * Поле необязательное: сервер без инспекции сессий остаётся читаемым клиентом.
+ */
+export function isProviderSessionHolder(value: unknown): value is ProviderSessionHolder {
+  return isRecord(value) && Number.isSafeInteger(value.ownerPid) && Number(value.ownerPid) > 0
+    && (value.childPid === null || Number.isSafeInteger(value.childPid) && Number(value.childPid) > 0)
+    && (value.sessionId === null || Number.isSafeInteger(value.sessionId)
+      && Number(value.sessionId) > 0)
+    && (value.chatKey === null || typeof value.chatKey === 'string' && value.chatKey.length <= 64)
+    && typeof value.ageSeconds === 'number' && Number.isFinite(value.ageSeconds)
+    && Number(value.ageSeconds) >= 0;
+}
+
+/**
  * В preview клиент получает только объяснение подтверждаемого эффекта и непрозрачный token.
  * Пути не становятся командами: start использует серверную подготовку, не возвращённые поля.
  */
@@ -202,7 +225,9 @@ export function isProviderLifecyclePreparation(value: unknown): value is Provide
     || new Set(value.affectedProviderIds).size !== value.affectedProviderIds.length
     || !Array.isArray(value.footprint) || value.footprint.length > 512
     || !Array.isArray(value.shellChanges) || !Array.isArray(value.warnings)
-    || !value.warnings.every(notice)) {
+    || !value.warnings.every(notice)
+    || value.holders !== undefined && (!Array.isArray(value.holders) || value.holders.length > 64
+      || !value.holders.every(isProviderSessionHolder))) {
     return false;
   }
 

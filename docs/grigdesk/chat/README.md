@@ -21,6 +21,7 @@
 - [Проверка лимитов Kimi сохраняет путь к пользовательскому Node.js](kimi-usage-node-path.md)
 - [Окружение запуска и источники лимитов всех встроенных исполнителей](provider-runtime-environments.md)
 - [Lifecycle внешних CLI: четыре операции, PTY/factory и восстановление](external-cli-lifecycle.md)
+- [Живые сессии держат копию: инспекция holders и подтверждение закрытия в окне установки](provider-session-holders-close.md)
 - [Переустановка сохраняет старый prefix вместо текущего каталога пользовательского npm](provider-reinstall-prefix.md)
 - [Установка после удаления: отсутствующая привязка и оставшаяся npm-копия](provider-install-stale-binding.md)
 - [Проверка installer-хуков: точная версия или прежние байты](provider-install-hooks-review-gate.md)
