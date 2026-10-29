@@ -35,6 +35,8 @@ import type {
   InTurnUnavailableReason,
 } from '../../../../shared/chat/chatInTurnContracts.ts';
 import { KIMI_MODELS } from './profile.ts';
+import { runScopedKimi } from './scopedTurn.ts';
+import type { WorkToolsPort } from '../executors/workIpc.ts';
 import { inspectKimiRuntimeHost } from './runtimePreflight.ts';
 import {
   buildKimiSandboxLaunch,
@@ -385,6 +387,7 @@ export async function runContainedKimi({
   chatKey,
   mcpServers = [],
   workTools,
+  workspaceAccess,
   log,
   deps = {},
 }: {
@@ -417,9 +420,28 @@ export async function runContainedKimi({
   chatKey?: string;
   mcpServers?: readonly KimiMcpServerSpec[];
   workTools?: { descriptors?: unknown } | null;
+  workspaceAccess?: unknown;
   log?: KimiRuntimeLog;
   deps?: KimiRuntimeDeps;
 }) {
+  if (workspaceAccess) {
+    return runScopedKimi({
+      config,
+      env,
+      cwd,
+      message: String(message ?? ''),
+      model,
+      effort,
+      signal,
+      onStep,
+      onProgress,
+      onRunMetadata,
+      workspaceAccess,
+      workTools: workTools as WorkToolsPort | undefined,
+      startServer: deps.startServer,
+    });
+  }
+
   const spawnProcess = deps.spawn || spawn;
   const makeProxy = deps.createProxy || createKimiEgressProxy;
   const buildLaunch = deps.buildLaunch || buildKimiSandboxLaunch;

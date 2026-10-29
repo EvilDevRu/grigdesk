@@ -65,6 +65,7 @@ async function fixture(t, scenario = 'reviews', overrides = {}, effectiveSetting
       GRIGDESK_CODEX_FIXTURE_TRACE: trace,
       GRIGDESK_CODEX_FIXTURE_CLI_VERSION: '0.164.0',
       GRIGDESK_CODEX_FIXTURE_SCENARIO: scenario,
+      GRIGDESK_CODEX_FIXTURE_EXPECT_HOOK: overrides.workspaceAccess ? '0' : '1',
       GRIGDESK_CODEX_EFFECTIVE_SETTINGS: JSON.stringify(effectiveSettings),
       GRIGDESK_CODEX_EFFECT_MARKER: marker,
     },

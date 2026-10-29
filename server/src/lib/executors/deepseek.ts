@@ -27,6 +27,9 @@ import { DSH_TURN_FAILURE_RULES } from '../deepseek/turnFailureRules.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
 import { deepSeekNativeSettings } from '../executorSettings/deepseek.ts';
 import { installedLegacyBuildId } from '../deepseek/legacyCutover.ts';
+import { runScopedDsh } from './scopedDsh.ts';
+import { buildDeepSeekChildEnv } from '../deepseek/env.ts';
+import type { WorkToolsPort } from './workIpc.ts';
 
 type DeepSeekConfig = DeepSeekRuntimeConfig & {
   rootDir?: string;
@@ -94,6 +97,11 @@ export default {
   color: '#4D6BFE',
   order: 4,
   workToolsTransport: 'mcp',
+  async scopedWorkspace(config: DeepSeekConfig) {
+    const runtime = await preparedDeepSeekRuntime(config);
+
+    return process.platform === 'linux' && runtime.metadata?.capabilities.toolPermissions === true;
+  },
   workdir: { switch: 'reseed', roots: 'single' },
   sessionBinding: {
     /**
@@ -238,6 +246,26 @@ export default {
    * Режим чтения исключает проектные MCP ещё до запуска их процессов.
    */
   async run(options: Parameters<typeof runDeepSeekWebTurn>[0]) {
+    if (options.workspaceAccess) {
+      const runtime = await preparedDeepSeekRuntime(options.config, options.preparedRuntime);
+
+      if (!options.cwd) {
+        throw new Error('Триаж DeepSeek требует каталог результата.');
+      }
+
+      return runScopedDsh({
+        ...options,
+        cwd: options.cwd,
+        message: String(options.message ?? ''),
+        workspaceAccess: options.workspaceAccess,
+        workTools: options.workTools as WorkToolsPort | undefined,
+      }, {
+        runtime,
+        childEnv: (home) => buildDeepSeekChildEnv({ source: options.env ?? process.env, dshHome: home }),
+        ...(options.startServer ? { startServer: options.startServer } : {}),
+      });
+    }
+
     const project = options.cwd && (options.factory || options.permissionMode !== 'read-only')
       ? await readProjectMcpServers(options.cwd) : { file: null, servers: [], warnings: [] };
     for (const warning of project.warnings) {

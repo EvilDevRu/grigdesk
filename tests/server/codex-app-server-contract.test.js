@@ -262,6 +262,7 @@ test('Codex разделяет читаемые и writable roots триажа �
 
   await codex.run(runOptions(f, {
     cwd: output,
+    env: { ...f.env, GRIGDESK_CODEX_FIXTURE_EXPECT_HOOK: '0' },
     extraDirs: [],
     workspaceAccess: {
       readableRoots: [repo, input, output],

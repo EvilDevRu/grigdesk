@@ -803,6 +803,13 @@ export function runFixture({ onTurn, onBeforeTurn, effectiveSettings } = {}) {
     }
 
     if (phase === 'thread') {
+      if (message.method === 'config/read'
+          && argv.some((value) => String(value).startsWith('default_permissions='))) {
+        send({ id: message.id, result: { config: { mcp_servers: {} } } });
+
+        return;
+      }
+
       if (scenario === 'native-settings' && message.method === 'config/read') {
         send({ id: message.id, result: { config: { features: { future_flag: false } } } });
 

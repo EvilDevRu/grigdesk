@@ -24,7 +24,11 @@ import { createCodexStepNormalizer } from './_codexSteps.ts';
 import { CODEX_UNTRUSTED_INPUT, runCodexUntrusted } from './_codexUntrusted.ts';
 import type { PreparedExecutorRuntime, PreparedNativeSettings } from '../executorSettings/types.ts';
 import { codexNativeSettings } from '../executorSettings/codex.ts';
-import { nativeSettingsTomlArgs } from '../executorSettings/toml.ts';
+import { nativeSettingsTomlArgs, settingsTomlArgs } from '../executorSettings/toml.ts';
+import {
+  assertCodexWorkspaceMcp, assertCodexWorkspaceProfile, codexWorkspaceMcpOverrides,
+  codexWorkspaceProfile, codexWorkspaceProtocol,
+} from './_codexScopedWorkspace.ts';
 import { verifyNativeSettings } from '../executorSettings/capability.ts';
 import { decodeSettingsJson } from '../../../../shared/chat/providerSettingsContracts.ts';
 import {
@@ -56,8 +60,6 @@ import { ExecutorRuntimeError } from './errors.ts';
 import { codexQuestionPresentation, codexQuestionResponse } from './_codexQuestions.ts';
 
 const APP_SERVER_TIMEOUT_MS = 15_000;
-const SCOPED_WORKSPACE_CACHE_MS = 60_000;
-const scopedWorkspaceCache = new Map<string, { at: number; value: Promise<boolean> }>();
 
 // Серверный config в объёме, который читает исполнитель. Полная его форма
 // объявлена в config.ts; адаптер получает его целиком.
@@ -254,33 +256,12 @@ interface CodexTurn {
   reject: (error: unknown) => void;
 }
 
-/** Старый app-server принимает workspaceWrite, но читает весь хост — это не triage-safe. */
+/**
+ * Допуск триажа следует протоколу установленного CLI, включая новые permission profiles.
+ * Отсутствие проверяемого ограничения чтения по-прежнему закрывает модель для триажа.
+ */
 export async function codexSupportsRestrictedWorkspace(bin: unknown): Promise<boolean> {
-  const key = String(bin || '');
-  if (!key) return false;
-  const cached = scopedWorkspaceCache.get(key);
-  if (cached && Date.now() - cached.at < SCOPED_WORKSPACE_CACHE_MS) {
-    return cached.value;
-  }
-  const value = (async () => {
-    const schemaDir = await fs.mkdtemp(path.join(os.tmpdir(), 'grigdesk-codex-scope-'));
-    try {
-      await new Promise<void>((resolve, reject) => {
-        execFile(key, ['app-server', 'generate-ts', '--out', schemaDir], {
-          timeout: 10_000,
-          maxBuffer: 1024 * 1024,
-        }, (error) => (error ? reject(error) : resolve()));
-      });
-      const schema = await fs.readFile(path.join(schemaDir, 'v2', 'SandboxPolicy.ts'), 'utf8');
-      return /\breadOnlyAccess\b/.test(schema);
-    } catch {
-      return false;
-    } finally {
-      await fs.rm(schemaDir, { recursive: true, force: true }).catch(() => {});
-    }
-  })();
-  scopedWorkspaceCache.set(key, { at: Date.now(), value });
-  return value;
+  return Boolean(bin && await codexWorkspaceProtocol(String(bin)));
 }
 
 function windowLabel(value: unknown) {
@@ -1319,6 +1300,10 @@ export function openCodexSession({
       excludeSlashTmp: workspaceAccess?.excludeSlashTmp ?? false,
     };
   const newMode = !!permissionMode && permissionMode !== 'auto' && !workspaceAccess;
+  const workspaceProfileId = `grigdesk-triage-${randomUUID()}`;
+  const workspaceProfile = workspaceAccess
+    ? codexWorkspaceProfile(config.codexBin, env ?? process.env, roots, writableRoots) : null;
+  let namedWorkspaceProfile = false;
 
   /**
    * Новые профили подтверждают полную sandbox, включая roots, сеть и временные пути.
@@ -1339,6 +1324,9 @@ export function openCodexSession({
     const expectedRoots = [...writableRoots].sort();
     const mismatch = opened?.approvalPolicy !== approvalPolicy
       || opened?.approvalsReviewer !== approvalsReviewer || actual?.type !== expected.type
+      || (namedWorkspaceProfile && (actual?.networkAccess !== false
+        || actual.excludeTmpdirEnvVar !== true || actual.excludeSlashTmp !== true
+        || JSON.stringify(actualRoots) !== JSON.stringify(expectedRoots)))
       || (newMode && Object.keys(expected).some((key) => (
         key === 'writableRoots'
           ? JSON.stringify(actualRoots) !== JSON.stringify(expectedRoots)
@@ -1383,12 +1371,35 @@ export function openCodexSession({
     return `${current}${String(chunk || '')}`.slice(-limit);
   }
 
-  const commandHook = directCommandHook({
+  const commandHook = workspaceAccess ? null : directCommandHook({
     blockDirectSsh: providerSettings?.blockDirectSsh !== false,
     blockDirectDb: providerSettings?.blockDirectDb === true,
     strictUnknownDbClient: providerSettings?.strictUnknownDbClient === true,
   });
-  const child = spawn(config.codexBin, codexProcessArgs(providerSettings, nativeSettings), {
+  const processArgs = codexProcessArgs(workspaceAccess
+    ? {
+      blockDirectSsh: false,
+      blockDirectDb: false,
+      strictUnknownDbClient: false,
+    }
+    : providerSettings, nativeSettings);
+
+  if (workspaceProfile) {
+    processArgs.splice(processArgs.length - 1, 0, ...settingsTomlArgs({
+      default_permissions: workspaceProfileId,
+      permissions: { [workspaceProfileId]: workspaceProfile },
+      mcp_servers: {},
+      notify: [],
+      features: {
+        hooks: false,
+        apps: false,
+        plugins: false,
+        remote_plugin: false,
+      },
+    }));
+  }
+
+  const child = spawn(config.codexBin, processArgs, {
     cwd,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -2343,10 +2354,14 @@ export function openCodexSession({
   });
 
   const ready = (async () => {
-    // У новых app-server поле readOnlyAccess снято. Для строгих readable roots
-    // нельзя молча расширить чтение до всего хоста: такой запуск закрываем заранее.
-    if (workspaceAccess && !await codexSupportsRestrictedWorkspace(config.codexBin)) {
-      throw new Error('Установленный Codex не поддерживает ограниченные readable roots.');
+    if (workspaceAccess) {
+      const protocol = await codexWorkspaceProtocol(config.codexBin);
+
+      if (!protocol) {
+        throw new Error('Установленный Codex не поддерживает ограниченные readable roots.');
+      }
+
+      namedWorkspaceProfile = protocol === 'profile';
     }
 
     await request('initialize', {
@@ -2390,13 +2405,16 @@ export function openCodexSession({
       }
     }
 
+    const disabledMcp = workspaceAccess ? codexWorkspaceMcpOverrides(
+      await request('config/read', { cwd, includeLayers: false }),
+    ) : null;
     const dynamicTools = codexDynamicTools(workTools?.descriptors || []);
     const common = {
       ...(model && { model }),
       cwd,
       approvalPolicy,
       approvalsReviewer,
-      sandbox: modeProfile.sandbox,
+      ...(namedWorkspaceProfile ? { permissions: workspaceProfileId } : { sandbox: modeProfile.sandbox }),
       // Доверенные каталоги «Настройки → Исполнители» обязаны быть рабочими корнями,
       // а не только writable-песочницей: `codex exec --add-dir` давал агенту именно
       // рабочую область, и после переезда на app-server она сузилась до cwd.
@@ -2404,6 +2422,7 @@ export function openCodexSession({
       config: {
         ...(nativeSettings?.payload as Record<string, unknown> ?? {}),
         ...codexAppServerConfig(compactWindow),
+        ...(disabledMcp ? { mcp_servers: disabledMcp } : {}),
         ...(newMode && modeProfile.sandbox === 'workspace-write' ? {
           'sandbox_workspace_write.writable_roots': writableRoots,
           'sandbox_workspace_write.network_access': true,
@@ -2442,6 +2461,14 @@ export function openCodexSession({
     }
 
     assertEffectiveProfile(opened);
+
+    if (namedWorkspaceProfile && workspaceProfile) {
+      assertCodexWorkspaceProfile(opened,
+        await request('config/read', { cwd, includeLayers: false }), workspaceProfileId, workspaceProfile);
+      assertCodexWorkspaceMcp(await request('mcpServerStatus/list', {
+        threadId: opened?.thread?.id || opened?.thread?.sessionId,
+      }));
+    }
 
     threadId = opened?.thread?.id || opened?.thread?.sessionId || threadId;
     actualModel = String(opened?.model || model || '');
@@ -2607,7 +2634,7 @@ export function openCodexSession({
           cwd,
           approvalPolicy,
           approvalsReviewer,
-          sandboxPolicy,
+          ...(namedWorkspaceProfile ? { permissions: workspaceProfileId } : { sandboxPolicy }),
           ...(model && { model }),
           ...(effort && { effort }),
           summary: 'detailed',

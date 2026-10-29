@@ -305,7 +305,7 @@ test(RUNTIME_TEST_3,
     assert.equal(f.children.length, started);
   });
 
-const RUNTIME_TEST_4 = 'factory, workspaceAccess, untrustedInput, scopedWorkspace'
+const RUNTIME_TEST_4 = 'factory, untrustedInput и произвольный scopedWorkspace'
   + ' — glm_consumer_unsupported без процесса';
 
 test(RUNTIME_TEST_4, async (t) => {
@@ -313,7 +313,6 @@ test(RUNTIME_TEST_4, async (t) => {
 
   for (const consumer of [
     { factory: true },
-    { workspaceAccess: { mode: 'write' } },
     { untrustedInput: { text: 'x' } },
     { scopedWorkspace: true },
     { chatKey: '' },
@@ -322,6 +321,13 @@ test(RUNTIME_TEST_4, async (t) => {
     await assert.rejects(f.run(consumer), { code: 'glm_consumer_unsupported' }, JSON.stringify(consumer));
   }
 
+  assert.equal(f.children.length, 0);
+});
+
+test('некорректные корни триажа отклоняются до процесса', async (t) => {
+  const f = await fixture(t);
+
+  await assert.rejects(f.run({ workspaceAccess: { mode: 'write' } }), /Корни триажа/u);
   assert.equal(f.children.length, 0);
 });
 

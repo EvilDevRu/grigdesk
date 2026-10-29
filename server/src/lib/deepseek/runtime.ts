@@ -423,6 +423,7 @@ export async function runDeepSeekTurn({
   providerSettings?: DeepSeekProviderSettings | null;
   nativeSettings?: PreparedNativeSettings;
   preparedRuntime?: PreparedExecutorRuntime;
+  workspaceAccess?: unknown;
   extraDirs?: readonly string[];
   attachmentPaths?: readonly string[];
   factory?: boolean;

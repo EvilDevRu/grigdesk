@@ -309,7 +309,9 @@ test('установленный Codex сохраняет необходимый
   }
   assert.equal(
     await codex.scopedWorkspace({ codexBin: CODEX_BIN }),
-    /\breadOnlyAccess\b/.test(sandboxPolicy),
+    /\breadOnlyAccess\b/.test(sandboxPolicy)
+      || [threadStartParams, threadResumeParams, turnStartParams]
+        .every((source) => /\bpermissions\?\s*:\s*string\b/u.test(source)),
     `Codex ${version}: capability scopedWorkspace не совпадает с живой схемой`,
   );
 

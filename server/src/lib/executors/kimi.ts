@@ -300,6 +300,7 @@ export default {
   color: '#6657d9',
   order: 3,
   workToolsTransport: 'mcp',
+  scopedWorkspace: () => process.platform === 'linux',
   sessionBinding: {
     authProfileId: () => KIMI_AUTH_PROFILE_ID,
     securityProfile: (config: KimiConfig) => kimiSecurityProfile(config),

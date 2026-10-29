@@ -31,6 +31,7 @@ import { GLM_FACTORY_STATUS_SERVER, GLM_FACTORY_STATUS_TOOLS, glmFactoryPolicy }
 import { assertGlmGenerationAdmission, describeGlmGenerationAsync, glmRuntimeConfig } from './generation.ts';
 import { adoptLegacyGlmHome, glmChatHome, prepareGlmLaunch, startGlmProcess } from './launch.ts';
 import { createGlmTurnGuard } from './permissions.ts';
+import { runScopedGlmTurn } from './scopedTurn.ts';
 import { assertGlmSessionJournal, glmSessionJournalDir, isGlmSessionCorrupt } from './session.ts';
 
 type PermissionAnswer = {
@@ -267,6 +268,10 @@ function turnFailure(error: unknown, state: { promptAttempted: boolean; bindingE
  * подготовка запуска и параметризованный web-ход DSH. Повторов нет ни на каком слое.
  */
 export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) {
+  if (options.workspaceAccess && !options.factory && !options.untrustedInput && !options.scopedWorkspace) {
+    return runScopedGlmTurn(options, deps);
+  }
+
   const selected = preflight(options, deps);
 
   if (options.signal?.aborted) {

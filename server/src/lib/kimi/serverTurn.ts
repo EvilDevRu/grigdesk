@@ -40,6 +40,7 @@ export interface KimiServerTurnOptions {
   signal?: AbortSignal;
   nativeSettings?: PreparedNativeSettings;
   controlledCommands?: boolean;
+  verifyTools?: (client: KimiServerClient, sessionId: string) => Promise<void>;
   onCommandContext?: (client: KimiServerClient, sessionId: string) => void | Promise<void>;
   onStep?: (step: ChatStep) => void;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
@@ -105,7 +106,8 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
   const server: KimiServerProcess = await (options.startServer || startKimiServer)({
     bin: options.bin,
     home: options.home,
-    debugEndpoints: options.controlledCommands === true,
+    debugEndpoints: options.controlledCommands === true || Boolean(options.verifyTools),
+    signal: options.signal,
     ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.env ? { env: options.env } : {}),
     log: options.log || null,
@@ -149,6 +151,8 @@ export async function runKimiServerTurn(options: KimiServerTurnOptions): Promise
     if (options.controlledCommands) {
       await options.onCommandContext?.(server.client, session.id);
     }
+
+    await options.verifyTools?.(server.client, session.id);
 
     const stepSink = createStepSink(options.onStep);
     const drafts = new Map<string, string>();

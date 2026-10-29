@@ -168,6 +168,85 @@ test('карточка триажа предлагает только испол
   );
 });
 
+test('системный Триаж сохраняет выбор GPT и его усилие вместо Claude', async (t) => {
+  const plugin = SYSTEM.find((entry) => entry.id === 'analysis');
+  const { apply, select, wrapper, saved, flushPromises } = await mountSettings(t, {
+    plugin,
+    value: {
+      provider: 'claude',
+      model: 'claude-opus-5',
+      effort: 'max',
+    },
+    prepareProviders(store) {
+      const provider = store.providers.find((entry) => entry.id === 'codex');
+
+      provider.available = true;
+      provider.models = [{
+        id: 'gpt-triage',
+        name: 'GPT для триажа',
+        efforts: ['low', 'high'],
+      }];
+    },
+  });
+
+  await select.setValue(modelOption('codex', 'gpt-triage'));
+  assert.equal(effortSelect(wrapper).element.value, '');
+  await effortSelect(wrapper).setValue('high');
+  await apply();
+  await flushPromises();
+
+  assert.deepEqual(saved.at(-1), {
+    id: 'analysis',
+    values: {
+      triageModel: {
+        provider: 'codex',
+        model: 'gpt-triage',
+        effort: 'high',
+      },
+      autoArbitrate: false,
+    },
+  });
+});
+
+for (const [provider, name, model] of [
+  ['glm', 'GLM', '["zai","glm-5.3"]'],
+  ['kimi', 'Kimi', 'kimi-code/k3'],
+  ['deepseek', 'DeepSeek', '["deepseek-official","deepseek-v4-flash"]'],
+]) {
+  test(`системный Триаж предлагает и сохраняет ${name} с выбранным усилием`, async (t) => {
+    const plugin = SYSTEM.find((entry) => entry.id === 'analysis');
+    const { apply, select, wrapper, saved, flushPromises } = await mountSettings(t, {
+      plugin,
+      prepareProviders(store) {
+        store.providers.push({
+          id: provider,
+          name,
+          available: true,
+          capabilities: { scopedWorkspace: true },
+          models: [{
+            id: model,
+            name: `${name} для триажа`,
+            efforts: ['low', 'high'],
+          }],
+        });
+      },
+    });
+
+    assert.ok(select.findAll('option')
+      .some((option) => option.attributes('value') === modelOption(provider, model)));
+    await select.setValue(modelOption(provider, model));
+    await effortSelect(wrapper).setValue('high');
+    await apply();
+    await flushPromises();
+
+    assert.deepEqual(saved.at(-1).values.triageModel, {
+      provider,
+      model,
+      effort: 'high',
+    });
+  });
+}
+
 test('«Презентации» предлагают Codex с безопасным вводом и сохраняют его модель и усилие', async (t) => {
   const plugin = { ...SYSTEM.find((entry) => entry.id === 'showcase'), setup: undefined };
   const { apply, wrapper, select, saved, flushPromises } = await mountSettings(t, {
