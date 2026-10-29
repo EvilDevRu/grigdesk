@@ -509,6 +509,14 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         const { tokens, tokensIsEstimate } = output.total();
 
         reportProgress(tokens, { tokensIsEstimate });
+      } else if (chunk.type === 'block-start' && chunk.blockType === 'tool-call') {
+        // DSH завершает блоки после всех аргументов; текст готов уже в начале вызова.
+        // Чужая попытка и поздние границы не меняют завершённые реплики.
+        for (const [draftId, text] of drafts) {
+          if (draftId.startsWith(`${attempt}-`)) {
+            emitText(draftId, text, true);
+          }
+        }
       } else if (chunk.type === 'block-end') {
         const text = blockText(chunk.block) || drafts.get(id) || '';
         if (text) emitText(id, text, true);

@@ -51,7 +51,7 @@ async function runWire(
   t,
   frames,
   reason = { kind: 'completed' },
-  { snapshot = { type: 'snapshot', records: [] } } = {},
+  { snapshot = { type: 'snapshot', records: [] }, observeProgress } = {},
 ) {
   const app = Fastify();
   const subscriptions = new Map();
@@ -129,7 +129,14 @@ async function runWire(
     message: 'Проверь ленту.',
     onStep: (step) => broadcast.push(step),
     onAssistantMessage: (event) => messages.push(event),
-    onProgress: (tokens, info = {}) => progress.push({ tokens, ...info }),
+    onProgress: (tokens, info = {}) => {
+      progress.push({ tokens, ...info });
+      observeProgress?.({
+        tokens,
+        messages,
+        broadcast,
+      });
+    },
     onRunMetadata: (value) => metadata.push(value),
     startServer: async () => ({ client, stop: async () => {} }),
   }).catch((error) => error);
@@ -278,6 +285,64 @@ function textEnd(text, attemptId) {
       text,
     },
   }, attemptId);
+}
+
+for (const kind of ['completed', 'interrupted']) {
+  test(`DeepSeek/GLM: начало аргументов закрывает текст, поздний ${kind} его не повторяет`, async (t) => {
+    const checkpoints = new Map();
+    const frames = [
+      attemptFrame('start', 'attempt-1'),
+      textDelta('Сохраняю '),
+      textDelta('документ.'),
+      streamChunk({ type: 'usage', usage: { outputTokens: 101 } }),
+      streamChunk({
+        type: 'block-start',
+        index: 1,
+        blockType: 'tool-call',
+      }, 'foreign-attempt'),
+      streamChunk({ type: 'usage', usage: { outputTokens: 102 } }),
+      streamChunk({
+        type: 'block-start',
+        index: 1,
+        blockType: 'tool-call',
+      }),
+      streamChunk({
+        type: 'tool-call-delta',
+        index: 1,
+        arguments: '{"content":',
+      }),
+      streamChunk({ type: 'usage', usage: { outputTokens: 103 } }),
+      textEnd('Сохраняю документ.', 'attempt-1'),
+      toolCall('write-1', 'write', { path: '/tmp/document.txt', content: 'Текст' }),
+      attemptFrame('end', 'attempt-1', { outcome: { kind: 'committed' } }),
+      attemptFrame('start', 'attempt-2'),
+      textDelta('Документ сохранён.', 'attempt-2'),
+      textEnd('Документ сохранён.', 'attempt-2'),
+    ];
+    const { messages } = await runWire(t, frames, { kind }, {
+      observeProgress: ({ tokens, messages, broadcast }) => {
+        checkpoints.set(tokens, structuredClone({ messages, broadcast }));
+      },
+    });
+
+    for (const tokens of [101, 102]) {
+      assert.deepEqual(checkpoints.get(tokens).messages.map((event) => event.complete), [false, false],
+        'растущий текст и граница чужой попытки сохраняют открытый блок');
+    }
+
+    const early = checkpoints.get(103);
+    const firstId = storageMessageId('attempt-1-0');
+    const first = messages.filter((event) => event.assistantMessageId === firstId);
+
+    assert.deepEqual(early.messages.map((event) => event.complete), [false, false, true]);
+    assert.equal(early.messages.at(-1).text, 'Сохраняю документ.');
+    assert.equal(early.messages.at(-1).assistantMessageId, firstId);
+    assert.equal(early.broadcast.some((step) => step.k === 'tool'), false, 'целый вызов ещё не пришёл');
+    assert.equal(first.filter((event) => event.complete).length, 1);
+    assert.equal(messages.some((event) => event.abandoned), false);
+    assert.equal(messages.at(-1).assistantMessageId, storageMessageId('attempt-2-0'));
+    assert.equal(messages.at(-1).text, 'Документ сохранён.');
+  });
 }
 
 test('web: конец брошенной попытки закрывает её черновик ответа', async (t) => {
