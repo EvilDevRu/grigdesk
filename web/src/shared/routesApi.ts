@@ -3,6 +3,8 @@
 // Каталог неизменяем; черновики хранят полный состав маршрутов, bootstrap и инструкции.
 // Публикация и откат используют ожидаемый хеш, чтобы сохранить CAS-семантику current.
 
+import { parseStageRoleCatalog } from '../../../shared/pipeline/routeStageWizardContracts.ts';
+
 import { parseFactoryGraph } from '../../../shared/pipeline/factoryGraphContracts.ts';
 import type { FactoryGraphData } from '../../../shared/pipeline/factoryGraphContracts.ts';
 import {
@@ -87,6 +89,14 @@ export type DraftCreateRequest =
   };
 
 export const routesApi = {
+  /**
+   * Читает отдельный публичный каталог ролей образца.
+   * Старый editor-info сохраняет прежнюю закрытую форму.
+   */
+  async stageRoles(profile: string) {
+    return parseStageRoleCatalog(await api.get(`${profilePath(profile)}/editor/stage-roles`));
+  },
+
   async editor(profile: string): Promise<RouteEditorInfo> {
     const value: unknown = await api.get(`${profilePath(profile)}/editor`);
 

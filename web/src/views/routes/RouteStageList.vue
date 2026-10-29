@@ -34,7 +34,7 @@
                 </option>
               </UiSelect>
             </UiField>
-            <UiButton data-context="workspace-form" variant="ghost" data-test="stage-add" @click="add">Добавить этап</UiButton>
+            <UiButton data-context="workspace-form" variant="ghost" data-test="stage-add" @click="requestAdd">Добавить этап</UiButton>
           </div>
 
           <div class="route-stage-list__tools">
@@ -139,9 +139,11 @@ const props = defineProps<{
   document: RouteDraft;
   scope: RouteCommandScope;
   selectedNodeId?: string;
+  wizardEnabled?: boolean;
 }>();
 const emit = defineEmits<{
   change: [document: RouteDraft];
+  'open-wizard': [];
   'select-node': [value: { scope: RouteCommandScope; nodeId: string }];
 }>();
 const newType = ref<NewExecutor>('agent');
@@ -212,6 +214,14 @@ function allocateKey(suggested: string, used: ReadonlySet<string>): string {
   }
 
   return '';
+}
+
+function requestAdd(): void {
+  if (props.wizardEnabled && props.scope.kind === 'route') {
+    emit('open-wizard');
+  } else {
+    add();
+  }
 }
 
 function add(): void {
@@ -366,6 +376,7 @@ watch(() => props.selectedNodeId, () => {
     targetPhase.value = selectedNode.value.phase;
   }
 });
+defineExpose({ add });
 </script>
 
 <style scoped>

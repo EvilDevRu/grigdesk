@@ -18,6 +18,9 @@
 
 ## Грабли
 
+- [Отказ запуска браузера оставляет Vite открытым](browser-fixture-startup-cleanup.md) —
+  поздняя регистрация очистки превращает отсутствие браузера в таймаут всего прогона.
+
 - [Замер press включает остановку драйвера, если HTTP-приёмник делит его Node event loop](chat-performance-isolation.md)
 
 - [Вложенный node_modules в снимке Harness: одна причина vendor/buildInputs и отказа общего preflight](deepseek-vendor-node-modules.md)

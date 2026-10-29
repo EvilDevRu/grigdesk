@@ -344,6 +344,7 @@ const props = withDefaults(
     arbitrated?: Record<string, string> | null;
     // Выбранный узел редактора маршрутов; живой конвейер выбора не держит.
     selectedNode?: string | null;
+    highlightSelectedEdges?: boolean;
     // Масштаб холста относительно натурального размера, при котором текст читается.
     scale?: number;
   }>(),
@@ -355,6 +356,7 @@ const props = withDefaults(
     arbitrating: null,
     arbitrated: null,
     selectedNode: null,
+    highlightSelectedEdges: false,
     scale: 1,
   },
 );
@@ -416,6 +418,8 @@ onBeforeUnmount(() => viewportObserver?.disconnect());
 
 const markerId = `graph-arrow-${useId()}`;
 const focusedNode = ref<string | null>(null);
+const relatedNode = computed(() => focusedNode.value
+  ?? (props.highlightSelectedEdges ? props.selectedNode : null));
 
 // Пройденный узел рисуется одинаково и когда он сделан, и когда законно пропущен.
 // Множество строк, а не статусов: неизвестного узла в карте статусов может не быть
@@ -604,7 +608,7 @@ const edgeElements = computed<EdgeElement[]>(() => {
       labelPosition: path.label,
       labelClass,
       visible,
-      related: focusedNode.value === source || focusedNode.value === destination,
+      related: relatedNode.value === source || relatedNode.value === destination,
       showLabel: cycleEdge || edgeClass !== 'fail' || focusedNode.value === source,
       bounds: path.bounds,
     });

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "commands": [
+    { "id": "verify", "label": "Проверка", "filesystem": ["state-only"] },
+    { "id": "recheck", "label": "Перепроверка", "filesystem": ["state-only"] }
+  ],
+  "contextSections": []
+}
