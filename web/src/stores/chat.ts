@@ -1360,6 +1360,7 @@ export const useChatStore = defineStore('chat', {
       const out: ChatListRow[] = [];
       const source = showArchived ? (s.archived || []) : s.sessions;
 
+      previews.retain(source.map((chat) => chat.id));
       source.forEach((x) => {
         const h = row(x, showArchived);
 

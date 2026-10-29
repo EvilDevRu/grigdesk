@@ -11,12 +11,28 @@ interface PreviewEntry {
 
 /**
  * Превью хранит только короткий исходный фрагмент и результат для одного чата.
- * LRU ограничивает память; поиск по истории выполняется отдельно и не обрезается.
+ * LRU ограничивает память; владелец может удержать весь текущий список без вытеснения по кругу.
  */
 export function createChatListPreviewCache(renderText = mdToText) {
   const entries = new Map<string, PreviewEntry>();
+  let limit = CACHE_LIMIT;
 
   return {
+    /**
+     * Последовательный обход списка больше LRU не должен вытеснять собственное начало.
+     * Смена списка освобождает прежние записи, поэтому память ограничена текущими id.
+     */
+    retain(chatIds: Iterable<string>): void {
+      const alive = new Set(chatIds);
+
+      limit = Math.max(CACHE_LIMIT, alive.size);
+
+      for (const id of entries.keys()) {
+        if (!alive.has(id)) {
+          entries.delete(id);
+        }
+      }
+    },
     /**
      * Попадание обновляет LRU без разбора Markdown; изменение заменяет одну запись.
      * До разбора и после него действуют независимые пределы исходника и результата.
@@ -36,7 +52,7 @@ export function createChatListPreviewCache(renderText = mdToText) {
 
       entries.set(chatId, entry);
 
-      if (entries.size > CACHE_LIMIT) {
+      if (entries.size > limit) {
         entries.delete(entries.keys().next().value!);
       }
 
@@ -47,6 +63,7 @@ export function createChatListPreviewCache(renderText = mdToText) {
     },
     clear(): void {
       entries.clear();
+      limit = CACHE_LIMIT;
     },
     get size(): number {
       return entries.size;

@@ -75,6 +75,11 @@
       <div
         v-for="r in rows"
         :key="r.id"
+        v-memo="[
+          r.title, r.snippet, r.modelName, r.provider, r.provider?.color, r.taskId,
+          r.archived, r.draft, r.sending, r.compacting, r.unread, r.waiting, r.sleep,
+          r.id === chat.activeId, r.id === editId, r.id === editId ? editVal : '', ago(r.ts),
+        ]"
         class="row"
         :class="{
           archived: r.archived,
@@ -325,6 +330,9 @@ const rows = computed(() => {
     };
   });
 });
+
+// Memo строки перечисляет всё, что рисует её поддерево, включая выбор и инлайн-редактор.
+// Копия строки при обновлении другого чата не должна пересоздавать все controls списка.
 
 // Отправка из архивного разговора сама возвращает его в активные. В этот момент
 // переключаем и левый список: иначе открытый чат уже активный, а сайдбар продолжает

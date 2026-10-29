@@ -191,6 +191,7 @@
 - [Исправление фризов: функциональные проверки, полная серия до/после и остаточные задержки](chat-freeze-fix-results.md)
 - [Стенд производительности: полная lazy-история, счётчики и конфликт step-reuse/409](chat-performance-conflict.md)
 - [Диагностика фризов через штатный журнал окна: операции, longtask и layout](chat-performance-logging.md)
+- [Большой список чатов: кэш текущего каталога и обновление только изменённых строк](chat-list-rendering.md)
 - [Стартовые паузы: разбор JSON ответов и применение снимка доски](startup-performance-logging.md)
 - [Чаты на отдельном полном сервере: production UI, SSE, запись, reload и архив](chat-runtime-smoke-check.md)
 - [История чата: Blob уменьшает синхронную стоимость передачи большого JSON в fetch](chat-history-request-body.md)

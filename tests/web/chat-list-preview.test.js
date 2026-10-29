@@ -33,22 +33,36 @@ test('80 неизменённых превью разбираются один �
   assert.equal(cache.size, 0);
 });
 
-test('кэш не обещает попадания при последовательном обходе 300 чатов', () => {
+test('текущий каталог больше 256 чатов не вытесняет собственные превью по кругу', () => {
   let calls = 0;
   const cache = createChatListPreviewCache((source) => {
     calls += 1;
 
     return source;
   });
+  const ids = Array.from({ length: 310 }, (_, index) => String(index));
+
+  cache.retain(ids);
 
   for (let pass = 0; pass < 2; pass += 1) {
-    for (let index = 0; index < 300; index += 1) {
-      cache.get(String(index), 'текст');
+    for (const id of ids) {
+      cache.get(id, 'текст');
     }
   }
 
-  assert.equal(calls, 600);
-  assert.equal(cache.size, 256);
+  assert.equal(calls, 310);
+  assert.equal(cache.size, 310);
+  cache.get('0', 'правка');
+  assert.equal(calls, 311);
+  cache.retain(['0', '1']);
+  assert.equal(cache.size, 2, 'смена списка освобождает прежний каталог');
+  cache.clear();
+
+  for (const id of ids) {
+    cache.get(id, 'текст');
+  }
+
+  assert.equal(cache.size, 256, 'без владельца остаётся прежний предел LRU');
 });
 
 test('реальный Markdown остаётся читаемым на обрезанном источнике', () => {
