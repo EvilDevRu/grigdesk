@@ -311,6 +311,137 @@ test('правка файла показывается двухколоночн�
   assert.equal(wrapper.find('.dcell.add').text(), 'const b = 3;');
 });
 
+test('native edit показывает old_string/new_string как дифф без повторения JSON', async (t) => {
+  const input = {
+    kind: 'edit',
+    file_path: '/workspace/analysis.json',
+    old_string: '  "route_depth": "mid",\n  "route_reason": "Прежнее решение"',
+    new_string: '  "route_depth": "full",\n  "route_reason": "Новое решение"',
+    justification: 'Уточнить параметры перед запуском.',
+    sandbox_permissions: 'danger-full-access',
+  };
+  const original = JSON.stringify(input);
+  const { wrapper } = await mountPermission(t, {
+    pid: 'native-edit',
+    tool: 'edit',
+    canRemember: false,
+    input,
+  });
+
+  assert.equal(wrapper.find('.p-diff').exists(), true);
+  assert.equal(wrapper.findAll('.dcell.del').length, 2);
+  assert.equal(wrapper.findAll('.dcell.add').length, 2);
+  assert.match(wrapper.get('.dcell.del').element.textContent, /  "route_depth": "mid",/u);
+  assert.equal(wrapper.findAll('pre').length, 0);
+  assert.equal(wrapper.get('[data-permission-justification]').text(), input.justification);
+  assert.equal(JSON.stringify(input), original);
+
+  await button(wrapper, 'Разрешить').trigger('click');
+
+  assert.deepEqual(wrapper.emitted('answer'), [[true, false]]);
+});
+
+test('native edit сохраняет пустую сторону при удалении и вставке', async (t) => {
+  const { wrapper } = await mountPermission(t, {
+    pid: 'native-delete',
+    tool: 'edit',
+    input: {
+      old_string: 'удалить',
+      new_string: '',
+    },
+  });
+
+  assert.equal(wrapper.find('.p-diff').exists(), true);
+  assert.equal(wrapper.get('.dcell.del').text(), 'удалить');
+  assert.equal(wrapper.findAll('pre').length, 0);
+
+  await wrapper.setProps({
+    req: {
+      pid: 'native-insert',
+      tool: 'edit',
+      input: {
+        old_string: '',
+        new_string: 'добавить',
+      },
+    },
+  });
+
+  assert.equal(wrapper.get('.dcell.add').text(), 'добавить');
+  assert.equal(wrapper.findAll('pre').length, 0);
+});
+
+test('native write показывает полное содержимое файла с переводами строк', async (t) => {
+  const content = `  # Итог\n<script>window.invalid = true</script>\n${'x'.repeat(10_000)}\n`;
+  const { wrapper } = await mountPermission(t, {
+    pid: 'native-write',
+    tool: 'write',
+    input: {
+      file_path: '/workspace/result.md',
+      content,
+    },
+  });
+
+  assert.equal(wrapper.get('.p-path').text(), '/workspace/result.md');
+  assert.equal(wrapper.findAll('pre').length, 1);
+  assert.equal(wrapper.get('pre').element.textContent, content);
+  assert.equal(wrapper.find('script').exists(), false);
+});
+
+test('неполные и неверные native параметры остаются в подробностях', async (t) => {
+  const input = {
+    old_string: 'старое',
+    new_string: { nested: 'новое' },
+    content: ['строка'],
+  };
+  const { wrapper } = await mountPermission(t, {
+    pid: 'native-invalid',
+    tool: 'edit',
+    input,
+  });
+
+  assert.equal(wrapper.find('.p-diff').exists(), false);
+  assert.deepEqual(JSON.parse(wrapper.get('pre').text()), input);
+
+  await wrapper.setProps({
+    req: {
+      pid: 'native-incomplete',
+      tool: 'edit',
+      input: { old_string: 'старое' },
+    },
+  });
+
+  assert.equal(wrapper.find('.p-diff').exists(), false);
+  assert.deepEqual(JSON.parse(wrapper.get('pre').text()), { old_string: 'старое' });
+});
+
+test('готовый предпросмотр имеет приоритет, отличающиеся native поля остаются видимыми', async (t) => {
+  const { wrapper } = await mountPermission(t, {
+    pid: 'mixed-preview',
+    tool: 'edit',
+    input: {
+      diff: {
+        old: 'готовое старое',
+        new: 'готовое новое',
+      },
+      details: 'Готовые подробности',
+      old_string: 'исходное старое',
+      new_string: 'исходное новое',
+      content: 'Исходное содержимое',
+      extra: { preserved: true },
+    },
+  });
+
+  assert.equal(wrapper.get('.dcell.del').text(), 'готовое старое');
+  assert.equal(wrapper.get('.dcell.add').text(), 'готовое новое');
+  assert.equal(wrapper.findAll('pre')[0].text(), 'Готовые подробности');
+  assert.deepEqual(JSON.parse(wrapper.findAll('pre')[1].text()), {
+    old_string: 'исходное старое',
+    new_string: 'исходное новое',
+    content: 'Исходное содержимое',
+    extra: { preserved: true },
+  });
+});
+
 test('длинные варианты плана используют choice rows и сохраняют choice id', async (t) => {
   const { wrapper, flushPromises } = await mountPermission(t, {
     pid: 'p4',

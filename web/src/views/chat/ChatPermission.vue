@@ -212,7 +212,9 @@ const title = computed(() => {
 const plan = computed(() => displayText(input.value.plan));
 const command = computed(() => displayText(isSsh.value ? props.req.command : input.value.command));
 const filePath = computed(() => displayText(input.value.file_path));
-const details = computed(() => displayText(input.value.details));
+const details = computed(() => displayText(
+  input.value.details ?? (typeof input.value.content === 'string' ? input.value.content : null),
+));
 const description = computed(() => {
   const text = displayText(input.value.description);
 
@@ -287,10 +289,26 @@ const dbSpecial = computed(() => [
   ...(Array.isArray(props.req?.forbidden) ? props.req.forbidden : []),
 ].map(String).join(', '));
 
-const diff = computed(() => {
-  const source = input.value.diff;
+// Native-запросы несут исходную пару строк, адаптеры могут прислать готовый diff.
+// Обе формы показываются одинаково; пустая строка остаётся допустимой стороной правки.
+const diffSource = computed(() => {
+  if (input.value.diff) {
+    return input.value.diff;
+  }
+  if (typeof input.value.old_string === 'string' && typeof input.value.new_string === 'string') {
+    return {
+      old: input.value.old_string,
+      new: input.value.new_string,
+    };
+  }
 
-  if (!source || (!source.old && !source.new)) {
+  return null;
+});
+
+const diff = computed(() => {
+  const source = diffSource.value;
+
+  if (!source || (typeof source.old !== 'string' && typeof source.new !== 'string')) {
     return null;
   }
 
@@ -344,6 +362,13 @@ const rest = computed(() => {
   }
   if (timeoutMs.value !== null) {
     knownFields.add('timeoutMs');
+  }
+  if (diff.value && !input.value.diff) {
+    knownFields.add('old_string');
+    knownFields.add('new_string');
+  }
+  if (input.value.details == null && typeof input.value.content === 'string') {
+    knownFields.add('content');
   }
 
   const extra = Object.fromEntries(
