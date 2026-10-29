@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
+import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
 import {
   jsonRequest,
   listFixture,
@@ -109,4 +110,22 @@ test('LEGACY-PENDING: прежние GET и ACK сохраняют полный 
     ok: true,
   });
   await assert.rejects(fs.access(file), { code: 'ENOENT' });
+});
+
+test('LEGACY-NONEMPTY: новый чат до первого read сохраняет приоритет над legacy-копией', async (t) => {
+  const fixture = await listFixture(t);
+
+  await fixture.app.close();
+
+  const legacyPath = path.join(fixture.root, 'legacy.json');
+  const created = sampleChat('created-before-read');
+  const store = new ChatHistoryStore({ chatsDir: fixture.config.chatsDir, legacyPath });
+
+  await fs.writeFile(legacyPath, JSON.stringify({ sessions: [sampleChat('old-copy')] }));
+  await store.saveOne(created);
+
+  const state = await store.read();
+
+  assert.deepEqual(state.sessions.map((chat) => chat.id), [created.id]);
+  await fs.access(legacyPath);
 });

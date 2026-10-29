@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import {
   assertLight,
@@ -142,12 +143,20 @@ test('LIST-BENCHMARK: тысяча чатов, 34 тысячи реплик, о�
   }
 
   const samples = [];
+  let readFile = t.mock.method(fs, 'readFile');
+  const chatReads = () => readFile.mock.calls.filter((call) =>
+    /^bench-\d+\.json$/.test(path.basename(String(call.arguments[0])))).length;
 
   const coldStart = performance.now();
 
-  const fixture = await listFixture(t, [], {
+  let fixture = await listFixture(t, [], {
     root,
-    extraRoutes: timingHooks(samples),
+    extraRoutes: async (app) => {
+      await timingHooks(samples)(app);
+      // Дешёвая системная ручка на том же event loop изолирует стоимость каталога.
+      // Внешние пробы ОС и исполнителей не входят в этот замер.
+      app.get('/api/system', async () => ({ ok: true }));
+    },
   });
 
   benchmarkApp = fixture.app;
@@ -155,28 +164,67 @@ test('LIST-BENCHMARK: тысяча чатов, 34 тысячи реплик, о�
   const registrationMs = performance.now() - coldStart;
 
   const firstStarted = performance.now();
+  const readsAtReady = chatReads();
+  const systemLatencies = [];
+  let preparing = true;
+  const firstList = jsonRequest(fixture.app, 'GET', '/api/chat/store/list').finally(() => {
+    preparing = false;
+  });
 
-  const initial = await jsonRequest(fixture.app, 'GET', '/api/chat/store/list');
+  while (preparing) {
+    const scheduled = performance.now();
+
+    await delay(5);
+    await jsonRequest(fixture.app, 'GET', '/api/system');
+    // Включаем опоздание таймера: блокировка до начала HTTP тоже считается задержкой.
+    systemLatencies.push(performance.now() - scheduled - 5);
+  }
+
+  const initial = await firstList;
 
   const firstListWaitMs = performance.now() - firstStarted;
+  const coldChatReads = chatReads();
+  const systemMaxMs = Math.max(...systemLatencies);
 
   const known = versionsOf(initial);
 
   assert.equal(headsOf(initial).length, 1000);
   assertLight(initial);
+  assert.ok(readsAtReady < 1000, 'сервер принимает запросы до завершения подготовки каталога');
+  assert.ok(systemLatencies.length > 10, 'системные запросы выполнялись во время прогрева');
+  assert.ok(systemMaxMs < 50, `/api/system во время прогрева: ${systemMaxMs.toFixed(1)} мс`);
+  assert.equal(coldChatReads, 1000, 'миграция, шапки и выбор восстановления делят один проход');
+  readFile.mock.resetCalls();
+
+  await fixture.app.close();
+
+  const warmStart = performance.now();
+  const readsBeforeRestart = chatReads();
+
+  fixture = await listFixture(t, [], { root, extraRoutes: timingHooks(samples) });
+  benchmarkApp = fixture.app;
+
+  const restarted = await jsonRequest(fixture.app, 'GET', '/api/chat/store/list');
+  const warmFirstListMs = performance.now() - warmStart;
+
+  assert.deepEqual(versionsOf(restarted), known);
+  assert.equal(chatReads(), readsBeforeRestart, 'рестарт использует персистные шапки без чтений чатов');
+  assert.ok(warmFirstListMs < 1000, `первый список с кэшем: ${warmFirstListMs.toFixed(1)} мс`);
+  readFile.mock.resetCalls();
+  readFile.mock.restore();
 
   const legacy = await measure(fixture.app, samples, 'GET', '/api/chat/store');
 
-  const readFile = t.mock.method(fs, 'readFile');
+  readFile = t.mock.method(fs, 'readFile');
 
-  const chatReads = () => readFile.mock.calls.filter((call) =>
-    /^bench-\d+\.json$/.test(path.basename(String(call.arguments[0])))).length;
+  const readsAfterLegacy = chatReads();
 
   const list = await measure(fixture.app, samples, 'GET', '/api/chat/store/list');
 
   const unchanged = await measure(fixture.app, samples, 'POST', '/api/chat/store/changes', { known });
 
-  assert.equal(chatReads(), 0, 'после готовности list и пустая delta не читают JSON чатов');
+  assert.equal(chatReads() - readsAfterLegacy, 0,
+    'после готовности list и пустая delta не читают JSON чатов');
   assert.ok(legacy.bytes > 200_000_000, 'синтетическая нагрузка действительно сопоставима с исходной');
   assert.ok(list.bytes < legacy.bytes / 10);
   await writeChat(fixture, {
@@ -186,7 +234,17 @@ test('LIST-BENCHMARK: тысяча чатов, 34 тысячи реплик, о�
 
   const changed = await measure(fixture.app, samples, 'POST', '/api/chat/store/changes', { known });
 
-  assert.equal(chatReads(), 1, 'изменение одного чата разбирается один раз');
+  assert.equal(chatReads() - readsAfterLegacy, 1, 'изменение одного чата разбирается один раз');
+
+  const searchUrl = '/api/chat/store/search?q=%D1%82%D1%82%D1%82&archived=0';
+  const firstSearch = await jsonRequest(fixture.app, 'GET', searchUrl);
+  const readsAfterSearch = chatReads();
+  const repeatedSearch = await jsonRequest(fixture.app, 'GET', searchUrl);
+  const repeatedSearchChatReads = chatReads() - readsAfterSearch;
+
+  assert.ok(firstSearch.matches.length > 600);
+  assert.deepEqual(repeatedSearch, firstSearch);
+  assert.equal(repeatedSearchChatReads, 0, 'повторный поиск не читает JSON чатов');
 
   const detail = await measure(fixture.app, samples, 'GET', '/api/chat/store/chat/bench-1');
 
@@ -198,6 +256,10 @@ test('LIST-BENCHMARK: тысяча чатов, 34 тысячи реплик, о�
     detail,
     registrationMs,
     firstListWaitMs,
+    warmFirstListMs,
+    systemMaxMs,
+    coldChatReads,
+    repeatedSearchChatReads,
     knownBytes: Buffer.byteLength(JSON.stringify({ known })),
   }));
 });

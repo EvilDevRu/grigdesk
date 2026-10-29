@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -25,6 +26,17 @@ const LIST = '/api/chat/store/list';
 const CHANGES = '/api/chat/store/changes';
 
 const SEARCH = '/api/chat/store/search';
+
+/**
+ * Отдельный экземпляр имитирует рестарт с тем же синтетическим реестром моделей.
+ * Он не разделяет ни шапки, ни результаты поиска с первым процессом.
+ */
+function restartedHistory(fixture, registry = { 'test-provider': [{ id: 'test-model', efforts: [] }] }) {
+  return new ChatHistoryStore({
+    chatsDir: fixture.config.chatsDir,
+    registryProvider: async () => registry,
+  });
+}
 
 test('LIST-HEADS: тысяча строк без истории и тел вложений', async (t) => {
 
@@ -192,6 +204,159 @@ test('LIST-DELTA: версии переживают равные даты, ар�
   assert.deepEqual(empty.gone, []);
 });
 
+test('LIST-PERSISTENT: рестарт сверяет stat, реестр и изменённые файлы', async (t) => {
+  const chats = [sampleChat('persist-one', { effort: 'high', mode: 'plan' }), sampleChat('persist-two')];
+  const fixture = await listFixture(t, chats);
+  const initial = await jsonRequest(fixture.app, 'GET', LIST);
+
+  await fixture.app.close();
+
+  const reads = t.mock.method(fs, 'readFile');
+  const chatReads = () => reads.mock.calls.filter((call) =>
+    chats.some((chat) => String(call.arguments[0]) === chatPath(fixture, chat))).length;
+
+  assert.deepEqual(await restartedHistory(fixture).webHeads(), headsOf(initial));
+  assert.equal(chatReads(), 0, 'неизменный каталог не читает истории после рестарта');
+  await restartedHistory(fixture, {
+    'test-provider': [{ id: 'test-model', efforts: ['high'] }],
+  }).prepareWeb();
+  assert.equal(chatReads(), 0, 'динамические усилия модели не влияют на миграцию чатов');
+
+  const writing = restartedHistory(fixture);
+
+  await writing.patchExecution(chats[1].id, (current) => ({ ...current, title: 'После записи' }));
+  await writing.webHeads();
+
+  const afterWrite = chatReads();
+
+  await restartedHistory(fixture).webHeads();
+  assert.equal(chatReads(), afterWrite, 'нормализованная запись тоже прогревает кэш следующего процесса');
+
+  const chat = await readChat(fixture, chats[0]);
+  const before = await fs.stat(chatPath(fixture, chat));
+
+  await writeChat(fixture, { ...chat, title: 'Название' });
+  await fs.utimes(chatPath(fixture, chat), before.atimeMs / 1000, before.mtimeMs / 1000);
+  assert.equal((await fs.stat(chatPath(fixture, chat))).size, before.size);
+
+  const baseline = chatReads();
+  const changed = await restartedHistory(fixture).webHeads();
+
+  assert.equal(chatReads() - baseline, 1, 'перечитывается только изменённый файл');
+  assert.equal(changed.find((head) => head.id === chat.id).title, 'Название');
+
+  const migrationReads = chatReads();
+
+  await restartedHistory(fixture, {}).prepareWeb();
+  assert.equal(chatReads() - migrationReads, 2, 'смена реестра повторяет прежнюю миграцию');
+  assert.equal((await readChat(fixture, chats[1])).modelRefState.state, 'unknown_provider');
+});
+
+test('LIST-PERSISTENT-BAD: битый, чужой и неподдерживаемый кэш перестраивается', async (t) => {
+  const chat = sampleChat('cache-rebuild');
+  const fixture = await listFixture(t, [chat]);
+  const initial = await jsonRequest(fixture.app, 'GET', LIST);
+
+  await fixture.app.close();
+
+  const file = path.join(fixture.config.chatsDir, '.web-heads.json');
+  const original = JSON.parse(await fs.readFile(file, 'utf8'));
+  const brokenEntries = JSON.stringify({
+    [chat.id]: { file: '../../escape.json' },
+  });
+  const invalidShape = JSON.parse(original.entries);
+
+  invalidShape[chat.id].web.lastReply = { key: 17, text: null };
+
+  const invalidEntries = JSON.stringify(invalidShape);
+  const variants = [
+    '{',
+    JSON.stringify({ ...original, root: '/other-catalog' }),
+    JSON.stringify({ ...original, format: 999 }),
+    JSON.stringify({ ...original, digest: 'broken' }),
+    JSON.stringify({
+      ...original,
+      entries: brokenEntries,
+      digest: createHash('sha256').update(brokenEntries).digest('hex'),
+    }),
+    JSON.stringify({
+      ...original,
+      entries: invalidEntries,
+      digest: createHash('sha256').update(invalidEntries).digest('hex'),
+    }),
+  ];
+
+  for (const variant of variants) {
+    await fs.writeFile(file, variant);
+
+    const heads = await restartedHistory(fixture).webHeads();
+
+    assert.deepEqual(heads, headsOf(initial));
+    assertLight(heads);
+    assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
+    assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).format, 1);
+  }
+});
+
+test('LIST-PERSISTENT-WRITE: отказ записи производного кэша не закрывает историю', async (t) => {
+  const fixture = await listFixture(t, [sampleChat('cache-write-failed')]);
+  const initial = await jsonRequest(fixture.app, 'GET', LIST);
+
+  await fixture.app.close();
+  await fs.unlink(path.join(fixture.config.chatsDir, '.web-heads.json'));
+
+  const write = fs.writeFile.bind(fs);
+
+  t.mock.method(fs, 'writeFile', async (file, ...args) => {
+    if (path.basename(String(file)).startsWith('.web-heads.json.')) {
+      throw Object.assign(new Error('Кэш недоступен для записи'), { code: 'EACCES' });
+    }
+
+    return write(file, ...args);
+  });
+
+  assert.deepEqual(await restartedHistory(fixture).webHeads(), headsOf(initial));
+});
+
+test('LIST-RECOVERY: шапки выбирают только незавершённые переходы и seedClaim', async (t) => {
+  const chats = [
+    sampleChat('recovery-none'),
+    sampleChat('recovery-done', { workdirState: { transition: { phase: 'done' } } }),
+    sampleChat('recovery-ready', { workdirState: { transition: { phase: 'ready' } } }),
+    sampleChat('recovery-claim', { workdirState: { seedClaim: { id: 'claim' } } }),
+  ];
+  // Эта проверка выбирает кандидатов до вызова recover, который меняет durable фазы.
+  // Файлы принадлежат фикстуре, а подготовка отдельного store не запускает recovery.
+  const fixture = await listFixture(t);
+
+  await fixture.app.close();
+
+  for (const chat of chats) {
+    await writeChat(fixture, chat);
+  }
+
+  const history = restartedHistory(fixture);
+
+  assert.deepEqual((await history.workdirRecoveryIds()).sort(), ['recovery-claim', 'recovery-ready']);
+  assert.deepEqual((await restartedHistory(fixture).workdirRecoveryIds()).sort(),
+    ['recovery-claim', 'recovery-ready']);
+});
+
+test('LIST-PREPARATION: запрос ожидания разрешений отвечает до окончания прогрева', {
+  timeout: 5000,
+}, async (t) => {
+  const registry = Promise.withResolvers();
+
+  t.after(() => registry.resolve({}));
+
+  const fixture = await listFixture(t, [], { modelsRegistry: () => registry.promise });
+  const waiting = await jsonRequest(fixture.app, 'GET', '/api/chat/waiting');
+
+  assert.deepEqual(waiting.waiting, []);
+  registry.resolve({});
+  await jsonRequest(fixture.app, 'GET', LIST);
+});
+
 test('SEARCH-CONTRACT: весь текст, первое совпадение и отдельный архив', async (t) => {
 
   const longText = 'а'.repeat(1500) + ' Найди Здесь ' + 'б'.repeat(200);
@@ -245,6 +410,43 @@ test('SEARCH-CONTRACT: весь текст, первое совпадение и
 
     assert.deepEqual(data.matches, []);
   }
+});
+
+test('SEARCH-CACHE: новые запросы используют тексты, правка и удаление инвалидируют кэш', async (t) => {
+  const chat = sampleChat('search-cached', {
+    messages: [{ role: 'user', text: 'Первый ТоКен' }],
+  });
+  const fixture = await listFixture(t, [chat, sampleChat('search-unchanged')]);
+  const search = (query, archived = 0) => jsonRequest(fixture.app, 'GET',
+    `${SEARCH}?q=${encodeURIComponent(query)}&archived=${archived}`);
+  const first = await search('токен');
+  const reads = t.mock.method(fs, 'readFile');
+  const chatReads = () => reads.mock.calls.filter((call) =>
+    /^search-(cached|unchanged)\.json$/.test(path.basename(String(call.arguments[0])))).length;
+
+  assert.deepEqual(await search('токен'), first);
+  assert.equal((await search('первый')).matches[0].snippetSource, 'Первый ТоКен');
+  assert.equal(chatReads(), 0, 'кэш повторно используется также другим запросом');
+
+  const current = await readChat(fixture, chat);
+  const changed = { ...current, messages: [{ role: 'assistant', text: 'Второй Маркер' }] };
+
+  await writeChat(fixture, changed);
+  assert.deepEqual((await search('токен')).matches, []);
+  assert.equal((await search('маркер')).matches[0].snippetSource, 'Второй Маркер');
+
+  const afterChange = chatReads();
+
+  await search('второй');
+  assert.equal(chatReads(), afterChange);
+  assert.equal(reads.mock.calls.some((call) =>
+    path.basename(String(call.arguments[0])) === 'search-unchanged.json'), false);
+
+  await writeChat(fixture, { ...changed, archived: true });
+  assert.deepEqual((await search('маркер')).matches, []);
+  assert.equal((await search('маркер', 1)).matches[0].id, chat.id);
+  await fs.unlink(chatPath(fixture, chat));
+  assert.deepEqual((await search('маркер', 1)).matches, []);
 });
 
 test('SEARCH-ALL: совпадения не теряются после обычного лимита страницы', async (t) => {

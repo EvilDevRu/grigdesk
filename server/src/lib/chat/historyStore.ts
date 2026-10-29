@@ -2,9 +2,15 @@
 // Каждый чат — свой файл chats/YYYY-MM/<id>.json (месяц СОЗДАНИЯ чата, файл не переезжает),
 // мета (активный чат, дефолты модели/усилия) — chats/meta.json. Битый файл одного чата
 // не валит остальную историю: он пропускается с предупреждением.
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { setImmediate as yieldToLoop } from 'node:timers/promises';
+import { performance } from 'node:perf_hooks';
 import { projectWebChatHead, chatSearchSnippet } from '../../../../shared/chat/chatListProjection.ts';
 import type { WebChatHead } from '../../../../shared/chat/chatListProjection.ts';
+import { canonicalJson } from '../../../../shared/lib/canonicalJson.ts';
+import { sha256 } from '../../../../shared/node/hash.ts';
+import { ChatCatalogCache, sameFileStat } from './catalogCache.ts';
+import type { CatalogHead, SearchText } from './catalogCache.ts';
 import { chatPreview } from './chatPreview.ts';
 import { writeDurableFile } from '../durableFile.ts';
 import { promises as fs } from 'node:fs';
@@ -298,13 +304,15 @@ export class ChatHistoryStore {
 
   // Путь чат-файла → признаки файла и его шапка. Список чатов телефона не разбирает
   // неизменённые файлы заново: полная история весит сотни мегабайт.
-  private headCache = new Map<string, {
-    ino: number;
-    size: number;
-    mtimeMs: number;
-    head: ChatHead | null;
-    web: WebChatHead | null;
-  }>();
+  private headCache = new Map<string, CatalogHead>();
+
+  private searchCache = new Map<string, SearchText>();
+
+  private catalogCache: ChatCatalogCache;
+
+  private catalogRegistry: ModelRegistry | null = null;
+
+  private headsRefresh: Promise<void> | null = null;
 
   /** `legacyPath` — старая схема «вся история в одном файле», мигрируется однократно. */
   constructor({
@@ -327,6 +335,7 @@ export class ChatHistoryStore {
     now?: () => number;
   }) {
     this.dir = chatsDir;
+    this.catalogCache = new ChatCatalogCache(chatsDir, log);
     this.isProjectDeleted = isProjectDeleted;
     this.guardNewChat = guardNewChat;
     this.legacyPath = legacyPath;
@@ -386,11 +395,17 @@ export class ChatHistoryStore {
     }
     for (const month of months.filter((m) => /^\d{4}-\d{2}$/.test(m)).sort().reverse()) {
       const file = path.join(this.dir, month, `${chatId}.json`);
+
       try {
         const json = await fs.readFile(file, 'utf8');
         const chat = JSON.parse(json);
+
         if (chat?.id === chatId) {
-          return { path: file, chat, json };
+          return {
+            path: file,
+            chat,
+            json,
+          };
         }
       } catch {
         // Нет в этом месяце или файл битый — ищем дальше.
@@ -410,21 +425,21 @@ export class ChatHistoryStore {
    */
   async scan(): Promise<Map<string, ChatEntry>> {
     const map = new Map<string, ChatEntry>();
-    let months: string[] = [];
-    try { months = await fs.readdir(this.dir); } catch { return map; }
-    for (const m of months) {
-      if (!/^\d{4}-\d{2}$/.test(m)) continue;
-      const mdir = path.join(this.dir, m);
-      for (const f of await fs.readdir(mdir)) {
-        if (!f.endsWith('.json')) continue;
-        const p = path.join(mdir, f);
-        try {
-          const json = await fs.readFile(p, 'utf8');
-          const chat = JSON.parse(json);
-          if (chat?.id) map.set(chat.id, { path: p, chat, json });
-        } catch (e) {
-          this.log?.warn?.({ file: p, err: (e as Error).message }, 'чат-файл не читается, пропущен');
+
+    for await (const file of this.catalogFiles()) {
+      try {
+        const json = await fs.readFile(file, 'utf8');
+        const chat = JSON.parse(json);
+
+        if (chat?.id) {
+          map.set(chat.id, {
+            path: file,
+            chat,
+            json,
+          });
         }
+      } catch (e) {
+        this.log?.warn?.({ file, err: (e as Error).message }, 'чат-файл не читается, пропущен');
       }
     }
     return map;
@@ -437,52 +452,138 @@ export class ChatHistoryStore {
    */
   async heads(): Promise<ChatHead[]> {
     await this.ensureMigrated();
+    await this.refreshHeads();
 
     const map = new Map<string, ChatHead>();
-    const seen = new Set<string>();
-    let months: string[] = [];
 
-    try {
-      months = await fs.readdir(this.dir);
-    } catch {
-      return [];
+    for (const entry of this.headCache.values()) {
+      if (entry.head?.id) {
+        map.set(entry.head.id, entry.head);
+      }
     }
+
+    return [...map.values()].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  }
+
+  /**
+   * Проход ограничен числом файлов и временем порции, включая попадания в кэш.
+   * Явный yield даёт HTTP и SSE исполниться даже при горячем файловом кэше ОС.
+   */
+  private async *catalogFiles(): AsyncGenerator<string> {
+    let count = 0;
+    let started = performance.now();
+    const months = await fs.readdir(this.dir).catch(() => [] as string[]);
 
     for (const month of months) {
       if (!/^\d{4}-\d{2}$/.test(month)) {
         continue;
       }
 
-      const directory = path.join(this.dir, month);
-
-      for (const name of await fs.readdir(directory)) {
+      for (const name of await fs.readdir(path.join(this.dir, month))) {
         if (!name.endsWith('.json')) {
           continue;
         }
 
-        const file = path.join(directory, name);
+        yield path.join(this.dir, month, name);
+        count += 1;
 
-        seen.add(file);
-
-        try {
-          const head = await this.headOf(file);
-
-          if (head?.id) {
-            map.set(head.id, head);
-          }
-        } catch (e) {
-          this.log?.warn?.({ file, err: (e as Error).message }, 'чат-файл не читается, пропущен');
+        if (count >= 50 || performance.now() - started >= 8) {
+          await yieldToLoop();
+          count = 0;
+          started = performance.now();
         }
       }
     }
+  }
 
-    for (const file of [...this.headCache.keys()]) {
-      if (!seen.has(file)) {
-        this.headCache.delete(file);
-      }
+  /**
+   * Одновременные list, delta и search разделяют одну сверку stat и запись кэша.
+   * Удалённый или повреждённый файл освобождает также сохранённый поисковый текст.
+   */
+  private refreshHeads(): Promise<void> {
+    if (!this.headsRefresh) {
+      this.headsRefresh = (async () => {
+        const seen = new Set<string>();
+
+        for await (const file of this.catalogFiles()) {
+          seen.add(file);
+
+          try {
+            await this.headOf(file);
+          } catch (error) {
+            this.headCache.delete(file);
+            this.searchCache.delete(file);
+            this.log?.warn?.({ file, err: (error as Error).message }, 'чат-файл не читается, пропущен');
+          }
+        }
+        for (const file of this.headCache.keys()) {
+          if (!seen.has(file)) {
+            this.headCache.delete(file);
+            this.searchCache.delete(file);
+          }
+        }
+
+        await this.catalogCache.save(this.headCache);
+      })().finally(() => {
+        this.headsRefresh = null;
+      });
     }
 
-    return [...map.values()].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    return this.headsRefresh;
+  }
+
+  /**
+   * Для восстановления нужны только id чатов с незавершённой durable фазой.
+   * Полные ленты читает адресный recover, остальные истории остаются на диске.
+   */
+  async workdirRecoveryIds(): Promise<string[]> {
+    await this.prepareWeb();
+
+    return [...this.headCache.values()].flatMap((entry) =>
+      entry.needsWorkdirRecovery && entry.web ? [entry.web.id] : []);
+  }
+
+  /**
+   * Запоминает две короткие проекции ровно тех байтов, которые были прочитаны.
+   * Признаки до чтения не позволяют приписать старые байты более новой записи.
+   */
+  private cacheHead(
+    file: string,
+    chat: StoredChat,
+    json: string,
+    stat: Awaited<ReturnType<typeof fs.stat>>,
+    migrationChecked = false,
+  ) {
+    const state = chat?.workdirState;
+    const phase = state?.transition?.phase;
+    const checked = migrationChecked || !!chat?.id && this.catalogRegistry !== null
+      && stableJson(this.migratedChat(chat, this.catalogRegistry)) === json;
+    const head: ChatHead | null = chat?.id ? {
+      id: chat.id,
+      title: chat.title,
+      purpose: chat.purpose,
+      taskId: chat.taskId,
+      logicalIdentity: chat.logicalIdentity,
+      model: chat.model,
+      modelRef: chat.modelRef,
+      unread: chat.unread,
+      archived: chat.archived,
+      createdAt: chat.createdAt,
+      updatedAt: chat.updatedAt,
+      preview: chatPreview(chat),
+    } : null;
+
+    this.headCache.set(file, {
+      ino: Number(stat.ino),
+      ctimeMs: Number(stat.ctimeMs),
+      size: Number(stat.size),
+      mtimeMs: Number(stat.mtimeMs),
+      head,
+      web: head ? projectWebChatHead(chat, this.versionOf(json)) : null,
+      needsWorkdirRecovery: !!state?.seedClaim || !!phase && !['done', 'failed'].includes(phase),
+      migrationChecked: checked,
+    });
+    this.searchCache.delete(file);
   }
 
   /**
@@ -493,39 +594,16 @@ export class ChatHistoryStore {
     const stat = await fs.stat(file);
     const cached = this.headCache.get(file);
 
-    if (cached && cached.ino === stat.ino && cached.size === stat.size
-      && cached.mtimeMs === stat.mtimeMs) {
+    if (cached && sameFileStat(cached, stat)) {
       return cached.head;
     }
 
     const json = await fs.readFile(file, 'utf8');
     const chat = JSON.parse(json) as StoredChat;
-    const head: ChatHead | null = chat?.id
-      ? {
-        id: chat.id,
-        title: chat.title,
-        purpose: chat.purpose,
-        taskId: chat.taskId,
-        logicalIdentity: chat.logicalIdentity,
-        model: chat.model,
-        modelRef: chat.modelRef,
-        unread: chat.unread,
-        archived: chat.archived,
-        createdAt: chat.createdAt,
-        updatedAt: chat.updatedAt,
-        preview: chatPreview(chat),
-      }
-      : null;
 
-    this.headCache.set(file, {
-      ino: stat.ino,
-      size: stat.size,
-      mtimeMs: stat.mtimeMs,
-      head,
-      web: chat?.id ? projectWebChatHead(chat, this.versionOf(json)) : null,
-    });
+    this.cacheHead(file, chat, json, stat);
 
-    return head;
+    return this.headCache.get(file)!.head;
   }
 
   /**
@@ -533,7 +611,7 @@ export class ChatHistoryStore {
    * Время обновления не используется: внешняя правка может сохранить прежнюю дату.
    */
   versionOf(json: string): string {
-    return createHash('sha256').update(json).digest('hex');
+    return sha256(json);
   }
 
   private preparation: Promise<void> | null = null;
@@ -549,7 +627,6 @@ export class ChatHistoryStore {
       this.preparation = (async () => {
         await this.ensureMigrated();
         await this.importLegacy();
-        await this.heads();
       })().catch((error) => {
         this.preparation = null;
 
@@ -572,8 +649,8 @@ export class ChatHistoryStore {
   }
 
   /**
-   * Поиск читает выбранную группу последовательно без полнотекстового кэша.
-   * Число совпадений не ограничивается: окно сохраняет полный состав списка.
+   * Поиск хранит только тексты реплик и их lowercase, без steps и вложений.
+   * Сверка шапок инвалидирует изменённые файлы; тёплый запрос не читает JSON.
    */
   async searchWeb(query: string, archived: boolean): Promise<Array<{ id: string; snippetSource: string }>> {
     const matches: Array<{ id: string; snippetSource: string }> = [];
@@ -583,16 +660,60 @@ export class ChatHistoryStore {
       return matches;
     }
 
-    for (const head of await this.webHeads()) {
-      if (!!head.archived !== archived) {
+    await this.webHeads();
+
+    let started = performance.now();
+    let count = 0;
+
+    for (const [file, head] of this.headCache) {
+      if (!head.web || !!head.web.archived !== archived) {
         continue;
       }
 
-      const chat = await this.peek(head.id);
-      const snippetSource = chat ? chatSearchSnippet(chat, normalized) : null;
+      let text = this.searchCache.get(file);
+
+      if (!text || !sameFileStat(text, head)) {
+        const stat = await fs.stat(file).catch(() => null);
+
+        if (!stat) {
+          continue;
+        }
+
+        try {
+          const chat = JSON.parse(await fs.readFile(file, 'utf8')) as StoredChat;
+          const messages = (chat.messages || []).map((message) => ({ text: String(message.text || '') }));
+
+          text = {
+            ino: stat.ino,
+            size: stat.size,
+            mtimeMs: stat.mtimeMs,
+            ctimeMs: stat.ctimeMs,
+            chat: {
+              title: chat.title,
+              taskId: chat.taskId,
+              messages,
+            },
+            lowercase: messages.map((message) => message.text.toLowerCase()),
+          };
+          this.searchCache.set(file, text);
+        } catch (error) {
+          this.log?.warn?.({ file, err: (error as Error).message }, 'поиск: чат-файл пропущен');
+          continue;
+        }
+      }
+
+      const snippetSource = chatSearchSnippet(text.chat, normalized, text.lowercase);
 
       if (snippetSource !== null) {
-        matches.push({ id: head.id, snippetSource });
+        matches.push({ id: head.web.id, snippetSource });
+      }
+
+      count += 1;
+
+      if (count >= 50 || performance.now() - started >= 8) {
+        await yieldToLoop();
+        count = 0;
+        started = performance.now();
       }
     }
 
@@ -620,7 +741,15 @@ export class ChatHistoryStore {
    * Параллельные полная выдача и каталог ждут завершённый импорт, а не гоняются за rename.
    */
   private async importLegacyOnce(): Promise<void> {
-    if (!this.legacyPath || (await this.heads()).length) {
+    if (!this.legacyPath || [...this.headCache.values()].some((entry) => entry.head)) {
+      return;
+    }
+
+    // Между ensureMigrated и первым read мог появиться чат через saveOne.
+    // Пустой снимок шапок не разрешает импорт поверх уже непустого каталога.
+    await this.refreshHeads();
+
+    if ([...this.headCache.values()].some((entry) => entry.head)) {
       return;
     }
 
@@ -639,6 +768,7 @@ export class ChatHistoryStore {
     if (legacy?.sessions?.length || legacy?.archived?.length) {
       await this.save(legacy, { legacyImport: true });
       await fs.rename(this.legacyPath, this.legacyPath + '.migrated');
+      await this.refreshHeads();
     }
   }
 
@@ -727,39 +857,125 @@ export class ChatHistoryStore {
     return backupDir;
   }
 
+  /**
+   * Одинаковая нормализация проверяет миграцию при старте и после обычной записи.
+   * Уже нормализованный файл получает пригодную для следующего процесса шапку.
+   */
+  private migratedChat(chat: StoredChat, registry: ModelRegistry): StoredChat {
+    const surface = CHAT_SURFACES.has(String(chat.surface)) ? chat.surface : this.defaultSurface;
+    const next = migrateChatModelRecord(chat, registry, { surface }).chat as StoredChat;
+
+    next.revision = Number.isSafeInteger(chat.revision) && Number(chat.revision) >= 0
+      ? chat.revision : 0;
+    next.sessionBindingState = legacySessionState(chat);
+
+    return next;
+  }
+
+  /**
+   * Миграция и шапки делят один разбор каждого изменённого файла при старте.
+   * Кэш действителен только для того же реестра моделей и версии мигратора.
+   */
   async migrateSchema(): Promise<{ changed: boolean; backupDir: string | null }> {
     await this.ensureDir();
-    const entries = await this.scan();
+
     const meta = await this.readMetaRaw();
     const registry = await this.registry();
+    // Миграция зависит от identity, алиасов и порядка выбора legacy-модели.
+    // Динамические efforts, подписи и окна контекста не меняют сохранённые чаты.
+    const migrationRegistry = Object.fromEntries(Object.entries(registry).map(([provider, models]) => [
+      provider,
+      (models || []).map((model) => ({
+        id: model?.id,
+        family: model?.family,
+        tier: model?.tier,
+        extra: model?.extra,
+        aliases: model?.aliases,
+        modelRefAliases: model?.modelRefAliases,
+      })),
+    ]));
+    const migration = this.versionOf(canonicalJson({
+      schema: CHAT_SCHEMA,
+      catalog: 1,
+      surface: this.defaultSurface,
+      registry: JSON.parse(stableJson(migrationRegistry)),
+    }));
+
+    this.headCache = await this.catalogCache.load(migration);
+    this.catalogRegistry = registry;
+    this.searchCache.clear();
+
     const changes: Array<ChatEntry & { migrated: Record<string, unknown>; originalJson: string }> = [];
-    for (const entry of entries.values()) {
-      const surface = CHAT_SURFACES.has(String(entry.chat?.surface))
-        ? entry.chat.surface
-        : this.defaultSurface;
-      const { chat: migrated } = migrateChatModelRecord(entry.chat, registry, { surface });
-      migrated.revision = Number.isSafeInteger(entry.chat?.revision)
-        && Number(entry.chat.revision) >= 0
-        ? entry.chat.revision
-        : 0;
-      migrated.sessionBindingState = legacySessionState(entry.chat);
-      const json = stableJson(migrated);
-      // originalJson именно отдельным полем: спред entry кладёт исходные байты в
-      // `json`, а следом их затирает мигрированный — копировать было бы уже нечего.
-      if (json !== entry.json) changes.push({ ...entry, migrated, json, originalJson: entry.json });
+    const seen = new Set<string>();
+
+    for await (const file of this.catalogFiles()) {
+      seen.add(file);
+
+      try {
+        const stat = await fs.stat(file);
+        const cached = this.headCache.get(file);
+
+        if (cached?.migrationChecked && sameFileStat(cached, stat)) {
+          continue;
+        }
+
+        const originalJson = await fs.readFile(file, 'utf8');
+        const chat = JSON.parse(originalJson) as StoredChat;
+
+        if (!chat?.id) {
+          this.headCache.delete(file);
+          continue;
+        }
+
+        const migrated = this.migratedChat(chat, registry);
+        const json = stableJson(migrated);
+
+        if (json !== originalJson) {
+          changes.push({
+            path: file,
+            chat,
+            migrated,
+            json,
+            originalJson,
+          });
+        } else {
+          this.cacheHead(file, chat, originalJson, stat, true);
+        }
+      } catch (error) {
+        this.headCache.delete(file);
+        this.log?.warn?.({ file, err: (error as Error).message }, 'чат-файл не читается, пропущен');
+      }
     }
+    for (const file of this.headCache.keys()) {
+      if (!seen.has(file)) {
+        this.headCache.delete(file);
+      }
+    }
+
     const { meta: migratedMeta } = migrateDefaultModel(meta, registry);
     migratedMeta.schema = CHAT_SCHEMA;
     const metaChanged = stableJson(migratedMeta) !== stableJson(meta);
-    if (!changes.length && !metaChanged) return { changed: false, backupDir: null };
-
-    const backupDir = await this.backupMigration(
+    const backupDir = changes.length || metaChanged ? await this.backupMigration(
       changes.map((change) => ({ path: change.path, json: change.originalJson })),
       metaChanged ? meta : null,
-    );
-    for (const change of changes) await this.writeAtomic(change.path, change.json);
-    if (metaChanged) await this.writeAtomic(path.join(this.dir, 'meta.json'), stableJson(migratedMeta));
-    return { changed: true, backupDir };
+    ) : null;
+
+    for (const change of changes) {
+      await this.writeAtomic(change.path, change.json);
+
+      const stat = await fs.stat(change.path);
+
+      this.cacheHead(change.path, change.migrated as StoredChat, change.json, stat, true);
+      await yieldToLoop();
+    }
+
+    if (metaChanged) {
+      await this.writeAtomic(path.join(this.dir, 'meta.json'), stableJson(migratedMeta));
+    }
+
+    await this.catalogCache.save(this.headCache);
+
+    return { changed: !!changes.length || metaChanged, backupDir };
   }
 
   async ensureMigrated(): Promise<{ changed: boolean; backupDir: string | null }> {

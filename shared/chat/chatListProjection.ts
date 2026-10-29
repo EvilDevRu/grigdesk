@@ -79,13 +79,17 @@ export function projectWebChatHead(chat: Record<string, unknown>, version: strin
  * Поиск проверяет полный текст, возвращая прежнее окно вокруг первого совпадения.
  * Пустой фрагмент означает совпадение только названия, null — отсутствие совпадений.
  */
-export function chatSearchSnippet(chat: Record<string, unknown>, query: string): string | null {
+export function chatSearchSnippet(
+  chat: Record<string, unknown>,
+  query: string,
+  lowercase?: readonly string[],
+): string | null {
   const title = String(chat.title || (chat.taskId ? `#${chat.taskId}` : 'Новый чат'));
   const messages = Array.isArray(chat.messages) ? chat.messages as Message[] : [];
 
-  for (const message of messages) {
+  for (const [position, message] of messages.entries()) {
     const text = String(message.text || '');
-    const index = text.toLowerCase().indexOf(query);
+    const index = (lowercase?.[position] ?? text.toLowerCase()).indexOf(query);
 
     if (index >= 0) {
       return (index > 24 ? '…' : '') + text.slice(Math.max(0, index - 24), index + 72);

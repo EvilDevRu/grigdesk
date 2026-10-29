@@ -1292,24 +1292,25 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     }),
   });
 
-  // До появления новых ходов завершаем durable фазы прошлого процесса. Выжимку
-  // повторно не заказываем; один повреждённый путь не мешает загрузить остальные чаты.
-  const startupChats = await history.scan();
-
-  for (const { chat: record } of startupChats.values()) {
-    const state = record.workdirState;
-    const phase = state?.transition?.phase;
-
-    if (!state?.seedClaim && (!phase || ['done', 'failed'].includes(phase))) {
-      continue;
-    }
-
-    try {
-      await workdirTransitions.recover(record.id!);
-    } catch (error) {
-      fastify.log.warn({ err: (error as Error).message }, 'восстановление рабочей папки не завершено');
+  /**
+   * Незавершённые переходы выбираются из общей подготовки коротких шапок.
+   * Полные чаты читает только recover; остальные API доступны во время прогрева.
+   */
+  async function recoverCatalogWorkdirs() {
+    for (const id of await history.workdirRecoveryIds()) {
+      try {
+        await workdirTransitions.recover(id);
+      } catch (error) {
+        fastify.log.warn({ err: (error as Error).message }, 'восстановление рабочей папки не завершено');
+      }
     }
   }
+
+  fastify.addHook('onRequest', async (request) => {
+    if (/^\/api\/chat\/(?:store|workdir|sessions?)(?:\/|\?|$)/.test(request.url)) {
+      await catalogPreparation;
+    }
+  });
 
   /**
    * Ошибка workspace всегда является отказом до запуска исполнителя.
@@ -2534,6 +2535,8 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    * означает «исполнитель точно не запускался».
    */
   async function prepareTurn(opts: ChatTurnInput): Promise<PreparedTurn | (TurnReply & { ok: false })> {
+    await catalogPreparation;
+
     const chatKey = String(opts.chatKey || '');
     const strict = await companionScopePreflight(opts);
 
@@ -5699,13 +5702,15 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   // Первая сверка запускает разовую миграцию чатов и сборку реестра моделей с пробами всех
   // исполнителей — это дольше лимита старта модуля, и сервер падал по кругу. Поэтому старт
   // её не ждёт: сверки сериализованы, а сбой оставляет pending до следующего прохода.
-  const catalogPreparation = history.prepareWeb().catch(() => {});
+  const catalogPreparation = history.prepareWeb().then(recoverCatalogWorkdirs).catch((error) => {
+    fastify.log.warn({ err: (error as Error).message }, 'чат: подготовка каталога требует повтора');
+  });
 
   fastify.addHook('onClose', async () => {
     await catalogPreparation;
   });
 
-  const startupReconcile = mobileHistory.reconcile().catch(() => {
+  const startupReconcile = catalogPreparation.then(() => mobileHistory.reconcile()).catch(() => {
     fastify.log.warn('чат: восстановление мобильной истории оставило pending для повторной сверки');
   });
 
