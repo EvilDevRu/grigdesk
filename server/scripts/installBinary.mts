@@ -10,7 +10,7 @@ import { installBinary, type InstallOptions } from './binary/installSteps.mts';
  */
 function parseArguments(args: string[]): InstallOptions {
   const flags = new Map<string, string>();
-  const allowed = ['--binary', '--target', '--releases-dir'];
+  const allowed = ['--binary', '--target', '--releases-dir', '--deepseek-binary', '--glm-mode'];
 
   for (let index = 0; index < args.length; index += 2) {
     const name = args[index]!;
@@ -20,11 +20,17 @@ function parseArguments(args: string[]): InstallOptions {
       throw new Error('Некорректные аргументы установщика');
     }
 
-    flags.set(name, path.resolve(value));
+    flags.set(name, name === '--glm-mode' ? value : path.resolve(value));
   }
 
   if (!flags.has('--binary') || !flags.has('--target')) {
     throw new Error('Не заданы обязательные пути установщика');
+  }
+
+  const glmMode = flags.get('--glm-mode');
+
+  if (glmMode !== undefined && glmMode !== 'api' && glmMode !== 'coding-plan') {
+    throw new Error('Неизвестный режим GLM установщика');
   }
 
   return {
@@ -33,6 +39,8 @@ function parseArguments(args: string[]): InstallOptions {
     releasesDir: flags.get('--releases-dir') ?? path.join(
       dataPath(dataHome({ env: process.env, home: os.homedir() }), 'serverRuntime'), 'releases',
     ),
+    ...(flags.has('--deepseek-binary') ? { deepseekBinary: flags.get('--deepseek-binary')! } : {}),
+    ...(glmMode ? { glmMode } : {}),
   };
 }
 
@@ -47,7 +55,7 @@ async function main(): Promise<void> {
     options = parseArguments(process.argv.slice(2));
   } catch {
     process.stderr.write('Использование: install:binary -- --binary <ELF> --target <путь> '
-      + '[--releases-dir <каталог>]\n');
+      + '[--releases-dir <каталог>] [--deepseek-binary <ELF>] [--glm-mode api|coding-plan]\n');
     process.exitCode = 2;
 
     return;

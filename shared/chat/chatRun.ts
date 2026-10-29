@@ -13,6 +13,7 @@ export interface ChatRunSnapshot {
   turnId?: string;
   providerId: string;
   requestedModelId: string;
+  permissionMode?: string;
   actualModelId?: string;
   modelSource?: ChatModelSource;
   cwd: string;
@@ -44,6 +45,7 @@ export function normalizeChatRunSnapshot(value: unknown): ChatRunSnapshot | null
     ...(typeof raw.turnId === 'string' && raw.turnId ? { turnId: raw.turnId } : {}),
     providerId: raw.providerId as string,
     requestedModelId: raw.requestedModelId as string,
+    ...(typeof raw.permissionMode === 'string' ? { permissionMode: raw.permissionMode } : {}),
     ...(confirmed ? {
       actualModelId: raw.actualModelId as string,
       modelSource: raw.modelSource as ChatModelSource,

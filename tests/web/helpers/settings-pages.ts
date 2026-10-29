@@ -34,3 +34,5 @@ export { setUiLocale } from '../../../web/src/ui.ts';
 export {
   default as PluginWorkspacePage,
 } from '../../../web/src/views/settings/pages/PluginWorkspacePage.vue';
+
+export { default as SettingsModal } from '../../../web/src/views/settings/SettingsModal.vue';

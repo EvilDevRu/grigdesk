@@ -25,6 +25,7 @@
       <span v-if="arbitrating" class="sarbrun" v-tooltip="arbiterRunLabel(arbitrating)">
         Арбитр разбирает остановку · {{ arbiterRunLabel(arbitrating) }}
       </span>
+      <span v-else-if="conversation" class="sarbnote">{{ conversationLabel }}</span>
       <span v-else-if="arbiterNote" class="sarbnote" :class="arbiterVerdict" v-tooltip="arbiterModel">
         ⚖ {{ arbiterNote }}<span v-if="arbiterModel" class="samodel mono"> · {{ arbiterModel }}</span>
       </span>
@@ -56,7 +57,8 @@ import { computed, ref, useId, watch } from 'vue';
 import type { ArbiterRun } from '../../../../shared/pipeline/factoryGraphContracts.ts';
 import { arbiterRunLabel } from '../../shared/arbiterRun.ts';
 import type { GraphStallView } from '../../shared/graphStall.ts';
-import { UiDisclosureButton, vTooltip } from '../../ui';
+import type { ArbiterConversationSummary } from '../../../../shared/pipeline/arbiterConversation.ts';
+import { UiDisclosureButton, vTooltip, t } from '../../ui';
 
 const props = defineProps<{
   view: GraphStallView | null;
@@ -66,7 +68,22 @@ const props = defineProps<{
   arbiterNote?: string;
   arbiterModel?: string | null;
   arbiterVerdict?: string;
+  conversation?: ArbiterConversationSummary | null;
 }>();
+
+const conversationLabel = computed(() => {
+  const labels = {
+    idle: t('core.arbiterDialogTitle'),
+    analyzing: t('core.arbiterAnalyzing'),
+    awaiting_user: t('core.arbiterAwaiting'),
+    applying: t('core.arbiterApplying'),
+    resolved: t('core.arbiterResolved'),
+    interrupted: t('core.arbiterInterrupted'),
+    stale: t('core.arbiterStale'),
+  };
+
+  return labels[props.conversation?.state || 'idle'];
+});
 
 const metricPluralRules = new Intl.PluralRules('ru');
 const metricNouns = {

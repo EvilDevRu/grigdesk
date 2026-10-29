@@ -301,3 +301,26 @@ test('«Отключить» стирает токен только после �
   assert.equal(wrapper.find('input').exists(), true, 'после отключения возвращается форма токена');
   assert.match(wrapper.text(), /@BotFather/);
 });
+
+test('LOAD-SURFACE-telegram: каркас подключения сменяется двумя настоящими шагами', async (t) => {
+  const pending = Promise.withResolvers();
+  const calls = [];
+  const h = await mountView(t, {
+    api: { get(url) {
+      calls.push(url);
+      assert.equal(url, '/api/telegram/status');
+
+      return pending.promise;
+    } },
+  });
+  const bricks = h.wrapper.findAll('[data-ui-skeleton]').length;
+  const header = h.wrapper.get('h1').element;
+
+  pending.resolve({ bot: { ...EMPTY_BOT }, poll: null });
+  await h.settle();
+  assert.equal(h.wrapper.findAll('.setup-card').length, 2);
+  assert.ok(h.wrapper.get('h1').element === header);
+  assert.deepEqual(calls, ['/api/telegram/status']);
+  assert.equal(h.wrapper.find('[data-ui-loading]').exists(), false);
+  assert.ok(bricks > 0, 'подключение использует свой каркас вместо одинаковых строк');
+});

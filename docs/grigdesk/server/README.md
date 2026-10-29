@@ -1,5 +1,11 @@
 # Сервер и доступ
 
+- [Единый режим допуска GLM при установке сервера и DeepSeek](server-install-glm-mode.md)
+
+- [Условная правка .env: сверка прежнего значения под очередью писателя](env-file-expected-value.md)
+
+- [Исходный PATH/prefix и приватная проверка Bash для внешних CLI](user-cli-parent-environment.md)
+
 - [Подтверждение TLS-привязки, готовность relay и диагностика отказов](phone-pairing-confirmation.md)
 
 - [Управляемый direct-вход, PHONE:2 и общий client relay](phone-access.md)
@@ -13,6 +19,10 @@
 Читай перед правкой: `server/src/app.ts`, `server/src/plugins`, `server/src/modules/auth`, `bin`, `deploy`.
 
 ## Устройство
+
+- [Фоновый реестр исполнителей: снимок, бюджет 1,2 с, общий сбор и явный refresh](providers-background-read.md)
+
+- [Прогресс сборки без мерцания и предложение открыть окно после успеха](cli-build-interaction.md)
 
 - [Пустой вызов CLI: меню или справка, открытие окна только по явному действию](cli-default-command.md)
 
@@ -28,6 +38,8 @@
 
 - [Сборка и установка сервера, веба и окна одной командой из исходников](ctl-build.md)
 
+- [Полная сборка привязывает окно к новому серверу при следующем запуске](build-server-selection.md)
+
 - [E0 без baseline: функциональные ворота, cold-порог и явная пометка отчёта](server-binary-smoke-baseline.md)
 
 - [Выбор ELF/R/source и владение preparation в окне](server-binary-desktop.md)
@@ -35,6 +47,8 @@
 - [Сервер одним ELF: I/D/R, argv, launcher, приёмка и действия владельца](server-binary.md)
 
 - [Установка, private receipt и откат серверного ELF](server-binary-install.md)
+
+- [Пересборка проверяет совместимость сервера с установленными DeepSeek/GLM до замены](server-executor-install-guard.md)
 
 - [PATH одиночного ELF: пользовательские CLI и nvm без ссылок](server-binary-path.md)
 

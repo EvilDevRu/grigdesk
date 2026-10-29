@@ -25,6 +25,7 @@ import path from 'node:path';
 
 import { readLaunchLog } from '../factoryRouteCli.ts';
 import { listFactoryProfiles, PROFILE_RE } from '../profiles.ts';
+import { readProfileServiceHost } from '../profileServiceHost.ts';
 import { releaseSlot, reservedTasks, reserveSlot } from '../sandboxSlots.ts';
 import { readProcessIdentity } from '../speech/modelJobsProcess.ts';
 import {
@@ -652,6 +653,7 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
       slot: entry.slot,
       fePort: entry.fePort,
       apiPort: entry.apiPort,
+      serviceHost: profile ? await readProfileServiceHost(profilesDir, profile) : null,
       repos: entry.repos,
       standAlive: alive,
       feAlive,

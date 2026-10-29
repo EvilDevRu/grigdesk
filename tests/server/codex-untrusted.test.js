@@ -246,7 +246,12 @@ child.on('close', code => process.exit(code ?? 1));
     ...request.input.filter((item) => item.type === 'additional_tools').flatMap((item) => item.tools),
   ];
   const exposed = tools.flatMap((tool) => tool.type === 'namespace' ? tool.tools : [tool]);
-  assert.deepEqual(exposed.map((tool) => tool.name).sort(), ['exec', 'request_user_input_async', 'wait']);
+  const toolNames = exposed.map((tool) => tool.name).sort();
+
+  // CLI 0.164 может не объявлять необязательный вопрос в изолированном ходе.
+  // Остальной набор точный: исчезновение вопроса не разрешает никаких новых tools.
+  assert.deepEqual(toolNames.filter((name) => name !== 'request_user_input_async'), ['exec', 'wait']);
+  assert.ok(toolNames.filter((name) => name === 'request_user_input_async').length <= 1);
   // В описании оболочки есть примеры tools.exec_command; это не объявления.
   // У изолированной оболочки нет ни одного вложенного инструмента.
   assert.doesNotMatch(exposed.find((tool) => tool.name === 'exec').description, /declare const tools:/u);

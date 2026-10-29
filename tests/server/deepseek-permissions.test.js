@@ -16,6 +16,39 @@ const params = {
 };
 const selected = (optionId) => ({ outcome: { outcome: 'selected', optionId } });
 
+test('native gate показывает точную правку и всегда требует разового решения человека', () => {
+  const edit = deepSeekPermissionPresentation(params, {
+    title: 'edit',
+    rawInput: { file_path: 'src/a.ts', old_string: 'old', new_string: 'new' },
+  }, true);
+
+  assert.equal(edit.requiresExplicitUser, true);
+  assert.equal(edit.canRemember, false);
+  assert.deepEqual(edit.input.diff, { old: 'old', new: 'new' });
+  const write = deepSeekPermissionPresentation(params, {
+    title: 'write', rawInput: { file_path: 'new.ts', content: 'полный\nтекст' },
+  }, true);
+
+  assert.equal(write.input.details, 'полный\nтекст');
+});
+
+test('gated ACP не обходит человека по известному имени work MCP', async () => {
+  let calls = 0;
+  const result = await resolveDeepSeekPermission({
+    params,
+    context: { title: 'mcp__grigdesk-work__supervised_ssh', rawInput: { action: 'exec', command: 'true' } },
+    mode: 'workspace-write', toolPermissions: true, workToolNames: new Set(['supervised_ssh']),
+    onPermission: async (presentation) => {
+      calls += 1;
+      assert.equal(presentation.requiresExplicitUser, true);
+      return { allow: false };
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.deepEqual(result, selected('reject-once'));
+});
+
 test('permissionOutcome сохраняет известный выбор и fail-closed отклоняет неизвестный optionId', () => {
   assert.deepEqual(permissionOutcome(params, selected('allow-once')), selected('allow-once'));
   assert.deepEqual(permissionOutcome(params, selected('reject-once')), selected('reject-once'));

@@ -51,21 +51,23 @@ async function metadataBinary(t, info) {
  * Каталог попытки как у движка: private prompt в RUN_DIR, runtime home рядом,
  * server-owned identity этапа только в env. Ключ синтетический.
  */
-async function wrapperFixture(t, { info = admittedInfo(), env: extra = {}, mode = 'read-only' } = {}) {
+async function wrapperFixture(t, { info = admittedInfo(), env: extra = {}, mode = 'state-only' } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'glm-factory-wrapper-'));
   const project = path.join(root, 'project');
   const runDir = path.join(root, 'run');
+  const stateDir = path.join(root, 'state');
   const prompt = path.join(runDir, 'glm/prompt.md');
   const { binary } = await metadataBinary(t, info);
 
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.mkdir(path.join(project, '.git'), { recursive: true });
+  await fs.mkdir(stateDir, { recursive: true });
   await fs.mkdir(path.dirname(prompt), { recursive: true, mode: 0o700 });
   await fs.writeFile(prompt, 'fixture-stage-prompt', { mode: 0o600 });
 
   const argv = [
     '--bin', binary,
-    '--cwd', project,
+    '--cwd', mode === 'state-only' ? stateDir : project,
     '--run-dir', runDir,
     '--runtime-home', path.join(runDir, 'glm/runtime'),
     '--prompt-file', prompt,
@@ -86,6 +88,7 @@ async function wrapperFixture(t, { info = admittedInfo(), env: extra = {}, mode 
     FACTORY_STATUS_MODE: 'request',
     FACTORY_STATUS_REQUEST_DIR: path.join(root, 'state/control-requests'),
     FACTORY_STATE: path.join(root, 'state'),
+    STATE_DIR: stateDir,
     FACTORY_LOOP_ROLE: 'lead',
     ...extra,
   };
@@ -93,6 +96,7 @@ async function wrapperFixture(t, { info = admittedInfo(), env: extra = {}, mode 
   return {
     root,
     project,
+    stateDir,
     runDir,
     prompt,
     binary,
@@ -109,7 +113,8 @@ function withArgument(argv, name, value) {
 }
 
 test('SB11: wrapper отдаёт runTurn пару zai, режим ФС, prepared runtime и host status', async (t) => {
-  for (const [mode, filesystem] of [['read-only', 'state-only'], ['workspace-write', 'workspace-write']]) {
+  for (const filesystem of ['state-only', 'workspace-write']) {
+    const mode = filesystem;
     const f = await wrapperFixture(t, { mode });
     const events = [];
     let captured;
@@ -134,7 +139,7 @@ test('SB11: wrapper отдаёт runTurn пару zai, режим ФС, prepared
     assert.equal(captured.effort, 'high');
     assert.equal(captured.factory, true);
     assert.equal(captured.message, 'fixture-stage-prompt');
-    assert.equal(captured.cwd, await fs.realpath(f.project));
+    assert.equal(captured.cwd, await fs.realpath(filesystem === 'state-only' ? f.stateDir : f.project));
     assert.equal(captured.chatKey, 'factory:123:BUILD:fixture:1');
     assert.deepEqual({ ...captured.factoryContext, statusServer: undefined }, {
       task: '123',
@@ -142,6 +147,7 @@ test('SB11: wrapper отдаёт runTurn пару zai, режим ФС, prepared
       runId: 'fixture',
       epoch: '1',
       filesystem,
+      ...(filesystem === 'state-only' ? { stateDir: await fs.realpath(f.stateDir) } : {}),
       statusServer: undefined,
     });
     assert.equal(captured.factoryContext.statusServer.name, 'factory-status');
@@ -188,6 +194,13 @@ test('SB11: неверная identity, режим доступа и аргуме
 
   const foreignIdentity = withArgument(f.argv, '--runtime-identity', `deepseek-package:${'f'.repeat(64)}`);
 
+  for (const stateDir of [undefined, '', 'relative', f.project]) {
+    await assert.rejects(runGlmFactory(f.argv, { ...f.env, STATE_DIR: stateDir }, {
+      emit: () => {},
+      runTurn,
+    }), { code: 'glm_factory_context_invalid' });
+  }
+
   await assert.rejects(runGlmFactory(foreignIdentity, f.env, {
     emit: () => {},
     runTurn,
@@ -198,7 +211,7 @@ test('SB11: неверная identity, режим доступа и аргуме
   }), { code: 'glm_runtime_changed' });
   await assert.rejects(runGlmFactory(f.argv, {
     ...f.env,
-    GRIGDESK_GLM_API_MODE: 'coding-plan',
+    GRIGDESK_GLM_API_MODE: 'team-plan',
     ZAI_CODING_API_KEY: 'synthetic-coding-key',
   }, { emit: () => {}, runTurn }), { code: 'glm_factory_mode_unsupported' });
 
@@ -208,6 +221,7 @@ test('SB11: неверная identity, режим доступа и аргуме
     withArgument(withArgument(f.argv, '--model', '["zai","glm-4.7"]'), '--effort', 'max'),
     withArgument(f.argv, '--mode', 'danger-full-access'),
     withArgument(f.argv, '--cwd', 'relative'),
+    withArgument(f.argv, '--cwd', f.project),
     [...f.argv, '--unknown', 'x'],
   ]) {
     await assert.rejects(runGlmFactory(argv, f.env, { emit: () => {}, runTurn }), JSON.stringify(argv));

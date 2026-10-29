@@ -27,6 +27,8 @@ export interface InstallOptions {
   target: string;
   hostContract: string;
   releasesDir: string;
+  /** Фактический режим GLM потребителя; без флага — режим из host-контракта. */
+  glmMode?: 'api' | 'coding-plan';
 }
 
 export interface InstallResult {
@@ -68,16 +70,24 @@ async function probe(binary: string, stage: string, args: string[], timeout: num
 }
 
 /**
- * Установленный потребитель задаёт все требования, включая фактический admission API.
+ * Установленный потребитель задаёт все требования. Admission сверяется по режиму
+ * фактического потребителя (--glm-mode), а совместимость хоста — по контракту целиком:
+ * рантайм службы всё равно требует admission выбранного режима на каждом запуске,
+ * поэтому требование неиспользуемого режима избыточно и не добавляет защиты.
  * Декларация compatibility без совпадения с входами плагина не даёт права публикации.
  */
-async function checkCandidate(binary: string, stage: string, hostFile: string): Promise<DeepSeekRuntimeInfo> {
+async function checkCandidate(
+  binary: string,
+  stage: string,
+  hostFile: string,
+  glmMode?: InstallOptions['glmMode'],
+): Promise<DeepSeekRuntimeInfo> {
   const info = decodeDeepSeekRuntimeInfo(await probe(binary, stage, ['--runtime-info', '--json'], 30000));
   const host = decodeDeepSeekHostContract(JSON.parse(await fs.readFile(hostFile, 'utf8')));
 
   assertDeepSeekHostCompatibility(info, host);
 
-  assertDeepSeekGlmApiAdmission(info, host);
+  assertDeepSeekGlmApiAdmission(info, host, glmMode);
 
   const proof = await probe(binary, stage, [
     '--cache-dir', path.join(stage, 'cache'), '--verify', '--json',
@@ -98,7 +108,7 @@ export async function installBinary(
   options: InstallOptions,
   hooks: InstallHooks = {},
 ): Promise<InstallResult> {
-  for (const value of Object.values(options)) {
+  for (const value of [options.binary, options.target, options.hostContract, options.releasesDir]) {
     if (!path.isAbsolute(value)) {
       throw new Error('Пути установщика DeepSeek должны быть абсолютными');
     }
@@ -123,7 +133,7 @@ export async function installBinary(
 
     const stamp = await fs.lstat(staged, { bigint: true });
     const digest = await sha256File(staged);
-    const info = await checkCandidate(staged, stage, options.hostContract);
+    const info = await checkCandidate(staged, stage, options.hostContract, options.glmMode);
 
     await assertInstallFileUnchanged(staged, stamp, digest, snapshotPolicy);
 

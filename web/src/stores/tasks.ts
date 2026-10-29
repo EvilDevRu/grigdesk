@@ -26,7 +26,7 @@ export const useTasksStore = defineStore('tasks', {
      * Номера вне диапазона собственных задач читаются прежним запросом Б24.
      * Внутри диапазона источник подтверждает запись; ответ проверяется до замены кеша.
      */
-    async load(id: TaskId, force = false): Promise<TaskDetail> {
+    async load(id: TaskId, force = false, signal?: AbortSignal): Promise<TaskDetail> {
       const cached = this.details[id];
 
       if (cached && !force && Date.now() - cached.loadedAt < 30000) {
@@ -38,7 +38,7 @@ export const useTasksStore = defineStore('tasks', {
 
       if (!portal) {
         try {
-          response = await api.get(`/api/grigdesk-tasks/${id}`);
+          response = await api.get(`/api/grigdesk-tasks/${id}`, { signal });
         } catch (error) {
           if (!(error instanceof ApiError) || error.status !== 404
             || !isRecord(error.data) || error.data.error !== 'grigdesk_task_not_found') {
@@ -50,7 +50,7 @@ export const useTasksStore = defineStore('tasks', {
       }
 
       const data = portal
-        ? decodeTaskDetail(await api.get(`/api/b24/task/${id}`))
+        ? decodeTaskDetail(await api.get(`/api/b24/task/${id}`, { signal }))
         : decodeTaskDetail(decodeGrigdeskTask(response, String(id)));
 
       this.details[id] = { data, loadedAt: Date.now() };

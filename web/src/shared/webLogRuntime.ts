@@ -1,4 +1,5 @@
 import type { App } from 'vue';
+import { nextTick } from 'vue';
 import type { Pinia } from 'pinia';
 import type { Router } from 'vue-router';
 
@@ -13,6 +14,7 @@ import { attachTransport } from './webLogTransport.ts';
 import { installCapture } from './webLogCapture.ts';
 import { useWebLogStore } from '../stores/webLog.ts';
 import { sseSubscribe } from '../composables/useSse.ts';
+import { flushChatPerformance, installChatPerformance } from './chatPerformance.ts';
 
 const POLICY_STORAGE_KEY = 'grigdesk-diagnostic-level-v2';
 const ROUTES_STORAGE_KEY = 'grigdesk-web-log-api-routes-v1';
@@ -452,8 +454,13 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
     doc.addEventListener('visibilitychange', onPolicyVisibility);
   }
 
-  /** Ручная отметка человека сразу просит отправку, не дожидаясь интервала. */
+  /**
+   * Ручная отметка включает свежую сводку производительности в предысторию.
+   * Отправка запрашивается сразу, без ожидания обычного интервала транспорта.
+   */
   function mark(text: string) {
+    flushChatPerformance();
+
     const key = log.mark(text);
 
     if (key) {
@@ -543,6 +550,16 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
     sw: serviceWorkerState(win),
     queued: transport.status().pendingCount,
     storage: transport.status().storageAvailable,
+  });
+
+  const stopPerformance = installChatPerformance({
+    log,
+    win,
+    doc,
+    view: () => router.currentRoute?.value?.path ?? 'other',
+    afterFlush: (callback) => {
+      void nextTick(callback);
+    },
   });
 
   let stopAuth: (() => void) | null = null;
@@ -686,6 +703,7 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
     }
 
     stopCapture();
+    stopPerformance();
     transport.dispose();
     (win as Window & { __grigDeskLog?: unknown }).__grigDeskLog = oldGlobal;
 

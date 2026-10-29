@@ -155,7 +155,9 @@ async function settled(service, task, timeoutMs = 10000) {
 }
 
 test('подъём без задачи берёт номер из служебного диапазона и снимает гард профиля', async (t) => {
-  const { service, stateDir, events } = await serviceFixture(t);
+  const { service, stateDir, profilesDir, events } = await serviceFixture(t);
+
+  await writeFile(path.join(profilesDir, 'demo-profile', 'profile.sh'), 'PROFILE_SERVICE_HOST="localhost"\n');
 
   const started = await service.raise({ profile: 'demo-profile', task: null });
 
@@ -181,6 +183,7 @@ test('подъём без задачи берёт номер из служебн
   assert.equal(entry.profile, 'demo-profile');
   assert.equal(entry.fePort, 5192);
   assert.equal(entry.apiPort, 8092);
+  assert.equal(entry.serviceHost, 'localhost');
   assert.equal(entry.feAlive, false);
   assert.equal(entry.profileBinding, 'verified');
   assert.deepEqual(entry.repos.map((repo) => repo.branch), [`route-task-${started.task}`]);

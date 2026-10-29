@@ -68,6 +68,10 @@ export interface ProviderUsage {
   dataCheckedAt: number;
   stale: boolean;
   retryAt?: number;
+  lastSuccessfulAt?: number | null;
+  runtimeGeneration?: string;
+  usageSchema?: string;
+  pollIntervalMs?: number;
 }
 
 /**
@@ -275,7 +279,24 @@ export function createUsageReadCache<Value>(
   let cache: { at: number; value: Value } | null = null;
   let inFlight: Promise<Value> | null = null;
   let generation = 0;
+  let notifiedSnapshot: { at: number; value: Value } | null = null;
   const invalidationWaiters = new Set<() => void>();
+
+  /**
+   * Меняет поколение и отпускает старых читателей без отмены чужой read-only операции.
+   * При замене проекции возраст замера сохраняется: доставка не продлевает TTL данных.
+   */
+  function invalidate(replacement: { value: Value } | null) {
+    generation += 1;
+    cache = replacement ? { at: cache?.at ?? now(), value: replacement.value } : null;
+    inFlight = null;
+
+    for (const notify of invalidationWaiters) {
+      notify();
+    }
+
+    invalidationWaiters.clear();
+  }
 
   /**
    * Делит загрузку актуального поколения между всеми читателями.
@@ -342,6 +363,50 @@ export function createUsageReadCache<Value>(
   return {
     read,
 
+    /**
+     * Отдаёт прежний успешный снимок, пока единственная общая загрузка обновляет его.
+     * Без снимка ограничивает ожидание; поздний успех уведомляет уже отпущенных читателей.
+     */
+    async readStale(waitMs: number, fallback: Value, onReady: () => void): Promise<Value> {
+      const version = generation;
+      const snapshot = cache;
+      let deferred = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const loading = read().then((value) => {
+        if (deferred && generation === version && cache !== notifiedSnapshot) {
+          notifiedSnapshot = cache;
+          onReady();
+        }
+
+        return value;
+      }).catch((error: unknown) => {
+        if (snapshot || deferred) {
+          return snapshot?.value ?? fallback;
+        }
+
+        throw error;
+      });
+
+      if (snapshot) {
+        deferred = now() - snapshot.at >= maxAgeMs;
+
+        return snapshot.value;
+      }
+
+      const timeout = new Promise<Value>((resolve) => {
+        timer = setTimeout(() => {
+          deferred = true;
+          resolve(fallback);
+        }, waitMs);
+      });
+
+      try {
+        return await Promise.race([loading, timeout]);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+
     async refresh() {
       if (inFlight) return inFlight;
 
@@ -363,17 +428,11 @@ export function createUsageReadCache<Value>(
      * Начатый read-only запрос может завершиться, но его результат уже никому не отдаётся.
      */
     clear() {
-      generation += 1;
-      cache = null;
-      // Уже начатую read-only операцию не убиваем, но после явного сброса новый
-      // читатель не должен получить её потенциально устаревший результат.
-      inFlight = null;
+      invalidate(null);
+    },
 
-      for (const invalidate of invalidationWaiters) {
-        invalidate();
-      }
-
-      invalidationWaiters.clear();
+    replace(value: Value) {
+      invalidate({ value });
     },
   };
 }

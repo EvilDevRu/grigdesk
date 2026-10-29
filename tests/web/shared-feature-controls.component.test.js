@@ -148,7 +148,7 @@ test('AttentionAlerts запускает и скрывает оценки чер
     global: {
       stubs: {
         UiTopbarPanel: {
-          template: '<section><slot name="trigger" /><slot /></section>',
+          template: '<section><slot name="trigger" /><slot /><slot name="footer" /></section>',
         },
       },
     },
@@ -195,7 +195,7 @@ test('AttentionAlerts не опрашивает и не показывает о�
     global: {
       stubs: {
         UiTopbarPanel: {
-          template: '<section><slot name="trigger" /><slot /></section>',
+          template: '<section><slot name="trigger" /><slot /><slot name="footer" /></section>',
         },
       },
     },

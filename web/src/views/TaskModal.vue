@@ -93,7 +93,7 @@
             </UiButton>
           </div>
           <div class="brief-scroll">
-            <UiLoadingState v-if="loading && !detail" label="Читаю данные задачи…" variant="document" />
+            <TaskLoading v-if="loading && !detail" label="Читаю данные задачи…"  area="description" />
             <div v-else-if="editForm" class="task-edit" aria-label="Редактирование задачи">
               <UiField
                 label="Заголовок"
@@ -170,8 +170,8 @@
                 </UiField>
               </div>
 
-              <UiLoadingState v-if="editOptionsBusy" label="Загружаю исполнителей и проекты…"
-                variant="inline" />
+              <TaskLoading v-if="editOptionsBusy" label="Загружаю исполнителей и проекты…"
+                           area="options" :failed="Boolean(editOptionsError)" />
               <div v-else-if="editOptionsError" class="edit-options-state bad">
                 <span>{{ editOptionsError }}</span>
                 <UiButton data-role="task-edit-options-retry" @click="loadEditOptions">
@@ -623,7 +623,8 @@
           role="tabpanel"
           aria-labelledby="task-tab-comments"
         >
-          <UiLoadingState v-if="comLoading && comments === null" label="загрузка комментариев…" />
+          <TaskLoading v-if="comLoading && comments === null"
+                       label="загрузка комментариев…" area="comments" />
           <div v-else-if="comments && !comments.length" class="tmuted">Комментариев нет.</div>
           <div v-else-if="comments" class="comlist">
             <div v-for="c in comments" :key="c.mid" class="com">
@@ -970,6 +971,8 @@
 </template>
 
 <script setup lang="ts">
+import TaskLoading from './TaskLoading.vue';
+
 import type {
   BoardNamedItem, TaskComment, TaskDetail, TaskLaunchOptions,
 } from '../shared/boardContracts.ts';
@@ -1012,7 +1015,6 @@ import {
   UiTextarea,
   UiTooltip,
   vTooltip,
-  UiLoadingState,
 } from '../ui';
 import { useUiStore } from '../stores/ui.ts';
 import { useTasksStore } from '../stores/tasks.ts';
@@ -1382,6 +1384,9 @@ function tgPlural(n: number) {
   return 'сообщений';
 }
 
+let detailAbort: AbortController | null = null;
+let commentsAbort: AbortController | null = null;
+
 /**
  * Загружает карточку через общий кеш задач с прежним принудительным обновлением.
  * Отказ остаётся в открытой карточке и не превращается в пустой успешный ответ.
@@ -1394,11 +1399,13 @@ async function loadDetail(force = false) {
   const id = taskId.value;
   const request = ++detailRequest;
 
+  detailAbort?.abort();
+  detailAbort = new AbortController();
   loading.value = true;
   err.value = null;
 
   try {
-    const loaded = await tasks.load(id, force);
+    const loaded = await tasks.load(id, force, detailAbort.signal);
 
     if (request !== detailRequest || taskId.value !== id) {
       return;
@@ -1857,10 +1864,14 @@ async function loadComments() {
   const id = taskId.value;
   const request = ++commentsRequest;
 
+  commentsAbort?.abort();
+  commentsAbort = new AbortController();
   comLoading.value = true;
 
   try {
-    const result = decodeTaskComments(await api.get(`/api/b24/task/${id}/comments`));
+    const result = decodeTaskComments(await api.get(`/api/b24/task/${id}/comments`, {
+      signal: commentsAbort.signal,
+    }));
 
     if (taskId.value === id && request === commentsRequest && isB24Task.value) {
       comments.value = result;
@@ -2531,6 +2542,8 @@ function onTaskDialogOpenChange(open: boolean) {
 
 // Открытие/закрытие модалки по taskId.
 watch(taskId, (id) => {
+  detailAbort?.abort();
+  commentsAbort?.abort();
   detailRequest += 1;
   commentsRequest += 1;
   comLoading.value = false;
@@ -2627,6 +2640,8 @@ watch(
   { immediate: true },
 );
 onUnmounted(() => {
+  detailAbort?.abort();
+  commentsAbort?.abort();
   detailRequest += 1;
   commentsRequest += 1;
   stopLaunchEvents();

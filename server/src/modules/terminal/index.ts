@@ -11,6 +11,8 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { FastifyInstance } from 'fastify';
 import type { Writable } from 'node:stream';
 
+import { ptyStartEnvironment } from '../../lib/providerInstall/userCliEnvironment.ts';
+
 // Сообщение от клиента: ввод или изменение размера. Разбирается из недоверенного
 // JSON, поэтому каждое поле проверяется отдельно.
 interface TerminalMessage {
@@ -31,17 +33,23 @@ function clampInt(value: unknown, def: number, min: number, max: number): number
   return Math.min(max, Math.max(min, n));
 }
 
+/**
+ * PTY получает очищенную пользовательскую среду и запускает shell ровно один раз.
+ * Startup-файлы выполняет сам shell, поэтому rc второй раз не source-ится.
+ */
 export function spawnPty({
   cols,
   rows,
   shell,
   home,
+  env = process.env,
   python = process.env.GRIGDESK_TERMINAL_PYTHON || 'python3',
 }: {
   cols: number;
   rows: number;
   shell: string;
   home: string;
+  env?: NodeJS.ProcessEnv;
   python?: string;
 }): ChildProcessWithoutNullStreams {
   return spawn(python, [
@@ -53,7 +61,12 @@ export function spawnPty({
     '--control-fd', '3',
   ], {
     cwd: home,
-    env: { ...process.env, TERM: 'xterm-256color', COLUMNS: String(cols), LINES: String(rows) },
+    env: {
+      ...env,
+      TERM: 'xterm-256color',
+      COLUMNS: String(cols),
+      LINES: String(rows),
+    },
     stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
   });
 }
@@ -71,7 +84,24 @@ async function terminalModule(fastify: FastifyInstance): Promise<void> {
     const rows = clampInt(req.query.rows, 30, 5, 200);
     const shell = process.env.SHELL || '/bin/bash';
     const home = os.homedir();
-    const child = spawnPty({ cols, rows, shell, home });
+    let ptyEnv: Record<string, string>;
+
+    try {
+      ptyEnv = ptyStartEnvironment(process.env);
+    } catch (error) {
+      fastify.log.warn({ err: (error as Error).message }, 'terminal: исходное окружение неизвестно');
+      socket.close(1011, 'terminal environment unavailable');
+
+      return;
+    }
+
+    const child = spawnPty({
+      cols,
+      rows,
+      shell,
+      home,
+      env: ptyEnv,
+    });
     active++;
     fastify.log.info({ pid: child.pid, cols, rows }, 'terminal: PTY запущен');
 

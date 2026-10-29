@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { test as nodeTest } from 'node:test';
 
+import { protocolChanges, protocolHead, protocolList, protocolReconcile } from './helpers/chat-protocol.js';
+
 import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
 import { chatStoreFixture, setChatProviders, sseOf } from './helpers/chat-store.js';
 
@@ -27,6 +29,23 @@ const refOf = (model) => ({
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const effortOf = (chat) => chat.effort || '';
 
+test('сохранённый Claude plan не уходит в запрос DeepSeek, явный readonly сохраняется', async (t) => {
+  const f = await fixture(t, { initial: {
+    model: 'ds-test', modelRef: refOf('ds-test'), mode: 'plan',
+  } });
+
+  await f.chat.send(f.live.id, 'Первый вопрос');
+  let request = f.requests.filter((entry) => entry.url === '/api/chat').at(-1);
+
+  assert.equal(request.body.mode, 'default');
+  f.chat.setMode(f.live.id, 'read-only');
+  await f.chat.send(f.live.id, 'Следующий вопрос');
+  request = f.requests.filter((entry) => entry.url === '/api/chat').at(-1);
+
+  assert.equal(request.body.mode, 'read-only');
+  assert.equal((await f.read()).mode, 'read-only');
+});
+
 /**
  * Каталог окна берёт уровни из тех же записей, что реестр серверного хранилища.
  * Неизвестная модель остаётся неизвестной, а не превращается в модель без уровней.
@@ -45,7 +64,12 @@ function installProviders() {
       return {
         id,
         model,
-        provider: provider ? { id: provider, sessionBinding: provider === 'deepseek' } : null,
+        provider: provider ? {
+          id: provider,
+          sessionBinding: provider === 'deepseek',
+          modes: (provider === 'deepseek' ? ['default', 'auto', 'read-only'] : ['manual', 'auto', 'plan'])
+            .map((mode) => ({ id: mode, label: mode })),
+        } : null,
       };
     },
   });
@@ -138,20 +162,21 @@ async function fixture(t, { initial = {}, unsaved = false } = {}) {
       async get(url) {
         requests.push({ method: 'GET', url });
 
-        if (url === '/api/chat/store') {
-          return {
+        if (url === '/api/chat/store/list') {
+          return protocolList({
             sessions: [await history.readOne(base.id)],
             archived: [],
             activeId: base.id,
-          };
+          });
+        }
+        if (url === `/api/chat/store/head/${base.id}`) {
+          return { head: protocolHead(await history.readOne(base.id)) };
         }
         if (url === `/api/chat/store/chat/${base.id}`) {
-          const answer = { chat: await history.readOne(base.id) };
+          const chat = await history.readOne(base.id);
+          const answer = { chat, version: protocolHead(chat).version };
 
           return hooks.get ? hooks.get(answer) : answer;
-        }
-        if (url === '/api/chat/pending') {
-          return { pending: hooks.pending || [] };
         }
 
         return { active: [] };
@@ -186,6 +211,12 @@ async function fixture(t, { initial = {}, unsaved = false } = {}) {
           body: copy(body),
         });
 
+        if (url === '/api/chat/store/reconcile') {
+          return protocolReconcile({ pending: hooks.pending || [] }, body.loadedIds);
+        }
+        if (url === '/api/chat/store/changes') {
+          return protocolChanges({ sessions: [await history.readOne(base.id)], archived: [] }, body.known);
+        }
         if (url === '/api/chat/session/reset') {
           await history.patchExecution(body.chatKey, () => ({ executionRunId: null, sessionId: null }));
 
@@ -221,6 +252,16 @@ async function fixture(t, { initial = {}, unsaved = false } = {}) {
 
     installProviders();
     windows.push(chat);
+
+    if (fromServer) {
+      const surface = chat.registerSurface('проверка выбора после F5', {
+        chatId: base.id,
+        visible: true,
+      });
+
+      await chat.ensureChatMessages(base.id);
+      surface.dispose();
+    }
 
     return chat;
   }

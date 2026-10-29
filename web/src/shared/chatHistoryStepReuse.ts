@@ -153,15 +153,15 @@ export function createChatHistoryStepReuseState() {
       ));
     },
     /**
-     * Сетевая проекция удаляет steps только при совпадении revision и подтверждённого массива.
-     * Полный снимок остаётся отдельным объектом для одного безопасного fallback.
+     * Сетевая проекция удаляет steps только у подтверждённых неизменённых массивов.
+     * CAS чата и revision основания независимы: сервер проверяет refs под lock свежего файла.
      */
     request(snapshot: ChatHistorySnapshot, capability: number, activeSteps: unknown) {
       const base = bases.get(snapshot.id!);
       const refs: HistoryStepRef[] = [];
       const sources = new Set<number>();
 
-      if (capability === 1 && base && base.revision === snapshot.revision) {
+      if (capability === 1 && base) {
         for (const entry of signature(snapshot)) {
           const key = messageKey(snapshot.messages![entry.index]);
           const confirmed = base.steps.find((item) => item.steps === entry.steps && item.key === key &&
@@ -218,7 +218,7 @@ export function createChatHistoryStepReuseState() {
     },
     /**
      * Проверяем каждую позицию ACK относительно захваченного снимка, не живого стора.
-     * Слияние, stale или неверная форма оставляют клиента без доказанной базы для refs.
+     * Даже при stale/слиянии точные confirmed доказывают сохранность отдельных массивов.
      */
     acceptAck(
       snapshot: ChatHistorySnapshot,
@@ -230,7 +230,6 @@ export function createChatHistoryStepReuseState() {
       const ack = decodeHistoryStepReuseAck(response.stepReuseAck);
 
       if (!ack || ack.revision !== response.revision ||
-        response.stale || response.restored || response.dropped ||
         ack.confirmed.length > (snapshot.messages?.length || 0)) {
         return;
       }
@@ -261,10 +260,10 @@ export function createChatHistoryStepReuseState() {
 }
 
 /**
- * Только отказ ссылки или исчезновение нового URI разрешают один полный повтор.
- * Generic CAS, сеть, auth и лимит тела сохраняют прежний путь ошибки и штатного retry.
+ * Отказ refs требует лёгкой сверки головы и повторной проверки под серверным lock.
+ * Generic CAS, сеть, auth и лимит тела сохраняют обычный путь ошибки и штатного retry.
  */
-export function mayRetryFullHistory(error: unknown): boolean {
+export function isHistoryStepsChanged(error: unknown): boolean {
   const failure = error as {
     status?: number;
     data?: {
@@ -272,6 +271,5 @@ export function mayRetryFullHistory(error: unknown): boolean {
     }
   } | null;
 
-  return failure?.status === 404 || failure?.status === 405 ||
-    (failure?.status === 409 && failure.data?.error === 'chat_steps_changed');
+  return failure?.status === 409 && failure.data?.error === 'chat_steps_changed';
 }

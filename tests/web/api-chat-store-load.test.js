@@ -132,3 +132,43 @@ test('STORE-HTTP-04', async (t) => {
     });
   }
 });
+
+test('STORE-HTTP-05: read POST измеряет тишину, а не общую длительность', async (t) => {
+  for (const idle of [false, true]) {
+    await t.test(idle ? '30 секунд тишины' : 'живой поток дольше 30 секунд', async (sub) => {
+
+      const clock = loadClock(sub);
+
+      const requests = streamFetch(sub);
+
+      const result = api.post('/api/chat/store/changes', { known: {} }, OPTIONS)
+        .catch((error) => error);
+
+      sub.after(() => requests[0]?.end());
+      await drain();
+      assert.ok(requests[0].signal, 'read POST с idleTimeoutMs создаёт watchdog и сигнал отмены');
+      requests[0].push(new TextEncoder().encode('{"sessions":'));
+      await clock.tick(20000);
+
+      if (idle) {
+        await clock.tick(10000);
+        assert.equal(requests[0].signal.aborted, true);
+        assert.equal((await result).name, 'TimeoutError');
+      } else {
+        requests[0].push(new TextEncoder().encode('[],"archived":[]'));
+        await clock.tick(20000);
+        requests[0].push(new TextEncoder().encode(',"gone":[]}'));
+        requests[0].end();
+        assert.deepEqual(await result, {
+          sessions: [],
+          archived: [],
+          gone: [],
+        });
+        assert.equal(requests[0].signal.aborted, false);
+      }
+
+      assert.equal(requests.length, 1, 'read POST не повторяется автоматически');
+      assert.equal(clock.pending(), 0);
+    });
+  }
+});

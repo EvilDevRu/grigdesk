@@ -6,8 +6,10 @@
   >
     <template #trigger>
       <UiButton
-        variant="outline"
+        data-context="analysis-attention-topbar"
+        variant="link"
         tone="warning"
+        size="compact"
         :aria-label="t('core.needAttention2', { itemsLength: items.length })"
       >
         <template #leading>
@@ -36,36 +38,20 @@
     </template>
 
     <div class="attention-alerts">
-      <strong class="attention-heading">
+      <p class="attention-description">
         {{ t('core.triageEvaluationsInterruptedManualRestartOnly') }}
-      </strong>
+      </p>
 
-      <UiFormActions align="start">
-        <UiButton
-          v-if="items.length > 1"
-          tone="accent"
-          :loading="busy === 'all'"
-          :loading-label="t('core.starting')"
-          @click="restartAll"
-        >
-          {{ t('core.restartAll') }}{{ items.length }})
-        </UiButton>
-        <UiButton
-          :disabled="busy === 'all'"
-          @click="dismissAll"
-        >
-          {{ t('core.hideAll') }}
-        </UiButton>
-      </UiFormActions>
-
-      <div class="attention-list">
-        <div
+      <ul class="attention-list">
+        <li
           v-for="item in items"
           :key="item.task"
           class="attention-row"
         >
-          <b class="mono">#{{ item.task }}</b>
-          <span class="attention-reason">{{ item.reason }}</span>
+          <span class="attention-copy">
+            <b class="attention-task mono">#{{ item.task }}</b>
+            <span class="attention-reason">{{ item.reason }}</span>
+          </span>
 
           <span class="attention-actions">
             <UiIconButton
@@ -75,7 +61,17 @@
               :disabled="busy === item.task"
               @click="restart(item.task)"
             >
-              ↻
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M20 7v5h-5M20 12a8 8 0 1 0-2.4 5.7" />
+              </svg>
             </UiIconButton>
             <UiIconButton
               :label="t('core.hideEvaluation', { itemTask: item.task })"
@@ -84,12 +80,45 @@
               :disabled="busy === item.task"
               @click="dismiss(item.task)"
             >
-              ✕
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linecap="round"
+                aria-hidden="true"
+              >
+                <path d="m6 6 12 12M18 6 6 18" />
+              </svg>
             </UiIconButton>
           </span>
-        </div>
-      </div>
+        </li>
+      </ul>
     </div>
+
+    <template #footer>
+      <UiFormActions align="start">
+        <UiButton
+          v-if="items.length > 1"
+          variant="text"
+          tone="accent"
+          size="compact"
+          :loading="busy === 'all'"
+          :loading-label="t('core.starting')"
+          @click="restartAll"
+        >
+          {{ t('core.restartAll') }}{{ items.length }})
+        </UiButton>
+        <UiButton
+          variant="text"
+          size="compact"
+          :disabled="busy === 'all'"
+          @click="dismissAll"
+        >
+          {{ t('core.dismissAll') }}
+        </UiButton>
+      </UiFormActions>
+    </template>
   </UiTopbarPanel>
 </template>
 
@@ -196,19 +225,19 @@ async function dismissAll() {
   text-align: left;
 }
 
-.attention-heading {
-  padding-right: 6px;
-  color: var(--warn);
+.attention-description {
+  margin: 0;
+  color: var(--ink-mid);
 }
 
 .attention-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
   max-height: 45vh;
-  margin-right: -6px;
-  padding-right: 4px;
+  margin: 0;
+  padding: 0;
   overflow-y: auto;
+  list-style: none;
 }
 
 .attention-row {
@@ -216,20 +245,36 @@ async function dismissAll() {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 2px 0;
+  padding: 9px 0;
+}
+
+.attention-row + .attention-row {
+  border-top: 1px solid var(--line);
+}
+
+.attention-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.attention-task {
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .attention-reason {
-  flex: 1;
   min-width: 0;
   color: var(--ink-mid);
-  font-size: 12px;
+  font-size: 11px;
   overflow-wrap: anywhere;
 }
 
 .attention-actions {
   display: inline-flex;
   flex: none;
-  gap: 6px;
+  gap: 2px;
 }
 </style>

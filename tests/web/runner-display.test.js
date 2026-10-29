@@ -90,6 +90,25 @@ test('missing attempt telemetry falls back to runner policy', () => {
   assert.equal(runnerModelEffortLabel(runner), 'gpt-5.6-sol · effort max');
 });
 
+test('подпись GLM использует серверную модель вместо служебного семейства default', () => {
+  const runner = {
+    primary: 'glm',
+    models: { glm: {
+      family: 'default',
+      label: 'glm-5.3',
+      effort: 'high',
+    } },
+  };
+
+  assert.equal(runnerModelLabel(runner), 'glm-5.3');
+  assert.equal(runnerModelEffortLabel(runner), 'glm-5.3 · effort high');
+  assert.equal(runnerModelLabel({
+    ...runner,
+    actual: 'glm',
+    model: 'glm-5.2',
+  }), 'glm-5.2');
+});
+
 // Цена запуска важнее объёма токенов: она позволяет сравнивать узлы
 // маршрута, а разбивка по кэшу остаётся в подсказке.
 test('attempt cost prefers money over token volume', () => {

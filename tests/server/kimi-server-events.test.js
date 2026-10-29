@@ -1,6 +1,6 @@
 // Поток событий Kimi: подпротокол с токеном, подписка на сессии и доставка кадров.
 //
-// Проверяем контракт, снятый с установленного сервера 0.33.0: токен едет подпротоколом
+// Проверяем 0.33.0 и heartbeat протокола v2 (2.3.1): токен едет подпротоколом
 // `kimi-code.bearer.<token>`, после открытия уходит `subscribe` со списком сессий, а
 // серверные кадры доходят до подписчика без потерь.
 import assert from 'node:assert/strict';
@@ -23,14 +23,27 @@ const websocket = requireFromServer('@fastify/websocket');
  */
 async function fakeEventServer(t) {
   const app = Fastify({ logger: false });
-  const state = { protocol: '', subscribe: null, socket: null };
+  const state = {
+    protocol: '',
+    subscribe: null,
+    socket: null,
+    messages: [],
+    lastInboundAt: Date.now(),
+  };
 
   await app.register(websocket);
   app.get('/api/v1/ws', { websocket: true }, (socket, request) => {
     state.protocol = String(request.headers['sec-websocket-protocol'] || '');
     state.socket = socket;
     socket.on('message', (raw) => {
-      state.subscribe = JSON.parse(String(raw));
+      const message = JSON.parse(String(raw));
+
+      state.lastInboundAt = Date.now();
+      state.messages.push(message);
+
+      if (message.type === 'subscribe') {
+        state.subscribe = message;
+      }
     });
   });
 
@@ -133,6 +146,133 @@ test('Kimi: битый кадр не рвёт поток, ошибка соед�
 
   await assert.rejects(() => broken.ready);
   assert.equal(errors.length, 1);
+});
+
+test('Kimi: ping получает pong с nonce и не попадает к подписчику', async (t) => {
+  const { state, baseUrl } = await fakeEventServer(t);
+  const events = [];
+  const stream = openKimiEventStream({
+    baseUrl,
+    token: 'token',
+    sessionIds: ['heartbeat-session'],
+    onEvent: (event) => events.push(event),
+  });
+
+  t.after(() => stream.close());
+  await stream.ready;
+
+  const before = { type: 'assistant.delta', payload: { delta: 'До пинга' } };
+  const after = { type: 'turn.ended', payload: { reason: 'completed' } };
+  const pings = [
+    { type: 'ping', payload: { nonce: 'heartbeat-nonce' } },
+    { type: 'ping', payload: { nonce: 42 } },
+    { type: 'ping', payload: {} },
+    { type: 'ping' },
+  ];
+
+  for (const frame of [before, ...pings, after]) {
+    state.socket.send(JSON.stringify(frame));
+  }
+
+  await waitFor(() => events.some((event) => event.type === after.type), 'событие после ping');
+
+  assert.deepEqual(events, [before, after]);
+  await waitFor(() => state.messages.filter((message) => message.type === 'pong').length === pings.length,
+    'ответы pong');
+  assert.deepEqual(state.messages.filter((message) => message.type === 'pong'), [
+    { type: 'pong', payload: { nonce: 'heartbeat-nonce' } },
+    { type: 'pong', payload: { nonce: '' } },
+    { type: 'pong', payload: { nonce: '' } },
+    { type: 'pong', payload: { nonce: '' } },
+  ]);
+});
+
+test('Kimi: heartbeat сохраняет поток дольше четырёх интервалов без событий хода', async (t) => {
+  const { state, baseUrl } = await fakeEventServer(t);
+  const events = [];
+  const closed = [];
+  const heartbeatMs = 100;
+  const stream = openKimiEventStream({
+    baseUrl,
+    token: 'token',
+    sessionIds: ['heartbeat-session'],
+    onEvent: (event) => events.push(event),
+    onClose: (info) => closed.push(info),
+  });
+
+  t.after(() => stream.close());
+  await stream.ready;
+  await waitFor(() => state.subscribe, 'подписка перед heartbeat');
+
+  let ticks = 0;
+  const lateEvent = { type: 'assistant.delta', payload: { delta: 'Долгий ход продолжается' } };
+  const timer = setInterval(() => {
+    ticks += 1;
+
+    if (Date.now() - state.lastInboundAt >= heartbeatMs * 2) {
+      state.socket.close(1001, 'heartbeat timeout');
+      clearInterval(timer);
+
+      return;
+    }
+
+    state.socket.send(JSON.stringify({
+      type: 'ping',
+      timestamp: new Date().toISOString(),
+      payload: { nonce: `heartbeat-${ticks}` },
+    }));
+
+    if (ticks === 6) {
+      state.socket.send(JSON.stringify(lateEvent));
+    }
+  }, heartbeatMs);
+
+  t.after(() => clearInterval(timer));
+  state.socket.on('close', () => clearInterval(timer));
+  await waitFor(() => closed.length || events.some((event) => event.type === lateEvent.type),
+    'поздний кадр или heartbeat timeout');
+
+  assert.deepEqual(closed, [], 'клиент должен поддерживать heartbeat входящими кадрами');
+  assert.ok(ticks > 4);
+  assert.deepEqual(events, [lateEvent]);
+});
+
+test('Kimi: ошибка отправки pong при закрытии не выпускает ping к подписчику', async (t) => {
+  const { state, baseUrl } = await fakeEventServer(t);
+  const events = [];
+  const errors = [];
+  let pongAttempts = 0;
+
+  class ClosingSocket extends WebSocket {
+    send(raw) {
+      if (JSON.parse(raw).type === 'pong') {
+        pongAttempts += 1;
+
+        throw new Error('сокет закрывается');
+      }
+
+      super.send(raw);
+    }
+  }
+
+  const stream = openKimiEventStream({
+    baseUrl,
+    token: 'token',
+    sessionIds: ['heartbeat-session'],
+    WebSocketImpl: ClosingSocket,
+    onEvent: (event) => events.push(event),
+    onError: (error) => errors.push(error),
+  });
+
+  t.after(() => stream.close());
+  await stream.ready;
+  state.socket.send(JSON.stringify({ type: 'ping', payload: { nonce: 'closing-nonce' } }));
+  state.socket.send(JSON.stringify({ type: 'turn.ended' }));
+  await waitFor(() => events.length, 'событие после неудачной отправки pong');
+
+  assert.equal(pongAttempts, 1);
+  assert.deepEqual(events, [{ type: 'turn.ended' }]);
+  assert.deepEqual(errors, []);
 });
 
 /** Ожидание условия короткими паузами: настоящие задержки в тесте не нужны. */

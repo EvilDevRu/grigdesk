@@ -83,7 +83,8 @@ restore_coverage() {
 # Отдельно сохраняются код возврата и журнал, чтобы проверить барьер до run.
 run_fixture() {
   local task=$1
-  pipeline_store_route_init "$task" BUILD PROFILE fixture STALLED_HUMAN 0
+  pipeline_store_route_init "$task" BUILD PROFILE fixture STALLED_HUMAN 0 \
+    RUNNER_OVERRIDE_STAGE_BUILD "${2:-}"
   run_agent "$task" 'проверка продолжения после срока preflight' BUILD \
     >"$TEST_ROOT/task-$task.log" 2>&1
   fixture_rc=$?
@@ -134,19 +135,35 @@ for provider in alpha beta; do
   task=73
   [[ "$provider" == alpha ]] || task=74
   run_fixture "$task"
-  assert_rc 79 "$fixture_rc" "недоступный $provider после истечения сохраняет fail-closed"
-  assert_eq '' "$(cat "$TEST_ROOT/invocations")" "недоступный $provider блокирует любой model call"
+  assert_rc 0 "$fixture_rc" "недоступный $provider не блокирует готового кандидата цепочки"
+  actual=alpha
+  reason=primary
+  if [[ "$provider" == alpha ]]; then
+    actual=beta
+    reason=unavailable_preflight
+    assert_contains "$(cat "$LOGDIR/t${task}.stages.log")" 'alpha недоступен по снимку' \
+      "переход к объявленному резерву объяснён в журнале этапа"
+  fi
+  assert_eq "$actual" "$(cat "$TEST_ROOT/invocations")" "запущен только готовый $actual"
   assert_eq "$provider" "$(coverage_artifact_get "$coverage/host.env" UNAVAILABLE_RUNNERS)" \
     "новый preflight называет реально недоступного $provider"
-  assert_eq coverage_unavailable "$(get "$task" RUNNER_REASON_BUILD)" \
-    "причина отказа $provider сохраняется в реестре"
+  assert_eq "$reason" "$(get "$task" RUNNER_REASON_BUILD)" \
+    "причина выбора кандидата сохраняется в реестре"
 done
+
+restore_coverage
+export FAKE_ALPHA_PROBE=missing FAKE_BETA_PROBE=missing
+run_fixture 95
+assert_rc 79 "$fixture_rc" "полностью недоступная цепочка сохраняет fail-closed"
+assert_eq '' "$(cat "$TEST_ROOT/invocations")" "нет готовых кандидатов — нет model call"
+assert_eq 1 "$(get 95 STALLED_HUMAN)" "полностью недоступная цепочка требует человека"
+assert_eq coverage_unavailable "$(get 95 RUNNER_REASON_BUILD)" "причина остановки сохраняется"
 
 restore_coverage
 export FAKE_CATALOG_MISSING=1
 run_fixture 75
-assert_rc 79 "$fixture_rc" "снятая модель блокирует автоматическое обновление"
-assert_eq '' "$(cat "$TEST_ROOT/invocations")" "снятая модель не заменяется другим исполнителем"
+assert_rc 0 "$fixture_rc" "снятая модель primary разрешает объявленный готовый резерв"
+assert_eq beta "$(cat "$TEST_ROOT/invocations")" "структурный отказ ведёт только в объявленный резерв"
 
 restore_coverage
 export FACTORY_HOST_PREFLIGHT_TTL=invalid
@@ -172,16 +189,21 @@ assert_eq $'alpha\nbeta' "$(cat "$TEST_ROOT/probes")" "нет бесконечн
 # Автоматическое обновление разрешено только для корректного истёкшего снимка.
 # Отсутствие, несовместимость и зафиксированная недоступность сохраняют прежний отказ.
 task=80
-for defect in missing revision structural-hash structural-unavailable host-unavailable expires numeric; do
+for defect in missing revision structural-hash structural-unavailable host-unavailable expires numeric \
+  structural-status host-status provider-list; do
   restore_coverage
   case "$defect" in
     missing) rm "$coverage/host.env" ;;
     revision) sed -i 's/CATALOG_REVISION=.*/CATALOG_REVISION=foreign/' "$coverage/host.env" ;;
     structural-hash) sed -i 's/STRUCTURAL_HASH=.*/STRUCTURAL_HASH=foreign/' "$coverage/host.env" ;;
-    structural-unavailable) sed -i 's/UNAVAILABLE=0/UNAVAILABLE=1/' "$coverage/structural.env" ;;
-    host-unavailable) sed -i 's/UNAVAILABLE=0/UNAVAILABLE=1/' "$coverage/host.env" ;;
+    structural-unavailable) sed -i 's/=native$/=unavailable/' \
+      "$coverage/structural.env" ;;
+    host-unavailable) sed -i 's/=ready$/=unavailable/' "$coverage/host.env" ;;
     expires) sed -i 's/EXPIRES_AT=.*/EXPIRES_AT=invalid/' "$coverage/host.env" ;;
     numeric) sed -i 's/EXPIRES_AT=.*/EXPIRES_AT=08/' "$coverage/host.env" ;;
+    structural-status) sed -i '/^PROVIDER_alpha=/d' "$coverage/structural.env" ;;
+    host-status) sed -i 's/PROVIDER_alpha=ready/PROVIDER_alpha=unknown/' "$coverage/host.env" ;;
+    provider-list) sed -i 's/PROVIDERS=.*/PROVIDERS=alpha/' "$coverage/host.env" ;;
   esac
   run_fixture "$task"
   assert_rc 79 "$fixture_rc" "повреждение $defect сохраняет fail-closed"
@@ -189,6 +211,26 @@ for defect in missing revision structural-hash structural-unavailable host-unava
   assert_eq '' "$(cat "$TEST_ROOT/invocations")" "повреждение $defect не начинает model call"
   task=$((task + 1))
 done
+
+# Прежняя схема не даёт допуска даже при положительных агрегатных счётчиках.
+# Чтение узла вызывает единственную полную запись v2 и заново проверяет свою цепочку.
+restore_coverage
+sed -i 's/SCHEMA=2/SCHEMA=1/' "$coverage/structural.env" "$coverage/host.env"
+sed -i '/^PROVIDER/d' "$coverage/structural.env" "$coverage/host.env"
+sed -i "s/EXPIRES_AT=.*/EXPIRES_AT=$(( $(date +%s) + 3600 ))/" "$coverage/host.env"
+run_fixture 96
+assert_rc 0 "$fixture_rc" "SCHEMA=1 заменяется полноценной проверкой перед узлом"
+assert_eq 2 "$(coverage_artifact_get "$coverage/structural.env" SCHEMA)" "структурный снимок переписан"
+assert_eq 2 "$(coverage_artifact_get "$coverage/host.env" SCHEMA)" "хостовый снимок переписан"
+assert_eq $'alpha\nbeta\nalpha\nalpha' "$(cat "$TEST_ROOT/probes")" \
+  "старая схема не читается как разрешение без проб"
+
+restore_coverage
+sed -i 's/SCHEMA=2/SCHEMA=1/' "$coverage/structural.env" "$coverage/host.env"
+export FACTORY_HOST_PREFLIGHT_TTL=invalid
+run_fixture 97
+assert_rc 79 "$fixture_rc" "SCHEMA=1 без успешного переписывания остаётся fail-closed"
+assert_eq '' "$(cat "$TEST_ROOT/invocations")" "старая схема не разрешает model call"
 
 # Runtime-sensitive резерв, как встроенный DeepSeek, сверяет сборку перед каждым узлом
 # даже в пределах TTL. Легитимная смена сборки резерва не должна останавливать узел
@@ -296,9 +338,118 @@ assert_contains "$(cat "$TEST_ROOT/task-92.log")" 'FACTORY_ERROR=runtime_changed
 restore_runtime_coverage 1.1.0
 export FAKE_BETA_PROBE=missing
 run_fixture 93
-assert_rc 79 "$fixture_rc" "непройденный preflight после смены сборки останавливает узел"
-assert_eq '' "$(cat "$TEST_ROOT/invocations")" "непройденный preflight не начинает model call"
-assert_eq coverage_unavailable "$(get 93 RUNNER_REASON_BUILD)" "причина отказа preflight сохранена"
+assert_rc 0 "$fixture_rc" "недоступный резерв после смены сборки не останавливает primary"
+assert_eq alpha "$(cat "$TEST_ROOT/invocations")" "доступный primary продолжает узел"
+assert_eq primary "$(get 93 RUNNER_REASON_BUILD)" "выбор primary сохранён"
+
+restore_runtime_coverage 1.1.0
+export FAKE_BETA_PROBE=missing
+profile_runner_host_preflight fixture
+assert_rc 1 "$?" "полный preflight по-прежнему сообщает недоступность провайдера профиля"
+: >"$TEST_ROOT/probes"
+run_fixture 94 alpha
+assert_rc 0 "$fixture_rc" "недоступный runtime-провайдер вне цепочки узла не блокирует запуск"
+assert_eq $'alpha\nalpha' "$(cat "$TEST_ROOT/probes")" \
+  "сборка провайдера вне цепочки не сверяется и общий preflight не повторяется"
 rm -f -- "$TEST_ROOT/beta-build"
+
+# Настоящий start/gate/resume использует опубликованный bundle и trusted cursor.
+# После ворот BUILD уже недостижим: его beta не должен блокировать SHIP с task-stage override.
+profile_dir="$FACTORY_PROFILES_DIR/demo-profile"
+repo="$TEST_ROOT/resume-checkout"
+routes="$TEST_ROOT/resume-routes"
+mkdir -p "$profile_dir" "$repo"
+git -C "$repo" init -q
+git -C "$repo" config user.name fixture
+git -C "$repo" config user.email fixture@example.test
+git -C "$repo" checkout -qb shared-main
+printf 'исходное состояние\n' >"$repo/tracked.txt"
+git -C "$repo" add tracked.txt
+git -C "$repo" commit -qm 'исходное состояние'
+cat >"$profile_dir/profile.sh" <<PROFILE
+PROFILE_NAME=demo-profile
+profile_workspace_mode() { printf 'shared\\n'; }
+profile_repositories() { printf 'app\\t%s\\t%s\\n' '$repo' '$repo'; }
+profile_source_branch() { printf 'shared-main\\n'; }
+profile_container() { printf 'fixture-stand\\n'; }
+profile_stand_alive() { return 0; }
+profile_project_context() { printf '%s\\n' '{"stack":["fixture"],"guardrails":[]}'; }
+profile_service_ports() { printf '8830\\t8830\\n'; }
+profile_exclusive_resources() { printf '%s\\n' 'stand:fixture-stand' 'workspace:$repo'; }
+PROFILE
+cat >"$profile_dir/runners.env" <<'CONFIG'
+RUNNERS_SCHEMA=1
+CONFIG_REVISION=1
+RUNNERS_COVERAGE=required
+PROJECT_RUNNER_PRIMARY=alpha
+PROJECT_RUNNER_FAILOVER=
+STAGE_BUILD_PRIMARY=beta
+STAGE_SHIP_PRIMARY=beta
+MODEL_DEFAULT_ALPHA_FAMILY=fixture
+MODEL_DEFAULT_ALPHA_VERSION=latest
+MODEL_DEFAULT_BETA_FAMILY=fixture
+MODEL_DEFAULT_BETA_VERSION=latest
+CONFIG
+printf '%s\n' '{"capabilities":["route-v2"]}' >"$profile_dir/graph.json"
+"$NODE_BIN" "$FACTORY_TESTS_HOME/fixtures/routes-catalog-publish.mjs" "$routes" null \
+  >"$TEST_ROOT/resume-catalog.json"
+assert_rc 0 "$?" "каталог опубликован для проверки охвата resume"
+cat >"$TEST_ROOT/resume-ticket.json" <<'JSON'
+{"schema":1,"taskId":"98","title":"проверка resume","description":"продолжить после ворот",
+ "acceptanceCriteria":["исполнитель вне цепочки не блокирует"],"sourceUrl":"https://example.test/98"}
+JSON
+
+# Каждый запуск использует отдельные roots; реальный профиль и стоящие задачи недоступны.
+# Живой запрет снимается только для локальных fake runners, без CLI модели и внешних служб.
+resume_factory() {
+  FACTORY_FORBID_LIVE=0 "$FACTORY_HOME/bin/factory" 98 "$@" \
+    --profile demo-profile --routes-dir "$routes" \
+    --state-dir "$TEST_ROOT/resume-state" --control-dir "$TEST_ROOT/resume-control"
+}
+
+unset FAKE_BETA_PROBE
+: >"$TEST_ROOT/invocations"
+resume_factory start --route trivial --ticket-json "$TEST_ROOT/resume-ticket.json" \
+  --delivery-target app=main >"$TEST_ROOT/scoped-start.log" 2>&1
+start_rc=$?
+if (( start_rc != 0 )); then
+  test_note "start: $(cat "$TEST_ROOT/scoped-start.log")"
+fi
+assert_rc 0 "$start_rc" "start проходит цепочки всех узлов и останавливается на воротах"
+registry="$TEST_ROOT/resume-state/t98.pipeline"
+attempt=$(awk -F= '$1=="ATTEMPT_ID"{print $2}' "$registry")
+assert_eq waiting "$(awk -F= '$1=="GATE_ACCEPT"{print $2}' "$registry")" "ворота действительно достигнуты"
+export FAKE_BETA_PROBE=missing
+resume_factory gate --attempt "$attempt" --node gate_accept --decision approved --commit-only \
+  >"$TEST_ROOT/scoped-gate.log" 2>&1
+assert_rc 0 "$?" "решение ворот записывается без preflight снятого исполнителя"
+before_resume=$(cat "$TEST_ROOT/invocations")
+resume_factory resume --attempt "$attempt" >"$TEST_ROOT/scoped-blocked-resume.log" 2>&1
+assert_rc 1 "$?" "resume требует недоступный primary реально достижимого SHIP"
+assert_contains "$(cat "$TEST_ROOT/scoped-blocked-resume.log")" \
+  'FACTORY_ERROR=runner_preflight_unavailable RUNNERS=beta' "отказ называет только цепочку SHIP"
+assert_eq "$before_resume" "$(cat "$TEST_ROOT/invocations")" "отказ resume не вызывает модель"
+
+# Реестровый primary расходится с pin: runtime восстановит пустое значение запуска.
+# Preflight должен видеть ту же цепочку, сохраняя независимый task-stage override.
+STATE_DIR="$TEST_ROOT/resume-state" pipeline_store_update 98 \
+  RUNNER_OVERRIDE_PRIMARY beta RUNNER_OVERRIDE_STAGE_SHIP alpha
+: >"$TEST_ROOT/invocations"
+resume_factory resume --attempt "$attempt" >"$TEST_ROOT/scoped-resume.log" 2>&1
+resume_rc=$?
+if (( resume_rc != 0 )); then
+  test_note "resume: $(cat "$TEST_ROOT/scoped-resume.log")"
+  test_note "этапы: $(cat "$TEST_ROOT/resume-state/logs/t98.stages.log")"
+fi
+assert_rc 0 "$resume_rc" "resume после ворот с override SHIP не требует снятого исполнителя"
+assert_eq $'alpha\nalpha' "$(cat "$TEST_ROOT/invocations")" "только оставшиеся SHIP и RETRO вызвали primary"
+assert_eq alpha "$(awk -F= '$1=="RUNNER_ACTUAL_SHIP"{print $2}' "$registry")" \
+  "SHIP использовал task-stage override"
+assert_eq '' "$(awk -F= '$1=="RUNNER_OVERRIDE_PRIMARY"{print $2}' "$registry")" \
+  "preflight учёл восстановленный runtime primary из trusted launch identity"
+assert_eq completed "$(awk -F= '$1=="RESULT"{print $2}' "$registry")" "попытка завершена после ворот"
+assert_eq unavailable \
+  "$(coverage_artifact_get "$TEST_ROOT/resume-state/coverage/demo-profile/host.env" PROVIDER_beta)" \
+  "снимок честно сохраняет недоступность beta вне оставшихся цепочек"
 
 finish_tests

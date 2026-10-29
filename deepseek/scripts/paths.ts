@@ -11,7 +11,10 @@ export function deepSeekPackagePaths(): {
   runtimeDependenciesDir: string;
   dynamicImportsFile: string;
   licensesDir: string;
-  hostFiles: Record<'entry' | 'webHost' | 'presetsHost' | 'acpSettingsBridge', string>;
+  hostFiles: Record<
+    'entry' | 'webHost' | 'presetsHost' | 'acpSettingsBridge'
+    | 'toolPermissionGate' | 'toolPermissionPolicy' | 'toolPermissionPaths', string
+  >;
   scripts: Record<'composition' | 'inputs' | 'licenses' | 'vendor' | 'sync' | 'runtime', string>;
 } {
   const root = fileURLToPath(new URL('..', import.meta.url));
@@ -27,6 +30,9 @@ export function deepSeekPackagePaths(): {
       webHost: path.join(root, 'src/host/webHost.mjs'),
       presetsHost: path.join(root, 'src/host/presetsHost.mjs'),
       acpSettingsBridge: path.join(root, 'src/host/acpSettingsBridge.mjs'),
+      toolPermissionGate: path.join(root, 'src/host/toolPermissionGate.mjs'),
+      toolPermissionPolicy: path.join(root, 'src/host/toolPermissionPolicy.mjs'),
+      toolPermissionPaths: path.join(root, 'src/host/toolPermissionPaths.mjs'),
     },
     scripts: {
       composition: path.join(root, 'scripts/runtimeComposition.ts'),

@@ -272,6 +272,29 @@
         value-text="3 из 7"
       />
       <UiProgress indeterminate size="line" label="Пример тонкой линии под шапкой" />
+      <div class="ui-gallery__row">
+        <UiSkeleton data-loading-example="line" width="120px" />
+        <UiSkeleton data-loading-example="block" shape="block" width="120px" />
+        <UiSkeleton data-loading-example="circle" shape="circle" />
+      </div>
+      <UiSkeletonLayout data-loading-example="list" layout="list" />
+      <UiSkeletonLayout data-loading-example="form" layout="form" />
+      <UiSkeletonLayout data-loading-example="text" layout="text" />
+      <UiLoadingState data-loading-example="chat">
+        <div class="ui-gallery__loading-chat">
+          <UiSkeleton height="48px" />
+          <UiSkeleton shape="block" width="64%" />
+          <UiSkeleton shape="block" width="48%" style="align-self: flex-end" />
+          <UiSkeleton height="64px" />
+        </div>
+      </UiLoadingState>
+      <UiLoadingState data-loading-example="columns">
+        <div class="ui-gallery__loading-columns">
+          <UiSkeletonLayout v-for="index in 3" :key="index" />
+        </div>
+      </UiLoadingState>
+      <UiLoadingState data-loading-example="show-label" show-label />
+      <UiLoadingState data-loading-example="reduce" class="ui-gallery__loading-reduce" />
       <UiLoadingState label="Загрузка списка…" />
       <UiLoadingState label="Загрузка карточек…" variant="cards" />
       <UiLoadingState label="Открываю документ…" variant="document" />
@@ -358,6 +381,8 @@ import {
   UiIconButton,
   UiInlineMessage,
   UiLoadingState,
+  UiSkeleton,
+  UiSkeletonLayout,
   UiInput,
   UiNumberField,
   UiPasswordInput,

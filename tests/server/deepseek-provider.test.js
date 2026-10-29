@@ -121,12 +121,14 @@ test('адаптер объявляет полный честный контра
   assert.equal(typeof deepseek.run, 'function');
   assert.equal(deepseek.session, undefined);
   assert.equal(deepseek.untrustedInput, undefined);
-  assert.equal(deepseek.scopedWorkspace, undefined);
+  assert.equal(typeof deepseek.scopedWorkspace, 'function');
   assert.deepEqual(deepseek.workdir, { switch: 'reseed', roots: 'single' });
 
   const modes = await deepseek.modes();
   assert.deepEqual(modes.map((mode) => mode.id), ['default', 'auto', 'read-only']);
-  assert.match(modes[0].hint, /внутри проекта уже разрешены/iu);
+  assert.equal(modes[0].label, 'Спрашивать');
+  assert.match(modes[0].hint, /требуют разрешения/iu);
+  assert.match(modes[1].hint, /песочнице.*расширение доступа/iu);
   assert.doesNotMatch(modes[0].hint, /перед кажд/iu);
   assert.equal(deepSeekSeedModels().length, 1);
 });
@@ -138,6 +140,6 @@ test('DeepSeek session identity пинит ключ и профиль без р�
   const changed = deepSeekSecurityProfile({ blockDirectSsh: false, blockDirectDb: false });
   assert.match(auth, /^deepseek-env-key:[a-f0-9]{16}$/u);
   assert.equal(auth.includes(secret), false);
-  assert.match(secure, /^deepseek-host-sandbox-v5:[a-f0-9]{64}$/u);
+  assert.match(secure, /^deepseek-host-sandbox-v6:[a-f0-9]{64}$/u);
   assert.notEqual(secure, changed);
 });

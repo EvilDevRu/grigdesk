@@ -26,6 +26,7 @@ import RichMarkdown from '../../shared/markdown/RichMarkdown.vue';
 import { chatImageHref } from './chatImages.ts';
 import { chatFileLinkHref } from '../../features/code/links.ts';
 import { UiDisclosureButton } from '../../ui';
+import { startChatPerformance } from '../../shared/chatPerformance.ts';
 
 const props = defineProps<{
   chatId?: string;
@@ -62,11 +63,13 @@ function measurePreview(): void {
     return;
   }
 
+  const finish = startChatPerformance('chat.preview', () => ({ chars: text.value.length }));
   const style = getComputedStyle(element);
   const lineHeight = Number.parseFloat(style.lineHeight);
   const lines = Number.parseFloat(style.getPropertyValue('--chat-reply-preview-lines')) || 4;
 
   overflows.value = element.scrollHeight > lineHeight * lines + 1;
+  finish();
 }
 
 watch(text, async () => {

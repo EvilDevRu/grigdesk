@@ -9,6 +9,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 process.env.NODE_ENV = 'test';
 
 const UI_STUB = `
+export * from './src/ui.ts';
 import { defineComponent, h } from 'vue';
 export { default as UiPaneHeader } from './src/components/composites/UiPaneHeader.vue';
 export { default as UiField } from './src/components/composites/UiField.vue';

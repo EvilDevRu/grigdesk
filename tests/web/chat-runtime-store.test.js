@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { reconcileWith } from './helpers/chat-protocol.js';
+
 import { apiHarness, chatStoreFixture, sseOf } from './helpers/chat-store.js';
 import { chatStatus } from '../../web/src/views/chat/chatStatus.ts';
 import { chatTimeline } from '../../web/src/views/chat/chatTimeline.ts';
@@ -168,6 +170,7 @@ test('finally pending A повторно сверяет run после асин�
     ? new Promise((resolve) => {
       release = resolve;
     }) : Promise.resolve(emptyPage);
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
 
   sse('chat-turn-start', start('run-a', { turnId: 'turn-a' }));
   sse('chat-done', {
@@ -515,6 +518,7 @@ test('фоновый pending до done: итог и контекст приме�
 
     return url === '/api/chat/pending' ? { pending: [pending] } : emptyPage;
   };
+  apiHarness.post = reconcileWith(apiHarness.post, apiHarness.get);
   apiHarness.put = async () => ({
     ok: true,
     written: true,

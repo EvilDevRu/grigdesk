@@ -11,6 +11,14 @@ import type { Stats } from 'node:fs';
 import { normalizedMetaUsage } from './metaUsage.ts';
 import type { MetaEnv, MetaUsage } from './metaUsage.ts';
 import { parsePipeline } from './pipelineParse.ts';
+import { GLM_FACTORY_MODELS } from './glm/factoryCatalog.ts';
+import { openRunDirectory, readRunFile } from './runnerArtifacts.ts';
+import {
+  cleanRunnerFailureMessage,
+  inspectGlmFactoryFailure,
+  runnerFailureDetail,
+} from './runnerFailure.ts';
+import { runnerModelName } from './runnerModel.ts';
 
 // Реестр задачи и runners.env профиля читаются одинаково: плоские строковые пары.
 export type RunnerRegistry = Record<string, string | undefined>;
@@ -26,6 +34,7 @@ export interface RunnerPolicy {
 // Требование к модели: точное имя либо семейство с версией и вариантом.
 export interface ModelPolicy {
   exact: string | null;
+  label?: string | null;
   family: string | null;
   version: string | null;
   variant: string | null;
@@ -66,6 +75,7 @@ export interface RunnerAttempt {
   rc: number | null;
   source: string | null;
   tokens: RunAttemptTokens | null;
+  failureDetail?: string;
 }
 
 // Фактическое рабочее время процессов попытки маршрута.
@@ -107,6 +117,10 @@ function policy(
   };
 }
 
+/**
+ * Предварительная политика повторяет приоритет этапа над профилем, не меняя настройки запуска.
+ * Служебному семейству GLM добавляем подпись из каталога, которую UI может показать до первого хода.
+ */
 function modelPolicy(
   profileConfig: RunnerRegistry,
   stage: string,
@@ -117,11 +131,14 @@ function modelPolicy(
   const value = (suffix: string) => profileConfig[`MODEL_${stage}_${providerKey}_${suffix}`]
     || profileConfig[`MODEL_DEFAULT_${providerKey}_${suffix}`]
     || null;
-  const exact = value('EXACT');
-  const family = value('FAMILY');
+  const exact = runnerModelName(value('EXACT'));
+  const family = value('FAMILY') || (provider === 'glm' ? 'default' : null);
   if (!exact && !family) return null;
+
   return {
     exact,
+    ...(provider === 'glm' && family === 'default'
+      ? { label: exact || runnerModelName(GLM_FACTORY_MODELS[0]?.id) } : {}),
     family,
     version: value('VERSION') || (family ? 'latest' : null),
     variant: value('VARIANT') || (family ? 'auto' : null),
@@ -151,11 +168,15 @@ export function resolveProjectRunnerState(profileConfig: RunnerRegistry): Runner
   );
 }
 
-/** Полная цепочка и runtime-телеметрия этапа. */
+/**
+ * Цепочка, runtime-телеметрия и подписи этапа собираются на серверной границе DTO.
+ * Последняя GLM-попытка уточняет модель до старта, не подменяя фактическую модель реестра.
+ */
 export function resolveRunnerState(
   profileConfig: RunnerRegistry,
   registry: RunnerRegistry,
   stage: string,
+  attempts: RunnerAttempt[] = [],
 ): RunnerState {
   const key = STAGE_ID.test(String(stage || '')) ? stage : '';
   let resolved: RunnerPolicy;
@@ -186,11 +207,19 @@ export function resolveRunnerState(
     provider,
     modelPolicy(profileConfig, key, provider),
   ]));
+
+  const glmPolicy = models.glm;
+  const latestGlm = attempts.findLast((attempt) => attempt.runner === 'glm' && attempt.model);
+
+  if (glmPolicy && latestGlm?.model) {
+    glmPolicy.label = latestGlm.model;
+  }
+
   return {
     ...resolved,
     actual,
     family: key ? registry[`MODEL_FAMILY_${key}`] || null : null,
-    model: key ? registry[`MODEL_ACTUAL_${key}`] || null : null,
+    model: runnerModelName(key ? registry[`MODEL_ACTUAL_${key}`] : null),
     reason: key ? registry[`RUNNER_REASON_${key}`] || null : null,
     planLevel: key ? registry[`PLAN_LEVEL_${key}`] || null : null,
     catalogRevision: key ? registry[`CATALOG_REVISION_${key}`] || null : null,
@@ -249,6 +278,51 @@ function runAttemptTokens(meta: MetaEnv): RunAttemptTokens | null {
 }
 
 /**
+ * Причина GLM поясняет только завершившийся отказ: успех, таймаут и остановка её не наследуют.
+ * Старому запуску без mirror читаем ограниченный хвост его собственного журнала через retained FD.
+ */
+async function glmAttemptFailure(
+  stateDir: string,
+  task: string | number,
+  stage: string,
+  id: string,
+  meta: MetaEnv,
+): Promise<string | null> {
+  if (meta.RUNNER !== 'glm' || !/^-?\d+$/u.test(meta.RC || '')
+    || [0, 124, 130, 143].includes(Number(meta.RC))
+    || !meta.RESULT_CLASS || ['ok', 'timeout', 'manual_switch'].includes(meta.RESULT_CLASS)) {
+    return null;
+  }
+
+  if (meta.FAILURE_CODE && meta.FAILURE_MESSAGE) {
+    return runnerFailureDetail({
+      code: meta.FAILURE_CODE,
+      message: cleanRunnerFailureMessage(meta.FAILURE_MESSAGE),
+    });
+  }
+
+  try {
+    const directory = await openRunDirectory(stateDir, ['logs', 'runs', `t${task}`, stage, id]);
+
+    try {
+      const current = parsePipeline(await readRunFile(directory, 'meta.env'));
+
+      if (['RUNNER', 'EPOCH', 'RC', 'RESULT_CLASS'].some((key) => current[key] !== meta[key])) {
+        return null;
+      }
+
+      const failure = inspectGlmFactoryFailure(await readRunFile(directory, 'events.jsonl', true));
+
+      return failure ? runnerFailureDetail(failure) : null;
+    } finally {
+      await directory.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
  * История реально стартовавших процессов этапа. meta.env пишет runner-launcher;
  * это диагностические данные, поэтому битый/исчезнувший run не ломает весь граф.
  */
@@ -266,15 +340,20 @@ export async function readRunnerAttempts(
     return [];
   }
   const attempts: RunnerAttempt[] = [];
+  const metadata = new Map<string, MetaEnv>();
+
   await Promise.all(ids.map(async (id) => {
     if (!RUN_ID.test(id)) return;
+
     try {
       const meta = parsePipeline(await fsp.readFile(path.join(root, id, 'meta.env'), 'utf8'));
+
+      metadata.set(id, meta);
       attempts.push({
         id,
         epoch: /^\d+$/.test(meta.EPOCH || '') ? Number(meta.EPOCH) : null,
         runner: PROVIDER_ID.test(meta.RUNNER || '') ? meta.RUNNER ?? null : null,
-        model: meta.MODEL || null,
+        model: runnerModelName(meta.RESOLVED_MODEL || meta.MODEL),
         effort: meta.EFFORT || null,
         reason: meta.ROUTE_REASON || null,
         result: meta.RESULT_CLASS || null,
@@ -286,7 +365,19 @@ export async function readRunnerAttempts(
   }));
   attempts.sort((a, b) => (a.epoch ?? Number.MAX_SAFE_INTEGER) - (b.epoch ?? Number.MAX_SAFE_INTEGER)
     || a.id.localeCompare(b.id));
-  return attempts.slice(-20);
+
+  const recent = attempts.slice(-20);
+
+  // Старые журналы читаются только для видимых попыток, а не для всей истории этапа.
+  await Promise.all(recent.map(async (attempt) => {
+    const detail = await glmAttemptFailure(stateDir, task, stage, attempt.id, metadata.get(attempt.id)!);
+
+    if (detail) {
+      attempt.failureDetail = detail;
+    }
+  }));
+
+  return recent;
 }
 
 /**

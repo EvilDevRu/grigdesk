@@ -3,7 +3,8 @@ import type { ChatHistorySnapshot } from './chatHistorySnapshot.ts';
 
 type Group = 'model' | 'effort' | 'mode';
 type ModelSelection = Pick<ChatRecord, 'model' | 'modelRef'>;
-type Selection = string | ModelSelection;
+type ModeSelection = Pick<ChatRecord, 'mode' | 'modeSelection'>;
+type Selection = string | ModelSelection | ModeSelection;
 type Source = ChatRecord | ChatHistorySnapshot;
 
 interface Intent {
@@ -27,9 +28,11 @@ function modelKey(value: Selection): string {
     return value;
   }
 
-  return value.modelRef
-    ? JSON.stringify([value.modelRef.provider, value.modelRef.model])
-    : value.model || '';
+  const model = value as ModelSelection;
+
+  return model.modelRef
+    ? JSON.stringify([model.modelRef.provider, model.modelRef.model])
+    : model.model || '';
 }
 
 /**
@@ -37,6 +40,11 @@ function modelKey(value: Selection): string {
  * Пустые effort и mode сравниваются одинаково при отсутствии поля в старой схеме.
  */
 function read(source: Source, group: Group): Selection {
+  if (group === 'mode') {
+    return { mode: typeof source.mode === 'string' ? source.mode : '',
+      modeSelection: source.modeSelection
+        ? { ...source.modeSelection as NonNullable<ChatRecord['modeSelection']> } : undefined };
+  }
   if (group !== 'model') {
     return typeof source[group] === 'string' ? source[group] as string : '';
   }
@@ -49,8 +57,13 @@ function read(source: Source, group: Group): Selection {
   };
 }
 
+/**
+ * Маркер выбора и ID режима составляют одну группу CAS и сравниваются вместе.
+ * Модель сохраняет прежнее сравнение по modelRef независимо от legacy alias.
+ */
 function same(group: Group, left: Selection, right: Selection): boolean {
-  return group === 'model' ? modelKey(left) === modelKey(right) : left === right;
+  return group === 'model' ? modelKey(left) === modelKey(right)
+    : group === 'mode' ? JSON.stringify(left) === JSON.stringify(right) : left === right;
 }
 
 /**
@@ -58,7 +71,7 @@ function same(group: Group, left: Selection, right: Selection): boolean {
  * Пара модели меняется вместе, чтобы legacy-id не расходился с modelRef.
  */
 function assign(target: ChatRecord, group: Group, value: Selection): void {
-  if (group === 'model') {
+  if (group === 'model' || group === 'mode') {
     Object.assign(target, value as ModelSelection);
   } else {
     target[group] = value as string;

@@ -44,7 +44,7 @@ for (const locale of ['ru', 'en']) {
     await button(h, 'Выйти', locale);
     await button(h, 'Отмена', locale);
 
-    const remember = await catalogMessage('desktop', 'Запомнить');
+    const remember = await catalogMessage('desktop', 'Больше не спрашивать');
 
     assert.ok(dialog.textContent.includes(remember[locale]));
     assert.equal(h.stops().length, 0, 'Показ вопроса не останавливает работу');

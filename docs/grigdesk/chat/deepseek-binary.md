@@ -29,7 +29,10 @@ compiled и живого допуска; Coding Plan закрыт. Offline-пр�
 Рабочий хост — Linux x64/glibc. Системный Node для Harness не нужен; shell, работоспособный
 bubblewrap и средства управляемых команд по-прежнему нужны. Холодный запуск распаковывает
 payload. Тёплый сверяет состав и fingerprints; `--verify` всегда считает полные хэши.
-Поколения кэша и резервные ELF пока автоматически не удаляются, поэтому занимают диск.
+Поколения кэша и резервные ELF не удаляются самой установкой, поэтому занимают диск.
+Штатная чистка встроена в `grigdesk-ctl build deepseek`: остаются две свежие группы
+поколений по buildId и два свежих резервных ELF ([контракт цели](../server/ctl-build.md));
+та же чистка доступна вручную как `npm --prefix deepseek run prune:cache`.
 
 Изолированная копия server/shared/engine с одним ELF выполняет DeepSeek и GLM с resume и
 Factory metadata probe без source package, tools, upstream snapshot и legacy runtime tree.

@@ -6,7 +6,7 @@
         <span>GrigDesk · {{ t('core.grigdeskGenericTask') }}</span>
         <UiIconButton label="Закрыть окно" @click="closeWindow">✕</UiIconButton>
       </header>
-      <UiLoadingState v-if="target" label="Подключаемся к GrigDesk…" variant="document" />
+      <TaskLoading v-if="target" label="Подключаемся к GrigDesk…" area="window" />
       <p v-else class="task-window-waiting" role="alert">
         Не удалось определить задачу. Закройте окно и откройте карточку снова.
       </p>
@@ -15,13 +15,15 @@
 </template>
 
 <script setup lang="ts">
+import TaskLoading from './TaskLoading.vue';
+
 import { onUnmounted, watch } from 'vue';
 import { sseSubscribe } from '../composables/useSse.ts';
 import { useAuthStore } from '../stores/auth.ts';
 import { useChatStore } from '../stores/chat.ts';
 import type { SurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
 import { useUiStore } from '../stores/ui.ts';
-import { t, UiIconButton, UiLoadingState } from '../ui';
+import { t, UiIconButton } from '../ui';
 import TaskModal from './TaskModal.vue';
 
 const props = defineProps<{

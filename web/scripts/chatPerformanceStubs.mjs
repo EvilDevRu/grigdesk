@@ -14,9 +14,32 @@ export const performanceStubs = new Map([
     export const closeSystemNotification = () => {};
   `],
   ['web/src/composables/useSse.ts', `
+    import { onMounted, onUnmounted, ref } from 'vue';
+
+    const connected = ref(true);
+    const listeners = new Set();
+
+    window.__performanceSse = (name, payload) => {
+      for (const handler of listeners) {
+        handler(name, payload);
+      }
+    };
+
     export const sseSubscribe = (handler) => {
-      window.__performanceSse = handler;
-      return () => {};
+      listeners.add(handler);
+
+      return () => listeners.delete(handler);
+    };
+
+    export const useSse = (handler) => {
+      let off;
+
+      onMounted(() => {
+        off = sseSubscribe((name, payload) => handler?.(name, payload));
+      });
+      onUnmounted(() => off?.());
+
+      return { connected };
     };
   `],
   ['web/src/stores/providers.ts', `

@@ -25,6 +25,11 @@ structural="$STATE_DIR/coverage/fixture/structural.env"
 host="$STATE_DIR/coverage/fixture/host.env"
 assert_file_exists "$structural" "profile preflight writes structural artifact"
 assert_file_exists "$host" "profile preflight writes host artifact"
+assert_eq 2 "$(coverage_artifact_get "$structural" SCHEMA)" "структурное покрытие имеет схему 2"
+assert_eq 2 "$(coverage_artifact_get "$host" SCHEMA)" "хостовое покрытие имеет схему 2"
+assert_eq native "$(coverage_artifact_get "$structural" PROVIDER_alpha)" \
+  "структурное покрытие хранит именной уровень"
+assert_eq ready "$(coverage_artifact_get "$host" PROVIDER_beta)" "хост хранит именную готовность"
 assert_eq 0 "$(coverage_artifact_get "$host" UNAVAILABLE)" "both configured providers are ready"
 assert_eq "" "$(coverage_artifact_get "$host" UNAVAILABLE_RUNNERS)" \
   "ready preflight publishes an empty runner detail"
@@ -37,6 +42,8 @@ assert_eq 1 "$(coverage_artifact_get "$host" UNAVAILABLE)" \
   "unavailable configured provider is counted"
 assert_eq beta "$(coverage_artifact_get "$host" UNAVAILABLE_RUNNERS)" \
   "host artifact names the unavailable configured provider"
+assert_eq ready "$(coverage_artifact_get "$host" PROVIDER_alpha)" "соседняя готовность сохранена"
+assert_eq unavailable "$(coverage_artifact_get "$host" PROVIDER_beta)" "отказ записан только провайдеру"
 
 mktemp() { return 1; }
 profile_runner_host_preflight fixture 300 60 >/dev/null 2>&1
@@ -81,7 +88,7 @@ assert_eq '' "$(coverage_artifact_get "$deepseek_host" UNAVAILABLE_RUNNERS)" \
 
 export FAKE_DEEPSEEK_PROBE=missing
 profile_runner_host_preflight deepseek-fixture 500 60 >/dev/null 2>&1
-assert_rc 1 "$?" "unavailable DeepSeek blocks the whole configured profile"
+assert_rc 1 "$?" "строгий профильный preflight сообщает недоступность DeepSeek"
 assert_eq deepseek "$(coverage_artifact_get "$deepseek_host" UNAVAILABLE_RUNNERS)" \
   "host artifact names DeepSeek as the unavailable candidate"
 

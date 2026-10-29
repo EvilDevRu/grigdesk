@@ -93,7 +93,7 @@ test('llm-pi-ai входит в замыкание как host overlay, а base 
   assert.deepEqual(closure.reasons[PLUGIN], ['GrigDesk server-owned overlay']);
   assert.deepEqual(closure.external[PLUGIN], { 'synthetic-model-library': '3.4.0' });
   assert.equal(layers.base.some((patch) => patch.insert?.some((row) => row.name === PLUGIN)), false);
-  assert.equal(COMPOSITION_REVISION, 'grigdesk-host-web-acp-v3');
+  assert.equal(COMPOSITION_REVISION, 'grigdesk-host-web-acp-v4');
 });
 
 test('pi-ai разрешён в exact 0.85.1 с integrity из upstream lock', async () => {

@@ -43,10 +43,12 @@ async function fixture(t, scenario, { wrapChild } = {}) {
   const deps = {
     prepareLaunch: async (options) => {
       launchOptions.push(options);
+
       return {
         launchDir,
         dshHome,
         overlayPath: path.join(launchDir, 'overlay.yml'),
+        ...(options.toolPermissions ? { toolPolicyPath: path.join(launchDir, 'tool-policy.json') } : {}),
       };
     },
     spawn: (_command, _args, options) => {
@@ -99,6 +101,51 @@ async function methods(file) {
     .filter((entry) => entry.kind === 'request' && entry.message?.method)
     .map((entry) => entry.message.method);
 }
+
+test('чат не запускает рабочий процесс без обязательного toolPolicyPath', async (t) => {
+  const f = await fixture(t, { configOptions: [] });
+
+  await assert.rejects(runDeepSeekTurn({
+    ...f.base,
+    deps: {
+      ...f.base.deps,
+      prepareLaunch: async (options) => {
+        const { toolPolicyPath: _policy, ...launch } = await f.base.deps.prepareLaunch(options);
+
+        return launch;
+      },
+    },
+  }), { code: 'deepseek_tool_permissions_unavailable' });
+  assert.equal(f.children.length, 0);
+  await assert.rejects(fs.stat(path.join(f.root, 'launch')), { code: 'ENOENT' });
+});
+
+test('фильтр MCP режима чтения относится к чату и сохраняет отдельный контракт Factory', async (t) => {
+  const mcpServers = [{
+    name: 'factory-status',
+    command: '/bin/true',
+    args: [],
+    env: [],
+  }];
+
+  for (const factory of [false, true]) {
+    const f = await fixture(t, { configOptions: [] });
+
+    await runDeepSeekTurn({
+      ...f.base,
+      factory,
+      permissionMode: 'read-only',
+      mcpServers,
+    });
+
+    const request = (await logEntries(f.logFile)).find((entry) => (
+      entry.kind === 'request' && entry.message.method === 'session/new'
+    ));
+
+    assert.deepEqual(request.message.params.mcpServers, factory ? mcpServers : []);
+    assert.equal(Boolean(f.launchOptions[0].toolPermissions), !factory);
+  }
+});
 
 test('new → binding → config → один prompt; updates/usage/steps сохраняют порядок', async (t) => {
   const f = await fixture(t, {
@@ -360,7 +407,16 @@ test('abort шлёт session/cancel, получает cancelled и не оста
 });
 
 test('cancel во время permission игнорирует поздний allow-once', async (t) => {
-  const f = await fixture(t, { permission: { toolCallId: 'permission-tool' } });
+  const f = await fixture(t, {
+    updates: [{
+      sessionUpdate: 'tool_call',
+      toolCallId: 'permission-tool',
+      title: 'write',
+      rawInput: { file_path: 'synthetic.txt', content: 'synthetic' },
+      status: 'in_progress',
+    }],
+    permission: { toolCallId: 'permission-tool' },
+  });
   const controller = new AbortController();
   let resolvePermission;
   const asked = new Promise((resolve) => { resolvePermission = resolve; });

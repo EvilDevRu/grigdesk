@@ -11,6 +11,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 process.env.NODE_ENV = 'test';
 
 const UI_STUB = `
+export * from './src/ui.ts';
 export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
 import { defineComponent, h } from 'vue';
 export { default as UiPaneHeader } from './src/components/composites/UiPaneHeader.vue';

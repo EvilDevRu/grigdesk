@@ -13,23 +13,25 @@ import { nearestProjectRoot } from '../deepseek/projectMcp.ts';
 import { inspectSessionJournal } from '../deepseek/journal.ts';
 import type { DeepSeekRuntimeConfig } from '../deepseek/runtimeProcess.ts';
 import type { PreparedExecutorRuntime } from '../executorSettings/types.ts';
+import { createGlmTreeObserver } from './treeObserver.ts';
 import { preparedGlmRuntime } from './preparedRuntime.ts';
 import { DeepSeekWebError } from '../deepseek/serverClient.ts';
 import { runDeepSeekServerTurn } from '../deepseek/serverTurn.ts';
 import type { DeepSeekTurnVariant } from '../deepseek/serverTurn.ts';
 import {
   GLM_DEFAULT_EFFORT,
-  GLM_MODEL_ERROR_CODES,
   GLM_MODEL_UNAVAILABLE,
 } from './contract.ts';
 import type { GlmAccessMode } from './contract.ts';
 import { assertGlmRuntimeHome, buildGlmChildEnv, glmAccessError, resolveGlmAccess } from './env.ts';
+import { classifyGlmModelError } from './modelErrors.ts';
 import { assertGlmFactoryContext } from './factoryContext.ts';
 import type { GlmFactoryTurnContext } from './factoryContext.ts';
 import { GLM_FACTORY_STATUS_SERVER, GLM_FACTORY_STATUS_TOOLS, glmFactoryPolicy } from './factoryPolicy.ts';
 import { assertGlmGenerationAdmission, describeGlmGenerationAsync, glmRuntimeConfig } from './generation.ts';
 import { adoptLegacyGlmHome, glmChatHome, prepareGlmLaunch, startGlmProcess } from './launch.ts';
 import { createGlmTurnGuard } from './permissions.ts';
+import { runScopedGlmTurn } from './scopedTurn.ts';
 import { assertGlmSessionJournal, glmSessionJournalDir, isGlmSessionCorrupt } from './session.ts';
 
 type PermissionAnswer = {
@@ -99,11 +101,6 @@ const LABELS: DeepSeekTurnVariant['labels'] = Object.freeze({
   modelError: 'Ошибка модели GLM',
   action: 'Действие GLM',
   source: 'GLM',
-});
-
-const MODEL_ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
-  glm_auth_failed: 'Z.ai отклонил ключ GLM. Проверь ключ режима в окружении службы.',
-  glm_quota_exhausted: 'Квота или баланс Z.ai исчерпаны. Ход не повторялся.',
 });
 
 /**
@@ -185,10 +182,9 @@ function preflight(options: GlmTurnOptions, deps: GlmRuntimeDeps) {
     throw glmAccessError(access.reason || 'glm_access_mode_missing', 'GLM недоступен: проверь карточку.');
   }
 
-  // Этап фабрики объявлен только для Обычного API: Coding Plan сюда не подставляется.
-  if (factory && access.mode !== 'api') {
-    throw glmAccessError('glm_factory_mode_unsupported', 'Этап GLM поддерживает только Обычный API.');
-  }
+  // Этап фабрики идёт в режиме службы (api или coding-plan — policy-v2, решение владельца
+  // 29.10.2026): ключ режима подставляет buildGlmChildEnv, допуск сверяет resolveGlmAccess
+  // по metadata DSH. Отдельной привязки этапа к «только api» больше нет.
 
   const model = modelPair(options.model);
   // Каталог адаптера — сам DSH: без списка в зависимостях принадлежность модели и уровня
@@ -246,7 +242,8 @@ function turnFailure(error: unknown, state: { promptAttempted: boolean; bindingE
   const unavailable = failure instanceof DeepSeekWebError && failure.code === GLM_MODEL_UNAVAILABLE;
 
   if (!state.promptAttempted && failure instanceof DeepSeekWebError && isGlmSessionCorrupt(failure.message)) {
-    return glmAccessError('glm_session_missing', 'Журнал сессии GLM повреждён; сбрось память чата.');
+    return Object.assign(glmAccessError('glm_session_missing',
+      'Журнал сессии GLM повреждён; сбрось память чата.'), { cause: failure });
   }
 
   if (!state.promptAttempted && unavailable) {
@@ -260,7 +257,10 @@ function turnFailure(error: unknown, state: { promptAttempted: boolean; bindingE
     return glmAccessError('glm_runtime_start_failed', 'GLM не запустился до отправки сообщения.');
   }
 
-  return Object.assign(glmAccessError('glm_ambiguous_outcome', GLM_AMBIGUOUS_MESSAGE), carried);
+  return Object.assign(glmAccessError('glm_ambiguous_outcome', GLM_AMBIGUOUS_MESSAGE), {
+    ...carried,
+    cause: failure,
+  });
 }
 
 /**
@@ -268,6 +268,10 @@ function turnFailure(error: unknown, state: { promptAttempted: boolean; bindingE
  * подготовка запуска и параметризованный web-ход DSH. Повторов нет ни на каком слое.
  */
 export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) {
+  if (options.workspaceAccess && !options.factory && !options.untrustedInput && !options.scopedWorkspace) {
+    return runScopedGlmTurn(options, deps);
+  }
+
   const selected = preflight(options, deps);
 
   if (options.signal?.aborted) {
@@ -284,17 +288,24 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
   });
   const generation = await describeGlmGenerationAsync(config, runtime);
 
+  if (!selected.factory && runtime.metadata?.capabilities.glmNativeGate !== true) {
+    throw glmAccessError('glm_policy_gate_missing', 'В поставке GLM нет обязательного native gate.');
+  }
+
   if (generation.buildId !== runtime.buildId) {
     throw glmAccessError('glm_runtime_start_failed', 'Сборка DSH сменилась во время подготовки хода.');
   }
 
   const identity = assertGlmGenerationAdmission(generation, selected.accessMode, deps.admission);
 
-  const cwd = await fs.realpath(options.cwd!);
+  // STATE_DIR — единственный workspace проверяющего узла. Рабочие деревья читаются
+  // по абсолютным путям, а native write/edit и shell остаются в одной песочнице DSH.
+  const factory = selected.factory;
+  const cwd = await fs.realpath(factory?.context.filesystem === 'state-only'
+    ? factory.context.stateDir! : options.cwd!);
   const runtimeHome = assertGlmRuntimeHome(String(options.config.glmRuntimeHome ?? ''));
   const home = runtime.kind === 'binary' ? glmChatHome(runtimeHome, options.chatKey!)
     : glmChatHome(runtimeHome, identity, options.chatKey!);
-  const factory = selected.factory;
   let sessionId = options.sessionId;
   let journalNote: ChatStep | undefined;
 
@@ -451,11 +462,14 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
       }),
       variant: {
         labels: LABELS,
-        classifyModelError: (failure) => {
-          const code = GLM_MODEL_ERROR_CODES[String(failure.code || '')];
-
-          return code ? glmAccessError(code, MODEL_ERROR_MESSAGES[code]!) : null;
-        },
+        ...(launch.nativeGate ? {
+          createObserver: (context) => createGlmTreeObserver({
+            ...context,
+            ...launch.nativeGate!,
+            workTools,
+          }),
+        } : {}),
+        classifyModelError: classifyGlmModelError,
         verifySnapshot: (snapshot) => {
           const next = recordOrEmpty(
             recordOrEmpty(recordOrEmpty(recordOrEmpty(snapshot.projections).values).modelSelection).next
@@ -469,7 +483,7 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
             : glmAccessError('glm_effort_mismatch', 'GLM подтвердил другой уровень рассуждения.');
         },
         autoApprove: guard.autoApprove,
-        inspectEvent: guard.inspect,
+        inspectEvent: launch.nativeGate ? undefined : guard.inspect,
         approve: guard.approve,
         settle: guard.settle,
         // Блокировка — определённый исход: DSH отказал до модели, повтора и эффекта нет.

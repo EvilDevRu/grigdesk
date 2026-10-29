@@ -271,10 +271,10 @@ export async function ensureTestDeepSeekBinaryPair(): Promise<{
 }
 
 /**
- * Отдельный тестовый выпуск получает admission только в приватной копии builder.
- * Производственный список допуска не меняется; installer проверяет настоящий ELF без DI.
+ * Положительный и отрицательный выпуски задают admission в приватной копии builder.
+ * Допуск production больше не определяет исход отрицательного теста установщика.
  */
-export async function ensureTestAdmittedDeepSeekBinary(): Promise<TestDeepSeekBinary> {
+async function ensureTestDeepSeekAdmission(admitted: boolean): Promise<TestDeepSeekBinary> {
   const base = await ensureTestDeepSeekBinary();
   const plugin = base.info.glm.inputs.llmPiAi;
 
@@ -286,15 +286,16 @@ export async function ensureTestAdmittedDeepSeekBinary(): Promise<TestDeepSeekBi
     format: 1,
     profileRevision: base.info.glm.profileRevision,
     policyRevision: base.info.glm.policyRevision,
-    admission: [{
+    admission: admitted ? [{
       mode: 'api',
       compatibility: glmCompatibilityHash({ ...base.info.glm.inputs, llmPiAi: plugin }, 'api', {
         profile: base.info.glm.profileRevision,
         policy: base.info.glm.policyRevision,
       }),
-    }],
+    }] : [],
   };
-  const directory = path.join(base.cacheDir, 'test-variants', 'install-admitted');
+  const variant = admitted ? 'install-admitted' : 'install-unadmitted';
+  const directory = path.join(base.cacheDir, 'test-variants', base.info.packageId, variant);
   const { cache } = await candidateRoot();
 
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
@@ -308,7 +309,7 @@ export async function ensureTestAdmittedDeepSeekBinary(): Promise<TestDeepSeekBi
 
     if (!await fs.access(binary).then(() => true, () => false)) {
       await buildCandidate(directory, cache, [
-        '--binary-version', `${base.info.binaryVersion}-test-install-admitted`, '--payload', base.payloadFile,
+        '--binary-version', `${base.info.binaryVersion}-test-${variant}`, '--payload', base.payloadFile,
       ], compatibility);
     }
 
@@ -316,6 +317,22 @@ export async function ensureTestAdmittedDeepSeekBinary(): Promise<TestDeepSeekBi
   } finally {
     await lock.release();
   }
+}
+
+/**
+ * Настоящий положительный ELF имеет вычисленный допуск именно своего payload.
+ * Производственный файл compatibility не изменяется во время подготовки фикстуры.
+ */
+export async function ensureTestAdmittedDeepSeekBinary(): Promise<TestDeepSeekBinary> {
+  return ensureTestDeepSeekAdmission(true);
+}
+
+/**
+ * Отрицательный ELF явно не содержит admission независимо от допуска рабочей поставки.
+ * Он нужен для проверки отказа установщика после успешной живой приёмки production.
+ */
+export async function ensureTestUnadmittedDeepSeekBinary(): Promise<TestDeepSeekBinary> {
+  return ensureTestDeepSeekAdmission(false);
 }
 
 /**

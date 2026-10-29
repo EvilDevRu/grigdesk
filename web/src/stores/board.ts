@@ -2,6 +2,7 @@
 // обновление идёт в фоне + периодический поллинг (не тормозит навигацию).
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
+import { measureChatPerformance } from '../shared/chatPerformance.ts';
 import { boardActivity, boardTaskIds } from '../shared/boardActivity.ts';
 import { useTaskSeenStore } from './taskSeen.ts';
 import { errorMessage } from '../../../shared/lib/errors.ts';
@@ -10,6 +11,7 @@ import { decodeBoardDashboard, isBoardDashboard } from '../shared/boardContracts
 import type { BoardDashboard } from '../shared/boardContracts.ts';
 
 const mirrors = new WeakMap<object, () => void>();
+const reads = new WeakMap<object, AbortController>();
 
 export const useBoardStore = defineStore('board', {
   state: () => ({
@@ -51,28 +53,44 @@ export const useBoardStore = defineStore('board', {
       }
 
       const readAt = Math.max(Date.now(), this.readAt + 1);
+      const controller = new AbortController();
 
+      reads.set(this, controller);
       this.loading = true;
 
       try {
-        const dashboard = decodeBoardDashboard(await api.get('/api/b24/dashboard'));
+        const raw = await api.get('/api/b24/dashboard', {
+          signal: controller.signal,
+          retry: false,
+        });
+        const accepted = measureChatPerformance('board.apply', () => {
+          const dashboard = decodeBoardDashboard(raw);
 
-        if (readAt <= this.readAt) {
+          if (controller.signal.aborted || readAt <= this.readAt) {
+            return false;
+          }
+
+          this.data = dashboard;
+          this.loadedAt = Date.now();
+          this.readAt = readAt;
+          this.error = null;
+
+          return true;
+        });
+
+        if (!accepted) {
           return;
         }
 
-        this.data = dashboard;
-        this.loadedAt = Date.now();
-        this.readAt = readAt;
-        this.error = null;
         await this.markBaselineSeen();
 
         return readAt;
       } catch (e) {
-        if (readAt >= this.readAt) {
+        if (!controller.signal.aborted && readAt >= this.readAt) {
           this.error = errorMessage(e, 'Доска недоступна');
         }
       } finally {
+        reads.delete(this);
         this.loading = false;
       }
     },
@@ -140,8 +158,13 @@ export const useBoardStore = defineStore('board', {
         timer.unref();
       }
     },
-    // Нужен при потере сессии: иначе поллинг молотит в закрытый API и сыпет 401 в консоль.
+    /**
+     * Потеря сессии снимает и таймер, и ожидание текущего чтения в общей очереди.
+     * Отменённый запрос не обновляет доску и не оставляет повтор после остановки.
+     */
     stopPolling() {
+      reads.get(this)?.abort();
+
       if (this._timer) {
         clearInterval(this._timer);
       }

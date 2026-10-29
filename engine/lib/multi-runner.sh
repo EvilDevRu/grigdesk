@@ -146,11 +146,20 @@ _multi_probe_version() {
   printf '%s\n' "${version:-1.0.0}"
 }
 
+# Сначала отсекаем недоступного кандидата по покрытию цепочки, затем резолвим
+# фактическую модель и сборку. Диспетчер сохраняет причину перехода к резерву.
 _multi_resolve() {
   local provider=$1 requested_family=${2:-}
   local config family version variant effort exact fallback provider_key auth_profile
   local probe_output runner_version previous_version refresh_probe=0
   config=$(multi_runner_config_file)
+  if [[ "${MULTI_COVERAGE_REQUIRED:-0}" == 1 ]] &&
+     ! coverage_provider_ready "$STATE_DIR/coverage/$PROFILE_NAME/structural.env" \
+       "$STATE_DIR/coverage/$PROFILE_NAME/host.env" "$provider"; then
+    DISPATCH_RESOLVE_RESULT=unavailable_preflight
+    flog "$MULTI_TASK" "$MULTI_STAGE: $provider недоступен по снимку; проверяю следующий резерв" || true
+    return 4
+  fi
   runner_registry_has "$provider" || {
     DISPATCH_RESOLVE_RESULT=route_unavailable
     return 4
@@ -449,14 +458,16 @@ tests — дефект/неполнота теста; environment —
 # providers печатаются через запятую: решение об обновлении снимка принимает вызывающий.
 # Версия разбирается той же функцией, что и при записи снимка в preflight.
 _multi_coverage_runtime_match() (
-  local config=$1 host=$2 provider observed expected changed=''
+  local chain=$1 host=$2 provider observed expected changed=''
   source "$FACTORY_HOME/lib/profile-preflight.sh" || return 79
   runner_registry_reset
   runner_registry_load "${FACTORY_RUNNERS_DIR:-"$FACTORY_HOME/lib/runners"}" || return 79
 
-  # Один provider может стоять в нескольких цепочках профиля, но проба ему нужна одна.
+  # Недоступный кандидат не блокирует объявленный готовый резерв своей сборкой.
+  # Дубликаты внутри цепочки пробуются один раз, чужие цепочки не читаются.
   while IFS= read -r provider; do
     [[ -n "$provider" ]] || continue
+    coverage_provider_ready "$(dirname "$host")/structural.env" "$host" "$provider" || continue
     if ! declare -F "runner_${provider}_refresh_probe" >/dev/null ||
        ! runner_call "$provider" refresh_probe; then
       continue
@@ -471,7 +482,7 @@ _multi_coverage_runtime_match() (
     if [[ -z "$expected" || "$expected" != "$observed" ]]; then
       changed+="${changed:+,}$provider"
     fi
-  done < <(_profile_preflight_providers "$config" | LC_ALL=C sort -u)
+  done < <(tr ',' '\n' <<<"$chain" | LC_ALL=C sort -u)
 
   [[ -n "$changed" ]] || return 0
   printf '%s\n' "$changed"
@@ -485,6 +496,7 @@ _multi_coverage_runtime_match() (
 # удачного обновления в журнале маршрута выглядела бы причиной чужого падения.
 _multi_refresh_coverage() {
   local task=$1 stage=$2 config=$3 expected_revision=$4 reason=$5
+  local chain=$6
   local coverage_dir="$STATE_DIR/coverage/${PROFILE_NAME}" refresh_rc=0 changed
 
   flog "$task" "$stage: $reason; повторяю host preflight" || true
@@ -494,7 +506,7 @@ _multi_refresh_coverage() {
     source "$FACTORY_HOME/lib/profile-preflight.sh" || exit 78
     profile_runner_host_preflight "$PROFILE_NAME"
   ) || refresh_rc=$?
-  if (( refresh_rc != 0 )); then
+  if (( refresh_rc != 0 && refresh_rc != 1 )); then
     flog "$task" "$stage: повторная проверка исполнителей не пройдена (код $refresh_rc)" || true
     return 79
   fi
@@ -502,11 +514,11 @@ _multi_refresh_coverage() {
   # Сверяем исходную revision и новое время: во время пробы могли измениться
   # конфигурация или снимок, а короткий TTL мог уже истечь. Второго обновления нет.
   if ! coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
-    "$expected_revision" "$(date +%s)"; then
+    "$expected_revision" "$(date +%s)" "$chain"; then
     flog "$task" "$stage: обновлённый preflight несовместим или уже просрочен" || true
     return 79
   fi
-  if ! changed=$(_multi_coverage_runtime_match "$config" "$coverage_dir/host.env"); then
+  if ! changed=$(_multi_coverage_runtime_match "$chain" "$coverage_dir/host.env"); then
     flog "$task" "$stage: сборка ${changed:-исполнителя} не совпала и после обновления" || true
     [[ -z "$changed" ]] || printf 'FACTORY_ERROR=runtime_changed RUNNERS=%s\n' "$changed" >&2
     return 79
@@ -514,44 +526,54 @@ _multi_refresh_coverage() {
   flog "$task" "$stage: проверка исполнителей обновлена; продолжаю запуск узла" || true
 }
 
-# Истёкший положительный снимок требует новой metadata-проверки, а не остановки
-# длинного маршрута. Повреждение/недоступность не обновляем; TTL вручную не продлеваем.
+# Истёкший положительный снимок и прежняя схема требуют новой metadata-проверки.
+# Повреждение/недоступность цепочки не обновляем; TTL вручную не продлеваем.
 # Смена сборки runtime-sensitive исполнителя (в том числе легитимное обновление) лечится
 # так же, как истёкший срок: иначе новая сборка резерва останавливала бы узлы любого
 # основного исполнителя до ручного preflight.
 _multi_require_coverage() {
   local task=$1 stage=$2 config=$3 coverage_dir expected_revision changed
+  local primary=$4 failover=$5 chain
+  chain="$primary${failover:+,$failover}"
   coverage_dir="$STATE_DIR/coverage/${PROFILE_NAME}"
   expected_revision=$(sha256sum "$config" | awk '{print substr($1,1,16)}')
   if coverage_gate "$coverage_dir/structural.env" "$coverage_dir/host.env" \
-    "$expected_revision" "$(date +%s)"; then
-    changed=$(_multi_coverage_runtime_match "$config" "$coverage_dir/host.env") && return 0
+    "$expected_revision" "$(date +%s)" "$chain"; then
+    changed=$(_multi_coverage_runtime_match "$chain" "$coverage_dir/host.env") && return 0
     _multi_refresh_coverage "$task" "$stage" "$config" "$expected_revision" \
-      "сменилась сборка ${changed:-исполнителя}"
+      "сменилась сборка ${changed:-исполнителя}" "$chain"
     return
   fi
-  [[ "${COVERAGE_GATE_REASON:-}" == expired ]] || return 79
+  local reason
+  case "${COVERAGE_GATE_REASON:-}" in
+    expired) reason='истёк срок проверки исполнителей' ;;
+    obsolete_schema) reason='устарела схема проверки исполнителей' ;;
+    *) return 79 ;;
+  esac
 
-  _multi_refresh_coverage "$task" "$stage" "$config" "$expected_revision" \
-    "истёк срок проверки исполнителей"
+  _multi_refresh_coverage "$task" "$stage" "$config" "$expected_revision" "$reason" "$chain"
 }
 
+# Цепочка узла разрешается до coverage тем же порядком task/profile overrides.
+# Ни один кандидат не получает model call без допуска, включая ручной switch.
 multi_runner_run() {
   local task=$1 prompt=$2 stage=$3 timeout_s=$4
   local config route primary failover rc manual_count=0 switched=0
   config=$(multi_runner_config_file)
   profile_config_validate "$config" || return 78
+  route=$(routing_resolve "$config" "$(_pf "$task")" "$stage") || return 78
+  primary=$(awk -F= '$1=="PRIMARY"{print $2}' <<<"$route")
+  failover=$(awk -F= '$1=="FAILOVER"{print $2}' <<<"$route")
+  MULTI_COVERAGE_REQUIRED=0
   if [[ "$(profile_config_get "$config" RUNNERS_COVERAGE)" == required ]]; then
-    if ! _multi_require_coverage "$task" "$stage" "$config"; then
+    MULTI_COVERAGE_REQUIRED=1
+    if ! _multi_require_coverage "$task" "$stage" "$config" "$primary" "$failover"; then
       set_st "$task" STALLED_HUMAN 1 "RUNNER_REASON_${stage}" coverage_unavailable
       return 79
     fi
   fi
   runner_registry_reset
   runner_registry_load "${FACTORY_RUNNERS_DIR:-"$FACTORY_HOME/lib/runners"}" || return 78
-  route=$(routing_resolve "$config" "$(_pf "$task")" "$stage") || return 78
-  primary=$(awk -F= '$1=="PRIMARY"{print $2}' <<<"$route")
-  failover=$(awk -F= '$1=="FAILOVER"{print $2}' <<<"$route")
   MULTI_ROUTE_SOURCE=$(awk -F= '$1=="SOURCE"{print $2}' <<<"$route")
   MULTI_PRIMARY=$primary
   MULTI_FAILOVER=$failover
@@ -597,6 +619,12 @@ multi_runner_run() {
       switched=1
       MULTI_DISPATCH_ORDINAL=$((MULTI_DISPATCH_ORDINAL + 1))
       MULTI_DISPATCH_SOURCE_OVERRIDE=manual-switch
+      if [[ "$MULTI_COVERAGE_REQUIRED" == 1 ]] &&
+         ! _multi_require_coverage "$task" "$stage" "$config" "$primary" "$failover"; then
+        set_st "$task" STALLED_HUMAN 1 "RUNNER_REASON_${stage}" coverage_unavailable
+        _multi_catalog_cleanup
+        return 79
+      fi
       continue
     fi
     set_st "$task" "RUNNER_ACTUAL_${stage}" "${DISPATCH_RESULT_RUNNER:-$primary}" \

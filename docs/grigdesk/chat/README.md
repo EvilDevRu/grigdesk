@@ -1,10 +1,42 @@
 # Чат и исполнители
 
-- [Установка CLI: общее окно, серверная операция и восстановление](provider-cli-installation.md)
-- [Приоритет пользовательского npm для CLI и прежние способы без него](provider-install-npm.md)
-- [Проверка и подключение npm-копии вместо закреплённого старого CLI](provider-install-npm-binding.md)
-- [Вывод установки, обновление реестра и перевод собственных причин](provider-install-output-and-messages.md)
-- [Вывод команды скрыт под «Детали» при любом исходе установки](provider-install-details.md)
+- [Повторная сверка пика, кредитных квот и коэффициентов GLM, 29.10.2026](glm-quota-recheck.md)
+
+- [Режимы Codex: admission, явный выбор чата, native-вопросы и предел проверки](codex-permission-modes.md)
+
+- [Границы подготовки внешнего CLI и reuse живого процесса](executor-preparation-boundaries.md)
+- [Срок прямого вопроса: callback не наследует таймер enqueue](direct-interaction-lifetime.md)
+
+- [Codex: ask-hook, повторный stdin и границы строгих ручных подтверждений](codex-hook-approval-limits.md)
+
+- [Auto-review Codex: запуск, native события, остановка запросов и граница проверки](codex-auto-review-runtime.md)
+
+- [Удаление CLI: снятие привязки, оставшиеся копии и обновление карточки](provider-uninstall-state.md)
+- [Оставшаяся копия после удаления npm: версии и обычные действия](provider-native-after-uninstall.md)
+
+- [Копия официального установщика: своя группа при 0775, причины отказов, удаление и восстановление](provider-native-lifecycle.md)
+- [Окно обслуживания: немедленная проверка подготовки, подтверждение и отказ](provider-lifecycle-preparation.md)
+
+- [Две формы Bash: ссылки на один CLI не блокируют переустановку](provider-shell-symlink-identity.md)
+
+- [Опись внешних CLI, успешное время замера и границы прогноза](external-cli-diagnostics.md)
+- [Проверка лимитов Kimi сохраняет путь к пользовательскому Node.js](kimi-usage-node-path.md)
+- [Окружение запуска и источники лимитов всех встроенных исполнителей](provider-runtime-environments.md)
+- [Lifecycle внешних CLI: четыре операции, PTY/factory и восстановление](external-cli-lifecycle.md)
+- [Живые сессии держат копию: инспекция holders и подтверждение закрытия в окне установки](provider-session-holders-close.md)
+- [Переустановка сохраняет старый prefix вместо текущего каталога пользовательского npm](provider-reinstall-prefix.md)
+- [Установка после удаления: отсутствующая привязка и оставшаяся npm-копия](provider-install-stale-binding.md)
+- [Проверка installer-хуков: точная версия или прежние байты](provider-install-hooks-review-gate.md)
+
+- [Установка CLI: краткое подтверждение, подробности, token и восстановление](provider-cli-installation.md)
+- [Внешний Node/npm и пользовательский prefix вместо папки данных](provider-install-npm.md)
+- [Проверка и подключение npm-копии, перенос прежней bin-ссылки](provider-install-npm-binding.md)
+- [Проверка нативного Linux ELF и JavaScript в npm-пакетах исполнителей](provider-install-native-bin.md)
+- [Настройка Bash PATH: независимый probe, управляемый блок и честный terminal](provider-install-shell-path.md)
+- [Вывод установки, обновление реестра и исходные сообщения причин](provider-install-output-and-messages.md)
+- [Отказ подготовки установки не подменяется прошлым успешным результатом](provider-install-prepare-failure.md)
+- [Команда и вывод скрыты под «Детали», подтверждение — под «Подробности»](provider-install-details.md)
+- [Постоянная высота окна установки, прокрутка деталей и доступность действий](provider-install-height.md)
 - [Повтор установки и обновления CLI при плохой сети: бюджет, паузы и остановка](provider-install-network-retry.md)
 - [Кнопка «Повторить» после отказа установки или обновления CLI](provider-install-manual-retry.md)
 
@@ -15,6 +47,7 @@
 - [GLM parity: те же сценарии на ELF, policy/MCP и исходы остановки](glm-binary-parity.md)
 
 - [Offline/live проверка GLM: явный ELF, cache и временный api admission](glm-smoke-binary.md)
+- [Отчёт smoke GLM: полный HTTP-отказ без секретов и остановка после первого неуспеха](glm-smoke-http-errors.md)
 
 - [Память GLM: A→B→A, несовместимый журнал и закрепление ELF до prompt](glm-binary-memory.md)
 
@@ -54,6 +87,9 @@
 
 ### Kimi
 
+- [Предпросмотр разрешений: команды, файлы и дифф вместо object Object](kimi-approval-display.md)
+- [Heartbeat WebSocket: ping/pong, тайминги и причина закрытия в ошибке хода](kimi-ws-heartbeat.md)
+- [Окружение MCP для kimi web: ACP-массив превращается в объект](kimi-web-mcp-env.md)
 - [Отказ пятичасовой квоты и другие ошибки сохраняют причину вместо «Ход остановлен»](kimi-turn-failures.md)
 - [Первая буква вместо реплики, «Пишет…» перед долгим Agent и подтверждение модели](kimi-reply-presentation.md)
 - [Серверная лента Kimi: цельные размышления, подписи инструментов и границы](kimi-server-steps.md)
@@ -63,8 +99,15 @@
 - [Дополнительные workspace-каталоги для kimi-чатов (паритет с codex --add-dir)](kimi-workspace-extra-dirs.md)
 - [Kimi ACP: результаты contract spike](kimi-acp-spike.md)
 - [KimiRuntime: security gate](kimi-runtime-security.md)
+- [Авторизация Kimi: официальный и scoped credential](kimi-scoped-credentials.md)
 
 ### Чат
+
+- [Типы плагинов при отдельном импорте модуля чата](module-plugin-types.md)
+
+- [Цельный лёгкий список и адресная загрузка истории: принятое решение №93038](lazy-history.md)
+- [Подготовка порциями, персистные шапки и кэш текстов поиска](catalog-cache.md)
+- [Отметка прочтения при адресной загрузке ленты](detail-read-metadata-race.md)
 
 - [Загрузка списка: состояния, причины отказа, повторы и защита до первого успеха](store-loading-recovery.md)
 - [Экран загрузки: единый статус, силуэты списка и заглушка области разговора](loading-screen.md)
@@ -74,10 +117,17 @@
 - [«Требуют вмешательства»: чипы, чтобы вопрос не проехал мимо](intervention-badges.md)
 - [Автопрокрутка](auto-scroll.md)
 - [Вложения (фото) и диктовка](attachments-and-dictation.md)
+- [Просмотр неотправленных изображений и галерея текущего черновика](draft-image-preview.md)
 - [Типизированные границы старых ответов: MIME, revision папки и сетевые ошибки](typed-legacy-responses.md)
 - [Всплывашка разрешений (аналог permission prompt Claude Code)](permission-prompt.md)
+- [Карточки разрешений и вопросов: содержимое, постоянные действия и свой ответ](intervention-cards.md)
+- [Параметры разрешения GLM: обоснование, доступ и таймаут вместо сырого JSON](permission-parameters.md)
+- [Правка и запись файла: исходные строки и content в предпросмотре разрешения](permission-file-preview.md)
+- [Длинный запрос: нижняя панель сохраняет высоту кнопок решения](intervention-footer-layout.md)
+- [Поля запросов: общий фон, компактные действия, ссылки и выравнивание](intervention-controls.md)
 - [Диалог: агент задаёт вопрос (AskUserQuestion)](agent-questions.md)
 - [Доставка хода: приём по turnId, журнал ходов, итог через pending](turn-delivery.md)
+- [Порядок финалов очереди при записи из нескольких окон](pending-final-order.md)
 - [Автопродолжение хода после сбоя исполнителя: допуск, паузы, бюджет и приоритет человека](auto-continue.md)
 - [Часики доставки в пузыре: ожидание у времени, сбой отдельной строкой](message-pending-mark.md)
 - [Уточнение работающему агенту: тот же ход, ответ до финала и восстановление](in-turn-messages.md)
@@ -95,7 +145,9 @@
 - [Лента хода агента (как в чате VS Code)](agent-turn-feed.md)
 - [Действия субагента под своим вызовом, включая поздние реплики (№93016)](subagent-step-placement.md)
 - [Картинка в строке Read и генерации Codex: миниатюра через маршрут картинок чата вместо «[изображение]» и base64](step-images.md)
+- [DeepSeek: read_image становится строкой Read с миниатюрой; старые шаги не переписываются](deepseek-step-images.md)
 - [Приглушённые подписи инструментов и служебных сведений](activity-visual-hierarchy.md)
+- [Монохромные SVG-иконки инструментов в живой и сохранённой ленте](activity-icons.md)
 - [Ответы среди действий: хронология и компактные реплики](conversation-timeline.md)
 - [Общая линия хода, иконки ответов и выравнивание](turn-rail.md)
 - [Сведения о запуске и лимитах справа на существующей линии](run-status-placement.md)
@@ -104,10 +156,17 @@
 - [Модульное подключение нового ИИ](executor-integration.md)
 - [Рабочие инструменты GrigDesk](work-tools.md)
 - [Режимы прав (--permission-mode)](permission-modes.md)
+- [DeepSeek: три режима, native gate до эффекта, подтверждения и совместимость](deepseek-tool-permissions.md)
+- [Штатная песочница Harness: расширение доступа и отсутствие оценки опасности команд](deepseek-native-sandbox.md)
+- [Лишние вопросы auto: старый установленный ELF, приватный tmp и запись артефактов](deepseek-auto-runtime-update.md)
 - [Спрос ВИСИТ, пока не ответишь (без короткого UI-таймаута)](pending-question-lifetime.md)
 - [Хранилище истории — chats/ в папке данных](history-storage.md)
 - [Ссылки на сохранённые шаги: отдельный PUT, durable ACK, снимок и fallback](history-step-reuse.md)
+- [Живой ход: refs при серверных записях, stale CAS и синтетика 20 блоков](history-reuse-live-writes.md)
+- [Порционная сериализация полного JSON и смена revision без второго обхода](history-serialization.md)
 - [Сохранение: реактивные кэши отпечатка и страховочного JSON каждого чата](chat-save-projection-cache.md)
+- [Поиск по id при сохранении: реактивные индексы активного списка и архива](chat-catalog-lookup.md)
+- [Сохранение: один отбор загруженных чатов и сравнение шапок без JSON-строк](chat-persist-passes.md)
 - [Смена папки требует согласования истории, очереди и памяти](workdir-transition-preconditions.md)
 - [Чат (modules/chat)](chat-module.md)
 - [Рабочая папка чата: приоритет задачи, выбор проекта и границы записи](chat-workspace.md)
@@ -118,13 +177,22 @@
 
 ### Исполнители и модели
 
+- [Единые подписи окон лимитов: поповер, прогноз и строка чата на RU/EN](usage-window-labels.md)
 - [Видимость доплаты Kimi/Codex, пустые ответы и слияние снимков](extra-usage-visibility.md)
+- [Два формата квот Kimi: окна, календарный месяц, разбивка кода и кошелёк](kimi-quota-format.md)
 
 - [Gemini: отдельные точки подключения чата и Factory, offline-защита и внешние контракты](gemini-integration-boundaries.md)
 
 - [GigaCode CLI: документированные возможности и граница проверки](gigacode-cli-contract.md)
 - [Qwen Code: две точки подключения и проверенные внешние источники](qwen-integration-boundaries.md)
 - [Исполнитель GLM (Z.ai): допуск режима, живая проверка и ограничения](glm-executor.md)
+- [Coding Plan: успешный smoke нового ключа, точный допуск и история отказа 1113](glm-coding-plan-smoke.md)
+- [Ошибки модели GLM: код 1113, понятная причина и безопасное сообщение в чате](glm-model-errors.md)
+- [Типы ключей GLM: почему активный Pro совместим с ошибкой 1113 и как проверить причину](glm-key-types.md)
+- [Диагностика GLM: оплата SUCCESS, активный Pro и отказ 1113 на двух модельных маршрутах](glm-entitlement-diagnostics.md)
+- [Дополнительный контроль GLM без ЛК: нулевой API-баланс, каталог и таймаут бесплатной модели](glm-api-control.md)
+- [GLM после перезапуска: видимость при закрытом допуске и кэш адаптера](glm-setup-visibility.md)
+- [Картинки GLM: запрет read_image и отличие чтения от границы записи](glm-image-input.md)
 - [Контракт доступа и допуска GLM: два режима, отдельные ключи, отпечаток и setup-only карточка](glm-access-contract.md)
 - [Входы сборки GLM: exact-версии, проверка notices и запрет записи llm-pi-ai](glm-build-inputs.md)
 - [Notices GLM: точные версии, закреплённые источники и offline supplements](glm-license-inventory.md)
@@ -133,9 +201,14 @@
 - [Профиль запуска GLM: overlay, hooks с matcher *, homes и server-owned settings](glm-launch-profile.md)
 - [Ход GLM: порядок, таблица исходов, повторы запроса при обрыве сети, сжатие и replay размышлений](glm-turn-runtime.md)
 - [Счёт и лимиты GLM: баланс Обычного API и окна Coding Plan из адресов кабинета Z.ai](glm-usage.md)
+- [Кредитные окна GLM: поддержка CREDIT_LIMIT, живые поля и отсутствие данных Extra Usage](glm-credit-windows.md)
 - [Тариф Coding Plan GLM: местные окна, оба поколения расходов и сторож документации Z.ai](glm-tariff.md)
 - [Кеш Z.ai и цена хода GLM: 97–98% входа из кеша, цену делают шаги × контекст, как сверить по журналу](glm-cache-cost.md)
-- [Политика инструментов GLM: hook с matcher *, сверка approval и остаточный риск fail-open](glm-tool-policy.md)
+- [Native gate и foreground-делегирование GLM](glm-native-gate.md) — proof до эффекта, точная связь ребёнка, журнал resume и remote ownership.
+- [Политика инструментов GLM: native gate чата и прежний hook Factory/ACP](glm-tool-policy.md)
+- [Навыки GLM: каталог пользователя и разрешённый загрузчик skill типом read](glm-skill-policy.md)
+- [Субагенты GLM: исследование наследования и пробелов прежнего корневого сторожа](glm-subagent-boundaries.md)
+- [Native-контракты делегирования GLM: child never, окончательный guard, каталог, страницы истории и remote owner](glm-delegation-contracts.md)
 - [MCP у GLM: только grigdesk-work, готовность до prompt, потеря без переподключения](glm-mcp.md)
 - [Каталог GLM: ACP-чтение без prompt, уровни по модели, glm-4.7 и glm-5-turbo без выбора](glm-catalog.md)
 - [Память GLM: привязка, проверка журнала перед resume, сброс и summary-сжатие](glm-session-memory.md)
@@ -153,6 +226,7 @@
 - [Сетевой сбой DeepSeek и отказ остановки: раздельные причины и безопасное продолжение](deepseek-transport-cleanup.md)
 - [Отказ запуска GLM: выход процесса прерывает ожидание URL и HTTP-авторизацию](glm-startup-failure.md)
 - [Этап фабрики на GLM: политика без вопросов, typed контекст хоста, wrapper и metadata](glm-factory-stage.md)
+- [Представление этапа GLM: модель, инструменты и причина отказа](../pipeline/glm-runner-display.md)
 - [Замена DeepSeek сохраняет heartbeat живого WebSocket](deepseek-publication-event-loop.md)
 - [Приватный settings-мост DeepSeek: ACP, readback и restart](deepseek-private-settings-bridge.md)
 - [Собранный DeepSeek: чат, поток, настройки и файловые границы](deepseek-compiled-chat-parity.md)
@@ -187,7 +261,9 @@
 - [Пустой и выбранный уровни эффорта: оформление зависит только от текущего выбора (№93021)](effort-slider-states.md)
 - [Claude: ступень ultracode запрашивает workflow; discovery, модельный допуск и ограничения](claude-ultracode.md)
 - [MCP-серверы исполнителя — блок в той же плашке](mcp-server-controls.md)
-- [Codex: принудительный never и отказ MCP-инструментов, требующих подтверждения](codex-mcp-approvals.md)
+- [Codex: native Auto-review, ручные requests и intentional never служебных запусков](codex-mcp-approvals.md)
+- [Codex: штатные подтверждения, Auto-review, правила команд и проверка протокола 0.164.0](codex-native-approvals.md)
+- [Codex: граница записи в Git и отличие чата от этапов конвейера](codex-git-and-pipeline-permissions.md)
 - [DeepSeek: MCP в запуске и списке настроек](deepseek-mcp-visibility.md)
 - [DeepSeek: безопасный список проектных MCP, состояния и общие границы](deepseek-mcp-status.md)
 

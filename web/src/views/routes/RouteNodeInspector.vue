@@ -138,7 +138,9 @@
         <summary>Исполнитель и модель — из настроек проекта</summary>
         <div class="ui-workspace-section__body">
           <p class="route-node-help">Эти параметры задаются в проекте и здесь доступны только для просмотра.</p>
-          <UiLoadingState v-if="policyLoading" label="Читаю политику запуска…" variant="document" />
+          <UiLoadingState v-if="policyLoading" label="Читаю политику запуска…" variant="document" >
+            <UiSkeletonLayout layout="text" :header="false" />
+          </UiLoadingState>
           <p v-else-if="!effectivePolicy" class="muted">Политика запуска недоступна.</p>
           <template v-else>
             <p>Основной исполнитель: {{ effectivePolicy.primary || 'не указан' }}</p>
@@ -156,6 +158,8 @@
 </template>
 
 <script setup lang="ts">
+import { UiSkeletonLayout } from '../../ui';
+
 import { computed, onUnmounted, ref, watch } from 'vue';
 import type {
   DraftNode,

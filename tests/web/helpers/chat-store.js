@@ -3,6 +3,8 @@
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { loadProductModule } from './compile-vue.js';
+import { protocolHead, protocolReconcile } from './chat-protocol.js';
+import { createChatVisibilityRegistry } from '../../../web/src/shared/chatVisibility.ts';
 
 const PINIA_PATH = fileURLToPath(new URL('../../../web/node_modules/pinia/dist/pinia.mjs', import.meta.url));
 const LOCALE_PATH = fileURLToPath(new URL('../../../web/src/services/locale.ts', import.meta.url));
@@ -12,6 +14,7 @@ const LOCALE_PATH = fileURLToPath(new URL('../../../web/src/services/locale.ts',
  * get(url: string, options?: object): Promise<unknown>;
  * post(url: string, body?: object): Promise<unknown>;
  * put(url: string, body?: object): Promise<unknown>;
+ * patch(url: string, body?: object): Promise<unknown>;
  * del(url: string): Promise<unknown>;
  * }} */
 export const apiHarness = {};
@@ -107,7 +110,16 @@ export async function chatStoreFixture(state = {}, {
   globalThis.__chatNotifications = [];
   globalThis.__chatDismissed = [];
   globalThis.__chatProviders = defaultProviders();
-  globalThis.__chatVisibility.ids.clear();
+
+  const registry = createChatVisibilityRegistry();
+
+  globalThis.__chatVisibility = {
+    ...registry,
+    ids: new Set(),
+    isVisible(id) {
+      return this.ids.has(id) || registry.isVisible(id);
+    },
+  };
   globalThis.__chatUiContext.capture = () => ({
     routingScope: null,
     promptContext: { page: '', path: '/chats' },
@@ -129,8 +141,23 @@ export async function chatStoreFixture(state = {}, {
 
   if (!api) {
     apiHarness.get = async () => ({ active: [] });
-    apiHarness.post = async () => ({});
+    apiHarness.post = async (url) => {
+      if (url === '/api/chat/store/changes') {
+        return {
+          listProtocol: 1,
+          sessions: [],
+          archived: [],
+          gone: [],
+        };
+      }
+      if (url === '/api/chat/store/reconcile') {
+        return protocolReconcile();
+      }
+
+      return {};
+    };
     apiHarness.put = async () => ({});
+    apiHarness.patch = async () => ({});
     apiHarness.del = async () => ({});
   }
   if (unloaded) {
@@ -150,6 +177,15 @@ export async function chatStoreFixture(state = {}, {
   // Стор считает себя совпавшим с сервером — иначе любое чужое изменение он отвергнет
   // как «у нас есть несохранённое» (см. `_dirty`).
   chat._markSent();
+
+  for (const session of [...chat.sessions, ...chat.archived]) {
+    if (chat.messageLoads) {
+      chat.messageLoads[session.id] = { state: 'loaded', error: '' };
+    }
+
+    chat._applyChatHead?.(protocolHead({ ...session, archived: chat.archived.includes(session) }), false);
+  }
+
   return chat;
 }
 

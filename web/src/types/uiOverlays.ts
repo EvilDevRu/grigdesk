@@ -79,6 +79,8 @@ export interface ConfirmDialogOptions {
   iconColor?: string;
   // Команда или путь показываются моноширинным блоком как данные, без перевода.
   code?: string;
+  // Длинные технические данные доступны только после явного раскрытия.
+  details?: { label: UiText; text: string };
   okText?: UiText;
   cancelText?: UiText;
   danger?: boolean;

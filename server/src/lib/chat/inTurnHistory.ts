@@ -204,8 +204,16 @@ export class InTurnHistory {
       const id = String(entry?.id || '');
       const turnId = String(entry?.turnId || '');
       const runId = String(entry.runId || '');
+      const parent = messages.findIndex((message) => message.role === 'user' && message.turnId === turnId);
+      const earlierTurns = new Set(parent < 0 ? [] : messages.slice(0, parent)
+        .filter((message) => message.role === 'user' && message.turnId)
+        .map((message) => String(message.turnId)));
+
+      // Окно могло сохранить предыдущие ответы после всех вопросов очереди.
+      // Новый финал не должен обгонять их, даже если его вопрос стоит раньше в ленте.
       const anchor = messages.findLastIndex((message) => (!!runId && message.runId === runId)
-        || (!!turnId && message.role === 'user' && message.turnId === turnId));
+        || (!!turnId && message.role === 'user' && message.turnId === turnId)
+        || (message.role !== 'user' && earlierTurns.has(String(message.turnId || message.pid || ''))));
 
       append({
         role: String(entry?.role || 'assistant'),

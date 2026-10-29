@@ -9,11 +9,11 @@ GLM исполняет этапы конвейера тем же DSH ELF (`bin/d
 
 | Метод | Поведение |
 | --- | --- |
-| `probe` | `glmRuntimeInfo.mts --probe`: допуск `api` по metadata ELF, без ключа модели. Coding Plan, пустой режим или нет ELF → `4`; offline → `126`. |
+| `probe` | `glmRuntimeInfo.mts --probe`: допуск режима службы (`api` или `coding-plan` — factory-policy-v2) по metadata ELF, без ключа модели. Пустой/чужой режим или нет ELF → `4`; offline → `126`. |
 | `catalog` | Семь проверенных моделей маршрута `zai` из `glm/factoryCatalog.ts`, provider `glm`. |
 | `capabilities` | `status status_request tools structured_output`. Sandbox, fanout и native resume не заявлены. |
 | `default_policy` | `FAMILY=default`, `EFFORT=high`; `family_alias` — `4`. |
-| `run` | Только `GRIGDESK_GLM_API_MODE=api`; режимы ФС `state-only→read-only`, `workspace-write`. |
+| `run` | Режим службы `api` или `coding-plan`; `state-only` → `workspace-write` только в `STATE_DIR`, `workspace-write` → запись в cwd проекта. |
 | `classify` | `0→ok`, `124→timeout`, всё остальное `unknown`. |
 | `fanout_count` | Разбор retained JSON; повреждённый поток — отказ, а не `0`. |
 | `interrupt` | `0`: wrapper и DSH живут в setsid-сессии launcher-а. |
@@ -31,6 +31,13 @@ Descriptor metadata-helper-а — единственный источник ELF,
 `RUN_DIR/glm/runtime`. Ключ, prompt и status identity в argv не попадают;
 `RUNNER_GLM_ADD_DIRS` — только prompt-контекст, не writable root DSH.
 
+При `state-only` shell-раннер передаёт wrapper-у `--mode state-only` и физический
+`STATE_DIR` как `--cwd`. Wrapper закрепляет его в `factoryContext.stateDir`; runtime
+использует этот каталог как cwd и workspaceRoot DSH с approval `never`. Native
+`write`/`edit` разрешены hook только внутри этого корня, без символических ссылок;
+shell за его пределами ограничен песочницей. Подробности и проверки обязательных
+артефактов — [GLM и артефакты state-only](../grigdesk/pipeline/glm-state-artifacts.md).
+
 Node и ELF — общая host-поставка DSH: `GRIGDESK_DEEPSEEK_NODE_BIN`/`NODE_BIN` и
 `GRIGDESK_DEEPSEEK_BIN`, кэш — `GRIGDESK_DEEPSEEK_CACHE_DIR`. Отдельного CLI `glm` нет:
 basename `glm|glm-*` заблокирован OFFLINE_GUARD, а `tests/engine/fakes/bin/glm` — tripwire `97`.
@@ -39,9 +46,11 @@ basename `glm|glm-*` заблокирован OFFLINE_GUARD, а `tests/engine/fa
 
 Сервер передаёт движку `GRIGDESK_GLM_API_MODE` (только `api`/`coding-plan`, иначе пусто) и
 host-owned пути: PATH с каталогом установки первым, Node и ELF DSH, кэш, `FACTORY_HOME`,
-профили. `extraEnv` их не подменяет и не может внести модельный ключ. `ZAI_API_KEY` и
-`DEEPSEEK_API_KEY` идут юниту файлом `route-secrets.env` 0600, отвязанному процессу — его
-окружением; `ZAI_CODING_API_KEY` не передаётся ни одной веткой.
+профили. `extraEnv` их не подменяет и не может внести модельный ключ. `ZAI_API_KEY`,
+`ZAI_CODING_API_KEY` и `DEEPSEEK_API_KEY` идут юниту файлом `route-secrets.env` 0600,
+отвязанному процессу — его окружением (оба ключа Z.ai — с 29.10.2026: этапу разрешён
+Coding Plan, ключ режима подставляет wrapper); служебный `GRIGDESK_GLM_ROUTE_KEY`
+этапам не передаётся.
 
 ## Классификация и диагностика
 

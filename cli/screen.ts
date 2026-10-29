@@ -17,6 +17,7 @@ export interface ScreenOptions {
   full?: boolean;
   follow?: boolean;
   minimumWidth?: number;
+  incremental?: boolean;
 }
 
 interface ScreenState {
@@ -109,7 +110,11 @@ function renderScreen(session: TerminalSession, state: ScreenState): void {
     ...header,
     ...full ? body : body.slice(state.offset, state.offset + pageSize),
     ...footer,
-  ], () => renderScreen(session, state), { theme: 'dark', width });
+  ], () => renderScreen(session, state), {
+    theme: 'dark',
+    width,
+    incremental: options.incremental,
+  });
 }
 
 /**
