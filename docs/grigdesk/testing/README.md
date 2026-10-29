@@ -1,5 +1,7 @@
 # Тесты и проверка
 
+- [Готовность маршрутизатора перед повторной навигацией](router-ready-navigation.md)
+
 - [Гейты DeepSeek: unit, SEA, source candidate и host parity](deepseek-test-gates.md)
 
 Веб-тесты на happy-dom, Playwright и ловушки, из-за которых тест врёт.

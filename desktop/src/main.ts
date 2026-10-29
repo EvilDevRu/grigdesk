@@ -1,4 +1,5 @@
 import { desktopLocale, desktopText, setDesktopLocale } from './locale.ts';
+import { createDirectorySelector } from './directorySelection.ts';
 import {
   app,
   BrowserWindow,
@@ -923,6 +924,10 @@ async function prepare(signal: AbortSignal): Promise<void> {
   });
 
   client = createClientRuntime({
+    selectDirectory: createDirectorySelector({
+      getWindow: () => mainWindow,
+      showOpenDialog: (parent, options) => dialog.showOpenDialog(parent, options),
+    }),
     windowControls,
     desktopExit: desktopExitPreference(),
     settings: stored,

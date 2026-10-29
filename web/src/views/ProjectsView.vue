@@ -18,6 +18,14 @@
           @retry="retry"
         >
           <template #actions>
+            <UiIconButton data-context="workspace-toolbar" :label="t('core.onboardingOpen')"
+              v-tooltip="t('core.onboardingOpen')"
+              @click="router.push('/onboarding?new=1')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m3 18 12-12 3 3L6 21ZM5 2v6M2 5h6M19 15v6M16 18h6M17 2v3M15.5 3.5h3" />
+              </svg>
+            </UiIconButton>
             <UiButton
               v-if="!creating"
               data-role="project-create"
@@ -174,6 +182,7 @@ import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vu
 
 import {
   UiButton,
+  UiIconButton,
   UiInlineMessage,
   UiPaneHeader,
   confirmDialog,

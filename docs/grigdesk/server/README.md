@@ -1,5 +1,7 @@
 # Сервер и доступ
 
+- [Состояние мастера: API, ревизии и создание проекта](onboarding-state.md)
+
 - [Подтверждение TLS-привязки, готовность relay и диагностика отказов](phone-pairing-confirmation.md)
 
 - [Управляемый direct-вход, PHONE:2 и общий client relay](phone-access.md)
