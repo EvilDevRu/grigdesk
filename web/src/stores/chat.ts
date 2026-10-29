@@ -96,6 +96,22 @@ export const DEFAULT_SPEECH = Object.freeze<SpeechSnapshot>({
 });
 
 /**
+ * Индекс читает только состав списка и id, поэтому текст и runtime чата его не инвалидируют.
+ * При повторном id сохраняется первый объект, как у прежнего Array.find.
+ */
+function indexChats(sessions: ChatSession[]): Map<string, ChatSession> {
+  const index = new Map<string, ChatSession>();
+
+  for (const session of sessions) {
+    if (!index.has(session.id)) {
+      index.set(session.id, session);
+    }
+  }
+
+  return index;
+}
+
+/**
  * Речь приезжает и внутри chat-store snapshot, и отдельным settings/SSE-ответом.
  * Нормализуем в одном месте: старый/частичный сервер не должен включить облачный путь
  * невалидным значением или уронить композер отсутствующим `local`.
@@ -1219,6 +1235,8 @@ export const useChatStore = defineStore('chat', {
     inTurnError: '',
   }),
   getters: {
+    _sessionsById: (s) => indexChats(s.sessions),
+    _archivedById: (s) => indexChats(s.archived || []),
     loadErrorMessage: (s) => {
       const messages = {
         network: messageRef('core.chatListLoadNetwork'),
@@ -1232,15 +1250,17 @@ export const useChatStore = defineStore('chat', {
     // На странице «Чаты» можно открыть архивный разговор для чтения, не возвращая
     // его в активные. Поэтому выбранный чат и поиск по id смотрят в оба списка;
     // принадлежность к архиву по-прежнему задаётся только самим списком.
-    active: (s) => s.sessions.find((x) => x.id === s.activeId)
-      || (s.archived || []).find((x) => x.id === s.activeId)
-      || null,
-    session: (s) => (id: string) => s.sessions.find((x) => x.id === id)
-      || (s.archived || []).find((x) => x.id === id)
-      || null,
+    active(): ChatSession | null {
+      return this.session(this.activeId || '');
+    },
+    session(): (id: string) => ChatSession | null {
+      return (id) => this._sessionsById.get(id) || this._archivedById.get(id) || null;
+    },
     inTurnFor: (s) => (id: string) => s.inTurnRuns[id] || null,
     runtimeFor: (s) => (id: string) => s.runtimeRuns[id] || null,
-    isArchived: (s) => (id: string) => (s.archived || []).some((x) => x.id === id),
+    isArchived(): (id: string) => boolean {
+      return (id) => this._archivedById.has(id);
+    },
     // Заголовок вкладки: название задачи → #номер → «Новый чат».
     tabLabel: () => (sess: ChatRecord) => sess.title || (sess.taskId ? `#${sess.taskId}` : 'Новый чат'),
     // Непрочитанные: агент ответил, а мы на этот чат ещё не смотрели. Считаем и архивные —
@@ -2603,41 +2623,37 @@ export const useChatStore = defineStore('chat', {
         const state = historyPersistenceFor(this);
 
         const cache = persistenceProjections.get(toRaw(this))!;
+        const loadedSessions = this.sessions.filter((chat) => this.isChatMessagesLoaded(chat.id));
+        const loadedArchived = (this.archived || [])
+          .filter((chat) => this.isChatMessagesLoaded(chat.id));
+        const allChats = [...this.sessions, ...(this.archived || [])];
         const projections = {
-          sessions: this.sessions.filter((chat) => this.isChatMessagesLoaded(chat.id))
-            .map((chat) => cache.get(chat)),
-          archived: (this.archived || []).filter((chat) => this.isChatMessagesLoaded(chat.id))
-            .map((chat) => cache.get(chat, true)),
+          sessions: loadedSessions.map((chat) => cache.get(chat)),
+          archived: loadedArchived.map((chat) => cache.get(chat, true)),
         };
-        const slim = this.sessions.filter((chat) => this.isChatMessagesLoaded(chat.id)).map(slimOf);
-        const archivedSlim = (this.archived || [])
-          .filter((chat) => this.isChatMessagesLoaded(chat.id)).map(archivedSlimOf);
-        const payload = {
-
-          sessions: slim,
-          archived: archivedSlim,
+        const meta = {
           activeId: this.activeId,
-
           defModel: this.defModel,
           defModelRef: this.defModelRef,
-
           defEffort: this.defEffort,
           defMode: this.defMode,
-
           defWorkdir: this.defWorkdir,
           recentWorkdirs: this.recentWorkdirs,
-
         };
         // Страховочный снимок в браузере: переживает падение и перезапуск сервера.
         // Без него ответ, пришедший последним, терялся насовсем — «следующего изменения»,
         // на котором он бы сохранился, могло и не быть.
         if (needSnapshot && !chatLoadRuntimeFor(this).snapshots.size) {
-          writeSnapshot(payload, projections);
+          writeSnapshot({
+            ...meta,
+            sessions: loadedSessions.map(slimOf),
+            archived: loadedArchived.map(archivedSlimOf),
+          }, projections);
           needSnapshot = false;
         }
         // Каждый чат — свой запрос, и только если он реально изменился.
         const jobs = [];
-        const alive = new Set([...this.sessions, ...this.archived].map((chat) => chat.id));
+        const alive = new Set(allChats.map((chat) => chat.id));
 
         for (const id of chatLoadRuntimeFor(this).headOnly) {
           const head = this._find(id);
@@ -2675,9 +2691,10 @@ export const useChatStore = defineStore('chat', {
           jobs.push(send);
         };
 
-        slim.forEach((c, index) => push(c, projections.sessions[index]!));
-        archivedSlim.forEach((c, index) => push(c, projections.archived[index]!));
-        cache.prune([...this.sessions, ...(this.archived || [])]);
+        // Dirty-сигнатуре нужны только id и messages; JSON-отпечаток уже есть в проекции.
+        loadedSessions.forEach((c, index) => push(c, projections.sessions[index]!));
+        loadedArchived.forEach((c, index) => push(c, projections.archived[index]!));
+        cache.prune(allChats);
         // Чат исчез из стора (удалили, вытеснили из архива) — убираем и на сервере.
         for (const id of new Set([
           ...historyPersistenceFor(this).sentChats.keys(), ...chatLoadRuntimeFor(this).versions.keys(),
@@ -2697,22 +2714,6 @@ export const useChatStore = defineStore('chat', {
             }).finally(() => chatLoadRuntimeFor(this).deleting.delete(id)));
         }
 
-        const meta = {
-
-          activeId: this.activeId,
-
-          defModel: this.defModel,
-
-          defModelRef: this.defModelRef,
-
-          defEffort: this.defEffort,
-
-          defMode: this.defMode,
-
-          defWorkdir: this.defWorkdir,
-          recentWorkdirs: this.recentWorkdirs,
-
-        };
         const metaJson = JSON.stringify(meta);
 
         if (metaJson !== sentMeta) {
@@ -3141,10 +3142,10 @@ export const useChatStore = defineStore('chat', {
       });
     },
     _get(id?: string | null): ChatSession | null {
-      return this.sessions.find((s) => s.id === id) || null;
+      return this._sessionsById.get(id ?? '') || null;
     },
     _find(id?: string | null): ChatSession | null {
-      return this._get(id) || (this.archived || []).find((s) => s.id === id) || null;
+      return this.session(id ?? '');
     },
 
     /**
@@ -4006,11 +4007,14 @@ export const useChatStore = defineStore('chat', {
      */
     _dirty(chat: ChatSession) {
       if (!this.isChatMessagesLoaded(chat.id)) {
-        return JSON.stringify(this._headMetadata(chat.id))
-          !== JSON.stringify(this._headMetadata(chat.id, chatLoadRuntimeFor(this).heads.get(chat.id)));
+        const next = this._headMetadata(chat.id);
+        const before = this._headMetadata(chat.id, chatLoadRuntimeFor(this).heads.get(chat.id));
+
+        return next.title !== before.title || next.unread !== before.unread
+          || next.archived !== before.archived || next.closedAt !== before.closedAt;
       }
 
-      const archived = (this.archived || []).some((c) => c.id === chat.id);
+      const archived = this.isArchived(chat.id);
       const snapshot = archived ? archivedSlimOf(chat) : slimOf(chat);
 
       return !historyPersistenceFor(this).isSent(snapshot, fingerprintOf(snapshot));
