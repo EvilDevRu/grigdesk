@@ -1,105 +1,155 @@
 <template>
-  <section class="ac ui-workspace" data-ui-workspace data-role="arbiter-conversation" :aria-label="t('core.arbiterDialogTitle')">
-    <div class="ac-layout">
+  <section class="ac ui-workspace" data-ui-workspace data-role="arbiter-conversation"
+           :aria-label="t('core.arbiterDialogTitle')">
+    <div class="ac-layout" :class="{ 'ac-layout--single': !showDecisions }">
       <div class="ac-thread">
         <header class="ac-heading">
-          <span class="ac-eyebrow">{{ t('core.stageAnalysisConversation') }}</span>
-          <h3>{{ t('core.arbiterDialogTitle') }}</h3>
-          <p class="ac-status" role="status" aria-live="polite">{{ status }}</p>
+          <span class="ac-avatar" data-author="arbiter" aria-hidden="true">⚖</span>
+          <div class="ac-heading-copy">
+            <h3>{{ t('core.arbiterSourceArbiter') }}</h3>
+            <p class="ac-status" role="status" aria-live="polite">
+              <UiSpinner v-if="analyzing" decorative />
+              {{ status }}
+            </p>
+          </div>
+          <span v-if="analyzing && arbitrating?.model" class="ac-model mono">{{ arbitrating.model }}</span>
         </header>
+        <p v-if="doc?.automatic" class="ac-automatic">{{ t('core.arbiterAutomaticNotice') }}</p>
         <p v-if="error" class="ac-error" role="alert">{{ error }}</p>
-    <div v-if="historyChoices.length" class="ac-history">
-      <label :for="`${inputId}-history`">{{ t('core.arbiterHistory') }}</label>
-      <UiSelect :id="`${inputId}-history`" :model-value="selectedHistory" @update:model-value="selectHistory">
-        <option value="">{{ t('core.arbiterCurrentStop') }}</option>
-        <option v-for="(item, index) in historyChoices" :key="item.conversationId"
-                :value="item.conversationId">{{ t('core.arbiterEarlierAnalysis', { number: index + 1 }) }}</option>
-      </UiSelect>
-    </div>
+        <div v-if="historyChoices.length" class="ac-history">
+          <label :for="`${inputId}-history`">{{ t('core.arbiterHistory') }}</label>
+          <UiSelect :id="`${inputId}-history`" :model-value="selectedHistory"
+                    @update:model-value="selectHistory">
+            <option value="">{{ t('core.arbiterCurrentStop') }}</option>
+            <option v-for="(item, index) in historyChoices" :key="item.conversationId"
+                    :value="item.conversationId">
+              {{ t('core.arbiterEarlierAnalysis', { number: index + 1 }) }}
+            </option>
+          </UiSelect>
+        </div>
 
-    <ol v-if="doc" class="ac-messages" aria-live="off">
-      <li v-for="message in doc.messages" :key="message.id" :data-author="message.author">
-        <span class="ac-author">{{ message.author === 'node' && message.sourceKind === 'command'
-          ? t('core.arbiterSourceCommand') : authorLabels[message.author] }}</span>
-        <p>{{ message.author === 'arbiter' ? arbiterMessageText(message.text) : message.text }}</p>
-      </li>
-    </ol>
-    <p v-if="doc?.result?.summary && !doc.messages.some((row) => row.text === doc?.result?.summary)"
-       class="ac-summary">{{ doc.result.summary }}</p>
+        <section v-if="sourceMessages.length" class="ac-source" :aria-label="t('core.arbiterStopContext')">
+          <UiDisclosureButton v-model:open="sourceOpen" :controls="`${inputId}-source`" block
+                              data-role="arbiter-source-disclosure">
+            {{ t('core.arbiterStopContext') }}
+          </UiDisclosureButton>
+          <div :id="`${inputId}-source`" class="ac-source-content">
+            <div v-for="message in sourceMessages" :key="message.id" data-author="node">
+              <span class="ac-author">{{ message.sourceKind === 'command'
+                ? t('core.arbiterSourceCommand') : t('core.arbiterSourceNode') }}</span>
+              <p :class="{ 'ac-source-preview': !sourceOpen }">{{ message.text }}</p>
+            </div>
+          </div>
+        </section>
 
-    <section v-if="legacyCard?.card" class="ac-legacy">
-      <h4>{{ t('core.arbiterHistorical') }}</h4>
-      <p v-for="(text, key) in legacyCard.card" :key="key">{{ text }}</p>
-    </section>
+        <ol v-if="messages.length || analyzing" class="ac-messages"
+            :aria-label="t('core.stageAnalysisConversation')">
+          <li v-for="message in messages" :key="message.id" :data-author="message.author">
+            <span class="ac-avatar" :data-author="message.author" aria-hidden="true">{{
+              message.author === 'arbiter' ? '⚖' : message.author === 'human' ? '↳' : '·'
+            }}</span>
+            <div class="ac-message-body">
+              <div class="ac-message-meta">
+                <span class="ac-author">{{ authorLabels[message.author] }}</span>
+                <span v-if="message.status === 'partial'" class="ac-message-state">
+                  {{ t('core.arbiterWriting') }}
+                </span>
+                <time v-if="message.createdAt" :datetime="message.createdAt">
+                  {{ messageTime(message.createdAt) }}
+                </time>
+              </div>
+              <p>{{ message.author === 'arbiter' ? arbiterMessageText(message.text) : message.text }}</p>
+            </div>
+          </li>
+          <li v-if="preparingReply" class="ac-thinking" data-role="arbiter-thinking">
+            <span class="ac-avatar" data-author="arbiter" aria-hidden="true">⚖</span>
+            <div class="ac-message-body">
+              <span class="ac-author">{{ t('core.arbiterSourceArbiter') }}</span>
+              <p><UiSpinner decorative /> {{ t('core.arbiterPreparingReply') }}</p>
+            </div>
+          </li>
+        </ol>
+        <section v-if="legacyCard?.card" class="ac-legacy">
+          <h4>{{ t('core.arbiterHistorical') }}</h4>
+          <p v-for="(text, key) in legacyCard.card" :key="key">{{ text }}</p>
+        </section>
 
-
-        <div v-if="!doc?.messages.length && !doc?.result?.summary && !legacyCard?.card" class="ac-empty">
+        <div v-if="!messages.length && !analyzing && !legacyCard?.card" class="ac-empty">
           <span class="ac-empty-icon" aria-hidden="true">↳</span>
           <h4>{{ t('core.stageAnalysisEmptyTitle') }}</h4>
           <p>{{ t('core.stageAnalysisEmptyHint') }}</p>
         </div>
         <template v-if="identity && !readOnly">
-      <section v-for="question in doc?.result?.questions || []" :key="question.id" class="ac-question">
-        <h4>{{ question.text }}</h4>
-        <div class="ac-actions">
-          <UiButton wrap data-context="workspace-form-wrap" v-for="option in question.options" :key="option.id" :disabled="!canDiscuss"
-                    @click="send('discuss', { questionId: question.id, optionId: option.id })">
-            {{ option.label }}
-          </UiButton>
-        </div>
-        <label :for="`${inputId}-${question.id}`">{{ t('core.arbiterCustomAnswer') }}</label>
-        <UiTextarea :id="`${inputId}-${question.id}`" v-model="draft.answers[question.id]" rows="2"
-                    :maxlength="ARBITER_LIMITS.humanText" />
-        <UiButton wrap data-context="workspace-form-wrap" :disabled="!canDiscuss || !draft.answers[question.id]?.trim()"
-                  @click="answerQuestion(question.id)">{{ t('core.arbiterSend') }}</UiButton>
-      </section>
+          <section v-for="question in doc?.result?.questions || []" :key="question.id" class="ac-question">
+            <h4>{{ question.text }}</h4>
+            <div class="ac-actions">
+              <UiButton v-for="option in question.options" :key="option.id" wrap
+                        data-context="workspace-form-wrap" :disabled="!canDiscuss"
+                        @click="send('discuss', { questionId: question.id, optionId: option.id })">
+                {{ option.label }}
+              </UiButton>
+            </div>
+            <label :for="`${inputId}-${question.id}`">{{ t('core.arbiterCustomAnswer') }}</label>
+            <UiTextarea :id="`${inputId}-${question.id}`" v-model="draft.answers[question.id]" rows="2"
+                        data-context="workspace-note" :maxlength="ARBITER_LIMITS.humanText" />
+            <UiButton wrap data-context="workspace-form-wrap"
+                      :disabled="!canDiscuss || !draft.answers[question.id]?.trim()"
+                      @click="answerQuestion(question.id)">
+              {{ t('core.arbiterSend') }}
+            </UiButton>
+          </section>
 
-      <div v-if="doc && draft" class="ac-composer">
-        <label :for="inputId">{{ t('core.arbiterDiscuss') }}</label>
-        <UiTextarea :id="inputId" ref="composer" v-model="draft.text" rows="3"
-                    data-role="arbiter-discuss-input" :placeholder="t('core.stageInstructionPlaceholder')" :maxlength="ARBITER_LIMITS.humanText"
-                    @keydown.ctrl.enter.prevent="discuss" />
-        <div class="ac-actions">
-          <UiButton wrap data-context="workspace-form-wrap" :disabled="!canDiscuss || !draft.text.trim()" data-role="arbiter-discuss" variant="solid" tone="accent" @click="discuss">
-            {{ t('core.arbiterSend') }}
-          </UiButton>
-          <UiButton wrap data-context="workspace-form-wrap" v-if="capabilities?.status === 'supported'" :disabled="busy || pending"
-                    variant="text" @click="draft.custom = !draft.custom">
-            {{ t('core.arbiterCustomInstruction') }}
-          </UiButton>
-        </div>
-        <div v-if="draft.custom && capabilities?.status === 'supported'" class="ac-custom">
-          <label :for="`${inputId}-target`">{{ t('core.arbiterTarget') }}</label>
-          <UiSelect :id="`${inputId}-target`" v-model="draft.targetNode">
-            <option value="">{{ t('core.arbiterTarget') }}</option>
-            <option v-for="target in instructionTargets" :key="target.node" :value="target.node">
-              {{ target.label }}
-            </option>
-          </UiSelect>
-          <label :for="`${inputId}-instruction`">{{ t('core.arbiterInstruction') }}</label>
-          <UiTextarea :id="`${inputId}-instruction`" v-model="draft.instruction" rows="4"
-                      data-role="arbiter-custom-input" :maxlength="ARBITER_LIMITS.instruction" />
-          <p v-if="customAction" class="ac-consequences">{{ consequences(customAction) }}</p>
-          <UiButton wrap data-context="workspace-form-wrap" :disabled="!canApply || !customAction" data-role="arbiter-custom-apply"
-                    @click="applyCustom">{{ t('core.arbiterApply') }}</UiButton>
-        </div>
-      </div>
-
+          <div v-if="doc && draft" class="ac-composer">
+            <label :for="inputId">{{ t('core.arbiterDiscuss') }}</label>
+            <UiTextarea :id="inputId" ref="composer" v-model="draft.text" rows="2"
+                        data-context="workspace-note" data-role="arbiter-discuss-input"
+                        :placeholder="t('core.stageInstructionPlaceholder')"
+                        :maxlength="ARBITER_LIMITS.humanText" @keydown.ctrl.enter.prevent="discuss" />
+            <div class="ac-actions">
+              <UiButton wrap data-context="workspace-form-wrap" data-role="arbiter-discuss"
+                        :disabled="!canDiscuss || !draft.text.trim()" variant="solid" tone="accent"
+                        @click="discuss">
+                {{ t('core.arbiterSend') }}
+              </UiButton>
+              <UiButton v-if="capabilities?.status === 'supported'" wrap data-context="workspace-form-wrap"
+                        :disabled="busy || pending" variant="text" @click="draft.custom = !draft.custom">
+                {{ t('core.arbiterCustomInstruction') }}
+              </UiButton>
+            </div>
+            <div v-if="draft.custom && capabilities?.status === 'supported'" class="ac-custom">
+              <label :for="`${inputId}-target`">{{ t('core.arbiterTarget') }}</label>
+              <UiSelect :id="`${inputId}-target`" v-model="draft.targetNode">
+                <option value="">{{ t('core.arbiterTarget') }}</option>
+                <option v-for="target in instructionTargets" :key="target.node" :value="target.node">
+                  {{ target.label }}
+                </option>
+              </UiSelect>
+              <label :for="`${inputId}-instruction`">{{ t('core.arbiterInstruction') }}</label>
+              <UiTextarea :id="`${inputId}-instruction`" v-model="draft.instruction" rows="4"
+                          data-role="arbiter-custom-input" :maxlength="ARBITER_LIMITS.instruction" />
+              <p v-if="customAction" class="ac-consequences">{{ consequences(customAction) }}</p>
+              <UiButton wrap data-context="workspace-form-wrap" :disabled="!canApply || !customAction"
+                        data-role="arbiter-custom-apply" @click="applyCustom">
+                {{ t('core.arbiterApply') }}
+              </UiButton>
+            </div>
+          </div>
         </template>
-        <div v-if="doc" class="ac-technical-section">
-    <UiDisclosureButton v-if="doc" v-model:open="technicalOpen"
-                        :controls="`${inputId}-technical`">{{ t('core.arbiterTechnical') }}</UiDisclosureButton>
-    <div v-if="technicalOpen && doc" :id="`${inputId}-technical`">
-      <pre class="ac-technical">{{ doc.result?.technicalDetails }}</pre>
-      <a :href="journalUrl" target="_blank" rel="noopener noreferrer" download>
-        {{ t('core.arbiterFullJournal') }}
-      </a>
-      <p>{{ t('core.arbiterJournalScope') }}</p>
-    </div>
 
+        <div v-if="doc" class="ac-technical-section">
+          <UiDisclosureButton v-model:open="technicalOpen" :controls="`${inputId}-technical`">
+            {{ t('core.arbiterTechnical') }}
+          </UiDisclosureButton>
+          <div v-if="technicalOpen" :id="`${inputId}-technical`">
+            <pre class="ac-technical">{{ doc.result?.technicalDetails }}</pre>
+            <a :href="journalUrl" target="_blank" rel="noopener noreferrer" download>
+              {{ t('core.arbiterFullJournal') }}
+            </a>
+            <p>{{ t('core.arbiterJournalScope') }}</p>
+          </div>
         </div>
       </div>
-      <aside class="ac-decisions">
+      <aside v-if="showDecisions" class="ac-decisions">
         <div class="ac-decision-heading">
           <span class="ac-decision-icon" aria-hidden="true">↗</span>
           <h4>{{ t('core.stageAnalysisDecision') }}</h4>
@@ -115,54 +165,63 @@
         </p>
         <div v-if="identity && !readOnly && (!doc || doc.state === 'idle' || doc.state === 'interrupted')"
              class="ac-start">
-          <UiButton wrap data-context="workspace-form-wrap" :disabled="busy || pending" data-role="arbiter-start"
+          <UiButton wrap data-context="workspace-form-wrap" :disabled="busy || pending"
+                    data-role="arbiter-start"
                     variant="solid" tone="accent" @click="send('start')">
             {{ doc && doc.state !== 'idle' ? t('core.arbiterRetryAnalysis') : t('core.arbiterStart') }}
           </UiButton>
         </div>
-        <p v-if="doc?.automatic" class="ac-notice">{{ t('core.arbiterAutomaticNotice') }}</p>
-    <div v-if="store.pending[task]" class="ac-pending">
-      <p>{{ t('core.arbiterPending') }}</p>
-      <UiButton wrap data-context="workspace-form-wrap" :disabled="busy" @click="reload">{{ t('core.arbiterCheckState') }}</UiButton>
-      <UiButton wrap data-context="workspace-form-wrap" :disabled="busy" @click="retryRequest">{{ t('core.arbiterRetryRequest') }}</UiButton>
-    </div>
-
+        <div v-if="store.pending[task]" class="ac-pending">
+          <p>{{ t('core.arbiterPending') }}</p>
+          <UiButton wrap data-context="workspace-form-wrap" :disabled="busy" @click="reload">
+            {{ t('core.arbiterCheckState') }}
+          </UiButton>
+          <UiButton wrap data-context="workspace-form-wrap" :disabled="busy" @click="retryRequest">
+            {{ t('core.arbiterRetryRequest') }}
+          </UiButton>
+        </div>
 
         <template v-if="identity && !readOnly">
           <div v-if="capabilities?.message || capabilities?.status !== 'supported'" class="ac-compatibility">
             <p v-if="capabilities?.message" class="ac-notice">{{ capabilities.message }}</p>
-            <UiButton wrap data-context="workspace-form-wrap" v-if="capabilities?.status !== 'supported'" :disabled="busy" variant="text" @click="reload">
+            <UiButton v-if="capabilities?.status !== 'supported'" wrap data-context="workspace-form-wrap"
+                      :disabled="busy" variant="text" @click="reload">
               {{ t('core.arbiterCheckSupport') }}
             </UiButton>
           </div>
-      <section v-for="proposal in doc?.result?.proposals || []" :key="proposal.id" class="ac-proposal">
-        <h4>{{ proposal.label }} <span v-if="proposal.recommended">· {{ t('core.arbiterRecommended') }}</span></h4>
-        <p>{{ proposal.explanation }}</p>
-        <p v-if="proposal.expectedResult !== proposal.explanation">{{ proposal.expectedResult }}</p>
-        <p v-if="proposal.kind === 'apply'" class="ac-consequences">{{ consequences(proposal.action) }}</p>
-        <div class="ac-actions">
-          <UiButton wrap data-context="workspace-form-wrap" :disabled="proposal.kind === 'apply' ? !canApply : !canDiscuss"
-                    :data-role="`arbiter-${proposal.kind}`"
-                    @click="send(proposal.kind, { proposalId: proposal.id })">
-            {{ proposal.kind === 'apply' ? `${t('core.arbiterApply')} · ${targetLabel(proposal.action)}`
-              : proposal.label }}
-          </UiButton>
-          <UiButton wrap data-context="workspace-form-wrap" v-if="proposal.kind === 'apply' && proposal.action.kind !== 'retry_command'"
-                    :disabled="busy || !canApply" variant="text" @click="edit(proposal)">
-            {{ t('core.arbiterEditProposal') }}
-          </UiButton>
-        </div>
-      </section>
-
-
+          <section v-for="proposal in doc?.result?.proposals || []" :key="proposal.id" class="ac-proposal">
+            <h4>
+              {{ proposal.label }}
+              <span v-if="proposal.recommended">· {{ t('core.arbiterRecommended') }}</span>
+            </h4>
+            <p>{{ proposal.explanation }}</p>
+            <p v-if="proposal.expectedResult !== proposal.explanation">{{ proposal.expectedResult }}</p>
+            <p v-if="proposal.kind === 'apply'" class="ac-consequences">
+              {{ consequences(proposal.action) }}
+            </p>
+            <div class="ac-actions">
+              <UiButton wrap data-context="workspace-form-wrap"
+                        :disabled="proposal.kind === 'apply' ? !canApply : !canDiscuss"
+                        :data-role="`arbiter-${proposal.kind}`"
+                        @click="send(proposal.kind, { proposalId: proposal.id })">
+                {{ proposal.kind === 'apply'
+                  ? `${t('core.arbiterApply')} · ${targetLabel(proposal.action)}` : proposal.label }}
+              </UiButton>
+              <UiButton v-if="proposal.kind === 'apply' && proposal.action.kind !== 'retry_command'" wrap
+                        data-context="workspace-form-wrap" :disabled="busy || !canApply" variant="text"
+                        @click="edit(proposal)">
+                {{ t('core.arbiterEditProposal') }}
+              </UiButton>
+            </div>
+          </section>
         </template>
-    <UiButton wrap data-context="workspace-form-wrap" v-if="resumable" :disabled="busy || pending" data-role="arbiter-resume" @click="resume">
-      {{ t('core.arbiterResumeOnly') }}
-    </UiButton>
-    <UiButton wrap data-context="workspace-form-wrap" v-if="readOnly" variant="text" @click="openCurrent">
-      {{ t('core.arbiterNewStop') }}
-    </UiButton>
-
+        <UiButton v-if="resumable" wrap data-context="workspace-form-wrap" :disabled="busy || pending"
+                  data-role="arbiter-resume" @click="resume">
+          {{ t('core.arbiterResumeOnly') }}
+        </UiButton>
+        <UiButton v-if="readOnly" wrap data-context="workspace-form-wrap" variant="text" @click="openCurrent">
+          {{ t('core.arbiterNewStop') }}
+        </UiButton>
       </aside>
     </div>
   </section>
@@ -171,16 +230,19 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from 'vue';
 
-import { UiButton, UiDisclosureButton, UiSelect, UiTextarea, t } from '../../ui.ts';
+import { UiButton, UiDisclosureButton, UiSelect, UiSpinner, UiTextarea, t, uiLocale } from '../../ui.ts';
 import {
   ARBITER_LIMITS, arbiterMessageText, sameStop,
 } from '../../../../shared/pipeline/arbiterConversation.ts';
 import type {
   ArbiterAction,
+  ArbiterMessage,
   ArbiterProposal,
   ArbiterConversationSummary,
 } from '../../../../shared/pipeline/arbiterConversation.ts';
 import { useArbiterConversationsStore } from '../../stores/arbiterConversations.ts';
+import { formatDate } from '../../../../shared/i18n/formats.ts';
+import type { ArbiterRun } from '../../../../shared/pipeline/factoryGraphContracts.ts';
 import type { ArbiterCard } from '../../shared/pipelineContracts.ts';
 
 const props = defineProps<{
@@ -188,16 +250,21 @@ const props = defineProps<{
   node: string;
   conversationId?: string;
   history?: ArbiterConversationSummary[];
-  legacyCard?: ArbiterCard | null
+  legacyCard?: ArbiterCard | null;
+  arbitrating?: ArbiterRun | null;
 }>();
+
 const emit = defineEmits<{ 'current-stop': [] }>();
 const store = useArbiterConversationsStore();
 const inputId = `arbiter-${useId()}`;
+
 const technicalOpen = ref(false);
+const sourceOpen = ref(false);
 const localError = ref('');
 const composer = ref<InstanceType<typeof UiTextarea> | null>(null);
 const failurePanel = ref<HTMLElement | null>(null);
 const openedId = ref(props.conversationId || '');
+
 const current = computed(() => store.currentByTask[props.task]);
 const historyChoices = computed(() => (props.history || [])
   .filter((row) => row.identity.node === props.node
@@ -219,6 +286,31 @@ const readOnly = computed(() => Boolean(doc.value?.readOnly || doc.value?.state 
 const pending = computed(() => Boolean(store.pending[props.task]));
 const busy = computed(() => Boolean(store.sending[props.task]
   || doc.value?.state === 'analyzing' || doc.value?.state === 'applying'));
+const analyzing = computed(() => !readOnly.value && (doc.value
+  ? doc.value.state === 'analyzing' : Boolean(props.arbitrating)));
+const showDecisions = computed(() => !analyzing.value || pending.value);
+const sourceMessages = computed(() => doc.value?.messages
+  .filter((message) => message.author === 'node') || []);
+const messages = computed(() => {
+  const rows: Pick<ArbiterMessage, 'id' | 'author' | 'text' | 'createdAt' | 'status'>[] =
+    doc.value?.messages.filter((message) => message.author !== 'node') || [];
+  const summary = doc.value?.result?.summary;
+
+  if (summary && !rows.some((message) => message.author === 'arbiter'
+    && arbiterMessageText(message.text) === summary.trim())) {
+    return [...rows, {
+      id: 'result-summary',
+      author: 'arbiter' as const,
+      text: summary,
+      createdAt: '',
+      status: 'complete' as const,
+    }];
+  }
+
+  return rows;
+});
+const preparingReply = computed(() => analyzing.value && !messages.value
+  .some((message) => message.author === 'arbiter' && message.status === 'partial'));
 const canDiscuss = computed(() => Boolean(doc.value && !readOnly.value && !busy.value && !pending.value));
 const canApply = computed(() => canDiscuss.value && capabilities.value?.status === 'supported');
 const instructionTargets = computed(() => capabilities.value?.targets
@@ -275,9 +367,13 @@ const status = computed(() => {
     return t('core.arbiterStale');
   }
 
+  if (analyzing.value) {
+    return t('core.arbiterConnected');
+  }
+
   const labels = {
     idle: t('core.stageAnalysisReady'),
-    analyzing: t('core.arbiterAnalyzing'),
+    analyzing: t('core.arbiterConnected'),
     awaiting_user: t('core.arbiterAwaiting'),
     applying: t('core.arbiterApplying'),
     resolved: t('core.arbiterResolved'),
@@ -287,6 +383,16 @@ const status = computed(() => {
 
   return doc.value ? labels[doc.value.state] : identity.value ? labels.idle : t('core.arbiterNoStop');
 });
+
+/**
+ * Время реплики показывается в локали и часовом поясе устройства.
+ * Старые сообщения без корректной даты остаются читаемыми без выдуманного времени.
+ */
+function messageTime(value: string) {
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime()) ? '' : formatDate(date, uiLocale, { timeStyle: 'short' });
+}
 
 const targetLabel = (action: ArbiterAction) => capabilities.value?.targets
   .find((row) => row.node === action.targetNode)
@@ -410,6 +516,7 @@ async function reload() {
 async function selectHistory(value: string | number | null) {
   openedId.value = value === null ? '' : String(value);
   localError.value = '';
+  sourceOpen.value = false;
 
   try {
     await store.open(props.task, openedId.value || undefined);
@@ -441,6 +548,7 @@ async function retryRequest() {
 
 watch(() => [props.task, props.node, props.conversationId], async () => {
   openedId.value = props.conversationId || '';
+  sourceOpen.value = false;
   await reload();
   openedId.value ||= doc.value?.id || '';
   await nextTick();
@@ -476,24 +584,32 @@ watch(analysisFailure, async (message) => {
   grid-template-columns: minmax(0, 1fr) 340px;
   min-height: inherit;
 }
+.ac-layout--single {
+  grid-template-columns: minmax(0, 1fr);
+}
 .ac-thread {
   min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 16px;
+  gap: 14px;
   padding: 18px;
 }
 .ac-heading {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
 }
-.ac-eyebrow {
+.ac-heading-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ac-model {
+  margin-left: auto;
   color: var(--ink-mid);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: .1em;
+  font-size: 11px;
 }
 .ac h3, .ac h4, .ac p {
   margin: 0;
@@ -505,11 +621,64 @@ watch(analysisFailure, async (message) => {
 }
 .ac p {
   white-space: pre-wrap;
-  line-height: 1.65;
+  line-height: 1.55;
 }
-.ac-status, .ac-author {
+.ac-status, .ac-author, .ac-automatic {
   color: var(--ink-mid);
   font-size: 11px;
+}
+.ac-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ac-automatic {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.ac-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink-mid);
+  font-size: 16px;
+}
+.ac-avatar[data-author="arbiter"] {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent);
+}
+.ac-avatar[data-author="human"] {
+  background: color-mix(in srgb, var(--ink-mid) 12%, var(--surface));
+  color: var(--ink);
+}
+.ac-source {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--ground) 25%, var(--surface));
+}
+.ac-source-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 12px 12px;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.ac-source-content .ac-author {
+  display: block;
+  margin-bottom: 4px;
+}
+.ac-source p.ac-source-preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
 }
 .ac-error {
   padding: 12px;
@@ -611,7 +780,7 @@ watch(analysisFailure, async (message) => {
 .ac-messages {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
   list-style: none;
   padding: 0;
   margin: 0;
@@ -620,24 +789,54 @@ watch(analysisFailure, async (message) => {
   display: none;
 }
 .ac-messages li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
   font-size: 13px;
 }
 .ac-messages li[data-author="human"] {
-  margin-left: 28px;
-  border-color: color-mix(in srgb, var(--accent) 20%, var(--line));
-  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  align-self: flex-end;
+  flex-direction: row-reverse;
+  max-width: 88%;
+}
+.ac-message-body {
+  min-width: 0;
+  flex: 1;
+}
+.ac-message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 2px 0 6px;
+}
+.ac-message-meta time, .ac-message-state {
+  color: var(--ink-mid);
+  font-size: 10px;
+}
+.ac-messages li[data-author="arbiter"] .ac-author {
+  color: var(--accent);
+}
+.ac-messages li[data-author="human"] .ac-message-body {
+  padding: 8px 12px;
+  border-radius: 10px 2px 10px 10px;
+  background: var(--surface-2);
+}
+.ac-messages li[data-author="system"] {
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+.ac-thinking p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  color: var(--ink-mid);
+  font-size: 12px;
 }
 .ac-author {
-  display: block;
-  margin-bottom: 7px;
   font-weight: 600;
-}
-.ac-summary {
-  font-size: 13px;
 }
 .ac-composer, .ac-custom, .ac-question, .ac-proposal, .ac-pending, .ac-legacy, .ac-history {
   display: flex;
@@ -646,9 +845,10 @@ watch(analysisFailure, async (message) => {
   min-width: 0;
 }
 .ac-composer {
-  margin-top: auto;
-  padding-top: 14px;
+  padding: 12px 0;
   border-top: 1px solid var(--line);
+  background: var(--surface);
+  gap: 8px;
 }
 .ac-composer label, .ac-question label, .ac-history label {
   color: var(--ink-mid);
@@ -697,6 +897,9 @@ watch(analysisFailure, async (message) => {
   .ac-layout {
     grid-template-columns: minmax(0, 1fr) 300px;
   }
+  .ac-layout--single {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .ac-thread {
     padding: 16px;
   }
@@ -722,8 +925,15 @@ watch(analysisFailure, async (message) => {
   .ac-empty {
     padding: 10px 0 0;
   }
-  .ac-composer {
-    margin-top: 0;
+  .ac-heading {
+    flex-wrap: wrap;
+  }
+  .ac-model {
+    width: 100%;
+    padding-left: 38px;
+  }
+  .ac-messages li[data-author="human"] {
+    max-width: 94%;
   }
 }
 </style>

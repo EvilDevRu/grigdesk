@@ -11,6 +11,12 @@ test('остановка → поток → F5 → обсуждение → ди
     await page.goto(fx.url);
     await page.locator('[data-role="arbiter-start"]').click();
     await page.getByText('Читаю сведения о текущей остановке.', { exact: true }).waitFor();
+    assert.equal(await page.locator('.ac-decisions').count(), 0);
+    await page.screenshot({ path: path.join(fx.artifacts, 'connected-desktop.png'), fullPage: true });
+    await page.setViewportSize({ width: 380, height: 820 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({ path: path.join(fx.artifacts, 'connected-mobile.png'), fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 900 });
     assert.equal(fx.gotoCalls(), 0);
     fx.releaseFirst();
     await page.getByRole('heading', { name: 'Известно, где остановилась проверка?' }).waitFor();
@@ -79,7 +85,7 @@ test('остановка → поток → F5 → обсуждение → ди
       .getByText('Истёк лимит времени разбора.', { exact: true }).waitFor();
     assert.equal(fx.gotoCalls(), 1);
     await page.goto(`${fx.url}/?lang=en`);
-    await page.getByRole('heading', { name: 'Stop analysis', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Arbiter', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Retry analysis', exact: true }).waitFor();
     await other.close();
     assert.deepEqual(fx.errors, []);

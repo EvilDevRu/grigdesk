@@ -502,11 +502,10 @@
           </UiIconButton>
         </header>
 
-        <!-- Разбор ИДЁТ. Стоит первой строкой тела: узел открывают с вопросом «что от
-             меня хотят», и пока арбитр читает код, честный ответ — «сейчас ничего».
-             Ниже по модалке остаются и вердикт узла, и кнопки: решение арбитра можно
-             не дожидаться, но делать это следует осознанно. -->
-        <div v-if="stageArbitrating" class="sarbrun sarbnode">
+        <!-- В обсуждении статус принадлежит шапке арбитра и не дублируется над вкладками.
+             В журнале и настройках плашка сохраняет сведения об идущем разборе. -->
+        <div v-if="stageArbitrating && (!stageUsesConversation || stageTab !== 'result')"
+             class="sarbrun sarbnode">
           <span class="sarbspin" aria-hidden="true"></span>
           <span class="sarbtxt">Арбитр разбирает эту остановку — ожидается результат</span>
           <span class="sarbmeta mono">{{ arbiterRunLabel(stageArbitrating) }}</span>
@@ -563,6 +562,7 @@
              class="sconversation" role="tabpanel" aria-labelledby="stage-result-tab">
           <ArbiterConversation :task="String(stage!.task)" :node="stage!.id"
                                :conversation-id="stageConversationId" :legacy-card="stageArbiterCard"
+                               :arbitrating="stageArbitrating"
                                :history="stageGraph?.arbiterConversations"
                                @current-stop="openStallStage(stageTask!)" />
         </div>
@@ -1048,8 +1048,9 @@
         <!-- Универсальные действия закреплены внизу и не уезжают за длинным документом. -->
         <footer class="sactions">
           <span class="sactions-context">
-            <span class="stage-footer-dot" :class="stage!.status" aria-hidden="true"></span>
-            {{ stageStatusHint(stage!) }}
+            <span class="stage-footer-dot" :class="stageArbitrating ? 'arb' : stage!.status"
+                  aria-hidden="true"></span>
+            {{ stageArbitrating ? translate('core.arbiterAnalyzing') : stageStatusHint(stage!) }}
           </span>
           <div class="sactions-buttons">
             <!-- Задачу открываем поверх этапа: она нужна как справка, а не вместо узла.
@@ -4271,7 +4272,7 @@ function cardState(g: PipelineViewGraph) {
 .stage-footer-dot.done {
   background: var(--good);
 }
-.stage-footer-dot.run {
+.stage-footer-dot.run, .stage-footer-dot.arb {
   background: var(--accent);
 }
 .stage-footer-dot.stall {

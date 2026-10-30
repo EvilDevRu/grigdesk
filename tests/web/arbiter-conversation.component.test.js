@@ -196,6 +196,62 @@ test('свой текст требует этап и последствия; SSE
   assert.equal(wrapper.get('[data-role="arbiter-discuss"]').attributes('disabled') !== undefined, true);
 });
 
+test('источник отделён от реплик, а автор итога и сообщения человека обозначены явно', async (t) => {
+  const { wrapper, doc, flushPromises } = await fixture(t);
+
+  doc.messages.push({
+    id: 'human-reply',
+    author: 'human',
+    text: 'Проверь последний запуск.',
+    createdAt: '2026-01-20T12:30:00Z',
+  });
+  await flushPromises();
+
+  assert.equal(wrapper.find('.ac-messages [data-author="node"]').exists(), false);
+  assert.match(wrapper.get('.ac-source').text(), /Исполнитель этапа/);
+  assert.equal(wrapper.get('[data-role="arbiter-source-disclosure"]').attributes('aria-expanded'), 'false');
+  assert.equal(wrapper.get('.ac-messages [data-author="human"] .ac-author').text(), 'Вы');
+  assert.equal(wrapper.findAll('.ac-messages [data-author="arbiter"] .ac-author')
+    .every((label) => label.text() === 'Арбитр'), true);
+  assert.equal(wrapper.get('.ac-messages [data-author="human"] time').attributes('datetime'),
+    '2026-01-20T12:30:00Z');
+
+  await wrapper.get('[data-role="arbiter-source-disclosure"]').trigger('click');
+  doc.revision += 1;
+  await flushPromises();
+
+  assert.equal(wrapper.get('[data-role="arbiter-source-disclosure"]').attributes('aria-expanded'), 'true');
+  assert.equal(wrapper.get('.ac-source p').classes().includes('ac-source-preview'), false);
+});
+
+test('ожидание ответа занимает ширину обсуждения, а варианты появляются после разбора', async (t) => {
+  const { wrapper, doc, draft, flushPromises } = await fixture(t);
+
+  draft.text = 'Уточнение к разбору';
+  doc.state = 'analyzing';
+  doc.result = null;
+  await flushPromises();
+
+  assert.match(wrapper.get('.ac-status').text(), /На связи/);
+  assert.equal(wrapper.find('[data-role="arbiter-thinking"]').exists(), true);
+  assert.equal(wrapper.find('.ac-decisions').exists(), false);
+  assert.equal(wrapper.get('[data-role="arbiter-discuss"]').attributes('disabled') !== undefined, true);
+
+  doc.messages[1].status = 'partial';
+  await flushPromises();
+
+  assert.equal(wrapper.find('[data-role="arbiter-thinking"]').exists(), false);
+  assert.match(wrapper.get('[data-author="arbiter"] .ac-message-state').text(), /пишет/);
+
+  doc.messages[1].status = 'complete';
+  doc.state = 'awaiting_user';
+  await flushPromises();
+
+  assert.equal(wrapper.find('.ac-decisions').exists(), true);
+  assert.equal(wrapper.find('[data-role="arbiter-thinking"]').exists(), false);
+  assert.equal(wrapper.get('[data-role="arbiter-discuss"]').attributes('disabled'), undefined);
+});
+
 test('unsupported сохраняет обсуждение, но не разрешает применение и старую форму возврата', async (t) => {
   const { wrapper } = await fixture(t, { unsupported: true });
 

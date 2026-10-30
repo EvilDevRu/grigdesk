@@ -125,22 +125,27 @@ async function mountPipeline(t, { factoryTask, graph }) {
   return { wrapper, openNode };
 }
 
-test('идущий разбор виден в модалке узла и в её бейдже статуса', async (t) => {
+test('идущий разбор передаётся в обсуждение без повторной плашки над вкладками', async (t) => {
   const { wrapper, openNode } = await mountPipeline(t, makeFixture({
     arbitrating: { actor: 'auto', model: 'claude/claude-opus-5', elapsedSec: 200 },
   }));
   await openNode();
 
-  const plate = wrapper.find('.sarbrun.sarbnode');
+  const conversation = wrapper.getComponent({ name: 'ArbiterConversation' });
 
-  assert.equal(plate.exists(), true, 'плашка разбора показана');
-  assert.match(plate.text(), /ожидается результат/);
-  assert.match(plate.text(), /сам · 3 мин/, 'видно, что задача едет сама и сколько уже');
+  assert.equal(wrapper.find('.sarbrun.sarbnode').exists(), false);
+  assert.equal(conversation.props('arbitrating').model, 'claude/claude-opus-5');
+  assert.match(conversation.get('.ac-status').text(), /На связи/);
+  assert.equal(conversation.find('.ac-decisions').exists(), false);
+  assert.match(wrapper.get('.sactions-context').text(), /Арбитр изучает остановку/);
 
   const badge = wrapper.find('.sbadge');
 
   assert.equal(badge.classes().includes('arb'), true, 'бейдж говорит тем же цветом, что узел');
   assert.equal(badge.text(), 'арбитр разбирает');
+
+  await wrapper.get('#stage-activity-tab').trigger('click');
+  assert.match(wrapper.get('.sarbrun.sarbnode').text(), /сам · 3 мин/);
 });
 
 test('без разбора модалка остаётся прежней', async (t) => {
