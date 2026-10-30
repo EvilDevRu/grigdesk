@@ -801,7 +801,7 @@
           <main v-if="stageHasMain || stageTab !== 'result' || !stageHasRail" class="smain">
             <div v-show="stageTab === 'result'" id="stage-result-panel" class="stage-tab-panel"
                  role="tabpanel" aria-labelledby="stage-result-tab">
-              <div class="stage-section-heading">
+              <div v-if="!stageDoc" class="stage-section-heading">
                 <h4>{{ stage!.status === 'done' ? translate('core.stageCompleted') : stage!.label }}</h4>
               </div>
               <!-- Телеметрия захода: время, длительность, расход. Живёт рядом с исполнителем,
@@ -837,22 +837,12 @@
                 </UiLoadingState>
               </div>
               <div v-else-if="stageDoc" class="sect content-sect document-sect">
-                <UiDisclosureButton
-                  class="stage-disclosure"
-                  data-role="pipeline-section-disclosure"
-                  controls="pipeline-stage-document"
-                  density="compact"
-                  :open="stageDocOpen"
-                  @update:open="stageDocOpen = $event"
-                >
-                  Документ этапа
-                </UiDisclosureButton>
-                <div
-                  v-if="stageDocOpen"
-                  id="pipeline-stage-document"
-                  class="sdoc md"
-                  v-html="mdToHtml(stageDoc)"
-                ></div>
+                <StageDocument
+                  v-model:open="stageDocOpen"
+                  :text="stageDoc"
+                  :title="translate(NODE_DOC[stage!.id] === 'plan'
+                    ? 'core.stagePlanDocument' : 'core.stageDocument')"
+                />
               </div>
               <div v-if="!stageDoc && !stageDocLoading" class="stage-empty">
                 <span class="stage-empty-symbol" aria-hidden="true">≡</span>
@@ -1121,7 +1111,6 @@ import { useUiStore } from '../stores/ui.ts';
 import { useTasksStore } from '../stores/tasks.ts';
 import { useBoardStore } from '../stores/board.ts';
 import { liveTimerSec, pipelineWorkSec, secToHMS } from '../shared/format.ts';
-import { mdToHtml } from '../shared/md.ts';
 import {
   alertDialog,
   confirmDialog,
@@ -1165,6 +1154,7 @@ import ArbiterConversation from './pipeline/ArbiterConversation.vue';
 import FactoryGraph from './pipeline/FactoryGraph.vue';
 import PipelineStopPanel from './pipeline/PipelineStopPanel.vue';
 import PipelineCardActions from './pipeline/PipelineCardActions.vue';
+import StageDocument from './pipeline/StageDocument.vue';
 import { graphStallView } from '../shared/graphStall.ts';
 import type { PipelineCardAction, PipelineCardActionId } from '../shared/pipelineCardActions.ts';
 import LoopStatus from './pipeline/LoopStatus.vue';
@@ -4134,54 +4124,15 @@ function cardState(g: PipelineViewGraph) {
   border-radius: 8px; background: color-mix(in srgb, var(--ground) 88%, #000); }
 .logline { padding: 2px 0; font-size: 12px; overflow-wrap: anywhere; }
 .small { font-size: 12px; }
-/* Документ этапа — главный читаемый слой модалки. Внутренней карточки больше нет:
-   документ живёт в одной поверхности, мера строки ограничена, а широкие таблицы
-   прокручиваются внутри себя, вместо того чтобы ломать слова посреди строки. */
+/* Название, навигация и текст документа используют одну ось и меру чтения.
+   Колонка занимает свободное место целиком, пока не достигнет комфортной ширины строки. */
 .document-sect {
-  gap: 14px;
+  width: 100%;
+  max-width: 880px;
+  margin-inline: auto;
+  gap: 0;
   padding: 0;
 }
-.sdoc { min-width: 0; padding: 0 0 16px; color: var(--ink); font-size: 13px;
-  line-height: 1.65; overflow-wrap: normal; }
-.sdoc :deep(p), .sdoc :deep(ul), .sdoc :deep(ol), .sdoc :deep(blockquote) { max-width: 76ch; }
-.sdoc :deep(p) { margin: 0 0 11px; }
-.sdoc :deep(h1) { margin: 8px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line);
-  font-size: 18px; font-weight: 650; line-height: 1.3; }
-.sdoc :deep(h2) { margin: 22px 0 9px; font-size: 14.5px; font-weight: 650; line-height: 1.35; }
-.sdoc :deep(h3) { margin: 16px 0 7px; font-size: 13px; font-weight: 650; line-height: 1.4; }
-.sdoc :deep(h4) { margin: 14px 0 6px; color: var(--ink-mid); font-size: 12.5px; font-weight: 650; }
-.sdoc :deep(ul), .sdoc :deep(ol) { margin: 0 0 12px; padding-left: 22px; }
-.sdoc :deep(li) { margin: 3px 0; }
-.sdoc :deep(li > p) { margin: 0 0 4px; }
-.sdoc :deep(strong) { color: var(--ink); font-weight: 600; }
-.sdoc :deep(hr) { margin: 20px 0; border: 0; border-top: 1px solid var(--line); }
-.sdoc :deep(blockquote) { margin: 14px 0; padding: 8px 14px; border-left: 3px solid var(--accent);
-  border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--accent) 7%, transparent);
-  color: var(--ink-mid); }
-.sdoc :deep(blockquote p:last-child) { margin-bottom: 0; }
-.sdoc :deep(a) { color: var(--accent); text-decoration: none; }
-.sdoc :deep(a:hover) { text-decoration: underline; text-underline-offset: 2px; }
-.sdoc :deep(code) { padding: 1px 5px; border-radius: 4px; background: var(--surface-2);
-  font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
-.sdoc :deep(pre) { margin: 12px 0; padding: 12px 14px; overflow-x: auto; border: 1px solid var(--line);
-  border-radius: 9px; background: color-mix(in srgb, var(--ground) 60%, #000); }
-.sdoc :deep(pre code) { padding: 0; background: transparent; font-size: 12px; line-height: 1.6; }
-.sdoc :deep(img) { max-width: 100%; height: auto; border-radius: 8px; }
-.sdoc :deep(table) { display: block; width: 100%; max-width: 100%; margin: 14px 0; overflow-x: auto;
-  border: 1px solid var(--line); border-radius: 10px; border-collapse: separate; border-spacing: 0;
-  font-size: 12.5px; }
-.sdoc :deep(thead) { background: var(--surface-2); }
-.sdoc :deep(th) { padding: 8px 10px; border-bottom: 1px solid var(--line-2);
-  background: var(--surface-2); color: var(--ink-mid); font-size: 10.5px; font-weight: 600;
-  letter-spacing: .04em; line-height: 1.35; text-align: left; text-transform: uppercase;
-  vertical-align: bottom; }
-.sdoc :deep(td) { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top;
-  line-height: 1.5; overflow-wrap: break-word; }
-.sdoc :deep(tbody tr:last-child td) { border-bottom: 0; }
-.sdoc :deep(tbody tr:nth-child(even) td) {
-  background: color-mix(in srgb, var(--surface-2) 42%, transparent);
-}
-.sdoc :deep(td code) { font-size: 11.5px; overflow-wrap: anywhere; }
 /* Вопросы узла. Номер и формулировка стоят НАД полем, а не сбоку: вопрос агента бывает
    в две строки, и боковая колонка сжимала бы поле ответа до нечитаемого. */
 .rwq { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
@@ -4401,15 +4352,6 @@ function cardState(g: PipelineViewGraph) {
   .runner-result {
     grid-column: 3;
     grid-row: 1;
-  }
-  .sdoc {
-    font-size: 13px;
-  }
-  .sdoc :deep(h1) {
-    font-size: 17px;
-  }
-  .sdoc :deep(td) {
-    padding: 7px 8px;
   }
   .gbtns .btn {
     flex: 1 1 120px;

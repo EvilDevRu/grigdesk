@@ -1715,6 +1715,19 @@
   text-transform: uppercase;
 }
 
+/* Оглавление читается вертикально по левой оси, включая многострочные названия.
+   Пункты растут по тексту и сохраняют общий сенсорный минимум площадки нажатия. */
+.ui-button[data-context='stage-document-section'] {
+  height: auto;
+  min-height: var(--toolbar-control-h);
+  padding: 6px 10px;
+}
+
+.ui-button[data-context='stage-document-section'] > .ui-button__content,
+.ui-button[data-context='stage-document-section'] .ui-button__label {
+  width: 100%;
+}
+
 .ui-disclosure-button__icon,
 .ui-disclosure-button__chevron {
   display: inline-flex;
