@@ -271,9 +271,13 @@ export class ArbiterConversationService {
         !['requestId', 'expectedStop', 'decisionRevision', 'originalProposalId'].includes(key)));
       const intent = kind === 'start' ? {} : decodeHumanIntent(kind, payload);
       let humanText = '';
+      let answeredQuestion: ArbiterOperation['answeredQuestion'];
 
       if (kind === 'discuss') {
-        humanText = this.discussion(doc, intent);
+        const discussion = this.discussion(doc, intent);
+
+        humanText = discussion.text;
+        answeredQuestion = discussion.answeredQuestion;
       } else if (kind === 'diagnose') {
         const proposal = doc.result?.proposals.find((row) => row.id === intent.proposalId);
 
@@ -296,6 +300,10 @@ export class ArbiterConversationService {
 
       const operation = this.operation(kind, String(raw.requestId), fingerprint);
       const previous = doc.result;
+
+      if (answeredQuestion) {
+        operation.answeredQuestion = answeredQuestion;
+      }
 
       doc = await this.store.update(task, doc.id, (latest) => {
         Object.assign(latest, invalidateDecision(latest));
@@ -401,9 +409,12 @@ export class ArbiterConversationService {
    * Вопрос и подпись выбранного ответа сохраняются вместе с ответом человека.
    * Старый id не может выбрать вариант из другого цикла решения.
    */
-  private discussion(doc: ArbiterConversation, intent: Record<string, unknown>) {
+  private discussion(doc: ArbiterConversation, intent: Record<string, unknown>): {
+    text: string;
+    answeredQuestion?: ArbiterOperation['answeredQuestion'];
+  } {
     if (typeof intent.text === 'string') {
-      return intent.text;
+      return { text: intent.text };
     }
 
     const question = doc.result?.questions.find((row) => row.id === intent.questionId);
@@ -413,7 +424,15 @@ export class ArbiterConversationService {
       throw new ArbiterConversationError('question_unknown', 'Вопрос или ответ уже недоступен.', 409);
     }
 
-    return `${question.text}\n\n${answer}`;
+    return {
+      text: `${question.text}\n\n${answer}`,
+      answeredQuestion: {
+        questionId: question.id,
+        ...(typeof intent.optionId === 'string' ? { optionId: intent.optionId } : {}),
+        question: question.text,
+        answer,
+      },
+    };
   }
 
   private operation(kind: IntentKind, requestId: string, fingerprint: string): ArbiterOperation {

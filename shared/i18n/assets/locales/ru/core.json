@@ -834,6 +834,8 @@
   "arbiterRetryAnalysis": "Повторить разбор",
   "arbiterAnalyzing": "Арбитр изучает остановку; ответ ещё готовится",
   "arbiterAwaiting": "Разбор готов; выберите следующий шаг",
+  "arbiterChooseProposal": "Уточнений больше нет; выберите предложение",
+  "arbiterContinueDiscussion": "Решения учтены; можно продолжить обсуждение",
   "arbiterApplying": "Указание передаётся этапу",
   "arbiterInterrupted": "Разбор не завершён; история сохранена",
   "arbiterAnalysisFailed": "Не удалось подготовить варианты решения",

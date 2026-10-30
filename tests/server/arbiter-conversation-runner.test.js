@@ -154,6 +154,117 @@ test('промпт текстом требует explanation и булевый r
   assert.match(prompt, /У каждого предложения обязательны explanation и recommended: true\|false\./u);
 });
 
+test('start просит полный разбор, discuss и diagnose учитывают закрытый вопрос коротким ходом', async (t) => {
+  const fx = await fixture(t);
+
+  fx.doc.operations.push({
+    id: 'answer',
+    kind: 'discuss',
+    answeredQuestion: {
+      questionId: 'q',
+      question: result.questions[0].text,
+      answer: 'После следующего плана.',
+    },
+  });
+
+  const start = buildConversationPrompt(fx.doc, fx.context, 'start');
+
+  assert.match(start, /Разбери остановку конвейера: что случилось/u);
+  assert.match(start, /Первый абзац публичной реплики — 2–4 простых предложения без жаргона/u);
+  assert.match(start, /не перечисляй в summary/u);
+
+  for (const intent of ['discuss', 'diagnose']) {
+    const prompt = buildConversationPrompt(fx.doc, fx.context, intent);
+    const contents = JSON.parse(prompt.split('\n\n').at(-1));
+
+    assert.doesNotMatch(prompt, /Разбери остановку конвейера/u);
+    assert.match(prompt, /Не повторяй прежний полный разбор/u);
+    assert.match(prompt, /Не задавай отвеченные вопросы снова/u);
+    assert.match(prompt, /Новый вопрос нужен только если без ответа человека дальше нельзя/u);
+    assert.doesNotMatch(prompt, /Нужен хотя бы вопрос или предложение/u);
+    assert.deepEqual(contents.answeredQuestions, [{
+      question: result.questions[0].text,
+      answer: 'После следующего плана.',
+    }]);
+  }
+});
+
+test('старый диалог восстанавливает пары вопрос/ответ и сохраняет многострочный ответ целиком', async (t) => {
+  const fx = await fixture(t);
+  const answer = 'После плана.\n\nСначала проверим изменения.';
+
+  fx.doc.operations = [{
+    id: 'first',
+    kind: 'start',
+    result,
+  }, { id: 'answer', kind: 'discuss' }];
+  fx.doc.messages.push({
+    author: 'human',
+    turnId: 'answer',
+    text: `${result.questions[0].text}\n\n${answer}`,
+  });
+  fx.doc.messages.push({ author: 'human', text: 'Произвольный\n\nтекст' });
+  fx.doc.result = result;
+
+  const prompt = buildConversationPrompt(fx.doc, fx.context, 'discuss');
+  const contents = JSON.parse(prompt.split('\n\n').at(-1));
+
+  assert.deepEqual(contents.answeredQuestions, [{ question: result.questions[0].text, answer }]);
+  assert.deepEqual(contents.humanDecisions, ['Произвольный\n\nтекст']);
+  assert.deepEqual(contents.lastResult.questions, []);
+});
+
+test('повтор отвеченного вопроса снимается с новым id; другой вопрос с прежним id остаётся', async (t) => {
+  const fx = await fixture(t);
+
+  fx.doc.operations.push({
+    kind: 'discuss',
+    answeredQuestion: {
+      questionId: 'q',
+      question: result.questions[0].text,
+      answer: 'Утром.',
+    },
+  });
+
+  for (const withNewQuestion of [true, false]) {
+    const stored = await fx.store.read('7', fx.doc.id);
+
+    if (withNewQuestion === false) {
+      await fx.store.update('7', fx.doc.id, (doc) => {
+        doc.operations[0].outcome = 'running';
+      });
+    }
+
+    const reply = {
+      ...result,
+      questions: [
+        {
+          ...result.questions[0],
+          id: 'repeated',
+          text: '  УТОЧНИТЕ время остановки. ',
+        },
+        ...(withNewQuestion ? [{ ...result.questions[0], text: 'Журнал сохранился?' }] : []),
+      ],
+    };
+
+    await runArbiterConversation({
+      ...fx,
+      operationId: 'turn',
+      intent: 'discuss',
+      input: {},
+      executor: { run: async () => ({ reply: `<arbiter-result>${JSON.stringify(reply)}</arbiter-result>` }) },
+      readCurrent: async () => fx.context,
+    });
+
+    const saved = await fx.store.read('7', stored.id);
+
+    assert.equal(saved.state, 'awaiting_user');
+    assert.deepEqual(saved.result.questions.map((row) => row.text),
+      withNewQuestion ? ['Журнал сохранился?'] : []);
+    assert.equal(saved.result.nextStep, withNewQuestion ? 'answer_questions' : 'continue_discussion');
+  }
+});
+
 test('проверенный auto доходит до исполнителя и разбор сохраняет результат', async (t) => {
   const fx = await fixture(t);
   const modes = [];

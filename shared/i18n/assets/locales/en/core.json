@@ -814,6 +814,8 @@
   "arbiterRetryAnalysis": "Retry analysis",
   "arbiterAnalyzing": "The arbiter is examining the stop; the answer is being prepared",
   "arbiterAwaiting": "Analysis is ready; choose the next step",
+  "arbiterChooseProposal": "No more questions; choose a proposal",
+  "arbiterContinueDiscussion": "Decisions recorded; you can continue the discussion",
   "arbiterApplying": "Sending the instruction to the stage",
   "arbiterInterrupted": "Analysis did not finish; history is saved",
   "arbiterAnalysisFailed": "Could not prepare decision options",

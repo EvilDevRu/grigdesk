@@ -296,6 +296,34 @@ test('unsupported сохраняет обсуждение, но не разре�
   assert.equal(wrapper.find('[data-role="pipeline-arbiter-decision"]').exists(), false);
 });
 
+test('без вопросов остаются предложения и свободный ответ; законченные уточнения не показывают заглушку',
+  async (t) => {
+    const { wrapper, calls, doc, draft, flushPromises } = await fixture(t);
+
+    doc.result.questions = [];
+    doc.result.nextStep = 'choose_proposal';
+    await flushPromises();
+
+    assert.equal(wrapper.find('.ac-question').exists(), false);
+    assert.equal(wrapper.find('[data-role="arbiter-diagnose"]').exists(), true);
+    assert.equal(wrapper.find('[data-role="arbiter-discuss-input"]').exists(), true);
+    assert.equal(wrapper.find('.ac-decision-empty').exists(), false);
+    assert.match(wrapper.get('.ac-status').text(), /Уточнений больше нет; выберите предложение/u);
+
+    doc.result.proposals = [];
+    doc.result.nextStep = 'continue_discussion';
+    await flushPromises();
+
+    assert.equal(wrapper.find('.ac-decisions').exists(), false);
+    assert.equal(wrapper.find('[data-role="arbiter-analysis-failure"]').exists(), false);
+    assert.match(wrapper.get('.ac-status').text(), /Решения учтены/u);
+    draft.text = 'Продолжим после плана.';
+    await flushPromises();
+    await wrapper.get('[data-role="arbiter-discuss"]').trigger('click');
+
+    assert.deepEqual(calls[0].slice(2), ['discuss', { text: 'Продолжим после плана.' }]);
+  });
+
 test('сбой разбора виден рядом с ручным повтором и не оставляет обещания будущих вариантов', async (t) => {
   const { wrapper, doc, calls, flushPromises } = await fixture(t);
 

@@ -311,7 +311,9 @@ const busy = computed(() => Boolean(store.sending[props.task]
   || doc.value?.state === 'analyzing' || doc.value?.state === 'applying'));
 const analyzing = computed(() => !readOnly.value && (doc.value
   ? doc.value.state === 'analyzing' : Boolean(props.arbitrating)));
-const showDecisions = computed(() => !analyzing.value || pending.value);
+const showDecisions = computed(() => pending.value || !analyzing.value
+  && (doc.value?.result?.nextStep !== 'continue_discussion'
+    || readOnly.value || capabilities.value?.status !== 'supported'));
 const sourceMessages = computed(() => doc.value?.messages
   .filter((message) => message.author === 'node') || []);
 const messages = computed(() => {
@@ -392,6 +394,11 @@ const status = computed(() => {
 
   if (analyzing.value) {
     return t('core.arbiterConnected');
+  }
+
+  if (doc.value?.state === 'awaiting_user' && !questions.value.length) {
+    return doc.value.result?.proposals.length
+      ? t('core.arbiterChooseProposal') : t('core.arbiterContinueDiscussion');
   }
 
   const labels = {

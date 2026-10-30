@@ -70,6 +70,40 @@ test('результат допускает вопрос без предложе
     .proposals[0]!.kind, 'apply');
 });
 
+test('итог без вопросов предлагает выбор, а без вопросов и предложений явно продолжает диалог', () => {
+  const base = {
+    summary: 'Решение учтено. Выберите, как продолжить.',
+    questions: [],
+    proposals: [proposal],
+    technicalDetails: '',
+  };
+
+  for (const nextStep of [undefined, 'choose_proposal']) {
+    const row = nextStep ? { ...base, nextStep } : base;
+
+    assert.deepEqual(decodeArbiterResult(row, targets, stop.node), row);
+  }
+
+  const finished = {
+    ...base,
+    proposals: [],
+    nextStep: 'continue_discussion',
+  };
+
+  assert.deepEqual(decodeArbiterResult(finished, targets, stop.node), finished);
+
+  for (const row of [
+    { ...base, nextStep: 'answer_questions' },
+    { ...base, nextStep: 'continue_discussion' },
+    { ...base, nextStep: 'applying' },
+    { ...finished, nextStep: 'choose_proposal' },
+    { ...finished, nextStep: null },
+    { ...finished, questions: [question] },
+  ]) {
+    assert.throws(() => decodeArbiterResult(row, targets, stop.node));
+  }
+});
+
 test('строгая схема запрещает неизвестные поля, команды, повторы id и неподходящую цель', () => {
   const base = {
     summary: 'Причина ещё неизвестна.',

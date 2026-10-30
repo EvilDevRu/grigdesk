@@ -79,6 +79,7 @@ export type ArbiterProposal = ProposalDescription & ({
 
 export interface ArbiterResult {
   summary: string;
+  nextStep?: 'answer_questions' | 'choose_proposal' | 'continue_discussion';
   questions: ArbiterQuestion[];
   proposals: ArbiterProposal[];
   technicalDetails: string;
@@ -132,6 +133,12 @@ export interface ArbiterOperation {
   observation?: 'waiting' | 'running' | 'completed' | 'stopped' | 'superseded';
   nextStop?: StopIdentity;
   result?: ArbiterResult;
+  answeredQuestion?: {
+    questionId: string;
+    optionId?: string;
+    question: string;
+    answer: string;
+  };
   applyOperationId?: string;
   acceptedEvent?: StageIdentity;
   expectedCurrentStage?: StageIdentity;
@@ -191,7 +198,7 @@ const { record, wholeNumber, boolean } = contractDecoders((field) => {
 });
 
 /**
- * Закрывает набор ключей для сетевого запроса и ответа модели.
+ * Закрывает набор ключей для сетевого запроса и канонического документа.
  * Произвольные исполняемые поля не могут пройти вместе с известными полями.
  */
 export function arbiterRecord(value: unknown, required: string[], optional: string[] = []) {
@@ -332,7 +339,7 @@ export function decodeArbiterResult(
   targets: readonly ArbiterTarget[],
   currentNode: string,
 ): ArbiterResult {
-  const row = arbiterRecord(value, ['summary', 'questions', 'proposals', 'technicalDetails']);
+  const row = arbiterRecord(value, ['summary', 'questions', 'proposals', 'technicalDetails'], ['nextStep']);
   const questions = uniqueList(row.questions, ARBITER_LIMITS.questions, (value) => {
     const question = arbiterRecord(value, ['id', 'text', 'options', 'allowCustom']);
 
@@ -384,15 +391,23 @@ export function decodeArbiterResult(
     };
   });
 
-  if (!questions.length && !proposals.length) {
+  const nextStep = row.nextStep;
+
+  if (nextStep !== undefined && (typeof nextStep !== 'string'
+    || !['answer_questions', 'choose_proposal', 'continue_discussion'].includes(nextStep))
+    || nextStep === 'answer_questions' && !questions.length
+    || nextStep === 'choose_proposal' && (questions.length > 0 || !proposals.length)
+    || nextStep === 'continue_discussion' && (questions.length > 0 || proposals.length > 0)
+    || !questions.length && !proposals.length && nextStep !== 'continue_discussion') {
     throw new ArbiterConversationError(
       'bad_model_reply',
-      'Арбитр не предложил следующего действия или вопроса.'
+      'Следующий шаг разбора не соответствует вопросам и предложениям.'
     );
   }
 
   return {
     summary: arbiterText(row.summary, ARBITER_LIMITS.summary),
+    ...(nextStep !== undefined ? { nextStep: nextStep as ArbiterResult['nextStep'] } : {}),
     questions,
     proposals,
     technicalDetails: arbiterText(row.technicalDetails, ARBITER_LIMITS.technicalDetails, true),

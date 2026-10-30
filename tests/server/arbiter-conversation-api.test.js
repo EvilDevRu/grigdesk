@@ -47,7 +47,7 @@ const result = {
  * HTTP работает с настоящим durable service и удерживаемым executor без живых задач.
  * Внешняя команда отсутствует в зависимостях читающего хода.
  */
-async function fixture(t) {
+async function fixture(t, { replies = [] } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'arbiter-api-'));
 
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
@@ -85,7 +85,9 @@ async function fixture(t) {
             await held;
           }
 
-          return { reply: `<arbiter-result>${JSON.stringify(result)}</arbiter-result>` };
+          const reply = JSON.stringify(replies[calls - 1] || result);
+
+          return { reply: `<arbiter-result>${reply}</arbiter-result>` };
         }
       }
     }),
@@ -239,6 +241,17 @@ test('обсуждение и вариант вопроса доходят до 
   await fx.service.wait('7');
   assert.match(fx.prompts[1], /Да, журнал есть/);
 
+  const answered = await fx.store.read('7', doc.id);
+
+  assert.deepEqual(answered.operations[1].answeredQuestion, {
+    questionId: 'q',
+    optionId: 'yes',
+    question: 'Есть журнал?',
+    answer: 'Да, журнал есть',
+  });
+  assert.deepEqual(answered.result.questions, []);
+  assert.equal(answered.result.nextStep, 'choose_proposal');
+
   const stale = await fx.app.inject({
     method: 'POST',
     url: `/api/tasks/7/arbiter-conversations/${doc.id}/diagnose`,
@@ -251,6 +264,74 @@ test('обсуждение и вариант вопроса доходят до 
   });
 
   assert.equal(stale.statusCode, 409);
+});
+
+test('ответы закрывают вопросы, сохраняют выбор диагностики и допускают окончание уточнений', async (t) => {
+  const question = {
+    id: 'q1',
+    text: 'Когда принять решение об изменении проверки?',
+    options: [{ id: 'defer', label: 'Решить после следующего адресного плана' }],
+    allowCustom: true,
+  };
+  const second = { ...result.questions[0], id: 'q2' };
+  const replies = [
+    { ...result, questions: [question, second] },
+    {
+      ...result,
+      summary: 'Решение отложено до нового плана. Осталось уточнить наличие журнала.',
+      questions: [second],
+    },
+    {
+      ...result,
+      summary: 'Журнал доступен. Выберите его дополнительный разбор.',
+      questions: [],
+      nextStep: 'choose_proposal',
+    },
+    {
+      ...result,
+      summary: 'Решение учтено. Вернёмся к обсуждению после подготовки плана.',
+      questions: [],
+      proposals: [],
+      nextStep: 'continue_discussion',
+    },
+  ];
+  const fx = await fixture(t, { replies });
+  const start = await fx.service.start('7', { requestId: randomUUID(), expectedStop: identity });
+
+  fx.finish();
+  await start.completion;
+
+  for (const [index, payload] of [
+    { questionId: 'q1', optionId: 'defer' },
+    { questionId: 'q2', customAnswer: 'Журнал есть.\n\nОн полный.' },
+    { text: 'Вернёмся после плана.' },
+  ].entries()) {
+    const before = await fx.store.read('7', start.conversationId);
+    const ack = await fx.service.submit('7', before.id, 'discuss', {
+      requestId: randomUUID(),
+      expectedStop: identity,
+      decisionRevision: before.decisionRevision,
+      ...payload,
+    });
+
+    await ack.completion;
+
+    const saved = await fx.store.read('7', before.id);
+    const contents = JSON.parse(fx.prompts[index + 1].split('\n\n').at(-1));
+
+    assert.equal(saved.state, 'awaiting_user');
+    assert.equal(saved.result.summary, replies[index + 1].summary);
+    assert.deepEqual(saved.result.questions, replies[index + 1].questions);
+    assert.deepEqual(saved.result.proposals, replies[index + 1].proposals);
+    assert.equal(contents.answeredQuestions[0].question, question.text);
+    assert.equal(contents.answeredQuestions[0].answer, question.options[0].label);
+
+    if (index > 0) {
+      assert.equal(contents.answeredQuestions[1].answer, 'Журнал есть.\n\nОн полный.');
+    }
+  }
+
+  assert.equal(fx.calls(), 4);
 });
 
 test('GET между durable записью и регистрацией job не прерывает принимаемый разбор', async (t) => {

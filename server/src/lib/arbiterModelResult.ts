@@ -60,7 +60,8 @@ export function parseArbiterModelResult(
   currentNode: string,
 ) {
   try {
-    const raw = arbiterRecord(JSON.parse(text), ['summary', 'questions', 'proposals', 'technicalDetails']);
+    const raw = arbiterRecord(JSON.parse(text),
+      ['summary', 'questions', 'proposals', 'technicalDetails'], ['nextStep']);
     const questions = Array.isArray(raw.questions) ? raw.questions.map(modelQuestion) : raw.questions;
     const proposals = Array.isArray(raw.proposals) ? raw.proposals.map(modelProposal) : raw.proposals;
 

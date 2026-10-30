@@ -108,7 +108,7 @@ function decodeDocument(value: unknown): ArbiterConversation {
   for (const operation of doc.operations) {
     arbiterRecord(operation, ['id', 'requestId', 'fingerprint', 'kind', 'outcome', 'createdAt', 'updatedAt'],
       ['error', 'message', 'action', 'originalProposal', 'receipt', 'reason', 'originalStage',
-        'observedSequence', 'observation', 'nextStop', 'result',
+        'observedSequence', 'observation', 'nextStop', 'result', 'answeredQuestion',
         'applyOperationId', 'acceptedEvent', 'expectedCurrentStage']);
     arbiterText(operation.id, 500);
     arbiterText(operation.requestId, 500);
@@ -125,6 +125,23 @@ function decodeDocument(value: unknown): ArbiterConversation {
 
     requestIds.add(operation.requestId);
     operationIds.add(operation.id);
+
+    if (operation.answeredQuestion !== undefined) {
+      const answer = arbiterRecord(operation.answeredQuestion,
+        ['questionId', 'question', 'answer'], ['optionId']);
+
+      if (operation.kind !== 'discuss') {
+        throw new Error('Ответ на вопрос принадлежит обсуждению.');
+      }
+
+      arbiterText(answer.questionId, 80);
+      arbiterText(answer.question, ARBITER_LIMITS.summary);
+      arbiterText(answer.answer, ARBITER_LIMITS.humanText);
+
+      if (answer.optionId !== undefined) {
+        arbiterText(answer.optionId, 80);
+      }
+    }
 
     if (operation.message !== undefined) {
       arbiterText(operation.message, ARBITER_LIMITS.summary, true);
