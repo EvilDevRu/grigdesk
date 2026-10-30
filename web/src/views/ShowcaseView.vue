@@ -105,7 +105,9 @@
           <span v-for="operation in doctorBlockers" :key="operation.id">
             {{ operation.title }} — {{ operation.reason }}
           </span>
-          <UiButton variant="ghost" @click="openSettings({ pageId: 'plugins.installed' })">Открыть настройки</UiButton>
+          <UiButton variant="ghost" @click="openSettings({ pageId: 'tools.showcase' })">
+            Открыть настройки
+          </UiButton>
         </span>
       </UiInlineMessage>
 

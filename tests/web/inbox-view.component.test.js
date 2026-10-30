@@ -615,7 +615,7 @@ test('Inbox объясняет окно тишины, отсутствие мо�
   assert.match(wrapper.get('.item-card .auto-state').text(), /Автосоздание выключено/);
 
   await notice.get('a').trigger('click');
-  assert.deepEqual(settingsRequests, [{ pageId: 'plugins.installed', entityId: 'synthetic-inbox' }]);
+  assert.deepEqual(settingsRequests, [{ pageId: 'automation.inbox' }]);
 });
 
 test('очередь открывает одну переписку и сохраняет её выбор при навигации и SSE', async (t) => {

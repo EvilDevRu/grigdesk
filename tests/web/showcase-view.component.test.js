@@ -802,7 +802,7 @@ test('готовая установка не занимает список ро�
   await blocked.wrapper.findAll('button').find((entry) => entry.text() === 'Открыть настройки')
     .trigger('click');
   assert.ok(blocked.calls.some(([name, request]) =>
-    name === 'settings' && request.pageId === 'plugins.installed'));
+    name === 'settings' && request.pageId === 'tools.showcase'));
 });
 
 test('идущая установка показывает шаг и даёт её отменить', async (t) => {

@@ -3,9 +3,23 @@
     class="settings-plugin"
     :data-plugin-page="plugin?.id"
     :data-ready="ready"
+    :data-single="Boolean(singlePluginId)"
   >
     <p v-if="error" role="alert">{{ error }}</p>
-    <div class="settings-plugin-filters">
+    <UiInlineMessage v-if="plugins.loadError" tone="warning" data-plugin-load-error>
+      {{ plugins.loadError }}
+    </UiInlineMessage>
+    <UiButton v-if="plugins.loadError || error" data-plugin-retry @click="load">
+      {{ t('settings.retryLoading') }}
+    </UiButton>
+    <p v-if="!ready && !plugins.loadError && !error" role="status" data-plugin-loading>
+      {{ t('settings.loadingSection2') }}
+    </p>
+    <p v-if="installer.recoveryError" role="alert">{{ installer.recoveryError.message }}</p>
+    <p v-else-if="installer.job?.status === 'recovery_required'" role="alert">
+      {{ installer.job.error?.message }}
+    </p>
+    <div v-if="!singlePluginId" class="settings-plugin-filters">
       <UiInput
         v-model="filters.query"
         data-plugin-filter
@@ -20,15 +34,18 @@
       </UiSelect>
       <div class="settings-plugin-filter-options">
         <UiCheckbox v-model="filters.configurable">{{ t('settings.withSettings') }}</UiCheckbox>
-        <UiCheckbox v-model="filters.custom">{{ t('settings.customOnly') }}</UiCheckbox>
-        <UiButton v-if="filters.query || filters.state !== 'all' || filters.configurable || filters.custom"
+        <UiButton v-if="filters.query || filters.state !== 'all' || filters.configurable"
                   variant="text" data-context="workspace-form-wrap" @click="clearFilters">
           {{ t('settings.resetFilters') }}
         </UiButton>
       </div>
     </div>
     <div class="settings-plugin-workspace">
-      <aside class="settings-plugin-sidebar" :aria-label="t('settings.pluginSelection')">
+      <aside
+        v-if="!singlePluginId"
+        class="settings-plugin-sidebar"
+        :aria-label="t('settings.pluginSelection')"
+      >
         <div class="settings-plugin-picker">
           <UiSelect
             :model-value="plugin?.id || ''"
@@ -72,11 +89,8 @@
             </div>
           </section>
         </div>
-        <p v-if="!groups.length">{{ t('settings.noPluginsFoundChangeTheQueryOr') }}</p>
-        <p v-if="installer.recoveryError" role="alert">{{ installer.recoveryError.message }}</p>
-        <p v-else-if="installer.job?.status === 'recovery_required'" role="alert">
-          {{ installer.job.error?.message }}
-        </p>
+        <p v-if="!groups.length && hasCustom">{{ t('settings.noPluginsFoundChangeTheQueryOr') }}</p>
+        <p v-else-if="!groups.length">{{ t('settings.installAPluginFromGitToAdd') }}</p>
         <div class="settings-plugin-actions">
           <UiButton
             v-if="list.some((entry) => entry.install)"
@@ -270,11 +284,12 @@
             </UiButton>
           </SettingsField>
         </template>
-        <p v-else-if="!plugin && settings.entityId">{{ t('settings.thePluginIsNoLongerAvailable') }}</p>
-        <div v-else-if="!plugin" class="settings-plugin-empty">
-          <h4>{{ list.length ? t('settings.selectAPlugin') : t('settings.noPluginsInstalled') }}</h4>
+        <p v-else-if="ready && !plugin && (settings.entityId || singlePluginId)"
+           data-plugin-missing>{{ t('settings.thePluginIsNoLongerAvailable') }}</p>
+        <div v-else-if="ready && !plugin" class="settings-plugin-empty">
+          <h4>{{ hasCustom ? t('settings.selectAPlugin') : t('settings.noPluginsInstalled') }}</h4>
           <p>
-            {{ list.length ? t('settings.selectAPluginFromTheListTo')
+            {{ hasCustom ? t('settings.selectAPluginFromTheListTo')
               : t('settings.installAPluginFromGitToAdd') }}
           </p>
         </div>
@@ -303,7 +318,7 @@ import { localizePluginMetadata, localizePluginCategory } from '../../../feature
 
 import SettingsScope from '../SettingsScope.vue';
 import SettingsIcon from '../SettingsIcon.vue';
-import { computed, reactive, ref, watch, onMounted } from 'vue';
+import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import {
   UiSwitch, UiCheckbox, UiInput, UiNumberInput, UiSelect, UiPasswordInput, UiButton, UiInlineMessage,
 } from '../../../ui.ts';
@@ -326,6 +341,9 @@ import PluginSetupPanel from './PluginSetupPanel.vue';
 import { useProvidersStore } from '../../../stores/providers.ts';
 import { createPluginEditor } from '../../../features/settings/pluginEditor.ts';
 import { pluginValueKey, type PluginStorePort } from '../../../features/settings/resources/plugins.ts';
+import {
+  pluginFieldAddress, pluginSettingsTarget, systemPluginOfPage,
+} from '../../../features/settings/pluginPages.ts';
 import type { FieldAddress, JsonValue } from '../../../features/settings/contracts.ts';
 import { failureText } from '../../../shared/apiClient.ts';
 import SettingsField from '../SettingsField.vue';
@@ -339,20 +357,26 @@ const filters = settings.sessionService('plugin-filters', () => reactive({
   query: '',
   state: 'all',
   configurable: false,
-  custom: false,
 }));
 const list = computed(() => (plugins.list as PluginListItem[])
   .map((entry) => localizePluginMetadata(entry, uiLocale.value)));
+// Одиночный режим: страница из карты системных плагинов рисует форму одного
+// плагина без списка и фильтров магазина.
+const singlePluginId = computed(() => systemPluginOfPage(settings.pageId));
+const pluginId = computed(() => singlePluginId.value ?? settings.entityId);
+
 const visible = computed(() => list.value.filter((entry) => {
   const needle = filters.query.trim().toLocaleLowerCase('ru');
-  const text = [entry.id, entry.name, entry.description, entry.nav?.label,
-    entry.system ? t('settings.system') : t('settings.custom')].join(' ').toLocaleLowerCase('ru');
+  const text = [entry.id, entry.name, entry.description, entry.nav?.label]
+    .join(' ').toLocaleLowerCase('ru');
 
-  return (!needle || text.includes(needle))
+  return !entry.system
+    && (!needle || text.includes(needle))
     && (filters.state === 'all' || (filters.state === 'enabled') === draftEnabled(entry.id))
-    && (!filters.custom || !entry.system)
     && (!filters.configurable || entry.settings.length > 0 || Boolean(entry.placements?.length));
 }));
+
+const hasCustom = computed(() => list.value.some((entry) => !entry.system));
 const groups = computed(() => PLUGIN_CATEGORIES.map((category) => ({
   ...localizePluginCategory(category, uiLocale.value),
   plugins: visible.value.filter((entry) => pluginCategoryOf(entry) === category.id),
@@ -363,10 +387,10 @@ const installOpen = ref(false);
 const installMode = ref<'install' | 'update'>('install');
 const providers = useProvidersStore();
 const registry = computed(() => providers.providers as ProviderEntry[]);
-const plugin = computed(() => list.value
-  .find((entry) => entry.id === settings.entityId));
-const resourceId = computed(() => `pluginSettings:${settings.entityId}`);
-const enabledId = computed(() => `pluginEnabled:${settings.entityId}`);
+const plugin = computed(() => list.value.find((entry) => entry.id === pluginId.value
+  && (!singlePluginId.value || entry.system === true)));
+const resourceId = computed(() => `pluginSettings:${pluginId.value}`);
+const enabledId = computed(() => `pluginEnabled:${pluginId.value}`);
 const baselineEnabled = computed(() => {
   settings.snapshot;
 
@@ -379,7 +403,7 @@ const enabled = computed(() => {
   return settings.getValue(enabledId.value, 'enabled') === true;
 });
 const restartPending = computed(() =>
-  (plugins.restartPending as Record<string, boolean>)[settings.entityId ?? '']);
+  (plugins.restartPending as Record<string, boolean>)[pluginId.value ?? '']);
 const ready = ref(false);
 const error = ref('');
 const unavailable = computed(() => settings.snapshot.resources.find((item) => item.id === resourceId.value)
@@ -388,6 +412,7 @@ const unavailable = computed(() => settings.snapshot.resources.find((item) => it
     && !plugin.value?.placements?.some((item) =>
       pluginValueKey('placements', item.slot) === field.key)) ?? []);
 let editor: ReturnType<typeof createPluginEditor> | null = null;
+let loadAttempt = 0;
 
 const provenanceKeys: Record<SourceMembership, 'settings.marketplaceOfficial'
   | 'settings.marketplaceCommunity' | 'settings.marketplaceExternal'
@@ -428,7 +453,6 @@ function clearFilters(): void {
   filters.query = '';
   filters.state = 'all';
   filters.configurable = false;
-  filters.custom = false;
 }
 
 function openInstall(mode: 'install' | 'update'): void {
@@ -439,15 +463,12 @@ function openInstall(mode: 'install' | 'update'): void {
 }
 
 /**
- * Адреса настроек и размещений не пересекаются при одинаковых непрозрачных ключах.
- * Значения формы читаются из сессии, без второго локального draft record.
+ * Адрес поля принадлежит странице плагина: одиночная страница знает своего
+ * владельца, а список «Установленные» адресуется явным выбором entity.
  */
 function address(section: string, key?: string): FieldAddress {
-  return {
-    pageId: 'plugins.installed',
-    entityId: settings.entityId,
-    fieldPath: key === undefined ? [section] : [section, key],
-  };
+  return pluginFieldAddress(String(pluginId.value), plugin.value?.system === true,
+    key === undefined ? [section] : [section, key]);
 }
 
 function fieldUnavailable(key: string): boolean {
@@ -599,19 +620,38 @@ function discard(key: string): void {
 }
 
 /**
- * Ресурсы всех объявленных плагинов регистрируются без чтений отдельных API.
- * Посещение выбранного плагина загружает baseline один раз для текущего открытия.
+ * Каждая загрузка принадлежит странице и открытию, выбранным до первого await.
+ * Устаревший ответ не выбирает страницу и не регистрирует редакторы в новой сессии.
  */
 async function load(): Promise<void> {
-  if (!props.active || !settings.isOpen || settings.pageId !== 'plugins.installed') {
+  const attempt = ++loadAttempt;
+
+  if (!props.active || !settings.isOpen
+    || (!singlePluginId.value && settings.pageId !== 'plugins.installed')) {
     return;
   }
 
+  const opening = settings.snapshot.sessionId;
+  const pageId = settings.pageId;
+  const entityId = settings.entityId;
+  const current = () => attempt === loadAttempt && props.active && settings.isOpen
+    && settings.snapshot.sessionId === opening && settings.pageId === pageId
+    && settings.entityId === entityId;
+
   ready.value = false;
+  error.value = '';
 
   try {
-    if (!plugins.loaded) {
-      await plugins.load();
+    if (!plugins.loaded || plugins.loadError) {
+      const result = await plugins.load();
+
+      if (!current() || result.outcome !== 'accepted') {
+        return;
+      }
+    }
+
+    if (!current()) {
+      return;
     }
 
     for (const entry of plugins.list as PluginListItem[]) {
@@ -619,39 +659,76 @@ async function load(): Promise<void> {
         createPluginEditor(entry.id, settings, plugins as unknown as PluginStorePort));
     }
 
-    if (!settings.entityId && plugins.list[0] && !settings.navigationError) {
-      settings.selectPage('plugins.installed', (plugins.list[0] as PluginListItem).id);
+    const legacy = plugins.list.find((entry) => entry.id === settings.entityId);
+    const legacyTarget = legacy?.system ? pluginSettingsTarget(legacy.id, true) : null;
+
+    if (!singlePluginId.value && legacyTarget && legacyTarget.pageId !== 'plugins.installed') {
+      const target = settings.revealTarget;
+
+      if (target?.pageId === 'plugins.installed' && target.entityId === legacy?.id) {
+        settings.reveal({
+          pageId: legacyTarget.pageId,
+          fieldPath: [...target.fieldPath],
+        });
+      } else {
+        settings.selectPage(legacyTarget.pageId);
+      }
 
       return;
     }
-    if (plugin.value) {
-      const id = plugin.value.id;
-      const opening = settings.snapshot.sessionId;
 
-      editor = settings.sessionService(`plugin-editor:${plugin.value.id}`, () =>
-        createPluginEditor(plugin.value!.id, settings, plugins as unknown as PluginStorePort));
-      await editor.load();
+    const firstCustom = (plugins.list as PluginListItem[]).find((entry) => !entry.system);
 
-      if (!providers.loaded && plugin.value.settings.some((field) =>
-        ['model', 'providers'].includes(field.type ?? ''))) {
-        await providers.load();
-      }
+    if (!settings.entityId && !singlePluginId.value && firstCustom && !settings.navigationError) {
+      settings.selectPage('plugins.installed', firstCustom.id);
 
-      if (settings.isOpen && settings.entityId === id && settings.snapshot.sessionId === opening) {
-        ready.value = true;
-      }
+      return;
+    }
+
+    const selected = plugin.value;
+
+    if (!selected) {
+      ready.value = true;
+
+      return;
+    }
+
+    editor = settings.sessionService(`plugin-editor:${selected.id}`, () =>
+      createPluginEditor(selected.id, settings, plugins as unknown as PluginStorePort));
+    await editor.load();
+
+    if (!current()) {
+      return;
+    }
+    if (!providers.loaded && selected.settings.some((field) =>
+      ['model', 'providers'].includes(field.type ?? ''))) {
+      await providers.load();
+    }
+    if (current()) {
+      ready.value = true;
     }
   } catch (cause) {
-    error.value = failureText(cause);
+    if (current()) {
+      error.value = failureText(cause);
+    }
   }
 }
+
+onBeforeUnmount(() => {
+  loadAttempt += 1;
+});
 
 onMounted(() => {
   void installer.loadJob();
 });
 
-watch([() => props.active, () => settings.pageId, () => settings.entityId, () => settings.snapshot.sessionId],
-  load, { immediate: true });
+watch([
+  () => props.active,
+  () => settings.isOpen,
+  () => settings.pageId,
+  () => settings.entityId,
+  () => settings.snapshot.sessionId,
+], load, { immediate: true });
 </script>
 
 <style scoped>
@@ -683,6 +760,9 @@ watch([() => props.active, () => settings.pageId, () => settings.entityId, () =>
   grid-template-columns: 240px minmax(0, 1fr);
   gap: 16px;
   min-width: 0;
+}
+.settings-plugin[data-single='true'] .settings-plugin-workspace {
+  grid-template-columns: minmax(0, 1fr);
 }
 .settings-plugin-sidebar {
   display: grid;

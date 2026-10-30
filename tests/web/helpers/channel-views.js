@@ -58,7 +58,7 @@ async function compileView(view, expose = []) {
         '../stores/plugins.ts': `
           export const usePluginsStore = () => ({
             loaded: true,
-            list: [{ id: 'synthetic-inbox', nav: { path: '/inbox' } }],
+            list: [{ id: 'inbox', system: true, nav: { path: '/inbox' } }],
           });
         `,
         // Транспорт раздела импортирует клиента соседним путём: заглушка

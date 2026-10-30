@@ -348,6 +348,10 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
     label: translator.t('ru', 'settings.connectionsAndAccess'),
   },
   {
+    id: 'tools',
+    label: translator.t('ru', 'settings.toolsGroup'),
+  },
+  {
     id: 'plugins',
     label: translator.t('ru', 'settings.plugins'),
   },
@@ -375,6 +379,12 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     groupId: 'interface',
     label: translator.t('ru', 'settings.keyboardShortcuts'),
     description: translator.t('ru', 'settings.keyboardShortcutsForOpeningTools'),
+  },
+  {
+    id: 'interface.usageForecast',
+    groupId: 'interface',
+    label: translator.t('ru', 'settings.builtinPlugins.usage-forecast.name'),
+    description: translator.t('ru', 'settings.builtinPlugins.usage-forecast.description'),
   },
   {
     id: 'agents.providers',
@@ -419,6 +429,24 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     description: translator.t('ru', 'settings.automaticStopAnalysisModelAndEffort'),
   },
   {
+    id: 'automation.analysis',
+    groupId: 'automation',
+    label: translator.t('ru', 'settings.builtinPlugins.analysis.name'),
+    description: translator.t('ru', 'settings.builtinPlugins.analysis.description'),
+  },
+  {
+    id: 'automation.shelf',
+    groupId: 'automation',
+    label: translator.t('ru', 'settings.builtinPlugins.shelf.name'),
+    description: translator.t('ru', 'settings.builtinPlugins.shelf.description'),
+  },
+  {
+    id: 'automation.inbox',
+    groupId: 'automation',
+    label: translator.t('ru', 'settings.builtinPlugins.inbox.name'),
+    description: translator.t('ru', 'settings.builtinPlugins.inbox.description'),
+  },
+  {
     id: 'speech.dictation',
     groupId: 'speech',
     label: translator.t('ru', 'settings.dictation2'),
@@ -429,6 +457,12 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     groupId: 'speech',
     label: translator.t('ru', 'settings.videoTranscription'),
     description: translator.t('ru', 'settings.transcriptionQualityAndStylePrompt'),
+  },
+  {
+    id: 'speech.videoTasks',
+    groupId: 'speech',
+    label: translator.t('ru', 'settings.builtinPlugins.video.name'),
+    description: translator.t('ru', 'settings.builtinPlugins.video.description'),
   },
   {
     id: 'speech.language',
@@ -459,6 +493,54 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     groupId: 'connections',
     label: translator.t('ru', 'settings.serverAccess'),
     description: translator.t('ru', 'settings.applicationPairingQRDeviceNameAndMachine'),
+  },
+  {
+    id: 'connections.ssh',
+    groupId: 'connections',
+    label: translator.t('ru', 'settings.builtinPlugins.ssh.name'),
+    description: translator.t('ru', 'settings.builtinPlugins.ssh.description'),
+  },
+  {
+    id: 'connections.db',
+    groupId: 'connections',
+    label: translator.t('ru', 'settings.builtinPlugins.db.name'),
+    description: translator.t('ru', 'settings.builtinPlugins.db.description'),
+  },
+  {
+    id: 'connections.telegram',
+    groupId: 'connections',
+    label: translator.t('ru', 'settings.builtinPlugins.telegram.name'),
+    description: translator.t('ru', 'settings.builtinPlugins.telegram.description'),
+  },
+  {
+    id: 'connections.github',
+    groupId: 'connections',
+    label: translator.t('ru', 'settings.builtinPlugins.github.name'),
+    description: translator.t('ru', 'settings.builtinPlugins.github.description'),
+  },
+  {
+    id: 'tools.code',
+    groupId: 'tools',
+    label: translator.t('ru', 'settings.builtinPlugins.code.name'),
+    description: translator.t('ru', 'settings.builtinPlugins.code.description'),
+  },
+  {
+    id: 'tools.docker',
+    groupId: 'tools',
+    label: translator.t('ru', 'settings.builtinPlugins.docker.name'),
+    description: translator.t('ru', 'settings.builtinPlugins.docker.description'),
+  },
+  {
+    id: 'tools.studio3d',
+    groupId: 'tools',
+    label: translator.t('ru', 'settings.builtinPlugins.studio3d.name'),
+    description: translator.t('ru', 'settings.builtinPlugins.studio3d.description'),
+  },
+  {
+    id: 'tools.showcase',
+    groupId: 'tools',
+    label: translator.t('ru', 'settings.builtinPlugins.showcase.name'),
+    description: translator.t('ru', 'settings.builtinPlugins.showcase.description'),
   },
   {
     id: 'plugins.installed',
@@ -599,6 +681,9 @@ const GROUP_MESSAGES: Record<string, Record<string, string>> = {
   "connections": {
     "label": "settings.connectionsAndAccess"
   },
+  "tools": {
+    "label": "settings.toolsGroup"
+  },
   "plugins": {
     "label": "settings.plugins"
   },
@@ -679,6 +764,58 @@ const PAGE_MESSAGES: Record<string, Record<string, string>> = {
   "connections.mobile": {
     "label": "settings.phoneAndAccess",
     "description": "settings.relaysDevicePairingAndLoginOnThis"
+  },
+  "connections.ssh": {
+    "label": "settings.builtinPlugins.ssh.name",
+    "description": "settings.builtinPlugins.ssh.description"
+  },
+  "connections.db": {
+    "label": "settings.builtinPlugins.db.name",
+    "description": "settings.builtinPlugins.db.description"
+  },
+  "connections.telegram": {
+    "label": "settings.builtinPlugins.telegram.name",
+    "description": "settings.builtinPlugins.telegram.description"
+  },
+  "connections.github": {
+    "label": "settings.builtinPlugins.github.name",
+    "description": "settings.builtinPlugins.github.description"
+  },
+  "automation.analysis": {
+    "label": "settings.builtinPlugins.analysis.name",
+    "description": "settings.builtinPlugins.analysis.description"
+  },
+  "automation.shelf": {
+    "label": "settings.builtinPlugins.shelf.name",
+    "description": "settings.builtinPlugins.shelf.description"
+  },
+  "automation.inbox": {
+    "label": "settings.builtinPlugins.inbox.name",
+    "description": "settings.builtinPlugins.inbox.description"
+  },
+  "speech.videoTasks": {
+    "label": "settings.builtinPlugins.video.name",
+    "description": "settings.builtinPlugins.video.description"
+  },
+  "interface.usageForecast": {
+    "label": "settings.builtinPlugins.usage-forecast.name",
+    "description": "settings.builtinPlugins.usage-forecast.description"
+  },
+  "tools.code": {
+    "label": "settings.builtinPlugins.code.name",
+    "description": "settings.builtinPlugins.code.description"
+  },
+  "tools.docker": {
+    "label": "settings.builtinPlugins.docker.name",
+    "description": "settings.builtinPlugins.docker.description"
+  },
+  "tools.studio3d": {
+    "label": "settings.builtinPlugins.studio3d.name",
+    "description": "settings.builtinPlugins.studio3d.description"
+  },
+  "tools.showcase": {
+    "label": "settings.builtinPlugins.showcase.name",
+    "description": "settings.builtinPlugins.showcase.description"
   },
   "plugins.installed": {
     "label": "settings.marketplaceOverview",

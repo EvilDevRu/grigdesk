@@ -13,11 +13,12 @@ import {
 } from '../../web/src/features/settings/catalog.ts';
 
 const EXPECTED_PAGES = [
-  ['interface', ['behavior', 'notifications', 'shortcuts']],
+  ['interface', ['behavior', 'notifications', 'shortcuts', 'usageForecast']],
   ['agents', ['providers', 'models']],
-  ['automation', ['chats', 'context', 'launch', 'monitoring', 'arbiter']],
-  ['speech', ['dictation', 'video', 'language', 'models', 'advanced']],
-  ['connections', ['b24', 'devices']],
+  ['automation', ['chats', 'context', 'launch', 'monitoring', 'arbiter', 'analysis', 'shelf', 'inbox']],
+  ['speech', ['dictation', 'video', 'videoTasks', 'language', 'models', 'advanced']],
+  ['connections', ['b24', 'devices', 'ssh', 'db', 'telegram', 'github']],
+  ['tools', ['code', 'docker', 'studio3d', 'showcase']],
   ['plugins', ['installed']],
   ['system', ['startup', 'updates', 'diagnostics', 'processes']],
 ];
@@ -219,4 +220,83 @@ test('CAT-N1: старый install адрес переносится в общи
   }) }), 'plugins.installed');
   assert.deepEqual(SETTINGS_PAGES.filter((page) => page.groupId === 'plugins').map((page) => page.id),
     ['plugins.installed']);
+});
+
+test('CAT-N3: системные плагины разнесены по своим страницам каталога', async () => {
+  const { SYSTEM_PLUGIN_PAGES, pluginSettingsPageId, pluginSettingsTarget, systemPluginOfPage } =
+    await import('../../web/src/features/settings/pluginPages.ts');
+
+  assert.deepEqual(SYSTEM_PLUGIN_PAGES, {
+    ssh: 'connections.ssh',
+    db: 'connections.db',
+    telegram: 'connections.telegram',
+    github: 'connections.github',
+    analysis: 'automation.analysis',
+    shelf: 'automation.shelf',
+    inbox: 'automation.inbox',
+    video: 'speech.videoTasks',
+    'usage-forecast': 'interface.usageForecast',
+    code: 'tools.code',
+    docker: 'tools.docker',
+    studio3d: 'tools.studio3d',
+    showcase: 'tools.showcase',
+  });
+
+  const groupOf = {
+    ssh: 'connections',
+    db: 'connections',
+    telegram: 'connections',
+    github: 'connections',
+    analysis: 'automation',
+    shelf: 'automation',
+    inbox: 'automation',
+    video: 'speech',
+    'usage-forecast': 'interface',
+    code: 'tools',
+    docker: 'tools',
+    studio3d: 'tools',
+    showcase: 'tools',
+  };
+
+  for (const [pluginId, pageId] of Object.entries(SYSTEM_PLUGIN_PAGES)) {
+    const page = SETTINGS_PAGES.find((item) => item.id === pageId);
+
+    assert.equal(Boolean(page), true, `${pluginId}: страница ${pageId} объявлена`);
+    assert.equal(page.groupId, groupOf[pluginId], `${pluginId}: группа страницы`);
+    assert.equal(pluginSettingsPageId(pluginId, true), pageId);
+    assert.equal(systemPluginOfPage(pageId), pluginId);
+    assert.deepEqual(pluginSettingsTarget(pluginId, true), { pageId });
+
+    for (const locale of ['ru', 'en']) {
+      assert.equal(translator.t(locale, `settings.builtinPlugins.${pluginId}.name`),
+        getSettingsPages(locale).find((item) => item.id === pageId).label,
+        `${pluginId}: подпись страницы берётся из перевода плагина (${locale})`);
+    }
+  }
+
+  assert.equal(pluginSettingsPageId('sample', false), 'plugins.installed');
+  assert.deepEqual(pluginSettingsTarget('sample', false),
+    {
+      pageId: 'plugins.installed',
+      entityId: 'sample'
+    });
+  assert.deepEqual(pluginSettingsTarget('unknown', true),
+    {
+      pageId: 'plugins.installed',
+      entityId: 'unknown'
+    });
+  assert.deepEqual(pluginSettingsTarget('ssh', false),
+    {
+      pageId: 'plugins.installed',
+      entityId: 'ssh'
+    });
+
+  for (const id of ['constructor', 'toString', '__proto__']) {
+    assert.equal(pluginSettingsPageId(id, true), 'plugins.installed');
+    assert.deepEqual(pluginSettingsTarget(id, true), {
+      pageId: 'plugins.installed',
+      entityId: id
+    });
+    assert.equal(systemPluginOfPage(id), null);
+  }
 });

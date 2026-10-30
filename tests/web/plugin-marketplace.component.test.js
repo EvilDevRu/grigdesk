@@ -357,3 +357,59 @@ test('CAT-UI-API2: modern карточка создаёт точный install i
   assert.equal(installed, null);
   assert.equal(h.writes().length, 0);
 });
+
+test('CAT-CONFIGURE: кнопка каталога выбирает страницу или пользовательскую вкладку', async (t) => {
+  for (const system of [true, false]) {
+    await t.test(`system=${system}`, async (t) => {
+      const fixture = catalogFixture();
+
+      fixture.index.plugins[0].id = 'ssh';
+      fixture.index.plugins[0].details = 'ssh.json';
+      fixture.detail.plugin.id = 'ssh';
+
+      const h = await settingsHarness(t, 'plugins.installed', 'PluginWorkspacePage', {
+        stubs: { PluginPage: true },
+        prepare({ plugins, control }) {
+          plugins.list = [{
+            id: 'ssh',
+            name: 'SSH',
+            system,
+            enabled: false,
+            settings: [],
+            values: {},
+          }];
+          control.handlers['/api/plugin-catalog'] = () => Response.json({
+            state: 'fresh',
+            applicationVersion: '1.0.0',
+            fetchedAt: fixture.index.generatedAt,
+            catalog: fixture.index,
+          });
+          control.handlers['/api/plugin-catalog/ssh'] = () => Response.json(fixture.detail);
+        },
+      });
+      const editor = h.module.createPluginEditor('ssh', h.settings, h.plugins);
+
+      await editor.load();
+      h.settings.setField('pluginEnabled:ssh', 'enabled', true);
+      await h.wrapper.get('[data-catalog-id="ssh"]').trigger('click');
+      await h.flushPromises();
+
+      const configure = h.wrapper.findAll('button')
+        .find((button) => button.text() === 'Открыть установленный плагин');
+
+      assert.equal(Boolean(configure), true);
+      await configure.trigger('click');
+      await h.flushPromises();
+      assert.equal(h.settings.pageId, system ? 'connections.ssh' : 'plugins.installed');
+      assert.equal(h.settings.entityId, system ? undefined : 'ssh');
+
+      if (!system) {
+        assert.equal(h.wrapper.get('[data-plugins-tab="installed"]').attributes('aria-selected'), 'true');
+      }
+
+      assert.equal(h.settings.getValue('pluginEnabled:ssh', 'enabled'), true);
+      assert.equal(h.settings.snapshot.dirtyCount, 1);
+      assert.equal(h.writes().length, 0);
+    });
+  }
+});

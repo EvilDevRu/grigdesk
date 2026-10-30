@@ -9,7 +9,7 @@ test('Числовое поле: границы манифеста, число �
         id: 'ssh-fixture',
         name: 'SSH',
         enabled: true,
-        system: true,
+        system: false,
         settings: [{
           key: 'limit',
           label: 'Лимит вывода',

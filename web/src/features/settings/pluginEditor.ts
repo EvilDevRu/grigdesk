@@ -12,6 +12,7 @@ import {
   pluginValueKey,
   type PluginStorePort,
 } from './resources/plugins.ts';
+import { pluginFieldAddress } from './pluginPages.ts';
 
 /**
  * Ресурс плагина остаётся в общей сессии при выборе другого элемента каталога.
@@ -41,6 +42,7 @@ export function createPluginEditor(
 
     const source = plugins.list.find((entry) => entry.id === id);
     const plugin = source ? localizePluginMetadata(source, uiLocale.value) : undefined;
+    const system = source?.system === true;
     const state = settings.snapshot.resources.find((resource) => resource.id === resourceId);
     const fields: SessionField[] = (plugin?.settings ?? []).map((field) => {
       const key = pluginValueKey('values', field.key);
@@ -57,11 +59,7 @@ export function createPluginEditor(
       return {
         key,
         secret: ['secret', 'password'].includes(field.type ?? ''),
-        address: {
-          pageId: 'plugins.installed',
-          entityId: id,
-          fieldPath: ['values', field.key],
-        },
+        address: pluginFieldAddress(id, system, ['values', field.key]),
         ...changed ? {
           unavailable: t("settings.theFieldSchemaChangedDiscardTheEdit"),
         } : {},
@@ -70,20 +68,12 @@ export function createPluginEditor(
 
     fields.push(...(plugin?.placements ?? []).map((field) => ({
       key: pluginValueKey('placements', field.slot),
-      address: {
-        pageId: 'plugins.installed',
-        entityId: id,
-        fieldPath: ['placements', field.slot],
-      },
+      address: pluginFieldAddress(id, system, ['placements', field.slot]),
     })));
     settings.registerResource(adapter, fields);
     settings.registerResource(enabledAdapter, plugin ? [{
       key: 'enabled',
-      address: {
-        pageId: 'plugins.installed',
-        entityId: id,
-        fieldPath: ['enabled'],
-      },
+      address: pluginFieldAddress(id, system, ['enabled']),
     }] : []);
 
     if (plugin && state?.loaded) {
@@ -107,11 +97,7 @@ export function createPluginEditor(
         };
       }),
       {
-        address: {
-          pageId: 'plugins.installed',
-          entityId: id,
-          fieldPath: ['enabled'],
-        },
+        address: pluginFieldAddress(id, system, ['enabled']),
         label: t("settings.enable2", { pluginName: plugin.name }),
         get description() {
     return t("settings.pluginAvailabilityForAllDevices");

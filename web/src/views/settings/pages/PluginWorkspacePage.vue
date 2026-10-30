@@ -72,6 +72,7 @@ import { usePluginInstallStore } from '../../../stores/pluginInstall.ts';
 import { usePluginCatalogStore } from '../../../stores/pluginCatalog.ts';
 import { usePluginsStore } from '../../../stores/plugins.ts';
 import { usePluginMarketplaceState } from '../../../features/settings/pluginMarketplace.ts';
+import { pluginSettingsTarget } from '../../../features/settings/pluginPages.ts';
 import type { CatalogSelection } from '../../../../../shared/plugins/pluginCatalogPolicy.ts';
 import type { PluginListItem } from '../../../../../shared/plugins/pluginsContracts.ts';
 import PluginPage from './PluginPage.vue';
@@ -138,12 +139,18 @@ function openSelection(next: CatalogSelection, installed: PluginListItem | null)
 }
 
 /**
- * Настройки конкретного установленного плагина адресуются существующей сессией.
- * Вкладка выбирается явно и не зависит от того, менялся ли уже entityId.
+ * Настройки плагина открываются на его странице: системные живут в тематических
+ * разделах, пользовательские — в списке «Установленные» с явным выбором.
  */
 function configure(id: string): void {
-  settings.selectPage('plugins.installed', id);
-  state.tab = 'installed';
+  const entry = plugins.list.find((item) => item.id === id);
+  const target = pluginSettingsTarget(id, entry?.system === true);
+
+  settings.selectPage(target.pageId, target.entityId);
+
+  if (target.pageId === 'plugins.installed') {
+    state.tab = 'installed';
+  }
 }
 
 watch([() => settings.entityId, () => settings.revealTarget], ([id, target]) => {

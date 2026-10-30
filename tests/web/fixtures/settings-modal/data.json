@@ -137,7 +137,7 @@
         "id": "sample",
         "name": "Тестовый плагин",
         "version": "1.0.0",
-        "system": true,
+        "system": false,
         "category": "dev",
         "description": "Проверка параметров и размещений",
         "enabled": false,

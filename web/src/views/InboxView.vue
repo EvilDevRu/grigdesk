@@ -348,6 +348,7 @@ import {
   t,
 } from '../ui';
 import { openSettings } from '../shared/settingsNavigation.ts';
+import { pluginSettingsTarget } from '../features/settings/pluginPages.ts';
 import { usePluginsStore } from '../stores/plugins.ts';
 import type { PluginListItem } from '../../../shared/plugins/pluginsContracts.ts';
 import { useSse } from '../composables/useSse.ts';
@@ -1266,8 +1267,8 @@ function autoTaskState(item: InboxItem) {
 }
 
 /**
- * Идентификатор берётся из публичного каталога по объявленному маршруту раздела.
- * Ожидание каталога не подменяет цель строкой id, которой нет в DTO самой очереди.
+ * Страница раздела объявлена в карте системных плагинов; исчезнувший плагин
+ * честно покажет свою причину на месте, а не пустой список магазина.
  */
 async function openInboxSettings(): Promise<void> {
   const plugins = usePluginsStore();
@@ -1278,7 +1279,9 @@ async function openInboxSettings(): Promise<void> {
 
   const entry = (plugins.list as PluginListItem[]).find((plugin) => plugin.nav?.path === '/inbox');
 
-  openSettings({ pageId: 'plugins.installed', entityId: entry?.id });
+  openSettings(entry
+    ? pluginSettingsTarget(entry.id, entry.system === true)
+    : { pageId: 'automation.inbox' });
 }
 
 useSse((name: string) => {

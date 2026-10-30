@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { SYSTEM_PLUGIN_PAGES } from '../../web/src/features/settings/pluginPages.ts';
 import { i18nComponent } from './helpers/i18nComponent.js';
 import { settingsResource } from './helpers/settings-session.js';
 import { catalogMessage } from './helpers/i18nCatalog.js';
@@ -14,6 +15,19 @@ const pages = [
   'interface.behavior', 'interface.notifications', 'interface.shortcuts',
   'automation.chats', 'automation.context', 'automation.launch', 'automation.monitoring',
   'automation.arbiter', 'agents.models', 'connections.devices', 'connections.b24',
+  'connections.ssh',
+  'connections.db',
+  'connections.telegram',
+  'connections.github',
+  'automation.analysis',
+  'automation.shelf',
+  'automation.inbox',
+  'speech.videoTasks',
+  'interface.usageForecast',
+  'tools.code',
+  'tools.docker',
+  'tools.studio3d',
+  'tools.showcase',
   'connections.mobile', 'system.startup', 'system.updates', 'system.processes',
   'plugins.installed', 'agents.providers', 'speech.dictation',
   'speech.video', 'speech.language', 'speech.models', 'speech.advanced', 'system.diagnostics',
@@ -168,6 +182,41 @@ test('I18N-S02: все страницы, публичные метаданные
   };
   const h = await i18nComponent(t, { responses: { '/api/devices/access': access } });
 
+  const plugins = h.module.usePluginsStore(h.pinia);
+
+  plugins.list.push(...Object.keys(SYSTEM_PLUGIN_PAGES).map((id) => ({
+    id,
+    name: id,
+    description: '',
+    version: '0.1.0',
+    system: true,
+    enabled: false,
+    settings: id === 'ssh' ? [
+      {
+        key: 'outputLimitKiB',
+        type: 'number',
+        label: 'Лимит вывода, KiB',
+        default: 64
+      },
+      {
+        key: 'echoToTerminal',
+        type: 'checkbox',
+        label: 'Эхо команд агента в терминал',
+        default: true
+      },
+    ] : [],
+    placements: id === 'usage-forecast'
+      ? [{
+        slot: 'provider.popover.after-bars',
+        enabled: true
+      }]
+      : [],
+    values: id === 'ssh' ? {
+      outputLimitKiB: 64,
+      echoToTerminal: true
+    } : {},
+  })));
+
   assert.deepEqual(Object.keys(h.module.SETTINGS_PAGE_COMPONENTS).sort(), [...pages].sort());
   h.settings.setAuthenticated(true);
   h.settings.requestOpen({ pageId: 'interface.behavior' });
@@ -202,7 +251,54 @@ test('I18N-S02: все страницы, публичные метаданные
       /\bsettings\.[a-z]+\./, pageId);
     // Прежний раздел мобильного доступа стал псевдонимом единого «Доступа к серверу».
     assert.equal(h.settings.pageId, pageId === 'connections.mobile' ? 'connections.devices' : pageId);
+
+    if (Object.values(SYSTEM_PLUGIN_PAGES).includes(pageId)) {
+      assert.equal(Boolean(document.querySelector('[data-plugin-page] [role="switch"]')), true, pageId);
+      assert.equal(Boolean(document.querySelector('[data-plugin-missing]')), false, pageId);
+    }
   }
+
+  h.settings.selectPage('connections.ssh');
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await h.flushPromises();
+  }
+
+  const number = new h.DOMWrapper(document.querySelector('[data-plugin-page="ssh"] input[type="number"]'));
+
+  await number.setValue('128');
+  h.settings.selectPage('tools.code');
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await h.flushPromises();
+  }
+
+  const echo = h.settings.dynamicFields.find((field) => field.address.pageId === 'connections.ssh'
+    && field.address.fieldPath[1] === 'echoToTerminal');
+
+  assert.equal(Boolean(echo), true);
+  assert.equal(echo.address.entityId, undefined);
+  h.settings.query = echo.label;
+  await h.flushPromises();
+
+  const result = [...document.querySelectorAll('[data-settings-result]')]
+    .find((node) => node.textContent.includes(echo.label));
+
+  assert.equal(Boolean(result), true);
+  await new h.DOMWrapper(result).trigger('click');
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await h.flushPromises();
+  }
+
+  assert.equal(h.settings.pageId, 'connections.ssh');
+  assert.equal(h.settings.entityId, undefined);
+  assert.equal(h.settings.revealTarget, null);
+  assert.equal(document.querySelector('[data-plugin-page="ssh"] input[type="number"]').value, '128');
+  assert.equal(Boolean(document.activeElement?.closest('[data-settings-field][data-revealed="true"]')), true);
+  assert.equal(h.calls.some((call) => call.method && call.method !== 'GET'), false);
+  h.settings.discardField('pluginSettings:ssh', '["values","outputLimitKiB"]');
+  h.settings.query = '';
 
   h.settings.selectPage('connections.devices');
 

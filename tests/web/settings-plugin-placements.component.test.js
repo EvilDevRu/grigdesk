@@ -5,7 +5,7 @@ import { settingsHarness } from './helpers/settings-harness.js';
 const record = {
   id: 'forecast',
   name: 'Прогноз',
-  system: true,
+  system: false,
   enabled: true,
   settings: [
     {

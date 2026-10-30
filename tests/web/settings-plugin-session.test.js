@@ -197,6 +197,107 @@ test('Плагины: общая сессия и полная запись зн�
       state.cleanup();
     }
   });
+  await t.test('PL-ADDR: поля системного плагина адресуются его страницей', async () => {
+    const state = fixture();
+    const systemList = [{
+      ...state.plugin,
+      id: 'ssh',
+      system: true,
+      settings: [{
+        key: 'outputLimitKiB',
+        type: 'number',
+        label: 'Лимит',
+        min: 4,
+        max: 1024
+      }],
+      placements: [{
+        slot: 'chat.header',
+        label: 'Чат',
+        enabled: true
+      }],
+    }];
+
+    try {
+      const custom = module.createPluginEditor('sample', state.settings, state.plugins);
+      const system = module.createPluginEditor('ssh', state.settings, {
+        ...state.plugins,
+        list: systemList,
+      });
+
+      await custom.load();
+      await system.load();
+
+      const customFields = state.settings.snapshot.resources
+        .find((item) => item.id === 'pluginSettings:sample').fields;
+      const systemFields = state.settings.snapshot.resources
+        .find((item) => item.id === 'pluginSettings:ssh').fields;
+      const enabled = state.settings.snapshot.resources
+        .find((item) => item.id === 'pluginEnabled:ssh').fields;
+
+      assert.deepEqual(customFields[0].address, {
+        pageId: 'plugins.installed',
+        entityId: 'sample',
+        fieldPath: ['values', 'limit'],
+      });
+      assert.deepEqual(systemFields[0].address, {
+        pageId: 'connections.ssh',
+        fieldPath: ['values', 'outputLimitKiB'],
+      });
+      assert.deepEqual(enabled[0].address, {
+        pageId: 'connections.ssh',
+        fieldPath: ['enabled'],
+      });
+      assert.deepEqual(systemFields[1].address, {
+        pageId: 'connections.ssh',
+        fieldPath: ['placements', 'chat.header'],
+      });
+      assert.deepEqual(state.settings.dynamicFields.filter((item) =>
+        item.address.pageId === 'connections.ssh').map((item) => item.address), [
+        {
+          pageId: 'connections.ssh',
+          fieldPath: ['values', 'outputLimitKiB']
+        },
+        {
+          pageId: 'connections.ssh',
+          fieldPath: ['placements', 'chat.header']
+        },
+        {
+          pageId: 'connections.ssh',
+          fieldPath: ['enabled']
+        },
+      ]);
+
+      const forecast = module.createPluginEditor('usage-forecast', state.settings, {
+        ...state.plugins,
+        list: [{
+          ...state.plugin,
+          id: 'usage-forecast',
+          system: true,
+          settings: [],
+          placements: [{
+            slot: 'provider.popover.after-bars',
+            enabled: true
+          }],
+        }],
+      });
+
+      await forecast.load();
+      assert.deepEqual(state.settings.dynamicFields.filter((item) =>
+        item.address.pageId === 'interface.usageForecast').map((item) => item.address), [
+        {
+          pageId: 'interface.usageForecast',
+          fieldPath: ['placements', 'provider.popover.after-bars']
+        },
+        {
+          pageId: 'interface.usageForecast',
+          fieldPath: ['enabled']
+        },
+      ]);
+    } finally {
+      state.cleanup();
+    }
+  });
+
   await t.test('PL04/05: потерянная модель, effort и секрет в новой форме', async () => {
     const state = fixture();
     const { settings, pinia, plugins, calls } = state;
