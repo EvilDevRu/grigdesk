@@ -296,8 +296,13 @@ export async function fillProject(page, directories, title = 'Проект из 
     const branch = page.getByRole('combobox', { name: names.branch }).nth(index);
 
     await branch.waitFor();
-    await page.waitForFunction((select) => select.value === 'main'
-      && [...select.options].some((option) => option.value === 'main'), await branch.elementHandle());
+    await page.waitForFunction((button) => {
+      const select = button.closest('.ui-select-wrap')?.querySelector('select');
+
+      return select?.value === 'main'
+        && [...select.options].some((option) => option.value === 'main')
+        && button.textContent.trim() === 'main';
+    }, await branch.elementHandle());
   }
 }
 

@@ -8,6 +8,11 @@
 `UiFieldHandle`. Он сохраняет исходный контракт `el`, `focus` и необязательный
 `select`; импорт типа не добавляет зависимости при выполнении.
 
+У `UiSelect` метод `focus` фокусирует видимую кнопку, `el` возвращает скрытый
+native select для совместимости, а `triggerEl` — видимую кнопку. Эти два элемента
+имеют разные id; label и aria-состояния внешнего `UiField` связаны с кнопкой.
+Подробности — [общий выбор](select-control.md).
+
 Границу проверяют `npm --prefix web run check:ui` и
 `tests/web/ui-dependency-boundary.test.js`; доступность типа проверяет
 `npm --prefix web run typecheck`.

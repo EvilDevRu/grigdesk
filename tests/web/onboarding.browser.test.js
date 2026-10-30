@@ -1,3 +1,4 @@
+import { selectUiOption } from './helpers/selectUiOption.ts';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -54,7 +55,7 @@ test('ONB-E2E-01: настоящий App и HTTP, два Git, ACK/reload и об
   await page.getByRole('button', { name: names.skip }).click();
   await waitState(f, (state) => state.active.step === 'project');
   await fillProject(page, [first, second], 'Два репозитория из мастера');
-  await page.getByRole('combobox', { name: names.branch }).nth(1).selectOption('feature');
+  await selectUiOption(page, page.getByRole('combobox', { name: names.branch }).nth(1), 'feature');
   await waitState(f, (state) => state.active.draft.repositories[1]?.baseBranch === 'feature');
   await page.reload({ waitUntil: 'domcontentloaded' });
   assert.equal(await page.getByRole('textbox', { name: names.title }).inputValue(),

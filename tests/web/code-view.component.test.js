@@ -476,11 +476,16 @@ test('CodeView показывает два подписанных уровня, 
   assert.equal(wrapper.findAll('.panel select').length, 0);
   assert.equal(wrapper.get('label[for="code-project"]').text(), 'проект');
   assert.equal(wrapper.get('label[for="code-context"]').text(), 'рабочая копия');
-  assert.equal(wrapper.get('#code-context').element.value, JSON.stringify(['web', '/work/web-preview']));
-  assert.deepEqual(wrapper.findAll('#code-context optgroup').map((group) => group.attributes('label')), [
+  assert.equal(
+    wrapper.get('#code-context-native').element.value,
+    JSON.stringify(['web', '/work/web-preview']),
+  );
+  assert.deepEqual(
+    wrapper.findAll('#code-context-native optgroup').map((group) => group.attributes('label')), [
     'engine', 'web',
   ]);
-  const optionTexts = wrapper.findAll('#code-context option').map((option) => option.text());
+
+  const optionTexts = wrapper.findAll('#code-context-native option').map((option) => option.text());
   assert.ok(optionTexts.includes('engine · Основная · master'));
   assert.ok(optionTexts.includes('engine · Задача t46 · task-46'));
   assert.ok(optionTexts.includes('web · Worktree web-preview · detached HEAD'));
@@ -491,7 +496,7 @@ test('CodeView показывает два подписанных уровня, 
   assert.equal(query(restoredLs).get('repo'), 'web');
   assert.equal(query(restoredLs).get('root'), '/work/web-preview');
 
-  await wrapper.get('#code-context').setValue(JSON.stringify(['engine', '/engine']));
+  await wrapper.get('#code-context-native').setValue(JSON.stringify(['engine', '/engine']));
   await settle(flushPromises);
   assert.deepEqual(JSON.parse(browser.localStorage.getItem('grigdesk-code-context:grigdesk')), {
     v: 1,
@@ -504,18 +509,18 @@ test('CodeView показывает два подписанных уровня, 
 
   // Переключатель рабочей копии остаётся и у проекта с единственным вариантом:
   // человек должен видеть, где вообще меняют копию, а не угадывать.
-  await wrapper.get('#code-project').setValue('solo');
+  await wrapper.get('#code-project-native').setValue('solo');
   await settle(flushPromises);
   assert.equal(wrapper.findAll('.code-head select').length, 2);
   assert.deepEqual(
-    wrapper.findAll('#code-context option').map((option) => option.text()),
+    wrapper.findAll('#code-context-native option').map((option) => option.text()),
     ['solo · Основная · trunk'],
   );
   assert.equal(wrapper.find('.code-head .tlabel').exists(), false);
 
-  await wrapper.get('#code-project').setValue('grigdesk');
+  await wrapper.get('#code-project-native').setValue('grigdesk');
   await settle(flushPromises);
-  assert.equal(wrapper.get('#code-context').element.value, JSON.stringify(['engine', '/engine']));
+  assert.equal(wrapper.get('#code-context-native').element.value, JSON.stringify(['engine', '/engine']));
   assert.equal(browser.localStorage.getItem('grigdesk-code-context:solo'), JSON.stringify({
     v: 1,
     repoKey: 'solo',
@@ -1225,7 +1230,7 @@ test('поздние ls/file не перезаписывают новый выб
     },
   };
   const { wrapper, flushPromises, monacoState } = await mountCodeView(t, { api });
-  const context = wrapper.get('#code-context');
+  const context = wrapper.get('#code-context-native');
 
   await context.setValue(JSON.stringify(['race', '/race/b']));
   await context.setValue(JSON.stringify(['race', '/race/a']));
@@ -1252,7 +1257,7 @@ test('поздние ls/file не перезаписывают новый выб
   assert.match(wrapper.get('.ehead').text(), /two\.js/);
   assert.doesNotMatch(wrapper.get('.ehead').text(), /читаю/);
 
-  await wrapper.get('#code-context').setValue(JSON.stringify(['race', '/race/b']));
+  await wrapper.get('#code-context-native').setValue(JSON.stringify(['race', '/race/b']));
   await settle(flushPromises);
   assert.equal(monacoState.fileEditors[0].setCalls.at(-1), null);
   assert.equal(currentModel.disposed, true);
@@ -1315,25 +1320,27 @@ test('поздние repos и git не возвращают интерфейс �
   };
   const { wrapper, flushPromises } = await mountCodeView(t, { api });
 
-  await wrapper.get('#code-project').setValue('b');
-  await wrapper.get('#code-project').setValue('a');
+  await wrapper.get('#code-project-native').setValue('b');
+  await wrapper.get('#code-project-native').setValue('a');
   currentARepos.resolve({ repos: aRepos });
   await settle(flushPromises);
   lateBRepos.reject(new Error('late project B error'));
   await settle(flushPromises);
 
-  assert.equal(wrapper.get('#code-project').element.value, 'a');
-  assert.equal(wrapper.get('#code-context').element.value, JSON.stringify(['a', '/a/main']));
+  assert.equal(wrapper.get('#code-project-native').element.value, 'a');
+  assert.equal(wrapper.get('#code-context-native').element.value, JSON.stringify(['a', '/a/main']));
   assert.equal(wrapper.find('.perr').exists(), false);
-  assert.ok(wrapper.findAll('#code-context option').every((option) => option.text().startsWith('a ·')));
+  assert.ok(wrapper.findAll('#code-context-native option').every((option) => {
+    return option.text().startsWith('a ·');
+  }));
 
   await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
   assert.equal(wrapper.find('button.git-file[data-path="main-initial.js"]').exists(), true);
 
-  await wrapper.get('#code-context').setValue(JSON.stringify(['a', '/a/task']));
+  await wrapper.get('#code-context-native').setValue(JSON.stringify(['a', '/a/task']));
   await waitFor(() => taskGitCalls === 1, 'не стартовал Git-запрос старого task-контекста');
-  await wrapper.get('#code-context').setValue(JSON.stringify(['a', '/a/main']));
+  await wrapper.get('#code-context-native').setValue(JSON.stringify(['a', '/a/main']));
   await waitFor(() => mainGitCalls === 3, 'не стартовал Git-запрос нового main-контекста');
   currentMainGit.resolve(gitPayload('main-current.js'));
   await settle(flushPromises);
@@ -1556,14 +1563,14 @@ test('ответ revalidation не откатывает проект, выбра
   await wrapper.setProps({ active: false });
   await wrapper.setProps({ active: true });
   await waitFor(() => projectCalls === 2, 'не стартовала revalidation проектов');
-  await wrapper.get('#code-project').setValue('b');
+  await wrapper.get('#code-project-native').setValue('b');
   await settle(flushPromises);
-  assert.equal(wrapper.get('#code-project').element.value, 'b');
+  assert.equal(wrapper.get('#code-project-native').element.value, 'b');
 
   nextProjects.resolve({ projects });
   await settle(flushPromises);
-  assert.equal(wrapper.get('#code-project').element.value, 'b');
-  assert.equal(wrapper.get('#code-context').element.value, JSON.stringify(['b', '/b']));
+  assert.equal(wrapper.get('#code-project-native').element.value, 'b');
+  assert.equal(wrapper.get('#code-context-native').element.value, JSON.stringify(['b', '/b']));
 });
 
 test('фоновое обновление дерева не отменяет сворачивание каталога человеком', async (t) => {
@@ -1732,7 +1739,7 @@ test('intent open-file открывает точную рабочую копию
   });
   await settle(flushPromises, 10);
 
-  assert.equal(wrapper.get('#code-context').element.value, JSON.stringify(['demo', '/work/t1234']));
+  assert.equal(wrapper.get('#code-context-native').element.value, JSON.stringify(['demo', '/work/t1234']));
   assert.equal(wrapper.get('.ehead .epath').text(), 'web/src/chat.js');
   // Каталоги пути раскрыты: иначе файл открылся бы, но потерялся бы в навигаторе.
   assert.equal(wrapper.get('button[data-dir-path="web"]').attributes('aria-expanded'), 'true');
@@ -2260,7 +2267,7 @@ test('оба переключателя живут в шапке и не дуб�
   assert.equal(wrapper.findAll('.code-head select').length, 2);
   assert.equal(wrapper.findAll('.panel select').length, 0);
   assert.equal(wrapper.find('.panel .tlabel').exists(), false);
-  assert.equal(wrapper.get('#code-context').element.value, JSON.stringify(['demo', '/demo']));
+  assert.equal(wrapper.get('#code-context-native').element.value, JSON.stringify(['demo', '/demo']));
 });
 
 test('композер стоит в нижнем footer и отдаёт полю ввода целую строку', async (t) => {
@@ -2622,7 +2629,7 @@ test('Git-навигация не протекает в обычный файл 
 
   await wrapper.get('button[data-action="file-history"]').trigger('click');
   await settle(flushPromises);
-  await wrapper.get('#code-context').setValue(JSON.stringify(['demo', '/other']));
+  await wrapper.get('#code-context-native').setValue(JSON.stringify(['demo', '/other']));
   await settle(flushPromises);
   assert.equal(wrapper.find('.file-history').exists(), false);
 });
@@ -4372,8 +4379,11 @@ test('TW-C01: новый экземпляр и возврат сохраняют
 
   await second.wrapper.vm.importState(state);
   await settle(second.flushPromises, 10);
-  assert.equal(second.wrapper.get('#code-project').element.value, 'demo');
-  assert.equal(second.wrapper.get('#code-context').element.value, JSON.stringify(['demo', '/work/task']));
+  assert.equal(second.wrapper.get('#code-project-native').element.value, 'demo');
+  assert.equal(
+    second.wrapper.get('#code-context-native').element.value,
+    JSON.stringify(['demo', '/work/task']),
+  );
   assert.equal(second.wrapper.get('.ehead .epath').text(), 'a.ts');
   assert.equal(second.monacoState.fileEditors.at(-1).model.content, 'WORKTREE\nsecond\nthird');
   assert.equal(second.monacoState.fileEditors.at(-1).position.lineNumber, 3);
@@ -4389,7 +4399,10 @@ test('TW-C01: новый экземпляр и возврат сохраняют
 
   await third.wrapper.vm.importState(returning);
   await settle(third.flushPromises, 10);
-  assert.equal(third.wrapper.get('#code-context').element.value, JSON.stringify(['demo', '/work/task']));
+  assert.equal(
+    third.wrapper.get('#code-context-native').element.value,
+    JSON.stringify(['demo', '/work/task']),
+  );
   assert.equal(third.wrapper.get('textarea.commit-message').element.value, 'Точный черновик коммита');
 });
 
@@ -4484,7 +4497,7 @@ for (const event of ['projects-changed', 'hello']) {
       storage: { 'grigdesk-project': 'demo' },
     });
 
-    assert.equal(wrapper.get('#code-context').element.value.includes('demo'), true);
+    assert.equal(wrapper.get('#code-context-native').element.value.includes('demo'), true);
     globalThis.__codeViewSse('hello', null);
     await new Promise((resolve) => setTimeout(resolve, 0));
     removed = true;
@@ -4503,13 +4516,13 @@ for (const event of ['projects-changed', 'hello']) {
     });
     await settle(flushPromises);
 
-    const hasDeleted = wrapper.findAll('#code-context option')
+    const hasDeleted = wrapper.findAll('#code-context-native option')
       .some((item) => item.attributes('value').includes('demo'));
 
     assert.equal(hasDeleted,
       false);
 
-    const context = wrapper.find('#code-context');
+    const context = wrapper.find('#code-context-native');
 
     assert.equal(context.exists() ? context.element.value : '', '');
   });
@@ -4560,9 +4573,9 @@ test('LOAD-KEEP-inline-code: рабочая копия и поиск сохра�
             },
         }
     });
-    const options = h.wrapper.get('#code-context').findAll('option');
+    const options = h.wrapper.get('#code-context-native').findAll('option');
 
-    await h.wrapper.get('#code-context').setValue(options[1].attributes('value'));
+    await h.wrapper.get('#code-context-native').setValue(options[1].attributes('value'));
     await settle(h.flushPromises);
     assert.equal(h.wrapper.find('[data-variant="inline"] .ui-spinner').exists(), true);
     assert.equal(h.wrapper.find('[data-ui-skeleton]').exists(), false);

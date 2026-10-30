@@ -63,7 +63,7 @@ test('BOARD-FILTERS-02: режим триажа взаимоисключающи
   await wrapper.get('.favfilter').trigger('click');
   await wrapper.get('.newfilter').trigger('click');
   await wrapper.get('[data-option-value="unrated"]').trigger('click');
-  await wrapper.get('.trisort').setValue('risk');
+  await wrapper.get('.ui-select-wrap:has(.trisort) select').setValue('risk');
   await flushPromises();
 
   assert.equal(wrapper.findAll('li.trow').length, 1);
@@ -82,7 +82,7 @@ test('BOARD-FILTERS-02: режим триажа взаимоисключающи
   await wrapper.get('.filter-reset').trigger('click');
   await flushPromises();
   assert.equal(wrapper.get('.search input').element.value, '');
-  assert.equal(wrapper.get('.trisort').element.value, 'b24');
+  assert.equal(wrapper.get('.ui-select-wrap:has(.trisort) select').element.value, 'b24');
   assert.equal(wrapper.get('.favfilter').attributes('aria-pressed'), 'false');
   assert.equal(wrapper.get('.newfilter').attributes('aria-pressed'), 'false');
   assert.equal(wrapper.get('[data-option-value="all"]').attributes('aria-pressed'), 'true');
@@ -98,7 +98,7 @@ test('BOARD-FILTERS-03: повреждённые сохранённые наст
     triagePrefs: '{сломанный json',
   });
 
-  assert.equal(wrapper.get('.trisort').element.value, 'b24');
+  assert.equal(wrapper.get('.ui-select-wrap:has(.trisort) select').element.value, 'b24');
   assert.equal(wrapper.get('[data-option-value="all"]').attributes('aria-pressed'), 'true');
   assert.equal(wrapper.findAll('li.trow').length, 2);
 });

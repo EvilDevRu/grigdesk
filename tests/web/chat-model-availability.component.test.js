@@ -5,9 +5,11 @@
 // блокировка — нет: отказ приходит от самого запуска и называет настоящую причину.
 import assert from 'node:assert/strict';
 
-globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
-import test from 'node:test';
+import { after, before, test } from 'node:test';
 import { compileChatSession as compileChatSessionHarness } from './helpers/chat-session.js';
+import { createUiBrowser } from './helpers/ui-components.js';
+
+globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
 
 process.env.NODE_ENV = 'test';
 
@@ -32,33 +34,24 @@ const PROVIDERS = [
   },
 ];
 
-async function installBrowser(t) {
-  const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
-  const browser = new Window({ url: 'https://grigdesk.test/#/chats' });
+let sharedBrowser;
 
-  for (const [key, value] of Object.entries({
-    window: browser,
-    document: browser.document,
-    navigator: browser.navigator,
-    location: browser.location,
-    localStorage: browser.localStorage,
-    Node: browser.Node,
-    Element: browser.Element,
-    HTMLElement: browser.HTMLElement,
-    SVGElement: browser.SVGElement,
-    Document: browser.Document,
-    ShadowRoot: browser.ShadowRoot,
-    Event: browser.Event,
-    CustomEvent: browser.CustomEvent,
-    KeyboardEvent: browser.KeyboardEvent,
-    getComputedStyle: browser.getComputedStyle.bind(browser),
-  })) {
-    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
-  }
-  browser.document.body.innerHTML = '<div id="mount"></div>';
-  t.after(() => browser.close());
+before(async () => {
+  sharedBrowser = await createUiBrowser('https://grigdesk.test/#/chats');
+});
 
-  return browser;
+after(async () => {
+  await sharedBrowser?.close();
+});
+
+/**
+ * Один document на файл нужен новым пользовательским проверкам Teleport.
+ * Каждый mount получает чистое body, глобальные Vue DOM singletons остаются прежними.
+ */
+async function installBrowser() {
+  sharedBrowser.document.body.innerHTML = '<div id="mount"></div>';
+
+  return sharedBrowser;
 }
 
 // Реестр отвечает как настоящий стор: модель ищется по всем исполнителям, доступность
@@ -75,7 +68,7 @@ function modelOf(value) {
  * Сохранённое состояние задаётся до загрузки реестра и не исправляется фикстурой.
  */
 async function mountChat(t, { initial = {}, reset = async () => true, binding = false } = {}) {
-  const browser = await installBrowser(t);
+  const browser = await installBrowser();
   const { reactive } = await import('../../web/node_modules/vue/index.mjs');
   const session = reactive({
     id: 'model-availability-chat',
@@ -372,3 +365,55 @@ for (const draft of ['', 'Черновик без единого хода']) {
     assert.doesNotMatch(wrapper.text(), /Память агента сброшена/);
   });
 }
+
+test('SELECT-CHAT-01: отказ async reset сохраняет прежнюю видимую модель', async (t) => {
+  const gate = Promise.withResolvers();
+
+  t.after(() => gate.resolve(false));
+
+  const { wrapper, session, resetCalls, setModelCalls, flushPromises } = await mountChat(t, {
+    initial: RETIRED_SESSION,
+    reset: () => gate.promise,
+  });
+  const trigger = wrapper.get('.sel.model button.ui-select');
+  const before = trigger.text();
+
+  await trigger.trigger('click');
+  await flushPromises();
+
+  const native = wrapper.get('.sel.model select').element;
+  const index = [...native.options].findIndex((option) => option.value === 'gpt-5.6-sol');
+  const item = document.querySelector('.ui-select-popup [data-option-index="' + index + '"]');
+
+  assert.ok(Boolean(item));
+  item.click();
+  await flushPromises();
+  assert.equal(resetCalls.length, 1);
+  assert.equal(setModelCalls.length, 0);
+  assert.equal(trigger.text(), before);
+  gate.resolve(false);
+  await flushPromises();
+  assert.equal(trigger.text(), before);
+  assert.equal(native.value, RETIRED_SESSION.model);
+  assert.deepEqual(session.modelRef, RETIRED_SESSION.modelRef);
+  assert.equal(setModelCalls.length, 0);
+});
+
+test('SELECT-CHAT-02: видимый выбор недоступного исполнителя доходит до стора', async (t) => {
+  const { wrapper, session, setModelCalls, flushPromises } = await mountChat(t);
+
+  await wrapper.get('.sel.model button.ui-select').trigger('click');
+  await flushPromises();
+
+  const native = wrapper.get('.sel.model select').element;
+  const index = [...native.options].findIndex((option) => option.value === 'gpt-5.6-sol');
+  const item = document.querySelector('.ui-select-popup [data-option-index="' + index + '"]');
+
+  assert.ok(Boolean(item));
+  assert.equal(item.disabled, false);
+  item.click();
+  await flushPromises();
+  assert.deepEqual(setModelCalls, [{ sid: session.id, modelId: 'gpt-5.6-sol' }]);
+  assert.equal(session.modelRef.model, 'gpt-5.6-sol');
+  assert.match(wrapper.get('.sel.model button.ui-select').text(), /GPT 5.6 Sol/u);
+});

@@ -104,10 +104,10 @@ const mountView = (t, opts) => mountTelegramView(t, { ...opts, prefix: 'rules' }
 
 const btn = (wrapper, text) => wrapper.findAll('button').find((b) => b.text().includes(text));
 const saveBtn = (wrapper) => btn(wrapper, 'Сохранить');
-const chatSelect = (row) => row.get('.chat-select');
-const topicSelect = (row) => row.get('.topic-select');
-const projectSelect = (row) => row.get('.project-select');
-const b24GroupSelect = (row) => row.get('.b24-group-select');
+const chatSelect = (row) => row.get('.ui-select-wrap:has(.chat-select) select');
+const topicSelect = (row) => row.get('.ui-select-wrap:has(.topic-select) select');
+const projectSelect = (row) => row.get('.ui-select-wrap:has(.project-select) select');
+const b24GroupSelect = (row) => row.get('.ui-select-wrap:has(.b24-group-select) select');
 
 test('правил нет — раздел говорит, что закрыты все чаты, и ничего не сохраняет сам', async (t) => {
   const srv = server();

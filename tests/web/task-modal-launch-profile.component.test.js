@@ -173,10 +173,10 @@ for (const event of ['projects-changed', 'hello']) {
   });
     await flushPromises();
     assert.equal(reads, 2);
-    assert.equal(wrapper.get('#launch-profile').element.value, '');
+    assert.equal(wrapper.get('#launch-profile-native').element.value, '');
     assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, true);
     assert.equal(wrapper.get('[data-role="task-launch-note"]').element.value, 'Критерии человека');
-    assert.equal(wrapper.get('#launch-profile').findAll('option')
+    assert.equal(wrapper.get('#launch-profile-native').findAll('option')
       .some((option) => option.element.value === 'project-alpha'), false);
     wrapper.unmount();
     assert.equal(listeners.size, 0);
@@ -207,7 +207,7 @@ test('PD: поздний первый launch-options не возвращает �
   release(deletionCatalog());
   await flushPromises();
   assert.equal(reads, 2);
-  assert.equal(wrapper.get('#launch-profile').element.value, '');
+  assert.equal(wrapper.get('#launch-profile-native').element.value, '');
   assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, true);
 });
 
@@ -241,7 +241,7 @@ test('PD: ошибка сверки блокирует запуск, повто�
   await wrapper.get('[data-role="task-launch-note"]').setValue('Правка во время запроса');
   release(deletionCatalog());
   await flushPromises();
-  assert.equal(wrapper.get('#launch-profile').element.value, 'project-alpha');
+  assert.equal(wrapper.get('#launch-profile-native').element.value, 'project-alpha');
   assert.equal(wrapper.get('[data-role="task-launch-note"]').element.value, 'Правка во время запроса');
   assert.equal(wrapper.get('[data-role="task-launch-submit"]').element.disabled, false);
   assert.equal(wrapper.text().includes('Не удалось обновить параметры запуска'), false);
@@ -382,28 +382,29 @@ test('TaskModal выбирает project-beta, перечитывает feature 
 
   await wrapper.get('[data-role="task-launch-open"]').trigger('click');
   await flushPromises();
-  const profile = wrapper.get('#launch-profile');
+
+  const profile = wrapper.get('#launch-profile-native');
   assert.deepEqual(profile.findAll('option').map((option) => option.text()), ['project-alpha', 'project-beta']);
   assert.match(wrapper.text(), /каталог маршрутов профиля не опубликован/);
   assert.equal(wrapper.get('[data-role="task-launch-submit"]').attributes('disabled'), '');
 
   await profile.setValue('project-beta');
   await flushPromises();
-  assert.equal(wrapper.get('#launch-route').element.value, 'feature');
+  assert.equal(wrapper.get('#launch-route-native').element.value, 'feature');
   assert.match(wrapper.text(), /debug/);
-  assert.equal(wrapper.find('#launch-profile').exists(), false);
+  assert.equal(wrapper.find('#launch-profile-native').exists(), false);
   assert.match(wrapper.get('[aria-label="Параметры запуска"]').text(), /project-beta/);
   assert.match(wrapper.get('[aria-label="Параметры запуска"]').text(), /project-beta\/master/);
   assert.equal(wrapper.find('[aria-label="Целевая ветка project-beta"]').exists(), false);
   assert.equal(wrapper.get('.ladvanced').attributes('open'), undefined);
   assert.match(wrapper.get('.ladvanced').text(), /Целевые ветки из конфигурации профиля/);
 
-  await wrapper.get('#launch-route').setValue('consilium-debug');
+  await wrapper.get('#launch-route-native').setValue('consilium-debug');
   await flushPromises();
   assert.equal(wrapper.get('#launch-instrumentation').element.value, 'project-beta:src/diagnostics.py');
-  assert.equal(wrapper.get('#launch-diagnosis-kind').element.value, 'data');
+  assert.equal(wrapper.get('#launch-diagnosis-kind-native').element.value, 'data');
   assert.equal(wrapper.get('#launch-diagnosis-signal').element.value, 'Повторный запуск создаёт дубликаты');
-  await wrapper.get('#launch-route').setValue('feature');
+  await wrapper.get('#launch-route-native').setValue('feature');
   await flushPromises();
 
   await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
@@ -439,7 +440,8 @@ test('TaskModal: исполнитель по умолчанию «из проф�
   await wrapper.get('[data-role="task-launch-open"]').trigger('click');
   await flushPromises();
 
-  const runner = wrapper.get('#launch-runner');
+
+  const runner = wrapper.get('#launch-runner-native');
   assert.deepEqual(
     runner.findAll('option').map((option) => option.text()),
     ['Из профиля (Claude)', 'Claude', 'Codex'],
@@ -455,7 +457,7 @@ test('TaskModal: исполнитель по умолчанию «из проф�
   // Явный выбор — runnerPrimary уезжает в launch.
   await wrapper.get('[data-role="task-launch-open"]').trigger('click');
   await flushPromises();
-  await wrapper.get('#launch-runner').setValue('codex');
+  await wrapper.get('#launch-runner-native').setValue('codex');
   await wrapper.get('[data-role="task-launch-submit"]').trigger('click');
   await flushPromises();
   assert.equal(launchCalls.length, 2);
@@ -479,13 +481,14 @@ test('TaskModal: смена профиля сбрасывает выбор ис�
 
   await wrapper.get('[data-role="task-launch-open"]').trigger('click');
   await flushPromises();
-  await wrapper.get('#launch-runner').setValue('codex');
-  assert.equal(wrapper.get('#launch-runner').element.value, 'codex');
+  await wrapper.get('#launch-runner-native').setValue('codex');
+  assert.equal(wrapper.get('#launch-runner-native').element.value, 'codex');
 
   // У нового профиля свой набор исполнителей и свой primary — прошлый выбор терять обязаны.
-  await wrapper.get('#launch-profile').setValue('project-beta');
+  await wrapper.get('#launch-profile-native').setValue('project-beta');
   await flushPromises();
-  const runner = wrapper.get('#launch-runner');
+
+  const runner = wrapper.get('#launch-runner-native');
   assert.equal(runner.element.value, '');
   assert.deepEqual(
     runner.findAll('option').map((option) => option.text()),
@@ -532,7 +535,7 @@ test('TaskModal: критерии предзаполняются объёмом 
 
   // Человек стёр подсказку — смена профиля не возвращает её.
   await criteria.setValue('');
-  await wrapper.get('#launch-profile').setValue('project-beta');
+  await wrapper.get('#launch-profile-native').setValue('project-beta');
   await flushPromises();
   assert.equal(wrapper.get('[data-role="task-launch-note"]').element.value, '');
 

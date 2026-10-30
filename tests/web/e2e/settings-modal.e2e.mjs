@@ -1,3 +1,4 @@
+import { selectUiOption } from '../helpers/selectUiOption.ts';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -196,11 +197,11 @@ test('UI00: общий модал на изолированном браузер
     if (tab === 'overview') {
       const picker = fixture.page.getByRole('combobox', { name: 'Выберите исполнителя', exact: true });
 
-      await picker.selectOption('three-d');
+      await selectUiOption(fixture.page, picker, 'three-d');
       await fixture.page.locator('[data-provider-page="three-d"][data-ready="true"]').waitFor();
       assert.equal(await fixture.page.locator('[data-select-provider="three-d"]')
         .getAttribute('aria-pressed'), 'true');
-      await picker.selectOption('fixture');
+      await selectUiOption(fixture.page, picker, 'fixture');
       await fixture.page.locator('[data-provider-page="fixture"][data-ready="true"]').waitFor();
     }
   }

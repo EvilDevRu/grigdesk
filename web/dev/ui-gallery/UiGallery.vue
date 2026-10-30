@@ -87,6 +87,62 @@
 
     <section class="ui-gallery__section">
       <h2>Product compositions</h2>
+      <form data-select-demo-form>
+        <article data-select-demo data-ui-workspace>
+          <UiControlGroup label="Поля выбора">
+            <UiField label="Каталог моделей" required>
+              <UiSelect
+                v-model="selectDemoValue"
+                compact
+                name="demoModel"
+                data-select-demo-trigger
+                aria-label="Каталог моделей"
+                @change="selectDemoChanges += 1"
+                @update:model-value="selectDemoUpdates += 1"
+              >
+                <option value="">Без выбора</option>
+                <optgroup label="Первый провайдер">
+                  <option v-for="index in 12" :key="index" :value="'demo-' + index">
+                    {{ 'Длинная модель ' + index + ' · название полностью видно в списке' }}
+                  </option>
+                </optgroup>
+                <optgroup label="Второй провайдер — недоступен">
+                  <option value="repo/special" title="Полное пояснение модели">Особая модель</option>
+                  <option value="locked" disabled>Настоящий disabled</option>
+                </optgroup>
+                <template #actions>
+                  <UiButton size="compact" @click="selectDemoActions += 1">Обновить</UiButton>
+                </template>
+                <template #footer="{ close }">
+                  <UiButton size="compact" @click="addSelectDemoOption(close)">Добавить</UiButton>
+                </template>
+              </UiSelect>
+            </UiField>
+            <UiField label="Приоритет">
+              <UiSelect v-model="selectDemoPriority" compact data-select-secondary-trigger>
+                <option value="low">Низкий</option>
+                <option value="high">Высокий</option>
+              </UiSelect>
+            </UiField>
+            <UiButton data-select-common-action @click="selectDemoCommon += 1">Применить группу</UiButton>
+          </UiControlGroup>
+          <output data-select-demo-value>{{ selectDemoValue }}</output>
+          <output data-select-demo-priority>{{ selectDemoPriority }}</output>
+          <output data-select-demo-actions>{{ selectDemoActions }}</output>
+          <output data-select-demo-common>{{ selectDemoCommon }}</output>
+          <output data-select-demo-changes>{{ selectDemoChanges }}</output>
+          <output data-select-demo-updates>{{ selectDemoUpdates }}</output>
+        </article>
+      </form>
+      <UiButton data-select-open-dialog @click="selectDemoDialog = true">Открыть тест выбора</UiButton>
+      <UiDialog v-model:open="selectDemoDialog" title="Тест выбора в диалоге">
+        <UiField label="Вложенное поле">
+          <UiSelect v-model="selectDialogValue" searchable data-select-dialog-trigger>
+            <option value="">Без выбора</option>
+            <option value="dialog-model">Модель диалога</option>
+          </UiSelect>
+        </UiField>
+      </UiDialog>
       <article class="ui-gallery__ssh-card" data-geometry-ssh-card>
         <strong>Боевой код — server.internal:22</strong>
         <span>Пользователь: root · sudo</span>
@@ -399,6 +455,7 @@ import {
   UiActionLink,
   UiButton,
   UiCheckbox,
+  UiControlGroup,
   UiChoiceList,
   UiDiscreteSlider,
   UiDisclosureButton,
@@ -438,6 +495,24 @@ const password = ref('секрет');
 const search = ref('длинная строка поиска');
 const number = ref<number | '' | null>(4);
 const selectValue = ref<string | number | null>('one');
+const selectDemoValue = ref<string | number | null>('');
+const selectDemoPriority = ref<string | number | null>('low');
+const selectDemoActions = ref(0);
+const selectDemoCommon = ref(0);
+const selectDemoChanges = ref(0);
+const selectDemoUpdates = ref(0);
+const selectDemoDialog = ref(false);
+const selectDialogValue = ref<string | number | null>('');
+
+/**
+ * Действие демонстрирует расширение popup, не меняя выбранный вариант.
+ * Закрытие приходит из слота, галерея не обращается к внутренним refs.
+ */
+function addSelectDemoOption(close: () => void): void {
+  selectDemoActions.value += 1;
+  close();
+}
+
 const longText = ref('Многострочное содержимое остаётся многострочным.');
 const composerText = ref('Внутри составного composer-а нет второй рамки фокуса.');
 const chatToolbarSelect = ref<string | number | null>('gpt');

@@ -1,3 +1,4 @@
+import { selectUiOption } from './helpers/selectUiOption.ts';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
@@ -138,7 +139,7 @@ async function choose(page, role, after = 'build') {
   await page.locator(`[data-test="wizard-role-${role}"]`).click();
   await page.locator('[data-test="wizard-next"]').click();
   await page.locator('[data-test="wizard-next"]').click();
-  await page.locator('[data-test="wizard-after"]').selectOption(after);
+  await selectUiOption(page, page.locator('button[data-test="wizard-after"]'), after);
 }
 
 /**
@@ -190,15 +191,16 @@ test('SW-E1: полный мастер desktop/touch', async (t) => {
 
       assert.deepEqual(route.nodes.find((node) => node.id === 'build').on.done, { next: selectedId });
       assert.deepEqual(route.nodes.find((node) => node.id === selectedId).on.done, { next: 'verify' });
-      await page.getByRole('dialog').locator('[data-test="simulation-start-target"]').selectOption('feature');
+      await selectUiOption(page, page.getByRole('dialog')
+        .locator('button[data-test="simulation-start-target"]'), 'feature');
       await page.getByRole('dialog').locator('[data-test="simulation-start"]').click();
 
       for (const nodeId of ['plan', 'skeptic', 'gate_plan', 'tests', 'build']) {
         const dialog = page.getByRole('dialog');
 
         assert.ok((await dialog.locator('.route-simulation').textContent()).includes(nodeId));
-        await dialog.locator('[data-test="simulation-outcome"]')
-          .selectOption(nodeId === 'gate_plan' ? 'approved' : 'done');
+        await selectUiOption(page, dialog.locator('button[data-test="simulation-outcome"]'),
+          nodeId === 'gate_plan' ? 'approved' : 'done');
 
         const stepped = page.waitForResponse((response) => response.url().includes('/simulate/step'));
 

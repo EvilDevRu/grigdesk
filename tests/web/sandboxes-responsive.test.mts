@@ -1,3 +1,4 @@
+import { selectUiOption } from './helpers/selectUiOption.ts';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import test from 'node:test';
@@ -234,7 +235,9 @@ async function geometry(page: Page) {
         // Содержимое раскрытий проверяется после открытия ниже в этом же сценарии.
         const panels = [...root.querySelectorAll(selectors)]
             .filter((node) => node.checkVisibility());
-        const controls = [...root.querySelectorAll('.sandboxes__filters input, .sandboxes__filters select')];
+        const controls = [...root.querySelectorAll(
+            '.sandboxes__filters input, .sandboxes__filters button.ui-select',
+        )];
         const cards = [...root.querySelectorAll('.sandbox-card')];
         const rows = [...root.querySelectorAll('[data-context="workspace-catalog-row"]')];
         const card = cards[0]!;
@@ -318,7 +321,7 @@ test('песочницы: геометрия списка и формы на д�
         await page.locator('.sandbox-raise').waitFor();
 
         const form = await page.locator('.sandbox-raise').evaluate((root) => {
-            const fields = [...root.querySelectorAll('select, input:not([type="checkbox"])')]
+            const fields = [...root.querySelectorAll('button.ui-select, input:not([type="checkbox"])')]
                 .map((node) => node.getBoundingClientRect());
             const button = root.querySelector('button[type="submit"]')!.getBoundingClientRect();
 
@@ -411,10 +414,10 @@ test('песочницы: ошибка чтения, повтор, пустое 
     client.state.failRead = false;
     await page.getByRole('button', { name: 'Обновить песочницы' }).click();
     await page.locator('.sandbox-raise').waitFor();
-    assert.equal(await page.getByRole('combobox',
-        { name: 'Профиль',
-        exact: true }).inputValue(),
-        'demo-shop');
+    assert.equal((await page.getByRole('combobox', {
+        name: 'Профиль',
+        exact: true,
+    }).textContent())?.trim(), 'demo-shop');
     await page.screenshot({ path: `${client.artifacts}/sandboxes-empty.png` });
     client.state.overview.profiles = [];
     await page.getByRole('button', { name: 'Обновить песочницы' }).click();
@@ -453,7 +456,7 @@ test('песочницы: фильтры, журнал и длинные дан�
     assert.equal((await geometry(page)).panelsFit, true);
     await page.screenshot({ path: `${client.artifacts}/sandboxes-narrow-dock.png` });
     await showList(page);
-    await page.getByRole('combobox', { name: 'Какие стенды показать' }).selectOption('pipeline');
+    await selectUiOption(page, page.getByRole('combobox', { name: 'Какие стенды показать' }), 'pipeline');
     await page.getByText('Подходящих стендов нет.', { exact: false }).waitFor();
     await page.getByRole('button', { name: 'Сбросить', exact: true }).click();
 

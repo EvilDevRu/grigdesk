@@ -155,8 +155,8 @@ test('LOCAL-LAUNCH-FORM-01: свой проект передаётся initial/r
   await flushPromises();
   assert.ok(profiles.length > initialReads, 'Событие перечитывает параметры запуска');
   assert.equal(profiles.at(-1), 'beta');
-  assert.equal(wrapper.get('#launch-profile').element.value, 'beta');
-  await wrapper.get('#launch-profile').setValue('alpha');
+  assert.equal(wrapper.get('#launch-profile-native').element.value, 'beta');
+  await wrapper.get('#launch-profile-native').setValue('alpha');
   await flushPromises();
 
   const selectedReads = profiles.length;
@@ -172,5 +172,5 @@ test('LOCAL-LAUNCH-FORM-01: свой проект передаётся initial/r
   await flushPromises();
   assert.ok(profiles.length > selectedReads, 'Явный выбор сохраняется после нового чтения');
   assert.equal(profiles.at(-1), 'alpha');
-  assert.equal(wrapper.get('#launch-profile').element.value, 'alpha');
+  assert.equal(wrapper.get('#launch-profile-native').element.value, 'alpha');
 });

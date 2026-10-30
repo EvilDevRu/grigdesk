@@ -159,6 +159,135 @@
   color: var(--ink);
 }
 
+/* Видимое поле сохраняет прежние .ui-select contexts.
+   Скрытый native adapter не участвует в геометрии и последовательности фокуса. */
+.ui-select-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+}
+
+button.ui-select {
+  display: inline-flex;
+  align-items: center;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.ui-select__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-select-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.ui-popover.ui-select-popup {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 4px;
+  overflow: hidden;
+  border-radius: var(--control-radius);
+}
+
+.ui-select-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 4px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ui-select-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  outline: none;
+}
+
+.ui-select-option {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 6px 28px 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ui-select-option__label,
+.ui-select-option__description {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ui-select-option__description {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+
+.ui-select-option[data-active],
+.ui-select-option:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.ui-select-option[aria-selected='true'] {
+  color: var(--accent);
+}
+
+.ui-select-option:disabled {
+  cursor: not-allowed;
+  opacity: var(--control-disabled-opacity);
+}
+
+.ui-select-option__check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+.ui-select-group {
+  padding: 8px 8px 4px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ui-select-header,
+.ui-select-footer {
+  flex: 0 0 auto;
+  padding: 4px;
+}
+
+.ui-select-footer {
+  border-top: 1px solid var(--line);
+}
+
+.ui-select-empty {
+  margin: 0;
+  padding: 12px 8px;
+  color: var(--ink-mid);
+}
+
 @media (max-width: 600px) {
   .ui-textarea[data-role='pipeline-stage-note'] {
     min-height: 96px;

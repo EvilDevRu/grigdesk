@@ -113,7 +113,7 @@ test('UiSelect compact сжимает wrapper и сохраняет number modif
   });
 
   assert.equal(wrapper.classes().includes('ui-select-wrap--compact'), true);
-  assert.equal(wrapper.get('select').classes().includes('ui-select--compact'), true);
+  assert.equal(wrapper.get('button.ui-select').classes().includes('ui-select--compact'), true);
   await wrapper.get('select').setValue('2');
   assert.equal(values.at(-1), 2);
   wrapper.unmount();

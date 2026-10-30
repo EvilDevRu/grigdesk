@@ -1,3 +1,4 @@
+import { selectUiOption } from './helpers/selectUiOption.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -236,8 +237,11 @@ test('ONB-PROJECT-UI: несколько папок проверяются ср�
   const page = await f.newPage({ route: '#/onboarding' });
 
   await fillProject(page, [first, second], 'Два репозитория');
-  assert.equal(await page.getByRole('combobox', { name: names.branch }).nth(0).inputValue(), 'main');
-  await page.getByRole('combobox', { name: names.branch }).nth(1).selectOption('feature');
+  assert.equal(
+    (await page.getByRole('combobox', { name: names.branch }).nth(0).textContent()).trim(),
+    'main',
+  );
+  await selectUiOption(page, page.getByRole('combobox', { name: names.branch }).nth(1), 'feature');
   await page.getByRole('button', { name: names.next }).click();
 
   const state = await waitState(f, (value) => value.active.step === 'workspace');

@@ -103,6 +103,7 @@
   "language": "Interface language",
   "system": "System default",
   "search": "Search",
+  "selectNoResults": "No options found",
   "saveFailure": "Could not save the interface language.",
   "localComputer": "This computer",
   "caption": "{pName} ({pVendor}) · {value3} · {pAuthLabel}",
