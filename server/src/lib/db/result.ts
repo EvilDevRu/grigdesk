@@ -21,11 +21,23 @@ export interface LimitOptions {
   completed?: boolean;
 }
 
-// Значение из чужой базы недоверенно: управляющие последовательности снимаются и с
-// имён колонок, и со значений — иначе они двигали бы курсор в терминале человека.
+/**
+ * Управляющие последовательности снимаются с ключей и значений ответа базы.
+ * Date преобразуется до обхода объектов, иначе дата превращается в пустой словарь.
+ */
 function sanitize(value: unknown): unknown {
-  if (typeof value === 'string') return value.replace(ANSI, '').replace(CONTROLS, '');
-  if (Array.isArray(value)) return (value as unknown[]).map(sanitize);
+  if (typeof value === 'string') {
+    return value.replace(ANSI, '').replace(CONTROLS, '');
+  }
+
+  if (value instanceof Date) {
+    return value.toJSON();
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(sanitize);
+  }
+
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>)
       .map(([key, item]) => [sanitize(key), sanitize(item)]));
@@ -34,7 +46,10 @@ function sanitize(value: unknown): unknown {
   return value;
 }
 
-/** Ограничение считает сериализованные полные строки и никогда не режет UTF-8 значение. */
+/**
+ * Лимит оставляет непрерывное начало выборки из целых строк и не режет UTF-8.
+ * После остановки показа обход продолжается только для честного полного объёма.
+ */
 export async function normalizeDbResult(
   input: unknown,
   options: LimitOptions = {},
@@ -49,16 +64,26 @@ export async function normalizeDbResult(
   const shown = [];
   let shownBytes = 0;
   let totalBytes = 0;
+  let accepting = true;
+
   for (const row of rows) {
     const bytes = Buffer.byteLength(JSON.stringify(row), 'utf8');
+
     totalBytes += bytes;
-    if (shown.length >= maxRows || shownBytes + bytes > maxBytes) continue;
+
+    if (!accepting || shown.length >= maxRows || shownBytes + bytes > maxBytes) {
+      accepting = false;
+      continue;
+    }
+
     shown.push(row);
     shownBytes += bytes;
   }
+
   const completed = options.completed !== false;
   const truncated = shown.length < rows.length || !completed;
   const totalRows = completed ? rows.length : null;
+
   return {
     rows: shown,
     shownRows: shown.length,

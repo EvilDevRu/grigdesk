@@ -78,6 +78,8 @@ SSH, просмотр документов, «Код», стенды и песо
 
 ## Грабли
 
+- [Базы: сохранение дат и непрерывный срез результата](db-human-query-pitfalls.md)
+
 - [npm ci: ignore-scripts не закрывает запуск через project .npmrc](npm-install-config.md)
 
 - [Параллельные записи журнала песочницы теряли общий временный файл на rename](sandbox-journal-concurrency.md)

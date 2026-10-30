@@ -99,6 +99,33 @@ test('прерванный поток не выдумывает полное ч�
   });
 });
 
+test('даты драйвера сохраняются как ISO-строки, включая вложенные значения', async () => {
+  const { normalizeDbResult } = await import('../../server/src/lib/db/result.ts');
+  const date = new Date('2026-10-30T10:33:00.000Z');
+  const result = await normalizeDbResult([{ created_at: date, nested: [date, new Date(NaN)] }], {
+    maxRows: 10,
+    maxBytes: 4096,
+  });
+
+  assert.deepEqual(result.rows, [{
+    created_at: date.toISOString(),
+    nested: [date.toISOString(), null],
+  }]);
+});
+
+test('байтовый срез остаётся началом выборки после первой невлезшей строки', async () => {
+  const { normalizeDbResult } = await import('../../server/src/lib/db/result.ts');
+  const rows = [{ n: 1 }, { n: 2, value: 'x'.repeat(500) }, { n: 3 }];
+  const result = await normalizeDbResult(rows, { maxRows: 10, maxBytes: 40 });
+
+  assert.deepEqual(result.rows, [rows[0]]);
+  assert.equal(result.totalRows, 3);
+  assert.equal(result.totalBytes, rows.reduce(
+    (total, row) => total + Buffer.byteLength(JSON.stringify(row)), 0,
+  ));
+  assert.equal(result.notice, 'показано 1 из 3');
+});
+
 test('журнал хранит авторазрешённый запрос без значений строк и пароля', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-db-audit-'));
   t.after(() => rm(root, { recursive: true, force: true }));
