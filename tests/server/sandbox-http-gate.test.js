@@ -146,6 +146,37 @@ test('снос передаёт явный признак «вместе с не
   ]);
 });
 
+test('снос принимает выбранный профиль и отклоняет недопустимые значения', async (t) => {
+  const { app, service } = await fixture(t);
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/sandboxes/990000/down',
+    payload: { profile: 'demo-profile', force: true },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(service.calls, [
+    ['dismantle', {
+      task: '990000',
+      force: true,
+      profile: 'demo-profile',
+    }],
+  ]);
+
+  for (const profile of ['../../etc', '', null, 42, ['demo-profile']]) {
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/sandboxes/990000/down',
+      payload: { profile },
+    });
+
+    assert.equal(invalid.statusCode, 400);
+    assert.equal(invalid.json().error, 'bad_profile');
+  }
+
+  assert.equal(service.calls.length, 1);
+});
+
 test('действие профиля уходит службе с аргументами, журнал — по номеру стенда', async (t) => {
   const { app, service } = await fixture(t);
 

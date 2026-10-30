@@ -196,6 +196,25 @@ test('успешный снос перечитывает обзор и сним�
   assert.deepEqual(store.busyTasks, []);
 });
 
+test('снос передаёт профиль, который человек выбрал для ручного стенда', async (t) => {
+  const calls = [];
+  const { dismantleSandbox } = await sectionFixture(t, {
+    get: async () => OVERVIEW,
+    post: async (path, body) => {
+      calls.push([path, body]);
+
+      return { task: '990000', job: { ...JOB, action: 'down' } };
+    },
+  });
+
+  await dismantleSandbox('990000', false, 'demo-profile');
+
+  assert.deepEqual(calls, [[
+    '/api/sandboxes/990000/down',
+    { force: false, profile: 'demo-profile' },
+  ]]);
+});
+
 test('подъём отправляет выбранный профиль и применяет начатое задание', async (t) => {
   const calls = [];
   const { store, raiseSandbox } = await sectionFixture(t, {

@@ -1,4 +1,9 @@
 {
+  "sandboxRemovalProfile": "Профиль для сноса",
+  "sandboxRemovalProfileHint": "GrigDesk не определил профиль этого стенда. Выберите проект, скрипт которого должен удалить стенд.",
+  "sandboxRemovalChooseProfile": "Выберите профиль",
+  "sandboxRemovalNoProfiles": "Нет профилей со скриптом сноса down.sh. Добавьте его в профиль проекта.",
+  "sandboxRemovalProfileConfirm": "Снос выполнит скрипт профиля «{profile}».",
   "pipelineRunControls": "Управление конвейерами",
   "startPipelines": "Запустить конвейеры",
   "startingPipelines": "Запускаю конвейеры",

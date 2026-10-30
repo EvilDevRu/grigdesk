@@ -34,9 +34,12 @@ export const sandboxApi = {
     return parseSandboxAction(value);
   },
 
-  async dismantle(task: string, force = false) {
+  async dismantle(task: string, force = false, profile?: string) {
     const path = `/api/sandboxes/${encodeURIComponent(task)}/down`;
-    const value: unknown = await api.post(path, { force });
+    const value: unknown = await api.post(path, {
+      force,
+      ...(profile === undefined ? {} : { profile }),
+    });
 
     return parseSandboxAction(value);
   },

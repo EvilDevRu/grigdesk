@@ -91,6 +91,7 @@ async function serviceFixture(t, {
   withScripts = true,
   manualRange = { from: 990000, to: 990004 },
   probe = async () => false,
+  isProjectArchived,
 } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-sandbox-life-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -125,6 +126,7 @@ async function serviceFixture(t, {
     // Настоящих стендов в тесте нет, поэтому и портов быть не может: проба портов
     // подменена, иначе проверка ходила бы на живые сокеты машины.
     probe,
+    isProjectArchived,
     broadcast: (event, data) => events.push([event, data]),
   });
   t.after(() => service.stop());
@@ -345,6 +347,98 @@ test('снос с явным «вместе с незакоммиченным» 
   await settled(service, '990002');
 
   assert.equal(await readFile(path.join(stateDir, 't990002.downenv'), 'utf8'), 'worktree: force\n');
+});
+
+test('ручной стенд без журнала сносится скриптом явно выбранного профиля', async (t) => {
+  const { service, stateDir, profilesDir } = await serviceFixture(t);
+
+  await script(path.join(profilesDir, 'plain-profile', 'up.sh'), UP_STUB);
+  await script(path.join(profilesDir, 'plain-profile', 'down.sh'), DOWN_STUB);
+  await writeFile(path.join(stateDir, 't990001.env'), 'TASK=990001\nWORKSPACE_MODE=isolated\n');
+
+  const overview = await service.overview();
+  const entry = overview.sandboxes.find((item) => item.task === '990001');
+
+  assert.equal(entry.profile, null);
+  assert.equal(entry.removableReason, 'unknown_owner');
+  assert.equal(overview.profiles.find((item) => item.id === 'plain-profile').canDismantle, true);
+  await assert.rejects(
+    () => service.dismantle({ task: '990001' }),
+    (error) => error.code === 'profile_unknown',
+  );
+
+  const removal = await service.dismantle({ task: '990001', profile: 'plain-profile' });
+
+  assert.equal(removal.job.profile, 'plain-profile');
+  assert.equal((await settled(service, '990001')).state, 'done');
+  assert.equal(await readFile(path.join(stateDir, 't990001.downenv'), 'utf8'), 'worktree: keep\n');
+  assert.equal((await service.overview()).sandboxes.length, 0);
+});
+
+test('явный профиль сноса проверяется и не заменяет известного владельца', async (t) => {
+  const { service, stateDir, profilesDir } = await serviceFixture(t);
+  const started = await service.raise({ profile: 'demo-profile', task: '990001' });
+
+  await settled(service, started.task);
+
+  for (const [profile, code] of [
+    ['../../etc', 'bad_profile'],
+    ['missing-profile', 'profile_unknown'],
+    ['plain-profile', 'sandbox_unsupported'],
+  ]) {
+    await assert.rejects(
+      () => service.dismantle({ task: started.task, profile }),
+      (error) => error.code === code,
+    );
+  }
+
+  await script(path.join(profilesDir, 'plain-profile', 'down.sh'), DOWN_STUB);
+  await assert.rejects(
+    () => service.dismantle({ task: started.task, profile: 'plain-profile' }),
+    (error) => error.code === 'profile_mismatch',
+  );
+  await assert.rejects(() => stat(path.join(stateDir, 't990001.downenv')));
+  assert.equal((await service.overview()).sandboxes.length, 1);
+});
+
+test('архивный профиль со скриптом down.sh доступен для явного сноса', async (t) => {
+  const { service, stateDir } = await serviceFixture(t, {
+    isProjectArchived: (id) => id === 'demo-profile',
+  });
+
+  await writeFile(path.join(stateDir, 't990001.env'), 'TASK=990001\nWORKSPACE_MODE=isolated\n');
+
+  const overview = await service.overview();
+  const profile = overview.profiles.find((item) => item.id === 'demo-profile');
+
+  assert.equal(profile.canRaise, false);
+  assert.equal(profile.canDismantle, true);
+  assert.equal(overview.sandboxes[0].removableReason, 'unknown_owner');
+  await service.dismantle({ task: '990001', profile: 'demo-profile' });
+  assert.equal((await settled(service, '990001')).state, 'done');
+});
+
+test('выбор профиля не разрешает снос стенда конвейера, общего или внешнего стенда', async (t) => {
+  const { service, stateDir } = await serviceFixture(t);
+
+  for (const extra of [
+    'WORKSPACE_MODE=shared\n',
+    'WORKSPACE_MODE=isolated\nSTAND_OWNERSHIP=external\n',
+    'WORKSPACE_MODE=isolated\n',
+  ]) {
+    await writeFile(path.join(stateDir, 't990001.env'), `TASK=990001\n${extra}`);
+
+    if (extra === 'WORKSPACE_MODE=isolated\n') {
+      await writeFile(path.join(stateDir, 't990001.pipeline'), 'PROFILE=demo-profile\n');
+    }
+
+    await assert.rejects(
+      () => service.dismantle({ task: '990001', profile: 'demo-profile' }),
+      (error) => error.code === 'pipeline_owned',
+    );
+  }
+
+  await assert.rejects(() => stat(path.join(stateDir, 't990001.downenv')));
 });
 
 test('профиль без скриптов песочницы не предлагается и не поднимается', async (t) => {

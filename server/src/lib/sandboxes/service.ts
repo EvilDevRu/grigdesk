@@ -100,6 +100,7 @@ export interface SandboxRaiseInput {
 export interface SandboxDismantleInput {
   task: string;
   force?: boolean;
+  profile?: string;
 }
 
 export interface SandboxRunInput {
@@ -289,17 +290,24 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
         return {
           id,
           canRaise: false,
+          canDismantle: false,
           reason: 'регистрация проекта удалена',
         };
       }
 
       if (archived) {
-        return { id, canRaise: false, reason: 'проект в архиве: новый стенд не поднимается' };
+        return {
+          id,
+          canRaise: false,
+          canDismantle: down,
+          reason: 'проект в архиве: новый стенд не поднимается',
+        };
       }
 
       return {
         id,
         canRaise: missing.length === 0,
+        canDismantle: down,
         reason: missing.length === 0 ? null : `профиль не объявил ${missing.join(' и ')}`,
       };
     }));
@@ -329,7 +337,8 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
   /**
    * Чей down.sh звать. Обычно профиль известен из журнала собственного подъёма;
    * стенд, поднятый мимо GrigDesk, опознаётся только когда песочницу на машине
-   * умеет ровно один профиль. Иначе снос остаётся человеку и его терминалу.
+   * умеет ровно один профиль. При неоднозначности человек выбирает профиль
+   * в карточке, а dismantle проверяет его перед запуском down.sh.
    */
   function ownerOf(record: SandboxJournalRecord | null, capable: string[]): string | null {
     if (record?.profile) {
@@ -816,8 +825,17 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
       }
     },
 
+    /**
+     * Явный профиль разрешает снос ручного стенда без журнала подъёма.
+     * Проверки владения и аренда действуют до запуска любого профильного скрипта.
+     */
     async dismantle(input) {
       const task = requireTask(String(input.task));
+
+      if (input.profile !== undefined && !PROFILE_RE.test(input.profile)) {
+        throw new SandboxError('bad_profile', 'имя профиля имеет недопустимую форму', 400);
+      }
+
       const lease = await acquireLifecycle(task);
 
       try {
@@ -844,12 +862,29 @@ export function createSandboxService(options: SandboxServiceOptions): SandboxSer
         }
 
         const capable = known.filter((item) => item.canRaise).map((item) => item.id);
-        const profile = ownerOf(record, capable);
+        const owner = ownerOf(record, capable);
+        const profile = input.profile ?? owner;
+
+        if (input.profile !== undefined) {
+          const selected = known.find((item) => item.id === input.profile);
+
+          if (!selected) {
+            throw new SandboxError('profile_unknown', `профиль ${input.profile} не найден`, 404);
+          }
+
+          if (!selected.canDismantle) {
+            throw new SandboxError('sandbox_unsupported', `профиль ${input.profile} недоступен для сноса`);
+          }
+
+          if (owner && owner !== profile) {
+            throw new SandboxError('profile_mismatch', 'профиль стенда изменился — обновите карточку');
+          }
+        }
 
         if (!profile) {
           throw new SandboxError(
             'profile_unknown',
-            'GrigDesk не знает, чей это стенд: профилей с песочницей несколько, а журнала подъёма нет',
+            'GrigDesk не знает, чей это стенд: выберите профиль для сноса в карточке стенда',
           );
         }
 

@@ -1,4 +1,9 @@
 {
+  "sandboxRemovalProfile": "Removal profile",
+  "sandboxRemovalProfileHint": "GrigDesk could not identify this stand’s profile. Choose the project whose script should remove the stand.",
+  "sandboxRemovalChooseProfile": "Choose a profile",
+  "sandboxRemovalNoProfiles": "No profiles provide a down.sh removal script. Add one to the project profile.",
+  "sandboxRemovalProfileConfirm": "The removal script from profile “{profile}” will run.",
   "pipelineRunControls": "Pipeline controls",
   "startPipelines": "Start pipelines",
   "startingPipelines": "Starting pipelines",

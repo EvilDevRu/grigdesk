@@ -49,8 +49,10 @@ export const loadSandboxes = async () => {
 export const raiseSandbox = async (profile, task) => {
   globalThis.__sandboxViewHarness.calls.push(['raise', profile, task]);
 };
-export const dismantleSandbox = async (task, force) => {
-  globalThis.__sandboxViewHarness.calls.push(['dismantle', task, force]);
+export const dismantleSandbox = async (task, force, profile) => {
+  globalThis.__sandboxViewHarness.calls.push([
+    'dismantle', task, force, ...(profile === undefined ? [] : [profile]),
+  ]);
 };
 export const runSandboxAction = async (task, action, args) => {
   globalThis.__sandboxViewHarness.calls.push(['run', task, action, args]);
@@ -205,6 +207,65 @@ test('стенд конвейера показан без кнопок снос�
 
   assert.equal(wrapper.findAll('.sandbox-card__actions button').length, 0);
   assert.match(wrapper.text(), /владеет конвейер/i);
+});
+
+test('для ручного стенда без владельца профиль выбирается перед подтверждением сноса', async (t) => {
+  const profiles = [
+    {
+      id: 'demo-profile',
+      canRaise: true,
+      canDismantle: true,
+      reason: null,
+    },
+    {
+      id: 'archived-profile',
+      canRaise: false,
+      canDismantle: true,
+      reason: 'архив',
+    },
+    {
+      id: 'unsupported-profile',
+      canRaise: false,
+      canDismantle: false,
+      reason: 'нет down.sh',
+    },
+  ];
+  const { wrapper, flushPromises, calls, harness } = await mountView(t, {
+    sandboxes: [entry({
+      profile: null,
+      removable: false,
+      removableReason: 'unknown_owner',
+    })],
+    state: { profiles },
+  });
+  const removal = wrapper.find('.sandbox-card__removal');
+  const select = removal.find('select');
+  const buttons = removal.findAll('.sandbox-card__removal-option button');
+
+  assert.equal(removal.attributes('open'), '');
+  assert.equal(buttons.length, 2);
+  assert.equal(buttons.every((button) => button.element.disabled), true);
+  assert.deepEqual(select.findAll('option').map((option) => option.element.value), [
+    '', 'demo-profile', 'archived-profile',
+  ]);
+  await select.setValue('archived-profile');
+  await buttons[0].trigger('click');
+  await flushPromises();
+
+  assert.deepEqual(calls.filter(([kind]) => kind === 'dismantle'), [
+    ['dismantle', '990000', false, 'archived-profile'],
+  ]);
+  assert.match(harness.confirmations[0].text, /профиля «archived-profile»/);
+
+  harness.confirmed = false;
+  await buttons[1].trigger('click');
+  await flushPromises();
+  assert.equal(calls.filter(([kind]) => kind === 'dismantle').length, 1);
+
+  harness.store.profiles = profiles.filter((profile) => profile.id !== 'archived-profile');
+  await flushPromises();
+  assert.equal(select.element.value, '');
+  assert.equal(buttons.every((button) => button.element.disabled), true);
 });
 
 test('идущий подъём показан шагом, а не пустой карточкой', async (t) => {

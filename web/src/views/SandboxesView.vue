@@ -113,6 +113,7 @@
           <p v-if="outsideFilter" class="sandboxes__empty">Выбранный стенд вне фильтра</p>
           <SandboxCard v-if="selected?.entry" :key="selected.task" :entry="selected.entry"
                        :job="selected.job" :busy="store.isBusy(selected.task)"
+                       :profiles="store.profiles"
                        :task-title="selected.title" :state-label="selected.stateLabel"
                        :state-detail="selected.detail" @dismantle="dismantle" @run="run" />
           <section v-else-if="selected" class="ui-workspace-section sandboxes__pending">
@@ -149,6 +150,7 @@ import {
   promptDialog,
   vTooltip,
   UiLoadingState,
+  t,
 } from '../ui';
 import {
   dismantleSandbox,
@@ -375,9 +377,17 @@ async function raise(payload: { profile: string; task: string | null }) {
  * кнопок проговариваем прямо в вопросе: обычный снос оставляет незакоммиченное,
  * второй забирает worktree вместе с ним (профиль снимает патч в архив).
  */
-async function dismantle(payload: { task: string; force: boolean }) {
+async function dismantle(payload: {
+  task: string;
+  force: boolean;
+  profile?: string;
+}) {
+  const profileNotice = payload.profile
+    ? `${t('core.sandboxRemovalProfileConfirm', { profile: payload.profile })}\n\n`
+    : '';
   const accepted = await confirmDialog(
     `Снести стенд t${payload.task}?\n\n`
+      + profileNotice
       + (payload.force
         ? 'Worktree будет удалён вместе с незакоммиченными изменениями — профиль сохранит их патчем в архив.'
         : 'Контейнеры и схемы данных будут удалены. Незакоммиченное в worktree сохраняется: '
@@ -393,7 +403,7 @@ async function dismantle(payload: { task: string; force: boolean }) {
     return;
   }
 
-  await dismantleSandbox(payload.task, payload.force);
+  await dismantleSandbox(payload.task, payload.force, payload.profile);
 }
 
 /**

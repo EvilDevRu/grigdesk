@@ -30,6 +30,7 @@ interface RaiseRoute {
 interface DismantleRoute {
   Body: {
     force?: unknown;
+    profile?: unknown;
   };
   Params: {
     task: string;
@@ -109,13 +110,22 @@ export default fp<SandboxesModuleOptions>(async function sandboxesModule(fastify
 
   fastify.post<DismantleRoute>('/api/sandboxes/:task/down', async (request, reply) => {
     const task = String(request.params.task);
+    const profile = request.body?.profile;
 
     if (!SANDBOX_TASK_RE.test(task)) {
       return reply.code(400).send({ error: 'bad_task' });
     }
 
+    if (profile !== undefined && (typeof profile !== 'string' || !PROFILE_RE.test(profile))) {
+      return reply.code(400).send({ error: 'bad_profile' });
+    }
+
     try {
-      return await service.dismantle({ task, force: request.body?.force === true });
+      return await service.dismantle({
+        task,
+        force: request.body?.force === true,
+        ...(profile === undefined ? {} : { profile }),
+      });
     } catch (error) {
       return sendError(reply, error);
     }

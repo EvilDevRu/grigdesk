@@ -139,13 +139,26 @@
           </div>
         </details>
 
-        <details v-if="entry.removable" class="ui-workspace-disclosure sandbox-card__removal"
+        <details v-if="entry.removable || needsRemovalProfile" :open="needsRemovalProfile"
+                 class="ui-workspace-disclosure sandbox-card__removal"
                  data-context="workspace-inline">
           <summary>Удаление стенда</summary>
           <div class="sandbox-card__actions ui-workspace-section__body">
+            <UiField v-if="needsRemovalProfile" :label="t('core.sandboxRemovalProfile')"
+                     :hint="t('core.sandboxRemovalProfileHint')">
+              <UiSelect v-model="removalProfile" :disabled="busy || !removalProfiles.length">
+                <option value="">{{ t('core.sandboxRemovalChooseProfile') }}</option>
+                <option v-for="profile in removalProfiles" :key="profile.id" :value="profile.id">
+                  {{ profile.id }}
+                </option>
+              </UiSelect>
+            </UiField>
+            <p v-if="needsRemovalProfile && !removalProfiles.length" class="sandbox-card__hint">
+              {{ t('core.sandboxRemovalNoProfiles') }}
+            </p>
             <div class="sandbox-card__removal-option">
               <UiButton variant="outline" tone="danger" data-context="workspace-form-wrap"
-                        :loading="busy" @click="emit('dismantle', { task: entry.task, force: false })">
+                        :loading="busy" :disabled="!canDismantle" @click="requestDismantle(false)">
                 Снести стенд
               </UiButton>
               <p class="sandbox-card__hint">
@@ -153,8 +166,8 @@
               </p>
             </div>
             <div class="sandbox-card__removal-option">
-              <UiButton variant="ghost" tone="danger" data-context="workspace-form-wrap" :aria-disabled="busy"
-                        @click="emit('dismantle', { task: entry.task, force: true })">
+              <UiButton variant="ghost" tone="danger" data-context="workspace-form-wrap"
+                        :disabled="!canDismantle" @click="requestDismantle(true)">
                 Снести вместе с изменениями
               </UiButton>
               <p class="sandbox-card__hint">
@@ -179,10 +192,13 @@ import {
   UiActionLink,
   UiButton,
   UiDisclosureButton,
+  UiField,
   UiIconButton,
   UiInlineMessage,
   UiProgress,
   UiPaneHeader,
+  UiSelect,
+  t,
   vTooltip,
 } from '../../ui';
 import { loadSandboxJobLog } from '../../actions/sandboxes';
@@ -190,7 +206,7 @@ import { sandboxUrl } from '../../shared/sandbox.ts';
 import { ALERT_TASK_QUERY } from '../../shared/alertTargets.ts';
 import { writeClipboardText } from '../../shared/clipboard.ts';
 import type {
-  SandboxActionDecl, SandboxEntry, SandboxJob,
+  SandboxActionDecl, SandboxEntry, SandboxJob, SandboxProfile,
 } from '../../../../shared/plugins/sandboxes/sandboxContracts';
 
 const ICON = {
@@ -208,6 +224,7 @@ const props = defineProps<{
   entry: SandboxEntry;
   job: SandboxJob | null;
   busy: boolean;
+  profiles?: SandboxProfile[];
   taskTitle?: string;
   stateLabel?: string;
   stateDetail?: string;
@@ -217,6 +234,7 @@ const emit = defineEmits<{
   dismantle: [payload: {
     task: string;
     force: boolean;
+    profile?: string;
   }];
   run: [payload: {
     task: string;
@@ -230,8 +248,25 @@ const copied = ref('');
 const logOpen = ref(false);
 const logText = ref('');
 const logTruncated = ref(false);
+const removalProfile = ref('');
 
 const actions = computed(() => props.entry.actions ?? []);
+const needsRemovalProfile = computed(() => props.entry.owner === 'manual'
+  && props.entry.removableReason === 'unknown_owner');
+const removalProfiles = computed(() => (props.profiles ?? [])
+  .filter((profile) => profile.canDismantle ?? profile.canRaise));
+const hasRemovalProfile = computed(() => removalProfiles.value
+  .some((profile) => profile.id === removalProfile.value));
+const canDismantle = computed(() => !props.busy && (props.entry.removable
+  || (needsRemovalProfile.value && hasRemovalProfile.value)));
+
+// Исчезнувший профиль нельзя незаметно заменить соседним: человек подтверждал
+// конкретный скрипт сноса и должен заново выбрать его после изменения каталога.
+watch(removalProfiles, (profiles) => {
+  if (!profiles.some((profile) => profile.id === removalProfile.value)) {
+    removalProfile.value = '';
+  }
+});
 
 const feHref = computed(() => sandboxUrl(props.entry.fePort, props.entry.serviceHost));
 const apiHref = computed(() => sandboxUrl(props.entry.apiPort, props.entry.serviceHost));
@@ -328,13 +363,28 @@ const updatedLabel = computed(() => {
 const BLOCKED: Record<string, string> = {
   pipeline_owned: 'Стендом владеет конвейер или общий checkout: он сносится из карточки задачи.',
   job_running: 'Удаление недоступно, пока выполняется задание стенда.',
-  unknown_owner: 'GrigDesk не знает, чей это стенд, — снос остаётся за скриптом профиля в терминале.',
 };
 
 const blockedReason = computed(() => BLOCKED[props.entry.removableReason || ''] || '');
 
 function copyLabel(path: string) {
   return copied.value === path ? 'Скопировано' : 'Копировать путь';
+}
+
+/**
+ * Неопознанный ручной стенд сносится только скриптом, который выбрал человек.
+ * Для известного владельца сохраняется обычный запрос без переопределения профиля.
+ */
+function requestDismantle(force: boolean) {
+  if (!canDismantle.value) {
+    return;
+  }
+
+  emit('dismantle', {
+    task: props.entry.task,
+    force,
+    ...(needsRemovalProfile.value ? { profile: removalProfile.value } : {}),
+  });
 }
 
 /**

@@ -528,6 +528,70 @@ test('десять стендов двух профилей помещаются
     assert.match(await modal.innerText(), /100/);
     assert.deepEqual(errors, []);
 });
+test('ручной стенд без профиля: выбор и подтверждение сноса на двух ширинах', async (t) => {
+  const client = await fixture(t);
+
+  client.state.overview.sandboxes = [{
+    ...structuredClone(baseEntry),
+    profile: null,
+    removable: false,
+    removableReason: 'unknown_owner',
+    actions: [],
+  }];
+  client.state.overview.jobs = [];
+  client.state.overview.profiles = [
+    {
+      id: 'demo-shop',
+      canRaise: true,
+      canDismantle: true,
+      reason: null,
+    },
+    {
+      id: 'archived-shop',
+      canRaise: false,
+      canDismantle: true,
+      reason: 'проект в архиве',
+    },
+  ];
+
+  for (const width of [1280, 390]) {
+    const { page, errors } = await client.open(width, 900, width === 390);
+
+    await chooseStand(page, baseEntry.task);
+
+    const remove = page.getByRole('button', { name: 'Снести стенд', exact: true });
+
+    assert.equal(await remove.isVisible(), true);
+    assert.equal(await remove.isDisabled(), true);
+    await page.getByRole('combobox', { name: 'Профиль для сноса', exact: true }).click();
+    await page.getByRole('option', { name: 'archived-shop', exact: true }).click();
+    await page.getByRole('listbox').waitFor({ state: 'hidden' });
+    assert.equal(await remove.isEnabled(), true);
+    await page.screenshot({ path: `${client.artifacts}/manual-removal-${width}.png` });
+    await remove.click();
+
+    const dialog = page.getByRole('dialog');
+    const writesBefore = client.state.writes.length;
+
+    assert.match(await dialog.innerText(), /профиля «archived-shop»/);
+    await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+    assert.equal(client.state.writes.length, writesBefore);
+    await remove.click();
+    await Promise.all([
+      page.waitForRequest((request) => request.method() === 'POST'
+        && request.url().endsWith(`/api/sandboxes/${baseEntry.task}/down`)),
+      dialog.getByRole('button', { name: 'Снести', exact: true }).click(),
+    ]);
+
+    assert.deepEqual(client.state.writes.at(-1), {
+      path: `/api/sandboxes/${baseEntry.task}/down`,
+      body: { force: false, profile: 'archived-shop' },
+    });
+    assert.deepEqual(errors, []);
+    await page.close();
+  }
+});
+
 test('список и стенд переключаются по контейнеру', async (t) => {
     const client = await fixture(t);
 

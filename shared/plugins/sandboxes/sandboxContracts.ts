@@ -114,6 +114,8 @@ const sandboxEntry = objectOf({
 const sandboxProfile = objectOf({
   id: text,
   canRaise: boolean,
+  // Снос доступен и архивному профилю, даже если новый стенд поднимать нельзя.
+  canDismantle: optional(boolean),
   reason: nullable(text),
 });
 
