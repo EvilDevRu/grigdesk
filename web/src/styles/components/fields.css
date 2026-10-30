@@ -171,6 +171,7 @@
 button.ui-select {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   text-align: left;
   font-family: inherit;
   cursor: pointer;
@@ -181,6 +182,11 @@ button.ui-select {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ui-select__leading {
+  display: inline-flex;
+  flex: none;
 }
 
 .ui-select-actions {
@@ -199,6 +205,12 @@ button.ui-select {
   border-radius: var(--control-radius);
 }
 
+/* Каталог моделей использует плотность toolbar и на компьютере, и на телефоне.
+   Сенсорный токен сохраняет 44 px, не возвращая desktop к обычной высоте формы. */
+.ui-select-popup[data-group-navigation] {
+  --control-height: var(--toolbar-control-h);
+}
+
 .ui-select-panel {
   display: flex;
   flex-direction: column;
@@ -208,12 +220,73 @@ button.ui-select {
   min-height: 0;
 }
 
+.ui-select-search {
+  position: relative;
+  flex: none;
+}
+
+.ui-select-search__icon {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 10px;
+  width: 15px;
+  height: 15px;
+  transform: translateY(-50%);
+  color: var(--ink-mid);
+  pointer-events: none;
+}
+
+.ui-input[data-context='select-search'] {
+  padding-left: 32px;
+}
+
+/* В компактном меню фокус остаётся тонкой рамкой общего поля.
+   Внешний ореол здесь упирался в край панели и выглядел второй рамкой. */
+.ui-select-popup[data-group-navigation] .ui-input[data-context='select-search'] {
+  --control-focus-ring: none;
+}
+
 .ui-select-list {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
   outline: none;
+}
+
+.ui-select-group-nav {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: min(144px, 25dvh);
+  overflow: auto;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ui-select-group-nav > .ui-button {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ui-select-group-nav__count {
+  margin-inline-start: 4px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Фирменные знаки помещают навигацию в одну строку на любом экране.
+   Полные названия остаются доступными именами кнопок и подсказками. */
+.ui-select-group-nav .ui-button[data-group-icon] {
+  width: var(--toolbar-control-h);
+  padding-inline: 0;
+}
+
+.ui-select-group-nav .ui-button[data-group-icon] .ui-button__label {
+  display: none;
 }
 
 .ui-select-option {
@@ -233,11 +306,34 @@ button.ui-select {
   cursor: pointer;
 }
 
+.ui-select-popup[data-group-navigation] .ui-select-option {
+  padding-block: 4px;
+}
+
 .ui-select-option__label,
 .ui-select-option__description {
   max-width: 100%;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.ui-select-option__content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ui-select-option__leading {
+  display: inline-flex;
+  flex: none;
+  color: var(--ink-mid);
+}
+
+.ui-select-option__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .ui-select-option__description {
@@ -626,6 +722,27 @@ button.ui-select {
 .ui-select[data-context='code-head-select']:disabled {
   cursor: default;
   opacity: 0.5;
+}
+
+/* Выбор модели оформлен полем рабочей панели и сохраняет общую сенсорную высоту.
+   Иконка, подпись и шеврон помещаются внутри одной рамки без подчёркивания текста. */
+.ui-select[data-role='chat-model'] {
+  padding-inline: 8px 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-2);
+  background-position: right 8px center;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ui-select[data-role='chat-model']:hover:not(:disabled),
+.ui-select[data-role='chat-model']:focus {
+  border-color: var(--line-2);
+}
+
+.ui-select[data-role='chat-model'][aria-expanded='true'],
+.ui-select[data-role='chat-model']:focus-visible {
+  border-color: var(--accent);
 }
 
 /* Формы настроек используют общий ритм primitives; варианты ниже описывают только

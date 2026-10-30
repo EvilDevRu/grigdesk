@@ -19,8 +19,9 @@
     <UiPopover
       :open="open"
       :style="popupStyle"
-      :data-ui-workspace="workspaceMode || undefined"
+      :data-ui-workspace="workspaceMode || groupNavigation || undefined"
       :data-ui-touch="touchMode || undefined"
+      :data-group-navigation="groupNavigation || undefined"
       class="ui-select-popup"
       has-popup="dialog"
       focus-policy="none"
@@ -47,6 +48,9 @@
           @focus="$emit('focus', $event)"
           @blur="$emit('blur', $event)"
         >
+          <span v-if="$slots['value-leading']" class="ui-select__leading" aria-hidden="true">
+            <slot name="value-leading" :option="selectedOption" :value="model" />
+          </span>
           <span class="ui-select__label">
             <slot name="value" :option="selectedOption" :value="model">{{ selectedLabel }}</slot>
           </span>
@@ -57,18 +61,73 @@
         <div v-if="$slots.header" class="ui-select-header">
           <slot name="header" :close="closeFromAction" :value="model" />
         </div>
-        <UiSearchInput
-          v-if="showSearch"
-          ref="searchInput"
-          v-model="query"
-          :aria-label="t('core.search')"
-          :aria-controls="controlId + '-list'"
-          :aria-activedescendant="activeId"
-          role="combobox"
-          aria-expanded="true"
-          aria-autocomplete="list"
-          @keydown="onSearchKeydown"
-        />
+        <div v-if="showSearch" class="ui-select-search">
+          <svg class="ui-select-search__icon" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="6.5" />
+            <path d="m16 16 4.5 4.5" stroke-linecap="round" />
+          </svg>
+          <UiSearchInput
+            ref="searchInput"
+            v-model="query"
+            data-context="select-search"
+            :aria-label="t('core.search')"
+            :placeholder="t('core.search')"
+            :aria-controls="controlId + '-list'"
+            :aria-activedescendant="activeId"
+            role="combobox"
+            aria-expanded="true"
+            aria-autocomplete="list"
+            @keydown="onSearchKeydown"
+          />
+        </div>
+        <div
+          v-if="groupNavigation && navigationGroups.length"
+          class="ui-select-group-nav"
+          role="group"
+          :aria-label="t('core.selectGroups')"
+        >
+          <UiButton
+            variant="ghost"
+            size="compact"
+            :pressed="effectiveGroupKey === null"
+            :aria-label="t('core.selectAllGroups')"
+            :title="t('core.selectAllGroups')"
+            data-group-icon
+            data-select-group="all"
+            @click="selectGroup(null)"
+          >
+            <template #leading>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                <rect x="3" y="3" width="6" height="6" rx="1" />
+                <rect x="15" y="3" width="6" height="6" rx="1" />
+                <rect x="3" y="15" width="6" height="6" rx="1" />
+                <rect x="15" y="15" width="6" height="6" rx="1" />
+              </svg>
+            </template>
+            {{ t('core.selectAllGroups') }}
+            <span class="ui-select-group-nav__count">{{ options.length }}</span>
+          </UiButton>
+          <UiButton
+            v-for="group in navigationGroups"
+            :key="group.key"
+            variant="ghost"
+            size="compact"
+            :pressed="effectiveGroupKey === group.key"
+            :aria-label="group.label"
+            :title="group.label"
+            :data-group-icon="$slots['group-leading'] ? '' : undefined"
+            :data-select-group="group.key"
+            @click="selectGroup(group.key)"
+          >
+            <template v-if="$slots['group-leading']" #leading>
+              <span aria-hidden="true"><slot name="group-leading" :option="group.option" /></span>
+            </template>
+            {{ group.label }}
+            <span class="ui-select-group-nav__count">{{ group.count }}</span>
+          </UiButton>
+        </div>
         <div
           :id="controlId + '-list'"
           ref="list"
@@ -85,7 +144,8 @@
             :role="group.label ? 'group' : undefined"
             :aria-label="group.label || undefined"
           >
-            <div v-if="group.label" class="ui-select-group" aria-hidden="true">{{ group.label }}</div>
+            <div v-if="group.label && (!groupNavigation || effectiveGroupKey === null)"
+                 class="ui-select-group" aria-hidden="true">{{ group.label }}</div>
             <button
               v-for="option in group.options"
               :id="controlId + '-option-' + option.index"
@@ -102,16 +162,23 @@
               @mousemove="activate(option)"
               @click="choose(option)"
             >
-              <slot
-                name="option"
-                :option="option"
-                :selected="option.value === String(model ?? '')"
-              >
-                <span class="ui-select-option__label">{{ option.label }}</span>
-                <span v-if="option.description" class="ui-select-option__description">
-                  {{ option.description }}
+              <span class="ui-select-option__content">
+                <span v-if="$slots['option-leading']" class="ui-select-option__leading" aria-hidden="true">
+                  <slot name="option-leading" :option="option" />
                 </span>
-              </slot>
+                <span class="ui-select-option__text">
+                  <slot
+                    name="option"
+                    :option="option"
+                    :selected="option.value === String(model ?? '')"
+                  >
+                    <span class="ui-select-option__label">{{ option.label }}</span>
+                    <span v-if="option.description" class="ui-select-option__description">
+                      {{ option.description }}
+                    </span>
+                  </slot>
+                </span>
+              </span>
               <span
                 v-if="option.value === String(model ?? '')"
                 class="ui-select-option__check"
@@ -161,6 +228,7 @@ import type { UiModelModifiers, UiSelectValue } from '../../types/uiFields';
 import type { UiPopoverCloseReason } from '../../types/uiOverlays';
 import UiPopover from '../overlays/UiPopover.vue';
 import UiSearchInput from '../composites/UiSearchInput.vue';
+import UiButton from './UiButton.vue';
 
 defineOptions({ inheritAttrs: false });
 
@@ -172,6 +240,7 @@ const props = withDefaults(defineProps<{
   required?: boolean;
   compact?: boolean;
   searchable?: boolean | 'auto';
+  groupNavigation?: boolean;
   modelValue?: UiSelectValue;
   modelModifiers?: UiModelModifiers;
 }>(), {
@@ -182,6 +251,7 @@ const props = withDefaults(defineProps<{
   required: false,
   compact: false,
   searchable: 'auto',
+  groupNavigation: false,
   modelValue: undefined,
   modelModifiers: () => ({}),
 });
@@ -189,6 +259,9 @@ const props = withDefaults(defineProps<{
 defineSlots<{
   default(): unknown;
   value?(props: { option: UiSelectOptionSnapshot | undefined; value: UiSelectValue }): unknown;
+  'value-leading'?(props: { option: UiSelectOptionSnapshot | undefined; value: UiSelectValue }): unknown;
+  'group-leading'?(props: { option: UiSelectOptionSnapshot }): unknown;
+  'option-leading'?(props: { option: UiSelectOptionSnapshot }): unknown;
   option?(props: { option: UiSelectOptionSnapshot; selected: boolean }): unknown;
   actions?(props: { value: UiSelectValue; disabled: boolean }): unknown;
   header?(props: { close: () => void; value: UiSelectValue }): unknown;
@@ -237,11 +310,47 @@ const fallbackId = 'ui-select-' + useId().replaceAll(':', '');
 let optionsStamp = '';
 
 const query = ref('');
+const activeGroupKey = ref<string | null>(null);
 const searchInput = ref<InstanceType<typeof UiSearchInput> | null>(null);
 
+const navigationGroups = computed(() => {
+  const groups = new Map<string, {
+    key: string;
+    label: string;
+    count: number;
+    option: UiSelectOptionSnapshot;
+  }>();
+
+  for (const option of options.value) {
+    if (!option.groupLabel) {
+      continue;
+    }
+
+    const group = groups.get(option.groupKey);
+
+    if (group) {
+      group.count += 1;
+    } else {
+      groups.set(option.groupKey, {
+        key: option.groupKey,
+        label: option.groupLabel,
+        count: 1,
+        option,
+      });
+    }
+  }
+
+  return [...groups.values()];
+});
+const effectiveGroupKey = computed(() => props.groupNavigation
+  && navigationGroups.value.some((group) => group.key === activeGroupKey.value)
+  ? activeGroupKey.value
+  : null);
 const showSearch = computed(() => props.searchable === true
   || (props.searchable === 'auto' && options.value.length >= 10));
-const visibleOptions = computed(() => filterUiSelectOptions(options.value, query.value));
+const visibleOptions = computed(() => filterUiSelectOptions(options.value, query.value).filter((option) => {
+  return effectiveGroupKey.value === null || option.groupKey === effectiveGroupKey.value;
+}));
 const optionGroups = computed(() => {
   const groups: Array<{
     key: string;
@@ -374,6 +483,7 @@ async function setOpen(value: boolean): Promise<void> {
   if (value) {
     query.value = '';
     syncOptions();
+    activeGroupKey.value = props.groupNavigation ? selectedOption.value?.groupKey ?? null : null;
     resetActive();
     await nextTick();
     await Promise.resolve();
@@ -385,12 +495,27 @@ async function setOpen(value: boolean): Promise<void> {
 
     startPopupMetrics();
 
-    if (showSearch.value) {
+    if (showSearch.value && !(props.groupNavigation && touchMode.value)) {
       searchInput.value?.focus({ preventScroll: true });
     } else {
       list.value?.focus({ preventScroll: true });
     }
+
+    scrollToActive();
   }
+}
+
+/**
+ * Смена группы фильтрует только каталог и никогда не выбирает модель за человека.
+ * Поиск сбрасывается, чтобы выбранная группа показывала все свои варианты.
+ */
+function selectGroup(key: string | null): void {
+  query.value = '';
+  activeGroupKey.value = key;
+}
+
+function scrollToActive(): void {
+  document.getElementById(activeId.value || '')?.scrollIntoView?.({ block: 'nearest' });
 }
 
 /**
@@ -624,7 +749,20 @@ function onSearchKeydown(event: KeyboardEvent): void {
   }
 }
 
-watch(visibleOptions, resetActive);
+watch(query, (value) => {
+  if (value.trim()) {
+    activeGroupKey.value = null;
+  }
+}, { flush: 'sync' });
+
+watch(visibleOptions, async () => {
+  resetActive();
+  await nextTick();
+
+  if (open.value) {
+    scrollToActive();
+  }
+});
 
 function closeFromAction(): void {
   closePicker(false);
@@ -674,13 +812,15 @@ function updatePopupMetrics(): void {
   const rect = button.getBoundingClientRect();
   const above = rect.top - top - 12;
   const below = top + height - rect.bottom - 12;
+  const preferredWidth = props.groupNavigation ? 360 : 280;
+  const preferredHeight = props.groupNavigation ? 520 : 360;
 
   workspaceMode.value = Boolean(button.closest('[data-ui-workspace]'));
   touchMode.value = Boolean(button.closest('[data-ui-touch]'));
   popupStyle.value = {
-    width: Math.max(0, Math.min(Math.max(rect.width, 280), width - 16)) + 'px',
+    width: Math.max(0, Math.min(Math.max(rect.width, preferredWidth), width - 16)) + 'px',
     maxWidth: Math.max(0, width - 16) + 'px',
-    maxHeight: Math.max(0, Math.min(360, Math.max(above, below))) + 'px',
+    maxHeight: Math.max(0, Math.min(preferredHeight, Math.max(above, below))) + 'px',
   };
 }
 

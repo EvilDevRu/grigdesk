@@ -405,6 +405,13 @@ test('SELECT-CHAT-02: видимый выбор недоступного исп�
   await wrapper.get('.sel.model button.ui-select').trigger('click');
   await flushPromises();
 
+  const group = [...document.querySelectorAll('.ui-select-group-nav button')]
+    .find((button) => button.textContent.includes('Codex'));
+
+  assert.ok(Boolean(group));
+  group.click();
+  await flushPromises();
+
   const native = wrapper.get('.sel.model select').element;
   const index = [...native.options].findIndex((option) => option.value === 'gpt-5.6-sol');
   const item = document.querySelector('.ui-select-popup [data-option-index="' + index + '"]');
@@ -417,3 +424,77 @@ test('SELECT-CHAT-02: видимый выбор недоступного исп�
   assert.equal(session.modelRef.model, 'gpt-5.6-sol');
   assert.match(wrapper.get('.sel.model button.ui-select').text(), /GPT 5.6 Sol/u);
 });
+
+test('SELECT-CHAT-03: GLM показывает имена без wire-массива и длинных повторов', async (t) => {
+  const id = JSON.stringify(['zai', 'glm-5.3']);
+  const glm = {
+    id: 'glm',
+    name: 'GLM (Z.ai)',
+    available: true,
+    models: [{
+      id,
+      name: 'GLM-5.3',
+      contextRuntimeOnly: true,
+      efforts: [],
+    }],
+  };
+
+  PROVIDERS.push(glm);
+  t.after(() => PROVIDERS.splice(PROVIDERS.indexOf(glm), 1));
+
+  const { wrapper, setModelCalls, flushPromises } = await mountChat(t, {
+    initial: { model: id, modelRef: { provider: 'glm', model: id } },
+  });
+
+  await wrapper.get('.sel.model button.ui-select').trigger('click');
+  await flushPromises();
+
+  const popup = document.querySelector('.ui-select-popup');
+  const rows = [...popup.querySelectorAll('[role="option"]')];
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].textContent.trim().replace('✓', '').trim(), 'GLM-5.3');
+  assert.equal(popup.textContent.includes('["zai"'), false);
+  assert.equal(popup.textContent.includes('после первого хода'), false);
+  assert.match(modelOption(wrapper, id).attributes('title'), /рабочее окно появится/u);
+  assert.deepEqual(setModelCalls, []);
+});
+
+for (const disabled of [[1], [0], [0, 1]]) {
+  test(`SELECT-CHAT-OFF: отключённые исполнители скрыты: ${disabled.join(',')}`, async (t) => {
+    for (const index of disabled) {
+      PROVIDERS[index].chatEnabled = false;
+    }
+
+    t.after(() => {
+      for (const index of disabled) {
+        delete PROVIDERS[index].chatEnabled;
+      }
+    });
+
+    const { wrapper, setModelCalls, flushPromises } = await mountChat(t);
+    const trigger = wrapper.get('.sel.model button.ui-select');
+
+    assert.match(trigger.text(), /Opus 5/u);
+    await trigger.trigger('click');
+    await flushPromises();
+
+    const popup = document.querySelector('.ui-select-popup');
+    const tabs = [...popup.querySelectorAll('.ui-select-group-nav button')];
+    const options = [...wrapper.get('.sel.model select').element.options];
+
+    for (const index of disabled) {
+      const provider = PROVIDERS[index];
+
+      assert.equal(tabs.some((button) => button.textContent.includes(provider.name)), false);
+      assert.equal(options.some((option) => option.value === provider.models[0].id && !option.hidden), false);
+    }
+
+    const all = popup.querySelector('[data-select-group="all"]');
+
+    all?.click();
+    await flushPromises();
+    assert.equal(popup.querySelectorAll('[role="option"]').length, PROVIDERS.length - disabled.length);
+    assert.deepEqual(setModelCalls, []);
+  });
+}

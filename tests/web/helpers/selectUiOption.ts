@@ -18,6 +18,11 @@ export async function selectUiOption(page: Page, trigger: Locator, value: string
   await trigger.click();
 
   const popup = page.locator('.ui-select-popup');
+  const allGroups = popup.locator('[data-select-group="all"]');
+
+  if (await allGroups.isVisible()) {
+    await allGroups.click();
+  }
 
   await popup.locator('[data-option-index="' + index + '"]').click();
   await popup.waitFor({ state: 'hidden' });

@@ -22,6 +22,201 @@ async function fixture(t) {
 }
 
 /**
+ * Каталог содержит несколько исполнителей и настоящую форму непрозрачного GLM id.
+ * Проверяется весь экран чата с синтетическим API, без доступа к переписке пользователя.
+ */
+function chatCatalog() {
+  return [
+    ['claude', 'Claude', ['Opus', 'Sonnet', 'Haiku']],
+    ['codex', 'Codex', ['Sol', 'Astra', 'Terra', 'Luna', 'Mini', 'Pro', 'Fast', 'Code']],
+    ['kimi', 'Kimi', ['Kimi']],
+    ['deepseek', 'DeepSeek', ['Pro', 'Flash', 'Vision', 'Lite', 'Code', 'Fast']],
+    ['glm', 'GLM (Z.ai)', ['GLM-5.3', 'GLM-5.2', 'GLM-5-Turbo', 'GLM-4.7']],
+  ].map(([id, name, names], index) => ({
+    id,
+    name,
+    color: ['#d97757', '#10a37f', '#6657d9', '#4D6BFE', '#FFFFFF'][index],
+    available: true,
+    modes: [
+      {
+        id: 'ask',
+        label: 'Вручную',
+        hint: 'Подтверждать действия',
+      },
+      {
+        id: 'auto',
+        label: 'Авто',
+        hint: 'Автоматический режим',
+      },
+    ],
+    models: names.map((label) => ({
+      id: id === 'glm' ? JSON.stringify(['zai', label.toLowerCase()]) : id + '-' + label,
+      name: label,
+      efforts: ['low', 'high'],
+      contextRuntimeOnly: true,
+    })),
+  }));
+}
+
+test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне и в низком viewport', async (t) => {
+  const providers = chatCatalog();
+  const glm = providers.at(-1);
+
+  providers.push({
+    id: 'disabled-executor',
+    name: 'Отключённый исполнитель',
+    chatEnabled: false,
+    available: true,
+    models: [{
+      id: 'disabled-model',
+      name: 'Скрытая модель',
+      efforts: [],
+      contextRuntimeOnly: true,
+    }],
+  });
+
+  const session = {
+    id: 'model-picker-chat',
+    title: 'Выбор модели',
+    model: glm.models[0].id,
+    modelRef: { provider: 'glm', model: glm.models[0].id },
+    messages: [],
+  };
+  const client = await clientBrowser(t, {
+    artifacts: path.join(process.env.GRIGDESK_ARTIFACTS_DIR || '/tmp/grigdesk-select-artifacts',
+      'model-picker'),
+    chatStore: { sessions: [session], activeId: session.id },
+    responses: { '/api/providers': { providers, models: [] } },
+  });
+  const errors = [];
+
+  for (const [width, height, touch] of [
+    [1440, 1000, false],
+    [390, 844, true],
+    [320, 568, true],
+    [844, 390, true],
+    [390, 430, true],
+  ]) {
+    const context = await client.browser.newContext({
+      viewport: { width, height },
+      hasTouch: touch,
+      isMobile: touch,
+      locale: 'ru-RU',
+    });
+
+    try {
+      const page = await context.newPage();
+
+      page.on('pageerror', (error) => errors.push(error.message));
+      await page.addInitScript(() => localStorage.setItem('grigdesk-ui-language', 'ru'));
+      await page.goto(client.origin + '#/chats');
+      await page.locator('.cl .row-hit').first().click();
+
+      const options = page.locator('.phone-options');
+
+      if (await options.isVisible()) {
+        await options.click();
+      }
+
+      const trigger = page.locator('button[data-role="chat-model"]');
+
+      await trigger.waitFor();
+
+      if (touch) {
+        await trigger.tap();
+      } else {
+        await trigger.click();
+      }
+
+      const popup = page.locator('.ui-select-popup');
+
+      await popup.waitFor({ state: 'visible' });
+      assert.equal(await popup.getByRole('option').count(), 4);
+      assert.equal(await trigger.locator('svg').count(), 1);
+      assert.equal(await popup.locator('.ui-select-group-nav svg').count(), 6);
+      assert.equal(await popup.locator('[role="option"] svg').count(), 4);
+      assert.equal((await popup.innerText()).includes('Отключённый исполнитель'), false);
+      assert.equal((await popup.innerText()).includes('["zai"'), false);
+      assert.equal((await popup.innerText()).includes('после первого хода'), false);
+
+      const codexIcon = popup.getByRole('button', { name: 'Codex', exact: true }).locator('svg');
+
+      assert.equal(await codexIcon.evaluate((node) => getComputedStyle(node).color), 'rgb(16, 163, 127)');
+
+      const geometry = await popup.evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        const list = node.querySelector('[role="listbox"]');
+        const buttons = [...node.querySelectorAll('.ui-select-group-nav button, [role="option"]')];
+        const search = node.querySelector('input[type="search"]');
+        const searchStyle = getComputedStyle(search);
+        const groupButtons = [...node.querySelectorAll('.ui-select-group-nav [data-group-icon]')];
+
+        return {
+          left: box.left,
+          right: box.right,
+          top: box.top,
+          bottom: box.bottom,
+          overflow: node.scrollWidth > node.clientWidth + 1,
+          listHeight: list.clientHeight,
+          minButtonHeight: Math.min(...buttons.map((button) => button.getBoundingClientRect().height)),
+          searchFocused: document.activeElement === node.querySelector('input[type="search"]'),
+          searchHeight: search.getBoundingClientRect().height,
+          searchRadius: searchStyle.borderRadius,
+          searchShadow: searchStyle.boxShadow,
+          searchFontSize: Number.parseFloat(searchStyle.fontSize),
+          labelsHidden: groupButtons.every((button) => {
+            return getComputedStyle(button.querySelector('.ui-button__label')).display === 'none';
+          }),
+          navigationHeight: node.querySelector('.ui-select-group-nav').getBoundingClientRect().height,
+        };
+      });
+
+      assert.equal(geometry.left >= 0 && geometry.right <= width, true);
+      assert.equal(geometry.top >= 0 && geometry.bottom <= height, true);
+      assert.equal(geometry.overflow, false);
+      assert.equal(geometry.listHeight >= 44, true);
+      assert.equal(geometry.searchFocused, !touch);
+      assert.equal(geometry.searchHeight, touch ? 44 : 28);
+      assert.equal(geometry.searchRadius, '4px');
+      assert.equal(geometry.searchShadow, 'none');
+      assert.equal(geometry.labelsHidden, true);
+      assert.equal(geometry.navigationHeight <= (touch ? 50 : 34), true);
+
+      if (touch) {
+        assert.equal(geometry.minButtonHeight >= 44, true);
+      }
+
+      if (width <= 600) {
+        assert.equal(geometry.searchFontSize >= 16, true);
+      }
+
+      await page.screenshot({ path: path.join(client.artifacts, `models-${width}x${height}.png`) });
+      await popup.screenshot({ path: path.join(client.artifacts, `models-menu-${width}x${height}.png`) });
+      await popup.getByRole('button', { name: /^Codex/u }).click();
+      assert.equal(await popup.getByRole('option').count(), 8);
+      assert.equal(await trigger.innerText(), 'GLM-5.3');
+      await popup.locator('input[type="search"]').fill('GLM-4.7');
+      assert.equal(await popup.getByRole('option').count(), 1);
+      await popup.locator('input[type="search"]').press('Enter');
+      await popup.waitFor({ state: 'hidden' });
+      assert.equal(await trigger.innerText(), 'GLM-4.7');
+
+      await trigger.click();
+      await popup.waitFor({ state: 'visible' });
+      await popup.locator('[data-select-group="all"]').click();
+      assert.equal(await popup.getByRole('option').count(), 22);
+      assert.equal((await popup.innerText()).includes('Скрытая модель'), false);
+      await page.keyboard.press('Escape');
+      await popup.waitFor({ state: 'hidden' });
+    } finally {
+      await context.close();
+    }
+  }
+
+  assert.deepEqual(errors, []);
+});
+
+/**
  * Локальный marker проверяет перенос режима через Teleport без помощи root-токенов.
  * На touch-странице сохраняем тип настоящего pointer-события для проверки tap.
  */

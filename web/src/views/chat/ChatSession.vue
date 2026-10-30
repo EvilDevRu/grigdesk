@@ -109,17 +109,38 @@
           <span class="lbl">модель</span>
           <UiSelect
             compact
+            searchable
+            group-navigation
             data-context="chat-session-toolbar"
             data-role="chat-model"
+            :aria-label="t('core.chatModelPicker')"
             :model-value="modelId"
             :disabled="frozen"
             v-tooltip="currentModelTitle" :aria-description="currentModelTitle"
             @change="onModelChange"
           >
-            <option v-if="modelId && !currentModel" :value="modelId" disabled>
-              {{ modelId }} — нет в реестре
+            <template #value-leading>
+              <ProviderIcon v-if="current.provider" :provider="current.provider" :size="14"
+                            :style="{ color: current.provider.color }" />
+            </template>
+            <template #value="{ option, value }">
+              {{ currentModel ? modelOptionLabel(currentModel) : option?.label || value }}
+            </template>
+            <template #group-leading="{ option }">
+              <ProviderIcon v-if="prov.modelOf(option.value).provider"
+                            :provider="prov.modelOf(option.value).provider!" :size="16"
+                            :style="{ color: prov.modelOf(option.value).provider?.color }" />
+            </template>
+            <template #option-leading="{ option }">
+              <ProviderIcon v-if="prov.modelOf(option.value).provider"
+                            :provider="prov.modelOf(option.value).provider!" :size="14"
+                            :style="{ color: prov.modelOf(option.value).provider?.color }" />
+            </template>
+            <option v-if="modelId && (!currentModel || current.provider?.chatEnabled === false)"
+                    :value="modelId" :hidden="current.provider?.chatEnabled === false" disabled>
+              {{ currentModel ? modelOptionLabel(currentModel) : modelId + ' — нет в реестре' }}
             </option>
-            <template v-if="provGroups.length">
+            <template v-if="prov.loaded || prov.providers.length">
               <!-- «недоступен» — итог последней проверки исполнителя, а не запрет: причина
                    бывает временной (сеть, тайм-аут probe, минутный разлогин), и блокировка выбора
                    отбирала у человека решение из-за одного неудачного опроса. Пометка остаётся,
@@ -128,6 +149,7 @@
                         :label="p.name + (p.available ? '' : ' — недоступен')">
                 <!-- «?» — модели нет в каталоге установленного CLI (он про неё не знает) -->
                 <option v-for="m in p.models" :key="m.id" :value="m.id"
+                        :data-description="modelOptionDescription(m)"
                         :title="modelOptionTitle(m, p)">
                   {{ modelOptionLabel(m) }}
                 </option>
@@ -993,14 +1015,31 @@ const currentModelTitle = computed(() => (
 // названа здесь же и словами: она предупреждает о вероятном отказе, но выбор не отменяет.
 const modelOptionTitle = (
   model: ProviderModelEntry, provider: { available?: boolean } | null,
-) => modelContextTitle(model, model.id)
+) => modelContextTitle(model, model.name)
   + (model.unknown ? ' · нет в каталоге установленного CLI' : '')
   + (provider?.available === false ? ' · исполнитель недоступен по последней проверке' : '');
 const modelOptionLabel = (model: ProviderModelEntry) => model.name
   + (model.contextUnverified && !model.contextRuntimeOnly ? ' · окно не подтверждено' : '')
   + (model.unknown ? ' ?' : '');
+
+/**
+ * В списке оставляем только известный размер окна; wire-id может оказаться JSON-массивом.
+ * Полная справка о рабочем окне и доступности остаётся у выбранной модели и в title.
+ */
+function modelOptionDescription(model: ProviderModelEntry): string {
+  const runtimeWindow = model.id === currentModel.value?.id ? Number(sess.value?.contextWindow) : 0;
+  const context = runtimeWindow || (model.contextRuntimeOnly ? 0 : Number(model.context));
+
+  if (!context) {
+    return '';
+  }
+
+  return t('core.chatModelContext', { tokens: fmtTokens(context) });
+}
+
 // Группы моделей для селекта (что именно видно — решает стор, правило одно на весь GrigDesk).
 const provGroups = computed(() => prov.providers
+  .filter((p) => p.chatEnabled !== false)
   .map((p) => ({ ...p, models: prov.visibleModels(p, modelId.value) }))
   .filter((p) => p.models.length));
 const FALLBACK_MODELS = ['opus', 'sonnet', 'haiku', 'fable']; // пока реестр не загрузился

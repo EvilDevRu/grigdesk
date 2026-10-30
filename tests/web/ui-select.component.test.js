@@ -224,6 +224,65 @@ test('SELECT-SEARCH-02: явные режимы и пустой результа
   assert.deepEqual(state.values, []);
 });
 
+test('SELECT-GROUPS-01: текущая группа, общий поиск и переход не меняют выбор', async (t) => {
+  const state = fixture(t, {
+    modelValue: 'glm',
+    searchable: true,
+    groupNavigation: true,
+  }, {
+    default: () => [
+      h('optgroup', { label: 'Codex' }, [h('option', { value: 'gpt' }, 'GPT')]),
+      h('optgroup', { label: 'GLM' }, [
+        h('option', { value: 'glm' }, 'GLM-5.3'),
+        h('option', { value: 'glm-old' }, 'GLM-4.7'),
+      ]),
+    ],
+  });
+  const popup = await openPicker(state);
+
+  assert.equal(popup.findAll('[role="option"]').length, 2);
+  assert.equal(popup.get('[data-select-group="1"]').attributes('aria-pressed'), 'true');
+  await popup.get('[data-select-group="0"]').trigger('click');
+  assert.equal(popup.get('[role="option"]').text(), 'GPT');
+  assert.deepEqual(state.values, []);
+  assert.deepEqual(state.changes, []);
+  await popup.get('input[type="search"]').setValue('GLM-4.7');
+  await flushPromises();
+  assert.equal(popup.get('[data-select-group="all"]').attributes('aria-pressed'), 'true');
+  assert.equal(popup.findAll('[role="option"]').length, 1);
+  assert.equal(popup.get('[role="option"]').attributes('data-option-index'), '2');
+  await popup.get('input[type="search"]').trigger('keydown', { key: 'Enter' });
+  await flushPromises();
+  assert.deepEqual(state.values, ['glm-old']);
+  assert.equal(state.changes[0].target.selectedIndex, 2);
+
+  const reopened = await openPicker(state);
+
+  assert.equal(reopened.get('[data-select-group="1"]').attributes('aria-pressed'), 'true');
+  assert.equal(reopened.findAll('[role="option"]').length, 2);
+});
+
+test('SELECT-GROUPS-02: Все включает варианты без группы и сбрасывает поиск', async (t) => {
+  const state = fixture(t, {
+    modelValue: 'grouped',
+    searchable: true,
+    groupNavigation: true,
+  }, {
+    default: () => [
+      h('option', { value: 'plain' }, 'Без группы'),
+      h('optgroup', { label: 'Исполнитель' }, [h('option', { value: 'grouped' }, 'Модель')]),
+    ],
+  });
+  const popup = await openPicker(state);
+
+  assert.equal(popup.findAll('[role="option"]').length, 1);
+  await popup.get('input[type="search"]').setValue('ничего');
+  await popup.get('[data-select-group="all"]').trigger('click');
+  assert.equal(popup.get('input[type="search"]').element.value, '');
+  assert.equal(popup.findAll('[role="option"]').length, 2);
+  assert.deepEqual(state.values, []);
+});
+
 test('SELECT-SEARCH-03: граница 9/10 и явное выключение работают при открытом списке', async (t) => {
   const { ref } = await import('../../web/node_modules/vue/index.mjs');
   const count = ref(9);
