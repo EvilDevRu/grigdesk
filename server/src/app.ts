@@ -94,7 +94,9 @@ import { createEngineRegistry } from './lib/db/engineRegistry.ts';
 import { createDbStore } from './lib/db/store.ts';
 import { createDbSessionManager } from './lib/db/sessionManager.ts';
 import { createDbAudit } from './lib/db/audit.ts';
-import { cancelDbQuery, createDbBroker } from './lib/db/broker.ts';
+import { createDbBroker } from './lib/db/broker.ts';
+import { createHumanDbQueries } from './lib/db/humanQueries.ts';
+import type { DbQueryRecord } from './lib/db/humanQueries.ts';
 import type { LimitedDbResult } from './lib/db/result.ts';
 import type { FactoryModuleOptions } from './modules/factory/index.ts';
 import type { MediaModuleOptions } from './modules/media/index.ts';
@@ -513,20 +515,6 @@ async function build(desktopParent: DesktopParent | null) {
 
   // Живой запрос к БД. Хранится в памяти процесса: перезапуск обнуляет ленту, и это
   // честно — сессии БД его тоже не переживают.
-  interface DbQueryRecord extends Record<string, unknown> {
-    id: string;
-    sessionId: string;
-    actor: string;
-    text: string;
-    queryClass: string | null;
-    tables: string[];
-    state: 'running' | 'done' | 'error' | 'cancelled';
-    startedAt: string;
-    finishedAt: string | null;
-    error?: string | null;
-    result: LimitedDbResult | { ok: false; error: string } | null;
-  }
-
   const dbQueries = new Map<string, DbQueryRecord>();
 
   function publicDbQuery(query: DbQueryRecord | null | undefined) {
@@ -568,6 +556,15 @@ async function build(desktopParent: DesktopParent | null) {
     const session = event.session as { id?: unknown } | undefined;
 
     fastify.sse?.broadcast?.('db-sessions', { sessionId: session?.id });
+  });
+
+  const humanDbQueries = createHumanDbQueries({
+    sessions: dbSessions,
+    queries: dbQueries,
+    settings: dbSettings,
+    audit: dbAudit,
+    publish: (queryId) => fastify.sse?.broadcast?.('db-queries', { queryId }),
+    onAuditError: () => fastify.log.error('Не удалось записать журнал запроса БД'),
   });
 
   const dbService = {
@@ -616,85 +613,10 @@ async function build(desktopParent: DesktopParent | null) {
       });
       return { schema: result };
     },
-    async query(id: string, input: { text?: unknown; params?: unknown[] }) {
-      const session = dbSessions.find(id);
-      if (!session) {
-        throw Object.assign(new Error('DB-сессия не найдена'), { code: 'session_not_found' });
-      }
-      const query: DbQueryRecord = {
-        id: randomUUID(),
-        sessionId: session.id,
-        actor: 'human',
-        text: String(input.text || ''),
-        queryClass: null,
-        tables: [],
-        state: 'running',
-        startedAt: new Date().toISOString(),
-        finishedAt: null,
-        result: null,
-      };
-      dbQueries.set(query.id, query);
-      const run = { id: query.id, queryId: query.id };
-      const untrack = dbSessions.trackRun(session.id, run);
-      fastify.sse?.broadcast?.('db-queries', { queryId: query.id });
-      Promise.resolve().then(async () => {
-        try {
-          const execute = session.engine.execute as (
-            handle: unknown,
-            request: Record<string, unknown>,
-          ) => Promise<unknown>;
-          const raw = await execute(session.handle, {
-            text: query.text,
-            params: input.params || [],
-            queryId: query.id,
-            limits: dbSettings(),
-          });
-          query.result = await normalizeDbResult(raw, { ...dbSettings(), completed: true });
-          query.state = 'done';
-          await dbAudit.append({
-            projectId: session.profile.projectId,
-            sessionId: session.id,
-            actor: 'human',
-            query: query.text,
-            outcome: 'success',
-            rows: Number((query.result as LimitedDbResult | null)?.totalRows ?? 0),
-            bytes: Number((query.result as LimitedDbResult | null)?.totalBytes ?? 0),
-            truncated: Boolean((query.result as LimitedDbResult | null)?.truncated),
-          });
-        } catch {
-          query.state = 'error';
-          query.result = { ok: false, error: 'query_failed' };
-          await dbAudit.append({
-            projectId: session.profile.projectId,
-            sessionId: session.id,
-            actor: 'human',
-            query: query.text,
-            outcome: 'query_failed',
-          });
-        } finally {
-          query.finishedAt = new Date().toISOString();
-          (untrack as (() => void) | undefined)?.();
-          fastify.sse?.broadcast?.('db-queries', { queryId: query.id });
-        }
-      });
-      return { queryId: query.id };
-    },
+    query: humanDbQueries.query,
     listQueries: () => [...dbQueries.values()].map(publicDbQuery),
     getQuery: (id: string) => publicDbQuery(dbQueries.get(id)),
-    async cancelQuery(id: string) {
-      const query = dbQueries.get(id);
-      const session = query ? dbSessions.find(query.sessionId) : null;
-      const outcome = await cancelDbQuery({
-        query: query as unknown as Record<string, unknown> | null,
-        session: session as unknown as Record<string, unknown> | null,
-        sessions: dbSessions as unknown as Record<string, unknown>,
-      });
-      if (!outcome.ok || !query) return outcome;
-      query.state = 'cancelled';
-      query.finishedAt = new Date().toISOString();
-      fastify.sse?.broadcast?.('db-queries', { queryId: query.id });
-      return { ok: true, method: outcome.method };
-    },
+    cancelQuery: humanDbQueries.cancel,
     listAudit: (query: Parameters<typeof dbAuditStore.list>[0]) => dbAuditStore.list(query),
     answerApproval: (
       pid: string,

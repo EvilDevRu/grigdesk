@@ -431,6 +431,40 @@ async function catalogStore() {
   });
 }
 
+test('консоль показывает причину SQL-ошибки вместо сырого JSON', async (t) => {
+  const store = await catalogStore();
+
+  store.sessions = [{
+    id: 'session-a',
+    profileId: 'primary',
+    projectId: 'shop',
+    label: 'Заказы',
+    engine: 'mysql',
+    role: 'read',
+    agentAllowed: false,
+  }];
+  store.queries = [{
+    id: 'query-error',
+    sessionId: 'session-a',
+    text: 'SELEC 1',
+    actor: 'human',
+    state: 'error',
+    result: {
+      ok: false,
+      error: 'ER_PARSE_ERROR',
+      message: 'Syntax error near SELECT',
+    },
+  }];
+
+  const { wrapper, flushPromises } = await mountPanel(t, store);
+
+  await wrapper.get('.db-query-row__actions button').trigger('click');
+  await flushPromises();
+  assert.match(wrapper.get('[data-db-query-error]').text(), /Syntax error near SELECT/u);
+  assert.match(wrapper.get('[data-db-query-error]').text(), /ER_PARSE_ERROR/u);
+  assert.equal(wrapper.find('.db-result__raw').exists(), false);
+});
+
 test('поиск профилей сохраняет выбранный вход, а смена профиля очищает пароль', async (t) => {
   const store = await catalogStore();
   const { wrapper, flushPromises } = await mountPanel(t, store);

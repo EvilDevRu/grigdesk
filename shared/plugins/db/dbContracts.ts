@@ -99,6 +99,7 @@ const dbResult = objectOf({
 const failedResult = objectOf({
   ok: oneOf(false),
   error: text,
+  message: optional(text),
 });
 
 const queryState = oneOf('checking', 'waiting', 'running', 'done', 'denied', 'error', 'cancelled');

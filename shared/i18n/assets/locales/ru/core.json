@@ -1063,6 +1063,7 @@
   "stageWizardReason_role_invalid": "Роль недоступна: проверьте настройки и возможности профиля.",
   "stageWizardReason_route_missing": "Маршрут больше недоступен.",
   "stageWizardReason_prompt_missing": "Инструкция роли недоступна.",
+  "dbQueryFailed": "Не удалось выполнить запрос. Попробуйте ещё раз или проверьте подключение.",
   "dbDesignSummary": "Профилей: {profiles} · Сессий: {sessions}",
   "dbDesignRunning": "Выполняется: {count}",
   "dbDesignHideForm": "Скрыть форму",

@@ -1,3 +1,5 @@
+import { errorCode, errorMessage } from '../../../../shared/lib/errors.ts';
+
 const ANSI = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001b\\))/gu;
 const CONTROLS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/gu;
 
@@ -19,6 +21,12 @@ export interface LimitOptions {
   maxRows?: number;
   maxBytes?: number;
   completed?: boolean;
+}
+
+export interface DbQueryFailure {
+  ok: false;
+  error: string;
+  message?: string;
 }
 
 /**
@@ -44,6 +52,22 @@ function sanitize(value: unknown): unknown {
   }
 
   return value;
+}
+
+/**
+ * Наружу выходят только код и очищенный текст ошибки, без sql, params, stack и config.
+ * Эти данные показываются человеку в консоли и не добавляются в журнал аудита.
+ */
+export function normalizeDbFailure(error: unknown): DbQueryFailure {
+  const candidate = errorCode(error);
+  const code = /^[A-Za-z0-9_]{1,80}$/u.test(candidate) ? candidate : 'query_failed';
+  const message = String(sanitize(errorMessage(error, ''))).slice(0, 2000);
+
+  return {
+    ok: false,
+    error: code,
+    ...(message ? { message } : {}),
+  };
 }
 
 /**

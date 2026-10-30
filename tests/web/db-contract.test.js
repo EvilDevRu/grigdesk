@@ -119,7 +119,11 @@ test('результат запроса различает ответ базы �
   });
 
   assert.equal(done.result.untrusted, true);
-  assert.deepEqual(failed.result, { ok: false, error: 'query_failed' });
+  assert.deepEqual(failed.result, {
+    ok: false,
+    error: 'query_failed',
+    message: null,
+  });
   assert.equal(done.queryClass, null, 'нераспознанный род запроса — пустое место');
 });
 
@@ -133,6 +137,30 @@ test('исход отмены сохраняет способ, которым з
     ok: false,
     method: null,
     error: 'cancel_not_supported',
+  });
+});
+
+test('ответ ошибки сохраняет сообщение для человека и исключает поля драйвера', () => {
+  const [query] = parseDbQueries({ queries: [{
+    id: 'error-a',
+    sessionId: 'session-a',
+    actor: 'human',
+    text: 'SELEC 1',
+    state: 'error',
+    startedAt: '2026-10-30T10:00:00Z',
+    result: {
+      ok: false,
+      error: 'ER_PARSE_ERROR',
+      message: 'Syntax error',
+      stack: 'PRIVATE_STACK',
+      config: { password: 'PRIVATE_PASSWORD' },
+    },
+  }] });
+
+  assert.deepEqual(query.result, {
+    ok: false,
+    error: 'ER_PARSE_ERROR',
+    message: 'Syntax error',
   });
 });
 

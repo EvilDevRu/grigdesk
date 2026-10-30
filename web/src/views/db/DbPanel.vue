@@ -472,6 +472,12 @@
                       <small>Лента обновится после ответа базы.</small>
                     </div>
 
+                    <UiInlineMessage v-else-if="failedResult" tone="danger" data-db-query-error>
+                      <strong>{{ failedResult.message || t('core.dbQueryFailed') }}</strong>
+                      <br />
+                      <small>{{ failedResult.error }}</small>
+                    </UiInlineMessage>
+
                     <div
                       v-else-if="displayedResult && resultRows.length"
                       class="db-result-table-wrap"
@@ -892,6 +898,12 @@ const displayedResult = computed(() => (
   || fallbackResults[selectedSessionId.value]
   || null
 ));
+const failedResult = computed(() => {
+  const value = displayedResult.value;
+
+  return value && 'ok' in value && value.ok === false ? value : null;
+});
+
 // Счётчик строк относится только к настоящему ответу базы. У отказа его нет, и
 // показать «0 из 0» вместо ошибки значило бы выдать неудачу за пустой результат.
 const limitedResult = computed<DbResult | null>(() => {
