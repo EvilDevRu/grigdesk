@@ -396,17 +396,25 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
       hostServer: GLM_FACTORY_STATUS_SERVER,
     } : {}),
   });
-  const ignored = [
-    ...(options.attachmentPaths?.length ? ['вложения'] : []),
-    ...(options.extraDirs?.length ? ['дополнительные каталоги'] : []),
-  ];
 
-  // Граница записи GLM — только рабочая папка: вложения и прочие корни в неё не добавляются.
-  if (ignored.length) {
+  // Пути вложений читаются вне workspace; просмотр изображения зависит от модели.
+  // Проверку image input оставляем инструменту Harness, не политике GrigDesk.
+  if (options.attachmentPaths?.length) {
+    options.onStep?.({
+      k: 'note',
+      text: 'Вложения переданы в сообщении путями и доступны только на чтение. '
+        + 'Просмотр изображений доступен только моделям GLM с image input; '
+        + 'текстовые модели получат отказ read_image от Harness.',
+    } as ChatStep);
+  }
+
+  // Дополнительные каталоги не расширяют границу записи песочницы DSH.
+  // Их доступность для чтения не зависит от поддержки изображений моделью.
+  if (options.extraDirs?.length) {
     options.onStep?.({
       k: 'note',
       level: 'warn',
-      text: `GLM пишет только в рабочей папке ${cwd}: ${ignored.join(' и ')} не добавлены в рабочую область`,
+      text: `GLM пишет только в рабочей папке ${cwd}; дополнительные каталоги доступны только на чтение.`,
     } as ChatStep);
   }
 

@@ -149,13 +149,13 @@ const PROFILE_TOOLS = [
 ];
 
 const NATIVE_TOOLS_TEST = 'GLM_NATIVE_TOOLS — точные имена профиля без делегирующих, workflow и web, '
-  + 'но с вопросом агента, навыками и фоновыми задачами';
+  + 'с просмотром изображений, вопросом агента, навыками и фоновыми задачами';
 
 test(NATIVE_TOOLS_TEST, () => {
   const forbidden = [
     'subagent', 'subagent_fork', 'send_message', 'interrupt_agent', 'list_agents', 'workflow', 'ralph',
     'web_fetch', 'web_search', 'exit_plan_mode', 'create_goal',
-    'get_goal', 'update_goal', 'present', 'read_image',
+    'get_goal', 'update_goal', 'present',
   ];
 
   assert.equal(Object.isFrozen(GLM_NATIVE_TOOLS), true);
@@ -164,7 +164,7 @@ test(NATIVE_TOOLS_TEST, () => {
   assert.ok(GLM_NATIVE_TOOLS.every((name) => PROFILE_TOOLS.includes(name)));
   assert.deepEqual(GLM_NATIVE_TOOLS.filter((name) => forbidden.includes(name)), []);
   assert.deepEqual([...GLM_NATIVE_TOOLS].sort(), ['ask_user_question', 'bash', 'edit', 'glob', 'grep',
-    'job_kill', 'job_list', 'job_output', 'read', 'skill', 'todo_write', 'write']);
+    'job_kill', 'job_list', 'job_output', 'read', 'read_image', 'skill', 'todo_write', 'write']);
 });
 
 test('коды ошибки модели в turn/end: AUTH и QUOTA отличаются от доставки', () => {

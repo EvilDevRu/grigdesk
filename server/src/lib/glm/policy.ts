@@ -28,6 +28,9 @@ export const GLM_WORK_SERVER_NAME = 'grigdesk-work';
 
 const KINDS: Readonly<Record<string, GlmToolKind>> = Object.freeze({
   read: 'read',
+  // Просмотр изображения — чтение: other требовал бы лишнего ручного подтверждения.
+  // Поддержку image input выбранной модели проверяет инструмент Harness.
+  read_image: 'read',
   glob: 'search',
   grep: 'search',
   write: 'edit',

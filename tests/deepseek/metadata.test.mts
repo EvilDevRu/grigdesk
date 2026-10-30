@@ -14,6 +14,7 @@ import {
 } from '../../shared/chat/deepSeekBinary.ts';
 import { createDeepSeekMetadata, manifestBytes, packageIdFor } from '../../deepseek/src/runtime/metadata.ts';
 import { sha256 } from '../../shared/node/hash.ts';
+import { GLM_COMPATIBILITY } from '../../deepseek/src/runtime/glmCompatibility.ts';
 import { runtimeInfoFixture } from '../helpers/deepseekMetadataFixture.mts';
 import {
   GLM_ALLOWED_MODES,
@@ -135,6 +136,8 @@ test('требования host соответствуют адаптерам и
 
   assert.equal(host.glm.profileRevision, GLM_PROFILE_REVISION);
   assert.equal(host.glm.policyRevision, GLM_POLICY_REVISION);
+  assert.equal(GLM_COMPATIBILITY.profileRevision, host.glm.profileRevision);
+  assert.equal(GLM_COMPATIBILITY.policyRevision, host.glm.policyRevision);
   assert.ok(GLM_ALLOWED_MODES.includes(host.glm.mode));
   assert.deepEqual(GLM_ALLOWED_MODES, ['api', 'coding-plan']);
   assert.deepEqual(host.requiredCapabilities, ['web', 'acp', 'settingsWeb', 'settingsAcp']);

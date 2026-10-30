@@ -1,6 +1,7 @@
 # Политика инструментов GLM и разрешения
 
-В web-чате профиля `grigdesk-glm-profile-v3` каждый вызов проходит [native gate](glm-native-gate.md), включая
+В web-чате профиля `grigdesk-glm-profile-v3` с политикой `grigdesk-glm-policy-v3`
+каждый вызов проходит [native gate](glm-native-gate.md), включая
 окончательный guard перед эффектом. Chat policy дополнительно разрешает только foreground
 `subagent` и `subagent_fork` без смены модели и прав ребёнка.
 
@@ -12,13 +13,15 @@ SSH/БД чата) он читает из файла `glm-policy.json` ката�
 
 ## Что пропускается
 
-- Инструменты профиля по точному имени: `read`, `write`, `edit`, `glob`, `grep`, `bash`,
+- Инструменты профиля по точному имени: `read`, `read_image`, `write`, `edit`, `glob`, `grep`, `bash`,
   `skill`, `job_list`, `job_output`, `job_kill`, `todo_write`, `ask_user_question`.
+  `read_image` — просмотр изображения с типом действия `read`; поддержку image input
+  выбранной модели проверяет сам Harness: [контракт изображений](glm-image-input.md).
   `skill` — нативный загрузчик инструкций навыка: чтение `SKILL.md` в контекст без файловых
   и сетевых эффектов, тип действия `read`. `job_*` — фоновые задачи самого процесса: запуск
   идёт через `bash`, `job_list`/`job_output` читают состояние и вывод (тип `read`),
   `job_kill` останавливает свою задачу (тип `execute`). Делегирующие, субагентные, workflow,
-  goal, plan, `present`, `read_image`, `web_search`, `web_fetch` и любое неизвестное имя —
+  goal, plan, `present`, `web_search`, `web_fetch` и любое неизвестное имя —
   отказ.
 - `bash` — через общую политику прямых команд: SSH при запрете — отказ; удалённый клиент БД
   при `blockDirectDb` — отказ, клиент с непроверяемым хостом — отказ при `strictUnknownDbClient`.

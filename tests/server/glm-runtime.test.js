@@ -184,6 +184,42 @@ test(RUNTIME_TEST_1, async (t) => {
   });
 });
 
+test('заметки GLM разделяют чтение вложений, image input модели и границу записи', async (t) => {
+  for (const [attachments, extraDirs] of [[false, false], [true, false], [false, true], [true, true]]) {
+    await t.test(`вложения=${attachments}, каталоги=${extraDirs}`, async (sub) => {
+      const f = await fixture(sub, TEXT_SCENARIO);
+      const attachment = path.join(f.root, 'shot.png');
+      const message = attachments ? `Посмотри изображение: ${attachment}` : 'fixture-prompt';
+      const steps = [];
+      const expected = [];
+
+      if (attachments) {
+        expected.push('Вложения переданы в сообщении путями и доступны только на чтение. '
+          + 'Просмотр изображений доступен только моделям GLM с image input; '
+          + 'текстовые модели получат отказ read_image от Harness.');
+      }
+      if (extraDirs) {
+        expected.push(`GLM пишет только в рабочей папке ${await fs.realpath(f.project)}; `
+          + 'дополнительные каталоги доступны только на чтение.');
+      }
+
+      const result = await f.run({
+        message,
+        attachmentPaths: attachments ? [attachment] : [],
+        extraDirs: extraDirs ? [path.join(f.root, 'other')] : [],
+        onStep: (step) => steps.push(step),
+      });
+      const notes = steps.filter((step) => step.k === 'note').map((step) => step.text);
+      const prompt = (await f.log()).find((entry) => entry.message?.method === 'session/prompt');
+
+      assert.equal(result.reply, 'ok');
+      assert.deepEqual(notes, expected);
+      assert.ok(notes.every((text) => !text.includes('не добавлены в рабочую область')));
+      assert.deepEqual(prompt.message.params.request.content, [{ type: 'text', text: message }]);
+    });
+  }
+});
+
 test('отказ CAS binding — ни одного prompt', async (t) => {
   const f = await fixture(t);
   const refusal = Object.assign(new Error('binding занят'), { code: 'provider_session_conflict' });

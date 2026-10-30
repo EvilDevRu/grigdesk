@@ -99,7 +99,8 @@ export function chatAttachmentsBlock(paths: readonly string[]): string {
 
   const list = paths.map((file) => `- ${file}`).join('\n');
 
-  return `[Вложения]\nПользователь приложил файлы (открой их инструментом Read):\n${list}\n[/Вложения]\n\n`;
+  return '[Вложения]\nПользователь приложил файлы. Изображения открой подходящим инструментом '
+    + `чтения изображений (Read или read_image — что доступно в этом окружении):\n${list}\n[/Вложения]\n\n`;
 }
 
 /**

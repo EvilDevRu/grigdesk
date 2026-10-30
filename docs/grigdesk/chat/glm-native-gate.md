@@ -1,6 +1,6 @@
 # Native gate и foreground-делегирование GLM
 
-Профиль чата `grigdesk-glm-profile-v3` и политика `grigdesk-glm-policy-v2` используют
+Профиль чата `grigdesk-glm-profile-v3` и политика `grigdesk-glm-policy-v3` используют
 host plugin `deepseek/src/host/glmGate.mjs`. Factory и ACP-каталог сохраняют прежнюю
 hook-политику. Наличие реализации не заменяет допуск конкретного ELF через живую проверку.
 

@@ -151,6 +151,9 @@ test('папка вложений открыта агенту, но не пок�
   const started = events.find((event) => event.event === 'chat-turn-start').data;
 
   assert.equal(run.options.extraDirs.includes(path.resolve(attachments)), true);
+  assert.ok(run.options.message.includes(path.join(attachments, 'shot.png')));
+  assert.match(run.options.message, /Изображения открой подходящим инструментом чтения изображений/u);
+  assert.match(run.options.message, /Read или read_image — что доступно в этом окружении/u);
   assert.equal(started.snapshot.extraDirs.includes(path.resolve(attachments)), false);
   const active = (await app.inject('/api/chat/active')).json().active[0];
 

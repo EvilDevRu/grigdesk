@@ -1,5 +1,7 @@
 # Чат и исполнители
 
+- [Согласование ревизии политики GLM в producer и host](glm-producer-policy-sync.md)
+
 - [Повторная сверка пика, кредитных квот и коэффициентов GLM, 29.10.2026](glm-quota-recheck.md)
 
 - [Режимы Codex: admission, явный выбор чата, native-вопросы и предел проверки](codex-permission-modes.md)
@@ -192,7 +194,7 @@
 - [Диагностика GLM: оплата SUCCESS, активный Pro и отказ 1113 на двух модельных маршрутах](glm-entitlement-diagnostics.md)
 - [Дополнительный контроль GLM без ЛК: нулевой API-баланс, каталог и таймаут бесплатной модели](glm-api-control.md)
 - [GLM после перезапуска: видимость при закрытом допуске и кэш адаптера](glm-setup-visibility.md)
-- [Картинки GLM: запрет read_image и отличие чтения от границы записи](glm-image-input.md)
+- [Картинки GLM: read_image в политике v3, чтение вложений и image input модели](glm-image-input.md)
 - [Контракт доступа и допуска GLM: два режима, отдельные ключи, отпечаток и setup-only карточка](glm-access-contract.md)
 - [Входы сборки GLM: exact-версии, проверка notices и запрет записи llm-pi-ai](glm-build-inputs.md)
 - [Notices GLM: точные версии, закреплённые источники и offline supplements](glm-license-inventory.md)

@@ -6,6 +6,6 @@
   "glm": {
     "mode": "api",
     "profileRevision": "grigdesk-glm-profile-v3",
-    "policyRevision": "grigdesk-glm-policy-v2"
+    "policyRevision": "grigdesk-glm-policy-v3"
   }
 }

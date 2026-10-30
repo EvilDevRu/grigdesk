@@ -11,7 +11,7 @@ export type GlmAccessMode = 'api' | 'coding-plan';
 export type { GlmCompatibilityRuntime };
 
 export const GLM_PROFILE_REVISION = 'grigdesk-glm-profile-v3';
-export const GLM_POLICY_REVISION = 'grigdesk-glm-policy-v2';
+export const GLM_POLICY_REVISION = 'grigdesk-glm-policy-v3';
 // Ревизии отвязанного этапа фабрики отдельны от чата: смена Factory профиля или политики
 // не меняет отпечаток, допуск и память обычного чата GLM.
 export const GLM_FACTORY_PROFILE_REVISION = 'grigdesk-glm-factory-profile-v2';
@@ -30,9 +30,12 @@ export const GLM_ALLOWED_MODES: readonly GlmAccessMode[] = Object.freeze(['api',
 // skill — нативный загрузчик инструкций навыка из каталога пользователя: чтение без
 // файловых и сетевых эффектов. job_* — фоновые задачи самого процесса: запуск идёт через
 // bash, job_list/job_output читают состояние и вывод, job_kill останавливает своё.
+// read_image — просмотр изображений, тип read. Поддержку image input модели проверяет
+// сам инструмент DSH; политика GrigDesk не принимает это решение за модель.
 // Всё перечисленное действует и в чате, и на этапах Factory.
 export const GLM_NATIVE_TOOLS: readonly string[] = Object.freeze([
   'read',
+  'read_image',
   'write',
   'edit',
   'glob',

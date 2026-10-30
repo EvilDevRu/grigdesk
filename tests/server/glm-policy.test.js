@@ -7,6 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { canonicalGlmJson } from '../../server/src/lib/glm/contract.ts';
+import { decideGlmTool } from '../../server/src/lib/glm/policy.ts';
 import { GLM_POLICY_HOOK_PATH } from '../../server/src/lib/glm/profile.ts';
 
 const POLICY = {
@@ -81,7 +82,7 @@ test('делегирующие, субагентные, workflow и web-инст
   const forbidden = [
     'subagent', 'subagent_fork', 'send_message', 'interrupt_agent', 'list_agents', 'workflow', 'ralph',
     'web_fetch', 'web_search', 'present', 'create_goal',
-    'exit_plan_mode', 'read_image',
+    'exit_plan_mode',
   ];
 
   for (const name of forbidden) {
@@ -144,6 +145,25 @@ test('загрузчик навыков — exit 0 с типом read', async (t
 
   assert.equal(result.code, 0);
   assert.equal(result.descriptor.name, 'skill');
+  assert.equal(result.descriptor.kind, 'read');
+  assert.equal(result.descriptor.decision, 'allow');
+});
+
+test('read_image разрешён как read в политике чата и hook Factory/ACP', async (t) => {
+  const input = { file_path: '/attachments/shot.png' };
+
+  for (const policy of [POLICY, { ...POLICY, delegation: 'foreground-v1' }]) {
+    assert.deepEqual(decideGlmTool('read_image', input, policy), {
+      allow: true,
+      kind: 'read',
+      reason: '',
+    });
+  }
+
+  const result = await runHook(t, preToolUse('read_image', input));
+
+  assert.equal(result.code, 0);
+  assert.equal(result.descriptor.name, 'read_image');
   assert.equal(result.descriptor.kind, 'read');
   assert.equal(result.descriptor.decision, 'allow');
 });

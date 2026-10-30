@@ -253,7 +253,7 @@ test('поздний onSessionCreated после сброса не оживля�
   assert.ok(cleared.generation > created.generation);
 });
 
-test('вложения и дополнительные каталоги не расширяют запись, в ленте предупреждение', async (t) => {
+test('вложения и дополнительные каталоги получают отдельные заметки о чтении', async (t) => {
   const f = await fixture(t);
   const steps = [];
   const result = await f.run({
@@ -262,11 +262,14 @@ test('вложения и дополнительные каталоги не р�
     onStep: (step) => steps.push(step),
   });
   const overlay = (await f.log()).length;
+  const notes = steps.filter((step) => step.k === 'note');
 
   assert.equal(result.reply, 'ok');
   assert.ok(overlay > 0);
-  assert.ok(steps.some((step) => step.k === 'note' && step.level === 'warn'
-    && /вложения/u.test(step.text) && /дополнительные каталоги/u.test(step.text)));
+  assert.equal(notes.length, 2);
+  assert.match(notes[0].text, /Вложения.*доступны только на чтение/u);
+  assert.match(notes[1].text, /дополнительные каталоги доступны только на чтение/u);
+  assert.equal(notes[1].level, 'warn');
 });
 
 test('capability binding GLM видна чату', async (t) => {
