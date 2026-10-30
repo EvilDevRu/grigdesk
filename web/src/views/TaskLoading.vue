@@ -3,9 +3,18 @@
     <div :class="['task-loading', area]">
       <UiSkeleton v-if="area === 'options'" width="50%" />
       <template v-else-if="area === 'window'">
-        <UiSkeleton height="48px" />
-        <UiSkeletonLayout layout="text" />
-        <UiSkeletonLayout layout="list" />
+        <div class="window-overview">
+          <UiSkeleton width="72%" height="22px" />
+          <UiSkeleton width="58%" />
+        </div>
+        <div class="window-navigation">
+          <UiSkeleton width="72px" />
+          <UiSkeleton width="48px" />
+          <UiSkeleton width="96px" />
+        </div>
+        <div class="window-content">
+          <UiSkeletonLayout layout="text" />
+        </div>
       </template>
       <UiSkeletonLayout v-else :layout="area === 'comments' ? 'list' : 'text'" :header="false" />
     </div>
@@ -33,9 +42,33 @@ withDefaults(defineProps<{
 <style scoped>
 .task-loading { min-width: 0; }
 .options { display: flex; align-items: center; height: 36px; padding: 8px 12px; }
-.window { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; padding: 24px; }
-.window > :first-child { grid-column: 1 / -1; }
-@media (max-width: 600px) {
-  .window { grid-template-columns: minmax(0, 1fr); }
+.window {
+  container: task-loading / inline-size;
+}
+.window-overview {
+  display: grid;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.window-navigation {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  min-height: 43px;
+  padding-inline: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.window-content {
+  padding: 20px;
+}
+@container task-loading (max-width: 480px) {
+  .window-content {
+    padding: 14px 12px;
+  }
+  .window-overview,
+  .window-navigation {
+    padding-inline: 12px;
+  }
 }
 </style>

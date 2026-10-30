@@ -10,43 +10,53 @@
     fade-only
     @update:open="onTaskDialogOpenChange"
   >
-      <header class="mhead" :class="{ 'mhead-window': presentation === 'document' }">
-        <div class="mheading">
-          <div class="midentity">
+    <div class="task-detail" data-ui-workspace :data-pane="contentPane">
+      <div class="mhead" :class="{ 'mhead-window': presentation === 'document' }">
+        <UiPaneHeader class="task-toolbar" inset="content" data-ui-task-header>
+          <template #title>
             <span class="meyebrow">{{ ownTask ? t('core.grigdeskTaskLabel')
               : isB24Task ? 'Задача Битрикс24' : t('core.grigdeskGenericTask') }}</span>
+          </template>
+          <template #meta>
             <span class="mid mono">#{{ taskId }}</span>
-          </div>
+          </template>
+          <template #actions>
+            <div class="mhead-actions" role="group" aria-label="Действия с карточкой">
+              <TaskFavoriteButton
+                v-if="isB24Task"
+                :active="favorites.isFavorite(taskId)"
+                :pending="!favorites.loaded || favorites.loading || favorites.isPending(taskId)"
+                :task-title="detail?.title || boardTask?.title || `Задача #${taskId}`"
+                @toggle="toggleFavorite"
+              />
+              <UiIconButton
+                data-context="task-modal-header"
+                label="Обновить задачу"
+                v-tooltip="'Обновить'"
+                :loading="loading"
+                :disabled="Boolean(editForm) || busy === 'edit'"
+                loading-label="Обновляю задачу"
+                @click="refresh"
+              >
+                ⟳
+              </UiIconButton>
+              <UiIconButton
+                data-context="task-modal-header"
+                label="Закрыть задачу"
+                v-tooltip="'Закрыть (Esc)'"
+                @click="ui.close()"
+              >
+                ✕
+              </UiIconButton>
+            </div>
+          </template>
+        </UiPaneHeader>
+        <div class="mheading">
           <h3 id="task-modal-title" class="mtitle" tabindex="-1">
             {{ detail?.title || (loading ? 'Загрузка…' : 'Задача') }}
           </h3>
         </div>
-        <div class="mhead-actions" role="group" aria-label="Действия с карточкой">
-          <TaskFavoriteButton v-if="isB24Task" :active="favorites.isFavorite(taskId)"
-                              :pending="!favorites.loaded || favorites.loading || favorites.isPending(taskId)"
-                              :task-title="detail?.title || boardTask?.title || `Задача #${taskId}`"
-                              @toggle="toggleFavorite" />
-          <UiIconButton
-            data-context="task-modal-header"
-            label="Обновить задачу"
-            v-tooltip="'Обновить'"
-            :loading="loading"
-            :disabled="Boolean(editForm) || busy === 'edit'"
-            loading-label="Обновляю задачу"
-            @click="refresh"
-          >
-            ⟳
-          </UiIconButton>
-          <UiIconButton
-            data-context="task-modal-header"
-            label="Закрыть задачу"
-            v-tooltip="'Закрыть (Esc)'"
-            @click="ui.close()"
-          >
-            ✕
-          </UiIconButton>
-        </div>
-      </header>
+      </div>
 
       <div v-if="err || (isB24Task && (favorites.error || shelf.error))" class="malerts" aria-live="polite">
         <p v-if="err" class="err">{{ err }}</p>
@@ -76,14 +86,43 @@
         </div>
       </div>
 
+      <div class="task-sectionbar">
+        <UiTabs v-model="taskSection" class="task-navigation" :label="t('core.taskDesignSections')">
+          <UiTab
+            id="task-tab-description"
+            value="description"
+            controls="task-description"
+            data-context="task-modal-tab"
+            data-task-section="description"
+          >{{ t('core.taskDesignDescription') }}</UiTab>
+          <UiTab
+            id="task-tab-triage"
+            value="triage"
+            controls="task-panel-triage"
+            data-context="task-modal-tab"
+            data-task-section="triage"
+          >{{ t('core.taskDesignAnalysis') }}</UiTab>
+          <UiTab
+            v-if="isB24Task"
+            id="task-tab-comments"
+            value="comments"
+            controls="task-panel-comments"
+            data-context="task-modal-tab"
+            data-task-section="comments"
+          >
+            {{ t('core.taskDesignComments') }}<span v-if="comments?.length"> · {{ comments.length }}</span>
+          </UiTab>
+        </UiTabs>
+      </div>
+
       <div class="mbody">
-        <section class="task-pane brief-pane" aria-labelledby="task-brief-title">
-          <div class="pane-head">
-            <div>
-              <h4 id="task-brief-title" class="pane-title">Описание задачи</h4>
-            </div>
+        <section id="task-description" class="task-pane brief-pane"
+                 role="tabpanel" aria-labelledby="task-tab-description">
+          <div class="brief-head">
+            <h4 class="pane-title">Описание задачи</h4>
             <UiButton
               v-if="isB24Task && detail && !editForm"
+              size="compact"
               data-role="task-edit-open"
               v-tooltip="'Редактировать задачу'"
               :disabled="loading || busy === 'edit'"
@@ -254,33 +293,7 @@
           </div>
         </section>
 
-        <section class="task-pane work-pane" aria-labelledby="task-work-title">
-          <div class="work-head">
-            <div>
-              <h4 id="task-work-title" class="pane-title">Разбор задачи</h4>
-            </div>
-            <!-- Табы: Триаж | Комментарии -->
-            <UiTabs v-model="mtab" class="mtabs" label="Раздел карточки задачи">
-              <UiTab
-                id="task-tab-triage"
-                data-context="task-modal-tab"
-                value="triage"
-                controls="task-panel-triage"
-              >
-                Оценка
-              </UiTab>
-              <UiTab
-                v-if="isB24Task"
-                id="task-tab-comments"
-                data-context="task-modal-tab"
-                value="comments"
-                controls="task-panel-comments"
-              >
-                Комментарии<template v-if="comments?.length"> ({{ comments.length }})</template>
-              </UiTab>
-            </UiTabs>
-          </div>
-
+        <section class="task-pane work-pane" :aria-label="t('core.taskDesignAnalysis')">
           <div class="tab-scroll" :class="{ 'show-comments': mtab === 'comments' }">
             <!-- Триаж: оценка сложности/рисков без стенда -->
             <div
@@ -294,7 +307,7 @@
             Триаж выключен в настройках плагинов. Сохранённые оценки и уточнения не удалены.
           </div>
           <template v-else>
-          <div v-if="!triagePending" class="thead2">
+          <div v-if="!triagePending" class="thead2" :class="{ 'is-empty': !triage?.analysis }">
             <div class="triage-summary">
               <span class="triage-summary-title">Оценка по коду</span>
               <span v-if="triage?.analysis" class="triage-ready">Готова</span>
@@ -303,6 +316,7 @@
               </span>
               <span v-else class="tmuted">Задача ещё не оценена</span>
             </div>
+            <p v-if="!triage?.analysis" class="triage-empty-hint">{{ t('core.taskDesignAnalysisHint') }}</p>
             <UiButton
               data-role="task-compact-action"
               tone="accent"
@@ -342,26 +356,30 @@
           </div>
 
           <template v-if="triage?.analysis && !triagePending">
-            <section v-if="triage.analysis.summary" class="triage-result" aria-label="Вывод оценки">
-              <h5>Вывод</h5>
-              <p class="tsum">{{ triage.analysis.summary }}</p>
-            </section>
-            <p v-if="triage.stale?.length" class="tstale">
-              ⚠ Код под оценкой менялся: {{ triage.stale.slice(0, 5).join(', ') }}{{ triage.stale.length > 5 ? ` и ещё ${triage.stale.length - 5}` : '' }} — стоит переоценить.
-            </p>
-            <section v-if="triage.analysis.risk_markers?.length" class="triage-risks">
-              <h5>Риски и ограничения <span>{{ triage.analysis.risk_markers.length }}</span></h5>
-              <ul class="tlist">
-                <li v-for="m in triage.analysis.risk_markers" :key="m">{{ m }}</li>
-              </ul>
-            </section>
+            <div
+              v-if="triage.analysis.summary || triage.stale?.length || triage.analysis.risk_markers?.length"
+              class="triage-findings"
+            >
+              <section v-if="triage.analysis.summary" class="triage-result" aria-label="Вывод оценки">
+                <h5>Вывод</h5>
+                <p class="tsum">{{ triage.analysis.summary }}</p>
+              </section>
+              <p v-if="triage.stale?.length" class="tstale">
+                ⚠ Код под оценкой менялся: {{ triage.stale.slice(0, 5).join(', ') }}{{ triage.stale.length > 5 ? ` и ещё ${triage.stale.length - 5}` : '' }} — стоит переоценить.
+              </p>
+              <section v-if="triage.analysis.risk_markers?.length" class="triage-risks">
+                <h5>Риски и ограничения <span>{{ triage.analysis.risk_markers.length }}</span></h5>
+                <ul class="tlist">
+                  <li v-for="m in triage.analysis.risk_markers" :key="m">{{ m }}</li>
+                </ul>
+              </section>
+            </div>
             <section
               v-if="triageQuestions.length"
               class="clarify"
               aria-labelledby="task-triage-questions-title"
             >
               <header class="clarify-head">
-                <span class="clarify-head-icon" aria-hidden="true">?</span>
                 <div>
                   <h5 id="task-triage-questions-title">Нужно ваше решение</h5>
                   <p>Выберите подходящий вариант. При необходимости добавьте пояснение.</p>
@@ -698,7 +716,8 @@
               @click="openConveyor"
             >
               {{ conveyor.stall ? (conveyor.stall.kind === 'crashed' ? '✖ Конвейер оборвался' : '🛑 Конвейер встал')
-                 : conveyor.daemonAlive ? '🏭 Идёт на конвейере' : '🏭 Уже на конвейере' }} →
+                 : conveyor.daemonAlive ? t('core.taskDesignPipelineRunning')
+                   : t('core.taskDesignPipeline') }} →
             </UiButton>
             <UiButton
               v-else
@@ -712,7 +731,7 @@
               v-tooltip="launchOpenHint"
               @click="openLaunch"
             >
-              🏭 На конвейер
+              {{ t('core.taskDesignLaunch') }}
             </UiButton>
             <UiButton
               v-if="isB24Task && completed"
@@ -967,6 +986,7 @@
           <span v-if="launchMsg" class="lmsg" aria-live="polite">{{ launchMsg }}</span>
           <span v-if="sandboxMsg" class="lmsg">{{ sandboxMsg }}</span>
       </footer>
+    </div>
   </TaskCardFrame>
 </template>
 
@@ -1008,6 +1028,7 @@ import {
   UiFormActions,
   UiIconButton,
   UiInput,
+  UiPaneHeader,
   UiSelect,
   UiSpinner,
   UiTab,
@@ -1848,9 +1869,32 @@ async function startClarifyDictation(questionId: string) {
 
 // ── Табы модалки: Триаж | Комментарии ──
 const mtab = ref('triage');
+const contentPane = ref<'description' | 'work'>('description');
+// Одна навигация управляет и видимой областью, и прежней ленивой вкладкой обсуждения.
+// Возврат к описанию не сбрасывает выбранный разбор и не уничтожает его форму.
+const taskSection = computed({
+  get: () => contentPane.value === 'description' ? 'description' : mtab.value,
+  set: (section: string | number) => {
+    if (section === 'description' || section === 'triage' || section === 'comments') {
+      selectTaskSection(section);
+    }
+  },
+});
 const comments = ref<TaskComment[] | null>(null);    // null = ещё не загружали
 const comLoading = ref(false);
 let commentsRequest = 0;
+
+/**
+ * Карточка показывает одну область, сохраняя DOM и черновики остальных.
+ * Комментарии используют прежнюю вкладку и её ленивую загрузку без повторных запросов.
+ */
+function selectTaskSection(section: 'description' | 'triage' | 'comments') {
+  contentPane.value = section === 'description' ? 'description' : 'work';
+
+  if (section !== 'description') {
+    mtab.value = section;
+  }
+}
 
 /**
  * Список комментариев проверяется до публикации в шаблоне карточки.
@@ -2571,6 +2615,7 @@ watch(taskId, (id) => {
     showClarifyHistory.value = false;
     showAnalysisDetails.value = false;
     mtab.value = 'triage';
+    contentPane.value = 'description';
     comments.value = null;
     clarifyDrafts.value = {};
     clarifySaved.value = '';
@@ -2659,30 +2704,28 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.mhead {
-  flex: none;
+.task-detail {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 18px 20px 16px;
-  border-bottom: 1px solid var(--line);
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  container: task-detail / inline-size;
   background: var(--surface);
 }
-.mheading {
-  flex: 1;
+.mhead {
+  flex: none;
   min-width: 0;
 }
-.midentity {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 7px;
+.mheading {
+  min-width: 0;
+  padding: 18px 20px 10px;
 }
 .meyebrow {
   color: var(--ink-mid);
   font-size: 12px;
+  font-weight: 500;
 }
 .mid {
   color: var(--accent);
@@ -2690,13 +2733,13 @@ onUnmounted(() => {
   font-weight: 600;
 }
 .mtitle {
-  max-height: 120px;
+  max-height: 84px;
   margin: 0;
   overflow-y: auto;
   color: var(--ink);
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 650;
-  line-height: 1.4;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 .mhead-actions {
@@ -2714,32 +2757,42 @@ onUnmounted(() => {
 .mhead-window .mhead-actions {
   -webkit-app-region: no-drag;
 }
-.malerts { flex: none; display: grid; gap: 4px; max-height: 104px; overflow-y: auto;
-  padding: 8px 16px; border-bottom: 1px solid color-mix(in srgb, var(--bad) 28%, var(--line));
-  background: color-mix(in srgb, var(--bad) 9%, var(--surface)); }
-.err { margin: 0; color: var(--bad); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.malerts {
+  flex: none;
+  display: grid;
+  gap: 4px;
+  max-height: 104px;
+  padding: 8px 20px;
+  overflow-y: auto;
+  border-bottom: 1px solid color-mix(in srgb, var(--bad) 28%, var(--line));
+  background: color-mix(in srgb, var(--bad) 9%, var(--surface));
+}
+.err {
+  margin: 0;
+  color: var(--bad);
+  font-size: 12.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
 .mcontext {
   flex: none;
   min-width: 0;
-  padding: 10px 20px;
-  border-bottom: 1px solid var(--line);
-  background: var(--ground);
+  padding: 0 20px 8px;
 }
 .meta {
-  min-width: 0;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 20px;
+  gap: 8px 18px;
+  min-width: 0;
 }
 .tag {
   max-width: 100%;
-  padding: 3px 9px;
-  border: 1px solid var(--line-2);
-  border-radius: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
   background: var(--surface-2);
   color: var(--ink);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -2765,56 +2818,107 @@ onUnmounted(() => {
   color: var(--ink-mid);
   font-size: 12px;
 }
-.mbody { flex: 1; min-width: 0; min-height: 0; display: grid;
-  grid-template-columns: minmax(0, .88fr) minmax(0, 1.12fr); gap: 14px;
-  padding: 14px 16px; overflow: hidden; }
-.task-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
-  border: 1px solid var(--line); border-radius: 12px; background: var(--ground); }
-.pane-head,
-.work-head {
+.task-sectionbar {
   flex: none;
   min-width: 0;
-  min-height: 58px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 16px;
+  padding-inline: 20px;
   border-bottom: 1px solid var(--line);
 }
-.pane-head > div,
-.work-head > div {
+.mbody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.task-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.task-detail[data-pane='description'] .work-pane,
+.task-detail[data-pane='work'] .brief-pane {
+  display: none;
+}
+.brief-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+  padding: 16px 20px 0;
 }
 .pane-title {
   margin: 0;
   color: var(--ink);
   font-size: 14px;
-  font-weight: 650;
-  line-height: 1.35;
+  font-weight: 600;
+  line-height: 20px;
 }
-.brief-scroll, .tab-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto;
-  overscroll-behavior: contain; scrollbar-gutter: stable; }
-.brief-scroll { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
-.task-edit { display: grid; gap: 13px; min-width: 0; padding: 12px;
-  border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
-.task-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.task-edit-grid > :last-child { grid-column: 1 / -1; }
-.edit-options-state { display: flex; align-items: center; gap: 7px; color: var(--ink-mid);
-  font-size: 12px; line-height: 1.4; }
-.edit-options-state.bad { align-items: flex-start; justify-content: space-between; color: var(--bad); }
-.edit-message { margin: 0; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--good) 35%, var(--line));
-  border-radius: 9px; background: color-mix(in srgb, var(--good) 8%, var(--surface));
-  color: var(--good); font-size: 12px; line-height: 1.45; }
-.desc-box {
+.brief-scroll,
+.tab-scroll {
+  flex: 1;
   min-width: 0;
-  padding: 4px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.brief-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 20px 24px;
+}
+.task-edit {
+  display: grid;
+  gap: 13px;
+  min-width: 0;
+}
+.task-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.task-edit-grid > :last-child {
+  grid-column: 1 / -1;
+}
+.edit-options-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.edit-options-state.bad {
+  align-items: flex-start;
+  justify-content: space-between;
+  color: var(--bad);
+}
+.edit-message {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--good);
+  background: color-mix(in srgb, var(--good) 8%, var(--surface));
+  color: var(--good);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.desc-box {
+  max-width: 100ch;
+  min-width: 0;
 }
 .desc {
   margin: 0;
   color: var(--ink);
   font-size: 14px;
-  line-height: 1.7;
+  line-height: 1.75;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2824,11 +2928,14 @@ onUnmounted(() => {
   text-underline-offset: 3px;
   overflow-wrap: anywhere;
 }
-.brief-empty { display: grid; min-height: 150px; place-items: center; padding: 18px;
-  border: 1px dashed var(--line); border-radius: 10px; color: var(--ink-mid); font-size: 13px;
-  line-height: 1.45; text-align: center; }
+.brief-empty {
+  padding-block: 12px;
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 1.6;
+}
 .tab-scroll {
-  padding: 16px;
+  padding: 20px 20px 24px;
 }
 .tab-scroll.show-comments {
   display: flex;
@@ -2885,8 +2992,9 @@ onUnmounted(() => {
   min-width: 0;
 }
 .triage-summary-title {
-  color: var(--ink-mid);
-  font-size: 12px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
 }
 .triage-ready {
   color: var(--good);
@@ -2896,14 +3004,19 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   flex-basis: 100%;
-  gap: 8px;
-  margin: 0;
+  gap: 0;
+  margin: 4px 0 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-2);
 }
 .triage-metric {
   min-width: 0;
-  padding: 10px;
-  border-radius: 8px;
-  background: var(--surface);
+  padding: 14px 16px;
+}
+.triage-metric + .triage-metric {
+  border-left: 1px solid var(--line);
 }
 .triage-metric dt {
   color: var(--ink-mid);
@@ -2963,6 +3076,41 @@ onUnmounted(() => {
 .thead2 [data-role='task-compact-action'] {
   flex: none;
 }
+.thead2.is-empty {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 14px;
+  padding-block: 8px;
+}
+.is-empty .triage-summary {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
+}
+.is-empty .triage-summary-title {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+.triage-empty-hint {
+  max-width: 62ch;
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.triage-findings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 20px 32px;
+}
+.triage-findings:has(> :only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.triage-findings .tstale {
+  grid-column: 1 / -1;
+}
 .triage-result h5,
 .triage-risks h5 {
   display: flex;
@@ -3008,54 +3156,157 @@ onUnmounted(() => {
 .tlist li::marker {
   color: var(--warn);
 }
-.clarify { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line);
-  border-radius: 11px; background: var(--surface); }
-.triage-disabled { color: var(--ink-mid); font-size: 13px; padding: 6px 2px; }
-.clarify-head { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px;
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
-  border-radius: 10px 10px 0 0; }
-.clarify-head-icon { display: grid; flex: none; place-items: center; width: 24px; height: 24px;
-  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--line)); border-radius: 50%;
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent);
-  font-family: var(--mono); font-size: 13px; font-weight: 700; }
-.clarify-head h5 { margin: 0; color: var(--ink); font-size: 13px; font-weight: 650; line-height: 1.35; }
-.clarify-head p { margin: 2px 0 0; color: var(--ink-mid); font-size: 11.5px; line-height: 1.45; }
-.clarify-list { min-width: 0; }
-.clarify-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; }
-.clarify-card + .clarify-card { border-top: 1px solid var(--line); }
-.clarify-question { display: grid; align-items: start; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; }
-.clarify-index { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px;
-  background: var(--surface-2); color: var(--ink-mid); font-family: var(--mono); font-size: 11px; }
-.clarify-card.is-answered .clarify-index { background: color-mix(in srgb, var(--good) 12%, var(--surface-2));
-  color: var(--good); }
-.clarify-question-copy { min-width: 0; }
-.clarify-question h6 { margin: 1px 0 0; color: var(--ink); font-size: 13px;
-  font-weight: 650; line-height: 1.45; overflow-wrap: anywhere; }
-.clarify-status { display: inline-flex; margin-top: 5px; padding: 2px 7px;
-  border: 1px solid color-mix(in srgb, var(--good) 35%, var(--line)); border-radius: 999px;
-  color: var(--good); font-size: 10.5px; font-weight: 500; line-height: 1.35; }
-.clarify-status.warn { border-color: color-mix(in srgb, var(--warn) 38%, var(--line)); color: var(--warn); }
-.clarify-recommendation { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 8px;
-  min-width: 0; margin-left: 34px; padding: 8px 10px; border-left: 2px solid var(--accent);
-  border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--accent) 6%, transparent);
-  color: var(--ink-mid); font-size: 11.5px; line-height: 1.45; }
-.clarify-recommendation-label { color: var(--accent); font-size: 10px; font-weight: 650;
-  letter-spacing: .06em; text-transform: uppercase; }
-.clarify-recommendation strong { color: var(--ink); font-weight: 600; }
-.clarify-options { margin-left: 34px; }
-.clarify-compose-row { margin-left: 34px; }
-.clarify-answer { display: flex; flex-direction: column; gap: 7px; min-width: 0; margin-left: 34px; }
-.clarify-answer-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
-  color: var(--ink); font-size: 11.5px; font-weight: 550; }
-.clarify-answer-head small { color: var(--ink-mid); font-size: 10.5px; font-weight: 400; }
-.clarify-text { width: 100%; min-width: 0; }
-.clarify-answer-tools { display: flex; align-items: center; justify-content: space-between;
-  gap: 8px; color: var(--ink-mid); font-size: 10.5px; line-height: 1.35; }
-.clarify-card-actions { display: flex; flex: none; align-items: center; gap: 6px; }
-.clarify-submit { position: sticky; z-index: 1; bottom: -12px; padding: 10px 12px;
-  border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; background: var(--surface);
-  box-shadow: 0 -12px 24px color-mix(in srgb, var(--ground) 72%, transparent); }
+.clarify {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-top: 1px solid var(--line);
+}
+.triage-disabled {
+  padding-block: 8px;
+  color: var(--ink-mid);
+  font-size: 13px;
+}
+.clarify-head {
+  padding-block: 16px 4px;
+}
+.clarify-head h5 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+.clarify-head p {
+  margin: 6px 0 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.clarify-list {
+  min-width: 0;
+}
+.clarify-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding-block: 16px;
+}
+.clarify-card + .clarify-card {
+  border-top: 1px solid var(--line);
+}
+.clarify-question {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+.clarify-index {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--ink-mid);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.clarify-card.is-answered .clarify-index {
+  color: var(--good);
+}
+.clarify-question-copy {
+  min-width: 0;
+}
+.clarify-question h6 {
+  margin: 1px 0 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.clarify-status {
+  display: inline-flex;
+  margin-top: 5px;
+  color: var(--good);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.clarify-status.warn {
+  color: var(--warn);
+}
+.clarify-recommendation {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+  margin-left: 32px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.clarify-recommendation-label {
+  color: var(--accent);
+  font-weight: 500;
+}
+.clarify-recommendation strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.clarify-options,
+.clarify-compose-row,
+.clarify-answer {
+  margin-left: 32px;
+}
+.clarify-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.clarify-answer-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: var(--ink);
+  font-size: 12px;
+}
+.clarify-answer-head small {
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+.clarify-text {
+  width: 100%;
+  min-width: 0;
+}
+.clarify-answer-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.clarify-card-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+.clarify-submit {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
 .clhist,
 .triage-details {
   min-width: 0;
@@ -3083,8 +3334,6 @@ onUnmounted(() => {
   border-radius: 8px; padding: 3px 8px 3px 3px; background: var(--surface-2); font-size: 12px; }
 .attchip img { width: 26px; height: 26px; object-fit: cover; border-radius: 5px; }
 .attname { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-mid); }
-/* ── Табы модалки ── */
-.mtabs { align-self: stretch; }
 /* ── Таб комментариев ── */
 .comtab {
   display: flex;
@@ -3104,8 +3353,22 @@ onUnmounted(() => {
   scrollbar-gutter: stable;
 }
 
-.com { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; }
-.comhead { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
+.com {
+  padding-block: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.com:first-child {
+  padding-top: 0;
+}
+.comhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
 .comtime { color: var(--ink-mid); font-size: 11.5px; }
 .comtext { margin-top: 4px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .comatts { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
@@ -3139,7 +3402,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px 20px;
+  gap: 10px 16px;
   min-width: 0;
   padding: 12px 20px;
   border-top: 1px solid var(--line);
@@ -3149,17 +3412,17 @@ onUnmounted(() => {
   display: flex;
   flex: 1 0 auto;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
 }
 .timer {
   flex: none;
   display: flex;
   flex-direction: column;
-  min-width: 106px;
+  min-width: 90px;
 }
 .tclock {
-  font-size: 19px;
+  font-size: 17px;
   font-weight: 650;
   line-height: 1.25;
 }
@@ -3228,74 +3491,158 @@ onUnmounted(() => {
   min-width: 0;
 }
 
-@media (max-width: 980px) {
-  .mbody { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
-    scrollbar-gutter: stable; }
-  .task-pane { flex: none; min-height: auto; overflow: visible; }
-  .brief-scroll, .tab-scroll { flex: none; min-height: auto; overflow: visible; scrollbar-gutter: auto; }
-  .tg { max-height: 320px; }
-  .clarify-submit { position: static; box-shadow: none; }
-  .controls { gap: 10px; }
-  .timer-group { flex: 1 1 100%; justify-content: space-between; }
-  .cbtns { flex: 1; }
-  .tab-scroll.show-comments { display: block; overflow: visible; }
-  .comtab { min-height: 240px; }
-  .comlist { flex: none; overflow: visible; }
+@container task-detail (max-width: 700px) {
+  .triage-findings {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .timer-group {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+  .cbtns {
+    flex: 1;
+  }
+  .triage-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .triage-metric:nth-child(3) {
+    border-left: 0;
+  }
+  .triage-metric:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
+  }
 }
 
-@media (max-width: 600px) {
-  .mhead { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px; }
-  .mheading { display: contents; }
-  .midentity { grid-row: 1; grid-column: 1; margin: 0; }
-  .meyebrow { font-size: 11px; }
-  .mtitle { grid-row: 2; grid-column: 1 / -1; max-height: 112px; font-size: 16px; }
-  .mhead-actions { grid-row: 1; grid-column: 2; gap: 0; }
-  .malerts { max-height: 88px; padding: 8px 12px; }
-  .mcontext { padding: 8px 12px; max-height: 90px; overflow-y: auto; }
-  .meta { gap: 8px 14px; }
-  .context-item { font-size: 11px; }
-  .mbody { gap: 10px; padding: 10px; }
-  .task-pane { border-radius: 10px; }
-  .pane-head { min-height: 50px; padding: 8px 11px; }
-  .brief-scroll, .tab-scroll { padding: 10px; }
-  .task-edit { padding: 10px; }
-  .task-edit-grid { grid-template-columns: minmax(0, 1fr); }
-  .task-edit-grid > :last-child { grid-column: auto; }
-  .task-edit-actions > * { flex: 1; }
-  .desc-box { padding: 2px; }
-  .desc { font-size: 13.5px; line-height: 1.65; }
-  .tg { max-height: 280px; padding: 9px 10px; }
-  .work-head { min-height: 50px; padding: 7px; }
-  .work-head > div { display: none; }
-  .mtabs { width: 100%; }
-  .triage-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .clarify-head, .clarify-card { padding: 11px; }
-  .clarify-recommendation, .clarify-options, .clarify-compose-row, .clarify-answer {
+@container task-detail (max-width: 480px) {
+  .mheading {
+    padding: 10px 12px 8px;
+  }
+  .mtitle {
+    max-height: 70px;
+    font-size: 16px;
+  }
+  .malerts {
+    max-height: 88px;
+    padding: 8px 12px;
+  }
+  .mcontext {
+    max-height: 72px;
+    padding: 0 12px 10px;
+    overflow-y: auto;
+  }
+  .meta {
+    gap: 6px 14px;
+  }
+  .context-item {
+    font-size: 11px;
+  }
+  .task-sectionbar {
+    padding-inline: 12px;
+  }
+  .brief-head {
+    padding: 12px 12px 0;
+  }
+  .brief-scroll,
+  .tab-scroll {
+    padding: 14px 12px;
+  }
+  .task-edit-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .task-edit-grid > :last-child {
+    grid-column: auto;
+  }
+  .task-edit-actions > * {
+    flex: 1;
+  }
+  .desc {
+    font-size: 13.5px;
+    line-height: 1.65;
+  }
+  .tg {
+    max-height: 280px;
+    padding: 9px 10px;
+  }
+  .clarify-head {
+    padding-top: 16px;
+  }
+  .clarify-card {
+    padding-block: 16px;
+  }
+  .clarify-recommendation,
+  .clarify-options,
+  .clarify-compose-row,
+  .clarify-answer {
     margin-left: 0;
   }
-  .clarify-answer-tools { align-items: flex-start; }
-  .comment { flex-direction: column; align-items: stretch; }
-  .comment > :last-child { align-self: flex-end; }
-  .controls { gap: 9px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
-  .timer-group { gap: 10px; }
-  .timer { min-width: 90px; }
-  .tclock { font-size: 17px; }
-  .cbtns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
-
-  .convstall, .lmsg { grid-column: 1 / -1; }
-  .lform { left: -10px; right: -10px; max-height: 60dvh;
-    padding: 12px 12px 14px; border-radius: 12px 12px 0 0; }
-  .lrow { align-items: stretch; }
-  .lsummary-row, .lrepo { grid-template-columns: 1fr; gap: 3px; }
-  .lbtns > * { flex: 1; }
+  .clarify-answer-tools {
+    align-items: flex-start;
+  }
+  .comment {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .comment > :last-child {
+    align-self: flex-end;
+  }
+  .controls {
+    gap: 8px;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  }
+  .timer-group {
+    gap: 8px;
+  }
+  .timer {
+    min-width: 78px;
+  }
+  .tclock {
+    font-size: 16px;
+  }
+  .cbtns {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 6px;
+  }
+  .convstall,
+  .lmsg {
+    grid-column: 1 / -1;
+  }
+  .lform {
+    max-height: 60dvh;
+    padding: 12px 12px 14px;
+    border-radius: 10px 10px 0 0;
+  }
+  .lrow {
+    align-items: stretch;
+  }
+  .lsummary-row,
+  .lrepo {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+  .lbtns > * {
+    flex: 1;
+  }
 }
 
-@media (min-width: 981px) and (max-height: 720px) {
-  .mhead { min-height: 56px; padding-block: 8px; }
-  .mcontext { min-height: 38px; padding-block: 5px; }
-  .mbody { gap: 10px; padding-block: 10px; }
-  .pane-head, .work-head { min-height: 50px; }
-  .brief-scroll, .tab-scroll { padding: 10px; }
-  .controls { padding-block: 8px; }
+@media (max-height: 540px) {
+  .mheading {
+    padding-block: 6px;
+  }
+  .mtitle {
+    max-height: 48px;
+    font-size: 16px;
+  }
+  .mcontext {
+    max-height: 46px;
+    padding-bottom: 6px;
+    overflow-y: auto;
+  }
+  .controls {
+    padding-block: 6px;
+  }
+  .timer-group {
+    flex: 1 1 auto;
+  }
 }
 </style>

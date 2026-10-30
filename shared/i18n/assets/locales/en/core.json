@@ -1034,5 +1034,13 @@
   "stageWizardReason_recheck_unavailable": "A declared free recheck or a position before an existing command is required.",
   "stageWizardReason_role_invalid": "The role is unavailable: check settings and profile capabilities.",
   "stageWizardReason_route_missing": "The route is no longer available.",
-  "stageWizardReason_prompt_missing": "The role instruction is unavailable."
+  "stageWizardReason_prompt_missing": "The role instruction is unavailable.",
+  "taskDesignSections": "Task sections",
+  "taskDesignDescription": "Description",
+  "taskDesignAnalysis": "Assessment",
+  "taskDesignComments": "Comments",
+  "taskDesignAnalysisHint": "Assess complexity, risks and the work route. Clarifications for agents stay in GrigDesk.",
+  "taskDesignPipeline": "Pipeline",
+  "taskDesignLaunch": "Run pipeline",
+  "taskDesignPipelineRunning": "Pipeline running"
 }

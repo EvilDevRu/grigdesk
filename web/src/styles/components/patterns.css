@@ -52,6 +52,10 @@
   padding-left: 20px;
 }
 
+.ui-pane-header[data-ui-task-header] .ui-pane-header__layout {
+  padding-inline: 20px;
+}
+
 .ui-pane-header__main {
   flex: 1;
   min-width: 0;
@@ -99,6 +103,10 @@
 @container ui-pane-header (max-width: 480px) {
   .ui-pane-header[data-inset='content'] .ui-pane-header__layout {
     padding-left: 12px;
+  }
+
+  .ui-pane-header[data-ui-task-header] .ui-pane-header__layout {
+    padding-inline: 12px;
   }
 
   .ui-pane-header__navigation {
@@ -736,6 +744,23 @@
   font-size: 11.5px;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+/* Вопрос задачи читается как список решений: пояснение идёт под названием.
+   Общий control сохраняет перенос текста и одинаковую ось вариантов на любой ширине. */
+.ui-choice-list[data-role='task-clarification-options'] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ui-choice-list[data-role='task-clarification-options'] .ui-choice-list__content {
+  display: grid;
+  gap: 4px;
+}
+
+@container task-detail (max-width: 700px) {
+  .ui-choice-list[data-role='task-clarification-options'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .ui-choice-list__indicator {

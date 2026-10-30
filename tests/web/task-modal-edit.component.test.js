@@ -51,9 +51,24 @@ async function mountEditor(t, presentation = 'dialog') {
     responsible: { id: 17, name: 'Старый исполнитель' },
   };
   const updates = [];
+  const reads = [];
 
   globalThis[`${prefix}Api`] = {
+    /**
+     * Справочники и комментарии читаются через прежние публичные адреса.
+     * Счётчик отделяет ленивую загрузку обсуждения от простого переключения областей.
+     */
     async get(url) {
+      reads.push(url);
+
+      if (url.endsWith('/comments')) {
+        return { comments: [{
+          mid: 1,
+          author: 'Автор',
+          text: 'Комментарий',
+          time: '10:00',
+        }] };
+      }
       if (url.endsWith('/clarifications')) return { text: '' };
       if (url === '/api/tasks') return { tasks: [] };
       if (url === '/api/b24/users') {
@@ -150,7 +165,13 @@ async function mountEditor(t, presentation = 'dialog') {
   });
   await flushPromises();
   await flushPromises();
-  return { wrapper, flushPromises, updates };
+
+  return {
+    wrapper,
+    flushPromises,
+    updates,
+    reads,
+  };
 }
 
 test('TaskModal редактирует все основные поля и умеет очистить описание и проект', async (t) => {
@@ -218,3 +239,44 @@ test('TF-01: та же карточка редактируется как док
   assert.deepEqual(updates, [{ id: '42', fields: { title: 'Заголовок отдельного окна' } }]);
   assert.match(wrapper.text(), /Изменения сохранены/);
 });
+
+for (const presentation of ['dialog', 'document']) {
+  test(`Разделы карточки сохраняют черновики и лениво читают комментарии: ${presentation}`, async (t) => {
+    const { wrapper, flushPromises, reads, updates } = await mountEditor(t, presentation);
+    const section = (name) => wrapper.get(`[data-task-section="${name}"]`);
+
+    assert.equal(wrapper.get('.task-detail').attributes('data-pane'), 'description');
+    assert.equal(reads.filter((url) => url.endsWith('/comments')).length, 0);
+    assert.equal(section('description').attributes('aria-selected'), 'true');
+    section('description').element.focus();
+    await section('description').trigger('keydown', { key: 'ArrowRight' });
+    assert.equal(section('triage').attributes('aria-selected'), 'true');
+    await section('triage').trigger('keydown', { key: 'ArrowLeft' });
+    assert.equal(section('description').attributes('aria-selected'), 'true');
+    await wrapper.get('[data-role="task-edit-open"]').trigger('click');
+    await flushPromises();
+    await wrapper.get('[data-role="task-edit-title"]').setValue('Несохранённая постановка');
+
+    const editor = wrapper.get('[data-role="task-edit-title"]').element;
+
+    await section('triage').trigger('click');
+    assert.equal(wrapper.get('.task-detail').attributes('data-pane'), 'work');
+    assert.equal(section('triage').attributes('aria-selected'), 'true');
+    await section('comments').trigger('click');
+    await flushPromises();
+    assert.equal(reads.filter((url) => url.endsWith('/comments')).length, 1);
+    await wrapper.get('[data-role="task-comment"]').setValue('Несохранённый комментарий');
+
+    const composer = wrapper.get('[data-role="task-comment"]').element;
+
+    await section('description').trigger('click');
+    assert.equal(wrapper.get('[data-role="task-edit-title"]').element === editor, true);
+    assert.equal(editor.value, 'Несохранённая постановка');
+    await section('comments').trigger('click');
+    await flushPromises();
+    assert.equal(wrapper.get('[data-role="task-comment"]').element === composer, true);
+    assert.equal(composer.value, 'Несохранённый комментарий');
+    assert.equal(reads.filter((url) => url.endsWith('/comments')).length, 1);
+    assert.deepEqual(updates, []);
+  });
+}

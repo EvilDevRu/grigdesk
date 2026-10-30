@@ -1054,5 +1054,13 @@
   "stageWizardReason_recheck_unavailable": "Нужна объявленная свободная перепроверка или место перед существующей командой.",
   "stageWizardReason_role_invalid": "Роль недоступна: проверьте настройки и возможности профиля.",
   "stageWizardReason_route_missing": "Маршрут больше недоступен.",
-  "stageWizardReason_prompt_missing": "Инструкция роли недоступна."
+  "stageWizardReason_prompt_missing": "Инструкция роли недоступна.",
+  "taskDesignSections": "Разделы задачи",
+  "taskDesignDescription": "Описание",
+  "taskDesignAnalysis": "Оценка",
+  "taskDesignComments": "Комментарии",
+  "taskDesignAnalysisHint": "Оценка поможет определить сложность, риски и маршрут работы. Уточнения для агентов останутся в GrigDesk.",
+  "taskDesignPipeline": "Конвейер",
+  "taskDesignLaunch": "На конвейер",
+  "taskDesignPipelineRunning": "Конвейер работает"
 }

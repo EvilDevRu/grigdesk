@@ -17,6 +17,7 @@ function uiFacadeStub(prefix, { stubDialog = false } = {}) {
     ['UiFormActions', 'src/components/composites/UiFormActions.vue'],
     ['UiIconButton', 'src/components/primitives/UiIconButton.vue'],
     ['UiInput', 'src/components/primitives/UiInput.vue'],
+    ['UiPaneHeader', 'src/components/composites/UiPaneHeader.vue'],
     ['UiSelect', 'src/components/primitives/UiSelect.vue'],
     ['UiSpinner', 'src/components/primitives/UiSpinner.vue'],
     ['UiLoadingState', 'src/components/feedback/UiLoadingState.vue'],

@@ -1638,23 +1638,14 @@
 }
 
 .ui-button[data-context='task-footer-action'] {
-  height: var(--control-height);
+  height: auto;
   min-height: var(--control-height);
-  padding: 0 13px;
-  border-radius: 8px;
-  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: var(--control-radius);
+  font-size: 12px;
   font-weight: 500;
-  line-height: 1;
-}
-
-@media (max-width: 600px) {
-  .ui-button[data-context='task-footer-action'] {
-    height: auto;
-    min-height: var(--control-height);
-    padding-block: 4px;
-    line-height: 1.3;
-    white-space: normal;
-  }
+  line-height: 1.3;
+  white-space: normal;
 }
 
 .ui-disclosure-button[data-role='task-note-disclosure'],
@@ -1668,9 +1659,35 @@
   color: var(--accent);
 }
 
+.ui-tabs:has(.ui-tab[data-context='task-modal-tab']) {
+  gap: 24px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 .ui-tab[data-context='task-modal-tab'] {
-  padding-inline: 11px;
+  min-height: max(42px, var(--toolbar-control-h));
+  padding: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
   font-size: 12.5px;
+}
+
+.ui-tab[data-context='task-modal-tab'][aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  background: transparent;
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.ui-tab[data-context='task-modal-tab']:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
 }
 
 .ui-tabs:has(.ui-tab[data-context='pipeline-stage-tab']) {
@@ -2277,13 +2294,11 @@
 @media (max-width: 600px) {
   .ui-tabs:has(.ui-tab[data-context='task-modal-tab']) {
     width: 100%;
+    gap: 20px;
   }
 
   .ui-tab[data-context='task-modal-tab'] {
-    flex: 1;
-    justify-content: center;
-    min-height: var(--control-height);
-    padding-inline: 8px;
+    min-height: max(42px, var(--toolbar-control-h));
   }
 
 }
