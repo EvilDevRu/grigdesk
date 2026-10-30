@@ -1044,6 +1044,7 @@
   "stageWizardReason_route_missing": "The route is no longer available.",
   "stageWizardReason_prompt_missing": "The role instruction is unavailable.",
   "dbQueryFailed": "The query failed. Try again or check the connection.",
+  "dbAuditSkipped": "Damaged audit records: {count}. They remain on disk; intact records are shown.",
   "dbDesignSummary": "Profiles: {profiles} · Sessions: {sessions}",
   "dbDesignRunning": "Running: {count}",
   "dbDesignHideForm": "Hide form",

@@ -5,9 +5,8 @@ import { dbApi } from '../../shared/dbApi.ts';
 import { useDbStore } from '../../stores/db.ts';
 
 /**
- * Свежий снимок раздела: движки, профили, сессии, лента запросов и журнал одним
- * заходом. Пять ответов собираются вместе, потому что порознь они рассказывают
- * противоречивую историю — сессию уже закрытого профиля, например.
+ * Согласованный снимок движков, профилей, сессий и ленты загружается вместе.
+ * Отказ журнала виден отдельно и не скрывает исправные подключения и консоль.
  */
 export async function loadDb(): Promise<void> {
   const store = useDbStore();
@@ -16,12 +15,9 @@ export async function loadDb(): Promise<void> {
   store.setError('');
 
   try {
-    const [engines, profiles, sessions, queries, audit] = await Promise.all([
-      dbApi.engines(),
-      dbApi.profiles(),
-      dbApi.sessions(),
-      dbApi.queries(),
-      dbApi.audit(),
+    const [[engines, profiles, sessions, queries], [audit]] = await Promise.all([
+      Promise.all([dbApi.engines(), dbApi.profiles(), dbApi.sessions(), dbApi.queries()]),
+      Promise.allSettled([dbApi.audit()]),
     ]);
 
     store.setSnapshot({
@@ -29,8 +25,14 @@ export async function loadDb(): Promise<void> {
       profiles,
       sessions,
       queries,
-      audit: audit.items,
+      audit: audit.status === 'fulfilled' ? audit.value.items : store.audit,
+      auditSkippedRecords: audit.status === 'fulfilled'
+        ? audit.value.skippedRecords ?? 0 : store.auditSkippedRecords,
     });
+
+    if (audit.status === 'rejected') {
+      store.setAuditError(errorMessage(audit.reason, 'Не удалось загрузить журнал баз'));
+    }
   } catch (error) {
     store.setError(errorMessage(error, 'Не удалось загрузить базы'));
   } finally {
@@ -85,9 +87,14 @@ export async function refreshDbQueries(): Promise<void> {
  */
 export async function refreshDbAudit(): Promise<void> {
   const store = useDbStore();
-  const page = await dbApi.audit();
 
-  store.setAudit(page.items);
+  try {
+    const page = await dbApi.audit();
+
+    store.setAudit(page.items, page.skippedRecords ?? 0);
+  } catch (error) {
+    store.setAuditError(errorMessage(error, 'Не удалось загрузить журнал баз'));
+  }
 }
 
 /**

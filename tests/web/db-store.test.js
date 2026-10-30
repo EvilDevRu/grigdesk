@@ -249,6 +249,54 @@ test('потерянная сессия не подменяет собой ст�
   assert.deepEqual(store.sessions, [session({ agentAllowed: true })]);
 });
 
+test('отказ аудита не скрывает живые сессии, а восстановление снимает предупреждение', async (t) => {
+  let broken = true;
+  const { module, store } = await dbSection(t, {
+    /**
+     * Только журнал меняет исход; остальные ответы остаются согласованным снимком.
+     * Так проверяется доступность консоли при независимом отказе аудита.
+     */
+    async get(path) {
+      if (path.endsWith('/engines')) {
+        return { engines: [] };
+      }
+
+      if (path.endsWith('/profiles')) {
+        return { profiles: [] };
+      }
+
+      if (path.endsWith('/sessions')) {
+        return { sessions: [session()] };
+      }
+
+      if (path.endsWith('/queries')) {
+        return { queries: [] };
+      }
+
+      if (broken) {
+        throw new Error('Журнал временно недоступен');
+      }
+
+      return { items: [{ at: '2026-10-30T10:00:00Z' }], skippedRecords: 2 };
+    },
+  });
+
+  await module.loadDb();
+
+  assert.equal(store.sessions.length, 1);
+  assert.equal(store.error, '');
+  assert.equal(store.auditError, 'Журнал временно недоступен');
+  broken = false;
+  await module.refreshDbAudit();
+  assert.equal(store.auditError, '');
+  assert.equal(store.auditSkippedRecords, 2);
+  assert.equal(store.audit.length, 1);
+  broken = true;
+  await module.refreshDbAudit();
+  assert.equal(store.audit.length, 1, 'последние целые записи остаются видимыми');
+  assert.equal(store.sessions.length, 1);
+});
+
 
 for (const event of ['projects-changed', 'hello']) {
   test(`PD-db-catalog: ${event} обновляет выбор, поздний ответ не возвращает удалённое`, async (t) => {

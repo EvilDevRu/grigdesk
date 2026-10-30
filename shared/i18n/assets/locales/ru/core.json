@@ -1064,6 +1064,7 @@
   "stageWizardReason_route_missing": "Маршрут больше недоступен.",
   "stageWizardReason_prompt_missing": "Инструкция роли недоступна.",
   "dbQueryFailed": "Не удалось выполнить запрос. Попробуйте ещё раз или проверьте подключение.",
+  "dbAuditSkipped": "Повреждённых записей в журнале: {count}. Они сохранены на диске, показаны целые записи.",
   "dbDesignSummary": "Профилей: {profiles} · Сессий: {sessions}",
   "dbDesignRunning": "Выполняется: {count}",
   "dbDesignHideForm": "Скрыть форму",

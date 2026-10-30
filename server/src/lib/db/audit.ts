@@ -17,6 +17,7 @@ export interface DbAuditRecord {
 export interface DbAuditPage {
   items: DbAuditRecord[];
   nextCursor: number | null;
+  skippedRecords?: number;
 }
 
 function recordOf(entry: unknown, at: string): DbAuditRecord {
@@ -30,7 +31,10 @@ function recordOf(entry: unknown, at: string): DbAuditRecord {
   return record;
 }
 
-/** Дневной allowlist-журнал никогда не сериализует пароль, параметры или значения строк. */
+/**
+ * Журнал хранит только поля allowlist, без пароля, параметров и значений строк.
+ * Повреждённые строки остаются на диске, но не скрывают целые записи при чтении.
+ */
 export async function createDbAudit(
   { dir = '', now = () => new Date() }: { dir?: string; now?: () => Date | number } = {},
 ) {
@@ -48,18 +52,38 @@ export async function createDbAudit(
       }));
   }
 
+  /**
+   * Новая запись отделяется от повреждённого или незавершённого хвоста переводом строки.
+   * Существующие байты не исправляются и не удаляются автоматически.
+   */
   async function append(entry: unknown): Promise<DbAuditRecord> {
     await cleanup();
     const at = new Date(now()).toISOString();
     const record = recordOf(entry, at);
-    await fs.appendFile(
-      path.join(dir, `${at.slice(0, 10)}.ndjson`),
-      `${JSON.stringify(record)}\n`,
-      { mode: 0o600 },
-    );
+    const file = await fs.open(path.join(dir, `${at.slice(0, 10)}.ndjson`), 'a+', 0o600);
+
+    try {
+      const { size } = await file.stat();
+      const last = Buffer.alloc(1);
+
+      if (size > 0) {
+        await file.read(last, 0, 1, size - 1);
+      }
+
+      const separator = size > 0 && last[0] !== 10 ? '\n' : '';
+
+      await file.appendFile(`${separator}${JSON.stringify(record)}\n`);
+    } finally {
+      await file.close();
+    }
+
     return record;
   }
 
+  /**
+   * Повреждённая строка учитывается предупреждением, не меняя файл и порядок записей.
+   * Пагинация считает только целые записи, поэтому следующий cursor остаётся честным.
+   */
   async function list(
     { cursor = 0, limit = 50 }: { cursor?: unknown; limit?: unknown } = {},
   ): Promise<DbAuditPage> {
@@ -67,16 +91,35 @@ export async function createDbAudit(
     const names = (await fs.readdir(dir).catch(() => []))
       .filter((name) => name.endsWith('.ndjson')).sort().reverse();
     const items: DbAuditRecord[] = [];
+    let skippedRecords = 0;
+
     for (const name of names) {
       const raw = await fs.readFile(path.join(dir, name), 'utf8');
-      items.push(...raw.trim().split('\n').filter(Boolean).reverse()
-        .map((line) => JSON.parse(line) as DbAuditRecord));
+
+      for (const line of raw.split('\n').filter((value) => value.trim()).reverse()) {
+        try {
+          const entry: unknown = JSON.parse(line);
+
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+            || typeof (entry as DbAuditRecord).at !== 'string') {
+            skippedRecords += 1;
+            continue;
+          }
+
+          items.push(recordOf(entry, (entry as DbAuditRecord).at));
+        } catch {
+          skippedRecords += 1;
+        }
+      }
     }
+
     const offset = Math.max(0, Number(cursor) || 0);
     const size = Math.max(1, Math.min(200, Number(limit) || 50));
+
     return {
       items: items.slice(offset, offset + size),
       nextCursor: offset + size < items.length ? offset + size : null,
+      ...(skippedRecords ? { skippedRecords } : {}),
     };
   }
 

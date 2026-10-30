@@ -31,6 +31,8 @@ export interface DbStoreState {
   sshSessions: SshSession[];
   queries: DbQuery[];
   audit: DbAuditEntry[];
+  auditError: string;
+  auditSkippedRecords: number;
   schemas: Record<string, DbResult>;
   loading: boolean;
   projectsLoading: boolean;
@@ -48,6 +50,8 @@ export const useDbStore = defineStore('db', {
     sshSessions: [],
     queries: [],
     audit: [],
+    auditError: '',
+    auditSkippedRecords: 0,
     schemas: {},
     loading: false,
     projectsLoading: false,
@@ -58,9 +62,9 @@ export const useDbStore = defineStore('db', {
 
   actions: {
     /**
-     * Свежий снимок раздела целиком. Движки, профили, сессии, запросы и журнал
-     * приходят одним заходом: показывать сессии от прошлого ответа рядом со
-     * свежими профилями значило бы обещать вкладку, которой уже нет.
+     * Движки, профили, сессии и запросы заменяются согласованным снимком.
+     * Журнал может сохранять последний прочитанный ответ при отдельной ошибке аудита,
+     * которая не должна скрывать действующие подключения.
      */
     setSnapshot(snapshot: {
       engines: DbEngine[];
@@ -68,12 +72,15 @@ export const useDbStore = defineStore('db', {
       sessions: DbSession[];
       queries: DbQuery[];
       audit: DbAuditEntry[];
+      auditSkippedRecords?: number;
     }) {
       this.engines = snapshot.engines;
       this.profiles = snapshot.profiles;
       this.sessions = snapshot.sessions;
       this.queries = snapshot.queries;
       this.audit = snapshot.audit;
+      this.auditSkippedRecords = snapshot.auditSkippedRecords ?? 0;
+      this.auditError = '';
       this.error = '';
     },
 
@@ -81,8 +88,14 @@ export const useDbStore = defineStore('db', {
       this.queries = queries;
     },
 
-    setAudit(audit: DbAuditEntry[]) {
+    setAudit(audit: DbAuditEntry[], skippedRecords = 0) {
       this.audit = audit;
+      this.auditSkippedRecords = skippedRecords;
+      this.auditError = '';
+    },
+
+    setAuditError(message: string) {
+      this.auditError = message;
     },
 
     setProfiles(profiles: DbProfile[]) {

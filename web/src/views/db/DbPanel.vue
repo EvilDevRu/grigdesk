@@ -568,6 +568,13 @@
                 <span class="db-count">{{ store.audit?.length || 0 }}</span>
               </summary>
 
+              <UiInlineMessage v-if="store.auditError" tone="warning" data-db-audit-error>
+                {{ store.auditError }}
+              </UiInlineMessage>
+              <UiInlineMessage v-if="store.auditSkippedRecords" tone="warning" data-db-audit-warning>
+                {{ t('core.dbAuditSkipped', { count: store.auditSkippedRecords }) }}
+              </UiInlineMessage>
+
               <div v-if="store.audit?.length" class="db-audit__list">
                 <article v-for="item in store.audit" :key="item.at">
                   <header>
@@ -583,7 +590,9 @@
                   </small>
                 </article>
               </div>
-              <p v-else class="db-audit__empty">Запросов в журнале ещё не было.</p>
+              <p v-else-if="!store.auditError && !store.auditSkippedRecords" class="db-audit__empty">
+                Запросов в журнале ещё не было.
+              </p>
             </details>
           </div>
 

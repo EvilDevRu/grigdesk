@@ -163,6 +163,7 @@ const schemaAnswer = objectOf({ schema: dbResult });
 const auditPage = objectOf({
   items: listOf(auditEntry),
   nextCursor: optional(wholeNumber),
+  skippedRecords: optional(wholeNumber),
 });
 const acknowledgement = objectOf({ ok: boolean });
 // Архивный проект новому профилю не предлагается, но у заведённых он читается:

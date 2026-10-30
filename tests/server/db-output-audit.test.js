@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -126,8 +126,46 @@ test('байтовый срез остаётся началом выборки �
   assert.equal(result.notice, 'показано 1 из 3');
 });
 
+test('повреждённые строки аудита не скрывают целые записи и не изменяются при чтении', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-db-audit-damaged-'));
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const { createDbAudit } = await import('../../server/src/lib/db/audit.ts');
+  const audit = await createDbAudit({ dir: root, now: () => new Date('2026-10-30T10:00:00Z') });
+  const file = path.join(root, '2026-10-30.ndjson');
+  const entry = {
+    at: '2026-10-30T09:00:00Z',
+    actor: 'human',
+    query: 'SELECT 1',
+  };
+  const raw = `${JSON.stringify(entry)}\n{broken\nnull\n${'\0'.repeat(6)}`;
+
+  await writeFile(file, raw, { mode: 0o600 });
+
+  const page = await audit.list();
+
+  assert.deepEqual(page.items, [entry]);
+  assert.equal(page.skippedRecords, 3);
+  assert.equal(await readFile(file, 'utf8'), raw);
+  await audit.append({
+    actor: 'human',
+    query: 'SELECT 2',
+    outcome: 'success',
+  });
+
+  const after = await audit.list({ limit: 1 });
+
+  assert.equal(after.items[0].query, 'SELECT 2');
+  assert.equal(after.nextCursor, 1);
+  assert.equal(after.skippedRecords, 3);
+  await appendFile(file, '\n');
+  assert.equal((await audit.list({ cursor: 1 })).items[0].query, 'SELECT 1');
+});
+
 test('журнал хранит авторазрешённый запрос без значений строк и пароля', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-db-audit-'));
+
   t.after(() => rm(root, { recursive: true, force: true }));
   const module = await load(
     '../../server/src/lib/db/audit.ts',
@@ -170,6 +208,7 @@ test('журнал хранит авторазрешённый запрос бе
 
 test('очистка журнала удаляет записи старше тридцати дней', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-db-retention-'));
+
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, '2026-07-01.ndjson'), '{"query":"old"}\n');
   const module = await load(

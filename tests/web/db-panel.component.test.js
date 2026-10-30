@@ -465,6 +465,20 @@ test('консоль показывает причину SQL-ошибки вме
   assert.equal(wrapper.find('.db-result__raw').exists(), false);
 });
 
+test('предупреждение аудита не скрывает профили и не выдаёт журнал за пустой', async (t) => {
+  const store = await catalogStore();
+
+  store.auditError = 'Журнал недоступен';
+  store.auditSkippedRecords = 2;
+
+  const { wrapper } = await mountPanel(t, store);
+
+  assert.equal(wrapper.findAll('[data-db-profile-card]').length, 2);
+  assert.match(wrapper.get('[data-db-audit-error]').text(), /Журнал недоступен/u);
+  assert.match(wrapper.get('[data-db-audit-warning]').text(), /Повреждённых записей в журнале: 2/u);
+  assert.equal(wrapper.find('.db-audit__empty').exists(), false);
+});
+
 test('поиск профилей сохраняет выбранный вход, а смена профиля очищает пароль', async (t) => {
   const store = await catalogStore();
   const { wrapper, flushPromises } = await mountPanel(t, store);
