@@ -3951,8 +3951,14 @@ function cardState(g: PipelineViewGraph) {
   scrollbar-gutter: stable;
 }
 .smain {
+  --stage-main-padding: 18px;
   grid-area: main;
-  padding: 18px;
+  padding: 0 var(--stage-main-padding) var(--stage-main-padding);
+}
+/* Верхний отступ прокручивается с панелью, чтобы липкая шапка документа
+   доходила до края колонки и не оставляла полосу с текстом над собой. */
+.smain > .stage-tab-panel {
+  padding-top: var(--stage-main-padding);
 }
 .srail {
   grid-area: rail;
@@ -4243,7 +4249,7 @@ function cardState(g: PipelineViewGraph) {
     grid-template-columns: minmax(0, 1fr) 300px;
   }
   .smain {
-    padding: 16px;
+    --stage-main-padding: 16px;
   }
   .srail {
     padding: 16px;
@@ -4327,6 +4333,10 @@ function cardState(g: PipelineViewGraph) {
   .smain, .srail {
     padding: 14px 12px;
     gap: 20px;
+  }
+  .smain {
+    --stage-main-padding: 14px;
+    padding-top: 0;
   }
   .stage-tab-panel {
     gap: 16px;

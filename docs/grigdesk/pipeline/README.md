@@ -98,6 +98,7 @@
 - [Работа узла: вращающаяся обводка и синяя стрелка текущего возврата](running-node-outline.md)
 - [Выбор исполнителя на отдельной вкладке без закрытия окна](node-executor-selection.md)
 - [Документ этапа: карта NODE_DOC и список сервера обязаны сходиться](stage-document-mapping.md)
+- [Шапка документа: верхний отступ без щели при прокрутке](stage-document-sticky-header.md)
 - [Клиент (web/src/shared/graphGeom.ts)](graph-client.md)
 - [Импорт общего API из вложенных компонентов конвейера](client-api-imports.md)
 - [Модель и effort в модалке узла](node-model-and-effort.md)
