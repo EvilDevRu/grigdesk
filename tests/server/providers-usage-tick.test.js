@@ -145,6 +145,175 @@ test('external freshness отличает первый отказ от успе�
   assert.equal(later.stale, true);
 });
 
+test('тик без CLI замораживает запись и возобновляется после установки', async (t) => {
+  const initial = Date.UTC(2030, 0, 1);
+
+  t.mock.timers.enable({ apis: ['Date'], now: initial });
+
+  let installed = false;
+  let probes = 0;
+  const fixture = await tickFixture(t, {
+    clients: 0,
+    usageTickMs: 20_000,
+    adapter: (onUsage) => ({
+      ...tickingAdapter(onUsage),
+      usagePresentation: { freshness: true },
+      probe: async () => {
+        probes += 1;
+
+        return {
+          ok: installed,
+          version: installed ? '1.0' : null,
+        };
+      },
+    }),
+  });
+  const warn = t.mock.method(fixture.app.log, 'warn');
+  const registry = (await fixture.app.inject('/api/providers')).json().providers;
+
+  assert.equal(registry[0].installed, false);
+  await fixture.app.refreshProvidersUsage();
+
+  const removed = fixture.events.at(-1).data.usage['ticking-provider'];
+
+  assert.equal(fixture.reads(), 0, 'usage не вызывается даже при наличии читаемых credentials');
+  assert.equal(probes, 1, 'тик использует уже выполненный probe реестра');
+  assert.equal(removed.state, 'unavailable');
+  assert.equal(removed.message, 'Программа исполнителя удалена. Установи CLI для проверки лимитов.');
+  assert.deepEqual(removed.bars, []);
+  assert.deepEqual(removed.resources, []);
+  assert.equal(removed.stale, true);
+  assert.equal(removed.lastSuccessfulAt, null);
+
+  for (const offset of [20_001, 40_002]) {
+    t.mock.timers.setTime(initial + offset);
+    await fixture.app.refreshProvidersUsage();
+    assert.deepEqual(fixture.events.at(-1).data.usage['ticking-provider'], removed);
+  }
+
+  assert.equal(probes, 1, 'свежий probe не повторяется на каждом тике');
+  assert.equal(fixture.reads(), 0);
+  assert.equal(warn.mock.callCount(), 0, 'отсутствие CLI не журналируется как сбой usage');
+  installed = true;
+  t.mock.timers.setTime(initial + 60_003);
+  await fixture.app.refreshProvidersUsage();
+
+  const restored = fixture.events.at(-1).data.usage['ticking-provider'];
+
+  assert.equal(probes, 2, 'истёкший probe перепроверяет наличие CLI');
+  assert.equal(fixture.reads(), 1);
+  assert.equal(restored.state, 'ok');
+  assert.equal(restored.stale, false);
+  assert.equal(restored.lastSuccessfulAt, initial + 60_003);
+});
+
+test('удаление CLI через UI и вне GrigDesk сохраняет одинаковый замер и допускает возврат', async (t) => {
+  const initial = Date.UTC(2030, 0, 1);
+  const snapshots = [];
+
+  t.mock.timers.enable({ apis: ['Date'], now: initial });
+
+  for (const throughUi of [true, false]) {
+    t.mock.timers.setTime(initial);
+
+    let installed = true;
+    const fixture = await tickFixture(t, {
+      clients: 0,
+      usageTickMs: 300_000,
+      adapter: (onUsage) => ({
+        ...tickingAdapter(onUsage),
+        usagePresentation: { freshness: true },
+        probe: async () => ({
+          ok: installed,
+          version: installed ? '1.0' : null,
+        }),
+        usage: async () => {
+          onUsage();
+
+          return {
+            state: 'ok',
+            bars: [liveBar(12)],
+            resources: [{
+              key: 'credits',
+              label: 'Кредиты',
+              summary: '5 кредитов',
+              tone: 'ok',
+            }],
+          };
+        },
+      }),
+    });
+    const read = async () =>
+      (await fixture.app.inject('/api/providers/usage')).json().usage['ticking-provider'];
+    const before = await read();
+    const sink = fixture.app.providerUsageSink('ticking-provider');
+
+    assert.equal(sink({ bars: [liveBar(13)] }), true);
+    installed = false;
+    t.mock.timers.setTime(initial + 300_001);
+
+    if (throughUi) {
+      await fixture.app.invalidateProviderRuntime('ticking-provider', { removed: true });
+    }
+
+    await fixture.app.refreshProvidersUsage();
+
+    const removed = await read();
+    const { runtimeGeneration, ...snapshot } = removed;
+
+    snapshots.push(snapshot);
+    assert.notEqual(runtimeGeneration, before.runtimeGeneration);
+    assert.equal(removed.lastSuccessfulAt, before.lastSuccessfulAt);
+    assert.equal(removed.checkedAt, before.checkedAt);
+    assert.equal(removed.dataCheckedAt, before.dataCheckedAt);
+    assert.deepEqual(removed.bars, []);
+    assert.deepEqual(removed.resources, []);
+    assert.equal(sink({ bars: [liveBar(14)] }), false, 'событие удалённого CLI отклоняется');
+    t.mock.timers.setTime(initial + 600_002);
+    await fixture.app.refreshProvidersUsage();
+    assert.deepEqual(await read(), removed, 'повторный тик не меняет замороженный замер');
+    assert.equal(fixture.reads(), 1);
+    installed = true;
+    t.mock.timers.setTime(initial + 900_003);
+    await fixture.app.refreshProvidersUsage();
+    assert.equal((await read()).state, 'ok');
+    assert.equal((await read()).lastSuccessfulAt, initial + 900_003);
+    assert.equal(fixture.reads(), 2, 'возврат CLI не требует lifecycle-события');
+  }
+
+  assert.deepEqual(snapshots[0], snapshots[1]);
+});
+
+test('установленный CLI без входа продолжает опрашиваться и возвращает auth_required', async (t) => {
+  const fixture = await tickFixture(t, {
+    clients: 0,
+    usageTickMs: 300_000,
+    adapter: (onUsage) => ({
+      ...tickingAdapter(onUsage),
+      auth: async () => ({
+        mode: 'none',
+        label: 'Войди в CLI',
+        available: false,
+      }),
+      usage: async () => {
+        onUsage();
+
+        return {
+          state: 'auth_required',
+          message: 'Войди в CLI',
+        };
+      },
+    }),
+  });
+  const card = (await fixture.app.inject('/api/providers')).json().providers[0];
+
+  assert.equal(card.installed, true);
+  assert.equal(card.available, false);
+  await fixture.app.refreshProvidersUsage();
+  assert.equal(fixture.reads(), 1);
+  assert.equal(fixture.events.at(-1).data.usage['ticking-provider'].state, 'auth_required');
+});
+
 test('runtime invalidation сохраняет свой 429, отклоняет старый sink и не меняет managed DTO', async (t) => {
   const initial = Date.UTC(2030, 0, 1);
 

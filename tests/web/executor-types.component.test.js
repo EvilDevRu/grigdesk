@@ -110,6 +110,12 @@ function compileShell() {
           return { connected: globalThis.__typesShellConnected };
         };
       `,
+      // Диалоги и соседние stores используют тот же поток с другим путём импорта.
+      // Их подписки изолированы от проверяемого обработчика оболочки.
+      '../composables/useSse.ts': `
+        export const sseSubscribe = () => () => {};
+        export const useSse = () => ({ connected: globalThis.__typesShellConnected });
+      `,
       'vue-router': `
         export const useRoute = () => ({ path: '/chats', fullPath: '/chats', query: {}, meta: {} });
         export const useRouter = () => ({ push() {}, resolve: () => ({ matched: [] }) });
@@ -137,6 +143,11 @@ function compileShell() {
 test('типы исполнителей в настоящих настройках и топбаре', async (t) => {
   const browser = await installUiBrowser(t);
 
+  browser.happyDOM.setWindowSize({
+    width: 1280,
+    height: 900,
+  });
+
   globalThis.__GRIGDESK_VERSION__ = 'test';
   globalThis.__GRIGDESK_SHA__ = 'test';
 
@@ -158,6 +169,7 @@ test('типы исполнителей в настоящих настройка
       const prov = reactive({
         providers: [card('universal', undefined, false), card('tripo', '3d', false)],
         usage: { tripo: credits() },
+        usageTransport: { deliveryStale: false },
         updating: '',
         updateResults: {},
         load: async () => {},
@@ -208,6 +220,13 @@ test('типы исполнителей в настоящих настройка
       await flushPromises();
 
       assert.equal(wrapper.find('.prov.tripo').exists(), false);
+      assert.equal(wrapper.find('.prov.universal').exists(), true);
+      assert.equal(wrapper.get('.prov.universal').classes().includes('off'), true);
+      prov.providers[0].installed = false;
+      await nextTick();
+      assert.equal(wrapper.find('.prov.universal').exists(), false);
+      prov.providers[0].installed = true;
+      await nextTick();
       assert.equal(wrapper.find('.prov.universal').exists(), true);
       prov.providers[1].available = true;
       await nextTick();

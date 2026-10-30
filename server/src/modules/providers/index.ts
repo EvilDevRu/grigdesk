@@ -150,6 +150,10 @@ async function providersModule(
   const serviceEnv = opts.env || process.env;
   const adaptersOf = opts.getProviderAdapters || getProviderAdapters;
   const modelsOf = opts.getModelsRegistry || getModelsRegistry;
+  const installationChecks = new Map<string, {
+    at: number;
+    installed: boolean;
+  }>();
 
   registerProviderNativeSettings(fastify, {
     config,
@@ -201,7 +205,7 @@ async function providersModule(
    * Собирает карточки из общих источников адаптеров и моделей без чтения MCP.
    * Возможности объявляет исполнитель; подменённые источники изолируют офлайн-стенд.
    */
-  async function buildRegistry() {
+  async function buildRegistry(_previous: unknown, context: { isCurrent: () => boolean }) {
     const executors = await adaptersOf();
     const models = await modelsOf(config);
     const fileNames = await envFileNames(config.envPath);
@@ -213,6 +217,14 @@ async function providersModule(
       const chatEnabled = isChatExecutor(ex);
       const [probe, auth] = await Promise.all([ex.probe(config), ex.auth(config, deps)]);
       const { ok, version } = probe;
+
+      if (context.isCurrent()) {
+        installationChecks.set(ex.id, {
+          at: Date.now(),
+          installed: ok,
+        });
+      }
+
       const distribution = ex.distribution?.(config, probe) || null;
       const managed = distribution?.managed === true;
       let installation = managed ? null : await resolveProviderInstallation(ex, config,
@@ -454,6 +466,71 @@ async function providersModule(
   let usageProviderIds: string[] = [];
 
   /**
+   * Использует свежий probe реестра или прошлого опроса, не собирая тяжёлую карточку.
+   * Ошибка probe не доказывает удаление; поздний ответ старого поколения не кэшируется.
+   */
+  async function installedOf(ex: ExecutorAdapter, isCurrent: () => boolean): Promise<boolean | undefined> {
+    const cached = installationChecks.get(ex.id);
+
+    if (cached && Date.now() - cached.at < CACHE_MS) {
+      return cached.installed;
+    }
+
+    try {
+      const { ok } = await ex.probe(config);
+
+      if (isCurrent()) {
+        installationChecks.set(ex.id, {
+          at: Date.now(),
+          installed: ok,
+        });
+      }
+
+      return ok;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Замораживает один runtime одинаково при lifecycle-операции и исчезновении CLI.
+   * Время замера и Retry-After сохраняются, прежние живые события теряют поколение.
+   */
+  function retainRuntimeUsage(ex: ExecutorAdapter, removed: boolean): ProviderUsage {
+    const previous = usagePrevious.get(ex.id);
+    const generation = (usageGenerations.get(ex.id) ?? 0) + 1;
+
+    usageGenerations.set(ex.id, generation);
+    liveUsage.delete(ex.id);
+
+    if (removed) {
+      removedRuntimes.add(ex.id);
+    } else {
+      removedRuntimes.delete(ex.id);
+    }
+
+    const retained: ProviderUsage = {
+      ...(previous ?? normalizeProviderUsage({ state: 'unavailable' })),
+      ...(removed ? {
+        state: 'unavailable',
+        message: 'Программа исполнителя удалена. Установи CLI для проверки лимитов.',
+        bars: [],
+        resources: [],
+      } : {}),
+      stale: true,
+      ...(ex.usagePresentation?.freshness ? {
+        lastSuccessfulAt: previous?.lastSuccessfulAt ?? null,
+        runtimeGeneration: `${usageBootId}:${generation}`,
+        pollIntervalMs: usageTickMs,
+      } : {}),
+    };
+
+    usagePrevious.set(ex.id, retained);
+
+    return retained;
+  }
+
+  /**
    * Все выходы накладывают живые значения одним способом, сохраняя сырой кэш опроса.
    * Полная карта не удаляет соседнего исполнителя в сторе, который заменяет снимок целиком.
    */
@@ -567,6 +644,24 @@ async function providersModule(
       const generation = usageGenerations.get(ex.id) ?? 0;
       const held = usageBackoff.get(ex.id);
       const previous = previousUsage?.[ex.id] ?? usagePrevious.get(ex.id);
+      const isCurrent = () => context.isCurrent()
+        && (usageGenerations.get(ex.id) ?? 0) === generation;
+      const installed = ex.kind === 'api' ? true : await installedOf(ex, isCurrent);
+
+      if (!isCurrent()) {
+        return [ex.id, previous ?? unsupportedProviderUsage(String(ex.name), checkedAt)] as const;
+      }
+
+      if (installed === false) {
+        const retained = removedRuntimes.has(ex.id) && previous
+          ? previous : retainRuntimeUsage(ex, true);
+
+        return [ex.id, retained] as const;
+      }
+
+      if (installed === true) {
+        removedRuntimes.delete(ex.id);
+      }
 
       // Идёт пауза после «стучитесь реже»: отдаём прошлый снимок как есть. Он уже несёт
       // и слова вендора, и последние полосы — новых мы честно не знаем, а сходить за
@@ -674,38 +769,13 @@ async function providersModule(
     const adapter = (await adaptersOf()).get(id);
 
     registryCache.clear();
+    installationChecks.delete(id);
 
     if (!adapter?.usagePresentation?.freshness) {
       return false;
     }
 
-    const generation = (usageGenerations.get(id) ?? 0) + 1;
-    const previous = usagePrevious.get(id);
-
-    usageGenerations.set(id, generation);
-    liveUsage.delete(id);
-
-    if (options.removed) {
-      removedRuntimes.add(id);
-    } else {
-      removedRuntimes.delete(id);
-    }
-
-    const retained = previous || normalizeProviderUsage({ state: 'unavailable' });
-
-    usagePrevious.set(id, {
-      ...retained,
-      ...(options.removed ? {
-        state: 'unavailable',
-        message: 'Программа исполнителя удалена. Установи CLI для проверки лимитов.',
-        bars: [],
-        resources: [],
-      } : {}),
-      stale: true,
-      lastSuccessfulAt: previous?.lastSuccessfulAt ?? null,
-      runtimeGeneration: `${usageBootId}:${generation}`,
-      pollIntervalMs: usageTickMs,
-    });
+    retainRuntimeUsage(adapter, options.removed === true);
 
     if (usageProviderIds.every((providerId) => usagePrevious.has(providerId))) {
       usageCache.replace(Object.fromEntries(usagePrevious));

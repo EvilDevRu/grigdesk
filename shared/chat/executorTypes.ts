@@ -19,6 +19,7 @@ interface TypedProvider {
   type?: unknown;
   chatEnabled?: boolean;
   available?: boolean;
+  installed?: boolean;
 }
 
 /**
@@ -32,12 +33,13 @@ export function normalizeExecutorType(value: unknown): ExecutorType {
 }
 
 /**
- * Универсальные иконки сохраняют прежний допуск чата, включая недоступные CLI.
+ * Универсальная иконка требует допуска чата и доступности либо установленного CLI.
+ * Установленный CLI без авторизации остаётся видимым для перехода ко входу.
  * Узкий исполнитель появляется только после локальной настройки доступа.
  */
 export function isTopbarProvider(provider: TypedProvider): boolean {
   return normalizeExecutorType(provider.type) === 'universal'
-    ? provider.chatEnabled !== false
+    ? provider.chatEnabled !== false && (provider.available === true || provider.installed === true)
     : provider.available === true;
 }
 

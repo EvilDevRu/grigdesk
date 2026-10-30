@@ -71,14 +71,26 @@ test('тип и run совместно определяют допуск, дос
   assert.equal(isChatExecutor({ run() {} }), true);
   assert.equal(isChatExecutor({ type: '3d', run() {} }), false);
   assert.equal(isChatExecutor({}), false);
-  assert.equal(isTopbarProvider({ available: false }), true);
-  assert.equal(isTopbarProvider({ chatEnabled: false }), false);
+  assert.equal(isTopbarProvider({ available: false }), false);
+  assert.equal(isTopbarProvider({ available: false, installed: true }), true);
+  assert.equal(isTopbarProvider({ available: false, installed: false }), false);
+  assert.equal(isTopbarProvider({ available: true }), true);
+  assert.equal(isTopbarProvider({
+    chatEnabled: false,
+    available: true,
+    installed: true,
+  }), false);
   assert.equal(isTopbarProvider({
     type: '3d',
     available: true,
     chatEnabled: false
   }), true);
   assert.equal(isTopbarProvider({ type: '3d', available: false }), false);
+  assert.equal(isTopbarProvider({
+    type: '3d',
+    available: false,
+    installed: true,
+  }), false);
 });
 
 test('узкий run не даёт runtime и сохранённые модели; карточка и декораторы защищены', async (t) => {
