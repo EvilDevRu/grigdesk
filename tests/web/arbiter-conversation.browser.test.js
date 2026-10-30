@@ -72,7 +72,9 @@ test('остановка → поток → F5 → обсуждение → ди
     await page.locator('[data-role="arbiter-resume"]').waitFor();
     assert.equal(fx.gotoCalls(), 1);
     assert.equal(fx.resumeCalls(), 1);
-    assert.match(await page.locator('[data-role="arbiter-conversation"]').innerText(), /принято.*не запущен/);
+    // Кнопка продолжения доступна уже при accepted, до окончания попытки запуска.
+    // Ждём итог первого resume, чтобы не читать промежуточное сообщение.
+    await page.getByText(/Указание принято, но этап пока не запущен:/).waitFor();
     await page.locator('[data-role="arbiter-resume"]').click();
     await page.getByText(/Этап запущен повторно; результат ещё ожидается/).waitFor();
     assert.equal(fx.gotoCalls(), 1);

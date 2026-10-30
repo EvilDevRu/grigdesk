@@ -18,6 +18,8 @@
 
 ## Грабли
 
+- [Арбитр: кнопка resume появляется раньше окончательного сообщения о запуске](arbiter-resume-observation.md)
+
 - [Общий выбор в фикстурах: видимый список, native adapter и required](select-fixtures.md)
 
 - [Отказ запуска браузера оставляет Vite открытым](browser-fixture-startup-cleanup.md) —
