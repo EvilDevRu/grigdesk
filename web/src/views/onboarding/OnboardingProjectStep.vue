@@ -1,13 +1,23 @@
 <template>
   <section v-if="store.draft">
-    <h2>{{ t('core.onboardingAddProject') }}</h2>
-    <UiField :label="t('core.onboardingProjectTitle')">
+    <header class="onboarding-section-head">
+      <h2 tabindex="-1">{{ t('core.onboardingAddProject') }}</h2>
+      <p class="onboarding-description">{{ t('core.onboardingProjectHelp') }}</p>
+    </header>
+    <UiField :label="t('core.onboardingProjectTitle')" :hint="t('core.onboardingProjectNameHelp')">
       <UiInput :model-value="store.draft.title" :disabled="locked" :maxlength="120"
         @update:model-value="title" />
     </UiField>
-    <p>{{ t('core.onboardingServerPath') }}</p>
+    <p class="repository-help">{{ t('core.onboardingServerPath') }}</p>
     <UiInlineMessage v-if="locked" tone="warning">{{ t('core.onboardingPendingProject') }}</UiInlineMessage>
-    <div v-for="repo in store.draft.repositories" :key="repo.name" class="repository">
+    <div v-for="(repo, index) in store.draft.repositories" :key="repo.name" class="repository">
+      <header class="repository-heading">
+        <h3>{{ t('core.onboardingRepositoryNumber', { number: index + 1 }) }}</h3>
+        <UiButton wrap v-if="store.draft.repositories.length > 1" :disabled="locked"
+          variant="ghost" tone="danger" @click="remove(repo.name)">
+          {{ t('core.onboardingRemoveFolder') }}
+        </UiButton>
+      </header>
       <UiField :label="t('core.onboardingFolder')">
         <UiInput :model-value="repo.source" :disabled="locked" :maxlength="1024"
           @update:model-value="source(repo.name, String($event ?? ''))" @blur="check(repo.name)" />
@@ -16,10 +26,10 @@
         <UiButton wrap v-if="picker" :disabled="locked" @click="pick(repo.name)">
           {{ t('core.onboardingChooseFolder') }}
         </UiButton>
-        <UiButton wrap v-if="store.draft.repositories.length > 1" :disabled="locked"
-          variant="ghost" @click="remove(repo.name)">{{ t('core.onboardingRemoveFolder') }}</UiButton>
       </div>
-      <p v-if="checks[repo.name]?.pending">{{ t('core.onboardingCheckingFolder') }}</p>
+      <p v-if="checks[repo.name]?.pending" class="repository-help" role="status">
+        {{ t('core.onboardingCheckingFolder') }}
+      </p>
       <UiInlineMessage v-if="checks[repo.name]?.result?.reason" tone="warning">
         {{ t(checks[repo.name]?.result?.state === 'unborn'
           ? 'core.onboardingUnborn' : checks[repo.name]?.result?.state === 'detached'
@@ -37,6 +47,7 @@
       </UiField>
     </div>
     <UiButton wrap :disabled="locked || store.draft.repositories.length >= 16" @click="add">
+      <template #leading><span aria-hidden="true">+</span></template>
       {{ t('core.onboardingAddFolder') }}
     </UiButton>
     <UiInlineMessage v-if="pickerError" tone="warning">{{ t('core.onboardingPickerFailed') }}</UiInlineMessage>
@@ -289,13 +300,46 @@ onBeforeUnmount(() => {
 .repository {
   display: grid;
   gap: 12px;
-  margin: 24px 0;
+  margin: 16px 0;
   min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.repository-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.repository-heading h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.repository-help {
+  margin: 16px 0 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.repository .repository-help {
+  margin: 0;
 }
 
 .repository-actions {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.repository-actions:empty {
+  display: none;
 }
 </style>
