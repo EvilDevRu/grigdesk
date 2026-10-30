@@ -3,10 +3,32 @@
     <header class="tool-window-titlebar">
       <span>{{ item?.label || 'GrigDesk' }}</span>
       <div class="tool-window-actions">
-        <UiButton v-if="panelReady" :disabled="returning" @click="returnToColumn">
-          {{ t('core.returnTool') }}
-        </UiButton>
-        <UiButton @click="closeWindow">{{ t('core.closeTool') }}</UiButton>
+        <UiIconButton v-if="panelReady" data-context="tool-window-control"
+                      :label="t('core.returnTool')" v-tooltip.bottom="t('core.returnTool')"
+                      :disabled="returning" @click="returnToColumn">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
+            <path d="M10.5 2.5v11M4 8h4m-2-2 2 2-2 2" />
+          </svg>
+        </UiIconButton>
+        <UiIconButton data-context="tool-window-control" :label="t('desktop.windowMinimize')"
+                      v-tooltip.bottom="t('desktop.windowMinimize')"
+                      :disabled="windowControlsBusy || !ready" @click="controlWindow('minimize')">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11h10" /></svg>
+        </UiIconButton>
+        <UiIconButton data-context="tool-window-control"
+                      :label="maximized ? t('desktop.windowRestore') : t('desktop.windowMaximize')"
+                      v-tooltip.bottom="maximized ? t('desktop.windowRestore') : t('desktop.windowMaximize')"
+                      :disabled="windowControlsBusy || !ready" @click="controlWindow('toggle-maximize')">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path v-if="maximized" d="M6 3h7v7M3 6h7v7H3Z" />
+            <path v-else d="M3 3h10v10H3Z" />
+          </svg>
+        </UiIconButton>
+        <UiIconButton data-context="tool-window-control" :label="t('core.closeTool')"
+                      v-tooltip.bottom="t('core.closeTool')" @click="closeWindow">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M4 12l8-8" /></svg>
+        </UiIconButton>
       </div>
     </header>
     <p v-if="error" role="alert">{{ error }}</p>
@@ -24,8 +46,9 @@ import { panelLoading } from '../shared/tools/panelLoading.ts';
 import { toolWindowText } from '../shared/tools/toolWindowMessages.ts';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import {
-  UiButton,
+  UiIconButton,
   t,
+  vTooltip,
 } from '../ui.ts';
 import { useAuthStore } from '../stores/auth.ts';
 import { usePluginsStore } from '../stores/plugins.ts';
@@ -35,9 +58,14 @@ import type { SurfaceDocument } from '../../../shared/desktop/surfaceContract.ts
 import type { ToolPanelHandle, ToolWindowState } from '../shared/tools/toolWindowState.ts';
 import { registryToolId } from '../shared/tools/toolWindowState.ts';
 import { setCodeWindowAction } from '../shared/tools/toolWindowActions.ts';
+import { useToolWindowControls } from '../shared/tools/useToolWindowControls.ts';
 
 const props = defineProps<{ target: SurfaceDocument | null; ready: boolean }>();
 const auth = useAuthStore();
+const { maximized, busy: windowControlsBusy, control: controlWindow } = useToolWindowControls(
+  () => props.target,
+  () => props.ready,
+);
 const plugins = usePluginsStore();
 const id = computed(() => registryToolId(props.target?.id ?? ''));
 const item = computed(() => toolById(plugins, id.value));
@@ -170,6 +198,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   flex: none;
   padding: 4px 8px;
   -webkit-app-region: drag;
@@ -179,7 +208,8 @@ onBeforeUnmount(() => {
 }
 .tool-window-actions {
   display: flex;
-  gap: 8px;
+  flex: none;
+  gap: 4px;
   -webkit-app-region: no-drag;
 }
 .tool-window-page > :deep(.panel) {

@@ -2,10 +2,15 @@ import { randomUUID } from 'node:crypto';
 
 import type { SurfaceTarget } from '../../shared/desktop/surfaceContract.ts';
 import { surfaceUrl } from '../../shared/desktop/surfaceContract.ts';
+import type { ToolWindowAction, ToolWindowControlResult } from '../../shared/desktop/toolWindowContract.ts';
 
 export interface SurfaceWindow {
   isDestroyed(): boolean;
   isMinimized(): boolean;
+  isMaximized(): boolean;
+  minimize(): void;
+  maximize(): void;
+  unmaximize(): void;
   restore(): void;
   show(): void;
   focus(): void;
@@ -212,11 +217,40 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
     return true;
   }
 
+  /**
+   * Изменяет только живое окно инструмента с точной instance текущей машины.
+   * Чтение состояния не поднимает окно и отражает максимизацию оконным менеджером.
+   */
+  function control(origin: string, target: SurfaceTarget, instance: string,
+    action: ToolWindowAction): ToolWindowControlResult {
+    const entry = entries.get(origin + ' ' + target.kind + ':' + target.id);
+
+    if (target.kind !== 'tool' || !entry || entry.instance !== instance
+      || origin !== adapters.allowedOrigin() || entry.window.isDestroyed()) {
+      return { accepted: false };
+    }
+
+    const window = entry.window;
+
+    if (action === 'minimize') {
+      window.minimize();
+    } else if (action === 'toggle-maximize') {
+      if (window.isMaximized()) {
+        window.unmaximize();
+      } else {
+        window.maximize();
+      }
+    }
+
+    return { accepted: true, maximized: window.isMaximized() };
+  }
+
   return {
     open,
     closeAll,
     status,
     focus,
     close,
+    control,
   };
 }

@@ -47,6 +47,8 @@ function fixture() {
         destroyed: false,
         shows: 0,
         focuses: 0,
+        minimized: false,
+        maximized: false,
         loads: [],
         isDestroyed() {
           return this.destroyed;
@@ -58,7 +60,19 @@ function fixture() {
           this.focuses += 1;
         },
         isMinimized() {
-          return false;
+          return this.minimized;
+        },
+        isMaximized() {
+          return this.maximized;
+        },
+        minimize() {
+          this.minimized = true;
+        },
+        maximize() {
+          this.maximized = true;
+        },
+        unmaximize() {
+          this.maximized = false;
         },
         restore() {
         },
@@ -301,4 +315,46 @@ test('TW-N02: closed/status проверяют instance; closeAll отменяе
   assert.equal(f.made.at(-1).shows, 0);
   assert.equal(f.made.at(-1).destroyed, true);
   assert.deepEqual(await f.controller.status(origin), []);
+});
+
+test('TW-N04: кнопки управляют только своей живой instance и читают внешнюю максимизацию', async (t) => {
+  const f = fixture();
+  const origin = 'http://127.0.0.1:47101';
+  const target = { kind: 'tool', id: 'ssh' };
+  const first = await f.controller.open(origin, target);
+  const second = await f.controller.open(origin, { kind: 'tool', id: 'code' });
+
+  t.after(() => f.controller.closeAll());
+
+  assert.deepEqual(f.controller.control(origin, target, first.instance, 'minimize'), {
+    accepted: true,
+    maximized: false,
+  });
+  assert.equal(f.made[0].minimized, true);
+  assert.equal(f.made[1].minimized, false);
+  assert.deepEqual(f.controller.control(origin, target, first.instance, 'toggle-maximize'), {
+    accepted: true,
+    maximized: true,
+  });
+  assert.equal(f.made[1].maximized, false);
+  assert.deepEqual(f.controller.control(origin, target, first.instance, 'toggle-maximize'), {
+    accepted: true,
+    maximized: false,
+  });
+  f.made[0].maximize();
+  assert.deepEqual(f.controller.control(origin, target, first.instance, 'window-state'), {
+    accepted: true,
+    maximized: true,
+  });
+
+  for (const instance of ['stale-instance', second.instance]) {
+    assert.deepEqual(f.controller.control(origin, target, instance, 'toggle-maximize'), { accepted: false });
+  }
+
+  assert.equal(f.made[0].maximized, true);
+  f.changeOrigin('http://127.0.0.1:47102');
+  assert.deepEqual(f.controller.control(origin, target, first.instance, 'minimize'), { accepted: false });
+  f.changeOrigin(origin);
+  f.made[0].destroy();
+  assert.deepEqual(f.controller.control(origin, target, first.instance, 'minimize'), { accepted: false });
 });

@@ -690,6 +690,22 @@
   color: var(--ink-mid);
 }
 
+.ui-icon-button[data-context='tool-window-control'] {
+  width: var(--toolbar-control-h);
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+}
+
+.ui-icon-button[data-context='tool-window-control'] svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .ui-icon-button--embedded,
 .ui-icon-button[data-role='embedded'] {
   width: 30px;

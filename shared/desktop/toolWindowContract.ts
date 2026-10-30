@@ -1,10 +1,15 @@
 import { isInstallPluginId } from '../plugins/pluginInstallValues.ts';
 import { recordOrNull } from '../lib/objects.ts';
 
+export type ToolWindowAction = 'window-state' | 'minimize' | 'toggle-maximize';
+
+export type ToolWindowControlResult = { accepted: false }
+  | { accepted: true; maximized: boolean };
+
 export type ToolControl = { action: 'open'; id: string }
   | { action: 'status' }
   | {
-    action: 'focus' | 'close';
+    action: 'focus' | 'close' | ToolWindowAction;
     id: string;
     instance: string;
   };
@@ -51,7 +56,8 @@ export function parseToolControl(value: unknown): ToolControl | null {
     return { action: 'open', id: item.id };
   }
 
-  if ((item.action === 'focus' || item.action === 'close') && count === 3
+  if ((item.action === 'focus' || item.action === 'close' || item.action === 'window-state'
+    || item.action === 'minimize' || item.action === 'toggle-maximize') && count === 3
     && isToolInstance(item.instance)) {
     return {
       action: item.action,

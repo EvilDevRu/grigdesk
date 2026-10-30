@@ -608,6 +608,26 @@ test('TW-N03: отдельный tool control, точная форма и неи
   assert.equal(calls.length, 2);
   assert.equal(calls[0].origin, 'http://127.0.0.1:47101');
 
+  for (const action of ['minimize', 'toggle-maximize', 'window-state']) {
+    const request = {
+      action,
+      id: 'code',
+      instance,
+    };
+    const response = await invokeSurface(f.shell, '/__shell/surfaces/tool', request);
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls.at(-1).request, request);
+
+    const missingInstance = await invokeSurface(f.shell, '/__shell/surfaces/tool', { action, id: 'code' });
+
+    assert.equal(missingInstance.status, 400);
+    assert.equal((await invokeSurface(f.shell, '/__shell/surfaces/tool', {
+      ...request,
+      url: 'https://example.org',
+    })).status, 400);
+  }
+
   const noNative = fixture();
 
   t.after(() => noNative.shell.close());

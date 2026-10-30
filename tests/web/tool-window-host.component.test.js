@@ -146,7 +146,12 @@ test('TW-U02: tool document имеет одну registry-панель, шапк�
   assert.equal(child.findAll('[data-panel="code"]').length, 1);
   assert.deepEqual(host.imports, [['code', snapshot]], 'Init передаёт снимок смонтированной панели');
   assert.equal(child.find('[data-panel="code"]').text(), 'page');
-  assert.match(child.text(), /Вернуть в колонку/);
+
+  const returnButton = child.find('button[aria-label="Вернуть в колонку"]');
+
+  assert.equal(returnButton.exists(), true);
+  assert.equal(returnButton.text(), '');
+  assert.equal(returnButton.attributes('data-ui-tooltip'), 'Вернуть в колонку');
   assert.ok(child.findAll('button').some((button) => /Закрыть/.test(
     button.text() + ' ' + button.attributes('aria-label'),
   )));

@@ -963,7 +963,12 @@ async function prepare(signal: AbortSignal): Promise<void> {
           return { focused: surfaceWindows?.focus(origin, target, request.instance) ?? false };
         }
 
-        return { closed: surfaceWindows?.close(origin, target, request.instance) ?? false };
+        if (request.action === 'close') {
+          return { closed: surfaceWindows?.close(origin, target, request.instance) ?? false };
+        }
+
+        return surfaceWindows?.control(origin, target, request.instance, request.action)
+          ?? { accepted: false };
       },
 
       /**
