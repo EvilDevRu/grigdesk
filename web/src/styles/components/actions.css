@@ -1624,8 +1624,8 @@
 
 .ui-button[data-role='pipeline-compact-action'],
 .ui-button[data-role='pipeline-stall-answer-open'] {
-  height: 30px;
-  min-height: 30px;
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
   padding: 0 10px;
   font-size: 12px;
 }

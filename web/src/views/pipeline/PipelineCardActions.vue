@@ -3,6 +3,7 @@
     <UiButton
       v-for="action in actions"
       :key="action.id"
+      size="compact"
       :class="action.className"
       :data-role="action.role || 'pipeline-compact-action'"
       :tone="action.primary ? action.tone : 'neutral'"
