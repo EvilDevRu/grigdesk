@@ -4,14 +4,16 @@
     class="diff-dialog"
     layer="diff-workspace"
     size="workspace"
-    :label="`#${diff.taskId} · диф`"
+    :label="t('core.diffDesignDialogTitle', { task: diff.taskId || '—' })"
     :body-inset="false"
     fade-only
     @update:open="onDialogOpenChange"
   >
     <template #header="{ close }">
       <div class="diff-dialog__header">
-        <span class="diff-dialog__title mono">#{{ diff.taskId }} · диф</span>
+        <span class="diff-dialog__title">
+          {{ t('core.diffDesignDialogTitle', { task: diff.taskId || '—' }) }}
+        </span>
         <UiIconButton
           role="embedded"
           label="Закрыть диф"
@@ -40,7 +42,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, watch } from 'vue';
-import { UiDialog, UiIconButton, vTooltip } from '../ui';
+import { UiDialog, UiIconButton, t, vTooltip } from '../ui';
 import { useDiffStore } from '../stores/diff.ts';
 import DiffPanel from './diff/DiffPanel.vue';
 

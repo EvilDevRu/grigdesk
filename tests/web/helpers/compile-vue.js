@@ -363,6 +363,7 @@ export async function compileBoundary(relative, expose, additional = {}) {
   const uiNames = [...uiSource.matchAll(/default as (Ui\w+)/g)].map((match) => match[1]);
   const ui = [
     'import { h } from "vue";',
+    `export { t } from ${JSON.stringify(webFile('src/services/locale.ts'))};`,
     'const component = { setup: (_, { slots }) => () => h("div", {}, slots.default?.({close() {}})) };',
     ...uiNames.map((name) => name === 'UiDialog' || name === 'UiPopover'
       ? `export const ${name} = { props: ['open'], setup: () => () => null };`

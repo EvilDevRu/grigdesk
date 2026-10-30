@@ -2,9 +2,15 @@
   <div class="diff-loading">
     <UiLoadingState style="height: 100%" :label="label" :failed="failed">
       <div class="split">
-        <div class="tree" data-loading-region="tree"><UiSkeletonLayout /></div>
+        <div class="tree" data-loading-region="tree">
+          <div class="tree-header"><UiSkeleton width="55%" height="18px" /></div>
+          <div class="tree-search"><UiSkeleton height="32px" /></div>
+          <div class="tree-content"><UiSkeletonLayout :header="false" /></div>
+        </div>
         <div class="editor">
           <UiSkeleton class="header" height="36px" />
+          <div class="context"><UiSkeleton width="40%" height="16px" /></div>
+          <UiSkeleton height="27px" />
           <div class="canvases" :class="{ together: sideBySide }">
             <div class="canvas" :class="{ original: sideBySide }" data-loading-region="original">
               <UiSkeletonLayout layout="text" :rows="12" />
@@ -45,19 +51,40 @@ withDefaults(defineProps<{
 
 .split {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: 288px minmax(0, 1fr);
   height: 100%;
 }
 
 .tree {
-  padding: 8px;
   border-right: 1px solid var(--line);
   min-width: 0;
 }
 
+.tree-header {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding-inline: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tree-search {
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tree-content {
+  padding: 10px;
+}
+
+.context {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
 .editor {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -95,13 +122,15 @@ withDefaults(defineProps<{
 @container diff-panel (max-width: 700px) {
   .split {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .tree {
-    max-height: min(160px, 30dvh);
     overflow: hidden;
-    border-bottom: 1px solid var(--line);
+    border-right: 0;
+  }
+
+  .editor {
+    display: none;
   }
 }
 </style>
