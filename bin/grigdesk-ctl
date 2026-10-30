@@ -170,8 +170,9 @@ developer_command() {
 
   if [[ "$CMD" == build ]]; then
     if (( $# > 1 )) || [[ "$build_target" != all && "$build_target" != server \
-      && "$build_target" != web && "$build_target" != window && "$build_target" != deepseek ]]; then
-      echo 'Справка: grigdesk-ctl build [all|server|web|window|deepseek]' >&2
+      && "$build_target" != web && "$build_target" != window && "$build_target" != deepseek \
+      && "$build_target" != apk ]]; then
+      echo 'Справка: grigdesk-ctl build [all|server|web|window|deepseek|apk]' >&2
       return 2
     fi
   fi
@@ -277,6 +278,16 @@ developer_command() {
     else
       observed_step window.install "$DIR/deploy/desktop.sh" install || return $?
     fi
+  }
+
+  # Android использует штатный сборщик полного клиента со встроенным общим интерфейсом.
+  # Путь результата следует папке данных и явному переопределению, как в tools/mobile.
+  build_apk() {
+    local data
+
+    data=$(grigdesk_data_home) || return $?
+    observed_step apk.build "$DIR/tools/mobile" build || return $?
+    echo "Собран APK: ${GRIGDESK_MOBILE_APK_DIR:-$data/state/mobile-apk}/grigdesk-mobile-debug.apk"
   }
 
   # Цель deepseek стоит отдельно от all: сборке нужны сеть (worker Node, npm-зависимости)
@@ -444,6 +455,11 @@ developer_command() {
     build)
       desktop_requires_selection=0
 
+      if [[ "$build_target" == apk ]]; then
+        build_step apk build_apk || return $?
+        return 0
+      fi
+
       # Цель deepseek не собирает веб/окно и не меняет привязку сервера:
       # установленный ELF подхватывает следующий ход без перезапуска.
       # Итоговые сообщения печатает сама цель — включая мягкий финал без допуска.
@@ -548,7 +564,7 @@ case "$CMD" in
     # Только валидная ручная сборка попадает в экран прогресса.
     # Внутренний ребёнок и старые ошибки аргументов сохраняют обычный путь.
     if [[ "$CMD" == build && -t 0 && -t 1 && "${GRIGDESK_CTL_BUILD_CHILD:-}" != 1 \
-      && $# -le 2 && "${2-all}" =~ ^(all|server|web|window|deepseek)$ ]]; then
+      && $# -le 2 && "${2-all}" =~ ^(all|server|web|window|deepseek|apk)$ ]]; then
       source "$DIR/deploy/lib/runtime-env.sh"
       grigdesk_require_node source
       exec node "$DIR/cli/main.ts" "$@"

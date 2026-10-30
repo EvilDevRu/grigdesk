@@ -31,6 +31,7 @@ b24 в путь с пробелами и запускает их из разны
 Копирование только прежних отдельных runtime-файлов теряет зависимость до HTTP-запроса.
 
 Фикстура `mobile-build-script.test.js` переносит также `tools/mobile-client.mts`, общий
-сборщик `client-ui.mts`, `desktop/src/uiRelease.ts` и его зависимости из shared. Подменённый
+сборщик `client-ui.mts`, `desktop/src/uiRelease.ts`, `desktop/src/locale.ts` и его зависимости
+из shared, включая целиком `shared/i18n/` с каталогами переводов. Подменённый
 npm создаёт index.html в переданном staging outDir, Gradle — APK модуля :client. Это сохраняет
 проверку настоящего sealing и публикации файла, не вызывая внешние компиляторы.

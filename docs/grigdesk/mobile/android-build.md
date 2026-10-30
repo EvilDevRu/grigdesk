@@ -16,6 +16,9 @@ tools/mobile check
 tools/mobile build
 ```
 
+Эта же debug-сборка доступна как `grigdesk-ctl build apk` и пункт «Android APK»
+в меню «Сборка»: [команда, прогресс и путь результата](../server/ctl-build-apk.md).
+
 `deps` загружает и проверяет закреплённые архивы, принимает SDK-лицензии и устанавливает
 пакеты. `doctor` сверяет настоящие исполнимые файлы, версии, установленный SDK и jar
 [Gradle Wrapper](gradle-wrapper.md) с суммой из lock.

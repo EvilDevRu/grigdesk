@@ -34,7 +34,7 @@
 | `grigdesk-ctl desktop …`, `mobile …`, `release …` | Передача прежним скриптам |
 | `grigdesk-ctl b24 …` | Собранный `bin/b24`, без него — исходник `b24/src/main.ts` ([команда b24](../b24/binary-cli.md)) |
 | `grigdesk-ctl bundle` | Свежая переносимая папка и архив без установки ([контракт](portable-bundle.md)) |
-| `grigdesk-ctl build [all\|server\|web\|window\|deepseek]` | Сборка и установка; без цели — сервер, веб, окно; `deepseek` — отдельная цель поставки исполнителя ([контракт](ctl-build.md)) |
+| `grigdesk-ctl build [all\|server\|web\|window\|deepseek\|apk]` | Сборка и установка; без цели — сервер, веб, окно; `deepseek` — поставка исполнителя, `apk` — Android-приложение ([контракт](ctl-build.md)) |
 | `grigdesk-ctl dev`, `deps`, `run` | Прежние команды разработки |
 | `grigdesk-ctl --help`, `-h`, `help`; `--help` или `-h` в любой команде | Справка без внешних вызовов |
 | `grigdesk-ctl --version` | Версия собственной копии из VERSION |

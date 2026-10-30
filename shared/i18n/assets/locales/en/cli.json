@@ -31,7 +31,7 @@
   "devices": "Devices",
   "devicesDescription": "pair with QR, list, revoke",
   "build": "Build",
-  "buildDescription": "server, web, window, DeepSeek, portable bundle",
+  "buildDescription": "server, web, window, DeepSeek, APK, portable bundle",
   "development": "Development",
   "developmentDescription": "dev mode, dependencies, run",
   "exit": "Exit",
@@ -62,6 +62,8 @@
   "windowDescription": "build web, package and install window",
   "deepseek": "DeepSeek",
   "deepseekDescription": "build, verify and install the DeepSeek binary",
+  "apk": "Android APK",
+  "apkDescription": "build the app with embedded web UI",
   "bundle": "Portable bundle",
   "bundleDescription": "release/ directory and archive, without installation",
   "dev": "Dev mode",
@@ -87,6 +89,7 @@
   "summaryWeb": "Built web: {path}",
   "summaryWindow": "Installed window: {path}; web built.",
   "summaryDeepseek": "Installed DeepSeek: {path}",
+  "summaryApk": "Built APK: {path}",
   "summaryBundle": "Built release/ and release.tar.gz without installation.",
   "reopen": "Close the window and open it again to run the new code.",
   "webHint": "The window will show the new web after grigdesk-ctl build window.",
@@ -110,6 +113,9 @@
     "closed": "closed"
   },
   "steps": {
+    "apk": {
+      "build": "APK: build web UI and Android app"
+    },
     "server": {
       "node": "Server: prepare Node",
       "build": "Server: build",

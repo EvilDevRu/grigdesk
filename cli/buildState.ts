@@ -13,6 +13,7 @@ const seconds: Record<string, number> = {
   'web.build': 45,
   'window.package': 180,
   'window.install': 10,
+  'apk.build': 180,
   'deepseek.deps': 120,
   'deepseek.prepare': 60,
   'deepseek.build': 240,
@@ -73,6 +74,10 @@ export function estimateBuildProgress(input: {
  * Он задаёт оценку до получения первого события, не управляя самой цепочкой сборки.
  */
 export function buildStepIds(variant: string): string[] {
+  if (variant === 'apk') {
+    return ['apk.build'];
+  }
+
   if (variant === 'bundle') {
     return ['server', 'b24', 'relay', 'deepseek', 'window', 'verify', 'pack', 'publish']
       .map((name) => `bundle.${name}`);

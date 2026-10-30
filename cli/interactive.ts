@@ -47,7 +47,7 @@ export async function runEntry(argv: readonly string[]): Promise<number> {
   }
 
   if (argv[0] === 'build' && argv.length <= 2
-    && ['all', 'server', 'web', 'window', 'deepseek'].includes(argv[1] ?? 'all')
+    && ['all', 'server', 'web', 'window', 'deepseek', 'apk'].includes(argv[1] ?? 'all')
     && sourceInstallation(root)) {
     if (interactive && process.env.GRIGDESK_CTL_BUILD_CHILD !== '1') {
       return runBuildProgress(root, argv[1] ?? 'all');

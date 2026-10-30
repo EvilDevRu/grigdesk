@@ -57,8 +57,6 @@ export async function terminalBuildFixture(t: TestContext) {
     `echo fixture-open >> '${calls}'`,
   ].join('\n'), { mode: 0o755 });
 
-  const npm = path.join(stubs, 'npm');
-  const original = await readFile(npm, 'utf8');
   const insert = [
     'process.stdout.write("fixture-out " + args.join(" ") + "\\n");',
     'process.stderr.write("fixture-err\\n");',
@@ -69,7 +67,11 @@ export async function terminalBuildFixture(t: TestContext) {
     'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 180);',
   ].join('\n');
 
-  await writeFile(npm, original.replace('process.exit(', insert + '\nprocess.exit('), { mode: 0o755 });
+  for (const file of [path.join(stubs, 'npm'), path.join(box.root, 'tools/mobile')]) {
+    const original = await readFile(file, 'utf8');
+
+    await writeFile(file, original.replace('process.exit(', insert + '\nprocess.exit('), { mode: 0o755 });
+  }
 
   // Контракт bundle подтверждается отдельно настоящим executeBundle на маленьком payload.
   // Для меню здесь проверяется делегирование той же команды и принятие её событий.
@@ -112,7 +114,7 @@ export function launchBuild(t: TestContext, box: Awaited<ReturnType<typeof termi
 }
 
 /**
- * Порядок пунктов совпадает с заданием: all/server/web/window/deepseek/bundle.
+ * Порядок пунктов совпадает с меню: all/server/web/window/deepseek/apk/bundle.
  * Ожидание подменю не зависит от скорости запуска Node или системных команд.
  */
 export async function chooseBuild(session: ReturnType<typeof startPty>, target: string) {
@@ -122,7 +124,10 @@ export async function chooseBuild(session: ReturnType<typeof startPty>, target: 
 
   session.write(down.repeat(5) + '\r');
   await session.wait(/Переносимый комплект|Portable bundle/iu, 4000, before);
-  session.write(down.repeat(['all', 'server', 'web', 'window', 'deepseek', 'bundle'].indexOf(target)) + '\r');
+
+  const targets = ['all', 'server', 'web', 'window', 'deepseek', 'apk', 'bundle'];
+
+  session.write(down.repeat(targets.indexOf(target)) + '\r');
 }
 
 /**

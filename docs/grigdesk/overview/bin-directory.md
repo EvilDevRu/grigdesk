@@ -18,9 +18,10 @@
 | `bin/grigdesk-app` | установленное окно: AppImage из `desktop/release` без расширения в имени, вне git; кладёт `grigdesk-ctl desktop install` ([установка](../web/desktop-window.md)) |
 | `bin/grigdesk.png` | иконка ярлыка; копия `web/public/icon-512.png` |
 
-В папке исходников `bin/grigdesk-ctl build [all|server|web|window|deepseek]` собирает и ставит
+В папке исходников `bin/grigdesk-ctl build [all|server|web|window|deepseek|apk]` собирает и ставит
 компоненты; без цели — сервер, веб, затем окно; `deepseek` — отдельная цель поставки исполнителя,
-не входящая в `all`. Установленный рядом ELF не перехватывает
+не входящая в `all`. `apk` отдельно собирает Android-приложение со встроенным вебом
+через `tools/mobile build`. Установленный рядом ELF не перехватывает
 `dev|build|deps|mobile|release`: эти команды используют исходники и Node разработчика.
 Готовый `release.json` и ELF без исходников сохраняют прежний отказ команд разработки.
 Сборка не перезапускает процессы и не меняет выбор сервера окна:

@@ -31,7 +31,7 @@
   "devices": "Устройства",
   "devicesDescription": "привязать телефон по QR, список, отозвать",
   "build": "Сборка",
-  "buildDescription": "сервер, веб, окно, DeepSeek, переносимый комплект",
+  "buildDescription": "сервер, веб, окно, DeepSeek, APK, переносимый комплект",
   "development": "Разработка",
   "developmentDescription": "dev-режим, зависимости, run",
   "exit": "Выход",
@@ -62,6 +62,8 @@
   "windowDescription": "собрать веб, упаковать и установить окно",
   "deepseek": "DeepSeek",
   "deepseekDescription": "собрать, проверить и установить поставку DeepSeek",
+  "apk": "Android APK",
+  "apkDescription": "собрать приложение со встроенным вебом",
   "bundle": "Переносимый комплект",
   "bundleDescription": "папка release/ и архив без установки",
   "dev": "Dev-режим",
@@ -87,6 +89,7 @@
   "summaryWeb": "Собран веб: {path}",
   "summaryWindow": "Поставлено окно: {path}; веб собран.",
   "summaryDeepseek": "Поставлен DeepSeek: {path}",
+  "summaryApk": "Собран APK: {path}",
   "summaryBundle": "Готовы release/ и release.tar.gz без установки.",
   "reopen": "Закройте окно и откройте снова — запустится новый код.",
   "webHint": "Окно покажет новый веб после grigdesk-ctl build window.",
@@ -110,6 +113,9 @@
     "closed": "закрыто"
   },
   "steps": {
+    "apk": {
+      "build": "APK: сборка веба и Android-приложения"
+    },
     "server": {
       "node": "Сервер: подготовка Node",
       "build": "Сервер: сборка",

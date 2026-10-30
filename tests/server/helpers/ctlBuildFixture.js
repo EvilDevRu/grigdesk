@@ -209,6 +209,14 @@ export async function fixture(t, { source = true, binary = true, release = false
  * Отдельные цели получают только свои стадии, без управления живыми компонентами.
  */
 export function expectedBuildCalls(box, target = 'all') {
+  if (target === 'apk') {
+    return [{
+      command: 'mobile',
+      cwd: '/',
+      args: ['build'],
+    }];
+  }
+
   const cache = path.join(box.env.XDG_CACHE_HOME, 'grigdesk/server-binary');
   const server = [
     {

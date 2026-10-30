@@ -52,6 +52,7 @@ for (const [target, steps] of [
   ['server', server],
   ['web', web],
   ['window', [...web, ...window]],
+  ['apk', ['apk.build']],
 ]) {
   test(`BE-STEPS: ${target}, реальные границы fd 3 и прежний argv`, async (t) => {
     const box = await fixture(t);
@@ -69,6 +70,18 @@ for (const [target, steps] of [
     }
   });
 }
+
+test('BE-STEPS: отказ APK завершает свою стадию исходным кодом', async (t) => {
+  const box = await fixture(t);
+
+  await box.fail('mobile', 'build', 29);
+
+  const result = await observedBuild(box, 'apk');
+
+  assert.equal(result.code, 29, result.stderr);
+  assert.equal(result.events, 'start\tapk.build\nend\tapk.build\t29\n');
+  assert.deepEqual(await box.calls(), expectedBuildCalls(box, 'apk'));
+});
 
 for (const [stage, command, argument, code, count] of [
   ['server.node', null, null, 1, 0],

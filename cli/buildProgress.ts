@@ -6,7 +6,7 @@ import { StringDecoder } from 'node:string_decoder';
 import type { Readable } from 'node:stream';
 import { setTimeout as pause } from 'node:timers/promises';
 
-import { dataHome } from '../shared/runtime/dataHome.ts';
+import { dataHome, dataPath } from '../shared/runtime/dataHome.ts';
 import { openBuildLog, readBuildTimings, saveBuildTimings } from './buildLog.ts';
 import { collectBuildProcesses, signalBuildProcesses } from './buildProcesses.ts';
 import type { BuildProcess } from './buildProcesses.ts';
@@ -463,7 +463,11 @@ async function observeBuild(
   const target = variant === 'server' ? 'bin/grigdesk-server'
     : variant === 'window' ? 'bin/grigdesk-app'
     : variant === 'deepseek' ? 'bin/deepseek' : 'web/dist';
-  const lines = [t(summary, { path: path.join(root, target) }), t('total', { time: duration(elapsed) })];
+  const resultPath = variant === 'apk'
+    ? path.resolve(root, process.env.GRIGDESK_MOBILE_APK_DIR || dataPath(dataHome(input), 'mobileApk'),
+      'grigdesk-mobile-debug.apk')
+    : path.join(root, target);
+  const lines = [t(summary, { path: resultPath }), t('total', { time: duration(elapsed) })];
 
   if (selectServer) {
     lines.push(t('selectServer', { path: path.join(root, 'bin/grigdesk-server') }));
@@ -473,7 +477,7 @@ async function observeBuild(
     lines.push(t('serverQueued'));
   }
 
-  if (variant !== 'bundle') {
+  if (variant !== 'bundle' && variant !== 'apk') {
     lines.push(t(variant === 'web' ? 'webHint'
       : variant === 'deepseek' ? 'deepseekHint' : selectServer ? 'serverNotSelected' : 'reopen'));
   }
@@ -493,7 +497,7 @@ async function observeBuild(
     full: true,
   };
 
-  if (variant === 'bundle' || variant === 'deepseek') {
+  if (variant === 'bundle' || variant === 'deepseek' || variant === 'apk') {
     showScreen(session, summaryScreen);
 
     return 0;

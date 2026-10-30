@@ -91,7 +91,7 @@ test('CE-4 справка и версия', () => {
 });
 
 test('CE-BUILD: справка перечисляет цели сборки и оба типа серверной установки окна', () => {
-  assert.match(HELP_TEXT, /grigdesk-ctl build \[all\|server\|web\|window\|deepseek\]/);
+  assert.match(HELP_TEXT, /grigdesk-ctl build \[all\|server\|web\|window\|deepseek\|apk\]/);
   assert.match(HELP_TEXT, /grigdesk-ctl desktop use-server <ELF\|R>/);
   assert.match(HELP_TEXT, /по умолчанию|без аргументов/);
 });
@@ -177,7 +177,8 @@ test('CE-11 справка команд разработчика ничего н
     const result = await box.run(argv);
 
     assert.equal(result.code, 0, `${argv.join(' ')}: ${result.stderr}`);
-    assert.match(result.stdout, /grigdesk-ctl build \[all\|server\|web\|window\|deepseek\]/, argv.join(' '));
+    assert.match(result.stdout, /grigdesk-ctl build \[all\|server\|web\|window\|deepseek\|apk\]/,
+      argv.join(' '));
     assert.doesNotMatch(result.stdout + result.stderr, /Сборка web|npm i|уже слушает/, argv.join(' '));
   }
 

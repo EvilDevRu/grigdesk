@@ -28,7 +28,7 @@ async function leaveSuccessfulMenu(session: ReturnType<typeof launchBuild>) {
   assertRestored(result, session.output());
 }
 
-for (const target of ['all', 'server', 'web', 'window', 'deepseek', 'bundle']) {
+for (const target of ['all', 'server', 'web', 'window', 'deepseek', 'apk', 'bundle']) {
   for (const locale of ['ru_RU.UTF-8', 'en_US.UTF-8']) {
     test(`BS-RESULTS/SUMMARY: меню ${target}, ${locale}, шаги, прогресс, полный журнал и итог`, async (t) => {
       const box = await terminalBuildFixture(t);
@@ -62,7 +62,7 @@ for (const target of ['all', 'server', 'web', 'window', 'deepseek', 'bundle']) {
       assert.match(output, locale.startsWith('ru') ? /Журнал/u : /Log/u);
       assert.match(output, locale.startsWith('ru') ? /Сборка/u : /Build/iu);
 
-      if (target !== 'bundle' && target !== 'deepseek') {
+      if (target !== 'bundle' && target !== 'deepseek' && target !== 'apk') {
         assert.match(output, locale.startsWith('ru')
           ? /Открыть окно GrigDesk\?/u : /Open the GrigDesk window\?/u);
       } else {
@@ -103,6 +103,11 @@ for (const target of ['all', 'server', 'web', 'window', 'deepseek', 'bundle']) {
             ? /Поставлен DeepSeek: /u : /Installed DeepSeek: /u);
           assert.match(output, locale.startsWith('ru')
             ? /Новый ELF получит следующий ход DeepSeek/u : /next DeepSeek turn/u);
+        } else if (target === 'apk') {
+          assert.match(output, locale.startsWith('ru') ? /Собран APK: /u : /Built APK: /u);
+          assert.match(visibleLines(output).map((line) => line.trim()).join(''),
+            /grigdesk-mobile-debug\.apk/u);
+          assert.doesNotMatch(output, /Закройте окно|Close.*window/iu);
         } else {
           assert.match(output, locale.startsWith('ru') ? /Закройте окно/iu : /Close.*window/iu);
         }
@@ -115,6 +120,21 @@ for (const target of ['all', 'server', 'web', 'window', 'deepseek', 'bundle']) {
     });
   }
 }
+
+test('BS-APK: явная команда показывает каталог результата и завершается без вопроса об окне', async (t) => {
+  const box = await terminalBuildFixture(t);
+  const directory = path.join(box.env.HOME, 'custom apk directory');
+  const session = launchBuild(t, box, 'apk', false, {
+    env: { ...box.env, GRIGDESK_MOBILE_APK_DIR: directory },
+  });
+  const result = await session.done;
+
+  assert.equal(result.code, 0, session.output());
+  assert.match(session.output(), /Собран APK/u);
+  assert.ok((await buildLog(box)).text.includes(path.join(directory, 'grigdesk-mobile-debug.apk')));
+  assert.doesNotMatch(session.output(), openQuestion);
+  assertRestored(result, session.output());
+});
 
 for (const [command, argument, code] of [
   ['node', 'prepare-runtime', 1],

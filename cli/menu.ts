@@ -44,7 +44,7 @@ function menuItems(source: boolean): MenuItem[] {
     description: `${name}Description`,
     argv: [component, name],
   }));
-  const build = ['all', 'server', 'web', 'window', 'deepseek', 'bundle'].map((variant) => ({
+  const build = ['all', 'server', 'web', 'window', 'deepseek', 'apk', 'bundle'].map((variant) => ({
     label: variant === 'server' ? 'serverOnly' : variant,
     description: `${variant === 'server' ? 'serverOnly' : variant}Description`,
     variant,

@@ -66,8 +66,8 @@ test('build: --help и -h в исходниках не вызывают сбор
   for (const binary of [false, true]) {
     const box = await fixture(t, { binary });
 
-    for (const flag of ['--help', '-h']) {
-      const result = await box.run(['build', 'window', flag]);
+    for (const [target, flag] of [['window', '--help'], ['window', '-h'], ['apk', '--help']]) {
+      const result = await box.run(['build', target, flag]);
 
       assert.equal(result.code, 0, result.stderr);
       assert.match(result.stdout, /СПРАВКА/);
@@ -87,14 +87,18 @@ test('build: deps/mobile/release в исходниках обходят уста
 });
 
 test('build: all по умолчанию и отдельные цели соблюдают точный порядок и argv', async (t) => {
-  for (const target of [undefined, 'all', 'server', 'web', 'window']) {
+  for (const target of [undefined, 'all', 'server', 'web', 'window', 'apk']) {
     const box = await fixture(t);
     const result = await box.run(['build', ...target ? [target] : []]);
 
     assert.equal(result.code, 0, `${target}: ${result.stderr}`);
     assert.deepEqual(await box.calls(), expectedBuildCalls(box, target));
 
-    if (target === 'web') {
+    if (target === 'apk') {
+      assert.ok(result.stdout.includes(path.join(box.env.GRIGDESK_HOME,
+        'state/mobile-apk/grigdesk-mobile-debug.apk')));
+      assert.doesNotMatch(result.stdout, /Закройте окно|use-server/u);
+    } else if (target === 'web') {
       assert.match(result.stdout, /Окно покажет новый веб после grigdesk-ctl build window/);
       assert.doesNotMatch(result.stdout, /Закройте окно/);
     } else if (target === 'server') {
@@ -107,14 +111,31 @@ test('build: all по умолчанию и отдельные цели собл
 });
 
 test('build: неизвестная цель и лишний аргумент дают код 2 до эффектов', async (t) => {
-  for (const tail of [['unknown'], ['--unknown'], [''], ['server', 'web'], ['all', 'extra']]) {
+  for (const tail of [['unknown'], ['--unknown'], [''], ['server', 'web'], ['all', 'extra'],
+    ['apk', 'extra']]) {
     const box = await fixture(t);
     const result = await box.run(['build', ...tail]);
 
     assert.equal(result.code, 2, `${JSON.stringify(tail)}: ${result.stderr}`);
-    assert.match(result.stderr, /build \[all\|server\|web\|window\|deepseek\]/);
+    assert.match(result.stderr, /build \[all\|server\|web\|window\|deepseek\|apk\]/);
     assert.deepEqual(await box.calls(), []);
   }
+});
+
+test('build apk: каталог результата переопределяется, ошибка сборщика сохраняет код', async (t) => {
+  const box = await fixture(t);
+  const directory = path.join(box.env.HOME, 'custom apk directory');
+  const result = await box.run(['build', 'apk'], { GRIGDESK_MOBILE_APK_DIR: directory });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(result.stdout.includes(path.join(directory, 'grigdesk-mobile-debug.apk')));
+  await box.fail('mobile', 'build', 29);
+
+  const failed = await box.run(['build', 'apk']);
+
+  assert.equal(failed.code, 29, failed.stderr);
+  assert.match(failed.stderr, /не удалось: apk/u);
+  assert.doesNotMatch(failed.stdout, /Собран APK|Закройте окно/u);
 });
 
 test('build deepseek: отдельная цель собирает, проверяет и ставит поставку', async (t) => {

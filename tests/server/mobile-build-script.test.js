@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chmod, copyFile, mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
@@ -55,6 +55,7 @@ async function fixture(t) {
     'tools/mobile-client.mts',
     'tools/client-ui.mts',
     'desktop/src/uiRelease.ts',
+    'desktop/src/locale.ts',
     'shared/client/apiVersion.ts',
     'shared/node/hash.ts',
     'shared/runtime/uiRelease.ts',
@@ -68,6 +69,7 @@ async function fixture(t) {
     await copyFile(path.join(root, file), target);
   }
 
+  await cp(path.join(root, 'shared/i18n'), path.join(project, 'shared/i18n'), { recursive: true });
   await mkdir(signing, { recursive: true });
   await mkdir(commands, { recursive: true });
   await mkdir(path.join(dataHome, 'state/mobile-apk'), { recursive: true });

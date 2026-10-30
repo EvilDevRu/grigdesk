@@ -33,8 +33,9 @@ grigdesk-ctl device revoke <id>
 grigdesk-ctl desktop … | b24 … | mobile … | release …
 grigdesk-ctl desktop use-server <ELF|R>  Выбрать серверный ELF или прежний SEA-комплект для окна
 grigdesk-ctl bundle             Собрать переносимую папку release/ и архив из исходников
-grigdesk-ctl build [all|server|web|window|deepseek]
+grigdesk-ctl build [all|server|web|window|deepseek|apk]
                                 Без аргументов: сервер → веб → окно (all по умолчанию)
+                                apk: Android-приложение со встроенным вебом
 grigdesk-ctl dev | deps | run
 grigdesk-ctl --help | -h | help | <группа> --help
 grigdesk-ctl --version
