@@ -55,7 +55,9 @@ export async function startSettingsBrowser(t, responses = {}) {
 
   browser = await chromium.launch({
     headless: true,
-    channel: 'chromium',
+    ...(process.env.CHROME_BIN
+      ? { executablePath: process.env.CHROME_BIN }
+      : { channel: 'chromium' }),
     chromiumSandbox: true,
     args: ['--disable-features=LocalNetworkAccessChecks'],
   });
@@ -64,6 +66,29 @@ export async function startSettingsBrowser(t, responses = {}) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const unexpected = [];
   const errors = [];
+  const knownResponses = {
+    '/api/devices': {
+      listener: {
+        state: 'online',
+        addresses: ['192.0.2.10:8145'],
+      },
+      devices: [],
+      currentDeviceId: null,
+    },
+    '/api/devices/access': {
+      name: 'Тестовый сервер',
+      source: 'env',
+      direct: {
+        enabled: true,
+        state: 'online',
+        addresses: ['192.0.2.10:8145'],
+        error: null,
+      },
+      networks: [{ name: 'lan', address: '192.0.2.10' }],
+      relays: [],
+    },
+    ...responses,
+  };
 
   await context.addInitScript(() => {
     window.addEventListener('unhandledrejection', (event) => {
@@ -78,7 +103,7 @@ export async function startSettingsBrowser(t, responses = {}) {
       return route.continue();
     }
 
-    const response = responses[url.pathname];
+    const response = knownResponses[url.pathname];
 
     if (response !== undefined) {
       const json = typeof response === 'function' ? await response(request) : response;

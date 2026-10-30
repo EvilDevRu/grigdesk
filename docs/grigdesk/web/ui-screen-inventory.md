@@ -1,6 +1,6 @@
 # Карта экранов для визуальной сверки
 
-Источник маршрутов — `web/src/router.ts`: 24 маршрута с компонентами и редирект
+Источник маршрутов — `web/src/router.ts`: 25 неперенаправляющих маршрутов и редиректы
 `/` → `/board` и `/agents` → `/routes`. Это карта точек входа; вкладки, модальные окна и состояние
 выбранного объекта не становятся отдельными маршрутами автоматически.
 
@@ -15,6 +15,7 @@
 | `/chats` | `ChatsView.vue` |
 | `/routes` | `RoutesView.vue` |
 | `/projects/:id?` | `ProjectsView.vue` |
+| `/onboarding` | `OnboardingView.vue` |
 | `/tools` | `ToolsView.vue` |
 | `/code` | `CodeView.vue` |
 | `/shelf` | `ShelfView.vue` |
@@ -33,6 +34,7 @@
 | `/diff` | `DiffView.vue` |
 | `/settings` | `settings/settingsRouteStub.ts`; guard открывает общий модал |
 | `/ext/:id` | `ExtPluginView.vue` |
+| `/surface` | Пустой route adapter; содержимое карточки или инструмента выбирает `App.vue` |
 
 Панели инструментов монтирует `shared/layout/ToolHost.vue`; route-adapter
 не является второй копией панели. Внешний плагин использует
@@ -41,12 +43,14 @@
 
 ## Дополнительные поверхности
 
-`settings/SettingsModal.vue` открывает 23 страницы семи групп через общий `UiDialog`.
+`settings/SettingsModal.vue` открывает 22 страницы семи групп через общий `UiDialog`.
 Дерево и поиск находятся слева; на узком экране навигацию открывает «Разделы».
 Формы используют одну сессию и footer «Отмена / Применить / ОК». Каталог страниц —
 `features/settings/catalog.ts`; [контракт оболочки](settings-modal.md).
 Вход `/settings` сохраняет текущий маршрут, а первая навигация переводится на `/board`
 с отложенным до входа запросом открытия. Отдельного renderer настроек нет.
+Прежний адрес страницы `connections.mobile` выбирает `connections.devices` и не добавляет
+отдельную страницу в каталог. Доступ к ретрансляторам раскрывается на этой странице.
 
 В `App.vue` также находятся `NoAccessView`, общие hosts диалогов, подсказок
 и тостов, `TaskModal`, `DiffModal`, `DocumentModal`. Проверка одних маршрутов

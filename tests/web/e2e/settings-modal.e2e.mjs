@@ -217,7 +217,7 @@ test('UI00: общий модал на изолированном браузер
   }
 
   for (const pageId of [
-    'connections.b24', 'connections.devices', 'connections.mobile',
+    'connections.b24', 'connections.devices',
     'system.startup', 'system.updates', 'system.processes',
   ]) {
     await fixture.page.evaluate((id) => window.settingsFixture.settings.selectPage(id), pageId);
@@ -226,13 +226,9 @@ test('UI00: общий модал на изолированном браузер
       : pageId === 'system.processes' ? '[data-processes-page]' : `[data-system-page="${pageId}"]`;
 
     if (pageId === 'connections.devices') {
-      await fixture.page.locator('[data-settings-devices] .devices-empty').waitFor();
+      await fixture.page.locator('.server-access .devices-empty').waitFor();
     } else {
       await fixture.page.locator(`${root}[data-ready="true"]`).waitFor();
-    }
-
-    if (pageId === 'connections.mobile') {
-      await fixture.page.locator('.mobile-empty').first().waitFor();
     }
 
     for (const [width, height] of [[1280, 800], [390, 844]]) {
@@ -240,6 +236,11 @@ test('UI00: общий модал на изолированном браузер
       await captureSettingsPage(fixture, `${pageId}-${width}.png`);
     }
   }
+
+  await fixture.page.evaluate(() => window.settingsFixture.settings.selectPage('connections.mobile'));
+  assert.equal(await fixture.page.evaluate(() => window.settingsFixture.settings.pageId),
+    'connections.devices');
+  await fixture.page.locator('.server-access .devices-empty').waitFor();
 
   await fixture.page.evaluate(() => window.settingsFixture.settings.selectPage('plugins.installed'));
   await fixture.page.locator('[data-install-git]').click();
@@ -472,6 +473,9 @@ test('UI04/05/06/08: состояния, keyboard-only и viewport при мас
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => window.settingsFixture.settings.selectPage('connections.mobile'));
+  assert.equal(await page.evaluate(() => window.settingsFixture.settings.pageId), 'connections.devices');
+  await page.locator('.server-access .devices-empty').waitFor();
+  await page.locator('.server-access .ui-disclosure-button').click();
   await page.locator('.mobile-empty').first().waitFor();
 
   const add = page.locator('[data-testid=mobile-open-add]');
