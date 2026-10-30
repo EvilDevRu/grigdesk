@@ -1,6 +1,8 @@
 # Чат и исполнители
+
 - [Preflight допуска GLM: условный вопрос о smoke и предупреждение об отложенной установке](glm-admission-preflight.md)
 
+- [Длинный resume GLM: собственный предел RPC 32 МиБ и отмена чтения страницы истории](glm-resume-page-limit.md)
 
 - [Согласование ревизии политики GLM в producer и host](glm-producer-policy-sync.md)
 

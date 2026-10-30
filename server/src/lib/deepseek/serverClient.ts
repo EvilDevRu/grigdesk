@@ -1,7 +1,8 @@
 // Серверный клиент штатного профиля DSH web. Cookie получается только от URL
 // запущенного нами процесса и никогда не выходит за loopback этого запуска.
 import { randomUUID } from 'node:crypto';
-import { readSettingsJson } from '../executorSettings/probe.ts';
+
+const MAX_RPC_RESPONSE_BYTES = 32 * 1024 * 1024;
 
 export class DeepSeekWebError extends Error {
   readonly code: string;
@@ -53,25 +54,76 @@ export class DeepSeekWebClient {
   }
 
   /**
+   * RPC-тело накапливается порциями с собственным пределом 32 МиБ по байтам.
+   * Общий сигнал запроса отменяет и зависший read; при любом исходе reader освобождается.
+   */
+  private async readRpcJson(response: Response, signal: AbortSignal): Promise<unknown> {
+    if (!response.body) {
+      throw new Error('Тело RPC-ответа отсутствует');
+    }
+
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let bytes = 0;
+    const abort = () => {
+      void reader.cancel(signal.reason).catch(() => {});
+    };
+
+    signal.addEventListener('abort', abort, { once: true });
+
+    try {
+      signal.throwIfAborted();
+
+      while (true) {
+        const { value, done } = await reader.read();
+
+        signal.throwIfAborted();
+
+        if (done) {
+          break;
+        }
+
+        bytes += value.byteLength;
+
+        if (bytes > MAX_RPC_RESPONSE_BYTES) {
+          throw new Error('RPC-ответ превысил предел объёма');
+        }
+
+        chunks.push(value);
+      }
+
+      return JSON.parse(new TextDecoder().decode(Buffer.concat(chunks, bytes)));
+    } finally {
+      signal.removeEventListener('abort', abort);
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  }
+
+  /**
    * Ответ сверяется по rpcId и штатному envelope до извлечения результата.
-   * Чтение настроек с AbortSignal также ограничивает размер тела ответа.
+   * Один потоковый читатель ограничивает объём и срок ответа независимо от внешнего signal.
    */
   async rpc(
     method: string, args: Record<string, unknown> = {}, timeoutMs = 30_000, signal?: AbortSignal,
   ): Promise<unknown> {
     const rpcId = randomUUID();
+    const requestSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+      : AbortSignal.timeout(timeoutMs);
     let response: Response;
+
     try {
       response = await fetch(`${this.baseUrl}/api/${method}`, {
         method: 'POST',
         headers: { cookie: this.cookie, 'content-type': 'application/json' },
         body: JSON.stringify({ type: 'client-request', rpcId, method, payload: { args } }),
-        signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
-          : AbortSignal.timeout(timeoutMs),
+        signal: requestSignal,
       });
     } catch (error) {
-      throw new DeepSeekWebError(String((error as Error)?.message || error), 'deepseek_transport_unknown', true);
+      throw new DeepSeekWebError(
+        String((error as Error)?.message || error), 'deepseek_transport_unknown', true,
+      );
     }
     if (!response.ok) {
       throw new DeepSeekWebError(`DeepSeek web HTTP ${response.status}`, 'deepseek_http_error', true);
@@ -79,7 +131,7 @@ export class DeepSeekWebClient {
     let frame: RpcResult;
 
     try {
-      frame = await (signal ? readSettingsJson(response) : response.json()) as RpcResult;
+      frame = await this.readRpcJson(response, requestSignal) as RpcResult;
     } catch {
       throw new DeepSeekWebError('DeepSeek web вернул повреждённый RPC-ответ',
         'deepseek_bad_response', true);
