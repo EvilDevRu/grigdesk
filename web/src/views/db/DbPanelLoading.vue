@@ -3,6 +3,7 @@
     <UiLoadingState style="height: 100%" :label="label" :failed="failed">
       <div class="outline">
         <div class="header"><UiSkeleton width="26%" height="20px" /></div>
+        <div class="navigation"><UiSkeleton width="100%" height="32px" /></div>
         <div class="split">
           <div class="list"><UiSkeletonLayout /></div>
           <div class="body">
@@ -72,69 +73,79 @@ withDefaults(defineProps<{
   overflow: hidden;
 }
 .outline {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
-  padding: 9px 12px 12px;
 }
 .header {
   display: flex;
+  flex: none;
   align-items: center;
-  min-height: 38px;
+  min-height: 36px;
+  padding-inline: 12px;
+  border-bottom: 1px solid var(--line);
 }
+.navigation { display: none; flex: none; padding: 6px 10px; }
 .split {
   display: grid;
-  grid-template-columns: minmax(280px, 326px) minmax(0, 1fr);
-  gap: 10px;
+  flex: 1;
+  grid-template-columns: 288px minmax(0, 1fr);
   min-height: 0;
 }
-.list { padding: 14px; border: 1px solid var(--line); }
-.body { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; overflow: auto; }
+.list { padding: 10px; border-right: 1px solid var(--line); overflow: auto; }
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+}
 .queries {
   display: grid;
   flex: none;
   gap: 8px;
-  min-height: 84px;
-  padding: 9px 10px;
-  border: 1px solid var(--line);
+  min-height: 32px;
+  align-content: center;
 }
+.queries > :last-child { display: none; }
 .console {
   display: flex;
-  flex: 1 0 470px;
+  flex: 1 0 440px;
   flex-direction: column;
-  min-height: 470px;
+  min-height: 440px;
   border: 1px solid var(--line);
 }
 .console-header {
   display: flex;
   flex: none;
   align-items: center;
-  min-height: 44px;
-  padding: 5px 7px;
+  min-height: 40px;
+  padding: 5px 8px;
   border-bottom: 1px solid var(--line);
 }
 .workbench {
   display: grid;
   flex: 1;
-  grid-template-columns: minmax(190px, 250px) minmax(0, 1fr);
-  min-height: 360px;
+  grid-template-columns: 200px minmax(0, 1fr);
+  min-height: 0;
 }
 .schema { min-width: 0; border-right: 1px solid var(--line); }
 .schema-header {
   display: flex;
   align-items: center;
-  min-height: 43px;
-  padding: 6px 8px 6px 10px;
+  min-height: 40px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--line);
 }
 .schema-copy { padding: 9px; }
 .query-console { display: grid; grid-template-rows: auto minmax(180px, 1fr); min-width: 0; }
 .query-editor {
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: 10px;
+  padding: 12px;
   border-bottom: 1px solid var(--line);
 }
 .query-heading { display: grid; gap: 6px; min-height: 40px; align-content: center; }
@@ -145,10 +156,9 @@ withDefaults(defineProps<{
 /* До первой сессии узкая панель открывается списком профилей.
    Порог берётся от ширины панели, как у готового рабочего пространства. */
 @container db-loading (max-width: 940px) {
+  .navigation { display: flex; }
   .split { grid-template-columns: minmax(0, 1fr); }
+  .list { border-right: 0; }
   .body { display: none; }
-}
-@container db-loading (max-width: 660px) {
-  .outline { padding: 7px 8px 10px; gap: 8px; }
 }
 </style>

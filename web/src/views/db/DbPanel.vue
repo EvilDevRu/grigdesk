@@ -1,131 +1,214 @@
 <template>
   <section
-    class="db-panel"
+    class="db-panel ui-workspace"
+    data-ui-workspace
     :class="{
       'is-active': props.active,
       'is-compact': props.compact,
       'is-dock': props.presentation === 'dock',
     }"
-    :data-pane="activeSession ? mobilePane : 'profiles'"
+    :data-pane="showCreate ? 'create' : activeSession || mobilePane === 'activity' ? mobilePane : 'profiles'"
     aria-labelledby="db-panel-title"
     :aria-busy="refreshLoading || undefined"
   >
     <div class="db-panel__surface">
-      <header class="db-panel__header">
-        <div class="db-panel__brand">
-          <span class="db-panel__mark" aria-hidden="true">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <ellipse cx="12" cy="5" rx="8" ry="3" />
-              <path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5" />
-              <path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" />
-            </svg>
-          </span>
-          <div>
+      <div class="db-panel__heading">
+        <UiPaneHeader class="db-panel__header">
+          <template #title>
             <div class="db-panel__title">
               <h2 id="db-panel-title">Базы</h2>
-              <span
-                class="ui-maturity-chip"
-                data-product-maturity="beta"
-                aria-label="Бета-версия"
-              >
+              <span class="ui-maturity-chip" data-product-maturity="beta" aria-label="Бета-версия">
                 бета
               </span>
             </div>
-            <small>Сессии и запросы под контролем человека</small>
-          </div>
-        </div>
-
-        <div class="db-panel__summary" aria-label="Сводка по базам">
-          <span class="db-summary-item" :class="{ active: store.sessions?.length }">
-            <i aria-hidden="true"></i>
-            {{ store.sessions?.length || 0 }} сесс.
-          </span>
-          <span class="db-summary-item">
-            {{ store.profiles?.length || 0 }} проф.
-          </span>
-          <span v-if="activeQueryCount" class="db-summary-item is-running">
-            {{ activeQueryCount }} выполняется
-          </span>
-        </div>
-
-        <UiIconButton
-          class="db-refresh"
-          role="embedded"
-          label="Обновить базы"
-          v-tooltip="'Обновить'"
-          :loading="refreshLoading"
-          loading-label="Обновляю"
-          @click="refresh"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            width="16"
-            height="16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M20 7v5h-5 M4 17v-5h5" />
-            <path d="M6.1 9a7 7 0 0 1 11.6-2.3L20 9 M4 15l2.3 2.3A7 7 0 0 0 17.9 15" />
-          </svg>
-        </UiIconButton>
-      </header>
+          </template>
+          <template #meta>
+            <span class="db-panel__summary" aria-label="Сводка по базам">
+              {{ t('core.dbDesignSummary', {
+                profiles: store.profiles?.length || 0,
+                sessions: store.sessions?.length || 0,
+              }) }}
+            </span>
+            <span v-if="activeQueryCount" class="db-running-label">
+              {{ t('core.dbDesignRunning', { count: activeQueryCount }) }}
+            </span>
+          </template>
+          <template #actions>
+            <UiButton tone="accent" data-context="workspace-toolbar"
+                      :aria-expanded="showCreate" aria-controls="db-create" @click="toggleCreate">
+              {{ showCreate ? t('core.dbDesignHideForm') : t('core.dbDesignAddProfile') }}
+            </UiButton>
+            <UiIconButton class="db-refresh" role="embedded" data-context="workspace-toolbar"
+                          label="Обновить базы" v-tooltip="'Обновить'" :loading="refreshLoading"
+                          loading-label="Обновляю" @click="refresh">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                   stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M20 7v5h-5 M4 17v-5h5" />
+                <path d="M6.1 9a7 7 0 0 1 11.6-2.3L20 9 M4 15l2.3 2.3A7 7 0 0 0 17.9 15" />
+              </svg>
+            </UiIconButton>
+          </template>
+        </UiPaneHeader>
+      </div>
 
       <div class="db-panel__body">
-        <UiTabs v-if="activeSession" v-model="mobilePane" class="db-pane-nav" data-ui-workspace-tabs label="Рабочая область базы">
-          <UiTab value="query" controls="db-workbench">Запрос</UiTab>
-          <UiTab value="result" controls="db-workbench">Результат</UiTab>
-          <UiTab value="schema" controls="db-workbench">Схема</UiTab>
-          <UiTab value="profiles" controls="db-profiles-pane">Профили</UiTab>
-          <UiTab value="activity" controls="db-queries-pane">Запросы · {{ store.queries?.length || 0 }}</UiTab>
-        </UiTabs>
+        <div v-show="!showCreate" class="db-panel__navigation">
+          <UiTabs v-model="mobileWorkspace" data-ui-workspace-tabs label="Рабочая область базы">
+            <UiTab value="profiles" controls="db-profiles-pane">
+              Профили · {{ store.profiles?.length || 0 }}
+            </UiTab>
+            <UiTab value="console" controls="db-session-panel" :disabled="!activeSession">Консоль</UiTab>
+            <UiTab value="activity" controls="db-queries-pane">Запросы · {{ store.queries?.length || 0 }}</UiTab>
+          </UiTabs>
+        </div>
         <UiInlineMessage v-if="visibleError" tone="danger">
           {{ visibleError }}
         </UiInlineMessage>
 
         <div class="db-layout">
-          <div class="db-workspace">
-            <section
-              class="db-live-queries"
+          <div id="db-workspace-pane" class="db-workspace">
+            <section v-show="showCreate" id="db-create" class="db-create ui-workspace-section"
+                     aria-labelledby="db-create-title">
+              <UiPaneHeader>
+                <template #title><h3 id="db-create-title">{{ t('core.dbDesignNewProfile') }}</h3></template>
+                <template #actions>
+                  <UiButton data-context="workspace-toolbar" @click="toggleCreate">
+                    {{ t('core.dbDesignCancel') }}
+                  </UiButton>
+                </template>
+              </UiPaneHeader>
+              <form class="db-profile-form" @submit.prevent="saveProfile">
+                <UiField label="Проект" required>
+                  <UiSelect
+                    v-model="draft.projectId"
+                    required
+                    :disabled="!projectOptions.length"
+                    aria-label="Проект"
+                    data-db-project-select
+                  >
+                    <option value="" disabled>{{ projectPlaceholder }}</option>
+                    <option v-for="project in projectOptions" :key="project.id" :value="project.id">
+                      {{ project.id }}
+                    </option>
+                  </UiSelect>
+                </UiField>
+
+                <UiField label="Метка" required>
+                  <UiInput
+                    v-model.trim="draft.label"
+                    required
+                    placeholder="Например, аналитика"
+                    aria-label="Метка профиля"
+                  />
+                </UiField>
+
+                <UiField label="Движок" required>
+                  <UiSelect v-model="draft.engine" required aria-label="Движок базы">
+                    <option value="" disabled>Выберите движок</option>
+                    <option v-for="engine in store.engines" :key="engine.id" :value="engine.id">
+                      {{ engine.label }}
+                    </option>
+                  </UiSelect>
+                </UiField>
+
+                <UiField label="Роль">
+                  <UiSelect v-model="draft.role" aria-label="Роль профиля">
+                    <option value="read">Только чтение</option>
+                    <option value="write">Чтение и запись</option>
+                  </UiSelect>
+                </UiField>
+
+                <UiField label="Адрес" required>
+                  <UiInput
+                    v-model.trim="draft.host"
+                    required
+                    placeholder="db.internal"
+                    aria-label="Адрес базы"
+                  />
+                </UiField>
+
+                <UiField label="Порт" required>
+                  <UiNumberInput
+                    v-model="draft.port"
+                    :min="1"
+                    :max="65535"
+                    required
+                    placeholder="3306"
+                    aria-label="Порт базы"
+                  />
+                </UiField>
+
+                <UiField label="Пользователь" required>
+                  <UiInput
+                    v-model.trim="draft.user"
+                    required
+                    autocomplete="username"
+                    placeholder="reader"
+                    aria-label="Пользователь базы"
+                  />
+                </UiField>
+
+                <UiField label="База / номер">
+                  <UiInput
+                    v-model.trim="draft.database"
+                    placeholder="Необязательно"
+                    aria-label="Имя или номер базы"
+                  />
+                </UiField>
+
+                <UiField label="Маршрут">
+                  <UiSelect v-model="draft.via" aria-label="Маршрут подключения">
+                    <option value="direct">Напрямую</option>
+                    <option value="ssh">Через открытую SSH-сессию</option>
+                  </UiSelect>
+                </UiField>
+
+                <div class="db-profile-form__environment">
+                  <UiSwitch v-model="draft.prod">Прод-среда</UiSwitch>
+                </div>
+
+                <UiInlineMessage v-if="store.projectsError" tone="danger">
+                  {{ store.projectsError }}
+                </UiInlineMessage>
+
+                <UiFormActions class="db-profile-form__actions">
+                  <UiButton
+                    type="submit"
+                    variant="solid"
+                    tone="accent"
+                    :loading="savingProfile"
+                    loading-label="Сохраняю профиль"
+                    :disabled="!profileDraftValid"
+                  >
+                    Сохранить профиль
+                  </UiButton>
+                </UiFormActions>
+              </form>
+            </section>
+
+            <details
+              v-show="!showCreate"
+              class="db-live-queries ui-workspace-disclosure"
+              data-context="workspace-inline"
+              :open="activeQueryCount > 0 || mobilePane === 'activity'"
               :class="{ 'has-active': activeQueryCount }"
               id="db-queries-pane"
               data-db-queries
               aria-label="Живая лента запросов"
             >
-              <header class="db-live-queries__heading">
-                <span class="db-live-queries__icon" aria-hidden="true">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.8"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  >
-                    <path d="M4 18V9 M10 18V5 M16 18v-7 M22 18V3" />
-                  </svg>
+              <summary>
+                <span>Живая лента запросов</span>
+                <span class="db-live-queries__status">
+                  <span class="db-activity-label">
+                    {{ activeQueryCount
+                      ? t('core.dbDesignRunning', { count: activeQueryCount })
+                      : t('core.dbDesignNoActiveQueries') }}
+                  </span>
+                  <span class="db-count" :class="{ 'is-running': activeQueryCount }">
+                    {{ store.queries?.length || 0 }}
+                  </span>
                 </span>
-                <div>
-                  <h3>Живая лента запросов</h3>
-                  <small v-if="store.queries?.length">
-                    Человек и агенты в открытых сессиях
-                  </small>
-                  <small v-else>Активных запросов нет</small>
-                </div>
-                <span class="db-count" :class="{ 'is-running': activeQueryCount }">
-                  {{ store.queries?.length || 0 }}
-                </span>
-              </header>
+              </summary>
 
               <div v-if="store.queries?.length" class="db-query-list">
                 <article
@@ -170,17 +253,14 @@
                 Новые запросы появятся здесь во время выполнения.
               </div>
 
-              <UiInlineMessage
-                v-if="store.cancelNotice"
-                class="db-cancel-notice"
-                tone="warning"
-                data-db-cancel-notice
-              >
-                {{ store.cancelNotice }}
-              </UiInlineMessage>
-            </section>
+            </details>
+
+            <UiInlineMessage v-if="!showCreate && store.cancelNotice" tone="warning" data-db-cancel-notice>
+              {{ store.cancelNotice }}
+            </UiInlineMessage>
 
             <section
+              v-show="!showCreate"
               id="db-session-panel"
               class="db-console"
               :class="{ 'has-session': activeSession }"
@@ -197,6 +277,7 @@
                       :key="session.id"
                       class="db-tab"
                       :value="session.id"
+                      :aria-label="sessionTabTitle(session)"
                       controls="db-workbench"
                       v-tooltip="sessionTabTitle(session)"
                     >
@@ -239,6 +320,14 @@
                   </span>
                 </div>
               </header>
+
+              <div v-if="activeSession" class="db-console__navigation">
+                <UiTabs v-model="mobilePane" data-ui-workspace-tabs label="Рабочая область базы">
+                  <UiTab value="query" controls="db-workbench">Запрос</UiTab>
+                  <UiTab value="result" controls="db-workbench">Результат</UiTab>
+                  <UiTab value="schema" controls="db-workbench">Схема</UiTab>
+                </UiTabs>
+              </div>
 
               <div
                 id="db-workbench"
@@ -453,7 +542,8 @@
               </footer>
             </section>
 
-            <details class="db-audit" data-db-audit>
+            <details v-show="!showCreate" class="db-audit ui-workspace-disclosure"
+                     data-context="workspace-inline" data-db-audit>
               <summary>
                 <span>
                   <svg
@@ -492,244 +582,115 @@
           </div>
 
           <aside id="db-profiles-pane" class="db-profiles" data-db-profiles aria-label="Профили баз данных">
-            <header class="db-section-heading">
-              <div>
-                <h3>Профили</h3>
-                <small>Пароль только для одного входа</small>
-              </div>
-              <span class="db-count">{{ store.profiles?.length || 0 }}</span>
-            </header>
-
-            <UiLoadingState v-if="refreshLoading && !store.profiles?.length && !store.error" >
-              <UiSkeletonLayout layout="list" :header="false" />
-            </UiLoadingState>
-            <div v-else-if="store.profiles?.length" class="db-profile-list">
-              <article
-                v-for="profile in store.profiles"
-                :key="profile.id"
-                class="db-profile"
-                :class="{
-                  'is-connected': profileSessionCount(profile.id),
-                  'is-current': profileIsCurrent(profile.id),
-                  'is-selected': profile.id === selectedProfileId,
-                  'is-prod': profile.prod,
-                }"
-                data-db-profile-card
-              >
-                <div class="db-profile-choice-wrap">
-                  <UiRadio
-                    v-model="selectedProfileId"
-                    class="db-profile-choice"
-                    name="db-profile"
-                    :value="profile.id"
-                  >
-                    <span class="db-profile-choice__content">
-                      <span class="db-profile-choice__title">
-                        <strong>{{ profile.label }}</strong>
-                        <span
-                          v-if="profileSessionCount(profile.id)"
-                          class="db-live-badge"
-                        >
-                          <i aria-hidden="true"></i>
-                          {{ profileSessionCount(profile.id) }} сесс.
-                        </span>
-                      </span>
-                      <code>{{ profile.host }}:{{ profile.port }}</code>
-                      <span class="db-profile-choice__meta">
-                        <span>{{ engineLabel(profile.engine) }} · {{ roleLabel(profile.role) }}</span>
-                        <span class="db-profile-choice__badges">
-                          <span v-if="profile.via === 'ssh'" class="db-via-badge">SSH</span>
-                          <span v-if="profile.prod" class="db-prod-badge">прод</span>
-                          <span class="db-project-badge">{{ profile.projectId }}</span>
-                        </span>
+            <UiPaneHeader class="db-catalog-heading">
+              <template #title><h3>Профили</h3></template>
+              <template #meta>{{ store.profiles?.length || 0 }}</template>
+            </UiPaneHeader>
+            <div class="db-catalog-search">
+              <UiSearchInput v-model="search" :placeholder="t('core.dbDesignSearchPlaceholder')"
+                             :aria-label="t('core.dbDesignSearchLabel')" />
+            </div>
+            <div class="db-profiles__body">
+              <UiLoadingState v-if="refreshLoading && !store.profiles?.length && !store.error">
+                <UiSkeletonLayout layout="list" :header="false" />
+              </UiLoadingState>
+              <div v-else-if="store.profiles?.length" class="db-profile-list">
+                <section v-for="group in profileGroups" :key="group.projectId" class="db-profile-group">
+                  <h4 class="db-profile-group__heading">
+                    <span>{{ group.projectId }}</span>
+                    <span>{{ group.profiles.length }}</span>
+                  </h4>
+                  <UiButton v-for="profile in group.profiles" :key="profile.id"
+                            class="db-profile" variant="ghost" data-context="workspace-catalog-row"
+                            data-db-profile-card :data-profile-id="profile.id"
+                            :pressed="selectedProfileId === profile.id"
+                            :disabled="Boolean(openingProfileId)" @click="selectProfile(profile.id)">
+                    <span class="db-profile__heading">
+                      <strong>{{ profile.label }}</strong>
+                      <span v-if="profile.prod" class="db-prod-badge">прод</span>
+                      <span v-if="profileSessionCount(profile.id)" class="db-live-badge"
+                            :aria-label="t('core.dbDesignSessionCount', {
+                              count: profileSessionCount(profile.id),
+                            })">
+                        <i aria-hidden="true"></i>{{ profileSessionCount(profile.id) }}
                       </span>
                     </span>
-                  </UiRadio>
-                </div>
-
-                <form
-                  v-if="profile.id === selectedProfileId"
-                  class="db-connect-form"
-                  @submit.prevent="openSession"
-                >
-                  <UiField label="Пароль на один вход">
-                    <UiPasswordInput
-                      v-model="password"
-                      autocomplete="current-password"
-                      :aria-label="`Пароль для ${profile.label}`"
-                      placeholder="Пароль"
-                      :disabled="Boolean(openingProfileId && openingProfileId !== profile.id)"
-                    />
-                  </UiField>
-
-                  <UiField
-                    v-if="selectedProfile?.via === 'ssh'"
-                    label="SSH-сессия"
-                    :hint="sshSessionHint"
-                  >
-                    <UiSelect v-model="sshSessionId" data-db-ssh-session>
-                      <option value="">Выберите SSH-сессию</option>
-                      <option
-                        v-for="session in availableSshSessions"
-                        :key="session.id"
-                        :value="session.id"
-                      >
-                        {{ session.label || session.id }}
-                      </option>
-                    </UiSelect>
-                  </UiField>
-
-                  <UiButton
-                    type="submit"
-                    block
-                    variant="solid"
-                    tone="accent"
-                    :loading="openingProfileId === profile.id"
-                    loading-label="Открываю сессию"
-                    :disabled="!password
-                      || (selectedProfile?.via === 'ssh' && !sshSessionId)"
-                  >
-                    Открыть сессию
+                    <code class="db-profile__address">{{ profile.host }}:{{ profile.port }}</code>
+                    <span class="db-profile__meta">
+                      {{ engineLabel(profile.engine) }} · {{ roleLabel(profile.role) }}
+                      <span v-if="profile.via === 'ssh'" class="db-via-badge">SSH</span>
+                    </span>
                   </UiButton>
-                </form>
-              </article>
-            </div>
-
-            <div v-else class="db-profiles__empty" role="status">
-              <span aria-hidden="true">＋</span>
-              <strong>Профилей пока нет</strong>
-              <small>Добавьте подключение к базе ниже.</small>
-            </div>
-
-            <details class="db-add-profile" :open="!store.profiles?.length">
-              <summary>
-                <span class="db-disclosure-icon" aria-hidden="true">＋</span>
-                <span>Добавить профиль</span>
-              </summary>
-
-              <form class="db-profile-form" @submit.prevent="saveProfile">
-                <UiField label="Проект" required>
-                  <UiSelect
-                    v-model="draft.projectId"
-                    required
-                    :disabled="!projectOptions.length"
-                    aria-label="Проект"
-                    data-db-project-select
-                  >
-                    <option value="" disabled>{{ projectPlaceholder }}</option>
-                    <option v-for="project in projectOptions" :key="project.id" :value="project.id">
-                      {{ project.id }}
-                    </option>
-                  </UiSelect>
-                </UiField>
-
-                <UiField label="Метка" required>
-                  <UiInput
-                    v-model.trim="draft.label"
-                    required
-                    placeholder="Например, аналитика"
-                    aria-label="Метка профиля"
-                  />
-                </UiField>
-
-                <UiField label="Движок" required>
-                  <UiSelect v-model="draft.engine" required aria-label="Движок базы">
-                    <option value="" disabled>Выберите движок</option>
-                    <option v-for="engine in store.engines" :key="engine.id" :value="engine.id">
-                      {{ engine.label }}
-                    </option>
-                  </UiSelect>
-                </UiField>
-
-                <UiField label="Роль">
-                  <UiSelect v-model="draft.role" aria-label="Роль профиля">
-                    <option value="read">Только чтение</option>
-                    <option value="write">Чтение и запись</option>
-                  </UiSelect>
-                </UiField>
-
-                <UiField label="Адрес" required>
-                  <UiInput
-                    v-model.trim="draft.host"
-                    required
-                    placeholder="db.internal"
-                    aria-label="Адрес базы"
-                  />
-                </UiField>
-
-                <UiField label="Порт" required>
-                  <UiNumberInput
-                    v-model="draft.port"
-                    :min="1"
-                    :max="65535"
-                    required
-                    placeholder="3306"
-                    aria-label="Порт базы"
-                  />
-                </UiField>
-
-                <UiField label="Пользователь" required>
-                  <UiInput
-                    v-model.trim="draft.user"
-                    required
-                    autocomplete="username"
-                    placeholder="reader"
-                    aria-label="Пользователь базы"
-                  />
-                </UiField>
-
-                <UiField label="База / номер">
-                  <UiInput
-                    v-model.trim="draft.database"
-                    placeholder="Необязательно"
-                    aria-label="Имя или номер базы"
-                  />
-                </UiField>
-
-                <UiField label="Маршрут">
-                  <UiSelect v-model="draft.via" aria-label="Маршрут подключения">
-                    <option value="direct">Напрямую</option>
-                    <option value="ssh">Через открытую SSH-сессию</option>
-                  </UiSelect>
-                </UiField>
-
-                <div class="db-profile-form__environment">
-                  <UiSwitch v-model="draft.prod">Прод-среда</UiSwitch>
-                </div>
-
-                <UiInlineMessage v-if="store.projectsError" tone="danger">
-                  {{ store.projectsError }}
-                </UiInlineMessage>
-
-                <UiFormActions class="db-profile-form__actions">
-                  <UiButton
-                    type="submit"
-                    variant="solid"
-                    tone="accent"
-                    :loading="savingProfile"
-                    loading-label="Сохраняю профиль"
-                    :disabled="!profileDraftValid"
-                  >
-                    Сохранить профиль
+                </section>
+                <div v-if="!profileGroups.length" class="db-catalog-empty" role="status">
+                  <strong>{{ t('core.dbDesignNoMatches') }}</strong>
+                  <span>{{ t('core.dbDesignChangeSearch') }}</span>
+                  <UiButton variant="text" size="compact" @click="search = ''">
+                    {{ t('core.dbDesignClearSearch') }}
                   </UiButton>
-                </UiFormActions>
-              </form>
-            </details>
-
-            <p class="db-secret-note">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="m5 12 4 4L19 6" />
-              </svg>
-              Пароль не сохраняется и передаётся только при ручном входе.
-            </p>
+                </div>
+              </div>
+              <div v-else-if="!store.error" class="db-profiles__empty db-catalog-empty" role="status">
+                <strong>Профилей пока нет</strong>
+                <span>{{ t('core.dbDesignEmptyHint') }}</span>
+                <UiButton tone="accent" @click="toggleCreate">{{ t('core.dbDesignAddProfile') }}</UiButton>
+              </div>
+              <div v-if="selectedProfile" class="db-profiles__footer">
+                <section class="db-selected" :aria-label="t('core.dbDesignSelectedProfile')">
+                  <p class="db-selected__project">{{ selectedProfile.projectId }}</p>
+                  <div class="db-selected__heading">
+                    <strong>{{ selectedProfile.label }}</strong>
+                    <span v-if="selectedProfile.prod" class="db-prod-badge">прод</span>
+                  </div>
+                  <code class="db-selected__address">
+                    {{ selectedProfile.user }}@{{ selectedProfile.host }}:{{ selectedProfile.port }}
+                  </code>
+                  <span class="db-selected__meta">
+                    {{ engineLabel(selectedProfile.engine) }} · {{ roleLabel(selectedProfile.role) }}
+                    <span v-if="selectedProfile.database"> · {{ selectedProfile.database }}</span>
+                  </span>
+                  <div v-if="profileSessionCount(selectedProfile.id)" class="db-selected__actions">
+                    <UiButton tone="accent" data-context="workspace-form"
+                              @click="openProfileSession(selectedProfile.id)">
+                      {{ t('core.dbDesignOpenConsole') }}
+                    </UiButton>
+                    <UiButton variant="text" data-context="workspace-form"
+                              :aria-expanded="showNewLogin" aria-controls="db-login"
+                              @click="showNewLogin = !showNewLogin">
+                      {{ showNewLogin ? t('core.dbDesignHideLogin') : t('core.dbDesignNewSession') }}
+                    </UiButton>
+                  </div>
+                  <form v-if="!profileSessionCount(selectedProfile.id) || showNewLogin"
+                        id="db-login" class="db-connect-form" @submit.prevent="openSession">
+                    <UiField label="Пароль на один вход">
+                      <UiPasswordInput ref="passwordInput" v-model="password" autocomplete="current-password"
+                                       :aria-label="`Пароль для ${selectedProfile.label}`"
+                                       placeholder="Пароль" :disabled="Boolean(openingProfileId)" />
+                    </UiField>
+                    <UiField v-if="selectedProfile.via === 'ssh'" label="SSH-сессия" :hint="sshSessionHint">
+                      <UiSelect v-model="sshSessionId" data-db-ssh-session :disabled="Boolean(openingProfileId)">
+                        <option value="">Выберите SSH-сессию</option>
+                        <option v-for="session in availableSshSessions" :key="session.id" :value="session.id">
+                          {{ session.label || session.id }}
+                        </option>
+                      </UiSelect>
+                    </UiField>
+                    <UiButton type="submit" block variant="solid" tone="accent" data-context="workspace-form"
+                              :loading="openingProfileId === selectedProfile.id" loading-label="Открываю сессию"
+                              :disabled="!password || (selectedProfile.via === 'ssh' && !sshSessionId)">
+                      Открыть сессию
+                    </UiButton>
+                  </form>
+                </section>
+                <p class="db-secret-note">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m5 12 4 4L19 6" />
+                  </svg>
+                  Пароль не сохраняется и передаётся только при ручном входе.
+                </p>
+              </div>
+            </div>
           </aside>
         </div>
       </div>
@@ -738,10 +699,8 @@
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout } from '../../ui';
-
 import { toolWindowText } from '../../shared/tools/toolWindowMessages.ts';
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 
 import {
@@ -753,13 +712,16 @@ import {
   UiInput,
   UiNumberInput,
   UiPasswordInput,
-  UiRadio,
+  UiPaneHeader,
+  UiSearchInput,
+  UiSkeletonLayout,
   UiSelect,
   UiSwitch,
   UiTab,
   UiTabs,
   UiTextarea,
   alertDialog,
+  t,
   vTooltip,
   UiLoadingState,
 } from '../../ui';
@@ -801,12 +763,16 @@ const store = useDbStore();
 
 watchDb();
 
+const search = ref('');
+const showCreate = ref(false);
+const showNewLogin = ref(false);
+const passwordInput = ref<InstanceType<typeof UiPasswordInput> | null>(null);
 const selectedProfileId = ref('');
 const selectedSessionId = ref('');
 const sshSessionId = ref('');
 const password = ref('');
 const query = ref('');
-const mobilePane = ref('query');
+const mobilePane = ref('profiles');
 const resultQueryIds = reactive<Record<string, string>>({});
 const fallbackResults = reactive<Record<string, DbResult | null>>({});
 const localError = ref('');
@@ -832,10 +798,37 @@ const draft = reactive({
 
 const visibleError = computed(() => localError.value || store.error || '');
 
+const mobileWorkspace = computed({
+  get: () => ['profiles', 'activity'].includes(mobilePane.value) ? mobilePane.value : 'console',
+  set: (value: string) => {
+    mobilePane.value = value === 'console' ? 'query' : value;
+  },
+});
+
 const refreshLoading = computed(() => store.loading || store.projectsLoading);
 const selectedProfile = computed(() => (
   (store.profiles || []).find((profile) => profile.id === selectedProfileId.value) || null
 ));
+const profileGroups = computed(() => {
+  const needle = search.value.trim().toLocaleLowerCase();
+  const groups = new Map<string, typeof store.profiles>();
+
+  for (const profile of store.profiles || []) {
+    const text = [profile.projectId, profile.label, profile.host, profile.port, profile.user,
+      profile.database, engineLabel(profile.engine), roleLabel(profile.role), profile.via].join(' ');
+
+    if (needle && !text.toLocaleLowerCase().includes(needle)) {
+      continue;
+    }
+
+    const profiles = groups.get(profile.projectId) || [];
+
+    profiles.push(profile);
+    groups.set(profile.projectId, profiles);
+  }
+
+  return [...groups].map(([projectId, profiles]) => ({ projectId, profiles }));
+});
 const activeSession = computed(() => (
   (store.sessions || []).find((session) => session.id === selectedSessionId.value) || null
 ));
@@ -1050,8 +1043,40 @@ function profileSessionCount(profileId: string): number {
   return profileSessions(profileId).length;
 }
 
-function profileIsCurrent(profileId: string): boolean {
-  return activeSession.value?.profileId === profileId;
+/**
+ * Форма добавления занимает рабочую область, но не пересоздаёт консоль и её запрос.
+ * При закрытии черновик остаётся доступным для следующего открытия.
+ */
+function toggleCreate(): void {
+  showCreate.value = !showCreate.value;
+}
+
+/**
+ * Выбор подключённого профиля возвращает его живую сессию без нового входа.
+ * Фильтр каталога не участвует в выборе и не сбрасывает одноразовый пароль.
+ */
+function selectProfile(profileId: string): void {
+  selectedProfileId.value = profileId;
+  showCreate.value = false;
+
+  if (profileSessionCount(profileId)) {
+    openProfileSession(profileId);
+  }
+}
+
+/**
+ * Возвращаемся в текущую сессию профиля либо первую доступную, сохраняя её результат.
+ * На узком экране переход сразу показывает консоль вместо каталога.
+ */
+function openProfileSession(profileId: string): void {
+  const sessions = profileSessions(profileId);
+  const session = sessions.find((item) => item.id === selectedSessionId.value) || sessions[0];
+
+  if (session) {
+    selectedSessionId.value = session.id;
+    mobilePane.value = 'query';
+    showCreate.value = false;
+  }
 }
 
 function querySessionOpen(item: DbQuery | null | undefined): boolean {
@@ -1119,7 +1144,10 @@ function reconcileSelections(): void {
   }
 }
 
-/** Обновляются обе независимые части панели, а текущий выбор сверяется после ответов. */
+/**
+ * Перечитываем каталог и проекты независимо друг от друга.
+ * После ответов сохраняем выбор только среди существующих профилей и сессий.
+ */
 async function refresh(): Promise<void> {
   localError.value = '';
   await Promise.all([loadDb(), loadDbProjects()]);
@@ -1152,6 +1180,7 @@ async function openSession(): Promise<void> {
     if (session.id) {
       selectedSessionId.value = session.id;
       mobilePane.value = 'query';
+      showNewLogin.value = false;
     }
   } catch (error) {
     localError.value = errorMessage(error, 'Не удалось открыть сессию базы');
@@ -1314,6 +1343,10 @@ async function saveProfile(): Promise<void> {
     if (saved?.id) {
       selectedProfileId.value = saved.id;
     }
+
+    search.value = '';
+    showCreate.value = false;
+    mobilePane.value = 'profiles';
   } catch (error) {
     await alertDialog(errorMessage(error, 'Не удалось сохранить профиль'), { title: 'Базы' });
   } finally {
@@ -1324,6 +1357,7 @@ async function saveProfile(): Promise<void> {
 watch(selectedProfileId, async () => {
   password.value = '';
   sshSessionId.value = '';
+  showNewLogin.value = false;
 
   if (selectedProfile.value?.via === 'ssh') {
     try {
@@ -1334,9 +1368,22 @@ watch(selectedProfileId, async () => {
   }
 });
 
+watch(showNewLogin, async (visible) => {
+  if (visible) {
+    await nextTick();
+    passwordInput.value?.focus();
+  } else {
+    password.value = '';
+  }
+});
+
 watch(selectedSessionId, (sessionId, previousId) => {
   if (sessionId && sessionId !== previousId) {
     void loadSchema();
+
+    if (!previousId) {
+      mobilePane.value = 'query';
+    }
   }
 });
 
@@ -1384,7 +1431,7 @@ onMounted(refresh);
 <style scoped>
 .db-panel {
   box-sizing: border-box;
-  container-type: inline-size;
+  container: db-panel / inline-size;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -1394,174 +1441,283 @@ onMounted(refresh);
 }
 
 .db-panel__surface {
-  box-sizing: border-box;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 10px;
-  width: 100%;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-width: 0;
   min-height: 0;
-  padding: 9px 12px 12px;
-  overflow: hidden;
 }
 
-.db-panel__body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.db-panel__heading {
+  flex: none;
   min-width: 0;
-  min-height: 0;
+  background: var(--topbar);
 }
 
-.db-panel__header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-  min-height: 38px;
-}
-
-.db-panel.is-compact.is-dock .db-panel__header {
+.db-panel.is-compact.is-dock .db-panel__heading {
   padding-right: var(--tool-dock-actions-space, 82px);
 }
 
-.db-panel__brand,
 .db-panel__title,
-.db-panel__summary,
-.db-summary-item,
-.db-live-queries__heading,
-.db-query-row,
-.db-query-row__meta,
-.db-query-row__actions,
+.db-live-queries__status,
+.db-profile__heading,
+.db-profile__meta,
+.db-selected__heading,
+.db-selected__actions,
 .db-console__header,
 .db-console__context,
 .db-live-label,
+.db-live-badge,
 .db-subsection-heading,
 .db-query-editor > header,
 .db-query-editor__actions,
 .db-result-stage__header,
 .db-result-stage__header > div,
-.db-result-state,
 .db-session-endpoint,
 .db-agent-access,
-.db-section-heading,
-.db-profile-choice__title,
-.db-profile-choice__meta,
-.db-profile-choice__badges,
-.db-live-badge,
-.db-audit > summary,
-.db-audit > summary > span,
 .db-audit article header {
   display: flex;
   align-items: center;
-}
-
-.db-panel__brand {
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
 .db-panel__title {
   gap: 6px;
-  min-width: 0;
 }
 
-.db-panel__brand h2,
+.db-panel__summary,
+.db-activity-label {
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.db-running-label {
+  color: var(--warn);
+  font-size: 11px;
+}
+
 .db-panel h3 {
   margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
 }
 
-.db-panel__brand h2 {
-  font-size: 15px;
-  line-height: 1.15;
-  letter-spacing: 0.015em;
-}
-
-.db-panel__brand small,
-.db-section-heading small,
-.db-subsection-heading small,
-.db-query-editor header small,
-.db-session-endpoint small,
-.db-agent-access small {
-  display: block;
-  margin-top: 2px;
-  color: var(--ink-mid);
-  font-size: 11px;
-}
-
-.db-panel__mark,
-.db-database-icon {
-  display: grid;
-  flex: none;
-  place-items: center;
-  color: var(--accent);
-}
-
-.db-panel__mark {
-  width: 32px;
-  height: 32px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--accent) 9%, var(--ground));
-}
-
-.db-panel__mark svg {
-  width: 17px;
-  height: 17px;
-}
-
-.db-panel__summary {
-  justify-content: flex-end;
-  gap: 6px;
+.db-panel__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   min-width: 0;
-  overflow: hidden;
+  min-height: 0;
 }
 
-.db-summary-item {
+.db-panel__navigation,
+.db-console__navigation {
+  display: none;
   flex: none;
-  gap: 6px;
-  min-height: 25px;
-  padding: 0 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 62%, transparent);
-  color: var(--ink-mid);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.db-summary-item i,
-.db-live-badge i,
-.db-live-label i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--idle);
-}
-
-.db-summary-item.active i,
-.db-live-badge i,
-.db-live-label i {
-  background: var(--good);
-  box-shadow: 0 0 7px color-mix(in srgb, var(--good) 62%, transparent);
-}
-
-.db-summary-item.is-running {
-  border-color: color-mix(in srgb, var(--warn) 40%, var(--line));
-  background: color-mix(in srgb, var(--warn) 8%, var(--surface));
-  color: var(--warn);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
 }
 
 .db-layout {
   display: grid;
   flex: 1;
-  grid-template-columns: minmax(280px, 326px) minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 288px minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
+}
+
+.db-profiles {
+  display: flex;
+  flex-direction: column;
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  background: var(--sidebar);
+}
+
+.db-catalog-search {
+  flex: none;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.db-profiles__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 10px;
+  overflow: auto;
+}
+
+.db-profile-list {
+  padding-block: 4px 8px;
+}
+
+.db-profile-group__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 10px 5px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.db-profile-group__heading > span:first-child,
+.db-profile__heading strong,
+.db-selected__heading strong,
+.db-selected__project {
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-profile__heading {
+  gap: 6px;
+}
+
+.db-profile__heading strong {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.db-profile__address {
+  display: block;
+  overflow: hidden;
+  color: var(--ink-mid);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-profile__meta,
+.db-selected__meta {
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 17px;
+  overflow-wrap: anywhere;
+}
+
+.db-live-badge {
+  flex: none;
+  gap: 4px;
+  color: var(--good);
+  font-size: 10px;
+}
+
+.db-live-badge i,
+.db-live-label i,
+.db-tab__dot {
+  display: block;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--good);
+}
+
+.db-profiles__footer {
+  position: sticky;
+  z-index: 2;
+  bottom: 0;
+  display: grid;
+  flex: none;
+  gap: 8px;
+  margin-inline: -10px;
+  padding: 10px;
+  border-top: 1px solid var(--line);
+  background: var(--sidebar);
+}
+
+.db-selected {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+
+.db-selected__project {
+  margin: 0;
+  color: var(--ink-low);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.db-selected__heading strong {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.db-selected__address {
+  color: var(--ink-mid);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
+.db-selected__actions {
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.db-connect-form {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin-top: 4px;
+}
+
+.db-secret-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--ink-low);
+  font-size: 10.5px;
+  line-height: 15px;
+}
+
+.db-secret-note svg {
+  flex: none;
+  width: 13px;
+  height: 15px;
+}
+
+.db-catalog-empty {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 20px 10px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.db-catalog-empty strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .db-workspace {
@@ -1572,153 +1728,104 @@ onMounted(refresh);
   gap: 8px;
   min-width: 0;
   min-height: 0;
+  padding: 12px;
   overflow: auto;
-  scrollbar-color: var(--line-2) transparent;
-  scrollbar-width: thin;
 }
 
-.db-profiles {
-  display: flex;
-  flex-direction: column;
-  grid-column: 1;
-  grid-row: 1;
-  gap: 9px;
+.db-create {
+  flex: none;
+  width: 100%;
+  max-width: 760px;
+}
+
+.db-profile-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
   min-width: 0;
-  min-height: 0;
-  padding: 0 9px 10px;
-  overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--sidebar) 88%, var(--ground));
-  scrollbar-color: var(--line-2) transparent;
-  scrollbar-width: thin;
+  padding: 16px;
 }
 
-.db-section-heading {
-  position: sticky;
-  z-index: 2;
-  top: 0;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 48px;
-  margin: 0 -1px;
-  padding: 8px 1px 7px;
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--sidebar) 96%, var(--ground));
+.db-profile-form__environment {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-height);
 }
 
-.db-section-heading h3,
-.db-live-queries h3,
-.db-subsection-heading h3,
-.db-query-editor h3,
-.db-result-stage h3 {
-  font-size: 13px;
+.db-profile-form__actions,
+.db-profile-form > .ui-inline-message {
+  grid-column: 1 / -1;
+}
+
+.db-live-queries,
+.db-audit {
+  flex: none;
+  min-width: 0;
+}
+
+.db-live-queries > summary,
+.db-audit > summary {
+  display: list-item;
+  position: relative;
+  padding-right: 32px;
+}
+
+.db-live-queries__status {
+  float: right;
+  margin-left: 10px;
+}
+
+.db-audit > summary > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+}
+
+.db-audit > summary svg {
+  width: 14px;
+  height: 14px;
+  color: var(--ink-mid);
+}
+
+.db-audit > summary > .db-count {
+  position: absolute;
+  right: 0;
+  top: 7px;
 }
 
 .db-count {
-  display: grid;
+  display: inline-grid;
   flex: none;
   place-items: center;
-  min-width: 23px;
-  height: 23px;
-  padding: 0 7px;
-  border-radius: 999px;
+  min-width: 20px;
+  height: 20px;
+  padding-inline: 5px;
+  border-radius: 4px;
   background: var(--surface-2);
   color: var(--ink-mid);
-  font-size: 10.5px;
+  font-size: 10px;
+  line-height: 14px;
 }
 
 .db-count.is-running {
-  background: color-mix(in srgb, var(--warn) 16%, var(--surface));
   color: var(--warn);
 }
 
-.db-live-queries {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--surface) 46%, transparent);
-}
-
-.db-live-queries.has-active {
-  border-color: color-mix(in srgb, var(--warn) 36%, var(--line));
-  background: color-mix(in srgb, var(--warn) 5%, var(--surface));
-}
-
-.db-live-queries__heading {
-  gap: 9px;
-  min-width: 0;
-}
-
-.db-live-queries__heading > div {
-  flex: 1;
-  min-width: 0;
-}
-
-.db-live-queries__heading small {
-  display: block;
-  margin-top: 2px;
-  color: var(--ink-mid);
-  font-size: 10.5px;
-}
-
-.db-live-queries__icon {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--surface-2);
-  color: var(--ink-mid);
-}
-
-.db-live-queries.has-active .db-live-queries__icon {
-  background: color-mix(in srgb, var(--warn) 15%, var(--surface));
-  color: var(--warn);
-}
-
-.db-live-queries__icon svg {
-  width: 14px;
-  height: 14px;
-}
-
-.db-query-list {
-  display: grid;
-  gap: 6px;
-  max-height: 220px;
-  min-width: 0;
+.db-query-list,
+.db-audit__list {
+  max-height: 240px;
   overflow: auto;
 }
 
 .db-query-row {
-  gap: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   min-width: 0;
-  padding: 8px 9px;
-  border: 1px solid var(--line);
-  border-left-width: 3px;
-  border-radius: 8px;
-  background: var(--ground);
-}
-
-.db-query-row.is-running,
-.db-query-row.is-waiting {
-  border-left-color: var(--warn);
-}
-
-.db-query-row.is-done {
-  border-left-color: var(--good);
-}
-
-.db-query-row.is-danger {
-  border-left-color: var(--bad);
-}
-
-.db-query-row.is-muted {
-  border-left-color: var(--ink-mid);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
 }
 
 .db-query-row__main {
@@ -1727,98 +1834,86 @@ onMounted(refresh);
 }
 
 .db-query-row__meta {
-  justify-content: space-between;
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   margin-bottom: 4px;
   color: var(--ink-mid);
   font-size: 10px;
 }
 
-.db-query-row__meta time {
-  flex: none;
+.db-query-row.is-running .db-query-row__meta {
+  color: var(--warn);
+}
+
+.db-query-row.is-danger .db-query-row__meta {
+  color: var(--bad);
 }
 
 .db-query-row code,
-.db-audit code {
+.db-audit article code {
   display: block;
-  min-width: 0;
-  max-width: 100%;
   overflow: hidden;
-  color: var(--ink);
   font-family: var(--mono);
   font-size: 11px;
-  line-height: 1.45;
+  line-height: 17px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .db-query-row__actions {
+  display: flex;
   flex: none;
-  gap: 5px;
+  gap: 6px;
 }
 
-.db-query-list__empty {
-  padding: 0 0 1px 37px;
+.db-query-list__empty,
+.db-audit__empty {
+  margin: 0;
+  padding: 12px 0;
   color: var(--ink-mid);
-  font-size: 10.5px;
-}
-
-.db-cancel-notice {
-  margin-top: 1px;
+  font-size: 11px;
+  line-height: 17px;
 }
 
 .db-console {
   display: flex;
-  flex: 1 0 470px;
+  flex: 1 0 440px;
   flex-direction: column;
   min-width: 0;
-  min-height: 470px;
+  min-height: 440px;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--ground);
-  box-shadow: var(--shadow);
 }
 
 .db-console__header {
   flex: none;
-  gap: 9px;
-  min-width: 0;
-  min-height: 44px;
-  padding: 5px 7px;
+  min-height: 40px;
+  padding: 5px 8px;
   border-bottom: 1px solid var(--line);
   background: var(--topbar);
 }
 
 .db-session-switcher {
   display: flex;
-  flex: 0 1 auto;
+  flex: 1;
   align-items: center;
-  gap: 6px;
-  width: max-content;
-  max-width: min(68%, 760px);
+  gap: 8px;
   min-width: 0;
 }
 
 .db-session-switcher__label {
   flex: none;
-  color: var(--ink-mid);
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+  color: var(--ink-low);
+  font-size: 10px;
 }
 
 .db-tabs {
   flex: 0 1 auto;
-  gap: 5px;
-  width: max-content;
-  max-width: 100%;
   min-width: 0;
-}
-
-.db-session-close {
-  flex: none;
+  max-width: 100%;
 }
 
 .db-tab__content {
@@ -1826,23 +1921,13 @@ onMounted(refresh);
   align-items: center;
   gap: 6px;
   min-width: 0;
-  padding: 1px 7px;
-}
-
-.db-tab__dot {
-  display: block;
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--good);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--good) 55%, transparent);
+  padding: 1px 4px;
 }
 
 .db-tab__copy {
   display: grid;
-  gap: 1px;
   min-width: 0;
+  gap: 1px;
   text-align: left;
 }
 
@@ -1856,22 +1941,21 @@ onMounted(refresh);
 
 .db-tab__copy strong {
   font-size: 11px;
-  line-height: 1.1;
+  line-height: 15px;
 }
 
 .db-tab__copy small {
   color: var(--ink-mid);
-  font-size: 9px;
-  line-height: 1.05;
+  font-size: 10px;
+  line-height: 13px;
 }
 
 .db-console__title {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   color: var(--ink-mid);
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: 12px;
 }
 
 .db-console__title > span {
@@ -1882,56 +1966,50 @@ onMounted(refresh);
 
 .db-console__context {
   flex: none;
-  justify-content: flex-end;
-  gap: 7px;
-  min-width: 0;
   margin-left: auto;
 }
 
 .db-live-label {
   gap: 5px;
   color: var(--good);
-  font-size: 10.5px;
+  font-size: 11px;
   white-space: nowrap;
 }
 
 .db-role-badge,
 .db-prod-badge,
-.db-project-badge,
 .db-via-badge,
 .db-untrusted-badge {
   flex: none;
-  border-radius: 999px;
+  padding: 3px 5px;
+  border-radius: 4px;
   font-size: 10px;
-  line-height: 1;
+  font-weight: 400;
+  line-height: 13px;
 }
 
-.db-role-badge,
-.db-project-badge {
-  padding: 4px 7px;
-  background: color-mix(in srgb, var(--accent) 11%, var(--surface));
-  color: var(--accent);
+.db-role-badge {
+  background: var(--surface-2);
+  color: var(--ink-mid);
 }
 
 .db-prod-badge {
-  padding: 4px 7px;
-  background: color-mix(in srgb, var(--bad) 13%, transparent);
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
   color: var(--bad);
 }
 
-.db-via-badge {
-  padding: 4px 7px;
-  background: color-mix(in srgb, var(--warn) 13%, transparent);
+.db-via-badge,
+.db-untrusted-badge {
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
   color: var(--warn);
 }
 
 .db-workbench {
   display: grid;
   flex: 1;
-  grid-template-columns: minmax(190px, 250px) minmax(0, 1fr);
+  grid-template-columns: 200px minmax(0, 1fr);
   min-width: 0;
-  min-height: 360px;
-  overflow: hidden;
+  min-height: 0;
 }
 
 .db-schema {
@@ -1941,20 +2019,32 @@ onMounted(refresh);
   min-height: 0;
   overflow: hidden;
   border-right: 1px solid var(--line);
-  background: color-mix(in srgb, var(--sidebar) 86%, var(--ground));
+  background: var(--sidebar);
 }
 
 .db-subsection-heading {
+  flex: none;
   justify-content: space-between;
-  gap: 8px;
-  min-height: 43px;
-  padding: 6px 8px 6px 10px;
+  min-height: 40px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--topbar) 86%, var(--ground));
+}
+
+.db-subsection-heading small,
+.db-query-editor header small,
+.db-session-endpoint small,
+.db-agent-access small {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-mid);
+  font-size: 11px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
 }
 
 .db-schema__list {
   display: grid;
+  align-content: start;
   gap: 2px;
   margin: 0;
   padding: 6px;
@@ -1967,22 +2057,16 @@ onMounted(refresh);
   align-items: center;
   gap: 7px;
   min-width: 0;
-  padding: 6px 7px;
-  border-radius: 6px;
+  padding: 6px 4px;
   color: var(--ink-mid);
   font-size: 11px;
-}
-
-.db-schema__list li:hover {
-  background: var(--surface-2);
-  color: var(--ink);
 }
 
 .db-schema__list svg {
   flex: none;
   width: 13px;
   height: 13px;
-  color: var(--accent);
+  color: var(--ink-low);
 }
 
 .db-schema__list span {
@@ -1994,20 +2078,17 @@ onMounted(refresh);
 
 .db-schema__raw,
 .db-result__raw {
+  flex: 1;
   min-width: 0;
   margin: 0;
+  padding: 10px;
   overflow: auto;
   color: var(--ink-mid);
   font-family: var(--mono);
-  font-size: 10.5px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 17px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.db-schema__raw {
-  flex: 1;
-  padding: 9px;
 }
 
 .db-schema__empty,
@@ -2016,43 +2097,40 @@ onMounted(refresh);
   flex: 1;
   place-content: center;
   justify-items: center;
-  gap: 5px;
+  gap: 6px;
   min-height: 0;
-  padding: 20px;
+  padding: 24px 16px;
   color: var(--ink-mid);
   text-align: center;
 }
 
 .db-schema__empty > span,
 .db-result-state__icon {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  margin-bottom: 2px;
-  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
-  color: var(--accent);
+  margin-bottom: 4px;
+  color: var(--ink-low);
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 22px;
+  line-height: 28px;
 }
 
 .db-schema__empty strong,
 .db-result-state strong {
-  color: var(--ink);
-  font-size: 11.5px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .db-schema__empty small,
 .db-result-state small {
-  font-size: 10.5px;
-  line-height: 1.45;
+  max-width: 32ch;
+  color: var(--ink-low);
+  font-size: 11px;
+  line-height: 17px;
 }
 
 .db-query-console {
   display: grid;
-  grid-template-rows: auto minmax(180px, 1fr);
+  grid-template-rows: auto minmax(140px, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -2060,39 +2138,30 @@ onMounted(refresh);
 
 .db-query-editor {
   display: grid;
-  gap: 8px;
+  align-content: start;
+  gap: 10px;
   min-width: 0;
-  padding: 10px;
+  padding: 12px;
   border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface) 35%, transparent);
 }
 
 .db-query-editor > header,
-.db-result-stage__header {
+.db-result-stage__header,
+.db-query-editor__actions {
   justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
 }
 
 .db-query-shortcut {
   flex: none;
-  padding: 3px 6px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  color: var(--ink-mid);
+  color: var(--ink-low);
   font-family: var(--mono);
-  font-size: 9.5px;
-}
-
-.db-query-editor__actions {
-  justify-content: space-between;
-  gap: 10px;
+  font-size: 10px;
 }
 
 .db-query-editor__actions > small {
-  color: var(--ink-mid);
-  font-size: 10px;
-  line-height: 1.4;
+  color: var(--ink-low);
+  font-size: 10.5px;
+  line-height: 16px;
 }
 
 .db-run-button {
@@ -2105,52 +2174,33 @@ onMounted(refresh);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background:
-    linear-gradient(color-mix(in srgb, var(--line) 18%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--line) 16%, transparent) 1px, transparent 1px),
-    var(--ground);
-  background-size: 28px 28px, 28px 28px, auto;
+  background: var(--ground);
 }
 
 .db-result-stage__header {
   flex: none;
   flex-wrap: wrap;
-  gap: 6px;
-  min-height: 38px;
-  padding: 6px 9px;
+  min-height: 36px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--topbar) 90%, transparent);
+  background: var(--topbar);
 }
 
 .db-result-stage__header > div {
   flex-wrap: wrap;
-  gap: 7px;
-  min-width: 0;
-}
-
-.db-untrusted-badge {
-  padding: 4px 7px;
-  background: color-mix(in srgb, var(--warn) 13%, transparent);
-  color: var(--warn);
+  gap: 6px;
 }
 
 .db-result-count {
   color: var(--ink-mid);
-  font-size: 10.5px;
-  white-space: nowrap;
-}
-
-.db-result-state.is-running {
-  display: flex;
-  flex-direction: column;
+  font-size: 11px;
 }
 
 .db-result-state__pulse {
-  width: 12px;
-  height: 12px;
-  margin-bottom: 5px;
-  border: 2px solid color-mix(in srgb, var(--warn) 28%, transparent);
-  border-top-color: var(--warn);
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: db-spin 0.8s linear infinite;
 }
@@ -2166,15 +2216,14 @@ onMounted(refresh);
   width: max-content;
   min-width: 100%;
   border-collapse: collapse;
-  background: color-mix(in srgb, var(--ground) 94%, transparent);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 11px;
 }
 
 .db-result-table th,
 .db-result-table td {
   max-width: 420px;
-  padding: 7px 9px;
+  padding: 7px 10px;
   overflow: hidden;
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -2189,55 +2238,29 @@ onMounted(refresh);
   top: 0;
   background: var(--topbar);
   color: var(--ink-mid);
-  font-weight: 650;
-}
-
-.db-result-table tbody tr:hover {
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-}
-
-.db-result__raw {
-  flex: 1;
-  padding: 10px;
+  font-weight: 600;
 }
 
 .db-session-tools {
-  display: grid;
+  display: flex;
   flex: none;
-  grid-template-columns: minmax(170px, 1fr) minmax(235px, auto);
+  flex-wrap: wrap;
   align-items: center;
-  gap: 9px;
-  padding: 8px 9px;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 8px 12px;
   border-top: 1px solid var(--line);
   background: var(--topbar);
 }
 
-.db-session-endpoint {
-  gap: 8px;
-  min-width: 0;
-}
-
-.db-database-icon {
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface);
-}
-
-.db-database-icon.is-small {
-  width: 27px;
-  height: 27px;
-  border-radius: 7px;
-}
-
-.db-database-icon svg {
-  width: 15px;
-  height: 15px;
+.db-session-endpoint,
+.db-agent-access {
+  flex: 1 1 180px;
 }
 
 .db-session-endpoint > span:last-child,
 .db-agent-access > span {
+  flex: 1;
   min-width: 0;
 }
 
@@ -2245,345 +2268,52 @@ onMounted(refresh);
 .db-agent-access strong {
   display: block;
   overflow: hidden;
-  font-size: 11.5px;
+  font-size: 11px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.db-agent-access {
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-  padding: 5px 8px;
-  border-right: 1px solid var(--line);
-  border-left: 1px solid var(--line);
-}
-
-.db-audit,
-.db-add-profile {
-  flex: none;
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 42%, transparent);
-}
-
-.db-audit > summary,
-.db-add-profile > summary {
-  cursor: pointer;
-  list-style: none;
-}
-
-.db-audit > summary::-webkit-details-marker,
-.db-add-profile > summary::-webkit-details-marker {
-  display: none;
-}
-
-.db-audit > summary {
-  justify-content: space-between;
-  gap: 9px;
-  min-height: 39px;
-  padding: 7px 10px;
-  font-size: 11.5px;
-  font-weight: 600;
-}
-
-.db-audit > summary > span {
-  gap: 7px;
-}
-
-.db-audit > summary svg {
-  width: 14px;
-  height: 14px;
-  color: var(--ink-mid);
-}
-
-.db-audit > summary:hover,
-.db-add-profile > summary:hover {
-  background: color-mix(in srgb, var(--surface-2) 54%, transparent);
-}
-
-.db-audit[open] > summary,
-.db-add-profile[open] > summary {
-  border-bottom: 1px solid var(--line);
-}
-
-.db-audit__list {
+.db-database-icon {
   display: grid;
-  max-height: 330px;
-  overflow: auto;
+  flex: none;
+  place-items: center;
+  color: var(--ink-low);
+}
+
+.db-database-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .db-audit article {
   display: grid;
   gap: 6px;
   min-width: 0;
-  padding: 9px 10px;
-  border-top: 1px solid var(--line);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
 }
 
-.db-audit article:first-child {
-  border-top: 0;
-}
-
-.db-audit article header {
-  gap: 7px;
+.db-audit article header,
+.db-audit article small {
   color: var(--ink-mid);
   font-size: 10px;
 }
 
 .db-audit article header strong {
-  padding: 3px 6px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.db-audit article header strong.is-good {
-  background: color-mix(in srgb, var(--good) 12%, transparent);
-  color: var(--good);
-}
-
-.db-audit article header strong.is-bad {
-  background: color-mix(in srgb, var(--bad) 12%, transparent);
-  color: var(--bad);
+  font-weight: 500;
 }
 
 .db-audit article time {
   margin-left: auto;
 }
 
-.db-audit article small {
-  color: var(--ink-mid);
-  font-size: 10px;
-}
-
-.db-audit__empty {
-  margin: 0;
-  padding: 14px 10px;
-  color: var(--ink-mid);
-  font-size: 11px;
-}
-
-.db-profile-list {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-
-.db-profile {
-  display: grid;
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--ground);
-  transition:
-    border-color var(--control-motion-duration) var(--control-motion-easing),
-    background var(--control-motion-duration) var(--control-motion-easing);
-}
-
-.db-profile:hover {
-  border-color: var(--line-2);
-}
-
-.db-profile.is-connected {
-  border-color: color-mix(in srgb, var(--good) 35%, var(--line));
-  background: color-mix(in srgb, var(--good) 3%, var(--ground));
-}
-
-.db-profile.is-current {
-  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
-  background: color-mix(in srgb, var(--accent) 5%, var(--ground));
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 76%, transparent);
-}
-
-.db-profile.is-prod:not(.is-current) {
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--bad) 64%, transparent);
-}
-
-.db-profile-choice-wrap {
-  padding: 10px;
-}
-
-.db-profile-choice {
-  align-items: flex-start;
-  width: 100%;
-}
-
-:deep(.db-profile-choice .ui-radio__mark) {
-  margin-top: 2px;
-}
-
-:deep(.db-profile-choice .ui-radio__label) {
-  flex: 1;
-  min-width: 0;
-}
-
-.db-profile-choice__content {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-
-.db-profile-choice__title {
-  gap: 7px;
-  min-width: 0;
-}
-
-.db-profile-choice__title > strong {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  font-size: 12.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.db-live-badge {
-  flex: none;
-  gap: 5px;
+.db-audit .is-good {
   color: var(--good);
-  font-size: 10px;
 }
 
-.db-profile-choice__content > code {
-  overflow: hidden;
-  color: var(--ink-mid);
-  font-family: var(--mono);
-  font-size: 10.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.db-profile-choice__meta {
-  justify-content: space-between;
-  gap: 7px;
-  min-width: 0;
-  color: var(--ink-mid);
-  font-size: 10.5px;
-}
-
-.db-profile-choice__meta > :first-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.db-profile-choice__badges {
-  flex: none;
-  gap: 4px;
-}
-
-.db-connect-form {
-  display: grid;
-  gap: 8px;
-  padding: 9px 10px 10px;
-  border-top: 1px solid var(--line);
-}
-
-.db-profiles__empty {
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-  padding: 22px 14px;
-  border: 1px dashed var(--line-2);
-  border-radius: 10px;
-  color: var(--ink-mid);
-  text-align: center;
-}
-
-.db-profiles__empty > span {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  margin-bottom: 3px;
-  border-radius: 50%;
-  background: var(--surface-2);
-  color: var(--accent);
-  font-size: 18px;
-}
-
-.db-profiles__empty strong {
-  color: var(--ink);
-  font-size: 12.5px;
-}
-
-.db-profiles__empty small {
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.db-add-profile > summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 7px 10px;
-  color: var(--ink);
-  font-size: 11.5px;
-  font-weight: 600;
-}
-
-.db-disclosure-icon {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  background: var(--surface-2);
-  color: var(--accent);
-  font-size: 14px;
-  font-weight: 400;
-  transition: transform var(--control-motion-duration) var(--control-motion-easing);
-}
-
-.db-add-profile[open] .db-disclosure-icon {
-  transform: rotate(45deg);
-}
-
-.db-profile-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
-  padding: 11px 10px 10px;
-}
-
-.db-profile-form__environment {
-  display: flex;
-  align-items: center;
-  min-height: var(--control-height);
-}
-
-.db-profile-form__actions {
-  justify-content: stretch;
-}
-
-.db-profile-form__actions > :deep(.ui-button) {
-  flex: 1;
-}
-
-.db-secret-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  margin: auto 2px 0;
-  padding-top: 2px;
-  color: var(--ink-mid);
-  font-size: 10.5px;
-  line-height: 1.45;
-}
-
-.db-secret-note svg {
-  flex: none;
-  width: 13px;
-  height: 13px;
-  margin-top: 1px;
-  color: var(--good);
+.db-audit .is-bad {
+  color: var(--bad);
 }
 
 @keyframes db-spin {
@@ -2592,76 +2322,105 @@ onMounted(refresh);
   }
 }
 
-@container (max-width: 940px) {
-  .db-panel__surface {
-    grid-template-rows: auto auto;
-    align-content: start;
-    overflow: auto;
+/* Выбор областей зависит от ширины самой панели, включая узкий док.
+   Скрытие сохраняет сессию, результаты и черновики смонтированными. */
+@container db-panel (max-width: 940px) {
+  .db-panel__navigation {
+    display: block;
   }
 
-  .db-panel__body {
-    min-height: max-content;
+  .db-console__navigation {
+    display: block;
   }
 
   .db-layout {
     display: flex;
-    flex: none;
-    flex-direction: column;
-    min-height: max-content;
-    overflow: visible;
   }
 
   .db-workspace,
   .db-profiles {
-    flex: none;
-    min-height: 0;
-    overflow: visible;
+    flex: 1;
+  }
+
+  .db-catalog-heading {
+    display: none;
+  }
+
+  .db-profiles {
+    border-right: 0;
+  }
+
+  .db-panel[data-pane='profiles'] .db-workspace,
+  .db-panel:not([data-pane='profiles']) .db-profiles,
+  .db-panel:not([data-pane='activity']) .db-live-queries,
+  .db-panel[data-pane='activity'] .db-console,
+  .db-panel[data-pane='activity'] .db-audit,
+  .db-panel:not([data-pane='schema']) .db-schema,
+  .db-panel[data-pane='schema'] .db-query-console,
+  .db-panel[data-pane='result'] .db-query-editor,
+  .db-panel[data-pane='query'] .db-result-stage {
+    display: none;
   }
 
   .db-console {
-    flex: none;
-    min-height: 620px;
+    flex: 1 0 auto;
+    min-height: 0;
   }
 
-  .db-console:not(.has-session) {
-    min-height: 500px;
+  .db-workbench {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .db-profile-form {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .db-query-console {
+    grid-template-rows: auto;
   }
 
-  .db-profile-form__environment,
-  .db-profile-form__actions {
-    grid-column: 1 / -1;
+  .db-result-stage,
+  .db-schema {
+    min-height: 220px;
+  }
+
+  .db-schema {
+    border-right: 0;
+  }
+
+  .db-live-queries__status {
+    float: none;
+    display: inline-flex;
   }
 }
 
-@container (max-width: 660px) {
-  .db-panel__surface {
-    gap: 8px;
-    padding: 7px 8px 10px;
-  }
-
-  .db-panel__header {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 7px;
-  }
-
-  .db-panel__brand {
-    grid-column: 1;
-  }
-
+@container db-panel (max-width: 560px) {
   .db-panel__summary {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    justify-content: flex-start;
-    overflow-x: auto;
+    display: none;
   }
 
-  .db-refresh {
-    grid-column: 2;
-    grid-row: 1;
+  .db-profile-form {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .db-workspace {
+    padding: 10px;
+  }
+
+  .db-console__header {
+    flex-wrap: wrap;
+  }
+
+  .db-session-switcher__label {
+    display: none;
+  }
+
+  .db-session-switcher {
+    max-width: calc(100% - 40px);
+  }
+
+  .db-console__context {
+    flex-wrap: wrap;
+    width: 100%;
+    margin-left: 0;
   }
 
   .db-query-row {
@@ -2678,123 +2437,23 @@ onMounted(refresh);
     justify-content: flex-end;
   }
 
-  .db-console__header {
+  .db-query-editor__actions {
     flex-wrap: wrap;
   }
 
-  .db-session-switcher {
-    flex: 1 1 0;
-    max-width: calc(100% - 40px);
-  }
-
-  .db-session-switcher__label {
-    display: none;
-  }
-
-  .db-tabs {
-    flex: 1 1 auto;
-    width: auto;
-  }
-
-  .db-console__context {
-    width: 100%;
-    justify-content: flex-start;
-    margin-left: 0;
-  }
-
-  .db-console {
-    min-height: 760px;
-  }
-
-  .db-console:not(.has-session) {
-    min-height: 670px;
-  }
-
-  .db-workbench {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(150px, 220px) minmax(460px, auto);
-    overflow: visible;
-  }
-
-  .db-schema {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .db-query-console {
-    min-height: 460px;
-  }
-
-  .db-session-tools {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .db-profile-form {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@container (max-width: 390px) {
-  .db-panel__brand small,
-  .db-summary-item:nth-child(2),
-  .db-session-endpoint small,
   .db-query-editor__actions > small {
-    display: none;
-  }
-
-  .db-panel__mark {
-    width: 29px;
-    height: 29px;
+    flex: 1 1 120px;
   }
 
   .db-tab__copy strong,
   .db-tab__copy small {
-    max-width: 14ch;
-  }
-
-  .db-profile-choice__meta {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .db-query-editor__actions {
-    justify-content: flex-end;
+    max-width: 17ch;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .db-profile,
-  .db-disclosure-icon {
-    transition: none;
-  }
-
   .db-result-state__pulse {
     animation: none;
   }
-}
-/* Области телефона переключаются без пересоздания сессии и текста запроса.
-   На широком экране сохраняются одновременные схема, запрос и результат. */
-.db-pane-nav { display: none; flex: none; }
-@container (max-width: 940px) {
-  .db-pane-nav { display: inline-flex; }
-  .db-panel__brand small { display: none; }
-  .db-panel[data-pane='profiles'] .db-workspace { display: none; }
-  .db-panel:not([data-pane='profiles']) .db-profiles { display: none; }
-  .db-panel:not([data-pane='activity']) .db-live-queries { display: none; }
-  .db-panel[data-pane='activity'] .db-console { display: none; }
-  .db-console, .db-console:not(.has-session) { min-height: 0; }
-  .db-workbench { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
-  .db-panel:not([data-pane='schema']) .db-schema { display: none; }
-  .db-panel[data-pane='schema'] .db-query-console { display: none; }
-  .db-query-console { min-height: 0; grid-template-rows: auto; }
-  .db-panel[data-pane='result'] .db-query-editor { display: none; }
-  .db-panel[data-pane='query'] .db-result-stage { display: none; }
-  .db-result-stage { min-height: 220px; }
-  .db-schema { min-height: 200px; }
-}
-@media (max-height: 500px) {
-  .db-profiles__empty { padding: 8px 10px; }
-  .db-profiles__empty svg { display: none; }
-  .db-panel__heading p { display: none; }
 }
 </style>

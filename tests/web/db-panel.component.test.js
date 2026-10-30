@@ -128,7 +128,7 @@ test('панель передаёт выбранную SSH-сессию при �
     wrapper.unmount();
     delete globalThis.__dbPanelStore;
   });
-  await wrapper.get('input[type="radio"]').setValue(true);
+  await wrapper.get('[data-profile-id="profile-a"]').trigger('click');
   await flushPromises();
   await wrapper.get('.db-connect-form').trigger('submit');
   await flushPromises();
@@ -183,7 +183,8 @@ test('панель БД использует каркас ToolHost и явные
     dock: true,
     workspace: true,
     profiles: true,
-    emptyProfile: '＋Профилей пока нетДобавьте подключение к базе ниже.',
+    emptyProfile: 'Профилей пока нетДобавьте подключение — оно появится в каталоге проектов.'
+      + '+ Добавить профиль',
     emptyResult: '{ }Результатов пока нетОткройте сессию из профиля слева.',
   });
 });
@@ -264,7 +265,7 @@ test('сессии БД работают вкладками, а результа
   releaseFirstSchema();
   await flushPromises();
 
-  await wrapper.find('input[role="switch"]').setValue(false);
+  await wrapper.find('.db-agent-access input[role="switch"]').setValue(false);
   await wrapper.get('[aria-label^="Закрыть активную сессию"]').trigger('click');
   await flushPromises();
 
@@ -382,4 +383,142 @@ test('PD-db-catalog: исчезнувший выбор нового профил
   await flushPromises();
   assert.equal(wrapper.get('[data-db-project-select]').element.value, '',
     'поздний каталог не восстанавливает прежний выбор');
+});
+
+/**
+ * Используем реактивный снимок, чтобы поиск, удаление профиля и открытые сессии
+ * проходили через те же watchers, что и обновления реестра в приложении.
+ */
+async function catalogStore() {
+  const { reactive } = await import('../../web/node_modules/vue/index.mjs');
+
+  return reactive({
+    profiles: [
+      {
+        id: 'primary',
+        projectId: 'shop',
+        label: 'Заказы',
+        engine: 'mysql',
+        role: 'read',
+        host: 'orders.internal',
+        port: 3306,
+        user: 'reader',
+        database: 'orders',
+        via: 'direct',
+      },
+      {
+        id: 'analytics',
+        projectId: 'reports',
+        label: 'Аналитика',
+        engine: 'postgres',
+        role: 'write',
+        host: 'reports.internal',
+        port: 5432,
+        user: 'analyst',
+        database: 'metrics',
+        via: 'direct',
+      },
+    ],
+    projects: [{ id: 'shop' }, { id: 'reports' }],
+    engines: [{ id: 'mysql', label: 'MySQL' }, { id: 'postgres', label: 'PostgreSQL' }],
+    sessions: [],
+    sshSessions: [],
+    queries: [],
+    audit: [],
+    schemas: {},
+    async load() {},
+    async loadProjects() {},
+  });
+}
+
+test('поиск профилей сохраняет выбранный вход, а смена профиля очищает пароль', async (t) => {
+  const store = await catalogStore();
+  const { wrapper, flushPromises } = await mountPanel(t, store);
+
+  await wrapper.get('input[type="password"]').setValue('one-use');
+  await wrapper.get('input[type="search"]').setValue('metrics');
+  await flushPromises();
+
+  assert.deepEqual(wrapper.findAll('[data-profile-id]').map((row) => row.attributes('data-profile-id')),
+    ['analytics']);
+  assert.match(wrapper.get('.db-selected').text(), /Заказы/);
+  assert.equal(wrapper.get('input[type="password"]').element.value, 'one-use');
+
+  await wrapper.get('input[type="search"]').setValue('missing');
+  assert.match(wrapper.get('.db-catalog-empty').text(), /Подходящих профилей нет/);
+  await wrapper.get('.db-catalog-empty button').trigger('click');
+  assert.equal(wrapper.findAll('[data-profile-id]').length, 2);
+
+  await wrapper.get('[data-profile-id="analytics"]').trigger('click');
+  assert.equal(wrapper.get('input[type="password"]').element.value, '');
+  assert.match(wrapper.get('.db-selected').text(), /Аналитика/);
+
+  store.profiles = store.profiles.filter((profile) => profile.id === 'primary');
+  await flushPromises();
+  assert.match(wrapper.get('.db-selected').text(), /Заказы/);
+});
+
+test('выбор подключённого профиля возвращает сессию, новый вход получает фокус', async (t) => {
+  const store = await catalogStore();
+
+  store.sessions.push({
+    id: 'live',
+    profileId: 'primary',
+    label: 'Заказы',
+    projectId: 'shop',
+    engine: 'mysql',
+    role: 'read',
+    agentAllowed: false,
+  });
+
+  const { wrapper, flushPromises } = await mountPanel(t, store);
+
+  assert.equal(wrapper.find('.db-connect-form').exists(), false);
+  await wrapper.get('[data-profile-id="primary"]').trigger('click');
+  assert.equal(wrapper.get('.db-panel').attributes('data-pane'), 'query');
+  assert.equal(wrapper.get('.db-tabs [role="tab"]').attributes('aria-selected'), 'true');
+  await wrapper.get('[aria-controls="db-login"]').trigger('click');
+  await flushPromises();
+
+  assert.equal(document.activeElement === wrapper.get('input[type="password"]').element, true);
+  await wrapper.get('input[type="password"]').setValue('temporary');
+  await wrapper.get('[aria-controls="db-login"]').trigger('click');
+  await wrapper.get('[aria-controls="db-login"]').trigger('click');
+  assert.equal(wrapper.get('input[type="password"]').element.value, '');
+});
+
+test('скрытие формы сохраняет черновик профиля и SQL, активная лента раскрывается', async (t) => {
+  const store = await catalogStore();
+
+  store.sessions.push({
+    id: 'live',
+    profileId: 'primary',
+    label: 'Заказы',
+    projectId: 'shop',
+    engine: 'mysql',
+    role: 'read',
+    agentAllowed: false,
+  });
+
+  const { wrapper, flushPromises } = await mountPanel(t, store);
+
+  await wrapper.get('[data-role="db-query"]').setValue('SELECT 42');
+  await wrapper.get('[aria-controls="db-create"]').trigger('click');
+  await wrapper.get('[aria-label="Метка профиля"]').setValue('Черновик');
+  assert.equal(wrapper.get('.db-panel').attributes('data-pane'), 'create');
+  await wrapper.get('[aria-controls="db-create"]').trigger('click');
+  await wrapper.get('[aria-controls="db-create"]').trigger('click');
+
+  assert.equal(wrapper.get('[aria-label="Метка профиля"]').element.value, 'Черновик');
+  assert.equal(wrapper.get('[data-role="db-query"]').element.value, 'SELECT 42');
+  assert.equal(wrapper.get('[data-db-queries]').attributes('open'), undefined);
+
+  store.queries.push({
+    id: 'running',
+    sessionId: 'live',
+    state: 'running',
+    text: 'SELECT 42',
+  });
+  await flushPromises();
+  assert.equal(wrapper.get('[data-db-queries]').attributes('open'), '');
 });
