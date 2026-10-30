@@ -121,7 +121,8 @@ test('ONB-E2E-02: manual после reload и второго context продо�
 
   const page = await f.newPage({ route: '#/projects' });
 
-  await page.getByRole('button', { name: names.manual }).click();
+  assert.equal(await page.locator('.projects').getByRole('button', { name: names.manual }).count(), 0);
+  await page.locator('.topbar-actions').getByRole('button', { name: names.manual }).click();
   await page.getByRole('button', { name: names.skip }).click();
   await page.getByRole('textbox', { name: names.title }).fill('Ручной второй проект');
 
@@ -136,8 +137,7 @@ test('ONB-E2E-02: manual после reload и второго context продо�
   const other = await f.newPage({ route: '#/board' });
 
   assert.equal(other.url().includes('#/onboarding'), false);
-  await other.goto(f.origin + '#/projects');
-  await other.getByRole('button', { name: names.manual }).click();
+  await other.locator('.topbar-actions').getByRole('button', { name: names.manual }).click();
   assert.equal(await other.getByRole('textbox', { name: names.title }).inputValue(), 'Ручной второй проект');
   assert.equal((await request(f.app)).active.id, state.active.id);
 

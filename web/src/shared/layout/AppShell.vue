@@ -397,6 +397,15 @@
         <ConnectionButton :icon="ICONS.connection" />
         <PhoneConnectButton />
         <AlertHistoryPopover />
+        <UiIconButton v-if="active && hasMachine" variant="link" role="rail" data-context="topbar-action"
+          :label="t('core.onboardingOpen')" v-tooltip="t('core.onboardingOpen')"
+          :aria-current="route.path === '/onboarding' ? 'page' : undefined"
+          @click="router.push('/onboarding?new=1')">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m3 18 12-12 3 3L6 21ZM5 2v6M2 5h6M19 15v6M16 18h6M17 2v3M15.5 3.5h3" />
+          </svg>
+        </UiIconButton>
         <UiIconButton v-if="active" variant="link" role="rail" data-context="topbar-action"
           :label="t('settings.settings')" v-tooltip="t('settings.settings')"
           aria-haspopup="dialog" :pressed="settings.isOpen"
@@ -1285,5 +1294,11 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
   .topbar { gap: 4px; }
   .tb-slot { flex: 1; }
   .content { scrollbar-gutter: auto; }
+}
+
+/* В самой узкой шапке уменьшается только поле вокруг знака приложения.
+   Все действия, включая мастер, сохраняют сенсорные площадки 44 px. */
+@media (max-width: 360px) {
+  .app-mark { width: 28px; }
 }
 </style>
