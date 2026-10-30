@@ -346,14 +346,17 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
 
       const next = v2 ? value as unknown as ProviderLifecycleSnapshot : decodeProviderInstallSnapshot(value);
 
-      selectedV2 ||= v2;
-
       if (next.revision < snapshot.value.revision) {
         return false;
       }
 
       const previous = snapshot.value;
+      // Первый V2 раскрывает итоги, скрытые проекцией V1, без новой операции.
+      // Рост revision сохраняет обновление после действительно пропущенного финала.
+      const refreshNewFinals = v2 && receivedSnapshot
+        && (selectedV2 || next.revision > previous.revision);
 
+      selectedV2 ||= v2;
       snapshot.value = structuredClone(next);
       uncertain.value = false;
       error.value = '';
@@ -370,7 +373,7 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
         startFailure.value = null;
       }
 
-      project(previous, v2 && receivedSnapshot || !!pending.value);
+      project(previous, refreshNewFinals || !!pending.value);
       receivedSnapshot = true;
 
       return true;

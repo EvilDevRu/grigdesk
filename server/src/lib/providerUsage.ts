@@ -286,9 +286,9 @@ export function createUsageReadCache<Value>(
    * Меняет поколение и отпускает старых читателей без отмены чужой read-only операции.
    * При замене проекции возраст замера сохраняется: доставка не продлевает TTL данных.
    */
-  function invalidate(replacement: { value: Value } | null) {
+  function invalidate(replacement: { value: Value; at?: number } | null) {
     generation += 1;
-    cache = replacement ? { at: cache?.at ?? now(), value: replacement.value } : null;
+    cache = replacement ? { at: replacement.at ?? cache?.at ?? now(), value: replacement.value } : null;
     inFlight = null;
 
     for (const notify of invalidationWaiters) {
@@ -429,6 +429,14 @@ export function createUsageReadCache<Value>(
      */
     clear() {
       invalidate(null);
+    },
+
+    /**
+     * Начинает новое поколение сбора, сохраняя последний снимок для фоновых читателей.
+     * Прежний сбор не публикуется; строгие читатели ждут актуальные данные.
+     */
+    expire() {
+      invalidate(cache ? { value: cache.value, at: Number.NEGATIVE_INFINITY } : null);
     },
 
     replace(value: Value) {

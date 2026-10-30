@@ -200,6 +200,7 @@
 - [Диагностика фризов через штатный журнал окна: операции, longtask и layout](chat-performance-logging.md)
 - [Большой список чатов: кэш текущего каталога и обновление только изменённых строк](chat-list-rendering.md)
 - [Реестр исполнителей: общее чтение, готовый снимок и инвалидация по SSE](providers-registry-load.md)
+- [Повторное чтение после старта: revision истории V1/V2 и сохранение карточек при проверке версий](provider-startup-reloads.md)
 - [Стартовые паузы: разбор JSON ответов и применение снимка доски](startup-performance-logging.md)
 - [Чаты на отдельном полном сервере: production UI, SSE, запись, reload и архив](chat-runtime-smoke-check.md)
 - [История чата: Blob уменьшает синхронную стоимость передачи большого JSON в fetch](chat-history-request-body.md)

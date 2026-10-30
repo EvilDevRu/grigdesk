@@ -27,6 +27,7 @@ async function fixture(t) {
     id: 'background-fixture',
     name: 'Fixture',
     bin: () => '/bin/true',
+    latestVersion: async () => '',
     auth: async () => ({
       mode: 'none',
       label: 'ok',
@@ -59,6 +60,7 @@ async function fixture(t) {
 
   return {
     app,
+    adapter,
     events,
     builds: () => builds,
     hold() {
@@ -158,6 +160,35 @@ test('отказ фонового сбора сохраняет успешный
   assert.equal(ready, 1);
 });
 
+test('проверка версий сохраняет карточки во время повторного сбора', async (t) => {
+  const own = await fixture(t);
+  const first = (await own.app.inject('/api/providers')).json();
+
+  own.adapter.latestVersion = async () => '2.0.0';
+  await own.app.inject({ method: 'POST', url: '/api/providers/check-updates' });
+
+  const release = own.hold();
+
+  t.after(release);
+
+  const start = performance.now();
+  const stale = (await own.app.inject('/api/providers')).json();
+
+  assert.deepEqual(stale, first, 'Проверка версий убрала уже загруженные карточки');
+  assert.ok(performance.now() - start < 250);
+  assert.deepEqual(own.events, ['providers-update']);
+  release();
+  await setImmediate();
+  await setImmediate();
+
+  const current = (await own.app.inject('/api/providers')).json().providers[0];
+
+  assert.equal(current.version, '2.0.0');
+  assert.equal(current.latest, '2.0.0');
+  assert.equal(current.updateAvailable, true);
+  assert.deepEqual(own.events, ['providers-update', 'providers-update']);
+});
+
 test('инвалидация не возвращает старый fallback и не рассылает старый поздний сбор', async () => {
   const gates = [];
   let ready = 0;
@@ -175,6 +206,31 @@ test('инвалидация не возвращает старый fallback и 
   await setImmediate();
   assert.deepEqual(await cache.read(), ['current']);
   assert.equal(ready, 0);
+});
+
+test('expire сохраняет снимок и отсекает предыдущий незавершённый сбор', async () => {
+  const gates = [];
+  let ready = 0;
+  const cache = createUsageReadCache(() => new Promise((resolve) => gates.push(resolve)));
+  const initial = cache.read();
+
+  await setImmediate();
+  gates[0](['initial']);
+  await initial;
+  cache.expire();
+  assert.deepEqual(await cache.readStale(10, [], () => ready += 1), ['initial']);
+  cache.expire();
+  assert.deepEqual(await cache.readStale(10, [], () => ready += 1), ['initial']);
+  gates[1](['obsolete']);
+  await setImmediate();
+  assert.equal(ready, 0);
+
+  const current = cache.read();
+
+  gates[2](['current']);
+  assert.deepEqual(await current, ['current']);
+  await setImmediate();
+  assert.equal(ready, 1);
 });
 
 test('быстрый отказ без снимка сохраняет исходную ошибку', async () => {

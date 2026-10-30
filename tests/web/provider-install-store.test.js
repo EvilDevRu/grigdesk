@@ -777,3 +777,55 @@ test('финал удаления перечитывает карточки по
   assert.equal(fixture.calls.gets.filter((url) => url === '/api/providers?refresh=1').length, 1);
   assert.match(fixture.providers.updateResults.claude.text, /удалена/u);
 });
+
+test('первый V2 отличает прежнюю историю V1 от новой операции по revision', async (t) => {
+  for (const previousRevision of [6, 5]) {
+    await t.test(`предыдущая revision ${previousRevision}`, async (scenario) => {
+      const final = {
+        ...job(),
+        operation: 'uninstall',
+        stage: 'cleanup',
+        status: 'succeeded',
+        outcome: 'uninstalled',
+        finishedAt: 1_700_000_001_000,
+        affectedProviderIds: ['claude'],
+        targets: [{
+          providerId: 'claude',
+          installationId: null,
+          phase: 'cleanup',
+          outcome: 'uninstalled',
+          error: null,
+        }],
+      };
+      const full = { ...snapshot(null, 6, { claude: final }), schemaVersion: 2 };
+      const expectedRefreshes = previousRevision < full.revision ? 1 : 0;
+      const fixture = await clientFixture(scenario, {
+        get: async (url) => url.includes('/installations/') ? full : {
+          providers: [{
+            ...card,
+            installation: { ...card.installation, lifecycleProtocol: 2 },
+          }],
+        },
+      });
+
+      fixture.store.applySnapshot(snapshot(null, previousRevision));
+      fixture.providers.providers[0].installation.lifecycleProtocol = 2;
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const refreshes = () => fixture.calls.gets.filter((url) => url === '/api/providers?refresh=1');
+
+      assert.equal(refreshes().length, expectedRefreshes);
+      fixture.store.applySnapshot(full);
+      assert.equal(refreshes().length, expectedRefreshes);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const next = { ...final, id: 'next-finished-operation' };
+      const current = { ...snapshot(null, 7, { claude: next }), schemaVersion: 2 };
+
+      fixture.store.applySnapshot(current);
+      fixture.store.applySnapshot(current);
+      assert.equal(refreshes().length, expectedRefreshes + 1);
+      assert.equal(fixture.calls.posts.length, 0);
+    });
+  }
+});

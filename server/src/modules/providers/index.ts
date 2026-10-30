@@ -824,7 +824,7 @@ async function providersModule(
 
   /**
    * Проверяет версии только у адаптеров текущего источника, включая фоновый таймер.
-   * Обновление остаётся ручным; изменившийся снимок сбрасывает кэш карточек.
+   * Обновление остаётся ручным; новые метаданные не убирают прежние карточки на время сбора.
    */
   async function checkUpdates() {
     const executors = await adaptersOf();
@@ -853,7 +853,7 @@ async function providersModule(
     }
 
     if (changed) {
-      registryCache.clear(); // в следующем ответе /api/providers поедут новые поля
+      registryCache.expire();
       fastify.sse?.broadcast?.('providers-update', {
         updates: [...updates.entries()].map(([id, u]) => ({ id, latest: u.latest, updateAvailable: u.outdated })),
       });
