@@ -176,6 +176,42 @@ test('единый блок показывает источник, ход, ит�
   assert.equal(wrapper.text().includes('settings.arbiter'), true);
 });
 
+test('рекомендованный ответ выделен, а выбор сохраняет исходный вопрос и id варианта', async (t) => {
+  const { wrapper, calls, doc, draft, flushPromises } = await fixture(t);
+
+  doc.result.questions[0].options = [
+    { id: 'keep', label: 'Оставить проверку неизменной' },
+    { id: 'defer', label: 'Решить после следующего плана (Рекомендуется)' },
+    { id: 'inspect', label: 'Inspect the next plan (Recommended)' },
+    { id: 'literal', label: 'Не рекомендуется менять проверку' },
+    { id: 'middle', label: 'Вариант (Recommended) ещё обсуждается' },
+  ];
+  draft.answers.q = 'Мой ответ';
+  await flushPromises();
+
+  const options = wrapper.findAll('[data-context="arbiter-question-option"]');
+
+  assert.deepEqual(options.map((option) => option.attributes('data-tone')),
+    ['neutral', 'success', 'success', 'neutral', 'neutral']);
+  assert.equal(options[1].attributes('data-variant'), 'solid');
+  assert.equal(options[1].find('.ac-option-recommendation').exists(), true);
+  assert.equal(options[1].text().includes('(Рекомендуется)'), false);
+  assert.match(options[1].text(), /Решить после следующего плана/);
+  assert.equal(doc.result.questions[0].options[1].label,
+    'Решить после следующего плана (Рекомендуется)');
+  assert.equal(wrapper.get('[data-role="arbiter-diagnose"]').attributes('data-tone'), 'success');
+  assert.equal(wrapper.get('[data-role="arbiter-apply"]').attributes('data-tone'), 'neutral');
+  await options[1].trigger('click');
+
+  assert.deepEqual(calls[0].slice(2), ['discuss', { questionId: 'q', optionId: 'defer' }]);
+  assert.equal(draft.answers.q, 'Мой ответ');
+  doc.state = 'analyzing';
+  await flushPromises();
+
+  assert.equal(wrapper.findAll('[data-context="arbiter-question-option"]')
+    .every((option) => option.attributes('disabled') !== undefined), true);
+});
+
 test('свой текст требует этап и последствия; SSE сохраняет черновик; busy закрывает отправку', async (t) => {
   const { wrapper, calls, draft, doc, flushPromises } = await fixture(t);
 

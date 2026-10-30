@@ -831,6 +831,7 @@
   "arbiterDiscuss": "Message to the arbiter",
   "arbiterSend": "Send to arbiter",
   "arbiterCustomAnswer": "Custom answer",
+  "arbiterQuestionHint": "Choose an option to send it to the arbiter immediately, or write your own answer.",
   "arbiterCustomInstruction": "Custom instruction",
   "arbiterInstruction": "Instruction for the selected stage",
   "arbiterTarget": "Choose a stage",

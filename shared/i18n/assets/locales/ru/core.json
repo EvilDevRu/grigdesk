@@ -851,6 +851,7 @@
   "arbiterDiscuss": "Сообщение арбитру",
   "arbiterSend": "Отправить арбитру",
   "arbiterCustomAnswer": "Свой ответ",
+  "arbiterQuestionHint": "Выберите вариант — он сразу отправится арбитру. Или напишите свой ответ.",
   "arbiterCustomInstruction": "Своё указание",
   "arbiterInstruction": "Указание выбранному этапу",
   "arbiterTarget": "Выберите этап",

@@ -80,23 +80,39 @@
           <p>{{ t('core.stageAnalysisEmptyHint') }}</p>
         </div>
         <template v-if="identity && !readOnly">
-          <section v-for="question in doc?.result?.questions || []" :key="question.id" class="ac-question">
-            <h4>{{ question.text }}</h4>
-            <div class="ac-actions">
-              <UiButton v-for="option in question.options" :key="option.id" wrap
-                        data-context="workspace-form-wrap" :disabled="!canDiscuss"
+          <section v-for="question in questions" :key="question.id" class="ac-question"
+                   :aria-labelledby="`${inputId}-${question.id}-heading`">
+            <div class="ac-question-heading">
+              <h4 :id="`${inputId}-${question.id}-heading`">{{ question.text }}</h4>
+              <p class="ac-question-hint">{{ t('core.arbiterQuestionHint') }}</p>
+            </div>
+            <div class="ac-question-options">
+              <UiButton v-for="option in question.options" :key="option.id" block wrap
+                        data-context="arbiter-question-option" :disabled="!canDiscuss"
+                        :tone="option.recommended ? 'success' : 'neutral'"
+                        :variant="option.recommended ? 'solid' : 'outline'"
                         @click="send('discuss', { questionId: question.id, optionId: option.id })">
-                {{ option.label }}
+                <span class="ac-option-copy">
+                  <span v-if="option.recommended" class="ac-option-recommendation">
+                    <span aria-hidden="true">✓</span> {{ t('core.arbiterRecommended') }}
+                  </span>
+                  <span>{{ option.label }}</span>
+                </span>
+                <template #trailing><span aria-hidden="true">→</span></template>
               </UiButton>
             </div>
-            <label :for="`${inputId}-${question.id}`">{{ t('core.arbiterCustomAnswer') }}</label>
-            <UiTextarea :id="`${inputId}-${question.id}`" v-model="draft.answers[question.id]" rows="2"
-                        data-context="workspace-note" :maxlength="ARBITER_LIMITS.humanText" />
-            <UiButton wrap data-context="workspace-form-wrap"
-                      :disabled="!canDiscuss || !draft.answers[question.id]?.trim()"
-                      @click="answerQuestion(question.id)">
-              {{ t('core.arbiterSend') }}
-            </UiButton>
+            <div class="ac-question-custom">
+              <label :for="`${inputId}-${question.id}`">{{ t('core.arbiterCustomAnswer') }}</label>
+              <UiTextarea :id="`${inputId}-${question.id}`" v-model="draft.answers[question.id]" rows="2"
+                          data-context="workspace-note" :maxlength="ARBITER_LIMITS.humanText" />
+              <div class="ac-question-submit">
+                <UiButton wrap data-context="workspace-form-wrap"
+                          :disabled="!canDiscuss || !draft.answers[question.id]?.trim()"
+                          @click="answerQuestion(question.id)">
+                  {{ t('core.arbiterSend') }}
+                </UiButton>
+              </div>
+            </div>
           </section>
 
           <div v-if="doc && draft" class="ac-composer">
@@ -202,6 +218,8 @@
             <div class="ac-actions">
               <UiButton wrap data-context="workspace-form-wrap"
                         :disabled="proposal.kind === 'apply' ? !canApply : !canDiscuss"
+                        :tone="proposal.recommended ? 'success' : 'neutral'"
+                        :variant="proposal.recommended ? 'solid' : 'outline'"
                         :data-role="`arbiter-${proposal.kind}`"
                         @click="send(proposal.kind, { proposalId: proposal.id })">
                 {{ proposal.kind === 'apply'
@@ -238,6 +256,7 @@ import type {
   ArbiterAction,
   ArbiterMessage,
   ArbiterProposal,
+  ArbiterQuestion,
   ArbiterConversationSummary,
 } from '../../../../shared/pipeline/arbiterConversation.ts';
 import { useArbiterConversationsStore } from '../../stores/arbiterConversations.ts';
@@ -273,6 +292,10 @@ const historyChoices = computed(() => (props.history || [])
 const selectedHistory = computed(() => historyChoices.value
   .some((row) => row.conversationId === openedId.value) ? openedId.value : '');
 const doc = computed(() => store.document(props.task, openedId.value || current.value?.conversationId || ''));
+const questions = computed(() => (doc.value?.result?.questions || []).map((question) => ({
+  ...question,
+  options: question.options.map(questionOption),
+})));
 const journalUrl = computed(() => `/api/tasks/${encodeURIComponent(props.task)}/arbiter-conversations/`
   + `${encodeURIComponent(doc.value?.id || '')}/journal`);
 const identity = computed(() => doc.value?.identity
@@ -383,6 +406,21 @@ const status = computed(() => {
 
   return doc.value ? labels[doc.value.state] : identity.value ? labels.idle : t('core.arbiterNoStop');
 });
+
+/**
+ * У вариантов вопроса рекомендация хранится в конце подписи, отдельного поля в контракте нет.
+ * Явная пометка RU/EN становится значком; исходные данные и порядок вариантов сохраняются.
+ */
+function questionOption(option: ArbiterQuestion['options'][number]) {
+  const marker = /\s*\((?:рекомендуется|рекомендую|рекомендуем|recommended)\)\s*$/iu;
+  const recommended = marker.test(option.label);
+
+  return {
+    ...option,
+    recommended,
+    label: recommended ? option.label.replace(marker, '').trim() || option.label : option.label,
+  };
+}
 
 /**
  * Время реплики показывается в локали и часовом поясе устройства.
@@ -870,8 +908,45 @@ watch(analysisFailure, async (message) => {
   font-size: 12px;
 }
 .ac-question {
-  padding-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--ground) 25%, var(--surface));
+}
+.ac-question-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ac-question-hint {
+  color: var(--ink-mid);
+  font-size: 11px;
+}
+.ac-question-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+.ac-option-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.ac-option-recommendation {
+  font-size: 10px;
+  font-weight: 600;
+}
+.ac-question-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
+}
+.ac-question-submit {
+  display: flex;
+  justify-content: flex-end;
 }
 .ac-actions {
   display: flex;
@@ -924,6 +999,9 @@ watch(analysisFailure, async (message) => {
   }
   .ac-empty {
     padding: 10px 0 0;
+  }
+  .ac-question {
+    padding: 12px;
   }
   .ac-heading {
     flex-wrap: wrap;

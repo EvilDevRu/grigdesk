@@ -258,6 +258,25 @@
   overflow-wrap: anywhere;
 }
 
+/* Варианты арбитра образуют список действий с читаемой подписью и знаком отправки.
+   Цвет рекомендации задаётся общими variant/tone; экран отвечает только за содержимое. */
+.ui-button[data-context='arbiter-question-option'] {
+  height: auto;
+  padding: 10px 12px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.ui-button[data-context='arbiter-question-option'][data-tone='neutral'] {
+  --ui-action-tone: var(--ink);
+}
+
+.ui-button[data-context='arbiter-question-option'] .ui-button__content,
+.ui-button[data-context='arbiter-question-option'] .ui-button__label {
+  width: 100%;
+  text-align: left;
+}
+
 /* Название собственной задачи остаётся целиком доступным в узкой группе доски. */
 .ui-button[data-context='grigdesk-task-title'] {
   height: auto;

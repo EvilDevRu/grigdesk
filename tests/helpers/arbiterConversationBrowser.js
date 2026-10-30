@@ -95,7 +95,14 @@ export async function arbiterConversationBrowser(t) {
     questions: [{
       id: 'q',
       text: 'Известно, где остановилась проверка?',
-      options: [{ id: 'unknown', label: 'Пока неизвестно' }],
+      options: [
+        { id: 'unknown', label: 'Пока неизвестно' },
+        { id: 'defer', label: 'Решить после следующего адресного плана (Рекомендуется)' },
+        {
+          id: 'keep',
+          label: 'Оставить проверку неизменной и согласовать следующий шаг после разбора журнала'
+        },
+      ],
       allowCustom: true
     }],
     proposals: [

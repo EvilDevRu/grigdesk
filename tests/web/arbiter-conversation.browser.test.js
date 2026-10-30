@@ -23,6 +23,32 @@ test('остановка → поток → F5 → обсуждение → ди
     await page.reload();
     await page.getByRole('heading', { name: 'Известно, где остановилась проверка?' }).waitFor();
     assert.equal(await page.getByText('Читаю сведения о текущей остановке.', { exact: true }).count(), 1);
+
+    const choices = page.locator('[data-context="arbiter-question-option"]');
+    const recommended = choices.filter({ hasText: 'Решить после следующего адресного плана' });
+
+    assert.equal(await recommended.getAttribute('data-tone'), 'success');
+    assert.equal(await recommended.getAttribute('data-variant'), 'solid');
+    await page.screenshot({ path: path.join(fx.artifacts, 'question-desktop.png'), fullPage: true });
+    await page.setViewportSize({ width: 380, height: 820 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+
+    const boxes = await choices.evaluateAll((buttons) => buttons.map((button) => {
+      const box = button.getBoundingClientRect();
+
+      return {
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        bottom: box.bottom
+      };
+    }));
+
+    assert.equal(boxes.length, 3);
+    assert.equal(boxes.every((box) => box.x === boxes[0].x && box.width === boxes[0].width), true);
+    assert.equal(boxes.slice(1).every((box, index) => box.y > boxes[index].bottom), true);
+    await page.screenshot({ path: path.join(fx.artifacts, 'question-mobile.png'), fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('button', { name: 'Пока неизвестно', exact: true }).click();
     await page.locator('[data-role="arbiter-diagnose"]:not([disabled])').waitFor();
     assert.equal(fx.gotoCalls(), 0);
