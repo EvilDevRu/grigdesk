@@ -89,6 +89,14 @@ export function formatPort(port: DockerPort): string {
   return `${port.published} → ${port.target}${port.protocol === 'tcp' ? '' : `/${port.protocol}`}`;
 }
 
+/**
+ * Длинный digest не вытесняет имя образа из строки контейнера.
+ * Полное значение остаётся в подсказке и поиске; короткий хеш различает версии.
+ */
+export function formatContainerImage(image: string): string {
+  return image.replace(/(@sha256:|^sha256:)([a-f0-9]{12})[a-f0-9]+$/iu, '$1$2…');
+}
+
 const STATE_LABELS: Record<string, string> = {
   running: 'работает',
   exited: 'остановлен',

@@ -107,15 +107,17 @@ async function ensureTerminal(): Promise<void> {
     return;
   }
 
+  const palette = getComputedStyle(host.value);
+
   term = new Terminal({
     cursorBlink: true,
     fontFamily: 'ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace',
     fontSize: 13,
     lineHeight: 1.3,
     theme: {
-      background: '#0a0c10',
-      foreground: '#e7eaf0',
-      cursor: '#5aa2ff',
+      background: palette.getPropertyValue('--surface').trim(),
+      foreground: palette.getPropertyValue('--ink').trim(),
+      cursor: palette.getPropertyValue('--accent').trim(),
     },
   });
   fit = new FitAddon();
@@ -302,7 +304,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   flex: 1;
-  background: var(--ground);
+  background: var(--surface);
 }
 
 .docker-exec__host :deep(.xterm) {

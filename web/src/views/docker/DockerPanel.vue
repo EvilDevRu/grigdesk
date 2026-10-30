@@ -338,6 +338,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   height: 100%;
+  background: var(--surface);
 }
 
 .docker-panel__surface {
@@ -380,18 +381,18 @@ onBeforeUnmount(() => {
   flex: none;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 24px;
-  padding: 12px 16px;
+  gap: 16px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--line);
-  background: var(--topbar);
+  background: var(--surface);
 }
 
 .docker-panel__summary {
   display: grid;
   grid-template-columns: repeat(4, auto);
-  gap: 24px;
+  gap: 16px;
   margin: 0;
-  padding-left: 24px;
+  padding-left: 16px;
   border-left: 1px solid var(--line);
   color: var(--ink-mid);
   font-size: 12px;
@@ -400,9 +401,9 @@ onBeforeUnmount(() => {
 
 .docker-summary-item {
   display: flex;
-  flex-direction: column-reverse;
-  justify-content: flex-end;
-  gap: 2px;
+  flex-direction: row-reverse;
+  align-items: baseline;
+  gap: 6px;
 }
 
 .docker-summary-item dd {
@@ -465,19 +466,34 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-@container docker-panel (max-width: 760px) {
+@container docker-panel (max-width: 900px) {
   .docker-panel__navigation {
     grid-template-columns: minmax(0, 1fr);
-    gap: 16px;
+    gap: 8px;
   }
 
   .docker-panel__summary {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 12px;
     width: 100%;
-    max-width: 440px;
     padding-left: 0;
     border-left: 0;
+  }
+
+  .docker-summary-item {
+    justify-content: flex-end;
+  }
+}
+
+@container docker-panel (max-width: 400px) {
+  .docker-panel__summary {
+    gap: 8px;
+  }
+
+  .docker-summary-item {
+    flex-direction: column-reverse;
+    align-items: flex-start;
+    gap: 0;
   }
 }
 

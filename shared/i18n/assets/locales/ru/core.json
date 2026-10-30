@@ -1121,5 +1121,6 @@
   "taskDesignAnalysisHint": "Оценка поможет определить сложность, риски и маршрут работы. Уточнения для агентов останутся в GrigDesk.",
   "taskDesignPipeline": "Конвейер",
   "taskDesignLaunch": "На конвейер",
-  "taskDesignPipelineRunning": "Конвейер работает"
+  "taskDesignPipelineRunning": "Конвейер работает",
+  "dockerUnusedImagesCount": "Неиспользуемых: {count}"
 }

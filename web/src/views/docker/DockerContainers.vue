@@ -30,6 +30,14 @@
       <p v-else>Созданные на этом хосте контейнеры появятся здесь после обновления.</p>
     </div>
 
+    <div v-if="groups.length" class="docker-containers__columns" aria-hidden="true">
+      <span>Контейнер / образ</span>
+      <span>Порты</span>
+      <span>CPU</span>
+      <span>Память</span>
+      <span>Действия</span>
+    </div>
+
     <article v-for="group in groups" :key="group.key" class="docker-group">
       <header class="docker-group__head">
         <UiIconButton
@@ -55,6 +63,7 @@
         </span>
         <div v-if="group.project" class="docker-group__actions">
           <UiButton
+            size="compact"
             :disabled="projectBusy(group)"
             @click="runProject(group, group.running ? 'restart' : 'start')"
           >
@@ -75,13 +84,6 @@
       </header>
 
       <div v-show="!collapsed.has(group.key)" :id="groupId(group)">
-        <div class="docker-group__columns" aria-hidden="true">
-          <span>Контейнер / образ</span>
-          <span>Порты</span>
-          <span>CPU</span>
-          <span>Память</span>
-          <span>Действия</span>
-        </div>
         <ul class="docker-list">
           <li
             v-for="container in group.items"
@@ -100,7 +102,9 @@
                   </span>
                 </div>
               </div>
-              <small class="docker-row__image" v-tooltip="container.image">{{ container.image }}</small>
+              <small class="docker-row__image" v-tooltip="container.image">
+                {{ formatContainerImage(container.image) }}
+              </small>
             </div>
 
             <div class="docker-row__ports">
@@ -155,6 +159,7 @@
                 </svg>
               </UiIconButton>
               <UiIconButton
+                class="docker-row__lifecycle"
                 role="embedded"
                 data-context="workspace-toolbar"
                 :label="`${container.state === 'running' ? 'Перезапустить' : 'Запустить'} ${container.name}`"
@@ -232,7 +237,7 @@ import {
   confirmDialog,
   vTooltip,
 } from '../../ui';
-import { formatPort, formatSize, stateLabel, stateTone } from './format';
+import { formatContainerImage, formatPort, formatSize, stateLabel, stateTone } from './format';
 import { dockerSettings } from './settings';
 
 interface DockerFeedback {
@@ -478,7 +483,7 @@ onBeforeUnmount(() => {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
 }
 
 .docker-containers__filters {
@@ -487,6 +492,13 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px 24px;
+  position: sticky;
+  top: -12px;
+  z-index: 2;
+  margin: -12px -12px 0;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
 }
 
 .docker-containers__search {
@@ -525,14 +537,16 @@ onBeforeUnmount(() => {
 
 .docker-group {
   min-width: 0;
+  margin-bottom: 12px;
 }
 
 .docker-group__head {
   display: flex;
   align-items: center;
   min-width: 0;
-  padding: 6px 0;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
   gap: 8px;
 }
 
@@ -596,28 +610,28 @@ onBeforeUnmount(() => {
   list-style: none;
 }
 
-.docker-group__columns,
+.docker-containers__columns,
 .docker-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(130px, 0.7fr) 54px 84px 156px;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) 54px 84px 168px;
   align-items: center;
   gap: 12px;
-  padding: 10px;
-  border-top: 1px solid var(--line);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
 }
 
-.docker-group__columns {
+.docker-containers__columns {
   padding-block: 6px;
   color: var(--ink-mid);
   font-size: 12px;
 }
 
-.docker-group__columns > :nth-child(3),
-.docker-group__columns > :nth-child(4) {
+.docker-containers__columns > :nth-child(3),
+.docker-containers__columns > :nth-child(4) {
   text-align: right;
 }
 
-.docker-group__columns > :last-child {
+.docker-containers__columns > :last-child {
   text-align: center;
 }
 
@@ -646,7 +660,7 @@ onBeforeUnmount(() => {
 
 .docker-row__name strong {
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
   overflow: hidden;
   font-size: 13px;
   font-weight: 600;
@@ -660,15 +674,15 @@ onBeforeUnmount(() => {
   margin: 2px 0 0;
   color: var(--ink-mid);
   font-size: 12px;
+  font-family: var(--mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .docker-row__state {
   display: flex;
-  flex: 0 1 auto;
-  max-width: 70%;
-  justify-content: flex-end;
+  flex: none;
+  max-width: 60%;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 8px;
@@ -694,7 +708,7 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   align-content: center;
   align-items: center;
-  gap: 6px;
+  gap: 0 12px;
 }
 
 .docker-port {
@@ -743,12 +757,16 @@ onBeforeUnmount(() => {
   gap: 2px;
 }
 
+.docker-row__lifecycle {
+  margin-left: 8px;
+}
+
 .docker-containers__message {
-  margin: 0;
+  margin: 8px 0;
 }
 
 @container docker-containers (max-width: 960px) {
-  .docker-group__columns {
+  .docker-containers__columns {
     display: none;
   }
 
@@ -849,8 +867,7 @@ onBeforeUnmount(() => {
   .docker-row__actions {
     grid-column: 1 / -1;
     grid-row: 4;
-    padding-top: 8px;
-    border-top: 1px solid var(--line);
+    padding-top: 0;
   }
 }
 @media (max-height: 500px) {

@@ -11,6 +11,7 @@
         </small>
       </div>
       <UiButton
+        size="compact"
         :loading="store.usageLoading"
         :disabled="cleaning"
         @click="store.loadUsage({ force: true })"
@@ -278,7 +279,7 @@ async function clean(): Promise<void> {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .docker-cleanup__head {
@@ -299,15 +300,15 @@ async function clean(): Promise<void> {
 }
 
 .docker-cleanup__head p {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--ink-mid);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
 .docker-cleanup__head small {
   display: block;
-  margin-top: 6px;
+  margin-top: 4px;
   color: var(--ink-mid);
   font-size: 12px;
   line-height: 1.5;
@@ -351,7 +352,7 @@ async function clean(): Promise<void> {
 
 .docker-usage__description small {
   display: block;
-  margin-top: 5px;
+  margin-top: 3px;
   color: var(--ink-mid);
   font-size: 12px;
   line-height: 1.5;
@@ -423,7 +424,7 @@ async function clean(): Promise<void> {
 }
 
 .docker-cleanup__total {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
 

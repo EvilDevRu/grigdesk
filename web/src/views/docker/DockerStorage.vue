@@ -7,11 +7,11 @@
           <p>Постоянные данные контейнеров. Неиспользуемых: {{ unusedVolumes }}.</p>
         </div>
         <UiCheckbox v-model="onlyUnusedVolumes">Только неиспользуемые</UiCheckbox>
+        <p v-if="!allowVolumeRemoval" class="docker-storage__note">
+          Удаление томов выключено в настройках плагина.
+        </p>
       </header>
 
-      <p v-if="!allowVolumeRemoval" class="docker-storage__note">
-        Удаление томов выключено в настройках плагина.
-      </p>
       <p v-if="!visibleVolumes.length" class="docker-storage__empty">
         {{ store.volumes.length ? 'Неиспользуемых томов нет.' : 'Томов пока нет.' }}
       </p>
@@ -25,10 +25,11 @@
               <span :class="{ 'is-used': volume.inUse }">
                 {{ volume.inUse ? 'используется' : 'не используется' }}
               </span>
+              <span v-if="volume.usedBy.length" class="docker-item__used"
+                    v-tooltip="volume.usedBy.join(', ')">
+                Контейнеры: {{ volume.usedBy.join(', ') }}
+              </span>
             </div>
-            <p v-if="volume.usedBy.length" class="docker-item__used" v-tooltip="volume.usedBy.join(', ')">
-              Контейнеры: {{ volume.usedBy.join(', ') }}
-            </p>
           </div>
 
           <div class="docker-item__end">
@@ -246,9 +247,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .docker-storage {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
   min-width: 0;
-  flex-direction: column;
   gap: 24px;
 }
 
@@ -294,6 +296,7 @@ onBeforeUnmount(() => {
 }
 
 .docker-storage__note {
+  flex-basis: 100%;
   margin: 0;
 }
 
@@ -354,7 +357,8 @@ onBeforeUnmount(() => {
 }
 
 .docker-item__used {
-  margin: 5px 0 0;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   color: var(--ink-mid);
   font-size: 12px;
@@ -378,6 +382,19 @@ onBeforeUnmount(() => {
 
 .docker-storage__message {
   margin: 0;
+  grid-column: 1 / -1;
+}
+
+@container docker-panel (min-width: 1100px) {
+  .docker-storage {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+  }
+
+  .docker-storage__head {
+    min-height: 80px;
+    align-content: start;
+  }
 }
 
 @container docker-panel (max-width: 560px) {

@@ -1101,5 +1101,6 @@
   "taskDesignAnalysisHint": "Assess complexity, risks and the work route. Clarifications for agents stay in GrigDesk.",
   "taskDesignPipeline": "Pipeline",
   "taskDesignLaunch": "Run pipeline",
-  "taskDesignPipelineRunning": "Pipeline running"
+  "taskDesignPipelineRunning": "Pipeline running",
+  "dockerUnusedImagesCount": "Unused: {count}"
 }

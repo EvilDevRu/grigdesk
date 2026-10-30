@@ -252,7 +252,7 @@ onBeforeUnmount(disconnect);
   min-height: 0;
   flex: 1;
   padding: 12px;
-  background: var(--ground);
+  background: var(--surface);
   overflow: auto;
 }
 

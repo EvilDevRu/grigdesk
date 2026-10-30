@@ -1,12 +1,5 @@
 <template>
   <div class="docker-images">
-    <header class="docker-images__head">
-      <div>
-        <h3>Локальные образы <span>{{ store.images.length }}</span></h3>
-        <p>Образы для запуска контейнеров. Неиспользуемых: {{ unusedCount }}.</p>
-      </div>
-    </header>
-
     <div class="docker-images__filters">
       <div class="docker-images__search">
         <UiSearchInput
@@ -15,7 +8,10 @@
           aria-label="Поиск образа"
         />
       </div>
-      <UiCheckbox v-model="onlyUnused">Только неиспользуемые</UiCheckbox>
+      <div class="docker-images__filter-options">
+        <UiCheckbox v-model="onlyUnused">Только неиспользуемые</UiCheckbox>
+        <span class="docker-images__caption">{{ t('core.dockerUnusedImagesCount', { count: unusedCount }) }}</span>
+      </div>
     </div>
 
     <p v-if="!visible.length" class="docker-images__empty">
@@ -29,10 +25,10 @@
           <div class="docker-image__meta">
             <span class="docker-image__id">{{ image.shortId }}</span>
             <span>создан {{ formatAge(image.createdAt) }} назад</span>
+            <span v-if="image.inUse" class="docker-image__used" v-tooltip="image.usedBy.join(', ')">
+              Контейнеры: {{ image.usedBy.join(', ') }}
+            </span>
           </div>
-          <p v-if="image.inUse" class="docker-image__used" v-tooltip="image.usedBy.join(', ')">
-            Контейнеры: {{ image.usedBy.join(', ') }}
-          </p>
         </div>
 
         <div class="docker-image__details">
@@ -78,6 +74,7 @@ import { computed, onBeforeUnmount, ref } from 'vue';
 
 import type { DockerImage } from '../../../../shared/plugins/docker/dockerContracts';
 
+import { t } from '../../services/locale';
 import { useDockerStore } from '../../stores/docker';
 import { UiCheckbox, UiIconButton, UiInlineMessage, UiSearchInput, confirmDialog, vTooltip } from '../../ui';
 import { formatAge, formatSize, formatTags } from './format';
@@ -154,37 +151,29 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-.docker-images__head h3 {
+.docker-images__filter-options {
   display: flex;
   align-items: center;
-  margin: 0;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
+  flex-wrap: wrap;
+  gap: 8px 20px;
 }
 
-.docker-images__head h3 span {
+.docker-images__caption {
   color: var(--ink-mid);
   font-size: 12px;
-  font-weight: 500;
-}
-
-.docker-images__head p {
-  margin: 6px 0 0;
-  color: var(--ink-mid);
-  font-size: 12px;
-  line-height: 1.5;
 }
 
 .docker-images__filters {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px 16px;
+  justify-content: space-between;
+  gap: 12px 24px;
 }
 
 .docker-images__search {
-  flex: 1 1 230px;
+  min-width: 0;
+  flex: 0 1 420px;
 }
 
 .docker-images__empty {
@@ -204,9 +193,9 @@ onBeforeUnmount(() => {
 
 .docker-image {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) 100px 140px auto;
   align-items: center;
-  padding: 10px 0;
+  padding: 10px;
   border-top: 1px solid var(--line);
   gap: 12px;
 }
@@ -242,7 +231,8 @@ onBeforeUnmount(() => {
 }
 
 .docker-image__used {
-  margin: 5px 0 0;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   color: var(--ink-mid);
   font-size: 12px;
@@ -251,21 +241,20 @@ onBeforeUnmount(() => {
 }
 
 .docker-image__details {
-  display: flex;
-  align-items: flex-end;
-  flex-direction: column;
-  gap: 6px;
+  display: contents;
 }
 
 .docker-image__size {
   font-family: var(--mono);
   font-size: 13px;
+  text-align: right;
   white-space: nowrap;
 }
 
 .docker-image__tag {
   color: var(--ink-mid);
   font-size: 12px;
+  text-align: right;
   white-space: nowrap;
 }
 
@@ -281,11 +270,18 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
-@container docker-panel (max-width: 560px) {
+@container docker-panel (max-width: 760px) {
   .docker-images__search {
     flex-basis: 100%;
   }
 
+  .docker-images__filter-options {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+@container docker-panel (max-width: 600px) {
   .docker-image {
     grid-template-columns: minmax(0, 1fr) auto;
     padding: 10px 0;
@@ -297,6 +293,7 @@ onBeforeUnmount(() => {
   }
 
   .docker-image__details {
+    display: flex;
     align-items: center;
     flex-direction: row;
     flex-wrap: wrap;
