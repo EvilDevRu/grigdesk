@@ -27,16 +27,17 @@ function modelQuestion(value: unknown) {
 }
 
 /**
- * Отсутствующее пояснение берётся из уже предложенного ожидаемого результата.
- * Action, его цель и указание сохраняются целиком для прежней проверки без догадок.
+ * Пропущенное пояснение берётся из результата, пропущенная рекомендация означает false.
+ * Явные значения не исправляются; action, цель и указание проверит строгий декодер.
  */
 function modelProposal(value: unknown) {
   const proposal = arbiterRecord(value, [
-    'id', 'kind', 'label', 'recommended', 'expectedResult',
-  ], ['explanation', 'diagnosticInstruction', 'action']);
+    'id', 'kind', 'label', 'expectedResult',
+  ], ['recommended', 'explanation', 'diagnosticInstruction', 'action']);
 
   return {
     ...proposal,
+    recommended: Object.hasOwn(proposal, 'recommended') ? proposal.recommended : false,
     explanation: Object.hasOwn(proposal, 'explanation') ? proposal.explanation : proposal.expectedResult,
   };
 }

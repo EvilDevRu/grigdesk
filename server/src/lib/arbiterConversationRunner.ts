@@ -156,7 +156,8 @@ export function buildConversationPrompt(
       }],
       technicalDetails: '',
     }),
-    'У каждого предложения обязательно explanation. У варианта вопроса только id и label, без description.',
+    'У каждого предложения обязательны explanation и recommended: true|false.',
+    'У варианта вопроса только id и label, без description.',
     ("Никаких лишних полей. summary до 2000 знаков, вопросы и " +
       "предложения до 4, варианты до 6."),
     'Нужен хотя бы вопрос или предложение. Один конкретный вопрос без предложений допустим.',

@@ -52,11 +52,45 @@ test('модельные description и пропущенные пояснени�
 
   assert.deepEqual(canonical.questions[0].options, [{ id: 'restore', label: 'Восстановить версию' }]);
   assert.equal(canonical.proposals.length, 2);
+  assert.deepEqual(canonical.proposals.map((proposal) => proposal.recommended), [true, false]);
   assert.equal(canonical.proposals[0].explanation, modelResult.proposals[0].expectedResult);
   assert.deepEqual(canonical.proposals[1].action, modelResult.proposals[1].action);
   assert.deepEqual(decodeArbiterResult(canonical, targets, 'tests'), canonical);
   assert.throws(() => decodeArbiterResult(modelResult, targets, 'tests'));
   assert.deepEqual(modelResult, before);
+});
+
+test('пропущенный recommended у неприоритетных diagnose и apply заполняется false', () => {
+  const row = parseArbiterModelResult(JSON.stringify(modelResult), targets, 'tests');
+
+  row.proposals.splice(1, 0, { ...row.proposals[0], id: 'other_diagnose' });
+  delete row.proposals[1].recommended;
+  delete row.proposals[2].recommended;
+
+  const expected = structuredClone(row);
+
+  expected.proposals[1].recommended = false;
+  expected.proposals[2].recommended = false;
+
+  assert.throws(() => decodeArbiterResult(row, targets, 'tests'), { code: 'invalid_request' });
+
+  const canonical = parseArbiterModelResult(JSON.stringify(row), targets, 'tests');
+
+  assert.deepEqual(canonical, expected);
+  assert.deepEqual(decodeArbiterResult(canonical, targets, 'tests'), canonical);
+});
+
+test('явный не-булевый recommended у diagnose и apply отклоняет весь итог', () => {
+  for (const index of [0, 1]) {
+    for (const recommended of [null, 'false', 'true', 0, 1, [], {}]) {
+      const row = structuredClone(modelResult);
+
+      row.proposals[index].recommended = recommended;
+
+      assert.throws(() => parseArbiterModelResult(JSON.stringify(row), targets, 'tests'),
+        { code: 'bad_model_reply' });
+    }
+  }
 });
 
 test('модельные послабления не принимают неизвестные поля, цели и повреждённые указания', () => {

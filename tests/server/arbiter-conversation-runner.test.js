@@ -8,6 +8,7 @@ import { resolveArbiterTarget } from '../../server/src/lib/factoryArbiter.ts';
 import { resolveModelRef } from '../../server/src/lib/chat/modelRef.ts';
 import { createGlmFakeRuntime } from '../helpers/glmFakeRuntime.mts';
 import {
+  buildConversationPrompt,
   projectArbiterFrames,
   runArbiterConversation
 } from '../../server/src/lib/arbiterConversationRunner.ts';
@@ -146,6 +147,13 @@ async function fixture(t) {
   };
 }
 
+test('промпт текстом требует explanation и булевый recommended у каждого предложения', async (t) => {
+  const fx = await fixture(t);
+  const prompt = buildConversationPrompt(fx.doc, fx.context, 'start');
+
+  assert.match(prompt, /У каждого предложения обязательны explanation и recommended: true\|false\./u);
+});
+
 test('проверенный auto доходит до исполнителя и разбор сохраняет результат', async (t) => {
   const fx = await fixture(t);
   const modes = [];
@@ -235,7 +243,6 @@ test('отклонения оформления GLM сохраняют вопр�
       id: 'diagnose',
       kind: 'diagnose',
       label: 'Проверить журнал',
-      recommended: true,
       expectedResult: 'Подтверждение причины.',
       diagnosticInstruction: 'Прочитай журнал.',
     }],
@@ -260,6 +267,7 @@ test('отклонения оформления GLM сохраняют вопр�
   assert.equal(saved.operations[0].outcome, 'completed');
   assert.deepEqual(saved.result.questions[0].options, [{ id: 'known', label: 'Причина известна' }]);
   assert.equal(saved.result.proposals[0].explanation, 'Подтверждение причины.');
+  assert.equal(saved.result.proposals[0].recommended, false);
 });
 
 test('публичный текст сохранён до завершения executor; fallback не повторяет кадр', async (t) => {
