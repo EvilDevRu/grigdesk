@@ -1519,7 +1519,12 @@ section.wizard-panel { display: grid; gap: 16px; }
   .video-hero.compact .lead { display: none; }
   .upload-icon { width: 43px; height: 43px; border-radius: 12px; }
   .meeting-summary, .transcript, .drafts { padding: 15px; border-radius: 14px; }
-  .dhead { align-items: flex-start; }
+  .dhead {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .dhead > .section-title { flex: 1 1 220px; }
+  .dhead > .btn { flex: none; }
   .draft { padding: 13px; }
   .shot { align-items: stretch; flex-direction: column; }
   .shot-open { align-self: flex-start; }

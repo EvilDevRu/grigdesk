@@ -10,6 +10,7 @@
 - [Кадр записи: превью до постановки и вложение к задаче](frame-preview-and-attachments.md)
 - [Кому и в какой проект](task-assignment.md)
 - [Пошаговый мастер вместо одной длинной страницы](meeting-wizard.md)
+- [Задачи на телефоне: полная подпись добавления и перенос шапки](phone-task-actions.md)
 - [Приём файла: список расширений, а не одни MIME-маски](upload-file-extensions.md)
 - [Разбор на несколько задач](meeting-task-splitting.md)
 - [Разбор переживает уход со страницы](persistent-analysis.md)
