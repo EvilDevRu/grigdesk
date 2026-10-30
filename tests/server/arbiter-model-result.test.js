@@ -93,19 +93,40 @@ test('явный не-булевый recommended у diagnose и apply откло
   }
 });
 
-test('модельные послабления не принимают неизвестные поля, цели и повреждённые указания', () => {
+test('посторонние поля вопроса, варианта и предложения удаляются; allowCustom по умолчанию true', () => {
+  const row = structuredClone(modelResult);
+
+  delete row.questions[0].allowCustom;
+  row.questions[0].title = 'Лишний заголовок';
+  row.questions[0].options[0].description = { arbitrary: ['Данные оформления'] };
+  row.questions[0].options[0].command = 'Не выполняется';
+  row.proposals[0].confidence = 0.9;
+  row.proposals[1].details = { extra: true };
+
+  const canonical = parseArbiterModelResult(JSON.stringify(row), targets, 'tests');
+
+  assert.equal(canonical.questions[0].allowCustom, true);
+  assert.equal(Object.hasOwn(canonical.questions[0], 'title'), false);
+  assert.deepEqual(canonical.questions[0].options, [{ id: 'restore', label: 'Восстановить версию' }]);
+  assert.equal(Object.hasOwn(canonical.proposals[0], 'confidence'), false);
+  assert.equal(Object.hasOwn(canonical.proposals[1], 'details'), false);
+  assert.deepEqual(decodeArbiterResult(canonical, targets, 'tests'), canonical);
+  assert.throws(() => decodeArbiterResult(row, targets, 'tests'));
+});
+
+test('модельные послабления не принимают повреждённые известные поля, цели и указания', () => {
   const mutations = [
     (row) => {
       row.command = 'outside';
     },
     (row) => {
-      row.questions[0].options[0].command = 'outside';
+      row.questions[0].allowCustom = false;
     },
     (row) => {
-      row.questions[0].options[0].description = { action: 'outside' };
+      row.questions[0].options[0].label = { action: 'outside' };
     },
     (row) => {
-      row.questions[0].options[0].description = 'x'.repeat(2001);
+      row.questions[0].options[0].label = 'x'.repeat(501);
     },
     (row) => {
       row.questions[0].options.push(row.questions[0].options[0]);

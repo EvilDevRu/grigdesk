@@ -1,29 +1,37 @@
 import {
-  ARBITER_LIMITS,
   ArbiterConversationError,
   arbiterRecord,
-  arbiterText,
   decodeArbiterResult,
 } from '../../../shared/pipeline/arbiterConversation.ts';
 import type { ArbiterTarget } from '../../../shared/pipeline/arbiterConversation.ts';
 
 /**
- * Вариант вопроса модели может содержать пояснение, которое не участвует в выборе.
- * Удаляется только проверенное текстовое description; остальные поля проверит строгий декодер.
+ * На границе модели выбирает известные поля, не сохраняя постороннее оформление.
+ * Наличие обязательных полей и их значения по-прежнему проверяются строго.
+ */
+function modelRecord(value: unknown, required: string[], optional: string[] = []) {
+  const keys = value && typeof value === 'object' ? Object.keys(value) : [];
+  const source = arbiterRecord(value, required, keys);
+
+  return Object.fromEntries([...required, ...optional]
+    .filter((key) => Object.hasOwn(source, key))
+    .map((key) => [key, source[key]]));
+}
+
+/**
+ * Вопрос без allowCustom допускает свой ответ, как и канонический вопрос.
+ * Дополнительные поля вопроса и вариантов не участвуют в выборе и удаляются.
  */
 function modelQuestion(value: unknown) {
-  const question = arbiterRecord(value, ['id', 'text', 'options', 'allowCustom']);
-  const options = Array.isArray(question.options) ? question.options.map((value) => {
-    const option = arbiterRecord(value, ['id', 'label'], ['description']);
+  const question = modelRecord(value, ['id', 'text', 'options'], ['allowCustom']);
+  const options = Array.isArray(question.options)
+    ? question.options.map((value) => modelRecord(value, ['id', 'label'])) : question.options;
 
-    if (Object.hasOwn(option, 'description')) {
-      arbiterText(option.description, ARBITER_LIMITS.summary, true);
-    }
-
-    return { id: option.id, label: option.label };
-  }) : question.options;
-
-  return { ...question, options };
+  return {
+    ...question,
+    options,
+    allowCustom: Object.hasOwn(question, 'allowCustom') ? question.allowCustom : true,
+  };
 }
 
 /**
@@ -31,7 +39,7 @@ function modelQuestion(value: unknown) {
  * Явные значения не исправляются; action, цель и указание проверит строгий декодер.
  */
 function modelProposal(value: unknown) {
-  const proposal = arbiterRecord(value, [
+  const proposal = modelRecord(value, [
     'id', 'kind', 'label', 'expectedResult',
   ], ['recommended', 'explanation', 'diagnosticInstruction', 'action']);
 
@@ -43,8 +51,8 @@ function modelProposal(value: unknown) {
 }
 
 /**
- * Только граница модели допускает известные отклонения оформления ответа.
- * Durable/API-контракт остаётся строгим; ошибочный JSON и исполняемые поля не публикуются.
+ * Только граница модели убирает посторонние поля и восполняет безопасные значения.
+ * Durable/API-контракт и вложенный action остаются строгими; полномочия не расширяются.
  */
 export function parseArbiterModelResult(
   text: string,
