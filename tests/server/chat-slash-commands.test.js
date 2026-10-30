@@ -282,9 +282,16 @@ test('/api/providers отдаёт commands каждого исполнителя
   const adapters = new Map([
     ['fake', stubAdapter('fake', () => { // намеренно SYNC: контракт не обязывает async
       calls += 1;
+
       return [
         { cmd: '/status', desc: 'Показать статус', run: 'prompt' },
         { cmd: '$pr-fixes', desc: 'Критические замечания PR', run: 'prompt' },
+        {
+          cmd: '/debug',
+          desc: 'Отладка по логам',
+          run: 'prompt',
+          kind: 'skill',
+        },
         { cmd: '/goal', desc: 'Автономная цель', run: 'none', hint: 'только в TUI' },
         { cmd: '/bad', desc: '', run: 'prompt' }, // невалидная запись отбрасывается
         { cmd: '$bad skill', desc: 'Пробел в имени', run: 'prompt' },
@@ -310,6 +317,12 @@ test('/api/providers отдаёт commands каждого исполнителя
   assert.deepEqual(byId.get('fake')?.commands, [
     { cmd: '/status', desc: 'Показать статус', run: 'prompt' },
     { cmd: '$pr-fixes', desc: 'Критические замечания PR', run: 'prompt' },
+    {
+      cmd: '/debug',
+      desc: 'Отладка по логам',
+      run: 'prompt',
+      kind: 'skill',
+    },
     { cmd: '/goal', desc: 'Автономная цель', run: 'none', hint: 'только в TUI' },
   ]);
   assert.deepEqual(byId.get('broken')?.commands, [], 'падение commands() не валит реестр');
@@ -509,6 +522,12 @@ async function saveChat(app, id, provider, model) {
 const SLASH_COMMANDS = [
   { cmd: '/status', desc: 'Статус сессии', run: 'prompt' },
   { cmd: '$pr-fixes', desc: 'Критические замечания', run: 'prompt' },
+  {
+    cmd: '/debug',
+    desc: 'Отладка по логам',
+    run: 'prompt',
+    kind: 'skill',
+  },
   { cmd: '/goal', desc: 'Автономная цель', run: 'none', hint: 'только в TUI' },
 ];
 
@@ -565,6 +584,7 @@ test('slashCommand валидация: чужая команда, none-кома�
     { message: '/hack', slashCommand: '/hack' }, // нет в списке исполнителя
     { message: '/goal', slashCommand: '/goal' }, // run: 'none' — исполнять нельзя
     { message: '$pr-fixes', slashCommand: '$pr-fixes' }, // skill — обычный prompt, не служебный ход
+    { message: '/debug', slashCommand: '/debug' }, // /skill тоже сохраняет обычный контекст
     { message: 'обычный текст', slashCommand: '/status' }, // подмена текста флагом
     { message: '/status', slashCommand: '/status; rm -rf /' }, // мусор в поле
   ]) {
@@ -575,7 +595,7 @@ test('slashCommand валидация: чужая команда, none-кома�
   assert.equal(executor.calls.length, 0, 'ни один невалидный ход не дошёл до executor-а');
   // Форма имени проверяется ДО чтения каталога: `$pr-fixes` и `/status; rm -rf /`
   // отказ получают без него (у codex это был бы подъём app-server ради 400).
-  assert.equal(executor.commandCalls.length, 3, 'каталог читается только для `/`-формы');
+  assert.equal(executor.commandCalls.length, 4, 'каталог читается только для `/`-формы');
 });
 
 test('служебный ход claude не автоповторяется при пустом выводе, ответ — плашка note', async (t) => {

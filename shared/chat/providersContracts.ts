@@ -75,6 +75,7 @@ export interface ProviderEntry {
     cmd: string;
     desc?: string;
     run?: string;
+    kind?: 'skill';
     args?: boolean | string;
     hint?: string;
   }>;

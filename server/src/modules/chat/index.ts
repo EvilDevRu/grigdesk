@@ -313,7 +313,11 @@ interface ChatExecutor {
   turnFailureRules?: ExecutorAdapter['turnFailureRules'];
   modes?: (config: GrigDeskConfig) => Promise<Array<{ id: string }> | null>;
   normalizePermissionMode?: ExecutorAdapter['normalizePermissionMode'];
-  commands?: (config: GrigDeskConfig) => Promise<Array<{ cmd: string; run?: string }>>;
+  commands?: (config: GrigDeskConfig) => Promise<Array<{
+    cmd: string;
+    run?: string;
+    kind?: 'skill';
+  }>>;
   run: NonNullable<ExecutorAdapter['run']>;
   sessionBinding?: ExecutorAdapter['sessionBinding'];
   session?: LiveExecutor['session'] & { mode?: string };
@@ -3179,16 +3183,18 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     // текст хода — ей самой (с необязательными аргументами через пробел). Иначе полем
     // можно было бы обойти титул-хук и договорённости о повторах для обычного текста.
     let slash = null;
+
     if (!compact && slashCommand != null) {
       const want = String(slashCommand);
       const text = String(message || '').trim();
-      // `$skill` тоже лежит в каталоге commands(), но это обычный model prompt:
-      // служебный флаг разрешён только настоящим `/`-командам CLI. Форму проверяем
+      // Навыки тоже лежат в commands(), но это обычный ход модели, включая /имя.
+      // Служебный флаг разрешён только командам CLI без kind: 'skill'. Форму проверяем
       // ДО чтения каталога: у codex это подъём app-server, а ответ всё равно 400.
       const list = /^\/\S+$/.test(want) && typeof executor?.commands === 'function'
         ? await Promise.resolve(executor.commands(config)).catch(() => [])
         : [];
-      slash = list.find((c) => c.cmd === want && c.run === 'prompt'
+
+      slash = list.find((c) => c.cmd === want && c.run === 'prompt' && c.kind !== 'skill'
         && (text === c.cmd || text.startsWith(`${c.cmd} `))) || null;
 
       if (!slash) {

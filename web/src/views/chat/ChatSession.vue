@@ -136,21 +136,18 @@
                             :provider="prov.modelOf(option.value).provider!" :size="14"
                             :style="{ color: prov.modelOf(option.value).provider?.color }" />
             </template>
-            <option v-if="modelId && (!currentModel || current.provider?.chatEnabled === false)"
-                    :value="modelId" :hidden="current.provider?.chatEnabled === false" disabled>
+            <option v-if="modelId && (!currentModel || currentModelHidden)"
+                    :value="modelId" :hidden="currentModelHidden" disabled>
               {{ currentModel ? modelOptionLabel(currentModel) : modelId + ' — нет в реестре' }}
             </option>
             <template v-if="prov.loaded || prov.providers.length">
-              <!-- «недоступен» — итог последней проверки исполнителя, а не запрет: причина
-                   бывает временной (сеть, тайм-аут probe, минутный разлогин), и блокировка выбора
-                   отбирала у человека решение из-за одного неудачного опроса. Пометка остаётся,
-                   отказ приходит от самого запуска и называет настоящую причину. -->
-              <optgroup v-for="p in provGroups" :key="p.id"
-                        :label="p.name + (p.available ? '' : ' — недоступен')">
+              <!-- Вкладки и модели строятся только по доступным исполнителям.
+                   Сохранённый выбор недоступного исполнителя остаётся скрытым native option. -->
+              <optgroup v-for="p in provGroups" :key="p.id" :label="p.name">
                 <!-- «?» — модели нет в каталоге установленного CLI (он про неё не знает) -->
                 <option v-for="m in p.models" :key="m.id" :value="m.id"
                         :data-description="modelOptionDescription(m)"
-                        :title="modelOptionTitle(m, p)">
+                        :title="modelOptionTitle(m)">
                   {{ modelOptionLabel(m) }}
                 </option>
               </optgroup>
@@ -979,7 +976,17 @@ onUnmounted(() => {
 const modelId = computed(() => current.value.id);
 const effortValue = computed(() => sess.value?.effort || '');
 const currentModel = computed(() => current.value.model);
+const currentModelHidden = computed(() => Boolean(current.value.provider)
+  && !isSelectableProvider(current.value.provider));
 const fmtTokens = (value: unknown) => Math.max(0, Number(value) || 0).toLocaleString('ru');
+
+/**
+ * Каталог выбора предлагает только исполнителей с подтверждённой доступностью.
+ * Это не меняет сохранённую модель или память уже открытого разговора.
+ */
+function isSelectableProvider(provider: Pick<ProviderEntry, 'available' | 'chatEnabled'> | null): boolean {
+  return provider?.available === true && provider.chatEnabled !== false;
+}
 
 /**
  * Каталог Codex намеренно не сообщает окно. Для выбранной модели точнее всего замер
@@ -1011,13 +1018,10 @@ function modelContextTitle(model: ProviderModelEntry | null, label: string) {
 const currentModelTitle = computed(() => (
   currentModel.value ? modelContextTitle(currentModel.value, currentModel.value.name) : 'Модель'
 ));
-// Подсказка пункта: окно модели и оговорки каталога. Недоступность исполнителя
-// названа здесь же и словами: она предупреждает о вероятном отказе, но выбор не отменяет.
-const modelOptionTitle = (
-  model: ProviderModelEntry, provider: { available?: boolean } | null,
-) => modelContextTitle(model, model.name)
-  + (model.unknown ? ' · нет в каталоге установленного CLI' : '')
-  + (provider?.available === false ? ' · исполнитель недоступен по последней проверке' : '');
+// Подсказка доступной модели сохраняет окно и оговорки исходного каталога.
+// Недоступные исполнители отсекаются до создания вариантов списка.
+const modelOptionTitle = (model: ProviderModelEntry) => modelContextTitle(model, model.name)
+  + (model.unknown ? ' · нет в каталоге установленного CLI' : '');
 const modelOptionLabel = (model: ProviderModelEntry) => model.name
   + (model.contextUnverified && !model.contextRuntimeOnly ? ' · окно не подтверждено' : '')
   + (model.unknown ? ' ?' : '');
@@ -1039,7 +1043,7 @@ function modelOptionDescription(model: ProviderModelEntry): string {
 
 // Группы моделей для селекта (что именно видно — решает стор, правило одно на весь GrigDesk).
 const provGroups = computed(() => prov.providers
-  .filter((p) => p.chatEnabled !== false)
+  .filter(isSelectableProvider)
   .map((p) => ({ ...p, models: prov.visibleModels(p, modelId.value) }))
   .filter((p) => p.models.length));
 const FALLBACK_MODELS = ['opus', 'sonnet', 'haiku', 'fable']; // пока реестр не загрузился
@@ -1939,11 +1943,11 @@ async function submit() {
   }
 
   // Точное имя пункта выполняем через его dispatch. `/`-команды провайдера идут
-  // служебным ходом, `$skill` — обычным prompt; run:'none' остаётся обычным сообщением.
+  // служебным ходом, навыки — обычным prompt; run:'none' остаётся обычным сообщением.
   // Сверка регистронезависимая — как в меню: имя навыка приходит от исполнителя.
   const exact = allCommands.value.find((c) => c.cmd.toLowerCase() === t.toLowerCase() && c.run !== 'none');
 
-  if (exact && exact.cmd.startsWith('/')) {
+  if (exact && exact.cmd.startsWith('/') && exact.kind !== 'skill') {
     runCommand(exact);
 
     return;
@@ -2141,7 +2145,7 @@ function onKey(e: KeyboardEvent) {
   }
 }
 
-// ── Команды и навыки: «/» открывает CLI-команды, «$» — skills Codex ──
+// ── Команды и навыки: «/» открывает команды и навыки Harness, «$» — навыки Codex ──
 // Две секции: клиентские команды GrigDesk и команды CLI выбранной модели (провайдерский
 // список приезжает в /api/providers, контракт — server/src/lib/executors/index.js).
 interface ChatCommand {
@@ -2149,6 +2153,7 @@ interface ChatCommand {
   desc?: string;
   source: string;
   run?: string;
+  kind?: 'skill';
   args?: boolean | string;
   hint?: string;
 }
@@ -2304,11 +2309,11 @@ async function runCommand(command: string | ChatCommand) {
 
       return;
     }
-    // `$skill` — обычный model prompt: Codex сам раскрывает явное упоминание в
-    // содержимое SKILL.md. `slashCommand` нужен только локальным `/`-командам CLI.
+    // Навык — обычный model prompt: runtime сам раскрывает явное упоминание в
+    // содержимое SKILL.md. `slashCommand` нужен только служебным командам CLI.
     // Вложения тоже уезжают только с навыком: у служебного хода их не бывает,
-    // а «переделай вот эту картинку» — обычный сценарий $-навыка.
-    const skill = c.cmd.startsWith('$');
+    // а «переделай вот эту картинку» — обычный сценарий навыка.
+    const skill = c.kind === 'skill' || c.cmd.startsWith('$');
 
     if (skill && sess.value.sending) {
       input.value = c.cmd;

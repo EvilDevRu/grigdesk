@@ -90,7 +90,7 @@
 
 - [Области дополнительных настроек: чаты, конвейеры и непроверенная ACP-схема](native-settings-consumers.md)
 
-- [Недоступность исполнителя не отнимает выбор его моделей](unavailable-executor-model-selection.md)
+- [Доступность моделей: фильтр чата и выбор в настройках](unavailable-executor-model-selection.md)
 
 ### Kimi
 
@@ -186,6 +186,7 @@
 
 - [Выбор модели: вкладки исполнителей, иконки, общий поиск, отключение и адаптив](model-picker.md)
 - [Компактное меню моделей на desktop: ряд иконок, поле поиска и тонкий фокус](model-picker-desktop.md)
+- [Выбор модели: скрытие недоступных вкладок, моделей и результатов поиска](model-picker-availability.md)
 
 - [Единые подписи окон лимитов: поповер, прогноз и строка чата на RU/EN](usage-window-labels.md)
 - [Видимость доплаты Kimi/Codex, пустые ответы и слияние снимков](extra-usage-visibility.md)
@@ -217,6 +218,7 @@
 - [Native gate и foreground-делегирование GLM](glm-native-gate.md) — proof до эффекта, точная связь ребёнка, журнал resume и remote ownership.
 - [Политика инструментов GLM: native gate чата и прежний hook Factory/ACP](glm-tool-policy.md)
 - [Навыки GLM: каталог пользователя и разрешённый загрузчик skill типом read](glm-skill-policy.md)
+- [Навыки GLM и DeepSeek в меню: общий каталог и обычный ход по /имени](harness-skill-menu.md)
 - [Субагенты GLM: исследование наследования и пробелов прежнего корневого сторожа](glm-subagent-boundaries.md)
 - [Native-контракты делегирования GLM: child never, окончательный guard, каталог, страницы истории и remote owner](glm-delegation-contracts.md)
 - [MCP у GLM: только grigdesk-work, готовность до prompt, потеря без переподключения](glm-mcp.md)

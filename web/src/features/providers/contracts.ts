@@ -123,6 +123,7 @@ export function isProvider(value: unknown): value is ProviderEntry {
     && (value.commands == null || (Array.isArray(value.commands)
       && value.commands.every((command) => isRecord(command) && typeof command.cmd === 'string'
         && fields(command, ['desc', 'run', 'hint'])
+        && (command.kind == null || command.kind === 'skill')
         && (command.args == null || ['string', 'boolean'].includes(typeof command.args)))))
     && ['settings', 'credentials', 'modes'].every((key) => value[key] == null
       || (Array.isArray(value[key]) && value[key].every(isRecord)));

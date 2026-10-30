@@ -21,6 +21,7 @@ import { runDeepSeekWebTurn } from '../deepseek/webRuntime.ts';
 import { mergeMcpServers, readProjectMcpServers } from '../deepseek/projectMcp.ts';
 import { readDeepSeekMcpStatus } from '../deepseek/mcpStatus.ts';
 import { deepSeekUsage } from '../deepseek/balance.ts';
+import { readHarnessSkillCommands } from '../deepseek/skillCommands.ts';
 import { DEEPSEEK_PROFILE_REVISION } from '../deepseek/profile.ts';
 import { RETRY_CONTRACT } from '../chat/retryContract.ts';
 import { DSH_TURN_FAILURE_RULES } from '../deepseek/turnFailureRules.ts';
@@ -93,6 +94,7 @@ export default {
   prepareRuntime: prepareDeepSeekChatRuntime,
   normalizePermissionMode: normalizeDeepSeekPermissionMode,
   name: 'DeepSeek',
+  commands: () => readHarnessSkillCommands(),
   vendor: 'DeepSeek',
   color: '#4D6BFE',
   order: 4,

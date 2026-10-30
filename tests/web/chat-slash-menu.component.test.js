@@ -278,6 +278,65 @@ test('Enter на Codex skill шлёт $skill без slashCommand', async (t) => 
   assert.equal(sendCalls[0][3]?.slashCommand, undefined);
 });
 
+for (const id of ['glm', 'deepseek']) {
+  test(`${id}: /навык виден в меню и уносит вложения обычным ходом`, async (t) => {
+    const provider = {
+      id,
+      name: id,
+      available: true,
+      models: [{ id: 'test-model', efforts: [] }],
+      commands: [{
+        cmd: '/debug',
+        desc: 'Отладка по логам',
+        run: 'prompt',
+        kind: 'skill',
+      }],
+    };
+    const { wrapper, sendCalls, flushPromises } = await mountChat(t, {
+      provider,
+      session: makeSession({ model: 'test-model', modelRef: { provider: id, model: 'test-model' } }),
+    });
+
+    await wrapper.trigger('drop', {
+      dataTransfer: { types: ['Files'], files: [new Blob(['png'], { type: 'image/png' })] },
+    });
+    await flushPromises();
+    await wrapper.find('textarea').setValue('/de');
+
+    assert.deepEqual(menuState(wrapper).heads, [id]);
+    assert.deepEqual(menuState(wrapper).items.map((item) => item.cmd), ['/debug']);
+
+    await wrapper.find('.cmd-menu button.cmd').trigger('click');
+    await flushPromises();
+
+    assert.equal(sendCalls.length, 1);
+    assert.deepEqual(sendCalls[0].slice(0, 2), ['slash-chat', '/debug']);
+    assert.deepEqual(sendCalls[0][2].map((attachment) => attachment.file), ['shot.png']);
+    assert.equal(sendCalls[0][3]?.slashCommand, undefined);
+    assert.equal(wrapper.findAll('.pend .chip').length, 0);
+  });
+}
+
+test('слэш-навык во время ответа идёт обычной очередью без повторного dispatch', async (t) => {
+  const { wrapper, sendCalls } = await mountChat(t, {
+    session: makeSession({ sending: true }),
+    provider: {
+      ...KIMI_PROVIDER,
+      commands: [{
+        cmd: '/debug',
+        desc: 'Отладка по логам',
+        run: 'prompt',
+        kind: 'skill',
+      }],
+    },
+  });
+
+  await wrapper.find('textarea').setValue('/de');
+  await wrapper.find('.cmd-menu button.cmd').trigger('click');
+
+  assert.deepEqual(sendCalls, [['slash-chat', '/debug', []]]);
+});
+
 // $skill — обычный ход модели, значит приложенные файлы обязаны уехать вместе с ним:
 // у служебной `/`-команды вложений не бывает, а «разбери вот этот скриншот» — обычный
 // сценарий навыка. Раньше файл молча оставался висеть в композере.

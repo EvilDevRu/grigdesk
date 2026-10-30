@@ -1,8 +1,5 @@
-// Выбор модели в чате при «недоступном» исполнителе. Смысл проверки: «недоступен» —
-// это итог последней проверки CLI, а не приговор. Причина бывает временной (сеть,
-// тайм-аут опроса, минутный разлогин), и раньше один неудачный опрос гасил в селекте
-// все модели исполнителя — решение отбиралось у человека. Пометка обязана остаться,
-// блокировка — нет: отказ приходит от самого запуска и называет настоящую причину.
+// Каталог выбора скрывает недоступных и отключённых исполнителей вместе с моделями.
+// Сохранённый выбор и память разговора при этом остаются прежними до действия человека.
 import assert from 'node:assert/strict';
 
 import { after, before, test } from 'node:test';
@@ -23,13 +20,11 @@ const PROVIDERS = [
     available: true,
     models: [{ id: 'claude-opus-5', name: 'Opus 5', efforts: [] }],
   },
-  // Опрос этого исполнителя не удался — реестр отдал его без доступности, но с моделями:
-  // каталог не стирается от непрочитанного бинаря.
   {
     id: 'codex',
     name: 'Codex',
     color: '#10a37f',
-    available: false,
+    available: true,
     models: [{ id: 'gpt-5.6-sol', name: 'GPT 5.6 Sol', efforts: [] }],
   },
 ];
@@ -183,30 +178,25 @@ async function mountChat(t, { initial = {}, reset = async () => true, binding = 
 const modelOption = (wrapper, id) => wrapper.findAll('.sel.model option')
   .find((option) => option.attributes('value') === id);
 
-test('модели недоступного исполнителя выбор не теряют', async (t) => {
+test('модели доступного исполнителя доступны для выбора', async (t) => {
   const { wrapper } = await mountChat(t);
   const option = modelOption(wrapper, 'gpt-5.6-sol');
 
-  assert.ok(option, 'модель недоступного исполнителя пропала из селекта');
-  assert.equal(option.attributes('disabled'), undefined, 'модель заблокирована по недоступности');
+  assert.ok(option, 'модель доступного исполнителя пропала из селекта');
+  assert.equal(option.attributes('disabled'), undefined);
   assert.equal(option.element.disabled, false);
 });
 
-test('недоступность названа в группе и в подсказке пункта', async (t) => {
+test('каталог доступных исполнителей не содержит пометок недоступности', async (t) => {
   const { wrapper } = await mountChat(t);
   const groups = wrapper.findAll('.sel.model optgroup');
   const labels = groups.map((group) => group.attributes('label'));
 
-  assert.deepEqual(labels, ['Claude', 'Codex — недоступен']);
-  assert.match(
-    modelOption(wrapper, 'gpt-5.6-sol').attributes('title'),
-    /исполнитель недоступен по последней проверке/u,
-  );
-  // У доступного исполнителя лишней оговорки в подсказке нет.
+  assert.deepEqual(labels, ['Claude', 'Codex']);
   assert.doesNotMatch(modelOption(wrapper, 'claude-opus-5').attributes('title'), /недоступен/u);
 });
 
-test('переключение на модель недоступного исполнителя доходит до стора', async (t) => {
+test('переключение на модель доступного исполнителя доходит до стора', async (t) => {
   const { wrapper, setModelCalls } = await mountChat(t);
 
   await wrapper.find('.sel.model select').setValue('gpt-5.6-sol');
@@ -399,7 +389,7 @@ test('SELECT-CHAT-01: отказ async reset сохраняет прежнюю �
   assert.equal(setModelCalls.length, 0);
 });
 
-test('SELECT-CHAT-02: видимый выбор недоступного исполнителя доходит до стора', async (t) => {
+test('SELECT-CHAT-02: видимый выбор доступного исполнителя доходит до стора', async (t) => {
   const { wrapper, session, setModelCalls, flushPromises } = await mountChat(t);
 
   await wrapper.get('.sel.model button.ui-select').trigger('click');
@@ -424,6 +414,53 @@ test('SELECT-CHAT-02: видимый выбор недоступного исп�
   assert.equal(session.modelRef.model, 'gpt-5.6-sol');
   assert.match(wrapper.get('.sel.model button.ui-select').text(), /GPT 5.6 Sol/u);
 });
+
+for (const unavailable of [[1], [0], [0, 1]]) {
+  test(`SELECT-CHAT-UNAVAILABLE: недоступные исполнители скрыты: ${unavailable.join(',')}`, async (t) => {
+    for (const index of unavailable) {
+      PROVIDERS[index].available = false;
+    }
+
+    t.after(() => {
+      for (const index of unavailable) {
+        PROVIDERS[index].available = true;
+      }
+    });
+
+    const { wrapper, session, setModelCalls, resetCalls, flushPromises } = await mountChat(t);
+    const trigger = wrapper.get('.sel.model button.ui-select');
+
+    assert.match(trigger.text(), /Opus 5/u);
+    assert.equal(wrapper.get('.sel.model select').element.value, 'claude-opus-5');
+    await trigger.trigger('click');
+    await flushPromises();
+
+    const popup = document.querySelector('.ui-select-popup');
+
+    for (const index of unavailable) {
+      const provider = PROVIDERS[index];
+      const tabs = [...popup.querySelectorAll('.ui-select-group-nav button')];
+      const native = modelOption(wrapper, provider.models[0].id);
+
+      assert.equal(tabs.some((button) => button.getAttribute('aria-label') === provider.name), false);
+      assert.equal(Boolean(native && !native.element.hidden), false);
+    }
+
+    popup.querySelector('[data-select-group="all"]')?.click();
+    await flushPromises();
+    assert.equal(popup.querySelectorAll('[role="option"]').length, PROVIDERS.length - unavailable.length);
+
+    const search = popup.querySelector('input[type="search"]');
+
+    search.value = unavailable.includes(0) ? 'Opus' : 'GPT';
+    search.dispatchEvent(new sharedBrowser.Event('input', { bubbles: true }));
+    await flushPromises();
+    assert.equal(popup.querySelectorAll('[role="option"]').length, 0);
+    assert.equal(session.modelRef.model, 'claude-opus-5');
+    assert.deepEqual(setModelCalls, []);
+    assert.deepEqual(resetCalls, []);
+  });
+}
 
 test('SELECT-CHAT-03: GLM показывает имена без wire-массива и длинных повторов', async (t) => {
   const id = JSON.stringify(['zai', 'glm-5.3']);

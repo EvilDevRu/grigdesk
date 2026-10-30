@@ -724,9 +724,9 @@ button.ui-select {
   opacity: 0.5;
 }
 
-/* Выбор модели оформлен полем рабочей панели и сохраняет общую сенсорную высоту.
-   Иконка, подпись и шеврон помещаются внутри одной рамки без подчёркивания текста. */
-.ui-select[data-role='chat-model'] {
+/* Все селекты шапки чата используют одну рамку, подложку и отступы.
+   Модель, режим и задача сохраняют общий сенсорный размер без отдельных скинов. */
+.ui-select[data-context='chat-session-toolbar'] {
   padding-inline: 8px 28px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -735,13 +735,13 @@ button.ui-select {
   -webkit-tap-highlight-color: transparent;
 }
 
-.ui-select[data-role='chat-model']:hover:not(:disabled),
-.ui-select[data-role='chat-model']:focus {
+.ui-select[data-context='chat-session-toolbar']:hover:not(:disabled),
+.ui-select[data-context='chat-session-toolbar']:focus {
   border-color: var(--line-2);
 }
 
-.ui-select[data-role='chat-model'][aria-expanded='true'],
-.ui-select[data-role='chat-model']:focus-visible {
+.ui-select[data-context='chat-session-toolbar'][aria-expanded='true'],
+.ui-select[data-context='chat-session-toolbar']:focus-visible {
   border-color: var(--accent);
 }
 

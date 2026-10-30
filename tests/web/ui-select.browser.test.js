@@ -62,6 +62,10 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
   const providers = chatCatalog();
   const glm = providers.at(-1);
 
+  // Кэш моделей Claude сохраняется в реестре, даже когда текущая проверка не прошла.
+  // Выбор обязан скрыть и вкладку, и эти прежние модели.
+  providers[0].available = false;
+
   providers.push({
     id: 'disabled-executor',
     name: 'Отключённый исполнитель',
@@ -121,6 +125,49 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
       const trigger = page.locator('button[data-role="chat-model"]');
 
       await trigger.waitFor();
+      await page.locator('.cs:not(.frozen)').waitFor();
+
+      const toolbarStyles = await page.locator('button[data-context="chat-session-toolbar"]')
+        .evaluateAll((buttons) => buttons.map((button) => {
+          const style = getComputedStyle(button);
+
+          return {
+            height: style.height,
+            padding: style.padding,
+            border: style.border,
+            radius: style.borderRadius,
+            background: style.backgroundColor,
+            chevron: style.backgroundPosition,
+            fontSize: style.fontSize,
+          };
+        }));
+
+      assert.equal(toolbarStyles.length, 3);
+      assert.deepEqual(toolbarStyles[0], toolbarStyles[1]);
+      assert.deepEqual(toolbarStyles[1], toolbarStyles[2]);
+      assert.equal(toolbarStyles[0].height, touch ? '44px' : '28px');
+      assert.equal(toolbarStyles[0].radius, '4px');
+      await page.locator('.cs-top').screenshot({
+        path: path.join(client.artifacts, `chat-header-${width}x${height}.png`),
+      });
+
+      const selectBounds = await page.locator('.bar .sel').evaluateAll((fields) => {
+        const boxes = fields.map((field) => field.getBoundingClientRect());
+        const left = Math.min(...boxes.map((box) => box.left)) - 4;
+        const top = Math.min(...boxes.map((box) => box.top)) - 4;
+
+        return {
+          x: left,
+          y: top,
+          width: Math.max(...boxes.map((box) => box.right)) - left + 4,
+          height: Math.max(...boxes.map((box) => box.bottom)) - top + 4,
+        };
+      });
+
+      await page.screenshot({
+        path: path.join(client.artifacts, `chat-selects-${width}x${height}.png`),
+        clip: selectBounds,
+      });
 
       if (touch) {
         await trigger.tap();
@@ -133,7 +180,8 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
       await popup.waitFor({ state: 'visible' });
       assert.equal(await popup.getByRole('option').count(), 4);
       assert.equal(await trigger.locator('svg').count(), 1);
-      assert.equal(await popup.locator('.ui-select-group-nav svg').count(), 6);
+      assert.equal(await popup.locator('.ui-select-group-nav svg').count(), 5);
+      assert.equal(await popup.getByRole('button', { name: 'Claude', exact: true }).count(), 0);
       assert.equal(await popup.locator('[role="option"] svg').count(), 4);
       assert.equal((await popup.innerText()).includes('Отключённый исполнитель'), false);
       assert.equal((await popup.innerText()).includes('["zai"'), false);
@@ -204,8 +252,11 @@ test('SELECT-CHAT-BROWSER: модели на десктопе, телефоне 
       await trigger.click();
       await popup.waitFor({ state: 'visible' });
       await popup.locator('[data-select-group="all"]').click();
-      assert.equal(await popup.getByRole('option').count(), 22);
+      assert.equal(await popup.getByRole('option').count(), 19);
       assert.equal((await popup.innerText()).includes('Скрытая модель'), false);
+      await popup.locator('input[type="search"]').fill('Opus');
+      assert.equal(await popup.getByRole('option').count(), 0);
+      assert.equal(await trigger.innerText(), 'GLM-4.7');
       await page.keyboard.press('Escape');
       await popup.waitFor({ state: 'hidden' });
     } finally {

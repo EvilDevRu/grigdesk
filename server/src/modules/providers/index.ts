@@ -121,10 +121,12 @@ const DIRECT_SSH_ENFORCEMENTS = new Set([
 // run ∈ prompt|none, desc до 120 символов.
 function normalizeCommands(list: unknown) {
   if (!Array.isArray(list)) return [];
+
   return (list as Array<{
     cmd?: unknown;
     desc?: unknown;
     run?: unknown;
+    kind?: unknown;
     hint?: unknown;
     args?: unknown;
   }>)
@@ -136,6 +138,7 @@ function normalizeCommands(list: unknown) {
       cmd: c.cmd as string,
       desc: (c.desc as string).trim().slice(0, 120),
       run: c.run,
+      ...(c.kind === 'skill' ? { kind: 'skill' as const } : {}),
       ...(c.hint ? { hint: String(c.hint).slice(0, 120) } : {}),
       ...(c.args ? { args: true } : {}),
     }));

@@ -26,6 +26,7 @@ import type { PreparedExecutorRuntime } from '../executorSettings/types.ts';
 import type { GlmRuntimeDeps, GlmTurnOptions } from '../glm/runtime.ts';
 import { directSshSetting } from './_directSshPolicy.ts';
 import { DSH_TURN_FAILURE_RULES } from '../deepseek/turnFailureRules.ts';
+import { readHarnessSkillCommands } from '../deepseek/skillCommands.ts';
 
 type GlmConfig = DeepSeekRuntimeConfig & {
   rootDir?: string;
@@ -126,6 +127,7 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
     id: 'glm',
     prepareRuntime: prepareGlmRuntime,
     name: 'GLM (Z.ai)',
+    commands: () => readHarnessSkillCommands(),
     vendor: 'Z.ai',
     // Белый, как знак на логотипе Z.ai: тёмный цвет читался как «недоступен».
     color: '#FFFFFF',
