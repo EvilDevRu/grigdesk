@@ -38,7 +38,7 @@ type AuthStoreLike = {
   $subscribe: (fn: () => void, options?: { detached?: boolean }) => () => void;
 };
 
-type ApiEvent = 'api.fail' | 'api.slow';
+type ApiEvent = 'api.fail' | 'api.slow' | 'api.pending' | 'api.recovered';
 
 type RuntimeOptions = {
   app: App;

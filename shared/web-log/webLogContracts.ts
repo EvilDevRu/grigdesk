@@ -5,6 +5,8 @@ import { recordOrNull } from '../lib/objects.ts';
 
 import { isApiRouteTemplate } from './webLogApiRoutes.ts';
 import { WEB_PERFORMANCE_OPERATIONS } from './webPerformance.ts';
+import { WEB_REGISTRY_OUTCOMES, WEB_REGISTRY_REASONS, WEB_SSE_SIGNALS } from './webDiagnostics.ts';
+import type { WebApiTiming, WebRegistryReason } from './webDiagnostics.ts';
 import type { WebPerformanceBlock, WebPerformanceCounts, WebPerformanceOperation } from './webPerformance.ts';
 
 export const WEB_LOG_LIMITS = {
@@ -39,14 +41,21 @@ export const WEB_LOG_EVENTS = {
   'router.error': 'error',
   'api.fail': 'warn',
   'api.slow': 'warn',
+  'api.pending': 'warn',
+  'api.recovered': 'info',
   'sse.open': 'info',
   'sse.hello': 'info',
   'sse.error': 'warn',
+  'sse.fault': 'error',
   'auth.change': 'info',
   'sw.updatefound': 'info',
   'sw.controllerchange': 'info',
   'sw.needRefresh': 'info',
   'store.error': 'error',
+  'store.slow': 'warn',
+  'store.pending': 'warn',
+  'providers.registry': 'info',
+  'state.anomaly': 'warn',
   'ui.layer': 'debug',
   'ui.focus': 'debug',
   'perf.ready': 'info',
@@ -69,6 +78,13 @@ export type SafeError = {
   category: string;
   message: string;
   stack?: string;
+};
+
+type ApiAttemptData = WebApiTiming & {
+  method: string;
+  path: string;
+  ms: number;
+  attempt: number;
 };
 
 export type WebLogData = {
@@ -115,7 +131,7 @@ export type WebLogData = {
     result: string;
   };
   'router.error': { to: string; error: SafeError };
-  'api.fail': {
+  'api.fail': WebApiTiming & {
     method: string;
     path: string;
     status?: number;
@@ -124,15 +140,18 @@ export type WebLogData = {
     attempt: number;
     willRetry: boolean;
   };
-  'api.slow': {
-    method: string;
-    path: string;
-    ms: number;
-    attempt: number;
-  };
+  'api.slow': ApiAttemptData;
+  'api.pending': ApiAttemptData;
+  'api.recovered': ApiAttemptData;
   'sse.open': { gapMs?: number; retries?: number };
   'sse.hello': { boot: string | null; changed: boolean };
   'sse.error': { uptimeMs?: number; retries?: number };
+  'sse.fault': {
+    signal: string;
+    phase: 'parse' | 'subscriber' | 'relay';
+    name: string;
+    error?: SafeError;
+  };
   'auth.change': {
     ready: boolean;
     authenticated: boolean;
@@ -145,6 +164,34 @@ export type WebLogData = {
     store: string;
     action: string;
     error: SafeError;
+  };
+  'store.slow': {
+    store: string;
+    action: string;
+    ms: number;
+    outcome: 'success' | 'error';
+  };
+  'store.pending': {
+    store: string;
+    action: string;
+    ms: number;
+  };
+  'providers.registry': {
+    reason: WebRegistryReason;
+    outcome: typeof WEB_REGISTRY_OUTCOMES[number];
+    request: number;
+    refresh: boolean;
+    previous: number;
+    count?: number;
+    ms?: number;
+  };
+  'state.anomaly': {
+    store: string;
+    action: string;
+    kind: 'empty-snapshot' | 'invalid-snapshot';
+    request: number;
+    previous: number;
+    count?: number;
   };
   'ui.layer': {
     op: string;
@@ -241,9 +288,31 @@ type FieldKind = 'bool' | 'number' | 'count' | 'id' | 'route' | 'api' | 'method'
   | 'error' | 'failureName' | 'descriptor' | 'text' | 'source' | 'vueSource' | 'component'
   | 'store' | 'action' | 'signature' | 'browser' | 'os' | 'sw' | 'tag' | 'category'
   | 'result' | 'authReason' | 'transportReason' | 'visibility' | 'operation' | 'layer'
-  | 'performanceOperation' | 'performanceBlock' | 'diagnosticTag';
+  | 'performanceOperation' | 'performanceBlock' | 'diagnosticTag'
+  | 'apiPhase' | 'ssePhase' | 'sseSignal' | 'registryReason' | 'registryOutcome'
+  | 'anomalyKind' | 'actionOutcome';
 
 type FieldSchema = Record<string, FieldKind>;
+
+const API_TIMING_FIELDS: FieldSchema = {
+  request: 'count',
+  phase: 'apiPhase',
+  refresh: 'bool',
+  status: 'count',
+  headersMs: 'number',
+  bodyMs: 'number',
+  parseMs: 'number',
+  serverMs: 'number',
+  chars: 'count',
+};
+
+const API_ATTEMPT_FIELDS: FieldSchema = {
+  ...API_TIMING_FIELDS,
+  method: 'method',
+  path: 'api',
+  ms: 'number',
+  attempt: 'count',
+};
 
 const DATA_FIELDS: Record<WebLogEvent, FieldSchema> = {
   'app.start': {
@@ -290,6 +359,7 @@ const DATA_FIELDS: Record<WebLogEvent, FieldSchema> = {
   },
   'router.error': { to: 'route', error: 'error' },
   'api.fail': {
+    ...API_TIMING_FIELDS,
     method: 'method',
     path: 'api',
     status: 'count',
@@ -298,15 +368,18 @@ const DATA_FIELDS: Record<WebLogEvent, FieldSchema> = {
     attempt: 'count',
     willRetry: 'bool',
   },
-  'api.slow': {
-    method: 'method',
-    path: 'api',
-    ms: 'number',
-    attempt: 'count',
-  },
+  'api.slow': API_ATTEMPT_FIELDS,
+  'api.pending': API_ATTEMPT_FIELDS,
+  'api.recovered': API_ATTEMPT_FIELDS,
   'sse.open': { gapMs: 'number', retries: 'count' },
   'sse.hello': { boot: 'id', changed: 'bool' },
   'sse.error': { uptimeMs: 'number', retries: 'count' },
+  'sse.fault': {
+    signal: 'sseSignal',
+    phase: 'ssePhase',
+    name: 'failureName',
+    error: 'error',
+  },
   'auth.change': {
     ready: 'bool',
     authenticated: 'bool',
@@ -319,6 +392,34 @@ const DATA_FIELDS: Record<WebLogEvent, FieldSchema> = {
     store: 'store',
     action: 'action',
     error: 'error',
+  },
+  'store.slow': {
+    store: 'store',
+    action: 'action',
+    ms: 'number',
+    outcome: 'actionOutcome',
+  },
+  'store.pending': {
+    store: 'store',
+    action: 'action',
+    ms: 'number',
+  },
+  'providers.registry': {
+    reason: 'registryReason',
+    outcome: 'registryOutcome',
+    request: 'count',
+    refresh: 'bool',
+    previous: 'count',
+    count: 'count',
+    ms: 'number',
+  },
+  'state.anomaly': {
+    store: 'store',
+    action: 'action',
+    kind: 'anomalyKind',
+    request: 'count',
+    previous: 'count',
+    count: 'count',
   },
   'ui.layer': {
     op: 'operation',
@@ -394,9 +495,16 @@ const REQUIRED_FIELDS: Partial<Record<WebLogEvent, string[]>> = {
   'router.error': ['to', 'error'],
   'api.fail': ['method', 'path', 'ms', 'attempt', 'willRetry'],
   'api.slow': ['method', 'path', 'ms', 'attempt'],
+  'api.pending': ['method', 'path', 'ms', 'attempt', 'request', 'phase'],
+  'api.recovered': ['method', 'path', 'ms', 'attempt'],
   'sse.hello': ['boot', 'changed'],
+  'sse.fault': ['signal', 'phase', 'name'],
   'auth.change': ['ready', 'authenticated', 'reason'],
   'store.error': ['store', 'action', 'error'],
+  'store.slow': ['store', 'action', 'ms', 'outcome'],
+  'store.pending': ['store', 'action', 'ms'],
+  'providers.registry': ['reason', 'outcome', 'request', 'refresh', 'previous'],
+  'state.anomaly': ['store', 'action', 'kind', 'request', 'previous'],
   'ui.layer': ['op', 'kind', 'id', 'depth'],
   'ui.focus': ['target'],
   'perf.ready': ['tag', 'longTasks', 'longFrames'],
@@ -413,7 +521,7 @@ export const WEB_LOG_ROUTES = [
   '/', '/board', '/pipeline', '/sandboxes', '/showcase/:id?', '/chats',
   '/diff', '/documents', '/terminal', '/ssh', '/db', '/docker', '/routes',
   '/projects/:id?', '/code', '/shelf', '/tools', '/ext/:id', '/video', '/inbox',
-  '/github', '/telegram', '/settings', '/3d', '/surface',
+  '/github', '/telegram', '/settings', '/3d', '/surface', '/onboarding',
 ] as const;
 
 const LAYERS = [
@@ -629,6 +737,26 @@ function safeError(value: unknown): SafeError | Invalid {
 }
 
 /**
+ * Общая проекция ошибки доступна ловушкам до передачи в диагностический sink.
+ * Неправильная форма или недоступный getter оставляет только безопасную категорию.
+ */
+export function sanitizeWebLogError(value: unknown): SafeError {
+  const fallback: SafeError = {
+    name: 'Error',
+    category: 'unclassified',
+    message: 'unclassified',
+  };
+
+  try {
+    const result = safeError(value);
+
+    return result === INVALID ? fallback : result;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
  * DOM-цель описывается тегом и областью интерфейса из закрытых списков,
  * без текста, классов и атрибутов.
  */
@@ -680,7 +808,7 @@ function numeric(value: unknown, count = false): number | Invalid {
 
 /** Закрытые перечисления полей: неизвестная строка становится `other`. */
 const ENUMS: Partial<Record<FieldKind, readonly string[]>> = {
-  signature: ['api', 'js', 'vue', 'store', 'router', 'res'],
+  signature: ['api', 'js', 'vue', 'store', 'router', 'res', 'sse', 'state'],
   layer: LAYERS,
   visibility: ['visible', 'hidden'],
   method: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
@@ -694,7 +822,17 @@ const ENUMS: Partial<Record<FieldKind, readonly string[]>> = {
   authReason: ['load', 'login', 'setup', '401', 'logout'],
   transportReason: ['timeout', 'offline', 'http', 'invalid-ack', 'policy', '401'],
   vueSource: VUE_SOURCE_NAMES,
-  failureName: ['Error', 'AbortError', 'TimeoutError', 'TypeError', 'NetworkError', 'HTTPError'],
+  failureName: [
+    'Error', 'AbortError', 'TimeoutError', 'TypeError', 'SyntaxError', 'NetworkError', 'HTTPError',
+    'RangeError', 'ReferenceError', 'URIError', 'AggregateError',
+  ],
+  apiPhase: ['request', 'headers', 'body', 'parse', 'done'],
+  ssePhase: ['parse', 'subscriber', 'relay'],
+  sseSignal: WEB_SSE_SIGNALS,
+  registryReason: WEB_REGISTRY_REASONS,
+  registryOutcome: WEB_REGISTRY_OUTCOMES,
+  anomalyKind: ['empty-snapshot', 'invalid-snapshot'],
+  actionOutcome: ['success', 'error'],
   performanceOperation: WEB_PERFORMANCE_OPERATIONS,
   performanceBlock: ['longtask', 'event-loop', 'animation-frame'],
   diagnosticTag: ['AGENT-DBG'],

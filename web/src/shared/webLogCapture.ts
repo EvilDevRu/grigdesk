@@ -5,8 +5,9 @@ import type { Pinia } from 'pinia';
 import type { NavigationFailure, Router } from 'vue-router';
 
 import { vueErrorSource } from '../../../shared/web-log/webLogContracts.ts';
-import type { SafeError, WebLogData } from '../../../shared/web-log/webLogContracts.ts';
+import type { WebLogData } from '../../../shared/web-log/webLogContracts.ts';
 import type { WebLog } from './webLog.ts';
+import { summarizeWebError as summarizeError } from './webDiagnostics.ts';
 
 type CaptureOptions = {
   app: App;
@@ -20,27 +21,6 @@ type CaptureOptions = {
   // Ошибка, уже записанная как api.fail, не повторяется записью store.error.
   isReportedError?: (error: unknown) => boolean;
 };
-
-/**
- * Извлекаем только признаки ошибки, которые очистит контракт.
- * Исходное сообщение не переходит напрямую в запись журнала.
- */
-function summarizeError(value: unknown): SafeError {
-  const error = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
-  const name = typeof error.name === 'string' ? error.name : 'Error';
-  const message = typeof error.message === 'string' ? error.message : 'unclassified';
-  const stack = typeof error.stack === 'string' ? error.stack : undefined;
-  const category = /(?:chunk|dynamically imported module|module script)/iu.test(message)
-    ? 'chunk-load'
-    : 'unclassified';
-
-  return {
-    name,
-    category,
-    message,
-    ...(stack ? { stack } : {}),
-  };
-}
 
 /** Имя компонента: явное `name` либо имя SFC, которое Vue кладёт в `__name`. */
 function componentName(instance: ComponentPublicInstance | null): string {
@@ -119,6 +99,8 @@ export function installCapture(options: CaptureOptions): () => void {
   const { app, router, pinia, log, win, doc } = options;
   const cleanup: (() => void)[] = [];
   const actionStops = new Set<() => void>();
+  const actionTimers = new Set<ReturnType<typeof setTimeout>>();
+  let actionEpoch = 0;
   let disposed = false;
   let navStarted = 0;
   const monotonic = () => win.performance?.now?.() ?? Date.now();
@@ -210,12 +192,73 @@ export function installCapture(options: CaptureOptions): () => void {
   );
 
   pinia.use(({ store }) => {
-    if (disposed) {
+    // Обновление панели журнала вызывается самой записью: его повторное наблюдение
+    // могло бы запустить рекурсию при ошибке или медленной обработке статуса.
+    if (disposed || store.$id === 'webLog') {
       return;
     }
 
-    const stop = store.$onAction(({ name, onError }) => {
+    const stop = store.$onAction(({ name, onError, after }) => {
+      const epoch = actionEpoch;
+      const started = log.level() === 'verbose' ? monotonic() : null;
+      let finished = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+
+      /**
+       * Только медленные действия дополняют журнал; аргументы и результат не читаются.
+       * Смена уровня или dispose отсекает завершение прежнего поколения наблюдений.
+       */
+      function finish(outcome: 'success' | 'error'): void {
+        finished = true;
+        clearTimeout(timer);
+
+        if (timer) {
+          actionTimers.delete(timer);
+        }
+        if (started === null || disposed || epoch !== actionEpoch || log.level() !== 'verbose') {
+          return;
+        }
+
+        const ms = Math.max(0, monotonic() - started);
+
+        if (ms >= 500) {
+          log.record('store.slow', {
+            store: store.$id,
+            action: name,
+            ms,
+            outcome,
+          });
+        }
+      }
+
+      // Синхронные actions завершаются до микрозадачи и не создают таймер на каждый вызов.
+      // Незавершённое действие оставляет одну отметку даже без исхода Promise.
+      if (started !== null) {
+        queueMicrotask(() => {
+          if (finished || disposed || epoch !== actionEpoch || log.level() !== 'verbose'
+            || actionTimers.size >= 128) {
+            return;
+          }
+
+          timer = setTimeout(() => {
+            actionTimers.delete(timer!);
+
+            if (!finished && !disposed && epoch === actionEpoch && log.level() === 'verbose') {
+              log.record('store.pending', {
+                store: store.$id,
+                action: name,
+                ms: Math.max(0, monotonic() - started),
+              });
+            }
+          }, Math.max(0, 3000 - (monotonic() - started)));
+          actionTimers.add(timer);
+        });
+      }
+
+      after?.(() => finish('success'));
       onError((error) => {
+        finish('error');
+
         if (options.isReportedError?.(error)) {
           return;
         }
@@ -237,6 +280,14 @@ export function installCapture(options: CaptureOptions): () => void {
 
     actionStops.clear();
   });
+
+  const clearActionTimers = () => {
+    actionEpoch += 1;
+    actionTimers.forEach(clearTimeout);
+    actionTimers.clear();
+  };
+
+  cleanup.push(log.subscribeLevel(clearActionTimers), clearActionTimers);
 
   const listen = (target: EventTarget, name: string, handler: EventListener) => {
     target.addEventListener(name, handler);

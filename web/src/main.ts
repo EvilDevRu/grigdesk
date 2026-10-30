@@ -18,6 +18,8 @@ import { router } from './router.ts';
 import { useDeviceStore } from './stores/device.ts';
 import { useAuthStore } from './stores/auth.ts';
 import { api, isReportedApiError, setApiLogSink } from './shared/apiClient.ts';
+import { setWebDiagnosticSink } from './shared/webDiagnostics.ts';
+import { resetApiDiagnostics } from './shared/apiDiagnostics.ts';
 import { setSseLogSink, configureSseRelay, sseSubscribe } from './composables/useSse.ts';
 import { currentDesktopMode } from './shared/desktopSettings.ts';
 import { parseMainRequest } from '../../shared/desktop/surfaceContract.ts';
@@ -83,7 +85,11 @@ const webLog = createWebLogRuntime({
   layers: { get: getUiLayerDiagnostics, subscribe: subscribeUiLayerDiagnostics },
 });
 
-setApiLogSink((event, data) => webLog.recordApi(event, data));
+setApiLogSink((event, data) => webLog.recordApi(event, data), () => webLog.log.level() === 'verbose');
+setWebDiagnosticSink((event, data) => webLog.log.record(event, data));
+
+const stopApiDiagnosticPolicy = webLog.log.subscribeLevel(resetApiDiagnostics);
+
 setSseLogSink((event, data) => {
   if (event === 'sse.hello' && (typeof data.boot === 'string' || data.boot === null)) {
     webLog.setBoot(data.boot);
@@ -285,6 +291,8 @@ app.use(router).mount('#app');
 import.meta.hot?.dispose(() => {
   removePluginRuntime();
   setApiLogSink(null);
+  setWebDiagnosticSink(null);
+  stopApiDiagnosticPolicy();
   setUiDownloadAdapter(null);
   setSseLogSink(null);
   webLog.dispose();

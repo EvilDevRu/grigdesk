@@ -75,6 +75,7 @@ import { FactoryArbiterLive } from './lib/factoryArbiterLive.ts';
 import { runInboxTriage } from './lib/inbox/triage.ts';
 import { FactoryDebugSettings } from './lib/factoryDebug.ts';
 import { DiagnosticLoggingPolicy, serverLogLevel } from './lib/diagnosticLogging.ts';
+import { installHttpDiagnostics } from './lib/httpDiagnostics.ts';
 import { readRouteWorkTime } from './lib/factoryRouteCli.ts';
 import { TaskFavoritesStore } from './lib/taskFavoritesStore.ts';
 import { TaskFavoritesService } from './lib/taskFavoritesService.ts';
@@ -228,6 +229,7 @@ async function build(desktopParent: DesktopParent | null) {
   });
 
   await fastify.register(apiVersionPlugin);
+  installHttpDiagnostics(fastify);
 
   // Журнал окна хранит пути /api шаблонами; каталог шаблонов собирается здесь,
   // до регистрации модулей, чтобы в него попал каждый маршрут сервера.

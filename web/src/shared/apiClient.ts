@@ -1,6 +1,9 @@
 import { delayWithAbort } from '../../../shared/lib/delay.ts';
 import { startChatPerformance } from './chatPerformance.ts';
 import { acquireB24Read, b24ReadRoute, shouldLogB24Failure } from './b24ReadBackoff.ts';
+import { resetApiDiagnostics, startApiDiagnostic } from './apiDiagnostics.ts';
+import type { ApiDiagnostic } from './apiDiagnostics.ts';
+import type { WebApiTiming } from '../../../shared/web-log/webDiagnostics.ts';
 
 // Единый клиент к серверу GrigDesk.
 //
@@ -124,8 +127,13 @@ function startResponseParse(path: string, chars: number): () => void {
  * Разбор ответа + единая обработка 401. Пути входа исключаем: там 401 — это «неверный
  * пароль», а не «сессия истекла», и сбрасывать состояние по нему нельзя.
  */
-async function handle(res: Response, path: string): Promise<unknown> {
+async function handle(res: Response, path: string, diagnostic?: ApiDiagnostic): Promise<unknown> {
+  diagnostic?.received(res);
+
   const text = await res.text();
+
+  diagnostic?.parsing(text.length);
+
   let data: unknown = null;
   const finish = startResponseParse(path, text.length);
 
@@ -138,6 +146,8 @@ async function handle(res: Response, path: string): Promise<unknown> {
   } finally {
     finish();
   }
+
+  diagnostic?.parsed();
 
   return handleData(res, path, data);
 }
@@ -160,17 +170,21 @@ function handleData(res: Response, path: string, data: unknown): unknown {
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
-type ApiLogSink = (event: 'api.fail' | 'api.slow', data: Record<string, unknown>) => void;
+type ApiLogEvent = 'api.fail' | 'api.slow' | 'api.pending' | 'api.recovered';
+type ApiLogSink = (event: ApiLogEvent, data: Record<string, unknown>) => void;
 
 let logSink: ApiLogSink | null = null;
+let diagnosticEnabled: () => boolean = () => logSink !== null;
 const reportedErrors = new WeakSet<object>();
 
 /**
  * Подключаем runtime журнала к общей точке наблюдения API.
  * Сам транспорт журнала эту точку не использует.
  */
-export function setApiLogSink(sink: ApiLogSink | null): void {
+export function setApiLogSink(sink: ApiLogSink | null, enabled?: () => boolean): void {
+  resetApiDiagnostics();
   logSink = sink;
+  diagnosticEnabled = enabled ?? (() => logSink !== null);
 }
 
 /**
@@ -185,7 +199,7 @@ export function isReportedApiError(error: unknown): boolean {
  * Передаём безопасную категорию сбоя или медленного ответа.
  * Ошибка журнала не меняет исход прикладного запроса.
  */
-function reportApi(event: 'api.fail' | 'api.slow', data: Record<string, unknown>): void {
+function reportApi(event: ApiLogEvent, data: Record<string, unknown>): void {
   try {
     logSink?.(event, data);
   } catch {
@@ -208,18 +222,30 @@ function reportAttempt(
   attempt: number,
   error?: unknown,
   willRetry = false,
+  timing: WebApiTiming = {},
 ): void {
   const route = path.split(/[?#]/u, 1)[0] ?? '';
 
-  if (ms > 10_000) {
+  if (ms >= 1000) {
     reportApi('api.slow', {
       method,
       path: route,
       ms,
       attempt,
+      ...timing,
     });
   }
   if (error === undefined) {
+    if (attempt > 1) {
+      reportApi('api.recovered', {
+        method,
+        path: route,
+        ms,
+        attempt,
+        ...timing,
+      });
+    }
+
     return;
   }
 
@@ -237,7 +263,8 @@ function reportAttempt(
 
   const b24Route = b24ReadRoute(path);
 
-  const transient = status === undefined || [502, 503, 504].includes(status);
+  const transient = (status === undefined && name !== 'SyntaxError')
+    || (status !== undefined && [502, 503, 504].includes(status));
 
   if (method === 'GET' && b24Route && transient && !shouldLogB24Failure(b24Route)) {
     return;
@@ -249,6 +276,7 @@ function reportAttempt(
     ms,
     attempt,
     willRetry,
+    ...timing,
     ...(status === undefined ? { name } : { status }),
   });
 }
@@ -259,18 +287,38 @@ function reportAttempt(
  */
 async function observed<T>(method: Method, path: string, work: () => Promise<T>): Promise<T> {
   const start = performance.now();
+  const diagnostic = observeAttempt(method, path, 1, 'request');
 
   try {
     const result = await work();
 
-    reportAttempt(method, path, elapsed(start), 1);
+    reportAttempt(method, path, elapsed(start), 1, undefined, false, diagnostic?.finish(true));
 
     return result;
   } catch (error) {
-    reportAttempt(method, path, elapsed(start), 1, error);
+    reportAttempt(method, path, elapsed(start), 1, error, false, diagnostic?.finish());
 
     throw error;
   }
+}
+
+/**
+ * Все попытки, включая мутации без таймаута, имеют одно ограниченное уведомление ожидания.
+ * Путь очищается от query до передачи sink, который дополнительно заменит его шаблоном.
+ */
+function observeAttempt(method: Method, path: string, attempt: number,
+  phase: 'request' | 'headers' = 'headers'): ApiDiagnostic {
+  return startApiDiagnostic({
+    path,
+    phase,
+    enabled: () => logSink !== null && diagnosticEnabled(),
+    pending: (timing) => reportApi('api.pending', {
+      method,
+      path: path.split(/[?#]/u, 1)[0],
+      attempt,
+      ...timing,
+    }),
+  });
 }
 
 // Настройка одной попытки. По умолчанию GET ждёт 30 с и повторяется один раз, а
@@ -298,6 +346,7 @@ async function requestWhileReceiving(
   opts: RequestInit,
   idleTimeoutMs: number,
   consumer?: AbortSignal,
+  diagnostic?: ApiDiagnostic,
 ): Promise<unknown> {
   const controller = new AbortController();
   const { signal } = controller;
@@ -327,6 +376,7 @@ async function requestWhileReceiving(
 
     const res = await fetch(url(path), { ...opts, signal });
 
+    diagnostic?.received(res);
     reset();
 
     let text = '';
@@ -358,6 +408,9 @@ async function requestWhileReceiving(
     }
 
     let data: unknown = null;
+
+    diagnostic?.parsing(text.length);
+
     const finish = startResponseParse(path, text.length);
 
     try {
@@ -369,6 +422,8 @@ async function requestWhileReceiving(
     } finally {
       finish();
     }
+
+    diagnostic?.parsed();
 
     return handleData(res, path, data);
   } finally {
@@ -449,13 +504,14 @@ async function request(
 
     const complete = b24Route ? await acquireB24Read(b24Route, options.signal) : null;
     const start = performance.now();
+    const diagnostic = observeAttempt(method, path, number);
 
     try {
       const result = options.idleTimeoutMs && options.idleTimeoutMs > 0
-        ? await requestWhileReceiving(path, opts, options.idleTimeoutMs, options.signal)
-        : await handle(await attempt(), path);
+        ? await requestWhileReceiving(path, opts, options.idleTimeoutMs, options.signal, diagnostic)
+        : await handle(await attempt(), path, diagnostic);
 
-      reportAttempt(method, path, elapsed(start), number);
+      reportAttempt(method, path, elapsed(start), number, undefined, false, diagnostic?.finish(true));
       complete?.('success');
 
       return result;
@@ -469,6 +525,7 @@ async function request(
       const transient = error instanceof TypeError || name === 'TimeoutError' || name === 'AbortError'
         || (b24Route && error instanceof ApiError && [502, 503, 504].includes(error.status));
       const cancelled = options.signal?.aborted;
+      const timing = diagnostic?.finish();
 
       complete?.(cancelled ? 'cancelled' : transient ? 'failure' : 'success');
 
@@ -484,7 +541,7 @@ async function request(
         number < attempts &&
         !!transient;
 
-      reportAttempt(method, path, elapsed(start), number, error, willRetry);
+      reportAttempt(method, path, elapsed(start), number, error, willRetry, timing);
 
       if (!willRetry) {
         throw error;

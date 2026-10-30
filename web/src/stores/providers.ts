@@ -14,6 +14,8 @@ import type { JsonValue } from '../../../shared/chat/providerSettingsContracts.t
 import { isProvider, isUsageSnapshot, isUsageActionReply, type UsageEntry }
   from '../features/providers/contracts.ts';
 import { api, failureText } from '../shared/apiClient.ts';
+import { recordWebDiagnostic } from '../shared/webDiagnostics.ts';
+import type { WebRegistryReason } from '../../../shared/web-log/webDiagnostics.ts';
 import { familyModels } from '../../../shared/chat/modelFamily.ts';
 
 const t = localeTranslator(uiLocale);
@@ -22,6 +24,13 @@ interface RegistryRead {
   promise: Promise<void>;
   version: number;
   refresh: boolean;
+  request: number;
+}
+
+interface RegistryLoadOptions {
+  cached?: boolean;
+  invalidate?: boolean;
+  reason?: WebRegistryReason;
 }
 
 const registryReads = new WeakMap<object, RegistryRead>();
@@ -224,8 +233,12 @@ export const useProvidersStore = defineStore('providers', {
      * Читатели одной версии разделяют GET; монтирование использует готовый снимок.
      * SSE/credentials инвалидируют летящий ответ, а явный refresh сильнее обычного чтения.
      */
-    load(refresh = false, { cached = false, invalidate = false } = {}): Promise<void> {
+    load(refresh = false, {
+      cached = false, invalidate = false, reason = 'other',
+    }: RegistryLoadOptions = {}): Promise<void> {
       const key = toRaw(this);
+      const previousCount = this.providers.length;
+      const started = performance.now();
 
       if (invalidate) {
         this.registryVersion += 1;
@@ -233,21 +246,47 @@ export const useProvidersStore = defineStore('providers', {
 
       const version = this.registryVersion;
       const previous = registryReads.get(key);
+      const trace = (outcome: 'start' | 'joined' | 'cached' | 'applied' | 'discarded' | 'invalid' | 'failed',
+        request: number, count?: number) => recordWebDiagnostic('providers.registry', {
+        reason,
+        outcome,
+        request,
+        refresh,
+        previous: previousCount,
+        ms: Math.max(0, performance.now() - started),
+        ...(count === undefined ? {} : { count }),
+      });
 
       if (previous?.version === version && (!refresh || previous.refresh)) {
+        trace('joined', previous.request);
+
         return previous.promise;
       }
       if (cached && this.loaded && !refresh && !invalidate) {
+        trace('cached', this.registryRequest, previousCount);
+
         return Promise.resolve();
       }
 
       const request = ++this.registryRequest;
+
+      trace('start', request);
+
       const pending = (async () => {
         try {
           const reply = await api.get(`/api/providers${refresh ? '?refresh=1' : ''}`);
 
           if (!isRecord(reply) || (reply.providers != null
             && (!Array.isArray(reply.providers) || !reply.providers.every(isProvider)))) {
+            trace('invalid', request);
+            recordWebDiagnostic('state.anomaly', {
+              store: 'providers',
+              action: 'load',
+              kind: 'invalid-snapshot',
+              request,
+              previous: previousCount,
+            });
+
             throw new Error(t('settings.providerRegistryFailure'));
           }
 
@@ -255,13 +294,29 @@ export const useProvidersStore = defineStore('providers', {
           const showAllModels = reply.showAllModels;
 
           if (request !== this.registryRequest || version !== this.registryVersion) {
+            trace('discarded', request, providers?.length ?? 0);
+
             return;
           }
 
           this.providers = providers || [];
           this.showAllModels = !!showAllModels;
           registryStatuses.set(key, { ok: true });
+          trace('applied', request, this.providers.length);
+
+          if (previousCount > 0 && this.providers.length === 0) {
+            recordWebDiagnostic('state.anomaly', {
+              store: 'providers',
+              action: 'load',
+              kind: 'empty-snapshot',
+              request,
+              previous: previousCount,
+              count: 0,
+            });
+          }
         } catch (error) {
+          trace('failed', request);
+
           if (request === this.registryRequest && version === this.registryVersion) {
             registryStatuses.set(key, {
               ok: false,
@@ -283,6 +338,7 @@ export const useProvidersStore = defineStore('providers', {
         promise: pending,
         version,
         refresh,
+        request,
       });
 
       return pending;
@@ -319,7 +375,7 @@ export const useProvidersStore = defineStore('providers', {
       this.usageAt = 0;
       this.usageTransport.error = '';
 
-      return Promise.all([this.load(), this.loadUsage(true)]);
+      return Promise.all([this.load(false, { reason: 'credentials' }), this.loadUsage(true)]);
     },
     /**
      * Использует существующий минутный GET; компоненты читают единый снимок.
@@ -433,7 +489,7 @@ export const useProvidersStore = defineStore('providers', {
         this.usageRequest += 1;
         this.registryVersion += 1;
         this.registryRequest += 1;
-        void this.load();
+        void this.load(false, { reason: 'reconnect' });
         void this.loadUsage(true);
       }
     },

@@ -68,6 +68,7 @@
 | `pipeline/arbiterConversation.ts` | StopIdentity, лимиты, строгий ответ арбитра, допустимые действия и инвалидирование решения; общий контракт сервера и диалога |
 | `server/src/lib/mcpEnvironment.ts` | Окружение MCP: ACP-пары → объект, готовый объект без изменений; используют Kimi host и DeepSeek, пустое поле решает адаптер |
 | `lib/errors.ts` | Строковый code, message с fallback и отдельное преобразование Error/String |
+| `web-log/webLogContracts.ts` | `sanitizeWebLogError`: безопасные имена, категории и кадры ресурсов сборки до записи исключения |
 | `lib/delay.ts` | Пауза с отменой самим signal.reason; обычная Node-пауза — node:timers/promises |
 | `lib/text.ts` | UTF-16 границы, лексический порядок, текст unknown, URI и JSON Pointer |
 | `node/payloadCache.ts` | Atomic extraction, package lock, полный verifier и kernel fingerprints; политика marker задаётся адаптером |

@@ -325,7 +325,7 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
     providers.updateResults = results;
 
     if (refreshRegistry) {
-      void providers.load(true);
+      void providers.load(true, { reason: 'install' });
     }
   }
 
@@ -477,7 +477,7 @@ export const useProviderInstallStore = defineStore('provider-install', () => {
           changed,
         },
       };
-      await providers.load(true);
+      await providers.load(true, { reason: 'install' });
     } catch (failure) {
       if (scope === generation) {
         providers.updateResults = {

@@ -8,64 +8,13 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import { api } from '../shared/apiClient.ts';
 import { measureChatPerformance, startChatPerformance } from '../shared/chatPerformance.ts';
 import type { RelayChannel } from '../shared/windowRelay.ts';
+import { WEB_SSE_SIGNALS } from '../../../shared/web-log/webDiagnostics.ts';
+import { summarizeWebError } from '../shared/webDiagnostics.ts';
 
 // Все именованные события сервера — новые добавлять сюда (иначе подписчик их не увидит).
 // `as const` не украшение: из списка выводится тип имени, и опечатка в ветке подписчика
 // становится ошибкой сборки, а не молчащей веткой (та же грабля, что уже стоила отладки).
-const EVENT_NAMES = [
-  'hello',
-  'plugin-event',
-  'state-change',
-  'providers-update',
-  'provider-install',
-  'provider-install-v2',
-  'providers-usage',
-  'grigdesk-update',
-  'chat-permission',
-  'chat-question',
-  'chat-permission-done',
-  'ssh-permission',
-  'ssh-sessions',
-  'ssh-audit',
-  'db-permission',
-  'db-sessions',
-  'db-queries',
-  'db-audit',
-  'chat-step',
-  'chat-progress',
-  'chat-done',
-  'chat-orphan',
-  'chat-turn-start',
-  'chat-run-metadata',
-  'chat-in-turn',
-  'chat-assistant-message',
-  'chat-sessions',
-  'chat-session',
-  'chat-store',
-  'chat-store-meta',
-  'speech-settings',
-  'diagnostic-logging',
-  'inbox-changed',
-  'telegram-status',
-  'mobile-changed',
-  'task-shelf-changed',
-  'grigdesk-tasks-changed',
-  'arbiter-live',
-  'arbiter-conversation',
-  'sandboxes-changed',
-  'sandbox-progress',
-  'projects-changed',
-  'onboarding-changed',
-  'routes-draft-changed',
-  'routes-catalog-changed',
-  'showcase-changed',
-  'showcase-progress',
-  'showcase-build-progress',
-  'showcase-voice',
-  'usage-forecast',
-  'studio-changed',
-  'studio-progress',
-] as const;
+const EVENT_NAMES = WEB_SSE_SIGNALS;
 
 // Имя события шины: ровно то, что сервер объявил выше.
 export type SseEventName = (typeof EVENT_NAMES)[number];
@@ -77,7 +26,7 @@ const connected = ref(false);
 const listeners = new Set<SseListener>();
 
 type SseLogSink = (
-  event: 'sse.open' | 'sse.hello' | 'sse.error',
+  event: 'sse.open' | 'sse.hello' | 'sse.error' | 'sse.fault',
   data: Record<string, unknown>,
 ) => void;
 
@@ -162,7 +111,7 @@ export function resetSseForTests(): void {
  * Ошибка подписчика не прерывает восстановление потока.
  */
 function report(
-  event: 'sse.open' | 'sse.hello' | 'sse.error',
+  event: 'sse.open' | 'sse.hello' | 'sse.error' | 'sse.fault',
   data: Record<string, unknown>,
 ): void {
   try {
@@ -170,6 +119,21 @@ function report(
   } catch {
     /* журнал не влияет на поток */
   }
+}
+
+/**
+ * Сбой доставки сохраняет имя сигнала и этап, но не тело и не текст исключения.
+ * Контракт журнала повторно проверяет закрытые имена на клиенте и сервере.
+ */
+function reportFault(signal: SseEventName, phase: 'parse' | 'subscriber' | 'relay', error: unknown): void {
+  const summary = summarizeWebError(error);
+
+  report('sse.fault', {
+    signal,
+    phase,
+    name: summary.name,
+    error: summary,
+  });
 }
 
 /**
@@ -234,9 +198,13 @@ function deliver(name: SseEventName, data: unknown): void {
 
   for (const fn of listeners) {
     try {
-      fn(name, data);
-    } catch {
-      /* один сломанный подписчик не мешает остальным */
+      const result: unknown = fn(name, data);
+
+      if (result && typeof (result as Promise<unknown>).then === 'function') {
+        void Promise.resolve(result).catch((error) => reportFault(name, 'subscriber', error));
+      }
+    } catch (error) {
+      reportFault(name, 'subscriber', error);
     }
   }
 
@@ -255,8 +223,8 @@ function publish(name: SseEventName, data: unknown): void {
       name,
       data,
     });
-  } catch {
-    /* окно карточки получит следующее событие */
+  } catch (error) {
+    reportFault(name, 'relay', error);
   }
 }
 
@@ -352,8 +320,10 @@ function ensure(): void {
       try {
         data = measureChatPerformance('sse.decode', () => JSON.parse(e.data),
           () => ({ chars: e.data.length }));
-      } catch {
-        /* событие без тела */
+      } catch (error) {
+        if (e.data) {
+          reportFault(name, 'parse', error);
+        }
       }
 
       deliver(name, data);

@@ -95,6 +95,12 @@ const SUPPRESSIBLE = new Set<WebLogEvent>([
   'router.error',
   'res.error',
   'store.error',
+  'sse.fault',
+  'state.anomaly',
+  'store.slow',
+  'store.pending',
+  'api.slow',
+  'api.pending',
 ]);
 
 /**
@@ -109,6 +115,7 @@ function signatureOf(ev: WebLogEvent, data: WebLogData[WebLogEvent]): string {
     ev, error.name, error.category, error.message, frame, body.component, body.info,
     body.store, body.action, body.source, body.line, body.col, body.method, body.path,
     body.status, body.name, body.tag, body.category, body.src, body.to,
+    body.kind, body.signal, body.phase,
   ];
 
   return parts.map((part) => (part === undefined || part === null ? '' : String(part))).join('|');

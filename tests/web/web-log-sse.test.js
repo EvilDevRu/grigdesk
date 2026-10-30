@@ -30,3 +30,64 @@ test('SSE сообщает open до hello и сохраняет boot из ва�
     globalThis.EventSource = originalSource;
   }
 });
+
+test('SSE фиксирует ошибки JSON и обоих видов подписчиков, сохраняя доставку остальным', async (t) => {
+  const events = [];
+  const delivered = [];
+  let source;
+
+  class FakeEventSource {
+    listeners = new Map();
+
+    constructor() {
+      source = this;
+    }
+
+    addEventListener(name, fn) {
+      this.listeners.set(name, fn);
+    }
+
+    close() {}
+  }
+
+  const original = globalThis.EventSource;
+
+  globalThis.EventSource = FakeEventSource;
+  setSseLogSink((event, data) => events.push({ event, data }));
+  t.after(() => {
+    resetSseForTests();
+    setSseLogSink(null);
+    globalThis.EventSource = original;
+  });
+  sseSubscribe(() => {
+    const failure = new TypeError('secret-subscriber');
+
+    failure.stack = 'secret\n at /assets/fault-abcdef12.js:1:20';
+
+    throw failure;
+  });
+  sseSubscribe(async () => {
+    throw new RangeError('secret-async');
+  });
+  sseSubscribe(() => {
+    throw Object.defineProperty(new Error(), 'message', {
+      get() {
+        throw new Error('secret-getter');
+      },
+    });
+  });
+  sseSubscribe((name, data) => delivered.push({ name, data }));
+  source.listeners.get('providers-update')({ data: 'secret-invalid-json' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const faults = events.filter((entry) => entry.event === 'sse.fault');
+
+  assert.deepEqual(faults.map((entry) => entry.data.phase), [
+    'parse', 'subscriber', 'subscriber', 'subscriber',
+  ]);
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].data, null);
+  assert.equal(faults[2].data.error.message, 'unclassified');
+  assert.equal(faults[1].data.error.stack, '/assets/fault-abcdef12.js:1:20');
+  assert.doesNotMatch(JSON.stringify(events), /secret/u);
+});

@@ -104,6 +104,87 @@ test('store.error называет store и action и не дублирует з
   off();
 });
 
+test('медленное действие имеет отметку ожидания и итог без аргументов; off снимает таймер', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  let clock = 0;
+  let onAction;
+  let complete;
+  const log = makeLog();
+  const win = new EventTarget();
+  const hooks = {};
+
+  win.performance = { now: () => clock };
+
+  const off = installCapture({
+    app: { config: { errorHandler: null } },
+    router: fakeRouter(hooks),
+    pinia: { use: (fn) => hooks.plugin = fn },
+    log,
+    win,
+    doc: new EventTarget(),
+  });
+
+  t.after(off);
+  hooks.plugin({ store: {
+    $id: 'fixture',
+    $onAction: (callback) => {
+      onAction = callback;
+
+      return () => {};
+    },
+  } });
+  onAction({
+    name: 'load',
+    args: ['secret-argument'],
+    after: (callback) => complete = callback,
+    onError: () => {},
+  });
+  await Promise.resolve();
+  clock = 3000;
+  t.mock.timers.tick(3000);
+  clock = 3500;
+  complete('secret-result');
+
+  const entries = log.snapshot().entries;
+
+  assert.deepEqual(entries.map((entry) => entry.ev), ['store.pending', 'store.slow']);
+  assert.equal(entries[1].data.ms, 3500);
+  assert.equal(entries[1].data.outcome, 'success');
+  assert.doesNotMatch(JSON.stringify(entries), /secret/u);
+  onAction({
+    name: 'load',
+    after: () => {},
+    onError: () => {},
+  });
+  await Promise.resolve();
+  log.setLevel('off');
+  t.mock.timers.tick(30_000);
+  assert.equal(log.snapshot().entries.length, 0);
+});
+
+test('журнал не подписывается на собственный store и не создаёт рекурсивные события', () => {
+  const log = makeLog();
+  const hooks = {};
+  let subscriptions = 0;
+  const off = installCapture({
+    app: { config: { errorHandler: null } },
+    router: fakeRouter(hooks),
+    pinia: { use: (plugin) => hooks.plugin = plugin },
+    log,
+    win: new EventTarget(),
+    doc: new EventTarget(),
+  });
+
+  hooks.plugin({ store: {
+    $id: 'webLog',
+    $onAction: () => subscriptions += 1,
+  } });
+  assert.equal(subscriptions, 0);
+  assert.equal(log.snapshot().entries.length, 0);
+  off();
+});
+
 test('результат перехода различает успех и повтор того же адреса', async () => {
   const log = makeLog();
   const component = { render: () => null };

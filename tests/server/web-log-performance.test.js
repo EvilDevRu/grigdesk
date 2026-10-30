@@ -68,6 +68,27 @@ test('замеры проходят ядро окна, auth, серверную 
   finish();
   recorder.block('longtask', 0, 150);
   recorder.flush();
+  log.record('api.pending', {
+    method: 'GET',
+    path: '/api/web-log/routes',
+    ms: 3000,
+    attempt: 1,
+    request: 1,
+    phase: 'headers',
+  });
+  log.record('sse.fault', {
+    signal: 'providers-update',
+    phase: 'subscriber',
+    name: 'TypeError',
+  });
+  log.record('state.anomaly', {
+    store: 'providers',
+    action: 'load',
+    kind: 'empty-snapshot',
+    request: 1,
+    previous: 3,
+    count: 0,
+  });
 
   const entries = log.snapshot().entries.map((entry) => ({
     ...entry,
@@ -91,12 +112,14 @@ test('замеры проходят ядро окна, auth, серверную 
   });
 
   assert.equal(response.statusCode, 200);
-  assert.equal(response.json().accepted, 3);
+  assert.equal(response.json().accepted, 6);
 
   const text = await readFile(path.join(dir, '2026-10-29.ndjson'), 'utf8');
   const saved = text.trim().split('\n').map((line) => JSON.parse(line));
 
-  assert.deepEqual(saved.map((entry) => entry.ev), ['perf.ready', 'perf.operation', 'perf.block']);
+  assert.deepEqual(saved.map((entry) => entry.ev), [
+    'perf.ready', 'perf.operation', 'perf.block', 'api.pending', 'sse.fault', 'state.anomaly',
+  ]);
   assert.equal(saved[1].data.ms, 140);
   assert.equal(saved[2].data.operation, 'chat.snapshot');
   assert.doesNotMatch(text, /privateText|Содержимое/u);

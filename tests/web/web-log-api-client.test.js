@@ -28,7 +28,7 @@ test('API sink видит отказ без query и содержимого; dow
     assert.equal(events[0].ev, 'api.fail');
     assert.equal(events[0].data.path, '/api/projects/private');
     assert.equal(events[0].data.status, 503);
-    assert.doesNotMatch(JSON.stringify(events), /secret-token|token=abc|body/u);
+    assert.doesNotMatch(JSON.stringify(events), /secret-token|token=abc|"body":/u);
   } finally {
     globalThis.fetch = originalFetch;
     setApiLogSink(null);
@@ -80,7 +80,7 @@ test('повтор GET фиксирует неудачную попытку с w
     assert.deepEqual(await api.get('/api/tasks'), { ok: true });
     assert.equal(calls, 2);
     assert.deepEqual(events.map(({ ev, data }) => [ev, data.attempt, data.willRetry]),
-      [['api.fail', 1, true]]);
+      [['api.fail', 1, true], ['api.recovered', 2, undefined]]);
     assert.doesNotMatch(JSON.stringify(events), /secret-network-detail/u);
   } finally {
     globalThis.fetch = originalFetch;

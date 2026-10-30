@@ -585,7 +585,7 @@ onUnmounted(() => stopInboxSummary());
 // в селекторе без F5 и без обновления GrigDesk.
 const providersTimer = setInterval(() => {
   if (props.active) {
-    void prov.load();
+    void prov.load(false, { reason: 'timer' });
   }
 }, 60_000);
 
@@ -840,7 +840,7 @@ watch(() => props.active, (active) => {
   void chatStore.ensure();
   grigDeskUpdate.start();
   void plugins.load();
-  void prov.load();
+  void prov.load(false, { reason: 'startup' });
   void prov.loadUsage();
   notifyWatch.start();
 }, { immediate: true });
@@ -1038,7 +1038,7 @@ const { connected } = useSse((name, data) => {
     if (isRecord(data) && typeof data.credentials === 'string' && data.credentials) {
       void prov.invalidateCredentials(data.credentials);
     } else {
-      void prov.load(false, { invalidate: true });
+      void prov.load(false, { invalidate: true, reason: 'sse' });
     }
   }
   // Фоновый тик сервера принёс свежие лимиты — полосы в шапке идут за ними без наведения.
