@@ -698,5 +698,184 @@ test('GLM сохраняет последний контекст DSH в резу
   assert.deepEqual(progress.map((item) => item.contextTokens), [3300, 700]);
   assert.equal(result.contextTokens, 700);
   assert.equal(result.contextMetric, 'deepseek-web-usage');
-  assert.equal(result.contextWindow, undefined);
+  assert.equal(result.contextWindow, 0);
+});
+
+test('snapshot: окно проходит в каждый замер, включая кеш, уменьшение и ноль', async (t) => {
+  const f = await fixture(t, {
+    contextPressure: {
+      pressureTokens: 90000,
+      contextWindow: 131072,
+    },
+    updates: [
+      {
+        sessionUpdate: 'usage',
+        usage: {
+          inputTokens: 1000,
+          cacheReadTokens: 2000,
+          cacheWriteTokens: 300,
+          outputTokens: 40,
+        },
+      },
+      {
+        sessionUpdate: 'usage',
+        usage: { inputTokens: 0, outputTokens: 45 },
+      },
+      {
+        sessionUpdate: 'usage',
+        usage: { inputTokens: 700, outputTokens: 50 },
+      },
+    ],
+  });
+  const progress = [];
+  const result = await f.run({
+    onProgress: (tokens, info) => progress.push({ tokens, ...info }),
+  });
+
+  assert.deepEqual(progress.map((item) => item.contextTokens), [3300, 0, 700]);
+  assert.deepEqual(progress.map((item) => item.contextWindow), [131072, 131072, 131072]);
+  assert.ok(progress.every((item) => item.contextMetric === 'deepseek-web-usage'));
+  assert.equal(result.contextTokens, 700);
+  assert.equal(result.contextWindow, 131072);
+  assert.equal(result.contextMetric, 'deepseek-web-usage');
+});
+
+test('snapshot: отсутствующее и некорректное окно не превращаются в ёмкость', async (t) => {
+  const invalid = [undefined, null, '131072', true, [131072], {}, -1, 0, 1.5, 2 ** 53];
+
+  for (const value of invalid) {
+    await t.test(`окно=${JSON.stringify(value)}`, async (sub) => {
+      const f = await fixture(sub, {
+        contextPressure: { contextWindow: value },
+        updates: [{
+          sessionUpdate: 'usage',
+          usage: { inputTokens: 700, outputTokens: 50 },
+        }],
+      });
+      const progress = [];
+      const result = await f.run({
+        onProgress: (tokens, info) => progress.push({ tokens, ...info }),
+      });
+
+      assert.equal(result.contextWindow, 0);
+      assert.equal(result.contextTokens, 700);
+      assert.equal(progress.at(-1).contextWindow, 0);
+    });
+  }
+});
+
+test('request/context: первый ход получает окно до usage без проекции snapshot', async (t) => {
+  const f = await fixture(t, {
+    updates: [
+      {
+        sessionUpdate: 'requestContext',
+        context: {
+          provider: 'zai',
+          model: 'glm-5.3',
+          contextWindow: 262144,
+        },
+      },
+      {
+        sessionUpdate: 'usage',
+        usage: { inputTokens: 700, outputTokens: 50 },
+      },
+    ],
+  });
+  const progress = [];
+  const result = await f.run({
+    onProgress: (tokens, info) => progress.push({ tokens, ...info }),
+  });
+
+  assert.equal(result.contextWindow, 262144);
+  assert.equal(result.contextTokens, 700);
+  assert.equal(progress.length, 1);
+  assert.equal(progress[0].contextWindow, 262144);
+  assert.equal(progress[0].contextMetric, 'deepseek-web-usage');
+});
+
+test('request/context: новое, неизвестное и восстановленное окно заменяют snapshot', async (t) => {
+  const f = await fixture(t, {
+    contextPressure: { contextWindow: 131072 },
+    updates: [
+      {
+        sessionUpdate: 'usage',
+        usage: { inputTokens: 700, outputTokens: 10 },
+      },
+      {
+        sessionUpdate: 'requestContext',
+        context: {
+          provider: 'zai',
+          model: 'glm-5.3',
+          contextWindow: 262144,
+        },
+      },
+      {
+        sessionUpdate: 'usage',
+        usage: { inputTokens: 0, outputTokens: 20 },
+      },
+      {
+        sessionUpdate: 'requestContext',
+        context: { provider: 'zai', model: 'glm-4.7' },
+      },
+      {
+        sessionUpdate: 'usage',
+        usage: { inputTokens: 50, outputTokens: 30 },
+      },
+      {
+        sessionUpdate: 'requestContext',
+        context: {
+          provider: 'zai',
+          model: 'glm-5.3',
+          contextWindow: 131072,
+        },
+      },
+      {
+        sessionUpdate: 'usage',
+        usage: { inputTokens: 40, outputTokens: 40 },
+      },
+    ],
+  });
+  const progress = [];
+  const result = await f.run({
+    onProgress: (tokens, info) => progress.push({ tokens, ...info }),
+  });
+
+  assert.deepEqual(progress.map((item) => item.contextTokens), [700, 0, 50, 40]);
+  assert.deepEqual(progress.map((item) => item.contextWindow), [131072, 262144, 0, 131072]);
+  assert.equal(result.contextWindow, 131072);
+  assert.equal(result.contextTokens, 40);
+});
+
+test('request/context: некорректное окно инвалидирует прежнее без числового приведения', async (t) => {
+  const invalid = [undefined, null, '131072', true, [131072], {}, -1, 0, 1.5, 2 ** 53];
+
+  for (const value of invalid) {
+    await t.test(`окно=${JSON.stringify(value)}`, async (sub) => {
+      const f = await fixture(sub, {
+        contextPressure: { contextWindow: 262144 },
+        updates: [
+          {
+            sessionUpdate: 'requestContext',
+            context: {
+              provider: 'zai',
+              model: 'glm-5.3',
+              contextWindow: value,
+            },
+          },
+          {
+            sessionUpdate: 'usage',
+            usage: { inputTokens: 700, outputTokens: 50 },
+          },
+        ],
+      });
+      const progress = [];
+      const result = await f.run({
+        onProgress: (tokens, info) => progress.push({ tokens, ...info }),
+      });
+
+      assert.equal(result.contextWindow, 0);
+      assert.equal(progress.at(-1).contextWindow, 0);
+      assert.equal(result.contextTokens, 700);
+    });
+  }
 });

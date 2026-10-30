@@ -474,6 +474,19 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       options.onProgress?.(tokens + descendantTokens, info);
     };
     /**
+     * Snapshot и request/context задают полное состояние окна текущего маршрута.
+     * Явный ноль инвалидирует неизвестную ёмкость при merge у потребителей;
+     * usage без поля окна отдельно сохраняет это состояние.
+     */
+    const applyContextWindow = (value: unknown) => {
+      const context = normalizeContextUsage({ contextWindow: value });
+
+      lastContextUsage = {
+        ...lastContextUsage,
+        contextWindow: context.contextWindow || 0,
+      };
+    };
+    /**
      * Дельты и usage относятся только к корневой попытке.
      * Расход потомков прибавляется reportProgress отдельно от контекста корня.
      */
@@ -543,15 +556,15 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         const validInput = typeof input === 'number' && Number.isFinite(input) && input >= 0;
         const context = validInput ? normalizeContextUsage({
           contextTokens: prompt,
-          contextWindow: usage.contextWindow,
           contextMetric: 'deepseek-web-usage',
         }) : {};
 
         if (context.contextTokens !== undefined) {
-          lastContextUsage = context;
+          lastContextUsage = { ...lastContextUsage, ...context };
+          reportProgress(tokens, { tokensIsEstimate, ...lastContextUsage });
+        } else {
+          reportProgress(tokens, { tokensIsEstimate });
         }
-
-        reportProgress(tokens, { tokensIsEstimate, ...context });
       }
     };
     /**
@@ -570,6 +583,11 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
             recordOrEmpty(recordOrEmpty(recordOrEmpty(item.projections).values).modelSelection).next,
             'session'
           );
+          // Окно контекста живёт в проекции snapshot: resume-сессия знает его ещё
+          // до первого usage этого хода.
+          const projections = recordOrEmpty(recordOrEmpty(item.projections).values);
+
+          applyContextWindow(recordOrEmpty(projections.contextPressure).contextWindow);
         }
 
         return;
@@ -603,6 +621,10 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
         return;
       }
       if (event.type === 'turn/start') turnStarted = true;
+      // Полное состояние маршрута: отсутствие окна отменяет прежнюю ёмкость.
+      if (event.type === 'request/context') {
+        applyContextWindow(data.contextWindow);
+      }
       if (event.type === 'tool/call') {
         sink.emitAll(thoughts.flush());
         madeProgress = true;

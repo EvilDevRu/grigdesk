@@ -666,7 +666,7 @@ for (const compacted of [false, true]) {
     assert.deepEqual(progress.map((item) => item.contextTokens), expected);
     assert.equal(result.contextTokens, expected.at(-1));
     assert.equal(result.contextMetric, 'deepseek-web-usage');
-    assert.equal(result.contextWindow, undefined);
+    assert.equal(result.contextWindow, 0);
   });
 }
 
@@ -690,4 +690,26 @@ test('web: null и некорректный вход не создают изм�
   })]);
 
   assert.equal(result.contextTokens, 0);
+});
+
+test('web DeepSeek: окно snapshot доезжает до usage и итога', async (t) => {
+  const snapshot = {
+    type: 'snapshot',
+    records: [],
+    projections: {
+      values: {
+        contextPressure: { contextWindow: 131072 },
+      },
+    },
+  };
+  const frames = [streamChunk({
+    type: 'usage',
+    usage: { inputTokens: 700, outputTokens: 50 },
+  })];
+  const { result, progress } = await runWire(t, frames, { kind: 'completed' }, { snapshot });
+
+  assert.equal(result.contextWindow, 131072);
+  assert.equal(result.contextTokens, 700);
+  assert.equal(progress.at(-1).contextWindow, 131072);
+  assert.equal(progress.at(-1).contextMetric, 'deepseek-web-usage');
 });

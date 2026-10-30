@@ -210,6 +210,10 @@ function playUpdate(update, describe) {
     });
   }
 
+  if (update.sessionUpdate === 'requestContext') {
+    emit('request/context', update.context);
+  }
+
   if (update.sessionUpdate === 'tool_call') {
     emit('tool/call', {
       turn,
@@ -273,6 +277,7 @@ async function sendSnapshot(socket, streamId, address) {
   const options = await readScenario().catch(() => ({}));
   const delay = Number(options.delay?.['session/follow'] || 0);
   const next = options.readback === undefined ? selection : options.readback;
+  const pressure = options.contextPressure;
 
   if (delay > 0) {
     await new Promise((resolve) => setTimeout(resolve, delay));
@@ -283,7 +288,12 @@ async function sendSnapshot(socket, streamId, address) {
     header: { id: address.sessionId },
     cursor: seq,
     records: [],
-    projections: { values: { modelSelection: { lastUsed: null, next } } },
+    projections: {
+      values: {
+        modelSelection: { lastUsed: null, next },
+        ...(pressure ? { contextPressure: pressure } : {}),
+      },
+    },
   });
 
   if (glmNative && options.hooks !== 'no-marker') {

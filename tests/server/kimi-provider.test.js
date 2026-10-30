@@ -465,3 +465,10 @@ test('Kimi принимает новый кошелёк без полос и с�
   assert.deepEqual(parseKimiUsageResources(wallet)[0].balance, { amount: 0, currency: 'USD' });
   assert.equal(parseKimiUsageBars(legacy)[0].pct, 20);
 });
+
+test('kimi сжимает контекст выжимкой, а не слэш-командой web-транспорта', async () => {
+  // Web-протокол Kimi не исполняет '/compact' локально: текст уходит модели как
+  // обычное сообщение (docs/grigdesk/chat/context-wheel-executor-gaps.md), кнопка
+  // кольца при этом обещала сжатие. План summary — тот же путь, что у DeepSeek/GLM.
+  assert.deepEqual(kimi.compaction, { kind: 'summary' });
+});

@@ -19,6 +19,7 @@ import {
 } from '../../server/src/lib/kimi/profile.ts';
 import chatModule from '../../server/src/modules/chat/index.ts';
 import { createClaudeTurnCollector } from '../../server/src/lib/executors/_claudeStream.ts';
+import kimiExecutor from '../../server/src/lib/executors/kimi.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
@@ -104,6 +105,99 @@ function kimiIdentity(root, chatKey) {
     model: 'kimi-test',
     authProfileId: KIMI_AUTH_PROFILE_ID,
     securityProfile: KIMI_SECURITY_PROFILE,
+  };
+}
+
+/**
+ * Полный цикл Kimi проходит настоящий chat API и дисковые binding/историю.
+ * Подменён только исполнитель: первый ход, выжимка и продолжение воспроизводимы.
+ */
+async function kimiCompactFixture(t, outcome = 'summary') {
+  const calls = [];
+  const seed = 'Задача: продолжить проверку. Решение: сохранить рабочую выжимку.';
+  const executor = {
+    id: kimiExecutor.id,
+    compaction: kimiExecutor.compaction,
+    retryContract: kimiExecutor.retryContract,
+    sessionBinding: kimiSessionBinding,
+    /**
+     * Второй вызов является сжатием существующей памяти; остальные создают сессию.
+     * Stop и пустой ответ моделируются отдельно, без успешного результата compact.
+     */
+    async run(options) {
+      calls.push({ message: options.message, sessionId: options.sessionId });
+
+      if (calls.length === 2) {
+        if (outcome === 'stopped') {
+          throw Object.assign(new Error('Ход остановлен.'), {
+            stopped: true,
+            sessionId: options.sessionId,
+            steps: [],
+          });
+        }
+
+        return {
+          reply: outcome === 'empty' ? '   ' : seed,
+          sessionId: options.sessionId,
+          steps: [],
+        };
+      }
+
+      const sessionId = calls.length === 1 ? 'before-compact' : 'after-compact';
+
+      await options.onSessionCreated(sessionId);
+
+      return {
+        reply: 'Готово.',
+        sessionId,
+        steps: [],
+      };
+    },
+  };
+  const f = await apiFixture(t, { executor });
+  const chatKey = 'compact-chat';
+  const modelRef = { provider: 'kimi', model: 'kimi-test' };
+
+  await saveKimiChat(f.app, chatKey);
+
+  const first = await f.app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey,
+      modelRef,
+      message: 'Первый обычный ход.',
+    },
+  });
+
+  assert.equal(first.statusCode, 200, first.body);
+
+  const bindings = new ChatSessionBindingStore({ dir: f.config.chatBindingsDir });
+  const before = await bindings.read(chatKey);
+
+  assert.ok(before);
+  assert.equal(before.sessionId, 'before-compact');
+
+  const history = new ChatHistoryStore({ chatsDir: f.config.chatsDir });
+
+  return {
+    ...f,
+    chatKey,
+    modelRef,
+    seed,
+    calls,
+    bindings,
+    before,
+    history,
+    compact: () => f.app.inject({
+      method: 'POST',
+      url: '/api/chat/compact',
+      payload: {
+        chatKey,
+        modelRef,
+        sessionId: before.sessionId,
+      },
+    }),
   };
 }
 
@@ -1155,3 +1249,85 @@ for (const stopped of [false, true]) {
       .map((entry) => [entry.data.tokens, entry.data.contextTokens]), [[8, 3300], [8, 3300]]);
   });
 }
+
+test('Kimi compact сохраняет выжимку, ротирует binding и начинает новую сессию', async (t) => {
+  const f = await kimiCompactFixture(t);
+  const response = await f.compact();
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls[1].sessionId, f.before.sessionId);
+  assert.match(f.calls[1].message, /^Сожми наш разговор в рабочую выжимку/u);
+  assert.notEqual(f.calls[1].message, '/compact');
+  assert.deepEqual(response.json().compact, { kind: 'summary', seed: f.seed });
+  assert.equal(response.json().sessionId, null);
+  assert.equal(response.json().contextTokens, 0);
+
+  const rotated = await f.bindings.read(f.chatKey);
+  const stored = await f.history.readOne(f.chatKey);
+
+  assert.equal(rotated.sessionId, null);
+  assert.equal(rotated.generation, f.before.generation + 1);
+  assert.equal(stored.sessionId, null);
+  assert.equal(stored.pendingSeed, f.seed);
+
+  // Legacy-окно вклеивает сохранённую выжимку само; новый workdir-протокол
+  // использует server claim. Здесь проверяется первый существующий путь.
+  const message = `[Выжимка предыдущего разговора — продолжаем с этого места]\n${stored.pendingSeed}`
+    + '\n[/Выжимка]\n\nПродолжай.';
+  const next = await f.app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      chatKey: f.chatKey,
+      modelRef: f.modelRef,
+      sessionId: null,
+      message,
+    },
+  });
+
+  assert.equal(next.statusCode, 200, next.body);
+  assert.equal(f.calls.length, 3);
+  assert.equal(f.calls[2].sessionId ?? null, null);
+  assert.ok(f.calls[2].message.includes(f.seed));
+  assert.equal(next.json().sessionId, 'after-compact');
+  assert.equal((await f.bindings.read(f.chatKey)).sessionId, 'after-compact');
+  assert.equal((await f.history.readOne(f.chatKey)).pendingSeed, '');
+});
+
+test('пустая выжимка Kimi не ротирует binding и не подтверждает сжатие', async (t) => {
+  const f = await kimiCompactFixture(t, 'empty');
+  const response = await f.compact();
+
+  assert.equal(response.statusCode, 500, response.body);
+  assert.match(response.body, /Исполнитель не вернул выжимку — контекст не сжат/u);
+  assert.equal(response.json().compact, undefined);
+  assert.equal(f.calls.length, 2);
+
+  const after = await f.bindings.read(f.chatKey);
+  const stored = await f.history.readOne(f.chatKey);
+
+  assert.equal(after.sessionId, f.before.sessionId);
+  assert.equal(after.generation, f.before.generation);
+  assert.equal(stored.sessionId, f.before.sessionId);
+  assert.equal(stored.pendingSeed || '', '');
+});
+
+test('остановленное сжатие Kimi сохраняет прежнюю session без успешного compact', async (t) => {
+  const f = await kimiCompactFixture(t, 'stopped');
+  const response = await f.compact();
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().stopped, true);
+  assert.equal(response.json().compact, undefined);
+  assert.equal(response.json().sessionId, f.before.sessionId);
+  assert.equal(f.calls.length, 2);
+
+  const after = await f.bindings.read(f.chatKey);
+  const stored = await f.history.readOne(f.chatKey);
+
+  assert.equal(after.sessionId, f.before.sessionId);
+  assert.equal(after.generation, f.before.generation);
+  assert.equal(stored.sessionId, f.before.sessionId);
+  assert.equal(stored.pendingSeed || '', '');
+});

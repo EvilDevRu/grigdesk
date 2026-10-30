@@ -228,7 +228,9 @@ test('kimi сканирует пользовательские скиллы из
   assert.ok(!byCmd.has('/loose'), 'loose .md-файл не попадает в список');
   assert.ok(byCmd.get('/long')?.desc.length <= 120, 'desc обрезается до 120 символов');
   // Built-ins на месте и идут раньше скиллов.
-  assert.ok(list.findIndex((c) => c.cmd === '/compact') < list.findIndex((c) => c.cmd === '/pr-fixes'));
+  assert.ok(list.findIndex((c) => c.cmd === '/status') < list.findIndex((c) => c.cmd === '/pr-fixes'));
+  // '/compact' в web-транспорте уходит модели текстом — команды в списке больше нет.
+  assert.ok(!list.some((c) => c.cmd === '/compact'));
 
   // Скилл с именем, совпадающим с built-in, не дублирует команду.
   await fs.mkdir(path.join(dir, 'status'), { recursive: true });
@@ -241,7 +243,8 @@ test('kimi без каталога скиллов и в contained-режиме �
   const empty = await fs.mkdtemp(path.join(os.tmpdir(), 'kimi-skills-empty-'));
   const hostList = await kimiExecutor.commands({ kimiLaunchMode: 'host', kimiHome: empty });
   assertCommandsShape(hostList, 'kimi');
-  assert.ok(hostList.some((c) => c.cmd === '/compact'));
+  assert.ok(hostList.some((c) => c.cmd === '/status'));
+  assert.ok(!hostList.some((c) => c.cmd === '/compact'));
 
   // contained хостовых скиллов не видит: читает kimiRuntimeHome, а не kimiHome.
   const hostHome = await fs.mkdtemp(path.join(os.tmpdir(), 'kimi-skills-host-'));

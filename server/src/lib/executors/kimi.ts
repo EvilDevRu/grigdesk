@@ -78,19 +78,16 @@ function probe(bin: string) {
   });
 }
 
-// Локальные ACP-команды Kimi: исполняются сервером ACP без вызова модели и отвечают
-// текстом в ленту. Состав зафиксирован contract gate против pinned 0.31.1:
-// TUI-команды (/new, /clear, /model, /goal…)
-// ACP не знает — отвечает «Unknown ACP command», в список их брать нельзя. При смене
-// pinned-версии список пересматривается вместе с contract gate.
-// /compact — боевой путь кнопки сжатия; в меню скрыт дедупликацией (GrigDesk сильнее).
+// Унаследованный список ACP-команд. Текущий web-транспорт отправляет их модели
+// обычным текстом; локального исполнения этих пунктов он не гарантирует.
+// Остальные команды сохранены до отдельного пересмотра. '/compact' исключён:
+// собственная команда GrigDesk использует summary и ротацию сессии.
 const KIMI_ACP_COMMANDS = [
   { cmd: '/status', desc: 'Состояние сессии: модель, режим, контекст', run: 'prompt' },
   { cmd: '/usage', desc: 'Расход контекста и токенов сессии', run: 'prompt' },
   { cmd: '/tasks', desc: 'Фоновые задачи этой сессии', run: 'prompt' },
   { cmd: '/mcp', desc: 'Состояние MCP-серверов сессии', run: 'prompt' },
   { cmd: '/help', desc: 'Список ACP-команд Kimi', run: 'prompt' },
-  { cmd: '/compact', desc: 'Сжать контекст разговора', run: 'prompt' },
 ];
 
 // Пользовательские скиллы (<активный home>/skills/<имя>/SKILL.md) ACP исполняет как
@@ -364,7 +361,10 @@ export default {
     text: true,
     confirmation: 'forwarded',
   },
-  compaction: { kind: 'native', message: '/compact' },
+  // Web-транспорт Kimi не исполняет слэш-команды: '/compact' ушёл бы модели текстом
+  // (docs/grigdesk/chat/context-wheel-executor-gaps.md), поэтому кнопка кольца
+  // сжимает выжимкой — тот же серверный путь, что у DeepSeek и GLM.
+  compaction: { kind: 'summary' },
   // Host-режим не принимает extraDirs; contained объявляет их через server-owned
   // local.toml и монтирует в sandbox. UI получает фактический режим.
   workdir(config: KimiConfig) {
