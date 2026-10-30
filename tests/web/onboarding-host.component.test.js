@@ -48,11 +48,13 @@ for (const scenario of ['empty', 'passport', 'dismissed', 'manual', 'auto-saved'
     const eligible = scenario === 'empty' || scenario === 'auto-saved';
 
     if (eligible) {
-      await page.waitForURL(/#\/onboarding/);
+      await page.locator('[data-role="onboarding-modal"]').waitFor();
+      assert.equal(page.url().includes('#/onboarding'), false);
     } else {
       await page.waitForResponse((response) => response.url().endsWith('/api/onboarding'))
         .catch(() => {});
       assert.equal(page.url().includes('#/onboarding'), false);
+      assert.equal(await page.locator('[data-role="onboarding-modal"]').count(), 0);
     }
 
     assert.equal(f.calls.filter((call) => call.url.endsWith('/start')).length, eligible ? 1 : 0);

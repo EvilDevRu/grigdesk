@@ -1,17 +1,39 @@
-<template></template>
+<template>
+  <OnboardingModal v-if="store.isOpen" />
+</template>
 
 <script setup lang="ts">
-import { watch } from 'vue';
+import { onBeforeUnmount, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { useOnboardingStore } from '../../stores/onboarding.ts';
 import { useSse } from '../../composables/useSse.ts';
 import { isRecord } from '../../../../shared/lib/objects.ts';
+import { asyncView } from '../asyncView.ts';
+
+const OnboardingModal = asyncView(() => import('../../views/onboarding/OnboardingModal.vue'));
 
 const store = useOnboardingStore();
 const route = useRoute();
 const router = useRouter();
 const attempted = new Set<string>();
+
+watch(() => [store.requestedMode, store.scope] as const, ([mode, scope]) => {
+  if (mode && scope) {
+    void store.open(mode);
+  }
+}, { immediate: true });
+
+const removeNavigationGuard = router.beforeEach(async (to, from) => {
+  if (!store.isOpen || from.matched.length === 0 || to.name === 'onboarding'
+    || to.fullPath === from.fullPath) {
+    return true;
+  }
+
+  return store.close();
+});
+
+onBeforeUnmount(removeNavigationGuard);
 
 watch(() => store.scope, async (scope) => {
   if (!scope || attempted.has(scope)) {
@@ -26,14 +48,12 @@ watch(() => store.scope, async (scope) => {
 
   const state = await store.load();
 
-  if (store.scope !== scope || initialPath !== '/' || route.fullPath !== landingPath
+  if (store.scope !== scope || store.isOpen || initialPath !== '/' || route.fullPath !== landingPath
     || state?.shouldOpen !== true) {
     return;
   }
 
-  if (await store.start('auto') && store.scope === scope && route.fullPath === landingPath) {
-    await router.push('/onboarding');
-  }
+  await store.open('auto');
 }, { immediate: true });
 
 useSse((name, data) => {

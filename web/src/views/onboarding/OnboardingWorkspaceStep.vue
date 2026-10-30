@@ -8,7 +8,7 @@
       <div v-for="mode in modes" :key="mode" class="workspace-option"
         :class="{ 'is-selected': store.draft.workspace.mode === mode }">
         <div class="workspace-option-heading">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path v-if="mode === 'isolated'" d="M9 3H4v5m5 13H4v-5M4 8h5v8H4M15 7h5v10h-5zM9 12h6" />
             <path v-else d="M3 7V5h7l2 2h9v12H3zM3 10h18" />
@@ -17,7 +17,7 @@
             {{ t('core.onboardingRecommended') }}
           </span>
         </div>
-        <UiButton wrap block role="radio" :aria-checked="store.draft.workspace.mode === mode"
+        <UiButton data-context="workspace-form-wrap" block role="radio" :aria-checked="store.draft.workspace.mode === mode"
           :aria-describedby="`workspace-${mode}-help`"
           :tabindex="store.draft.workspace.mode === mode ? 0 : -1" variant="outline"
           :tone="store.draft.workspace.mode === mode ? 'accent' : 'neutral'"
@@ -105,7 +105,7 @@ onMounted(async () => {
 <style scoped>
 .workspace-options {
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 .workspace-modes {
@@ -116,7 +116,7 @@ onMounted(async () => {
 
 .workspace-option {
   min-width: 0;
-  padding: 16px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -132,8 +132,8 @@ onMounted(async () => {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px;
-  min-height: 24px;
-  margin-bottom: 16px;
+  min-height: 20px;
+  margin-bottom: 10px;
   color: var(--ink-mid);
 }
 
@@ -143,9 +143,9 @@ onMounted(async () => {
 }
 
 .workspace-option p {
-  margin: 12px 0 0;
+  margin: 8px 0 0;
   color: var(--ink-mid);
-  font-size: 13px;
-  line-height: 1.7;
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>

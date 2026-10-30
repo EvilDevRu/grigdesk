@@ -24,8 +24,17 @@ export const names = {
  * Проверки самой страницы после BUILD используют настоящий App, UI и router.
  */
 export function requireWizard() {
-  assert.ok(existsSync(new URL('../../../web/src/views/OnboardingView.vue', import.meta.url)),
-    'Нет страницы мастера первого запуска');
+  assert.ok(existsSync(new URL('../../../web/src/views/onboarding/OnboardingModal.vue', import.meta.url)),
+    'Нет модального мастера первого запуска');
+}
+
+/**
+ * После перезагрузки рабочий раздел остаётся на месте, а мастер открывается явной кнопкой.
+ * Сервер продолжает прежний проход без повторного создания проекта.
+ */
+export async function reopenWizard(page) {
+  await page.locator('.topbar-actions').getByRole('button', { name: names.manual }).click();
+  await page.locator('[data-role="onboarding-modal"]').waitFor();
 }
 
 /**
@@ -312,8 +321,7 @@ export async function fillProject(page, directories, title = 'Проект из 
  */
 export async function assertGeometry(page, touch = false) {
   const result = await page.evaluate(() => {
-    const current = document.querySelector('[aria-current="step"]');
-    const root = current?.closest('main') || document.querySelector('main');
+    const root = document.querySelector('[data-role="onboarding-modal"]');
     const bounds = (root || document.documentElement).getBoundingClientRect();
     const visible = [...(root || document).querySelectorAll('button')]
       .filter((item) => item.getBoundingClientRect().width > 0);
@@ -345,7 +353,7 @@ export async function assertGeometry(page, touch = false) {
 export async function scaleWizardText(page, factor) {
   await page.evaluate((factor) => {
     const scaled = new WeakSet();
-    const root = document.querySelector('.shell .content');
+    const root = document.querySelector('[data-role="onboarding-modal"]');
     /**
      * Новые текстовые узлы измеряются до общей записи размеров.
      * Уже увеличенные элементы остаются неизменными при смене шага.

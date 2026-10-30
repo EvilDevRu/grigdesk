@@ -15,7 +15,7 @@
 | `/chats` | `ChatsView.vue` |
 | `/routes` | `RoutesView.vue` |
 | `/projects/:id?` | `ProjectsView.vue` |
-| `/onboarding` | `OnboardingView.vue` |
+| `/onboarding` | `onboarding/onboardingRouteStub.ts`; guard открывает общий модал |
 | `/tools` | `ToolsView.vue` |
 | `/code` | `CodeView.vue` |
 | `/shelf` | `ShelfView.vue` |
@@ -42,6 +42,8 @@
 самому плагину и не определяется исходниками встроенного UI.
 
 ## Дополнительные поверхности
+
+`onboarding/OnboardingModal.vue` открывает мастер поверх текущего раздела через общий `UiDialog`.
 
 `settings/SettingsModal.vue` открывает 35 страниц восьми групп через общий `UiDialog`.
 Дерево и поиск находятся слева; на узком экране навигацию открывает «Разделы».

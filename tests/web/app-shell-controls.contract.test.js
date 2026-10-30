@@ -46,7 +46,7 @@ test('AppShell использует public UI controls и общую повер�
   await settings.hover();
   await page.getByRole('tooltip', { name: 'Настройки', exact: true }).waitFor();
 
-  const gear = source.match(/<UiIconButton\b[^>]*aria-haspopup="dialog"[^>]*>/u)?.[0] ?? '';
+  const gear = source.match(/<UiIconButton\b[^>]*:pressed="settings.isOpen"[^>]*>/u)?.[0] ?? '';
 
   assert.match(gear, /v-tooltip=/u);
   assert.match(gear, /aria-haspopup="dialog"/u);

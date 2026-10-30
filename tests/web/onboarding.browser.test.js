@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import {
   assertGeometry, fillProject, names, projectInput, repository, request, requireWizard,
-  scaleWizardText, token, waitState, wizardBrowser,
+  reopenWizard, scaleWizardText, token, waitState, wizardBrowser,
 } from './helpers/onboardingFixture.js';
 
 /**
@@ -51,13 +51,14 @@ test('ONB-E2E-01: настоящий App и HTTP, два Git, ACK/reload и об
   const second = await repository(f.root, 'second');
   const page = await f.newPage();
 
-  await page.waitForURL(/#\/onboarding/);
+  await page.locator('[data-role="onboarding-modal"]').waitFor();
   await page.getByRole('button', { name: names.skip }).click();
   await waitState(f, (state) => state.active.step === 'project');
   await fillProject(page, [first, second], 'Два репозитория из мастера');
   await selectUiOption(page, page.getByRole('combobox', { name: names.branch }).nth(1), 'feature');
   await waitState(f, (state) => state.active.draft.repositories[1]?.baseBranch === 'feature');
   await page.reload({ waitUntil: 'domcontentloaded' });
+  await reopenWizard(page);
   assert.equal(await page.getByRole('textbox', { name: names.title }).inputValue(),
     'Два репозитория из мастера');
   await page.getByRole('button', { name: names.next }).click();
@@ -67,7 +68,7 @@ test('ONB-E2E-01: настоящий App и HTTP, два Git, ACK/reload и об
 
   const other = await f.newPage();
 
-  await other.waitForURL(/#\/onboarding/);
+  await other.locator('[data-role="onboarding-modal"]').waitFor();
   assert.equal(await other.getByRole('radio', { name: /Прямо в моей папке/i }).isChecked(), true);
   await assertSse(f, page);
   await page.getByRole('radio', { name: /Прямо в моей папке/i }).check();
@@ -145,8 +146,9 @@ test('ONB-E2E-02: manual после reload и второго context продо�
   const starts = f.calls.filter((call) => call.url.endsWith('/start')).length;
 
   await other.reload({ waitUntil: 'domcontentloaded' });
-  assert.equal(await other.getByRole('textbox', { name: names.title }).inputValue(), 'Ручной второй проект');
   assert.equal(f.calls.filter((call) => call.url.endsWith('/start')).length, starts);
+  await reopenWizard(other);
+  assert.equal(await other.getByRole('textbox', { name: names.title }).inputValue(), 'Ручной второй проект');
   assert.equal((await f.app.projects.list()).length, 1);
 });
 
@@ -197,7 +199,7 @@ test('ONB-E2E-02: RU/EN, узкий экран, touch, текст130%, все ш
           touch: size.touch,
         });
 
-        await page.waitForURL(/#\/onboarding/);
+        await page.locator('[data-role="onboarding-modal"]').waitFor();
         await page.getByRole('button', { name: names.skip }).waitFor();
 
         if (size.workspaceWidth) {

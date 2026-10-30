@@ -115,7 +115,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/onboarding',
     name: 'onboarding',
-    component: () => import('./views/OnboardingView.vue'),
+    component: () => import('./views/onboarding/onboardingRouteStub.ts'),
     meta: { title: 'Мастер настройки', layout: 'workspace' },
   },
   {

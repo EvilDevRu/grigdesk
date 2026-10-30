@@ -13,7 +13,7 @@
     <div v-for="(repo, index) in store.draft.repositories" :key="repo.name" class="repository">
       <header class="repository-heading">
         <h3>{{ t('core.onboardingRepositoryNumber', { number: index + 1 }) }}</h3>
-        <UiButton wrap v-if="store.draft.repositories.length > 1" :disabled="locked"
+        <UiButton data-context="workspace-form-wrap" v-if="store.draft.repositories.length > 1" :disabled="locked"
           variant="ghost" tone="danger" @click="remove(repo.name)">
           {{ t('core.onboardingRemoveFolder') }}
         </UiButton>
@@ -23,7 +23,7 @@
           @update:model-value="source(repo.name, String($event ?? ''))" @blur="check(repo.name)" />
       </UiField>
       <div class="repository-actions">
-        <UiButton wrap v-if="picker" :disabled="locked" @click="pick(repo.name)">
+        <UiButton data-context="workspace-form-wrap" v-if="picker" :disabled="locked" @click="pick(repo.name)">
           {{ t('core.onboardingChooseFolder') }}
         </UiButton>
       </div>
@@ -46,7 +46,7 @@
         </UiSelect>
       </UiField>
     </div>
-    <UiButton wrap :disabled="locked || store.draft.repositories.length >= 16" @click="add">
+    <UiButton data-context="workspace-form-wrap" :disabled="locked || store.draft.repositories.length >= 16" @click="add">
       <template #leading><span aria-hidden="true">+</span></template>
       {{ t('core.onboardingAddFolder') }}
     </UiButton>
@@ -300,9 +300,9 @@ onBeforeUnmount(() => {
 .repository {
   display: grid;
   gap: 12px;
-  margin: 16px 0;
+  margin: 12px 0;
   min-width: 0;
-  padding: 16px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -323,7 +323,7 @@ onBeforeUnmount(() => {
 }
 
 .repository-help {
-  margin: 16px 0 0;
+  margin: 12px 0 0;
   color: var(--ink-mid);
   font-size: 12px;
   line-height: 1.65;

@@ -13,7 +13,7 @@
       <article v-for="provider in providers.providers" :key="provider.id" class="provider"
         :class="{ 'is-ready': isChatReady(provider) }">
         <header class="provider-heading">
-          <span class="provider-icon"><ProviderIcon :provider="provider" :size="22" /></span>
+          <span class="provider-icon"><ProviderIcon :provider="provider" :size="16" /></span>
           <h3>{{ provider.name }}</h3>
         </header>
         <p class="provider-status">
@@ -25,11 +25,11 @@
           <p>{{ localizeProviderAuthLabel(provider, uiLocale) }}</p>
         </div>
         <div v-if="!isChatReady(provider)" class="provider-actions">
-          <UiButton wrap v-if="!provider.installed && provider.installation?.canInstall"
+          <UiButton data-context="workspace-form-wrap" v-if="!provider.installed && provider.installation?.canInstall"
             :disabled="installer.busy" @click="installer.requestInstall(provider.id, 'install')">
             {{ t('core.onboardingInstall', { name: provider.name }) }}
           </UiButton>
-          <UiButton wrap v-if="provider.installed && !provider.available && provider.installation?.loginCommand"
+          <UiButton data-context="workspace-form-wrap" v-if="provider.installed && !provider.available && provider.installation?.loginCommand"
             @click="login(provider.installation.loginCommand)">
             {{ t('core.onboardingLogin', { name: provider.name }) }}
           </UiButton>
@@ -37,7 +37,7 @@
       </article>
     </div>
     <div class="provider-refresh">
-      <UiButton wrap :loading="checking" @click="refresh(true)">
+      <UiButton data-context="workspace-form-wrap" :loading="checking" @click="refresh(true)">
         <template #leading><span aria-hidden="true">↻</span></template>
         {{ t('core.onboardingCheckAgain') }}
       </UiButton>
@@ -88,6 +88,7 @@ async function refresh(force: boolean): Promise<void> {
  */
 async function login(command: string): Promise<void> {
   if (await onboarding.flush()) {
+    onboarding.hide();
     await launcher.openTerminal({ insert: command });
   }
 }
@@ -100,15 +101,15 @@ onMounted(() => refresh(false));
 .providers {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
-  gap: 12px;
-  margin: 16px 0 20px;
+  gap: 8px;
+  margin: 12px 0;
 }
 
 .provider {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 16px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -117,15 +118,15 @@ onMounted(() => refresh(false));
 .provider-heading {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .provider-icon {
   display: grid;
   place-items: center;
-  flex: 0 0 32px;
-  height: 32px;
+  flex: 0 0 24px;
+  height: 24px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   color: var(--ink-mid);
@@ -142,7 +143,7 @@ onMounted(() => refresh(false));
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   color: var(--ink-mid);
   font-size: 12px;
   font-weight: 500;
@@ -154,10 +155,10 @@ onMounted(() => refresh(false));
 
 .provider-details {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   color: var(--ink-mid);
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
 .provider-details p {
@@ -169,7 +170,7 @@ onMounted(() => refresh(false));
   flex-wrap: wrap;
   gap: 8px;
   margin-top: auto;
-  padding-top: 14px;
+  padding-top: 10px;
 }
 
 .provider-actions:empty {

@@ -32,6 +32,8 @@ import {
   installSettingsOpenListener,
 } from './shared/settingsNavigation.ts';
 import { useSettingsStore } from './stores/settings.ts';
+import { useOnboardingStore } from './stores/onboarding.ts';
+import { installOnboardingRouteGuard } from './shared/onboarding/onboardingNavigation.ts';
 import { showSectionLoadFailure } from './shared/sectionLoadFailure.ts';
 import App from './App.vue';
 import { useShellStore } from './stores/shell.ts';
@@ -109,6 +111,7 @@ webLog.attachAuthStore(useAuthStore(pinia));
 
 const settings = useSettingsStore(pinia);
 const removeSettingsGuard = installSettingsRouteGuard(router, settings);
+const removeOnboardingGuard = installOnboardingRouteGuard(router, useOnboardingStore(pinia));
 const removeSettingsListener = installSettingsOpenListener(window,
   (request) => settings.requestOpen(request));
 
@@ -297,6 +300,7 @@ import.meta.hot?.dispose(() => {
   setSseLogSink(null);
   webLog.dispose();
   removeSettingsGuard();
+  removeOnboardingGuard();
   removeSettingsListener();
   removeRouteError();
   removeBackAction();

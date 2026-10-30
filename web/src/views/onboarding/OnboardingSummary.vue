@@ -43,20 +43,20 @@ const session = computed(() => store.snapshot?.active);
 .summary-complete {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
-  margin-bottom: 16px;
+  width: 24px;
+  height: 24px;
+  margin-bottom: 12px;
   border-radius: var(--radius-round);
   background: color-mix(in srgb, var(--good) 12%, transparent);
   color: var(--good);
-  font-size: 20px;
+  font-size: 14px;
 }
 
 .summary-facts {
   display: grid;
   gap: 8px;
-  margin-bottom: 20px;
-  font-size: 13px;
+  margin-bottom: 12px;
+  font-size: 12px;
 }
 
 .summary-facts p {
@@ -73,7 +73,7 @@ const session = computed(() => store.snapshot?.active);
 
 .summary-repositories {
   display: grid;
-  margin: 0 0 24px;
+  margin: 0 0 16px;
   padding: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -88,7 +88,7 @@ const session = computed(() => store.snapshot?.active);
   flex-wrap: wrap;
   gap: 8px 16px;
   min-width: 0;
-  padding: 12px 14px;
+  padding: 10px 12px;
   font-family: var(--mono);
   font-size: 12px;
 }
@@ -102,7 +102,7 @@ const session = computed(() => store.snapshot?.active);
 }
 
 .summary-next {
-  padding-top: 20px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 
@@ -113,9 +113,9 @@ const session = computed(() => store.snapshot?.active);
 }
 
 .summary-next p {
-  margin: 8px 0 12px;
+  margin: 6px 0 8px;
   color: var(--ink-mid);
-  font-size: 13px;
-  line-height: 1.7;
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>

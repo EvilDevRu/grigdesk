@@ -5,7 +5,7 @@ import test from 'node:test';
 import { card, job, preparation, snapshot } from './helpers/providerInstallFixture.js';
 import {
   atProject, atWorkspace, fillProject, names, repository, request, requireWizard,
-  token, waitState, wizardBrowser,
+  reopenWizard, token, waitState, wizardBrowser,
 } from './helpers/onboardingFixture.js';
 
 /**
@@ -187,6 +187,9 @@ test('ONB-AI-01: статусы, общий installer, login без Enter и н�
   assert.deepEqual(terminalCalls, [{ type: 'insert', text: loginCommand }]);
   assert.equal(terminalCalls[0].text.includes('\n'), false);
 
+  await page.locator('[data-role="onboarding-modal"]').waitFor({ state: 'hidden' });
+  await reopenWizard(page);
+
   await page.route('**/api/providers*', async (route) => {
     if (route.request().method() !== 'GET') {
       await route.continue();
@@ -221,6 +224,7 @@ test('ONB-SKIP-01: предупреждение и подтверждённый 
 
   assert.equal(state.active.aiSkipped, true);
   await f.page.reload({ waitUntil: 'domcontentloaded' });
+  await reopenWizard(f.page);
   await f.page.getByRole('textbox', { name: names.title }).waitFor();
   assert.equal((await request(f.app)).active.aiSkipped, true);
 });
@@ -322,6 +326,7 @@ test('ONB-MODE-UI: isolated по умолчанию, shared и выбранна�
   await page.getByText(/по одной задаче/i).first().waitFor();
   await page.getByText(/уже запущенн/i).first().waitFor();
   await page.reload({ waitUntil: 'domcontentloaded' });
+  await reopenWizard(page);
   assert.equal(await page.getByRole('radio', { name: /Прямо в моей папке/i }).isChecked(), true);
   assert.equal((await request(f.app)).active.id, state.active.id);
 });
@@ -397,7 +402,7 @@ for (const step of ['ai', 'project', 'workspace', 'summary']) {
 
     try {
       await page.getByRole('button', { name: names.dismiss }).click();
-      assert.equal(new URL(page.url()).hash, '#/onboarding');
+      assert.equal(await page.locator('[data-role="onboarding-modal"]').isVisible(), true);
     } finally {
       release();
     }

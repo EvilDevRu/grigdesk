@@ -18,6 +18,9 @@ export const useOnboardingStore = defineStore('onboarding', () => {
   const dirty = ref(false);
   const saving = ref(false);
   const busy = ref(false);
+  const isOpen = ref(false);
+  const opening = ref(false);
+  const requestedMode = ref<'manual' | 'resume' | null>(null);
   const error = ref<'read' | 'save' | null>(null);
   const scope = computed(() => auth.ready && auth.authenticated && shell.initialized
     && (!shell.present || (shell.profile && shell.status === 'online'))
@@ -26,7 +29,7 @@ export const useOnboardingStore = defineStore('onboarding', () => {
   let edits = 0;
   let pending: Promise<void> | null = null;
 
-  watch(scope, () => {
+  watch(scope, (_scope, previous) => {
     generation += 1;
     edits = 0;
     pending = null;
@@ -35,6 +38,13 @@ export const useOnboardingStore = defineStore('onboarding', () => {
     dirty.value = false;
     saving.value = false;
     busy.value = false;
+    isOpen.value = false;
+    opening.value = false;
+
+    if (previous) {
+      requestedMode.value = null;
+    }
+
     error.value = null;
   }, { flush: 'sync' });
 
@@ -232,6 +242,7 @@ export const useOnboardingStore = defineStore('onboarding', () => {
       }
 
       accept(result, true);
+      dirty.value = false;
       error.value = null;
 
       return result.open === true;
@@ -259,12 +270,78 @@ export const useOnboardingStore = defineStore('onboarding', () => {
     await load();
   }
 
+  /**
+   * Запрос кнопки или старого адреса ждёт готового подключения в общем host.
+   * Повторный вызов не перезапускает уже открытый мастер и не стирает его ввод.
+   */
+  function requestOpen(mode: 'manual' | 'resume' = 'manual'): void {
+    if (!isOpen.value && !opening.value) {
+      requestedMode.value = mode;
+    }
+  }
+
+  /**
+   * Модал открывается поверх текущего раздела; сервер по-прежнему владеет проходом.
+   * Смена подключения отсекает поздний результат, ошибка ручного открытия остаётся видимой.
+   */
+  async function open(mode: 'auto' | 'manual' | 'resume'): Promise<boolean> {
+    if (!scope.value || isOpen.value || opening.value) {
+      return false;
+    }
+
+    const epoch = generation;
+
+    requestedMode.value = null;
+    isOpen.value = true;
+    opening.value = true;
+
+    try {
+      const opened = mode === 'resume' ? Boolean(await load()) : await start(mode);
+
+      if (epoch !== generation) {
+        return false;
+      }
+
+      if (!opened && mode === 'auto') {
+        isOpen.value = false;
+      }
+
+      return opened;
+    } finally {
+      if (epoch === generation) {
+        opening.value = false;
+      }
+    }
+  }
+
+  function hide(): void {
+    isOpen.value = false;
+    requestedMode.value = null;
+  }
+
+  /**
+   * Закрытие ждёт последнего сохранения, но не отменяет проход на сервере.
+   * При отказе записи окно остаётся открытым до явного решения человека.
+   */
+  async function close(): Promise<boolean> {
+    if (busy.value || opening.value || (dirty.value && !await flush())) {
+      return false;
+    }
+
+    hide();
+
+    return true;
+  }
+
   return {
     snapshot,
     draft,
     dirty,
     saving,
     busy,
+    isOpen,
+    opening,
+    requestedMode,
     error,
     scope,
     load,
@@ -273,5 +350,9 @@ export const useOnboardingStore = defineStore('onboarding', () => {
     transition,
     start,
     reload,
+    requestOpen,
+    open,
+    hide,
+    close,
   };
 });
