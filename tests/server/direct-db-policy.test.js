@@ -161,7 +161,7 @@ test('Codex process hook применяет host-aware DB-политику к в
     cwd: root,
     model: 'gpt-contract-0.149',
     effort: 'medium',
-    permissionMode: 'bypassPermissions',
+    permissionMode: 'auto',
     providerSettings: {
       blockDirectSsh: false,
       blockDirectDb: true,
