@@ -57,6 +57,19 @@ export async function terminalBuildFixture(t: TestContext) {
     `echo fixture-open >> '${calls}'`,
   ].join('\n'), { mode: 0o755 });
 
+  // Вердикт preflight управляется файлом в HOME фикстуры, без реального дерева deepseek.
+  // Отсутствие файла означает, что оба режима требуют живого допуска.
+  await mkdir(path.join(box.root, 'deepseek/scripts'), { recursive: true });
+  await writeFile(path.join(box.root, 'deepseek/scripts/admissionPreflight.mts'), [
+    'import fs from "node:fs";',
+    'const control = process.env.STUB_HOME + "/preflight.json";',
+    'let verdict = { consumerMode: "api", missing: ["api", "coding-plan"], pluginMissing: false };',
+    'if (fs.existsSync(control)) {',
+    '  verdict = { ...verdict, ...JSON.parse(fs.readFileSync(control, "utf8")) };',
+    '}',
+    'process.stdout.write(JSON.stringify(verdict));',
+  ].join('\n'));
+
   const insert = [
     'process.stdout.write("fixture-out " + args.join(" ") + "\\n");',
     'process.stderr.write("fixture-err\\n");',

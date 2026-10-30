@@ -1,10 +1,11 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { constants } from 'node:os';
 import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import type { Readable } from 'node:stream';
 import { setTimeout as pause } from 'node:timers/promises';
+import { promisify } from 'node:util';
 
 import { dataHome, dataPath } from '../shared/runtime/dataHome.ts';
 import { openBuildLog, readBuildTimings, saveBuildTimings } from './buildLog.ts';
@@ -22,6 +23,8 @@ interface ObservedStep extends BuildStep {
   startedAt?: number;
   code?: number;
 }
+
+const runTool = promisify(execFile);
 
 function duration(milliseconds: number): string {
   const seconds = Math.floor(milliseconds / 1000);
@@ -76,25 +79,73 @@ async function offerOpenWindow(
   }
 }
 
+interface GlmAdmissionState {
+  consumerMode: string;
+  missing: string[];
+}
+
 /**
- * Живой smoke допуска GLM — осознанный выбор человека: он расходует квоту живого API.
- * Выбор передаётся сборке окружением и применяется только к режимам без действующего
- * допуска; Esc или Enter оставляют пропуск по умолчанию.
+ * Режим потребителя читает тот же ctlBuild, что и shell; preflight сверяет входы дерева.
+ * Любой сбой, таймаут или некорректный ответ возвращает прежний вопрос с пропуском:
+ * квота живого API расходуется по умолчанию лишь при доказанном отсутствии допуска.
+ */
+async function deepSeekAdmissionState(
+  root: string, input: { env: NodeJS.ProcessEnv; home: string },
+): Promise<GlmAdmissionState | null> {
+  try {
+    const mode = (await runTool(process.execPath, [
+      path.join(root, 'server/scripts/ctlBuild.mts'),
+      'glm-mode',
+      path.join(dataHome(input), '.env'),
+    ], { timeout: 10_000, env: input.env })).stdout.trim();
+    const verdict = JSON.parse((await runTool(process.execPath, [
+      path.join(root, 'deepseek/scripts/admissionPreflight.mts'),
+      '--mode', mode,
+    ], { timeout: 20_000, env: input.env })).stdout);
+    const modes = ['api', 'coding-plan'];
+
+    if (!modes.includes(mode) || verdict?.consumerMode !== mode || !Array.isArray(verdict.missing)
+      || !verdict.missing.every((value: unknown) => typeof value === 'string' && modes.includes(value))) {
+      return null;
+    }
+
+    return { consumerMode: mode, missing: verdict.missing };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * При доказанном отсутствии допуска вопрос называет режим и предлагает его живой smoke.
+ * Если preflight не смог ответить, прежний вопрос сохраняет пропуск по умолчанию.
  */
 async function askDeepSeekSmoke(
   session: TerminalSession,
+  admission: GlmAdmissionState | null,
 ): Promise<'none' | 'consumer' | 'both' | null> {
   const { t } = cliTranslator();
-  const choices: Array<'none' | 'consumer' | 'both'> = ['none', 'consumer', 'both'];
+  const mode = admission && admission.missing.includes(admission.consumerMode)
+    ? admission.consumerMode
+    : null;
+  const informed = mode !== null;
+  const choices: Array<'none' | 'consumer' | 'both'> = informed
+    ? ['consumer', 'both', 'none']
+    : ['none', 'consumer', 'both'];
   let selected = 0;
   const render = () => showScreen(session, {
     title: `${t('build')}: ${t('deepseek')}`,
-    state: { text: t('smokeQuestion'), tone: 'accent' },
+    state: {
+      text: t(informed ? 'smokeQuestionMissing' : 'smokeQuestion', { mode: mode ?? '' }),
+      tone: 'accent',
+    },
     lines: choices.map((choice, index) => ({
-      text: `${index === selected ? '›' : ' '} ${t(`smokeChoice.${choice}`)}`,
+      text: `${index === selected ? '›' : ' '} ${t(
+        informed ? `smokeMissingChoice.${choice}` : `smokeChoice.${choice}`,
+        { mode: mode ?? '' },
+      )}`,
       selected: index === selected,
     })),
-    footer: t('smokeNavigation'),
+    footer: t(informed ? 'smokeMissingNavigation' : 'smokeNavigation'),
   });
 
   session.resume();
@@ -132,10 +183,13 @@ async function observeBuild(
   const { t } = cliTranslator();
   const input = { env: process.env, home: process.env.HOME || os.homedir() };
 
-  // Выбор живого smoke спрашивается до журнала и запуска оболочки: отмена
-  // на вопросе не оставляет открытых ресурсов, а квота живого API тратится
-  // только по явному решению человека.
-  const smokeChoice = variant === 'deepseek' ? await askDeepSeekSmoke(session) : undefined;
+  // Покрытый допуск режима потребителя позволяет начать сборку без вопроса.
+  // При сбое preflight возвращается прежний вопрос с пропуском по умолчанию.
+  const admission = variant === 'deepseek' ? await deepSeekAdmissionState(root, input) : null;
+  const smokeNeeded = admission === null || admission.missing.includes(admission.consumerMode);
+  const smokeChoice = variant === 'deepseek' && smokeNeeded
+    ? await askDeepSeekSmoke(session, admission)
+    : undefined;
 
   if (variant === 'deepseek' && smokeChoice === null) {
     return 130;
@@ -176,6 +230,7 @@ async function observeBuild(
   let previousPercent = 0;
   let frame = 0;
   let selectServer = false;
+  let deferredAdmission = '';
   let queuedServer = false;
   let interrupted = 0;
   let cancellation: Promise<void> | undefined;
@@ -354,6 +409,10 @@ async function observeBuild(
           selectServer = true;
         }
 
+        if (type === 'hint' && id === 'deepseek-deferred') {
+          deferredAdmission = code || 'api';
+        }
+
         if (type === 'hint' && id === 'queued-server') {
           queuedServer = true;
           selectServer = false;
@@ -467,7 +526,13 @@ async function observeBuild(
     ? path.resolve(root, process.env.GRIGDESK_MOBILE_APK_DIR || dataPath(dataHome(input), 'mobileApk'),
       'grigdesk-mobile-debug.apk')
     : path.join(root, target);
-  const lines = [t(summary, { path: resultPath }), t('total', { time: duration(elapsed) })];
+  const deferred = variant === 'deepseek' && deferredAdmission !== '';
+  const lines: Array<string | ScreenLine> = [
+    deferred
+      ? { text: t('deepseekDeferred', { mode: deferredAdmission }), tone: 'warning' }
+      : t(summary, { path: resultPath }),
+    t('total', { time: duration(elapsed) }),
+  ];
 
   if (selectServer) {
     lines.push(t('selectServer', { path: path.join(root, 'bin/grigdesk-server') }));
@@ -478,8 +543,12 @@ async function observeBuild(
   }
 
   if (variant !== 'bundle' && variant !== 'apk') {
-    lines.push(t(variant === 'web' ? 'webHint'
-      : variant === 'deepseek' ? 'deepseekHint' : selectServer ? 'serverNotSelected' : 'reopen'));
+    lines.push(variant === 'web' ? t('webHint')
+      : variant === 'deepseek'
+        ? deferred
+          ? { text: t('deepseekDeferredHint', { mode: deferredAdmission }), tone: 'muted' }
+          : t('deepseekHint')
+        : selectServer ? t('serverNotSelected') : t('reopen'));
   }
 
   const summaryScreen: ScreenOptions = {

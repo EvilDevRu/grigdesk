@@ -365,6 +365,7 @@ developer_command() {
     if ! observed_step "deepseek.admission-$glm_mode" npm --prefix "$DIR/deepseek" run --silent admission:check -- \
       --binary "$cache/out/deepseek" --mode "$glm_mode" \
       --host-contract "$DIR/server/deepseek-host-contract.json"; then
+      build_event hint deepseek-deferred "$glm_mode"
       echo "DeepSeek собран и проверен: $cache/out/deepseek"
       echo "Установка не выполнена: не хватает живого допуска GLM ($glm_mode)."
       echo "Повторите сборку, выбрав живой smoke на старте, или прогоните"

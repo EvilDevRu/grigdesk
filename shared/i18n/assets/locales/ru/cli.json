@@ -17,6 +17,13 @@
   "skipOpen": "Не открывать",
   "openWindowNavigation": "↑↓ выбор · Enter подтвердить · Д/Н · Esc не открывать",
   "smokeQuestion": "Живой smoke допуска GLM после сборки?",
+  "smokeQuestionMissing": "Нет живого допуска GLM: {mode}. Прогнать smoke после сборки?",
+  "smokeMissingNavigation": "↑↓ выбор · Enter подтвердить",
+  "smokeMissingChoice": {
+    "consumer": "Прогнать smoke допуска {mode}",
+    "both": "Оба режима: api и coding-plan",
+    "none": "Отложить — установка не будет выполнена"
+  },
   "smokeNavigation": "↑↓ выбор · Enter подтвердить · Esc пропустить",
   "smokeChoice": {
     "none": "Пропустить (по умолчанию)",
@@ -94,6 +101,8 @@
   "reopen": "Закройте окно и откройте снова — запустится новый код.",
   "webHint": "Окно покажет новый веб после grigdesk-ctl build window.",
   "deepseekHint": "Новый ELF получит следующий ход DeepSeek; перезапуск сервера не нужен.",
+  "deepseekDeferred": "Установка не выполнена: нет живого допуска GLM ({mode}).",
+  "deepseekDeferredHint": "Повторите сборку со smoke или запустите glmLiveSmoke.mts --mode {mode} --admit.",
   "selectServer": "Для выбора этого сервера окном: grigdesk-ctl desktop use-server {path}",
   "serverQueued": "При следующем запуске окно выберет сервер этой сборки.",
   "serverNotSelected": "Окно сохраняет выбор другой установки сервера; новый сервер ещё не выбран.",

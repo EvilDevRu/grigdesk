@@ -43,7 +43,7 @@ for (const target of ['all', 'server', 'web', 'window', 'deepseek', 'apk', 'bund
 
       await chooseBuild(session, target);
 
-      // Цель deepseek сначала спрашивает про живой smoke; Enter оставляет пропуск.
+      // Фикстура без допуска предлагает живой smoke; admission:check затем разрешает установку.
       if (target === 'deepseek') {
         await session.wait(/smoke/iu, 4000);
         session.write('\r');
@@ -133,6 +133,133 @@ test('BS-APK: явная команда показывает каталог ре
   assert.match(session.output(), /Собран APK/u);
   assert.ok((await buildLog(box)).text.includes(path.join(directory, 'grigdesk-mobile-debug.apk')));
   assert.doesNotMatch(session.output(), openQuestion);
+  assertRestored(result, session.output());
+});
+
+test('BS-SMOKE: при покрытом допуске вопрос smoke не задан, установка идёт', async (t) => {
+  const box = await terminalBuildFixture(t);
+
+  await writeFile(path.join(box.env.HOME, 'preflight.json'),
+    JSON.stringify({ consumerMode: 'api', missing: [] }));
+
+  const session = launchBuild(t, box, 'deepseek');
+  const result = await session.done;
+
+  // Метки стадий «живой smoke (api)» печатаются всегда — вопрос отличается текстом.
+  const question = /Живой smoke допуска GLM|Нет живого допуска GLM/u;
+
+  assert.equal(result.code, 0, session.output());
+  assert.doesNotMatch(session.output(), question);
+  assert.match(session.output(), /Поставлен DeepSeek/u);
+  assertRestored(result, session.output());
+});
+
+test('BS-SMOKE: без допуска вопрос называет режим, Enter выбирает прогон smoke', async (t) => {
+  const box = await terminalBuildFixture(t);
+
+  await writeFile(path.join(box.env.HOME, 'preflight.json'),
+    JSON.stringify({ consumerMode: 'api', missing: ['api', 'coding-plan'] }));
+
+  const session = launchBuild(t, box, 'deepseek');
+
+  await session.wait(/Нет живого допуска GLM: api/u, 4000);
+  assert.match(session.output(), /Прогнать smoke допуска api/u);
+  session.write('\r');
+  await session.wait(totalTime, 10000);
+
+  const result = await session.done;
+
+  assert.equal(result.code, 0, session.output());
+  assert.match(session.output(), /Поставлен DeepSeek/u);
+  assert.equal((await box.calls()).filter((call) => call.args.includes('admission:check')).length, 2);
+  assertRestored(result, session.output());
+});
+
+for (const verdict of ['invalid-json', { consumerMode: 'coding-plan' }, { missing: [42] }]) {
+  test(`BS-SMOKE: сбой preflight — прежний вопрос и пропуск, ${JSON.stringify(verdict)}`, async (t) => {
+    const box = await terminalBuildFixture(t);
+
+    await writeFile(path.join(box.env.HOME, 'preflight.json'),
+      typeof verdict === 'string' ? verdict : JSON.stringify(verdict));
+
+    const session = launchBuild(t, box, 'deepseek');
+
+    await session.wait(/Живой smoke допуска GLM после сборки/u, 4000);
+    assert.doesNotMatch(session.output(), /Нет живого допуска GLM/u);
+    session.write('\r');
+
+    const result = await session.done;
+
+    assert.equal(result.code, 0, session.output());
+    assert.equal((await box.calls()).filter((call) => call.args.includes('admission:check')).length, 1);
+    assertRestored(result, session.output());
+  });
+}
+
+test('BS-SMOKE: допуск потребителя достаточен, both из окружения сохраняется', async (t) => {
+  const box = await terminalBuildFixture(t);
+
+  await writeFile(path.join(box.env.HOME, 'preflight.json'),
+    JSON.stringify({ consumerMode: 'api', missing: ['coding-plan'] }));
+
+  const session = launchBuild(t, box, 'deepseek', false, {
+    env: { ...box.env, GRIGDESK_DEEPSEEK_SMOKE: 'both' },
+  });
+  const result = await session.done;
+
+  assert.equal(result.code, 0, session.output());
+  assert.doesNotMatch(session.output(), /Живой smoke допуска GLM|Нет живого допуска GLM/u);
+  assert.equal((await box.calls()).filter((call) => call.args.includes('admission:check')).length, 3);
+  assertRestored(result, session.output());
+});
+
+test('BS-SMOKE: режим coding-plan из окружения показан в английском вопросе и предупреждении', async (t) => {
+  const box = await terminalBuildFixture(t);
+
+  await mkdir(box.env.GRIGDESK_HOME, { recursive: true });
+  await writeFile(path.join(box.env.GRIGDESK_HOME, '.env'), 'GRIGDESK_GLM_API_MODE=api\n');
+  await writeFile(path.join(box.env.HOME, 'preflight.json'),
+    JSON.stringify({ consumerMode: 'coding-plan', missing: ['coding-plan'] }));
+  await box.fail('npm', 'admission:check', 3);
+
+  const session = launchBuild(t, box, 'deepseek', false, {
+    env: {
+      ...box.env,
+      GRIGDESK_GLM_API_MODE: 'coding-plan',
+      LANG: 'en_US.UTF-8',
+    },
+  });
+
+  await session.wait(/Live GLM admission missing: coding-plan/u, 4000);
+  assert.match(session.output(), /Run admission smoke: coding-plan/u);
+  session.write('\x1b[B\x1b[B\r');
+
+  const result = await session.done;
+
+  assert.equal(result.code, 0, session.output());
+  assert.match(session.output(), /Installation skipped: no live GLM admission \(coding-plan\)/u);
+  assert.doesNotMatch(session.output(), /Installed DeepSeek/u);
+  assertRestored(result, session.output());
+});
+
+test('BS-SMOKE: отложенная без допуска установка показана предупреждением', async (t) => {
+  const box = await terminalBuildFixture(t);
+
+  await writeFile(path.join(box.env.HOME, 'preflight.json'),
+    JSON.stringify({ consumerMode: 'api', missing: ['api'] }));
+  await box.fail('npm', 'admission:check', 3);
+
+  const session = launchBuild(t, box, 'deepseek');
+
+  await session.wait(/Нет живого допуска GLM: api/u, 4000);
+  session.write('\x1b[B\x1b[B\r');
+  await session.wait(totalTime, 10000);
+
+  const result = await session.done;
+
+  assert.equal(result.code, 0, session.output());
+  assert.match(session.output(), /Установка не выполнена: нет живого допуска GLM \(api\)/u);
+  assert.doesNotMatch(session.output(), /Поставлен DeepSeek/u);
   assertRestored(result, session.output());
 });
 

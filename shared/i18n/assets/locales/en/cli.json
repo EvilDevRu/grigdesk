@@ -17,6 +17,13 @@
   "skipOpen": "Do not open",
   "openWindowNavigation": "↑↓ select · Enter confirm · Y/N · Esc do not open",
   "smokeQuestion": "Run a live GLM admission smoke after the build?",
+  "smokeQuestionMissing": "Live GLM admission missing: {mode}. Run the smoke after the build?",
+  "smokeMissingNavigation": "↑↓ select · Enter confirm",
+  "smokeMissingChoice": {
+    "consumer": "Run admission smoke: {mode}",
+    "both": "Both modes: api and coding-plan",
+    "none": "Defer — installation will be skipped"
+  },
   "smokeNavigation": "↑↓ select · Enter confirm · Esc skip",
   "smokeChoice": {
     "none": "Skip (default)",
@@ -94,6 +101,8 @@
   "reopen": "Close the window and open it again to run the new code.",
   "webHint": "The window will show the new web after grigdesk-ctl build window.",
   "deepseekHint": "The next DeepSeek turn picks up the new binary; no server restart needed.",
+  "deepseekDeferred": "Installation skipped: no live GLM admission ({mode}).",
+  "deepseekDeferredHint": "Re-run with live smoke or run glmLiveSmoke.mts --mode {mode} --admit.",
   "selectServer": "To select this server: grigdesk-ctl desktop use-server {path}",
   "serverQueued": "The window will select this build's server on its next launch.",
   "serverNotSelected": "The window keeps a different server installation selected; the new server is not selected yet.",

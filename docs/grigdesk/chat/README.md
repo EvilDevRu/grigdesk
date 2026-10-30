@@ -1,4 +1,6 @@
 # Чат и исполнители
+- [Preflight допуска GLM: условный вопрос о smoke и предупреждение об отложенной установке](glm-admission-preflight.md)
+
 
 - [Согласование ревизии политики GLM в producer и host](glm-producer-policy-sync.md)
 

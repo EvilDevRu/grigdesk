@@ -21,6 +21,7 @@
     "prepare:runtime": "node scripts/prepareRuntimeDeps.mts",
     "install:binary": "node scripts/install.mts",
     "admission:check": "node scripts/admissionCheck.mts",
+    "admission:preflight": "node scripts/admissionPreflight.mts",
     "prune:cache": "node scripts/pruneRuntimeCache.mts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }

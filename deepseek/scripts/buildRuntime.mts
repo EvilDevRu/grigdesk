@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 import { sha256 } from '../../shared/node/hash.ts';
+import type { GlmCompatibilityRuntime } from '../../shared/node/glmCompatibility.ts';
 import { makeReadOnlyTree } from '../../shared/node/files.ts';
 import { GLM_SESSION_EVENTS } from '../../shared/node/glmGateProtocol.ts';
 import { deepSeekPackagePaths } from './paths.ts';
@@ -105,6 +106,37 @@ export async function deepSeekBuildInputs(
     nativeAbi: process.versions.modules,
     platform: process.platform,
     arch: process.arch,
+  };
+}
+
+export interface GlmRuntimeIdentity {
+  source: { commit: string };
+  inputIdentity: { composition: string; dependencyLock: string };
+  llmPiAi: GlmCompatibilityRuntime['llmPiAi'] | null;
+}
+
+/**
+ * Identity GLM-допуска связывает vendor commit, композицию host-файлов и lock зависимостей.
+ * Сборка замораживает эти же значения в metadata, а CLI проверяет их до сборки:
+ * единая формула не позволяет preflight разойтись с допуском готового кандидата.
+ */
+export async function glmRuntimeIdentity(options: {
+  vendorDir?: string;
+  dependencyRoot?: string;
+} = {}): Promise<GlmRuntimeIdentity> {
+  const vendorDir = options.vendorDir ?? deepSeekPackagePaths().vendorDir;
+  const dependencyRoot = options.dependencyRoot ?? defaultDependencyRoot;
+  const manifest = await verifyDeepSeekVendorMetadata(vendorDir);
+  const inputs = await deepSeekBuildInputs(vendorDir, dependencyRoot);
+  const llmPiAi = await llmPiAiContract(manifest, dependencyRoot);
+
+  return {
+    source: { commit: manifest.commit },
+    inputIdentity: {
+      composition: `${COMPOSITION_REVISION}:${sha256(JSON.stringify(inputs.hashes))}`,
+      dependencyLock: sha256(await fs.readFile(path.join(dependencyRoot, 'package-lock.json'))),
+    },
+    llmPiAi: llmPiAi as GlmRuntimeIdentity['llmPiAi'],
   };
 }
 
@@ -365,6 +397,10 @@ export async function buildDeepSeekRuntime(options: {
   const requireBuild = createRequire(path.join(dependencyRoot, 'package.json'));
   const manifest = await verifyDeepSeekSnapshot(options.vendorDir);
   const originalInputs = await deepSeekBuildInputs(options.vendorDir, dependencyRoot);
+  const glmIdentity = await glmRuntimeIdentity({
+    vendorDir: options.vendorDir,
+    dependencyRoot,
+  });
   const major = Number(process.versions.node.split('.')[0]);
   const minor = Number(process.versions.node.split('.')[1]);
 
@@ -496,7 +532,7 @@ export async function buildDeepSeekRuntime(options: {
       throw new Error('Входы DeepSeek изменились во время сборки; candidate запрещён');
     }
 
-    const llmPiAi = await llmPiAiContract(manifest, dependencyRoot);
+    const llmPiAi = glmIdentity.llmPiAi;
 
     if (options.readOnly) {
       await makeReadOnlyTree(staging);
@@ -529,7 +565,7 @@ export async function buildDeepSeekRuntime(options: {
       source: sha256(JSON.stringify(originalInputs.source)),
       // Admission связывает также bytes host gate и преобразования preset.
       // Изменение helper bridge не сохраняет допуск по одной текстовой ревизии.
-      composition: `${COMPOSITION_REVISION}:${sha256(JSON.stringify(originalInputs.hashes))}`,
+      composition: glmIdentity.inputIdentity.composition,
       compositionSource: sha256(await fs.readFile(
         deepSeekPackagePaths().scripts.composition,
       )),
@@ -537,7 +573,7 @@ export async function buildDeepSeekRuntime(options: {
       builder: sha256(await fs.readFile(fileURLToPath(import.meta.url))),
       launcher: sha256(await fs.readFile(path.join(staging, 'entry.mjs'))),
       webHost: sha256(await fs.readFile(path.join(staging, 'webHost.mjs'))),
-      dependencyLock: sha256(await fs.readFile(path.join(dependencyRoot, 'package-lock.json'))),
+      dependencyLock: glmIdentity.inputIdentity.dependencyLock,
       platform: process.platform,
       arch: process.arch,
       nativeAbi: process.versions.modules,

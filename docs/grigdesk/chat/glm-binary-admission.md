@@ -37,3 +37,9 @@ Offline-тесты могут явно передать test admission, loopback
 разрешённого режима (`--mode api|coding-plan --confirm-live`); флаг `--admit` после
 полного успеха дописывает проверенную запись в `deepseek/compatibility/glm.json`
 той же рабочей копии, а следующая сборка замораживает новый список в metadata.
+
+Preflight `deepseek/scripts/admissionPreflight.mts` считает identity входов дерева той же
+`glmRuntimeIdentity`, что и сборка, и отвечает CLI, нужен ли вопрос о живом smoke.
+Авторитет допуска остаётся за `admission:check` собранного кандидата. Любая правка входов
+билдера, включая сам `buildRuntime.mts`, устаревляет записи допуска до нового живого
+smoke с `--admit` и следующей сборки. Подробности — [preflight допуска](glm-admission-preflight.md).
