@@ -160,6 +160,7 @@
 
 - [Сенсорный размер общих элементов и диалогов через data-ui-touch](touch-control-size.md)
 - [Размер кнопки: обычный и компактный параметром size, без чужого data-context](button-size.md)
+- [Контраст кнопки при выполнении: цвет и размер спиннера, loading вместе с disabled](button-loading-contrast.md)
 - [Размер переключателя: общий size, компактные 28/44 px и кнопки слота](segmented-control-size.md)
 
 - [Интерфейс обращается к своему origin](same-origin-transport.md)

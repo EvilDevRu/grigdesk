@@ -33,6 +33,33 @@
       </div>
     </section>
 
+    <section class="ui-gallery__section" data-button-loading-states>
+      <h2>Загрузка кнопок</h2>
+      <p class="muted">Все варианты и тоны: loading вместе с disabled.</p>
+      <div
+        v-for="variant in variants"
+        :key="variant"
+        class="ui-gallery__row"
+        data-geometry-row="peer"
+      >
+        <UiButton
+          v-for="tone in tones"
+          :key="tone"
+          :variant="variant"
+          :tone="tone"
+          :loading-label="`${variant} · ${tone}`"
+          loading
+          disabled
+        >{{ variant }} · {{ tone }}</UiButton>
+      </div>
+      <div class="ui-gallery__row">
+        <UiButton size="compact" tone="success" variant="solid" loading disabled>
+          ✓ Принять
+        </UiButton>
+        <UiIconButton label="Обновляю" loading disabled>↻</UiIconButton>
+      </div>
+    </section>
+
     <section id="gallery-fields" class="ui-gallery__section">
       <h2>Fields</h2>
       <div class="ui-gallery__grid">

@@ -597,6 +597,20 @@
   opacity: 1;
 }
 
+/* Выполняемое действие сохраняет контраст даже при одновременном disabled.
+   Спиннер наследует цвет надписи: тёмный на яркой заливке и светлый на тёмной. */
+.ui-button.is-loading,
+.ui-button[aria-busy='true'] {
+  opacity: 1;
+  cursor: progress;
+}
+
+.ui-button__loading > .ui-spinner {
+  width: 16px;
+  height: 16px;
+  color: inherit;
+}
+
 .ui-button.is-pressed,
 .ui-button[aria-pressed='true'],
 .ui-toggle-button.is-pressed,
