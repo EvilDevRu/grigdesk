@@ -2402,9 +2402,9 @@ function shortAnchor(anchor: unknown) {
   return parts.length ? parts[parts.length - 1] : anchor;
 }
 
-// Снос идёт до пары минут (docker + схемы БД) — на это время кнопка превращается
-// в индикатор «сношу…», повторный клик заблокирован.
-const sandboxBusy = ref(new Set<TaskId>());
+// На задачу выполняется одно действие: все её кнопки заблокированы,
+// а индикатор загрузки показывает только кнопку этого действия.
+const pendingCardActions = ref(new Map<TaskId, PipelineCardActionId>());
 
 
 /**
@@ -2412,7 +2412,7 @@ const sandboxBusy = ref(new Set<TaskId>());
  * После ответа перечитывает список, а индикатор снимает и при отказе.
  */
 async function sandboxDown(task: TaskId) {
-  if (sandboxBusy.value.has(task)) {
+  if (pendingCardActions.value.has(task)) {
     return;
   }
   if (!await confirmDialog(
@@ -2424,7 +2424,7 @@ async function sandboxDown(task: TaskId) {
     return;
   }
 
-  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  pendingCardActions.value = new Map(pendingCardActions.value).set(task, 'down');
 
   try {
     await api.post(`/api/tasks/${task}/sandbox/down`);
@@ -2437,10 +2437,10 @@ async function sandboxDown(task: TaskId) {
   }
 
   finally {
-    const s = new Set(sandboxBusy.value);
+    const s = new Map(pendingCardActions.value);
 
     s.delete(task);
-    sandboxBusy.value = s;
+    pendingCardActions.value = s;
   }
 }
 
@@ -2450,7 +2450,7 @@ async function sandboxDown(task: TaskId) {
 async function closeTask(t: PipelineViewTask) {
   const task = t.task;
 
-  if (sandboxBusy.value.has(task)) {
+  if (pendingCardActions.value.has(task)) {
     return;
   }
 
@@ -2479,7 +2479,7 @@ async function closeTask(t: PipelineViewTask) {
     return;
   }
 
-  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  pendingCardActions.value = new Map(pendingCardActions.value).set(task, 'close');
 
   try {
     const r = decodePipelineReply(await api.post(`/api/tasks/${task}/close`));
@@ -2492,10 +2492,10 @@ async function closeTask(t: PipelineViewTask) {
   }
 
   finally {
-    const s = new Set(sandboxBusy.value);
+    const s = new Map(pendingCardActions.value);
 
     s.delete(task);
-    sandboxBusy.value = s;
+    pendingCardActions.value = s;
   }
 }
 
@@ -2504,7 +2504,7 @@ async function closeTask(t: PipelineViewTask) {
 // Пересборки стенда отдельно от прогона в движке не существует, поэтому здесь именно
 // перезапуск конвейера (resume) — со сносом остатков упавшей песочницы перед ним.
 async function sandboxRetry(task: TaskId) {
-  if (sandboxBusy.value.has(task)) {
+  if (pendingCardActions.value.has(task)) {
     return;
   }
   if (!await confirmDialog(
@@ -2515,7 +2515,7 @@ async function sandboxRetry(task: TaskId) {
     return;
   }
 
-  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  pendingCardActions.value = new Map(pendingCardActions.value).set(task, 'retry');
 
   try {
     const r = decodePipelineReply(await api.post(`/api/tasks/${task}/sandbox/retry`));
@@ -2538,10 +2538,10 @@ async function sandboxRetry(task: TaskId) {
       : `Не удалось перезапустить: ${errorMessage(e, '')}`);
 
   } finally {
-    const s = new Set(sandboxBusy.value);
+    const s = new Map(pendingCardActions.value);
 
     s.delete(task);
-    sandboxBusy.value = s;
+    pendingCardActions.value = s;
   }
 }
 
@@ -2708,8 +2708,6 @@ function openStallStage(t: PipelineViewTask) {
 // Отдельный разбор арбитра: узел, его карточка и вопросы. Живёт рядом с модалкой узла,
 // а не внутри неё — вопрос у него один, и ширина нужна вся.
 
-const arbiterBusy = ref(new Set<TaskId>());
-
 function canArbitrate(t: PipelineViewTask) {
   // Признак считает СЕРВЕР одним правилом (`stopIsArbitrable`), общим с гейтом самого
   // арбитра: раньше здесь стояла своя копия сравнения с `no-progress`, и после
@@ -2749,11 +2747,11 @@ const stageArbitrating = computed(() => {
  * Открывает диалог узла после сохранения операции разбора.
  */
 async function arbitrate(task: TaskId) {
-  if (arbiterBusy.value.has(task)) {
+  if (pendingCardActions.value.has(task)) {
     return;
   }
 
-  arbiterBusy.value = new Set([...arbiterBusy.value, task]);
+  pendingCardActions.value = new Map(pendingCardActions.value).set(task, 'arbitrate');
 
   try {
     await api.post(`/api/tasks/${task}/arbitrate`);
@@ -2767,10 +2765,10 @@ async function arbitrate(task: TaskId) {
   } catch (error) {
     await alertDialog(`Разбор не удалось начать: ${errorMessage(error, '')}`);
   } finally {
-    const remaining = new Set(arbiterBusy.value);
+    const remaining = new Map(pendingCardActions.value);
 
     remaining.delete(task);
-    arbiterBusy.value = remaining;
+    pendingCardActions.value = remaining;
   }
 }
 
@@ -2807,7 +2805,7 @@ function canCloseTask(t: PipelineViewTask) {
  */
 function cardActions(t: PipelineViewTask): PipelineCardAction[] {
   const actions: PipelineCardAction[] = [];
-  const busy = sandboxBusy.value.has(t.task);
+  const pendingAction = pendingCardActions.value.get(t.task);
 
   /**
    * Общие атрибуты действия задаются один раз после проверки права в родителе.
@@ -2828,7 +2826,8 @@ function cardActions(t: PipelineViewTask): PipelineCardAction[] {
       className,
       role: id === 'answer' ? 'pipeline-stall-answer-open' : 'pipeline-compact-action',
       tone: ['stop', 'down', 'close'].includes(id) ? 'danger' : 'accent',
-      busy: id === 'arbitrate' ? arbiterBusy.value.has(t.task) : busy,
+      disabled: pendingAction !== undefined,
+      loading: pendingAction === id,
       primary: false,
     });
   };
@@ -2918,7 +2917,7 @@ function runCardAction(t: PipelineViewTask, id: PipelineCardActionId) {
  * Повторная команда блокируется до завершения запроса и обновления списка.
  */
 async function resumeRun(task: TaskId) {
-  if (sandboxBusy.value.has(task)) {
+  if (pendingCardActions.value.has(task)) {
     return;
   }
   if (!await confirmDialog(
@@ -2928,7 +2927,7 @@ async function resumeRun(task: TaskId) {
     return;
   }
 
-  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  pendingCardActions.value = new Map(pendingCardActions.value).set(task, 'resume');
 
   try {
     await api.post(`/api/tasks/${task}/resume`);
@@ -2939,10 +2938,10 @@ async function resumeRun(task: TaskId) {
   }
 
   finally {
-    const s = new Set(sandboxBusy.value);
+    const s = new Map(pendingCardActions.value);
 
     s.delete(task);
-    sandboxBusy.value = s;
+    pendingCardActions.value = s;
   }
 }
 
@@ -2979,7 +2978,7 @@ function bulkCandidates(action: BulkAction, scope: BulkScope) {
   const source = scope === 'all' ? tasks.value : projectTasks.value;
   const eligible = action === 'resume' ? canResume : canStop;
 
-  return source.filter((task) => eligible(task) && !sandboxBusy.value.has(task.task));
+  return source.filter((task) => eligible(task) && !pendingCardActions.value.has(task.task));
 }
 
 /**
@@ -3001,7 +3000,10 @@ async function runBulkAction(action: BulkAction, scope: BulkScope) {
   const eligible = action === 'resume' ? canResume : canStop;
 
   bulkBusy.value = action;
-  sandboxBusy.value = new Set([...sandboxBusy.value, ...selected.map((task) => task.task)]);
+  pendingCardActions.value = new Map([
+    ...pendingCardActions.value,
+    ...selected.map((task) => [task.task, action] as const),
+  ]);
 
   try {
     for (const selectedTask of selected) {
@@ -3022,13 +3024,13 @@ async function runBulkAction(action: BulkAction, scope: BulkScope) {
 
     await load();
   } finally {
-    const busy = new Set(sandboxBusy.value);
+    const busy = new Map(pendingCardActions.value);
 
     for (const task of selected) {
       busy.delete(task.task);
     }
 
-    sandboxBusy.value = busy;
+    pendingCardActions.value = busy;
     bulkBusy.value = null;
   }
 
@@ -3043,7 +3045,7 @@ async function runBulkAction(action: BulkAction, scope: BulkScope) {
  * Состояние перечитывается перед снятием блокировки повторной команды.
  */
 async function stopRun(task: TaskId) {
-  if (sandboxBusy.value.has(task)) {
+  if (pendingCardActions.value.has(task)) {
     return;
   }
   if (!await confirmDialog(
@@ -3054,7 +3056,7 @@ async function stopRun(task: TaskId) {
     return;
   }
 
-  sandboxBusy.value = new Set([...sandboxBusy.value, task]);
+  pendingCardActions.value = new Map(pendingCardActions.value).set(task, 'stop');
 
   try {
     await api.post(`/api/tasks/${task}/stop`);
@@ -3065,10 +3067,10 @@ async function stopRun(task: TaskId) {
   }
 
   finally {
-    const s = new Set(sandboxBusy.value);
+    const s = new Map(pendingCardActions.value);
 
     s.delete(task);
-    sandboxBusy.value = s;
+    pendingCardActions.value = s;
   }
 }
 

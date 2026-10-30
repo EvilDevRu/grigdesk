@@ -329,27 +329,74 @@ for (const [label, stop, task, graph, endpoint] of [
   });
 }
 
-test('busy не дублирует запрос продолжения', async (t) => {
-  const { wrapper, harness, posts, flushPromises } = await mountStallPipeline(t);
-  let finish;
+for (const [label, stop, task, graph, fails] of [
+  ['продолжить прогон', exhaustedStop, {}, {}],
+  ['продолжить прогон', exhaustedStop, {}, {}, true],
+  ['перезапустить стенд', sandbox, {}, {}],
+  ['остановить', null, { daemonAlive: true }, {}],
+  ['снести стенд', exhaustedStop, {}, { fePort: 13000 }],
+  ['закрыть задачу', exhaustedStop, {}, {}],
+  ['разобрать остановку', noProgress, {}, {}],
+]) {
+  const outcome = fails ? 'отказ' : 'успех';
 
-  harness.pending = new Promise((resolve) => {
-    finish = resolve;
+  test(`спиннер только у выбранного действия, остальные заблокированы: ${label}, ${outcome}`, async (t) => {
+    const fixture = stallFixture(stop, task, graph);
+
+    fixture.additionalTasks = [{ ...fixture.factoryTask, task: 43 }];
+
+    const { wrapper, harness, posts, flushPromises } = await mountStallPipeline(t, fixture);
+    let finish;
+    let fail;
+
+    harness.pending = new Promise((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    });
+
+    t.after(() => finish());
+
+    const cards = wrapper.findAll('article.card');
+    const buttons = cards[0].findAll('.pipeline-card-actions button');
+    const button = buttons.find((item) => item.text().includes(label));
+
+    assert.ok(button, `нет действия ${label}`);
+    await button.trigger('click');
+    await flushPromises();
+
+    assert.equal(button.attributes('aria-busy'), 'true');
+    assert.equal(button.find('.ui-spinner').exists(), true);
+    assert.equal(cards[0].findAll('.pipeline-card-actions .ui-spinner').length, 1);
+
+    for (const item of buttons) {
+      assert.equal(item.element.disabled, true);
+
+      if (item.element !== button.element) {
+        assert.equal(item.attributes('aria-busy'), undefined);
+        assert.equal(item.find('.ui-spinner').exists(), false);
+        assert.ok(item.get('.ui-button__label').text());
+        assert.equal(item.get('.ui-button__content').attributes('aria-hidden'), undefined);
+      }
+
+      await item.trigger('click');
+    }
+
+    assert.ok(cards[1].findAll('.pipeline-card-actions button').every((item) => !item.element.disabled));
+    assert.equal(cards[1].findAll('.pipeline-card-actions .ui-spinner').length, 0);
+    assert.equal(posts.length, 1);
+
+    if (fails) {
+      fail(new Error('Синтетический отказ действия'));
+    } else {
+      finish();
+    }
+
+    await flushPromises();
+
+    assert.ok(cards[0].findAll('.pipeline-card-actions button').every((item) => !item.element.disabled));
+    assert.equal(cards[0].findAll('.pipeline-card-actions .ui-spinner').length, 0);
   });
-
-  t.after(() => finish());
-
-  const button = actionButtons(wrapper, 'продолжить прогон')[0];
-
-  await button.trigger('click');
-  await flushPromises();
-  await button.trigger('click');
-  await flushPromises();
-
-  assert.equal(posts.length, 1);
-  finish();
-  await flushPromises();
-});
+}
 
 test('другая остановка закрывает старые подробности панели', async (t) => {
   const { wrapper, harness, flushPromises } = await mountStallPipeline(t);

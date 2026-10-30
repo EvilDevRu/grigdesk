@@ -10,6 +10,7 @@ export interface PipelineCardAction {
   role?: string;
   tone: UiActionTone;
   primary: boolean;
-  busy: boolean;
+  disabled: boolean;
+  loading: boolean;
   loadingLabel: string;
 }
