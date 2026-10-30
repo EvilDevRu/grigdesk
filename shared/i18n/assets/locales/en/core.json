@@ -1083,6 +1083,7 @@
   "diffDesignDeleted": "Deleted",
   "diffDesignRenamed": "Renamed",
   "diffDesignDialogTitle": "#{task} · Changes",
+  "shelfDesignRefresh": "Refresh task shelf",
   "taskDesignSections": "Task sections",
   "taskDesignDescription": "Description",
   "taskDesignAnalysis": "Assessment",

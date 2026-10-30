@@ -884,20 +884,23 @@
     grid-template-columns: 1fr;
   }
 }
-/* Карточка полки отличается от обычной строки выбора только раскладкой: содержимое
-   у неё многострочное, поэтому колонка действий не центрируется по высоте. Рамку, фон
-   и радиус карточка берёт у самого примитива — дублировать их здесь значит увести
-   карточку от токенов kit при первом же изменении темы. */
+/* Полка — плоский список многострочных задач с самостоятельными действиями.
+   Кромка внимания не меняет ось текста: место под неё зарезервировано у всех строк. */
 [data-ui-task-shelf-row] {
   height: 100%;
   align-items: stretch;
   min-width: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
 }
 
 [data-ui-task-shelf-row] .ui-selectable-row__primary {
   display: block;
   min-width: 0;
-  padding: 14px 6px 14px 16px;
+  padding: 12px 6px 12px 12px;
   color: inherit;
   text-align: left;
 }
@@ -905,7 +908,7 @@
 [data-ui-task-shelf-row] .ui-selectable-row__actions {
   flex-direction: column;
   align-self: flex-start;
-  padding: 10px 9px 0 0;
+  padding: 8px 8px 0 0;
 }
 
 [data-ui-task-shelf-row][data-shelf-attention='true'] {
@@ -913,12 +916,12 @@
 }
 
 [data-ui-task-shelf-row][data-shelf-state='lit'] {
-  border-color: color-mix(in srgb, var(--warn) 48%, var(--line));
-  background: color-mix(in srgb, var(--warn) 8%, var(--surface));
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 4%, var(--ground));
 }
 
 [data-ui-task-shelf-row][data-shelf-completed='true'] {
-  opacity: .62;
+  opacity: .72;
   transition: opacity .15s ease;
 }
 

@@ -1103,6 +1103,7 @@
   "diffDesignDeleted": "Удалён",
   "diffDesignRenamed": "Переименован",
   "diffDesignDialogTitle": "#{task} · Изменения",
+  "shelfDesignRefresh": "Обновить полку",
   "taskDesignSections": "Разделы задачи",
   "taskDesignDescription": "Описание",
   "taskDesignAnalysis": "Оценка",
