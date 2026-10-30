@@ -30,6 +30,8 @@
 
 ## Грабли
 
+- [Ожидание Б24 задерживает локальные метки и занимает соединения интерфейса телефона](read-queue-stalls.md)
+
 - [Проверка снимка доски принимает числовой Unix-старт таймера](board-snapshot-timer.md)
 - [Таймер задачи: timer_elapsed из B24 всегда 0 — считать от timer_started_at](task-timer-calculation.md)
 - [B24Client НЕ потокобезопасен — все вызовы через очередь _run](client-request-queue.md)
