@@ -231,6 +231,7 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
 
           const installDialog = page.getByRole('dialog').last();
 
+          await installDialog.locator('[data-role="driver-custom-source"]').click();
           await installDialog.locator('input[type="url"], input[name="url"], input[name="repo"]')
             .fill('https://git.fixture/unavailable.git');
           await installDialog.locator('input[name="tag"], input[name="version"]').fill('v1.0.0');

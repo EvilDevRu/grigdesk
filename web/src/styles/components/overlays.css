@@ -262,6 +262,21 @@
   padding-top: 24px;
 }
 
+/* Установщик трекеров сохраняет шапку и действия вне прокручиваемой формы.
+   На телефоне его размеры заменяет общая полноэкранная оболочка ниже. */
+.ui-dialog-overlay .ui-dialog[data-role='tracker-install'] {
+  width: min(640px, calc(100vw - 40px));
+}
+
+.ui-dialog[data-role='tracker-install'] .ui-dialog__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-dialog[data-role='tracker-install'] .ui-dialog__body {
+  padding-top: 22px;
+}
+
 .ui-dialog[data-role='workdir-picker'][data-body-inset='false'] .ui-dialog__body {
   flex-direction: column;
   overflow-y: auto;

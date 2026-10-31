@@ -75,6 +75,7 @@ test('TRACKER-INSTALL-UI-01: repo/tag, review, apply, update и rollback чер�
   const dialog = card.wrapper.findAll('[role="dialog"]').at(-1);
 
   assert.ok(dialog, 'Установка открывается поверх настроек в отдельном диалоге');
+  await dialog.find('[data-role="driver-custom-source"]').trigger('click');
 
   const repo = dialog.find('input[type="url"], input[name="url"], input[name="repo"]');
 
@@ -86,7 +87,7 @@ test('TRACKER-INSTALL-UI-01: repo/tag, review, apply, update и rollback чер�
   assert.ok(tag.exists());
   await tag.setValue('v1.0.0');
 
-  const prepare = actionButton(dialog, /проверить|подготовить|prepare|review/iu);
+  const prepare = actionButton(dialog, /^\s*(?:проверить пакет|review package)\s*$/iu);
 
   assert.ok(prepare);
   await prepare.trigger('click');
@@ -172,13 +173,14 @@ test('TRACKER-SETTINGS-02: ошибка установки сохраняет в
   await openTrackerSettings(card);
   await actionButton(card.wrapper, /установить из git|install from git/iu).trigger('click');
   await card.flushPromises();
+  await card.wrapper.find('[data-role="driver-custom-source"]').trigger('click');
 
   const repo = card.wrapper.find('input[type="url"], input[name="url"], input[name="repo"]');
   const tag = card.wrapper.find('input[name="tag"], input[name="version"]');
 
   await repo.setValue('https://git.fixture/unavailable.git');
   await tag.setValue('v1.0.0');
-  await actionButton(card.wrapper, /проверить|подготовить|prepare|review/iu).trigger('click');
+  await actionButton(card.wrapper, /^\s*(?:проверить пакет|review package)\s*$/iu).trigger('click');
   await card.flushPromises();
   assert.match(card.wrapper.text(), /Репозиторий недоступен/u);
   assert.equal(repo.element.value, 'https://git.fixture/unavailable.git');

@@ -142,6 +142,7 @@ test('DRIVER-REMOVE-UI-04: SSE показывает удаление managed-п�
     },
   });
 
+  await card.dialog.find('[data-role="driver-custom-source"]').trigger('click');
   await card.dialog.find('input[name="url"]').setValue('https://git.fixture/driver.git');
   await card.dialog.find('input[name="tag"]').setValue('v1.0.0');
   await actionButton(card.dialog, /^\s*Проверить пакет\s*$/u).trigger('click');
