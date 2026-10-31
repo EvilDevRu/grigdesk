@@ -3628,6 +3628,11 @@ export const useChatStore = defineStore('chat', {
             s.progressTokensEstimate = false;
             s.turnStartedAt = 0;
           } else {
+            // Стоп относился к прошлому ходу: очередь сразу пускает следующий, и кнопка
+            // обязана освободиться уже здесь. В chat-done её держит queued-гвардия (работа
+            // ведь продолжается), и без этого сброса она висела бы в «Останавливаю…»
+            // весь новый ход — как у фоновых ходов, для которых тот же сброс ниже.
+            s.stopping = false;
             s.sending = true;
             s.steps = [];
             s.progressTokens = 0;
@@ -4471,10 +4476,19 @@ export const useChatStore = defineStore('chat', {
           ...(comment ? { comment } : {}),
         }));
       } catch { /* запрос уже протух (таймаут/другое окно) */ }
-      // Kimi (ACP) не умеет текст в отказе: сервер отвечает commentDelivered:false,
-      // и пояснение едет обычным сообщением — встанет в очередь чата.
+      // Канал эскалации текст отказа не несёт: сервер отвечает commentDelivered:false.
+      // Пояснение обязано догнать агента сразу — он только что получил голый отказ и без
+      // причины действует вслепую. У прямых исполнителей (GLM, DeepSeek) есть ввод в
+      // активный ход: отправляем туда с префиксом-связкой. Фолбэк — прежняя очередь:
+      // канал не готов (Kimi/ACP, ход уже кончился) или текст не приняли.
       if (!allow && comment && res?.commentDelivered === false) {
-        await this.send(p.chatKey || '', comment);
+        const key = p.chatKey || '';
+        const text = `Пояснение к отказу (${p.tool || 'действие'}): ${comment}`;
+        const delivered = await this.sendInTurn(key, text);
+
+        if (!delivered) {
+          await this.send(key, comment);
+        }
       }
     },
     // Legacy-вопрос получает массив, structured-форма — `{ action, answers }` с raw values.
