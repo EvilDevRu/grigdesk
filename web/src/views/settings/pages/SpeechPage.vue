@@ -62,7 +62,13 @@
             @update:model-value="edit('videoInitialPrompt', $event)"
           />
         </SettingsField>
-        <UiButton data-context="workspace-form-wrap" @click="edit('videoInitialPrompt', null)">{{ t('settings.restoreDefaultPrompt') }}</UiButton>
+        <UiButton
+          data-context="workspace-form-wrap"
+          data-speech-prompt-reset
+          @click="edit('videoInitialPrompt', null)"
+        >
+          {{ t('settings.restoreDefaultPrompt') }}
+        </UiButton>
         <p v-if="value('videoInitialPrompt') === null">
           {{ t('settings.afterApplyingTheServerWillUseIts') }}
         </p>
@@ -93,60 +99,19 @@
         <p>{{ t('settings.downloadsCopiesAndCancellationsTakeEffectImmediately') }}</p>
         <p v-if="!view.capabilities.models.length">{{ t('settings.theServerHasNotReportedTheModel') }}</p>
         <ul v-if="view.capabilities.models.length" class="settings-speech-models">
-          <li
+          <SpeechModelRow
             v-for="model in view.capabilities.models"
             :key="model.modelId"
-            class="settings-speech-model"
-            :data-model="model.modelId"
-          >
-            <div class="settings-speech-model-copy">
-              <strong>{{ model.modelId }}</strong>
-              <small>{{ model.repo }} · {{ modelSize(model.sizeMb) }}</small>
-            </div>
-            <span class="settings-speech-model-status" :data-cached="model.cached">
-              {{ model.cached ? t('settings.cached') : t('settings.notDownloaded') }}
-            </span>
-            <div class="settings-speech-actions">
-              <UiButton data-context="workspace-form-wrap"
-                v-if="!model.cached"
-                :data-download="model.modelId"
-                :disabled="modelBusy(model.modelId)"
-                @click="operations.start('download', model.modelId)"
-              >
-                {{ t('settings.download') }}
-              </UiButton>
-              <UiButton data-context="workspace-form-wrap"
-                v-if="!model.cached"
-                :data-copy="model.modelId"
-                :disabled="modelBusy(model.modelId)"
-                @click="operations.start('copy', model.modelId)"
-              >
-                {{ t('settings.copyFromSharedCache') }}
-              </UiButton>
-              <UiButton data-context="workspace-form-wrap"
-                v-if="operations.isActive(operations.jobFor(model.modelId))"
-                :data-cancel="model.modelId"
-                :disabled="operations.busy.value
-                  .includes(`cancel:${operations.jobFor(model.modelId)?.jobId}`)"
-                @click="operations.cancel(operations.jobFor(model.modelId))"
-              >
-                {{ t('settings.cancel2') }}
-              </UiButton>
-            </div>
-            <p v-if="operations.jobFor(model.modelId)">
-              {{ operations.jobFor(model.modelId)?.kind === 'copy'
-                ? t('settings.copying') : t('settings.downloading3') }}:
-              {{ jobLabel(operations.jobFor(model.modelId)) }}
-            </p>
-            <UiProgress
-              v-if="operations.jobFor(model.modelId)?.percent != null"
-              :label="t('settings.modelProgress')"
-              :value="operations.jobFor(model.modelId)?.percent ?? undefined"
-            />
-            <p v-if="operations.jobFor(model.modelId)?.error" role="alert">
-              {{ operations.jobFor(model.modelId)?.error }}
-            </p>
-          </li>
+            :model="model"
+            :job="operations.jobFor(model.modelId)"
+            :busy="modelBusy(model.modelId)"
+            :active="operations.isActive(operations.jobFor(model.modelId))"
+            :cancelling="operations.busy.value.includes(`cancel:${operations.jobFor(model.modelId)?.jobId}`)"
+            :verified="modelCacheVerified"
+            :can-download="canDownloadModels"
+            @start="operations.start"
+            @cancel="operations.cancel"
+          />
         </ul>
       </template>
       <template v-else-if="settings.pageId === 'speech.advanced'">
@@ -252,7 +217,7 @@
             .
           </p>
           <template v-if="benchmarkJob">
-            <p>{{ jobLabel(benchmarkJob) }}</p>
+            <p>{{ speechJobLabel(benchmarkJob, uiLocale) }}</p>
             <UiProgress
               v-if="benchmarkJob.percent !== null"
               :label="t('settings.benchmarkProgress')"
@@ -266,6 +231,42 @@
           </template>
         </SettingsSection>
       </template>
+      <SettingsSection
+        v-if="['speech.dictation', 'speech.video'].includes(settings.pageId)"
+        data-speech-server-setup
+        :heading="t('settings.speechSetupHeading')"
+        :description="t('settings.speechSetupDescription')"
+      >
+        <SettingsFacts :items="serverFacts" />
+        <div
+          v-for="check in missingEnvironmentChecks"
+          :key="check.name"
+          class="settings-speech-repair"
+        >
+          <strong>{{ speechCheckName(check.name, uiLocale) }}</strong>
+          <code v-if="check.fix">{{ check.fix }}</code>
+        </div>
+        <p v-if="!canDownloadModels">{{ t('settings.speechSetupRuntimeRequired') }}</p>
+        <ul v-if="selectedModel" class="settings-speech-models">
+          <SpeechModelRow
+            :model="selectedModel"
+            :job="operations.jobFor(selectedModel.modelId)"
+            :busy="modelBusy(selectedModel.modelId)"
+            :active="operations.isActive(operations.jobFor(selectedModel.modelId))"
+            :cancelling="operations.busy.value
+              .includes(`cancel:${operations.jobFor(selectedModel.modelId)?.jobId}`)"
+            :verified="modelCacheVerified"
+            :can-download="canDownloadModels"
+            @start="operations.start"
+            @cancel="operations.cancel"
+          />
+        </ul>
+        <p v-else>{{ t('settings.speechSetupModelUnknown', { modelId: selectedModelId }) }}</p>
+        <p v-if="selectedModel && !selectedModel.cached">{{ t('settings.speechSetupDownloadImmediate') }}</p>
+        <UiButton data-speech-recheck :disabled="refreshing" @click="refresh">
+          {{ refreshing ? t('settings.checking') : t('settings.speechSetupRecheck') }}
+        </UiButton>
+      </SettingsSection>
     </template>
   </div>
 </template>
@@ -274,12 +275,12 @@
 import { UiSkeletonLayout } from '../../../ui';
 
 import { t, uiLocale } from '../../../ui.ts';
-import { formatNumber } from '../../../../../shared/i18n/formats.ts';
 
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import SettingsScope from '../SettingsScope.vue';
 import SettingsSection from '../SettingsSection.vue';
 import SettingsFacts from '../SettingsFacts.vue';
+import SpeechModelRow from '../SpeechModelRow.vue';
 import {
   UiButton,
   UiSelect,
@@ -306,7 +307,7 @@ import {
 import {
   createSpeechOperations,
   speechBenchmarkText,
-  type SpeechJob,
+  speechJobLabel,
 } from '../../../features/settings/speechOperations.ts';
 import { browserSpeechRecognition, probeLocalSpeech } from '../../../features/settings/speechBrowser.ts';
 import SettingsField from '../SettingsField.vue';
@@ -399,6 +400,22 @@ const browserStatusLabel = computed(() => ({
 } as Record<string, string>)[browserStatus.value] ?? browserStatus.value);
 const dictationModel = computed(() => text('model') || QUALITY_MODELS[text('quality')] || 'medium');
 const videoModel = computed(() => text('videoModel') || QUALITY_MODELS[text('videoQuality')] || 'medium');
+const selectedModelId = computed(() => settings.pageId === 'speech.video'
+  ? videoModel.value : dictationModel.value);
+const selectedModel = computed(() => view.value.capabilities.models.find((model) =>
+  model.modelId === selectedModelId.value));
+const missingEnvironmentChecks = computed(() => view.value.capabilities.environmentChecks
+  .filter((check) => !check.ok));
+const modelCacheVerified = computed(() => !missingEnvironmentChecks.value.some((check) =>
+  check.name === 'диагностика кэша моделей' || check.name === 'диагностика media runtime'));
+const canDownloadModels = computed(() => !missingEnvironmentChecks.value.some((check) =>
+  check.name.startsWith('python venv') || check.name.startsWith('faster-whisper')));
+const serverFacts = computed(() => [{
+  label: t('settings.speechSetupEnvironment'),
+  value: view.value.capabilities.environmentReady === true ? t('settings.speechSetupReady')
+    : view.value.capabilities.environmentReady === false ? t('settings.speechSetupMissing')
+      : t('settings.speechSetupUnknown'),
+}]);
 const speechFacts = computed(() => [
   { label: t('settings.speechFactPath'), value: effectivePath.value },
   { label: t('settings.speechFactBrowserModel'), value: browserStatusLabel.value },
@@ -426,16 +443,22 @@ const benchmarkDisabled = computed(() => !view.value.capabilities.benchmark.avai
   || text('device') === 'cuda' && !cudaReady.value || operations.isActive(benchmarkJob.value)
   || operations.busy.value.includes('benchmark:'));
 const effectivePath = computed(() => {
-  const local = view.value.capabilities.local;
+  const capabilities = view.value.capabilities;
+  const ready = capabilities.environmentReady === true
+    && capabilities.models.some((model) => model.modelId === dictationModel.value && model.cached);
+  const localReason = missingEnvironmentChecks.value[0]?.name
+    || (capabilities.environmentReady !== true
+      ? capabilities.local.reason || t('settings.speechSetupUnknown')
+      : t('settings.speechCheckModel', { modelId: dictationModel.value }));
 
   if (text('engine') === 'whisper') {
-    return local.ready ? t('settings.whisperOnTheGrigDeskServer')
-    : t('settings.unavailable4', { localReason: local.reason });
+    return ready ? t('settings.whisperOnTheGrigDeskServer')
+      : t('settings.unavailable4', { localReason });
   }
   if (!browserSpeechRecognition(window)
       || text('browserProcessing') === 'local' && browserStatus.value === 'unavailable') {
-    return local.ready ? t('settings.whisperFallbackBrowserModeUnavailable')
-      : t('settings.unavailableBrowserModeAndWhisperAreNot', { localReason: local.reason });
+    return ready ? t('settings.whisperFallbackBrowserModeUnavailable')
+      : t('settings.unavailableBrowserModeAndWhisperAreNot', { localReason });
   }
 
   if (text('browserProcessing') !== 'local') {
@@ -487,39 +510,6 @@ function modelBusy(modelId: string): boolean {
 }
 
 /**
- * Размер показывается в привычных единицах без ложного нуля при неизвестных данных.
- * Маленьким моделям хватает одной десятичной цифры, большим — целых мегабайт.
- */
-function modelSize(sizeMb: number): string {
-  return sizeMb <= 0 ? t('settings.unknownSize') : sizeMb >= 1024
-    ? t('settings.gb', { value1: formatNumber(sizeMb / 1024, uiLocale, {
-      minimumFractionDigits: 1,
-      maximumFractionDigits: 1,
-    }) })
-    : t('settings.mb', { value1: formatNumber(sizeMb, uiLocale, {
-      minimumFractionDigits: sizeMb >= 100 ? 0 : 1,
-      maximumFractionDigits: sizeMb >= 100 ? 0 : 1,
-    }) });
-}
-
-/**
- * Статус задания и процент показываются рядом с его явными действиями.
- * Неизвестное серверное состояние остаётся видимым, а не считается успехом.
- */
-function jobLabel(job?: SpeechJob): string {
-  const labels: Record<string, string> = {
-    queued: t('settings.queued'),
-    running: t('settings.running'),
-    done: t('settings.done2'),
-    failed: t('settings.error'),
-    cancelled: t('settings.cancelled'),
-    interrupted: t('settings.interruptedByRestart'),
-  };
-
-  return job ? `${labels[job.status] ?? job.status}${job.percent === null ? '' : ` · ${job.percent}%`}` : '';
-}
-
-/**
  * Проверка окружения является чтением и не применяет неприменённые параметры.
  * Проверка браузерной модели не запрашивает согласие на облачную обработку.
  */
@@ -529,6 +519,7 @@ async function refresh(): Promise<void> {
   }
 
   refreshing.value = true;
+  error.value = '';
 
   try {
     await service.resource.refresh(undefined, true);
@@ -551,7 +542,9 @@ watch(() => props.active, async (active) => {
 }, { immediate: true });
 
 watch([() => props.active, () => settings.pageId], ([active, page]) => {
-  operations.setActive(Boolean(active && ['speech.models', 'speech.advanced'].includes(String(page))));
+  operations.setActive(Boolean(active && [
+    'speech.dictation', 'speech.video', 'speech.models', 'speech.advanced',
+  ].includes(String(page))));
 }, { immediate: true });
 
 watch([() => props.active, () => text('language')], async ([active, language]) => {
@@ -583,11 +576,6 @@ onBeforeUnmount(() => operations.setActive(false));
   justify-self: start;
   margin-top: 12px;
 }
-.settings-speech-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 /* Модель — строка списка: имя и источник слева, состояние и действия справа.
    Ход операции и ошибка идут ниже на всю ширину строки. */
 .settings-speech-models {
@@ -596,48 +584,17 @@ onBeforeUnmount(() => operations.setActive(false));
   padding: 0;
   list-style: none;
 }
-.settings-speech-model {
+.settings-speech-repair {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 6px 16px;
-  min-width: 0;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
+  gap: 4px;
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
-.settings-speech-model > :is(p, .ui-progress) {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--ink-mid);
-  font-size: 12px;
-}
-.settings-speech-model-copy {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-.settings-speech-model-copy strong {
-  font-size: 13px;
+.settings-speech-repair strong {
   font-weight: 500;
 }
-.settings-speech-model-copy small {
+.settings-speech-repair code {
+  white-space: pre-wrap;
   color: var(--ink-mid);
-  font-size: 12px;
-}
-.settings-speech-model-status {
-  color: var(--ink-mid);
-  font-size: 12px;
-}
-.settings-speech-model-status[data-cached='true'] {
-  color: var(--good);
-}
-@container settings-page (max-width: 480px) {
-  .settings-speech-model {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .settings-speech-model > .settings-speech-actions {
-    grid-column: 1 / -1;
-  }
 }
 </style>

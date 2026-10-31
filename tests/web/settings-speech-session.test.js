@@ -269,7 +269,7 @@ test('Новые страницы речи и операции', async (t) => {
     await wrapper.find('textarea').setValue('новые термины');
     settings.selectPage('speech.video');
     await flushPromises();
-    await wrapper.find('button').trigger('click');
+    await wrapper.find('[data-speech-prompt-reset]').trigger('click');
     settings.selectPage('speech.advanced');
     await flushPromises();
     await wrapper.find('[role="switch"]').setValue(false);

@@ -314,3 +314,4 @@
 - [settings-preferences.md](settings-preferences.md) — черновики prefs, клавиш, экрана и диагностики.
 
 - [settings-speech.md](settings-speech.md) — речь, гонки снимков и UI-опрос заданий в общем модале.
+- [Готовность речи на сервере: наличие выбранной модели и скачивание прямо в диктовке и видео](speech-server-setup.md)
