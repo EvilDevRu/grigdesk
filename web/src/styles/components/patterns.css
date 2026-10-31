@@ -1071,6 +1071,13 @@
 [data-ui-settings-result]:hover {
   background: var(--surface);
 }
+[data-ui-settings-field] {
+  container: settings-field / inline-size;
+  min-width: 0;
+  width: 100%;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
 [data-ui-settings-field] > .ui-field {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1193,6 +1200,9 @@
   align-self: center;
   justify-self: end;
   grid-area: control;
+}
+[data-ui-settings-field] .ui-field__control > .ui-switch:not(:has(.ui-switch__label)) {
+  padding-inline: 0;
 }
 [data-ui-settings-field] .ui-field__control > .ui-switch ~ p {
   grid-area: status;

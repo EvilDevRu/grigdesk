@@ -62,7 +62,12 @@
           :data-hotkey-tool="row.id"
           class="settings-hotkey-row"
         >
-          <span class="settings-hotkey-label">{{ row.label }}</span>
+          <div class="settings-hotkey-description">
+            <span class="settings-hotkey-label">{{ row.label }}</span>
+            <small v-if="row.availability === 'disabled'">
+              {{ t('settings.pluginDisabledShortcutInactive') }}
+            </small>
+          </div>
           <div class="settings-hotkey-actions">
             <UiButton
               data-record
@@ -81,7 +86,6 @@
               {{ row.combo ? t('settings.disable') : t('settings.restore') }}
             </UiButton>
           </div>
-          <small v-if="row.availability === 'disabled'">{{ t('settings.pluginDisabledShortcutInactive') }}</small>
         </div>
         <p v-if="mapIssue" role="alert">{{ mapIssue }}</p>
         <p>{{ t('settings.recordingUsesThePhysicalKeySystemAnd') }}</p>
@@ -129,7 +133,8 @@ const hotkeys = useHotkeysStore();
 const plugins = usePluginsStore();
 const error = ref<UiText>('');
 const fields = computed(() => getSettingsFields(uiLocale.value)
-  .filter((field) => field.address.pageId === settings.pageId));
+  .filter((field) => field.address.pageId === settings.pageId)
+  .filter((field) => field.resourceId !== 'wakeLock' || device.wakeLockSupported || device.wakeLockEnabled));
 const wakeLockEnabled = computed(() => {
   settings.snapshot;
 
@@ -315,33 +320,27 @@ onBeforeUnmount(() => {
   align-content: start;
   min-width: 0;
 }
-.settings-language {
-  container: settings-field / inline-size;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--line);
-}
 /* Сочетание само является кнопкой изменения: в строке название и две кнопки. */
 .settings-hotkey-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: 'label actions' 'hint hint';
   align-items: center;
-  gap: 4px 12px;
+  gap: 12px;
   padding: 8px 0;
   border-bottom: 1px solid var(--line);
 }
 .settings-hotkey-row:first-child {
   padding-top: 0;
 }
+.settings-hotkey-description {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
 .settings-hotkey-label {
-  display: flex;
-  align-items: center;
-  grid-area: label;
-  min-height: var(--control-height);
   line-height: 18px;
 }
 .settings-hotkey-row small {
-  grid-area: hint;
   color: var(--ink-low);
   font-size: 12px;
   line-height: 16px;
@@ -356,7 +355,6 @@ onBeforeUnmount(() => {
 .settings-hotkey-actions {
   display: flex;
   flex-wrap: wrap;
-  grid-area: actions;
   justify-content: flex-end;
   gap: 8px;
 }

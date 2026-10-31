@@ -198,11 +198,16 @@ test('Параметры приложения — общий черновик и
 
     const device = module.useDeviceStore();
 
-    device.wakeLockSupported = true;
+    device.wakeLockSupported = false;
 
     const page = mount(module.InterfacePage, { props: { active: true }, global: { plugins: [pinia] } });
 
     t.after(() => page.unmount());
+    await flushPromises();
+
+    assert.equal(page.find('[role="switch"]').exists(), false,
+      'Без Wake Lock API выключенная настройка не отображается');
+    device.wakeLockSupported = true;
     await flushPromises();
 
     const previous = device.wakeLockEnabled;
@@ -215,6 +220,11 @@ test('Параметры приложения — общий черновик и
 
     assert.equal(device.wakeLockEnabled, !previous);
     assert.equal(browser.localStorage.getItem('grigdesk-screen-wake-lock'), previous ? '0' : '1');
+    device.wakeLockSupported = false;
+    await flushPromises();
+
+    assert.equal(page.find('[role="switch"]').exists(), true,
+      'Сохранённую включённую настройку можно выключить и без доступного API');
 
     let notifications = 0;
 

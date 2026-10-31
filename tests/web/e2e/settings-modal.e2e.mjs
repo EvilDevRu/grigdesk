@@ -40,7 +40,7 @@ function findFieldMisalignments(modal) {
   });
   const hotkeys = [...modal.querySelectorAll('.settings-hotkey-row')].flatMap((row) => {
     const label = row.querySelector('.settings-hotkey-label');
-    const title = label.getBoundingClientRect();
+    const title = row.querySelector('.settings-hotkey-description').getBoundingClientRect();
     const combo = row.querySelector('kbd').getBoundingClientRect();
     const hint = row.querySelector('small');
 
@@ -49,7 +49,10 @@ function findFieldMisalignments(modal) {
     }
 
     const axis = Math.abs(title.top + title.height / 2 - combo.top - combo.height / 2);
-    const hintBelow = !hint || hint.getBoundingClientRect().top >= Math.max(title.bottom, combo.bottom);
+    const name = label.getBoundingClientRect();
+    const note = hint?.getBoundingClientRect();
+    const hintBelow = !note || Math.abs(note.left - name.left) <= 1
+      && Math.abs(note.top - name.bottom - 2) <= 1;
 
     return axis > 1 || !hintBelow ? [{
       label: label.textContent.trim(),
