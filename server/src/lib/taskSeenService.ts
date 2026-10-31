@@ -1,3 +1,4 @@
+import type { B24ReadOptions } from './b24/readOperations.ts';
 // Предметный слой просмотренных задач: scope выводится из текущего B24-портала и
 // пользователя, наружу уходит только opaque hash — клиент не может попросить чужой набор.
 import { b24AccountScope } from './b24AccountScope.ts';
@@ -33,19 +34,28 @@ export class TaskSeenService {
     this.b24 = b24;
   }
 
-  private async _scope(): Promise<string> {
+  /**
+   * Scope берётся только из подтверждённой серверной identity.
+   * Signal отменяет чтение; локальные мутации сохраняют прежнюю доставку.
+   */
+  private async _scope(options: B24ReadOptions = {}): Promise<string> {
     let identity: Awaited<ReturnType<B24Adapter['accountIdentity']>>;
 
     try {
-      identity = await this.b24.accountIdentity();
+      identity = await this.b24.accountIdentity(options);
     } catch (error) {
       throw new TaskSeenIdentityError(undefined, error);
     }
     return seenScopeFor(identity);
   }
 
-  async list(): Promise<SeenScope & { scope: string }> {
-    const scope = await this._scope();
+  /**
+   * Чтение отметок передаёт срок жизни HTTP до общего определения identity.
+   * Серверный scope по-прежнему не может быть выбран полем запроса.
+   */
+  async list(options: B24ReadOptions = {}): Promise<SeenScope & { scope: string }> {
+    const scope = await this._scope(options);
+
     return { scope, ...await this.store.list(scope) };
   }
 

@@ -654,7 +654,11 @@ async function build(desktopParent: DesktopParent | null) {
   const githubCredentials = new GitHubCredentialsStore({ file: config.githubCredsPath });
   const githubAccountContextFor = createGitHubAccountContextFactory({ dir: config.githubDir });
   const claudeAuth = new ClaudeAuthStore({ authPath: config.claudeAuthPath });
-  const b24 = new B24Adapter({ credsStore, cookiePath: config.b24CookiePath });
+  const b24 = new B24Adapter({
+    credsStore,
+    cookiePath: config.b24CookiePath,
+    trace: (event) => fastify.log.debug(event, 'Чтение Б24'),
+  });
   // Идентичность companion-чата можно создать и для запущенной задачи фабрики, и для
   // существующей задачи Б24 до запуска. Подтвердить её имеют право только эти
   // серверные источники.

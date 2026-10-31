@@ -1,4 +1,5 @@
 import { delayWithAbort } from '../../../shared/lib/delay.ts';
+import { acquireB24Capacity } from './b24ReadCapacity.ts';
 
 interface RouteState {
   tail: Promise<void>;
@@ -63,6 +64,7 @@ export async function acquireB24Read(route: string, signal?: AbortSignal) {
   const own = state;
   const previous = own.tail;
   let release = () => {};
+  let releaseCapacity: (() => void) | undefined;
   const done = new Promise<void>((resolve) => {
     release = resolve;
   });
@@ -79,13 +81,24 @@ export async function acquireB24Read(route: string, signal?: AbortSignal) {
     }
 
     signal?.throwIfAborted();
+    releaseCapacity = await acquireB24Capacity(route, signal);
+    signal?.throwIfAborted();
   } catch (error) {
+    releaseCapacity?.();
     release();
 
     throw error;
   }
 
+  let finished = false;
+
   return (outcome: 'success' | 'failure' | 'cancelled') => {
+    if (finished) {
+      return;
+    }
+
+    finished = true;
+
     if (outcome === 'failure') {
       own.failures += 1;
       own.retryAt = Date.now() + Math.min(
@@ -96,9 +109,11 @@ export async function acquireB24Read(route: string, signal?: AbortSignal) {
       own.retryAt = 0;
     }
 
+    releaseCapacity?.();
     release();
   };
 }
+
 
 /**
  * В журнал проходит один отказ шаблона за скользящую минуту независимо от длительности.

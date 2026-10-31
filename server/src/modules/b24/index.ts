@@ -4,6 +4,8 @@ import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { B24Adapter } from '../../adapters/b24.ts';
+import type { B24ReadOptions } from '../../lib/b24/readOperations.ts';
+import { withB24RequestRead } from '../../lib/b24/requestRead.ts';
 import {
   B24ValidationError,
   normalizeTaskUpdateFields,
@@ -35,8 +37,8 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
    * Дополняет неизменённые данные портала разрешёнными Telegram-обсуждениями.
    * Одна функция обслуживает чтение и ответ после редактирования, чтобы DTO не расходились.
    */
-  const taskWithDiscussion = async (id: string): Promise<unknown> => {
-    const task = await b24.taskDetail(id) as Payload | null;
+  const taskWithDiscussion = async (id: string, options: B24ReadOptions = {}): Promise<unknown> => {
+    const task = await b24.taskDetail(id, options) as Payload | null;
 
     if (typeof fastify.telegramDiscussion !== 'function' || !task) return task;
 
@@ -49,7 +51,8 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
   // Полный дашборд: задачи + на контроле + я поставил + показатели + графики.
   fastify.get('/api/b24/dashboard', async (request, reply) => {
     try {
-      return await b24.getDashboard();
+      return await withB24RequestRead(request, reply,
+        (options) => b24.getDashboard(options));
     } catch (err) {
       const message = failureText(err);
       const notConfigured = /не настроен/i.test(message);
@@ -72,8 +75,10 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
   fastify.get<TaskRoute>('/api/b24/task/:id', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+
     try {
-      return await taskWithDiscussion(id);
+      return await withB24RequestRead(request, reply,
+        (options) => taskWithDiscussion(id, options));
     } catch (err) {
       return reply.code(502).send({ error: 'b24_error', message: failureText(err) });
     }
@@ -82,7 +87,10 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
   // Поиск пользователей (для выбора исполнителя).
   fastify.get<TaskRoute>('/api/b24/users', async (request, reply) => {
     try {
-      return { users: await b24.findUsers(request.query.q || '') };
+      const users = await withB24RequestRead(request, reply,
+        (options) => b24.findUsers(request.query.q || '', options));
+
+      return { users };
     } catch (err) {
       return reply.code(502).send({ error: 'b24_error', message: failureText(err) });
     }
@@ -91,7 +99,10 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
   // Доступные текущему пользователю проекты/рабочие группы для поля GROUP_ID задачи.
   fastify.get('/api/b24/groups', async (request, reply) => {
     try {
-      return { groups: await b24.listGroups() };
+      const groups = await withB24RequestRead(request, reply,
+        (options) => b24.listGroups(options));
+
+      return { groups };
     } catch (err) {
       return reply.code(502).send({ error: 'b24_error', message: failureText(err) });
     }
@@ -173,12 +184,17 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
   )));
 
   // Комментарии задачи (для таба в модалке): без системных, свежие снизу.
-  fastify.get<TaskRoute>('/api/b24/task/:id/comments', wrap(async (r) => {
-    const page = await b24.taskPageData(taskId(r)) as Payload;
-    const comments = Array.isArray(page.comments) ? page.comments as Payload[] : [];
+  fastify.get<TaskRoute>('/api/b24/task/:id/comments', async (request, reply) => {
+    try {
+      const page = await withB24RequestRead(request, reply,
+        (options) => b24.taskPageData(taskId(request), options)) as Payload;
+      const comments = Array.isArray(page.comments) ? page.comments as Payload[] : [];
 
-    return { comments: comments.filter((c) => !c.isSystem) };
-  }));
+      return { comments: comments.filter((comment) => !comment.isSystem) };
+    } catch (error) {
+      return reply.code(502).send({ error: 'b24_error', message: failureText(error) });
+    }
+  });
 
   fastify.post<TaskRoute>('/api/b24/task/:id/timer/:action', wrap((r) => {
     const a = String(r.params.action ?? '');
