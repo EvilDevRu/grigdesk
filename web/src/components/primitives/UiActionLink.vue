@@ -10,6 +10,7 @@
     ]"
     :data-variant="normalizedVariant"
     :data-tone="normalizedTone"
+    :data-size="normalizedSize"
     :href="guarded ? undefined : href"
     :target="target"
     :rel="safeRel"
@@ -27,8 +28,9 @@ import { messageRef } from '../../services/locale.ts';
 import { computed, ref } from 'vue';
 import { uiDownloadAvailable, saveUiDownload } from '../../services/downloads.ts';
 import { showToast } from '../../services/toasts.ts';
-import type { UiActionTone, UiActionVariant } from '../../types/uiActions';
+import type { UiActionSize, UiActionTone, UiActionVariant } from '../../types/uiActions';
 import {
+  normalizeActionSize,
   normalizeActionTone,
   normalizeActionVariant,
 } from '../../types/uiActions';
@@ -43,6 +45,7 @@ const props = withDefaults(
     download?: string | boolean;
     variant?: UiActionVariant;
     tone?: UiActionTone;
+    size?: UiActionSize;
     disabled?: boolean;
     ariaDisabled?: boolean;
     block?: boolean;
@@ -53,6 +56,7 @@ const props = withDefaults(
     download: undefined,
     variant: 'outline',
     tone: 'neutral',
+    size: 'default',
     disabled: false,
     ariaDisabled: false,
     block: false,
@@ -65,6 +69,7 @@ const emit = defineEmits<{ click: [event: MouseEvent] }>();
 const element = ref<HTMLAnchorElement | null>(null);
 const normalizedVariant = computed(() => normalizeActionVariant(props.variant));
 const normalizedTone = computed(() => normalizeActionTone(props.tone));
+const normalizedSize = computed(() => normalizeActionSize(props.size));
 const guarded = computed(() => props.disabled || props.ariaDisabled);
 const safeRel = computed(
   () =>

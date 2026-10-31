@@ -1,11 +1,26 @@
 <template>
-  <span class="stand-link">
+  <span class="stand-link" :data-size="size">
     <UiActionLink
-        v-bind="$attrs" :href="href" target="_blank" rel="noopener noreferrer"
+        v-bind="$attrs" :href="href" :size="size" target="_blank" rel="noopener noreferrer"
         @click="click" @auxclick="aux">
       <slot>{{ href }}</slot>
     </UiActionLink>
     <UiPopover v-if="browser.available" :trigger-label="t('core.browserOpenWith')">
+      <template v-if="size === 'compact'" #trigger="{ toggle }">
+        <UiIconButton
+            role="embedded"
+            data-context="workspace-toolbar"
+            variant="outline"
+            :label="t('core.browserOpenWith')"
+            v-tooltip="t('core.browserOpenWith')"
+            @click="toggle"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </UiIconButton>
+      </template>
       <template #default="{ close }">
         <UiButton @click="override('internal', close)">{{ t('settings.browserInternal') }}</UiButton>
         <UiButton @click="override('external', close)">{{ t('settings.browserExternal') }}</UiButton>
@@ -18,11 +33,17 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { UiActionLink, UiButton, UiPopover, t } from '../../ui.ts';
+import { UiActionLink, UiButton, UiIconButton, UiPopover, t, vTooltip } from '../../ui.ts';
+import type { UiActionSize } from '../../ui.ts';
 import { useBrowserStore } from '../../stores/browser.ts';
 import { openStand } from './openStand.ts';
 
-const props = defineProps<{ href: string }>();
+const props = withDefaults(defineProps<{
+  href: string;
+  size?: UiActionSize;
+}>(), {
+  size: 'default',
+});
 
 defineOptions({ inheritAttrs: false });
 
@@ -79,5 +100,9 @@ function override(target: 'internal' | 'external', close: () => void): void {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.stand-link[data-size='compact'] {
+  gap: 2px;
 }
 </style>

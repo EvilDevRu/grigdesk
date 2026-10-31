@@ -414,24 +414,37 @@
       </div>
 
       <footer v-if="!isCollapsed(t.task) || !t.stall" class="strip">
-        <template v-if="!isCollapsed(t.task)">
-        <span v-if="t.graph.fePort" class="chunk">
-          <span class="sdot" :class="t.daemonAlive ? 'on' : 'off'"></span>
-          стенд · <StandLink :href="sandboxUrl(t.graph.fePort, t.graph.serviceHost) || ''">фронт :{{ t.graph.fePort }}</StandLink>
-          <StandLink v-if="t.graph.apiPort" :href="sandboxUrl(t.graph.apiPort, t.graph.serviceHost) || ''">API :{{ t.graph.apiPort }}</StandLink>
-        </span>
-        <!-- Стенд ещё строится: живой прогресс сборки песочницы из t*.stage -->
-        <span v-else-if="t.graph.sandbox" class="chunk building">
-          <UiSpinner decorative />
-          стенд строится · {{ t.graph.sandbox.step }}/{{ t.graph.sandbox.total }} · {{ t.graph.sandbox.label }}
-        </span>
-        <span v-if="loopList(t.graph).length" class="chunk warn">↻ возвраты: {{ loopList(t.graph).join(', ') }}</span>
-        <span v-if="t.graph.halted && !t.stall" class="chunk halted">
-          ⚠ застряла на {{ stripEmoji(t.graph.nodes[t.graph.halted]?.[1]) || t.graph.halted }}
-        </span>
-        </template>
+        <div v-if="!isCollapsed(t.task)" class="strip__context">
+          <div v-if="t.graph.fePort" class="strip__stand">
+            <span class="chunk">
+              <span class="sdot" :class="t.daemonAlive ? 'on' : 'off'" aria-hidden="true"></span>
+              стенд
+            </span>
+            <div class="strip__links">
+              <StandLink size="compact" :href="sandboxUrl(t.graph.fePort, t.graph.serviceHost) || ''">
+                фронт :{{ t.graph.fePort }}
+              </StandLink>
+              <StandLink v-if="t.graph.apiPort" size="compact"
+                         :href="sandboxUrl(t.graph.apiPort, t.graph.serviceHost) || ''">
+                API :{{ t.graph.apiPort }}
+              </StandLink>
+            </div>
+          </div>
+          <!-- Стенд ещё строится: живой прогресс сборки песочницы из t*.stage -->
+          <span v-else-if="t.graph.sandbox" class="chunk building">
+            <UiSpinner decorative />
+            стенд строится · {{ t.graph.sandbox.step }}/{{ t.graph.sandbox.total }} · {{ t.graph.sandbox.label }}
+          </span>
+          <span v-if="loopList(t.graph).length" class="chunk warn">
+            ↻ возвраты: {{ loopList(t.graph).join(', ') }}
+          </span>
+          <span v-if="t.graph.halted && !t.stall" class="chunk halted">
+            ⚠ застряла на {{ stripEmoji(t.graph.nodes[t.graph.halted]?.[1]) || t.graph.halted }}
+          </span>
+        </div>
         <PipelineCardActions
           v-if="!t.stall"
+          class="strip__actions"
           :actions="cardActions(t)"
           @action="(id) => runCardAction(t, id)"
         />
@@ -3601,13 +3614,48 @@ function cardState(g: PipelineViewGraph) {
 
 .gwrap { min-width: 0; margin: 8px 0; }
 
-.strip { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--ink-mid);
-  border-top: 1px solid var(--line); padding-top: 10px; }
+.strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  color: var(--ink-mid);
+  font-size: 12.5px;
+}
+
+.strip__context,
+.strip__stand,
+.strip__links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.strip__context {
+  flex: 1 1 auto;
+  gap: 8px 16px;
+}
+
+.strip__stand {
+  gap: 8px;
+}
+
+.strip__links {
+  gap: 6px;
+}
+
+.strip__actions {
+  margin-inline-start: auto;
+}
+
 .chunk { display: inline-flex; align-items: center; gap: 6px; }
 .chunk.warn { color: var(--warn); }
 .chunk.halted { color: var(--bad); }
 .chunk.building { color: var(--accent); }
-.strip a { color: var(--accent); margin-left: 6px; }
 .sdot { width: 8px; height: 8px; border-radius: 50%; }
 .sdot.on { background: var(--good); }
 .sdot.off { background: var(--ink-mid); }
