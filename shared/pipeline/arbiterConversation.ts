@@ -226,6 +226,20 @@ export function arbiterText(value: unknown, limit: number, empty = false): strin
 }
 
 /**
+ * Показывает присланный моделью вид предложения в причине отказа.
+ * Управляющие символы и длина ограничены: текст модели недоверенный,
+ * но короткая выписка отличает синоним вида от повреждённого итога.
+ */
+function unknownKindText(value: unknown): string {
+  const text = String(value ?? '')
+    .replace(/[\u0000-\u001f\u007f]/gu, ' ')
+    .trim()
+    .slice(0, 40);
+
+  return text || 'вид не назван';
+}
+
+/**
  * Сохраняет порядок вариантов, проверяя их количество и уникальность id.
  * Повтор идентификатора делает выбор неоднозначным и отклоняет весь ответ.
  */
@@ -381,7 +395,8 @@ export function decodeArbiterResult(
     }
 
     if (proposal.kind !== 'apply') {
-      throw new ArbiterConversationError('invalid_request', 'Неизвестный вид предложения.');
+      throw new ArbiterConversationError('invalid_request',
+        `Неизвестный вид предложения: «${unknownKindText(proposal.kind)}».`);
     }
 
     return {

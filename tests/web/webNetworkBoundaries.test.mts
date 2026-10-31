@@ -24,8 +24,20 @@ async function fixture(oldName: string, newName: string, exported: string) {
   const server: { reply: unknown } = { reply: {} };
 
   migrationHarness.api = {
+    /**
+     * Локальная проверка источника не использует удерживаемый ответ портала.
+     * Все обращения учитываются, чтобы проверить число подтверждений владельца.
+     */
     async get(url: string) {
       calls.push({ method: 'GET', url });
+
+      if (url === '/api/settings/b24') {
+        return {
+          configured: true,
+          baseUrl: 'https://portal.example.test',
+          login: 'fixture',
+        };
+      }
 
       if (url.startsWith('/api/grigdesk-tasks/')) {
         throw new migrationHarness.ApiError('Нет своей задачи', 404, { error: 'grigdesk_task_not_found' });
@@ -254,6 +266,7 @@ test('NET-b24', async () => {
   server.reply = { tasks: [] };
   await store.load(true);
   assert.equal(baselineCalls, 1);
+  assert.equal(calls.filter((call) => call.url === '/api/settings/b24').length, 2);
 
   const previous = store.data;
 
@@ -262,7 +275,8 @@ test('NET-b24', async () => {
   assert.equal(store.data, previous, 'неверная доска не назначается');
   assert.equal(baselineCalls, 1);
   assert.ok(store.error);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.filter((call) => call.url === '/api/b24/dashboard').length, 2);
+  assert.equal(calls.filter((call) => call.url === '/api/settings/b24').length, 5);
 });
 
 test('NET-b24-task', async () => {

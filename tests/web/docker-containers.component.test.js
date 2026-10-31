@@ -78,6 +78,15 @@ async function mountContainers(t, { values = {}, stats = {}, busyIds = [] } = {}
   const execCalls = [];
   const containers = structuredClone(INVENTORY);
   const harness = {
+    browser: {
+      available: false,
+      preferences: {
+        open: 'external',
+        external: 'system',
+        agents: false,
+      },
+      control: async () => {},
+    },
     store: {
       containers,
       loading: false,
@@ -107,6 +116,8 @@ async function mountContainers(t, { values = {}, stats = {}, busyIds = [] } = {}
 
   const component = await compileVue(CONTAINERS, {
     stubs: {
+      '../../stores/browser.ts':
+        'export const useBrowserStore = () => globalThis.__dockerContainersHarness.browser;',
       '../../stores/docker': (
         'export const useDockerStore = () => globalThis.__dockerContainersHarness.store;'
       ),

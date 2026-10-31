@@ -691,3 +691,53 @@ test('SH-START-REASON: срок через report не меняет уже го�
   assert.deepEqual(value.shell.state(), before);
   assert.equal(value.timers.length, 0);
 });
+
+test('BR-S01: browser capability только с native port; HTTP state не содержит tabs/paths/control',
+  async (t) => {
+  const plain = fixture();
+
+  t.after(() => plain.shell.close());
+  assert.equal(plain.shell.state().capabilities.includes('browser'), false);
+  assert.equal(Object.hasOwn(plain.shell.state(), 'browser'), false);
+
+  let nativeChanged;
+  let disposed = false;
+  const value = fixture({ nativeBrowser: {
+    state: () => ({ preferences: {
+      open: 'external',
+      external: 'system',
+      agents: false
+    }, revision: 4 }),
+    subscribe: (callback) => {
+      nativeChanged = callback;
+
+      return () => {
+        disposed = true;
+      };
+    },
+  } });
+  const before = value.shell.state().rev;
+
+  nativeChanged();
+  assert.ok(value.shell.state().rev > before);
+  assert.equal(value.shell.state().capabilities.includes('browser'), true);
+  assert.deepEqual(Object.keys(value.shell.state().browser).sort(), ['preferences', 'revision']);
+
+  const server = http.createServer((request, response) => value.shell.handle(request, response));
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    value.shell.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const response = await fetch(`${origin}/__shell/browser/execute`, {
+    method: 'POST', body: JSON.stringify({ action: 'click', tabId: 'private' }),
+  });
+
+  assert.equal(response.status, 404);
+  value.shell.close();
+  assert.equal(disposed, true);
+});

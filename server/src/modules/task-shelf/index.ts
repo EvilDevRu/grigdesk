@@ -1,3 +1,4 @@
+import { withB24RequestRead } from '../../lib/b24/requestRead.ts';
 // Account-scoped полка B24-задач. Роуты меняют только state GrigDesk и живо
 // закрываются гейтом системного плагина; общий auth guard уже закрывает весь /api.
 import fp from 'fastify-plugin';
@@ -81,7 +82,9 @@ async function taskShelfModule(
     }
   };
 
-  fastify.get<TaskShelfRoute>('/api/b24/task-shelf', run(() => shelf.list()));
+  fastify.get<TaskShelfRoute>('/api/b24/task-shelf', (request, reply) =>
+    withB24RequestRead(request, reply, (options) =>
+      run(() => shelf.list(options))(request, reply)));
   fastify.put<TaskShelfRoute>('/api/b24/task-shelf/:taskId', run((request) => {
     const taskId = normalizeShelfTaskId(request.params.taskId);
     return shelf.put(taskId, request.body);

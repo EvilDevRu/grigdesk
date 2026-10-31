@@ -20,9 +20,12 @@ test('SB08: runtime-info, runner и status MCP зарегистрированы 
 
   for (const [id, kind] of [
     ['deepseek-runtime-info', 'script'], ['deepseek-runner', 'main'], ['factory-status-mcp', 'script'],
+    ['factory-browser', 'main'],
   ]) {
     assert.equal(catalog.helpers.find((helper) => helper.id === id)?.entryKind, kind, id);
   }
+
+  assert.deepEqual(catalog.helpers.find((helper) => helper.id === 'factory-browser').exports, ['main']);
 
   assert.ok(catalog.helpers.find((helper) => helper.id === 'deepseek-runner').exports
     .includes('runDeepSeekFactory'));
@@ -54,7 +57,7 @@ test('SB08: настоящий Bash runner вызывает relocated metadata w
       path.join(root, 'server/deepseek-host-contract.json'));
     await fs.writeFile(path.join(helpers, 'helpers.json'), await fs.readFile(MANIFEST));
 
-    for (const id of ['deepseek-runtime-info', 'deepseek-runner', 'factory-status-mcp']) {
+    for (const id of ['deepseek-runtime-info', 'deepseek-runner', 'factory-status-mcp', 'factory-browser']) {
       await buildHelper({
         root: SOURCE,
         manifest: catalog,

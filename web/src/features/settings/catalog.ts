@@ -163,6 +163,20 @@ SETTINGS_FIELDS.push(...DEVICE_FIELDS.map(([pageId, resourceId, key, control, la
   scope: translator.t('ru', 'settings.thisDevice2'),
 })));
 
+SETTINGS_FIELDS.push(...([
+  ['open', 'select', 'settings.browserOpen', 'settings.browserOpenHint'],
+  ['external', 'select', 'settings.browserApplication', 'settings.browserApplicationHint'],
+  ['agents', 'switch', 'settings.browserAgents', 'settings.browserAgentsHint'],
+] as const).map(([key, control, labelKey, hintKey]) => ({
+  address: { pageId: 'tools.browser', fieldPath: [key] },
+  resourceId: 'browser',
+  key,
+  control,
+  scope: translator.t('ru', 'settings.thisDevice2'),
+  label: translator.t('ru', labelKey),
+  description: translator.t('ru', hintKey),
+})));
+
 SETTINGS_FIELDS.push({
   address: { pageId: 'system.diagnostics', fieldPath: ['level'] },
   resourceId: 'factoryDebug',
@@ -543,6 +557,12 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     description: translator.t('ru', 'settings.builtinPlugins.showcase.description'),
   },
   {
+    id: 'tools.browser',
+    groupId: 'tools',
+    label: translator.t('ru', 'settings.browserPage'),
+    description: translator.t('ru', 'settings.browserPageHint'),
+  },
+  {
     id: 'plugins.installed',
     groupId: 'plugins',
     label: translator.t('ru', 'settings.marketplaceOverview'),
@@ -693,6 +713,10 @@ const GROUP_MESSAGES: Record<string, Record<string, string>> = {
 };
 
 const PAGE_MESSAGES: Record<string, Record<string, string>> = {
+  'tools.browser': {
+    label: 'settings.browserPage',
+    description: 'settings.browserPageHint',
+  },
   "interface.behavior": {
     "label": "settings.behavior",
     "description": "settings.languageAndScreenWakeLockOnThisDevice"
@@ -840,6 +864,21 @@ const PAGE_MESSAGES: Record<string, Record<string, string>> = {
 };
 
 const FIELD_MESSAGES: Record<string, Record<string, string>> = {
+  'browser:open': {
+    label: 'settings.browserOpen',
+    description: 'settings.browserOpenHint',
+    scope: 'settings.thisDevice2',
+  },
+  'browser:external': {
+    label: 'settings.browserApplication',
+    description: 'settings.browserApplicationHint',
+    scope: 'settings.thisDevice2',
+  },
+  'browser:agents': {
+    label: 'settings.browserAgents',
+    description: 'settings.browserAgentsHint',
+    scope: 'settings.thisDevice2',
+  },
   "prefs:chatLiveSessions": {
     "label": "settings.keepTheChatAgentAliveBetweenTurns",
     "description": "settings.appliesToTheNextTurnIdleProcesses",

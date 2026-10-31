@@ -107,10 +107,10 @@
         <div class="spacer"></div>
         <div class="sel model">
           <span class="lbl">модель</span>
-          <UiSelect
+          <ProviderModelSelect
             compact
-            searchable
-            group-navigation
+            :providers="prov.providers"
+            value-format="id"
             data-context="chat-session-toolbar"
             data-role="chat-model"
             :aria-label="t('core.chatModelPicker')"
@@ -119,22 +119,8 @@
             v-tooltip="currentModelTitle" :aria-description="currentModelTitle"
             @change="onModelChange"
           >
-            <template #value-leading>
-              <ProviderIcon v-if="current.provider" :provider="current.provider" :size="14"
-                            :style="{ color: current.provider.color }" />
-            </template>
             <template #value="{ option, value }">
               {{ currentModel ? modelOptionLabel(currentModel) : option?.label || value }}
-            </template>
-            <template #group-leading="{ option }">
-              <ProviderIcon v-if="prov.modelOf(option.value).provider"
-                            :provider="prov.modelOf(option.value).provider!" :size="16"
-                            :style="{ color: prov.modelOf(option.value).provider?.color }" />
-            </template>
-            <template #option-leading="{ option }">
-              <ProviderIcon v-if="prov.modelOf(option.value).provider"
-                            :provider="prov.modelOf(option.value).provider!" :size="14"
-                            :style="{ color: prov.modelOf(option.value).provider?.color }" />
             </template>
             <option v-if="modelId && (!currentModel || currentModelHidden)"
                     :value="modelId" :hidden="currentModelHidden" disabled>
@@ -155,7 +141,7 @@
             <template v-else>
               <option v-for="m in FALLBACK_MODELS" :key="m" :value="m">{{ m }}</option>
             </template>
-          </UiSelect>
+          </ProviderModelSelect>
         </div>
         <!-- Режим прав: как агент поступает с действиями (спрашивать / сам / только план) -->
         <div v-if="modes.length || modeUnavailable" class="sel mode">
@@ -693,7 +679,7 @@ import type {
   ChatAttachment, HistoryAttachment, ChatMessage, ContextCache,
 } from '../../shared/chatContracts.ts';
 import type { PipelineTask } from '../../shared/pipelineContracts.ts';
-import type { ProviderEntry, ProviderModelEntry } from '../../../../shared/chat/providersContracts.ts';
+import type { ProviderModelEntry } from '../../../../shared/chat/providersContracts.ts';
 
 import { useDictationController } from '../../features/speech/provider.ts';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.ts';
@@ -715,6 +701,8 @@ import { providerUsageFreshness } from '../../../../shared/chat/providerUsageFre
 import ChatQuestion from './ChatQuestion.vue';
 import ChatPermission from './ChatPermission.vue';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
+import ProviderModelSelect from '../../shared/ProviderModelSelect.vue';
+import { isSelectableModelProvider } from '../../shared/providerModelSelect.ts';
 import {
   confirmDialog,
   t,
@@ -977,16 +965,8 @@ const modelId = computed(() => current.value.id);
 const effortValue = computed(() => sess.value?.effort || '');
 const currentModel = computed(() => current.value.model);
 const currentModelHidden = computed(() => Boolean(current.value.provider)
-  && !isSelectableProvider(current.value.provider));
+  && !isSelectableModelProvider(current.value.provider));
 const fmtTokens = (value: unknown) => Math.max(0, Number(value) || 0).toLocaleString('ru');
-
-/**
- * Каталог выбора предлагает только исполнителей с подтверждённой доступностью.
- * Это не меняет сохранённую модель или память уже открытого разговора.
- */
-function isSelectableProvider(provider: Pick<ProviderEntry, 'available' | 'chatEnabled'> | null): boolean {
-  return provider?.available === true && provider.chatEnabled !== false;
-}
 
 /**
  * Каталог Codex намеренно не сообщает окно. Для выбранной модели точнее всего замер
@@ -1043,7 +1023,7 @@ function modelOptionDescription(model: ProviderModelEntry): string {
 
 // Группы моделей для селекта (что именно видно — решает стор, правило одно на весь GrigDesk).
 const provGroups = computed(() => prov.providers
-  .filter(isSelectableProvider)
+  .filter(isSelectableModelProvider)
   .map((p) => ({ ...p, models: prov.visibleModels(p, modelId.value) }))
   .filter((p) => p.models.length));
 const FALLBACK_MODELS = ['opus', 'sonnet', 'haiku', 'fable']; // пока реестр не загрузился

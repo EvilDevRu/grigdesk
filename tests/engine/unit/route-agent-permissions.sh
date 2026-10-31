@@ -213,4 +213,21 @@ assert_eq нет "$(has "$no_venv" '.venv/bin/python')" \
 # `finish_tests` обязан стоять ПОСЛЕДНИМ: он печатает план и возвращает код, но
 # скрипт не завершает. Пока он стоял в середине файла, все проверки ниже исполнялись
 # впустую — их падение не попадало ни в план, ни в код возврата прогона.
+browser_node="$TEST_ROOT/browser-node"
+browser_helper="$TEST_ROOT/browser-helper"
+printf '#!/bin/sh\nexit 0\n' >"$browser_node"
+printf '#!/bin/sh\nexit 0\n' >"$browser_helper"
+chmod +x "$browser_node"
+for browser_policy in allow forbid; do
+  settings=$(GRIGDESK_BROWSER_NODE="$browser_node" GRIGDESK_BROWSER_HELPER="$browser_helper" \
+    FACTORY_ROUTE_BROWSER_POLICY="$browser_policy" _agent_settings REVIEW)
+  rules=$(cat "$settings")
+  case "$browser_policy:$rules" in
+    allow:*"Bash($browser_node $browser_helper request:*)"*) test_ok "exact pinned browser request" ;;
+    forbid:*"$browser_helper"*) test_fail "forbid выдал browser request" ;;
+    forbid:*) test_ok "forbid без browser request" ;;
+    *) test_fail "allow не выдал pinned browser request" ;;
+  esac
+done
+
 finish_tests

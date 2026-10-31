@@ -1155,6 +1155,17 @@ async function gateReplacement(root: string, inputs: any, ports: any, context: a
     decision: 'approved',
   });
   const preparedGate = await ports.prepareFactoryRouteLaunch(configB, gateArgs);
+  const expectedBrowser = path.join(selectionA.runtimeRoot,
+    selectionA.packageId === null ? 'server/src/lib/browser/factoryBrowserCli.ts'
+      : 'server/runtime/helpers/factory-browser.mjs');
+
+  if (origin === 'legacy-R') {
+    assert.equal(preparedGate.config.runtimeHostEnv.GRIGDESK_BROWSER_HELPER, '');
+  } else {
+    assert.equal(preparedGate.config.runtimeHostEnv.GRIGDESK_BROWSER_NODE, selectionA.node);
+    assert.equal(preparedGate.config.runtimeHostEnv.GRIGDESK_BROWSER_HELPER, expectedBrowser);
+  }
+
   let gcRetainsA = origin !== 'binary-A';
   let gcReason: string | undefined;
 
@@ -1206,6 +1217,18 @@ async function gateReplacement(root: string, inputs: any, ports: any, context: a
   const results = path.join(after.directory, 'stage-results');
   const terminal = await Promise.all((await fs.readdir(results)).filter((name) => name.startsWith('event.'))
     .map(async (name) => JSON.parse(await fs.readFile(path.join(results, name), 'utf8'))));
+
+    if (origin !== 'legacy-R') {
+      const preflight = await ports.prepareFactoryRouteLaunch(configA,
+        ['267', 'start', '--profile', 'sample']);
+
+      assert.equal(preflight.config.runtimeHostEnv.GRIGDESK_BROWSER_NODE, selectionA.node);
+      assert.ok(preflight.config.runtimeHostEnv.GRIGDESK_BROWSER_HELPER.includes('factory-browser'));
+
+      if (selectionA.packageId !== null) {
+        assert.ok(preflight.config.runtimeHostEnv.GRIGDESK_SERVER_RUNTIME_RESERVATION);
+      }
+    }
 
   return {
     origin,

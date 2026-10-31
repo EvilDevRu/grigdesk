@@ -1,3 +1,6 @@
+import browser from './browser.ts';
+import { browserActions } from '../../../../../shared/browser/browserActions.ts';
+
 import supervisedDb from './supervisedDb.ts';
 import supervisedSsh from './supervisedSsh.ts';
 import type { WorkToolPolicy } from '../../../../../shared/chat/chatPermissionModes.ts';
@@ -12,8 +15,36 @@ export interface WorkToolRegistration {
 }
 
 const REGISTRATIONS = Object.freeze([
-  supervisedSsh, supervisedDb,
+  supervisedSsh, supervisedDb, browser,
 ]) as readonly WorkToolRegistration[];
+
+/**
+ * Browser добавляет свои action limits поверх прежнего policy. У providers без
+ * policy остальные tools выводятся из единственного registry, не второй таблицы имён.
+ */
+export function withBrowserToolPolicy(base: WorkToolPolicy | undefined, mode: string): WorkToolPolicy {
+  const allowedActions: Record<string, readonly string[]> = base ? { ...base.allowedActions } : {};
+
+  if (!base) {
+    for (const registration of REGISTRATIONS) {
+      const schema = registration.descriptor.inputSchema as {
+        properties?: { action?: { enum?: unknown } };
+      } | undefined;
+      const actions = schema?.properties?.action?.enum;
+
+      if (Array.isArray(actions) && actions.every((action) => typeof action === 'string')) {
+        allowedActions[registration.descriptor.name] = [...actions];
+      }
+    }
+  }
+
+  const prior = base?.allowedActions.grigdesk_browser;
+
+  allowedActions.grigdesk_browser = browserActions(mode)
+    .filter((action) => !prior || prior.includes(action));
+
+  return { revision: Math.max(2, base?.revision ?? 0), allowedActions };
+}
 
 /**
  * Один реестр владеет descriptor, dispatch и очисткой результата рабочих tools.

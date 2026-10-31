@@ -42,4 +42,35 @@ output=$(printf '%s\n' '{"tool_name":"Read","tool_input":{}}' | \
 assert_contains "$output" '"permissionDecision": "deny"' \
   "unexpected hook tool fails closed"
 
+browser_node="$TEST_ROOT/pinned-node"
+browser_helper="$TEST_ROOT/pinned-helper"
+request=$(python3 - "$browser_node" "$browser_helper" <<'BROWSER_REQUEST'
+import json
+import shlex
+import sys
+value = {"action": "fill", "tabId": "t", "pageEpoch": 1, "ref": "e1",
+         "text": "do docker ps; git push origin HEAD; $(touch /tmp/forbidden)"}
+print(shlex.join([*sys.argv[1:], "request", "--input-json", json.dumps(value)]))
+BROWSER_REQUEST
+)
+payload=$(python3 - "$request" <<'BROWSER_PAYLOAD'
+import json
+import sys
+print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}))
+BROWSER_PAYLOAD
+)
+output=$(printf '%s\n' "$payload" | python3 "$policy" shared-stand "$browser_node" "$browser_helper")
+assert_eq '' "$output" "quoted page text не считается shell command"
+for command in "$request; docker ps" "$request && git push" \
+  "$browser_node $browser_helper relay --input-json '{}' ; docker ps"; do
+  payload=$(python3 - "$command" <<'BROWSER_PAYLOAD'
+import json
+import sys
+print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}))
+BROWSER_PAYLOAD
+)
+  output=$(printf '%s\n' "$payload" | python3 "$policy" shared-stand "$browser_node" "$browser_helper")
+  assert_contains "$output" '"permissionDecision": "deny"' "shell chain не получает helper exemption"
+done
+
 finish_tests

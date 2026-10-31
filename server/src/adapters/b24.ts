@@ -1,203 +1,302 @@
-// B24Adapter — изоляция интеграции Битрикс24 от остального сервера.
-// Строит локальный B24Client из кредов «Настроек» + СВОЙ cookie-файл (нет конфликта
-// между процессами). Собирает полный DTO «Рабочего стола» из getData + chartDataByPeriod.
+// Сервер владеет одной сессией Б24 и сериализует работу с её cookie и sessid.
+// Читатели разделяют срок и работу, а локальный scope не ждёт занятую очередь.
+import { createHash } from 'node:crypto';
+
 import { B24Client } from '../lib/b24/client.ts';
 import type { NewTask } from '../lib/b24/client.ts';
 import type { CredsStore } from '../lib/b24/credsStore.ts';
+import { B24ReadOperations } from '../lib/b24/readOperations.ts';
+import type {
+  B24ReadOperation,
+  B24ReadOptions,
+  B24ReadTrace,
+} from '../lib/b24/readOperations.ts';
 
-// Кто мы на портале. Область пользовательских данных считается ИЗ этого, а не из
-// того, что прислал браузер: иначе клиент мог бы попросить чужой набор.
 export interface B24AccountIdentity {
   baseUrl: string;
   userId: number;
 }
 
+interface AdapterOptions {
+  credsStore: CredsStore;
+  cookiePath: string;
+  readTimeoutMs?: number;
+  trace?: (event: B24ReadTrace) => void;
+}
+
 export class B24Adapter {
   readonly credsStore: CredsStore;
-
   readonly cookiePath: string;
 
-  private _client: B24Client | null;
+  private _client: B24Client | null = null;
+  private _sig: string | null = null;
+  private _identity: B24AccountIdentity | null = null;
+  private _chain: Promise<unknown> = Promise.resolve();
+  private _readVersion = 0;
+  private readonly _reads: B24ReadOperations;
 
-  private _sig: string | null;
-
-  private _identity: B24AccountIdentity | null;
-
-  // Очередь: B24Client не потокобезопасен — сессия и куки у него общие.
-  private _chain: Promise<unknown>;
-
-  constructor({ credsStore, cookiePath }: { credsStore: CredsStore; cookiePath: string }) {
+  constructor({ credsStore, cookiePath, readTimeoutMs, trace }: AdapterOptions) {
     this.credsStore = credsStore;
     this.cookiePath = cookiePath;
-    this._client = null;
-    this._sig = null;
-    this._identity = null;
-    this._chain = Promise.resolve();
+    this._reads = new B24ReadOperations((fn) => this._run(fn), {
+      timeoutMs: readTimeoutMs,
+      trace,
+    });
   }
 
-  /** Сериализует операции с клиентом — иначе конкурентные запросы рвут сессию («Client Error»). */
+  /**
+   * Физическая очередь ждёт настоящее завершение операции, включая отменяемое чтение.
+   * Ошибка снимает свой элемент, не разрешая конкурентный доступ к общей сессии.
+   */
   private _run<Value>(fn: () => Promise<Value> | Value): Promise<Value> {
-    const r = this._chain.then(fn);
+    const work = this._chain.then(fn);
 
-    // Цепочку не рвём на ошибке: один неудачный запрос не должен запирать очередь.
-    this._chain = r.then(() => {}, () => {});
+    this._chain = work.then(() => undefined, () => undefined);
 
-    return r;
+    return work;
   }
 
-  /** Ленивая сборка клиента; пересоздаёт, если креды сменились. Бросает, если не настроено. */
+  /**
+   * Мутация ставит границу объединения до своей постановки в физическую очередь.
+   * Чтение после действия не присоединяется к снимку, созданному до этого действия.
+   */
+  private _mutate<Value>(fn: () => Promise<Value> | Value): Promise<Value> {
+    this._readVersion += 1;
+
+    return this._run(fn);
+  }
+
+  /**
+   * Клиент и версия выбираются до объединения, поэтому credentials разделяют поколения.
+   * Полный ключ остаётся только в памяти и никогда не попадает в диагностический журнал.
+   */
+  private _read<Value>(key: string, operation: B24ReadOperation,
+    fn: (client: B24Client, signal: AbortSignal) => Promise<Value>,
+    options: B24ReadOptions = {}): Promise<Value> {
+    const client = this.client();
+    const versioned = `${this._readVersion}:${key}`;
+
+    return this._reads.read(versioned, operation, (signal) => fn(client, signal), options.signal);
+  }
+
+  /**
+   * Полные credentials сравниваются только в памяти; cookie-файл разделён по порталу и логину.
+   * Прежний общий файл не импортируется: чужая действующая сессия не подтверждает новый scope.
+   */
   client(): B24Client {
     const creds = this.credsStore.read();
-    if (!creds) throw new Error('B24 не настроен: заполните логин/пароль в Настройках.');
-    const sig = `${creds.baseUrl}|${creds.login}`;
+
+    if (!creds) {
+      this.invalidate();
+
+      throw new Error('B24 не настроен: заполните логин/пароль в Настройках.');
+    }
+
+    const sig = JSON.stringify([creds.baseUrl, creds.login, creds.password]);
+
     if (!this._client || this._sig !== sig) {
-      this._client = new B24Client({ ...creds, cookiePath: this.cookiePath });
+      this.invalidate();
+
+      const account = createHash('sha256')
+        .update(JSON.stringify([creds.baseUrl.replace(/\/+$/u, ''), creds.login]))
+        .digest('hex');
+
+      this._client = new B24Client({
+        ...creds,
+        cookiePath: `${this.cookiePath}.${account}`,
+      });
       this._sig = sig;
     }
+
     return this._client;
   }
 
-  /** Сбросить клиент (после смены кредов). */
+  /**
+   * Смена учётной записи отменяет старые чтения до очистки локального scope.
+   * Физическая очередь сохраняется, пока активная работа действительно не закончилась.
+   */
   invalidate(): void {
+    this._reads.invalidate();
+    this._readVersion += 1;
     this._client = null;
     this._sig = null;
     this._identity = null;
   }
 
   /**
-   * Дешёвый readiness gate без сети и без создания client-а.
-   * Inbox проверяет его до чтения channel stores/model/materialize, чтобы при пустых
-   * credentials вообще не касаться потенциально чувствительного текста обращений.
+   * Проверка настройки не создаёт клиента и не обращается к порталу.
+   * Её используют входящие перед чтением материалов и запуском модели.
    */
   isConfigured(): boolean {
     return this.credsStore.read() !== null;
   }
 
   /**
-   * Проверка номера пользуется той же очередью, что и остальные операции портала.
-   * Отсутствие настройки не создаёт клиент и не делает сетевых запросов.
+   * Проверка существования номера остаётся чтением той же серверной сессии.
+   * Отсутствующая настройка возвращает unknown без сетевого обращения.
    */
   async probeTaskNumber(id: string): Promise<'exists' | 'absent' | 'unknown'> {
     if (!this.isConfigured()) {
       return 'unknown';
     }
 
-    return this._run(() => this.client().probeTaskNumber(id));
+    return this._read(`probe:${id}`, 'probe', (client) => client.probeTaskNumber(id));
   }
 
-  /** Текущая область пользовательских B24-данных; кеш сбрасывается вместе с credentials. */
-  async accountIdentity(): Promise<B24AccountIdentity | null> {
-    return this._run(async () => {
-      if (this._identity) return { ...this._identity };
-      const client = this.client();
-      const userId = await client.discoverUserId();
-      if (!userId) return null;
-      this._identity = { baseUrl: client.baseUrl, userId };
+  /**
+   * Проверенный scope текущих credentials не зависит от очереди операций портала.
+   * Холодное определение объединяется; отменённый результат не восстанавливает старый кэш.
+   */
+  async accountIdentity(options: B24ReadOptions = {}): Promise<B24AccountIdentity | null> {
+    this.client();
+    options.signal?.throwIfAborted();
+
+    if (this._identity) {
       return { ...this._identity };
-    });
+    }
+
+    const identity = await this._read('identity', 'identity', async (client, signal) => {
+      if (this._identity) {
+        return this._identity;
+      }
+
+      const userId = await client.discoverUserId();
+
+      signal.throwIfAborted();
+
+      if (!userId) {
+        return null;
+      }
+
+      this._identity = { baseUrl: client.baseUrl, userId };
+
+      return this._identity;
+    }, options);
+
+    return identity ? { ...identity } : null;
   }
 
-  /** Проверка авторизации: логинится и возвращает { ok, userId } или { ok:false, error }. */
-  async testAuth(): Promise<{ ok: boolean; userId?: number | null; error?: string }> {
-    return this._run(async () => {
+  /**
+   * Явная проверка входа сохраняет прежний результат и правила работы с авторизацией.
+   * Она ставит границу объединения, поскольку может изменить сессию портала.
+   */
+  async testAuth(): Promise<{
+    ok: boolean;
+    userId?: number | null;
+    error?: string;
+  }> {
+    return this._mutate(async () => {
       try {
         const client = this.client();
+
         await client.ensureAuth();
+
         const userId = (await client.discoverUserId()) ?? null;
+
         return { ok: true, userId };
-      } catch (err) {
-        return { ok: false, error: String((err as { message?: unknown } | null)?.message || err) };
+      } catch (error) {
+        return { ok: false, error: String((error as { message?: unknown } | null)?.message || error) };
       }
     });
   }
 
-  /** Полный DTO «Рабочего стола»: все блоки + графики. */
-  async getDashboard(): Promise<Record<string, unknown>> {
-    return this._run(() => this._getDashboard());
+  /**
+   * Все окна разделяют одно чтение доски текущей версии операций.
+   * Подписчик может уйти независимо от других, не продлевая общий срок.
+   */
+  async getDashboard(options: B24ReadOptions = {}): Promise<Record<string, unknown>> {
+    return this._read('dashboard', 'dashboard',
+      (client, signal) => this._getDashboard(client, signal), options);
   }
 
-  private async _getDashboard(): Promise<Record<string, unknown>> {
-    const client = this.client();
+  /**
+   * Клиент фиксируется до постановки в очередь и не заменяется во время чтения.
+   * Проверка signal перед публикацией identity отсекает результат старого аккаунта.
+   */
+  private async _getDashboard(client: B24Client, signal: AbortSignal): Promise<Record<string, unknown>> {
     const uid = (await client.discoverUserId()) ?? 0;
-    if (uid > 0) this._identity = { baseUrl: client.baseUrl, userId: uid };
+
+    signal.throwIfAborted();
+
+    if (uid > 0) {
+      this._identity = { baseUrl: client.baseUrl, userId: uid };
+    }
+
     const resp = await client.apiGet(
-      `/local/ajax/dashboard.php?action=getData&user_id=${uid}&project_id=0&chart_period=day&show_all_tasks=1`,
+      '/local/ajax/dashboard.php?action=getData'
+        + `&user_id=${uid}&project_id=0&chart_period=day&show_all_tasks=1`,
     );
-    const d = ((resp as { data?: unknown } | null)?.data ?? {}) as Record<string, unknown>;
-    const mainData = (d.mainData ?? {}) as Record<string, unknown>;
-
-    // Задачи маппим тестированным mapTask, добавляем timerStartedAt (в mapTask его нет).
-    const mapList = (arr: unknown) => ((arr ?? []) as Record<string, unknown>[]).map((t) => ({
-      ...client.mapTask(t, uid),
-      timerStartedAt: t.timer_started_at ?? null,
+    const data = ((resp as { data?: unknown } | null)?.data ?? {}) as Record<string, unknown>;
+    const mainData = (data.mainData ?? {}) as Record<string, unknown>;
+    const mapList = (items: unknown) => ((items ?? []) as Record<string, unknown>[]).map((item) => ({
+      ...client.mapTask(item, uid),
+      timerStartedAt: item.timer_started_at ?? null,
     }));
-
     const salaryHtml = await (await client.raw('/salary/?project_id=0')).text();
     const charts = B24Adapter.parseCharts(salaryHtml);
     const month = await client.getMonthStats(mainData);
 
+    signal.throwIfAborted();
+
     return {
       userId: uid,
-      today: d.todayData ?? null,
-      prevDay: d.prevDayData ?? null,
-      dynamics: d.dynamics ?? null,
-      activeTimer: d.activeTimer ?? null,
-      workedToday: d.workedTasks
-        ?? d.worked_tasks
-        ?? (d.todayData as { worked_tasks?: unknown } | null)?.worked_tasks
+      today: data.todayData ?? null,
+      prevDay: data.prevDayData ?? null,
+      dynamics: data.dynamics ?? null,
+      activeTimer: data.activeTimer ?? null,
+      workedToday: data.workedTasks
+        ?? data.worked_tasks
+        ?? (data.todayData as { worked_tasks?: unknown } | null)?.worked_tasks
         ?? [],
-      tasks: mapList(d.currentTasks),
-      toReview: mapList(d.tasksToReview),
-      created: mapList(d.createdTasks),
-      accomplice: mapList(d.accompliceTasks),
-      auditor: mapList(d.auditorTasks),
+      tasks: mapList(data.currentTasks),
+      toReview: mapList(data.tasksToReview),
+      created: mapList(data.createdTasks),
+      accomplice: mapList(data.accompliceTasks),
+      auditor: mapList(data.auditorTasks),
       month,
       charts,
     };
   }
 
-  /** Детали одной задачи. */
-  async taskDetail(taskId: unknown): Promise<unknown> {
-    return this._run(() => this.client().taskDetails(taskId));
+  async taskDetail(taskId: unknown, options: B24ReadOptions = {}): Promise<unknown> {
+    return this._read(`task:${String(taskId)}`, 'task', (client) => client.taskDetails(taskId), options);
   }
 
-  /** Вложения + комментарии со страницы задачи (getTaskDetails их не отдаёт). */
-  async taskPageData(taskId: unknown): Promise<unknown> {
-    return this._run(() => this.client().taskPageData(taskId));
+  async taskPageData(taskId: unknown, options: B24ReadOptions = {}): Promise<unknown> {
+    return this._read(`taskPage:${String(taskId)}`, 'taskPage',
+      (client) => client.taskPageData(taskId), options);
   }
 
-  // --- Действия (мутации). Все — через очередь (общая сессия). ---
+  async findUsers(query: unknown, options: B24ReadOptions = {}): Promise<unknown> {
+    return this._read(`users:${String(query)}`, 'users', (client) => client.findUsers(query), options);
+  }
 
-  async createTask(opts: NewTask): Promise<unknown> {
-    return this._run(() => this.client().createTask(opts));
+  async listGroups(options: B24ReadOptions = {}): Promise<unknown> {
+    return this._read('groups', 'groups', (client) => client.listGroups(), options);
+  }
+
+  async createTask(input: NewTask): Promise<unknown> {
+    return this._mutate(() => this.client().createTask(input));
   }
 
   async updateTask(taskId: unknown, fields: unknown): Promise<unknown> {
-    return this._run(() => this.client().updateTask(taskId, fields));
+    return this._mutate(() => this.client().updateTask(taskId, fields));
   }
 
   async addComment(taskId: unknown, text: unknown): Promise<unknown> {
-    return this._run(() => this.client().addComment(taskId, text));
+    return this._mutate(() => this.client().addComment(taskId, text));
   }
 
   async timer(action: unknown, taskId: unknown): Promise<unknown> {
-    return this._run(() => this.client().timer(action, taskId));
+    return this._mutate(() => this.client().timer(action, taskId));
   }
 
   async completeTask(taskId: unknown): Promise<unknown> {
-    return this._run(() => this.client().completeTask(taskId));
+    return this._mutate(() => this.client().completeTask(taskId));
   }
 
   async renewTask(taskId: unknown): Promise<unknown> {
-    return this._run(() => this.client().renewTask(taskId));
-  }
-
-  async findUsers(query: unknown): Promise<unknown> {
-    return this._run(() => this.client().findUsers(query));
-  }
-
-  async listGroups(): Promise<unknown> {
-    return this._run(() => this.client().listGroups());
+    return this._mutate(() => this.client().renewTask(taskId));
   }
 
   /**

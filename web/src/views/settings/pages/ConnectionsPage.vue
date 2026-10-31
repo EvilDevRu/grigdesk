@@ -63,6 +63,7 @@ import { t, uiLocale } from '../../../ui.ts';
 
 import { computed, ref, watch, useId } from 'vue';
 import { UiInput, UiPasswordInput, UiButton, UiDisclosureButton, UiInlineMessage } from '../../../ui.ts';
+import { useBoardStore } from '../../../stores/board.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
 import { getSettingsFields } from '../../../features/settings/catalog.ts';
 import { createB24Adapter } from '../../../features/settings/resources/connections.ts';
@@ -145,7 +146,14 @@ async function load(): Promise<void> {
       if (settings.isOpen && settings.snapshot.sessionId === opening) {
         settings.resourceDetails = { ...settings.resourceDetails, b24: { configured: view.configured } };
       }
-    }, uiLocale));
+    }, uiLocale, () => {
+      const board = useBoardStore();
+      const token = board.beginSourceChange();
+
+      return (_outcome) => {
+        void board.finishSourceChange(token);
+      };
+    }));
 
     settings.registerResource(adapter, fields.value.map((field) => ({
       ...field,

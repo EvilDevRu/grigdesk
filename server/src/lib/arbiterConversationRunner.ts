@@ -247,9 +247,10 @@ export function buildConversationPrompt(
     'Если вопросов и предложений нет, укажи nextStep=continue_discussion и объясни в summary следующий шаг.',
     'continue_discussion не применяет действие. Состояние «применяю» выставит сервер после выбора человека.',
     'kind=diagnose: diagnosticInstruction для нового ЧИТАЮЩЕГО разбора. Запуск тестов это не обещает.',
-    'Для agent kind=apply: вместо diagnosticInstruction поле action='
+    'kind=apply (для agent-этапов): вместо diagnosticInstruction поле action='
       + '{kind:replay_current|return_to_node,targetNode,instruction}.',
-    'Для текущего command action={kind:retry_command,targetNode}, без instruction: повтор прежней команды.',
+    'Для command-этапа вместо apply допустимо action={kind:retry_command,targetNode}, '
+      + 'без instruction: повтор прежней команды.',
     'Цели только из targets; не обещай прав, которых нет в policy. Исправление выбирает человек.',
     ("Обсуждение не является согласием применить действие. Технические пути и " +
       "команды вынеси в technicalDetails."),

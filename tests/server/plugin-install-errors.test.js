@@ -49,6 +49,7 @@ test('E2: полная таблица содержит все контрактн
     "service_closed",
     "job_not_found",
     "job_not_ready",
+    "engine_busy",
     "plugin_busy",
     "local_changes",
     "not_managed",

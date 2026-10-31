@@ -1,3 +1,4 @@
+import { factoryBrowserChildEnv } from '../browser/factoryBrowserEnvironment.ts';
 // Подготовка web-профиля сохраняет те же границы записи, hooks, env allowlist и
 // привязку сессии, которые ACP runtime применял до смены транспорта.
 import { promises as fs } from 'node:fs';
@@ -106,7 +107,11 @@ export async function runDeepSeekWebTurn(options: WebOptions) {
       }
     }
 
-    const env = buildDeepSeekChildEnv({ source: options.env || process.env, dshHome: launch.dshHome });
+    const sourceEnv = options.env || process.env;
+    const env = factoryBrowserChildEnv(buildDeepSeekChildEnv({
+      source: sourceEnv,
+      dshHome: launch.dshHome,
+    }), sourceEnv, options.factory === true);
     const tools = (options.workTools as { descriptors?: Array<{ name?: unknown; function?: { name?: unknown } }> } | null)?.descriptors;
     const workToolNames = new Set((Array.isArray(tools) ? tools : [])
       .map((entry) => String(entry?.name || entry?.function?.name || '')).filter(Boolean));

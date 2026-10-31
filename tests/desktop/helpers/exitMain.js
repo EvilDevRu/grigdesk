@@ -334,6 +334,10 @@ export async function exitMain(t, options = {}) {
       const f = globalThis.__exitMain;
       export const app = f.app;
       export const BrowserWindow = f.BrowserWindow;
+      export class WebContentsView {}
+      export const ipcMain = {
+        handle() {}, on() {}, removeHandler() {}, removeListener() {},
+      };
       export const session = { fromPartition: () => f.session };
       export const Menu = { setApplicationMenu() {}, buildFromTemplate: () => ({ popup() {} }) };
       const display = { id: 1, workArea: { x: 0, y: 0, width: 1920, height: 1080 } };
@@ -364,6 +368,10 @@ export async function exitMain(t, options = {}) {
         const f = globalThis.__exitMain;
         f.calls.push('save');
         if (f.options.blockSave) await f.save.promise;
+      };
+      export const updateSettings = async (file, live, patch) => {
+        await writeSettings(file, { ...live, ...patch });
+        Object.assign(live, patch);
       };
     `,
   };

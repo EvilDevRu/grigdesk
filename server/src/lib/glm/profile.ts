@@ -47,6 +47,7 @@ export interface GlmLaunchFilesOptions {
 
 export interface GlmFactoryProfileContext {
   filesystem: GlmFactoryFilesystem;
+  browser?: true;
 }
 
 export const GLM_POLICY_HOOK_PATH = fileURLToPath(
@@ -177,7 +178,8 @@ export async function buildGlmLaunchFiles(
 
   // Hook различает потребителя по форме документа: у чата прежний JSON без consumer.
   const policy = options.factory
-    ? glmFactoryToolPolicy(options.factory.filesystem, options.workspaceRoot) : {
+    ? glmFactoryToolPolicy(options.factory.filesystem, options.workspaceRoot,
+      options.factory.browser === true) : {
     workTools: [...options.workTools ?? []],
     ssh: options.hooks.ssh,
     db: options.hooks.db,

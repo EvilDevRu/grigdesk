@@ -578,6 +578,61 @@
   }
 }
 
+/* Вкладки браузера используют общую геометрию toolbar и отдельное закрытие.
+   Содержимое документа располагается под одной полосой, без рамки вокруг tablist. */
+.ui-tabs[data-ui-browser-tabs] {
+  display: flex;
+  width: max-content;
+  max-width: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+  gap: 4px;
+}
+
+.ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab] {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-width: 140px;
+  max-width: 240px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab][data-selected='true'] {
+  border-color: var(--line);
+  background: var(--surface-2);
+}
+
+.ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab]:hover {
+  background: var(--surface-2);
+}
+
+.ui-tabs[data-ui-browser-tabs] .ui-tab {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  min-height: var(--toolbar-control-h);
+  height: auto;
+  padding: 0 8px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  gap: 6px;
+  font-size: 12px;
+  text-align: left;
+}
+
+.ui-tabs[data-ui-browser-tabs] .ui-icon-button {
+  flex: none;
+}
+
 .ui-choice-list__option {
   width: 100%;
   min-width: 0;

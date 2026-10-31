@@ -13,6 +13,7 @@
     "src/lib/fastifyDecorations.ts",
     "../tests/server/**/*",
     "../tests/shared/**/*.mts",
+    "../tests/desktop/browser-*.test.mts",
     "../tests/desktop/e2e/**/*.mjs",
     "../tests/desktop/e2e/**/*.mts",
     "../tests/cli/**/*.mts",

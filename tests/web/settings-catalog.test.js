@@ -18,7 +18,7 @@ const EXPECTED_PAGES = [
   ['automation', ['chats', 'context', 'launch', 'monitoring', 'arbiter', 'analysis', 'shelf', 'inbox']],
   ['speech', ['dictation', 'video', 'videoTasks', 'language', 'models', 'advanced']],
   ['connections', ['b24', 'devices', 'ssh', 'db', 'telegram', 'github']],
-  ['tools', ['code', 'docker', 'studio3d', 'showcase']],
+  ['tools', ['code', 'docker', 'studio3d', 'showcase', 'browser']],
   ['plugins', ['installed']],
   ['system', ['startup', 'updates', 'diagnostics', 'processes']],
 ];

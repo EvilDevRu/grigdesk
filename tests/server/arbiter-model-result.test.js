@@ -141,7 +141,7 @@ test('модельные послабления не принимают повр
       delete row.proposals[0].expectedResult;
     },
     (row) => {
-      row.proposals[0].action = row.proposals[1].action;
+      row.proposals[0].diagnosticInstruction = row.proposals[1].action;
     },
     (row) => {
       row.proposals[1].action.targetNode = 'future';
@@ -164,6 +164,49 @@ test('модельные послабления не принимают повр
     assert.throws(() => parseArbiterModelResult(JSON.stringify(row), targets, 'tests'),
       { code: 'bad_model_reply' });
   }
+});
+
+test('незнакомый вид предложения выводится из его собственных полей', () => {
+  const row = structuredClone(modelResult);
+
+  row.proposals[0].kind = 'изучить';
+  row.proposals[1].kind = 'retry_command';
+
+  const canonical = parseArbiterModelResult(JSON.stringify(row), targets, 'tests');
+
+  assert.equal(canonical.proposals[0].kind, 'diagnose');
+  assert.equal(canonical.proposals[1].kind, 'apply');
+  assert.deepEqual(canonical.proposals[1].action, modelResult.proposals[1].action);
+  assert.deepEqual(decodeArbiterResult(canonical, targets, 'tests'), canonical);
+  assert.throws(() => decodeArbiterResult(row, targets, 'tests'));
+});
+
+test('парное служебное поле другого вида удаляется у предложения с незнакомым видом', () => {
+  const row = structuredClone(modelResult);
+
+  row.proposals[1].kind = 'goto';
+  row.proposals[1].diagnosticInstruction = 'Прочитай журнал этапа.';
+
+  const canonical = parseArbiterModelResult(JSON.stringify(row), targets, 'tests');
+
+  assert.equal(canonical.proposals[1].kind, 'apply');
+  assert.equal(Object.hasOwn(canonical.proposals[1], 'diagnosticInstruction'), false);
+  assert.deepEqual(decodeArbiterResult(canonical, targets, 'tests'), canonical);
+});
+
+test('незнакомый вид без распознаваемого служебного поля отклоняет итог и называет вид', () => {
+  const row = structuredClone(modelResult);
+
+  row.proposals[0].kind = 'investigate';
+  row.proposals[0].action = 'Перезапустить проверки';
+  delete row.proposals[0].diagnosticInstruction;
+
+  assert.throws(() => parseArbiterModelResult(JSON.stringify(row), targets, 'tests'), (error) => {
+    assert.equal(error.code, 'bad_model_reply');
+    assert.equal(error.message.includes('«investigate»'), true);
+
+    return true;
+  });
 });
 
 test('ошибка JSON не публикует фрагмент служебного ответа модели', () => {

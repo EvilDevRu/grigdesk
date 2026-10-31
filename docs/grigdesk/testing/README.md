@@ -1,5 +1,13 @@
 # Тесты и проверка
 
+- [Режим HTML предпросмотра: doctype и ложный отступ формы](preview-document-mode.md)
+
+- [Три описи browser-тестов: запуск, typecheck и снимок миграции](browser-test-inventory.md)
+
+- [Native bridge и отложенные Vue runtime imports в типизированной mounted fixture](browser-viewport-types.md)
+
+- [Timeout генерируемого child может скрывать SyntaxError](generated-fixture-syntax.md)
+
 - [Готовность маршрутизатора перед повторной навигацией](router-ready-navigation.md)
 
 - [Native-пробы режимов Codex: loopback, маркеры и граница вложенной песочницы](codex-permission-mode-fixtures.md)
@@ -17,6 +25,8 @@
 - [Проверки единого приложения и границы автоматической приёмки](unified-client-checks.md)
 
 ## Грабли
+
+- [Снимок после recovery нового владельца для проверки повторного close установщика](installer-recovery-close-snapshot.md)
 
 - [Арбитр: кнопка resume появляется раньше окончательного сообщения о запуске](arbiter-resume-observation.md)
 

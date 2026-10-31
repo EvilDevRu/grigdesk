@@ -90,6 +90,16 @@
   "dynamicKeys": {},
   "technicalTokens": [
     {
+      "text": "browser_preferences_ack_invalid",
+      "file": "web/src/features/settings/resources/browser.ts",
+      "reason": "Код повреждённого native ACK для resourceWriteFailure; не подпись интерфейса"
+    },
+    {
+      "text": "browser_unavailable",
+      "file": "desktop/src/main.ts",
+      "reason": "Код отказа native browser IPC при отсутствии окна; часть протокола"
+    },
+    {
       "text": "invalid-api-path",
       "file": "web/src/pluginRuntime/context.ts",
       "reason": "Внутренний код отказа API; панель показывает локализованное сообщение вместо исключения"
@@ -390,6 +400,12 @@
       ]
     },
     "web/src/features/settings/catalog.ts": {
+      "labelKey": [
+        "settings.browserOpen", "settings.browserApplication", "settings.browserAgents"
+      ],
+      "hintKey": [
+        "settings.browserOpenHint", "settings.browserApplicationHint", "settings.browserAgentsHint"
+      ],
       "GROUP_MESSAGES[group.id]!.label!": [
         "settings.*"
       ],

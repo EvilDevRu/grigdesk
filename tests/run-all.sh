@@ -101,6 +101,13 @@ NODE_TEST_MAX_RSS_MB=4096 bash "$PROJECT_ROOT/tests/run-node-tests-safe.sh" --te
   --test-concurrency=2 "$PROJECT_ROOT"/tests/desktop/*.test.js || RC=1
 
 NODE_TEST_MAX_RSS_MB=4096 bash "$PROJECT_ROOT/tests/run-node-tests-safe.sh" --test \
+  --test-concurrency=2 "$PROJECT_ROOT"/tests/desktop/browser-*.test.mts \
+  "$PROJECT_ROOT"/tests/server/browser-*.test.mts \
+  "$PROJECT_ROOT"/tests/server/factory-browser-*.test.mts \
+  "$PROJECT_ROOT"/tests/web/browser-*.test.mts \
+  "$PROJECT_ROOT"/tests/web/open-stand.test.mts || RC=1
+
+NODE_TEST_MAX_RSS_MB=4096 bash "$PROJECT_ROOT/tests/run-node-tests-safe.sh" --test \
   --test-concurrency=2 "$PROJECT_ROOT"/tests/cli/*.test.mts || RC=1
 
 exit "$RC"

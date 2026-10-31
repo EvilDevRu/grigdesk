@@ -72,16 +72,16 @@
       </div>
 
       <div v-if="hasPorts" class="sandbox-card__ports">
-        <UiActionLink v-if="feHref" :href="feHref" target="_blank" tone="accent"
+        <StandLink v-if="feHref" :href="feHref" tone="accent"
                       :aria-label="`Открыть сайт стенда t${entry.task}`"
                       data-context="workspace-form" v-tooltip="`Открыть сайт стенда: ${feHref}`">
           Сайт <span class="sandbox-card__port">:{{ entry.fePort }}</span>
           <span aria-hidden="true">↗</span>
-        </UiActionLink>
-        <UiActionLink v-if="apiHref" :href="apiHref" target="_blank" data-context="workspace-form"
+        </StandLink>
+        <StandLink v-if="apiHref" :href="apiHref" data-context="workspace-form"
                       v-tooltip="`Открыть API — интерфейс сервера: ${apiHref}`">
           API <span class="sandbox-card__port">:{{ entry.apiPort }}</span><span aria-hidden="true">↗</span>
-        </UiActionLink>
+        </StandLink>
       </div>
 
       <p v-if="typeof entry.feAlive === 'boolean'" class="sandbox-card__hint">
@@ -187,6 +187,7 @@
 </template>
 
 <script setup lang="ts">
+import StandLink from '../../shared/browser/StandLink.vue';
 import { computed, ref, watch } from 'vue';
 import {
   UiActionLink,

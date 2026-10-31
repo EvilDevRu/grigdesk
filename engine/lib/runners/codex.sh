@@ -2,6 +2,7 @@
 
 # shellcheck disable=SC1091
 source "${FACTORY_HOME:?}/lib/executor.sh"
+source "$FACTORY_HOME/lib/browser-runner-access.sh"
 
 runner_codex_probe() {
   local cli
@@ -68,6 +69,7 @@ runner_codex_run() {
   local task=$1 prompt=$2 stage=$3 model=$4 effort=$5 timeout_s=$6 run_dir=$7
   local sandbox=${RUNNER_CODEX_SANDBOX:-workspace-write}
   local -a args=(codex exec --json --skip-git-repo-check)
+  factory_browser_runner_roots || return 4
   if [[ "${RUNNER_CODEX_RESTRICT_SHARED_STAND:-0}" == 1 ]]; then
     # Shared checkout не должен наследовать доступ пользователя к Docker socket.
     # Permission profile — реальная process boundary; PreToolUse ниже лишь даёт
@@ -105,18 +107,31 @@ runner_codex_run() {
     codex_alias_dir="$FACTORY_HOME/lib/runners/codex-path"
     [[ -x "$codex_alias_dir/codex-linux-sandbox" &&
        ! -L "$codex_alias_dir/codex-linux-sandbox" ]] || return 4
-    for read_dir in "$FACTORY_HOME" "$codex_runtime" ${RUNNER_CODEX_READ_DIRS:-}; do
+    for read_dir in "$FACTORY_HOME" "$codex_runtime" ${RUNNER_CODEX_READ_DIRS:-} \
+        ${FACTORY_BROWSER_CODEX_READ_DIRS:-}; do
       [[ "$read_dir" == /* && "$read_dir" =~ ^[A-Za-z0-9_@+.,/=-]+$ &&
          -d "$read_dir" && ! -L "$read_dir" &&
          "$(realpath -e -- "$read_dir" 2>/dev/null)" == "$read_dir" ]] || return 4
       filesystem_policy+=', "'"$read_dir"'" = "read"'
     done
+    if [[ "${FACTORY_BROWSER_ENABLED:-0}" == 1 ]]; then
+      local browser_mailbox=${FACTORY_BROWSER_REQUEST_DIR:-}
+      [[ "$browser_mailbox" =~ ^/[A-Za-z0-9_@+.,/=-]+$ &&
+         "$browser_mailbox" == "$STATE_DIR/"* && -d "$browser_mailbox" &&
+         ! -L "$browser_mailbox" &&
+         "$(realpath -e -- "$browser_mailbox")" == "$browser_mailbox" ]] || return 4
+      filesystem_policy+=', "'"$browser_mailbox"'" = "write"'
+    fi
     filesystem_policy+=', "'"$control_dir"'" = "read"'
     filesystem_policy+=' }'
     # Командному sandbox не нужен network transport: ни localhost/TCP, ни AF_UNIX.
     # FIFO I/O и flock работают через read-only bind exact control directory.
     permission_policy='{ filesystem = '"$filesystem_policy"', network = { enabled = false } }'
-    hook_policy='[{ matcher = "^Bash$", hooks = [{ type = "command", command = "/usr/bin/python3 '"$policy_hook"' shared-stand", timeout = 5 }] }]'
+    local browser_policy_args=""
+    if [[ "${FACTORY_BROWSER_ENABLED:-0}" == 1 ]]; then
+      browser_policy_args=" $GRIGDESK_BROWSER_NODE $GRIGDESK_BROWSER_HELPER"
+    fi
+    hook_policy='[{ matcher = "^Bash$", hooks = [{ type = "command", command = "/usr/bin/python3 '"$policy_hook"' shared-stand'"$browser_policy_args"'", timeout = 5 }] }]'
     args+=(
       --ignore-user-config
       --strict-config

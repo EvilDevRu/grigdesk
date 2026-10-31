@@ -1,3 +1,4 @@
+import type { B24ReadOptions } from './b24/readOperations.ts';
 // Предметный слой полки: scope всегда выводится из текущей портальной сессии,
 // а клиент получает только непрозрачный хеш и полный server-confirmed снимок.
 import { b24AccountScope } from './b24AccountScope.ts';
@@ -6,7 +7,7 @@ import type { ShelfSnapshot, TaskShelfStore } from './taskShelfStore.ts';
 import type { ShelfState } from '../../../shared/b24/shelfContracts.ts';
 
 export interface TaskShelfIdentitySource {
-  accountIdentity(): Promise<unknown>;
+  accountIdentity(options?: B24ReadOptions): Promise<unknown>;
 }
 
 export interface TaskShelfResult extends ShelfState {
@@ -47,9 +48,13 @@ export class TaskShelfService {
     this.b24 = b24;
   }
 
-  async _scope(): Promise<string> {
+  /**
+   * Scope берётся только из подтверждённой серверной identity.
+   * Signal отменяет чтение; локальные мутации сохраняют прежнюю доставку.
+   */
+  async _scope(options: B24ReadOptions = {}): Promise<string> {
     try {
-      const identity = await this.b24.accountIdentity();
+      const identity = await this.b24.accountIdentity(options);
 
       return b24AccountScope(identity as B24Identity | null);
     } catch (error) {
@@ -57,8 +62,13 @@ export class TaskShelfService {
     }
   }
 
-  async list(): Promise<TaskShelfResult> {
-    const scope = await this._scope();
+  /**
+   * Чтение полки снимает только своего подписчика при закрытии HTTP-ответа.
+   * Состав снимка и не перечисляемый changed сохраняются общим withScope.
+   */
+  async list(options: B24ReadOptions = {}): Promise<TaskShelfResult> {
+    const scope = await this._scope(options);
+
     return withScope(scope, await this.store.list(scope));
   }
 

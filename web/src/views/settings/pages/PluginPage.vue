@@ -178,7 +178,9 @@
               <p>{{ t('settings.noneSelectedMeansAll') }}</p>
             </template>
             <template v-else-if="field.type === 'model'">
-              <UiSelect
+              <ProviderModelSelect
+                :providers="registry"
+                :fallback-label="lostModel(field) || selectedModel(field.key)?.name || ''"
                 :disabled="fieldUnavailable(field.key)"
                 :model-value="modelOption(field.key)"
                 :aria-label="field.label"
@@ -186,16 +188,17 @@
               >
                 <option value="">{{ t('settings.notSelected') }}</option>
                 <option
-                  v-if="lostModel(field)"
+                  v-if="lostModel(field) || modelUnavailable(field.key)"
                   :value="modelOption(field.key)"
+                  :hidden="modelUnavailable(field.key)"
                   disabled
                 >
-                  {{ lostModel(field) }}
+                  {{ lostModel(field) || selectedModel(field.key)?.name }}
                 </option>
                 <optgroup
                   v-for="group in modelGroups(field)"
                   :key="group.id"
-                  :label="group.name + (group.available ? '' : t('settings.unavailable'))"
+                  :label="group.name"
                 >
                   <option
                     v-for="entry in group.models"
@@ -205,7 +208,7 @@
                     {{ entry.name }}
                   </option>
                 </optgroup>
-              </UiSelect>
+              </ProviderModelSelect>
               <template v-if="efforts(field.key).length || modelValue(field.key)?.effort">
                 <p>{{ t('settings.effort') }}</p>
                 <UiSelect
@@ -339,6 +342,10 @@ import PluginSourcePanel from '../PluginSourcePanel.vue';
 import PluginInstallDialog from '../PluginInstallDialog.vue';
 import PluginSetupPanel from './PluginSetupPanel.vue';
 import { useProvidersStore } from '../../../stores/providers.ts';
+import ProviderModelSelect from '../../../shared/ProviderModelSelect.vue';
+import {
+  isSelectableModelProvider, modelSelectValue as modelId,
+} from '../../../shared/providerModelSelect.ts';
 import { createPluginEditor } from '../../../features/settings/pluginEditor.ts';
 import { pluginValueKey, type PluginStorePort } from '../../../features/settings/resources/plugins.ts';
 import {
@@ -523,10 +530,6 @@ function modelValue(key: string): PluginModelValue | null {
     ? current as unknown as PluginModelValue : null;
 }
 
-function modelId(provider: string, model: string): string {
-  return JSON.stringify({ provider, model });
-}
-
 function modelOption(key: string): string {
   const current = modelValue(key);
 
@@ -551,7 +554,7 @@ function lostEffort(key: string): string {
 }
 
 function modelGroups(field: PluginSetting) {
-  return registry.value.filter((entry) =>
+  return registry.value.filter(isSelectableModelProvider).filter((entry) =>
     !field.requiresCapability || entry.capabilities?.[field.requiresCapability])
     .map((entry) => ({ ...entry, models: (providers.visibleModels as (
       entry: ProviderEntry, selected: string | null,
@@ -561,7 +564,7 @@ function modelGroups(field: PluginSetting) {
 
 /**
  * Пропавшая или несовместимая модель остаётся явным option сохранённого выбора.
- * Временная недоступность исполнителя сама по себе не запрещает выбор модели.
+ * Скрытый по доступности выбор сохраняется до явного действия человека.
  */
 function lostModel(field: PluginSetting): string {
   const current = modelValue(field.key);
@@ -582,6 +585,13 @@ function lostModel(field: PluginSetting): string {
 
   return field.requiresCapability && !provider?.capabilities?.[field.requiresCapability]
     ? t('settings.notSuitableForThisSetting', { providerName: provider?.name, modelName: model.name }) : '';
+}
+
+function modelUnavailable(key: string): boolean {
+  const current = modelValue(key);
+
+  return registry.value.some((provider) => provider.id === current?.provider
+    && !isSelectableModelProvider(provider));
 }
 
 /**

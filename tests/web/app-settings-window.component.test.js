@@ -52,9 +52,19 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
     clear: () => { },
     stopPoll: () => { },
   };
+  h.boardStore = {
+    ...h.store,
+    load: async () => h.calls.push('board.load'),
+    clearSource: () => h.calls.push('board.clear'),
+  };
   h.store.$onAction = () => () => {};
   h.store.setMirror = () => {};
   h.store.applySnapshot = () => {};
+  Object.assign(h.boardStore, {
+    $onAction: h.store.$onAction,
+    setMirror: h.store.setMirror,
+    applySnapshot: h.store.applySnapshot,
+  });
   h.shelfStore = {
     ...h.store,
     setPassive(value) {
@@ -96,6 +106,10 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
     }};`;
   const stubs = {
     ...appWindowStubs,
+    './shared/layout/DesktopExitHost.vue': marker('exit'),
+    './shared/tools/toolWindowRelay.ts':
+      'export const startToolShelfRelay = () => () => {};',
+    './views/ToolWindowPage.vue': marker('tool'),
     './views/TaskWindowPage.vue': `import { h } from 'vue';
       export default {
         props: ['target', 'ready'],
@@ -157,6 +171,9 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
   ]) {
     stubs['./stores/' + file] = `export const ${name} = () => globalThis.__settingsApp.store;`;
   }
+
+  stubs['./stores/board.ts'] =
+    'export const useBoardStore = () => globalThis.__settingsApp.boardStore;';
 
   h.plugins = { load: h.loadPlugins, enabled: () => true };
   stubs['./stores/taskShelf.ts'] =
@@ -341,3 +358,15 @@ test('SP-08: карточка монтируется только после з�
 
 
 test.after(() => browser.close());
+test('SOURCE-APP: смена машины, auth scope и потеря входа очищают снимок', async (t) => {
+  const { h } = await fixture(t, 'main', true, true);
+  const before = h.calls.filter((call) => call === 'board.clear').length;
+
+  h.shell.profile = { id: 'another-machine', name: 'Fixture' };
+  await flushPromises();
+  h.auth.clientScope = 'another-owner';
+  await flushPromises();
+  h.auth.authenticated = false;
+  await flushPromises();
+  assert.equal(h.calls.filter((call) => call === 'board.clear').length, before + 3);
+});

@@ -138,21 +138,20 @@ test('модели берутся из общего реестра исполн�
   assert.ok(select.exists(), 'селекта модели нет — настройка нарисована полем ввода');
   assert.deepEqual(
     wrapper.findAll('[data-settings-field] optgroup').map((g) => g.attributes('label')),
-    ['Claude', 'Фейк', 'GPT (Codex) — недоступен'],
-    'исполнители обязаны стоять группами, а недоступный — с оговоркой',
+    ['Claude', 'Фейк'],
+    'в каталоге должны оставаться только доступные исполнители',
   );
   // Старая версия («extra») в кратком списке не показывается — то же правило, что в чате.
   assert.deepEqual(
     wrapper.findAll('[data-settings-field] optgroup option').map((o) => o.text()),
-    ['Opus 5', 'qwen3.6 (hf)', 'GPT-5.6'],
+    ['Opus 5', 'qwen3.6 (hf)'],
   );
-  // Недоступность — итог последней проверки, а не приговор: CLI мог не ответить на опрос,
-  // моргнуть сетью или разлогиниться на минуту. Оговорка в названии группы остаётся,
-  // блокировки выбора нет — иначе один неудачный опрос решал бы за человека.
+  // Доступные модели не получают дополнительной блокировки.
+  // Недоступный исполнитель исключён вместе с его вариантами.
   assert.deepEqual(
     wrapper.findAll('[data-settings-field] optgroup option')
       .map((o) => o.attributes('disabled') !== undefined),
-    [false, false, false],
+    [false, false],
   );
   // Подсказка манифеста должна доехать до экрана: она объясняет, почему без модели
   // автоматических задач не будет вовсе.
@@ -164,7 +163,7 @@ test('карточка триажа предлагает только испол
 
   assert.deepEqual(
     wrapper.findAll('[data-settings-field] optgroup').map((group) => group.attributes('label')),
-    ['Claude', 'GPT (Codex) — недоступен'],
+    ['Claude'],
   );
 });
 
@@ -290,17 +289,18 @@ test('выбор сохраняется парой «исполнитель + м
   }], 'на сервер уезжает пара, а не склеенная строка');
 });
 
-test('модель недоступного исполнителя выбирается и сохраняется', async (t) => {
-  // Причина недоступности бывает временной, а настройка живёт дольше: человек вправе
-  // назначить модель заранее — сервер попробует запустить её и назовёт настоящий отказ.
-  const { apply, wrapper, plugins, saved, select, flushPromises } = await mountSettings(t);
+test('недоступный исполнитель скрыт, сохранённая модель не меняется сама', async (t) => {
+  const value = { provider: 'codex', model: 'gpt-5.6' };
+  const { wrapper, plugins, saved, select } = await mountSettings(t, { value });
 
-  await select.setValue(modelOption('codex', 'gpt-5.6'));
-  assert.equal(plugins.plugin.values.triageModel, null);
-
-  await apply();
-  await flushPromises();
-  assert.deepEqual(saved, [{ id: 'inbox', values: { triageModel: { provider: 'codex', model: 'gpt-5.6' } } }]);
+  assert.equal(select.element.value, modelOption('codex', 'gpt-5.6'));
+  assert.equal(select.get('option[hidden]').element.hidden, true);
+  assert.deepEqual(
+    wrapper.findAll('[data-settings-field] optgroup').map((group) => group.attributes('label')),
+    ['Claude', 'Фейк'],
+  );
+  assert.deepEqual(plugins.plugin.values.triageModel, value);
+  assert.deepEqual(saved, []);
 });
 
 test('сохранённый выбор показан выбранным', async (t) => {

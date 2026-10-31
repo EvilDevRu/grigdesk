@@ -43,6 +43,13 @@ export function compilePipelineView(prefix, { realGraph = false, expose = [] } =
   return compileVue(VIEW_PATH, {
     expose,
     stubs: {
+      '../../stores/browser.ts': `
+        export const useBrowserStore = () => ({
+          available: false,
+          preferences: { open: 'external', external: 'system', agents: false },
+          control: async () => {},
+        });
+      `,
       '../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`
         + '\nexport { ApiError } from "./src/shared/apiClient.ts";',
       '../../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`

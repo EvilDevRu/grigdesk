@@ -1,3 +1,5 @@
+import { t } from './ui.ts';
+
 import { createRouter, createWebHashHistory } from 'vue-router';
 import type { RouteRecordRaw } from 'vue-router';
 import SettingsRouteStub from './views/settings/settingsRouteStub.ts';
@@ -29,6 +31,17 @@ const routes: RouteRecordRaw[] = [
     name: 'sandboxes',
     component: () => import('./views/SandboxesView.vue'),
     meta: { title: 'Песочницы', layout: 'workspace' },
+  },
+  {
+    path: '/browser',
+    name: 'browser',
+    component: () => import('./views/BrowserView.vue'),
+    meta: {
+      layout: 'workspace',
+      get title() {
+        return t('core.browserTitle');
+      },
+    },
   },
   {
     path: '/showcase/:id?',

@@ -6,6 +6,7 @@
 // используются — прав на их создание в портале нет.
 
 import { join } from 'node:path';
+import { currentB24Read } from './readOperations.ts';
 import { CookieJar } from './cookieJar.ts';
 import { describeStatus } from './status.ts';
 import { fetchTaskMedia } from './media.ts';
@@ -325,18 +326,28 @@ export class B24Client {
     }
 
     /**
-     * Низкоуровневый fetch с куками. Поглощает Set-Cookie из ответа (ротация сессии).
-     * redirect:'manual' — чтобы не потерять куки на промежуточных 30x.
+     * Общий signal чтения охватывает заголовки и последующее потребление тела fetch.
+     * Вне контекста чтения правила существующих операций и повторов сохраняются.
      */
     async raw(path: string, { method = 'GET', headers = {}, body = null }: {
         method?: string;
         headers?: Record<string, string>;
         body?: BodyInit | null;
     } = {}): Promise<Response> {
-        // Ретрай на транзиентные сетевые сбои (ECONNRESET / «socket disconnected
-        // before TLS» — fetch при этом бросает исключение, а не возвращает ответ).
+        const read = currentB24Read();
         let lastErr;
+
         for (let attempt = 0; attempt < 3; attempt += 1) {
+            read?.signal.throwIfAborted();
+
+            const started = performance.now();
+
+            read?.trace({
+                operation: read.operation,
+                phase: 'request',
+                attempt: attempt + 1,
+            });
+
             try {
                 const res = await fetch(this.url(path), {
                     method,
@@ -347,13 +358,29 @@ export class B24Client {
                         ...headers,
                     },
                     body,
+                    ...(read ? { signal: read.signal } : {}),
                 });
+
+                read?.trace({
+                    operation: read.operation,
+                    phase: 'headers',
+                    attempt: attempt + 1,
+                    status: res.status,
+                    ms: performance.now() - started,
+                });
+                read?.signal.throwIfAborted();
                 this.jar.absorb(res.headers.getSetCookie?.() ?? []);
+
                 return res;
-            } catch (e) {
-                lastErr = e;
+            } catch (error) {
+                if (read?.signal.aborted) {
+                    throw read.signal.reason;
+                }
+
+                lastErr = error;
             }
         }
+
         throw lastErr;
     }
 

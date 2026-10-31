@@ -313,6 +313,10 @@ runtime_interrupt_trusted_active() {
   rc=$?
   (( rc == 0 )) || return "$rc"
   read -r stage run_id epoch runner pid pgid session starttime <<<"$identity"
+  if [[ "${BROWSER_RUN_TASK:-}" == "$task" && "${BROWSER_RUN_STAGE:-}" == "$stage" &&
+        "${BROWSER_RUN_ID:-}" == "$run_id" && "${BROWSER_RUN_EPOCH:-}" == "$epoch" ]]; then
+    browser_transport_stop
+  fi
   runtime_interrupt_and_wait "$pid" "$pgid" "$starttime" "$grace_s" "$session" ||
     return
   runner_trusted_identity_clear \
