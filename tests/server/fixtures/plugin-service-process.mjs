@@ -1,4 +1,4 @@
-import { PluginInstallService } from '../../../server/src/lib/pluginInstall/service.ts';
+import { PluginInstallService } from '../../../server/src/lib/packageInstall/service.ts';
 
 const options = JSON.parse(process.argv[2]);
 const service = new PluginInstallService(options);

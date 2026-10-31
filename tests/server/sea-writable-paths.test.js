@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { createNpmRunner } from '../../server/src/lib/pluginInstall/npm.ts';
+import { createNpmRunner } from '../../server/src/lib/packageInstall/npm.ts';
 import { profilesDirFor } from '../../server/src/lib/runtimeLayout.ts';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));

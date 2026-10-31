@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { isProviderInstallJob } from '../../shared/chat/providerInstallContracts.ts';
-import { runCommand } from '../../server/src/lib/pluginInstall/runCommand.ts';
+import { runCommand } from '../../server/src/lib/packageInstall/runCommand.ts';
 import { isTransientInstallFailure } from '../../server/src/lib/providerInstall/networkFailure.ts';
 import { installFixture, current, start, completed, until } from './helpers/providerInstallFixture.js';
 

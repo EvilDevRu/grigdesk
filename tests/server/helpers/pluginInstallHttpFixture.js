@@ -3,14 +3,14 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { liveGroupMembers } from '../../../server/src/lib/pluginInstall/workerIdentity.ts';
+import { liveGroupMembers } from '../../../server/src/lib/packageInstall/workerIdentity.ts';
 
 import { AuthStore } from '../../../server/src/lib/authStore.ts';
 import authPlugin from '../../../server/src/plugins/auth.ts';
 import installRoutes from '../../../server/src/modules/plugins/installRoutes.ts';
 import catalogRoutes from '../../../server/src/modules/plugin-catalog/index.ts';
 import pluginsModule from '../../../server/src/modules/plugins/index.ts';
-import { PluginInstallService } from '../../../server/src/lib/pluginInstall/service.ts';
+import { PluginInstallService } from '../../../server/src/lib/packageInstall/service.ts';
 import { installJob, installedRecord } from './pluginInstallState.js';
 
 export const requireFromServer = createRequire(new URL('../../../server/package.json', import.meta.url));
@@ -141,6 +141,8 @@ export async function installHttpFixture(t, options = {}) {
     internalToken: 'fixture-internal',
     cliToken: 'fixture-cli',
   });
+
+  await options.registerRoutes?.(app);
 
   if (options.catalog) {
     await app.register(catalogRoutes, { catalog: options.catalog });

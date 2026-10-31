@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { normalizeGitUrl } from '../../server/src/lib/pluginInstall/gitUrl.ts';
+import { normalizeGitUrl } from '../../server/src/lib/packageInstall/gitUrl.ts';
 
 test('U1: HTTPS host нормализуется, регистр пути сохраняется', () => {
   assert.equal(normalizeGitUrl(' https://Git.Example.invalid/Team/demo.git/ '),

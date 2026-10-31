@@ -3,9 +3,9 @@ import { lstat, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createNpmRunner } from '../../server/src/lib/pluginInstall/npm.ts';
-import { validatePluginPackage } from '../../server/src/lib/pluginInstall/validatePackage.ts';
-import { runCommand } from '../../server/src/lib/pluginInstall/runCommand.ts';
+import { createNpmRunner } from '../../server/src/lib/packageInstall/npm.ts';
+import { validatePluginPackage } from '../../server/src/lib/packageInstall/validatePackage.ts';
+import { runCommand } from '../../server/src/lib/packageInstall/runCommand.ts';
 import { createOfflineNpmFixture } from './helpers/pluginNpmFixture.js';
 
 const expected = {

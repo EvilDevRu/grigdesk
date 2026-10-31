@@ -4,7 +4,7 @@
 runtime. Apply и rollback сохраняют собственные preflight, создание intent, резервирование
 `operation`, обработку отказа до эффектов и `finally`.
 
-Общий `publishReplacement` в `server/src/lib/pluginInstall/service.ts` последовательно
+Общий `publishReplacement` в `server/src/lib/packageInstall/service.ts` последовательно
 вызывает filesystem resolver, перечитывает state, сбрасывает описания, публикует restart
 для загруженного плагина, завершает lease и обновляет reserved/health. Только completed
 обновляет каталог runtime; результат возвращается копией durable job.

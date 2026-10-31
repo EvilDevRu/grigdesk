@@ -21,8 +21,8 @@
       "server/src/lib/chat/permission-mcp.js",
       "server/src/lib/executors/_direct-ssh-policy-hook.js",
       "server/src/lib/executors/work-mcp.js",
-      "server/src/lib/pluginInstall/commandSupervisor.mjs",
-      "server/src/lib/pluginInstall/gitBlobPrefix.mjs",
+      "server/src/lib/packageInstall/commandSupervisor.mjs",
+      "server/src/lib/packageInstall/gitBlobPrefix.mjs",
       "server/src/workers/grigdesk-update-worker.js"
     ],
     "tests": [

@@ -1106,5 +1106,6 @@
   "taskDesignPipeline": "Pipeline",
   "taskDesignLaunch": "Run pipeline",
   "taskDesignPipelineRunning": "Pipeline running",
-  "dockerUnusedImagesCount": "Unused: {count}"
+  "dockerUnusedImagesCount": "Unused: {count}",
+  "dbInstallDriver": "Install driver from Git…"
 }

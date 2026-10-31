@@ -338,3 +338,122 @@ for (const event of ['projects-changed', 'hello']) {
     assert.equal(JSON.stringify(store.sessions), before);
   });
 }
+
+
+test('DSTORE-SNAPSHOT: engines и diagnostics публикуются атомарно и переживают offline', async (t) => {
+  let offline = false;
+
+  const engines = [{
+    id: 'fixture-db',
+    label: 'Внешний',
+    capabilities: {}
+  }];
+
+  const errors = [{
+    id: 'broken',
+    code: 'manifest_invalid',
+    message: 'Ошибка внешнего драйвера'
+  }];
+
+  const { module, store } = await dbSection(t, {
+    /**
+     * Один исправный снимок загружается до моделирования потери сети.
+     * Offline обязан сохранить его вместе с диагностикой драйвера.
+     */
+    async get(path) {
+      if (offline) {
+        throw new TypeError('offline fixture');
+      }
+
+      if (path.endsWith('/engines')) {
+        return {
+          engines,
+          errors,
+          installs: { 'fixture-db': null }
+        };
+      }
+
+      if (path.endsWith('/profiles')) {
+        return { profiles: [] };
+      }
+
+      if (path.endsWith('/sessions')) {
+        return { sessions: [] };
+      }
+
+      if (path.endsWith('/queries')) {
+        return { queries: [] };
+      }
+
+      return { items: [] };
+    },
+  });
+
+  await module.loadDb();
+
+  assert.deepEqual(store.engines, engines);
+
+  assert.deepEqual(store.engineErrors, errors);
+
+  assert.deepEqual(store.engineInstalls, { 'fixture-db': null });
+
+  assert.equal(store.error, '');
+
+  offline = true;
+
+  await module.loadDb();
+
+  assert.deepEqual(store.engines, engines);
+
+  assert.deepEqual(store.engineErrors, errors);
+
+  assert.match(store.error, /offline/u);
+});
+
+test('DSTORE-SNAPSHOT: malformed metadata сохраняют прежний согласованный snapshot', async (t) => {
+  let broken = false;
+
+  const engines = [{
+    id: 'fixture-db',
+    label: 'Внешний',
+    capabilities: {}
+  }];
+
+  const { module, store } = await dbSection(t, {
+    /**
+     * Второй ответ повреждает metadata при формально исправном engines.
+     * Проверяется отказ всего нового снимка, а не частичная публикация.
+     */
+    async get(path) {
+      if (path.endsWith('/engines')) {
+        return {
+          engines: broken ? [] : engines, installs: broken ? { 'fixture-db': { version: 42 } } : {},
+        };
+      }
+
+      if (path.endsWith('/profiles')) {
+        return { profiles: [] };
+      }
+
+      if (path.endsWith('/sessions')) {
+        return { sessions: [] };
+      }
+
+      if (path.endsWith('/queries')) {
+        return { queries: [] };
+      }
+
+      return { items: [] };
+    },
+  });
+
+  await module.loadDb();
+
+  broken = true;
+
+  await module.loadDb();
+
+  assert.deepEqual(store.engines, engines);
+
+  assert.ok(store.error);
+});

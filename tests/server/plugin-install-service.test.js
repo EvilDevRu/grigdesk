@@ -7,9 +7,9 @@ import { pathToFileURL } from 'node:url';
 
 import { createPluginRepo, git } from './helpers/pluginRepo.js';
 import { serviceFixture } from './helpers/pluginServiceFixture.js';
-import { PluginSourceRegistry } from '../../server/src/lib/pluginInstall/sources.ts';
-import { installError } from '../../server/src/lib/pluginInstall/errors.ts';
-import { computePayloadDigest } from '../../server/src/lib/pluginInstall/payloadDigest.ts';
+import { PluginSourceRegistry } from '../../server/src/lib/packageInstall/sources.ts';
+import { installError } from '../../server/src/lib/packageInstall/errors.ts';
+import { computePayloadDigest } from '../../server/src/lib/packageInstall/payloadDigest.ts';
 
 /**
  * Установка проходит обычный service API и ждёт подготовки через fixture seam.

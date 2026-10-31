@@ -98,3 +98,40 @@ async function assertConfiguredPath(value: string, file: boolean): Promise<void>
     }
   }
 }
+
+/**
+ * Второй установщик проверяет все roots и состояния до захвата owner lock.
+ * Независимые деревья исключают пересечение транзакций плагинов и драйверов.
+ */
+export async function readDbEngineInstallConfiguration(
+  config: PluginInstallConfiguration & Pick<GrigDeskConfig,
+    'dbEnginesDir' | 'dbEngineInstallsStatePath'>,
+) {
+  const directories = [config.userPluginsDir, config.userPluginsDataDir, config.dbEnginesDir];
+  const states = [config.pluginInstallsStatePath, config.dbEngineInstallsStatePath] as const;
+  const paths = [...directories, ...states];
+
+  if (paths.some((value) => typeof value !== 'string' || !path.isAbsolute(value))) {
+    throw new TypeError('Пути installer должны быть абсолютными.');
+  }
+
+  const overlaps = (left: string, right: string) => left === right
+    || left.startsWith(right + path.sep) || right.startsWith(left + path.sep);
+
+  if (directories.some((left, index) => directories.slice(index + 1).some((right) =>
+    overlaps(path.resolve(left), path.resolve(right))))
+    || states.some((state) => directories.some((dir) => overlaps(path.resolve(state), path.resolve(dir))))
+    || overlaps(path.resolve(states[0]), path.resolve(states[1]))) {
+    throw new TypeError('Каталоги и состояния установщиков должны быть независимыми.');
+  }
+
+  for (const value of paths) {
+    await assertConfiguredPath(value, states.includes(value));
+  }
+
+  return readPluginInstallConfiguration({
+    ...config,
+    userPluginsDir: config.dbEnginesDir,
+    pluginInstallsStatePath: config.dbEngineInstallsStatePath,
+  });
+}

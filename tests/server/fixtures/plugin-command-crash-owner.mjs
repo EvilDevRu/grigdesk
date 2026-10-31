@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { runCommand } from '../../../server/src/lib/pluginInstall/runCommand.ts';
+import { runCommand } from '../../../server/src/lib/packageInstall/runCommand.ts';
 import { writeDurableFile } from '../../../server/src/lib/durableFile.ts';
 import { commandTree } from '../helpers/pluginCommandTree.js';
 

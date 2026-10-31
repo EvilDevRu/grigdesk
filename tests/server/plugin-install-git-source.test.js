@@ -5,9 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { GitPluginSource } from '../../server/src/lib/pluginInstall/gitSource.ts';
-import { runCommand } from '../../server/src/lib/pluginInstall/runCommand.ts';
-import { liveGroupMembers } from '../../server/src/lib/pluginInstall/workerIdentity.ts';
+import { GitPluginSource } from '../../server/src/lib/packageInstall/gitSource.ts';
+import { runCommand } from '../../server/src/lib/packageInstall/runCommand.ts';
+import { liveGroupMembers } from '../../server/src/lib/packageInstall/workerIdentity.ts';
 
 import { createPluginRepo, git } from './helpers/pluginRepo.js';
 

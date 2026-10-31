@@ -2,11 +2,11 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { Ajv } from 'ajv';
 import type { AnySchema } from 'ajv';
 import { inputs, outputs } from './installSchemas.ts';
-import type { InstallRequest, PluginInstallPort, RollbackRequest } from '../../lib/pluginInstall/service.ts';
-import { errorInfo, installError, PluginInstallError } from '../../lib/pluginInstall/errors.ts';
+import type { InstallRequest, PluginInstallPort, RollbackRequest } from '../../lib/packageInstall/service.ts';
+import { errorInfo, installError, PluginInstallError } from '../../lib/packageInstall/errors.ts';
 
 import type { PluginInstallJob } from '../../../../shared/plugins/pluginInstallContracts.ts';
-import { validArchiveKey } from '../../lib/pluginInstall/stateValidation.ts';
+import { validArchiveKey } from '../../lib/packageInstall/stateValidation.ts';
 
 type JobRequest = FastifyRequest<{ Params: { jobId: string }; Body: { reviewToken: string } }>;
 type PluginRequest = FastifyRequest<{ Params: { id: string }; Body: RollbackRequest }>;
@@ -21,7 +21,11 @@ type UpdateRequest = FastifyRequest<{
  */
 export default async function installRoutes(
   app: FastifyInstance,
-  { installs }: { installs: PluginInstallPort },
+  { installs, basePath = '/api/plugin-installs', itemSegment = 'plugins' }: {
+    installs: PluginInstallPort;
+    basePath?: string;
+    itemSegment?: string;
+  },
 ): Promise<void> {
   const validator = new Ajv({
     removeAdditional: false,
@@ -78,27 +82,27 @@ export default async function installRoutes(
     }
   });
 
-  app.get('/api/plugin-installs/jobs/current', { schema: { response: outputs.current } }, async () => ({
+  app.get(`${basePath}/jobs/current`, { schema: { response: outputs.current } }, async () => ({
     job: publicJob(await installs.currentJob()),
     recoveryError: installs.health(),
   }));
-  app.get('/api/plugin-installs/jobs/:jobId', {
+  app.get(`${basePath}/jobs/:jobId`, {
     schema: { params: inputs.jobParams, response: outputs.current },
   }, async (request: JobRequest) => ({
     job: publicJob(await installs.getJob(request.params.jobId)),
     recoveryError: installs.health(),
   }));
-  app.post('/api/plugin-installs/versions', {
+  app.post(`${basePath}/versions`, {
     schema: { body: inputs.versions, response: outputs.versions },
   }, async (request: FastifyRequest<{ Body: { url: unknown } }>) =>
     installs.listVersions(request.body.url));
-  app.post('/api/plugin-installs/jobs', { schema: { body: inputs.install, response: outputs.job } },
+  app.post(`${basePath}/jobs`, { schema: { body: inputs.install, response: outputs.job } },
     async (request: FastifyRequest<{ Body: InstallRequest }>, reply) => {
       const job = publicJob(await installs.startInstall(request.body));
 
       return reply.code(202).send({ job });
     });
-  app.post('/api/plugin-installs/jobs/:jobId/apply', {
+  app.post(`${basePath}/jobs/:jobId/apply`, {
     schema: {
       params: inputs.jobParams,
       body: inputs.apply,
@@ -106,7 +110,7 @@ export default async function installRoutes(
     },
   }, async (request: JobRequest) =>
     ({ job: publicJob(await installs.apply(request.params.jobId, request.body.reviewToken)) }));
-  app.post('/api/plugin-installs/jobs/:jobId/cancel', {
+  app.post(`${basePath}/jobs/:jobId/cancel`, {
     schema: {
       params: inputs.jobParams,
       body: inputs.empty,
@@ -114,7 +118,7 @@ export default async function installRoutes(
     },
   }, async (request: JobRequest) =>
     ({ job: publicJob(await installs.cancel(request.params.jobId)) }));
-  app.post('/api/plugin-installs/plugins/:id/update', {
+  app.post(`${basePath}/${itemSegment}/:id/update`, {
     schema: {
       params: inputs.pluginParams,
       body: inputs.update,
@@ -125,7 +129,7 @@ export default async function installRoutes(
 
     return reply.code(202).send({ job });
   });
-  app.post('/api/plugin-installs/plugins/:id/rollback', {
+  app.post(`${basePath}/${itemSegment}/:id/rollback`, {
     schema: {
       params: inputs.pluginParams,
       body: inputs.rollback,
@@ -133,7 +137,7 @@ export default async function installRoutes(
     },
   }, async (request: PluginRequest) =>
     ({ job: publicJob(await installs.rollback(request.params.id, request.body)) }));
-  app.post('/api/plugin-installs/check', {
+  app.post(`${basePath}/check`, {
     schema: { body: inputs.empty, response: outputs.check },
   }, async () => ({ plugins: await installs.checkUpdates() }));
 }

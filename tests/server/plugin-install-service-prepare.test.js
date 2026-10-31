@@ -3,10 +3,10 @@ import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { PluginSourceRegistry } from '../../server/src/lib/pluginInstall/sources.ts';
+import { PluginSourceRegistry } from '../../server/src/lib/packageInstall/sources.ts';
 import { createPluginRepo } from './helpers/pluginRepo.js';
 import { commandSuccess, serviceFixture } from './helpers/pluginServiceFixture.js';
-import { PluginInstallStateStore } from '../../server/src/lib/pluginInstall/stateStore.ts';
+import { PluginInstallStateStore } from '../../server/src/lib/packageInstall/stateStore.ts';
 
 /**
  * Synthetic source не использует Git transport: service обязан вызывать его интерфейс.

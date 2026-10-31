@@ -1,4 +1,4 @@
-import { decodeInstallState } from '../../server/src/lib/pluginInstall/stateValidation.ts';
+import { decodeInstallState } from '../../server/src/lib/packageInstall/stateValidation.ts';
 import assert from 'node:assert/strict';
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 
-import { emptyInstallState, PluginInstallStateStore } from '../../server/src/lib/pluginInstall/stateStore.ts';
+import { emptyInstallState, PluginInstallStateStore } from '../../server/src/lib/packageInstall/stateStore.ts';
 import { applyingState, installedRecord, installJob } from './helpers/pluginInstallState.js';
 import { writeDurableFile } from '../../server/src/lib/durableFile.ts';
 

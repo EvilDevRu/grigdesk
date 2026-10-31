@@ -8,12 +8,12 @@ import test from 'node:test';
 
 import { commandTree } from './helpers/pluginCommandTree.js';
 
-import { runCommand } from '../../server/src/lib/pluginInstall/runCommand.ts';
+import { runCommand } from '../../server/src/lib/packageInstall/runCommand.ts';
 
 import {
   readProcessIdentity,
   terminateOwnedWorker,
-} from '../../server/src/lib/pluginInstall/workerIdentity.ts';
+} from '../../server/src/lib/packageInstall/workerIdentity.ts';
 
 import { writeDurableFile } from '../../server/src/lib/durableFile.ts';
 import { withPathLock } from '../../server/src/lib/pathLock.ts';

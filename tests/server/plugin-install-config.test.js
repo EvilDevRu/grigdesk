@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { readPluginInstallConfiguration } from '../../server/src/lib/pluginInstall/configuration.ts';
+import { readPluginInstallConfiguration } from '../../server/src/lib/packageInstall/configuration.ts';
 
 const exec = promisify(execFile);
 
@@ -139,7 +139,7 @@ test('CFG2: настоящий boot recover до scan, полный SYSTEM reser
   fixture.child.kill('SIGTERM');
   assert.equal((await fixture.exited)[1], null, 'onClose заканчивается без SIGKILL');
 
-  const { PluginInstallService } = await import('../../server/src/lib/pluginInstall/service.ts');
+  const { PluginInstallService } = await import('../../server/src/lib/packageInstall/service.ts');
   const next = new PluginInstallService({
     pluginsDir: fixture.env.GRIGDESK_PLUGINS_DIR,
     statePath: fixture.env.GRIGDESK_PLUGIN_INSTALLS_STATE_PATH,
@@ -158,7 +158,7 @@ test('CFG2: настоящий boot recover до scan, полный SYSTEM reser
 test('CFG3: второй owner и blocked state сохраняют встроенный API без import user marker', async (t) => {
   const { pluginBootFixture } = await import('./helpers/pluginBootFixture.js');
   const { writeHttpPlugin } = await import('./helpers/pluginInstallHttpFixture.js');
-  const { PluginInstallService } = await import('../../server/src/lib/pluginInstall/service.ts');
+  const { PluginInstallService } = await import('../../server/src/lib/packageInstall/service.ts');
 
   for (const ownerHeld of [true, false]) {
     const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-blocked-install-boot-'));
@@ -218,9 +218,9 @@ test('CFG3: второй owner и blocked state сохраняют встрое�
 test('CFG4: boot/close с native Git сливает workers, повторный boot узнаёт outcome', async (t) => {
   const { pluginBootFixture } = await import('./helpers/pluginBootFixture.js');
   const { createPluginRepo, fixtureGitEnv } = await import('./helpers/pluginRepo.js');
-  const { runCommand } = await import('../../server/src/lib/pluginInstall/runCommand.ts');
+  const { runCommand } = await import('../../server/src/lib/packageInstall/runCommand.ts');
   const { liveGroupMembers, terminateOwnedWorker } =
-    await import('../../server/src/lib/pluginInstall/workerIdentity.ts');
+    await import('../../server/src/lib/packageInstall/workerIdentity.ts');
   const { readFile, unlink } = await import('node:fs/promises');
   const repo = await createPluginRepo(t);
 

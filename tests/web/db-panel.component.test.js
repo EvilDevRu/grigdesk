@@ -29,6 +29,13 @@ async function mountPanel(t, store, props = {}) {
       // Заглушка сопоставляется по точной строке импорта: панель зовёт операции
       // раздела, а состояние берёт из того же реактивного объекта.
       '../../actions/db': DB_ACTIONS_STUB,
+      '../../stores/dbEngineInstall.ts': `
+        export const useDbEngineInstallStore = () => ({
+          job: null, versions: [], error: null, recoveryError: null, pendingAction: null,
+          reconciling: false, busy: false, versionsLoading: false, versionsInputKey: '', versionsUrl: '',
+          loadJob: async () => {}, invalidateVersions: () => {},
+        });
+      `,
     },
   });
   const { mount, flushPromises } = await import(
@@ -63,10 +70,18 @@ test('панель БД объединяет сессии схему консо�
     cancelQuery: async () => {},
   };
   let component;
+
   try {
     component = await compileVue(PANEL, {
       stubs: {
         '../../actions/db': DB_ACTIONS_STUB,
+      '../../stores/dbEngineInstall.ts': `
+        export const useDbEngineInstallStore = () => ({
+          job: null, versions: [], error: null, recoveryError: null, pendingAction: null,
+          reconciling: false, busy: false, versionsLoading: false, versionsInputKey: '', versionsUrl: '',
+          loadJob: async () => {}, invalidateVersions: () => {},
+        });
+      `,
       },
     });
   } catch (error) {
@@ -118,6 +133,13 @@ test('панель передаёт выбранную SSH-сессию при �
       // Заглушка сопоставляется по точной строке импорта: панель зовёт операции
       // раздела, а состояние берёт из того же реактивного объекта.
       '../../actions/db': DB_ACTIONS_STUB,
+      '../../stores/dbEngineInstall.ts': `
+        export const useDbEngineInstallStore = () => ({
+          job: null, versions: [], error: null, recoveryError: null, pendingAction: null,
+          reconciling: false, busy: false, versionsLoading: false, versionsInputKey: '', versionsUrl: '',
+          loadJob: async () => {}, invalidateVersions: () => {},
+        });
+      `,
     },
   });
   const { mount, flushPromises } = await import(
@@ -569,4 +591,105 @@ test('скрытие формы сохраняет черновик профил
   });
   await flushPromises();
   assert.equal(wrapper.get('[data-db-queries]').attributes('open'), '');
+});
+
+
+/**
+ * Для новых сценариев все данные синтетические; metadata не создаёт второй engines state.
+ * Mount сохраняет настоящий UiSelect и общий driver dialog.
+ */
+function driverPanelStore(overrides = {}) {
+  return {
+    profiles: [],
+    projects: [{ id: 'fixture' }],
+    sessions: [],
+    sshSessions: [],
+    engines: [
+      {
+        id: 'mysql',
+        label: 'MySQL',
+        capabilities: {}
+      },
+      {
+        id: 'fixture-db',
+        label: 'Внешняя СУБД',
+        capabilities: {}
+      },
+    ],
+    engineErrors: [],
+    engineInstalls: {},
+    installHealth: null,
+    queries: [],
+    audit: [],
+    schemas: {},
+    load: async () => { },
+    loadProjects: async () => { },
+    ...overrides,
+  };
+}
+
+test('DUI-01: явная установка открывает driver wizard и сохраняет один селект движков', async (t) => {
+  const { wrapper, flushPromises } = await mountPanel(t, driverPanelStore(), {
+    compact: true, presentation: 'dock',
+  });
+
+  const install = wrapper.findAll('button')
+    .find((button) => /Установить драйвер из Git/u.test(button.text()));
+
+  assert.ok(install, 'в Базах нужна явная кнопка установки драйвера');
+
+  await install.trigger('click');
+
+  await flushPromises();
+
+  assert.match(wrapper.text(), /драйвер/iu);
+
+  const dialog = wrapper.findComponent({ name: 'PluginInstallDialog' });
+
+  assert.equal(dialog.exists(), true);
+
+  assert.equal(dialog.props('packageKind'), 'db-engine');
+
+  await dialog.vm.$emit('update:open', false);
+
+  await flushPromises();
+
+  const add = wrapper.findAll('button').find((button) => button.text().includes('Добавить профиль'));
+
+  await add.trigger('click');
+
+  await flushPromises();
+
+  const selects = wrapper.findAll('select[aria-label="Движок базы"]');
+
+  assert.equal(selects.length, 1);
+
+  assert.deepEqual(selects[0].findAll('option').map((option) => option.attributes('value')),
+    ['', 'mysql', 'fixture-db']);
+
+  assert.equal(wrapper.findAll('table').length, 0);
+});
+
+test('DUI-02: warning внешнего драйвера виден рядом с прежними профилями', async (t) => {
+  const { wrapper } = await mountPanel(t, driverPanelStore({
+    profiles: [{
+      id: 'profile-a',
+      projectId: 'fixture',
+      label: 'Прежний профиль',
+      engine: 'mysql',
+      role: 'read',
+      via: 'direct'
+    }],
+    engineErrors: [{
+      id: 'broken',
+      code: 'manifest_invalid',
+      message: 'Ошибка внешнего драйвера'
+    }],
+  }));
+
+  assert.match(wrapper.text(), /Ошибка внешнего драйвера/u);
+
+  assert.match(wrapper.text(), /Прежний профиль/u);
+
+  assert.equal(wrapper.findAll('[data-db-profile-card]').length, 1);
 });

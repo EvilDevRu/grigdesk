@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { runCommand } from '../../server/src/lib/pluginInstall/runCommand.ts';
+import { runCommand } from '../../server/src/lib/packageInstall/runCommand.ts';
 
 test('RC1: настоящий child возвращает stdout, код и полный result', async () => {
   const result = await runCommand(process.execPath, ['-e', "process.stdout.write('ok'); process.exit(3)"], {

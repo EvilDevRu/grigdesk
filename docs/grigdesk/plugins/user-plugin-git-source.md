@@ -1,6 +1,6 @@
 # Проверка Git-источника пользовательского плагина
 
-`server/src/lib/pluginInstall/gitSource.ts` реализует `PluginSource`. Listing возвращает
+`server/src/lib/packageInstall/gitSource.ts` реализует `PluginSource`. Listing возвращает
 стабильные теги `vX.Y.Z`, выбирает peeled commit аннотированного тега и сортирует SemVer.
 Нормализация допускает HTTPS без userinfo, SSH без пароля, короткий SSH адрес и абсолютный
 file URL без host. Управляющие символы, query/fragment и SSH option injection отвергаются

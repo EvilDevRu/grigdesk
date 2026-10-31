@@ -1671,5 +1671,12 @@
   "providerInstallationShellCleanupSkipped": "Строки PATH оставлены без изменений",
   "providerInstallationShellCleanupAbsent": "Собственных вставок PATH не найдено",
   "providerInstallationLegacyBindingReplaced": "Прежняя привязка будет переключена на новую копию",
-  "providerLifecycleHeading": "Обслуживание · {name}"
+  "providerLifecycleHeading": "Обслуживание · {name}",
+  "dbDrivers": "Драйверы баз данных",
+  "installingDbDriver": "Установка драйвера из Git",
+  "applyDriver": "Применить",
+  "driverSavedRestart": "Драйвер сохранён. Перезапустите сервер вручную.",
+  "driverInstalledRestart": "Драйвер «{name}» v{version} сохранён. Для активации нужен ручной перезапуск сервера.",
+  "manualDbDriver": "Драйвер установлен вручную и не связан с источником.",
+  "driverRollbackConfirmation": "Восстановить драйвер версии {previousVersion}? После отката перезапустите сервер вручную."
 }

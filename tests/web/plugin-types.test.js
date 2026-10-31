@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
-import { validatePluginPackage } from '../../server/src/lib/pluginInstall/validatePackage.ts';
+import { validatePluginPackage } from '../../server/src/lib/packageInstall/validatePackage.ts';
 import { runtimeFixture } from '../server/helpers/pluginRuntimeFixture.js';
 import {
   builtPackage, command, compileConsumer, compileSourceContract, consumer,

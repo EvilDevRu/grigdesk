@@ -6,12 +6,12 @@ import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { liveGroupMembers } from '../../server/src/lib/pluginInstall/workerIdentity.ts';
-import { installError } from '../../server/src/lib/pluginInstall/errors.ts';
+import { liveGroupMembers } from '../../server/src/lib/packageInstall/workerIdentity.ts';
+import { installError } from '../../server/src/lib/packageInstall/errors.ts';
 import { writeDurableFile } from '../../server/src/lib/durableFile.ts';
-import { PluginInstallService } from '../../server/src/lib/pluginInstall/service.ts';
-import { PluginSourceRegistry } from '../../server/src/lib/pluginInstall/sources.ts';
-import { computePayloadDigest } from '../../server/src/lib/pluginInstall/payloadDigest.ts';
+import { PluginInstallService } from '../../server/src/lib/packageInstall/service.ts';
+import { PluginSourceRegistry } from '../../server/src/lib/packageInstall/sources.ts';
+import { computePayloadDigest } from '../../server/src/lib/packageInstall/payloadDigest.ts';
 import { installedRecord } from './helpers/pluginInstallState.js';
 import { mirrorPair } from './helpers/pluginMirrorFixture.js';
 import { createPluginRepo } from './helpers/pluginRepo.js';

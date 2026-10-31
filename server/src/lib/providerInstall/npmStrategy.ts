@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { ProviderLifecycleOperation } from '../../../../shared/chat/providerLifecycleContracts.ts';
 import type { ExternalCliInstallation } from './inventoryTypes.ts';
 import type { ExternalCliDefinition } from './inventoryTypes.ts';
-import { runCommand, type PluginCommandRunner, type CommandOwnership } from '../pluginInstall/runCommand.ts';
+import { runCommand, type PluginCommandRunner, type CommandOwnership } from '../packageInstall/runCommand.ts';
 import { InstallEnvironmentError, type ExternalInstallRuntime } from './npmEnvironment.ts';
 import { inspectNpmGraph, assertReviewedNpmHooks, type NpmGraphPackage } from './npmGraph.ts';
 import reviewed from './npmReviewedHooks.json' with { type: 'json' };

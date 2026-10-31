@@ -6,7 +6,7 @@ import { isProviderLifecycleSnapshot, type ProviderLifecycleSnapshot }
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import type { RemovedCliBinding } from './lifecycleBinding.ts';
 import { writeDurableFile } from '../durableFile.ts';
-import type { CommandWorker } from '../pluginInstall/runCommand.ts';
+import type { CommandWorker } from '../packageInstall/runCommand.ts';
 import { isMigrationJournal, type MigrationJournal } from './legacyBinMigration.ts';
 import {
   isProviderInstallSnapshot,

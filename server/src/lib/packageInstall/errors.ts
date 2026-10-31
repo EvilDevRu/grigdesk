@@ -140,6 +140,10 @@ export const PLUGIN_INSTALL_ERRORS: Record<string, { status: number; message: st
     status: 409,
     message: "Задание ещё не готово к установке.",
   },
+  engine_busy: {
+    status: 409,
+    message: 'Закройте подключения этого движка перед заменой драйвера.',
+  },
   plugin_busy: {
     status: 409,
     message: "Плагин сейчас занят.",

@@ -1,3 +1,6 @@
+import installRoutes from '../plugins/installRoutes.ts';
+import type { PluginInstallPort } from '../../lib/packageInstall/service.ts';
+
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
 import { objectOrEmpty } from '../../../../shared/lib/objects.ts';
@@ -14,6 +17,7 @@ type Payload = Record<string, unknown>;
  */
 export interface DbService {
   listEngines?: () => unknown;
+  engineSnapshot?: () => unknown;
   listProfiles?: () => unknown;
   createProfile?: (input: unknown) => unknown;
   updateProfile?: (id: string, input: unknown) => unknown;
@@ -33,6 +37,7 @@ export interface DbService {
 }
 
 export interface DbModuleOptions {
+  installs?: PluginInstallPort;
   service?: DbService;
 }
 
@@ -90,6 +95,9 @@ function sendError(reply: FastifyReply, error: unknown) {
   const status: Record<string, number> = {
     not_found: 404,
     session_not_found: 404,
+    engine_replacing: 409,
+    engine_restart_required: 409,
+    engine_recovery_required: 409,
     origin_mismatch: 409,
     already_resolved: 409,
     duplicate_selector: 409,
@@ -104,10 +112,13 @@ function sendError(reply: FastifyReply, error: unknown) {
   });
 }
 
-/** Session-only HTTP API живо проверяет плагин до каждой операции. */
+/**
+ * Session-only HTTP API живо проверяет плагин до каждой операции.
+ * Вложенный установщик наследует допуск раздела и сохраняет собственные строгие схемы.
+ */
 export default async function dbModule(
   fastify: FastifyInstance,
-  { service }: DbModuleOptions = {},
+  { service, installs }: DbModuleOptions = {},
 ): Promise<void> {
   if (!fastify.hasContentTypeParser('application/octet-stream')) {
     fastify.addContentTypeParser(
@@ -122,7 +133,17 @@ export default async function dbModule(
   });
 
   const call = (name: keyof DbService, fallback: unknown) => operation(service, name, fallback);
-  fastify.get('/api/db/engines', async () => ({ engines: await call('listEngines', [])() }));
+
+  if (installs) {
+    await fastify.register(installRoutes, {
+      installs,
+      basePath: '/api/db/engine-installs',
+      itemSegment: 'engines',
+    });
+  }
+
+  fastify.get('/api/db/engines', async () => service?.engineSnapshot
+    ? service.engineSnapshot() : { engines: await call('listEngines', [])() });
   fastify.get('/api/db/profiles', async () => ({ profiles: await call('listProfiles', [])() }));
   fastify.post<IdRoute>('/api/db/profiles', async (request, reply) => {
     try { return await call('createProfile', null)(request.body || {}); } catch (error) {

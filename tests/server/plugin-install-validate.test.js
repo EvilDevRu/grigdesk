@@ -8,7 +8,7 @@ import test from 'node:test';
 
 import {
   validatePluginPackage, validatePreparedPluginPackage,
-} from '../../server/src/lib/pluginInstall/validatePackage.ts';
+} from '../../server/src/lib/packageInstall/validatePackage.ts';
 import { decodeUserPluginManifest, scanUserPlugins } from '../../server/src/lib/pluginsRegistry.ts';
 
 const expected = {

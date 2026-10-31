@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { computePayloadDigest } from '../../server/src/lib/pluginInstall/payloadDigest.ts';
+import { computePayloadDigest } from '../../server/src/lib/packageInstall/payloadDigest.ts';
 import { createPluginRepo, git } from './helpers/pluginRepo.js';
 import { serviceFixture } from './helpers/pluginServiceFixture.js';
 import { compatibleState, moduleRelease, prepareModule } from './helpers/pluginModuleFixture.js';

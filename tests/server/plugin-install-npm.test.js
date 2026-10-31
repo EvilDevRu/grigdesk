@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createNpmRunner, prepareNpmDependencies } from '../../server/src/lib/pluginInstall/npm.ts';
-import { runCommand } from '../../server/src/lib/pluginInstall/runCommand.ts';
+import { createNpmRunner, prepareNpmDependencies } from '../../server/src/lib/packageInstall/npm.ts';
+import { runCommand } from '../../server/src/lib/packageInstall/runCommand.ts';
 
 const success = {
   code: 0,

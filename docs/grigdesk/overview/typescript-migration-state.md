@@ -29,7 +29,7 @@
 
 Весь `web/src` перенесён в TypeScript, включая store чата, adapter подтверждений
 и крупные Vue `ChatSession` и `PipelineView`. Новые JS-helper сервера:
-`server/src/lib/pluginInstall/commandSupervisor.mjs` и `gitBlobPrefix.mjs`.
+`server/src/lib/packageInstall/commandSupervisor.mjs` и `gitBlobPrefix.mjs`.
 
 Зависимости, build output и приватное состояние не являются предметом переноса.
 Пять JS-SFC в `tests/web/fixtures/ui` перечислены в `COVERAGE_EXCEPTIONS` и намеренно

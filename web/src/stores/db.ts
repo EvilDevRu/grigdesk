@@ -9,6 +9,7 @@ import { defineStore } from 'pinia';
 import type {
   DbAuditEntry,
   DbEngine,
+  DbEngineMetadata,
   DbProfile,
   DbQuery,
   DbResult,
@@ -25,6 +26,9 @@ export interface DbProjectOption {
 
 export interface DbStoreState {
   engines: DbEngine[];
+  engineErrors: DbEngineMetadata['errors'];
+  engineInstalls: DbEngineMetadata['installs'];
+  installHealth: DbEngineMetadata['installHealth'];
   projects: DbProjectOption[];
   profiles: DbProfile[];
   sessions: DbSession[];
@@ -44,6 +48,9 @@ export interface DbStoreState {
 export const useDbStore = defineStore('db', {
   state: (): DbStoreState => ({
     engines: [],
+    engineErrors: [],
+    engineInstalls: {},
+    installHealth: null,
     projects: [],
     profiles: [],
     sessions: [],
@@ -68,6 +75,9 @@ export const useDbStore = defineStore('db', {
      */
     setSnapshot(snapshot: {
       engines: DbEngine[];
+      engineErrors?: DbStoreState['engineErrors'];
+      engineInstalls?: DbStoreState['engineInstalls'];
+      installHealth?: DbStoreState['installHealth'];
       profiles: DbProfile[];
       sessions: DbSession[];
       queries: DbQuery[];
@@ -75,6 +85,9 @@ export const useDbStore = defineStore('db', {
       auditSkippedRecords?: number;
     }) {
       this.engines = snapshot.engines;
+      this.engineErrors = snapshot.engineErrors ?? [];
+      this.engineInstalls = snapshot.engineInstalls ?? {};
+      this.installHealth = snapshot.installHealth ?? null;
       this.profiles = snapshot.profiles;
       this.sessions = snapshot.sessions;
       this.queries = snapshot.queries;

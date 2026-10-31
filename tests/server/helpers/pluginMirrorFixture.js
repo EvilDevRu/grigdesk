@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { installError } from '../../../server/src/lib/pluginInstall/errors.ts';
-import { PluginSourceRegistry } from '../../../server/src/lib/pluginInstall/sources.ts';
+import { installError } from '../../../server/src/lib/packageInstall/errors.ts';
+import { PluginSourceRegistry } from '../../../server/src/lib/packageInstall/sources.ts';
 import { serviceFixture } from './pluginServiceFixture.js';
 
 /**

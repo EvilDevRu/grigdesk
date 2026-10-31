@@ -7,11 +7,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import assert from 'node:assert/strict';
-import { PluginInstallStateStore } from '../../../server/src/lib/pluginInstall/stateStore.ts';
+import { PluginInstallStateStore } from '../../../server/src/lib/packageInstall/stateStore.ts';
 import {
   liveGroupMembers,
   terminateOwnedWorker,
-} from '../../../server/src/lib/pluginInstall/workerIdentity.ts';
+} from '../../../server/src/lib/packageInstall/workerIdentity.ts';
 
 import { AuthStore } from '../../../server/src/lib/authStore.ts';
 
@@ -60,6 +60,8 @@ export function isolatedEnv(root, port, mobilePort = port + 1) {
     GRIGDESK_MEDIA_DIR: path.join(root, 'media'),
     GRIGDESK_MEDIA_HF_DIR: path.join(root, 'hf'),
     GRIGDESK_PLUGINS_DIR: path.join(root, 'plugins'),
+    GRIGDESK_DB_ENGINES_DIR: path.join(root, 'db-engines'),
+    GRIGDESK_DB_ENGINE_INSTALLS_STATE_PATH: path.join(root, 'state/db-engine-installs.json'),
     GRIGDESK_PLUGINS_DATA_DIR: path.join(root, 'plugin-data'),
     GRIGDESK_PLUGIN_INSTALLS_STATE_PATH: path.join(root, 'state/plugin-installs.json'),
     GRIGDESK_TICKETS_DIR: path.join(root, 'tickets'),
@@ -112,6 +114,7 @@ export async function pluginBootFixture(t, {
   before,
   env = {},
   badState = false,
+  badDbEngineState = false,
   apiSession = true,
   port: requestedPort,
 } = {}) {
@@ -138,6 +141,23 @@ export async function pluginBootFixture(t, {
     });
 
     for (const worker of Object.values(disk?.workers ?? {})) {
+      assert.equal(await terminateOwnedWorker(worker), true);
+      assert.deepEqual(await liveGroupMembers(worker.pgid), []);
+    }
+
+    const driverStore = new PluginInstallStateStore({
+      statePath: path.join(root, 'state/db-engine-installs.json'),
+      hasWorkEvidence: async () => false,
+    });
+    const driverDisk = await driverStore.read().catch((error) => {
+      if (badDbEngineState && error.code === 'state_invalid') {
+        return null;
+      }
+
+      throw error;
+    });
+
+    for (const worker of Object.values(driverDisk?.workers ?? {})) {
       assert.equal(await terminateOwnedWorker(worker), true);
       assert.deepEqual(await liveGroupMembers(worker.pgid), []);
     }

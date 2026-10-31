@@ -101,6 +101,7 @@ export function installProgress(job: PluginInstallJob | null): {
  */
 export function installResultText(job: PluginInstallJob,
   locale: LocaleSource = 'ru',
+  packageKind: 'plugin' | 'db-engine' = 'plugin',
 ): string {
   const t = localeTranslator(locale);
 
@@ -108,6 +109,10 @@ export function installResultText(job: PluginInstallJob,
   const version = job.target?.version ?? '';
 
   if (job.status === 'done') {
+    if (packageKind === 'db-engine') {
+      return t('settings.driverInstalledRestart', { name, version });
+    }
+
     if (job.kind === 'rollback') {
       return t("settings.versionVRestoredRestartGrigDesk", { version: version });
     }

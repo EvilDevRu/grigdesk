@@ -105,7 +105,7 @@ test('R3: строгие inputs/params без coercion, unknown полей и pr
 });
 
 test('R4: PluginInstallError сохраняет status/code/message, health отдельно', async (t) => {
-  const { installError } = await import('../../server/src/lib/pluginInstall/errors.ts');
+  const { installError } = await import('../../server/src/lib/packageInstall/errors.ts');
   const fixture = await installHttpFixture(t);
 
   for (const code of ['source_url_invalid', 'plugin_busy', 'recovery_required', 'state_invalid']) {

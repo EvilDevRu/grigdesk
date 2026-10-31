@@ -1126,5 +1126,6 @@
   "taskDesignPipeline": "Конвейер",
   "taskDesignLaunch": "На конвейер",
   "taskDesignPipelineRunning": "Конвейер работает",
-  "dockerUnusedImagesCount": "Неиспользуемых: {count}"
+  "dockerUnusedImagesCount": "Неиспользуемых: {count}",
+  "dbInstallDriver": "Установить драйвер из Git…"
 }

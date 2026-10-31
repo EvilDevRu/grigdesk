@@ -1,3 +1,5 @@
+import { packagePolicy } from './packagePolicy.ts';
+import type { PackageKind } from './packagePolicy.ts';
 import type {
   PluginInstallErrorInfo,
   PluginInstallJob,
@@ -67,6 +69,7 @@ export interface PluginInstallRuntime {
 }
 
 export interface PluginInstallServiceOptions {
+  packageKind?: PackageKind;
   pluginsDir: string;
   statePath: string;
   grigDeskVersion: string;
@@ -553,6 +556,7 @@ export class PluginInstallService {
       }
 
       const validated = await validatePreparedPluginPackage(directory, {
+        packageKind: this.options.packageKind,
         version: job.target.version,
         expectedId: pluginId,
         reservedIds: new Set(this.options.reservedIds),
@@ -654,7 +658,8 @@ export class PluginInstallService {
     this.state = await this.store.read();
     this.invalidateDescriptions();
 
-    if (outcome.outcome === 'completed' && wasLoaded) {
+    if (outcome.outcome === 'completed'
+      && (wasLoaded || packagePolicy(this.options.packageKind).restartOnly)) {
       this.restarts.add(intent.pluginId);
     }
 
@@ -772,7 +777,7 @@ export class PluginInstallService {
         checkedAt: sameSource(record.source, record.previous.source) ? record.checkedAt : null,
         checkError: sameSource(record.source, record.previous.source) ? record.checkError : null,
       };
-      const manifest = await readPluginManifest(previousDir);
+      const manifest = await readPluginManifest(previousDir, this.options.packageKind);
       const time = this.now().toISOString();
       const target: PluginVersionRef = {
         version: targetRecord.version,
@@ -798,10 +803,10 @@ export class PluginInstallService {
           source: structuredClone(targetRecord.source),
           target,
           id,
-          name: typeof manifest.name === 'string' ? manifest.name : id,
+          name: String(manifest[packagePolicy(this.options.packageKind).nameField] ?? id),
           version: targetRecord.version,
           description: typeof manifest.description === 'string' ? manifest.description : '',
-          hasServer: false,
+          hasServer: this.options.packageKind === 'db-engine',
           hasWeb: typeof manifest.web === 'string' && manifest.web !== '',
           replaces: {
             kind: 'managed',
@@ -1163,6 +1168,7 @@ export class PluginInstallService {
       });
 
       const validated = await validatePluginPackage(directory, {
+        packageKind: this.options.packageKind,
         version: target.version,
         expectedId: request.expectedId ?? null,
         reservedIds: new Set(this.options.reservedIds),
@@ -1227,7 +1233,7 @@ export class PluginInstallService {
           sourceChanged: !sameSource(record.source, initial.source),
         } : current ? { kind: 'unmanaged' } : { kind: 'none' },
         changes: null,
-        warnings: validated.hasServer ? ['Код плагина выполняется с правами GrigDesk.'] : [],
+        warnings: validated.hasServer ? [...packagePolicy(this.options.packageKind).warnings] : [],
       };
 
       if (validated.webModuleDir !== null) {
@@ -1237,9 +1243,8 @@ export class PluginInstallService {
 
       if (record) {
         const changes = await source.changes(directory, record.sha, target.sha);
-        const previousModuleDir = await installedWebModuleDir(
-          path.join(this.options.pluginsDir, validated.id),
-        );
+        const previousModuleDir = this.options.packageKind === 'db-engine' ? null
+          : await installedWebModuleDir(path.join(this.options.pluginsDir, validated.id));
         const moduleDirs = [validated.webModuleDir, previousModuleDir]
           .filter((dir): dir is string => dir !== null);
 
@@ -1462,10 +1467,12 @@ export class PluginInstallService {
     try {
       return await this.readOperation(async () => {
         const digest = await computePayloadDigest(directory, expected.npmDirs);
-        const manifest = await readPluginManifest(directory);
+        const manifest = await readPluginManifest(directory, this.options.packageKind);
 
         if (digest !== expected.payloadDigest
-          || manifest.id !== id || manifest.version !== expected.version) {
+          || manifest.id !== id || (this.options.packageKind === 'db-engine'
+            ? manifest.version !== undefined && manifest.version !== expected.version
+            : manifest.version !== expected.version)) {
           return true;
         }
 

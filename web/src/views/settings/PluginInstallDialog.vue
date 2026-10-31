@@ -23,7 +23,7 @@
             </svg>
           </span>
           <div class="install-head-copy">
-            <p>{{ t('settings.grigdeskPlugins') }}</p>
+            <p>{{ driver ? t('settings.dbDrivers') : t('settings.grigdeskPlugins') }}</p>
             <h2 class="install-heading" data-role="install-heading">{{ heading }}</h2>
           </div>
           <UiIconButton :label="t('settings.closeInstallationWindow')" @click="onOpenChange(false)">
@@ -237,7 +237,7 @@
           </div>
         </section>
         <section v-else-if="view === 'ready' && preview" class="install-ready">
-          <PluginSourceNotice :membership="membership" :source="store.job?.source.url ?? ''" />
+          <PluginSourceNotice v-if="!driver" :membership="membership" :source="store.job?.source.url ?? ''" />
           <PluginInstallPreview :preview="preview" />
         </section>
         <section v-else-if="view === 'result' && store.job" class="install-result-layout">
@@ -259,14 +259,14 @@
             class="install-result-message"
             data-role="install-result"
           >
-            {{ installResultText(store.job, uiLocale) }}
+            {{ installResultText(store.job, uiLocale, props.packageKind) }}
           </p>
           <UiInlineMessage
             v-else
             data-role="install-result"
             :tone="resultTone"
           >
-            {{ installResultText(store.job, uiLocale) }}
+            {{ installResultText(store.job, uiLocale, props.packageKind) }}
           </UiInlineMessage>
         </section>
       </div>
@@ -360,7 +360,7 @@
               variant="solid"
               tone="accent"
               data-role="install-apply"
-              :disabled="locked || catalog.loading"
+              :disabled="locked || catalog?.loading"
               @click="confirmApply"
             >
               {{ applyCaption }}
@@ -417,6 +417,7 @@ import PluginInstallPreview from './PluginInstallPreview.vue';
 import PluginSourceNotice from './PluginSourceNotice.vue';
 import { usePluginCatalogStore } from '../../stores/pluginCatalog.ts';
 import { sourceMembership, type CatalogSelection } from '../../../../shared/plugins/pluginCatalogPolicy.ts';
+import { useDbEngineInstallStore } from '../../stores/dbEngineInstall.ts';
 import { usePluginInstallStore } from '../../stores/pluginInstall.ts';
 import { deriveInstallDialogView } from '../../shared/pluginInstallView.ts';
 import {
@@ -425,17 +426,19 @@ import {
   installResultText,
   shortSha,
 } from '../../shared/pluginInstall.ts';
-import type { PluginListItem } from '../../../../shared/plugins/pluginsContracts.ts';
+import type { InstallSubject } from '../../stores/packageInstall.ts';
 
 const props = defineProps<{
   open: boolean;
   mode: 'install' | 'update';
-  plugin: PluginListItem | null;
+  plugin: InstallSubject | null;
+  packageKind?: 'plugin' | 'db-engine';
   catalogSelection?: CatalogSelection | null;
 }>();
 const emit = defineEmits<{ 'update:open': [value: boolean] }>();
-const store = usePluginInstallStore();
-const catalog = usePluginCatalogStore();
+const driver = props.packageKind === 'db-engine';
+const store = driver ? useDbEngineInstallStore() : usePluginInstallStore();
+const catalog = driver ? null : usePluginCatalogStore();
 const url = ref('');
 const selectedVersion = ref('');
 const replaceModified = ref(false);
@@ -447,6 +450,7 @@ let openingEpoch = 0;
 let disposed = false;
 
 const dialogView = computed(() => deriveInstallDialogView({
+  packageKind: props.packageKind,
   job: store.job,
   mode: props.mode,
   pluginName: props.plugin?.name ?? null,
@@ -477,10 +481,11 @@ const locked = computed(() => dialogView.value.locked);
 const view = computed(() => dialogView.value.screen);
 const progress = computed(() => dialogView.value.progress);
 const preview = computed(() => dialogView.value.preview);
-const membership = computed(() => sourceMembership(
-  catalog.index, catalog.state, preview.value?.id ?? '', store.job?.source ?? null,
+const membership = computed(() => driver ? 'unverified' : sourceMembership(
+  catalog!.index, catalog!.state, preview.value?.id ?? '', store.job?.source ?? null,
 ));
-const applyCaption = computed(() => ['external', 'unverified'].includes(membership.value)
+const applyCaption = computed(() => driver ? t('settings.applyDriver')
+  : ['external', 'unverified'].includes(membership.value)
   ? t('settings.marketplaceInstallFromSource')
   : store.job?.kind === 'update' || preview.value?.replaces.kind === 'managed'
     ? t('settings.update') : t('settings.install'));
@@ -531,7 +536,7 @@ async function findVersions(): Promise<void> {
  * Disabled разметка обновится позднее, поэтому одного атрибута кнопки недостаточно.
  */
 async function confirmApply(): Promise<void> {
-  if (!locked.value && !catalog.loading && store.job?.status === 'ready') {
+  if (!locked.value && !catalog?.loading && store.job?.status === 'ready') {
     await store.apply();
   }
 }
@@ -591,7 +596,7 @@ watch(url, (value, old) => {
 
 watch(() => props.open && store.job?.status === 'ready'
   ? `${store.job.id}:${store.job.revision}` : '', (identity) => {
-  if (identity) {
+  if (identity && catalog) {
     void catalog.loadIndex(true);
   }
 }, { immediate: true, flush: 'sync' });

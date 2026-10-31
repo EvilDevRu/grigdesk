@@ -106,6 +106,7 @@ const expectedLayout = {
   studio3d: '3d',
   agents: 'agents',
   plugins: 'plugins',
+  dbEngines: 'db-engines',
   profiles: 'profiles',
   artifacts: 'artifacts',
   moveJournal: '.move-journal.json',
@@ -165,7 +166,7 @@ test('DH-06: отдельный файл настроек вычисляется
   assert.equal(envFilePath({ env: {}, home }), '/home/user/.grigdesk/.env');
 });
 
-test('DH-07: раскладка содержит ровно 21 относительный путь', () => {
+test('DH-07: раскладка содержит относительные пути и каталог внешних движков', () => {
   assert.deepEqual(DATA_LAYOUT, expectedLayout);
 
   for (const value of Object.values(DATA_LAYOUT)) {
@@ -181,7 +182,7 @@ test('DH-08a: папка артефактов вычисляется без де
 });
 
 test('DH-08: пути каждого элемента раскладки', () => {
-  for (const key of Object.keys(expectedLayout) as Array<keyof typeof expectedLayout>) {
+  for (const key of Object.keys(expectedLayout) as Array<keyof typeof DATA_LAYOUT>) {
     assert.equal(dataPath('/data/c', key), `/data/c/${expectedLayout[key]}`);
   }
 });

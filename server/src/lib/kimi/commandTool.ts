@@ -1,7 +1,7 @@
 import { evaluateDirectCommand } from '../executors/_directSshPolicy.ts';
 import type { DirectCommandOptions, DirectCommandDecision } from '../executors/_directSshPolicy.ts';
-import { runCommand } from '../pluginInstall/runCommand.ts';
-import type { PluginCommandRunner } from '../pluginInstall/runCommand.ts';
+import { runCommand } from '../packageInstall/runCommand.ts';
+import type { PluginCommandRunner } from '../packageInstall/runCommand.ts';
 import { COMMAND_TOOL } from './commandProfile.ts';
 
 interface Options {

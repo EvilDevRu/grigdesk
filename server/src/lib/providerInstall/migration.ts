@@ -15,7 +15,7 @@ import type {
 } from '../../../../shared/chat/providerLifecycleContracts.ts';
 import type { ProviderInstallNotice } from '../../../../shared/chat/providerInstallContracts.ts';
 import { readEnvFile, updateEnvFile } from '../envFile.ts';
-import { runCommand, type PluginCommandRunner } from '../pluginInstall/runCommand.ts';
+import { runCommand, type PluginCommandRunner } from '../packageInstall/runCommand.ts';
 import { discoverExternalCli } from './inventory.ts';
 import type { ExternalCliDefinition, ExternalCliInventoryInput } from './inventoryTypes.ts';
 import {

@@ -315,3 +315,120 @@ test('SEA-REG-05: настоящие каталоги дают тот же со�
   assert.deepEqual((await registry.list()).map((engine) => engine.id).sort(),
     ['clickhouse', 'mysql', 'redis']);
 });
+
+/**
+ * CJS использует штатные context/moduleUrls plugins и generated builtin table.
+ * Внешний пакет остаётся в папке данных и импортируется настоящим ESM bridge.
+ */
+async function externalCjsFixture(t, bridge = true) {
+  const { writeEngine, adapterSource } = await import('./helpers/dbEngineFixture.js');
+
+  const { createRuntimeContextPlugin } = await import('../../server/scripts/sea/context.mts');
+
+  const { createModuleUrlsPlugin } = await import('../../server/scripts/sea/moduleUrls.mts');
+
+  const tree = await fixture(t);
+
+  await fill(tree);
+
+  const tables = await writeRegistryTables({ executorsDir: tree.executorsDir, enginesDir: tree.enginesDir });
+
+  const R = path.join(tree.root, 'R with space');
+
+  const externalDir = path.join(tree.root, 'data/db-engines');
+
+  await mkdir(path.join(R, 'server/runtime'), { recursive: true });
+
+  await writeFile(path.join(R, 'server/package.json'), '{"type":"module"}');
+
+  if (bridge) {
+    await writeFile(path.join(R, 'server/runtime/esmBridge.cjs'),
+      await readFile(path.join(ROOT, 'server/build/esmBridge.cjs')));
+  }
+
+  const dir = await writeEngine(externalDir, 'fixture-db', {}, adapterSource('fixture-db', `
+    import { value } from './relative.mjs';
+    import dependency from 'fixture-local-dependency';
+    const answer = await Promise.resolve(value + dependency);
+  `).replace('return [{ answer: 42 }]', 'return [{ answer }]'));
+
+  await writeFile(path.join(dir, 'relative.mjs'), 'export const value = 40;');
+
+  await mkdir(path.join(dir, 'node_modules/fixture-local-dependency'), { recursive: true });
+
+  await writeFile(path.join(dir, 'node_modules/fixture-local-dependency/package.json'),
+    '{"name":"fixture-local-dependency","main":"index.mjs","type":"module"}');
+
+  await writeFile(path.join(dir, 'node_modules/fixture-local-dependency/index.mjs'), 'export default 2;');
+
+  const entry = path.join(tree.root, 'entry.mts');
+
+  const registryUrl = path.join(ROOT, 'server/src/lib/db/engineRegistry.ts');
+
+  await writeFile(entry, `
+    import { createEngineRegistry } from ${JSON.stringify(registryUrl)};
+    export const load = () => createEngineRegistry({
+      externalDir: ${JSON.stringify(externalDir)}, grigDeskVersion: '1.0.0',
+      runtime: { kind: 'packaged', root: ${JSON.stringify(R)} },
+    });
+  `);
+
+  const urls = createModuleUrlsPlugin({
+    root: ROOT,
+    runtimeModule: path.join(ROOT, 'server/src/lib/runtimePaths.ts'),
+    skip: [entry, ...engineEntries(tree.enginesDir).map((item) => item.file)],
+  });
+
+  const output = path.join(tree.root, 'registry.cjs');
+
+  const table = await readFile(tables.engineTable, 'utf8');
+
+  const result = await build({
+    entryPoints: [entry],
+    outfile: output,
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node24',
+    logLevel: 'silent',
+    plugins: [{
+      name: 'fixture-generated-builtins',
+      setup(builder) {
+        builder.onLoad({ filter: /engineTable\.ts$/ }, () => ({
+          contents: table,
+          loader: 'ts',
+          resolveDir: path.dirname(tables.engineTable),
+        }));
+      },
+    }, createRuntimeContextPlugin(ROOT, 'sea'), urls.plugin],
+  });
+
+  assert.deepEqual(result.warnings, []);
+
+  return { registry: await require(output).load(), table };
+}
+
+test('SEA-DB-01: CJS+bridge объединяет builtin/external с relative/TLA/npm', async (t) => {
+  const { registry, table } = await externalCjsFixture(t);
+
+  assert.deepEqual((await registry.list()).map((engine) => engine.id).sort(),
+    ['fixture-db', 'mysql', 'redis']);
+
+  assert.doesNotMatch(table, /fixture-db|db-engines/u);
+
+  const adapter = registry.get('fixture-db');
+
+  assert.deepEqual(await adapter.execute({}, { text: 'SELECT 42' }), [{ answer: 42 }]);
+});
+
+test('SEA-DB-01: missing bridge оставляет builtin и безопасную diagnostic внешнего', async (t) => {
+  const { registry } = await externalCjsFixture(t, false);
+
+  assert.deepEqual((await registry.list()).map((engine) => engine.id).sort(), ['mysql', 'redis']);
+
+  const errors = typeof registry.errors === 'function' ? await registry.errors() : registry.errors;
+
+  assert.ok(Array.isArray(errors) && errors.some((error) => error.id === 'fixture-db'));
+
+  assert.equal(registry.get('fixture-db'), null);
+});

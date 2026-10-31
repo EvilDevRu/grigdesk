@@ -1671,5 +1671,12 @@
   "providerInstallationShellCleanupSkipped": "PATH lines were left unchanged",
   "providerInstallationShellCleanupAbsent": "No GrigDesk PATH insertions were found",
   "providerInstallationLegacyBindingReplaced": "The previous binding will point to the new copy",
-  "providerLifecycleHeading": "Maintenance · {name}"
+  "providerLifecycleHeading": "Maintenance · {name}",
+  "dbDrivers": "Database drivers",
+  "installingDbDriver": "Install a driver from Git",
+  "applyDriver": "Apply",
+  "driverSavedRestart": "Driver saved. Restart the server manually.",
+  "driverInstalledRestart": "Driver “{name}” v{version} saved. Restart the server manually to activate it.",
+  "manualDbDriver": "This driver was installed manually and has no managed source.",
+  "driverRollbackConfirmation": "Restore driver version {previousVersion}? Restart the server manually afterwards."
 }

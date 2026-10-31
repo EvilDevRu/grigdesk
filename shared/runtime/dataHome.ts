@@ -25,6 +25,7 @@ export const DATA_LAYOUT = {
   studio3d: '3d',
   agents: 'agents',
   plugins: 'plugins',
+  dbEngines: 'db-engines',
   profiles: 'profiles',
   artifacts: 'artifacts',
   moveJournal: '.move-journal.json',

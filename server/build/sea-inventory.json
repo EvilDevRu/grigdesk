@@ -974,7 +974,7 @@
       "detail": "Worker медиа собирается как helper; guard входа сравнивает argv с entry helper."
     },
     {
-      "file": "server/src/lib/pluginInstall/commandSupervisor.mjs",
+      "file": "server/src/lib/packageInstall/commandSupervisor.mjs",
       "construct": "fork",
       "target": "",
       "count": 1,
@@ -983,7 +983,7 @@
       "detail": "Supervisor собирается как helper; самоперезапуск берёт реальный entry."
     },
     {
-      "file": "server/src/lib/pluginInstall/commandSupervisor.mjs",
+      "file": "server/src/lib/packageInstall/commandSupervisor.mjs",
       "construct": "import-meta",
       "target": "url",
       "count": 1,
@@ -992,7 +992,7 @@
       "detail": "Supervisor собирается как helper; самоперезапуск берёт реальный entry."
     },
     {
-      "file": "server/src/lib/pluginInstall/runCommand.ts",
+      "file": "server/src/lib/packageInstall/runCommand.ts",
       "construct": "fork",
       "target": "",
       "count": 1,
@@ -1785,7 +1785,7 @@
       "detail": "Хук политики прямого SSH."
     },
     {
-      "path": "server/src/lib/pluginInstall/commandSupervisor.mjs",
+      "path": "server/src/lib/packageInstall/commandSupervisor.mjs",
       "kind": "file",
       "expect": "source",
       "owner": "task-10",
@@ -1793,7 +1793,7 @@
       "detail": "Supervisor установки плагинов."
     },
     {
-      "path": "server/src/lib/pluginInstall/gitBlobPrefix.mjs",
+      "path": "server/src/lib/packageInstall/gitBlobPrefix.mjs",
       "kind": "file",
       "expect": "source",
       "owner": "task-10",

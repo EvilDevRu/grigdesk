@@ -1,6 +1,6 @@
 # Владение командами подготовки плагина
 
-`server/src/lib/pluginInstall/runCommand.ts` запускает команды через отдельный
+`server/src/lib/packageInstall/runCommand.ts` запускает команды через отдельный
 `commandSupervisor.mjs`. Helper находится вне PGID команды. Gated leader создаёт
 группу и сообщает PID, PGID и Linux startTime до запуска целевого executable.
 `ownership.started` должен устойчиво записать эту identity; только его успешный
