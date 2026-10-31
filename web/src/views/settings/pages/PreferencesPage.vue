@@ -25,18 +25,22 @@
           :step="field.key === 'runSilenceWindow' ? 'any' : 1"
           @update:model-value="edit(field.key, $event)"
         />
-        <UiSelect
+        <ProviderModelSelect
           v-else-if="field.key === 'arbiterModelRef'"
+          :providers="providers.providers"
           :aria-label="field.label"
           :model-value="modelValue"
+          :fallback-label="modelLabel"
           @update:model-value="selectModel"
         >
           <option value="">{{ t('settings.notSelected2') }}</option>
-          <option v-if="modelLost" :value="modelValue">{{ modelLabel }} {{ t('settings.missingFromRegistry2') }}</option>
+          <option v-if="modelLost || modelUnavailable" :value="modelValue" :hidden="modelUnavailable" disabled>
+            {{ modelLabel }} {{ modelLost ? t('settings.missingFromRegistry2') : '' }}
+          </option>
           <optgroup
             v-for="provider in providerOptions"
             :key="provider.id"
-            :label="provider.name + (provider.available ? '' : t('settings.unavailable'))"
+            :label="provider.name"
           >
             <option
               v-for="model in provider.models || []"
@@ -46,7 +50,7 @@
               {{ model.name || model.id }}
             </option>
           </optgroup>
-        </UiSelect>
+        </ProviderModelSelect>
         <UiSelect
           v-else
           :aria-label="field.label"
@@ -84,18 +88,27 @@ import {
 import { api, failureText } from '../../../shared/apiClient.ts';
 import { SETTINGS_FIELDS, getSettingsFields } from '../../../features/settings/catalog.ts';
 import { createPreferencesAdapter } from '../../../features/settings/resources/preferences.ts';
-import type { ProviderEntry } from '../../../../../shared/chat/providersContracts.ts';
 import type { JsonValue } from '../../../features/settings/contracts.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
 import { useChatStore } from '../../../stores/chat.ts';
 import { useProvidersStore } from '../../../stores/providers.ts';
 import SettingsField from '../SettingsField.vue';
 import SettingsScope from '../SettingsScope.vue';
+import ProviderModelSelect from '../../../shared/ProviderModelSelect.vue';
+import {
+  isSelectableModelProvider, modelSelectValue as modelKey,
+} from '../../../shared/providerModelSelect.ts';
 
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
 const providers = useProvidersStore();
-const providerOptions = computed(() => providers.providers as ProviderEntry[]);
+const providerOptions = computed(() => providers.providers
+  .filter(isSelectableModelProvider)
+  .map((provider) => ({
+    ...provider,
+    models: providers.visibleModels(provider, providers.modelOf(value('arbiterModelRef')).id),
+  }))
+  .filter((provider) => provider.models.length));
 const error = ref('');
 const fields = computed(() => getSettingsFields(uiLocale.value).filter((field) =>
   field.resourceId === 'prefs' && field.address.pageId === settings.pageId));
@@ -107,6 +120,11 @@ const modelValue = computed(() => {
 });
 const modelLost = computed(() =>
   value('arbiterModelRef') && !providers.modelOf(value('arbiterModelRef')).model);
+const modelUnavailable = computed(() => {
+  const provider = providers.modelOf(value('arbiterModelRef')).provider;
+
+  return Boolean(value('arbiterModelRef') && provider && !isSelectableModelProvider(provider));
+});
 const modelLabel = computed(() => {
   const reference = value('arbiterModelRef') as { provider: string; model: string } | null;
 
@@ -134,10 +152,6 @@ function numberValue(key: string): number | '' {
 
 function edit(key: string, next: JsonValue): void {
   settings.setField('prefs', key, next);
-}
-
-function modelKey(provider: string, model: string): string {
-  return JSON.stringify({ provider, model });
 }
 
 /**

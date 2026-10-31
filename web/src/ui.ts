@@ -62,6 +62,7 @@ export type * from './types/uiFields';
 export type * from './types/uiLayers';
 export type * from './types/uiOverlays';
 export type * from './types/uiSelection';
+export type { UiSelectOptionSnapshot } from './composables/useUiFieldSelect';
 
 export { default as UiToastHost } from './components/feedback/UiToastHost.vue';
 export {
