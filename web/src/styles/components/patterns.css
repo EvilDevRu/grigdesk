@@ -360,27 +360,51 @@
   justify-content: flex-end;
 }
 
+/* Сегменты соединены общей рамкой: выбранный заполняет свою часть без внутренней плашки.
+   Низкая специфичность геометрии вкладок оставляет оформление навигационных полос их контекстам. */
 .ui-segmented-control,
 .ui-tabs,
 .ui-tabs__list {
   display: inline-flex;
   align-items: stretch;
   min-width: 0;
-  padding: 2px;
+  padding: 0;
   border: 1px solid var(--control-border);
-  border-radius: calc(var(--control-radius) + 2px);
+  border-radius: var(--control-radius);
   background: var(--ground);
 }
 
-.ui-segmented-control .ui-toggle-button,
-.ui-segmented-control > .ui-button,
+.ui-segmented-control > :where(.ui-toggle-button, .ui-button),
 .ui-tab {
-  height: calc(var(--control-height) - 6px);
-  min-height: calc(var(--control-height) - 6px);
+  height: calc(var(--control-height) - 2px);
+  min-height: calc(var(--control-height) - 2px);
   border: 0;
-  border-radius: calc(var(--control-radius) - 3px);
+  border-radius: 0;
   background: transparent;
   color: var(--ink-mid);
+}
+
+.ui-segmented-control > :where(.ui-toggle-button, .ui-button) + :where(.ui-toggle-button, .ui-button),
+:where(.ui-tabs, .ui-tabs__list) > .ui-tab + :where(.ui-tab) {
+  border-inline-start: 1px solid var(--control-border);
+}
+
+:where(.ui-segmented-control, .ui-tabs, .ui-tabs__list) >
+:is(.ui-toggle-button, .ui-button, .ui-tab):where(:first-child) {
+  border-start-start-radius: calc(var(--control-radius) - 1px);
+  border-end-start-radius: calc(var(--control-radius) - 1px);
+}
+
+:where(.ui-segmented-control, .ui-tabs, .ui-tabs__list) >
+:is(.ui-toggle-button, .ui-button, .ui-tab):where(:last-child) {
+  border-start-end-radius: calc(var(--control-radius) - 1px);
+  border-end-end-radius: calc(var(--control-radius) - 1px);
+}
+
+:where(.ui-segmented-control, .ui-tabs, .ui-tabs__list) >
+:is(.ui-toggle-button, .ui-button, .ui-tab):hover:where(:not(:disabled):not([aria-disabled='true'])) {
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .ui-segmented-control .ui-toggle-button[aria-pressed='true'],
@@ -391,22 +415,24 @@
 .ui-tab.is-active {
   background: var(--surface-2);
   color: var(--ink);
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: none;
+}
+
+/* Внутренний фокус остаётся видимым и в прокручиваемом списке вкладок.
+   Его правило идёт после выбранного состояния, чтобы заливка не скрывала клавиатурный фокус. */
+:where(.ui-segmented-control, .ui-tabs, .ui-tabs__list) >
+:is(.ui-toggle-button, .ui-button, .ui-tab):focus-visible {
+  outline: 2px solid var(--control-focus-color);
+  outline-offset: -2px;
+  box-shadow: none;
 }
 
 /* Размер выбирается общим параметром, как у UiButton, и действует также на slot-кнопки.
-   Рамка рисуется внутри: вся группа занимает 28 px на desktop и 44 px на touch. */
-.ui-segmented-control[data-size='compact'] {
-  padding: 0;
-  border: 0;
-  box-shadow: inset 0 0 0 1px var(--control-border);
-}
-
+   Два пикселя внешней рамки входят в общую высоту 28 px на desktop и 44 px на touch. */
 .ui-segmented-control[data-size='compact'] > .ui-button {
   height: auto;
-  min-height: var(--toolbar-control-h);
+  min-height: calc(var(--toolbar-control-h) - 2px);
   padding: 3px 7px;
-  border-radius: var(--control-radius);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -417,6 +443,15 @@
   overflow-x: auto;
 }
 
+.ui-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .ui-tabs__list {
   width: max-content;
   max-width: 100%;
@@ -425,23 +460,6 @@
 
 .ui-tabs__panel {
   min-width: 0;
-}
-
-/* Переключатель связанных задач использует поверхность рабочих полей доски.
-   Вложенная вкладка сохраняет отступ и скругление внутри общей рамки. */
-.ui-tabs:has(.ui-tab[data-context='board-related-tab']) {
-  gap: 2px;
-  border-radius: var(--control-radius);
-  background: var(--control-background);
-}
-
-.ui-tab[data-context='board-related-tab'] {
-  border-radius: max(2px, calc(var(--control-radius) - 2px));
-}
-
-.ui-tab[data-context='board-related-tab'][aria-selected='true'] {
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--control-border);
 }
 
 /* Подписанные вкладки 3D занимают одну полосу в доке и в развёрнутой студии.
@@ -464,6 +482,7 @@
   min-height: var(--control-height);
   height: auto;
   padding: 8px 12px;
+  border: 0;
   border-bottom: 2px solid transparent;
   border-radius: 0;
   white-space: nowrap;
@@ -540,6 +559,7 @@
   align-items: center;
   justify-content: center;
   padding: 0 12px;
+  border: 0;
   border-bottom: 2px solid transparent;
   border-radius: 0;
   gap: 8px;
