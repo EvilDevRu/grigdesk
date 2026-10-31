@@ -1,3 +1,5 @@
+import { packagePolicy } from './packagePolicy.ts';
+import type { PackageKind } from './packagePolicy.ts';
 import type {
   PluginInstallErrorInfo,
   PluginInstallJob,
@@ -67,6 +69,7 @@ export interface PluginInstallRuntime {
 }
 
 export interface PluginInstallServiceOptions {
+  packageKind?: PackageKind;
   pluginsDir: string;
   packagePolicy?: InstallPackagePolicy;
   statePath: string;
@@ -149,7 +152,13 @@ export class PluginInstallService {
    */
   constructor(options: PluginInstallServiceOptions) {
     this.options = options;
-    this.packagePolicy = options.packagePolicy ?? pluginPackagePolicy;
+    this.packagePolicy = options.packagePolicy ?? {
+      ...pluginPackagePolicy,
+      readManifest: (directory) => pluginPackagePolicy.readManifest(directory, options.packageKind),
+      serverWarnings: packagePolicy(options.packageKind).warnings,
+      installedModuleDir: options.packageKind === 'db-engine'
+        ? async () => null : pluginPackagePolicy.installedModuleDir,
+    };
     this.workDir = path.join(options.pluginsDir, '.grigdesk-install');
     this.now = options.now ?? (() => new Date());
     this.store = new PluginInstallStateStore({
@@ -654,6 +663,7 @@ export class PluginInstallService {
       }
 
       const validated = await this.packagePolicy.validatePrepared(directory, {
+        packageKind: this.options.packageKind,
         version: job.target.version,
         expectedId: pluginId,
         reservedIds: new Set(this.options.reservedIds),
@@ -755,7 +765,8 @@ export class PluginInstallService {
     this.state = await this.store.read();
     this.invalidateDescriptions();
 
-    if (outcome.outcome === 'completed' && wasLoaded) {
+    if (outcome.outcome === 'completed'
+      && (wasLoaded || packagePolicy(this.options.packageKind).restartOnly)) {
       this.restarts.add(intent.pluginId);
     }
 
@@ -909,10 +920,10 @@ export class PluginInstallService {
           source: structuredClone(targetRecord.source),
           target,
           id,
-          name: typeof manifest.name === 'string' ? manifest.name : id,
+          name: String(manifest[packagePolicy(this.options.packageKind).nameField] ?? id),
           version: targetRecord.version,
           description: typeof manifest.description === 'string' ? manifest.description : '',
-          hasServer: false,
+          hasServer: this.options.packageKind === 'db-engine',
           hasWeb: typeof manifest.web === 'string' && manifest.web !== '',
           replaces: {
             kind: 'managed',
@@ -1293,6 +1304,7 @@ export class PluginInstallService {
       });
 
       const validated = await this.packagePolicy.validate(directory, {
+        packageKind: this.options.packageKind,
         version: target.version,
         expectedId: request.expectedId ?? null,
         reservedIds: new Set(this.options.reservedIds),
@@ -1595,7 +1607,9 @@ export class PluginInstallService {
         const manifest = await this.packagePolicy.readManifest(directory);
 
         if (digest !== expected.payloadDigest
-          || manifest.id !== id || manifest.version !== expected.version) {
+          || manifest.id !== id || (this.options.packageKind === 'db-engine'
+            ? manifest.version !== undefined && manifest.version !== expected.version
+            : manifest.version !== expected.version)) {
           return true;
         }
 

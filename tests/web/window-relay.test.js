@@ -102,6 +102,7 @@ test('WR-03: доской делится тот, кто её прочитал; �
   const fresh = {
     data: { tasks: [{ id: 42, timerRunning: true }] },
     readAt: 2000,
+    sourceKey: 'fixture',
   };
   let snapshot = null;
   let sourceLoaded = null;
@@ -109,6 +110,10 @@ test('WR-03: доской делится тот, кто её прочитал; �
   let mirrorRequest;
   const stopSource = startBoardRelay({
     role: 'source',
+    sourceState: () => ({ key: 'fixture', suspended: false }),
+    watchInvalidation: () => () => undefined,
+    invalidate: () => undefined,
+    recheck: async () => undefined,
     channel: source,
     snapshot: () => snapshot,
     watchLoads(callback) {
@@ -125,6 +130,10 @@ test('WR-03: доской делится тот, кто её прочитал; �
   });
   const stopMirror = startBoardRelay({
     role: 'mirror',
+    sourceState: () => ({ key: 'fixture', suspended: false }),
+    watchInvalidation: () => () => undefined,
+    invalidate: () => undefined,
+    recheck: async () => undefined,
     channel: mirror,
     snapshot: () => fresh,
     watchLoads(callback) {
@@ -146,6 +155,7 @@ test('WR-03: доской делится тот, кто её прочитал; �
   snapshot = {
     data: { tasks: [{ id: 42, timerRunning: false }] },
     readAt: 1000,
+    sourceKey: 'fixture',
   };
   sourceLoaded();
   assert.deepEqual(source.posted, [{
@@ -153,6 +163,7 @@ test('WR-03: доской делится тот, кто её прочитал; �
     type: 'board-snapshot',
     data: snapshot.data,
     readAt: 1000,
+    sourceKey: 'fixture',
   }]);
   mirror.onmessage({ data: source.posted[0] });
   mirror.onmessage({
@@ -170,6 +181,10 @@ test('WR-03: доской делится тот, кто её прочитал; �
   mirror.onmessage({ data: { version: 1, type: 'board-request' } });
   mirror.onmessage({ data: { ...source.posted[0], readAt: Number.POSITIVE_INFINITY } });
   mirror.onmessage({ data: { ...source.posted[0], data: [] } });
+
+  const { sourceKey: _sourceKey, ...legacy } = source.posted[0];
+
+  mirror.onmessage({ data: legacy });
   assert.deepEqual(mirrorApplied, [{ data: snapshot.data, readAt: 1000 }]);
   assert.equal(mirror.posted.length, 1);
   mirrorLoaded();
@@ -178,6 +193,7 @@ test('WR-03: доской делится тот, кто её прочитал; �
     type: 'board-snapshot',
     data: fresh.data,
     readAt: 2000,
+    sourceKey: 'fixture',
   });
   source.onmessage({ data: mirror.posted[1] });
   assert.deepEqual(sourceApplied, [{ data: fresh.data, readAt: 2000 }]);

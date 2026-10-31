@@ -1,4 +1,4 @@
-import { runCommand } from '../../../server/src/lib/pluginInstall/runCommand.ts';
+import { runCommand } from '../../../server/src/lib/packageInstall/runCommand.ts';
 
 const result = await runCommand(process.execPath, ['-e', `
   process.stderr.write('start');

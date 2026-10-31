@@ -1,3 +1,4 @@
+import { withTrackerRequestRead } from '../../lib/trackers/requestRead.ts';
 // Локальное избранное B24-задач. Мутации меняют только state GrigDesk и не пишут в B24.
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -54,7 +55,9 @@ async function taskFavoritesModule(
     }
   };
 
-  fastify.get('/api/tracker/task-favorites', run(() => favorites.list()));
+  fastify.get<{ Params: { taskId: string } }>('/api/tracker/task-favorites', (request, reply) =>
+    withTrackerRequestRead(request, reply, (options) =>
+      run(() => favorites.list(options))(request, reply)));
   fastify.put('/api/tracker/task-favorites/:taskId', run((request) => {
     const taskId = normalizeFavoriteTaskId(request.params.taskId);
     return favorites.add(taskId);

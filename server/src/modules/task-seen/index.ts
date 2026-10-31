@@ -1,3 +1,4 @@
+import { withTrackerRequestRead } from '../../lib/trackers/requestRead.ts';
 // Просмотренные B24-задачи. Метки живут только в state GrigDesk и в B24 не пишутся.
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -88,7 +89,9 @@ async function taskSeenModule(
     }
   };
 
-  fastify.get('/api/tracker/task-seen', run(() => seen.list()));
+  fastify.get('/api/tracker/task-seen', (request, reply) =>
+    withTrackerRequestRead(request, reply, (options) =>
+      run(() => seen.list(options))(request, reply)));
   fastify.post('/api/tracker/task-seen', run((request) => {
     const { taskIds, baseline } = parseMarkBody(request.body);
     return seen.markSeen(taskIds, { baseline });

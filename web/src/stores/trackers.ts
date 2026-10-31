@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import { useBoardStore } from './board.ts';
 
 import type { TrackerCatalog } from '../../../shared/trackers/contracts.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
@@ -29,6 +30,29 @@ export const useTrackersStore = defineStore('trackers', {
     },
   },
   actions: {
+    /**
+     * Запись настроек закрывает старые снимки до отправки POST и любого его исхода.
+     * Пауза принадлежит своей эпохе; SSE или более новая запись не разблокируются поздним finally.
+     */
+    async saveSettings(input: {
+      externalId: string | null;
+      settings: Record<string, Record<string, unknown>>;
+      expectedRevision: number;
+    }) {
+      const board = useBoardStore();
+      const token = board.beginSourceChange();
+
+      try {
+        const result = await api.post('/api/trackers/settings', input) as { revision: number };
+
+        this.invalidate();
+        await this.load(true);
+
+        return result;
+      } finally {
+        await board.finishSourceChange(token);
+      }
+    },
     /**
      * Metadata читается независимо от details и зеркала доски.
      * Только подтверждённый 404 старого API разрешает прежние custom-действия.

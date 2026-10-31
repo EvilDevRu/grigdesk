@@ -1,6 +1,6 @@
 # Подготовка и публикация пользовательского пакета
 
-`server/src/lib/pluginInstall/service.ts` объединяет источники, проверку пакета, npm,
+`server/src/lib/packageInstall/service.ts` объединяет источники, проверку пакета, npm,
 устойчивый журнал и filesystem resolver. Модуль плагинов использует его через
 installer port и HTTP; boot подключён [отдельно](plugin-install-boot.md), а
 установка из каталога описана в [контракте интерфейса](../web/plugin-install-ui.md).

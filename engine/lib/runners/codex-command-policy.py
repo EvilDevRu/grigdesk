@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import sys
 
 
@@ -26,8 +27,24 @@ def deny(reason: str) -> None:
     sys.stdout.write("\n")
 
 
+# Canonical POSIX quoting допускает один фиксированный executable с JSON аргументом.
+# Метасимволы в JSON не исполняются; любой иной shell source остаётся под прежним hook.
+def fixed_browser_request(command: str, paths: list[str]) -> bool:
+    if len(paths) != 2 or any(not re.fullmatch(r"/[A-Za-z0-9_@+.,/=-]+", p) for p in paths):
+        return False
+    try:
+        words = shlex.split(command, posix=True)
+        if shlex.join(words) != command or len(words) != 5:
+            return False
+        if words[:4] != [*paths, "request", "--input-json"]:
+            return False
+        value = json.loads(words[4])
+        return isinstance(value, dict)
+    except (ValueError, TypeError):
+        return False
+
 def main() -> int:
-    if sys.argv[1:] != ["shared-stand"]:
+    if len(sys.argv) not in (2, 4) or sys.argv[1] != "shared-stand":
         deny("Неизвестная policy Codex-runner; команда отклонена fail-closed.")
         return 0
     try:
@@ -42,6 +59,9 @@ def main() -> int:
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     if not isinstance(command, str) or not command or "\x00" in command:
         deny("Shared-stand policy не смогла разобрать команду; вызов отклонён.")
+        return 0
+
+    if fixed_browser_request(command, sys.argv[2:]):
         return 0
 
     # Docker socket скрыт permission profile, поэтому эти проверки — понятная

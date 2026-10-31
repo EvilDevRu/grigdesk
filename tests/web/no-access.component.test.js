@@ -123,6 +123,7 @@ async function mountApp(t, options = {}) {
     startPolling: () => globalThis.__noAccess.polling.push('start'),
     stopPolling: () => globalThis.__noAccess.polling.push('stop'),
     load: () => {}, start: () => {}, stop: () => {}, clear: () => {}, stopPoll: () => {},
+    clearSource: () => {},
     ${extra} });`;
   const stubs = {
     ...appWindowStubs,

@@ -15,13 +15,20 @@ export async function settingsHarness(t, pageId, component, options = {}) {
     handlers: {},
     answer: true,
     confirms: [],
+    navigations: [],
   };
 
   globalThis.__settingsHarness = control;
 
-  const [{ createPinia, setActivePinia }, { mount, flushPromises }, module] = await Promise.all([
+  const [
+    { createPinia, setActivePinia },
+    { mount, flushPromises },
+    { routerKey },
+    module,
+  ] = await Promise.all([
     import('../../../web/node_modules/pinia/dist/pinia.mjs'),
     import('../../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    import('../../../web/node_modules/vue-router/dist/vue-router.mjs'),
     compileModule(webFile('../tests/web/helpers/settings-pages.ts'), {
       stubs: {
         '../router.ts': 'export const router = { push: async () => {} };',
@@ -133,6 +140,15 @@ export async function settingsHarness(t, pageId, component, options = {}) {
     global: {
       plugins: [pinia],
       stubs: options.stubs ?? {},
+      provide: {
+        [routerKey]: {
+          async push(target) {
+            control.navigations.push(target);
+
+            return options.navigate?.(target);
+          },
+        },
+      },
     },
   });
 

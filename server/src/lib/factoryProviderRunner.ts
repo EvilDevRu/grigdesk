@@ -1,3 +1,5 @@
+import { factoryBrowserReady } from './browser/factoryBrowserCapability.ts';
+
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -33,6 +35,8 @@ export const FACTORY_STATUS_ENV_NAMES: readonly string[] = Object.freeze([
   'STATE_DIR',
   'FACTORY_STAGE_RESULT_CHECK',
   'FACTORY_LOOP_ROLE',
+  'FACTORY_BROWSER_ENABLED',
+  'FACTORY_ROUTE_BROWSER_POLICY',
 ]);
 
 // Prompt этапа читается целиком в память: предел защищает wrapper от чужого огромного файла.
@@ -162,13 +166,18 @@ export function factoryRunIdentity(env: NodeJS.ProcessEnv, label: string): Facto
 }
 
 /**
- * Env статусного MCP — точный allowlist имён движка без пустых значений и NUL.
- * Модельные ключи и режим доступа сюда не попадают ни при каком окружении.
+ * Explicit MCP env сериализуется в YAML, поэтому nonce туда не добавляется никогда.
+ * Public browser флаги выдаются парой только при готовом доверенном transport.
  */
 export function factoryStatusEnvironment(env: NodeJS.ProcessEnv): Array<{ name: string; value: string }> {
   const output: Array<{ name: string; value: string }> = [];
+  const browser = factoryBrowserReady(env);
 
   for (const name of FACTORY_STATUS_ENV_NAMES) {
+    if ((name === 'FACTORY_BROWSER_ENABLED' || name === 'FACTORY_ROUTE_BROWSER_POLICY') && !browser) {
+      continue;
+    }
+
     const value = env[name];
 
     if (typeof value === 'string' && value && !value.includes('\0')) {

@@ -1879,71 +1879,55 @@
   color: var(--ink);
 }
 
-.ui-icon-button[data-context='chat-context'] {
-  width: 30px;
-  height: 30px;
-  min-height: 30px;
+.ui-button[data-context='chat-context'] {
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
+  color: var(--ink);
 }
 
-.ui-icon-button[data-context='chat-context'] svg {
-  width: 22px;
-  height: 22px;
-}
-
-/* Внутренний label обычной кнопки режет переполнение ради длинного текста. Кольцо —
-   SVG-иконка, поэтому ему нужна точная коробка без text-overflow clipping. */
-.ui-icon-button[data-context='chat-context'] .ui-button__label {
+/* Полоса и процент образуют один фокусируемый control с общей подсказкой.
+   Обычное text-overflow кнопки не должно обрезать ни шкалу, ни её подпись. */
+.ui-button[data-context='chat-context'] .ui-button__label {
+  display: flex;
   flex: none;
-  width: 22px;
-  height: 22px;
+  align-items: center;
+  gap: 8px;
   overflow: visible;
 }
 
-.ui-icon-button[data-context='chat-context'] .rfg {
-  stroke: var(--good);
-  transition: stroke-dashoffset 0.3s;
+.ui-button[data-context='chat-context'] .ctx-meter-cap {
+  margin-right: 2px;
+  color: var(--ink-mid);
+  font-size: 10.5px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  opacity: .75;
 }
 
-.ui-icon-button[data-context='chat-context'] .rbg {
-  stroke: var(--surface-2);
+.ui-button[data-context='chat-context'] .ctx-meter-value {
+  min-width: 4ch;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
-.ui-icon-button[data-context='chat-context'].mid .rfg {
-  stroke: var(--warn);
-}
-
-.ui-icon-button[data-context='chat-context'].hi .rfg {
-  stroke: var(--bad);
-}
-
-.ui-icon-button[data-context='chat-context'].estimate .rfg {
-  stroke: var(--accent);
-  opacity: 0.8;
-}
-
-.ui-icon-button[data-context='chat-context'].compacting {
-  opacity: 1;
-}
-
-.ui-icon-button[data-context='chat-context'].compacting .rfg {
-  stroke: var(--accent);
-}
-
-.ui-icon-button[data-context='chat-context'].compacting svg {
-  animation: ui-chat-context-spin 0.8s linear infinite;
-}
-
-.ui-icon-button[data-context='chat-context']:hover:not([aria-disabled='true']) {
+.ui-button[data-context='chat-context']:hover:not([aria-disabled='true']) {
   background: var(--surface-2);
 }
 
-.ui-icon-button[data-context='chat-context'][aria-disabled='true'] {
+.ui-button[data-context='chat-context'][aria-disabled='true'] {
   cursor: default;
   opacity: 0.7;
+}
+
+.ui-button[data-context='chat-context'].compacting {
+  opacity: 1;
 }
 
 .ui-icon-button[data-context='chat-message-copy'] {
@@ -2309,12 +2293,6 @@
 @keyframes ui-chat-icon-rotate {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@keyframes ui-chat-context-spin {
-  to {
-    transform: rotate(1turn);
   }
 }
 

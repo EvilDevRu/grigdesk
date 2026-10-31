@@ -20,7 +20,22 @@ export interface DriverManifest {
   settings: TrackerSettingsSchema;
 }
 
+export interface TrackerReadOptions {
+  signal?: AbortSignal;
+}
+
+export interface TrackerReadTrace {
+  operation: 'identity' | 'dashboard' | 'task' | 'taskPage' | 'users' | 'groups' | 'probe';
+  phase: 'queued' | 'started' | 'request' | 'headers' | 'settled';
+  outcome?: 'success' | 'error' | 'cancelled' | 'timeout';
+  ms?: number;
+  waitMs?: number;
+  attempt?: number;
+  status?: number;
+}
+
 export interface TrackerHost {
+  traceRead?(event: TrackerReadTrace): void;
   fetch?: typeof fetch;
   credentials: { read(): TaskData | null };
   dataDir: string;
@@ -43,26 +58,26 @@ export interface TaskTracker {
   id: string;
   capabilities: TrackerCapabilities;
   isConfigured(): boolean;
-  accountIdentity(): Promise<TrackerIdentity | null>;
+  accountIdentity(options?: TrackerReadOptions): Promise<TrackerIdentity | null>;
   testAuth(): Promise<{
     ok: boolean;
     userId?: number | null;
     error?: string;
   }>;
-  listTasks(): Promise<TaskData[]>;
-  taskDetail(id: string): Promise<unknown>;
-  getDashboard(): Promise<TrackerDashboard>;
+  listTasks(options?: TrackerReadOptions): Promise<TaskData[]>;
+  taskDetail(id: string, options?: TrackerReadOptions): Promise<unknown>;
+  getDashboard(options?: TrackerReadOptions): Promise<TrackerDashboard>;
   sourceUrl(id: string): Promise<string> | string;
   probeTaskNumber(id: string): Promise<TaskPresence>;
-  taskPageData?(id: string): Promise<unknown>;
+  taskPageData?(id: string, options?: TrackerReadOptions): Promise<unknown>;
   createTask?(input: TaskData): Promise<unknown>;
   updateTask?(id: string, input: unknown): Promise<unknown>;
   addComment?(id: string, text: unknown): Promise<unknown>;
   timer?(action: string, id: string): Promise<unknown>;
   completeTask?(id: string): Promise<unknown>;
   renewTask?(id: string): Promise<unknown>;
-  findUsers?(query: string): Promise<unknown>;
-  listGroups?(): Promise<unknown>;
+  findUsers?(query: string, options?: TrackerReadOptions): Promise<unknown>;
+  listGroups?(options?: TrackerReadOptions): Promise<unknown>;
   dispose?(): Promise<void>;
 }
 

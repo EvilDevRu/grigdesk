@@ -18,6 +18,8 @@ import type { WindowControls } from '../windowControls.ts';
 
 import { parseToolControl } from '../../../shared/desktop/toolWindowContract.ts';
 import type { ToolControl } from '../../../shared/desktop/toolWindowContract.ts';
+import type { ApplicationLauncher } from '../applicationLauncher.ts';
+import { applicationLauncherApi } from './applicationLauncherApi.ts';
 
 interface ProbeUpstream extends PipeUpstream {
   probe(): Promise<void>;
@@ -29,7 +31,14 @@ export interface NativeWindows {
   main(origin: string, request: MainRequest): Promise<boolean>;
 }
 
+export interface NativeBrowserState {
+  state(): NonNullable<ShellState['browser']>;
+  subscribe(listener: () => void): () => void;
+}
+
 interface ShellOptions {
+  applicationLauncher?: ApplicationLauncher;
+  nativeBrowser?: NativeBrowserState;
   selectDirectory?(origin: string): Promise<string | null>;
   windowControls?: WindowControls;
   desktopExit?: DesktopExitPreference;
@@ -111,6 +120,7 @@ export function createShellApi(options: ShellOptions) {
   });
   const unsubscribeExit = options.desktopExit?.subscribe(changed);
   const unsubscribeWindow = options.windowControls?.subscribe(changed);
+  const unsubscribeBrowser = options.nativeBrowser?.subscribe(changed);
   /**
    * Публичный снимок содержит только сведения, нужные интерфейсу.
    * Закрытый ключ, pin и внутренние порты профилей не уходят в renderer.
@@ -122,6 +132,7 @@ export function createShellApi(options: ShellOptions) {
 
     return {
       rev,
+      ...(options.nativeBrowser ? { browser: options.nativeBrowser.state() } : {}),
       ...(options.windowControls ? { windowControls: options.windowControls.state() } : {}),
       ...(options.desktopExit ? { desktopExit: { skipConfirmation: options.desktopExit.get() } } : {}),
       ...(options.systemLanguage === undefined ? {} : {
@@ -137,7 +148,9 @@ export function createShellApi(options: ShellOptions) {
       serverApi: connection?.serverApi || null,
       appApi,
       capabilities: [
+        ...(options.applicationLauncher ? ['applicationLauncher' as const] : []),
         ...(options.nativeWindows ? ['windows' as const] : []),
+        ...(options.nativeBrowser ? ['browser' as const] : []),
         ...(options.selectDirectory ? ['selectDirectory' as const] : []),
       ],
       localAvailable: options.localAvailable(),
@@ -362,6 +375,12 @@ export function createShellApi(options: ShellOptions) {
       }
 
       const body = await readBody(req, locale);
+
+      if (pathname === '/__shell/launcher') {
+        await applicationLauncherApi(req, res, body, options.applicationLauncher);
+
+        return;
+      }
 
       if (req.method === 'POST' && pathname === '/__shell/directory/select') {
         if (!options.selectDirectory) {
@@ -621,6 +640,7 @@ export function createShellApi(options: ShellOptions) {
       closed = true;
       unsubscribeExit?.();
       unsubscribeWindow?.();
+      unsubscribeBrowser?.();
 
       for (const cancel of retries.values()) {
         cancel();

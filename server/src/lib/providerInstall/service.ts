@@ -6,8 +6,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 import type { ExecutorAdapter, ProviderInstallCommand, ProviderInstallation } from '../executors/index.ts';
 import { isOutdated, parseVersion } from '../executors/_npmLatest.ts';
-import { runCommand, type PluginCommandRunner } from '../pluginInstall/runCommand.ts';
-import { terminateOwnedWorker } from '../pluginInstall/workerIdentity.ts';
+import { runCommand, type PluginCommandRunner } from '../packageInstall/runCommand.ts';
+import { terminateOwnedWorker } from '../packageInstall/workerIdentity.ts';
 import { withRetry } from '../retry.ts';
 import { applyEnvChanges, updateEnvFile } from '../envFile.ts';
 import { runtimeInstallationRoot, runtimeRoot } from '../runtimePaths.ts';
@@ -1309,7 +1309,7 @@ export class ProviderInstallService {
     try {
       const options = {
         ownership: {
-          started: async (worker: import('../pluginInstall/runCommand.ts').CommandWorker) => {
+          started: async (worker: import('../packageInstall/runCommand.ts').CommandWorker) => {
             this.state.worker = worker;
             await this.publish();
           },

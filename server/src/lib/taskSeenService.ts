@@ -1,4 +1,5 @@
-// Предметный слой просмотренных задач: scope выводится из текущего трекера и
+import type { TrackerReadOptions } from './trackers/contract.ts';
+// Предметный слой просмотренных задач: scope выводится из текущего B24-портала и
 // пользователя, наружу уходит только opaque hash — клиент не может попросить чужой набор.
 import { trackerAccountScope } from './trackers/accountScope.ts';
 import type { TrackerIdentity } from './trackers/accountScope.ts';
@@ -41,22 +42,27 @@ export class TaskSeenService {
   }
 
   /**
-   * Идентичность берётся у выбранного драйвера перед каждой операцией сервиса.
-   * Неполные реквизиты и сетевые отказы превращаются в безопасную ошибку области.
+   * Scope берётся только из подтверждённой серверной identity.
+   * Signal отменяет чтение; локальные мутации сохраняют прежнюю доставку.
    */
-  private async _scope(): Promise<string> {
+  private async _scope(options: TrackerReadOptions = {}): Promise<string> {
     let identity: Awaited<ReturnType<TrackerFacade['accountIdentity']>>;
 
     try {
-      identity = await this.tracker.accountIdentity();
+      identity = await this.tracker.accountIdentity(options);
     } catch (error) {
       throw new TaskSeenIdentityError(undefined, error);
     }
     return seenScopeFor(identity);
   }
 
-  async list(): Promise<SeenScope & { scope: string }> {
-    const scope = await this._scope();
+  /**
+   * Чтение отметок передаёт срок жизни HTTP до общего определения identity.
+   * Серверный scope по-прежнему не может быть выбран полем запроса.
+   */
+  async list(options: TrackerReadOptions = {}): Promise<SeenScope & { scope: string }> {
+    const scope = await this._scope(options);
+
     return { scope, ...await this.store.list(scope) };
   }
 

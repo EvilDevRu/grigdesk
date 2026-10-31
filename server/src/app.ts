@@ -44,8 +44,11 @@ import { extractSceneFrames } from './lib/media/ingest.ts';
 import { TrackerCredentialsStore } from './lib/trackers/credentialsStore.ts';
 import { ClaudeAuthStore } from './lib/claudeAuthStore.ts';
 import { PrefsStore } from './lib/prefsStore.ts';
-import { PluginInstallService } from './lib/pluginInstall/service.ts';
-import { readPluginInstallConfiguration } from './lib/pluginInstall/configuration.ts';
+import { PluginInstallService } from './lib/packageInstall/service.ts';
+import { createDbEngineInstallRuntime } from './lib/db/installRuntime.ts';
+import {
+  readDbEngineInstallConfiguration, readPluginInstallConfiguration,
+} from './lib/packageInstall/configuration.ts';
 import { SYSTEM } from './lib/pluginsRegistry.ts';
 import { SpeechRuntime } from './lib/speech/index.ts';
 import { ModelJobManager } from './lib/speech/modelJobs.ts';
@@ -149,6 +152,9 @@ import {
 import { isProjectArchived } from './lib/projects/archive.ts';
 import { projectRepos } from './lib/projects.ts';
 import { RoutesStore } from './modules/routes/store.ts';
+import { createFactoryBrowserTrusted } from './lib/browser/factoryBrowserTrusted.ts';
+import { createBrowserService } from './lib/browser/browserService.ts';
+import browserModule from './modules/browser/index.ts';
 import codeModule from './modules/code/index.ts';
 import studio3dModule from './modules/studio3d/index.ts';
 import telegramModule from './modules/telegram/index.ts';
@@ -200,6 +206,7 @@ function readPluginSettings(
  */
 async function build(desktopParent: DesktopParent | null) {
   const installOptions = await readPluginInstallConfiguration(config);
+  const dbInstallOptions = await readDbEngineInstallConfiguration(config);
   const factoryDebug = new FactoryDebugSettings({
     factoryBin: config.factoryBin,
     stateDir: config.stateDir,
@@ -305,6 +312,42 @@ async function build(desktopParent: DesktopParent | null) {
     prefs,
     broadcast: (event, data) => fastify.sse?.broadcast?.(event, data),
   });
+  const browserAuthority = {
+    controlRoot: config.factoryControlDir,
+    trusted: createFactoryBrowserTrusted({
+      state: factoryState,
+      routes: new RoutesStore({ baseDir: config.routesDir }),
+      projectExists: async (profile) => (await listProjects(config, prefs)).includes(profile),
+    }),
+  };
+  const browser = await createBrowserService({
+    prefs,
+    dataHome: config.dataHome,
+    artifactsDir: config.artifactsDir,
+    authority: browserAuthority,
+  });
+  const removeTaskOwners = browser.owners.register('task', async () => {
+    const rows: { owner: string; label: string }[] = [];
+
+    for (const task of (await factoryState.listTaskIds()).slice(0, 1000)) {
+      const trusted = await browserAuthority.trusted(task).catch(() => null);
+
+      if (trusted) {
+        rows.push({
+          owner: JSON.stringify(['task', trusted.profile, task, trusted.attempt]),
+          label: `Задача ${task}`,
+        });
+      }
+    }
+
+    return rows;
+  });
+
+  fastify.addHook('onClose', async () => {
+    removeTaskOwners();
+    await browser.close();
+  });
+
   const isDeletedProject = (id: string) => isProjectDeleted(prefs, id);
   const permissionQueue = createPermissionQueue();
   const sshConnections = await createSshStore({
@@ -436,7 +479,28 @@ async function build(desktopParent: DesktopParent | null) {
     },
   };
 
-  const dbEngines = await createEngineRegistry();
+  const builtinEngines = await createEngineRegistry();
+  const builtinList = await builtinEngines.list();
+  const dbEngineInstalls = new PluginInstallService({
+    ...dbInstallOptions,
+    packageKind: 'db-engine',
+    reservedIds: builtinList.map((engine) => engine.id),
+    log: fastify.log,
+  });
+
+  fastify.addHook('onClose', async () => dbEngineInstalls.close());
+
+  const dbRecovery = await dbEngineInstalls.recover();
+  const dbEngines = await createEngineRegistry({
+    loaders: builtinList.map((engine) => ({
+      name: engine.id,
+      load: async () => ({ default: builtinEngines.get(engine.id) }),
+    })),
+    externalDir: config.dbEnginesDir,
+    blockedIds: dbRecovery.blockedIds,
+    grigDeskVersion: dbInstallOptions.grigDeskVersion,
+    log: fastify.log,
+  });
   const dbProfiles = await createDbStore({
     withReferences: projectsService.withReferences,
     isProjectDeleted: isDeletedProject,
@@ -462,6 +526,9 @@ async function build(desktopParent: DesktopParent | null) {
       Math.max(1, Number(readPluginSettings(fastify, 'db').idleCloseMinutes) || 15) * 60_000
     ),
   });
+
+  dbEngineInstalls.bindRuntime(createDbEngineInstallRuntime({ sessions: dbSessions, engines: dbEngines }));
+
   const dbSettings = () => {
     const value = readPluginSettings(fastify, 'db');
     return {
@@ -570,6 +637,27 @@ async function build(desktopParent: DesktopParent | null) {
 
   const dbService = {
     listEngines: () => dbEngines.list(),
+    /**
+     * Дополнительные сведения относятся только к активному startup-снимку.
+     * Ошибка installer не скрывает список и не вызывает повторного импорта.
+     */
+    async engineSnapshot() {
+      const engines = await dbEngines.list();
+      const installs: Record<string, unknown> = {};
+
+      for (const engine of engines) {
+        if (!builtinEngines.get(engine.id)) {
+          installs[engine.id] = await dbEngineInstalls.describe(engine.id).catch(() => null);
+        }
+      }
+
+      return {
+        engines,
+        errors: dbEngines.errors(),
+        installs,
+        installHealth: dbEngineInstalls.health(),
+      };
+    },
     listProfiles: () => dbProfiles.list(),
     createProfile: (input: Parameters<typeof dbProfiles.create>[0]) => dbProfiles.create(input),
     updateProfile: (
@@ -660,6 +748,7 @@ async function build(desktopParent: DesktopParent | null) {
   const claudeAuth = new ClaudeAuthStore({ authPath: config.claudeAuthPath });
   const trackerRuntime = await createTrackerRuntime({
     config,
+    traceRead: (event) => fastify.log.debug(event, 'Чтение трекера'),
     credsStore,
     factoryState,
     projectsService,
@@ -1236,11 +1325,13 @@ async function build(desktopParent: DesktopParent | null) {
     projectsService,
   });
   await fastify.register<SshModuleOptions>(sshModule, { service: asPort(sshService) });
-  await fastify.register(dbModule, { service: dbService });
+  await fastify.register(dbModule, { service: dbService, installs: dbEngineInstalls });
   await fastify.register(dockerModule, { service: dockerService });
   await fastify.register(sandboxesModule, { service: sandboxService });
   await fastify.register(showcaseModule, { service: showcaseService });
+  await fastify.register(browserModule, browser);
   await fastify.register(chatModule, {
+    browser,
     projectsService,
     factoryState,
     config,

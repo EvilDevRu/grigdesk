@@ -38,6 +38,7 @@ import type { EnvMap } from '../../shared/desktop/desktopRuntime.ts';
 import type { RuntimeDescriptor } from '../../shared/desktop/desktopRuntime.ts';
 import { isNodeVersionSupported, MIN_NODE_VERSION } from '../../server/src/lib/nodeVersion.ts';
 import { localOrigin } from './connection.ts';
+import { cleanDesktopChildEnvironment } from './childEnvironment.ts';
 
 export type RuntimeProblem = 'not_installed' | 'invalid' | 'root' | 'web' | 'node' | 'package';
 
@@ -91,26 +92,7 @@ export interface RuntimeDependencies {
 
 const executeFile = promisify(execFile);
 
-const PACKAGED_ENV_KEYS = new Set([
-  'APPDIR',
-  'APPIMAGE',
-  'ARGV0',
-  'OWD',
-  'APPIMAGE_EXTRACT_AND_RUN',
-  'CHROME_DESKTOP',
-  'FC_FONTATIONS',
-  'INVOCATION_ID',
-  'JOURNAL_STREAM',
-  'SYSTEMD_EXEC_PID',
-  'MANAGERPID',
-  'NOTIFY_SOCKET',
-  'LISTEN_PID',
-  'LISTEN_FDS',
-  'LISTEN_FDNAMES',
-  'CLAUDECODE',
-  'GRIGDESK_DESKTOP_DATA_DIR',
-]);
-const PACKAGED_PATH_KEYS = ['PATH', 'LD_LIBRARY_PATH', 'XDG_DATA_DIRS', 'GSETTINGS_SCHEMA_DIR'];
+
 
 export const runtimeDependencies: RuntimeDependencies = {
   async applyBuildSelection(input) {
@@ -406,47 +388,13 @@ export function buildServerEnv(input: {
   sea?: boolean;
   cli?: PackagedCliInput;
 }): Record<string, string> {
-  const env: Record<string, string> = Object.fromEntries(Object.entries({
+  const inherited: Record<string, string> = Object.fromEntries(Object.entries({
     ...input.dotenv,
     ...input.parent,
-  })
-    .filter((entry): entry is [string, string] => entry[1] !== undefined));
-  const appDirs = [env.APPDIR, input.appDir].filter((value): value is string => Boolean(value));
+  }).filter((entry): entry is [string, string] => entry[1] !== undefined));
+  const env = cleanDesktopChildEnvironment(inherited, input.appDir);
 
-  env[USER_CLI_PARENT_KEY] = captureUserCliParent(env);
-
-  for (const key of Object.keys(env)) {
-    if (PACKAGED_ENV_KEYS.has(key) || key.startsWith('ELECTRON_')) {
-      delete env[key];
-    }
-  }
-
-  if (appDirs.length > 0) {
-    for (const key of PACKAGED_PATH_KEYS) {
-      const value = env[key];
-
-      if (value === undefined) {
-        continue;
-      }
-
-      const filtered = value.split(':')
-        .filter((entry) => !appDirs.some((appDir) => entry === appDir || entry.startsWith(`${appDir}/`)))
-        .join(':');
-
-      if (filtered) {
-        env[key] = filtered;
-      } else {
-        delete env[key];
-      }
-    }
-  }
-
-  const originalDesktop = env.ORIGINAL_XDG_CURRENT_DESKTOP;
-
-  if (originalDesktop !== undefined) {
-    env.XDG_CURRENT_DESKTOP = originalDesktop;
-    delete env.ORIGINAL_XDG_CURRENT_DESKTOP;
-  }
+  env[USER_CLI_PARENT_KEY] = captureUserCliParent(inherited);
 
   // Packaged-сервер с готовыми каталогами CLI получает общий порядок в packagedChildEnvironment.
   if (!input.sea || !input.cli) {

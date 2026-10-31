@@ -6,7 +6,7 @@ import {
   PLUGIN_INSTALL_ERRORS,
   installError,
   errorInfo,
-} from '../../server/src/lib/pluginInstall/errors.ts';
+} from '../../server/src/lib/packageInstall/errors.ts';
 
 test('E1: ошибка адреса имеет безопасный русский текст и HTTP 400', () => {
   const error = installError('source_url_invalid');
@@ -50,6 +50,7 @@ test('E2: полная таблица содержит все контрактн
     "service_closed",
     "job_not_found",
     "job_not_ready",
+    "engine_busy",
     "plugin_busy",
     "local_changes",
     "not_managed",

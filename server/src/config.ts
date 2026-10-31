@@ -349,6 +349,12 @@ export const config = {
   pluginInstallsStatePath: process.env.GRIGDESK_PLUGIN_INSTALLS_STATE_PATH
     || path.join(dataStateDir, 'plugin-installs.json'),
 
+  // Внешние драйверы активируются только при следующем старте сервера.
+  // Состояние установщика не входит в заменяемые пакеты.
+  dbEnginesDir: process.env.GRIGDESK_DB_ENGINES_DIR || dataPath(dataHome, 'dbEngines'),
+  dbEngineInstallsStatePath: process.env.GRIGDESK_DB_ENGINE_INSTALLS_STATE_PATH
+    || path.join(dataStateDir, 'db-engine-installs.json'),
+
   // Машинные переменные читают все штатные способы запуска.
   // Общий writer сохраняет соседние настройки и порядок строк.
   envPath: envFilePath({ env: process.env, home }),

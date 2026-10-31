@@ -6,6 +6,7 @@ import {
   parseDbAccess,
   parseDbAuditPage,
   parseDbCancel,
+  parseDbEngines,
   parseDbProfiles,
   parseDbQueries,
   parseDbSchema,
@@ -217,3 +218,73 @@ test('повреждённый ответ сети не становится с�
   await assert.rejects(dbApi.sessions(), DbContractError);
   await assert.rejects(dbApi.runQuery('session-a', 'SELECT 1'), DbContractError);
 });
+
+
+const DRIVER_ENGINES = [{
+  id: 'fixture-db',
+  label: 'Внешний',
+  capabilities: { schema: true }
+}];
+
+const DRIVER_ERROR = {
+  id: 'broken',
+  code: 'manifest_invalid',
+  message: 'Некорректный манифест драйвера'
+};
+
+/**
+ * Старый engines() остаётся совместимым публичным контрактом.
+ * Новый snapshot проверяется через прежний API до появления отдельного метода.
+ */
+async function engineSnapshot() {
+  return typeof dbApi.engineSnapshot === 'function' ? dbApi.engineSnapshot() : dbApi.engines();
+}
+
+test('DCONTRACT-BASE: старый parser сохраняет engines и игнорирует optional поля', () => {
+  assert.deepEqual(parseDbEngines({
+    engines: DRIVER_ENGINES,
+    errors: [DRIVER_ERROR],
+    installs: {}
+  }),
+    DRIVER_ENGINES);
+});
+
+test('DCONTRACT-01: старый сервер получает пустые optional defaults в snapshot', async (t) => {
+  t.mock.method(api, 'get', async () => ({ engines: DRIVER_ENGINES }));
+
+  assert.deepEqual(await engineSnapshot(), {
+    engines: DRIVER_ENGINES,
+    errors: [],
+    installs: {},
+    installHealth: null,
+  });
+});
+
+test('DCONTRACT-01: исправные diagnostics не считаются сетевым отказом', async (t) => {
+  t.mock.method(api, 'get', async () => ({
+    engines: DRIVER_ENGINES,
+    errors: [DRIVER_ERROR],
+    installs: { 'fixture-db': null },
+    installHealth: null,
+  }));
+
+  const snapshot = await engineSnapshot();
+
+  assert.deepEqual(snapshot.engines, DRIVER_ENGINES);
+
+  assert.deepEqual(snapshot.errors, [DRIVER_ERROR]);
+
+  assert.deepEqual(snapshot.installs, { 'fixture-db': null });
+});
+
+for (const patch of [
+  { errors: [{ ...DRIVER_ERROR, code: 42 }] },
+  { installs: { 'fixture-db': { version: 42 } } },
+  { installHealth: { code: 42, message: [] } },
+]) {
+  test('DCONTRACT-01: повреждённые optional metadata не публикуются', async (t) => {
+    t.mock.method(api, 'get', async () => ({ engines: DRIVER_ENGINES, ...patch }));
+
+    await assert.rejects(engineSnapshot());
+  });
+}

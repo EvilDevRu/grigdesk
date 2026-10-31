@@ -31,12 +31,17 @@
 
     <template v-if="ownTasks.trackerConfigured !== false">
     <BoardLoading v-if="!data && !error" label="Загрузка доски…" />
-    <div v-else-if="error" class="err">
+    <div v-if="error" class="err" role="alert">
       {{ t('core.trackerBoardError', { message: error }) }}
       <UiButton variant="text" @click="trackerSettingsOpen = true">→ Настройки</UiButton>
     </div>
 
-    <template v-else-if="data">
+    <p v-if="data" class="muted" role="status" data-role="board-snapshot-status">
+      <span v-if="error">{{ t('core.boardSnapshotStale') }} </span>
+      <time :datetime="snapshotDateTime">{{ t('core.boardSnapshotUpdated', { time: snapshotTime }) }}</time>
+    </p>
+
+    <template v-if="data">
       <TrackerWidgets :widgets="data.widgets ?? []" />
 
       <!-- Драйвер разрешает несколько незакрытых таймеров одновременно: показываем каждый. -->
@@ -457,7 +462,11 @@ const sortedOwnTasks = computed(() => [...ownTasks.tasks].sort((left, right) =>
 
 // Данные — из кеш-стора (мгновенный показ при переходе + фоновое обновление).
 const board = useBoardStore();
-const { data, error, loading } = storeToRefs(board);
+const { data, error, loading, readAt } = storeToRefs(board);
+const snapshotDateTime = computed(() => readAt.value > 0
+  ? new Date(readAt.value).toISOString() : undefined);
+const snapshotTime = computed(() => readAt.value > 0
+  ? new Date(readAt.value).toLocaleString() : '—');
 const now = ref(Date.now());
 const STATUS_COLOR: Record<string, string> = {
   running: 'var(--accent)',

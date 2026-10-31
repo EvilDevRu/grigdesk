@@ -2,6 +2,13 @@
   "schema": 1,
   "helpers": [
     {
+      "id": "factory-browser",
+      "entry": "server/src/lib/browser/factoryBrowserCli.ts",
+      "entryKind": "main",
+      "exports": ["main"],
+      "description": "Run-scoped браузерный helper Factory."
+    },
+    {
       "id": "external-cli-lease",
       "entry": "server/scripts/externalCliLease.mts",
       "entryKind": "main",
@@ -111,14 +118,14 @@
     },
     {
       "id": "plugin-command-supervisor",
-      "entry": "server/src/lib/pluginInstall/commandSupervisor.mjs",
+      "entry": "server/src/lib/packageInstall/commandSupervisor.mjs",
       "entryKind": "script",
       "exports": [],
       "description": "Supervisor установки плагинов с повторным запуском leader-а."
     },
     {
       "id": "plugin-git-blob-prefix",
-      "entry": "server/src/lib/pluginInstall/gitBlobPrefix.mjs",
+      "entry": "server/src/lib/packageInstall/gitBlobPrefix.mjs",
       "entryKind": "script",
       "exports": [],
       "description": "Разбор git-blob префикса для установки плагина из репозитория."

@@ -6,7 +6,7 @@ import { isRecord } from '../../../../shared/lib/objects.ts';
 import type { ProviderLifecycleOperation, ProviderLifecyclePreparation }
   from '../../../../shared/chat/providerLifecycleContracts.ts';
 import type { ExecutorAdapter } from '../executors/index.ts';
-import { runCommand, type PluginCommandRunner } from '../pluginInstall/runCommand.ts';
+import { runCommand, type PluginCommandRunner } from '../packageInstall/runCommand.ts';
 import { InstallEnvironmentError, type InstallRoots } from './npmEnvironment.ts';
 import {
   resolveUserCliNpm, resolveUserCliEnvironment, type UserCliEnvironment,

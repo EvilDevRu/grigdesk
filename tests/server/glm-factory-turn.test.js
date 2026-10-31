@@ -418,3 +418,59 @@ test('SB10: обычный чат сохраняет политику grigdesk-w
   });
   assert.deepEqual(rowsById(launch.overlay).get('approval')?.config, { policy: 'ask' });
 });
+
+test('BR-G06: actual GLM runtime проводит browser при обоих filesystem policy', async (t) => {
+  const browser = 'mcp__factory-status__grigdesk_browser';
+  const nonce = 'ad'.repeat(32);
+
+  for (const filesystem of ['workspace-write', 'state-only']) {
+    const f = await fixture(t, {
+      hooks: true,
+      updates: [
+        toolCall('browser-1', browser, { action: 'list' }),
+        toolResult('browser-1', '{"ok":true,"tabs":[]}'),
+        { sessionUpdate: 'agent_message_chunk', content: { text: 'stage-browser-ok' } },
+      ],
+    }, {
+      FACTORY_BROWSER_ENABLED: '1',
+      FACTORY_ROUTE_BROWSER_POLICY: 'allow',
+      FACTORY_BROWSER_NONCE: nonce,
+    });
+    const status = statusServer(f.root);
+
+    status.env.push(
+      { name: 'FACTORY_BROWSER_ENABLED', value: '1' },
+      { name: 'FACTORY_ROUTE_BROWSER_POLICY', value: 'allow' },
+    );
+
+    const result = await f.run({
+      factoryContext: {
+        ...IDENTITY,
+        filesystem,
+        ...(filesystem === 'state-only' ? { stateDir: f.stateDir } : {}),
+        statusServer: status,
+      },
+    });
+    const [launch] = f.launches;
+    const rows = rowsById(launch.overlay);
+    const mounted = inserted(launch.overlay).filter((row) => row.name === '@deepseek-ai/dsh-mcp-client');
+    const serialized = JSON.stringify({
+      overlay: launch.overlay,
+      hooks: launch.hooks,
+      policy: launch.policy,
+    });
+
+    assert.equal(result.reply, 'stage-browser-ok');
+    assert.equal(launch.policy.browser, true);
+    assert.deepEqual(launch.policy.rawTools, [...GLM_FACTORY_STATUS_TOOLS, browser]);
+    assert.equal(rows.get('sandbox-policy')?.config.workspaceRoot,
+      await fs.realpath(filesystem === 'state-only' ? f.stateDir : f.project));
+    assert.equal(rows.get('approval')?.config.policy, 'never');
+    assert.deepEqual(mounted.map((row) => row.config.serverName), ['factory-status']);
+    assert.equal(mounted[0].config.env.FACTORY_BROWSER_ENABLED, '1');
+    assert.equal(Object.hasOwn(mounted[0].config.env, 'FACTORY_BROWSER_NONCE'), false);
+    assert.equal(serialized.includes(nonce), false);
+    assert.equal(serialized.includes('FACTORY_BROWSER_NONCE'), false);
+    assert.equal(await f.closed(), true);
+  }
+});

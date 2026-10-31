@@ -279,7 +279,7 @@ export async function buildHelper(input: BuildHelperInput): Promise<BuiltHelper>
     root: input.root,
     runtimeModule: path.join(input.root, 'server/src/lib/runtimePaths.ts'),
     // Supervisor повторно запускает свой реальный ESM entry, а не URL исходника.
-    skip: [generated, path.join(input.root, 'server/src/lib/pluginInstall/commandSupervisor.mjs')],
+    skip: [generated, path.join(input.root, 'server/src/lib/packageInstall/commandSupervisor.mjs')],
   });
 
   const result = await esbuild({

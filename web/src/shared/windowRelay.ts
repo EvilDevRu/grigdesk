@@ -74,12 +74,17 @@ export function startShellRelay(options: ShellRelayOptions): () => void {
 interface BoardSnapshot {
   data: unknown;
   readAt: number;
+  sourceKey: string;
 }
 interface BoardRelayOptions {
   role: RelayRole;
   snapshot(): BoardSnapshot | null;
+  sourceState(): { key: string; suspended: boolean };
   watchLoads(callback: () => void): () => void;
-  apply(data: unknown, readAt: number): void;
+  watchInvalidation(callback: () => void): () => void;
+  apply(data: unknown, readAt: number, sourceKey: string): void;
+  invalidate(suspended: boolean): void;
+  recheck(): Promise<unknown>;
   mirror(request: (() => void) | null): void;
   channel?: RelayChannel;
 }
@@ -87,42 +92,85 @@ interface BoardRelayOptions {
 const BOARD_RELAY_NAME = 'grigdesk-board-v1';
 
 /**
- * Дашборд портала опрашивает только главный документ. Документ, сам прочитавший доску
- * (опрос главного окна или действие в карточке), делится снимком; остальные его применяют.
+ * Снимок принимается только после локальной проверки его владельца, ключ из канала не доверенный.
+ * Отдельная инвалидизация существует и без данных; пауза записи credentials охватывает зеркала.
  */
 export function startBoardRelay(options: BoardRelayOptions): () => void {
   const channel = options.channel ?? new BroadcastChannel(BOARD_RELAY_NAME);
   let active = true;
+  let receivingInvalidation = false;
   const post = (value: unknown) => {
     if (active) {
       channel.postMessage(value);
+    }
+  };
+  const recheck = () => {
+    if (!options.sourceState().suspended) {
+      void options.recheck().catch(() => undefined);
     }
   };
   const share = () => {
     const current = options.snapshot();
     const data = current?.data;
 
-    if (current && data && typeof data === 'object' && !Array.isArray(data)) {
+    if (current && data && typeof data === 'object' && !Array.isArray(data)
+      && !options.sourceState().suspended && current.sourceKey.length > 0) {
       post({
         version: 1,
         type: 'board-snapshot',
         data,
         readAt: current.readAt,
+        sourceKey: current.sourceKey,
       });
     }
   };
   const request = () => post({ version: 1, type: 'board-request' });
   const stopLoads = options.watchLoads(share);
+  const stopInvalidation = options.watchInvalidation(() => {
+    if (receivingInvalidation || options.role !== 'source') {
+      return;
+    }
+
+    post({
+      version: 1,
+      type: 'board-source-invalidated',
+      suspended: options.sourceState().suspended,
+    });
+  });
 
   channel.onmessage = ({ data }) => {
     if (!active) {
       return;
     }
-    if (relayType(data, 4) === 'board-snapshot' && data.data
-      && typeof data.data === 'object' && !Array.isArray(data.data) && Number.isFinite(data.readAt)) {
-      options.apply(data.data, data.readAt);
+    if (relayType(data, 3) === 'board-source-invalidated' && typeof data.suspended === 'boolean') {
+      receivingInvalidation = true;
+
+      try {
+        options.invalidate(data.suspended);
+      } finally {
+        receivingInvalidation = false;
+      }
+
+      recheck();
+
+      return;
     }
-    else if (options.role === 'source' && relayType(data, 2) === 'board-request') {
+    if (relayType(data, 5) === 'board-snapshot' && data.data
+      && typeof data.data === 'object' && !Array.isArray(data.data) && Number.isFinite(data.readAt)
+      && typeof data.sourceKey === 'string' && data.sourceKey.length > 0) {
+      const state = options.sourceState();
+
+      if (state.suspended) {
+        return;
+      }
+      if (data.sourceKey !== state.key) {
+        recheck();
+
+        return;
+      }
+
+      options.apply(data.data, data.readAt, data.sourceKey);
+    } else if (options.role === 'source' && relayType(data, 2) === 'board-request') {
       share();
     }
   };
@@ -135,6 +183,7 @@ export function startBoardRelay(options: BoardRelayOptions): () => void {
   return () => {
     active = false;
     stopLoads();
+    stopInvalidation();
 
     if (options.role === 'mirror') {
       options.mirror(null);

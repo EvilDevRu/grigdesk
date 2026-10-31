@@ -1,3 +1,5 @@
+import { decodeInstallInfo } from './pluginInstallApi.ts';
+
 import { api } from './apiClient.ts';
 import {
   parseDbAccess,
@@ -5,6 +7,7 @@ import {
   parseDbAuditPage,
   parseDbCancel,
   parseDbEngines,
+  parseDbEngineSnapshot,
   parseDbProfile,
   parseDbProfiles,
   parseDbProjects,
@@ -35,6 +38,15 @@ export const dbApi = {
     const value: unknown = await api.get('/api/db/engines');
 
     return parseDbEngines(value);
+  },
+
+  async engineSnapshot() {
+    const snapshot = parseDbEngineSnapshot(await api.get('/api/db/engines'));
+    const installs = Object.fromEntries(Object.entries(snapshot.installs).map(([id, value]) => [
+      id, value === null ? null : decodeInstallInfo(value),
+    ]));
+
+    return { ...snapshot, installs };
   },
 
   async profiles() {

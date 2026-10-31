@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 
-import type { PluginInstallPort } from '../../lib/pluginInstall/service.ts';
+import type { PluginInstallPort } from '../../lib/packageInstall/service.ts';
 import registerInstallRoutes from '../plugins/installRoutes.ts';
 
 /**

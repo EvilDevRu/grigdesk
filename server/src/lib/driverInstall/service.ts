@@ -1,5 +1,5 @@
-import { PluginInstallService } from '../pluginInstall/service.ts';
-import type { PluginInstallServiceOptions } from '../pluginInstall/service.ts';
+import { PluginInstallService } from '../packageInstall/service.ts';
+import type { PluginInstallServiceOptions } from '../packageInstall/service.ts';
 import { driverPackagePolicy } from '../trackers/driverPackage.ts';
 
 /**

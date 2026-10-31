@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { computePayloadDigest } from '../../server/src/lib/pluginInstall/payloadDigest.ts';
+import { computePayloadDigest } from '../../server/src/lib/packageInstall/payloadDigest.ts';
 import {
   driverInstallFixture, driverRecord, driverRepo, prepareDriver,
 } from './helpers/driverInstallFixture.js';

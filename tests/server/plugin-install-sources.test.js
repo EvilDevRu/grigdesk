@@ -4,8 +4,8 @@ import test from 'node:test';
 import {
   PluginSourceRegistry,
   createDefaultPluginSources,
-} from '../../server/src/lib/pluginInstall/sources.ts';
-import { GitPluginSource } from '../../server/src/lib/pluginInstall/gitSource.ts';
+} from '../../server/src/lib/packageInstall/sources.ts';
+import { GitPluginSource } from '../../server/src/lib/packageInstall/gitSource.ts';
 
 test('SR1: пустой реестр и повтор kind отвергаются', () => {
   assert.throws(() => new PluginSourceRegistry([]), TypeError);

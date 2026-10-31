@@ -64,6 +64,20 @@ export default defineConfig(({ command }) => {
           changeOrigin: true,
           ws: true,
           rewriteWsOrigin: true,
+          // changeOrigin в паре с rewriteWsOrigin выравнивает Host и Origin только
+          // у WS-апгрейда. Обычному HTTP-запросу changeOrigin подменяет Host на
+          // target, а Origin браузера остаётся с портом dev-сервера — и серверные
+          // гарды «Origin === Host» (установка плагинов/движков, обмен ключа окна)
+          // резали POST за прокси 403 origin_forbidden. Возвращаем исходный Host:
+          // сервер сверяет то, что реально в браузере. WS идёт событием proxyReqWs
+          // и этой правкой не задет.
+          configure(proxy) {
+            proxy.on('proxyReq', (proxyReq, req) => {
+              const host = req.headers.host;
+
+              if (host) proxyReq.setHeader('host', host);
+            });
+          },
         },
         '/vscode': { target: proxyTarget, changeOrigin: true, ws: true },
         '/shots': proxyTarget,

@@ -8,7 +8,7 @@ import test from 'node:test';
 import {
   installFixture, prepare, startWithToken, current, completed,
 } from './helpers/providerInstallFixture.js';
-import { runCommand } from '../../server/src/lib/pluginInstall/runCommand.ts';
+import { runCommand } from '../../server/src/lib/packageInstall/runCommand.ts';
 import { EXTERNAL_BASELINE_PATH } from '../../server/src/lib/providerInstall/npmEnvironment.ts';
 
 /**

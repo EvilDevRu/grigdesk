@@ -2,7 +2,9 @@
 // Общие gate-тесты продолжают проверять настоящие watchers оболочки и авторизации.
 export const appWindowStubs = {
   './shared/onboarding/OnboardingHost.vue': 'export default { render: () => null };',
+  './shared/layout/DesktopExitHost.vue': 'export default { render: () => null };',
   './shared/layout/DesktopWindowControls.vue': 'export default { render: () => null };',
+  './views/ToolWindowPage.vue': 'export default { render: () => null };',
   './views/TaskWindowPage.vue': 'export default { render: () => null };',
   './stores/plugins.ts': 'export const usePluginsStore = () => ({ load: async () => {} });',
   './composables/useSse.ts': `export const setSseEnabled = () => {};

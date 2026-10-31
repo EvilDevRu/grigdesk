@@ -6,6 +6,8 @@
 // сервер уже снял с них управляющие последовательности и ограничил объём, а раздел
 // показывает их текстом. Придумать им схему значило бы обещать то, чего нет.
 
+import type { PluginInstallInfo, PluginInstallErrorInfo } from '../pluginInstallContracts.ts';
+
 import { contractDecoders } from '../../lib/contractDecoders.ts';
 import type { Decoder } from '../../lib/contractDecoders.ts';
 
@@ -154,6 +156,17 @@ const auditEntry = objectOf({
 });
 
 const engineList = objectOf({ engines: listOf(dbEngine) });
+const engineDiagnostic = objectOf({
+  id: text,
+  code: text,
+  message: text,
+});
+const engineSnapshot = objectOf({
+  engines: listOf(dbEngine),
+  errors: optional(listOf(engineDiagnostic)),
+  installs: optional(record),
+  installHealth: optional(nullable(objectOf({ code: text, message: text }))),
+});
 const profileList = objectOf({ profiles: listOf(dbProfile) });
 const sessionList = objectOf({ sessions: listOf(dbSession) });
 const sessionOpened = objectOf({ session: dbSession });
@@ -182,6 +195,12 @@ export type DbAuditEntry = ReturnType<typeof auditEntry>;
 export type DbAuditPage = ReturnType<typeof auditPage>;
 export type DbProject = ReturnType<typeof projectList>['projects'][number];
 
+export interface DbEngineMetadata {
+  errors: ReturnType<typeof engineDiagnostic>[];
+  installs: Record<string, PluginInstallInfo | null>;
+  installHealth: PluginInstallErrorInfo | null;
+}
+
 export interface DbAccess {
   session: DbSession | null;
   error: string | null;
@@ -207,6 +226,21 @@ export interface DbProfileInput {
   database: string;
   prod: boolean;
   via: string;
+}
+
+/**
+ * Диагностика дополняет единый список и проверяется вместе с ним.
+ * Старый сервер без дополнительных полей получает пустые безопасные значения.
+ */
+export function parseDbEngineSnapshot(value: unknown) {
+  const snapshot = engineSnapshot(value, 'dbEngineSnapshot');
+
+  return {
+    engines: snapshot.engines,
+    errors: snapshot.errors ?? [],
+    installs: snapshot.installs ?? {},
+    installHealth: snapshot.installHealth ?? null,
+  };
 }
 
 export function parseDbEngines(value: unknown): DbEngine[] {

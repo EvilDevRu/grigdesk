@@ -5,7 +5,7 @@ import type { ProviderLifecycleOperation } from '../../../../shared/chat/provide
 import type { ProviderInstallCommand } from '../executors/index.ts';
 import { isOutdated, parseVersion } from '../executors/_npmLatest.ts';
 import { runCommand, type CommandOwnership, type PluginCommandRunner }
-  from '../pluginInstall/runCommand.ts';
+  from '../packageInstall/runCommand.ts';
 import type { ExternalCliDefinition, ExternalCliInstallation } from './inventoryTypes.ts';
 import { InstallEnvironmentError } from './npmEnvironment.ts';
 import { treeSnapshot } from './treeSnapshot.ts';

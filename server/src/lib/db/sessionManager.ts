@@ -1,3 +1,5 @@
+import { installError } from '../packageInstall/errors.ts';
+
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 
@@ -109,6 +111,48 @@ export function createDbSessionManager(options: DbSessionManagerOptions = {}) {
   const idleMs = options.idleMs;
   const sessions = new Map<string, LiveSession>();
   const events = new EventEmitter();
+  const active = new Map<string, number>();
+  const admission = new Map<string, string>();
+
+  /**
+   * Lease синхронно закрывает допуск до первого await замены файлов.
+   * Счётчик включает opening, живые handles и незавершённый close.
+   */
+  function prepareEngineReplace(id: string) {
+    if ((active.get(id) ?? 0) > 0 || admission.get(id) === 'engine_replacing') {
+      throw installError('engine_busy');
+    }
+
+    const previous = admission.get(id);
+    let finished = false;
+
+    admission.set(id, 'engine_replacing');
+
+    return {
+      /**
+       * Только первый исход меняет допуск; повтор finish безопасен.
+       * Возврат файлов восстанавливает прежний барьер, успех требует рестарта.
+       */
+      async finish(outcome: 'installed' | 'reverted' | 'blocked') {
+        if (finished) {
+          return;
+        }
+
+        finished = true;
+
+        if (outcome === 'reverted') {
+          if (previous) {
+            admission.set(id, previous);
+          } else {
+            admission.delete(id);
+          }
+        } else {
+          admission.set(id, outcome === 'installed'
+            ? 'engine_restart_required' : 'engine_recovery_required');
+        }
+      },
+    };
+  }
 
   // Снятие висящих подтверждений этой сессии: спрашивать про доступ, которого уже
   // нет, нельзя — человек ответил бы на вопрос о мёртвом соединении.
@@ -146,6 +190,19 @@ export function createDbSessionManager(options: DbSessionManagerOptions = {}) {
     const lookupEngine = engines?.get as AnyFunction | undefined;
     const engine = lookupEngine?.call(engines, target?.engine as never) as Payload;
     if (!engine) throw new DbSessionError('engine_not_found', 'Движок БД не найден');
+
+    const blocked = admission.get(target.engine);
+
+    if (blocked) {
+      if (Buffer.isBuffer(password)) {
+        password.fill(0);
+      }
+
+      throw new DbSessionError(blocked, 'Драйвер заменяется или требует перезапуска сервера.');
+    }
+
+    active.set(target.engine, (active.get(target.engine) ?? 0) + 1);
+
     const secret = Buffer.isBuffer(password) ? password : Buffer.from(String(password || ''));
     const channels: Channel[] = [];
     let channel: Channel | null = null;
@@ -198,6 +255,7 @@ export function createDbSessionManager(options: DbSessionManagerOptions = {}) {
       });
     } catch (error) {
       channels.forEach(closeChannel);
+      active.set(target.engine, (active.get(target.engine) ?? 1) - 1);
       throw error;
     } finally {
       secret.fill(0);
@@ -243,9 +301,11 @@ export function createDbSessionManager(options: DbSessionManagerOptions = {}) {
     session.alive = false;
     session.generation += 1;
     if (session.idleTimer) clearTimeout(session.idleTimer);
-    await cancelRuns(session, reason);
-    cancelPending(session.id, reason);
+
     try {
+      await cancelRuns(session, reason);
+      cancelPending(session.id, reason);
+
       const handleClose = session.handle?.close as (() => Promise<unknown>) | undefined;
       const engineClose = session.engine.close as
         ((handle: Payload | null) => unknown) | undefined;
@@ -253,6 +313,7 @@ export function createDbSessionManager(options: DbSessionManagerOptions = {}) {
       if (typeof handleClose === 'function') await handleClose.call(session.handle);
       else await engineClose?.call(session.engine, session.handle);
     } finally {
+      active.set(session.profile.engine, (active.get(session.profile.engine) ?? 1) - 1);
       (session.channels?.length ? session.channels : [session.channel]).forEach(closeChannel);
     }
     emit('lost', session, { reason });
@@ -330,6 +391,7 @@ export function createDbSessionManager(options: DbSessionManagerOptions = {}) {
   const unsubscribe = subscribe?.call(sshSessions, sshLost);
 
   return {
+    prepareEngineReplace,
     open,
     close,
     closeAll,

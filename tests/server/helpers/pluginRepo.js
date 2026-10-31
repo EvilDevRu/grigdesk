@@ -1,8 +1,13 @@
 import { execFile } from 'node:child_process';
+
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+
 import os from 'node:os';
+
 import path from 'node:path';
+
 import { pathToFileURL } from 'node:url';
+
 import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
@@ -44,17 +49,23 @@ export async function git(cwd, ...args) {
  * Репозиторий плагина для тестов установки: рабочая копия и bare origin.
  * `release` пишет файлы версии, коммитит, ставит тег и публикует его в origin.
  */
-export async function createPluginRepo(t, { id = 'demo', name = 'Демо' } = {}) {
+export async function createPluginRepo(t, { id = 'demo', name = 'Демо', packageKind = 'plugin' } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-plugin-repo-'));
+
   const work = path.join(root, 'work');
+
   const origin = path.join(root, 'origin.git');
 
   t.after(() => rm(root, { recursive: true, force: true }));
 
   await git(root, 'init', '-q', '-b', 'main', work);
+
   await git(work, 'config', 'user.name', 'GrigDesk Test');
+
   await git(work, 'config', 'user.email', 'grigdesk@example.invalid');
+
   await git(root, 'init', '-q', '--bare', origin);
+
   await git(work, 'remote', 'add', 'origin', origin);
 
   /**
@@ -63,12 +74,18 @@ export async function createPluginRepo(t, { id = 'demo', name = 'Демо' } = {
    */
   async function release(version, { manifest = {}, files = {}, lightweight = false } = {}) {
     const all = {
-      'plugin.json': JSON.stringify({
+      [packageKind === 'db-engine' ? 'engine.json' : 'plugin.json']: JSON.stringify({
         id,
         name,
         api: 1,
         version,
         description: 'Тестовый плагин',
+        ...(packageKind === 'db-engine' ? {
+          label: name,
+          kind: 'db-engine',
+          minimum: '0.0.0',
+          entry: 'entry.mjs',
+        } : {}),
         ...manifest,
       }, null, 2),
       ...files,
@@ -78,10 +95,12 @@ export async function createPluginRepo(t, { id = 'demo', name = 'Демо' } = {
       const target = path.join(work, file);
 
       await mkdir(path.dirname(target), { recursive: true });
+
       await writeFile(target, body, 'utf8');
     }
 
     await git(work, 'add', '-A');
+
     await git(work, 'commit', '-q', '-m', `release ${version}`);
 
     if (lightweight) {

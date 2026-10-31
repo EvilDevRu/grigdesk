@@ -6,12 +6,12 @@ import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { liveGroupMembers } from '../../server/src/lib/pluginInstall/workerIdentity.ts';
-import { installError } from '../../server/src/lib/pluginInstall/errors.ts';
+import { liveGroupMembers } from '../../server/src/lib/packageInstall/workerIdentity.ts';
+import { installError } from '../../server/src/lib/packageInstall/errors.ts';
 import { writeDurableFile } from '../../server/src/lib/durableFile.ts';
-import { PluginInstallService } from '../../server/src/lib/pluginInstall/service.ts';
-import { PluginSourceRegistry } from '../../server/src/lib/pluginInstall/sources.ts';
-import { computePayloadDigest } from '../../server/src/lib/pluginInstall/payloadDigest.ts';
+import { PluginInstallService } from '../../server/src/lib/packageInstall/service.ts';
+import { PluginSourceRegistry } from '../../server/src/lib/packageInstall/sources.ts';
+import { computePayloadDigest } from '../../server/src/lib/packageInstall/payloadDigest.ts';
 import { installedRecord } from './helpers/pluginInstallState.js';
 import { mirrorPair } from './helpers/pluginMirrorFixture.js';
 import { createPluginRepo } from './helpers/pluginRepo.js';
@@ -1022,7 +1022,6 @@ test('M45-effects: close на барьере apply/rollback и native read де�
         assert.deepEqual(await liveGroupMembers(worker.pgid), []);
       }
 
-      const stable = await readFile(fixture.statePath, 'utf8');
       const next = new PluginInstallService(fixture.service.options);
 
       try {
@@ -1030,6 +1029,11 @@ test('M45-effects: close на барьере apply/rollback и native read де�
         assert.equal((await next.currentJob()).status, 'done');
         assert.equal(JSON.parse(await readFile(path.join(current, 'plugin.json'), 'utf8')).version,
           rollback ? '1.0.0' : '1.2.0');
+
+        // Recovery нового владельца вправе обработать durable очередь cleanup.
+        // Повторный close прежнего владельца сравниваем с состоянием после recovery.
+        const stable = await readFile(fixture.statePath, 'utf8');
+
         await fixture.service.close();
         assert.equal(await readFile(fixture.statePath, 'utf8'), stable,
           'поздний close не пишет после unlock');

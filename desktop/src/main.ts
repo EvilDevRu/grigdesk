@@ -1,8 +1,11 @@
 import { desktopLocale, desktopText, setDesktopLocale } from './locale.ts';
 import { createDirectorySelector } from './directorySelection.ts';
+import { createApplicationLauncher } from './applicationLauncher.ts';
 import {
   app,
   BrowserWindow,
+  WebContentsView,
+  ipcMain,
   clipboard,
   dialog,
   Menu,
@@ -13,6 +16,15 @@ import {
 } from 'electron';
 import type { BrowserWindowConstructorOptions, Rectangle, Session } from 'electron';
 import type { ChildProcess } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+
+import { createBrowserApi } from './browser/browserApi.ts';
+import { createBrowserApps } from './browser/browserApps.ts';
+import { openExternalBrowser } from './browser/externalBrowser.ts';
+import { createNativeBrowserView, browserChildWindowOptions } from './browser/browserView.ts';
+import { attachBrowserIpc } from './browser/browserIpc.ts';
+import { normalizeBrowserPreferences } from '../../shared/browser/browserContract.ts';
+import { cleanDesktopChildEnvironment } from './childEnvironment.ts';
 import { closeSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
@@ -43,7 +55,7 @@ import type { ServerRuntime } from './runtimeConfig.ts';
 import { openServerLog, readUnitState, runVpnGate, spawnServer } from './serverProcess.ts';
 import { createServerSupervisor } from './serverSupervisor.ts';
 import type { ServerStartupStage } from './serverSupervisor.ts';
-import { readSettings, writeSettings } from './settings.ts';
+import { readSettings, writeSettings, updateSettings } from './settings.ts';
 import { API_VERSION } from '../../shared/client/apiVersion.ts';
 import { createClientRuntime } from './clientRuntime.ts';
 import { createPortableRuntime } from './portableRuntime.ts';
@@ -72,6 +84,10 @@ import {
 } from './windowSecurity.ts';
 
 let surfaceWindows: ReturnType<typeof createSurfaceWindows> | null = null;
+let browserApi: ReturnType<typeof createBrowserApi> | null = null;
+let browserDocumentEpoch = 0;
+let removeBrowserIpc: (() => void) | null = null;
+
 const surfaceWindowOrder: BrowserWindow[] = [];
 const maximizeOnShow = new WeakSet<object>();
 let settingsRequest: ReturnType<typeof createSettingsRequest> | null = null;
@@ -214,6 +230,9 @@ const desktopExit = createDesktopExitController({
   log: writeLog,
   exit: () => {
     exiting = true;
+    browserApi?.dispose();
+    removeBrowserIpc?.();
+    removeBrowserIpc = null;
     app.exit(0);
   },
 });
@@ -464,6 +483,9 @@ function configureWindow(
   }
 
   configuredWindows.add(window);
+
+  const childOptions = browserChildWindowOptions(options);
+
   window.setMenuBarVisibility(false);
   window.webContents.on('before-input-event', (event, input) => {
     // Одиночный Alt не показывает меню и не уходит в страницу.
@@ -475,11 +497,11 @@ function configureWindow(
   guardContents(window.webContents, {
     origin: pipeOrigins,
     openExternal,
-    childOptions: options,
+    childOptions,
     onSettingsRequest: () => {
       settingsRequest?.open();
     },
-    onChild: (child) => configureWindow(child, origin, options),
+    onChild: (child) => configureWindow(child, origin, childOptions),
   });
   window.webContents.on('context-menu', (_event, params) => {
     const template = contextMenuTemplate(params, (url) => clipboard.writeText(url), desktopLocale());
@@ -714,11 +736,24 @@ async function createMainWindow(origin: string, stored: DesktopSettings): Promis
   const base = windowOptions(path.join(__dirname, 'icon.png'), app.isPackaged, stored.window);
   const options: BrowserWindowConstructorOptions = {
     ...base,
-    webPreferences: { ...base.webPreferences, session: grigDeskSession },
+    webPreferences: {
+      ...base.webPreferences,
+      session: grigDeskSession,
+      preload: path.join(__dirname, 'browserPreload.cjs'),
+    },
   };
   const window = new BrowserWindow(options);
 
   mainWindow = window;
+  window.webContents.on('did-start-navigation', (event) => {
+    if (event.isMainFrame && !event.isSameDocument) {
+      browserDocumentEpoch += 1;
+      browserApi?.documentChanged();
+    }
+  });
+  window.on('resize', () => browserApi?.hideForResize());
+  window.on('closed', () => browserApi?.machineChanged());
+
   pipeOrigin = origin;
   window.on('maximize', windowControls.changed);
   window.on('unmaximize', windowControls.changed);
@@ -923,12 +958,126 @@ async function prepare(signal: AbortSignal): Promise<void> {
     },
   });
 
+  const manualBrowserApps = structuredClone(stored.manualBrowserApps ?? []);
+  const browserEnvironment = cleanDesktopChildEnvironment(process.env, packageDir);
+  const browserApps = createBrowserApps({
+    dataHome: browserEnvironment.XDG_DATA_HOME || path.join(os.homedir(), '.local/share'),
+    dataDirs: (browserEnvironment.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(path.delimiter),
+    searchPath: browserEnvironment.PATH ?? '',
+    manual: manualBrowserApps,
+    save: () => updateSettings(settingsFile!, stored, {
+      manualBrowserApps: structuredClone(manualBrowserApps),
+    }),
+  });
+
+  browserApi = createBrowserApi({
+    preferences: () => normalizeBrowserPreferences(stored.browser),
+    commit: (value) => updateSettings(settingsFile!, stored, { browser: value }),
+    apps: browserApps.list,
+    chooseApp: async () => {
+      const window = mainWindow;
+
+      if (!window || window.isDestroyed()) {
+        throw new Error('browser_unavailable');
+      }
+
+      const result = await dialog.showOpenDialog(window, { properties: ['openFile'] });
+
+      return result.canceled || !result.filePaths[0]
+        ? null : browserApps.registerManual(result.filePaths[0]);
+    },
+    external: (application, url) => openExternalBrowser({
+      system: (target) => shell.openExternal(target),
+      resolve: browserApps.resolve,
+      spawn: (command, args) => new Promise<void>((resolve, reject) => {
+        const child = spawn(command, args, {
+          shell: false,
+          detached: true,
+          stdio: 'ignore',
+          env: browserEnvironment,
+        });
+
+        child.once('error', reject);
+        child.once('spawn', () => {
+          child.unref();
+          resolve();
+        });
+      }),
+    }, application, url),
+    view: ({ scope, events }) => createNativeBrowserView({
+      machine: stored.selected ?? 'unselected',
+      scope,
+      create: (options) => new WebContentsView(options),
+      window: () => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          throw new Error('browser_unavailable');
+        }
+
+        return mainWindow;
+      },
+      pipeOrigins: () => pipeOrigins,
+      events,
+    }),
+    bounds: () => {
+      const window = mainWindow;
+      const bounds = window?.getContentBounds();
+
+      return {
+        width: bounds?.width ?? 0,
+        height: bounds?.height ?? 0,
+        zoom: window?.webContents.getZoomFactor() ?? 1,
+      };
+    },
+    changed: (snapshot) => {
+      const window = mainWindow;
+
+      if (window && !window.isDestroyed() && pipeOrigin
+        && sameOrigin(window.webContents.mainFrame.url, pipeOrigin)) {
+        window.webContents.send('grigdesk:browser:state', snapshot);
+      }
+    },
+    intent: (value) => {
+      const window = mainWindow;
+
+      if (window && !window.isDestroyed() && pipeOrigin
+        && sameOrigin(window.webContents.mainFrame.url, pipeOrigin)) {
+        window.webContents.send('grigdesk:browser:intent', value);
+      }
+    },
+  });
+  removeBrowserIpc?.();
+  removeBrowserIpc = attachBrowserIpc({
+    ipc: ipcMain,
+    window: () => mainWindow,
+    origin: () => quit.stopping ? null : pipeOrigin,
+    epoch: () => browserDocumentEpoch,
+    execute: (request, valid) => browserApi!.invoke(request, valid),
+    hide: (request) => browserApi!.hide(request),
+  });
+
   client = createClientRuntime({
+    applicationLauncher: process.platform === 'linux' ? createApplicationLauncher({
+      executablePath: process.env.APPIMAGE ?? process.execPath,
+      arguments: app.isPackaged ? [] : [app.getAppPath()],
+      home: os.homedir(),
+      env: process.env,
+      trustShortcut: (file) => new Promise((resolve) => {
+        execFile('gio', ['set', file, 'metadata::trusted', 'true'], { timeout: 2000 }, () => resolve());
+      }),
+    }) : undefined,
     selectDirectory: createDirectorySelector({
       getWindow: () => mainWindow,
       showOpenDialog: (parent, options) => dialog.showOpenDialog(parent, options),
     }),
     windowControls,
+    nativeBrowser: {
+      state: () => {
+        const current = browserApi!.snapshot();
+
+        return { preferences: current.preferences, revision: current.revision };
+      },
+      subscribe: browserApi!.subscribe,
+    },
     desktopExit: desktopExitPreference(),
     settings: stored,
     save: () => writeSettings(settingsFile!, stored),
@@ -1094,6 +1243,7 @@ async function prepare(signal: AbortSignal): Promise<void> {
      * Дочерние окна прежней машины закрываются перед переходом главного.
      */
     async navigate(origin) {
+      browserApi?.machineChanged();
       surfaceWindows?.closeAll();
       pipeOrigin = origin;
 
@@ -1318,6 +1468,9 @@ const quit = createQuitController({
     desktopExit.cleanup();
     startup.cancel();
     surfaceWindows?.closeAll();
+    browserApi?.dispose();
+    removeBrowserIpc?.();
+    removeBrowserIpc = null;
     lifetime.abort();
     portable?.close();
     client?.shell.close();

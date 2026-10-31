@@ -4,10 +4,10 @@ import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { PluginInstallService } from '../../server/src/lib/pluginInstall/service.ts';
-import { PluginInstallStateStore } from '../../server/src/lib/pluginInstall/stateStore.ts';
-import { createApplyFs } from '../../server/src/lib/pluginInstall/applyPackage.ts';
-import { computePayloadDigest } from '../../server/src/lib/pluginInstall/payloadDigest.ts';
+import { PluginInstallService } from '../../server/src/lib/packageInstall/service.ts';
+import { PluginInstallStateStore } from '../../server/src/lib/packageInstall/stateStore.ts';
+import { createApplyFs } from '../../server/src/lib/packageInstall/applyPackage.ts';
+import { computePayloadDigest } from '../../server/src/lib/packageInstall/payloadDigest.ts';
 import { createApplyFixture } from './helpers/pluginApplyFixture.js';
 import { runApplyChild } from './helpers/pluginApplyProcess.js';
 import { versionSnapshot } from './helpers/pluginApplyFixture.js';

@@ -378,3 +378,19 @@ test('SEA-RELEASE-08: повторная публикация не доверя�
   }), /поврежд|целостност/i);
   assert.equal(await readFile(first.archive, 'utf8'), 'archive-one');
 });
+
+test('SEA-RELEASE-05-DB: настоящий CJS граф сохраняет external scanner и runtime bridge', async (t) => {
+  const root = await scratch(t);
+
+  const result = await bundleServer({
+    sourceRoot: SOURCE,
+    workDir: root,
+    outfile: path.join(root, 'db-server.cjs'),
+  });
+
+  const inputs = Object.keys(result.metafile.inputs).map((file) => file.replaceAll('\\', '/'));
+
+  for (const file of ['server/src/lib/db/externalEngineDirectory.ts', 'server/src/lib/runtimeImport.ts']) {
+    assert.equal(inputs.some((input) => input.endsWith(file)), true, file);
+  }
+});

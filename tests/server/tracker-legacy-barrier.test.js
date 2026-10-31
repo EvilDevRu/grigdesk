@@ -114,7 +114,19 @@ test('LEGACY-HTTP-01: прежние пути, тела и ответы B24 со
 
     assert.equal(response.statusCode, 200, url);
     assert.deepEqual(response.json(), expected, url);
-    assert.deepEqual(calls.at(-1), { name, args }, url);
+
+    const actual = calls.at(-1);
+
+    if (method === 'GET') {
+      const options = actual.args.at(-1);
+
+      assert.deepEqual(Object.keys(options), ['signal'], url);
+      assert.equal(options.signal instanceof AbortSignal, true, url);
+      assert.equal(options.signal.aborted, false, url);
+      assert.deepEqual(actual, { name, args: [...args, options] }, url);
+    } else {
+      assert.deepEqual(actual, { name, args }, url);
+    }
   }
 
   calls.length = 0;
@@ -138,7 +150,7 @@ test('LEGACY-HTTP-01: прежние пути, тела и ответы B24 со
       groupId: null,
       priority: 0,
     }] },
-    { name: 'taskDetail', args: ['42'] },
+    { name: 'taskDetail', args: ['42', {}] },
   ]);
   assert.equal(updated.json().telegram.links.length, 1);
 });

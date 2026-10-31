@@ -294,14 +294,17 @@ test('V08: «Обновления» и «Запуск системы» — св�
   assert.deepEqual(fixture.unexpected, []);
 });
 
-test('V09: «Процессы» — сводка парами', async (t) => {
+test('V09: «Процессы» — три счётчика и отдельные правила пула', async (t) => {
   const fixture = await openSettings(t);
 
   await showPage(fixture, 'system.processes', '[data-processes-page][data-ready="true"]');
 
-  const terms = await fixture.page.locator('[data-processes-page] dl.settings-facts dt').allTextContents();
+  const terms = await fixture.page.locator('[data-processes-page] dl.settings-process-metrics dt')
+    .allTextContents();
 
-  assert.deepEqual(terms.map((term) => term.trim()), ['В пуле', 'Ведут ход', 'Свободны', 'Лимит пула']);
+  assert.deepEqual(terms.map((term) => term.trim()), ['В пуле', 'Ведут ход', 'Свободны']);
+  assert.match(await fixture.page.locator('.settings-process-policy').textContent(),
+    /Лимит пула\s*4, автогашение через 30 мин простоя/);
   assert.deepEqual(fixture.errors, []);
   assert.deepEqual(fixture.unexpected, []);
 });

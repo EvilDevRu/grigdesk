@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { installError } from '../../lib/pluginInstall/errors.ts';
+import { installError } from '../../lib/packageInstall/errors.ts';
 import { changeError } from './changes.ts';
 
 import type { PluginLifecycle, ReplacementLease } from '../../../../packages/plugin-types/src/server.ts';

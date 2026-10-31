@@ -116,15 +116,13 @@ async function save() {
   error.value = '';
 
   try {
-    const result = await api.post('/api/trackers/settings', {
+    const result = await trackers.saveSettings({
       externalId: externalId.value || null,
       settings: externalId.value ? { [externalId.value]: { ...values.value } } : {},
       expectedRevision: revision.value,
     }) as { revision: number };
 
     revision.value = result.revision;
-    trackers.invalidate();
-    await trackers.load(true);
   } catch (cause) {
     error.value = failureText(cause);
   } finally {

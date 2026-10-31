@@ -5,8 +5,8 @@ import test from 'node:test';
 
 import pluginsModule from '../../server/src/modules/plugins/index.ts';
 import { scanUserPlugins } from '../../server/src/lib/pluginsRegistry.ts';
-import { validatePluginPackage } from '../../server/src/lib/pluginInstall/validatePackage.ts';
-import { sensitivePluginFile } from '../../server/src/lib/pluginInstall/serviceSnapshots.ts';
+import { validatePluginPackage } from '../../server/src/lib/packageInstall/validatePackage.ts';
+import { sensitivePluginFile } from '../../server/src/lib/packageInstall/serviceSnapshots.ts';
 import { createPluginRepo } from './helpers/pluginRepo.js';
 import { installHttpFixture } from './helpers/pluginInstallHttpFixture.js';
 import { Fastify, runtimeFixture } from './helpers/pluginRuntimeFixture.js';

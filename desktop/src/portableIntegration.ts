@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+import { desktopCommand } from './desktopEntry.ts';
+
 interface IntegrationOptions {
   isPortable: boolean;
   windowPath: string;
@@ -12,16 +14,6 @@ interface IntegrationOptions {
   ask(): Promise<boolean>;
   reportError(error: unknown): void;
   fs?: typeof fs;
-}
-
-/**
- * Exec использует синтаксис desktop entry, поэтому проценты и кавычки экранируются отдельно.
- * Shell не запускается; путь остаётся одним аргументом даже с пробелами и метасимволами.
- */
-function desktopExec(file: string): string {
-  const escaped = file.replace(/%/gu, '%%').replace(/[\\"`$]/gu, '\\$&');
-
-  return `"${escaped.replace(/\\/gu, '\\\\')}"`;
 }
 
 /**
@@ -68,7 +60,7 @@ export async function offerPortableIntegration(options: IntegrationOptions): Pro
       '[Desktop Entry]',
       'Type=Application',
       'Name=GrigDesk',
-      `Exec=${desktopExec(options.windowPath)}`,
+      `Exec=${desktopCommand(options.windowPath)}`,
       'Terminal=false',
       'Categories=Development;',
       '',

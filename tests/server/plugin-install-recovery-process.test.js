@@ -5,7 +5,7 @@ import test from 'node:test';
 
 import { createApplyFixture } from './helpers/pluginApplyFixture.js';
 import { runApplyChild } from './helpers/pluginApplyProcess.js';
-import { getRollbackReceipt } from '../../server/src/lib/pluginInstall/stateStore.ts';
+import { getRollbackReceipt } from '../../server/src/lib/packageInstall/stateStore.ts';
 
 /**
  * Disk outcome сопоставляется с настоящими bytes и полными snapshots.

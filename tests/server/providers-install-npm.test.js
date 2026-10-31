@@ -305,7 +305,7 @@ test('отказ npm, проверки или сохранения не пере
  * в переданном `--prefix`. Проверяется именно граница запуска, а не mock runner.
  */
 test('настоящий запуск fake npm ставит копию в выбранный prefix вне D', async (t) => {
-  const { runCommand } = await import('../../server/src/lib/pluginInstall/runCommand.ts');
+  const { runCommand } = await import('../../server/src/lib/packageInstall/runCommand.ts');
   const fixture = await installNpmFixture(t, {
     installed: true,
     runner: runCommand,

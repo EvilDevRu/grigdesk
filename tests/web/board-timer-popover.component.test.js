@@ -39,7 +39,8 @@ test('BOARD-TIMERS-03: топбар раскрывает таймеры и св�
   assert.equal(trigger.attributes('aria-expanded'), 'false');
   assert.match(trigger.attributes('aria-label'), /активных 1/u);
   assert.match(trigger.attributes('aria-label'), /сегодня отработано 3ч 45мин/u);
-  assert.equal(trigger.text(), '1');
+  assert.equal(trigger.get('.board-timers-topbar-count').text(), '1');
+  assert.equal(trigger.get('.topbar-status-label').text(), 'Таймеры задач');
   assert.equal(trigger.find('.board-timers-topbar-label').exists(), false);
   assert.equal(trigger.find('.board-timers-topbar-live').exists(), false);
 
@@ -50,9 +51,11 @@ test('BOARD-TIMERS-03: топбар раскрывает таймеры и св�
   assert.ok(popover);
 
   const header = popover.closest('.ui-topbar-panel').querySelector('.ui-topbar-panel__head');
+
+  assert.equal(header.querySelector('.ui-topbar-panel__title')?.textContent.trim(), 'Таймеры задач');
   assert.match(
-    header?.textContent.replace(/\s+/gu, ' ').trim(),
-    /^Таймеры задач Активно 1\s*·\s*сегодня 3ч 45мин$/u,
+    header.querySelector('.board-timers-popover-summary')?.textContent.replace(/\s+/gu, ' ').trim(),
+    /^Активно 1\s*·\s*сегодня 3ч 45мин$/u,
   );
   assert.equal(Boolean(header?.querySelector('.board-timers-popover-count')), false);
   assert.equal(

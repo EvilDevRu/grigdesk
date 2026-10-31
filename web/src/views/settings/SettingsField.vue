@@ -74,13 +74,8 @@ watch(() => settings.revealTarget, reveal, { flush: 'post' });
 
 <style scoped>
 .settings-field {
-  container: settings-field / inline-size;
   display: grid;
   gap: 10px;
-  min-width: 0;
-  width: 100%;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
   scroll-margin-block: 16px;
 }
 .settings-field[data-dirty='true'], .settings-field[data-revealed='true'] {

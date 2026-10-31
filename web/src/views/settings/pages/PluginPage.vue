@@ -104,13 +104,30 @@
       </aside>
       <section class="settings-plugin-editor" :aria-label="t('settings.selectedPluginSettings')">
         <template v-if="plugin && ready">
-          <header class="settings-plugin-title">
+          <header v-if="!showcasePage" class="settings-plugin-title">
             <SettingsIcon name="plugins" />
             <h4>{{ plugin.name }}</h4>
             <span>{{ plugin.version }}</span>
             <p>{{ plugin.description }}</p>
             <p v-if="!plugin.system" :data-installed-source="plugin.id">{{ provenance(plugin) }}</p>
           </header>
+          <SettingsSection
+            v-if="showcasePage"
+            :heading="t('settings.showcaseSetupStartHeading')"
+            :description="t('settings.showcaseSetupStartHint')"
+          >
+            <UiButton
+              data-showcase-open
+              data-context="workspace-form-wrap"
+              :disabled="!baselineEnabled || !enabled || recoveryBlocked
+                || settings.snapshot.applying || settings.actionRunning"
+              @click="openShowcase"
+            >
+              {{ t('settings.showcaseSetupOpen') }}
+            </UiButton>
+            <p v-if="!enabled">{{ t('settings.showcaseSetupEnableFirst') }}</p>
+            <p v-else-if="!baselineEnabled">{{ t('settings.showcaseSetupApplyFirst') }}</p>
+          </SettingsSection>
           <PluginSourcePanel
             v-if="!plugin.system"
             :key="plugin.id"
@@ -136,6 +153,23 @@
           </SettingsField>
           <p v-if="restartPending">{{ t('settings.waitingForRestart') }}</p>
           <p v-else-if="plugin.needsRestart">{{ t('settings.changingServerComponentStatusWillRequireA') }}</p>
+          <SettingsSection
+            v-if="plugin.system && plugin.id === 'telegram'"
+            :heading="t('settings.telegramSetupHeading')"
+            :description="t('settings.telegramSetupDescription')"
+          >
+            <UiButton
+              data-telegram-setup
+              data-context="workspace-form-wrap"
+              :disabled="!baselineEnabled || !enabled || recoveryBlocked
+                || settings.snapshot.applying || settings.actionRunning"
+              @click="openTelegram"
+            >
+              {{ t('settings.telegramSetupOpen') }}
+            </UiButton>
+            <p v-if="!enabled">{{ t('settings.telegramSetupEnableFirst') }}</p>
+            <p v-else-if="!baselineEnabled">{{ t('settings.telegramSetupApplyFirst') }}</p>
+          </SettingsSection>
           <h4 v-if="plugin.placements?.length">{{ t('settings.placement') }}</h4>
           <SettingsField
             v-for="slot in plugin.placements ?? []"
@@ -178,7 +212,9 @@
               <p>{{ t('settings.noneSelectedMeansAll') }}</p>
             </template>
             <template v-else-if="field.type === 'model'">
-              <UiSelect
+              <ProviderModelSelect
+                :providers="registry"
+                :fallback-label="lostModel(field) || selectedModel(field.key)?.name || ''"
                 :disabled="fieldUnavailable(field.key)"
                 :model-value="modelOption(field.key)"
                 :aria-label="field.label"
@@ -186,16 +222,17 @@
               >
                 <option value="">{{ t('settings.notSelected') }}</option>
                 <option
-                  v-if="lostModel(field)"
+                  v-if="lostModel(field) || modelUnavailable(field.key)"
                   :value="modelOption(field.key)"
+                  :hidden="modelUnavailable(field.key)"
                   disabled
                 >
-                  {{ lostModel(field) }}
+                  {{ lostModel(field) || selectedModel(field.key)?.name }}
                 </option>
                 <optgroup
                   v-for="group in modelGroups(field)"
                   :key="group.id"
-                  :label="group.name + (group.available ? '' : t('settings.unavailable'))"
+                  :label="group.name"
                 >
                   <option
                     v-for="entry in group.models"
@@ -205,7 +242,7 @@
                     {{ entry.name }}
                   </option>
                 </optgroup>
-              </UiSelect>
+              </ProviderModelSelect>
               <template v-if="efforts(field.key).length || modelValue(field.key)?.effort">
                 <p>{{ t('settings.effort') }}</p>
                 <UiSelect
@@ -319,6 +356,7 @@ import { localizePluginMetadata, localizePluginCategory } from '../../../feature
 import SettingsScope from '../SettingsScope.vue';
 import SettingsIcon from '../SettingsIcon.vue';
 import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { isNavigationFailure, NavigationFailureType, useRouter } from 'vue-router';
 import {
   UiSwitch, UiCheckbox, UiInput, UiNumberInput, UiSelect, UiPasswordInput, UiButton, UiInlineMessage,
 } from '../../../ui.ts';
@@ -339,6 +377,10 @@ import PluginSourcePanel from '../PluginSourcePanel.vue';
 import PluginInstallDialog from '../PluginInstallDialog.vue';
 import PluginSetupPanel from './PluginSetupPanel.vue';
 import { useProvidersStore } from '../../../stores/providers.ts';
+import ProviderModelSelect from '../../../shared/ProviderModelSelect.vue';
+import {
+  isSelectableModelProvider, modelSelectValue as modelId,
+} from '../../../shared/providerModelSelect.ts';
 import { createPluginEditor } from '../../../features/settings/pluginEditor.ts';
 import { pluginValueKey, type PluginStorePort } from '../../../features/settings/resources/plugins.ts';
 import {
@@ -347,9 +389,11 @@ import {
 import type { FieldAddress, JsonValue } from '../../../features/settings/contracts.ts';
 import { failureText } from '../../../shared/apiClient.ts';
 import SettingsField from '../SettingsField.vue';
+import SettingsSection from '../SettingsSection.vue';
 
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
+const router = useRouter();
 const plugins = usePluginsStore();
 const installer = usePluginInstallStore();
 const catalog = usePluginCatalogStore();
@@ -363,6 +407,7 @@ const list = computed(() => (plugins.list as PluginListItem[])
 // Одиночный режим: страница из карты системных плагинов рисует форму одного
 // плагина без списка и фильтров магазина.
 const singlePluginId = computed(() => systemPluginOfPage(settings.pageId));
+const showcasePage = computed(() => singlePluginId.value === 'showcase');
 const pluginId = computed(() => singlePluginId.value ?? settings.entityId);
 
 const visible = computed(() => list.value.filter((entry) => {
@@ -490,6 +535,32 @@ function setEnabled(next: boolean): void {
   settings.setField(enabledId.value, 'enabled', next);
 }
 
+/**
+ * Настройка подключения открывает существующий раздел с токеном, чатами и пультом.
+ * Общая политика перехода сохраняет выбор судьбы неприменённых настроек.
+ */
+async function openTelegram(): Promise<void> {
+  await settings.requestAction(async () => {
+    const failure = await router.push('/telegram');
+
+    return !isNavigationFailure(failure)
+      || isNavigationFailure(failure, NavigationFailureType.duplicated);
+  });
+}
+
+/**
+ * Создание ролика начинается в рабочем разделе, а настройки остаются подготовкой.
+ * Общий переход сохраняет выбор судьбы всех неприменённых полей модала.
+ */
+async function openShowcase(): Promise<void> {
+  await settings.requestAction(async () => {
+    const failure = await router.push('/showcase');
+
+    return !isNavigationFailure(failure)
+      || isNavigationFailure(failure, NavigationFailureType.duplicated);
+  });
+}
+
 function textValue(key: string): string {
   return String(value('values', key) ?? '');
 }
@@ -523,10 +594,6 @@ function modelValue(key: string): PluginModelValue | null {
     ? current as unknown as PluginModelValue : null;
 }
 
-function modelId(provider: string, model: string): string {
-  return JSON.stringify({ provider, model });
-}
-
 function modelOption(key: string): string {
   const current = modelValue(key);
 
@@ -551,7 +618,7 @@ function lostEffort(key: string): string {
 }
 
 function modelGroups(field: PluginSetting) {
-  return registry.value.filter((entry) =>
+  return registry.value.filter(isSelectableModelProvider).filter((entry) =>
     !field.requiresCapability || entry.capabilities?.[field.requiresCapability])
     .map((entry) => ({ ...entry, models: (providers.visibleModels as (
       entry: ProviderEntry, selected: string | null,
@@ -561,7 +628,7 @@ function modelGroups(field: PluginSetting) {
 
 /**
  * Пропавшая или несовместимая модель остаётся явным option сохранённого выбора.
- * Временная недоступность исполнителя сама по себе не запрещает выбор модели.
+ * Скрытый по доступности выбор сохраняется до явного действия человека.
  */
 function lostModel(field: PluginSetting): string {
   const current = modelValue(field.key);
@@ -582,6 +649,13 @@ function lostModel(field: PluginSetting): string {
 
   return field.requiresCapability && !provider?.capabilities?.[field.requiresCapability]
     ? t('settings.notSuitableForThisSetting', { providerName: provider?.name, modelName: model.name }) : '';
+}
+
+function modelUnavailable(key: string): boolean {
+  const current = modelValue(key);
+
+  return registry.value.some((provider) => provider.id === current?.provider
+    && !isSelectableModelProvider(provider));
 }
 
 /**

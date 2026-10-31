@@ -1,9 +1,10 @@
 # Конфигурация и boot установки плагинов
 
-Приложение создаёт один PluginInstallService и передаёт его модулю плагинов. Версия
+Для пользовательских плагинов приложение создаёт PluginInstallService и передаёт его модулю плагинов. Версия
 берётся из bounded обычного VERSION; reservedIds — полный SYSTEM. Installer recovery
 выполняется до user scan/import, runtime связывается до обслуживания install API.
 OnClose ждёт весь installer lifetime и durable callbacks до выхода процесса.
+[Драйверы БД](db-engine-install.md) используют отдельный экземпляр того же сервиса со своими путями.
 
 Пути задаются конфигурацией:
 

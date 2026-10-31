@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { PluginInstallService } from '../../../server/src/lib/pluginInstall/service.ts';
+import { PluginInstallService } from '../../../server/src/lib/packageInstall/service.ts';
 import { createPluginRepo, git } from './pluginRepo.js';
 
 const policyUrl = new URL('../../../server/src/lib/trackers/driverPackage.ts', import.meta.url);

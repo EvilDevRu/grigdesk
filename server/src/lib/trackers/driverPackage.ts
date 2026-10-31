@@ -3,21 +3,21 @@ import path from 'node:path';
 
 import { isTrackerSettingsSchema } from '../../../../shared/trackers/validation.ts';
 import { parseSemVer } from '../releaseCommon.ts';
-import { installError } from '../pluginInstall/errors.ts';
-import { assertRealPackageRoot, readPackageTree } from '../pluginInstall/packageTree.ts';
-import type { InstallPackagePolicy } from '../pluginInstall/packagePolicy.ts';
+import { installError } from '../packageInstall/errors.ts';
+import { assertRealPackageRoot, readPackageTree } from '../packageInstall/packageTree.ts';
+import type { InstallPackagePolicy } from '../packageInstall/packagePolicy.ts';
 import {
   boundedJson,
   PACKAGE_LIMITS,
   readPreparedPackageTree,
   validateGitControls,
   validateNpmDirs,
-} from '../pluginInstall/validatePackage.ts';
-import type { PackageExpectations, ValidatedPackage } from '../pluginInstall/validatePackage.ts';
+} from '../packageInstall/validatePackage.ts';
+import type { PackageExpectations, ValidatedPackage } from '../packageInstall/validatePackage.ts';
 
 const DRIVER_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const RESERVED_IDS = new Set(['own', 'constructor', 'prototype', '__proto__']);
-const PLUGIN_FIELDS = ['api', 'nav', 'category', 'web', 'webModule', 'api-ext'];
+const PLUGIN_FIELDS = ['api', 'nav', 'category', 'web', 'webModule', 'api-ext', 'legacy'];
 
 /**
  * Манифест читается без исполнения пакета и переходов по символьным ссылкам.

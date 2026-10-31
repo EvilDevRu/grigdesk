@@ -5,8 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { createNpmRunner } from '../../server/src/lib/pluginInstall/npm.ts';
-import { runCommand } from '../../server/src/lib/pluginInstall/runCommand.ts';
+import { createNpmRunner } from '../../server/src/lib/packageInstall/npm.ts';
+import { runCommand } from '../../server/src/lib/packageInstall/runCommand.ts';
 import {
   createRuntimePaths,
   helperCommand,
@@ -37,10 +37,10 @@ test('SEA-PW-01: source-команды installer-helper-ов прежние', ()
 
   assert.equal(supervisor.command, process.execPath);
   assert.deepEqual(supervisor.args, [
-    path.join(ROOT, 'server/src/lib/pluginInstall/commandSupervisor.mjs'),
+    path.join(ROOT, 'server/src/lib/packageInstall/commandSupervisor.mjs'),
   ]);
   assert.deepEqual(blob.args, [
-    path.join(ROOT, 'server/src/lib/pluginInstall/gitBlobPrefix.mjs'),
+    path.join(ROOT, 'server/src/lib/packageInstall/gitBlobPrefix.mjs'),
     'abc',
   ]);
 });

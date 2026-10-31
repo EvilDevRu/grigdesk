@@ -1,3 +1,4 @@
+import type { TrackerReadOptions } from './trackers/contract.ts';
 // Предметный слой избранного: браузер не передаёт account scope, он выводится
 // из текущего трекера и пользователя и возвращается только как opaque hash.
 import { trackerAccountScope } from './trackers/accountScope.ts';
@@ -41,22 +42,27 @@ export class TaskFavoritesService {
   }
 
   /**
-   * Идентичность берётся у выбранного драйвера перед каждой операцией сервиса.
-   * Неполные реквизиты и сетевые отказы превращаются в безопасную ошибку области.
+   * Scope берётся только из подтверждённой серверной identity.
+   * Signal отменяет чтение; локальные мутации сохраняют прежнюю доставку.
    */
-  private async _scope(): Promise<string> {
+  private async _scope(options: TrackerReadOptions = {}): Promise<string> {
     let identity: Awaited<ReturnType<TrackerFacade['accountIdentity']>>;
 
     try {
-      identity = await this.tracker.accountIdentity();
+      identity = await this.tracker.accountIdentity(options);
     } catch (error) {
       throw new TaskFavoritesIdentityError(undefined, error);
     }
     return favoriteScopeFor(identity);
   }
 
-  async list(): Promise<FavoritesScope & { scope: string }> {
-    const scope = await this._scope();
+  /**
+   * GET может снять своего подписчика холодного определения scope.
+   * Локальные мутации используют прежний вызов _scope без HTTP-отмены.
+   */
+  async list(options: TrackerReadOptions = {}): Promise<FavoritesScope & { scope: string }> {
+    const scope = await this._scope(options);
+
     return { scope, ...await this.store.list(scope) };
   }
 

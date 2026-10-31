@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import { factoryStatusBoundaryArgs } from '../src/lib/factoryStatusArgs.ts';
+import { createFactoryBrowserMcp } from '../src/lib/browser/factoryBrowserMcp.ts';
 
 const execFileAsync = promisify(execFile);
 const STAGE_PROGRESS = fileURLToPath(new URL('../../engine/lib/stage-progress.sh', import.meta.url));
@@ -194,6 +195,8 @@ async function stageResult(argumentsValue: unknown, context: RunContext) {
   return invoke(STAGE_RESULT, args, context);
 }
 
+const browser = createFactoryBrowserMcp(process.env);
+
 const tools = [
   {
     name: 'stage_progress',
@@ -238,6 +241,7 @@ const tools = [
       },
     },
   },
+  ...browser.descriptors,
 ];
 
 function send(id: unknown, result?: unknown, error?: { code: number; message: string }): void {
@@ -278,9 +282,16 @@ async function handle(message: RpcRequest): Promise<void> {
     const context = runContext(process.env);
     const name = String(message.params.name || '');
     const argumentsValue = message.params.arguments ?? {};
-    if (name === 'stage_progress') send(message.id, await stageProgress(argumentsValue, context));
-    else if (name === 'stage_result') send(message.id, await stageResult(argumentsValue, context));
-    else send(message.id, undefined, { code: -32602, message: 'Unknown tool' });
+
+    if (name === 'stage_progress') {
+      send(message.id, await stageProgress(argumentsValue, context));
+    } else if (name === 'stage_result') {
+      send(message.id, await stageResult(argumentsValue, context));
+    } else if (name === 'grigdesk_browser') {
+      send(message.id, await browser.invoke(argumentsValue));
+    } else {
+      send(message.id, undefined, { code: -32602, message: 'Unknown tool' });
+    }
   } catch (error) {
     send(message.id, {
       content: [{ type: 'text', text: String((error as Error)?.message || error).slice(0, 1_000) }],

@@ -16,12 +16,15 @@ export async function loadDb(): Promise<void> {
 
   try {
     const [[engines, profiles, sessions, queries], [audit]] = await Promise.all([
-      Promise.all([dbApi.engines(), dbApi.profiles(), dbApi.sessions(), dbApi.queries()]),
+      Promise.all([dbApi.engineSnapshot(), dbApi.profiles(), dbApi.sessions(), dbApi.queries()]),
       Promise.allSettled([dbApi.audit()]),
     ]);
 
     store.setSnapshot({
-      engines,
+      engines: engines.engines,
+      engineErrors: engines.errors,
+      engineInstalls: engines.installs,
+      installHealth: engines.installHealth,
       profiles,
       sessions,
       queries,

@@ -117,3 +117,11 @@ export function stockDriverModule(t) {
 export function copyStockPackage(config, t) {
   return copyPackage('grigdesk-b24', config, t);
 }
+
+/**
+ * Регрессионные проверки чтений импортируют фактическую приватную реализацию пакета.
+ * Отсутствие необязательного соседнего пакета сохраняет стандартный skip-контракт.
+ */
+export function customReadModule(file, t) {
+  return packageModule('grigdesk-b24-discript', file, t);
+}

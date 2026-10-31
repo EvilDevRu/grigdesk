@@ -190,6 +190,7 @@ export async function mountBoardView(t, {
           ...snapshot,
         },
         error: boardError,
+        readAt: 1_800_000_000_000,
         loading: pending,
       }),
       actions: { async load() {} },

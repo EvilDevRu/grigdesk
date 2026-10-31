@@ -1,3 +1,5 @@
+import { loadExternalEngines } from './externalEngineDirectory.ts';
+import type { ExternalEngineOptions } from './externalEngineDirectory.ts';
 import type { DbEngineLoader } from './engineDirectory.ts';
 import { loadersFromDirectory } from './engineDirectory.ts';
 import { dbEngineLoaders } from './engineTable.ts';
@@ -16,7 +18,7 @@ export interface DbEngineAdapter {
   [method: string]: unknown;
 }
 
-export interface EngineRegistryOptions {
+export interface EngineRegistryOptions extends ExternalEngineOptions {
   dir?: string | null;
   loaders?: readonly DbEngineLoader[] | null;
 }
@@ -31,6 +33,7 @@ export interface EngineRegistryOptions {
 export async function createEngineRegistry({
   dir = null,
   loaders = null,
+  ...external
 }: EngineRegistryOptions = {}) {
   const engines = new Map<string, DbEngineAdapter>();
   const resolved = loaders ?? (dir ? await loadersFromDirectory(dir) : await dbEngineLoaders());
@@ -53,7 +56,15 @@ export async function createEngineRegistry({
     engines.set(engine.id, engine);
   }
 
+  const errors = await loadExternalEngines(engines, external, (engine) => {
+    if (!engine?.id || !engine.label || !engine.capabilities
+      || REQUIRED.some((method) => typeof engine[method] !== 'function')) {
+      throw new Error('Драйвер не соответствует DB SPI');
+    }
+  });
+
   return {
+    errors: () => structuredClone(errors),
     get: (id: unknown) => engines.get(String(id || '')) || null,
     list: async () => [...engines.values()].map((engine) => ({
       id: engine.id,

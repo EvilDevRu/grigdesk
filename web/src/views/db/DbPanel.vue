@@ -34,6 +34,9 @@
             </span>
           </template>
           <template #actions>
+            <UiButton data-context="workspace-toolbar" @click="openDriverInstall('install', false)">
+              {{ t('core.dbInstallDriver') }}
+            </UiButton>
             <UiButton tone="accent" data-context="workspace-toolbar"
                       :aria-expanded="showCreate" aria-controls="db-create" @click="toggleCreate">
               {{ showCreate ? t('core.dbDesignHideForm') : t('core.dbDesignAddProfile') }}
@@ -64,6 +67,17 @@
         <UiInlineMessage v-if="visibleError" tone="danger">
           {{ visibleError }}
         </UiInlineMessage>
+
+        <UiInlineMessage v-for="error in store.engineErrors" :key="error.id" tone="warning">
+          {{ error.id }}: {{ error.message }}
+        </UiInlineMessage>
+        <UiInlineMessage v-if="store.installHealth" tone="warning">
+          {{ store.installHealth.message }}
+        </UiInlineMessage>
+        <PluginSourcePanel v-if="selectedDriver" :plugin="selectedDriver" package-kind="db-engine"
+                           @update="openDriverInstall('update')" @bind="openDriverInstall('install')" />
+        <PluginInstallDialog v-if="driverDialogOpen" v-model:open="driverDialogOpen"
+                             :mode="driverDialogMode" :plugin="driverDialogSubject" package-kind="db-engine" />
 
         <div class="db-layout">
           <div id="db-workspace-pane" class="db-workspace">
@@ -714,6 +728,10 @@
 </template>
 
 <script setup lang="ts">
+import PluginInstallDialog from '../settings/PluginInstallDialog.vue';
+import PluginSourcePanel from '../settings/PluginSourcePanel.vue';
+import type { InstallSubject } from '../../stores/packageInstall.ts';
+
 import { toolWindowText } from '../../shared/tools/toolWindowMessages.ts';
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
@@ -810,6 +828,34 @@ const draft = reactive({
   via: 'direct',
   prod: false,
 });
+
+const driverDialogOpen = ref(false);
+const driverDialogMode = ref<'install' | 'update'>('install');
+const driverDialogSubject = ref<InstallSubject | null>(null);
+const selectedDriver = computed<InstallSubject | null>(() => {
+  const id = showCreate.value ? draft.engine : selectedProfile.value?.engine;
+  const engine = store.engines?.find((item) => item.id === id);
+
+  if (!engine || !Object.hasOwn(store.engineInstalls ?? {}, engine.id)) {
+    return null;
+  }
+
+  return {
+    id: engine.id,
+    name: engine.label,
+    install: store.engineInstalls[engine.id],
+  };
+});
+
+/**
+ * Установка открывает общий wizard с отдельным серверным родом пакета.
+ * Карточка выбранного движка передаётся только при обновлении или привязке источника.
+ */
+function openDriverInstall(mode: 'install' | 'update', selected = true): void {
+  driverDialogMode.value = mode;
+  driverDialogSubject.value = selected ? selectedDriver.value : null;
+  driverDialogOpen.value = true;
+}
 
 const visibleError = computed(() => localError.value || store.error || '');
 

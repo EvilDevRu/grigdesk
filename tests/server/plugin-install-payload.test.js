@@ -11,8 +11,8 @@ import {
   capturePackageSnapshot,
   computePayloadDigest,
   validatePreparedPayload,
-} from '../../server/src/lib/pluginInstall/payloadDigest.ts';
-import { readPackageTree } from '../../server/src/lib/pluginInstall/packageTree.ts';
+} from '../../server/src/lib/packageInstall/payloadDigest.ts';
+import { readPackageTree } from '../../server/src/lib/packageInstall/packageTree.ts';
 
 /**
  * Snapshot снимается до создания зависимостей, как в настоящей подготовке.

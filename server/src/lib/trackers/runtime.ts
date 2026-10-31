@@ -9,9 +9,9 @@ import { createOwnTracker } from './own.ts';
 import { TrackerRegistry } from './registry.ts';
 import { createSerialQueue } from './serialQueue.ts';
 import { TrackerSettingsStore } from './settingsStore.ts';
-import type { TrackerHost } from './contract.ts';
+import type { TrackerHost, TrackerReadTrace } from './contract.ts';
 import { TrackerError } from './contract.ts';
-import { installError } from '../pluginInstall/errors.ts';
+import { installError } from '../packageInstall/errors.ts';
 
 export interface TrackerRuntimeOptions extends Omit<GrigdeskTasksServiceOptions, 'tracker'> {
   config: GrigdeskTasksServiceOptions['config'] & {
@@ -23,6 +23,7 @@ export interface TrackerRuntimeOptions extends Omit<GrigdeskTasksServiceOptions,
   };
   credsStore: TrackerCredentialsStore;
   fetch?: typeof fetch;
+  traceRead?: (event: TrackerReadTrace) => void;
   grigDeskVersion?: string;
   onChanged?: () => void | Promise<void>;
 }
@@ -51,6 +52,7 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
     if (!value) {
       value = {
         fetch: options.fetch,
+        traceRead: options.traceRead,
         credentials: { read: () => credsStore.readFor(id) },
         dataDir: path.join(path.dirname(config.trackerSettingsPath), 'tracker-data', id),
         cookiePath: cookiePathFor(id),

@@ -3,8 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 
-import { PluginInstallService } from '../../../server/src/lib/pluginInstall/service.ts';
-import { liveGroupMembers } from '../../../server/src/lib/pluginInstall/workerIdentity.ts';
+import { PluginInstallService } from '../../../server/src/lib/packageInstall/service.ts';
+import { liveGroupMembers } from '../../../server/src/lib/packageInstall/workerIdentity.ts';
 
 export const commandSuccess = {
   code: 0,

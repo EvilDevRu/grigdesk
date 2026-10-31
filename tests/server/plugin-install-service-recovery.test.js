@@ -9,8 +9,8 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import { writeDurableFile } from '../../server/src/lib/durableFile.ts';
-import { PluginInstallService } from '../../server/src/lib/pluginInstall/service.ts';
-import { liveGroupMembers } from '../../server/src/lib/pluginInstall/workerIdentity.ts';
+import { PluginInstallService } from '../../server/src/lib/packageInstall/service.ts';
+import { liveGroupMembers } from '../../server/src/lib/packageInstall/workerIdentity.ts';
 import { createPluginRepo } from './helpers/pluginRepo.js';
 import { serviceFixture } from './helpers/pluginServiceFixture.js';
 import { createApplyFixture } from './helpers/pluginApplyFixture.js';

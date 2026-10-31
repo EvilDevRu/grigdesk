@@ -17,6 +17,8 @@ test('IN01/02/04/06/10/11: App сохраняет основной докуме�
       import('../../web/node_modules/vue/index.mjs'),
       compileModule(webFile('../tests/web/helpers/settings-app.ts'), { stubs: {
         ...appWindowStubs,
+        '../router.ts': 'export const router = { push: async () => {} };',
+        '../../router.ts': 'export const router = { push: async () => {} };',
         './shared/asyncView.ts': `
           import { asyncView as realAsyncView } from './src/shared/asyncView.ts';
           export const asyncView = (loader, ...options) => realAsyncView(async () => {
@@ -71,7 +73,9 @@ test('IN01/02/04/06/10/11: App сохраняет основной докуме�
         './views/DiffModal.vue': 'export default { render: () => null };',
         './views/DocumentModal.vue': 'export default { render: () => null };',
         './views/MediaViewer.vue': 'export default { render: () => null };',
-        './stores/board.ts': 'export const useBoardStore = () => ({ startPolling() {}, stopPolling() {} });',
+        './stores/board.ts': `export const useBoardStore = () => ({
+          startPolling() {}, stopPolling() {}, clearSource() {},
+        });`,
         './stores/system.ts': `
           export const useSystemStore = () => ({ startPolling() {}, stopPolling() {} });
         `,

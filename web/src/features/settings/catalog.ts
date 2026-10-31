@@ -163,6 +163,20 @@ SETTINGS_FIELDS.push(...DEVICE_FIELDS.map(([pageId, resourceId, key, control, la
   scope: translator.t('ru', 'settings.thisDevice2'),
 })));
 
+SETTINGS_FIELDS.push(...([
+  ['open', 'select', 'settings.browserOpen', 'settings.browserOpenHint'],
+  ['external', 'select', 'settings.browserApplication', 'settings.browserApplicationHint'],
+  ['agents', 'switch', 'settings.browserAgents', 'settings.browserAgentsHint'],
+] as const).map(([key, control, labelKey, hintKey]) => ({
+  address: { pageId: 'tools.browser', fieldPath: [key] },
+  resourceId: 'browser',
+  key,
+  control,
+  scope: translator.t('ru', 'settings.thisDevice2'),
+  label: translator.t('ru', labelKey),
+  description: translator.t('ru', hintKey),
+})));
+
 SETTINGS_FIELDS.push({
   address: { pageId: 'system.diagnostics', fieldPath: ['level'] },
   resourceId: 'factoryDebug',
@@ -291,7 +305,15 @@ SETTINGS_FIELDS.push({
   control: 'switch',
   label: translator.t('ru', 'settings.startWhenTheMachineTurnsOn'),
   description: translator.t('ru', 'settings.configuresTheSystemdUnitOnThisMachine'),
-  scope: translator.t('ru', 'settings.thisMachine'),
+  scope: translator.t('ru', 'settings.selectedServerComputer'),
+}, {
+  address: { pageId: 'system.startup', fieldPath: ['application', 'enabled'] },
+  resourceId: 'applicationAutostart',
+  key: 'enabled',
+  control: 'switch',
+  label: translator.t('ru', 'settings.startApplicationOnLogin'),
+  description: translator.t('ru', 'settings.applicationAutostartDescription'),
+  scope: translator.t('ru', 'settings.applicationComputer'),
 });
 
 export const SETTINGS_PAGE_KEY = 'grigdesk-settings-page';
@@ -505,7 +527,13 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     id: 'tools.showcase',
     groupId: 'tools',
     label: translator.t('ru', 'settings.builtinPlugins.showcase.name'),
-    description: translator.t('ru', 'settings.builtinPlugins.showcase.description'),
+    description: translator.t('ru', 'settings.showcaseSetupDescription'),
+  },
+  {
+    id: 'tools.browser',
+    groupId: 'tools',
+    label: translator.t('ru', 'settings.browserPage'),
+    description: translator.t('ru', 'settings.browserPageHint'),
   },
   {
     id: 'plugins.installed',
@@ -657,6 +685,10 @@ const GROUP_MESSAGES: Record<string, Record<string, string>> = {
 };
 
 const PAGE_MESSAGES: Record<string, Record<string, string>> = {
+  'tools.browser': {
+    label: 'settings.browserPage',
+    description: 'settings.browserPageHint',
+  },
   "interface.behavior": {
     "label": "settings.behavior",
     "description": "settings.languageAndScreenWakeLockOnThisDevice"
@@ -775,7 +807,7 @@ const PAGE_MESSAGES: Record<string, Record<string, string>> = {
   },
   "tools.showcase": {
     "label": "settings.builtinPlugins.showcase.name",
-    "description": "settings.builtinPlugins.showcase.description"
+    "description": "settings.showcaseSetupDescription"
   },
   "plugins.installed": {
     "label": "settings.marketplaceOverview",
@@ -800,6 +832,21 @@ const PAGE_MESSAGES: Record<string, Record<string, string>> = {
 };
 
 const FIELD_MESSAGES: Record<string, Record<string, string>> = {
+  'browser:open': {
+    label: 'settings.browserOpen',
+    description: 'settings.browserOpenHint',
+    scope: 'settings.thisDevice2',
+  },
+  'browser:external': {
+    label: 'settings.browserApplication',
+    description: 'settings.browserApplicationHint',
+    scope: 'settings.thisDevice2',
+  },
+  'browser:agents': {
+    label: 'settings.browserAgents',
+    description: 'settings.browserAgentsHint',
+    scope: 'settings.thisDevice2',
+  },
   "prefs:chatLiveSessions": {
     "label": "settings.keepTheChatAgentAliveBetweenTurns",
     "description": "settings.appliesToTheNextTurnIdleProcesses",
@@ -943,7 +990,12 @@ const FIELD_MESSAGES: Record<string, Record<string, string>> = {
   "autostart:enabled": {
     "label": "settings.startWhenTheMachineTurnsOn",
     "description": "settings.configuresTheSystemdUnitOnThisMachine",
-    "scope": "settings.thisMachine"
+    "scope": "settings.selectedServerComputer"
+  },
+  "applicationAutostart:enabled": {
+    "label": "settings.startApplicationOnLogin",
+    "description": "settings.applicationAutostartDescription",
+    "scope": "settings.applicationComputer"
   },
   "devicePairing:name": {
     "label": "settings.deviceName",

@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createApplyFs } from '../../server/src/lib/pluginInstall/applyPackage.ts';
+import { createApplyFs } from '../../server/src/lib/packageInstall/applyPackage.ts';
 import { createTrackerRuntime } from '../../server/src/lib/trackers/runtime.ts';
 import { driverInstallFixture, driverRepo, prepareDriver } from './helpers/driverInstallFixture.js';
 import { selectTracker, trackerFixture, writeTracker } from './helpers/trackerFixture.js';

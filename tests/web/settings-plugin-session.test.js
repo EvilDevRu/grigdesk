@@ -307,6 +307,7 @@ test('Плагины: общая сессия и полная запись зн�
     providerStore.providers = [{
       id: 'future',
       name: 'Будущий',
+      available: true,
       models: [{
         id: 'org/model:tag',
         name: 'Модель',

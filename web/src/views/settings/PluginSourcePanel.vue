@@ -24,7 +24,7 @@
       </UiButton>
     </div>
     <template v-if="!plugin.install">
-      <p>{{ t('settings.thePluginWasInstalledManuallyAndHas') }}</p>
+      <p>{{ driver ? t('settings.manualDbDriver') : t('settings.thePluginWasInstalledManuallyAndHas') }}</p>
       <p class="source-hint">{{ t('settings.attachARepositoryToSelectVersionsAnd') }}</p>
       <div class="source-actions">
         <UiButton
@@ -137,16 +137,18 @@ import { t, messageRef } from '../../ui.ts';
 import { computed, ref, onBeforeUnmount } from 'vue';
 
 import { UiButton, UiInlineMessage, confirmDialog } from '../../ui';
+import { useDbEngineInstallStore } from '../../stores/dbEngineInstall.ts';
 import { usePluginInstallStore } from '../../stores/pluginInstall.ts';
 import { shortSha } from '../../shared/pluginInstall.ts';
-import type { PluginListItem } from '../../../../shared/plugins/pluginsContracts.ts';
+import type { InstallSubject } from '../../stores/packageInstall.ts';
 
-const props = defineProps<{ plugin: PluginListItem }>();
+const props = defineProps<{ plugin: InstallSubject; packageKind?: 'plugin' | 'db-engine' }>();
 const emit = defineEmits<{
   update: [];
   bind: [];
 }>();
-const store = usePluginInstallStore();
+const driver = props.packageKind === 'db-engine';
+const store = driver ? useDbEngineInstallStore() : usePluginInstallStore();
 const confirming = ref(false);
 let disposed = false;
 
@@ -179,8 +181,12 @@ async function rollback(): Promise<void> {
   let confirmed = false;
 
   try {
+    const confirmation = driver
+      ? messageRef('settings.driverRollbackConfirmation', { previousVersion: previous.version })
+      : messageRef('settings.pluginRollbackConfirmation', { previousVersion: previous.version });
+
     confirmed = await confirmDialog(
-      messageRef('settings.pluginRollbackConfirmation', { previousVersion: previous.version }),
+      confirmation,
       { okText: messageRef('settings.restore') },
     );
   } finally {

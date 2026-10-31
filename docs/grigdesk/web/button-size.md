@@ -1,6 +1,6 @@
 # Размер кнопки
 
-`UiButton` принимает параметр `size`: `default` (по умолчанию) или `compact`. Значение
+`UiButton` и `UiActionLink` принимают параметр `size`: `default` (по умолчанию) или `compact`. Значение
 выводится в атрибут `data-size`; неизвестное значение даёт `default`. Тип и нормализация —
 `UiActionSize` и `normalizeActionSize` в `web/src/types/uiActions.ts`.
 

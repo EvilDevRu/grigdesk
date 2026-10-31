@@ -33,7 +33,7 @@ async function mountSlider(t, props) {
 
 const LEVELS = ['low', 'medium', 'high'];
 
-test('EFFORT-01: обычный слайдер меняет уровень кликом по точке и по треку', async (t) => {
+test('EFFORT-01: тонкий слайдер меняет уровень и следует динамической шкале модели', async (t) => {
   const wrapper = await mountSlider(t, { modelValue: 'low', levels: LEVELS });
 
   assert.equal(wrapper.findAll('.ui-discrete-slider__points > span').length, LEVELS.length);
@@ -46,6 +46,10 @@ test('EFFORT-01: обычный слайдер меняет уровень кл�
   assert.equal(wrapper.findAll('.ui-discrete-slider__points > span').length, 5);
   assert.equal(wrapper.get('input[type="range"]').attributes('max'), '4');
   assert.equal(wrapper.get('input[type="range"]').attributes('aria-valuetext'), 'high');
+
+  const track = wrapper.get('.ui-discrete-slider--thin');
+
+  assert.equal(track.element.style.getPropertyValue('--ui-slider-fill'), '75%');
 });
 
 test('EFFORT-02: неактивный слайдер молчит, но значение остаётся читаемым', async (t) => {
@@ -149,6 +153,7 @@ test('SLIDER-B1: обычный числовой слайдер сохраняе
   });
 
   assert.equal(wrapper.get('.is-active').text(), 'Обычно');
+  assert.equal(wrapper.find('.ui-discrete-slider--thin').exists(), false);
   assert.equal(wrapper.get('input').element.value, '2');
   await wrapper.get('input').setValue(4);
 

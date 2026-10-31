@@ -3,6 +3,8 @@
     :open="open"
     size="content"
     :body-inset="false"
+    class="ui-workspace"
+    data-ui-workspace
     data-role="plugin-install-dialog"
     :data-mode="mode"
     :data-view="view"
@@ -23,7 +25,7 @@
             </svg>
           </span>
           <div class="install-head-copy">
-            <p>{{ t('settings.grigdeskPlugins') }}</p>
+            <p>{{ driver ? t('settings.dbDrivers') : t('settings.grigdeskPlugins') }}</p>
             <h2 class="install-heading" data-role="install-heading">{{ heading }}</h2>
           </div>
           <UiIconButton :label="t('settings.closeInstallationWindow')" @click="onOpenChange(false)">
@@ -184,8 +186,13 @@
               {{ t('settings.refreshVersionList') }}
             </UiButton>
           </div>
-          <template v-if="mode === 'install'">
-            <UiDisclosureButton v-model:open="sourceHelpOpen" controls="plugin-install-source-help">
+          <div v-if="mode === 'install'" class="install-source-support">
+            <UiDisclosureButton
+              v-model:open="sourceHelpOpen"
+              controls="plugin-install-source-help"
+              size="compact"
+              block
+            >
               {{ t('settings.sshAndPrivateRepositories') }}
             </UiDisclosureButton>
             <p
@@ -195,7 +202,7 @@
             >
               {{ t('settings.httpsSshGitHostPathAndFile') }}
             </p>
-          </template>
+          </div>
         </form>
         <section v-else-if="view === 'progress'" class="install-preparation">
           <div
@@ -237,7 +244,7 @@
           </div>
         </section>
         <section v-else-if="view === 'ready' && preview" class="install-ready">
-          <PluginSourceNotice :membership="membership" :source="store.job?.source.url ?? ''" />
+          <PluginSourceNotice v-if="!driver" :membership="membership" :source="store.job?.source.url ?? ''" />
           <PluginInstallPreview :preview="preview" />
         </section>
         <section v-else-if="view === 'result' && store.job" class="install-result-layout">
@@ -259,14 +266,14 @@
             class="install-result-message"
             data-role="install-result"
           >
-            {{ installResultText(store.job, uiLocale) }}
+            {{ installResultText(store.job, uiLocale, props.packageKind) }}
           </p>
           <UiInlineMessage
             v-else
             data-role="install-result"
             :tone="resultTone"
           >
-            {{ installResultText(store.job, uiLocale) }}
+            {{ installResultText(store.job, uiLocale, props.packageKind) }}
           </UiInlineMessage>
         </section>
       </div>
@@ -360,7 +367,7 @@
               variant="solid"
               tone="accent"
               data-role="install-apply"
-              :disabled="locked || catalog.loading"
+              :disabled="locked || catalog?.loading"
               @click="confirmApply"
             >
               {{ applyCaption }}
@@ -417,6 +424,7 @@ import PluginInstallPreview from './PluginInstallPreview.vue';
 import PluginSourceNotice from './PluginSourceNotice.vue';
 import { usePluginCatalogStore } from '../../stores/pluginCatalog.ts';
 import { sourceMembership, type CatalogSelection } from '../../../../shared/plugins/pluginCatalogPolicy.ts';
+import { useDbEngineInstallStore } from '../../stores/dbEngineInstall.ts';
 import { usePluginInstallStore } from '../../stores/pluginInstall.ts';
 import { deriveInstallDialogView } from '../../shared/pluginInstallView.ts';
 import {
@@ -425,17 +433,19 @@ import {
   installResultText,
   shortSha,
 } from '../../shared/pluginInstall.ts';
-import type { PluginListItem } from '../../../../shared/plugins/pluginsContracts.ts';
+import type { InstallSubject } from '../../stores/packageInstall.ts';
 
 const props = defineProps<{
   open: boolean;
   mode: 'install' | 'update';
-  plugin: PluginListItem | null;
+  plugin: InstallSubject | null;
+  packageKind?: 'plugin' | 'db-engine';
   catalogSelection?: CatalogSelection | null;
 }>();
 const emit = defineEmits<{ 'update:open': [value: boolean] }>();
-const store = usePluginInstallStore();
-const catalog = usePluginCatalogStore();
+const driver = props.packageKind === 'db-engine';
+const store = driver ? useDbEngineInstallStore() : usePluginInstallStore();
+const catalog = driver ? null : usePluginCatalogStore();
 const url = ref('');
 const selectedVersion = ref('');
 const replaceModified = ref(false);
@@ -447,6 +457,7 @@ let openingEpoch = 0;
 let disposed = false;
 
 const dialogView = computed(() => deriveInstallDialogView({
+  packageKind: props.packageKind,
   job: store.job,
   mode: props.mode,
   pluginName: props.plugin?.name ?? null,
@@ -477,10 +488,11 @@ const locked = computed(() => dialogView.value.locked);
 const view = computed(() => dialogView.value.screen);
 const progress = computed(() => dialogView.value.progress);
 const preview = computed(() => dialogView.value.preview);
-const membership = computed(() => sourceMembership(
-  catalog.index, catalog.state, preview.value?.id ?? '', store.job?.source ?? null,
+const membership = computed(() => driver ? 'unverified' : sourceMembership(
+  catalog!.index, catalog!.state, preview.value?.id ?? '', store.job?.source ?? null,
 ));
-const applyCaption = computed(() => ['external', 'unverified'].includes(membership.value)
+const applyCaption = computed(() => driver ? t('settings.applyDriver')
+  : ['external', 'unverified'].includes(membership.value)
   ? t('settings.marketplaceInstallFromSource')
   : store.job?.kind === 'update' || preview.value?.replaces.kind === 'managed'
     ? t('settings.update') : t('settings.install'));
@@ -531,7 +543,7 @@ async function findVersions(): Promise<void> {
  * Disabled разметка обновится позднее, поэтому одного атрибута кнопки недостаточно.
  */
 async function confirmApply(): Promise<void> {
-  if (!locked.value && !catalog.loading && store.job?.status === 'ready') {
+  if (!locked.value && !catalog?.loading && store.job?.status === 'ready') {
     await store.apply();
   }
 }
@@ -591,7 +603,7 @@ watch(url, (value, old) => {
 
 watch(() => props.open && store.job?.status === 'ready'
   ? `${store.job.id}:${store.job.revision}` : '', (identity) => {
-  if (identity) {
+  if (identity && catalog) {
     void catalog.loadIndex(true);
   }
 }, { immediate: true, flush: 'sync' });
@@ -677,7 +689,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .install-header {
   display: grid;
-  gap: 1rem;
+  gap: 0.75rem;
   width: 100%;
   min-width: 0;
 }
@@ -686,7 +698,7 @@ onBeforeUnmount(() => {
   grid-template-columns: 2.5rem minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.75rem;
-  height: 3rem;
+  min-height: 2.5rem;
 }
 .install-brand-icon,
 .install-stage-icon {
@@ -695,7 +707,7 @@ onBeforeUnmount(() => {
   flex: none;
   width: 2.5rem;
   height: 2.5rem;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--accent);
 }
@@ -738,7 +750,7 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
   height: 2.25rem;
   padding: 0 0.625rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   color: var(--ink-low);
 }
 .install-steps [data-current='true'] {
@@ -785,14 +797,14 @@ onBeforeUnmount(() => {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  gap: 1rem;
+  gap: 0.75rem;
   width: 100%;
   min-width: 0;
-  padding: 1.25rem;
+  padding: 1rem 1.25rem;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  font-size: 0.875rem;
+  font-size: var(--workspace-text-size);
   line-height: 1.55;
 }
 .install-content > * {
@@ -804,23 +816,27 @@ onBeforeUnmount(() => {
 }
 .install-stage-heading {
   display: grid;
-  grid-template-columns: 2.75rem minmax(0, 1fr);
+  grid-template-columns: 2rem minmax(0, 1fr);
   align-items: start;
-  gap: 0.875rem;
-  height: 4.5rem;
+  gap: 0.75rem;
+  min-height: 3.25rem;
 }
 .install-stage-icon {
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 50%;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-sm);
+}
+.install-stage-icon svg {
+  width: 1.125rem;
+  height: 1.125rem;
 }
 .install-stage-copy h3 {
-  font-size: 1.125rem;
-  line-height: 1.35;
+  font-size: 0.9375rem;
+  line-height: 1.4;
   font-weight: 600;
 }
 .install-stage-copy p {
-  margin-top: 0.375rem;
+  margin-top: 0.25rem;
   color: var(--ink-mid);
   font-size: 0.8125rem;
   line-height: 1.5;
@@ -844,7 +860,7 @@ onBeforeUnmount(() => {
 .install-result-layout {
   display: grid;
   align-content: start;
-  gap: 1rem;
+  gap: 0.75rem;
   min-width: 0;
 }
 .install-repository-input {
@@ -854,16 +870,22 @@ onBeforeUnmount(() => {
 }
 .install-version-block {
   display: grid;
+  gap: 0.375rem;
+}
+.install-source-support {
+  display: grid;
   gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
 }
 .install-source-help,
 .install-version-status,
 .install-current-version {
   color: var(--ink-mid);
-  font-size: 0.8125rem;
+  font-size: var(--workspace-meta-size);
 }
 .install-version-status {
-  min-height: 2.75rem;
+  min-height: 2.25rem;
 }
 .install-loading-label {
   display: flex;
@@ -873,10 +895,10 @@ onBeforeUnmount(() => {
 .install-current-version,
 .install-job-source,
 .install-package-summary {
-  padding: 1rem;
+  padding: 0.75rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--ground);
+  background: var(--surface-2);
   overflow-wrap: anywhere;
 }
 .install-job-source {
@@ -1040,9 +1062,6 @@ onBeforeUnmount(() => {
   }
   .install-repository-input {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .install-stage-heading {
-    height: 6rem;
   }
   .install-steps {
     gap: 0.25rem;

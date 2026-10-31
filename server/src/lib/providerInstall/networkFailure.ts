@@ -1,4 +1,4 @@
-import type { PluginCommandResult } from '../pluginInstall/runCommand.ts';
+import type { PluginCommandResult } from '../packageInstall/runCommand.ts';
 
 const TRANSIENT_CURL = /\bcurl:\s*\((?:5|6|7|18|28|35|52|55|56|92|95)\)/iu;
 const TRANSIENT_NETWORK = new RegExp([

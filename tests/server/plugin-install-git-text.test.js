@@ -8,9 +8,9 @@ import {
   completeGitStdout,
   parsePluginCommits,
   parsePluginChangedFiles,
-} from '../../server/src/lib/pluginInstall/gitText.ts';
+} from '../../server/src/lib/packageInstall/gitText.ts';
 
-import { runCommand } from '../../server/src/lib/pluginInstall/runCommand.ts';
+import { runCommand } from '../../server/src/lib/packageInstall/runCommand.ts';
 
 const A = 'a'.repeat(40);
 const B = 'b'.repeat(40);

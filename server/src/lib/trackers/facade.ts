@@ -1,6 +1,6 @@
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import { TrackerError } from './contract.ts';
-import type { TaskData, TaskTracker, TrackerIdentity } from './contract.ts';
+import type { TaskData, TaskTracker, TrackerIdentity, TrackerReadOptions } from './contract.ts';
 import type { TrackerRegistry } from './registry.ts';
 import type { TrackerSettingsStore } from './settingsStore.ts';
 import type { TrackerCapabilities } from '../../../../shared/trackers/contracts.ts';
@@ -112,9 +112,9 @@ export class TrackerFacade {
    * Идентичность внешнего пакета нормализуется до строкового пользовательского id.
    * Пакеты прежней версии с числовым id сохраняют тот же личный scope.
    */
-  accountIdentity(): Promise<TrackerIdentity | null> {
+  accountIdentity(options: TrackerReadOptions = {}): Promise<TrackerIdentity | null> {
     return this.invoke(async (tracker) => {
-      const identity = await tracker.accountIdentity();
+      const identity = await tracker.accountIdentity(options);
 
       return identity ? { ...identity, userId: String(identity.userId) } : null;
     });
@@ -128,11 +128,11 @@ export class TrackerFacade {
    * Старые поля разворачиваются аддитивно, widgets и возможности принадлежат драйверу.
    * Legacy API остаётся адресом внешнего трекера, собственная группа читается отдельно.
    */
-  getDashboard(): Promise<Record<string, unknown>> {
+  getDashboard(options: TrackerReadOptions = {}): Promise<Record<string, unknown>> {
     const revision = this.selection.read().revision;
 
     return this.invoke(async (tracker) => {
-      const snapshot = await tracker.getDashboard();
+      const snapshot = await tracker.getDashboard(options);
 
       return {
         ...snapshot.compatibility,
@@ -145,13 +145,13 @@ export class TrackerFacade {
     });
   }
 
-  taskDetail(id: unknown): Promise<unknown> {
-    return this.invoke((tracker) => tracker.taskDetail(String(id)));
+  taskDetail(id: unknown, options: TrackerReadOptions = {}): Promise<unknown> {
+    return this.invoke((tracker) => tracker.taskDetail(String(id), options));
   }
 
-  taskPageData(id: unknown): Promise<unknown> {
+  taskPageData(id: unknown, options: TrackerReadOptions = {}): Promise<unknown> {
     return this.invoke((tracker) => tracker.taskPageData
-      ? tracker.taskPageData(String(id)) : Promise.resolve({ comments: [], attachments: [] }));
+      ? tracker.taskPageData(String(id), options) : Promise.resolve({ comments: [], attachments: [] }));
   }
 
   createTask(input: TaskData): Promise<unknown> {
@@ -180,12 +180,12 @@ export class TrackerFacade {
     return this.invoke((tracker) => tracker.renewTask!(String(id)), 'renew');
   }
 
-  findUsers(query: unknown): Promise<unknown> {
-    return this.invoke((tracker) => tracker.findUsers!(String(query)), 'users');
+  findUsers(query: unknown, options: TrackerReadOptions = {}): Promise<unknown> {
+    return this.invoke((tracker) => tracker.findUsers!(String(query), options), 'users');
   }
 
-  listGroups(): Promise<unknown> {
-    return this.invoke((tracker) => tracker.listGroups!(), 'projects');
+  listGroups(options: TrackerReadOptions = {}): Promise<unknown> {
+    return this.invoke((tracker) => tracker.listGroups!(options), 'projects');
   }
 
   sourceUrl(id: string): Promise<string> {

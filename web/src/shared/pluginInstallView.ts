@@ -12,6 +12,7 @@ import {
 } from './pluginInstall.ts';
 
 export interface InstallDialogInput {
+  packageKind?: 'plugin' | 'db-engine';
   job: PluginInstallJob | null;
   mode: 'install' | 'update';
   pluginName: string | null;
@@ -75,6 +76,8 @@ function dialogHeading(input: InstallDialogInput,
   const t = localeTranslator(locale);
 
   const current = input.job;
+  const installHeading = input.packageKind === 'db-engine'
+    ? t("settings.installingDbDriver") : t("settings.installingAPluginFromGit");
 
   if (current) {
     const name = current.preview?.name ?? current.pluginId ?? t("settings.plugin");
@@ -87,12 +90,12 @@ function dialogHeading(input: InstallDialogInput,
       return t("settings.restoring", { name: name });
     }
 
-    return t("settings.installingAPluginFromGit");
+    return installHeading;
   }
 
   return input.mode === 'update'
     ? t("settings.updating2", { value1: input.pluginName ?? t("settings.plugin") })
-    : t("settings.installingAPluginFromGit");
+    : installHeading;
 }
 
 /**
@@ -148,7 +151,8 @@ export function deriveInstallDialogView(input: InstallDialogInput,
     : screen === 'source' ? t("settings.findTheReleaseYouWantToInstall")
     : screen === 'progress' ? t("settings.workContinuesEvenIfTheWindowIs")
     : screen === 'ready' ? t("settings.reviewThePackageAndConfirmTheChanges")
-    : completed ? t("settings.pluginSavedNextStepsAreBelow")
+    : completed ? input.packageKind === 'db-engine'
+      ? t("settings.driverSavedRestart") : t("settings.pluginSavedNextStepsAreBelow")
     : input.job?.status === 'cancelled' ? t("settings.youCanCloseTheWindowAndReturn")
     : t("settings.operationDetailsAreBelow");
   const stageTone = completed ? 'success'
@@ -202,7 +206,7 @@ export function deriveInstallDialogView(input: InstallDialogInput,
     stageTone,
     stageIcon,
     canStart,
-    resultText: input.job ? installResultText(input.job, locale) : '',
+    resultText: input.job ? installResultText(input.job, locale, input.packageKind) : '',
     footer: {
       primary: {
         action: primaryAction,

@@ -3,8 +3,10 @@
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
-import { TrackerError } from '../../lib/trackers/contract.ts';
 import type { TrackerFacade } from '../../lib/trackers/facade.ts';
+import { TrackerError } from '../../lib/trackers/contract.ts';
+import type { TrackerReadOptions } from '../../lib/trackers/contract.ts';
+import { withTrackerRequestRead } from '../../lib/trackers/requestRead.ts';
 import {
   TrackerValidationError,
   normalizeTaskUpdateFields,
@@ -59,8 +61,8 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
    * Дополняет неизменённые данные портала разрешёнными Telegram-обсуждениями.
    * Одна функция обслуживает чтение и ответ после редактирования, чтобы DTO не расходились.
    */
-  const taskWithDiscussion = async (id: string): Promise<unknown> => {
-    const task = await tracker.taskDetail(id) as Payload | null;
+  const taskWithDiscussion = async (id: string, options: TrackerReadOptions = {}): Promise<unknown> => {
+    const task = await tracker.taskDetail(id, options) as Payload | null;
 
     if (typeof fastify.telegramDiscussion !== 'function' || !task) {
       return task;
@@ -75,7 +77,8 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
   // Полный дашборд: задачи + на контроле + я поставил + показатели + графики.
   fastify.get('/api/tracker/dashboard', async (request, reply) => {
     try {
-      return await tracker.getDashboard();
+      return await withTrackerRequestRead(request, reply,
+        (options) => tracker.getDashboard(options));
     } catch (err) {
       const message = failureText(err);
       const notConfigured = /не настроен/i.test(message);
@@ -103,7 +106,8 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
     }
 
     try {
-      return await taskWithDiscussion(id);
+      return await withTrackerRequestRead(request, reply,
+        (options) => taskWithDiscussion(id, options));
     } catch (err) {
       return reply.code(502).send({ error: 'b24_error', message: failureText(err) });
     }
@@ -112,7 +116,10 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
   // Поиск пользователей (для выбора исполнителя).
   fastify.get<TaskRoute>('/api/tracker/users', async (request, reply) => {
     try {
-      return { users: await tracker.findUsers(request.query.q || '') };
+      const users = await withTrackerRequestRead(request, reply,
+        (options) => tracker.findUsers(request.query.q || '', options));
+
+      return { users };
     } catch (err) {
       return reply.code(502).send({ error: 'b24_error', message: failureText(err) });
     }
@@ -121,7 +128,10 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
   // Доступные текущему пользователю проекты/рабочие группы для поля GROUP_ID задачи.
   fastify.get('/api/tracker/groups', async (request, reply) => {
     try {
-      return { groups: await tracker.listGroups() };
+      const groups = await withTrackerRequestRead(request, reply,
+        (options) => tracker.listGroups(options));
+
+      return { groups };
     } catch (err) {
       return reply.code(502).send({ error: 'b24_error', message: failureText(err) });
     }
@@ -224,12 +234,17 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
   )));
 
   // Комментарии задачи (для таба в модалке): без системных, свежие снизу.
-  fastify.get<TaskRoute>('/api/tracker/task/:id/comments', wrap(async (r) => {
-    const page = await tracker.taskPageData(taskId(r)) as Payload;
-    const comments = Array.isArray(page.comments) ? page.comments as Payload[] : [];
+  fastify.get<TaskRoute>('/api/tracker/task/:id/comments', async (request, reply) => {
+    try {
+      const page = await withTrackerRequestRead(request, reply,
+        (options) => tracker.taskPageData(taskId(request), options)) as Payload;
+      const comments = Array.isArray(page.comments) ? page.comments as Payload[] : [];
 
-    return { comments: comments.filter((c) => !c.isSystem) };
-  }));
+      return { comments: comments.filter((comment) => !comment.isSystem) };
+    } catch (error) {
+      return reply.code(502).send({ error: 'b24_error', message: failureText(error) });
+    }
+  });
 
   fastify.post<TaskRoute>('/api/tracker/task/:id/timer/:action', wrap((r) => {
     const a = String(r.params.action ?? '');

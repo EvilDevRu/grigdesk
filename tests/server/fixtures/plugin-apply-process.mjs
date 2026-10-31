@@ -4,8 +4,8 @@ import {
   createApplyFs,
   applyIntent,
   recoverApply,
-} from '../../../server/src/lib/pluginInstall/applyPackage.ts';
-import { PluginInstallStateStore } from '../../../server/src/lib/pluginInstall/stateStore.ts';
+} from '../../../server/src/lib/packageInstall/applyPackage.ts';
+import { PluginInstallStateStore } from '../../../server/src/lib/packageInstall/stateStore.ts';
 import { writeDurableFile } from '../../../server/src/lib/durableFile.ts';
 
 const config = JSON.parse(await readFile(process.argv[2], 'utf8'));

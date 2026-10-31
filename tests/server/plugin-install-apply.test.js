@@ -5,10 +5,10 @@ import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
-import { applyIntent, recoverApply } from '../../server/src/lib/pluginInstall/applyPackage.ts';
+import { applyIntent, recoverApply } from '../../server/src/lib/packageInstall/applyPackage.ts';
 import { createApplyFixture } from './helpers/pluginApplyFixture.js';
-import { computePayloadDigest } from '../../server/src/lib/pluginInstall/payloadDigest.ts';
-import { PluginInstallStateStore } from '../../server/src/lib/pluginInstall/stateStore.ts';
+import { computePayloadDigest } from '../../server/src/lib/packageInstall/payloadDigest.ts';
+import { PluginInstallStateStore } from '../../server/src/lib/packageInstall/stateStore.ts';
 import { writeDurableFile } from '../../server/src/lib/durableFile.ts';
 
 test('A1: fresh install атомарно публикует record/done, candidate становится current', async (t) => {

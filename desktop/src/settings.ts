@@ -11,6 +11,11 @@ import { recordOrNull } from '../../shared/lib/objects.ts';
 
 import { isToolWindowId } from '../../shared/desktop/toolWindowContract.ts';
 
+import { normalizeBrowserPreferences } from '../../shared/browser/browserContract.ts';
+import type { BrowserPreferences } from '../../shared/browser/browserContract.ts';
+import { normalizeManualBrowserApps } from './browser/browserApps.ts';
+import type { ManualBrowser } from './browser/browserApps.ts';
+
 import { localOrigin } from './connection.ts';
 import { normalizeSurfaceGeometry } from './surfaceGeometry.ts';
 import { normalizeExitPreference } from './desktopExitPreference.ts';
@@ -27,6 +32,8 @@ export type WindowState = {
 };
 
 export type DesktopSettings = {
+  browser?: BrowserPreferences;
+  manualBrowserApps?: ManualBrowser[];
   skipExitConfirmation?: boolean;
   uiLanguage?: string;
   version: 2;
@@ -127,6 +134,11 @@ export function normalizeSettings(value: unknown): DesktopSettings {
   }
 
   return {
+    ...(supported && settings.browser !== undefined
+      ? { browser: normalizeBrowserPreferences(settings.browser) } : {}),
+    ...(supported && settings.manualBrowserApps !== undefined ? {
+      manualBrowserApps: normalizeManualBrowserApps(settings.manualBrowserApps),
+    } : {}),
     ...(supported && normalizeExitPreference(settings.skipExitConfirmation)
       ? { skipExitConfirmation: true } : {}),
     ...(taskWindow || Object.keys(tools).length ? {
@@ -218,14 +230,13 @@ async function atomicWrite(file: string, content: string): Promise<void> {
 }
 
 /**
- * Сохранения одного пути выполняются последовательно и заменяют файл атомарно.
- * Собственные временные файлы удаляются также при отказе записи или переименования.
+ * Все записи файла, включая новый transactional patch, используют одну очередь.
+ * Ошибка отдельного сохранения не блокирует следующую операцию этого же пути.
  */
-export function writeSettings(file: string, settings: DesktopSettings): Promise<void> {
+function queueSettings(file: string, operation: (destination: string) => Promise<void>): Promise<void> {
   const destination = path.resolve(file);
-  const content = JSON.stringify(normalizeSettings(settings), null, 2) + '\n';
   const previous = queues.get(destination) ?? Promise.resolve();
-  const pending = previous.catch(() => undefined).then(() => atomicWrite(destination, content));
+  const pending = previous.catch(() => undefined).then(() => operation(destination));
 
   queues.set(destination, pending);
 
@@ -238,4 +249,38 @@ export function writeSettings(file: string, settings: DesktopSettings): Promise<
   void pending.then(release, release);
 
   return pending;
+}
+
+/**
+ * Текущий объект сериализуется при исполнении своей очереди, а не при постановке.
+ * Поздняя запись геометрии сохраняет уже подтверждённый browser patch.
+ */
+export function writeSettings(file: string, settings: DesktopSettings): Promise<void> {
+  return queueSettings(file, async (destination) => {
+    await atomicWrite(destination, JSON.stringify(normalizeSettings(settings), null, 2) + '\n');
+  });
+}
+
+/**
+ * На диск и в runtime попадает одна и та же нормализованная форма patch.
+ * Изменённые соседями поля общего объекта во время await не откатываются.
+ */
+export function updateSettings(file: string, settings: DesktopSettings,
+  patch: Pick<Partial<DesktopSettings>, 'browser' | 'manualBrowserApps'>,
+): Promise<void> {
+  return queueSettings(file, async (destination) => {
+    const candidate = normalizeSettings({ ...settings, ...patch });
+
+    await atomicWrite(destination, JSON.stringify(candidate, null, 2) + '\n');
+
+    for (const key of Object.keys(patch) as Array<keyof typeof patch>) {
+      const value = candidate[key];
+
+      if (value === undefined) {
+        delete settings[key];
+      } else {
+        Object.assign(settings, { [key]: value });
+      }
+    }
+  });
 }

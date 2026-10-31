@@ -102,8 +102,10 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
   return compileVue(TASK_MODAL_PATH, {
     stubs: {
       'vue-router': `export const useRouter = () => globalThis.${prefix}Router || ({ push() {} });`,
-      '../shared/shellClient.ts':
+      '../shared/shellClient.ts': [
         `export const shellAction = (...args) => globalThis.${prefix}ShellAction?.(...args);`,
+        'export const readShellState = async () => null;',
+      ].join('\n'),
       '../shared/apiClient.ts': [
         `export const api = globalThis.${prefix}Api;`,
         `export { ApiError, failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,

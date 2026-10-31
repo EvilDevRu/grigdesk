@@ -4,8 +4,8 @@ import { lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createApplyFs } from '../../server/src/lib/pluginInstall/applyPackage.ts';
-import { installError } from '../../server/src/lib/pluginInstall/errors.ts';
+import { createApplyFs } from '../../server/src/lib/packageInstall/applyPackage.ts';
+import { installError } from '../../server/src/lib/packageInstall/errors.ts';
 import { installedRecord } from './helpers/pluginInstallState.js';
 import { mirrorPair } from './helpers/pluginMirrorFixture.js';
 
@@ -431,7 +431,7 @@ test('M44: после 32 новых terminal outcomes старый done отсу
     assert.equal(Object.hasOwn(retained.completedJobs, old.id), false);
     await fixture.service.close();
 
-    const { PluginInstallService } = await import('../../server/src/lib/pluginInstall/service.ts');
+    const { PluginInstallService } = await import('../../server/src/lib/packageInstall/service.ts');
     const next = new PluginInstallService(fixture.service.options);
 
     next.bindRuntime({

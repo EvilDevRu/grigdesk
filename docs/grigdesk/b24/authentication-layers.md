@@ -9,7 +9,7 @@
 - Отдельный пакет драйвера содержит протокол портала, cookies, задачи, таймеры,
   комментарии, файлы и статусы. Сессионные вызовы проходят через `host.serial`:
   клиент не потокобезопасен, параллельные операции с общей сессией приводили к `Client Error`.
-- `server/src/adapters/b24.ts` — совместимый фасад общего реестра трекеров.
+- `server/src/lib/trackers/facade.ts` — нейтральный фасад общего реестра трекеров.
 - `server/src/modules/tracker/index.ts` — локальный HTTP API GrigDesk.
 - `server/src/lib/trackers/credentialsStore.ts` — общее серверное хранилище реквизитов
   драйверов в `tracker-credentials.json` с режимом `0600`; каждый host видит только свою запись.

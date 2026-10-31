@@ -2,11 +2,11 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { Ajv } from 'ajv';
 import type { AnySchema } from 'ajv';
 import { inputs, outputs } from './installSchemas.ts';
-import type { InstallRequest, PluginInstallPort, RollbackRequest } from '../../lib/pluginInstall/service.ts';
-import { errorInfo, installError, PluginInstallError } from '../../lib/pluginInstall/errors.ts';
+import type { InstallRequest, PluginInstallPort, RollbackRequest } from '../../lib/packageInstall/service.ts';
+import { errorInfo, installError, PluginInstallError } from '../../lib/packageInstall/errors.ts';
 
 import type { PluginInstallJob } from '../../../../shared/plugins/pluginInstallContracts.ts';
-import { validArchiveKey } from '../../lib/pluginInstall/stateValidation.ts';
+import { validArchiveKey } from '../../lib/packageInstall/stateValidation.ts';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 
 type JobRequest = FastifyRequest<{ Params: { jobId: string }; Body: { reviewToken: string } }>;
@@ -67,10 +67,17 @@ function driverOutputSchemas(): typeof outputs {
  */
 export default async function installRoutes(
   app: FastifyInstance,
-  { installs, driver = false }: { installs: PluginInstallPort; driver?: boolean },
+  {
+    installs, driver = false, basePath = '/api/plugin-installs', itemSegment = 'plugins',
+  }: {
+    installs: PluginInstallPort;
+    driver?: boolean;
+    basePath?: string;
+    itemSegment?: string;
+  },
 ): Promise<void> {
-  const prefix = driver ? '/api/driver-installs' : '/api/plugin-installs';
-  const resource = driver ? 'drivers' : 'plugins';
+  const prefix = driver ? '/api/driver-installs' : basePath;
+  const resource = driver ? 'drivers' : itemSegment;
   const responseSchemas = driver ? driverOutputSchemas() : outputs;
 
   /**
@@ -219,7 +226,7 @@ export default async function installRoutes(
 
   app.post(`${prefix}/check`, {
     schema: { body: inputs.empty, response: responseSchemas.check },
-  }, async () => ({ [resource]: await installs.checkUpdates() }));
+  }, async () => ({ [driver ? 'drivers' : 'plugins']: await installs.checkUpdates() }));
 }
 
 /**

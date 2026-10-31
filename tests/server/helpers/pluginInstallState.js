@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { emptyInstallState } from '../../../server/src/lib/pluginInstall/stateStore.ts';
+import { emptyInstallState } from '../../../server/src/lib/packageInstall/stateStore.ts';
 
 /**
  * Полный synthetic record используется storage и transaction сценариями.

@@ -5,7 +5,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
-import { runCommand } from '../../server/src/lib/pluginInstall/runCommand.ts';
+import { runCommand } from '../../server/src/lib/packageInstall/runCommand.ts';
 import {
   installFixture, installNpmFixture, current, start, completed, until, prepare, startWithToken,
 } from './helpers/providerInstallFixture.js';
@@ -269,7 +269,7 @@ test('перезапуск сохраняет interrupted и не трогает
     const childScript = `
       import { installFixture, start } from ${JSON.stringify(new URL('./helpers/providerInstallFixture.js',
     import.meta.url).href)};
-      import { runCommand } from ${JSON.stringify(new URL('../../server/src/lib/pluginInstall/runCommand.ts',
+      import { runCommand } from ${JSON.stringify(new URL('../../server/src/lib/packageInstall/runCommand.ts',
     import.meta.url).href)};
       const f = await installFixture({ after() {} }, {
         config: { providerInstallStatePath: ${JSON.stringify(statePath)} },

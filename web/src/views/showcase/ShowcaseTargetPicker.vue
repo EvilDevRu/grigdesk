@@ -48,16 +48,14 @@
               <span class="picker__meta">{{ metaOf(target) }}</span>
             </div>
             <div class="picker__actions">
-              <UiActionLink
+              <StandLink
                 v-if="urlOf(target)"
                 class="picker__link"
                 :href="urlOf(target) ?? ''"
                 variant="ghost"
-                target="_blank"
-                rel="noopener noreferrer"
               >
                 Открыть стенд <span aria-hidden="true">↗</span>
-              </UiActionLink>
+              </StandLink>
               <!-- Ролик без запуска: человек сначала отмечает, о чём рассказать, —
                    коммиты, незакоммиченное, своё пожелание — и снимает из блока. -->
               <UiButton
@@ -135,6 +133,7 @@
 </template>
 
 <script setup lang="ts">
+import StandLink from '../../shared/browser/StandLink.vue';
 import { UiSkeletonLayout } from '../../ui';
 
 import { computed } from 'vue';

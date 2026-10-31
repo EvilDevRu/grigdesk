@@ -6,7 +6,7 @@
                       :max="Math.max(0, levels.length - 1)" :step="1"
                       :labels="sliderLabels" :value-text="selectedDescription"
                       :unselected="idx < 0"
-                      ticks :disabled="disabled" label="Усилие рассуждения" />
+                      thin ticks :disabled="disabled" label="Усилие рассуждения" />
     <span class="val">{{ model || '—' }}</span>
   </div>
 </template>
@@ -16,7 +16,7 @@ import { computed, type PropType } from 'vue';
 import { UiDiscreteSlider, vTooltip } from '../../ui';
 
 // Слайдер усилия рассуждения — как переключатель в расширении VS Code:
-// дискретные точки, клик по точке (или трек) задаёт уровень.
+// дискретные риски, клик по риске (или треку) задаёт уровень.
 // УРОВНИ НЕ ЗАХАРДКОЖЕНЫ: приходят пропсом levels из реестра моделей
 // (у каждой модели свой набор; появится новый уровень — отрисуется сам).
 const props = defineProps({

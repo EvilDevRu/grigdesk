@@ -1,3 +1,7 @@
+import { packagePolicy } from './packagePolicy.ts';
+import type { PackageKind } from './packagePolicy.ts';
+import { assertEngineEntry, decodeEngineManifest, engineManifestError } from '../db/engineManifest.ts';
+
 import { selectPluginServerEntry } from '../pluginServerEntry.ts';
 import { resolvePluginWebModule } from '../pluginWebModule.ts';
 import { lstat, open, readFile } from 'node:fs/promises';
@@ -28,6 +32,7 @@ export const PACKAGE_LIMITS: PackageLimits = {
 };
 
 export interface PackageExpectations {
+  packageKind?: PackageKind;
   version: string;
   expectedId: string | null;
   reservedIds: ReadonlySet<string>;
@@ -67,7 +72,7 @@ export async function validatePreparedPluginPackage(
   dir: string,
   expected: PackageExpectations,
 ): Promise<ValidatedPackage> {
-  const manifest = await readPluginManifest(dir);
+  const manifest = await readPluginManifest(dir, expected.packageKind);
   const tree = await readPreparedPackageTree(dir, manifest);
 
   return validatePackageTree(dir, expected, PACKAGE_LIMITS, tree);
@@ -122,13 +127,45 @@ async function validatePackageTree(
   limits: PackageLimits,
   tree: PackageEntry[],
 ): Promise<ValidatedPackage> {
-  const info = await lstat(path.join(dir, 'plugin.json')).catch(() => null);
+  const policy = packagePolicy(expected.packageKind);
+  const info = await lstat(path.join(dir, policy.manifest)).catch(() => null);
 
   if (!info?.isFile()) {
-    throw installError('manifest_missing');
+    throw expected.packageKind === 'db-engine' ? engineManifestError('manifest_missing')
+      : installError('manifest_missing');
   }
 
-  const manifest = await boundedJson(path.join(dir, 'plugin.json'), limits.maxManifestBytes);
+  const manifest = await boundedJson(path.join(dir, policy.manifest), limits.maxManifestBytes)
+    .catch((error: unknown) => {
+      throw expected.packageKind === 'db-engine' ? engineManifestError() : error;
+    });
+
+  if (expected.packageKind === 'db-engine') {
+    const fields = decodeEngineManifest(manifest, expected.grigDeskVersion, expected.version);
+
+    if (expected.reservedIds.has(fields.id)) {
+      throw engineManifestError('id_reserved');
+    }
+
+    if (expected.expectedId !== null && fields.id !== expected.expectedId) {
+      throw engineManifestError('id_mismatch');
+    }
+
+    await assertEngineEntry(dir, fields.entry);
+    await validateGitControls(dir, tree);
+
+    return {
+      id: fields.id,
+      name: fields.label,
+      version: expected.version,
+      description: '',
+      hasServer: true,
+      webDir: null,
+      webModuleDir: null,
+      npmDirs: await validateNpmDirs(dir, manifest),
+    };
+  }
+
   const id = manifest.id;
 
   if (typeof id !== 'string' || !PLUGIN_ID_RE.test(id)
@@ -220,10 +257,13 @@ function normalizeModulePath(raw: unknown, rootAllowed: boolean): string | null 
  * Повторная проверка manifest ограничена ordinary no-link root и размером JSON.
  * Caller уже знает npmDirs установленного snapshot и не исполняет код пакета.
  */
-export async function readPluginManifest(directory: string): Promise<Record<string, unknown>> {
+export async function readPluginManifest(
+  directory: string,
+  kind: PackageKind = 'plugin',
+): Promise<Record<string, unknown>> {
   await assertRealPackageRoot(directory);
 
-  return boundedJson(path.join(directory, 'plugin.json'), PACKAGE_LIMITS.maxManifestBytes);
+  return boundedJson(path.join(directory, packagePolicy(kind).manifest), PACKAGE_LIMITS.maxManifestBytes);
 }
 
 const MAX_NPM_JSON_BYTES = 2 * 1024 * 1024;

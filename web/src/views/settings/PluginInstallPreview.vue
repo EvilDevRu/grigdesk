@@ -95,9 +95,9 @@ const changesOpen = ref(false);
 <style scoped>
 .install-preview {
   display: grid;
-  gap: 1rem;
+  gap: 0.75rem;
   min-width: 0;
-  font-size: 0.875rem;
+  font-size: var(--workspace-text-size);
   line-height: 1.55;
 }
 .install-preview p,
@@ -116,11 +116,11 @@ const changesOpen = ref(false);
   gap: 0.75rem;
 }
 .preview-identity h3 {
-  font-size: 1.125rem;
+  font-size: 0.9375rem;
 }
 .preview-version {
   padding: 0.15rem 0.5rem;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
   font-size: 0.8125rem;
@@ -143,10 +143,10 @@ const changesOpen = ref(false);
   grid-template-columns: auto minmax(0, 1fr);
   gap: 0.5rem 1rem;
   margin: 0;
-  padding: 0.875rem;
+  padding: 0.75rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--ground);
+  background: var(--surface-2);
 }
 .preview-source dd {
   margin: 0;

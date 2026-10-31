@@ -239,6 +239,7 @@ button.ui-select {
 
 .ui-input[data-context='select-search'] {
   padding-left: 32px;
+  background: var(--surface-2);
 }
 
 /* В компактном меню фокус остаётся тонкой рамкой общего поля.

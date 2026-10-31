@@ -108,6 +108,10 @@ export async function localeMain(t, { preference, systemLanguage = 'en-US' } = {
       const f = globalThis.__localeMain;
       export const app = f.app;
       export const BrowserWindow = f.BrowserWindow;
+      export class WebContentsView {}
+      export const ipcMain = {
+        handle() {}, on() {}, removeHandler() {}, removeListener() {},
+      };
       export const session = f.session;
       export const screen = { getPrimaryDisplay: () => ({ workArea: {
         x: 0, y: 0, width: 1920, height: 1080,
@@ -124,6 +128,10 @@ export async function localeMain(t, { preference, systemLanguage = 'en-US' } = {
         return globalThis.__localeMain.settings;
       }
       export const writeSettings = async () => {};
+      export const updateSettings = async (file, live, patch) => {
+        await writeSettings(file, { ...live, ...patch });
+        Object.assign(live, patch);
+      };
     `,
     './runtimeConfig.ts': `
       export const runtimeDependencies = {};

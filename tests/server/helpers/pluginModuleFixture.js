@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-import { decodeInstallState } from '../../../server/src/lib/pluginInstall/stateValidation.ts';
+import { decodeInstallState } from '../../../server/src/lib/packageInstall/stateValidation.ts';
 
 export const moduleWarning = 'Модуль интерфейса исполняется в главном окне GrigDesk '
   + 'с вашей сессией и может обращаться к любому API GrigDesk.';
