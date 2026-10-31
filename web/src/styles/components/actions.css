@@ -1900,7 +1900,6 @@
 }
 
 .ui-button[data-context='chat-context'] .ctx-meter-cap {
-  margin-right: 2px;
   color: var(--ink-mid);
   font-size: 10.5px;
   font-weight: 400;
@@ -1910,11 +1909,9 @@
 }
 
 .ui-button[data-context='chat-context'] .ctx-meter-value {
-  min-width: 4ch;
   font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  text-align: right;
 }
 
 .ui-button[data-context='chat-context']:hover:not([aria-disabled='true']) {

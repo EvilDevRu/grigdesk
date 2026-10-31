@@ -80,7 +80,7 @@ const sliderIndex = computed({
   padding: 0; user-select: none; flex: none; }
 .cap { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); opacity: .75; flex: none; }
 .eff-slider { width: 78px; flex: none; }
-.val { font-size: 12px; font-weight: 600; color: var(--accent); flex: none; min-width: 46px; }
+.val { font-size: 12px; font-weight: 600; color: var(--accent); flex: none; }
 
 /* Только индикатор: курсор не обещает клика, но значение остаётся читаемым —
    человек обязан видеть, каким усилием уйдёт ход. */
