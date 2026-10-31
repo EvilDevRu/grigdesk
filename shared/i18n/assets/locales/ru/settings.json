@@ -1,4 +1,9 @@
 {
+  "telegramSetupHeading": "Подключение бота и чаты",
+  "telegramSetupDescription": "На странице Telegram можно подключить бота по токену, выбрать чаты и настроить пульт.",
+  "telegramSetupOpen": "Настроить Telegram",
+  "telegramSetupEnableFirst": "Включите Telegram и нажмите «Применить», чтобы перейти к настройке подключения.",
+  "telegramSetupApplyFirst": "Нажмите «Применить», чтобы сохранить включение Telegram. Затем откройте настройку подключения.",
   "cliCopies": "Копии программы",
   "cliShellUnknown": "Окружение нового терминала не подтверждено.",
   "cliCopiesConflict": "Разные копии в GrigDesk и новом терминале.",

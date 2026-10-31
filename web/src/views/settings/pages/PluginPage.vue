@@ -136,6 +136,23 @@
           </SettingsField>
           <p v-if="restartPending">{{ t('settings.waitingForRestart') }}</p>
           <p v-else-if="plugin.needsRestart">{{ t('settings.changingServerComponentStatusWillRequireA') }}</p>
+          <SettingsSection
+            v-if="plugin.system && plugin.id === 'telegram'"
+            :heading="t('settings.telegramSetupHeading')"
+            :description="t('settings.telegramSetupDescription')"
+          >
+            <UiButton
+              data-telegram-setup
+              data-context="workspace-form-wrap"
+              :disabled="!baselineEnabled || !enabled || recoveryBlocked
+                || settings.snapshot.applying || settings.actionRunning"
+              @click="openTelegram"
+            >
+              {{ t('settings.telegramSetupOpen') }}
+            </UiButton>
+            <p v-if="!enabled">{{ t('settings.telegramSetupEnableFirst') }}</p>
+            <p v-else-if="!baselineEnabled">{{ t('settings.telegramSetupApplyFirst') }}</p>
+          </SettingsSection>
           <h4 v-if="plugin.placements?.length">{{ t('settings.placement') }}</h4>
           <SettingsField
             v-for="slot in plugin.placements ?? []"
@@ -322,6 +339,7 @@ import { localizePluginMetadata, localizePluginCategory } from '../../../feature
 import SettingsScope from '../SettingsScope.vue';
 import SettingsIcon from '../SettingsIcon.vue';
 import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { isNavigationFailure, NavigationFailureType, useRouter } from 'vue-router';
 import {
   UiSwitch, UiCheckbox, UiInput, UiNumberInput, UiSelect, UiPasswordInput, UiButton, UiInlineMessage,
 } from '../../../ui.ts';
@@ -354,9 +372,11 @@ import {
 import type { FieldAddress, JsonValue } from '../../../features/settings/contracts.ts';
 import { failureText } from '../../../shared/apiClient.ts';
 import SettingsField from '../SettingsField.vue';
+import SettingsSection from '../SettingsSection.vue';
 
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
+const router = useRouter();
 const plugins = usePluginsStore();
 const installer = usePluginInstallStore();
 const catalog = usePluginCatalogStore();
@@ -495,6 +515,19 @@ function set(section: 'values' | 'placements', key: string, next: JsonValue): vo
 
 function setEnabled(next: boolean): void {
   settings.setField(enabledId.value, 'enabled', next);
+}
+
+/**
+ * Настройка подключения открывает существующий раздел с токеном, чатами и пультом.
+ * Общая политика перехода сохраняет выбор судьбы неприменённых настроек.
+ */
+async function openTelegram(): Promise<void> {
+  await settings.requestAction(async () => {
+    const failure = await router.push('/telegram');
+
+    return !isNavigationFailure(failure)
+      || isNavigationFailure(failure, NavigationFailureType.duplicated);
+  });
 }
 
 function textValue(key: string): string {

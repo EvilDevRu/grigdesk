@@ -1,4 +1,9 @@
 {
+  "telegramSetupHeading": "Bot connection and chats",
+  "telegramSetupDescription": "On the Telegram page, connect a bot with its token, choose chats and set up the control panel.",
+  "telegramSetupOpen": "Set up Telegram",
+  "telegramSetupEnableFirst": "Enable Telegram and click Apply to set up the connection.",
+  "telegramSetupApplyFirst": "Click Apply to save Telegram activation. Then open the connection setup.",
   "cliCopies": "Program installations",
   "cliShellUnknown": "The new terminal environment could not be verified.",
   "cliCopiesConflict": "GrigDesk and a new terminal select different installations.",
