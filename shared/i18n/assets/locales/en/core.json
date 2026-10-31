@@ -1148,7 +1148,6 @@
   "browserHostConflict": "Agents are using the browser on another computer.",
   "browserHostError": "The browser is temporarily unavailable to agents. Reconnect it.",
   "browserOpenWith": "Open in",
-  "browserTabCount": "Tabs: {count}",
   "browserDesktopHint": "Built-in tabs are available in the GrigDesk app for Linux. You can open environments in an external browser.",
   "browserAddressShortcut": "Ctrl+L — focus the address",
   "browserAgentsReady": "Agent access ready"

@@ -1168,7 +1168,6 @@
   "browserHostConflict": "Агенты используют браузер другого компьютера.",
   "browserHostError": "Браузер временно недоступен агентам. Подключите его повторно.",
   "browserOpenWith": "Где открыть",
-  "browserTabCount": "Вкладки: {count}",
   "browserDesktopHint": "Встроенные вкладки доступны в приложении GrigDesk для Linux. Стенды можно открывать во внешнем браузере.",
   "browserAddressShortcut": "Ctrl+L — перейти к адресу",
   "browserAgentsReady": "Доступ агентам открыт"

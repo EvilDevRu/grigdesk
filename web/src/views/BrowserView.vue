@@ -1,20 +1,5 @@
 <template>
-  <section class="browser-workspace ui-workspace" data-ui-workspace aria-labelledby="browser-title">
-    <UiPaneHeader>
-      <template #title><h1 id="browser-title">{{ t('core.browserTitle') }}</h1></template>
-      <template v-if="browser.available" #meta>
-        <span>{{ t('core.browserTabCount', { count: browser.snapshot.tabs.length }) }}</span>
-      </template>
-      <template #actions>
-        <UiButton size="compact" :disabled="!browser.available || Boolean(browser.busy)" @click="newTab">
-          <template #leading>
-            <svg v-bind="ICON" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-          </template>
-          {{ t('core.browserNewTab') }}
-        </UiButton>
-      </template>
-    </UiPaneHeader>
-
+  <section class="browser-workspace ui-workspace" data-ui-workspace :aria-label="t('core.browserTitle')">
     <div v-if="!browser.available" class="browser-empty" role="status">
       <svg class="browser-empty__icon" v-bind="ICON" aria-hidden="true">
         <rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" />
@@ -23,38 +8,53 @@
       <p>{{ t('core.browserDesktopHint') }}</p>
     </div>
     <template v-else>
-      <div v-if="browser.snapshot.tabs.length" ref="tabRow" class="browser-tab-row">
-        <UiTabs
-          :model-value="selected"
-          :label="t('core.browserTabs')"
-          data-ui-browser-tabs
-          @update:model-value="selectTab"
-        >
-          <div
-              v-for="tab in browser.snapshot.tabs"
-              :key="tab.id"
-              data-ui-browser-tab
-              :data-selected="tab.id === selected"
+      <div class="browser-tab-row">
+        <div v-if="browser.snapshot.tabs.length" ref="tabRow" class="browser-tabs-scroll">
+          <UiTabs
+            :model-value="selected"
+            :label="t('core.browserTabs')"
+            data-ui-browser-tabs
+            @update:model-value="selectTab"
           >
-            <UiTab :id="`browser-tab-${tab.id}`" :value="tab.id" controls="browser-page">
-              <svg class="browser-tab-icon" v-bind="ICON" aria-hidden="true">
-                <circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a16 16 0 0 1 0 18a16 16 0 0 1 0-18" />
-              </svg>
-              <span class="browser-tab-label" v-tooltip="tabName(tab)">
-                {{ tabName(tab) }}
-              </span>
-            </UiTab>
-            <UiIconButton
-                role="embedded"
-                data-context="workspace-toolbar"
-                :label="t('core.browserCloseNamed', { name: tabName(tab) })"
-                v-tooltip="t('core.browserCloseNamed', { name: tabName(tab) })"
-                @click="closeTab(tab.id)"
+            <div
+                v-for="tab in browser.snapshot.tabs"
+                :key="tab.id"
+                data-ui-browser-tab
+                :data-selected="tab.id === selected"
             >
-              <svg v-bind="ICON" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
-            </UiIconButton>
-          </div>
-        </UiTabs>
+              <UiTab :id="`browser-tab-${tab.id}`" :value="tab.id" controls="browser-page">
+                <svg class="browser-tab-icon" v-bind="ICON" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M3 12h18M12 3a16 16 0 0 1 0 18a16 16 0 0 1 0-18" />
+                </svg>
+                <span class="browser-tab-label" v-tooltip="tabName(tab)">
+                  {{ tabName(tab) }}
+                </span>
+              </UiTab>
+              <UiIconButton
+                  role="embedded"
+                  data-context="workspace-toolbar"
+                  :label="t('core.browserCloseNamed', { name: tabName(tab) })"
+                  v-tooltip="t('core.browserCloseNamed', { name: tabName(tab) })"
+                  @click="closeTab(tab.id)"
+              >
+                <svg v-bind="ICON" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+              </UiIconButton>
+            </div>
+          </UiTabs>
+        </div>
+        <div class="browser-tab-row__create">
+          <UiIconButton
+              role="embedded"
+              data-context="workspace-toolbar"
+              :disabled="Boolean(browser.busy)"
+              :label="t('core.browserNewTab')"
+              v-tooltip="t('core.browserNewTab')"
+              @click="newTab"
+          >
+            <svg v-bind="ICON" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          </UiIconButton>
+        </div>
       </div>
 
       <form class="browser-toolbar" @submit.prevent="submit">
@@ -233,7 +233,6 @@ import {
   UiIconButton,
   UiInlineMessage,
   UiInput,
-  UiPaneHeader,
   UiSelect,
   UiTab,
   UiTabs,
@@ -601,12 +600,26 @@ onBeforeUnmount(() => {
 }
 
 .browser-tab-row {
+  display: flex;
+  align-items: center;
   flex: none;
   min-width: 0;
-  padding: 6px 12px 0;
+  padding: 4px 12px 0;
   border-bottom: 1px solid var(--line);
-  background: var(--sidebar);
+  background: var(--surface);
+  gap: 4px;
+}
+
+.browser-tabs-scroll {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow-x: auto;
+}
+
+.browser-tab-row__create {
+  display: flex;
+  flex: none;
+  padding-bottom: 4px;
 }
 
 .browser-tab-label {

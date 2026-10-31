@@ -605,7 +605,7 @@
 
 .ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab][data-selected='true'] {
   border-color: var(--line);
-  background: var(--surface);
+  background: var(--surface-2);
 }
 
 .ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab]:hover {
