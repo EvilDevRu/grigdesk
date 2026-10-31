@@ -18,6 +18,8 @@
         </li>
       </ul>
     </section>
+    <UiButton @click="trackerSettingsOpen = true">{{ t('core.trackerSettings') }}</UiButton>
+    <TrackerSettingsDialog v-if="trackerSettingsOpen" v-model:open="trackerSettingsOpen" />
     <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen" @created="ui.openTask($event)" />
 
     <template v-if="ownTasks.b24Configured !== false">
@@ -28,48 +30,7 @@
     </div>
 
     <template v-else-if="data">
-      <!-- Показатели + месяц -->
-      <div class="stats-summary">
-        <span>Сегодня {{ hoursToHM(data.today!.hours) }} · {{ data.today!.tasks_count }} задач</span>
-        <UiButton variant="text" :aria-expanded="statsExpanded" aria-controls="board-stats"
-                  @click="statsExpanded = !statsExpanded">Показатели</UiButton>
-      </div>
-      <section id="board-stats" class="stats" aria-label="Учёт времени и выполненные задачи">
-        <div v-for="s in statTiles" :key="s.key" class="tile" :class="'t-' + s.tone">
-          <div class="thead">
-            <span class="tico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="TILE_ICONS[s.icon]" /></svg></span>
-            <span class="tlabel">{{ s.label }}</span>
-          </div>
-          <div class="tval">{{ s.value }}</div>
-          <div class="tdelta mono" :class="s.dir">
-            <span class="darrow">{{ s.dir === 'up' ? '↑' : s.dir === 'down' ? '↓' : '→' }}</span>{{ s.delta }}
-            <span class="dvs">к вчерашнему дню</span>
-          </div>
-        </div>
-        <div class="tile month t-month">
-          <div class="thead">
-            <span class="tico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="TILE_ICONS.calendar" /></svg></span>
-            <span class="tlabel">За месяц</span>
-            <span class="tpct mono" :class="{ over: overwork }">{{ monthPct }}%</span>
-          </div>
-          <div class="month-summary">
-            <div class="tval">{{ hoursToHM(data.month!.hours) }}</div>
-            <div
-              class="month-completed"
-              data-stat="month-completed"
-              :aria-label="`Выполнено задач за месяц: ${data.month!.completedTasks ?? 0}`"
-            >
-              <strong class="mono">{{ data.month!.completedTasks ?? 0 }}</strong>
-              <span>выполнено задач</span>
-            </div>
-          </div>
-          <div class="bar"><span class="fill" :class="{ over: overwork }" :style="{ width: Math.min(100, monthPct) + '%' }"></span></div>
-          <div class="mfoot">
-            <span class="muted">норма {{ data.month!.norm }}ч</span>
-            <span v-if="overwork" class="over mono">+{{ overwork }}ч переработки</span>
-          </div>
-        </div>
-      </section>
+      <TrackerWidgets :widgets="data.widgets ?? []" />
 
       <!-- B24 разрешает несколько незакрытых таймеров одновременно: показываем каждый. -->
       <section
@@ -305,14 +266,16 @@
               {{ seen.loading ? 'Повторяю…' : 'Повторить' }}
             </UiButton>
           </div>
-          <div class="list-head" :class="{ 'without-analysis': !analysisEnabled }" aria-hidden="true">
+          <div class="list-head"
+               :class="{ 'without-analysis': !analysisEnabled, 'without-timer': !supportsTimer }"
+               aria-hidden="true">
             <span class="list-task-label">Задача</span>
             <span v-if="analysisEnabled">Оценка</span>
-            <span class="list-time-label">Учтено</span>
+            <span v-if="supportsTimer" class="list-time-label">Учтено</span>
           </div>
           <ul ref="taskList" class="tasks scroller" @scroll="onTasksScroll">
             <li v-for="t in visibleTasks" :key="t.id" class="trow"
-                :class="{ 'without-analysis': !analysisEnabled }">
+                :class="{ 'without-analysis': !analysisEnabled, 'without-timer': !supportsTimer }">
               <TaskFavoriteButton :active="favorites.isFavorite(t.id)"
                                   :pending="!favorites.loaded || favorites.loading || favorites.isPending(t.id)"
                                   :task-title="t.title" @toggle="toggleFavorite(t)" />
@@ -350,7 +313,7 @@
                 </span>
               </UiPressable>
               <div v-if="analysisEnabled" class="task-triage"><TriageBadge :row="triageOf(t)" /></div>
-              <span class="ttime" :class="{ running: t.timerRunning }">
+              <span v-if="supportsTimer" class="ttime" :class="{ running: t.timerRunning }">
                 <span class="mono">{{ secToHMS(liveElapsed(t)) }}</span>
                 <span v-if="t.timerRunning" class="time-state">Идёт учёт</span>
               </span>
@@ -428,29 +391,16 @@
         </section>
       </div>
 
-      <!-- Статистика -->
-      <section v-if="chart" class="charts">
-        <div class="charts-head">
-          <h3 class="h">Статистика</h3>
-          <UiSegmentedControl
-            v-model="period"
-            class="periods"
-            label="Период статистики"
-            :options="PERIOD_OPTIONS"
-          />
-        </div>
-        <div class="charts-grid">
-          <MiniChart title="Часы" kind="hours" :labels="chart.labels" :you="chart.hours" :dept="chart.hours_dept" />
-          <MiniChart title="Задачи" kind="count" :labels="chart.labels" :you="chart.tasks" :dept="chart.tasks_dept" />
-          <MiniChart title="Ср. время" kind="hours" :labels="chart.labels" :you="chart.avg_time" :dept="chart.avg_time_dept" />
-        </div>
-      </section>
     </template>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
+import TrackerWidgets from './board/TrackerWidgets.vue';
+import TrackerSettingsDialog from './board/TrackerSettingsDialog.vue';
+import { boardSupportsTimer } from '../shared/trackerCapabilities.ts';
+import { useTrackersStore } from '../stores/trackers.ts';
 import BoardLoading from './BoardLoading.vue';
 
 import NewGrigdeskTaskDialog from './board/NewGrigdeskTaskDialog.vue';
@@ -463,7 +413,7 @@ import { decodePipelineTasks } from '../shared/pipelineContracts.ts';
 import { openSettings } from '../shared/settingsNavigation.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
-import { hoursToHM, liveTimerSec, secToHMS, signed } from '../shared/format.ts';
+import { liveTimerSec, secToHMS } from '../shared/format.ts';
 import { useBoardStore } from '../stores/board.ts';
 import { useUiStore } from '../stores/ui.ts';
 import { analyzeTask, startAnalysisPolling, useAnalysisStore } from '../actions/analysis';
@@ -471,7 +421,6 @@ import { useTaskFavoritesStore } from '../stores/taskFavorites.ts';
 import { useTaskShelfStore } from '../stores/taskShelf.ts';
 import { usePluginsStore } from '../stores/plugins.ts';
 import { useTaskSeenStore } from '../stores/taskSeen.ts';
-import MiniChart from './board/MiniChart.vue';
 import TriageBadge from './board/TriageBadge.vue';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
 import { api } from '../shared/apiClient.ts';
@@ -494,6 +443,8 @@ import {
 const ui = useUiStore();
 const ownTasks = useGrigdeskTasksStore();
 const newTaskOpen = ref(false);
+const trackerSettingsOpen = ref(false);
+const trackers = useTrackersStore();
 const sortedOwnTasks = computed(() => [...ownTasks.tasks].sort((left, right) =>
   right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
 ));
@@ -502,13 +453,6 @@ const sortedOwnTasks = computed(() => [...ownTasks.tasks].sort((left, right) =>
 const board = useBoardStore();
 const { data, error, loading } = storeToRefs(board);
 const now = ref(Date.now());
-const period = ref('day');
-const PERIOD_OPTIONS = [
-  { value: 'day', label: 'Дни' },
-  { value: 'week', label: 'Нед' },
-  { value: 'month', label: 'Мес' },
-];
-
 const STATUS_COLOR: Record<string, string> = {
   running: 'var(--accent)',
   overdue: 'var(--bad)',
@@ -539,6 +483,16 @@ async function loadConveyor() {
 }
 
 useSse((name) => {
+  if (name === 'trackers-changed') {
+    trackers.invalidate();
+    board.invalidate?.();
+    void trackers.load(true);
+    void board.load(true);
+    void ownTasks.load();
+    void favorites.load(true);
+    void seen.load(true);
+  }
+
   if (name === 'grigdesk-tasks-changed' || name === 'hello') {
     void ownTasks.load();
   }
@@ -597,73 +551,9 @@ function liveElapsed(t: BoardTask) {
 }
 
 // Иконки плиток (Lucide-контуры, stroke=currentColor).
-const TILE_ICONS: Record<string, string> = {
-  clock: 'M12 7.5v4.5l3 2 M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
-  check: 'M21.5 11.1V12a9.5 9.5 0 1 1-5.6-8.7 M22 5 12 15l-3-3',
-  gauge: 'M12 13l3.4-3.4 M4.5 17.5a9 9 0 1 1 15 0',
-  calendar: 'M8 2.5v3 M16 2.5v3 M3.5 9.5h17 M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v13A1.5 1.5 0'
-    + ' 0 1 19 20.5H5A1.5 1.5 0 0 1 3.5 19V6A1.5 1.5 0 0 1 5 4.5z',
-};
-const statTiles = computed(() => {
-  const d = data.value;
-
-  if (!d?.today) {
-    return [];
-  }
-
-  const dyn = d.dynamics || {};
-  const dir = (n: number | undefined) => (Number(n) > 0 ? 'up' : Number(n) < 0 ? 'down' : 'flat');
-
-  return [
-    {
-      key: 'hours',
-      icon: 'clock',
-      tone: 'accent',
-      label: 'Отработано сегодня',
-      value: hoursToHM(d.today.hours),
-      delta: signed(dyn.hours, 'ч'),
-      dir: dir(dyn.hours),
-    },
-    {
-      key: 'tasks',
-      icon: 'check',
-      tone: 'good',
-      label: 'Выполнено сегодня',
-      value: d.today.tasks_count ?? 0,
-      delta: signed(dyn.tasks),
-      dir: dir(dyn.tasks),
-    },
-    {
-      key: 'avg',
-      icon: 'gauge',
-      tone: 'warn',
-      label: 'Среднее на задачу',
-      value: hoursToHM(d.today.avg_time),
-      delta: signed(dyn.avg_time, 'ч'),
-      dir: dir(dyn.avg_time),
-    },
-  ];
-});
-const overwork = computed(() => {
-  const m = data.value?.month;
-
-  if (!m?.norm) {
-    return 0;
-  }
-
-  return Math.max(0, +(m.hours! - m.norm).toFixed(1));
-});
-// Процент выполнения месячной нормы (может быть > 100 при переработке).
-const monthPct = computed(() => {
-  const m = data.value?.month;
-
-  if (!m?.norm) {
-    return 0;
-  }
-
-  return Math.round((m.hours! / m.norm) * 100);
-});
-const activeTasks = computed(() => (data.value?.tasks || []).filter((task) => task.timerRunning));
+const supportsTimer = computed(() => boardSupportsTimer(data.value));
+const activeTasks = computed(() => supportsTimer.value
+  ? (data.value?.tasks || []).filter((task) => task.timerRunning) : []);
 // Поиск основного списка независим от поиска контроля и поручений.
 const q = ref('');
 const taskSearch = ref<UiFieldHandle<HTMLInputElement> | null>(null);
@@ -885,7 +775,6 @@ function onTasksScroll(e: Event) {
   }
 }
 
-const chart = computed(() => data.value?.charts?.[period.value] || null);
 
 let ticker: ReturnType<typeof setInterval> | null = null;
 
@@ -894,6 +783,7 @@ function refreshOwnTasks() {
 }
 
 onMounted(() => {
+  void trackers.load();
   refreshOwnTasks();
   window.addEventListener('focus', refreshOwnTasks);
   board.load();
@@ -1269,6 +1159,10 @@ onUnmounted(() => {
 .trow { min-width: 0; padding: 12px 10px; border-radius: 8px; }
 .trow.without-analysis,
 .list-head.without-analysis { grid-template-columns: 28px minmax(0, 1fr) 86px; }
+.trow.without-timer,
+.list-head.without-timer { grid-template-columns: 28px minmax(0, 1fr) 182px; }
+.trow.without-analysis.without-timer,
+.list-head.without-analysis.without-timer { grid-template-columns: 28px minmax(0, 1fr); }
 .trow > :deep(.favbtn) { align-self: start; margin-top: -4px; }
 .trow:hover,
 .trow:focus-within { background: var(--surface-2); }
@@ -1335,6 +1229,7 @@ onUnmounted(() => {
   .list-head { display: none; }
   .trow,
   .trow.without-analysis { grid-template-columns: 28px minmax(0, 1fr) 86px; gap: 9px; padding: 12px 2px; }
+  .trow.without-timer { grid-template-columns: 28px minmax(0, 1fr); }
   .trow .ttext { grid-column: 2 / -1; }
   .task-triage { grid-column: 2; }
   .ttime { grid-column: 3; grid-row: 2; }
@@ -1358,6 +1253,8 @@ onUnmounted(() => {
   .colhead .h { font-size: 15px; gap: 6px; }
   .trow,
   .trow.without-analysis { grid-template-columns: 24px minmax(0, 1fr) 78px; gap: 6px; }
+  .trow.without-timer,
+  .trow.without-analysis.without-timer { grid-template-columns: 24px minmax(0, 1fr); }
   .task-triage :deep(.total) { display: none; }
 }
 

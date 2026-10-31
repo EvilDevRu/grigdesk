@@ -1,6 +1,8 @@
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from './uiLocalePort.ts';
+import type { TrackerCapabilities, TrackerWidget } from '../../../shared/trackers/contracts.ts';
+import { isTrackerWidget } from '../../../shared/trackers/validation.ts';
 
 export interface BoardTask extends Record<string, unknown> {
   id: string | number;
@@ -111,6 +113,10 @@ export interface BoardChart {
 }
 
 export interface BoardDashboard extends Record<string, unknown> {
+  trackerId?: string;
+  capabilities?: TrackerCapabilities;
+  widgets?: TrackerWidget[];
+  generation?: number;
   charts?: Record<string, BoardChart>;
   tasks?: BoardTask[];
   toReview?: BoardTask[];
@@ -165,6 +171,14 @@ function isBoardTask(value: unknown): value is BoardTask {
  */
 export function isBoardDashboard(value: unknown): value is BoardDashboard {
   if (!isRecord(value)) {
+    return false;
+  }
+
+  if ((value.trackerId !== undefined && typeof value.trackerId !== 'string')
+    || (value.capabilities !== undefined && (!isRecord(value.capabilities)
+      || !Object.values(value.capabilities).every((item) => typeof item === 'boolean')))
+    || (value.widgets !== undefined
+      && (!Array.isArray(value.widgets) || !value.widgets.every(isTrackerWidget)))) {
     return false;
   }
 

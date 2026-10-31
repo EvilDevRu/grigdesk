@@ -68,6 +68,19 @@ export async function validatePreparedPluginPackage(
   expected: PackageExpectations,
 ): Promise<ValidatedPackage> {
   const manifest = await readPluginManifest(dir);
+  const tree = await readPreparedPackageTree(dir, manifest);
+
+  return validatePackageTree(dir, expected, PACKAGE_LIMITS, tree);
+}
+
+/**
+ * Сгенерированные зависимости имеют общую файловую политику для всех пакетов.
+ * Их исключение из исходного дерева не ослабляет проверку ссылок и пределов payload.
+ */
+export async function readPreparedPackageTree(
+  dir: string,
+  manifest: Record<string, unknown>,
+): Promise<PackageEntry[]> {
   const selection = isRecord(manifest.install) ? manifest.install.npm : undefined;
   const lockInfo = await lstat(path.join(dir, 'package-lock.json')).catch(() => null);
   const rawDirs = selection ?? (lockInfo ? ['.'] : []);
@@ -96,7 +109,7 @@ export async function validatePreparedPluginPackage(
   const original = tree.filter((entry) => !generated.some((root) => entry.relative === root
     || entry.relative.startsWith(`${root}/`)));
 
-  return validatePackageTree(dir, expected, PACKAGE_LIMITS, original);
+  return original;
 }
 
 /**
@@ -241,7 +254,7 @@ export async function validateNpmDirectory(directory: string): Promise<void> {
  * Lock в корне требует парный package.json, runtime declarations требуют lock.
  * Пустой package.json без runtime зависимостей не запускает npm.
  */
-async function validateNpmDirs(dir: string, manifest: Record<string, unknown>): Promise<string[]> {
+export async function validateNpmDirs(dir: string, manifest: Record<string, unknown>): Promise<string[]> {
   const packageFile = path.join(dir, 'package.json');
   const lockFile = path.join(dir, 'package-lock.json');
   const packageInfo = await lstat(packageFile).catch(() => null);
@@ -315,7 +328,7 @@ async function validateNpmDirs(dir: string, manifest: Record<string, unknown>): 
  * Git-фильтры и LFS pointers не переносятся в устанавливаемый payload.
  * Все пути уже проверены обходом; префикс обычного blob читается ограниченно.
  */
-async function validateGitControls(dir: string, tree: PackageEntry[]): Promise<void> {
+export async function validateGitControls(dir: string, tree: PackageEntry[]): Promise<void> {
   for (const entry of tree) {
     if (!entry.info.isFile()) {
       continue;
@@ -376,7 +389,7 @@ async function validateWeb(dir: string, raw: unknown): Promise<string | null> {
  * Размер обычного файла проверяется до чтения, JSON обязан быть объектом.
  * Ошибки парсинга скрываются за стабильным безопасным кодом.
  */
-async function boundedJson(file: string, maximum: number): Promise<Record<string, unknown>> {
+export async function boundedJson(file: string, maximum: number): Promise<Record<string, unknown>> {
   try {
     const info = await lstat(file);
 

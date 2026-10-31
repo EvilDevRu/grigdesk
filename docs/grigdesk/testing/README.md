@@ -106,6 +106,7 @@
 - [Перенаправленный XDG_CACHE_HOME прячет браузеры Playwright](playwright-xdg-cache.md)
 - [Удалённый JS-файл валит снимок миграции, хотя код рабочий](migration-inventory-snapshot.md)
 - [Тест проходит из корня, но падает из папки своего пакета](package-test-working-directory.md)
+- [Протокольные проверки трекера требуют отдельный пакет драйвера](tracker-driver-package.md)
 - [Настройки роняют вкладку headless-проверки = нужен полный Chromium](headless-shell-settings-crash.md)
 - [Живой замер production-сборки: посредник с CLI-токеном и что под ним не открывается](live-ui-cli-proxy.md)
 - [Тест ждёт `OK`, а утилита пишет `ЦЕЛ` = вывод coreutils переведён на язык машины](coreutils-locale.md)

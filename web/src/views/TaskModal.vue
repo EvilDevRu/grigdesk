@@ -103,7 +103,7 @@
             data-task-section="triage"
           >{{ t('core.taskDesignAnalysis') }}</UiTab>
           <UiTab
-            v-if="isB24Task"
+            v-if="isB24Task && trackerCaps.comments"
             id="task-tab-comments"
             value="comments"
             controls="task-panel-comments"
@@ -121,7 +121,7 @@
           <div class="brief-head">
             <h4 class="pane-title">Описание задачи</h4>
             <UiButton
-              v-if="isB24Task && detail && !editForm"
+              v-if="isB24Task && trackerCaps.editing && detail && !editForm"
               size="compact"
               data-role="task-edit-open"
               v-tooltip="'Редактировать задачу'"
@@ -634,7 +634,7 @@
 
         <!-- Комментарии задачи (таб): список из B24 + добавление -->
         <div
-          v-if="isB24Task"
+          v-if="isB24Task && trackerCaps.comments"
           v-show="mtab === 'comments'"
           id="task-panel-comments"
           class="comtab"
@@ -682,7 +682,7 @@
 
       <!-- Управление -->
       <footer class="controls" aria-label="Действия с задачей">
-          <div v-if="isB24Task" class="timer-group" role="group" aria-label="Учёт времени">
+          <div v-if="isB24Task && trackerCaps.timer" class="timer-group" role="group" aria-label="Учёт времени">
             <div class="timer" :class="{ run: running }">
               <span class="tclock mono">{{ elapsed !== null ? secToHMS(elapsed) : '—' }}</span>
               <span class="tstate">{{ running ? 'Идёт учёт' : 'Учёт остановлен' }}</span>
@@ -734,7 +734,7 @@
               {{ t('core.taskDesignLaunch') }}
             </UiButton>
             <UiButton
-              v-if="isB24Task && completed"
+              v-if="isB24Task && completed && trackerCaps.renew"
               data-context="task-footer-action"
               tone="success"
               variant="solid"
@@ -746,7 +746,7 @@
               ↺ Возобновить
             </UiButton>
             <UiButton
-              v-else-if="isB24Task"
+              v-else-if="isB24Task && !completed && trackerCaps.complete"
               data-context="task-footer-action"
               tone="success"
               variant="solid"
@@ -1013,6 +1013,7 @@ import { api, failureText } from '../shared/apiClient.ts';
 import { shellAction } from '../shared/shellClient.ts';
 import { leaveTaskForPipeline } from '../shared/taskWindowNavigation.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
+import { useTrackersStore } from '../stores/trackers.ts';
 import { sseSubscribe } from '../composables/useSse.ts';
 import { parseProjectsChange } from '../../../shared/runtime/projectsContracts.ts';
 import {
@@ -1074,6 +1075,8 @@ const router = useRouter();
 
 const ui = useUiStore();
 const tasks = useTasksStore();
+const trackers = useTrackersStore();
+const trackerCaps = computed(() => trackers.capabilities);
 const board = useBoardStore();
 const favorites = useTaskFavoritesStore();
 const shelf = useTaskShelfStore();
@@ -1089,6 +1092,7 @@ const isB24Task = computed(() => detail.value !== null
   ? !ownTask.value
   : Boolean(taskId.value) && !/^[1-9]\d{11}$/u.test(String(taskId.value)));
 let detailRequest = 0;
+const detailTrackerRevision = ref<number | null>(null);
 const loading = ref(false);
 const canAnalyzeTask = computed(() => isB24Task.value || (ownTask.value && !loading.value));
 const busy = ref<string | null>(null);   // какое действие выполняется
@@ -1901,7 +1905,7 @@ function selectTaskSection(section: 'description' | 'triage' | 'comments') {
  * Ошибка формы использует прежнее пустое состояние и снимает индикатор загрузки.
  */
 async function loadComments() {
-  if (!isB24Task.value) {
+  if (!isB24Task.value || !trackerCaps.value.comments) {
     return;
   }
 
@@ -1932,7 +1936,7 @@ async function loadComments() {
 }
 
 watch(mtab, (t) => {
-  if (isB24Task.value && t === 'comments' && comments.value === null) {
+  if (isB24Task.value && trackerCaps.value.comments && t === 'comments' && comments.value === null) {
     loadComments();
   }
 });
@@ -2057,10 +2061,22 @@ async function act(name: string, fn: () => Promise<unknown>) {
 }
 
 const toggleTimer = () => act('timer', () => tasks.timer(taskId.value!, running.value ? 'pause' : 'start'));
+
+/**
+ * Подтверждение относится к исходной задаче и поколению подключения.
+ * Смена трекера во время диалога не переносит завершение на другой аккаунт.
+ */
 const complete = async () => {
+  const epoch = trackers.epoch;
+  const id = taskId.value;
+
   if (await confirmDialog('Завершить задачу?', { okText: 'Завершить' })) {
+    if (epoch !== trackers.epoch || taskId.value !== id) {
+      return;
+    }
+
     act('complete', async () => {
-      await tasks.complete(taskId.value!);
+      await tasks.complete(id!);
       ui.close();
     });
   }
@@ -2069,12 +2085,19 @@ const complete = async () => {
 // Возобновление не возвращает детали задачи: после подтверждения перечитываем их.
 // Статус и доступные действия определяет портал, а ошибки остаются в карточке.
 async function renew() {
+  const epoch = trackers.epoch;
+  const id = taskId.value;
+
   if (!(await confirmDialog('Возобновить задачу?', { okText: 'Возобновить' }))) {
     return;
   }
 
+  if (epoch !== trackers.epoch || taskId.value !== id) {
+    return;
+  }
+
   await act('renew', async () => {
-    await tasks.renew(taskId.value!);
+    await tasks.renew(id!);
     await loadDetail(true);
   });
 }
@@ -2185,6 +2208,27 @@ async function refreshLaunchOptions() {
 }
 
 const stopLaunchEvents = sseSubscribe((name, payload) => {
+  if (name === 'trackers-changed') {
+    detailRequest += 1;
+    commentsRequest += 1;
+    detailAbort?.abort();
+    commentsAbort?.abort();
+    detail.value = null;
+    comments.value = null;
+    commentText.value = '';
+    tasks.invalidate?.();
+    trackers.invalidate();
+    detailTrackerRevision.value = isRecord(payload) && Number.isSafeInteger(payload.revision)
+      ? Number(payload.revision) : 0;
+    loading.value = false;
+    comLoading.value = false;
+    void trackers.load(true);
+    closeLaunch();
+    cancelTaskEdit();
+
+    return;
+  }
+
   if (name === 'projects-changed') {
     try {
       const change = parseProjectsChange(payload);
@@ -2201,6 +2245,20 @@ const stopLaunchEvents = sseSubscribe((name, payload) => {
 
   void refreshLaunchOptions();
 });
+
+// Новое поколение metadata подтверждает, что детали читаются уже из текущего подключения.
+// Ожидание переживает замену запроса metadata другим подписчиком или диалогом настроек.
+watch(
+  () => [trackers.catalog, detailTrackerRevision.value] as const,
+  ([catalog, revision]) => {
+    if (!catalog || revision === null || catalog.revision < revision) {
+      return;
+    }
+
+    detailTrackerRevision.value = null;
+    void loadDetail(true);
+  },
+);
 // Рекомендацию маршрута считает сервер: только он знает, из этого ли каталога пришла
 // оценка и остался ли предложенный маршрут опубликованным. Клиент её не пересчитывает.
 function preferredLaunchRoute(opts: TaskLaunchOptions) {
@@ -2586,6 +2644,7 @@ function onTaskDialogOpenChange(open: boolean) {
 
 // Открытие/закрытие модалки по taskId.
 watch(taskId, (id) => {
+  detailTrackerRevision.value = null;
   detailAbort?.abort();
   commentsAbort?.abort();
   detailRequest += 1;
@@ -2599,6 +2658,7 @@ watch(taskId, (id) => {
   editMessage.value = null;
 
   if (id) {
+    void trackers.load();
     detail.value = null;
     launchMsg.value = null;
     sandboxMsg.value = null;

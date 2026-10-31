@@ -89,6 +89,10 @@ export const config = {
   installationBin,
   dataHome,
   dataStateDir,
+  driversDir: path.join(dataHome, 'drivers'),
+  driverInstallsPath: path.join(dataStateDir, 'driver-installs.json'),
+  trackerSettingsPath: path.join(dataStateDir, 'tracker-settings.json'),
+  trackerCredentialsPath: path.join(dataStateDir, 'tracker-credentials.json'),
   // Библиотека 3D отделена от чатов и проектных деревьев; плагин открывает её
   // только после включения, тестовые серверы задают собственный каталог.
   studio3dDir: process.env.GRIGDESK_3D_DIR || dataPath(dataHome, 'studio3d'),

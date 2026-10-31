@@ -3,6 +3,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { trackerMetadata } from './helpers/trackerCard.js';
+
 import { compileTaskModal } from './helpers/task-modal.js';
 
 process.env.NODE_ENV = 'test';
@@ -60,6 +62,10 @@ async function mountEditor(t, presentation = 'dialog') {
      */
     async get(url) {
       reads.push(url);
+
+      if (url === '/api/trackers') {
+        return trackerMetadata();
+      }
 
       if (url.endsWith('/comments')) {
         return { comments: [{

@@ -1,10 +1,13 @@
 # Задачи Б24
 
-Клиент портала, статусы, доска, полка и личное состояние задач.
+Драйверы трекеров, совместимый HTTP-фасад, доска, полка и личное состояние задач.
 
 Читай перед правкой: `server/src/lib/b24`, `server/src/modules/b24`, `server/src/modules/task-shelf`, `server/src/modules/task-favorites`, `server/src/modules/task-seen`, `web/src/views/board`, `web/src/views/shelf`, `b24/` (команда `b24`).
 
 ## Устройство
+
+- [Принятые границы драйверов трекера и правила поставки](tracker-drivers.md)
+- [Обновление карточки, колонка времени и ряды виджетов трекера](tracker-ui-refresh.md)
 
 - [Поля доски и переключатель контроля: общий рабочий режим, фон и скругления](board-control-styles.md)
 
@@ -34,4 +37,4 @@
 
 - [Проверка снимка доски принимает числовой Unix-старт таймера](board-snapshot-timer.md)
 - [Таймер задачи: timer_elapsed из B24 всегда 0 — считать от timer_started_at](task-timer-calculation.md)
-- [B24Client НЕ потокобезопасен — все вызовы через очередь _run](client-request-queue.md)
+- [Общая очередь сессионного драйвера и смена реквизитов](client-request-queue.md)

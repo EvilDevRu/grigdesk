@@ -33,11 +33,8 @@ import type {
   InstallBaseSnapshot,
 } from './stateStore.ts';
 import { errorInfo, installError } from './errors.ts';
-import {
-  readPluginManifest,
-  validatePluginPackage,
-  validatePreparedPluginPackage,
-} from './validatePackage.ts';
+import { pluginPackagePolicy } from './packagePolicy.ts';
+import type { InstallPackagePolicy } from './packagePolicy.ts';
 import { createNpmRunner, prepareNpmDependencies } from './npm.ts';
 import { computePayloadDigest } from './payloadDigest.ts';
 import { safeGitConfigDigest } from './gitMetadata.ts';
@@ -46,7 +43,7 @@ import { terminateOwnedWorker } from './workerIdentity.ts';
 import type { ApplyFs } from './applyPackage.ts';
 import { applyIntent, createApplyFs, recoverApply } from './applyPackage.ts';
 import {
-  installedSnapshot, installedWebModuleDir, sameSource, sensitivePluginFile,
+  installedSnapshot, sameSource,
 } from './serviceSnapshots.ts';
 import { compareSemVer } from '../releaseCommon.ts';
 import { workspaceWithinBudget } from './workspaceBudget.ts';
@@ -68,6 +65,7 @@ export interface PluginInstallRuntime {
 
 export interface PluginInstallServiceOptions {
   pluginsDir: string;
+  packagePolicy?: InstallPackagePolicy;
   statePath: string;
   grigDeskVersion: string;
   reservedIds: readonly string[];
@@ -101,7 +99,7 @@ export interface RollbackRequest {
 export type PluginInstallPort = Pick<PluginInstallService,
   | 'bindRuntime' | 'recover' | 'health' | 'close' | 'describe' | 'listVersions'
   | 'startInstall' | 'startUpdate' | 'currentJob' | 'getJob' | 'apply' | 'cancel'
-  | 'rollback' | 'checkUpdates' | 'restartRequired' | 'refreshCatalog'
+  | 'rollback' | 'checkUpdates' | 'restartRequired' | 'refreshCatalog' | 'payloadDigest'
 >;
 
 /**
@@ -111,6 +109,7 @@ export type PluginInstallPort = Pick<PluginInstallService,
 export class PluginInstallService {
   readonly options: PluginInstallServiceOptions;
   readonly workDir: string;
+  private readonly packagePolicy: InstallPackagePolicy;
   readonly store: PluginInstallStateStore;
   private readonly sources: PluginSourceRegistry;
   private readonly npm: NpmRunner;
@@ -146,6 +145,7 @@ export class PluginInstallService {
    */
   constructor(options: PluginInstallServiceOptions) {
     this.options = options;
+    this.packagePolicy = options.packagePolicy ?? pluginPackagePolicy;
     this.workDir = path.join(options.pluginsDir, '.grigdesk-install');
     this.now = options.now ?? (() => new Date());
     this.store = new PluginInstallStateStore({
@@ -552,7 +552,7 @@ export class PluginInstallService {
         throw installError('preview_stale');
       }
 
-      const validated = await validatePreparedPluginPackage(directory, {
+      const validated = await this.packagePolicy.validatePrepared(directory, {
         version: job.target.version,
         expectedId: pluginId,
         reservedIds: new Set(this.options.reservedIds),
@@ -772,7 +772,7 @@ export class PluginInstallService {
         checkedAt: sameSource(record.source, record.previous.source) ? record.checkedAt : null,
         checkError: sameSource(record.source, record.previous.source) ? record.checkError : null,
       };
-      const manifest = await readPluginManifest(previousDir);
+      const manifest = await this.packagePolicy.readManifest(previousDir);
       const time = this.now().toISOString();
       const target: PluginVersionRef = {
         version: targetRecord.version,
@@ -985,6 +985,25 @@ export class PluginInstallService {
   }
 
   /**
+   * Digest берётся из проверенного durable кандидата, а не из review token.
+   * После публикации текущего задания его байты подтверждает установленная запись.
+   */
+  payloadDigest(jobId: string): string | null {
+    const job = this.state.job;
+
+    if (job?.id !== jobId) {
+      return null;
+    }
+
+    if (this.state.prepared?.jobId === jobId) {
+      return this.state.prepared.candidateDigest;
+    }
+
+    return job.status === 'done' && job.pluginId
+      ? this.state.plugins[job.pluginId]?.payloadDigest ?? null : null;
+  }
+
+  /**
    * Job by id нужен для reconciliation, даже если current job уже сменился.
    * Сохранённый terminal summary удерживается отдельно от live job.
    */
@@ -1162,7 +1181,7 @@ export class PluginInstallService {
         job.percent = null;
       });
 
-      const validated = await validatePluginPackage(directory, {
+      const validated = await this.packagePolicy.validate(directory, {
         version: target.version,
         expectedId: request.expectedId ?? null,
         reservedIds: new Set(this.options.reservedIds),
@@ -1227,7 +1246,7 @@ export class PluginInstallService {
           sourceChanged: !sameSource(record.source, initial.source),
         } : current ? { kind: 'unmanaged' } : { kind: 'none' },
         changes: null,
-        warnings: validated.hasServer ? ['Код плагина выполняется с правами GrigDesk.'] : [],
+        warnings: validated.hasServer ? [...this.packagePolicy.serverWarnings] : [],
       };
 
       if (validated.webModuleDir !== null) {
@@ -1237,7 +1256,7 @@ export class PluginInstallService {
 
       if (record) {
         const changes = await source.changes(directory, record.sha, target.sha);
-        const previousModuleDir = await installedWebModuleDir(
+        const previousModuleDir = await this.packagePolicy.installedModuleDir(
           path.join(this.options.pluginsDir, validated.id),
         );
         const moduleDirs = [validated.webModuleDir, previousModuleDir]
@@ -1246,7 +1265,7 @@ export class PluginInstallService {
         preview.changes = changes ? {
           ...changes,
           sensitive: changes.files.filter((file) =>
-            sensitivePluginFile(file.path, validated.webDir, moduleDirs))
+            this.packagePolicy.sensitiveFile(file.path, validated.webDir, moduleDirs))
             .map((file) => file.path),
         } : null;
       }
@@ -1462,7 +1481,7 @@ export class PluginInstallService {
     try {
       return await this.readOperation(async () => {
         const digest = await computePayloadDigest(directory, expected.npmDirs);
-        const manifest = await readPluginManifest(directory);
+        const manifest = await this.packagePolicy.readManifest(directory);
 
         if (digest !== expected.payloadDigest
           || manifest.id !== id || manifest.version !== expected.version) {

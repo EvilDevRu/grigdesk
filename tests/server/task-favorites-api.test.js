@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { B24Adapter } from '../../server/src/adapters/b24.ts';
+import { identityFixture } from './helpers/trackerIdentity.js';
 import { TaskFavoritesStore } from '../../server/src/lib/taskFavoritesStore.ts';
 import {
   favoriteScopeFor,
@@ -141,20 +141,11 @@ test('API-07: повреждённое хранилище имеет отдел�
   assert.doesNotMatch(response.body, /schemaVersion/);
 });
 
-test('B24 identity кешируется после первого определения и сбрасывается с credentials', async () => {
+test('B24 identity кешируется после первого определения и сбрасывается с credentials', async (t) => {
   let discoveries = 0;
-  const client = {
-    baseUrl: 'https://portal.example.test/',
-    async discoverUserId() {
-      discoveries += 1;
-      return 77;
-    },
-  };
-  const adapter = new B24Adapter({
-    credsStore: { read: () => ({ baseUrl: client.baseUrl, login: 'user', password: 'secret' }) },
-    cookiePath: '/tmp/not-used-task-favorites-cookie',
+  const { adapter, changeCredentials } = await identityFixture(t, () => {
+    discoveries += 1;
   });
-  adapter.client = () => client;
 
   assert.deepEqual(await adapter.accountIdentity(), {
     baseUrl: 'https://portal.example.test/',
@@ -166,7 +157,7 @@ test('B24 identity кешируется после первого определ
   });
   assert.equal(discoveries, 1);
 
-  adapter.invalidate();
+  await changeCredentials();
   await adapter.accountIdentity();
   assert.equal(discoveries, 2);
 });

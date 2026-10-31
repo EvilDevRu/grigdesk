@@ -324,6 +324,7 @@ function observeAttempt(method: Method, path: string, attempt: number,
 // Настройка одной попытки. По умолчанию GET ждёт 30 с и повторяется один раз, а
 // мутации ждут без таймаута и не повторяются.
 export interface RequestOptions {
+  headers?: Record<string, string>;
   // Таймаут попытки в миллисекундах; 0 — без таймаута.
   timeoutMs?: number;
   // Вместо общего предела ждём указанное время без заголовков или непустых байтов.
@@ -445,7 +446,7 @@ async function request(
   body?: unknown,
   options: RequestOptions = {},
 ): Promise<unknown> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...options.headers };
   const opts: RequestInit = {
     ...FETCH_OPTS,
     method,
@@ -694,7 +695,7 @@ export interface ApiClient {
   eventsUrl: () => string;
   get: (path: string, options?: RequestOptions) => Promise<unknown>;
   post: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
-  put: (path: string, body?: unknown) => Promise<unknown>;
+  put: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
   patch: (path: string, body?: unknown) => Promise<unknown>;
   del: (path: string, body?: unknown) => Promise<unknown>;
   postBytes: typeof postBytes;
@@ -712,7 +713,7 @@ export const api: ApiClient = {
   eventsUrl: () => url('/api/events'),
   get: (path: string, options?: RequestOptions) => request('GET', path, undefined, options),
   post: (path: string, body?: unknown, options?: RequestOptions) => request('POST', path, body, options),
-  put: (path: string, body?: unknown) => request('PUT', path, body),
+  put: (path: string, body?: unknown, options?: RequestOptions) => request('PUT', path, body, options),
   patch: (path: string, body?: unknown) => request('PATCH', path, body),
   del: (path: string, body?: unknown) => request('DELETE', path, body),
   postBytes: (path, body, opts) => observed('POST', path, () => postBytes(path, body, opts)),

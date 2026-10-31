@@ -1062,6 +1062,7 @@
 </template>
 
 <script setup lang="ts">
+import { boardSupportsTimer } from '../shared/trackerCapabilities.ts';
 import PipelineLoading from './PipelineLoading.vue';
 
 import DeferredFindings from './pipeline/DeferredFindings.vue';
@@ -1216,6 +1217,10 @@ function boardTask(t: PipelineViewTask) {
  * Статус существует только для явного булева значения из снимка доски.
  */
 function b24TimerState(t: PipelineViewTask) {
+  if (!boardSupportsTimer(board.data)) {
+    return null;
+  }
+
   const timerRunning = boardTask(t)?.timerRunning;
 
   if (timerRunning === true) {
@@ -1236,7 +1241,7 @@ function b24TimerState(t: PipelineViewTask) {
 function b24TimerLabel(t: PipelineViewTask) {
   const task = boardTask(t);
 
-  if (!task || typeof task.timerRunning !== 'boolean') {
+  if (!boardSupportsTimer(board.data) || !task || typeof task.timerRunning !== 'boolean') {
     return '';
   }
 
@@ -1251,7 +1256,7 @@ const outsideTimers = computed(() => {
 
   const d = board.data;
 
-  if (!d) {
+  if (!d || !boardSupportsTimer(d)) {
     return [];
   }
 

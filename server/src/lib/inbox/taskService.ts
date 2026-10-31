@@ -58,6 +58,8 @@ interface DecisionResult {
 interface B24Port {
   isConfigured: () => boolean;
   createTask: (options: Payload) => Promise<{ id?: unknown } | null>;
+  captureContext?: () => { trackerId: string | null; revision: number };
+  assertContext?: (context: { trackerId: string | null; revision: number }) => void;
 }
 
 interface AttachmentAnalyzerPort {
@@ -790,7 +792,13 @@ export class InboxTaskService {
     }
   }
 
+  /**
+   * Подготовка обращения закрепляет подключение до чтения чувствительного текста.
+   * Перед созданием повторно проверяются поколение трекера и состояние источника.
+   */
   async task(ref: string, source: unknown, internalOptions?: unknown) {
+    const trackerContext = this.b24.captureContext?.();
+
     // Самый ранний gate: без B24 не читаем даже channel archive и текст.
     await this._assertInboxEnabled();
     if (!this.b24.isConfigured()) {
@@ -1078,6 +1086,11 @@ export class InboxTaskService {
         }
 
         let created;
+
+        if (trackerContext) {
+          this.b24.assertContext?.(trackerContext);
+        }
+
         try {
           created = await this.b24.createTask({
             title: finalTitle,

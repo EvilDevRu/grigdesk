@@ -5,14 +5,12 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
-import {
-  B24Client,
-  B24ValidationError,
-} from '../../server/src/lib/b24/client.ts';
+import { customClientModule } from './helpers/trackerCustomPackage.js';
 import b24Module from '../../server/src/modules/b24/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
+const { B24Client, B24ValidationError } = await customClientModule();
 
 /** Собирает B24Client без сети и сохраняет единственный form-urlencoded запрос. */
 function protocolClient(calls) {

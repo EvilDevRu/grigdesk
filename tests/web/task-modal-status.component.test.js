@@ -4,6 +4,7 @@ import test from 'node:test';
 import { compileModule, migrationHarness, webFile } from './helpers/compile-vue.js';
 import { compileTaskModal } from './helpers/task-modal.js';
 import { installUiBrowser } from './helpers/ui-components.js';
+import { trackerMetadata } from './helpers/trackerCard.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -69,6 +70,10 @@ async function mountCard(t, browser, {
     // Детали копируются как сетевой ответ, чтобы кеш не менялся вместе с порталом.
     // Остальные запросы карточки получают пустые независимые ответы.
     async get(url, options) {
+      if (url === '/api/trackers') {
+        return trackerMetadata();
+      }
+
       if (url.startsWith('/api/grigdesk-tasks/')) {
         throw new migrationHarness.ApiError('Нет своей задачи', 404, { error: 'grigdesk_task_not_found' });
       }

@@ -12,8 +12,11 @@ const TEST_UTILS = '../../../web/node_modules/@vue/test-utils/dist/vue-test-util
 
 let mountNonce = 0;
 
-/** Компиляция вью через общий TS-aware helper с настоящими UI-компонентами. */
-export async function compileBoardView() {
+/**
+ * Компиляция вью оставляет настоящие UI-компоненты.
+ * Точечные HTTP/графические подмены передаются сценарием без изменения соседних тестов.
+ */
+export async function compileBoardView({ stubs = {} } = {}) {
   return compileVue(VIEW_PATH, {
     stubs: {
       '../shared/format.ts': `
@@ -74,6 +77,7 @@ export async function compileBoardView() {
           post: async (url, payload) => globalThis.__boardViewOwnApi?.post(url, payload),
         };
       `,
+      ...stubs,
       '../composables/useSse.ts': `
         import { onUnmounted } from 'vue';
         export const sseSubscribe = (listener) => {
@@ -138,6 +142,8 @@ const DEFAULT_TASKS = [
  */
 export async function mountBoardView(t, {
   prefix = 'board',
+  snapshot = {},
+  compilerStubs = {},
   tasks = DEFAULT_TASKS,
   pending = false,
   boardError = null,
@@ -180,6 +186,7 @@ export async function mountBoardView(t, {
           tasks,
           toReview,
           created,
+          ...snapshot,
         },
         error: boardError,
         loading: pending,
@@ -254,7 +261,7 @@ export async function mountBoardView(t, {
   globalThis.__boardViewOwnApi = ownApi;
   globalThis.__boardViewStores = stores;
   const pinia = createPinia();
-  const BoardView = await compileBoardView();
+  const BoardView = await compileBoardView({ stubs: compilerStubs });
   const wrapper = mount(BoardView, {
     attachTo: browser.document.querySelector('#mount'),
     global: {

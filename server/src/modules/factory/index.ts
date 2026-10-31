@@ -168,6 +168,8 @@ type Registry = Record<string, string>;
 // Соседи, которых модуль получает сборкой приложения. Их полные контракты живут
 // в своих файлах; здесь перечислено ровно то, что использует раздел.
 interface B24Port {
+  sourceUrl?: (id: string) => Promise<string> | string;
+  capabilities?: () => { comments?: boolean } | undefined;
   accountIdentity: () => Promise<{ baseUrl?: unknown; userId?: unknown } | null>;
   taskPageData: (id: string) => Promise<{ comments?: unknown }>;
 }
@@ -787,7 +789,12 @@ async function factoryModule(
   // Берём из настроек портала: своего адреса задачи GrigDesk не выдумывает.
   async function taskSourceUrl(id: string) {
     if (!b24) return '';
+
     try {
+      if (b24.sourceUrl) {
+        return await b24.sourceUrl(id);
+      }
+
       const identity = await b24.accountIdentity();
       const base = String(identity?.baseUrl || '').replace(/\/+$/, '');
       if (!base || !identity?.userId) return '';
@@ -839,7 +846,7 @@ async function factoryModule(
         text: lines.join('\n').slice(0, 4000),
       });
     }
-    if (b24 && !own) {
+    if (b24 && !own && b24.capabilities?.()?.comments !== false) {
       try {
         const page = await b24.taskPageData(id);
         const comments = (page.comments || []) as Array<{

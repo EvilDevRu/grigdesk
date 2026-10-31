@@ -7,6 +7,7 @@ import { errorInfo, installError, PluginInstallError } from '../../lib/pluginIns
 
 import type { PluginInstallJob } from '../../../../shared/plugins/pluginInstallContracts.ts';
 import { validArchiveKey } from '../../lib/pluginInstall/stateValidation.ts';
+import { isRecord } from '../../../../shared/lib/objects.ts';
 
 type JobRequest = FastifyRequest<{ Params: { jobId: string }; Body: { reviewToken: string } }>;
 type PluginRequest = FastifyRequest<{ Params: { id: string }; Body: RollbackRequest }>;
@@ -16,13 +17,85 @@ type UpdateRequest = FastifyRequest<{
 }>;
 
 /**
+ * Общие формы job сохраняются, дополнительные поля принадлежат только driver API.
+ * Plugin serializer и его публичный контракт не расширяются вместе с драйверами.
+ */
+function driverOutputSchemas(): typeof outputs {
+  const result: unknown = JSON.parse(JSON.stringify(outputs)
+    .replaceAll('pluginId', 'driverId').replaceAll('plugins', 'drivers'));
+
+  /**
+   * Обходит только данные JSON Schema и расширяет узлы с driverId.
+   * Вложенные install records и plugin-схемы сохраняют прежнюю форму.
+   */
+  function extend(value: unknown): void {
+    if (!isRecord(value)) {
+      return;
+    }
+
+    if (isRecord(value.properties) && Object.hasOwn(value.properties, 'driverId')) {
+      value.properties.restartRequired = { type: 'boolean' };
+
+      const preview = value.properties.preview;
+
+      if (isRecord(preview) && isRecord(preview.properties)) {
+        preview.properties.payloadDigest = {
+          type: 'string',
+          nullable: true,
+          pattern: '^[a-f0-9]{64}$',
+        };
+      }
+    }
+
+    for (const child of Object.values(value)) {
+      if (Array.isArray(child)) {
+        child.forEach(extend);
+      } else {
+        extend(child);
+      }
+    }
+  }
+
+  extend(result);
+
+  return result as typeof outputs;
+}
+
+/**
  * Установка имеет свой encapsulated HTTP scope и отдельный session допуск.
  * Чтение исхода остаётся доступным всем авторизованным transport ядра.
  */
 export default async function installRoutes(
   app: FastifyInstance,
-  { installs }: { installs: PluginInstallPort },
+  { installs, driver = false }: { installs: PluginInstallPort; driver?: boolean },
 ): Promise<void> {
+  const prefix = driver ? '/api/driver-installs' : '/api/plugin-installs';
+  const resource = driver ? 'drivers' : 'plugins';
+  const responseSchemas = driver ? driverOutputSchemas() : outputs;
+
+  /**
+   * Публичный job использует имя своей области, внутренний журнал остаётся общим.
+   * Проверка ссылки на архив выполняется до удаления служебного имени поля.
+   */
+  const jobView = (job: PluginInstallJob | null) => {
+    const checked = publicJob(job);
+
+    if (!driver || !checked) {
+      return checked;
+    }
+
+    const { pluginId, ...fields } = checked;
+
+    return {
+      ...fields,
+      driverId: pluginId,
+      preview: fields.preview ? {
+        ...fields.preview,
+        payloadDigest: installs.payloadDigest?.(checked.id) ?? null,
+      } : null,
+      restartRequired: pluginId ? installs.restartRequired(pluginId) : false,
+    };
+  };
   const validator = new Ajv({
     removeAdditional: false,
     coerceTypes: false,
@@ -78,64 +151,64 @@ export default async function installRoutes(
     }
   });
 
-  app.get('/api/plugin-installs/jobs/current', { schema: { response: outputs.current } }, async () => ({
-    job: publicJob(await installs.currentJob()),
+  app.get(`${prefix}/jobs/current`, { schema: { response: responseSchemas.current } }, async () => ({
+    job: jobView(await installs.currentJob()),
     recoveryError: installs.health(),
   }));
-  app.get('/api/plugin-installs/jobs/:jobId', {
-    schema: { params: inputs.jobParams, response: outputs.current },
+  app.get(`${prefix}/jobs/:jobId`, {
+    schema: { params: inputs.jobParams, response: responseSchemas.current },
   }, async (request: JobRequest) => ({
-    job: publicJob(await installs.getJob(request.params.jobId)),
+    job: jobView(await installs.getJob(request.params.jobId)),
     recoveryError: installs.health(),
   }));
-  app.post('/api/plugin-installs/versions', {
-    schema: { body: inputs.versions, response: outputs.versions },
+  app.post(`${prefix}/versions`, {
+    schema: { body: inputs.versions, response: responseSchemas.versions },
   }, async (request: FastifyRequest<{ Body: { url: unknown } }>) =>
     installs.listVersions(request.body.url));
-  app.post('/api/plugin-installs/jobs', { schema: { body: inputs.install, response: outputs.job } },
+  app.post(`${prefix}/jobs`, { schema: { body: inputs.install, response: responseSchemas.job } },
     async (request: FastifyRequest<{ Body: InstallRequest }>, reply) => {
-      const job = publicJob(await installs.startInstall(request.body));
+      const job = jobView(await installs.startInstall(request.body));
 
       return reply.code(202).send({ job });
     });
-  app.post('/api/plugin-installs/jobs/:jobId/apply', {
+  app.post(`${prefix}/jobs/:jobId/apply`, {
     schema: {
       params: inputs.jobParams,
       body: inputs.apply,
-      response: outputs.job,
+      response: responseSchemas.job,
     },
   }, async (request: JobRequest) =>
-    ({ job: publicJob(await installs.apply(request.params.jobId, request.body.reviewToken)) }));
-  app.post('/api/plugin-installs/jobs/:jobId/cancel', {
+    ({ job: jobView(await installs.apply(request.params.jobId, request.body.reviewToken)) }));
+  app.post(`${prefix}/jobs/:jobId/cancel`, {
     schema: {
       params: inputs.jobParams,
       body: inputs.empty,
-      response: outputs.job,
+      response: responseSchemas.job,
     },
   }, async (request: JobRequest) =>
-    ({ job: publicJob(await installs.cancel(request.params.jobId)) }));
-  app.post('/api/plugin-installs/plugins/:id/update', {
+    ({ job: jobView(await installs.cancel(request.params.jobId)) }));
+  app.post(`${prefix}/${resource}/:id/update`, {
     schema: {
       params: inputs.pluginParams,
       body: inputs.update,
-      response: outputs.job,
+      response: responseSchemas.job,
     },
   }, async (request: UpdateRequest, reply) => {
-    const job = publicJob(await installs.startUpdate(request.params.id, request.body));
+    const job = jobView(await installs.startUpdate(request.params.id, request.body));
 
     return reply.code(202).send({ job });
   });
-  app.post('/api/plugin-installs/plugins/:id/rollback', {
+  app.post(`${prefix}/${resource}/:id/rollback`, {
     schema: {
       params: inputs.pluginParams,
       body: inputs.rollback,
-      response: outputs.job,
+      response: responseSchemas.job,
     },
   }, async (request: PluginRequest) =>
-    ({ job: publicJob(await installs.rollback(request.params.id, request.body)) }));
-  app.post('/api/plugin-installs/check', {
-    schema: { body: inputs.empty, response: outputs.check },
-  }, async () => ({ plugins: await installs.checkUpdates() }));
+    ({ job: jobView(await installs.rollback(request.params.id, request.body)) }));
+  app.post(`${prefix}/check`, {
+    schema: { body: inputs.empty, response: responseSchemas.check },
+  }, async () => ({ [resource]: await installs.checkUpdates() }));
 }
 
 /**

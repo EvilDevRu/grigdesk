@@ -1,6 +1,7 @@
 
 import { compileTaskModal } from './task-modal.js';
 import { installUiBrowser } from './ui-components.js';
+import { trackerMetadata } from './trackerCard.js';
 
 export const LOCAL_TASK = {
   id: '100000000001',
@@ -118,6 +119,10 @@ export async function mountLocalCard(t, {
      */
     async get(url) {
       reads.push(url);
+
+      if (url === '/api/trackers') {
+        return trackerMetadata();
+      }
 
       if (url.endsWith('/clarifications')) {
         return clarifications;

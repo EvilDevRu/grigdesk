@@ -142,6 +142,10 @@ export async function installHttpFixture(t, options = {}) {
     cliToken: 'fixture-cli',
   });
 
+  if (options.registerRoutes) {
+    await options.registerRoutes(app);
+  }
+
   if (options.catalog) {
     await app.register(catalogRoutes, { catalog: options.catalog });
   }

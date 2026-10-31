@@ -35,6 +35,18 @@ export const useBoardStore = defineStore('board', {
   },
   actions: {
     /**
+     * Смена трекера отменяет старое чтение и удаляет его снимок.
+     * Метка не позволяет прежнему зеркалу вернуть данные другого подключения.
+     */
+    invalidate() {
+      reads.get(this)?.abort();
+      this.data = null;
+      this.error = null;
+      this.loading = false;
+      this.loadedAt = 0;
+      this.readAt = Math.max(Date.now(), this.readAt + 1);
+    },
+    /**
      * Окно карточки не опрашивает дашборд: обычная загрузка просит снимок у главного окна.
      * Принудительная загрузка после своего действия читает доску как прежде.
      * Время начала GET определяет свежесть: поздний ответ не отменяет более новый снимок.
@@ -90,8 +102,10 @@ export const useBoardStore = defineStore('board', {
           this.error = errorMessage(e, 'Доска недоступна');
         }
       } finally {
-        reads.delete(this);
-        this.loading = false;
+        if (reads.get(this) === controller) {
+          reads.delete(this);
+          this.loading = false;
+        }
       }
     },
     /**

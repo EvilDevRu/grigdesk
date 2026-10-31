@@ -431,6 +431,7 @@
 </template>
 
 <script setup lang="ts">
+import { boardSupportsTimer } from '../trackerCapabilities.ts';
 import { formatDate, formatNumber, intlLocale } from '../../../../shared/i18n/formats.ts';
 import { uiLocale } from '../../ui.ts';
 
@@ -465,6 +466,7 @@ import {
   vTooltip,
 } from '../../ui';
 import { useSse } from '../../composables/useSse.ts';
+import { useTrackersStore } from '../../stores/trackers.ts';
 import { useSystemStore } from '../../stores/system.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
 import { isTopbarProvider } from '../../../../shared/chat/executorTypes.ts';
@@ -770,7 +772,7 @@ const taskStore = useTasksStore();
 const recentPausedTimerIds = ref<string[]>([]);
 const timerActionTaskId = ref<string | null>(null);
 const timerActionError = ref('');
-const boardTasks = computed(() => boardStore.data?.tasks || []);
+const boardTasks = computed(() => boardSupportsTimer(boardStore.data) ? boardStore.data?.tasks || [] : []);
 const workedTodayHours = computed(() => boardStore.data?.today?.hours ?? 0);
 const topbarTimerTasks = computed(() => {
   const recentIds = new Set(recentPausedTimerIds.value);
@@ -1036,6 +1038,18 @@ watch(() => route.fullPath, () => {
 const phoneAccess = usePhoneAccessStore();
 
 const { connected } = useSse((name, data) => {
+  if (name === 'trackers-changed') {
+    const trackers = useTrackersStore();
+
+    boardStore.invalidate();
+    taskStore.invalidate();
+    trackers.invalidate();
+    recentPausedTimerIds.value = [];
+    timerActionError.value = '';
+    void trackers.load(true);
+    void boardStore.load();
+  }
+
   if (name === 'mobile-changed' && phoneAccess.open) {
     void phoneAccess.refresh().catch(() => {});
   }

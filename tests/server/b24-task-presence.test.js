@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { B24Client } from '../../server/src/lib/b24/client.ts';
+import { customClientModule } from './helpers/trackerCustomPackage.js';
+
+const { B24Client } = await customClientModule();
 
 const cases = [
   ['exists', { success: true, data: { id: '100000000001', title: 'Занята' } }, 'exists'],

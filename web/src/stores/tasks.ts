@@ -5,6 +5,7 @@ import { decodeGrigdeskTask } from '../../../shared/tasks/grigdeskTaskContracts.
 import { defineStore } from 'pinia';
 import { api, ApiError } from '../shared/apiClient.ts';
 import { useBoardStore } from './board.ts';
+import { useTrackersStore } from './trackers.ts';
 import {
   decodeTaskDetail, decodeTaskLaunchOptions, decodeTaskLaunchResult,
 } from '../shared/boardContracts.ts';
@@ -18,15 +19,23 @@ interface CachedTask {
 }
 
 export const useTasksStore = defineStore('tasks', {
-  state: () => ({ details: {} as Record<string, CachedTask> }),
+  state: () => ({
+    details: {} as Record<string, CachedTask>,
+    epoch: 0,
+  }),
 
   actions: {
+    invalidate() {
+      this.epoch += 1;
+      this.details = {};
+    },
     /**
      * Детали используют прежний кеш на тридцать секунд с принудительным обновлением.
      * Номера вне диапазона собственных задач читаются прежним запросом Б24.
      * Внутри диапазона источник подтверждает запись; ответ проверяется до замены кеша.
      */
     async load(id: TaskId, force = false, signal?: AbortSignal): Promise<TaskDetail> {
+      const epoch = this.epoch;
       const cached = this.details[id];
 
       if (cached && !force && Date.now() - cached.loadedAt < 30000) {
@@ -53,6 +62,12 @@ export const useTasksStore = defineStore('tasks', {
         ? decodeTaskDetail(await api.get(`/api/b24/task/${id}`, { signal }))
         : decodeTaskDetail(decodeGrigdeskTask(response, String(id)));
 
+      signal?.throwIfAborted();
+
+      if (epoch !== this.epoch) {
+        throw new DOMException('', 'AbortError');
+      }
+
       this.details[id] = { data, loadedAt: Date.now() };
 
       return data;
@@ -67,7 +82,9 @@ export const useTasksStore = defineStore('tasks', {
      * Доска перечитывается только после подтверждённого ответа обновления.
      */
     async update(id: TaskId, fields: Record<string, unknown>): Promise<TaskDetail> {
-      const data = decodeTaskDetail(await api.put(`/api/b24/task/${id}`, fields));
+      const data = decodeTaskDetail(await api.put(
+        `/api/b24/task/${id}`, fields, useTrackersStore().mutationOptions(),
+      ));
 
       this.details[id] = { data, loadedAt: Date.now() };
       await useBoardStore().load(true);
@@ -76,7 +93,7 @@ export const useTasksStore = defineStore('tasks', {
     },
 
     async timer(id: TaskId, action: string) {
-      await api.post(`/api/b24/task/${id}/timer/${action}`);
+      await api.post(`/api/b24/task/${id}/timer/${action}`, undefined, useTrackersStore().mutationOptions());
       await useBoardStore().load(true);
     },
 
@@ -85,7 +102,7 @@ export const useTasksStore = defineStore('tasks', {
      * Заголовок остаётся доступным конвейеру до следующего чтения деталей.
      */
     async complete(id: TaskId) {
-      await api.post(`/api/b24/task/${id}/complete`);
+      await api.post(`/api/b24/task/${id}/complete`, undefined, useTrackersStore().mutationOptions());
 
       if (this.details[id]) {
         this.details[id].loadedAt = 0;
@@ -99,7 +116,7 @@ export const useTasksStore = defineStore('tasks', {
      * Прежний снимок помечается устаревшим перед обновлением доски.
      */
     async renew(id: TaskId) {
-      await api.post(`/api/b24/task/${id}/renew`);
+      await api.post(`/api/b24/task/${id}/renew`, undefined, useTrackersStore().mutationOptions());
 
       if (this.details[id]) {
         this.details[id].loadedAt = 0;
@@ -109,7 +126,7 @@ export const useTasksStore = defineStore('tasks', {
     },
 
     async comment(id: TaskId, text: string) {
-      await api.post(`/api/b24/task/${id}/comment`, { text });
+      await api.post(`/api/b24/task/${id}/comment`, { text }, useTrackersStore().mutationOptions());
     },
 
     async launchOptions(id: TaskId, profile = '') {

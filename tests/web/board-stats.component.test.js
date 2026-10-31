@@ -8,6 +8,20 @@ process.env.NODE_ENV = 'test';
 test('плитка месяца показывает число выполненных задач рядом с учётом времени', async (t) => {
   const { wrapper } = await mountBoardView(t, {
     prefix: 'board-month-completed',
+    snapshot: {
+      trackerId: 'b24-custom',
+      widgets: [{
+        id: 'month',
+        kind: 'kpi',
+        title: { text: 'За месяц' },
+        items: [{
+          id: 'month-completed',
+          label: { text: 'выполнено задач' },
+          value: 17,
+          format: 'count',
+        }],
+      }],
+    },
     month: { hours: 82.5, norm: 160, completedTasks: 17 },
   });
 

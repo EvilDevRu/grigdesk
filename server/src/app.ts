@@ -36,7 +36,8 @@ import { windowKeyPath } from '../../shared/desktop/windowKeyPath.ts';
 import { FactoryStateAdapter } from './adapters/factoryState.ts';
 import { ArbiterCardsStore } from './lib/arbiterCards.ts';
 import { ArbiterConversationStore } from './lib/arbiterConversationStore.ts';
-import { B24Adapter } from './adapters/b24.ts';
+import { createTrackerRuntime } from './lib/trackers/runtime.ts';
+import trackersModule from './modules/trackers/index.ts';
 import { SystemAdapter } from './adapters/system.ts';
 import { MediaAdapter } from './adapters/media.ts';
 import { extractSceneFrames } from './lib/media/ingest.ts';
@@ -654,7 +655,20 @@ async function build(desktopParent: DesktopParent | null) {
   const githubCredentials = new GitHubCredentialsStore({ file: config.githubCredsPath });
   const githubAccountContextFor = createGitHubAccountContextFactory({ dir: config.githubDir });
   const claudeAuth = new ClaudeAuthStore({ authPath: config.claudeAuthPath });
-  const b24 = new B24Adapter({ credsStore, cookiePath: config.b24CookiePath });
+  const trackerRuntime = await createTrackerRuntime({
+    config,
+    credsStore,
+    factoryState,
+    projectsService,
+    grigDeskVersion: installOptions.grigDeskVersion,
+    onChanged: async () => {
+      await fastify.sse?.broadcast?.('trackers-changed', trackerRuntime.selection.read());
+    },
+  });
+  const { b24 } = trackerRuntime;
+
+  fastify.addHook('onClose', async () => trackerRuntime.close());
+  await fastify.register(trackersModule, { runtime: trackerRuntime });
   // Идентичность companion-чата можно создать и для запущенной задачи фабрики, и для
   // существующей задачи Б24 до запуска. Подтвердить её имеют право только эти
   // серверные источники.
@@ -1202,6 +1216,7 @@ async function build(desktopParent: DesktopParent | null) {
     projectsService,
   });
   await fastify.register(grigdeskTasksModule, {
+    service: trackerRuntime.own,
     config,
     b24,
     factoryState,
@@ -1230,8 +1245,24 @@ async function build(desktopParent: DesktopParent | null) {
   // авторизацию Claude показывает раздел исполнителей, а пути берутся из сервисов.
   // Оба аргумента были мёртвыми, типизация это показала.
   await fastify.register<SettingsModuleOptions>(settingsModule, {
-    credsStore: asPort(credsStore),
-    b24: asPort(b24),
+    credsStore: asPort({
+      publicView: () => credsStore.publicView(),
+      write: (input: Parameters<CredsStore['write']>[0]) => trackerRuntime.writeSettings(
+        trackerRuntime.selection.read().externalId, { 'b24-custom': { ...input } },
+      ),
+    }),
+    b24: asPort({
+      invalidate: async () => {
+        await fastify.sse?.broadcast?.('trackers-changed', trackerRuntime.selection.read());
+      },
+      testAuth: async () => {
+        try {
+          return await trackerRuntime.registry.testAuth('b24-custom');
+        } catch {
+          return { ok: false, error: 'Кастомный драйвер Б24 недоступен' };
+        }
+      },
+    }),
     prefs,
     factoryDebug,
     diagnosticLogging,

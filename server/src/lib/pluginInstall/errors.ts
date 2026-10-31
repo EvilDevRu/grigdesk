@@ -84,6 +84,10 @@ export const PLUGIN_INSTALL_ERRORS: Record<string, { status: number; message: st
     status: 422,
     message: "Плагин рассчитан на другую версию контракта (api). Этот GrigDesk поддерживает api 1 и 2.",
   },
+  contract_unsupported: {
+    status: 422,
+    message: 'Драйвер рассчитан на другую версию контракта трекера.',
+  },
   version_invalid: {
     status: 422,
     message: "version в plugin.json должна быть вида X.Y.Z.",

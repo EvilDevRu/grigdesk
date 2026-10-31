@@ -106,7 +106,7 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
         `export const shellAction = (...args) => globalThis.${prefix}ShellAction?.(...args);`,
       '../shared/apiClient.ts': [
         `export const api = globalThis.${prefix}Api;`,
-        `export { failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,
+        `export { ApiError, failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,
       ].join('\n'),
       '../composables/useUiContextSource.ts': contextSourceStub(prefix),
       '../composables/useSse.ts': [

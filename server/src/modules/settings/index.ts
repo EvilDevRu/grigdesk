@@ -380,8 +380,10 @@ async function settingsModule(
     if (!login || !password) {
       return reply.code(400).send({ error: 'bad_input', message: 'Укажите логин и пароль.' });
     }
-    credsStore.write({ login, password, baseUrl });
-    b24.invalidate(); // пересобрать клиент под новые креды
+
+    await credsStore.write({ login, password, baseUrl });
+    await b24.invalidate();
+
     return credsStore.publicView();
   });
 

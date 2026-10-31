@@ -4,10 +4,12 @@ import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { B24Adapter } from '../../adapters/b24.ts';
+import { TrackerError } from '../../lib/trackers/contract.ts';
+import type { TrackerFacade } from '../../lib/trackers/facade.ts';
 import {
   B24ValidationError,
   normalizeTaskUpdateFields,
-} from '../../lib/b24/client.ts';
+} from '../../lib/trackers/taskFields.ts';
 
 export interface B24ModuleOptions {
   b24: B24Adapter;
@@ -28,8 +30,31 @@ function failureText(error: unknown): string {
   return String((error as { message?: unknown } | null)?.message || error);
 }
 
+/**
+ * Прежние HTTP-пути делегируют операции общему фасаду выбранного трекера.
+ * Сервер сохраняет разрешение media-имён и проверку поколения новых клиентов.
+ */
 async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Promise<void> {
   const { b24 } = opts;
+
+  // Новые клиенты фиксируют поколение при подготовке мутации.
+  // Legacy HTTP и CLI без заголовка продолжают обращаться к текущему выбору.
+  const assertGeneration = (request: FastifyRequest) => {
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
+      || !request.url.startsWith('/api/b24/')) {
+      return;
+    }
+
+    const generation = request.headers['x-grigdesk-tracker-generation'];
+
+    if (generation !== undefined) {
+      if (typeof generation !== 'string' || !/^\d+$/.test(generation)) {
+        throw new TrackerError('tracker_context_changed', 'Некорректное поколение трекера', 409);
+      }
+
+      (b24 as TrackerFacade).assertContext?.(Number(generation));
+    }
+  };
 
   /**
    * Дополняет неизменённые данные портала разрешёнными Telegram-обсуждениями.
@@ -102,12 +127,15 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
     fn: (request: FastifyRequest<TaskRoute>) => Promise<unknown> | unknown,
   ) => async (request: FastifyRequest<TaskRoute>, reply: FastifyReply) => {
     try {
+      assertGeneration(request);
+
       return await fn(request);
     } catch (err) {
       const badRequest = err instanceof B24ValidationError;
+      const trackerError = err instanceof TrackerError;
 
-      return reply.code(badRequest ? 400 : 502).send({
-        error: badRequest ? err.code : 'b24_error',
+      return reply.code(trackerError ? err.status : badRequest ? 400 : 502).send({
+        error: trackerError || badRequest ? err.code : 'b24_error',
         message: failureText(err),
       });
     }
@@ -123,6 +151,9 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
   // media регистрируется отдельно, а при выключенном плагине кадров просто нет.
   fastify.post<TaskRoute>('/api/b24/tasks', wrap((r) => {
     const body = { ...((r.body || {}) as Payload) };
+
+    (b24 as TrackerFacade).assertAttachments?.(body);
+
     const names = Array.isArray(body.frames) ? body.frames : [];
     const clips = Array.isArray(body.clips) ? body.clips : [];
     delete body.frames;
@@ -164,7 +195,14 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
     }
 
     const fields = normalizeTaskUpdateFields(r.body);
+    const context = (b24 as TrackerFacade).captureContext?.();
+
     await b24.updateTask(id, fields);
+
+    if (context) {
+      (b24 as TrackerFacade).assertContext(context);
+    }
+
     return taskWithDiscussion(id);
   }));
   fastify.post<TaskRoute>('/api/b24/task/:id/comment', wrap((r) => b24.addComment(
