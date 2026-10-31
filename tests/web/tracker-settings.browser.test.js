@@ -219,15 +219,15 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
           const dialog = page.getByRole('dialog').last();
 
           await dialog.waitFor();
-          assert.equal(await dialog.locator('input[value="own"]').isChecked(), true);
-          assert.equal(await dialog.locator('input[value="own"]').isDisabled(), true);
+
+          assert.equal(await dialog.getByRole('region', { name: 'GrigDesk', exact: true }).count(), 0);
 
           await selectUiOption(page, dialog.getByRole('combobox'), 'grigdesk-b24');
 
           await dialog.getByRole('button', { name: /сохранить|save/iu }).click();
           assert.ok(writes.some((call) => call.path === '/api/trackers/settings'
             && call.body.externalId === 'grigdesk-b24'));
-          await dialog.getByRole('button', { name: /установить из git|install from git/iu }).click();
+          await dialog.getByRole('button', { name: /^(установить|install)$/iu }).click();
 
           const installDialog = page.getByRole('dialog').last();
 

@@ -8,17 +8,14 @@ import {
 
 process.env.NODE_ENV = 'test';
 
-test('TRACKER-SETTINGS-01: настройки без Б24, own нельзя отключить, выбор и secret через tracker API',
+test('TRACKER-SETTINGS-01: настройки без отдельного трекера GrigDesk, выбор и secret через tracker API',
   async (t) => {
     const card = await mountTrackerBoard(t);
 
     await openTrackerSettings(card);
 
-    const own = card.wrapper.find('input[value="own"]');
-
-    assert.ok(own.exists());
-    assert.equal(own.element.checked, true);
-    assert.equal(own.element.disabled, true);
+    assert.equal(card.wrapper.find('section[aria-label="GrigDesk"]').exists(), false);
+    assert.equal(card.wrapper.find('option[value="own"]').exists(), false);
     await chooseExternal(card, 'grigdesk-b24');
 
     const secret = card.wrapper.find('input[type="password"]');
@@ -40,6 +37,13 @@ test('TRACKER-SETTINGS-01: настройки без Б24, own нельзя от
     assert.ok(writes.some((call) => JSON.stringify(call.payload).includes('fixture-secret')));
     assert.equal(writes.some((call) => call.url.includes('/plugins')), false);
     assert.equal(card.state.catalog.activeIds.includes('own'), true);
+    assert.match(card.wrapper.text(), /Настройки доски сохранены|Board settings saved/iu);
+
+    const updatedSecret = card.wrapper.find('input[type="password"]');
+
+    assert.equal(updatedSecret.element.value, 'fixture-secret');
+    await updatedSecret.setValue('updated-fixture-secret');
+    assert.doesNotMatch(card.wrapper.text(), /Настройки доски сохранены|Board settings saved/iu);
   });
 
 test('TRACKER-INSTALL-UI-01: repo/tag, review, apply, update и rollback через отдельный API', async (t) => {
@@ -66,7 +70,7 @@ test('TRACKER-INSTALL-UI-01: repo/tag, review, apply, update и rollback чер�
 
   await openTrackerSettings(card);
 
-  const install = actionButton(card.wrapper, /установить из git|install from git/iu);
+  const install = actionButton(card.wrapper, /^\s*(?:установить|install)\s*$/iu);
 
   assert.ok(install);
   await install.trigger('click');
@@ -171,7 +175,7 @@ test('TRACKER-SETTINGS-02: ошибка установки сохраняет в
   });
 
   await openTrackerSettings(card);
-  await actionButton(card.wrapper, /установить из git|install from git/iu).trigger('click');
+  await actionButton(card.wrapper, /^\s*(?:установить|install)\s*$/iu).trigger('click');
   await card.flushPromises();
   await card.wrapper.find('[data-role="driver-custom-source"]').trigger('click');
 

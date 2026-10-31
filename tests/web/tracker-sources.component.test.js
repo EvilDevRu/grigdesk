@@ -15,7 +15,7 @@ async function installDialog(t, options) {
   const card = await mountTrackerBoard(t, options);
 
   await openTrackerSettings(card);
-  await actionButton(card.wrapper, /установить из git|install from git/iu).trigger('click');
+  await actionButton(card.wrapper, /^\s*(?:установить|install)\s*$/iu).trigger('click');
   await card.flushPromises();
 
   const dialog = card.wrapper.findAll('[role="dialog"]').at(-1);
@@ -206,7 +206,7 @@ test('DRIVER-SOURCES-UI-08: источник активного задания �
   await card.flushPromises();
   await card.dialog.find('button[aria-label="Закрыть"]').trigger('click');
   await card.flushPromises();
-  await actionButton(card.wrapper, /установить из git|install from git/iu).trigger('click');
+  await actionButton(card.wrapper, /^\s*установить\s*$/iu).trigger('click');
   await card.flushPromises();
 
   const reopened = card.wrapper.findAll('[role="dialog"]').at(-1);

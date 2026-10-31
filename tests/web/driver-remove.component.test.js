@@ -43,7 +43,7 @@ async function removalCard(t, handlers = {}) {
   });
   await openTrackerSettings(card);
 
-  const install = actionButton(card.wrapper, /установить из git|install from git/iu);
+  const install = actionButton(card.wrapper, /^\s*(?:установить|install)\s*$/iu);
 
   assert.ok(install, JSON.stringify(card.wrapper.findAll('button').map((button) => button.text())));
   await install.trigger('click');

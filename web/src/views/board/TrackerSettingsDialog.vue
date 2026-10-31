@@ -1,29 +1,74 @@
 <template>
-  <UiDialog :open="open" :title="t('core.trackerSettings')" @update:open="emit('update:open', $event)">
+  <UiDialog :open="open" :title="t('core.trackerSettings')" :busy="saving" :dismissible="!saving"
+            :description="t('core.trackerSettingsIntro')" data-role="tracker-settings" data-ui-workspace
+            initial-focus="#tracker-external" @update:open="emit('update:open', $event)">
+    <template #title>
+      <div class="tracker-settings__heading">
+        <span class="tracker-settings__title">{{ t('core.trackerSettings') }}</span>
+        <UiIconButton :label="t('core.close')" :disabled="saving" @click="emit('update:open', false)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+               stroke-linecap="round" aria-hidden="true">
+            <path d="m6 6 12 12M18 6 6 18" />
+          </svg>
+        </UiIconButton>
+      </div>
+    </template>
+
     <div class="tracker-settings">
-      <UiCheckbox value="own" checked disabled>GrigDesk</UiCheckbox>
-      <UiField :label="t('core.trackerExternal')">
-        <UiSelect v-model="externalId" :disabled="saving">
-          <option value="">{{ t('core.trackerNone') }}</option>
-          <option v-for="driver in externalDrivers" :key="driver.id" :value="driver.id">
-            {{ driver.name }}{{ driver.reason ? ` — ${driver.reason}` : '' }}
-          </option>
-        </UiSelect>
-      </UiField>
-      <template v-for="(field, key) in selected?.schema ?? {}" :key="key">
-        <UiField :label="fieldLabel(field.label, key)">
-          <UiCheckbox v-if="field.type === 'boolean'" v-model="values[key]" :disabled="saving" />
-          <UiInput v-else :model-value="String(values[key] ?? '')"
-                   :type="field.secret ? 'password' : 'text'"
-                   @update:model-value="values[key] = field.type === 'number' ? Number($event) : ($event ?? '')"
-                   :disabled="saving" autocomplete="off" />
+      <div class="tracker-settings__fields">
+        <UiField id="tracker-external" :label="t('core.trackerExternal')"
+                 :hint="t('core.trackerExternalHint')">
+          <UiSelect v-model="externalId" :disabled="saving">
+            <option value="">{{ t('core.trackerNone') }}</option>
+            <option v-for="driver in externalDrivers" :key="driver.id" :value="driver.id">
+              {{ driver.name }}{{ driver.reason ? ` — ${driver.reason}` : '' }}
+            </option>
+          </UiSelect>
         </UiField>
-      </template>
+        <template v-for="(field, key) in selected?.schema ?? {}" :key="key">
+          <UiField :label="fieldLabel(field.label, key)">
+            <UiCheckbox v-if="field.type === 'boolean'" v-model="values[key]" :disabled="saving" />
+            <UiInput v-else :model-value="String(values[key] ?? '')"
+                     :type="field.secret ? 'password' : 'text'"
+                     @update:model-value="values[key] = field.type === 'number' ? Number($event) : ($event ?? '')"
+                     :disabled="saving" autocomplete="off" />
+          </UiField>
+        </template>
+      </div>
+
+      <div class="tracker-settings__install">
+        <div class="tracker-settings__copy">
+          <h3>{{ t('core.trackerMoreIntegrations') }}</h3>
+          <p>{{ t('core.trackerInstallHint') }}</p>
+        </div>
+        <UiButton :disabled="saving" @click="installOpen = true">
+          <template #leading>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4" />
+            </svg>
+          </template>
+          {{ t('core.trackerInstall') }}
+        </UiButton>
+      </div>
+
       <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
-      <UiButton :disabled="saving" @click="save">{{ t('core.trackerSave') }}</UiButton>
-      <UiButton @click="installOpen = true">{{ t('core.trackerInstallGit') }}</UiButton>
+      <UiInlineMessage v-else-if="saved" tone="success" role="status">
+        {{ t('core.trackerSaved') }}
+      </UiInlineMessage>
       <TrackerInstallDialog v-if="installOpen" v-model:open="installOpen" />
     </div>
+
+    <template #footer>
+      <UiFormActions class="tracker-settings__actions">
+        <UiButton variant="ghost" :disabled="saving" @click="emit('update:open', false)">
+          {{ t('core.close') }}
+        </UiButton>
+        <UiButton variant="solid" tone="accent" :loading="saving" :disabled="saving" @click="save">
+          {{ t('core.trackerSave') }}
+        </UiButton>
+      </UiFormActions>
+    </template>
   </UiDialog>
 </template>
 
@@ -34,7 +79,8 @@ import type { TrackerLabel } from '../../../../shared/trackers/contracts.ts';
 import { useTrackersStore } from '../../stores/trackers.ts';
 import { api, failureText } from '../../shared/apiClient.ts';
 import {
-  t, resolveUiText, messageRef, UiButton, UiCheckbox, UiDialog, UiField, UiInlineMessage, UiInput, UiSelect,
+  t, resolveUiText, messageRef, UiButton, UiCheckbox, UiDialog, UiField, UiFormActions,
+  UiIconButton, UiInlineMessage, UiInput, UiSelect,
 } from '../../ui.ts';
 import TrackerInstallDialog from './TrackerInstallDialog.vue';
 
@@ -48,11 +94,17 @@ const savedValues = ref<Record<string, Record<string, unknown>>>({});
 const values = ref<Record<string, string | boolean | number>>({});
 const error = ref('');
 const saving = ref(false);
+const saved = ref(false);
 const installOpen = ref(false);
+
 const externalDrivers = computed(() =>
   trackers.catalog?.drivers.filter((driver) => driver.id !== 'own' && !driver.deleted) ?? [],
 );
 const selected = computed(() => externalDrivers.value.find((driver) => driver.id === externalId.value));
+
+watch([externalId, values], () => {
+  saved.value = false;
+}, { deep: true });
 
 /**
  * Подпись схемы переводится только при явном descriptor ключа.
@@ -113,6 +165,7 @@ async function save() {
   }
 
   saving.value = true;
+  saved.value = false;
   error.value = '';
 
   try {
@@ -123,6 +176,7 @@ async function save() {
     }) as { revision: number };
 
     revision.value = result.revision;
+    saved.value = true;
   } catch (cause) {
     error.value = failureText(cause);
   } finally {
@@ -134,5 +188,66 @@ onMounted(load);
 </script>
 
 <style scoped>
-.tracker-settings { display: grid; gap: 12px; min-width: 0; overflow-wrap: anywhere; }
+.tracker-settings {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tracker-settings__heading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+.tracker-settings__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.tracker-settings__copy {
+  min-width: 0;
+}
+
+.tracker-settings__copy h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.tracker-settings__copy p {
+  margin: 3px 0 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.tracker-settings__fields {
+  display: grid;
+  gap: 16px;
+}
+
+.tracker-settings__install {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.tracker-settings__actions {
+  width: 100%;
+}
+
+@media (max-width: 600px) {
+  .tracker-settings__install {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+}
 </style>
