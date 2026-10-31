@@ -1137,6 +1137,7 @@
   "trackerApply": "Apply",
   "trackerCancel": "Cancel",
   "trackerUpdate": "Update",
+  "trackerUpdateAvailable": "Version {version} is available",
   "trackerRemove": "Remove",
   "trackerRemoveTitle": "Remove driver",
   "trackerRemoveConfirmation": "Remove driver “{name}”? Its credentials will be kept. If selected, the tracker will be disconnected.",

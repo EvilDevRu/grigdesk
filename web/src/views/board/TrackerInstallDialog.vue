@@ -127,6 +127,9 @@
         <h3>{{ t('core.trackerInstalled') }}</h3>
         <div v-for="(record, id) in installedDrivers" :key="id" class="driver-package">
           <p class="driver-package__identity">{{ id }} <span>{{ record.version }}</span></p>
+          <UiInlineMessage v-if="record.updateAvailable" tone="accent">
+            {{ t('core.trackerUpdateAvailable', { version: record.latest?.version ?? '' }) }}
+          </UiInlineMessage>
           <UiInlineMessage v-if="record.checkError" tone="danger">{{ record.checkError.message }}</UiInlineMessage>
           <UiInlineMessage v-if="record.rollbackError" tone="danger">
             {{ record.rollbackError.message }}

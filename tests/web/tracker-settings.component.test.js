@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { migrationHarness } from './helpers/compile-vue.js';
 import {
-  actionButton, chooseExternal, mountTrackerBoard, openTrackerSettings,
+  actionButton, chooseExternal, driverInstallInfo, mountTrackerBoard, openTrackerSettings,
 } from './helpers/trackerBoard.js';
 
 process.env.NODE_ENV = 'test';
@@ -161,6 +161,43 @@ test('TRACKER-INSTALL-UI-01: repo/tag, review, apply, update и rollback чер�
   assert.match(dialog.text(), /перезапуск|restart/iu);
 
   assert.equal(card.apiCalls.some((call) => call.url.includes('plugin-installs')), false);
+});
+
+test('TRACKER-INSTALL-UI-02: проверка обновлений показывает доступную версию драйвера', async (t) => {
+  const card = await mountTrackerBoard(t);
+
+  await openTrackerSettings(card);
+
+  const install = actionButton(card.wrapper, /^\s*(?:установить|install)\s*$/iu);
+
+  assert.ok(install);
+  await install.trigger('click');
+  await card.flushPromises();
+
+  const dialog = card.wrapper.findAll('[role="dialog"]').at(-1);
+
+  assert.ok(dialog, 'Диалог установки открыт');
+
+  const check = actionButton(dialog, /проверить обновления|check for updates/iu);
+
+  assert.ok(check, 'Кнопка проверки обновлений доступна');
+
+  card.state.installed = driverInstallInfo('1.0.0', 1, null, {
+    updateAvailable: true,
+    latest: { version: '1.1.0', tag: 'v1.1.0', sha: 'c'.repeat(40) },
+    checkedAt: '2026-01-02T00:00:00.000Z',
+  });
+  await check.trigger('click');
+  await card.flushPromises();
+
+  assert.match(dialog.text(), /доступна версия 1\.1\.0|version 1\.1\.0 is available/iu);
+
+  card.state.installed = driverInstallInfo('1.1.0', 2);
+  await check.trigger('click');
+  await card.flushPromises();
+
+  assert.doesNotMatch(dialog.text(), /доступна версия|version \d+\.\d+\.\d+ is available/iu);
+  assert.match(dialog.text(), /1\.1\.0/u);
 });
 
 test('TRACKER-SETTINGS-02: ошибка установки сохраняет выбор и введённый repo/tag', async (t) => {

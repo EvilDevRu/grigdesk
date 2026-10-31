@@ -50,7 +50,7 @@ export const driverSourceCatalog = () => ({
  * Версии различаются digest и коммитом, чтобы откат нельзя было подтвердить кандидатом.
  * Поля снимка совпадают с InstallInfo, который читает общий строгий decoder.
  */
-function driverInstallInfo(version, revision, previous = null) {
+export function driverInstallInfo(version, revision, previous = null, extra = {}) {
   return {
     ...installedRecord(version, revision),
     source: { kind: 'git', url: 'https://git.fixture/driver.git' },
@@ -62,6 +62,7 @@ function driverInstallInfo(version, revision, previous = null) {
     restartRequired: true,
     rollbackAvailable: previous !== null,
     rollbackError: null,
+    ...extra,
   };
 }
 

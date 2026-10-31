@@ -1157,6 +1157,7 @@
   "trackerApply": "Применить",
   "trackerCancel": "Отменить",
   "trackerUpdate": "Обновить",
+  "trackerUpdateAvailable": "Доступна версия {version}",
   "trackerRemove": "Удалить",
   "trackerRemoveTitle": "Удалить драйвер",
   "trackerRemoveConfirmation": "Удалить драйвер «{name}»? Его реквизиты сохранятся. Если драйвер выбран на доске, она перейдёт на собственные задачи.",
