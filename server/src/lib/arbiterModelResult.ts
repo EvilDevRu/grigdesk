@@ -35,19 +35,48 @@ function modelQuestion(value: unknown) {
 }
 
 /**
+ * Незнакомый вид предложения выводится по его собственным полям: вложенный
+ * объект action означает apply, непустый diagnosticInstruction — diagnose.
+ * Названный моделью синоним вида не расширяет контракт: цель, указание
+ * и полномочия по-прежнему проверяет строгий декодер.
+ */
+function modelKind(proposal: Record<string, unknown>) {
+  if (proposal.kind === 'diagnose' || proposal.kind === 'apply') {
+    return proposal.kind;
+  }
+
+  if (proposal.action && typeof proposal.action === 'object') {
+    return 'apply';
+  }
+
+  return typeof proposal.diagnosticInstruction === 'string' && proposal.diagnosticInstruction.trim()
+    ? 'diagnose'
+    : proposal.kind;
+}
+
+/**
  * Пропущенное пояснение берётся из результата, пропущенная рекомендация означает false.
  * Явные значения не исправляются; action, цель и указание проверит строгий декодер.
+ * Вид предложения оставляет себе единственное служебное поле: парное поле
+ * другого вида удаляется как постороннее оформление, а не отклоняет весь итог.
  */
 function modelProposal(value: unknown) {
   const proposal = modelRecord(value, [
     'id', 'kind', 'label', 'expectedResult',
-  ], ['recommended', 'explanation', 'diagnosticInstruction', 'action']);
-
-  return {
+  ], ['recommended', 'explanation', 'diagnosticInstruction', 'action']) as Record<string, unknown>;
+  const kind = modelKind(proposal);
+  const canonical: Record<string, unknown> = {
     ...proposal,
+    kind,
     recommended: Object.hasOwn(proposal, 'recommended') ? proposal.recommended : false,
     explanation: Object.hasOwn(proposal, 'explanation') ? proposal.explanation : proposal.expectedResult,
   };
+
+  if (kind === 'diagnose' || kind === 'apply') {
+    delete canonical[kind === 'diagnose' ? 'action' : 'diagnosticInstruction'];
+  }
+
+  return canonical;
 }
 
 /**
