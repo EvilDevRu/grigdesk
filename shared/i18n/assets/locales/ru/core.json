@@ -1164,6 +1164,11 @@
   "trackerRollback": "Откатить",
   "trackerRestart": "Требуется ручной перезапуск сервера",
   "trackerPortal": "Адрес портала",
+  "trackerAuthMode":
+    "Способ подключения: токен — для порталов с подпиской, логин и пароль — для бесплатных порталов",
+  "trackerAuthToken": "Токен доступа",
+  "trackerAuthPassword": "Логин и пароль",
+  "trackerChooseOption": "Выберите значение",
   "trackerAccessToken": "Токен доступа",
   "trackerPeriod": "Период статистики",
   "trackerDay": "День",

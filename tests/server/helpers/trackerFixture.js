@@ -21,7 +21,8 @@ export const CUSTOM_CAPABILITIES = Object.fromEntries([
   'complete', 'renew', 'users', 'projects',
 ].map((key) => [key, true]));
 export const STOCK_CAPABILITIES = Object.fromEntries(Object.keys(CUSTOM_CAPABILITIES)
-  .map((key) => [key, ['create', 'complete', 'users', 'projects'].includes(key)]));
+  .map((key) => [key, ['create', 'comments', 'complete', 'editing', 'users', 'projects']
+    .includes(key)]));
 
 /**
  * Пакет фикстуры — исполняемый драйвер с одинаковым локальным номером задачи.

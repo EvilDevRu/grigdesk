@@ -13,14 +13,58 @@ export function isTrackerLabel(value: unknown): value is TrackerLabel {
 }
 
 /**
+ * Варианты выбора имеют собственные подписи и уникальные непустые значения.
+ * Посторонние свойства не проходят границу декларативного контракта.
+ */
+function isSelectOptions(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length === 0) {
+    return false;
+  }
+
+  const values = new Set<string>();
+
+  return value.every((option) => {
+    if (!isRecord(option) || Object.keys(option).some((key) => !['value', 'label'].includes(key))
+      || typeof option.value !== 'string' || !option.value.trim() || values.has(option.value)
+      || !isTrackerLabel(option.label)) {
+      return false;
+    }
+
+    values.add(option.value);
+
+    return true;
+  });
+}
+
+/**
+ * Условие видимости сравнивает строку без преобразования типов.
+ * Выбор и флаг всегда видимы; произвольные выражения схема не исполняет.
+ */
+function isFieldVisibility(field: Record<string, unknown>): boolean {
+  if (field.visibleIf === undefined) {
+    return true;
+  }
+
+  const condition = field.visibleIf;
+
+  return !['boolean', 'select'].includes(String(field.type)) && isRecord(condition)
+    && Object.keys(condition).every((key) => ['field', 'equals'].includes(key))
+    && typeof condition.field === 'string' && Boolean(condition.field.trim())
+    && typeof condition.equals === 'string';
+}
+
+/**
  * Схема настроек содержит только известные типы и явные подписи данных или каталога.
  * Непроверенное поле пакета не становится настройкой и не определяет выдачу секрета в GET.
  */
 export function isTrackerSettingsSchema(value: unknown): value is TrackerSettingsSchema {
   return isRecord(value) && Object.entries(value).every(([key, field]) =>
     /^[a-zA-Z][a-zA-Z0-9_]*$/u.test(key) && !['constructor', 'prototype', '__proto__'].includes(key)
-    && isRecord(field) && ['string', 'number', 'boolean'].includes(String(field.type))
-    && Object.keys(field).every((name) => ['type', 'label', 'secret', 'required'].includes(name))
+    && isRecord(field) && ['string', 'number', 'boolean', 'select'].includes(String(field.type))
+    && Object.keys(field).every((name) =>
+      ['type', 'label', 'secret', 'required', 'options', 'visibleIf'].includes(name))
+    && (field.type === 'select' ? isSelectOptions(field.options) : field.options === undefined)
+    && isFieldVisibility(field)
     && (field.secret === undefined || typeof field.secret === 'boolean')
     && (field.required === undefined || typeof field.required === 'boolean')
     && (field.label === undefined || isTrackerLabel(field.label)));

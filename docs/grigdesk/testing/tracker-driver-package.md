@@ -5,7 +5,7 @@
 Подготовка пакета — условие выполнения зависимых проверок, а не действие теста.
 
 Имена пакетов владельца: `grigdesk-b24` — стоковый REST, `grigdesk-b24-discript` — кастомный портал.
-В `driver.json` и `package.json` обоих пакетов указана версия `0.1.0`.
+В `driver.json` и `package.json` stock указана версия `0.1.1`, discript — `0.1.0`.
 
 `tests/server/helpers/trackerPackage.js` использует `GRIGDESK_CUSTOM_DRIVER_DIR`.
 Без переменной он ожидает `grigdesk-desk-drivers/grigdesk-b24-discript` рядом с checkout GrigDesk.

@@ -108,6 +108,12 @@ async function stockFixture(t, { failure = null, failingMethod = 'tasks.task.add
       }];
     } else if (method === 'sonet_group.get') {
       result = [{ ID: '11', NAME: 'Облачный проект' }];
+    } else if (method === 'task.commentitem.getlist') {
+      result = [];
+    } else if (method === 'task.commentitem.add') {
+      result = 777;
+    } else if (method === 'tasks.task.update') {
+      result = true;
     } else {
       response.writeHead(500);
       response.end(JSON.stringify({ error: 'UNEXPECTED_METHOD' }));
@@ -136,7 +142,11 @@ async function stockFixture(t, { failure = null, failingMethod = 'tasks.task.add
   }
 
   await selectTracker(fixture, 'grigdesk-b24', {
-    'grigdesk-b24': { baseUrl: 'https://cloud.fixture', accessToken: TOKEN },
+    'grigdesk-b24': {
+      baseUrl: 'https://cloud.fixture',
+      authMode: 'token',
+      accessToken: TOKEN,
+    },
   });
 
   return {
@@ -246,8 +256,6 @@ test('STOCK-02: TASK_NOT_FOUND отличается от доступа и се�
 
 for (const [name, method, url, payload] of [
   ['timer', 'POST', '/api/tracker/task/42/timer/start', {}],
-  ['comments', 'POST', '/api/tracker/task/42/comment', { text: 'Не поддерживается' }],
-  ['editing', 'PUT', '/api/tracker/task/42', { title: 'Не менять' }],
   ['renew', 'POST', '/api/tracker/task/42/renew', {}],
   ['images', 'POST', '/api/tracker/tasks', { title: 'С файлом', images: [{ path: '/fixture/image.png' }] }],
   ['STOCK-03-ATTACH', 'POST', '/api/tracker/tasks', { title: 'С кадром', frames: ['shot.png'] }],
@@ -272,3 +280,51 @@ for (const [name, method, url, payload] of [
     assert.equal(fixture.cloud.requests.length, before);
   });
 }
+
+test('STOCK-04: комментарий уходит в портал и возвращается с номером', async (t) => {
+  const fixture = await stockFixture(t);
+
+  if (!fixture) {
+    return;
+  }
+
+  const response = await fixture.request('POST', '/api/tracker/task/42/comment', {
+    text: 'Проверено эмулятором',
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json(), { ok: true, commentId: 777 });
+
+  const add = fixture.cloud.requests.find((request) => request.url === '/rest/task.commentitem.add');
+
+  assert.ok(add);
+  assert.ok(add.body.toString().includes('Проверено эмулятором'));
+
+  const tab = await fixture.request('GET', '/api/tracker/task/42/comments');
+
+  assert.equal(tab.statusCode, 200, tab.body);
+  assert.deepEqual(tab.json(), { comments: [] });
+  assert.ok(fixture.cloud.requests.some((request) => request.url === '/rest/task.commentitem.getlist'));
+});
+
+test('STOCK-04: правка задачи уходит в tasks.task.update', async (t) => {
+  const fixture = await stockFixture(t);
+
+  if (!fixture) {
+    return;
+  }
+
+  const response = await fixture.request('PUT', '/api/tracker/task/42', {
+    title: 'Переименована эмулятором',
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(Number(response.json().id), 42);
+
+  const update = fixture.cloud.requests.find((request) => request.url === '/rest/tasks.task.update');
+
+  assert.ok(update);
+  assert.ok(update.body.toString().includes('Переименована эмулятором'));
+  assert.equal(fixture.cloud.requests.filter((request) =>
+    request.url === '/rest/tasks.task.update').length, 1);
+});

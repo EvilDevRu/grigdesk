@@ -88,7 +88,11 @@ async function trackersModule(app: FastifyInstance, options: {
           for (const [key, value] of Object.entries(values)) {
             const field = entry.schema[key];
 
-            if (!field || typeof value !== field.type) {
+            const valid = field?.type === 'select'
+              ? typeof value === 'string' && field.options.some((option) => option.value === value)
+              : field && typeof value === field.type;
+
+            if (!valid) {
               throw new TrackerError('invalid_request', 'Некорректное поле драйвера');
             }
           }

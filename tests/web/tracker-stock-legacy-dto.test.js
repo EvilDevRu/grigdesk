@@ -14,7 +14,11 @@ test('B-STOCK-LEGACY-DTO-01: decoder принимает ответ внешне�
 
   const { default: createDriver } = driverModule;
   const driver = createDriver({
-    credentials: { read: () => ({ baseUrl: 'https://cloud.fixture', accessToken: 'fixture' }) },
+    credentials: { read: () => ({
+      baseUrl: 'https://cloud.fixture',
+      authMode: 'token',
+      accessToken: 'fixture',
+    }) },
     fetch: async (url) => Response.json({
       result: String(url).endsWith('/user.current') ? { ID: '7' } : {
         tasks: [{ id: '42', title: 'Облачная задача' }],

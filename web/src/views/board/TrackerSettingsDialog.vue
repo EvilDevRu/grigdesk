@@ -26,11 +26,20 @@
           </UiSelect>
         </UiField>
         <template v-for="(field, key) in selected?.schema ?? {}" :key="key">
-          <UiField :label="fieldLabel(field.label, key)">
+          <UiField v-if="fieldVisible(field)" :label="fieldLabel(field.label, key)">
             <UiCheckbox v-if="field.type === 'boolean'" v-model="values[key]" :disabled="saving" />
+            <UiSelect v-else-if="field.type === 'select'" :model-value="String(values[key] ?? '')"
+                      :disabled="saving" @update:model-value="values[key] = $event ?? ''">
+              <option value="" disabled>{{ t('core.trackerChooseOption') }}</option>
+              <option v-for="option in field.options" :key="option.value" :value="option.value">
+                {{ fieldLabel(option.label, option.value) }}
+              </option>
+            </UiSelect>
             <UiInput v-else :model-value="String(values[key] ?? '')"
                      :type="field.secret ? 'password' : 'text'"
-                     @update:model-value="values[key] = field.type === 'number' ? Number($event) : ($event ?? '')"
+                     @update:model-value="
+                       values[key] = field.type === 'number' ? Number($event) : ($event ?? '')
+                     "
                      :disabled="saving" autocomplete="off" />
           </UiField>
         </template>
@@ -75,7 +84,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 
-import type { TrackerLabel } from '../../../../shared/trackers/contracts.ts';
+import type { TrackerLabel, TrackerSettingsField } from '../../../../shared/trackers/contracts.ts';
 import { useTrackersStore } from '../../stores/trackers.ts';
 import { api, failureText } from '../../shared/apiClient.ts';
 import {
@@ -117,6 +126,10 @@ function fieldLabel(value: TrackerLabel | undefined, fallback: string | number):
 
   return value ? 'text' in value ? value.text
     : resolveUiText(messageRef(value.key, value.params)) : String(fallback);
+}
+
+function fieldVisible(field: TrackerSettingsField): boolean {
+  return !field.visibleIf || values.value[field.visibleIf.field] === field.visibleIf.equals;
 }
 
 watch(externalId, (id) => {
@@ -169,9 +182,12 @@ async function save() {
   error.value = '';
 
   try {
+    const visibleValues = Object.fromEntries(Object.entries(selected.value?.schema ?? {})
+      .filter(([, field]) => fieldVisible(field))
+      .map(([key]) => [key, values.value[key]]));
     const result = await trackers.saveSettings({
       externalId: externalId.value || null,
-      settings: externalId.value ? { [externalId.value]: { ...values.value } } : {},
+      settings: externalId.value ? { [externalId.value]: visibleValues } : {},
       expectedRevision: revision.value,
     }) as { revision: number };
 

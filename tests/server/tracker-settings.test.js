@@ -20,7 +20,11 @@ test('TRACKER-SECRETS-01: settings требуют сессию, secret не во
   assert.equal(denied.statusCode, 401);
 
   await selectTracker(fixture, 'grigdesk-b24', {
-    'grigdesk-b24': { baseUrl: 'https://cloud.fixture', accessToken: SECRET },
+    'grigdesk-b24': {
+      baseUrl: 'https://cloud.fixture',
+      authMode: 'token',
+      accessToken: SECRET,
+    },
   });
 
   for (const url of ['/api/trackers', '/api/trackers/settings', '/api/driver-installs/jobs/current']) {
@@ -61,4 +65,29 @@ test('TRACKER-SECRETS-01: stale revision не меняет выбор, успе�
   assert.equal(stale.statusCode, 409);
   assert.equal((await fixture.request('GET', '/api/trackers')).json().externalId, 'fixture-a');
   assert.ok(fixture.events.some((event) => event.name === 'trackers-changed'));
+});
+
+test('Select: HTTP сохраняет строку варианта и отвергает неизвестное значение и тип', async (t) => {
+  const fixture = await trackerFixture(t, { setup: copyStockPackage });
+
+  assert.ok(fixture);
+
+  for (const authMode of ['token', 'password']) {
+    await selectTracker(fixture, 'grigdesk-b24', { 'grigdesk-b24': { authMode } });
+
+    const settings = await fixture.request('GET', '/api/trackers/settings');
+
+    assert.equal(settings.json().settings['grigdesk-b24'].authMode, authMode);
+  }
+
+  for (const authMode of ['unknown', '', 1, true]) {
+    const settings = await fixture.request('GET', '/api/trackers/settings');
+    const response = await fixture.request('POST', '/api/trackers/settings', {
+      externalId: 'grigdesk-b24',
+      expectedRevision: settings.json().revision,
+      settings: { 'grigdesk-b24': { authMode } },
+    });
+
+    assert.equal(response.statusCode, 400);
+  }
 });

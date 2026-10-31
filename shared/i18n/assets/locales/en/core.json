@@ -1144,6 +1144,11 @@
   "trackerRollback": "Roll back",
   "trackerRestart": "Manual server restart required",
   "trackerPortal": "Portal URL",
+  "trackerAuthMode":
+    "Connection method: token for portals with a subscription, login and password for free portals",
+  "trackerAuthToken": "Access token",
+  "trackerAuthPassword": "Login and password",
+  "trackerChooseOption": "Choose a value",
   "trackerAccessToken": "Access token",
   "trackerPeriod": "Statistics period",
   "trackerDay": "Day",
