@@ -949,8 +949,8 @@
       "description": "Your Bitrix24 tasks awaiting an assessment, pipeline event or new comments.",
       "fields": {
         "browserNotifications": {
-          "label": "Notify in the browser",
-          "hint": "A new event for a task on the shelf produces one notification: in GrigDesk, or a system notification when GrigDesk is minimized."
+          "label": "Notify about shelf events",
+          "hint": "A new event for a task on the shelf shows an in-app notification. When GrigDesk is minimized or out of focus, a system notification is also shown."
         },
         "autoAddOnAnalysis": {
           "label": "Add to shelf when assessment starts",
