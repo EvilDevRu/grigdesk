@@ -163,7 +163,7 @@
         <EffortSlider v-if="effortLevels.length" :model-value="effortValue" :levels="effortLevels"
                       :hints="currentModel?.effortHints || {}"
                       :disabled="frozen" @update:model-value="chat.setEffort(sid, $event)" />
-        <!-- Контекст: точная активная заполненность; при недоступной метрике дуга пустая.
+        <!-- Контекст: точная активная заполненность; при недоступной метрике полоса пустая.
              Клик — сжатие контекста (с подтверждением), Alt+клик — сброс памяти агента.
              Подсказка штатная, а не browser title: так она не обрезается и вмещает
              раздельные числа, состояние и действия. -->
@@ -172,31 +172,27 @@
           :surface-style="{ maxWidth: 'min(300px, calc(100vw - 16px))' }"
         >
           <template #trigger>
-            <UiIconButton
-              class="ctx-tip ctx-ring"
+            <UiButton
+              class="ctx-tip ctx-meter"
               :class="[ctxClass, { estimate: ctxIsEstimate, compacting: sess.compacting }]"
-              role="embedded"
-              :label="ctxTitle"
-              :aria-disabled="ctxRingDisabled"
+              variant="ghost"
+              :aria-label="ctxTitle"
+              :aria-disabled="ctxDisabled"
               data-context="chat-context"
               @click="onCtxClick"
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle class="rbg" cx="12" cy="12" r="9" fill="none" stroke-width="3" />
-                <circle
-                  class="rfg"
-                  cx="12"
-                  cy="12"
-                  r="9"
-                  fill="none"
-                  stroke-width="3"
-                  stroke-linecap="round"
-                  :stroke-dasharray="RING_C"
-                  :stroke-dashoffset="ringDash"
-                  transform="rotate(-90 12 12)"
-                />
-              </svg>
-            </UiIconButton>
+              <span class="ctx-meter-cap" aria-hidden="true">{{ t('core.chatContextLabel') }}</span>
+              <UiProgress
+                :value="ctxMeterValue"
+                :tone="ctxMeterTone"
+                :indeterminate="sess.compacting"
+                :label="ctxTooltip.title"
+                :value-text="ctxTitle"
+                data-context="chat-context"
+                aria-hidden="true"
+              />
+              <span class="ctx-meter-value" aria-hidden="true">{{ ctxMeterText }}</span>
+            </UiButton>
           </template>
           <template #tip>
             <span class="ctx-pop" data-testid="context-tooltip">
@@ -710,11 +706,13 @@ import {
   UiFilePicker,
   UiIconButton,
   UiInput,
+  UiProgress,
   UiSelect,
   UiSpinner,
   UiTextarea,
   UiTooltip,
   vTooltip,
+  type UiActionTone,
 } from '../../ui';
 import ChatMarkdown from './ChatMarkdown.vue';
 import { documentLinkFromClick } from '../../features/documents/links.ts';
@@ -1586,30 +1584,40 @@ const ctxTitle = computed(() => {
   return `Контекст: ${estimate}${tokens} из ${limit} ${ctxLimitWhat.value} (${ctxPct.value}%)`
     + `${live}${warn}${window}${spentHint.value}${cacheHint.value} · ${hint}`;
 });
-// Кольцо-индикатор контекста (клик — сжатие, Alt+клик — сброс памяти).
-const RING_C = 2 * Math.PI * 9;
-// На время сжатия дуга — короткий бегунок: кольцо в этот момент вращается, а полное
-// (или почти полное) кольцо при вращении выглядело бы неподвижным.
-const SPIN_DASH = RING_C * 0.75;
-const ringDash = computed(() => {
+// Полоса и подпись используют ту же достоверность, что и подробная подсказка.
+// Отсутствие свежего замера не превращается в нулевую или старую заполненность.
+const ctxMeterValue = computed(() => ctxTooltip.value.percent ? ctxPct.value : 0);
+const ctxMeterText = computed(() => {
   if (sess.value?.compacting) {
-    return SPIN_DASH;
-  }
-  if (ctxUnavailable.value) {
-    return RING_C;
+    return '…';
   }
 
-  return RING_C * (1 - ctxPct.value / 100);
+  const percent = ctxTooltip.value.percent;
+
+  return percent ? `${ctxIsEstimate.value ? '≈ ' : ''}${percent}` : '—';
 });
-// Нативный disabled выкидывает кнопку из Tab-порядка вместе с её подсказкой. Кольцо
+const ctxMeterTone = computed<UiActionTone>(() => {
+  if (sess.value?.compacting || ctxIsEstimate.value) {
+    return 'accent';
+  }
+  if (!ctxTooltip.value.percent) {
+    return 'neutral';
+  }
+  if (ctxClass.value === 'hi') {
+    return 'danger';
+  }
+
+  return ctxClass.value === 'mid' ? 'warning' : 'success';
+});
+// Нативный disabled выкидывает кнопку из Tab-порядка вместе с её подсказкой. Индикатор
 // остаётся фокусируемым и честно объявляет недоступность через aria-disabled; обработчик
 // ниже всё равно не запускает действие, пока нет сессии или идёт ход/сжатие.
-const ctxRingDisabled = computed(() => !sess.value?.sessionId
+const ctxDisabled = computed(() => !sess.value?.sessionId
   || !!sess.value?.compacting || !!sess.value?.sending);
 
 /**
- * Клик по кольцу. Основное действие — СЖАТИЕ: агент пересказывает разговор сам и
- * продолжает с выжимки. Alt+клик оставлен под прежнее поведение кольца — полный сброс
+ * Клик по индикатору. Основное действие — СЖАТИЕ: агент пересказывает разговор сам и
+ * продолжает с выжимки. Alt+клик оставлен под прежнее поведение — полный сброс
  * памяти агента: путать эти два действия дорого (после сброса переписка на экране
  * остаётся, а агент не помнит ничего), поэтому у каждого свой вопрос и свой текст.
  */
@@ -2701,10 +2709,10 @@ function skipQuestion() {
    во время сжатия можно, нельзя только отправить. */
 .cs.frozen .bar :deep(.eff) { opacity: .5; pointer-events: none; }
 
-/* Кольцо контекста — маленькое, кликабельное (сжатие; Alt — сброс) */
+/* Индикатор контекста сохраняет своё место в строке при изменении чисел. */
 .ctx-tip { flex: none; align-items: center; }
 
-/* Форматированная подсказка кольца. Содержимое слота телепортируется UiTooltip в body,
+/* Форматированная подсказка контекста. Содержимое слота телепортируется UiTooltip в body,
    но сохраняет scope этого компонента, поэтому локальные стили работают и не текут. */
 .ctx-pop { display: flex; flex-direction: column; gap: 7px; width: 260px; max-width: 100%; text-align: left; }
 .ctx-pop-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
@@ -2946,7 +2954,7 @@ function skipQuestion() {
    полное название есть в подсказке по ховеру. Порог — по ширине чата: на 1440 рядом с
    широким списком шапка уже, чем на планшете без списка. */
 @container chat (max-width: 899px) {
-  .sel .lbl, .bar :deep(.eff .cap) { display: none; }
+  .sel .lbl, .bar :deep(.eff .cap), .bar :deep(.ctx-meter-cap) { display: none; }
 }
 
 /* ── Шапка уже 640 px: строка последнего хода уходит ───────────────────────────

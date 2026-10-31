@@ -296,6 +296,15 @@
   background: var(--line);
 }
 
+/* Контекст чата — компактная шкала внутри кнопки с процентом и общей подсказкой.
+   Её высота не влияет на площадку действия и не меняет обычные полосы прогресса. */
+.ui-progress[data-context='chat-context'] {
+  flex: none;
+  width: 56px;
+  height: 3px;
+  background: var(--line-2);
+}
+
 .ui-progress__value,
 .ui-progress__bar {
   display: block;

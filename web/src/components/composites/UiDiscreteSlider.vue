@@ -1,8 +1,9 @@
 <template>
   <div class="ui-discrete-slider" :class="{
     'ui-discrete-slider--ticks': ticks,
+    'ui-discrete-slider--thin': thin,
     'ui-discrete-slider--unselected': unselected,
-  }">
+  }" :style="thin ? trackStyle : undefined">
     <UiRange
       v-model="rangeValue"
       :min="min"
@@ -46,6 +47,7 @@ const props = withDefaults(
     readonly?: boolean;
     unselected?: boolean;
     ticks?: boolean;
+    thin?: boolean;
     label?: string;
     valueText?: string;
     labels?: Record<number, string>;
@@ -58,6 +60,7 @@ const props = withDefaults(
     readonly: false,
     unselected: false,
     ticks: false,
+    thin: false,
     label: undefined,
     valueText: undefined,
     labels: () => ({}),
@@ -131,4 +134,15 @@ const points = computed(() =>
 const valueLabel = computed(
   () => props.labels[model.value] || String(model.value),
 );
+
+// Тонкий трек использует тот же диапазон, что и нативный range, без своей шкалы.
+// При пустом выборе заливка отсутствует: физический min ещё не является выбором.
+const trackStyle = computed(() => {
+  const span = props.max - props.min;
+  const filled = props.unselected || span <= 0
+    ? 0
+    : Math.min(100, Math.max(0, ((model.value - props.min) / span) * 100));
+
+  return { '--ui-slider-fill': `${filled}%` };
+});
 </script>
