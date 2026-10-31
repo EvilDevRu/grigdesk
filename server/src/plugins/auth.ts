@@ -9,7 +9,7 @@
 // Почему 401, а не редирект на страницу входа: браузерный вход снят, приложение входит
 // по ключу, а отказ обязан быть машинно-читаемым ответом, а не HTML.
 import fp from 'fastify-plugin';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { AuthStore } from '../lib/authStore.ts';
 import { deviceOf } from '../lib/clientAccess/principal.ts';
@@ -19,6 +19,32 @@ export interface AuthPluginOptions {
   // Секрет процесса для дочернего CLI и токен локальных CLI-потребителей.
   internalToken?: string;
   cliToken?: string;
+  /**
+   * Префиксы роутов, чьи POST-мутации допускают только браузерную сессию.
+   * Проверка живёт в самом гарде: фаза onRequest едина, и приоритет отказа
+   * сессии перед валидацией тела не зависит от порядка модульных плагинов.
+   */
+  sessionOnlyPrefixes?: readonly string[];
+}
+
+/**
+ * Отказ машинных видов авторизации на session-only мутациях установки пакетов.
+ * Возвращается только для POST; чтения остаются доступными любому транспорту.
+ */
+function sessionOnlyGate(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  routeUrl: string,
+  opts: AuthPluginOptions,
+) {
+  if (request.method !== 'POST' || !opts.sessionOnlyPrefixes
+    || !opts.sessionOnlyPrefixes.some((prefix) => routeUrl.startsWith(prefix))) {
+    return;
+  }
+
+  return reply.header('Cache-Control', 'no-store')
+    .code(403)
+    .send({ error: 'session_required', message: 'Требуется сессия браузера.' });
 }
 
 // Cookie ограничена выдавшим её хостом; Secure определяется протоколом запроса.
@@ -262,7 +288,8 @@ async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Pr
     // Пускаем по секрету, который живёт только в памяти процесса и передаётся тому child'у.
     if (internalToken && request.headers['x-grigdesk-internal'] === internalToken) {
       request.authKind = 'internal';
-      return;
+
+      return sessionOnlyGate(request, reply, routeUrl, opts);
     }
 
     // Локальные CLI-потребители (bin/b24, ship-этап фабрики, скиллы): токен из файла 0600
@@ -270,7 +297,8 @@ async function authPlugin(fastify: FastifyInstance, opts: AuthPluginOptions): Pr
     // всё содержимое .state. Cookie у CLI нет, а публиковать PR/комментарии он обязан.
     if (cliToken && request.headers['x-grigdesk-token'] === cliToken) {
       request.authKind = 'cli';
-      return;
+
+      return sessionOnlyGate(request, reply, routeUrl, opts);
     }
 
     // 401 и на upgrade вебсокета тоже: хуки Fastify выполняются и для WS-роутов,

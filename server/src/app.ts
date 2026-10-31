@@ -140,6 +140,7 @@ import usageForecastModule from './modules/usage-forecast/index.ts';
 import analysisModule from './modules/analysis/index.ts';
 import authModule from './modules/auth/index.ts';
 import pluginsModule from './modules/plugins/index.ts';
+import { SESSION_ONLY_PREFIXES } from './modules/plugins/installRoutes.ts';
 import pluginCatalogModule from './modules/plugin-catalog/index.ts';
 import { PluginCatalogService } from './lib/pluginCatalog.ts';
 import projectsModule from './modules/projects/index.ts';
@@ -1087,6 +1088,7 @@ async function build(desktopParent: DesktopParent | null) {
     authStore,
     internalToken,
     cliToken,
+    sessionOnlyPrefixes: SESSION_ONLY_PREFIXES,
   });
   // Единственный движок пишет одну runtime-проекцию; legacy-реестры в этом каталоге
   // доступны только для чтения и не требуют второго watcher-а.

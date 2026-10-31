@@ -10,6 +10,7 @@ import trackersModule from '../../../server/src/modules/trackers/index.ts';
 import trackerModule from '../../../server/src/modules/tracker/index.ts';
 import ownModule from '../../../server/src/modules/grigdesk-tasks/index.ts';
 import authPlugin from '../../../server/src/plugins/auth.ts';
+import { SESSION_ONLY_PREFIXES } from '../../../server/src/modules/plugins/installRoutes.ts';
 import { AuthStore } from '../../../server/src/lib/authStore.ts';
 import { tasksFixture } from './grigdesk-tasks.js';
 
@@ -137,6 +138,7 @@ export async function trackerFixture(t, { legacy = false, setup = null, fetch: t
 
   app.decorate('sse', { broadcast: (name, payload) => events.push({ name, payload }) });
   await app.register(authPlugin, {
+    sessionOnlyPrefixes: SESSION_ONLY_PREFIXES,
     authStore,
     cliToken: 'tracker-test-cli',
     internalToken: 'tracker-test-internal',

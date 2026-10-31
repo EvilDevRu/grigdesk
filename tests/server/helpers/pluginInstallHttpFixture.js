@@ -7,6 +7,7 @@ import { liveGroupMembers } from '../../../server/src/lib/packageInstall/workerI
 
 import { AuthStore } from '../../../server/src/lib/authStore.ts';
 import authPlugin from '../../../server/src/plugins/auth.ts';
+import { SESSION_ONLY_PREFIXES } from '../../../server/src/modules/plugins/installRoutes.ts';
 import installRoutes from '../../../server/src/modules/plugins/installRoutes.ts';
 import catalogRoutes from '../../../server/src/modules/plugin-catalog/index.ts';
 import pluginsModule from '../../../server/src/modules/plugins/index.ts';
@@ -137,6 +138,7 @@ export async function installHttpFixture(t, options = {}) {
   options.configure?.(app);
 
   await app.register(authPlugin, {
+    sessionOnlyPrefixes: SESSION_ONLY_PREFIXES,
     authStore,
     internalToken: 'fixture-internal',
     cliToken: 'fixture-cli',

@@ -62,6 +62,12 @@ function driverOutputSchemas(): typeof outputs {
 }
 
 /**
+ * Префиксы роутов установки: их POST-мутации допускают только браузерную сессию.
+ * Список передаётся общему auth-гарду в app.ts и тестовым фикстурам.
+ */
+export const SESSION_ONLY_PREFIXES = ['/api/driver-installs', '/api/plugin-installs'] as const;
+
+/**
  * Установка имеет свой encapsulated HTTP scope и отдельный session допуск.
  * Чтение исхода остаётся доступным всем авторизованным transport ядра.
  */
@@ -131,11 +137,10 @@ export default async function installRoutes(
     return reply.code(500).send({ error: safe.code, message: safe.message });
   });
 
+  // Допуск сессии для POST проверяет общий auth-гард по SESSION_ONLY_PREFIXES:
+  // единая фаза onRequest сохраняет приоритет отказа и не зависит от порядка
+  // регистрации плагинов. Здесь остаются только Origin и Content-Type.
   app.addHook('onRequest', async (request, reply) => {
-    if (request.method === 'POST' && request.authKind !== 'session') {
-      return reply.code(403).send({ error: 'session_required', message: 'Требуется сессия браузера.' });
-    }
-
     if (request.method !== 'POST') {
       return;
     }
