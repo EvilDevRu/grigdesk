@@ -1,3 +1,4 @@
+import { classifyWriteError } from '../contracts.ts';
 import { localeMessage, localeTranslator, type LocaleSource } from '../../../../../shared/i18n/catalogs.ts';
 import { translate as t } from '../../../../../shared/i18n/catalogs.ts';
 import type { ApiClient } from '../../../shared/apiClient.ts';
@@ -36,7 +37,8 @@ export function createB24Adapter(
   client: Pick<ApiClient, 'get' | 'post'>,
   onView: (view: B24CredsView) => void,
   locale: LocaleSource = 'ru',
-
+  beginSourceChange: () => (outcome: 'confirmed' | 'failed' | 'unknown') => void
+    = () => () => undefined,
 ): ResourceAdapter {
   const t = localeTranslator(locale);
   const messageText = localeMessage(locale);
@@ -76,42 +78,54 @@ export function createB24Adapter(
           }]);
     },
     /**
-     * Публичный ответ подтверждает только несекретные поля и наличие подключения.
-     * Пароль очищается по ACK, не возвращаясь в baseline или результат.
+     * Пауза принадлежит конкретной записи и снимается её исходом, а не любым поздним ACK.
+     * После неизвестного результата проверяются текущие настройки без повтора мутации.
      */
     async write(intents, baseline, signal) {
-      const values: Record<string, JsonValue> = { ...baseline };
+      const finishSource = beginSourceChange();
+      let outcome: 'confirmed' | 'failed' | 'unknown' = 'unknown';
 
-      for (const [key, intent] of intents) {
-        if (intent.op === 'set') {
-          values[key] = intent.value;
+      try {
+        const values: Record<string, JsonValue> = { ...baseline };
+
+        for (const [key, intent] of intents) {
+          if (intent.op === 'set') {
+            values[key] = intent.value;
+          }
         }
-      }
 
-      const view = decodeB24(await client.post('/api/settings/b24', {
-        baseUrl: values.baseUrl,
-        login: values.login,
-        password: values.password,
-      }, { signal }), locale);
+        const view = decodeB24(await client.post('/api/settings/b24', {
+          baseUrl: values.baseUrl,
+          login: values.login,
+          password: values.password,
+        }, { signal }), locale);
 
-      if (!view.configured) {
+        if (!view.configured) {
+          return {
+            status: 'unknown',
+            fields: [],
+            message: messageText('settings.connectionNotConfirmedByTheServer'),
+          };
+        }
+
+        onView(view);
+        outcome = 'confirmed';
+
         return {
-          status: 'unknown',
-          fields: [],
-          message: messageText("settings.connectionNotConfirmedByTheServer"),
-        };
-      }
-
-      onView(view);
-
-      return {
-        status: 'success',
-        fields: [...intents].map(([key]) => ({
-          key,
           status: 'success',
-          ...key === 'baseUrl' || key === 'login' ? { serverValue: view[key] } : {},
-        })),
-      };
+          fields: [...intents].map(([key]) => ({
+            key,
+            status: 'success',
+            ...key === 'baseUrl' || key === 'login' ? { serverValue: view[key] } : {},
+          })),
+        };
+      } catch (error) {
+        outcome = classifyWriteError(error, locale).outcome === 'unknown' ? 'unknown' : 'failed';
+
+        throw error;
+      } finally {
+        finishSource(outcome);
+      }
     },
   };
 }

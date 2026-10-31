@@ -12,6 +12,14 @@ test('BM-01: окно карточки просит снимок, а после 
 
   setActivePinia(createPinia());
   t.mock.method(api, 'get', async (path) => {
+    if (path === '/api/settings/b24') {
+      return {
+        configured: true,
+        baseUrl: 'https://portal.example.test',
+        login: 'fixture',
+      };
+    }
+
     if (path === '/api/b24/task-seen') {
       return {
         scope: 'fixture',
@@ -69,6 +77,14 @@ test('BM-02: своё действие во время ожидания сним
     return {};
   });
   t.mock.method(api, 'get', async (path) => {
+    if (path === '/api/settings/b24') {
+      return {
+        configured: true,
+        baseUrl: 'https://portal.example.test',
+        login: 'fixture',
+      };
+    }
+
     if (path === '/api/b24/task-seen') {
       return {
         scope: 'fixture',
@@ -118,6 +134,14 @@ test('BM-03: HTTP-снимок принимает числовой Unix-стар
   ]]));
 
   t.mock.method(api, 'get', async (path) => {
+    if (path === '/api/settings/b24') {
+      return {
+        configured: true,
+        baseUrl: 'https://portal.example.test',
+        login: 'fixture',
+      };
+    }
+
     if (path === '/api/b24/task-seen') {
       return {
         scope: 'fixture',
@@ -158,6 +182,7 @@ test('BM-04: зеркало принимает Unix-старт и сохраня
     },
   ]]));
 
+  board.sourceKey = 'fixture';
   board.applySnapshot(dashboard, 2000);
   assert.deepEqual(board.data, dashboard);
   assert.equal(board.readAt, 2000);

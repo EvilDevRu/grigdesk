@@ -100,6 +100,9 @@
         "error": null,
         "loadedAt": 0,
         "readAt": 0,
+        "sourceKey": "",
+        "sourceEpoch": 0,
+        "sourceSuspended": false,
         "_polling": false,
         "_timer": null
       }

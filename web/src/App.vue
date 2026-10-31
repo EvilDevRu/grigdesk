@@ -208,11 +208,20 @@ function startWindowSync() {
   }) : () => {
   };
   const stopBoard = startBoardRelay({
+    sourceState: () => ({ key: board.sourceKey, suspended: board.sourceSuspended }),
+    invalidate: (suspended) => board.clearSource(suspended),
+    recheck: () => board.load(),
+    watchInvalidation: (callback) => board.$onAction(({ name, after }) => {
+      if (['clearSource', 'beginSourceChange', 'finishSourceChange'].includes(name)) {
+        after(() => callback());
+      }
+    }),
     role: surfaceDocument ? 'mirror' : 'source',
     channel: new BroadcastChannel('grigdesk-board-v1'),
     snapshot: () => (board.data ? {
       data: JSON.parse(JSON.stringify(board.data)),
       readAt: board.readAt,
+      sourceKey: board.sourceKey,
     } : null),
     watchLoads: (callback) => board.$onAction(({ name, after }: {
       name: string;
@@ -226,9 +235,13 @@ function startWindowSync() {
         });
       }
     }),
-    apply: (data, readAt) => board.applySnapshot(data, readAt),
+    apply: (data, readAt, sourceKey) => board.applySnapshot(data, readAt, sourceKey),
     mirror: (request) => board.setMirror(request),
   });
+
+  if (surfaceDocument) {
+    void board.load();
+  }
 
   const stopToolShelf = !surfaceDocument || surfaceTarget?.id === 'shelf'
     ? startToolShelfRelay({
@@ -341,6 +354,12 @@ watch(() => shell.status, (status, previous) => {
   }
 }, { immediate: true });
 
+// Смена машины или владельца локальной сессии снимает снимок до следующего рендера.
+// Ключ Б24 отдельно проверяется локальным GET перед принятием HTTP или relay.
+watch([() => shell.profile?.id, () => auth.clientScope], () => {
+  useBoardStore().clearSource();
+}, { flush: 'sync' });
+
 watch(() => auth.authenticated && (!shell.present || shell.status === 'online'), setSseEnabled,
   { immediate: true });
 
@@ -359,6 +378,7 @@ watch(() => auth.authenticated, (on, was) => {
     settings.dispose('auth-lost');
     pollingStarted = false;
     useBoardStore().stopPolling();
+    useBoardStore().clearSource();
     useSystemStore().stopPolling();
     useTaskShelfStore().stop();
     dismissAllAlerts();

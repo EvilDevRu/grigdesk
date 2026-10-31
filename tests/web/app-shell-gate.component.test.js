@@ -42,6 +42,7 @@ test('оболочка: интерфейс открыт до сервера, м�
       stop: noop,
       clear: noop,
       stopPoll: noop,
+      clearSource: () => {},
     };
 
     const stubs = {
