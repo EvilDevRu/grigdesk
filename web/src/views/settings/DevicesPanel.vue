@@ -1,15 +1,24 @@
 <template>
   <section class="devices-panel" aria-labelledby="devices-heading">
     <header class="devices-heading">
-      <h3 id="devices-heading">{{ t('settings.devices') }}</h3>
-      <UiButton data-context="workspace-form-wrap" :disabled="loading" @click="adding = true">{{ t('settings.addDevice') }}</UiButton>
+      <div class="devices-heading__title">
+        <h3 id="devices-heading">{{ t('settings.devices') }}</h3>
+        <span v-if="status" class="devices-count">
+          {{ t('settings.accessActiveDevices', { count: activeCount }) }}
+        </span>
+      </div>
+      <UiButton wrap :disabled="loading" aria-haspopup="dialog" @click="adding = true">
+        {{ phone ? t('settings.accessConnectComputer') : t('settings.addDevice') }}
+      </UiButton>
     </header>
-    <p>{{ t('settings.phoneAddComputerHint') }}</p>
+    <p>{{ phone ? t('settings.accessConnectComputerHint') : t('settings.phoneAddComputerHint') }}</p>
     <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
-    <UiInlineMessage v-if="status && status.listener.state !== 'online'" tone="warning">
+    <UiInlineMessage v-if="!phone && status && status.listener.state !== 'online'" tone="warning">
       {{ status.listener.error || t('settings.networkAccessIsDisabledSetGRIGDESKCLIENT') }}
     </UiInlineMessage>
-    <p v-else-if="status">{{ t('settings.connectionAddresses') }} {{ status.listener.addresses.join(', ') }}</p>
+    <p v-else-if="!phone && status">
+      {{ t('settings.connectionAddresses') }} {{ status.listener.addresses.join(', ') }}
+    </p>
     <UiLoadingState v-if="loading" :label="t('settings.loadingDevices')" :failed="Boolean(error)" >
       <UiSkeletonLayout layout="list" :header="false" />
     </UiLoadingState>
@@ -19,17 +28,30 @@
       :heading="t('settings.noDevicesAddedYet')"
       :text="t('settings.addADeviceAndUseTheCode')"
     />
-    <article v-for="device in status?.devices ?? []" :key="device.id" class="device-row">
-      <div>
-        <strong>{{ device.name }}{{ device.id === status?.currentDeviceId ? t('settings.thisDevice') : "" }}</strong>
-        <p>{{ device.scope === 'client' ? t('settings.application') : t('settings.legacyApplication') }}</p>
-        <p>{{ t('settings.lastLogin') }} {{ new Date(device.lastSeenAt).toLocaleString(intlLocale(uiLocale)) }}</p>
+    <article v-for="device in sortedDevices" :key="device.id" class="device-row">
+      <div class="device-details">
+        <div class="device-name">
+          <strong>
+            {{ device.name }}{{ device.id === status?.currentDeviceId ? t('settings.thisDevice') : '' }}
+          </strong>
+          <span v-if="device.revokedAt" class="device-revoked">{{ t('settings.revoked') }}</span>
+        </div>
+        <div class="device-meta">
+          <p>{{ device.scope === 'client' ? t('settings.application') : t('settings.legacyApplication') }}</p>
+          <p>
+            {{ t('settings.lastLogin') }}
+            {{ new Date(device.lastSeenAt).toLocaleString(intlLocale(uiLocale)) }}
+          </p>
+        </div>
       </div>
-      <UiButton v-if="!device.revokedAt" variant="text" @click="edit(device)">
-        {{ t('settings.phoneRename') }}
-      </UiButton>
-      <span v-if="device.revokedAt">{{ t('settings.revoked') }}</span>
-      <UiButton data-context="workspace-form-wrap" v-else tone="danger" variant="text" @click="revoke(device)">{{ t('settings.revoke') }}</UiButton>
+      <div v-if="!device.revokedAt" class="device-actions">
+        <UiButton variant="text" @click="edit(device)">
+          {{ t('settings.phoneRename') }}
+        </UiButton>
+        <UiButton tone="danger" variant="text" @click="revoke(device)">
+          {{ t('settings.revoke') }}
+        </UiButton>
+      </div>
     </article>
     <PairDeviceDialog v-model:open="adding" :draft="draft" />
     <UiDialog :open="!!editing" :title="t('settings.phoneRename')" @update:open="editing = null">
@@ -51,13 +73,9 @@
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout } from '../../ui';
-
 import { intlLocale } from '../../../../shared/i18n/formats.ts';
-import { uiLocale } from '../../ui.ts';
-import { t } from '../../ui.ts';
 
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 import {
@@ -69,6 +87,9 @@ import {
   confirmDialog,
   messageRef,
   UiLoadingState,
+  UiSkeletonLayout,
+  t,
+  uiLocale,
 } from '../../ui.ts';
 import { api } from '../../shared/apiClient.ts';
 import PairDeviceDialog from './PairDeviceDialog.vue';
@@ -103,6 +124,10 @@ const editing = ref<DeviceRow | null>(null);
 const revoking = ref<DeviceRow | null>(null);
 const newName = ref('');
 const mutating = ref(false);
+
+const activeCount = computed(() => status.value?.devices.filter((device) => !device.revokedAt).length ?? 0);
+const sortedDevices = computed(() => [...(status.value?.devices ?? [])].sort((left, right) =>
+  Number(Boolean(left.revokedAt)) - Number(Boolean(right.revokedAt))));
 
 /**
  * Публичный список не содержит пинов или ключей, ответ после unmount не используется.
@@ -245,7 +270,8 @@ onBeforeUnmount(() => controller.abort());
   min-width: 0;
   container: settings-devices / inline-size;
 }
-.devices-heading, .device-row {
+.devices-heading,
+.device-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -253,6 +279,17 @@ onBeforeUnmount(() => controller.abort());
 }
 .devices-heading {
   flex-wrap: wrap;
+}
+.devices-heading__title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.devices-count,
+.device-revoked {
+  color: var(--ink-dim);
+  font-size: 12px;
 }
 .devices-heading h3 {
   margin: 0;
@@ -267,17 +304,40 @@ onBeforeUnmount(() => controller.abort());
   overflow-wrap: anywhere;
 }
 .device-row {
-  padding-top: 12px;
+  padding: 12px 0;
   border-top: 1px solid var(--line);
 }
-.device-row > div {
+.device-details {
   display: grid;
   gap: 6px;
   min-width: 0;
 }
+.device-name,
+.device-meta,
+.device-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+}
+.device-name strong {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.device-actions {
+  flex: none;
+  gap: 4px;
+}
 @container settings-devices (max-width: 480px) {
   .device-row {
-    flex-wrap: wrap;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .device-actions {
+    max-width: 100%;
   }
 }
 </style>

@@ -302,12 +302,12 @@ test('I18N-S02: все страницы, публичные метаданные
 
   h.settings.selectPage('connections.devices');
 
-  // «Добавить устройство» активна после загрузки списка устройств выбранного сервера.
+  // Подключение компьютера доступно после загрузки списка устройств выбранного сервера.
   for (let attempt = 0; attempt < 8; attempt += 1) {
     await h.flushPromises();
   }
 
-  const adding = await catalogMessage('settings', 'Добавить устройство');
+  const adding = await catalogMessage('settings', 'Подключить компьютер');
   const add = [...document.querySelectorAll('[role="dialog"] button')]
     .map((button) => new h.DOMWrapper(button))
     .find((button) => button.text() === adding.en);
