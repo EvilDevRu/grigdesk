@@ -334,7 +334,15 @@ SETTINGS_FIELDS.push(...CONNECTION_FIELDS.map(([key, control, label, description
   control: 'switch',
   label: translator.t('ru', 'settings.startWhenTheMachineTurnsOn'),
   description: translator.t('ru', 'settings.configuresTheSystemdUnitOnThisMachine'),
-  scope: translator.t('ru', 'settings.thisMachine'),
+  scope: translator.t('ru', 'settings.selectedServerComputer'),
+}, {
+  address: { pageId: 'system.startup', fieldPath: ['application', 'enabled'] },
+  resourceId: 'applicationAutostart',
+  key: 'enabled',
+  control: 'switch',
+  label: translator.t('ru', 'settings.startApplicationOnLogin'),
+  description: translator.t('ru', 'settings.applicationAutostartDescription'),
+  scope: translator.t('ru', 'settings.applicationComputer'),
 });
 
 export const SETTINGS_PAGE_KEY = 'grigdesk-settings-page';
@@ -1037,7 +1045,12 @@ const FIELD_MESSAGES: Record<string, Record<string, string>> = {
   "autostart:enabled": {
     "label": "settings.startWhenTheMachineTurnsOn",
     "description": "settings.configuresTheSystemdUnitOnThisMachine",
-    "scope": "settings.thisMachine"
+    "scope": "settings.selectedServerComputer"
+  },
+  "applicationAutostart:enabled": {
+    "label": "settings.startApplicationOnLogin",
+    "description": "settings.applicationAutostartDescription",
+    "scope": "settings.applicationComputer"
   },
   "devicePairing:name": {
     "label": "settings.deviceName",

@@ -1,5 +1,6 @@
 import { desktopLocale, desktopText, setDesktopLocale } from './locale.ts';
 import { createDirectorySelector } from './directorySelection.ts';
+import { createApplicationLauncher } from './applicationLauncher.ts';
 import {
   app,
   BrowserWindow,
@@ -15,7 +16,7 @@ import {
 } from 'electron';
 import type { BrowserWindowConstructorOptions, Rectangle, Session } from 'electron';
 import type { ChildProcess } from 'node:child_process';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 
 import { createBrowserApi } from './browser/browserApi.ts';
 import { createBrowserApps } from './browser/browserApps.ts';
@@ -1055,6 +1056,15 @@ async function prepare(signal: AbortSignal): Promise<void> {
   });
 
   client = createClientRuntime({
+    applicationLauncher: process.platform === 'linux' ? createApplicationLauncher({
+      executablePath: process.env.APPIMAGE ?? process.execPath,
+      arguments: app.isPackaged ? [] : [app.getAppPath()],
+      home: os.homedir(),
+      env: process.env,
+      trustShortcut: (file) => new Promise((resolve) => {
+        execFile('gio', ['set', file, 'metadata::trusted', 'true'], { timeout: 2000 }, () => resolve());
+      }),
+    }) : undefined,
     selectDirectory: createDirectorySelector({
       getWindow: () => mainWindow,
       showOpenDialog: (parent, options) => dialog.showOpenDialog(parent, options),

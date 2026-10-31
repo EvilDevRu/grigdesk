@@ -18,6 +18,8 @@ import type { WindowControls } from '../windowControls.ts';
 
 import { parseToolControl } from '../../../shared/desktop/toolWindowContract.ts';
 import type { ToolControl } from '../../../shared/desktop/toolWindowContract.ts';
+import type { ApplicationLauncher } from '../applicationLauncher.ts';
+import { applicationLauncherApi } from './applicationLauncherApi.ts';
 
 interface ProbeUpstream extends PipeUpstream {
   probe(): Promise<void>;
@@ -35,6 +37,7 @@ export interface NativeBrowserState {
 }
 
 interface ShellOptions {
+  applicationLauncher?: ApplicationLauncher;
   nativeBrowser?: NativeBrowserState;
   selectDirectory?(origin: string): Promise<string | null>;
   windowControls?: WindowControls;
@@ -145,6 +148,7 @@ export function createShellApi(options: ShellOptions) {
       serverApi: connection?.serverApi || null,
       appApi,
       capabilities: [
+        ...(options.applicationLauncher ? ['applicationLauncher' as const] : []),
         ...(options.nativeWindows ? ['windows' as const] : []),
         ...(options.nativeBrowser ? ['browser' as const] : []),
         ...(options.selectDirectory ? ['selectDirectory' as const] : []),
@@ -371,6 +375,12 @@ export function createShellApi(options: ShellOptions) {
       }
 
       const body = await readBody(req, locale);
+
+      if (pathname === '/__shell/launcher') {
+        await applicationLauncherApi(req, res, body, options.applicationLauncher);
+
+        return;
+      }
 
       if (req.method === 'POST' && pathname === '/__shell/directory/select') {
         if (!options.selectDirectory) {

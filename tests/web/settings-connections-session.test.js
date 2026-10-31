@@ -178,7 +178,7 @@ test('Подключения и система в общей сессии', asyn
       await flushPromises();
       assertSettingsFields(startup.element, module.SETTINGS_FIELDS, 'system.startup');
       assert.match(startup.text(), /Под управлением приложения/);
-      await startup.find('[role="switch"]').setValue(true);
+      await startup.find('[data-startup-scope="server"] [role="switch"]').setValue(true);
       assert.equal(calls.filter((call) => call.method === 'PUT').length, 0);
       await settings.apply();
       assert.equal(calls.filter((call) => call.method === 'PUT').length, 1);
