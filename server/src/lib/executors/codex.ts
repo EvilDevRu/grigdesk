@@ -1204,28 +1204,51 @@ function codexDynamicTools(descriptors: readonly unknown[] = []) {
 }
 
 /**
- * App-server принимает результат dynamic tool не как произвольный JSON, а как
- * типизированный список content items. Сам безопасный broker-result оставляем JSON:
- * модель получает прежний контракт, а transport — обязательную wire-обёртку.
+ * Dynamic tool передаёт изображения типизированным content item, без base64 в тексте.
+ * Обычный broker JSON сохраняет прежнюю текстовую wire-обёртку.
  */
-function codexDynamicToolResponse(value: unknown) {
-  let success = (value as { ok?: unknown } | null)?.ok !== false;
+export function codexDynamicToolResponse(value: unknown) {
+  const source = value as {
+    ok?: unknown;
+    format?: unknown;
+    content?: unknown;
+  } | null;
+
+  if (source?.format === 'grigdesk-work-content-v1') {
+    const images = source.content as {
+      type?: string;
+      mimeType?: string;
+      data?: string;
+    }[];
+
+    if (Array.isArray(images) && images.length === 1 && images[0]?.type === 'image'
+      && images[0].mimeType === 'image/jpeg' && typeof images[0].data === 'string'
+      && /^[A-Za-z0-9+/]+={0,2}$/u.test(images[0].data)
+      && Buffer.byteLength(images[0].data, 'base64') <= 2 * 1024 * 1024) {
+      return {
+        contentItems: [{ type: 'inputImage', imageUrl: `data:image/jpeg;base64,${images[0].data}` }],
+        success: true,
+      };
+    }
+
+    value = { ok: false, error: 'tool_response_invalid' };
+  }
+
   let text: string;
+  let success = (value as { ok?: unknown } | null)?.ok !== false;
 
   try {
     text = JSON.stringify(value ?? null);
+
     if (typeof text !== 'string') {
-      throw new TypeError('результат рабочего инструмента не сериализуется в JSON');
+      throw new TypeError('tool_response_invalid');
     }
   } catch {
     success = false;
     text = JSON.stringify({ ok: false, error: 'tool_response_invalid' });
   }
 
-  return {
-    contentItems: [{ type: 'inputText', text }],
-    success,
-  };
+  return { contentItems: [{ type: 'inputText', text }], success };
 }
 
 /**

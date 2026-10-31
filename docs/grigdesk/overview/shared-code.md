@@ -53,6 +53,7 @@
 | `plugins/ssh/` | Контракты SSH, сессий и доверия ключам хостов | Node, браузер |
 | `desktop/` | Описание установки, типы DeviceIdentity/IdentityStore, контракт окон и путь ключа доступа | Node, браузер |
 | `i18n/` | Чистый переводчик, descriptors, каталоги RU/EN, LocaleSource и Intl; [контракт](../web/interface-language.md) | Node, браузер |
+| `browser/` | Настройки и URL, action decoder и descriptor grigdesk_browser; [контракт](../web/browser-workspace.md) | Node, браузер |
 | `client/` | Подключение приложений: версия API, строка привязки, API оболочки | Node, браузер |
 | `runtime/` | Папка данных, настройки, готовность, проекты, обновление и версии интерфейса | Node, браузер |
 | `web-log/` | Контракты журнала, шаблоны API-маршрутов и уровни диагностики | Node, браузер |
@@ -64,6 +65,7 @@
 | Модуль | Назначение |
 |---|---|
 | `web/src/shared/providerModelSelect.ts` | Допуск доступного исполнителя и непрозрачные значения селекта; `ProviderModelSelect.vue` объединяет представление моделей чата, арбитра и плагинов |
+| `browser/browserContract.ts`, `browser/browserActions.ts`, `browser/browserTool.ts` | Общие безопасные defaults/URL, закрытые actions и provider-neutral tool schema |
 | `plugins/sandboxes/serviceHost.ts` | Проверка имени хоста стенда без схемы, порта и пути; профиль на сервере и ссылки в браузере |
 | `chat/chatPermissionModes.ts` | Маркер явного выбора режима конкретного чата и server-owned action-матрица work tools |
 | `pipeline/arbiterConversation.ts` | StopIdentity, лимиты, строгий ответ арбитра, допустимые действия и инвалидирование решения; общий контракт сервера и диалога |

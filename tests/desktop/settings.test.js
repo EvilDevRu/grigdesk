@@ -3,12 +3,16 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { randomUUID } from 'node:crypto';
+
+import { createBrowserApps, normalizeManualBrowserApps } from '../../desktop/src/browser/browserApps.ts';
 
 import {
   DEFAULT_WINDOW,
   normalizeSettings,
   readSettings,
   writeSettings,
+  updateSettings,
 } from '../../desktop/src/settings.ts';
 
 const defaults = {
@@ -293,4 +297,185 @@ test('DW-11/каталог: новый личный каталог имеет 07
   await assert.rejects(writeSettings(path.join(parent, 'settings.json'), first));
   assert.equal((await fs.stat(parent)).mode & 0o777, 0o755);
   assert.deepEqual(await fs.readdir(parent), []);
+});
+
+test('BR02: browser сохраняется вместе с геометрией и профилями', async (t) => {
+  const { file } = await fixture(t);
+  const browser = {
+    open: 'internal',
+    external: 'app:firefox',
+    agents: true
+  };
+  const settings = normalizeSettings({ ...first, browser });
+
+  assert.deepEqual(settings.browser, browser);
+  await writeSettings(file, settings);
+
+  const loaded = await readSettings(file);
+
+  assert.deepEqual(loaded.browser, browser);
+  assert.deepEqual(loaded.profiles, settings.profiles);
+  assert.deepEqual(loaded.window, settings.window);
+});
+
+test('BR07-Q: browser commit и следующая геометрия не теряют поля друг друга', async (t) => {
+  const { file } = await fixture(t);
+  const settings = normalizeSettings(first);
+  const browser = {
+    open: 'internal',
+    external: 'system',
+    agents: true
+  };
+  const browserSave = updateSettings(file, settings, { browser });
+
+  settings.window.width = 1777;
+
+  const geometrySave = writeSettings(file, settings);
+
+  await Promise.all([browserSave, geometrySave]);
+
+  const loaded = await readSettings(file);
+
+  assert.deepEqual(loaded.browser, browser);
+  assert.equal(loaded.window.width, 1777);
+});
+
+test('BR-M01: manual register переживает restart и последующие записи geometry/preferences', async (t) => {
+  const { root, file } = await fixture(t);
+  const executable = path.join(root, 'browser');
+
+  await fs.writeFile(executable, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+
+  const settings = normalizeSettings(first);
+  const manual = structuredClone(settings.manualBrowserApps ?? []);
+  const apps = createBrowserApps({
+    dataHome: path.join(root, 'xdg'),
+    dataDirs: [],
+    manual,
+    save: () => updateSettings(file, settings, { manualBrowserApps: structuredClone(manual) }),
+  });
+  const selected = await apps.registerManual(executable);
+
+  await updateSettings(file, settings, { browser: {
+    open: 'external',
+    external: selected.id,
+    agents: false,
+  } });
+  settings.window.width = 1333;
+  settings.profiles[0].name = 'Renamed fixture';
+  await writeSettings(file, settings);
+
+  const loaded = await readSettings(file);
+  const restarted = createBrowserApps({
+    dataHome: path.join(root, 'xdg'),
+    dataDirs: [],
+    manual: loaded.manualBrowserApps,
+  });
+
+  assert.equal(loaded.browser.external, selected.id);
+  assert.equal(loaded.window.width, 1333);
+  assert.equal(loaded.profiles[0].name, 'Renamed fixture');
+  assert.deepEqual(await restarted.resolve(selected.id), { command: executable, args: [] });
+  await fs.unlink(executable);
+  assert.equal(await restarted.resolve(selected.id), null);
+  await writeSettings(file, loaded);
+  assert.equal((await readSettings(file)).manualBrowserApps[0].id, selected.id);
+});
+
+test('BR-M02: private normalizer bounded; 33-я регистрация не становится ephemeral ID', async (t) => {
+  const { root } = await fixture(t);
+  const executable = path.join(root, 'existing');
+  const other = path.join(root, 'new');
+
+  await fs.writeFile(executable, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+  await fs.writeFile(other, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+
+  const manual = Array.from({ length: 32 }, (_, index) => ({
+    id: `app:manual-${randomUUID()}`,
+    path: index === 0 ? executable : path.join(root, `unused-${index}`),
+    name: `Fixture ${index}`,
+  }));
+  const bad = {
+    id: 'app:manual-forged',
+    path: '/bad',
+    name: 'Bad'
+  };
+  const extra = {
+    id: `app:manual-${randomUUID()}`,
+    path: other,
+    name: 'Other'
+  };
+  const normalized = normalizeManualBrowserApps([bad, manual[0], manual[0], ...manual.slice(1), extra]);
+
+  assert.equal(normalized.length, 32);
+  assert.equal(normalized.some((entry) => entry.path === other), false);
+
+  let saves = 0;
+  const apps = createBrowserApps({
+    dataHome: root,
+    dataDirs: [],
+    manual,
+    save: async () => {
+      saves += 1;
+    }
+  });
+
+  assert.deepEqual(await apps.registerManual(executable), { id: manual[0].id, name: manual[0].name });
+  await assert.rejects(() => apps.registerManual(other), /browser_app_limit/u);
+  assert.equal(saves, 0);
+  assert.equal(manual.length, 32);
+});
+
+test('BR-M03: failed pending register не отдаёт второй операции неподтверждённый ID', async (t) => {
+  const { root } = await fixture(t);
+  const executable = path.join(root, 'browser');
+
+  await fs.writeFile(executable, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+
+  let entered;
+  let release;
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let saves = 0;
+  const manual = [];
+  const apps = createBrowserApps({
+    dataHome: root,
+    dataDirs: [],
+    manual,
+    save: async () => {
+      saves += 1;
+
+      if (saves === 1) {
+        entered();
+        await gate;
+
+        throw new Error('disk');
+      }
+    }
+  });
+  const first = apps.registerManual(executable);
+  const rejected = assert.rejects(first, /disk/u);
+
+  await started;
+
+  let secondSettled = false;
+  const second = apps.registerManual(executable).then((value) => {
+    secondSettled = true;
+
+    return value;
+  });
+
+  assert.equal(secondSettled, false);
+  release();
+  await rejected;
+
+  const selected = await second;
+
+  assert.equal(saves, 2);
+  assert.equal(manual.length, 1);
+  assert.equal(manual[0].id, selected.id);
 });

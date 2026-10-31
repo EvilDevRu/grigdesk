@@ -1,3 +1,5 @@
+import { BROWSER_DESCRIPTOR } from '../../../../shared/browser/browserTool.ts';
+
 import { lstatSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 
@@ -11,6 +13,7 @@ export interface GlmFactoryToolPolicy {
   consumer: 'factory';
   filesystem: GlmFactoryFilesystem;
   stateDir?: string;
+  browser?: true;
   rawTools: string[];
 }
 
@@ -19,6 +22,19 @@ export const GLM_FACTORY_STATUS_SERVER = 'factory-status';
 
 export const GLM_FACTORY_STATUS_TOOLS: readonly string[] = Object.freeze(['stage_progress', 'stage_result']
   .map((name) => glmMcpToolName(GLM_FACTORY_STATUS_SERVER, name)));
+
+const BROWSER_TOOLS: readonly string[] = Object.freeze([
+  ...GLM_FACTORY_STATUS_TOOLS,
+  glmMcpToolName(GLM_FACTORY_STATUS_SERVER, BROWSER_DESCRIPTOR.name),
+]);
+
+/**
+ * Factory status inventory расширяется одним точным именем по capability хоста.
+ * Без browser сохраняется прежний набор и прежняя форма JSON policy.
+ */
+export function glmFactoryToolInventory(browser = false): readonly string[] {
+  return browser ? BROWSER_TOOLS : GLM_FACTORY_STATUS_TOOLS;
+}
 
 /**
  * Движок передаёт только доказанные файловые режимы узла.
@@ -39,12 +55,13 @@ export function glmFactoryPolicy(value: string) {
 }
 
 /**
- * Документ политики hook для отвязанного этапа пишет только host-wrapper.
- * Inventory равен точному набору статусных инструментов, без проектных MCP.
+ * Browser policy не заменяет filesystem policy: проверяющий может пользоваться UI.
+ * Только trusted factory context добавляет browser=true и точный третий raw tool.
  */
 export function glmFactoryToolPolicy(
   filesystem: GlmFactoryFilesystem,
   stateDir?: string,
+  browser = false,
 ): GlmFactoryToolPolicy {
   glmFactoryPolicy(filesystem);
 
@@ -53,27 +70,32 @@ export function glmFactoryToolPolicy(
     consumer: 'factory',
     filesystem,
     ...(filesystem === 'state-only' ? { stateDir } : {}),
-    rawTools: [...GLM_FACTORY_STATUS_TOOLS],
+    ...(browser ? { browser: true } : {}),
+    rawTools: [...glmFactoryToolInventory(browser)],
   });
 }
 
 /**
- * Factory policy принимает только точный статусный inventory этого host consumer.
- * Имя произвольного MCP не становится разрешённым только из-за общего префикса.
+ * Optional marker разрешён только как true с полным exact browser inventory.
+ * Wildcard, похожее имя сервера и browser tool без marker отклоняются до hook.
  */
 export function parseGlmFactoryToolPolicy(value: unknown): GlmFactoryToolPolicy {
   const policy = value as Partial<GlmFactoryToolPolicy> | null;
-  const keys = policy?.filesystem === 'state-only'
-    ? 'consumer,filesystem,format,rawTools,stateDir' : 'consumer,filesystem,format,rawTools';
+  const browser = policy?.browser === true;
+  const expected = glmFactoryToolInventory(browser);
+  const keys = ['consumer', 'filesystem', 'format', 'rawTools',
+    ...(policy?.filesystem === 'state-only' ? ['stateDir'] : []),
+    ...(browser ? ['browser'] : []),
+  ].sort().join(',');
 
   if (!policy || typeof policy !== 'object' || Array.isArray(policy)
     || Object.keys(policy).sort().join(',') !== keys
     || policy.format !== 1 || policy.consumer !== 'factory'
     || !['state-only', 'workspace-write'].includes(String(policy.filesystem))
-    || (policy.filesystem === 'state-only' && !validStateDirectory(policy.stateDir))
-    || !Array.isArray(policy.rawTools) || policy.rawTools.length !== GLM_FACTORY_STATUS_TOOLS.length
-    || new Set(policy.rawTools).size !== GLM_FACTORY_STATUS_TOOLS.length
-    || policy.rawTools.some((name) => !GLM_FACTORY_STATUS_TOOLS.includes(name))) {
+    || policy.filesystem === 'state-only' && !validStateDirectory(policy.stateDir)
+    || !Array.isArray(policy.rawTools) || policy.rawTools.length !== expected.length
+    || new Set(policy.rawTools).size !== expected.length
+    || policy.rawTools.some((name) => !expected.includes(name))) {
     throw Object.assign(new TypeError('Политика GLM Factory повреждена'), {
       code: 'glm_factory_policy_invalid',
     });
@@ -84,6 +106,7 @@ export function parseGlmFactoryToolPolicy(value: unknown): GlmFactoryToolPolicy 
     consumer: 'factory',
     filesystem: policy.filesystem!,
     ...(policy.filesystem === 'state-only' ? { stateDir: policy.stateDir! } : {}),
+    ...(browser ? { browser: true as const } : {}),
     rawTools: [...policy.rawTools],
   };
 }

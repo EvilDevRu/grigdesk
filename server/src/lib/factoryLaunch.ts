@@ -11,6 +11,7 @@ import {
 import { helperCommandFor, nodeExecutable, readHelperCatalog, runtimeMode } from './runtimePaths.ts';
 
 import { config as runtimeConfig } from '../config.ts';
+import { browserRelaySocket, factoryBrowserRuntimeEnv } from './browser/factoryBrowserRuntime.ts';
 
 // Аргументы transient-юнита route-оркестратора (resume после ворот и после возврата).
 //
@@ -83,6 +84,8 @@ export function selectedFactoryRuntimeConfig<T extends FactoryRouteLaunchPaths>(
     factoryBin: selected.engineBin,
     runtimeNode: selected.node,
     runtimeHostEnv: {
+      ...factoryBrowserRuntimeEnv(selected,
+        browserRelaySocket(config.dataHome ?? runtimeConfig.dataHome)),
       GRIGDESK_SERVER_RUNTIME_RESERVATION: '',
       GRIGDESK_SERVER_RUNTIME_NODE: '',
       GRIGDESK_SERVER_RUNTIME_PIN_HELPER: '',
@@ -206,6 +209,7 @@ export async function prepareFactoryRouteLaunch<T extends FactoryRouteLaunchPath
     });
 
     prepared.runtimeHostEnv = {
+      ...prepared.runtimeHostEnv,
       GRIGDESK_SERVER_RUNTIME_RESERVATION: reservation.reservation,
       GRIGDESK_SERVER_RUNTIME_NODE: helper.command,
       GRIGDESK_SERVER_RUNTIME_PIN_HELPER: helper.args[0]!,

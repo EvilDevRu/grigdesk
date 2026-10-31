@@ -7,6 +7,7 @@ source "$FACTORY_HOME/lib/run-state.sh"
 source "$FACTORY_HOME/lib/status-request.sh"
 source "$FACTORY_HOME/lib/runtime-analytics.sh"
 source "$FACTORY_HOME/lib/provider-lineage-state.sh"
+source "$FACTORY_HOME/lib/browser-transport.sh"
 
 _runner_process_full_identity() {
   local pid=${1:?pid} stat tail
@@ -422,6 +423,9 @@ runner_trusted_identity_clear() {
   (( rc == 0 )) || return "$rc"
   [[ "$existing" == "$stage $run_id $epoch $runner $pid $pgid $session $starttime" ]] ||
     return 73
+  local browser_binding_root
+  browser_binding_root=$(factory_control_root) || return
+  rm -f -- "$browser_binding_root/browser-runs/t${task}/${run_id}.json"
   rm -f -- "$file"
 }
 
@@ -1098,6 +1102,7 @@ _runner_launch_fault_v2() {
 }
 
 _runner_launch_held_cleanup_v2() {
+  browser_transport_stop
   local token_fd=${1:-} saved_term=${2:-} saved_int=${3:-} context_file=${4:-}
   if [[ "$token_fd" =~ ^[0-9]+$ ]]; then
     exec {token_fd}<&- 2>/dev/null || true
@@ -1110,6 +1115,7 @@ _runner_launch_held_cleanup_v2() {
 }
 
 _runner_launch_pre_release_abort_v2() {
+  browser_transport_stop
   local runner_id=$1 task=$2 stage=$3 run_id=$4 epoch=$5 pid=$6 pgid=$7
   local session=$8 starttime=$9 started_ns=${10:-0} lifecycle_started=${11:-0}
   local quiesced_at quiesced_ns clock_boot evidence never_evidence
@@ -1296,6 +1302,7 @@ runner_launch() {
   saved_int_trap=$(trap -p INT)
   trap 'RUNNER_LAUNCH_DEFERRED_SIGNAL=${RUNNER_LAUNCH_DEFERRED_SIGNAL:-TERM}' TERM
   trap 'RUNNER_LAUNCH_DEFERRED_SIGNAL=${RUNNER_LAUNCH_DEFERRED_SIGNAL:-INT}' INT
+  browser_transport_prepare "$task" "$stage" "$run_id" "$epoch" "$request_dir" "$token_fd"
   FACTORY_LAUNCH_BARRIER=1 \
   FACTORY_RUN_TASK="$task" FACTORY_RUN_STAGE="$stage" \
   FACTORY_RUN_ID="$run_id" FACTORY_RUN_EPOCH="$epoch" \
@@ -1399,6 +1406,8 @@ runner_launch() {
       "$token_fd" "$saved_term_trap" "$saved_int_trap" ""
     return "$rc"
   }
+
+  browser_transport_start
 
   debug_log_init "${FACTORY_RUN_PROFILE:-}" "$task" "$stage" "$run_dir" "$run_id" "$epoch" \
     || true
@@ -1557,6 +1566,7 @@ runner_launch() {
   # PGID и писать после начала восстановления базовой линии транзакции. Доверенный
   # запускатель владеет именно этими PGID/session и не снимает идентичность,
   # пока не исчезнет каждый участник.
+  browser_transport_stop
   RUNNER_LAUNCH_STATE=quiescing
   if _runner_runtime_present "$pgid" "$session" "$starttime"; then
     _runner_quiesce_owned_runtime "$pid" "$pgid" "$session" "$starttime" 1 ||

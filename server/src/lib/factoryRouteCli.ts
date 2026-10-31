@@ -49,6 +49,9 @@ const ROUTE_WITHHELD_NAMES = [GLM_ROUTE_KEY_ENV];
 // Имена, которыми владеет хост. Значение из extraEnv их не подменяет, даже если сам
 // хост переменную не задал (необязательные пути не открываются вызывающему).
 const ROUTE_HOST_NAMES = [
+  'GRIGDESK_BROWSER_NODE',
+  'GRIGDESK_BROWSER_HELPER',
+  'GRIGDESK_BROWSER_RELAY_SOCKET',
   'PATH',
   'HOME',
   'GRIGDESK_HOME',

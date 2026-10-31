@@ -2,6 +2,13 @@
   "schema": 1,
   "helpers": [
     {
+      "id": "factory-browser",
+      "entry": "server/src/lib/browser/factoryBrowserCli.ts",
+      "entryKind": "main",
+      "exports": ["main"],
+      "description": "Run-scoped браузерный helper Factory."
+    },
+    {
       "id": "external-cli-lease",
       "entry": "server/scripts/externalCliLease.mts",
       "entryKind": "main",

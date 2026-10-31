@@ -199,6 +199,9 @@ import type { Studio3dProvider } from '../studio3d/provider.ts';
 import type { ExternalCliDefinition } from '../providerInstall/inventoryTypes.ts';
 
 import { createWorkToolRegistry } from './work-tools/index.ts';
+
+export { withBrowserToolPolicy } from './work-tools/index.ts';
+
 import { executorLoaders } from './registryTable.ts';
 import { externalCliAdapter } from '../providerInstall/externalCliAdapter.ts';
 import { normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts';
@@ -447,8 +450,15 @@ export function createWorkTools({
   pluginEnabled,
   dbInvoke,
   workToolPolicy,
+  browserAvailable,
+  browserOwner,
+  browserInvoke,
 }: Record<string, unknown> = {}) {
   return createWorkToolRegistry({
+  browserAvailable,
+  browserOwner,
+  browserInvoke,
+
     projectId,
     chatKey,
     permissionMode,

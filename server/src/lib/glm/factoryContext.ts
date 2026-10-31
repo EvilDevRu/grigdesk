@@ -1,3 +1,6 @@
+import { FACTORY_STATUS_ENV_NAMES } from '../factoryProviderRunner.ts';
+import { factoryBrowserPublicEnabled } from '../browser/factoryBrowserCapability.ts';
+
 import path from 'node:path';
 
 import { glmAccessError } from './env.ts';
@@ -12,6 +15,7 @@ export interface GlmFactoryTurnContext {
   epoch: string;
   filesystem: GlmFactoryFilesystem;
   stateDir?: string;
+  browser?: true;
   statusServer: GlmMcpServer;
 }
 
@@ -47,6 +51,10 @@ function statusServer(value: unknown): GlmMcpServer {
   }
 
   if (new Set(server.env.map((entry) => entry.name)).size !== server.env.length) {
+    throw invalidContext();
+  }
+
+  if (server.env.some((entry) => !FACTORY_STATUS_ENV_NAMES.includes(entry.name))) {
     throw invalidContext();
   }
 
@@ -88,6 +96,12 @@ export function assertGlmFactoryContext(value: unknown): GlmFactoryTurnContext {
     throw invalidContext();
   }
 
+  const browser = factoryBrowserPublicEnabled(Object.fromEntries(env));
+
+  if (context.browser !== undefined && context.browser !== (browser ? true : undefined)) {
+    throw invalidContext();
+  }
+
   return {
     task: context.task!,
     stage: context.stage!,
@@ -95,6 +109,7 @@ export function assertGlmFactoryContext(value: unknown): GlmFactoryTurnContext {
     epoch: context.epoch!,
     filesystem: context.filesystem!,
     ...(context.filesystem === 'state-only' ? { stateDir: context.stateDir! } : {}),
+    ...(browser ? { browser: true as const } : {}),
     statusServer: server,
   };
 }

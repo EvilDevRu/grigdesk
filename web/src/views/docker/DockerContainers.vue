@@ -112,14 +112,12 @@
                 v-for="port in container.ports"
                 :key="`${port.published}-${port.target}-${port.protocol}`"
               >
-                <a
+                <StandLink
                   v-if="port.published"
                   class="docker-port"
-                  :href="sandboxUrl(port.published) || undefined"
-                  target="_blank"
-                  rel="noopener"
+                  :href="sandboxUrl(port.published) || ''"
                   v-tooltip="`Открыть ${formatPort(port)}`"
-                >{{ formatPort(port) }}<span aria-hidden="true"> ↗</span></a>
+                >{{ formatPort(port) }}<span aria-hidden="true"> ↗</span></StandLink>
                 <span v-else class="docker-port is-internal">{{ formatPort(port) }}</span>
               </template>
               <span v-if="!container.ports.length" class="docker-row__placeholder">Нет портов</span>
@@ -211,6 +209,7 @@
 </template>
 
 <script setup lang="ts">
+import StandLink from '../../shared/browser/StandLink.vue';
 import DockerLoading from './DockerLoading.vue';
 
 import { computed, onBeforeUnmount, ref } from 'vue';

@@ -17,6 +17,8 @@
 
 ## Устройство
 
+- [Браузер этапа: pinned authority, CLI/MCP, lifecycle и поставка](browser-transport.md)
+
 - [Как усиливать узлы конвейера](node-hardening.md) — входы и результаты, PLAN/SKEPTIC,
   доказательства проверок, повторы, границы GLM и безопасная публикация.
 

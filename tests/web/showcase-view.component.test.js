@@ -200,6 +200,8 @@ let compiledViewPromise = null;
 function showcaseViewComponent() {
   compiledViewPromise ??= compileVue(VIEW, {
     stubs: {
+      '../../stores/browser.ts':
+        'export const useBrowserStore = () => globalThis.__showcaseViewHarness.browser;',
       '../shared/settingsNavigation.ts': `
         export const openSettings = (request) =>
           globalThis.__showcaseViewHarness.calls.push(['settings', request]);
@@ -432,6 +434,15 @@ async function mountView(t, {
   const calls = [];
   const route = reactive({ params: { id: routeId } });
   const harness = {
+    browser: {
+      available: false,
+      preferences: {
+        open: 'external',
+        external: 'system',
+        agents: false,
+      },
+      control: async () => {},
+    },
     confirmed,
     confirmGate,
     sourceOptions,

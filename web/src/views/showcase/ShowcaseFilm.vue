@@ -22,15 +22,13 @@
         <p class="film__target">{{ targetText }}</p>
       </div>
       <div class="film__head-actions">
-        <UiActionLink
+        <StandLink
           v-if="targetUrl"
           :href="targetUrl"
           variant="ghost"
-          target="_blank"
-          rel="noopener noreferrer"
         >
           Открыть стенд <span aria-hidden="true">↗</span>
-        </UiActionLink>
+        </StandLink>
         <UiButton variant="ghost" tone="danger" :disabled="busy" @click="emit('remove-project')">
           Удалить ролик
         </UiButton>
@@ -272,6 +270,7 @@
 </template>
 
 <script setup lang="ts">
+import StandLink from '../../shared/browser/StandLink.vue';
 import { computed, reactive, ref, watch } from 'vue';
 
 import {

@@ -6,6 +6,7 @@ import { ARBITER_DEFAULTS, normalizeArbiterSettings } from './factoryArbiter.ts'
 import { SPEECH_DEFAULTS, normalizeSpeechSettings } from './speechSettings.ts';
 
 const DEFAULTS = {
+  browserAgentMode: 'legacy',
   // Перед любым запуском (триаж, конвейер) подтягивать свежий код в репозитории
   // проекта: fetch всегда, pull --ff-only только на чистом master.
   gitRefreshBeforeRun: true,

@@ -37,6 +37,7 @@ import { installOnboardingRouteGuard } from './shared/onboarding/onboardingNavig
 import { showSectionLoadFailure } from './shared/sectionLoadFailure.ts';
 import App from './App.vue';
 import { useShellStore } from './stores/shell.ts';
+import { installBrowserHostRuntime } from './shared/browser/browserHostRuntime.ts';
 import { installBackAction } from './shared/backAction.ts';
 import { installAppViewport } from './shared/appViewport.ts';
 import './styles/index.css';
@@ -290,8 +291,11 @@ window.grigdeskToolClosed = (value) => {
   }
 };
 
+const removeBrowserHost = installBrowserHostRuntime(pinia);
+
 app.use(router).mount('#app');
 import.meta.hot?.dispose(() => {
+  removeBrowserHost();
   removePluginRuntime();
   setApiLogSink(null);
   setWebDiagnosticSink(null);

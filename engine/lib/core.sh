@@ -136,6 +136,14 @@ _agent_settings() {
     done
   done
 
+  if [[ "${FACTORY_ROUTE_BROWSER_POLICY:-forbid}" == allow &&
+        "${GRIGDESK_BROWSER_NODE:-}" =~ ^/[A-Za-z0-9_@+.,/=-]+$ &&
+        -x "$GRIGDESK_BROWSER_NODE" &&
+        "${GRIGDESK_BROWSER_HELPER:-}" =~ ^/[A-Za-z0-9_@+.,/=-]+$ &&
+        -f "$GRIGDESK_BROWSER_HELPER" ]]; then
+    base+=',"Bash('"$GRIGDESK_BROWSER_NODE $GRIGDESK_BROWSER_HELPER"' request:*)"'
+  fi
+
   rules="\"Bash(bash $FACTORY_HOME/lib/stage-result.sh:*)\",\"Bash($FACTORY_HOME/lib/stage-result.sh:*)\""
   rules+=",\"Bash(bash $FACTORY_HOME/lib/stage-progress.sh:*)\",\"Bash($FACTORY_HOME/lib/stage-progress.sh:*)\""
   # Опыт проверяющего узла: запуск кода без права изменить дерево (см. stage-probe.sh).

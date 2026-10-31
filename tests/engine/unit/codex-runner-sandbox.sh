@@ -146,6 +146,45 @@ done
 control_add_count=$(grep -Fx -- "$control_dir" "$TEST_ROOT/codex-argv" | wc -l)
 assert_eq 0 "$control_add_count" "control directory is never emitted as writable --add-dir"
 
+browser_runtime="$TEST_ROOT/browser-runtime"
+browser_evidence="$TEST_ROOT/browser-evidence"
+browser_mailbox="$STATE_DIR/status-requests/browser-fixture/browser"
+mkdir -p "$browser_runtime" "$browser_evidence" "$browser_mailbox"
+export GRIGDESK_BROWSER_NODE="$TEST_ROOT/pinned-browser-node"
+export GRIGDESK_BROWSER_HELPER="$TEST_ROOT/pinned-browser-helper"
+printf '#!/bin/sh\nexit 0\n' >"$GRIGDESK_BROWSER_HELPER"
+cat >"$GRIGDESK_BROWSER_NODE" <<'BROWSER_NODE'
+#!/usr/bin/env bash
+case "$2" in
+  read-roots) printf '%s\n' "$FIXTURE_BROWSER_RUNTIME" ;;
+  evidence-root) printf '%s\n' "$FIXTURE_BROWSER_EVIDENCE" ;;
+  *) exit 4 ;;
+esac
+BROWSER_NODE
+chmod +x "$GRIGDESK_BROWSER_NODE"
+export FIXTURE_BROWSER_RUNTIME="$browser_runtime" FIXTURE_BROWSER_EVIDENCE="$browser_evidence"
+export FACTORY_BROWSER_ENABLED=1 FACTORY_ROUTE_BROWSER_POLICY=allow
+export FACTORY_BROWSER_REQUEST_DIR="$browser_mailbox"
+runner_codex_run 42 prompt BUILD gpt-fixture high 30 "$run_dir"
+assert_rc 0 "$?" "browser helper доступен ограниченному runner без модели"
+browser_argv=$(cat "$TEST_ROOT/codex-argv")
+for directory in "$browser_runtime" "$browser_evidence"; do
+  assert_contains "$browser_argv" "\"$directory\" = \"read\"" "browser root readonly"
+  grep -Fxq -- "$directory" "$TEST_ROOT/codex-argv"
+  assert_rc 1 "$?" "readonly browser root не выдаётся через writable add-dir"
+done
+assert_contains "$browser_argv" "\"$browser_mailbox\" = \"write\"" "own mailbox writable"
+assert_contains "$browser_argv" "shared-stand $GRIGDESK_BROWSER_NODE $GRIGDESK_BROWSER_HELPER" \
+  "hook receives captured pinned paths"
+export FACTORY_BROWSER_ENABLED=0
+runner_codex_run 42 prompt BUILD gpt-fixture high 30 "$run_dir"
+assert_rc 0 "$?" "forbid сохраняет прежний runner"
+case "$(cat "$TEST_ROOT/codex-argv")" in
+  *"$browser_evidence"*) test_fail "disabled browser не монтирует evidence" ;;
+  *) test_ok "disabled browser не монтирует evidence" ;;
+esac
+unset FACTORY_BROWSER_REQUEST_DIR
+
 RUNNER_CODEX_ADD_DIRS="$state_root $project_extra $control_dir"
 runner_codex_run 42 "prompt" BUILD gpt-fixture high 30 "$run_dir" >/dev/null 2>&1
 assert_rc 4 "$?" "shared-stand runner rejects writable-root overlap with control dir"

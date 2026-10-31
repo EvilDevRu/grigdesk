@@ -99,6 +99,15 @@ async function mountView(t, {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/sandboxes');
   const calls = [];
   const harness = {
+    browser: {
+      available: false,
+      preferences: {
+        open: 'external',
+        external: 'system',
+        agents: false,
+      },
+      control: async () => {},
+    },
     confirmed,
     confirmations: [],
     prompts: [],
@@ -130,6 +139,8 @@ async function mountView(t, {
 
   const component = await compileVue(VIEW, {
     stubs: {
+      '../../stores/browser.ts':
+        'export const useBrowserStore = () => globalThis.__sandboxViewHarness.browser;',
       '../actions/sandboxes': ACTIONS_STUB,
       '../../actions/sandboxes': ACTIONS_STUB,
       '../ui': (UI_STUB) +

@@ -897,6 +897,7 @@ function navTitle(item: NavLink) {
 }
 
 const ICONS: Record<string, string> = {
+  browser: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM3 12h18M12 3c3 3 3 15 0 18C9 18 9 6 12 3Z',
   connection: 'M4 5h16v10H4z M8 20h8 M12 15v5',
   cube: 'M12 2l9 5v10l-9 5-9-5V7z M12 22V12 M21 7l-9 5-9-5',
   board: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
@@ -933,7 +934,7 @@ const ICONS: Record<string, string> = {
   plugin: 'M4 7h3a2 2 0 1 1 4 0h3v3a2 2 0 1 1 0 4v3h-3a2 2 0 1 0-4 0H4v-3a2 2 0 1 0 0-4V7z',
 };
 // Основные разделы сохраняют прежние адреса и порядок при смене языка.
-const nav = [
+const coreNav = [
   {
     to: '/board',
     get label() {
@@ -977,6 +978,15 @@ const nav = [
     icon: 'projects',
   },
 ];
+const nav = computed(() => [
+  ...coreNav,
+  ...(isDesktopMain && shell.capabilities.includes('browser') ? [{
+    to: '/browser',
+    label: t('core.browserTitle'),
+    icon: 'browser',
+  }] : []),
+]);
+
 // Плагины в сайдбаре: включённые и с СУЩЕСТВУЮЩЕЙ страницей во фронте. У системных
 // страница собрана в бандл, у пользовательских — своя папка web, которую ведёт общий
 // роут /ext/:id; пункт с мёртвой ссылкой хуже отсутствующего — такие скрываем.
@@ -1007,11 +1017,11 @@ const statusOpen = ref(false);
 const analysis = useAnalysisStore();
 const statusAttention = computed(() => sysResourcesAlarm.value
   || notifyWatch.badgeSummary.attentionCount > 0 || analysis.issues.length > 0);
-const phoneNav = computed(() => [nav[0]!, nav[3]!, nav[1]!]);
+const phoneNav = computed(() => [nav.value[0]!, nav.value[3]!, nav.value[1]!]);
 const phoneMoreActive = computed(() => !phoneNav.value.some((item) => item.to === route.path));
 const phoneMenuItems = computed(() => {
   const items = [
-    ...nav,
+    ...nav.value,
     ...pluginNav.value,
     ...toolsNav.value,
     ...dockRouteNav.value,

@@ -55,6 +55,7 @@ type SettingsRequest = FastifyRequest<{
 }>;
 
 const PROTECTED_PREFS = new Map([
+  ['browserAgentMode', '/api/browser/mode'],
   ['speech', '/api/settings/speech'],
   // Реестры проектов принадлежат разделу «Проекты»: здесь они пишутся только своим API,
   // иначе одна общая запись настроек затирала бы паспорта проектов целиком.

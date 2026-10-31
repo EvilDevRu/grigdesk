@@ -1,3 +1,5 @@
+import type { BrowserPreferences } from '../browser/browserContract.ts';
+
 import { translator } from '../i18n/catalogs.ts';
 
 import type { WindowControlsState } from '../desktop/windowControls.ts';
@@ -19,6 +21,7 @@ export interface MachineProfile {
 }
 
 export interface ShellState {
+  browser?: { preferences: BrowserPreferences; revision: number };
   windowControls?: WindowControlsState;
   desktopExit?: { skipConfirmation: boolean };
   locale?: { preference: string; systemLanguage: string };
@@ -34,7 +37,7 @@ export interface ShellState {
   localAvailable: boolean;
   serverApi: ApiVersion | null;
   appApi: ApiVersion;
-  capabilities: ('scan' | 'save' | 'unlock' | 'windows' | 'selectDirectory')[];
+  capabilities: ('scan' | 'save' | 'unlock' | 'windows' | 'selectDirectory' | 'browser')[];
 }
 
 export const RELEASES_URL = '';

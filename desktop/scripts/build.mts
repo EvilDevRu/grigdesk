@@ -43,6 +43,16 @@ async function buildDesktop(): Promise<void> {
         ].join('\n'),
       },
     });
+    await build({
+      entryPoints: [path.join(desktop, 'src/browser/browserPreload.ts')],
+      outfile: path.join(output, 'browserPreload.cjs'),
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      target: 'node24',
+      external: ['electron'],
+    });
+
     // Окно получает заранее сглаженный растр: уменьшение упаковочной иконки 512 px
     // самой панелью задач теряет сглаживание и делает края букв зубчатыми.
     await copyFile(path.join(desktop, 'build/window-icon.png'), path.join(output, 'icon.png'));

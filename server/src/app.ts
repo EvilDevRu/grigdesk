@@ -148,6 +148,9 @@ import {
 import { isProjectArchived } from './lib/projects/archive.ts';
 import { projectRepos } from './lib/projects.ts';
 import { RoutesStore } from './modules/routes/store.ts';
+import { createFactoryBrowserTrusted } from './lib/browser/factoryBrowserTrusted.ts';
+import { createBrowserService } from './lib/browser/browserService.ts';
+import browserModule from './modules/browser/index.ts';
 import codeModule from './modules/code/index.ts';
 import studio3dModule from './modules/studio3d/index.ts';
 import telegramModule from './modules/telegram/index.ts';
@@ -304,6 +307,42 @@ async function build(desktopParent: DesktopParent | null) {
     prefs,
     broadcast: (event, data) => fastify.sse?.broadcast?.(event, data),
   });
+  const browserAuthority = {
+    controlRoot: config.factoryControlDir,
+    trusted: createFactoryBrowserTrusted({
+      state: factoryState,
+      routes: new RoutesStore({ baseDir: config.routesDir }),
+      projectExists: async (profile) => (await listProjects(config, prefs)).includes(profile),
+    }),
+  };
+  const browser = await createBrowserService({
+    prefs,
+    dataHome: config.dataHome,
+    artifactsDir: config.artifactsDir,
+    authority: browserAuthority,
+  });
+  const removeTaskOwners = browser.owners.register('task', async () => {
+    const rows: { owner: string; label: string }[] = [];
+
+    for (const task of (await factoryState.listTaskIds()).slice(0, 1000)) {
+      const trusted = await browserAuthority.trusted(task).catch(() => null);
+
+      if (trusted) {
+        rows.push({
+          owner: JSON.stringify(['task', trusted.profile, task, trusted.attempt]),
+          label: `Задача ${task}`,
+        });
+      }
+    }
+
+    return rows;
+  });
+
+  fastify.addHook('onClose', async () => {
+    removeTaskOwners();
+    await browser.close();
+  });
+
   const isDeletedProject = (id: string) => isProjectDeleted(prefs, id);
   const permissionQueue = createPermissionQueue();
   const sshConnections = await createSshStore({
@@ -1216,7 +1255,9 @@ async function build(desktopParent: DesktopParent | null) {
   await fastify.register(dockerModule, { service: dockerService });
   await fastify.register(sandboxesModule, { service: sandboxService });
   await fastify.register(showcaseModule, { service: showcaseService });
+  await fastify.register(browserModule, browser);
   await fastify.register(chatModule, {
+    browser,
     projectsService,
     factoryState,
     config,

@@ -1,3 +1,5 @@
+import { browserActions } from '../../../../shared/browser/browserActions.ts';
+
 /**
  * Нормализация вызывается до общей очистки неизвестного режима чата.
  * Отдельный контракт не позволяет молча заменить ошибочный выбор более широкими правами.
@@ -17,6 +19,8 @@ export function normalizeDeepSeekPermissionMode(value: unknown) {
 export type DeepSeekWorkActions = Record<string, Record<string, 'read' | 'broker'>>;
 
 const WORK_ACTIONS: DeepSeekWorkActions = {
+  grigdesk_browser: Object.fromEntries(browserActions('default').map((action) => [action,
+    browserActions('read-only').includes(action) ? 'read' as const : 'broker' as const])),
   supervised_ssh: { list: 'read', exec: 'broker' },
   supervised_db: {
     list: 'read',

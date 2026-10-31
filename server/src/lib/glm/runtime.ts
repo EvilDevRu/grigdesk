@@ -1,3 +1,4 @@
+import { factoryBrowserChildEnv } from '../browser/factoryBrowserEnvironment.ts';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -27,7 +28,11 @@ import { assertGlmRuntimeHome, buildGlmChildEnv, glmAccessError, resolveGlmAcces
 import { classifyGlmModelError } from './modelErrors.ts';
 import { assertGlmFactoryContext } from './factoryContext.ts';
 import type { GlmFactoryTurnContext } from './factoryContext.ts';
-import { GLM_FACTORY_STATUS_SERVER, GLM_FACTORY_STATUS_TOOLS, glmFactoryPolicy } from './factoryPolicy.ts';
+import {
+  GLM_FACTORY_STATUS_SERVER,
+  glmFactoryPolicy,
+  glmFactoryToolInventory,
+} from './factoryPolicy.ts';
 import { assertGlmGenerationAdmission, describeGlmGenerationAsync, glmRuntimeConfig } from './generation.ts';
 import { adoptLegacyGlmHome, glmChatHome, prepareGlmLaunch, startGlmProcess } from './launch.ts';
 import { createGlmTurnGuard } from './permissions.ts';
@@ -365,7 +370,10 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
     },
     mcpServers: factory ? [factory.context.statusServer] : options.mcpServers,
     ...(factory ? {
-      factory: { filesystem: factory.context.filesystem },
+      factory: {
+        filesystem: factory.context.filesystem,
+        ...(factory.context.browser ? { browser: true as const } : {}),
+      },
       hostServer: GLM_FACTORY_STATUS_SERVER,
     } : {}),
     workTools,
@@ -373,11 +381,11 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
     egressGuard: deps.egressGuard,
     warn: (message) => options.log?.warn?.({ chatKey: options.chatKey }, message),
   });
-  const env = buildGlmChildEnv({
+  const env = factoryBrowserChildEnv(buildGlmChildEnv({
     source: deps.env,
     dshHome: launch.dshHome,
     mode: selected.accessMode,
-  });
+  }), deps.env, Boolean(factory));
   const state = {
     promptAttempted: false,
     bindingError: null as unknown,
@@ -392,7 +400,7 @@ export async function runGlmTurn(options: GlmTurnOptions, deps: GlmRuntimeDeps) 
     workTools,
     signal: options.signal,
     ...(factory ? {
-      rawMcpTools: GLM_FACTORY_STATUS_TOOLS,
+      rawMcpTools: glmFactoryToolInventory(factory.context.browser === true),
       hostServer: GLM_FACTORY_STATUS_SERVER,
     } : {}),
   });

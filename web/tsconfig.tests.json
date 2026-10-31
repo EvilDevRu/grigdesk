@@ -27,6 +27,7 @@
   "include": [
     // HTTP-фикстуры подключают providers/auth сервера вместе с их общими типами Fastify.
     "../server/src/lib/fastifyDecorations.ts",
+    "src/types/browserNative.d.ts",
     "../tests/web/**/*"
   ]
 }
