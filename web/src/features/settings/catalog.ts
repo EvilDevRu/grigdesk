@@ -562,7 +562,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     id: 'tools.showcase',
     groupId: 'tools',
     label: translator.t('ru', 'settings.builtinPlugins.showcase.name'),
-    description: translator.t('ru', 'settings.builtinPlugins.showcase.description'),
+    description: translator.t('ru', 'settings.showcaseSetupDescription'),
   },
   {
     id: 'tools.browser',
@@ -847,7 +847,7 @@ const PAGE_MESSAGES: Record<string, Record<string, string>> = {
   },
   "tools.showcase": {
     "label": "settings.builtinPlugins.showcase.name",
-    "description": "settings.builtinPlugins.showcase.description"
+    "description": "settings.showcaseSetupDescription"
   },
   "plugins.installed": {
     "label": "settings.marketplaceOverview",

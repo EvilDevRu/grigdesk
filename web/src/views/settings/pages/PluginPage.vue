@@ -104,13 +104,30 @@
       </aside>
       <section class="settings-plugin-editor" :aria-label="t('settings.selectedPluginSettings')">
         <template v-if="plugin && ready">
-          <header class="settings-plugin-title">
+          <header v-if="!showcasePage" class="settings-plugin-title">
             <SettingsIcon name="plugins" />
             <h4>{{ plugin.name }}</h4>
             <span>{{ plugin.version }}</span>
             <p>{{ plugin.description }}</p>
             <p v-if="!plugin.system" :data-installed-source="plugin.id">{{ provenance(plugin) }}</p>
           </header>
+          <SettingsSection
+            v-if="showcasePage"
+            :heading="t('settings.showcaseSetupStartHeading')"
+            :description="t('settings.showcaseSetupStartHint')"
+          >
+            <UiButton
+              data-showcase-open
+              data-context="workspace-form-wrap"
+              :disabled="!baselineEnabled || !enabled || recoveryBlocked
+                || settings.snapshot.applying || settings.actionRunning"
+              @click="openShowcase"
+            >
+              {{ t('settings.showcaseSetupOpen') }}
+            </UiButton>
+            <p v-if="!enabled">{{ t('settings.showcaseSetupEnableFirst') }}</p>
+            <p v-else-if="!baselineEnabled">{{ t('settings.showcaseSetupApplyFirst') }}</p>
+          </SettingsSection>
           <PluginSourcePanel
             v-if="!plugin.system"
             :key="plugin.id"
@@ -390,6 +407,7 @@ const list = computed(() => (plugins.list as PluginListItem[])
 // Одиночный режим: страница из карты системных плагинов рисует форму одного
 // плагина без списка и фильтров магазина.
 const singlePluginId = computed(() => systemPluginOfPage(settings.pageId));
+const showcasePage = computed(() => singlePluginId.value === 'showcase');
 const pluginId = computed(() => singlePluginId.value ?? settings.entityId);
 
 const visible = computed(() => list.value.filter((entry) => {
@@ -524,6 +542,19 @@ function setEnabled(next: boolean): void {
 async function openTelegram(): Promise<void> {
   await settings.requestAction(async () => {
     const failure = await router.push('/telegram');
+
+    return !isNavigationFailure(failure)
+      || isNavigationFailure(failure, NavigationFailureType.duplicated);
+  });
+}
+
+/**
+ * Создание ролика начинается в рабочем разделе, а настройки остаются подготовкой.
+ * Общий переход сохраняет выбор судьбы всех неприменённых полей модала.
+ */
+async function openShowcase(): Promise<void> {
+  await settings.requestAction(async () => {
+    const failure = await router.push('/showcase');
 
     return !isNavigationFailure(failure)
       || isNavigationFailure(failure, NavigationFailureType.duplicated);

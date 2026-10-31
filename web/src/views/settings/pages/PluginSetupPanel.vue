@@ -1,44 +1,89 @@
 <template>
   <section class="settings-plugin-setup" data-plugin-setup>
-    <h4>{{ t('settings.readiness') }}</h4>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <header class="setup-heading">
+      <h4>{{ t('settings.pluginSetupHeading') }}</h4>
+      <UiButton :disabled="loading || Boolean(busy)" @click="load">
+        {{ t('settings.recheckReadiness') }}
+      </UiButton>
+    </header>
+    <UiInlineMessage v-if="error" tone="danger">{{ error }}</UiInlineMessage>
     <UiLoadingState v-if="loading && !status" :label="t('settings.checkingWhatIsOnTheMachine')"
                     :failed="Boolean(error)">
       <UiSkeletonLayout layout="list" :header="false" />
     </UiLoadingState>
-    <div v-for="item in status?.items ?? []" :key="item.id">
-      <b>{{ item.title }}</b>
-      <p>{{ item.reason }}</p>
-      <p v-if="item.job">{{ item.job.label }} {{ item.job.error }}</p>
-      <p v-else-if="item.action">{{ item.action.hint }}</p>
-      <UiButton
-        v-if="item.job?.state === 'running'"
-        :disabled="Boolean(busy)"
-        @click="operate(item, true)"
+    <section v-for="group in groups" :key="group.id" class="setup-group" :data-setup-group="group.id">
+      <header v-if="group.heading" class="setup-group-heading">
+        <h5>{{ group.heading }}</h5>
+        <p>{{ group.hint }}</p>
+      </header>
+      <UiDisclosureButton
+        v-if="group.collapsible"
+        v-model:open="voicesOpen"
+        :controls="voicesPanelId"
       >
-        {{ t('settings.cancel2') }}
-      </UiButton>
-      <UiButton
-        v-else-if="item.action"
-        :disabled="Boolean(busy)"
-        @click="operate(item, false)"
+        {{ t('settings.showcaseSetupVoiceOptions') }}
+      </UiDisclosureButton>
+      <div
+        v-show="!group.collapsible || voicesOpen"
+        :id="group.collapsible ? voicesPanelId : undefined"
+        class="setup-items"
       >
-        {{ item.action.label }}
-      </UiButton>
-    </div>
-    <UiButton :disabled="loading || Boolean(busy)" @click="load">{{ t('settings.recheckReadiness') }}</UiButton>
+        <div v-for="item in group.items" :key="item.id" class="setup-item" :data-setup-item="item.id">
+          <div class="setup-item-heading">
+            <b>{{ item.title }}</b>
+            <span class="setup-status" :data-status="item.status">
+              <template v-if="item.job?.state === 'running'">
+                {{ t('settings.pluginSetupInstalling') }}
+              </template>
+              <template v-else-if="item.status === 'ready'">
+                {{ t('settings.pluginSetupReady') }}
+              </template>
+              <template v-else-if="item.status === 'blocked'">
+                {{ t('settings.pluginSetupBlocked') }}
+              </template>
+              <template v-else-if="item.status === 'warning'">
+                {{ t('settings.pluginSetupWarning') }}
+              </template>
+              <template v-else>{{ t('settings.pluginSetupUnknown') }}</template>
+            </span>
+          </div>
+          <p class="setup-item-reason">{{ item.reason }}</p>
+          <p v-if="item.job && item.job.state !== 'succeeded'" role="status">
+            {{ item.job.label }} {{ item.job.error }}
+          </p>
+          <p v-if="item.action && item.job?.state !== 'running'" class="setup-item-hint">
+            {{ item.action.hint }}
+          </p>
+          <UiButton
+            v-if="item.job?.state === 'running'"
+            :disabled="Boolean(busy)"
+            @click="operate(item, true)"
+          >
+            {{ t('settings.cancel2') }}
+          </UiButton>
+          <UiButton
+            v-else-if="item.action"
+            :disabled="Boolean(busy)"
+            @click="operate(item, false)"
+          >
+            {{ item.action.label }}
+          </UiButton>
+        </div>
+      </div>
+    </section>
   </section>
 </template>
 
 <script setup lang="ts">
-import { UiSkeletonLayout } from '../../../ui';
+import { computed, ref, useId, watch, onBeforeUnmount } from 'vue';
 
-import { t } from '../../../ui.ts';
-
-import { ref, watch, onBeforeUnmount } from 'vue';
 import {
+  t,
   UiButton,
+  UiDisclosureButton,
+  UiInlineMessage,
   UiLoadingState,
+  UiSkeletonLayout,
 } from '../../../ui.ts';
 import { usePluginsStore } from '../../../stores/plugins.ts';
 import { failureText } from '../../../shared/apiClient.ts';
@@ -52,10 +97,46 @@ const status = ref<PluginSetupStatus | null>(null);
 const error = ref('');
 const busy = ref('');
 const loading = ref(false);
+const voicesOpen = ref(false);
+const voicesPanelId = useId();
+const groups = computed(() => {
+  const items = status.value?.items ?? [];
+
+  if (!props.plugin.system || props.plugin.id !== 'showcase') {
+    return [{
+      id: 'requirements',
+      heading: '',
+      hint: '',
+      collapsible: false,
+      items,
+    }];
+  }
+
+  const voiceItems = items.filter(isVoice);
+
+  return [{
+    id: 'recording',
+    heading: t('settings.showcaseSetupRecordingHeading'),
+    hint: t('settings.showcaseSetupRecordingHint'),
+    collapsible: false,
+    items: items.filter((item) => !isVoice(item)),
+  }, {
+    id: 'voices',
+    heading: t('settings.showcaseSetupVoicesHeading'),
+    hint: t('settings.showcaseSetupVoicesHint'),
+    collapsible: true,
+    items: voiceItems,
+  }].filter((group) => group.items.length > 0);
+});
+
 let epoch = 0;
 let disposed = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let controller: AbortController | null = null;
+
+function isVoice(item: PluginSetupItem): boolean {
+  return item.id.startsWith('voice:') || item.id === 'edge' || item.id === 'yandex';
+}
 
 function active(): boolean {
   return !disposed && props.active && props.plugin.enabled && Boolean(props.plugin.setup);
@@ -169,5 +250,77 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.settings-plugin-setup { display: grid; gap: 12px; min-width: 0; }
+.settings-plugin-setup {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding-block: 20px;
+}
+.settings-plugin-setup h4,
+.settings-plugin-setup h5,
+.settings-plugin-setup p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.setup-heading,
+.setup-item-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+.setup-heading h4 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.setup-group,
+.setup-group-heading,
+.setup-items,
+.setup-item {
+  display: grid;
+  min-width: 0;
+}
+.setup-group {
+  gap: 10px;
+}
+.setup-group-heading {
+  gap: 4px;
+}
+.setup-group-heading h5 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.setup-item {
+  gap: 6px;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.setup-item:first-child {
+  border-top: 1px solid var(--line);
+}
+.setup-item > .ui-button,
+.setup-group > .ui-disclosure-button {
+  justify-self: start;
+  max-width: 100%;
+}
+.setup-group-heading p,
+.setup-item-hint {
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.setup-status {
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+.setup-status[data-status='ready'] {
+  color: var(--good);
+}
+.setup-status[data-status='blocked'],
+.setup-status[data-status='warning'] {
+  color: var(--warn);
+}
 </style>
