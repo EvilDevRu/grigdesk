@@ -16,11 +16,11 @@ const MAX_BACKOFF_MS = 60_000;
  * Все читатели одного шаблона Б24 разделяют очередь и паузу, включая разные task id.
  * Параметры поиска не создают независимый обход ограничения частоты.
  */
-export function b24ReadRoute(path: string): string | null {
+export function trackerReadRoute(path: string): string | null {
   const route = path.split(/[?#]/u, 1)[0] ?? '';
 
-  return route.startsWith('/api/b24/')
-    ? route.replace(/^(\/api\/b24\/task)\/[^/]+/u, '$1/:id') : null;
+  return route.startsWith('/api/tracker/')
+    ? route.replace(/^(\/api\/tracker\/task)\/[^/]+/u, '$1/:id') : null;
 }
 
 /**
@@ -48,7 +48,7 @@ function waitForTurn(previous: Promise<void>, signal?: AbortSignal): Promise<voi
  * Бронирует одну попытку маршрута; завершение меняет паузу до допуска следующего читателя.
  * Отменённое ожидание сохраняет порядок очереди и не сбрасывает накопленный отказ.
  */
-export async function acquireB24Read(route: string, signal?: AbortSignal) {
+export async function acquireTrackerRead(route: string, signal?: AbortSignal) {
   let state = routes.get(route);
 
   if (!state) {
@@ -104,7 +104,7 @@ export async function acquireB24Read(route: string, signal?: AbortSignal) {
  * В журнал проходит один отказ шаблона за скользящую минуту независимо от длительности.
  * Подавление записи не влияет на ошибку, которую получает вызывающий код.
  */
-export function shouldLogB24Failure(route: string): boolean {
+export function shouldLogTrackerFailure(route: string): boolean {
   const now = Date.now();
   const previous = lastFailureLog.get(route);
 

@@ -7,7 +7,7 @@ import type { GrigdeskTasksConfig, TaskNumberProbe } from './numbers.ts';
 
 export interface GrigdeskTasksServiceOptions {
   config: GrigdeskTasksConfig;
-  b24: TaskNumberProbe;
+  tracker: TaskNumberProbe;
   projectsService: Pick<ProjectsService, 'list' | 'read' | 'withReferences'>;
   factoryState: {
     discoverProfiles(): string[];
@@ -49,8 +49,8 @@ function clientOrigin(value: unknown): string {
  * Отсутствующий профиль или пустой каталог не заменяются глобальным проектом.
  */
 export function createGrigdeskTasksService(options: GrigdeskTasksServiceOptions) {
-  const { config, b24, projectsService, factoryState } = options;
-  const store = new GrigdeskTaskStore({ config, b24 });
+  const { config, tracker, projectsService, factoryState } = options;
+  const store = new GrigdeskTaskStore({ config, tracker });
 
   /**
    * Проверяет выбранный проект по действующему реестру и опубликованному каталогу.
@@ -85,7 +85,7 @@ export function createGrigdeskTasksService(options: GrigdeskTasksServiceOptions)
       return {
         tasks: tasks.map(({ description: _description, ...summary }) => summary),
         revision,
-        b24Configured: b24.isConfigured(),
+        trackerConfigured: tracker.isConfigured(),
       };
     },
     /**

@@ -19,7 +19,7 @@ for (const presentation of ['dialog', 'document']) {
     assert.equal(wrapper.find('[data-role="task-shelf-toggle"]').exists(), false);
     assert.equal(wrapper.find('.stub-modal-fav').exists(), false);
     assert.deepEqual(personal, []);
-    assert.equal(reads.some((url) => url.startsWith('/api/b24/')), false);
+    assert.equal(reads.some((url) => url.startsWith('/api/tracker/')), false);
     assert.ok(wrapper.find('[data-role="task-launch-open"]').exists());
     assert.match(text, /Оценка|Триаж|Сложность/i);
   });

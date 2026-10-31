@@ -3,11 +3,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { customClientModule } from './helpers/trackerCustomPackage.js';
+import { customClientModule } from './helpers/trackerPackage.js';
 
-const { B24Client } = await customClientModule();
+test('месячная сводка использует completed_tasks, а не сумму дневного ряда задач', async (t) => {
+  const clientModule = await customClientModule(t);
 
-test('месячная сводка использует completed_tasks, а не сумму дневного ряда задач', async () => {
+  if (!clientModule) {
+    return;
+  }
+
+  const { B24Client } = clientModule;
   const client = Object.create(B24Client.prototype);
   let apiCalls = 0;
   let requestedPath = '';

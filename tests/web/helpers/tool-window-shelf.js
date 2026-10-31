@@ -154,7 +154,7 @@ export async function shelfFixture(t, ids = ['11', '99']) {
     async get(url) {
       h.calls.push({ method: 'GET', url });
 
-      return url === '/api/b24/task-shelf'
+      return url === '/api/tracker/task-shelf'
         ? structuredClone(state)
         : { title: 'Полная карточка', group_name: 'Проект' };
     },

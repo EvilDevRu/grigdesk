@@ -1,9 +1,7 @@
 import { recordOrEmpty } from '../../../../../shared/lib/objects.ts';
 
-import { describeStatus } from '../../b24/status.ts';
-
 import { decodeContract } from '../contract.ts';
-import type { B24Summary } from '../contract.ts';
+import type { TrackerSummary } from '../contract.ts';
 import { MobileInputError } from '../errors.ts';
 import { factorySnapshotHash } from '../factoryIdentity.ts';
 import type { MobileApp } from '../mobileServer.ts';
@@ -24,11 +22,11 @@ function deadline(value: unknown) {
 }
 
 /**
- * Название статуса берётся из серверной семантики Б24, описание остаётся простым текстом.
+ * Название статуса берётся из данных выбранного драйвера, описание остаётся простым текстом.
  * HTML портала не интерпретируется и не удаляется до безопасной интерполяции приложения.
  */
 function status(task: Payload) {
-  return text(task.statusText || task.statusLabel || describeStatus(task, null).label, 800);
+  return text(task.statusText || task.statusLabel || '', 800);
 }
 
 /**
@@ -45,9 +43,9 @@ function disabledReason(option: Payload) {
  * Фасад портала читает прежние внутренние ручки; запуск принадлежит общему factory admission.
  * OptionId выбирается только из сохранённого снимка, который владелец сверяет под task lock.
  */
-export function registerB24Routes(app: MobileApp, deps: Deps) {
-  app.get<{ Querystring: Payload }>('/api/mobile/v1/b24/tasks', async (request) => {
-    const source = await upstream(deps, 'GET', '/api/b24/dashboard');
+export function registerTrackerRoutes(app: MobileApp, deps: Deps) {
+  app.get<{ Querystring: Payload }>('/api/mobile/v1/tracker/tasks', async (request) => {
+    const source = await upstream(deps, 'GET', '/api/tracker/dashboard');
     const pipeline = await upstream(deps, 'GET', '/api/tasks');
     const ids = new Set(
       (Array.isArray(pipeline.tasks) ? pipeline.tasks : []).map((item) =>
@@ -55,7 +53,7 @@ export function registerB24Routes(app: MobileApp, deps: Deps) {
       ),
     );
     const sourceTasks = Array.isArray(source.tasks) ? source.tasks.map(recordOrEmpty) : [];
-    const tasks: B24Summary[] = sourceTasks.map((task) => ({
+    const tasks: TrackerSummary[] = sourceTasks.map((task) => ({
       id: taskId(String(task.id)),
       title: text(task.title, 800),
       status: status(task),
@@ -65,18 +63,18 @@ export function registerB24Routes(app: MobileApp, deps: Deps) {
     }));
     const page = paginate(tasks, request.query);
 
-    return decodeContract('b24-tasks', {
+    return decodeContract('tracker-tasks', {
       tasks: page.items,
       hasMore: page.hasMore,
       nextCursor: page.nextCursor,
     });
   });
-  app.get<{ Params: { id: string } }>('/api/mobile/v1/b24/tasks/:id', async (request) => {
+  app.get<{ Params: { id: string } }>('/api/mobile/v1/tracker/tasks/:id', async (request) => {
     const id = taskId(request.params.id);
-    const task = await upstream(deps, 'GET', `/api/b24/task/${id}`);
+    const task = await upstream(deps, 'GET', `/api/tracker/task/${id}`);
     const description = text(task.description, 250000);
 
-    return decodeContract('b24-task', {
+    return decodeContract('tracker-task', {
       task: {
         id,
         title: text(task.title, 800),
@@ -89,7 +87,7 @@ export function registerB24Routes(app: MobileApp, deps: Deps) {
     });
   });
   app.get<{ Params: { id: string } }>(
-    '/api/mobile/v1/b24/tasks/:id/launch-options',
+    '/api/mobile/v1/tracker/tasks/:id/launch-options',
     async (request) => {
       const id = taskId(request.params.id);
       const pipeline = await upstream(deps, 'GET', '/api/tasks');
@@ -148,7 +146,7 @@ export function registerB24Routes(app: MobileApp, deps: Deps) {
           ? snapshot.defaultRoute
           : (options.find((option) => !option.disabledReason)?.id ?? null),
         actionToken: available
-          ? deps.tokens.issue(request.mobileDevice!.id, `b24:${id}`, 'launch', {
+          ? deps.tokens.issue(request.mobileDevice!.id, `tracker:${id}`, 'launch', {
               snapshot,
               hash: factorySnapshotHash(snapshot),
             })
@@ -160,11 +158,11 @@ export function registerB24Routes(app: MobileApp, deps: Deps) {
   app.post<{
     Params: { id: string };
     Body: Payload;
-  }>('/api/mobile/v1/b24/tasks/:id/launch', async (request) => {
+  }>('/api/mobile/v1/tracker/tasks/:id/launch', async (request) => {
     const id = taskId(request.params.id);
     const saved = deps.tokens.take(
       request.mobileDevice!.id,
-      `b24:${id}`,
+      `tracker:${id}`,
       'launch',
       request.body?.actionToken,
     );

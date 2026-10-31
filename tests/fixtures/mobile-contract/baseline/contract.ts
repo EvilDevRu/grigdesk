@@ -427,7 +427,7 @@ export function decodeTask(value: unknown): Task {
  * Проверяет форму «b24-tasks» перед чтением её обязательных полей.
  * Необязательные поля будущего v1 остаются совместимыми с закреплёнными enum.
  */
-export function decodeB24Tasks(value: unknown): B24Tasks {
+export function decodeTrackerTasks(value: unknown): B24Tasks {
   return decodeContract<B24Tasks>('b24-tasks', value);
 }
 
@@ -435,7 +435,7 @@ export function decodeB24Tasks(value: unknown): B24Tasks {
  * Проверяет форму «b24-task» перед чтением её обязательных полей.
  * Необязательные поля будущего v1 остаются совместимыми с закреплёнными enum.
  */
-export function decodeB24Task(value: unknown): B24Task {
+export function decodeTrackerTask(value: unknown): B24Task {
   return decodeContract<B24Task>('b24-task', value);
 }
 

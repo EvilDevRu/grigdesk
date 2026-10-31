@@ -130,7 +130,7 @@ printf '%s\\n' "$result"
     factoryState: adapter,
     config,
     prefs: { read: () => ({}) },
-    b24: null,
+    tracker: null,
     analyzer: { readClarifications: async () => null, readOpenQuestions: async () => null },
   });
   await app.ready();

@@ -17,12 +17,12 @@ const PRIORITY_ALIASES: Record<string, number> = {
 };
 const TASK_UPDATE_FIELDS = new Set(['title', 'description', 'groupId', 'responsibleId', 'priority']);
 
-export class B24ValidationError extends Error {
+export class TrackerValidationError extends Error {
   readonly code = 'b24_bad_request';
 
   constructor(message: string) {
     super(message);
-    this.name = 'B24ValidationError';
+    this.name = 'TrackerValidationError';
   }
 }
 
@@ -54,7 +54,7 @@ function positiveId(value: unknown, label: string): number {
   const id = Number(text);
 
   if (!Number.isSafeInteger(id) || id <= 0 || (typeof text === 'string' && !/^\d+$/.test(text))) {
-    throw new B24ValidationError(`${label}: нужно положительное целое число`);
+    throw new TrackerValidationError(`${label}: нужно положительное целое число`);
   }
 
   return id;
@@ -66,7 +66,7 @@ function positiveId(value: unknown, label: string): number {
  */
 export function normalizeTaskUpdateFields(value: unknown): TaskFields {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new B24ValidationError('Поля задачи должны быть объектом');
+    throw new TrackerValidationError('Поля задачи должны быть объектом');
   }
 
   const raw = value as TaskFields;
@@ -74,18 +74,18 @@ export function normalizeTaskUpdateFields(value: unknown): TaskFields {
   const unknown = keys.filter((key) => !TASK_UPDATE_FIELDS.has(key));
 
   if (unknown.length) {
-    throw new B24ValidationError(`Неизвестные поля задачи: ${unknown.join(', ')}`);
+    throw new TrackerValidationError(`Неизвестные поля задачи: ${unknown.join(', ')}`);
   }
 
   if (!keys.length) {
-    throw new B24ValidationError('Не передано ни одного изменения задачи');
+    throw new TrackerValidationError('Не передано ни одного изменения задачи');
   }
 
   const fields: TaskFields = {};
 
   if (Object.hasOwn(raw, 'title')) {
     if (typeof raw.title !== 'string' || !raw.title.trim()) {
-      throw new B24ValidationError('Заголовок задачи не может быть пустым');
+      throw new TrackerValidationError('Заголовок задачи не может быть пустым');
     }
 
     fields.title = raw.title.trim();
@@ -93,7 +93,7 @@ export function normalizeTaskUpdateFields(value: unknown): TaskFields {
 
   if (Object.hasOwn(raw, 'description')) {
     if (typeof raw.description !== 'string') {
-      throw new B24ValidationError('Описание задачи должно быть строкой');
+      throw new TrackerValidationError('Описание задачи должно быть строкой');
     }
 
     fields.description = raw.description;
@@ -114,11 +114,11 @@ export function normalizeTaskUpdateFields(value: unknown): TaskFields {
     try {
       priority = normalizePriority(raw.priority);
     } catch (error) {
-      throw new B24ValidationError(String((error as { message?: unknown } | null)?.message || error));
+      throw new TrackerValidationError(String((error as { message?: unknown } | null)?.message || error));
     }
 
     if (priority === null) {
-      throw new B24ValidationError('Приоритет задачи не может быть пустым');
+      throw new TrackerValidationError('Приоритет задачи не может быть пустым');
     }
 
     fields.priority = priority;

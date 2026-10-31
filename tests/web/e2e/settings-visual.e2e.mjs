@@ -17,7 +17,6 @@ async function openSettings(t) {
 
   const fixture = await startSettingsBrowser(t, {
     '/api/settings/prefs': data.prefs,
-    '/api/settings/b24': data.b24,
     '/api/system/launcher': data.launcher,
     '/api/system/server': data.server,
     '/api/system/version': data.release,
@@ -405,9 +404,6 @@ test('V14: тексты без внутренних значений и обре
 
   await showPage(fixture, 'interface.behavior');
   assert.match(await fixture.page.locator('.settings-page-intro p').textContent(), /язык/i);
-  await showPage(fixture, 'connections.b24', '[data-connections-page="connections.b24"][data-ready="true"]');
-  assert.equal(await fixture.page.locator('[data-connections-page] input[type="password"]')
-    .getAttribute('placeholder'), 'Новый пароль');
   await showPage(fixture, 'system.diagnostics');
   assert.match(await fixture.page.locator('.settings-diagnostics').textContent(),
     /Только ошибки · источник: переменная окружения/);

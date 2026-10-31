@@ -50,7 +50,7 @@ const error = ref('');
 const saving = ref(false);
 const installOpen = ref(false);
 const externalDrivers = computed(() =>
-  trackers.catalog?.drivers.filter((driver) => driver.id !== 'own') ?? [],
+  trackers.catalog?.drivers.filter((driver) => driver.id !== 'own' && !driver.deleted) ?? [],
 );
 const selected = computed(() => externalDrivers.value.find((driver) => driver.id === externalId.value));
 
@@ -72,6 +72,13 @@ watch(externalId, (id) => {
     key,
     field.secret ? '' : savedValues.value[id]?.[key] ?? (field.type === 'boolean' ? false : ''),
   ])) as typeof values.value;
+});
+
+watch(() => trackers.catalog, (catalog) => {
+  if (catalog?.drivers.some((driver) => driver.id === externalId.value && driver.deleted)) {
+    externalId.value = catalog.externalId ?? '';
+    revision.value = catalog.revision;
+  }
 });
 
 /**

@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 import { legacyQueueAdapter } from './helpers/trackerQueue.js';
-import b24Module from '../../server/src/modules/b24/index.ts';
+import trackerModule from '../../server/src/modules/tracker/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 
@@ -59,7 +59,7 @@ async function legacyFixture(t) {
   app.decorate('telegramDiscussion', async () => ({ links: [{ url: 'https://t.me/fixture/1' }] }));
   app.decorate('mediaFramePath', (name) => name === 'shot.png' ? '/fixture/shot.png' : null);
   app.decorate('mediaClipPath', (name) => name === 'clip.mp4' ? '/fixture/clip.mp4' : null);
-  await app.register(b24Module, { b24 });
+  await app.register(trackerModule, { tracker: b24 });
   await app.ready();
   t.after(() => app.close());
 
@@ -75,16 +75,16 @@ async function legacyFixture(t) {
 test('LEGACY-HTTP-01: прежние пути, тела и ответы B24 сохраняются', async (t) => {
   const { app, calls, detail, dashboard } = await legacyFixture(t);
   const rows = [
-    ['GET', '/api/b24/dashboard', undefined, dashboard, 'getDashboard', []],
-    ['GET', '/api/b24/users?q=Иван', undefined,
+    ['GET', '/api/tracker/dashboard', undefined, dashboard, 'getDashboard', []],
+    ['GET', '/api/tracker/users?q=Иван', undefined,
       { users: [{ id: 7, name: 'Исполнитель' }] }, 'findUsers', ['Иван']],
-    ['GET', '/api/b24/groups', undefined,
+    ['GET', '/api/tracker/groups', undefined,
       { groups: [{ id: 9, name: 'Проект' }] }, 'listGroups', []],
-    ['GET', '/api/b24/task/42', undefined,
+    ['GET', '/api/tracker/task/42', undefined,
       { ...detail, telegram: { links: [{ url: 'https://t.me/fixture/1' }] } }, 'taskDetail', ['42']],
-    ['GET', '/api/b24/task/42/comments', undefined,
+    ['GET', '/api/tracker/task/42/comments', undefined,
       { comments: [{ mid: 1, text: 'Ответ' }] }, 'taskPageData', ['42']],
-    ['POST', '/api/b24/tasks', {
+    ['POST', '/api/tracker/tasks', {
       title: 'Новая',
       frames: ['shot.png'],
       clips: ['clip.mp4']
@@ -96,13 +96,13 @@ test('LEGACY-HTTP-01: прежние пути, тела и ответы B24 со
           { path: '/fixture/shot.png', name: 'запись.jpg' },
         ],
       }]],
-    ['POST', '/api/b24/task/42/comment', { text: 'Ответ' },
+    ['POST', '/api/tracker/task/42/comment', { text: 'Ответ' },
       { ok: true }, 'addComment', ['42', 'Ответ']],
     ...['start', 'pause', 'stop'].map((action) => [
-      'POST', `/api/b24/task/42/timer/${action}`, {}, { ok: true }, 'timer', [action, '42'],
+      'POST', `/api/tracker/task/42/timer/${action}`, {}, { ok: true }, 'timer', [action, '42'],
     ]),
-    ['POST', '/api/b24/task/42/complete', {}, { ok: true }, 'completeTask', ['42']],
-    ['POST', '/api/b24/task/42/renew', {}, { ok: true }, 'renewTask', ['42']],
+    ['POST', '/api/tracker/task/42/complete', {}, { ok: true }, 'completeTask', ['42']],
+    ['POST', '/api/tracker/task/42/renew', {}, { ok: true }, 'renewTask', ['42']],
   ];
 
   for (const [method, url, payload, expected, name, args] of rows) {
@@ -121,7 +121,7 @@ test('LEGACY-HTTP-01: прежние пути, тела и ответы B24 со
 
   const updated = await app.inject({
     method: 'PUT',
-    url: '/api/b24/task/42',
+    url: '/api/tracker/task/42',
     payload: {
       title: ' Только заголовок ',
       description: '',
@@ -147,8 +147,8 @@ test('LEGACY-HTTP-01: прежние отказы не вызывают эффе
   const { app, b24, calls } = await legacyFixture(t);
 
   for (const [method, url, payload, error] of [
-    ['GET', '/api/b24/task/no-id', undefined, 'bad_task_id'],
-    ['PUT', '/api/b24/task/42', { deadline: 'завтра' }, 'b24_bad_request'],
+    ['GET', '/api/tracker/task/no-id', undefined, 'bad_task_id'],
+    ['PUT', '/api/tracker/task/42', { deadline: 'завтра' }, 'b24_bad_request'],
   ]) {
     const response = await app.inject({
       method,
@@ -162,7 +162,7 @@ test('LEGACY-HTTP-01: прежние отказы не вызывают эффе
 
   assert.deepEqual(calls, []);
 
-  const invalidTimer = await app.inject({ method: 'POST', url: '/api/b24/task/42/timer/invalid' });
+  const invalidTimer = await app.inject({ method: 'POST', url: '/api/tracker/task/42/timer/invalid' });
 
   assert.equal(invalidTimer.statusCode, 502);
   assert.deepEqual(calls, []);
@@ -171,7 +171,7 @@ test('LEGACY-HTTP-01: прежние отказы не вызывают эффе
     throw new Error('B24 не настроен');
   };
 
-  const unavailable = await app.inject('/api/b24/dashboard');
+  const unavailable = await app.inject('/api/tracker/dashboard');
 
   assert.equal(unavailable.statusCode, 400);
   assert.equal(unavailable.json().error, 'b24_error');
@@ -180,7 +180,7 @@ test('LEGACY-HTTP-01: прежние отказы не вызывают эффе
     throw new Error('Ошибка сети');
   };
 
-  const failed = await app.inject('/api/b24/dashboard');
+  const failed = await app.inject('/api/tracker/dashboard');
 
   assert.equal(failed.statusCode, 502);
   assert.equal(failed.json().error, 'b24_error');
@@ -220,6 +220,10 @@ test('LEGACY-QUEUE-01: detail, dashboard и mutation сериализованы,
     };
 
     const adapter = await legacyQueueAdapter(operation, t);
+
+    if (!adapter) {
+      return;
+    }
 
     const detail = adapter.taskDetail('42');
     const rejected = assert.rejects(detail, /Ожидаемый отказ/u);

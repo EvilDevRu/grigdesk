@@ -5,15 +5,21 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
-import { customClientModule } from './helpers/trackerCustomPackage.js';
-import b24Module from '../../server/src/modules/b24/index.ts';
+import { customClientModule } from './helpers/trackerPackage.js';
+import trackerModule from '../../server/src/modules/tracker/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
-const { B24Client } = await customClientModule();
+test('нормализация проектов приводит id к числу, чистит мусор и сортирует имена', async (t) => {
+  const clientModule = await customClientModule(t);
 
-test('нормализация проектов приводит id к числу, чистит мусор и сортирует имена', () => {
+  if (!clientModule) {
+    return;
+  }
+
+  const { B24Client } = clientModule;
+
   assert.deepEqual(B24Client.normalizeGroups([
     { id: '101', name: 'Проект Альфа', type: 'project' },
     { ID: '41', NAME: ' Магазин ', TYPE: 'PROJECT' },
@@ -25,7 +31,14 @@ test('нормализация проектов приводит id к числ�
   ]);
 });
 
-test('список проектов читает страницы nav и кешируется на время жизни B24-клиента', async () => {
+test('список проектов читает страницы nav и кешируется на время жизни B24-клиента', async (t) => {
+  const clientModule = await customClientModule(t);
+
+  if (!clientModule) {
+    return;
+  }
+
+  const { B24Client } = clientModule;
   const client = Object.create(B24Client.prototype);
   const paths = [];
   client.ensureAuth = async () => {};
@@ -51,10 +64,15 @@ test('список проектов читает страницы nav и кеш�
   assert.equal(paths.length, 4, 'force должен перечитать все страницы');
 });
 
+/**
+ * Фикстура регистрирует нейтральный HTTP-фасад с управляемыми проектами драйвера.
+ * Запрос проходит обычный обработчик, ответы внешнего портала не нужны.
+ */
 async function appWithGroups(t, listGroups) {
   const app = Fastify({ logger: false });
-  app.register(b24Module, {
-    b24: {
+
+  app.register(trackerModule, {
+    tracker: {
       listGroups,
       getDashboard: async () => ({}),
       taskDetail: async () => null,
@@ -66,10 +84,10 @@ async function appWithGroups(t, listGroups) {
   return app;
 }
 
-test('GET /api/b24/groups отдаёт узкий справочник id + имя', async (t) => {
+test('GET /api/tracker/groups отдаёт узкий справочник id + имя', async (t) => {
   const groups = [{ id: 101, name: 'Проект Альфа', type: 'project' }];
   const app = await appWithGroups(t, async () => groups);
-  const response = await app.inject({ method: 'GET', url: '/api/b24/groups' });
+  const response = await app.inject({ method: 'GET', url: '/api/tracker/groups' });
 
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), { groups });
@@ -77,7 +95,7 @@ test('GET /api/b24/groups отдаёт узкий справочник id + им
 
 test('ошибка портала у списка проектов остаётся именованным b24_error', async (t) => {
   const app = await appWithGroups(t, async () => { throw new Error('портал недоступен'); });
-  const response = await app.inject({ method: 'GET', url: '/api/b24/groups' });
+  const response = await app.inject({ method: 'GET', url: '/api/tracker/groups' });
 
   assert.equal(response.statusCode, 502);
   assert.deepEqual(response.json(), { error: 'b24_error', message: 'портал недоступен' });

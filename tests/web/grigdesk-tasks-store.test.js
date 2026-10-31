@@ -68,7 +68,7 @@ test('LOCAL-LOAD-01: точный own 404 в своём диапазоне ра�
   assert.equal(loaded.title, portal.title);
   assert.deepEqual(loaded.telegram, portal.telegram);
   assert.deepEqual(await store.load(OWN.id), loaded);
-  assert.deepEqual(calls, [`/api/grigdesk-tasks/${OWN.id}`, `/api/b24/task/${OWN.id}`]);
+  assert.deepEqual(calls, [`/api/grigdesk-tasks/${OWN.id}`, `/api/tracker/task/${OWN.id}`]);
 });
 
 test('LOCAL-LOAD-02: короткий номер читает Б24 без own API, номер диапазона проверяет источник', async () => {
@@ -86,22 +86,22 @@ test('LOCAL-LOAD-02: короткий номер читает Б24 без own AP
       throw new migrationHarness.ApiError('Хранилище недоступно', 503, { error: 'unavailable' });
     }
 
-    return url === '/api/b24/task/42' ? portal : { ...portal, id: Number(OWN.id) };
+    return url === '/api/tracker/task/42' ? portal : { ...portal, id: Number(OWN.id) };
   });
   const short = await store.load('42');
 
   assert.equal(short.title, portal.title);
   assert.deepEqual(short.telegram, portal.telegram);
-  assert.deepEqual(calls, ['/api/b24/task/42']);
+  assert.deepEqual(calls, ['/api/tracker/task/42']);
 
   const ranged = await store.load(OWN.id);
 
   assert.equal(ranged.title, portal.title);
   assert.deepEqual(ranged.telegram, portal.telegram);
   assert.deepEqual(calls, [
-    '/api/b24/task/42',
+    '/api/tracker/task/42',
     `/api/grigdesk-tasks/${OWN.id}`,
-    `/api/b24/task/${OWN.id}`,
+    `/api/tracker/task/${OWN.id}`,
   ]);
 });
 

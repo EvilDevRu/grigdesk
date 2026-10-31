@@ -2,7 +2,7 @@
 //
 // Все ручные решения сериализуются в одном server writer process. Это намеренно
 // шире mutex одного item: после пересклейки два разных item ref могут покрывать
-// одно сообщение, а второй вызов B24 всё равно обязан увидеть decision первого
+// одно сообщение, а второй вызов трекера всё равно обязан увидеть decision первого
 // ДО внешнего side effect.
 
 import { lexical } from '../../../../shared/lib/text.ts';
@@ -55,7 +55,7 @@ interface DecisionResult {
   version: number;
 }
 
-interface B24Port {
+interface TrackerPort {
   isConfigured: () => boolean;
   createTask: (options: Payload) => Promise<{ id?: unknown } | null>;
   captureContext?: () => { trackerId: string | null; revision: number };
@@ -391,7 +391,7 @@ function ensureWritable(resolved: ResolvedItem): void {
 /**
  * Что из подготовленного уезжает НА ПОРТАЛ. Разбор вложений это не трогает:
  * речь и кадры видео модель читает всегда, ограничивается только загрузка
- * исходных байтов в B24.
+ * исходных байтов в трекер.
  *
  * Настройка называет ровно две группы, и стороны у неё разные по смыслу:
  * автомату выдаётся ТОЛЬКО разрешённое (человеческого суждения за ним нет),
@@ -547,7 +547,7 @@ async function releaseAttachmentAnalysis(
 export class InboxTaskService {
   coordinator: CoordinatorPort;
 
-  b24: B24Port;
+  tracker: TrackerPort;
 
   listProjects: () => Promise<unknown>;
 
@@ -579,7 +579,7 @@ export class InboxTaskService {
 
   constructor({
     coordinator,
-    b24,
+    tracker,
     listProjects = async () => [],
     taskUrlFor = async () => '',
     onChanged = () => {},
@@ -591,7 +591,7 @@ export class InboxTaskService {
     log = console,
   }: {
     coordinator?: CoordinatorPort;
-    b24?: B24Port;
+    tracker?: TrackerPort;
     listProjects?: () => Promise<unknown>;
     taskUrlFor?: (taskId: string) => Promise<unknown> | unknown;
     onChanged?: (payload: Payload) => unknown;
@@ -605,8 +605,8 @@ export class InboxTaskService {
     if (!coordinator || typeof coordinator.resolveItem !== 'function') {
       fail('invalid_service_config', 'InboxTaskService требует coordinator.', 500);
     }
-    if (!b24 || typeof b24.isConfigured !== 'function' || typeof b24.createTask !== 'function') {
-      fail('invalid_service_config', 'InboxTaskService требует B24 port с readiness.', 500);
+    if (!tracker || typeof tracker.isConfigured !== 'function' || typeof tracker.createTask !== 'function') {
+      fail('invalid_service_config', 'InboxTaskService требует порт трекера с проверкой готовности.', 500);
     }
     if (typeof listProjects !== 'function' || typeof taskUrlFor !== 'function'
         || typeof onChanged !== 'function' || typeof isEnabled !== 'function'
@@ -617,7 +617,7 @@ export class InboxTaskService {
       fail('invalid_service_config', 'InboxTaskService получил неверные callbacks.', 500);
     }
     this.coordinator = coordinator;
-    this.b24 = b24 as B24Port;
+    this.tracker = tracker as TrackerPort;
     this.listProjects = listProjects;
     this.taskUrlFor = taskUrlFor;
     this.onChanged = onChanged;
@@ -628,7 +628,7 @@ export class InboxTaskService {
     this.now = now;
     this.log = log;
     this.queue = Promise.resolve();
-    // После B24 success + store failure автоматический повтор опасен. До явной
+    // После успеха трекера и отказа хранилища автоматический повтор опасен. До явной
     // operator reconciliation этот process блокирует весь decisions channel,
     // а item/message keys сохраняет для точной диагностики пересклейки.
     this.indeterminateChannels = new Map();
@@ -751,7 +751,7 @@ export class InboxTaskService {
     } catch (err) {
       this.log.warn?.(
         { taskId, code: errorCode(err) },
-        'inbox: безопасная ссылка на B24-задачу не собрана',
+        'inbox: безопасная ссылка на задачу трекера не собрана',
       );
 
       return '';
@@ -772,12 +772,13 @@ export class InboxTaskService {
 
   async _deliverTaskNotification(receipt: TaskNotificationReceipt | null) {
     if (!receipt) return null;
+
     try {
       return publicNotification(
         await receipt.resolved.context.notifyTaskCreated?.(receipt.payload),
       );
     } catch (err) {
-      // B24 и durable decision уже состоялись. Ошибка обратного сообщения не
+      // Задача трекера и durable decision уже состоялись. Ошибка обратного сообщения не
       // имеет права превратить успех в повтор создания задачи. Но и молчать о
       // ней нельзя: раньше провал жил только в warn-логе, и со стороны человека
       // это выглядело как «оповещение просто не пришло» — при том, что
@@ -797,12 +798,13 @@ export class InboxTaskService {
    * Перед созданием повторно проверяются поколение трекера и состояние источника.
    */
   async task(ref: string, source: unknown, internalOptions?: unknown) {
-    const trackerContext = this.b24.captureContext?.();
+    const trackerContext = this.tracker.captureContext?.();
 
-    // Самый ранний gate: без B24 не читаем даже channel archive и текст.
+    // Самый ранний gate: без подключения трекера не читаем даже channel archive и текст.
     await this._assertInboxEnabled();
-    if (!this.b24.isConfigured()) {
-      fail('no_b24', 'Битрикс24 не подключён — задачу ставить негде.', 503);
+
+    if (!this.tracker.isConfigured()) {
+      fail('no_b24', 'Трекер не подключён — задачу ставить негде.', 503);
     }
     exactBody(source, TASK_KEYS, ['revision', 'messageRefs'], 'task body');
 
@@ -822,7 +824,11 @@ export class InboxTaskService {
 
     const committed = await this._serialize(async () => {
       await this._assertInboxEnabled();
-      if (!this.b24.isConfigured()) fail('no_b24', 'Битрикс24 больше не подключён.', 503);
+
+      if (!this.tracker.isConfigured()) {
+        fail('no_b24', 'Трекер больше не подключён.', 503);
+      }
+
       const first = await this._resolve(ref);
       let firstReleased = false;
       let second: ResolvedItem | null = null;
@@ -836,10 +842,11 @@ export class InboxTaskService {
           first.item.ref,
           selection.refs,
         );
+
         if (priorIndeterminate) {
           fail(
             'indeterminate_task_commit',
-            'Для этого обращения B24 уже мог создать задачу; нужен operator reconciliation.',
+            'Для этого обращения трекер уже мог создать задачу; нужен operator reconciliation.',
             503,
             null,
             priorIndeterminate,
@@ -861,6 +868,7 @@ export class InboxTaskService {
         });
         const rawAttachments = selectedDraft.attachments;
         await this._assertInboxEnabled();
+
         if (rawAttachments.length && typeof first.context.materializeAttachments !== 'function') {
           fail('channel_materialize_failed', 'Канал не умеет подготовить свои вложения.', 503);
         }
@@ -882,7 +890,7 @@ export class InboxTaskService {
 
         // Долгий Whisper/model call не должен держать account lease. Байты уже
         // получены под generation checks, а второй resolve ниже заново проверит
-        // revision, policy и generation непосредственно перед B24.
+        // revision, policy и generation непосредственно перед вызовом трекера.
         await this._release(first);
         firstReleased = true;
 
@@ -1042,15 +1050,18 @@ export class InboxTaskService {
         }
 
         // Список проектов читается до финального resolve: последний channel lookup
-        // остаётся максимально близко к необратимому B24 side effect.
-        if (!this.b24.isConfigured()) fail('no_b24', 'Битрикс24 больше не подключён.', 503);
+        // остаётся максимально близко к необратимому созданию задачи в трекере.
+        if (!this.tracker.isConfigured()) {
+          fail('no_b24', 'Трекер больше не подключён.', 503);
+        }
+
         const projects = await this.listProjects();
         if (!Array.isArray(projects)) {
           fail('stale_policy', 'Список проектов временно недоступен.', 409);
         }
 
         // Rules, archive contents, assignments, activation и generation могли
-        // измениться во время materialize. Второй resolve — обязательный pre-B24 CAS.
+        // измениться во время materialize. Второй resolve — обязательный CAS перед вызовом трекера.
         second = await this._resolve(ref);
         this._validateItem(second, body.revision, { requireActive: action.by === 'auto' });
         if (!sameSelection(first, second)) {
@@ -1063,7 +1074,10 @@ export class InboxTaskService {
         }
         await this._assertContextCurrent(second);
         await this._assertInboxEnabled();
-        if (!this.b24.isConfigured()) fail('no_b24', 'Битрикс24 больше не подключён.', 503);
+
+        if (!this.tracker.isConfigured()) {
+          fail('no_b24', 'Трекер больше не подключён.', 503);
+        }
 
         // Настройка читается ЗДЕСЬ, а не в начале хода: между materialize и
         // порталом прошли Whisper и model call, и человек мог за это время
@@ -1088,11 +1102,11 @@ export class InboxTaskService {
         let created;
 
         if (trackerContext) {
-          this.b24.assertContext?.(trackerContext);
+          this.tracker.assertContext?.(trackerContext);
         }
 
         try {
-          created = await this.b24.createTask({
+          created = await this.tracker.createTask({
             title: finalTitle,
             description: finalDescription,
             groupId: second.item.policy.b24.groupId,
@@ -1167,11 +1181,12 @@ export class InboxTaskService {
             verified.refs,
             { taskId, taskUrl },
           );
+
           this.log.error?.({ itemRef: second.item.ref, taskId, code: errorCode(err) },
-            'inbox: B24 task создана, decision commit неопределён');
+            'inbox: задача трекера создана, decision commit неопределён');
           fail(
             'indeterminate_task_commit',
-            'B24-задача создана, но Inbox не подтвердил запись решения. Не повторяйте действие.',
+            'Задача трекера создана, но Inbox не подтвердил запись решения. Не повторяйте действие.',
             503,
             err,
             details,
@@ -1245,10 +1260,11 @@ export class InboxTaskService {
           resolved.item.ref,
           selection.refs,
         );
+
         if (priorIndeterminate) {
           fail(
             'indeterminate_task_commit',
-            'Для выбранных сообщений B24 уже мог создать задачу; нужен operator reconciliation.',
+            'Для выбранных сообщений трекер уже мог создать задачу; нужен operator reconciliation.',
             503,
             null,
             priorIndeterminate,
@@ -1310,6 +1326,7 @@ export class InboxTaskService {
           resolved.item.ref,
           selection.refs,
         );
+
         if (priorIndeterminate) {
           fail(
             'indeterminate_task_commit',

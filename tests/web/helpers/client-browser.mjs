@@ -101,7 +101,7 @@ export async function clientBrowser(t, options = {}) {
             '/api/grigdesk-tasks': {
               tasks: [],
               revision: 0,
-              b24Configured: true
+              trackerConfigured: true
             },
             '/api/grigdesk-tasks/projects': { projects: [] },
             '/__shell/state': options.shell || shell,
@@ -111,25 +111,25 @@ export async function clientBrowser(t, options = {}) {
               method: 'device',
             },
             '/api/providers': { providers: [], models: [] },
-            '/api/b24/task-favorites': {
+            '/api/tracker/task-favorites': {
               scope: 'fixture',
               revision: 1,
               taskIds: [],
             },
-            '/api/b24/task-seen': {
+            '/api/tracker/task-seen': {
               scope: 'fixture',
               revision: 1,
               taskIds: [],
               initialized: true,
             },
-            '/api/b24/task/11': {
+            '/api/tracker/task/11': {
               id: 11,
               title: 'Задача для узкого экрана',
               description: '<p>Полное описание задачи на телефоне.</p>',
               status_label: 'В работе',
             },
             '/api/chat/store': { sessions: [chatSession], activeId: chatSession.id },
-            '/api/b24/dashboard': {
+            '/api/tracker/dashboard': {
               today: { hours: 1, tasks_count: 1 },
               month: { hours: 1, norm: 160 },
               tasks: [{
@@ -157,7 +157,8 @@ export async function clientBrowser(t, options = {}) {
           req.resume();
           res.end(JSON.stringify(options.responses?.[url.pathname] || chatRoutes[url.pathname]
             || responses[url.pathname]
-            || (url.pathname.startsWith("/api/b24/task-seen/") ? responses["/api/b24/task-seen"] : {})));
+            || (url.pathname.startsWith("/api/tracker/task-seen/")
+              ? responses["/api/tracker/task-seen"] : {})));
         });
       },
     }, vue()],

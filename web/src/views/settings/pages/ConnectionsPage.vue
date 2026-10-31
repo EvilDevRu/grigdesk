@@ -4,161 +4,32 @@
     :data-connections-page="settings.pageId"
     :data-ready="ready"
   >
-    <template v-if="settings.pageId === 'connections.b24'">
-      <SettingsScope>{{ t('settings.connectionChangesAreSavedWithApply') }}</SettingsScope>
-      <UiInlineMessage :tone="configured ? 'success' : 'neutral'">
-        {{ configured ? t('settings.connectionConfigured') : t('settings.connectionNotConfigured') }}
-      </UiInlineMessage>
-      <SettingsField
-        v-for="field in fields"
-        :key="field.key"
-        :address="field.address"
-      >
-        <UiPasswordInput
-          v-if="field.key === 'password'"
-          :model-value="value(field.key)"
-          :aria-label="field.label"
-          autocomplete="new-password"
-          :placeholder="t('settings.newPasswordPlaceholder')"
-          @update:model-value="edit(field.key, $event)"
-        />
-        <UiInput
-          v-else
-          :model-value="value(field.key)"
-          :aria-label="field.label"
-          :placeholder="field.key === 'baseUrl' ? 'https://company.bitrix24.ru' : t('settings.portalLogin')"
-          @update:model-value="edit(field.key, $event)"
-        />
-      </SettingsField>
-      <UiButton data-context="workspace-form-wrap"
-        class="settings-connection-test"
-        :disabled="!configured || dirty || testing"
-        @click="testConnection"
-      >
-        {{ t('settings.testConnection') }}
-      </UiButton>
-      <p v-if="dirty">{{ t('settings.applyConnectionChangesFirst') }}</p>
-    </template>
-    <template v-else>
-      <MobileAccess />
-      <SettingsSection>
-        <UiDisclosureButton v-model:open="help" :controls="helpId">
-          {{ t('settings.loginOnThisComputer') }}
-        </UiDisclosureButton>
-        <div v-if="help" :id="helpId" class="settings-connection-help">
-          <p>{{ t('settings.automaticLoginUsingThisComputerSLocal') }}</p>
-          <p>
-            {{ t('settings.ifTheSessionIsLostTheMain') }}
-          </p>
-        </div>
-      </SettingsSection>
-    </template>
-    <p v-if="message" role="status">{{ message }}</p>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <MobileAccess />
+    <SettingsSection>
+      <UiDisclosureButton v-model:open="help" :controls="helpId">
+        {{ t('settings.loginOnThisComputer') }}
+      </UiDisclosureButton>
+      <div v-if="help" :id="helpId" class="settings-connection-help">
+        <p>{{ t('settings.automaticLoginUsingThisComputerSLocal') }}</p>
+        <p>{{ t('settings.ifTheSessionIsLostTheMain') }}</p>
+      </div>
+    </SettingsSection>
   </section>
 </template>
 
 <script setup lang="ts">
-import { t, uiLocale } from '../../../ui.ts';
+import { computed, ref, useId } from 'vue';
 
-import { computed, ref, watch, useId } from 'vue';
-import { UiInput, UiPasswordInput, UiButton, UiDisclosureButton, UiInlineMessage } from '../../../ui.ts';
+import { t, UiDisclosureButton } from '../../../ui.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
-import { getSettingsFields } from '../../../features/settings/catalog.ts';
-import { createB24Adapter } from '../../../features/settings/resources/connections.ts';
-import { api, failureText } from '../../../shared/apiClient.ts';
 import MobileAccess from '../MobileAccess.vue';
-import SettingsField from '../SettingsField.vue';
-import SettingsScope from '../SettingsScope.vue';
 import SettingsSection from '../SettingsSection.vue';
 
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
-const fields = computed(() => getSettingsFields(uiLocale.value)
-  .filter((field) => field.resourceId === 'b24'));
-const configured = computed(() => settings.resourceDetails.b24?.configured === true);
-const dirty = computed(() => settings.snapshot.resources.find((entry) => entry.id === 'b24')
-  ?.fields.some((field) => field.dirty) === true);
 const help = ref(false);
 const helpId = `settings-local-access-${useId()}`;
-const ready = ref(false);
-const testing = ref(false);
-const message = ref('');
-const error = ref('');
-
-function value(key: string): string {
-  settings.snapshot;
-
-  return String(settings.getValue('b24', key) ?? '');
-}
-
-function edit(key: string, value: unknown): void {
-  if (key === 'password' && value === '') {
-    settings.discardField('b24', key);
-  } else {
-    settings.setField('b24', key, String(value ?? ''));
-  }
-}
-
-/**
- * Проверка использует сохранённое подключение и потому запрещена при dirty Б24.
- * Она не применяет параметры других страниц и не отправляет содержимое черновика.
- */
-async function testConnection(): Promise<void> {
-  if (!configured.value || dirty.value || testing.value) {
-    return;
-  }
-
-  testing.value = true;
-
-  try {
-    const result = await api.post('/api/settings/b24/test') as { ok: boolean; error?: string };
-
-    message.value = result.ok
-      ? t('settings.connectionVerified') : result.error || t('settings.connectionNotConfirmed');
-  } catch (cause) {
-    error.value = failureText(cause);
-  } finally {
-    testing.value = false;
-  }
-}
-
-/**
- * Секрет регистрируется без baseline: сервер возвращает только configured.
- * Обновлённый снимок принадлежит текущему открытию и не оживляет закрытую форму.
- */
-async function load(): Promise<void> {
-  if (!props.active || !settings.isOpen) {
-    return;
-  }
-
-  if (settings.pageId !== 'connections.b24') {
-    ready.value = true;
-
-    return;
-  }
-
-  const opening = settings.snapshot.sessionId;
-
-  try {
-    const adapter = settings.sessionService('b24-adapter', () => createB24Adapter(api, (view) => {
-      if (settings.isOpen && settings.snapshot.sessionId === opening) {
-        settings.resourceDetails = { ...settings.resourceDetails, b24: { configured: view.configured } };
-      }
-    }, uiLocale));
-
-    settings.registerResource(adapter, fields.value.map((field) => ({
-      ...field,
-      secret: field.key === 'password',
-    })));
-    await settings.loadResource('b24');
-    ready.value = true;
-  } catch (cause) {
-    error.value = failureText(cause);
-  }
-}
-
-watch([() => props.active, () => settings.pageId], load, { immediate: true });
+const ready = computed(() => props.active && settings.isOpen);
 </script>
 
 <style scoped>
@@ -168,14 +39,8 @@ watch([() => props.active, () => settings.pageId], load, { immediate: true });
   min-width: 0;
   align-content: start;
 }
-.settings-connections > [data-settings-field] + [data-settings-field] {
-  margin-top: -12px;
-}
 .settings-connections p {
   margin: 0;
-}
-.settings-connection-test {
-  justify-self: start;
 }
 .settings-connection-help {
   display: grid;

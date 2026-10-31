@@ -31,7 +31,7 @@ export const scenarios = [
   'tasks',
   'task',
   'b24-list',
-  'b24-task',
+  'tracker-task',
   'launch-dialog',
   'more',
   'update-banner',
@@ -89,8 +89,8 @@ export async function fixture(name) {
     'tasks',
     'task',
     'plan',
-    'b24-tasks',
-    'b24-task',
+    'tracker-tasks',
+    'tracker-task',
     'launch-options',
     'app',
     'accepted',
@@ -137,7 +137,7 @@ export async function fixture(name) {
   data.chat.chat.actions.stop = 'a'.repeat(48);
   data.plan.text =
     'План изменений\n\n' + 'Полное основание с длинными словами: ' + 'ВажнаяПроверка'.repeat(100);
-  data['b24-task'].task.description =
+  data['tracker-task'].task.description =
     '<b>Описание как текст</b>\n' + 'Подробное описание задачи. '.repeat(100);
   data['launch-options'].options = [
     {
@@ -256,9 +256,9 @@ export async function fixture(name) {
   } else if (name === 'task' || name === 'gate-confirm') {
     options.route = '/tasks/' + data.task.task.id;
   } else if (name === 'b24-list') {
-    options.route = '/b24';
-  } else if (name === 'b24-task' || name === 'launch-dialog') {
-    options.route = '/b24/' + data['b24-task'].task.id;
+    options.route = '/tracker';
+  } else if (name === 'tracker-task' || name === 'launch-dialog') {
+    options.route = '/tracker/' + data['tracker-task'].task.id;
   } else if (name === 'more') {
     options.route = '/more';
   } else if (name === 'update-banner') {
@@ -339,12 +339,12 @@ export async function fixture(name) {
     data.task.task.actions.resume = 'b'.repeat(48);
   }
   if (name === 'b24-empty') {
-    options.route = '/b24';
-    data['b24-tasks'].tasks = [];
+    options.route = '/tracker';
+    data['tracker-tasks'].tasks = [];
   }
   if (name === 'launch-options') {
-    options.route = '/b24/' + data['b24-task'].task.id;
-    data['b24-task'].task.description = 'Проверить выпуск приложения на телефоне и планшете.';
+    options.route = '/tracker/' + data['tracker-task'].task.id;
+    data['tracker-task'].task.description = 'Проверить выпуск приложения на телефоне и планшете.';
     data['launch-options'].options.push({
       id: 'route-review',
       title: 'Запуск с проверкой',

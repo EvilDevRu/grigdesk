@@ -39,7 +39,7 @@ function select(overrides = {}) {
     tasks,
     analysisByTask,
     query: '',
-    sortBy: 'b24',
+    sortBy: 'tracker',
     onlyUnrated: false,
     onlyNeedsInfo: false,
     favoriteOnly: false,
@@ -123,7 +123,7 @@ test('LIST-08: ключ сброса пагинации меняется от п
     onlyNeedsInfo: false,
     favoriteOnly: false,
     newOnly: false,
-    sortBy: 'b24',
+    sortBy: 'tracker',
     taskCount: 77,
   });
   for (const patch of [
@@ -141,7 +141,7 @@ test('LIST-08: ключ сброса пагинации меняется от п
       onlyNeedsInfo: false,
       favoriteOnly: false,
       newOnly: false,
-      sortBy: 'b24',
+      sortBy: 'tracker',
       taskCount: 77,
       ...patch,
     }), base);

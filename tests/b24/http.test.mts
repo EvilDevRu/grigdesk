@@ -36,7 +36,7 @@ test('BH-01: успешный ответ сохраняется побайтно
       token: TOKEN,
     }, {
       method: 'GET',
-      path: '/api/b24/dashboard',
+      path: '/api/tracker/dashboard',
     });
 
     assert.ok(Buffer.from(result).equals(body), String(status));
@@ -50,7 +50,7 @@ test('BH-01: успешный ответ сохраняется побайтно
     token: TOKEN,
   }, {
     method: 'POST',
-    path: '/api/b24/task/1/renew',
+    path: '/api/tracker/task/1/renew',
   });
 
   assert.equal(result.byteLength, 0);
@@ -73,7 +73,7 @@ test('BH-02: HTTP-отказ скрывает тело и возвращает 2
       token: TOKEN,
     }, {
       method: 'GET',
-      path: '/api/b24/dashboard',
+      path: '/api/tracker/dashboard',
     }), `Запрос к GrigDesk завершился ошибкой HTTP ${status}.`);
   }
 });
@@ -83,7 +83,7 @@ test('BH-03: redirect не получает второй запрос и ток�
     response.end('{}');
   });
   const source = await startHttpFixture(t, (_request, response) => {
-    response.writeHead(302, { Location: `${target.baseUrl}/api/b24/dashboard` }).end();
+    response.writeHead(302, { Location: `${target.baseUrl}/api/tracker/dashboard` }).end();
   });
 
   await rejects22(request({
@@ -91,7 +91,7 @@ test('BH-03: redirect не получает второй запрос и ток�
     token: TOKEN,
   }, {
     method: 'GET',
-    path: '/api/b24/dashboard',
+    path: '/api/tracker/dashboard',
   }), 'Запрос к GrigDesk завершился ошибкой HTTP 302.');
   assert.equal(source.requests.length, 1);
   assert.equal(target.requests.length, 0);
@@ -119,7 +119,7 @@ test('BH-04: сетевой обрыв, в том числе после 200, в�
       token: TOKEN,
     }, {
       method: 'GET',
-      path: '/api/b24/dashboard',
+      path: '/api/tracker/dashboard',
     }), network);
   }
 
@@ -128,7 +128,7 @@ test('BH-04: сетевой обрыв, в том числе после 200, в�
     token: TOKEN,
   }, {
     method: 'GET',
-    path: '/api/b24/dashboard',
+    path: '/api/tracker/dashboard',
   }), network);
 });
 
@@ -143,21 +143,21 @@ test('BH-05: JSON-заголовок ставится только по RequestS
 
   await request(connection, {
     method: 'GET',
-    path: '/api/b24/dashboard',
+    path: '/api/tracker/dashboard',
   });
   await request(connection, {
     method: 'POST',
-    path: '/api/b24/task/1/renew',
+    path: '/api/tracker/task/1/renew',
   });
   await request(connection, {
     method: 'POST',
-    path: '/api/b24/task/1/comment',
+    path: '/api/tracker/task/1/comment',
     body: '{"text":"т"}',
     json: true,
   });
   await request(connection, {
     method: 'POST',
-    path: '/api/b24/tasks',
+    path: '/api/tracker/tasks',
     body: new Uint8Array(Buffer.from('{"title":"т"}\n')),
     json: true,
   });
@@ -217,7 +217,7 @@ test('BH-02a: HTTP-отказ называет причину из поля mess
       token: TOKEN,
     }, {
       method: 'GET',
-      path: '/api/b24/dashboard',
+      path: '/api/tracker/dashboard',
     }), expected);
   }
 });
@@ -233,7 +233,7 @@ test('BH-02a: повреждённый JSON не становится причи
     token: TOKEN,
   }, {
     method: 'GET',
-    path: '/api/b24/dashboard',
+    path: '/api/tracker/dashboard',
   }), 'Запрос к GrigDesk завершился ошибкой HTTP 502.');
 });
 
@@ -257,7 +257,7 @@ for (const [label, message, expected] of unsafeReasons) {
       token: TOKEN,
     }, {
       method: 'GET',
-      path: '/api/b24/dashboard',
+      path: '/api/tracker/dashboard',
     }), `Запрос к GrigDesk завершился ошибкой HTTP 400: ${expected}${end}`);
   });
 }
@@ -278,7 +278,7 @@ for (const status of [undefined, 200, 502]) {
       token: TOKEN,
     }, {
       method: 'POST',
-      path: '/api/b24/tasks',
+      path: '/api/tracker/tasks',
       body: '{}',
       json: true,
     }, { timeoutMs: 100 }), TIMEOUT_MESSAGE);

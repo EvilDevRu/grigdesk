@@ -71,7 +71,7 @@ export const useBoardStore = defineStore('board', {
       this.loading = true;
 
       try {
-        const raw = await api.get('/api/b24/dashboard', {
+        const raw = await api.get('/api/tracker/dashboard', {
           signal: controller.signal,
           retry: false,
         });

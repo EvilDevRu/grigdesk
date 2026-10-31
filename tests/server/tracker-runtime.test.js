@@ -44,7 +44,7 @@ for (const outcome of ['installed', 'reverted', 'blocked']) {
     await selectTracker(fixture, 'fixture-driver');
 
     const registry = fixture.runtime.registry;
-    const accepted = fixture.b24.taskDetail('42');
+    const accepted = fixture.tracker.taskDetail('42');
 
     await entered.promise;
 
@@ -69,10 +69,10 @@ for (const outcome of ['installed', 'reverted', 'blocked']) {
     assert.equal(registry.isLoaded('fixture-driver'), true);
 
     if (outcome === 'reverted') {
-      assert.equal((await fixture.b24.taskDetail('43')).title, 'Принятый вызов');
+      assert.equal((await fixture.tracker.taskDetail('43')).title, 'Принятый вызов');
       assert.deepEqual(calls, ['42', '43']);
     } else {
-      await assert.rejects(fixture.b24.taskDetail('43'));
+      await assert.rejects(fixture.tracker.taskDetail('43'));
       assert.deepEqual(calls, ['42']);
 
       const catalog = (await fixture.request('GET', '/api/trackers')).json();

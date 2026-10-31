@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { ActionTokens } from '../../server/src/lib/mobile/actionTokens.ts';
-import { registerB24Routes } from '../../server/src/lib/mobile/facade/b24.ts';
+import { registerTrackerRoutes } from '../../server/src/lib/mobile/facade/tracker.ts';
 import { mobileFacadeFixture, mutation } from './helpers/mobile-facade.js';
 
 /**
@@ -46,7 +46,7 @@ async function setup(t) {
               ? options
               : path === '/api/tasks'
                 ? { tasks: [{ task: '101' }] }
-                : path === '/api/b24/dashboard'
+                : path === '/api/tracker/dashboard'
                   ? {
                       tasks: [
                         {
@@ -69,7 +69,7 @@ async function setup(t) {
       };
     },
   };
-  const { app } = await mobileFacadeFixture(t, (mobile) => registerB24Routes(mobile, deps));
+  const { app } = await mobileFacadeFixture(t, (mobile) => registerTrackerRoutes(mobile, deps));
 
   return {
     app,
@@ -80,26 +80,26 @@ async function setup(t) {
 
 test('MC-19/20/21: текст Б24, onPipeline и закреплённый выбор маршрута', async (t) => {
   const { app, calls } = await setup(t);
-  const list = (await app.inject('/api/mobile/v1/b24/tasks')).json();
+  const list = (await app.inject('/api/mobile/v1/tracker/tasks')).json();
 
   assert.equal(list.tasks[0].onPipeline, true);
   assert.equal(list.tasks[0].deadline, null);
 
-  const detail = (await app.inject('/api/mobile/v1/b24/tasks/101')).json();
+  const detail = (await app.inject('/api/mobile/v1/tracker/tasks/101')).json();
 
   assert.equal(detail.task.description, '<img src=x onerror=alert(1)>');
 
-  const already = (await app.inject('/api/mobile/v1/b24/tasks/101/launch-options')).json();
+  const already = (await app.inject('/api/mobile/v1/tracker/tasks/101/launch-options')).json();
 
   assert.equal(already.reason, 'Задача уже на конвейере.');
   assert.equal(already.actionToken, null);
   assert.deepEqual(already.options, []);
 
-  const launch = (await app.inject('/api/mobile/v1/b24/tasks/102/launch-options')).json();
+  const launch = (await app.inject('/api/mobile/v1/tracker/tasks/102/launch-options')).json();
 
   assert.equal(launch.options[1].disabledReason, 'Нужны параметры инструментации в GrigDesk.');
 
-  const bad = await mutation(app, '/api/mobile/v1/b24/tasks/102/launch', {
+  const bad = await mutation(app, '/api/mobile/v1/tracker/tasks/102/launch', {
     optionId: 'forged',
     actionToken: launch.actionToken,
   });
@@ -110,10 +110,10 @@ test('MC-19/20/21: текст Б24, onPipeline и закреплённый вы�
     false,
   );
 
-  const fresh = (await app.inject('/api/mobile/v1/b24/tasks/102/launch-options')).json();
+  const fresh = (await app.inject('/api/mobile/v1/tracker/tasks/102/launch-options')).json();
   const result = await mutation(
     app,
-    '/api/mobile/v1/b24/tasks/102/launch',
+    '/api/mobile/v1/tracker/tasks/102/launch',
     {
       optionId: 'feature',
       actionToken: fresh.actionToken,

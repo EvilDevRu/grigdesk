@@ -36,7 +36,7 @@ interface BoardSelection<T> extends ResetOptions {
 }
 
 // Чистая логика основного списка доски. Не зависит от Vue/Pinia и поэтому отдельно
-// фиксирует поиск, сочетание фильтров и сохранение B24-порядка.
+// фиксирует поиск, сочетание фильтров и сохранение трекера-порядка.
 const SIZE_ORDER: Record<string, number> = {
   S: 1,
   M: 2,
@@ -65,7 +65,7 @@ function triageRow(analysisByTask: AnalysisByTask, task: BoardTask) {
 
 /**
  * Сортирует только по известной оценке, сохраняя прежнее место задач без разбора.
- * Значения B24 не переписываются: вычисляется отдельная числовая метрика.
+ * Значения трекера не переписываются: вычисляется отдельная числовая метрика.
  */
 function metric(task: BoardTask, sortBy: string, analysisByTask: AnalysisByTask): number {
   const analysis = triageRow(analysisByTask, task)?.analysis;
@@ -90,14 +90,14 @@ function metric(task: BoardTask, sortBy: string, analysisByTask: AnalysisByTask)
 }
 
 /**
- * Совмещает фильтры без потери полей задач и порядка исходного списка B24.
+ * Совмещает фильтры без потери полей задач и порядка исходного списка трекера.
  * Сортировка создаёт копию, чтобы вызывающий сохранил исходную последовательность.
  */
 export function selectBoardTasks<T extends BoardTask = BoardTask>({
   tasks = [],
   analysisByTask = {},
   query = '',
-  sortBy = 'b24',
+  sortBy = 'tracker',
   onlyUnrated = false,
   onlyNeedsInfo = false,
   favoriteOnly = false,
@@ -133,7 +133,7 @@ export function selectBoardTasks<T extends BoardTask = BoardTask>({
       return !!analysis && (analysis.needs_clarification || analysis.confidence === 'low');
     });
   }
-  if (sortBy !== 'b24') {
+  if (sortBy !== 'tracker') {
     list = [...list].sort(
       (left, right) => metric(right, sortBy, analysisByTask)
         - metric(left, sortBy, analysisByTask),
@@ -153,7 +153,7 @@ export function boardTaskListResetKey({
   onlyNeedsInfo = false,
   favoriteOnly = false,
   newOnly = false,
-  sortBy = 'b24',
+  sortBy = 'tracker',
   taskCount = 0,
 }: ResetOptions = {}): string {
   return JSON.stringify([

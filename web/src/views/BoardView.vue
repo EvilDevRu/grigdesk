@@ -6,7 +6,12 @@
         <UiButton tone="accent" @click="newTaskOpen = true">{{ t('core.grigdeskNewTask') }}</UiButton>
       </div>
       <p v-if="ownTasks.error" class="err" role="alert">{{ ownTasks.error }}</p>
-      <p v-if="ownTasks.b24Configured === false" class="muted">{{ t('core.grigdeskB24Disconnected') }}</p>
+      <div v-if="ownTasks.trackerConfigured === false" class="tracker-setup-banner">
+        <p>{{ t('core.trackerSetupBanner') }}</p>
+        <UiButton tone="accent" @click="trackerSettingsOpen = true">
+          {{ t('core.trackerSetupAction') }}
+        </UiButton>
+      </div>
       <ul class="own-tasks-list">
         <li v-for="task in sortedOwnTasks" :key="task.id">
           <UiButton variant="text" data-context="grigdesk-task-title" @click="ui.openTask(task.id)">
@@ -18,21 +23,23 @@
         </li>
       </ul>
     </section>
-    <UiButton @click="trackerSettingsOpen = true">{{ t('core.trackerSettings') }}</UiButton>
+    <UiButton v-if="ownTasks.trackerConfigured !== false" @click="trackerSettingsOpen = true">
+      {{ t('core.trackerSettings') }}
+    </UiButton>
     <TrackerSettingsDialog v-if="trackerSettingsOpen" v-model:open="trackerSettingsOpen" />
     <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen" @created="ui.openTask($event)" />
 
-    <template v-if="ownTasks.b24Configured !== false">
+    <template v-if="ownTasks.trackerConfigured !== false">
     <BoardLoading v-if="!data && !error" label="Загрузка доски…" />
     <div v-else-if="error" class="err">
-      Ошибка B24: {{ error }}
-      <UiButton variant="text" @click="openSettings({ pageId: 'connections.b24' })">→ Настройки</UiButton>
+      {{ t('core.trackerBoardError', { message: error }) }}
+      <UiButton variant="text" @click="trackerSettingsOpen = true">→ Настройки</UiButton>
     </div>
 
     <template v-else-if="data">
       <TrackerWidgets :widgets="data.widgets ?? []" />
 
-      <!-- B24 разрешает несколько незакрытых таймеров одновременно: показываем каждый. -->
+      <!-- Драйвер разрешает несколько незакрытых таймеров одновременно: показываем каждый. -->
       <section
         v-if="activeTasks.length"
         class="active-timers"
@@ -133,7 +140,7 @@
             <label v-if="analysisEnabled" class="filter-section sort-filter">
               <span class="filter-caption">Сортировка</span>
               <UiSelect v-model="sortBy" class="trisort">
-                <option value="b24">порядок B24</option>
+                <option value="tracker">{{ t('core.trackerOrder') }}</option>
                 <option value="risk">по риску</option>
                 <option value="complexity">по сложности</option>
                 <option value="size">по размеру</option>
@@ -207,7 +214,7 @@
                 v-if="hasListFilters || activeFilterCount"
                 class="filter-reset"
                 variant="text"
-                v-tooltip="'Вернуть порядок B24 и показать все задачи'"
+                v-tooltip="t('core.trackerResetOrder')"
                 @click="resetTaskFilters"
               >
                 Сбросить
@@ -410,7 +417,6 @@ import type { UiFieldHandle } from '../ui.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { decodePipelineTasks } from '../shared/pipelineContracts.ts';
 
-import { openSettings } from '../shared/settingsNavigation.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { liveTimerSec, secToHMS } from '../shared/format.ts';
@@ -471,7 +477,7 @@ function statusColor(kind: string | undefined) {
 // цвет конвейера (зелёный — идёт, оранжевый — стоит/ждёт), как на странице конвейера.
 const conveyor = ref(new Map<string, boolean>());
 /**
- * Дешёвый снимок фабрики уточняет точки состояния задач B24.
+ * Дешёвый снимок фабрики уточняет точки состояния задач трекера.
  * Неверный ответ оставляет прежние точки и не объявляет пустую успешную загрузку.
  */
 async function loadConveyor() {
@@ -516,7 +522,7 @@ function dotColor(t: BoardTask) {
 }
 /**
  * Подпись точки объясняет текущую работу или остановку конвейера.
- * Задача вне фабрики продолжает показывать исходную подпись B24.
+ * Задача вне фабрики продолжает показывать исходную подпись трекера.
  */
 function dotTitle(t: BoardTask) {
   const k = String(t.id);
@@ -545,7 +551,7 @@ function taskStateLabel(task: BoardTask) {
   return task.overdue ? 'Просрочена' : task.statusLabel || '';
 }
 
-// Живой тик таймера: считается от timer_started_at из B24 — см. liveTimerSec.
+// Живой тик таймера: считается от timer_started_at из трекера — см. liveTimerSec.
 function liveElapsed(t: BoardTask) {
   return liveTimerSec(t, now.value);
 }
@@ -600,7 +606,7 @@ const seen = useTaskSeenStore();
 const newOnly = ref(false);
 const isNewTask = (task: BoardTask) => seen.ready && !seen.isSeen(task.id);
 const TRIAGE_LS = 'board.triage';
-const SORT_MODES = new Set(['b24', 'risk', 'complexity', 'size', 'fresh']);
+const SORT_MODES = new Set(['tracker', 'risk', 'complexity', 'size', 'fresh']);
 const TRIAGE_OPTIONS = [
   { value: 'all', label: 'Все' },
   { value: 'unrated', label: 'Без оценки' },
@@ -616,18 +622,18 @@ function readTriagePrefs() {
     const saved = isRecord(value) ? value : {};
 
     return {
-      sortBy: typeof saved.sortBy === 'string' && SORT_MODES.has(saved.sortBy) ? saved.sortBy : 'b24',
+      sortBy: typeof saved.sortBy === 'string' && SORT_MODES.has(saved.sortBy) ? saved.sortBy : 'tracker',
       // Один режим вместо двух независимых флагов: повреждённое старое значение
       // больше не может одновременно включить «без оценки» и «нужны уточнения».
       triageMode: saved?.onlyUnrated ? 'unrated' : saved?.onlyNeedsInfo ? 'needs-info' : 'all',
     };
   } catch {
-    return { sortBy: 'b24', triageMode: 'all' };
+    return { sortBy: 'tracker', triageMode: 'all' };
   }
 }
 
 const savedTriage = readTriagePrefs();
-const sortBy = ref(savedTriage.sortBy);   // b24 | risk | complexity | size | fresh
+const sortBy = ref(savedTriage.sortBy);   // tracker | risk | complexity | size | fresh
 const triageMode = ref(savedTriage.triageMode); // all | unrated | needs-info
 const onlyUnrated = computed(() => triageMode.value === 'unrated');
 const onlyNeedsInfo = computed(() => triageMode.value === 'needs-info');
@@ -681,7 +687,7 @@ const myTasks = computed(() => {
     tasks: data.value?.tasks || [],
     analysisByTask: analysis.byTask,
     query: q.value,
-    sortBy: analysisEnabled.value ? sortBy.value : 'b24',
+    sortBy: analysisEnabled.value ? sortBy.value : 'tracker',
     onlyUnrated: analysisEnabled.value && onlyUnrated.value,
     onlyNeedsInfo: analysisEnabled.value && onlyNeedsInfo.value,
     favoriteOnly: favoriteOnly.value,
@@ -705,7 +711,7 @@ const currentNewCount = computed(() => {
   return (data.value?.tasks || []).filter((task) => !seen.isSeen(task.id)).length;
 });
 const activeFilterCount = computed(() => [
-  analysisEnabled.value && sortBy.value !== 'b24',
+  analysisEnabled.value && sortBy.value !== 'tracker',
   favoriteOnly.value,
   newOnly.value,
   analysisEnabled.value && triageMode.value !== 'all',
@@ -720,7 +726,7 @@ const hasListFilters = computed(() => !!q.value.trim()
  */
 async function resetTaskFilters() {
   q.value = '';
-  sortBy.value = 'b24';
+  sortBy.value = 'tracker';
   triageMode.value = 'all';
   favoriteOnly.value = false;
   newOnly.value = false;
@@ -814,6 +820,24 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+.tracker-setup-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.tracker-setup-banner p {
+  flex: 1 1 240px;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
 }
 .own-tasks-list {
   display: grid;

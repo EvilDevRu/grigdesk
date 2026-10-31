@@ -7,15 +7,15 @@ state GrigDesk и потому одинаковы на всех его окна�
 
 | метка | API | файл state |
 |---|---|---|
-| избранное («звезда») | `GET /api/b24/task-favorites`, `PUT`/`DELETE .../:taskId` | `task-favorites.json` |
-| полка («жду событие») | `GET /api/b24/task-shelf`, `PUT`/`DELETE .../:taskId` | `task-shelf.json` |
-| просмотрено («новая») | `GET`/`POST /api/b24/task-seen` | `task-seen.json` |
+| избранное («звезда») | `GET /api/tracker/task-favorites`, `PUT`/`DELETE .../:taskId` | `task-favorites.json` |
+| полка («жду событие») | `GET /api/tracker/task-shelf`, `PUT`/`DELETE .../:taskId` | `task-shelf.json` |
+| просмотрено («новая») | `GET`/`POST /api/tracker/task-seen` | `task-seen.json` |
 
 Общее устройство (`lib/task-{favorites,shelf,seen}-{store,service}.js`, модули
 `modules/task-{favorites,shelf,seen}/`):
 
-- **scope клиент не выбирает** — он выводится из текущей портальной сессии
-  (`b24AccountScope` = sha256 от нормализованного адреса портала и id пользователя) и
+- **scope клиент не выбирает** — он выводится из текущей идентичности трекера
+  (`trackerAccountScope` = sha256 от нормализованного адреса портала и id пользователя) и
   наружу отдаётся только opaque-хешем. Попросить чужой набор нечем; смена аккаунта
   портала сама даёт другой набор, а не подмешивает метки прежнего.
 - Файл — `{schemaVersion, scopes: {<scope>: {revision, …}}}` в `<папка данных>/state` (0600),

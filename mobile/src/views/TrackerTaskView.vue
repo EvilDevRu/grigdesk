@@ -3,7 +3,7 @@
     <UiPaneHeader
       :title="current?.task.title || listed?.title || 'Задача Б24'"
       :sub="current?.task.status || ''"
-      back="/b24"
+      back="/tracker"
       back-label="Все задачи Б24"
     />
     <div ref="body" class="pane-body">
@@ -89,13 +89,13 @@ import { useRoute, useRouter } from 'vue-router';
 import type { LaunchOptions } from '../api/contract.ts';
 import { ApiError } from '../api/client.ts';
 import { UiButton, UiCard, UiDialog, UiError, UiIcon, UiPaneHeader } from '../ui.ts';
-import { useB24Store } from '../stores/b24.ts';
+import { useTrackerStore } from '../stores/tracker.ts';
 import { useLinkStore } from '../stores/link.ts';
 import { useReload } from '../composables/useReload.ts';
 
 const route = useRoute();
 const router = useRouter();
-const store = useB24Store();
+const store = useTrackerStore();
 const link = useLinkStore();
 const id = computed(() => String(route.params.id));
 const current = computed(() => (store.current?.task.id === id.value ? store.current : null));
@@ -150,7 +150,7 @@ async function launch() {
   busy.value = true;
 
   try {
-    await link.api!.launchB24Task(id.value, selected.value, options.value.actionToken);
+    await link.api!.launchTrackerTask(id.value, selected.value, options.value.actionToken);
     await router.push('/tasks');
   } catch (failure) {
     error.value =
@@ -176,5 +176,5 @@ watch(id, () => {
   selected.value = '';
   void reload();
 });
-useReload(reload, ['b24']);
+useReload(reload, ['tracker']);
 </script>

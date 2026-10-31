@@ -274,7 +274,7 @@ export type Task = {
     actions: Actions;
   };
 };
-export type B24Summary = {
+export type TrackerSummary = {
   id: string;
   title: string;
   status: string;
@@ -282,8 +282,8 @@ export type B24Summary = {
   priority: number;
   onPipeline: boolean;
 };
-export type B24Tasks = Page & { tasks: B24Summary[] };
-export type B24Task = {
+export type TrackerTasks = Page & { tasks: TrackerSummary[] };
+export type TrackerTask = {
   task: {
     id: string;
     title: string;
@@ -535,19 +535,19 @@ export function decodeTask(value: unknown): Task {
 }
 
 /**
- * Проверяет форму «b24-tasks» перед чтением её обязательных полей.
+ * Проверяет форму «tracker-tasks» перед чтением её обязательных полей.
  * Необязательные поля будущего v1 остаются совместимыми с закреплёнными enum.
  */
-export function decodeB24Tasks(value: unknown): B24Tasks {
-  return decodeContract<B24Tasks>('b24-tasks', value);
+export function decodeTrackerTasks(value: unknown): TrackerTasks {
+  return decodeContract<TrackerTasks>('tracker-tasks', value);
 }
 
 /**
- * Проверяет форму «b24-task» перед чтением её обязательных полей.
+ * Проверяет форму «tracker-task» перед чтением её обязательных полей.
  * Необязательные поля будущего v1 остаются совместимыми с закреплёнными enum.
  */
-export function decodeB24Task(value: unknown): B24Task {
-  return decodeContract<B24Task>('b24-task', value);
+export function decodeTrackerTask(value: unknown): TrackerTask {
+  return decodeContract<TrackerTask>('tracker-task', value);
 }
 
 /**

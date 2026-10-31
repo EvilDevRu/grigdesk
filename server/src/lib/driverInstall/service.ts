@@ -17,6 +17,6 @@ export function createDriverInstallService(
     ...common,
     pluginsDir: driversDir,
     packagePolicy: driverPackagePolicy,
-    reservedIds: ['own', 'b24-stock'],
+    reservedIds: ['own'],
   });
 }

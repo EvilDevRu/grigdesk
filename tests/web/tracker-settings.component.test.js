@@ -19,7 +19,7 @@ test('TRACKER-SETTINGS-01: настройки без Б24, own нельзя от
     assert.ok(own.exists());
     assert.equal(own.element.checked, true);
     assert.equal(own.element.disabled, true);
-    await chooseExternal(card, 'b24-stock');
+    await chooseExternal(card, 'grigdesk-b24');
 
     const secret = card.wrapper.find('input[type="password"]');
 
@@ -36,7 +36,7 @@ test('TRACKER-SETTINGS-01: настройки без Б24, own нельзя от
     const writes = card.apiCalls.filter((call) => call.method === 'POST');
 
     assert.ok(writes.some((call) => call.url === '/api/trackers/settings'
-      && call.payload.externalId === 'b24-stock'));
+      && call.payload.externalId === 'grigdesk-b24'));
     assert.ok(writes.some((call) => JSON.stringify(call.payload).includes('fixture-secret')));
     assert.equal(writes.some((call) => call.url.includes('/plugins')), false);
     assert.equal(card.state.catalog.activeIds.includes('own'), true);
@@ -200,7 +200,7 @@ test('TRACKER-SETTINGS-02: stale revision показывает отказ и с�
   });
 
   await openTrackerSettings(card);
-  await chooseExternal(card, 'b24-custom');
+  await chooseExternal(card, 'grigdesk-b24-discript');
   await actionButton(card.wrapper, /сохранить|save/iu).trigger('click');
   await card.flushPromises();
   assert.match(card.wrapper.text(), /Настройки изменились/u);

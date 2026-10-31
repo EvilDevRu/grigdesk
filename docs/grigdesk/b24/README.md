@@ -2,9 +2,23 @@
 
 Драйверы трекеров, совместимый HTTP-фасад, доска, полка и личное состояние задач.
 
-Читай перед правкой: `server/src/lib/b24`, `server/src/modules/b24`, `server/src/modules/task-shelf`, `server/src/modules/task-favorites`, `server/src/modules/task-seen`, `web/src/views/board`, `web/src/views/shelf`, `b24/` (команда `b24`).
+Читай перед правкой: `server/src/lib/trackers`, `server/src/modules/tracker`, `server/src/modules/task-shelf`, `server/src/modules/task-favorites`, `server/src/modules/task-seen`, `web/src/views/board`, `web/src/views/shelf`, `b24/` (команда `b24`).
 
 ## Устройство
+
+- [Имена пакетов владельца: id, версия и соответствие папке](driver-package-names.md)
+
+- [Удаление драйвера: drain, выбор доски, реквизиты и пометка до рестарта](driver-removal.md)
+
+- [Источники драйверов: встроенные ярлыки, локальная надстройка и API установщика](driver-sources.md)
+
+- [Каталог внешних драйверов: умолчание и GRIGDESK_DRIVERS_DIR](driver-directory.md)
+
+- [Нейтральный API трекера и обновление клиентов](neutral-tracker-api.md)
+
+- [Нейтральная идентичность и прежние хеши личных данных](tracker-account-scope.md)
+
+- [Граница внешних драйверов и статусная семантика](external-driver-boundary.md)
 
 - [Принятые границы драйверов трекера и правила поставки](tracker-drivers.md)
 - [Обновление карточки, колонка времени и ряды виджетов трекера](tracker-ui-refresh.md)

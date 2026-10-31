@@ -235,7 +235,7 @@ export async function factoryDecisionFixture(t, { after = null, before = {}, cor
     factoryState: adapter,
     config,
     prefs: { read: () => ({}) },
-    b24: null,
+    tracker: null,
     analyzer: {
       readClarifications: async () => null,
       readOpenQuestions: async () => null,

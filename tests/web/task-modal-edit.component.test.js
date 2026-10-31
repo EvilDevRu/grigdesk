@@ -77,7 +77,7 @@ async function mountEditor(t, presentation = 'dialog') {
       }
       if (url.endsWith('/clarifications')) return { text: '' };
       if (url === '/api/tasks') return { tasks: [] };
-      if (url === '/api/b24/users') {
+      if (url === '/api/tracker/users') {
         return {
           users: [
             { id: 17, name: 'Старый исполнитель' },
@@ -85,7 +85,7 @@ async function mountEditor(t, presentation = 'dialog') {
           ],
         };
       }
-      if (url === '/api/b24/groups') {
+      if (url === '/api/tracker/groups') {
         return {
           groups: [
             { id: 7, name: 'Старый проект' },

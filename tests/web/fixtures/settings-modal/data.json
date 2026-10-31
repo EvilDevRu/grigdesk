@@ -182,11 +182,6 @@
       }
     ]
   },
-  "b24": {
-    "configured": true,
-    "baseUrl": "https://portal.example.test",
-    "login": "Синтетический логин"
-  },
   "launcher": {
     "autostart": {
       "unit": "disabled",

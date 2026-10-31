@@ -95,8 +95,6 @@ export function isolatedEnv(root, port, mobilePort = port + 1) {
     GRIGDESK_SSH_KNOWN_HOSTS_PATH: path.join(root, 'state/known_hosts'),
     GRIGDESK_DB_PROFILES_PATH: path.join(root, 'state/db.json'),
     GRIGDESK_PROVIDER_USAGE_SEEN_PATH: path.join(root, 'state/usage.json'),
-    B24_CREDS_PATH: path.join(root, 'state/b24.json'),
-    B24_COOKIE_PATH: path.join(root, 'state/b24-cookie.txt'),
     GRIGDESK_TELEGRAM_ACCOUNT_CREDS_PATH: path.join(root, 'state/telegram.json'),
     GRIGDESK_GITHUB_CREDS_PATH: path.join(root, 'state/github.json'),
   };

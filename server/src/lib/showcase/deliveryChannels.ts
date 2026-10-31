@@ -34,7 +34,7 @@ export interface DeliveryChannelDeps {
   // Форма клиента разделу неизвестна намеренно: ему нужен ровно один метод, которого
   // у портала пока и нет. Объявить здесь готовый интерфейс значило бы сказать, что
   // такой метод существует.
-  b24?: unknown;
+  tracker?: unknown;
   telegramConnected?: () => boolean;
 }
 
@@ -46,15 +46,19 @@ function canUploadDiskFile(client: unknown): boolean {
   return typeof (client as { uploadDiskFile?: unknown } | null)?.uploadDiskFile === 'function';
 }
 
+/**
+ * Канал объявляет фактическую готовность перед предложением отправки пользователю.
+ * Переданный фасад трекера не означает наличия неподдерживаемой загрузки на диск.
+ */
 export function deliveryChannelStatuses(deps: DeliveryChannelDeps): ChannelStatus[] {
-  const b24Ready = canUploadDiskFile(deps.b24);
+  const trackerReady = canUploadDiskFile(deps.tracker);
 
   return [
     {
       id: 'b24',
       name: 'Битрикс24',
       ready: false,
-      reason: b24Ready
+      reason: trackerReady
         ? 'Файл загрузить можно, но прикрепить его к задаче пока нечем.'
         : 'Портал не подключён.',
       missing: 'запрос прикрепления файла к задаче, проверенный на живом портале',

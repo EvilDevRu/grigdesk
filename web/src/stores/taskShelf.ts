@@ -13,8 +13,8 @@ import type {
   ShelfEventSource,
   ShelfObservedSnapshot,
 } from '../shared/taskShelfDecision.ts';
-import { parseShelfState } from '../../../shared/b24/shelfContracts.ts';
-import type { ShelfEntry, ShelfReason } from '../../../shared/b24/shelfContracts.ts';
+import { parseShelfState } from '../../../shared/trackers/shelfContracts.ts';
+import type { ShelfEntry, ShelfReason } from '../../../shared/trackers/shelfContracts.ts';
 import { sseSubscribe } from '../composables/useSse.ts';
 import { useAnalysisStore } from './analysis.ts';
 import { useNotifyWatchStore } from './notifyWatch.ts';
@@ -320,7 +320,7 @@ async function hydrateTaskDetail(
   const scope = store.scope;
   const epoch = store._epoch;
   const signal = controller.detailAbort.signal;
-  const request: Promise<unknown> = api.get(`/api/b24/task/${encodeURIComponent(taskId)}`, {
+  const request: Promise<unknown> = api.get(`/api/tracker/task/${encodeURIComponent(taskId)}`, {
     signal,
     retry: false,
   });
@@ -417,12 +417,12 @@ function observedTask(controller: ShelfController, taskId: string): ShelfObserve
   const pipeline = controller.pipeline.loadedAt > 0 && !controller.pipeline.error
     ? controller.pipeline.observedByTask?.[taskId] || null
     : null;
-  let b24 = null;
+  let trackerSnapshot = null;
 
   if (controller.board.loadedAt > 0 && !controller.board.error && controller.board.data) {
     const task = boardTask(controller, taskId);
 
-    b24 = task
+    trackerSnapshot = task
       ? {
         present: true,
         status: task.status || null,
@@ -440,7 +440,7 @@ function observedTask(controller: ShelfController, taskId: string): ShelfObserve
   return {
     analysis,
     pipeline: pipeline as ShelfObservedSnapshot['pipeline'],
-    b24,
+    b24: trackerSnapshot,
   };
 }
 
@@ -637,7 +637,7 @@ function needsHumanNow(
  * Добавляет статус портальной задачи и полезные метаданные из текущей доски.
  * Сохранённый снимок используется только как fallback, если задача ушла из списка.
  */
-function b24Activity(
+function trackerActivity(
   task: ShelfBoardTask | null,
   snapshot: ShelfObservedSnapshot['b24'],
 ): ShelfActivity | null {
@@ -674,7 +674,7 @@ function presentation(
 ): ShelfRowDetails {
   const detail = cachedTaskDetail(controller, entry.taskId);
   const activities = [
-    b24Activity(task, snapshot.b24),
+    trackerActivity(task, snapshot.b24),
     analysisActivity(controller, entry, snapshot.analysis),
     pipelineActivity(entry, observed.pipeline, snapshot.pipeline),
   ].filter((activity): activity is ShelfActivity => activity !== null);

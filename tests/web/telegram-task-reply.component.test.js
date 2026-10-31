@@ -62,8 +62,12 @@ function server(initialRules) {
         if (url === '/api/telegram/rules') {
           return { rules: copy(rules), projects: ['demo'], policyFingerprint };
         }
-        if (url === '/api/b24/users') return { users: [] };
-        if (url === '/api/b24/groups') return { groups: [] };
+        if (url === '/api/tracker/users') {
+          return { users: [] };
+        }
+        if (url === '/api/tracker/groups') {
+          return { groups: [] };
+        }
         return {};
       },
       async post() { return {}; },

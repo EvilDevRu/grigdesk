@@ -34,7 +34,7 @@ test('LOCAL-API-01: создание без Б24 сохраняет задачу
   const detail = await restarted.app.inject({ url: `/api/grigdesk-tasks/${task.id}`, headers });
 
   assert.equal(list.statusCode, 200, list.body);
-  assert.equal(list.json().b24Configured, false);
+  assert.equal(list.json().trackerConfigured, false);
   assert.equal(list.json().tasks[0].id, task.id);
   assert.equal('description' in list.json().tasks[0], false);
   assert.deepEqual(detail.json(), task);

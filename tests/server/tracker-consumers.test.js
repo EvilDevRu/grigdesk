@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import factoryModule from '../../server/src/modules/factory/index.ts';
 import { Analyzer } from '../../server/src/lib/analysis/analyzer.ts';
-import { registerB24Routes } from '../../server/src/lib/mobile/facade/b24.ts';
+import { registerTrackerRoutes } from '../../server/src/lib/mobile/facade/tracker.ts';
 import { ActionTokens } from '../../server/src/lib/mobile/actionTokens.ts';
 import { mobileFacadeFixture } from './helpers/mobile-facade.js';
 import { inboxConsumerFixture, REVISION } from './helpers/trackerInbox.js';
@@ -22,12 +22,12 @@ test('TRACKER-SOURCE-URL-01: factory ticket использует sourceUrl др�
   if (fixture.runtime) {
     await selectTracker(fixture, 'fixture-driver');
   } else {
-    fixture.b24.client = () => ({
+    fixture.tracker.client = () => ({
       baseUrl: 'https://tracker.fixture',
       discoverUserId: async () => 7,
       taskPageData: async () => ({ comments: [] }),
     });
-    fixture.b24.sourceUrl = (id) => `https://tracker.fixture/t/${id}`;
+    fixture.tracker.sourceUrl = (id) => `https://tracker.fixture/t/${id}`;
   }
 
   const config = fixture.config;
@@ -62,7 +62,7 @@ exit 42
   t.after(() => app.close());
   await app.register(factoryModule, {
     config,
-    b24: fixture.b24,
+    tracker: fixture.tracker,
     prefs: { read: () => ({}) },
     analyzer: { readClarifications: async () => null, readOpenQuestions: async () => null },
     factoryState: {
@@ -99,32 +99,18 @@ exit 42
 test('TRACKER-SWITCH-02: смена driver во время Inbox подготовки запрещает эффект в новом аккаунте',
   async (t) => {
     const fixture = await trackerFixture(t, {
-      legacy: true,
       setup: async (config) => {
         await writeTracker(config, 'fixture-a');
         await writeTracker(config, 'fixture-b');
       },
     });
-    const legacyCreates = [];
 
-    if (fixture.runtime) {
-      await selectTracker(fixture, 'fixture-a');
-    } else {
-      fixture.credsStore.write({ login: 'fixture-a', password: 'fixture-password' });
-      fixture.b24.client = () => ({
-        createTask: async () => {
-          legacyCreates.push(fixture.credsStore.read().login);
-
-          return { id: 43 };
-        },
-      });
-      fixture.b24.sourceUrl = (id) => `https://tracker.fixture/t/${id}`;
-    }
+    await selectTracker(fixture, 'fixture-a');
 
     const entered = Promise.withResolvers();
     const release = Promise.withResolvers();
     const inbox = inboxConsumerFixture({
-      b24: fixture.b24,
+      b24: fixture.tracker,
       prepare: async () => {
         entered.resolve();
         await release.promise;
@@ -138,22 +124,12 @@ test('TRACKER-SWITCH-02: смена driver во время Inbox подгото�
     t.after(() => release.resolve());
     await entered.promise;
 
-    if (fixture.runtime) {
-      await selectTracker(fixture, 'fixture-b');
-    } else {
-      fixture.credsStore.write({ login: 'fixture-b', password: 'fixture-password' });
-      fixture.b24.invalidate();
-    }
+    await selectTracker(fixture, 'fixture-b');
 
     release.resolve();
 
     const result = await operation;
 
-    if (!fixture.runtime) {
-      assert.equal(result.error, undefined, 'Исходная Inbox fixture должна успешно дойти до эффекта');
-    }
-
-    assert.deepEqual(legacyCreates, [], 'Подготовленное действие не должно перейти в новый аккаунт');
     assert.equal(result.error?.code, 'tracker_context_changed');
     assert.deepEqual(await trackerCalls(fixture.config, 'fixture-a'), []);
     assert.deepEqual(await trackerCalls(fixture.config, 'fixture-b'), []);
@@ -175,12 +151,12 @@ test('TRACKER-CONSUMERS-01: analyzer и mobile используют выбран
 
   Object.assign(analyzer, {
     config: fixture.config,
-    b24: fixture.b24,
+    tracker: fixture.tracker,
     log: { warn() {} }
   });
   assert.equal((await analyzer._fetchTicket('42')).title, 'fixture-b');
 
-  const inbox = inboxConsumerFixture({ b24: fixture.b24 });
+  const inbox = inboxConsumerFixture({ b24: fixture.tracker });
   const created = await inbox.service.task(inbox.itemRef, {
     revision: REVISION,
     messageRefs: [inbox.messageRef],
@@ -191,7 +167,7 @@ test('TRACKER-CONSUMERS-01: analyzer и mobile используют выбран
     .filter((call) => call.method === 'createTask').length, 1);
 
 
-  const mobile = await mobileFacadeFixture(t, (app) => registerB24Routes(app, {
+  const mobile = await mobileFacadeFixture(t, (app) => registerTrackerRoutes(app, {
     tokens: new ActionTokens(),
     callApi: async (method, url, payload) => {
       const response = await fixture.request(method, url, payload);
@@ -199,7 +175,7 @@ test('TRACKER-CONSUMERS-01: analyzer и mobile используют выбран
       return { statusCode: response.statusCode, body: response.json() };
     },
   }));
-  const response = await mobile.app.inject('/api/mobile/v1/b24/tasks/42');
+  const response = await mobile.app.inject('/api/mobile/v1/tracker/tasks/42');
 
   assert.equal(response.statusCode, 200);
   assert.equal(response.json().task.title, 'fixture-b');

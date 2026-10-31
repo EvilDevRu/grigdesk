@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { accessSync, constants } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -39,10 +40,10 @@ function chromeBinary() {
 
 /**
  * Отдельный Vite обслуживает реальный BoardView, всё API перехватывает Playwright.
- * Entry и cache лежат в state, рабочая сборка и действующий сервер не затрагиваются.
+ * Entry и cache лежат во временной папке, рабочая сборка и действующий сервер не затрагиваются.
  */
 async function browserFixture(t, binary) {
-  const root = await mkdtemp('/home/evildev/.factory/state/tracker-browser-');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'tracker-browser-'));
   const entry = path.join(root, 'entry.ts');
   const vite = await import('../../web/node_modules/vite/dist/node/index.js');
   const vue = (await import('../../web/node_modules/@vitejs/plugin-vue/dist/index.mjs')).default;
@@ -147,6 +148,8 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
 
             if (url.pathname === '/api/trackers') {
               data = trackerCatalog();
+            } else if (url.pathname === '/api/trackers/sources') {
+              data = { sources: [] };
             } else if (url.pathname === '/api/trackers/settings') {
               data = {
                 revision: 1,
@@ -157,7 +160,7 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
               data = {
                 tasks: [],
                 revision: 0,
-                b24Configured: false
+                trackerConfigured: false
               };
             } else if (url.pathname.endsWith('/projects')) {
               data = { projects: [] };
@@ -168,7 +171,7 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
               data = { job: null };
             } else if (url.pathname === '/api/plugins') {
               data = { plugins: [] };
-            } else if (url.pathname === '/api/b24/dashboard') {
+            } else if (url.pathname === '/api/tracker/dashboard') {
               data = {
                 userId: 7,
                 tasks: [],
@@ -207,7 +210,7 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
           assert.deepEqual(errors, [], 'Реальная доска загружена без ошибок fixture');
 
           const settings = page.getByRole('button', {
-            name: /настрой.*(доск|трекер)|board settings|tracker settings/iu,
+            name: /настро[йи].*(доск|трекер)|board settings|tracker settings|set up tracker/iu,
           });
 
           assert.equal(await settings.count(), 1, 'Кнопка настроек трекера доступна без Б24');
@@ -219,11 +222,11 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
           assert.equal(await dialog.locator('input[value="own"]').isChecked(), true);
           assert.equal(await dialog.locator('input[value="own"]').isDisabled(), true);
 
-          await selectUiOption(page, dialog.getByRole('combobox'), 'b24-stock');
+          await selectUiOption(page, dialog.getByRole('combobox'), 'grigdesk-b24');
 
           await dialog.getByRole('button', { name: /сохранить|save/iu }).click();
           assert.ok(writes.some((call) => call.path === '/api/trackers/settings'
-            && call.body.externalId === 'b24-stock'));
+            && call.body.externalId === 'grigdesk-b24'));
           await dialog.getByRole('button', { name: /установить из git|install from git/iu }).click();
 
           const installDialog = page.getByRole('dialog').last();

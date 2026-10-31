@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 
-import type { B24Task, B24Tasks } from '../api/contract.ts';
+import type { TrackerTask, TrackerTasks } from '../api/contract.ts';
 import { createLatest } from '../api/latest.ts';
 import { onClear, useLinkStore } from './link.ts';
 
@@ -9,10 +9,10 @@ import { onClear, useLinkStore } from './link.ts';
  * Данные портала принадлежат серверу, UI хранит только актуальные проверенные DTO.
  * Независимые counters не дают старой карточке заменить текущую после перехода.
  */
-export const useB24Store = defineStore('b24', () => {
+export const useTrackerStore = defineStore('tracker', () => {
   const link = useLinkStore();
-  const list = ref<B24Tasks | null>(null);
-  const current = ref<B24Task | null>(null);
+  const list = ref<TrackerTasks | null>(null);
+  const current = ref<TrackerTask | null>(null);
   const error = ref('');
   const detailError = ref('');
   const listLatest = createLatest();
@@ -35,7 +35,7 @@ export const useB24Store = defineStore('b24', () => {
   const loadList = () =>
     run(() =>
       listLatest.run(
-        () => link.api!.getB24Tasks(),
+        () => link.api!.getTrackerTasks(),
         (value) => {
           list.value = value;
         },
@@ -45,7 +45,7 @@ export const useB24Store = defineStore('b24', () => {
     run(
       () =>
         detailLatest.run(
-          () => link.api!.getB24Task(id),
+          () => link.api!.getTrackerTask(id),
           (value) => {
             current.value = value;
           },

@@ -99,7 +99,7 @@ export const useTaskSeenStore = defineStore('taskSeen', {
       this.error = null;
       this._inflight = (async () => {
         try {
-          const snapshot = await api.get('/api/b24/task-seen');
+          const snapshot = await api.get('/api/tracker/task-seen');
 
           if (epoch !== this._epoch) {
             return false;
@@ -147,7 +147,7 @@ export const useTaskSeenStore = defineStore('taskSeen', {
       this.error = null;
 
       try {
-        const snapshot = await api.post('/api/b24/task-seen', { taskIds, baseline });
+        const snapshot = await api.post('/api/tracker/task-seen', { taskIds, baseline });
 
         if (epoch !== this._epoch) {
           return false;

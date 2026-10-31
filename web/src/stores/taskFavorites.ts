@@ -94,7 +94,7 @@ export const useTaskFavoritesStore = defineStore('taskFavorites', {
       this.error = null;
 
       try {
-        const snapshot = await api.get('/api/b24/task-favorites');
+        const snapshot = await api.get('/api/tracker/task-favorites');
 
         if (epoch !== this._epoch) {
           return false;
@@ -140,8 +140,8 @@ export const useTaskFavoritesStore = defineStore('taskFavorites', {
 
       try {
         const snapshot = favorite
-          ? await api.put(`/api/b24/task-favorites/${encodeURIComponent(key)}`)
-          : await api.del(`/api/b24/task-favorites/${encodeURIComponent(key)}`);
+          ? await api.put(`/api/tracker/task-favorites/${encodeURIComponent(key)}`)
+          : await api.del(`/api/tracker/task-favorites/${encodeURIComponent(key)}`);
 
         if (epoch !== this._epoch) {
           return false;

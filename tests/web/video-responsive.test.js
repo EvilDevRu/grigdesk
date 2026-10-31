@@ -33,8 +33,8 @@ const responses = {
       },
     },
   },
-  '/api/b24/users': { users: [] },
-  '/api/b24/groups': { groups: [] },
+  '/api/tracker/users': { users: [] },
+  '/api/tracker/groups': { groups: [] },
 };
 
 test('видео: действие добавления задачи читается целиком на телефоне и сохраняет черновики', {

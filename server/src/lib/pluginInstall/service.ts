@@ -8,7 +8,7 @@ import type {
   PluginInstallPreview,
   PluginInstalledVersion,
 } from '../../../../shared/plugins/pluginInstallContracts.ts';
-import { isInstallSha } from '../../../../shared/plugins/pluginInstallValues.ts';
+import { isInstallPluginId, isInstallSha } from '../../../../shared/plugins/pluginInstallValues.ts';
 import { createDefaultPluginSources } from './sources.ts';
 import type { PluginSourceRegistry } from './sources.ts';
 import type { NpmRunner } from './npm.ts';
@@ -42,6 +42,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { terminateOwnedWorker } from './workerIdentity.ts';
 import type { ApplyFs } from './applyPackage.ts';
 import { applyIntent, createApplyFs, recoverApply } from './applyPackage.ts';
+import { finishPackageRemoval } from './removePackage.ts';
 import {
   installedSnapshot, sameSource,
 } from './serviceSnapshots.ts';
@@ -61,6 +62,8 @@ export interface PluginInstallRuntime {
   isLoaded(id: string): boolean;
   prepareReplace(id: string, signal: AbortSignal): Promise<PluginReplacementLease>;
   refresh(): Promise<void>;
+  removed?(id: string): void;
+  installed?(id: string): void;
 }
 
 export interface PluginInstallServiceOptions {
@@ -100,6 +103,7 @@ export type PluginInstallPort = Pick<PluginInstallService,
   | 'bindRuntime' | 'recover' | 'health' | 'close' | 'describe' | 'listVersions'
   | 'startInstall' | 'startUpdate' | 'currentJob' | 'getJob' | 'apply' | 'cancel'
   | 'rollback' | 'checkUpdates' | 'restartRequired' | 'refreshCatalog' | 'payloadDigest'
+  | 'remove'
 >;
 
 /**
@@ -135,7 +139,7 @@ export class PluginInstallService {
   private healthError: PluginInstallErrorInfo | null = null;
   private closed = false;
   private reserved = false;
-  private operation: 'cancel' | 'apply' | 'rollback' | null = null;
+  private operation: 'cancel' | 'apply' | 'rollback' | 'remove' | null = null;
   private generation = 0;
   private controller: AbortController | null = null;
 
@@ -229,6 +233,8 @@ export class PluginInstallService {
         for (const name of ['jobs', 'transactions', 'previous', 'replaced']) {
           await fs.ensureDir(path.join(this.workDir, name));
         }
+
+        await finishPackageRemoval(this.store, fs, fs.roots);
 
         const resolved = await recoverApply(this.store, fs);
 
@@ -487,6 +493,101 @@ export class PluginInstallService {
     return this.restarts.has(id);
   }
 
+  removedIds(): string[] {
+    return [...(this.state.removedIds ?? [])];
+  }
+
+  /**
+   * Удаление использует общий mutex и lifetime, как замена или откат пакета.
+   * Ручная установка также удаляется: наличие записи managed не является условием.
+   */
+  async remove(id: string): Promise<{ id: string; restartRequired: boolean }> {
+    return this.mutation(() => this.performRemove(id));
+  }
+
+  /**
+   * Lease дожидается принятых вызовов до durable намерения и перемещения файлов.
+   * Реквизиты принадлежат runtime и не входят ни в цель удаления, ни в cleanup.
+   */
+  private async performRemove(id: string): Promise<{ id: string; restartRequired: boolean }> {
+    this.assertAvailable();
+
+    if (!this.runtime) {
+      throw installError('recovery_required');
+    }
+
+    if (this.reserved || this.operation) {
+      throw installError('install_busy');
+    }
+
+    if (!isInstallPluginId(id) || this.options.reservedIds.includes(id)) {
+      throw installError('package_not_found');
+    }
+
+    this.operation = 'remove';
+
+    const fs = this.filesystem();
+    let lease: PluginReplacementLease | null = null;
+    let intentStarted = false;
+
+    try {
+      const record = this.state.plugins[id];
+      const npmDirs = record?.npmDirs ?? [];
+      const previousNpmDirs = record?.previous?.npmDirs ?? [];
+      const directory = path.join(this.options.pluginsDir, id);
+
+      if (!await fs.lstatIdentity(directory)) {
+        throw installError('package_not_found');
+      }
+
+      lease = await this.runtime.prepareReplace(id, this.closingSignal.signal);
+
+      const current = await fs.lstatIdentity(directory, npmDirs);
+      const previous = await fs.lstatIdentity(path.join(this.workDir, 'previous', id), previousNpmDirs);
+
+      if (!current) {
+        throw installError('package_not_found');
+      }
+
+      intentStarted = true;
+
+      await this.writeState((state) => {
+        state.removal = {
+          pluginId: id,
+          transactionId: randomUUID(),
+          previousTransactionId: randomUUID(),
+          current,
+          previous,
+          npmDirs,
+          previousNpmDirs,
+        };
+      });
+
+      await finishPackageRemoval(this.store, fs, fs.roots);
+      this.state = await this.store.read();
+      this.invalidateDescriptions();
+      this.restarts.add(id);
+      this.runtime.removed?.(id);
+      await lease.finish('installed');
+      await this.refreshRuntime();
+      await recoverApply(this.store, fs);
+      this.state = await this.store.read();
+
+      return { id, restartRequired: true };
+    } catch (error) {
+      if (intentStarted) {
+        this.healthError = errorInfo(installError('recovery_required'));
+        this.reserved = true;
+      }
+
+      await lease?.finish(intentStarted ? 'blocked' : 'reverted');
+
+      throw error;
+    } finally {
+      this.operation = null;
+    }
+  }
+
   /**
    * Публикация выполняется с runtime lease и durable filesystem intent.
    * Повтор подтверждённого outcome не запускает файловый переход заново.
@@ -656,6 +757,16 @@ export class PluginInstallService {
 
     if (outcome.outcome === 'completed' && wasLoaded) {
       this.restarts.add(intent.pluginId);
+    }
+
+    if (outcome.outcome === 'completed' && this.state.removedIds?.includes(intent.pluginId)) {
+      await this.writeState((state) => {
+        state.removedIds = state.removedIds?.filter((id) => id !== intent.pluginId);
+      });
+    }
+
+    if (outcome.outcome === 'completed') {
+      this.runtime?.installed?.(intent.pluginId);
     }
 
     await lease.finish(outcome.outcome === 'completed' ? 'installed'
@@ -1100,7 +1211,7 @@ export class PluginInstallService {
 
         const disk = await this.store.read();
 
-        if (this.healthError || Object.keys(disk.workers).length > 0 || disk.apply) {
+        if (this.healthError || Object.keys(disk.workers).length > 0 || disk.apply || disk.removal) {
           throw installError('recovery_required');
         }
 

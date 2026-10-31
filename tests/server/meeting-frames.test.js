@@ -21,7 +21,7 @@ import {
   meetingFramePath,
   sweepMeetingFrames,
 } from '../../server/src/lib/media/meetingFrames.ts';
-import b24Module from '../../server/src/modules/b24/index.ts';
+import trackerModule from '../../server/src/modules/tracker/index.ts';
 import mediaModule from '../../server/src/modules/media/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -238,12 +238,16 @@ test('отказ ffmpeg оставляет задачи без кадра, а н
 
 // ── Вложение на портал ──────────────────────────────────────────────────────
 
+/**
+ * Фикстура проверяет разрешение имени кадра перед отправкой задачи трекеру.
+ * Пути файлов остаются под контролем media-декоратора HTTP-модуля.
+ */
 async function buildTaskApp(t, { framePath }) {
   const created = [];
   const app = Fastify({ logger: false });
   app.decorate('mediaFramePath', framePath);
-  app.register(b24Module, {
-    b24: {
+  app.register(trackerModule, {
+    tracker: {
       createTask: async (body) => { created.push(body); return { id: 4242 }; },
     },
   });
@@ -259,7 +263,7 @@ test('кадр уезжает на портал ИМЕНЕМ: путь подс�
 
   const res = await app.inject({
     method: 'POST',
-    url: '/api/b24/tasks',
+    url: '/api/tracker/tasks',
     payload: {
       title: 'Время забора',
       // Произвольный путь в теле — это «залей на портал что скажу»: ручка грузит файлы
@@ -279,7 +283,7 @@ test('пропавший кадр не отменяет постановку з�
   const { app, created } = await buildTaskApp(t, { framePath: () => null });
   const res = await app.inject({
     method: 'POST',
-    url: '/api/b24/tasks',
+    url: '/api/tracker/tasks',
     payload: { title: 'Время забора', frames: [`${RUN}/p0-00272s.jpg`] },
   });
   assert.equal(res.statusCode, 200);

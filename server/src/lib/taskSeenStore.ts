@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { parseB24TaskId } from './b24TaskId.ts';
+import { parseTrackerTaskId } from './trackers/taskId.ts';
 
 const SCHEMA_VERSION = 1;
 // Потолок набора: доска отдаёт около сотни задач, так что обрезка хвоста наступит
@@ -37,8 +37,12 @@ interface SeenDocument {
   scopes: Record<string, SeenScope>;
 }
 
+/**
+ * Просмотренные задачи используют общий разбор числового номера трекера.
+ * Неверный номер отклоняется до изменения сохранённого набора отметок.
+ */
 export function normalizeSeenTaskId(value: unknown): string {
-  const normalized = parseB24TaskId(value);
+  const normalized = parseTrackerTaskId(value);
   if (!normalized) {
     throw new TaskSeenStoreError(
       'BAD_SEEN_TASK_ID',

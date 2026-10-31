@@ -27,7 +27,7 @@ async function fixture(t, { identity, identityError } = {}) {
     },
   };
   const store = new TaskSeenStore({ filePath });
-  const seen = new TaskSeenService({ store, b24 });
+  const seen = new TaskSeenService({ store, tracker: b24 });
   const app = Fastify({ logger: false });
   app.register(taskSeenModule, { seen });
   t.after(() => app.close());
@@ -42,7 +42,7 @@ async function fixture(t, { identity, identityError } = {}) {
 
 test('SEEN-API-01: GET отдаёт server-derived scope и не раскрывает identity', async (t) => {
   const { app, calls } = await fixture(t);
-  const response = await app.inject({ method: 'GET', url: '/api/b24/task-seen' });
+  const response = await app.inject({ method: 'GET', url: '/api/tracker/task-seen' });
 
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), {
@@ -61,12 +61,12 @@ test('SEEN-API-02: POST помечает задачи и повтор идемп
 
   const first = await app.inject({
     method: 'POST',
-    url: '/api/b24/task-seen',
+    url: '/api/tracker/task-seen',
     payload: { taskIds: ['0042', 43] },
   });
   const repeat = await app.inject({
     method: 'POST',
-    url: '/api/b24/task-seen',
+    url: '/api/tracker/task-seen',
     payload: { taskIds: ['42'] },
   });
 
@@ -83,20 +83,20 @@ test('SEEN-API-03: initialized поднимает только baseline', async 
   // Открытая из конвейера задача не должна объявлять набор базовым: доска ещё не грузилась.
   const early = await app.inject({
     method: 'POST',
-    url: '/api/b24/task-seen',
+    url: '/api/tracker/task-seen',
     payload: { taskIds: ['5'] },
   });
   assert.equal(early.json().initialized, false);
 
   const baseline = await app.inject({
     method: 'POST',
-    url: '/api/b24/task-seen',
+    url: '/api/tracker/task-seen',
     payload: { taskIds: ['5', '6'], baseline: true },
   });
   assert.equal(baseline.json().initialized, true);
   assert.deepEqual(baseline.json().taskIds, ['5', '6']);
 
-  const after = await app.inject({ method: 'GET', url: '/api/b24/task-seen' });
+  const after = await app.inject({ method: 'GET', url: '/api/tracker/task-seen' });
   assert.equal(after.json().initialized, true);
 });
 
@@ -104,14 +104,16 @@ test('SEEN-API-04: смена портала или B24-пользователя
   const { app, setIdentity } = await fixture(t);
   const first = await app.inject({
     method: 'POST',
-    url: '/api/b24/task-seen',
+    url: '/api/tracker/task-seen',
     payload: { taskIds: ['11'], baseline: true },
   });
 
   setIdentity({ baseUrl: 'https://other.example.test', userId: 77 });
-  const otherPortal = await app.inject({ method: 'GET', url: '/api/b24/task-seen' });
+
+  const otherPortal = await app.inject({ method: 'GET', url: '/api/tracker/task-seen' });
   setIdentity({ baseUrl: 'https://portal.example.test', userId: 78 });
-  const otherUser = await app.inject({ method: 'GET', url: '/api/b24/task-seen' });
+
+  const otherUser = await app.inject({ method: 'GET', url: '/api/tracker/task-seen' });
 
   assert.notEqual(first.json().scope, otherPortal.json().scope);
   assert.notEqual(first.json().scope, otherUser.json().scope);
@@ -126,7 +128,7 @@ test('SEEN-API-05: клиент не может выбрать чужой scope 
   const { app } = await fixture(t);
   const response = await app.inject({
     method: 'POST',
-    url: '/api/b24/task-seen?scope=attacker',
+    url: '/api/tracker/task-seen?scope=attacker',
     payload: { scope: 'attacker', taskIds: ['9'] },
   });
 
@@ -140,7 +142,7 @@ test('SEEN-API-06: кривое тело получает стабильный 4
 
   const badId = await app.inject({
     method: 'POST',
-    url: '/api/b24/task-seen',
+    url: '/api/tracker/task-seen',
     payload: { taskIds: ['not-a-number'] },
   });
   assert.equal(badId.statusCode, 400);
@@ -155,7 +157,11 @@ test('SEEN-API-06: кривое тело получает стабильный 4
     { taskIds: ['1'], baseline: 'yes' },
     { taskIds: Array.from({ length: 1001 }, (_, index) => String(index + 1)) },
   ]) {
-    const response = await app.inject({ method: 'POST', url: '/api/b24/task-seen', payload });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/tracker/task-seen',
+      payload,
+    });
     assert.equal(response.statusCode, 400, JSON.stringify(payload).slice(0, 60));
     assert.equal(response.json().error, 'bad_request');
   }
@@ -166,7 +172,7 @@ test('SEEN-API-06: кривое тело получает стабильный 4
 test('SEEN-API-07: ошибка B24 identity имеет отдельный безопасный 503-контракт', async (t) => {
   const secret = 'private B24 login failure';
   const { app } = await fixture(t, { identityError: new Error(secret) });
-  const response = await app.inject({ method: 'GET', url: '/api/b24/task-seen' });
+  const response = await app.inject({ method: 'GET', url: '/api/tracker/task-seen' });
 
   assert.equal(response.statusCode, 503);
   assert.equal(response.json().error, 'b24_identity_unavailable');
@@ -177,7 +183,7 @@ test('SEEN-API-07: повреждённое хранилище имеет отд
   const { app, filePath } = await fixture(t);
   await writeFile(filePath, '{"schemaVersion":1', { mode: 0o600 });
 
-  const response = await app.inject({ method: 'GET', url: '/api/b24/task-seen' });
+  const response = await app.inject({ method: 'GET', url: '/api/tracker/task-seen' });
 
   assert.equal(response.statusCode, 503);
   assert.equal(response.json().error, 'task_seen_unavailable');

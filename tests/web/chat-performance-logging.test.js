@@ -59,8 +59,8 @@ test('разбор обычного и потокового JSON и примен
 
   t.after(stop);
   t.mock.method(globalThis, 'fetch', async (url) => {
-    const body = String(url).includes('/api/b24/dashboard') ? { tasks: [] }
-      : String(url).includes('/api/b24/task-seen') ? {
+    const body = String(url).includes('/api/tracker/dashboard') ? { tasks: [] }
+      : String(url).includes('/api/tracker/task-seen') ? {
         scope: 'fixture',
         revision: 1,
         initialized: true,

@@ -67,7 +67,7 @@ export async function driverInstallFixture(t, { root: supplied, bind = true } = 
     pluginsDir: driversDir,
     statePath,
     grigDeskVersion: '1.0.0',
-    reservedIds: ['own', 'b24-stock'],
+    reservedIds: ['own'],
     packagePolicy,
   });
   const leases = [];

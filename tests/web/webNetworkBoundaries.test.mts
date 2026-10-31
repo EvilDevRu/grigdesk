@@ -276,7 +276,7 @@ test('NET-b24-task', async () => {
   server.reply = { id: '42', title: [] };
   await Promise.resolve(store.load('42', true)).catch(() => {});
   assert.equal(store.details['42'], previous, 'неверный title не кешируется');
-  assert.equal(calls.filter((call) => call.url.startsWith('/api/b24/task/')).length, 2);
+  assert.equal(calls.filter((call) => call.url.startsWith('/api/tracker/task/')).length, 2);
 });
 
 test('NET-chat', async () => {

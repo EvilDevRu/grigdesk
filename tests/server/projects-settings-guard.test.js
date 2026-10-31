@@ -29,8 +29,6 @@ async function settingsApp({ prefs, events = [] }) {
     broadcast: (event, data) => events.push({ event, data }),
   });
   await app.register(settingsModule, {
-    credsStore: { publicView: () => ({}), write: () => {} },
-    b24: { invalidate: () => {}, testAuth: async () => ({ ok: true }) },
     prefs,
     factoryDebug: {},
     speechRuntime: undefined,

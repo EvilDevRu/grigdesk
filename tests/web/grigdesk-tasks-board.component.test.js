@@ -8,11 +8,23 @@ import { LOCAL_TASK } from './helpers/grigdesk-task-card.js';
  * Управляемая сеть отвечает списком и проектами, а POST возвращает серверный номер.
  * Реальные store, форма и доска связываются через обычный api, без подмены сохранения в компоненте.
  */
-async function fixture(t, { projects = [{ id: 'beta', title: 'Проект Бета' }], configured = false } = {}) {
+async function fixture(t, {
+  projects = [{ id: 'beta', title: 'Проект Бета' }],
+  configured = false,
+  pending = false,
+} = {}) {
   const rows = [];
   const posts = [];
   const reads = [];
+  const initialRead = Promise.withResolvers();
   let refuse = false;
+
+  if (!pending) {
+    initialRead.resolve();
+  }
+
+  t.after(() => initialRead.resolve());
+
   const api = {
     /**
      * Возвращает независимые снимки списка и проектов, как HTTP-транспорт.
@@ -26,10 +38,12 @@ async function fixture(t, { projects = [{ id: 'beta', title: 'Проект Бе�
       }
 
       if (url === '/api/grigdesk-tasks') {
+        await initialRead.promise;
+
         return {
           tasks: [...rows],
           revision: rows.length,
-          b24Configured: configured
+          trackerConfigured: configured
         };
       }
 
@@ -55,6 +69,12 @@ async function fixture(t, { projects = [{ id: 'beta', title: 'Проект Бе�
     prefix: 'local-board',
     boardError: 'Ошибка B24 → Настройки',
     ownApi: api,
+    componentStubs: {
+      TrackerSettingsDialog: {
+        props: ['open'],
+        template: '<div v-if="open" data-testid="tracker-settings-dialog"></div>',
+      },
+    },
   });
 
   return {
@@ -62,6 +82,7 @@ async function fixture(t, { projects = [{ id: 'beta', title: 'Проект Бе�
     rows,
     posts,
     reads,
+    finishLoading: initialRead.resolve,
     refuse: (value) => {
       refuse = value;
     },
@@ -115,7 +136,7 @@ async function submit(fx) {
 test('LOCAL-BOARD-01: без Б24 форма доступна, сохранённая задача видна и открывается', async (t) => {
   const fx = await fixture(t);
 
-  assert.match(fx.wrapper.text(), /Б24 не подключён/);
+  assert.equal(fx.wrapper.find('.own-tasks .tracker-setup-banner').exists(), true);
   await openForm(fx);
   await fillForm(fx);
   await submit(fx);
@@ -133,12 +154,54 @@ test('LOCAL-BOARD-01: без Б24 форма доступна, сохранён�
   assert.equal(fx.posts.some((entry) => entry.url.endsWith('/analyze')), false);
 });
 
+test('LOCAL-BOARD: баннер без трекера открывает настройки и заменяет отдельную кнопку', async (t) => {
+  const fx = await fixture(t);
+  const banner = fx.wrapper.get('.own-tasks .tracker-setup-banner');
+
+  assert.equal(banner.get('p').text(),
+    'Внешний трекер не подключён — задачи трекера не показываются.');
+  assert.equal(banner.get('button').text(), 'Настроить трекер');
+  assert.equal(banner.get('button').attributes('data-tone'), 'accent');
+  assert.equal(fx.wrapper.findAll('button')
+    .some((button) => button.text() === 'Настройки трекера доски'), false);
+  assert.equal(fx.wrapper.find('[data-testid="tracker-settings-dialog"]').exists(), false);
+  await banner.get('button').trigger('click');
+  await fx.flushPromises();
+  assert.equal(fx.wrapper.find('[data-testid="tracker-settings-dialog"]').exists(), true);
+});
+
+test('LOCAL-BOARD: при загрузке нет баннера, отдельная кнопка открывает настройки', async (t) => {
+  const fx = await fixture(t, { pending: true });
+  const settings = fx.wrapper.findAll('button')
+    .find((button) => button.text() === 'Настройки трекера доски');
+
+  assert.equal(fx.wrapper.find('.tracker-setup-banner').exists(), false);
+  assert.ok(settings, 'Во время загрузки настройки трекера доступны');
+  await settings.trigger('click');
+  await fx.flushPromises();
+  assert.equal(fx.wrapper.find('[data-testid="tracker-settings-dialog"]').exists(), true);
+  fx.finishLoading();
+  await fx.flushPromises();
+  assert.equal(fx.wrapper.find('.tracker-setup-banner').exists(), true);
+  assert.equal(fx.wrapper.findAll('button')
+    .some((button) => button.text() === 'Настройки трекера доски'), false);
+});
+
 test('LOCAL-BOARD-01: ошибка подключённого портала оставляет собственную группу доступной', async (t) => {
   const fx = await fixture(t, { configured: true });
 
   await openForm(fx);
   assert.match(fx.wrapper.text(), /Ошибка B24/);
-  assert.doesNotMatch(fx.wrapper.text(), /Б24 не подключён/);
+  assert.equal(fx.wrapper.find('.tracker-setup-banner').exists(), false);
+  assert.equal(fx.wrapper.findAll('button')
+    .some((button) => button.text() === 'Настройки трекера доски'), true);
+
+  const settings = fx.wrapper.findAll('button')
+    .find((button) => button.text() === 'Настройки трекера доски');
+
+  await settings.trigger('click');
+  await fx.flushPromises();
+  assert.equal(fx.wrapper.find('[data-testid="tracker-settings-dialog"]').exists(), true);
 });
 
 test('LOCAL-BOARD-02: невалидный ввод и отказ сохраняют черновик, оценка не запускается', async (t) => {
@@ -237,7 +300,7 @@ test('LOCAL-BOARD-03: старый GET не откатывает POST, собы�
         return {
           tasks: [second, LOCAL_TASK],
           revision: 2,
-          b24Configured: false
+          trackerConfigured: false
         };
       },
       async post() {
@@ -258,12 +321,12 @@ test('LOCAL-BOARD-03: старый GET не откатывает POST, собы�
   release({
     tasks: [],
     revision: 0,
-    b24Configured: true
+    trackerConfigured: true
   });
   await fx.flushPromises();
   assert.match(fx.wrapper.text(), /Своя задача/);
   assert.match(fx.wrapper.text(), /Задача другой вкладки/);
-  assert.match(fx.wrapper.text(), /Б24 не подключён/);
+  assert.equal(fx.wrapper.find('.own-tasks .tracker-setup-banner').exists(), true);
   assert.equal(peak, 1);
   assert.equal(reads, 2);
 });

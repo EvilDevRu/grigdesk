@@ -24,7 +24,7 @@ import {
   meetingClipRun,
   sweepMeetingClips,
 } from '../../server/src/lib/media/meetingClips.ts';
-import b24Module from '../../server/src/modules/b24/index.ts';
+import trackerModule from '../../server/src/modules/tracker/index.ts';
 import mediaModule, { parseByteRange } from '../../server/src/modules/media/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -313,12 +313,16 @@ test('выключенный плагин не режет, не отдаёт б�
 
 // ── Вложение на портал ──────────────────────────────────────────────────────
 
+/**
+ * Фикстура проверяет разрешение имени клипа перед отправкой задачи трекеру.
+ * Пути файлов остаются под контролем media-декоратора HTTP-модуля.
+ */
 async function buildTaskApp(t, { clipPath }) {
   const created = [];
   const app = Fastify({ logger: false });
   app.decorate('mediaClipPath', clipPath);
-  app.register(b24Module, {
-    b24: { createTask: async (body) => { created.push(body); return { id: 4242 }; } },
+  app.register(trackerModule, {
+    tracker: { createTask: async (body) => { created.push(body); return { id: 4242 }; } },
   });
   await app.ready();
   t.after(() => app.close());
@@ -332,7 +336,7 @@ test('фрагмент уезжает на портал ИМЕНЕМ: путь �
 
   const res = await app.inject({
     method: 'POST',
-    url: '/api/b24/tasks',
+    url: '/api/tracker/tasks',
     payload: {
       title: 'Время забора',
       // Произвольный путь в теле — это «залей на портал что скажу»: ручка грузит файлы
@@ -349,7 +353,7 @@ test('пропавший фрагмент не отменяет постанов
   const { app, created } = await buildTaskApp(t, { clipPath: () => null });
   const res = await app.inject({
     method: 'POST',
-    url: '/api/b24/tasks',
+    url: '/api/tracker/tasks',
     payload: { title: 'Время забора', clips: [`${RUN}/p0-00257-030s.mp4`] },
   });
   assert.equal(res.statusCode, 200);

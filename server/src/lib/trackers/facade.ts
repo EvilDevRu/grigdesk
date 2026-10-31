@@ -74,7 +74,7 @@ export class TrackerFacade {
     const { externalId } = this.selection.read();
 
     if (!externalId) {
-      return Promise.reject(new TrackerError('tracker_unavailable', 'B24 не настроен'));
+      return Promise.reject(new TrackerError('tracker_unavailable', 'Внешний трекер не настроен'));
     }
 
     return this.registry.call(externalId, async (tracker) => {
@@ -108,8 +108,16 @@ export class TrackerFacade {
     }
   }
 
+  /**
+   * Идентичность внешнего пакета нормализуется до строкового пользовательского id.
+   * Пакеты прежней версии с числовым id сохраняют тот же личный scope.
+   */
   accountIdentity(): Promise<TrackerIdentity | null> {
-    return this.invoke((tracker) => tracker.accountIdentity());
+    return this.invoke(async (tracker) => {
+      const identity = await tracker.accountIdentity();
+
+      return identity ? { ...identity, userId: String(identity.userId) } : null;
+    });
   }
 
   testAuth() {

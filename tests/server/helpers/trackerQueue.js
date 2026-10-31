@@ -1,4 +1,4 @@
-import { B24Adapter } from '../../../server/src/adapters/b24.ts';
+import { TrackerFacade } from '../../../server/src/lib/trackers/facade.ts';
 import { TrackerRegistry } from '../../../server/src/lib/trackers/registry.ts';
 import { createSerialQueue } from '../../../server/src/lib/trackers/serialQueue.ts';
 import { TrackerSettingsStore } from '../../../server/src/lib/trackers/settingsStore.ts';
@@ -6,16 +6,22 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { customClientModule, customDriverModule } from './trackerCustomPackage.js';
+import { customClientModule, customDriverModule } from './trackerPackage.js';
 
 /**
  * Барьер проходит через настоящий фасад, registry и host.serial кастомного пакета.
  * Подменены только сетевые методы клиента; очередь и допуск остаются продуктовыми.
  */
 export async function legacyQueueAdapter(operation, t) {
+  const clientModule = await customClientModule(t);
+
+  if (!clientModule) {
+    return null;
+  }
+
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-tracker-queue-'));
-  const { B24Client } = await customClientModule();
-  const { default: createCustomTracker } = await customDriverModule();
+  const { B24Client } = clientModule;
+  const { default: createCustomTracker } = await customDriverModule(t);
   const host = {
     credentials: { read: () => ({
       baseUrl: 'https://portal.example.test',
@@ -28,7 +34,9 @@ export async function legacyQueueAdapter(operation, t) {
     logger: { info: () => {}, warn: () => {} },
   };
   const registry = new TrackerRegistry({ directory: path.join(root, 'drivers'), host: () => host });
-  const selection = new TrackerSettingsStore(path.join(root, 'selection.json'), true);
+  const selection = new TrackerSettingsStore(path.join(root, 'selection.json'));
+
+  selection.write('grigdesk-b24-discript');
 
   t.after(async () => {
     await registry.close();
@@ -43,9 +51,9 @@ export async function legacyQueueAdapter(operation, t) {
   t.mock.method(B24Client.prototype, 'raw', async () => ({ text: async () => '' }));
 
   registry.register(createCustomTracker(host), 'Кастомный Б24');
-  await registry.activate('b24-custom');
+  await registry.activate('grigdesk-b24-discript');
 
-  const adapter = new B24Adapter({ registry, selection });
+  const adapter = new TrackerFacade({ registry, selection });
 
   // Проекция сохраняет прежние маркеры результата после перехода dashboard на объект DTO.
   // Она выполняется после реального вызова фасада, а не заменяет работу общей очереди.

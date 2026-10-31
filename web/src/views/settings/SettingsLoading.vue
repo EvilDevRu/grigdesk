@@ -21,15 +21,11 @@
     <div v-else :class="['settings-loading', { split: pageId === 'agents.providers' }]">
       <UiSkeletonLayout v-if="pageId === 'agents.providers'" layout="list" />
       <div>
-        <div v-if="pageId === 'connections.b24'" class="connection-intro">
-          <UiSkeleton width="60%" height="21px" />
-          <UiSkeleton shape="block" height="38px" />
-        </div>
         <div v-if="pageId === 'system.processes' || area === 'processes'" class="facts">
           <UiSkeleton v-for="i in 3" :key="i" shape="block" />
         </div>
         <UiSkeletonLayout :layout="pageId === 'system.processes' ? 'list' : 'form'" :header="false"
-          :rows="pageId === 'connections.b24' ? 3 : 4" />
+          :rows="4" />
       </div>
     </div>
   </UiLoadingState>
@@ -59,11 +55,6 @@ withDefaults(defineProps<{
 .settings-loading { min-width: 0; }
 .split { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; }
 .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
-.connection-intro {
-  display: grid;
-  gap: 12px;
-  margin-bottom: 12px;
-}
 .catalog-loading {
   container: loading-plugin-catalog / inline-size;
   display: grid;

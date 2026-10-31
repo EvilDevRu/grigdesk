@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import { TrackerError } from '../../lib/trackers/contract.ts';
+import { readDriverSources } from '../../lib/trackers/driverSources.ts';
 import type { TrackerRuntime } from '../../lib/trackers/runtime.ts';
 import { createSerialQueue } from '../../lib/trackers/serialQueue.ts';
 import installRoutes from './installRoutes.ts';
@@ -11,7 +12,10 @@ import installRoutes from './installRoutes.ts';
  * Каталог содержит только описания и признаки готовности, никогда credentials.
  * Выбор защищён сессией, Origin, JSON и сравнением поколения перед записью.
  */
-async function trackersModule(app: FastifyInstance, options: { runtime: TrackerRuntime }) {
+async function trackersModule(app: FastifyInstance, options: {
+  runtime: TrackerRuntime;
+  driverSourcesPath: string;
+}) {
   const { runtime } = options;
   const serial = createSerialQueue();
   const publicSettings = () => {
@@ -29,6 +33,9 @@ async function trackersModule(app: FastifyInstance, options: { runtime: TrackerR
   };
 
   app.get('/api/trackers', async () => runtime.catalog());
+  app.get('/api/trackers/sources', async () => ({
+    sources: await readDriverSources(options.driverSourcesPath, app.log),
+  }));
   app.get('/api/trackers/settings', async () => publicSettings());
   app.post('/api/trackers/settings', async (request, reply) => {
     if (request.authKind !== 'session') {
@@ -65,7 +72,7 @@ async function trackersModule(app: FastifyInstance, options: { runtime: TrackerR
         const catalog = runtime.registry.descriptors();
 
         if (body.externalId === 'own' || (body.externalId !== null
-          && !catalog.some((entry) => entry.id === body.externalId))) {
+          && !catalog.some((entry) => entry.id === body.externalId && !entry.deleted))) {
           throw new TrackerError('invalid_request', 'Неизвестный внешний драйвер');
         }
 

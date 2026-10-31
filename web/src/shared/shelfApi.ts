@@ -1,6 +1,6 @@
 import { api } from './apiClient.ts';
-import { parseShelfEntrySnapshot, parseShelfState } from '../../../shared/b24/shelfContracts.ts';
-import type { ShelfPutInput, ShelfReason, ShelfState } from '../../../shared/b24/shelfContracts.ts';
+import { parseShelfEntrySnapshot, parseShelfState } from '../../../shared/trackers/shelfContracts.ts';
+import type { ShelfPutInput, ShelfReason, ShelfState } from '../../../shared/trackers/shelfContracts.ts';
 
 // Снимок собирает решатель полки из живых источников, поэтому до проверки контрактом он
 // остаётся сырым: сервер такой же снимок проверяет у себя и отказывает по нему.
@@ -12,7 +12,7 @@ export interface ShelfPutRequest {
 }
 
 function shelfUrl(taskId: string): string {
-  return `/api/b24/task-shelf/${encodeURIComponent(taskId)}`;
+  return `/api/tracker/task-shelf/${encodeURIComponent(taskId)}`;
 }
 
 /**
@@ -22,7 +22,7 @@ function shelfUrl(taskId: string): string {
  */
 export const shelfApi = {
   async list(): Promise<ShelfState> {
-    const value: unknown = await api.get('/api/b24/task-shelf');
+    const value: unknown = await api.get('/api/tracker/task-shelf');
 
     return parseShelfState(value);
   },

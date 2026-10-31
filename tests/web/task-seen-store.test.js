@@ -144,7 +144,7 @@ test('SEEN-WEB-06: markSeen отмечает задачу и не шлёт уж�
   };
 
   assert.equal(await store.markSeen([42]), true);
-  assert.deepEqual(sent, [['/api/b24/task-seen', { taskIds: ['42'], baseline: false }]]);
+  assert.deepEqual(sent, [['/api/tracker/task-seen', { taskIds: ['42'], baseline: false }]]);
   assert.equal(store.isSeen('42'), true);
 
   // Открытие уже просмотренной задачи случается постоянно — сеть тут ни при чём.

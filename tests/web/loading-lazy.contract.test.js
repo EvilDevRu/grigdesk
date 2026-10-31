@@ -26,7 +26,6 @@ const keys = [
     'automation.arbiter',
     'agents.models',
     'connections.devices',
-    'connections.b24',
     'connections.mobile',
     'connections.ssh',
     'connections.db',

@@ -4,16 +4,23 @@ import test from 'node:test';
 
 import { selectTracker, trackerFixture, writeTracker } from './helpers/trackerFixture.js';
 
+import { copyStockPackage } from './helpers/trackerPackage.js';
+
 const SECRET = 'fixture-access-token-must-stay-server-side';
 
 test('TRACKER-SECRETS-01: settings требуют сессию, secret не возвращается и лежит mode0600', async (t) => {
-  const fixture = await trackerFixture(t, { legacy: true });
+  const fixture = await trackerFixture(t, { setup: copyStockPackage });
+
+  if (!fixture) {
+    return;
+  }
+
   const denied = await fixture.app.inject('/api/trackers/settings');
 
   assert.equal(denied.statusCode, 401);
 
-  await selectTracker(fixture, 'b24-stock', {
-    'b24-stock': { baseUrl: 'https://cloud.fixture', accessToken: SECRET },
+  await selectTracker(fixture, 'grigdesk-b24', {
+    'grigdesk-b24': { baseUrl: 'https://cloud.fixture', accessToken: SECRET },
   });
 
   for (const url of ['/api/trackers', '/api/trackers/settings', '/api/driver-installs/jobs/current']) {
@@ -31,7 +38,7 @@ test('TRACKER-SECRETS-01: settings требуют сессию, secret не во
   assert.equal(settings.includes(SECRET), false);
   assert.equal(fixture.logs.join('').includes(SECRET), false);
   assert.equal((await stat(fixture.config.trackerCredentialsPath)).mode & 0o777, 0o600);
-  await selectTracker(fixture, 'b24-stock', { 'b24-stock': { accessToken: '' } });
+  await selectTracker(fixture, 'grigdesk-b24', { 'grigdesk-b24': { accessToken: '' } });
   assert.ok((await readFile(fixture.config.trackerCredentialsPath, 'utf8')).includes(SECRET));
 });
 

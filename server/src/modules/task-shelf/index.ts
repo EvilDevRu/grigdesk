@@ -81,12 +81,12 @@ async function taskShelfModule(
     }
   };
 
-  fastify.get<TaskShelfRoute>('/api/b24/task-shelf', run(() => shelf.list()));
-  fastify.put<TaskShelfRoute>('/api/b24/task-shelf/:taskId', run((request) => {
+  fastify.get<TaskShelfRoute>('/api/tracker/task-shelf', run(() => shelf.list()));
+  fastify.put<TaskShelfRoute>('/api/tracker/task-shelf/:taskId', run((request) => {
     const taskId = normalizeShelfTaskId(request.params.taskId);
     return shelf.put(taskId, request.body);
   }, { mutation: true }));
-  fastify.delete<TaskShelfRoute>('/api/b24/task-shelf/:taskId', run((request) => {
+  fastify.delete<TaskShelfRoute>('/api/tracker/task-shelf/:taskId', run((request) => {
     const taskId = normalizeShelfTaskId(request.params.taskId);
     return shelf.remove(taskId);
   }, { mutation: true }));

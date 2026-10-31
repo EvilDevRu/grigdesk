@@ -199,11 +199,12 @@ async function fixture(t) {
   adapter.getTaskGraph = async () => graph;
 
   const app = Fastify({ logger: false });
+
   await app.register(factoryModule, {
     factoryState: adapter,
     config,
     prefs: { read: () => ({}) },
-    b24: null,
+    tracker: null,
     analyzer: { readClarifications: async () => null, readOpenQuestions: async () => null },
   });
   await app.ready();

@@ -17,7 +17,7 @@ test('пакет ответов хранится в единственном mar
   const analyzer = new Analyzer({
     config: { analysisDir: dir },
     claudeAuth: null,
-    b24: null,
+    tracker: null,
     factoryState: {},
     log: null,
   });
@@ -76,7 +76,7 @@ test('клиентский абсолютный путь вложения не �
   const analyzer = new Analyzer({
     config: { analysisDir: dir },
     claudeAuth: null,
-    b24: null,
+    tracker: null,
     factoryState: {},
     log: null,
   });
@@ -141,10 +141,11 @@ test('GET уточнений возвращает server-owned actor и status �
     `<!-- grigdesk-clarification:v1 ${marker} -->`,
     '',
   ].join('\n'));
+
   const analyzer = new Analyzer({
     config: { analysisDir: dir },
     claudeAuth: null,
-    b24: null,
+    tracker: null,
     factoryState: {},
     log: null,
   });
@@ -169,7 +170,7 @@ test('выбор доезжает до записи, а чужой вопрос 
   const analyzer = new Analyzer({
     config: { analysisDir: dir },
     claudeAuth: null,
-    b24: null,
+    tracker: null,
     factoryState: {},
     log: null,
   });
@@ -228,7 +229,7 @@ test('ответ выбором варианта виден в markdown вопр
   const analyzer = new Analyzer({
     config: { analysisDir: dir },
     claudeAuth: null,
-    b24: null,
+    tracker: null,
     factoryState: {},
     log: null,
   });
@@ -273,7 +274,7 @@ test('human_required арбитра остаётся видимым требов
   const analyzer = new Analyzer({
     config: { analysisDir: dir },
     claudeAuth: null,
-    b24: null,
+    tracker: null,
     factoryState: {},
     log: null,
   });
@@ -327,7 +328,7 @@ test('ответ арбитра со старым именем читается 
   const analyzer = new Analyzer({
     config: { analysisDir: dir },
     claudeAuth: null,
-    b24: null,
+    tracker: null,
     factoryState: {},
     log: null,
   });

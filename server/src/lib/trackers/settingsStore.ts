@@ -11,9 +11,9 @@ export interface TrackerSelection {
 export class TrackerSettingsStore {
   private value: TrackerSelection;
 
-  constructor(privateFile: string, legacyConfigured: boolean) {
+  constructor(privateFile: string) {
     this.file = privateFile;
-    this.value = { externalId: legacyConfigured ? 'b24-custom' : null, revision: 0 };
+    this.value = { externalId: null, revision: 0 };
 
     try {
       const parsed = JSON.parse(fs.readFileSync(privateFile, 'utf8')) as TrackerSelection;

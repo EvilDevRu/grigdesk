@@ -1,11 +1,43 @@
 import { isRecord } from '../../../shared/lib/objects.ts';
-import { decodeInstallChecks, decodeInstallJob } from './pluginInstallApi.ts';
+import { decodeInstallChecks, decodeInstallJob, PluginInstallProtocolError } from './pluginInstallApi.ts';
 import type { PluginInstallInfo, PluginInstallJob } from '../../../shared/plugins/pluginInstallContracts.ts';
 
 export type DriverInstallJob = Omit<PluginInstallJob, 'pluginId'> & {
   driverId: string | null;
   payloadDigest: string | null;
 };
+
+/**
+ * Ответ удаления подтверждает конкретный id, а не прежнюю job установки.
+ * Флаг рестарта остаётся явным серверным фактом и проверяется до смены UI.
+ */
+export function decodeDriverRemoval(raw: unknown): { id: string; restartRequired: boolean } {
+  if (!isRecord(raw) || typeof raw.id !== 'string' || typeof raw.restartRequired !== 'boolean') {
+    throw new PluginInstallProtocolError();
+  }
+
+  return { id: raw.id, restartRequired: raw.restartRequired };
+}
+
+/**
+ * Каталог содержит только ярлыки HTTP(S) репозиториев, без ожидаемого id или версии.
+ * Проверенный URL позволяет диалогу безопасно показать домен без сетевого обращения.
+ */
+export function decodeDriverSources(raw: unknown): { title: string; url: string }[] {
+  if (!isRecord(raw) || !Array.isArray(raw.sources)) {
+    throw new PluginInstallProtocolError();
+  }
+
+  return raw.sources.map((source) => {
+    if (!isRecord(source) || typeof source.title !== 'string' || !source.title.trim()
+      || typeof source.url !== 'string' || !URL.canParse(source.url)
+      || !['http:', 'https:'].includes(new URL(source.url).protocol)) {
+      throw new PluginInstallProtocolError();
+    }
+
+    return { title: source.title, url: source.url };
+  });
+}
 
 /**
  * Механизм job общий, имя внешнего ресурса остаётся драйверным.

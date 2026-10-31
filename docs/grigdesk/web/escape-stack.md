@@ -8,7 +8,7 @@
 - `PipelineView` численно сопоставляет `task` карточки с `id` из `board.data.tasks` и отдельно
   от времени работы узлов показывает состояние B24-таймера. Идущий таймер дотикивается через
   `liveTimerSec(task, now)` общим секундным тиком страницы. Источник — уже загруженный снимок
-  `GET /api/b24/dashboard` с `timerRunning`/`timerStartedAt`: отдельного запроса и нового
+  `GET /api/tracker/dashboard` с `timerRunning`/`timerStartedAt`: отдельного запроса и нового
   polling нет, а для отсутствующей в снимке задачи статус не показывается.
 
 Источник до переноса: docs/grigdesk/architecture.md § Escape координирует единый typed stack.

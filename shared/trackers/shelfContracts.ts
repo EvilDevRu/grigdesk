@@ -73,7 +73,7 @@ const pipelineSnapshot = objectOf({
   gate: nullable(text),
 });
 
-const b24Snapshot = objectOf({
+const trackerSnapshot = objectOf({
   present: boolean,
   status: nullable(text),
   statusKind: nullable(text),
@@ -83,7 +83,7 @@ const b24Snapshot = objectOf({
 const entrySnapshot = objectOf({
   analysis: nullable(analysisSnapshot),
   pipeline: nullable(pipelineSnapshot),
-  b24: nullable(b24Snapshot),
+  b24: nullable(trackerSnapshot),
 });
 
 const shelfEntry = objectOf({
@@ -104,7 +104,7 @@ export type ShelfReason = ReturnType<typeof reason>;
 export type ShelfAnalysisState = ReturnType<typeof analysisState>;
 export type ShelfAnalysisSnapshot = ReturnType<typeof analysisSnapshot>;
 export type ShelfPipelineSnapshot = ReturnType<typeof pipelineSnapshot>;
-export type ShelfB24Snapshot = ReturnType<typeof b24Snapshot>;
+export type ShelfTrackerSnapshot = ReturnType<typeof trackerSnapshot>;
 export type ShelfEntrySnapshot = ReturnType<typeof entrySnapshot>;
 export type ShelfEntry = ReturnType<typeof shelfEntry>;
 export type ShelfState = ReturnType<typeof shelfState>;
@@ -118,10 +118,18 @@ export interface ShelfPutInput {
   createIfMissing: boolean;
 }
 
+/**
+ * Полный снимок полки проверяется на сетевой границе до чтения его полей.
+ * Схема общая для сервера и интерфейса, имена сохранённых данных не меняются.
+ */
 export function parseShelfState(value: unknown): ShelfState {
   return shelfState(value, 'shelf');
 }
 
+/**
+ * Снимок записи проверяется одинаково при получении и сохранении полки.
+ * Неверные данные отвергаются до изменения server-confirmed состояния.
+ */
 export function parseShelfEntrySnapshot(value: unknown): ShelfEntrySnapshot {
   return entrySnapshot(value, 'shelfSnapshot');
 }

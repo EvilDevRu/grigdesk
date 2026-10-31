@@ -32,7 +32,6 @@ export const SETTINGS_PAGE_COMPONENTS: Record<string, Component> = {
   'automation.arbiter': asyncView(() => import('./pages/PreferencesPage.vue'), loading('automation.arbiter')),
   'agents.models': asyncView(() => import('./pages/PreferencesPage.vue'), loading('agents.models')),
   'connections.devices': asyncView(() => import('./pages/DevicesPage.vue'), loading('connections.devices')),
-  'connections.b24': asyncView(() => import('./pages/ConnectionsPage.vue'), loading('connections.b24')),
   'connections.mobile': asyncView(() => import('./pages/DevicesPage.vue'), loading('connections.mobile')),
   'system.startup': asyncView(() => import('./pages/SystemPage.vue'), loading('system.startup')),
   'system.updates': asyncView(() => import('./pages/SystemPage.vue'), loading('system.updates')),

@@ -63,13 +63,23 @@ const PLAN_TASKS = [
 /** Роутер api раздела: ростер и проекты портала плюс подставные ответы. */
 function fakeApi({ users = [], groups = [], job = DONE_JOB, storage = null, post = async () => ({ id: 1234 }) } = {}) {
   const calls = [];
+
   return {
     calls,
     posted: (url) => calls.filter(([method, target]) => method === 'POST' && target === url).map(([, , body]) => body),
+    /**
+     * Наблюдаемый API отвечает справочниками выбранного трекера и текущими данными видео.
+     * Остальные запросы остаются явными ошибками изолированной фикстуры.
+     */
     async get(url) {
       calls.push(['GET', url]);
-      if (url.endsWith('/api/b24/users')) return { users };
-      if (url.endsWith('/api/b24/groups')) return { groups };
+
+      if (url.endsWith('/api/tracker/users')) {
+        return { users };
+      }
+      if (url.endsWith('/api/tracker/groups')) {
+        return { groups };
+      }
       if (url.endsWith('/api/media/doctor')) return { ok: true, storage };
       if (url.startsWith('/api/media/ingest/')) return job;
       return {};
@@ -437,7 +447,7 @@ test('задача уезжает с исполнителем и проекто�
   await view.button('Поставить все').trigger('click');
   await view.run();
 
-  const posted = api.posted('/api/b24/tasks');
+  const posted = api.posted('/api/tracker/tasks');
   assert.equal(posted.length, 2);
   assert.deepEqual(posted[0], {
     title: 'Первая', description: '', createdById: 43, responsibleId: 42, groupId: 7, priority: 2,
@@ -488,7 +498,8 @@ test('постановщик выбирается отдельно от испо
 
   await view.button('Поставить').trigger('click');
   await view.run();
-  const [body] = api.posted('/api/b24/tasks');
+
+  const [body] = api.posted('/api/tracker/tasks');
   assert.equal(body.createdById, 43);
   assert.equal(body.responsibleId, null);
 });
@@ -515,7 +526,7 @@ test('у каждой задачи своя кнопка, и она ставит
   await draftButton(drafts[0]).trigger('click');
   await view.run();
 
-  const posted = api.posted('/api/b24/tasks');
+  const posted = api.posted('/api/tracker/tasks');
   assert.equal(posted.length, 1, 'соседний черновик уехать не имеет права');
   assert.equal(posted[0].title, 'Нужная');
 
@@ -722,7 +733,7 @@ test('кадр виден в черновике до постановки и у�
 
   await draftButton(view.wrapper.find('.draft')).trigger('click');
   await view.run();
-  assert.deepEqual(api.posted('/api/b24/tasks')[0].frames, ['0123456789abcdef/p0-00272s.jpg']);
+  assert.deepEqual(api.posted('/api/tracker/tasks')[0].frames, ['0123456789abcdef/p0-00272s.jpg']);
 });
 
 test('«не прикладывать» снимает кадр с задачи, но оставляет его на экране', async (t) => {
@@ -739,7 +750,7 @@ test('«не прикладывать» снимает кадр с задачи,
 
   await draftButton(view.wrapper.find('.draft')).trigger('click');
   await view.run();
-  assert.deepEqual(api.posted('/api/b24/tasks')[0].frames, [], 'отказ доезжает до портала');
+  assert.deepEqual(api.posted('/api/tracker/tasks')[0].frames, [], 'отказ доезжает до портала');
 });
 
 test('без кадра черновик выглядит как раньше и ничего не обещает', async (t) => {
@@ -751,7 +762,7 @@ test('без кадра черновик выглядит как раньше и
   assert.equal(view.wrapper.find('.shot').exists(), false);
   await draftButton(view.wrapper.find('.draft')).trigger('click');
   await view.run();
-  assert.deepEqual(api.posted('/api/b24/tasks')[0].frames, []);
+  assert.deepEqual(api.posted('/api/tracker/tasks')[0].frames, []);
 });
 
 test('запись видна в диалоге независимо от регистра расширения', async (t) => {
@@ -848,8 +859,8 @@ test('фрагмент уезжает к задаче именем, а отка�
 
   await draft.findAll('button').find((b) => b.text().includes('Поставить')).trigger('click');
   await view.run();
-  assert.deepEqual(api.posted('/api/b24/tasks')[0].clips, [], 'отказ снимает вложение');
-  assert.deepEqual(api.posted('/api/b24/tasks')[0].frames, ['0123456789abcdef/p0-00271s.jpg']);
+  assert.deepEqual(api.posted('/api/tracker/tasks')[0].clips, [], 'отказ снимает вложение');
+  assert.deepEqual(api.posted('/api/tracker/tasks')[0].frames, ['0123456789abcdef/p0-00271s.jpg']);
 });
 
 test('окно фрагмента расширяется кнопкой — единственная ручка у фиксированного куска', async (t) => {
@@ -870,7 +881,7 @@ test('запись без видеодорожки оставляет задач
 
   await view.wrapper.findAll('button').find((b) => b.text().includes('Поставить')).trigger('click');
   await view.run();
-  assert.deepEqual(api.posted('/api/b24/tasks')[0].clips, []);
+  assert.deepEqual(api.posted('/api/tracker/tasks')[0].clips, []);
 });
 
 test('кадр и фрагмент открываются просмотрщиком GrigDesk, а не новой вкладкой', async (t) => {

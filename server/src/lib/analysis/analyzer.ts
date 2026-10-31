@@ -60,7 +60,7 @@ export interface QueueResult {
 export interface AnalyzerOptions {
   config: AnalyzerConfig;
   claudeAuth?: unknown;
-  b24?: unknown;
+  tracker?: unknown;
   factoryState?: unknown;
   prefs?: unknown;
   log?: unknown;
@@ -263,7 +263,7 @@ export class Analyzer {
 
   claudeAuth: any;
 
-  b24: any;
+  tracker: any;
 
   factoryState: any;
 
@@ -308,12 +308,12 @@ export class Analyzer {
   onAnalyzed?: ((id: string) => unknown) | null;
 
   constructor({
-    config, claudeAuth, b24, factoryState, prefs, log, discussion,
+    config, claudeAuth, tracker, factoryState, prefs, log, discussion,
     pluginEnabled, pluginSettings, providerRegistry, executorFor,
   }: AnalyzerOptions) {
     this.config = config;
     this.claudeAuth = claudeAuth;
-    this.b24 = b24;
+    this.tracker = tracker;
     this.factoryState = factoryState;
     this.prefs = prefs;
     this.log = log;
@@ -1102,10 +1102,11 @@ export class Analyzer {
       };
     }
 
-    const detail = await this.b24.taskDetail(id);
+    const detail = await this.tracker.taskDetail(id);
     let comments = [];
+
     try {
-      const page = await this.b24.taskPageData(id);
+      const page = await this.tracker.taskPageData(id);
       comments = (page.comments || []).filter((c: any) => !c.isSystem && c.text);
     } catch (e) {
       this.log?.warn(

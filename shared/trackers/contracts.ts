@@ -67,6 +67,7 @@ export interface TrackerDescriptor {
   capabilities: TrackerCapabilities;
   schema: TrackerSettingsSchema;
   reason?: string;
+  deleted?: boolean;
 }
 
 export interface TrackerCatalog {

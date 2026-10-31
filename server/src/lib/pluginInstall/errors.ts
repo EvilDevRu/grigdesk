@@ -156,6 +156,10 @@ export const PLUGIN_INSTALL_ERRORS: Record<string, { status: number; message: st
     status: 404,
     message: "Плагин установлен вручную и не связан с источником.",
   },
+  package_not_found: {
+    status: 404,
+    message: 'Установленный пакет не найден.',
+  },
   no_previous: {
     status: 409,
     message: "Прежней версии для отката нет.",

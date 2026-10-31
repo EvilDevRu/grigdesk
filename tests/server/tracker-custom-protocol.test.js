@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { startHttpFixture } from '../b24/helpers/httpFixture.mts';
 import { trackerFixture } from './helpers/trackerFixture.js';
-import { copyCustomPackage, customClientModule } from './helpers/trackerCustomPackage.js';
+import { copyCustomPackage, customClientModule } from './helpers/trackerPackage.js';
 
 const charts = Object.fromEntries(['day', 'week', 'month'].map((period) => [period, {
   labels: [`Период ${period}`],
@@ -104,12 +104,18 @@ async function customPortal(t, { emptyChart = false } = {}) {
 }
 
 test('CUSTOM-PROTOCOL-01: login, page, upload, create CSRF, comment, timer, complete и renew', async (t) => {
+  const clientModule = await customClientModule(t);
+
+  if (!clientModule) {
+    return;
+  }
+
   const portal = await customPortal(t);
   const root = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-custom-client-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
 
-  const { B24Client } = await customClientModule();
+  const { B24Client } = clientModule;
   const client = new B24Client({
     baseUrl: portal.baseUrl,
     login: 'fixture-user',
@@ -154,18 +160,31 @@ for (const emptyChart of [false, true]) {
   test(`CUSTOM-WIDGET-01: completed_tasks и все периоды, emptyChart=${emptyChart}`, async (t) => {
     const portal = await customPortal(t, { emptyChart });
     const fixture = await trackerFixture(t, {
-      legacy: true,
-      setup: async (config) => {
-        await writeFile(config.b24CredsPath, JSON.stringify({
-          baseUrl: portal.baseUrl,
-          login: 'fixture-user',
-          password: 'fixture-password',
-        }));
+      setup: async (config, context) => {
+        if (!await copyCustomPackage(config, context)) {
+          return false;
+        }
 
-        await copyCustomPackage(config);
+        await mkdir(path.dirname(config.trackerCredentialsPath), { recursive: true });
+        await writeFile(config.trackerCredentialsPath, JSON.stringify({
+          'grigdesk-b24-discript': {
+            baseUrl: portal.baseUrl,
+            login: 'fixture-user',
+            password: 'fixture-password',
+          },
+        }));
+        await writeFile(config.trackerSettingsPath, JSON.stringify({
+          externalId: 'grigdesk-b24-discript',
+          revision: 0,
+        }));
       },
     });
-    const snapshot = await fixture.b24.getDashboard();
+
+    if (!fixture) {
+      return;
+    }
+
+    const snapshot = await fixture.tracker.getDashboard();
 
     assert.equal(snapshot.month.completedTasks, 17);
     assert.ok(Array.isArray(snapshot.widgets), 'Dashboard драйвера содержит widgets');

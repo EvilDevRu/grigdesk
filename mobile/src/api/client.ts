@@ -2,8 +2,8 @@ import { decodeContract } from './contract.ts';
 import type {
   Accepted,
   AppUpdate,
-  B24Task,
-  B24Tasks,
+  TrackerTask,
+  TrackerTasks,
   Chat,
   ChatOptions,
   ChatResult,
@@ -420,15 +420,15 @@ export class ApiClient {
     });
   }
 
-  getB24Tasks(cursor?: string) {
-    return this.call<B24Tasks>('b24-tasks', 'GET', '/api/mobile/v1/b24/tasks' + query({ cursor }));
+  getTrackerTasks(cursor?: string) {
+    return this.call<TrackerTasks>('tracker-tasks', 'GET', '/api/mobile/v1/tracker/tasks' + query({ cursor }));
   }
 
-  getB24Task(id: string) {
-    return this.call<B24Task>(
-      'b24-task',
+  getTrackerTask(id: string) {
+    return this.call<TrackerTask>(
+      'tracker-task',
       'GET',
-      `/api/mobile/v1/b24/tasks/${encodeURIComponent(id)}`,
+      `/api/mobile/v1/tracker/tasks/${encodeURIComponent(id)}`,
     );
   }
 
@@ -436,15 +436,15 @@ export class ApiClient {
     return this.call<LaunchOptions>(
       'launch-options',
       'GET',
-      `/api/mobile/v1/b24/tasks/${encodeURIComponent(id)}/launch-options`,
+      `/api/mobile/v1/tracker/tasks/${encodeURIComponent(id)}/launch-options`,
     );
   }
 
-  launchB24Task(id: string, optionId: string, actionToken: string) {
+  launchTrackerTask(id: string, optionId: string, actionToken: string) {
     return this.call(
       'launch',
       'POST',
-      `/api/mobile/v1/b24/tasks/${encodeURIComponent(id)}/launch`,
+      `/api/mobile/v1/tracker/tasks/${encodeURIComponent(id)}/launch`,
       {
         optionId,
         actionToken,

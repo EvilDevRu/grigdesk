@@ -1,6 +1,21 @@
 <template>
   <UiDialog :open="open" :title="t('core.trackerInstallGit')" @update:open="emit('update:open', $event)">
     <div class="driver-install">
+      <section class="driver-sources" :aria-label="t('core.trackerOfficialSources')">
+        <h3>{{ t('core.trackerOfficialSources') }}</h3>
+        <p v-if="store.sourcesLoading" role="status">{{ t('core.trackerSourcesLoading') }}</p>
+        <UiInlineMessage v-else-if="store.sourcesError" tone="danger">
+          {{ store.sourcesError }}
+        </UiInlineMessage>
+        <p v-else-if="!store.sources.length">{{ t('core.trackerSourcesEmpty') }}</p>
+        <div class="driver-source-list">
+          <UiButton v-for="source in store.sources" :key="source.url" class="driver-source"
+                    :disabled="store.busy" @click="store.url = source.url">
+            <span>{{ source.title }}</span>
+            <small>{{ sourceDomain(source.url) }}</small>
+          </UiButton>
+        </div>
+      </section>
       <UiField :label="t('core.trackerRepository')">
         <UiInput v-model="store.url" name="url" type="url" :disabled="store.busy" />
       </UiField>
@@ -20,6 +35,9 @@
         </option>
       </UiSelect>
       <UiInlineMessage v-if="store.error" tone="danger">{{ store.error }}</UiInlineMessage>
+      <UiInlineMessage v-if="store.versionsEmpty" tone="danger">
+        {{ t('core.trackerNoVersions') }}
+      </UiInlineMessage>
       <UiInlineMessage v-if="store.previousUnavailable" tone="danger">
         {{ t('core.trackerPreviousUnavailable') }}
       </UiInlineMessage>
@@ -54,9 +72,9 @@
                   :disabled="store.busy" @click="store.cancel()">{{ t('core.trackerCancel') }}</UiButton>
       </template>
       <UiButton :disabled="store.busy" @click="store.check()">{{ t('core.trackerCheckUpdates') }}</UiButton>
-      <template v-if="Object.keys(store.installed).length">
+      <template v-if="Object.keys(installedDrivers).length || otherDrivers.length">
         <h3>{{ t('core.trackerInstalled') }}</h3>
-        <div v-for="(record, id) in store.installed" :key="id">
+        <div v-for="(record, id) in installedDrivers" :key="id" class="driver-package">
           <p>{{ id }} {{ record.version }}</p>
           <p v-if="record.checkError" role="alert">{{ record.checkError.message }}</p>
           <p v-if="record.rollbackError" role="alert">{{ record.rollbackError.message }}</p>
@@ -67,6 +85,19 @@
                     @click="store.rollback(String(id))">
             {{ t('core.trackerRollback') }}
           </UiButton>
+          <UiButton tone="danger" :disabled="store.busy || active || removing || !!store.pendingRollback"
+                    @click="removeDriver(String(id), String(id))">
+            {{ t('core.trackerRemove') }}
+          </UiButton>
+        </div>
+        <div v-for="driver in otherDrivers" :key="driver.id" class="driver-package">
+          <p>{{ driver.name }} {{ driver.version }}</p>
+          <UiInlineMessage v-if="driver.deleted">{{ t('core.trackerDeleted') }}</UiInlineMessage>
+          <UiButton v-else tone="danger"
+                    :disabled="store.busy || active || removing || !!store.pendingRollback"
+                    @click="removeDriver(driver.id, driver.name)">
+            {{ t('core.trackerRemove') }}
+          </UiButton>
         </div>
       </template>
       <UiInlineMessage v-if="store.restartRequired">{{ t('core.trackerRestart') }}</UiInlineMessage>
@@ -75,15 +106,26 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 import { useDriverInstallStore } from '../../stores/driverInstall.ts';
-import { t, UiButton, UiDialog, UiField, UiInlineMessage, UiInput, UiSelect } from '../../ui.ts';
+import { useTrackersStore } from '../../stores/trackers.ts';
+import {
+  confirmDialog, messageRef, t, UiButton, UiDialog, UiField, UiInlineMessage, UiInput, UiSelect,
+} from '../../ui.ts';
 
 defineProps<{ open: boolean }>();
 
 const emit = defineEmits<{ 'update:open': [open: boolean] }>();
 const store = useDriverInstallStore();
+const trackers = useTrackersStore();
+const removing = ref(false);
+// SSE может подтвердить удаление раньше ответа check или при его сетевом отказе.
+// Такая карточка сразу получает tombstone, а не прежние кнопки управляемой установки.
+const installedDrivers = computed(() => Object.fromEntries(Object.entries(store.installed)
+  .filter(([id]) => !trackers.catalog?.drivers.some((driver) => driver.id === id && driver.deleted))));
+const otherDrivers = computed(() => trackers.catalog?.drivers.filter((driver) =>
+  driver.id !== 'own' && !installedDrivers.value[driver.id]) ?? []);
 const active = computed(() => !!store.job && ['running', 'ready', 'applying'].includes(store.job.status));
 const statusLabel = computed(() => store.job ? t(({
   running: 'core.trackerJobRunning',
@@ -102,7 +144,36 @@ const stageLabel = computed(() => store.job?.stage ? t(({
 } as const)[store.job.stage]) : '');
 let timer: ReturnType<typeof setInterval> | null = null;
 
+const sourceDomain = (url: string) => new URL(url).hostname;
+
+/**
+ * Общий диалог подтверждает удаление выбранного пакета и сохраняет реквизиты владельца.
+ * Повторный клик не создаёт второе подтверждение или параллельный запрос удаления.
+ */
+async function removeDriver(id: string, name: string) {
+  if (removing.value || store.busy) {
+    return;
+  }
+
+  removing.value = true;
+
+  try {
+    const accepted = await confirmDialog(messageRef('core.trackerRemoveConfirmation', { name }), {
+      title: messageRef('core.trackerRemoveTitle'),
+      okText: messageRef('core.trackerRemove'),
+      danger: true,
+    });
+
+    if (accepted) {
+      await store.remove(id);
+    }
+  } finally {
+    removing.value = false;
+  }
+}
+
 onMounted(() => {
+  void store.loadSources();
   void store.current();
   timer = setInterval(() => {
     if (store.job && ['running', 'applying'].includes(store.job.status)) {
@@ -119,5 +190,7 @@ onUnmounted(() => {
 
 <style scoped>
 .driver-install { display: grid; gap: 12px; min-width: 0; overflow-wrap: anywhere; }
+.driver-source-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.driver-source small { display: block; color: var(--ink-mid); }
 .digest { word-break: break-all; }
 </style>

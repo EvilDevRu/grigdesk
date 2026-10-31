@@ -1277,8 +1277,8 @@ async function loadEditOptions() {
   editOptionsError.value = null;
 
   const [users, groups] = await Promise.allSettled([
-    api.get('/api/b24/users'),
-    api.get('/api/b24/groups'),
+    api.get('/api/tracker/users'),
+    api.get('/api/tracker/groups'),
   ]);
 
   if (requestId !== editOptionsRequest || !editForm.value) {
@@ -1368,7 +1368,7 @@ async function saveTaskEdit() {
 }
 
 // ── Обсуждение в Telegram: что стоит за ссылками t.me из описания ──
-// Поле `telegram` приходит от GET /api/b24/task/:id (сервер уже применил
+// Поле `telegram` приходит от GET /api/tracker/task/:id (сервер уже применил
 // allowlist и лимиты). Тело задачи оно не трогает — это отдельный блок.
 // Текст цитат — из чужого чата, поэтому только интерполяция: никакого v-html,
 // как у описания. Отказ показываем ровно так, как прислал сервер: у него нет
@@ -1917,7 +1917,7 @@ async function loadComments() {
   comLoading.value = true;
 
   try {
-    const result = decodeTaskComments(await api.get(`/api/b24/task/${id}/comments`, {
+    const result = decodeTaskComments(await api.get(`/api/tracker/task/${id}/comments`, {
       signal: commentsAbort.signal,
     }));
 

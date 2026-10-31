@@ -88,8 +88,8 @@ async function taskSeenModule(
     }
   };
 
-  fastify.get('/api/b24/task-seen', run(() => seen.list()));
-  fastify.post('/api/b24/task-seen', run((request) => {
+  fastify.get('/api/tracker/task-seen', run(() => seen.list()));
+  fastify.post('/api/tracker/task-seen', run((request) => {
     const { taskIds, baseline } = parseMarkBody(request.body);
     return seen.markSeen(taskIds, { baseline });
   }));

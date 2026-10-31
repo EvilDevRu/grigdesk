@@ -12,7 +12,7 @@ test('BM-01: окно карточки просит снимок, а после 
 
   setActivePinia(createPinia());
   t.mock.method(api, 'get', async (path) => {
-    if (path === '/api/b24/task-seen') {
+    if (path === '/api/tracker/task-seen') {
       return {
         scope: 'fixture',
         revision: 1,
@@ -21,7 +21,7 @@ test('BM-01: окно карточки просит снимок, а после 
       };
     }
 
-    if (path === '/api/b24/dashboard') {
+    if (path === '/api/tracker/dashboard') {
       dashboards += 1;
     }
 
@@ -64,12 +64,12 @@ test('BM-02: своё действие во время ожидания сним
   let dashboards = 0;
 
   t.mock.method(api, 'post', async (path) => {
-    assert.equal(path, '/api/b24/task/42/timer/start');
+    assert.equal(path, '/api/tracker/task/42/timer/start');
 
     return {};
   });
   t.mock.method(api, 'get', async (path) => {
-    if (path === '/api/b24/task-seen') {
+    if (path === '/api/tracker/task-seen') {
       return {
         scope: 'fixture',
         revision: 1,
@@ -78,7 +78,7 @@ test('BM-02: своё действие во время ожидания сним
       };
     }
 
-    assert.equal(path, '/api/b24/dashboard');
+    assert.equal(path, '/api/tracker/dashboard');
     dashboards += 1;
 
     return { tasks: [{ id: 42, timerRunning: true }] };
@@ -118,7 +118,7 @@ test('BM-03: HTTP-снимок принимает числовой Unix-стар
   ]]));
 
   t.mock.method(api, 'get', async (path) => {
-    if (path === '/api/b24/task-seen') {
+    if (path === '/api/tracker/task-seen') {
       return {
         scope: 'fixture',
         revision: 1,
@@ -127,7 +127,7 @@ test('BM-03: HTTP-снимок принимает числовой Unix-стар
       };
     }
 
-    assert.equal(path, '/api/b24/dashboard');
+    assert.equal(path, '/api/tracker/dashboard');
 
     return dashboard;
   });

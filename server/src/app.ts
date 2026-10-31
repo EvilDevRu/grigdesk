@@ -41,7 +41,7 @@ import trackersModule from './modules/trackers/index.ts';
 import { SystemAdapter } from './adapters/system.ts';
 import { MediaAdapter } from './adapters/media.ts';
 import { extractSceneFrames } from './lib/media/ingest.ts';
-import { CredsStore } from './lib/b24/credsStore.ts';
+import { TrackerCredentialsStore } from './lib/trackers/credentialsStore.ts';
 import { ClaudeAuthStore } from './lib/claudeAuthStore.ts';
 import { PrefsStore } from './lib/prefsStore.ts';
 import { PluginInstallService } from './lib/pluginInstall/service.ts';
@@ -121,7 +121,7 @@ import staticPlugin from './plugins/static.ts';
 
 import healthModule from './modules/health/index.ts';
 import factoryModule from './modules/factory/index.ts';
-import b24Module from './modules/b24/index.ts';
+import trackerModule from './modules/tracker/index.ts';
 import grigdeskTasksModule from './modules/grigdesk-tasks/index.ts';
 import taskFavoritesModule from './modules/task-favorites/index.ts';
 import taskShelfModule from './modules/task-shelf/index.ts';
@@ -635,7 +635,10 @@ async function build(desktopParent: DesktopParent | null) {
   fastify.addHook('onClose', async () => {
     await sshSessions.closeAll('server_shutdown');
   });
-  const credsStore = new CredsStore({ credsPath: config.b24CredsPath, baseUrl: config.b24BaseUrl });
+
+  const credsStore = new TrackerCredentialsStore({
+    trackerCredentialsPath: config.trackerCredentialsPath,
+  });
   const telegramBindings = new TelegramAccountBindings({
     file: path.join(config.telegramDir, 'account-bindings.json'),
   });
@@ -665,10 +668,13 @@ async function build(desktopParent: DesktopParent | null) {
       await fastify.sse?.broadcast?.('trackers-changed', trackerRuntime.selection.read());
     },
   });
-  const { b24 } = trackerRuntime;
+  const { tracker } = trackerRuntime;
 
   fastify.addHook('onClose', async () => trackerRuntime.close());
-  await fastify.register(trackersModule, { runtime: trackerRuntime });
+  await fastify.register(trackersModule, {
+    runtime: trackerRuntime,
+    driverSourcesPath: config.driverSourcesPath,
+  });
   // Идентичность companion-чата можно создать и для запущенной задачи фабрики, и для
   // существующей задачи Б24 до запуска. Подтвердить её имеют право только эти
   // серверные источники.
@@ -677,9 +683,16 @@ async function build(desktopParent: DesktopParent | null) {
       await factoryState.readRegistry(taskId);
       return true;
     } catch { /* задача законно может существовать только в Б24 до запуска конвейера */ }
-    if (!b24.isConfigured()) return false;
-    try { return Boolean(await b24.taskDetail(taskId)); }
-    catch { return false; }
+
+    if (!tracker.isConfigured()) {
+      return false;
+    }
+
+    try {
+      return Boolean(await tracker.taskDetail(taskId));
+    } catch {
+      return false;
+    }
   };
   const speechRuntime = new SpeechRuntime({
     mediaDir: config.mediaDir,
@@ -799,7 +812,7 @@ async function build(desktopParent: DesktopParent | null) {
     providerSettings: () => (prefs.read().providerSettings || {}) as Record<string, unknown>,
     // Задача портала для стенда задачи: сессией владеет сервер, раздел получает
     // только текст. Портал недоступен — разбор идёт без постановки, а не падает.
-    taskDetails: async (taskId: string) => await b24.taskDetail(taskId) as {
+    taskDetails: async (taskId: string) => await tracker.taskDetail(taskId) as {
       title?: unknown;
       description?: unknown;
     } | null,
@@ -813,7 +826,7 @@ async function build(desktopParent: DesktopParent | null) {
     // Каналы доставки: сессией портала и аккаунтом Telegram владеет сервер, раздел
     // получает их готовыми и вторых не заводит.
     deliveryDeps: {
-      b24,
+      tracker,
       telegramConnected: () => telegramConnection.connection === 'connected',
     },
     // Пределы читаются при каждом обращении: смена настройки действует со следующего
@@ -870,15 +883,10 @@ async function build(desktopParent: DesktopParent | null) {
   });
   const inboxTaskService = new InboxTaskService({
     coordinator: asPort(inboxCoordinator),
-    b24: asPort(b24),
+    tracker: asPort(tracker),
     isEnabled: () => fastify.pluginEnabled('inbox'),
     listProjects: () => listProjects(config, prefs),
-    taskUrlFor: async (taskId) => {
-      const identity = await b24.accountIdentity();
-      if (!identity?.baseUrl || !identity?.userId) return '';
-      const base = String(identity.baseUrl).replace(/\/+$/u, '');
-      return `${base}/company/personal/user/${identity.userId}/tasks/task/view/${taskId}/`;
-    },
+    taskUrlFor: (taskId) => tracker.sourceUrl(taskId),
     attachmentAnalyzer: inboxAttachmentAnalyzer,
     // Читается живьём перед каждой загрузкой: галка в настройках действует
     // на следующую же задачу, без рестарта.
@@ -904,7 +912,7 @@ async function build(desktopParent: DesktopParent | null) {
   const inboxAutoTasks = new InboxAutoTasks({
     coordinator: asPort(inboxCoordinator),
     taskService: inboxTaskService,
-    b24: asPort(b24),
+    tracker: asPort(tracker),
     attachmentAnalyzer: inboxAttachmentAnalyzer,
     modelRef: () => readPluginSettings(fastify, 'inbox').triageModel ?? null,
     isEnabled: () => fastify.pluginEnabled('inbox'),
@@ -920,13 +928,18 @@ async function build(desktopParent: DesktopParent | null) {
   });
 
   const taskFavoritesStore = new TaskFavoritesStore({ filePath: config.taskFavoritesPath });
-  const taskFavorites = new TaskFavoritesService({ store: taskFavoritesStore, b24 });
+  const taskFavorites = new TaskFavoritesService({ store: taskFavoritesStore, tracker });
   const taskShelfStore = new TaskShelfStore({ filePath: config.taskShelfPath });
-  const taskShelf = new TaskShelfService({ store: taskShelfStore, b24 });
+  const taskShelf = new TaskShelfService({ store: taskShelfStore, tracker });
   const taskSeenStore = new TaskSeenStore({ filePath: config.taskSeenPath });
-  const taskSeen = new TaskSeenService({ store: taskSeenStore, b24 });
+  const taskSeen = new TaskSeenService({ store: taskSeenStore, tracker });
   const analyzer = new Analyzer({
-    config, claudeAuth, b24, factoryState, prefs, log: fastify.log,
+    config,
+    claudeAuth,
+    tracker,
+    factoryState,
+    prefs,
+    log: fastify.log,
     // Декоратор появится ниже, вместе с модулем telegram, — поэтому ищем его в
     // момент вызова. Триаж случается много позже `ready()`, так что к тому
     // времени он уже на месте; нет модуля — оценка просто идёт без переписки.
@@ -954,7 +967,7 @@ async function build(desktopParent: DesktopParent | null) {
   // Живёт только в памяти, на диск и в конфиг не попадает, меняется с каждым запуском.
   const internalToken = randomUUID();
 
-  // Токен ЛОКАЛЬНЫХ CLI-потребителей (bin/b24, ship-этап фабрики, скиллы): у них нет ни
+  // Токен ЛОКАЛЬНЫХ CLI-потребителей (bin/tracker, ship-этап фабрики, скиллы): у них нет ни
   // cookie, ни памяти нашего процесса. Файл 0600 на диске машины-мозга — владение файлом
   // эквивалентно владению остальными кредами .state. Стабилен между рестартами:
   // демоны фабрики живут дольше процесса GrigDesk.
@@ -1005,14 +1018,14 @@ async function build(desktopParent: DesktopParent | null) {
     factoryState,
     config,
     prefs,
-    b24: asPort(b24),
+    tracker: asPort(tracker),
     analyzer: asPort(analyzer),
     internalToken,
     arbiterCards,
     arbiterLive,
     arbiterConversations,
   });
-  await fastify.register(b24Module, { b24 });
+  await fastify.register(trackerModule, { tracker });
   await fastify.register(taskFavoritesModule, { favorites: taskFavorites });
   await fastify.register(taskSeenModule, { seen: taskSeen });
   await fastify.register(systemModule, {
@@ -1218,7 +1231,7 @@ async function build(desktopParent: DesktopParent | null) {
   await fastify.register(grigdeskTasksModule, {
     service: trackerRuntime.own,
     config,
-    b24,
+    tracker,
     factoryState,
     projectsService,
   });
@@ -1245,24 +1258,6 @@ async function build(desktopParent: DesktopParent | null) {
   // авторизацию Claude показывает раздел исполнителей, а пути берутся из сервисов.
   // Оба аргумента были мёртвыми, типизация это показала.
   await fastify.register<SettingsModuleOptions>(settingsModule, {
-    credsStore: asPort({
-      publicView: () => credsStore.publicView(),
-      write: (input: Parameters<CredsStore['write']>[0]) => trackerRuntime.writeSettings(
-        trackerRuntime.selection.read().externalId, { 'b24-custom': { ...input } },
-      ),
-    }),
-    b24: asPort({
-      invalidate: async () => {
-        await fastify.sse?.broadcast?.('trackers-changed', trackerRuntime.selection.read());
-      },
-      testAuth: async () => {
-        try {
-          return await trackerRuntime.registry.testAuth('b24-custom');
-        } catch {
-          return { ok: false, error: 'Кастомный драйвер Б24 недоступен' };
-        }
-      },
-    }),
     prefs,
     factoryDebug,
     diagnosticLogging,

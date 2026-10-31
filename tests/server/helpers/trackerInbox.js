@@ -118,7 +118,7 @@ export function inboxConsumerFixture({ b24, prepare = async () => {} }) {
   };
   const service = new InboxTaskService({
     coordinator,
-    b24,
+    tracker: b24,
     listProjects: async () => {
       await prepare();
 

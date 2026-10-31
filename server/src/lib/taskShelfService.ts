@@ -1,12 +1,12 @@
-// Предметный слой полки: scope всегда выводится из текущей портальной сессии,
+// Предметный слой полки: scope всегда выводится из текущей учётной записи трекера,
 // а клиент получает только непрозрачный хеш и полный server-confirmed снимок.
-import { b24AccountScope } from './b24AccountScope.ts';
-import type { B24Identity } from './b24AccountScope.ts';
+import { trackerAccountScope } from './trackers/accountScope.ts';
+import type { TrackerIdentity } from './trackers/accountScope.ts';
 import type { ShelfSnapshot, TaskShelfStore } from './taskShelfStore.ts';
-import type { ShelfState } from '../../../shared/b24/shelfContracts.ts';
+import type { ShelfState } from '../../../shared/trackers/shelfContracts.ts';
 
 export interface TaskShelfIdentitySource {
-  accountIdentity(): Promise<unknown>;
+  accountIdentity(): Promise<TrackerIdentity | null>;
 }
 
 export interface TaskShelfResult extends ShelfState {
@@ -17,7 +17,7 @@ export interface TaskShelfResult extends ShelfState {
 export class TaskShelfIdentityError extends Error {
   code: string;
 
-  constructor(message = 'Не удалось определить B24-пользователя', cause: unknown = null) {
+  constructor(message = 'Не удалось определить пользователя трекера', cause: unknown = null) {
     super(message, cause ? { cause } : undefined);
     this.name = 'TaskShelfIdentityError';
     this.code = 'B24_IDENTITY_UNAVAILABLE';
@@ -40,18 +40,22 @@ function withScope(scope: string, snapshot: ShelfSnapshot): TaskShelfResult {
 export class TaskShelfService {
   store: TaskShelfStore;
 
-  b24: TaskShelfIdentitySource;
+  tracker: TaskShelfIdentitySource;
 
-  constructor({ store, b24 }: { store: TaskShelfStore; b24: TaskShelfIdentitySource }) {
+  constructor({ store, tracker }: { store: TaskShelfStore; tracker: TaskShelfIdentitySource }) {
     this.store = store;
-    this.b24 = b24;
+    this.tracker = tracker;
   }
 
+  /**
+   * Полка вычисляет область из текущей идентичности внешнего драйвера.
+   * Ошибка подключения скрывает детали источника и не подменяет набор пользователя.
+   */
   async _scope(): Promise<string> {
     try {
-      const identity = await this.b24.accountIdentity();
+      const identity = await this.tracker.accountIdentity();
 
-      return b24AccountScope(identity as B24Identity | null);
+      return trackerAccountScope(identity);
     } catch (error) {
       throw new TaskShelfIdentityError(undefined, error);
     }

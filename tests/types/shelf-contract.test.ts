@@ -1,5 +1,5 @@
-import type { ShelfEntry, ShelfState } from '../../shared/b24/shelfContracts.ts';
-import { parseShelfState } from '../../shared/b24/shelfContracts.ts';
+import type { ShelfEntry, ShelfState } from '../../shared/trackers/shelfContracts.ts';
+import { parseShelfState } from '../../shared/trackers/shelfContracts.ts';
 import { shelfApi } from '../../web/src/shared/shelfApi.ts';
 import taskShelfDecision from '../../web/src/shared/taskShelfDecision.ts';
 import type { ShelfRow } from '../../web/src/stores/taskShelf.ts';

@@ -147,7 +147,7 @@ test('раннер пишет в оценку маршрут политики, �
       analysisConcurrency: 1,
     },
     claudeAuth: { env: () => process.env },
-    b24: {
+    tracker: {
       async taskDetail() { return { title: 'Demo | мелочь', description: '' }; },
       async taskPageData() { return { comments: [] }; },
     },

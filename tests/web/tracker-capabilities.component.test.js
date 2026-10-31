@@ -10,7 +10,7 @@ for (const presentation of ['dialog', 'document']) {
   test(`TRACKER-CAPS-01: ${presentation}, stock скрывает unsupported при stale payload`, async (t) => {
     const { wrapper, calls } = await mountTrackerCard(t, {
       presentation,
-      trackerId: 'b24-stock',
+      trackerId: 'grigdesk-b24',
       capabilities: STOCK_CAPS,
     });
 
@@ -27,7 +27,7 @@ for (const presentation of ['dialog', 'document']) {
   test(`TRACKER-CAPS-01: ${presentation}, завершённый stock не предлагает renew`, async (t) => {
     const { wrapper } = await mountTrackerCard(t, {
       presentation,
-      trackerId: 'b24-stock',
+      trackerId: 'grigdesk-b24',
       capabilities: STOCK_CAPS,
       status: 5,
     });
@@ -63,7 +63,7 @@ test('TRACKER-CAPS-01: stock не показывает активный тайм
   });
 
   Object.assign(stores.board().data, {
-    trackerId: 'b24-stock',
+    trackerId: 'grigdesk-b24',
     capabilities: STOCK_CAPS,
     widgets: []
   });
@@ -75,7 +75,7 @@ test('TRACKER-UI-02: поздний detail после trackers-changed не пр
   const card = await mountTrackerCard(t, { detailMode: 'held' });
 
   for (const listener of card.listeners) {
-    listener('trackers-changed', { revision: 2, externalId: 'b24-stock' });
+    listener('trackers-changed', { revision: 2, externalId: 'grigdesk-b24' });
   }
 
   card.heldDetail.resolve({

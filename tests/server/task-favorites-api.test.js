@@ -31,7 +31,7 @@ async function fixture(t, { identity, identityError } = {}) {
     },
   };
   const store = new TaskFavoritesStore({ filePath });
-  const favorites = new TaskFavoritesService({ store, b24 });
+  const favorites = new TaskFavoritesService({ store, tracker: b24 });
   const app = Fastify({ logger: false });
   app.register(taskFavoritesModule, { favorites });
   t.after(() => app.close());
@@ -46,7 +46,7 @@ async function fixture(t, { identity, identityError } = {}) {
 
 test('API-01: GET возвращает server-derived scope и не раскрывает identity', async (t) => {
   const { app, calls } = await fixture(t);
-  const response = await app.inject({ method: 'GET', url: '/api/b24/task-favorites' });
+  const response = await app.inject({ method: 'GET', url: '/api/tracker/task-favorites' });
 
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), {
@@ -62,10 +62,10 @@ test('API-01: GET возвращает server-derived scope и не раскры
 test('API-02/03: PUT и DELETE возвращают канон, одинаковая мутация идемпотентна', async (t) => {
   const { app } = await fixture(t);
 
-  const add = await app.inject({ method: 'PUT', url: '/api/b24/task-favorites/0042' });
-  const repeat = await app.inject({ method: 'PUT', url: '/api/b24/task-favorites/42' });
-  const remove = await app.inject({ method: 'DELETE', url: '/api/b24/task-favorites/42' });
-  const repeatRemove = await app.inject({ method: 'DELETE', url: '/api/b24/task-favorites/42' });
+  const add = await app.inject({ method: 'PUT', url: '/api/tracker/task-favorites/0042' });
+  const repeat = await app.inject({ method: 'PUT', url: '/api/tracker/task-favorites/42' });
+  const remove = await app.inject({ method: 'DELETE', url: '/api/tracker/task-favorites/42' });
+  const repeatRemove = await app.inject({ method: 'DELETE', url: '/api/tracker/task-favorites/42' });
 
   assert.equal(add.statusCode, 200);
   assert.deepEqual(add.json().taskIds, ['42']);
@@ -78,12 +78,14 @@ test('API-02/03: PUT и DELETE возвращают канон, одинаков
 
 test('API-04: смена портала или B24-пользователя создаёт другой scope', async (t) => {
   const { app, setIdentity } = await fixture(t);
-  const first = await app.inject({ method: 'PUT', url: '/api/b24/task-favorites/11' });
+  const first = await app.inject({ method: 'PUT', url: '/api/tracker/task-favorites/11' });
 
   setIdentity({ baseUrl: 'https://other.example.test', userId: 77 });
-  const otherPortal = await app.inject({ method: 'GET', url: '/api/b24/task-favorites' });
+
+  const otherPortal = await app.inject({ method: 'GET', url: '/api/tracker/task-favorites' });
   setIdentity({ baseUrl: 'https://portal.example.test', userId: 78 });
-  const otherUser = await app.inject({ method: 'GET', url: '/api/b24/task-favorites' });
+
+  const otherUser = await app.inject({ method: 'GET', url: '/api/tracker/task-favorites' });
 
   assert.notEqual(first.json().scope, otherPortal.json().scope);
   assert.notEqual(first.json().scope, otherUser.json().scope);
@@ -96,7 +98,7 @@ test('API-05: query и body не позволяют клиенту выбрат�
   const { app } = await fixture(t);
   const response = await app.inject({
     method: 'PUT',
-    url: '/api/b24/task-favorites/9?scope=attacker',
+    url: '/api/tracker/task-favorites/9?scope=attacker',
     payload: { scope: 'attacker', taskIds: ['999'] },
   });
 
@@ -109,7 +111,7 @@ test('API-06: неверный task id получает стабильный 400
   const { app, calls } = await fixture(t);
   const response = await app.inject({
     method: 'PUT',
-    url: '/api/b24/task-favorites/not-a-number',
+    url: '/api/tracker/task-favorites/not-a-number',
   });
 
   assert.equal(response.statusCode, 400);
@@ -123,7 +125,7 @@ test('API-06: неверный task id получает стабильный 400
 test('API-07: ошибка B24 identity имеет отдельный безопасный 503-контракт', async (t) => {
   const secret = 'private B24 login failure';
   const { app } = await fixture(t, { identityError: new Error(secret) });
-  const response = await app.inject({ method: 'GET', url: '/api/b24/task-favorites' });
+  const response = await app.inject({ method: 'GET', url: '/api/tracker/task-favorites' });
 
   assert.equal(response.statusCode, 503);
   assert.equal(response.json().error, 'b24_identity_unavailable');
@@ -134,7 +136,7 @@ test('API-07: повреждённое хранилище имеет отдел�
   const { app, filePath } = await fixture(t);
   await writeFile(filePath, '{"schemaVersion":1', { mode: 0o600 });
 
-  const response = await app.inject({ method: 'GET', url: '/api/b24/task-favorites' });
+  const response = await app.inject({ method: 'GET', url: '/api/tracker/task-favorites' });
 
   assert.equal(response.statusCode, 503);
   assert.equal(response.json().error, 'task_favorites_unavailable');
@@ -143,17 +145,23 @@ test('API-07: повреждённое хранилище имеет отдел�
 
 test('B24 identity кешируется после первого определения и сбрасывается с credentials', async (t) => {
   let discoveries = 0;
-  const { adapter, changeCredentials } = await identityFixture(t, () => {
+  const fixture = await identityFixture(t, () => {
     discoveries += 1;
   });
 
+  if (!fixture) {
+    return;
+  }
+
+  const { adapter, changeCredentials } = fixture;
+
   assert.deepEqual(await adapter.accountIdentity(), {
     baseUrl: 'https://portal.example.test/',
-    userId: 77,
+    userId: '77',
   });
   assert.deepEqual(await adapter.accountIdentity(), {
     baseUrl: 'https://portal.example.test/',
-    userId: 77,
+    userId: '77',
   });
   assert.equal(discoveries, 1);
 

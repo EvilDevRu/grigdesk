@@ -40,7 +40,7 @@ export class TrackerRegistry {
     return [...this.entries.values()].map(({ descriptor, tracker }) => ({
       ...descriptor,
       capabilities: { ...descriptor.capabilities },
-      configured: tracker?.isConfigured() ?? false,
+      configured: !descriptor.deleted && (tracker?.isConfigured() ?? false),
     }));
   }
 
@@ -73,6 +73,10 @@ export class TrackerRegistry {
    */
   unavailable(id: string, reason: string): void {
     const existing = this.entries.get(id);
+
+    if (existing?.descriptor.deleted) {
+      return;
+    }
 
     if (existing?.tracker && !existing.directory) {
       return;
@@ -110,7 +114,7 @@ export class TrackerRegistry {
     const seen = new Map<string, string[]>();
 
     for (const entry of directories) {
-      if (entry.name.startsWith('.') || ['own', 'b24-stock'].includes(entry.name)) {
+      if (entry.name.startsWith('.') || ['own'].includes(entry.name)) {
         continue;
       }
 
@@ -125,11 +129,11 @@ export class TrackerRegistry {
         await validateDriverPackage(directory, {
           expectedId: entry.name,
           version: String(raw.version),
-          reservedIds: new Set(['own', 'b24-stock']),
+          reservedIds: new Set(['own']),
           grigDeskVersion: '1.0.0',
         }, true);
 
-        if (this.entries.get(id)?.loaded) {
+        if (this.entries.get(id)?.loaded || this.entries.get(id)?.descriptor.deleted) {
           continue;
         }
 
@@ -207,12 +211,16 @@ export class TrackerRegistry {
   async activate(id: string): Promise<void> {
     const entry = await this.load(id);
 
+    if (entry.closed) {
+      throw new TrackerError('tracker_busy', 'Драйвер занят изменением подключения', 409);
+    }
+
     this.active.add(id);
     entry.descriptor.status = 'active';
   }
 
   /**
-   * Legacy-форма проверяет именно custom, даже когда на доске выбран другой драйвер.
+   * Проверка реквизитов адресует переданный драйвер независимо от выбора доски.
    * Проверка использует тот же экземпляр, lease и очередь, не активируя второй внешний источник.
    */
   async testAuth(id: string) {
@@ -277,6 +285,37 @@ export class TrackerRegistry {
   }
 
   /**
+   * Удалённый пакет теряет допуск, но сохраняет честную пометку кешированного ESM до рестарта.
+   * Сканирование и смена выбора не должны снова разрешить вызовы старого экземпляра.
+   */
+  deleted(id: string): void {
+    const entry = this.entries.get(id);
+
+    if (!entry) {
+      return;
+    }
+
+    this.active.delete(id);
+    entry.closed = true;
+    entry.busy = undefined;
+    entry.descriptor.deleted = true;
+    entry.descriptor.status = 'restartRequired';
+    entry.descriptor.capabilities = { ...NO_TRACKER_CAPABILITIES };
+  }
+
+  /**
+   * Переустановка снимает отметку удаления после commit нового пакета.
+   * Допуск загруженного старого ESM по-прежнему определяет lease и требует рестарта.
+   */
+  installed(id: string): void {
+    const entry = this.entries.get(id);
+
+    if (entry) {
+      entry.descriptor.deleted = false;
+    }
+  }
+
+  /**
    * Смена реквизитов ждёт все уже принятые вызовы до записи нового аккаунта.
    * Поколение и secrets меняются синхронно внутри закрытого допуска, без окна для старого запроса.
    */
@@ -320,7 +359,7 @@ export class TrackerRegistry {
       entry.busy = 'replacement';
 
       try {
-        await Promise.allSettled([...entry.pending]);
+        await Promise.allSettled([...entry.pending, ...(entry.loading ? [entry.loading] : [])]);
         signal.throwIfAborted();
       } catch (error) {
         entry.closed = wasClosed;
@@ -340,8 +379,8 @@ export class TrackerRegistry {
 
         finished = true;
         entry.busy = undefined;
-        entry.closed = outcome === 'reverted' ? wasClosed
-          : outcome === 'blocked' || (outcome === 'installed' && entry.loaded);
+        entry.closed = entry.descriptor.deleted || (outcome === 'reverted' ? wasClosed
+          : outcome === 'blocked' || (outcome === 'installed' && entry.loaded));
         entry.descriptor.status = outcome === 'blocked' ? 'unavailable'
           : entry.closed ? 'restartRequired' : this.active.has(id) ? 'active' : 'available';
       },

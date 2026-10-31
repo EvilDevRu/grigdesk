@@ -45,15 +45,15 @@ test('BM-01: каждая команда строит точный метод, �
   const cases: Array<[ApiCommand, RequestSpec]> = [
     [{ kind: 'dashboard' }, {
       method: 'GET',
-      path: '/api/b24/dashboard',
+      path: '/api/tracker/dashboard',
     }],
     [{ kind: 'task', id: '0042' }, {
       method: 'GET',
-      path: '/api/b24/task/0042',
+      path: '/api/tracker/task/0042',
     }],
     [{ kind: 'task', id: 'a/b?c' }, {
       method: 'GET',
-      path: '/api/b24/task/a%2Fb%3Fc',
+      path: '/api/tracker/task/a%2Fb%3Fc',
     }],
     [{
       kind: 'comment',
@@ -61,25 +61,25 @@ test('BM-01: каждая команда строит точный метод, �
       text: 'текст "с" \\ кавычками\n',
     }, {
       method: 'POST',
-      path: '/api/b24/task/42/comment',
+      path: '/api/tracker/task/42/comment',
       body: JSON.stringify({ text: 'текст "с" \\ кавычками\n' }),
       json: true,
     }],
     [{ kind: 'complete', id: '42' }, {
       method: 'POST',
-      path: '/api/b24/task/42/complete',
+      path: '/api/tracker/task/42/complete',
     }],
     [{ kind: 'renew', id: '42' }, {
       method: 'POST',
-      path: '/api/b24/task/42/renew',
+      path: '/api/tracker/task/42/renew',
     }],
     [{ kind: 'users', query: '' }, {
       method: 'GET',
-      path: '/api/b24/users?q=',
+      path: '/api/tracker/users?q=',
     }],
     [{ kind: 'users', query: 'Иван П&+?' }, {
       method: 'GET',
-      path: `/api/b24/users?${new URLSearchParams({ q: 'Иван П&+?' })}`,
+      path: `/api/tracker/users?${new URLSearchParams({ q: 'Иван П&+?' })}`,
     }],
   ];
 
@@ -90,7 +90,7 @@ test('BM-01: каждая команда строит точный метод, �
       action,
     }, {
       method: 'POST',
-      path: `/api/b24/task/42/timer/${action}`,
+      path: `/api/tracker/task/42/timer/${action}`,
     }]);
   }
 
@@ -116,7 +116,7 @@ test('BM-02: create читает stdin ровно один раз и сохра�
     assert.equal(io.stdinReads, 1);
     assert.equal(io.specs.length, 1);
     assert.equal(io.specs[0]?.method, 'POST');
-    assert.equal(io.specs[0]?.path, '/api/b24/tasks');
+    assert.equal(io.specs[0]?.path, '/api/tracker/tasks');
     assert.equal(io.specs[0]?.json, true);
     assert.ok(Buffer.from(io.specs[0]?.body as Uint8Array).equals(Buffer.from(text)));
   }
@@ -185,7 +185,7 @@ test('BM-03: start ждёт renew, подавляет его отказ и во�
       const running = runCommand({ kind: 'start', id: '42' }, CONNECTION, io);
 
       await new Promise((resolve) => setTimeout(resolve, 20));
-      assert.deepEqual(order, ['/api/b24/task/42/renew']);
+      assert.deepEqual(order, ['/api/tracker/task/42/renew']);
       finishRenew?.();
 
       if (timerFails) {
@@ -194,7 +194,7 @@ test('BM-03: start ждёт renew, подавляет его отказ и во�
         assert.equal(Buffer.from(await running).toString(), 'timer-body');
       }
 
-      assert.deepEqual(order, ['/api/b24/task/42/renew', '/api/b24/task/42/timer/start']);
+      assert.deepEqual(order, ['/api/tracker/task/42/renew', '/api/tracker/task/42/timer/start']);
     }
   }
 });

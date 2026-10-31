@@ -32,7 +32,7 @@
         <UiListRow
           v-for="task in visible"
           :key="task.id"
-          :to="'/b24/' + task.id"
+          :to="'/tracker/' + task.id"
           :label="task.title"
           :current="task.id === activeId"
         >
@@ -60,7 +60,7 @@
 import { computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
-import type { B24Summary } from '../api/contract.ts';
+import type { TrackerSummary } from '../api/contract.ts';
 import {
   UiButton,
   UiChip,
@@ -71,12 +71,12 @@ import {
   UiPaneHeader,
   UiSplit,
 } from '../ui.ts';
-import { useB24Store } from '../stores/b24.ts';
+import { useTrackerStore } from '../stores/tracker.ts';
 import { useLinkStore } from '../stores/link.ts';
 import { useReload } from '../composables/useReload.ts';
 
 const route = useRoute();
-const store = useB24Store();
+const store = useTrackerStore();
 const link = useLinkStore();
 const activeId = computed(() => String(route.params.id || ''));
 const query = ref('');
@@ -98,7 +98,7 @@ const visible = computed(() =>
     (filter.value !== 'pipeline' || task.onPipeline),
   ),
 );
-const facts = (task: B24Summary) =>
+const facts = (task: TrackerSummary) =>
   [
     task.status,
     task.deadline ? 'до ' + new Date(task.deadline).toLocaleDateString('ru-RU') : '',
@@ -118,7 +118,7 @@ async function more() {
   }
 
   try {
-    const page = await link.api!.getB24Tasks(snapshot.nextCursor);
+    const page = await link.api!.getTrackerTasks(snapshot.nextCursor);
 
     if (store.list === snapshot) {
       store.list = {
@@ -131,5 +131,5 @@ async function more() {
   }
 }
 
-useReload(store.loadList, ['b24', 'tasks']);
+useReload(store.loadList, ['tracker', 'tasks']);
 </script>

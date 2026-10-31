@@ -113,7 +113,7 @@ test('выбранное фото читается только из per-run inp
       analysisConcurrency: 1,
     },
     claudeAuth: { env: () => process.env },
-    b24: {
+    tracker: {
       async taskDetail() { return { title: 'Demo | задача', description: '' }; },
       async taskPageData() { return { comments: [] }; },
     },
@@ -222,7 +222,7 @@ test('пропавший token и symlink наружу становятся не
       analysisConcurrency: 1,
     },
     claudeAuth: { env: () => process.env },
-    b24: {
+    tracker: {
       async taskDetail() { return { title: 'Demo | задача', description: '' }; },
       async taskPageData() { return { comments: [] }; },
     },

@@ -14,7 +14,7 @@ async function fixture(t) {
   const analyzer = new Analyzer({
     config: { analysisDir: dir },
     claudeAuth: null,
-    b24: null,
+    tracker: null,
     factoryState: {},
     log: null,
   });

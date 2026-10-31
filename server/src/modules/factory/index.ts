@@ -167,10 +167,9 @@ type Registry = Record<string, string>;
 
 // Соседи, которых модуль получает сборкой приложения. Их полные контракты живут
 // в своих файлах; здесь перечислено ровно то, что использует раздел.
-interface B24Port {
+interface TrackerPort {
   sourceUrl?: (id: string) => Promise<string> | string;
   capabilities?: () => { comments?: boolean } | undefined;
-  accountIdentity: () => Promise<{ baseUrl?: unknown; userId?: unknown } | null>;
   taskPageData: (id: string) => Promise<{ comments?: unknown }>;
 }
 
@@ -204,7 +203,7 @@ export interface FactoryModuleOptions {
   factoryState: FactoryStateAdapter;
   config: FactoryModuleConfig;
   prefs: PrefsStore;
-  b24?: B24Port | null;
+  tracker?: TrackerPort | null;
   analyzer: AnalyzerPort;
   internalToken?: string;
   arbiterCards?: ArbiterCardsStore | null;
@@ -293,12 +292,16 @@ function runnerStageIsLive(
   return graph.statuses?.[nodeId] === 'run' || Boolean(registry?.[`ACTIVE_RUN_${stage}`]);
 }
 
+/**
+ * Фабрика получает доступ к внешним задачам через нейтральный порт выбранного трекера.
+ * Мутации конвейера и неизменяемый ticket по-прежнему принадлежат ядру.
+ */
 async function factoryModule(
   fastify: FastifyInstance,
   opts: FactoryModuleOptions,
 ): Promise<void> {
   const {
-    factoryState, config, prefs, b24, analyzer, internalToken = '', arbiterCards = null,
+    factoryState, config, prefs, tracker, analyzer, internalToken = '', arbiterCards = null,
     arbiterLive = null,
   } = opts;
   const cfg = { factoryHome: config.factoryHome, stateDir: config.stateDir };
@@ -786,19 +789,14 @@ async function factoryModule(
   }
 
   // Ссылка на задачу в трекере — обязательное поле immutable ticket (движок требует http(s) URL).
-  // Берём из настроек портала: своего адреса задачи GrigDesk не выдумывает.
+  // Адрес даёт сам драйвер: ядро не строит URL по правилам конкретного поставщика.
   async function taskSourceUrl(id: string) {
-    if (!b24) return '';
+    if (!tracker?.sourceUrl) {
+      return '';
+    }
 
     try {
-      if (b24.sourceUrl) {
-        return await b24.sourceUrl(id);
-      }
-
-      const identity = await b24.accountIdentity();
-      const base = String(identity?.baseUrl || '').replace(/\/+$/, '');
-      if (!base || !identity?.userId) return '';
-      return `${base}/company/personal/user/${identity.userId}/tasks/task/view/${id}/`;
+      return await tracker.sourceUrl(id);
     } catch (e) {
       fastify.log.warn({ task: id, err: errorMessage(e) }, 'ссылка на задачу для тикета не получена');
       return '';
@@ -807,7 +805,7 @@ async function factoryModule(
 
   // Контекст, которого нет в описании задачи: локальные уточнения человека и арбитра
   // (в трекер их НЕ публикуем — заказчик видит комментарии) и несистемные комментарии
-  // из B24. Без них конвейер стартует слепее триажа и переспрашивает отвеченное.
+  // из трекера. Без них конвейер стартует слепее триажа и переспрашивает отвеченное.
   // Уточнения режутся тем же пределом, что и в промпте триажа: описание тикета
   // вмещает на порядок больше, а разный объём у двух читателей — разная постановка.
   async function ticketSections(id: string, { profile = null, title = '', description = '', own = false }: {
@@ -846,9 +844,9 @@ async function factoryModule(
         text: lines.join('\n').slice(0, 4000),
       });
     }
-    if (b24 && !own && b24.capabilities?.()?.comments !== false) {
+    if (tracker && !own && tracker.capabilities?.()?.comments !== false) {
       try {
-        const page = await b24.taskPageData(id);
+        const page = await tracker.taskPageData(id);
         const comments = (page.comments || []) as Array<{
           isSystem?: unknown;
           text?: unknown;
@@ -1834,7 +1832,7 @@ async function factoryModule(
     };
   });
 
-  // Запуск задачи на конвейер (замена входа через хук на mcp__b24__b24_task).
+  // Запуск задачи на конвейер через общий вход фабрики.
   fastify.post<FactoryRoute>('/api/tasks/:id/launch', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });

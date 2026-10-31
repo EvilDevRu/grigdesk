@@ -54,12 +54,12 @@ async function taskFavoritesModule(
     }
   };
 
-  fastify.get('/api/b24/task-favorites', run(() => favorites.list()));
-  fastify.put('/api/b24/task-favorites/:taskId', run((request) => {
+  fastify.get('/api/tracker/task-favorites', run(() => favorites.list()));
+  fastify.put('/api/tracker/task-favorites/:taskId', run((request) => {
     const taskId = normalizeFavoriteTaskId(request.params.taskId);
     return favorites.add(taskId);
   }));
-  fastify.delete('/api/b24/task-favorites/:taskId', run((request) => {
+  fastify.delete('/api/tracker/task-favorites/:taskId', run((request) => {
     const taskId = normalizeFavoriteTaskId(request.params.taskId);
     return favorites.remove(taskId);
   }));

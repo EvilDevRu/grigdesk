@@ -89,7 +89,8 @@ export const config = {
   installationBin,
   dataHome,
   dataStateDir,
-  driversDir: path.join(dataHome, 'drivers'),
+  driversDir: process.env.GRIGDESK_DRIVERS_DIR || path.join(dataHome, 'drivers'),
+  driverSourcesPath: path.join(dataHome, 'driver-sources.json'),
   driverInstallsPath: path.join(dataStateDir, 'driver-installs.json'),
   trackerSettingsPath: path.join(dataStateDir, 'tracker-settings.json'),
   trackerCredentialsPath: path.join(dataStateDir, 'tracker-credentials.json'),
@@ -217,13 +218,6 @@ export const config = {
   // Файловый журнал окна: дневные NDJSON, доступны только владельцу сервера.
   webLogDir: process.env.GRIGDESK_WEB_LOG_DIR || path.join(dataStateDir, 'web-log'),
 
-
-  // Битрикс24. Куки и креды — В СВОЁМ каталоге (изоляция: свой cookie-файл = нет
-  // session-thrash). Портал/креды задаются из «Настроек» и живут в .state (gitignore).
-  // Никаких проектных значений по умолчанию в коде — пустой GrigDesk не знает ничего.
-  b24BaseUrl: process.env.GRIGDESK_B24_BASE_URL || '',
-  b24CookiePath: process.env.B24_COOKIE_PATH || path.join(dataStateDir, 'b24-cookies.json'),
-  b24CredsPath: process.env.B24_CREDS_PATH || path.join(dataStateDir, 'b24-creds.json'),
 
   // Постановки задач для immutable route-прогонов. Хранилище GrigDesk, а НЕ
   // рабочее дерево задачи: дерево принадлежит агенту, и файл постановки в нём агент

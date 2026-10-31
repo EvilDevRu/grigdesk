@@ -4,10 +4,13 @@ import type {
   TrackerWidget,
 } from '../../../../shared/trackers/contracts.ts';
 
+import type { TrackerIdentity } from './accountScope.ts';
+
+export type { TrackerIdentity } from './accountScope.ts';
+
 export type TaskData = Record<string, unknown>;
 export type TaskRef = { trackerId: string; id: string };
 export type TaskPresence = 'exists' | 'absent' | 'unknown';
-export type TrackerIdentity = { baseUrl: string; userId: number };
 
 export interface DriverManifest {
   id: string;
@@ -18,6 +21,7 @@ export interface DriverManifest {
 }
 
 export interface TrackerHost {
+  fetch?: typeof fetch;
   credentials: { read(): TaskData | null };
   dataDir: string;
   cookiePath: string;

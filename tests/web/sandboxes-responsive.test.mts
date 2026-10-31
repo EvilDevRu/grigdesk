@@ -175,7 +175,7 @@ async function fixture(t: TestContext) {
 
             await route.fulfill({ json });
         });
-        await page.route(/\/api\/b24\/task\/\d+(?:\?.*)?$/, async (route) => {
+        await page.route(/\/api\/tracker\/task\/\d+(?:\?.*)?$/, async (route) => {
             const task = new URL(route.request().url()).pathname.split('/').at(-1)!;
 
             await route.fulfill({ json: {

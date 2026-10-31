@@ -6,8 +6,8 @@ import ChatsView from './views/ChatsView.vue';
 import ChatView from './views/ChatView.vue';
 import TasksView from './views/TasksView.vue';
 import TaskView from './views/TaskView.vue';
-import B24View from './views/B24View.vue';
-import B24TaskView from './views/B24TaskView.vue';
+import TrackerView from './views/TrackerView.vue';
+import TrackerTaskView from './views/TrackerTaskView.vue';
 import MoreView from './views/MoreView.vue';
 
 // Карточки вложены в свои списки: страница списка остаётся смонтированной, поэтому на
@@ -48,12 +48,12 @@ export const router = createRouter({
       ],
     },
     {
-      path: '/b24',
-      component: B24View,
+      path: '/tracker',
+      component: TrackerView,
       children: [
         {
           path: ':id',
-          component: B24TaskView,
+          component: TrackerTaskView,
         },
       ],
     },

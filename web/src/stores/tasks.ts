@@ -59,7 +59,7 @@ export const useTasksStore = defineStore('tasks', {
       }
 
       const data = portal
-        ? decodeTaskDetail(await api.get(`/api/b24/task/${id}`, { signal }))
+        ? decodeTaskDetail(await api.get(`/api/tracker/task/${id}`, { signal }))
         : decodeTaskDetail(decodeGrigdeskTask(response, String(id)));
 
       signal?.throwIfAborted();
@@ -83,7 +83,7 @@ export const useTasksStore = defineStore('tasks', {
      */
     async update(id: TaskId, fields: Record<string, unknown>): Promise<TaskDetail> {
       const data = decodeTaskDetail(await api.put(
-        `/api/b24/task/${id}`, fields, useTrackersStore().mutationOptions(),
+        `/api/tracker/task/${id}`, fields, useTrackersStore().mutationOptions(),
       ));
 
       this.details[id] = { data, loadedAt: Date.now() };
@@ -93,7 +93,9 @@ export const useTasksStore = defineStore('tasks', {
     },
 
     async timer(id: TaskId, action: string) {
-      await api.post(`/api/b24/task/${id}/timer/${action}`, undefined, useTrackersStore().mutationOptions());
+      await api.post(
+        `/api/tracker/task/${id}/timer/${action}`, undefined, useTrackersStore().mutationOptions(),
+      );
       await useBoardStore().load(true);
     },
 
@@ -102,7 +104,7 @@ export const useTasksStore = defineStore('tasks', {
      * Заголовок остаётся доступным конвейеру до следующего чтения деталей.
      */
     async complete(id: TaskId) {
-      await api.post(`/api/b24/task/${id}/complete`, undefined, useTrackersStore().mutationOptions());
+      await api.post(`/api/tracker/task/${id}/complete`, undefined, useTrackersStore().mutationOptions());
 
       if (this.details[id]) {
         this.details[id].loadedAt = 0;
@@ -116,7 +118,7 @@ export const useTasksStore = defineStore('tasks', {
      * Прежний снимок помечается устаревшим перед обновлением доски.
      */
     async renew(id: TaskId) {
-      await api.post(`/api/b24/task/${id}/renew`, undefined, useTrackersStore().mutationOptions());
+      await api.post(`/api/tracker/task/${id}/renew`, undefined, useTrackersStore().mutationOptions());
 
       if (this.details[id]) {
         this.details[id].loadedAt = 0;
@@ -126,7 +128,7 @@ export const useTasksStore = defineStore('tasks', {
     },
 
     async comment(id: TaskId, text: string) {
-      await api.post(`/api/b24/task/${id}/comment`, { text }, useTrackersStore().mutationOptions());
+      await api.post(`/api/tracker/task/${id}/comment`, { text }, useTrackersStore().mutationOptions());
     },
 
     async launchOptions(id: TaskId, profile = '') {

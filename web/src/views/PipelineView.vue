@@ -335,7 +335,7 @@
         </UiButton>
         <span class="route">{{ ROUTE_ICON[t.route || ''] || '•' }} {{ t.route }}</span>
         <UiButton
-          v-if="t.source === 'grigdesk' || b24Title(t.task)"
+          v-if="t.source === 'grigdesk' || trackerTitle(t.task)"
           class="ctitle"
           data-role="pipeline-title"
           v-tooltip="title(t)"
@@ -358,14 +358,14 @@
           {{ t.readOnly ? '◌ только чтение' : t.stall ? (t.stall.kind === 'crashed' ? '✖ оборвалась' : '🛑 встала') : (t.daemonAlive ? '● идёт' : '○ стоит') }}
         </span>
         <span
-          v-if="b24TimerState(t)"
-          class="b24-timer mono"
-          :class="b24TimerState(t)"
-          data-role="pipeline-b24-timer"
-          :data-state="b24TimerState(t)"
+          v-if="trackerTimerState(t)"
+          class="tracker-timer mono"
+          :class="trackerTimerState(t)"
+          data-role="pipeline-tracker-timer"
+          :data-state="trackerTimerState(t)"
           v-tooltip="'Таймер Битрикс24 по этой задаче'"
         >
-          {{ b24TimerLabel(t) }}
+          {{ trackerTimerLabel(t) }}
         </span>
         <!-- Чистая работа узлов: все петли входят, ожидание человека на воротах — нет. -->
         <span v-if="t.graph.timing" class="elapsed mono" v-tooltip="elapsedTitle(t)">⏱ {{ elapsedLabel(t) }}</span>
@@ -1186,7 +1186,7 @@ function collapsedCards(value: unknown): TaskId[] {
   return value;
 }
 
-function b24Title(taskNum: TaskId) {
+function trackerTitle(taskNum: TaskId) {
   return taskStore.title(taskNum);
 }
 
@@ -1201,7 +1201,7 @@ function title(taskOrNum: PipelineViewTask | TaskId) {
     ? taskOrNum
     : tasks.value.find((item) => Number(item.task) === Number(taskNum));
 
-  return task?.source === 'grigdesk' ? task.title || null : b24Title(taskNum) || task?.title || null;
+  return task?.source === 'grigdesk' ? task.title || null : trackerTitle(taskNum) || task?.title || null;
 }
 
 const boardTasksById = computed(() => new Map(
@@ -1216,7 +1216,7 @@ function boardTask(t: PipelineViewTask) {
  * Не превращаем отсутствие портальной задачи в ложное состояние «таймер стоит».
  * Статус существует только для явного булева значения из снимка доски.
  */
-function b24TimerState(t: PipelineViewTask) {
+function trackerTimerState(t: PipelineViewTask) {
   if (!boardSupportsTimer(board.data)) {
     return null;
   }
@@ -1238,7 +1238,7 @@ function b24TimerState(t: PipelineViewTask) {
  * Подписывает только явно известное состояние портального таймера.
  * Отсутствие задачи остаётся пустой подписью, а не остановленным таймером.
  */
-function b24TimerLabel(t: PipelineViewTask) {
+function trackerTimerLabel(t: PipelineViewTask) {
   const task = boardTask(t);
 
   if (!boardSupportsTimer(board.data) || !task || typeof task.timerRunning !== 'boolean') {
@@ -3592,9 +3592,9 @@ function cardState(g: PipelineViewGraph) {
 .daemon.alive { color: var(--good); }
 .daemon.idle { color: var(--ink-mid); }
 .daemon.stall { color: var(--bad); font-weight: 600; }
-.b24-timer { flex: none; font-size: 12px; white-space: nowrap; }
-.b24-timer.running { color: var(--good); }
-.b24-timer.stopped { color: var(--ink-mid); }
+.tracker-timer { flex: none; font-size: 12px; white-space: nowrap; }
+.tracker-timer.running { color: var(--good); }
+.tracker-timer.stopped { color: var(--ink-mid); }
 .elapsed { font-size: 12px; color: var(--ink-mid); white-space: nowrap; }
 
 .progress { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }

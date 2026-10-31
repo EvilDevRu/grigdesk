@@ -9,7 +9,7 @@ test('плитка месяца показывает число выполнен
   const { wrapper } = await mountBoardView(t, {
     prefix: 'board-month-completed',
     snapshot: {
-      trackerId: 'b24-custom',
+      trackerId: 'grigdesk-b24-discript',
       widgets: [{
         id: 'month',
         kind: 'kpi',

@@ -14,7 +14,7 @@ process.env.NODE_ENV = 'test';
 const pages = [
   'interface.behavior', 'interface.notifications', 'interface.shortcuts',
   'automation.chats', 'automation.context', 'automation.launch', 'automation.monitoring',
-  'automation.arbiter', 'agents.models', 'connections.devices', 'connections.b24',
+  'automation.arbiter', 'agents.models', 'connections.devices',
   'connections.ssh',
   'connections.db',
   'connections.telegram',

@@ -206,6 +206,17 @@ export default async function installRoutes(
     },
   }, async (request: PluginRequest) =>
     ({ job: jobView(await installs.rollback(request.params.id, request.body)) }));
+
+  if (driver) {
+    app.post(`${prefix}/${resource}/:id/remove`, {
+      schema: {
+        params: inputs.pluginParams,
+        body: inputs.empty,
+      },
+    }, async (request: FastifyRequest<{ Params: { id: string } }>) =>
+      installs.remove(request.params.id));
+  }
+
   app.post(`${prefix}/check`, {
     schema: { body: inputs.empty, response: responseSchemas.check },
   }, async () => ({ [resource]: await installs.checkUpdates() }));

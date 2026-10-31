@@ -17,7 +17,7 @@ export const trackerCatalog = () => ({
       capabilities: { create: true, projects: true }
     },
     {
-      id: 'b24-stock',
+      id: 'grigdesk-b24',
       name: 'Облачный Б24',
       status: 'available',
       capabilities: STOCK_CAPS,
@@ -31,11 +31,18 @@ export const trackerCatalog = () => ({
       },
     },
     {
-      id: 'b24-custom',
+      id: 'grigdesk-b24-discript',
       name: 'Кастомный Б24',
       status: 'available',
       capabilities: CUSTOM_CAPS
     },
+  ],
+});
+
+export const driverSourceCatalog = () => ({
+  sources: [
+    { title: 'Битрикс24', url: 'https://github.com/EvilDevRu/grigdesk-b24' },
+    { title: 'Jira', url: 'https://github.com/EvilDevRu/grigdesk-jira' },
   ],
 });
 
@@ -70,7 +77,7 @@ function driverJob(kind, record, status = 'ready', previous = null) {
     sha: record.sha,
   };
 
-  job.driverId = 'b24-custom';
+  job.driverId = 'grigdesk-b24-discript';
   delete job.pluginId;
   job.source = record.source;
   job.target = target;
@@ -100,6 +107,7 @@ export async function mountTrackerBoard(t, {
   configured = false,
   handlers = {},
   catalog = trackerCatalog(),
+  compilerStubs = {},
 } = {}) {
   const calls = [];
   const state = {
@@ -111,6 +119,7 @@ export async function mountTrackerBoard(t, {
     },
     job: null,
     installed: null,
+    trackerConfigured: configured,
   };
   const api = {
     /**
@@ -132,6 +141,10 @@ export async function mountTrackerBoard(t, {
         return structuredClone(state.catalog);
       }
 
+      if (url === '/api/trackers/sources') {
+        return driverSourceCatalog();
+      }
+
       if (url === '/api/trackers/settings') {
         return structuredClone(state.settings);
       }
@@ -147,7 +160,7 @@ export async function mountTrackerBoard(t, {
       return {
         tasks: [],
         revision: 0,
-        b24Configured: configured
+        trackerConfigured: state.trackerConfigured
       };
     },
     /**
@@ -213,7 +226,34 @@ export async function mountTrackerBoard(t, {
       }
 
       if (url === '/api/driver-installs/check') {
-        return { drivers: { 'b24-custom': structuredClone(state.installed) } };
+        return { drivers: { 'grigdesk-b24-discript': structuredClone(state.installed) } };
+      }
+
+      if (url.endsWith('/remove')) {
+        const id = url.split('/').at(-2);
+        const driver = state.catalog.drivers.find((entry) => entry.id === id);
+
+        assert.ok(driver);
+        driver.deleted = true;
+        driver.status = 'restartRequired';
+
+        if (state.catalog.externalId === id) {
+          state.catalog.externalId = null;
+          state.catalog.activeIds = ['own'];
+          state.catalog.revision += 1;
+          state.settings.externalId = null;
+          state.settings.revision = state.catalog.revision;
+          state.trackerConfigured = false;
+        }
+
+        state.installed = null;
+        state.job = null;
+
+        for (const listener of globalThis.__boardViewOwnListeners ?? []) {
+          listener('trackers-changed', { revision: state.catalog.revision });
+        }
+
+        return { id, restartRequired: true };
       }
 
       if (url.endsWith('/rollback')) {
@@ -242,13 +282,14 @@ export async function mountTrackerBoard(t, {
   const mounted = await mountBoardView(t, {
     ownApi: api,
     snapshot: {
-      trackerId: 'b24-custom',
+      trackerId: 'grigdesk-b24-discript',
       capabilities: CUSTOM_CAPS,
       widgets: []
     },
     compilerStubs: {
       '../shared/apiClient.ts': apiStub,
       '../../shared/apiClient.ts': apiStub,
+      ...compilerStubs,
     },
   });
 
@@ -266,7 +307,7 @@ export async function mountTrackerBoard(t, {
  */
 export async function openTrackerSettings(card) {
   const button = card.wrapper.findAll('button').find((candidate) =>
-    /настрой.*(доск|трекер)|трекер.*настрой|board settings|tracker settings/iu.test(
+    /настро[йи].*(доск|трекер)|трекер.*настрой|board settings|tracker settings|set up tracker/iu.test(
       `${candidate.text()} ${candidate.attributes('aria-label') ?? ''}`,
     ));
 

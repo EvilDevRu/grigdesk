@@ -261,5 +261,5 @@ test('LOAD-KEEP-host-task: ожидание комментариев не пер
   assert.ok(h.wrapper.get('[data-role="task-comment"]').element === composer);
   assert.ok(h.wrapper.get('.mhead').element === header);
   assert.equal(h.wrapper.findAll('[data-role="task-comment"]').length, 1);
-  assert.equal(h.calls.filter((url) => url === '/api/b24/task/42/comments').length, 1);
+  assert.equal(h.calls.filter((url) => url === '/api/tracker/task/42/comments').length, 1);
 });

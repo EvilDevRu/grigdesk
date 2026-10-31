@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { copyCustomPackage } from './trackerCustomPackage.js';
+import { copyCustomPackage } from './trackerPackage.js';
 import { trackerFixture } from './trackerFixture.js';
 
 /**
@@ -10,16 +10,17 @@ import { trackerFixture } from './trackerFixture.js';
  */
 export async function identityFixture(t, onDiscovery) {
   const fixture = await trackerFixture(t, {
-    legacy: true,
-    setup: async (config) => {
-      await copyCustomPackage(config);
-    },
+    setup: copyCustomPackage,
   });
+
+  if (!fixture) {
+    return null;
+  }
 
   // Registry импортирует временную копию пакета, подменяется prototype именно этой копии.
   // Клиент остаётся настоящим: кеш discoverUserId и смена session проверяются без стабов identity.
   const copiedClient = await import(pathToFileURL(
-    path.join(fixture.config.driversDir, 'b24-custom/src/client.ts'),
+    path.join(fixture.config.driversDir, 'grigdesk-b24-discript/src/client.ts'),
   ).href);
 
   // Прежний identity-double отдавал URL с завершающим слешем, нормализация URL здесь не проверяется.
@@ -32,8 +33,8 @@ export async function identityFixture(t, onDiscovery) {
 
     return { text: async () => 'USER_ID=77;' };
   });
-  await fixture.runtime.writeSettings('b24-custom', {
-    'b24-custom': {
+  await fixture.runtime.writeSettings('grigdesk-b24-discript', {
+    'grigdesk-b24-discript': {
       baseUrl: 'https://portal.example.test/',
       login: 'user',
       password: 'secret',
@@ -41,9 +42,9 @@ export async function identityFixture(t, onDiscovery) {
   });
 
   return {
-    adapter: fixture.b24,
-    changeCredentials: () => fixture.runtime.writeSettings('b24-custom', {
-      'b24-custom': { password: 'changed-secret' },
+    adapter: fixture.tracker,
+    changeCredentials: () => fixture.runtime.writeSettings('grigdesk-b24-discript', {
+      'grigdesk-b24-discript': { password: 'changed-secret' },
     }),
   };
 }

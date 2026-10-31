@@ -72,7 +72,7 @@ export async function compileBoardView({ stubs = {} } = {}) {
         export const api = {
           get: async (url) => globalThis.__boardViewOwnApi?.get(url) || (
             url === '/api/grigdesk-tasks/projects' ? { projects: [] }
-              : { tasks: [], revision: 0, b24Configured: true }
+              : { tasks: [], revision: 0, trackerConfigured: true }
           ),
           post: async (url, payload) => globalThis.__boardViewOwnApi?.post(url, payload),
         };
@@ -144,6 +144,7 @@ export async function mountBoardView(t, {
   prefix = 'board',
   snapshot = {},
   compilerStubs = {},
+  componentStubs = {},
   tasks = DEFAULT_TASKS,
   pending = false,
   boardError = null,
@@ -269,6 +270,7 @@ export async function mountBoardView(t, {
       stubs: {
         RouterLink: { template: '<a><slot /></a>' },
         teleport: true,
+        ...componentStubs,
       },
     },
   });

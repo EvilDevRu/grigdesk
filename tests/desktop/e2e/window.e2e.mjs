@@ -902,7 +902,6 @@ async function settingsTab(page, id) {
   const mapping = {
     app: 'interface.behavior',
     speech: 'speech.dictation',
-    b24: 'connections.b24',
     providers: 'agents.providers',
     runs: 'automation.context',
     plugins: 'plugins.installed',

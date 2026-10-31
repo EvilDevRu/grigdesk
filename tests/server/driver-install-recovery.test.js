@@ -91,7 +91,7 @@ test('DRIVER-RECOVERY-01: crash после rename восстанавливает
     pluginsDir: fixture.roots.pluginsDir,
     statePath: fixture.statePath,
     grigDeskVersion: '1.0.0',
-    reservedIds: ['own', 'b24-stock'],
+    reservedIds: ['own'],
     packagePolicy,
   });
 

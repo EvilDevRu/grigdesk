@@ -62,7 +62,7 @@ const tabs: Tab[] = [
     icon: 'pipeline',
   },
   {
-    path: '/b24',
+    path: '/tracker',
     title: 'Задачи',
     icon: 'board',
   },

@@ -66,8 +66,12 @@ async function mountTelegram(t, { rules = [rule()] } = {}) {
           policyFingerprint: POLICY_FINGERPRINT,
         };
       }
-      if (url === '/api/b24/users') return { users: [] };
-      if (url === '/api/b24/groups') return { groups: [] };
+      if (url === '/api/tracker/users') {
+        return { users: [] };
+      }
+      if (url === '/api/tracker/groups') {
+        return { groups: [] };
+      }
       return {};
     },
     async post() { return {}; },

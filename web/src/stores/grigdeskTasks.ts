@@ -20,7 +20,7 @@ export const useGrigdeskTasksStore = defineStore('grigdesk-tasks', {
     tasks: [] as GrigdeskTaskSummary[],
     projects: [] as GrigdeskTaskProject[],
     revision: -1,
-    b24Configured: null as boolean | null,
+    trackerConfigured: null as boolean | null,
     error: '',
     loading: false,
   }),
@@ -36,7 +36,7 @@ export const useGrigdeskTasksStore = defineStore('grigdesk-tasks', {
 
       this.tasks = snapshot.tasks;
       this.revision = snapshot.revision;
-      this.b24Configured = snapshot.b24Configured;
+      this.trackerConfigured = snapshot.trackerConfigured;
     },
 
     /**

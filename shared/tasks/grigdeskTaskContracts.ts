@@ -17,7 +17,7 @@ export interface GrigdeskTask extends GrigdeskTaskSummary {
 export interface GrigdeskTasksSnapshot {
   tasks: GrigdeskTaskSummary[];
   revision: number;
-  b24Configured: boolean;
+  trackerConfigured: boolean;
 }
 
 export interface GrigdeskTaskProject {
@@ -43,7 +43,7 @@ const task = d.objectOf({ ...summaryFields, description: d.text });
 const snapshot = d.objectOf({
   tasks: d.listOf(summary),
   revision: d.wholeNumber,
-  b24Configured: d.boolean,
+  trackerConfigured: d.boolean,
 });
 
 /**

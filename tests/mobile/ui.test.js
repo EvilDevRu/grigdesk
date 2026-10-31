@@ -24,8 +24,8 @@ async function samples() {
     'tasks',
     'task',
     'plan',
-    'b24-tasks',
-    'b24-task',
+    'tracker-tasks',
+    'tracker-task',
     'launch-options',
     'app',
     'accepted',
@@ -64,9 +64,9 @@ function kindOf(input) {
     /^tasks$/,
     /^tasks\/[^/]+$/,
     /^tasks\/[^/]+\/plan$/,
-    /^b24\/tasks$/,
-    /^b24\/tasks\/[^/]+$/,
-    /^b24\/tasks\/[^/]+\/launch-options$/,
+    /^tracker\/tasks$/,
+    /^tracker\/tasks\/[^/]+$/,
+    /^tracker\/tasks\/[^/]+\/launch-options$/,
     /^app$/,
   ];
   const kinds = [
@@ -78,8 +78,8 @@ function kindOf(input) {
     'tasks',
     'task',
     'plan',
-    'b24-tasks',
-    'b24-task',
+    'tracker-tasks',
+    'tracker-task',
     'launch-options',
     'app',
   ];
@@ -269,15 +269,15 @@ test('MA-10…31: экраны используют native bridge, провер�
     );
   }
 
-  await router.push('/b24');
+  await router.push('/tracker');
   await flushPromises();
   await clickText(wrapper, 'На конвейере');
   assert.equal(
     wrapper.findAll('.split-list .mobile-list-row').length,
-    data['b24-tasks'].tasks.filter((task) => task.onPipeline).length,
+    data['tracker-tasks'].tasks.filter((task) => task.onPipeline).length,
   );
   await clickText(wrapper, 'Все');
-  await router.push('/b24/' + data['b24-task'].task.id);
+  await router.push('/tracker/' + data['tracker-task'].task.id);
   await flushPromises();
   assert.match(wrapper.text(), /Запустить на конвейере/);
   await clickText(wrapper, 'Запустить на конвейере');

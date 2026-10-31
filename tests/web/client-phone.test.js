@@ -124,7 +124,7 @@ const tasks = Array.from({ length: 55 }, (_, index) => ({
 
 const responses = {
   ...projects,
-  '/api/b24/dashboard': {
+  '/api/tracker/dashboard': {
     today: { hours: 1, tasks_count: 1 },
     month: { hours: 1, norm: 160 },
     tasks,
@@ -186,16 +186,21 @@ test('телефон: полная ширина, меню разделов, ча
       await page.locator('.cl .row-hit').first().click();
 
       const composer = page.locator('textarea[data-role="chat-composer"]');
-      const model = page.locator('[data-role="chat-model"]');
+      const model = page.locator('button[data-role="chat-model"][role="combobox"]');
+      const nativeModel = page.locator('select[data-role="chat-model"]');
       const options = page.getByRole('button', { name: 'Настройки чата', exact: true });
 
       await composer.fill('Черновик на телефоне');
       await assertPhoneFrame(page, width, 844);
+      assert.equal(await model.count(), 1);
+      assert.equal(await nativeModel.count(), 1);
+      assert.equal(await nativeModel.isVisible(), false);
       assert.equal(await page.locator('.sidebar').isVisible(), false);
       assert.equal(await model.isVisible(), false);
       assert.ok(await page.locator('.cs-top').evaluate((el) => el.clientHeight) <= 68);
       await options.click();
       assert.equal(await model.isVisible(), true);
+      assert.equal(await nativeModel.isVisible(), false);
       await scaleClientText(page, 1.3, '.cs-top');
       assert.equal(await page.locator('.cs-top').evaluate((el) => (
         el.scrollWidth <= el.clientWidth + 1

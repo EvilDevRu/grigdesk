@@ -202,7 +202,7 @@ exit 0
     },
     config,
     prefs: { read: () => ({}) },
-    b24: comments.length ? { taskPageData: async () => ({ comments }) } : null,
+    tracker: comments.length ? { taskPageData: async () => ({ comments }) } : null,
     analyzer: { readClarifications: async () => null, readOpenQuestions: async () => null, async get() { return null; } },
   });
   const nativeBotApi = {

@@ -1,27 +1,27 @@
 import path from 'node:path';
 
-import type { CredsStore } from '../b24/credsStore.ts';
+import type { TrackerCredentialsStore } from './credentialsStore.ts';
 import { createDriverInstallService } from '../driverInstall/service.ts';
 import { createGrigdeskTasksService } from '../grigdeskTasks/service.ts';
 import type { GrigdeskTasksServiceOptions } from '../grigdeskTasks/service.ts';
-import { createStockTracker, STOCK_SCHEMA } from './b24Stock.ts';
 import { TrackerFacade } from './facade.ts';
 import { createOwnTracker } from './own.ts';
 import { TrackerRegistry } from './registry.ts';
 import { createSerialQueue } from './serialQueue.ts';
 import { TrackerSettingsStore } from './settingsStore.ts';
 import type { TrackerHost } from './contract.ts';
+import { TrackerError } from './contract.ts';
+import { installError } from '../pluginInstall/errors.ts';
 
-export interface TrackerRuntimeOptions extends Omit<GrigdeskTasksServiceOptions, 'b24'> {
+export interface TrackerRuntimeOptions extends Omit<GrigdeskTasksServiceOptions, 'tracker'> {
   config: GrigdeskTasksServiceOptions['config'] & {
     driversDir: string;
     driverInstallsPath: string;
     trackerSettingsPath: string;
     trackerCredentialsPath: string;
-    b24CookiePath: string;
     dataHome?: string;
   };
-  credsStore: CredsStore;
+  credsStore: TrackerCredentialsStore;
   fetch?: typeof fetch;
   grigDeskVersion?: string;
   onChanged?: () => void | Promise<void>;
@@ -33,11 +33,13 @@ export interface TrackerRuntimeOptions extends Omit<GrigdeskTasksServiceOptions,
  */
 export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
   const { config, credsStore } = options;
-  const selection = new TrackerSettingsStore(config.trackerSettingsPath, credsStore.has());
 
   credsStore.useTrackerCredentialsPath(config.trackerCredentialsPath);
 
   const hosts = new Map<string, TrackerHost>();
+  const cookiePathFor = (id: string) => path.join(
+    path.dirname(config.trackerSettingsPath), 'tracker-data', id, 'cookies.json',
+  );
 
   /**
    * Host закрепляет реквизиты, очередь и постоянные пути за одним driver id.
@@ -48,10 +50,10 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
 
     if (!value) {
       value = {
+        fetch: options.fetch,
         credentials: { read: () => credsStore.readFor(id) },
         dataDir: path.join(path.dirname(config.trackerSettingsPath), 'tracker-data', id),
-        cookiePath: id === 'b24-custom' ? config.b24CookiePath
-          : path.join(path.dirname(config.trackerSettingsPath), 'tracker-data', id, 'cookies.json'),
+        cookiePath: cookiePathFor(id),
         serial: createSerialQueue(),
         logger: { info: () => {}, warn: () => {} },
       };
@@ -61,14 +63,6 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
     return value;
   };
   const registry = new TrackerRegistry({ directory: config.driversDir, host });
-  const b24 = new TrackerFacade({
-    registry,
-    selection,
-  });
-  const own = createGrigdeskTasksService({
-    ...options,
-    b24: { isConfigured: () => b24.hasSelection(), probeTaskNumber: (id) => b24.probeTaskNumber(id) },
-  });
   const installs = createDriverInstallService({
     driversDir: config.driversDir,
     statePath: config.driverInstallsPath,
@@ -77,12 +71,37 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
 
   const recovery = await installs.recover();
 
-  registry.register(createOwnTracker(own), 'GrigDesk');
-  registry.register(createStockTracker(host('b24-stock'), options.fetch), 'Битрикс24 REST', STOCK_SCHEMA);
+  // Обёртка own регистрируется до выбора внешнего подключения и создания его фасада.
+  // Методы вызываются только после сборки runtime и обращаются к единственному own-сервису.
+  registry.register(createOwnTracker({
+    get: (id) => own.get(id),
+    list: () => own.list(),
+    create: (input) => own.create(input),
+    listProjects: () => own.listProjects(),
+  }), 'GrigDesk');
   installs.bindRuntime({
     isLoaded: (id) => registry.isLoaded(id),
-    prepareReplace: (id, signal) => registry.prepareReplace(id, signal),
+    prepareReplace: async (id, signal) => {
+      try {
+        return await registry.prepareReplace(id, signal);
+      } catch (error) {
+        if (error instanceof TrackerError && error.status === 409) {
+          throw installError('install_busy');
+        }
+
+        throw error;
+      }
+    },
+    removed: (id) => registry.deleted(id),
+    installed: (id) => registry.installed(id),
     refresh: async () => {
+      const selected = selection.read().externalId;
+      const entry = registry.descriptors().find((driver) => driver.id === selected);
+
+      if (selected && installs.removedIds().includes(selected) && (!entry || entry.deleted)) {
+        selection.write(null);
+      }
+
       await registry.refresh();
       await activateSelection();
       await options.onChanged?.();
@@ -92,7 +111,7 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
 
   if (recovery.blockedIds === '*') {
     for (const entry of registry.descriptors()) {
-      if (!['own', 'b24-stock'].includes(entry.id)) {
+      if (entry.id !== 'own') {
         registry.unavailable(entry.id, 'Требуется восстановление установки');
       }
     }
@@ -101,6 +120,23 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
       registry.unavailable(id, 'Требуется восстановление установки');
     }
   }
+
+  const selection = new TrackerSettingsStore(config.trackerSettingsPath);
+
+  if (installs.removedIds().includes(selection.read().externalId ?? '')
+    && !registry.descriptors().some((entry) => entry.id === selection.read().externalId
+      && entry.status !== 'unavailable')) {
+    selection.write(null);
+  }
+
+  const tracker = new TrackerFacade({ registry, selection });
+  const own = createGrigdeskTasksService({
+    ...options,
+    tracker: {
+      isConfigured: () => tracker.hasSelection(),
+      probeTaskNumber: (id) => tracker.probeTaskNumber(id),
+    },
+  });
 
   /**
    * Ограничение одного внешнего применяется к настройкам доски, а не общему реестру.
@@ -134,12 +170,16 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
     registry,
     selection,
     credsStore,
-    b24,
+    tracker,
     own,
     installs,
     activateSelection,
     writeSettings: async (externalId: string | null, changes: Record<string, Record<string, unknown>>) => {
       await registry.changeCredentials(Object.keys(changes), () => {
+        if (externalId && registry.descriptors().some((entry) => entry.id === externalId && entry.deleted)) {
+          throw new TrackerError('tracker_busy', 'Драйвер удалён и требует перезапуска', 409);
+        }
+
         for (const [id, values] of Object.entries(changes)) {
           credsStore.writeFor(id, values);
         }

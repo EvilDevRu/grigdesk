@@ -105,7 +105,7 @@ async function factoryServer(t, env) {
       profilesDir: '/tmp/no-profiles',
     },
     prefs: { read: () => ({}) },
-    b24: null,
+    tracker: null,
     analyzer: { readClarifications: async () => null, readOpenQuestions: async () => null },
   });
   await app.ready();

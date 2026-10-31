@@ -2,19 +2,19 @@
 
 Читающие маршруты:
 
-- `GET /api/b24/dashboard`, `/api/b24/task/:id`, `/api/b24/task/:id/comments`;
-- `GET /api/b24/users?q=...` — ростер для выбора ответственного;
-- `GET /api/b24/groups` — доступные активные проекты/рабочие группы для выбора
+- `GET /api/tracker/dashboard`, `/api/tracker/task/:id`, `/api/tracker/task/:id/comments`;
+- `GET /api/tracker/users?q=...` — ростер для выбора ответственного;
+- `GET /api/tracker/groups` — доступные активные проекты/рабочие группы для выбора
   `GROUP_ID` задачи (`{groups: [{id, name, type}]}`).
 
 Мутации:
 
-- `POST /api/b24/tasks`;
-- `PUT /api/b24/task/:id` — частичное обновление основных полей;
-- `POST /api/b24/task/:id/comment`;
-- `POST /api/b24/task/:id/timer/:action`;
-- `POST /api/b24/task/:id/complete`;
-- `POST /api/b24/task/:id/renew`.
+- `POST /api/tracker/tasks`;
+- `PUT /api/tracker/task/:id` — частичное обновление основных полей;
+- `POST /api/tracker/task/:id/comment`;
+- `POST /api/tracker/task/:id/timer/:action`;
+- `POST /api/tracker/task/:id/complete`;
+- `POST /api/tracker/task/:id/renew`.
 
 `B24Client.deleteTask` существует, но HTTP и CLI намеренно его не публикуют.
 
@@ -25,7 +25,7 @@
 справочники `/users` и `/groups`, что формы постановки задач. Текущее значение остаётся
 в селекте даже после исчезновения сотрудника или проекта из активного справочника.
 
-Тело `PUT /api/b24/task/:id` — частичный объект из полей `title`, `description`,
+Тело `PUT /api/tracker/task/:id` — частичный объект из полей `title`, `description`,
 `responsibleId`, `groupId`, `priority`. Неизменённые поля браузер не присылает, а сервер
 отклоняет неизвестные: это не даёт очищенному отображению HTML-описания затереть исходник
 при правке одного заголовка. Пустая строка `description` очищает описание, `groupId: null`
@@ -33,7 +33,7 @@
 пустой заголовок, неизвестные поля и невалидные ID получают `400 b24_bad_request` до сети.
 
 После успешного `tasks.task.update` маршрут заново читает задачу и разворачивает Telegram-
-ссылки, поэтому ответ совпадает с DTO обычного `GET /api/b24/task/:id`. Стор заменяет им
+ссылки, поэтому ответ совпадает с DTO обычного `GET /api/tracker/task/:id`. Стор заменяет им
 кеш деталей и перечитывает доску. Если изменилась постановка уже оценённой задачи, UI
 не запускает модель самовольно, а явно предлагает человеку нажать «Переоценить».
 

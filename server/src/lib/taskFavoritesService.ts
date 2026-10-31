@@ -1,22 +1,26 @@
 // Предметный слой избранного: браузер не передаёт account scope, он выводится
-// из текущего B24-портала и пользователя и возвращается только как opaque hash.
-import { b24AccountScope } from './b24AccountScope.ts';
-import type { B24Identity } from './b24AccountScope.ts';
+// из текущего трекера и пользователя и возвращается только как opaque hash.
+import { trackerAccountScope } from './trackers/accountScope.ts';
+import type { TrackerIdentity } from './trackers/accountScope.ts';
 import type { TaskFavoritesStore, FavoritesScope } from './taskFavoritesStore.ts';
-import type { B24Adapter } from '../adapters/b24.ts';
+import type { TrackerFacade } from './trackers/facade.ts';
 
 export class TaskFavoritesIdentityError extends Error {
   readonly code = 'B24_IDENTITY_UNAVAILABLE';
 
-  constructor(message = 'Не удалось определить B24-пользователя', cause: unknown = null) {
+  constructor(message = 'Не удалось определить пользователя трекера', cause: unknown = null) {
     super(message, cause ? { cause } : undefined);
     this.name = 'TaskFavoritesIdentityError';
   }
 }
 
-export function favoriteScopeFor(identity: B24Identity | null | undefined): string {
+/**
+ * Избранное использует общий ключ учётной записи и скрывает причину отказа источника.
+ * Неполная идентичность не позволяет прочитать либо изменить чужую подборку.
+ */
+export function favoriteScopeFor(identity: TrackerIdentity | null | undefined): string {
   try {
-    return b24AccountScope(identity);
+    return trackerAccountScope(identity);
   } catch (error) {
     throw new TaskFavoritesIdentityError(undefined, error);
   }
@@ -25,19 +29,26 @@ export function favoriteScopeFor(identity: B24Identity | null | undefined): stri
 export class TaskFavoritesService {
   readonly store: TaskFavoritesStore;
 
-  // Адаптер портала: из него берётся текущая учётная запись, а не из запроса браузера.
-  readonly b24: Pick<B24Adapter, 'accountIdentity'>;
+  // Фасад трекера: из него берётся текущая учётная запись, а не из запроса браузера.
+  readonly tracker: Pick<TrackerFacade, 'accountIdentity'>;
 
-  constructor({ store, b24 }: { store: TaskFavoritesStore; b24: Pick<B24Adapter, 'accountIdentity'> }) {
+  constructor({ store, tracker }: {
+    store: TaskFavoritesStore;
+    tracker: Pick<TrackerFacade, 'accountIdentity'>;
+  }) {
     this.store = store;
-    this.b24 = b24;
+    this.tracker = tracker;
   }
 
+  /**
+   * Идентичность берётся у выбранного драйвера перед каждой операцией сервиса.
+   * Неполные реквизиты и сетевые отказы превращаются в безопасную ошибку области.
+   */
   private async _scope(): Promise<string> {
-    let identity: Awaited<ReturnType<B24Adapter['accountIdentity']>>;
+    let identity: Awaited<ReturnType<TrackerFacade['accountIdentity']>>;
 
     try {
-      identity = await this.b24.accountIdentity();
+      identity = await this.tracker.accountIdentity();
     } catch (error) {
       throw new TaskFavoritesIdentityError(undefined, error);
     }

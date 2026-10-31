@@ -1,22 +1,26 @@
-// Предметный слой просмотренных задач: scope выводится из текущего B24-портала и
+// Предметный слой просмотренных задач: scope выводится из текущего трекера и
 // пользователя, наружу уходит только opaque hash — клиент не может попросить чужой набор.
-import { b24AccountScope } from './b24AccountScope.ts';
-import type { B24Identity } from './b24AccountScope.ts';
+import { trackerAccountScope } from './trackers/accountScope.ts';
+import type { TrackerIdentity } from './trackers/accountScope.ts';
 import type { TaskSeenStore, SeenScope } from './taskSeenStore.ts';
-import type { B24Adapter } from '../adapters/b24.ts';
+import type { TrackerFacade } from './trackers/facade.ts';
 
 export class TaskSeenIdentityError extends Error {
   readonly code = 'B24_IDENTITY_UNAVAILABLE';
 
-  constructor(message = 'Не удалось определить B24-пользователя', cause: unknown = null) {
+  constructor(message = 'Не удалось определить пользователя трекера', cause: unknown = null) {
     super(message, cause ? { cause } : undefined);
     this.name = 'TaskSeenIdentityError';
   }
 }
 
-export function seenScopeFor(identity: B24Identity | null | undefined): string {
+/**
+ * Просмотренные задачи используют тот же ключ учётной записи, что избранное и полка.
+ * Отказ определения пользователя остаётся безопасной ошибкой предметного сервиса.
+ */
+export function seenScopeFor(identity: TrackerIdentity | null | undefined): string {
   try {
-    return b24AccountScope(identity);
+    return trackerAccountScope(identity);
   } catch (error) {
     throw new TaskSeenIdentityError(undefined, error);
   }
@@ -25,19 +29,26 @@ export function seenScopeFor(identity: B24Identity | null | undefined): string {
 export class TaskSeenService {
   readonly store: TaskSeenStore;
 
-  // Адаптер портала: из него берётся текущая учётная запись, а не из запроса браузера.
-  readonly b24: Pick<B24Adapter, 'accountIdentity'>;
+  // Фасад трекера: из него берётся текущая учётная запись, а не из запроса браузера.
+  readonly tracker: Pick<TrackerFacade, 'accountIdentity'>;
 
-  constructor({ store, b24 }: { store: TaskSeenStore; b24: Pick<B24Adapter, 'accountIdentity'> }) {
+  constructor({ store, tracker }: {
+    store: TaskSeenStore;
+    tracker: Pick<TrackerFacade, 'accountIdentity'>;
+  }) {
     this.store = store;
-    this.b24 = b24;
+    this.tracker = tracker;
   }
 
+  /**
+   * Идентичность берётся у выбранного драйвера перед каждой операцией сервиса.
+   * Неполные реквизиты и сетевые отказы превращаются в безопасную ошибку области.
+   */
   private async _scope(): Promise<string> {
-    let identity: Awaited<ReturnType<B24Adapter['accountIdentity']>>;
+    let identity: Awaited<ReturnType<TrackerFacade['accountIdentity']>>;
 
     try {
-      identity = await this.b24.accountIdentity();
+      identity = await this.tracker.accountIdentity();
     } catch (error) {
       throw new TaskSeenIdentityError(undefined, error);
     }

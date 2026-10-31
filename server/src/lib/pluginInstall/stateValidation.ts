@@ -27,9 +27,13 @@ const RECORD_FIELDS = [...VERSION_FIELDS, 'revision', 'previous', 'latest', 'che
  * Ошибки сохраняют исходный файл и никогда не превращаются в пустое состояние.
  */
 export function decodeInstallState(raw: unknown, writing = false): PluginInstallState {
-  const state = object(raw, [
+  const state = object(raw);
+
+  object(state, [
     'schemaVersion', 'nextRevision', 'plugins', 'job', 'completedJobs', 'apply', 'prepared',
     'cleanup', 'lastRollback', 'workers',
+    ...(Object.hasOwn(state, 'removal') ? ['removal'] : []),
+    ...(Object.hasOwn(state, 'removedIds') ? ['removedIds'] : []),
   ]);
 
   requireValid(state.schemaVersion === 1 && positiveInteger(state.nextRevision));
@@ -108,6 +112,29 @@ export function decodeInstallState(raw: unknown, writing = false): PluginInstall
 
   if (state.apply !== null) {
     validateIntent(state.apply, state);
+  }
+
+  if (state.removal != null) {
+    const removal = object(state.removal, [
+      'pluginId', 'transactionId', 'previousTransactionId', 'current', 'previous',
+      'npmDirs', 'previousNpmDirs',
+    ]);
+
+    requireValid(validPluginId(removal.pluginId) && uuid(removal.transactionId)
+      && uuid(removal.previousTransactionId) && removal.transactionId !== removal.previousTransactionId);
+    requireValid(state.apply === null && state.prepared === null);
+    validateIdentity(removal.current, true);
+    validateIdentity(removal.previous, true, true);
+
+    for (const paths of [removal.npmDirs, removal.previousNpmDirs]) {
+      requireValid(Array.isArray(paths)
+        && paths.every((value) => normalizePluginPackagePath(value, true) === value));
+    }
+  }
+
+  if (state.removedIds !== undefined) {
+    requireValid(Array.isArray(state.removedIds) && state.removedIds.every(validPluginId)
+      && new Set(state.removedIds).size === state.removedIds.length);
   }
 
   const revisions = [

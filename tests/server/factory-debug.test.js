@@ -160,8 +160,6 @@ test('settings API exposes global debug level and maps invalid input to 400', as
   const app = Fastify({ logger: false });
   app.decorate('sse', { broadcast: (name) => broadcasts.push(name) });
   await app.register(settingsModule, {
-    credsStore: { publicView: () => ({}), write: () => {} },
-    b24: { invalidate: () => {}, testAuth: async () => ({ ok: true }) },
     prefs: { read: () => ({}), write: () => ({}) },
     factoryDebug,
   });

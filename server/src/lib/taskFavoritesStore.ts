@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { parseB24TaskId } from './b24TaskId.ts';
+import { parseTrackerTaskId } from './trackers/taskId.ts';
 
 const SCHEMA_VERSION = 1;
 
@@ -29,8 +29,12 @@ interface FavoritesDocument {
   scopes: Record<string, FavoritesScope>;
 }
 
+/**
+ * Избранное принимает канонический числовой номер через общий разбор трекера.
+ * Ошибка остаётся собственной ошибкой хранилища и не раскрывает внутренние данные.
+ */
 export function normalizeFavoriteTaskId(value: unknown): string {
-  const normalized = parseB24TaskId(value);
+  const normalized = parseTrackerTaskId(value);
   if (!normalized) {
     throw new TaskFavoritesStoreError(
       'BAD_FAVORITE_TASK_ID',

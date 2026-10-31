@@ -21,7 +21,7 @@ process.env.NODE_ENV = 'test';
 let compileNonce = 0;
 
 // Одно монтирование модалки на задаче с готовым полем `telegram`
-// (именно в таком виде его отдаёт GET /api/b24/task/:id).
+// (именно в таком виде его отдаёт GET /api/tracker/task/:id).
 async function mountModal(t, task) {
   compileNonce += 1;
 

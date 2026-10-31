@@ -3,28 +3,28 @@ import test from 'node:test';
 
 import { decodeBoardDashboard, isBoardDashboard } from '../../web/src/shared/boardContracts.ts';
 
-test('B-STOCK-LEGACY-DTO-01: старый decoder принимает stock без salary-полей', () => {
+import { stockDriverModule } from '../server/helpers/trackerPackage.js';
+
+test('B-STOCK-LEGACY-DTO-01: decoder принимает ответ внешнего stock без salary-полей', async (t) => {
+  const driverModule = await stockDriverModule(t);
+
+  if (!driverModule) {
+    return;
+  }
+
+  const { default: createDriver } = driverModule;
+  const driver = createDriver({
+    credentials: { read: () => ({ baseUrl: 'https://cloud.fixture', accessToken: 'fixture' }) },
+    fetch: async (url) => Response.json({
+      result: String(url).endsWith('/user.current') ? { ID: '7' } : {
+        tasks: [{ id: '42', title: 'Облачная задача' }],
+      },
+    }),
+  });
   const snapshot = {
-    userId: 7,
-    trackerId: 'b24-stock',
-    capabilities: {
-      create: true,
-      complete: true,
-      users: true,
-      projects: true,
-      timer: false,
-      widgets: false,
-      comments: false,
-      attachments: false,
-      editing: false,
-      renew: false,
-    },
-    tasks: [{ id: 42, title: 'Облачная задача' }],
-    toReview: [],
-    created: [],
-    accomplice: [],
-    auditor: [],
-    widgets: [],
+    ...await driver.getDashboard(),
+    trackerId: driver.id,
+    capabilities: driver.capabilities,
   };
 
   assert.equal(isBoardDashboard(snapshot), true);

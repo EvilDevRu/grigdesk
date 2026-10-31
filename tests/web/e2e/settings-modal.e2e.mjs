@@ -115,7 +115,6 @@ test('UI00: общий модал на изолированном браузер
 
   const fixture = await startSettingsBrowser(t, {
     '/api/settings/prefs': data.prefs,
-    '/api/settings/b24': data.b24,
     '/api/system/launcher': data.launcher,
     '/api/system/server': data.server,
     '/api/system/version': data.release,
@@ -218,7 +217,7 @@ test('UI00: общий модал на изолированном браузер
   }
 
   for (const pageId of [
-    'connections.b24', 'connections.devices',
+    'connections.devices',
     'system.startup', 'system.updates', 'system.processes',
   ]) {
     await fixture.page.evaluate((id) => window.settingsFixture.settings.selectPage(id), pageId);

@@ -364,17 +364,17 @@ export async function toolRun(t, options = {}) {
         }]),
       }
     }));
-    await context.route('**/api/b24/**', async (route) => {
+    await context.route('**/api/tracker/**', async (route) => {
       const request = route.request();
       const pathname = new URL(request.url()).pathname;
-      const detail = pathname.match(/^\/api\/b24\/task\/([0-9]+)$/);
-      const timer = pathname.match(/^\/api\/b24\/task\/([0-9]+)\/timer\/(start|pause)$/);
-      const favorite = pathname.match(/^\/api\/b24\/task-favorites\/([0-9]+)$/);
-      const shelfTask = pathname.match(/^\/api\/b24\/task-shelf\/([0-9]+)$/);
-      const comment = pathname.match(/^\/api\/b24\/task\/([0-9]+)\/(comment|comments)$/);
+      const detail = pathname.match(/^\/api\/tracker\/task\/([0-9]+)$/);
+      const timer = pathname.match(/^\/api\/tracker\/task\/([0-9]+)\/timer\/(start|pause)$/);
+      const favorite = pathname.match(/^\/api\/tracker\/task-favorites\/([0-9]+)$/);
+      const shelfTask = pathname.match(/^\/api\/tracker\/task-shelf\/([0-9]+)$/);
+      const comment = pathname.match(/^\/api\/tracker\/task\/([0-9]+)\/(comment|comments)$/);
       let result = {};
 
-      if(pathname === '/api/b24/dashboard') {
+      if(pathname === '/api/tracker/dashboard') {
         result = {
 
           today: { hours: 0, tasks_count: 0 },
@@ -417,14 +417,14 @@ export async function toolRun(t, options = {}) {
         }
 
         result = task;
-      } else if(pathname === '/api/b24/task-seen') {
+      } else if(pathname === '/api/tracker/task-seen') {
         if(request.method() === 'POST') {
           seen.taskIds = [...new Set([...seen.taskIds, ...(request.postDataJSON().taskIds || [])])];
           seen.revision += 1;
         }
 
         result = seen;
-      } else if(pathname === '/api/b24/task-favorites' || favorite) {
+      } else if(pathname === '/api/tracker/task-favorites' || favorite) {
         if(favorite && request.method() !== 'GET') {
           favorites.taskIds = favorites.taskIds.filter((id) => id !== favorite[1]);
 
@@ -436,7 +436,7 @@ export async function toolRun(t, options = {}) {
         }
 
         result = favorites;
-      } else if(pathname === '/api/b24/task-shelf' || shelfTask) {
+      } else if(pathname === '/api/tracker/task-shelf' || shelfTask) {
         if(shelfTask) {
           const id = shelfTask[1];
 
@@ -493,9 +493,9 @@ export async function toolRun(t, options = {}) {
         }
 
         result = { comments: rows };
-      } else if(pathname === '/api/b24/users') {
+      } else if(pathname === '/api/tracker/users') {
         result = { users: [{ id: 1, name: 'Исполнитель' }] };
-      } else if(pathname === '/api/b24/groups') {
+      } else if(pathname === '/api/tracker/groups') {
         result = { groups: [] };
       }
 
@@ -603,10 +603,10 @@ export async function toolRun(t, options = {}) {
           surfaceStreams.push(url.pathname);
         }
       }
-      if(surface && url.pathname === '/api/b24/dashboard') {
+      if(surface && url.pathname === '/api/tracker/dashboard') {
         surfaceDashboards.push(owner);
       }
-      if(surface && request.method() === 'GET' && /^\/api\/b24\/task\/\d+$/.test(url.pathname)) {
+      if(surface && request.method() === 'GET' && /^\/api\/tracker\/task\/\d+$/.test(url.pathname)) {
         childDetails.push({ owner, path: url.pathname });
       }
       if(url.pathname === '/api/settings/factory-debug' && request.method() === 'GET') {

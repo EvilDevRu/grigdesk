@@ -4,6 +4,8 @@ import test from 'node:test';
 import { startHttpFixture } from '../b24/helpers/httpFixture.mts';
 import { selectTracker, STOCK_CAPABILITIES, trackerFixture } from './helpers/trackerFixture.js';
 
+import { copyStockPackage } from './helpers/trackerPackage.js';
+
 const TOKEN = 'fixture-stock-token-private';
 const task = (id, extra = {}) => ({
   id: String(id),
@@ -118,6 +120,7 @@ async function stockFixture(t, { failure = null, failingMethod = 'tasks.task.add
   });
   const signals = [];
   const fixture = await trackerFixture(t, {
+    setup: copyStockPackage,
     fetch: async (input, options) => {
       const url = new URL(String(input));
 
@@ -128,8 +131,12 @@ async function stockFixture(t, { failure = null, failingMethod = 'tasks.task.add
     },
   });
 
-  await selectTracker(fixture, 'b24-stock', {
-    'b24-stock': { baseUrl: 'https://cloud.fixture', accessToken: TOKEN },
+  if (!fixture) {
+    return null;
+  }
+
+  await selectTracker(fixture, 'grigdesk-b24', {
+    'grigdesk-b24': { baseUrl: 'https://cloud.fixture', accessToken: TOKEN },
   });
 
   return {
@@ -141,7 +148,12 @@ async function stockFixture(t, { failure = null, failingMethod = 'tasks.task.add
 
 test('STOCK-01: две страницы, создание, завершение и справочники через исходящий REST', async (t) => {
   const fixture = await stockFixture(t);
-  const dashboard = await fixture.request('GET', '/api/b24/dashboard');
+
+  if (!fixture) {
+    return;
+  }
+
+  const dashboard = await fixture.request('GET', '/api/tracker/dashboard');
 
   assert.equal(dashboard.statusCode, 200, dashboard.body);
   assert.deepEqual(dashboard.json().tasks.map((entry) => Number(entry.id)), [42, 43]);
@@ -156,20 +168,21 @@ test('STOCK-01: две страницы, создание, завершение 
     groupId: 11,
     priority: 2,
   };
-  const created = await fixture.request('POST', '/api/b24/tasks', creation);
+  const created = await fixture.request('POST', '/api/tracker/tasks', creation);
 
   assert.equal(created.statusCode, 200, created.body);
   assert.equal(created.json().id, 45);
-  assert.equal((await fixture.request('POST', '/api/b24/task/42/complete', {})).statusCode, 200);
+  assert.equal((await fixture.request('POST', '/api/tracker/task/42/complete', {})).statusCode, 200);
 
-  const detail = await fixture.request('GET', '/api/b24/task/42');
+  const detail = await fixture.request('GET', '/api/tracker/task/42');
 
   assert.equal(detail.statusCode, 200);
   assert.equal(detail.json().status, 5);
-  assert.deepEqual((await fixture.request('GET', '/api/b24/users?q=Иван')).json(), {
+  assert.equal(detail.json().statusText, 'Завершена');
+  assert.deepEqual((await fixture.request('GET', '/api/tracker/users?q=Иван')).json(), {
     users: [{ id: 7, name: 'Иван Тестовый' }],
   });
-  assert.deepEqual((await fixture.request('GET', '/api/b24/groups')).json(), {
+  assert.deepEqual((await fixture.request('GET', '/api/tracker/groups')).json(), {
     groups: [{ id: 11, name: 'Облачный проект' }],
   });
 
@@ -199,7 +212,12 @@ test('STOCK-01: две страницы, создание, завершение 
 for (const failure of ['expired', 'forbidden', 'rate', 'unavailable', 'malformed', 'missing', 'timeout']) {
   test(`STOCK-02: ${failure} безопасно отказывает без повтора mutation`, { timeout: 40_000 }, async (t) => {
     const fixture = await stockFixture(t, { failure });
-    const response = await fixture.request('POST', '/api/b24/tasks', { title: 'Не повторять' });
+
+    if (!fixture) {
+      return;
+    }
+
+    const response = await fixture.request('POST', '/api/tracker/tasks', { title: 'Не повторять' });
 
     assert.ok(response.statusCode >= 400);
     assert.equal(response.body.includes(TOKEN), false);
@@ -217,21 +235,30 @@ test('STOCK-02: TASK_NOT_FOUND отличается от доступа и се�
     await t.test(failure, async (s) => {
       const fixture = await stockFixture(s, { failure, failingMethod: 'tasks.task.get' });
 
-      assert.equal(await fixture.b24.probeTaskNumber('42'), expected);
+      if (!fixture) {
+        return;
+      }
+
+      assert.equal(await fixture.tracker.probeTaskNumber('42'), expected);
     });
   }
 });
 
 for (const [name, method, url, payload] of [
-  ['timer', 'POST', '/api/b24/task/42/timer/start', {}],
-  ['comments', 'POST', '/api/b24/task/42/comment', { text: 'Не поддерживается' }],
-  ['editing', 'PUT', '/api/b24/task/42', { title: 'Не менять' }],
-  ['renew', 'POST', '/api/b24/task/42/renew', {}],
-  ['images', 'POST', '/api/b24/tasks', { title: 'С файлом', images: [{ path: '/fixture/image.png' }] }],
-  ['STOCK-03-ATTACH', 'POST', '/api/b24/tasks', { title: 'С кадром', frames: ['shot.png'] }],
+  ['timer', 'POST', '/api/tracker/task/42/timer/start', {}],
+  ['comments', 'POST', '/api/tracker/task/42/comment', { text: 'Не поддерживается' }],
+  ['editing', 'PUT', '/api/tracker/task/42', { title: 'Не менять' }],
+  ['renew', 'POST', '/api/tracker/task/42/renew', {}],
+  ['images', 'POST', '/api/tracker/tasks', { title: 'С файлом', images: [{ path: '/fixture/image.png' }] }],
+  ['STOCK-03-ATTACH', 'POST', '/api/tracker/tasks', { title: 'С кадром', frames: ['shot.png'] }],
 ]) {
   test(`STOCK-03 / B-VIDEO-01: ${name} отклонён до сети`, async (t) => {
     const fixture = await stockFixture(t);
+
+    if (!fixture) {
+      return;
+    }
+
     const before = fixture.cloud.requests.length;
     const response = await fixture.request(method, url, payload);
 

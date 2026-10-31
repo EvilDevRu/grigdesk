@@ -15,7 +15,7 @@ let nonce = 0;
  * Каталог явно подтверждает возможности выбранного внешнего драйвера.
  * Legacy-карточки используют тот же metadata DTO, что и проверки новых ограничений.
  */
-export function trackerMetadata(trackerId = 'b24-custom', capabilities = CUSTOM_CAPS) {
+export function trackerMetadata(trackerId = 'grigdesk-b24-discript', capabilities = CUSTOM_CAPS) {
   return {
     revision: 1,
     externalId: trackerId,
@@ -33,7 +33,7 @@ export function trackerMetadata(trackerId = 'b24-custom', capabilities = CUSTOM_
  * Metadata приходит независимо от details, чтобы тест различал readiness и capabilities.
  */
 export async function mountTrackerCard(t, {
-  trackerId = 'b24-custom',
+  trackerId = 'grigdesk-b24-discript',
   capabilities = CUSTOM_CAPS,
   id = '42',
   presentation = 'dialog',
@@ -117,7 +117,7 @@ export async function mountTrackerCard(t, {
           : structuredClone(metadata);
       }
 
-      if (url === `/api/b24/task/${id}` || url === `/api/grigdesk-tasks/${id}`) {
+      if (url === `/api/tracker/task/${id}` || url === `/api/grigdesk-tasks/${id}`) {
         if (detailMode === 'held') {
           return heldDetail.promise;
         }

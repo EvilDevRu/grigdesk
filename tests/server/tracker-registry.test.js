@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdir, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -16,9 +16,11 @@ test('TRACKER-REGISTRY-01: own постоянно активен, доска в�
   const initial = await fixture.request('GET', '/api/trackers');
 
   assert.equal(initial.statusCode, 200);
+  assert.equal((await fixture.request('GET', '/api/b24/dashboard')).statusCode, 404);
   assert.deepEqual(initial.json().activeIds, ['own']);
   assert.equal(initial.json().externalId, null);
-  assert.ok(initial.json().drivers.some((driver) => driver.id === 'b24-stock'));
+  assert.deepEqual(initial.json().drivers.map((driver) => driver.id).sort(),
+    ['fixture-a', 'fixture-b', 'own']);
 
   await selectTracker(fixture, 'fixture-a');
   await selectTracker(fixture, 'fixture-b');
@@ -56,14 +58,14 @@ test('TRACKER-CONSUMERS-01: прежний HTTP и identity используют
   await selectTracker(fixture, 'fixture-a');
   await selectTracker(fixture, 'fixture-b');
 
-  const detail = await fixture.request('GET', '/api/b24/task/42');
-  const created = await fixture.request('POST', '/api/b24/tasks', { title: 'Новая' });
+  const detail = await fixture.request('GET', '/api/tracker/task/42');
+  const created = await fixture.request('POST', '/api/tracker/tasks', { title: 'Новая' });
 
   assert.equal(detail.statusCode, 200);
   assert.equal(detail.json().title, 'fixture-b');
   assert.equal(created.statusCode, 200);
-  assert.deepEqual(await fixture.b24.accountIdentity(), {
-    baseUrl: 'https://tracker.fixture', userId: 7,
+  assert.deepEqual(await fixture.tracker.accountIdentity(), {
+    baseUrl: 'https://tracker.fixture', userId: '7',
   });
   assert.deepEqual(await trackerCalls(fixture.config, 'fixture-a'), []);
   assert.deepEqual((await trackerCalls(fixture.config, 'fixture-b')).map((call) => call.method), [
@@ -71,20 +73,27 @@ test('TRACKER-CONSUMERS-01: прежний HTTP и identity используют
   ]);
 });
 
-test('TRACKER-REGISTRY-02 / B-MIGRATION-01: legacy credentials без пакета сохраняют unavailable',
+test('TRACKER-REGISTRY-02 / B-MIGRATION-01: старый файл реквизитов полностью игнорируется',
   async (t) => {
     const fixture = await trackerFixture(t, { legacy: true });
     const catalog = await fixture.request('GET', '/api/trackers');
 
     assert.equal(catalog.statusCode, 200);
-    assert.equal(catalog.json().externalId, 'b24-custom');
+    assert.equal(catalog.json().externalId, null);
     assert.deepEqual(catalog.json().activeIds, ['own']);
-    assert.equal(catalog.json().drivers.find((driver) => driver.id === 'b24-custom').status, 'unavailable');
+    assert.deepEqual(catalog.json().drivers.map((driver) => driver.id).sort(), ['own']);
 
-    const dashboard = await fixture.request('GET', '/api/b24/dashboard');
+    const dashboard = await fixture.request('GET', '/api/tracker/dashboard');
 
     assert.equal(dashboard.statusCode, 400);
     assert.equal(dashboard.json().error, 'b24_error');
+
+    assert.equal(existsSync(fixture.config.trackerCredentialsPath), false);
+
+    const previous = JSON.parse(await readFile(path.join(fixture.root, 'state/b24-creds.json'), 'utf8'));
+
+    assert.equal(previous.login, 'fixture-user');
+    assert.equal(previous.password, 'fixture-password');
   });
 
 for (const kind of ['corrupt', 'contract', 'duplicate', 'shadow', 'symlink']) {
@@ -156,7 +165,15 @@ for (const kind of ['corrupt', 'contract', 'duplicate', 'shadow', 'symlink']) {
 }
 
 test('TRACKER-NUMBER-01: missing selected driver не доказывает отсутствие номера', async (t) => {
-  const fixture = await trackerFixture(t, { legacy: true });
+  const fixture = await trackerFixture(t, {
+    setup: async (config) => {
+      await mkdir(path.dirname(config.trackerSettingsPath), { recursive: true });
+      await writeFile(config.trackerSettingsPath, JSON.stringify({
+        externalId: 'missing-driver',
+        revision: 1,
+      }));
+    },
+  });
   const catalog = await fixture.request('GET', '/api/trackers');
 
   assert.equal(catalog.statusCode, 200);

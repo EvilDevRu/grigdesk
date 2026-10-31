@@ -16,7 +16,7 @@ import {
 import type { PackageExpectations, ValidatedPackage } from '../pluginInstall/validatePackage.ts';
 
 const DRIVER_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
-const RESERVED_IDS = new Set(['own', 'b24-stock', 'constructor', 'prototype', '__proto__']);
+const RESERVED_IDS = new Set(['own', 'constructor', 'prototype', '__proto__']);
 const PLUGIN_FIELDS = ['api', 'nav', 'category', 'web', 'webModule', 'api-ext'];
 
 /**

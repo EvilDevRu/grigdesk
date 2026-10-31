@@ -76,11 +76,11 @@ export async function readGrigdeskTask(
 
 export class GrigdeskTaskStore {
   config: GrigdeskTasksConfig;
-  b24?: TaskNumberProbe;
+  tracker?: TaskNumberProbe;
 
-  constructor({ config, b24 }: { config: GrigdeskTasksConfig; b24?: TaskNumberProbe }) {
+  constructor({ config, tracker }: { config: GrigdeskTasksConfig; tracker?: TaskNumberProbe }) {
     this.config = config;
-    this.b24 = b24;
+    this.tracker = tracker;
   }
 
   async list() {
@@ -113,7 +113,7 @@ export class GrigdeskTaskStore {
 
       const document = await readDocument(this.config);
       const id = await reserveTaskNumber(
-        this.config, document.nextId, document.tasks.map((task) => task.id), this.b24,
+        this.config, document.nextId, document.tasks.map((task) => task.id), this.tracker,
       );
       const { clientOrigin, ...fields } = draft;
       const task: GrigdeskTask = {

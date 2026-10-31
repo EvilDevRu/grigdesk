@@ -1,7 +1,9 @@
 import { defineStore } from 'pinia';
 
 import { api, ApiError, failureText } from '../shared/apiClient.ts';
-import { decodeDriverInstallChecks, decodeDriverInstallResponse } from '../shared/driverInstallApi.ts';
+import {
+  decodeDriverInstallChecks, decodeDriverInstallResponse, decodeDriverRemoval, decodeDriverSources,
+} from '../shared/driverInstallApi.ts';
 import type { DriverInstallJob } from '../shared/driverInstallApi.ts';
 import { decodeInstallVersions, decodeStoredRollback } from '../shared/pluginInstallApi.ts';
 import type { PluginInstallInfo, PluginVersionRef } from '../../../shared/plugins/pluginInstallContracts.ts';
@@ -16,6 +18,10 @@ export const useDriverInstallStore = defineStore('driver-install', {
     job: null as DriverInstallJob | null,
     installed: {} as Record<string, PluginInstallInfo>,
     versions: [] as PluginVersionRef[],
+    versionsEmpty: false,
+    sources: [] as { title: string; url: string }[],
+    sourcesLoading: false,
+    sourcesError: '',
     busy: false,
     error: '',
     recoveryError: '',
@@ -27,6 +33,26 @@ export const useDriverInstallStore = defineStore('driver-install', {
     tag: '',
   }),
   actions: {
+    /**
+     * Открытие диалога читает только локальный каталог, без проверки репозиториев.
+     * Ошибка каталога сохраняет ручной ввод и не становится rejected promise lifecycle.
+     */
+    async loadSources() {
+      if (this.sourcesLoading) {
+        return;
+      }
+
+      this.sourcesLoading = true;
+      this.sourcesError = '';
+
+      try {
+        this.sources = decodeDriverSources(await api.get('/api/trackers/sources'));
+      } catch (error) {
+        this.sourcesError = failureText(error);
+      } finally {
+        this.sourcesLoading = false;
+      }
+    },
     /**
      * Один допуск охватывает подготовку CAS и сам POST, включая повтор неизвестного исхода.
      * Ошибка сохраняет черновик, job и намерение отката для следующего открытия диалога.
@@ -105,9 +131,33 @@ export const useDriverInstallStore = defineStore('driver-install', {
     },
     versionsForSource() {
       return this.run(async () => {
+        this.versions = [];
+        this.versionsEmpty = false;
         this.versions = decodeInstallVersions(await api.post('/api/driver-installs/versions', {
           url: this.url,
         })).versions;
+        this.versionsEmpty = this.versions.length === 0;
+      });
+    },
+    /**
+     * Удаление подтверждается сервером и перечитывает каталог с сохранённой tombstone-пометкой.
+     * Сброс выбранного источника приходит тем же SSE, что обычная смена настройки доски.
+     */
+    remove(id: string) {
+      return this.run(async () => {
+        const result = decodeDriverRemoval(await api.post(`/api/driver-installs/drivers/${id}/remove`, {}));
+
+        if (this.job?.driverId === result.id) {
+          this.job = null;
+        }
+
+        await this.readInstalled();
+        this.restartRequired ||= result.restartRequired;
+
+        const trackers = useTrackersStore();
+
+        trackers.invalidate();
+        await trackers.load(true);
       });
     },
     prepare() {
@@ -116,6 +166,7 @@ export const useDriverInstallStore = defineStore('driver-install', {
       }
 
       return this.run(async () => {
+        this.versionsEmpty = false;
         await this.accept(await api.post('/api/driver-installs/jobs', {
           url: this.url,
           version: this.tag.replace(/^v/u, ''),

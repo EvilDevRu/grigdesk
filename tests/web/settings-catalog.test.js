@@ -17,7 +17,7 @@ const EXPECTED_PAGES = [
   ['agents', ['providers', 'models']],
   ['automation', ['chats', 'context', 'launch', 'monitoring', 'arbiter', 'analysis', 'shelf', 'inbox']],
   ['speech', ['dictation', 'video', 'videoTasks', 'language', 'models', 'advanced']],
-  ['connections', ['b24', 'devices', 'ssh', 'db', 'telegram', 'github']],
+  ['connections', ['devices', 'ssh', 'db', 'telegram', 'github']],
   ['tools', ['code', 'docker', 'studio3d', 'showcase']],
   ['plugins', ['installed']],
   ['system', ['startup', 'updates', 'diagnostics', 'processes']],
@@ -82,7 +82,6 @@ test('CAT02: вызов, query, сохранённая страница, пер�
   const oldTabs = {
     app: 'interface.behavior',
     speech: 'speech.dictation',
-    b24: 'connections.b24',
     providers: 'agents.providers',
     runs: 'automation.chats',
     plugins: 'plugins.installed',
@@ -105,7 +104,7 @@ test('CAT02: вызов, query, сохранённая страница, пер�
 });
 
 test('CAT03: неизвестный адрес и отказ storage дают следующий безопасный вариант', () => {
-  const storage = storageFixture({ 'grigdesk-settings-page': 'connections.b24' });
+  const storage = storageFixture({ 'grigdesk-settings-page': 'connections.devices' });
 
   assert.equal(
     resolveSettingsPage({
@@ -113,10 +112,10 @@ test('CAT03: неизвестный адрес и отказ storage дают с
       queryPage: '../evil.vue',
       storage,
     }),
-    'connections.b24',
+    'connections.devices',
   );
   assert.equal(resolveSettingsPage({ pageId: {}, queryPage: 'speech.video' }), 'speech.video');
-  assert.equal(storage.records.get('grigdesk-settings-page'), 'connections.b24');
+  assert.equal(storage.records.get('grigdesk-settings-page'), 'connections.devices');
   assert.equal(resolveSettingsPage({ storage: storageFixture({ 'grigdesk-settings-page': '{' }) }),
     'interface.behavior');
 

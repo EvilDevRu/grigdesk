@@ -284,36 +284,7 @@ SETTINGS_FIELDS.push(...SPEECH_FIELDS.map(([pageId, key, control, label, descrip
   scope: translator.t('ru', 'settings.allDevices'),
 })));
 
-const CONNECTION_FIELDS = [
-  [
-    'baseUrl',
-    'text',
-    translator.t('ru', 'settings.bPortalAddress'),
-    translator.t('ru', 'settings.theFullAddressIsSavedTogetherWith'),
-  ],
-  [
-    'login',
-    'text',
-    translator.t('ru', 'settings.bLogin'),
-    translator.t('ru', 'settings.portalAccountForAllDevices'),
-  ],
-  [
-    'password',
-    'text',
-    translator.t('ru', 'settings.bPassword'),
-    translator.t('ru', 'settings.enterANewPasswordWheneverChangingThe'),
-  ],
-] as const;
-
-SETTINGS_FIELDS.push(...CONNECTION_FIELDS.map(([key, control, label, description]) => ({
-  address: { pageId: 'connections.b24', fieldPath: [key] },
-  resourceId: 'b24',
-  key,
-  control,
-  label,
-  description,
-  scope: translator.t('ru', 'settings.allDevices'),
-})), {
+SETTINGS_FIELDS.push({
   address: { pageId: 'system.startup', fieldPath: ['enabled'] },
   resourceId: 'autostart',
   key: 'enabled',
@@ -483,12 +454,6 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     description: translator.t('ru', 'settings.modelsDeviceEnvironmentAndPerformanceMeasurement'),
   },
   {
-    id: 'connections.b24',
-    groupId: 'connections',
-    label: translator.t('ru', 'settings.bitrix'),
-    description: translator.t('ru', 'settings.portalCredentialsAndConnectionTesting'),
-  },
-  {
     id: 'connections.devices',
     groupId: 'connections',
     label: translator.t('ru', 'settings.serverAccess'),
@@ -595,7 +560,6 @@ function migrateLegacyPage(storage: SettingsStorage): string | undefined {
   const legacyPages = new Map([
     ['app', 'interface.behavior'],
     ['speech', 'speech.dictation'],
-    ['b24', 'connections.b24'],
     ['providers', 'agents.providers'],
     ['runs', 'automation.chats'],
     ['plugins', 'plugins.installed'],
@@ -752,10 +716,6 @@ const PAGE_MESSAGES: Record<string, Record<string, string>> = {
   "speech.advanced": {
     "label": "settings.speechAdvancedPage",
     "description": "settings.modelsDeviceEnvironmentAndPerformanceMeasurement"
-  },
-  "connections.b24": {
-    "label": "settings.bitrix",
-    "description": "settings.portalCredentialsAndConnectionTesting"
   },
   "connections.devices": {
     "label": "settings.serverAccess",
@@ -978,21 +938,6 @@ const FIELD_MESSAGES: Record<string, Record<string, string>> = {
   "speech:conditionOnPreviousText": {
     "label": "settings.usePreviousText",
     "description": "settings.forDictationVideoTranscriptionUsesItsOwn",
-    "scope": "settings.allDevices"
-  },
-  "b24:baseUrl": {
-    "label": "settings.bPortalAddress",
-    "description": "settings.theFullAddressIsSavedTogetherWith",
-    "scope": "settings.allDevices"
-  },
-  "b24:login": {
-    "label": "settings.bLogin",
-    "description": "settings.portalAccountForAllDevices",
-    "scope": "settings.allDevices"
-  },
-  "b24:password": {
-    "label": "settings.bPassword",
-    "description": "settings.enterANewPasswordWheneverChangingThe",
     "scope": "settings.allDevices"
   },
   "autostart:enabled": {

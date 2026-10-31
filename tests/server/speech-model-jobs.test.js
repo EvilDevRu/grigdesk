@@ -787,8 +787,6 @@ async function settingsApp(t, modelJobs) {
   const app = Fastify({ logger: false });
   t.after(() => app.close());
   await app.register(settingsModule, {
-    credsStore: { publicView: () => ({}), write: () => {} },
-    b24: { invalidate: () => {}, testAuth: async () => ({ ok: true }) },
     prefs: new PrefsStore({ prefsPath: path.join(root, 'prefs.json') }),
     factoryDebug: {},
     speechRuntime: { capabilities: async () => ({ local: { ready: false } }) },

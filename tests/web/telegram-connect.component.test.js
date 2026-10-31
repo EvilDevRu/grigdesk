@@ -98,8 +98,8 @@ test('форма подключает бота: пробелы срезаны, �
     ['POST', '/api/telegram/connect', { token: TOKEN }],
     ['GET', '/api/telegram/chats'],
     ['GET', '/api/telegram/rules'],
-    ['GET', '/api/b24/users'],
-    ['GET', '/api/b24/groups'],
+    ['GET', '/api/tracker/users'],
+    ['GET', '/api/tracker/groups'],
   ]);
   assert.match(wrapper.text(), /@example_inbox_bot/);
   assert.match(wrapper.text(), /…v5u6/);
@@ -167,7 +167,7 @@ test('включённый режим приватности виден пред
   // имеет свой API и с Telegram-страницы не читается.
   assert.deepEqual(calls, [
     '/api/telegram/status', '/api/telegram/chats', '/api/telegram/rules',
-    '/api/b24/users', '/api/b24/groups',
+    '/api/tracker/users', '/api/tracker/groups',
     '/api/telegram/recheck', '/api/telegram/chats',
   ]);
   assert.equal(wrapper.find('.state.warn').exists(), false);

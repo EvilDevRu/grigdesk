@@ -1420,7 +1420,7 @@ export const mobileSchema = {
       },
       "additionalProperties": true
     },
-    "b24-tasks": {
+    "tracker-tasks": {
       "type": "object",
       "required": [
         "tasks",
@@ -1492,7 +1492,7 @@ export const mobileSchema = {
       },
       "additionalProperties": true
     },
-    "b24-task": {
+    "tracker-task": {
       "type": "object",
       "required": [
         "task"
@@ -2603,25 +2603,25 @@ export const mobileSchema = {
     },
     {
       "method": "GET",
-      "path": "/api/mobile/v1/b24/tasks",
-      "response": "b24-tasks",
+      "path": "/api/mobile/v1/tracker/tasks",
+      "response": "tracker-tasks",
       "status": 200
     },
     {
       "method": "GET",
-      "path": "/api/mobile/v1/b24/tasks/:id",
-      "response": "b24-task",
+      "path": "/api/mobile/v1/tracker/tasks/:id",
+      "response": "tracker-task",
       "status": 200
     },
     {
       "method": "GET",
-      "path": "/api/mobile/v1/b24/tasks/:id/launch-options",
+      "path": "/api/mobile/v1/tracker/tasks/:id/launch-options",
       "response": "launch-options",
       "status": 200
     },
     {
       "method": "POST",
-      "path": "/api/mobile/v1/b24/tasks/:id/launch",
+      "path": "/api/mobile/v1/tracker/tasks/:id/launch",
       "response": "launch",
       "status": 200,
       "headers": [

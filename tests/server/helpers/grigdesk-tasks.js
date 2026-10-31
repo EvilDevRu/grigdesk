@@ -59,7 +59,7 @@ export async function tasksFixture(t, {
   const portalCalls = [];
   const probes = [];
   const presence = new Map();
-  const b24 = {
+  const tracker = {
     isConfigured: () => configured,
     async probeTaskNumber(id) {
       probes.push(String(id));
@@ -137,7 +137,7 @@ export async function tasksFixture(t, {
 
   const moduleOptions = {
     config,
-    b24,
+    tracker,
     factoryState,
     projectsService,
     prefs: { read: () => ({}) },

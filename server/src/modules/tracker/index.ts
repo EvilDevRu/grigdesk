@@ -1,21 +1,20 @@
-// Модуль b24 — доска «Рабочего стола», детали задач и управляемые мутации портала.
-// Все действия проходят через единый сериализованный B24Adapter с общей сессией.
+// Модуль трекера — доска «Рабочего стола», детали задач и управляемые мутации портала.
+// Все действия проходят через единый сериализованный фасад трекера с общей сессией.
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
-import type { B24Adapter } from '../../adapters/b24.ts';
 import { TrackerError } from '../../lib/trackers/contract.ts';
 import type { TrackerFacade } from '../../lib/trackers/facade.ts';
 import {
-  B24ValidationError,
+  TrackerValidationError,
   normalizeTaskUpdateFields,
 } from '../../lib/trackers/taskFields.ts';
 
-export interface B24ModuleOptions {
-  b24: B24Adapter;
+export interface TrackerModuleOptions {
+  tracker: TrackerFacade;
 }
 
-// Свободная запись портала: форму задают ответы Битрикса.
+// Свободная запись портала: форму задаёт внешний драйвер.
 type Payload = Record<string, unknown>;
 
 // Маршруты этого модуля: у всех задачных ручек один и тот же параметр адреса.
@@ -34,14 +33,14 @@ function failureText(error: unknown): string {
  * Прежние HTTP-пути делегируют операции общему фасаду выбранного трекера.
  * Сервер сохраняет разрешение media-имён и проверку поколения новых клиентов.
  */
-async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Promise<void> {
-  const { b24 } = opts;
+async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOptions): Promise<void> {
+  const { tracker } = opts;
 
   // Новые клиенты фиксируют поколение при подготовке мутации.
   // Legacy HTTP и CLI без заголовка продолжают обращаться к текущему выбору.
   const assertGeneration = (request: FastifyRequest) => {
     if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
-      || !request.url.startsWith('/api/b24/')) {
+      || !request.url.startsWith('/api/tracker/')) {
       return;
     }
 
@@ -52,7 +51,7 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
         throw new TrackerError('tracker_context_changed', 'Некорректное поколение трекера', 409);
       }
 
-      (b24 as TrackerFacade).assertContext?.(Number(generation));
+      (tracker as TrackerFacade).assertContext?.(Number(generation));
     }
   };
 
@@ -61,9 +60,11 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
    * Одна функция обслуживает чтение и ответ после редактирования, чтобы DTO не расходились.
    */
   const taskWithDiscussion = async (id: string): Promise<unknown> => {
-    const task = await b24.taskDetail(id) as Payload | null;
+    const task = await tracker.taskDetail(id) as Payload | null;
 
-    if (typeof fastify.telegramDiscussion !== 'function' || !task) return task;
+    if (typeof fastify.telegramDiscussion !== 'function' || !task) {
+      return task;
+    }
 
     const text = [task.title, task.description].filter(Boolean).join('\n');
     const telegram = await fastify.telegramDiscussion(text) as { links?: unknown[] };
@@ -72,9 +73,9 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
   };
 
   // Полный дашборд: задачи + на контроле + я поставил + показатели + графики.
-  fastify.get('/api/b24/dashboard', async (request, reply) => {
+  fastify.get('/api/tracker/dashboard', async (request, reply) => {
     try {
-      return await b24.getDashboard();
+      return await tracker.getDashboard();
     } catch (err) {
       const message = failureText(err);
       const notConfigured = /не настроен/i.test(message);
@@ -91,12 +92,16 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
   // ответ обычной задачи остался прежним.
   //
   // Ссылка на декоратор ленивая (проверка в момент запроса): модуль telegram
-  // регистрируется ПОЗЖЕ b24, а к первому запросу он уже на месте. Выключенный
+  // регистрируется ПОЗЖЕ tracker, а к первому запросу он уже на месте. Выключенный
   // плагин, сломанный архив или молчащий Телеграм отдают пустоту — карточка
   // задачи открывается в любом случае (см. modules/telegram).
-  fastify.get<TaskRoute>('/api/b24/task/:id', async (request, reply) => {
+  fastify.get<TaskRoute>('/api/tracker/task/:id', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
-    if (!id) return reply.code(400).send({ error: 'bad_task_id' });
+
+    if (!id) {
+      return reply.code(400).send({ error: 'bad_task_id' });
+    }
+
     try {
       return await taskWithDiscussion(id);
     } catch (err) {
@@ -105,18 +110,18 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
   });
 
   // Поиск пользователей (для выбора исполнителя).
-  fastify.get<TaskRoute>('/api/b24/users', async (request, reply) => {
+  fastify.get<TaskRoute>('/api/tracker/users', async (request, reply) => {
     try {
-      return { users: await b24.findUsers(request.query.q || '') };
+      return { users: await tracker.findUsers(request.query.q || '') };
     } catch (err) {
       return reply.code(502).send({ error: 'b24_error', message: failureText(err) });
     }
   });
 
   // Доступные текущему пользователю проекты/рабочие группы для поля GROUP_ID задачи.
-  fastify.get('/api/b24/groups', async (request, reply) => {
+  fastify.get('/api/tracker/groups', async (request, reply) => {
     try {
-      return { groups: await b24.listGroups() };
+      return { groups: await tracker.listGroups() };
     } catch (err) {
       return reply.code(502).send({ error: 'b24_error', message: failureText(err) });
     }
@@ -131,7 +136,7 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
 
       return await fn(request);
     } catch (err) {
-      const badRequest = err instanceof B24ValidationError;
+      const badRequest = err instanceof TrackerValidationError;
       const trackerError = err instanceof TrackerError;
 
       return reply.code(trackerError ? err.status : badRequest ? 400 : 502).send({
@@ -149,13 +154,14 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
   // Принимать путь от клиента здесь нельзя: это ручка, которая грузит файлы на портал,
   // и произвольный путь означал бы «залей туда что скажу». Ссылка ленивая — модуль
   // media регистрируется отдельно, а при выключенном плагине кадров просто нет.
-  fastify.post<TaskRoute>('/api/b24/tasks', wrap((r) => {
+  fastify.post<TaskRoute>('/api/tracker/tasks', wrap((r) => {
     const body = { ...((r.body || {}) as Payload) };
 
-    (b24 as TrackerFacade).assertAttachments?.(body);
+    (tracker as TrackerFacade).assertAttachments?.(body);
 
     const names = Array.isArray(body.frames) ? body.frames : [];
     const clips = Array.isArray(body.clips) ? body.clips : [];
+
     delete body.frames;
     delete body.clips;
     // Фрагмент записи — такое же вложение по ИМЕНИ, что и кадр, и путь ему так же
@@ -170,7 +176,10 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
         path,
         name: i ? `фрагмент-${i + 1}.mp4` : 'фрагмент.mp4',
       }));
-      if (files.length) body.images = [...(Array.isArray(body.images) ? body.images : []), ...files];
+
+      if (files.length) {
+        body.images = [...(Array.isArray(body.images) ? body.images : []), ...files];
+      }
     }
     if (names.length && typeof fastify.mediaFramePath === 'function') {
       const paths = names
@@ -183,53 +192,57 @@ async function b24Module(fastify: FastifyInstance, opts: B24ModuleOptions): Prom
       const files = paths.map((path, i) => ({ path, name: i ? `запись-${i + 1}.jpg` : 'запись.jpg' }));
       // Исчезнувший кадр (истёк TTL, сменился разбор) задачу не отменяет: описание с
       // таймкодом на месте, и терять из-за картинки уже готовую постановку незачем.
-      if (files.length) body.images = [...(Array.isArray(body.images) ? body.images : []), ...files];
+      if (files.length) {
+        body.images = [...(Array.isArray(body.images) ? body.images : []), ...files];
+      }
     }
-    return b24.createTask(body);
+
+    return tracker.createTask(body);
   }));
 
-  fastify.put<TaskRoute>('/api/b24/task/:id', wrap(async (r) => {
+  fastify.put<TaskRoute>('/api/tracker/task/:id', wrap(async (r) => {
     const id = taskId(r);
+
     if (!id) {
-      throw new B24ValidationError('Некорректный номер задачи');
+      throw new TrackerValidationError('Некорректный номер задачи');
     }
 
     const fields = normalizeTaskUpdateFields(r.body);
-    const context = (b24 as TrackerFacade).captureContext?.();
+    const context = (tracker as TrackerFacade).captureContext?.();
 
-    await b24.updateTask(id, fields);
+    await tracker.updateTask(id, fields);
 
     if (context) {
-      (b24 as TrackerFacade).assertContext(context);
+      (tracker as TrackerFacade).assertContext(context);
     }
 
     return taskWithDiscussion(id);
   }));
-  fastify.post<TaskRoute>('/api/b24/task/:id/comment', wrap((r) => b24.addComment(
+  fastify.post<TaskRoute>('/api/tracker/task/:id/comment', wrap((r) => tracker.addComment(
     taskId(r),
     ((r.body || {}) as Payload).text || '',
   )));
 
   // Комментарии задачи (для таба в модалке): без системных, свежие снизу.
-  fastify.get<TaskRoute>('/api/b24/task/:id/comments', wrap(async (r) => {
-    const page = await b24.taskPageData(taskId(r)) as Payload;
+  fastify.get<TaskRoute>('/api/tracker/task/:id/comments', wrap(async (r) => {
+    const page = await tracker.taskPageData(taskId(r)) as Payload;
     const comments = Array.isArray(page.comments) ? page.comments as Payload[] : [];
 
     return { comments: comments.filter((c) => !c.isSystem) };
   }));
 
-  fastify.post<TaskRoute>('/api/b24/task/:id/timer/:action', wrap((r) => {
+  fastify.post<TaskRoute>('/api/tracker/task/:id/timer/:action', wrap((r) => {
     const a = String(r.params.action ?? '');
 
     if (!['start', 'pause', 'stop'].includes(a)) {
       throw new Error(`неизвестное действие таймера: ${a}`);
     }
 
-    return b24.timer(a, taskId(r));
+    return tracker.timer(a, taskId(r));
   }));
 
-  fastify.post<TaskRoute>('/api/b24/task/:id/complete', wrap((r) => b24.completeTask(taskId(r))));
-  fastify.post<TaskRoute>('/api/b24/task/:id/renew', wrap((r) => b24.renewTask(taskId(r))));
+  fastify.post<TaskRoute>('/api/tracker/task/:id/complete', wrap((r) => tracker.completeTask(taskId(r))));
+  fastify.post<TaskRoute>('/api/tracker/task/:id/renew', wrap((r) => tracker.renewTask(taskId(r))));
 }
 
-export default fp(b24Module, { name: 'module-b24' });
+export default fp(trackerModule, { name: 'module-tracker' });
