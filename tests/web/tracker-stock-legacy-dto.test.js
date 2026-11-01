@@ -21,7 +21,16 @@ test('B-STOCK-LEGACY-DTO-01: decoder принимает ответ внешне�
     }) },
     fetch: async (url) => Response.json({
       result: String(url).endsWith('/user.current') ? { ID: '7' } : {
-        tasks: [{ id: '42', title: 'Облачная задача' }],
+        tasks: [{
+          id: '42',
+          title: 'Облачная задача',
+          group: {},
+          responsible: {
+            id: '7',
+            name: 'Исполнитель',
+            workPosition: '',
+          },
+        }],
       },
     }),
   });
@@ -36,6 +45,8 @@ test('B-STOCK-LEGACY-DTO-01: decoder принимает ответ внешне�
   const decoded = decodeBoardDashboard(snapshot);
 
   assert.equal(decoded.tasks[0].id, 42);
+  assert.equal(decoded.tasks[0].group, '');
+  assert.equal(decoded.tasks[0].responsible, 'Исполнитель');
   assert.equal(decoded.today, undefined);
   assert.equal(decoded.month, undefined);
   assert.equal(decoded.charts, undefined);

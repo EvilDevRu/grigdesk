@@ -14,6 +14,12 @@ const task = (id, extra = {}) => ({
   responsibleId: '7',
   createdBy: '9',
   groupId: '11',
+  group: { id: '11', name: 'Облачный проект' },
+  responsible: {
+    id: '7',
+    name: 'Исполнитель',
+    workPosition: '',
+  },
   accomplices: [],
   auditors: [],
   ...extra,
@@ -186,6 +192,8 @@ test('STOCK-01: две страницы, создание, завершение 
   assert.equal(dashboard.statusCode, 200, dashboard.body);
   assert.deepEqual(dashboard.json().tasks.map((entry) => Number(entry.id)), [42, 43]);
   assert.equal(dashboard.json().tasks.some((entry) => Number(entry.id) === 44), false);
+  assert.equal(dashboard.json().tasks[0].group, 'Облачный проект');
+  assert.equal(dashboard.json().tasks[0].responsible, 'Исполнитель');
   assert.deepEqual(dashboard.json().capabilities, STOCK_CAPABILITIES);
   assert.deepEqual(dashboard.json().widgets, []);
   assert.equal(Object.hasOwn(dashboard.json().tasks[0], 'timerRunning'), false);
