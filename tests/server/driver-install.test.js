@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -8,6 +8,31 @@ import { computePayloadDigest } from '../../server/src/lib/packageInstall/payloa
 import {
   driverInstallFixture, driverRecord, driverRepo, prepareDriver,
 } from './helpers/driverInstallFixture.js';
+
+test('DRIVER-READ-02: список и previous читаются при недоступном origin без импорта драйвера', async (t) => {
+  const repo = await driverRepo(t);
+
+  await repo.release('1.0.0');
+
+  const fixture = await driverInstallFixture(t);
+  const first = await prepareDriver(fixture.service, repo.url);
+
+  await fixture.service.apply(first.id, first.reviewToken);
+  await repo.release('1.1.0');
+  await fixture.service.startUpdate(repo.id);
+  await fixture.service.whenIdle();
+
+  const update = await fixture.service.currentJob();
+
+  await fixture.service.apply(update.id, update.reviewToken);
+  await rename(repo.origin, `${repo.origin}.offline`);
+
+  const installed = await fixture.service.listInstalled();
+
+  assert.equal(installed[repo.id].version, '1.1.0');
+  assert.equal(installed[repo.id].previous.version, '1.0.0');
+  assert.equal(installed[repo.id].rollbackAvailable, true);
+});
 
 test('DRIVER-INSTALL-01: install, update, rollback возвращают driver bytes и digest', async (t) => {
   const repo = await driverRepo(t);

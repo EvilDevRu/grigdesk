@@ -106,7 +106,7 @@ export type PluginInstallPort = Pick<PluginInstallService,
   | 'bindRuntime' | 'recover' | 'health' | 'close' | 'describe' | 'listVersions'
   | 'startInstall' | 'startUpdate' | 'currentJob' | 'getJob' | 'apply' | 'cancel'
   | 'rollback' | 'checkUpdates' | 'restartRequired' | 'refreshCatalog' | 'payloadDigest'
-  | 'remove'
+  | 'remove' | 'listInstalled'
 >;
 
 /**
@@ -366,6 +366,26 @@ export class PluginInstallService {
   /**
    * Локальная информация использует persisted record и не требует сети.
    * Проверка целостности и cache расширяются сервисными сценариями.
+   */
+  async listInstalled(): Promise<Record<string, PluginInstallInfo>> {
+    this.assertAvailable();
+
+    const result: Record<string, PluginInstallInfo> = {};
+
+    for (const id of Object.keys(this.state.plugins)) {
+      const record = await this.describe(id);
+
+      if (record) {
+        result[id] = record;
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Сведения конкретного пакета используют persisted record и локальную проверку.
+   * Короткий cache не требует сети и сбрасывается при публикации нового снимка.
    */
   async describe(id: string): Promise<PluginInstallInfo | null> {
     this.assertAvailable();

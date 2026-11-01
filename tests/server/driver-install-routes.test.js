@@ -6,6 +6,27 @@ import { installHttpFixture, installPortFixture } from './helpers/pluginInstallH
 
 const moduleUrl = new URL('../../server/src/modules/trackers/installRoutes.ts', import.meta.url);
 
+test('DRIVER-READ-01: installed закрыт auth и читает локальные записи без checkUpdates', async (t) => {
+  const stub = installPortFixture();
+  const fixture = await installHttpFixture(t, {
+    registerRoutes: async (app) => {
+      await app.register((await import(moduleUrl.href)).default, { installs: stub.port });
+    },
+  });
+  const url = '/api/driver-installs/installed';
+
+  assert.equal((await fixture.app.inject(url)).statusCode, 401);
+
+  for (const headers of [fixture.session, fixture.cli, fixture.internal]) {
+    const response = await fixture.app.inject({ url, headers });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { drivers: {} });
+  }
+
+  assert.deepEqual(stub.calls.map((call) => call.name), ['listInstalled', 'listInstalled', 'listInstalled']);
+});
+
 test('DRIVER-AUTH-01: реальный auth guard, session/Origin/JSON и отдельные driver routes', async (t) => {
   const stub = installPortFixture();
   const fixture = await installHttpFixture(t, {

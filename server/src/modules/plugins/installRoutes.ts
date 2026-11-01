@@ -220,6 +220,10 @@ export default async function installRoutes(
     ({ job: jobView(await installs.rollback(request.params.id, request.body)) }));
 
   if (driver) {
+    app.get(`${prefix}/installed`, { schema: { response: responseSchemas.check } }, async () => ({
+      drivers: await installs.listInstalled(),
+    }));
+
     app.post(`${prefix}/${resource}/:id/remove`, {
       schema: {
         params: inputs.pluginParams,

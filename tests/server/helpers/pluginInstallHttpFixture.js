@@ -37,6 +37,7 @@ export function installPortFixture() {
     refreshCatalog: async () => {},
     restartRequired: () => false,
     describe: async () => null,
+    listInstalled: async () => call('listInstalled', [], {}),
     currentJob: async () => call('currentJob', [], job),
     getJob: async (id) => call('getJob', [id], job),
     listVersions: async (url) => call('listVersions', [url],
