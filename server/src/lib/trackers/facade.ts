@@ -1,4 +1,5 @@
 import { isRecord } from '../../../../shared/lib/objects.ts';
+import { NO_TRACKER_CAPABILITIES } from '../../../../shared/trackers/contracts.ts';
 import { TrackerError } from './contract.ts';
 import type { TaskData, TaskTracker, TrackerIdentity, TrackerReadOptions } from './contract.ts';
 import type { TrackerRegistry } from './registry.ts';
@@ -79,7 +80,9 @@ export class TrackerFacade {
 
     return this.registry.call(externalId, async (tracker) => {
       if (capability && !tracker.capabilities[capability]) {
-        throw new TrackerError(`${capability}_unsupported`, 'Действие не поддерживается трекером');
+        const code = capability === 'delete' ? 'unsupported' : `${capability}_unsupported`;
+
+        throw new TrackerError(code, 'Действие не поддерживается трекером');
       }
 
       try {
@@ -138,7 +141,7 @@ export class TrackerFacade {
         ...snapshot.compatibility,
         ...snapshot,
         trackerId: tracker.id,
-        capabilities: tracker.capabilities,
+        capabilities: { ...NO_TRACKER_CAPABILITIES, ...tracker.capabilities },
         widgets: snapshot.widgets,
         generation: revision,
       };
@@ -174,6 +177,10 @@ export class TrackerFacade {
 
   completeTask(id: unknown): Promise<unknown> {
     return this.invoke((tracker) => tracker.completeTask!(String(id)), 'complete');
+  }
+
+  deleteTask(id: string): Promise<{ ok: boolean }> {
+    return this.invoke((tracker) => tracker.deleteTask!(id), 'delete');
   }
 
   renewTask(id: unknown): Promise<unknown> {

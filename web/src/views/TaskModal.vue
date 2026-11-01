@@ -757,6 +757,18 @@
             >
               ✓ Завершить
             </UiButton>
+            <UiButton
+              v-if="isB24Task && trackerCaps.delete"
+              data-context="task-footer-action"
+              data-role="task-delete"
+              tone="danger"
+              variant="outline"
+              :loading="busy === 'delete'"
+              :disabled="Boolean(busy)"
+              @click="deleteTask"
+            >
+              {{ t('core.taskDelete') }}
+            </UiButton>
             <UiPopover v-if="isB24Task || sandbox" placement="top-end" aria-label="Другие действия с задачей">
               <template #trigger><UiButton>Ещё</UiButton></template>
               <template #default="{ close }">
@@ -2081,6 +2093,35 @@ const complete = async () => {
     });
   }
 };
+
+/**
+ * Удаление требует подтверждения для исходной задачи и подключения.
+ * После ожидания карточка закрывается только если пользователь всё ещё смотрит эту задачу.
+ */
+async function deleteTask() {
+  if (busy.value || !isB24Task.value || !trackerCaps.value.delete) {
+    return;
+  }
+
+  const epoch = trackers.epoch;
+  const id = taskId.value;
+  const confirmed = await confirmDialog(t('core.taskDeleteConfirmation'), {
+    danger: true,
+    okText: t('core.taskDelete'),
+  });
+
+  if (!confirmed || epoch !== trackers.epoch || taskId.value !== id || busy.value) {
+    return;
+  }
+
+  await act('delete', async () => {
+    await tasks.deleteTask(id!);
+
+    if (epoch === trackers.epoch && taskId.value === id) {
+      ui.close();
+    }
+  });
+}
 
 // Возобновление не возвращает детали задачи: после подтверждения перечитываем их.
 // Статус и доступные действия определяет портал, а ошибки остаются в карточке.

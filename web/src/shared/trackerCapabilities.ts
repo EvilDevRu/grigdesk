@@ -3,7 +3,7 @@ import type { TrackerCapabilities } from '../../../shared/trackers/contracts.ts'
 import { isRecord } from '../../../shared/lib/objects.ts';
 
 export const LEGACY_TRACKER_CAPABILITIES: TrackerCapabilities = Object.fromEntries(
-  Object.keys(NO_TRACKER_CAPABILITIES).map((key) => [key, true]),
+  Object.keys(NO_TRACKER_CAPABILITIES).map((key) => [key, key !== 'delete']),
 ) as unknown as TrackerCapabilities;
 
 /**

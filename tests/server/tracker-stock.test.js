@@ -23,7 +23,9 @@ const task = (id, extra = {}) => ({
  * Облако — настоящий loopback HTTP, а разрешённый HTTPS origin переписывается только transport seam.
  * Все обращения, включая неожиданные, остаются в fixture и записываются до отправки ответа.
  */
-async function stockFixture(t, { failure = null, failingMethod = 'tasks.task.add' } = {}) {
+async function stockFixture(t, {
+  failure = null, failingMethod = 'tasks.task.add', completeDenied = false,
+} = {}) {
   let completed = false;
   const cloud = await startHttpFixture(t, (request, response) => {
     const method = new URL(request.url, 'http://fixture').pathname.replace('/rest/', '');
@@ -31,6 +33,16 @@ async function stockFixture(t, { failure = null, failingMethod = 'tasks.task.add
       ? JSON.parse(request.body.toString())
       : Object.fromEntries(new URLSearchParams(request.body.toString()));
     let result;
+
+    if (method === 'tasks.task.complete' && completeDenied) {
+      response.writeHead(400, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({
+        error: '0',
+        error_description: 'Действие над задачей не разрешено',
+      }));
+
+      return;
+    }
 
     if (method === failingMethod && failure) {
       if (failure === 'timeout') {
@@ -100,6 +112,8 @@ async function stockFixture(t, { failure = null, failingMethod = 'tasks.task.add
     } else if (method === 'tasks.task.complete') {
       completed = true;
       result = true;
+    } else if (method === 'tasks.task.delete') {
+      result = { task: true };
     } else if (method === 'user.get') {
       result = [{
         ID: '7',
@@ -113,6 +127,10 @@ async function stockFixture(t, { failure = null, failingMethod = 'tasks.task.add
     } else if (method === 'task.commentitem.add') {
       result = 777;
     } else if (method === 'tasks.task.update') {
+      if (Number(fields.fields?.STATUS) === 5) {
+        completed = true;
+      }
+
       result = true;
     } else {
       response.writeHead(500);
@@ -327,4 +345,38 @@ test('STOCK-04: правка задачи уходит в tasks.task.update', as
   assert.ok(update.body.toString().includes('Переименована эмулятором'));
   assert.equal(fixture.cloud.requests.filter((request) =>
     request.url === '/rest/tasks.task.update').length, 1);
+});
+
+
+test('STOCK-DELETE-01: удаление через HTTP-фасад отправляет tasks.task.delete один раз', async (t) => {
+  const fixture = await stockFixture(t);
+
+  assert.ok(fixture);
+
+  const response = await fixture.request('DELETE', '/api/tracker/task/42');
+  const calls = fixture.cloud.requests.filter((request) => request.url === '/rest/tasks.task.delete');
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json(), { ok: true });
+  assert.equal(calls.length, 1);
+  assert.equal(JSON.parse(calls[0].body.toString()).taskId, '42');
+});
+
+
+test('STOCK-COMPLETE-01: отказ нового модуля завершает через STATUS=5 без повторов', async (t) => {
+  const fixture = await stockFixture(t, { completeDenied: true });
+
+  assert.ok(fixture);
+
+  const response = await fixture.request('POST', '/api/tracker/task/42/complete');
+  const actions = fixture.cloud.requests.filter((request) =>
+    ['/rest/tasks.task.complete', '/rest/tasks.task.update'].includes(request.url));
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json(), { ok: true });
+  assert.deepEqual(actions.map((request) => request.url), [
+    '/rest/tasks.task.complete', '/rest/tasks.task.update',
+  ]);
+  assert.deepEqual(JSON.parse(actions[1].body.toString()).fields, { STATUS: 5 });
+  assert.equal((await fixture.request('GET', '/api/tracker/task/42')).json().status, 5);
 });

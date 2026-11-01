@@ -1107,6 +1107,8 @@
   "taskDesignComments": "Comments",
   "taskDesignAnalysisHint": "Assess complexity, risks and the work route. Clarifications for agents stay in GrigDesk.",
   "taskDesignPipeline": "Pipeline",
+  "taskDelete": "Delete",
+  "taskDeleteConfirmation": "Delete the task on the portal? This action cannot be undone.",
   "taskDesignLaunch": "Run pipeline",
   "taskDesignPipelineRunning": "Pipeline running",
   "dockerUnusedImagesCount": "Unused: {count}",

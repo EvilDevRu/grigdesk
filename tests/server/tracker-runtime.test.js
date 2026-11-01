@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { importRuntimeModule } from '../../server/src/lib/runtimeImport.ts';
-import { selectTracker, trackerFixture, writeTracker } from './helpers/trackerFixture.js';
+import { selectTracker, trackerCalls, trackerFixture, writeTracker } from './helpers/trackerFixture.js';
 
 for (const outcome of ['installed', 'reverted', 'blocked']) {
   test(`DRIVER-RUNTIME-01: lease drain и ${outcome} управляют admission`, async (t) => {
@@ -124,4 +124,60 @@ test('DRIVER-RUNTIME-01: source и SEA bridge импортируют один dr
 
   assert.equal(source.default().id, 'fixture-driver');
   assert.equal(sea, source);
+});
+
+
+test('TRACKER-DELETE-01: неподдерживаемое удаление отклонено до вызова драйвера', async (t) => {
+  const fixture = await trackerFixture(t, {
+    setup: (config) => writeTracker(config, 'fixture-driver'),
+  });
+
+  await selectTracker(fixture, 'fixture-driver');
+
+  const before = await trackerCalls(fixture.config, 'fixture-driver');
+  const response = await fixture.request('DELETE', '/api/tracker/task/42');
+
+  assert.equal(response.statusCode, 400, response.body);
+  assert.equal(response.json().error, 'unsupported');
+  assert.deepEqual(await trackerCalls(fixture.config, 'fixture-driver'), before);
+  await assert.rejects(fixture.tracker.deleteTask('42'), { code: 'unsupported', status: 400 });
+});
+
+test('TRACKER-DELETE-02: маршрут вызывает deleteTask выбранного драйвера ровно один раз', async (t) => {
+  const fixture = await trackerFixture(t, {
+    setup: (config) => writeTracker(config, 'fixture-driver', {
+      code: `import { appendFileSync } from 'node:fs';
+        export default () => ({
+          id: 'fixture-driver',
+          capabilities: { delete: true },
+          isConfigured: () => true,
+          taskDetail: async (id) => ({ id, title: 'Задача' }),
+          deleteTask: async (id) => {
+            appendFileSync(new URL('./calls.jsonl', import.meta.url),
+              JSON.stringify({ method: 'deleteTask', args: [id] }) + '\\n');
+            return { ok: true };
+          },
+        });`,
+    }),
+  });
+  const catalog = await selectTracker(fixture, 'fixture-driver');
+  const response = await fixture.request('DELETE', '/api/tracker/task/42', undefined, {
+    'x-grigdesk-tracker-generation': String(catalog.revision),
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json(), { ok: true });
+  assert.deepEqual(await trackerCalls(fixture.config, 'fixture-driver'), [
+    { method: 'deleteTask', args: ['42'] },
+  ]);
+
+  const stale = await fixture.request('DELETE', '/api/tracker/task/42', undefined, {
+    'x-grigdesk-tracker-generation': String(catalog.revision - 1),
+  });
+  const invalid = await fixture.request('DELETE', '/api/tracker/task/invalid');
+
+  assert.equal(stale.statusCode, 409);
+  assert.equal(stale.json().error, 'tracker_context_changed');
+  assert.equal(invalid.statusCode, 400);
+  assert.equal((await trackerCalls(fixture.config, 'fixture-driver')).length, 1);
 });

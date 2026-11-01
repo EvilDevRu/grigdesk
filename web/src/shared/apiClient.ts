@@ -697,7 +697,7 @@ export interface ApiClient {
   post: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
   put: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
   patch: (path: string, body?: unknown) => Promise<unknown>;
-  del: (path: string, body?: unknown) => Promise<unknown>;
+  del: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
   postBytes: typeof postBytes;
   postBlob: typeof postBlob;
   download: typeof download;
@@ -715,7 +715,7 @@ export const api: ApiClient = {
   post: (path: string, body?: unknown, options?: RequestOptions) => request('POST', path, body, options),
   put: (path: string, body?: unknown, options?: RequestOptions) => request('PUT', path, body, options),
   patch: (path: string, body?: unknown) => request('PATCH', path, body),
-  del: (path: string, body?: unknown) => request('DELETE', path, body),
+  del: (path: string, body?: unknown, options?: RequestOptions) => request('DELETE', path, body, options),
   postBytes: (path, body, opts) => observed('POST', path, () => postBytes(path, body, opts)),
   postBlob: (path, body, opts) => observed('POST', path, () => postBlob(path, body, opts)),
   download: (path) => observed('POST', path, () => download(path)),

@@ -256,6 +256,18 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
     return tracker.timer(a, taskId(r));
   }));
 
+  fastify.delete<TaskRoute>('/api/tracker/task/:id', wrap(async (r) => {
+    const id = taskId(r);
+
+    if (!id) {
+      throw new TrackerValidationError('Некорректный номер задачи');
+    }
+
+    await tracker.deleteTask(id);
+
+    return { ok: true };
+  }));
+
   fastify.post<TaskRoute>('/api/tracker/task/:id/complete', wrap((r) => tracker.completeTask(taskId(r))));
   fastify.post<TaskRoute>('/api/tracker/task/:id/renew', wrap((r) => tracker.renewTask(taskId(r))));
 }

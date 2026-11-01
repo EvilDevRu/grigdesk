@@ -4,10 +4,10 @@ import { installUiBrowser } from './ui-components.js';
 
 export const CUSTOM_CAPS = Object.fromEntries([
   'create', 'timer', 'comments', 'attachments', 'widgets', 'editing',
-  'complete', 'renew', 'users', 'projects',
-].map((key) => [key, true]));
+  'complete', 'delete', 'renew', 'users', 'projects',
+].map((key) => [key, key !== 'delete']));
 export const STOCK_CAPS = Object.fromEntries(Object.keys(CUSTOM_CAPS)
-  .map((key) => [key, ['create', 'complete', 'users', 'projects'].includes(key)]));
+  .map((key) => [key, ['create', 'complete', 'delete', 'users', 'projects'].includes(key)]));
 
 let nonce = 0;
 
@@ -40,6 +40,8 @@ export async function mountTrackerCard(t, {
   detailMode = 'ready',
   metadataMode = 'ready',
   status = 3,
+  confirm = async () => true,
+  deleteError = null,
 } = {}) {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/board');
   const prefix = `__trackerCard${nonce += 1}`;
@@ -79,7 +81,15 @@ export async function mountTrackerCard(t, {
         created: [],
       },
     }),
-    actions: { async load() {} },
+    actions: {
+      async load(force) {
+        calls.push({
+          method: 'BOARD',
+          url: '/api/tracker/dashboard',
+          force,
+        });
+      },
+    },
   });
   const useUiStore = defineStore(`${prefix}-ui`, {
     state: () => ({ taskId: id, launchRequested: false }),
@@ -149,6 +159,20 @@ export async function mountTrackerCard(t, {
 
       return { ok: true };
     },
+    async del(url, payload, options) {
+      calls.push({
+        method: 'DELETE',
+        url,
+        payload,
+        options,
+      });
+
+      if (deleteError) {
+        throw new Error(deleteError);
+      }
+
+      return { ok: true };
+    },
     async put(url, payload) {
       calls.push({
         method: 'PUT',
@@ -161,6 +185,7 @@ export async function mountTrackerCard(t, {
   };
   const globals = {
     Api: api,
+    ConfirmDialog: confirm,
     ApiError: migrationHarness.ApiError,
     UiStore: useUiStore,
     BoardStore: useBoardStore,

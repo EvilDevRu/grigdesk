@@ -114,6 +114,17 @@ export const useTasksStore = defineStore('tasks', {
     },
 
     /**
+     * Удалённая задача сразу исключается из кеша, затем доска перечитывается.
+     * Заголовок поколения защищает удаление при смене подключения трекера.
+     */
+    async deleteTask(id: TaskId) {
+      await api.del(`/api/tracker/task/${id}`, undefined, useTrackersStore().mutationOptions());
+
+      delete this.details[id];
+      await useBoardStore().load(true);
+    },
+
+    /**
      * Ответ возобновления не содержит новый статус задачи.
      * Прежний снимок помечается устаревшим перед обновлением доски.
      */

@@ -1127,6 +1127,8 @@
   "taskDesignComments": "Комментарии",
   "taskDesignAnalysisHint": "Оценка поможет определить сложность, риски и маршрут работы. Уточнения для агентов останутся в GrigDesk.",
   "taskDesignPipeline": "Конвейер",
+  "taskDelete": "Удалить",
+  "taskDeleteConfirmation": "Удалить задачу на портале? Действие необратимо.",
   "taskDesignLaunch": "На конвейер",
   "taskDesignPipelineRunning": "Конвейер работает",
   "dockerUnusedImagesCount": "Неиспользуемых: {count}",
