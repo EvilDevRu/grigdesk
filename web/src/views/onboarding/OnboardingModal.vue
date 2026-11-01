@@ -15,7 +15,7 @@
         <p class="onboarding-sidebar-title">{{ t('core.onboardingBaseGroup') }}</p>
         <ol class="onboarding-steps" :aria-label="t('core.onboardingSteps')">
           <li v-for="(label, index) in labels" :key="label"
-            :class="{ 'is-complete': index < currentIndex, 'is-skipped': index === 0 && session?.aiSkipped }"
+            :class="{ 'is-complete': index < currentIndex, 'is-skipped': index === 0 && aiSkipped }"
             :aria-current="index === currentIndex && index < 3 ? 'step' : undefined"
             :aria-disabled="index > 2 ? 'true' : undefined">
             <span v-if="index === 3" class="onboarding-future-heading">
@@ -27,10 +27,10 @@
               {{ t('core.onboardingNextGroup') }}
             </span>
             <span class="onboarding-step-number" aria-hidden="true">
-              {{ index === 0 && session?.aiSkipped ? '−' : index < currentIndex ? '✓' : index + 1 }}
+              {{ index === 0 && aiSkipped ? '−' : index < currentIndex ? '✓' : index + 1 }}
             </span>
             <span class="onboarding-step-copy">
-              <span class="onboarding-step-label">{{ label }}<span v-if="index === 0 && session?.aiSkipped"
+              <span class="onboarding-step-label">{{ label }}<span v-if="index === 0 && aiSkipped"
                 class="onboarding-step-skipped"> — {{ t('core.onboardingSkipped') }}</span></span>
               <span v-if="index < 3" class="onboarding-step-detail">{{ descriptions[index] }}</span>
             </span>
@@ -67,11 +67,16 @@
           {{ t(store.saving || store.dirty ? 'core.onboardingSaving' : 'core.onboardingSaved') }}
         </p>
         <div v-if="session && store.draft" class="onboarding-actions">
-          <UiButton data-context="workspace-form-wrap" :disabled="busy" variant="ghost" @click="dismiss">
+          <UiButton v-if="currentIndex > 0 && session.status !== 'dismissed'"
+            data-context="workspace-form-wrap" :disabled="busy || !!store.error"
+            variant="outline" @click="store.transition('/back')">
+            {{ t('core.onboardingBack') }}
+          </UiButton>
+          <UiButton data-context="workspace-form-wrap" :disabled="busy" variant="outline" @click="dismiss">
             {{ t('core.onboardingDismiss') }}
           </UiButton>
           <UiButton v-if="session.step === 'ai'" data-context="workspace-form-wrap"
-            :disabled="busy || !!store.error" variant="ghost"
+            :disabled="busy || !!store.error" variant="outline"
             @click="store.transition('/advance', { skipAi: true })">
             {{ t('core.onboardingSkip') }}
           </UiButton>
@@ -127,6 +132,7 @@ const descriptions = computed(() => [
 ]);
 const currentIndex = computed(() => ['ai', 'project', 'workspace', 'summary']
   .indexOf(session.value?.step ?? ''));
+const aiSkipped = computed(() => currentIndex.value > 0 && session.value?.aiSkipped);
 const projectRoute = computed(() => session.value?.projectSaved
   ? `/projects/${session.value.projectId}` : '/projects');
 const canAdvance = computed(() => !store.error && !busy.value && (session.value?.step === 'ai'

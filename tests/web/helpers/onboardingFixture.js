@@ -11,7 +11,7 @@ export { atProject, atWorkspace, projectInput, repository, request, token };
 export const names = {
   next: /^(Далее|Продолжить|Next|Continue)$/,
   skip: /^(Пропустить|Пропустить шаг|Skip|Skip step)$/,
-  dismiss: /^(Настрою сам|I.ll set it up myself|Set up manually)$/,
+  dismiss: /^(Пропустить настройку|Skip setup)$/,
   title: /название проекта|project (name|title)/i,
   path: /папка|путь|folder|path/i,
   branch: /ветка|branch/i,

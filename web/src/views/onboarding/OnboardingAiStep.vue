@@ -13,7 +13,9 @@
       <article v-for="provider in providers.providers" :key="provider.id" class="provider"
         :class="{ 'is-ready': isChatReady(provider) }">
         <header class="provider-heading">
-          <span class="provider-icon"><ProviderIcon :provider="provider" :size="16" /></span>
+          <span class="provider-icon" :style="{ color: isChatReady(provider) ? provider.color : undefined }">
+            <ProviderIcon :provider="{ ...provider, available: isChatReady(provider) }" :size="16" />
+          </span>
           <h3>{{ provider.name }}</h3>
         </header>
         <p class="provider-status">

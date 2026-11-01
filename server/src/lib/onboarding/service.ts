@@ -266,11 +266,17 @@ export function createOnboardingService(options: OnboardingOptions) {
         }
 
         if (session.step === 'project') {
-          await commitProject(value, session, save);
+          if (session.projectSaved) {
+            session.step = 'workspace';
+            await save();
+          } else {
+            await commitProject(value, session, save);
+          }
         } else {
           if (session.step === 'ai') {
             session.aiSkipped = skipAi === true;
             session.step = 'project';
+            remember(value, session);
           } else if (session.step === 'workspace') {
             session.step = 'summary';
             session.status = 'completed';
@@ -283,6 +289,30 @@ export function createOnboardingService(options: OnboardingOptions) {
           await save();
         }
 
+        announce(value.revision);
+      });
+
+      return snapshot(state);
+    },
+
+    /**
+     * Возврат сохраняет ответы и созданный паспорт, не повторяя создание проекта.
+     * Итог можно открыть заново для выбора режима; пропущенный проход не возобновляется.
+     */
+    async back(expected: number, id: string): Promise<OnboardingState> {
+      const state = await store.transact(expected, async (value, save) => {
+        const session = current(value, id);
+
+        if (session.status === 'dismissed' || session.step === 'ai'
+          || (session.status === 'completed' && session.step !== 'summary')) {
+          throw new OnboardingError('invalid_transition');
+        }
+
+        session.step = session.step === 'summary' ? 'workspace'
+          : session.step === 'workspace' ? 'project' : 'ai';
+        session.status = 'active';
+        remember(value, session);
+        await save();
         announce(value.revision);
       });
 

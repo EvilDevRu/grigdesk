@@ -51,7 +51,7 @@ async function onboardingModule(fastify: FastifyInstance, options: OnboardingOpt
 
   for (const [method, suffix] of [
     ['GET', ''], ['POST', '/start'], ['PATCH', ''],
-    ['POST', '/advance'], ['POST', '/dismiss'], ['POST', '/repository'],
+    ['POST', '/advance'], ['POST', '/back'], ['POST', '/dismiss'], ['POST', '/repository'],
   ] as const) {
     fastify.route({
       method,
@@ -100,12 +100,13 @@ async function onboardingModule(fastify: FastifyInstance, options: OnboardingOpt
             return await service.saveDraft(revision, body.sessionId, draftBody(body.draft));
           }
 
-          if (suffix === '/dismiss') {
+          if (suffix === '/dismiss' || suffix === '/back') {
             if ('skipAi' in body) {
               throw new OnboardingError('invalid_body');
             }
 
-            return await service.dismiss(revision, body.sessionId);
+            return suffix === '/back' ? await service.back(revision, body.sessionId)
+              : await service.dismiss(revision, body.sessionId);
           }
 
           if (body.skipAi !== undefined && typeof body.skipAi !== 'boolean') {

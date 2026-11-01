@@ -9,7 +9,10 @@
         @update:model-value="title" />
     </UiField>
     <p class="repository-help">{{ t('core.onboardingServerPath') }}</p>
-    <UiInlineMessage v-if="locked" tone="warning">{{ t('core.onboardingPendingProject') }}</UiInlineMessage>
+    <UiInlineMessage v-if="locked" tone="warning">
+      {{ t(store.snapshot?.active?.projectSaved
+        ? 'core.onboardingSavedProject' : 'core.onboardingPendingProject') }}
+    </UiInlineMessage>
     <div v-for="(repo, index) in store.draft.repositories" :key="repo.name" class="repository">
       <header class="repository-heading">
         <h3>{{ t('core.onboardingRepositoryNumber', { number: index + 1 }) }}</h3>
@@ -39,6 +42,7 @@
         <UiSelect :model-value="repo.baseBranch ?? ''" :disabled="locked || checks[repo.name]?.pending"
           @update:model-value="branch(repo.name, String($event ?? ''))">
           <option value="">{{ t('core.onboardingChooseBranch') }}</option>
+          <option v-if="locked && repo.baseBranch" :value="repo.baseBranch">{{ repo.baseBranch }}</option>
           <option v-for="item in checks[repo.name]?.result?.branches ?? []"
             :key="item.name" :value="item.name" :disabled="!item.compatible">
             {{ item.name }}{{ !item.compatible ? ` — ${t('core.onboardingIncompatible')}` : '' }}
