@@ -187,7 +187,7 @@ test('LOCAL-BOARD: баннер настройки виден вместе со 
 
 test('LOCAL-BOARD: шестерёнка в шапке доступна при загрузке и без трекера', async (t) => {
   const fx = await fixture(t, { pending: true });
-  const settings = fx.wrapper.get('.board-heading button[aria-label="Настройки трекера доски"]');
+  const settings = fx.wrapper.get('.board-heading button[aria-label="Настройки трекеров"]');
 
   assert.equal(settings.text(), '');
   assert.equal(settings.find('svg').exists(), true);
@@ -218,7 +218,7 @@ test('LOCAL-BOARD: ошибка трекера оставляет внутрен
   await fx.wrapper.get('.board-tracker-error .ui-disclosure-button').trigger('click');
   await fx.flushPromises();
   assert.equal(fx.wrapper.get('.board-tracker-error-details').text(), 'Ошибка B24 → Настройки');
-  await fx.wrapper.get('.board-heading button[aria-label="Настройки трекера доски"]').trigger('click');
+  await fx.wrapper.get('.board-heading button[aria-label="Настройки трекеров"]').trigger('click');
   await fx.flushPromises();
   assert.equal(fx.wrapper.find('[data-testid="tracker-settings-dialog"]').exists(), true);
 });

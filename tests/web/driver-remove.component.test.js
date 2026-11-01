@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { migrationHarness, webFile } from './helpers/compile-vue.js';
 import {
-  actionButton, mountTrackerBoard, openTrackerSettings, trackerCatalog,
+  actionButton, liveTrackerDialog, mountTrackerBoard, openTrackerManager, prepareTracker, trackerCatalog,
 } from './helpers/trackerBoard.js';
 
 process.env.NODE_ENV = 'test';
@@ -41,19 +41,14 @@ async function removalCard(t, handlers = {}) {
     host.unmount();
     delete globalThis.__driverRemovalHost;
   });
-  await openTrackerSettings(card);
+  await openTrackerManager(card);
 
-  const install = actionButton(card.wrapper, /^\s*(?:установить|install)\s*$/iu);
-
-  assert.ok(install, JSON.stringify(card.wrapper.findAll('button').map((button) => button.text())));
-  await install.trigger('click');
-  await card.flushPromises();
-
-  const dialog = card.wrapper.findAll('[role="dialog"]').at(-1);
+  const dialog = liveTrackerDialog(card);
   const packageCard = dialog.findAll('.driver-package')
     .find((entry) => entry.text().includes('Кастомный Б24'));
 
   assert.ok(packageCard);
+  await actionButton(packageCard, /^Другие действия$/u).trigger('click');
 
   return {
     ...card,
@@ -71,7 +66,7 @@ test('DRIVER-REMOVE-UI-01: кнопка открывает общий confirm, �
   await card.flushPromises();
   assert.match(card.host.text(), /Удалить драйвер/u);
   assert.match(card.host.text(), /Кастомный Б24/u);
-  assert.match(card.host.text(), /реквизиты сохранятся/u);
+  assert.match(card.host.text(), /Реквизиты и данные подключения сохранятся/u);
   assert.equal(card.apiCalls.some((call) => call.url.endsWith('/remove')), false);
   await actionButton(card.host, /отмена|отменить/iu).trigger('click');
   await card.flushPromises();
@@ -135,25 +130,28 @@ test('DRIVER-REMOVE-UI-03: отказ 409 сохраняет пакет, выб�
 
 test('DRIVER-REMOVE-UI-04: SSE показывает удаление managed-пакета при отказе повторного check', async (t) => {
   const card = await removalCard(t, {
-    post: async (url, _payload, state) => {
-      if (url.endsWith('/check') && state.catalog.drivers.some((driver) => driver.deleted)) {
+    get: async (url, state) => {
+      if (url.endsWith('/installed') && state.catalog.drivers.some((driver) => driver.deleted)) {
         throw new Error('Не удалось перечитать установленные пакеты');
       }
     },
   });
 
-  await card.dialog.find('[data-role="driver-custom-source"]').trigger('click');
-  await card.dialog.find('input[name="url"]').setValue('https://git.fixture/driver.git');
-  await card.dialog.find('input[name="tag"]').setValue('v1.0.0');
-  await actionButton(card.dialog, /^\s*Проверить пакет\s*$/u).trigger('click');
+  await prepareTracker(card);
+  await actionButton(card.dialog, /^Установить$/u).trigger('click');
   await card.flushPromises();
-  await actionButton(card.dialog, /^\s*Применить\s*$/u).trigger('click');
+  await actionButton(card.dialog, /^К трекерам$/u).trigger('click');
   await card.flushPromises();
 
   const installed = card.dialog.findAll('.driver-package')
-    .find((entry) => entry.text().includes('grigdesk-b24-discript'));
+    .find((entry) => entry.text().includes('Кастомный Б24'));
 
   assert.ok(installed);
+
+  if (!actionButton(installed, /^Удалить$/u)) {
+    await actionButton(installed, /^Другие действия$/u).trigger('click');
+  }
+
   await actionButton(installed, /^\s*Удалить\s*$/u).trigger('click');
   await card.flushPromises();
   await actionButton(card.host, /^\s*Удалить\s*$/u).trigger('click');

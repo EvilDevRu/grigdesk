@@ -164,6 +164,17 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
               };
             } else if (url.pathname.endsWith('/projects')) {
               data = { projects: [] };
+            } else if (url.pathname === '/api/driver-installs/installed') {
+              data = { drivers: {} };
+            } else if (url.pathname === '/api/driver-installs/versions') {
+              data = {
+                source: { kind: 'git', url: request.postDataJSON().url },
+                versions: [{
+                  version: '1.0.0',
+                  tag: 'v1.0.0',
+                  sha: 'a'.repeat(40),
+                }],
+              };
             } else if (url.pathname === '/api/driver-installs/jobs') {
               status = 502;
               data = { error: 'source_unavailable', message: 'Fixture git unavailable' };
@@ -222,19 +233,30 @@ test('TRACKER-SETTINGS-02 / B-BROWSER-SKIP-01: ru/en, 1440/390/320, выбор �
 
           assert.equal(await dialog.getByRole('region', { name: 'GrigDesk', exact: true }).count(), 0);
 
-          await selectUiOption(page, dialog.getByRole('combobox'), 'grigdesk-b24');
+          assert.equal(await page.locator('[data-role="tracker-settings"]').count(), 1);
+
+          const driver = dialog.locator('[data-driver="grigdesk-b24"]');
+
+          if (await driver.isVisible()) {
+            await driver.click();
+          } else {
+            await selectUiOption(page, dialog.getByRole('combobox'), 'grigdesk-b24');
+          }
+
+          await dialog.locator('[data-role="tracker-board-enabled"]').check();
 
           await dialog.getByRole('button', { name: /сохранить|save/iu }).click();
           assert.ok(writes.some((call) => call.path === '/api/trackers/settings'
             && call.body.externalId === 'grigdesk-b24'));
-          await dialog.getByRole('button', { name: /^(установить|install)$/iu }).click();
+          await dialog.getByRole('button', { name: /^(Добавить трекер|Add tracker)$/u }).click();
 
           const installDialog = page.getByRole('dialog').last();
 
           await installDialog.locator('[data-role="driver-custom-source"]').click();
           await installDialog.locator('input[type="url"], input[name="url"], input[name="repo"]')
             .fill('https://git.fixture/unavailable.git');
-          await installDialog.locator('input[name="tag"], input[name="version"]').fill('v1.0.0');
+          await installDialog.getByRole('button', { name: /^(Далее|Next)$/u }).click();
+          await installDialog.getByRole('combobox').waitFor();
           await installDialog.getByRole('button', { name: /^(проверить пакет|review package)$/iu }).click();
           await installDialog.getByText('Fixture git unavailable').waitFor();
           assert.equal(writes.filter((call) => call.path === '/api/driver-installs/jobs').length, 1);

@@ -70,7 +70,7 @@ export function driverInstallInfo(version, revision, previous = null, extra = {}
  * Подготовка и terminal outcome используют согласованные target, preview и время завершения.
  * Смена версии не маскируется одним прежним ready-снимком для всех действий.
  */
-function driverJob(kind, record, status = 'ready', previous = null) {
+export function driverJob(kind, record, status = 'ready', previous = null) {
   const job = installJob(status, kind);
   const target = {
     version: record.version,
@@ -150,6 +150,10 @@ export async function mountTrackerBoard(t, {
         return structuredClone(state.settings);
       }
 
+      if (url === '/api/driver-installs/installed') {
+        return { drivers: { 'grigdesk-b24-discript': structuredClone(state.installed) } };
+      }
+
       if (url.includes('/driver-installs/jobs/')) {
         return { job: structuredClone(state.job) };
       }
@@ -219,6 +223,15 @@ export async function mountTrackerBoard(t, {
         state.installed = driverInstallInfo(state.job.target.version,
           (state.installed?.revision ?? 0) + 1, state.installed);
         state.job.status = 'done';
+        state.job.finishedAt = '2026-01-01T00:00:01.000Z';
+        state.job.updatedAt = state.job.finishedAt;
+        state.job.revision += 1;
+
+        return { job: structuredClone(state.job) };
+      }
+
+      if (url.endsWith('/cancel')) {
+        state.job.status = 'cancelled';
         state.job.finishedAt = '2026-01-01T00:00:01.000Z';
         state.job.updatedAt = state.job.finishedAt;
         state.job.revision += 1;
@@ -317,14 +330,32 @@ export async function openTrackerSettings(card) {
   await card.flushPromises();
 }
 
-export const actionButton = (wrapper, pattern) => wrapper.findAll('button')
-  .find((button) => pattern.test(`${button.text()} ${button.attributes('aria-label') ?? ''}`));
+export const actionButton = (wrapper, pattern) => wrapper.findAll('button').find((button) => {
+  const text = button.text().replace(/›$/u, '');
+
+  return pattern.test(`${text} ${button.attributes('aria-label') ?? ''}`.trim());
+});
+
+/**
+ * Управление пакетами открывается отдельным переходом из формы доски.
+ * Сохранённая операция восстанавливается только после этого явного действия.
+ */
+export async function openTrackerManager(card) {
+  await openTrackerSettings(card);
+  await actionButton(card.wrapper, /^Другие действия$/u).trigger('click');
+  await card.flushPromises();
+}
 
 /**
  * Общие controls допускают radio или select для единственного внешнего источника.
  * Тест выбирает реальное поле по его значению и проверяет эффект через HTTP.
  */
 export async function chooseExternal(card, id) {
+  if (!card.wrapper.find('select').exists()) {
+    await actionButton(card.wrapper, /^(?:Подключение доски|Board connection)$/u).trigger('click');
+    await card.flushPromises();
+  }
+
   const radio = card.wrapper.find(`input[type="radio"][value="${id}"]`);
 
   if (radio.exists()) {
@@ -337,5 +368,56 @@ export async function chooseExternal(card, id) {
     await select.setValue(id);
   }
 
+  const activation = card.wrapper.find('[data-role="tracker-board-enabled"]');
+
+  if (activation.exists() && !activation.element.checked) {
+    await activation.setValue(true);
+  }
+
   await card.flushPromises();
+}
+
+/**
+ * Установка начинается отдельным действием списка, сохраняя одну модальную оболочку.
+ * Последующие действия обращаются к тому же диалогу, даже при смене шага.
+ */
+export async function openTrackerInstaller(card) {
+  const button = actionButton(card.wrapper, /^\s*(?:Добавить трекер|Add tracker|Установить|Install)\s*$/u);
+
+  await button.trigger('click');
+  await card.flushPromises();
+
+  return liveTrackerDialog(card);
+}
+
+/**
+ * UiDialog обновляет поверхность при смене доступного описания шага.
+ * Проверки всегда обращаются к живому узлу вместо detached DOMWrapper прошлого шага.
+ */
+export function liveTrackerDialog(card) {
+  return new Proxy({}, {
+    get(_target, key) {
+      const dialog = card.wrapper.find('[data-role="tracker-install"]');
+      const value = dialog[key];
+
+      return typeof value === 'function' ? value.bind(dialog) : value;
+    },
+  });
+}
+
+/**
+ * Общий путь ввода репозитория проходит выбор версии и явную проверку.
+ * Подготовка не подтверждает применение и возвращает диалог для дальнейших проверок.
+ */
+export async function prepareTracker(card, url = 'https://git.fixture/driver.git') {
+  const dialog = await openTrackerInstaller(card);
+
+  await dialog.find('[data-role="driver-custom-source"]').trigger('click');
+  await dialog.find('input[name="url"]').setValue(url);
+  await actionButton(dialog, /^Далее$/u).trigger('click');
+  await card.flushPromises();
+  await actionButton(dialog, /^Проверить пакет$/u).trigger('click');
+  await card.flushPromises();
+
+  return dialog;
 }
