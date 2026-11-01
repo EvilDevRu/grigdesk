@@ -12,8 +12,11 @@ async function fixture(t, {
   projects = [{ id: 'beta', title: 'Проект Бета' }],
   configured = false,
   pending = false,
+  initialTasks = [],
+  pipelineTasks = [],
+  boardError = 'Ошибка B24 → Настройки',
 } = {}) {
-  const rows = [];
+  const rows = [...initialTasks];
   const posts = [];
   const reads = [];
   const initialRead = Promise.withResolvers();
@@ -35,6 +38,10 @@ async function fixture(t, {
 
       if (url === '/api/grigdesk-tasks/projects') {
         return { projects };
+      }
+
+      if (url === '/api/tasks') {
+        return { tasks: pipelineTasks };
       }
 
       if (url === '/api/grigdesk-tasks') {
@@ -67,7 +74,7 @@ async function fixture(t, {
   };
   const mounted = await mountBoardView(t, {
     prefix: 'local-board',
-    boardError: 'Ошибка B24 → Настройки',
+    boardError,
     ownApi: api,
     componentStubs: {
       TrackerSettingsDialog: {
@@ -94,9 +101,11 @@ async function fixture(t, {
  * Поля выбираются по типу control: внутренняя разметка формы не является контрактом.
  */
 async function openForm(fx) {
-  const button = fx.wrapper.findAll('button').find((entry) => entry.text().includes('Новая задача'));
+  const button = fx.wrapper.findAll('.board-heading button')
+    .find((entry) => entry.text() === 'Новая задача');
 
   assert.ok(button, 'На доске доступна кнопка «Новая задача»');
+  assert.equal(button.isVisible(), true);
   await button.trigger('click');
   await fx.flushPromises();
 }
@@ -136,7 +145,7 @@ async function submit(fx) {
 test('LOCAL-BOARD-01: без Б24 форма доступна, сохранённая задача видна и открывается', async (t) => {
   const fx = await fixture(t);
 
-  assert.equal(fx.wrapper.find('.own-tasks .tracker-setup-banner').exists(), true);
+  assert.equal(fx.wrapper.find('.tracker-board .tracker-setup-banner').exists(), true);
   await openForm(fx);
   await fillForm(fx);
   await submit(fx);
@@ -150,59 +159,135 @@ test('LOCAL-BOARD-01: без Б24 форма доступна, сохранён�
   });
   assert.match(fx.wrapper.text(), /Своя задача/);
   assert.match(fx.wrapper.text(), /Проект Бета/);
+  assert.equal(fx.wrapper.get('.own-tasks').isVisible(), true);
+  assert.equal(fx.wrapper.get('.own-tasks').attributes('aria-label'), 'Задачи GrigDesk');
+  assert.equal(fx.wrapper.find('.task-internal-flag').exists(), false);
+  assert.equal(fx.wrapper.find('[role="tablist"]').exists(), false);
+  assert.equal(fx.wrapper.find('li.trow').exists(), false);
+  assert.equal(fx.wrapper.find('[data-role="board-snapshot-status"]').exists(), false);
   assert.deepEqual(fx.calls.opened, [LOCAL_TASK.id]);
   assert.equal(fx.posts.some((entry) => entry.url.endsWith('/analyze')), false);
 });
 
-test('LOCAL-BOARD: баннер без трекера открывает настройки и заменяет отдельную кнопку', async (t) => {
+test('LOCAL-BOARD: баннер настройки виден вместе со списком внутренних задач', async (t) => {
   const fx = await fixture(t);
-  const banner = fx.wrapper.get('.own-tasks .tracker-setup-banner');
+  const banner = fx.wrapper.get('.tracker-board .tracker-setup-banner');
 
   assert.equal(banner.get('p').text(),
     'Внешний трекер не подключён — задачи трекера не показываются.');
   assert.equal(banner.get('button').text(), 'Настроить трекер');
-  assert.equal(banner.get('button').attributes('data-tone'), 'accent');
-  assert.equal(fx.wrapper.findAll('button')
-    .some((button) => button.text() === 'Настройки трекера доски'), false);
-  assert.equal(fx.wrapper.find('[data-testid="tracker-settings-dialog"]').exists(), false);
+  assert.equal(banner.isVisible(), true);
+  assert.equal(fx.wrapper.get('.own-tasks').isVisible(), true);
+  assert.equal(fx.wrapper.find('[role="tabpanel"]').exists(), false);
+  assert.equal(fx.wrapper.find('.own-tasks .tracker-setup-banner').exists(), false);
   await banner.get('button').trigger('click');
   await fx.flushPromises();
   assert.equal(fx.wrapper.find('[data-testid="tracker-settings-dialog"]').exists(), true);
 });
 
-test('LOCAL-BOARD: при загрузке нет баннера, отдельная кнопка открывает настройки', async (t) => {
+test('LOCAL-BOARD: шестерёнка в шапке доступна при загрузке и без трекера', async (t) => {
   const fx = await fixture(t, { pending: true });
-  const settings = fx.wrapper.findAll('button')
-    .find((button) => button.text() === 'Настройки трекера доски');
+  const settings = fx.wrapper.get('.board-heading button[aria-label="Настройки трекера доски"]');
 
+  assert.equal(settings.text(), '');
+  assert.equal(settings.find('svg').exists(), true);
   assert.equal(fx.wrapper.find('.tracker-setup-banner').exists(), false);
-  assert.ok(settings, 'Во время загрузки настройки трекера доступны');
   await settings.trigger('click');
   await fx.flushPromises();
   assert.equal(fx.wrapper.find('[data-testid="tracker-settings-dialog"]').exists(), true);
   fx.finishLoading();
   await fx.flushPromises();
+  assert.equal(settings.isVisible(), true);
   assert.equal(fx.wrapper.find('.tracker-setup-banner').exists(), true);
-  assert.equal(fx.wrapper.findAll('button')
-    .some((button) => button.text() === 'Настройки трекера доски'), false);
 });
 
-test('LOCAL-BOARD-01: ошибка подключённого портала оставляет собственную группу доступной', async (t) => {
+test('LOCAL-BOARD: ошибка трекера оставляет внутренние задачи и создание на общей доске', async (t) => {
   const fx = await fixture(t, { configured: true });
 
   await openForm(fx);
-  assert.match(fx.wrapper.text(), /Ошибка B24/);
+  assert.equal(fx.wrapper.get('#board-tracker-panel .own-tasks').isVisible(), true);
+  assert.equal(fx.wrapper.find('.board-heading [role="tablist"]').exists(), false);
   assert.equal(fx.wrapper.find('.tracker-setup-banner').exists(), false);
-  assert.equal(fx.wrapper.findAll('button')
-    .some((button) => button.text() === 'Настройки трекера доски'), true);
-
-  const settings = fx.wrapper.findAll('button')
-    .find((button) => button.text() === 'Настройки трекера доски');
-
-  await settings.trigger('click');
+  await fillForm(fx);
+  await submit(fx);
+  assert.equal(fx.wrapper.get('.own-tasks').text().includes(LOCAL_TASK.title), true);
+  assert.equal(fx.wrapper.get('.own-tasks .task-internal-flag').text(), 'Внутренняя');
+  assert.equal(fx.wrapper.get('#board-tracker-panel').isVisible(), true);
+  assert.equal(fx.wrapper.get('.board-tracker-error').text().includes('Не удалось обновить'), true);
+  assert.equal(fx.wrapper.find('.board-tracker-error-details').exists(), false);
+  await fx.wrapper.get('.board-tracker-error .ui-disclosure-button').trigger('click');
+  await fx.flushPromises();
+  assert.equal(fx.wrapper.get('.board-tracker-error-details').text(), 'Ошибка B24 → Настройки');
+  await fx.wrapper.get('.board-heading button[aria-label="Настройки трекера доски"]').trigger('click');
   await fx.flushPromises();
   assert.equal(fx.wrapper.find('[data-testid="tracker-settings-dialog"]').exists(), true);
 });
+
+test('LOCAL-BOARD: секция внутренних завершает доску трекера, все строки имеют флаг', async (t) => {
+  const newer = {
+    ...LOCAL_TASK,
+    id: '100000000002',
+    title: 'Более новая задача',
+    createdAt: '2026-10-25T00:00:00.000Z',
+  };
+  const sameDate = {
+    ...LOCAL_TASK,
+    id: '100000000003',
+    title: 'Задача с тем же временем',
+    createdAt: newer.createdAt,
+  };
+  const fx = await fixture(t, {
+    configured: true,
+    initialTasks: [LOCAL_TASK, newer, sameDate],
+    pipelineTasks: [{ task: newer.id, daemonAlive: true }],
+    boardError: null,
+  });
+  const board = fx.wrapper.get('#board-tracker-panel');
+  const internal = board.get('.own-tasks');
+  const rows = internal.findAll('li');
+
+  assert.equal(internal.isVisible(), true);
+  assert.equal(internal.attributes('aria-label'), 'Внутренние');
+  assert.equal(internal.get('h3').text(), 'Внутренние');
+  assert.equal(board.element.lastElementChild === internal.element, true);
+  assert.equal(board.findAll('li.trow').length, 2);
+  assert.equal(fx.wrapper.find('.tracker-setup-banner').exists(), false);
+  assert.deepEqual(rows.map((row) => row.get('button .mono').text()), [
+    `#${sameDate.id}`,
+    `#${newer.id}`,
+    `#${LOCAL_TASK.id}`,
+  ]);
+  assert.deepEqual(rows.map((row) => row.get('.task-internal-flag').text()), [
+    'Внутренняя',
+    'Внутренняя',
+    'Внутренняя',
+  ]);
+  assert.equal(rows.every((row) => row.text().includes(LOCAL_TASK.projectTitle)), true);
+  assert.match(rows[1].text(), /На конвейере/u);
+  assert.equal(board.find('li.trow .task-internal-flag').exists(), false);
+  assert.equal(fx.wrapper.find('[role="tablist"]').exists(), false);
+  assert.equal(board.attributes('role'), undefined);
+  assert.equal(board.attributes('aria-labelledby'), undefined);
+  assert.equal(internal.attributes('aria-labelledby'), undefined);
+  assert.equal(fx.wrapper.find('#board-internal-panel').exists(), false);
+  assert.equal(fx.wrapper.find('#board-internal-tab, #board-tracker-tab').exists(), false);
+  await rows[0].get('button').trigger('click');
+  assert.deepEqual(fx.calls.opened, [sameDate.id]);
+  await openForm(fx);
+  assert.equal(fx.wrapper.get('[role="dialog"]').isVisible(), true);
+});
+
+for (const configured of [true, false]) {
+  test(`LOCAL-BOARD: пустая секция видна при trackerConfigured=${configured}`, async (t) => {
+    const fx = await fixture(t, { configured, boardError: null });
+    const internal = fx.wrapper.get('.own-tasks');
+
+    assert.equal(internal.isVisible(), true);
+    assert.equal(internal.get('p.muted').text(),
+      'Внутренних задач пока нет. Создайте первую задачу для своего проекта.');
+    assert.equal(internal.findAll('li').length, 0);
+  });
+}
 
 test('LOCAL-BOARD-02: невалидный ввод и отказ сохраняют черновик, оценка не запускается', async (t) => {
   const fx = await fixture(t);
@@ -326,7 +411,7 @@ test('LOCAL-BOARD-03: старый GET не откатывает POST, собы�
   await fx.flushPromises();
   assert.match(fx.wrapper.text(), /Своя задача/);
   assert.match(fx.wrapper.text(), /Задача другой вкладки/);
-  assert.equal(fx.wrapper.find('.own-tasks .tracker-setup-banner').exists(), true);
+  assert.equal(fx.wrapper.find('.tracker-board .tracker-setup-banner').exists(), true);
   assert.equal(peak, 1);
   assert.equal(reads, 2);
 });

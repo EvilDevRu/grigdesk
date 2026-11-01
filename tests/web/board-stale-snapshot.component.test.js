@@ -30,7 +30,7 @@ test('STALE-01: ошибка обновления сохраняет задач�
 });
 
 test('STALE-02: ошибка первого чтения не выдаёт отсутствующий снимок за данные', async (t) => {
-  const { wrapper } = await mountBoardView(t, {
+  const { wrapper, flushPromises, stores } = await mountBoardView(t, {
     prefix: 'board-no-snapshot',
     pending: true,
     boardError: 'fixture initial failure',
@@ -38,5 +38,22 @@ test('STALE-02: ошибка первого чтения не выдаёт от�
 
   assert.equal(wrapper.findAll('li.trow').length, 0);
   assert.equal(wrapper.find('[data-role="board-snapshot-status"]').exists(), false);
-  assert.match(wrapper.text(), /fixture initial failure/u);
+  assert.match(wrapper.get('.board-tracker-error').text(), /Не удалось обновить задачи трекера/u);
+  assert.equal(wrapper.find('.board-tracker-error-details').exists(), false);
+  await wrapper.get('.board-tracker-error .ui-disclosure-button').trigger('click');
+  await flushPromises();
+  assert.equal(wrapper.get('.board-tracker-error-details').text(), 'fixture initial failure');
+
+  const refreshes = [];
+
+  assert.equal(wrapper.get('.board-tracker-error button[data-variant="text"]').attributes('disabled'), '');
+  stores.board().loading = false;
+  await flushPromises();
+
+  stores.board().load = async (force) => {
+    refreshes.push(force);
+  };
+  await wrapper.get('.board-tracker-error button[data-variant="text"]').trigger('click');
+  await flushPromises();
+  assert.deepEqual(refreshes, [true]);
 });

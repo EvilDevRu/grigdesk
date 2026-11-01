@@ -1,40 +1,46 @@
 <template>
   <div class="board ui-workspace" data-ui-workspace :class="{ 'stats-expanded': statsExpanded }">
-    <section class="own-tasks" :aria-label="t('core.grigdeskTasks')">
-      <div class="own-tasks-heading">
-        <h3>{{ t('core.grigdeskTasks') }}</h3>
-        <UiButton tone="accent" @click="newTaskOpen = true">{{ t('core.grigdeskNewTask') }}</UiButton>
-      </div>
-      <p v-if="ownTasks.error" class="err" role="alert">{{ ownTasks.error }}</p>
+    <UiPaneHeader class="board-heading">
+      <template #actions>
+        <UiButton tone="accent" data-context="workspace-toolbar"
+                  @click="newTaskOpen = true">{{ t('core.grigdeskNewTask') }}</UiButton>
+        <UiIconButton :label="t('core.trackerSettings')" data-context="workspace-toolbar"
+                      v-tooltip="t('core.trackerSettings')" @click="trackerSettingsOpen = true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+            <path d="m9 3-.5 2a8 8 0 0 0-2 1.2L4.5 6l-2 3.5L4 11v2l-1.5 1.5 2 3.5 2-.2A8 8 0 0 0
+                     8.5 19l.5 2h4l.5-2a8 8 0 0 0 2-1.2l2 .2 2-3.5L18 13v-2l1.5-1.5-2-3.5-2 .2A8 8
+                     0 0 0 13.5 5L13 3Z" />
+            <circle cx="11" cy="12" r="3" />
+          </svg>
+        </UiIconButton>
+      </template>
+    </UiPaneHeader>
+    <TrackerSettingsDialog v-if="trackerSettingsOpen" v-model:open="trackerSettingsOpen" />
+    <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen" @created="ui.openTask($event)" />
+
+    <div id="board-tracker-panel" class="tracker-board">
       <div v-if="ownTasks.trackerConfigured === false" class="tracker-setup-banner">
         <p>{{ t('core.trackerSetupBanner') }}</p>
         <UiButton tone="accent" @click="trackerSettingsOpen = true">
           {{ t('core.trackerSetupAction') }}
         </UiButton>
       </div>
-      <ul class="own-tasks-list">
-        <li v-for="task in sortedOwnTasks" :key="task.id">
-          <UiButton variant="text" data-context="grigdesk-task-title" @click="ui.openTask(task.id)">
-            <span class="mono">#{{ task.id }}</span> {{ task.title }}
-          </UiButton>
-          <span class="muted">{{ task.projectTitle }}</span>
-          <TriageBadge v-if="analysisEnabled" :row="analysis.byTask[task.id] || null" />
-          <span v-if="conveyor.has(task.id)" class="muted">{{ t('core.grigdeskTaskPipeline') }}</span>
-        </li>
-      </ul>
-    </section>
-    <UiButton v-if="ownTasks.trackerConfigured !== false" @click="trackerSettingsOpen = true">
-      {{ t('core.trackerSettings') }}
-    </UiButton>
-    <TrackerSettingsDialog v-if="trackerSettingsOpen" v-model:open="trackerSettingsOpen" />
-    <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen" @created="ui.openTask($event)" />
-
     <template v-if="ownTasks.trackerConfigured !== false">
     <BoardLoading v-if="!data && !error" label="Загрузка доски…" />
-    <div v-if="error" class="err" role="alert">
-      {{ t('core.trackerBoardError', { message: error }) }}
-      <UiButton variant="text" @click="trackerSettingsOpen = true">→ Настройки</UiButton>
-    </div>
+    <UiInlineMessage v-if="error" :tone="data ? 'warning' : 'danger'" class="board-tracker-error">
+      <div class="board-tracker-error-heading">
+        <strong>{{ t('core.boardTrackerUnavailable') }}</strong>
+        <div class="board-tracker-error-actions">
+          <UiButton variant="text" :disabled="loading" :loading="loading" @click="board.load(true)">
+            {{ t('core.boardRetry') }}
+          </UiButton>
+          <UiDisclosureButton v-model:open="errorDetailsOpen" :controls="errorDetailsId" density="compact">
+            {{ t('core.boardErrorDetails') }}
+          </UiDisclosureButton>
+        </div>
+      </div>
+      <p v-if="errorDetailsOpen" :id="errorDetailsId" class="board-tracker-error-details">{{ error }}</p>
+    </UiInlineMessage>
 
     <p v-if="data" class="muted" role="status" data-role="board-snapshot-status">
       <span v-if="error">{{ t('core.boardSnapshotStale') }} </span>
@@ -405,6 +411,31 @@
 
     </template>
     </template>
+      <section class="own-tasks"
+               :aria-label="t(ownTasks.trackerConfigured !== false
+                 ? 'core.boardInternalTab' : 'core.grigdeskTasks')">
+        <h3>
+          {{ t(ownTasks.trackerConfigured !== false ? 'core.boardInternalTab' : 'core.grigdeskTasks') }}
+        </h3>
+        <p v-if="ownTasks.error" class="err" role="alert">{{ ownTasks.error }}</p>
+        <p v-if="!ownTasks.loading && !ownTasks.error && !sortedOwnTasks.length" class="muted">
+          {{ t('core.boardInternalEmpty') }}
+        </p>
+        <ul class="own-tasks-list">
+          <li v-for="task in sortedOwnTasks" :key="task.id">
+            <UiButton variant="text" data-context="grigdesk-task-title" @click="ui.openTask(task.id)">
+              <span class="mono">#{{ task.id }}</span> {{ task.title }}
+            </UiButton>
+            <span v-if="ownTasks.trackerConfigured !== false" class="task-internal-flag">
+              {{ t('core.taskInternalFlag') }}
+            </span>
+            <span class="muted">{{ task.projectTitle }}</span>
+            <TriageBadge v-if="analysisEnabled" :row="analysis.byTask[task.id] || null" />
+            <span v-if="conveyor.has(task.id)" class="muted">{{ t('core.grigdeskTaskPipeline') }}</span>
+          </li>
+        </ul>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -422,7 +453,7 @@ import type { UiFieldHandle } from '../ui.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { decodePipelineTasks } from '../shared/pipelineContracts.ts';
 
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, useId } from 'vue';
 import { storeToRefs } from 'pinia';
 import { liveTimerSec, secToHMS } from '../shared/format.ts';
 import { useBoardStore } from '../stores/board.ts';
@@ -441,6 +472,10 @@ import {
   t,
   confirmDialog,
   UiButton,
+  UiDisclosureButton,
+  UiIconButton,
+  UiInlineMessage,
+  UiPaneHeader,
   UiPressable,
   UiSearchInput,
   UiSegmentedControl,
@@ -455,6 +490,8 @@ const ui = useUiStore();
 const ownTasks = useGrigdeskTasksStore();
 const newTaskOpen = ref(false);
 const trackerSettingsOpen = ref(false);
+const errorDetailsOpen = ref(false);
+const errorDetailsId = `board-error-${useId()}`;
 const trackers = useTrackersStore();
 const sortedOwnTasks = computed(() => [...ownTasks.tasks].sort((left, right) =>
   right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
@@ -463,6 +500,11 @@ const sortedOwnTasks = computed(() => [...ownTasks.tasks].sort((left, right) =>
 // Данные — из кеш-стора (мгновенный показ при переходе + фоновое обновление).
 const board = useBoardStore();
 const { data, error, loading, readAt } = storeToRefs(board);
+
+watch(error, () => {
+  errorDetailsOpen.value = false;
+});
+
 const snapshotDateTime = computed(() => readAt.value > 0
   ? new Date(readAt.value).toISOString() : undefined);
 const snapshotTime = computed(() => readAt.value > 0
@@ -824,11 +866,31 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.own-tasks-heading {
+/* Шапка заполняет верхнее и боковые поля AppShell, как тулбар конвейера.
+   Отступ содержимого доски сохраняется у самой страницы. */
+.board-heading {
+  flex: none;
+  margin: calc(var(--page-gutter) * -1) calc(var(--page-gutter) * -1) 0;
+}
+.tracker-board {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.board-tracker-error-heading,
+.board-tracker-error-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.board-tracker-error-heading {
   justify-content: space-between;
-  gap: 12px;
+}
+.board-tracker-error-details {
+  margin: 8px 0 0;
+  overflow-wrap: anywhere;
 }
 .tracker-setup-banner {
   display: flex;
@@ -849,7 +911,8 @@ onUnmounted(() => {
   color: var(--ink);
 }
 .own-tasks-list {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   padding: 0;
   list-style: none;
@@ -1225,7 +1288,8 @@ onUnmounted(() => {
 .badge { font-size: 11px; color: var(--accent); }
 /* Метка «новая» — того же синего, что и точка новых задач на чипе «Доска» в навигации:
    человек приходит сюда именно с неё, и цвет должен совпасть. */
-.newbadge {
+.newbadge,
+.task-internal-flag {
   flex: none; font-size: 11px; font-weight: 500; line-height: 1.5;
   border-radius: 5px;
   background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); padding: 1px 6px;
