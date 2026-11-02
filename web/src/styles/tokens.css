@@ -76,7 +76,6 @@
      палитру: foundation не вводит вторую тему и не меняет существующие поверхности. */
   --control-background: var(--ground);
   --control-background-hover: var(--surface-2);
-  --control-background-readonly: color-mix(in srgb, var(--surface-2) 58%, var(--ground));
   --control-border: var(--line);
   --control-border-hover: var(--line-2);
   --control-text: var(--ink);
@@ -87,6 +86,11 @@
   --control-motion-duration: 150ms;
   --control-motion-easing: ease;
   --control-thumb-shadow: 0 1px 3px #00000080;
+
+  /* Поля имеют одну поверхность в форме, диалоге и teleported-меню.
+     Их фон не зависит от рабочего контейнера и не меняет заливку кнопок или переключателей. */
+  --field-background: var(--surface-2);
+  --field-background-readonly: var(--surface);
 
   --overlay-scrim: #000000aa;
   --overlay-popover-shadow: 0 14px 40px #000000aa;
@@ -122,7 +126,7 @@
   /* Рабочая форма наследует палитру каркаса; ввод получает более светлый surface-2.
      Роли общие, локального оформления controls у экранов нет. */
   --workspace-catalog-background: var(--sidebar);
-  --workspace-field-background: var(--surface-2);
+  --workspace-field-background: var(--field-background);
   --workspace-label-column: 128px;
   --workspace-selection-column: 100px;
   --workspace-actions-column: calc(3 * var(--toolbar-control-h));
@@ -136,7 +140,6 @@
      Hover сохраняет эту поверхность; readonly остаётся отдельным спокойным слоем. */
   --control-background: var(--workspace-field-background);
   --control-background-hover: var(--surface-2);
-  --control-background-readonly: var(--surface);
   --control-outline-background-hover: var(--control-background-hover);
   --control-outline-border: var(--control-border);
   --control-border: var(--line-2);

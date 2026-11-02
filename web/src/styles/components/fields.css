@@ -7,7 +7,7 @@
   min-width: 0;
   border: 1px solid var(--control-border);
   border-radius: var(--control-radius);
-  background: var(--control-background);
+  background: var(--field-background);
   color: var(--control-text);
   transition:
     border-color var(--control-motion-duration) var(--control-motion-easing),
@@ -68,7 +68,6 @@
 }
 
 .ui-textarea[data-role='task-clarification'] {
-  background: var(--surface-2);
   font-size: 13px;
 }
 
@@ -78,7 +77,6 @@
 
 .ui-textarea[data-role='task-launch-note'] {
   min-height: 72px;
-  background: var(--ground);
   font-size: 13px;
 }
 
@@ -118,7 +116,7 @@
 .ui-input[readonly],
 .ui-number-input[readonly],
 .ui-textarea[readonly] {
-  background: var(--control-background-readonly);
+  background: var(--field-background-readonly);
   color: var(--ink-mid);
 }
 
@@ -239,7 +237,6 @@ button.ui-select {
 
 .ui-input[data-context='select-search'] {
   padding-left: 32px;
-  background: var(--surface-2);
 }
 
 /* В компактном меню фокус остаётся тонкой рамкой общего поля.
@@ -675,7 +672,6 @@ button.ui-select {
   padding: 0 8px;
   border-color: var(--line-2);
   border-radius: 7px;
-  background: var(--ground);
   color: var(--ink);
   font-size: 14px;
   font-weight: 600;
@@ -747,7 +743,6 @@ button.ui-select {
   border: 0;
   border-bottom: 1px solid transparent;
   border-radius: 0;
-  background-color: transparent;
   background-position: right 4px center;
   color: var(--ink);
   font-size: 12.5px;
@@ -770,13 +765,18 @@ button.ui-select {
   opacity: 0.5;
 }
 
+/* Выбор проекта и рабочей копии встроен в строку навигации по коду.
+   Прозрачный фон сохраняет общую поверхность шапки без отдельных плашек. */
+.ui-select[data-context='code-head-select'] {
+  background-color: transparent;
+}
+
 /* Все селекты шапки чата используют одну рамку, подложку и отступы.
    Модель, режим и задача сохраняют общий сенсорный размер без отдельных скинов. */
 .ui-select[data-context='chat-session-toolbar'] {
   padding-inline: 8px 28px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background-color: var(--surface-2);
   background-position: right 8px center;
   -webkit-tap-highlight-color: transparent;
 }
@@ -811,7 +811,6 @@ html[data-ui-touch] .ui-select[data-context='chat-session-toolbar']::after {
   height: 32px;
   min-height: 32px;
   border-radius: var(--radius-sm);
-  background: var(--surface-2);
   font-size: 13px;
 }
 
@@ -835,7 +834,6 @@ html[data-ui-touch] .ui-select[data-context='chat-session-toolbar']::after {
 .ui-number-input[data-context='settings-field'],
 .ui-textarea[data-context='settings-field'],
 .ui-select[data-context='settings-field'] {
-  background-color: var(--ground);
   font-size: 14px;
 }
 
@@ -856,7 +854,6 @@ html[data-ui-touch] .ui-select[data-context='chat-session-toolbar']::after {
 .plugrow .ui-select.inp[data-context='settings-field'] {
   padding-right: 31px;
   padding-left: 11px;
-  background-color: var(--surface);
   background-position: right 11px center;
   font-size: 12.5px;
 }

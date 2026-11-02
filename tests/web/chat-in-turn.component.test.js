@@ -337,6 +337,7 @@ test('телефон: переименование доступно при за�
 
   const title = wrapper.get('[data-role="chat-title"]');
 
+  assert.equal(css(title.element).backgroundColor, '#1c222c');
   assert.equal(browser.document.activeElement === title.element, true);
   await title.setValue('Новое название');
   await title.trigger('keydown', { key: 'Enter' });
