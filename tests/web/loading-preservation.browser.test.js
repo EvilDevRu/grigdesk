@@ -59,12 +59,12 @@ for (const [id, value, expected] of [
             chosen: getComputedStyle(element).getPropertyValue('--composer-h').trim(),
         }));
 
-        assert.equal(style.minimum, '48px');
+        assert.equal(style.minimum, '36px');
         assert.equal(style.maximum, '368px');
 
         if (expected === null) {
             assert.equal(style.chosen, '', 'неверная настройка оставляет естественную высоту CSS');
-            assert.ok(rect.height >= 48 && rect.height <= 368);
+            assert.ok(rect.height >= 36 && rect.height <= 368);
         }
         else {
             assert.ok(

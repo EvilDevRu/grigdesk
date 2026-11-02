@@ -354,8 +354,8 @@ test('раскладка чата: JS и CSS считают одни и те ж�
   assert.match(layout, /const COMPOSER_MAX_VH = 0\.46;/);
   // После удаления floating panel у полноразмерного composer остались один минимум и
   // один device-key; legacy key здесь даже не читается.
-  assert.match(layout, /const COMPOSER_MIN = 48;/);
-  assert.match(fields, /data-role='chat-composer'\][^{]*\{[^}]*min-height: 48px;/);
+  assert.match(layout, /const COMPOSER_MIN = 36;/);
+  assert.match(fields, /data-role='chat-composer'\][^{]*\{[^}]*min-height: 36px;/);
   assert.match(
     fields,
     /data-role='chat-composer'\]:focus-visible\s*\{[^}]*box-shadow:\s*none;/,

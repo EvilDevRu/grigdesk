@@ -919,12 +919,14 @@ html[data-ui-touch] .ui-select[data-context='chat-session-toolbar']::after {
   height: 18px;
 }
 
-/* `--composer-h` появляется только после ручного ресайза. Ограничение 46vh обязано
-   совпадать с COMPOSER_MAX_VH в ChatSession, иначе у разделителя будет мёртвый ход. */
+/* Без ручной высоты поле растёт и сжимается по тексту, включая переносы по ширине.
+   Потолок 46vh совпадает с COMPOSER_MAX_VH; дальше текст прокручивается внутри. */
 .ui-textarea[data-role='chat-composer'] {
   flex: 1;
+  min-width: 0;
+  field-sizing: content;
   height: var(--composer-h, auto);
-  min-height: 48px;
+  min-height: 36px;
   max-height: 46vh;
   padding: 6px 0;
   resize: none;
@@ -938,8 +940,8 @@ html[data-ui-touch] .ui-select[data-context='chat-session-toolbar']::after {
   outline: none;
 }
 
-/* Фокус показывает внешняя рамка composer-а. Внутренний focus-ring primitive-а
-   создавал вторую прямоугольную рамку посреди составного поля. */
+/* Фокус показывает верхний разделитель панели ввода в ChatSession.
+   Внутренний focus-ring primitive-а создавал прямоугольную рамку посреди панели. */
 .ui-textarea[data-role='chat-composer']:focus-visible {
   outline: none;
   box-shadow: none;

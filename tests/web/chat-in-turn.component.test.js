@@ -328,6 +328,11 @@ test('телефон: переименование доступно при за�
   const edit = wrapper.get('[data-context="chat-title-edit"]');
   const css = (element) => browser.getComputedStyle(element);
 
+  const composer = css(wrapper.get('.composer').element);
+
+  assert.equal(composer.backgroundColor, 'transparent');
+  assert.equal(composer.borderTopWidth, '0px');
+  assert.equal(composer.borderRadius, '0px');
   assert.equal(wrapper.classes().includes('options-open'), false);
   assert.equal(edit.isVisible(), true);
   assert.equal(edit.find('svg').exists(), true);

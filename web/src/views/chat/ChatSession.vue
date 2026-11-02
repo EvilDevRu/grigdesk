@@ -644,7 +644,7 @@
             :disabled="!messagesReady"
             ref="taEl"
             v-model="input"
-            rows="2"
+            rows="1"
             data-role="chat-composer"
             enterkeyhint="enter"
             :placeholder="recording ? 'Говори… (клик по микрофону — стоп, Esc — отмена)' : drainingSpeech ? 'Завершаю распознавание…' : speechBusy ? 'Подготавливаю диктовку…' : 'Сообщение агенту…'"
@@ -3002,8 +3002,16 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
 .m-file { font-size: 12.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: inline-block; }
 .m-atts a { text-decoration: none; }
 
-/* position — опора для разделителя высоты поля (.cs-resize) */
-.cs-input { position: relative; padding: 12px var(--chat-gutter) 16px; border-top: 1px solid var(--line); }
+/* Единая подложка отделяет всю панель ввода от ленты без вложенной карточки.
+   position оставляет верхнюю линию опорой разделителя высоты (.cs-resize). */
+.cs-input {
+  position: relative;
+  flex: none;
+  padding: 8px var(--chat-gutter);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.cs-input:focus-within { border-top-color: var(--line-2); }
 /* Чипы вложений до отправки */
 .pend { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .chip { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }
@@ -3047,8 +3055,17 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
 .drop-box { border: 2px dashed var(--accent); border-radius: 14px; padding: 18px 28px; font-size: 14px;
   color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 
-.composer { display: flex; gap: 6px; align-items: flex-end; background: var(--ground); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
-.composer:focus-within { border-color: var(--line-2); }
+/* Ввод и действия лежат на общей поверхности нижней панели без отдельной карточки.
+   Фокус отмечает верхний разделитель панели, не замыкая рамку вокруг текста. */
+.composer {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
 
 /* Разделитель высоты поля ввода — на верхней кромке блока, поверх его линии
    (как разделитель дока): собственного места не занимает, включение ресайза
@@ -3108,7 +3125,6 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
 /* Узкие сообщения сохраняют прежние размеры текста и предел ширины вложений. */
 @media (max-width: 759px) {
   .cs-top { justify-content: flex-start; }
-  .cs-input { padding-bottom: 12px; }
   /* Иначе длинный текст режется в узкий столбик */
   .msg.user { max-width: 92%; }
   .msg .text { font-size: 14px; }
@@ -3144,9 +3160,8 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
   .phone-chat-options :deep(.eff .eff-slider) { width: auto; flex: 1; }
   .phone-chat-options .ctx-tip { width: 100%; justify-content: flex-start; }
   .cs-body { min-height: 0; scrollbar-gutter: auto; padding-inline: var(--chat-gutter); }
-  .cs-input { padding: 8px var(--chat-gutter); flex: none; }
   .cs-resize { display: none; }
-  .composer { flex-wrap: wrap; align-items: center; padding: 6px; }
+  .composer { flex-wrap: wrap; align-items: center; }
   .composer > :deep([data-role='chat-composer']) {
     flex: 1 0 100%;
     order: -1;
