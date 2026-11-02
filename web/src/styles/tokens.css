@@ -42,7 +42,9 @@
   --panel-header-font-weight: 600;
   --panel-header-title-color: var(--ink);
   --tool-dock-action-size: 30px;
-  --chat-head-h: 80px;
+  /* Два ряда toolbar, зазор 4 px, поля по 4 px и нижняя граница 1 px.
+     На touch ряды растут до 44 px: общий минимум обеих колонок следует за ними. */
+  --chat-head-h: max(80px, calc(2 * var(--toolbar-control-h) + 13px));
   --chat-list-row-h: 56px;
   --chat-avatar-size: 32px;
   --page-gutter: 16px;

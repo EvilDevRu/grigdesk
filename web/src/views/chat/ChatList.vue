@@ -490,11 +490,13 @@ async function del(r: ListRow) {
 /* Высота шапки — общий с открытым чатом токен (--chat-head-h): содержимое здесь и справа
    разное, и без общей высоты две разделительные линии идут на разном уровне. Содержимое
    центрируем по вертикали — тогда запас высоты не выглядит «прибитым» к верху. */
-.top { display: flex; flex-direction: column; justify-content: center; gap: 5px;
+.top { display: flex; flex-direction: column; justify-content: center; gap: 4px;
   min-height: var(--chat-head-h); flex: none; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .tools { display: flex; align-items: center; gap: 7px; }
 .search { flex: 1; min-width: 0; }
-.archive-toggle { align-self: flex-start; }
+/* Flex-контейнер убирает место под текстовую базовую линию inline-flex переключателя.
+   Иначе шапка списка перерастает общий минимум и её нижняя граница образует ступеньку. */
+.archive-toggle { display: flex; align-self: flex-start; }
 .new { flex: none; }
 
 .rows { flex: 1; overflow-y: auto; padding: 5px; }
