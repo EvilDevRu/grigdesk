@@ -12,7 +12,11 @@
 import { spawn as spawnProcess, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+
 import { dataHome, dataPath } from '../../../../shared/runtime/dataHome.ts';
+
+export const AUDIO_PROBE_PY = fileURLToPath(new URL('./audio-probe.py', import.meta.url));
 
 // Одна проверка окружения: что именно не готово и чем это чинится. Пара
 // «отказ + шаг починки» неразделима — без второго человеку некуда идти.
@@ -94,12 +98,9 @@ export function preflight({
         fix: 'GRIGDESK_MEDIA_PYTHON=<путь к venv>/bin/python в .env папки данных + перезапуск сервера',
     });
 
-    // faster-whisper проверяем только если venv вообще есть.
-    let whisper = false;
-    if (venv) {
-        const r = spawn(pythonPath, ['-c', 'import faster_whisper'], { stdio: 'ignore', env });
-        whisper = r.status === 0;
-    }
+    // Проверяем файловый декодер: импорт не выявляет несовместимость faster-whisper и PyAV.
+    const whisper = venv && spawn(pythonPath, [AUDIO_PROBE_PY], { stdio: 'ignore', env }).status === 0;
+
     checks.push({
         name: 'faster-whisper (распознавание речи)',
         ok: whisper,
@@ -146,7 +147,7 @@ export async function preflightAsync({
         exitStatus('ffmpeg', ['-version'], { env, spawn }),
         exitStatus('ffprobe', ['-version'], { env, spawn }),
         venv
-            ? exitStatus(pythonPath, ['-c', 'import faster_whisper'], { env, spawn })
+            ? exitStatus(pythonPath, [AUDIO_PROBE_PY], { env, spawn })
             : Promise.resolve({ ok: false }),
     ]);
     const checks: PreflightCheck[] = [

@@ -192,6 +192,7 @@ test('install wiring and media dependencies are reproducible', () => {
   assert.match(install, /grigdesk_install_media/);
   assert.match(readFileSync(path.join(root, 'server/requirements-media.txt'), 'utf8'), /ctranslate2==4\.7\.2/);
   assert.match(readFileSync(path.join(root, 'server/requirements-media.txt'), 'utf8'), /huggingface-hub==1\.18\.0/);
+  assert.match(readFileSync(path.join(root, 'server/requirements-media.txt'), 'utf8'), /^av==18\.1\.0$/m);
   assert.match(readFileSync(path.join(root, 'server/requirements-media-cuda.txt'), 'utf8'), /nvidia-cublas-cu12==12\.9\.2\.10/);
 });
 
@@ -208,6 +209,7 @@ function installationFixture(t, options = {}) {
   let blocked = false;
   let failure = false;
   let failModel = false;
+  let failDecoder = false;
   let gpu = 'no_device';
   let barrier = null;
 
@@ -235,7 +237,9 @@ function installationFixture(t, options = {}) {
     commandOptions.onStdout('вывод установщика\n');
 
     return {
-      code: failure || failModel && args.some((arg) => arg.includes('snapshot_download(repo_id=')) ? 1 : 0,
+      code: failure
+        || failModel && args.some((arg) => arg.includes('snapshot_download(repo_id='))
+        || failDecoder && args.some((arg) => arg.endsWith('audio-probe.py')) ? 1 : 0,
       signal: null,
       aborted: false,
       timedOut: false,
@@ -289,6 +293,9 @@ function installationFixture(t, options = {}) {
     },
     failModel: (value) => {
       failModel = value;
+    },
+    failDecoder: (value) => {
+      failDecoder = value;
     },
     gpu: (value) => {
       gpu = value;
@@ -504,6 +511,23 @@ test('UI установки речи: ошибка скачивания не п�
   assert.equal(result.job.status, 'failed');
   assert.equal(result.job.stage, 'model');
   fx.failModel(false);
+  await fx.service.start('update', false);
+  assert.equal((await installedOutcome(fx.service)).job.status, 'succeeded');
+});
+
+test('UI установки речи: успешный импорт не скрывает отказ файлового декодера', async (t) => {
+  const fx = installationFixture(t);
+
+  fx.failDecoder(true);
+  await fx.service.start('install', false);
+
+  const failed = await installedOutcome(fx.service);
+
+  assert.equal(failed.job.status, 'failed');
+  assert.equal(failed.job.stage, 'verification');
+  assert.equal(fx.calls.some((call) => call.args.some((arg) =>
+    arg.includes('snapshot_download(repo_id='))), false);
+  fx.failDecoder(false);
   await fx.service.start('update', false);
   assert.equal((await installedOutcome(fx.service)).job.status, 'succeeded');
 });

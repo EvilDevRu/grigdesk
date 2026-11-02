@@ -28,6 +28,8 @@
 
 ## Грабли
 
+- [Файловая диктовка: faster-whisper 1.2.1 несовместим с PyAV 19](whisper-pyav-compatibility.md)
+
 - [Python без ensurepip: системный пакет venv и понятная ошибка установки](speech-missing-venv.md)
 
 - [Штатный Python: имена python3 и ссылки родительских каталогов](speech-managed-paths.md)

@@ -15,7 +15,7 @@
 2. Ставит закреплённые `requirements-media.txt` текущего выпуска GrigDesk.
 3. Запускает `cuda-probe.py` в новом окружении. При обнаруженном NVIDIA GPU
    (`ready` или `missing_library`) ставит `requirements-media-cuda.txt`.
-4. Проверяет импорты и доступность ffmpeg/ffprobe.
+4. Проверяет импорты, реальное декодирование короткого WAV и доступность ffmpeg/ffprobe.
 5. Скачивает pinned snapshot выбранной модели из серверного allowlist в runtime-кэш.
 6. Проверяет кэш через общий `model-cache-probe.py` и загружает веса через
    `WhisperModel` на CPU без сети. Только после этого сохраняет успешный исход.

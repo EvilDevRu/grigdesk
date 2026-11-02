@@ -62,6 +62,11 @@
       "kind": "file"
     },
     {
+      "source": "server/src/lib/media/audio-probe.py",
+      "target": "server/src/lib/media/audio-probe.py",
+      "kind": "file"
+    },
+    {
       "source": "server/src/lib/media/transcribe.py",
       "target": "server/src/lib/media/transcribe.py",
       "kind": "file"

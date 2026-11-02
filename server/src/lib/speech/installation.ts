@@ -10,6 +10,7 @@ import {
 } from '../../../../shared/media/speechInstallation.ts';
 import { acquireDirectoryLock } from '../../../../shared/node/directoryLock.ts';
 import { writeDurableFile } from '../durableFile.ts';
+import { AUDIO_PROBE_PY } from '../media/preflight.ts';
 import { runCommand, type PluginCommandRunner, type CommandWorker } from '../packageInstall/runCommand.ts';
 import { liveGroupMembers } from '../packageInstall/workerIdentity.ts';
 import { speechModel, type SpeechModel } from './catalog.ts';
@@ -395,6 +396,7 @@ export class SpeechInstallationService {
         await this.command(this.python, [
           '-c', 'import faster_whisper, ctranslate2, huggingface_hub, numpy',
         ]);
+        await this.command(this.python, [AUDIO_PROBE_PY]);
         await this.command('ffmpeg', ['-version']);
         await this.command('ffprobe', ['-version']);
         await this.installModel(model);
