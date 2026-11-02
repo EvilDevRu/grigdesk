@@ -368,8 +368,8 @@ for (const locale of ['ru', 'en']) {
   });
 }
 
-for (const step of ['ai', 'project', 'workspace', 'summary']) {
-  test(`ONB-DISMISS-UI: ${step} ждёт ACK и открывает обычное место настройки`, async (t) => {
+for (const step of ['ai', 'project', 'workspace']) {
+  test(`ONB-DISMISS-UI: ${step} ждёт ACK и оставляет исходный раздел`, async (t) => {
     requireWizard();
 
     const f = await wizardBrowser(t);
@@ -379,14 +379,11 @@ for (const step of ['ai', 'project', 'workspace', 'summary']) {
     } else if (step === 'project') {
       await atProject(f, 'manual');
     } else {
-      const state = await atWorkspace(f, 'manual');
-
-      if (step === 'summary') {
-        await request(f.app, 'POST', '/advance', token(state));
-      }
+      await atWorkspace(f, 'manual');
     }
 
     const page = await f.newPage({ route: '#/onboarding' });
+    const initialUrl = page.url();
     let release;
     const gate = new Promise((resolve) => {
     release = resolve;
@@ -407,16 +404,10 @@ for (const step of ['ai', 'project', 'workspace', 'summary']) {
       release();
     }
 
-    await page.waitForURL(/#\/projects/);
+    await page.locator('[data-role="onboarding-modal"]').waitFor({ state: 'hidden' });
     assert.equal((await request(f.app)).autoOpenDisabled, true);
-
-    if (step === 'ai') {
-      const settings = page.locator('[data-role="settings-modal"]');
-
-      await settings.waitFor();
-      await settings.locator('[data-page="agents.providers"]').waitFor();
-      await settings.getByRole('heading', { name: /исполнител|provider/i }).waitFor();
-    }
+    assert.equal(page.url(), initialUrl);
+    assert.equal(await page.locator('[data-role="settings-modal"]').count(), 0);
   });
 }
 

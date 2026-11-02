@@ -72,7 +72,8 @@
             variant="outline" @click="store.transition('/back')">
             {{ t('core.onboardingBack') }}
           </UiButton>
-          <UiButton data-context="workspace-form-wrap" :disabled="busy" variant="outline" @click="dismiss">
+          <UiButton v-if="session.status === 'active'" data-context="workspace-form-wrap"
+            :disabled="busy || !!store.error" variant="outline" @click="dismiss">
             {{ t('core.onboardingDismiss') }}
           </UiButton>
           <UiButton v-if="session.step === 'ai'" data-context="workspace-form-wrap"
@@ -88,7 +89,8 @@
             <UiButton data-context="workspace-form-wrap" :disabled="busy" @click="another">
               {{ t('core.onboardingAnother') }}
             </UiButton>
-            <UiButton data-context="workspace-form-wrap" variant="solid" tone="accent" @click="finish">
+            <UiButton data-context="workspace-form-wrap" :disabled="busy || !!store.error"
+              variant="solid" tone="accent" @click="finish">
               {{ t('core.onboardingDone') }}
             </UiButton>
           </template>
@@ -109,7 +111,6 @@ import {
 } from '../../ui';
 import type { UiDialogCloseReason } from '../../ui';
 import { useOnboardingStore } from '../../stores/onboarding.ts';
-import { openSettings } from '../../shared/settingsNavigation.ts';
 import OnboardingAiStep from './OnboardingAiStep.vue';
 import OnboardingProjectStep from './OnboardingProjectStep.vue';
 import OnboardingWorkspaceStep from './OnboardingWorkspaceStep.vue';
@@ -184,22 +185,15 @@ async function finish(): Promise<void> {
 }
 
 /**
- * Отказ подтверждается сервером до закрытия, затем открывается обычное место настройки.
- * Неуспешная запись оставляет окно с прежними ответами и причиной ошибки.
+ * Пропуск подтверждается сервером и возвращает к разделу, над которым открыт мастер.
+ * Действие не открывает другую настройку; ошибка оставляет окно и введённые ответы.
  */
 async function dismiss(): Promise<void> {
-  const ai = session.value?.step === 'ai';
-
   if (!await store.transition('/dismiss')) {
     return;
   }
 
   store.hide();
-  await router.push(projectRoute.value);
-
-  if (ai) {
-    openSettings({ pageId: 'agents.providers' });
-  }
 }
 </script>
 
