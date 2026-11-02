@@ -1112,6 +1112,34 @@ test('CAT-DLG2: происхождение берётся из actual job, а н
   assert.equal(wrapper.get('[data-source-notice]').attributes('data-membership'), 'external');
 });
 
+test('CAT-OFFICIAL: официальный пакет скрывает общие риски, но сохраняет предупреждения операции',
+  async (t) => {
+    const { catalogFixture } = await import('../helpers/pluginCatalog.js');
+    const data = catalogFixture();
+    const job = webInstallJob();
+    const operationWarning = 'Установленная версия будет понижена.';
+
+    data.index.plugins[0].origin = 'official';
+    job.source = data.entry.source;
+    job.preview.source = data.entry.source;
+    job.preview.warnings = ['Код плагина выполняется с правами GrigDesk.', moduleWarning, operationWarning];
+
+    const { wrapper, state } = await mountInstallDialog(t, { job });
+
+    globalThis.__catalogUi.index = data.index;
+    globalThis.__catalogUi.state = 'fresh';
+    await nextTick();
+    assert.equal(wrapper.get('[data-source-notice]').attributes('data-membership'), 'official');
+    assert.doesNotMatch(wrapper.get('[data-role="install-preview"]').text(), /правами|вашей сессией/u);
+    assert.equal(wrapper.get('[data-role="install-warning"]').text(), operationWarning);
+
+    state.job.source = { kind: 'git', url: 'https://github.com/other/demo.git' };
+    state.job.preview.source = state.job.source;
+    await nextTick();
+    assert.match(wrapper.get('[data-role="install-preview"]').text(), /правами GrigDesk/u);
+    assert.equal(wrapper.get('[data-source-notice]').attributes('data-membership'), 'external');
+  });
+
 test('CAT-DLG5: ready и reopen запускают проверку; apply ждёт её фактического исхода', async (t) => {
   const { wrapper, state } = await mountInstallDialog(t);
   const reads = [];

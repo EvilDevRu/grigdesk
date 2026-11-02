@@ -18,7 +18,7 @@
       <dd class="preview-sha">{{ preview.target.sha }}</dd>
     </dl>
     <UiInlineMessage
-      v-for="warning in preview.warnings"
+      v-for="warning in warnings"
       :key="warning"
       tone="warning"
       data-role="install-warning"
@@ -34,7 +34,7 @@
         {{ t('settings.changesCommits') }} {{ preview.changes.commits.length }} {{ t('settings.files') }}
         {{ preview.changes.files.length }}
       </UiDisclosureButton>
-      <p v-if="preview.changes.sensitive.length" class="preview-sensitive">
+      <p v-if="!official && preview.changes.sensitive.length" class="preview-sensitive">
         {{ t('settings.serverCodeOrDependenciesAreAffected') }}
       </p>
       <div
@@ -72,7 +72,7 @@
       </div>
       <p v-if="preview.changes.truncated" class="preview-sensitive">{{ t('settings.theListIsTruncated') }}</p>
     </div>
-    <UiInlineMessage tone="warning">
+    <UiInlineMessage v-if="!official" tone="warning">
       {{ t('settings.pluginCodeRunsInsideGrigDeskWithIts') }}
     </UiInlineMessage>
   </section>
@@ -81,15 +81,18 @@
 <script setup lang="ts">
 import { t, uiLocale } from '../../ui.ts';
 
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import { UiDisclosureButton, UiInlineMessage } from '../../ui';
 import { replacesText, shortSha } from '../../shared/pluginInstall.ts';
+import { isPackageCodeWarning } from '../../shared/installWarnings.ts';
 import type { PluginInstallPreview } from '../../../../shared/plugins/pluginInstallContracts.ts';
 
-defineProps<{ preview: PluginInstallPreview }>();
+const props = defineProps<{ preview: PluginInstallPreview; official?: boolean }>();
 
 const changesOpen = ref(false);
+const warnings = computed(() => props.preview.warnings
+  .filter((warning) => !props.official || !isPackageCodeWarning(warning)));
 </script>
 
 <style scoped>

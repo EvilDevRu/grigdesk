@@ -9,6 +9,29 @@ import {
 
 process.env.NODE_ENV = 'test';
 
+test('WIZARD-OFFICIAL: встроенный репозиторий скрывает общее предупреждение',
+  async (t) => {
+    const card = await manager(t, {
+      handlers: {
+        post: async (url, payload, state) => {
+          if (url === '/api/driver-installs/jobs') {
+            const record = driverInstallInfo('1.0.0', 1);
+
+            record.source = { kind: 'git', url: payload.url };
+            state.job = driverJob('install', record);
+
+            return { job: structuredClone(state.job) };
+          }
+        },
+      },
+    });
+
+    await prepareTracker(card, 'git@github.com:EvilDevRu/grigdesk-b24.git');
+    assert.doesNotMatch(card.dialog.text(), /правами GrigDesk/u);
+    assert.ok(actionButton(card.dialog, /^Установить$/u));
+    assert.equal(card.apiCalls.some((call) => call.url.endsWith('/apply')), false);
+  });
+
 /**
  * Открывает список и возвращает текущую единственную модальную оболочку.
  * Запросы остаются наблюдаемыми, реальные stores обслуживают весь маршрут.

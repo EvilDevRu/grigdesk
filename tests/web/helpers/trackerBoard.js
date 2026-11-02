@@ -298,7 +298,12 @@ export async function mountTrackerBoard(t, {
     snapshot: {
       trackerId: 'grigdesk-b24-discript',
       capabilities: CUSTOM_CAPS,
-      widgets: []
+      widgets: [],
+      tasks: [],
+      toReview: [],
+      created: [],
+      accomplice: [],
+      auditor: [],
     },
     compilerStubs: {
       '../shared/apiClient.ts': apiStub,

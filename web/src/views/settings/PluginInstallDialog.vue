@@ -245,7 +245,7 @@
         </section>
         <section v-else-if="view === 'ready' && preview" class="install-ready">
           <PluginSourceNotice v-if="!driver" :membership="membership" :source="store.job?.source.url ?? ''" />
-          <PluginInstallPreview :preview="preview" />
+          <PluginInstallPreview :preview="preview" :official="!driver && membership === 'official'" />
         </section>
         <section v-else-if="view === 'result' && store.job" class="install-result-layout">
           <div v-if="store.job.preview" class="install-package-summary">

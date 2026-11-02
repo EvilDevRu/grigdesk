@@ -204,7 +204,7 @@
             </p>
             <UiInlineMessage v-if="resultRestartRequired">{{ t('core.trackerRestart') }}</UiInlineMessage>
             <template v-if="store.job.status === 'ready'">
-              <UiInlineMessage tone="warning">{{ t('core.trackerServerCode') }}</UiInlineMessage>
+              <UiInlineMessage v-if="!officialSource" tone="warning">{{ t('core.trackerServerCode') }}</UiInlineMessage>
               <UiInlineMessage v-for="warning in warnings" :key="warning" tone="warning">
                 {{ warning }}
               </UiInlineMessage>
@@ -319,6 +319,9 @@ import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'v
 import { useDriverInstallStore } from '../../stores/driverInstall.ts';
 import { useTrackersStore } from '../../stores/trackers.ts';
 import TrackerUpdateStatus from './TrackerUpdateStatus.vue';
+import { BUILTIN_DRIVER_SOURCES } from '../../../../shared/trackers/driverSources.ts';
+import { sameCatalogSource } from '../../../../shared/plugins/pluginCatalogPolicy.ts';
+import { isPackageCodeWarning } from '../../shared/installWarnings.ts';
 import {
   confirmDialog, messageRef, t, UiButton, UiDialog, UiDisclosureButton, UiField, UiFormActions,
   UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiProgress, UiSelect,
@@ -407,8 +410,11 @@ const stageLabel = computed(() => store.job?.stage ? t(({
   validating: 'core.trackerStageValidating',
   dependencies: 'core.trackerStageDependencies',
 } as const)[store.job.stage]) : '');
+const officialSource = computed(() => !!store.job?.preview && BUILTIN_DRIVER_SOURCES.some((source) =>
+  sameCatalogSource({ kind: 'git', url: source.url }, store.job!.preview!.source)));
 const warnings = computed(() => [...new Set(store.job?.preview?.warnings ?? [])]
-  .filter((warning) => !/правами GrigDesk|GrigDesk permissions/iu.test(warning)));
+  .filter((warning) => !/правами GrigDesk|GrigDesk permissions/iu.test(warning)
+    && (!officialSource.value || !isPackageCodeWarning(warning))));
 const resultRestartRequired = computed(() => store.jobRestartRequired
   || !!store.job?.driverId && !!store.installed[store.job.driverId]?.restartRequired);
 const driverName = (id: string) => packages.value.find((entry) => entry.id === id)?.name ?? id;

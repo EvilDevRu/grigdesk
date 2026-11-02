@@ -1,18 +1,13 @@
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import { readTextOrNull } from '../../../../shared/node/files.ts';
+import { BUILTIN_DRIVER_SOURCES } from '../../../../shared/trackers/driverSources.ts';
+
+export { BUILTIN_DRIVER_SOURCES } from '../../../../shared/trackers/driverSources.ts';
 
 export interface DriverSource {
   title: string;
   url: string;
 }
-
-// Запись — только ярлык репозитория: id объявляет сам пакет в driver.json,
-// а совместимость по контракту проверяет установщик. Репозиторий может быть ещё
-// не опубликован: попытка установки завершится явным читаемым отказом.
-export const BUILTIN_DRIVER_SOURCES: readonly DriverSource[] = [
-  { title: 'Битрикс24', url: 'https://github.com/EvilDevRu/grigdesk-b24' },
-  { title: 'Jira', url: 'https://github.com/EvilDevRu/grigdesk-jira' },
-];
 
 /**
  * Локальная надстройка принимается целиком: неоднозначный URL отменяет весь файл.

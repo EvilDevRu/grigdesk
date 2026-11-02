@@ -1,6 +1,7 @@
 # Источники драйверов трекера
 
-`server/src/lib/trackers/driverSources.ts` содержит встроенные ярлыки репозиториев:
+`shared/trackers/driverSources.ts` содержит встроенные ярлыки репозиториев;
+`server/src/lib/trackers/driverSources.ts` добавляет локальную надстройку:
 
 - «Битрикс24» — `https://github.com/EvilDevRu/grigdesk-b24`.
 - «Jira» — `https://github.com/EvilDevRu/grigdesk-jira`.

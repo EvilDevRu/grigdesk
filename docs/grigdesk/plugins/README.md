@@ -1,5 +1,7 @@
 # Плагины
 
+- [Официальные пакеты: скрытие общих предупреждений при сохранении проверок и подтверждения](official-install-notices.md)
+
 SSH, просмотр документов, «Код», стенды и песочницы, презентации.
 
 Читай перед правкой: `server/src/modules/ssh`, `server/src/lib/ssh`, `server/src/lib/documents`, `server/src/modules/code`, `server/src/lib/sandboxes`, `server/src/lib/showcase`.
