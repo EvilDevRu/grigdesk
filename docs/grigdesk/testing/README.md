@@ -29,6 +29,8 @@
 
 ## Грабли
 
+- [Подмена Python os.open и очистка TemporaryDirectory через dir_fd](python-open-fixture.md)
+
 - [Фикстуры трекеров, настроек и актуальной оболочки](tracker-dev-fixtures.md)
 
 - [Каталог capabilities и виджеты в loading-фикстурах трекера](tracker-loading-fixtures.md)

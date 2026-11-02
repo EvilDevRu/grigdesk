@@ -71,9 +71,5 @@ export const SETTINGS_PAGE_COMPONENTS: Record<string, Component> = {
   'tools.browser': asyncView(() => import('./pages/BrowserPage.vue'), loading('tools.browser')),
   'agents.providers': asyncView(() => import('./pages/ProviderPage.vue'), loading('agents.providers')),
   'speech.dictation': asyncView(() => import('./pages/SpeechPage.vue'), loading('speech.dictation')),
-  'speech.video': asyncView(() => import('./pages/SpeechPage.vue'), loading('speech.video')),
-  'speech.language': asyncView(() => import('./pages/SpeechPage.vue'), loading('speech.language')),
-  'speech.models': asyncView(() => import('./pages/SpeechPage.vue'), loading('speech.models')),
-  'speech.advanced': asyncView(() => import('./pages/SpeechPage.vue'), loading('speech.advanced')),
   'system.diagnostics': asyncView(() => import('./pages/DiagnosticsPage.vue'), loading('system.diagnostics')),
 };

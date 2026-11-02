@@ -3,6 +3,7 @@
     <div class="settings-speech-model-copy">
       <strong>{{ model.modelId }}</strong>
       <small>{{ model.repo }} · {{ sizeLabel }}</small>
+      <small v-if="selectedFor" data-speech-model-selected>{{ selectedFor }}</small>
     </div>
     <span class="settings-speech-model-status" :data-cached="verified && model.cached">
       {{ !verified ? t('settings.speechSetupUnknown')
@@ -57,6 +58,7 @@ import { speechJobLabel, type SpeechJob } from '../../features/settings/speechOp
 
 const props = withDefaults(defineProps<{
   model: SpeechModel;
+  selectedFor?: string;
   job?: SpeechJob;
   busy: boolean;
   active: boolean;

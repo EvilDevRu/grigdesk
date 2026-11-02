@@ -31,7 +31,7 @@ const pages = [
   'tools.browser',
   'connections.mobile', 'system.startup', 'system.updates', 'system.processes',
   'plugins.installed', 'agents.providers', 'speech.dictation',
-  'speech.video', 'speech.language', 'speech.models', 'speech.advanced', 'system.diagnostics',
+  'system.diagnostics',
 ];
 
 /**
@@ -181,7 +181,23 @@ test('I18N-S02: все страницы, публичные метаданные
     networks: [],
     relays: [],
   };
-  const h = await i18nComponent(t, { responses: { '/api/devices/access': access } });
+  const h = await i18nComponent(t, {
+    responses: {
+      '/api/devices/access': access,
+      '/api/settings/speech': {
+        ...data.speech,
+        capabilities: {
+          ...data.speech.capabilities,
+          models: data.speech.capabilities.models.map((model) => ({ ...model, cached: true })),
+        },
+      },
+      '/api/settings/speech/installation': {
+        managed: true,
+        installed: true,
+        job: null,
+      },
+    },
+  });
 
   const plugins = h.module.usePluginsStore(h.pinia);
 
@@ -236,6 +252,15 @@ test('I18N-S02: все страницы, публичные метаданные
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
       await h.flushPromises();
+    }
+
+    if (pageId === 'speech.dictation') {
+      const advanced = new h.DOMWrapper(document.querySelector('[data-speech-advanced-toggle]'));
+
+      assert.equal(advanced.attributes('aria-expanded'), 'false');
+      await advanced.trigger('click');
+      await h.flushPromises();
+      assert.equal(advanced.attributes('aria-expanded'), 'true');
     }
 
     const title = document.querySelector('#settings-page-title')?.textContent || '';

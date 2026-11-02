@@ -28,6 +28,11 @@ async function openSettings(t) {
       devices: [],
     },
     '/api/settings/speech': data.speech,
+    '/api/settings/speech/installation': {
+      managed: true,
+      installed: true,
+      job: null,
+    },
     '/api/plugins': data.plugins,
     '/api/plugin-catalog': {
       state: 'unconfigured',
@@ -86,8 +91,8 @@ function contrastSource() {
 test('V01: текстовая область — во всю ширину под названием', async (t) => {
   const fixture = await openSettings(t);
 
-  await showPage(fixture, 'speech.language',
-    '[data-settings-speech-page="speech.language"][data-ready="true"]');
+  await showPage(fixture, 'speech.dictation',
+    '[data-settings-speech-page="speech.dictation"][data-ready="true"]');
 
   const field = await fixture.page.locator('[data-ui-settings-field]:has(.ui-textarea)').first()
     .evaluate((element) => {
@@ -108,8 +113,8 @@ test('V01: текстовая область — во всю ширину под
 test('V02: ширина формы и шкала заголовков', async (t) => {
   const fixture = await openSettings(t);
 
-  await showPage(fixture, 'speech.advanced',
-    '[data-settings-speech-page="speech.advanced"][data-ready="true"]');
+  await showPage(fixture, 'speech.dictation',
+    '[data-settings-speech-page="speech.dictation"][data-ready="true"]');
 
   const narrow = await fixture.page.locator('[data-role="settings-modal"]').evaluate((modal) => {
     const inner = modal.querySelector('.settings-page-inner').getBoundingClientRect();
@@ -202,7 +207,7 @@ test('V06: дерево — одна раскрытая группа и подп
   const pages = new Set();
   let expanded = [];
 
-  for (const pageId of ['agents.models', 'speech.advanced', 'connections.devices', 'plugins.installed']) {
+  for (const pageId of ['agents.models', 'speech.dictation', 'connections.devices', 'plugins.installed']) {
     await showPage(fixture, pageId, `[data-settings-node="${pageId}"][aria-selected="true"]`);
 
     const tree = await fixture.page.locator('[role="tree"]').evaluate((element) => {
@@ -232,9 +237,10 @@ test('V06: дерево — одна раскрытая группа и подп
     groupHeights: 1,
     pageHeights: 1,
   });
-  await showPage(fixture, 'speech.advanced', '[data-settings-node="speech.advanced"][aria-selected="true"]');
-  assert.equal(await fixture.page.locator('[data-settings-node="speech.advanced"]').textContent(),
-    'Дополнительно');
+  await showPage(fixture, 'speech.dictation',
+    '[data-settings-node="speech.dictation"][aria-selected="true"]');
+  assert.equal(await fixture.page.locator('[data-settings-node="speech.dictation"]').textContent(),
+    'Речь');
   assert.deepEqual(fixture.errors, []);
   assert.deepEqual(fixture.unexpected, []);
 });
@@ -314,10 +320,13 @@ test('V10: речь — сведения парами, модели строка
 
   await showPage(fixture, 'speech.dictation',
     '[data-settings-speech-page="speech.dictation"][data-ready="true"]');
+  assert.equal(await fixture.page.locator('[data-speech-advanced]').count(), 0);
+  await fixture.page.locator('[data-speech-advanced-toggle]').click();
   assert.equal(await fixture.page.locator('[data-settings-speech-page] dl.settings-facts dt').count(), 4);
-  await showPage(fixture, 'speech.models', '[data-settings-speech-page="speech.models"][data-ready="true"]');
+  await showPage(fixture, 'speech.dictation',
+    '[data-settings-speech-page="speech.dictation"][data-ready="true"]');
 
-  const models = await fixture.page.locator('[data-settings-speech-page="speech.models"]')
+  const models = await fixture.page.locator('[data-settings-speech-page="speech.dictation"]')
     .evaluate((element) => ({
       rows: element.querySelectorAll('li.settings-speech-model').length,
       sections: element.querySelectorAll('.settings-speech-model .settings-section-heading').length,
@@ -330,7 +339,7 @@ test('V10: речь — сведения парами, модели строка
     rows: 2,
     sections: 0,
     cachedDownload: false,
-    status: 'В кэше',
+    status: 'Установлено на сервере',
   });
   assert.deepEqual(fixture.errors, []);
   assert.deepEqual(fixture.unexpected, []);

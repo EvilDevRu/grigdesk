@@ -210,77 +210,77 @@ const SPEECH_FIELDS = [
     translator.t('ru', 'settings.presetForModelAndRecognitionDepth'),
   ],
   [
-    'speech.video',
+    'speech.dictation',
     'videoQuality',
     'select',
     translator.t('ru', 'settings.videoQuality'),
     translator.t('ru', 'settings.meetingRecordingRecognitionPreset'),
   ],
   [
-    'speech.video',
+    'speech.dictation',
     'videoInitialPrompt',
     'textarea',
     translator.t('ru', 'settings.videoStylePrompt'),
     translator.t('ru', 'settings.upToCharactersAShortExampleSets'),
   ],
   [
-    'speech.language',
+    'speech.dictation',
     'language',
     'select',
     translator.t('ru', 'settings.recognitionLanguage'),
     translator.t('ru', 'settings.automaticRussianOrEnglish'),
   ],
   [
-    'speech.language',
+    'speech.dictation',
     'dictionary',
     'textarea',
     translator.t('ru', 'settings.projectTerms'),
     translator.t('ru', 'settings.upToCharactersOneTermPerLine'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'model',
     'select',
     translator.t('ru', 'settings.dictationModel'),
     translator.t('ru', 'settings.emptySelectionKeepsThePresetModel'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'videoModel',
     'select',
     translator.t('ru', 'settings.videoModel'),
     translator.t('ru', 'settings.emptySelectionKeepsThePresetModel'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'device',
     'select',
     translator.t('ru', 'settings.processingDevice'),
     translator.t('ru', 'settings.cudaIsAvailableOnlyAfterASuccessful'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'computeType',
     'select',
     translator.t('ru', 'settings.computeType'),
     translator.t('ru', 'settings.emptySelectionKeepsTheDeviceDefault'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'beamSize',
     'number',
     translator.t('ru', 'settings.dictationSearchDepth'),
     translator.t('ru', 'settings.fromToEmptyMeansPresetDefault'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'vadSilenceMs',
     'number',
     translator.t('ru', 'settings.vadPauseMs'),
     translator.t('ru', 'settings.fromToMilliseconds'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'conditionOnPreviousText',
     'switch',
     translator.t('ru', 'settings.usePreviousText'),
@@ -334,7 +334,7 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
   },
   {
     id: 'speech',
-    label: translator.t('ru', 'settings.speechAndTranscription'),
+    label: translator.t('ru', 'settings.speechPageTitle'),
   },
   {
     id: 'connections',
@@ -442,38 +442,14 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   {
     id: 'speech.dictation',
     groupId: 'speech',
-    label: translator.t('ru', 'settings.dictation2'),
-    description: translator.t('ru', 'settings.dictationEngineProcessingLocationAndQuality'),
-  },
-  {
-    id: 'speech.video',
-    groupId: 'speech',
-    label: translator.t('ru', 'settings.videoTranscription'),
-    description: translator.t('ru', 'settings.transcriptionQualityAndStylePrompt'),
+    label: translator.t('ru', 'settings.speechPageTitle'),
+    description: translator.t('ru', 'settings.speechPageDescription'),
   },
   {
     id: 'speech.videoTasks',
     groupId: 'speech',
     label: translator.t('ru', 'settings.builtinPlugins.video.name'),
     description: translator.t('ru', 'settings.builtinPlugins.video.description'),
-  },
-  {
-    id: 'speech.language',
-    groupId: 'speech',
-    label: translator.t('ru', 'settings.languageAndTerms'),
-    description: translator.t('ru', 'settings.recognitionLanguageAndTermDictionary'),
-  },
-  {
-    id: 'speech.models',
-    groupId: 'speech',
-    label: translator.t('ru', 'settings.localModels'),
-    description: translator.t('ru', 'settings.modelCatalogDownloadsAndCopying'),
-  },
-  {
-    id: 'speech.advanced',
-    groupId: 'speech',
-    label: translator.t('ru', 'settings.speechAdvancedPage'),
-    description: translator.t('ru', 'settings.modelsDeviceEnvironmentAndPerformanceMeasurement'),
   },
   {
     id: 'connections.devices',
@@ -610,11 +586,18 @@ function migrateLegacyPage(storage: SettingsStorage): string | undefined {
 }
 
 /**
- * Бывшая отдельная страница установки стала безопасным alias общего раздела.
+ * Снятые страницы установки и речи ведут в соответствующий общий раздел.
  * Неизвестный ID по-прежнему не даёт импортировать произвольный компонент.
  */
 export function normalizeSettingsPageId(raw: unknown): string | undefined {
-  const id = raw === 'plugins.install' ? 'plugins.installed' : raw;
+  const aliases: Record<string, string> = {
+    'plugins.install': 'plugins.installed',
+    'speech.video': 'speech.dictation',
+    'speech.language': 'speech.dictation',
+    'speech.models': 'speech.dictation',
+    'speech.advanced': 'speech.dictation',
+  };
+  const id = typeof raw === 'string' ? aliases[raw] ?? raw : raw;
 
   return typeof id === 'string' && SETTINGS_PAGES.some((page) => page.id === id) ? id : undefined;
 }
@@ -638,13 +621,19 @@ export function resolveSettingsPage(request: PageRequest = {}): string {
  * Допустимость динамического поля проверяет владелец каталога после загрузки сущности.
  */
 export function resolveFieldAddress(address: FieldAddress): FieldAddress | null {
-  if (!SETTINGS_PAGES.some((page) => page.id === address.pageId)
+  const pageId = normalizeSettingsPageId(address.pageId);
+
+  if (!pageId
       || !Array.isArray(address.fieldPath) || address.fieldPath.length === 0
       || address.fieldPath.some((part) => typeof part !== 'string' || part.length === 0)) {
     return null;
   }
 
-  return { ...address, fieldPath: [...address.fieldPath] };
+  return {
+    ...address,
+    pageId,
+    fieldPath: [...address.fieldPath],
+  };
 }
 
 /**
@@ -668,7 +657,7 @@ const GROUP_MESSAGES: Record<string, Record<string, string>> = {
     "label": "settings.chatsAndPipeline"
   },
   "speech": {
-    "label": "settings.speechAndTranscription"
+    "label": "settings.speechPageTitle"
   },
   "connections": {
     "label": "settings.connectionsAndAccess"
@@ -730,24 +719,8 @@ const PAGE_MESSAGES: Record<string, Record<string, string>> = {
     "description": "settings.automaticStopAnalysisModelAndEffort"
   },
   "speech.dictation": {
-    "label": "settings.dictation2",
-    "description": "settings.dictationEngineProcessingLocationAndQuality"
-  },
-  "speech.video": {
-    "label": "settings.videoTranscription",
-    "description": "settings.transcriptionQualityAndStylePrompt"
-  },
-  "speech.language": {
-    "label": "settings.languageAndTerms",
-    "description": "settings.recognitionLanguageAndTermDictionary"
-  },
-  "speech.models": {
-    "label": "settings.localModels",
-    "description": "settings.modelCatalogDownloadsAndCopying"
-  },
-  "speech.advanced": {
-    "label": "settings.speechAdvancedPage",
-    "description": "settings.modelsDeviceEnvironmentAndPerformanceMeasurement"
+    "label": "settings.speechPageTitle",
+    "description": "settings.speechPageDescription"
   },
   "connections.devices": {
     "label": "settings.serverAccess",

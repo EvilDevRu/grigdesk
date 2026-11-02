@@ -724,6 +724,9 @@ with tempfile.TemporaryDirectory() as root:
     module.os.open = secure_open
     module.os.replace = inspect_replace
     module.atomic_write({'status': 'running'})
+    # os общий для всех модулей; TemporaryDirectory использует open с dir_fd при очистке.
+    module.os.open = real_open
+    module.os.replace = real_replace
     print(json.dumps({
         **observed,
         'exclusive': bool(observed['flags'] & os.O_EXCL),

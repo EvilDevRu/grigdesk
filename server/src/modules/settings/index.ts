@@ -16,6 +16,8 @@ import type { SpeechRuntime } from '../../lib/speech/runtime.ts';
 import type { FactoryDebugSettings } from '../../lib/factoryDebug.ts';
 import { PrefsCorruptedError, publicPrefsView } from '../../lib/prefsStore.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
+import type { SpeechInstallationService } from '../../lib/speech/installation.ts';
+import { registerSpeechInstallation } from './speechInstallation.ts';
 
 export interface SettingsModuleOptions {
   prefs: PrefsStore;
@@ -24,6 +26,7 @@ export interface SettingsModuleOptions {
   speechRuntime?: SpeechRuntime | null;
   speechSettings?: SpeechSettingsStore;
   modelJobs?: ModelJobManager | null;
+  speechInstallation?: SpeechInstallationService;
 }
 
 // Снимок настроек речи вместе с возможностями окружения.
@@ -87,6 +90,11 @@ async function settingsModule(
   const speechSettings = opts.speechSettings || new SpeechSettingsStore({ prefs });
   const modelJobs = Object.hasOwn(opts, 'modelJobs') ? opts.modelJobs : (speechRuntime?.modelJobs || null);
   let speechMutationTail: Promise<unknown> = Promise.resolve();
+
+  if (opts.speechInstallation) {
+    registerSpeechInstallation(fastify, opts.speechInstallation);
+    fastify.addHook('onClose', () => opts.speechInstallation!.close());
+  }
 
   function serializeSpeechMutation<Value>(operation: () => Promise<Value>): Promise<Value> {
     const result = speechMutationTail.then(operation, operation);

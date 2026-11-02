@@ -171,7 +171,7 @@ test('IN01/02/04/06/10/11: App сохраняет основной докуме�
   await flushPromises();
 
   assert.equal(settings.isOpen, true);
-  assert.equal(settings.pageId, 'speech.video');
+  assert.equal(settings.pageId, 'speech.dictation');
   assert.equal(app.find('[data-modal-settings]').exists(), true);
 
   settings.cancel();

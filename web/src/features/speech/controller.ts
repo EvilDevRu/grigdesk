@@ -6,6 +6,7 @@ import { isSpeechSettings, type SpeechSettings, type SpeechWindow, type SpeechEr
   type LeaseHandlers, type ControllerOptions, type Timer } from './contracts.ts';
 import { api as defaultApi, failureText } from '../../shared/apiClient.ts';
 import { createSpeechStream } from '../../shared/speechStream.ts';
+import { browserLocalSpeechAllowed } from './browserSupport.ts';
 
 const DEFAULT_BROWSER_DRAIN_TIMEOUT_MS = 1800;
 const DEFAULT_LOCAL_STREAM_LAG_NOTICE_MS = 4000;
@@ -121,6 +122,7 @@ function browserErrorText(error: string) {
 function defaultBrowser() {
   return {
     isSecureContext: () => globalThis.window?.isSecureContext !== false,
+    localRecognitionAllowed: () => browserLocalSpeechAllowed(globalThis.navigator?.userAgent ?? ''),
     recognitionCtor: () => (globalThis.window as SpeechWindow)?.SpeechRecognition
       || (globalThis.window as SpeechWindow)?.webkitSpeechRecognition || null,
     phraseCtor: () => (globalThis.window as SpeechWindow)?.SpeechRecognitionPhrase || null,
@@ -1026,7 +1028,7 @@ export function createDictationController({
     run.browserRecognitionCtor = Ctor;
 
     if (speechPrefs().browserProcessing === 'local') {
-      const supportsLocal = 'processLocally' in (Ctor.prototype || {})
+      const supportsLocal = browser.localRecognitionAllowed() && 'processLocally' in (Ctor.prototype || {})
         && typeof Ctor.available === 'function';
 
       if (!supportsLocal) {

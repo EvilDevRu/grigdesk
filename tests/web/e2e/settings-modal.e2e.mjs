@@ -129,6 +129,11 @@ test('UI00: общий модал на изолированном браузер
       devices: [],
     },
     '/api/settings/speech': data.speech,
+    '/api/settings/speech/installation': {
+      managed: true,
+      installed: true,
+      job: null,
+    },
     '/api/plugins': data.plugins,
     '/api/plugin-catalog': {
       state: 'unconfigured',
@@ -153,7 +158,7 @@ test('UI00: общий модал на изолированном браузер
     'interface.behavior', 'interface.notifications', 'interface.shortcuts', 'agents.models',
     'automation.chats', 'automation.context', 'automation.launch', 'automation.monitoring',
     'automation.arbiter', 'system.diagnostics',
-    'speech.dictation', 'speech.video', 'speech.language', 'speech.models', 'speech.advanced',
+    'speech.dictation',
   ]) {
     await fixture.page.evaluate((id) => window.settingsFixture.settings.selectPage(id), pageId);
 
@@ -287,6 +292,11 @@ async function geometryFixture(t) {
       return data.prefs;
     },
     '/api/settings/speech': data.speech,
+    '/api/settings/speech/installation': {
+      managed: true,
+      installed: true,
+      job: null,
+    },
     '/api/providers': data.providers,
     '/api/providers/usage': { usage: {} },
     '/api/providers/fixture/settings/catalog': native,

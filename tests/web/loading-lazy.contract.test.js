@@ -47,10 +47,6 @@ const keys = [
     'plugins.installed',
     'agents.providers',
     'speech.dictation',
-    'speech.video',
-    'speech.language',
-    'speech.models',
-    'speech.advanced',
     'system.diagnostics',
 ];
 

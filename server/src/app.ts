@@ -51,6 +51,7 @@ import {
 } from './lib/packageInstall/configuration.ts';
 import { SYSTEM } from './lib/pluginsRegistry.ts';
 import { SpeechRuntime } from './lib/speech/index.ts';
+import { SpeechInstallationService } from './lib/speech/installation.ts';
 import { ModelJobManager } from './lib/speech/modelJobs.ts';
 import { listProjects } from './lib/profiles.ts';
 import * as telegramBotApi from './lib/telegram/api.ts';
@@ -1355,6 +1356,14 @@ async function build(desktopParent: DesktopParent | null) {
     factoryDebug,
     diagnosticLogging,
     speechRuntime,
+    speechInstallation: new SpeechInstallationService({
+      dataHome: config.dataHome,
+      rootDir: config.rootDir,
+      pythonPath: config.mediaPython,
+      mediaHfDir: config.mediaHfDir,
+      prepareMaintenance: () => speechRuntime.prepareMaintenance(),
+      refresh: () => speechRuntime.invalidateCapabilities(),
+    }),
   });
   await fastify.register(terminalModule);
   await fastify.register(routesModule, { config, prefs });

@@ -6,6 +6,10 @@
 
 ## Устройство
 
+- [Ссылки установки системных зависимостей речи](speech-dependency-links.md)
+
+- [Установка, обновление и удаление окружения Whisper через настройки](speech-installation.md)
+
 - [Встреча из нескольких файлов](multi-file-meetings.md)
 - [Кадр записи: превью до постановки и вложение к задаче](frame-preview-and-attachments.md)
 - [Кому и в какой проект](task-assignment.md)
@@ -24,7 +28,12 @@
 
 ## Грабли
 
+- [Python без ensurepip: системный пакет venv и понятная ошибка установки](speech-missing-venv.md)
+
+- [Штатный Python: имена python3 и ссылки родительских каталогов](speech-managed-paths.md)
+
 - [Медиа: runtime отдельно от исходников](runtime-storage-boundary.md)
 - [Расшифровка видео сплошным потоком = у неё не было стилевой подсказки](transcription-style-prompt.md)
 - [Browser speech: onend не означает «включить снова»](browser-speech-end-handling.md)
+- [Android WebView: объявленный on-device API может завершить renderer](webview-local-speech.md)
 - [Live Whisper — rolling decode, а не WebM-чанки и не настоящий streaming encoder](whisper-rolling-decode.md)

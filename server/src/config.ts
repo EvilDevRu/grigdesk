@@ -317,10 +317,10 @@ export const config = {
   // Пусто → кнопка «снести стенд» отвечает «не настроено». Без хардкода путей проекта.
   sandboxDownCmd: process.env.GRIGDESK_SANDBOX_DOWN_CMD || '',
 
-  // Медиа-конвейер (распознавание речи). Venv из state/ папки данных подключается через
-  // GRIGDESK_MEDIA_PYTHON; читается в media/preflight.ts. Хранилище job'ов/медиа.
+  // Медиа-конвейер использует штатный venv папки данных без дополнительной настройки.
+  // GRIGDESK_MEDIA_PYTHON позволяет явно подключить внешнее окружение вместо штатного.
   mediaDir: process.env.GRIGDESK_MEDIA_DIR || path.join(dataStateDir, 'media'),
-  mediaPython: process.env.GRIGDESK_MEDIA_PYTHON || '',
+  mediaPython: process.env.GRIGDESK_MEDIA_PYTHON || path.join(dataPath(dataHome, 'mediaVenv'), 'bin/python'),
   // Собственный кэш моделей речи: обычный transcribe работает fail-closed и никогда
   // не скачивает веса в общий ~/.cache. Все Python-spawn получают этот HF_HOME.
   mediaHfDir: process.env.GRIGDESK_MEDIA_HF_DIR || path.join(dataStateDir, 'hf'),
