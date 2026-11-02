@@ -75,7 +75,8 @@ async function onboardingModule(fastify: FastifyInstance, options: OnboardingOpt
           }
 
           const fields = suffix === '/start' ? ['expectedRevision', 'mode']
-            : ['expectedRevision', 'sessionId', ...(method === 'PATCH' ? ['draft'] : ['skipAi'])];
+            : ['expectedRevision', 'sessionId', ...(method === 'PATCH' ? ['draft']
+              : suffix === '/advance' ? ['skipAi', 'previewWorkspace'] : [])];
           const body = bodyRecord(request.body, fields);
 
           if (!Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 0) {
@@ -101,19 +102,17 @@ async function onboardingModule(fastify: FastifyInstance, options: OnboardingOpt
           }
 
           if (suffix === '/dismiss' || suffix === '/back') {
-            if ('skipAi' in body) {
-              throw new OnboardingError('invalid_body');
-            }
-
             return suffix === '/back' ? await service.back(revision, body.sessionId)
               : await service.dismiss(revision, body.sessionId);
           }
 
-          if (body.skipAi !== undefined && typeof body.skipAi !== 'boolean') {
+          if ((body.skipAi !== undefined && typeof body.skipAi !== 'boolean')
+            || (body.previewWorkspace !== undefined && typeof body.previewWorkspace !== 'boolean')) {
             throw new OnboardingError('invalid_skip');
           }
 
-          return await service.advance(revision, body.sessionId, body.skipAi as boolean | undefined);
+          return await service.advance(revision, body.sessionId, body.skipAi as boolean | undefined,
+            body.previewWorkspace as boolean | undefined);
         } catch (error) {
           if (error instanceof OnboardingError) {
             const current = error.status === 409 ? await service.getState().catch(() => null) : null;

@@ -1007,6 +1007,7 @@
   "onboardingWorkspaceHelp": "Выберите, как агенты будут работать с кодом проекта.",
   "onboardingRecommended": "Рекомендуем",
   "onboardingSummaryHelp": "Проект добавлен, папки и выбранный режим сохранены.",
+  "onboardingWorkspaceNeedsProject": "Вы можете выбрать режим заранее. Для завершения настройки добавьте проект.",
   "onboardingWhatsNext": "Что дальше",
   "onboardingTitle": "Начнём работу с GrigDesk",
   "onboardingSteps": "Шаги настройки",

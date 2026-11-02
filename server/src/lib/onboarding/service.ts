@@ -255,18 +255,25 @@ export function createOnboardingService(options: OnboardingOptions) {
 
     /**
      * Шаги меняются только после подтверждённой записи; Git перепроверяется при commit.
+     * Просмотр режима до создания проекта не разрешает завершить пустой проход.
      * Итог завершает лишь эту часть мастера, не создавая работающий профиль.
      */
-    async advance(expected: number, id: string, skipAi?: boolean): Promise<OnboardingState> {
+    async advance(
+      expected: number,
+      id: string,
+      skipAi?: boolean,
+      previewWorkspace?: boolean,
+    ): Promise<OnboardingState> {
       const state = await store.transact(expected, async (value, save) => {
         const session = current(value, id);
 
-        if (session.status !== 'active' || (skipAi !== undefined && session.step !== 'ai')) {
+        if (session.status !== 'active' || (skipAi !== undefined && session.step !== 'ai')
+          || (previewWorkspace !== undefined && session.step !== 'project')) {
           throw new OnboardingError('invalid_transition');
         }
 
         if (session.step === 'project') {
-          if (session.projectSaved) {
+          if (session.projectSaved || (previewWorkspace === true && !session.projectIntent)) {
             session.step = 'workspace';
             await save();
           } else {
@@ -278,6 +285,10 @@ export function createOnboardingService(options: OnboardingOptions) {
             session.step = 'project';
             remember(value, session);
           } else if (session.step === 'workspace') {
+            if (!session.projectSaved) {
+              throw new OnboardingError('invalid_project');
+            }
+
             session.step = 'summary';
             session.status = 'completed';
             value.autoOpenDisabled = true;

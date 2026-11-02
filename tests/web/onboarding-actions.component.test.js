@@ -38,6 +38,39 @@ test('ONB-ACTIONS: подпись каждой кнопки соответств
     });
   }
 
+  await t.test('пропуск со второго шага ждёт ввода без обязательных папки и ветки', async (t) => {
+    const f = await mountOnboarding(t, browser, { providers: [] });
+
+    await onboardingButton(f, 'Пропустить шаг').trigger('click');
+    await waitOnboarding(f, () => f.store.snapshot.active.step === 'project');
+
+    const gate = Promise.withResolvers();
+
+    globalThis.__onboardingMounted.intercept = async (call) => {
+      if (call.patch) {
+        await gate.promise;
+      }
+    };
+
+    try {
+      await f.wrapper.get('input').setValue('Незаконченный проект');
+      await onboardingButton(f, 'Пропустить настройку').trigger('click');
+      assert.equal(f.store.isOpen, true);
+      assert.equal(f.effects.some((call) => call.suffix === '/dismiss'), false);
+    } finally {
+      gate.resolve();
+      await waitOnboarding(f, () => !f.store.isOpen && !f.store.busy);
+    }
+
+    const saved = await request(f.backend.app);
+
+    assert.equal(saved.active.status, 'dismissed');
+    assert.equal(saved.active.draft.title, 'Незаконченный проект');
+    assert.equal(saved.autoOpenDisabled, true);
+    assert.equal((await f.backend.app.projects.list()).length, 0);
+    assert.equal(f.router.currentRoute.value.fullPath, '/chats?view=agents');
+  });
+
   await t.test('на итоге остаются завершение, возврат и новый проект без действия пропуска', async (t) => {
     const f = await mountOnboarding(t, browser, { prepare: atSummary });
 

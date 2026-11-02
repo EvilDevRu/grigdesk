@@ -205,6 +205,47 @@
   font-size: 10px;
 }
 
+/* Шкала мастера использует общие кнопки и сохраняет одинаковые оси всех шагов.
+   Недоступный следующий шаг остаётся читаемым; активные переходы видны по hover и фокусу. */
+.ui-pressable[data-context='onboarding-step'] {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 0 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  text-align: left;
+}
+
+.ui-pressable[data-context='onboarding-step']:disabled {
+  opacity: 1;
+}
+
+.ui-pressable[data-context='onboarding-step']:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.ui-pressable[data-context='onboarding-step']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.onboarding-steps li[aria-disabled] > .ui-pressable[data-context='onboarding-step'] {
+  min-height: 36px;
+}
+
+@container (max-width: 660px) {
+  .ui-pressable[data-context='onboarding-step'],
+  .onboarding-steps li[aria-disabled] > .ui-pressable[data-context='onboarding-step'] {
+    min-height: 0;
+    padding: 4px;
+  }
+}
+
 /* Строка рабочего каталога: выбранная сущность заметна и мышью, и с клавиатуры.
    Скин принадлежит UI-kit; сам экран задаёт только раскладку содержимого строки. */
 .ui-pressable[data-context='workspace-catalog-row'] {

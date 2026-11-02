@@ -15,7 +15,7 @@
         <p class="onboarding-sidebar-title">{{ t('core.onboardingBaseGroup') }}</p>
         <ol class="onboarding-steps" :aria-label="t('core.onboardingSteps')">
           <li v-for="(label, index) in labels" :key="label"
-            :class="{ 'is-complete': index < currentIndex, 'is-skipped': index === 0 && aiSkipped }"
+            :class="{ 'is-complete': isComplete(index), 'is-skipped': index === 0 && aiSkipped }"
             :aria-current="index === currentIndex && index < 3 ? 'step' : undefined"
             :aria-disabled="index > 2 ? 'true' : undefined">
             <span v-if="index === 3" class="onboarding-future-heading">
@@ -26,14 +26,17 @@
               </svg>
               {{ t('core.onboardingNextGroup') }}
             </span>
-            <span class="onboarding-step-number" aria-hidden="true">
-              {{ index === 0 && aiSkipped ? '−' : index < currentIndex ? '✓' : index + 1 }}
-            </span>
-            <span class="onboarding-step-copy">
-              <span class="onboarding-step-label">{{ label }}<span v-if="index === 0 && aiSkipped"
-                class="onboarding-step-skipped"> — {{ t('core.onboardingSkipped') }}</span></span>
-              <span v-if="index < 3" class="onboarding-step-detail">{{ descriptions[index] }}</span>
-            </span>
+            <UiPressable data-context="onboarding-step" :disabled="!canNavigate(index)"
+              @click="navigate(index)">
+              <span class="onboarding-step-number" aria-hidden="true">
+                {{ index === 0 && aiSkipped ? '−' : isComplete(index) ? '✓' : index + 1 }}
+              </span>
+              <span class="onboarding-step-copy">
+                <span class="onboarding-step-label">{{ label }}<span v-if="index === 0 && aiSkipped"
+                  class="onboarding-step-skipped"> — {{ t('core.onboardingSkipped') }}</span></span>
+                <span v-if="index < 3" class="onboarding-step-detail">{{ descriptions[index] }}</span>
+              </span>
+            </UiPressable>
           </li>
         </ol>
         <p class="onboarding-sidebar-note">{{ t('core.onboardingFutureHelp') }}</p>
@@ -81,7 +84,12 @@
             @click="store.transition('/advance', { skipAi: true })">
             {{ t('core.onboardingSkip') }}
           </UiButton>
-          <UiButton v-if="session.status === 'active'" data-context="workspace-form-wrap"
+          <UiButton v-if="session.step === 'workspace' && !session.projectSaved"
+            data-context="workspace-form-wrap" :disabled="busy || !!store.error"
+            variant="solid" tone="accent" @click="store.transition('/back')">
+            {{ t('core.onboardingAddProject') }}
+          </UiButton>
+          <UiButton v-else-if="session.status === 'active'" data-context="workspace-form-wrap"
             :disabled="!canAdvance" variant="solid" tone="accent" @click="store.transition('/advance')">
             {{ t('core.onboardingNext') }}
           </UiButton>
@@ -107,7 +115,7 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import {
-  t, UiButton, UiDialog, UiIconButton, UiInlineMessage, UiLoadingState, confirmDialog,
+  t, UiButton, UiDialog, UiIconButton, UiInlineMessage, UiLoadingState, UiPressable, confirmDialog,
 } from '../../ui';
 import type { UiDialogCloseReason } from '../../ui';
 import { useOnboardingStore } from '../../stores/onboarding.ts';
@@ -120,10 +128,11 @@ const store = useOnboardingStore();
 const router = useRouter();
 const content = ref<HTMLElement | null>(null);
 const closing = ref(false);
+const navigating = ref(false);
 const aiReady = ref(false);
 const projectReady = ref(false);
 const session = computed(() => store.snapshot?.active);
-const busy = computed(() => store.busy || store.opening || closing.value);
+const busy = computed(() => store.busy || store.opening || closing.value || navigating.value);
 const labels = computed(() => [
   t('core.onboardingAi'), t('core.onboardingProject'), t('core.onboardingWorkspace'),
   t('core.onboardingAnalysis'), t('core.onboardingRoutes'), t('core.onboardingPipeline'),
@@ -139,6 +148,57 @@ const projectRoute = computed(() => session.value?.projectSaved
 const canAdvance = computed(() => !store.error && !busy.value && (session.value?.step === 'ai'
   ? aiReady.value : session.value?.step === 'project'
     ? projectReady.value || !!session.value.projectIntent : true));
+
+/**
+ * Основные шаги доступны независимо от полноты проекта; будущие остаются закрытыми.
+ * Просмотр режима задач не выдаёт незавершённый проект за созданный паспорт.
+ */
+function canNavigate(index: number): boolean {
+  if (busy.value || store.error || !session.value || session.value.status === 'dismissed'
+    || index < 0 || index > 2 || index === currentIndex.value) {
+    return false;
+  }
+
+  return true;
+}
+
+function isComplete(index: number): boolean {
+  return index < currentIndex.value && (index !== 1 || !!session.value?.projectSaved);
+}
+
+/**
+ * Шкала использует те же серверные переходы и барьер сохранения, что кнопки подвала.
+ * На весь путь к выбранному шагу блокируем повторные действия, не создавая копию паспорта.
+ */
+async function navigate(index: number): Promise<void> {
+  if (!canNavigate(index)) {
+    return;
+  }
+
+  const id = session.value!.id;
+
+  navigating.value = true;
+
+  try {
+    while (session.value?.id === id && currentIndex.value !== index) {
+      const suffix = currentIndex.value > index ? '/back' : '/advance';
+      const extra: Record<string, unknown> = {};
+
+      if (suffix === '/advance' && session.value.step === 'ai') {
+        extra.skipAi = !aiReady.value;
+      } else if (suffix === '/advance' && session.value.step === 'project'
+        && !projectReady.value && !session.value.projectIntent) {
+        extra.previewWorkspace = true;
+      }
+
+      if (!await store.transition(suffix, extra)) {
+        return;
+      }
+    }
+  } finally {
+    navigating.value = false;
+  }
+}
 
 watch(() => session.value?.step, async (step, previous) => {
   if (!previous || !step || step === previous) {
@@ -259,13 +319,7 @@ async function dismiss(): Promise<void> {
 
 .onboarding-steps li {
   position: relative;
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  align-items: center;
-  gap: 0 10px;
   min-width: 0;
-  min-height: 52px;
-  padding: 6px 8px;
   border-radius: var(--radius-sm);
 }
 
@@ -336,7 +390,6 @@ async function dismiss(): Promise<void> {
 }
 
 .onboarding-steps [aria-disabled] {
-  min-height: 36px;
   color: var(--ink-low);
 }
 
@@ -350,9 +403,9 @@ async function dismiss(): Promise<void> {
 .onboarding-future-heading {
   display: flex;
   align-items: center;
-  grid-column: 1 / -1;
   gap: 6px;
   margin-bottom: 12px;
+  padding: 0 8px;
   color: var(--ink-low);
   font-size: 12px;
   font-weight: 500;
@@ -442,7 +495,7 @@ async function dismiss(): Promise<void> {
   .onboarding-steps li:nth-child(4) {
     margin: 0;
     min-height: 0;
-    padding: 4px;
+    padding: 0;
     border: 0;
   }
 

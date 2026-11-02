@@ -987,6 +987,7 @@
   "onboardingWorkspaceHelp": "Choose how agents will work with your project’s code.",
   "onboardingRecommended": "Recommended",
   "onboardingSummaryHelp": "Your project is added. Folders and the selected mode are saved.",
+  "onboardingWorkspaceNeedsProject": "You can choose a mode now. Add a project to complete setup.",
   "onboardingWhatsNext": "What’s next",
   "onboardingTitle": "Get started with GrigDesk",
   "onboardingSteps": "Setup steps",

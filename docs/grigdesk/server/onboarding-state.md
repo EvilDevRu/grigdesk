@@ -7,7 +7,9 @@ CAS по expectedRevision и атомарную запись tmp0600 → rename.
 
 `GET /api/onboarding` возвращает снимок и shouldOpen. `POST /start` принимает mode=auto|manual
 и expectedRevision; результат содержит open. PATCH сохраняет draft. POST `/advance`, `/back` и `/dismiss`
-принимают sessionId и expectedRevision; skipAi разрешён только на шаге ai. POST `/repository`
+принимают sessionId и expectedRevision; skipAi разрешён только на шаге ai.
+`/advance` с `previewWorkspace=true` открывает режим задач до заполнения проекта —
+[контракт предварительного выбора](onboarding-workspace-preview.md). POST `/repository`
 принимает dir и только читает локальный Git. Все пути начинаются с `/api/onboarding`, закрыты
 общим auth, возвращают no-store, отклоняют лишние поля. Конфликт даёт 409 с текущим снимком.
 
