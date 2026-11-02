@@ -4,6 +4,7 @@
     <UiDisclosureButton
       v-if="!live"
       class="summary-disclosure"
+      data-context="chat-activity-summary"
       density="compact"
       :open="open"
       :controls="`${baseId}-list`"
@@ -25,6 +26,7 @@
         <template v-if="r.k === 'think'">
           <UiDisclosureButton
             class="step-disclosure"
+            data-context="chat-step"
             density="compact"
             :open="Boolean(expanded[r.rowKey])"
             :controls="`${baseId}-${r.rowKey}`"
@@ -48,6 +50,7 @@
         <template v-else-if="r.k === 'tool'">
           <UiDisclosureButton
             class="step-disclosure"
+            data-context="chat-step"
             density="compact"
             :open="Boolean(expanded[r.rowKey])"
             :controls="`${baseId}-${r.rowKey}`"
@@ -113,6 +116,7 @@
         <template v-else-if="r.k === 'res'">
           <UiDisclosureButton
             class="step-disclosure"
+            data-context="chat-step"
             density="compact"
             :open="Boolean(expanded[r.rowKey])"
             :controls="`${baseId}-${r.rowKey}`"
@@ -402,6 +406,11 @@ function toolLabel(name: string | undefined) {
   color: var(--ink-low);
 }
 .list { display: flex; flex-direction: column; gap: 2px; }
+/* Компактные строки технической ленты идут без дополнительного промежутка.
+   Вложенные детали остаются внутри своей строки и не меняют площадку её раскрытия. */
+@media (max-width: 600px) {
+  .steps, .list { gap: 0; }
+}
 .step.nested { padding-left: 16px; border-left: 1px dashed var(--line); }
 
 .step-disclosure {

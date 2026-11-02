@@ -250,6 +250,52 @@
   overflow-wrap: anywhere;
 }
 
+/* Отказ загрузки истории остаётся под шапкой, а действие читается рядом с причиной.
+   Узкая колонка переносит кнопку под текст без уменьшения области нажатия. */
+.ui-inline-message[data-context='chat-message-load'] {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 12px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+
+.ui-inline-message[data-context='chat-message-load'] > .ui-inline-message__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ui-message-tone);
+}
+
+.ui-inline-message[data-context='chat-message-load'] > .ui-inline-message__icon > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ui-inline-message[data-context='chat-message-load'] .ui-inline-message__title {
+  display: block;
+  color: var(--ink);
+}
+
+.ui-inline-message[data-context='chat-message-load'] .ui-inline-message__detail {
+  margin: 3px 0 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+}
+
+@container (max-width: 480px) {
+  .ui-inline-message[data-context='chat-message-load'] {
+    grid-template-columns: 20px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .ui-inline-message[data-context='chat-message-load'] > .ui-button {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
 /* Сообщение Git делит 34-пиксельный нижний ряд с fetch/push и может переноситься. */
 .ui-inline-message[data-context='code-git-notice'] {
   padding: 5px 7px;

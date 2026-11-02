@@ -4686,3 +4686,66 @@ for (const area of ['history', 'git', 'commits']) {
     assert.ok(bricks > 0, `${area}: общий каркас списка вместо одинаковой заглушки`);
   });
 }
+
+test('PH-CODE: phone отдаёт контексту ряд и сохраняет подписи', async (t) => {
+  const api = {
+    /**
+     * Фикстура отдаёт существующие DTO только для чтений шапки и рабочей копии.
+     * Неожиданный запрос показывает отклонение сценария вместо скрытого пустого ответа.
+     */
+    async get(url) {
+      if (url === '/api/projects') {
+        return { projects: [projectFixture('пример', ['/work/repo'])] };
+      }
+      if (url.includes('/repos')) {
+        return { repos: [{
+          key: 'repo',
+          dir: '/work/repo',
+          trees: [mainTree('/work/repo')],
+          error: '',
+        }] };
+      }
+      if (url.includes('/ls')) {
+        return { entries: [] };
+      }
+      if (url.includes('/git')) {
+        return {
+          branch: 'main',
+          files: [],
+          staged: [],
+          unstaged: [],
+        };
+      }
+
+      throw new Error(`unexpected GET ${url}`);
+    },
+  };
+  const { wrapper, browser, flushPromises } = await mountCodeView(t, { api });
+
+  await settle(flushPromises);
+
+  const source = await readFile(VIEW_PATH, 'utf8');
+  const style = browser.document.createElement('style');
+  const cssText = source.match(/<style scoped>([\s\S]*?)<\/style>/u)[1];
+
+  style.textContent = cssText;
+  browser.document.head.append(style);
+  t.after(() => style.remove());
+  browser.happyDOM.setWindowSize({ width: 390, height: 844 });
+  style.textContent = cssText;
+
+  const context = wrapper.get('.head-ctx').element;
+  const projectLabel = wrapper.get('label[for="code-project"]').element;
+
+  assert.equal(browser.getComputedStyle(context).flexBasis, '100%');
+  assert.equal(browser.getComputedStyle(context).flexDirection, 'column');
+  assert.equal(browser.getComputedStyle(projectLabel).display, 'block');
+  assert.equal(browser.getComputedStyle(wrapper.get('.head-pick').element).display, 'grid');
+  assert.equal(browser.getComputedStyle(context).gap, '4px');
+  assert.equal(wrapper.get('#code-project-native').element.value, 'пример');
+  assert.match(wrapper.get('#code-context-native').element.value, /repo/u);
+
+  browser.happyDOM.setWindowSize({ width: 1280, height: 900 });
+  style.textContent = cssText;
+  assert.notEqual(browser.getComputedStyle(context).flexBasis, '100%');
+});

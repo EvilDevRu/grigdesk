@@ -5509,4 +5509,49 @@ onBeforeUnmount(() => {
 .note.img-note { color: var(--ink-mid); }
 
 .diff-layout { flex: none; }
+/* Подписи стоят рядом со значениями, чтобы контекст не занимал четыре строки формы.
+   Оба выбора сохраняют отдельный ряд и читаемую ширину без изменения состояния редактора. */
+@media (max-width: 600px) {
+  .code-panel .code-head {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding-bottom: 4px;
+  }
+
+  .code-panel .code-head .head-ctx {
+    flex: 1 0 100%;
+    order: 2;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    overflow: visible;
+  }
+
+  .code-panel .code-head .head-pick {
+    flex: none;
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    overflow: visible;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .code-panel .code-head .head-pick label {
+    display: block;
+    font-size: 13px;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  .code-panel .code-head .head-pick :deep(.ui-select-wrap),
+  .code-panel .code-head .head-pick :deep(.ui-select) {
+    width: 100%;
+    max-width: none;
+  }
+}
 </style>

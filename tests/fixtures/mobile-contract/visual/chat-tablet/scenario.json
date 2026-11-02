@@ -205,7 +205,7 @@
       "nextOffset": null,
       "readToken": "dddddddddddddddddddddddddddddddddddddddddddddddd"
     },
-    "b24-tasks": {
+    "tracker-tasks": {
       "tasks": [
         {
           "id": "101",
@@ -219,7 +219,7 @@
       "hasMore": false,
       "nextCursor": null
     },
-    "b24-task": {
+    "tracker-task": {
       "task": {
         "id": "101",
         "title": "Первая задача",

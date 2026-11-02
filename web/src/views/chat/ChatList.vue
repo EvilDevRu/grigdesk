@@ -5,6 +5,7 @@
         <div class="search">
           <UiSearchInput
             v-model="q"
+            data-context="chat-list-search"
             :placeholder="showArchived ? 'Поиск в архиве' : 'Поиск'"
           />
         </div>
@@ -490,7 +491,7 @@ async function del(r: ListRow) {
    разное, и без общей высоты две разделительные линии идут на разном уровне. Содержимое
    центрируем по вертикали — тогда запас высоты не выглядит «прибитым» к верху. */
 .top { display: flex; flex-direction: column; justify-content: center; gap: 5px;
-  min-height: var(--chat-head-h); flex: none; padding: 0 10px; border-bottom: 1px solid var(--line); }
+  min-height: var(--chat-head-h); flex: none; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .tools { display: flex; align-items: center; gap: 7px; }
 .search { flex: 1; min-width: 0; }
 .archive-toggle { align-self: flex-start; }
