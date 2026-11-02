@@ -1,4 +1,5 @@
-import { chatReplyKey, chatSearchSnippet } from '../../../shared/chat/chatListProjection.ts';
+import { chatReplyKey, chatSearchSnippet, projectWebChatHead }
+  from '../../../shared/chat/chatListProjection.ts';
 import { parseProjectsChange } from '../../../shared/runtime/projectsContracts.ts';
 import { messageRef, t } from '../ui.ts';
 // Чат с агентами — МУЛЬТИСЕССИИ (вкладки, как в VS Code).
@@ -1449,6 +1450,19 @@ export const useChatStore = defineStore('chat', {
       const local = this._find(head.id);
       const full = !!local && !runtime.headOnly.has(head.id);
       const dirty = !!local && this._dirty(local);
+      const revision = Math.max(previous?.revision || 0, local?.revision || 0);
+
+      if (typeof head.revision === 'number' && head.revision < revision) {
+        return;
+      }
+
+      // Чужое прочтение применяем и поверх несохранённого названия головы.
+      // Местное прочтение относится лишь к прежнему ответу, новый финал оно не скрывает.
+      if (local && dirty && !full) {
+        const sameReply = (previous?.lastReply?.key || '') === (head.lastReply?.key || '');
+
+        local.unread = sameReply ? !!local.unread && !!head.unread : !!head.unread;
+      }
 
       runtime.heads.set(head.id, { ...head });
       runtime.versions.set(head.id, head.version!);
@@ -2911,6 +2925,7 @@ export const useChatStore = defineStore('chat', {
       const fingerprint = fingerprintOf(snapshot);
       const steps = state.signature(snapshot);
       const generation = state.generation(id);
+      const confirmedReplyKey = state.replyKey(id);
       const selections = selectionStateFor(this);
       const selected = selections.capture(id);
 
@@ -3035,6 +3050,19 @@ export const useChatStore = defineStore('chat', {
           return response;
         }
 
+        const localReplyKey = projectWebChatHead({ ...latest }, '').lastReply?.key || '';
+        const remoteReplyKey = (Object.hasOwn(remote, 'lastReply')
+          ? remote.lastReply?.key : projectWebChatHead({ ...remote }, '').lastReply?.key) || '';
+        // Сервер мог добавить новый локальный итог при первом stale PUT, сохранив
+        // старый unread. Отличаем его от снимка уже прочитанного в другом окне ответа.
+        const newLocalReply = !!localReplyKey && localReplyKey !== confirmedReplyKey
+          && (localReplyKey === remoteReplyKey ? remote.revision === response.revision
+            : !remoteReplyKey || latest.messages.some((message, index) => (
+              messageNoticeKey(id, message, index) === remoteReplyKey
+            )));
+
+        latest.unread = newLocalReply ? !!latest.unread
+          : localReplyKey === remoteReplyKey ? !!latest.unread && !!remote.unread : !!remote.unread;
         selections.rebase(id, latest, remote);
         applySaveAck(latest, remote, { runtimeOnly: true });
         latest.revision = remote.revision;

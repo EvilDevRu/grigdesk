@@ -8,6 +8,7 @@ import type {
   HistoryStepReuseRequest,
 } from '../../../shared/chat/chatHistoryStepReuse.ts';
 import { messageKey } from '../../../shared/chat/chatMessageIdentity.ts';
+import { projectWebChatHead } from '../../../shared/chat/chatListProjection.ts';
 import type { ChatHistorySnapshot } from './chatHistorySnapshot.ts';
 
 interface StepSignature {
@@ -46,6 +47,7 @@ function sameSignature(left: StepSignature[] | undefined, right: StepSignature[]
  */
 export function createChatHistoryStepReuseState() {
   const sentChats = new Map<string, string>();
+  const sentReplies = new Map<string, string>();
   const sentSteps = new Map<string, StepSignature[]>();
   const bases = new Map<string, ConfirmedBase>();
   const generations = new Map<string, object>();
@@ -83,6 +85,7 @@ export function createChatHistoryStepReuseState() {
     bases.delete(id);
     generations.delete(id);
     sentChats.delete(id);
+    sentReplies.delete(id);
     sentSteps.delete(id);
   };
 
@@ -90,6 +93,9 @@ export function createChatHistoryStepReuseState() {
     sentChats,
     signature,
     forget,
+    replyKey(id: string): string | undefined {
+      return sentReplies.get(id);
+    },
     generation(id: string): object {
       let generation = generations.get(id);
 
@@ -102,6 +108,7 @@ export function createChatHistoryStepReuseState() {
     },
     markSent(chat: ChatHistorySnapshot, fingerprint: string, steps = signature(chat)): void {
       sentChats.set(chat.id!, fingerprint);
+      sentReplies.set(chat.id!, projectWebChatHead(chat, '').lastReply?.key || '');
       sentSteps.set(chat.id!, steps);
     },
     isSent(chat: ChatHistorySnapshot, fingerprint: string): boolean {
@@ -114,6 +121,7 @@ export function createChatHistoryStepReuseState() {
      */
     clear(): void {
       sentChats.clear();
+      sentReplies.clear();
       sentSteps.clear();
       bases.clear();
       generations.clear();
