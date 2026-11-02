@@ -4,14 +4,15 @@
     class="settings-field"
     data-ui-settings-field
     :data-layout="layout"
+    :data-presentation="presentation"
     :data-settings-field="JSON.stringify(address)"
     :data-revealed="revealed || undefined"
     :data-dirty="field?.dirty || undefined"
     :data-conflict="field?.conflict || undefined"
   >
     <UiField
-      :label="metadata?.label"
-      :hint="metadata?.description"
+      :label="presentation === 'field' ? metadata?.label : undefined"
+      :hint="presentation === 'field' ? metadata?.description : undefined"
       :error="field?.error || field?.unavailable"
     >
       <slot />
@@ -36,7 +37,8 @@ import { useSettingsStore } from '../../stores/settings.ts';
 const props = withDefaults(defineProps<{
   address: FieldAddress;
   layout?: 'row' | 'stack';
-}>(), { layout: 'row' });
+  presentation?: 'field' | 'action';
+}>(), { layout: 'row', presentation: 'field' });
 const settings = useSettingsStore();
 const element = ref<HTMLElement>();
 const revealed = ref(false);

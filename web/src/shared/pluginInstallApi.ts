@@ -547,3 +547,21 @@ export function decodeStoredRollback(raw: unknown): StoredRollbackIntent {
 export function decodeOptionalInstall(raw: unknown): PluginInstallInfo | null | undefined {
   return raw === undefined ? undefined : raw === null ? null : decodeInstallInfo(raw);
 }
+
+/**
+ * Подтверждение удаления относится ровно к запрошенному пакету.
+ * Успешный HTTP с чужим id не разрешает очищать карточку и её черновик.
+ */
+export function decodeInstallRemoval(raw: unknown, expectedId: string): {
+  id: string;
+  restartRequired: boolean;
+} {
+  const value = object(raw);
+  const id = pluginId(value.id);
+
+  if (id !== expectedId) {
+    throw new PluginInstallProtocolError();
+  }
+
+  return { id, restartRequired: boolean(value.restartRequired) };
+}

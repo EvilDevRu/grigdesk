@@ -3,8 +3,9 @@
     class="plugin-source"
     data-role="plugin-source"
     :data-managed="!!plugin.install"
+    :data-embedded="embedded"
   >
-    <header class="source-heading">
+    <header v-if="!embedded" class="source-heading">
       <h3>{{ t('settings.sourceAndUpdates') }}</h3>
       <span v-if="plugin.install" class="source-version">v{{ plugin.install.version }}</span>
     </header>
@@ -142,7 +143,11 @@ import { usePluginInstallStore } from '../../stores/pluginInstall.ts';
 import { shortSha } from '../../shared/pluginInstall.ts';
 import type { InstallSubject } from '../../stores/packageInstall.ts';
 
-const props = defineProps<{ plugin: InstallSubject; packageKind?: 'plugin' | 'db-engine' }>();
+const props = defineProps<{
+  plugin: InstallSubject;
+  packageKind?: 'plugin' | 'db-engine';
+  embedded?: boolean;
+}>();
 const emit = defineEmits<{
   update: [];
   bind: [];
@@ -222,6 +227,13 @@ onBeforeUnmount(() => {
 .plugin-source h3 {
   margin: 0;
   overflow-wrap: anywhere;
+}
+.plugin-source[data-embedded='true'] {
+  gap: 8px;
+  margin: 0;
+  padding: 8px 0 0;
+  border: 0;
+  border-radius: 0;
 }
 .source-heading {
   display: flex;

@@ -1024,3 +1024,8 @@ html[data-ui-touch] .ui-select[data-context='chat-session-toolbar']::after {
     overflow-wrap: anywhere;
   }
 }
+.ui-input[data-context='plugin-list-search'] {
+  padding-inline: 0;
+  border-color: transparent;
+  background: transparent;
+}

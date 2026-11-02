@@ -379,7 +379,9 @@ test('V12: у плагина один переключатель включен�
   });
   await fixture.page.locator('[data-plugin-page="sample"][data-ready="true"]').waitFor();
   assert.equal(await fixture.page.locator('.settings-plugin-catalog [role="switch"]').count(), 0);
-  assert.equal(await fixture.page.locator('[data-plugin-page="sample"] [role="switch"]').count() >= 1, true);
+  assert.equal(await fixture.page.locator(
+    '[data-plugin-page="sample"] [data-plugin-enable-action]',
+  ).count(), 1);
   assert.deepEqual(fixture.errors, []);
   assert.deepEqual(fixture.unexpected, []);
 });

@@ -223,14 +223,34 @@ export default async function installRoutes(
     app.get(`${prefix}/installed`, { schema: { response: responseSchemas.check } }, async () => ({
       drivers: await installs.listInstalled(),
     }));
+  }
 
+  if (driver || resource === 'plugins') {
     app.post(`${prefix}/${resource}/:id/remove`, {
       schema: {
         params: inputs.pluginParams,
         body: inputs.empty,
+        response: {
+          200: {
+            type: 'object',
+            required: ['id', 'restartRequired'],
+            additionalProperties: false,
+            properties: {
+              id: { type: 'string' },
+              restartRequired: { type: 'boolean' },
+            },
+          },
+        },
       },
-    }, async (request: FastifyRequest<{ Params: { id: string } }>) =>
-      installs.remove(request.params.id));
+    }, async (request: FastifyRequest<{ Params: { id: string } }>) => {
+      const result = await installs.remove(request.params.id);
+
+      if (!driver) {
+        app.sse?.broadcast?.('state-change', { plugins: true });
+      }
+
+      return result;
+    });
   }
 
   app.post(`${prefix}/check`, {

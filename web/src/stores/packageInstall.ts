@@ -9,6 +9,7 @@ import {
   decodeInstallJobResponse,
   decodeInstallChecks,
   decodeStoredRollback,
+  decodeInstallRemoval,
   PluginInstallProtocolError,
 } from '../shared/pluginInstallApi.ts';
 import type { PluginVersionRef, PluginInstallJob } from '../../../shared/plugins/pluginInstallContracts.ts';
@@ -190,6 +191,10 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
    * Dispose и более новая мутация лишают поздний ответ права изменить store.
    */
   async function readCurrent(): Promise<void> {
+    if (pendingAction.value === 'remove') {
+      return;
+    }
+
     if (reconciling.value && pendingRequest && pendingRequest.kind !== 'rollback') {
       await reconcile();
       schedulePoll();
@@ -576,6 +581,65 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
   }
 
   /**
+   * Удаление занимает тот же допуск, что установка; повторный POST не запускается.
+   * После потери ответа перечитывается каталог, но успех без подтверждения не объявляется.
+   */
+  async function remove(id: string): Promise<boolean> {
+    if (busy.value || reconciling.value || recoveryError.value || pendingAction.value || disposed
+      || isActiveInstallJob(job.value) || job.value?.status === 'ready'
+      || job.value?.status === 'recovery_required') {
+      return false;
+    }
+
+    busy.value = true;
+    pendingAction.value = 'remove';
+    error.value = null;
+    jobEpoch += 1;
+
+    const controller = new AbortController();
+    let removed = false;
+
+    controllers.add(controller);
+
+    try {
+      decodeInstallRemoval(await api.post(
+        `${basePath}/${itemSegment}/${encodeURIComponent(id)}/remove`,
+        {},
+        { signal: controller.signal },
+      ), id);
+
+      if (disposed) {
+        return false;
+      }
+
+      if (job.value?.pluginId === id) {
+        job.value = null;
+      }
+
+      removed = true;
+    } catch (cause: unknown) {
+      if (!disposed) {
+        error.value = failureText(cause);
+      }
+    } finally {
+      controllers.delete(controller);
+
+      if (!disposed) {
+        try {
+          await preset.refresh();
+        } catch (cause: unknown) {
+          error.value = failureText(cause);
+        } finally {
+          pendingAction.value = null;
+          busy.value = false;
+        }
+      }
+    }
+
+    return removed && !disposed;
+  }
+
+  /**
    * Проверка всех источников обновляет каталог после серверного результата.
    * Отдельный флаг checking не подменяет job подготовки или применения.
    */
@@ -734,6 +798,7 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
     apply,
     cancel,
     rollback,
+    remove,
     checkUpdates,
     forgetJob,
     reconcile,

@@ -740,6 +740,18 @@
   background: var(--surface-2);
 }
 
+/* Установленный плагин использует общую плоскую строку с отдельным флажком.
+   Иконка и подпись принадлежат кнопке выбора, флажок остаётся соседним действием. */
+.ui-selectable-row[data-ui-settings-plugin-row] {
+  border-radius: 0;
+}
+.ui-selectable-row[data-ui-settings-plugin-row] .ui-selectable-row__primary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
 /* Строка исполнителя наследует выбор, наведение и фокус общей составной строки.
    Контекст задаёт только место параметров справа и их перенос на узком экране. */
 .ui-selectable-row[data-context='pipeline-executor'] {
@@ -1212,6 +1224,25 @@
 [data-ui-settings-field] .ui-field__control > .ui-switch ~ p {
   grid-area: status;
   margin-top: 4px;
+}
+/* Подписанная кнопка сама объясняет действие, сохраняя адрес, ошибки и конфликты поля.
+   Такой вариант не добавляет к шапке сущности отдельную строку названия параметра. */
+[data-ui-settings-field][data-presentation='action'] {
+  width: auto;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  container-type: normal;
+}
+[data-ui-settings-field][data-presentation='action'] > .ui-field {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'control' 'hint';
+}
+/* Внутри менеджера вкладка уже задаёт границу секции, строки остаются обычной формой.
+   Ошибки, подсветка раскрытого поля и controls сохраняют общие состояния. */
+[data-ui-plugin-form] [data-ui-settings-field] {
+  padding-block: 8px;
+  border-bottom: 0;
 }
 [data-ui-settings-catalog] {
   justify-content: flex-start;

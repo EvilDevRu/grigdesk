@@ -48,7 +48,7 @@
       </div>
       <div :key="settings.pageId" class="settings-page-scroll">
         <div class="settings-page-inner">
-          <header class="settings-page-intro">
+          <header v-if="settings.pageId !== 'plugins.installed'" class="settings-page-intro">
             <h3 id="settings-page-title">{{ page?.label }}</h3>
             <p>{{ page?.description }}</p>
           </header>
@@ -185,6 +185,21 @@ function openResult(result: SettingsSearchResult): void {
 .settings-workspace:is([data-page='agents.providers'], [data-page='plugins.installed'])
   .settings-page-inner {
   max-width: none;
+}
+/* Менеджер плагинов владеет шапкой и двумя областями прокрутки внутри панели.
+   Внешняя форма не добавляет ему второй заголовок и рамку из отступов. */
+.settings-workspace[data-page='plugins.installed'] .settings-page-scroll {
+  display: flex;
+  overflow: hidden;
+}
+.settings-workspace[data-page='plugins.installed'] .settings-page-inner {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  gap: 0;
+  padding: 0;
 }
 .settings-page-intro {
   display: grid;

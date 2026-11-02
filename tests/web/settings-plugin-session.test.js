@@ -394,9 +394,9 @@ test('Плагины: общая сессия и полная запись зн�
     try {
       await flushPromises();
       await page.find('input[type="number"]').setValue('20');
-      await page.find('[data-select-plugin="second"]').trigger('click');
+      await page.find('[data-select-plugin="second"] button').trigger('click');
       await flushPromises();
-      await page.find('[data-select-plugin="sample"]').trigger('click');
+      await page.find('[data-select-plugin="sample"] button').trigger('click');
       await flushPromises();
 
       assert.equal(page.find('input[type="number"]').element.value, '20');
