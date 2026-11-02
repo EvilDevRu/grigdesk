@@ -476,55 +476,47 @@
       data-ui-workspace
       size="workspace"
       :label="stage?.label || 'Этап конвейера'"
+      initial-focus="#stage-modal-title"
       :body-inset="false"
       fade-only
       @update:open="onStageDialogOpenChange"
     >
-        <header class="sh">
-          <div class="shead-copy">
-            <span class="shead-kicker">{{ translate('core.stageWorkspace') }}
-              <span aria-hidden="true">/</span> <span class="mono">{{ stage!.key }}</span>
-            </span>
-            <h3 id="stage-modal-title">{{ stage!.label }}</h3>
+      <div class="stage-detail">
+        <div class="sh">
+          <UiPaneHeader inset="content" data-ui-detail-header>
+            <template #title>{{ translate('core.stageWorkspace') }}</template>
+            <template #meta><span class="stage-key mono">{{ stage!.key }}</span></template>
+            <template #actions>
+              <UiIconButton
+                data-context="pipeline-stage-close"
+                label="Закрыть этап"
+                v-tooltip="'Закрыть (Esc)'"
+                @click="closeStage()"
+              >
+                ✕
+              </UiIconButton>
+            </template>
+          </UiPaneHeader>
+          <div class="sheading">
+            <h3 id="stage-modal-title" tabindex="-1">{{ stage!.label }}</h3>
+          </div>
+        </div>
+
+        <!-- Контекст этапа повторяет сведения задачи: состояние и исполнитель под
+             названием. Шапка с закрытием не растёт вместе с этими метаданными. -->
+        <div id="stage-task-context" class="stage-context">
+          <div class="shead-state">
+            <span class="sbadge" :class="stageArbitrating ? 'arb' : stage!.status">{{
+              stageArbitrating ? 'арбитр разбирает' : stageStatusHint(stage!)
+            }}</span>
+            <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{
+              agentActivityLabel(stageActivity)
+            }}</span>
             <span v-if="stage!.meta.runner" class="shead-executor">
               {{ runnerNodeLabel(stage!.meta.runner) }}
               <span class="shead-model mono">{{ runnerModelEffortLabel(stage!.meta.runner) }}</span>
             </span>
           </div>
-          <!-- Статус этапа и признак жизни хода — один вопрос человека («этап идёт
-               или встал?»), поэтому они стоят рядом. Раньше ответ был разнесён по двум
-               полосам: бейдж в шапке, «нет событий 28 мин» — строкой ниже среди чипов. -->
-          <div class="shead-state">
-            <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{
-              agentActivityLabel(stageActivity)
-            }}</span>
-            <span class="sbadge" :class="stageArbitrating ? 'arb' : stage!.status">{{
-              stageArbitrating ? 'арбитр разбирает' : stageStatusHint(stage!)
-            }}</span>
-          </div>
-          <UiIconButton
-            class="sx"
-            data-context="pipeline-stage-close"
-            label="Закрыть этап"
-            v-tooltip="'Закрыть (Esc)'"
-            @click="closeStage()"
-          >
-            ✕
-          </UiIconButton>
-        </header>
-
-        <!-- В обсуждении статус принадлежит шапке арбитра и не дублируется над вкладками.
-             В журнале и настройках плашка сохраняет сведения об идущем разборе. -->
-        <div v-if="stageArbitrating && (!stageUsesConversation || stageTab !== 'result')"
-             class="sarbrun sarbnode">
-          <span class="sarbspin" aria-hidden="true"></span>
-          <span class="sarbtxt">Арбитр разбирает эту остановку — ожидается результат</span>
-          <span class="sarbmeta mono">{{ arbiterRunLabel(stageArbitrating) }}</span>
-        </div>
-
-        <!-- Контекст решения: задачу и её стенд видно, пока ворота открыты. Ссылки те же,
-             что в подвале карточки конвейера; нового действия или отдельного API здесь нет. -->
-        <div id="stage-task-context" class="stage-context">
           <div class="stage-task-context">
             <span class="stage-context-label">Задача <b class="mono">#{{ stage!.task }}</b></span>
             <span v-if="stageTaskTitle" class="stage-task-title" v-tooltip="stageTaskTitle">{{ stageTaskTitle }}</span>
@@ -546,6 +538,15 @@
             </span>
             <span v-else class="stage-stand-state">не поднят</span>
           </div>
+        </div>
+
+        <!-- В обсуждении статус принадлежит шапке арбитра и не дублируется над вкладками.
+             В журнале и настройках плашка сохраняет сведения об идущем разборе. -->
+        <div v-if="stageArbitrating && (!stageUsesConversation || stageTab !== 'result')"
+             class="sarbrun sarbnode">
+          <span class="sarbspin" aria-hidden="true"></span>
+          <span class="sarbtxt">Арбитр разбирает эту остановку — ожидается результат</span>
+          <span class="sarbmeta mono">{{ arbiterRunLabel(stageArbitrating) }}</span>
         </div>
 
         <div class="stage-navigation">
@@ -1065,6 +1066,7 @@
             <OpenDiffButton :task-id="stage!.task" />
           </div>
         </footer>
+      </div>
     </UiDialog>
 
   </div>
@@ -1129,6 +1131,7 @@ import {
   UiDialog,
   UiDisclosureButton,
   UiIconButton,
+  UiPaneHeader,
   UiPopover,
   UiSpinner,
   UiSelectableRow,
@@ -3677,75 +3680,76 @@ function cardState(g: PipelineViewGraph) {
 
 /* Окно узла разделяет чтение результата, настройку и решение человека.
    Шапка и вкладки постоянны; документ получает собственную спокойную поверхность. */
-.sh {
-  min-height: 78px;
-  flex: none;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: start;
-  gap: 20px;
-  padding: 12px 16px 10px 18px;
+.stage-detail {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  container: pipeline-stage / inline-size;
   background: var(--surface);
 }
-.shead-copy {
+.sh {
+  flex: none;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
-.shead-kicker {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: var(--ink-mid);
-  font-size: 11px;
-  line-height: 14px;
+.sheading {
+  min-width: 0;
+  padding: 18px 20px 10px;
 }
-.shead-kicker > span:first-child {
-  opacity: .4;
+.stage-key {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
 }
-.sh h3 {
+.sheading h3 {
+  max-height: 84px;
   margin: 0;
+  overflow-y: auto;
   color: var(--ink);
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 650;
-  line-height: 1.2;
-  letter-spacing: -.035em;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 .shead-executor {
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 9px;
+  gap: 4px 9px;
   color: var(--ink-mid);
-  font-size: 11px;
-  line-height: 14px;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .shead-model {
-  opacity: .75;
   font-size: 11px;
 }
 .shead-state {
+  min-width: 0;
   display: flex;
-  justify-content: flex-end;
   align-items: center;
-  gap: 8px;
+  gap: 8px 18px;
   flex-wrap: wrap;
-  padding-top: 2px;
+}
+.shead-state .jf {
+  margin-left: 0;
 }
 .stage-context {
   flex: none;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 20px;
-  min-height: 36px;
-  padding: 7px 18px;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--ground) 45%, var(--surface));
+  gap: 8px 18px;
+  padding: 0 20px 8px;
+}
+.stage-context .shead-state {
+  flex: 1 0 100%;
 }
 .stage-task-context {
+  flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -3807,11 +3811,12 @@ function cardState(g: PipelineViewGraph) {
 }
 .stage-navigation {
   flex: none;
+  min-width: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 0 18px;
+  padding: 0 20px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
 }
@@ -3891,9 +3896,17 @@ function cardState(g: PipelineViewGraph) {
 
 /* Компактная строка метаданных */
 .smeta { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.sbadge { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px;
-  border-radius: 999px; font-size: 10px; font-weight: 650;
-  line-height: 1.15; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+.sbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
 /* Точка статуса: цвет и слово читаются одним знаком, как у узлов на графе. */
 .sbadge::before { content: ''; flex: none; width: 5px; height: 5px; border-radius: 50%;
   background: currentColor; }
@@ -4261,7 +4274,7 @@ function cardState(g: PipelineViewGraph) {
   justify-content: space-between;
   gap: 14px;
   margin-top: auto;
-  padding: 6px 16px 6px 18px;
+  padding: 10px 20px;
   border-top: 1px solid var(--line);
   background: var(--surface);
 }
@@ -4324,37 +4337,8 @@ function cardState(g: PipelineViewGraph) {
 }
 
 @media (max-width: 600px) {
-  .sh {
-    min-height: 0;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
-    padding: 14px 12px;
-  }
-  .shead-copy {
-    grid-column: 1;
-    grid-row: 1;
-  }
-  .shead-state {
-    grid-column: 1;
-    grid-row: 2;
-    justify-content: flex-start;
-    padding-top: 0;
-  }
-  .sx {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-  }
-  .sh h3 {
-    font-size: 18px;
-  }
-  .shead-executor {
-    font-size: 11px;
-    gap: 5px;
-  }
-  .stage-context {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 9px;
-    padding: 8px 12px;
+  .stage-task-context {
+    flex-basis: 100%;
   }
   .stage-task-context {
     align-items: baseline;
@@ -4372,10 +4356,6 @@ function cardState(g: PipelineViewGraph) {
   }
   .stage-stand-link {
     min-height: 28px;
-  }
-  .stage-navigation {
-    gap: 0;
-    padding: 0 12px;
   }
   .stage-readonly {
     display: none;
@@ -4429,8 +4409,49 @@ function cardState(g: PipelineViewGraph) {
   }
 }
 
+@container pipeline-stage (max-width: 480px) {
+  .sheading {
+    padding: 10px 12px 8px;
+  }
+  .sheading h3 {
+    max-height: 70px;
+    font-size: 16px;
+  }
+  .stage-context {
+    max-height: 72px;
+    padding: 0 12px 10px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .shead-state {
+    gap: 6px 14px;
+  }
+  .shead-executor {
+    font-size: 11px;
+    gap: 4px 6px;
+  }
+  .stage-navigation {
+    gap: 0;
+    padding: 0 12px;
+  }
+}
+
+@media (max-height: 540px) {
+  .sheading {
+    padding-block: 6px;
+  }
+  .sheading h3 {
+    max-height: 48px;
+    font-size: 16px;
+  }
+  .stage-context {
+    max-height: 46px;
+    padding-bottom: 6px;
+    overflow-y: auto;
+  }
+}
+
 @media (max-height: 700px) and (min-width: 601px) {
-  .sh { min-height: 56px; }
   .live-feed { max-height: 190px; }
   .runner-attempts { max-height: 200px; }
 }

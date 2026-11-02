@@ -13,6 +13,7 @@ function uiFacadeStub(prefix) {
     ['UiDisclosureButton', 'src/components/composites/UiDisclosureButton.vue'],
     ['UiIconButton', 'src/components/primitives/UiIconButton.vue'],
     ['UiLoadingState', 'src/components/feedback/UiLoadingState.vue'],
+    ['UiPaneHeader', 'src/components/composites/UiPaneHeader.vue'],
     ['UiPopover', 'src/components/overlays/UiPopover.vue'],
     ['UiSpinner', 'src/components/primitives/UiSpinner.vue'],
     ['UiSelectableRow', 'src/components/composites/UiSelectableRow.vue'],
