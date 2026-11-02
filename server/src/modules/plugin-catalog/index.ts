@@ -25,19 +25,18 @@ export default async function pluginCatalogModule(
     });
   });
 
-  app.get<{ Querystring: { refresh?: '1'; api?: '2' } }>('/api/plugin-catalog', {
+  app.get<{ Querystring: { refresh?: '1' } }>('/api/plugin-catalog', {
     schema: {
       querystring: {
         type: 'object',
         properties: {
           refresh: { type: 'string', enum: ['1'] },
-          api: { type: 'string', enum: ['2'] },
         },
         additionalProperties: false,
       },
     },
-  }, async (request) => options.catalog.index(request.query.refresh === '1', request.query.api === '2'));
-  app.get<{ Params: { id: string }; Querystring: { api?: '2' } }>('/api/plugin-catalog/:id', {
+  }, async (request) => options.catalog.index(request.query.refresh === '1'));
+  app.get<{ Params: { id: string } }>('/api/plugin-catalog/:id', {
     schema: {
       params: {
         type: 'object',
@@ -47,9 +46,9 @@ export default async function pluginCatalogModule(
       },
       querystring: {
         type: 'object',
-        properties: { api: { type: 'string', enum: ['2'] } },
+        properties: {},
         additionalProperties: false,
       },
     },
-  }, async (request) => options.catalog.detail(request.params.id, request.query.api === '2'));
+  }, async (request) => options.catalog.detail(request.params.id));
 }

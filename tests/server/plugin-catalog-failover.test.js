@@ -6,6 +6,7 @@ import { catalogFixture } from '../helpers/pluginCatalog.js';
 
 const primary = 'https://grigdesk.com/api/plugins/v1/index.json';
 const secondary = 'https://grigdesk.ru/api/plugins/v1/index.json';
+const local = 'http://127.0.0.1:4174/api/plugins/v1/index.json';
 
 /**
  * Настоящий Response сохраняет декодирование и ограничение тела внутри сервиса.
@@ -139,7 +140,7 @@ test('CAT-F4: другой снимок резервного сайта не п�
   assert.equal(calls.includes(secondary.replace('index.json', 'demo.json')), false);
 });
 
-test('CAT-F5: отказ обоих сайтов сохраняет stale, cooldown и восстановление старшего источника',
+test('CAT-F5: отказ всех сайтов сохраняет stale, cooldown и восстановление старшего источника',
   async (t) => {
     const fixture = catalogFixture();
     const calls = [];
@@ -171,9 +172,9 @@ test('CAT-F5: отказ обоих сайтов сохраняет stale, coold
     assert.equal(stale.state, 'stale');
     assert.equal(stale.fetchedAt, fresh.fetchedAt);
     assert.deepEqual(stale.catalog, fresh.catalog);
-    assert.deepEqual(calls, [primary, primary, secondary]);
+    assert.deepEqual(calls, [primary, primary, secondary, local]);
     await service.index(true);
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 4);
     online = true;
     now += 30001;
     assert.equal((await service.index()).state, 'fresh');

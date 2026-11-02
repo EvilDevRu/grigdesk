@@ -135,7 +135,7 @@ function identity(value: Pick<CatalogSummary, 'repository' | 'source'>): void {
  * Индекс публикуется одной проверенной проекцией; ошибка одного элемента отвергает весь ответ.
  * Null generatedAt разрешён только для начального пустого снимка сайта.
  */
-export function decodeCatalogIndex(raw: unknown, maximumApi: 1 | 2 = 1): CatalogIndex {
+export function decodeCatalogIndex(raw: unknown): CatalogIndex {
   const result = d.objectOf({
     schemaVersion: d.oneOf(1),
     generatedAt: d.nullable(timestamp),
@@ -151,10 +151,6 @@ export function decodeCatalogIndex(raw: unknown, maximumApi: 1 | 2 = 1): Catalog
   for (const item of result.plugins) {
     identity(item);
 
-    if (item.latest && item.latest.api > maximumApi) {
-      throw new TypeError('Каталог: неподдерживаемый api в latest');
-    }
-
     if (item.details !== `${item.id}.json`) {
       throw new TypeError('Каталог: некорректный адрес подробностей');
     }
@@ -167,7 +163,7 @@ export function decodeCatalogIndex(raw: unknown, maximumApi: 1 | 2 = 1): Catalog
  * Detail проверяется независимо от индекса и не допускает повторов версий.
  * Соответствие конкретному index snapshot проверит сервис, который заказывал документ.
  */
-export function decodeCatalogDetail(raw: unknown, maximumApi: 1 | 2 = 1): CatalogDetail {
+export function decodeCatalogDetail(raw: unknown): CatalogDetail {
   const result = d.objectOf({
     schemaVersion: d.oneOf(1),
     generatedAt: timestamp,
@@ -176,10 +172,6 @@ export function decodeCatalogDetail(raw: unknown, maximumApi: 1 | 2 = 1): Catalo
   const versions = result.plugin.versions;
 
   identity(result.plugin);
-
-  if (versions.some((item) => item.api > maximumApi)) {
-    throw new TypeError('Каталог: неподдерживаемый api в versions');
-  }
 
   if (versions.length > 100 || new Set(versions.map((item) => item.version)).size !== versions.length) {
     throw new TypeError('Каталог: несогласованные версии');
@@ -200,12 +192,12 @@ export interface CatalogIndexResponse {
  * Браузер проверяет локальную оболочку так же строго, как сервер проверяет публичный сайт.
  * Свежесть и наличие снимка согласованы: ошибка не превращается в пустой успешный каталог.
  */
-export function decodeCatalogResponse(raw: unknown, maximumApi: 1 | 2 = 1): CatalogIndexResponse {
+export function decodeCatalogResponse(raw: unknown): CatalogIndexResponse {
   const result = d.objectOf({
     state: d.oneOf('fresh', 'stale', 'unavailable', 'unconfigured'),
     applicationVersion: stable,
     fetchedAt: d.nullable(timestamp),
-    catalog: d.nullable((value) => decodeCatalogIndex(value, maximumApi)),
+    catalog: d.nullable(decodeCatalogIndex),
   })(raw, 'response');
   const available = result.state === 'fresh' || result.state === 'stale';
 

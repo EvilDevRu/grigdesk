@@ -5,7 +5,7 @@ import { PluginCatalogService } from '../../server/src/lib/pluginCatalog.ts';
 import { installHttpFixture } from './helpers/pluginInstallHttpFixture.js';
 import { catalogFixture } from '../helpers/pluginCatalog.js';
 import { moduleCatalogFixture } from '../helpers/pluginCatalogModules.js';
-import { decodeCatalogResponse, decodeCatalogDetail } from '../helpers/pluginCatalogV1.mts';
+import { decodeCatalogResponse, decodeCatalogDetail } from '../../shared/plugins/pluginCatalogContracts.ts';
 
 test('CAT-R1: auth до сети, same-origin API, строгие query, детали и 404', async (t) => {
   const data = catalogFixture();
@@ -54,7 +54,7 @@ test('CAT-R1: auth до сети, same-origin API, строгие query, дет�
 });
 
 
-test('CAT-R2-API-NEGOTIATION: modern и legacy маршруты сохраняют auth и строгие query', async (t) => {
+test('CAT-R2-MIXED: общий маршрут отдаёт api1/2, сохраняет auth и строгие query', async (t) => {
   const data = moduleCatalogFixture();
   const calls = [];
   const catalog = new PluginCatalogService({
@@ -62,11 +62,10 @@ test('CAT-R2-API-NEGOTIATION: modern и legacy маршруты сохраняю
     applicationVersion: '1.0.0',
     fetch: async (input) => {
       const url = String(input);
-      const channel = url.includes('/v2/') ? data.modern : data.legacy;
 
       calls.push(url);
 
-      return Response.json(url.endsWith('index.json') ? channel.index : channel.detail);
+      return Response.json(url.endsWith('index.json') ? data.index : data.detail);
     },
   });
 
@@ -74,34 +73,35 @@ test('CAT-R2-API-NEGOTIATION: modern и legacy маршруты сохраняю
 
   const fixture = await installHttpFixture(t, { catalog });
 
-  for (const url of ['/api/plugin-catalog?api=2', '/api/plugin-catalog/demo?api=2']) {
+  for (const url of ['/api/plugin-catalog', '/api/plugin-catalog/demo']) {
     assert.equal((await fixture.app.inject(url)).statusCode, 401);
   }
 
   assert.deepEqual(calls, []);
 
   for (const headers of [fixture.session, fixture.cli, fixture.internal]) {
-    const index = await fixture.app.inject({ url: '/api/plugin-catalog?api=2', headers });
-    const detail = await fixture.app.inject({ url: '/api/plugin-catalog/demo?api=2', headers });
+    const index = await fixture.app.inject({ url: '/api/plugin-catalog', headers });
+    const detail = await fixture.app.inject({ url: '/api/plugin-catalog/demo', headers });
 
     assert.equal(index.statusCode, 200);
     assert.equal(detail.statusCode, 200);
-    assert.deepEqual(index.json().catalog, data.modern.index);
-    assert.deepEqual(detail.json(), data.modern.detail);
+    assert.deepEqual(decodeCatalogResponse(index.json()).catalog, data.index);
+    assert.deepEqual(decodeCatalogDetail(detail.json()), data.detail);
   }
 
-  const legacyIndex = await fixture.app.inject({ url: '/api/plugin-catalog', headers: fixture.session });
-  const legacyDetail = await fixture.app.inject({
-    url: '/api/plugin-catalog/demo', headers: fixture.session,
+  const refreshed = await fixture.app.inject({
+    url: '/api/plugin-catalog?refresh=1',
+    headers: fixture.session,
   });
 
-  assert.equal(legacyIndex.statusCode, 200);
-  assert.equal(legacyDetail.statusCode, 200);
-  assert.deepEqual(decodeCatalogResponse(legacyIndex.json()).catalog, data.legacy.index);
-  assert.deepEqual(decodeCatalogDetail(legacyDetail.json()), data.legacy.detail);
+  assert.equal(refreshed.statusCode, 200);
+  assert.equal(calls.filter((url) => url.endsWith('index.json')).length, 2);
+  assert.ok(calls.every((url) => url.includes('/v1/')));
 
   for (const root of ['/api/plugin-catalog', '/api/plugin-catalog/demo']) {
-    for (const query of ['api=1', 'api=3', 'api=x', 'api=2&foreign=1']) {
+    for (const query of [
+      'api=1', 'api=2', 'api=3', 'api=x', 'api=2&foreign=1', 'url=https://foreign.invalid',
+    ]) {
       const response = await fixture.app.inject({ url: `${root}?${query}`, headers: fixture.session });
 
       assert.equal(response.statusCode, 400, `${root}?${query}`);

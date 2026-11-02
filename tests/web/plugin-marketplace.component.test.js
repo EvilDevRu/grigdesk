@@ -330,13 +330,13 @@ test('CAT-UI8: версия ниже установленной называет
 });
 
 
-test('CAT-UI-API2: modern карточка создаёт точный install intent без автоматического apply', async (t) => {
-  const { modern } = moduleCatalogFixture();
+test('CAT-UI-API2: карточка api2 создаёт точный install intent без автоматического apply', async (t) => {
+  const modules = moduleCatalogFixture();
   const h = await settingsHarness(t, 'plugins.installed', 'PluginCatalogPanel', {
     prepare({ control }) {
-      control.handlers['/api/plugin-catalog?api=2'] = () => Response.json(catalogResponse(modern));
-      control.handlers['/api/plugin-catalog?api=2&refresh=1'] = () => Response.json(catalogResponse(modern));
-      control.handlers['/api/plugin-catalog/demo?api=2'] = () => Response.json(modern.detail);
+      control.handlers['/api/plugin-catalog'] = () => Response.json(catalogResponse(modules));
+      control.handlers['/api/plugin-catalog?refresh=1'] = () => Response.json(catalogResponse(modules));
+      control.handlers['/api/plugin-catalog/demo'] = () => Response.json(modules.detail);
     },
   });
 
@@ -351,8 +351,8 @@ test('CAT-UI-API2: modern карточка создаёт точный install i
 
   assert.deepEqual(selection, {
     id: 'demo',
-    source: modern.entry.source,
-    target: modern.version,
+    source: modules.entry.source,
+    target: modules.version,
   });
   assert.equal(installed, null);
   assert.equal(h.writes().length, 0);

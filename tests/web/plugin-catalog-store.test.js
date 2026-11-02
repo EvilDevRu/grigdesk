@@ -187,17 +187,17 @@ test('CAT-W6: карточка, сброшенная новым снимком, 
 });
 
 
-test('CAT-W7-NEGOTIATION: same-origin api2, refresh, detail и точный SHA', async (t) => {
+test('CAT-W7-MIXED: единый same-origin каталог api1/2, refresh, detail и точный SHA', async (t) => {
   const module = await compileModule(webFile('src/stores/pluginCatalog.ts'));
-  const { modern } = moduleCatalogFixture();
+  const modules = moduleCatalogFixture();
   const calls = [];
   const store = module.definePluginCatalogStore({
     get: async (url, options) => {
       calls.push({ url, timeoutMs: options.timeoutMs });
 
-      return url.includes('/demo') ? modern.detail : catalogResponse(modern);
+      return url.includes('/demo') ? modules.detail : catalogResponse(modules);
     },
-  }, 'catalog-modern')(createPinia());
+  }, 'catalog-modules')(createPinia());
 
   t.after(() => store.$dispose());
   await store.loadIndex();
@@ -205,56 +205,22 @@ test('CAT-W7-NEGOTIATION: same-origin api2, refresh, detail и точный SHA'
   assert.equal(store.index.plugins[0].latest.api, 2);
   await store.loadIndex(true);
   await store.loadDetail('demo');
-  assert.equal(store.detail.plugin.versions[0].sha, modern.version.sha);
+  assert.equal(store.detail.plugin.versions[0].sha, modules.version.sha);
   assert.deepEqual(calls, [
-    { url: '/api/plugin-catalog?api=2', timeoutMs: 25000 },
-    { url: '/api/plugin-catalog?api=2&refresh=1', timeoutMs: 25000 },
-    { url: '/api/plugin-catalog/demo?api=2', timeoutMs: 15000 },
+    { url: '/api/plugin-catalog', timeoutMs: 20000 },
+    { url: '/api/plugin-catalog?refresh=1', timeoutMs: 20000 },
+    { url: '/api/plugin-catalog/demo', timeoutMs: 15000 },
   ]);
-});
-
-test('CAT-W8-OLD-SERVER: один HTTP400 выбирает прежний режим для refresh/detail', async (t) => {
-  const module = await compileModule(webFile('src/stores/pluginCatalog.ts'));
-  const fixture = catalogFixture();
-  const calls = [];
-  const store = module.definePluginCatalogStore({
-    get: async (url, options) => {
-      calls.push({
-        url,
-        signal: options.signal,
-        timeoutMs: options.timeoutMs,
-      });
-
-      if (url.includes('api=2')) {
-        throw new ApiError('Неизвестный query', 400, {});
-      }
-
-      return url.includes('/demo') ? fixture.detail : catalogResponse(fixture);
-    },
-  }, 'catalog-old-server')(createPinia());
-
-  t.after(() => store.$dispose());
-  await store.loadIndex();
-  assert.equal(store.state, 'fresh');
-  await store.loadIndex(true);
-  await store.loadDetail('demo');
-  assert.equal(store.detail.plugin.id, 'demo');
-  assert.deepEqual(calls.map((item) => item.url), [
-    '/api/plugin-catalog?api=2', '/api/plugin-catalog',
-    '/api/plugin-catalog?refresh=1', '/api/plugin-catalog/demo',
-  ]);
-  assert.equal(calls[0].signal, calls[1].signal);
-  assert.equal(calls[0].signal.aborted, true, 'refresh завершил прежний epoch');
-  assert.deepEqual(calls.map((item) => item.timeoutMs), [25000, 15000, 15000, 15000]);
 });
 
 for (const [label, failure] of [
+  ['400', new ApiError('Некорректный запрос', 400, {})],
   ['401', new ApiError('Сессия истекла', 401, {})],
   ['503', new ApiError('Временно недоступно', 503, {})],
   ['невалидный 200', null],
   ['cancel', new DOMException('Отменено', 'AbortError')],
 ]) {
-  test(`CAT-W9-NO-DOWNGRADE: ${label} не пробует legacy`, async (t) => {
+  test(`CAT-W9-FAILURE: ${label} завершает единственный запрос ошибкой`, async (t) => {
     const module = await compileModule(webFile('src/stores/pluginCatalog.ts'));
     const calls = [];
     const store = module.definePluginCatalogStore({
@@ -273,13 +239,13 @@ for (const [label, failure] of [
     await store.loadIndex();
     assert.equal(store.state, 'unavailable');
     assert.equal(store.error, true);
-    assert.deepEqual(calls, ['/api/plugin-catalog?api=2']);
+    assert.deepEqual(calls, ['/api/plugin-catalog']);
   });
 }
 
-test('CAT-W9-NO-DOWNGRADE: поздний HTTP400 старого epoch не меняет modern snapshot', async (t) => {
+test('CAT-W9-FAILURE: поздний HTTP400 старого epoch не меняет новый снимок', async (t) => {
   const module = await compileModule(webFile('src/stores/pluginCatalog.ts'));
-  const { modern } = moduleCatalogFixture();
+  const modules = moduleCatalogFixture();
   const old = Promise.withResolvers();
   const calls = [];
   const store = module.definePluginCatalogStore({
@@ -290,7 +256,7 @@ test('CAT-W9-NO-DOWNGRADE: поздний HTTP400 старого epoch не ме
         return old.promise;
       }
 
-      return url.includes('/demo') ? modern.detail : catalogResponse(modern);
+      return url.includes('/demo') ? modules.detail : catalogResponse(modules);
     },
   }, 'catalog-late-400')(createPinia());
 
@@ -303,12 +269,12 @@ test('CAT-W9-NO-DOWNGRADE: поздний HTTP400 старого epoch не ме
   await pending;
   await store.loadDetail('demo');
   assert.equal(store.state, 'fresh');
-  assert.equal(store.detail.plugin.versions[0].sha, modern.version.sha);
-  assert.deepEqual(calls, ['/api/plugin-catalog?api=2', '/api/plugin-catalog?api=2&refresh=1',
-    '/api/plugin-catalog/demo?api=2']);
+  assert.equal(store.detail.plugin.versions[0].sha, modules.version.sha);
+  assert.deepEqual(calls, ['/api/plugin-catalog', '/api/plugin-catalog?refresh=1',
+    '/api/plugin-catalog/demo']);
 });
 
-test('CAT-W9-NO-DOWNGRADE: HTTP400 после dispose не запускает legacy запрос', async () => {
+test('CAT-W9-FAILURE: HTTP400 после dispose не запускает новый запрос', async () => {
   const module = await compileModule(webFile('src/stores/pluginCatalog.ts'));
   const pending = Promise.withResolvers();
   const calls = [];
@@ -324,6 +290,6 @@ test('CAT-W9-NO-DOWNGRADE: HTTP400 после dispose не запускает le
   store.$dispose();
   pending.reject(new ApiError('Закрыто', 400, {}));
   await reading;
-  assert.deepEqual(calls, ['/api/plugin-catalog?api=2']);
+  assert.deepEqual(calls, ['/api/plugin-catalog']);
   assert.equal(store.index, null);
 });
