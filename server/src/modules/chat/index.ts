@@ -4509,6 +4509,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   });
 
   // Рабочая область берётся из durable чата, а query задаёт только запрошенный файл.
+  // Общие вложения доступны миниатюрам так же, как агенту, без открытия всей папки чатов.
   // Каталог картинок, сохранённых самим исполнителем, объявляет его адаптер.
   // no-store ставится до schema validation, чтобы отказ тоже не оставался в кэше.
   fastify.get<ChatRoute>('/api/chat/:id/image', {
@@ -4544,7 +4545,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const result = await readChatImage({
       cwd: workspace.cwd,
       extraDirs: workspace.extraDirs,
-      imageRoots: [...artifactsDirs, ...(executor?.imageRoots?.(config) || [])],
+      imageRoots: [attachDir, ...artifactsDirs, ...(executor?.imageRoots?.(config) || [])],
       requested: request.query.path,
     });
 
