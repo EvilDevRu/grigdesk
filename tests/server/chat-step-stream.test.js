@@ -380,6 +380,53 @@ test('Codex imageGeneration приходит строкой GenerateImage без
   assert.equal(JSON.stringify(steps).includes('iVBORw0KGgo'), false);
 });
 
+test('Codex dynamicToolCall показывает сохранённую картинку без base64 в ленте', () => {
+  const imagePath = '/artifacts/tool-images/screenshot.jpg';
+  const normalize = createCodexStepNormalizer({ toolImagePath: () => imagePath });
+  const steps = normalize({
+    method: 'item/completed',
+    params: {
+      item: {
+        type: 'dynamicToolCall',
+        id: 'browser-shot',
+        tool: 'grigdesk_browser',
+        arguments: { action: 'screenshot' },
+        status: 'completed',
+        success: true,
+        contentItems: [{ type: 'inputImage', imageUrl: 'data:image/jpeg;base64,c2NyZWVuc2hvdA==' }],
+      },
+    },
+  });
+
+  assert.equal(steps.find((step) => step.k === 'tool')?.imagePath, imagePath);
+  assert.equal(steps.find((step) => step.k === 'res')?.text, STEP_IMAGE_TEXT);
+  assert.equal(JSON.stringify(steps).includes('base64'), false);
+});
+
+test('Codex dynamicToolCall сохраняет текст рядом с картинкой и причину отказа', () => {
+  const normalize = createCodexStepNormalizer();
+  const steps = normalize({
+    method: 'item/completed',
+    params: {
+      item: {
+        type: 'dynamicToolCall',
+        id: 'mixed-output',
+        tool: 'sample_tool',
+        success: false,
+        contentItems: [
+          { type: 'inputText', text: 'Не удалось получить полный снимок' },
+          { type: 'inputImage', imageUrl: 'data:image/jpeg;base64,c2NyZWVuc2hvdA==' },
+        ],
+      },
+    },
+  });
+  const result = steps.find((step) => step.k === 'res');
+
+  assert.equal(result?.ok, false);
+  assert.equal(result?.text, `Не удалось получить полный снимок\n${STEP_IMAGE_TEXT}`);
+  assert.equal(JSON.stringify(steps).includes('base64'), false);
+});
+
 test('Codex события без вызова показываются служебной строкой', () => {
   const normalize = createCodexStepNormalizer();
   const steps = [

@@ -102,12 +102,24 @@ interface CodexChange {
   unified_diff?: unknown;
 }
 
+/**
+ * Результаты превращаются в короткий текст ленты без байтов типизированной картинки.
+ * Текстовые блоки сохраняются рядом с заглушкой, включая причины отказов инструмента.
+ */
 function textOf(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (Array.isArray(value)) return value.map(textOf).filter(Boolean).join('\n');
   if (value && typeof value === 'object') {
-    const record = value as { text?: unknown; content?: unknown };
+    const record = value as {
+      type?: unknown;
+      text?: unknown;
+      content?: unknown;
+    };
+
+    if (record.type === 'inputImage') {
+      return STEP_IMAGE_TEXT;
+    }
     if (typeof record.text === 'string') return record.text;
     if (typeof record.content === 'string') return record.content;
     try { return JSON.stringify(value); } catch { return ''; }
@@ -465,6 +477,12 @@ export function createCodexStepNormalizer({
   model = '',
   cwd = '',
   mode = 'workspace-write',
+  toolImagePath = () => '',
+}: {
+  model?: string;
+  cwd?: string;
+  mode?: string;
+  toolImagePath?: (id: string) => string;
 } = {}) {
   let started = false;
   const tools = new Map<string, ChatStep>();
@@ -505,6 +523,12 @@ export function createCodexStepNormalizer({
     const tool = toolOf(source);
     if (!tool) return null;
     const id = tool.id ? String(tool.id) : '';
+    const imagePath = id ? toolImagePath(id) : '';
+
+    if (imagePath) {
+      tool.imagePath = imagePath;
+    }
+
     const known = id ? tools.get(id) : null;
     const step: ChatStep = known
       ? mergeTool(known, tool)

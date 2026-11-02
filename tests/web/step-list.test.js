@@ -268,6 +268,54 @@ test('StepList показывает сгенерированную картин�
   assert.equal(wrapper.find('.body.res').exists(), false, 'рядом с картинкой осталась заглушка');
 });
 
+test('StepList показывает картинку результата инструмента через защищённый маршрут', async (t) => {
+  const steps = [
+    {
+      k: 'tool',
+      id: 'screenshot',
+      name: 'grigdesk_browser',
+      title: 'Снимок страницы',
+      sub: 'dynamic',
+      imagePath: '/artifacts/tool-images/screenshot.jpg',
+    },
+    {
+      k: 'res',
+      id: 'screenshot',
+      ok: true,
+      text: STEP_IMAGE_TEXT,
+    },
+  ];
+  const wrapper = await mountStepList(t, steps, { chatId: 'c1' });
+
+  assert.equal(wrapper.find('.step-image').exists(), false);
+  await wrapper.get('.step-disclosure').trigger('click');
+  assert.equal(wrapper.find('.step-image img').exists(), true);
+  assert.equal(wrapper.get('.step-image img').attributes('src'),
+    '/api/chat/c1/image?path=%2Fartifacts%2Ftool-images%2Fscreenshot.jpg');
+  assert.equal(wrapper.find('.body.res').exists(), false);
+
+  await wrapper.setProps({ steps: JSON.parse(JSON.stringify(steps)), live: false });
+  await wrapper.get('.summary-disclosure').trigger('click');
+  assert.equal(wrapper.find('.step-image img').exists(), true);
+});
+
+test('StepList не загружает картинку результата при отказе или неподходящем пути', async (t) => {
+  const cases = [
+    { imagePath: 'https://example.test/image.jpg' },
+    { imagePath: '/api/image.jpg' },
+    { imagePath: '/artifacts/image.svg' },
+    { imagePath: '/artifacts/image.jpg', ok: false },
+  ];
+
+  for (const { imagePath, ok = true } of cases) {
+    const steps = imageRead({ ok }, { name: 'grigdesk_browser', imagePath });
+    const wrapper = await mountStepList(t, steps, { chatId: 'c1' });
+
+    await wrapper.get('.step-disclosure').trigger('click');
+    assert.equal(wrapper.find('.step-image').exists(), false, imagePath);
+  }
+});
+
 test('StepList заменяет неотданную картинку честной подписью', async (t) => {
   const wrapper = await mountStepList(t, imageRead(), { chatId: 'c1' });
 

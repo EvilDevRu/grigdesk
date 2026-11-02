@@ -21,6 +21,7 @@ import { createStepSink } from '../chat/streamSteps.ts';
 import { CODEX_TURN_FAILURE_RULES, codexTurnFailure } from './_codexTurnFailures.ts';
 import { contextCacheStatus, reportedContextCache } from '../chat/contextCache.ts';
 import { createCodexStepNormalizer } from './_codexSteps.ts';
+import { createCodexToolImages } from './_codexToolImages.ts';
 import { CODEX_UNTRUSTED_INPUT, runCodexUntrusted } from './_codexUntrusted.ts';
 import type { PreparedExecutorRuntime, PreparedNativeSettings } from '../executorSettings/types.ts';
 import { codexNativeSettings } from '../executorSettings/codex.ts';
@@ -66,6 +67,7 @@ const APP_SERVER_TIMEOUT_MS = 15_000;
 type CodexConfig = {
   codexBin: string;
   rootDir?: string;
+  artifactsDir?: string;
 };
 
 // Сохранённые ручки исполнителя из prefs: их состав объявляет он же.
@@ -214,6 +216,7 @@ interface CodexTurn {
   message: unknown;
   stepSink: StepSink;
   normalizeStep: (value: unknown) => ChatStep[];
+  toolImages: ReturnType<typeof createCodexToolImages>;
   onProgress?: (tokens: number, info?: Record<string, unknown>) => void;
   onRunMetadata?: (metadata: ChatRunMetadata) => void;
   onPermission?: (ask: Record<string, unknown>) => unknown;
@@ -1486,11 +1489,17 @@ export function openCodexSession({
     onAssistantMessage?: (event: InTurnAssistantEvent) => void | Promise<void>;
   }): CodexTurn {
     const stepSink = createStepSink(onStep);
+    const toolImages = createCodexToolImages(config.artifactsDir);
 
     return {
       message,
       stepSink,
-      normalizeStep: createCodexStepNormalizer({ model, cwd }),
+      toolImages,
+      normalizeStep: createCodexStepNormalizer({
+        model,
+        cwd,
+        toolImagePath: toolImages.pathFor,
+      }),
       onProgress,
       onRunMetadata,
       onPermission,
@@ -2172,7 +2181,10 @@ export function openCodexSession({
     log?.warn?.({ reason }, 'Codex: отклонён некорректный рабочий вызов');
   }
 
-  /** Dynamic tool выполняется максимум один раз на callId внутри одного хода. */
+  /**
+   * Dynamic tool выполняется максимум один раз на callId внутри одного хода.
+   * До ответа Codex сохраняем миниатюру, чтобы completed мог передать её путь в ленту.
+   */
   function consumeWorkToolRequest(messageObject: CodexRpcMessage) {
     const params = messageObject.params as {
       tool?: string;
@@ -2224,7 +2236,20 @@ export function openCodexSession({
     const outcome: Promise<Record<string, unknown>> = Promise.resolve().then(
       () => workTools?.invoke(String(params.tool), input ?? {}),
     ).then(
-      (result) => ({ result: codexDynamicToolResponse(result) }),
+      async (result) => {
+        const response = codexDynamicToolResponse(result);
+        const image = response.contentItems[0];
+
+        if (response.success && image?.type === 'inputImage' && 'imageUrl' in image) {
+          try {
+            await current.toolImages.save(callId, image.imageUrl);
+          } catch {
+            log?.warn?.({}, 'Codex: не удалось сохранить миниатюру результата инструмента');
+          }
+        }
+
+        return { result: response };
+      },
       (error: unknown) => ({
         error: { code: -32603, message: String((error as Error)?.message || error) },
       }),

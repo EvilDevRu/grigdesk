@@ -13,6 +13,7 @@ import { classifyTurnFailure } from '../../server/src/lib/chat/turnFailures.ts';
 import { createCodexStepNormalizer } from '../../server/src/lib/executors/_codexSteps.ts';
 import { CODEX_TURN_FAILURE_RULES } from '../../server/src/lib/executors/_codexTurnFailures.ts';
 import codex, { parseCodexRateLimits } from '../../server/src/lib/executors/codex.ts';
+import { STEP_IMAGE_TEXT } from '../../shared/chat/chatSteps.ts';
 import { CODEX_APP_SERVER_COMPATIBILITY } from '../fixtures/codex-app-server/rich-turn-0.149.0.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -500,6 +501,70 @@ test('Codex не роняет ход на дубле и чужом item/tool/cal
     entry.direction === 'client' && entry.message?.id === 91012
   ));
   assert.equal(foreignResponse?.message?.error?.code, -32602);
+});
+
+test('Codex сохраняет screenshot для ленты, передавая агенту исходный inputImage', async (t) => {
+  const f = await fixture(t, 'screenshot-tool');
+  const artifactsDir = path.join(f.dir, 'artifacts');
+  const data = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+  const sent = [];
+  const result = await codex.run(runOptions(f, {
+    config: { codexBin: f.bin, artifactsDir },
+    onStep: (step) => sent.push(step),
+    workTools: {
+      descriptors: [{ name: 'grigdesk_browser', inputSchema: { type: 'object' } }],
+      async invoke() {
+        return {
+          format: 'grigdesk-work-content-v1',
+          content: [{
+            type: 'image',
+            mimeType: 'image/jpeg',
+            data: data.toString('base64'),
+          }],
+        };
+      },
+    },
+  }));
+  const image = sent.find((step) => step.k === 'tool' && step.imagePath);
+
+  assert.equal(typeof image?.imagePath, 'string');
+  assert.equal(path.dirname(path.dirname(image.imagePath)), artifactsDir);
+  assert.deepEqual(await readFile(image.imagePath), data);
+  assert.equal(result.steps.some((step) => step.imagePath === image.imagePath), true);
+  assert.equal(sent.find((step) => step.k === 'res' && step.id === image.id)?.text, STEP_IMAGE_TEXT);
+  assert.equal(JSON.stringify(sent).includes('base64'), false);
+
+  const trace = await readTrace(f.trace);
+  const response = trace.find((entry) => entry.direction === 'client' && entry.message?.id === 91008);
+
+  assert.equal(response?.message?.result?.contentItems?.[0]?.imageUrl,
+    `data:image/jpeg;base64,${data.toString('base64')}`);
+});
+
+test('Codex сохраняет ответ инструмента при отказе записи миниатюры', async (t) => {
+  const f = await fixture(t, 'screenshot-tool');
+  const warnings = [];
+  const result = await codex.run(runOptions(f, {
+    config: { codexBin: f.bin, artifactsDir: f.bin },
+    log: { warn: (_fields, message) => warnings.push(message) },
+    workTools: {
+      descriptors: [{ name: 'grigdesk_browser', inputSchema: { type: 'object' } }],
+      async invoke() {
+        return {
+          format: 'grigdesk-work-content-v1',
+          content: [{
+            type: 'image',
+            mimeType: 'image/jpeg',
+            data: 'AQ==',
+          }],
+        };
+      },
+    },
+  }));
+
+  assert.equal(result.reply, 'Готово: изменения сохранены.');
+  assert.equal(warnings.includes('Codex: не удалось сохранить миниатюру результата инструмента'), true);
+  assert.equal(JSON.stringify(result.steps).includes('base64'), false);
 });
 
 test('AbortSignal прерывает app-server ход через turn/interrupt и сохраняет sessionId со steps', async (t) => {
