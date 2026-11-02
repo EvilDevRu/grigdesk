@@ -1,24 +1,25 @@
 <template>
-  <div class="board ui-workspace" data-ui-workspace :class="{ 'stats-expanded': statsExpanded }">
-    <UiPaneHeader class="board-heading">
+  <div class="board ui-workspace" data-ui-workspace :class="{ 'stats-expanded': statsExpanded, 'has-board-pages': phonePages.length > 1 }">
+    <UiPaneHeader class="board-heading" data-context="board-heading">
+      <template #title>
+        <h2 class="board-title">{{ t('core.board') }}</h2>
+      </template>
+      <template v-if="phoneBoard" #meta>
+        <BoardTrackerSettingsButton @click="trackerSettingsOpen = true" />
+      </template>
       <template #actions>
-        <UiButton tone="accent" data-context="workspace-toolbar"
+        <UiButton tone="accent" data-context="workspace-toolbar" data-role="board-new-task"
                   @click="newTaskOpen = true">{{ t('core.grigdeskNewTask') }}</UiButton>
-        <UiIconButton :label="t('core.trackerSettings')" data-context="workspace-toolbar"
-                      v-tooltip="t('core.trackerSettings')" @click="trackerSettingsOpen = true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
-            <path d="m9 3-.5 2a8 8 0 0 0-2 1.2L4.5 6l-2 3.5L4 11v2l-1.5 1.5 2 3.5 2-.2A8 8 0 0 0
-                     8.5 19l.5 2h4l.5-2a8 8 0 0 0 2-1.2l2 .2 2-3.5L18 13v-2l1.5-1.5-2-3.5-2 .2A8 8
-                     0 0 0 13.5 5L13 3Z" />
-            <circle cx="11" cy="12" r="3" />
-          </svg>
-        </UiIconButton>
+        <BoardTrackerSettingsButton v-if="!phoneBoard" @click="trackerSettingsOpen = true" />
       </template>
     </UiPaneHeader>
     <TrackerSettingsDialog v-if="trackerSettingsOpen" v-model:open="trackerSettingsOpen" />
     <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen" @created="ui.openTask($event)" />
 
     <div id="board-tracker-panel" class="tracker-board">
+      <div v-if="!phoneBoard || ownTasks.trackerConfigured === false || error
+                 || data?.widgets?.length || activeTasks.length"
+           class="board-overview">
       <div v-if="ownTasks.trackerConfigured === false" class="tracker-setup-banner">
         <p>{{ t('core.trackerSetupBanner') }}</p>
         <UiButton tone="accent" @click="trackerSettingsOpen = true">
@@ -26,7 +27,7 @@
         </UiButton>
       </div>
     <template v-if="ownTasks.trackerConfigured !== false">
-    <BoardLoading v-if="!data && !error" label="Загрузка доски…" />
+    <BoardLoading v-if="!phoneBoard && !data && !error" label="Загрузка доски…" />
     <UiInlineMessage v-if="error" :tone="data ? 'warning' : 'danger'" class="board-tracker-error">
       <div class="board-tracker-error-heading">
         <strong>{{ trackerUnavailableLabel }}</strong>
@@ -42,7 +43,7 @@
       <p v-if="errorDetailsOpen" :id="errorDetailsId" class="board-tracker-error-details">{{ error }}</p>
     </UiInlineMessage>
 
-    <p v-if="data" class="muted" role="status" data-role="board-snapshot-status">
+    <p v-if="data && !phoneBoard" class="muted" role="status" data-role="board-snapshot-status">
       <span v-if="error">{{ t('core.boardSnapshotStale') }} </span>
       <time :datetime="snapshotDateTime">{{ t('core.boardSnapshotUpdated', { time: snapshotTime }) }}</time>
     </p>
@@ -100,9 +101,41 @@
         </ul>
       </section>
 
-      <div class="cols" :class="{ solo: !(data.toReview!.length || data.created!.length) }">
+    </template>
+    </template>
+      </div>
+      <UiTabs v-if="phoneBoard && phonePages.length > 1" class="board-page-nav"
+              data-context="board-page-nav" :label="t('core.boardPages')"
+              :model-value="activeBoardPage" @update:model-value="selectBoardPage">
+        <UiTab v-for="page in phonePages" :id="`${boardPagesId}-tab-${page.id}`" :key="page.id"
+               :value="page.id" :controls="`${boardPagesId}-panel-${page.id}`"
+               :aria-label="t('core.boardPageLabel', {
+                 label: page.id === 'related' ? t('core.boardRelatedTitle') : page.label,
+                 count: page.loading ? t('core.loading') : page.count,
+               })"
+               :data-board-page-tab="page.id" data-context="board-page-tab">
+          <span class="board-page-label">{{ page.label }}</span>
+          <span class="board-page-count">{{ page.loading ? '…' : page.count }}</span>
+        </UiTab>
+      </UiTabs>
+      <div ref="boardPagesTrack" class="board-pages" @scroll.passive="onBoardPagesScroll">
+      <template v-if="phoneBoard && ownTasks.trackerConfigured !== false && !data && !error">
+      <section v-for="page in ['mine', 'related']" :key="page"
+               :id="`${boardPagesId}-panel-${page}`" class="col board-page-loading"
+               :class="page === 'mine' ? 'primary' : 'secondary'"
+               :role="phonePages.length > 1 ? 'tabpanel' : undefined"
+               :aria-labelledby="phonePages.length > 1 ? `${boardPagesId}-tab-${page}` : undefined"
+               :inert="activeBoardPage !== page ? true : undefined">
+        <BoardLoading compact :label="t('core.loading')" />
+      </section>
+      </template>
+      <div v-if="ownTasks.trackerConfigured !== false && data" class="cols"
+           :class="{ solo: !(data.toReview!.length || data.created!.length) }">
         <!-- Мои задачи — основной блок -->
-        <section class="col primary">
+        <section :id="`${boardPagesId}-panel-mine`" class="col primary"
+                 :role="phoneBoard && phonePages.length > 1 ? 'tabpanel' : undefined"
+                 :aria-labelledby="phoneBoard && phonePages.length > 1 ? `${boardPagesId}-tab-mine` : undefined"
+                 :inert="phoneBoard && activeBoardPage !== 'mine' ? true : undefined">
           <div class="colhead">
             <h3 class="h big">
               <span class="heading-name">Мои задачи</span>
@@ -112,27 +145,30 @@
             </h3>
             <UiButton
               class="filter-toggle"
+              data-context="board-filter-toggle"
               variant="outline"
               :tone="activeFilterCount ? 'accent' : 'neutral'"
               :pressed="Boolean(activeFilterCount)"
               :aria-expanded="String(filtersOpen)"
+              :aria-label="activeFilterCount
+                ? t('core.boardTaskFiltersActive', { count: activeFilterCount })
+                : t('core.boardTaskFilters')"
+              v-tooltip="t('core.boardTaskFilters')"
               aria-controls="board-task-filters"
               @click="filtersOpen = !filtersOpen"
             >
-              <template #leading>
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M4 5h16l-6.3 7.1v5.4l-3.4 1.7v-7.1z" />
-                </svg>
-              </template>
-              <span>Фильтры</span>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 5h16l-6.3 7.1v5.4l-3.4 1.7v-7.1z" />
+              </svg>
+              <span class="filter-toggle-label">Фильтры</span>
               <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
             </UiButton>
             <div class="search" role="search">
@@ -214,6 +250,7 @@
               <UiSegmentedControl
                 v-model="triageMode"
                 class="trisegment"
+                data-context="board-triage-mode"
                 label="Режим триажа"
                 :options="TRIAGE_OPTIONS"
               />
@@ -352,10 +389,15 @@
           </ul>
         </section>
 
-        <!-- Контроль / поставленные: блок скрыт, когда обе секции пусты -->
-        <section v-if="data.toReview!.length || data.created!.length" class="col secondary">
-          <h3 class="h big">Контроль и поручения</h3>
-          <UiTabs v-model="secondaryMode!" class="secondary-tabs" label="Связанные задачи">
+        <!-- На телефоне пустой контроль сохраняет ширину вкладок и положение остальных страниц. -->
+        <section v-if="phoneBoard || data.toReview!.length || data.created!.length"
+                 :id="`${boardPagesId}-panel-related`" class="col secondary"
+                 :role="phoneBoard && phonePages.length > 1 ? 'tabpanel' : undefined"
+                 :aria-labelledby="phoneBoard && phonePages.length > 1 ? `${boardPagesId}-tab-related` : undefined"
+                 :inert="phoneBoard && activeBoardPage !== 'related' ? true : undefined">
+          <h3 class="h big">{{ t('core.boardRelatedTitle') }}</h3>
+          <UiTabs :model-value="secondaryMode ?? 'review'" class="secondary-tabs" label="Связанные задачи"
+                  @update:model-value="secondaryMode = String($event)">
             <UiTab id="board-review-tab" data-context="board-related-tab"
                    value="review" controls="board-related-list">
               Контроль <span class="cnt">{{ data.toReview!.length }}</span>
@@ -372,14 +414,14 @@
             clear-label="Очистить поиск связанных задач"
           />
           <div class="secondary-summary">
-            <span>{{ secondaryMode === 'review' ? 'Ждут моего контроля' : 'Я поставил задачу' }}</span>
+            <span>{{ secondaryMode !== 'created' ? 'Ждут моего контроля' : 'Я поставил задачу' }}</span>
             <span v-if="secondaryQuery.trim()">{{ relatedTasks.length }} из {{ relatedSource.length }}</span>
           </div>
           <div
             id="board-related-list"
             class="related-panel"
             role="tabpanel"
-            :aria-labelledby="secondaryMode === 'review' ? 'board-review-tab' : 'board-created-tab'"
+            :aria-labelledby="secondaryMode !== 'created' ? 'board-review-tab' : 'board-created-tab'"
           >
             <ul ref="relatedList" class="tasks related-list">
               <li v-for="t in relatedTasks" :key="t.id" class="related-row">
@@ -409,12 +451,13 @@
         </section>
       </div>
 
-    </template>
-    </template>
-      <section class="own-tasks"
+      <section :id="`${boardPagesId}-panel-own`" class="own-tasks"
+               :role="phoneBoard && phonePages.length > 1 ? 'tabpanel' : undefined"
+               :aria-labelledby="phoneBoard && phonePages.length > 1 ? `${boardPagesId}-tab-own` : undefined"
+               :inert="phoneBoard && activeBoardPage !== 'own' ? true : undefined"
                :aria-label="t(ownTasks.trackerConfigured !== false
                  ? 'core.boardInternalTab' : 'core.grigdeskTasks')">
-        <h3>
+        <h3 class="h big">
           {{ t(ownTasks.trackerConfigured !== false ? 'core.boardInternalTab' : 'core.grigdeskTasks') }}
         </h3>
         <p v-if="ownTasks.error" class="err" role="alert">{{ ownTasks.error }}</p>
@@ -423,24 +466,45 @@
         </p>
         <ul class="own-tasks-list">
           <li v-for="task in sortedOwnTasks" :key="task.id">
-            <UiButton variant="text" data-context="grigdesk-task-title" @click="ui.openTask(task.id)">
-              <span class="mono">#{{ task.id }}</span> {{ task.title }}
+            <UiButton variant="text" class="own-task-title" data-context="grigdesk-task-title"
+                      @click="ui.openTask(task.id)">
+              <span class="task-name">{{ task.title }}</span>
+              <span class="task-meta own-task-meta">
+                <span class="mono task-id">#{{ task.id }}</span>
+                <span>{{ task.projectTitle }}</span>
+                <span v-if="ownTasks.trackerConfigured !== false" class="task-internal-flag">
+                  {{ t('core.taskInternalFlag') }}
+                </span>
+              </span>
             </UiButton>
-            <span v-if="ownTasks.trackerConfigured !== false" class="task-internal-flag">
-              {{ t('core.taskInternalFlag') }}
-            </span>
-            <span class="muted">{{ task.projectTitle }}</span>
-            <TriageBadge v-if="analysisEnabled" :row="analysis.byTask[task.id] || null" />
-            <span v-if="conveyor.has(task.id)" class="muted">{{ t('core.grigdeskTaskPipeline') }}</span>
+            <div v-if="analysisEnabled || conveyor.has(task.id)" class="own-task-details">
+              <TriageBadge v-if="analysisEnabled" :row="analysis.byTask[task.id] || null" />
+              <span v-if="conveyor.has(task.id)" class="muted own-task-state">
+                {{ t('core.grigdeskTaskPipeline') }}
+              </span>
+            </div>
           </li>
         </ul>
       </section>
+      </div>
     </div>
+    <footer v-if="phoneBoard && ownTasks.trackerConfigured !== false" class="board-phone-footer">
+      <p role="status" data-role="board-snapshot-status">
+        <template v-if="data">
+          <span v-if="error">{{ t('core.boardSnapshotStale') }} </span>
+          <time :datetime="snapshotDateTime">{{ t('core.boardSnapshotUpdated', { time: snapshotTime }) }}</time>
+        </template>
+        <span v-else>{{ error ? trackerUnavailableLabel : t('core.loading') }}</span>
+      </p>
+    </footer>
   </div>
 </template>
 
 <script setup lang="ts">
 import TrackerWidgets from './board/TrackerWidgets.vue';
+import BoardTrackerSettingsButton from './board/BoardTrackerSettingsButton.vue';
+import { useBoardPhonePages } from './board/useBoardPhonePages.ts';
+import type { BoardPhonePage } from './board/useBoardPhonePages.ts';
 import TrackerSettingsDialog from './board/TrackerSettingsDialog.vue';
 import { boardSupportsTimer } from '../shared/trackerCapabilities.ts';
 import { useTrackersStore } from '../stores/trackers.ts';
@@ -473,7 +537,6 @@ import {
   confirmDialog,
   UiButton,
   UiDisclosureButton,
-  UiIconButton,
   UiInlineMessage,
   UiPaneHeader,
   UiPressable,
@@ -505,6 +568,46 @@ const sortedOwnTasks = computed(() => [...ownTasks.tasks].sort((left, right) =>
 // Данные — из кеш-стора (мгновенный показ при переходе + фоновое обновление).
 const board = useBoardStore();
 const { data, error, loading, readAt } = storeToRefs(board);
+
+const boardPagesId = `board-pages-${useId()}`;
+const phonePages = computed<BoardPhonePage[]>(() => {
+  const pages: BoardPhonePage[] = [];
+
+  if (ownTasks.trackerConfigured !== false && (data.value || !error.value)) {
+    pages.push({
+      id: 'mine',
+      label: t('core.boardMinePage'),
+      count: data.value?.tasks?.length ?? 0,
+      loading: !data.value,
+    });
+
+    const related = (data.value?.toReview?.length ?? 0) + (data.value?.created?.length ?? 0);
+
+    pages.push({
+      id: 'related',
+      label: t('core.boardRelatedPage'),
+      count: related,
+      loading: !data.value,
+    });
+  }
+
+  pages.push({
+    id: 'own',
+    label: t(ownTasks.trackerConfigured !== false ? 'core.boardInternalTab' : 'core.grigdeskTasks'),
+    count: sortedOwnTasks.value.length,
+    loading: ownTasks.loading && !sortedOwnTasks.value.length,
+  });
+
+  return pages;
+});
+const {
+  phone: phoneBoard,
+  activePage: activeBoardPage,
+  track: boardPagesTrack,
+  selectPage: selectBoardPage,
+  onScroll: onBoardPagesScroll,
+} = useBoardPhonePages(phonePages);
+
 
 watch(error, () => {
   errorDetailsOpen.value = false;
@@ -877,6 +980,19 @@ onUnmounted(() => {
   flex: none;
   margin: calc(var(--page-gutter) * -1) calc(var(--page-gutter) * -1) 0;
 }
+.board-overview {
+  display: contents;
+}
+.board-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.board-page-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .tracker-board {
   display: flex;
   flex-direction: column;
@@ -927,6 +1043,13 @@ onUnmounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+.own-task-details {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-width: 0;
 }
 
 .board {
@@ -1339,7 +1462,6 @@ onUnmounted(() => {
 
 @container board-primary (max-width: 560px) {
   .trisegment { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .trisegment > :deep(.ui-button:last-child) { grid-column: 1 / -1; }
   .batch-actions {
     flex: 1 1 100%;
     margin-left: 0;
@@ -1390,28 +1512,136 @@ onUnmounted(() => {
 /* На телефоне список принадлежит прокрутке страницы: вложенное окно в 58vh
    мешало долистывать задачи и переходить к контролю и поручениям одним жестом. */
 @media (max-width: 600px) {
-  .board { gap: 10px; }
-  .cols { gap: 10px; }
-  .col.primary, .col.secondary { flex-basis: 100%; padding: 10px; }
+  .board {
+    height: 100%;
+    min-height: 0;
+    gap: 8px;
+    overflow: hidden;
+    padding: 0 var(--page-gutter) var(--page-gutter);
+    background: var(--surface);
+  }
+  .tracker-board {
+    flex: 1;
+    min-height: 0;
+    gap: 8px;
+    overflow: visible;
+  }
+  .board-overview {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    gap: 8px;
+    max-height: min(30vh, 240px);
+    overflow-y: auto;
+  }
+  .board-phone-footer {
+    flex: none;
+    min-height: 18px;
+  }
+  .board-pages {
+    position: relative;
+    display: grid;
+    flex: 1;
+    min-height: 0;
+    grid-auto-flow: column;
+    grid-auto-columns: 100%;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .board-pages::-webkit-scrollbar { display: none; }
+  .board-pages > .cols { display: contents; }
+  .board.has-board-pages .colhead .h,
+  .board.has-board-pages .col.secondary > .h,
+  .board.has-board-pages .own-tasks > .h { display: none; }
+  .board.has-board-pages .colhead .search,
+  .board.has-board-pages .colhead .filter-toggle { grid-row: 1; }
+  .board-heading { margin: 0 calc(var(--page-gutter) * -1); }
+  .cols { gap: 16px; }
+  .col.primary, .col.secondary, .own-tasks {
+    flex-basis: 100%;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    overflow-y: auto;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  .own-tasks {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .colhead .h, .col.secondary > .h, .own-tasks > .h {
+    margin: 0;
+    color: var(--ink-mid);
+    font-size: 14px;
+    line-height: 20px;
+  }
+  .own-tasks-list {
+    margin: 0;
+    gap: 0;
+  }
+  .own-tasks-list li {
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+  }
+  .own-tasks-list li + li {
+    border-top: 1px solid var(--line);
+  }
+  .own-task-meta {
+    width: 100%;
+  }
+  .own-task-meta .task-internal-flag {
+    padding: 0;
+    background: transparent;
+    color: inherit;
+  }
+  .own-task-state {
+    font-size: 12px;
+  }
+  [data-role='board-snapshot-status'] {
+    margin: 0;
+    padding-inline: 12px;
+    font-size: 12px;
+    line-height: 18px;
+  }
+  .colhead { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; margin: 0; }
+  .colhead .h { grid-column: 1 / -1; }
+  .colhead .search { grid-column: 1; grid-row: 2; }
+  .colhead .filter-toggle { grid-column: 2; grid-row: 2; }
+  .triage-filter { flex: 1 1 100%; }
+  .trisegment { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
   .scroller, .related-list { max-height: none; overflow-y: visible; scrollbar-gutter: auto; }
   .tasks .trow, .tasks .trow.without-analysis {
-    grid-template-columns: minmax(0, 1fr) 44px;
-    gap: 8px;
-    padding: 12px 0;
+    grid-template-columns: minmax(0, 1fr) auto 44px;
+    gap: 4px 8px;
+    padding: 8px 12px;
     border-radius: 0;
   }
-  .tasks .trow .ttext { grid-column: 1; grid-row: 1; }
-  .tasks .trow > :deep(.favbtn) { grid-column: 2; grid-row: 1; margin-top: 0; }
+  .tasks .trow .ttext { grid-column: 1 / 3; grid-row: 1; }
+  .tasks .trow > :deep(.favbtn) { grid-column: 3; grid-row: 1; margin-top: 0; }
   .tasks .trow .task-triage { grid-column: 1; grid-row: 2; }
   .tasks .trow .ttime {
-    grid-column: 1 / -1;
-    grid-row: 3;
+    grid-column: 2 / -1;
+    grid-row: 2;
     flex-direction: row;
     align-items: center;
     gap: 8px;
   }
   .task-name { font-size: 15px; line-height: 1.45; }
   .task-meta { font-size: 12px; gap: 4px 8px; }
+  .col.secondary { gap: 8px; }
+  .related-row { padding: 10px 12px; }
   .active-timers { padding: 10px; }
   .charts-head { flex-wrap: wrap; gap: 8px; }
 }

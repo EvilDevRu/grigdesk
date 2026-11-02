@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { mountBoardView } from './helpers/board-view.js';
+import { webFile } from './helpers/compile-vue.js';
 import { LOCAL_TASK } from './helpers/grigdesk-task-card.js';
 
 /**
@@ -249,7 +251,7 @@ test('LOCAL-BOARD: секция внутренних завершает доск
   assert.equal(internal.isVisible(), true);
   assert.equal(internal.attributes('aria-label'), 'Внутренние');
   assert.equal(internal.get('h3').text(), 'Внутренние');
-  assert.equal(board.element.lastElementChild === internal.element, true);
+  assert.equal(board.get('.board-pages').element.lastElementChild === internal.element, true);
   assert.equal(board.findAll('li.trow').length, 2);
   assert.equal(fx.wrapper.find('.tracker-setup-banner').exists(), false);
   assert.deepEqual(rows.map((row) => row.get('button .mono').text()), [
@@ -414,4 +416,81 @@ test('LOCAL-BOARD-03: старый GET не откатывает POST, собы�
   assert.equal(fx.wrapper.find('.tracker-board .tracker-setup-banner').exists(), true);
   assert.equal(peak, 1);
   assert.equal(reads, 2);
+});
+
+test('BOARD-HIERARCHY: название первым, полный номер и проект в метаданных, одно открытие', async (t) => {
+  const task = {
+    ...LOCAL_TASK,
+    id: '1000000000001',
+    title: 'Название без служебного префикса',
+  };
+  const fx = await fixture(t, {
+    configured: true,
+    initialTasks: [task],
+    pipelineTasks: [{ task: task.id, daemonAlive: true }],
+    boardError: null,
+  });
+  const row = fx.wrapper.get('.own-tasks-list li');
+
+  assert.equal(row.find('.own-task-title .task-name').exists(), true);
+  assert.equal(row.get('.own-task-title .task-name').text(), task.title);
+  assert.equal(row.get('.own-task-meta .mono').text(), `#${task.id}`);
+  assert.match(row.get('.own-task-meta').text(), /Проект Бета/u);
+  assert.match(row.get('.own-task-details').text(), /На конвейере/u);
+
+  const { browser, wrapper } = fx;
+  const source = await readFile(webFile('src/views/BoardView.vue'), 'utf8');
+  const layers = ['tokens', 'base', 'components/foundation', 'components/actions'];
+  const cssText = (await Promise.all(layers.map((name) =>
+    readFile(webFile(`src/styles/${name}.css`), 'utf8')))).join('\n')
+    + '\n' + source.match(/<style scoped>([\s\S]*?)<\/style>/u)[1];
+  const style = browser.document.createElement('style');
+
+  browser.happyDOM.setWindowSize({ width: 390, height: 844 });
+  browser.document.documentElement.setAttribute('data-ui-touch', '');
+  style.textContent = cssText;
+  browser.document.head.append(style);
+  t.after(() => style.remove());
+
+  const css = (selector) => browser.getComputedStyle(wrapper.get(selector).element);
+  const titleColor = css('.own-task-title .task-name').color;
+
+  assert.notEqual(titleColor, '');
+  assert.equal(titleColor, css('.tasks .task-name').color);
+  assert.notEqual(titleColor, css('.own-task-meta').color);
+  assert.equal(css('.own-task-title .task-name').fontSize, '15px');
+  assert.equal(css('.own-task-meta').fontSize, '12px');
+  assert.equal(css('.own-task-title').minHeight, '44px');
+
+  await row.get('.own-task-title').trigger('click');
+  assert.deepEqual(fx.calls.opened, [task.id]);
+});
+
+test('PHONE-HEADER: реальная форма создания наследует общую шапку, desktop сохраняется', async (t) => {
+  const fx = await fixture(t);
+
+  fx.browser.happyDOM.setWindowSize({ width: 390, height: 844 });
+  fx.browser.document.documentElement.setAttribute('data-ui-touch', '');
+  await fx.flushPromises();
+  await openForm(fx);
+
+  const source = await readFile(webFile('src/views/board/NewGrigdeskTaskDialog.vue'), 'utf8');
+  const layers = ['tokens', 'base', 'components/foundation', 'components/actions',
+    'components/patterns', 'components/overlays'];
+  const cssText = (await Promise.all(layers.map((name) =>
+    readFile(webFile(`src/styles/${name}.css`), 'utf8')))).join('\n')
+    + '\n' + source.match(/<style scoped>([\s\S]*?)<\/style>/u)[1];
+  const style = fx.browser.document.createElement('style');
+
+  style.textContent = cssText;
+  fx.browser.document.head.append(style);
+  t.after(() => style.remove());
+
+  const title = fx.wrapper.get('.new-task-title').element;
+
+  assert.equal(fx.browser.getComputedStyle(title).fontSize, '12px');
+  assert.equal(fx.browser.getComputedStyle(title).fontWeight, '500');
+  fx.browser.happyDOM.setWindowSize({ width: 1280, height: 900 });
+  style.textContent = cssText;
+  assert.equal(fx.browser.getComputedStyle(title).fontSize, '17px');
 });

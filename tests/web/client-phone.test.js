@@ -226,7 +226,7 @@ test('телефон: полная ширина, меню разделов, ча
   }
 });
 
-test('телефон: доска прокручивается страницей, фильтрует и позволяет загрузить оставшиеся задачи', {
+test('телефон: страница доски прокручивает свой список, фильтрует и загружает оставшиеся задачи', {
   timeout: 120000,
 }, async (t) => {
   const { browser, origin } = await clientBrowser(t, { responses, artifacts });
@@ -237,6 +237,9 @@ test('телефон: доска прокручивается страницей
   await assertPhoneFrame(page, 360, 740);
   assert.equal(await page.locator('.trow').count(), 40);
   assert.equal(await page.locator('.scroller').evaluate((el) => getComputedStyle(el).overflowY), 'visible');
+  assert.equal(await page.locator('.col.primary').evaluate((el) => getComputedStyle(el).overflowY), 'auto');
+  assert.equal(await page.locator('.board-pages').evaluate((el) => getComputedStyle(el).scrollSnapType),
+    'x mandatory');
 
   const firstTask = await page.locator('.ttext').first().boundingBox();
 
@@ -244,7 +247,7 @@ test('телефон: доска прокручивается страницей
   await page.screenshot({ path: path.join(artifacts, 'board-360.png') });
   await page.locator('[data-role="board-load-more"]').click();
   assert.equal(await page.locator('.trow').count(), 55);
-  await page.locator('.content').evaluate((el) => {
+  await page.locator('.col.primary').evaluate((el) => {
     el.scrollTop = 0;
   });
   await page.locator('.filter-toggle').click();
