@@ -6,7 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { reserveFactoryRuntime, bindFactoryRuntime } from '../../server/src/lib/factoryRuntimePins.ts';
+import {
+  bindFactoryRuntime, reserveFactoryRuntime, unpinFactoryRuntimeAttempt,
+} from '../../server/src/lib/factoryRuntimePins.ts';
 import { probeFactoryGotoCapability } from '../../server/src/lib/factoryRuntimeCapabilities.ts';
 import {
   routeGateArgs, routeResumeArgs, runRouteEngine, spawnRouteEngine,
@@ -609,3 +611,125 @@ test('SB18 alias profiles root не создаёт второй scope и не п
   assert.equal(result.failure?.error, 'factory_runtime_pin_invalid');
   assert.equal(await fs.access(path.join(input.root, 'markers')).then(() => true, () => false), false);
 });
+
+// Снятие закрепления после runner_preflight_incompatible: попытка освобождает
+// прежний рантайм целиком (authority pin, индекс, бронь и ссылки реестра) и тут же
+// свободно закрепляется за текущей поставкой. Повторный вызов — no-op.
+test('unpin снимает pin A и позволяет повторно закрепить B на ту же попытку', async (t) => {
+  const input = await fixture(t);
+
+  await pinA(input);
+
+  const unpinned = await unpinFactoryRuntimeAttempt({
+    controlRoot: input.controlRoot,
+    stateRoot: input.stateRoot,
+    profileRoot: input.profileRoot,
+    cacheDir: input.variants.A.cacheDir,
+    task: input.task,
+    attempt: input.attempt,
+    profile: 'sample',
+  });
+
+  assert.equal(unpinned.unpinned, true);
+  assert.equal(unpinned.packageId, input.variants.A.packageId);
+
+  const scopeDir = path.join(input.controlRoot, 'server-runtimes');
+
+  for (const root of [scopeDir, path.join(input.variants.A.cacheDir, 'attempt-pins')]) {
+    const names = await fs.readdir(root, { recursive: true }).catch(() => []);
+
+    for (const name of names) {
+      assert.ok(!String(name).includes(input.attempt), `файл закрепления попытки удалён: ${name}`);
+    }
+  }
+
+  const registry = JSON.parse(await fs.readFile(
+    path.join(input.variants.A.cacheDir, 'state/control-roots.json'), 'utf8'));
+
+  for (const root of registry.roots) {
+    for (const reference of root.references) {
+      assert.ok(reference.attempt !== input.attempt, 'ссылка реестра попытки снята');
+    }
+  }
+
+  const repeated = await unpinFactoryRuntimeAttempt({
+    controlRoot: input.controlRoot,
+    stateRoot: input.stateRoot,
+    profileRoot: input.profileRoot,
+    cacheDir: input.variants.A.cacheDir,
+    task: input.task,
+    attempt: input.attempt,
+    profile: 'sample',
+  });
+
+  assert.equal(repeated.unpinned, false, 'повторное снятие — no-op');
+
+  const reservation = await reserveFactoryRuntime({
+    controlRoot: input.controlRoot,
+    stateRoot: input.stateRoot,
+    profileRoot: input.profileRoot,
+    task: input.task,
+    ...input.variants.B,
+  });
+  const pin = await bindFactoryRuntime({
+    reservation: reservation.reservation,
+    task: input.task,
+    attempt: input.attempt,
+    attemptDir: input.attemptDir,
+  });
+
+  assert.equal(pin.packageId, input.variants.B.packageId, 'попытка перезакреплена на B');
+});
+
+// Сбой удаления пережившей reservation не должен терять её token вместе с пином.
+// После устранения файлового отказа тот же unpin завершает очистку идемпотентно.
+test('unpin сохраняет token до очистки reservation и допускает повтор после отказа', async (t) => {
+  const input = await fixture(t);
+  const pin = await pinA(input);
+  const request = {
+    ...input,
+    cacheDir: input.variants.A.cacheDir,
+    profile: 'sample',
+  };
+  const reservation = path.join(
+    input.controlRoot, 'server-runtimes/reservations', `${pin.reservationToken}.json`,
+  );
+  const authority = path.join(input.controlRoot, 'server-runtimes', pin.scope, `${input.attempt}.json`);
+
+  await fs.mkdir(reservation);
+  await assert.rejects(unpinFactoryRuntimeAttempt(request));
+
+  assert.deepEqual(JSON.parse(await fs.readFile(authority, 'utf8')), pin,
+    'ошибка очистки сохраняет token в authority');
+
+  await fs.rmdir(reservation);
+  await fs.writeFile(reservation, '{}');
+
+  assert.equal((await unpinFactoryRuntimeAttempt(request)).unpinned, true);
+  await assert.rejects(fs.access(reservation), { code: 'ENOENT' });
+
+  assert.equal((await unpinFactoryRuntimeAttempt(request)).unpinned, false);
+});
+
+for (const corruption of ['null', 'other-package']) {
+  test(`unpin сохраняет authority при повреждённом индексе: ${corruption}`, async (t) => {
+    const input = await fixture(t);
+    const pin = await pinA(input);
+    const cacheDir = input.variants.A.cacheDir;
+    const index = path.join(cacheDir, 'attempt-pins', pin.scope, `${input.attempt}.json`);
+    const authority = path.join(input.controlRoot, 'server-runtimes', pin.scope, `${input.attempt}.json`);
+    const registry = path.join(cacheDir, 'state/control-roots.json');
+    const beforeRegistry = await fs.readFile(registry, 'utf8');
+    const value = corruption === 'null' ? null : { ...pin, packageId: input.variants.B.packageId };
+
+    await fs.writeFile(index, JSON.stringify(value));
+    await assert.rejects(unpinFactoryRuntimeAttempt({
+      ...input,
+      cacheDir,
+      profile: 'sample',
+    }), { code: 'factory_runtime_pin_invalid' });
+
+    assert.deepEqual(JSON.parse(await fs.readFile(authority, 'utf8')), pin);
+    assert.equal(await fs.readFile(registry, 'utf8'), beforeRegistry);
+  });
+}

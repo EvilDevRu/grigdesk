@@ -9,7 +9,7 @@ GLM исполняет этапы конвейера тем же DSH ELF (`bin/d
 
 | Метод | Поведение |
 | --- | --- |
-| `probe` | `glmRuntimeInfo.mts --probe`: допуск режима службы (`api` или `coding-plan` — factory-policy-v2) по metadata ELF, без ключа модели. Пустой/чужой режим или нет ELF → `4`; offline → `126`. |
+| `probe` | `glmRuntimeInfo.mts --probe`: допуск режима службы (`api` или `coding-plan` — factory-policy-v2) по metadata ELF, без ключа модели. Пустой/чужой режим или нет ELF → `4`; offline → `126`. Коды поставки `deepseek_binary_incompatible`, `glm_runtime_incompatible`, `glm_plugin_missing` → `4` и отдельная строка `RUNNER_SUPPLY_INCOMPATIBLE=glm` в stderr; прочие отказы маркера не получают. |
 | `catalog` | Семь проверенных моделей маршрута `zai` из `glm/factoryCatalog.ts`, provider `glm`. |
 | `capabilities` | `status status_request tools structured_output`. Sandbox, fanout и native resume не заявлены. |
 | `default_policy` | `FAMILY=default`, `EFFORT=high`; `family_alias` — `4`. |
@@ -21,6 +21,11 @@ GLM исполняет этапы конвейера тем же DSH ELF (`bin/d
 Версия раннера — `<runtimeVersion DSH>.p<packageId>.<ревизия профиля>.<ревизия политики этапа>`.
 Замена ELF или ревизий меняет её, поэтому прежнее покрытие даёт `runtime_changed`, а не
 продолжение на другой поставке.
+
+Если закреплённый helper уже отвергает поставку на preflight, маркер позволяет серверу
+один раз перепривязать рантайм при resume с сохранением попытки и курсора. Полный
+контракт и граница с обычной недоступностью —
+[несовместимость поставки раннера](../grigdesk/pipeline/runner-supply-incompatibility.md).
 
 ## Запуск этапа
 

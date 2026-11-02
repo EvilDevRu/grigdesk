@@ -600,17 +600,33 @@ export function routeFailure(output: string | null | undefined): RouteFailure | 
       message: 'опубликованный каталог изменился после выбора маршрута; поставь задачу заново',
     };
   }
-  const marker = /FACTORY_ERROR=(runner_preflight_unavailable|runner_preflight_failed)(?:\s+RUNNERS=([a-z][a-z0-9_-]*(?:,[a-z][a-z0-9_-]*)*))?/.exec(text);
-  if (!marker) return null;
+
+  const marker = new RegExp(
+    'FACTORY_ERROR=(runner_preflight_unavailable|runner_preflight_failed|runner_preflight_incompatible)'
+    + '(?:\\s+RUNNERS=([a-z][a-z0-9_-]*(?:,[a-z][a-z0-9_-]*)*))?',
+    'u',
+  ).exec(text);
+
+  if (!marker) {
+    return null;
+  }
+
   const runners = marker[2] ? String(marker[2]).split(',') : [];
   const unavailable = marker[1] === 'runner_preflight_unavailable';
-  if (unavailable && runners.length === 0) return null;
+  const incompatible = marker[1] === 'runner_preflight_incompatible';
+
+  if ((unavailable || incompatible) && runners.length === 0) {
+    return null;
+  }
+
   return {
     error: String(marker[1]),
     runners,
-    message: unavailable
-      ? `недоступны исполнители профиля: ${runners.join(', ')}`
-      : 'проверка исполнителей профиля не выполнена',
+    message: incompatible
+      ? `закреплённый рантайм попытки несовместим с поставкой исполнителей: ${runners.join(', ')}`
+      : unavailable
+        ? `недоступны исполнители профиля: ${runners.join(', ')}`
+        : 'проверка исполнителей профиля не выполнена',
   };
 }
 

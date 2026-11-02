@@ -88,4 +88,80 @@ reset_probe ok
 warn=$(_profile_preflight_probe codex 2>&1 >/dev/null)
 assert_eq '' "$warn" "проба с первой попытки журнал не засоряет"
 
+# Несовместимость поставки: детерминированный отказ пробы с маркером раннера
+# собирается в PREFLIGHT_SUPPLY_INCOMPATIBLE в основном процессе, исходный stderr
+# причин проходит вызывающему, повторов детерминированный отказ не получает.
+PREFLIGHT_SUPPLY_INCOMPATIBLE=''
+glm_supply_marker() {
+  printf 'RUNNER_SUPPLY_INCOMPATIBLE=glm\n' >&2
+  printf '{"code":"deepseek_binary_incompatible","error":"синтетика"}\n' >&2
+  return 4
+}
+runner_call() { glm_supply_marker; }
+_profile_preflight_probe glm >"$work/supply-out" 2>"$work/supply-err"
+assert_rc 4 "$?" "несовместимость поставки — код 4 без повторов"
+assert_eq 'glm' "$PREFLIGHT_SUPPLY_INCOMPATIBLE" "маркер раннера собран в глобаль"
+assert_contains "$(cat -- "$work/supply-err")" 'deepseek_binary_incompatible' \
+  "исходный stderr причин проходит наружу"
+
+# Проба без маркера не меняет накопленный список текущего preflight.
+# Сброс выполняется только на входе в profile_runner_host_preflight.
+PREFLIGHT_SUPPLY_INCOMPATIBLE='glm'
+runner_call() {
+  printf '{"code":"glm_runtime_not_admitted"}\n' >&2
+  return 4
+}
+_profile_preflight_probe kimi >"$work/supply-out2" 2>/dev/null
+assert_rc 4 "$?" "прочий детерминированный отказ — тот же код"
+assert_eq 'glm' "$PREFLIGHT_SUPPLY_INCOMPATIBLE" "маркер не растёт от чужих отказов"
+
+# Только строгий маркер самого проверяемого раннера при rc=4 даёт перепривязку.
+# Чужое имя, пояснение в той же строке и другие коды отказа её не разрешают.
+runner_call() {
+  printf '%s\n' "$probe_marker" >&2
+  return "$probe_rc"
+}
+for probe_marker in 'RUNNER_SUPPLY_INCOMPATIBLE=kimi' 'RUNNER_SUPPLY_INCOMPATIBLE=glm (код)'; do
+  probe_rc=4
+  PREFLIGHT_SUPPLY_INCOMPATIBLE=''
+  _profile_preflight_probe glm >/dev/null 2>&1
+  assert_eq '' "$PREFLIGHT_SUPPLY_INCOMPATIBLE" "неподходящий маркер не принят: $probe_marker"
+done
+for probe_rc in 0 2 126; do
+  probe_marker='RUNNER_SUPPLY_INCOMPATIBLE=glm'
+  PREFLIGHT_SUPPLY_INCOMPATIBLE=''
+  _profile_preflight_probe glm >/dev/null 2>&1
+  assert_eq '' "$PREFLIGHT_SUPPLY_INCOMPATIBLE" "маркер при rc=$probe_rc не даёт перепривязку"
+done
+unset -f runner_call
+source "$FACTORY_HOME/lib/runners/index.sh"
+
+# Настоящий профильный вызов должен сохранить глобаль за границей захвата stdout.
+# Второй вызов с готовым раннером обязан сбросить прежний список несовместимости.
+export FACTORY_RUNNERS_DIR="$work/runners"
+export FACTORY_PROFILES_DIR="$work/profiles"
+mkdir -p "$FACTORY_RUNNERS_DIR" "$FACTORY_PROFILES_DIR/supply"
+cp "$FACTORY_TESTS_HOME/fakes/runners/alpha.sh" "$FACTORY_RUNNERS_DIR/alpha.sh"
+cat >>"$FACTORY_RUNNERS_DIR/alpha.sh" <<'RUNNER'
+runner_alpha_probe() {
+  if [[ "${SUPPLY_PROBE:-incompatible}" == ready ]]; then
+    printf '1.2.3\n'
+    return 0
+  fi
+  printf 'RUNNER_SUPPLY_INCOMPATIBLE=alpha\n' >&2
+  return 4
+}
+RUNNER
+printf '%s\n' \
+  RUNNERS_SCHEMA=1 CONFIG_REVISION=1 PROJECT_RUNNER_PRIMARY=alpha \
+  MODEL_DEFAULT_ALPHA_FAMILY=fixture MODEL_DEFAULT_ALPHA_VERSION=latest \
+  >"$FACTORY_PROFILES_DIR/supply/runners.env"
+profile_runner_host_preflight supply 100 60 >/dev/null 2>"$work/host-err"
+assert_rc 1 "$?" "несовместимая поставка блокирует профильный preflight"
+assert_eq alpha "$PREFLIGHT_SUPPLY_INCOMPATIBLE" "глобаль переживает захват stdout профильной пробы"
+SUPPLY_PROBE=ready
+profile_runner_host_preflight supply 200 60 >/dev/null 2>&1
+assert_rc 0 "$?" "новый preflight принимает готового раннера"
+assert_eq '' "$PREFLIGHT_SUPPLY_INCOMPATIBLE" "каждый профильный preflight очищает глобаль"
+
 finish_tests

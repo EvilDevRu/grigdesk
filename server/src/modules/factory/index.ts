@@ -14,6 +14,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+
+import { config as runtimeConfig } from '../../config.ts';
+import { dataPath } from '../../../../shared/runtime/dataHome.ts';
+import { unpinFactoryRuntimeAttempt } from '../../lib/factoryRuntimePins.ts';
 import {
   factoryMobileIdentity, factorySnapshotHash, sameFactoryIdentity,
 } from '../../lib/mobile/factoryIdentity.ts';
@@ -982,46 +986,114 @@ async function factoryModule(
     }
 
     const stagesLog = path.join(config.stateDir, 'logs', `t${id}.stages.log`);
-    const from = await logLength(stagesLog);
-    const launch = await spawnRouteEngine(config, {
-      task: id,
-      args: routeResumeArgs(config, { task: id, profile, attempt }),
-      extraEnv: stageAutoCompactEnv(prefs?.read()),
-    });
-    if (!launch.ok) {
-      fastify.log.warn({ task: id, err: launch.message }, `route resume ${why} не запустился — продолжить вручную`);
-      return launch;
+
+    /**
+     * Один цикл «запуск движка + подтверждение поднятия». Отдельной функцией:
+     * при несовместимости закреплённой поставки с фактическим раннером цикл
+     * выполняется второй раз уже на перепривязанном рантайме, и метка журнала
+     * stages.log для повтора берётся заново — первый запуск дописал туда свой отказ.
+     */
+    const launchOnce = async (): ReturnType<typeof spawnRouteEngine> => {
+      const from = await logLength(stagesLog);
+      const launch = await spawnRouteEngine(config, {
+        task: id,
+        args: routeResumeArgs(config, { task: id, profile, attempt }),
+        extraEnv: stageAutoCompactEnv(prefs?.read()),
+      });
+
+      if (!launch.ok) {
+        fastify.log.warn(
+          { task: id, err: launch.message },
+          `route resume ${why} не запустился — продолжить вручную`,
+        );
+
+        return launch;
+      }
+
+      const confirmed = await confirmRouteResume({
+        attempt,
+        identity: async () => {
+          try {
+            const { registry } = await factoryState.readRegistry(id);
+
+            return {
+              attempt: registry.ATTEMPT_ID || '',
+              alive: factoryState.isDaemonAlive(registry.ORCH_PID, id),
+            };
+          } catch {
+            return null;
+          }
+        },
+        // Без systemd быстрый выход уже поймал сам spawn (он ждёт код 3 секунды),
+        // поэтому здесь остаётся только финальная проверка identity.
+        unitAlive: launch.unit ? () => routeUnitActive(id) : async () => true,
+        reason: () => readLogSince(stagesLog, from),
+      });
+
+      if (!confirmed.ok) {
+        const failure = routeFailure(confirmed.message);
+
+        fastify.log.warn(
+          { task: id, outcome: confirmed.outcome, err: confirmed.message },
+          `route resume ${why} не поднялся — прогон стоит`,
+        );
+
+        return {
+          ...launch,
+          ok: false,
+          message: failure?.message || confirmed.message,
+          failure,
+        };
+      }
+
+      return { ...launch, ok: true };
+    };
+
+    let resumed = await launchOnce();
+
+    // Несовместимость закреплённого рантайма с фактической поставкой исполнителя
+    // лечится сменой закрепления, а не человеком: движок сам сообщил об этом кодом
+    // runner_preflight_incompatible (маркер раннера), попытка сохраняет курсор,
+    // каталог и ворота, а повторный запуск свободно закрепляет текущую поставку
+    // сервера. Ровно одна перепривязка на нажатие: если несовместима и текущая
+    // поставка, отказ уходит человеку как обычно.
+    if (!resumed.ok && resumed.failure?.error === 'runner_preflight_incompatible') {
+      let migrated = false;
+
+      try {
+        const unpinned = await unpinFactoryRuntimeAttempt({
+          controlRoot: config.factoryControlDir,
+          stateRoot: config.stateDir,
+          profileRoot: config.profilesDir,
+          cacheDir: config.runtime?.cacheDir
+            ?? dataPath(config.dataHome ?? runtimeConfig.dataHome, 'serverRuntime'),
+          task: id,
+          attempt,
+          profile,
+        });
+
+        migrated = unpinned.unpinned;
+      } catch (error) {
+        fastify.log.warn(
+          { task: id, err: (error as Error).message },
+          'route resume: перепривязка рантайма попытки не выполнена',
+        );
+      }
+
+      if (migrated) {
+        const runnersList = resumed.failure.runners ?? [];
+
+        fastify.log.warn(
+          { task: id, runners: runnersList },
+          `route resume ${why}: закрепление рантайма снято, повтор на текущей поставке`
+            + ` (несовместимы исполнители: ${runnersList.join(', ')})`,
+        );
+
+        resumed = await launchOnce();
+      }
     }
-    const confirmed = await confirmRouteResume({
-      attempt,
-      identity: async () => {
-        try {
-          const { registry } = await factoryState.readRegistry(id);
-          return {
-            attempt: registry.ATTEMPT_ID || '',
-            alive: factoryState.isDaemonAlive(registry.ORCH_PID, id),
-          };
-        } catch { return null; }
-      },
-      // Без systemd быстрый выход уже поймал сам spawn (он ждёт код 3 секунды),
-      // поэтому здесь остаётся только финальная проверка identity.
-      unitAlive: launch.unit ? () => routeUnitActive(id) : async () => true,
-      reason: () => readLogSince(stagesLog, from),
-    });
-    if (!confirmed.ok) {
-      const failure = routeFailure(confirmed.message);
-      fastify.log.warn(
-        { task: id, outcome: confirmed.outcome, err: confirmed.message },
-        `route resume ${why} не поднялся — прогон стоит`,
-      );
-      return {
-        ...launch,
-        ok: false,
-        message: failure?.message || confirmed.message,
-        failure,
-      };
-    }
-    return { ...launch, ok: true };
+
+    return resumed;
   }
 
   /**

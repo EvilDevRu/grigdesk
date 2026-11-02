@@ -197,6 +197,37 @@ assert_contains "$(runner_glm_dialect)" 'billing usage unavailable' \
 runner_glm_interrupt
 assert_rc 0 "$?" "interrupt оставляет дерево setsid-сессии launcher-у"
 
+# Отказ helper-а с кодом несовместимости ПОСТАВКИ (закреплённый движок против
+# фактического ELF DSH) обязан отдавать rc 4 и структурный маркер: по нему движок
+# печатает runner_preflight_incompatible, а сервер перепривязывает попытку. Прочие
+# отказы helper-а маркером не помечаются.
+glm_probe_case() {
+  local label=$1 helper_code=$2 want_marker=$3
+  local out rc
+  factory_exec() {
+    shift
+    printf '{"code":"%s","error":"синтетика"}\n' "$helper_code" >&2
+    return 1
+  }
+  out=$(runner_glm_probe 2>&1 1>/dev/null)
+  rc=$?
+  assert_rc 4 "$rc" "проба glm: $label — код 4"
+  if [[ "$want_marker" == marker ]]; then
+    assert_eq 1 "$(grep -cx 'RUNNER_SUPPLY_INCOMPATIBLE=glm' <<<"$out")" \
+      "проба glm: $label — строгая строка маркера поставки"
+  else
+    assert_eq ok "$([[ "$out" != *RUNNER_SUPPLY_INCOMPATIBLE* ]] && echo ok || echo fail)" \
+      "проба glm: $label — без маркера"
+  fi
+}
+
+glm_probe_case 'бинарник несовместим' deepseek_binary_incompatible marker
+glm_probe_case 'ревизии политики несовместимы' glm_runtime_incompatible marker
+glm_probe_case 'нет модельного плагина' glm_plugin_missing marker
+glm_probe_case 'нет ELF' deepseek_binary_missing none
+glm_probe_case 'режим не поддержан' glm_factory_mode_unsupported none
+glm_probe_case 'допуск не пройден' glm_runtime_not_admitted none
+
 # OFFLINE_GUARD ловит glm даже при ложной метке local.
 unset -f factory_exec
 source "$FACTORY_HOME/lib/executor.sh"

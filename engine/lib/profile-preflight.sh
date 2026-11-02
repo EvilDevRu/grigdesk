@@ -27,6 +27,12 @@ _profile_preflight_probe_sleep() {
   sleep "$1"
 }
 
+# Список раннеров, чья проба отказала с маркером RUNNER_SUPPLY_INCOMPATIBLE:
+# закреплённая поставка движка несовместима с фактическим CLI/ELF исполнителя.
+# Заполняется profile_runner_host_preflight и читается оркестратором bin/factory
+# после его вызова: это диагностическая причина, отдельная от прочей недоступности.
+PREFLIGHT_SUPPLY_INCOMPATIBLE=''
+
 # Проба CLI идемпотентна: она только читает версию и ничего не меняет ни на хосте,
 # ни у провайдера, — поэтому право на повтор у неё есть. Повторяется ТОЛЬКО
 # транзиент. Детерминированные ответы (`4` — CLI нет вовсе, `2` — контракт раннера
@@ -38,25 +44,42 @@ _profile_preflight_probe_sleep() {
 # профиль, поэтому моргнувшая проба чужого resume записала `UNAVAILABLE=2` — и
 # идущий рядом прогон встал fail-closed на следующем же узле (`coverage_unavailable`).
 # Через минуту повторный preflight прошёл без единой правки хоста.
+#
+# stderr пробы сохраняется: детерминированный отказ с маркером несовместимости
+# поставки попадает в PREFLIGHT_SUPPLY_INCOMPATIBLE, а исходный текст причин
+# возвращается вызывающему для журнала.
 _profile_preflight_probe() {
-  local provider=${1:?provider} attempt=0 rc output
+  local provider=${1:?provider} attempt=0 rc output err_file
   local -a delays=(0.5 1.5)
+  err_file=$(mktemp "${TMPDIR:-/tmp}/preflight-probe.XXXXXX") || return 78
   while :; do
     # Код пробы снимается СРАЗУ после вызова, а не после `fi`: у `if` без `else`
     # значение конструкции равно нулю при ложном условии, и `rc=$?` там всегда
     # давал бы 0 — то есть недоступный CLI считался бы исправным.
-    output=$(runner_call "$provider" probe 2>/dev/null)
+    output=$(runner_call "$provider" probe 2>"$err_file")
     rc=$?
     if [[ "$rc" -eq 0 ]]; then
       [[ "$attempt" -eq 0 ]] ||
         printf 'preflight: проба %s ответила с попытки %s\n' "$provider" "$((attempt + 1))" >&2
       printf '%s\n' "$output"
+      rm -f -- "$err_file"
       return 0
     fi
     case "$rc" in
-      2|4|126) return "$rc" ;;
+      2|4|126)
+        if [[ "$rc" == 4 ]] && grep -Fxq "RUNNER_SUPPLY_INCOMPATIBLE=$provider" "$err_file"; then
+          PREFLIGHT_SUPPLY_INCOMPATIBLE+="${PREFLIGHT_SUPPLY_INCOMPATIBLE:+,}$provider"
+        fi
+        cat -- "$err_file" >&2
+        rm -f -- "$err_file"
+        return "$rc"
+        ;;
     esac
-    [[ "$attempt" -lt "${#delays[@]}" ]] || return "$rc"
+    if [[ "$attempt" -ge "${#delays[@]}" ]]; then
+      cat -- "$err_file" >&2
+      rm -f -- "$err_file"
+      return "$rc"
+    fi
     _profile_preflight_probe_sleep "${delays[attempt]}"
     attempt=$((attempt + 1))
   done
@@ -70,8 +93,11 @@ profile_preflight_ttl() {
 
 # Единственный профильный писатель снимает статусы всех настроенных провайдеров.
 # Строгий результат нужен factory-check; runtime отдельно проверяет свои цепочки.
+# Маркер несовместимости поставки пересобирается с нуля на каждый вызов, чтобы
+# повторный preflight в том же процессе не нёс прошлые отказы.
 profile_runner_host_preflight() {
   local profile=$1 now=${2:-$(date +%s)} ttl
+  PREFLIGHT_SUPPLY_INCOMPATIBLE=''
   ttl=$(profile_preflight_ttl "${3:-}") || return
   [[ "$profile" =~ ^[A-Za-z0-9._-]+$ &&
      "$now" =~ ^[0-9]+$ && "$ttl" =~ ^[0-9]+$ ]] || return 2
@@ -85,7 +111,7 @@ profile_runner_host_preflight() {
   mkdir -p "$coverage_dir" || return 78
   local providers plans results provider structural_level host_status provider_key
   local family version variant exact defaults
-  local probe_output runner_version
+  local probe_output probe_file runner_version
   declare -A preflight_probe_ready=()
   declare -A preflight_structural_ready=()
   declare -A preflight_runtime_versions=()
@@ -119,12 +145,20 @@ profile_runner_host_preflight() {
     fi
     [[ -n "$version" ]] || version=latest
     [[ -n "$variant" ]] || variant=auto
-    if probe_output=$(_profile_preflight_probe "$provider"); then
+    # Проба меняет глобаль несовместимости поставки, поэтому вызывается в текущей
+    # оболочке. Подстановка $(...) сохранила бы stdout, но потеряла бы этот список.
+    probe_file=$(mktemp "$coverage_dir/.probe-output.XXXXXX") || {
+      rm -f -- "$providers" "$plans" "$results"
+      return 78
+    }
+    if _profile_preflight_probe "$provider" >"$probe_file"; then
+      probe_output=$(cat -- "$probe_file")
       preflight_probe_ready["$provider"]=1
     else
       probe_output=""
       preflight_probe_ready["$provider"]=0
     fi
+    rm -f -- "$probe_file"
     # Не отбрасываем prerelease: pinned runner `0.1.5-rc.2` должен сравниваться
     # с catalog min/max как exact версия, а не как более старая `0.1.5`.
     runner_version=$(_multi_probe_version "$probe_output")

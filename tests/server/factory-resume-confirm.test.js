@@ -258,6 +258,30 @@ test('отказ resume сохраняет scoped-список исполнит�
   });
 });
 
+// Несовместимость закреплённой поставки движка с фактическим раннером — отдельная
+// typed-причина: по ней resume перепривязывает попытку на текущий рантайм, а не
+// оставляет человеку неразличимое «недоступны исполнители».
+test('несовместимость поставки типизируется отдельно от недоступности', async () => {
+  const res = await confirmRouteResume({
+    attempt: ATTEMPT,
+    identity: async () => null,
+    unitAlive: async () => false,
+    reason: async () =>
+      'runner preflight: закреплённая поставка движка несовместима с glm '
+        + '[FACTORY_ERROR=runner_preflight_incompatible RUNNERS=glm]',
+    settleMs: 20,
+    stepMs: 4,
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.outcome, 'exited');
+  assert.deepEqual(routeFailure(res.message), {
+    error: 'runner_preflight_incompatible',
+    runners: ['glm'],
+    message: 'закреплённый рантайм попытки несовместим с поставкой исполнителей: glm',
+  });
+});
+
 test('пустой журнал не оставляет отказ без текста', async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-resume-log-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
