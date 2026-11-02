@@ -213,7 +213,7 @@ test('TaskModal редактирует все основные поля и ум�
     },
   }]);
   assert.equal(wrapper.find('[data-role="task-edit-title"]').exists(), false);
-  assert.match(wrapper.text(), /Изменения сохранены в Битрикс24/);
+  assert.match(wrapper.text(), /Изменения сохранены\./);
   assert.match(wrapper.text(), /Новая постановка/);
 });
 
@@ -247,12 +247,12 @@ test('TF-01: та же карточка редактируется как док
 });
 
 for (const presentation of ['dialog', 'document']) {
-  test(`Разделы карточки сохраняют черновики и лениво читают комментарии: ${presentation}`, async (t) => {
+  test(`Разделы карточки сохраняют черновики и используют один page-запрос: ${presentation}`, async (t) => {
     const { wrapper, flushPromises, reads, updates } = await mountEditor(t, presentation);
     const section = (name) => wrapper.get(`[data-task-section="${name}"]`);
 
     assert.equal(wrapper.get('.task-detail').attributes('data-pane'), 'description');
-    assert.equal(reads.filter((url) => url.endsWith('/comments')).length, 0);
+    assert.equal(reads.filter((url) => url.endsWith('/comments')).length, 1);
     assert.equal(section('description').attributes('aria-selected'), 'true');
     section('description').element.focus();
     await section('description').trigger('keydown', { key: 'ArrowRight' });

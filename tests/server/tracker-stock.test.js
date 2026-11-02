@@ -128,6 +128,10 @@ async function stockFixture(t, {
       }];
     } else if (method === 'sonet_group.get') {
       result = [{ ID: '11', NAME: 'Облачный проект' }];
+    } else if (method === 'task.item.gettags') {
+      result = ['Релиз'];
+    } else if (method === 'tasks.task.starttimer' || method === 'tasks.task.pausetimer') {
+      result = true;
     } else if (method === 'task.commentitem.getlist') {
       result = [];
     } else if (method === 'task.commentitem.add') {
@@ -196,7 +200,8 @@ test('STOCK-01: две страницы, создание, завершение 
   assert.equal(dashboard.json().tasks[0].responsible, 'Исполнитель');
   assert.deepEqual(dashboard.json().capabilities, STOCK_CAPABILITIES);
   assert.deepEqual(dashboard.json().widgets, []);
-  assert.equal(Object.hasOwn(dashboard.json().tasks[0], 'timerRunning'), false);
+  assert.equal(dashboard.json().tasks[0].timerRunning, false);
+  assert.equal(dashboard.json().tasks[0].timerElapsed, 0);
 
   const creation = {
     title: 'Новая в облаке',
@@ -281,8 +286,6 @@ test('STOCK-02: TASK_NOT_FOUND отличается от доступа и се�
 });
 
 for (const [name, method, url, payload] of [
-  ['timer', 'POST', '/api/tracker/task/42/timer/start', {}],
-  ['renew', 'POST', '/api/tracker/task/42/renew', {}],
   ['images', 'POST', '/api/tracker/tasks', { title: 'С файлом', images: [{ path: '/fixture/image.png' }] }],
   ['STOCK-03-ATTACH', 'POST', '/api/tracker/tasks', { title: 'С кадром', frames: ['shot.png'] }],
 ]) {
@@ -329,7 +332,15 @@ test('STOCK-04: комментарий уходит в портал и возв�
   const tab = await fixture.request('GET', '/api/tracker/task/42/comments');
 
   assert.equal(tab.statusCode, 200, tab.body);
-  assert.deepEqual(tab.json(), { comments: [] });
+  assert.deepEqual(tab.json(), {
+    comments: [],
+    tags: ['Релиз'],
+    subtasks: [42, 43, 44].map((id) => ({
+      id,
+      title: `Облачная ${id}`,
+      statusText: 'В работе (таймер не идёт)',
+    })),
+  });
   assert.ok(fixture.cloud.requests.some((request) => request.url === '/rest/task.commentitem.getlist'));
 });
 
@@ -388,3 +399,60 @@ test('STOCK-COMPLETE-01: отказ нового модуля завершает
   assert.deepEqual(JSON.parse(actions[1].body.toString()).fields, { STATUS: 5 });
   assert.equal((await fixture.request('GET', '/api/tracker/task/42')).json().status, 5);
 });
+
+
+test('STOCK-CARD: таймер проходит HTTP-фасад, срок принимается и снимается', async (t) => {
+  const fixture = await stockFixture(t);
+
+  assert.ok(fixture);
+
+  for (const action of ['start', 'pause', 'stop']) {
+    const response = await fixture.request('POST', `/api/tracker/task/42/timer/${action}`, {});
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal((await fixture.request('GET', '/api/tracker/task/42')).json().timerRunning,
+      action === 'start');
+  }
+
+  for (const deadline of ['2026-11-05T19:00:00+07:00', null]) {
+    const response = await fixture.request('PUT', '/api/tracker/task/42', { deadline });
+
+    assert.equal(response.statusCode, 200, response.body);
+
+    const updates = fixture.cloud.requests.filter((request) => request.url === '/rest/tasks.task.update');
+
+    assert.deepEqual(JSON.parse(updates.at(-1).body.toString()).fields, { DEADLINE: deadline });
+  }
+
+  const timerCalls = fixture.cloud.requests.filter((request) => /timer$/u.test(request.url));
+
+  assert.deepEqual(timerCalls.map((request) => request.url), [
+    '/rest/tasks.task.starttimer', '/rest/tasks.task.pausetimer', '/rest/tasks.task.pausetimer',
+  ]);
+});
+
+for (const [method, path, payload, restMethod] of [
+  ['POST', 'renew', {}, 'tasks.task.renew'],
+  ['POST', 'approve', {}, 'tasks.task.approve'],
+  ['POST', 'disapprove', {}, 'tasks.task.disapprove'],
+  ['POST', 'checklist', { title: 'Пункт' }, 'task.checklistitem.add'],
+  ['PUT', 'checklist/11', { title: 'Имя' }, 'task.checklistitem.update'],
+  ['PUT', 'checklist/11', { complete: true }, 'task.checklistitem.complete'],
+  ['PUT', 'checklist/11', { complete: false }, 'task.checklistitem.renew'],
+  ['DELETE', 'checklist/11', undefined, 'task.checklistitem.delete'],
+  ['PUT', 'tags', { tags: [] }, 'task.item.update'],
+]) {
+  test(`STOCK-CARD: ${restMethod} сохраняет 404 через границу внешнего пакета`, async (t) => {
+    const fixture = await stockFixture(t, { failure: 'absent', failingMethod: restMethod });
+
+    if (!fixture) {
+      return;
+    }
+
+    const response = await fixture.request(method, `/api/tracker/task/42/${path}`, payload);
+
+    assert.equal(response.statusCode, 404, response.body);
+    assert.equal(response.json().error, 'task_not_found');
+    assert.equal(fixture.cloud.requests.filter((request) => request.url.endsWith(restMethod)).length, 1);
+  });
+}

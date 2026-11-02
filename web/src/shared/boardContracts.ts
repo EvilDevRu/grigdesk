@@ -27,12 +27,27 @@ export interface TaskDetail extends Record<string, unknown> {
   title?: string;
   description?: string;
   status?: string | number;
+  statusText?: string;
   status_label?: string;
   priority?: number | string;
   priority_label?: string;
   group_id?: number | string;
   group_name?: string;
-  responsible?: { id?: number | string; name?: string };
+  deadline?: string | null;
+  creator?: {
+    name?: string;
+    icon?: string;
+  };
+  responsible?: {
+    id?: number | string;
+    name?: string;
+    icon?: string;
+  };
+  accomplicesData?: unknown;
+  auditorsData?: unknown;
+  checklist?: unknown;
+  parentId?: number | string;
+  replicate?: string;
   telegram?: { links?: TelegramLink[] };
 }
 
@@ -65,6 +80,12 @@ export interface TaskComment {
   time?: string;
   text?: string;
   attachments?: Array<{ attachedId?: number | string; name?: string }>;
+}
+
+export interface TaskSubtask {
+  id: number | string;
+  title: string;
+  statusText?: string;
 }
 
 export interface TaskLaunchOptions {
@@ -324,6 +345,35 @@ export function decodeTaskComments(value: unknown): TaskComment[] {
   }
 
   return items;
+}
+
+/**
+ * Теги остаются обычными строками драйвера, без интерпретации как ключей перевода.
+ * Отсутствующее или повреждённое расширение не мешает читать прежние комментарии.
+ */
+export function decodeTaskTags(value: unknown): string[] {
+  const tags = isRecord(value) ? value.tags : undefined;
+
+  return Array.isArray(tags) && tags.every((tag) => typeof tag === 'string') ? tags : [];
+}
+
+/**
+ * Подзадачи принимаются только с номером и заголовком для безопасного перехода.
+ * Старые драйверы без расширения сохраняют пустой список и прежний контракт ответа.
+ */
+export function decodeTaskSubtasks(value: unknown): TaskSubtask[] {
+  const subtasks = isRecord(value) ? value.subtasks : undefined;
+
+  if (!Array.isArray(subtasks) || !subtasks.every((item): item is TaskSubtask => (
+    isRecord(item) && ['string', 'number'].includes(typeof item.id)
+      && /^\d+$/u.test(String(item.id)) && Number(item.id) > 0
+      && typeof item.title === 'string'
+      && (item.statusText == null || typeof item.statusText === 'string')
+  ))) {
+    return [];
+  }
+
+  return subtasks;
 }
 
 /**

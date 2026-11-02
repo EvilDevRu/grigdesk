@@ -10,6 +10,10 @@ import { withTrackerRequestRead } from '../../lib/trackers/requestRead.ts';
 import {
   TrackerValidationError,
   normalizeTaskUpdateFields,
+  checklistItemId,
+  normalizeChecklistAdd,
+  normalizeChecklistUpdate,
+  normalizeTaskTags,
 } from '../../lib/trackers/taskFields.ts';
 
 export interface TrackerModuleOptions {
@@ -21,7 +25,11 @@ type Payload = Record<string, unknown>;
 
 // Маршруты этого модуля: у всех задачных ручек один и тот же параметр адреса.
 type TaskRoute = {
-  Params: { id: string; action?: string };
+  Params: {
+    id: string;
+    action?: string;
+    itemId?: string;
+  };
   Querystring: { q?: string };
   Body: unknown;
 };
@@ -81,9 +89,12 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
         (options) => tracker.getDashboard(options));
     } catch (err) {
       const message = failureText(err);
-      const notConfigured = /не настроен/i.test(message);
+      const known = err instanceof TrackerError;
 
-      return reply.code(notConfigured ? 400 : 502).send({ error: 'b24_error', message });
+      return reply.code(known ? err.status : 502).send({
+        error: known ? err.code : 'tracker_error',
+        message,
+      });
     }
   });
 
@@ -109,7 +120,7 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
       return await withTrackerRequestRead(request, reply,
         (options) => taskWithDiscussion(id, options));
     } catch (err) {
-      return reply.code(502).send({ error: 'b24_error', message: failureText(err) });
+      return reply.code(502).send({ error: 'tracker_error', message: failureText(err) });
     }
   });
 
@@ -121,7 +132,7 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
 
       return { users };
     } catch (err) {
-      return reply.code(502).send({ error: 'b24_error', message: failureText(err) });
+      return reply.code(502).send({ error: 'tracker_error', message: failureText(err) });
     }
   });
 
@@ -133,7 +144,7 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
 
       return { groups };
     } catch (err) {
-      return reply.code(502).send({ error: 'b24_error', message: failureText(err) });
+      return reply.code(502).send({ error: 'tracker_error', message: failureText(err) });
     }
   });
 
@@ -150,7 +161,7 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
       const trackerError = err instanceof TrackerError;
 
       return reply.code(trackerError ? err.status : badRequest ? 400 : 502).send({
-        error: trackerError || badRequest ? err.code : 'b24_error',
+        error: trackerError || badRequest ? err.code : 'tracker_error',
         message: failureText(err),
       });
     }
@@ -158,6 +169,20 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
   const taskId = (request: FastifyRequest<TaskRoute>) => (
     String(request.params.id).replace(/[^0-9]/g, '')
   );
+
+  /**
+   * Новые мутации не превращают повреждённый адрес в номер другой задачи.
+   * Прежняя очистка legacy-путей остаётся в их существующем обработчике.
+   */
+  const mutationTaskId = (request: FastifyRequest<TaskRoute>) => {
+    const id = request.params.id;
+
+    if (!/^\d+$/u.test(id)) {
+      throw new TrackerValidationError('Некорректный номер задачи');
+    }
+
+    return id;
+  };
 
   // Создание задачи. `frames` — кадры записи из раздела «Видео»: браузер присылает
   // ИМЯ кадра, а путь на диске подставляет сам media (декоратор `mediaFramePath`).
@@ -240,9 +265,13 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
         (options) => tracker.taskPageData(taskId(request), options)) as Payload;
       const comments = Array.isArray(page.comments) ? page.comments as Payload[] : [];
 
-      return { comments: comments.filter((comment) => !comment.isSystem) };
+      return {
+        comments: comments.filter((comment) => !comment.isSystem),
+        ...(Array.isArray(page.tags) ? { tags: page.tags } : {}),
+        ...(Array.isArray(page.subtasks) ? { subtasks: page.subtasks } : {}),
+      };
     } catch (error) {
-      return reply.code(502).send({ error: 'b24_error', message: failureText(error) });
+      return reply.code(502).send({ error: 'tracker_error', message: failureText(error) });
     }
   });
 
@@ -270,6 +299,26 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
 
   fastify.post<TaskRoute>('/api/tracker/task/:id/complete', wrap((r) => tracker.completeTask(taskId(r))));
   fastify.post<TaskRoute>('/api/tracker/task/:id/renew', wrap((r) => tracker.renewTask(taskId(r))));
+
+  fastify.post<TaskRoute>('/api/tracker/task/:id/checklist', wrap((r) => (
+    tracker.addChecklistItem(mutationTaskId(r), normalizeChecklistAdd(r.body))
+  )));
+  fastify.put<TaskRoute>('/api/tracker/task/:id/checklist/:itemId', wrap((r) => (
+    tracker.updateChecklistItem(mutationTaskId(r), checklistItemId(r.params.itemId),
+      normalizeChecklistUpdate(r.body))
+  )));
+  fastify.delete<TaskRoute>('/api/tracker/task/:id/checklist/:itemId', wrap((r) => (
+    tracker.deleteChecklistItem(mutationTaskId(r), checklistItemId(r.params.itemId))
+  )));
+  fastify.put<TaskRoute>('/api/tracker/task/:id/tags', wrap((r) => (
+    tracker.updateTaskTags(mutationTaskId(r), normalizeTaskTags(r.body))
+  )));
+  fastify.post<TaskRoute>('/api/tracker/task/:id/approve', wrap((r) => (
+    tracker.approveTask(mutationTaskId(r))
+  )));
+  fastify.post<TaskRoute>('/api/tracker/task/:id/disapprove', wrap((r) => (
+    tracker.disapproveTask(mutationTaskId(r))
+  )));
 }
 
 export default fp(trackerModule, { name: 'module-tracker' });

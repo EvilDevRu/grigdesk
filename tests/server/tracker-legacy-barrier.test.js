@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 import { legacyQueueAdapter } from './helpers/trackerQueue.js';
+import { TrackerError } from '../../server/src/lib/trackers/contract.ts';
 import trackerModule from '../../server/src/modules/tracker/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -180,13 +181,13 @@ test('LEGACY-HTTP-01: прежние отказы не вызывают эффе
   assert.deepEqual(calls, []);
 
   b24.getDashboard = async () => {
-    throw new Error('B24 не настроен');
+    throw new TrackerError('tracker_unavailable', 'Внешний трекер не настроен');
   };
 
   const unavailable = await app.inject('/api/tracker/dashboard');
 
   assert.equal(unavailable.statusCode, 400);
-  assert.equal(unavailable.json().error, 'b24_error');
+  assert.equal(unavailable.json().error, 'tracker_unavailable');
 
   b24.getDashboard = async () => {
     throw new Error('Ошибка сети');
@@ -195,7 +196,7 @@ test('LEGACY-HTTP-01: прежние отказы не вызывают эффе
   const failed = await app.inject('/api/tracker/dashboard');
 
   assert.equal(failed.statusCode, 502);
-  assert.equal(failed.json().error, 'b24_error');
+  assert.equal(failed.json().error, 'tracker_error');
 });
 
 test('LEGACY-QUEUE-01: detail, dashboard и mutation сериализованы, reject не запирает очередь',
@@ -257,3 +258,58 @@ test('LEGACY-QUEUE-01: detail, dashboard и mutation сериализованы,
     assert.deepEqual(order, ['detail', 'dashboard', 'complete']);
     assert.equal(await adapter.completeTask('42'), 'complete');
   });
+
+
+test('Карточка аддитивно передаёт page-расширения и сохраняет фильтрацию комментариев', async (t) => {
+  const { app, b24 } = await legacyFixture(t);
+  const tags = ['Релиз'];
+  const subtasks = [{
+    id: 43,
+    title: 'Подзадача',
+    statusText: 'Готово',
+  }];
+
+  b24.taskPageData = async () => ({
+    comments: [{ mid: 1, text: 'Ответ' }, { mid: 2, isSystem: true }],
+    tags,
+    subtasks,
+  });
+
+  const response = await app.inject({ method: 'GET', url: '/api/tracker/task/42/comments' });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), {
+    comments: [{ mid: 1, text: 'Ответ' }],
+    tags,
+    subtasks,
+  });
+});
+
+test('HTTP-валидация срока принимает только ISO с часовым поясом или null', async (t) => {
+  const { app, calls } = await legacyFixture(t);
+
+  for (const deadline of ['2026-11-05T19:00:00+07:00', '2026-11-05T12:00:00.000Z', null]) {
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/tracker/task/42',
+      payload: { deadline },
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(calls.at(-2), { name: 'updateTask', args: ['42', { deadline }] });
+  }
+
+  calls.length = 0;
+
+  for (const deadline of ['', 'не дата', '2026-11-05T19:00', false, 0, {}]) {
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/tracker/task/42',
+      payload: { deadline },
+    });
+
+    assert.equal(response.statusCode, 400, response.body);
+  }
+
+  assert.deepEqual(calls, []);
+});

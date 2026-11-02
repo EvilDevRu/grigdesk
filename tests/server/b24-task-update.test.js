@@ -154,11 +154,11 @@ test('PUT задачи отклоняет лишние поля как b24_bad_r
   const response = await app.inject({
     method: 'PUT',
     url: '/api/tracker/task/42',
-    payload: { title: 'Задача', deadline: 'завтра' },
+    payload: { title: 'Задача', unexpected: 'лишнее поле' },
   });
 
   assert.equal(response.statusCode, 400);
   assert.equal(response.json().error, 'b24_bad_request');
-  assert.match(response.json().message, /deadline/);
+  assert.match(response.json().message, /unexpected/);
   assert.deepEqual(calls, []);
 });

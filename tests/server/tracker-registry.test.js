@@ -86,7 +86,7 @@ test('TRACKER-REGISTRY-02 / B-MIGRATION-01: старый файл реквизи
     const dashboard = await fixture.request('GET', '/api/tracker/dashboard');
 
     assert.equal(dashboard.statusCode, 400);
-    assert.equal(dashboard.json().error, 'b24_error');
+    assert.equal(dashboard.json().error, 'tracker_unavailable');
 
     assert.equal(existsSync(fixture.config.trackerCredentialsPath), false);
 

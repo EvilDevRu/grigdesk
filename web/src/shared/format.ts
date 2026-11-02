@@ -1,3 +1,6 @@
+import { intlLocale } from '../../../shared/i18n/formats.ts';
+import { uiLocalePort } from './uiLocalePort.ts';
+
 // Форматирование времени под доску B24.
 
 // Проекция времени работы узлов конвейера: сумма завершённого и, если узел идёт
@@ -131,4 +134,64 @@ export function signed(n: unknown, suffix = ''): string {
   const s = v > 0 ? '+' : '';
 
   return `${s}${v}${suffix}`;
+}
+
+/**
+ * Срок показывается в часовом поясе устройства и на текущем языке интерфейса.
+ * Только ISO задаёт момент: готовая подпись старого драйвера не разбирается как дата США.
+ */
+export function formatDateTime(value: unknown): string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T/u.test(value)) {
+    return '';
+  }
+
+  const date = new Date(value);
+
+  if (!Number.isFinite(date.getTime())) {
+    return '';
+  }
+
+  const locale = intlLocale(uiLocalePort);
+  const options: Intl.DateTimeFormatOptions = {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  };
+  const day = new Intl.DateTimeFormat(locale, options).format(date)
+    .replace(/([а-я]{3})[а-я]*\.?/iu, '$1')
+    .replace(/ г\./u, '');
+  const time = new Intl.DateTimeFormat(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+
+  return `${day}, ${time}`;
+}
+
+/**
+ * Просрочка имеет приоритет над сегодняшним сроком, включая прошедшее время сегодня.
+ * Граница сегодняшнего дня определяется локальным календарём, а не датой в UTC.
+ */
+export function deadlineState(deadlineIso: unknown, nowMs: number): 'today' | 'over' | null {
+  if (typeof deadlineIso !== 'string' || !/^\d{4}-\d{2}-\d{2}T/u.test(deadlineIso)
+    || !Number.isFinite(nowMs)) {
+    return null;
+  }
+
+  const deadline = new Date(deadlineIso);
+  const timestamp = deadline.getTime();
+
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  if (timestamp < nowMs) {
+    return 'over';
+  }
+
+  const now = new Date(nowMs);
+  const sameDay = deadline.getFullYear() === now.getFullYear()
+    && deadline.getMonth() === now.getMonth() && deadline.getDate() === now.getDate();
+
+  return sameDay ? 'today' : null;
 }

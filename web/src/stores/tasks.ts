@@ -138,6 +138,82 @@ export const useTasksStore = defineStore('tasks', {
       await useBoardStore().load(true);
     },
 
+    /**
+     * Фиксирует поколение перед записью и не начинает чтение другого трекера после её ответа.
+     * Общая граница используется новыми мутациями карточки без оптимистичной замены кеша.
+     */
+    async mutateCard(id: TaskId, path: string, method: 'post' | 'put' | 'del', payload?: unknown) {
+      const epoch = this.epoch;
+
+      await api[method](`/api/tracker/task/${id}/${path}`, payload, useTrackersStore().mutationOptions());
+
+      if (epoch !== this.epoch) {
+        throw new DOMException('', 'AbortError');
+      }
+    },
+
+    /**
+     * Чек-лист перечитывается только после подтверждённого добавления пункта.
+     * Ответ мутации не подмешивается в кеш деталей и не предсказывает структуру дерева.
+     */
+    async addChecklistItem(id: TaskId, input: { title: string; parentId?: string }) {
+      await this.mutateCard(id, 'checklist', 'post', input);
+
+      return this.load(id, true);
+    },
+
+    /**
+     * Переименование и отметка передаются как частичное изменение пункта.
+     * После успеха авторитетной остаётся полная карточка драйвера.
+     */
+    async updateChecklistItem(id: TaskId, itemId: string, input: { title?: string; complete?: boolean }) {
+      await this.mutateCard(id, `checklist/${itemId}`, 'put', input);
+
+      return this.load(id, true);
+    },
+
+    /**
+     * Удаление не вырезает пункт из локального дерева до ответа сервера.
+     * Повторное чтение учитывает портальное поведение вложенных пунктов.
+     */
+    async deleteChecklistItem(id: TaskId, itemId: string) {
+      await this.mutateCard(id, `checklist/${itemId}`, 'del');
+
+      return this.load(id, true);
+    },
+
+    /**
+     * Теги заменяются полным списком, затем читаются из прежнего page-ответа.
+     * Пустой список значим: особую REST-сериализацию выполняет внешний пакет.
+     */
+    async updateTaskTags(id: TaskId, tags: string[]) {
+      await this.mutateCard(id, 'tags', 'put', { tags });
+
+      return api.get(`/api/tracker/task/${id}/comments`);
+    },
+
+    /**
+     * Приёмка и возврат обновляют детали и доску после подтверждённой мутации.
+     * Новый статус берётся чтением, чтобы кеш не зависел от формата ответа операции.
+     */
+    async reviewTask(id: TaskId, action: 'approve' | 'disapprove') {
+      await this.mutateCard(id, action, 'post');
+
+      const data = await this.load(id, true);
+
+      await useBoardStore().load(true);
+
+      return data;
+    },
+
+    async approveTask(id: TaskId) {
+      return this.reviewTask(id, 'approve');
+    },
+
+    async disapproveTask(id: TaskId) {
+      return this.reviewTask(id, 'disapprove');
+    },
+
     async comment(id: TaskId, text: string) {
       await api.post(`/api/tracker/task/${id}/comment`, { text }, useTrackersStore().mutationOptions());
     },

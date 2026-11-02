@@ -6,12 +6,23 @@ import { cardButton, mountTrackerCard, STOCK_CAPS } from './helpers/trackerCard.
 
 process.env.NODE_ENV = 'test';
 
+const BASIC_CAPS = {
+  ...STOCK_CAPS,
+  timer: false,
+  comments: false,
+  editing: false,
+  tags: false,
+  checklist: false,
+  review: false,
+  renew: false,
+};
+
 for (const presentation of ['dialog', 'document']) {
-  test(`TRACKER-CAPS-01: ${presentation}, stock скрывает unsupported при stale payload`, async (t) => {
+  test(`TRACKER-CAPS-01: ${presentation}, contract-1 скрывает unsupported при stale payload`, async (t) => {
     const { wrapper, calls } = await mountTrackerCard(t, {
       presentation,
       trackerId: 'grigdesk-b24',
-      capabilities: STOCK_CAPS,
+      capabilities: BASIC_CAPS,
     });
 
     assert.equal(wrapper.find('[aria-label="Учёт времени"]').exists(), false);
@@ -28,7 +39,7 @@ for (const presentation of ['dialog', 'document']) {
     const { wrapper } = await mountTrackerCard(t, {
       presentation,
       trackerId: 'grigdesk-b24',
-      capabilities: STOCK_CAPS,
+      capabilities: BASIC_CAPS,
       status: 5,
     });
 
@@ -52,7 +63,7 @@ for (const presentation of ['dialog', 'document']) {
   }
 }
 
-test('TRACKER-CAPS-01: stock не показывает активный таймер из старого snapshot', async (t) => {
+test('TRACKER-CAPS-01: contract-1 без timer не показывает активный таймер из старого snapshot', async (t) => {
   const { wrapper, stores, flushPromises } = await mountBoardView(t, {
     tasks: [{
       id: 42,
@@ -64,7 +75,7 @@ test('TRACKER-CAPS-01: stock не показывает активный тайм
 
   Object.assign(stores.board().data, {
     trackerId: 'grigdesk-b24',
-    capabilities: STOCK_CAPS,
+    capabilities: BASIC_CAPS,
     widgets: []
   });
   await flushPromises();

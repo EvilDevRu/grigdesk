@@ -2,6 +2,7 @@ import { isRecord } from '../../../../shared/lib/objects.ts';
 import { NO_TRACKER_CAPABILITIES } from '../../../../shared/trackers/contracts.ts';
 import { TrackerError } from './contract.ts';
 import type { TaskData, TaskTracker, TrackerIdentity, TrackerReadOptions } from './contract.ts';
+import type { ChecklistItemInput, ChecklistItemUpdate } from './contract.ts';
 import type { TrackerRegistry } from './registry.ts';
 import type { TrackerSettingsStore } from './settingsStore.ts';
 import type { TrackerCapabilities } from '../../../../shared/trackers/contracts.ts';
@@ -67,10 +68,12 @@ export class TrackerFacade {
   /**
    * Выбор фиксируется до ожидания, а реестр фиксирует экземпляр при допуске.
    * Неподдерживаемый метод отклоняется до вызова драйвера и сетевых эффектов.
+   * Внешний пакет имеет свой класс ошибки: отсутствие задачи нормализуется по контракту.
    */
   private invoke<T>(
     operation: (tracker: TaskTracker) => Promise<T>,
     capability?: keyof TrackerCapabilities,
+    method?: keyof TaskTracker,
   ): Promise<T> {
     const { externalId } = this.selection.read();
 
@@ -85,11 +88,20 @@ export class TrackerFacade {
         throw new TrackerError(code, 'Действие не поддерживается трекером');
       }
 
+      if (method && typeof tracker[method] !== 'function') {
+        throw new TrackerError(`${capability}_unsupported`, 'Драйвер не поддерживает это действие');
+      }
+
       try {
         return await operation(tracker);
       } catch (error) {
         if (isRecord(error) && error.code === 'b24_bad_request' && typeof error.message === 'string') {
           throw new TrackerError('b24_bad_request', error.message);
+        }
+
+        if (isRecord(error) && error.code === 'task_not_found' && error.status === 404
+          && typeof error.message === 'string') {
+          throw new TrackerError('task_not_found', error.message, 404);
         }
 
         throw error;
@@ -184,7 +196,33 @@ export class TrackerFacade {
   }
 
   renewTask(id: unknown): Promise<unknown> {
-    return this.invoke((tracker) => tracker.renewTask!(String(id)), 'renew');
+    return this.invoke((tracker) => tracker.renewTask!(String(id)), 'renew', 'renewTask');
+  }
+
+  addChecklistItem(id: string, input: ChecklistItemInput): Promise<unknown> {
+    return this.invoke((tracker) => tracker.addChecklistItem!(id, input), 'checklist', 'addChecklistItem');
+  }
+
+  updateChecklistItem(id: string, itemId: string, input: ChecklistItemUpdate): Promise<unknown> {
+    return this.invoke((tracker) => tracker.updateChecklistItem!(id, itemId, input),
+      'checklist', 'updateChecklistItem');
+  }
+
+  deleteChecklistItem(id: string, itemId: string): Promise<unknown> {
+    return this.invoke((tracker) => tracker.deleteChecklistItem!(id, itemId),
+      'checklist', 'deleteChecklistItem');
+  }
+
+  updateTaskTags(id: string, tags: string[]): Promise<unknown> {
+    return this.invoke((tracker) => tracker.updateTaskTags!(id, tags), 'tags', 'updateTaskTags');
+  }
+
+  approveTask(id: string): Promise<unknown> {
+    return this.invoke((tracker) => tracker.approveTask!(id), 'review', 'approveTask');
+  }
+
+  disapproveTask(id: string): Promise<unknown> {
+    return this.invoke((tracker) => tracker.disapproveTask!(id), 'review', 'disapproveTask');
   }
 
   findUsers(query: unknown, options: TrackerReadOptions = {}): Promise<unknown> {

@@ -4,10 +4,15 @@ import { installUiBrowser } from './ui-components.js';
 
 export const CUSTOM_CAPS = Object.fromEntries([
   'create', 'timer', 'comments', 'attachments', 'widgets', 'editing',
-  'complete', 'delete', 'renew', 'users', 'projects',
-].map((key) => [key, key !== 'delete']));
+  'complete', 'delete', 'renew', 'users', 'projects', 'checklist', 'tags', 'review',
+].map((key) => [key, !['delete', 'checklist', 'tags', 'review'].includes(key)]));
+const STOCK_FEATURES = [
+  'create', 'timer', 'comments', 'editing', 'complete', 'delete', 'users', 'projects',
+  'renew', 'checklist', 'tags', 'review',
+];
+
 export const STOCK_CAPS = Object.fromEntries(Object.keys(CUSTOM_CAPS)
-  .map((key) => [key, ['create', 'complete', 'delete', 'users', 'projects'].includes(key)]));
+  .map((key) => [key, STOCK_FEATURES.includes(key)]));
 
 let nonce = 0;
 
@@ -42,6 +47,12 @@ export async function mountTrackerCard(t, {
   status = 3,
   confirm = async () => true,
   deleteError = null,
+  detail = {},
+  pageData = {},
+  pageMode = 'ready',
+  boardFields = {},
+  users = [],
+  mutation = null,
 } = {}) {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/board');
   const prefix = `__trackerCard${nonce += 1}`;
@@ -53,6 +64,7 @@ export async function mountTrackerCard(t, {
   const listeners = new Set();
   const heldDetail = Promise.withResolvers();
   const heldMetadata = Promise.withResolvers();
+  const heldPage = Promise.withResolvers();
   const task = {
     id: Number(id),
     trackerId,
@@ -62,6 +74,7 @@ export async function mountTrackerCard(t, {
     status,
     attachments: [{ name: 'stale.png' }],
     comments: [{ mid: 1, text: 'Устаревший комментарий' }],
+    ...detail,
   };
   const metadata = trackerMetadata(trackerId, capabilities);
   const useBoardStore = defineStore(`${prefix}-board`, {
@@ -75,7 +88,8 @@ export async function mountTrackerCard(t, {
           id: Number(id),
           title: task.title,
           timerRunning: true,
-          timerElapsed: 12
+          timerElapsed: 12,
+          ...boardFields
         }],
         toReview: [],
         created: [],
@@ -98,6 +112,10 @@ export async function mountTrackerCard(t, {
         this.taskId = null;
       },
       consumeTaskLaunch() {},
+      openTask(taskId) {
+        calls.push({ method: 'OPEN', id: String(taskId) });
+        this.taskId = String(taskId);
+      },
     },
   });
   const api = {
@@ -139,12 +157,24 @@ export async function mountTrackerCard(t, {
         return structuredClone(task);
       }
 
+      if (url === '/api/tracker/users') {
+        return { users };
+      }
+
       if (url === '/api/tasks') {
         return { tasks: [] };
       }
 
       if (url.endsWith('/comments')) {
-        return { comments: [{ mid: 1, text: 'Устаревший комментарий' }] };
+        if (pageMode === 'held') {
+          return heldPage.promise;
+        }
+
+        if (pageMode === 'error') {
+          throw new Error('Не удалось загрузить теги');
+        }
+
+        return { comments: [{ mid: 1, text: 'Устаревший комментарий' }], ...pageData };
       }
 
       return {};
@@ -157,8 +187,18 @@ export async function mountTrackerCard(t, {
         options
       });
 
-      return { ok: true };
+      return mutation ? await mutation({
+        method: 'POST',
+        url,
+        payload,
+        task,
+        pageData,
+      }) : { ok: true };
     },
+    /**
+     * Ошибка удаления и управляемая мутация действуют независимо от GET-снимка.
+     * Это позволяет проверить отказ без оптимистичного удаления в карточке.
+     */
     async del(url, payload, options) {
       calls.push({
         method: 'DELETE',
@@ -171,14 +211,31 @@ export async function mountTrackerCard(t, {
         throw new Error(deleteError);
       }
 
-      return { ok: true };
+      return mutation ? await mutation({
+        method: 'DELETE',
+        url,
+        payload,
+        task,
+        pageData,
+      }) : { ok: true };
     },
-    async put(url, payload) {
+    async put(url, payload, options) {
       calls.push({
         method: 'PUT',
         url,
+        options,
         payload
       });
+
+      if (mutation) {
+        return await mutation({
+        method: 'PUT',
+        url,
+        payload,
+        task,
+        pageData,
+      });
+      }
 
       return structuredClone(task);
     },
@@ -231,6 +288,7 @@ export async function mountTrackerCard(t, {
   t.after(() => {
     heldDetail.resolve(task);
     heldMetadata.resolve(metadata);
+    heldPage.resolve({ comments: [] });
     wrapper.unmount();
 
     for (const suffix of [...Object.keys(globals), 'TasksStore']) {
@@ -247,7 +305,9 @@ export async function mountTrackerCard(t, {
     listeners,
     heldDetail,
     heldMetadata,
+    heldPage,
     metadata,
+    task,
     board: useBoardStore(pinia),
     ui: useUiStore(pinia),
     tasks: tasks.useTasksStore(pinia),

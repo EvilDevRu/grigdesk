@@ -79,7 +79,7 @@ test('LOCAL-CARD-02: refresh и поздний ответ предыдущей �
     description: '<p>Портальная постановка</p>',
   });
   await flushPromises();
-  assert.match(wrapper.text(), /Задача Битрикс24/);
+  assert.equal(wrapper.get('.meyebrow').text(), 'Задача');
   assert.equal(wrapper.find('[data-role="task-edit-open"]').exists(), true);
   ui.taskId = LOCAL_TASK.id;
   await flushPromises();

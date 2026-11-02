@@ -93,10 +93,10 @@ test('GET /api/tracker/groups отдаёт узкий справочник id + 
   assert.deepEqual(response.json(), { groups });
 });
 
-test('ошибка портала у списка проектов остаётся именованным b24_error', async (t) => {
+test('ошибка портала у списка проектов остаётся именованным tracker_error', async (t) => {
   const app = await appWithGroups(t, async () => { throw new Error('портал недоступен'); });
   const response = await app.inject({ method: 'GET', url: '/api/tracker/groups' });
 
   assert.equal(response.statusCode, 502);
-  assert.deepEqual(response.json(), { error: 'b24_error', message: 'портал недоступен' });
+  assert.deepEqual(response.json(), { error: 'tracker_error', message: 'портал недоступен' });
 });

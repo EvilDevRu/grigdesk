@@ -18,10 +18,11 @@ const requireFromServer = createRequire(new URL('../../../server/package.json', 
 
 export const CUSTOM_CAPABILITIES = Object.fromEntries([
   'create', 'timer', 'comments', 'attachments', 'widgets', 'editing',
-  'complete', 'delete', 'renew', 'users', 'projects',
-].map((key) => [key, key !== 'delete']));
+  'complete', 'delete', 'renew', 'users', 'projects', 'checklist', 'tags', 'review',
+].map((key) => [key, !['delete', 'checklist', 'tags', 'review'].includes(key)]));
 export const STOCK_CAPABILITIES = Object.fromEntries(Object.keys(CUSTOM_CAPABILITIES)
-  .map((key) => [key, ['create', 'comments', 'complete', 'delete', 'editing', 'users', 'projects']
+  .map((key) => [key, ['create', 'timer', 'comments', 'complete', 'delete', 'editing', 'users', 'projects',
+    'renew', 'checklist', 'tags', 'review']
     .includes(key)]));
 
 /**

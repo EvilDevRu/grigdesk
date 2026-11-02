@@ -10,6 +10,7 @@ function uiFacadeStub(prefix, { stubDialog = false } = {}) {
   const componentImports = [
     ['UiPopover', 'src/components/overlays/UiPopover.vue'],
     ['UiButton', 'src/components/primitives/UiButton.vue'],
+    ['UiCheckbox', 'src/components/primitives/UiCheckbox.vue'],
     ['UiChoiceList', 'src/components/composites/UiChoiceList.vue'],
     ['UiDisclosureButton', 'src/components/composites/UiDisclosureButton.vue'],
     ['UiField', 'src/components/composites/UiField.vue'],
@@ -162,6 +163,7 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
         `  globalThis.${prefix}DictationController || fallbackController;`,
       ].join('\n'),
       '../shared/format.ts': [
+        `export { formatDateTime, deadlineState } from ${JSON.stringify(webFile('src/shared/format.ts'))};`,
         'export const liveTimerSec = (task) => task?.timerElapsed || 0;',
         'export const secToHMS = (value) => String(value ?? 0);',
         // mmss повторён настоящим: тест прогресса триажа читает именно таймкод,
@@ -190,4 +192,12 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
       './board/TaskFavoriteButton.vue': favoriteButtonStub(prefix),
     },
   });
+}
+
+/**
+ * Пункт интерактивного чек-листа ищется по id, сохраняя свободу внутренней разметки.
+ * Все тесты карточки используют одну границу строки с отметкой и действиями.
+ */
+export function taskChecklistItem(wrapper, id) {
+  return wrapper.get(`[data-checklist-id="${id}"]`);
 }
