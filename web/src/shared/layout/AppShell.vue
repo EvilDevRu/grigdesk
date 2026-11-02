@@ -130,6 +130,7 @@
                                :alarm="sysResourcesAlarm" :label="sysResourcesLabel" :open="resourcesOpen"
                                @click="resourcesOpen = true" />
       </Teleport>
+      <span v-if="hasMachine && !phoneLayout" class="sep" aria-hidden="true"></span>
       <TopbarStatus v-if="hasMachine" v-model:open="statusOpen" :attention="statusAttention" :phone="phoneLayout"
                     @close="runtimeProviders.forEach((p) => usageWatch.close(p.id))">
       <div class="status">

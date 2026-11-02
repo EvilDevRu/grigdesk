@@ -76,8 +76,9 @@ test('DESKTOP-RESOURCES: кнопка ресурсов принимает кли
 
   assert.equal(position, 'relative');
   assert.equal(noDrag, true);
-  assert.equal(alarm.top, '2px');
-  assert.equal(alarm.right, '0px');
+  assert.equal(alarm.top, '-2px');
+  assert.equal(alarm.right, '-3px');
+  assert.equal(browser.getComputedStyle(wrapper.get('.resource-memory').element).position, 'relative');
 });
 
 test('PHONE-TOPBAR: сводка использует снимок, неизвестные значения и компактную геометрию', async (t) => {

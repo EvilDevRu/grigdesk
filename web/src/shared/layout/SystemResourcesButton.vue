@@ -3,9 +3,11 @@
                :data-context="phone ? 'phone-status-metrics' : 'topbar-metrics'"
                :class="{ stale, 'phone-status-metrics': phone }" :aria-label="label || t('core.computerResources')"
                aria-haspopup="dialog" :aria-expanded="open" @click="$emit('click', $event)">
-    <span>CPU <b :class="loadClass(metrics?.cpu.percent)">{{ cpuLabel }}</b></span>
-    <span>RAM <b :class="loadClass(metrics?.mem?.percent)">{{ memoryLabel }}</b></span>
-    <span v-if="alarm" class="resources-alarm" aria-hidden="true"></span>
+    <span class="resource-reading">CPU <b :class="loadClass(metrics?.cpu.percent)">{{ cpuLabel }}</b></span>
+    <span class="resource-memory">
+      <span class="resource-reading">RAM <b :class="loadClass(metrics?.mem?.percent)">{{ memoryLabel }}</b></span>
+      <span v-if="alarm" class="resources-alarm" aria-hidden="true"></span>
+    </span>
   </UiPressable>
 </template>
 

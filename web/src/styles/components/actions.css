@@ -2507,38 +2507,74 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
   outline-offset: -2px;
 }
 
-/* Метрики и сеть топбара используют настоящие клавиатурные кнопки.
-   Геометрия и типографика живут рядом с остальными status controls. */
-.ui-pressable[data-context='topbar-metrics'] {
+/* Одна и та же кнопка ресурсов открывает диалог на любой ширине.
+   Телефон сохраняет свою площадку, desktop получает геометрию топбара ниже. */
+.ui-pressable.resource-trigger {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 28px;
-  padding-right: 12px;
-  color: var(--ink-mid);
-  font-variant-numeric: tabular-nums;
+  gap: 12px;
+  white-space: nowrap;
 }
+
+.ui-pressable.resource-trigger.stale .resource-reading {
+  opacity: 0.5;
+}
+
+/* Как у .prov-mark, якорь охватывает только содержимое, а не всю площадку кнопки.
+   Метка остаётся у верхнего правого края показаний при любой высоте топбара. */
+.ui-pressable.resource-trigger .resource-memory {
+  position: relative;
+  display: inline-flex;
+}
+
+.ui-pressable.resource-trigger .resources-alarm {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bad);
+  box-shadow: 0 0 0 2px var(--surface);
+  pointer-events: none;
+}
+
+/* Метрики не наследуют размер текста страницы после переноса из .status.
+   Кегль совпадает со счётчиками конвейера, подсветка заполняет высоту топбара. */
+.ui-pressable[data-context='topbar-metrics'] {
+  gap: 8px;
+  height: var(--app-topbar-h);
+  min-height: var(--app-topbar-h);
+  padding: 0 6px;
+  color: var(--ink-mid);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transition:
+    background var(--control-motion-duration) var(--control-motion-easing),
+    color var(--control-motion-duration) var(--control-motion-easing);
+}
+
 .ui-pressable[data-context='topbar-metrics'] b {
   font-weight: 600;
 }
 
-.ui-pressable[data-context='topbar-metrics'].stale > span {
-  opacity: .5;
+/* Нижняя линия шапки рисуется её внутренней тенью, поверх которой живёт кнопка.
+   Заливка оставляет последний пиксель прозрачным, не меняя площадку и ось текста. */
+.ui-pressable[data-context='topbar-metrics']:hover:not(:disabled):not([aria-disabled='true']),
+.ui-pressable[data-context='topbar-metrics']:focus-visible,
+.ui-pressable[data-context='topbar-metrics'][aria-expanded='true'] {
+  background:
+    linear-gradient(var(--topbar-panel), var(--topbar-panel))
+    top / 100% calc(100% - 1px) no-repeat;
+  color: var(--ink);
 }
 
-/* Метка тревоги не занимает места рядом с цифрами ресурсов.
-   Даже при устаревшем снимке она сохраняет яркость поверх приглушённых показаний. */
-.ui-pressable[data-context='topbar-metrics'] > span.resources-alarm {
-  position: absolute;
-  top: 2px;
-  right: 0;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--bad);
-  opacity: 1;
-  pointer-events: none;
+.ui-pressable[data-context='topbar-metrics']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .ui-pressable[data-context='topbar-network'] {
@@ -2586,11 +2622,6 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
   position: relative;
   justify-content: center;
   min-height: 44px;
-}
-
-.shell-status-panel .ui-pressable[data-context='topbar-metrics'] > span.resources-alarm {
-  top: 4px;
-  right: 4px;
 }
 
 /* Полное название задачи остаётся доступным в две строки узкой карточки. */
@@ -2809,31 +2840,6 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
     font-size: inherit;
     line-height: 16px;
   }
-}
-
-/* Одна и та же кнопка ресурсов открывает диалог на любой ширине.
-   Метка тревоги остаётся внутри площадки и не сдвигает соседние действия. */
-.ui-pressable.resource-trigger {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  min-height: var(--app-topbar-h);
-  white-space: nowrap;
-}
-
-.ui-pressable.resource-trigger.stale > span:not(.resources-alarm) {
-  opacity: 0.5;
-}
-
-.ui-pressable.resource-trigger > .resources-alarm {
-  position: absolute;
-  top: 3px;
-  right: -3px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--bad);
 }
 
 [data-ui-phone-sections] .topbar-status-label {
