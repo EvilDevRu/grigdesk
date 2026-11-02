@@ -52,7 +52,7 @@
   padding-left: 20px;
 }
 
-.ui-pane-header[data-ui-task-header] .ui-pane-header__layout {
+.ui-pane-header:is([data-ui-task-header], [data-ui-detail-header]) .ui-pane-header__layout {
   padding-inline: 20px;
 }
 
@@ -70,14 +70,19 @@
 
 .ui-pane-header__title {
   min-width: 0;
+  color: var(--panel-header-title-color);
+  font-size: var(--panel-header-font-size);
+  font-weight: var(--panel-header-font-weight);
+  line-height: 18px;
   overflow-wrap: anywhere;
 }
 
 .ui-pane-header__title :is(h1, h2, h3) {
   margin: 0;
-  font-size: 13px;
+  color: var(--panel-header-title-color);
+  font-size: var(--panel-header-font-size);
   line-height: 18px;
-  font-weight: 600;
+  font-weight: var(--panel-header-font-weight);
 }
 
 .ui-pane-header__meta {
@@ -105,7 +110,7 @@
     padding-left: 12px;
   }
 
-  .ui-pane-header[data-ui-task-header] .ui-pane-header__layout {
+  .ui-pane-header:is([data-ui-task-header], [data-ui-detail-header]) .ui-pane-header__layout {
     padding-inline: 12px;
   }
 
@@ -1367,5 +1372,254 @@
   }
   [data-ui-settings-tabs] > .ui-tab {
     flex: 1 1 auto;
+  }
+}
+
+/* Планшет получает ту же компактную шапку доски, что и телефон.
+   Сенсорный режим сохраняет площадку настроек 44 px независимо от ширины окна. */
+[data-ui-touch] .ui-pane-header[data-context='board-heading'] {
+  --board-new-task-height: 32px;
+  --board-new-task-hit-inset: -6px;
+}
+
+[data-ui-touch] .ui-pane-header[data-context='board-heading'] .ui-pane-header__layout {
+  min-height: calc(var(--toolbar-control-h) + 3px);
+  padding-top: 1px;
+  padding-bottom: 2px;
+}
+
+/* Заголовок не сжимается до буквенного столбца: длинные actions переносятся целиком.
+   Короткое действие остаётся рядом, когда обоим хватает собственной ширины. */
+@media (max-width: 600px) {
+  .board {
+    --board-secondary-color: color-mix(in srgb, var(--ink-low) 70%, var(--surface));
+  }
+
+  .board-phone-footer [data-role='board-snapshot-status'] {
+    color: var(--board-secondary-color);
+  }
+
+  .ui-tabs[data-context='board-page-nav'] {
+    display: flex;
+    flex: none;
+    gap: 0;
+    width: 100%;
+    overflow-x: visible;
+    overflow-y: visible;
+  }
+
+  .ui-tabs[data-context='board-page-nav'] .ui-tab[data-context='board-page-tab'] {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    height: auto;
+    min-height: 32px;
+    padding: 4px 6px;
+    gap: 4px;
+    font-size: 12px;
+    line-height: 18px;
+    white-space: normal;
+  }
+
+  .ui-tab[data-context='board-page-tab']::after {
+    content: '';
+    position: absolute;
+    inset: -6px 0;
+  }
+
+  .ui-segmented-control[data-context='board-triage-mode'] > .ui-button {
+    grid-column: auto;
+    height: auto;
+    min-height: 44px;
+    padding: 6px 8px;
+    font-size: 12px;
+    line-height: 18px;
+    white-space: normal;
+  }
+
+  .ui-tab[data-context='board-page-tab'] .board-page-count,
+  .ui-tab[data-context='board-related-tab'] .cnt {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border: 1px solid var(--line-2);
+    border-radius: 4px;
+    background: var(--ground);
+    color: var(--ink-mid);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+
+  .ui-pane-header__layout {
+    gap: 4px 8px;
+    min-height: calc(var(--toolbar-control-h) + 3px);
+    padding-top: 1px;
+    padding-bottom: 2px;
+  }
+
+  .ui-pane-header[data-context='board-heading'] .ui-pane-header__layout {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .ui-pane-header[data-context='board-heading'] {
+    --board-new-task-height: 32px;
+    --board-new-task-hit-inset: -6px;
+  }
+
+  .ui-pane-header__navigation {
+    flex: 0 1 auto;
+    max-width: 100%;
+  }
+
+  .ui-workspace-section__body {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  [data-ui-settings-field] {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .ui-pane-header__main {
+    flex: 1 0 auto;
+    max-width: 100%;
+  }
+
+  .ui-pane-header__actions {
+    flex: 0 1 auto;
+    max-width: 100%;
+  }
+
+  .ui-pane-header__title :is(h1, h2, h3) {
+    font-size: var(--panel-header-font-size);
+    line-height: 18px;
+  }
+
+  .ui-pane-header__meta {
+    font-size: 12px;
+    line-height: 18px;
+  }
+}
+
+@media (min-width: 601px) {
+  @container board-primary (max-width: 560px) {
+    .ui-segmented-control[data-context='board-triage-mode'] > .ui-button:last-child {
+      grid-column: 1 / -1;
+    }
+  }
+}
+
+/* Каталог разделов использует предметные группы из общего каталога плагинов.
+   Заголовок отделяет строки, а фон и активный пункт остаются общими для списка. */
+:is([data-ui-tools], [data-ui-phone-sections]) .tools-grid__group-title {
+  margin: 0;
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-low);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+/* Вторая полоса телефона отделяется спокойным промежуточным фоном от обеих областей.
+   Метрики остаются краткими, а исполнители используют прежние панели лимитов. */
+[data-ui-phone-status] {
+  display: none;
+}
+
+[data-ui-phone-sections] {
+  display: grid;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+[data-ui-phone-sections] .phone-sections-actions {
+  display: grid;
+  gap: 4px;
+}
+
+@media (max-width: 600px) {
+  [data-ui-phone-status] {
+    grid-row: 1;
+    grid-column: 1 / -1;
+    align-self: end;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+    height: var(--app-phone-status-h);
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--topbar) 35%, var(--surface));
+    color: var(--ink-mid);
+    font-size: 11px;
+    line-height: 16px;
+  }
+
+  [data-ui-phone-status] .phone-status-metrics-host {
+    display: flex;
+    flex: none;
+    min-width: 0;
+  }
+
+  [data-ui-phone-status] .phone-status-metrics {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 12px;
+    white-space: nowrap;
+  }
+
+  [data-ui-phone-status] .phone-status-metrics b {
+    font-weight: 500;
+  }
+
+  [data-ui-phone-status] .phone-status-providers {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    margin-left: auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+}
+
+[data-ui-phone-status] .lv-ok { color: var(--ink); }
+[data-ui-phone-status] .lv-warn { color: var(--warn); }
+[data-ui-phone-status] .lv-bad { color: var(--bad); }
+
+/* Полноэкранные настройки чата — подписанная мобильная форма.
+   Общие controls сохраняют сенсорный размер, шкала усилия следует ширине строки. */
+@media (max-width: 600px) {
+  .ui-dialog[data-ui-chat-options] .session-option,
+  .ui-dialog[data-ui-chat-options] .sel {
+    padding: 0;
+  }
+
+  .ui-dialog[data-ui-chat-options] .sel .lbl,
+  .ui-dialog[data-ui-chat-options] .option-label {
+    color: var(--ink-mid);
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: normal;
+    opacity: 1;
+  }
+
+  .ui-dialog[data-ui-chat-options] .eff {
+    height: 44px;
+  }
+
+  .ui-dialog[data-ui-chat-options] .eff .val {
+    font-size: 14px;
   }
 }

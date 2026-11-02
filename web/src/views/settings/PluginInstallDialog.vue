@@ -730,8 +730,6 @@ onBeforeUnmount(() => {
 .install-heading {
   overflow: hidden;
   margin: 0;
-  font-size: 1rem;
-  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

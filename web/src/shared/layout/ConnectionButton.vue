@@ -3,7 +3,7 @@
     <UiTopbarPanel v-model:open="open" :title="t('core.machines')" trigger-mode="click">
       <template #trigger>
         <UiButton v-tooltip="label" variant="ghost" :aria-label="label" :aria-expanded="open"
-                  data-context="connection-trigger">
+                  :data-context="labeled ? 'phone-section-action' : 'connection-trigger'">
           <template #leading>
             <span class="connection-symbol">
               <svg class="connection-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -14,11 +14,10 @@
                                 :disconnected="disconnected" compact aria-hidden="true" />
             </span>
           </template>
-          <span class="connection-label">{{ shell.profile ? machineProfileName(shell.profile, uiLocale) : t('core.machines') }}</span>
-          <template #trailing>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-                 aria-hidden="true"><path d="m8 10 4 4 4-4" /></svg>
-          </template>
+          <span class="connection-label" :data-expanded-label="labeled ? '' : undefined">
+            {{ labeled ? t('core.machines')
+              : shell.profile ? machineProfileName(shell.profile, uiLocale) : t('core.machines') }}
+          </span>
         </UiButton>
       </template>
       <template #meta>{{ shell.profiles.length }}</template>
@@ -96,7 +95,7 @@ import { failureText } from '../apiClient.ts';
 import AddMachineDialog from './AddMachineDialog.vue';
 import ConnectionStatus from './ConnectionStatus.vue';
 
-withDefaults(defineProps<{ icon?: string }>(), { icon: '' });
+withDefaults(defineProps<{ icon?: string; labeled?: boolean }>(), { icon: '' });
 
 const shell = useShellStore();
 const open = ref(false);
@@ -280,7 +279,7 @@ async function disconnect(): Promise<void> {
 }
 
 @media (max-width: 1100px) {
-  .connection-label {
+  .connection-label:not([data-expanded-label]) {
     display: none;
   }
 }

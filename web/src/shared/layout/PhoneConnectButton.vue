@@ -1,8 +1,9 @@
 <template>
   <UiButton
     v-if="labeled"
-    variant="solid"
-    tone="accent"
+    :variant="menu ? 'ghost' : 'solid'"
+    :tone="menu ? 'neutral' : 'accent'"
+    :data-context="menu ? 'phone-section-action' : undefined"
     wrap
     aria-haspopup="dialog"
     :disabled="disabled"
@@ -37,7 +38,7 @@ import { useAuthStore } from '../../stores/auth.ts';
 import { useShellStore } from '../../stores/shell.ts';
 import { usePhoneAccessStore } from '../../stores/phoneAccess.ts';
 
-defineProps<{ labeled?: boolean }>();
+defineProps<{ labeled?: boolean; menu?: boolean }>();
 
 const auth = useAuthStore();
 const shell = useShellStore();

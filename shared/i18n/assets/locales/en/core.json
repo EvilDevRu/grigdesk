@@ -101,6 +101,9 @@
   "pluginModuleLoadFailed": "Could not load panel “{name}”. Check the plugin files and reload the window.",
   "pluginModuleRenderFailed": "Could not display panel “{name}”. Reload the window after fixing the plugin.",
   "sections": "Sections",
+  "sectionsSearch": "Find a section",
+  "sectionsEmpty": "No results. Change your search.",
+  "phoneSystemActions": "System and connections",
   "systemStatus": "System status",
   "conversationOptions": "Conversation settings",
   "toolReturnNarrow": "Expand the main window to return the tool to its column.",
@@ -159,6 +162,7 @@
     "other": "{count} cores"
   },
   "cpu": "CPU",
+  "resourceLoadAverage": "1 min average — {value}",
   "resourceComputing": "Computing",
   "resourceMemory": "Memory",
   "resourceDisks": "Disks",

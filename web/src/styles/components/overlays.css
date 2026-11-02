@@ -254,6 +254,24 @@
   min-width: 0;
 }
 
+/* Служебные заголовки не держат свою типографику в scoped CSS без слоя.
+   Desktop сохраняет прежние размеры; телефон ниже выбирает общую шкалу карточки. */
+.ui-dialog[data-role='new-grigdesk-task'] .new-task-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.ui-dialog[data-role='settings-modal'] .settings-heading h2,
+.ui-dialog[data-role='onboarding-modal'] .onboarding-heading h1 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ui-dialog[data-role='plugin-install-dialog'] .install-heading {
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
 .ui-dialog[data-role='new-grigdesk-task'] > .ui-dialog__description {
   padding-top: 8px;
 }
@@ -596,7 +614,7 @@
   }
 
   .ui-dialog__header {
-    padding-top: max(18px, env(safe-area-inset-top));
+    padding-top: max(10px, env(safe-area-inset-top));
   }
 
   .ui-dialog__header,
@@ -607,7 +625,51 @@
   }
 
   .ui-dialog__footer {
-    padding-bottom: max(18px, env(safe-area-inset-bottom));
+    padding-top: 8px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  .ui-dialog__body {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  /* Телефонные диалоги используют ту же служебную полосу, что просмотр задачи.
+     Крупное название документа остаётся в теле, высота растёт при переносе шапки. */
+  .ui-dialog-overlay .ui-dialog .ui-dialog__header {
+    min-height: calc(var(--toolbar-control-h) + 4px);
+    padding: 1px 12px 2px;
+    padding-top: max(1px, env(safe-area-inset-top));
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: max(12px, env(safe-area-inset-left));
+    border-bottom: 1px solid var(--line);
+    background: var(--topbar);
+    color: var(--panel-header-title-color);
+    font-size: var(--panel-header-font-size);
+    font-weight: var(--panel-header-font-weight);
+    line-height: 18px;
+  }
+
+  .ui-dialog .ui-dialog__title,
+  .ui-dialog .ui-dialog__title :is(h1, h2, h3),
+  .ui-dialog-overlay .ui-dialog .ui-dialog__header :is(h1, h2, h3),
+  .ui-dialog-overlay .ui-dialog .ui-dialog__title .new-task-title {
+    min-width: 0;
+    margin: 0;
+    color: var(--panel-header-title-color);
+    font-size: var(--panel-header-font-size);
+    font-weight: var(--panel-header-font-weight);
+    line-height: 18px;
+  }
+
+  .ui-dialog .ui-dialog__title {
+    flex: 1;
+  }
+
+  .ui-dialog > .ui-dialog__description {
+    padding-top: 8px;
+    font-size: 13px;
+    line-height: 1.5;
   }
 
   .ui-dialog-overlay[data-size='workspace']
@@ -668,4 +730,49 @@
 ) .ui-dialog__title {
   flex: 1;
   min-width: 0;
+}
+
+/* «Разделы» открываются рабочим окном, как просмотр задачи.
+   Поиск и группы прокручиваются в теле, закрытие всегда доступно в шапке. */
+.ui-dialog-overlay[data-size='workspace'] .ui-dialog[data-role='phone-sections'] {
+  width: min(680px, calc(100vw - 40px));
+  height: min(900px, calc(100dvh - 40px));
+}
+
+.ui-dialog[data-role='phone-sections'] .ui-dialog__title {
+  flex: 1;
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .ui-dialog-overlay[data-size='workspace'] .ui-dialog[data-role='phone-sections'] {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-width: 0;
+    border-radius: 0;
+  }
+}
+
+.ui-dialog[data-role='system-resources'] .ui-dialog__title {
+  flex: 1;
+  margin: 0;
+}
+
+.ui-dialog[data-role='system-resources'] .resource-dialog-meta {
+  color: var(--ink-mid);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ui-dialog[data-role='system-resources'] .ui-dialog__body {
+  flex-direction: column;
+}
+
+@media (min-width: 601px) {
+  .ui-dialog-overlay[data-size='workspace'] .ui-dialog[data-role='system-resources'] {
+    width: min(1040px, calc(100vw - 40px));
+    height: auto;
+    max-height: min(760px, calc(100dvh - 40px));
+  }
 }

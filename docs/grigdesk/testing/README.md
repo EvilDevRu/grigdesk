@@ -1,7 +1,15 @@
 # Тесты и проверка
 
+- [Happy DOM: первое несовпадение media не вызывает change без начального resize](happy-dom-media-initial-state.md)
+
+- [Teleport: defer откладывает монтаж, но не смену назначения](teleport-defer-update.md)
+
+- [Happy DOM: :root внутри media и проверяемая запись html:root](happy-dom-root-media.md)
+- [Happy DOM: корневой touch-атрибут и устаревший computed style](happy-dom-root-attribute-cache.md)
+
 - [Параметры test runner: concurrency перед списком файлов](node-test-option-order.md)
 
+- [Happy DOM: старый computedStyle после изменения viewport и способ сбросить кэш](happy-dom-media-cache.md)
 
 - [Режим HTML предпросмотра: doctype и ложный отступ формы](preview-document-mode.md)
 
@@ -28,6 +36,8 @@
 - [Проверки единого приложения и границы автоматической приёмки](unified-client-checks.md)
 
 ## Грабли
+
+- [Vue scoped CSS: :global с хвостом заменяет весь селектор](vue-global-selector.md)
 
 - [Подмена Python os.open и очистка TemporaryDirectory через dir_fd](python-open-fixture.md)
 

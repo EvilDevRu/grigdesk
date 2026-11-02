@@ -81,6 +81,16 @@ test('узкая шапка сохраняет действия и полную 
     assert.equal(Boolean(geometry.railOverflow), false, `${width}: горизонтальная прокрутка рейки`);
     assert.equal(geometry.buttonsFit, true, `${width}: действие шапки обрезано или мало`);
 
+    const metric = page.locator('[data-context="phone-status-metrics"], [data-context="topbar-metrics"]');
+
+    await metric.click();
+
+    const resources = page.getByRole('dialog', { name: 'Ресурсы компьютера', exact: true });
+
+    await resources.locator('.computer-resources').waitFor();
+    assert.equal(await resources.locator('.ui-popover').count(), 0);
+    await resources.getByRole('button', { name: 'Закрыть', exact: true }).click();
+
     if (width > 1100) {
       await page.locator('.topbar [data-context="provider-status"]').first().waitFor();
       assert.equal(await page.locator('.topbar [data-context="provider-status"]').count(), 10);
@@ -89,29 +99,31 @@ test('узкая шапка сохраняет действия и полную 
       continue;
     }
 
-    await page.getByRole('button', { name: 'Состояние системы', exact: true }).click();
-
     const overview = page.getByRole('dialog', { name: 'Состояние системы', exact: true });
 
-    await overview.waitFor();
+    if (width <= 600) {
+      assert.equal(await page.locator('.topbar button').count(), 2);
+      await page.locator('.phone-nav').getByRole('button', { name: 'Разделы', exact: true }).click();
 
-    if (width === 390 || width === 800) {
-      await scaleClientText(page, 1.3, '.shell-status-panel');
+      const menu = page.getByRole('dialog', { name: 'Разделы', exact: true });
+
+      assert.equal(await menu.locator('[data-shell-status-trigger]').count(), 0);
+      await menu.getByRole('button', { name: 'Закрыть', exact: true }).click();
+      await page.locator('[data-ui-phone-status] [data-context="provider-status"]').last().click();
+    } else {
+      await page.getByRole('button', { name: 'Состояние системы', exact: true }).click();
+      await overview.waitFor();
+
+      if (width === 800) {
+        await scaleClientText(page, 1.3, '.shell-status-panel');
+      }
+
+      assert.equal(await overview.locator('[data-context="provider-status"]').count(), 10);
+      assert.equal(await overview.locator('[data-context="topbar-metrics"]').count(), 0);
+      assert.equal(await overview.locator('[data-context="topbar-network"]').isVisible(), true);
+      await overview.locator('[data-context="provider-status"]').last().click();
     }
 
-    assert.equal(await overview.locator('[data-context="provider-status"]').count(), 10);
-    assert.equal(await overview.getByText('Исполнитель 10', { exact: true }).isVisible(), true);
-    assert.equal(await overview.locator('[data-context="topbar-metrics"]').isVisible(), true);
-    assert.equal(await overview.locator('[data-context="topbar-network"]').isVisible(), true);
-
-    const fits = await overview.evaluate((element) => {
-      const rect = element.getBoundingClientRect();
-
-      return rect.left >= 0 && rect.right <= innerWidth && element.scrollWidth <= element.clientWidth;
-    });
-
-    assert.equal(fits, true, `${width}: сводка не помещается`);
-    await overview.locator('[data-context="provider-status"]').last().click();
     await page.locator('.ptip-name').waitFor();
 
     if (width === 390) {
@@ -121,10 +133,13 @@ test('узкая шапка сохраняет действия и полную 
     }
 
     await page.locator('.ptip-name').waitFor({ state: 'hidden' });
-    assert.equal(await overview.isVisible(), true);
+    assert.equal(await overview.isVisible(), width > 600);
     await page.screenshot({ path: path.join(artifacts, `topbar-${width}.png`), animations: 'disabled' });
-    await page.keyboard.press('Escape');
-    await overview.waitFor({ state: 'hidden' });
+
+    if (width > 600) {
+      await page.keyboard.press('Escape');
+      await overview.waitFor({ state: 'hidden' });
+    }
 
     const settings = page.getByRole('button', { name: 'Настройки', exact: true });
 
@@ -134,8 +149,14 @@ test('узкая шапка сохраняет действия и полную 
   }
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('button', { name: 'Состояние системы', exact: true }).click();
+  await page.locator('[data-context="phone-status-metrics"]').click();
   await page.setViewportSize({ width: 1280, height: 900 });
+
+  const resources = page.getByRole('dialog', { name: 'Ресурсы компьютера', exact: true });
+
+  assert.equal(await resources.isVisible(), true);
+  assert.equal(await resources.locator('.computer-resources').count(), 1);
+  await resources.getByRole('button', { name: 'Закрыть', exact: true }).click();
   await page.locator('.topbar [data-context="provider-status"]').first().waitFor();
   assert.equal(await page.locator('.shell-status-panel').count(), 0);
 });

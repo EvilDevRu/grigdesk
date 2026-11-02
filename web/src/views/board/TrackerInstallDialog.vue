@@ -24,7 +24,8 @@
         </li>
       </ol>
       <p v-if="steps.length" class="driver-steps__mobile">
-        {{ t('core.trackerWizardStep', { current: stepIndex + 1, total: steps.length }) }} · {{ steps[stepIndex] }}
+        <span>{{ t('core.trackerWizardStep', { current: stepIndex + 1, total: steps.length }) }}</span>
+        <strong>{{ steps[stepIndex] }}</strong>
       </p>
 
       <UiLoadingState v-if="store.loading" :label="t('core.loading')" />
@@ -177,14 +178,24 @@
           </UiInlineMessage>
         </section>
 
-        <section v-else class="driver-job" :aria-label="statusLabel">
-          <p class="driver-job__status" :data-status="store.job?.status" role="status" aria-live="polite">
-            {{ store.unknownOutcome ? t('core.trackerCheckingOutcome') : statusLabel }}
-          </p>
+        <section v-else class="driver-job" :class="{ 'driver-job--working': working }" :aria-label="statusLabel">
+          <div class="driver-job__activity" role="status" aria-live="polite">
+            <UiSpinner v-if="working" decorative />
+            <div class="driver-job__activity-copy">
+              <p class="driver-job__status" :data-status="store.job?.status">
+                {{ store.unknownOutcome ? t('core.trackerCheckingOutcome') : statusLabel }}
+              </p>
+              <p v-if="working" class="driver-job__stage">{{ stageLabel || t('core.trackerOperationRunning') }}</p>
+            </div>
+          </div>
           <template v-if="working">
-            <p>{{ stageLabel || t('core.trackerOperationRunning') }}</p>
-            <UiProgress :label="stageLabel || statusLabel" :value="store.job?.percent ?? 0"
-                        :indeterminate="store.job?.stage !== 'fetching' || store.job.percent === null" />
+            <div class="driver-job__progress">
+              <UiProgress :label="stageLabel || statusLabel" :value="store.job?.percent ?? 0"
+                          :indeterminate="store.job?.stage !== 'fetching' || store.job.percent === null" />
+              <span v-if="store.job?.stage === 'fetching' && store.job.percent !== null">
+                {{ store.job.percent }}%
+              </span>
+            </div>
             <p class="driver-install__note">{{ t('core.trackerCloseKeepsOperation') }}</p>
           </template>
           <template v-if="store.job?.preview && !store.unknownOutcome">
@@ -324,7 +335,7 @@ import { sameCatalogSource } from '../../../../shared/plugins/pluginCatalogPolic
 import { isPackageCodeWarning } from '../../shared/installWarnings.ts';
 import {
   confirmDialog, messageRef, t, UiButton, UiDialog, UiDisclosureButton, UiField, UiFormActions,
-  UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiProgress, UiSelect,
+  UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiProgress, UiSelect, UiSpinner,
 } from '../../ui.ts';
 
 const props = defineProps<{
@@ -363,7 +374,7 @@ const title = computed(() => t(store.screen === 'manage' ? 'core.trackerManagerT
     : store.flow === 'update' ? 'core.trackerUpdateDoneTitle' : 'core.trackerInstallDoneTitle'
   : store.flow === 'rollback' ? 'core.trackerRollbackTitle'
   : store.flow === 'update' ? 'core.trackerUpdateTitle' : 'core.trackerInstallTitle'));
-const description = computed(() => completed.value
+const description = computed(() => working.value ? '' : completed.value
   ? t('core.trackerVersionInstalled', {
     version: store.job?.preview?.version ?? store.job?.target?.version ?? '',
   })
@@ -652,7 +663,35 @@ onUnmounted(() => {
 }
 
 .driver-install {
-  min-height: 300px;
+  align-content: start;
+}
+
+.driver-job__activity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.driver-job__activity-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.driver-job__stage {
+  font-size: 14px;
+}
+
+.driver-job__progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.driver-job__progress > :first-child {
+  flex: 1;
 }
 
 .driver-install__heading,
@@ -823,13 +862,34 @@ onUnmounted(() => {
   }
 
   .driver-steps__mobile {
-    display: block;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
     color: var(--ink-mid);
     font-size: 12px;
   }
 
+  .driver-steps__mobile strong {
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  .driver-job,
+  .driver-package {
+    gap: 12px;
+    padding: 16px;
+  }
+
   .driver-install__footer {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: stretch;
+    gap: 8px;
+  }
+
+  .driver-install__footer > :only-child {
+    grid-column: 1 / -1;
   }
 
   .driver-source-list {

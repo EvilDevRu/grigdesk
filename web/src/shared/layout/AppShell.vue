@@ -73,18 +73,20 @@
       </nav>
     </aside>
 
-    <nav v-if="hasMachine" class="phone-nav" :aria-label="t('core.sections')">
-      <router-link v-for="item in phoneNav" :key="item.to" :to="item.to"
-                   class="navitem" data-ui-shell-nav active-class="active" :aria-label="navTitle(item)">
-        <span class="icwrap">
-          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path :d="ICONS[item.icon]" />
-          </svg>
-          <NavigationCount :badge="badges[item.to]" />
-        </span>
-        <span class="phone-nav-label">{{ item.label }}</span>
-      </router-link>
+    <nav class="phone-nav" :class="{ 'phone-nav--connections': !hasMachine }" :aria-label="t('core.sections')">
+      <template v-if="hasMachine">
+        <router-link v-for="item in phoneNav" :key="item.to" :to="item.to"
+                     class="navitem" data-ui-shell-nav active-class="active" :aria-label="navTitle(item)">
+          <span class="icwrap">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path :d="ICONS[item.icon]" />
+            </svg>
+            <NavigationCount :badge="badges[item.to]" />
+          </span>
+          <span class="phone-nav-label">{{ item.label }}</span>
+        </router-link>
+      </template>
       <UiPressable class="navitem" data-ui-shell-nav :class="{ active: phoneMoreActive }"
                    :aria-label="t('core.sections')" aria-haspopup="dialog" :aria-expanded="phoneMenuOpen"
                    @click="phoneMenuOpen = true">
@@ -94,12 +96,24 @@
       </UiPressable>
     </nav>
 
-    <UiDialog v-model:open="phoneMenuOpen" :title="t('core.sections')" mobile-sheet>
-      <ToolsGrid :items="phoneMenuItems" :badges="badges" @select="phoneMenuOpen = false" />
-      <template #footer>
-        <UiButton variant="outline" @click="phoneMenuOpen = false">{{ t('core.close') }}</UiButton>
+    <UiDialog v-model:open="phoneMenuOpen" :label="t('core.sections')" size="workspace"
+              data-role="phone-sections" fade-only initial-focus=".tools-grid">
+      <template #header>
+        <h2 class="ui-dialog__title">{{ t('core.sections') }}</h2>
+        <UiIconButton :label="t('core.close')" data-context="workspace-toolbar" variant="ghost"
+                      @click="phoneMenuOpen = false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </UiIconButton>
       </template>
+      <ToolsGrid v-if="hasMachine" :items="phoneMenuItems" :groups="phoneMenuGroups" :badges="badges" layout="list"
+                 searchable @select="phoneMenuOpen = false" />
+      <section class="phone-sections-system" data-ui-phone-sections>
+        <h2 class="tools-grid__group-title">{{ t('core.phoneSystemActions') }}</h2>
+        <div id="phone-sections-actions" class="phone-sections-actions"></div>
+      </section>
     </UiDialog>
+    <div id="phone-actions-parking" hidden></div>
 
     <header data-ui-topbar class="topbar" :class="{
       'window-titlebar': isDesktopMain,
@@ -107,38 +121,19 @@
     }">
       <span class="app-mark" aria-label="GrigDesk"><GrigDeskMark class="logo" /></span>
       <!-- Слот действий текущего экрана: сюда разделы телепортируют свои кнопки (TopbarActions) -->
-      <div id="tb-slot" class="tb-slot"></div>
-      <TopbarStatus v-if="hasMachine" v-model:open="statusOpen" :attention="statusAttention"
+      <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
+        <div id="tb-slot" class="tb-slot"></div>
+      </PhoneShellPortal>
+      <Teleport to="#phone-status-metrics" :disabled="!phoneLayout" defer>
+        <SystemResourcesButton v-if="hasMachine" class="system-resources-trigger"
+                               :phone="phoneLayout" :metrics="sys" :stale="sysStale"
+                               :alarm="sysResourcesAlarm" :label="sysResourcesLabel" :open="resourcesOpen"
+                               @click="resourcesOpen = true" />
+      </Teleport>
+      <TopbarStatus v-if="hasMachine" v-model:open="statusOpen" :attention="statusAttention" :phone="phoneLayout"
                     @close="runtimeProviders.forEach((p) => usageWatch.close(p.id))">
       <div class="status">
-        <!-- CPU/RAM — самые «дёргающиеся» цифры, поэтому левее всех: их ширина меняется,
-             не сдвигая остальные элементы (правый край статуса зафиксирован) -->
-        <UiTopbarPanel v-if="sys" :title="t('core.computerResources')" size="wide">
-          <template #meta>{{ t('core.cores', { count: sys.cpu.cores }) }}</template>
-          <template #trigger>
-            <!-- Опрос не удался — цифры остаются, но честно блекнут: пустое место в шапке
-                 выглядело как «метрики пропали», хотя пропала только связь. -->
-            <UiPressable class="metric mono" data-context="topbar-metrics"
-                         :class="{ stale: sysStale }" :aria-label="sysResourcesLabel">
-              <span>
-                CPU <b :class="loadClass(sys.cpu.percent)">{{ formatNumber(sys.cpu.percent, uiLocale) }}%</b>
-              </span>
-              <span class="sep" aria-hidden="true"></span>
-              <span>
-                RAM <b :class="loadClass(sys.mem!.percent)">
-                  {{ formatNumber(sys.mem!.usedGb!, uiLocale) }}/{{ formatNumber(sys.mem!.totalGb!, uiLocale) }}
-                </b>
-              </span>
-              <span v-if="sysResourcesAlarm" class="resources-alarm" aria-hidden="true"></span>
-            </UiPressable>
-          </template>
-          <!-- Разбивка нагрузки полосками: одной строкой «занято 22 из 47» не видно,
-               кончилась физическая память или просто лежит холодный swap. -->
-          <template #default>
-            <ComputerResourcesPanel :metrics="sys" :stale="sysStale" :snapshot-time="sysSnapshotTime" />
-          </template>
-        </UiTopbarPanel>
-        <span v-if="sys" class="sep metric-sep" aria-hidden="true"></span>
+        <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
         <BoardTimerPopover
           v-if="topbarTimerTasks.length"
           :tasks="topbarTimerTasks"
@@ -149,27 +144,31 @@
           @open-board="openBoard"
           @toggle-timer="toggleBoardTimer"
         />
+        </PhoneShellPortal>
         <span
-          v-if="topbarTimerTasks.length && pipelineTopbar.total"
+          v-if="!phoneLayout && topbarTimerTasks.length && pipelineTopbar.total"
           class="sep"
           aria-hidden="true"
         ></span>
         <PipelineTopbarPopover
-          v-if="pipelineTopbar.total"
+          v-if="!phoneLayout && pipelineTopbar.total"
           :items="notifyWatch.topbarItems"
           :error="notifyWatch.error || ''"
           :icon="ICONS.pipeline!"
           @open-pipeline="openPipeline"
         />
         <span
-          v-if="topbarTimerTasks.length || pipelineTopbar.total"
+          v-if="topbarTimerTasks.length || (!phoneLayout && pipelineTopbar.total)"
           class="sep"
           aria-hidden="true"
         ></span>
-        <AttentionAlerts v-if="workspaceStarted" />
+        <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
+          <AttentionAlerts v-if="workspaceStarted" />
+        </PhoneShellPortal>
         <!-- Наведения на ряд иконок для чтения лимитов больше нет: свежий снимок сервер
              присылает сам (SSE providers-usage), а раскрытие всплывашки перечитывает
              его на случай оборванного потока и тикает, пока она открыта (см. usageWatch). -->
+        <Teleport to="#phone-status-providers" :disabled="!phoneLayout" defer>
         <span v-if="runtimeProviders.length" v-svg-pixel-snap class="provbox">
           <span
             v-for="p in runtimeProviders"
@@ -377,12 +376,14 @@
             </UiTopbarPanel>
           </span>
         </span>
-        <span v-if="runtimeProviders.length && sys?.net" class="sep" aria-hidden="true"></span>
+        </Teleport>
+        <span v-if="!phoneLayout && runtimeProviders.length && sys?.net" class="sep" aria-hidden="true"></span>
+        <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
         <UiTopbarPanel v-if="sys?.net" :title="t('core.network')">
           <template #trigger>
             <UiPressable class="netbox mono" data-context="topbar-network" :aria-label="t('core.networkInformation')">
               <span class="flag">{{ flagOf(sys.net!.countryCode) }}</span>
-              <span class="status-label">{{ t('core.network') }}</span>
+              <span :class="{ 'status-label': !phoneLayout }">{{ t('core.network') }}</span>
             </UiPressable>
           </template>
           <template #default>
@@ -390,12 +391,15 @@
             <template v-if="sys.net!.country"> · {{ sys.net!.country }}</template>
           </template>
         </UiTopbarPanel>
+        </PhoneShellPortal>
       </div>
       </TopbarStatus>
       <!-- Колокольчик — над стопкой тостов: ушедшее само оповещение можно найти здесь. -->
       <div class="topbar-actions">
         <ConnectionButton :icon="ICONS.connection" />
-        <PhoneConnectButton />
+        <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
+          <PhoneConnectButton :labeled="phoneLayout" :menu="phoneLayout" />
+        </PhoneShellPortal>
         <AlertHistoryPopover />
         <UiIconButton v-if="active && hasMachine" variant="link" role="rail" data-context="topbar-action"
           :label="t('core.onboardingOpen')" v-tooltip="t('core.onboardingOpen')"
@@ -418,21 +422,29 @@
         </UiIconButton>
       </div>
     </header>
+    <!-- Цели Teleport живут столько же, сколько оболочка: выбор машины меняет видимость.
+         Удалённая цель остаётся в Teleport и ломает следующий перенос при подключении. -->
+    <PhoneStatusBar v-show="hasMachine" />
 
-    <main class="content" :class="{ 'is-workspace': !hasMachine || route.meta.layout === 'workspace' }"
+    <main class="content" :class="{
+            'is-workspace': !hasMachine || route.meta.layout === 'workspace',
+            'is-phone-board': route.name === 'board',
+          }"
           :inert="toolDock.isExpanded" :aria-hidden="toolDock.isExpanded ? 'true' : undefined">
       <slot />
     </main>
     <ToolHost v-if="workspaceStarted" />
     <PhoneConnectDialog />
     <ProviderInstallDialog />
+    <ComputerResourcesDialog v-model:open="resourcesOpen" :metrics="sys" :stale="sysStale"
+                             :snapshot-time="sysSnapshotTime" />
 
   </div>
 </template>
 
 <script setup lang="ts">
 import { boardSupportsTimer } from '../trackerCapabilities.ts';
-import { formatDate, formatNumber, intlLocale } from '../../../../shared/i18n/formats.ts';
+import { formatDate, intlLocale } from '../../../../shared/i18n/formats.ts';
 import { uiLocale } from '../../ui.ts';
 
 import { t } from '../../ui.ts';
@@ -444,8 +456,11 @@ import type { BoardTask } from '../boardContracts.ts';
 import { installAlertDeepLinks, openAlertTarget } from '../alertDeepLinks.ts';
 import ConnectionButton from './ConnectionButton.vue';
 import TopbarStatus from './TopbarStatus.vue';
-import ComputerResourcesPanel from './ComputerResourcesPanel.vue';
-import { loadClass, resourcesAlarm } from './resourceMetrics.ts';
+import PhoneShellPortal from './PhoneShellPortal.vue';
+import PhoneStatusBar from './PhoneStatusBar.vue';
+import SystemResourcesButton from './SystemResourcesButton.vue';
+import ComputerResourcesDialog from './ComputerResourcesDialog.vue';
+import { resourcesAlarm } from './resourceMetrics.ts';
 import PhoneConnectButton from './PhoneConnectButton.vue';
 import ProviderInstallDialog from '../ProviderInstallDialog.vue';
 import { useProviderInstallStore, providerInstallVisibleWarnings } from '../../stores/providerInstall.ts';
@@ -453,7 +468,7 @@ import { providerCliActions } from '../../features/providers/providerCliActions.
 import { usePhoneAccessStore } from '../../stores/phoneAccess.ts';
 import PhoneConnectDialog from '../../views/settings/PhoneConnectDialog.vue';
 import { setAlertTargetOpener } from '../alerts.ts';
-import { ref, computed, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -471,7 +486,9 @@ import { useSystemStore } from '../../stores/system.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
 import { isTopbarProvider } from '../../../../shared/chat/executorTypes.ts';
 import { localizeProviderAuthLabel } from '../../features/providers/providerLocale.ts';
-import { usePluginsStore } from '../../stores/plugins.ts';
+import { pluginCategoryOf, usePluginsStore } from '../../stores/plugins.ts';
+import { PLUGIN_CATEGORIES } from '../../../../shared/plugins/pluginsContracts.ts';
+import { localizePluginCategory } from '../../features/settings/metadataLocale.ts';
 import { useStudio3dStore } from '../../stores/studio3d.ts';
 import { useArbiterConversationsStore } from '../../stores/arbiterConversations.ts';
 import { useAuthStore } from '../../stores/auth.ts';
@@ -1015,22 +1032,50 @@ const dockRouteNav = computed(() => [
 
 const toolsOpen = ref(false);
 const phoneMenuOpen = ref(false);
+const phoneLayout = ref(false);
+let phoneMedia: MediaQueryList | null = null;
+
+const syncPhoneLayout = () => {
+  phoneLayout.value = phoneMedia?.matches ?? false;
+};
+
+onMounted(() => {
+  phoneMedia = window.matchMedia('(max-width: 600px)');
+  phoneMedia.addEventListener('change', syncPhoneLayout);
+  syncPhoneLayout();
+});
+
+onUnmounted(() => phoneMedia?.removeEventListener('change', syncPhoneLayout));
+watch(phoneLayout, () => {
+  phoneMenuOpen.value = false;
+});
+
 const statusOpen = ref(false);
+const resourcesOpen = ref(false);
 const analysis = useAnalysisStore();
 const statusAttention = computed(() => sysResourcesAlarm.value
   || notifyWatch.badgeSummary.attentionCount > 0 || analysis.issues.length > 0);
 const phoneNav = computed(() => [nav.value[0]!, nav.value[3]!, nav.value[1]!]);
 const phoneMoreActive = computed(() => !phoneNav.value.some((item) => item.to === route.path));
+const phoneMenuGroups = computed(() => PLUGIN_CATEGORIES
+  .map((category) => localizePluginCategory(category, uiLocale.value)));
 const phoneMenuItems = computed(() => {
   const items = [
-    ...nav.value,
-    ...pluginNav.value,
-    ...toolsNav.value,
-    ...dockRouteNav.value,
+    ...nav.value.map((item) => ({
+      ...item,
+      section: ['/board', '/pipeline', '/chats'].includes(item.to) ? 'work' : 'dev',
+    })),
+    ...[...pluginNav.value, ...toolsNav.value, ...dockRouteNav.value].map((item) => ({
+      ...item,
+      section: item.id === 'terminal'
+        ? 'dev'
+        : pluginCategoryOf(plugins.list.find((plugin) => plugin.id === item.id)),
+    })),
     {
       to: '/tools',
       label: t('core.tools'),
       icon: 'tools',
+      section: 'other',
     },
   ];
 
@@ -1139,7 +1184,7 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .window-titlebar--controls {
   padding-right: calc(3 * var(--app-topbar-h));
 }
-.window-titlebar :is(.tb-slot, .status, .topbar-actions) {
+.window-titlebar :is(.tb-slot, .system-resources-trigger, .status, .topbar-actions) {
   -webkit-app-region: no-drag;
 }
 .app-mark {
@@ -1149,7 +1194,8 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 /* Слот действий экрана — сразу после заголовка; статус уезжает вправо */
 .tb-slot { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
 .tb-slot:empty { display: none; }
-.status { margin-left: auto; }
+.system-resources-trigger { margin-left: auto; }
+.status { margin-left: 0; }
 .status {
   display: flex;
   height: 100%;
@@ -1257,6 +1303,13 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .content { grid-row: 2; grid-column: 2; overflow-y: auto; scrollbar-gutter: stable; padding: var(--page-gutter); }
 
 .content.is-workspace { padding: 0; scrollbar-gutter: auto; overflow: hidden; }
+@media (max-width: 600px) {
+  .content.is-phone-board {
+    padding: 0;
+    overflow: hidden;
+    scrollbar-gutter: auto;
+  }
+}
 @media (max-width: 899px) {
   .shell { grid-template-columns: var(--app-rail-w) minmax(0, 1fr); }
   .dock-route-nav { display: flex; }
@@ -1266,7 +1319,7 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
    доступны без горизонтальной прокрутки и обрезанных сенсорных кнопок. */
 @media (max-width: 1100px) {
   .tb-slot { flex: 1; }
-  .topbar :deep([data-shell-status-trigger]) { margin-left: auto; }
+  .topbar :deep([data-shell-status-trigger]) { margin-left: 0; }
   .without-machine .topbar-actions { margin-left: auto; }
   .shell-status-panel .status {
     display: flex;
@@ -1301,9 +1354,11 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 @media (max-width: 600px) {
   .shell, .shell.without-machine {
     grid-template-columns: 0 minmax(0, 1fr) 0;
+    grid-template-rows: calc(var(--app-topbar-h) + var(--app-phone-status-h)) minmax(0, 1fr) 60px;
+  }
+  .shell.without-machine {
     grid-template-rows: var(--app-topbar-h) minmax(0, 1fr) 60px;
   }
-  .shell.without-machine { grid-template-rows: var(--app-topbar-h) minmax(0, 1fr); }
   .sidebar { display: none; }
   .phone-nav {
     grid-row: 3;
@@ -1313,12 +1368,18 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
     border-top: 1px solid var(--line);
     background: var(--sidebar);
   }
+  .phone-nav--connections { grid-template-columns: minmax(0, 1fr); }
   .phone-nav .navitem { flex-direction: column; gap: 3px; min-width: 0; }
   .phone-nav .icwrap { position: relative; }
   .phone-nav :deep(.navigation-count) { position: absolute; left: 16px; top: -4px; }
   .phone-nav-label { font-size: 11px; line-height: 1.25; }
-  .topbar { gap: 4px; }
-  .tb-slot { flex: 1; }
+  .topbar {
+    align-self: start;
+    height: var(--app-topbar-h);
+    gap: 4px;
+    justify-content: space-between;
+  }
+  .topbar-actions { margin-left: auto; }
   .content { scrollbar-gutter: auto; }
 }
 

@@ -72,6 +72,20 @@
   color: var(--ink);
 }
 
+/* В компактной шапке машина занимает такую же площадку, как соседние иконки.
+   Скрываем и обёртку подписи: пустой label сохранял gap и сдвигал рисунок влево. */
+@media (max-width: 1100px) {
+  .ui-button[data-context='connection-trigger'] {
+    flex: none;
+    width: var(--toolbar-control-h);
+    padding: 0;
+  }
+
+  .ui-button[data-context='connection-trigger'] .ui-button__label {
+    display: none;
+  }
+}
+
 .ui-pressable[data-context='studio-model-card'] {
   display: flex;
   flex-direction: column;
@@ -1136,9 +1150,56 @@
 }
 
 .ui-icon-button[data-context='alert-history'] {
+  position: relative;
   width: 28px;
   height: 28px;
   min-height: 28px;
+}
+
+/* Счётчик привязан к кнопке, а не к обрезаемой подписи внутри UiButton.
+   На touch он целиком помещается в 44 px, включая верхний край окна телефона. */
+.ui-icon-button[data-context='alert-history'] .ui-button__label {
+  overflow: visible;
+}
+
+.ui-icon-button[data-context='alert-history'] .alert-bell-badge {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--ground);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 15px;
+  white-space: nowrap;
+  text-align: center;
+  pointer-events: none;
+}
+
+html[data-ui-touch] .ui-icon-button[data-context='alert-history'] .alert-bell-badge {
+  top: 2px;
+  right: 2px;
+}
+
+.ui-button[data-context='board-filter-toggle'] .ui-button__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+@media (max-width: 600px) {
+  .ui-button[data-context='board-filter-toggle'] {
+    width: 44px;
+    min-width: 44px;
+    padding: 0;
+  }
+
+  .ui-button[data-context='board-filter-toggle'] :is(.filter-toggle-label, .filter-count) {
+    display: none;
+  }
 }
 
 .ui-icon-button[data-context='topbar-action'] svg,
@@ -1694,7 +1755,7 @@
   color: var(--accent);
 }
 
-.ui-tabs:has(.ui-tab[data-context='task-modal-tab']) {
+.ui-tabs:has(.ui-tab:is([data-context='task-modal-tab'], [data-context='pipeline-stage-tab'])) {
   gap: 24px;
   min-width: 0;
   padding: 0;
@@ -1703,7 +1764,7 @@
   background: transparent;
 }
 
-.ui-tab[data-context='task-modal-tab'] {
+.ui-tab:is([data-context='task-modal-tab'], [data-context='pipeline-stage-tab']) {
   min-height: max(42px, var(--toolbar-control-h));
   padding: 0;
   border: 0;
@@ -1713,48 +1774,20 @@
   font-size: 12.5px;
 }
 
-.ui-tab[data-context='task-modal-tab'][aria-selected='true'] {
+.ui-tab:is([data-context='task-modal-tab'], [data-context='pipeline-stage-tab'])[aria-selected='true'] {
   border-bottom-color: var(--accent);
   background: transparent;
   color: var(--ink);
   box-shadow: none;
 }
 
-.ui-tab[data-context='task-modal-tab']:hover:not(:disabled) {
+.ui-tab:is([data-context='task-modal-tab'], [data-context='pipeline-stage-tab']):hover:not(:disabled) {
   background: transparent;
   color: var(--ink);
-}
-
-.ui-tabs:has(.ui-tab[data-context='pipeline-stage-tab']) {
-  min-width: 0;
-  gap: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
 }
 
 .ui-tab[data-context='pipeline-stage-tab'] {
-  min-height: 49px;
   gap: 7px;
-  padding-inline: 0;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: transparent;
-  font-size: 12px;
-}
-
-.ui-tab[data-context='pipeline-stage-tab'][aria-selected='true'] {
-  border-bottom-color: var(--accent);
-  background: transparent;
-  color: var(--ink);
-  box-shadow: none;
-}
-
-.ui-tab[data-context='pipeline-stage-tab']:hover:not(:disabled) {
-  background: transparent;
-  color: var(--ink);
 }
 
 .ui-button[data-role='pipeline-section-disclosure'] {
@@ -1817,13 +1850,13 @@
   min-height: 24px;
   border: 0;
   border-radius: 6px;
-  background: var(--ground);
+  background: var(--row-bg, var(--surface));
   color: var(--ink-mid);
   font-size: 12px;
 }
 
 .ui-icon-button[data-context='chat-list-action']:hover:not(:disabled) {
-  background: var(--surface-2);
+  background: var(--row-bg, var(--surface-2));
   color: var(--ink);
 }
 
@@ -1833,6 +1866,28 @@
 
 .ui-icon-button[data-context='chat-list-action'][data-tone='danger']:hover:not(:disabled) {
   color: var(--bad);
+}
+
+/* Компактные действия списка не забирают ширину у названия разговора.
+   Прозрачная область сохраняет касание 44 px без чёрной подложки. */
+html[data-ui-touch] .ui-icon-button[data-role]:is(
+  [data-context='chat-list-new'],
+  [data-context='chat-list-action']
+) {
+  position: relative;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+}
+
+html[data-ui-touch] .ui-icon-button[data-role]:is(
+  [data-context='chat-list-new'],
+  [data-context='chat-list-action']
+)::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
 }
 
 .ui-icon-button[data-context='chat-session-back'] {
@@ -1877,6 +1932,33 @@
 .ui-icon-button[data-context='chat-title-edit']:hover:not(:disabled) {
   background: var(--surface-2);
   color: var(--ink);
+}
+
+html[data-ui-touch] .ui-icon-button[data-context='chat-title-edit'] {
+  width: 44px;
+  height: 44px;
+  color: color-mix(in srgb, var(--ink-low) 70%, var(--surface));
+  opacity: 1;
+}
+
+html[data-ui-touch] .ui-icon-button[data-context='chat-title-edit']:is(:hover, :focus-visible) {
+  color: var(--ink-mid);
+}
+
+/* Техническая лента намеренно плотнее форм и основных действий телефона.
+   Высота самой кнопки уменьшена: прозрачные 44 px иначе сохраняют прежние интервалы. */
+html[data-ui-touch] .cs .ui-disclosure-button:is(
+  [data-context='chat-step'], [data-context='chat-activity-summary'], [data-role='chat-reply-expand']
+) {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 4px;
+}
+
+html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
+  height: 28px;
+  min-height: 28px;
+  min-width: 28px;
 }
 
 .ui-button[data-context='chat-context'] {
@@ -1999,6 +2081,19 @@
 .ui-button[data-context='chat-workdir'] .ui-button__trailing > svg {
   width: 12px;
   height: 12px;
+}
+
+@media (max-width: 600px) {
+  .phone-chat-options .ui-button[data-context='chat-workdir'] {
+    width: 100%;
+    max-width: 100%;
+    justify-content: flex-start;
+    min-height: 44px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    font-size: 16px;
+  }
 }
 
 .ui-button[data-context='chat-pending-preview'] {
@@ -2302,12 +2397,12 @@
 }
 
 @media (max-width: 600px) {
-  .ui-tabs:has(.ui-tab[data-context='task-modal-tab']) {
+  .ui-tabs:has(.ui-tab:is([data-context='task-modal-tab'], [data-context='pipeline-stage-tab'])) {
     width: 100%;
     gap: 20px;
   }
 
-  .ui-tab[data-context='task-modal-tab'] {
+  .ui-tab:is([data-context='task-modal-tab'], [data-context='pipeline-stage-tab']) {
     min-height: max(42px, var(--toolbar-control-h));
   }
 
@@ -2374,9 +2469,12 @@
 /* Метрики и сеть топбара используют настоящие клавиатурные кнопки.
    Геометрия и типографика живут рядом с остальными status controls. */
 .ui-pressable[data-context='topbar-metrics'] {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  height: 28px;
+  padding-right: 12px;
   color: var(--ink-mid);
   font-variant-numeric: tabular-nums;
 }
@@ -2392,8 +2490,8 @@
    Даже при устаревшем снимке она сохраняет яркость поверх приглушённых показаний. */
 .ui-pressable[data-context='topbar-metrics'] > span.resources-alarm {
   position: absolute;
-  top: -5px;
-  right: -8px;
+  top: 2px;
+  right: 0;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -2493,7 +2591,7 @@
   line-height: 20px;
   font-size: var(--workspace-text-size);
   color: var(--ink);
-  border-color: transparent;
+  border: 1px solid transparent;
 }
 
 .ui-button[data-context='workspace-catalog-row'] .ui-button__content,
@@ -2537,3 +2635,181 @@
   border-top: 1px solid var(--line);
   border-radius: 0;
 }
+
+@media (max-width: 600px) {
+  .ui-button[data-context='grigdesk-task-title'] {
+    width: 100%;
+    min-height: var(--control-height);
+    padding: 0;
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  .ui-button[data-context='grigdesk-task-title'] .ui-button__content {
+    width: 100%;
+  }
+
+  .ui-button[data-context='grigdesk-task-title'] .ui-button__label {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+  }
+
+  .ui-pane-header__actions :is(.ui-button, .ui-action-link) {
+    max-width: 100%;
+    height: auto;
+    min-height: var(--control-height);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 600px) {
+  .ui-action-link[data-context='tool-menu-item'] {
+    font-size: 15px;
+  }
+}
+
+@media (max-width: 600px) {
+  [data-ui-static-row][data-context='workspace-catalog-row'] {
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    min-height: var(--control-height);
+    padding: 7px 10px;
+    border: 1px solid transparent;
+    line-height: 20px;
+    font-size: var(--workspace-text-size);
+    color: var(--ink);
+    text-align: left;
+  }
+}
+
+/* Размер действия задаёт шапка: desktop сохраняет 28 px, сенсорная версия — 32 px.
+   Невидимое расширение оставляет площадку 44 px на телефоне и планшете. */
+.ui-pane-header__actions .ui-button[data-context='workspace-toolbar'][data-role='board-new-task'] {
+  position: relative;
+  height: var(--board-new-task-height, var(--toolbar-control-h));
+  min-height: var(--board-new-task-height, var(--toolbar-control-h));
+}
+
+.ui-button[data-role='board-new-task']::after {
+  content: '';
+  position: absolute;
+  inset: var(--board-new-task-hit-inset, 0) 0;
+}
+
+@media (max-width: 600px) {
+  .ui-icon-button[data-board-tracker-settings] {
+    --ui-action-color: var(--board-secondary-color, var(--ink-low));
+  }
+
+  .ui-icon-button[data-board-tracker-settings]:hover,
+  .ui-icon-button[data-board-tracker-settings]:focus-visible {
+    --ui-action-color: var(--ink-mid);
+  }
+}
+
+/* Перенесённые действия сохраняют прежние компоненты и обработчики.
+   В каталоге телефона они получают подписанную строку с площадкой 44 px. */
+.ui-button[data-context='phone-section-action'] {
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  min-height: 44px;
+  padding: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ui-action-tone);
+  font-size: 15px;
+  text-align: left;
+  white-space: normal;
+}
+
+.ui-button[data-context='phone-section-action'] .ui-button__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.ui-button[data-context='phone-section-action'] .ui-button__label > svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+/* Тонкая телефонная полоса сохраняет свою высоту и явное нажатие исполнителя.
+   Подробности используют прежнюю общую всплывашку, без второй карточки лимитов. */
+@media (max-width: 600px) {
+  [data-ui-phone-status] .ui-pressable[data-context='provider-status'] {
+    width: 32px;
+    min-width: 32px;
+    height: var(--app-phone-status-h);
+    min-height: var(--app-phone-status-h);
+  }
+}
+
+/* CPU и RAM составляют одну кнопку сводки в тонкой полосе телефона.
+   Прежний popup получает от неё якорь, фокус и обработку Escape. */
+@media (max-width: 600px) {
+  [data-ui-phone-status] .ui-pressable[data-context='phone-status-metrics'] {
+    width: auto;
+    height: var(--app-phone-status-h);
+    min-height: var(--app-phone-status-h);
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+    line-height: 16px;
+  }
+}
+
+/* Одна и та же кнопка ресурсов открывает диалог на любой ширине.
+   Метка тревоги остаётся внутри площадки и не сдвигает соседние действия. */
+.ui-pressable.resource-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--app-topbar-h);
+  white-space: nowrap;
+}
+
+.ui-pressable.resource-trigger.stale > span:not(.resources-alarm) {
+  opacity: 0.5;
+}
+
+.ui-pressable.resource-trigger > .resources-alarm {
+  position: absolute;
+  top: 3px;
+  right: -3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bad);
+}
+
+[data-ui-phone-sections] .topbar-status-label {
+  display: inline;
+}
+
+[data-ui-phone-sections] .ui-button:is(
+  [data-context='board-timers-topbar'], [data-context='analysis-attention-topbar']
+),
+[data-ui-phone-sections] .ui-pressable[data-context='topbar-network'] {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px;
+  font-size: 15px;
+}
+
+.ui-pressable.resource-trigger .lv-ok { color: var(--ink); }
+.ui-pressable.resource-trigger .lv-warn { color: var(--warn); }
+.ui-pressable.resource-trigger .lv-bad { color: var(--bad); }

@@ -543,3 +543,40 @@ test('SELECT-LIFE-02: unmount во время открытия не оставл
   await flushPromises();
   assert.equal(listeners.size, 0);
 });
+
+test('PH-SELECT: touch открывает список, поиск начинается только явно', async (t) => {
+  browser.document.documentElement.setAttribute('data-ui-touch', '');
+  t.after(() => browser.document.documentElement.removeAttribute('data-ui-touch'));
+
+  const state = fixture(t, { searchable: true }, {
+    default: () => Array.from({ length: 12 }, (_, index) =>
+      h('option', { value: String(index) }, `Проект ${index}`)),
+  });
+  const popup = await openPicker(state);
+  const list = popup.get('[role="listbox"]');
+  const search = popup.get('input[type="search"]');
+
+  assert.equal(browser.document.activeElement === list.element, true);
+  assert.equal(list.attributes('tabindex'), '0');
+  assert.deepEqual(state.values, []);
+
+  search.element.focus();
+  await search.setValue('Проект 11');
+  await nextTick();
+  assert.equal(popup.findAll('[role="option"]').length, 1);
+  await popup.get('[role="option"]').trigger('click');
+  await flushPromises();
+
+  assert.deepEqual(state.values, ['11']);
+  assert.equal(state.changes.length, 1);
+  assert.equal(state.changes[0].target === state.wrapper.get('select').element, true);
+});
+
+test('PH-SELECT: desktop сохраняет автофокус поиска', async (t) => {
+  browser.document.documentElement.removeAttribute('data-ui-touch');
+
+  const state = fixture(t, { searchable: true });
+  const popup = await openPicker(state);
+
+  assert.equal(browser.document.activeElement === popup.get('input[type="search"]').element, true);
+});

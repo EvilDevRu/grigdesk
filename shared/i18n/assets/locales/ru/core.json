@@ -101,6 +101,9 @@
   "pluginModuleLoadFailed": "Не удалось загрузить панель «{name}». Проверьте файлы плагина и перезагрузите окно.",
   "pluginModuleRenderFailed": "Не удалось отобразить панель «{name}». Перезагрузите окно после исправления плагина.",
   "sections": "Разделы",
+  "sectionsSearch": "Найти раздел",
+  "sectionsEmpty": "Ничего не найдено. Измените запрос.",
+  "phoneSystemActions": "Система и подключения",
   "systemStatus": "Состояние системы",
   "conversationOptions": "Настройки чата",
   "toolReturnNarrow": "Расширьте главное окно для возврата в колонку.",
@@ -161,6 +164,7 @@
     "other": "{count} ядра"
   },
   "cpu": "Процессор",
+  "resourceLoadAverage": "За минуту — {value}",
   "resourceComputing": "Вычисления",
   "resourceMemory": "Память",
   "resourceDisks": "Диски",

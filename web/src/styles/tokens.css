@@ -34,9 +34,13 @@
      Токен общий, потому что иначе их разделительные линии расходятся: слева высоту
      задаёт поиск с тумблером архива, справа — название, задача и ряд настроек. */
   --app-topbar-h: 36px;
+  --app-phone-status-h: 30px;
   --app-rail-w: 36px;
   --app-nav-row-h: 30px;
   --toolbar-control-h: 28px;
+  --panel-header-font-size: 13px;
+  --panel-header-font-weight: 600;
+  --panel-header-title-color: var(--ink);
   --tool-dock-action-size: 30px;
   --chat-head-h: 80px;
   --chat-list-row-h: 56px;
@@ -162,8 +166,15 @@
 /* Телефонные поля оставляют место данным, а не внешним рамкам страницы.
    Размер 16 px в полях также сохраняет масштаб страницы при фокусе в iOS. */
 @media (max-width: 600px) {
-  :root {
+  html:root {
     --page-gutter: 10px;
+    --workspace-title-size: 16px;
+    --workspace-entity-title-size: 15px;
+    --workspace-text-size: 15px;
+    --workspace-meta-size: 13px;
+    --panel-header-font-size: 12px;
+    --panel-header-font-weight: 500;
+    --panel-header-title-color: var(--ink-mid);
     --chat-gutter: 12px;
     --chat-flow-inset: 8px;
     --chat-list-row-h: 72px;

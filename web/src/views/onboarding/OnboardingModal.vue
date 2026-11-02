@@ -213,8 +213,6 @@ async function dismiss(): Promise<void> {
 
 .onboarding-heading h1 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 600;
 }
 
 .onboarding-layout {

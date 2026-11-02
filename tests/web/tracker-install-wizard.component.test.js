@@ -1,13 +1,50 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { migrationHarness } from './helpers/compile-vue.js';
+import { migrationHarness, webFile } from './helpers/compile-vue.js';
 import {
   actionButton, chooseExternal, driverInstallInfo, driverJob, liveTrackerDialog, mountTrackerBoard,
   openTrackerManager, prepareTracker,
 } from './helpers/trackerBoard.js';
 
 process.env.NODE_ENV = 'test';
+
+test('WIZARD-PHONE: подготовка компактна, показывает этап и сохраняет отмену', async (t) => {
+  const card = await manager(t, {
+    handlers: {
+      get: async (_url, state) => {
+        if (!state.job) {
+          state.job = driverJob('update', driverInstallInfo('1.1.0', 2), 'running');
+          state.job.preview = null;
+          state.job.stage = 'fetching';
+          state.job.percent = 38;
+        }
+      },
+    },
+  });
+  const { compileStyle } = await import('../../web/node_modules/@vue/compiler-sfc/dist/compiler-sfc.cjs.js');
+  const source = await readFile(webFile('src/views/board/TrackerInstallDialog.vue'), 'utf8');
+  const style = card.browser.document.createElement('style');
+
+  card.browser.happyDOM.setWindowSize({ width: 390, height: 844 });
+  style.textContent = compileStyle({
+    source: source.match(/<style scoped>([\s\S]*?)<\/style>/u)[1],
+    id: 'data-v-tracker-phone',
+    scoped: true,
+  }).code.replaceAll('[data-v-tracker-phone]', '');
+  card.browser.document.head.append(style);
+  t.after(() => style.remove());
+
+  const layout = card.browser.getComputedStyle(card.dialog.get('.driver-install').element);
+
+  assert.equal(layout.alignContent, 'start');
+  assert.notEqual(layout.minHeight, '300px');
+  assert.equal(card.dialog.get('[role="progressbar"]').attributes('aria-valuenow'), '38');
+  assert.match(card.dialog.get('.driver-job').text(), /38%/u);
+  assert.doesNotMatch(card.dialog.text(), /Проверьте пакет и подтвердите изменение/u);
+  assert.ok(actionButton(card.dialog, /^Отменить проверку$/u));
+});
 
 test('WIZARD-OFFICIAL: встроенный репозиторий скрывает общее предупреждение',
   async (t) => {
