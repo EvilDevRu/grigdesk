@@ -77,8 +77,10 @@
 - Относящиеся тесты запускай только через сторож памяти: `bash tests/run-node-tests-safe.sh
   --test <файлы>` (несколько файлов — с `--test-concurrency=2` и `NODE_TEST_MAX_RSS_MB=4096`).
   Голый `node --test` память не ограничивает и уже клал машину —
-  [ловушка](docs/grigdesk/testing/happy-dom-assert-memory.md). Затем `bash tests/run-all.sh`.
-  Сборка web пишет в используемый `web/dist`: `npm --prefix web run build` — после зелёных тестов.
+  [ловушка](docs/grigdesk/testing/happy-dom-assert-memory.md). Запускай только профильные тесты
+  затронутой области; полный `tests/run-all.sh` — только по прямой просьбе человека.
+  Сборка web пишет в используемый `web/dist`: `npm --prefix web run build` — после зелёных
+  профильных тестов.
 
 ## Документация
 

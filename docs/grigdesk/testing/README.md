@@ -1,5 +1,8 @@
 # Тесты и проверка
 
+- [Параметры test runner: concurrency перед списком файлов](node-test-option-order.md)
+
+
 - [Режим HTML предпросмотра: doctype и ложный отступ формы](preview-document-mode.md)
 
 - [Три описи browser-тестов: запуск, typecheck и снимок миграции](browser-test-inventory.md)
