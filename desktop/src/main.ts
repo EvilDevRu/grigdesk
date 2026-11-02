@@ -9,6 +9,7 @@ import {
   clipboard,
   dialog,
   Menu,
+  nativeImage,
   safeStorage,
   screen,
   session,
@@ -1008,6 +1009,7 @@ async function prepare(signal: AbortSignal): Promise<void> {
       machine: stored.selected ?? 'unselected',
       scope,
       create: (options) => new WebContentsView(options),
+      imageFromBuffer: (data) => nativeImage.createFromBuffer(data),
       window: () => {
         if (!mainWindow || mainWindow.isDestroyed()) {
           throw new Error('browser_unavailable');

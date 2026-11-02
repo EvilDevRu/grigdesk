@@ -4,7 +4,8 @@ import { browserUrl } from '../../../shared/browser/browserContract.ts';
 import { isPlainRecord } from '../../../shared/lib/objects.ts';
 
 import type {
-  BrowserWindow, BrowserWindowConstructorOptions, WebContentsView, WebContentsViewConstructorOptions,
+  BrowserWindow, BrowserWindowConstructorOptions, NativeImage,
+  WebContentsView, WebContentsViewConstructorOptions,
 } from 'electron';
 import type { BrowserRect, TabView } from './browserTabs.ts';
 import type { createBrowserProtocol } from './browserProtocol.ts';
@@ -34,7 +35,7 @@ export interface NativeBrowserView extends TabView {
   history(direction: -1 | 1): void;
   reload(): void;
   zoom(factor: number): void;
-  screenshot(): Promise<string>;
+  screenshot(send: Send): Promise<string>;
   console(): { level: string; text: string }[];
 }
 
@@ -78,6 +79,7 @@ export function createNativeBrowserView(options: {
   machine: string;
   scope: string;
   create(value: WebContentsViewConstructorOptions): WebContentsView;
+  imageFromBuffer(data: Buffer): NativeImage;
   window(): BrowserWindow;
   pipeOrigins(): ReadonlySet<string>;
   events: BrowserViewEvents;
@@ -88,6 +90,7 @@ export function createNativeBrowserView(options: {
   const log: { level: string; text: string }[] = [];
   let disposed = false;
   let debuggerReady = false;
+  let attached = false;
 
   /**
    * Сайт получает bounded кольцевой журнал без network headers/cookies.
@@ -123,7 +126,8 @@ export function createNativeBrowserView(options: {
     height: 720
   });
   view.setVisible(false);
-  window.contentView.addChildView(view);
+  // Скрытый guest остаётся вне дерева окна: setVisible(false) выключает рисование,
+  // но прикреплённая страница всё ещё может забрать клавиатурный фокус при загрузке.
   contents.session.setPermissionCheckHandler(() => false);
   contents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   contents.session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
@@ -274,27 +278,171 @@ export function createNativeBrowserView(options: {
     }
   });
 
+  /**
+   * У скрытого WebContentsView может не быть compositor surface для capturePage.
+   * CDP снимает только текущий viewport без показа вкладки и без захвата всего документа.
+   */
+  async function captureImage(send: Send): Promise<NativeImage> {
+    try {
+      const image = await contents.capturePage(undefined, { stayHidden: true });
+
+      if (!image.isEmpty()) {
+        return image;
+      }
+    } catch {
+      // Отсутствующая native поверхность не означает недоступность живого документа.
+    }
+
+    if (disposed || !debuggerReady || !contents.debugger.isAttached()) {
+      throw new Error('browser_debugger_unavailable');
+    }
+
+    const { cssVisualViewport: viewport } = await send('Page.getLayoutMetrics') as {
+      cssVisualViewport?: unknown;
+    };
+
+    if (!isPlainRecord(viewport) || !['pageX', 'pageY', 'clientWidth', 'clientHeight']
+      .every((key) => typeof viewport[key] === 'number' && Number.isFinite(viewport[key]))
+      || Number(viewport.clientWidth) <= 0 || Number(viewport.clientHeight) <= 0) {
+      throw new Error('browser_capture_failed');
+    }
+
+    const { data } = await send('Page.captureScreenshot', {
+      format: 'jpeg',
+      quality: 75,
+      fromSurface: true,
+      captureBeyondViewport: true,
+      clip: {
+        x: viewport.pageX,
+        y: viewport.pageY,
+        width: viewport.clientWidth,
+        height: viewport.clientHeight,
+        scale: Math.min(1, 1280 / Number(viewport.clientWidth)),
+      },
+    }) as { data?: unknown };
+
+    if (typeof data !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/u.test(data)) {
+      throw new Error('browser_capture_failed');
+    }
+
+    if (Buffer.byteLength(data, 'base64') > 2 * 1024 * 1024) {
+      throw new Error('browser_image_too_large');
+    }
+
+    const image = options.imageFromBuffer(Buffer.from(data, 'base64'));
+
+    if (image.isEmpty()) {
+      throw new Error('browser_capture_failed');
+    }
+
+    return image;
+  }
+
+  /**
+   * Скрытая страница отсоединяется от native-дерева, сохраняя документ и CDP.
+   * Фокус возвращается интерфейсу только из этого guest в активном окне.
+   */
+  function hideView(): void {
+    if (!attached) {
+      return;
+    }
+
+    const alive = !window.isDestroyed();
+    const returnToMain = alive && window.isFocused() && !contents.isDestroyed() && contents.isFocused();
+
+    view.setVisible(false);
+
+    if (alive) {
+      window.contentView.removeChildView(view);
+    }
+
+    attached = false;
+
+    if (returnToMain && !window.isDestroyed() && window.isFocused()) {
+      window.webContents.focus();
+    }
+  }
+
   return {
     state: () => ({
       canBack: contents.navigationHistory.getActiveIndex() > 0,
       canForward: contents.navigationHistory.getActiveIndex() + 1 < contents.navigationHistory.length(),
       zoom: Math.round(contents.getZoomFactor() * 100),
     }),
+    /**
+     * Готовность документа достаточна для snapshot и ввода: внешние ресурсы могут висеть.
+     * loadURL остаётся обработанным после dom-ready, а сетевой отказ получает стабильный код.
+     */
     async navigate(raw) {
       const url = raw === '' ? 'about:blank' : webUrl(raw);
 
       reset();
-      await contents.loadURL(url);
+
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const ready = () => finish();
+        const failed = () => finish('browser_load_failed');
+        const lost = () => finish('browser_renderer_gone');
+
+        /**
+         * Первая готовность или ошибка завершает ожидание и снимает все listeners.
+         * Поздний результат полной загрузки уже не меняет исход навигации.
+         */
+        const finish = (error?: string) => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          contents.removeListener('dom-ready', ready);
+          contents.removeListener('destroyed', lost);
+          contents.removeListener('render-process-gone', lost);
+
+          if (error) {
+            reject(new Error(error));
+          } else {
+            resolve();
+          }
+        };
+
+        contents.once('dom-ready', ready);
+        contents.once('destroyed', lost);
+        contents.once('render-process-gone', lost);
+
+        try {
+          void contents.loadURL(url).then(ready, failed);
+        } catch {
+          failed();
+        }
+      });
     },
+    /**
+     * Только видимая вкладка получает родителя в native-дереве окна.
+     * Прикрепление сохраняет текущий фокус интерфейса, включая курсор поля чата.
+     */
     show(rect: BrowserRect) {
-      if (!disposed) {
-        view.setBounds(rect);
-        view.setVisible(true);
+      if (disposed || window.isDestroyed()) {
+        return;
+      }
+
+      const preserveMainFocus = window.isFocused() && window.webContents.isFocused();
+
+      view.setBounds(rect);
+
+      if (!attached) {
+        window.contentView.addChildView(view);
+        attached = true;
+      }
+
+      view.setVisible(true);
+
+      if (preserveMainFocus && !window.isDestroyed() && window.isFocused()) {
+        window.webContents.focus();
       }
     },
     hide() {
       if (!disposed) {
-        view.setVisible(false);
+        hideView();
       }
     },
     /**
@@ -344,8 +492,8 @@ export function createNativeBrowserView(options: {
      * Снимок скрытой страницы ограничивается по ширине и размеру JPEG.
      * Превышение лимита возвращает отказ без передачи большого изображения.
      */
-    async screenshot() {
-      const image = await contents.capturePage(undefined, { stayHidden: true });
+    async screenshot(send) {
+      const image = await captureImage(send);
       const resized = image.getSize().width > 1280 ? image.resize({ width: 1280 }) : image;
       const jpeg = resized.toJPEG(75);
 
@@ -366,11 +514,7 @@ export function createNativeBrowserView(options: {
       }
 
       disposed = true;
-      view.setVisible(false);
-
-      if (!window.isDestroyed()) {
-        window.contentView.removeChildView(view);
-      }
+      hideView();
 
       if (!contents.isDestroyed()) {
         contents.close();

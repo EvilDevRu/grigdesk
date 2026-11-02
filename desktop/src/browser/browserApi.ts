@@ -75,6 +75,7 @@ export function createBrowserApi(options: {
   const id = options.id ?? randomUUID;
   const views = new Map<string, {
     view: NativeBrowserView;
+    send: NativeBrowserView['send'];
     protocol: ReturnType<typeof createBrowserProtocol>;
     driver: ReturnType<typeof createBrowserDriver>;
     command: NativeCommand | null;
@@ -247,6 +248,7 @@ export function createBrowserApi(options: {
       };
       const bundle = {
         view,
+        send,
         command: null as NativeCommand | null,
         dispatched: false,
         protocol: createBrowserProtocol({
@@ -411,7 +413,7 @@ export function createBrowserApi(options: {
       }
 
       if (value.action === 'screenshot') {
-        const data = await bounded(bundle.view.screenshot(), value, tabId);
+        const data = await bounded(bundle.view.screenshot(bundle.send), value, tabId);
 
         if (!allowed(value, tabId)) {
           throw new Error('access_revoked');
@@ -765,7 +767,10 @@ export function createBrowserApi(options: {
               'access_revoked', 'stale_page', 'stale_element', 'invalid_fill', 'outcome_unknown',
             ].includes(code);
 
-            return { ok: false, error: known ? code : 'browser_unavailable' };
+            const fallback = native.action === 'screenshot'
+              ? 'browser_capture_failed' : 'browser_unavailable';
+
+            return { ok: false, error: known ? code : fallback };
           }
         });
 

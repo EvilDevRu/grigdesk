@@ -65,6 +65,8 @@ async function fixture(t: TestContext, agents = true) {
     scope: string;
     rect: BrowserRect | null;
     closed: boolean;
+    captureWithCdp: boolean;
+    captureFailure: boolean;
     zoom: number;
     gate: { method: string; barrier: ReturnType<typeof barrier> } | null;
   }>();
@@ -105,6 +107,8 @@ async function fixture(t: TestContext, agents = true) {
         scope,
         rect: null as BrowserRect | null,
         closed: false,
+        captureWithCdp: false,
+        captureFailure: false,
         zoom: 1,
         gate: null as { method: string; barrier: ReturnType<typeof barrier> } | null
       };
@@ -144,7 +148,22 @@ async function fixture(t: TestContext, agents = true) {
         zoom: (factor) => {
           record.zoom = factor;
         },
-        screenshot: async () => 'AQ==',
+        /**
+         * Fake снимка использует переданный runtime fence для отдельных CDP чтений.
+         * Так отзыв между чтением размеров и захватом проверяется без настоящего Electron.
+         */
+        async screenshot(send) {
+          if (record.captureFailure) {
+            throw new Error('Failed to capture page');
+          }
+
+          if (record.captureWithCdp) {
+            await send('Page.getLayoutMetrics');
+            await send('Page.captureScreenshot');
+          }
+
+          return 'AQ==';
+        },
         console: () => [{ level: 'error', text: 'fixture error' }],
         /**
          * Fake CDP сохраняет вызовы и отдаёт bounded fixture-ответы протокола.
@@ -368,6 +387,46 @@ test('BR-N04: revoke/IPC epoch change во время resolve не отправ�
   gate.release();
   assert.deepEqual(await pending, { ok: false, error: 'access_revoked' });
   assert.equal(f.calls.some((call) => call.method.startsWith('Input.')), false);
+});
+
+test('BR-N04B: отзыв между CDP чтениями снимка блокирует захват', { timeout: 5000 }, async (t) => {
+  const f = await fixture(t);
+  const tab = await f.open();
+  const view = f.views.get(tab.tabId)!;
+
+  view.captureWithCdp = true;
+
+  const captured = await f.execute({ action: 'screenshot', tabId: tab.tabId }, tab.grantEpoch) as {
+    format: string;
+  };
+
+  assert.equal(captured.format, 'grigdesk-work-content-v1');
+
+  const gate = barrier();
+
+  t.after(() => gate.release());
+  view.gate = { method: 'Page.getLayoutMetrics', barrier: gate };
+
+  const pending = f.execute({ action: 'screenshot', tabId: tab.tabId }, tab.grantEpoch);
+
+  await gate.entered;
+  await f.api.invoke({ operation: 'revoke', tabId: tab.tabId });
+  gate.release();
+  assert.deepEqual(await pending, { ok: false, error: 'access_revoked' });
+  assert.equal(f.calls.filter((call) => call.method === 'Page.captureScreenshot').length, 1);
+});
+
+test('BR-N04C: отказ снимка не объявляет живой браузер недоступным', async (t) => {
+  const f = await fixture(t);
+  const tab = await f.open();
+
+  f.views.get(tab.tabId)!.captureFailure = true;
+  assert.deepEqual(await f.execute({ action: 'screenshot', tabId: tab.tabId }, tab.grantEpoch),
+    { ok: false, error: 'browser_capture_failed' });
+
+  const result = await f.execute({ action: 'console', tabId: tab.tabId }, tab.grantEpoch) as { ok: boolean };
+
+  assert.equal(result.ok, true);
 });
 
 test('BR-N05: navigation begin блокирует команды; другой origin отзывает grant', async (t) => {
