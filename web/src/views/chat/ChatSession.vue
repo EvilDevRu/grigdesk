@@ -2837,8 +2837,13 @@ function skipQuestion() {
 .ctx-pop-rows { display: flex; flex-direction: column; gap: 4px; padding-top: 7px; border-top: 1px solid var(--line); }
 .ctx-pop-row { display: grid; grid-template-columns: minmax(76px, auto) minmax(0, 1fr); gap: 14px; align-items: baseline; }
 .ctx-pop-label { color: var(--ink-mid); }
-.ctx-pop-value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ctx-pop-row.cache .ctx-pop-value { white-space: normal; }
+.ctx-pop-value {
+  min-width: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .ctx-pop-row.unverified .ctx-pop-value { color: var(--warn); }
 .ctx-pop-actions { display: flex; flex-direction: column; gap: 3px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--ink-mid); }
 .ctx-pop-action { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
