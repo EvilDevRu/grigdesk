@@ -1241,6 +1241,14 @@
   font-size: 12px;
   font-weight: 500;
 }
+
+[data-ui-settings-catalog] .ui-settings-catalog-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+  min-width: 0;
+}
 [data-ui-settings-catalog] .ui-settings-catalog-status {
   color: var(--ink-low);
   font-size: 10px;

@@ -9,7 +9,12 @@ import { copyStockPackage } from './helpers/trackerPackage.js';
 const SECRET = 'fixture-access-token-must-stay-server-side';
 
 test('TRACKER-SECRETS-01: settings требуют сессию, secret не возвращается и лежит mode0600', async (t) => {
-  const fixture = await trackerFixture(t, { setup: copyStockPackage });
+  const fixture = await trackerFixture(t, {
+    setup: copyStockPackage,
+    fetch: async () => new Response(JSON.stringify({ result: { ID: 7 } }), {
+      headers: { 'content-type': 'application/json' },
+    }),
+  });
 
   if (!fixture) {
     return;
@@ -71,6 +76,11 @@ test('Select: HTTP сохраняет строку варианта и отве�
   const fixture = await trackerFixture(t, { setup: copyStockPackage });
 
   assert.ok(fixture);
+
+  fixture.credsStore.writeFor('grigdesk-b24', {
+    baseUrl: 'https://cloud.fixture',
+    accessToken: SECRET,
+  });
 
   for (const authMode of ['token', 'password']) {
     await selectTracker(fixture, 'grigdesk-b24', { 'grigdesk-b24': { authMode } });

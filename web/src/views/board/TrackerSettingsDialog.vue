@@ -2,14 +2,14 @@
   <TrackerInstallDialog v-if="!connectionOpen" :open="open" :start-install="startInstall"
                         :start-update="startUpdate"
                         @update:open="emit('update:open', $event)" @configure="configureDriver" />
-  <UiDialog v-else :open="open" :title="t('core.trackerDriversTitle')" :busy="saving" :dismissible="!saving"
-            :description="t('core.trackerSettingsIntro')" data-role="tracker-settings" data-ui-workspace
+  <UiDialog v-else :open="open" :title="t('core.trackerDriversTitle')" :busy="busy" :dismissible="!busy"
+            data-role="tracker-settings" data-ui-workspace
             initial-focus="[data-driver][aria-pressed='true'], #tracker-driver"
             @update:open="emit('update:open', $event)">
     <template #title>
       <div class="tracker-settings__heading">
         <span class="tracker-settings__title">{{ t('core.trackerDriversTitle') }}</span>
-        <UiIconButton :label="t('core.close')" :disabled="saving" @click="emit('update:open', false)">
+        <UiIconButton :label="t('core.close')" :disabled="busy" @click="emit('update:open', false)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
                stroke-linecap="round" aria-hidden="true">
             <path d="m6 6 12 12M18 6 6 18" />
@@ -26,10 +26,11 @@
         <aside class="tracker-settings__sidebar" :aria-label="t('core.trackerInstalled')">
           <div class="tracker-settings__picker">
             <UiField id="tracker-driver" :label="t('core.trackerExternal')">
-              <UiSelect v-model="editorId" :disabled="saving">
+              <UiSelect v-model="editorId" :disabled="busy">
                 <option v-if="!externalDrivers.length" value="">{{ t('core.trackerNone') }}</option>
                 <option v-for="driver in externalDrivers" :key="driver.id" :value="driver.id">
-                  {{ driver.name }}
+                  {{ driver.name }}{{ trackers.catalog?.externalId === driver.id
+                    ? ` · ${t('core.trackerInUse')}` : '' }}
                 </option>
               </UiSelect>
             </UiField>
@@ -37,13 +38,16 @@
           <div class="tracker-settings__catalog">
             <h3>{{ t('core.trackerInstalled') }}</h3>
             <UiButton v-for="driver in externalDrivers" :key="driver.id" :data-driver="driver.id"
-                      :pressed="editorId === driver.id" :disabled="saving" data-ui-settings-catalog
+                      :pressed="editorId === driver.id" :disabled="busy" data-ui-settings-catalog
                       data-context="provider-entry" @click="editorId = driver.id">
               <span class="ui-settings-catalog-copy">
-                <span class="ui-settings-catalog-title">{{ driver.name }}</span>
+                <span class="ui-settings-catalog-heading">
+                  <span class="ui-settings-catalog-title">{{ driver.name }}</span>
+                  <span v-if="trackers.catalog?.externalId === driver.id" class="ui-status-chip"
+                        data-tone="success" data-role="tracker-in-use">{{ t('core.trackerInUse') }}</span>
+                </span>
                 <span class="ui-settings-catalog-status">
                   {{ installer.installed[driver.id]?.version || driver.version || '' }}
-                  <span v-if="trackers.catalog?.externalId === driver.id"> · {{ t('core.trackerConnected') }}</span>
                   <span v-if="installer.installed[driver.id]?.updateAvailable">
                     · {{ t('core.trackerUpdates') }}
                   </span>
@@ -54,7 +58,7 @@
           <div class="tracker-settings__catalog-actions">
             <UiButton :loading="checking" :disabled="packageActionsDisabled || !externalDrivers.length"
                       @click="checkUpdates()">{{ t('core.trackerCheckUpdates') }}</UiButton>
-            <UiButton :disabled="saving || checking" @click="openInstaller()">
+            <UiButton :disabled="busy || checking" @click="openInstaller()">
               {{ t('core.trackerAdd') }}
             </UiButton>
           </div>
@@ -64,6 +68,8 @@
           <template v-if="selected">
             <div class="tracker-settings__driver-heading">
               <h3>{{ selected.name }}</h3>
+              <span v-if="trackers.catalog?.externalId === selected.id" class="ui-status-chip"
+                    data-tone="success" data-role="tracker-editor-in-use">{{ t('core.trackerInUse') }}</span>
               <span v-if="packageInfo?.version || selected.version" class="tracker-settings__version">
                 {{ t('core.trackerInstalledVersion', { version: packageInfo?.version || selected.version || '' }) }}
               </span>
@@ -86,7 +92,7 @@
               <UiButton tone="accent"
                         :disabled="packageActionsDisabled || !packageInfo?.updateAvailable || packageInfo.localChanges"
                         @click="openUpdate()">{{ t('core.trackerUpdate') }}</UiButton>
-              <UiButton variant="link" :disabled="saving || checking" @click="openManager()">
+              <UiButton variant="link" :disabled="busy || checking" @click="openManager()">
                 {{ t('core.trackerMoreActions') }}
               </UiButton>
             </UiFormActions>
@@ -94,7 +100,7 @@
             <section class="tracker-settings__section" :aria-label="t('core.trackerConnectionSettings')">
               <h4>{{ t('core.trackerConnectionSettings') }}</h4>
               <UiCheckbox :model-value="externalId === editorId" data-role="tracker-board-enabled"
-                          :disabled="saving || (!driverAvailable && externalId !== editorId)"
+                          :disabled="busy || (!driverAvailable && externalId !== editorId)"
                           @update:model-value="externalId = $event ? editorId : ''">
                 {{ t('core.trackerUseOnBoard') }}
               </UiCheckbox>
@@ -105,10 +111,10 @@
               <div class="tracker-settings__fields">
                 <template v-for="(field, key) in selected.schema ?? {}" :key="key">
                   <UiField v-if="fieldVisible(field)" :label="fieldLabel(field.label, key)"
-                           :hint="field.secret ? t('core.trackerSecretKept') : undefined">
-                    <UiCheckbox v-if="field.type === 'boolean'" v-model="values[key]" :disabled="saving" />
+                           :hint="fieldHint(field)" :error="fieldError(String(key))">
+                    <UiCheckbox v-if="field.type === 'boolean'" v-model="values[key]" :disabled="busy" />
                     <UiSelect v-else-if="field.type === 'select'" :model-value="String(values[key] ?? '')"
-                              :disabled="saving" @update:model-value="values[key] = $event ?? ''">
+                              :disabled="busy" @update:model-value="values[key] = $event ?? ''">
                       <option value="" disabled>{{ t('core.trackerChooseOption') }}</option>
                       <option v-for="option in field.options" :key="option.value" :value="option.value">
                         {{ fieldLabel(option.label, option.value) }}
@@ -119,10 +125,24 @@
                              @update:model-value="
                                values[key] = field.type === 'number' ? Number($event) : ($event ?? '')
                              "
-                             :disabled="saving" autocomplete="off" />
+                             @blur="normalizePortalField(String(key), field)"
+                             :disabled="busy" autocomplete="off" />
                   </UiField>
                 </template>
               </div>
+              <UiFormActions align="start">
+                <UiButton :loading="testing" :disabled="busy || !driverAvailable || invalidTokenInput"
+                          data-role="tracker-test-connection" @click="checkConnection()">
+                  {{ t('core.trackerTestConnection') }}
+                </UiButton>
+              </UiFormActions>
+              <p class="tracker-settings__note">{{ t('core.trackerTestConnectionHint') }}</p>
+              <UiInlineMessage v-if="connectionResult" :tone="connectionResult.ok ? 'success' : 'danger'"
+                               role="status" data-role="tracker-connection-result">
+                {{ connectionResult.ok ? t('core.trackerConnectionSuccess', { name: selected.name })
+                  : t('core.trackerConnectionFailure', { name: selected.name }) }}
+                <span v-if="connectionResult.error"> {{ connectionResult.error }}</span>
+              </UiInlineMessage>
             </section>
           </template>
           <p v-else class="tracker-settings__note">{{ t('core.trackerEmpty') }}</p>
@@ -142,10 +162,11 @@
 
     <template #footer>
       <UiFormActions class="tracker-settings__actions">
-        <UiButton variant="ghost" :disabled="saving" @click="emit('update:open', false)">
+        <UiButton variant="ghost" :disabled="busy" @click="emit('update:open', false)">
           {{ t('core.close') }}
         </UiButton>
-        <UiButton variant="solid" tone="accent" :loading="saving" :disabled="saving || loading" @click="save">
+        <UiButton variant="solid" tone="accent" :loading="saving"
+                  :disabled="busy || loading || invalidTokenInput" @click="save">
           {{ t('core.trackerSave') }}
         </UiButton>
       </UiFormActions>
@@ -154,12 +175,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 
 import type { TrackerLabel, TrackerSettingsField } from '../../../../shared/trackers/contracts.ts';
+import { isRecord } from '../../../../shared/lib/objects.ts';
+import {
+  isTrackerTokenField, isTrackerTokenInput, normalizeTrackerPortalInput, visibleTrackerTokenKeys,
+} from '../../../../shared/trackers/settingsValidation.ts';
 import { useTrackersStore } from '../../stores/trackers.ts';
 import { useDriverInstallStore } from '../../stores/driverInstall.ts';
-import { api, failureText } from '../../shared/apiClient.ts';
+import { api, ApiError, failureText } from '../../shared/apiClient.ts';
 import {
   t, resolveUiText, messageRef, UiButton, UiCheckbox, UiDialog, UiField, UiFormActions,
   UiIconButton, UiInlineMessage, UiInput, UiLoadingState, UiSelect, UiSkeletonLayout,
@@ -182,6 +207,13 @@ const loading = ref(true);
 const updatesLoading = ref(true);
 const updatesError = ref('');
 const checking = ref(false);
+const testing = ref(false);
+const connectionResult = ref<{ ok: boolean; error?: string } | null>(null);
+const tokenFailure = ref<{
+  driverId: string;
+  field: string;
+  message: string;
+} | null>(null);
 const saving = ref(false);
 const saved = ref(false);
 const connectionOpen = ref(true);
@@ -198,8 +230,15 @@ const packageInfo = computed(() => installer.installed[editorId.value]);
 const driverAvailable = computed(() => ['active', 'available'].includes(selected.value?.status ?? ''));
 const activeDriverName = computed(() => externalDrivers.value
   .find((driver) => driver.id === externalId.value)?.name ?? externalId.value);
+const busy = computed(() => saving.value || testing.value);
 const packageActionsDisabled = computed(() => loading.value || saving.value || updatesLoading.value
-  || checking.value || installer.blocked);
+  || checking.value || testing.value || installer.blocked);
+const tokenInputErrors = computed(() => Object.fromEntries(
+  visibleTrackerTokenKeys(selected.value?.schema ?? {}, values.value)
+    .filter((key) => !isTrackerTokenInput(String(values.value[key] ?? '')))
+    .map((key) => [key, t('core.trackerTokenInvalidFormat')]),
+));
+const invalidTokenInput = computed(() => Object.keys(tokenInputErrors.value).length > 0);
 
 /**
  * Настройка использует ту же модальную оболочку вместо диалога поверх установщика.
@@ -290,9 +329,102 @@ async function checkUpdates() {
   }
 }
 
-watch([externalId, values], () => {
+watch([externalId, editorId, values], () => {
   saved.value = false;
+  connectionResult.value = null;
+  tokenFailure.value = null;
 }, { deep: true });
+
+function fieldError(key: string): string | undefined {
+  return tokenInputErrors.value[key] || (tokenFailure.value?.driverId === editorId.value
+    && tokenFailure.value.field === key ? tokenFailure.value.message : undefined);
+}
+
+/**
+ * Дополнение схемы происходит после ввода, чтобы не сдвигать курсор при наборе адреса.
+ * Секреты и поля других типов сохраняют исходное значение.
+ */
+function normalizePortalField(key: string, field: TrackerSettingsField) {
+  const value = values.value[key];
+
+  if (typeof value === 'string') {
+    values.value[key] = normalizeTrackerPortalInput(field, value);
+  }
+}
+
+/**
+ * Поле токена объясняет назначение секрета до первой отправки формы.
+ * Общая подсказка о пустом вводе сохраняется для прежних пакетов и режима пароля.
+ */
+function fieldHint(field: TrackerSettingsField): string | undefined {
+  if (isTrackerTokenField(field)) {
+    return `${t('core.trackerTokenHint')} ${t('core.trackerSecretKept')}`;
+  }
+
+  return field.secret ? t('core.trackerSecretKept') : undefined;
+}
+
+/**
+ * При отказе черновика другого драйвера открывается его редактор с ошибкой поля.
+ * Значение секрета остаётся в памяти формы, сервер возвращает только безопасную причину.
+ */
+async function showTokenFailure(cause: unknown) {
+  if (!(cause instanceof ApiError) || !isRecord(cause.data)
+    || cause.data.error !== 'tracker_token_invalid'
+    || typeof cause.data.driverId !== 'string' || typeof cause.data.field !== 'string') {
+    return;
+  }
+
+  editorId.value = cause.data.driverId;
+  await nextTick();
+  tokenFailure.value = {
+    driverId: cause.data.driverId,
+    field: cause.data.field,
+    message: failureText(cause),
+  };
+}
+
+/**
+ * Проверка и сохранение отправляют только видимые поля текущего режима схемы.
+ * Скрытые реквизиты остаются в черновике формы до возврата в прежний режим.
+ */
+function visibleValues(id: string, draft: Record<string, string | boolean | number>) {
+  const schema = externalDrivers.value.find((driver) => driver.id === id)?.schema ?? {};
+
+  return Object.fromEntries(Object.entries(schema)
+    .filter(([, field]) => !field.visibleIf || draft[field.visibleIf.field] === field.visibleIf.equals)
+    .map(([key, field]) => {
+      const value = draft[key];
+
+      return [key, typeof value === 'string' ? normalizeTrackerPortalInput(field, value) : value];
+    }));
+}
+
+/**
+ * Проверяется выбранный редактором драйвер с текущим вводом, независимо от флажка доски.
+ * Сервер сохраняет прежний секрет при пустом поле и не записывает настройки проверки.
+ */
+async function checkConnection() {
+  if (busy.value || loading.value || !driverAvailable.value || invalidTokenInput.value) {
+    return;
+  }
+
+  testing.value = true;
+  connectionResult.value = null;
+
+  try {
+    connectionResult.value = await api.post('/api/trackers/test-connection', {
+      driverId: editorId.value,
+      settings: visibleValues(editorId.value, values.value),
+      expectedRevision: revision.value,
+    }) as { ok: boolean; error?: string };
+  } catch (cause) {
+    connectionResult.value = { ok: false, error: failureText(cause) };
+    await showTokenFailure(cause);
+  } finally {
+    testing.value = false;
+  }
+}
 
 /**
  * Подпись схемы переводится только при явном descriptor ключа.
@@ -365,7 +497,7 @@ async function load() {
  * Неуспешная запись сохраняет введённые значения для исправления и повторной проверки.
  */
 async function save() {
-  if (saving.value || loading.value) {
+  if (busy.value || loading.value || invalidTokenInput.value) {
     return;
   }
 
@@ -380,14 +512,7 @@ async function save() {
 
     const settings = Object.fromEntries([...pending]
       .filter(([id]) => externalDrivers.value.some((driver) => driver.id === id))
-      .map(([id, draft]) => {
-        const schema = externalDrivers.value.find((driver) => driver.id === id)?.schema ?? {};
-        const visibleValues = Object.fromEntries(Object.entries(schema)
-          .filter(([, field]) => !field.visibleIf || draft[field.visibleIf.field] === field.visibleIf.equals)
-          .map(([key]) => [key, draft[key]]));
-
-        return [id, visibleValues];
-      }));
+      .map(([id, draft]) => [id, visibleValues(id, draft)]));
     const result = await trackers.saveSettings({
       externalId: externalId.value || null,
       settings,
@@ -398,6 +523,7 @@ async function save() {
     saved.value = true;
   } catch (cause) {
     error.value = failureText(cause);
+    await showTokenFailure(cause);
   } finally {
     saving.value = false;
   }

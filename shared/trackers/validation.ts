@@ -62,7 +62,9 @@ export function isTrackerSettingsSchema(value: unknown): value is TrackerSetting
     /^[a-zA-Z][a-zA-Z0-9_]*$/u.test(key) && !['constructor', 'prototype', '__proto__'].includes(key)
     && isRecord(field) && ['string', 'number', 'boolean', 'select'].includes(String(field.type))
     && Object.keys(field).every((name) =>
-      ['type', 'label', 'secret', 'required', 'options', 'visibleIf'].includes(name))
+      ['type', 'label', 'secret', 'required', 'options', 'visibleIf', 'format'].includes(name))
+    && (field.format === undefined || (field.type === 'string' && field.secret === true
+      && field.format === 'api-token'))
     && (field.type === 'select' ? isSelectOptions(field.options) : field.options === undefined)
     && isFieldVisibility(field)
     && (field.secret === undefined || typeof field.secret === 'boolean')

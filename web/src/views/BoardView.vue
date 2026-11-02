@@ -29,7 +29,7 @@
     <BoardLoading v-if="!data && !error" label="Загрузка доски…" />
     <UiInlineMessage v-if="error" :tone="data ? 'warning' : 'danger'" class="board-tracker-error">
       <div class="board-tracker-error-heading">
-        <strong>{{ t('core.boardTrackerUnavailable') }}</strong>
+        <strong>{{ trackerUnavailableLabel }}</strong>
         <div class="board-tracker-error-actions">
           <UiButton variant="text" :disabled="loading" :loading="loading" @click="board.load(true)">
             {{ t('core.boardRetry') }}
@@ -493,6 +493,11 @@ const trackerSettingsOpen = ref(false);
 const errorDetailsOpen = ref(false);
 const errorDetailsId = `board-error-${useId()}`;
 const trackers = useTrackersStore();
+const trackerUnavailableLabel = computed(() => {
+  const name = trackers.catalog?.drivers.find((driver) => driver.id === trackers.catalog?.externalId)?.name;
+
+  return name ? t('core.boardNamedTrackerUnavailable', { name }) : t('core.boardTrackerUnavailable');
+});
 const sortedOwnTasks = computed(() => [...ownTasks.tasks].sort((left, right) =>
   right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
 ));

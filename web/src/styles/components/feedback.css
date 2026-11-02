@@ -257,6 +257,29 @@
   line-height: 1.35;
 }
 
+/* Сохранённый выбор обозначается одинаково в каталоге и в заголовке редактора. */
+.ui-status-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-mid);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.ui-status-chip[data-tone='success'] {
+  border-color: color-mix(in srgb, var(--good) 40%, var(--line));
+  background: color-mix(in srgb, var(--good) 10%, var(--surface));
+  color: var(--good);
+}
+
 /* Стадия зрелости продукта единообразно читается рядом с названием инструмента. */
 .ui-maturity-chip {
   display: inline-flex;

@@ -221,12 +221,42 @@ export class TrackerRegistry {
 
   /**
    * Проверка реквизитов адресует переданный драйвер независимо от выбора доски.
-   * Проверка использует тот же экземпляр, lease и очередь, не активируя второй внешний источник.
+   * Черновик получает отдельный экземпляр с временным host под общим lease пакета.
+   * Без host сохраняется проверка текущей сессии, не активирующая второй внешний источник.
    */
-  async testAuth(id: string) {
-    await this.load(id);
+  async testAuth(id: string, host?: TrackerHost) {
+    if (!host) {
+      await this.load(id);
 
-    return this.dispatch(id, (tracker) => tracker.testAuth(), false);
+      return this.dispatch(id, (tracker) => tracker.testAuth(), false);
+    }
+
+    const entry = this.entries.get(id);
+
+    if (this.closed || !entry?.directory || entry.closed) {
+      throw new TrackerError('tracker_unavailable', 'Пакет внешнего трекера недоступен');
+    }
+
+    const directory = entry.directory;
+
+    entry.loaded = true;
+
+    return this.track(entry, async () => {
+      const module = await importRuntimeModule<{ default: TrackerFactory }>(
+        path.join(directory, 'driver.ts'),
+      );
+      const probe = await module.default(host);
+
+      try {
+        if (probe.id !== id || typeof probe.testAuth !== 'function') {
+          throw new TrackerError('tracker_unavailable', 'Неверный контракт проверки драйвера');
+        }
+
+        return await probe.testAuth();
+      } finally {
+        await probe.dispose?.();
+      }
+    });
   }
 
   /**
@@ -268,7 +298,15 @@ export class TrackerRegistry {
       return Promise.reject(new TrackerError('tracker_unavailable', 'Трекер не настроен или недоступен'));
     }
 
-    const result = Promise.resolve().then(() => operation(entry.tracker!));
+    return this.track(entry, () => operation(entry.tracker!));
+  }
+
+  /**
+   * Обычные вызовы и временные проверки удерживают один учёт незавершённых операций.
+   * Запись credentials, замена пакета и закрытие ждут также dispose временного экземпляра.
+   */
+  private track<T>(entry: Entry, operation: () => Promise<T>): Promise<T> {
+    const result = Promise.resolve().then(operation);
 
     entry.pending.add(result);
     result.then(() => entry.pending.delete(result), () => entry.pending.delete(result));
@@ -320,7 +358,8 @@ export class TrackerRegistry {
    * Поколение и secrets меняются синхронно внутри закрытого допуска, без окна для старого запроса.
    */
   async changeCredentials(ids: string[], write: () => void): Promise<void> {
-    const entries = ids.map((id) => this.entries.get(id)).filter((entry): entry is Entry => !!entry?.tracker);
+    const entries = ids.map((id) => this.entries.get(id))
+      .filter((entry): entry is Entry => !!entry && (!!entry.tracker || entry.pending.size > 0));
 
     if (this.closed || entries.some((entry) => entry.closed || entry.busy)) {
       throw new TrackerError('tracker_busy', 'Драйвер занят установкой или требует перезапуска', 409);

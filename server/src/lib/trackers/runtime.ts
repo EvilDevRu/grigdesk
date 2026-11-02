@@ -1,4 +1,6 @@
 import path from 'node:path';
+import os from 'node:os';
+import { mkdtemp, rm } from 'node:fs/promises';
 
 import type { TrackerCredentialsStore } from './credentialsStore.ts';
 import { createDriverInstallService } from '../driverInstall/service.ts';
@@ -168,6 +170,50 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
 
   await activateSelection();
 
+  /**
+   * Черновик проверяется в отдельной сессии без изменения выбора и файлов реквизитов.
+   * Временные cookie удаляются после dispose; секреты маскируются в ответе драйвера.
+   */
+  async function testConnection(id: string, values: Record<string, unknown>) {
+    const credentials = credsStore.mergeFor(id, values);
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-tracker-probe-'));
+
+    try {
+      const result = await registry.testAuth(id, {
+        ...host(id),
+        credentials: { read: () => ({ ...credentials }) },
+        dataDir: directory,
+        cookiePath: path.join(directory, 'cookies.json'),
+        serial: createSerialQueue(),
+      });
+
+      if (result.ok) {
+        return { ok: true };
+      }
+
+      let error = result.error || 'Трекер отклонил подключение';
+      const schema = registry.descriptors().find((entry) => entry.id === id)?.schema ?? {};
+
+      for (const [key, field] of Object.entries(schema)) {
+        const secret = credentials[key];
+
+        if (field.secret && typeof secret === 'string' && secret) {
+          error = error.replaceAll(secret, '***').replaceAll(encodeURIComponent(secret), '***');
+        }
+      }
+
+      return { ok: false, error };
+    } catch (error) {
+      if (error instanceof TrackerError) {
+        throw error;
+      }
+
+      return { ok: false, error: 'Не удалось подключиться к трекеру. Проверьте адрес и реквизиты.' };
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+
   return {
     registry,
     selection,
@@ -176,6 +222,7 @@ export async function createTrackerRuntime(options: TrackerRuntimeOptions) {
     own,
     installs,
     activateSelection,
+    testConnection,
     writeSettings: async (externalId: string | null, changes: Record<string, Record<string, unknown>>) => {
       await registry.changeCredentials(Object.keys(changes), () => {
         if (externalId && registry.descriptors().some((entry) => entry.id === externalId && entry.deleted)) {

@@ -35,10 +35,10 @@ export class TrackerCredentialsStore {
   }
 
   /**
-   * Пустое поле секрета сохраняет прежнее значение при повторном открытии формы.
-   * Секреты записываются отдельно от выбора доски с правами только владельца.
+   * Черновик и запись одинаково сохраняют прежние значения для пустого ввода.
+   * Проверка соединения получает копию реквизитов без записи в постоянный файл.
    */
-  writeFor(id: string, values: Record<string, unknown>): void {
+  mergeFor(id: string, values: Record<string, unknown>): Record<string, unknown> {
     const merged = { ...this.readFor(id) };
 
     for (const [key, value] of Object.entries(values)) {
@@ -46,6 +46,16 @@ export class TrackerCredentialsStore {
         merged[key] = value;
       }
     }
+
+    return merged;
+  }
+
+  /**
+   * Пустое поле секрета сохраняет прежнее значение при повторном открытии формы.
+   * Секреты записываются отдельно от выбора доски с правами только владельца.
+   */
+  writeFor(id: string, values: Record<string, unknown>): void {
+    const merged = this.mergeFor(id, values);
 
     let stored: Record<string, unknown> = {};
 

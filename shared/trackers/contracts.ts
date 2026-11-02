@@ -59,13 +59,20 @@ interface TrackerSettingsFieldBase {
 }
 
 export type TrackerSettingsField = TrackerSettingsFieldBase & ({
-  type: 'string' | 'number';
+  type: 'string';
+  format?: 'api-token';
+  visibleIf?: { field: string; equals: string };
+} | {
+  type: 'number';
+  format?: never;
   visibleIf?: { field: string; equals: string };
 } | {
   type: 'boolean';
+  format?: never;
   visibleIf?: never;
 } | {
   type: 'select';
+  format?: never;
   options: Array<{ value: string; label: TrackerLabel }>;
   visibleIf?: never;
 });
