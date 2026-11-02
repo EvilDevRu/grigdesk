@@ -11,7 +11,7 @@ export type GlmAccessMode = 'api' | 'coding-plan';
 export type { GlmCompatibilityRuntime };
 
 export const GLM_PROFILE_REVISION = 'grigdesk-glm-profile-v3';
-export const GLM_POLICY_REVISION = 'grigdesk-glm-policy-v3';
+export const GLM_POLICY_REVISION = 'grigdesk-glm-policy-v4';
 // Ревизии отвязанного этапа фабрики отдельны от чата: смена Factory профиля или политики
 // не меняет отпечаток, допуск и память обычного чата GLM.
 export const GLM_FACTORY_PROFILE_REVISION = 'grigdesk-glm-factory-profile-v2';
@@ -21,17 +21,20 @@ export const GLM_FACTORY_PROFILE_REVISION = 'grigdesk-glm-factory-profile-v2';
 // окна Coding Plan, на которых живут чаты; ограничение владелец принял на себя.
 // policy-v3: state-only разрешает файловые артефакты только в STATE_DIR;
 // read-only рабочих деревьев обеспечивается границей workspace песочницы DSH.
-export const GLM_FACTORY_POLICY_REVISION = 'grigdesk-glm-factory-policy-v3';
+// policy-v4: общий базовый набор разрешает web_search и web_fetch.
+export const GLM_FACTORY_POLICY_REVISION = 'grigdesk-glm-factory-policy-v4';
 export const GLM_DEFAULT_EFFORT = 'high';
 export const GLM_ALLOWED_MODES: readonly GlmAccessMode[] = Object.freeze(['api', 'coding-plan']);
 
 // Факты G2 на настоящей generation. Инструменты профиля, которые hook разрешает по точному
-// имени: без делегирующих, субагентных, workflow, goal, plan и web-инструментов.
+// имени: без делегирующих, субагентных, workflow, goal и plan-инструментов.
 // skill — нативный загрузчик инструкций навыка из каталога пользователя: чтение без
 // файловых и сетевых эффектов. job_* — фоновые задачи самого процесса: запуск идёт через
 // bash, job_list/job_output читают состояние и вывод, job_kill останавливает своё.
 // read_image — просмотр изображений, тип read. Поддержку image input модели проверяет
 // сам инструмент DSH; политика GrigDesk не принимает это решение за модель.
+// web_search и web_fetch — поиск и чтение страниц; доступность провайдера и сетевые
+// ограничения проверяет Harness, разрешение инструмента их не подменяет.
 // Всё перечисленное действует и в чате, и на этапах Factory.
 export const GLM_NATIVE_TOOLS: readonly string[] = Object.freeze([
   'read',
@@ -40,6 +43,8 @@ export const GLM_NATIVE_TOOLS: readonly string[] = Object.freeze([
   'edit',
   'glob',
   'grep',
+  'web_search',
+  'web_fetch',
   'bash',
   'skill',
   'job_list',

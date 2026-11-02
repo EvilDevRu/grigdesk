@@ -246,8 +246,8 @@ test('настоящий запуск из пути с пробелами и ч�
   assert.ok((await fs.stat(launch.dshHome)).isDirectory(), 'home чата сохраняется');
 });
 
-// С G6 заглушку заменил полный hook: проверяется отказ вне политики до эффекта.
-test('настоящий hook политики запрещает инструменты вне политики до эффекта', async (t) => {
+// С G6 заглушку заменил полный hook: проверяются решения политики до эффекта.
+test('настоящая политика запрещает прямой SSH и разрешает web_fetch', async (t) => {
   const calls = [
     ['bash', { command: 'ssh -p 9 x@127.0.0.1; echo effect > bash-effect.txt', description: 'ssh' }],
     ['web_fetch', { url: 'http://127.0.0.1/' }],
@@ -265,7 +265,7 @@ test('настоящий hook политики запрещает инструм
 
   assert.deepEqual(entries.map((entry) => [entry.name, entry.decision]), [
     ['bash', 'deny'],
-    ['web_fetch', 'deny'],
+    ['web_fetch', 'allow'],
   ]);
   await assert.rejects(fs.stat(path.join(f.cwd, 'bash-effect.txt')), { code: 'ENOENT' });
 });

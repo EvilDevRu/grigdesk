@@ -33,6 +33,8 @@ const KINDS: Readonly<Record<string, GlmToolKind>> = Object.freeze({
   read_image: 'read',
   glob: 'search',
   grep: 'search',
+  web_search: 'search',
+  web_fetch: 'read',
   write: 'edit',
   edit: 'edit',
   bash: 'execute',

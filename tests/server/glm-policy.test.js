@@ -78,10 +78,10 @@ test('исключение внутри политики — exit 2', async (t) 
   }
 });
 
-test('делегирующие, субагентные, workflow и web-инструменты — exit 2', async (t) => {
+test('делегирующие, субагентные и workflow-инструменты — exit 2', async (t) => {
   const forbidden = [
     'subagent', 'subagent_fork', 'send_message', 'interrupt_agent', 'list_agents', 'workflow', 'ralph',
-    'web_fetch', 'web_search', 'present', 'create_goal',
+    'present', 'create_goal',
     'exit_plan_mode',
   ];
 
@@ -168,6 +168,34 @@ test('read_image разрешён как read в политике чата и ho
   assert.equal(result.descriptor.decision, 'allow');
 });
 
+test('веб-инструменты разрешены в чате и hook ACP с типами search и read', async (t) => {
+  const calls = [
+    ['web_search', { query: 'Harness documentation' }, 'search'],
+    ['web_fetch', { url: 'https://example.com/' }, 'read'],
+  ];
+
+  for (const [name, input, kind] of calls) {
+    for (const policy of [POLICY, { ...POLICY, delegation: 'foreground-v1' }]) {
+      assert.deepEqual(decideGlmTool(name, input, policy), {
+        allow: true,
+        kind,
+        reason: '',
+      });
+    }
+
+    const result = await runHook(t, preToolUse(name, input));
+
+    assert.equal(result.code, 0, name);
+    assert.equal(result.descriptor.name, name);
+    assert.equal(result.descriptor.kind, kind);
+    assert.equal(result.descriptor.decision, 'allow');
+  }
+
+  for (const name of ['WebSearch', 'WebFetch', 'web_search_extra', 'web_fetch ']) {
+    assert.equal((await runHook(t, preToolUse(name))).code, 2, name);
+  }
+});
+
 test('фоновые задачи — exit 0: чтение состояния и вывода, остановка своей задачи', async (t) => {
   const calls = [
     ['job_list', {}, 'read'],
@@ -192,7 +220,7 @@ test('hook пишет дескриптор с хэшем каноническо�
     nested: { b: 2, a: 1 },
   };
   const allowed = await runHook(t, preToolUse('write', input, 'call-42'));
-  const denied = await runHook(t, preToolUse('web_fetch', { url: 'http://127.0.0.1/' }, 'call-43'));
+  const denied = await runHook(t, preToolUse('unknown_tool', { url: 'http://127.0.0.1/' }, 'call-43'));
   const hash = createHash('sha256').update(canonicalGlmJson(input)).digest('hex');
 
   assert.deepEqual(allowed.descriptor, {

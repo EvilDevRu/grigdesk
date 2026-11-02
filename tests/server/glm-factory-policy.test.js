@@ -283,6 +283,36 @@ test('SB07b: state-only требует физический корень и за
   }
 });
 
+test('веб-инструменты доступны обоим файловым режимам Factory через настоящий hook', async (t) => {
+  const f = await fixture(t);
+  const calls = [
+    ['web_search', { query: 'Harness documentation' }, 'search'],
+    ['web_fetch', { url: 'https://example.com/' }, 'read'],
+  ];
+
+  for (const filesystem of ['state-only', 'workspace-write']) {
+    const policy = parseGlmFactoryToolPolicy({
+      ...FACTORY_POLICY,
+      filesystem,
+      ...(filesystem === 'state-only' ? { stateDir: f.cwd } : {}),
+    });
+
+    for (const [name, input, kind] of calls) {
+      assert.deepEqual(decideGlmFactoryTool(name, input, policy), {
+        allow: true,
+        kind,
+        reason: '',
+      });
+
+      const result = await runHook(t, policy, preToolUse(name, input));
+
+      assert.equal(result.code, 0, `${filesystem}: ${name}`);
+      assert.equal(result.descriptor.kind, kind);
+      assert.equal(result.descriptor.decision, 'allow');
+    }
+  }
+});
+
 test('SB07b: настоящий hook различает потребителя и закрыт при порче документа', async (t) => {
   const alive = await runHook(t, FACTORY_POLICY, { hook_event_name: 'UserPromptSubmit' });
   const status = await runHook(t, FACTORY_POLICY, preToolUse(STATUS_TOOLS[1], { result: 'done' }));
