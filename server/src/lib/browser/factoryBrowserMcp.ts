@@ -3,6 +3,7 @@ import { Buffer } from 'node:buffer';
 
 import { isPlainRecord } from '../../../../shared/lib/objects.ts';
 import { BROWSER_DESCRIPTOR } from '../../../../shared/browser/browserTool.ts';
+import { BROWSER_TAB_LIMIT_FAILURE } from '../../../../shared/browser/browserLimits.ts';
 import { parseBrowserAction } from '../../../../shared/browser/browserActions.ts';
 import { browserMailboxRequest, readBrowserReady } from './browserMailbox.ts';
 import type { MailboxContext } from './browserMailbox.ts';
@@ -90,10 +91,12 @@ const PUBLIC_ERRORS = new Set([
 function failure(error: unknown): FactoryBrowserMcpResult {
   const message = error instanceof Error ? error.message : '';
   const code = PUBLIC_ERRORS.has(message) ? message : 'browser_unavailable';
+  const result = code === 'browser_tab_limit'
+    ? { ...BROWSER_TAB_LIMIT_FAILURE } : { ok: false, error: code };
 
   return {
-    content: [{ type: 'text', text: JSON.stringify({ ok: false, error: code }) }],
-    structuredContent: { ok: false, error: code },
+    content: [{ type: 'text', text: JSON.stringify(result) }],
+    structuredContent: result,
     isError: true,
   };
 }

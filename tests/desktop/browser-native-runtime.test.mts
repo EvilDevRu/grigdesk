@@ -653,3 +653,33 @@ test('BR-N-ZOOM: public percent переводится в Electron factor и п�
   }),
     /browser_request_invalid/u);
 });
+
+test('BR-N-LIMIT: общий лимит действует при пустом списке нового агента', async (t) => {
+  const f = await fixture(t);
+
+  for (let index = 0; index < 20; index += 1) {
+    const opened = await f.execute({
+      action: 'open',
+      url: `http://fixture.test/page-${index}`,
+    }, 0, 'owner-b') as TabResult;
+
+    assert.equal(opened.ok, true);
+  }
+
+  assert.deepEqual(await f.execute({ action: 'list' }), { ok: true, tabs: [] });
+  assert.deepEqual(await f.execute({ action: 'open', url: 'http://fixture.test/new' }), {
+    ok: false,
+    error: 'browser_tab_limit',
+  });
+  assert.equal(f.api.snapshot().tabs.length, 20);
+
+  const existing = await f.execute({
+    action: 'open',
+    url: 'http://fixture.test/page-0',
+  }, 0, 'owner-b') as TabResult;
+
+  assert.equal(existing.ok, true);
+  assert.equal(f.api.snapshot().tabs.length, 20);
+  await f.api.invoke({ operation: 'close', tabId: existing.tabId });
+  assert.equal((await f.open()).ok, true);
+});

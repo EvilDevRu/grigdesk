@@ -1,3 +1,5 @@
+import { BROWSER_TAB_LIMIT } from '../../../shared/browser/browserLimits.ts';
+
 export interface BrowserRect {
   x: number;
   y: number;
@@ -115,7 +117,7 @@ export function createBrowserTabs(port: {
         return publicTab(existing);
       }
 
-      if (entries.size >= 20) {
+      if (entries.size >= BROWSER_TAB_LIMIT) {
         throw new Error('browser_tab_limit');
       }
 
