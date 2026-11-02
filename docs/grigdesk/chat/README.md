@@ -55,7 +55,7 @@
 
 - [GLM parity: те же сценарии на ELF, policy/MCP и исходы остановки](glm-binary-parity.md)
 
-- [Offline/live проверка GLM: явный ELF, cache и временный api admission](glm-smoke-binary.md)
+- [Offline/live проверка GLM: явный ELF/cache, оба режима, временный допуск и --admit](glm-smoke-binary.md)
 - [Отчёт smoke GLM: полный HTTP-отказ без секретов и остановка после первого неуспеха](glm-smoke-http-errors.md)
 
 - [Память GLM: A→B→A, несовместимый журнал и закрепление ELF до prompt](glm-binary-memory.md)
