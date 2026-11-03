@@ -302,8 +302,10 @@ if operation == "encode":
     if result == "done" and blocking:
         fail(
             "результат done: блокирующие замечания недопустимы — "
-            "объяви их отложенными или верни failed: " + ", ".join(sorted(blocking))
+            "верни failed: " + ", ".join(sorted(blocking))
         )
+    if result == "failed" and not blocking:
+        fail("результат failed: нужны блокирующие находки; автоматического done нет")
     if result == "done" and not owner:
         # У отложенной находки владелец нужен воротам, чтобы показать человеку, к кому
         # она пойдёт follow-up'ом. Отдельного флага у агента для этого не просим.
@@ -365,6 +367,11 @@ elif operation in {"validate", "owner"}:
         for finding in value["findings"]
     ):
         fail("результат done: вердикт содержит блокирующие замечания")
+    if result == "failed" and not any(
+        finding.get("severity", DEFAULT_SEVERITY) == "blocking"
+        for finding in value["findings"]
+    ):
+        fail("результат failed: нужны блокирующие находки; автоматического done нет")
     if result != "failed" and "stage" in value:
         fail(f"результат {result}: граница этапа допустима только у failed")
     if operation == "owner":

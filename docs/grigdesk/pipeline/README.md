@@ -1,5 +1,7 @@
 # Конвейер
 
+- [Достоверность приёмки: поздние блокеры, обязательные доказательства и автоматические цепочки](acceptance-evidence.md)
+
 - [Подтверждённый источник запуска и совместимая выдача конвейера](task-source-index.md)
 
 - [Codex: rc=0 без terminal status, noResult маршрута и stage-result](codex-no-result-contract.md)

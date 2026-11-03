@@ -512,6 +512,11 @@ assert_eq human "$(json_field "$evidence_stopped" stop)" \
   "rejected evidence wakes a human instead of retrying no-result"
 assert_eq failed "$(json_field "$evidence_stopped" lastCommit outcome)" \
   "runner done is replaced by trusted failed"
+evidence_findings=$(attempt_stage_state_findings_v2 "$evidence_task" "$evidence_attempt")
+assert_eq evidence-rejected "$(json_field "$evidence_findings" open 0 id)" \
+  "отказ доказательства остаётся открытым блокером вместо зелёного результата"
+assert_eq human "$(json_field "$evidence_findings" open 0 owner)" \
+  "недоступное обязательное доказательство требует решения человека"
 evidence_prefix="${evidence_task}"$'\ttrivial\tbuild\tBUILD\tdone'
 assert_contains "$(cat "$EVIDENCE_HOOK_LOG")" "$evidence_prefix" \
   "hook receives task, route, node, runKey, runner result and exact runId"

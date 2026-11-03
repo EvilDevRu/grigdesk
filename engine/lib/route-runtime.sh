@@ -1411,9 +1411,12 @@ _route_v2_run_agent_node() {
       # устранить сам (t8702: в manifest тестов попал файл, который VERIFY не исполняет),
       # поэтому цикл узла даёт один повтор с её цитатой и лишь потом зовёт человека.
       result=failed
-      verdict_b64=""
       ROUTE_V2_EVIDENCE_REJECTED=1
       ROUTE_V2_EVIDENCE_REASON=$(_route_v2_evidence_reason "$evidence_output")
+      # Непринятое доказательство не является задачей на слепой ремонт реализации.
+      # После штатного повтора typed human сохраняет открытый блокер у человека.
+      verdict_b64=$(run_state_verdict_encode failed human \
+        "evidence-rejected=${ROUTE_V2_EVIDENCE_REASON:-Обязательное доказательство недоступно}") || return
     fi
   fi
   rm -f -- "$_r2_context_file" "$_r2_prompt_file"
@@ -1533,11 +1536,9 @@ if outcome == "failed" or (outcome == "done" and findings):
     if outcome == "done" and blocking:
         fail()
     if outcome == "failed" and not blocking:
-        # Отказ, в котором не осталось ни одного блокирующего замечания, — не отказ:
-        # проверяющий сам объявил всё найденное отложенным. Разворачивать сборку не
-        # за что, иначе маршрут упрётся в no-progress по замечаниям, которые никто
-        # не просил чинить.
-        outcome = "done"
+        # Противоречивый отказ не доказывает выполнение обязательных критериев.
+        # Команда исправляет payload; хост не повышает исход до успешного.
+        fail()
     verdict = {"owner": owner or "build", "findings": normalized}
     if reviewed_raw is not None:
         if not isinstance(reviewed_raw, list) or not 1 <= len(reviewed_raw) <= 64:
