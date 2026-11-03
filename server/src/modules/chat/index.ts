@@ -44,6 +44,7 @@ import {
 import { ChatSessionBindingStore } from '../../lib/chat/sessionBindingStore.ts';
 import { ChatTurnLocks } from '../../lib/chat/turnLocks.ts';
 import { ChatTurnLedger, TURN_ID_RE } from '../../lib/chat/turnLedger.ts';
+import { chatTurnErrorMessage } from '../../lib/chat/turnError.ts';
 import { ChatInTurnLedger } from '../../lib/chat/inTurnLedger.ts';
 import { ChatAssistantMessages } from '../../lib/chat/assistantMessages.ts';
 import { ChatAssistantPublisher } from '../../lib/chat/assistantPublisher.ts';
@@ -432,6 +433,8 @@ interface RunningTurn extends ChatContextUsage {
 // давно получил подтверждение приёма.
 interface TurnChannel {
   turnId: string;
+  // Появляется только при регистрации исполнения; подготовка может завершиться раньше.
+  runId?: string;
   // Некому вернуть итог по HTTP: он уходит в pending.
   detached: () => boolean;
   // Записать итог в pending и сообщить окнам.
@@ -455,6 +458,15 @@ interface PreparedTurn {
     sessionId: string | null;
   };
 }
+
+// Полностью разрешённый вход после очереди; служебная выжимка может задать другую папку.
+type ChatTurnExecutionInput = ChatTurnInput & {
+  model: string;
+  target: RunTarget;
+  summaryWorkspace?: ResolvedWorkdir;
+  queued: boolean;
+  context: UiContext | null;
+};
 
 interface TurnReply {
   status: number;
@@ -3014,7 +3026,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         );
 
         if (turnLedger.get(entry.turnId)?.state !== 'done') {
-          await failTurn(entry, `Ход не выполнен: ${reason}.`);
+          await failTurn(entry, chatTurnErrorMessage(error));
         }
       })
       .catch(() => {})
@@ -3089,21 +3101,44 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   }
 
   /**
+   * Подготовка может упасть до регистрации исполнения: итог и конец принятого хода
+   * уходят окну до освобождения очереди, чтобы позднее событие не погасило следующий запуск.
+   */
+  async function runChatTurn(channel: TurnChannel, input: ChatTurnExecutionInput) {
+    try {
+      return await executeChatTurn(channel, input);
+    } catch (error) {
+      if (error instanceof ChatWorkdirError) {
+        throw error;
+      }
+
+      fastify.log.error({ err: error }, 'чат: ошибка подготовки или завершения хода');
+
+      return await channel.refuse(500, {
+        error: 'chat_failed',
+        message: chatTurnErrorMessage(error),
+      });
+    } finally {
+      if (channel.turnId && !channel.runId) {
+        fastify.sse.broadcast('chat-done', {
+          chatKey: input.chatKey,
+          turnId: channel.turnId,
+          queued: turnLedger.queued(input.chatKey).length,
+        });
+      }
+    }
+  }
+
+  /**
    * Один ход выбранного исполнителя: cwd и доп-каталоги из резолвера workspace, промпт,
    * права, живая сессия или разовый запуск, лента и прогресс в SSE. Куда уходит итог,
    * решает канал: ответом на запрос или записью в pending (принятый ход, оборванный сокет).
    */
-  async function runChatTurn(channel: TurnChannel, {
+  async function executeChatTurn(channel: TurnChannel, {
     id, message, model, effort, mode: wantMode, modeSelection, sessionId, context, attachments,
     chatKey, queued, requestTitle, sentAt, compact, slashCommand, target, summaryWorkspace, workspaceKey,
     mobileOwner,
-  }: ChatTurnInput & {
-    model: string;
-    target: RunTarget;
-    summaryWorkspace?: ResolvedWorkdir;
-    queued: boolean;
-    context: UiContext | null;
-  }) {
+  }: ChatTurnExecutionInput) {
     // Клиент фиксирует момент нажатия «отправить» до durable save. Он нужен только
     // страховочной записи pending: если окно закрылось и вопрос пришлось восстановить,
     // его точное время не должно превращаться во время готовности ответа.
@@ -3605,67 +3640,69 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       abandonedId = null;
     };
 
-    if (chatKey) {
-      activeRuns.set(chatKey, runRec);
-      backgroundRuns.hide(chatKey);
-      // Канал уточнений открывается на этот запуск; транспорт зарегистрирует порт сам.
-
-      inTurnMessages.beginRun({
-        chatKey,
-        runId,
-        ...(channel.turnId ? { parentTurnId: channel.turnId } : {}),
-        images: parseInTurnCapability(executor.inTurnInput)?.images === true,
-      });
-
-      if (plan) {
-        inTurnMessages.setAvailability(runId, false, 'compacting');
-      } else if (!executor.inTurnInput) {
-        // Исполнитель честно не умеет ввод в активный ход: причина называется сразу,
-        // а не выглядит как «транспорт ещё не поднялся».
-        inTurnMessages.setAvailability(runId, false, 'unsupported');
-      }
-
-      // Ход пошёл: окна снимают со своего сообщения метку «ждёт очереди».
-      fastify.sse.broadcast('chat-turn-start', {
-        chatKey,
-        at: runRec.startedAt,
-        runId,
-        snapshot: runRec.snapshot,
-        compact: !!plan,
-        inTurn: publicInTurnState(runId),
-        ...(channel.turnId ? { turnId: channel.turnId } : {}),
-      });
-    }
-    // Ожидание ответа человека не должно упираться в таймаут вызова MCP-инструмента.
-    const baseEnv = claudeAuth ? claudeAuth.env() : process.env;
-    // Порог автокомпакта из «Настроек → Запуски» — только тем CLI, у кого такая ручка
-    // вообще есть (executor.autoCompactEnv). Читаем перед каждым ходом: правка настройки
-    // действует сразу, без рестарта сервера. 0 — не вмешиваемся, у CLI остаётся свой.
-    const compactWindow = Math.max(0, Number(currentPrefs.chatAutoCompactWindow) || 0);
-    const compactEnv = compactWindow && executor.autoCompactEnv
-      ? { [executor.autoCompactEnv]: String(compactWindow) }
-      : {};
-
-    // Живая сессия: процесс исполнителя переживает свой ход. Только так фоновая команда
-    // и субагент доживают до конца, а CLI получает возможность разбудить модель сам —
-    // разовый запуск умирал вместе с ответом, и обещание «сообщу, когда закончится»
-    // выполнить было физически нечем. Умеет ли исполнитель жить между ходами, объявляет
-    // он сам (executor.session), а тумблер prefs оставлен для отката: живой процесс
-    // держит память и свои MCP-серверы.
-    const liveTurn = currentPrefs.chatLiveSessions !== false
-      && executor.session?.mode === 'persistent'
-      && !!chatKey;
-    if (liveTurn) {
-      // Кнопка «стоп» остаётся прежней ручкой: она дёргает abort, а мы превращаем его
-      // в прерывание ХОДА. Убивать процесс больше нельзя — вместе с ним умрёт разговор.
-      ac.signal.addEventListener('abort', () => {
-        liveSessions.interrupt(chatKey).catch((error) => {
-          fastify.log.warn({ chatKey, err: error?.message }, 'чат: не удалось прервать ход живой сессии');
-        });
-      }, { once: true });
-    }
+    channel.runId = runId;
 
     try {
+      if (chatKey) {
+        activeRuns.set(chatKey, runRec);
+        backgroundRuns.hide(chatKey);
+        // Канал уточнений открывается на этот запуск; транспорт зарегистрирует порт сам.
+
+        inTurnMessages.beginRun({
+          chatKey,
+          runId,
+          ...(channel.turnId ? { parentTurnId: channel.turnId } : {}),
+          images: parseInTurnCapability(executor.inTurnInput)?.images === true,
+        });
+
+        if (plan) {
+          inTurnMessages.setAvailability(runId, false, 'compacting');
+        } else if (!executor.inTurnInput) {
+          // Исполнитель честно не умеет ввод в активный ход: причина называется сразу,
+          // а не выглядит как «транспорт ещё не поднялся».
+          inTurnMessages.setAvailability(runId, false, 'unsupported');
+        }
+
+        // Ход пошёл: окна снимают со своего сообщения метку «ждёт очереди».
+        fastify.sse.broadcast('chat-turn-start', {
+          chatKey,
+          at: runRec.startedAt,
+          runId,
+          snapshot: runRec.snapshot,
+          compact: !!plan,
+          inTurn: publicInTurnState(runId),
+          ...(channel.turnId ? { turnId: channel.turnId } : {}),
+        });
+      }
+      // Ожидание ответа человека не должно упираться в таймаут вызова MCP-инструмента.
+      const baseEnv = claudeAuth ? claudeAuth.env() : process.env;
+      // Порог автокомпакта из «Настроек → Запуски» — только тем CLI, у кого такая ручка
+      // вообще есть (executor.autoCompactEnv). Читаем перед каждым ходом: правка настройки
+      // действует сразу, без рестарта сервера. 0 — не вмешиваемся, у CLI остаётся свой.
+      const compactWindow = Math.max(0, Number(currentPrefs.chatAutoCompactWindow) || 0);
+      const compactEnv = compactWindow && executor.autoCompactEnv
+        ? { [executor.autoCompactEnv]: String(compactWindow) }
+        : {};
+
+      // Живая сессия: процесс исполнителя переживает свой ход. Только так фоновая команда
+      // и субагент доживают до конца, а CLI получает возможность разбудить модель сам —
+      // разовый запуск умирал вместе с ответом, и обещание «сообщу, когда закончится»
+      // выполнить было физически нечем. Умеет ли исполнитель жить между ходами, объявляет
+      // он сам (executor.session), а тумблер prefs оставлен для отката: живой процесс
+      // держит память и свои MCP-серверы.
+      const liveTurn = currentPrefs.chatLiveSessions !== false
+        && executor.session?.mode === 'persistent'
+        && !!chatKey;
+      if (liveTurn) {
+        // Кнопка «стоп» остаётся прежней ручкой: она дёргает abort, а мы превращаем его
+        // в прерывание ХОДА. Убивать процесс больше нельзя — вместе с ним умрёт разговор.
+        ac.signal.addEventListener('abort', () => {
+          liveSessions.interrupt(chatKey).catch((error) => {
+            fastify.log.warn({ chatKey, err: error?.message }, 'чат: не удалось прервать ход живой сессии');
+          });
+        }, { once: true });
+      }
+
       if (channel.turnId && turnLedger.get(channel.turnId)?.mobileOwner) {
         await turnLedger.update(channel.turnId, { runId });
       }
@@ -4383,7 +4420,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           chatKey,
           role: 'error',
           ...errorContext,
-          reply: err.message,
+          reply: chatTurnErrorMessage(err, err.message),
           ...orphanUser,
           steps: summarySteps ? [...summarySteps] : [...runRec.steps],
           runId,
@@ -4398,7 +4435,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         ...errorContext,
         runId,
         error: err.code || 'chat_failed',
-        message: err.message,
+        message: chatTurnErrorMessage(err, err.message),
         ...(err.sessionReset ? { sessionReset: true } : {}),
         ...(err.sessionResetFailed ? { sessionResetFailed: true } : {}),
       });

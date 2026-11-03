@@ -3716,6 +3716,15 @@ export const useChatStore = defineStore('chat', {
           const current = this.runtimeRuns[d.chatKey];
           const inTurn = this.inTurnRuns[d.chatKey];
 
+          // Отказ подготовки имеет turnId, но ещё не имеет runId. Прежний запуск может
+          // всё ещё забирать итог: сначала ждём pending, затем сверяем работу с сервером,
+          // чтобы не оставить «работает» и не погасить уже начавшийся следующий ход.
+          if (d.turnId && !d.runId) {
+            this._collectPending().finally(() => this._loadActive());
+
+            return;
+          }
+
           // Конец своего запуска закрывает его черновики раньше ранних выходов: сверка
           // страницей может не пройти, а повторного chat-done не будет.
           this._closeInTurnDrafts(d.chatKey, d.runId);
