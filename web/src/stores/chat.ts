@@ -980,6 +980,30 @@ function selectedModel(session: ChatRecord | null) {
   return session?.modelRef || session?.model || '';
 }
 
+/**
+ * Пустой снимок при старте не доказывает отсутствие выбранной модели.
+ * После ожидания читаем текущий выбор заново: человек мог изменить его за это время.
+ */
+async function requestModel(session: ChatRecord) {
+  const providers = useProvidersStore();
+  let resolved = providers.modelOf(selectedModel(session));
+
+  if (!resolved.provider || !resolved.model) {
+    await providers.ensureModel(selectedModel(session));
+    resolved = providers.modelOf(selectedModel(session));
+  }
+
+  if (!resolved.provider || !resolved.model) {
+    throw new Error('Выбранная модель недоступна в реестре.');
+  }
+
+  return {
+    ...resolved,
+    provider: resolved.provider,
+    model: resolved.model,
+  };
+}
+
 const CODEX_CONTEXT_METRIC = 'active-input-v1';
 
 function metricNumber(value: unknown, { positive = false } = {}) {
@@ -5389,13 +5413,8 @@ export const useChatStore = defineStore('chat', {
 
       try {
         const url = s.taskId ? `/api/tasks/${s.taskId}/compact` : '/api/chat/compact';
-        const provStore = useProvidersStore();
-        const resolvedModel = provStore.modelOf(selectedModel(s));
+        const resolvedModel = await requestModel(s);
         const effortLevels = resolvedModel.model?.efforts || [];
-
-        if (!resolvedModel.provider || !resolvedModel.model) {
-          throw new Error('Выбранная модель недоступна в реестре.');
-        }
 
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
@@ -5612,13 +5631,8 @@ export const useChatStore = defineStore('chat', {
         const context = useUiContextStore().capture(router.currentRoute.value).promptContext;
         // Модель: сохранённый алиас резолвим в конкретную (что показано в селекте, то и считает),
         // пустое значение — модель по умолчанию из реестра.
-        const provStore = useProvidersStore();
-        const resolvedModel = provStore.modelOf(selectedModel(s));
+        const resolvedModel = await requestModel(s);
         const effortLevels = resolvedModel.model?.efforts || [];
-
-        if (!resolvedModel.provider || !resolvedModel.model) {
-          throw new Error('Выбранная модель недоступна в реестре.');
-        }
 
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
@@ -5830,11 +5844,7 @@ export const useChatStore = defineStore('chat', {
       try {
         // Модель: что показано в селекте, то и считает; пустое значение — модель по
         // умолчанию из реестра. Сохраняется в чат ДО durable save.
-        const resolvedModel = useProvidersStore().modelOf(selectedModel(s));
-
-        if (!resolvedModel.provider || !resolvedModel.model) {
-          throw new Error('Выбранная модель недоступна в реестре.');
-        }
+        const resolvedModel = await requestModel(s);
 
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
@@ -5933,17 +5943,26 @@ export const useChatStore = defineStore('chat', {
 
       let request;
 
+      postingTurns.add(turnId);
+
       try {
+        await requestModel(s);
+
+        if (m.delivery !== 'sending') {
+          postingTurns.delete(turnId);
+
+          return 'settled';
+        }
+
         request = this._turnRequest(s, m);
       } catch (caught) {
           const e = chatFailure(caught);
 
+        postingTurns.delete(turnId);
         this._refuseTurn(s, m, e);
 
         return 'refused';
       }
-
-      postingTurns.add(turnId);
 
       try {
         const r = decodeChatEnvelope(await api.post(

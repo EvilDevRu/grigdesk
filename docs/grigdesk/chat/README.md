@@ -256,6 +256,7 @@
 - [Сохранение модели, эффорта и режима при переключении (№93021)](model-switch-revert.md)
 - [Стабильный владелец runtime: общий raw-ключ для actions Pinia devtools](store-runtime-identity.md)
 - [Реестр моделей: устаревший отдаётся сразу, пересборка одна и в фоне](models-registry-cache.md)
+- [Отправка при холодном каталоге: ожидание готовой модели без ложного отказа](model-registry-startup.md)
 - [Алиасы CLI отдельными пунктами НЕ показываются](cli-model-aliases.md)
 - [В кратком списке моделей — только свежая версия каждого семейства](model-shortlist.md)
 - [Грабли исполнителей и моделей](executor-and-model-pitfalls.md)
