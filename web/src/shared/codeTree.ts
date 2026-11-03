@@ -22,6 +22,14 @@ export interface CodeContext {
   label: string;
 }
 
+export interface CodeContextChoice {
+  id: string;
+  repoKey: string;
+  treePath: string;
+  label: string;
+  description: string;
+}
+
 export type GitGroupId = 'staged' | 'work' | 'commits';
 export type GitStatBlock = 'add' | 'del' | 'none';
 
@@ -208,6 +216,56 @@ export function buildCodeContexts(repos: readonly CodeRepo[] | null | undefined)
     contexts,
     unavailable,
   };
+}
+
+/**
+ * Готовит короткие подписи выбора, сохраняя адреса контекстов неизменными.
+ * Одинаковые имена внутри репозитория различаются минимальным уникальным хвостом пути.
+ */
+export function buildCodeContextChoices(contexts: readonly CodeContext[]): CodeContextChoice[] {
+  const duplicates = new Map<string, CodeContextChoice[]>();
+  const choices = contexts.map((context) => {
+    const label = context.main || context.task ? worktreeLabel(context) : (context.name || 'без имени');
+    const choice: CodeContextChoice = {
+      id: context.id,
+      repoKey: context.repoKey,
+      treePath: context.treePath,
+      label,
+      description: context.branchLabel === label ? '' : context.branchLabel,
+    };
+    const key = JSON.stringify([context.repoKey, label]);
+    const group = duplicates.get(key) || [];
+
+    group.push(choice);
+    duplicates.set(key, group);
+
+    return choice;
+  });
+
+  for (const group of duplicates.values()) {
+    if (group.length < 2) {
+      continue;
+    }
+
+    const paths = group.map((choice) => choice.treePath.replaceAll('\\', '/').split('/').filter(Boolean));
+
+    for (const [index, choice] of group.entries()) {
+      const parts = paths[index] || [];
+      let depth = 1;
+
+      while (depth < parts.length && paths.some((peer, peerIndex) => {
+        return peerIndex !== index && peer.slice(-depth).join('/') === parts.slice(-depth).join('/');
+      })) {
+        depth += 1;
+      }
+
+      const suffix = parts.slice(-depth).join('/');
+
+      choice.label = parts.at(-1) === choice.label ? suffix : `${choice.label} · ${suffix}`;
+    }
+  }
+
+  return choices;
 }
 
 /**

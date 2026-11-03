@@ -149,6 +149,78 @@ test('FIELD-LAYER: диалог и поиск селекта сохраняют 
   assertBackground(popup, '#1c222c');
 });
 
+for (const attrs of [{}, { 'data-ui-workspace': '' }, { 'data-ui-touch': '' }]) {
+  test(`SELECT-STYLE: одинаковые шрифт и поиск во всех меню ${JSON.stringify(attrs)}`, async (t) => {
+    const variants = [
+      { name: 'inline', props: { compact: true, optionLayout: 'inline' } },
+      { name: 'plain', props: {} },
+      { name: 'compact', props: { compact: true } },
+      { name: 'groups', props: { groupNavigation: true } },
+      { name: 'compact-groups', props: { compact: true, groupNavigation: true } },
+    ];
+    const wrapper = fixture(t, () => h('section', attrs, variants.map((variant) => {
+      return h(ui.UiSelect, {
+        ...variant.props,
+        'data-select-style': variant.name,
+        modelValue: 'copy',
+        searchable: true,
+      }, {
+        default: () => h('optgroup', { label: 'repo' }, [
+          h('option', { value: 'copy', 'data-description': 'dev' }, 'Основная'),
+        ]),
+      });
+    })));
+    let reference;
+
+    for (const variant of variants) {
+      await wrapper.get(`button[data-select-style="${variant.name}"]`).trigger('click');
+      await flushPromises();
+
+      const popup = browser.document.querySelector('.ui-select-popup');
+      const input = popup.querySelector('input');
+
+      input.value = 'Ос';
+      input.dispatchEvent(new browser.Event('input', { bubbles: true }));
+      input.focus();
+      await flushPromises();
+
+      const rowStyle = browser.getComputedStyle(popup.querySelector('[role="option"]'));
+      const searchStyle = browser.getComputedStyle(input);
+      const clearStyle = browser.getComputedStyle(popup.querySelector('.ui-search-input > button'));
+      const actual = {
+        width: popup.style.width,
+        fontSize: browser.getComputedStyle(popup).fontSize,
+        rowMinHeight: rowStyle.minHeight,
+        searchHeight: searchStyle.height,
+        searchMinHeight: searchStyle.minHeight,
+        searchFontSize: searchStyle.fontSize,
+        searchRadius: searchStyle.borderRadius,
+        searchShadow: searchStyle.boxShadow,
+        clearHeight: clearStyle.height,
+        clearTop: clearStyle.top,
+      };
+
+      if (reference) {
+        assert.deepEqual(actual, reference, variant.name);
+      } else {
+        reference = actual;
+        assert.equal(actual.fontSize, '13px');
+        assert.equal(actual.searchShadow, 'none');
+
+        if ('data-ui-touch' in attrs) {
+          assert.equal(actual.searchHeight, '44px');
+        }
+      }
+
+      browser.document.body.dispatchEvent(new browser.KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+      }));
+      await flushPromises();
+    }
+  });
+}
+
 for (const [props, color] of [
   [{ readonly: true }, '#151b24'],
   [{ disabled: true }, '#1c222c'],

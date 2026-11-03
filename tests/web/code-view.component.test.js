@@ -486,9 +486,11 @@ test('CodeView показывает два подписанных уровня, 
   ]);
 
   const optionTexts = wrapper.findAll('#code-context-native option').map((option) => option.text());
-  assert.ok(optionTexts.includes('engine · Основная · master'));
-  assert.ok(optionTexts.includes('engine · Задача t46 · task-46'));
-  assert.ok(optionTexts.includes('web · Worktree web-preview · detached HEAD'));
+
+  assert.ok(optionTexts.includes('Основная'));
+  assert.ok(optionTexts.includes('Задача t46'));
+  assert.ok(optionTexts.includes('web-preview'));
+  assert.equal(wrapper.get('#code-context').text(), 'web · web-preview · detached HEAD');
   assert.match(wrapper.get('.context-warning').text(), /broken.*\/missing\/broken/s);
   assert.match(wrapper.get('.context-warning a').text(), /Проекты/);
 
@@ -496,7 +498,18 @@ test('CodeView показывает два подписанных уровня, 
   assert.equal(query(restoredLs).get('repo'), 'web');
   assert.equal(query(restoredLs).get('root'), '/work/web-preview');
 
-  await wrapper.get('#code-context-native').setValue(JSON.stringify(['engine', '/engine']));
+  await wrapper.get('#code-context').trigger('click');
+  await settle(flushPromises);
+
+  const popup = browser.document.querySelector('.ui-select-popup[data-option-layout="inline"]');
+
+  assert.ok(Boolean(popup));
+  assert.deepEqual([...popup.querySelectorAll('.ui-select-group')].map((group) => group.textContent),
+    ['engine', 'web']);
+  assert.equal(popup.textContent.includes('/work/web-preview'), false);
+  assert.match(popup.querySelector('[data-option-index="3"]').getAttribute('data-ui-tooltip'),
+    /\/work\/web-preview/u);
+  popup.querySelector('[data-option-index="0"]').click();
   await settle(flushPromises);
   assert.deepEqual(JSON.parse(browser.localStorage.getItem('grigdesk-code-context:grigdesk')), {
     v: 1,
@@ -514,8 +527,10 @@ test('CodeView показывает два подписанных уровня, 
   assert.equal(wrapper.findAll('.code-head select').length, 2);
   assert.deepEqual(
     wrapper.findAll('#code-context-native option').map((option) => option.text()),
-    ['solo · Основная · trunk'],
+    ['Основная'],
   );
+  assert.equal(wrapper.get('#code-context-native optgroup').attributes('label'), 'solo');
+  assert.equal(wrapper.get('#code-context').text(), 'Основная · trunk');
   assert.equal(wrapper.find('.code-head .tlabel').exists(), false);
 
   await wrapper.get('#code-project-native').setValue('grigdesk');
@@ -1330,8 +1345,8 @@ test('поздние repos и git не возвращают интерфейс �
   assert.equal(wrapper.get('#code-project-native').element.value, 'a');
   assert.equal(wrapper.get('#code-context-native').element.value, JSON.stringify(['a', '/a/main']));
   assert.equal(wrapper.find('.perr').exists(), false);
-  assert.ok(wrapper.findAll('#code-context-native option').every((option) => {
-    return option.text().startsWith('a ·');
+  assert.ok(wrapper.findAll('#code-context-native optgroup').every((group) => {
+    return group.attributes('label') === 'a';
   }));
 
   await selectCodeTab(wrapper, 'changes');

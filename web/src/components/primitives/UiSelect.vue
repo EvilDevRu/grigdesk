@@ -23,6 +23,7 @@
       :data-ui-touch="touchMode || undefined"
       :data-group-navigation="groupNavigation || undefined"
       :data-density="compact ? 'compact' : undefined"
+      :data-option-layout="optionLayout === 'inline' ? 'inline' : undefined"
       class="ui-select-popup"
       has-popup="dialog"
       focus-policy="none"
@@ -160,6 +161,7 @@
               :disabled="option.disabled"
               :aria-disabled="option.disabled ? 'true' : undefined"
               :aria-selected="option.value === String(model ?? '')"
+              v-tooltip="optionLayout === 'inline' ? optionTooltip(option) : ''"
               @mousemove="activate(option)"
               @click="choose(option)"
             >
@@ -225,6 +227,7 @@ import {
   type UiSelectOptionSnapshot,
 } from '../../composables/useUiFieldSelect';
 import { t } from '../../services/locale.ts';
+import { vTooltip } from '../../services/tooltipDirective.ts';
 import type { UiModelModifiers, UiSelectValue } from '../../types/uiFields';
 import type { UiPopoverCloseReason } from '../../types/uiOverlays';
 import UiPopover from '../overlays/UiPopover.vue';
@@ -242,6 +245,7 @@ const props = withDefaults(defineProps<{
   compact?: boolean;
   searchable?: boolean | 'auto';
   groupNavigation?: boolean;
+  optionLayout?: 'stacked' | 'inline';
   modelValue?: UiSelectValue;
   modelModifiers?: UiModelModifiers;
 }>(), {
@@ -253,6 +257,7 @@ const props = withDefaults(defineProps<{
   compact: false,
   searchable: 'auto',
   groupNavigation: false,
+  optionLayout: 'stacked',
   modelValue: undefined,
   modelModifiers: () => ({}),
 });
@@ -411,6 +416,15 @@ const selectedLabel = computed(() => {
 
   return selected?.label ?? (String(model.value ?? '') || t('core.select'));
 });
+
+/**
+ * Однострочное представление сокращает длинный текст только визуально.
+ * Подсказка сохраняет название, метаданные и полный технический адрес варианта.
+ */
+function optionTooltip(option: UiSelectOptionSnapshot): string {
+  return [...new Set([option.label, option.description, option.title].filter(Boolean))].join('\n');
+}
+
 const triggerAttrs = computed(() => {
   const {
     id: _id,
@@ -813,9 +827,8 @@ function updatePopupMetrics(): void {
   const rect = button.getBoundingClientRect();
   const above = rect.top - top - 12;
   const below = top + height - rect.bottom - 12;
-  const groupedWidth = props.compact ? 320 : 360;
   const groupedHeight = props.compact ? 420 : 520;
-  const preferredWidth = props.groupNavigation ? groupedWidth : 280;
+  const preferredWidth = 360;
   const preferredHeight = props.groupNavigation ? groupedHeight : 360;
 
   workspaceMode.value = Boolean(button.closest('[data-ui-workspace]'));

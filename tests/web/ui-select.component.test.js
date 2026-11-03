@@ -121,6 +121,49 @@ test('SELECT-UI-01: видимый выбор сохраняет native event и
   assert.equal(state.wrapper.get('button.ui-select').attributes('aria-expanded'), 'false');
 });
 
+test('SELECT-INLINE-01: путь доступен в подсказке, поиске и выборе с клавиатуры', async (t) => {
+  const state = fixture(t, {
+    compact: true,
+    optionLayout: 'inline',
+    searchable: true,
+  }, {
+    default: () => h('optgroup', { label: 'repo' }, [
+      h('option', {
+        value: '',
+        'data-description': 'dev',
+        title: '/work/main',
+      }, 'Основная'),
+      h('option', {
+        value: 'preview',
+        'data-description': '',
+        title: '/review/preview',
+      }, 'preview'),
+    ]),
+  });
+  const popup = await openPicker(state);
+  const option = popup.get('[role="option"][data-option-index="0"]');
+
+  assert.equal(popup.attributes('data-option-layout'), 'inline');
+  assert.equal(popup.element.style.width, '360px');
+  assert.equal(popup.get('.ui-select-group').text(), 'repo');
+  assert.equal(option.get('.ui-select-option__label').text(), 'Основная');
+  assert.equal(option.get('.ui-select-option__description').text(), 'dev');
+  assert.equal(option.attributes('data-ui-tooltip'), 'Основная\ndev\n/work/main');
+  assert.equal(popup.text().includes('/work/main'), false);
+  assert.equal(popup.find('[data-option-index="1"] .ui-select-option__description').exists(), false);
+
+  const search = popup.get('input');
+
+  await search.setValue('/review/preview');
+  assert.equal(popup.findAll('[role="option"]').length, 1);
+  assert.equal(popup.get('[role="option"]').text(), 'preview');
+  await search.trigger('keydown', { key: 'Enter' });
+  await flushPromises();
+  assert.deepEqual(state.values, ['preview']);
+  assert.equal(state.changes[0].target.value, 'preview');
+  assert.equal(state.wrapper.get('button.ui-select').attributes('aria-expanded'), 'false');
+});
+
 test('SELECT-MODEL-01: явный undefined очищает управляемое поле после выбора', async (t) => {
   const state = fixture(t, { modelValue: undefined });
   const popup = await openPicker(state);
