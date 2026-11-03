@@ -96,6 +96,19 @@ test('SL-04: unknown и неподтверждённый main сохраняют
   assert.equal(state.toasts.length, 2);
 });
 test('SL-02: настоящий UI store не применяет поздний fallback и не дублирует unknown', async (t) => {
+  // Node предоставляет собственный navigator.locks: эта фикстура проверяет ответы
+  // транспорта без очереди браузера, чтобы удержанный ACK не блокировал второй вызов.
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+
+  Object.defineProperty(globalThis, 'navigator', { value: {}, configurable: true });
+  t.after(() => {
+    if (navigatorDescriptor) {
+      Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+  });
+
   const { createPinia, disposePinia, setActivePinia } = await import(
     '../../web/node_modules/pinia/dist/pinia.mjs'
   );

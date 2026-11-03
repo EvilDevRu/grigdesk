@@ -1,5 +1,7 @@
 # Тесты и проверка
 
+- [Navigator.locks Node и удержанный ответ фикстуры окна](node-navigator-locks.md)
+
 - [Happy DOM: первое несовпадение media не вызывает change без начального resize](happy-dom-media-initial-state.md)
 
 - [Teleport: defer откладывает монтаж, но не смену назначения](teleport-defer-update.md)
