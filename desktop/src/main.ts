@@ -60,6 +60,7 @@ import type { ServerStartupStage } from './serverSupervisor.ts';
 import { readSettings, writeSettings, updateSettings } from './settings.ts';
 import { API_VERSION } from '../../shared/client/apiVersion.ts';
 import { createClientRuntime } from './clientRuntime.ts';
+import { createKeyboardLayoutReader } from './keyboardLayout.ts';
 import { createPortableRuntime } from './portableRuntime.ts';
 import { offerPortableIntegration } from './portableIntegration.ts';
 import { Profiles } from './profiles.ts';
@@ -1067,6 +1068,10 @@ async function prepare(signal: AbortSignal): Promise<void> {
   });
 
   client = createClientRuntime({
+    keyboardLayout: createKeyboardLayoutReader({
+      platform: process.platform,
+      env: browserEnvironment,
+    }),
     applicationLauncher: process.platform === 'linux' ? createApplicationLauncher({
       executablePath: process.env.APPIMAGE ?? process.execPath,
       arguments: app.isPackaged ? [] : [app.getAppPath()],

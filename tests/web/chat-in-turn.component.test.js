@@ -39,6 +39,7 @@ async function mountChat(t, {
   width = 1280,
   modes = [],
   realWorkdir = false,
+  desktop = false,
 } = {}) {
   const browser = sharedBrowser;
 
@@ -129,7 +130,16 @@ async function mountChat(t, {
 
   const [{ mount, flushPromises }, ChatSession] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
-    compileChatSession(PREFIX, { realSteps: true, realWorkdir }),
+    compileChatSession(PREFIX, {
+      realSteps: true,
+      realWorkdir,
+      stubs: {
+        '../../shared/desktopSettings.ts': (
+          `export const currentDesktopMode = () => '${desktop ? 'main' : 'page'}';`
+        ),
+        '../../shared/keyboardLayout.ts': 'export const observeKeyboardLayout = () => () => {};',
+      },
+    }),
   ]);
   const errors = [];
   const wrapper = mount(ChatSession, {
@@ -166,6 +176,22 @@ async function mountChat(t, {
     flushPromises,
   };
 }
+
+test('индикатор раскладки задаёт тот же минимум высоты для поля и его разделителя', async (t) => {
+  const { wrapper } = await mountChat(t, { desktop: true });
+  const separator = wrapper.get('.cs-resize');
+
+  assert.equal(wrapper.find('[data-role="chat-keyboard-layout"]').exists(), true);
+  assert.equal(separator.attributes('aria-valuemin'), '64');
+  await separator.trigger('keydown', { key: 'Home' });
+  assert.equal(separator.attributes('aria-valuenow'), '64');
+  assert.equal(wrapper.get('.cs').element.style.getPropertyValue('--composer-h'), '64px');
+  await separator.trigger('keydown', { key: 'ArrowDown' });
+  assert.equal(separator.attributes('aria-valuenow'), '64');
+  await separator.trigger('keydown', { key: 'ArrowUp' });
+  assert.equal(separator.attributes('aria-valuenow'), '80');
+  await separator.trigger('dblclick');
+});
 
 test('щелчок по картинке в ленте действий открывает общий просмотрщик чата', async (t) => {
   const previewed = [];

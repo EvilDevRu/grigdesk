@@ -1,4 +1,6 @@
 {
+  "keyboardLayoutCurrent": "Keyboard layout: {layout}",
+  "keyboardLayoutUnavailable": "Keyboard layout unavailable",
   "browserCloseTabsRight": "Close tabs to the right",
   "browserCloseOtherTabs": "Close other tabs",
   "browserCloseTab": "Close tab",

@@ -1,4 +1,6 @@
 {
+  "keyboardLayoutCurrent": "Раскладка клавиатуры: {layout}",
+  "keyboardLayoutUnavailable": "Раскладка клавиатуры недоступна",
   "browserCloseTabsRight": "Закрыть вкладки справа",
   "browserCloseOtherTabs": "Закрыть другие вкладки",
   "browserCloseTab": "Закрыть вкладку",

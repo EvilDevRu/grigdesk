@@ -20,6 +20,7 @@ import { parseToolControl } from '../../../shared/desktop/toolWindowContract.ts'
 import type { ToolControl } from '../../../shared/desktop/toolWindowContract.ts';
 import type { ApplicationLauncher } from '../applicationLauncher.ts';
 import { applicationLauncherApi } from './applicationLauncherApi.ts';
+import type { KeyboardLayout } from '../../../shared/desktop/keyboardLayout.ts';
 
 interface ProbeUpstream extends PipeUpstream {
   probe(): Promise<void>;
@@ -37,6 +38,7 @@ export interface NativeBrowserState {
 }
 
 interface ShellOptions {
+  keyboardLayout?(): Promise<KeyboardLayout | null>;
   applicationLauncher?: ApplicationLauncher;
   nativeBrowser?: NativeBrowserState;
   selectDirectory?(origin: string): Promise<string | null>;
@@ -370,6 +372,12 @@ export function createShellApi(options: ShellOptions) {
         } else {
           json(res, 200, state());
         }
+
+        return;
+      }
+
+      if (req.method === 'GET' && pathname === '/__shell/keyboard-layout') {
+        json(res, 200, { layout: await options.keyboardLayout?.() ?? null });
 
         return;
       }

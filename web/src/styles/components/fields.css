@@ -963,6 +963,12 @@ html[data-ui-touch] .ui-select[data-context='chat-session-toolbar']::after {
   box-shadow: none;
 }
 
+/* Раскладка занимает верх скрепочной колонки; две иконки не перекрываются даже
+   у пустого поля. Минимальная высота применяется только при видимом индикаторе. */
+.composer:has([data-role='chat-keyboard-layout']) > .ui-textarea[data-role='chat-composer'] {
+  min-height: 64px;
+}
+
 @media (max-width: 600px) {
   .ui-input, .ui-textarea, .ui-select {
     font-size: 16px;

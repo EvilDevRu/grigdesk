@@ -487,8 +487,8 @@
            поэтому места в раскладке не занимает и ничего не сдвигает. -->
       <div class="cs-resize" role="separator" aria-orientation="horizontal" tabindex="0"
            aria-label="Высота поля ввода"
-           :aria-valuemin="COMPOSER_MIN" :aria-valuemax="composerMax()"
-           :aria-valuenow="Math.round(composerH ?? COMPOSER_MIN)"
+           :aria-valuemin="composerMin" :aria-valuemax="composerMax()"
+           :aria-valuenow="clampComposer(composerH ?? composerMin)"
            v-tooltip="'Потяни — высота поля ввода. Двойной клик — вернуть обычную'"
            @pointerdown.prevent="startComposerResize" @pointermove.prevent="moveComposerResize"
            @pointerup.prevent="finishComposerResize" @pointercancel.prevent="cancelComposerResize"
@@ -618,6 +618,7 @@
         </div>
         <div v-if="interimSpeech" class="speech-interim" data-testid="speech-interim">Слышу: {{ interimSpeech }}</div>
         <div class="composer">
+          <ChatKeyboardLayout @visibility-change="keyboardLayoutVisible = $event" />
           <UiFilePicker
             data-role="chat-attachment"
             density="compact"
@@ -731,9 +732,12 @@
 </template>
 
 <script setup lang="ts">
-import { COMPOSER_KEY, COMPOSER_MIN, COMPOSER_MAX_VH, storedComposerHeight } from './chatLayout.ts';
+import {
+  COMPOSER_KEY, COMPOSER_MIN, COMPOSER_KEYBOARD_MIN, COMPOSER_MAX_VH, storedComposerHeight,
+} from './chatLayout.ts';
 
 import ChatWorkdir from './ChatWorkdir.vue';
+import ChatKeyboardLayout from './ChatKeyboardLayout.vue';
 import { chatWorkdirLabel } from '../../../../shared/chat/chatWorkdir.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api } from '../../shared/apiClient.ts';
@@ -1821,6 +1825,8 @@ onUnmounted(() => stopFocusDebug?.());
 // AGENT-DBG-END
 
 const composerH = ref<number | null>(storedComposerHeight());
+const keyboardLayoutVisible = ref(false);
+const composerMin = computed(() => keyboardLayoutVisible.value ? COMPOSER_KEYBOARD_MIN : COMPOSER_MIN);
 const composerStyle = computed(() => (
   composerH.value == null ? null : { '--composer-h': `${composerH.value}px` }
 ));
@@ -1828,18 +1834,18 @@ const composerStyle = computed(() => (
 function composerMax() {
   const view = typeof window === 'undefined' ? 0 : window.innerHeight;
 
-  return Math.max(COMPOSER_MIN, Math.round((view || 720) * COMPOSER_MAX_VH));
+  return Math.max(composerMin.value, Math.round((view || 720) * COMPOSER_MAX_VH));
 }
 
 function clampComposer(value: number) {
-  return Math.round(Math.min(Math.max(COMPOSER_MIN, value), composerMax()));
+  return Math.round(Math.min(Math.max(composerMin.value, value), composerMax()));
 }
 // Тянем от ФАКТИЧЕСКОЙ высоты поля, а не от сохранённого числа: после смены окна
 // (поворот планшета) CSS уже подрезал поле по 46vh, и старое число дало бы скачок.
 function composerHeightNow() {
   const h = taEl.value?.el?.getBoundingClientRect?.().height;
 
-  return clampComposer(h !== undefined && h > 0 ? h : (composerH.value ?? COMPOSER_MIN));
+  return clampComposer(h !== undefined && h > 0 ? h : (composerH.value ?? composerMin.value));
 }
 
 
@@ -1928,7 +1934,7 @@ function onComposerResizeKey(event: KeyboardEvent) {
   } else if (event.key === 'ArrowDown') {
     composerH.value = clampComposer(composerHeightNow() - step);
   } else if (event.key === 'Home') {
-    composerH.value = COMPOSER_MIN;
+    composerH.value = composerMin.value;
   } else if (event.key === 'End') {
     composerH.value = composerMax();
   } else {
@@ -3073,6 +3079,7 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
 /* Ввод и действия лежат на общей поверхности нижней панели без отдельной карточки.
    Фокус отмечает верхний разделитель панели, не замыкая рамку вокруг текста. */
 .composer {
+  position: relative;
   display: flex;
   gap: 6px;
   align-items: flex-end;

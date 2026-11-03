@@ -15,8 +15,10 @@ import type { WindowControls } from './windowControls.ts';
 import { json, startPipe } from './pipe/pipeServer.ts';
 import { createUpstream } from './pipe/upstream.ts';
 import type { ApplicationLauncher } from './applicationLauncher.ts';
+import type { KeyboardLayout } from '../../shared/desktop/keyboardLayout.ts';
 
 interface RuntimeOptions {
+  keyboardLayout?(): Promise<KeyboardLayout | null>;
   applicationLauncher?: ApplicationLauncher;
   nativeBrowser?: NativeBrowserState;
   selectDirectory?(origin: string): Promise<string | null>;
@@ -58,6 +60,7 @@ export function createClientRuntime(options: RuntimeOptions) {
     directory: options.identityDirectory,
   });
   const shell = createShellApi({
+    keyboardLayout: options.keyboardLayout,
     applicationLauncher: options.applicationLauncher,
     selectDirectory: options.selectDirectory,
     windowControls: options.windowControls,
