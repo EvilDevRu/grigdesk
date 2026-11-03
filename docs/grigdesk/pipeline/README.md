@@ -125,6 +125,8 @@
 
 ## Грабли
 
+- [Browser run stale до первого запроса: umask, права control и стартовый барьер](browser-launch-permissions.md)
+
 - [Арбитр: текст разбора сохранён, но ошибка формата итога убрала варианты решения](arbiter-result-format-failure.md)
 
 - [Арбитр требует отсутствующий plan: запуск использует режим «Авто»](arbiter-auto-mode.md)

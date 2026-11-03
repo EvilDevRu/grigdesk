@@ -411,6 +411,12 @@ tests — дефект/неполнота теста; environment —
   runner_launch "$provider" "$MULTI_TASK" "$prompt" "$MULTI_STAGE" "$model" \
     "${DISPATCH_RESOLVED_EFFORT:-high}" "$MULTI_TIMEOUT" "$run_dir" "$run_id" "$epoch" "$token"
   rc=$?
+  if [[ -n "${BROWSER_TRANSPORT_ERROR:-}" && "$rc" != 0 ]]; then
+    DISPATCH_INVOKE_RESULT=invalid_config
+    DISPATCH_INVOKE_DETAIL="браузерный транспорт: $BROWSER_TRANSPORT_ERROR"
+    DISPATCH_INVOKE_STARTED=0
+    return 0
+  fi
   fanout_count=$(runner_call "$provider" fanout_count "$run_dir" 2>/dev/null)
   [[ "$fanout_count" =~ ^[0-9]+$ ]] || fanout_count=0
   set_st "$MULTI_TASK" "FANOUT_${MULTI_STAGE}" "$fanout_count"

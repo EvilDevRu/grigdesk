@@ -1157,6 +1157,7 @@ runner_launch() {
   local source_rc=0 lifecycle_rc=0 analytics_rc=0 meta_rc=0 reconcile_rc=0 publication_ready=0
   local family=${FACTORY_DEBUG_FAMILY:-exact}
   RUNNER_LAUNCH_LAST_STARTED=0
+  BROWSER_TRANSPORT_ERROR=""
   module=$(runner_module_path "$runner_id") || return 2
   runner_contract_check "$runner_id" || return 2
   run_parent=$(dirname -- "$run_dir")
@@ -1302,7 +1303,18 @@ runner_launch() {
   saved_int_trap=$(trap -p INT)
   trap 'RUNNER_LAUNCH_DEFERRED_SIGNAL=${RUNNER_LAUNCH_DEFERRED_SIGNAL:-TERM}' TERM
   trap 'RUNNER_LAUNCH_DEFERRED_SIGNAL=${RUNNER_LAUNCH_DEFERRED_SIGNAL:-INT}' INT
-  browser_transport_prepare "$task" "$stage" "$run_id" "$epoch" "$request_dir" "$token_fd"
+  browser_transport_prepare "$task" "$stage" "$run_id" "$epoch" "$request_dir" "$token_fd" || {
+    rc=$?
+    # Резервация lineage уже сделана, но fork ещё не происходил.
+    # Отмена с доказательством never-started сохраняет право на следующий resume.
+    quiescence_evidence=$(runtime_analytics_hash_string_v2 \
+      "browser-prepare-never-started:$runner_id:$task:$stage:$run_id:$epoch") || true
+    _runner_lineage_cancel_v2 "$runner_id" "$run_id" \
+      "$quiescence_evidence" "$quiescence_evidence" || true
+    _runner_launch_held_cleanup_v2 \
+      "$token_fd" "$saved_term_trap" "$saved_int_trap" ""
+    return "$rc"
+  }
   FACTORY_LAUNCH_BARRIER=1 \
   FACTORY_RUN_TASK="$task" FACTORY_RUN_STAGE="$stage" \
   FACTORY_RUN_ID="$run_id" FACTORY_RUN_EPOCH="$epoch" \
@@ -1407,7 +1419,15 @@ runner_launch() {
     return "$rc"
   }
 
-  browser_transport_start
+  browser_transport_start || {
+    rc=$?
+    _runner_launch_pre_release_abort_v2 \
+      "$runner_id" "$task" "$stage" "$run_id" "$epoch" \
+      "$pid" "$pgid" "$session" "$starttime" 0 0 || true
+    _runner_launch_held_cleanup_v2 \
+      "$token_fd" "$saved_term_trap" "$saved_int_trap" ""
+    return "$rc"
+  }
 
   debug_log_init "${FACTORY_RUN_PROFILE:-}" "$task" "$stage" "$run_dir" "$run_id" "$epoch" \
     || true

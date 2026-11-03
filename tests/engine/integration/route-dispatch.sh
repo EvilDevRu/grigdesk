@@ -810,4 +810,34 @@ assert_eq 0 "$(json_field "$direct_findings" open length)" "принятие з�
 assert_eq remaining-scenario "$(json_field "$direct_findings" closed 0 id)" \
   "история передачи остаётся в журнале"
 
+# Отказ транспорта не создаёт commit/exhausted: тот же курсор и бюджет доступны resume.
+# Причина доходит до журнала стадий и комментария, даже если launcher уже убрал relay.
+"$NODE_BIN" "$direct_publisher" "$FACTORY_HOME/.." "$direct_routes" skip >/dev/null
+transport_task=9010
+transport_attempt=$(attempt_state_begin_v2 "$transport_task" "$profile_id" "$direct_routes")
+attempt_state_select_route_v2 "$transport_task" "$transport_attempt" direct >/dev/null
+route_v2_dispatch_bootstrap "$transport_task" "$transport_attempt" >/dev/null
+transport_before=$(attempt_stage_state_init_v2 "$transport_task" "$transport_attempt" direct)
+transport_calls=0
+v2_log() {
+  printf '%s\n' "$*" >>"$TEST_ROOT/browser-stop.log"
+}
+run_agent() {
+  transport_calls=$((transport_calls + 1))
+  run_state_begin "$1" "$3" browser-held 1 synthetic-token || return
+  BROWSER_TRANSPORT_ERROR=browser_run_stale
+  return 79
+}
+route_v2_dispatch_next "$transport_task" "$transport_attempt" >/dev/null 2>&1
+assert_rc 75 "$?" 'ошибка браузерного транспорта останавливает dispatcher'
+assert_eq 1 "$transport_calls" 'ошибка транспорта не выжигает повторы узла'
+transport_after=$(attempt_stage_state_read_v2 "$transport_task" "$transport_attempt")
+assert_eq "$transport_before" "$transport_after" 'отказ транспорта не меняет курсор и журнал этапов'
+assert_eq browser_run_stale "$(pipeline_store_get "$transport_task" RUNNER_REASON_REVIEW)" \
+  'реестр сохраняет машинную причину остановки'
+assert_contains "$(pipeline_store_get "$transport_task" REVIEW_COMMENT)" browser_run_stale \
+  'комментарий этапа называет реальный отказ'
+assert_contains "$(cat "$TEST_ROOT/browser-stop.log")" \
+  'REVIEW: браузерный транспорт не запущен — browser_run_stale' 'карточка получает причину из stages.log'
+
 finish_tests

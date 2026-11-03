@@ -12,6 +12,14 @@ Reservation объединяет статусный и browser runtime. Launcher
 убирают только собственные capability/relay. Forbid не получает descriptor, nonce и relay.
 Текущая старая pinned попытка без browser helper capability не получает её задним числом.
 
+Capability writer закрывает `control/runs` и каталог задачи до `0700`, включая каталоги,
+созданные прежним движком под групповой umask. Browser reader права не исправляет.
+Publisher повторяет только `browser_run_stale`, максимум три раза с паузой 100 мс.
+Отказ publisher или отсутствие подтверждённого readiness останавливают launcher до CONT
+кодом 79: агент не запускается, курсор и бюджет повторов узла сохраняются для resume.
+Код helper из `relay.log` передаётся в комментарий узла и журнал стадий; карточка остановки
+показывает инфраструктурную причину без фиктивного вердикта агента.
+
 Выбранный runtime передаёт GRIGDESK_BROWSER_NODE, GRIGDESK_BROWSER_HELPER и
 GRIGDESK_BROWSER_RELAY_SOCKET. Они перечислены в HOST_ENV_SUFFIXES, который используется
 диагностикой старых имён окружения.
@@ -20,6 +28,12 @@ Claude/Codex/Kimi используют factory-browser CLI и приватный
 JSON request не передаёт секрет в argv. Codex получает ровно необходимые readonly roots,
 mailbox и evidence root; canonical shell exemption допускает только точную команду,
 не chains. FD9 binding reader не сдвигает status FD7. Prompt не содержит token.
+Режим проверяется launcher и повторно bridge; ошибка чтения не подменяется режимом grigdesk.
+Encrypted `host.ready` содержит lease на две секунды, обновляемый каждые 500 мс независимо
+от socket request. Отсутствующий или просроченный readiness до запроса даёт
+`browser_transport_dead` в CLI и MCP, без чтения host PID из песочницы агента.
+Legacy readiness не требует живого relay: он штатно завершается после выбора legacy.
+После публикации запроса потерянный ответ сохраняет `outcome_unknown`, без повтора эффекта.
 
 DeepSeek/GLM используют host-owned factory-status MCP вне tool sandbox. Инструмент
 браузера добавляется условно к точному inventory разрешённого этапа. Child env получает
@@ -51,3 +65,4 @@ Electron smoke запускается отдельно от worker cache/profile
 Смежные контракты: [доступ в чате](../chat/browser-access.md),
 [native-окно и настройки](../web/browser-workspace.md),
 [упакованные helpers](../server/server-binary-factory-helpers.md).
+Разбор отказа до первого запроса — [права control и стартовый барьер](browser-launch-permissions.md).

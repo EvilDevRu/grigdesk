@@ -21,7 +21,7 @@ if [[ "$method" == run && "${FACTORY_BROWSER_ENABLED:-0}" == 1 ]]; then
   browser_task=$1
   browser_prompt=$2
   shift 2
-  browser_transport_prompt "$browser_prompt"
+  browser_transport_prompt "$browser_prompt" || exit "$?"
   "$fn" "$browser_task" "$BROWSER_TRANSPORT_PROMPT" "$@"
 else
   "$fn" "$@"

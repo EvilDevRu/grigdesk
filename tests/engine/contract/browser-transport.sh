@@ -30,11 +30,17 @@ const trace = (value) => fs.appendFileSync(process.env.BROWSER_FIXTURE_TRACE, va
 
 async function main() {
   if (mode === 'key') {
+    if (process.env.BROWSER_FIXTURE_KEY_FAILURE === '1') {
+      throw new Error('browser_nonce_invalid');
+    }
     process.stdout.write('a'.repeat(64) + '\n');
     return;
   }
 
   if (mode === 'mode') {
+    if (process.env.BROWSER_FIXTURE_MODE_FAILURE === '1') {
+      throw new Error('browser_transport_dead');
+    }
     process.stdout.write(fs.readFileSync(path.join(directory, 'host.ready'), 'utf8'));
     return;
   }
@@ -46,6 +52,16 @@ async function main() {
   }
 
   if (mode === 'publish-binding') {
+    const counter = path.join(directory, 'publish-attempts');
+    const attempts = fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0;
+    fs.writeFileSync(counter, String(attempts + 1));
+    const failure = process.env.BROWSER_FIXTURE_PUBLISH_FAILURE;
+    if (failure === 'invalid') {
+      throw new Error('browser_run_invalid');
+    }
+    if (failure === 'always' || (failure === 'once' && attempts === 0)) {
+      throw new Error('browser_run_stale');
+    }
     trace('published:' + get('--run-id'));
     fs.writeFileSync(path.join(directory, 'binding'), 'present');
     return;
@@ -60,6 +76,13 @@ async function main() {
   if (mode === 'relay') {
     if (Number(get('--parent-pid')) !== process.ppid) throw new Error('wrong_parent');
     fs.writeFileSync(path.join(directory, 'relay.pid'), String(process.pid));
+    if (process.env.BROWSER_FIXTURE_RELAY_FAILURE === 'dead') {
+      throw new Error('browser_run_stale');
+    }
+    if (process.env.BROWSER_FIXTURE_RELAY_FAILURE === 'unready') {
+      await delay(30000);
+      return;
+    }
     fs.writeFileSync(path.join(directory, 'host.ready'), process.env.BROWSER_FIXTURE_MODE + '\n');
     trace('ready:' + get('--run-id'));
     process.on('SIGTERM', () => {
@@ -93,7 +116,10 @@ async function main() {
   }
   throw new Error('unknown_mode');
 }
-main().catch(() => { process.stderr.write('fixture_failed\n'); process.exitCode = 1; });
+main().catch((error) => {
+  process.stderr.write((error.message.startsWith('browser_') ? error.message : 'fixture_failed') + '\n');
+  process.exitCode = 1;
+});
 JAVASCRIPT
 
 module="$fixture/runner.sh"
@@ -161,6 +187,67 @@ runner_launch browserfixture 242 'legacy exact prompt' CHECK sandboxed-model hig
 assert_rc 0 "$?" 'legacy mode preserves status protocol'
 assert_eq 'legacy exact prompt' "$(cat "$run_dir/received-prompt")" 'legacy prompt unchanged'
 export BROWSER_FIXTURE_MODE=grigdesk
+
+# Отказ до CONT не вызывает adapter и не подменяет его terminal result.
+# Небольшой повтор publisher допускает гонку чтения, но всегда сохраняет fail-closed.
+failure_task=270
+for failure in key publish publish-invalid relay unready retry-unready mode; do
+  failure_task=$((failure_task + 1))
+  task=$failure_task
+  run="run-browser-$failure"
+  prepare_case "$task" "$run"
+  run_dir="$STATE_DIR/logs/runs/t${task}/CHECK/$run"
+  if [[ "$failure" == key ]]; then
+    export BROWSER_FIXTURE_KEY_FAILURE=1
+  elif [[ "$failure" == publish ]]; then
+    export BROWSER_FIXTURE_PUBLISH_FAILURE=always
+  elif [[ "$failure" == publish-invalid ]]; then
+    export BROWSER_FIXTURE_PUBLISH_FAILURE=invalid
+  elif [[ "$failure" == retry-unready ]]; then
+    export BROWSER_FIXTURE_PUBLISH_FAILURE=once BROWSER_FIXTURE_RELAY_FAILURE=unready
+  elif [[ "$failure" == mode ]]; then
+    export BROWSER_FIXTURE_MODE_FAILURE=1
+  else
+    export BROWSER_FIXTURE_RELAY_FAILURE=$([[ "$failure" == relay ]] && printf dead || printf unready)
+  fi
+  runner_launch browserfixture "$task" held CHECK sandboxed-model high 5 \
+    "$run_dir" "$run" 1 "$token" >/dev/null 2>&1
+  assert_rc 79 "$?" "$failure stops launch as infrastructure failure"
+  assert_file_missing "$run_dir/received-prompt" "$failure never invokes provider"
+  assert_file_missing "$run_dir/control-requests/browser/binding" "$failure removes binding"
+  assert_file_missing "$(runner_trusted_identity_file "$task")" "$failure removes held identity"
+  if [[ "$failure" == unready || "$failure" == retry-unready || "$failure" == mode ]]; then
+    assert_eq browser_transport_dead "$BROWSER_TRANSPORT_ERROR" 'missing ready has named cause'
+  elif [[ "$failure" == key ]]; then
+    assert_eq browser_nonce_invalid "$BROWSER_TRANSPORT_ERROR" 'key failure preserves helper cause'
+  elif [[ "$failure" == publish-invalid ]]; then
+    assert_eq browser_run_invalid "$BROWSER_TRANSPORT_ERROR" 'invalid publisher preserves helper cause'
+    assert_eq 1 "$(cat "$run_dir/control-requests/browser/publish-attempts")" \
+      'non-stale publisher failure is not retried'
+  else
+    assert_eq browser_run_stale "$BROWSER_TRANSPORT_ERROR" "$failure preserves relay cause"
+  fi
+  if [[ "$failure" == publish ]]; then
+    assert_eq 3 "$(cat "$run_dir/control-requests/browser/publish-attempts")" \
+      'persistent stale stops after three publisher attempts'
+  fi
+  unset BROWSER_FIXTURE_PUBLISH_FAILURE BROWSER_FIXTURE_RELAY_FAILURE BROWSER_FIXTURE_KEY_FAILURE
+  unset BROWSER_FIXTURE_MODE_FAILURE
+done
+
+prepare_case 280 run-browser-publish-retry
+run_dir="$STATE_DIR/logs/runs/t280/CHECK/run-browser-publish-retry"
+export BROWSER_FIXTURE_PUBLISH_FAILURE=once
+runner_launch browserfixture 280 retry CHECK sandboxed-model high 5 \
+  "$run_dir" run-browser-publish-retry 1 "$token"
+assert_rc 0 "$?" 'publisher retries one transient stale before provider starts'
+assert_eq 2 "$(cat "$run_dir/control-requests/browser/publish-attempts")" 'publisher retry is bounded'
+unset BROWSER_FIXTURE_PUBLISH_FAILURE
+
+export FACTORY_BROWSER_ENABLED=1 FACTORY_BROWSER_REQUEST_DIR="$fixture/missing-mailbox"
+browser_transport_prompt original >/dev/null 2>&1
+assert_rc 79 "$?" 'unreadable mode refuses misleading browser prompt'
+assert_eq original "$BROWSER_TRANSPORT_PROMPT" 'failed mode does not prescribe unavailable transport'
 
 ordinal=0
 for point in after_held_identity after_identity_publish after_runner_started after_lineage_started; do

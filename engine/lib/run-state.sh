@@ -388,12 +388,29 @@ run_state_verdict_owner() {
   _run_state_verdict owner "$1" "${2:-}"
 }
 
+# Browser authority проверяет также родителей capability, поэтому umask хоста
+# не должна оставлять runs доступным группе. Закрываем и прежние owned-каталоги.
+_run_state_prepare_directory() {
+  local file=$1 root directory
+  root=$(factory_control_root) || return
+  [[ "$file" == "$root/runs/"* && "$(dirname "$(dirname "$file")")" == "$root/runs" ]] || return 78
+  for directory in "$root/runs" "$(dirname "$file")"; do
+    [[ ! -L "$directory" ]] || return 78
+    mkdir -p -- "$directory" || return
+    [[ -d "$directory" && -O "$directory" && ! -L "$directory" &&
+       "$(realpath -e -- "$directory")" == "$directory" ]] || return 78
+    chmod 700 -- "$directory" || return
+  done
+}
+
+# Capability публикуется только в защищённом дереве, независимо от umask.
+# Ошибка подготовки не должна оставлять успешную проекцию запуска без authority.
 _run_state_write() {
   local file=$1 run_id=$2 epoch=$3 token_hash=$4 state=$5 result=${6:-} comment=${7:-}
   local verdict_b64=${8:-}
   local tmp
-  mkdir -p "$(dirname "$file")"
-  tmp=$(mktemp "$(dirname "$file")/.active.XXXXXX")
+  _run_state_prepare_directory "$file" || return
+  tmp=$(mktemp "$(dirname "$file")/.active.XXXXXX") || return
   {
     printf 'SCHEMA=1\nRUN_ID=%s\nEPOCH=%s\nTOKEN_HASH=%s\nSTATE=%s\n' \
       "$run_id" "$epoch" "$token_hash" "$state"
@@ -422,7 +439,11 @@ run_state_begin() {
     fi
   fi
   token_hash=$(factory_token_hash "$token")
-  _run_state_write "$file" "$run_id" "$epoch" "$token_hash" active
+  _run_state_write "$file" "$run_id" "$epoch" "$token_hash" active || {
+    rc=$?
+    pipeline_lock_release "$lock_fd"
+    return "$rc"
+  }
   pipeline_store_update_unlocked "$task" RUN_PROTOCOL 2 "$stage" running \
     "ACTIVE_RUN_${stage}" "$run_id" "ACTIVE_EPOCH_${stage}" "$epoch"
   rc=$?
@@ -476,7 +497,11 @@ run_state_apply_result() {
     return 75
   }
   _run_state_write "$file" "$run_id" "$epoch" "$expected_hash" committed \
-    "$result" "$comment" "$verdict_b64"
+    "$result" "$comment" "$verdict_b64" || {
+      rc=$?
+      pipeline_lock_release "$lock_fd"
+      return "$rc"
+    }
   pipeline_store_update_unlocked "$task" "$stage" "$result" "${stage}_COMMENT" "$comment" \
     "ACTIVE_RUN_${stage}" ""
   rc=$?
@@ -563,7 +588,11 @@ run_state_control_update() {
       run_id=$(_run_state_get "$file" RUN_ID)
       epoch=$(_run_state_get "$file" EPOCH)
       token_hash=$(_run_state_get "$file" TOKEN_HASH)
-      _run_state_write "$file" "$run_id" "$epoch" "$token_hash" committed "$result" "$comment"
+      _run_state_write "$file" "$run_id" "$epoch" "$token_hash" committed "$result" "$comment" || {
+        rc=$?
+        pipeline_lock_release "$lock_fd"
+        return "$rc"
+      }
     fi
   fi
   pipeline_store_update_unlocked "$task" "$@"

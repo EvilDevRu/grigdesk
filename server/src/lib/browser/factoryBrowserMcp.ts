@@ -80,7 +80,7 @@ const PUBLIC_ERRORS = new Set([
   'browser_tab_missing', 'browser_tab_limit', 'browser_origin_forbidden',
   'browser_navigation_pending', 'browser_debugger_unavailable', 'browser_load_failed',
   'browser_renderer_gone', 'browser_image_too_large', 'browser_queue_full',
-  'browser_timeout', 'browser_run_stale', 'browser_run_limit',
+  'browser_timeout', 'browser_run_stale', 'browser_run_limit', 'browser_transport_dead',
   'outcome_unknown', 'access_revoked', 'stale_page', 'stale_element',
 ]);
 
@@ -185,7 +185,7 @@ export function createFactoryBrowserMcp(env: NodeJS.ProcessEnv, deps: {
         const parsed = parseBrowserAction(input);
 
         // ENABLED задаёт transport; только проверенный ready подтверждает существование relay.
-        if (await ready(context).catch(() => null) !== 'grigdesk') {
+        if (await ready(context) !== 'grigdesk') {
           return failure(new Error('browser_unavailable'));
         }
 

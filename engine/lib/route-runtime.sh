@@ -1283,6 +1283,7 @@ _route_v2_run_agent_node() {
   # Класс запуска читается после run_agent из глобала диспетчера; след прошлого узла не
   # должен сойти за класс этого захода, если до диспетчера дело не дошло.
   DISPATCH_RESULT_KIND=""
+  BROWSER_TRANSPORT_ERROR=""
   FACTORY_ROUTE_FILESYSTEM_POLICY="$policy" \
   FACTORY_ROUTE_BROWSER_POLICY="${ROUTE_V2_NODE_BROWSER:-forbid}" \
   FACTORY_ROUTE_TIMEOUT_CLASS="${ROUTE_V2_NODE_TIMEOUT_CLASS:-}" \
@@ -1312,6 +1313,15 @@ _route_v2_run_agent_node() {
   # fail-closed, оставляя узел невыполненным: после починки конфига resume продолжит.
   if (( agent_rc == 79 )); then
     rm -f -- "$_r2_context_file" "$_r2_prompt_file"
+    if [[ -n "${BROWSER_TRANSPORT_ERROR:-}" ]]; then
+      local transport_reason="браузерный транспорт не запущен — $BROWSER_TRANSPORT_ERROR"
+      run_state_control_update "$task" "$run_key" failed \
+        "${run_key}_COMMENT" "$transport_reason" "ACTIVE_RUN_${run_key}" "" \
+        STALLED_HUMAN 1 "RUNNER_REASON_${run_key}" "$BROWSER_TRANSPORT_ERROR" || return
+      declare -F v2_log >/dev/null && v2_log "${run_key}: $transport_reason"
+      _route_v2_fail "$transport_reason; исправь транспорт и повтори resume"
+      return 75
+    fi
     _route_v2_fail "run_agent отказал по конфигурации хоста (код 79): исправь и повтори resume"
     return 75
   fi
