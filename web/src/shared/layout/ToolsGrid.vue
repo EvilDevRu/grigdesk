@@ -34,7 +34,7 @@
             <span class="tool-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path :d="icons[item.icon] || icons.plugin" />
+                <path :d="navIconPath(item.icon)" />
               </svg>
               <NavigationCount v-if="layout === 'grid'" :badge="badges[item.to]" />
             </span>
@@ -52,7 +52,7 @@ import { computed, ref } from 'vue';
 
 import { t, UiActionLink, UiSearchInput, vTooltip } from '../../ui.ts';
 
-import { NAV_ICONS } from '../navIcons.ts';
+import { navIconPath } from '../navIcons.ts';
 import NavigationCount from './NavigationCount.vue';
 import type { PropType } from 'vue';
 
@@ -70,8 +70,6 @@ interface ToolNavGroup {
 }
 
 type Badge = InstanceType<typeof NavigationCount>['$props']['badge'];
-
-const icons: Readonly<Record<string, string>> = NAV_ICONS;
 
 const props = defineProps({
   items: {

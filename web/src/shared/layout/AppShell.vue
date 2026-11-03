@@ -16,7 +16,10 @@
           <router-link v-for="item in pluginNav" :key="item.to" :to="item.to" class="navitem" data-ui-shell-nav active-class="active"
                        :aria-label="navTitle(item)" v-tooltip.right="navTitle(item)">
             <span class="icwrap">
-              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon] || ICONS.plugin" /></svg>
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <path :d="navIconPath(item.icon)" />
+              </svg>
               <NavigationCount :badge="badges[item.to]" />
             </span>
             </router-link>
@@ -66,7 +69,7 @@
                        :aria-label="navTitle(item)" v-tooltip.right="navTitle(item)">
           <span class="icwrap">
             <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                 stroke-linecap="round" stroke-linejoin="round"><path :d="ICONS[item.icon]" /></svg>
+                 stroke-linecap="round" stroke-linejoin="round"><path :d="navIconPath(item.icon)" /></svg>
             <NavigationCount :badge="badges[item.to]" />
           </span>
         </router-link>
@@ -486,6 +489,7 @@ import { useProvidersStore } from '../../stores/providers.ts';
 import { isTopbarProvider } from '../../../../shared/chat/executorTypes.ts';
 import { localizeProviderAuthLabel } from '../../features/providers/providerLocale.ts';
 import { pluginCategoryOf, usePluginsStore } from '../../stores/plugins.ts';
+import { navIconPath } from '../navIcons.ts';
 import { PLUGIN_CATEGORIES } from '../../../../shared/plugins/pluginsContracts.ts';
 import { localizePluginCategory } from '../../features/settings/metadataLocale.ts';
 import { useStudio3dStore } from '../../stores/studio3d.ts';

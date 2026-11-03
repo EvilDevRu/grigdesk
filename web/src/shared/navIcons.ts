@@ -62,13 +62,36 @@ interface PluginIconSource {
   nav?: { icon?: string } | null;
 }
 
-const ICON_BY_NAME = NAV_ICONS as Record<string, string>;
+const ICON_BY_NAME: Readonly<Record<string, string>> = NAV_ICONS;
 
-// Иконка относится к назначению плагина, а не к его происхождению. Встроенные
-// повторяют навигацию GrigDesk; неизвестному пользовательскому модулю достаётся
-// нейтральный знак плагина — манифест не получает права передавать произвольный SVG.
+/**
+ * Иконка приходит как имя общего знака или SVG-контур из манифеста плагина.
+ * В path.d попадают только команды и числа; разметка и внешние адреса не принимаются.
+ */
+export function navIconPath(name: string | null | undefined, fallback = NAV_ICONS.plugin): string {
+  if (typeof name !== 'string') {
+    return fallback;
+  }
+
+  if (Object.hasOwn(ICON_BY_NAME, name)) {
+    return ICON_BY_NAME[name]!;
+  }
+
+  if (!name.startsWith('svg:')) {
+    return fallback;
+  }
+
+  const path = name.slice(4).trim();
+  const valid = path.length <= 4096 && /^[Mm]\s*[-+.\d]/u.test(path)
+    && /^[MmLlHhVvCcSsQqTtAaZzEe\d\s.,+-]+$/u.test(path);
+
+  return valid ? path : fallback;
+}
+
+/**
+ * Собственный контур и именованный знак используют один путь отображения.
+ * Если объявление неверно, сохраняется запасная иконка по id либо нейтральный знак.
+ */
 export function pluginIconPath(plugin: PluginIconSource | null | undefined): string {
-  const requested = plugin?.nav?.icon || '';
-
-  return ICON_BY_NAME[requested] || ICON_BY_NAME[plugin?.id || ''] || NAV_ICONS.plugin;
+  return navIconPath(plugin?.nav?.icon, navIconPath(plugin?.id));
 }

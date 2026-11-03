@@ -288,3 +288,33 @@ for (const startOnLogin of ['true', 1, null]) {
     assert.equal(list.find((item) => item.id === 'legacy').webModule ?? null, null);
   });
 }
+
+
+test('PM-ICON: контур из пакета сохраняется scanner и HTTP даже у выключенного плагина', async (t) => {
+  const root = await fixture(t);
+  const icon = 'svg:M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3z';
+
+  for (const id of ['ui-module', 'off']) {
+    await packageAt(root, id, {
+      nav: { path: `/ext/${id}`, label: id, icon, group: 'dock' },
+    });
+  }
+
+  const list = await scanUserPlugins(path.join(root, 'plugins'));
+
+  assert.equal(list.find((item) => item.id === 'ui-module').nav.icon, icon);
+
+  const { app, headers } = await startApp(t, root);
+  const response = await app.inject({ url: '/api/plugins', headers });
+
+  assert.equal(response.statusCode, 200);
+
+  const cards = response.json().plugins;
+
+  for (const id of ['ui-module', 'off']) {
+    const card = cards.find((item) => item.id === id);
+
+    assert.equal(card.nav.icon, icon);
+    assert.equal(card.enabled, id === 'ui-module');
+  }
+});

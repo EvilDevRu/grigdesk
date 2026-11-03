@@ -7,6 +7,8 @@ import { after, before, test } from 'node:test';
 import { compileVue, webFile } from './helpers/compile-vue.js';
 import { createUiBrowser } from './helpers/ui-components.js';
 
+import { NAV_ICONS } from '../../web/src/shared/navIcons.ts';
+
 let browser;
 let ToolsGrid;
 let UiDialog;
@@ -303,4 +305,32 @@ test('PH-NAV: группы сохраняют порядок, скрывают �
   await flushPromises();
   assert.equal(router.currentRoute.value.path, '/ext/new');
   assert.equal(wrapper.emitted('select').length, 1);
+});
+
+
+test('иконка из плагина отображается в SVG меню и обновляется вместе с манифестом', async (t) => {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/:pathMatch(.*)*', component: { template: '<div />' } }],
+  });
+  const path = 'M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3z';
+  const item = { id: 'audit', to: '/ext/audit', label: 'Аудит', icon: `svg:${path}` };
+
+  await router.push('/ext/audit');
+  await router.isReady();
+
+  const wrapper = mount(ToolsGrid, {
+    props: { items: [item] },
+    global: { plugins: [router] },
+  });
+
+  t.after(() => wrapper.unmount());
+  assert.equal(wrapper.get('.tool-icon path').attributes('d'), path);
+
+  await wrapper.setProps({ items: [{ ...item, icon: 'svg:M1 1<script>alert(1)</script>' }] });
+  assert.equal(wrapper.get('.tool-icon path').attributes('d'), NAV_ICONS.plugin);
+  assert.equal(wrapper.find('script').exists(), false);
+
+  await wrapper.setProps({ items: [{ ...item, icon: 'search' }] });
+  assert.equal(wrapper.get('.tool-icon path').attributes('d'), NAV_ICONS.search);
 });
