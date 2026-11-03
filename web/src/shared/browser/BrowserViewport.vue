@@ -1,5 +1,7 @@
 <template>
-  <div ref="element" class="browser-viewport" data-browser-viewport />
+  <div ref="element" class="browser-viewport" data-browser-viewport>
+    <img v-if="preview" :src="preview" class="browser-viewport__preview" alt="" aria-hidden="true" />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -9,6 +11,7 @@ import { getUiLayerDiagnostics, subscribeToasts, subscribeUiLayerDiagnostics } f
 import { browserRect } from './browserGeometry.ts';
 
 const element = ref<HTMLElement | null>(null);
+const preview = ref<string | null>(null);
 const instance = crypto.randomUUID();
 let revision = 0;
 let generation = 0;
@@ -19,6 +22,7 @@ let stopLayers: (() => void) | null = null;
 let stopToasts: (() => void) | null = null;
 let hasToasts = false;
 let appliedRect: ReturnType<typeof browserRect> = null;
+let covered = false;
 
 function blocked(): boolean {
   return document.visibilityState !== 'visible' || getUiLayerDiagnostics().length > 0 || hasToasts;
@@ -32,11 +36,44 @@ function hide(): void {
   generation += 1;
   revision += 1;
   appliedRect = null;
+  covered = false;
+  preview.value = null;
   window.grigdeskBrowser?.hide({
     operation: 'hide',
     instance,
     revision
   });
+}
+
+/**
+ * Меню получает DOM-подложку из последнего показанного кадра до снятия guest.
+ * Повторные слои сохраняют её: уже скрытая вкладка нового кадра не отдаёт.
+ */
+function cover(): void {
+  if (covered && appliedRect === null) {
+    return;
+  }
+
+  if (!alive || !mounted || document.visibilityState !== 'visible' || !window.grigdeskBrowser?.cover) {
+    hide();
+
+    return;
+  }
+
+  generation += 1;
+  revision += 1;
+  appliedRect = null;
+  covered = true;
+
+  const frame = window.grigdeskBrowser.cover({
+    operation: 'cover',
+    instance,
+    revision,
+  });
+
+  if (frame) {
+    preview.value = `data:image/jpeg;base64,${frame}`;
+  }
 }
 
 /**
@@ -74,6 +111,11 @@ async function measure(): Promise<void> {
         appliedRect = null;
       }
     });
+
+  if (expected === generation && !blocked()) {
+    covered = false;
+    preview.value = null;
+  }
 }
 
 /**
@@ -82,7 +124,7 @@ async function measure(): Promise<void> {
  */
 function refreshLayers(): void {
   if (blocked()) {
-    hide();
+    cover();
   } else if (alive && mounted) {
     void measure();
   }
@@ -93,6 +135,12 @@ function refreshLayers(): void {
  * Overlay закрывается тем же путём: следующий видимый layout ждёт Vue DOM update.
  */
 function refresh(): void {
+  if (blocked() && document.visibilityState === 'visible') {
+    cover();
+
+    return;
+  }
+
   hide();
 
   if (alive && mounted && !blocked()) {
@@ -155,9 +203,19 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .browser-viewport {
+  position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
   width: 100%;
+}
+
+.browser-viewport__preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
 }
 </style>

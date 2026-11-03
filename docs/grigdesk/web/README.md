@@ -77,6 +77,7 @@
 - [Таймаут не отменяет Chromium: время жизни поверхности и захват без изменения viewport](browser-capture-timeout.md)
 - [Скрытый CDP-захват через новую поверхность без ожидания показа кадра](browser-surface-redraw.md)
 - [Правильный JPEG при пустой панели и лишние скрытия из-за tooltip](browser-viewport-presentation.md)
+- [Кадр страницы под меню, диалогами и боковыми панелями](browser-overlay-preview.md)
 - [Проверенный показ после синхронного перехода видимости при прикреплении](browser-visibility-reset.md)
 - [Захват без показа, гонка layout, отменённая навигация и пределы диагноза чёрного экрана](browser-capture-lifecycle.md)
 - [Отказ evidence из-за прав прежней папки снимков и безопасное закрытие доступа](browser-evidence-directory.md)

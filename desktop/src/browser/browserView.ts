@@ -36,6 +36,7 @@ export interface NativeBrowserView extends TabView {
   reload(): void;
   zoom(factor: number): void;
   screenshot(send: Send): Promise<string>;
+  preview(): string | null;
   console(): { level: string; text: string }[];
 }
 
@@ -101,6 +102,49 @@ export function createNativeBrowserView(options: {
   let captureHost: BaseWindow | null = null;
   let captureJobs = 0;
   let captureReads = 0;
+  let lastFrame: NativeImage | null = null;
+  let frameSubscription = 0;
+  let frameGeneration = 0;
+
+  /**
+   * Храним только последний реально представленный кадр видимой вкладки.
+   * Это подложка DOM-слоя, а не агентский screenshot с перерисовкой через CDP.
+   */
+  function subscribeFrames(): void {
+    if (frameSubscription) {
+      return;
+    }
+
+    const subscription = ++frameGeneration;
+
+    frameSubscription = subscription;
+
+    try {
+      contents.beginFrameSubscription((frame) => {
+        if (!disposed && attached && frameSubscription === subscription) {
+          lastFrame = frame;
+        }
+      });
+    } catch {
+      // Необязательная подложка не мешает показу и вводу самой страницы.
+      frameSubscription = 0;
+    }
+  }
+
+  /**
+   * Скрытая вкладка больше не копирует кадры. Поздний callback прежней подписки
+   * не заполняет подложку после повторного показа или перехода на другую страницу.
+   */
+  function unsubscribeFrames(): void {
+    const subscribed = frameSubscription !== 0;
+
+    frameSubscription = 0;
+    lastFrame = null;
+
+    if (subscribed && !contents.isDestroyed()) {
+      contents.endFrameSubscription();
+    }
+  }
 
   /**
    * Сайт получает bounded кольцевой журнал без network headers/cookies.
@@ -125,6 +169,7 @@ export function createNativeBrowserView(options: {
   };
   const reset = () => {
     if (!disposed) {
+      lastFrame = null;
       options.events.start();
     }
   };
@@ -454,6 +499,8 @@ export function createNativeBrowserView(options: {
    * Фокус возвращается интерфейсу только из этого guest в активном окне.
    */
   function hideView(): void {
+    unsubscribeFrames();
+
     if (!attached) {
       return;
     }
@@ -558,8 +605,15 @@ export function createNativeBrowserView(options: {
           attached = true;
         }
 
+        const previous = view.getBounds();
+
+        if (previous.width !== rect.width || previous.height !== rect.height) {
+          lastFrame = null;
+        }
+
         view.setBounds(rect);
         view.setVisible(true);
+        subscribeFrames();
       } finally {
         if (reattaching) {
           contents.setBackgroundThrottling(false);
@@ -611,6 +665,20 @@ export function createNativeBrowserView(options: {
       contents.reload();
     },
     zoom: (factor) => contents.setZoomFactor(factor),
+    /**
+     * Подложка берётся до синхронного hide и не запускает новый захват Chromium.
+     * Ограничиваем JPEG для IPC; пустой или уже скрытый guest кадра не отдаёт.
+     */
+    preview() {
+      if (!attached || disposed || !lastFrame || lastFrame.isEmpty()) {
+        return null;
+      }
+
+      const image = lastFrame.getSize().width > 1280 ? lastFrame.resize({ width: 1280 }) : lastFrame;
+      const jpeg = image.toJPEG(75);
+
+      return jpeg.length <= 2 * 1024 * 1024 ? jpeg.toString('base64') : null;
+    },
     /**
      * Захват CDP удерживает служебную поверхность до реального ответа Electron.
      * Срок и права команды проверяет внешний send, не отменяющий этот Promise.

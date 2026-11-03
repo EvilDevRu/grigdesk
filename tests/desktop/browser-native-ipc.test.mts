@@ -10,7 +10,7 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
  * Fake IPC сохраняет настоящие handlers и вызывает их с независимыми sender/frame.
  * Same-origin URL намеренно одинаков, чтобы тест не прошёл по проверке другого origin.
  */
-function fixture() {
+function fixture(preview: string | null = null) {
   const emitter = new EventEmitter();
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const frame = { url: 'http://pipe.test/', isDestroyed: () => false };
@@ -38,6 +38,8 @@ function fixture() {
     },
     hide: () => {
       hidden += 1;
+
+      return preview;
     },
   });
   const invoke = (event: unknown, documentEpoch = epoch) => Promise.resolve().then(() =>
@@ -97,6 +99,18 @@ test('BR-I03: synchronous hide завершён до возврата, surface �
   assert.deepEqual(f.hide(f.event()), { ok: true });
   assert.equal(f.hidden(), 1);
   assert.deepEqual(f.hide(f.surface()), { ok: false, error: 'browser_sender_forbidden' });
+  assert.equal(f.hidden(), 1);
+  f.remove();
+  f.release();
+});
+
+test('BR-I04: кадр подложки получает только главный документ с текущей эпохой', () => {
+  const f = fixture('ZnJhbWU=');
+
+  assert.deepEqual(f.hide(f.event()), { ok: true, preview: 'ZnJhbWU=' });
+  assert.deepEqual(f.hide(f.surface()), { ok: false, error: 'browser_sender_forbidden' });
+  assert.deepEqual(f.hide(f.iframe()), { ok: false, error: 'browser_sender_forbidden' });
+  assert.deepEqual(f.hide(f.event(), 1), { ok: false, error: 'browser_sender_forbidden' });
   assert.equal(f.hidden(), 1);
   f.remove();
   f.release();

@@ -42,6 +42,19 @@ if (process.isMainFrame) {
 
       return result?.ok === true;
     },
+    /**
+     * Тот же синхронный барьер возвращает последний кадр видимой вкладки для DOM.
+     * Канал проверяет identity главного документа; произвольный захват здесь недоступен.
+     */
+    cover(request: unknown) {
+      if (epoch === null) {
+        return null;
+      }
+
+      const result = ipcRenderer.sendSync('grigdesk:browser:hide', { epoch, request });
+
+      return result?.ok === true && typeof result.preview === 'string' ? result.preview : null;
+    },
     subscribe: (callback: (value: unknown) => void) => subscribe('grigdesk:browser:state', callback),
     subscribeIntent: (callback: (value: unknown) => void) => subscribe('grigdesk:browser:intent', callback),
   }));

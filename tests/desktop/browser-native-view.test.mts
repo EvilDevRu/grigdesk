@@ -26,6 +26,7 @@ function fixture(options: {
   const calls: unknown[] = [];
   const contents = new EventEmitter();
   const debuggerPort = new EventEmitter();
+  const frames: ((image: NativeImage) => void)[] = [];
   let opener: ((input: { url: string }) => unknown) | null = null;
 
   type Network = (details: { url: string }, callback: (value: { cancel: boolean }) => void) => void;
@@ -135,6 +136,10 @@ function fixture(options: {
     },
     getZoomFactor: () => zoom,
     setBackgroundThrottling: (value: boolean) => calls.push(['throttling', value]),
+    beginFrameSubscription: (callback: (image: NativeImage) => void) => {
+      frames.push(callback);
+    },
+    endFrameSubscription: () => calls.push(['unsubscribe-frames']),
     capturePage: async (...args: unknown[]) => {
       calls.push(['capture', ...args]);
 
@@ -251,6 +256,12 @@ function fixture(options: {
     contents,
     debuggerPort,
     calls,
+    frames,
+    frame: (text: string) => ({
+      ...nativeImage,
+      getSize: () => ({ width: 800, height: 600 }),
+      toJPEG: () => Buffer.from(text),
+    }) as unknown as NativeImage,
     finishLoad,
     failLoad,
     finishCapture,
@@ -276,6 +287,39 @@ function fixture(options: {
     },
   };
 }
+
+test('BR-V-preview: подложка хранит показанный кадр, не захватывает скрытый guest', () => {
+  const f = fixture();
+  const rect = {
+    x: 10,
+    y: 20,
+    width: 800,
+    height: 600,
+  };
+
+  assert.equal(f.frames.length, 0);
+  assert.equal(f.adapter.preview(), null);
+  f.adapter.show(rect);
+  f.adapter.show(rect);
+  assert.equal(f.frames.length, 1, 'повторный layout не заводит новую подписку');
+  assert.equal(f.adapter.preview(), null);
+  f.frames[0]!(f.frame('shown-page'));
+  assert.equal(f.adapter.preview(), Buffer.from('shown-page').toString('base64'));
+  assert.equal(f.calls.some((call) => JSON.stringify(call).includes('capture')), false);
+  f.adapter.hide();
+  assert.equal(f.adapter.preview(), null);
+  assert.equal(f.calls.filter((call) => JSON.stringify(call) === '["unsubscribe-frames"]').length, 1);
+  f.adapter.show(rect);
+  f.frames[0]!(f.frame('late-old-page'));
+  assert.equal(f.adapter.preview(), null, 'поздний кадр прошлой подписки игнорируется');
+  f.frames[1]!(f.frame('current-page'));
+  assert.equal(f.adapter.preview(), Buffer.from('current-page').toString('base64'));
+  f.adapter.show({ ...rect, width: 600 });
+  assert.equal(f.adapter.preview(), null, 'новая геометрия не использует прежний кадр');
+  f.adapter.destroy();
+  f.frames[1]!(f.frame('closed-page'));
+  assert.equal(f.adapter.preview(), null);
+});
 
 test('BR-V-focus-background: навигация и команды скрытой страницы не забирают ввод у чата', async () => {
   const f = fixture();

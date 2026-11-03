@@ -597,6 +597,7 @@ export function createBrowserApi(options: {
       'viewport-unmount': ['instance'],
       layout: ['instance', 'revision', 'rect'],
       hide: ['instance', 'revision'],
+      cover: ['instance', 'revision'],
     };
 
     if (!isPlainRecord(raw) || typeof raw.operation !== 'string' || !Object.hasOwn(fields, raw.operation)
@@ -615,14 +616,34 @@ export function createBrowserApi(options: {
 
       return () => subscribers.delete(listener);
     },
+    /**
+     * Только актуальный viewport получает кадр выбранной вкладки перед скрытием.
+     * Подложка не выдаёт права агенту и не обходит fences обычного layout.
+     */
     hide(raw: unknown) {
       const value = request(raw);
 
-      if (value.operation !== 'hide') {
+      if (value.operation !== 'hide' && value.operation !== 'cover') {
         throw new Error('browser_request_invalid');
       }
 
-      layout(value, true);
+      let preview: string | null = null;
+
+      try {
+        if (value.operation === 'cover' && viewport && value.instance === viewport.instance
+          && Number.isSafeInteger(value.revision) && Number(value.revision) > viewport.revision
+          && tabs.layoutRect() !== null) {
+          const active = tabs.activeId();
+
+          preview = active ? views.get(active)?.view.preview() ?? null : null;
+        }
+      } finally {
+        // Отказ копирования кадра не оставляет native guest поверх меню.
+        // Старые instance/revision по-прежнему не меняют текущий layout.
+        layout(value, true);
+      }
+
+      return preview;
     },
     hideForResize: () => tabs.layout(null),
     /**

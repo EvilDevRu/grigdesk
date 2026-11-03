@@ -149,6 +149,11 @@ async function fixture(t: TestContext, agents = true) {
         zoom: (factor) => {
           record.zoom = factor;
         },
+        preview: () => {
+          calls.push({ tabId: id, method: 'preview' });
+
+          return Buffer.from(`frame:${id}`).toString('base64');
+        },
         /**
          * Fake снимка использует переданный runtime fence для отдельных CDP чтений.
          * Так отзыв между чтением размеров и захватом проверяется без настоящего Electron.
@@ -966,6 +971,37 @@ test('BR-N-ZOOM: public percent переводится в Electron factor и п�
     factor: 1.25
   }),
     /browser_request_invalid/u);
+});
+
+test('BR-N-COVER: подложка принадлежит текущим viewport и вкладке, grant сохраняется', async (t) => {
+  const f = await fixture(t);
+  const tab = await f.open();
+  const rect = await f.mount();
+  const instance = '44444444-4444-4444-8444-444444444444';
+  const cover = {
+    operation: 'cover',
+    instance,
+    revision: 2,
+  };
+
+  assert.equal(f.api.hide({ ...cover, instance: 'old-instance' }), null);
+  assert.deepEqual(f.views.get(tab.tabId)!.rect, rect);
+  assert.equal(f.api.hide({ ...cover, revision: 1 }), null);
+  assert.deepEqual(f.views.get(tab.tabId)!.rect, rect);
+  assert.equal(f.api.hide(cover), Buffer.from(`frame:${tab.tabId}`).toString('base64'));
+  assert.equal(f.views.get(tab.tabId)!.rect, null);
+  assert.equal(f.api.hide({ ...cover, revision: 3 }), null, 'скрытая вкладка не отдаёт старый кадр');
+  assert.equal(f.calls.filter((call) => call.method === 'preview').length, 1);
+  assert.equal(f.api.snapshot().tabs[0]!.grantEpoch, tab.grantEpoch);
+  await f.api.invoke({
+    operation: 'layout',
+    instance,
+    revision: 4,
+    rect,
+  });
+  assert.deepEqual(f.views.get(tab.tabId)!.rect, rect);
+  f.api.documentChanged();
+  assert.equal(f.api.hide({ ...cover, revision: 5 }), null);
 });
 
 test('BR-N-LIMIT: общий лимит действует при пустом списке нового агента', async (t) => {
