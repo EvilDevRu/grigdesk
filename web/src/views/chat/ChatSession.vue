@@ -241,6 +241,16 @@
           </div>
         </Teleport>
       </div>
+      <UiProgress
+        class="header-context"
+        data-context="chat-header-context"
+        size="line"
+        :value="ctxMeterValue"
+        :tone="ctxMeterTone"
+        :indeterminate="sess.compacting"
+        :label="ctxTooltip.title"
+        :value-text="ctxTitle"
+      />
     </div>
 
     <UiInlineMessage v-if="!messagesReady" class="load-state" data-context="chat-message-load"
@@ -2785,8 +2795,18 @@ function skipQuestion() {
    которого тянут мышью, чату на одном и том же экране остаётся от 400 до 1300 px. */
 .cs { container: chat / inline-size; }
 
-.cs-top { --chat-head-gap: 16px; display: flex; flex-direction: column; gap: 4px; padding: 4px var(--chat-gutter);
-  border-bottom: 1px solid var(--line); min-height: var(--chat-head-h); justify-content: center; }
+.cs-top {
+  --chat-head-gap: 16px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px var(--chat-gutter);
+  border-bottom: 1px solid var(--line);
+  min-height: var(--chat-head-h);
+  justify-content: center;
+}
+.header-context { display: none; }
 /* На странице высота шапки — общий с левым списком токен, иначе две разделительные линии
    расходятся. min-height, а не height: редкое предупреждение о модели важнее ровной линии —
    пусть шапка подрастёт, чем текст обрежется. */
@@ -3156,12 +3176,15 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
 /* При чтении на телефоне шапка занимает один ряд. Настройки раскрываются явно,
    сохраняя те же экземпляры controls и все предупреждения о неизвестной модели. */
 @media (max-width: 600px) {
-  .cs-top { min-height: 56px; padding-block: 6px; flex: none; }
+  .cs-top { min-height: 45px; padding-block: 0; flex: none; }
+  /* Дублируем шкалу настроек на границе шапки: она видна и при закрытом диалоге.
+     Абсолютная линия не отнимает место у названия и сенсорных площадок действий. */
+  .header-context { display: block; position: absolute; inset-inline: 0; bottom: -1px; }
   .hrow { gap: 4px; }
   .session-heading { display: flex; align-items: center; gap: 4px; min-width: 0; width: 100%; }
   .back { margin: 0; }
   .ttl { flex: 1 1 0; }
-  .ctitle { font-size: 16px; }
+  .ctitle { font-size: 15px; }
   .phone-options { display: grid; }
   .cs .session-workspace, .cs .session-controls, .bar .spacer { display: none; }
   .bar:not(:has(.warn)) { display: none; }

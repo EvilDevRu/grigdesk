@@ -211,6 +211,11 @@ test('кольцо контекста открывает форматирова�
   await flushPromises();
 
   const ring = wrapper.get('.ctx-meter');
+  const headerMeter = wrapper.get('[data-context="chat-header-context"]');
+
+  assert.equal(headerMeter.attributes('aria-valuenow'), '80');
+  assert.equal(headerMeter.classes().includes('ui-progress--warning'), true);
+  assert.equal(headerMeter.attributes('aria-valuetext'), ring.attributes('aria-label'));
   assert.equal(ring.attributes('title'), undefined);
   assert.match(ring.attributes('aria-label'), /Контекст: 160[\s\u00a0]000/);
   assert.equal(Boolean(browser.document.querySelector('[data-testid="context-tooltip"]')), false);
@@ -246,6 +251,8 @@ test('кольцо контекста открывает форматирова�
   await nextTick();
   assert.match(ring.attributes('aria-label'), /40[\s\u00a0]000 из 80[\s\u00a0]000.*50%/);
   assert.match(ring.attributes('aria-label'), /замер этого хода/);
+  assert.equal(headerMeter.attributes('aria-valuenow'), '50');
+  assert.equal(headerMeter.classes().includes('ui-progress--success'), true);
 
   session.sessionId = null;
   await nextTick();
@@ -259,6 +266,7 @@ test('кольцо контекста открывает форматирова�
   assert.match(ring.attributes('aria-label'), /Контекст: 0 из/);
   assert.equal(content.querySelector('.ctx-pop-pct')?.textContent.trim(), '0%');
   assert.equal(ring.get('.ctx-meter-value').text(), '0%');
+  assert.equal(headerMeter.attributes('aria-valuenow'), '0');
 
   session.liveContextUsage.contextTokens = 90_000;
   session.liveContextUsage.contextMetric = 'unavailable';
@@ -268,6 +276,14 @@ test('кольцо контекста открывает форматирова�
   assert.equal(Boolean(content.querySelector('.ctx-pop-pct')), false);
   assert.match(content.textContent, /Точная заполненность пока недоступна/);
   assert.equal(ring.classes().includes('hi'), false);
+  assert.equal(headerMeter.get('.ui-progress__bar').element.style.width, '0%');
+  assert.match(headerMeter.attributes('aria-valuetext'), /недоступна/);
+
+  session.compacting = true;
+  await nextTick();
+  assert.equal(headerMeter.attributes('aria-valuenow'), undefined);
+  assert.equal(headerMeter.find('.is-indeterminate').exists(), true);
+  session.compacting = false;
   session.sending = false;
   session.liveContextUsage = null;
 
