@@ -38,7 +38,7 @@
                 loading-label="Обновляю задачу"
                 @click="refresh"
               >
-                ⟳
+                <UiRefreshIcon />
               </UiIconButton>
               <UiIconButton
                 data-context="task-modal-header"
@@ -780,7 +780,8 @@
                     loading-label="Сохраняю уточнения"
                     @click="sendClarify"
                   >
-                    ↻ Уточнить и переоценить
+                    <template #leading><UiRefreshIcon /></template>
+                    Уточнить и переоценить
                   </UiButton>
                   <UiButton
                     v-if="analysisManifest"
@@ -1279,6 +1280,7 @@ import { useTrackersStore } from '../stores/trackers.ts';
 import { sseSubscribe } from '../composables/useSse.ts';
 import { parseProjectsChange } from '../../../shared/runtime/projectsContracts.ts';
 import {
+  UiRefreshIcon,
   confirmDialog,
   showToast,
   UiButton,

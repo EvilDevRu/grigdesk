@@ -264,10 +264,7 @@
       </div>
       <UiButton v-if="messageLoad?.state === 'error'" size="compact" @click="retryMessages">
         <template #leading>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17" />
-          </svg>
+          <UiRefreshIcon />
         </template>
         {{ t('core.chatListRetry') }}
       </UiButton>
@@ -775,6 +772,7 @@ import ProviderIcon from '../../shared/ProviderIcon.vue';
 import ProviderModelSelect from '../../shared/ProviderModelSelect.vue';
 import { isSelectableModelProvider } from '../../shared/providerModelSelect.ts';
 import {
+  UiRefreshIcon,
   confirmDialog,
   t,
   UiButton,

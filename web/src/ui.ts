@@ -4,6 +4,7 @@ export { default as UiAudio } from './components/primitives/UiAudio.vue';
 export { default as UiButton } from './components/primitives/UiButton.vue';
 export { default as UiCheckbox } from './components/primitives/UiCheckbox.vue';
 export { default as UiIconButton } from './components/primitives/UiIconButton.vue';
+export { default as UiRefreshIcon } from './components/primitives/UiRefreshIcon.vue';
 export { default as UiInput } from './components/primitives/UiInput.vue';
 export { default as UiNumberInput } from './components/primitives/UiNumberInput.vue';
 export { default as UiPressable } from './components/primitives/UiPressable.vue';

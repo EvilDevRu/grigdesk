@@ -18,6 +18,7 @@ function uiFacadeStub(prefix) {
     ['UiInput', 'src/components/primitives/UiInput.vue'],
     ['UiPressable', 'src/components/primitives/UiPressable.vue'],
     ['UiProgress', 'src/components/feedback/UiProgress.vue'],
+    ['UiRefreshIcon', 'src/components/primitives/UiRefreshIcon.vue'],
     ['UiSelect', 'src/components/primitives/UiSelect.vue'],
     ['UiSearchInput', 'src/components/composites/UiSearchInput.vue'],
     ['UiSelectableRow', 'src/components/composites/UiSelectableRow.vue'],

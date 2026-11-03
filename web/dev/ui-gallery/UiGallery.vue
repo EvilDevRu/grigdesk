@@ -28,7 +28,7 @@
         <UiButton disabled>Disabled</UiButton>
         <UiButton aria-disabled>Aria disabled</UiButton>
         <UiButton pressed>Pressed</UiButton>
-        <UiIconButton label="Обновить">↻</UiIconButton>
+        <UiIconButton label="Обновить"><UiRefreshIcon /></UiIconButton>
         <UiActionLink href="#gallery-fields">Action link</UiActionLink>
       </div>
     </section>
@@ -56,7 +56,7 @@
         <UiButton size="compact" tone="success" variant="solid" loading disabled>
           ✓ Принять
         </UiButton>
-        <UiIconButton label="Обновляю" loading disabled>↻</UiIconButton>
+        <UiIconButton label="Обновляю" loading disabled><UiRefreshIcon /></UiIconButton>
       </div>
     </section>
 
@@ -452,6 +452,7 @@
 import { ref } from 'vue';
 
 import {
+  UiRefreshIcon,
   UiActionLink,
   UiButton,
   UiCheckbox,

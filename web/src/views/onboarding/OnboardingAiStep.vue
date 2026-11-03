@@ -40,7 +40,7 @@
     </div>
     <div class="provider-refresh">
       <UiButton data-context="workspace-form-wrap" :loading="checking" @click="refresh(true)">
-        <template #leading><span aria-hidden="true">↻</span></template>
+        <template #leading><UiRefreshIcon /></template>
         {{ t('core.onboardingCheckAgain') }}
       </UiButton>
       <p v-if="ready" class="provider-ready-note">{{ t('core.onboardingAiContinue') }}</p>
@@ -51,7 +51,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 
-import { t, uiLocale, UiButton, UiInlineMessage, UiLoadingState } from '../../ui';
+import { UiRefreshIcon, t, uiLocale, UiButton, UiInlineMessage, UiLoadingState } from '../../ui';
 import type { ProviderEntry } from '../../../../shared/chat/providersContracts.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
 import { useProviderInstallStore } from '../../stores/providerInstall.ts';

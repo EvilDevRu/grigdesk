@@ -87,7 +87,7 @@
               v-tooltip="t('core.browserReload')"
               @click="history('reload')"
           >
-            <svg v-bind="ICON" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
+            <UiRefreshIcon />
           </UiIconButton>
         </div>
         <div class="browser-address">
@@ -192,7 +192,7 @@
               :disabled="browser.hostStatus.phase !== 'online'"
               @click="loadOwners"
           >
-            <svg v-bind="ICON" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
+            <UiRefreshIcon />
           </UiIconButton>
         </div>
       </div>
@@ -228,6 +228,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { SVGAttributes } from 'vue';
 
 import {
+  UiRefreshIcon,
   UiButton,
   UiDisclosureButton,
   UiIconButton,

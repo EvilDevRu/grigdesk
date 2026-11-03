@@ -204,7 +204,7 @@
                     />
                     <span v-if="p.updateAvailable" class="updot" aria-hidden="true"></span>
                     <span v-if="installation.snapshot.active?.providerId === p.id"
-                      :aria-label="t('settings.providerInstallationRunning')">⟳</span>
+                      :aria-label="t('settings.providerInstallationRunning')"><UiRefreshIcon /></span>
                   </span>
                   <span class="status-label">{{ p.name }}</span>
                 </UiPressable>
@@ -267,10 +267,7 @@
                     :loading-label="t('core.checking')"
                     @click="prov.refreshUsage()"
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                      <path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1 M20.5 3.5v5.5H15" />
-                    </svg>
+                    <UiRefreshIcon />
                   </UiIconButton>
                   <UiIconButton
                     data-context="topbar-popover-settings"
@@ -473,6 +470,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import {
+  UiRefreshIcon,
   UiActionLink,
   UiButton,
   UiDialog,

@@ -166,12 +166,9 @@
                 :loading="store.isBusy(container.id)"
                 @click="run(container, container.state === 'running' ? 'restart' : 'start')"
               >
-                <svg v-bind="ICON" aria-hidden="true">
-                  <path
-                    :d="container.state === 'running'
-                      ? 'M21 12a9 9 0 1 1-2.6-6.4 M21 4v5h-5'
-                      : 'M8 5l11 7-11 7z'"
-                  />
+                <UiRefreshIcon v-if="container.state === 'running'" />
+                <svg v-else v-bind="ICON" aria-hidden="true">
+                  <path d="M8 5l11 7-11 7z" />
                 </svg>
               </UiIconButton>
               <UiIconButton
@@ -228,6 +225,7 @@ import { sandboxUrl } from '../../shared/sandbox.ts';
 import { useDockerStore } from '../../stores/docker';
 import { usePluginsStore } from '../../stores/plugins.ts';
 import {
+  UiRefreshIcon,
   UiButton,
   UiCheckbox,
   UiIconButton,

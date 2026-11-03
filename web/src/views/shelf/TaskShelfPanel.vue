@@ -12,11 +12,7 @@
             <UiIconButton v-if="!shelf._viewMirror" role="embedded" data-context="workspace-toolbar"
                           :label="t('core.shelfDesignRefresh')" v-tooltip="t('core.shelfDesignRefresh')"
                           :loading="shelf.loading" @click="shelf.load(true)">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M20 7v5h-5 M4 17v-5h5" />
-                <path d="M6.1 9a7 7 0 0 1 11.6-2.3L20 9 M4 15l2.3 2.3A7 7 0 0 0 17.9 15" />
-              </svg>
+              <UiRefreshIcon />
             </UiIconButton>
           </template>
         </UiPaneHeader>
@@ -236,6 +232,7 @@ import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import type { ShelfActivity, ShelfActivityProgress, ShelfRow } from '../../stores/taskShelf.ts';
 import { useUiStore } from '../../stores/ui.ts';
 import {
+  UiRefreshIcon,
   UiButton,
   UiPaneHeader,
   UiInlineMessage,
