@@ -100,7 +100,7 @@ export function alertUser(input: AlertInput): boolean {
     actions.push({
       id: ALERT_OPEN_ACTION_ID,
       label: alertLocale ? alertTargetMessage(target) : alertTargetLabel(target),
-      tone: 'accent',
+      tone: 'neutral',
       variant: 'outline',
       run() {
         targetOpener?.(target);

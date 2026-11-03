@@ -489,7 +489,7 @@
   align-items: start;
   padding: 10px 12px 10px 11px;
   border: 1px solid color-mix(in srgb, var(--ui-toast-tone) 30%, var(--line-2));
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--ui-toast-tone) 7%, var(--surface));
   color: var(--ink);
   font-size: 12px;
@@ -550,7 +550,7 @@
   padding: 5px 7px;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--ground);
   font-family: var(--mono);
   font-size: 11px;
@@ -573,7 +573,7 @@
   margin: 0;
   padding: 2px 6px 2px 12px;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   color: var(--ink-mid);
   font-size: 11.5px;
@@ -606,13 +606,65 @@
   }
 }
 
-/* Кнопки тоста компактнее обычных: карточка — подсказка, а не форма. */
+/* Видимая плашка отделена от площадки нажатия: на touch остаются удобные 44 px,
+   но фон и рамка занимают 28 px. Длинная подпись переносится без обрезания. */
 .ui-button[data-context='toast-action'] {
-  height: 26px;
-  min-height: 26px;
-  padding-inline: 10px;
-  border-radius: 7px;
+  height: auto;
+  min-height: 28px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
   font-size: 12px;
+  line-height: 16px;
+}
+
+.ui-button[data-context='toast-action']::before {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--ui-action-border);
+  border-radius: inherit;
+  background: var(--ui-action-background);
+  content: '';
+  pointer-events: none;
+}
+
+.ui-button[data-context='toast-action'] > .ui-button__content {
+  position: relative;
+}
+
+.ui-button[data-context='toast-action'][data-variant='outline'] {
+  --ui-action-color: color-mix(in srgb, var(--ui-action-tone) 75%, var(--ink));
+  --ui-action-background: color-mix(in srgb, var(--ui-action-tone) 6%, var(--surface));
+  --ui-action-background-hover: color-mix(in srgb, var(--ui-action-tone) 12%, var(--surface));
+  --ui-action-border: color-mix(in srgb, var(--ui-action-tone) 24%, var(--line));
+}
+
+.ui-button[data-context='toast-action'][data-tone='neutral'] {
+  --ui-action-color: var(--ink);
+}
+
+.ui-button[data-context='toast-action']:hover:not(:disabled):not([aria-disabled='true']) {
+  background: transparent;
+}
+
+.ui-button[data-context='toast-action']:hover:not(:disabled):not([aria-disabled='true'])::before {
+  border-color: color-mix(in srgb, var(--ui-action-tone) 48%, var(--control-border-hover));
+  background: var(--ui-action-background-hover);
+}
+
+/* Дополнительные 16 px прозрачны и не конкурируют с текстом карточки.
+   Крестик тоже получает отдельные 44 px, для него зарезервирован конец заголовка. */
+:root[data-ui-touch] .ui-button[data-context='toast-action'] {
+  padding-block: 14px;
+}
+
+:root[data-ui-touch] .ui-button[data-context='toast-action']::before {
+  inset-block: 8px;
+}
+
+:root[data-ui-touch] .ui-toast__title {
+  padding-right: 32px;
 }
 
 .ui-icon-button[data-context='toast-close'] {
@@ -628,4 +680,12 @@
 
 .ui-icon-button[data-context='toast-close']:hover {
   color: var(--ink);
+}
+
+/* Прозрачный угол не закрывает заголовок и остаётся удобным для касания. */
+:root[data-ui-touch] .ui-icon-button[data-context='toast-close'] {
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 44px;
 }
