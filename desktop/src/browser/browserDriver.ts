@@ -19,6 +19,9 @@ export function createBrowserDriver(port: {
     editable: boolean
   } | null>;
   send(name: string, value: unknown): Promise<unknown>;
+  act(payload: { action: 'click' | 'fill' | 'scroll'; ref: string; text?: string; deltaY?: number }): Promise<{
+    ok: boolean
+  }>;
 }) {
   return {
     /**
@@ -95,6 +98,27 @@ export function createBrowserDriver(port: {
         });
         await send('Input.insertText', { text: input.text ?? '' });
       }
+    },
+    /**
+     * DOM-исполнение команды для вкладки вне экрана: действие выполняется
+     * в изолированном мире страницы и не зависит от видимости native view.
+     * Проверки доступа и эпохи повторяются вокруг единственного эффекта.
+     */
+    async domInput(input: BrowserInput) {
+      if (!port.allowed()) {
+        throw new Error('access_revoked');
+      }
+
+      if (input.pageEpoch !== port.epoch()) {
+        throw new Error('stale_page');
+      }
+
+      await port.act({
+        action: input.action,
+        ref: input.ref ?? '',
+        text: input.text,
+        deltaY: input.deltaY
+      });
     },
   };
 }

@@ -1,4 +1,4 @@
-import { SNAPSHOT_SOURCE, RESOLVE_SOURCE } from './pageSnapshot.ts';
+import { SNAPSHOT_SOURCE, RESOLVE_SOURCE, DOM_ACT_SOURCE } from './pageSnapshot.ts';
 
 interface ProtocolResult {
   result?: { value?: unknown; objectId?: string };
@@ -131,6 +131,39 @@ export function createBrowserProtocol(port: {
         y: number;
         editable: boolean
       } | null;
+    },
+    /**
+     * DOM-исполнение команды в изолированном мире снимка: путь для вкладок,
+     * которых нет на экране. Ref и параметры идут значениями протокола и
+     * не собираются в исполняемую строку.
+     */
+    async act(payload: { action: 'click' | 'fill' | 'scroll'; ref: string; text?: string; deltaY?: number }) {
+      check();
+
+      if (!worldGlobal || snapshotEpoch !== port.epoch()) {
+        throw new Error('stale_page');
+      }
+
+      const result = await port.send('Runtime.callFunctionOn', {
+        objectId: worldGlobal,
+        functionDeclaration: DOM_ACT_SOURCE,
+        arguments: [{ value: payload }],
+        returnByValue: true,
+      });
+
+      check();
+
+      if (result.exceptionDetails || snapshotEpoch !== port.epoch()) {
+        return { ok: false, code: 'stale_page' };
+      }
+
+      const value = result.result?.value as { ok?: boolean; code?: string } | null;
+
+      if (!value?.ok) {
+        throw new Error(value?.code && /^[a-z_]+$/u.test(value.code) ? value.code : 'stale_element');
+      }
+
+      return { ok: true };
     },
   };
 }

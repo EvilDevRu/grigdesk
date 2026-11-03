@@ -154,6 +154,12 @@ async function fixture(t: TestContext, agents = true) {
          * Так отзыв между чтением размеров и захватом проверяется без настоящего Electron.
          */
         async screenshot(send) {
+          calls.push({
+            tabId: id,
+            method: 'capture',
+            params: record.rect,
+          });
+
           if (record.captureFailure) {
             throw new Error('Failed to capture page');
           }
@@ -201,6 +207,16 @@ async function fixture(t: TestContext, agents = true) {
           }
 
           if (method === 'Runtime.callFunctionOn') {
+            /**
+             * DOM-команда агента приходит функцией с payload; фейк подтверждает
+             * исполнение, а resolve по-прежнему получает координаты элемента.
+             */
+            const declaration = String((params as { functionDeclaration?: string }).functionDeclaration ?? '');
+
+            if (declaration.startsWith('function(payload)')) {
+              return { result: { value: { ok: true } } };
+            }
+
             return { result: { value: {
               x: 10,
               y: 10,
@@ -243,6 +259,25 @@ async function fixture(t: TestContext, agents = true) {
 
     return result;
   };
+  /**
+   * Монтирует панель браузера с фиксированным rect: синтетический ввод по
+   * контракту BR-N31 доходит только до показанной вкладки, поэтому тесты ввода
+   * обязаны сначала дать вкладке layout.
+   */
+  const mount = async () => {
+    const instance = '44444444-4444-4444-8444-444444444444';
+    const rect = {
+      x: 0,
+      y: 0,
+      width: 800,
+      height: 600
+    };
+
+    await api.invoke({ operation: 'viewport-mount', instance });
+    await api.invoke({ operation: 'layout', instance, revision: 1, rect });
+
+    return rect;
+  };
 
   return {
     api,
@@ -250,6 +285,7 @@ async function fixture(t: TestContext, agents = true) {
     calls,
     execute,
     open,
+    mount,
     navigation: (gate: ReturnType<typeof barrier>) => {
       navigationGate = gate;
     },
@@ -321,6 +357,8 @@ test('BR-N01: human tab невидима агенту до explicit grant и п�
 test('BR-N02: второй snapshot меняет pageEpoch; S1 ref не нажимает S2 документ', async (t) => {
   const f = await fixture(t);
   const tab = await f.open();
+
+  await f.mount();
   const first = await f.execute({ action: 'snapshot', tabId: tab.tabId }, tab.grantEpoch) as {
     pageEpoch: number;
   };
@@ -337,6 +375,129 @@ test('BR-N02: второй snapshot меняет pageEpoch; S1 ref не нажи
     pageEpoch: first.pageEpoch
   }, tab.grantEpoch), { ok: false, error: 'stale_page' });
   assert.equal(f.calls.filter((call) => call.method.startsWith('Input.')).length, before);
+});
+
+test('BR-N30: zoom вкладки масштабирует координаты Input, клик попадает в элемент', async (t) => {
+  const f = await fixture(t);
+  const tab = await f.open();
+
+  await f.mount();
+  const snapshot = await f.execute({ action: 'snapshot', tabId: tab.tabId }, tab.grantEpoch) as {
+    pageEpoch: number;
+  };
+
+  f.views.get(tab.tabId)!.zoom = 2;
+
+  assert.deepEqual(await f.execute({
+    action: 'click',
+    tabId: tab.tabId,
+    ref: 'e1',
+    pageEpoch: snapshot.pageEpoch
+  }, tab.grantEpoch), { ok: true });
+
+  const events = f.calls.filter((call) => call.method === 'Input.dispatchMouseEvent');
+
+  assert.ok(events.length >= 2);
+  assert.deepEqual(events.map((event) => (event.params as { x: number; y: number }).x), [20, 20]);
+  assert.deepEqual(events.map((event) => (event.params as { x: number; y: number }).y), [20, 20]);
+
+  f.views.get(tab.tabId)!.zoom = 1;
+
+  assert.deepEqual(await f.execute({
+    action: 'click',
+    tabId: tab.tabId,
+    ref: 'e1',
+    pageEpoch: snapshot.pageEpoch
+  }, tab.grantEpoch), { ok: true });
+
+  const plain = f.calls.filter((call) => call.method === 'Input.dispatchMouseEvent').slice(-2);
+
+  assert.deepEqual(plain.map((event) => (event.params as { x: number; y: number }).x), [10, 10]);
+});
+
+test('BR-N31: ввод — native по показанной вкладке, DOM без смонтированной панели', async (t) => {
+  const f = await fixture(t);
+  const first = await f.open();
+  const snapshot = await f.execute({ action: 'snapshot', tabId: first.tabId }, first.grantEpoch) as {
+    pageEpoch: number;
+  };
+
+  /**
+   * Панель браузера не смонтирована: команда исполняется в DOM страницы через
+   * isolated world — без синтетических событий окна и без показа вкладки.
+   */
+  const domCalls = f.calls.length;
+
+  assert.deepEqual(await f.execute({
+    action: 'click',
+    tabId: first.tabId,
+    ref: 'e1',
+    pageEpoch: snapshot.pageEpoch
+  }, first.grantEpoch), { ok: true });
+
+  const afterDom = f.calls.slice(domCalls);
+
+  assert.ok(afterDom.some((call) => call.method === 'Runtime.callFunctionOn'
+    && String((call.params as { functionDeclaration?: string }).functionDeclaration ?? '')
+      .startsWith('function(payload)')));
+  assert.equal(afterDom.some((call) => call.method.startsWith('Input.')), false);
+  assert.equal(f.views.get(first.tabId)!.rect, null);
+
+  /**
+   * Со смонтированной панелью ввод активирует вкладку: render показывает её
+   * с rect панели и команда идёт системными событиями ввода.
+   */
+  const rect = await f.mount();
+  const nativeCalls = f.calls.length;
+
+  assert.deepEqual(await f.execute({
+    action: 'click',
+    tabId: first.tabId,
+    ref: 'e1',
+    pageEpoch: snapshot.pageEpoch
+  }, first.grantEpoch), { ok: true });
+
+  assert.ok(f.calls.slice(nativeCalls).some((call) => call.method === 'Input.dispatchMouseEvent'));
+  assert.deepEqual(f.views.get(first.tabId)!.rect, rect);
+
+  /**
+   * Открытие второй вкладки активирует её и скрывает первую; ввод в первую
+   * возвращает ей активность и показ, не оставляя ввод в отсоединённом view.
+   */
+  const second = await f.execute({
+    action: 'open',
+    url: 'http://fixture.test/second'
+  }, 0) as TabResult;
+
+  assert.equal(second.ok, true);
+  assert.notEqual(second.tabId, first.tabId);
+  assert.equal(f.views.get(first.tabId)!.rect, null);
+  assert.deepEqual(await f.execute({
+    action: 'click',
+    tabId: first.tabId,
+    ref: 'e1',
+    pageEpoch: snapshot.pageEpoch
+  }, first.grantEpoch), { ok: true });
+  assert.deepEqual(f.views.get(first.tabId)!.rect, rect);
+  assert.equal(f.views.get(second.tabId)!.rect, null);
+
+  /**
+   * После размонтирования панели ввод снова уходит в DOM-путь: приёмка фабрики
+   * не зависит от того, открыт ли инструмент браузера. Повторный mount новым
+   * instance не восстанавливает layout до явной команды.
+   */
+  await f.api.invoke({ operation: 'viewport-unmount', instance: '44444444-4444-4444-8444-444444444444' });
+  await f.api.invoke({ operation: 'viewport-mount', instance: '55555555-5555-4555-8555-555555555555' });
+  const againDom = f.calls.length;
+
+  assert.deepEqual(await f.execute({
+    action: 'click',
+    tabId: first.tabId,
+    ref: 'e1',
+    pageEpoch: snapshot.pageEpoch
+  }, first.grantEpoch), { ok: true });
+  assert.equal(f.calls.slice(againDom).some((call) => call.method.startsWith('Input.')), false);
+  assert.equal(f.views.get(first.tabId)!.rect, null);
 });
 
 test('BR-N03: pause/resume не оживляет queued старый grantEpoch', { timeout: 5000 }, async (t) => {
@@ -368,6 +529,8 @@ test('BR-N03: pause/resume не оживляет queued старый grantEpoch'
 test('BR-N04: revoke/IPC epoch change во время resolve не отправляет Input', async (t) => {
   const f = await fixture(t);
   const tab = await f.open();
+
+  await f.mount();
   const snapshot = await f.execute({ action: 'snapshot', tabId: tab.tabId }, tab.grantEpoch) as {
     pageEpoch: number;
   };
@@ -428,6 +591,119 @@ test('BR-N04C: отказ снимка не объявляет живой бра
   const result = await f.execute({ action: 'console', tabId: tab.tabId }, tab.grantEpoch) as { ok: boolean };
 
   assert.equal(result.ok, true);
+});
+
+test('BR-N32: снимок скрытого guest не показывает его и не отменяет новый layout', async (t) => {
+  const f = await fixture(t);
+  const tab = await f.open();
+  const view = f.views.get(tab.tabId)!;
+  const gate = barrier();
+
+  t.after(() => gate.release());
+  view.captureWithCdp = true;
+  view.gate = { method: 'Page.getLayoutMetrics', barrier: gate };
+
+  const pending = f.execute({ action: 'screenshot', tabId: tab.tabId }, tab.grantEpoch);
+
+  await gate.entered;
+  assert.equal(f.calls.find((call) => call.method === 'capture')!.params, null);
+  await f.mount();
+  gate.release();
+  await pending;
+  assert.notEqual(view.rect, null, 'завершение снимка не отменяет новый layout');
+  assert.deepEqual(await f.execute({ action: 'close', tabId: tab.tabId }, tab.grantEpoch), { ok: true });
+});
+
+test('BR-N33: зависший снимок не отзывает grant и не оставляет поздний сторож', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  const f = await fixture(t);
+  const tab = await f.open();
+  const view = f.views.get(tab.tabId)!;
+  const gate = barrier();
+
+  t.after(() => gate.release());
+  view.captureWithCdp = true;
+  view.gate = { method: 'Page.captureScreenshot', barrier: gate };
+
+  const pending = f.execute({ action: 'screenshot', tabId: tab.tabId }, tab.grantEpoch);
+
+  await gate.entered;
+  t.mock.timers.tick(10001);
+  assert.deepEqual(await pending, { ok: false, error: 'browser_capture_failed' });
+  assert.deepEqual(await f.execute({ action: 'console', tabId: tab.tabId }, tab.grantEpoch), {
+    ok: true,
+    console: [{ level: 'error', text: 'fixture error' }],
+    untrusted: true,
+  });
+  gate.release();
+});
+
+test('BR-N35: свежий кадр за две секунды укладывается в общий срок снимка', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  const f = await fixture(t);
+  const tab = await f.open();
+  const view = f.views.get(tab.tabId)!;
+  const gate = barrier();
+
+  t.after(() => gate.release());
+  view.captureWithCdp = true;
+  view.gate = { method: 'Page.captureScreenshot', barrier: gate };
+
+  const pending = f.execute({ action: 'screenshot', tabId: tab.tabId }, tab.grantEpoch);
+
+  await gate.entered;
+  t.mock.timers.tick(2100);
+  gate.release();
+
+  const result = await pending as { format?: string };
+
+  assert.equal(result.format, 'grigdesk-work-content-v1');
+});
+
+test('BR-N34: длинная серия по трём вкладкам сохраняет grants после навигаций и снимков', async (t) => {
+  const f = await fixture(t);
+  const tabs: TabResult[] = [];
+
+  for (let index = 0; index < 3; index += 1) {
+    tabs.push(await f.execute({ action: 'open', url: `http://fixture.test/${index}` }) as TabResult);
+  }
+
+  for (let index = 0; index < 12; index += 1) {
+    const tab = tabs[index % tabs.length]!;
+    const view = f.views.get(tab.tabId)!;
+
+    view.events.start();
+    view.events.navigated(`http://fixture.test/section-${index}`);
+
+    const observation = await f.execute({ action: 'snapshot', tabId: tab.tabId }, tab.grantEpoch) as {
+      ok: boolean;
+      pageEpoch: number;
+    };
+
+    assert.equal(observation.ok, true);
+
+    for (const action of ['click', 'fill'] as const) {
+      assert.deepEqual(await f.execute({
+        action,
+        tabId: tab.tabId,
+        pageEpoch: observation.pageEpoch,
+        ref: 'e1',
+        ...(action === 'fill' ? { text: 'проверка' } : {}),
+      }, tab.grantEpoch), { ok: true });
+    }
+
+    const shot = await f.execute({ action: 'screenshot', tabId: tab.tabId }, tab.grantEpoch) as {
+      format: string;
+    };
+
+    assert.equal(shot.format, 'grigdesk-work-content-v1');
+    assert.equal(view.rect, null);
+  }
+
+  assert.equal(f.api.snapshot().grants.length, 3);
+  assert.equal(f.api.snapshot().grants.every((grant) => !grant.paused && grant.grantEpoch === 1), true);
 });
 
 test('BR-N05: navigation begin блокирует команды; другой origin отзывает grant', async (t) => {

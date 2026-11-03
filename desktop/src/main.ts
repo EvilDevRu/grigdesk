@@ -3,6 +3,7 @@ import { createDirectorySelector } from './directorySelection.ts';
 import { createApplicationLauncher } from './applicationLauncher.ts';
 import {
   app,
+  BaseWindow,
   BrowserWindow,
   WebContentsView,
   ipcMain,
@@ -133,6 +134,13 @@ if (dataDirectory !== undefined) {
 }
 
 app.enableSandbox();
+
+// Скрытая поверхность не получает подтверждение показа кадра на экране.
+// CDP ждёт новую поверхность вместо presentation ACK; прочие features сохраняются.
+const captureFeatures = app.commandLine.getSwitchValue('enable-features').split(',').filter(Boolean);
+
+app.commandLine.appendSwitch('enable-features',
+  [...new Set([...captureFeatures, 'CDPScreenshotNewSurface'])].join(','));
 
 function writeLog(message: string): void {
   process.stderr.write(`${message}\n`);
@@ -1009,6 +1017,7 @@ async function prepare(signal: AbortSignal): Promise<void> {
       machine: stored.selected ?? 'unselected',
       scope,
       create: (options) => new WebContentsView(options),
+      captureWindow: (options) => new BaseWindow(options),
       imageFromBuffer: (data) => nativeImage.createFromBuffer(data),
       window: () => {
         if (!mainWindow || mainWindow.isDestroyed()) {

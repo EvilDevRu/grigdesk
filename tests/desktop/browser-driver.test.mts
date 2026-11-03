@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createBrowserDriver } from '../../desktop/src/browser/browserDriver.ts';
 
+const unexpectedDomInput = async () => assert.fail('native-сценарий не должен вызывать DOM-ввод');
+
 test('BR12: stale refs и отзыв не отправляют click; fill получает text как данные', async () => {
   const calls: unknown[] = [];
   let valid = true;
   const driver = createBrowserDriver({
+    act: unexpectedDomInput,
     allowed: () => valid,
     epoch: () => 4,
     resolve: async (ref: string) => ref === 'e1' ? {
@@ -48,6 +51,7 @@ test('BR12-B: revoke между press/release запрещает следующ�
   const calls: string[] = [];
   let allowed = true;
   const driver = createBrowserDriver({
+    act: unexpectedDomInput,
     allowed: () => allowed,
     epoch: () => 1,
     resolve: async () => ({
@@ -76,6 +80,7 @@ test('BR12-C: navigation during resolve и noneditable target не вводят 
   let epoch = 1;
   let calls = 0;
   const driver = createBrowserDriver({
+    act: unexpectedDomInput,
     allowed: () => true,
     epoch: () => epoch,
     resolve: async () => {
@@ -99,6 +104,7 @@ test('BR12-C: navigation during resolve и noneditable target не вводят 
   }), /stale_page/u);
 
   const readonly = createBrowserDriver({
+    act: unexpectedDomInput,
     allowed: () => true,
     epoch: () => epoch,
     resolve: async () => ({

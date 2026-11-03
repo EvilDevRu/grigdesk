@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 
-import { getUiLayerDiagnostics, subscribeUiLayerDiagnostics } from '../../ui.ts';
+import { getUiLayerDiagnostics, subscribeToasts, subscribeUiLayerDiagnostics } from '../../ui.ts';
 import { browserRect } from './browserGeometry.ts';
 
 const element = ref<HTMLElement | null>(null);
@@ -16,9 +16,12 @@ let alive = false;
 let mounted = false;
 let observer: ResizeObserver | null = null;
 let stopLayers: (() => void) | null = null;
+let stopToasts: (() => void) | null = null;
+let hasToasts = false;
+let appliedRect: ReturnType<typeof browserRect> = null;
 
 function blocked(): boolean {
-  return document.visibilityState !== 'visible' || getUiLayerDiagnostics().length > 0;
+  return document.visibilityState !== 'visible' || getUiLayerDiagnostics().length > 0 || hasToasts;
 }
 
 /**
@@ -28,6 +31,7 @@ function blocked(): boolean {
 function hide(): void {
   generation += 1;
   revision += 1;
+  appliedRect = null;
   window.grigdeskBrowser?.hide({
     operation: 'hide',
     instance,
@@ -52,14 +56,36 @@ async function measure(): Promise<void> {
   const rect = browserRect(box, { width: window.innerWidth, height: window.innerHeight },
     true, getUiLayerDiagnostics().length);
 
+  if (rect && appliedRect && Object.keys(rect).every((key) =>
+    rect[key as keyof typeof rect] === appliedRect![key as keyof typeof rect])) {
+    return;
+  }
+
   revision += 1;
+  appliedRect = rect;
   await window.grigdeskBrowser?.invoke({
     operation: 'layout',
     instance,
     revision,
     rect
   })
-    .catch(() => undefined);
+    .catch(() => {
+      if (expected === generation) {
+        appliedRect = null;
+      }
+    });
+}
+
+/**
+ * Stack уведомляет и о tooltip, который не перекрывает native viewport.
+ * Скрываем guest лишь при действительном блокере; закрытие слоя возвращает layout.
+ */
+function refreshLayers(): void {
+  if (blocked()) {
+    hide();
+  } else if (alive && mounted) {
+    void measure();
+  }
 }
 
 /**
@@ -76,7 +102,15 @@ function refresh(): void {
 
 onMounted(async () => {
   alive = true;
-  stopLayers = subscribeUiLayerDiagnostics(refresh);
+  stopToasts = subscribeToasts((toasts) => {
+    const visible = toasts.length > 0;
+
+    if (hasToasts !== visible) {
+      hasToasts = visible;
+      refresh();
+    }
+  });
+  stopLayers = subscribeUiLayerDiagnostics(refreshLayers);
   window.addEventListener('resize', refresh);
   window.addEventListener('scroll', refresh, true);
   window.addEventListener('pagehide', hide);
@@ -107,6 +141,7 @@ onBeforeUnmount(() => {
   mounted = false;
   hide();
   stopLayers?.();
+  stopToasts?.();
   observer?.disconnect();
   window.removeEventListener('resize', refresh);
   window.removeEventListener('scroll', refresh, true);

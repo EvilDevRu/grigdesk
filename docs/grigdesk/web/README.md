@@ -64,8 +64,21 @@
 
 - [Баннер подключения внешнего трекера на доске](tracker-setup-banner.md)
 - [Встроенный браузер: вкладки, настройки, native/DOM и изолированная приёмка](browser-workspace.md)
+- [Клики агента мимо элементов при зуме вкладки](browser-input-zoom.md) — CSS-координаты
+  resolve против DIP-ввода CDP; масштабирование в send-обёртке и тест BR-N30.
+- [Флап браузерного хоста стирает гранты агентов](browser-host-reregister.md) — каждая
+  перерегистрация хоста делает access.clear; история корреляции с зависшим захватом.
+- [Задержка UI и истечение lease: heartbeat зависит от цикла событий SPA](browser-host-ui-stall.md)
+- [ACK продлевал long-poll до таймаута, а пустой JSON DELETE мешал очистке host](browser-poll-deadline.md)
 - [Фоновые вкладки браузера: отсоединённый guest и сохранение фокуса интерфейса](browser-background-focus.md)
 - [Готовность DOM без ожидания ресурсов и снимок скрытой вкладки](browser-ready-capture.md)
+- [Непустой JPEG может быть прежним кадром: native-копия и обязательная перерисовка CDP](browser-capture-freshness.md)
+- [Таймаут не отменяет Chromium: время жизни поверхности и захват без изменения viewport](browser-capture-timeout.md)
+- [Скрытый CDP-захват через новую поверхность без ожидания показа кадра](browser-surface-redraw.md)
+- [Правильный JPEG при пустой панели и лишние скрытия из-за tooltip](browser-viewport-presentation.md)
+- [Проверенный показ после синхронного перехода видимости при прикреплении](browser-visibility-reset.md)
+- [Захват без показа, гонка layout, отменённая навигация и пределы диагноза чёрного экрана](browser-capture-lifecycle.md)
+- [Отказ evidence из-за прав прежней папки снимков и безопасное закрытие доступа](browser-evidence-directory.md)
 - [Оформление браузера: вкладки, адресная строка, доступ агентов и пустые состояния](browser-design.md)
 - [Компоновка браузера: вкладки и «+» сверху, адрес под ними](browser-toolbar-layout.md)
 - [Поиск Яндекс/Google, адреса без схемы, меню и перенос вкладок, оповещения](browser-navigation-tabs.md)

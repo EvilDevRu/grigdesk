@@ -7,7 +7,7 @@ import {
 } from '../../desktop/src/browser/browserView.ts';
 import { guardContents } from '../../desktop/src/windowSecurity.ts';
 
-import type { BrowserWindow, NativeImage, WebContentsView } from 'electron';
+import type { BaseWindow, BrowserWindow, NativeImage, WebContentsView } from 'electron';
 
 /**
  * Fake хранит реальные вызовы Electron adapter, не повторяя его guards.
@@ -17,6 +17,11 @@ function fixture(options: {
   pendingLoad?: boolean;
   failedCapture?: boolean;
   emptyCapture?: boolean;
+  pendingCapture?: boolean;
+  failedFreshCapture?: boolean;
+  pendingFreshCapture?: boolean;
+  failedAttach?: boolean;
+  failedCaptureAttach?: boolean;
 } = {}) {
   const calls: unknown[] = [];
   const contents = new EventEmitter();
@@ -28,6 +33,8 @@ function fixture(options: {
   let network: Network | null = null;
   let visible = false;
   let attached = false;
+  let captureAttached = false;
+  let captureDestroyed = true;
   let focused: 'main' | 'guest' | 'outside' = 'main';
   let bounds = {
     x: 0,
@@ -44,6 +51,14 @@ function fixture(options: {
   const pendingLoad = new Promise<void>((resolve, reject) => {
     finishLoad = resolve;
     failLoad = reject;
+  });
+  let finishCapture = () => {};
+  const pendingCapture = new Promise<void>((resolve) => {
+    finishCapture = resolve;
+  });
+  let finishFreshCapture = () => {};
+  const pendingFreshCapture = new Promise<void>((resolve) => {
+    finishFreshCapture = resolve;
   });
   const nativeImage = {
     isEmpty: () => false,
@@ -81,6 +96,14 @@ function fixture(options: {
       sendCommand: async (method: string, params: unknown) => {
         calls.push([method, params]);
 
+        if (method === 'Page.captureScreenshot' && options.failedFreshCapture) {
+          throw new Error('browser_capture_failed');
+        }
+
+        if (method === 'Page.captureScreenshot' && options.pendingFreshCapture) {
+          await pendingFreshCapture;
+        }
+
         if (method === 'Page.getLayoutMetrics') {
           return { cssVisualViewport: {
             pageX: 20,
@@ -105,19 +128,29 @@ function fixture(options: {
       }
     },
     getURL: () => url,
+    isLoadingMainFrame: () => false,
     setZoomFactor: (factor: number) => {
       zoom = factor;
       calls.push(['zoom', factor]);
     },
     getZoomFactor: () => zoom,
+    setBackgroundThrottling: (value: boolean) => calls.push(['throttling', value]),
     capturePage: async (...args: unknown[]) => {
       calls.push(['capture', ...args]);
+
+      if (options.pendingCapture) {
+        await pendingCapture;
+      }
 
       if (options.failedCapture) {
         throw new Error('Failed to capture page');
       }
 
-      return options.emptyCapture ? { isEmpty: () => true } as NativeImage : nativeImage;
+      return options.emptyCapture ? { isEmpty: () => true } as NativeImage : {
+        ...nativeImage,
+        getSize: () => ({ width: 1280, height: 720 }),
+        toJPEG: () => Buffer.from('stale-native-frame'),
+      } as unknown as NativeImage;
     },
     close: () => calls.push(['close']),
     isDestroyed: () => false,
@@ -135,6 +168,7 @@ function fixture(options: {
   });
   const view = {
     webContents,
+    getBounds: () => bounds,
     setBounds: (value: typeof bounds) => {
       bounds = value;
     },
@@ -154,6 +188,10 @@ function fixture(options: {
     },
     contentView: {
       addChildView: () => {
+        if (options.failedAttach) {
+          throw new Error('fixture_attach_failed');
+        }
+
         attached = true;
         focused = 'guest';
         calls.push(['add']);
@@ -168,6 +206,33 @@ function fixture(options: {
     machine: 'fixture-machine',
     scope: 'fixture-owner',
     create: () => view,
+    captureWindow: (value) => {
+      calls.push(['capture-window', value]);
+      captureDestroyed = false;
+
+      return {
+        isDestroyed: () => captureDestroyed,
+        destroy: () => {
+          assert.equal(captureAttached, false, 'guest снимается до уничтожения поверхности');
+          captureDestroyed = true;
+          calls.push(['capture-destroy']);
+        },
+        contentView: {
+          addChildView: () => {
+            if (options.failedCaptureAttach) {
+              throw new Error('fixture_capture_attach_failed');
+            }
+
+            captureAttached = true;
+            calls.push(['capture-add']);
+          },
+          removeChildView: () => {
+            captureAttached = false;
+            calls.push(['capture-remove']);
+          },
+        },
+      } as unknown as BaseWindow;
+    },
     imageFromBuffer: () => nativeImage,
     window: () => window,
     pipeOrigins: () => new Set(['http://pipe.test']),
@@ -188,6 +253,10 @@ function fixture(options: {
     calls,
     finishLoad,
     failLoad,
+    finishCapture,
+    finishFreshCapture,
+    captureAttached: () => captureAttached,
+    captureDestroyed: () => captureDestroyed,
     visible: () => visible,
     attached: () => attached,
     focused: () => focused,
@@ -235,11 +304,14 @@ test('BR-V-focus-visible: показ сохраняет ввод интерфе�
   f.adapter.show(rect);
   assert.equal(f.attached(), true);
   assert.equal(f.focused(), 'main', 'прикрепление view не забирает текущий ввод интерфейса');
+  assert.deepEqual(f.calls.filter((call) => Array.isArray(call) && call[0] === 'throttling'),
+    [['throttling', true], ['throttling', false]]);
 
   f.focus('guest');
   f.adapter.show(rect);
   assert.equal(f.focused(), 'guest', 'повторный layout сохраняет явный фокус сайта');
   assert.equal(f.calls.filter((call) => JSON.stringify(call) === '["add"]').length, 1);
+  assert.equal(f.calls.filter((call) => Array.isArray(call) && call[0] === 'throttling').length, 2);
 
   f.adapter.hide();
   assert.equal(f.attached(), false);
@@ -252,6 +324,23 @@ test('BR-V-focus-visible: показ сохраняет ввод интерфе�
   f.focus('outside');
   f.adapter.hide();
   assert.equal(f.focused(), 'outside', 'скрытие не активирует окно поверх другого приложения');
+  f.adapter.destroy();
+});
+
+test('BR-V-show-failure: отказ прикрепления не оставляет фоновую страницу throttled', () => {
+  const f = fixture({ failedAttach: true });
+  const rect = {
+    x: 5,
+    y: 6,
+    width: 700,
+    height: 500,
+  };
+
+  assert.throws(() => f.adapter.show(rect), /fixture_attach_failed/u);
+  assert.equal(f.attached(), false);
+  assert.equal(f.focused(), 'main');
+  assert.deepEqual(f.calls.filter((call) => Array.isArray(call) && call[0] === 'throttling'),
+    [['throttling', true], ['throttling', false]]);
   f.adapter.destroy();
 });
 
@@ -274,6 +363,60 @@ test('BR-V-focus-close: закрытие видимого guest возвраща
   assert.equal(f.calls.filter((call) => JSON.stringify(call) === '["close"]').length, 1);
 });
 
+test('BR-V-capture-attach: отказ скрытой поверхности сохраняет фоновые команды и фокус', async () => {
+  const f = fixture({ failedCaptureAttach: true });
+
+  await assert.rejects(f.adapter.screenshot(f.adapter.send), /fixture_capture_attach_failed/u);
+  assert.equal(f.captureDestroyed(), true);
+  assert.equal(f.captureAttached(), false);
+  assert.equal(f.attached(), false);
+  assert.equal(f.focused(), 'main');
+  assert.deepEqual(f.calls.filter((call) => Array.isArray(call) && call[0] === 'throttling'),
+    [['throttling', false]]);
+  await f.adapter.send('Runtime.evaluate', { expression: 'document.readyState' });
+  f.adapter.destroy();
+});
+
+test('BR-V-capture-switch: показ во время снимка переносит guest без позднего hide', async () => {
+  const f = fixture({ pendingCapture: true });
+  const pending = f.adapter.screenshot(f.adapter.send);
+  const rect = {
+    x: 10,
+    y: 20,
+    width: 700,
+    height: 500,
+  };
+
+  assert.equal(f.attached(), false);
+  assert.equal(f.captureAttached(), true);
+  assert.equal(f.focused(), 'main');
+  f.adapter.show(rect);
+  assert.equal(f.captureDestroyed(), true);
+  assert.equal(f.captureAttached(), false);
+  assert.equal(f.attached(), true);
+  f.finishCapture();
+  await pending;
+  assert.equal(f.visible(), true);
+  assert.equal(f.attached(), true);
+  assert.equal(f.focused(), 'main');
+  assert.deepEqual(f.bounds(), rect);
+  f.adapter.destroy();
+});
+
+test('BR-V-capture-close: закрытие во время снимка освобождает служебную поверхность', async () => {
+  const f = fixture({ pendingCapture: true });
+  const pending = f.adapter.screenshot(f.adapter.send);
+
+  f.adapter.destroy();
+  assert.equal(f.captureDestroyed(), true);
+  assert.equal(f.captureAttached(), false);
+  assert.equal(f.visible(), false);
+  f.finishCapture();
+  await assert.rejects(pending, /browser_debugger_unavailable/u);
+  assert.equal(f.calls.filter((call) => JSON.stringify(call) === '["capture-destroy"]').length, 1);
+  assert.equal(f.calls.some((call) => Array.isArray(call) && call[0] === 'Page.captureScreenshot'), false);
+});
+
 test('BR-V01: безопасные options, hidden default viewport и правильный capturePage API', async () => {
   const options = browserViewOptions('machine-a', 'owner-a').webPreferences!;
 
@@ -293,8 +436,16 @@ test('BR-V01: безопасные options, hidden default viewport и прав�
     height: 720
   });
   await f.adapter.screenshot(f.adapter.send);
-  assert.ok(f.calls.some((call) => JSON.stringify(call)
-    === '["capture",null,{"stayHidden":true}]'));
+  assert.equal(f.captureDestroyed(), true);
+  assert.deepEqual(f.calls.find((call) => Array.isArray(call) && call[0] === 'capture-window'),
+    ['capture-window', {
+      show: false,
+      focusable: false,
+      skipTaskbar: true,
+      frame: false,
+      width: 1280,
+      height: 720,
+    }]);
   f.adapter.show({
     x: 5,
     y: 6,
@@ -302,6 +453,9 @@ test('BR-V01: безопасные options, hidden default viewport и прав�
     height: 500
   });
   assert.equal(f.visible(), true);
+  await f.adapter.screenshot(f.adapter.send);
+  assert.ok(f.calls.some((call) => JSON.stringify(call)
+    === '["capture",null,{"stayHidden":false}]'));
   f.adapter.hide();
   assert.equal(f.visible(), false);
   f.adapter.zoom(1.5);
@@ -340,8 +494,20 @@ test('BR-V01C: отказ loadURL до готовности DOM даёт точ�
   f.adapter.destroy();
 });
 
-test('BR-V01D: скрытая вкладка отдаёт JPEG при отказе или пустом native capture', async (t) => {
-  for (const options of [{ failedCapture: true }, { emptyCapture: true }]) {
+test('BR-V-abort: отменённая навигация завершается текущим URL после остановки загрузки', async () => {
+  const f = fixture();
+
+  await f.adapter.navigate('http://fixture.test/original');
+  f.calls.length = 0;
+  f.contents.emit('did-start-navigation', { isMainFrame: true });
+  f.contents.emit('did-fail-load', {}, -3, 'ERR_ABORTED', 'http://fixture.test/cancelled', true);
+  f.contents.emit('did-stop-loading');
+  assert.deepEqual(f.calls, [['start'], ['navigated', 'http://fixture.test/original']]);
+  f.adapter.destroy();
+});
+
+test('BR-V01D: снимок берёт свежий кадр CDP вместо прежнего, пустого или упавшего native', async (t) => {
+  for (const options of [{}, { failedCapture: true }, { emptyCapture: true }]) {
     const f = fixture(options);
 
     t.after(() => f.adapter.destroy());
@@ -354,16 +520,81 @@ test('BR-V01D: скрытая вкладка отдаёт JPEG при отказ
       format: 'jpeg',
       quality: 75,
       fromSurface: true,
-      captureBeyondViewport: true,
-      clip: {
-        x: 20,
-        y: 300,
-        width: 2000,
-        height: 1000,
-        scale: 0.64,
-      },
+      captureBeyondViewport: false,
     }]);
   }
+});
+
+test('BR-V-capture-fresh: отказ свежего кадра не подменяется успешной старой native-копией', async () => {
+  const f = fixture({ failedFreshCapture: true });
+
+  await assert.rejects(f.adapter.screenshot(f.adapter.send), /browser_capture_failed/u);
+  assert.equal(f.captureDestroyed(), true);
+  assert.equal(f.captureAttached(), false);
+  assert.equal(f.visible(), false);
+  f.adapter.destroy();
+});
+
+test('BR-V-capture-timeout: поверхность живёт до ответа Chromium после таймаута команды', async () => {
+  const f = fixture({ pendingFreshCapture: true });
+  let raw: Promise<unknown> | undefined;
+  const send: typeof f.adapter.send = async (method, params) => {
+    if (method === 'Page.captureScreenshot') {
+      raw = f.adapter.send(method, params);
+
+      throw new Error('browser_capture_failed');
+    }
+
+    return f.adapter.send(method, params);
+  };
+
+  await assert.rejects(f.adapter.screenshot(send), /browser_capture_failed/u);
+  assert.equal(f.captureDestroyed(), false);
+  assert.equal(f.captureAttached(), true);
+  assert.equal(f.attached(), false);
+  await assert.rejects(f.adapter.screenshot(f.adapter.send), /browser_capture_failed/u);
+  assert.equal(f.calls.filter((call) => Array.isArray(call)
+    && call[0] === 'Page.captureScreenshot').length, 1);
+  f.finishFreshCapture();
+  await raw;
+  assert.equal(f.captureDestroyed(), true);
+  assert.equal(f.captureAttached(), false);
+  assert.equal(f.visible(), false);
+  f.adapter.destroy();
+});
+
+test('BR-V-capture-layout: скрытие и новый layout переживают фактическое завершение CDP', async () => {
+  const f = fixture({ pendingFreshCapture: true });
+  const first = {
+    x: 10,
+    y: 20,
+    width: 700,
+    height: 500,
+  };
+  const next = {
+    x: 30,
+    y: 40,
+    width: 900,
+    height: 600,
+  };
+
+  f.adapter.show(first);
+
+  const pending = f.adapter.screenshot(f.adapter.send);
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  f.adapter.hide();
+  assert.equal(f.attached(), false);
+  assert.equal(f.captureAttached(), true);
+  f.adapter.show(next);
+  f.finishFreshCapture();
+  await pending;
+  assert.equal(f.captureDestroyed(), true);
+  assert.equal(f.captureAttached(), false);
+  assert.equal(f.attached(), true);
+  assert.equal(f.visible(), true);
+  assert.deepEqual(f.bounds(), next);
+  f.adapter.destroy();
 });
 
 test('BR-V01E: поздний отказ ресурса после dom-ready не отклоняет открытую страницу', async (t) => {

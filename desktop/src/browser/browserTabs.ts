@@ -86,6 +86,11 @@ export function createBrowserTabs(port: {
   return {
     list: () => [...entries.values()].map(publicTab),
     activeId: () => active,
+    /**
+     * Текущий rect смонтированной панели браузера: null, когда инструмент браузера
+     * закрыт и показать вкладку в окне нечем. Ввод агента опирается на это состояние.
+     */
+    layoutRect: () => layout,
     get: (id: string) => publicTab(required(id)),
     scope: (id: string) => required(id).scope,
     effectiveOwner(id: string) {

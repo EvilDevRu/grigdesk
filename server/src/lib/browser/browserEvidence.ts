@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, lstat, readdir, realpath, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { mkdir, lstat, open, readdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { parseBrowserRunProof } from './factoryBrowserBinding.ts';
@@ -32,11 +33,28 @@ export function createBrowserEvidence(root: string) {
         }
       });
 
-      const stat = await lstat(directory);
+      /**
+       * Папка общих снимков могла существовать до evidence с правами umask (0775).
+       * Закрываем доступ только у собственного каталога, через дескриптор без
+       * перехода по ссылке; владельца и тип проверяем до изменения режима.
+       */
+      const handle = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+        .catch(() => {
+          throw new Error('browser_evidence_invalid');
+        });
 
-      if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0
-        || (process.getuid && stat.uid !== process.getuid())) {
-        throw new Error('browser_evidence_invalid');
+      try {
+        const stat = await handle.stat();
+
+        if (!stat.isDirectory() || (process.getuid && stat.uid !== process.getuid())) {
+          throw new Error('browser_evidence_invalid');
+        }
+
+        if ((stat.mode & 0o777) !== 0o700) {
+          await handle.chmod(0o700);
+        }
+      } finally {
+        await handle.close();
       }
     }
 

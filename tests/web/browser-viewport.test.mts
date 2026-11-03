@@ -73,10 +73,14 @@ test('VP01: layer registration скрывает view синхронно, tooltip
   await flushPromises();
   assert.equal(calls.at(-1)!.operation, 'layout');
 
+  const beforeTooltip = calls.length;
   const tooltip = fixture.registerUiLayer('viewport-tip', { name: 'tooltip', close: () => true });
 
+  await flushPromises();
+  assert.equal(calls.length, beforeTooltip, 'tooltip не скрывает и не переставляет native view');
   tooltip.unregister();
   await flushPromises();
+  assert.equal(calls.length, beforeTooltip);
   assert.equal(calls.at(-1)!.operation, 'layout');
 });
 
@@ -130,4 +134,47 @@ test('VP02: late mount ACK не возвращает unmounted instance пове
   } finally {
     current.unmount();
   }
+});
+
+test('VP03: оповещение синхронно скрывает guest и закрытие возвращает текущую страницу', async (t) => {
+  const calls: Record<string, unknown>[] = [];
+
+  window.grigdeskBrowser = {
+    invoke: async (request) => {
+      calls.push(request as Record<string, unknown>);
+
+      return {};
+    },
+    hide: (request) => {
+      calls.push(request);
+
+      return true;
+    },
+    subscribe: () => () => undefined,
+    subscribeIntent: () => () => undefined,
+  };
+
+  const wrapper = mount(fixture.BrowserViewport, { attachTo: document.body });
+
+  t.after(() => {
+    wrapper.unmount();
+    fixture.dismissToast('viewport-toast');
+  });
+  await flushPromises();
+  assert.equal(calls.at(-1)!.operation, 'layout');
+  fixture.showToast({
+    id: 'viewport-toast',
+    title: 'Нужен ответ',
+    durationMs: 0,
+  });
+  assert.equal(calls.at(-1)!.operation, 'hide');
+
+  const count = calls.length;
+
+  await flushPromises();
+  assert.equal(calls.length, count);
+  fixture.dismissToast('viewport-toast');
+  await flushPromises();
+  assert.equal(calls.at(-1)!.operation, 'layout');
+  assert.equal(calls.filter((item) => item.operation === 'viewport-mount').length, 1);
 });

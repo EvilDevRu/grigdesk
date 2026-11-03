@@ -4,7 +4,7 @@ import { browserUrl } from '../../../shared/browser/browserContract.ts';
 import { isPlainRecord } from '../../../shared/lib/objects.ts';
 
 import type {
-  BrowserWindow, BrowserWindowConstructorOptions, NativeImage,
+  BaseWindow, BaseWindowConstructorOptions, BrowserWindow, BrowserWindowConstructorOptions, NativeImage,
   WebContentsView, WebContentsViewConstructorOptions,
 } from 'electron';
 import type { BrowserRect, TabView } from './browserTabs.ts';
@@ -57,6 +57,12 @@ export function browserViewOptions(machine: string, scope: string): WebContentsV
       webviewTag: false,
       webSecurity: true,
       devTools: false,
+      /**
+       * Вкладки агентов работают в фоне: приостановленный рендерер не принимает
+       * синтетический ввод и не отдаёт кадр для снимка — команда висит до
+       * таймаута транспорта. Отключение throttling держит страницу активной.
+       */
+      backgroundThrottling: false,
     },
   };
 }
@@ -79,6 +85,7 @@ export function createNativeBrowserView(options: {
   machine: string;
   scope: string;
   create(value: WebContentsViewConstructorOptions): WebContentsView;
+  captureWindow(value: BaseWindowConstructorOptions): BaseWindow;
   imageFromBuffer(data: Buffer): NativeImage;
   window(): BrowserWindow;
   pipeOrigins(): ReadonlySet<string>;
@@ -91,6 +98,9 @@ export function createNativeBrowserView(options: {
   let disposed = false;
   let debuggerReady = false;
   let attached = false;
+  let captureHost: BaseWindow | null = null;
+  let captureJobs = 0;
+  let captureReads = 0;
 
   /**
    * Сайт получает bounded кольцевой журнал без network headers/cookies.
@@ -183,6 +193,15 @@ export function createNativeBrowserView(options: {
     options.events.metadata({ loading: true });
   });
   contents.on('did-stop-loading', () => {
+    /**
+     * Отмена навигации (ERR_ABORTED, загрузка файла) не даёт did-navigate.
+     * После остановки всех загрузок фиксируем фактический URL: иначе navigating
+     * остаётся навсегда и следующий запрос ошибочно получает access_revoked.
+     */
+    if (!disposed && !contents.isLoadingMainFrame()) {
+      options.events.navigated(contents.getURL() === 'about:blank' ? '' : contents.getURL());
+    }
+
     options.events.metadata({ loading: false });
   });
   contents.on('did-fail-load', (_event, code, _description, _url, mainFrame) => {
@@ -279,18 +298,115 @@ export function createNativeBrowserView(options: {
   });
 
   /**
-   * У скрытого WebContentsView может не быть compositor surface для capturePage.
-   * CDP снимает только текущий viewport без показа вкладки и без захвата всего документа.
+   * Служебная поверхность никогда не показывается и не получает фокус окна.
+   * Перед передачей guest главному окну освобождаем прежнего native-родителя;
+   * поздний finally снимка уже не сможет скрыть выбранную человеком вкладку.
+   */
+  function releaseCaptureHost(): void {
+    const host = captureHost;
+
+    if (!host) {
+      return;
+    }
+
+    captureHost = null;
+    view.setVisible(false);
+
+    if (!host.isDestroyed()) {
+      host.contentView.removeChildView(view);
+      host.destroy();
+    }
+  }
+
+  /**
+   * Таймаут команды не отменяет захват внутри Chromium. Поверхность остаётся
+   * доступной до фактического ответа, иначе ожидаемый кадр теряет родителя.
+   */
+  function releaseIdleCaptureHost(): void {
+    if (captureJobs === 0 && captureReads === 0 && captureHost) {
+      releaseCaptureHost();
+    }
+  }
+
+  /**
+   * Учитываем исходный Promise Electron, а не ограниченное ожидание команды.
+   * Поздний ответ освобождает только служебный host и не скрывает главное окно.
+   */
+  async function captureRead<T>(read: () => Promise<T>): Promise<T> {
+    captureReads += 1;
+
+    try {
+      return await read();
+    } finally {
+      captureReads -= 1;
+      releaseIdleCaptureHost();
+    }
+  }
+
+  /**
+   * Отсоединённому guest нужен compositor с native-родителем. Даём ему скрытый
+   * BaseWindow без собственного WebContents: документ, session и grant остаются
+   * прежними, а содержимое не входит в дерево главного окна даже на один кадр.
+   */
+  function prepareCaptureHost(): BaseWindow | null {
+    if (attached) {
+      return null;
+    }
+
+    if (captureHost) {
+      return captureHost;
+    }
+
+    const { width, height } = view.getBounds();
+    const host = options.captureWindow({
+      show: false,
+      focusable: false,
+      skipTaskbar: true,
+      frame: false,
+      width,
+      height,
+    });
+
+    captureHost = host;
+
+    try {
+      host.contentView.addChildView(view);
+      view.setBounds({
+        x: 0,
+        y: 0,
+        width,
+        height,
+      });
+      view.setVisible(true);
+    } catch (error) {
+      releaseCaptureHost();
+
+      throw error;
+    } finally {
+      contents.setBackgroundThrottling(false);
+    }
+
+    return host;
+  }
+
+  /**
+   * Native capture будит скрытую поверхность, но может вернуть её прежний кадр.
+   * Результат берём только через CDP: этот путь запрашивает перерисовку renderer
+   * перед копированием. Clip и full-page режим не включаем: они меняют размеры
+   * renderer, которые поздний ответ мог бы восстановить поверх нового layout.
    */
   async function captureImage(send: Send): Promise<NativeImage> {
-    try {
-      const image = await contents.capturePage(undefined, { stayHidden: true });
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-      if (!image.isEmpty()) {
-        return image;
-      }
-    } catch {
-      // Отсутствующая native поверхность не означает недоступность живого документа.
+    try {
+      await Promise.race([
+        captureRead(() => contents.capturePage(undefined, { stayHidden: false })).catch(() => null),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), 1500);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
     }
 
     if (disposed || !debuggerReady || !contents.debugger.isAttached()) {
@@ -307,19 +423,14 @@ export function createNativeBrowserView(options: {
       throw new Error('browser_capture_failed');
     }
 
-    const { data } = await send('Page.captureScreenshot', {
+    const pending = send('Page.captureScreenshot', {
       format: 'jpeg',
       quality: 75,
       fromSurface: true,
-      captureBeyondViewport: true,
-      clip: {
-        x: viewport.pageX,
-        y: viewport.pageY,
-        width: viewport.clientWidth,
-        height: viewport.clientHeight,
-        scale: Math.min(1, 1280 / Number(viewport.clientWidth)),
-      },
-    }) as { data?: unknown };
+      captureBeyondViewport: false,
+    });
+
+    const { data } = await pending as { data?: unknown };
 
     if (typeof data !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/u.test(data)) {
       throw new Error('browser_capture_failed');
@@ -357,6 +468,10 @@ export function createNativeBrowserView(options: {
     }
 
     attached = false;
+
+    if (!disposed && (captureJobs > 0 || captureReads > 0)) {
+      prepareCaptureHost();
+    }
 
     if (returnToMain && !window.isDestroyed() && window.isFocused()) {
       window.webContents.focus();
@@ -427,14 +542,29 @@ export function createNativeBrowserView(options: {
 
       const preserveMainFocus = window.isFocused() && window.webContents.isFocused();
 
-      view.setBounds(rect);
+      releaseCaptureHost();
 
-      if (!attached) {
-        window.contentView.addChildView(view);
-        attached = true;
+      // Синхронизируем скрытый виджет Chromium перед повторным прикреплением.
+      // Настройка фоновой работы восстанавливается в том же синхронном вызове.
+      const reattaching = !attached;
+
+      if (reattaching) {
+        contents.setBackgroundThrottling(true);
       }
 
-      view.setVisible(true);
+      try {
+        if (!attached) {
+          window.contentView.addChildView(view);
+          attached = true;
+        }
+
+        view.setBounds(rect);
+        view.setVisible(true);
+      } finally {
+        if (reattaching) {
+          contents.setBackgroundThrottling(false);
+        }
+      }
 
       if (preserveMainFocus && !window.isDestroyed() && window.isFocused()) {
         window.webContents.focus();
@@ -481,27 +611,46 @@ export function createNativeBrowserView(options: {
       contents.reload();
     },
     zoom: (factor) => contents.setZoomFactor(factor),
+    /**
+     * Захват CDP удерживает служебную поверхность до реального ответа Electron.
+     * Срок и права команды проверяет внешний send, не отменяющий этот Promise.
+     */
     async send(method, params) {
       if (disposed || !debuggerReady || !contents.debugger.isAttached()) {
         throw new Error('browser_debugger_unavailable');
       }
 
-      return contents.debugger.sendCommand(method, params as Record<string, unknown> | undefined);
+      const read = () => contents.debugger.sendCommand(method, params as Record<string, unknown> | undefined);
+
+      return method === 'Page.captureScreenshot' ? captureRead(read) : read();
     },
     /**
      * Снимок скрытой страницы ограничивается по ширине и размеру JPEG.
      * Превышение лимита возвращает отказ без передачи большого изображения.
      */
     async screenshot(send) {
-      const image = await captureImage(send);
-      const resized = image.getSize().width > 1280 ? image.resize({ width: 1280 }) : image;
-      const jpeg = resized.toJPEG(75);
-
-      if (jpeg.length > 2 * 1024 * 1024) {
-        throw new Error('browser_image_too_large');
+      if (captureReads > 0 || captureJobs > 0) {
+        throw new Error('browser_capture_failed');
       }
 
-      return jpeg.toString('base64');
+      captureJobs += 1;
+
+      try {
+        prepareCaptureHost();
+
+        const image = await captureImage(send);
+        const resized = image.getSize().width > 1280 ? image.resize({ width: 1280 }) : image;
+        const jpeg = resized.toJPEG(75);
+
+        if (jpeg.length > 2 * 1024 * 1024) {
+          throw new Error('browser_image_too_large');
+        }
+
+        return jpeg.toString('base64');
+      } finally {
+        captureJobs -= 1;
+        releaseIdleCaptureHost();
+      }
     },
     console: () => structuredClone(log),
     /**
@@ -515,6 +664,7 @@ export function createNativeBrowserView(options: {
 
       disposed = true;
       hideView();
+      releaseCaptureHost();
 
       if (!contents.isDestroyed()) {
         contents.close();
