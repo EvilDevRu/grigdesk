@@ -3,6 +3,7 @@
        в промежутке между созданием документа и ответом сервера. -->
   <UiDialogHost />
   <UiTooltipHost />
+  <UiDesktopContextMenu v-if="desktopDocument" />
   <DesktopExitHost v-if="currentDesktopMode() === 'main'" />
 
   <template v-if="shell.initialized">
@@ -59,6 +60,7 @@ import {
   uiLocale,
   UiDialogHost,
   UiTooltipHost,
+  UiDesktopContextMenu,
   UiToastHost,
   UiInlineMessage,
 } from './ui';

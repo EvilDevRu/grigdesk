@@ -1,3 +1,4 @@
+import { showStyledContextMenu } from './contextMenu.ts';
 import { desktopLocale, desktopText, setDesktopLocale } from './locale.ts';
 import { createDirectorySelector } from './directorySelection.ts';
 import { createApplicationLauncher } from './applicationLauncher.ts';
@@ -513,11 +514,21 @@ function configureWindow(
     },
     onChild: (child) => configureWindow(child, origin, childOptions),
   });
-  window.webContents.on('context-menu', (_event, params) => {
+  window.webContents.on('context-menu', async (_event, params) => {
     const template = contextMenuTemplate(params, (url) => clipboard.writeText(url), desktopLocale());
 
     if (template.length > 0 && !window.isDestroyed()) {
-      Menu.buildFromTemplate(template).popup({ window });
+      try {
+        if (await showStyledContextMenu(window, params, template)) {
+          return;
+        }
+      } catch {
+        // Во время навигации документ может исчезнуть до ответа на запрос меню.
+      }
+
+      if (!window.isDestroyed()) {
+        Menu.buildFromTemplate(template).popup({ window });
+      }
     }
   });
 }

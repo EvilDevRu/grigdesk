@@ -776,3 +776,65 @@
     max-height: min(760px, calc(100dvh - 40px));
   }
 }
+
+/* Контекстное меню окна использует общую поверхность и палитру приложения.
+   Колонки иконок и сочетаний сохраняют одну ось для всех команд. */
+.ui-context-menu {
+  position: fixed;
+  width: max-content;
+  min-width: min(264px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  padding: 5px;
+  border: 0;
+  border-radius: var(--control-radius);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--overlay-popover-shadow);
+}
+
+.ui-context-menu__item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ui-context-menu__item:hover,
+.ui-context-menu__item.is-active,
+.ui-context-menu__item:focus-visible {
+  outline: none;
+  background: var(--surface-2);
+}
+
+.ui-context-menu__item svg {
+  width: 16px;
+  height: 16px;
+  color: var(--ink-mid);
+}
+
+.ui-context-menu__item kbd {
+  margin-left: 16px;
+  color: var(--ink-mid);
+  font: inherit;
+  font-size: 11px;
+}
+
+.ui-context-menu__separator {
+  height: 1px;
+  margin: 5px 10px;
+  background: var(--line-2);
+}

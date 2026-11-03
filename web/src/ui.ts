@@ -84,3 +84,5 @@ export type { UiText, MessageRef } from './services/locale.ts';
 
 export { default as UiSkeleton } from './components/feedback/UiSkeleton.vue';
 export { default as UiSkeletonLayout } from './components/feedback/UiSkeletonLayout.vue';
+
+export { default as UiDesktopContextMenu } from './components/primitives/UiDesktopContextMenu.vue';
