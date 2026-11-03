@@ -703,7 +703,7 @@
                     tone="danger"
                     variant="solid"
                     :loading="stageBusy === 'gate'"
-                    :disabled="stageBusy === 'gate'"
+                    :disabled="Boolean(stageBusy)"
                     loading-label="Отправляю на доработку"
                     @click="gateDecide('reject')"
                   >
@@ -711,7 +711,7 @@
                   </UiButton>
                   <UiButton
                     class="btn"
-                    :disabled="stageBusy === 'gate'"
+                    :disabled="Boolean(stageBusy)"
                     @click="cancelGateReject()"
                   >
                     Отмена
@@ -726,7 +726,7 @@
                     tone="success"
                     variant="solid"
                     :loading="stageBusy === 'gate'"
-                    :disabled="stageBusy === 'gate' || (stage!.id === 'gate_accept' && !stageFindingsReady)"
+                    :disabled="Boolean(stageBusy) || (stage!.id === 'gate_accept' && !stageFindingsReady)"
                     loading-label="Принимаю решение"
                     @click="gateDecide('approve')"
                   >
@@ -736,7 +736,7 @@
                     class="btn bad"
                     tone="danger"
                     variant="solid"
-                    :disabled="stageBusy === 'gate'"
+                    :disabled="Boolean(stageBusy)"
                     @click="startGateReject()"
                   >
                     ✗ Отклонить
@@ -799,7 +799,7 @@
                 variant="solid"
                 block
                 :loading="stageBusy === 'force'"
-                :disabled="stageBusy === 'force'"
+                :disabled="Boolean(stageBusy)"
                 loading-label="Возвращаю конвейер"
                 @click="forceStatus('running')"
               >
@@ -886,7 +886,7 @@
                       data-role="pipeline-compact-action"
                       variant="text"
                       tone="warning"
-                      :disabled="stageBusy === 'runner-override'"
+                      :disabled="Boolean(stageBusy)"
                       @click="setStageRunner('')"
                     >
                       Сбросить
@@ -906,7 +906,7 @@
                       :selected="id === stageRunnerActive"
                       :pressed="id === stageRunnerActive"
                       :aria-busy="runnerPending === id"
-                      :disabled="stageBusy === 'runner-override'"
+                      :disabled="Boolean(stageBusy)"
                       @select="pickStageRunner(id)"
                     >
                       <span class="executor-identity">
@@ -960,7 +960,7 @@
                     tone="warning"
                     variant="outline"
                     :loading="stageBusy === 'runner-switch'"
-                    :disabled="stageBusy === 'runner-switch'"
+                    :disabled="Boolean(stageBusy)"
                     :loading-label="`Переключаю на ${providerLabel(id)}`"
                     @click="switchRunner(id)"
                   >
@@ -1100,6 +1100,8 @@ type BulkScope = 'all' | 'project';
 
 interface Stage {
   task: TaskId;
+  profile?: string;
+  attempt?: string | number | null;
   id: string;
   key: string;
   runnerKey: string;
@@ -1116,6 +1118,13 @@ interface StageNode {
   label: string;
   subtitle?: string;
   status: string;
+}
+
+type StageAction = 'gate' | 'force' | 'runner-switch' | 'runner-override';
+
+interface PendingStageAction {
+  action: StageAction;
+  runner?: string;
 }
 
 import { useSse } from '../composables/useSse.ts';
@@ -1746,7 +1755,42 @@ function isCollapsed(task: TaskId) {
 
 // Модалка этапа (клик по узлу графа): инфо + управление (ворота/форс/указание/активность).
 const stage = ref<Stage | null>(null);
-const stageBusy = ref<string | null>(null);
+const pendingStageActions = ref(new Map<string, PendingStageAction>());
+const stagePending = computed(() => (
+  stage.value ? pendingStageActions.value.get(stageActionKey(stage.value)) : undefined
+));
+const stageBusy = computed(() => stagePending.value?.action ?? null);
+
+function stageActionKey(opened: Stage) {
+  return JSON.stringify([String(opened.task), opened.profile, opened.attempt, opened.id]);
+}
+
+/**
+ * Занимает только исходный узел конкретной попытки, независимо от открытого окна.
+ * Повторный запрос к занятому узлу не может подменить выполняемое действие.
+ */
+function beginStageAction(opened: Stage, action: StageAction, runner?: string) {
+  const key = stageActionKey(opened);
+
+  if (pendingStageActions.value.has(key)) {
+    return false;
+  }
+
+  pendingStageActions.value.set(key, { action, runner });
+
+  return true;
+}
+
+function finishStageAction(opened: Stage) {
+  pendingStageActions.value.delete(stageActionKey(opened));
+}
+
+function closeCompletedStage(opened: Stage) {
+  if (stage.value === opened) {
+    closeStage();
+  }
+}
+
 // Два РАЗНЫХ текста, а не один на обе кнопки: у ворот пояснение доезжает до агента только
 // при отклонении, у возврата — всегда. Общий ref переносил бы набранное из одного смысла
 // в другой и подсказывал, что при «Принять» текст тоже куда-то уйдёт (он не уходит).
@@ -1930,6 +1974,8 @@ function openStage(t: PipelineViewTask, node: StageNode) {
 
   stage.value = {
     task: t.task,
+    profile: t.profile,
+    attempt: t.attempt,
     id: nodeId,
     key: t.graph.keys?.[nodeId] || nodeId.toUpperCase(),
     runnerKey: t.graph.runnerKeys?.[nodeId]
@@ -1949,24 +1995,28 @@ function openStage(t: PipelineViewTask, node: StageNode) {
   gateRejecting.value = false;
   rewindComment.value = '';
   rewindAnswers.value = {};
-  runnerPending.value = null;
   stageActivity.value = null;
   stageDoc.value = '';
   stageDocOpen.value = true;
   stageDocLoading.value = false;
   stageLogOpen.value = false;
 
+  const opened = stage.value;
   const doc = NODE_DOC[nodeId];
 
   if (doc) {
     stageDocLoading.value = true;
     api.get(`/api/tasks/${t.task}/doc/${doc}`)
       .then((r) => {
-        stageDoc.value = decodePipelineReply(r).text || '';
+        if (stage.value === opened) {
+          stageDoc.value = decodePipelineReply(r).text || '';
+        }
       })
       .catch(() => { /* документа нет — секция не показывается */ })
       .finally(() => {
-        stageDocLoading.value = false;
+        if (stage.value === opened) {
+          stageDocLoading.value = false;
+        }
       });
   }
 
@@ -1995,12 +2045,18 @@ function onStageDialogOpenChange(open: boolean) {
  * Отказ не закрывает модалку и не стирает последний успешный снимок.
  */
 async function pollActivity() {
-  if (!stage.value) {
+  const opened = stage.value;
+
+  if (!opened) {
     return;
   }
 
   try {
-    stageActivity.value = decodePipelineActivity(await api.get(`/api/tasks/${stage.value!.task}/activity`));
+    const activity = decodePipelineActivity(await api.get(`/api/tasks/${opened.task}/activity`));
+
+    if (stage.value === opened && opened.status === 'run' && opened.daemonAlive) {
+      stageActivity.value = activity;
+    }
   } catch { /* игнор */ }
 }
 // Модалка живёт дольше этапа: её открывают на бегущем узле и не закрывают. Статус в ней
@@ -2218,27 +2274,31 @@ function gateErrorText(e: unknown) {
  * Комментарий передаётся только при отклонении, как требует маршрут.
  */
 async function gateDecide(decision: string) {
-  stageBusy.value = 'gate';
+  const opened = stage.value;
+
+  if (!opened || !beginStageAction(opened, 'gate')) {
+    return;
+  }
   // При принятии комментарий не отправляем вовсе: пустое поле честнее, чем текст,
   // который движок молча выбросит, а проекция реестра потом покажет как «Замечание».
   const comment = decision === 'reject' ? gateComment.value : '';
 
   try {
     const res = decodePipelineReply(await api.post(
-      `/api/tasks/${stage.value!.task}/gate/${stage.value!.key}/${decision}`, {
+      `/api/tasks/${opened.task}/gate/${opened.key}/${decision}`, {
       comment,
-      profile: stageTask.value?.profile,
-      attempt: stageTask.value?.attempt,
+      profile: opened.profile,
+      attempt: opened.attempt,
     }));
 
     await load();
-    closeStage();
+    closeCompletedStage(opened);
     await warnIfNotResumed(res);
   }
   catch (e) {
     await alertDialog(gateErrorText(e));
   } finally {
-    stageBusy.value = null;
+    finishStageAction(opened);
   }
 }
 
@@ -2248,57 +2308,75 @@ async function gateDecide(decision: string) {
  * Указание человека уходит вместе с прежним запросом смены статуса.
  */
 async function forceStatus(status: string) {
+  const opened = stage.value;
+
+  if (!opened || stageBusy.value) {
+    return;
+  }
+
+  const comment = buildRewindNote(rewindQuestions.value, rewindAnswers.value, rewindComment.value);
   // Возврат курсора сбрасывает НЕ ТОЛЬКО этот узел, но и весь хвост маршрута за ним.
   // Возврат с приёмки на план сносит результаты всего, что между.
-  const question = `Вернуть конвейер на «${stage.value!.label}»? `
+  const question = `Вернуть конвейер на «${opened.label}»? `
     + 'Результаты этого узла и всех следующих за ним будут сброшены.';
 
   if (!await confirmDialog(question, { okText: 'Вернуть' })) {
     return;
   }
 
-  stageBusy.value = 'force';
+  if (stage.value !== opened || !beginStageAction(opened, 'force')) {
+    return;
+  }
+
   // Указание уезжает тем же запросом, что и сам возврат: сервер кладёт его в журнал
   // попытки причиной human-rewind, движок оттуда подмешивает его в промпт захода.
   try {
     const res = decodePipelineReply(await api.post(
-      `/api/tasks/${stage.value!.task}/stage/${stage.value!.key}/${status}`,
-      { comment: buildRewindNote(rewindQuestions.value, rewindAnswers.value, rewindComment.value) }));
+      `/api/tasks/${opened.task}/stage/${opened.key}/${status}`,
+      { comment }));
 
     await load();
-    closeStage();
+    closeCompletedStage(opened);
     await warnIfNotResumed(res);
   }
   catch (e) {
     alertDialog(`Ошибка: ${errorMessage(e, '')}`);
   } finally {
-    stageBusy.value = null;
+    finishStageAction(opened);
   }
 }
 // Выбор исполнителя модалку НЕ закрывает: человек сравнивает варианты и перебирает их,
 // а закрытие после каждого клика заставляло открывать узел заново. Новое состояние узла
 // приезжает обычным путём — load() → watch(stageLive) → stage.meta.
 async function switchRunner(target: string) {
+  const opened = stage.value;
+
+  if (!opened || stageBusy.value) {
+    return;
+  }
+
   if (!await confirmDialog(
-    `Остановить текущий запуск ${providerLabel(stage.value!.meta.runner!.actual)} `
+    `Остановить текущий запуск ${providerLabel(opened.meta.runner!.actual)} `
       + `и продолжить этап через ${providerLabel(target)}?`,
     { okText: 'Переключить' },
   )) {
     return;
   }
 
-  stageBusy.value = 'runner-switch';
+  if (stage.value !== opened || !beginStageAction(opened, 'runner-switch')) {
+    return;
+  }
 
   try {
-    await api.post(`/api/tasks/${stage.value!.task}/runner/switch`, {
-      stage: stage.value!.runnerKey,
+    await api.post(`/api/tasks/${opened.task}/runner/switch`, {
+      stage: opened.runnerKey,
       target,
     });
     await load();
   } catch (e) {
     alertDialog(`Не удалось переключить исполнителя: ${errorMessage(e, '')}`);
   } finally {
-    stageBusy.value = null;
+    finishStageAction(opened);
   }
 }
 // Исполнители, установленные на фабрике — для override этапа. Тянем один раз,
@@ -2340,29 +2418,26 @@ const stageRunnerLive = computed(() => Boolean(
 ));
 // Кого выбрали прямо сейчас: подсветка обязана переехать по клику, а не через секунду,
 // когда доедет полный load() всех задач с графами.
-const runnerPending = ref<string | null>(null);
+const runnerPending = computed(() => stagePending.value?.runner || null);
 const stageRunnerActive = computed(() => (
   runnerPending.value ?? (stage.value?.meta?.runner?.primary || '')
 ));
 // Override исполнителя до запуска этапа (бегущий переключают только кнопки switch).
 // '' — снять override этапа: вернётся переопределение задачи с запуска или профиль.
 async function setStageRunner(primary: string) {
-  if (stageBusy.value) {
+  const opened = stage.value;
+
+  if (!opened || !beginStageAction(opened, 'runner-override', primary)) {
     return;
   }
 
-  stageBusy.value = 'runner-override';
-  // У сброса будущего значения нет (его решит профиль) — подсветку до ответа не двигаем.
-  runnerPending.value = primary || null;
-
   try {
-    await taskStore.setStageRunner(stage.value!.task, stage.value!.runnerKey, primary);
+    await taskStore.setStageRunner(opened.task, opened.runnerKey, primary);
     await load();
   } catch (e) {
     alertDialog(`Не удалось сменить исполнителя этапа: ${errorMessage(e, '')}`);
   } finally {
-    stageBusy.value = null;
-    runnerPending.value = null;
+    finishStageAction(opened);
   }
 }
 
