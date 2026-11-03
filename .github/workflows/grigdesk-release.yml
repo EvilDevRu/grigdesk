@@ -1,0 +1,97 @@
+name: Релиз GrigDesk — сборка и публикация
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: grigdesk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      GRIGDESK_TEST_DEEPSEEK_ROOT: ${{ runner.temp }}/deepseek-tests
+      GRIGDESK_ARTIFACTS_DIR: ${{ runner.temp }}/deepseek-tests
+      GRIGDESK_DEEPSEEK_NODE_CACHE: ${{ runner.temp }}/deepseek-tests/node-cache
+    steps:
+      - name: Исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.21.0
+
+      - name: Зависимости сервера
+        run: npm --prefix server ci
+      - name: Зависимости web
+        run: npm --prefix web ci
+      # Сборщик комплекта не вызывает install (tools/bundle.mts), а билдеры всех
+      # пакетов импортируют esbuild из своих node_modules — ставим их явно.
+      - name: Зависимости комплекта
+        run: |
+          npm --prefix b24 ci
+          npm --prefix relay ci
+          npm --prefix deepseek ci
+          npm --prefix desktop ci
+      - name: Подготовка среды тестового исполнителя
+        run: >-
+          npm --prefix deepseek run prepare:runtime --
+          --node-cache-dir "$GRIGDESK_DEEPSEEK_NODE_CACHE"
+      - name: Тесты сервера
+        run: npm --prefix server test
+      - name: Тесты web
+        run: npm --prefix web test
+      - name: Тесты shared-контрактов
+        run: >-
+          NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test
+          --test-concurrency=2 tests/shared/*.test.mts
+      - name: Production-сборка web
+        run: npm --prefix web run build
+
+      - name: Ключ подписи
+        env:
+          SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/release-signing.pem"
+          printf '%s' "$SIGNING_KEY" > "$RUNNER_TEMP/release-signing.pem"
+
+      - name: Ключ сайта
+        env:
+          SITE_KEY: ${{ secrets.RELEASE_SITE_KEY }}
+          MIRROR_KEY: ${{ secrets.RELEASE_SITE_MIRROR_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/release-site-key"
+          printf '%s' "$SITE_KEY" > "$RUNNER_TEMP/release-site-key"
+          if [ -n "$MIRROR_KEY" ]; then
+            install -m 600 /dev/null "$RUNNER_TEMP/release-site-mirror-key"
+            printf '%s' "$MIRROR_KEY" > "$RUNNER_TEMP/release-site-mirror-key"
+          fi
+
+      - name: Сборка комплекта
+        run: GRIGDESK_RELEASE_SIGNING_KEY="$RUNNER_TEMP/release-signing.pem" node tools/bundle.mts
+
+      - name: Публикация на сайт
+        # Сборщик кладёт выпуск в корень репозитория: release/, release.tar.gz и суммы.
+        run: node tools/release-publish.mts "$PWD"
+        env:
+          RELEASE_SITE_HOST: ${{ secrets.RELEASE_SITE_HOST }}
+          RELEASE_SITE_USER: ${{ secrets.RELEASE_SITE_USER }}
+          RELEASE_SITE_KEY: ${{ runner.temp }}/release-site-key
+          RELEASE_SITE_DIR: ${{ secrets.RELEASE_SITE_DIR }}
+          RELEASE_SITE_PUBLIC_ORIGIN: ${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN }}
+          RELEASE_SITE_MIRROR_HOST: ${{ secrets.RELEASE_SITE_MIRROR_HOST }}
+          RELEASE_SITE_MIRROR_USER: ${{ secrets.RELEASE_SITE_MIRROR_USER }}
+          RELEASE_SITE_MIRROR_KEY: ${{ runner.temp }}/release-site-mirror-key
+          RELEASE_SITE_MIRROR_DIR: ${{ secrets.RELEASE_SITE_MIRROR_DIR }}
+          RELEASE_SITE_MIRROR_PUBLIC_ORIGIN: ${{ secrets.RELEASE_SITE_MIRROR_PUBLIC_ORIGIN }}

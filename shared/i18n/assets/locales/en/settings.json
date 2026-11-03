@@ -1796,5 +1796,18 @@
   "speechDictionary": "Dictionary and terms",
   "speechQualityBalanced": "Balanced",
   "speechLanguageAuto": "Auto",
-  "speechRuntimeRepair": "Speech recognition needs repair. Click Update."
+  "speechRuntimeRepair": "Speech recognition needs repair. Click Update.",
+  "pkgUpdateTitle": "GrigDesk package update",
+  "pkgUpdateAvailable": "Version {version} is available",
+  "pkgUpdateButton": "Update package",
+  "pkgUpdateCheck": "Check for updates",
+  "pkgStageQueued": "Queued",
+  "pkgStageVerifying": "Verifying signature",
+  "pkgStageDownloading": "Downloading",
+  "pkgStageUnpacking": "Verifying checksums and unpacking",
+  "pkgStageProbing": "Probing new server",
+  "pkgStageApplying": "Replacing files",
+  "pkgStageRestarting": "Restarting",
+  "pkgUpdateFailed": "Package update failed",
+  "pkgUpdateRestarting": "Waiting for restart. If started manually, restart GrigDesk manually."
 }

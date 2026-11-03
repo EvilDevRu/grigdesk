@@ -81,25 +81,21 @@ async function runRelease(repository, env = {}, args = []) {
   }
 }
 
-test('RL-45: workflow посредника закрепляет сборку, права и публикацию', async () => {
-  const text = await readFile(new URL('../../.github/workflows/relay-release.yml', import.meta.url), 'utf8');
+test('RL-45: посредник выпускается через общий workflow комплекта', async () => {
+  const text = await readFile(
+    new URL('../../.github/workflows/grigdesk-release.yml', import.meta.url), 'utf8',
+  );
   const runtime = JSON.parse(await readFile(runtimeFile, 'utf8'));
-  const steps = text.split('      - name:').slice(1);
-  const uses = [...text.matchAll(/^\s+uses:\s+(\S+)/gm)].map((match) => match[1]);
-  const triggers = text.match(/^on:\n([\s\S]*?)(?=^\S)/m)?.[1];
-  const checkout = steps.find((step) => step.includes('actions/checkout@'));
+  const uses = [...text.matchAll(/^\s+uses:\s+(\S+)/gm)].map((match) => {
+    return match[1];
+  });
 
-  assert.match(triggers, /^  workflow_dispatch:\n    inputs:\n      release:\n/);
-  assert.deepEqual([...triggers.matchAll(/^  (\w+):/gm)].map((match) => match[1]), ['workflow_dispatch']);
-  assert.match(triggers, /        type: boolean\n        default: false/);
-  assert.doesNotMatch(text, /\b(?:push|tags):/);
+  assert.match(text, /workflow_dispatch:/);
+  assert.match(text, /tags:\s*\n\s*- 'v\*'/);
   assert.match(text, /^permissions:\n  contents: read$/m);
-  assert.match(text, /    permissions:\n      contents: write/);
-  assert.match(checkout, /persist-credentials: false/);
-  assert.match(checkout, /fetch-depth: 0/);
-  assert.match(text, new RegExp(`node-version: ${runtime.version.replaceAll('.', '\\.')}(?:\\n|$)`));
-  assert.equal(text.split(runtime.version).length - 1, 1);
-  assert.equal(uses.length, 3);
+  assert.match(text, /persist-credentials: false/);
+  assert.ok(text.includes(`node-version: ${runtime.version}`));
+  assert.equal(uses.length, 2);
 
   for (const action of uses) {
     assert.match(action, /^[\w-]+\/[\w-]+@[a-f0-9]{40}$/);
@@ -108,12 +104,16 @@ test('RL-45: workflow посредника закрепляет сборку, п
   let previous = -1;
 
   for (const command of [
-    'node relay/scripts/releaseTag.mts',
-    'npm --prefix relay ci --include=dev',
-    'npm --prefix relay test',
-    'npm --prefix relay run build',
-    'npm --prefix relay run test:sea',
-    'sha256sum grigdesk-relay > grigdesk-relay.sha256',
+    'npm --prefix server ci',
+    'npm --prefix web ci',
+    'npm --prefix b24 ci',
+    'npm --prefix relay ci',
+    'npm --prefix deepseek ci',
+    'npm --prefix desktop ci',
+    'npm --prefix server test',
+    'npm --prefix web test',
+    'node tools/bundle.mts',
+    'node tools/release-publish.mts "$PWD"',
   ]) {
     const index = text.indexOf(command);
 
@@ -121,32 +121,11 @@ test('RL-45: workflow посредника закрепляет сборку, п
     previous = index;
   }
 
-  const checksum = steps.find((step) => step.includes('run: sha256sum'));
-  const release = steps.find((step) => step.includes('gh release create'));
-  const upload = steps.find((step) => step.includes('actions/upload-artifact@'));
-  const tagGuard = steps.find((step) => step.includes('node relay/scripts/releaseTag.mts'));
-
-  assert.match(checksum, /working-directory: bin/);
-  assert.match(tagGuard, /id: tag/);
-  assert.match(tagGuard, /if: inputs.release/);
-  assert.match(tagGuard, /DEFAULT_BRANCH: \$\{\{ github.event.repository.default_branch \}\}/);
-  assert.doesNotMatch(tagGuard, /GH_TOKEN/);
-  assert.equal(text.split('gh release create "$TAG"').length - 1, 1);
-  assert.equal(text.split('GH_TOKEN').length - 1, 1);
-  assert.match(release, /if: inputs.release/);
-  assert.match(release, /GH_TOKEN: \$\{\{ github.token \}\}/);
-  assert.match(release, /TAG: \$\{\{ steps.tag.outputs.tag \}\}/);
-  assert.match(release, /NODE_VERSION: \$\{\{ steps.tag.outputs.node \}\}/);
-  assert.match(release, /bin\/grigdesk-relay bin\/grigdesk-relay.sha256/);
-  assert.match(release, /--target "\$GITHUB_SHA"/);
-  assert.match(release, /--latest=false/);
-  assert.match(release, /--notes "Linux x64, Node \$NODE_VERSION\./);
-  assert.doesNotMatch(release, /--verify-tag/);
-  assert.match(upload, /if: \$\{\{ !inputs.release \}\}/);
-  assert.match(upload, /retention-days: 7/);
-  assert.match(upload, /bin\/grigdesk-relay\n\s+bin\/grigdesk-relay.sha256/);
-  assert.match(upload, /if-no-files-found: error/);
-  assert.doesNotMatch(text, /if:\s*!/);
+  assert.doesNotMatch(text, /gh release create|contents: write/);
+  await assert.rejects(
+    readFile(new URL('../../.github/workflows/relay-release.yml', import.meta.url)),
+    { code: 'ENOENT' },
+  );
 });
 
 test('RL-50: выпуск возвращает метку и версию Node без изменения прежних выходов', async (t) => {

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { parseServerBinaryArgs } from '../../server/src/binary/args.ts';
-import { packageIdFor, publicServerBinaryInfo } from '../../server/src/binary/metadata.ts';
+import {
+  createServerManifest, packageIdFor, publicServerBinaryInfo,
+} from '../../server/src/binary/metadata.ts';
 import { decodeServerBinaryInfo } from '../../shared/runtime/serverBinary.ts';
 import { decodePreparedRuntime, probeServerBinary } from '../../shared/node/serverBinaryRuntime.ts';
 
@@ -93,7 +95,7 @@ test('SB01: публичная проекция проверяет pin и иск
   assert.deepEqual(decodeServerBinaryInfo(info), info);
 
   for (const [key, value] of [
-    ['format', 2], ['hostContract', 2], ['packagingVersion', 1], ['version', '1.0.0'],
+    ['format', 2], ['hostContract', 2], ['packagingVersion', 1], ['version', '1.0'],
     ['packageId', 'bad'], ['capabilities', ['api', 'eval']],
   ]) {
     assert.throws(() => decodeServerBinaryInfo({ ...info, [key]: value }), {
@@ -158,4 +160,35 @@ test('SB19b-probe: внешняя metadata ограничена, prepare свя�
   await assert.rejects(probeServerBinary('/fixture/server', {
     run: async () => ({ stdout: JSON.stringify(info) + ' '.repeat(65536) }),
   }));
+});
+
+test('SB-version: metadata допускает стабильный SemVer, manifest сохраняет переданную версию', () => {
+  assert.equal(decodeServerBinaryInfo({
+    ...info,
+    version: '1.2.3'
+  }).version, '1.2.3');
+
+  const manifest = createServerManifest({
+    entries: [],
+    sha256: hash,
+    size: 22,
+  }, {
+    version: '0.2.0',
+    launcherSha256: hash,
+    engineSha256: hash,
+    buildInputs: {},
+  });
+
+  assert.equal(manifest.version, '0.2.0');
+
+  for (const version of ['0.2', 'v0.2.0', '01.2.3', '1.2.3-beta', '1.2.3+build']) {
+    assert.throws(() => {
+      return decodeServerBinaryInfo({
+        ...info,
+        version
+      });
+    }, {
+      code: 'server_metadata_invalid',
+    });
+  }
 });

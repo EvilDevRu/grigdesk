@@ -134,6 +134,29 @@
             {{ t('settings.releaseInstallation') }} {{ blockReasonLabel(reason, uiLocale) }}
           </p>
         </template>
+        <template v-if="release?.updateCapability?.kind === 'package'">
+          <p data-context="package-update-card">
+            {{ t('settings.pkgUpdateTitle') }} · {{ release.running.version }}
+            <template v-if="release.updateAvailable && release.packageUpdate">
+              → {{ release.packageUpdate.version }}
+            </template>
+            <UiButton data-context="package-update-check"
+              :disabled="updates.checking || updates.active" @click="updates.check()">
+              {{ t('settings.pkgUpdateCheck') }}
+            </UiButton>
+            <UiButton data-context="package-update-open"
+              :disabled="!release.updateAvailable && !release.job" @click="packageDialogOpen = true">
+              {{ t('settings.pkgUpdateButton') }}
+            </UiButton>
+          </p>
+          <p v-if="release.job" data-context="package-update-job">
+            {{ stageLabel }}
+          </p>
+          <p v-if="release.checkError" role="alert" data-context="package-update-channel-error">
+            {{ release.checkError.message }}
+          </p>
+          <PackageUpdateDialog :open="packageDialogOpen" @close="packageDialogOpen = false" />
+        </template>
         <p v-if="updates.error" role="alert">{{ updates.error }}</p>
       </SettingsSection>
       <SettingsSection v-if="!packageCapability" :heading="t('settings.sectionInterfaceBuild')">
@@ -157,7 +180,9 @@ import { api, ApiError, failureText } from '../../../shared/apiClient.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
 import { useGrigDeskUpdateStore } from '../../../stores/grigdeskUpdate.ts';
 import { serverModeText, serverRestartMessage } from '../serverMode.ts';
-import { blockReasonLabel, UPDATE_STAGE_LABELS } from '../../../shared/grigdeskUpdate.ts';
+import {
+  blockReasonLabel, UPDATE_STAGE_LABELS, PACKAGE_UPDATE_STAGE_LABELS,
+} from '../../../shared/grigdeskUpdate.ts';
 import { getSettingsFields } from '../../../features/settings/catalog.ts';
 import { createAutostartResource } from '../../../features/settings/resources/startup.ts';
 import { sseSubscribe } from '../../../composables/useSse.ts';
@@ -166,6 +191,7 @@ import type { ReleaseStatus } from '../../../../../shared/runtime/grigDeskUpdate
 import SettingsField from '../SettingsField.vue';
 import SettingsFacts from '../SettingsFacts.vue';
 import PackagedServerVersion from '../PackagedServerVersion.vue';
+import PackageUpdateDialog from '../../../shared/PackageUpdateDialog.vue';
 import { useShellStore } from '../../../stores/shell.ts';
 import { shellAction } from '../../../shared/shellClient.ts';
 import {
@@ -189,6 +215,7 @@ declare const __GRIGDESK_SHA__: string;
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
 const updates = useGrigDeskUpdateStore();
+const packageDialogOpen = ref(false);
 const shell = useShellStore();
 const server = ref<ServerView | null>(null);
 const launcher = ref<LauncherState | null>(null);
@@ -225,9 +252,12 @@ const packageCapability = computed(() => {
 
   return capability?.kind === 'package' ? capability : null;
 });
-const stageLabel = computed(() =>
-  (UPDATE_STAGE_LABELS as Record<string, string>)[release.value?.job?.stage ?? '']
-  || release.value?.job?.stage);
+const stageLabel = computed(() => {
+  const job = release.value?.job;
+  const labels = job?.kind === 'package-update' ? PACKAGE_UPDATE_STAGE_LABELS : UPDATE_STAGE_LABELS;
+
+  return (labels as Record<string, string>)[job?.stage ?? ''] || job?.stage;
+});
 const buildVersion = typeof __GRIGDESK_VERSION__ === 'undefined' ? '—' : __GRIGDESK_VERSION__;
 const buildSha = typeof __GRIGDESK_SHA__ === 'undefined' ? '' : __GRIGDESK_SHA__;
 const autostartValue = computed(() => {

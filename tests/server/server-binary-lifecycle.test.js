@@ -20,6 +20,7 @@ const payload = {
   sha256: 'a'.repeat(64),
 };
 const manifest = createServerManifest(payload, {
+  version: '0.1.0',
   launcherSha256: 'b'.repeat(64),
   engineSha256: 'c'.repeat(64),
   buildInputs: {},

@@ -32,6 +32,11 @@ interface BundleOptions {
   verifyDeepSeek(binary: string, env: NodeJS.ProcessEnv): Promise<void>;
   verifyDeepSeekCompatibility(binary: string, env: NodeJS.ProcessEnv): Promise<void>;
   audit?(root: string): Promise<void>;
+  /**
+   * Подпись ed25519 точного текста release.tar.gz.sha256: закрывает архив и опись
+   * bundle.json. Без подписи выпуск остаётся прежним трёхфайловым.
+   */
+  sign?(content: string): Promise<string>;
   run?: typeof execute;
   fs?: typeof fs;
 }
@@ -95,11 +100,14 @@ async function buildEnvironment(work: string, parent: NodeJS.ProcessEnv): Promis
 }
 
 /**
- * Все три имени публикуются после проверок; при ошибке rename возвращаются прежние выходы.
+ * Все имена выпуска (три базовых и подписанные добавки) публикуются после проверок.
+ * При ошибке rename возвращаются прежние выходы.
  * Backup не удаляется при неудаче восстановления, чтобы ручное восстановление было возможно.
  */
-async function publish(root: string, work: string, files: typeof fs): Promise<void> {
-  const names = ['release', 'release.tar.gz', 'release.tar.gz.sha256'];
+async function publish(
+  root: string, work: string, files: typeof fs, extra: string[] = [],
+): Promise<void> {
+  const names = ['release', 'release.tar.gz', 'release.tar.gz.sha256', ...extra];
   const backed: string[] = [];
   const installed: string[] = [];
 
@@ -285,8 +293,50 @@ export async function executeBundle(options: BundleOptions): Promise<void> {
         `${await sha256File(path.join(stage, 'bin/bundle.json'))}  release/bin/bundle.json`,
         '',
       ].join('\n'), { mode: 0o644 });
+
+      if (options.sign) {
+        const checksum = await files.readFile(path.join(work!, 'release.tar.gz.sha256'), 'utf8');
+        const signature = await options.sign(checksum);
+        const lines = checksum.split('\n');
+        const archiveLine = lines.find((line) => {
+          return line.includes('release.tar.gz');
+        });
+        const bundleLine = lines.find((line) => {
+          return line.includes('bundle.json');
+        });
+
+        if (!bundleLine || !archiveLine) {
+          throw new Error('Файл сумм не содержит ожидаемых строк');
+        }
+
+        const archiveStat = await files.stat(archive);
+
+        await files.writeFile(path.join(work!, 'release.tar.gz.sha256.sig'),
+          `${signature}\n`, { mode: 0o644 });
+        await files.writeFile(path.join(work!, 'channel.json'), `${JSON.stringify({
+          format: 1,
+          latest: {
+            version,
+            commit: source.commit,
+            archiveSha256: archiveLine.split(' ')[0],
+            archiveSize: archiveStat.size,
+            bundleSha256: bundleLine.split(' ')[0],
+            signature,
+            archiveUrl: null,
+            compat: {
+              os: 'linux',
+              arch: 'x64',
+              glibc: '2.28'
+            },
+          },
+          publishedAt: new Date().toISOString(),
+        }, null, 2)}\n`, { mode: 0o644 });
+      }
     });
-    await step('bundle.publish', () => publish(root, work!, files));
+    await step('bundle.publish', () => {
+      return publish(root, work!, files,
+      options.sign ? ['release.tar.gz.sha256.sig', 'channel.json'] : []);
+    });
   } catch (error) {
     preserve = Boolean((error as { preserveWork?: boolean }).preserveWork);
 

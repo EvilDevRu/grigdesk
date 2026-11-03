@@ -90,6 +90,21 @@ async function main(): Promise<void> {
 
   await executeBundle({
     root,
+    ...(process.env.GRIGDESK_RELEASE_SIGNING_KEY
+      ? {
+        /**
+         * Ключ читается только для явной подписи выпуска и не попадает в среду builders.
+         * Подпись связывает точные байты файла сумм с архивом и описью.
+         */
+        async sign(content: string) {
+          const { createPrivateKey, sign: signBytes } = await import('node:crypto');
+          const pem = await readFile(process.env.GRIGDESK_RELEASE_SIGNING_KEY!, 'utf8');
+
+          return signBytes(null, Buffer.from(content, 'utf8'),
+            createPrivateKey(pem)).toString('base64');
+        },
+      }
+      : {}),
     onStep: process.env.GRIGDESK_CTL_BUILD_OBSERVED === '1' ? writeBuildStepEvent : undefined,
     builders: {
       async server(input) {

@@ -123,6 +123,7 @@ test('SEA-UPDATE-03: сервер отвергает source-мутации до 
     assert.equal(response.json().error, 'packaged_update_requires_package', url);
   }
 
-  assert.deepEqual(effects, []);
+  // Packaged-модуль тоже запускает recover и фоновый таймер канала.
+  assert.deepEqual(effects, ['recover', 'timer']);
   assert.equal((await readFile(path.join(config.root, 'VERSION'), 'utf8')), '1.2.3');
 });

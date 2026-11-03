@@ -4,12 +4,13 @@ import {
 } from '../../../shared/runtime/serverBinary.ts';
 import { canonicalJson } from '../../../shared/lib/canonicalJson.ts';
 import { sha256 } from '../../../shared/node/hash.ts';
+import { isStableReleaseVersion } from '../../../shared/runtime/releaseChannelContracts.ts';
 import { decodePayloadDescriptor, type PayloadDescriptor } from './payload.ts';
 
 export interface ServerPackageManifest extends Record<string, unknown> {
   format: 1;
   hostContract: 1;
-  version: '0.1.0';
+  version: string;
   packagingVersion: 2;
   packageId: string;
   runtime: ServerBinaryInfo['runtime'];
@@ -25,14 +26,21 @@ export interface ServerPackageManifest extends Record<string, unknown> {
  * ELF SHA не включён: конечный файл хеширует установщик после внедрения SEA assets.
  */
 export function createServerManifest(payload: PayloadDescriptor, input: {
+  version: string;
   launcherSha256: string;
   engineSha256: string;
   buildInputs: Record<string, string>;
 }): ServerPackageManifest {
+  if (!isStableReleaseVersion(input.version)) {
+    throw Object.assign(new Error('Некорректная продуктовая версия серверного пакета'), {
+      code: 'server_metadata_invalid',
+    });
+  }
+
   const manifest = {
     format: 1 as const,
     hostContract: 1 as const,
-    version: '0.1.0' as const,
+    version: input.version,
     packagingVersion: 2 as const,
     runtime: {
       node: '24.21.0',

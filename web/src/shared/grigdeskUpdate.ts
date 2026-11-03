@@ -3,10 +3,16 @@ import { messageLabels } from '../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from './uiLocalePort.ts';
 
 export const ACTIVE_UPDATE_STATES = new Set([
+  'verifying', 'downloading', 'unpacking', 'probing',
   'queued', 'preparing', 'installing', 'building', 'testing', 'applying', 'restarting',
 ]);
 
 const UPDATE_STAGE_MESSAGES = {
+  verifying: 'settings.pkgStageVerifying',
+  downloading: 'settings.pkgStageDownloading',
+  unpacking: 'settings.pkgStageUnpacking',
+  probing: 'settings.pkgStageProbing',
+  completed: 'core.updateApplied',
   queued: 'core.jobQueued',
   preparing: 'core.checkingConditionsAndPreparingASnapshot',
   installing: 'core.installingDependencies',
@@ -19,6 +25,14 @@ const UPDATE_STAGE_MESSAGES = {
 };
 
 export const UPDATE_STAGE_LABELS = messageLabels(UPDATE_STAGE_MESSAGES, uiLocalePort);
+
+export const PACKAGE_UPDATE_STAGE_LABELS = messageLabels({
+  ...UPDATE_STAGE_MESSAGES,
+  queued: 'settings.pkgStageQueued',
+  applying: 'settings.pkgStageApplying',
+  restarting: 'settings.pkgStageRestarting',
+  failed: 'settings.pkgUpdateFailed',
+}, uiLocalePort);
 
 // Те же стадии одним-двумя словами — для плитки версии в конце рейки, где полная фраза
 // не помещается. Полная остаётся во всплывашке и в настройках.

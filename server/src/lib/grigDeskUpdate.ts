@@ -1,4 +1,5 @@
 import { config as runtimeConfig } from '../config.ts';
+import { PACKAGE_UPDATE_ERROR, PACKAGE_UPDATE_MESSAGE } from './packagedRelease.ts';
 
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -45,7 +46,7 @@ function reasonMessage(reason: string): string {
 }
 
 export interface GrigDeskUpdateManagerOptions {
-  releases: GrigDeskReleaseService;
+  releases: Pick<GrigDeskReleaseService, 'getStatus' | 'invalidate'>;
   rootDir: string;
   statePath: string;
   runner?: CommandRunner;
@@ -57,7 +58,7 @@ export interface GrigDeskUpdateManagerOptions {
 }
 
 export class GrigDeskUpdateManager {
-  private readonly releases: GrigDeskReleaseService;
+  private readonly releases: Pick<GrigDeskReleaseService, 'getStatus' | 'invalidate'>;
 
   private readonly rootDir: string;
 
@@ -175,6 +176,17 @@ export class GrigDeskUpdateManager {
     }
     assertExpectedSha(expectedCheckoutSha);
     return this.#start('update', { targetTag, expectedCheckoutSha: expectedCheckoutSha.toLowerCase() });
+  }
+
+  /**
+   * Обновление пакета недоступно source-установке: единый union-тип system-модуля
+   * требует наличия метода, отказ общий для обеих установок.
+   */
+  async startPackageUpdate(_request: unknown): Promise<never> {
+    throw Object.assign(new Error(PACKAGE_UPDATE_MESSAGE), {
+      code: PACKAGE_UPDATE_ERROR,
+      statusCode: 409,
+    });
   }
 
   async #start(kind: 'apply' | 'update', request: {

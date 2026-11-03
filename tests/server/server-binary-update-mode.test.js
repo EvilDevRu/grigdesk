@@ -11,7 +11,7 @@ import { PackagedReleaseService, PackagedUpdateManager, readPackagedIdentity,
  * Корень payload имеет canonical basename packageId, без git и release.json.
  * Identity reader внедряется тем же портом, которым пользуется packaged service.
  */
-async function fixture(t) {
+async function fixture(t, version = '0.1.0') {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'server-update-'));
   const packageId = 'a'.repeat(64);
   const root = path.join(temporary, packageId);
@@ -22,7 +22,7 @@ async function fixture(t) {
   await mkdir(path.dirname(bundleFile), { recursive: true });
   await writeFile(bundleFile, 'fixture');
   await writeFile(binary, 'fixture');
-  await writeFile(path.join(root, 'VERSION'), '0.1.0\n', { mode: 0o444 });
+  await writeFile(path.join(root, 'VERSION'), `${version}\n`, { mode: 0o444 });
 
   return {
     root,
@@ -63,8 +63,15 @@ test('SB19b: packageId только у настроенного payload с canon
     bundleFile: path.join(input.root, '../server/payload.cjs') }), /контекст|корень|packageId/);
 });
 
-test('SB19b: apply/update отказывают до worker и создания job', async () => {
-  const manager = new PackagedUpdateManager();
+test('SB19b: apply/update отказывают до worker и создания job', async (t) => {
+  const input = await fixture(t);
+  const manager = new PackagedUpdateManager({
+    installRoot: input.root,
+    statePath: path.join(input.root, 'package-update.json'),
+    channel: { latest: async () => {
+      return null;
+    } },
+  });
 
   await assert.rejects(manager.startApply({}), { code: 'packaged_update_requires_package', statusCode: 409 });
   await assert.rejects(manager.startUpdate({}), {
@@ -72,4 +79,11 @@ test('SB19b: apply/update отказывают до worker и создания j
     statusCode: 409,
   });
   assert.equal(await manager.getJob(), null);
+});
+
+test('SB-version: payload следующего выпуска читает защищённую продуктовую версию', async (t) => {
+  const input = await fixture(t, '0.2.0');
+  const identity = await readPackagedIdentity(input.root, input.context);
+
+  assert.equal(identity.version, '0.2.0');
 });

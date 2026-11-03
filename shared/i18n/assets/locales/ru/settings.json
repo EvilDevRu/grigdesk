@@ -1796,5 +1796,18 @@
   "speechDictionary": "Словарь и термины",
   "speechQualityBalanced": "Обычное",
   "speechLanguageAuto": "Авто",
-  "speechRuntimeRepair": "Распознавание требует восстановления. Нажмите «Обновить»."
+  "speechRuntimeRepair": "Распознавание требует восстановления. Нажмите «Обновить».",
+  "pkgUpdateTitle": "Обновление пакета GrigDesk",
+  "pkgUpdateAvailable": "Доступна версия {version}",
+  "pkgUpdateButton": "Обновить пакет",
+  "pkgUpdateCheck": "Проверить обновления",
+  "pkgStageQueued": "В очереди",
+  "pkgStageVerifying": "Проверка подписи",
+  "pkgStageDownloading": "Скачивание",
+  "pkgStageUnpacking": "Проверка сумм и распаковка",
+  "pkgStageProbing": "Проба нового сервера",
+  "pkgStageApplying": "Замена файлов",
+  "pkgStageRestarting": "Перезапуск",
+  "pkgUpdateFailed": "Не удалось обновить пакет",
+  "pkgUpdateRestarting": "Ожидается перезапуск. При ручном запуске перезапустите GrigDesk вручную."
 }

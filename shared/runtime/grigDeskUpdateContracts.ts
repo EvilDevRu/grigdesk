@@ -6,6 +6,10 @@
 export const ACTIVE_UPDATE_STATUSES = [
   'queued',
   'preparing',
+  'verifying',
+  'downloading',
+  'unpacking',
+  'probing',
   'installing',
   'building',
   'testing',
@@ -30,9 +34,14 @@ export interface ReleaseCheckError {
 export interface UpdateJob extends Record<string, unknown> {
   id: string;
   kind?: string;
+  progress?: {
+    downloadedBytes: number;
+    totalBytes: number
+  } | null;
   status: string;
   stage?: string;
   targetSha?: string | null;
+  targetVersion?: string | null;
   previousRunningInstanceId?: string | null;
   expectedRuntimeBuildId?: string | null;
   expectedDeepSeekBinary?: string | null;
@@ -79,6 +88,10 @@ export interface ReleaseStatus {
   running: RunningRelease;
   checkout: CheckoutState;
   latest: LatestRelease | null;
+  packageUpdate?: {
+    version: string;
+    archiveSha256: string
+  } | null;
   checkoutChanged: boolean;
   checkoutRelation: string;
   targetDescendsFromCheckout: boolean | null;

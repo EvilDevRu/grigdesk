@@ -1,11 +1,12 @@
 import { contractDecoders } from '../lib/contractDecoders.ts';
+import { isStableReleaseVersion } from './releaseChannelContracts.ts';
 
 const decode = contractDecoders(invalidMetadata);
 const requiredCapabilities = ['api', 'ipc', 'helpers', 'engine'] as const;
 const decodeInfo = decode.objectOf({
   format: decode.oneOf(1),
   hostContract: decode.oneOf(1),
-  version: decode.oneOf('0.1.0'),
+  version: releaseVersion,
   packagingVersion: decode.oneOf(2),
   packageId: sha256Text,
   runtime: decode.objectOf({
@@ -36,6 +37,20 @@ function invalidMetadata(field: string): never {
   throw Object.assign(new Error(`Некорректное описание сервера: ${field}`), {
     code: 'server_metadata_invalid',
   });
+}
+
+/**
+ * Продуктовая версия меняется независимо от format и hostContract бинарного протокола.
+ * Общий формат SemVer сохраняет строгий отказ с кодом metadata для неверного поля.
+ */
+function releaseVersion(value: unknown, field: string): string {
+  const version = decode.text(value, field);
+
+  if (!isStableReleaseVersion(version)) {
+    invalidMetadata(field);
+  }
+
+  return version;
 }
 
 /**
