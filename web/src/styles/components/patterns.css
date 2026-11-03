@@ -666,6 +666,11 @@
   text-align: left;
 }
 
+.ui-tabs[data-ui-browser-tabs] .browser-tab-icon[data-agent-state='paused'] {
+  color: var(--ink-mid);
+  opacity: var(--control-disabled-opacity);
+}
+
 .ui-tabs[data-ui-browser-tabs] .ui-icon-button {
   flex: none;
 }

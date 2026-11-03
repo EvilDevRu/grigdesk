@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { compileVue, compileModule, webFile } from './helpers/compile-vue.js';
@@ -374,7 +375,7 @@ test('BR-U14: контекстное меню фоновой вкладки, д�
   await f.wrapper.get('#browser-tab-one').trigger('contextmenu');
   await rendered();
   assert.equal(f.browser.snapshot.active, 'two');
-  assert.equal(document.querySelectorAll('[role="menuitem"]').length, 6);
+  assert.equal(document.querySelectorAll('[role="menuitem"]').length, 7);
   [...document.querySelectorAll('[role="menuitem"]')]
     .find((item) => item.textContent.includes('Дублировать')).click();
   await rendered();
@@ -401,6 +402,311 @@ test('BR-U14: контекстное меню фоновой вкладки, д�
   await f.wrapper.get('#browser-tab-two').trigger('auxclick', { button: 1 });
   await rendered();
   assert.equal(f.browser.snapshot.tabs.length, 0);
+});
+
+test('BR-U16: робот отражает owner/grantee доступ, паузу и подпись исполнителя', async (t) => {
+  const f = mounted(t, BrowserView);
+  const owner = JSON.stringify(['chat', null, 'fixture-owner', null]);
+  const grantee = JSON.stringify(['chat', null, 'fixture-controller', null]);
+
+  f.browser.snapshot.tabs = [
+    tab('human'),
+    {
+      ...tab('owner'),
+      creator: 'agent',
+      owner,
+      grantOrigin: 'http://fixture.test',
+    },
+    {
+      ...tab('agent-grant'),
+      creator: 'agent',
+      owner,
+      grantee,
+    },
+    {
+      ...tab('human-grant'),
+      grantee,
+      grantOrigin: 'http://fixture.test',
+      paused: true,
+    },
+    {
+      ...tab('unused'),
+      creator: 'agent',
+      owner,
+      paused: true,
+    },
+    {
+      ...tab('human-origin'),
+      grantOrigin: 'http://fixture.test',
+    },
+  ];
+  f.browser.snapshot.active = 'human';
+  await rendered();
+
+  for (const id of ['owner', 'agent-grant', 'human-grant']) {
+    const icon = f.wrapper.get(`#browser-tab-${id} .browser-tab-icon`);
+
+    assert.equal(icon.find('[data-browser-tab-robot]').exists(), true);
+    assert.equal(icon.find('[data-browser-tab-globe]').exists(), false);
+    assert.equal(icon.attributes('aria-hidden'), 'true');
+    assert.equal(icon.attributes('data-agent-state'), id === 'human-grant' ? 'paused' : 'active');
+    assert.equal(icon.attributes('data-ui-tooltip'), id === 'human-grant'
+      ? 'Управляет: Чат fixture-controller' : 'Владелец: Чат fixture-owner');
+  }
+
+  for (const id of ['human', 'unused', 'human-origin']) {
+    const icon = f.wrapper.get(`#browser-tab-${id} .browser-tab-icon`);
+
+    assert.equal(icon.find('[data-browser-tab-robot]').exists(), false);
+    assert.equal(icon.find('[data-browser-tab-globe] circle').exists(), true);
+    assert.equal(icon.attributes('data-agent-state'), undefined);
+    assert.equal(icon.attributes('data-ui-tooltip'), undefined);
+  }
+});
+
+test('BR-U17: смена доступа сохраняет SVG-слот 14×14 и flex-детей вкладки', async (t) => {
+  const f = mounted(t, BrowserView);
+  const style = document.createElement('style');
+  const source = await readFile(webFile('src/views/BrowserView.vue'), 'utf8');
+
+  style.textContent = [
+    await readFile(webFile('src/styles/tokens.css'), 'utf8'),
+    await readFile(webFile('src/styles/components/patterns.css'), 'utf8'),
+    source.split('<style scoped>')[1].split('</style>')[0],
+  ].join('\n');
+  document.head.append(style);
+  t.after(() => style.remove());
+  await rendered();
+
+  const button = f.wrapper.get('#browser-tab-one').element;
+  const icon = button.querySelector('.browser-tab-icon');
+  const label = button.querySelector('.browser-tab-label');
+  const owner = JSON.stringify(['chat', null, 'fixture-owner', null]);
+  const states = [
+    {
+      owner: null,
+      grantee: null,
+      grantOrigin: null,
+      paused: false,
+    },
+    {
+      owner,
+      grantee: null,
+      grantOrigin: 'http://fixture.test',
+      paused: false,
+    },
+    {
+      owner,
+      grantee: null,
+      grantOrigin: 'http://fixture.test',
+      paused: true,
+    },
+    {
+      owner,
+      grantee: null,
+      grantOrigin: null,
+      paused: true,
+    },
+    {
+      owner: null,
+      grantee: owner,
+      grantOrigin: 'http://fixture.test',
+      paused: false,
+    },
+  ];
+
+  for (const state of states) {
+    Object.assign(f.browser.active, state);
+    await rendered();
+
+    const iconStyle = getComputedStyle(icon);
+    const labelStyle = getComputedStyle(label);
+
+    assert.equal(button.children.length, 2);
+    assert.equal(button.children[0] === icon, true);
+    assert.equal(button.children[1] === label, true);
+    assert.equal(iconStyle.flex, '0 0 auto');
+    assert.equal(iconStyle.width, '14px');
+    assert.equal(iconStyle.height, '14px');
+    assert.equal(labelStyle.minWidth, '0');
+    assert.equal(labelStyle.textOverflow, 'ellipsis');
+
+    if (state.paused && state.grantOrigin !== null) {
+      assert.equal(iconStyle.opacity, '0.48');
+    } else {
+      assert.notEqual(iconStyle.opacity, '0.48');
+    }
+  }
+});
+
+for (const menuTab of ['one', 'dead-a']) {
+  test(`BR-U18: очистка из меню ${menuTab} закрывает только мёртвые agent-вкладки`, async (t) => {
+    const f = mounted(t, BrowserView);
+    const owner = JSON.stringify(['chat', null, 'fixture-owner', null]);
+    const agent = { creator: 'agent', owner };
+    const origin = { grantOrigin: 'http://fixture.test' };
+
+    f.browser.snapshot.tabs = [
+      tab('one'),
+      {
+        ...tab('human-origin'),
+        ...origin,
+      },
+      {
+        ...tab('dead-a'),
+        ...agent,
+      },
+      {
+        ...tab('owner-live'),
+        ...agent,
+        ...origin,
+      },
+      {
+        ...tab('owner-paused'),
+        ...agent,
+        ...origin,
+        paused: true,
+      },
+      {
+        ...tab('agent-grant'),
+        ...agent,
+        grantee: owner,
+      },
+      {
+        ...tab('agent-paused'),
+        ...agent,
+        grantee: owner,
+        paused: true,
+      },
+      {
+        ...tab('human-grant'),
+        grantee: owner,
+        ...origin,
+      },
+      {
+        ...tab('human-paused'),
+        grantee: owner,
+        ...origin,
+        paused: true,
+      },
+      {
+        ...tab('dead-b'),
+        ...agent,
+        paused: true,
+      },
+    ];
+    await rendered();
+    await f.wrapper.get(`#browser-tab-${menuTab}`).trigger('contextmenu');
+    await rendered();
+
+    const item = [...document.querySelectorAll('[role="menuitem"]')]
+      .find((item) => item.textContent.trim() === 'Закрыть неиспользуемые');
+
+    assert.equal(item.disabled, false);
+    item.click();
+    await rendered();
+    assert.equal(document.querySelector('[role="menu"]'), null);
+    assert.deepEqual(f.calls.filter((item) => item.operation === 'close').map((item) => item.tabId),
+      ['dead-a', 'dead-b']);
+    assert.deepEqual(f.browser.snapshot.tabs.map((item) => item.id), [
+      'one', 'human-origin', 'owner-live', 'owner-paused', 'agent-grant', 'agent-paused',
+      'human-grant', 'human-paused',
+    ]);
+    assert.equal(f.browser.snapshot.active, 'one');
+    assert.equal(document.activeElement.id, 'browser-tab-one');
+
+    await f.wrapper.get('#browser-tab-one').trigger('contextmenu');
+    await rendered();
+
+    const disabled = [...document.querySelectorAll('[role="menuitem"]')]
+      .find((item) => item.textContent.trim() === 'Закрыть неиспользуемые');
+
+    assert.equal(disabled.disabled, true);
+    disabled.click();
+    await rendered();
+    assert.equal(f.calls.filter((item) => item.operation === 'close').length, 2);
+  });
+}
+
+test('BR-U19: очистка ждёт ACK и фиксирует кандидатов до первого запроса', async (t) => {
+  const f = mounted(t, BrowserView);
+  const agent = { creator: 'agent', owner: JSON.stringify(['chat', null, 'fixture-owner', null]) };
+  const control = f.browser.control;
+  const started = [];
+  let release;
+  const ack = new Promise((resolve) => {
+    release = resolve;
+  });
+
+  f.browser.snapshot.tabs.push({ ...tab('dead-a'), ...agent }, { ...tab('dead-b'), ...agent });
+  f.browser.control = async (request) => {
+    started.push(request.tabId);
+
+    if (request.tabId === 'dead-a') {
+      await ack;
+    }
+
+    await control(request);
+  };
+  await rendered();
+  await f.wrapper.get('#browser-tab-two').trigger('contextmenu');
+  await rendered();
+  [...document.querySelectorAll('[role="menuitem"]')]
+    .find((item) => item.textContent.trim() === 'Закрыть неиспользуемые').click();
+  await rendered();
+  assert.equal(document.querySelector('[role="menu"]'), null);
+  assert.deepEqual(started, ['dead-a']);
+  f.browser.snapshot.tabs.push({ ...tab('dead-late'), ...agent });
+  release();
+  await rendered();
+  assert.deepEqual(started, ['dead-a', 'dead-b']);
+  assert.deepEqual(f.browser.snapshot.tabs.map((item) => item.id), ['one', 'two', 'dead-late']);
+  assert.equal(document.activeElement.id, 'browser-tab-one');
+});
+
+test('BR-U20: очистка прекращается при первом отказе native и возвращает фокус', async (t) => {
+  const f = mounted(t, BrowserView);
+  const agent = { creator: 'agent', owner: JSON.stringify(['chat', null, 'fixture-owner', null]) };
+  const control = f.browser.control;
+
+  f.browser.snapshot.tabs.push(...['dead-a', 'dead-b', 'dead-c']
+    .map((id) => ({ ...tab(id), ...agent })));
+  f.browser.control = async (request) => {
+    await control(request);
+
+    if (request.tabId === 'dead-a') {
+      f.fail();
+    }
+  };
+  await rendered();
+  await f.wrapper.get('#browser-tab-dead-a').trigger('contextmenu');
+  await rendered();
+  [...document.querySelectorAll('[role="menuitem"]')]
+    .find((item) => item.textContent.trim() === 'Закрыть неиспользуемые').click();
+  await rendered();
+  assert.deepEqual(f.calls.filter((item) => item.operation === 'close').map((item) => item.tabId),
+    ['dead-a', 'dead-b']);
+  assert.deepEqual(f.browser.snapshot.tabs.map((item) => item.id), ['one', 'two', 'dead-b', 'dead-c']);
+  assert.equal(f.wrapper.find('[role="alert"]').exists(), true);
+  assert.equal(document.activeElement.id, 'browser-tab-one');
+});
+
+test('BR-U21: очистка последней вкладки переводит фокус в адресную строку', async (t) => {
+  const f = mounted(t, BrowserView);
+
+  f.browser.snapshot.tabs = [{
+    ...tab('one'),
+    creator: 'agent',
+    owner: JSON.stringify(['chat', null, 'fixture-owner', null]),
+  }];
+  await rendered();
+  await f.wrapper.get('#browser-tab-one').trigger('contextmenu');
+  await rendered();
+  [...document.querySelectorAll('[role="menuitem"]')]
+    .find((item) => item.textContent.trim() === 'Закрыть неиспользуемые').click();
+  await rendered();
+  assert.equal(f.browser.snapshot.tabs.length, 0);
+  assert.equal(document.activeElement === f.wrapper.get('input[aria-label="Адрес"]').element, true);
 });
 
 test('BR-U15: перенос меняет native порядок, а стрелки следуют новому DOM порядку', async (t) => {

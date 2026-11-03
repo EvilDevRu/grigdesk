@@ -2,6 +2,7 @@
   "keyboardLayoutCurrent": "Раскладка клавиатуры: {layout}",
   "keyboardLayoutUnavailable": "Раскладка клавиатуры недоступна",
   "browserCloseTabsRight": "Закрыть вкладки справа",
+  "browserCloseUnusedTabs": "Закрыть неиспользуемые",
   "browserCloseOtherTabs": "Закрыть другие вкладки",
   "browserCloseTab": "Закрыть вкладку",
   "browserDuplicateTab": "Дублировать вкладку",

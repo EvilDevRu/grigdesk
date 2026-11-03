@@ -2,6 +2,7 @@
   "keyboardLayoutCurrent": "Keyboard layout: {layout}",
   "keyboardLayoutUnavailable": "Keyboard layout unavailable",
   "browserCloseTabsRight": "Close tabs to the right",
+  "browserCloseUnusedTabs": "Close unused tabs",
   "browserCloseOtherTabs": "Close other tabs",
   "browserCloseTab": "Close tab",
   "browserDuplicateTab": "Duplicate tab",

@@ -41,9 +41,24 @@
                     @dragend="endDrag"
                 >
                   <UiTab :id="`browser-tab-${tab.id}`" :value="tab.id" controls="browser-page">
-                    <svg class="browser-tab-icon" v-bind="ICON" aria-hidden="true">
-                      <circle cx="12" cy="12" r="9" />
-                      <path d="M3 12h18M12 3a16 16 0 0 1 0 18a16 16 0 0 1 0-18" />
+                    <svg
+                        class="browser-tab-icon"
+                        v-bind="ICON"
+                        aria-hidden="true"
+                        :data-agent-state="hasAgentAccess(tab)
+                          ? (tab.paused ? 'paused' : 'active') : undefined"
+                        v-tooltip="hasAgentAccess(tab)
+                          ? t(tab.owner !== null ? 'core.browserOwner' : 'core.browserController',
+                            { name: ownerName(tab.owner ?? tab.grantee) }) : ''"
+                    >
+                      <g v-if="hasAgentAccess(tab)" data-browser-tab-robot>
+                        <rect x="3" y="8" width="18" height="12" rx="3" />
+                        <path d="M12 8V4m-2 0h4M8 12v2m8-2v2m-7 3h6M3 13H1m20 0h2" />
+                      </g>
+                      <g v-else data-browser-tab-globe>
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M3 12h18M12 3a16 16 0 0 1 0 18a16 16 0 0 1 0-18" />
+                      </g>
                     </svg>
                     <span class="browser-tab-label" v-tooltip="tabName(tab)">
                       {{ tabName(tab) }}
@@ -89,6 +104,14 @@
                       @click="tabMenuAction('right', tab.id)"
                   >
                     {{ t('core.browserCloseTabsRight') }}
+                  </UiButton>
+                  <UiButton
+                      role="menuitem"
+                      variant="ghost"
+                      :disabled="!browser.snapshot.tabs.some(isUnusedTab)"
+                      @click="tabMenuAction('unused', tab.id)"
+                  >
+                    {{ t('core.browserCloseUnusedTabs') }}
                   </UiButton>
                 </div>
               </template>
@@ -334,6 +357,18 @@ function tabName(tab: BrowserTab): string {
   return tab.title || (tab.url === 'about:blank' ? '' : tab.url) || t('core.browserNewTab');
 }
 
+// Пауза сохраняет доступ исполнителя, поэтому робот остаётся в том же слоте.
+// Владелец без живого origin и без явного grant уже не управляет вкладкой.
+function hasAgentAccess(tab: BrowserTab): boolean {
+  return tab.grantee !== null || (tab.owner !== null && tab.grantOrigin !== null);
+}
+
+// Очистка касается только агентских остатков, которым нужна новая выдача человеком.
+// Человеческие вкладки и любой живой доступ, включая паузу, сохраняются.
+function isUnusedTab(tab: BrowserTab): boolean {
+  return tab.owner !== null && tab.grantee === null && tab.grantOrigin === null;
+}
+
 /**
  * Выбранная вкладка остаётся видна целиком вместе с кнопкой закрытия.
  * Измерение после Vue update учитывает и новый список, и сужение полосы вкладок.
@@ -510,7 +545,7 @@ function tabMenuKey(event: KeyboardEvent, tabId: string): void {
  * Групповое закрытие фиксирует список до первого await и останавливается при отказе native.
  */
 async function tabMenuAction(
-  operation: 'new' | 'reload' | 'duplicate' | 'close' | 'others' | 'right',
+  operation: 'new' | 'reload' | 'duplicate' | 'close' | 'others' | 'right' | 'unused',
   tabId: string,
 ): Promise<void> {
   contextTab.value = '';
@@ -540,7 +575,8 @@ async function tabMenuAction(
     });
   } else {
     const closing = operation === 'others' ? tabs.filter((item) => item.id !== tabId)
-      : operation === 'right' ? tabs.slice(index + 1) : [tab];
+      : operation === 'right' ? tabs.slice(index + 1)
+        : operation === 'unused' ? tabs.filter(isUnusedTab) : [tab];
 
     if (operation === 'others' && !await action({ operation: 'activate', tabId })) {
       return;
