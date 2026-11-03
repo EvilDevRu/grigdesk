@@ -1,4 +1,8 @@
 {
+  "browserGoogle": "Google",
+  "browserYandex": "Яндекс",
+  "browserSearchHint": "Текст в адресной строке встроенного браузера ищется в выбранной системе.",
+  "browserSearch": "Поиск по умолчанию",
   "speechPageTitle": "Речь",
   "speechPageDescription": "Установка распознавания, модели, качество и язык.",
   "speechServerRecognition": "Распознавание речи",

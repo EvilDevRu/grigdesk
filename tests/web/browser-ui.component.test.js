@@ -75,7 +75,8 @@ function harness() {
     preferences: {
       open: 'internal',
       external: 'system',
-      agents: true
+      agents: true,
+      search: 'yandex'
     },
     tabs: [tab('one'), tab('two')],
     active: 'one',
@@ -171,6 +172,20 @@ function harness() {
         browser.snapshot.active = request.tabId;
       } else if (request.operation === 'navigate') {
         browser.active.url = request.url;
+      } else if (request.operation === 'close') {
+        browser.snapshot.tabs = browser.snapshot.tabs.filter((item) => item.id !== request.tabId);
+
+        if (browser.snapshot.active === request.tabId) {
+          browser.snapshot.active = browser.snapshot.tabs[0]?.id ?? null;
+        }
+      } else if (request.operation === 'move') {
+        const moving = browser.snapshot.tabs.find((item) => item.id === request.tabId);
+        const rest = browser.snapshot.tabs.filter((item) => item.id !== request.tabId);
+        const index = request.beforeId === null ? rest.length
+          : rest.findIndex((item) => item.id === request.beforeId);
+
+        rest.splice(index, 0, moving);
+        browser.snapshot.tabs = rest;
       }
     },
   });
@@ -270,12 +285,13 @@ test('BR-U02: site navigation не стирает focused draft; Ctrl+T/W упр
     ctrlKey: true,
     cancelable: true
   });
+  const closingId = f.browser.snapshot.active;
 
   window.dispatchEvent(close);
   await rendered();
   assert.equal(close.defaultPrevented, true);
   assert.equal(f.calls.some((item) => item.operation === 'close'
-    && item.tabId === f.browser.snapshot.active), true);
+    && item.tabId === closingId), true);
 });
 
 test('BR-U12: guest intent приходит через preload subscription и снимается при unmount', async (t) => {
@@ -321,6 +337,106 @@ test('BR-U12: guest intent приходит через preload subscription и �
   assert.equal(deliver, undefined);
 });
 
+test('BR-U13: адрес без схемы и поисковый запрос проходят настоящее поле и выбранный engine', async (t) => {
+  const f = mounted(t, BrowserView);
+
+  await rendered();
+
+  const input = f.wrapper.get('input[aria-label="Адрес"]');
+
+  assert.equal(input.attributes('type'), 'text');
+  await input.setValue('ya.ru');
+  await f.wrapper.get('form').trigger('submit');
+  await rendered();
+  assert.equal(f.browser.active.url, 'https://ya.ru/');
+
+  for (const search of ['yandex', 'google']) {
+    f.browser.snapshot.preferences.search = search;
+    await input.setValue('найти кота & собаку');
+    await f.wrapper.get('form').trigger('submit');
+    await rendered();
+
+    const url = new URL(f.browser.active.url);
+
+    assert.equal(url.hostname, search === 'google' ? 'www.google.com' : 'yandex.ru');
+    assert.equal(url.searchParams.get(search === 'google' ? 'q' : 'text'), 'найти кота & собаку');
+  }
+});
+
+test('BR-U14: контекстное меню фоновой вкладки, дубликат и закрытие справа/остальных', async (t) => {
+  const f = mounted(t, BrowserView);
+
+  f.browser.snapshot.tabs.push(tab('three'));
+  await rendered();
+  await f.wrapper.get('#browser-tab-two').trigger('click');
+  await rendered();
+  assert.equal(document.querySelector('[role="menu"]'), null);
+  await f.wrapper.get('#browser-tab-one').trigger('contextmenu');
+  await rendered();
+  assert.equal(f.browser.snapshot.active, 'two');
+  assert.equal(document.querySelectorAll('[role="menuitem"]').length, 6);
+  [...document.querySelectorAll('[role="menuitem"]')]
+    .find((item) => item.textContent.includes('Дублировать')).click();
+  await rendered();
+
+  const duplicate = f.calls.find((item) => item.operation === 'open');
+
+  assert.equal(duplicate.url, 'http://fixture.test/one');
+  assert.equal(duplicate.deduplicate, false);
+  assert.equal('owner' in duplicate, false);
+
+  await f.wrapper.get('#browser-tab-two').trigger('contextmenu');
+  await rendered();
+  [...document.querySelectorAll('[role="menuitem"]')]
+    .find((item) => item.textContent.includes('Закрыть вкладки справа')).click();
+  await rendered();
+  assert.deepEqual(f.browser.snapshot.tabs.map((item) => item.id), ['one', 'two']);
+  await f.wrapper.get('#browser-tab-two').trigger('keydown', { key: 'F10', shiftKey: true });
+  await rendered();
+  [...document.querySelectorAll('[role="menuitem"]')]
+    .find((item) => item.textContent.includes('Закрыть другие')).click();
+  await rendered();
+  assert.deepEqual(f.browser.snapshot.tabs.map((item) => item.id), ['two']);
+  assert.equal(f.browser.snapshot.active, 'two');
+  await f.wrapper.get('#browser-tab-two').trigger('auxclick', { button: 1 });
+  await rendered();
+  assert.equal(f.browser.snapshot.tabs.length, 0);
+});
+
+test('BR-U15: перенос меняет native порядок, а стрелки следуют новому DOM порядку', async (t) => {
+  const f = mounted(t, BrowserView);
+
+  f.browser.snapshot.tabs.push(tab('three'));
+  await rendered();
+
+  const rows = f.wrapper.findAll('[data-ui-browser-tab]');
+  const dataTransfer = {
+    effectAllowed: '',
+    dropEffect: '',
+    setData() {},
+  };
+
+  await rows[2].trigger('dragstart', { dataTransfer });
+  await rows[0].trigger('dragover', { dataTransfer, clientX: -1 });
+  await rows[0].trigger('drop', { dataTransfer });
+  await rendered();
+  assert.deepEqual(f.calls.find((item) => item.operation === 'move'), {
+    operation: 'move',
+    tabId: 'three',
+    beforeId: 'one',
+  });
+  assert.deepEqual(f.wrapper.findAll('[role="tab"]').map((item) => item.attributes('id')),
+    ['browser-tab-three', 'browser-tab-one', 'browser-tab-two']);
+
+  const moved = f.wrapper.get('#browser-tab-three');
+
+  moved.element.focus();
+  await moved.trigger('keydown', { key: 'ArrowRight' });
+  await rendered();
+  assert.equal(f.browser.snapshot.active, 'one');
+  assert.equal(document.activeElement.id, 'browser-tab-one');
+});
+
 test('BR-U03: pause/revoke доступны при busy, grant несёт captured epochs', async (t) => {
   const f = mounted(t, BrowserView);
 
@@ -350,6 +466,7 @@ test('BR-U04: settings edits/file picker остаются draft, только Ap
 
   await rendered();
   await f.wrapper.get('select[aria-label="Открывать стенды"]').setValue('external');
+  await f.wrapper.get('select[aria-label="Поиск по умолчанию"]').setValue('google');
   await f.wrapper.get('input[role="switch"]').setValue(false);
   await f.wrapper.findAll('button')
     .find((button) => button.text() === 'Выбрать приложение…').trigger('click');
@@ -364,6 +481,7 @@ test('BR-U04: settings edits/file picker остаются draft, только Ap
     open: 'external',
     external: 'app:manual-fixture',
     agents: false,
+    search: 'google',
   });
   assert.equal(f.settings.snapshot.dirtyCount, 0);
 });
@@ -423,16 +541,16 @@ test('BR-U06: обычный href fallback, native override, middle click и о�
   assert.equal(f.wrapper.find('[role="alert"]').exists(), true);
 });
 
-test('BR-U07: catalog/page metadata RU/EN содержит три точных browser поля', () => {
+test('BR-U07: catalog/page metadata RU/EN содержит четыре точных browser поля', () => {
   const ru = getSettingsFields('ru').filter((field) => field.resourceId === 'browser');
   const en = getSettingsFields('en').filter((field) => field.resourceId === 'browser');
   const pages = getSettingsPages('en').map((page) => page.id);
 
-  assert.deepEqual(ru.map((field) => field.key), ['open', 'external', 'agents']);
+  assert.deepEqual(ru.map((field) => field.key), ['open', 'external', 'search', 'agents']);
   assert.equal(ru.every((field) => field.address.pageId === 'tools.browser'), true);
   assert.equal(en.every((field) => field.label !== ru.find((old) => old.key === field.key).label), true);
   assert.equal(pages.indexOf('tools.browser'), pages.indexOf('tools.showcase') + 1);
-  assert.equal(SETTINGS_FIELDS.filter((field) => field.resourceId === 'browser').length, 3);
+  assert.equal(SETTINGS_FIELDS.filter((field) => field.resourceId === 'browser').length, 4);
 });
 
 test('BR-U08: настоящий store отвергает старый snapshot и отзывает native до сетевого сбоя', async (t) => {
@@ -449,7 +567,8 @@ test('BR-U08: настоящий store отвергает старый snapshot 
     preferences: {
       open: 'internal',
       external: 'system',
-      agents: true
+      agents: true,
+      search: 'yandex'
     },
     active: 'one',
     tabs: [tab('one')],
@@ -514,7 +633,8 @@ test('BR-U09: push новее initial GET, unsubscribe освобождаетс�
     preferences: {
       open: 'internal',
       external: 'system',
-      agents: false
+      agents: false,
+      search: 'yandex'
     },
     active: 'one',
     tabs: [tab('one')],
@@ -565,7 +685,8 @@ test('BR-U11: canonical owner/grantee и native history/zoom переживаю�
     preferences: {
       open: 'internal',
       external: 'system',
-      agents: true
+      agents: true,
+      search: 'yandex'
     },
     active: 'one',
     tabs: [{
@@ -611,7 +732,8 @@ test('BR-U10: startup off не меняет mode; explicit off ACK предше�
     preferences: {
       open: 'external',
       external: 'system',
-      agents: false
+      agents: false,
+      search: 'yandex'
     },
     hostStatus: { phase: 'off', error: '' },
     startSnapshots: () => () => {},

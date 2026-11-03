@@ -520,6 +520,7 @@ export function createBrowserApi(options: {
       preferences: ['value'],
       open: ['url', 'target', 'deduplicate'],
       activate: ['tabId'],
+      move: ['tabId', 'beforeId'],
       navigate: ['tabId', 'url'],
       back: ['tabId'],
       forward: ['tabId'],
@@ -626,7 +627,7 @@ export function createBrowserApi(options: {
         const next = normalizeBrowserPreferences(candidate);
 
         if (!isPlainRecord(candidate)
-          || Object.keys(candidate).sort().join() !== 'agents,external,open'
+          || Object.keys(candidate).sort().join() !== 'agents,external,open,search'
           || Object.keys(next).some((key) => next[key as keyof BrowserPreferences] !== candidate[key])) {
           throw new Error('browser_request_invalid');
         }
@@ -817,6 +818,12 @@ export function createBrowserApi(options: {
 
       if (operation === 'activate') {
         tabs.activate(tabId);
+      } else if (operation === 'move') {
+        if (value.beforeId !== null && typeof value.beforeId !== 'string') {
+          throw new Error('browser_request_invalid');
+        }
+
+        tabs.move(tabId, value.beforeId);
       } else if (operation === 'pause' || operation === 'resume') {
         tabs.pause(tabId, operation === 'pause');
         views.get(tabId)!.protocol.reset();

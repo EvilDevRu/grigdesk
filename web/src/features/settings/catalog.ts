@@ -166,6 +166,7 @@ SETTINGS_FIELDS.push(...DEVICE_FIELDS.map(([pageId, resourceId, key, control, la
 SETTINGS_FIELDS.push(...([
   ['open', 'select', 'settings.browserOpen', 'settings.browserOpenHint'],
   ['external', 'select', 'settings.browserApplication', 'settings.browserApplicationHint'],
+  ['search', 'select', 'settings.browserSearch', 'settings.browserSearchHint'],
   ['agents', 'switch', 'settings.browserAgents', 'settings.browserAgentsHint'],
 ] as const).map(([key, control, labelKey, hintKey]) => ({
   address: { pageId: 'tools.browser', fieldPath: [key] },
@@ -818,6 +819,11 @@ const FIELD_MESSAGES: Record<string, Record<string, string>> = {
   'browser:agents': {
     label: 'settings.browserAgents',
     description: 'settings.browserAgentsHint',
+    scope: 'settings.thisDevice2',
+  },
+  'browser:search': {
+    label: 'settings.browserSearch',
+    description: 'settings.browserSearchHint',
     scope: 'settings.thisDevice2',
   },
   "prefs:chatLiveSessions": {

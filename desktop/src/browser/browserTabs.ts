@@ -173,6 +173,33 @@ export function createBrowserTabs(port: {
       active = id;
       render();
     },
+    /**
+     * Порядок принадлежит native-реестру и сохраняется при следующих snapshot.
+     * Перенос не меняет активную страницу, разрешения и живые native views.
+     */
+    move(id: string, beforeId: string | null) {
+      const tab = required(id);
+
+      if (beforeId === id) {
+        return;
+      }
+
+      if (beforeId !== null) {
+        required(beforeId);
+      }
+
+      const ordered = [...entries.values()].filter((entry) => entry.id !== id);
+      const index = beforeId === null ? ordered.length : ordered.findIndex((entry) => entry.id === beforeId);
+
+      ordered.splice(index, 0, tab);
+      entries.clear();
+
+      for (const entry of ordered) {
+        entries.set(entry.id, entry);
+      }
+
+      port.changed?.();
+    },
     layout(rect: BrowserRect | null) {
       layout = rect;
       render();

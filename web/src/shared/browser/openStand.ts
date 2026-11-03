@@ -7,7 +7,7 @@ import type { BrowserPreferences } from '../../../../shared/browser/browserContr
  */
 export async function openStand(port: {
   available: boolean;
-  preferences: BrowserPreferences;
+  preferences: Pick<BrowserPreferences, 'open'>;
   native(value: unknown): Promise<unknown>;
 }, value: string, override?: 'internal' | 'external', deduplicate = true): Promise<boolean> {
   if (!port.available) {

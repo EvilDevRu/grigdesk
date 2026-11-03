@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createSettingsSession } from '../../web/src/features/settings/session.ts';
 import { createBrowserSettingsAdapter } from '../../web/src/features/settings/resources/browser.ts';
 
-const fields = ['open', 'external', 'agents'].map((key) => ({
+const fields = ['open', 'external', 'search', 'agents'].map((key) => ({
   key,
   address: { pageId: 'tools.browser', fieldPath: [key] },
 }));
@@ -15,7 +15,8 @@ test('BR-S01: полный record, только Apply, подтверждённ�
     read: async () => ({
       open: 'external',
       external: 'app:fixture',
-      agents: false
+      agents: false,
+      search: 'yandex'
     }),
     disablePreference: async () => {},
     write: async (value) => {
@@ -30,6 +31,7 @@ test('BR-S01: полный record, только Apply, подтверждённ�
   await session.load('browser');
   session.setField('browser', 'open', 'internal');
   session.setField('browser', 'agents', true);
+  session.setField('browser', 'search', 'google');
   assert.equal(calls.length, 0);
 
   const result = await session.apply();
@@ -38,7 +40,8 @@ test('BR-S01: полный record, только Apply, подтверждённ�
   assert.deepEqual(calls, [{
     open: 'internal',
     external: 'app:fixture',
-    agents: true
+    agents: true,
+    search: 'google'
   }]);
   assert.equal(session.getSnapshot().dirtyCount, 0);
   session.dispose();
@@ -53,7 +56,8 @@ test('BR-S02: malformed preferences ACK оставляет dirty и unknown, а�
     read: async () => ({
       open: 'external',
       external: 'system',
-      agents: false
+      agents: false,
+      search: 'yandex'
     }),
     disablePreference: async () => {},
     write: async () => {
@@ -62,7 +66,8 @@ test('BR-S02: malformed preferences ACK оставляет dirty и unknown, а�
       return { preferences: {
         open: 'internal',
         external: '/tmp/forged',
-        agents: true
+        agents: true,
+        search: 'yandex'
       }, revision: 2 };
     },
   }), fields);
@@ -87,9 +92,10 @@ test('BR-S03: validation не принимает unset, path вместо app ID
     ['open', { op: 'unset' as const }],
     ['external', { op: 'set' as const, value: '/bin/browser' }],
     ['owner', { op: 'set' as const, value: 'victim' }],
+    ['search', { op: 'set' as const, value: 'unknown' }],
   ]), {});
 
-  assert.deepEqual(result.map((item) => item.key), ['open', 'external', 'owner']);
+  assert.deepEqual(result.map((item) => item.key), ['open', 'external', 'owner', 'search']);
 });
 
 test('BR-S04: явный off сначала native commit, потом mode ACK; loss ACK сохраняет dirty', async () => {
@@ -101,7 +107,8 @@ test('BR-S04: явный off сначала native commit, потом mode ACK; 
     read: async () => ({
       open: 'external',
       external: 'system',
-      agents: true
+      agents: true,
+      search: 'yandex'
     }),
     write: async (preferences) => {
       order.push('native');

@@ -24,6 +24,7 @@ export function createBrowserSettingsAdapter(port: {
       return [...intents].flatMap(([key, intent]) => {
         const valid = intent.op === 'set' && (
           key === 'open' && ['internal', 'external'].includes(String(intent.value))
+          || key === 'search' && ['yandex', 'google'].includes(String(intent.value))
           || key === 'agents' && typeof intent.value === 'boolean'
           || key === 'external' && typeof intent.value === 'string'
             && /^(system|app:[A-Za-z0-9._-]{1,160})$/u.test(intent.value)
@@ -50,7 +51,8 @@ export function createBrowserSettingsAdapter(port: {
 
         if (!isPlainRecord(response) || !Number.isSafeInteger(response.revision)
           || Number(response.revision) < 0 || !isPlainRecord(response.preferences)
-          || Object.keys(response.preferences).sort().join(',') !== 'agents,external,open'
+          || Object.keys(response.preferences).sort().join(',') !== 'agents,external,open,search'
+          || !['yandex', 'google'].includes(String(response.preferences.search))
           || !['internal', 'external'].includes(String(response.preferences.open))
           || typeof response.preferences.external !== 'string'
           || !/^(system|app:[A-Za-z0-9._-]{1,160})$/u.test(response.preferences.external)

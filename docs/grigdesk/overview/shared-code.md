@@ -65,7 +65,7 @@
 | Модуль | Назначение |
 |---|---|
 | `web/src/shared/providerModelSelect.ts` | Допуск доступного исполнителя и непрозрачные значения селекта; `ProviderModelSelect.vue` объединяет представление моделей чата, арбитра и плагинов |
-| `browser/browserContract.ts`, `browser/browserActions.ts`, `browser/browserTool.ts`, `browser/browserLimits.ts` | Общие безопасные defaults/URL, закрытые actions, provider-neutral tool schema и общий лимит вкладок |
+| `browser/browserContract.ts`, `browser/browserActions.ts`, `browser/browserTool.ts`, `browser/browserLimits.ts` | Безопасные defaults/URL, распознавание адресной строки и поиск, закрытые actions, provider-neutral tool schema и лимит вкладок |
 | `plugins/sandboxes/serviceHost.ts` | Проверка имени хоста стенда без схемы, порта и пути; профиль на сервере и ссылки в браузере |
 | `chat/chatPermissionModes.ts` | Маркер явного выбора режима конкретного чата и server-owned action-матрица work tools |
 | `pipeline/arbiterConversation.ts` | StopIdentity, лимиты, строгий ответ арбитра, допустимые действия и инвалидирование решения; общий контракт сервера и диалога |

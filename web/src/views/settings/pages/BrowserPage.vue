@@ -15,6 +15,16 @@
         <option value="internal">{{ t('settings.browserInternal') }}</option>
         <option value="external">{{ t('settings.browserExternal') }}</option>
       </UiSelect>
+      <UiSelect
+        v-else-if="field.key === 'search'"
+        :aria-label="field.label"
+        :model-value="String(value('search') ?? 'yandex')"
+        :disabled="disabled"
+        @update:model-value="edit('search', String($event))"
+      >
+        <option value="yandex">{{ t('settings.browserYandex') }}</option>
+        <option value="google">{{ t('settings.browserGoogle') }}</option>
+      </UiSelect>
       <template v-else-if="field.key === 'external'">
         <UiSelect
           :aria-label="field.label"

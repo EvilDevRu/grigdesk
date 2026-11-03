@@ -49,7 +49,8 @@ async function fixture(t: TestContext, agents = true) {
   let preferences: BrowserPreferences = {
     open: 'external',
     external: 'system',
-    agents
+    agents,
+    search: 'yandex'
   };
   let commitGate: ReturnType<typeof barrier> | null = null;
   let failCommit = false;
@@ -566,6 +567,7 @@ test('BR-N10: disk failure/deferred commit не включает preference agen
     open: 'internal',
     external: 'system',
     agents: true,
+    search: 'yandex',
   } });
   const rejected = assert.rejects(pending, /disk/u);
 
@@ -598,6 +600,42 @@ test('BR-N11: agent не получает protocol/source/owner metadata как 
   assert.equal(f.api.snapshot().tabs[0]!.owner, null);
   assert.equal(f.api.snapshot().tabs[0]!.url, '');
   assert.equal(f.api.snapshot().grants.length, 0);
+});
+
+test('BR-N-move: native snapshot сохраняет порядок, grant и активную страницу', async (t) => {
+  const f = await fixture(t);
+  const first = await f.open('owner-a');
+  const second = await f.open('owner-b');
+  const third = await f.open('owner-c');
+  const grants = f.api.snapshot().grants;
+
+  await f.api.invoke({
+    operation: 'move',
+    tabId: third.tabId,
+    beforeId: first.tabId,
+  });
+  assert.deepEqual(f.api.snapshot().tabs.map((tab) => tab.id), [third.tabId, first.tabId, second.tabId]);
+  assert.equal(f.api.snapshot().active, third.tabId);
+  assert.deepEqual(f.api.snapshot().grants, [grants[2], grants[0], grants[1]]);
+  await f.api.invoke({
+    operation: 'move',
+    tabId: third.tabId,
+    beforeId: null,
+  });
+  assert.deepEqual(f.api.snapshot().tabs.map((tab) => tab.id), [first.tabId, second.tabId, third.tabId]);
+  await assert.rejects(() => f.api.invoke({
+    operation: 'move',
+    tabId: first.tabId,
+    beforeId: 'missing',
+  }),
+    /browser_tab_missing/u);
+  await assert.rejects(() => f.api.invoke({
+    operation: 'move',
+    tabId: first.tabId,
+    beforeId: 1,
+  }),
+    /browser_request_invalid/u);
+  assert.equal([...f.views.values()].some((view) => view.closed), false);
 });
 test('BR-N12: stalled open ограничен deadline и не держит owner queue после timeout', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });

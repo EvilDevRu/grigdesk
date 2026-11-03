@@ -1,4 +1,8 @@
 {
+  "browserGoogle": "Google",
+  "browserYandex": "Yandex",
+  "browserSearchHint": "Text entered in the built-in browser address bar is searched with this engine.",
+  "browserSearch": "Default search engine",
   "speechPageTitle": "Speech",
   "speechPageDescription": "Recognition setup, models, quality, and language.",
   "speechServerRecognition": "Speech recognition",

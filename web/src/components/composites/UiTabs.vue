@@ -62,7 +62,14 @@ function onKeydown(event: KeyboardEvent): void {
 
   const tabs = [...registrations.values()].filter(
     (tab) => !tab.disabled && tab.element,
-  );
+  ).sort((left, right) => {
+    // Vue переносит keyed-вкладки без повторной регистрации, поэтому порядок берётся из DOM.
+    // Порядок Map после drag-and-drop больше не соответствует видимой полосе.
+    const position = left.element!.compareDocumentPosition(right.element!);
+
+    return position & Node.DOCUMENT_POSITION_FOLLOWING ? -1
+      : position & Node.DOCUMENT_POSITION_PRECEDING ? 1 : 0;
+  });
 
   if (!tabs.length) {
     return;

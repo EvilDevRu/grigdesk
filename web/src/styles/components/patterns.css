@@ -637,6 +637,18 @@
   background: var(--surface-2);
 }
 
+.ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab][data-dragging='true'] {
+  opacity: 0.5;
+}
+
+.ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab][data-drop='before'] {
+  border-left-color: var(--accent);
+}
+
+.ui-tabs[data-ui-browser-tabs] > [data-ui-browser-tab][data-drop='after'] {
+  border-right-color: var(--accent);
+}
+
 .ui-tabs[data-ui-browser-tabs] .ui-tab {
   display: flex;
   flex: 1;
