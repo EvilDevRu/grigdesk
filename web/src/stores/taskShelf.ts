@@ -1,3 +1,9 @@
+import { grigdeskPersonalStateVersion } from '../shared/grigdeskPersonalState.ts';
+import type {
+  TaskPersonalSource, TaskSourceOptions, TaskSourceId,
+} from '../../../shared/tasks/taskReference.ts';
+import { isTaskSourceId, taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
+import { decodeGrigdeskTask } from '../../../shared/tasks/grigdeskTaskContracts.ts';
 // Серверная account-scoped полка. Durable entries меняются только подтверждёнными
 // PUT/DELETE, а rows — локальная проекция существующих board/analysis/pipeline stores.
 import { markRaw, watch } from 'vue';
@@ -48,6 +54,7 @@ interface ShelfPipelineSource {
   loadedAt: number;
   error: unknown;
   observedByTask?: Record<string, ShelfLivePipeline | undefined>;
+  observedByReference?: Record<string, ShelfLivePipeline | undefined>;
 }
 
 interface ShelfBoardTask {
@@ -65,6 +72,7 @@ interface ShelfBoardTask {
 }
 
 interface ShelfBoardSource {
+  sourceEpoch?: number;
   loadedAt: number;
   error: unknown;
   data?: Record<string, ShelfBoardTask[] | undefined> | null;
@@ -83,6 +91,7 @@ interface ShelfTaskDetail {
 }
 
 interface ShelfController {
+  source: TaskPersonalSource;
   passive: boolean;
   analysis: ShelfAnalysisSource;
   pipeline: ShelfPipelineSource;
@@ -125,6 +134,8 @@ export interface ShelfRowDetails {
 
 export interface ShelfRow extends Omit<ShelfEntry, 'snapshot' | 'title'>, ShelfDecision {
   title: string;
+  taskSource?: TaskSourceId;
+  personalSource?: TaskPersonalSource;
   completed: boolean;
   needsHuman: boolean;
   details: ShelfRowDetails;
@@ -140,9 +151,17 @@ interface ShelfRuntimeEntry {
   primed: string[];
 }
 
+type ShelfViewAction = (
+  action: string,
+  taskId: string,
+  source?: TaskPersonalSource,
+  taskSource?: TaskSourceId,
+) => boolean;
+
 export interface TaskShelfState {
+  personalSource: TaskPersonalSource;
   _viewMirror: boolean;
-  _viewAction: ((action: string, taskId: string) => boolean) | null;
+  _viewAction: ShelfViewAction | null;
   scope: string;
   revision: number;
   entries: ShelfEntry[];
@@ -216,7 +235,7 @@ function emptySnapshot(): ShelfObservedSnapshot {
  * Нереактивная обвязка полки живёт рядом со стором, а не в его состоянии: соседние
  * сторы, кэш карточек и отписки не должны попадать в реактивность и в снимок вкладки.
  */
-function ensureController(store: object): ShelfController {
+function ensureController(store: { personalSource?: TaskPersonalSource }): ShelfController {
   let controller = controllers.get(store);
 
   if (controller) {
@@ -224,6 +243,7 @@ function ensureController(store: object): ShelfController {
   }
 
   controller = {
+    source: store.personalSource ?? 'tracker',
     passive: false,
     // Соседние сторы объявлены собственным контрактом чтения выше: пока они на
     // JavaScript, вывод типов из них не был бы проверенным знанием.
@@ -320,7 +340,8 @@ async function hydrateTaskDetail(
   const scope = store.scope;
   const epoch = store._epoch;
   const signal = controller.detailAbort.signal;
-  const request: Promise<unknown> = api.get(`/api/tracker/task/${encodeURIComponent(taskId)}`, {
+  const prefix = controller.source === 'grigdesk' ? 'grigdesk-tasks' : 'tracker/task';
+  const request: Promise<unknown> = api.get(`/api/${prefix}/${encodeURIComponent(taskId)}`, {
     signal,
     retry: false,
   });
@@ -335,7 +356,9 @@ async function hydrateTaskDetail(
       return;
     }
 
-    const data = detail !== null && typeof detail === 'object' ? detail as ShelfTaskDetail : {};
+    const own = controller.source === 'grigdesk' ? decodeGrigdeskTask(detail, taskId) : null;
+    const data = own ? { title: own.title, group_name: own.projectTitle }
+      : detail !== null && typeof detail === 'object' ? detail as ShelfTaskDetail : {};
 
     controller.detailByTask.set(taskId, { data, loadedAt: Date.now() });
     controller.detailFailures.delete(taskId);
@@ -356,8 +379,8 @@ async function hydrateTaskDetail(
  * не загружена или отвечает ошибкой, отсутствие задачи ничего не значит.
  */
 function hydrateMissingTaskDetails(store: ShelfStoreAccess, controller: ShelfController): void {
-  if (!enabled(controller) || !store.scope || controller.board.loadedAt <= 0
-    || controller.board.error || !controller.board.data) {
+  if (!enabled(controller) || !store.scope || (controller.source === 'tracker'
+    && (controller.board.loadedAt <= 0 || controller.board.error || !controller.board.data))) {
     return;
   }
 
@@ -369,7 +392,8 @@ function hydrateMissingTaskDetails(store: ShelfStoreAccess, controller: ShelfCon
 }
 
 function enabled(controller: ShelfController): boolean {
-  return controller.plugins.enabled?.('shelf') === true;
+  return controller.plugins.enabled?.('shelf') === true
+    && (controller.source === 'tracker' || grigdeskPersonalStateVersion.value === 1);
 }
 
 function setting(controller: ShelfController, key: string, fallback: unknown = true): unknown {
@@ -380,7 +404,32 @@ function setting(controller: ShelfController, key: string, fallback: unknown = t
  * Ищет задачу во всех списках доски: полка не знает, в какой роли человек её видит,
  * а статус и метаданные одинаково нужны из любого списка.
  */
+/**
+ * Полная ссылка строки принадлежит собственной задаче либо подтверждённой внешней доске.
+ * Личное пространство tracker не заменяет идентичность портала в межоконном действии.
+ */
+function shelfTaskSource(controller: ShelfController) {
+  const source = (controller.board.data as unknown as { source?: unknown } | null)?.source;
+
+  return controller.source === 'grigdesk' ? 'grigdesk' as const
+    : isTaskSourceId(source) && source !== 'grigdesk' ? source : undefined;
+}
+
+/**
+ * Собственные строки используют только собственные детали, внешние — роли dashboard.
+ * Отсутствие задачи во внешнем снимке не доказывает исчезновение собственной записи.
+ */
 function boardTask(controller: ShelfController, taskId: string): ShelfBoardTask | null {
+  if (controller.source === 'grigdesk') {
+    const detail = cachedTaskDetail(controller, taskId);
+
+    return detail ? {
+      id: taskId,
+      title: textOr(detail.title),
+      group: detailProject(detail)
+    } : null;
+  }
+
   for (const name of BOARD_LISTS) {
     const task = (controller.board.data?.[name] || [])
       .find((item) => taskKey(item.id) === taskId);
@@ -415,11 +464,17 @@ function observedTask(controller: ShelfController, taskId: string): ShelfObserve
   }
 
   const pipeline = controller.pipeline.loadedAt > 0 && !controller.pipeline.error
-    ? controller.pipeline.observedByTask?.[taskId] || null
+    ? controller.pipeline.observedByReference
+      ? controller.pipeline.observedByReference[taskReferenceKey({
+        id: taskId, source: controller.source === 'grigdesk' ? 'grigdesk'
+          : (controller.board.data as unknown as { source?: string } | null)?.source,
+      })] || null
+      : controller.source === 'tracker' ? controller.pipeline.observedByTask?.[taskId] || null : null
     : null;
   let trackerSnapshot = null;
 
-  if (controller.board.loadedAt > 0 && !controller.board.error && controller.board.data) {
+  if (controller.source === 'tracker' && controller.board.loadedAt > 0
+    && !controller.board.error && controller.board.data) {
     const task = boardTask(controller, taskId);
 
     trackerSnapshot = task
@@ -674,7 +729,7 @@ function presentation(
 ): ShelfRowDetails {
   const detail = cachedTaskDetail(controller, entry.taskId);
   const activities = [
-    trackerActivity(task, snapshot.b24),
+    controller.source === 'tracker' ? trackerActivity(task, snapshot.b24) : null,
     analysisActivity(controller, entry, snapshot.analysis),
     pipelineActivity(entry, observed.pipeline, snapshot.pipeline),
   ].filter((activity): activity is ShelfActivity => activity !== null);
@@ -698,7 +753,7 @@ function presentation(
 function sourceIssues(controller: ShelfController): string[] {
   const issues = [];
 
-  if (controller.board.error) {
+  if (controller.source === 'tracker' && controller.board.error) {
     issues.push('Статусы Битрикс24 могут быть устаревшими');
   }
   if (controller.analysis.error && controller.analysis.disabled !== true) {
@@ -723,8 +778,23 @@ function errorText(error: unknown): string {
   return typeof message === 'string' ? message : '';
 }
 
-export const useTaskShelfStore = defineStore('taskShelf', {
+interface ShelfBranch extends TaskShelfState {
+  isOnShelf(id: unknown): boolean;
+  isPending(id: unknown): boolean;
+  load(force?: boolean, options?: TaskSourceOptions & { silent?: boolean }): Promise<boolean>;
+  remove(id: unknown, options?: TaskSourceOptions): Promise<boolean>;
+  toggle(id: unknown, options?: TaskSourceOptions): Promise<boolean> | boolean;
+  autoAdd(id: unknown, options?: TaskSourceOptions): Promise<boolean> | boolean;
+  acknowledge(id: unknown, options?: TaskSourceOptions): Promise<boolean> | boolean;
+  clear(options?: TaskSourceOptions): void;
+  setPassive(value: boolean): void;
+  start(): void;
+  stop(): void;
+}
+
+const createTaskShelfStore = (storeId: string, source: TaskPersonalSource) => defineStore(storeId, {
   state: (): TaskShelfState => ({
+    personalSource: source,
     _viewMirror: false,
     _viewAction: null,
     scope: '',
@@ -744,6 +814,9 @@ export const useTaskShelfStore = defineStore('taskShelf', {
     _reloadSilent: false,
   }),
   getters: {
+    own: (): ShelfBranch => useGrigdeskTaskShelfStore(),
+    allRows: (state): ShelfRow[] => source === 'tracker' && !state._viewMirror
+      ? [...state.rows, ...useGrigdeskTaskShelfStore().rows] : state.rows,
     totalCount: (state) => state.rows.length,
     litCount: (state) => state.rows.filter((row) => row.state === 'lit').length,
     isOnShelf: (state) => (id: unknown) => (
@@ -760,7 +833,7 @@ export const useTaskShelfStore = defineStore('taskShelf', {
       this._viewMirror = value;
       ensureController(this).passive = value;
     },
-    setViewAction(action: ((action: string, taskId: string) => boolean) | null) {
+    setViewAction(action: ShelfViewAction | null) {
       this._viewAction = action;
     },
 /**
@@ -781,6 +854,10 @@ export const useTaskShelfStore = defineStore('taskShelf', {
       this.error = value.error as typeof this.error;
     },
     setPassive(value: boolean) {
+      if (source === 'tracker') {
+        useGrigdeskTaskShelfStore().setPassive(value);
+      }
+
       ensureController(this).passive = value;
     },
 
@@ -790,6 +867,11 @@ export const useTaskShelfStore = defineStore('taskShelf', {
      */
     applySnapshot(value: unknown, requestSeq: number | null = null, { silent = false } = {}) {
       const snapshot = parseShelfState(value);
+
+      if (source === 'grigdesk' && snapshot.scope !== 'grigdesk') {
+        throw new Error('Некорректный источник личных меток GrigDesk');
+      }
+
       const seq = requestSeq ?? ++this._requestSeq;
 
       if (snapshot.scope !== this.scope && seq < this._scopeRequestSeq) {
@@ -824,7 +906,13 @@ export const useTaskShelfStore = defineStore('taskShelf', {
      * Читает полку целиком. Одновременное чтение не запускается: пришедший во время
      * запроса повод перечитать превращается в один trailing-заход после текущего.
      */
-    async load(force = false, { silent = false } = {}) {
+    async load(force = false, { silent = false, source: requestedSource }: TaskSourceOptions & {
+      silent?: boolean;
+    } = {}): Promise<boolean> {
+      if (requestedSource === 'grigdesk' && source !== 'grigdesk') {
+        return useGrigdeskTaskShelfStore().load(force, { silent });
+      }
+
       if (this._viewMirror) {
         return false;
       }
@@ -853,7 +941,7 @@ export const useTaskShelfStore = defineStore('taskShelf', {
       this.error = null;
 
       try {
-        const snapshot = await shelfApi.list();
+        const snapshot = await shelfApi.list(source);
 
         if (epoch !== this._epoch) {
           return false;
@@ -938,7 +1026,11 @@ export const useTaskShelfStore = defineStore('taskShelf', {
             tone: 'accent',
             title: `Полка — задача #${entry.taskId}`,
             body: decision.message,
-            target: { kind: 'task', taskId: String(entry.taskId) },
+            target: {
+              kind: 'task',
+              taskId: String(entry.taskId),
+              ...(source === 'grigdesk' ? { source: 'grigdesk' as const } : {})
+            },
           });
         }
 
@@ -958,6 +1050,8 @@ export const useTaskShelfStore = defineStore('taskShelf', {
 
         rows.push({
           ...entry,
+          taskSource: shelfTaskSource(controller),
+          personalSource: source,
           ...decision,
           title: details.title,
           completed,
@@ -1008,7 +1102,7 @@ export const useTaskShelfStore = defineStore('taskShelf', {
           reason,
           snapshot,
           createIfMissing,
-        });
+        }, source);
 
         if (epoch !== this._epoch) {
           return false;
@@ -1041,9 +1135,19 @@ export const useTaskShelfStore = defineStore('taskShelf', {
      * Снимает задачу с полки. Оборванная мутация не повторяется: неизвестно, дошла ли
      * первая, а состояние всё равно приедет подтверждённым снимком сервера.
      */
-    async remove(id: unknown) {
+    async remove(id: unknown, options: TaskSourceOptions = {}): Promise<boolean> {
+      if (!this._viewMirror && (options.source ?? source) === source && options.taskSource
+        && options.taskSource !== shelfTaskSource(ensureController(this))) {
+        return false;
+      }
+
       if (this._viewMirror) {
-        return this._viewAction?.('remove', taskKey(id)) ?? false;
+        return this._viewAction?.(
+          'remove', taskKey(id), options.source ?? source, options.taskSource,
+        ) ?? false;
+      }
+      if (options.source === 'grigdesk' && source !== 'grigdesk') {
+        return useGrigdeskTaskShelfStore().remove(id, options);
       }
 
       const controller = ensureController(this);
@@ -1060,7 +1164,7 @@ export const useTaskShelfStore = defineStore('taskShelf', {
       this.error = null;
 
       try {
-        const response = await shelfApi.remove(key);
+        const response = await shelfApi.remove(key, source);
 
         if (epoch !== this._epoch) {
           return false;
@@ -1084,13 +1188,29 @@ export const useTaskShelfStore = defineStore('taskShelf', {
       }
     },
 
-    toggle(id: unknown) {
+    /**
+     * Ручная постановка и снятие выбирают одно личное пространство задачи.
+     * Изменения подтверждаются полным серверным снимком соответствующей полки.
+     */
+    toggle(id: unknown, options: TaskSourceOptions = {}): Promise<boolean> | boolean {
+      if (options.source === 'grigdesk' && source !== 'grigdesk') {
+        return useGrigdeskTaskShelfStore().toggle(id);
+      }
+
       return this.isOnShelf(id)
         ? this.remove(id)
         : this._put(id, { reason: 'manual', createIfMissing: true });
     },
 
-    autoAdd(id: unknown) {
+    /**
+     * Оценка добавляет задачу в её собственное личное пространство.
+     * Настройка плагина проверяется до любого запроса или изменения состояния.
+     */
+    autoAdd(id: unknown, options: TaskSourceOptions = {}): Promise<boolean> | boolean {
+      if (options.source === 'grigdesk' && source !== 'grigdesk') {
+        return useGrigdeskTaskShelfStore().autoAdd(id);
+      }
+
       const controller = ensureController(this);
 
       if (!enabled(controller) || !setting(controller, 'autoAddOnAnalysis', true)) {
@@ -1104,9 +1224,19 @@ export const useTaskShelfStore = defineStore('taskShelf', {
      * Просмотр перебазирует запись полки по полному наблюдению главного документа.
      * Карточка передаёт намерение главному окну, не подставляя неполный pipeline-снимок.
      */
-    acknowledge(id: unknown) {
+    acknowledge(id: unknown, options: TaskSourceOptions = {}): Promise<boolean> | boolean {
+      if (!this._viewMirror && (options.source ?? source) === source && options.taskSource
+        && options.taskSource !== shelfTaskSource(ensureController(this))) {
+        return false;
+      }
+
       if (this._viewMirror) {
-        return this._viewAction?.('acknowledge', taskKey(id)) ?? false;
+        return this._viewAction?.(
+          'acknowledge', taskKey(id), options.source ?? source, options.taskSource,
+        ) ?? false;
+      }
+      if (options.source === 'grigdesk' && source !== 'grigdesk') {
+        return useGrigdeskTaskShelfStore().acknowledge(id, options);
       }
 
       if (!this.isOnShelf(id)) {
@@ -1121,6 +1251,9 @@ export const useTaskShelfStore = defineStore('taskShelf', {
             version: 1,
             type: 'shelf-acknowledge',
             taskId: taskKey(id),
+            source,
+            ...(shelfTaskSource(ensureController(this))
+              ? { taskSource: shelfTaskSource(ensureController(this)) } : {}),
           });
         } finally {
           channel.close();
@@ -1142,7 +1275,11 @@ export const useTaskShelfStore = defineStore('taskShelf', {
      * Подписывается на события сервера и на живые источники. Включение плагина
      * перечитывает полку молча: накопленный за время выключения огонь не оповещает.
      */
-    start() {
+    start(): void {
+      if (source === 'tracker') {
+        useGrigdeskTaskShelfStore().start();
+      }
+
       if (this._viewMirror) {
         return;
       }
@@ -1151,6 +1288,12 @@ export const useTaskShelfStore = defineStore('taskShelf', {
 
       if (controller.started) {
         return;
+      }
+
+      if (source === 'tracker') {
+        controller.stops.push(watch(() => controller.board.sourceEpoch, () => {
+          this.clear({ source: 'tracker' });
+        }, { flush: 'sync' }));
       }
 
       controller.started = true;
@@ -1205,7 +1348,11 @@ export const useTaskShelfStore = defineStore('taskShelf', {
      * Снимает все подписки разом. Кэш карточек остаётся: остановка не меняет ни область,
      * ни состав полки, и после повторного start перечитывать его незачем.
      */
-    stop() {
+    stop(): void {
+      if (source === 'tracker') {
+        useGrigdeskTaskShelfStore().stop();
+      }
+
       const controller = controllers.get(this);
 
       if (!controller?.started) {
@@ -1226,7 +1373,11 @@ export const useTaskShelfStore = defineStore('taskShelf', {
      * Забывает полку целиком при смене человека. Растущий epoch отсекает ответы,
      * которые улетели до выхода: их данные принадлежат уже другой области.
      */
-    clear() {
+    clear(options: TaskSourceOptions = {}): void {
+      if (source === 'tracker' && options.source !== 'tracker') {
+        useGrigdeskTaskShelfStore().clear();
+      }
+
       const controller = controllers.get(this);
 
       if (controller) {
@@ -1251,3 +1402,6 @@ export const useTaskShelfStore = defineStore('taskShelf', {
     },
   },
 });
+
+export const useTaskShelfStore = createTaskShelfStore('taskShelf', 'tracker');
+export const useGrigdeskTaskShelfStore = createTaskShelfStore('grigdeskTaskShelf', 'grigdesk');

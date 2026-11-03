@@ -338,11 +338,23 @@ export class TaskShelfStore {
     return this._enqueue(() => this._snapshot(this._read(), String(scope)));
   }
 
-  async put(scope: string, taskId: unknown, value: unknown): Promise<ShelfSnapshot> {
+  /**
+   * Запись проверяется и меняется в общей очереди после проверки поколения источника.
+   * Подтверждение просмотра не создаёт удалённую ранее запись полки заново.
+   */
+  async put(
+    scope: string,
+    taskId: unknown,
+    value: unknown,
+    beforeWrite?: () => void,
+  ): Promise<ShelfSnapshot> {
     const id = normalizeShelfTaskId(taskId);
     const input = normalizeInput(value);
     const key = String(scope);
+
     return this._enqueue(() => {
+      beforeWrite?.();
+
       const document = this._read();
       const current = document.scopes[key] || { revision: 0, entries: [] };
       const index = current.entries.findIndex((entry) => entry.taskId === id);
@@ -370,10 +382,13 @@ export class TaskShelfStore {
     });
   }
 
-  async remove(scope: string, taskId: unknown): Promise<ShelfSnapshot> {
+  async remove(scope: string, taskId: unknown, beforeWrite?: () => void): Promise<ShelfSnapshot> {
     const id = normalizeShelfTaskId(taskId);
     const key = String(scope);
+
     return this._enqueue(() => {
+      beforeWrite?.();
+
       const document = this._read();
       const current = document.scopes[key];
       if (!current || !current.entries.some((entry) => entry.taskId === id)) {

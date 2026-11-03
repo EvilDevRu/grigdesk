@@ -188,7 +188,21 @@ export async function mountLocalCard(t, {
   });
   globalThis[`${prefix}FavoritesStore`] = defineStore(`${prefix}-favorites`, {
     state: () => ({ loaded: true, error: 'Чужая ошибка избранного' }),
-    getters: { isFavorite: () => () => false, isPending: () => () => false },
+    getters: {
+      own: () => ({
+        loaded: true,
+        loading: false,
+        error: null,
+        isFavorite: () => false,
+        isPending: () => false,
+        async load() {
+          personal.push('own-favorites');
+        },
+        async toggle() {},
+      }),
+      isFavorite: () => () => false,
+      isPending: () => () => false,
+    },
     actions: { async load() {
       personal.push('favorites');
     }, async toggle() {} },
@@ -199,7 +213,18 @@ export async function mountLocalCard(t, {
       initialized: true,
       error: null
     }),
-    getters: { ready: () => true, isSeen: () => () => true },
+    getters: {
+      own: () => ({
+        loaded: true,
+        ready: true,
+        error: null,
+        async markSeen() {
+          personal.push('own-seen');
+        },
+      }),
+      ready: () => true,
+      isSeen: () => () => true,
+    },
     actions: { async markSeen() {
       personal.push('seen');
     } },
@@ -231,7 +256,27 @@ export async function mountLocalCard(t, {
       entries: [],
       error: 'Чужая ошибка полки'
     }),
-    getters: { isOnShelf: () => () => false, isPending: () => () => false },
+    getters: {
+      own: () => ({
+        loaded: true,
+        loading: false,
+        entries: [{ taskId: task.id }],
+        error: null,
+        isOnShelf: () => true,
+        isPending: () => false,
+        async load() {
+          personal.push('own-shelf');
+        },
+        async acknowledge() {
+          personal.push('own-acknowledge');
+
+          return true;
+        },
+        async toggle() {},
+      }),
+      isOnShelf: () => () => false,
+      isPending: () => () => false,
+    },
     actions: {
       async load() {
         personal.push('shelf');

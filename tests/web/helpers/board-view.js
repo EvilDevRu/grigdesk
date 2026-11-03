@@ -207,12 +207,17 @@ export async function mountBoardView(t, {
         taskIds: [], loaded: true, loading: false, error: null, pending: {}, ...favorites,
       }),
       getters: {
+        own: () => stores.ownFavorites(),
         isFavorite: (state) => (id) => state.taskIds.includes(String(id)),
         isPending: (state) => (id) => !!state.pending[String(id)],
       },
       actions: {
         async load(force) { calls.favoritesLoad.push(!!force); },
-        async toggle(id) { calls.toggled.push(String(id)); return true; },
+        async toggle(id) {
+          calls.toggled.push(String(id));
+
+          return true;
+        },
       },
     }),
     shelf: defineStore(`board-view-shelf-${nonce}`, {
@@ -220,6 +225,7 @@ export async function mountBoardView(t, {
         entries: [], loaded: true, loading: false, error: null, pending: {}, ...shelf,
       }),
       getters: {
+        own: () => stores.ownShelf(),
         isOnShelf: (state) => (id) => state.entries
           .some((entry) => entry.taskId === String(id)),
         isPending: (state) => (id) => !!state.pending[String(id)],
@@ -248,15 +254,70 @@ export async function mountBoardView(t, {
         taskIds: [], loaded: true, initialized: true, loading: false, error: null, ...seen,
       }),
       getters: {
+        own: () => stores.ownSeen(),
         isSeen: (state) => (id) => state.taskIds.includes(String(id)),
         ready: (state) => state.loaded && state.initialized,
       },
       actions: {
         async load(force) { calls.seenLoad.push(!!force); },
+
         async markSeen(ids, opts) { calls.seenMarked.push({ ids: ids.map(String), opts }); return true; },
       },
     }),
   };
+
+  stores.ownFavorites = defineStore(`own-favorites-${nonce}`, {
+    state: () => ({
+      taskIds: [],
+      loaded: true,
+      loading: false,
+      error: null
+    }),
+    getters: {
+      isFavorite: (state) => (id) => state.taskIds.includes(String(id)),
+      isPending: () => () => false,
+    },
+    actions: {
+      async load() {
+        return true;
+      },
+      async toggle(id) {
+        calls.toggled.push(String(id));
+
+        return true;
+      },
+    },
+  });
+  stores.ownSeen = defineStore(`own-seen-${nonce}`, {
+    state: () => ({
+      taskIds: [],
+      loaded: true,
+      initialized: true,
+      ready: true,
+      error: null
+    }),
+    getters: { isSeen: (state) => (id) => state.taskIds.includes(String(id)) },
+    actions: {
+      async load() {
+        return true;
+      },
+      async markSeen() {
+        return true;
+      },
+    },
+  });
+  stores.ownShelf = defineStore(`own-shelf-${nonce}`, {
+    state: () => ({
+      loaded: true,
+      loading: false,
+      error: null
+    }),
+    getters: { isOnShelf: () => () => false },
+    actions: { async load() {
+      return true;
+    } },
+  });
+
   const listeners = new Set();
 
   globalThis.__boardViewOwnListeners = listeners;

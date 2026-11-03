@@ -151,7 +151,7 @@ export function createShellApi(options: ShellOptions) {
       appApi,
       capabilities: [
         ...(options.applicationLauncher ? ['applicationLauncher' as const] : []),
-        ...(options.nativeWindows ? ['windows' as const] : []),
+        ...(options.nativeWindows ? ['windows' as const, 'taskSources' as const] : []),
         ...(options.nativeBrowser ? ['browser' as const] : []),
         ...(options.selectDirectory ? ['selectDirectory' as const] : []),
       ],

@@ -1,9 +1,5 @@
-interface BoardTask {
-  id: string | number;
-  title?: unknown;
-  group?: unknown;
-  responsible?: unknown;
-}
+import type { BoardTask } from './boardContracts.ts';
+import { isTaskSourceId, taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
 
 interface AnalysisRow {
   analysis?: {
@@ -26,6 +22,9 @@ interface ResetOptions {
   newOnly?: boolean;
   sortBy?: string;
   taskCount?: unknown;
+  sources?: string[];
+  group?: string;
+  composition?: string;
 }
 
 interface BoardSelection<T> extends ResetOptions {
@@ -33,6 +32,8 @@ interface BoardSelection<T> extends ResetOptions {
   analysisByTask?: AnalysisByTask;
   favoriteTaskIds?: Array<string | number>;
   seenTaskIds?: Array<string | number>;
+  isFavorite?: (task: T) => boolean;
+  isSeen?: (task: T) => boolean;
 }
 
 // Чистая логика основного списка доски. Не зависит от Vue/Pinia и поэтому отдельно
@@ -97,15 +98,40 @@ export function selectBoardTasks<T extends BoardTask = BoardTask>({
   tasks = [],
   analysisByTask = {},
   query = '',
-  sortBy = 'tracker',
+  sortBy = 'created',
   onlyUnrated = false,
   onlyNeedsInfo = false,
   favoriteOnly = false,
   favoriteTaskIds = [],
   newOnly = false,
   seenTaskIds = [],
+  sources,
+  group = '',
+  isFavorite,
+  isSeen,
 }: BoardSelection<T> = {}): T[] {
-  let list = Array.isArray(tasks) ? tasks : [];
+  let list = Array.isArray(tasks) ? [...tasks] : [];
+
+  if (sortBy !== 'tracker') {
+    list.sort((left, right) => {
+      const leftDate = Date.parse(left.createdAt || '');
+      const rightDate = Date.parse(right.createdAt || '');
+      const leftValid = Number.isFinite(leftDate);
+      const rightValid = Number.isFinite(rightDate);
+
+      return leftValid && rightValid ? rightDate - leftDate : Number(rightValid) - Number(leftValid);
+    });
+  }
+  if (sources) {
+    list = list.filter((task) => {
+      const personal = task.personalSource || (task.source === 'grigdesk' ? 'grigdesk' : 'tracker');
+
+      return sources.includes(personal) || (isTaskSourceId(task.source) && sources.includes(task.source));
+    });
+  }
+  if (group) {
+    list = list.filter((task) => (String(task.group || '').trim() || '__none__') === group);
+  }
 
   if (String(query).trim()) {
     list = list.filter((task) => matchesBoardTask(task, query));
@@ -114,14 +140,14 @@ export function selectBoardTasks<T extends BoardTask = BoardTask>({
   if (favoriteOnly) {
     const favorites = new Set((favoriteTaskIds || []).map(String));
 
-    list = list.filter((task) => favorites.has(String(task.id)));
+    list = list.filter((task) => isFavorite ? isFavorite(task) : favorites.has(String(task.id)));
   }
   // Новая — та, которую ещё не открывали. Отметки приходят с сервера, поэтому
   // фильтр включается только с их загруженной базовой линией (см. BoardView).
   if (newOnly) {
     const seen = new Set((seenTaskIds || []).map(String));
 
-    list = list.filter((task) => !seen.has(String(task.id)));
+    list = list.filter((task) => !(isSeen ? isSeen(task) : seen.has(String(task.id))));
   }
   if (onlyUnrated) {
     list = list.filter((task) => !triageRow(analysisByTask, task)?.analysis);
@@ -133,8 +159,8 @@ export function selectBoardTasks<T extends BoardTask = BoardTask>({
       return !!analysis && (analysis.needs_clarification || analysis.confidence === 'low');
     });
   }
-  if (sortBy !== 'tracker') {
-    list = [...list].sort(
+  if (!['tracker', 'created'].includes(sortBy)) {
+    list.sort(
       (left, right) => metric(right, sortBy, analysisByTask)
         - metric(left, sortBy, analysisByTask),
     );
@@ -153,8 +179,11 @@ export function boardTaskListResetKey({
   onlyNeedsInfo = false,
   favoriteOnly = false,
   newOnly = false,
-  sortBy = 'tracker',
+  sortBy = 'created',
   taskCount = 0,
+  sources,
+  group = '',
+  composition = '',
 }: ResetOptions = {}): string {
   return JSON.stringify([
     String(query),
@@ -164,5 +193,38 @@ export function boardTaskListResetKey({
     !!newOnly,
     String(sortBy),
     Number(taskCount) || 0,
+    sources ? [...new Set(sources)].sort() : null,
+    group,
+    composition,
   ]);
+}
+
+/**
+ * Только summary собственного хранилища назначает строке личное пространство GrigDesk.
+ * Vendor source внешних задач не используется для выбора собственных операций.
+ */
+export function unifiedBoardTasks(
+  external: BoardTask[] = [],
+  own: import('../../../shared/tasks/grigdeskTaskContracts.ts').GrigdeskTaskSummary[] = [],
+): BoardTask[] {
+  return [
+    ...external.map((task) => ({
+      ...task,
+      source: task.source === 'grigdesk' ? undefined : task.source,
+      personalSource: 'tracker' as const,
+    })),
+    ...own.map((task) => ({
+      ...task,
+      group: task.projectTitle,
+      personalSource: 'grigdesk' as const
+    })),
+  ];
+}
+
+/**
+ * Фиксирует состав общей доски для сброса пагинации при смене источника.
+ * Равное число строк с другими полными ссылками даёт другой ключ.
+ */
+export function boardComposition(tasks: BoardTask[]): string {
+  return JSON.stringify(tasks.map(taskReferenceKey));
 }

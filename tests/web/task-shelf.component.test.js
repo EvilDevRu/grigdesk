@@ -57,6 +57,7 @@ async function mountPanel(t, rows, { error = null, mirror = false, pending = [] 
       loading: false,
       loaded: true,
       error,
+      get allRows() { return this.rows; },
       async remove(id) { calls.removed.push(String(id)); },
       async acknowledge(id) { calls.acknowledged.push(String(id)); },
       isPending(id) {

@@ -1,4 +1,6 @@
-// Серверные отметки просмотра синхронизируются между устройствами владельца.
+import type { TaskSourceOptions, TaskPersonalSource } from '../../../shared/tasks/taskReference.ts';
+import { trackerMutationOptions } from '../shared/trackerMutation.ts';
+// Серверные отметки двух личных пространств синхронизируются между устройствами.
 // Пока базовой линии нет, давние задачи не объявляются новыми.
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
@@ -34,7 +36,29 @@ function normalizedSnapshot(value: unknown) {
   };
 }
 
-export const useTaskSeenStore = defineStore('taskSeen', {
+interface SeenBranch {
+  scope: string;
+  revision: number;
+  taskIds: string[];
+  loaded: boolean;
+  loading: boolean;
+  error: string | null;
+  clear(options?: TaskSourceOptions): void;
+  load(force?: boolean, options?: TaskSourceOptions): Promise<boolean>;
+  initialized: boolean;
+  marking: boolean;
+  ready: boolean;
+  isSeen(id: unknown): boolean;
+  markSeen(ids: unknown, options?: TaskSourceOptions & {
+    baseline?: boolean; baselineId?: string;
+  }): Promise<boolean>;
+}
+
+const createTaskSeenStore = (storeId: string, source: TaskPersonalSource) => {
+  const prefix = source === 'grigdesk' ? 'grigdesk-tasks' : 'tracker';
+  const url = `/api/${prefix}/task-seen`;
+
+  return defineStore(storeId, {
   state: () => ({
     scope: '',
     revision: -1,
@@ -50,6 +74,7 @@ export const useTaskSeenStore = defineStore('taskSeen', {
     _inflight: null as Promise<boolean> | null,
   }),
   getters: {
+    own: (): SeenBranch => useGrigdeskTaskSeenStore(),
     count: (state) => state.taskIds.length,
     isSeen: (state) => (id: unknown) => state.taskIds.includes(taskKey(id)),
     ready: (state) => state.loaded && state.initialized,
@@ -61,6 +86,11 @@ export const useTaskSeenStore = defineStore('taskSeen', {
      */
     applySnapshot(value: unknown, requestSeq: number | null = null) {
       const snapshot = normalizedSnapshot(value);
+
+      if (source === 'grigdesk' && snapshot.scope !== 'grigdesk') {
+        throw new Error('Некорректный источник личных меток GrigDesk');
+      }
+
       const seq = requestSeq ?? ++this._requestSeq;
 
       if (snapshot.scope !== this.scope && seq < this._scopeRequestSeq) {
@@ -84,7 +114,11 @@ export const useTaskSeenStore = defineStore('taskSeen', {
      * Одновременные читатели ждут тот же запрос, вместо пропуска загрузки.
      * Ответ ушедшей эпохи не меняет снимок и флаги аккаунта.
      */
-    async load(force = false): Promise<boolean> {
+    async load(force = false, options: TaskSourceOptions = {}): Promise<boolean> {
+      if (options.source === 'grigdesk' && source !== 'grigdesk') {
+        return useGrigdeskTaskSeenStore().load(force);
+      }
+
       if (this._inflight) {
         return this._inflight;
       }
@@ -99,7 +133,7 @@ export const useTaskSeenStore = defineStore('taskSeen', {
       this.error = null;
       this._inflight = (async () => {
         try {
-          const snapshot = await api.get('/api/tracker/task-seen');
+          const snapshot = await api.get(url);
 
           if (epoch !== this._epoch) {
             return false;
@@ -119,7 +153,9 @@ export const useTaskSeenStore = defineStore('taskSeen', {
             this.loading = false;
           }
 
-          this._inflight = null;
+          if (epoch === this._epoch) {
+            this._inflight = null;
+          }
         }
       })();
 
@@ -130,13 +166,21 @@ export const useTaskSeenStore = defineStore('taskSeen', {
      * Базовый снимок один раз гасит новизну уже существующих задач.
      * Обычный просмотр не повторяет отправку уже подтверждённых отметок.
      */
-    async markSeen(ids: unknown, { baseline = false } = {}): Promise<boolean> {
+    async markSeen(ids: unknown, {
+      baseline = false, source: requestedSource, baselineId,
+    }: TaskSourceOptions & {
+      baseline?: boolean; baselineId?: string;
+    } = {}): Promise<boolean> {
+      if (requestedSource === 'grigdesk' && source !== 'grigdesk') {
+        return useGrigdeskTaskSeenStore().markSeen(ids, { baseline, baselineId });
+      }
+
       const taskIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(taskKey).filter(Boolean))];
 
-      if (!taskIds.length && !baseline) {
+      if (!taskIds.length && !baseline && !baselineId) {
         return true;
       }
-      if (!baseline && this.loaded && taskIds.every((id) => this.taskIds.includes(id))) {
+      if (!baseline && !baselineId && this.loaded && taskIds.every((id) => this.taskIds.includes(id))) {
         return true;
       }
 
@@ -147,7 +191,12 @@ export const useTaskSeenStore = defineStore('taskSeen', {
       this.error = null;
 
       try {
-        const snapshot = await api.post('/api/tracker/task-seen', { taskIds, baseline });
+        const snapshot = await api.post(url, {
+          taskIds,
+          baseline,
+          ...(baselineId ? { baselineId } : {})
+        },
+          source === 'tracker' ? trackerMutationOptions() : {});
 
         if (epoch !== this._epoch) {
           return false;
@@ -173,7 +222,11 @@ export const useTaskSeenStore = defineStore('taskSeen', {
      * Удаляет данные аккаунта и обесценивает все его летящие ответы.
      * Базовая линия нового владельца будет загружена заново.
      */
-    clear() {
+    clear(options: TaskSourceOptions = {}): void {
+      if (source === 'tracker' && options.source !== 'tracker') {
+        useGrigdeskTaskSeenStore().clear();
+      }
+
       this._epoch += 1;
       this._requestSeq += 1;
       this._scopeRequestSeq = this._requestSeq;
@@ -188,4 +241,8 @@ export const useTaskSeenStore = defineStore('taskSeen', {
       this.error = null;
     },
   },
-});
+  });
+};
+
+export const useTaskSeenStore = createTaskSeenStore('taskSeen', 'tracker');
+export const useGrigdeskTaskSeenStore = createTaskSeenStore('grigdeskTaskSeen', 'grigdesk');

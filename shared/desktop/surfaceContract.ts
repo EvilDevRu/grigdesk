@@ -1,9 +1,18 @@
+import { isTaskSourceId, parseTaskReference } from '../tasks/taskReference.ts';
+import type { TaskSourceId } from '../tasks/taskReference.ts';
 import { isToolWindowId, isToolInstance } from './toolWindowContract.ts';
 
 import { recordOrNull } from '../lib/objects.ts';
 
 export type SurfaceKind = 'task' | 'tool';
-export type SurfaceTarget = { kind: 'task'; id: string } | { kind: 'tool'; id: string };
+export type SurfaceTarget = {
+  kind: 'task';
+  id: string;
+  source?: TaskSourceId
+} | {
+  kind: 'tool';
+  id: string
+};
 export type SurfaceDocument = SurfaceTarget & { instance?: string };
 export type MainRequest = { destination: 'pipeline' }
   | { destination: 'task-dialog'; target: Extract<SurfaceTarget, { kind: 'task' }> };
@@ -19,12 +28,19 @@ export function parseSurfaceTarget(value: unknown): SurfaceTarget | null {
     return { kind: 'tool', id: item.id };
   }
 
-  if (!item || Object.keys(item).length !== 2 || item.kind !== 'task'
-    || typeof item.id !== 'string' || !/^[1-9][0-9]{0,14}$/.test(item.id)) {
+  if (!item || Object.keys(item).some((key) => !['kind', 'id', 'source'].includes(key))
+    || item.kind !== 'task'
+    || typeof item.id !== 'string' || !/^[1-9][0-9]{0,14}$/.test(item.id)
+    || (item.source !== undefined && (!isTaskSourceId(item.source)
+      || !parseTaskReference(`${item.source}:${item.id}`)))) {
     return null;
   }
 
-  return { kind: 'task', id: item.id };
+  return {
+    kind: 'task',
+    id: item.id,
+    ...(isTaskSourceId(item.source) ? { source: item.source } : {})
+  };
 }
 /**
  * Адрес поверхностей всегда принадлежит встроенному UI текущего origin.
@@ -35,6 +51,10 @@ export function surfaceUrl(origin: string, target: SurfaceTarget, instance?: str
 
   url.searchParams.set('surface', target.kind);
   url.searchParams.set('id', target.id);
+
+  if (target.kind === 'task' && target.source) {
+    url.searchParams.set('source', target.source);
+  }
 
   if (target.kind === 'tool' && isToolInstance(instance)) {
     url.searchParams.set('instance', instance);
@@ -54,7 +74,8 @@ export function surfaceTargetFromUrl(value: string, origin: string): SurfaceDocu
 
     if (url.origin !== origin || url.protocol !== 'http:' || url.username || url.password
       || url.pathname !== '/' || url.hash !== '#/surface'
-      || [...url.searchParams].length !== (url.searchParams.get('surface') === 'tool' ? 3 : 2)
+      || [...url.searchParams].length !== (url.searchParams.get('surface') === 'tool'
+        || url.searchParams.has('source') ? 3 : 2)
       || new Set(url.searchParams.keys()).size !== [...url.searchParams].length) {
       return null;
     }
@@ -62,6 +83,7 @@ export function surfaceTargetFromUrl(value: string, origin: string): SurfaceDocu
     const target = parseSurfaceTarget({
       kind: url.searchParams.get('surface'),
       id: url.searchParams.get('id'),
+      ...(url.searchParams.has('source') ? { source: url.searchParams.get('source') } : {}),
     });
 
     if (target?.kind === 'tool') {

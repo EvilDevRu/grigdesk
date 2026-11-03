@@ -41,6 +41,17 @@ function schedule(callback: () => void, milliseconds: number): () => void {
 
   return () => clearTimeout(timer);
 }
+
+/**
+ * Открытие и управление окном используют одну идентичность машины, вида и задачи.
+ * Явный источник различает одинаковые номера, прежняя цель сохраняет свой ключ.
+ */
+function surfaceWindowKey(origin: string, target: SurfaceTarget): string {
+  const source = target.kind === 'task' && target.source ? `:${target.source}` : '';
+
+  return `${origin} ${target.kind}:${target.id}${source}`;
+}
+
 /**
  * Каждая задача получает своё окно; повтор той же задачи только поднимает его.
  * Смена поколения уничтожает и видимые, и ещё загружающиеся экземпляры.
@@ -133,7 +144,7 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
       return Promise.resolve(target.kind === 'tool' ? { opened: false } : false);
     }
 
-    const key = origin + ' ' + target.kind + ':' + target.id;
+    const key = surfaceWindowKey(origin, target);
     const waiting = pending.get(key);
 
     if (waiting) {
@@ -189,7 +200,7 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
  * Чужая машина и устаревшая instance не получают побочных эффектов.
  */
   function focus(origin: string, target: SurfaceTarget, instance: string): boolean {
-    const entry = entries.get(origin + ' ' + target.kind + ':' + target.id);
+    const entry = entries.get(surfaceWindowKey(origin, target));
 
     if (!entry || entry.instance !== instance || origin !== adapters.allowedOrigin()
       || entry.window.isDestroyed()) {
@@ -206,7 +217,7 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
  * Запоздалый запрос старого документа не затрагивает его замену.
  */
   function close(origin: string, target: SurfaceTarget, instance: string): boolean {
-    const entry = entries.get(origin + ' ' + target.kind + ':' + target.id);
+    const entry = entries.get(surfaceWindowKey(origin, target));
 
     if (!entry || entry.instance !== instance || origin !== adapters.allowedOrigin()) {
       return false;
@@ -223,7 +234,7 @@ export function createSurfaceWindows(adapters: SurfaceAdapters) {
    */
   function control(origin: string, target: SurfaceTarget, instance: string,
     action: ToolWindowAction): ToolWindowControlResult {
-    const entry = entries.get(origin + ' ' + target.kind + ':' + target.id);
+    const entry = entries.get(surfaceWindowKey(origin, target));
 
     if (target.kind !== 'tool' || !entry || entry.instance !== instance
       || origin !== adapters.allowedOrigin() || entry.window.isDestroyed()) {

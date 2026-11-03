@@ -17,7 +17,7 @@
           </template>
         </UiPaneHeader>
       </div>
-      <div v-if="shelf.rows.length || hasFilters" class="shelf-toolbar">
+      <div v-if="shelf.allRows.length || hasFilters" class="shelf-toolbar">
         <div class="shelf-search">
           <UiSearchInput ref="searchInput" v-model="query"
                          aria-label="Поиск задач на полке" placeholder="Найти задачу…"
@@ -34,7 +34,7 @@
         </div>
       </div>
       <div v-if="hasFilters" class="shelf-filter-summary">
-        <span role="status">Показано {{ visibleCount }} из {{ shelf.rows.length }}</span>
+        <span role="status">Показано {{ visibleCount }} из {{ shelf.allRows.length }}</span>
         <UiButton variant="text" size="compact" @click="resetFilters">Сбросить фильтры</UiButton>
       </div>
     </header>
@@ -53,14 +53,14 @@
           <span>{{ shelf.sourceIssues.join(' · ') }}</span>
         </details>
       </UiInlineMessage>
-      <div v-if="!shelf.loading && !shelf.error && !shelf.rows.length" class="shelf-empty">
+      <div v-if="!shelf.loading && !shelf.error && !shelf.allRows.length" class="shelf-empty">
         <span class="shelf-empty-icon" aria-hidden="true">◇</span>
         <div>
           <h3>На полке пока пусто</h3>
           <p>Откладывайте сюда задачи, по которым ждёте оценку, прогон или ответ.</p>
         </div>
       </div>
-      <div v-else-if="shelf.rows.length && !visibleCount" class="shelf-empty">
+      <div v-else-if="shelf.allRows.length && !visibleCount" class="shelf-empty">
         <span class="shelf-empty-icon" aria-hidden="true">⌕</span>
         <div>
           <h3>Ничего не найдено</h3>
@@ -82,7 +82,7 @@
           </header>
 
           <ul class="shelf-list">
-            <li v-for="row in group.rows" :key="row.taskId">
+            <li v-for="row in group.rows" :key="JSON.stringify([row.taskSource, row.taskId])">
               <UiSelectableRow
                 class="shelf-card"
                 data-ui-task-shelf-row
@@ -90,7 +90,7 @@
                 :data-shelf-state="row.state"
                 :data-shelf-attention="row.needsHuman && !row.completed ? 'true' : undefined"
                 :data-shelf-completed="row.completed ? 'true' : undefined"
-                @select="ui.openTask(row.taskId)"
+                @select="ui.openTask(row.taskId, row.taskSource)"
               >
                 <span class="shelf-copy">
                   <span class="shelf-main">
@@ -188,9 +188,9 @@
                     v-tooltip="'Отметить событие просмотренным'"
                     role="embedded"
                     tone="success"
-                    :loading="shelf.isPending?.(row.taskId)"
-                    :disabled="shelf.isPending?.(row.taskId)"
-                    @click.stop="shelf.acknowledge(row.taskId)"
+                    :loading="(row.personalSource === 'grigdesk' ? shelf.own : shelf).isPending?.(row.taskId)"
+                    :disabled="(row.personalSource === 'grigdesk' ? shelf.own : shelf).isPending?.(row.taskId)"
+                    @click.stop="shelf.acknowledge(row.taskId, { source: row.personalSource, taskSource: row.taskSource })"
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -207,9 +207,9 @@
                     v-tooltip="'Убрать с полки'"
                     role="embedded"
                     tone="neutral"
-                    :loading="row.state !== 'lit' && shelf.isPending?.(row.taskId)"
-                    :disabled="shelf.isPending?.(row.taskId)"
-                    @click.stop="shelf.remove(row.taskId)"
+                    :loading="row.state !== 'lit' && (row.personalSource === 'grigdesk' ? shelf.own : shelf).isPending?.(row.taskId)"
+                    :disabled="(row.personalSource === 'grigdesk' ? shelf.own : shelf).isPending?.(row.taskId)"
+                    @click.stop="shelf.remove(row.taskId, { source: row.personalSource, taskSource: row.taskSource })"
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                          stroke-linecap="round" aria-hidden="true">
@@ -290,17 +290,17 @@ const allGroups = computed<ShelfGroup[]>(() => [
   {
     id: 'attention',
     title: 'Требуют внимания',
-    rows: shelf.rows.filter((row) => (row.state === 'lit' || row.needsHuman) && !row.completed),
+    rows: shelf.allRows.filter((row) => (row.state === 'lit' || row.needsHuman) && !row.completed),
   },
   {
     id: 'waiting',
     title: 'В ожидании',
-    rows: shelf.rows.filter((row) => row.state !== 'lit' && !row.needsHuman && !row.completed),
+    rows: shelf.allRows.filter((row) => row.state !== 'lit' && !row.needsHuman && !row.completed),
   },
   {
     id: 'completed',
     title: 'Завершённые',
-    rows: shelf.rows.filter((row) => row.completed),
+    rows: shelf.allRows.filter((row) => row.completed),
   },
 ]);
 
@@ -308,7 +308,7 @@ const filters = computed(() => [
   {
     id: 'all' as const,
     label: 'Все',
-    count: shelf.rows.length,
+    count: shelf.allRows.length,
   },
   ...allGroups.value.map((group) => ({
     id: group.id,
@@ -332,11 +332,11 @@ const visibleCount = computed(() => groups.value.reduce((total, group) => total 
  * общим при поиске, чтобы фильтр не создавал впечатление, что остальные задачи исчезли.
  */
 const summaryText = computed(() => {
-  if (!shelf.rows.length) {
+  if (!shelf.allRows.length) {
     return 'Задачи, по которым ждём событие';
   }
 
-  const total = `${shelf.rows.length} ${wordForm(shelf.rows.length, ['задача', 'задачи', 'задач'])}`;
+  const total = `${shelf.allRows.length} ${wordForm(shelf.allRows.length, ['задача', 'задачи', 'задач'])}`;
 
   const attention = allGroups.value.find((group) => group.id === 'attention')?.rows.length ?? 0;
 

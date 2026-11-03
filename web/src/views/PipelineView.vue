@@ -340,7 +340,7 @@
           data-role="pipeline-title"
           v-tooltip="title(t)"
           variant="text"
-          @click="ui.openTask(t.task)"
+          @click="ui.openTask(t.task, t.source)"
         >
           {{ title(t) }}
         </UiButton>
@@ -3190,7 +3190,7 @@ const STATE_RELOAD_DELAY_MS = 800;
 async function loadSnapshot() {
   try {
     const { tasks: list = [], silenceWindow: nextSilenceWindow }
-      = decodePipelineTasks(await api.get('/api/tasks'));
+      = decodePipelineTasks(await api.get('/api/tasks?sources=1'));
     const graphs = await Promise.all(
       list.map((t) => api.get(`/api/tasks/${t.task}/graph`).catch(() => null)
         .then((graph) => graph == null ? null : decodePipelineViewGraph(graph))),

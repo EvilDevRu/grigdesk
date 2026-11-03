@@ -18,6 +18,7 @@ export interface GrigdeskTasksSnapshot {
   tasks: GrigdeskTaskSummary[];
   revision: number;
   trackerConfigured: boolean;
+  personalStateVersion?: 1;
 }
 
 export interface GrigdeskTaskProject {
@@ -67,7 +68,18 @@ export function decodeGrigdeskTask(value: unknown, expectedId?: string): Grigdes
  * Ревизия позволяет отсечь ответ, начатый до успешного создания задачи.
  */
 export function decodeGrigdeskTasksSnapshot(value: unknown): GrigdeskTasksSnapshot {
-  return snapshot(value, 'snapshot');
+  const result = snapshot(value, 'snapshot');
+  const version = d.record(value, 'snapshot').personalStateVersion;
+
+  for (const task of result.tasks) {
+    decodeGrigdeskTask({ ...task, description: '' });
+  }
+
+  if (version !== undefined && version !== 1) {
+    throw new Error('Некорректная версия личных меток');
+  }
+
+  return { ...result, ...(version === 1 ? { personalStateVersion: 1 as const } : {}) };
 }
 
 /**

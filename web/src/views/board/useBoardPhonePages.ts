@@ -2,7 +2,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ComputedRef } from 'vue';
 
 export interface BoardPhonePage {
-  id: 'mine' | 'related' | 'own';
+  id: 'mine' | 'related';
   label: string;
   count: number;
   loading?: boolean;
@@ -82,7 +82,7 @@ export function useBoardPhonePages(pages: ComputedRef<BoardPhonePage[]>) {
 
   watch(() => pages.value.map((page) => page.id).join(','), async () => {
     if (!pageChosen || !pages.value.some((page) => page.id === activePage.value)) {
-      activePage.value = pages.value[0]?.id ?? 'own';
+      activePage.value = pages.value[0]?.id ?? 'mine';
     }
 
     await nextTick();

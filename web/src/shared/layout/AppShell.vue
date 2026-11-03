@@ -444,6 +444,7 @@
 </template>
 
 <script setup lang="ts">
+import { useGrigdeskTasksStore } from '../../stores/grigdeskTasks.ts';
 import { boardSupportsTimer } from '../trackerCapabilities.ts';
 import { formatDate, intlLocale } from '../../../../shared/i18n/formats.ts';
 import { uiLocale } from '../../ui.ts';
@@ -892,7 +893,7 @@ const badges = computed(() => {
 
   out['/chats'] = chatNavBadge(chatStore, uiLocale);
   out['/pipeline'] = pipelineNavBadge(notifyWatch.badgeSummary, uiLocale);
-  out['/shelf'] = shelfNavBadge(shelfStore.rows, uiLocale);
+  out['/shelf'] = shelfNavBadge(shelfStore.allRows, uiLocale);
   out['/board'] = unseen ? {
     n: unseen,
     kind: 'info',
@@ -1106,6 +1107,10 @@ const { connected } = useSse((name, data) => {
     timerActionError.value = '';
     void trackers.load(true);
     void boardStore.load();
+  }
+
+  if (name === 'grigdesk-tasks-changed' || name === 'hello') {
+    void useGrigdeskTasksStore().load();
   }
 
   if (name === 'mobile-changed' && phoneAccess.open) {

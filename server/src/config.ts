@@ -222,6 +222,8 @@ export const config = {
   // Постановки задач для immutable route-прогонов. Хранилище GrigDesk, а НЕ
   // рабочее дерево задачи: дерево принадлежит агенту, и файл постановки в нём агент
   // может переписать. Движок делает себе доверенную копию сам.
+  factoryTaskSourcesPath: process.env.GRIGDESK_FACTORY_TASK_SOURCES_PATH
+    || path.join(dataStateDir, 'factory-task-sources.json'),
   grigdeskTasksPath: process.env.GRIGDESK_TASKS_PATH || path.join(dataStateDir, 'grigdesk-tasks.json'),
 
   ticketsDir: process.env.GRIGDESK_TICKETS_DIR || path.join(dataStateDir, 'tickets'),

@@ -1,3 +1,5 @@
+import { formatTaskReference } from '../../../shared/tasks/taskReference.ts';
+import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import { translator, type LocaleSource } from '../../../shared/i18n/catalogs.ts';
 import { messageRef, type MessageRef } from '../../../shared/i18n/core.ts';
 
@@ -16,6 +18,7 @@ export type AlertTarget = {
 } | {
   kind: 'task';
   taskId: string;
+  source?: TaskSourceId;
 } | {
   kind: 'studio';
   modelId: string;
@@ -37,7 +40,9 @@ export function alertTargetHash(target: AlertTarget): string {
     return `#/chats?${ALERT_CHAT_QUERY}=${encodeURIComponent(target.chatId)}`;
   }
   if (target.kind === 'task') {
-    return `#/shelf?${ALERT_TASK_QUERY}=${encodeURIComponent(target.taskId)}`;
+    const reference = formatTaskReference({ id: target.taskId, source: target.source });
+
+    return `#/shelf?${ALERT_TASK_QUERY}=${encodeURIComponent(reference)}`;
   }
 
   return '#/pipeline';

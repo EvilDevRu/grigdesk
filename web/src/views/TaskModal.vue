@@ -23,7 +23,7 @@
           <template #actions>
             <div class="mhead-actions" role="group" aria-label="Действия с карточкой">
               <TaskFavoriteButton
-                v-if="isB24Task"
+                v-if="canUsePersonal"
                 :active="favorites.isFavorite(taskId)"
                 :pending="!favorites.loaded || favorites.loading || favorites.isPending(taskId)"
                 :task-title="detail?.title || boardTask?.title || `Задача #${taskId}`"
@@ -58,10 +58,10 @@
         </div>
       </div>
 
-      <div v-if="err || (isB24Task && (favorites.error || shelf.error))" class="malerts" aria-live="polite">
+      <div v-if="err || (canUsePersonal && (favorites.error || shelf.error))" class="malerts" aria-live="polite">
         <p v-if="err" class="err">{{ err }}</p>
-        <p v-if="isB24Task && favorites.error" class="err">Избранное: {{ favorites.error }}</p>
-        <p v-if="isB24Task && shelf.error" class="err">Полка: {{ shelf.error }}</p>
+        <p v-if="canUsePersonal && favorites.error" class="err">Избранное: {{ favorites.error }}</p>
+        <p v-if="canUsePersonal && shelf.error" class="err">Полка: {{ shelf.error }}</p>
       </div>
 
       <div class="mcontext" aria-label="Состояние задачи">
@@ -1047,10 +1047,10 @@
               ✓ Завершить
             </UiButton>
           </div>
-          <div v-if="isB24Task || sandbox" class="csecondary">
+          <div v-if="canUsePersonal || sandbox" class="csecondary">
             <div class="ctools" role="group" :aria-label="t('core.taskToolsActions')">
               <UiButton
-                v-if="isB24Task && shelfEnabled"
+                v-if="canUsePersonal && shelfEnabled"
                 data-context="task-footer-action"
                 data-role="task-shelf-toggle"
                 tone="neutral"
@@ -1296,6 +1296,8 @@
 </template>
 
 <script setup lang="ts">
+import { grigdeskPersonalStateVersion } from '../shared/grigdeskPersonalState.ts';
+import { taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
 import TaskLoading from './TaskLoading.vue';
 
 import type {
@@ -1388,22 +1390,39 @@ const tasks = useTasksStore();
 const trackers = useTrackersStore();
 const trackerCaps = computed(() => trackers.capabilities);
 const board = useBoardStore();
-const favorites = useTaskFavoritesStore();
-const shelf = useTaskShelfStore();
+const trackerFavorites = useTaskFavoritesStore();
+const favorites = computed(() => ownTask.value ? trackerFavorites.own : trackerFavorites);
+const trackerShelf = useTaskShelfStore();
+const shelf = computed(() => ownTask.value ? trackerShelf.own : trackerShelf);
 const plugins = usePluginsStore();
-const seen = useTaskSeenStore();
+const trackerSeen = useTaskSeenStore();
+const seen = computed(() => ownTask.value ? trackerSeen.own : trackerSeen);
 const { taskId } = storeToRefs(ui);
+const taskSource = computed(() => ui.taskSource);
 
 const detail = ref<TaskDetail | null>(null);
 const ownTask = computed(() => detail.value?.source === 'grigdesk');
+const currentTaskKey = computed(() => taskReferenceKey({
+  id: taskId.value!,
+  source: ownTask.value ? 'grigdesk' : taskSource.value || board.data?.source,
+}));
+
 // Как и в tasks.load, номер вне собственного диапазона сразу подтверждает источник Б24.
 // Внутри диапазона до ответа карточки портальные действия и личные эффекты скрыты.
-const isB24Task = computed(() => detail.value !== null
-  ? !ownTask.value
-  : Boolean(taskId.value) && !/^[1-9]\d{11}$/u.test(String(taskId.value)));
+const isB24Task = computed(() => {
+  if (taskSource.value && taskSource.value !== 'grigdesk' && taskSource.value !== board.data?.source) {
+    return false;
+  }
+
+  return detail.value !== null ? !ownTask.value
+    : taskSource.value ? taskSource.value !== 'grigdesk'
+      : Boolean(taskId.value) && !/^[1-9]\d{11}$/u.test(String(taskId.value));
+});
 let detailRequest = 0;
 const detailTrackerRevision = ref<number | null>(null);
 const loading = ref(false);
+const canUsePersonal = computed(() => isB24Task.value
+  || (ownTask.value && grigdeskPersonalStateVersion.value === 1));
 const canAnalyzeTask = computed(() => isB24Task.value || (ownTask.value && !loading.value));
 const busy = ref<string | null>(null);   // какое действие выполняется
 const err = ref<string | null>(null);
@@ -2143,6 +2162,32 @@ function tgPlural(n: number) {
   return 'сообщений';
 }
 
+let personalTarget = '';
+
+/**
+ * Личные эффекты выполняются только для подтверждённой карточки и поддерживаемого пространства.
+ * Позднее подтверждение capability включает own-метки без повторного открытия карточки.
+ */
+function loadPersonalState() {
+  if (!taskId.value || !detail.value || !canUsePersonal.value) {
+    return;
+  }
+
+  const key = currentTaskKey.value;
+
+  if (personalTarget === key) {
+    return;
+  }
+
+  personalTarget = key;
+  void favorites.value.load(true);
+  void shelf.value.load(true, { silent: true });
+  acknowledgeShelfOnOpen(taskId.value);
+  void seen.value.markSeen([taskId.value]);
+}
+
+watch(grigdeskPersonalStateVersion, loadPersonalState);
+
 let detailAbort: AbortController | null = null;
 let commentsAbort: AbortController | null = null;
 
@@ -2164,21 +2209,16 @@ async function loadDetail(force = false) {
   err.value = null;
 
   try {
-    const loaded = await tasks.load(id, force, detailAbort.signal);
+    const loaded = await tasks.load(id, force, detailAbort.signal, taskSource.value);
 
     if (request !== detailRequest || taskId.value !== id) {
       return;
     }
 
     detail.value = loaded;
+    void loadConveyor();
 
-    if (isB24Task.value) {
-      favorites.load(true);
-      acknowledgeShelfOnOpen(id);
-      // Личные отметки принадлежат только подтверждённой карточке Б24.
-      // До определения источника запросы account-scoped служб запрещены.
-      seen.markSeen([id]);
-    }
+    loadPersonalState();
   } catch (e) {
     if (request === detailRequest && taskId.value === id) {
       err.value = failureText(e);
@@ -2718,9 +2758,11 @@ async function loadConveyor() {
   }
 
   try {
-    const { tasks: list } = decodePipelineTasks(await api.get('/api/tasks'));
+    const { tasks: list } = decodePipelineTasks(await api.get('/api/tasks?sources=1'));
+    const key = currentTaskKey.value;
 
-    conveyor.value = (list || []).find((t) => String(t.task) === String(taskId.value!)) || null;
+    conveyor.value = (list || []).find((t) => t.source && taskReferenceKey({ id: t.task, source: t.source })
+      === key) || null;
   } catch { /* нет данных фабрики — не блокируем */ }
 
   if (!conveyor.value) {
@@ -3328,7 +3370,9 @@ async function doLaunch(payload: unknown) {
   err.value = null;
 
   try {
-    const r = await tasks.launch(taskId.value!, payload);
+    const r = await tasks.launch(taskId.value!, { ...objectOrEmpty(payload),
+      ...(taskSource.value ? { source: taskSource.value } : ownTask.value ? { source: 'grigdesk' } : {}),
+    });
 
     launchForm.value = null;
     launchMsg.value = r.outcome === 'already_running' ? 'Уже идёт на конвейере'
@@ -3404,8 +3448,8 @@ const refresh = async () => {
     void loadComments(true);
   }
 };
-const toggleFavorite = () => favorites.toggle(taskId.value!);
-const toggleShelf = () => shelf.toggle(taskId.value!);
+const toggleFavorite = () => favorites.value.toggle(taskId.value!);
+const toggleShelf = () => shelf.value.toggle(taskId.value!);
 let acknowledgedShelfTask = '';
 /**
  * Открытие карточки гасит накопленное внимание только один раз на задачу.
@@ -3414,13 +3458,14 @@ let acknowledgedShelfTask = '';
 function acknowledgeShelfOnOpen(id = taskId.value!) {
   const key = String(id || '');
 
-  if (!isB24Task.value || !key || !shelfEnabled.value || !shelf.loaded || !shelf.isOnShelf(key)
+  if (!canUsePersonal.value || !key || !shelfEnabled.value || !shelf.value.loaded
+    || !shelf.value.isOnShelf(key)
     || acknowledgedShelfTask === key) {
     return;
   }
 
   acknowledgedShelfTask = key;
-  void Promise.resolve(shelf.acknowledge(key)).then((ok) => {
+  void Promise.resolve(shelf.value.acknowledge(key)).then((ok) => {
     if (!ok && String(taskId.value || '') === key) {
       acknowledgedShelfTask = '';
     }
@@ -3434,7 +3479,7 @@ function onTaskDialogOpenChange(open: boolean) {
 }
 
 // Открытие/закрытие модалки по taskId.
-watch(taskId, (id) => {
+watch(() => [taskId.value, taskSource.value], ([id]) => {
   checklistEditing.value = null;
   checklistAdding.value = null;
   checklistCreating.value = false;
@@ -3452,6 +3497,7 @@ watch(taskId, (id) => {
   loading.value = false;
   closeLaunch();
   acknowledgedShelfTask = '';
+  personalTarget = '';
   cancelTaskEdit();
   editMessage.value = null;
 
@@ -3515,7 +3561,7 @@ watch(taskId, (id) => {
 // Полка загружается параллельно карточке. Если её снимок пришёл позже, открытая
 // задача всё равно должна погасить накопленный огонёк ровно один раз.
 watch(
-  () => [taskId.value!, shelf.loaded, shelf.entries, shelfEnabled.value],
+  () => [taskId.value!, shelf.value.loaded, shelf.value.entries, shelfEnabled.value],
   () => acknowledgeShelfOnOpen(),
 );
 watch(analysisEnabled, (enabled) => {

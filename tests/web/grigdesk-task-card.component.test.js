@@ -16,9 +16,12 @@ for (const presentation of ['dialog', 'document']) {
     assert.equal(wrapper.find('[aria-label="Учёт времени"]').exists(), false);
     assert.equal(wrapper.find('[data-role="task-edit-open"]').exists(), false);
     assert.equal(wrapper.find('[data-role="task-comment"]').exists(), false);
-    assert.equal(wrapper.find('[data-role="task-shelf-toggle"]').exists(), false);
-    assert.equal(wrapper.find('.stub-modal-fav').exists(), false);
-    assert.deepEqual(personal, []);
+    assert.equal(wrapper.find('[data-role="task-shelf-toggle"]').exists(), true);
+    assert.equal(wrapper.find('.stub-modal-fav').exists(), true);
+    assert.equal(personal.length > 0, true);
+    assert.equal(personal.every((call) => call.startsWith('own-')), true);
+    assert.equal(personal.includes('own-seen'), true);
+    assert.equal(personal.includes('own-acknowledge'), true);
     assert.equal(reads.some((url) => url.startsWith('/api/tracker/')), false);
     assert.ok(wrapper.find('[data-role="task-launch-open"]').exists());
     assert.match(text, /Оценка|Триаж|Сложность/i);

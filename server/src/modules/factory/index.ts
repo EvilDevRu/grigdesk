@@ -1,3 +1,9 @@
+import { randomUUID } from 'node:crypto';
+import { FactoryTaskSources, factoryTicketHash } from '../../lib/factoryTaskSources.ts';
+import { trackerAccountScope } from '../../lib/trackers/accountScope.ts';
+import type { TrackerContext } from '../../lib/trackers/facade.ts';
+import type { TaskSourceId } from '../../../../shared/tasks/taskReference.ts';
+import { isTaskSourceId } from '../../../../shared/tasks/taskReference.ts';
 import { GrigdeskTaskStore, readGrigdeskTask } from '../../lib/grigdeskTasks/store.ts';
 import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
 import { ArbiterConversationStore } from '../../lib/arbiterConversationStore.ts';
@@ -93,6 +99,8 @@ interface PreparedLaunch {
   catalogHash: string;
   launchInputs: NormalizedLaunchInputs;
   ticket: RouteTicket;
+  source?: TaskSourceId;
+  sourceContext?: TrackerContext;
 }
 
 // Ответ HTTP, собранный до отправки: статус и тело.
@@ -126,6 +134,7 @@ interface LaunchOptions {
   description?: string;
   acceptanceCriteria?: unknown;
   sourceUrl?: string;
+  source?: TaskSourceId;
   reuseTicket?: boolean;
   runnerPrimary?: string;
   expectedCatalogHash?: string;
@@ -172,6 +181,9 @@ type Registry = Record<string, string>;
 // Соседи, которых модуль получает сборкой приложения. Их полные контракты живут
 // в своих файлах; здесь перечислено ровно то, что использует раздел.
 interface TrackerPort {
+  captureContext?: () => TrackerContext;
+  assertContext?: (context: TrackerContext) => void;
+  accountIdentity?: () => Promise<import('../../lib/trackers/accountScope.ts').TrackerIdentity | null>;
   sourceUrl?: (id: string) => Promise<string> | string;
   capabilities?: () => { comments?: boolean } | undefined;
   taskPageData: (id: string) => Promise<{ comments?: unknown }>;
@@ -200,6 +212,7 @@ type FactoryModuleConfig = RouteConfig & LaunchConfig & Pick<
 > & {
   factoryStandsDir?: string;
   grigdeskTasksPath?: string;
+  factoryTaskSourcesPath?: string;
   arbiterConversationsDir?: string;
 };
 
@@ -588,21 +601,44 @@ async function factoryModule(
     return { ...managed, env, sandbox };
   };
 
+  const sourceIndex = config.factoryTaskSourcesPath
+    ? new FactoryTaskSources(config.factoryTaskSourcesPath) : null;
+
   // Список всех задач с картой статусов этапов.
-  fastify.get<FactoryRoute>('/api/tasks', async () => {
+  fastify.get<FactoryRoute>('/api/tasks', async (request) => {
     const tasks = await factoryState.listTasks();
     // Названия берём из одного снимка: полный файл не перечитывается для каждой строки.
     // Карта живёт только в этом запросе, поэтому следующий увидит новые задачи и правки.
     const ownTasks = tasks.length ? (await new GrigdeskTaskStore({ config }).list()).tasks : [];
     const ownById = new Map(ownTasks.map((task) => [task.id, task]));
+    const extended = request.query.sources === '1';
+    let sourceRecords: Awaited<ReturnType<FactoryTaskSources['read']>>['entries'] = {};
+
+    if (extended && sourceIndex) {
+      try {
+        sourceRecords = (await sourceIndex.read()).entries;
+      } catch (error) {
+        request.log.error({ err: error }, 'Не удалось прочитать источники конвейера');
+      }
+    }
 
     const titledTasks = await Promise.all(tasks.map(async (task) => {
       const own = ownById.get(String(task.task));
+      let source: TaskSourceId | undefined = own?.source;
+
+      if (extended && sourceRecords[String(task.task)]) {
+        try {
+          source = FactoryTaskSources.verified(sourceRecords[String(task.task)],
+            await factoryState.readTrustedTicketProof(task.task));
+        } catch {
+          source = undefined;
+        }
+      }
 
       return {
         ...task,
         title: own?.title || await storedTicketTitle(task.task),
-        ...(own ? { source: own.source } : {}),
+        ...(source ? { source } : {}),
         // Пока идёт разбор, задача снаружи выглядит вставшей: тот же затык, та же кнопка.
         // Без этого признака человек берётся за неё руками параллельно с арбитром.
         arbitrating: arbiterLive?.read(task.task) || null,
@@ -610,7 +646,11 @@ async function factoryModule(
     }));
     // Порог молчания едет вместе со списком: «этот ход завис» обязаны считать одинаково
     // чип в навигации, оповещение и карточка задачи, а хранится он в настройках.
-    return { tasks: titledTasks, silenceWindow: Math.max(0, Number(prefs.read().runSilenceWindow) || 0) };
+    return {
+      tasks: titledTasks,
+      ...(extended ? { sourcesVersion: 1 } : {}),
+      silenceWindow: Math.max(0, Number(prefs.read().runSilenceWindow) || 0)
+    };
   });
 
   // Деталь одной задачи: реестр + карта этапов + таймлайн.
@@ -1102,12 +1142,38 @@ async function factoryModule(
    * только базовый тикет: уточнения/комментарии/Telegram намеренно перечитываются при dispatch.
    */
   async function preflightRoutePipeline(id: string, {
-    profile, route, title, description, acceptanceCriteria, sourceUrl, reuseTicket = false,
+    profile, route, title, description, acceptanceCriteria, sourceUrl, source, reuseTicket = false,
     runnerPrimary = '', expectedCatalogHash = '',
     deliveryTargets = [], instrumentationFiles = [], diagnosisKind = '', diagnosisSignal = '',
   }: LaunchOptions = {}, { dynamicSections = true }: {
     dynamicSections?: boolean;
   } = {}): Promise<PreflightResult> {
+    const sourceContext = tracker?.captureContext?.();
+    const ownSourceTask = await readGrigdeskTask(config, id);
+    let launchSource: TaskSourceId | undefined = ownSourceTask ? 'grigdesk' : undefined;
+
+    if (reuseTicket && sourceIndex) {
+      const records = await sourceIndex.read();
+
+      try {
+        launchSource = FactoryTaskSources.verified(records.entries[id],
+          await factoryState.readTrustedTicketProof(id));
+      } catch {
+        launchSource = ownSourceTask ? 'grigdesk' : undefined;
+      }
+    } else if (!ownSourceTask && tracker?.accountIdentity && sourceContext?.trackerId) {
+      const identity = await tracker.accountIdentity();
+
+      launchSource = `${sourceContext.trackerId}@${trackerAccountScope(identity)}`;
+    }
+
+    if (sourceContext && !ownSourceTask && !reuseTicket) {
+      tracker?.assertContext?.(sourceContext);
+    }
+    if (source !== undefined && (!isTaskSourceId(source) || source !== launchSource)) {
+      return { ok: false, result: { status: 409, body: { error: 'task_source_mismatch' } } };
+    }
+
     const wanted = String(route || 'feature');
     const expected = String(expectedCatalogHash || '');
     if (expected && !/^[a-f0-9]{64}$/.test(expected)) {
@@ -1287,6 +1353,8 @@ async function factoryModule(
         catalogHash: pinnedCatalogHash,
         launchInputs,
         ticket: built,
+        source: launchSource,
+        sourceContext: !ownSourceTask && !reuseTicket ? sourceContext : undefined,
       },
     };
   }
@@ -1305,6 +1373,18 @@ async function factoryModule(
     const {
       profile, route: wanted, runnerPrimary, catalogHash, launchInputs, ticket: built,
     } = prepared.value;
+
+    if (prepared.value.sourceContext) {
+      tracker?.assertContext?.(prepared.value.sourceContext);
+    }
+
+    const dispatchId = randomUUID();
+    const pendingSource = prepared.value.source && sourceIndex ? {
+      taskId: id,
+      source: prepared.value.source,
+      dispatchId,
+      ticketHash: factoryTicketHash(built),
+    } : null;
     const gitRefresh = await maybeRefreshRepos(id, profile);
 
     // Слот стенда резервируем до запуска, чтобы два provisioning не взяли один порт.
@@ -1330,6 +1410,16 @@ async function factoryModule(
       const ticketFile = await writeTicketFile({ dir: config.ticketsDir, task: id, ticket: built });
       // Именно spawn — первая граница, после которой вызывающий уже не может доказать,
       // появился ли detached engine. До неё ошибки git/slot/ticket безопасно повторяемы.
+      if (prepared.value.sourceContext) {
+        tracker?.assertContext?.(prepared.value.sourceContext);
+      }
+      if (pendingSource) {
+        await sourceIndex!.put(pendingSource);
+      }
+      if (prepared.value.sourceContext) {
+        tracker?.assertContext?.(prepared.value.sourceContext);
+      }
+
       taskLaunchPending.set(String(id), { startedAt: Date.now() });
       launch = await spawnRouteEngine(config, {
         task: id,
@@ -1338,6 +1428,7 @@ async function factoryModule(
           profile,
           route: wanted,
           ticketFile,
+          queueDispatchId: dispatchId,
           runnerPrimary,
           expectedCatalogHash: catalogHash,
           ...launchInputs,
@@ -1384,10 +1475,12 @@ async function factoryModule(
       await pause(250);
       let registry: Registry | null = null;
       try { registry = (await factoryState.readRegistry(id)).registry; } catch { /* реестр ещё пишется */ }
+
       const identity = startRegistryIdentity(registry, {
         profile,
         route: wanted,
         expectedCatalogHash: catalogHash,
+        queueDispatchId: dispatchId,
         runnerPrimaryOverride: runnerPrimary,
       });
       if (identity && registry && factoryState.isDaemonAlive(registry.ORCH_PID, id)) {
@@ -1398,6 +1491,16 @@ async function factoryModule(
         launchConfirmations = 0;
       }
       if (launchConfirmations >= 4 && registry) {
+        if (pendingSource) {
+          const proof = await factoryState.readTrustedTicketProof(id);
+
+          if (!FactoryTaskSources.verified(pendingSource, proof)) {
+            throw new Error('Источник запуска не совпал с trusted попыткой');
+          }
+
+          await sourceIndex!.put({ ...pendingSource, attempt: proof.attempt });
+        }
+
         return {
           status: null,
           body: {
@@ -1908,8 +2011,18 @@ async function factoryModule(
   fastify.post<FactoryRoute>('/api/tasks/:id/launch', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
-    const r = await withTaskLaunchLock(id, () => startPipeline(id, request.body || {}));
-    return r.status ? reply.code(r.status).send(r.body) : r.body;
+
+    try {
+      const r = await withTaskLaunchLock(id, () => startPipeline(id, request.body || {}));
+
+      return r.status ? reply.code(r.status).send(r.body) : r.body;
+    } catch (error) {
+      if ((error as { status?: number }).status === 409) {
+        return reply.code(409).send({ error: (error as { code: string }).code });
+      }
+
+      throw error;
+    }
   });
 
   // Занятость слотов стенда: чем заняты, что зарезервировано, сколько свободно.

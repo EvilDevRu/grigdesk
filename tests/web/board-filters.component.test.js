@@ -82,7 +82,7 @@ test('BOARD-FILTERS-02: режим триажа взаимоисключающи
   await wrapper.get('.filter-reset').trigger('click');
   await flushPromises();
   assert.equal(wrapper.get('.search input').element.value, '');
-  assert.equal(wrapper.get('.ui-select-wrap:has(.trisort) select').element.value, 'tracker');
+  assert.equal(wrapper.get('.ui-select-wrap:has(.trisort) select').element.value, 'created');
   assert.equal(wrapper.get('.favfilter').attributes('aria-pressed'), 'false');
   assert.equal(wrapper.get('.newfilter').attributes('aria-pressed'), 'false');
   assert.equal(wrapper.get('[data-option-value="all"]').attributes('aria-pressed'), 'true');
@@ -98,7 +98,7 @@ test('BOARD-FILTERS-03: повреждённые сохранённые наст
     triagePrefs: '{сломанный json',
   });
 
-  assert.equal(wrapper.get('.ui-select-wrap:has(.trisort) select').element.value, 'tracker');
+  assert.equal(wrapper.get('.ui-select-wrap:has(.trisort) select').element.value, 'created');
   assert.equal(wrapper.get('[data-option-value="all"]').attributes('aria-pressed'), 'true');
   assert.equal(wrapper.findAll('li.trow').length, 2);
 });
@@ -132,7 +132,7 @@ test('BOARD-FILTERS-04: раскладка зависит от контейне�
     'две колонки не должны включаться по viewport без учёта sidebar и dock');
 });
 
-test('выключенный триаж убирает массовый запуск, свои фильтры и сортировку с доски', async (t) => {
+test('выключенный триаж убирает массовый запуск и триаж, сохраняет сортировку с доски', async (t) => {
   const { wrapper } = await mountBoardView(t, {
     prefix: 'board-analysis-disabled',
     tasks: TASKS,
@@ -151,7 +151,7 @@ test('выключенный триаж убирает массовый запу
   }, {
     batch: 0,
     filters: 0,
-    sort: 0,
+    sort: 1,
     placeholder: true,
   });
 });

@@ -1,3 +1,7 @@
+import { taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
+import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { decodeGrigdeskTask } from '../../../shared/tasks/grigdeskTaskContracts.ts';
 // Кеш деталей B24 и действия через GrigDesk без открытия стороннего портала.
@@ -10,6 +14,8 @@ import {
   decodeTaskDetail, decodeTaskLaunchOptions, decodeTaskLaunchResult,
 } from '../shared/boardContracts.ts';
 import type { TaskDetail } from '../shared/boardContracts.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 type TaskId = string | number;
 
@@ -34,22 +40,37 @@ export const useTasksStore = defineStore('tasks', {
      * Номера вне диапазона собственных задач читаются прежним запросом Б24.
      * Внутри диапазона источник подтверждает запись; ответ проверяется до замены кеша.
      */
-    async load(id: TaskId, force = false, signal?: AbortSignal): Promise<TaskDetail> {
+    async load(id: TaskId, force = false, signal?: AbortSignal, source?: TaskSourceId): Promise<TaskDetail> {
       const epoch = this.epoch;
-      const cached = this.details[id];
+      const key = source ? taskReferenceKey({ id, source }) : String(id);
+      const cached = this.details[key];
+
+      if (source && source !== 'grigdesk') {
+        const board = useBoardStore();
+
+        if (!board.data?.source) {
+          await board.load();
+        }
+        if (board.data?.source !== source) {
+          throw new Error(t('core.taskSourceMismatch'));
+        }
+      }
+      if (source === 'grigdesk' && !/^[1-9]\d{11}$/.test(String(id))) {
+        throw new Error(t('core.taskSourceUnsupported'));
+      }
 
       if (cached && !force && Date.now() - cached.loadedAt < 30000) {
         return cached.data;
       }
 
       let response: unknown;
-      let portal = !/^[1-9]\d{11}$/u.test(String(id));
+      let portal = source ? source !== 'grigdesk' : !/^[1-9]\d{11}$/u.test(String(id));
 
       if (!portal) {
         try {
           response = await api.get(`/api/grigdesk-tasks/${id}`, { signal });
         } catch (error) {
-          if (!(error instanceof ApiError) || error.status !== 404
+          if (source === 'grigdesk' || !(error instanceof ApiError) || error.status !== 404
             || !isRecord(error.data) || error.data.error !== 'grigdesk_task_not_found') {
             throw error;
           }
@@ -59,8 +80,14 @@ export const useTasksStore = defineStore('tasks', {
       }
 
       const data = portal
-        ? decodeTaskDetail(await api.get(`/api/tracker/task/${id}`, { signal }))
+        ? decodeTaskDetail(await api.get(`/api/tracker/task/${id}`, {
+          signal, ...(source ? useTrackersStore().mutationOptions() : {}),
+        }))
         : decodeTaskDetail(decodeGrigdeskTask(response, String(id)));
+
+      if (source && source !== 'grigdesk' && useBoardStore().data?.source !== source) {
+        throw new DOMException('', 'AbortError');
+      }
 
       signal?.throwIfAborted();
 
@@ -68,7 +95,7 @@ export const useTasksStore = defineStore('tasks', {
         throw new DOMException('', 'AbortError');
       }
 
-      this.details[id] = { data, loadedAt: Date.now() };
+      this.details[key] = { data, loadedAt: Date.now() };
 
       return data;
     },

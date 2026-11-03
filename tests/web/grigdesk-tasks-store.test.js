@@ -141,3 +141,44 @@ for (const [name, failure] of [
     assert.deepEqual(calls, [`/api/grigdesk-tasks/${OWN.id}`, `/api/grigdesk-tasks/${OWN.id}`]);
   });
 }
+
+
+test('LOCAL-SOURCE: явный grigdesk запрещает fallback после точного own 404', async () => {
+  const { store, calls } = await fixture(() => {
+    throw new migrationHarness.ApiError('Нет своей задачи', 404, { error: 'grigdesk_task_not_found' });
+  });
+
+  await assert.rejects(store.load(OWN.id, false, undefined, 'grigdesk'));
+  assert.deepEqual(calls, [`/api/grigdesk-tasks/${OWN.id}`]);
+});
+
+test('LOCAL-SOURCE: кеш различает own и внешний source с одним номером', async (t) => {
+  const source = `grigdesk-b24@${'a'.repeat(64)}`;
+  const board = { data: { source }, async load() {} };
+  const calls = [];
+
+  setActivePinia(createPinia());
+  globalThis.__sourceBoard = board;
+  t.after(() => delete globalThis.__sourceBoard);
+  migrationHarness.api = {
+    async get(url) {
+      calls.push(url);
+
+      return url.startsWith('/api/grigdesk-tasks/') ? OWN : { id: OWN.id, title: 'Внешняя задача' };
+    },
+  };
+
+  const { useTasksStore } = await loadMigrationModule('src/stores/tasks.js', 'src/stores/tasks.ts', {
+    './board.ts': 'export const useBoardStore = () => globalThis.__sourceBoard;',
+    './trackers.ts': 'export const useTrackersStore = () => ({ mutationOptions: () => ({}) });',
+  });
+  const store = useTasksStore();
+
+  assert.equal((await store.load(OWN.id, false, undefined, 'grigdesk')).title, OWN.title);
+  assert.equal((await store.load(OWN.id, false, undefined, source)).title, 'Внешняя задача');
+  assert.equal((await store.load(OWN.id, false, undefined, 'grigdesk')).title, OWN.title);
+  assert.equal(calls.length, 2);
+  board.data.source = `grigdesk-b24@${'b'.repeat(64)}`;
+  await assert.rejects(store.load(OWN.id, false, undefined, source));
+  assert.equal(calls.length, 2);
+});

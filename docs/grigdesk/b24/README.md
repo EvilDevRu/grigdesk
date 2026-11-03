@@ -1,5 +1,7 @@
 # Задачи Б24
 
+- [Общий список, источники и собственные личные метки](unified-board.md)
+
 Драйверы трекеров, совместимый HTTP-фасад, доска, полка и личное состояние задач.
 
 Читай перед правкой: `server/src/lib/trackers`, `server/src/modules/tracker`, `server/src/modules/task-shelf`, `server/src/modules/task-favorites`, `server/src/modules/task-seen`, `web/src/views/board`, `web/src/views/shelf`, `b24/` (команда `b24`).

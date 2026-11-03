@@ -1,3 +1,6 @@
+import { isTaskSourceId } from '../../../shared/tasks/taskReference.ts';
+import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
+import type { TaskPersonalSource } from '../../../shared/tasks/taskReference.ts';
 import { parseSurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
 
 // Межоконные сообщения desktop. Главный документ — единственный владелец постоянных потоков;
@@ -197,7 +200,7 @@ export function startBoardRelay(options: BoardRelayOptions): () => void {
 interface ShelfRelayOptions {
   role: RelayRole;
   channel: RelayChannel;
-  acknowledge(id: string): unknown;
+  acknowledge(id: string, source?: TaskPersonalSource, taskSource?: TaskSourceId): unknown;
 }
 
 /**
@@ -208,14 +211,19 @@ export function startShelfRelay(options: ShelfRelayOptions): () => void {
   let active = true;
 
   options.channel.onmessage = ({ data }) => {
-    if (!active || options.role !== 'source' || relayType(data, 3) !== 'shelf-acknowledge') {
+    const type = relayType(data, data?.taskSource !== undefined ? 5 : data?.source === undefined ? 3 : 4);
+
+    if (!active || options.role !== 'source' || type !== 'shelf-acknowledge') {
       return;
     }
 
     const target = parseSurfaceTarget({ kind: 'task', id: data.taskId });
 
     if (target) {
-      void Promise.resolve().then(() => options.acknowledge(target.id)).catch(() => undefined);
+      const source = data.source === 'grigdesk' ? 'grigdesk' : 'tracker';
+
+      void Promise.resolve().then(() => options.acknowledge(target.id, source,
+        isTaskSourceId(data.taskSource) ? data.taskSource : undefined)).catch(() => undefined);
     }
   };
 

@@ -1,3 +1,4 @@
+import { isTaskSourceId } from '../../../../shared/tasks/taskReference.ts';
 import { watch } from 'vue';
 import { recordOrNull } from '../../../../shared/lib/objects.ts';
 import { parseToolWindowState } from './toolWindowState.ts';
@@ -240,7 +241,7 @@ export function startToolShelfRelay({ role, channel, store, instance }: ShelfRel
       scope: store.scope,
       revision: store.revision,
       entries: store.entries,
-      rows: store.rows,
+      rows: store.allRows,
       sourceIssues: store.sourceIssues,
       loaded: store.loaded,
       error: store.error,
@@ -270,8 +271,12 @@ export function startToolShelfRelay({ role, channel, store, instance }: ShelfRel
       if (message.type === 'shelf-ready') {
         publish();
       } else if (message.type === 'shelf-action' && typeof message.taskId === 'string') {
-        const operation = message.action === 'remove' ? store.remove(message.taskId)
-          : message.action === 'acknowledge' ? store.acknowledge(message.taskId) : false;
+        const options = {
+          source: message.source === 'grigdesk' ? 'grigdesk' as const : 'tracker' as const,
+          ...(isTaskSourceId(message.taskSource) ? { taskSource: message.taskSource } : {}),
+        };
+        const operation = message.action === 'remove' ? store.remove(message.taskId, options)
+          : message.action === 'acknowledge' ? store.acknowledge(message.taskId, options) : false;
 
         void Promise.resolve(operation).then(publish);
       }
@@ -291,13 +296,15 @@ export function startToolShelfRelay({ role, channel, store, instance }: ShelfRel
     stops.push(watch(() => JSON.stringify(snapshot()), publish));
   } else {
     store.setViewMirror(true);
-    store.setViewAction((action, taskId) => {
+    store.setViewAction((action, taskId, source, taskSource) => {
       channel.postMessage({
         version: 1,
         type: 'shelf-action',
         instance,
         action,
         taskId,
+        source,
+        taskSource,
       });
 
       return true;

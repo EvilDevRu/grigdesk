@@ -52,9 +52,12 @@ watch(() => auth.authenticated, (on) => {
 onUnmounted(stopSpeech);
 
 
-watch(() => props.target?.id, (id) => {
-  if (id && String(ui.taskId ?? '') !== id) {
-    ui.openTaskInline(id);
+watch(() => props.target?.kind === 'task'
+  ? [props.target.id, props.target.source] as const : null, (target) => {
+  const [id, source] = target || [];
+
+  if (id && (String(ui.taskId ?? '') !== id || ui.taskSource !== source)) {
+    ui.openTaskInline(id, source);
     document.title = 'Задача #' + id + ' — GrigDesk';
   }
 }, { immediate: true });

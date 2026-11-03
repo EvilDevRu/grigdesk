@@ -1,3 +1,4 @@
+import { taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
 import { messageRef } from '../ui.ts';
 import { uiLocalePort } from '../shared/uiLocalePort.ts';
 // Вотчер конвейера: следит, что остановилось на человеке. Отсюда живут
@@ -42,6 +43,7 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
     silent: [] as PipelineNotice[],
     running: [] as PipelineNotice[],
     observedByTask: {} as Record<string, TaskObservation>,
+    observedByReference: {} as Record<string, TaskObservation>,
     loadedAt: 0,
     error: null as string | null,
   }),
@@ -112,7 +114,7 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
       try {
         // Порог молчания приходит вместе со списком: он общий для всех окон и лежит
         // в настройках сервера, а не в голове клиента.
-        const { tasks, silenceWindow } = decodePipelineTasks(await api.get('/api/tasks'));
+        const { tasks, silenceWindow } = decodePipelineTasks(await api.get('/api/tasks?sources=1'));
         const waiting: PipelineNotice[] = [];
         const stalled: PipelineNotice[] = [];
         const stalledKeys: string[] = [];
@@ -279,6 +281,9 @@ export const useNotifyWatchStore = defineStore('notifyWatch', {
         this.silent = silentRuns;
         this.running = running;
         this.observedByTask = observedByTask;
+        this.observedByReference = Object.fromEntries((tasks || []).filter((task) => task.source)
+          .map((task) => [taskReferenceKey({ id: task.task, source: task.source }),
+            observedByTask[String(task.task)]!]));
         this.loadedAt = Date.now();
         this.error = null;
         publishSandboxPipelineSnapshot({

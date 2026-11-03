@@ -1,3 +1,4 @@
+import { trackerAccountScope } from './accountScope.ts';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import { NO_TRACKER_CAPABILITIES } from '../../../../shared/trackers/contracts.ts';
 import { TrackerError } from './contract.ts';
@@ -144,18 +145,38 @@ export class TrackerFacade {
    * Legacy API остаётся адресом внешнего трекера, собственная группа читается отдельно.
    */
   getDashboard(options: TrackerReadOptions = {}): Promise<Record<string, unknown>> {
-    const revision = this.selection.read().revision;
+    const context = this.captureContext();
 
     return this.invoke(async (tracker) => {
       const snapshot = await tracker.getDashboard(options);
+      let source: string | undefined;
+
+      try {
+        const identity = await tracker.accountIdentity(options);
+
+        source = `${tracker.id}@${trackerAccountScope(identity)}`;
+      } catch {
+        // Снимок доступен без identity, но источник для адресных операций неизвестен.
+      }
+
+      this.assertContext(context);
+
+      const roles = Object.fromEntries(['tasks', 'toReview', 'created', 'accomplice', 'auditor']
+        .filter((key) => Array.isArray(snapshot[key]))
+        .map((key) => [key, (snapshot[key] as TaskData[]).map(({ source: _source, ...task }) => ({
+          ...task,
+          ...(source ? { source } : {}),
+        }))]));
 
       return {
         ...snapshot.compatibility,
         ...snapshot,
+        ...roles,
+        source,
         trackerId: tracker.id,
         capabilities: { ...NO_TRACKER_CAPABILITIES, ...tracker.capabilities },
         widgets: snapshot.widgets,
-        generation: revision,
+        generation: context.revision,
       };
     });
   }

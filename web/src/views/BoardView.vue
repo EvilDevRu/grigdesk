@@ -14,7 +14,7 @@
       </template>
     </UiPaneHeader>
     <TrackerSettingsDialog v-if="trackerSettingsOpen" v-model:open="trackerSettingsOpen" />
-    <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen" @created="ui.openTask($event)" />
+    <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen" @created="ui.openTask($event, 'grigdesk')" />
 
     <div id="board-tracker-panel" class="tracker-board">
       <div v-if="!phoneBoard || ownTasks.trackerConfigured === false || error
@@ -119,18 +119,9 @@
         </UiTab>
       </UiTabs>
       <div ref="boardPagesTrack" class="board-pages" @scroll.passive="onBoardPagesScroll">
-      <template v-if="phoneBoard && ownTasks.trackerConfigured !== false && !data && !error">
-      <section v-for="page in ['mine', 'related']" :key="page"
-               :id="`${boardPagesId}-panel-${page}`" class="col board-page-loading"
-               :class="page === 'mine' ? 'primary' : 'secondary'"
-               :role="phonePages.length > 1 ? 'tabpanel' : undefined"
-               :aria-labelledby="phonePages.length > 1 ? `${boardPagesId}-tab-${page}` : undefined"
-               :inert="activeBoardPage !== page ? true : undefined">
-        <BoardLoading compact :label="t('core.loading')" />
-      </section>
-      </template>
-      <div v-if="ownTasks.trackerConfigured !== false && data" class="cols"
-           :class="{ solo: !(data.toReview!.length || data.created!.length) }">
+
+      <div class="cols"
+           :class="{ solo: !(showRelated && (data?.toReview?.length || data?.created?.length)) }">
         <!-- Мои задачи — основной блок -->
         <section :id="`${boardPagesId}-panel-mine`" class="col primary"
                  :role="phoneBoard && phonePages.length > 1 ? 'tabpanel' : undefined"
@@ -140,7 +131,7 @@
             <h3 class="h big">
               <span class="heading-name">Мои задачи</span>
               <span class="cnt">
-                {{ myTasks.length }}<template v-if="hasListFilters"> из {{ data.tasks!.length }}</template>
+                {{ myTasks.length }}<template v-if="hasListFilters"> из {{ allTasks.length }}</template>
               </span>
             </h3>
             <UiButton
@@ -184,14 +175,34 @@
 
           <div id="board-task-filters" class="filterbar" :class="{ expanded: filtersOpen }"
                role="region" aria-label="Фильтры задач">
-            <label v-if="analysisEnabled" class="filter-section sort-filter">
+            <label class="filter-section sort-filter">
               <span class="filter-caption">Сортировка</span>
               <UiSelect v-model="sortBy" class="trisort">
-                <option value="tracker">{{ t('core.trackerOrder') }}</option>
-                <option value="risk">по риску</option>
-                <option value="complexity">по сложности</option>
-                <option value="size">по размеру</option>
-                <option value="fresh">по свежести оценки</option>
+                <option value="created">{{ t('core.boardCreatedOrder') }}</option>
+                <option v-if="analysisEnabled" value="risk">по риску</option>
+                <option v-if="analysisEnabled" value="complexity">по сложности</option>
+                <option v-if="analysisEnabled" value="size">по размеру</option>
+                <option v-if="analysisEnabled" value="fresh">по свежести оценки</option>
+              </UiSelect>
+            </label>
+
+            <div class="filter-section" role="group" :aria-label="t('core.boardSourceFilter')">
+              <span class="filter-caption">{{ t('core.boardSourceFilter') }}</span>
+              <UiToggleButton :model-value="selectedSources.includes('grigdesk')"
+                              @update:model-value="toggleSource('grigdesk', $event)">
+                {{ t('core.boardSourceGrigdesk') }}
+              </UiToggleButton>
+              <UiToggleButton :model-value="selectedSources.includes('tracker')"
+                              @update:model-value="toggleSource('tracker', $event)">
+                {{ trackerName }}
+              </UiToggleButton>
+            </div>
+            <label class="filter-section">
+              <span class="filter-caption">{{ t('core.boardProjectFilter') }}</span>
+              <UiSelect v-model="selectedGroup">
+                <option value="">{{ t('core.boardAllProjects') }}</option>
+                <option value="__none__">{{ t('core.boardNoProject') }}</option>
+                <option v-for="group in groupOptions" :key="group" :value="group">{{ group }}</option>
               </UiSelect>
             </label>
 
@@ -202,8 +213,8 @@
                 class="favfilter"
                 variant="outline"
                 tone="warning"
-                :disabled="!favorites.loaded || favorites.loading"
-                v-tooltip="favorites.loaded ? 'Только избранные задачи' : 'Избранное загружается'"
+                :disabled="!favoritesReady"
+                v-tooltip="favoritesReady ? 'Только избранные задачи' : 'Избранное загружается'"
               >
                 <template #leading>
                   <svg
@@ -226,8 +237,8 @@
                 class="newfilter"
                 variant="outline"
                 tone="accent"
-                :disabled="!seen.ready || seen.loading"
-                v-tooltip="seen.ready ? 'Только новые — те, что ещё не открывали' : 'Отметки просмотра загружаются'"
+                :disabled="!seenReady"
+                v-tooltip="seenReady ? 'Только новые — те, что ещё не открывали' : 'Отметки просмотра загружаются'"
               >
                 <template #leading>
                   <svg
@@ -298,7 +309,12 @@
               </div>
             </div>
           </div>
-          <div v-if="favorites.error" class="faverror" role="alert">
+          <p v-if="ownTasks.error" class="err" role="alert">{{ ownTasks.error }}</p>
+          <div v-for="issue in ownPersonalIssues" :key="issue.kind" class="faverror" role="alert">
+            <span>{{ issue.message }}</span>
+            <UiButton variant="text" @click="retryOwnPersonal">{{ t('core.boardRetry') }}</UiButton>
+          </div>
+          <div v-if="selectedSources.includes('tracker') && favorites.error" class="faverror" role="alert">
             <span>Избранное: {{ favorites.error }}</span>
             <UiButton
               variant="text"
@@ -310,7 +326,7 @@
             </UiButton>
           </div>
           <!-- Отказ отметок обязан быть виден: молча он читается как «новых задач нет». -->
-          <div v-if="seen.error" class="faverror" role="alert">
+          <div v-if="selectedSources.includes('tracker') && seen.error" class="faverror" role="alert">
             <span>Отметки просмотра: {{ seen.error }}</span>
             <UiButton
               variant="text"
@@ -329,36 +345,39 @@
             <span v-if="supportsTimer" class="list-time-label">Учтено</span>
           </div>
           <ul ref="taskList" class="tasks scroller" @scroll="onTasksScroll">
-            <li v-for="t in visibleTasks" :key="t.id" class="trow"
+            <li v-for="t in visibleTasks" :key="taskReferenceKey(t)" class="trow"
                 :class="{ 'without-analysis': !analysisEnabled, 'without-timer': !supportsTimer }">
-              <TaskFavoriteButton :active="favorites.isFavorite(t.id)"
-                                  :pending="!favorites.loaded || favorites.loading || favorites.isPending(t.id)"
+              <TaskFavoriteButton :active="favoriteState(t).isFavorite(t.id)"
+                                  :pending="!favoriteState(t).loaded || favoriteState(t).loading || favoriteState(t).isPending(t.id)"
                                   :task-title="t.title" @toggle="toggleFavorite(t)" />
               <UiPressable
                 class="ttext"
                 data-role="task-title"
                 data-context="board-task"
-                @click="ui.openTask(t.id)"
+                @click="ui.openTask(t.id, isTaskSourceId(t.source) ? t.source : undefined)"
               >
                 <span class="task-name">{{ t.title }}</span>
                 <span class="task-meta">
                   <span class="mono task-id">#{{ t.id }}</span>
+                  <span v-if="t.personalSource === 'grigdesk'" class="task-internal-flag">
+                    GrigDesk
+                  </span>
                   <span v-if="projectName(t)" class="task-project">{{ projectName(t) }}</span>
                   <span v-if="taskStateLabel(t)" class="task-state" :class="{ overdue: t.overdue }">
                     <span
                       class="tstat"
                       :class="{
-                        conv: conveyor.has(String(t.id)),
-                        'on-shelf': shelfEnabled && shelf.isOnShelf(t.id),
+                        conv: conveyor.has(taskReferenceKey(t)),
+                        'on-shelf': shelfEnabled && shelfState(t).isOnShelf(t.id),
                       }"
                       :style="{ background: dotColor(t) }"
                       v-tooltip="dotTitle(t)"
                     ></span>
                     {{ taskStateLabel(t) }}
                   </span>
-                  <span v-else class="tstat" :class="{ 'on-shelf': shelfEnabled && shelf.isOnShelf(t.id) }"
+                  <span v-else class="tstat" :class="{ 'on-shelf': shelfEnabled && shelfState(t).isOnShelf(t.id) }"
                         :style="{ background: dotColor(t) }" v-tooltip="dotTitle(t)"></span>
-                  <span v-if="shelfEnabled && shelf.isOnShelf(t.id)" class="shelf-mark">На полке</span>
+                  <span v-if="shelfEnabled && shelfState(t).isOnShelf(t.id)" class="shelf-mark">На полке</span>
                   <span v-if="isNewTask(t)" class="newbadge" role="img"
                         aria-label="Новая задача — ещё не открывали"
                         v-tooltip="'Новая задача — ещё не открывали'">Новая</span>
@@ -369,12 +388,14 @@
               </UiPressable>
               <div v-if="analysisEnabled" class="task-triage"><TriageBadge :row="triageOf(t)" /></div>
               <span v-if="supportsTimer" class="ttime" :class="{ running: t.timerRunning }">
-                <span class="mono">{{ secToHMS(liveElapsed(t)) }}</span>
+                <span v-if="t.personalSource !== 'grigdesk'" class="mono">{{ secToHMS(liveElapsed(t)) }}</span>
                 <span v-if="t.timerRunning" class="time-state">Идёт учёт</span>
               </span>
             </li>
             <li v-if="!myTasks.length" class="muted empty">
-              <template v-if="favoriteOnly && !hasFavoriteMatchesBeforeSearch">В текущем списке избранных задач нет</template>
+              <template v-if="!selectedSources.length">{{ t('core.boardNoSourcesSelected') }}</template>
+              <template v-else-if="!allTasks.length">{{ t('core.boardUnifiedEmpty') }}</template>
+              <template v-else-if="favoriteOnly && !currentFavoriteCount">В текущем списке избранных задач нет</template>
               <template v-else-if="favoriteOnly">Избранные задачи не подходят под поиск или фильтры</template>
               <template v-else-if="newOnly && !currentNewCount">Новых задач нет — все просмотрены</template>
               <template v-else-if="newOnly">Новые задачи не подходят под поиск или фильтры</template>
@@ -390,7 +411,7 @@
         </section>
 
         <!-- На телефоне пустой контроль сохраняет ширину вкладок и положение остальных страниц. -->
-        <section v-if="phoneBoard || data.toReview!.length || data.created!.length"
+        <section v-if="showRelated && (phoneBoard || data?.toReview?.length || data?.created?.length)"
                  :id="`${boardPagesId}-panel-related`" class="col secondary"
                  :role="phoneBoard && phonePages.length > 1 ? 'tabpanel' : undefined"
                  :aria-labelledby="phoneBoard && phonePages.length > 1 ? `${boardPagesId}-tab-related` : undefined"
@@ -400,11 +421,11 @@
                   @update:model-value="secondaryMode = String($event)">
             <UiTab id="board-review-tab" data-context="board-related-tab"
                    value="review" controls="board-related-list">
-              Контроль <span class="cnt">{{ data.toReview!.length }}</span>
+              Контроль <span class="cnt">{{ data?.toReview!.length }}</span>
             </UiTab>
             <UiTab id="board-created-tab" data-context="board-related-tab"
                    value="created" controls="board-related-list">
-              Поручения <span class="cnt">{{ data.created!.length }}</span>
+              Поручения <span class="cnt">{{ data?.created!.length }}</span>
             </UiTab>
           </UiTabs>
           <UiSearchInput
@@ -429,11 +450,14 @@
                   class="ttext"
                   data-role="task-title"
                   data-context="board-task"
-                  @click="ui.openTask(t.id)"
+                  @click="ui.openTask(t.id, isTaskSourceId(t.source) ? t.source : undefined)"
                 >
                   <span class="task-name">{{ t.title }}</span>
                   <span class="task-meta">
                     <span class="mono task-id">#{{ t.id }}</span>
+                  <span v-if="t.personalSource === 'grigdesk'" class="task-internal-flag">
+                    GrigDesk
+                  </span>
                     <span v-if="projectName(t)" class="task-project">{{ projectName(t) }}</span>
                     <span v-if="t.responsible" class="task-responsible">{{ t.responsible }}</span>
                     <span v-if="taskStateLabel(t)" class="task-state" :class="{ overdue: t.overdue }">
@@ -451,41 +475,7 @@
         </section>
       </div>
 
-      <section :id="`${boardPagesId}-panel-own`" class="own-tasks"
-               :role="phoneBoard && phonePages.length > 1 ? 'tabpanel' : undefined"
-               :aria-labelledby="phoneBoard && phonePages.length > 1 ? `${boardPagesId}-tab-own` : undefined"
-               :inert="phoneBoard && activeBoardPage !== 'own' ? true : undefined"
-               :aria-label="t(ownTasks.trackerConfigured !== false
-                 ? 'core.boardInternalTab' : 'core.grigdeskTasks')">
-        <h3 class="h big">
-          {{ t(ownTasks.trackerConfigured !== false ? 'core.boardInternalTab' : 'core.grigdeskTasks') }}
-        </h3>
-        <p v-if="ownTasks.error" class="err" role="alert">{{ ownTasks.error }}</p>
-        <p v-if="!ownTasks.loading && !ownTasks.error && !sortedOwnTasks.length" class="muted">
-          {{ t('core.boardInternalEmpty') }}
-        </p>
-        <ul class="own-tasks-list">
-          <li v-for="task in sortedOwnTasks" :key="task.id">
-            <UiButton variant="text" class="own-task-title" data-context="grigdesk-task-title"
-                      @click="ui.openTask(task.id)">
-              <span class="task-name">{{ task.title }}</span>
-              <span class="task-meta own-task-meta">
-                <span class="mono task-id">#{{ task.id }}</span>
-                <span>{{ task.projectTitle }}</span>
-                <span v-if="ownTasks.trackerConfigured !== false" class="task-internal-flag">
-                  {{ t('core.taskInternalFlag') }}
-                </span>
-              </span>
-            </UiButton>
-            <div v-if="analysisEnabled || conveyor.has(task.id)" class="own-task-details">
-              <TriageBadge v-if="analysisEnabled" :row="analysis.byTask[task.id] || null" />
-              <span v-if="conveyor.has(task.id)" class="muted own-task-state">
-                {{ t('core.grigdeskTaskPipeline') }}
-              </span>
-            </div>
-          </li>
-        </ul>
-      </section>
+
       </div>
     </div>
     <footer v-if="phoneBoard && ownTasks.trackerConfigured !== false" class="board-phone-footer">
@@ -501,6 +491,7 @@
 </template>
 
 <script setup lang="ts">
+import { taskReferenceKey, taskPersonalSource, isTaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import TrackerWidgets from './board/TrackerWidgets.vue';
 import BoardTrackerSettingsButton from './board/BoardTrackerSettingsButton.vue';
 import { useBoardPhonePages } from './board/useBoardPhonePages.ts';
@@ -531,7 +522,9 @@ import TriageBadge from './board/TriageBadge.vue';
 import TaskFavoriteButton from './board/TaskFavoriteButton.vue';
 import { api } from '../shared/apiClient.ts';
 import { useSse } from '../composables/useSse.ts';
-import { boardTaskListResetKey, matchesBoardTask, selectBoardTasks } from '../shared/boardTaskList.ts';
+import {
+  boardTaskListResetKey, matchesBoardTask, selectBoardTasks, unifiedBoardTasks, boardComposition,
+} from '../shared/boardTaskList.ts';
 import {
   t,
   confirmDialog,
@@ -561,53 +554,9 @@ const trackerUnavailableLabel = computed(() => {
 
   return name ? t('core.boardNamedTrackerUnavailable', { name }) : t('core.boardTrackerUnavailable');
 });
-const sortedOwnTasks = computed(() => [...ownTasks.tasks].sort((left, right) =>
-  right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
-));
-
 // Данные — из кеш-стора (мгновенный показ при переходе + фоновое обновление).
 const board = useBoardStore();
 const { data, error, loading, readAt } = storeToRefs(board);
-
-const boardPagesId = `board-pages-${useId()}`;
-const phonePages = computed<BoardPhonePage[]>(() => {
-  const pages: BoardPhonePage[] = [];
-
-  if (ownTasks.trackerConfigured !== false && (data.value || !error.value)) {
-    pages.push({
-      id: 'mine',
-      label: t('core.boardMinePage'),
-      count: data.value?.tasks?.length ?? 0,
-      loading: !data.value,
-    });
-
-    const related = (data.value?.toReview?.length ?? 0) + (data.value?.created?.length ?? 0);
-
-    pages.push({
-      id: 'related',
-      label: t('core.boardRelatedPage'),
-      count: related,
-      loading: !data.value,
-    });
-  }
-
-  pages.push({
-    id: 'own',
-    label: t(ownTasks.trackerConfigured !== false ? 'core.boardInternalTab' : 'core.grigdeskTasks'),
-    count: sortedOwnTasks.value.length,
-    loading: ownTasks.loading && !sortedOwnTasks.value.length,
-  });
-
-  return pages;
-});
-const {
-  phone: phoneBoard,
-  activePage: activeBoardPage,
-  track: boardPagesTrack,
-  selectPage: selectBoardPage,
-  onScroll: onBoardPagesScroll,
-} = useBoardPhonePages(phonePages);
-
 
 watch(error, () => {
   errorDetailsOpen.value = false;
@@ -641,9 +590,11 @@ const conveyor = ref(new Map<string, boolean>());
  */
 async function loadConveyor() {
   try {
-    const { tasks } = decodePipelineTasks(await api.get('/api/tasks'));
+    const { tasks } = decodePipelineTasks(await api.get('/api/tasks?sources=1'));
 
-    conveyor.value = new Map((tasks || []).map((t) => [String(t.task), !!t.daemonAlive]));
+    conveyor.value = new Map((tasks || []).filter((task) => task.source).map((task) => [
+      taskReferenceKey({ id: task.task, source: task.source }), !!task.daemonAlive,
+    ]));
   } catch { /* фабрика недоступна — точки остаются статусными */ }
 }
 
@@ -671,7 +622,7 @@ useSse((name) => {
  * При отсутствии проекции сохраняется прежний цвет портального статуса.
  */
 function dotColor(t: BoardTask) {
-  const k = String(t.id);
+  const k = taskReferenceKey(t);
 
   if (conveyor.value.has(k)) {
     return conveyor.value.get(k) ? 'var(--good)' : 'var(--warn)';
@@ -684,7 +635,7 @@ function dotColor(t: BoardTask) {
  * Задача вне фабрики продолжает показывать исходную подпись трекера.
  */
 function dotTitle(t: BoardTask) {
-  const k = String(t.id);
+  const k = taskReferenceKey(t);
 
   if (conveyor.value.has(k)) {
     return conveyor.value.get(k) ? 'На конвейере — идёт' : 'На конвейере — стоит (ждёт/прерван)';
@@ -701,7 +652,7 @@ function projectName(t: BoardTask) {
  * Признак просрочки используется только вне уже известного конвейера.
  */
 function taskStateLabel(task: BoardTask) {
-  const id = String(task.id);
+  const id = taskReferenceKey(task);
 
   if (conveyor.value.has(id)) {
     return conveyor.value.get(id) ? 'Конвейер идёт' : 'Конвейер остановлен';
@@ -763,9 +714,12 @@ const filtersOpen = ref(false);
 // загрузки (и до базовой линии) новых не бывает: см. геттер ready.
 const seen = useTaskSeenStore();
 const newOnly = ref(false);
-const isNewTask = (task: BoardTask) => seen.ready && !seen.isSeen(task.id);
+const favoriteState = (task: BoardTask) => task.personalSource === 'grigdesk' ? favorites.own : favorites;
+const seenState = (task: BoardTask) => task.personalSource === 'grigdesk' ? seen.own : seen;
+const shelfState = (task: BoardTask) => task.personalSource === 'grigdesk' ? shelf.own : shelf;
+const isNewTask = (task: BoardTask) => seenState(task).ready && !seenState(task).isSeen(task.id);
 const TRIAGE_LS = 'board.triage';
-const SORT_MODES = new Set(['tracker', 'risk', 'complexity', 'size', 'fresh']);
+const SORT_MODES = new Set(['created', 'risk', 'complexity', 'size', 'fresh']);
 const TRIAGE_OPTIONS = [
   { value: 'all', label: 'Все' },
   { value: 'unrated', label: 'Без оценки' },
@@ -781,25 +735,97 @@ function readTriagePrefs() {
     const saved = isRecord(value) ? value : {};
 
     return {
-      sortBy: typeof saved.sortBy === 'string' && SORT_MODES.has(saved.sortBy) ? saved.sortBy : 'tracker',
+      sortBy: typeof saved.sortBy === 'string' && SORT_MODES.has(saved.sortBy) ? saved.sortBy : 'created',
       // Один режим вместо двух независимых флагов: повреждённое старое значение
       // больше не может одновременно включить «без оценки» и «нужны уточнения».
+      sources: Array.isArray(saved.sources) ? [...new Set(saved.sources.filter((source) =>
+        source === 'tracker' || source === 'grigdesk'))] : ['tracker', 'grigdesk'],
+      group: typeof saved.group === 'string' ? saved.group : '',
       triageMode: saved?.onlyUnrated ? 'unrated' : saved?.onlyNeedsInfo ? 'needs-info' : 'all',
     };
   } catch {
-    return { sortBy: 'tracker', triageMode: 'all' };
+    return {
+      sortBy: 'created',
+      triageMode: 'all',
+      sources: ['tracker', 'grigdesk'],
+      group: ''
+    };
   }
 }
 
 const savedTriage = readTriagePrefs();
-const sortBy = ref(savedTriage.sortBy);   // tracker | risk | complexity | size | fresh
+const selectedSources = ref<string[]>(savedTriage.sources);
+const selectedGroup = ref(savedTriage.group);
+const allTasks = computed(() => unifiedBoardTasks(
+  ownTasks.trackerConfigured === false ? [] : data.value?.tasks, ownTasks.tasks,
+));
+const groupOptions = computed(() => [...new Set(allTasks.value
+  .map((task) => String(task.group || '').trim()).filter(Boolean))].sort());
+const sourceTasks = computed(() => selectBoardTasks({
+  tasks: allTasks.value,
+  sources: selectedSources.value,
+  group: selectedGroup.value,
+  // Источник и проект общие для списка и счётчиков. Порядок задаётся ниже,
+  // после выбора сортировки; счётчикам сортировать строки незачем.
+  sortBy: 'tracker',
+}));
+const showRelated = computed(() => selectedSources.value.includes('tracker')
+  && ownTasks.trackerConfigured !== false && !!data.value);
+const trackerName = computed(() => trackers.catalog?.drivers
+  .find((driver) => driver.id === trackers.catalog?.externalId)?.name || t('core.boardTrackerSource'));
+const favoritesReady = computed(() => selectedSources.value.every((source) =>
+  (source === 'grigdesk' ? favorites.own : favorites).loaded));
+const seenReady = computed(() => selectedSources.value.every((source) =>
+  (source === 'grigdesk' ? seen.own : seen).ready));
+const ownPersonalIssues = computed(() => {
+  if (!selectedSources.value.includes('grigdesk')) {
+    return [];
+  }
+  if (ownTasks.loaded && ownTasks.personalStateVersion !== 1) {
+    return [{ kind: 'version', message: t('core.boardPersonalUpdateRequired') }];
+  }
+
+  return [favorites.own.error, seen.own.error].filter(Boolean).map((message, index) => ({
+    kind: String(index),
+    message: t('core.boardPersonalError', { source: 'GrigDesk', message: message || '' }),
+  }));
+});
+
+function toggleSource(source: string, enabled: boolean) {
+  selectedSources.value = enabled ? [...new Set([...selectedSources.value, source])]
+    : selectedSources.value.filter((item) => item !== source);
+}
+
+async function retryOwnPersonal() {
+  await favorites.own.load(true);
+  await ownTasks.markBaselineSeen();
+}
+
+watch(() => ownTasks.personalStateVersion, (version) => {
+  if (version === 1) {
+    void favorites.own.load();
+  }
+}, { immediate: true });
+
+watch(() => [board.sourceKey, ownTasks.revision], () => {
+  if (selectedGroup.value && selectedGroup.value !== '__none__'
+    && ownTasks.loaded && !ownTasks.loading && !error.value && data.value
+    && !groupOptions.value.includes(selectedGroup.value)) {
+    selectedGroup.value = '';
+  }
+});
+
+const sortBy = ref(savedTriage.sortBy);   // created | risk | complexity | size | fresh
 const triageMode = ref(savedTriage.triageMode); // all | unrated | needs-info
 const onlyUnrated = computed(() => triageMode.value === 'unrated');
 const onlyNeedsInfo = computed(() => triageMode.value === 'needs-info');
 
-watch([sortBy, triageMode], () => {
+watch([sortBy, triageMode, selectedSources, selectedGroup], () => {
   try {
     localStorage.setItem(TRIAGE_LS, JSON.stringify({
+      version: 2,
+      sources: selectedSources.value,
+      group: selectedGroup.value,
       sortBy: sortBy.value,
       onlyUnrated: onlyUnrated.value,
       onlyNeedsInfo: onlyNeedsInfo.value,
@@ -809,7 +835,7 @@ watch([sortBy, triageMode], () => {
 
 const triageOf = (t: BoardTask) => analysis.byTask[t.id] || null;
 // Батч: все задачи без оценки и не в очереди — в триаж по одной (очередь на сервере).
-const unrated = computed(() => (data.value?.tasks || []).filter((t) => {
+const unrated = computed(() => allTasks.value.filter((t) => {
   if (!analysisEnabled.value) {
     return false;
   }
@@ -837,45 +863,46 @@ async function analyzeAllUnrated() {
   }
 
   for (const t of list) {
-    try { await analyzeTask(t.id); } catch { /* очередь дедупит и переживает отказ одной задачи */ }
+    try {
+      await analyzeTask(t.id, { source: taskPersonalSource(t.personalSource) });
+    } catch {
+      // Отказ одной задачи не отменяет остальные элементы очереди.
+    }
   }
 }
 
 const myTasks = computed(() => {
   return selectBoardTasks({
-    tasks: data.value?.tasks || [],
+    tasks: sourceTasks.value,
     analysisByTask: analysis.byTask,
     query: q.value,
-    sortBy: analysisEnabled.value ? sortBy.value : 'tracker',
+    sortBy: analysisEnabled.value ? sortBy.value : 'created',
     onlyUnrated: analysisEnabled.value && onlyUnrated.value,
     onlyNeedsInfo: analysisEnabled.value && onlyNeedsInfo.value,
     favoriteOnly: favoriteOnly.value,
-    favoriteTaskIds: favorites.taskIds,
-    newOnly: newOnly.value && seen.ready,
-    seenTaskIds: seen.taskIds,
+    isFavorite: (task: BoardTask) => favoriteState(task).isFavorite(task.id),
+    newOnly: newOnly.value && seenReady.value,
+    isSeen: (task: BoardTask) => !seenState(task).ready || seenState(task).isSeen(task.id),
   });
 });
 const currentFavoriteCount = computed(() => {
-  const ids = new Set(favorites.taskIds.map(String));
-
-  return (data.value?.tasks || []).filter((task) => ids.has(String(task.id))).length;
+  return sourceTasks.value.filter((task) => favoriteState(task).isFavorite(task.id)).length;
 });
 // Счётчик на кнопке фильтра — по всему списку доски, а не по видимой выборке:
 // он отвечает на вопрос «сколько задач я ещё не смотрел», а не «сколько нашлось».
 const currentNewCount = computed(() => {
-  if (!seen.ready) {
-    return 0;
-  }
-
-  return (data.value?.tasks || []).filter((task) => !seen.isSeen(task.id)).length;
+  return sourceTasks.value.filter(isNewTask).length;
 });
 const activeFilterCount = computed(() => [
-  analysisEnabled.value && sortBy.value !== 'tracker',
+  sortBy.value !== 'created',
+  selectedSources.value.length !== 2,
+  !!selectedGroup.value,
   favoriteOnly.value,
   newOnly.value,
   analysisEnabled.value && triageMode.value !== 'all',
 ].filter(Boolean).length);
 const hasListFilters = computed(() => !!q.value.trim()
+  || selectedSources.value.length !== 2 || !!selectedGroup.value
   || favoriteOnly.value || newOnly.value
   || (analysisEnabled.value && triageMode.value !== 'all'));
 
@@ -885,7 +912,9 @@ const hasListFilters = computed(() => !!q.value.trim()
  */
 async function resetTaskFilters() {
   q.value = '';
-  sortBy.value = 'tracker';
+  sortBy.value = 'created';
+  selectedSources.value = ['tracker', 'grigdesk'];
+  selectedGroup.value = '';
   triageMode.value = 'all';
   favoriteOnly.value = false;
   newOnly.value = false;
@@ -893,13 +922,7 @@ async function resetTaskFilters() {
   taskSearch.value?.focus();
 }
 
-const hasFavoriteMatchesBeforeSearch = computed(() => selectBoardTasks({
-  tasks: data.value?.tasks || [],
-  analysisByTask: analysis.byTask,
-  favoriteOnly: true,
-  favoriteTaskIds: favorites.taskIds,
-}).length > 0);
-const toggleFavorite = (task: BoardTask) => favorites.toggle(task.id);
+const toggleFavorite = (task: BoardTask) => favoriteState(task).toggle(task.id);
 // Пагинация по скроллу: рисуем первые N, при докрутке до низа добавляем ещё.
 const PAGE = 40;
 const visibleCount = ref(PAGE);
@@ -911,7 +934,10 @@ const listResetKey = computed(() => boardTaskListResetKey({
   favoriteOnly: favoriteOnly.value,
   newOnly: newOnly.value,
   sortBy: sortBy.value,
-  taskCount: data.value?.tasks?.length || 0,
+  taskCount: allTasks.value.length,
+  sources: selectedSources.value,
+  group: selectedGroup.value,
+  composition: JSON.stringify([board.sourceKey, boardComposition(allTasks.value)]),
 }));
 
 watch(listResetKey, () => {
@@ -939,6 +965,36 @@ function onTasksScroll(e: Event) {
     showMoreTasks();
   }
 }
+
+
+const boardPagesId = `board-pages-${useId()}`;
+const phonePages = computed<BoardPhonePage[]>(() => {
+  const pages: BoardPhonePage[] = [{
+    id: 'mine',
+    label: t('core.boardMinePage'),
+    count: allTasks.value.length,
+    loading: ownTasks.loading && !ownTasks.loaded,
+  }];
+
+  if (showRelated.value) {
+    pages.push({
+      id: 'related',
+      label: t('core.boardRelatedPage'),
+      count: (data.value?.toReview?.length ?? 0) + (data.value?.created?.length ?? 0),
+      loading: false,
+    });
+  }
+
+  return pages;
+});
+const {
+  phone: phoneBoard,
+  activePage: activeBoardPage,
+  track: boardPagesTrack,
+  selectPage: selectBoardPage,
+  onScroll: onBoardPagesScroll,
+} = useBoardPhonePages(phonePages);
+
 
 
 let ticker: ReturnType<typeof setInterval> | null = null;
@@ -1030,26 +1086,6 @@ onUnmounted(() => {
   min-width: 0;
   margin: 0;
   color: var(--ink);
-}
-.own-tasks-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0;
-  list-style: none;
-}
-.own-tasks-list li {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.own-task-details {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  min-width: 0;
 }
 
 .board {
@@ -1555,14 +1591,13 @@ onUnmounted(() => {
   }
   .board-pages::-webkit-scrollbar { display: none; }
   .board-pages > .cols { display: contents; }
-  .board.has-board-pages .colhead .h,
-  .board.has-board-pages .col.secondary > .h,
-  .board.has-board-pages .own-tasks > .h { display: none; }
   .board.has-board-pages .colhead .search,
   .board.has-board-pages .colhead .filter-toggle { grid-row: 1; }
   .board-heading { margin: 0 calc(var(--page-gutter) * -1); }
   .cols { gap: 16px; }
-  .col.primary, .col.secondary, .own-tasks {
+  .board.has-board-pages .colhead .h,
+  .board.has-board-pages .col.secondary > .h { display: none; }
+  .col.primary, .col.secondary {
     flex-basis: 100%;
     width: 100%;
     height: 100%;
@@ -1575,39 +1610,11 @@ onUnmounted(() => {
     border-radius: 0;
     background: transparent;
   }
-  .own-tasks {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .colhead .h, .col.secondary > .h, .own-tasks > .h {
+  .colhead .h, .col.secondary > .h {
     margin: 0;
     color: var(--ink-mid);
     font-size: 14px;
     line-height: 20px;
-  }
-  .own-tasks-list {
-    margin: 0;
-    gap: 0;
-  }
-  .own-tasks-list li {
-    display: grid;
-    gap: 6px;
-    padding: 10px 12px;
-  }
-  .own-tasks-list li + li {
-    border-top: 1px solid var(--line);
-  }
-  .own-task-meta {
-    width: 100%;
-  }
-  .own-task-meta .task-internal-flag {
-    padding: 0;
-    background: transparent;
-    color: inherit;
-  }
-  .own-task-state {
-    font-size: 12px;
   }
   [data-role='board-snapshot-status'] {
     margin: 0;
@@ -1628,7 +1635,7 @@ onUnmounted(() => {
     padding: 8px 12px;
     border-radius: 0;
   }
-  .tasks .trow .ttext { grid-column: 1 / 3; grid-row: 1; }
+  .tasks .trow .ttext { grid-column: 1 / 3; grid-row: 1; min-height: 44px; }
   .tasks .trow > :deep(.favbtn) { grid-column: 3; grid-row: 1; margin-top: 0; }
   .tasks .trow .task-triage { grid-column: 1; grid-row: 2; }
   .tasks .trow .ttime {

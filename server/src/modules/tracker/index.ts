@@ -49,8 +49,7 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
   // Новые клиенты фиксируют поколение при подготовке мутации.
   // Legacy HTTP и CLI без заголовка продолжают обращаться к текущему выбору.
   const assertGeneration = (request: FastifyRequest) => {
-    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
-      || !request.url.startsWith('/api/tracker/')) {
+    if (!request.url.startsWith('/api/tracker/')) {
       return;
     }
 
@@ -117,9 +116,22 @@ async function trackerModule(fastify: FastifyInstance, opts: TrackerModuleOption
     }
 
     try {
-      return await withTrackerRequestRead(request, reply,
+      assertGeneration(request);
+
+      const context = (tracker as TrackerFacade).captureContext?.();
+      const result = await withTrackerRequestRead(request, reply,
         (options) => taskWithDiscussion(id, options));
+
+      if (context) {
+        (tracker as TrackerFacade).assertContext(context);
+      }
+
+      return result;
     } catch (err) {
+      if (err instanceof TrackerError && err.status === 409) {
+        return reply.code(409).send({ error: err.code, message: err.message });
+      }
+
       return reply.code(502).send({ error: 'tracker_error', message: failureText(err) });
     }
   });

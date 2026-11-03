@@ -15,7 +15,7 @@ interface AnalysisPluginsSource {
  * собирается за неё браться, и следить за ней он всё равно будет. Настройка полки
  * это отключает, а её отказ не отменяет уже принятую очередью оценку.
  */
-async function shelveAnalyzed(id: string | number): Promise<void> {
+async function shelveAnalyzed(id: string | number, source: 'b24' | 'tracker' | 'grigdesk'): Promise<void> {
   const plugins = usePluginsStore() as unknown as AnalysisPluginsSource;
 
   if (!plugins.enabled('shelf') || plugins.byId('shelf')?.values?.autoAddOnAnalysis === false) {
@@ -23,7 +23,7 @@ async function shelveAnalyzed(id: string | number): Promise<void> {
   }
 
   try {
-    await useTaskShelfStore().autoAdd(id);
+    await useTaskShelfStore().autoAdd(id, { source: source === 'grigdesk' ? 'grigdesk' : 'tracker' });
   } catch {
     /* запуск оценки уже принят */
   }
@@ -36,7 +36,7 @@ async function shelveAnalyzed(id: string | number): Promise<void> {
  */
 export async function analyzeTask(
   id: string | number,
-  { source = 'b24' }: { source?: 'b24' | 'grigdesk' } = {},
+  { source = 'b24' }: { source?: 'b24' | 'tracker' | 'grigdesk' } = {},
 ): Promise<AnalysisQueueResponse> {
   const store = useAnalysisStore();
 
@@ -50,9 +50,7 @@ export async function analyzeTask(
 
   store.markQueued(id);
 
-  if (source === 'b24') {
-    await shelveAnalyzed(id);
-  }
+  await shelveAnalyzed(id, source);
 
   scheduleAnalysisPolling();
 

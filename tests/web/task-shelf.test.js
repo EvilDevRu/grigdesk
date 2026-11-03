@@ -504,6 +504,10 @@ async function reactiveStoreFixture({
      * Управляемая задержка ответа позволяет проверить поздние снимки и обновления.
      */
     async get(url) {
+        if (url === '/api/grigdesk-tasks/task-shelf') {
+          return serverSnapshot('grigdesk', 0, []);
+        }
+
         if (/^\/api\/tracker\/task\/\d+$/.test(url)) {
           harness.detailGetCalls += 1;
           harness.apiCalls.push({ method: 'GET', url });

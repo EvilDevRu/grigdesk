@@ -28,8 +28,8 @@ test('SC-01: только известная поверхность и кано�
       options: {},
     },
     {
-      kind: 'task', 
-      id: '42', 
+      kind: 'task',
+      id: '42',
       url: 'https://example.org'
     },
   ]) {
@@ -149,5 +149,25 @@ test('TC-02: закрытый контракт не принимает лишн�
 
   assert.equal(parseMainRequest({
     destination: 'task-dialog', target: { kind: 'tool', id: 'code' },
+  }), null);
+});
+
+test('SC-SOURCE: source-aware target проходит URL и main request без потери источника', () => {
+  const source = `grigdesk-b24@${'a'.repeat(64)}`;
+  const target = {
+    kind: 'task',
+    id: '42',
+    source
+  };
+
+  assert.deepEqual(parseSurfaceTarget(target), target);
+  assert.deepEqual(surfaceTargetFromUrl(surfaceUrl('http://127.0.0.1:8140', target),
+    'http://127.0.0.1:8140'), target);
+  assert.deepEqual(parseMainRequest({ destination: 'task-dialog', target }),
+    { destination: 'task-dialog', target });
+  assert.equal(parseSurfaceTarget({
+    kind: 'task',
+    id: '42',
+    source: 'grigdesk'
   }), null);
 });

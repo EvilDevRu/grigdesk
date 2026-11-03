@@ -198,6 +198,7 @@ test('TWS-01: полка карточки не ходит в портал и н�
       version: 1,
       type: 'shelf-acknowledge',
       taskId: '11',
+      source: 'tracker',
     },
   ]);
 });

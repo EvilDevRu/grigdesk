@@ -19,7 +19,10 @@ interface TaskDocument {
   tasks: GrigdeskTask[];
 }
 
-type TaskDraft = Omit<GrigdeskTask, 'id' | 'source' | 'createdAt' | 'sourceUrl'> & { clientOrigin: string };
+type TaskDraft = Omit<GrigdeskTask, 'id' | 'source' | 'createdAt' | 'sourceUrl'> & {
+  clientOrigin: string;
+  sourced?: boolean;
+};
 
 /**
  * Только отсутствие файла означает новое хранилище.
@@ -115,12 +118,12 @@ export class GrigdeskTaskStore {
       const id = await reserveTaskNumber(
         this.config, document.nextId, document.tasks.map((task) => task.id), this.tracker,
       );
-      const { clientOrigin, ...fields } = draft;
+      const { clientOrigin, sourced, ...fields } = draft;
       const task: GrigdeskTask = {
         ...fields,
         id,
         source: 'grigdesk',
-        sourceUrl: `${clientOrigin}/#/board?openTask=${id}`,
+        sourceUrl: `${clientOrigin}/#/board?openTask=${sourced ? encodeURIComponent(`grigdesk:${id}`) : id}`,
         createdAt: new Date().toISOString(),
       };
       const revision = document.revision + 1;

@@ -1,5 +1,7 @@
 # Конвейер
 
+- [Подтверждённый источник запуска и совместимая выдача конвейера](task-source-index.md)
+
 - [Codex: rc=0 без terminal status, noResult маршрута и stage-result](codex-no-result-contract.md)
 
 - [Offline-граница DeepSeek: metadata как provider, код 126 и denylist](deepseek-offline-guard.md)

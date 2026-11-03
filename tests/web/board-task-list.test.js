@@ -187,3 +187,22 @@ test('LIST-10: «новые» складываются с поиском, изб
     onlyUnrated: true,
   }), []);
 });
+
+test('даты создания образуют стабильный порядок, недатированные строки остаются в своём порядке', () => {
+  const rows = [
+    { id: 1, createdAt: 'плохая дата' },
+    { id: 2, createdAt: '2026-11-02T10:00:00+07:00' },
+    { id: 3 },
+    { id: 4, createdAt: '2026-11-02T03:00:00Z' },
+    { id: 5, createdAt: '2026-11-03T00:00:00Z' },
+  ];
+  const before = structuredClone(rows);
+
+  assert.deepEqual(selectBoardTasks({ tasks: rows }).map((row) => row.id), [5, 2, 4, 1, 3]);
+  assert.deepEqual(rows, before);
+  assert.deepEqual(selectBoardTasks({ tasks: rows, sources: [] }), []);
+  assert.notEqual(boardTaskListResetKey({ sources: ['tracker'], composition: 'a' }),
+    boardTaskListResetKey({ sources: ['tracker'], composition: 'b' }));
+  assert.equal(boardTaskListResetKey({ sources: ['grigdesk', 'tracker'] }),
+    boardTaskListResetKey({ sources: ['tracker', 'grigdesk'] }));
+});

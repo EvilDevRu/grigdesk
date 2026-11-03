@@ -52,163 +52,45 @@ async function fixture(t, options = {}) {
   });
 }
 
-test('BOARD-PAGES: кнопки и свайп выбирают раздел, формы остаются смонтированы', async (t) => {
-  const { wrapper, browser, flushPromises, calls } = await fixture(t);
+test('BOARD-PAGES: общий список и внешние роли сохраняют swipe, aria и формы', async (t) => {
+  const { wrapper, browser, flushPromises } = await fixture(t);
 
   browser.happyDOM.setWindowSize({ width: 390, height: 844 });
   await flushPromises();
-  assert.equal(wrapper.findAll('.board-page-nav [role="tab"]').length, 3);
-  assert.equal(wrapper.find('.board-heading .ui-pane-header__meta .ui-icon-button').exists(), true);
-  assert.equal(wrapper.find('.board-heading .ui-pane-header__actions .ui-icon-button').exists(), false);
-  assert.equal(wrapper.findAll('.board-heading .ui-icon-button').length, 1);
 
   const track = wrapper.get('.board-pages');
   const primary = wrapper.get('.col.primary').element;
-  const search = wrapper.get('.col.primary input[type="search"]');
 
-  Object.defineProperty(track.element, 'clientWidth', {
-    value: 390,
-    configurable: true,
-  });
-  await search.setValue('Первая');
-  primary.scrollTop = 180;
-  assert.equal(wrapper.findAll('.col.primary .trow').length, 1);
-
+  Object.defineProperty(track.element, 'clientWidth', { value: 390, configurable: true });
+  assert.equal(wrapper.findAll('.board-page-nav [role="tab"]').length, 2);
+  assert.equal(wrapper.find('[data-board-page-tab="own"]').exists(), false);
+  assert.equal(wrapper.findAll('.col.primary .trow').length, 3);
+  await wrapper.get('.col.primary input[type="search"]').setValue('Своя');
   await wrapper.get('[data-board-page-tab="related"]').trigger('click');
-  assert.equal(track.element.scrollLeft, 390);
-  assert.equal(wrapper.get('[data-board-page-tab="related"]').attributes('aria-selected'), 'true');
   assert.equal(primary.hasAttribute('inert'), true);
-  await wrapper.get('.col.secondary input[type="search"]').setValue('Связанная');
-
-  await wrapper.get('[data-board-page-tab="own"]').trigger('click');
-  assert.equal(track.element.scrollLeft, 780);
+  assert.equal(track.element.scrollLeft, 390);
   track.element.scrollLeft = 0;
   await track.trigger('scroll');
-
-  assert.equal(wrapper.get('[data-board-page-tab="mine"]').attributes('aria-selected'), 'true');
-  assert.equal(wrapper.get('.col.primary').element === primary, true);
-  assert.equal(primary.scrollTop, 180);
-  assert.equal(search.element.value, 'Первая');
-  assert.equal(wrapper.get('.col.secondary input[type="search"]').element.value, 'Связанная');
-  assert.deepEqual(calls.opened, []);
-
-  await wrapper.get('[data-board-page-tab="own"]').trigger('click');
-  browser.happyDOM.setWindowSize({ width: 1280, height: 900 });
-  await flushPromises();
-  assert.equal(wrapper.find('.board-page-nav').exists(), false);
-  assert.equal(wrapper.find('.board-heading .ui-pane-header__actions .ui-icon-button').exists(), true);
-  assert.equal(wrapper.findAll('.board-heading .ui-icon-button').length, 1);
   assert.equal(primary.hasAttribute('inert'), false);
-  assert.equal(wrapper.get('.col.primary').element === primary, true);
-
-  browser.happyDOM.setWindowSize({ width: 390, height: 844 });
-  await flushPromises();
-  assert.equal(wrapper.get('[data-board-page-tab="own"]').attributes('aria-selected'), 'true');
-  assert.equal(track.element.scrollLeft, 780);
+  assert.equal(wrapper.get('.col.primary input[type="search"]').element.value, 'Своя');
+  assert.equal(wrapper.findAll('.col.primary .trow').length, 1);
 });
 
-test('BOARD-PAGES: холодная загрузка выбирает основной список после первого ответа', async (t) => {
-  const { wrapper, browser, flushPromises, stores } = await fixture(t, { pending: true });
+test('BOARD-PAGES: own виден при загрузке и после отключения внешнего трекера', async (t) => {
+  const { wrapper, browser, flushPromises } = await fixture(t, { pending: true });
 
   browser.happyDOM.setWindowSize({ width: 390, height: 844 });
   await flushPromises();
-  assert.equal(wrapper.find('.board-overview [data-ui-loading]').exists(), false);
-  assert.equal(wrapper.findAll('.board-page-nav [role="tab"]').length, 3);
-  assert.equal(wrapper.get('[data-board-page-tab="mine"]').attributes('aria-selected'), 'true');
-  assert.equal(wrapper.get('.own-tasks').element.hasAttribute('inert'), true);
-  assert.equal(wrapper.find('.board-pages .board-phone-loading').exists(), true);
-  assert.equal(wrapper.find('.board-pages .summary').exists(), false);
-  assert.equal(wrapper.find('.board-overview [data-role="board-snapshot-status"]').exists(), false);
-  assert.equal(wrapper.get('.board-phone-footer [data-role="board-snapshot-status"]').text(), 'Загрузка');
-
-  stores.board().data = {
-    tasks: [{
-      id: 31,
-      title: 'Загруженная задача',
-    }],
-    toReview: [],
-    created: [],
-    widgets: [],
-  };
-  await flushPromises();
-  assert.equal(wrapper.get('[data-board-page-tab="mine"]').attributes('aria-selected'), 'true');
-  assert.equal(wrapper.get('.col.primary').element.hasAttribute('inert'), false);
-  assert.equal(wrapper.findAll('.board-page-nav [role="tab"]').length, 3);
-  assert.equal(wrapper.get('.col.secondary .empty').exists(), true);
-  assert.equal(wrapper.get('#board-review-tab').attributes('aria-selected'), 'true');
-  assert.equal(wrapper.get('#board-related-list').attributes('aria-labelledby'), 'board-review-tab');
-  assert.equal(wrapper.find('.board-overview [data-role="board-snapshot-status"]').exists(), false);
-  assert.equal(wrapper.find('.board-phone-footer time').exists(), true);
-});
-
-test('BOARD-PAGES: ответ трекера не уводит с внутренних задач, выбранных во время загрузки', async (t) => {
-  const { wrapper, browser, flushPromises, stores } = await fixture(t, { pending: true });
-
-  browser.happyDOM.setWindowSize({ width: 390, height: 844 });
-  await flushPromises();
-
-  const track = wrapper.get('.board-pages');
-  const own = wrapper.get('.own-tasks').element;
-
-  Object.defineProperty(track.element, 'clientWidth', {
-    value: 390,
-    configurable: true,
-  });
-  await wrapper.get('[data-board-page-tab="own"]').trigger('click');
-  own.scrollTop = 120;
-  stores.board().data = {
-    tasks: [],
-    toReview: [],
-    created: [{
-      id: 21,
-      title: 'Связанная задача',
-    }],
-    widgets: [],
-  };
-  await flushPromises();
-  assert.equal(wrapper.get('[data-board-page-tab="own"]').attributes('aria-selected'), 'true');
-  assert.equal(wrapper.get('.own-tasks').element === own, true);
-  assert.equal(own.scrollTop, 120);
-  assert.equal(track.element.scrollLeft, 780);
-  assert.equal(wrapper.find('.board-phone-loading').exists(), false);
-});
-
-test('BOARD-PAGES: пустой контроль сохраняет вкладку, отключение трекера выбирает доступный', async (t) => {
-  const { wrapper, browser, flushPromises, stores } = await fixture(t);
-
-  browser.happyDOM.setWindowSize({ width: 390, height: 844 });
-  await flushPromises();
-  assert.equal(wrapper.find('.board-page-nav').exists(), true);
-
-  const track = wrapper.get('.board-pages');
-
-  Object.defineProperty(track.element, 'clientWidth', {
-    value: 390,
-    configurable: true,
-  });
-  await wrapper.get('[data-board-page-tab="related"]').trigger('click');
-  stores.board().data.created.push({
-    id: 22,
-    title: 'Ещё поручение',
-    timerElapsed: 0,
-  });
-  await flushPromises();
-  assert.equal(wrapper.get('[data-board-page-tab="related"]').attributes('aria-selected'), 'true');
-
-  stores.board().data.created = [];
-  await flushPromises();
-  assert.equal(wrapper.findAll('.board-page-nav [role="tab"]').length, 3);
-  assert.equal(wrapper.get('[data-board-page-tab="related"]').attributes('aria-selected'), 'true');
-  assert.equal(track.element.scrollLeft, 390);
+  assert.equal(wrapper.findAll('.col.primary .trow').length, 1);
+  assert.equal(wrapper.find('.board-page-nav').exists(), false);
 
   const ownStore = wrapper.vm.$pinia._s.get('grigdesk-tasks');
 
-  assert.ok(ownStore);
   ownStore.trackerConfigured = false;
   await flushPromises();
-  assert.equal(wrapper.find('.board-page-nav').exists(), false);
-  assert.equal(wrapper.get('.own-tasks').element.hasAttribute('inert'), false);
-  assert.equal(track.element.scrollLeft, 0);
+  assert.equal(wrapper.find('.col.primary').exists(), true);
+  assert.equal(wrapper.find('.col.secondary').exists(), false);
+  assert.equal(wrapper.find('.tracker-setup-banner').exists(), true);
 });
 
 test('BOARD-PAGES: CSS оставляет вертикальную прокрутку внутри страницы и desktop-раскладку', async (t) => {
@@ -237,7 +119,7 @@ test('BOARD-PAGES: CSS оставляет вертикальную прокру�
   assert.equal(css('.board-pages').scrollSnapType, 'x mandatory');
   assert.equal(css('.col.primary').overflowY, 'auto');
   assert.equal(css('.col.secondary').overflowY, 'auto');
-  assert.equal(css('.own-tasks').overflowY, 'auto');
+  assert.equal(wrapper.find('.own-tasks').exists(), false);
   assert.equal(css('.board-heading').marginTop, '0px');
   assert.equal(css('.board-heading .ui-pane-header__layout').paddingRight, '12px');
   assert.notEqual(css('.board-heading .ui-icon-button').marginLeft, 'calc(10px + 12px)');

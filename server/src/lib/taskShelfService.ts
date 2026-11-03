@@ -1,3 +1,5 @@
+import { personalWriteGuard, resolvePersonalScope, validateOwnPersonalTasks } from './taskPersonalScope.ts';
+import type { PersonalScopeOptions, OwnTaskReader, PersonalIdentitySource } from './taskPersonalScope.ts';
 import type { TrackerReadOptions } from './trackers/contract.ts';
 // Предметный слой полки: scope всегда выводится из текущей портальной сессии,
 // а клиент получает только непрозрачный хеш и полный server-confirmed снимок.
@@ -6,7 +8,7 @@ import type { TrackerIdentity } from './trackers/accountScope.ts';
 import type { ShelfSnapshot, TaskShelfStore } from './taskShelfStore.ts';
 import type { ShelfState } from '../../../shared/trackers/shelfContracts.ts';
 
-export interface TaskShelfIdentitySource {
+export interface TaskShelfIdentitySource extends PersonalIdentitySource {
   accountIdentity(options?: TrackerReadOptions): Promise<TrackerIdentity | null>;
 }
 
@@ -43,21 +45,30 @@ export class TaskShelfService {
 
   tracker: TaskShelfIdentitySource;
 
-  constructor({ store, tracker }: { store: TaskShelfStore; tracker: TaskShelfIdentitySource }) {
+  readonly ownTasks?: OwnTaskReader;
+
+  constructor({ store, tracker, ownTasks }: {
+    store: TaskShelfStore;
+    tracker: TaskShelfIdentitySource;
+    ownTasks?: OwnTaskReader
+  }) {
     this.store = store;
     this.tracker = tracker;
+    this.ownTasks = ownTasks;
   }
 
   /**
    * Scope берётся только из подтверждённой серверной identity.
    * Signal отменяет чтение; локальные мутации сохраняют прежнюю доставку.
    */
-  async _scope(options: TrackerReadOptions = {}): Promise<string> {
+  async _scope(readOptions: TrackerReadOptions = {}, options: PersonalScopeOptions = {}): Promise<string> {
     try {
-      const identity = await this.tracker.accountIdentity(options);
-
-      return trackerAccountScope(identity);
+      return await resolvePersonalScope(this.tracker, options, readOptions);
     } catch (error) {
+      if ((error as { status?: number }).status === 409) {
+        throw error;
+      }
+
       throw new TaskShelfIdentityError(undefined, error);
     }
   }
@@ -66,19 +77,42 @@ export class TaskShelfService {
    * Чтение полки снимает только своего подписчика при закрытии HTTP-ответа.
    * Состав снимка и не перечисляемый changed сохраняются общим withScope.
    */
-  async list(options: TrackerReadOptions = {}): Promise<TaskShelfResult> {
-    const scope = await this._scope(options);
+  async list(
+    options: TrackerReadOptions = {},
+    sourceOptions: PersonalScopeOptions = {},
+  ): Promise<TaskShelfResult> {
+    const scope = await this._scope(options, sourceOptions);
 
     return withScope(scope, await this.store.list(scope));
   }
 
-  async put(taskId: unknown, value: unknown): Promise<TaskShelfResult> {
-    const scope = await this._scope();
-    return withScope(scope, await this.store.put(scope, taskId, value));
+  /**
+   * Локальная мутация проверяет источник и собственную запись до очереди сохранения.
+   * Проверка поколения повторяется внутри транзакции, не затрагивая own-пространство.
+   */
+  async put(taskId: unknown, value: unknown, options: PersonalScopeOptions = {}): Promise<TaskShelfResult> {
+    const beforeWrite = personalWriteGuard(this.tracker, options);
+    const scope = await this._scope({}, options);
+
+    if (options.source === 'grigdesk') {
+      await validateOwnPersonalTasks([taskId], this.ownTasks, true);
+    }
+
+    return withScope(scope, await this.store.put(scope, taskId, value, beforeWrite));
   }
 
-  async remove(taskId: unknown): Promise<TaskShelfResult> {
-    const scope = await this._scope();
-    return withScope(scope, await this.store.remove(scope, taskId));
+  /**
+   * Локальная мутация проверяет источник и собственную запись до очереди сохранения.
+   * Проверка поколения повторяется внутри транзакции, не затрагивая own-пространство.
+   */
+  async remove(taskId: unknown, options: PersonalScopeOptions = {}): Promise<TaskShelfResult> {
+    const beforeWrite = personalWriteGuard(this.tracker, options);
+    const scope = await this._scope({}, options);
+
+    if (options.source === 'grigdesk') {
+      await validateOwnPersonalTasks([taskId], this.ownTasks, false);
+    }
+
+    return withScope(scope, await this.store.remove(scope, taskId, beforeWrite));
   }
 }

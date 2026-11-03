@@ -1,3 +1,4 @@
+import { setTrackerMutationGeneration } from '../shared/trackerMutation.ts';
 import { defineStore } from 'pinia';
 import { useBoardStore } from './board.ts';
 
@@ -83,6 +84,7 @@ export const useTrackersStore = defineStore('trackers', {
         }
 
         this.catalog = raw as unknown as TrackerCatalog;
+        setTrackerMutationGeneration(this.catalog.revision);
         this.legacy = false;
         this.error = '';
       } catch (error) {
@@ -102,6 +104,7 @@ export const useTrackersStore = defineStore('trackers', {
      * Поздний ответ предыдущего запроса не возвращает их после смены поколения.
      */
     invalidate() {
+      setTrackerMutationGeneration(null);
       this.epoch += 1;
       this.catalog = null;
       this.legacy = false;

@@ -1,3 +1,4 @@
+import { GrigdeskTaskStore } from './lib/grigdeskTasks/store.ts';
 // Ядро сервера GrigDesk. Явная сборка: конфиг → адаптеры → плагины → модули → listen.
 // Никакой автозагрузки (YAGNI): модули регистрируются списком, зависимости передаём явно.
 import './startDataHome.ts';
@@ -1020,11 +1021,24 @@ async function build(desktopParent: DesktopParent | null) {
   });
 
   const taskFavoritesStore = new TaskFavoritesStore({ filePath: config.taskFavoritesPath });
-  const taskFavorites = new TaskFavoritesService({ store: taskFavoritesStore, tracker });
+  const ownPersonalTasks = new GrigdeskTaskStore({ config });
+  const taskFavorites = new TaskFavoritesService({
+    store: taskFavoritesStore,
+    tracker,
+    ownTasks: ownPersonalTasks
+  });
   const taskShelfStore = new TaskShelfStore({ filePath: config.taskShelfPath });
-  const taskShelf = new TaskShelfService({ store: taskShelfStore, tracker });
+  const taskShelf = new TaskShelfService({
+    store: taskShelfStore,
+    tracker,
+    ownTasks: ownPersonalTasks
+  });
   const taskSeenStore = new TaskSeenStore({ filePath: config.taskSeenPath });
-  const taskSeen = new TaskSeenService({ store: taskSeenStore, tracker });
+  const taskSeen = new TaskSeenService({
+    store: taskSeenStore,
+    tracker,
+    ownTasks: ownPersonalTasks
+  });
   const analyzer = new Analyzer({
     config,
     claudeAuth,

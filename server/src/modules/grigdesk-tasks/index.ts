@@ -56,9 +56,9 @@ async function grigdeskTasksModule(fastify: FastifyInstance, options: GrigdeskTa
       return publicError(reply, error);
     }
   });
-  fastify.post('/api/grigdesk-tasks', async (request, reply) => {
+  fastify.post<{ Querystring: { sources?: string } }>('/api/grigdesk-tasks', async (request, reply) => {
     try {
-      const result = await service.create(request.body);
+      const result = await service.create(request.body, { sources: request.query.sources === '1' });
 
       try {
         await fastify.sse?.broadcast?.('grigdesk-tasks-changed', { revision: result.revision });

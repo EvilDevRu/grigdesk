@@ -1,10 +1,12 @@
+import { personalWriteGuard, resolvePersonalScope, validateOwnPersonalTasks } from './taskPersonalScope.ts';
+import type { PersonalScopeOptions, OwnTaskReader } from './taskPersonalScope.ts';
 import type { TrackerReadOptions } from './trackers/contract.ts';
 // Предметный слой избранного: браузер не передаёт account scope, он выводится
 // из текущего трекера и пользователя и возвращается только как opaque hash.
 import { trackerAccountScope } from './trackers/accountScope.ts';
 import type { TrackerIdentity } from './trackers/accountScope.ts';
 import type { TaskFavoritesStore, FavoritesScope } from './taskFavoritesStore.ts';
-import type { TrackerFacade } from './trackers/facade.ts';
+import type { PersonalIdentitySource } from './taskPersonalScope.ts';
 
 export class TaskFavoritesIdentityError extends Error {
   readonly code = 'B24_IDENTITY_UNAVAILABLE';
@@ -31,48 +33,82 @@ export class TaskFavoritesService {
   readonly store: TaskFavoritesStore;
 
   // Фасад трекера: из него берётся текущая учётная запись, а не из запроса браузера.
-  readonly tracker: Pick<TrackerFacade, 'accountIdentity'>;
+  readonly tracker: PersonalIdentitySource;
 
-  constructor({ store, tracker }: {
+  readonly ownTasks?: OwnTaskReader;
+
+  constructor({ store, tracker, ownTasks }: {
+    ownTasks?: OwnTaskReader;
     store: TaskFavoritesStore;
-    tracker: Pick<TrackerFacade, 'accountIdentity'>;
+    tracker: PersonalIdentitySource;
   }) {
     this.store = store;
     this.tracker = tracker;
+    this.ownTasks = ownTasks;
   }
 
   /**
    * Scope берётся только из подтверждённой серверной identity.
    * Signal отменяет чтение; локальные мутации сохраняют прежнюю доставку.
    */
-  private async _scope(options: TrackerReadOptions = {}): Promise<string> {
-    let identity: Awaited<ReturnType<TrackerFacade['accountIdentity']>>;
-
+  async _scope(readOptions: TrackerReadOptions = {}, options: PersonalScopeOptions = {}): Promise<string> {
     try {
-      identity = await this.tracker.accountIdentity(options);
+      return await resolvePersonalScope(this.tracker, options, readOptions);
     } catch (error) {
+      if ((error as { status?: number }).status === 409) {
+        throw error;
+      }
+
       throw new TaskFavoritesIdentityError(undefined, error);
     }
-    return favoriteScopeFor(identity);
   }
 
   /**
    * GET может снять своего подписчика холодного определения scope.
    * Локальные мутации используют прежний вызов _scope без HTTP-отмены.
    */
-  async list(options: TrackerReadOptions = {}): Promise<FavoritesScope & { scope: string }> {
-    const scope = await this._scope(options);
+  async list(
+    options: TrackerReadOptions = {},
+    sourceOptions: PersonalScopeOptions = {},
+  ): Promise<FavoritesScope & { scope: string }> {
+    const scope = await this._scope(options, sourceOptions);
 
     return { scope, ...await this.store.list(scope) };
   }
 
-  async add(taskId: unknown): Promise<FavoritesScope & { scope: string }> {
-    const scope = await this._scope();
-    return { scope, ...await this.store.add(scope, taskId) };
+  /**
+   * Локальная мутация проверяет источник и собственную запись до очереди сохранения.
+   * Проверка поколения повторяется внутри транзакции, не затрагивая own-пространство.
+   */
+  async add(
+    taskId: unknown,
+    options: PersonalScopeOptions = {},
+  ): Promise<FavoritesScope & { scope: string }> {
+    const beforeWrite = personalWriteGuard(this.tracker, options);
+    const scope = await this._scope({}, options);
+
+    if (options.source === 'grigdesk') {
+      await validateOwnPersonalTasks([taskId], this.ownTasks, true);
+    }
+
+    return { scope, ...await this.store.add(scope, taskId, beforeWrite) };
   }
 
-  async remove(taskId: unknown): Promise<FavoritesScope & { scope: string }> {
-    const scope = await this._scope();
-    return { scope, ...await this.store.remove(scope, taskId) };
+  /**
+   * Локальная мутация проверяет источник и собственную запись до очереди сохранения.
+   * Проверка поколения повторяется внутри транзакции, не затрагивая own-пространство.
+   */
+  async remove(
+    taskId: unknown,
+    options: PersonalScopeOptions = {},
+  ): Promise<FavoritesScope & { scope: string }> {
+    const beforeWrite = personalWriteGuard(this.tracker, options);
+    const scope = await this._scope({}, options);
+
+    if (options.source === 'grigdesk') {
+      await validateOwnPersonalTasks([taskId], this.ownTasks, false);
+    }
+
+    return { scope, ...await this.store.remove(scope, taskId, beforeWrite) };
   }
 }

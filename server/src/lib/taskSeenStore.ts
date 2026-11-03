@@ -107,6 +107,8 @@ export class TaskSeenStore {
 
   private _writeSeq: number;
 
+  private _baselines = new Map<string, Set<string>>();
+
   constructor({ filePath }: { filePath: string }) {
     this.filePath = filePath;
     this._chain = Promise.resolve();
@@ -184,13 +186,52 @@ export class TaskSeenStore {
    * иначе первое же включение объявило бы новыми все давние задачи доски. Обычная пометка
    * из карточки задачи признак НЕ трогает — она может прийти раньше первой загрузки доски.
    */
-  async markSeen(scope: unknown, taskIds: unknown, { baseline = false } = {}): Promise<SeenScope> {
-    const ids = [...new Set((Array.isArray(taskIds) ? taskIds : [taskIds])
+  async markSeen(scope: unknown, taskIds: unknown, {
+    baseline = false, initializeOnce = false, baselineId = undefined, beforeWrite,
+  }: {
+    baseline?: boolean;
+    initializeOnce?: boolean;
+    baselineId?: string;
+    beforeWrite?: () => void
+  } = {}): Promise<SeenScope> {
+    let ids = [...new Set((Array.isArray(taskIds) ? taskIds : [taskIds])
       .map(normalizeSeenTaskId))];
     const key = String(scope);
+
     return this._enqueue(() => {
+      beforeWrite?.();
+
       const document = this._read();
       const current = document.scopes[key] || { revision: 0, initialized: false, taskIds: [] };
+
+      if (initializeOnce && (baseline || baselineId)) {
+        if (current.initialized) {
+          return this._snapshot(document, key);
+        }
+
+        if (baselineId) {
+          const batchKey = `${key}:${baselineId}`;
+          const batch = this._baselines.get(batchKey) ?? new Set<string>();
+
+          for (const id of ids) {
+            batch.add(id);
+          }
+
+          if (!baseline) {
+            if (this._baselines.size >= 32 && !this._baselines.has(batchKey)) {
+              this._baselines.delete(this._baselines.keys().next().value!);
+            }
+
+            this._baselines.set(batchKey, batch);
+
+            return this._snapshot(document, key);
+          }
+
+          ids = [...batch];
+          this._baselines.delete(batchKey);
+        }
+      }
+
       const known = new Set(current.taskIds);
       const added = ids.filter((id) => !known.has(id));
       const initialized = current.initialized || !!baseline;

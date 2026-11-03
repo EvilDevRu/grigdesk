@@ -37,7 +37,7 @@ export interface ShellState {
   localAvailable: boolean;
   serverApi: ApiVersion | null;
   appApi: ApiVersion;
-  capabilities: ('scan' | 'save' | 'unlock' | 'windows' | 'selectDirectory' | 'browser'
+  capabilities: ('scan' | 'save' | 'unlock' | 'windows' | 'taskSources' | 'selectDirectory' | 'browser'
     | 'applicationLauncher')[];
 }
 

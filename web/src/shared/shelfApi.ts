@@ -1,3 +1,5 @@
+import type { TaskPersonalSource } from '../../../shared/tasks/taskReference.ts';
+import { trackerMutationOptions } from './trackerMutation.ts';
 import { api } from './apiClient.ts';
 import { parseShelfEntrySnapshot, parseShelfState } from '../../../shared/trackers/shelfContracts.ts';
 import type { ShelfPutInput, ShelfReason, ShelfState } from '../../../shared/trackers/shelfContracts.ts';
@@ -11,8 +13,10 @@ export interface ShelfPutRequest {
   createIfMissing: boolean;
 }
 
-function shelfUrl(taskId: string): string {
-  return `/api/tracker/task-shelf/${encodeURIComponent(taskId)}`;
+function shelfUrl(taskId: string, source: TaskPersonalSource): string {
+  const prefix = source === 'grigdesk' ? 'grigdesk-tasks' : 'tracker';
+
+  return `/api/${prefix}/task-shelf/${encodeURIComponent(taskId)}`;
 }
 
 /**
@@ -21,26 +25,33 @@ function shelfUrl(taskId: string): string {
  * Поэтому контракт проверяется и на чтении, и на каждой мутации.
  */
 export const shelfApi = {
-  async list(): Promise<ShelfState> {
-    const value: unknown = await api.get('/api/tracker/task-shelf');
+  async list(source: TaskPersonalSource = 'tracker'): Promise<ShelfState> {
+    const prefix = source === 'grigdesk' ? 'grigdesk-tasks' : 'tracker';
+    const value: unknown = await api.get(`/api/${prefix}/task-shelf`);
 
     return parseShelfState(value);
   },
 
-  async put(taskId: string, request: ShelfPutRequest): Promise<ShelfState> {
+  async put(
+    taskId: string,
+    request: ShelfPutRequest,
+    source: TaskPersonalSource = 'tracker',
+  ): Promise<ShelfState> {
     const body: ShelfPutInput = {
       title: request.title,
       reason: request.reason,
       snapshot: parseShelfEntrySnapshot(request.snapshot),
       createIfMissing: request.createIfMissing,
     };
-    const value: unknown = await api.put(shelfUrl(taskId), body);
+    const value: unknown = await api.put(shelfUrl(taskId, source), body,
+      source === 'tracker' ? trackerMutationOptions() : {});
 
     return parseShelfState(value);
   },
 
-  async remove(taskId: string): Promise<ShelfState> {
-    const value: unknown = await api.del(shelfUrl(taskId));
+  async remove(taskId: string, source: TaskPersonalSource = 'tracker'): Promise<ShelfState> {
+    const value: unknown = await api.del(shelfUrl(taskId, source), undefined,
+      source === 'tracker' ? trackerMutationOptions() : {});
 
     return parseShelfState(value);
   },

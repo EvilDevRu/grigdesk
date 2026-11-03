@@ -167,10 +167,13 @@ export class TaskFavoritesStore {
     return this._enqueue(() => this._snapshot(this._read(), String(scope)));
   }
 
-  async add(scope: unknown, taskId: unknown): Promise<FavoritesScope> {
+  async add(scope: unknown, taskId: unknown, beforeWrite?: () => void): Promise<FavoritesScope> {
     const id = normalizeFavoriteTaskId(taskId);
     const key = String(scope);
+
     return this._enqueue(() => {
+      beforeWrite?.();
+
       const document = this._read();
       const current = document.scopes[key] || { revision: 0, taskIds: [] };
       if (current.taskIds.includes(id)) return this._snapshot(document, key);
@@ -184,10 +187,13 @@ export class TaskFavoritesStore {
     });
   }
 
-  async remove(scope: unknown, taskId: unknown): Promise<FavoritesScope> {
+  async remove(scope: unknown, taskId: unknown, beforeWrite?: () => void): Promise<FavoritesScope> {
     const id = normalizeFavoriteTaskId(taskId);
     const key = String(scope);
+
     return this._enqueue(() => {
+      beforeWrite?.();
+
       const document = this._read();
       const current = document.scopes[key];
       if (!current || !current.taskIds.includes(id)) return this._snapshot(document, key);
