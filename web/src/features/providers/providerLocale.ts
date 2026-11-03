@@ -1,10 +1,37 @@
-import { messages, translator, type LocaleSource } from '../../../../shared/i18n/catalogs.ts';
+import {
+  localeTranslator, messages, translator, type LocaleSource,
+} from '../../../../shared/i18n/catalogs.ts';
 import type { ProviderEntry } from '../../../../shared/chat/providersContracts.ts';
+import { isSelectableModelProvider } from '../../shared/providerModelSelect.ts';
+
+export interface ProviderAvailabilityView {
+  available: boolean;
+  chatReady: boolean;
+  label: string;
+}
 
 interface ProviderAction {
   kind: string;
   label: string;
   command?: string;
+}
+
+/**
+ * Общая подпись описывает доступность сервиса независимо от поддержки чата.
+ * Чатовый допуск берётся из существующего селектора; проекция не запускает проверки.
+ */
+export function providerAvailability(
+  provider: Pick<ProviderEntry, 'available' | 'chatEnabled'>,
+  locale: LocaleSource = 'ru',
+): ProviderAvailabilityView {
+  const available = provider.available === true;
+  const t = localeTranslator(locale);
+
+  return {
+    available,
+    chatReady: isSelectableModelProvider(provider),
+    label: available ? t('settings.available') : t('settings.unavailable2'),
+  };
 }
 
 /**

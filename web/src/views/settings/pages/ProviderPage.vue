@@ -14,7 +14,7 @@
         >
           <optgroup v-for="group in groups" :key="group.id" :label="group.label">
             <option v-for="entry in group.providers" :key="entry.id" :value="entry.id">
-              {{ entry.name }}{{ entry.available ? '' : t('settings.unavailable') }}
+              {{ entry.name }} · {{ entry.availability.label }}
             </option>
           </optgroup>
         </UiSelect>
@@ -38,8 +38,9 @@
               <template #leading><ProviderIcon :provider="entry" :size="20" /></template>
               <span class="ui-settings-catalog-copy">
                 <span class="ui-settings-catalog-title">{{ entry.name }}</span>
-                <span class="ui-settings-catalog-status" :data-available="entry.available">
-                  {{ entry.available ? t('settings.available') : t('settings.unavailable2') }}
+                <span class="ui-settings-catalog-status"
+                  :data-available="entry.availability.available">
+                  {{ entry.availability.label }}
                   <span v-if="entry.updateAvailable"> {{ t('settings.updateAvailable') }}</span>
                   <span v-if="dirtyProvider(entry.id)"> {{ t('settings.notApplied') }}</span>
                 </span>
@@ -70,7 +71,9 @@
         <div class="settings-provider-title">
           <ProviderIcon :provider="selected" :size="22" />
           <h4>{{ selected.name }}</h4>
-          <span class="settings-provider-status">{{ selected.available ? t('settings.available') : t('settings.unavailable2') }}</span>
+          <span class="settings-provider-status">
+            {{ selected.availability.label }}
+          </span>
         </div>
         <UiTabs
           data-ui-settings-tabs
@@ -418,6 +421,7 @@ import { useToolLauncher } from '../../../shared/tools/launcher.ts';
 import ProviderMcpStatus from '../ProviderMcpStatus.vue';
 import ProviderUsageResources from '../../../features/providers/ProviderUsageResources.vue';
 import { providerCliActions } from '../../../features/providers/providerCliActions.ts';
+import { providerAvailability } from '../../../features/providers/providerLocale.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import type { FieldAddress } from '../../../features/settings/contracts.ts';
 import SettingsField from '../SettingsField.vue';
@@ -428,8 +432,10 @@ const settings = useSettingsStore();
 const providers = useProvidersStore();
 const installation = useProviderInstallStore();
 const native = useProviderSettingsStore();
-const registry = computed(() => (providers.providers as ProviderEntry[])
-  .map((entry) => localizeProviderMetadata(entry, uiLocale.value)));
+const registry = computed(() => (providers.providers as ProviderEntry[]).map((entry) => ({
+  ...localizeProviderMetadata(entry, uiLocale.value),
+  availability: providerAvailability(entry, uiLocale),
+})));
 const selected = computed(() => registry.value.find((entry) => entry.id === settings.entityId));
 const cliActions = computed(() => selected.value ? providerCliActions(selected.value) : {
   selectedCopy: undefined,

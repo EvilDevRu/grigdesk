@@ -142,9 +142,13 @@ test('ONB-AI-01: статусы, общий installer, login без Enter и н�
   await page.getByText('Claude', { exact: true }).last().waitFor();
   await page.getByText(/не установлен/i).first().waitFor();
   await page.getByText(/нет входа|не выполнен вход/i).first().waitFor();
-  await page.getByText('Готов к работе', { exact: true }).waitFor();
-  assert.equal(await page.getByText('Готов к работе', { exact: true }).count(), 1,
-    'setup-only не объявлен готовым для чатов');
+
+  const available = page.locator('.provider-status span:last-child')
+    .filter({ hasText: /^Доступен$/u });
+
+  await available.first().waitFor();
+  assert.equal(await available.count(), 2,
+    'Доступность сервиса не равна допуску чата');
   await page.getByRole('button', { name: /установить.*Claude|установить/i }).last().click();
 
   const confirmation = page.getByRole('dialog').filter({
@@ -217,7 +221,7 @@ test('ONB-AI-01: статусы, общий installer, login без Enter и н�
 test('ONB-SKIP-01: предупреждение и подтверждённый пропуск восстанавливаются', async (t) => {
   const f = await aiPage(t, { providers: [] });
 
-  await f.page.getByText(/без ИИ конвейер работать не будет/i).waitFor();
+  await f.page.getByText(/Нужен хотя бы один доступный исполнитель с поддержкой чата/u).waitFor();
   await f.page.getByRole('button', { name: names.skip }).click();
 
   const state = await waitState(f, (value) => value.active.step === 'project');

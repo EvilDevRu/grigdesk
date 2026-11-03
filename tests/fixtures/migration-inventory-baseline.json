@@ -1067,6 +1067,8 @@
       "tests/web/provider-credentials.component.test.js",
       "tests/web/provider-icon.component.test.js",
       "tests/web/provider-native-settings.component.test.js",
+      "tests/web/provider-readiness-copy.component.test.js",
+      "tests/web/provider-readiness.component.test.js",
       "tests/web/provider-settings-store.test.js",
       "tests/web/provider-usage-forecast.component.test.js",
       "tests/web/provider-usage-resources.component.test.js",
