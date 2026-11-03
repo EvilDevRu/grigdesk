@@ -1487,7 +1487,7 @@
   "phoneReloadNetworks": "Reload network list",
   "marketplaceOfficial": "Official",
   "marketplaceCommunity": "Community",
-  "marketplaceUnknownSource": "Installation from an unknown source",
+  "marketplaceUnknownSource": "Source outside the GrigDesk catalog",
   "marketplaceUnverifiedSource": "Could not check the source against the catalog",
   "marketplaceManual": "Installed manually; source not specified",
   "marketplaceSourceRisk": "The plugin will run with GrigDesk permissions and may access files and run commands. Continue only if you trust the author and repository.",

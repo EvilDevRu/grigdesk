@@ -246,8 +246,10 @@ test('D8: текущие done managed и rollback показывают разл�
     sourceChanged: false,
   };
 
-  const { wrapper, state } = await mountInstallDialog(t, { job });
+  const { wrapper, state } = await mountInstallDialog(t);
 
+  state.job = job;
+  await nextTick();
   assert.equal(wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'result');
   assert.match(wrapper.get('[data-role="install-result"]').text(),
     /обновлён до v1\.0\.0\./u);
@@ -264,7 +266,10 @@ test('D9: failed причина/retry forget, recovery_required нельзя з�
   failed.error.message = 'Нет доступа к источнику фикстуры.';
   failed.stage = 'fetching';
 
-  const { wrapper, state, calls } = await mountInstallDialog(t, { job: failed });
+  const { wrapper, state, calls } = await mountInstallDialog(t);
+
+  state.job = failed;
+  await nextTick();
 
   assert.equal(wrapper.get('[data-role="install-result"]').text(), failed.error.message);
   assert.equal(wrapper.get('[aria-current="step"]').text(), '2 Проверка');
@@ -315,8 +320,9 @@ test('D10: ручные правки требуют force, startUpdate сохр�
   assert.match(wrapper.text(), /Отложить правки в резерв/u);
 });
 
-test('D11: terminal в закрытом диалоге показывается при открытии, автоматического forget нет', async (t) => {
-  const { wrapper, state, calls } = await mountInstallDialog(t, { job: webInstallJob('running') });
+test('D11: явный просмотр задания сохраняет terminal после повторного открытия', async (t) => {
+  const { wrapper, state, calls } = await mountInstallDialog(t,
+    { job: webInstallJob('running') }, { resume: true });
 
   for (const status of ['done', 'failed', 'interrupted']) {
     await wrapper.setProps({ open: false });
@@ -558,9 +564,10 @@ test('D20: повтор обновления после ошибки снова 
     name: 'Демо',
     install: webInstallInfo(),
   };
-  const { wrapper, calls } = await mountInstallDialog(t, {
-    job: webInstallJob('failed', 'update'),
-  }, { mode: 'update', plugin });
+  const { wrapper, state, calls } = await mountInstallDialog(t, {}, { mode: 'update', plugin });
+
+  state.job = webInstallJob('failed', 'update');
+  await nextTick();
 
   await wrapper.get('[data-role="install-retry"]').trigger('click');
   await flushPromises();
@@ -570,8 +577,10 @@ test('D20: повтор обновления после ошибки снова 
 
 test('D21: успешный итог завершает все шаги и сохраняет сведения об установленном пакете', async (t) => {
   const job = webInstallJob('done');
-  const { wrapper, state } = await mountInstallDialog(t, { job });
+  const { wrapper, state } = await mountInstallDialog(t);
 
+  state.job = job;
+  await nextTick();
   assert.equal(wrapper.findAll('.install-steps [data-complete="true"]').length, 3);
   assert.equal(wrapper.find('[aria-current="step"]').exists(), false);
   assert.equal(wrapper.get('[data-role="install-close"]').text(), 'Готово');
@@ -1053,7 +1062,8 @@ for (const scenario of dialogVisualCases) {
 
       t.after(() => release());
 
-      const { wrapper } = await mountInstallDialog(t, scenario.state, scenario.props, ({ state }) => {
+      const props = { resume: true, ...scenario.props };
+      const { wrapper } = await mountInstallDialog(t, scenario.state, props, ({ state }) => {
         if (scenario.boot === 'loading') {
           state.loadJob = async () => {
             await held;
@@ -1085,7 +1095,7 @@ test('CAT-DLG1: unknown source и offline различимы, повторное
   };
   globalThis.__catalogUi.state = 'fresh';
   await nextTick();
-  assert.match(wrapper.get('[data-source-notice]').text(), /Установка из неизвестного источника/u);
+  assert.match(wrapper.get('[data-source-notice]').text(), /Источник вне каталога GrigDesk/u);
   assert.match(wrapper.get('[data-source-notice]').text(), /доступ к файлам и запуску команд/u);
   globalThis.__catalogUi.loading = true;
   await nextTick();
@@ -1094,7 +1104,7 @@ test('CAT-DLG1: unknown source и offline различимы, повторное
   await wrapper.setProps({ open: false });
   await wrapper.setProps({ open: true });
   await flushPromises();
-  assert.match(wrapper.get('[data-source-notice]').text(), /Установка из неизвестного источника/u);
+  assert.match(wrapper.get('[data-source-notice]').text(), /Источник вне каталога GrigDesk/u);
   await wrapper.get('[data-role="install-apply"]').trigger('click');
   assert.equal(calls.filter(([method]) => method === 'apply').length, 1);
 });
@@ -1249,4 +1259,145 @@ test('CAT-DLG4: moved preset tag блокирует подготовку ещё 
   assert.equal(wrapper.get('[data-role="install-start"]').element.disabled, true);
   assert.match(wrapper.text(), /Выбранная версия изменилась/u);
   assert.equal(calls.some(([name]) => name === 'startInstall'), false);
+});
+
+
+for (const status of ['done', 'failed', 'cancelled', 'interrupted']) {
+  test(`Новая установка: прошлый ${status} уступает чистой форме после чтения current`, async (t) => {
+    const previous = webInstallJob(status, 'update');
+    const { wrapper, state, calls } = await mountInstallDialog(t, { job: previous }, {}, (fixture) => {
+      fixture.state.loadJob = async () => {
+        fixture.calls.push(['loadJob', []]);
+        fixture.state.job = previous;
+      };
+    });
+
+    assert.equal(wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'source');
+    assert.equal(wrapper.get('[data-role="install-url"]').element.value, '');
+    assert.equal(wrapper.get('[data-role="install-version"]').element.value, '');
+    assert.equal(wrapper.get('[data-role="install-start"]').element.disabled, true);
+    assert.equal(state.job, null);
+    assert.equal(calls.some(([method]) => ['startInstall', 'apply', 'cancel'].includes(method)), false);
+  });
+}
+
+test('Новая установка: отложенный terminal не мигает прошлым результатом во время bootstrap', async (t) => {
+  let release;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+
+  t.after(() => release());
+
+  const { wrapper } = await mountInstallDialog(t, { error: 'Прежняя ошибка.' }, {}, ({ state }) => {
+    state.loadJob = async () => {
+      state.job = webInstallJob('done', 'update');
+      await pending;
+    };
+  });
+
+  assert.equal(wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'loading');
+  assert.equal(wrapper.find('[data-role="install-result"]').exists(), false);
+  assert.equal(wrapper.find('[data-role="install-error"]').exists(), false);
+  release();
+  await flushPromises();
+  assert.equal(wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'source');
+});
+
+test('Новая установка: повторное открытие сбрасывает ввод, версии и раскрытую справку', async (t) => {
+  const { wrapper, state } = await mountInstallDialog(t);
+
+  await wrapper.get('[data-role="install-url"]').setValue('https://example.invalid/old.git');
+  state.versionsInputKey = 'https://example.invalid/old.git';
+  state.versionsUrl = state.versionsInputKey;
+  state.versions = [{
+    version: '1.1.0',
+    tag: 'v1.1.0',
+    sha: 'a'.repeat(40),
+  }];
+  await nextTick();
+  await wrapper.get('[data-role="install-version"]').setValue('1.1.0');
+  await wrapper.get('[aria-controls="plugin-install-source-help"]').trigger('click');
+  assert.equal(wrapper.find('#plugin-install-source-help').exists(), true);
+  await wrapper.setProps({ open: false });
+  await wrapper.setProps({ open: true });
+  await flushPromises();
+  assert.equal(wrapper.get('[data-role="install-url"]').element.value, '');
+  assert.equal(wrapper.get('[data-role="install-version"]').element.value, '');
+  assert.equal(wrapper.find('#plugin-install-source-help').exists(), false);
+  assert.equal(state.versions.length, 0);
+});
+
+test('Новая установка: известная активная операция может закончиться во время bootstrap', async (t) => {
+  const { wrapper, state, calls } = await mountInstallDialog(t, {
+    job: webInstallJob('applying'),
+  }, {}, ({ state }) => {
+    state.loadJob = async () => {
+      state.job = webInstallJob('done');
+    };
+  });
+
+  assert.equal(wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'result');
+  assert.equal(state.job.status, 'done');
+  assert.equal(calls.some(([method]) => method === 'forgetJob'), false);
+});
+
+test('Новая установка: старое обновление не подменяет новый update и его ручное подтверждение', async (t) => {
+  const plugin = {
+    id: 'new-plugin',
+    name: 'Новый выбор',
+    install: webInstallInfo({ localChanges: true }),
+  };
+  const { wrapper, state, calls } = await mountInstallDialog(t, {
+    job: webInstallJob('done', 'update'),
+  }, { mode: 'update', plugin });
+
+  assert.equal(wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'source');
+  assert.equal(wrapper.get('[data-role="install-heading"]').text(), 'Обновление «Новый выбор»');
+  assert.deepEqual(calls.find(([method]) => method === 'listVersions')[1], [plugin.install.source.url]);
+  assert.equal(wrapper.get('[data-role="install-replace-modified"]').element.checked, false);
+  assert.equal(state.job, null);
+});
+
+
+test('Новая установка: повтор current после сетевой ошибки также скрывает прежний итог', async (t) => {
+  const { wrapper, state } = await mountInstallDialog(t, {}, {}, ({ state }) => {
+    state.loadJob = async () => {
+      state.error = 'Связь прервана.';
+    };
+  });
+
+  assert.equal(wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'unavailable');
+  state.loadJob = async () => {
+    state.error = null;
+    state.job = webInstallJob('done', 'update');
+  };
+  await wrapper.get('[data-role="install-reload"]').trigger('click');
+  await flushPromises();
+  assert.equal(wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'source');
+  assert.equal(state.job, null);
+});
+
+test('Новая установка: закрытый bootstrap не скрывает результат другого открытия', async (t) => {
+  let release;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+
+  t.after(() => release());
+
+  const { wrapper, state, calls } = await mountInstallDialog(t, {}, {}, ({ state }) => {
+    state.loadJob = async () => {
+      await pending;
+    };
+  });
+
+  await wrapper.setProps({ open: false });
+  state.job = webInstallJob('done');
+  await wrapper.setProps({ resume: true, open: true });
+  release();
+  await flushPromises();
+  assert.equal(wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'result');
+  assert.equal(state.job.status, 'done');
+  assert.equal(calls.some(([method]) => method === 'forgetJob'), false);
 });

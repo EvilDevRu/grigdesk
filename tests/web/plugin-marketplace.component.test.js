@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { catalogFixture } from '../helpers/pluginCatalog.js';
 import { moduleCatalogFixture, catalogResponse } from '../helpers/pluginCatalogModules.js';
-import { webInstallInfo } from './helpers/pluginInstallFixtures.js';
+import { webInstallInfo, webInstallJob } from './helpers/pluginInstallFixtures.js';
 import { settingsHarness } from './helpers/settings-harness.js';
 
 test('CAT-UI1: поиск, safe README, выбор совместимой версии и install intent', async (t) => {
@@ -283,6 +283,7 @@ test('CAT-UI7: «Открыть задание установки» не нас�
   assert.equal(dialog().props('catalogSelection'), null);
   assert.equal(dialog().props('plugin'), null);
   assert.equal(dialog().props('mode'), 'install');
+  assert.equal(dialog().props('resume'), true);
 });
 
 test('CAT-UI8: версия ниже установленной называет установленную, а не выбранную', async (t) => {
@@ -412,4 +413,39 @@ test('CAT-CONFIGURE: кнопка каталога выбирает страни
       assert.equal(h.writes().length, 0);
     });
   }
+});
+
+
+test('Настройки: просмотр результата и новая Git-установка имеют разные намерения', async (t) => {
+  const previous = webInstallJob('done', 'update');
+  const h = await settingsHarness(t, 'plugins.installed', 'PluginWorkspacePage', {
+    stubs: { teleport: true },
+    prepare({ control }) {
+      control.handlers['/api/plugin-installs/jobs/current'] = () => new Response(JSON.stringify({
+        job: previous,
+        recoveryError: null,
+      }));
+    },
+  });
+
+  await h.flushPromises();
+  await h.wrapper.get('[data-install-job]').trigger('click');
+  await h.flushPromises();
+
+  const result = h.wrapper.findComponent({ name: 'PluginInstallDialog' });
+
+  assert.equal(result.props('resume'), true);
+  assert.equal(result.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'result');
+  // Закрытие родителя может размонтировать мастер без его собственного обработчика.
+  result.vm.$emit('update:open', false);
+  await h.flushPromises();
+  await h.wrapper.get('[data-install-git]').trigger('click');
+  await h.flushPromises();
+
+  const install = h.wrapper.findComponent({ name: 'PluginInstallDialog' });
+
+  assert.equal(install.props('resume'), false);
+  assert.equal(install.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'source');
+  assert.equal(install.get('[data-role="install-url"]').element.value, '');
+  assert.equal(h.writes().some((call) => /\/jobs(?:\/|$)/u.test(call.path)), false);
 });

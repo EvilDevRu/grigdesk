@@ -78,6 +78,7 @@
       v-if="installOpen"
       v-model:open="installOpen"
       :mode="installMode"
+      :resume="resumeJob"
       :plugin="installPlugin"
       :catalog-selection="selection"
     />
@@ -109,6 +110,7 @@ const plugins = usePluginsStore();
 const state = usePluginMarketplaceState();
 const installOpen = ref(false);
 const installMode = ref<'install' | 'update'>('install');
+const resumeJob = ref(false);
 const installPlugin = shallowRef<PluginListItem | null>(null);
 const selection = shallowRef<CatalogSelection | null>(null);
 const recoveryBlocked = computed(() => Boolean(installer.recoveryError)
@@ -126,6 +128,7 @@ function openGit(): void {
   selection.value = null;
   installPlugin.value = null;
   installMode.value = 'install';
+  resumeJob.value = false;
   installOpen.value = true;
 }
 
@@ -137,6 +140,7 @@ function openJob(): void {
   selection.value = null;
   installPlugin.value = null;
   installMode.value = 'install';
+  resumeJob.value = true;
   installOpen.value = true;
 }
 
@@ -156,6 +160,7 @@ function openSelection(next: CatalogSelection, installed: PluginListItem | null)
   };
   installPlugin.value = installed;
   installMode.value = installed?.install ? 'update' : 'install';
+  resumeJob.value = false;
   installOpen.value = true;
 }
 

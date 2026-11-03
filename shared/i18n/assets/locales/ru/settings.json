@@ -1487,7 +1487,7 @@
   "phoneReloadNetworks": "Обновить список сетей",
   "marketplaceOfficial": "Официальный",
   "marketplaceCommunity": "Сообщество",
-  "marketplaceUnknownSource": "Установка из неизвестного источника",
+  "marketplaceUnknownSource": "Источник вне каталога GrigDesk",
   "marketplaceUnverifiedSource": "Не удалось проверить источник по каталогу",
   "marketplaceManual": "Установлен вручную; источник не указан",
   "marketplaceSourceRisk": "Код плагина будет выполняться с правами GrigDesk и может получить доступ к файлам и запуску команд. Продолжайте, только если доверяете автору и репозиторию.",

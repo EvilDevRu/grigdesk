@@ -438,6 +438,7 @@ import type { InstallSubject } from '../../stores/packageInstall.ts';
 const props = defineProps<{
   open: boolean;
   mode: 'install' | 'update';
+  resume?: boolean;
   plugin: InstallSubject | null;
   packageKind?: 'plugin' | 'db-engine';
   catalogSelection?: CatalogSelection | null;
@@ -454,11 +455,12 @@ const bootLoading = ref(false);
 const bootFailed = ref(false);
 const contentElement = ref<HTMLElement | null>(null);
 let openingEpoch = 0;
+let discardPreviousTerminal = false;
 let disposed = false;
 
 const dialogView = computed(() => deriveInstallDialogView({
   packageKind: props.packageKind,
-  job: store.job,
+  job: bootLoading.value && isTerminalInstallJob(store.job) ? null : store.job,
   mode: props.mode,
   pluginName: props.plugin?.name ?? null,
   pluginLocalChanges: Boolean(props.plugin?.install?.localChanges),
@@ -617,19 +619,29 @@ watch(view, () => {
 }, { flush: 'post' });
 
 /**
- * Пока current не прочитан, новая операция недоступна: сервер мог сохранить старую.
- * При повторном открытии уже известное задание остаётся на месте без загрузочной вспышки.
+ * Current восстанавливает незавершённую работу до разрешения новой установки.
+ * Новый запуск скрывает прежний terminal; просмотр задания сохраняет его результат.
  */
 async function loadCurrent(): Promise<void> {
   const epoch = ++openingEpoch;
+  const discardTerminal = discardPreviousTerminal;
 
   bootLoading.value = true;
   bootFailed.value = false;
+
+  if (discardTerminal) {
+    store.forgetJob();
+    store.error = null;
+  }
 
   try {
     await store.loadJob();
   } finally {
     if (!disposed && props.open && epoch === openingEpoch) {
+      if (discardTerminal && !store.recoveryError && !store.pendingAction) {
+        store.forgetJob();
+      }
+
       bootLoading.value = false;
       bootFailed.value = !store.job && !!store.error;
     }
@@ -674,6 +686,15 @@ async function retry(): Promise<void> {
 
 watch(() => props.open, (open) => {
   if (open) {
+    discardPreviousTerminal = !props.resume && !store.busy && !store.reconciling
+      && !store.pendingAction && !store.recoveryError
+      && (!store.job || isTerminalInstallJob(store.job));
+
+    url.value = '';
+    selectedVersion.value = '';
+    replaceModified.value = false;
+    sourceHelpOpen.value = false;
+    store.invalidateVersions('');
     void loadCurrent();
   } else {
     openingEpoch += 1;
