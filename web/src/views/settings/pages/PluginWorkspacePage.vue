@@ -43,15 +43,21 @@
         </UiButton>
       </div>
     </div>
-    <UiInlineMessage v-if="recoveryBlocked" tone="warning">
-      {{ installer.recoveryError?.message ?? installer.job?.error?.message }}
-    </UiInlineMessage>
-    <UiInlineMessage v-if="plugins.loadError" tone="warning">
-      {{ plugins.loadError }}
-    </UiInlineMessage>
-    <UiButton v-if="plugins.loadError" data-context="workspace-form" @click="plugins.load()">
-      {{ t('settings.retryLoading') }}
-    </UiButton>
+    <div v-if="state.tab === 'catalog' && (recoveryBlocked || plugins.loadError)" class="plugins-notices">
+      <UiInlineMessage v-if="recoveryBlocked" tone="warning"
+                       :heading="t('settings.pluginRecoveryRequired')">
+        {{ installer.recoveryError?.message ?? installer.job?.error?.message }}
+      </UiInlineMessage>
+      <UiInlineMessage v-if="plugins.loadError" tone="warning"
+                       :heading="t('settings.pluginCatalogFailure')">
+        {{ plugins.loadError }}
+        <template #actions>
+          <UiButton data-context="workspace-form" @click="plugins.load()">
+            {{ t('settings.retryLoading') }}
+          </UiButton>
+        </template>
+      </UiInlineMessage>
+    </div>
     <section
       id="plugins-catalog-panel"
       v-if="state.tab === 'catalog'"
@@ -206,6 +212,14 @@ onMounted(() => {
 .plugins-tabs {
   flex: 1 1 160px;
   min-width: 0;
+}
+.plugins-notices {
+  display: grid;
+  flex: none;
+  gap: 8px;
+  max-height: 40%;
+  padding: 12px 16px;
+  overflow: auto;
 }
 .plugins-toolbar {
   display: flex;

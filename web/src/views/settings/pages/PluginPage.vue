@@ -5,26 +5,31 @@
     :data-ready="ready"
     :data-single="Boolean(singlePluginId)"
   >
-    <p v-if="error" role="alert">{{ error }}</p>
-    <UiInlineMessage v-if="plugins.loadError" tone="warning" data-plugin-load-error>
-      {{ plugins.loadError }}
-    </UiInlineMessage>
-    <UiButton v-if="plugins.loadError || error" data-plugin-retry @click="load">
-      {{ t('settings.retryLoading') }}
-    </UiButton>
+    <div v-if="error || plugins.loadError || recoveryBlocked || actionError || removedName"
+         class="settings-plugin-notices">
+      <UiInlineMessage v-if="error || plugins.loadError" :tone="error ? 'danger' : 'warning'"
+                       :heading="t('settings.pluginCatalogFailure')" data-plugin-load-error>
+        {{ error || plugins.loadError }}
+        <template #actions>
+          <UiButton data-plugin-retry @click="load">{{ t('settings.retryLoading') }}</UiButton>
+        </template>
+      </UiInlineMessage>
+      <UiInlineMessage v-if="recoveryBlocked" tone="warning"
+                       :heading="t('settings.pluginRecoveryRequired')">
+        {{ installer.recoveryError?.message ?? installer.job?.error?.message }}
+      </UiInlineMessage>
+      <UiInlineMessage v-if="actionError" tone="danger" :heading="t('settings.pluginActionFailed')"
+                       dismissible data-plugin-action-error @dismiss="installer.error = null">
+        {{ actionError }}
+      </UiInlineMessage>
+      <UiInlineMessage v-if="removedName" tone="success" :heading="t('settings.pluginRemoved')"
+                       dismissible data-plugin-removed @dismiss="removedName = ''">
+        {{ t('settings.pluginRemovedRestart', { pluginName: removedName }) }}
+      </UiInlineMessage>
+    </div>
     <p v-if="!ready && !plugins.loadError && !error" role="status" data-plugin-loading>
       {{ t('settings.loadingSection2') }}
     </p>
-    <p v-if="installer.recoveryError" role="alert">{{ installer.recoveryError.message }}</p>
-    <p v-else-if="installer.job?.status === 'recovery_required'" role="alert">
-      {{ installer.job.error?.message }}
-    </p>
-    <UiInlineMessage v-if="installer.error && !installOpen" tone="danger" data-plugin-action-error>
-      {{ installer.error }}
-    </UiInlineMessage>
-    <UiInlineMessage v-if="removedName" tone="success" data-plugin-removed>
-      {{ t('settings.pluginRemovedRestart', { pluginName: removedName }) }}
-    </UiInlineMessage>
     <div class="settings-plugin-workspace">
       <aside
         v-if="!singlePluginId"
@@ -170,28 +175,36 @@
                 </UiButton>
               </SettingsField>
               <span class="settings-plugin-meta">{{ plugin.version }}</span>
-              <template v-if="!plugin.system">
-                <UiButton
+              <div v-if="!plugin.system" class="settings-plugin-package-actions">
+                <UiIconButton
+                  :label="t('settings.update')"
+                  v-tooltip="t('settings.update')"
                   data-plugin-update-action
                   :disabled="packageActionsBlocked"
                   @click="openInstall(plugin.install ? 'update' : 'install')"
                 >
-                  {{ t('settings.update') }}
-                </UiButton>
-                <UiButton
+                  <UiRefreshIcon />
+                </UiIconButton>
+                <UiIconButton
+                  :label="t('settings.delete')"
+                  v-tooltip="t('settings.delete')"
                   tone="danger"
                   data-plugin-remove-action
                   :disabled="packageActionsBlocked || activeInstall"
                   :loading="installer.pendingAction === 'remove'"
                   @click="removePlugin"
                 >
-                  {{ t('settings.delete') }}
-                </UiButton>
-              </template>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6m4-6v6" />
+                  </svg>
+                </UiIconButton>
+              </div>
             </div>
             <p v-if="singlePluginId && plugin.description">{{ plugin.description }}</p>
           </header>
           <UiInlineMessage v-if="!singlePluginId && plugin.serverError" tone="danger"
+                           :heading="t('settings.pluginRuntimeError')"
                            class="settings-plugin-runtime-error">
             {{ plugin.serverError }}
           </UiInlineMessage>
@@ -494,8 +507,9 @@ import SettingsIcon from '../SettingsIcon.vue';
 import { computed, reactive, ref, watch, onMounted, onBeforeUnmount, useId } from 'vue';
 import { isNavigationFailure, NavigationFailureType, useRouter } from 'vue-router';
 import {
+  UiRefreshIcon,
   UiSwitch, UiCheckbox, UiInput, UiNumberInput, UiSelect, UiPasswordInput, UiButton, UiInlineMessage,
-  UiSearchInput, UiSelectableRow, UiIconButton, UiPopover, UiTabs, UiTab, confirmDialog, messageRef,
+  UiSearchInput, UiSelectableRow, UiIconButton, UiPopover, UiTabs, UiTab, confirmDialog, messageRef, vTooltip,
 } from '../../../ui.ts';
 import type {
   PluginListItem, PluginModelValue, PluginSetting,
@@ -567,6 +581,7 @@ const groups = computed(() => PLUGIN_CATEGORIES.map((category) => ({
 const recoveryBlocked = computed(() => Boolean(installer.recoveryError)
   || installer.job?.status === 'recovery_required');
 const installOpen = ref(false);
+const actionError = computed(() => !installOpen.value ? installer.error : '');
 const installMode = ref<'install' | 'update'>('install');
 const confirmingRemoval = ref(false);
 const removedName = ref('');
@@ -1072,6 +1087,16 @@ watch([
   min-height: 0;
   overflow: hidden;
 }
+.settings-plugin-notices {
+  display: grid;
+  flex: none;
+  gap: 8px;
+  max-height: 40%;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
 .settings-plugin-sidebar {
   display: flex;
   flex-direction: column;
@@ -1212,10 +1237,20 @@ watch([
 .settings-plugin-header-actions {
   display: flex;
   flex-basis: 100%;
-  flex-wrap: wrap;
-  align-items: center;
+  align-items: start;
   gap: 8px 14px;
   min-width: 0;
+}
+.settings-plugin-header-actions > .settings-plugin-meta {
+  align-self: start;
+  min-height: var(--control-height);
+}
+.settings-plugin-package-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: auto;
 }
 .settings-plugin-detail-tabs {
   flex: none;

@@ -33,6 +33,10 @@ test('Кнопки обновления и удаления доступны п�
 
   assert.equal(h.wrapper.get('[data-plugin-update-action]').isVisible(), true);
   assert.equal(h.wrapper.get('[data-plugin-remove-action]').isVisible(), true);
+  assert.equal(h.wrapper.get('[data-plugin-update-action]').attributes('aria-label'), 'Обновить');
+  assert.equal(h.wrapper.get('[data-plugin-remove-action]').attributes('aria-label'), 'Удалить');
+  assert.equal(h.wrapper.get('[data-plugin-update-action]').text(), '');
+  assert.equal(h.wrapper.get('[data-plugin-remove-action]').text(), '');
   assert.equal(h.wrapper.get('[data-plugin-details-tab="parameters"]').attributes('aria-selected'), 'true');
   await h.wrapper.get('[data-plugin-update-action]').trigger('click');
   await h.flushPromises();
@@ -95,6 +99,10 @@ test('Удаление подтверждается и отменяет толь
   assert.equal(h.settings.snapshot.dirtyCount, 1);
   assert.equal(h.settings.getValue('pluginSettings:second', '["values","text"]'), 'Остаётся');
   assert.match(h.wrapper.get('[data-plugin-removed]').text(), /удалён.*Перезапустите/u);
+  await h.wrapper.get('[data-plugin-removed] button').trigger('click');
+  await h.flushPromises();
+  assert.equal(h.wrapper.find('[data-plugin-removed]').exists(), false);
+  assert.equal(h.settings.snapshot.dirtyCount, 1);
 });
 
 test('Отказ удаления сохраняет ввод и показывает причину в карточке', async (t) => {
@@ -110,6 +118,11 @@ test('Отказ удаления сохраняет ввод и показыв�
   assert.equal(h.settings.entityId, 'demo');
   assert.match(h.wrapper.get('[data-plugin-action-error]').text(), /перезапустите/u);
   assert.equal(h.wrapper.find('[data-plugin-removed]').exists(), false);
+  await h.wrapper.get('[data-plugin-action-error] button').trigger('click');
+  await h.flushPromises();
+  assert.equal(h.wrapper.find('[data-plugin-action-error]').exists(), false);
+  assert.equal(h.writes().length, 1);
+  assert.equal(h.settings.snapshot.dirtyCount, 1);
 });
 
 test('Recovery закрывает действия, системные плагины их не получают', async (t) => {

@@ -250,6 +250,44 @@
   overflow-wrap: anywhere;
 }
 
+/* Развёрнутое оповещение отделяет короткий итог от причины и следующего действия.
+   Значок и закрытие сохраняют свои колонки при переносе длинного серверного текста. */
+.ui-inline-message[data-structured] {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 12px;
+  border-color: var(--line);
+  border-inline-start: 3px solid var(--ui-message-tone);
+  background: color-mix(in srgb, var(--ui-message-tone) 5%, var(--surface));
+  font-size: 12px;
+  line-height: 18px;
+}
+.ui-inline-message[data-structured]:has(> .ui-inline-message__dismiss) {
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+}
+.ui-inline-message[data-structured] > .ui-inline-message__icon {
+  width: 20px;
+  height: 20px;
+  color: var(--ui-message-tone);
+}
+.ui-inline-message[data-structured] .ui-inline-message__title {
+  margin-bottom: 3px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.ui-inline-message[data-structured] .ui-inline-message__detail {
+  color: var(--ink-mid);
+}
+.ui-inline-message__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* Отказ загрузки истории остаётся под шапкой, а действие читается рядом с причиной.
    Узкая колонка переносит кнопку под текст без уменьшения области нажатия. */
 .ui-inline-message[data-context='chat-message-load'] {

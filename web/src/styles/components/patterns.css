@@ -1236,7 +1236,14 @@
 }
 [data-ui-settings-field][data-presentation='action'] > .ui-field {
   grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'control';
+  row-gap: 0;
+}
+[data-ui-settings-field][data-presentation='action'] > .ui-field:has(
+  > :is(.ui-field__hint, .ui-field__error)
+) {
   grid-template-areas: 'control' 'hint';
+  row-gap: 6px;
 }
 /* Внутри менеджера вкладка уже задаёт границу секции, строки остаются обычной формой.
    Ошибки, подсветка раскрытого поля и controls сохраняют общие состояния. */
