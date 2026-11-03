@@ -141,7 +141,7 @@
         <section id="task-description" class="task-pane brief-pane"
                  role="tabpanel" aria-labelledby="task-tab-description">
           <div class="brief-head">
-            <h4 class="pane-title">Описание задачи</h4>
+            <h4 class="pane-title">{{ editForm ? t('core.taskEditHeading') : 'Описание задачи' }}</h4>
             <UiButton
               v-if="isB24Task && trackerCaps.editing && detail && !editForm"
               size="compact"
@@ -153,135 +153,176 @@
               Изменить
             </UiButton>
           </div>
-          <div class="brief-scroll">
+          <div class="brief-scroll" :class="{ 'brief-scroll--editing': editForm }">
             <TaskLoading v-if="loading && !detail" label="Читаю данные задачи…"  area="description" />
-            <div v-else-if="editForm" class="task-edit" aria-label="Редактирование задачи">
-              <UiField
-                label="Заголовок"
-                required
-                :error="editForm.title.trim() ? '' : 'Введите заголовок задачи'"
-              >
-                <UiInput
-                  v-model="editForm.title"
-                  data-role="task-edit-title"
-                  maxlength="255"
-                  autocomplete="off"
-                  :disabled="busy === 'edit'"
-                />
-              </UiField>
-
-              <UiField
-                label="Описание"
-                hint="Сохраняется обычным текстом; ссылки останутся кликабельными в карточке."
-              >
-                <UiTextarea
-                  v-model="editForm.description"
-                  data-role="task-edit-description"
-                  rows="10"
-                  :disabled="busy === 'edit'"
-                  @keydown.ctrl.enter.prevent="saveTaskEdit"
-                />
-              </UiField>
-
-              <div class="task-edit-grid">
-                <UiField label="Исполнитель">
-                  <UiSelect
-                    v-model="editForm.responsibleId"
-                    data-role="task-edit-responsible"
-                    :disabled="editOptionsBusy || busy === 'edit'"
+            <form v-else-if="editForm" class="task-edit" :aria-label="t('core.taskEditHeading')"
+                  @submit.prevent="saveTaskEdit" @keydown.ctrl.enter.prevent="saveTaskEdit"
+                  @keydown.meta.enter.prevent="saveTaskEdit">
+              <div class="task-edit-scroll">
+                <div class="task-edit-main">
+                  <UiField
+                    :label="t('core.taskEditTitle')"
+                    required
+                    :error="editForm.title.trim() ? '' : t('core.taskEditTitleRequired')"
                   >
-                    <option v-if="!editForm.responsibleId" value="" disabled>— не указан —</option>
-                    <option
-                      v-for="user in editResponsibleOptions"
-                      :key="user.id"
-                      :value="String(user.id)"
-                    >
-                      {{ user.name }}
-                    </option>
-                  </UiSelect>
-                </UiField>
+                    <UiInput
+                      ref="editTitleInput"
+                      v-model="editForm.title"
+                      data-role="task-edit-title"
+                      maxlength="255"
+                      autocomplete="off"
+                      :disabled="busy === 'edit'"
+                    />
+                  </UiField>
 
-                <UiField label="Проект">
-                  <UiSelect
-                    v-model="editForm.groupId"
-                    data-role="task-edit-group"
-                    :disabled="editOptionsBusy || busy === 'edit'"
+                  <UiField
+                    :label="t('core.taskDesignDescription')"
+                    :hint="t('core.taskEditDescriptionHint')"
                   >
-                    <option value="">— без проекта —</option>
-                    <option
-                      v-for="group in editGroupOptions"
-                      :key="group.id"
-                      :value="String(group.id)"
-                    >
-                      {{ group.name }}
-                    </option>
-                  </UiSelect>
-                </UiField>
+                    <UiTextarea
+                      v-model="editForm.description"
+                      data-role="task-edit-description"
+                      rows="12"
+                      :placeholder="t('core.taskEditDescriptionPlaceholder')"
+                      :disabled="busy === 'edit'"
+                    />
+                  </UiField>
+                </div>
 
-                <UiField label="Приоритет">
-                  <UiSelect
-                    v-model.number="editForm.priority"
-                    data-role="task-edit-priority"
-                    :disabled="busy === 'edit'"
-                  >
-                    <option :value="0">низкий</option>
-                    <option :value="1">средний</option>
-                    <option :value="2">высокий</option>
-                  </UiSelect>
-                </UiField>
+                <aside class="task-edit-properties" :aria-label="t('core.taskEditProperties')">
+                  <h5 class="task-edit-section-title">{{ t('core.taskEditProperties') }}</h5>
+                  <div class="task-edit-grid">
+                    <UiField :label="t('core.taskEditResponsible')">
+                      <UiSelect
+                        v-model="editForm.responsibleId"
+                        data-role="task-edit-responsible"
+                        :disabled="editOptionsBusy || busy === 'edit'"
+                      >
+                        <option v-if="!editForm.responsibleId" value="" disabled>
+                          {{ t('core.taskEditUnassigned') }}
+                        </option>
+                        <option
+                          v-for="user in editResponsibleOptions"
+                          :key="user.id"
+                          :value="String(user.id)"
+                        >
+                          {{ user.name }}
+                        </option>
+                      </UiSelect>
+                    </UiField>
 
-                <UiField :label="t('core.taskDeadline')">
-                  <UiInput
-                    v-model="editForm.deadline"
-                    type="datetime-local"
-                    data-role="task-edit-deadline"
-                    :disabled="busy === 'edit'"
-                  />
-                </UiField>
-                <UiField :label="t('core.taskAccomplices')">
-                  <UiChoiceList v-model="editForm.accomplices" mode="multiple" selection-indicator
-                                data-role="task-edit-accomplices" :label="t('core.taskAccomplices')"
-                                :options="editParticipantOptions"
-                                :disabled="editOptionsBusy || busy === 'edit'" />
-                </UiField>
-                <UiField :label="t('core.taskAuditors')">
-                  <UiChoiceList v-model="editForm.auditors" mode="multiple" selection-indicator
-                                data-role="task-edit-auditors" :label="t('core.taskAuditors')"
-                                :options="editParticipantOptions"
-                                :disabled="editOptionsBusy || busy === 'edit'" />
-                </UiField>
+                    <UiField :label="t('core.taskEditProject')">
+                      <UiSelect
+                        v-model="editForm.groupId"
+                        data-role="task-edit-group"
+                        :disabled="editOptionsBusy || busy === 'edit'"
+                      >
+                        <option value="">{{ t('core.taskEditNoProject') }}</option>
+                        <option
+                          v-for="group in editGroupOptions"
+                          :key="group.id"
+                          :value="String(group.id)"
+                        >
+                          {{ group.name }}
+                        </option>
+                      </UiSelect>
+                    </UiField>
+
+                    <UiField :label="t('core.taskEditPriority')">
+                      <UiSelect
+                        v-model.number="editForm.priority"
+                        data-role="task-edit-priority"
+                        :disabled="busy === 'edit'"
+                      >
+                        <option :value="0">{{ t('core.taskPriorityLow') }}</option>
+                        <option :value="1">{{ t('core.taskPriorityNormal') }}</option>
+                        <option :value="2">{{ t('core.taskPriorityHigh') }}</option>
+                      </UiSelect>
+                    </UiField>
+
+                    <UiField :label="t('core.taskDeadline')">
+                      <UiInput
+                        v-model="editForm.deadline"
+                        type="datetime-local"
+                        data-role="task-edit-deadline"
+                        :disabled="busy === 'edit'"
+                      />
+                    </UiField>
+                  </div>
+
+                  <div class="task-edit-people">
+                    <UiDisclosureButton v-model:open="editAccomplicesOpen" controls="task-edit-accomplices"
+                                        density="compact" data-role="task-edit-accomplices-toggle"
+                                        :disabled="editOptionsBusy || busy === 'edit'">
+                      {{ t('core.taskAccomplices') }}
+                      <span class="task-edit-count">{{ editForm.accomplices.length }}</span>
+                    </UiDisclosureButton>
+                    <div v-show="editAccomplicesOpen" id="task-edit-accomplices" class="task-edit-people-list">
+                      <UiChoiceList v-model="editForm.accomplices" mode="multiple" selection-indicator
+                                    data-role="task-edit-accomplices" :label="t('core.taskAccomplices')"
+                                    :options="editParticipantOptions"
+                                    :disabled="editOptionsBusy || busy === 'edit'">
+                        <p v-if="!editParticipantOptions.length" class="task-edit-note">
+                          {{ t('core.taskEditNoPeople') }}
+                        </p>
+                      </UiChoiceList>
+                    </div>
+                    <UiDisclosureButton v-model:open="editAuditorsOpen" controls="task-edit-auditors"
+                                        density="compact" data-role="task-edit-auditors-toggle"
+                                        :disabled="editOptionsBusy || busy === 'edit'">
+                      {{ t('core.taskAuditors') }}
+                      <span class="task-edit-count">{{ editForm.auditors.length }}</span>
+                    </UiDisclosureButton>
+                    <div v-show="editAuditorsOpen" id="task-edit-auditors" class="task-edit-people-list">
+                      <UiChoiceList v-model="editForm.auditors" mode="multiple" selection-indicator
+                                    data-role="task-edit-auditors" :label="t('core.taskAuditors')"
+                                    :options="editParticipantOptions"
+                                    :disabled="editOptionsBusy || busy === 'edit'">
+                        <p v-if="!editParticipantOptions.length" class="task-edit-note">
+                          {{ t('core.taskEditNoPeople') }}
+                        </p>
+                      </UiChoiceList>
+                    </div>
+                  </div>
+
+                  <TaskLoading v-if="editOptionsBusy" :label="t('core.taskEditLoadingOptions')"
+                               area="options" :failed="Boolean(editOptionsError)" />
+                  <div v-else-if="editOptionsError" class="edit-options-state bad">
+                    <span>{{ editOptionsError }}</span>
+                    <UiButton data-role="task-edit-options-retry" @click="loadEditOptions">
+                      {{ t('core.taskEditRetry') }}
+                    </UiButton>
+                  </div>
+                </aside>
               </div>
 
-              <TaskLoading v-if="editOptionsBusy" label="Загружаю исполнителей и проекты…"
-                           area="options" :failed="Boolean(editOptionsError)" />
-              <div v-else-if="editOptionsError" class="edit-options-state bad">
-                <span>{{ editOptionsError }}</span>
-                <UiButton data-role="task-edit-options-retry" @click="loadEditOptions">
-                  Повторить
-                </UiButton>
+              <div class="task-edit-footer">
+                <p class="task-edit-note" :class="{ 'task-edit-dirty': editHasChanges }" role="status">
+                  {{ editHasChanges ? t('core.taskEditUnsaved') : t('core.taskEditSaveHint') }}
+                </p>
+                <UiFormActions class="task-edit-actions">
+                  <UiButton
+                    data-role="task-edit-cancel"
+                    variant="ghost"
+                    :disabled="busy === 'edit'"
+                    @click="cancelTaskEdit"
+                  >
+                    {{ t('core.cancel') }}
+                  </UiButton>
+                  <UiButton
+                    data-role="task-edit-save"
+                    tone="accent"
+                    variant="solid"
+                    :loading="busy === 'edit'"
+                    :disabled="!editCanSave"
+                    :loading-label="t('core.taskEditSaving')"
+                    @click="saveTaskEdit"
+                  >
+                    {{ t('core.save') }}
+                  </UiButton>
+                </UiFormActions>
               </div>
-
-              <UiFormActions class="task-edit-actions">
-                <UiButton
-                  data-role="task-edit-cancel"
-                  :disabled="busy === 'edit'"
-                  @click="cancelTaskEdit"
-                >
-                  Отмена
-                </UiButton>
-                <UiButton
-                  data-role="task-edit-save"
-                  tone="success"
-                  variant="solid"
-                  :loading="busy === 'edit'"
-                  :disabled="!editCanSave"
-                  loading-label="Сохраняю задачу"
-                  @click="saveTaskEdit"
-                >
-                  {{ t('core.save') }}
-                </UiButton>
-              </UiFormActions>
-            </div>
+            </form>
 
             <template v-else>
               <p v-if="editMessage" class="edit-message" role="status">{{ editMessage }}</p>
@@ -918,7 +959,8 @@
       </div>
 
       <!-- Управление -->
-      <footer class="controls" aria-label="Действия с задачей">
+      <footer v-show="!editForm || taskSection !== 'description'" class="controls"
+              aria-label="Действия с задачей">
           <div v-if="isB24Task && trackerCaps.timer" class="timer-group" role="group" aria-label="Учёт времени">
             <div class="timer" :class="{ run: running }">
               <span class="tclock mono">{{ elapsed !== null ? secToHMS(elapsed) : '—' }}</span>
@@ -1004,59 +1046,63 @@
             >
               ✓ Завершить
             </UiButton>
-            <UiButton
-              v-if="isB24Task && trackerCaps.delete"
-              data-context="task-footer-action"
-              data-role="task-delete"
-              tone="danger"
-              variant="outline"
-              :loading="busy === 'delete'"
-              :disabled="Boolean(busy)"
-              @click="deleteTask"
+          </div>
+          <div v-if="isB24Task || sandbox" class="csecondary">
+            <div class="ctools" role="group" :aria-label="t('core.taskToolsActions')">
+              <UiButton
+                v-if="isB24Task && shelfEnabled"
+                data-context="task-footer-action"
+                data-role="task-shelf-toggle"
+                tone="neutral"
+                variant="ghost"
+                :pressed="shelf.isOnShelf(taskId)"
+                :loading="shelf.isPending(taskId)"
+                :disabled="shelf.isPending(taskId)"
+                loading-label="Обновляю полку"
+                @click="toggleShelf"
+              >
+                {{ shelf.isOnShelf(taskId) ? 'На полке' : 'На полку' }}
+              </UiButton>
+              <OpenDiffButton
+                data-context="task-footer-action"
+                variant="ghost"
+                :task-id="taskId!"
+              />
+            </div>
+            <div
+              v-if="sandbox || (isB24Task && trackerCaps.delete)"
+              class="cdanger"
+              role="group"
+              :aria-label="t('core.taskDestructiveActions')"
             >
-              {{ t('core.taskDelete') }}
-            </UiButton>
-            <UiPopover v-if="isB24Task || sandbox" placement="top-end" aria-label="Другие действия с задачей">
-              <template #trigger><UiButton>Ещё</UiButton></template>
-              <template #default="{ close }">
-                <div class="ui-action-menu">
-            <UiButton
-              v-if="isB24Task && shelfEnabled"
-              data-context="task-footer-action"
-              data-role="task-shelf-toggle"
-              tone="neutral"
-              variant="outline"
-              :pressed="shelf.isOnShelf(taskId)"
-              :loading="shelf.isPending(taskId)"
-              :disabled="shelf.isPending(taskId)"
-              loading-label="Обновляю полку"
-              @click="close('action'); toggleShelf()"
-            >
-              {{ shelf.isOnShelf(taskId) ? 'На полке' : 'На полку' }}
-            </UiButton>
-            <!-- Стенд задачи сносится прямо отсюда: карточку открывают, чтобы закрыть
-                 задачу, и ради одной кнопки идти в конвейер незачем. -->
-            <UiButton
-              v-if="sandbox"
-              data-context="task-footer-action"
-              tone="danger"
-              variant="outline"
-              :loading="sandboxBusy"
-              :disabled="sandboxBusy"
-              loading-label="Сношу стенд"
-              v-tooltip="`Снести песочницу задачи (фронт :${sandbox.fePort}${sandbox.apiPort ? `, API :${sandbox.apiPort}` : ''})`"
-              @click="close('action'); sandboxDown()"
-            >
-              ⏏ Снести стенд
-            </UiButton>
-            <OpenDiffButton
-              @click="close('action')"
-              data-context="task-footer-action"
-              :task-id="taskId!"
-            />
-                </div>
-              </template>
-            </UiPopover>
+              <!-- Стенд и удаление доступны напрямую, но отделены от запуска
+                   и завершения, чтобы повседневные действия не соседствовали с ними. -->
+              <UiButton
+                v-if="sandbox"
+                data-context="task-footer-action"
+                tone="danger"
+                variant="ghost"
+                :loading="sandboxBusy"
+                :disabled="sandboxBusy"
+                loading-label="Сношу стенд"
+                v-tooltip="`Снести песочницу задачи (фронт :${sandbox.fePort}${sandbox.apiPort ? `, API :${sandbox.apiPort}` : ''})`"
+                @click="sandboxDown"
+              >
+                ⏏ Снести стенд
+              </UiButton>
+              <UiButton
+                v-if="isB24Task && trackerCaps.delete"
+                data-context="task-footer-action"
+                data-role="task-delete"
+                tone="danger"
+                variant="ghost"
+                :loading="busy === 'delete'"
+                :disabled="Boolean(busy)"
+                @click="deleteTask"
+              >
+                {{ t('core.taskDelete') }}
+              </UiButton>
+            </div>
           </div>
           <!-- Обычный запуск показывает только человеческое решение. Immutable-техника
                видна кратко и раскрывается отдельно для редкой ручной корректировки. -->
@@ -1285,7 +1331,6 @@ import {
   showToast,
   UiButton,
   UiCheckbox,
-  UiPopover,
   UiChoiceList,
   UiDisclosureButton,
   t,
@@ -1825,6 +1870,9 @@ const descHtml = computed(() => linkify(cleanDesc.value));
 // ── Редактирование основных полей задачи внешнего трекера ──
 const editForm = ref<ReturnType<typeof taskEditSnapshot> | null>(null);
 const editBaseline = ref<ReturnType<typeof taskEditSnapshot> | null>(null);
+const editTitleInput = ref<InstanceType<typeof UiInput> | null>(null);
+const editAccomplicesOpen = ref(false);
+const editAuditorsOpen = ref(false);
 const editUsers = ref<BoardNamedItem[]>([]);
 const editGroups = ref<BoardNamedItem[]>([]);
 const editOptionsBusy = ref(false);
@@ -1939,10 +1987,11 @@ function taskEditPayload() {
   return fields;
 }
 
+const editHasChanges = computed(() => Object.keys(taskEditPayload()).length > 0);
 const editCanSave = computed(() => (
   Boolean(editForm.value?.title.trim())
   && busy.value !== 'edit'
-  && Object.keys(taskEditPayload()).length > 0
+  && editHasChanges.value
 ));
 
 /**
@@ -1987,13 +2036,11 @@ async function loadEditOptions() {
   editOptionsBusy.value = false;
 }
 
-/** Открывает форму на точном снимке показанной карточки и начинает загрузку справочников. */
-
 /**
- * Открывает форму на снимке показанной карточки и загружает справочники.
- * Повторное открытие не сбрасывает уже введённые человеком изменения.
+ * Открывает форму на снимке показанной карточки, фокусирует название и читает справочники.
+ * Повторное открытие сохраняет черновик; списки участников изначально свёрнуты.
  */
-function openTaskEdit() {
+async function openTaskEdit() {
   if (!detail.value || editForm.value) {
     return;
   }
@@ -2002,9 +2049,13 @@ function openTaskEdit() {
 
   editBaseline.value = snapshot;
   editForm.value = { ...snapshot };
+  editAccomplicesOpen.value = false;
+  editAuditorsOpen.value = false;
   editMessage.value = null;
   editOptionsError.value = null;
-  loadEditOptions();
+  void loadEditOptions();
+  await nextTick();
+  editTitleInput.value?.focus();
 }
 
 
@@ -3797,17 +3848,101 @@ onUnmounted(() => {
   padding: 16px 20px 24px;
 }
 .task-edit {
-  display: grid;
-  gap: 13px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+}
+.brief-scroll--editing {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+.task-edit-scroll {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.55fr);
+  align-content: start;
+  align-items: start;
+  gap: 24px;
+  min-width: 0;
+  min-height: 0;
+  padding: 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.task-edit-main {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.task-edit-properties {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding-left: 24px;
+  border-left: 1px solid var(--line);
+}
+.task-edit-section-title {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .task-edit-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
 }
-.task-edit-grid > :last-child {
-  grid-column: 1 / -1;
+.task-edit-people {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.task-edit-count {
+  margin-left: auto;
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.task-edit-people-list {
+  max-height: 200px;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.task-edit-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  min-width: 0;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.task-edit-note {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.task-edit-dirty {
+  color: var(--warn);
+}
+.task-edit-actions {
+  flex: none;
 }
 .edit-options-state {
   display: flex;
@@ -4331,7 +4466,7 @@ onUnmounted(() => {
 }
 .timer-group {
   display: flex;
-  flex: 1 0 auto;
+  flex: 1 1 auto;
   align-items: center;
   gap: 12px;
   min-width: 0;
@@ -4356,11 +4491,34 @@ onUnmounted(() => {
 }
 .cbtns {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
+}
+.csecondary {
+  display: flex;
+  flex: 1 0 100%;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.ctools,
+.cdanger {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.cdanger {
+  margin-left: auto;
 }
 .convstall { width: 100%; }
 .lmsg { font-size: 12px; color: var(--good); flex-basis: 100%; }
@@ -4413,6 +4571,17 @@ onUnmounted(() => {
 }
 
 @container task-detail (max-width: 700px) {
+  .task-edit-scroll {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .task-edit-properties {
+    padding: 20px 0 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+  .task-edit-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .triage-findings {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -4467,11 +4636,21 @@ onUnmounted(() => {
   .tab-scroll {
     padding: 14px 12px;
   }
+  .brief-scroll--editing {
+    padding: 0;
+  }
+  .task-edit-scroll {
+    gap: 20px;
+    padding: 16px 12px;
+  }
   .task-edit-grid {
     grid-template-columns: minmax(0, 1fr);
   }
-  .task-edit-grid > :last-child {
-    grid-column: auto;
+  .task-edit-footer {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
   }
   .task-edit-actions > * {
     flex: 1;
@@ -4521,8 +4700,16 @@ onUnmounted(() => {
   }
   .cbtns {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    flex-basis: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
+  }
+  .cbtns:has(> :nth-child(3)) > :first-child {
+    grid-column: 1 / -1;
+  }
+  .csecondary {
+    gap: 6px 12px;
+    padding-top: 6px;
   }
   .convstall,
   .lmsg {

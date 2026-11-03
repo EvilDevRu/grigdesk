@@ -232,6 +232,62 @@ test('TaskModal не перезаписывает нетронутые поля 
   }]);
 });
 
+for (const modifier of ['ctrlKey', 'metaKey']) {
+  test(`Редактор фокусирует название и сохраняет по ${modifier} + Enter один раз`, async (t) => {
+    const { wrapper, flushPromises, updates } = await mountEditor(t);
+
+    await wrapper.get('[data-role="task-edit-open"]').trigger('click');
+    await flushPromises();
+
+    const title = wrapper.get('[data-role="task-edit-title"]');
+
+    assert.equal(document.activeElement === title.element, true);
+    assert.equal(wrapper.get('[data-role="task-edit-save"]').element.disabled, true);
+    await title.setValue('   ');
+    assert.equal(wrapper.get('[data-role="task-edit-save"]').element.disabled, true);
+    assert.match(wrapper.get('.task-edit').text(), /Введите название задачи/);
+
+    await title.setValue('Сохранено с клавиатуры');
+    assert.match(wrapper.get('.task-edit-footer').text(), /Есть несохранённые изменения/);
+    await title.trigger('keydown', { key: 'Enter', [modifier]: true });
+    await flushPromises();
+
+    assert.deepEqual(updates, [{ id: '42', fields: { title: 'Сохранено с клавиатуры' } }]);
+    assert.equal(wrapper.find('.task-edit').exists(), false);
+  });
+}
+
+test('Свёрнутые участники сохраняют выбор, а отмена возвращает исходные поля', async (t) => {
+  const { wrapper, flushPromises, updates } = await mountEditor(t);
+
+  await wrapper.get('[data-role="task-edit-open"]').trigger('click');
+  await flushPromises();
+
+  const toggle = wrapper.get('[data-role="task-edit-accomplices-toggle"]');
+
+  assert.equal(toggle.attributes('aria-expanded'), 'false');
+  await toggle.trigger('click');
+  await wrapper.get('[data-role="task-edit-accomplices"] [role="option"]:last-child').trigger('click');
+  assert.match(toggle.text(), /1/);
+  await toggle.trigger('click');
+  await toggle.trigger('click');
+  assert.equal(wrapper.get(
+    '[data-role="task-edit-accomplices"] [role="option"]:last-child',
+  ).attributes('aria-selected'), 'true');
+  await wrapper.get('[data-role="task-edit-save"]').trigger('click');
+  await flushPromises();
+  assert.deepEqual(updates, [{ id: '42', fields: { accomplices: [23] } }]);
+
+  await wrapper.get('[data-role="task-edit-open"]').trigger('click');
+  await flushPromises();
+  await wrapper.get('[data-role="task-edit-title"]').setValue('Отменённое изменение');
+  await wrapper.get('[data-role="task-edit-cancel"]').trigger('click');
+  assert.equal(updates.length, 1);
+  await wrapper.get('[data-role="task-edit-open"]').trigger('click');
+  await flushPromises();
+  assert.equal(wrapper.get('[data-role="task-edit-title"]').element.value, 'Старая постановка');
+});
+
 test('TF-01: та же карточка редактируется как документ без модального backdrop', async (t) => {
   const { wrapper, flushPromises, updates } = await mountEditor(t, 'document');
 
