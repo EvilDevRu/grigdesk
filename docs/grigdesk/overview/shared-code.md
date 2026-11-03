@@ -90,6 +90,7 @@
 | `node/deepSeekArtifact.ts` | Полный manifest/payload generation и совместимость с явно выбранным Node |
 | `node/glmCompatibility.ts` | Прежняя формула compatibility GLM для сервера и установщика ELF |
 | `node/binaryInstall.ts` | Общий протокол установщиков: O_NOFOLLOW copy/fsync, inode/SHA, uid/mode receipt, approved CAS и target lock; формат ELF, backup и admission задают потребители ([сервер](../server/server-binary-install.md)) |
+| `node/readContainedText.ts` | Ограниченное чтение обычного текста внутри корня без вложенных симлинков; core API 2 и Showcase |
 | `node/directoryLock.ts` | Асинхронный mkdir-lock с PID/starttime, ограниченным ожиданием и своим release |
 | `runtime/nodeVersion.ts` | Общая чистая политика версий Node без чтения процесса вызывающего |
 | `lib/objects.ts` | Проверки прототипа/массива и преобразования unknown; разные политики пустого значения |

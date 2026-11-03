@@ -175,12 +175,15 @@ test('PM-HTTP: каталог, MIME, helper и прежний prefix server.js; 
   const catalog = (await app.inject({ url: '/api/plugins', headers })).json().plugins;
   const card = catalog.find((item) => item.id === 'ui-module');
 
+  const prefix = card.webModule.entry.replace(/panel\.js$/, '');
+
+  assert.match(prefix, /^\/api\/ext\/ui-module\/module\/[a-f0-9-]+\/$/);
   assert.deepEqual(card.webModule, {
-    entry: '/api/ext/ui-module/module/panel.js',
-    css: ['/api/ext/ui-module/module/panel.css'],
+    entry: `${prefix}panel.js`,
+    css: [`${prefix}panel.css`],
     locales: {
-      ru: '/api/ext/ui-module/module/ru.json',
-      en: '/api/ext/ui-module/module/en.json',
+      ru: `${prefix}ru.json`,
+      en: `${prefix}en.json`,
     },
   });
   assert.ok(catalog.every((item) => item.web === null || typeof item.web === 'string'));
@@ -189,7 +192,7 @@ test('PM-HTTP: каталог, MIME, helper и прежний prefix server.js; 
     ['panel.js', /javascript/], ['helper.js', /javascript/],
     ['panel.css', /text\/css/], ['ru.json', /json/], ['en.json', /json/],
   ]) {
-    const response = await app.inject({ url: `/api/ext/ui-module/module/${file}`, headers });
+    const response = await app.inject({ url: `${prefix}${file}`, headers });
 
     assert.equal(response.statusCode, 200, file);
     assert.match(response.headers['content-type'], mime);

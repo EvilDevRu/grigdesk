@@ -66,6 +66,7 @@ export interface PluginInstallRuntime {
   refresh(): Promise<void>;
   removed?(id: string): void;
   installed?(id: string): void;
+  restartRequired?(id: string): boolean;
 }
 
 export interface PluginInstallServiceOptions {
@@ -277,6 +278,15 @@ export class PluginInstallService {
           };
         }
 
+        await this.applyScheduledUpdate();
+
+        if (this.healthError) {
+          return {
+            blockedIds: this.state.job?.pluginId ? [this.state.job.pluginId] : '*',
+            error: structuredClone(this.healthError),
+          };
+        }
+
         const interrupted = this.state.job;
 
         if (!this.state.apply && interrupted && ['running', 'ready'].includes(interrupted.status)) {
@@ -294,7 +304,8 @@ export class PluginInstallService {
         }
 
         this.reserved = !!this.state.job
-          && ['running', 'ready', 'applying', 'recovery_required'].includes(this.state.job.status);
+          && ['running', 'ready', 'awaiting_restart', 'applying', 'recovery_required']
+            .includes(this.state.job.status);
 
         return { blockedIds: [], error: null };
       } catch (error) {
@@ -313,6 +324,33 @@ export class PluginInstallService {
    */
   health(): PluginInstallErrorInfo | null {
     return structuredClone(this.healthError ?? this.catalogError);
+  }
+
+  /**
+   * Подтверждённая замена legacy-плагина выполняется до сканирования и import runtime.
+   * Отказ повторной проверки сохраняет старую установку и требует нового подтверждения.
+   */
+  private async applyScheduledUpdate(): Promise<void> {
+    const job = this.state.job;
+
+    if (job?.status !== 'awaiting_restart' || !job.reviewToken) {
+      return;
+    }
+
+    try {
+      await this.performApply(job.id, job.reviewToken, true);
+    } catch (error) {
+      if (this.state.apply || this.healthError) {
+        throw error;
+      }
+
+      await this.updateJob(job.id, this.generation, (current) => {
+        current.status = 'failed';
+        current.error = errorInfo(error);
+        current.finishedAt = this.now().toISOString();
+        current.reviewToken = null;
+      });
+    }
   }
 
   /**
@@ -488,7 +526,8 @@ export class PluginInstallService {
       await this.writeState((state) => {
         const current = state.plugins[id];
 
-        if (!current || current.revision !== record.revision || !sameSource(current.source, record.source)) {
+        if (!current || current.revision !== record.revision || !sameSource(current.source, record.source)
+          || state.job?.status === 'awaiting_restart' && state.job.pluginId === id) {
           return;
         }
 
@@ -519,7 +558,7 @@ export class PluginInstallService {
    * Новый плагин ещё не имеет загруженного кода.
    */
   restartRequired(id: string): boolean {
-    return this.restarts.has(id);
+    return this.runtime?.restartRequired?.(id) ?? this.restarts.has(id);
   }
 
   removedIds(): string[] {
@@ -602,7 +641,7 @@ export class PluginInstallService {
       await recoverApply(this.store, fs);
       this.state = await this.store.read();
 
-      return { id, restartRequired: true };
+      return { id, restartRequired: this.restartRequired(id) };
     } catch (error) {
       if (intentStarted) {
         this.healthError = errorInfo(installError('recovery_required'));
@@ -629,10 +668,10 @@ export class PluginInstallService {
    * Полная цепочка публикации принадлежит lifetime сервиса до последнего callback.
    * Mutex резервируется до внешнего await и не освобождается при начале close.
    */
-  private async performApply(id: string, token: string): Promise<PluginInstallJob> {
+  private async performApply(id: string, token: string, startup = false): Promise<PluginInstallJob> {
     this.assertAvailable();
 
-    if (!this.runtime) {
+    if (!this.runtime && !startup) {
       throw installError('recovery_required');
     }
 
@@ -643,7 +682,7 @@ export class PluginInstallService {
       throw installError('job_not_found');
     }
 
-    if (!['ready', 'done'].includes(job.status)) {
+    if (!['ready', 'awaiting_restart', 'done'].includes(job.status)) {
       throw installError('job_not_ready');
     }
 
@@ -651,7 +690,7 @@ export class PluginInstallService {
       throw installError('preview_stale');
     }
 
-    if (job.status === 'done') {
+    if (job.status === 'done' || job.status === 'awaiting_restart' && !startup) {
       return job;
     }
 
@@ -666,13 +705,31 @@ export class PluginInstallService {
     this.operation = 'apply';
 
     const pluginId = job.pluginId;
-    const wasLoaded = this.runtime.isLoaded(pluginId);
+    const wasLoaded = this.runtime?.isLoaded(pluginId) ?? false;
     const fs = this.filesystem();
     let lease: PluginReplacementLease | null = null;
     let effectStarted = false;
+    let schedule = false;
 
     try {
-      lease = await this.runtime.prepareReplace(pluginId, this.closingSignal.signal);
+      if (startup) {
+        if (wasLoaded || this.options.packageKind && this.options.packageKind !== 'plugin') {
+          throw installError('recovery_required');
+        }
+
+        lease = { async finish() {} };
+      } else {
+        try {
+          lease = await this.runtime!.prepareReplace(pluginId, this.closingSignal.signal);
+        } catch (error) {
+          if (errorInfo(error).code !== 'plugin_stop_required' || !wasLoaded
+            || this.options.packageKind && this.options.packageKind !== 'plugin') {
+            throw error;
+          }
+
+          schedule = true;
+        }
+      }
 
       const disk = await this.store.read();
       const prepared = disk.prepared;
@@ -731,6 +788,18 @@ export class PluginInstallService {
         throw installError('preview_stale');
       }
 
+      if (schedule) {
+        if (!current) {
+          throw installError('plugin_stop_required');
+        }
+
+        await this.updateJob(id, this.generation, (current) => {
+          current.status = 'awaiting_restart';
+        });
+
+        return structuredClone(this.state.job!);
+      }
+
       await this.writeState((state) => {
         targetRecord.revision = state.nextRevision++;
       });
@@ -758,7 +827,7 @@ export class PluginInstallService {
 
       effectStarted = true;
 
-      return await this.publishReplacement(intent, fs, lease, wasLoaded);
+      return await this.publishReplacement(intent, fs, lease!, wasLoaded);
     } catch (error) {
       if (lease && !effectStarted) {
         await lease.finish('reverted');
@@ -1191,7 +1260,7 @@ export class PluginInstallService {
       throw installError('install_busy');
     }
 
-    if (!['running', 'ready'].includes(job.status)) {
+    if (!['running', 'ready', 'awaiting_restart'].includes(job.status)) {
       throw installError('job_not_ready');
     }
 

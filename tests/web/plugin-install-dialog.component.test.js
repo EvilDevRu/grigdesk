@@ -223,7 +223,21 @@ test('D7: явный ready cancel; закрытие running/ready не отме�
   }
 });
 
-test('D8: done managed и rollback показывают различимый итог и перезапуск', async (t) => {
+test('Мастер: отложенная замена показывает restart, отмену и закрытие без повторного apply', async (t) => {
+  const { wrapper, calls } = await mountInstallDialog(t, {
+    job: webInstallJob('awaiting_restart', 'update'),
+  });
+
+  assert.match(wrapper.text(), /Обновление ждёт перезапуска/u);
+  assert.match(wrapper.get('[data-role="install-result"]').text(), /Выключать и повторно включать/u);
+  assert.equal(wrapper.find('[data-role="install-apply"]').exists(), false);
+  assert.equal(wrapper.find('[data-role="install-retry"]').exists(), false);
+  assert.equal(wrapper.find('[data-role="install-cancel"]').exists(), true);
+  await wrapper.get('[data-role="install-cancel"]').trigger('click');
+  assert.equal(calls.filter(([method]) => method === 'cancel').length, 1);
+});
+
+test('D8: текущие done managed и rollback показывают различимый итог', async (t) => {
   const job = webInstallJob('done', 'update');
 
   job.preview.replaces = {
@@ -236,11 +250,11 @@ test('D8: done managed и rollback показывают различимый и�
 
   assert.equal(wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'result');
   assert.match(wrapper.get('[data-role="install-result"]').text(),
-    /обновлён до v1\.0\.0.*Перезапустите GrigDesk и перезагрузите окно/u);
+    /обновлён до v1\.0\.0\./u);
   state.job = webInstallJob('done', 'rollback');
   await nextTick();
   assert.equal(wrapper.get('[data-role="install-result"]').text(),
-    'Версия v1.0.0 восстановлена. Перезапустите GrigDesk и перезагрузите окно.');
+    'Версия v1.0.0 восстановлена.');
   assert.equal(wrapper.find('[data-role="install-close"]').exists(), true);
 });
 
@@ -826,7 +840,7 @@ const dialogVisualCases = [
     "expected": {
       "screen": "ready",
       "tone": "accent",
-      "heading": "Всё готово к установке",
+      "heading": "Пакет подготовлен",
       "description": "Проверьте пакет и подтвердите изменения.",
       "icon": "m5 12 4 4L19 6",
       "footer": "Проверьте источник перед установкой.",

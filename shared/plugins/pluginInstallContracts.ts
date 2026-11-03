@@ -25,6 +25,7 @@ export type PluginInstallJobKind = 'install' | 'update' | 'rollback';
 export type PluginInstallJobStatus =
   | 'running'
   | 'ready'
+  | 'awaiting_restart'
   | 'applying'
   | 'done'
   | 'failed'

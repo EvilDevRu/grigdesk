@@ -409,6 +409,7 @@ const stepIndex = computed(() => {
 const statusLabel = computed(() => store.job ? t(({
   running: 'core.trackerJobRunning',
   ready: 'core.trackerJobReady',
+  awaiting_restart: 'settings.waitingForRestart',
   applying: 'core.trackerJobApplying',
   done: 'core.trackerJobDone',
   failed: 'core.trackerJobFailed',

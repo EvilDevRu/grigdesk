@@ -570,7 +570,8 @@ const installOpen = ref(false);
 const installMode = ref<'install' | 'update'>('install');
 const confirmingRemoval = ref(false);
 const removedName = ref('');
-const activeInstall = computed(() => isActiveInstallJob(installer.job) || installer.job?.status === 'ready');
+const activeInstall = computed(() => isActiveInstallJob(installer.job)
+  || ['ready', 'awaiting_restart'].includes(installer.job?.status ?? ''));
 const packageActionsBlocked = computed(() => recoveryBlocked.value || installer.busy
   || installer.reconciling || Boolean(installer.pendingAction) || confirmingRemoval.value
   || settings.snapshot.applying || settings.actionRunning);

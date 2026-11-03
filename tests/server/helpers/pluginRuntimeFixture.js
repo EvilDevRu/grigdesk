@@ -132,6 +132,7 @@ export async function runtimeFixture(t, definitions = [{ id: 'demo' }], options 
     prefs,
     installs: port,
     documentReader: options.documentReader,
+    runtimeServices: options.runtimeServices,
   });
   await app.ready();
 

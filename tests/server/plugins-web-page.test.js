@@ -86,18 +86,18 @@ test('страница включённого плагина раздаётся 
   const viewer = list.find((plugin) => plugin.id === 'viewer');
   const sleeper = list.find((plugin) => plugin.id === 'sleeper');
 
-  assert.equal(viewer.web, '/api/ext/viewer/web/');
+  assert.match(viewer.web, /^\/api\/ext\/viewer\/web\/[a-f0-9-]+\/$/);
   assert.equal(viewer.needsRestart, false, 'загруженная страница переключается без рестарта');
   assert.equal(sleeper.web, '/api/ext/sleeper/web/');
   assert.equal(sleeper.enabled, false);
 
-  const index = await app.inject({ method: 'GET', url: '/api/ext/viewer/web/' });
+  const index = await app.inject({ method: 'GET', url: viewer.web });
 
   assert.equal(index.statusCode, 200);
   assert.match(index.headers['content-type'], /text\/html/);
   assert.match(index.body, /Обзор/);
 
-  const script = await app.inject({ method: 'GET', url: '/api/ext/viewer/web/app.js' });
+  const script = await app.inject({ method: 'GET', url: viewer.web + 'app.js' });
 
   assert.equal(script.statusCode, 200);
   assert.match(script.headers['content-type'], /javascript/);
@@ -109,4 +109,13 @@ test('страница включённого плагина раздаётся 
   const off = await app.inject({ method: 'GET', url: '/api/ext/sleeper/web/' });
 
   assert.equal(off.statusCode, 404);
+
+  await app.inject({ method: 'POST', url: '/api/plugins/viewer/toggle', payload: { enabled: false } });
+  await app.inject({ method: 'POST', url: '/api/plugins/viewer/toggle', payload: { enabled: true } });
+
+  const changed = (await app.inject('/api/plugins')).json().plugins.find((plugin) => plugin.id === 'viewer');
+
+  assert.notEqual(changed.web, viewer.web, 'iframe получает новый src при включении');
+  assert.equal((await app.inject(changed.web)).statusCode, 200);
+  assert.equal((await app.inject(viewer.web + 'app.js')).statusCode, 404);
 });

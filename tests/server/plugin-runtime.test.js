@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import http from 'node:http';
+import { PassThrough } from 'node:stream';
 
-import { requireFromServer } from './helpers/pluginInstallHttpFixture.js';
+import { requireFromServer, writeHttpPlugin } from './helpers/pluginInstallHttpFixture.js';
 
 import { runtimeFixture, settle } from './helpers/pluginRuntimeFixture.js';
 
@@ -52,14 +54,18 @@ test('AUTH-01: session, CLI/internal, API/static и encoded API после off/o
   }
 });
 
-test('LEG-03: выключение не снимает loaded и не разрешает замену без lease', async (t) => {
+test('LEG-03: выключение сохраняет loaded, отдельный router даёт lease через onClose', async (t) => {
   const f = await runtimeFixture(t);
 
   assert.equal((await f.toggle('demo', false)).statusCode, 200);
   assert.equal(f.port.runtime.isLoaded('demo'), true);
-  await assert.rejects(f.port.runtime.prepareReplace('demo', new AbortController().signal), {
-    code: 'plugin_stop_required',
-  });
+
+  const lease = await f.port.runtime.prepareReplace('demo', new AbortController().signal);
+
+  await lease.finish('reverted');
+  assert.equal((await f.request('GET', '/api/ext/demo/x')).statusCode, 404);
+  assert.equal((await f.toggle('demo', true)).statusCode, 200);
+  assert.equal((await f.request('GET', '/api/ext/demo/x')).statusCode, 200);
 });
 
 for (const kind of ['hooks', 'legacy', 'static']) {
@@ -151,7 +157,7 @@ test('LIVE-01: выключение сохраняет открытый WS, но
   }
 });
 
-test('LIVE-02: dormant не импортируется, первое on требует рестарта, off отменяет его', async (t) => {
+test('LIVE-02: dormant не импортируется, первое on сразу подключает сервер без рестарта', async (t) => {
   const f = await runtimeFixture(t, [{ id: 'demo' }], { prefs: { plugins: { demo: false } } });
 
   assert.equal(await f.imported('demo'), false);
@@ -160,11 +166,11 @@ test('LIVE-02: dormant не импортируется, первое on треб
   const on = await f.toggle('demo', true);
 
   assert.equal(on.statusCode, 200);
-  assert.equal(on.json().needsRestart, true);
+  assert.equal(on.json().needsRestart, false);
   assert.equal(f.prefs.read().plugins.demo, true);
-  assert.equal(await f.imported('demo'), false);
-  assert.equal((await f.request('GET', '/api/ext/demo/x')).statusCode, 404);
-  assert.equal((await f.card('demo')).needsRestart, true);
+  assert.equal(await f.imported('demo'), true);
+  assert.equal((await f.request('GET', '/api/ext/demo/x')).statusCode, 200);
+  assert.equal((await f.card('demo')).needsRestart, false);
   assert.equal((await f.toggle('demo', false)).json().needsRestart, false);
   assert.equal((await f.card('demo')).needsRestart, false);
 });
@@ -232,9 +238,114 @@ for (const outcome of ['installed', 'blocked']) {
 }
 
 test('LIVE-05: несовместимый api не обещает исправление перезапуском', async (t) => {
-  const f = await runtimeFixture(t, [{ id: 'demo', manifest: { api: 2 } }]);
+  const f = await runtimeFixture(t, [{ id: 'demo', manifest: { api: 99 } }]);
 
   assert.equal((await f.card('demo')).needsRestart, false);
   assert.equal(await f.imported('demo'), false);
   assert.equal((await f.request('GET', '/api/ext/demo/x')).statusCode, 404);
+});
+
+test('HOT-ISOLATION: ошибка другого сервера не мешает загрузке включённой новой версии', async (t) => {
+  const f = await runtimeFixture(t, [{
+    id: 'broken',
+    files: { 'server.js': 'export default async function plugin() { throw new Error("fixture"); }' },
+  }], { prefs: { plugins: { broken: true, added: true } } });
+
+  await writeHttpPlugin(f.config.userPluginsDir, 'added', {}, {
+    'server.js': 'export default async function plugin(app) { app.get("/x", async () => ({ ok: true })); }',
+  });
+  await f.port.runtime.refresh();
+
+  assert.equal((await f.card('broken')).needsRestart, true);
+  assert.equal((await f.card('added')).needsRestart, false);
+  assert.equal((await f.request('GET', '/api/ext/added/x')).statusCode, 200);
+});
+
+test('HOT-LOAD: первое on удерживает конкурентов, затем принимает multipart с исходным auth', async (t) => {
+  let entered;
+  let release;
+  const registered = new Promise((resolve) => entered = resolve);
+  const hold = new Promise((resolve) => release = resolve);
+  const f = await runtimeFixture(t, [{
+    id: 'demo',
+    files: { 'server.js': [
+      'export default async function plugin(app, options) {',
+      '  const probe = app.runtimeProbe.get(options.plugin.id);',
+      '  probe.entered();',
+      '  await probe.hold;',
+      '  app.post("/upload", async (request) => {',
+      '    const file = await request.file();',
+      '    return { body: (await file.toBuffer()).toString(), auth: request.authKind };',
+      '  });',
+      '}',
+    ].join('\n') },
+  }], { prefs: { plugins: { demo: false } } });
+
+  Object.assign(f.probe.get('demo'), { entered, hold });
+
+  const enabling = f.toggle('demo', true);
+
+  try {
+    await registered;
+    assert.equal((await f.toggle('demo', false)).statusCode, 409);
+    assert.equal((await f.settings('demo', { values: {} })).statusCode, 409);
+    await assert.rejects(f.port.runtime.prepareReplace('demo', new AbortController().signal), {
+      code: 'plugin_busy',
+    });
+    assert.equal(f.prefs.read().plugins.demo, false);
+  } finally {
+    release();
+  }
+
+  assert.equal((await enabling).json().needsRestart, false);
+
+  const payload = '--fixture\r\nContent-Disposition: form-data; name="file"; filename="x.txt"\r\n'
+    + 'Content-Type: text/plain\r\n\r\nФайл\r\n--fixture--\r\n';
+  const response = await f.request('POST', '/api/ext/demo/upload', Buffer.from(payload), {
+    ...f.session,
+    'content-type': 'multipart/form-data; boundary=fixture',
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json(), { body: 'Файл', auth: 'session' });
+});
+
+test('HOT-DRAIN: dispatch удерживает настоящий response до onClose и восстановления router', async (t) => {
+  const f = await runtimeFixture(t, [{
+    id: 'demo',
+    files: { 'server.js': [
+      'export default async function plugin(app, options) {',
+      '  const probe = app.runtimeProbe.get(options.plugin.id);',
+      '  app.addHook("onClose", async () => probe.closed = true);',
+      '  app.get("/x", async () => ({ ok: true }));',
+      '  app.get("/held", async (_request, reply) => {',
+      '    reply.type("text/plain").send(probe.stream);',
+      '    probe.stream.write("held\\n");',
+      '  });',
+      '}',
+    ].join('\n') },
+  }]);
+  const probe = f.probe.get('demo');
+
+  probe.stream = new PassThrough();
+
+  const address = await f.app.listen({ port: 0, host: '127.0.0.1' });
+  const response = await new Promise((resolve, reject) => {
+    http.get(`${address}/api/ext/demo/held`, { headers: f.session }, resolve).on('error', reject);
+  });
+
+  response.resume();
+
+  const pending = f.port.runtime.prepareReplace('demo', new AbortController().signal);
+
+  try {
+    assert.equal((await f.request('GET', '/api/ext/demo/x')).statusCode, 409);
+    assert.equal(probe.closed, undefined);
+  } finally {
+    probe.stream.end();
+    await (await pending).finish('reverted');
+  }
+
+  assert.equal(probe.closed, true);
+  assert.equal((await f.request('GET', '/api/ext/demo/x')).statusCode, 200);
 });

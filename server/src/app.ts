@@ -141,6 +141,7 @@ import usageForecastModule from './modules/usage-forecast/index.ts';
 import analysisModule from './modules/analysis/index.ts';
 import authModule from './modules/auth/index.ts';
 import pluginsModule from './modules/plugins/index.ts';
+import { createPluginRuntimeServices } from './modules/plugins/runtimeServices.ts';
 import { SESSION_ONLY_PREFIXES } from './modules/plugins/installRoutes.ts';
 import pluginCatalogModule from './modules/plugin-catalog/index.ts';
 import { PluginCatalogService } from './lib/pluginCatalog.ts';
@@ -1150,6 +1151,13 @@ async function build(desktopParent: DesktopParent | null) {
 
   // Реестр плагинов — ДО модулей-плагинов: они гейтят роуты через fastify.pluginEnabled().
   await fastify.register(pluginsModule, {
+    runtimeServices: createPluginRuntimeServices({
+      config,
+      project: (id) => projectsService.read(id),
+      sandboxes: () => sandboxService.overview(),
+      holdSandbox: (task) => sandboxActivityGuard.acquireAction(task),
+      log: fastify.log,
+    }),
     config,
     prefs,
     installs: pluginInstalls,

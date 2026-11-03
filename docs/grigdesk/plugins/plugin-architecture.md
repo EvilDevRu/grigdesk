@@ -9,8 +9,8 @@
 video, code, analysis, shelf, inbox, telegram, github, ssh, db, docker, showcase, studio3d) + скан
 пользовательских `plugins/<id>/plugin.json` (опционально один из `server.js` / `server.ts`).
 Роуты заперты в префиксе `/api/ext/<id>/` механикой Fastify; контракт версионирован полем `api` (1 или 2).
-Регистрация идёт на старте: загруженный пользовательский плагин выключается и включается сразу,
-первое включение dormant требует рестарта. Функции ядра, hooks и проверка настроек —
+Пользовательский плагин выключается и включается сразу, включая первое включение dormant;
+обновление и откат заменяют [собственный router и поколения ESM](plugin-hot-runtime.md) без рестарта. Функции ядра, hooks и проверка настроек —
 [серверный набор](server-core-api.md).
 Состояние — prefs (`plugins`, `pluginSettings`). Модуль `modules/plugins/` декорирует
 `fastify.pluginEnabled(id)` / `fastify.pluginSettings(id)` — регистрируется ДО модулей-плагинов;

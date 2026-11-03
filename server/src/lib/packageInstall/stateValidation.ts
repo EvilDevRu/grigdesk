@@ -110,6 +110,11 @@ export function decodeInstallState(raw: unknown, writing = false): PluginInstall
     validatePrepared(state.prepared, state.job);
   }
 
+  if (state.job && object(state.job).status === 'awaiting_restart') {
+    requireValid(state.prepared !== null && state.apply === null
+      && object(state.job).kind !== 'rollback');
+  }
+
   if (state.apply !== null) {
     validateIntent(state.apply, state);
   }
@@ -263,7 +268,7 @@ function validatePrepared(raw: unknown, rawJob: unknown): void {
   const base = object(value.baseSnapshot, ['record', 'current', 'previous']);
 
   requireValid(uuid(value.jobId) && value.jobId === job.id
-    && ['ready', 'applying', 'recovery_required'].includes(String(job.status)));
+    && ['ready', 'awaiting_restart', 'applying', 'recovery_required'].includes(String(job.status)));
   requireValid(digest(value.candidateDigest));
 
   if (base.record !== null) {

@@ -534,7 +534,7 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
   async function cancel(): Promise<void> {
     const current = job.value;
 
-    if (!current || !['running', 'ready'].includes(current.status)) {
+    if (!current || !['running', 'ready', 'awaiting_restart'].includes(current.status)) {
       return;
     }
 
@@ -587,6 +587,7 @@ export function createPackageInstallStore(preset: PackageInstallPreset) {
   async function remove(id: string): Promise<boolean> {
     if (busy.value || reconciling.value || recoveryError.value || pendingAction.value || disposed
       || isActiveInstallJob(job.value) || job.value?.status === 'ready'
+      || job.value?.status === 'awaiting_restart'
       || job.value?.status === 'recovery_required') {
       return false;
     }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -9,6 +9,169 @@ import { acquireKernelFileLock } from '../../server/src/lib/kernelLock.ts';
 import { parseByteRange } from '../../server/src/lib/httpRange.ts';
 import { DocumentReader } from '../../server/src/lib/documents/reader.ts';
 import { pluginCore, runtimeFixture, settle } from './helpers/pluginRuntimeFixture.js';
+import { createPluginRuntimeServices } from '../../server/src/modules/plugins/runtimeServices.ts';
+
+/**
+ * Подменяется только транспорт модели и источники данных приложения.
+ * Каталог, допуск, квитанция и публичный core остаются настоящими.
+ */
+function runtimeServicesFixture(overrides = {}) {
+  const calls = [];
+  const reads = [];
+  const target = {
+    ok: true,
+    ref: { provider: 'fake', model: 'm' },
+    effort: 'high',
+    executor: {
+      runUntrusted: async (input) => {
+        calls.push(input);
+
+        return { reply: '{}', actualModel: 'reported', cost: 0.125 };
+      },
+    },
+  };
+  const runtime = createPluginRuntimeServices({
+    config: {},
+    project: async (id) => {
+      reads.push(id);
+
+      return { id, repos: [], archivedAt: null };
+    },
+    sandboxes: async () => ({ sandboxes: [] }),
+    holdSandbox: async () => ({
+      assertHeld() {},
+      assertPathIdentity: async () => {},
+      release: async () => {},
+    }),
+    resolveTarget: async () => target,
+    ...overrides,
+  });
+
+  return { runtime, target, calls, reads };
+}
+
+test('CORE-API2: loader выдаёт сервисы через core без отдельного hostServices', async (t) => {
+  const data = runtimeServicesFixture();
+  const f = await runtimeFixture(t, [
+    { id: 'demo', manifest: { api: 2 } },
+  ], { runtimeServices: data.runtime });
+  const core = pluginCore(f);
+
+  assert.deepEqual(data.reads, []);
+
+  for (const method of ['project', 'sandboxes', 'holdSandbox', 'modelText',
+    'validateModel', 'readSourceText', 'lock', 'digest']) {
+    assert.equal(typeof core[method], 'function', method);
+  }
+
+  assert.equal(f.probe.get('demo').options.hostServices, undefined);
+  assert.equal((await core.project('fixture')).id, 'fixture');
+  assert.deepEqual(await core.sandboxes(), { sandboxes: [] });
+  assert.equal(core.digest({ a: 1, b: 2 }), core.digest({ b: 2, a: 1 }));
+});
+
+test('CORE-MODEL: capability и effort проверяются без coding fallback', async () => {
+  const { runtime, target, calls } = runtimeServicesFixture();
+  const modelRef = { provider: 'fake', model: 'm', effort: 'high' };
+
+  assert.deepEqual(await runtime.validateModel(modelRef), { ref: target.ref, effort: 'high' });
+  assert.equal(calls.length, 0);
+
+  const output = await runtime.modelText({ modelRef, message: 'данные' });
+
+  assert.equal(output.reportedModel, 'reported');
+  assert.equal(output.cost, 0.125);
+
+  for (const key of ['cwd', 'extraDirs', 'workTools', 'sessionId', 'permissionMode']) {
+    assert.equal(Object.hasOwn(calls[0], key), false, key);
+  }
+
+  target.effort = null;
+  await assert.rejects(runtime.modelText({ modelRef, message: 'данные' }), /model_selection_changed/);
+  delete target.executor.runUntrusted;
+  target.executor.run = () => assert.fail('Coding transport запрещён');
+  await assert.rejects(runtime.modelText({
+    modelRef: { provider: 'fake', model: 'm' }, message: 'данные',
+  }), /model_unavailable/);
+  assert.equal(calls.length, 1);
+});
+
+test('CORE-MODEL: выключение во время выбора модели останавливает оплачиваемый вызов', async (t) => {
+  const barrier = Promise.withResolvers();
+  const entered = Promise.withResolvers();
+  const data = runtimeServicesFixture({
+    resolveTarget: async () => {
+      entered.resolve();
+      await barrier.promise;
+
+      return data.target;
+    },
+  });
+  const f = await runtimeFixture(t, [{ id: 'demo', manifest: { api: 2 } }], {
+    runtimeServices: data.runtime,
+  });
+  const pending = pluginCore(f).modelText({
+    modelRef: { provider: 'fake', model: 'm' }, message: 'данные',
+  });
+
+  await entered.promise;
+
+  try {
+    const response = await f.request('POST', '/api/plugins/demo/toggle', { enabled: false });
+
+    assert.equal(response.statusCode, 200);
+  } finally {
+    barrier.resolve();
+  }
+
+  await assert.rejects(pending, /plugin_disabled/);
+  assert.equal(data.calls.length, 0);
+});
+
+test('CORE-MODEL: отмена и квитанция оплаченного неверного ответа', async () => {
+  const { runtime, target, calls } = runtimeServicesFixture();
+  const controller = new AbortController();
+  const modelRef = { provider: 'fake', model: 'm' };
+
+  controller.abort();
+  await assert.rejects(runtime.modelText({ modelRef, message: 'данные', signal: controller.signal }), {
+    name: 'AbortError',
+  });
+  assert.equal(calls.length, 0);
+
+  target.executor.runUntrusted = async () => ({ reply: null });
+
+  const receipts = [];
+
+  await assert.rejects(runtime.modelText({
+    modelRef, message: 'данные', onReceipt: (receipt) => receipts.push(receipt),
+  }), /model_output_invalid/);
+  assert.deepEqual(receipts, [{
+    resolvedRef: { provider: 'fake', model: 'm' },
+    effort: 'high',
+    reportedModel: null,
+    modelEvidence: 'executor_reported',
+    cost: null,
+  }]);
+});
+
+test('CORE-SOURCE: чтение ограничено корнем, обычным файлом и лимитом', async (t) => {
+  const { runtime } = runtimeServicesFixture();
+  const f = await runtimeFixture(t);
+  const root = path.join(f.root, 'source');
+
+  await mkdir(root);
+  await writeFile(path.join(root, 'safe.txt'), 'abcdef');
+  await symlink(path.join(root, 'safe.txt'), path.join(root, 'link.txt'));
+  assert.equal(await runtime.readSourceText(root, 'safe.txt', 3), 'abcd');
+  assert.equal(await runtime.readSourceText(root, 'link.txt', 10), null);
+  assert.equal(await runtime.readSourceText(root, '../safe.txt', 10), null);
+  await assert.rejects(runtime.readSourceText(root, 'safe.txt', -1), /source_limit_invalid/);
+
+  const lock = await runtime.lock(path.join(f.root, 'directory-lock'));
+
+  await lock.release();
+});
 
 /**
  * Подменяем только содержимое штатного Map в процессе данного тестового файла.

@@ -24,12 +24,13 @@ const cases = [
   ['isInstallTimestamp', ['2024-02-29T00:00:00.000Z'],
     ['2026-02-30T00:00:00.000Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00.000+00:00']],
   ['isInstallJobKind', ['install', 'update', 'rollback'], ['Install', 'erase', 'install\n']],
-  ['isInstallJobStatus', ['running', 'ready', 'applying', 'done', 'failed', 'cancelled',
+  ['isInstallJobStatus', ['running', 'ready', 'awaiting_restart', 'applying', 'done', 'failed', 'cancelled',
     'interrupted', 'recovery_required'], ['success', 'DONE', 'done\n']],
   ['isInstallStage', ['fetching', 'validating', 'dependencies'], ['npm', 'FETCHING', 'fetching\n']],
   ['isInstallTerminalStatus', ['done', 'failed', 'cancelled', 'interrupted'],
-    ['recovery_required', 'ready', 'DONE']],
-  ['isInstallPreparedStatus', ['ready', 'applying', 'done'], ['recovery_required', 'running', 'READY']],
+    ['recovery_required', 'ready', 'awaiting_restart', 'DONE']],
+  ['isInstallPreparedStatus', ['ready', 'awaiting_restart', 'applying', 'done'],
+    ['recovery_required', 'running', 'READY']],
 ];
 
 for (const [name, valid, invalid] of cases) {
@@ -72,9 +73,10 @@ test('Общий id совпадает с manifest regex и отказом от 
 test('Пять списков общих значений сохраняют явный состав', () => {
   assert.deepEqual(values.INSTALL_JOB_KINDS, ['install', 'update', 'rollback']);
   assert.deepEqual(values.INSTALL_JOB_STATUSES, [
-    'running', 'ready', 'applying', 'done', 'failed', 'cancelled', 'interrupted', 'recovery_required',
+    'running', 'ready', 'awaiting_restart', 'applying', 'done', 'failed', 'cancelled',
+    'interrupted', 'recovery_required',
   ]);
   assert.deepEqual(values.INSTALL_STAGES, ['fetching', 'validating', 'dependencies']);
   assert.deepEqual(values.INSTALL_TERMINAL_STATUSES, ['done', 'failed', 'cancelled', 'interrupted']);
-  assert.deepEqual(values.INSTALL_PREPARED_STATUSES, ['ready', 'applying', 'done']);
+  assert.deepEqual(values.INSTALL_PREPARED_STATUSES, ['ready', 'awaiting_restart', 'applying', 'done']);
 });

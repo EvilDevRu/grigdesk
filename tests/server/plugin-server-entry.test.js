@@ -94,7 +94,7 @@ test('ENTRY-03: server.ts чувствителен внутри web, докум�
   assert.equal(sensitivePluginFile('docs/README.md', 'web'), false);
 });
 
-test('ENTRY-04: настоящий Git/service ставит dormant TS, refresh без import, новый boot работает',
+test('ENTRY-04: Git/service ставит dormant TS, включение подключает код до нового boot',
   async (t) => {
     const repo = await createPluginRepo(t);
     const marker = path.join(repo.root, 'imported');
@@ -129,7 +129,8 @@ test('ENTRY-04: настоящий Git/service ставит dormant TS, refresh 
       payload: { enabled: true },
       headers: f.session,
     })).statusCode, 200);
-    assert.equal(await access(marker).then(() => true, () => false), false);
+    assert.equal(await access(marker).then(() => true, () => false), true);
+    assert.equal((await f.app.inject({ url: '/api/ext/demo/typed', headers: f.session })).statusCode, 200);
 
     const reboot = Fastify({ logger: false });
 

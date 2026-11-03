@@ -312,7 +312,7 @@
               {{ t('settings.cancel') }}
             </UiButton>
             <UiButton
-              v-else-if="view === 'ready'
+              v-else-if="view === 'ready' || store.job?.status === 'awaiting_restart'
                 || view === 'progress' && !clarifying && store.job?.status === 'running'"
               block
               data-role="install-cancel"

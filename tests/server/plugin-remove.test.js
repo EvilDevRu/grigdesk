@@ -52,7 +52,7 @@ test('Удаление ручного плагина убирает пакет �
   });
 
   assert.equal(response.statusCode, 200, response.body);
-  assert.deepEqual(response.json(), { id: 'demo', restartRequired: true });
+  assert.deepEqual(response.json(), { id: 'demo', restartRequired: false });
   assert.equal(existsSync(path.join(f.pluginsDir, 'demo')), false);
   assert.equal(await readFile(path.join(dataDir, 'saved.json'), 'utf8'), 'saved-data');
   assert.deepEqual(f.prefs.read(), prefs);
@@ -100,7 +100,7 @@ test('Удаление плагина требует session, JSON, свой Ori
   }
 });
 
-test('Загруженный сервер плагина без hook требует перезапуска до удаления', async (t) => {
+test('Загруженный сервер без prepareReplace закрывается собственным router перед удалением', async (t) => {
   const f = await fixture(t, true);
   const response = await f.app.inject({
     method: 'POST',
@@ -109,14 +109,14 @@ test('Загруженный сервер плагина без hook требу�
     headers: f.session,
   });
 
-  assert.equal(response.statusCode, 409, response.body);
-  assert.equal(response.json().error, 'plugin_stop_required');
-  assert.equal(existsSync(path.join(f.pluginsDir, 'demo')), true);
-  assert.equal((await f.app.inject({ url: '/api/ext/demo/ping', headers: f.session })).statusCode, 200);
-  assert.equal(f.events.length, 0);
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().restartRequired, false);
+  assert.equal(existsSync(path.join(f.pluginsDir, 'demo')), false);
+  assert.equal((await f.app.inject({ url: '/api/ext/demo/ping', headers: f.session })).statusCode, 404);
+  assert.equal(f.events.length, 1);
 });
 
-test('Загруженный плагин с lease удаляется и закрывает прежние маршруты до перезапуска', async (t) => {
+test('Загруженный плагин с lease удаляется вместе с прежними маршрутами без перезапуска', async (t) => {
   const f = await fixture(t, true, true);
   const response = await f.app.inject({
     method: 'POST',
@@ -130,7 +130,7 @@ test('Загруженный плагин с lease удаляется и зак�
 
   const ping = await f.app.inject({ url: '/api/ext/demo/ping', headers: f.session });
 
-  assert.equal(ping.statusCode, 409, ping.body);
-  assert.equal(ping.json().error, 'plugin_restart_required');
+  assert.equal(ping.statusCode, 404, ping.body);
+  assert.equal(response.json().restartRequired, false);
   assert.deepEqual(f.events, [{ name: 'state-change', data: { plugins: true } }]);
 });

@@ -18,6 +18,37 @@ const VERSION = {
   sha: 'a'.repeat(40),
 };
 
+test('Store: ожидающее restart обновление восстанавливается после потери ответа и отменяется', async (t) => {
+  const fixture = pluginInstallStoreFixture(t);
+  const store = fixture.newStore();
+  const ready = webInstallJob('ready', 'update');
+  const queued = {
+    ...ready,
+    status: 'awaiting_restart',
+    revision: ready.revision + 1,
+  };
+
+  fixture.handlers.set('GET ' + ROOT + '/jobs/current', () => ({ job: ready, recoveryError: null }));
+  await store.loadJob();
+  fixture.handlers.set(`POST ${ROOT}/jobs/${ready.id}/apply`, () => {
+    throw new Error('Ответ потерян после записи');
+  });
+  fixture.handlers.set(`GET ${ROOT}/jobs/${ready.id}`, () => ({ job: queued, recoveryError: null }));
+  await store.apply();
+  assert.equal(store.job.status, 'awaiting_restart');
+  assert.equal(store.reconciling, false);
+  assert.equal(store.forgetJob(), false);
+  assert.equal(fixture.loads, 0);
+  await store.apply();
+  assert.equal(fixture.calls.filter((call) => call.url.endsWith('/apply')).length, 1);
+
+  fixture.handlers.set(`POST ${ROOT}/jobs/${ready.id}/cancel`, () => ({
+    job: webInstallJob('cancelled', 'update', { revision: queued.revision + 1 }),
+  }));
+  await store.cancel();
+  assert.equal(store.job.status, 'cancelled');
+});
+
 test('ST1: поиск POST, canonical URL отдельно от input key, очистка и decoder failure', async (t) => {
   const fixture = pluginInstallStoreFixture(t);
   const store = fixture.newStore();

@@ -127,12 +127,14 @@ export function deriveInstallDialogView(input: InstallDialogInput,
   const activeStep = !input.job ? 0
     : input.job.status === 'running' || input.job.stage || !input.job.preview ? 1 : 2;
   const completed = input.job?.status === 'done';
+  const scheduled = input.job?.status === 'awaiting_restart';
   const footerHint = screen === 'source' ? t("settings.installationStartsOnlyAfterConfirmation")
     : screen === 'ready' ? t("settings.verifyTheSourceBeforeInstallation")
     : screen === 'progress' ? t("settings.closingTheWindowDoesNotCancelInstallation")
+    : scheduled ? t('settings.pluginUpdateRestartHint')
     : completed ? t("settings.changesSavedInGrigDesk")
     : screen === 'result' ? t("settings.operationResultSaved") : t("settings.checkingInstallationStatus");
-  const resultHeading = completed
+  const resultHeading = scheduled ? t('settings.pluginUpdateAwaitingRestart') : completed
     ? input.job?.kind === 'rollback' ? t("settings.versionRestored") : t("settings.installationComplete")
     : input.job?.status === 'cancelled' ? t("settings.installationCancelled2")
     : input.job?.status === 'recovery_required' ? t("settings.recoveryRequired2")
@@ -150,14 +152,16 @@ export function deriveInstallDialogView(input: InstallDialogInput,
     : screen === 'unavailable' ? t("settings.retryLoadingToContinue")
     : screen === 'source' ? t("settings.findTheReleaseYouWantToInstall")
     : screen === 'progress' ? t("settings.workContinuesEvenIfTheWindowIs")
-    : screen === 'ready' ? t("settings.reviewThePackageAndConfirmTheChanges")
+    : screen === 'ready' ? input.packageKind !== 'db-engine' && preview?.replaces.kind !== 'none'
+      ? t('settings.pluginUpdateReview') : t("settings.reviewThePackageAndConfirmTheChanges")
+    : scheduled ? t('settings.pluginUpdateRestartHint')
     : completed ? input.packageKind === 'db-engine'
       ? t("settings.driverSavedRestart") : t("settings.pluginSavedNextStepsAreBelow")
     : input.job?.status === 'cancelled' ? t("settings.youCanCloseTheWindowAndReturn")
     : t("settings.operationDetailsAreBelow");
   const stageTone = completed ? 'success'
     : screen === 'unavailable' || input.job?.status === 'failed' ? 'danger'
-    : input.job?.status === 'recovery_required' ? 'warning' : 'accent';
+    : input.job?.status === 'recovery_required' || scheduled ? 'warning' : 'accent';
   const stageIcon = completed || screen === 'ready' ? 'm5 12 4 4L19 6'
     : screen === 'result' || screen === 'unavailable' ? 'M12 5v9m0 3v2'
     : 'M7 7v10m0-10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z'
@@ -181,7 +185,8 @@ export function deriveInstallDialogView(input: InstallDialogInput,
   const primaryDisabled = primaryAction === 'wait' || (primaryAction === 'start' && !canStart)
     || (primaryAction === 'apply' || primaryAction === 'retry') && locked;
   const secondaryAction = ['source', 'loading', 'unavailable'].includes(screen) ? 'dismiss'
-    : screen === 'ready' || screen === 'progress' && !clarifying && input.job?.status === 'running'
+    : screen === 'ready' || scheduled
+      || screen === 'progress' && !clarifying && input.job?.status === 'running'
       ? 'cancel' : screen === 'result' && input.job?.status === 'failed' ? 'close' : null;
   const secondaryLabel = secondaryAction === 'dismiss' ? t("settings.cancel")
     : secondaryAction === 'cancel'

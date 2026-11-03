@@ -73,6 +73,20 @@ const rootId: string | undefined = roots[0]?.id;
 const asset = await options.core.documents.readAsset({ source: 'grigdesk', path: 'image.png' });
 const bytes: Buffer = asset.content;
 const value: Promise<number> = options.core.withPathLock('key', async () => 42);
+if (options.core.modelText && options.core.project && options.core.sandboxes) {
+  const result = await options.core.modelText({
+    modelRef: { provider: 'example', model: 'model', effort: 'high' }, message: 'данные',
+    onReceipt: (receipt) => { const cost: number | null = receipt.cost; },
+  });
+  const reply: string = result.reply;
+  const project = await options.core.project('example');
+  const projectId: string = project.id;
+  const overview = await options.core.sandboxes();
+  // @ts-expect-error Cwd не является параметром model-only вызова.
+  options.core.modelText({ modelRef: { provider: 'p', model: 'm' }, message: '', cwd: '/tmp' });
+  // @ts-expect-error Дополнительного версионированного hostServices нет.
+  options.hostServices;
+}
 const providers = await options.core.getProviders('3d');
 for (const provider of providers) {
   const snapshot = provider.snapshot?.();
@@ -227,7 +241,7 @@ test('TSDK-PACKAGE: внешняя команда создаёт перенос�
   assert.equal(metadata.name, '@grigdesk/plugin-types');
   assert.equal(metadata.type, 'module');
   assert.equal(metadata.private, true);
-  assert.equal(metadata.version, `${version}-api2.1`);
+  assert.equal(metadata.version, `${version}-api2.2`);
   assert.equal(metadata.peerDependencies.vue, `~${vueVersion}`);
   assert.ok(semver.satisfies(vueVersion, metadata.peerDependencies.vue));
   assert.equal(semver.satisfies(`${semver.major(vueVersion)}.${semver.minor(vueVersion) + 1}.0`,

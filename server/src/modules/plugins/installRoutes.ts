@@ -243,13 +243,7 @@ export default async function installRoutes(
         },
       },
     }, async (request: FastifyRequest<{ Params: { id: string } }>) => {
-      const result = await installs.remove(request.params.id);
-
-      if (!driver) {
-        app.sse?.broadcast?.('state-change', { plugins: true });
-      }
-
-      return result;
+      return installs.remove(request.params.id);
     });
   }
 
