@@ -169,7 +169,7 @@ function git(value: unknown, path: string) {
   };
 }
 
-const fileDiff = objectOf({
+const fileDiffFields = objectOf({
   path: text,
   status: text,
   binary: boolean,
@@ -177,6 +177,136 @@ const fileDiff = objectOf({
   oldContent: text,
   newContent: text,
 });
+/**
+ * Необязательный fingerprint сохраняет совместимость со старым сервером.
+ * При наличии проверяется полный SHA256, а не произвольная строка.
+ */
+function fingerprint(value: unknown, path: string): string {
+  const result = text(value, path);
+
+  if (!/^[a-f0-9]{64}$/u.test(result)) {
+    throw new CodeContractError(path);
+  }
+
+  return result;
+}
+
+function fileDiff(value: unknown, path: string) {
+  const source = record(value, path);
+
+  return {
+    ...fileDiffFields(value, path),
+    ...(source.fingerprint === undefined
+      ? {}
+      : { fingerprint: fingerprint(source.fingerprint, `${path}.fingerprint`) }),
+  };
+}
+
+export interface CodeComparison {
+  group: 'work' | 'staged' | 'commits';
+  path: string;
+  base?: string;
+  to?: string;
+  work?: boolean;
+}
+
+const reviewFingerprints = objectOf({
+  comparisons: listOf(objectOf({
+    ...{ group: gitGroup, path: text },
+    base: optional(text),
+    to: optional(text),
+    work: optional(boolean),
+    fingerprint: nullable(fingerprint),
+  })),
+});
+const conflictSide = objectOf({
+  presence: boolean,
+  binary: boolean,
+  tooBig: boolean,
+  content: text,
+  fingerprint,
+});
+const conflict = objectOf({
+  path: text,
+  base: conflictSide,
+  ours: conflictSide,
+  theirs: conflictSide,
+  work: conflictSide,
+});
+const partialAtom = objectOf({
+  id: text,
+  oldLine: nullable(numeric),
+  newLine: nullable(numeric),
+  oldText: text,
+  newText: text,
+});
+const partialDiff = objectOf({
+  token: text,
+  fingerprint: optional(fingerprint),
+  path: text,
+  group: oneOf('work', 'staged'),
+  patch: text,
+  hunks: listOf(objectOf({
+    id: text,
+    oldStart: numeric,
+    newStart: numeric,
+    atoms: listOf(partialAtom),
+  })),
+});
+const actionEntry = objectOf({ path: text, oldPath: optional(text) });
+const actionFailure = objectOf({ path: text, reason: text });
+const actionPreview = objectOf({
+  token: text,
+  eligible: listOf(actionEntry),
+  excluded: listOf(actionFailure),
+});
+const actionResult = objectOf({
+  ok: boolean,
+  completed: listOf(actionEntry),
+  failed: listOf(actionFailure),
+  unattempted: listOf(actionEntry),
+});
+const ignorePreview = objectOf({
+  token: text,
+  target: oneOf('shared', 'local'),
+  rules: listOf(text),
+  paths: listOf(text),
+});
+
+export interface CodeActionOptions {
+  action: 'stage' | 'unstage' | 'discard' | 'clean-new' | 'delete-new-dir';
+  group: 'work' | 'staged';
+  paths?: string[];
+  directory?: string;
+  token?: string;
+}
+
+export interface CodeIgnoreOptions {
+  target: 'shared' | 'local';
+  paths?: string[];
+  directory?: string;
+  token?: string;
+}
+
+export interface CodePartialOptions {
+  group: 'work' | 'staged';
+  path: string;
+  token: string;
+  atomIds: string[];
+}
+
+export const parseCodeReviewFingerprints = (value: unknown) => reviewFingerprints(value, 'fingerprints');
+export const parseCodeConflict = (value: unknown) => conflict(value, 'conflict');
+export const parseCodePartialDiff = (value: unknown) => partialDiff(value, 'partialDiff');
+export const parseCodeActionPreview = (value: unknown) => actionPreview(value, 'actionPreview');
+export const parseCodeActionResult = (value: unknown) => actionResult(value, 'actionResult');
+export const parseCodeIgnorePreview = (value: unknown) => ignorePreview(value, 'ignorePreview');
+
+export type CodePartialDiff = ReturnType<typeof partialDiff>;
+export type CodeActionPreview = ReturnType<typeof actionPreview>;
+export type CodeActionResult = ReturnType<typeof actionResult>;
+export type CodeConflict = ReturnType<typeof conflict>;
+
 const commitRange = objectOf({
   from: text,
   to: text,

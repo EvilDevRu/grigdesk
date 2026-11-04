@@ -19,6 +19,13 @@ import {
 } from '../../server/src/lib/codeCommitMessage.ts';
 import { COMMIT_MESSAGE_MAX } from '../../server/src/lib/git.ts';
 import codeModule from '../../server/src/modules/code/index.ts';
+import {
+  git as reviewGit,
+  indexBytes,
+  mergeConflict,
+  reviewFixture,
+  success,
+} from './code-review-fixture.js';
 
 const exec = promisify(execFile);
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -669,4 +676,262 @@ test('CODE-ACTION-09: `−` работает и до первого коммит
   assert.equal(snapshot.staged.length, 0);
   assert.ok(snapshot.files.some((file) => file.path === 'first.js'));
   assert.equal(await readFile(path.join(root, 'first.js'), 'utf8'), 'first\n');
+});
+
+test('CODE-GUARD-CONFLICT-RESTORE: discard all сохраняет U, новые и staged blobs', async (t) => {
+  const fixture = await reviewFixture(t, {
+    files: { 'app.txt': 'a\nb\nc\nd\n', 'tracked.txt': 'база\n' },
+  });
+  const conflict = await mergeConflict(fixture);
+
+  await fixture.write('tracked.txt', 'индекс\n');
+  await reviewGit(fixture.root, ['add', 'tracked.txt']);
+  await fixture.write('tracked.txt', 'рабочее\n');
+  await fixture.write('new.txt', 'новый\n');
+
+  const stages = await reviewGit(fixture.root, ['ls-files', '--stage']);
+  const markers = await readFile(path.join(fixture.root, conflict));
+  const response = await fixture.request('discard', { all: true });
+
+  success(response, 'discard all');
+  assert.equal(await readFile(path.join(fixture.root, 'tracked.txt'), 'utf8'), 'индекс\n');
+  assert.equal(await readFile(path.join(fixture.root, 'new.txt'), 'utf8'), 'новый\n');
+  assert.deepEqual(await readFile(path.join(fixture.root, conflict)), markers);
+  assert.equal(await reviewGit(fixture.root, ['ls-files', '--stage']), stages);
+});
+
+/**
+ * Preview и execute используют один точный набор leaf-путей или явно названный каталог.
+ * Токен берётся из HTTP-ответа; тест не вычисляет подтверждение вместо сервера.
+ */
+async function scopedAction(fixture, action, scope, group = 'work') {
+  const payload = {
+    action,
+    group,
+    ...scope,
+  };
+  const preview = success(await fixture.request('action-preview', payload), `preview ${action}`);
+  const response = await fixture.request('action-execute', { ...payload, token: preview.token });
+
+  return { preview, response };
+}
+
+test('CODE-DIR-CLEAN: pure-new папка удаляется только после точного preview', async (t) => {
+  const fixture = await reviewFixture(t);
+
+  await fixture.write('new/a.txt', 'a\n');
+  await fixture.write('new/sub/b.txt', 'b\n');
+  await fixture.write('new-other/keep.txt', 'сосед\n');
+
+  const { preview, response } = await scopedAction(fixture, 'delete-new-dir', { directory: 'new' });
+
+  assert.deepEqual(preview.eligible.map((entry) => entry.path).sort(), ['new/a.txt', 'new/sub/b.txt']);
+  success(response, 'удаление новой папки');
+  await assert.rejects(readFile(path.join(fixture.root, 'new/a.txt')), { code: 'ENOENT' });
+  await assert.rejects(readFile(path.join(fixture.root, 'new/sub/b.txt')), { code: 'ENOENT' });
+  await assert.rejects(readFile(path.join(fixture.root, 'new')), { code: 'ENOENT' });
+  assert.equal(await readFile(path.join(fixture.root, 'new-other/keep.txt'), 'utf8'), 'сосед\n');
+});
+
+for (const protection of ['tracked', 'staged', 'ignored', 'hidden', 'symlink', 'nested-git']) {
+  test(`CODE-DIR-PROTECT: whole-dir запрещён при ${protection}`, async (t) => {
+    const fixture = await reviewFixture(t);
+
+    await fixture.write('src/new.txt', 'новый\n');
+
+    if (protection === 'tracked' || protection === 'staged') {
+      await fixture.write('src/keep.txt', 'сохранить\n');
+      await reviewGit(fixture.root, ['add', 'src/keep.txt']);
+
+      if (protection === 'tracked') {
+        await reviewGit(fixture.root, ['commit', '-qm', 'Неизменённый tracked']);
+      }
+    } else if (protection === 'ignored') {
+      await fixture.write('.gitignore', 'src/ignored.txt\n');
+      await fixture.write('src/ignored.txt', 'игнорируемый\n');
+    } else if (protection === 'hidden') {
+      await fixture.write('src/.state/keep.txt', 'служебный\n');
+    } else if (protection === 'nested-git') {
+      await fixture.write('src/nested/keep.txt', 'вложенный\n');
+      await reviewGit(path.join(fixture.root, 'src/nested'), ['init', '-q']);
+    } else {
+      const { symlink } = await import('node:fs/promises');
+
+      await fixture.write('outside.txt', 'цель\n');
+      await symlink('../outside.txt', path.join(fixture.root, 'src/link'));
+    }
+
+    const before = await indexBytes(fixture.root);
+    const response = await fixture.request('action-preview', {
+      action: 'delete-new-dir',
+      group: 'work',
+      directory: 'src',
+    });
+
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(await readFile(path.join(fixture.root, 'src/new.txt'), 'utf8'), 'новый\n');
+    assert.deepEqual(await indexBytes(fixture.root), before);
+  });
+}
+
+test('CODE-DIR-DISCARD: mixed restore к индексу, clean-new отдельно, src-other цел', async (t) => {
+  const fixture = await reviewFixture(t, {
+    files: { 'src/app.txt': 'база\n', 'src-other/keep.txt': 'сосед\n' },
+  });
+
+  await fixture.write('src/app.txt', 'staged\n');
+  await reviewGit(fixture.root, ['add', 'src/app.txt']);
+  await fixture.write('src/app.txt', 'work\n');
+  await fixture.write('src/new.txt', 'новый\n');
+  await fixture.write('src-other/keep.txt', 'правка соседа\n');
+
+  const staged = await reviewGit(fixture.root, ['show', ':src/app.txt']);
+  const discarded = await scopedAction(fixture, 'discard', { directory: 'src' });
+
+  success(discarded.response, 'restore каталога');
+  assert.equal(await readFile(path.join(fixture.root, 'src/app.txt'), 'utf8'), staged);
+  assert.equal(await reviewGit(fixture.root, ['show', ':src/app.txt']), 'staged\n');
+  assert.equal(await readFile(path.join(fixture.root, 'src/new.txt'), 'utf8'), 'новый\n');
+  assert.equal(await readFile(path.join(fixture.root, 'src-other/keep.txt'), 'utf8'), 'правка соседа\n');
+
+  const cleaned = await scopedAction(fixture, 'clean-new', { directory: 'src' });
+
+  success(cleaned.response, 'удаление только новых');
+  assert.deepEqual(cleaned.preview.eligible.map((entry) => entry.path), ['src/new.txt']);
+  await assert.rejects(readFile(path.join(fixture.root, 'src/new.txt')), { code: 'ENOENT' });
+  assert.equal(await readFile(path.join(fixture.root, 'src/app.txt'), 'utf8'), staged);
+});
+
+for (const added of ['untracked', 'staged']) {
+  test(`CODE-DIR-PROTECT: stale inventory после ${added} не расширяет удаление`, async (t) => {
+    const fixture = await reviewFixture(t);
+
+    await fixture.write('new/a.txt', 'a\n');
+
+    const payload = {
+      action: 'delete-new-dir',
+      group: 'work',
+      directory: 'new',
+    };
+    const preview = success(await fixture.request('action-preview', payload), 'preview inventory');
+
+    await fixture.write('new/late.txt', 'поздний\n');
+
+    if (added === 'staged') {
+      await reviewGit(fixture.root, ['add', 'new/late.txt']);
+    }
+
+    const before = await indexBytes(fixture.root);
+    const response = await fixture.request('action-execute', { ...payload, token: preview.token });
+
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(await readFile(path.join(fixture.root, 'new/a.txt'), 'utf8'), 'a\n');
+    assert.equal(await readFile(path.join(fixture.root, 'new/late.txt'), 'utf8'), 'поздний\n');
+    assert.deepEqual(await indexBytes(fixture.root), before);
+  });
+}
+
+test('CODE-BATCH-PARTIAL: независимые порции, 500 completed и один failed', async (t) => {
+  const fixture = await reviewFixture(t);
+  const paths = Array.from({ length: 501 }, (_, index) => `new/${String(index).padStart(3, '0')}.txt`);
+
+  for (const file of paths) {
+    await fixture.write(file, `${file}\n`);
+  }
+
+  const firstPayload = {
+    action: 'stage',
+    group: 'work',
+    paths: paths.slice(0, 500),
+  };
+  const lastPayload = {
+    action: 'stage',
+    group: 'work',
+    paths: paths.slice(500),
+  };
+  const first = success(await fixture.request('action-preview', firstPayload), 'preview 500');
+  const last = success(await fixture.request('action-preview', lastPayload), 'preview 1');
+  const completed = success(await fixture.request('action-execute', {
+    ...firstPayload, token: first.token,
+  }), 'execute 500');
+
+  assert.equal(completed.completed.length, 500);
+  // Чужой index.lock воспроизводит реальный отказ Git во второй порции, без mock apply.
+  await fixture.write('.git/index.lock', 'чужая блокировка');
+
+  const response = await fixture.request('action-execute', { ...lastPayload, token: last.token });
+  const result = response.json();
+
+  assert.notEqual(result.ok, true);
+  assert.deepEqual(result.failed.map((entry) => entry.path), paths.slice(500));
+
+  const cached = await reviewGit(fixture.root, ['diff', '--cached', '--name-only']);
+
+  assert.equal(cached.trim().split('\n').length, 500);
+  assert.equal(await readFile(path.join(fixture.root, paths[500]), 'utf8'), `${paths[500]}\n`);
+  assert.equal(await readFile(path.join(fixture.root, '.git/index.lock'), 'utf8'), 'чужая блокировка');
+});
+
+test('CODE-DIR-DISCARD: scoped restore исключает U с причиной и сохраняет стадии', async (t) => {
+  const fixture = await reviewFixture(t);
+  const file = await mergeConflict(fixture);
+
+  await fixture.write('ordinary.txt', 'индекс\n');
+  await reviewGit(fixture.root, ['add', 'ordinary.txt']);
+  await fixture.write('ordinary.txt', 'работа\n');
+
+  const stages = await reviewGit(fixture.root, ['ls-files', '--stage']);
+  const markers = await readFile(path.join(fixture.root, file));
+  const { preview, response } = await scopedAction(fixture, 'discard', { paths: [file, 'ordinary.txt'] });
+
+  assert.ok(preview.excluded.some((entry) => entry.path === file && entry.reason));
+  success(response, 'restore обычного файла');
+  assert.deepEqual(await readFile(path.join(fixture.root, file)), markers);
+  assert.equal(await readFile(path.join(fixture.root, 'ordinary.txt'), 'utf8'), 'индекс\n');
+  assert.equal(await reviewGit(fixture.root, ['ls-files', '--stage']), stages);
+});
+
+for (const unborn of [false, true]) {
+  test(`CODE-DIR-DISCARD: scoped unstage unborn=${unborn} сохраняет диск`, async (t) => {
+    const fixture = await reviewFixture(t, { unborn });
+
+    await fixture.write('src/new.txt', 'staged\n');
+    await reviewGit(fixture.root, ['add', 'src/new.txt']);
+    await fixture.write('src/new.txt', 'work\n');
+
+    const { response } = await scopedAction(fixture, 'unstage', { paths: ['src/new.txt'] }, 'staged');
+
+    success(response, 'снятие из индекса');
+    assert.equal(await readFile(path.join(fixture.root, 'src/new.txt'), 'utf8'), 'work\n');
+    assert.equal(await reviewGit(fixture.root, ['ls-files', '--', 'src/new.txt']), '');
+  });
+}
+
+test('CODE-BATCH-PARTIAL: первая порция не инвалидирует token независимой второй', async (t) => {
+  const fixture = await reviewFixture(t);
+  const paths = Array.from({ length: 501 }, (_, index) => `new/${index}.txt`);
+
+  for (const file of paths) {
+    await fixture.write(file, `${file}\n`);
+  }
+
+  const firstPayload = {
+    action: 'stage',
+    group: 'work',
+    paths: paths.slice(0, 500),
+  };
+  const lastPayload = {
+    action: 'stage',
+    group: 'work',
+    paths: paths.slice(500),
+  };
+  const first = success(await fixture.request('action-preview', firstPayload), 'первая preview');
+  const last = success(await fixture.request('action-preview', lastPayload), 'вторая preview');
+
+  success(await fixture.request('action-execute', { ...firstPayload, token: first.token }), 'первые 500');
+  success(await fixture.request('action-execute', { ...lastPayload, token: last.token }), 'независимый 501');
+
+  const cached = await reviewGit(fixture.root, ['diff', '--cached', '--name-only']);
+
+  assert.equal(cached.trim().split('\n').length, 501);
 });

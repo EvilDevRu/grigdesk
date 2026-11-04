@@ -1,5 +1,11 @@
 import { api } from './apiClient.ts';
 import {
+  parseCodeReviewFingerprints,
+  parseCodeConflict,
+  parseCodePartialDiff,
+  parseCodeActionPreview,
+  parseCodeActionResult,
+  parseCodeIgnorePreview,
   parseCodeBlame,
   parseCodeCommitResponse,
   parseCodeCommitTitleResponse,
@@ -19,7 +25,13 @@ import {
   parseCodeStageResponse,
   parseCodeUndoCommitResponse,
 } from '../../../shared/plugins/code/codeContracts.ts';
-import type { CodeRequestContext } from '../../../shared/plugins/code/codeContracts.ts';
+import type {
+  CodeComparison,
+  CodeActionOptions,
+  CodeIgnoreOptions,
+  CodePartialOptions,
+  CodeRequestContext,
+} from '../../../shared/plugins/code/codeContracts.ts';
 
 export interface CodeStageOptions {
   all?: boolean;
@@ -44,6 +56,8 @@ export interface CodeCommitOptions {
 }
 
 export interface CodePatchOptions {
+  directory?: string;
+  paths?: string[];
   group: 'staged' | 'work' | 'commits';
   base?: string;
   to?: string;
@@ -134,6 +148,38 @@ export const codeApi = {
     return parseCodeFileDiff(value);
   },
 
+  async reviewFingerprints(context: CodeRequestContext, options: { comparisons: CodeComparison[] }) {
+    return parseCodeReviewFingerprints(await api.post(contextUrl(context, 'review-fingerprints'), options));
+  },
+
+  async conflict(context: CodeRequestContext, path: string) {
+    return parseCodeConflict(await api.get(actionUrl(context, 'conflict', { path })));
+  },
+
+  async partialDiff(context: CodeRequestContext, options: Pick<CodeComparison, 'group' | 'path'>) {
+    return parseCodePartialDiff(await api.get(actionUrl(context, 'partial-diff', options)));
+  },
+
+  async partialIndex(context: CodeRequestContext, options: CodePartialOptions) {
+    return parseCodeStageResponse(await api.post(contextUrl(context, 'partial-index'), options));
+  },
+
+  async actionPreview(context: CodeRequestContext, options: CodeActionOptions) {
+    return parseCodeActionPreview(await api.post(contextUrl(context, 'action-preview'), options));
+  },
+
+  async actionExecute(context: CodeRequestContext, options: CodeActionOptions) {
+    return parseCodeActionResult(await api.post(contextUrl(context, 'action-execute'), options));
+  },
+
+  async ignorePreview(context: CodeRequestContext, options: CodeIgnoreOptions) {
+    return parseCodeIgnorePreview(await api.post(contextUrl(context, 'ignore-preview'), options));
+  },
+
+  async ignore(context: CodeRequestContext, options: CodeIgnoreOptions) {
+    return parseCodeStageResponse(await api.post(contextUrl(context, 'ignore'), options));
+  },
+
   async fileLog(context: CodeRequestContext, path: string) {
     const value: unknown = await api.get(actionUrl(context, 'file-log', { path }));
 
@@ -175,12 +221,18 @@ export const codeApi = {
     return parseCodeCommitsDiff(value);
   },
 
+  /**
+   * Передаёт одну точную область обзора без изменения Git-путей.
+   * Сервер применяет область до ограничения числа файлов и размера patch.
+   */
   async patch(context: CodeRequestContext, options: CodePatchOptions) {
     const value: unknown = await api.get(actionUrl(context, 'patch', {
       group: options.group,
       base: options.base,
       to: options.to,
       path: options.path,
+      directory: options.directory,
+      paths: options.paths ? JSON.stringify(options.paths) : undefined,
       work: options.work ? '1' : undefined,
     }));
 

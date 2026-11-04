@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 
 import { parseCodeBlame, parseCodeCommitsDiff } from '../../shared/plugins/code/codeContracts.ts';
 import codeModule from '../../server/src/modules/code/index.ts';
+import { reviewFixture, success } from './code-review-fixture.js';
 import {
   branchDiff,
   blameFile,
@@ -477,4 +478,38 @@ test('CODE-WORK-04: «Вся ветка» с флагом work включает 
   assert.equal(withWork.files.find((file) => file.path === 'first.txt').add, 2);
   assert.equal(withWork.range.work, true);
   assert.equal(withWork.range.commits, 1);
+});
+
+test('CODE-PATCH-SCOPE: directory фильтруется до 300 файлов, src-other исключён', async (t) => {
+  const fixture = await reviewFixture(t);
+
+  for (let index = 0; index < 301; index += 1) {
+    await fixture.write(`aaa/${index}.txt`, 'чужой файл\n');
+  }
+
+  await fixture.write('src/a.txt', 'нужный\n');
+  await fixture.write('src-other/b.txt', 'не нужен\n');
+
+  const response = success(await fixture.request('patch', undefined, {
+    group: 'work', directory: 'src',
+  }), 'patch directory');
+
+  assert.match(response.patch, /src\/a\.txt/);
+  assert.doesNotMatch(response.patch, /aaa\/|src-other\//);
+  assert.equal(response.truncated, false);
+});
+
+test('CODE-PATCH-SCOPE: явные paths дедуплицируются и не расширяют обзор', async (t) => {
+  const fixture = await reviewFixture(t);
+
+  await fixture.write('app.txt', 'изменено\n');
+  await fixture.write('other.txt', 'сосед\n');
+
+  const response = success(await fixture.request('patch', undefined, {
+    group: 'work', paths: JSON.stringify(['app.txt', 'app.txt']),
+  }), 'patch paths');
+
+  assert.match(response.patch, /app\.txt/);
+  assert.doesNotMatch(response.patch, /other\.txt/);
+  assert.equal(response.patch.match(/^diff --git /gm)?.length, 1);
 });

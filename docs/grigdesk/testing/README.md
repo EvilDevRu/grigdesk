@@ -120,6 +120,7 @@
 - [Подмена providers adapters оставляет настоящий discovery моделей](providers-offline-fixtures.md)
 
 - [Веб-тест монтирует SFC дважды — а работает со сторами первого теста](sfc-store-isolation.md)
+- [SFC-бандлы: удержание фикстур в ESM-кеше и изолированное переиспользование](sfc-bundle-memory.md)
 - [Всплывашка открывается только в первом тесте файла = Vue запомнил document первого окна](vue-document-cache.md)
 - [Модалка «не открылась» в веб-тесте = стаб Teleport работает только при NODE_ENV=test](teleport-test-environment.md)
 - [Сторож, читающий текст задачи, ловит фикстуру, а не страницу](fixture-text-false-positives.md)

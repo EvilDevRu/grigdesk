@@ -275,6 +275,26 @@ function detach() {
   intersectionObserver = null;
 }
 
+/**
+ * Прокручивает виртуальный список к исходному индексу до появления строки в DOM.
+ * Потребитель после nextTick может поставить фокус или применить обычный scrollIntoView.
+ */
+async function reveal(index: number) {
+  if (!active.value || !scroller || !topGap.value || index < 0 || index >= props.items.length) {
+    return;
+  }
+
+  const offset = topGap.value.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+
+  scroller.scrollTop += offset + index * step;
+  view.top = index * step;
+  applyWindow();
+  await nextTick();
+  sync();
+}
+
+defineExpose({ reveal });
+
 watch([() => props.items.length, () => props.overscan], applyWindow, { immediate: true });
 
 // Порог пересекли на живом списке: распорки только что появились или исчезли.

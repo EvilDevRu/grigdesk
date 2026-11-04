@@ -1,6 +1,6 @@
 <template>
   <div class="code-panel" :class="{ compact, narrow: codePanelNarrow }"
-       :aria-busy="loading ? 'true' : undefined">
+       :aria-busy="loading ? 'true' : undefined" @keydown="onDiffKeydown">
     <header ref="panelHeader" class="code-head" tabindex="-1">
       <strong>Код</strong>
       <!-- Выбор рабочей копии живёт в шапке, а не отдельным блоком панели: там он
@@ -482,6 +482,42 @@
                   </UiPressable>
                 </div>
               </section>
+              <div class="code-review-controls">
+                <UiSearchInput v-model="gitFilterPath" data-action="git-filter-path"
+                               :aria-label="t('core.codeReviewFilterPath')" />
+                <UiSelect v-model="gitFilterStatus" compact data-action="git-filter-status"
+                          :aria-label="t('core.codeReviewFilterStatus')">
+                  <option value="">{{ t('core.codeReviewAllStatuses') }}</option>
+                  <option v-for="status in ['A', 'M', 'D', 'U'] as const" :key="status" :value="status">
+                    {{ t(`core.codeReviewStatus${status}`) }}
+                  </option>
+                </UiSelect>
+                <span data-action="git-filter-count">{{ gitFilterFound }} / {{ gitFilterTotal }}</span>
+                <UiButton variant="ghost" data-action="git-filter-clear" @click="clearGitFilter">
+                  {{ t('core.codeReviewClearFilter') }}
+                </UiButton>
+                <UiButton variant="ghost" data-action="git-collapse-all" @click="setAllGitDirs(false)">
+                  {{ t('core.codeReviewCollapseAll') }}
+                </UiButton>
+                <UiButton variant="ghost" data-action="git-expand-all" @click="setAllGitDirs(true)">
+                  {{ t('core.codeReviewExpandAll') }}
+                </UiButton>
+                <UiButton variant="ghost" data-action="git-reveal-current" @click="revealCurrentGitPath">
+                  {{ t('core.codeReviewReveal') }}
+                </UiButton>
+                <span data-action="git-selection-count">{{ gitSelection.size }}</span>
+                <UiSwitch v-if="hiddenSelectionCount" v-model="includeHiddenSelection"
+                          :label="t('core.codeReviewIncludeHidden', { count: hiddenSelectionCount })" />
+                <UiButton v-for="action in selectionActions" :key="action" variant="ghost"
+                          :data-action="`selection-${action}`" :disabled="gitActionBusy || !canSelectionAction(action)"
+                          @click="executeGitSelection(action)">{{ t(`core.codeReviewAction${action}`) }}</UiButton>
+                <UiButton variant="ghost" :disabled="!gitSelection.size" @click="askGitSelection">
+                  {{ t('core.codeReviewAskSelection') }}
+                </UiButton>
+                <UiInlineMessage v-if="gitActionResult" data-action="git-action-result" tone="neutral">
+                  {{ gitActionResult }}
+                </UiInlineMessage>
+              </div>
               <section v-for="group in visibleGitGroups" :key="group.id" class="git-group"
                        :data-group-section="group.id">
               <!-- Сводка отрезка — заголовок группы его файлов в две строки: сам отрезок с
@@ -616,7 +652,8 @@
               <!-- Группа бывает на тысячи файлов (новый репозиторий целиком в индексе):
                    и дерево, и список рисуются окном VirtualRows, а не всеми строками. -->
               <template v-else-if="gitView === 'tree'">
-                <VirtualRows v-slot="{ item: row }" :items="group.rows" :item-key="gitRowKey">
+                <VirtualRows v-slot="{ item: row }" :ref="(instance) => setGitRows(group.id, instance)"
+                             :items="group.rows" :item-key="gitRowKey">
                   <!-- Каталог: та же обойма, что у файла — в индекс уходят все файлы группы
                        под ним. Граница по «/», чтобы src не захватил src-other. -->
                   <div v-if="row.kind === 'dir'" class="git-file-line git-dir-line"
@@ -625,15 +662,32 @@
                                  data-context="code-tree-row"
                                  :data-path="row.path" :data-group="group.id" :data-depth="row.depth"
                                  :aria-expanded="gitOpenDirs.has(row.ref)"
-                                 :style="rowDepth(row.depth)" @click="toggleGitDir(row.ref)">
+                                 :style="rowDepth(row.depth)" :aria-selected="directorySelected(group, row.path)"
+                                 @click="clickGitDirectory(group, row.path, row.ref, $event)"
+                                 @contextmenu.prevent="openGitMenu(row.ref, $event)"
+                                 @keydown="gitRowKeydown(row.ref, $event)">
                       <span class="chev">{{ gitOpenDirs.has(row.ref) ? '▾' : '▸' }}</span>
                       <span class="dname" v-tooltip="row.path">{{ row.name }}</span>
+                      <span data-action="directory-count">{{ directoryCount(group, row.path) }}</span>
                     </UiPressable>
-                    <span v-if="group.mutable" class="git-row-actions">
+                    <span class="git-row-actions">
+                      <UiIconButton role="embedded" :label="t('core.codeReviewSelectPath')"
+                                    :pressed="directorySelected(group, row.path)"
+                                    @click="selectGitPaths(group, groupDirectoryFiles(group.files, row.path), $event)">
+                        ✓
+                      </UiIconButton>
+                      <CodeGitMenu :group="group.id" :path="row.path" directory
+                                   :files="group.files" :open="menuKey === row.ref"
+                                   @update:open="setGitMenu(row.ref, $event)"
+                                   @action="gitMenuAction(group, row.path, true, $event)" />
+                      <UiIconButton role="embedded" data-action="folder-review" :data-dir="row.path"
+                                    :label="t('core.codeReviewFolder')"
+                                    @click="openScopedReview(group, { directory: row.path })">≡</UiIconButton>
                       <UiIconButton
                         class="git-file-action"
                         role="embedded"
                         data-context="code-row-action"
+                        v-if="group.mutable"
                         :data-action="group.id === 'staged' ? 'unstage-dir' : 'stage-dir'"
                         :data-dir="row.path"
                         :label="gitDirActionLabel(group, row.path)"
@@ -647,10 +701,14 @@
                   <div v-else class="git-file-line" data-ui-row="code-change">
                     <UiPressable class="trow frow git-row git-file"
                                  data-context="code-tree-row"
-                                 :class="{ sel: gitSel === row.ref }" :pressed="gitSel === row.ref"
+                                 :class="{ sel: gitSel === row.ref, selected: gitSelection.has(row.ref) }"
+                                 :pressed="gitSel === row.ref" :aria-selected="gitSelection.has(row.ref)"
+                                 :data-viewed="isViewed(comparisonFor(group, row.path)) ? 'true' : undefined"
                                  :data-path="row.path" :data-group="group.id" :data-depth="row.depth"
                                  v-tooltip="gitFileHint(row.file)"
-                                 :style="rowDepth(row.depth)" @click="selectGit(row.ref)">
+                                 :style="rowDepth(row.depth)" @click="clickGitFile(group, row.path, $event)"
+                                 @contextmenu.prevent="openGitMenu(row.ref, $event)"
+                                 @keydown="gitRowKeydown(row.ref, $event)">
                       <span class="chev" aria-hidden="true"></span>
                       <span class="st" :class="row.file.status">
                         {{ STLABEL[row.file.status] || row.file.status }}
@@ -664,33 +722,13 @@
                     <!-- Обойма действий строки: к правому краю прижата она одна, а не каждая кнопка —
                          иначе «Откатить» и «+» ложились в одну точку. -->
                     <span class="git-row-actions">
-                      <UiPopover v-if="group.id === 'work' && row.file.status !== 'U'"
-                                 has-popup="menu" placement="bottom-end"
-                                 :style="{ width: 'min(240px, calc(100vw - 20px))' }">
-                        <template #trigger>
-                          <UiIconButton class="git-file-action" role="embedded"
-                                        data-context="code-row-action" data-action="row-more"
-                                        :data-file="row.path" label="Действия с файлом"
-                                        v-tooltip="`Действия с ${row.path}`">
-                            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                              <circle cx="3" cy="8" r="1.15" />
-                              <circle cx="8" cy="8" r="1.15" />
-                              <circle cx="13" cy="8" r="1.15" />
-                            </svg>
-                          </UiIconButton>
-                        </template>
-                        <template #default="{ close }">
-                          <UiButton block variant="ghost" tone="danger"
-                                    data-context="code-popover-action"
-                                    :data-group="group.id"
-                                    :data-action="row.file.status === 'A' ? 'clean' : 'discard'"
-                                    :data-file="row.path" :loading="gitBusy === discardGitFileKey(row.file)"
-                                    :disabled="gitActionBusy"
-                                    @click="discardGitFile(group, row.file); close('action')">
-                            {{ discardGitFileLabel(row.file) }}
-                          </UiButton>
-                        </template>
-                      </UiPopover>
+                      <UiIconButton role="embedded" :label="t('core.codeReviewSelectPath')"
+                                    :pressed="gitSelection.has(row.ref)"
+                                    @click="selectGitPaths(group, [row.path], $event)">✓</UiIconButton>
+                      <CodeGitMenu :group="group.id" :path="row.path" :status="row.file.status"
+                                   :open="menuKey === gitRef(group.id, row.path)"
+                                   @update:open="setGitMenu(gitRef(group.id, row.path), $event)"
+                                   @action="gitMenuAction(group, row.path, false, $event)" />
                       <UiIconButton
                         v-if="group.mutable"
                         class="git-file-action"
@@ -711,15 +749,20 @@
               <!-- Плоский список: сначала имя файла, каталог — приглушённым хвостом.
                    Целый путь обрезался с конца, то есть съедал именно имя. -->
               <template v-else>
-                <VirtualRows v-slot="{ item: entry }" :items="group.list" :item-key="gitListKey">
+                <VirtualRows v-slot="{ item: entry }" :ref="(instance) => setGitRows(group.id, instance)"
+                             :items="group.list" :item-key="gitListKey">
                   <div class="git-file-line" data-ui-row="code-change">
                     <UiPressable class="trow frow git-row git-file"
                                  data-context="code-tree-row"
                                  :class="{ sel: gitSel === gitRef(group.id, entry.file.path) }"
                                  :pressed="gitSel === gitRef(group.id, entry.file.path)"
+                                 :aria-selected="gitSelection.has(gitRef(group.id, entry.file.path))"
+                                 :data-viewed="isViewed(comparisonFor(group, entry.file.path)) ? 'true' : undefined"
                                  :data-path="entry.file.path" :data-group="group.id"
                                  v-tooltip="gitFileHint(entry.file)"
-                                 @click="selectGit(gitRef(group.id, entry.file.path))">
+                                 @click="clickGitFile(group, entry.file.path, $event)"
+                                 @contextmenu.prevent="openGitMenu(gitRef(group.id, entry.file.path), $event)"
+                                 @keydown="gitRowKeydown(gitRef(group.id, entry.file.path), $event)">
                       <span class="st" :class="entry.file.status">
                         {{ STLABEL[entry.file.status] || entry.file.status }}
                       </span>
@@ -735,33 +778,13 @@
                     <!-- Обойма действий строки: к правому краю прижата она одна, а не каждая кнопка —
                          иначе «Откатить» и «+» ложились в одну точку. -->
                     <span class="git-row-actions">
-                      <UiPopover v-if="group.id === 'work' && entry.file.status !== 'U'"
-                                 has-popup="menu" placement="bottom-end"
-                                 :style="{ width: 'min(240px, calc(100vw - 20px))' }">
-                        <template #trigger>
-                          <UiIconButton class="git-file-action" role="embedded"
-                                        data-context="code-row-action" data-action="row-more"
-                                        :data-file="entry.file.path" label="Действия с файлом"
-                                        v-tooltip="`Действия с ${entry.file.path}`">
-                            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                              <circle cx="3" cy="8" r="1.15" />
-                              <circle cx="8" cy="8" r="1.15" />
-                              <circle cx="13" cy="8" r="1.15" />
-                            </svg>
-                          </UiIconButton>
-                        </template>
-                        <template #default="{ close }">
-                          <UiButton block variant="ghost" tone="danger"
-                                    data-context="code-popover-action" :data-group="group.id"
-                                    :data-action="entry.file.status === 'A' ? 'clean' : 'discard'"
-                                    :data-file="entry.file.path"
-                                    :loading="gitBusy === discardGitFileKey(entry.file)"
-                                    :disabled="gitActionBusy"
-                                    @click="discardGitFile(group, entry.file); close('action')">
-                            {{ discardGitFileLabel(entry.file) }}
-                          </UiButton>
-                        </template>
-                      </UiPopover>
+                      <UiIconButton role="embedded" :label="t('core.codeReviewSelectPath')"
+                                    :pressed="gitSelection.has(gitRef(group.id, entry.file.path))"
+                                    @click="selectGitPaths(group, [entry.file.path], $event)">✓</UiIconButton>
+                      <CodeGitMenu :group="group.id" :path="entry.file.path" :status="entry.file.status"
+                                   :open="menuKey === gitRef(group.id, entry.file.path)"
+                                   @update:open="setGitMenu(gitRef(group.id, entry.file.path), $event)"
+                                   @action="gitMenuAction(group, entry.file.path, false, $event)" />
                       <UiIconButton
                         v-if="group.mutable"
                         class="git-file-action"
@@ -961,6 +984,28 @@
             Сбросить диапазон
           </UiButton>
           <span class="grow"></span>
+          <div v-if="tab === 'git' && !fileHistoryActive" class="hunk-navigation" role="group"
+               :aria-label="t('core.codeDiffHunkNavigation')">
+            <UiButton variant="ghost" data-action="hunk-previous" :disabled="!diffHunks.length"
+                      :aria-label="t('core.codeDiffPreviousHunk')" @click="navigateHunk(-1)">↑</UiButton>
+            <span data-action="hunk-position" class="mono" aria-live="polite">
+              {{ diffHunks.length ? hunkIndex + 1 : 0 }} / {{ diffHunks.length }}
+            </span>
+            <UiButton variant="ghost" data-action="hunk-next" :disabled="!diffHunks.length"
+                      :aria-label="t('core.codeDiffNextHunk')" @click="navigateHunk(1)">↓</UiButton>
+          </div>
+          <UiSelect v-if="tab === 'git' && shownEntry && !fileHistoryActive" compact data-action="diff-file-list"
+                    :aria-label="t('core.codeDiffFiles')"
+                    :model-value="gitRef(shownEntry.group.id, shownEntry.file.path)"
+                    @change="selectQuickDiff">
+            <option v-for="file in shownEntry.group.files" :key="file.path"
+                    :value="gitRef(shownEntry.group.id, file.path)">{{ file.path }}</option>
+          </UiSelect>
+          <UiButton variant="ghost" data-action="diff-layout-switch"
+                    :disabled="oneSidedDiff || editorForcesInlineDiff"
+                    @click="setDiffLayout(!side)">
+            {{ renderSideBySide ? t('core.codeDiffSideBySide') : t('core.codeDiffUnified') }}
+          </UiButton>
           <div v-if="gitFileNavigation" class="file-navigation" role="group"
                :aria-label="`Навигация по файлам изменений: файл ${gitFileNavigation.index + 1} из ${gitFileNavigation.total}`">
             <UiIconButton role="embedded" data-context="code-editor-action"
@@ -1031,18 +1076,123 @@
                         @change="toggleDiffWhitespace">
                 Игнорировать пробелы по краям строк
               </UiSwitch>
+              <UiSwitch :model-value="diffPreferences.collapse" data-action="diff-collapse"
+                        @change="setDiffBoolean('collapse', $event)">
+                {{ t('core.codeDiffCollapse') }}
+              </UiSwitch>
+              <label>{{ t('core.codeDiffContext') }}
+                <UiSelect :model-value="diffPreferences.context" data-action="diff-context"
+                          @change="setDiffChoice('context', $event)">
+                  <option value="3">3</option>
+                  <option value="10">10</option>
+                  <option value="all">{{ t('core.codeDiffAllLines') }}</option>
+                </UiSelect>
+              </label>
+              <label>{{ t('core.codeDiffDetail') }}
+                <UiSelect :model-value="diffPreferences.detail" data-action="diff-detail"
+                          @change="setDiffChoice('detail', $event)">
+                  <option value="line">{{ t('core.codeDiffLines') }}</option>
+                  <option value="word">{{ t('core.codeDiffWords') }}</option>
+                  <option value="char">{{ t('core.codeDiffCharacters') }}</option>
+                </UiSelect>
+              </label>
+              <label>{{ t('core.codeDiffWhitespace') }}
+                <UiSelect :model-value="diffPreferences.whitespace" data-action="diff-whitespace-mode"
+                          @change="setDiffChoice('whitespace', $event)">
+                  <option value="all">{{ t('core.codeDiffAllDifferences') }}</option>
+                  <option value="trim">{{ t('core.codeDiffTrim') }}</option>
+                  <option value="ignore-all">{{ t('core.codeDiffIgnoreWhitespace') }}</option>
+                </UiSelect>
+              </label>
+              <UiSwitch :model-value="diffPreferences.renderWhitespace" data-action="diff-render-whitespace"
+                        @change="setDiffBoolean('renderWhitespace', $event)">
+                {{ t('core.codeDiffWhitespaceGlyphs') }}
+              </UiSwitch>
+              <UiSwitch :model-value="diffPreferences.sync" data-action="diff-sync-scroll"
+                        :disabled="!renderSideBySide" @change="setDiffBoolean('sync', $event)">
+                {{ t('core.codeDiffSyncScroll') }}
+              </UiSwitch>
+              <UiSwitch :model-value="diffPreferences.align" data-action="diff-align"
+                        :disabled="!renderSideBySide" @change="setDiffBoolean('align', $event)">
+                {{ t('core.codeDiffAlign') }}
+              </UiSwitch>
+              <p v-if="!renderSideBySide" class="code-popover-note">{{ t('core.codeDiffPairOnly') }}</p>
             </div>
           </UiPopover>
         </div>
         </header>
+        <div v-if="tab === 'git' && shownEntry && !fileHistoryActive" class="code-review-controls">
+          <UiButton data-action="mark-viewed" variant="ghost" :disabled="diffLoading || !currentDiffContent()"
+                    :pressed="isViewed(currentComparison())" @click="markViewed">
+            {{ t('core.codeReviewViewed') }}
+          </UiButton>
+          <span data-action="review-progress">{{ t('core.codeReviewComparisons') }}: {{ viewedCount }} /
+            {{ reviewComparisonCount }}</span>
+          <UiButton data-action="next-unreviewed" variant="ghost"
+                    :aria-label="t('core.codeReviewNextUnreviewed')" @click="nextUnreviewed">
+            {{ t('core.codeReviewNextUnreviewed') }}
+          </UiButton>
+          <UiButton data-action="select-diff-hunk" variant="ghost" :disabled="!diffHunks.length"
+                    @click="selectCurrentHunk">{{ t('core.codeReviewSelectHunk') }}</UiButton>
+          <UiButton data-action="add-review-note" variant="ghost" :disabled="!diffDisplay"
+                    @click="addReviewNote(false)">{{ t('core.codeReviewAddNote') }}</UiButton>
+          <UiButton data-action="explain-selection" variant="ghost" :disabled="!diffDisplay"
+                    @click="addReviewNote(true)">{{ t('core.codeReviewExplain') }}</UiButton>
+          <UiButton data-action="review-notes-preview" variant="ghost" :disabled="!reviewNotes.length"
+                    @click="previewReviewNotes">{{ t('core.codeReviewNotes') }} ({{ reviewNotes.length }})</UiButton>
+          <UiButton v-if="partialAvailable" data-action="partial-stage" variant="ghost" :disabled="gitActionBusy"
+                    @click="applyPartialSelection(false)">{{ t(shownEntry.group.id === 'staged'
+                      ? 'core.codeReviewPartialUnstage' : 'core.codeReviewPartialStage') }}</UiButton>
+          <UiButton v-if="partialAvailable" data-action="partial-stage-hunk" variant="ghost"
+                    :disabled="gitActionBusy || !diffHunks.length" @click="applyPartialSelection(true)">
+            {{ t(shownEntry.group.id === 'staged'
+              ? 'core.codeReviewPartialUnstageHunk' : 'core.codeReviewPartialStageHunk') }}
+          </UiButton>
+        </div>
+        <div v-if="noteEditing" class="code-review-controls">
+          <UiTextarea v-model="noteText" data-action="review-note-text" :aria-label="t('core.codeReviewAddNote')" />
+          <UiButton data-action="save-review-note" @click="saveReviewNote">{{ t('core.codeReviewSave') }}</UiButton>
+          <UiButton variant="ghost" @click="noteEditing = false">{{ t('core.codeReviewCancel') }}</UiButton>
+        </div>
+        <div v-if="draftEditing" class="code-review-draft">
+          <div v-for="(note, index) in reviewNotes" :key="note.id" class="code-review-controls">
+            <span>{{ note.comparison.path }}: {{ note.from }}–{{ note.to }} {{ note.stale ? '⚠' : '' }}</span>
+            <UiButton variant="ghost" @click="editReviewNote(index)">{{ t('core.codeReviewEdit') }}</UiButton>
+            <UiButton variant="ghost" @click="removeReviewNote(index)">{{ t('core.codeReviewRemove') }}</UiButton>
+          </div>
+          <UiTextarea v-model="draftText" data-action="review-draft" :aria-label="t('core.codeReviewNotes')" />
+          <UiButton data-action="review-create-draft" @click="sendReviewNotes">
+            {{ t('core.codeReviewCreateDraft') }}
+          </UiButton>
+          <UiButton variant="ghost" @click="draftEditing = false">{{ t('core.codeReviewCancel') }}</UiButton>
+        </div>
+        <UiInlineMessage v-if="reviewError" tone="danger">{{ reviewError }}</UiInlineMessage>
+        <div v-if="shownEntry?.file.status === 'U' && tab === 'git'" class="code-review-controls">
+          <UiButton v-for="name in ['base', 'ours', 'theirs'] as const" :key="name" variant="ghost"
+                    :data-action="`conflict-${name}`" @click="showConflictPair(name)">
+            {{ t(`core.codeReviewConflict${name}`) }}
+            {{ conflictData && !conflictData[name].presence ? t('core.codeReviewAbsent') : '' }}
+          </UiButton>
+          <UiButton variant="ghost" @click="showConflictPair('work')">{{ t('core.codeReviewConflictwork') }}</UiButton>
+          <UiButton data-action="conflict-previous" variant="ghost" @click="navigateConflict(-1)">↑</UiButton>
+          <span data-action="conflict-position">{{ conflictLines.length ? conflictIndex + 1 : 0 }} /
+            {{ conflictLines.length }}</span>
+          <UiButton data-action="conflict-next" variant="ghost" @click="navigateConflict(1)">↓</UiButton>
+          <UiButton data-action="ask-conflict" variant="ghost" @click="askConflict">
+            {{ t('core.codeReviewAskConflict') }}
+          </UiButton>
+          <span v-if="conflictError">{{ conflictError }}</span>
+        </div>
         <div class="ebody" data-escape-owner="monaco">
           <div v-show="tab === 'files' && !imageSrc && !fileHistoryActive"
                ref="fileHost" class="editor"></div>
-          <div v-show="(tab === 'git' && !patchReviewActive) || fileHistoryActive"
-               ref="diffHost" class="editor"></div>
+          <CodeDiffView v-show="(tab === 'git' && !patchReviewActive) || fileHistoryActive"
+                        ref="diffView" class="editor" :comparison="diffDisplay"
+                        :side-by-side="renderSideBySide" :wrap="diffWrap" :preferences="diffPreferences"
+                        @computed="acceptDiffHunks" @position="updateHunkPosition" />
           <PatchReview v-if="patchReviewActive && patchReviewData"
-                       :patch="patchReviewData.patch" :truncated="patchReviewData.truncated"
-                       :files="patchReviewGroup?.files || []" @open="openPatchReviewFile" />
+                       :scope-label="patchScopeLabel" :patch="patchReviewData.patch" :truncated="patchReviewData.truncated"
+                       :files="patchScopeFiles" @open="openPatchReviewFile" />
           <div v-else-if="patchReviewActive && patchLoading" class="overlay">Собираю обзор…</div>
           <div v-else-if="patchReviewActive && patchError" class="overlay">{{ patchError }}</div>
           <!-- Картинка вместо пустого редактора: сырые байты отдаёт raw-роут «Кода». -->
@@ -1124,6 +1274,8 @@ import { useSse } from '../../composables/useSse';
 import { useChatStore } from '../../stores/chat.ts';
 import { router } from '../../router.ts';
 import type {
+  CodeActionOptions,
+  CodeComparison,
   CodeBlameLine,
   CodeDirectoryEntry,
   CodeCommitsDiffResponse,
@@ -1141,6 +1293,11 @@ import type {
   CodeTarget,
 } from '../../../../shared/plugins/code/codeContracts';
 import PatchReview from './PatchReview.vue';
+import CodeDiffView from './CodeDiffView.vue';
+import CodeGitMenu from './CodeGitMenu.vue';
+import { useCodeReviewState } from '../../features/code/codeReviewState';
+import { readDiffPreferences, storeDiffPreferences } from '../../features/code/codeDiffPreferences';
+import type { DiffHunk, DiffPreferences, DiffSide } from '../../features/code/codeDiffModel';
 import VirtualRows from '../../shared/VirtualRows.vue';
 import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco';
 import { codeLinkHref } from '../../features/code/links';
@@ -1150,6 +1307,8 @@ import {
   buildCodeContextChoices,
   buildCodeContexts,
   buildGitGroups,
+  buildGitTree,
+  flattenGitTree,
   chunkList,
   groupDirectoryFiles,
   splitGitPath,
@@ -1187,6 +1346,7 @@ import {
   promptDialog,
   vTooltip,
   UiLoadingState,
+  t,
 } from '../../ui';
 
 type CodeTab = 'files' | 'git';
@@ -1361,6 +1521,7 @@ const diffLoading = ref(false);
 const diffError = ref('');
 const patchContent = ref(new Map<string, CodePatchResponse>());
 const patchReviewKey = ref('');
+const patchScope = ref<{ directory?: string; paths?: string[] }>({});
 const patchReviewGroupId = ref<GitGroupId | null>(null);
 const patchLoading = ref(false);
 const patchError = ref('');
@@ -1569,6 +1730,15 @@ const renderSideBySide = computed(() => (
 ));
 const diffWrap = ref(localStorage.getItem('grigdesk-diff-wrap') === '1');
 const ignoreTrimWhitespace = ref(localStorage.getItem('grigdesk-diff-ws') === '1');
+const diffPreferences = ref(readDiffPreferences());
+const diffHunks = ref<DiffHunk[]>([]);
+const hunkIndex = ref(0);
+let pendingHunk: 'first' | 'last' | null = null;
+const diffDisplay = ref<{
+  path: string;
+  oldContent: string;
+  newContent: string;
+} | null>(null);
 const gitView = ref(normalizeGitView(localStorage.getItem('grigdesk-code-git-view')));
 // Свёрнутые группы изменений — настройка устройства: свёрнутое дерево правок открывает
 // список коммитов без прокрутки, а счётчик и итог группы остаются в заголовке.
@@ -1651,10 +1821,33 @@ const commitGroup = computed(() => {
 });
 const gitGroups = computed(() => buildGitGroups(git.value, gitOpenDirs.value, commitGroup.value));
 const changeGroups = computed(() => gitGroups.value.filter((group) => group.id !== 'commits'));
-const visibleGitGroups = computed(() => (
+const gitFilterPath = ref('');
+const gitFilterStatus = ref('');
+const paneGitGroups = computed(() => (
   gitPane.value === 'changes'
     ? changeGroups.value
     : gitGroups.value.filter((group) => group.id === 'commits')
+));
+const visibleGitGroups = computed(() => paneGitGroups.value.map((group) => {
+  const files = group.files.filter((file) => (
+    file.path.toLocaleLowerCase().includes(gitFilterPath.value.toLocaleLowerCase())
+    && (!gitFilterStatus.value || (file.status === 'R' ? 'M' : file.status) === gitFilterStatus.value)
+  ));
+  const tree = buildGitTree(files);
+
+  return {
+    ...group,
+    files,
+    tree,
+    rows: flattenGitTree(tree, gitOpenDirs.value, group.id),
+    list: files.map((file) => ({ file, ...splitGitPath(file.path) })),
+  };
+}));
+const gitFilterFound = computed(() => (
+  visibleGitGroups.value.reduce((sum, group) => sum + group.files.length, 0)
+));
+const gitFilterTotal = computed(() => (
+  paneGitGroups.value.reduce((sum, group) => sum + group.files.length, 0)
 ));
 
 // Ключи строк для VirtualRows — постоянные функции, а не стрелки в шаблоне: новая стрелка
@@ -1904,6 +2097,13 @@ const gitScopeBadge = computed(() => {
   }
 
   if (entry.file.status === 'U') {
+    if (conflictPair.value !== 'work') {
+      return {
+        label: `${t('core.codeReviewConflictbase')} → ${t(`core.codeReviewConflict${conflictPair.value}`)}`,
+        hint: t('core.codeReviewConflictReadOnly'),
+      };
+    }
+
     return {
       label: 'наша версия → рабочая копия',
       hint: 'слева — наша версия до конфликта, справа — файл с маркерами конфликта',
@@ -1948,14 +2148,12 @@ const diffLayoutLabel = computed(() => (
 
 // ── Monaco: оба редактора живут под v-show, но модели очищаются при смене контекста. ──
 const fileHost = ref<HTMLElement | null>(null);
-const diffHost = ref<HTMLElement | null>(null);
+const diffView = ref<InstanceType<typeof CodeDiffView> | null>(null);
 const editorHost = ref<HTMLElement | null>(null);
 const panelHeader = ref<HTMLElement | null>(null);
 const layHost = ref<HTMLElement | null>(null);
 let fileEditor: monaco.editor.IStandaloneCodeEditor | null = null;
-let diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
 let fileModel: monaco.editor.ITextModel | null = null;
-let diffModels: monaco.editor.ITextModel[] = [];
 let blameDecorations: monaco.editor.IEditorDecorationsCollection | null = null;
 let blameMouseDisposable: { dispose(): void } | null = null;
 let codeLinkCopiedTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1987,6 +2185,802 @@ function rangeQuery(range: CodeCommitsDiffResponse['range']) {
 function rangeCacheKey(range: CodeCommitsDiffResponse['range']) {
   return `${range.base}:${range.to}${range.work ? ':work' : ''}`;
 }
+
+const review = useCodeReviewState({
+  context: () => captureContext(),
+  current: () => currentComparison(),
+  comparisons: () => reviewComparisons.value,
+  content: () => currentDiffContent(),
+  oldPath: () => shownEntry.value?.file.oldPath,
+  selection: () => diffView.value?.getSelection(),
+  currentContext: (snapshot) => contextIsCurrent(snapshot),
+  refresh: () => loadGit(captureContext(), { silent: true }),
+  createDraft: createReviewDraft,
+});
+const {
+  viewedCount, isViewed, markViewed, reviewNotes, noteText, noteEditing,
+  draftEditing, draftText, addReviewNote, saveReviewNote, previewReviewNotes,
+  sendReviewNotes, removeReviewNote, editReviewNote, reviewError,
+} = review;
+const gitSelection = ref(new Set<string>());
+const gitSelectionAnchor = ref('');
+const includeHiddenSelection = ref(false);
+const hiddenSelectionCount = computed(() => {
+  const visible = new Set(visibleGitGroups.value.flatMap((group) => (
+    group.files.map((file) => gitRef(group.id, file.path))
+  )));
+
+  return [...gitSelection.value].filter((key) => !visible.has(key)).length;
+});
+const gitActionResult = ref('');
+const menuKey = ref('');
+let menuReturnTarget: HTMLElement | null = null;
+const gitRows = new Map<GitGroupId, { reveal(index: number): void }>();
+const conflictData = ref<Awaited<ReturnType<typeof codeApi.conflict>> | null>(null);
+const conflictError = ref('');
+const conflictPair = ref<'ours' | 'theirs' | 'work'>('work');
+const conflictIndex = ref(0);
+const conflictLines = computed(() => (conflictData.value?.work.content || '')
+  .split('\n').flatMap((line, index) => line.startsWith('<<<<<<< ') ? [index + 1] : []));
+
+const selectionActions = ['stage', 'unstage', 'discard', 'clean-new'] as const;
+const reviewComparisons = computed(() => {
+  const groups = shownEntry.value?.group.id === 'commits'
+    ? gitGroups.value.filter((group) => group.id === 'commits')
+    : changeGroups.value;
+
+  return groups.flatMap((group) => group.files.map((file) => comparisonFor(group, file.path)));
+});
+const reviewComparisonCount = computed(() => reviewComparisons.value.length);
+const partialAvailable = computed(() => Boolean(
+  shownEntry.value && shownEntry.value.group.id !== 'commits'
+  && shownEntry.value.file.status !== 'U' && !gitFile.value?.binary && !gitFile.value?.tooBig
+  && !diffLoading.value && !diffError.value && diffDisplay.value && !fileHistoryActive.value,
+));
+const patchScopeFiles = computed(() => (patchReviewGroup.value?.files || []).filter((file) => (
+  (!patchScope.value.directory || file.path.startsWith(`${patchScope.value.directory}/`))
+  && (!patchScope.value.paths || patchScope.value.paths.includes(file.path))
+)));
+const patchScopeLabel = computed(() => (
+  patchScope.value.directory || patchScope.value.paths?.join(', ') || ''
+));
+
+/**
+ * Адресует именно показанное сравнение, включая диапазон с текущими правками.
+ * Дерево при этом продолжает хранить исходную группу выбранного файла.
+ */
+function comparisonFor(group: GitGroup, path: string): CodeComparison {
+  const range = group.id === 'commits' ? commitsDiff.value?.range : null;
+
+  return {
+    group: group.id,
+    path,
+    ...(range ? {
+      base: range.base,
+      to: range.to,
+      work: !!range.work,
+    } : {}),
+  };
+}
+
+function currentComparison(): CodeComparison | null {
+  const entry = shownEntry.value;
+
+  return entry ? comparisonFor(entry.group, entry.file.path) : null;
+}
+
+/**
+ * Берёт fingerprint только из принятого lazy-ответа показанного сравнения.
+ * Метаданные соседних файлов не считаются доказательством просмотра их содержимого.
+ */
+function currentDiffContent(): CodeFileDiffResponse | null {
+  const entry = shownEntry.value;
+  const range = entry?.group.id === 'commits' && commitsDiff.value
+    ? rangeCacheKey(commitsDiff.value.range)
+    : '';
+
+  return entry ? diffContent.value.get(fileDiffKey(entry.group.id, entry.file.path, range)) || null : null;
+}
+
+/**
+ * Переходит к следующему неподтверждённому сравнению в текущей области.
+ * Смена файла не выполняет отметку просмотра автоматически.
+ */
+async function nextUnreviewed() {
+  const entries = reviewComparisons.value;
+  const current = currentComparison();
+  const index = entries.findIndex((entry) => entry.group === current?.group && entry.path === current.path);
+  const ordered = [...entries.slice(index + 1), ...entries.slice(0, index + 1)];
+  const target = ordered.find((entry) => !isViewed(entry));
+
+  if (target) {
+    await selectGit(gitRef(target.group, target.path));
+  }
+}
+
+function clearGitFilter() {
+  gitFilterPath.value = '';
+  gitFilterStatus.value = '';
+}
+
+function directoryCount(group: GitGroup, path: string) {
+  return groupDirectoryFiles(group.files, path).length;
+}
+
+function directorySelected(group: GitGroup, path: string) {
+  return groupDirectoryFiles(group.files, path).every((file) => (
+    gitSelection.value.has(gitRef(group.id, file))
+  ));
+}
+
+/**
+ * Множественный выбор хранит leaf union по группе независимо от раскрытия дерева.
+ * Shift использует видимый диапазон и никогда не добавляет пути скрытого фильтра.
+ */
+function selectGitPaths(group: GitGroup, paths: string[], event: MouseEvent | KeyboardEvent) {
+  const next = new Set(gitSelection.value);
+  const refs = paths.map((path) => gitRef(group.id, path));
+
+  if (event.shiftKey && paths.length === 1 && gitSelectionAnchor.value.startsWith(`${group.id}:`)) {
+    const visible = visibleGitGroups.value.find((item) => item.id === group.id)?.files || [];
+    const anchor = visible.findIndex((file) => gitRef(group.id, file.path) === gitSelectionAnchor.value);
+    const end = visible.findIndex((file) => file.path === paths[0]);
+
+    if (anchor >= 0 && end >= 0) {
+      for (const file of visible.slice(Math.min(anchor, end), Math.max(anchor, end) + 1)) {
+        next.add(gitRef(group.id, file.path));
+      }
+    }
+  } else {
+    const remove = refs.every((key) => next.has(key));
+
+    for (const key of refs) {
+      if (remove) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+    }
+
+    gitSelectionAnchor.value = refs[0] || '';
+  }
+
+  gitSelection.value = next;
+}
+
+function clickGitFile(group: GitGroup, path: string, event: MouseEvent) {
+  if (event.ctrlKey || event.metaKey || event.shiftKey) {
+    selectGitPaths(group, [path], event);
+  }
+
+  void selectGit(gitRef(group.id, path));
+}
+
+function clickGitDirectory(group: GitGroup, path: string, key: string, event: MouseEvent) {
+  if (event.ctrlKey || event.metaKey || event.shiftKey) {
+    selectGitPaths(group, groupDirectoryFiles(group.files, path), event);
+  } else {
+    toggleGitDir(key);
+  }
+}
+
+/**
+ * Раскрытие и выбор независимы: свернуть всё не означает потерять открытый файл.
+ * Изменяется только область групп, которую человек сейчас видит в навигаторе.
+ */
+function setAllGitDirs(open: boolean) {
+  const next = new Set(gitOpenDirs.value);
+
+  for (const group of paneGitGroups.value) {
+    for (const key of gitKnownDirs.value) {
+      if (key.startsWith(`${group.id}:`)) {
+        if (open) {
+          next.add(key);
+        } else {
+          next.delete(key);
+        }
+      }
+    }
+  }
+
+  gitOpenDirs.value = next;
+}
+
+/**
+ * Раскрывает только предков выбранного файла и возвращает строку в область видимости.
+ * Соседние каталоги сохраняют состояние, заданное человеком.
+ */
+async function revealCurrentGitPath() {
+  const entry = gitEntry.value;
+
+  if (!entry) {
+    return;
+  }
+
+  const next = new Set(gitOpenDirs.value);
+  const parts = entry.file.path.split('/');
+
+  for (let end = 1; end < parts.length; end += 1) {
+    next.add(gitRef(entry.group.id, parts.slice(0, end).join('/')));
+  }
+
+  gitOpenDirs.value = next;
+  collapsedGroups.value.delete(entry.group.id);
+  await nextTick();
+
+  const group = visibleGitGroups.value.find((item) => item.id === entry.group.id);
+  const index = gitView.value === 'tree'
+    ? group?.rows.findIndex((row) => row.kind === 'file' && row.path === entry.file.path)
+    : group?.list.findIndex((row) => row.file.path === entry.file.path);
+
+  if (index !== undefined && index >= 0) {
+    await gitRows.get(entry.group.id)?.reveal(index);
+    await nextTick();
+  }
+
+  layHost.value?.querySelector<HTMLElement>('.git-file.sel')?.scrollIntoView?.({ block: 'nearest' });
+}
+
+/**
+ * Регистрирует публичную границу виртуального списка без зависимости от Vue internals.
+ * Дерево и плоский список заменяют один handle своей Git-группы при переключении.
+ */
+function setGitRows(group: GitGroupId, instance: unknown) {
+  if (instance && typeof instance === 'object' && 'reveal' in instance
+    && typeof instance.reveal === 'function') {
+    const reveal = instance.reveal.bind(instance);
+
+    gitRows.set(group, { reveal });
+  } else {
+    gitRows.delete(group);
+  }
+}
+
+function openGitMenu(key: string, event: Event) {
+  event.preventDefault();
+  menuReturnTarget = event.currentTarget as HTMLElement;
+  menuKey.value = key;
+}
+
+/**
+ * Закрывает общее меню и возвращает фокус в строку, открывшую его с клавиатуры.
+ * Отложенный фокус выполняется после демонтажа поверхности popover.
+ */
+function setGitMenu(key: string, open: boolean) {
+  if (open && !menuReturnTarget && document.activeElement instanceof HTMLElement) {
+    menuReturnTarget = document.activeElement;
+  }
+
+  menuKey.value = open ? key : '';
+
+  if (!open && menuReturnTarget) {
+    const target = menuReturnTarget;
+
+    menuReturnTarget = null;
+    void nextTick(() => target.focus());
+  }
+}
+
+/**
+ * Контекстное меню доступно без мыши; Space изменяет только множественный выбор.
+ * Enter сохраняет обычное открытие файла через UiPressable.
+ */
+function gitRowKeydown(key: string, event: KeyboardEvent) {
+  if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+    openGitMenu(key, event);
+  } else if (event.key === ' ') {
+    const entry = gitEntries.value.get(key);
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (entry) {
+      selectGitPaths(entry.group, [entry.file.path], event);
+    } else {
+      const group = gitGroups.value.find((item) => key.startsWith(`${item.id}:`));
+
+      if (group) {
+        const path = key.slice(group.id.length + 1);
+
+        selectGitPaths(group, groupDirectoryFiles(group.files, path), event);
+      }
+    }
+  }
+}
+
+function canSelectionAction(action: CodeActionOptions['action']): boolean {
+  const group = action === 'unstage' ? 'staged' : 'work';
+
+  return [...gitSelection.value].some((key) => key.startsWith(`${group}:`));
+}
+
+/**
+ * Групповая операция по умолчанию берёт только видимую часть выбранного leaf union.
+ * Превью всех порций готовится до единственного подтверждения и первого execute.
+ */
+async function executeGitSelection(action: CodeActionOptions['action']) {
+  const groupId = action === 'unstage' ? 'staged' : 'work';
+  const groups = includeHiddenSelection.value ? gitGroups.value : visibleGitGroups.value;
+  const group = groups.find((item) => item.id === groupId);
+  const paths = group?.files.filter((file) => gitSelection.value.has(gitRef(groupId, file.path)))
+    .map((file) => file.path) || [];
+
+  await runScopedAction({
+    action,
+    group: groupId,
+    paths,
+  });
+}
+
+/**
+ * Серверные tokens связывают подтверждение с точным составом каждой порции.
+ * При частичном результате завершённые пути снимаются с выбора, остальные остаются.
+ */
+async function runScopedAction(options: CodeActionOptions) {
+  if (gitActionBusy.value || (!options.directory && !options.paths?.length)) {
+    return;
+  }
+
+  const snapshot = captureContext();
+  const batches = options.directory ? [options] : chunkList(options.paths || [], 500)
+    .map((paths) => ({ ...options, paths }));
+  let completed = 0;
+  let failed = 0;
+  let unattempted = 0;
+  let mutated = false;
+  const errors: string[] = [];
+
+  gitBusy.value = 'review-action';
+  gitActionResult.value = '';
+
+  try {
+    const plans = [];
+
+    for (const batch of batches) {
+      const preview = await codeApi.actionPreview(snapshot, batch);
+
+      plans.push({ batch, preview });
+    }
+
+    const composition = plans.map(({ preview }) => [
+      ...preview.eligible.map((entry) => entry.path),
+      ...preview.excluded.map((entry) => `${entry.path}: ${entry.reason}`),
+    ].join('\n')).join('\n');
+    const counts = t('core.codeReviewPreviewCounts', {
+      eligible: plans.reduce((sum, plan) => sum + plan.preview.eligible.length, 0),
+      excluded: plans.reduce((sum, plan) => sum + plan.preview.excluded.length, 0),
+      hidden: includeHiddenSelection.value ? 0 : hiddenSelectionCount.value,
+    });
+    const accepted = await confirmDialog(
+      `${snapshot.treePath}\n${options.directory || ''}\n${counts}\n${composition}`, {
+      title: t(`core.codeReviewAction${options.action}`),
+      danger: ['discard', 'clean-new', 'delete-new-dir'].includes(options.action),
+    });
+
+    if (!accepted || !contextIsCurrent(snapshot)) {
+      return;
+    }
+
+    const selected = new Set(gitSelection.value);
+
+    for (const plan of plans) {
+      for (const file of plan.preview.eligible) {
+        selected.add(gitRef(options.group, file.path));
+      }
+    }
+
+    gitSelection.value = selected;
+
+    for (let index = 0; index < plans.length; index += 1) {
+      if (!contextIsCurrent(snapshot)) {
+        return;
+      }
+
+      const plan = plans[index]!;
+
+      errors.push(...plan.preview.excluded.map((file) => `${file.path}: ${file.reason}`));
+
+      if (!plan.preview.eligible.length) {
+        failed += plan.preview.excluded.length;
+
+        continue;
+      }
+
+      mutated = true;
+
+      const result = await codeApi.actionExecute(snapshot, { ...plan.batch, token: plan.preview.token });
+
+      if (!contextIsCurrent(snapshot)) {
+        return;
+      }
+
+      errors.push(...result.failed.map((file) => `${file.path}: ${file.reason}`));
+      completed += result.completed.length;
+      failed += result.failed.length + plan.preview.excluded.length;
+      unattempted += result.unattempted.length;
+
+      const next = new Set(gitSelection.value);
+
+      for (const file of result.completed) {
+        next.delete(gitRef(options.group, file.path));
+      }
+
+      gitSelection.value = next;
+
+      if (!result.ok) {
+        unattempted += plans.slice(index + 1).reduce((sum, item) => sum + item.preview.eligible.length, 0);
+
+        break;
+      }
+    }
+
+    gitActionResult.value = [t('core.codeReviewActionResult', {
+      completed,
+      failed,
+      unattempted,
+    }), ...errors].join('\n');
+  } catch (error) {
+    gitActionResult.value = `${t('core.codeReviewActionResult', {
+      completed,
+      failed,
+      unattempted,
+    })}\n`
+      + codeErrorMessage(error) + (mutated ? `\n${t('core.codeReviewUnknownOutcome')}` : '');
+  } finally {
+    if (contextIsCurrent(snapshot)) {
+      if (mutated) {
+        await loadGit(snapshot, { silent: true });
+      }
+
+      gitBusy.value = '';
+    }
+  }
+}
+
+/**
+ * Общая матрица меню адресует исходную Git-группу строки, а не historical shownEntry.
+ * Чтения папки и файла имеют разные подписи и не подменяют друг друга.
+ */
+async function gitMenuAction(group: GitGroup, path: string, directory: boolean, action: string) {
+  const file = group.files.find((item) => item.path === path);
+
+  if (action === 'copy-path') {
+    await copyGitPath(path);
+  } else if (action === 'folder-review') {
+    await openScopedReview(group, { directory: path });
+  } else if (action === 'ask-agent') {
+    await askGitScope(group, directory ? { directory: path } : { paths: [path] });
+  } else if (action === 'file-history' || action === 'view-file') {
+    await selectGit(gitRef(group.id, path));
+
+    if (action === 'file-history') {
+      await openFileHistory();
+    }
+  } else if (group.id !== 'commits' && action.startsWith('ignore-')) {
+    await ignoreGitScope(action === 'ignore-shared' ? 'shared' : 'local',
+      directory ? { directory: path } : { paths: [path] });
+  } else if (group.id !== 'commits' && directory) {
+    const mapped = action === 'discard-dir' ? 'discard' : action === 'stage-dir' ? 'stage'
+      : action === 'unstage-dir' ? 'unstage' : action;
+
+    if (['stage', 'unstage', 'discard', 'clean-new', 'delete-new-dir'].includes(mapped)) {
+      await runScopedAction({
+        action: mapped as CodeActionOptions['action'],
+        group: group.id,
+        ...(mapped === 'delete-new-dir' ? { directory: path } : {
+          paths: groupDirectoryFiles(group.files, path),
+        }),
+      });
+    }
+  } else if (file && group.mutable) {
+    if (['stage-file', 'unstage-file', 'mark-resolved'].includes(action)) {
+      await changeGitFile(group, file);
+    } else if (['discard-file', 'clean-file'].includes(action)) {
+      await discardGitFile(group, file);
+    }
+  }
+}
+
+/**
+ * Копирует буквальный Git-путь без подмены ссылкой или абсолютным именем.
+ * При недоступном буфере общий prompt позволяет скопировать его вручную.
+ */
+async function copyGitPath(path: string) {
+  try {
+    await navigator.clipboard.writeText(path);
+  } catch {
+    await promptDialog({
+      title: t('core.codeReviewMenuCopy'),
+      value: path,
+      multiline: false,
+    });
+  }
+}
+
+/**
+ * Назначение ignore выбирает человек: shared и локальный exclude не взаимозаменяемы.
+ * Файлы остаются на диске; сервер повторно проверяет untracked и token правил.
+ */
+async function ignoreGitScope(target: 'shared' | 'local', scope: { directory?: string; paths?: string[] }) {
+  const snapshot = captureContext();
+
+  try {
+    const preview = await codeApi.ignorePreview(snapshot, { target, ...scope });
+    const accepted = await confirmDialog(`${snapshot.treePath}\n${preview.rules.join('\n')}`, {
+      title: t(target === 'shared' ? 'core.codeReviewMenuignore-shared' : 'core.codeReviewMenuignore-local'),
+    });
+
+    if (accepted && contextIsCurrent(snapshot)) {
+      await performGitAction({
+        key: 'ignore',
+        execute: (current) => codeApi.ignore(current, {
+          target,
+          ...scope,
+          token: preview.token,
+        }),
+      });
+    }
+  } catch (error) {
+    reviewError.value = codeErrorMessage(error);
+  }
+}
+
+/**
+ * Выбирает весь текущий блок на существующей исходной стороне.
+ * Удалённый блок адресуется old-строками, вставленный — new-строками.
+ */
+function selectCurrentHunk() {
+  const hunk = diffHunks.value[hunkIndex.value];
+
+  if (!hunk) {
+    return;
+  }
+
+  const side = hunk.newEnd > hunk.newStart ? 'new' : 'old';
+  const start = side === 'new' ? hunk.newStart : hunk.oldStart;
+  const end = side === 'new' ? hunk.newEnd : hunk.oldEnd;
+
+  diffView.value?.selectLines(side, start, Math.max(start, end - 1));
+}
+
+/**
+ * Частичная индексация получает канонические raw atoms отдельно от визуального diff.
+ * Скрытые пробелы не меняют ids, а stale-ответ никогда не запускает whole-file fallback.
+ */
+async function applyPartialSelection(wholeHunk: boolean) {
+  const comparison = currentComparison();
+  const selection = diffView.value?.getSelection();
+  const hunk = wholeHunk ? diffHunks.value[hunkIndex.value] : null;
+
+  if (!partialAvailable.value || !comparison || !selection || comparison.group === 'commits') {
+    return;
+  }
+
+  const snapshot = captureContext();
+  const group = comparison.group;
+
+  try {
+    const displayedFingerprint = currentDiffContent()?.fingerprint;
+    const raw = await codeApi.partialDiff(snapshot, { group, path: comparison.path });
+
+    if (!displayedFingerprint || raw.fingerprint !== displayedFingerprint) {
+      reviewError.value = t('core.codeReviewStalePartial');
+      await loadGit(snapshot, { silent: true });
+
+      return;
+    }
+
+    const atoms = raw.hunks.flatMap((block) => block.atoms).filter((atom) => {
+      if (hunk) {
+        const oldInside = atom.oldLine !== null
+          && atom.oldLine >= hunk.oldStart && atom.oldLine < hunk.oldEnd;
+        const newInside = atom.newLine !== null
+          && atom.newLine >= hunk.newStart && atom.newLine < hunk.newEnd;
+
+        return oldInside || newInside;
+      }
+
+      const line = selection.side === 'old' ? atom.oldLine : atom.newLine;
+
+      return line !== null && line >= selection.from && line <= selection.to;
+    });
+
+    if (!atoms.length || !contextIsCurrent(snapshot)) {
+      return;
+    }
+
+    const accepted = await confirmDialog(`${comparison.path}\n${atoms.map((atom) => (
+      `-${atom.oldText}\n+${atom.newText}`
+    )).join('\n')}`, { title: t('core.codeReviewPartialPreview') });
+
+    if (!accepted || !contextIsCurrent(snapshot) || gitSel.value !== gitRef(group, comparison.path)) {
+      return;
+    }
+
+    await performGitAction({
+      key: 'partial',
+      execute: (current) => codeApi.partialIndex(current, {
+        group,
+        path: comparison.path,
+        token: raw.token,
+        atomIds: atoms.map((atom) => atom.id),
+      }),
+    });
+  } catch (error) {
+    reviewError.value = codeErrorMessage(error);
+    await loadGit(snapshot, { silent: true });
+  }
+}
+
+function openScopedReview(group: GitGroup, scope: { directory?: string; paths?: string[] }) {
+  return openPatchReview(group, scope);
+}
+
+/**
+ * Папка и selection передаются агенту тем же точным scope, что и patch-обзор.
+ * Ограничения сервера и списка фрагментов явно видны в редактируемом черновике.
+ */
+async function askGitScope(group: GitGroup, scope: { directory?: string; paths?: string[] }) {
+  const snapshot = captureContext();
+  const range = group.id === 'commits' ? commitsDiff.value?.range : null;
+  const paths = group.files.filter((file) => (
+    (!scope.directory || file.path.startsWith(`${scope.directory}/`))
+    && (!scope.paths || scope.paths.includes(file.path))
+  )).map((file) => file.path);
+
+  try {
+    const response = await codeApi.patch(snapshot, {
+      group: group.id,
+      ...scope,
+      ...(range ? rangeQuery(range) : {}),
+    });
+
+    if (!contextIsCurrent(snapshot)) {
+      return;
+    }
+
+    draftText.value = `${snapshot.treePath}\n${JSON.stringify(comparisonFor(group, ''))}\n`
+      + `${paths.join('\n')}\n${response.truncated ? t('core.codeReviewTruncated') : ''}\n${response.patch}`;
+    draftEditing.value = true;
+  } catch (error) {
+    reviewError.value = codeErrorMessage(error);
+  }
+}
+
+/**
+ * Выбранные пути передаются с явной группой и точным scope patch.
+ * Разные сравнения не превращаются в общий неадресованный фрагмент.
+ */
+async function askGitSelection() {
+  const snapshot = captureContext();
+  const fragments: string[] = [];
+
+  try {
+    for (const group of paneGitGroups.value) {
+      const paths = group.files.filter((file) => gitSelection.value.has(gitRef(group.id, file.path)))
+        .map((file) => file.path);
+
+      if (!paths.length) {
+        continue;
+      }
+
+      const range = group.id === 'commits' ? commitsDiff.value?.range : null;
+      const response = await codeApi.patch(snapshot, {
+        group: group.id,
+        paths,
+        ...(range ? rangeQuery(range) : {}),
+      });
+
+      fragments.push(`${JSON.stringify(comparisonFor(group, ''))}\n${paths.join('\n')}\n`
+        + `${response.truncated ? t('core.codeReviewTruncated') : ''}\n${response.patch}`);
+    }
+
+    if (contextIsCurrent(snapshot) && fragments.length) {
+      draftText.value = `${snapshot.treePath}\n${fragments.join('\n\n')}`;
+      draftEditing.value = true;
+    }
+  } catch (error) {
+    reviewError.value = codeErrorMessage(error);
+  }
+}
+
+/**
+ * Передача заметок создаёт только обычный черновик и сохраняет контекст задачи.
+ * Отправку сообщения и запуск агента выполняет человек в чате.
+ */
+async function createReviewDraft(draft: string) {
+  const selectedContext = context.value;
+
+  if (!selectedContext) {
+    return;
+  }
+
+  const taskId = selectedContext.task.replace(/\D/gu, '');
+  const action = {
+    ...(taskId ? { taskId } : {}),
+    workdir: {
+      kind: 'project' as const,
+      projectId: project.value,
+      repoKey: selectedContext.repoKey,
+    },
+    title: t('core.codeReviewNotes'),
+    draft,
+  };
+
+  if (!sendCodeWindowAction(action)) {
+    chatStore.newSession(action);
+    await router.push('/chats');
+  }
+}
+
+/**
+ * Стадии конфликта загружаются только для актуального файла рабочей группы.
+ * Ошибка не заменяет проверенный ours/work диф и не разрешает конфликт автоматически.
+ */
+async function loadConflict(snapshot: ContextSnapshot, path: string, request: number) {
+  try {
+    const response = await codeApi.conflict(snapshot, path);
+
+    if (contextIsCurrent(snapshot) && request === diffRequestId && shownEntry.value?.file.path === path) {
+      conflictData.value = response;
+    }
+  } catch (error) {
+    if (contextIsCurrent(snapshot) && request === diffRequestId) {
+      conflictError.value = codeErrorMessage(error);
+    }
+  }
+}
+
+/**
+ * Все пары конфликта доступны только для чтения: base/ours, base/theirs, ours/work.
+ * Отсутствующая стадия остаётся пустой стороной с явной подписью в переключателе.
+ */
+function showConflictPair(side: 'base' | 'ours' | 'theirs' | 'work') {
+  const conflict = conflictData.value;
+
+  if (!conflict) {
+    return;
+  }
+
+  conflictPair.value = side === 'base' ? 'ours' : side;
+
+  const left = conflictPair.value === 'work' ? conflict.ours : conflict.base;
+  const right = conflict[conflictPair.value];
+
+  diffDisplay.value = left.binary || right.binary || left.tooBig || right.tooBig ? null : {
+    path: conflict.path,
+    oldContent: left.content,
+    newContent: right.content,
+  };
+}
+
+/**
+ * Переходит только между найденными маркерами рабочей копии конфликта.
+ * Показ исходной версии не считается автоматическим разрешением или stage.
+ */
+function navigateConflict(direction: -1 | 1) {
+  if (!conflictLines.value.length) {
+    return;
+  }
+
+  conflictIndex.value = Math.max(0, Math.min(
+    conflictLines.value.length - 1,
+    conflictIndex.value + direction,
+  ));
+  showConflictPair('work');
+  void nextTick(() => diffView.value?.reveal('new', conflictLines.value[conflictIndex.value]!));
+}
+
+async function askConflict() {
+  const conflict = conflictData.value;
+
+  if (!conflict) {
+    return;
+  }
+
+  await createReviewDraft(`${treePath.value}/${conflict.path}\n${JSON.stringify(conflict, null, 2)}`);
+}
+
 
 let gitActionId = 0;
 let fileLoadingRequestId = 0;
@@ -2218,7 +3212,7 @@ function navigatorResizeKey(event: KeyboardEvent) {
 
 function layoutEditors() {
   fileEditor?.layout?.();
-  diffEditor?.layout?.();
+  diffView.value?.layout();
 }
 
 function showNarrowNavigator() {
@@ -2505,6 +3499,16 @@ async function setContext(id: string, { activation = null }: ActivationOptions =
  * Смена идентификаторов запросов лишает поздние ответы права менять новую панель.
  */
 function resetState() {
+  gitSelection.value = new Set();
+  gitSelectionAnchor.value = '';
+  includeHiddenSelection.value = false;
+  menuKey.value = '';
+  menuReturnTarget = null;
+  gitActionResult.value = '';
+  draftEditing.value = false;
+  reviewError.value = '';
+  conflictData.value = null;
+  conflictError.value = '';
   dirs.value = new Map();
   openDirs.value = new Set();
   fileSel.value = '';
@@ -2676,8 +3680,17 @@ function toggleDiffWrap() {
   localStorage.setItem('grigdesk-diff-wrap', diffWrap.value ? '1' : '0');
 }
 
+/**
+ * Старый переключатель остаётся совместимым с сохранёнными настройками устройства.
+ * Новая модель получает тот же режим сравнения без нормализации исходных строк.
+ */
 function toggleDiffWhitespace() {
   ignoreTrimWhitespace.value = !ignoreTrimWhitespace.value;
+  diffPreferences.value = {
+    ...diffPreferences.value,
+    whitespace: ignoreTrimWhitespace.value ? 'trim' : 'all',
+  };
+  storeDiffPreferences(diffPreferences.value);
   localStorage.setItem('grigdesk-diff-ws', ignoreTrimWhitespace.value ? '1' : '0');
 }
 
@@ -3326,7 +4339,10 @@ async function discardGitGroup(group: GitGroup) {
   }
 
   return performGitAction({
-    execute: (current) => codeApi.discard(current, { all: true }),
+    execute: (current) => codeApi.discard(current, {
+      paths: group.files.filter((file) => file.status !== 'A' && file.status !== 'U')
+        .map((file) => file.path),
+    }),
     key: 'discard:all',
   });
 }
@@ -3386,15 +4402,14 @@ async function performGitAction<Result>({
  * Группа выбранных коммитов остаётся только для чтения.
  */
 function changeGitGroup(group: GitGroup) {
-  if (!group.mutable) {
+  if (group.id === 'commits') {
     return null;
   }
 
-  const action = group.id === 'staged' ? 'unstage' : 'stage';
-
-  return performGitAction({
-    execute: (snapshot) => codeApi[action](snapshot, { all: true }),
-    key: gitGroupActionKey(group.id),
+  return runScopedAction({
+    action: group.id === 'staged' ? 'unstage' : 'stage',
+    group: group.id,
+    paths: group.files.map((file) => file.path),
   });
 }
 
@@ -3406,30 +4421,14 @@ const GIT_ACTION_PATHS_MAX = 500;
  * поэтому сервер сверит каждый; каталог больше потолка уходит последовательными порциями.
  */
 function changeGitDir(group: GitGroup, dir: string) {
-  if (!group.mutable) {
+  if (group.id === 'commits') {
     return null;
   }
 
-  const action = group.id === 'staged' ? 'unstage' : 'stage';
-  const paths = groupDirectoryFiles(group.files, dir);
-
-  if (!paths.length) {
-    return null;
-  }
-
-  return performGitAction({
-    execute: async (snapshot) => {
-      let changed = 0;
-
-      for (const chunk of chunkList(paths, GIT_ACTION_PATHS_MAX)) {
-        const result = await codeApi[action](snapshot, { paths: chunk });
-
-        changed += result.changed;
-      }
-
-      return { ok: true as const, changed };
-    },
-    key: gitDirActionKey(group.id, dir),
+  return runScopedAction({
+    action: group.id === 'staged' ? 'unstage' : 'stage',
+    group: group.id,
+    paths: groupDirectoryFiles(group.files, dir),
   });
 }
 
@@ -3932,6 +4931,15 @@ async function ensureDiffContent(entry = shownEntry.value) {
   const snapshot = captureContext();
   const own = ++diffRequestId;
 
+  conflictData.value = null;
+  conflictError.value = '';
+  conflictPair.value = 'work';
+  conflictIndex.value = 0;
+
+  if (entry.file.status === 'U' && entry.group.id === 'work') {
+    void loadConflict(snapshot, entry.file.path, own);
+  }
+
   diffLoading.value = true;
   diffError.value = '';
   clearDiffModels();
@@ -3991,14 +4999,16 @@ function clearPatchReview() {
  * Загружает полный patch группы один раз на текущий Git-снимок.
  * Повторный клик по активной кнопке возвращает обычный Monaco-диф.
  */
-async function openPatchReview(group: GitGroup) {
+async function openPatchReview(group: GitGroup, scope: { directory?: string; paths?: string[] } = {}) {
   if (!group.files.length) {
     return;
   }
 
   showNarrowEditor();
 
-  const key = patchKey(group);
+  const key = `${patchKey(group)}:${JSON.stringify(scope)}`;
+
+  patchScope.value = scope;
 
   if (patchReviewKey.value === key) {
     await closePatchReview();
@@ -4031,6 +5041,7 @@ async function openPatchReview(group: GitGroup) {
   try {
     const response = await codeApi.patch(snapshot, {
       group: group.id,
+      ...scope,
       ...(range ? rangeQuery(range) : {}),
     });
 
@@ -4075,12 +5086,7 @@ async function openPatchReviewFile(path: string, line: number, side: 'old' | 'ne
   await selectGit(gitRef(group.id, path));
 
   if (line > 0) {
-    const editor = side === 'old'
-      ? diffEditor?.getOriginalEditor?.()
-      : diffEditor?.getModifiedEditor?.();
-
-    editor?.setPosition({ lineNumber: line, column: 1 });
-    editor?.revealLineInCenter(line);
+    diffView.value?.reveal(side, line);
   }
 }
 
@@ -4142,6 +5148,7 @@ async function syncCommitsDiff(snapshot = captureContext()) {
     }
 
     commitsDiff.value = nextDiff;
+    await review.revalidateViewed();
     commitsLoadedKey = key;
     commitsLoadedSelection.value = { ...bounds, selected: commitSel.value.size };
 
@@ -4200,6 +5207,7 @@ async function loadBranchDiff(snapshot = captureContext()) {
     }
 
     commitsDiff.value = nextDiff;
+    await review.revalidateViewed();
 
     const nextDirs = gitGroupDirectoryPaths(git.value, commitGroup.value);
 
@@ -4343,6 +5351,8 @@ async function loadGit(
     gitKnownDirs.value = nextDirs;
     gitDirsReady.value = true;
     git.value = nextGit;
+    gitSelection.value = new Set([...gitSelection.value].filter((key) => gitEntries.value.has(key)));
+    await review.revalidateViewed();
     resetDiffContent();
 
     if (gitSel.value && !gitEntries.value.has(gitSel.value)) {
@@ -4567,9 +5577,9 @@ function clearFileModel() {
 }
 
 function clearDiffModels() {
-  diffEditor?.setModel(null);
-  diffModels.forEach((model) => model.dispose());
-  diffModels = [];
+  diffDisplay.value = null;
+  diffHunks.value = [];
+  diffView.value?.clear();
 }
 
 /**
@@ -4634,53 +5644,133 @@ function revealLine(line: number) {
  * Редактор переиспользуется между файлами и получает актуальный режим колонок.
  */
 function showDiff(f: CodeGitFile | null) {
-  if (!f || !diffHost.value) {
+  if (!f) {
     return;
   }
-  if (!diffEditor) {
-    diffEditor = monaco.editor.createDiffEditor(diffHost.value, {
-      ...READONLY_OPTS,
-      fontSize: 13,
-      lineHeight: 20,
-      padding: { top: 8, bottom: 8 },
-      renderSideBySide: renderSideBySide.value,
-      diffWordWrap: diffWrap.value ? 'on' : 'off',
-      renderOverviewRuler: true,
-      ignoreTrimWhitespace: ignoreTrimWhitespace.value,
-      hideUnchangedRegions: {
-        enabled: true,
-        minimumLineCount: 3,
-        contextLineCount: 3
-      },
-    });
-  }
 
-  const lang = langOf(f.path);
-  const orig = monaco.editor.createModel(f.tooBig ? '' : (f.oldContent || ''), lang);
-  const mod = monaco.editor.createModel(f.tooBig ? '' : (f.newContent || ''), lang);
-  const old = diffModels;
-
-  diffModels = [orig, mod];
-  diffEditor.setModel({ original: orig, modified: mod });
-  old.forEach((m) => m.dispose());
+  diffDisplay.value = {
+    path: f.path,
+    oldContent: f.tooBig || f.binary ? '' : f.oldContent || '',
+    newContent: f.tooBig || f.binary ? '' : f.newContent || '',
+  };
 }
 
-watch(renderSideBySide, async (value) => {
-  diffEditor?.updateOptions?.({ renderSideBySide: value });
+/**
+ * Принимает только блоки уже вычисленного и показанного сравнения.
+ * Отложенный межфайловый переход завершается после принятия новых координат.
+ */
+function acceptDiffHunks(hunks: DiffHunk[]) {
+  diffHunks.value = hunks;
+  hunkIndex.value = pendingHunk === 'last' ? Math.max(0, hunks.length - 1) : 0;
+
+  if (hunks.length && pendingHunk) {
+    revealCurrentHunk();
+    pendingHunk = null;
+  }
+}
+
+/**
+ * Показывает содержательную сторону блока, включая чистое удаление.
+ * Пустая сторона вставки не становится ошибочной целью перехода.
+ */
+function revealCurrentHunk() {
+  const hunk = diffHunks.value[hunkIndex.value];
+
+  if (hunk) {
+    const side = hunk.newEnd > hunk.newStart ? 'new' : 'old';
+
+    diffView.value?.reveal(side, side === 'new' ? hunk.newStart : hunk.oldStart);
+  }
+}
+
+/**
+ * Счётчик следует за исходной строкой активной стороны редактора.
+ * Перед первым блоком показывается первый, после последнего — последний блок файла.
+ */
+function updateHunkPosition(side: DiffSide, line: number) {
+  const found = diffHunks.value.findIndex((hunk) => line < (side === 'old' ? hunk.oldEnd : hunk.newEnd));
+
+  hunkIndex.value = found >= 0 ? found : Math.max(0, diffHunks.value.length - 1);
+}
+
+/**
+ * На границе блоков продолжает проверку в соседнем файле той же показанной группы.
+ * Исторический descriptor и подписи сторон берутся из обычного selectGit.
+ */
+async function navigateHunk(direction: -1 | 1) {
+  const next = hunkIndex.value + direction;
+
+  if (next >= 0 && next < diffHunks.value.length) {
+    hunkIndex.value = next;
+    revealCurrentHunk();
+
+    return;
+  }
+
+  const entry = shownEntry.value;
+  const index = entry?.group.files.findIndex((file) => file.path === entry.file.path) ?? -1;
+  const file = entry?.group.files[index + direction];
+
+  if (entry && file) {
+    pendingHunk = direction > 0 ? 'first' : 'last';
+    await selectGit(gitRef(entry.group.id, file.path));
+  }
+}
+
+/**
+ * Клавиши принадлежат активной панели и не перехватывают ввод замечания или диалога.
+ * Alt+N/P дублируют F7 для браузеров с собственным режимом клавиатурного курсора.
+ */
+function onDiffKeydown(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null;
+
+  if (!props.active || tab.value !== 'git' || fileHistoryActive.value || patchReviewActive.value
+    || (target?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')
+      && !target.closest('.monaco-editor'))) {
+    return;
+  }
+
+  const alternative = event.altKey && !event.ctrlKey && ['n', 'p'].includes(event.key.toLowerCase());
+
+  if (event.key === 'F7' || alternative) {
+    event.preventDefault();
+    void navigateHunk(event.shiftKey || (alternative && event.key.toLowerCase() === 'p') ? -1 : 1);
+  }
+}
+
+function selectQuickDiff(event: Event) {
+  void selectGit((event.target as HTMLSelectElement).value);
+}
+
+/**
+ * Контролы принимают только известные значения, а не произвольные данные DOM.
+ * Сохранение не зависит от временного сужения контейнера до одной колонки.
+ */
+function setDiffChoice(key: 'context' | 'detail' | 'whitespace', event: Event) {
+  const value = (event.target as HTMLSelectElement).value;
+  const choices = {
+    context: ['3', '10', 'all'],
+    detail: ['line', 'word', 'char'],
+    whitespace: ['all', 'trim', 'ignore-all'],
+  };
+
+  if (choices[key].includes(value)) {
+    diffPreferences.value = { ...diffPreferences.value, [key]: value } as DiffPreferences;
+    ignoreTrimWhitespace.value = diffPreferences.value.whitespace === 'trim';
+    storeDiffPreferences(diffPreferences.value);
+  }
+}
+
+function setDiffBoolean(key: 'collapse' | 'renderWhitespace' | 'sync' | 'align', event: Event) {
+  diffPreferences.value = {
+    ...diffPreferences.value,
+    [key]: (event.target as HTMLInputElement).checked,
+  };
+  storeDiffPreferences(diffPreferences.value);
+}
+
+watch([renderSideBySide, diffWrap, () => props.compact], async () => {
   await nextTick();
-  layoutEditors();
-});
-watch(diffWrap, async (value) => {
-  diffEditor?.updateOptions?.({ diffWordWrap: value ? 'on' : 'off' });
-  await nextTick();
-  layoutEditors();
-});
-watch(ignoreTrimWhitespace, (value) => {
-  diffEditor?.updateOptions?.({ ignoreTrimWhitespace: value });
-});
-watch(() => props.compact, async () => {
-  await nextTick();
-  diffEditor?.updateOptions?.({ renderSideBySide: renderSideBySide.value });
   layoutEditors();
 });
 
@@ -5095,12 +6185,20 @@ onBeforeUnmount(() => {
   clearFileModel();
   clearDiffModels();
   fileEditor?.dispose();
-  diffEditor?.dispose();
 });
 </script>
 
 <style scoped>
+.code-review-controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px;
+  min-width: 0; max-height: 30vh; overflow: auto; flex-shrink: 0;
+}
+.code-review-controls > span { min-width: 0; overflow-wrap: anywhere; }
+.code-review-draft { max-height: 40%; overflow: auto; padding: 4px; }
+.git-file[data-viewed="true"] .nm::after { content: ' ✓'; }
+
 .code-panel { height: 100%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.hunk-navigation { display: flex; align-items: center; gap: 4px; }
 .code-head {
   min-width: 0; min-height: 36px; display: flex; align-items: center; gap: 10px;
   padding: 0 4px 8px; color: var(--ink); outline: none;
@@ -5279,6 +6377,8 @@ onBeforeUnmount(() => {
 /* Обойма действий строки: одна на строку, кнопки в ней в ряд. На тач-устройстве — в потоке. */
 .git-row-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 .git-file-line:has(.git-row-actions > :nth-child(2)) { --row-actions: 2; }
+.git-file-line:has(.git-row-actions > :nth-child(3)) { --row-actions: 3; }
+.git-file-line:has(.git-row-actions > :nth-child(4)) { --row-actions: 4; }
 /* Заголовок группы — кнопка сворачивания (скин в actions.css, code-group-toggle); здесь
    только текст заголовка, который при нехватке места обрезается многоточием. */
 .group-toggle .subtitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

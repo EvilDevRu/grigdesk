@@ -8,7 +8,7 @@
 // + `git status --porcelain`), а гитигнорённое туда не попадает.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,6 +16,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import codeModule, { isHiddenPath, isHiddenReal } from '../../server/src/modules/code/index.ts';
+import { indexBytes, reviewFixture } from './code-review-fixture.js';
 
 const exec = promisify(execFile);
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -194,3 +195,59 @@ test('CODE-DH-2 ссылка на скрытый файл скрыта по на
   assert.equal(isHiddenReal(link, [secret]), true);
   assert.equal(isHiddenReal(path.join(root, 'code', 'missing'), [secret]), false);
 });
+
+for (const action of ['review-fingerprints', 'conflict', 'partial-diff', 'partial-index',
+  'action-preview', 'action-execute', 'ignore-preview', 'ignore']) {
+  test(`CODE-REVIEW-HIDDEN: ${action} закрывает hidden и реальные внешние пути`, async (t) => {
+    const fixture = await reviewFixture(t);
+    const outside = path.join(fixture.temp, 'outside.txt');
+
+    await writeFile(outside, 'внешние байты\n');
+    await fixture.write('private-state/secret.txt', 'служебный\n');
+    await symlink(outside, path.join(fixture.root, 'external.txt'));
+
+    const before = await indexBytes(fixture.root);
+
+    for (const selected of ['private-state/secret.txt', 'external.txt']) {
+      let payload;
+
+      if (action === 'review-fingerprints') {
+        payload = { comparisons: [{ group: 'work', path: selected }] };
+      } else if (action === 'partial-index') {
+        payload = {
+          group: 'work',
+          path: selected,
+          token: 'untrusted',
+          atomIds: ['untrusted'],
+        };
+      } else if (action.startsWith('action-')) {
+        payload = {
+          action: 'stage',
+          group: 'work',
+          paths: [selected],
+          ...(action === 'action-execute' ? { token: 'untrusted' } : {}),
+        };
+      } else if (action.startsWith('ignore')) {
+        payload = {
+          target: 'shared',
+          paths: [selected],
+          ...(action === 'ignore' ? { token: 'untrusted' } : {}),
+        };
+      }
+
+      const response = await fixture.request(action, payload, { group: 'work', path: selected });
+
+      assert.ok([400, 403, 404, 409].includes(response.statusCode), response.body);
+      assert.doesNotMatch(response.body, /внешние байты|служебный/);
+      assert.deepEqual(await indexBytes(fixture.root), before);
+      assert.equal(await readFile(outside, 'utf8'), 'внешние байты\n');
+    }
+
+    fixture.disable();
+
+    const disabled = await fixture.request(action, action.includes('diff') || action === 'conflict'
+      ? undefined : {}, { group: 'work', path: 'app.txt' });
+
+    assert.equal(disabled.statusCode, 403, disabled.body);
+  });
+}

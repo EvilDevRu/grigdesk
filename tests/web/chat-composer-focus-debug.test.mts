@@ -1,30 +1,35 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 
+import type { Window as HappyDomWindow } from '../../web/node_modules/happy-dom/lib/index.js';
 import { installChatComposerFocusDebug } from '../../web/src/shared/chatComposerFocusDebug.ts';
 import { createUiBrowser } from './helpers/ui-components.js';
+
+interface FocusDebugWindow extends HappyDomWindow {
+  __grigDeskLog?: { mark(text: string): unknown };
+}
 
 /**
  * Настоящие focus-события DOM отделены от сервера: журнал собирает только текст отметок.
  * Часы управляемы, чтобы проверить паузу и снятие подписок без ожидания минуты.
  */
-async function fixture(t) {
-  const browser = await createUiBrowser();
+async function fixture(t: TestContext) {
+  const browser: FocusDebugWindow = await createUiBrowser();
   const element = browser.document.createElement('textarea');
   const target = browser.document.createElement('button');
-  const marks = [];
+  const marks: string[] = [];
   let time = 1000;
 
   element.value = 'Приватный текст сообщения';
   target.textContent = 'Секретная подпись';
   browser.document.body.append(element, target);
-  browser.__grigDeskLog = { mark: (text) => marks.push(text) };
+  browser.__grigDeskLog = { mark: (text: string) => marks.push(text) };
 
   const warn = console.warn;
 
   console.warn = () => {};
 
-  const dispose = installChatComposerFocusDebug(element, () => time);
+  const dispose = installChatComposerFocusDebug(element as unknown as HTMLTextAreaElement, () => time);
 
   t.after(() => {
     dispose();
@@ -38,7 +43,7 @@ async function fixture(t) {
     target,
     marks,
     dispose,
-    advance: (ms) => {
+    advance: (ms: number) => {
       time += ms;
     },
     type: () => {
@@ -57,9 +62,9 @@ test('неожиданный программный focus сохраняет ц�
   await Promise.resolve();
 
   assert.equal(h.marks.length, 1);
-  assert.match(h.marks[0], /AGENT-DBG chat-composer-focus/);
-  assert.match(h.marks[0], /"active":"BUTTON"/);
-  assert.doesNotMatch(h.marks[0], /Приватный|Секретная/);
+  assert.match(h.marks[0]!, /AGENT-DBG chat-composer-focus/);
+  assert.match(h.marks[0]!, /"active":"BUTTON"/);
+  assert.doesNotMatch(h.marks[0]!, /Приватный|Секретная/);
 
   h.type();
   h.target.focus();
@@ -70,7 +75,7 @@ test('неожиданный программный focus сохраняет ц�
   h.type();
   h.browser.dispatchEvent(new h.browser.Event('blur'));
   await Promise.resolve();
-  assert.match(h.marks[1], /"cause":"window"/);
+  assert.match(h.marks[1]!, /"cause":"window"/);
 });
 
 test('явный клик и Tab не считаются сбоем ввода', async (t) => {

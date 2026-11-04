@@ -184,3 +184,57 @@ test('карта файловых ссылок сохраняет последн
   assert.deepEqual(await loadCodeRoots(), [root]);
   assert.equal(count, 2);
 });
+
+test('CODE-FP-CONTRACT: fingerprint optional, повреждённое поле отклоняет весь ответ', () => {
+  assert.deepEqual(parseCodeFileDiff(fileDiff), fileDiff);
+
+  const fingerprint = 'a'.repeat(64);
+
+  assert.equal(parseCodeFileDiff({ ...fileDiff, fingerprint }).fingerprint, fingerprint);
+
+  for (const invalid of [null, 12, {}, '', 'bad-hash']) {
+    assert.throws(() => parseCodeFileDiff({ ...fileDiff, fingerprint: invalid }), CodeContractError);
+  }
+});
+
+for (const [method, options] of [
+  ['reviewFingerprints', { comparisons: [{ group: 'work', path: 'a.txt' }] }],
+  ['conflict', 'a.txt'],
+  ['partialDiff', { group: 'work', path: 'a.txt' }],
+  ['partialIndex', {
+    group: 'work',
+    path: 'a.txt',
+    token: 'token',
+    atomIds: ['raw-C'],
+  }],
+  ['actionPreview', {
+    action: 'stage',
+    group: 'work',
+    paths: ['a.txt'],
+  }],
+  ['actionExecute', {
+    action: 'stage',
+    group: 'work',
+    paths: ['a.txt'],
+    token: 'token',
+  }],
+  ['ignorePreview', { target: 'local', paths: ['a.txt'] }],
+  ['ignore', {
+    target: 'local',
+    paths: ['a.txt'],
+    token: 'token',
+  }],
+]) {
+  test(`CODE-REVIEW-CONTRACT: ${method} не принимает повреждённый HTTP JSON`, async (t) => {
+    const context = {
+      project: 'demo',
+      repoKey: 'main',
+      treePath: '/repo',
+    };
+
+    assert.equal(typeof codeApi[method], 'function', `Нет публичного адаптера ${method}`);
+    t.mock.method(api, 'get', async () => null);
+    t.mock.method(api, 'post', async () => null);
+    await assert.rejects(codeApi[method](context, options), CodeContractError);
+  });
+}

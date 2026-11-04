@@ -1,5 +1,6 @@
 <template>
   <div ref="reviewHost" class="patch-review" data-view="patch-review">
+    <p v-if="scopeLabel" class="patch-scope">{{ scopeLabel }}</p>
     <p v-if="truncated" class="patch-limit" role="status">
       Показаны первые {{ orderedFiles.length }} файлов или первые 2 МБ патча;
       остальное открой по отдельному файлу.
@@ -61,6 +62,7 @@ import { parseUnifiedDiff } from '../../shared/patch';
 import type { UnifiedDiffLineKind } from '../../shared/patch';
 
 const props = defineProps<{
+  scopeLabel?: string;
   patch: string;
   truncated: boolean;
   files: readonly CodeGitEntry[];

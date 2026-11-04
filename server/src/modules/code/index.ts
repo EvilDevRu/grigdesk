@@ -7,6 +7,14 @@
 // Доступ: корень обязан быть деревом из `git worktree list` репозитория проекта,
 // путь внутри — префикс-проверкой. Это дисциплина, а не песочница: GrigDesk и так
 // отдаёт полный шелл в «Терминале», но файловому API за auth-гардом она положена.
+import { readConflict } from '../../lib/codeGitReview.ts';
+import { readPartialDiff, applyPartialIndex } from '../../lib/codePartialIndex.ts';
+import { previewGitAction, executeGitAction } from '../../lib/codeGitSelection.ts';
+import { previewIgnore, appendIgnoreRules } from '../../lib/codeGitIgnore.ts';
+import type {
+  CodeActionOptions, CodeIgnoreOptions, CodePartialOptions, CodeComparison,
+} from '../../../../shared/plugins/code/codeContracts.ts';
+
 import fp from 'fastify-plugin';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { Dirent } from 'node:fs';
@@ -89,6 +97,8 @@ interface CodeRoute {
     repo?: unknown;
     root?: unknown;
     dir?: unknown;
+    directory?: unknown;
+    paths?: unknown;
     path?: unknown;
     work?: unknown;
     group?: unknown;
@@ -751,6 +761,179 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     }
   });
 
+  /**
+   * Проверяет буквальный путь и каждого существующего предка до чтения новых API.
+   * Ссылка наружу и фактическая служебная папка закрыты той же границей, что обычный file.
+   */
+  async function reviewPath(root: string, value: unknown): Promise<string> {
+    if (typeof value !== 'string' || !value || value.includes('\0') || path.isAbsolute(value)
+      || value.split('/').some((part) => !part || part === '.' || part === '..')) {
+      throw new CodeGitError('bad_path', 'Нужен буквальный путь внутри репозитория.', 400);
+    }
+
+    const absolute = path.resolve(root, value);
+    let ancestor = absolute;
+
+    while (ancestor !== root) {
+      if (isHiddenReal(ancestor, hidden)) {
+        throw new CodeGitError('hidden_path', 'Путь недоступен.', 403);
+      }
+
+      try {
+        const actual = await fs.realpath(ancestor);
+
+        if (actual !== root && !actual.startsWith(root + path.sep)) {
+          throw new CodeGitError('bad_path', 'Реальный путь находится вне репозитория.', 400);
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw error;
+        }
+      }
+
+      ancestor = path.dirname(ancestor);
+    }
+
+    return value;
+  }
+
+  /**
+   * Новые review-маршруты наследуют общий gate, resolveRoot и mutex мутаций.
+   * Поля тела проверяются до запуска Git; клиентский patch никогда не принимается.
+   */
+  for (const action of ['review-fingerprints', 'conflict', 'partial-diff', 'partial-index',
+    'action-preview', 'action-execute', 'ignore-preview', 'ignore']) {
+    const mutation = ['partial-index', 'action-execute', 'ignore'].includes(action);
+    const method = ['conflict', 'partial-diff'].includes(action) ? 'GET' : 'POST';
+
+    fastify.route<CodeRoute>({
+      method,
+      url: `/api/code/:project/${action}`,
+      handler: async (req, reply) => {
+        if (gate(reply)) {
+          return reply;
+        }
+
+        const ctx = await resolveRoot(req, reply);
+
+        if (!ctx) {
+          return reply;
+        }
+
+        /**
+         * Исполняет одну проверенную review-команду в разрешённом дереве.
+         * Чтения и мутации используют одинаковую политику входных путей.
+         */
+        const execute = async (root: string) => {
+          const body = requestBody(req);
+          const hide = (absolute: string) => isHiddenReal(absolute, hidden);
+
+          if (action === 'review-fingerprints') {
+            if (!Array.isArray(body.comparisons) || body.comparisons.length > 500) {
+              throw new CodeGitError('bad_comparisons', 'Не больше 500 сравнений за запрос.', 400);
+            }
+
+            const comparisons = [];
+
+            for (const value of body.comparisons) {
+              if (!isRecord(value) || !['work', 'staged', 'commits'].includes(String(value.group))) {
+                throw new CodeGitError('bad_comparisons', 'Некорректное сравнение.', 400);
+              }
+
+              const file = await reviewPath(root, value.path);
+              const comparison: CodeComparison = {
+                group: value.group as CodeComparison['group'],
+                path: file,
+                ...(typeof value.base === 'string' ? { base: value.base } : {}),
+                ...(typeof value.to === 'string' ? { to: value.to } : {}),
+                ...(typeof value.work === 'boolean' ? { work: value.work } : {}),
+              };
+
+              try {
+                const diff = await fileDiffSides(root, comparison);
+
+                comparisons.push({ ...comparison, fingerprint: diff.fingerprint });
+              } catch (error) {
+                if (!(error instanceof CodeGitError) || error.code !== 'no_file') {
+                  throw error;
+                }
+
+                comparisons.push({ ...comparison, fingerprint: null });
+              }
+            }
+
+            return { comparisons };
+          }
+
+          if (action === 'conflict' || action === 'partial-diff') {
+            const file = await reviewPath(root, req.query.path);
+
+            if (action === 'conflict') {
+              return readConflict(root, file);
+            }
+
+            const { raw: _raw, ...result } = await readPartialDiff(root, String(req.query.group), file);
+
+            return result;
+          }
+
+          if (action === 'partial-index') {
+            const file = await reviewPath(root, body.path);
+
+            if (!['work', 'staged'].includes(String(body.group)) || typeof body.token !== 'string'
+              || !Array.isArray(body.atomIds) || !body.atomIds.every((id) => typeof id === 'string')) {
+              throw new CodeGitError('bad_partial', 'Некорректный выбор строк.', 400);
+            }
+
+            return applyPartialIndex(root, { ...body, path: file } as unknown as CodePartialOptions);
+          }
+
+          if (body.directory !== undefined) {
+            await reviewPath(root, body.directory);
+          }
+
+          if (body.paths !== undefined) {
+            if (!Array.isArray(body.paths) || !body.paths.every((file) => typeof file === 'string')) {
+              throw new CodeGitError('bad_paths', 'Нужен список буквальных путей.', 400);
+            }
+
+            for (const file of body.paths) {
+              await reviewPath(root, file);
+            }
+          }
+
+          if (action === 'action-preview' || action === 'action-execute') {
+            const options = body as unknown as CodeActionOptions;
+
+            return action === 'action-preview' ? previewGitAction(root, options, hide)
+              : executeGitAction(root, options, hide);
+          }
+
+          const options = body as unknown as CodeIgnoreOptions;
+
+          if (action === 'ignore-preview') {
+            const preview = await previewIgnore(root, options, hide);
+            const { filename: _filename, content: _content, ...result } = preview;
+
+            return result;
+          }
+
+          return appendIgnoreRules(root, options, hide);
+        };
+
+        if (mutation) {
+          return mutateRoot(ctx, reply, execute);
+        }
+
+        try {
+          return await execute(ctx.tree.path);
+        } catch (error) {
+          return sendGitError(reply, error);
+        }
+      },
+    });
+  }
+
   // Общий диф непрерывного отрезка выбранных коммитов.
   fastify.get<CodeRoute>('/api/code/:project/commits-diff', async (req, reply) => {
     if (gate(reply)) {
@@ -822,6 +1005,8 @@ const codeModule: FastifyPluginAsync<CodeModuleOptions> = async (fastify, opts) 
     try {
       return await patchText(ctx.tree.path, {
         group,
+        ...(req.query.directory === undefined ? {} : { directory: String(req.query.directory) }),
+        ...(req.query.paths === undefined ? {} : { paths: JSON.parse(String(req.query.paths)) as string[] }),
         ...(req.query.path === undefined ? {} : { path: String(req.query.path) }),
         ...(req.query.base === undefined ? {} : { base: String(req.query.base) }),
         ...(req.query.to === undefined ? {} : { to: String(req.query.to) }),

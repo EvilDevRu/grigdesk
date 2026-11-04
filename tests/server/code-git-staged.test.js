@@ -18,6 +18,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import codeModule from '../../server/src/modules/code/index.ts';
+import { mergeConflict, reviewFixture, success, git as reviewGit } from './code-review-fixture.js';
 import { fileDiffSides, taskDiff, unquotePath, worktreeChanges } from '../../server/src/lib/git.ts';
 
 const exec = promisify(execFile);
@@ -335,3 +336,63 @@ test('CODE-CONFLICT-03: stage помечает конфликт разрешён
   assert.equal(byPath(changes.files).has('conflict.txt'), false);
   assert.equal(byPath(changes.staged).get('conflict.txt').status, 'M');
 });
+
+test('CODE-FP-RAW: одинаковые +/- не скрывают новую сырую сторону', async (t) => {
+  const fixture = await reviewFixture(t);
+  const load = async () => success(await fixture.request('file-diff', undefined, {
+    group: 'work', path: 'app.txt',
+  }), 'file-diff');
+
+  await fixture.write('app.txt', 'a\nb\nC\nd\n');
+
+  const first = await load();
+
+  assert.match(first.fingerprint || '', /^[a-f0-9]{64}$/);
+  assert.equal((await load()).fingerprint, first.fingerprint);
+  await fixture.write('app.txt', 'a\nb\nX\nd\n');
+
+  const changed = await load();
+
+  assert.notEqual(changed.fingerprint, first.fingerprint);
+
+  const fingerprints = success(await fixture.request('review-fingerprints', {
+    comparisons: [{ group: 'work', path: 'app.txt' }],
+  }), 'fingerprints');
+
+  assert.equal(fingerprints.comparisons[0].fingerprint, changed.fingerprint);
+  assert.equal('oldContent' in fingerprints.comparisons[0], false);
+  assert.equal('newContent' in fingerprints.comparisons[0], false);
+});
+
+for (const kind of ['UU', 'AA', 'UD']) {
+  test(`CODE-CONFLICT-SIDES: ${kind} читает реальные стадии, отсутствие явно`, async (t) => {
+    const fixture = await reviewFixture(t);
+    const file = await mergeConflict(fixture, kind);
+    const stagesBefore = await reviewGit(fixture.root, ['ls-files', '--stage']);
+    const response = success(await fixture.request('conflict', undefined, { path: file }), 'conflict');
+
+    for (const [name, stage] of [['base', 1], ['ours', 2], ['theirs', 3]]) {
+      const missing = (kind === 'AA' && stage === 1) || (kind === 'UD' && stage === 3);
+
+      assert.equal(response[name].presence, !missing, name);
+
+      if (missing) {
+        assert.equal(response[name].content, '');
+      } else {
+        assert.equal(response[name].content, await reviewGit(fixture.root, ['show', `:${stage}:${file}`]));
+      }
+
+      assert.match(response[name].fingerprint, /^[a-f0-9]{64}$/);
+    }
+
+    assert.equal(response.work.presence, true);
+    assert.equal(response.work.content, await readFileForReview(fixture.root, file));
+    assert.equal(await reviewGit(fixture.root, ['ls-files', '--stage']), stagesBefore);
+  });
+}
+
+const readFileForReview = async (root, file) => {
+  const { readFile } = await import('node:fs/promises');
+
+  return readFile(path.join(root, file), 'utf8');
+};

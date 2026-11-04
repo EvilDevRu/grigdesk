@@ -12,6 +12,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 
 import codeModule from '../../server/src/modules/code/index.ts';
+import { indexBytes, reviewFixture } from './code-review-fixture.js';
 import {
   parseCodeCommitResponse,
   parseCodeCommitTitleResponse,
@@ -274,4 +275,86 @@ test('CODE-CONTRACT-05: commit удерживает и затем освобож
   assert.equal(available.statusCode, 409);
   assert.equal(available.json().error, 'no_staged_changes');
   assert.equal(await readFile(path.join(root, 'app.ts'), 'utf8'), 'export const value = 2;\n');
+});
+
+test('CODE-GUARD-CODE-AUTH: настоящее authPlugin закрывает чтение и мутации', async (t) => {
+  const fixture = await reviewFixture(t, { auth: true });
+
+  await fixture.write('app.txt', 'рабочие байты\n');
+
+  const before = await indexBytes(fixture.root);
+
+  for (const [action, payload] of [['git', undefined], ['file', undefined], ['stage', { all: true }]]) {
+    const response = await fixture.request(action, payload, { path: 'app.txt' });
+
+    assert.equal(response.statusCode, 401, response.body);
+  }
+
+  assert.deepEqual(await indexBytes(fixture.root), before);
+  assert.equal(await readFile(path.join(fixture.root, 'app.txt'), 'utf8'), 'рабочие байты\n');
+});
+
+const reviewEndpoints = [
+  ['review-fingerprints', { comparisons: [{ group: 'work', path: 'app.txt' }] }],
+  ['conflict', undefined],
+  ['partial-diff', undefined],
+  ['partial-index', {
+    group: 'work',
+    path: 'app.txt',
+    token: 'stale',
+    atomIds: ['x'],
+  }],
+  ['action-preview', {
+    action: 'stage',
+    group: 'work',
+    paths: ['app.txt'],
+  }],
+  ['action-execute', {
+    action: 'stage',
+    group: 'work',
+    paths: ['app.txt'],
+    token: 'stale',
+  }],
+  ['ignore-preview', { target: 'shared', paths: ['new.txt'] }],
+  ['ignore', {
+    target: 'shared',
+    paths: ['new.txt'],
+    token: 'stale',
+  }],
+];
+
+for (const [action, payload] of reviewEndpoints) {
+  test(`CODE-REVIEW-GUARDS: ${action} auth/gate/root без effects`, async (t) => {
+    const secured = await reviewFixture(t, { auth: true });
+    const unauthorized = await secured.request(action, payload, { group: 'work', path: 'app.txt' });
+
+    assert.equal(unauthorized.statusCode, 401, unauthorized.body);
+
+    const fixture = await reviewFixture(t);
+    const before = await indexBytes(fixture.root);
+    const bad = await fixture.request(action, payload, {
+      root: path.join(fixture.temp, 'outside'),
+      group: 'work',
+      path: 'app.txt',
+    });
+
+    assert.ok([400, 404].includes(bad.statusCode), bad.body);
+    fixture.disable();
+
+    const disabled = await fixture.request(action, payload, { group: 'work', path: 'app.txt' });
+
+    assert.equal(disabled.statusCode, 403, disabled.body);
+    assert.deepEqual(await indexBytes(fixture.root), before);
+  });
+}
+
+test('CODE-REVIEW-GUARDS: fingerprints ограничивает 500 descriptors до чтения', async (t) => {
+  const fixture = await reviewFixture(t);
+  const before = await indexBytes(fixture.root);
+  const response = await fixture.request('review-fingerprints', {
+    comparisons: Array.from({ length: 501 }, () => ({ group: 'work', path: 'app.txt' })),
+  });
+
+  assert.equal(response.statusCode, 400, response.body);
+  assert.deepEqual(await indexBytes(fixture.root), before);
 });

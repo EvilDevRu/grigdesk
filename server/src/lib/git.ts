@@ -14,6 +14,8 @@ import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { rawComparison } from './codeGitReview.ts';
+
 import type {
   CodeBlameResponse,
   CodeCommitsDiffResponse,
@@ -99,6 +101,8 @@ interface LimitedGitOptions {
 }
 
 export interface PatchTextOptions {
+  directory?: string;
+  paths?: string[];
   group: 'staged' | 'work' | 'commits';
   path?: string;
   base?: string;
@@ -137,6 +141,7 @@ async function git(
       env: {
         ...process.env,
         GIT_TERMINAL_PROMPT: '0',
+        GIT_OPTIONAL_LOCKS: '0',
         ...(options.env || {}),
       },
     },
@@ -960,7 +965,18 @@ export async function fileDiffSides(
     throw new CodeGitError('no_file', 'Изменение файла не найдено. Обнови список.', 404);
   }
 
-  return fileDiffResponse(entry, oldContent, newContent);
+  const raw = await rawComparison(cwd, {
+    group,
+    path: relPath,
+    base,
+    to,
+    work,
+  }, entry);
+
+  return {
+    ...fileDiffResponse(entry, oldContent, newContent),
+    fingerprint: raw.fingerprint,
+  };
 }
 
 const ACTION_PATHS_MAX = 500;
@@ -1663,6 +1679,26 @@ export async function patchText(
     const changes = await worktreeChanges(cwd, { withContent: false });
 
     sourceFiles = options.group === 'staged' ? changes.staged : changes.files;
+  }
+
+  const scopes = [options.path, options.directory, options.paths].filter((value) => value !== undefined);
+
+  if (scopes.length > 1) {
+    throw new CodeGitError('bad_scope', 'Нужна одна область обзора.', 400);
+  }
+
+  if (options.directory !== undefined) {
+    sourceFiles = sourceFiles.filter((file) => file.path.startsWith(`${options.directory}/`));
+  }
+
+  if (options.paths !== undefined) {
+    const paths = new Set(options.paths);
+
+    if ([...paths].some((file) => !sourceFiles.some((entry) => entry.path === file))) {
+      throw new CodeGitError('bad_paths', 'Файл отсутствует в выбранной группе.', 400);
+    }
+
+    sourceFiles = sourceFiles.filter((file) => paths.has(file.path));
   }
 
   const selected = reviewFiles(sourceFiles, options.path);
