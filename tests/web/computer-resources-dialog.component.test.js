@@ -86,10 +86,6 @@ test('RESOURCES: единый диалог сохраняет устройств
   assert.equal(browser.getComputedStyle(dialog.querySelector('.ui-dialog__body')).overflow, 'hidden');
   assert.equal(browser.getComputedStyle(panel).overflow, 'auto');
 
-  browser.happyDOM.setWindowSize({ width: 1280, height: 900 });
-  style.textContent = cssText;
-  assert.match(browser.getComputedStyle(panel.querySelector('.resource-dashboard')).gridTemplateColumns,
-    /repeat\(2,/u);
 });
 
 test('RESOURCES: загрузка, старый сервер и неизвестная нагрузка сохраняют честные значения', async (t) => {

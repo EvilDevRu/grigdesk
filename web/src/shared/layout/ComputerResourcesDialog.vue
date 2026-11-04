@@ -1,12 +1,9 @@
 <template>
   <UiDialog v-model:open="open" :label="t('core.computerResources')" size="workspace"
-            data-role="system-resources" :body-inset="false" fade-only
+            data-role="system-resources" data-ui-workspace :body-inset="false" fade-only
             initial-focus=".computer-resources">
     <template #header>
       <h2 class="ui-dialog__title">{{ t('core.computerResources') }}</h2>
-      <span v-if="metrics?.cpu.cores" class="resource-dialog-meta">
-        {{ t('core.cores', { count: metrics.cpu.cores }) }}
-      </span>
       <UiIconButton :label="t('core.close')" data-context="workspace-toolbar" variant="ghost"
                     @click="open = false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -14,7 +11,9 @@
       </UiIconButton>
     </template>
     <ComputerResourcesPanel v-if="metrics" :metrics="metrics" :stale="stale" :snapshot-time="snapshotTime" />
-    <UiLoadingState v-else :label="t('core.loading')" variant="rows" />
+    <div v-else class="computer-resources-loading">
+      <UiLoadingState :label="t('core.loading')" variant="rows" />
+    </div>
   </UiDialog>
 </template>
 

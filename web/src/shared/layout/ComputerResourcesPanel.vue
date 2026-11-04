@@ -5,7 +5,10 @@
     </div>
     <div class="resource-dashboard">
       <section class="resource-section">
-        <h3>{{ t('core.resourceComputing') }}</h3>
+        <h3>
+          <span class="resource-section-icon"><ComputerResourceIcon name="cpu" /></span>
+          {{ t('core.resourceComputing') }}
+        </h3>
         <div class="resource-cards" :class="{ 'resource-cards--single': !metrics.gpus?.length }">
           <div class="pu-row resource-card">
             <div class="pu-head">
@@ -38,19 +41,24 @@
                 </span>
               </span>
             </div>
-            <span class="resource-device">{{ gpu.name }}</span>
             <span class="pu-bar" aria-hidden="true">
               <span class="pu-fill" :class="loadClass(gpu.percent)"
                     :style="{ width: barWidth(gpu.percent) }"></span>
             </span>
-            <span v-if="gpu.memoryUsedGb !== undefined || gpu.memoryTotalGb !== undefined" class="pu-reset">
-              {{ t('core.videoMemoryUsage', { used: number(gpu.memoryUsedGb), total: number(gpu.memoryTotalGb) }) }}
+            <span class="pu-reset">
+              <span class="resource-device">{{ gpu.name }}</span>
+              <span v-if="gpu.memoryUsedGb !== undefined || gpu.memoryTotalGb !== undefined">
+                {{ t('core.videoMemoryUsage', { used: number(gpu.memoryUsedGb), total: number(gpu.memoryTotalGb) }) }}
+              </span>
             </span>
           </div>
         </div>
       </section>
       <section v-if="mem" class="resource-section">
-        <h3>{{ t('core.resourceMemory') }}</h3>
+        <h3>
+          <span class="resource-section-icon"><ComputerResourceIcon name="memory" /></span>
+          {{ t('core.resourceMemory') }}
+        </h3>
         <div class="resource-cards resource-memory-grid">
           <div class="pu-row resource-card">
             <div class="pu-head">
@@ -84,13 +92,21 @@
         <p class="resource-memory-hint">{{ t('core.theHeaderCombinesRAMAndSwapUsed') }}</p>
       </section>
       <section v-if="metrics.disks?.length" class="resource-section resource-disks">
-        <h3>{{ t('core.resourceDisks') }}</h3>
+        <h3>
+          <span class="resource-section-icon"><ComputerResourceIcon name="disk" /></span>
+          {{ t('core.resourceDisks') }}
+        </h3>
         <div class="resource-cards resource-disk-grid">
-          <div v-for="disk in metrics.disks" :key="disk.id" class="pu-row resource-card">
+          <div v-for="disk in metrics.disks" :key="disk.id" class="pu-row resource-card"
+               :data-tone="diskClass(disk.freeGb)">
             <div class="pu-head">
-              <span class="pu-name resource-mount">
-                {{ disk.mountpoint }}
-                <span v-if="disk.dataHome" class="pu-data">{{ t('core.grigDeskDataDisk') }}</span>
+              <span class="pu-name resource-disk-name">
+                <ComputerResourceIcon class="resource-disk-icon" :class="diskClass(disk.freeGb)"
+                                      :name="diskClass(disk.freeGb) === 'lv-ok' ? 'disk' : 'warning'" />
+                <span class="resource-mount">
+                  {{ disk.mountpoint }}
+                  <span v-if="disk.dataHome" class="pu-data">{{ t('core.grigDeskDataDisk') }}</span>
+                </span>
               </span>
               <span class="pu-values">
                 <b :class="diskClass(disk.freeGb)">{{ t('core.diskFreeSpace', { free: number(disk.freeGb) }) }}</b>
@@ -121,6 +137,7 @@ import type { SystemMetrics } from '../../../../shared/runtime/systemMetrics.ts'
 import { formatNumber } from '../../../../shared/i18n/formats.ts';
 import { t, uiLocale } from '../../ui.ts';
 import { diskClass, loadClass, memoryView, temperatureClass } from './resourceMetrics.ts';
+import ComputerResourceIcon from './ComputerResourceIcon.vue';
 
 const props = defineProps<{
   metrics: SystemMetrics;
@@ -141,10 +158,11 @@ const barWidth = (value: number | undefined) => `${Math.max(0, Math.min(100, val
   flex: 1;
   min-width: 0;
   min-height: 0;
-  padding: 20px;
+  padding: 24px;
   overflow: auto;
   overscroll-behavior: contain;
   text-align: left;
+  container: computer-resources / inline-size;
 }
 
 .resource-dashboard {
@@ -157,21 +175,39 @@ const barWidth = (value: number | undefined) => `${Math.max(0, Math.min(100, val
 }
 
 .resource-section h3 {
-  margin: 0 0 10px;
-  color: var(--ink-mid);
-  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 12px;
+  color: var(--ink);
+  font-size: 14px;
   font-weight: 600;
-  line-height: 18px;
+  line-height: 20px;
+}
+
+.resource-section-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--ink-mid);
 }
 
 .resource-cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--sidebar);
 }
 
-.resource-cards--single,
-.resource-disk-grid {
+.resource-cards--single {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -180,40 +216,45 @@ const barWidth = (value: number | undefined) => `${Math.max(0, Math.min(100, val
   flex-direction: column;
   gap: 10px;
   min-width: 0;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--surface-2) 35%, var(--surface));
+  padding: 16px;
+}
+
+.resource-card:nth-child(even) {
+  border-left: 1px solid var(--line);
+}
+
+.resource-card:nth-child(n + 3) {
+  border-top: 1px solid var(--line);
 }
 
 .pu-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
   gap: 8px;
-  min-height: 40px;
+  min-height: 64px;
 }
 
 .pu-name {
   min-width: 0;
-  color: var(--ink);
-  font-size: 13px;
+  color: var(--ink-mid);
+  font-size: 12px;
   line-height: 18px;
   overflow-wrap: anywhere;
 }
 
 .pu-values {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
 }
 
 .pu-head b {
   color: var(--ink);
-  font-size: 24px;
-  font-weight: 600;
-  line-height: 28px;
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 34px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -232,12 +273,12 @@ const barWidth = (value: number | undefined) => `${Math.max(0, Math.min(100, val
 
 .temperature {
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .pu-bar {
   flex: none;
   height: 3px;
-  margin-top: auto;
   overflow: hidden;
   border-radius: 2px;
   background: var(--line);
@@ -249,13 +290,17 @@ const barWidth = (value: number | undefined) => `${Math.max(0, Math.min(100, val
   background: var(--accent);
 }
 
+.pu-reset {
+  min-height: 36px;
+}
+
 .pu-reset > span,
 .pu-data {
   display: block;
 }
 
 .resource-memory-hint {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   color: var(--ink-low);
 }
 
@@ -263,11 +308,95 @@ const barWidth = (value: number | undefined) => `${Math.max(0, Math.min(100, val
   justify-content: center;
 }
 
+.resource-disk-grid {
+  display: block;
+}
+
+.resource-disks .resource-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 1fr) minmax(150px, auto);
+  gap: 5px 24px;
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.resource-disks .resource-card:last-child {
+  border-bottom: 0;
+}
+
+.resource-disks .resource-card[data-tone='lv-warn'] {
+  background: color-mix(in srgb, var(--warn) 5%, transparent);
+  box-shadow: inset 3px 0 var(--warn);
+}
+
+.resource-disks .resource-card[data-tone='lv-bad'] {
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+  box-shadow: inset 3px 0 var(--bad);
+}
+
+.resource-disks .pu-head {
+  display: contents;
+}
+
+.resource-disks .pu-name {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  align-self: center;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.resource-disk-name {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.resource-disk-icon {
+  color: var(--ink-mid);
+}
+
+.resource-disk-icon.lv-warn {
+  color: var(--warn);
+}
+
+.resource-disk-icon.lv-bad {
+  color: var(--bad);
+}
+
+.resource-disks .pu-values {
+  grid-column: 3;
+  grid-row: 1 / 3;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+}
+
 .resource-disks .pu-head b {
-  font-size: 18px;
-  line-height: 24px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
   white-space: normal;
   text-align: right;
+}
+
+.resource-disks .pu-bar {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: end;
+}
+
+.resource-disks .pu-reset {
+  grid-column: 2;
+  grid-row: 2;
+  min-height: 0;
+}
+
+.resource-disks .pu-fill.lv-ok {
+  background: var(--ink-mid);
 }
 
 .resource-mount {
@@ -275,7 +404,7 @@ const barWidth = (value: number | undefined) => `${Math.max(0, Math.min(100, val
 }
 
 .pu-data {
-  margin-top: 4px;
+  margin-top: 3px;
   font-family: var(--sans);
 }
 
@@ -288,22 +417,72 @@ const barWidth = (value: number | undefined) => `${Math.max(0, Math.min(100, val
   margin-bottom: 18px;
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--warn) 8%, var(--surface));
   color: var(--warn);
   font-size: 13px;
   line-height: 20px;
 }
 
-@media (max-width: 600px) {
-  .computer-resources { padding: 14px 12px; }
-  .resource-dashboard { gap: 20px; }
-  .resource-card { padding: 12px; }
-}
-
-@media (min-width: 900px) {
+@container computer-resources (min-width: 720px) {
   .resource-dashboard { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .resource-disks { grid-column: 1 / -1; }
-  .resource-disk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@container computer-resources (max-width: 639px) {
+  .resource-disks .resource-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 16px;
+  }
+
+  .resource-disks .pu-name,
+  .resource-disks .pu-values {
+    grid-row: 1;
+  }
+
+  .resource-disks .pu-values {
+    grid-column: 2;
+    max-width: 150px;
+  }
+
+  .resource-disks .pu-bar,
+  .resource-disks .pu-reset {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+}
+
+@container computer-resources (max-width: 389px) {
+  .resource-section:not(.resource-disks) .pu-name {
+    min-height: 36px;
+  }
+
+  .resource-card {
+    padding: 12px;
+  }
+}
+
+@container computer-resources (max-width: 329px) {
+  .resource-disks .resource-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .resource-disks .pu-values {
+    grid-column: 1;
+    grid-row: 2;
+    align-items: flex-start;
+    max-width: none;
+  }
+
+  .resource-disks .pu-head b {
+    text-align: left;
+  }
+}
+
+@media (max-width: 600px) {
+  .computer-resources {
+    padding: 18px max(12px, env(safe-area-inset-right))
+      max(18px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  }
 }
 </style>

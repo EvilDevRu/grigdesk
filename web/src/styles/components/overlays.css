@@ -748,21 +748,22 @@
   margin: 0;
 }
 
-.ui-dialog[data-role='system-resources'] .resource-dialog-meta {
-  color: var(--ink-mid);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
 .ui-dialog[data-role='system-resources'] .ui-dialog__body {
   flex-direction: column;
 }
 
+.ui-dialog[data-role='system-resources'] .computer-resources-loading {
+  flex: 1;
+  min-height: 0;
+  padding: 20px;
+  overflow: auto;
+}
+
 @media (min-width: 601px) {
   .ui-dialog-overlay[data-size='workspace'] .ui-dialog[data-role='system-resources'] {
-    width: min(1040px, calc(100vw - 40px));
-    height: auto;
-    max-height: min(760px, calc(100dvh - 40px));
+    width: min(920px, calc(100vw - 40px));
+    height: min(640px, calc(100dvh - 40px));
+    max-height: min(640px, calc(100dvh - 40px));
   }
 }
 
