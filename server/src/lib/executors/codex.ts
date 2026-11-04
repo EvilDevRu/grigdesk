@@ -58,7 +58,10 @@ import {
 } from './_codexPermissionModes.ts';
 import { createCodexInteractionWaiters } from './_codexApprovals.ts';
 import { ExecutorRuntimeError } from './errors.ts';
-import { codexQuestionPresentation, codexQuestionResponse } from './_codexQuestions.ts';
+import {
+  codexAsyncQuestionPresentation, codexAsyncQuestionResponse,
+  codexQuestionPresentation, codexQuestionResponse,
+} from './_codexQuestions.ts';
 
 const APP_SERVER_TIMEOUT_MS = 15_000;
 
@@ -131,7 +134,14 @@ interface CodexNotificationParams {
   turnId?: unknown;
   turn_id?: unknown;
   turn?: { id?: string; status?: unknown; error?: unknown };
-  item?: { type?: string; id?: unknown; text?: unknown; phase?: unknown };
+  item?: {
+    type?: string;
+    id?: unknown;
+    text?: unknown;
+    phase?: unknown;
+    delivery?: unknown;
+    questions?: unknown;
+  };
   itemId?: unknown;
   delta?: unknown;
   requestId?: unknown;
@@ -257,6 +267,12 @@ interface CodexTurn {
   interruptTimer: ReturnType<typeof setTimeout> | null;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
+}
+
+// Async-вопрос не имеет RPC response: решение связывается с владельцем для turn/steer.
+interface CodexAsyncQuestionAnswer {
+  current: CodexTurn;
+  text: string;
 }
 
 /**
@@ -1445,6 +1461,14 @@ export function openCodexSession({
     },
   });
 
+  const asyncQuestions = createCodexInteractionWaiters({
+    send(_id, result) {
+      if (result) {
+        void deliverAsyncQuestionAnswer(result as CodexAsyncQuestionAnswer);
+      }
+    },
+  });
+
   function request(method: string, params?: unknown, owner: CodexTurn | null = null) {
     return new Promise<unknown>((requestResolve, requestReject) => {
       const id = ++nextRequestId;
@@ -1540,6 +1564,7 @@ export function openCodexSession({
    */
   function closeTurn(current: CodexTurn) {
     interactions.cancel(current);
+    asyncQuestions.cancel(current);
     clearTimeout(current.interruptTimer ?? undefined);
     abandonMessages(current);
     // Ход закрыт — канал уточнений больше не принимает: позднее сообщение не должно
@@ -1742,7 +1767,7 @@ export function openCodexSession({
    * `expectedTurnId` защищает от доставки в следующий turn, а RPC-ответ даёт только
    * `forwarded` — «прочитано моделью» транспорт не подтверждает.
    */
-  function inTurnPortFor(current: CodexTurn): InTurnPort {
+  function inTurnPortFor(current: CodexTurn) {
     return {
       /**
        * Передача уточнения в активный ход. Проверка ожидаемого turn id — часть протокола:
@@ -1813,7 +1838,46 @@ export function openCodexSession({
         }
       },
       close() {},
-    };
+    } satisfies InTurnPort;
+  }
+
+  /**
+   * Ответ async-карточки адресуется только её исходному живому ходу через штатный steer.
+   * Отказ доставки виден в ленте; автоматический повтор мог бы задвоить пользовательское решение.
+   */
+  async function deliverAsyncQuestionAnswer({ current, text }: CodexAsyncQuestionAnswer) {
+    if (turn !== current || current.settled || current.abortRequested || exited) {
+      return;
+    }
+
+    const result = await inTurnPortFor(current).deliver({ messageId: randomUUID(), text });
+
+    if (!result.ok && turn === current && !current.settled && !current.abortRequested) {
+      current.stepSink.emit({
+        k: 'note',
+        level: 'warn',
+        text: `Не удалось передать ответ на вопрос Codex: ${result.message}`,
+      });
+    }
+  }
+
+  /**
+   * Для async-сообщения нет server request: карточка ждёт человека независимо от модели.
+   * Отдельный набор waiter исключает смешение item ID с native request ID и снимается вместе с ходом.
+   */
+  function askAsyncQuestion(current: CodexTurn, item: NonNullable<CodexNotificationParams['item']>) {
+    const presentation = codexAsyncQuestionPresentation(item);
+
+    if (!presentation || typeof item.id !== 'string' || !item.id || !current.turnId
+      || current.settled || current.abortRequested) {
+      return;
+    }
+
+    asyncQuestions.ask(item.id, current, presentation, current.onPermission, (decision) => {
+      const text = codexAsyncQuestionResponse(presentation, decision);
+
+      return text ? { current, text } : null;
+    }, null);
   }
 
   /**
@@ -1982,16 +2046,25 @@ export function openCodexSession({
       const text = String(item.text || current.messageDeltas.get(id) || '');
       current.messageDeltas.delete(id);
 
+      if (item.delivery === 'async') {
+        current.madeProgress ||= Boolean(text.trim());
+
+        if (appNotificationThreadId(params) === threadId
+          && appNotificationTurnId(params) === current.turnId) {
+          askAsyncQuestion(current, item);
+        }
+      }
+
       if (!text.trim()) {
         return;
       }
 
       // Commentary уже ушёл отдельным text-шагом. Ответом считается явный final
-      // либо legacy-модель без phase, где последняя agentMessage была ответом.
-      if (item.phase === 'final_answer' || item.phase == null) {
+      // либо legacy-модель без phase. Async-вопрос не становится итогом или fallback commentary.
+      if (item.delivery !== 'async' && (item.phase === 'final_answer' || item.phase == null)) {
         current.reply = text;
         current.replyMessageId = id;
-      } else {
+      } else if (item.delivery !== 'async') {
         current.lastCommentary = text;
         current.lastCommentaryId = id;
       }
@@ -2530,6 +2603,7 @@ export function openCodexSession({
    */
   async function closeSession(force = false) {
     interactions.cancel();
+    asyncQuestions.cancel();
 
     if (exited) return;
     try { lines.close(); } catch { /* уже закрыт */ }
@@ -2706,6 +2780,7 @@ export function openCodexSession({
       if (!current || current.settled) return;
 
       interactions.cancel(current);
+      asyncQuestions.cancel(current);
       current.abortRequested = true;
       maybeInterrupt(current);
       if (!current.interruptTimer && protocol !== 'legacy') {

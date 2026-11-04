@@ -67,7 +67,7 @@ function effortSliderStub() {
   return [
     'export default {',
     '  name: "EffortSlider",',
-    '  props: ["modelValue", "levels", "hints", "disabled", "hint"],',
+    '  props: ["modelValue", "levels", "hints", "disabled", "hint", "expanded"],',
     '  emits: ["update:modelValue"],',
     '  template: `<span class="eff eff-stub"></span>`,',
     '};',

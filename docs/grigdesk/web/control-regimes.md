@@ -29,10 +29,14 @@
 [Общий фон полей](field-background-sources.md), включая [поиск селекта](select-search-surface.md),
 не зависит от `--control-background` кнопок и переключателей. Высота и сенсорный режим
 по-прежнему зависят от токенов окружения меню.
+Обычные кнопки тоже используют `--surface-2` через свой
+[токен поверхности действия](action-background-sources.md).
 
 ## Ручной сенсорный режим
 
-`data-ui-touch` вручную стоит в `MobileAccess.vue`, `ServerAccessPanel.vue`,
+`data-ui-touch` вручную стоит в [настройках чата телефона](phone-chat-options-content.md),
+в [телефонной панели конвейера](phone-pipeline-controls.md) и её меню,
+`MobileAccess.vue`, `ServerAccessPanel.vue`,
 `PhoneConnectDialog.vue` и `MobilePairingDialog.vue`; `confirmDialog` включает его опцией
 `touchTargets`. Пометка действует и на компьютере с мышью: поля и кнопки этих мест
 получают 44 px. На сенсорном экране корень получает тот же атрибут автоматически —

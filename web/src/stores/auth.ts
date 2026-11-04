@@ -4,9 +4,11 @@ import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
 import { useShellStore } from './shell.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
+import { connectionRetryDelay } from '../../../shared/client/connectionRetry.ts';
 
 const RELOAD_KEY = 'grigdesk-auth-reload-at';
 const RELOAD_INTERVAL_MS = 60_000;
+const recoveryTimers = new WeakMap<object, ReturnType<typeof setTimeout>>();
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -17,6 +19,9 @@ export const useAuthStore = defineStore('auth', {
     logConfirmation: 0,
     logEpoch: 0,
     logReason: 'load',
+    retryAt: 0,
+    retryAttempt: 0,
+    recovering: false,
   }),
 
   actions: {
@@ -26,6 +31,8 @@ export const useAuthStore = defineStore('auth', {
      */
     async load(reason = 'load') {
       const epoch = this.logEpoch;
+
+      this.stopRecovery();
 
       try {
         const s = await api.get('/api/auth/state');
@@ -44,6 +51,8 @@ export const useAuthStore = defineStore('auth', {
         this.authenticated = s.authenticated;
         this.clientScope = s.clientScope ?? s.login ?? '';
         this.logReason = reason;
+        this.retryAttempt = 0;
+        this.recovering = false;
 
         if (s.authenticated) {
           this.logConfirmation += 1;
@@ -55,11 +64,44 @@ export const useAuthStore = defineStore('auth', {
 
         this.authenticated = false;
         this.logReason = reason;
+
+        const shell = useShellStore();
+
+        if (shell.present && shell.status === 'online') {
+          this.scheduleRecovery(epoch);
+        }
       } finally {
         if (epoch === this.logEpoch) {
           this.ready = true;
         }
       }
+    },
+
+    /**
+     * Сбой чтения входа не должен навсегда отключать события при рабочем транспорте.
+     * Повторяет только GET состояния; смена эпохи или потеря связи отменяют восстановление.
+     */
+    scheduleRecovery(epoch: number) {
+      const delay = connectionRetryDelay(this.retryAttempt++);
+
+      this.stopRecovery();
+      this.recovering = true;
+      this.retryAt = Date.now() + delay;
+      recoveryTimers.set(this, setTimeout(() => {
+        recoveryTimers.delete(this);
+        this.retryAt = 0;
+
+        const shell = useShellStore();
+
+        if (this.logEpoch === epoch && shell.present && shell.status === 'online') {
+          void this.load('connection-retry');
+        }
+      }, delay));
+    },
+    stopRecovery() {
+      clearTimeout(recoveryTimers.get(this));
+      recoveryTimers.delete(this);
+      this.retryAt = 0;
     },
 
     /**
@@ -69,6 +111,8 @@ export const useAuthStore = defineStore('auth', {
     handleUnauthorized() {
       const shell = useShellStore();
 
+      this.stopRecovery();
+      this.recovering = false;
       this.logEpoch += 1;
       this.logReason = '401';
       this.authenticated = false;

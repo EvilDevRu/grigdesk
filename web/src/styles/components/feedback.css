@@ -404,7 +404,7 @@
 }
 
 /* Дубль контекста в шапке телефона совпадает с однопиксельным разделителем.
-   Цвет и анимация остаются общими с основным индикатором контекста. */
+   Заполнение и анимация остаются общими с основным индикатором контекста. */
 .ui-progress[data-context='chat-header-context'] {
   height: 1px;
 }
@@ -416,6 +416,14 @@
   width: 56px;
   height: 3px;
   background: var(--line-2);
+}
+
+@media (max-width: 600px) {
+  .ui-dialog[data-ui-chat-options] .ui-progress[data-context='chat-context'] {
+    flex: 1;
+    width: auto;
+    height: 5px;
+  }
 }
 
 .ui-progress__value,
@@ -442,6 +450,13 @@
 
 .ui-progress--danger .ui-progress__bar {
   background: var(--bad);
+}
+
+/* Цвет исполнителя приходит из каталога, без отдельной палитры для телефона.
+   Полупрозрачной становится только заливка: линия разделителя сохраняет свой контраст. */
+.ui-progress[data-context='chat-header-context'] .ui-progress__bar {
+  background: var(--chat-context-color, var(--ink-mid));
+  opacity: 0.5;
 }
 
 .ui-progress__label {

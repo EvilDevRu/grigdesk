@@ -54,9 +54,13 @@ async function mountPipeline(t, {
   fixtures = FIXTURE,
   post = async () => ({ ok: true }),
   onGet = () => {},
+  width = 1024,
 } = {}) {
   const { Window } = await import('../../web/node_modules/happy-dom/lib/index.js');
   const browser = new Window({ url: 'http://grigdesk.test/#/pipeline' });
+
+  browser.happyDOM.setWindowSize({ width, height: 844 });
+
   for (const [key, value] of Object.entries({
     window: browser,
     document: browser.document,
@@ -91,6 +95,7 @@ async function mountPipeline(t, {
      * Наблюдатель считает перечитывания без доступа к состоянию компонента.
      */
     async get(url) {
+      url = url.replace(/\?sources=1$/u, '');
       onGet(url);
 
       if (url === '/api/tasks') {
@@ -140,7 +145,13 @@ async function mountPipeline(t, {
   });
   await flushPromises();
   await flushPromises();
-  return { wrapper, flushPromises };
+  browser.dispatchEvent(new browser.Event('resize'));
+
+  return {
+    wrapper,
+    flushPromises,
+    browser,
+  };
 }
 
 function statusCounts(wrapper) {
@@ -599,4 +610,80 @@ test('пакет пропускает уже запущенную задачу �
   await flushPromises();
 
   assert.deepEqual(calls, ['/api/tasks/1101/resume']);
+});
+
+test('телефон: выбор проекта и состояния использует общие фильтры и сохраняет их', async (t) => {
+  const { wrapper, flushPromises } = await mountPipeline(t, { width: 390 });
+  const project = wrapper.get('[data-role="pipeline-phone-project"]');
+  const status = wrapper.get('[data-role="pipeline-phone-status"]');
+
+  await project.setValue('beta');
+  await flushPromises();
+
+  assert.equal(localStorage.getItem('grigdesk-pipeline-project'), 'beta');
+  assert.equal(wrapper.findAll('.card').length, 1);
+  assert.match(wrapper.get('.phone-toolbar').text(), /Все состояния · 1/u);
+
+  await status.setValue('waiting');
+  await flushPromises();
+
+  assert.equal(localStorage.getItem('grigdesk-pipeline-status'), 'waiting');
+  assert.equal(wrapper.find('.filter-empty').exists(), true);
+});
+
+test('телефон: настройки вида управляют прежними карточками и закрываются при расширении', async (t) => {
+  const { wrapper, flushPromises, browser } = await mountPipeline(t, { width: 390 });
+
+  await wrapper.get('[data-role="pipeline-phone-controls"]').trigger('click');
+  await wrapper.get('[data-role="pipeline-phone-compact"]').trigger('click');
+  await flushPromises();
+
+  assert.equal(localStorage.getItem('grigdesk-compact'), '0');
+  assert.equal(wrapper.get('.card').classes().includes('collapsed'), false);
+  assert.equal(wrapper.get('[data-role="pipeline-phone-loops"]').attributes('disabled'), undefined);
+
+  await wrapper.get('[data-role="pipeline-phone-loops"]').trigger('click');
+  await flushPromises();
+
+  assert.equal(
+    wrapper.get('.compact-view-controls [data-option="loops"]').attributes('aria-pressed'),
+    'true',
+  );
+
+  browser.happyDOM.setWindowSize({ width: 1024, height: 844 });
+  await flushPromises();
+
+  assert.equal(wrapper.find('.phone-toolbar').exists(), false);
+  assert.equal(wrapper.find('[data-role="pipeline-phone-loops"]').exists(), false);
+  assert.equal(
+    wrapper.get('.compact-view-controls [data-option="compact"]').attributes('aria-pressed'),
+    'false',
+  );
+});
+
+test('телефон: массовая команда сохраняет область проекта и блокировку повтора', async (t) => {
+  const calls = [];
+  const { wrapper, flushPromises } = await mountPipeline(t, {
+    width: 320,
+    project: 'alpha',
+    fixtures: BULK_FIXTURE,
+    post: async (url) => {
+      calls.push(url);
+
+      return { ok: true };
+    },
+  });
+
+  await wrapper.get('[data-role="pipeline-phone-controls"]').trigger('click');
+
+  const command = wrapper.get('[data-phone-bulk-action="stop"][data-bulk-scope="project"]');
+
+  assert.match(command.text(), /Остановить все во вкладке1/u);
+
+  await command.trigger('click');
+  await command.trigger('click');
+  await flushPromises();
+  await flushPromises();
+
+  assert.deepEqual(calls, ['/api/tasks/1103/stop']);
 });

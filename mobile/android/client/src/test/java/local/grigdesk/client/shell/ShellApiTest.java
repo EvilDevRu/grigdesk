@@ -51,7 +51,72 @@ public class ShellApiTest {
 
       assertEquals("отчёт.txt", ShellApi.saveName(" отчёт.txt "));
       assertFalse(shell.state.snapshot().toString().contains("fp"));
+
+      HttpHead unlock = new HttpHead("POST /__shell/unlock HTTP/1.1", java.util.Map.of());
+
+      try (PipeResponse response = shell.handle(unlock, new ByteArrayInputStream(new byte[0]))) {
+        JSONObject snapshot = new JSONObject(StaticAssets.readText(response.body, 4096));
+
+        assertEquals(200, response.status);
+        assertEquals(shell.state.snapshot().getLong("rev"), snapshot.getLong("rev"));
+        assertEquals("none", snapshot.getString("status"));
+        assertTrue(snapshot.has("profile"));
+        assertTrue(snapshot.has("profiles"));
+        assertTrue(snapshot.has("capabilities"));
+      }
     } finally {
+      Files.deleteIfExists(root);
+    }
+  }
+
+  /**
+   * Успешная разблокировка возвращает выбранную машину вместе со свежей ревизией.
+   * Подтверждение ok без снимка стирало профиль в общем интерфейсе Android.
+   */
+  @Test
+  public void unlockReturnsSelectedMachineAndCurrentConnectionState() throws Exception {
+    Path root = Files.createTempDirectory("grigdesk-unlock-state-");
+    Path file = root.resolve("profiles.json");
+    ProfileStore store = new ProfileStore(file.toFile(), port -> true);
+    String id = store.add("Фикстура", "https://machine.example:443", "1".repeat(64)).getString("id");
+    ShellApi.Native nativeActions = new ShellApi.Native() {
+      public String scan() {
+        return "";
+      }
+      public void save(String name, String type, InputStream body) {
+      }
+      public void unlock() {
+      }
+    };
+
+    try (ShellApi shell = new ShellApi(store, null, (profile, gate, report) -> new ShellApi.Transport() {
+      public void probe() {
+        report.accept("online", null);
+      }
+      public void close() {
+      }
+      public Upstream pipe() {
+        return null;
+      }
+    }, (callback, delay) -> () -> {}, Runnable::run, profile -> {}, nativeActions, () -> 0.5, 0, 1)) {
+      store.select(id);
+      shell.state.report(id, "locked", null, null);
+
+      long lockedRevision = shell.state.snapshot().getLong("rev");
+      HttpHead request = new HttpHead("POST /__shell/unlock HTTP/1.1", java.util.Map.of());
+
+      try (PipeResponse response = shell.handle(request, new ByteArrayInputStream(new byte[0]))) {
+        JSONObject snapshot = new JSONObject(StaticAssets.readText(response.body, 4096));
+
+        assertEquals(200, response.status);
+        assertEquals(id, snapshot.getJSONObject("profile").getString("id"));
+        assertEquals("online", snapshot.getString("status"));
+        assertTrue(snapshot.getLong("rev") > lockedRevision);
+        assertEquals(1, snapshot.getJSONArray("profiles").length());
+        assertFalse(snapshot.toString().contains("fp"));
+      }
+    } finally {
+      Files.deleteIfExists(file);
       Files.deleteIfExists(root);
     }
   }

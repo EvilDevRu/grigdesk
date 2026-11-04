@@ -386,7 +386,7 @@ test('телефон: переименование доступно при за�
 
   assert.equal(options !== null, true);
   assert.equal(options.contains(model), true, 'поле модели переезжает в диалог тем же узлом');
-  assert.match(options.textContent, /Задача.*Рабочая папка.*Модель/su);
+  assert.match(options.textContent, /Модель.*Рабочая область.*Задача.*Рабочая папка/su);
   assert.equal(css(options.querySelector('.session-controls')).display, 'grid');
   await wrapper.get('.phone-options').trigger('click');
   await flushPromises();
@@ -446,7 +446,11 @@ test('настройки телефона: полный набор полей, �
     assert.equal(dialog !== null, true);
     assert.equal(dialog.closest('[data-mobile-fullscreen]') !== null, true);
     assert.equal(dialog.contains(model) && dialog.contains(effort) && dialog.contains(task), true);
-    assert.match(dialog.textContent, /Задача.*Рабочая папка.*Модель.*Режим доступа.*Усилие.*Контекст/su);
+    assert.match(dialog.textContent,
+      /Агент.*Модель.*Режим доступа.*Усилие.*Рабочая область.*Задача.*Рабочая папка.*Контекст/su);
+    assert.equal(dialog.querySelectorAll('.options-section').length, 3);
+    assert.equal([...dialog.querySelectorAll('.context-actions button')]
+      .every((button) => button.disabled), true);
     assert.equal(browser.document.querySelectorAll('.sel.model').length, 1);
     dialog.querySelector('.options-heading button').click();
     await flushPromises();
@@ -464,6 +468,51 @@ test('настройки телефона: полный набор полей, �
   assert.equal(wrapper.get('.sel.model').element === model, true);
   assert.equal(wrapper.get('.eff').element === effort, true);
   assert.equal(wrapper.get('.task-tip').element === task, true);
+});
+
+test('телефон: явные действия с памятью требуют подтверждения и сохраняют свои операции', async (t) => {
+  const { wrapper, browser, session, store, flushPromises } = await mountChat(t, {
+    sending: false,
+    touch: true,
+    width: 390,
+  });
+  const operations = [];
+  let accepted = false;
+
+  session.sessionId = 'context-session';
+  store.compact = () => operations.push('compact');
+  store.resetContext = async () => operations.push('reset');
+  globalThis[`${PREFIX}ConfirmDialog`] = async () => accepted;
+  t.after(() => delete globalThis[`${PREFIX}ConfirmDialog`]);
+  await wrapper.get('.phone-options').trigger('click');
+  await flushPromises();
+
+  const actions = browser.document.querySelectorAll('.context-actions button');
+
+  assert.equal(actions.length, 2);
+  assert.equal(actions[0].disabled || actions[1].disabled, false);
+  actions[0].click();
+  actions[1].click();
+  await flushPromises();
+  assert.deepEqual(operations, []);
+  accepted = true;
+  actions[0].click();
+  await flushPromises();
+  actions[1].click();
+  await flushPromises();
+  assert.deepEqual(operations, ['compact', 'reset']);
+
+  session.sending = true;
+  await flushPromises();
+  assert.equal(actions[0].disabled && actions[1].disabled, true);
+
+  session.sending = false;
+  session.sessionResetting = true;
+  await flushPromises();
+  assert.equal(actions[0].disabled && actions[1].disabled, true);
+  browser.document.querySelector('.ctx-meter').click();
+  await flushPromises();
+  assert.deepEqual(operations, ['compact', 'reset']);
 });
 
 test('телефон: выбор папки встроен в настройки, подтверждение перехода остаётся явным', async (t) => {

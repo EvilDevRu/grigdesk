@@ -1,32 +1,59 @@
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from './uiLocalePort.ts';
+import { isRecord } from '../../../shared/lib/objects.ts';
 
 import type { ShellState } from '../../../shared/client/clientShell.ts';
 
 /**
+ * Подтверждение действия с ok не является снимком и не может стирать выбранную машину.
+ * Проверка общей формы применяется и к чтению, и к ответам нативных действий.
+ */
+export function isShellState(value: unknown): value is ShellState {
+  return isRecord(value) && typeof value.rev === 'number' && Number.isFinite(value.rev)
+    && typeof value.status === 'string' && Object.hasOwn(value, 'profile')
+    && (value.profile === null || isRecord(value.profile)) && Array.isArray(value.profiles)
+    && Array.isArray(value.capabilities) && typeof value.localAvailable === 'boolean';
+}
+
+/**
  * API оболочки не проходит через журнал прикладного API: строка привязки секретна.
  * Детектор допускает только JSON с числовой ревизией, не SPA-fallback Vite.
+ * Срок включает чтение тела и оставляет запас после штатного long-poll в 25 секунд.
  */
 export async function readShellState(rev?: number, signal?: AbortSignal): Promise<ShellState | null> {
-  const response = await fetch(`/__shell/state${rev === undefined ? '' : `?rev=${rev}`}`, {
-    credentials: 'same-origin',
-    cache: 'no-store',
-    signal,
-  });
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), 35_000);
+  const requestSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
+  const cancelTimeout = () => clearTimeout(timer);
 
-  if (!response.ok) {
-    return null;
+  requestSignal.addEventListener('abort', cancelTimeout, { once: true });
+
+  try {
+    const response = await fetch(`/__shell/state${rev === undefined ? '' : `?rev=${rev}`}`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      signal: requestSignal,
+    });
+
+    if (response.status >= 500 || response.status === 429) {
+      throw new Error('Оболочка временно недоступна');
+    }
+
+    if (!response.ok) {
+      return null;
+    }
+
+    if (!response.headers.get('content-type')?.includes('application/json')) {
+      return null;
+    }
+
+    const state: unknown = await response.json();
+
+    return isShellState(state) ? state : null;
+  } finally {
+    clearTimeout(timer);
+    requestSignal.removeEventListener('abort', cancelTimeout);
   }
-
-
-
-  if (!response.headers.get('content-type')?.includes('application/json')) {
-    return null;
-  }
-
-  const state = await response.json() as ShellState | null;
-
-  return state && typeof state.rev === 'number' && Number.isFinite(state.rev) ? state : null;
 }
 
 /**

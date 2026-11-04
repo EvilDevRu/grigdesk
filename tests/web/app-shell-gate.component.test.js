@@ -13,6 +13,7 @@ test('оболочка: интерфейс открыт до сервера, м�
     await installUiBrowser(t);
 
     const { reactive, nextTick } = await import('../../web/node_modules/vue/index.mjs');
+    const { createPinia } = await import('../../web/node_modules/pinia/dist/pinia.mjs');
     const { mount } = await import(
       '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs');
     const noop = () => {};
@@ -23,6 +24,7 @@ test('оболочка: интерфейс открыт до сервера, м�
       authenticated: false,
       load: async (reason) => authLoads.push(reason),
       watchUnauthorized: noop,
+      stopRecovery: noop,
     });
     globalThis.__gateShell = reactive({
       present: true,
@@ -43,17 +45,19 @@ test('оболочка: интерфейс открыт до сервера, м�
       clear: noop,
       stopPoll: noop,
       clearSource: () => {},
+      invalidate: noop,
+      close: noop,
     };
 
     const stubs = {
-    ...appWindowStubs,
+      ...appWindowStubs,
       './stores/settings.ts': `export const useSettingsStore = () => ({
         isOpen: false, setAuthenticated() {}, dispose() {},
       });`,
       './views/settings/SettingsModal.vue': 'export default { render: () => null };',
       './stores/auth.ts': 'export const useAuthStore = () => globalThis.__gateAuth;',
       './stores/shell.ts': 'export const useShellStore = () => globalThis.__gateShell;',
-      './shared/desktopSettings.ts': "export const currentDesktopMode = () => 'main';",
+      './shared/desktopSettings.ts': "export const currentDesktopMode = () => 'page';",
       './shared/alerts.ts': [
         'export const clearAlertHistory = () => {};',
         'export const dismissAllAlerts = () => {};',
@@ -65,9 +69,11 @@ test('оболочка: интерфейс открыт до сервера, м�
     };
 
     for (const [file, name] of [
-      ['board.js', 'useBoardStore'], ['system.js', 'useSystemStore'],
-      ['task-favorites.js', 'useTaskFavoritesStore'], ['taskShelf.ts', 'useTaskShelfStore'],
-      ['task-seen.js', 'useTaskSeenStore'], ['videoSession.ts', 'useVideoSessionStore'],
+      ['board.ts', 'useBoardStore'], ['system.ts', 'useSystemStore'],
+      ['taskFavorites.ts', 'useTaskFavoritesStore'], ['taskShelf.ts', 'useTaskShelfStore'],
+      ['taskSeen.ts', 'useTaskSeenStore'], ['videoSession.ts', 'useVideoSessionStore'],
+      ['grigdeskTasks.ts', 'useGrigdeskTasksStore'], ['tasks.ts', 'useTasksStore'],
+      ['ui.ts', 'useUiStore'],
     ]) {
       stubs[`./stores/${file}`] = `export const ${name} = () => globalThis.__gateOther;`;
     }
@@ -79,7 +85,11 @@ test('оболочка: интерфейс открыт до сервера, м�
     const component = await compileVue(webFile('src/App.vue'), { stubs });
     const wrapper = mount(component, {
       attachTo: document.body,
-      global: { stubs: { RouterView: { template: '<div data-route />' } } },
+      global: {
+        plugins: [createPinia()],
+        mocks: { $route: { name: 'chats' } },
+        stubs: { RouterView: { template: '<div data-route />' } },
+      },
     });
 
     t.after(() => wrapper.unmount());

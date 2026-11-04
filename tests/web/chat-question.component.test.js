@@ -152,6 +152,64 @@ test('single-вопрос заменяет выбор и отправляет п
   ]]]);
 });
 
+test('ответ на несколько вопросов доступен только после заполнения каждого', async (t) => {
+  const wrapper = await mountQuestion(t, [
+    { question: 'Способ?', options: [{ label: 'Первый' }, { label: 'Второй' }] },
+    {
+      question: 'Проверки?',
+      multiSelect: true,
+      options: [{ label: 'Тесты' }, { label: 'Сборка' }],
+    },
+    { question: 'Пояснение?' },
+  ]);
+  const lists = wrapper.findAll('.ui-choice-list');
+  const reply = button(wrapper, 'Ответить');
+  const field = wrapper.get('textarea');
+
+  await lists[0].findAll('.ui-choice-list__option')[0].trigger('click');
+  assert.equal(wrapper.get('.q-progress').text(), 'Ответов: 1 из 3');
+  assert.equal(reply.element.disabled, true);
+  await reply.trigger('click');
+  await field.trigger('keydown', { key: 'Enter', ctrlKey: true });
+  assert.equal(wrapper.emitted('answer'), undefined);
+
+  await lists[1].findAll('.ui-choice-list__option')[0].trigger('click');
+  await field.setValue('   ');
+  assert.equal(reply.element.disabled, true);
+  await field.setValue('Свой ответ');
+  assert.equal(wrapper.get('.q-progress').text(), 'Ответов: 3 из 3');
+  assert.equal(reply.element.disabled, false);
+
+  await lists[1].findAll('.ui-choice-list__option')[0].trigger('click');
+  assert.equal(reply.element.disabled, true, 'снятие последнего варианта снова блокирует ответ');
+  await field.trigger('keydown', { key: 'Enter', metaKey: true });
+  assert.equal(wrapper.emitted('answer'), undefined);
+  await lists[1].findAll('.ui-choice-list__option')[1].trigger('click');
+  await reply.trigger('click');
+  assert.deepEqual(wrapper.emitted('answer')[0][0].map((answer) => [answer.selected, answer.text]), [
+    [['Первый'], ''],
+    [['Сборка'], ''],
+    [[], 'Свой ответ'],
+  ]);
+});
+
+test('неполный ответ защищён обработчиком, пропуск остаётся доступен', async (t) => {
+  const wrapper = await mountQuestion(t, [
+    { question: 'Первый?', options: [{ label: 'Да' }] },
+    { question: 'Второй?', options: [{ label: 'Да' }] },
+  ]);
+
+  await wrapper.get('.ui-choice-list__option').trigger('click');
+
+  const action = wrapper.findAllComponents({ name: 'UiButton' })
+    .find((component) => component.text() === 'Ответить');
+
+  action.vm.$emit('click');
+  assert.equal(wrapper.emitted('answer'), undefined);
+  await button(wrapper, 'Пропустить').trigger('click');
+  assert.equal(wrapper.emitted('skip').length, 1);
+});
+
 test('multiple-вопрос и свой текст сохраняются одновременно', async (t) => {
   const wrapper = await mountQuestion(t, [{
     header: 'Проверки',

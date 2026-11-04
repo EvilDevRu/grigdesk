@@ -345,6 +345,10 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
       } else if (head.method().equals("POST") && path.equals("/__shell/unlock")) {
         nativeActions.unlock();
         connect(store.selected, true);
+
+        // Общий интерфейс сразу применяет снимок и снимает слой блокировки.
+        // Одного ok недостаточно: он не содержит ревизии и выбранной машины.
+        return PipeResponse.json(200, state.snapshot());
       } else if (head.method().equals("POST") && path.equals("/__shell/profiles")) {
         nativeActions.unlock();
         JSONObject added = pairing.add(data.getString("pairing"));

@@ -148,10 +148,14 @@ export class DeepSeekWebClient {
     return frame.result.value;
   }
 
-  async createSession(cwd: string, sessionId?: string | null): Promise<string> {
+  /**
+   * Обычный caller сохраняет прежний RPC deadline, model-only передаёт общий signal.
+   * Созданная сессия подтверждается тем же envelope и идентификатором.
+   */
+  async createSession(cwd: string, sessionId?: string | null, signal?: AbortSignal): Promise<string> {
     const value = await this.rpc('session/create', {
       request: { cwd, ...(sessionId ? { sessionId } : {}) },
-    }) as { sessionId?: unknown };
+    }, 30_000, signal) as { sessionId?: unknown };
     const id = String(value?.sessionId || '');
     if (!id || (sessionId && id !== sessionId)) {
       throw new DeepSeekWebError('DeepSeek web не подтвердил сессию', 'deepseek_session_invalid');
@@ -159,7 +163,13 @@ export class DeepSeekWebClient {
     return id;
   }
 
-  async prompt(sessionId: string, text: string, requestId: string, mode: 'queue' | 'steer') {
+  /**
+   * Общий signal нового режима прерывает и отправку, и чтение RPC-ответа.
+   * Отмена не означает, что внешний вендор гарантированно не получил уже принятый prompt.
+   */
+  async prompt(
+    sessionId: string, text: string, requestId: string, mode: 'queue' | 'steer', signal?: AbortSignal,
+  ) {
     return this.rpc('session/prompt', {
       request: {
         requestId,
@@ -167,7 +177,7 @@ export class DeepSeekWebClient {
         mode,
         content: [{ type: 'text', text }],
       },
-    }) as Promise<{ accepted: true }>;
+    }, 30_000, signal) as Promise<{ accepted: true }>;
   }
 
   async cancel(sessionId: string): Promise<void> {

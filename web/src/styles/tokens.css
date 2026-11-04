@@ -74,9 +74,9 @@
   --workspace-inset: 20px;
   --workspace-row-inset: 7px 10px;
 
-  /* Семантические токены общего control skin. Значения только ссылаются на исходную
-     палитру: foundation не вводит вторую тему и не меняет существующие поверхности. */
-  --control-background: var(--ground);
+  /* Обычные controls используют поверхность действия, общую с полями.
+     Фон страницы остаётся отдельным слоем и не просвечивает чёрной заливкой кнопок. */
+  --control-background: var(--surface-2);
   --control-background-hover: var(--surface-2);
   --control-border: var(--line);
   --control-border-hover: var(--line-2);

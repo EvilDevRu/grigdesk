@@ -36,4 +36,15 @@ const emit = defineEmits<{ action: [id: PipelineCardActionId] }>();
   gap: 6px;
   min-width: 0;
 }
+
+@media (max-width: 600px) {
+  .pipeline-card-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 128px), 1fr));
+    grid-auto-rows: 1fr;
+    align-items: stretch;
+    gap: 8px;
+    width: 100%;
+  }
+}
 </style>

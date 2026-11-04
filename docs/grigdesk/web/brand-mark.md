@@ -1,6 +1,6 @@
 # Знак GrigDesk
 
-В шапке используется малая G, в значке приложения — GD, в README — надпись GrigDesk.
+В шапке и значке приложения используется L8 «Графит» с одной исходной G, в README — надпись GrigDesk.
 Геометрия взята из утверждённых мастеров; прежняя шкала прибора удалена.
 
 ## Источники и воспроизведение
@@ -9,7 +9,7 @@
 `grigdesk-stacked.svg`, `grigdesk-gd{,-reversed,-small}.svg`,
 `grigdesk-g-small{,-reversed}.svg`, `grigdesk-favicon-tile.svg`,
 `grigdesk-app-icon.svg`, `grigdesk-app-icon-1024.png`, `grigdesk-maskable-512.png`.
-Их геометрия и утверждённые растры сохраняются побайтно. Производные надписи
+Геометрия буквы G и утверждённые растры сохраняются побайтно. Производные надписи
 `grigdesk-wordmark-light.svg` и `grigdesk-wordmark-graphite.svg` отличаются только заливкой:
 `#F2F3F5` и `#0B0D11`. README выбирает их через picture, ширина 360 px.
 
@@ -24,11 +24,12 @@
 - окно: `desktop/build/icon.png` 512 и `window-icon.png` 64;
 - команду: `bin/grigdesk.png`, побайтную копию веб-значка 512;
 - телефон: PNG 192/512, maskable 512, Android mipmap 48/72/96/144/192;
-- Android adaptive foreground: GD reversed на холсте 108 dp с графитовым фоном;
-- `GrigDeskMark.vue` и `UiBrandMark.vue`: малая G reversed, заливка `currentColor`.
+- Android adaptive foreground: полный L8 на холсте 108 dp с графитовым фоном;
+- актуальный Android :client: client_icon.png и adaptive-ресурсы для обычного и круглого значка;
+- `GrigDeskMark.vue` и `UiBrandMark.vue`: полный цветной L8 из мастера app-icon.
 
-Компоненты не перекрашивают отдельные части и не имеют режима mono. Цвет задаёт родитель.
-Фон графитовый `#0B0D11`, светлая надпись `#F2F3F5`; формы мастеров не перерисовываются.
+Цвета компонентов фиксированы мастером. В шапке знак занимает 20×20 px.
+Палитра, геометрия и безопасные поля описаны в [контракте L8](brand-l8.md).
 
 ## Проверка
 

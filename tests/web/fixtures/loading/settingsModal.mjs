@@ -16,6 +16,7 @@ export async function captureSettingsModal(t, mount, flushPromises) {
       authenticated: false,
       ready: false,
       watchUnauthorized() {},
+      stopRecovery() {},
       async load() {}
     },
     shell: {
