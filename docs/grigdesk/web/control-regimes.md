@@ -34,7 +34,8 @@
 
 ## Ручной сенсорный режим
 
-`data-ui-touch` вручную стоит в `MobileAccess.vue`, `ServerAccessPanel.vue`,
+`data-ui-touch` вручную стоит в [настройках чата телефона](phone-chat-options-content.md),
+`MobileAccess.vue`, `ServerAccessPanel.vue`,
 `PhoneConnectDialog.vue` и `MobilePairingDialog.vue`; `confirmDialog` включает его опцией
 `touchTargets`. Пометка действует и на компьютере с мышью: поля и кнопки этих мест
 получают 44 px. На сенсорном экране корень получает тот же атрибут автоматически —

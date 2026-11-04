@@ -171,73 +171,100 @@
                   {{ currentMode }} · {{ t('core.chatModeUnavailable') }}
                 </option>
               </UiSelect>
+              <p v-if="phoneLayout" class="option-help">{{ modeHint }}</p>
             </div>
             <div v-if="effortLevels.length" class="session-option effort-option">
               <span class="option-label">{{ t('core.chatOptionEffort') }}</span>
               <EffortSlider :model-value="effortValue" :levels="effortLevels"
                             :hints="currentModel?.effortHints || {}"
+                            :expanded="phoneLayout"
                             :disabled="frozen" @update:model-value="chat.setEffort(sid, $event)" />
             </div>
-            <!-- Контекст: точная активная заполненность; при недоступной метрике полоса пустая.
-                 Клик — сжатие контекста (с подтверждением), Alt+клик — сброс памяти агента.
-                 Подсказка штатная, а не browser title: так она не обрезается и вмещает
-                 раздельные числа, состояние и действия. -->
-            <div class="session-option context-option">
-              <span class="option-label">{{ t('core.chatContextLabel') }}</span>
-              <UiTooltip
-                placement="top-end"
-                :surface-style="{ maxWidth: 'min(300px, calc(100vw - 16px))' }"
-              >
-                <template #trigger>
-                  <UiButton
-                    class="ctx-tip ctx-meter"
-                    :class="[ctxClass, { estimate: ctxIsEstimate, compacting: sess.compacting }]"
-                    variant="ghost"
-                    :aria-label="ctxTitle"
-                    :aria-disabled="ctxDisabled"
+          </div>
+        </Teleport>
+        <Teleport :to="contextOptionsHost || 'body'"
+                  :disabled="!phoneLayout || !optionsOpen || !contextOptionsHost">
+          <!-- Контекст: точная активная заполненность; при недоступной метрике полоса пустая.
+               Клик — сжатие контекста (с подтверждением), Alt+клик — сброс памяти агента.
+               Подсказка штатная, а не browser title: так она не обрезается и вмещает
+               раздельные числа, состояние и действия. -->
+          <div class="session-option context-option">
+            <span class="option-label">{{ t('core.chatContextLabel') }}</span>
+            <UiTooltip
+              placement="top-end"
+              :surface-style="{ maxWidth: 'min(300px, calc(100vw - 16px))' }"
+            >
+              <template #trigger>
+                <UiButton
+                  class="ctx-tip ctx-meter"
+                  :class="[ctxClass, { estimate: ctxIsEstimate, compacting: sess.compacting }]"
+                  variant="ghost"
+                  :aria-label="ctxTitle"
+                  :aria-disabled="ctxDisabled"
+                  data-context="chat-context"
+                  @click="onCtxClick"
+                >
+                  <span class="ctx-meter-cap" aria-hidden="true">{{ t('core.chatContextLabel') }}</span>
+                  <UiProgress
+                    :value="ctxMeterValue"
+                    :tone="ctxMeterTone"
+                    :indeterminate="sess.compacting"
+                    :label="ctxTooltip.title"
+                    :value-text="ctxTitle"
                     data-context="chat-context"
-                    @click="onCtxClick"
-                  >
-                    <span class="ctx-meter-cap" aria-hidden="true">{{ t('core.chatContextLabel') }}</span>
-                    <UiProgress
-                      :value="ctxMeterValue"
-                      :tone="ctxMeterTone"
-                      :indeterminate="sess.compacting"
-                      :label="ctxTooltip.title"
-                      :value-text="ctxTitle"
-                      data-context="chat-context"
-                      aria-hidden="true"
-                    />
-                    <span class="ctx-meter-value" aria-hidden="true">{{ ctxMeterText }}</span>
-                  </UiButton>
-                </template>
-                <template #tip>
-                  <span class="ctx-pop" data-testid="context-tooltip">
-                    <span class="ctx-pop-head">
-                      <span><b>{{ ctxTooltip.title }}</b><span class="ctx-pop-unit"> · токены</span></span>
-                      <span v-if="ctxTooltip.percent" class="ctx-pop-pct" :class="ctxTooltip.tone">
-                        {{ ctxTooltip.percent }}
-                      </span>
-                    </span>
-                    <span v-if="ctxTooltip.status" class="ctx-pop-status" :class="ctxTooltip.tone">
-                      {{ ctxTooltip.status }}
-                    </span>
-                    <span v-if="ctxTooltip.detail" class="ctx-pop-detail">{{ ctxTooltip.detail }}</span>
-                    <span v-if="ctxTooltip.rows.length" class="ctx-pop-rows">
-                      <span v-for="row in ctxTooltip.rows" :key="row.label"
-                            class="ctx-pop-row" :class="{ unverified: row.unverified, cache: row.cache }">
-                        <span class="ctx-pop-label">{{ row.label }}</span>
-                        <span class="ctx-pop-value">{{ row.value }}</span>
-                      </span>
-                    </span>
-                    <span v-if="ctxTooltip.actions" class="ctx-pop-actions">
-                      <span class="ctx-pop-action"><b>Клик</b><span>сжать</span></span>
-                      <span class="ctx-pop-action"><b>Alt + клик</b><span>сбросить</span></span>
+                    aria-hidden="true"
+                  />
+                  <span class="ctx-meter-value" aria-hidden="true">{{ ctxMeterText }}</span>
+                </UiButton>
+              </template>
+              <template #tip>
+                <span class="ctx-pop" data-testid="context-tooltip">
+                  <span class="ctx-pop-head">
+                    <span><b>{{ ctxTooltip.title }}</b><span class="ctx-pop-unit"> · токены</span></span>
+                    <span v-if="ctxTooltip.percent" class="ctx-pop-pct" :class="ctxTooltip.tone">
+                      {{ ctxTooltip.percent }}
                     </span>
                   </span>
+                  <span v-if="ctxTooltip.status" class="ctx-pop-status" :class="ctxTooltip.tone">
+                    {{ ctxTooltip.status }}
+                  </span>
+                  <span v-if="ctxTooltip.detail" class="ctx-pop-detail">{{ ctxTooltip.detail }}</span>
+                  <span v-if="ctxTooltip.rows.length" class="ctx-pop-rows">
+                    <span v-for="row in ctxTooltip.rows" :key="row.label"
+                          class="ctx-pop-row" :class="{ unverified: row.unverified, cache: row.cache }">
+                      <span class="ctx-pop-label">{{ row.label }}</span>
+                      <span class="ctx-pop-value">{{ row.value }}</span>
+                    </span>
+                  </span>
+                  <span v-if="ctxTooltip.actions && !phoneLayout" class="ctx-pop-actions">
+                    <span class="ctx-pop-action"><b>Клик</b><span>сжать</span></span>
+                    <span class="ctx-pop-action"><b>Alt + клик</b><span>сбросить</span></span>
+                  </span>
+                </span>
+              </template>
+            </UiTooltip>
+            <template v-if="phoneLayout">
+              <p class="option-help" role="status">
+                <template v-if="ctxTooltip.status">{{ ctxTooltip.status }}</template>
+                <template v-else-if="ctxTooltip.percent">
+                  {{ t('core.chatContextTokens', {
+                    used: fmtTokens(ctxTokens),
+                    limit: fmtTokens(ctxLimit),
+                  }) }}
                 </template>
-              </UiTooltip>
-            </div>
+                <template v-else>{{ ctxTooltip.detail }}</template>
+              </p>
+              <div class="context-actions">
+                <UiButton :disabled="ctxDisabled || frozen" @click="onCtxClick({ altKey: false })">
+                  {{ t('core.chatContextCompact') }}
+                </UiButton>
+                <UiButton variant="ghost" :disabled="ctxDisabled || frozen"
+                          @click="onCtxClick({ altKey: true })">
+                  {{ t('core.chatContextReset') }}
+                </UiButton>
+              </div>
+              <p class="option-help">{{ t('core.chatContextActionsHint') }}</p>
+            </template>
           </div>
         </Teleport>
       </div>
@@ -281,7 +308,8 @@
     </UiInlineMessage>
 
     <UiDialog v-model:open="optionsOpen" size="compact" :title="t('core.conversationOptions')"
-              class="phone-chat-options" data-role="chat-options" data-ui-workspace data-ui-chat-options
+              class="phone-chat-options" data-role="chat-options" data-ui-workspace data-ui-touch
+              data-ui-chat-options
               initial-focus="[data-role='chat-options-body']">
       <template #title>
         <span class="options-heading">
@@ -293,9 +321,25 @@
         </span>
       </template>
       <div class="options-body" data-role="chat-options-body" tabindex="-1">
-        <div ref="workspaceOptionsHost"></div>
-        <div ref="controlOptionsHost"></div>
+        <section class="options-section" :aria-labelledby="`chat-options-agent-${sid}`">
+          <h2 :id="`chat-options-agent-${sid}`">{{ t('core.chatSettingsAgent') }}</h2>
+          <div ref="controlOptionsHost"></div>
+        </section>
+        <section class="options-section" :aria-labelledby="`chat-options-workspace-${sid}`">
+          <h2 :id="`chat-options-workspace-${sid}`">{{ t('core.chatSettingsWorkspace') }}</h2>
+          <div ref="workspaceOptionsHost"></div>
+        </section>
+        <section class="options-section" :aria-labelledby="`chat-options-context-${sid}`">
+          <h2 :id="`chat-options-context-${sid}`">{{ t('core.chatContextLabel') }}</h2>
+          <div ref="contextOptionsHost"></div>
+        </section>
       </div>
+      <template #footer>
+        <span class="option-help">{{ t('core.chatSettingsImmediate') }}</span>
+        <UiButton variant="solid" tone="accent" @click="optionsOpen = false">
+          {{ t('core.chatSettingsDone') }}
+        </UiButton>
+      </template>
     </UiDialog>
 
     <!-- Плашки «переписка не сохраняется» здесь НЕТ намеренно: saveError — состояние
@@ -820,6 +864,7 @@ const emit = defineEmits<{ back: [] }>();
 const optionsOpen = ref(false);
 const workspaceOptionsHost = ref<HTMLElement | null>(null);
 const controlOptionsHost = ref<HTMLElement | null>(null);
+const contextOptionsHost = ref<HTMLElement | null>(null);
 const phoneOptionsMedia = window.matchMedia('(max-width: 600px)');
 const phoneLayout = ref(phoneOptionsMedia.matches);
 
@@ -1724,7 +1769,7 @@ const ctxMeterTone = computed<UiActionTone>(() => {
 // остаётся фокусируемым и честно объявляет недоступность через aria-disabled; обработчик
 // ниже всё равно не запускает действие, пока нет сессии или идёт ход/сжатие.
 const ctxDisabled = computed(() => !sess.value?.sessionId
-  || !!sess.value?.compacting || !!sess.value?.sending);
+  || !!sess.value?.compacting || !!sess.value?.sending || frozen.value);
 
 /**
  * Клик по индикатору. Основное действие — СЖАТИЕ: агент пересказывает разговор сам и
@@ -1733,11 +1778,9 @@ const ctxDisabled = computed(() => !sess.value?.sessionId
  * остаётся, а агент не помнит ничего), поэтому у каждого свой вопрос и свой текст.
  */
 async function onCtxClick(e: { altKey: boolean }) {
-  const s = sess.value;
-
-  if (!s?.sessionId || s.compacting || s.sending) {
-      return;
-    }
+  if (ctxDisabled.value) {
+    return;
+  }
   if (e.altKey) {
     const ok = await confirmDialog(
       'Агент забудет весь разговор: следующее сообщение начнёт его с нуля. '
@@ -2814,10 +2857,10 @@ function skipQuestion() {
    линии. Вместо переноса ряд ужимается (см. shrink у .factbar), а на узком экране страница
    и так уходит в одну колонку, где шапке разрешено расти. */
 .hrow { display: flex; align-items: center; column-gap: var(--chat-head-gap); min-width: 0; }
-.session-heading, .session-workspace, .session-controls, .session-option { display: contents; }
-.option-label { display: none; }
+.session-heading, .cs .session-workspace, .cs .session-controls, .cs .session-option { display: contents; }
+.cs .option-label { display: none; }
 .options-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
-.options-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; outline: none; }
+.options-body { display: flex; flex-direction: column; gap: 20px; min-width: 0; outline: none; }
 /* Назад к списку: на широком экране список виден всегда, кнопка нужна только на мобиле */
 .back { display: none; flex: none; margin: 0 calc(8px - var(--chat-head-gap)) 0 -6px; place-items: center; }
 .phone-options { display: none; flex: none; }
@@ -2835,11 +2878,11 @@ function skipQuestion() {
    значению (field-sizing в скине селекта), а не пустая половина ряда с шевроном на краю;
    при нехватке места ужимается первой (shrink 100): название важнее. Полное название
    задачи доступно по ховеру в общем UiTooltip — внешний overflow страницы его не обрежет. */
-.task-tip { flex: 0 100 auto; max-width: min(420px, 50%); }
+.cs .task-tip { flex: 0 100 auto; max-width: min(420px, 50%); }
 /* Минимум — целое «без задачи»: дальше ужимается название чата. Это тот же элемент,
    что .task-tip (класс триггера подсказки), поэтому min-width задаётся здесь. */
-.sel.task { min-width: 104px; }
-.sel.task :deep(.ui-select-wrap) { flex: 0 1 auto; width: auto; min-width: 0; }
+.cs .sel.task { min-width: 104px; }
+.cs .sel.task :deep(.ui-select-wrap) { flex: 0 1 auto; width: auto; min-width: 0; }
 /* Модель получает ширину выбранного названия, а не фиксированные 140px.
    При нехватке места первой сокращается информационная строка последнего хода. */
 .sel.model { flex: 0 1 auto; min-width: 0; max-width: 100%; }
@@ -2847,8 +2890,15 @@ function skipQuestion() {
    подпись-метка, значение и шеврон. Вертикальных черт между ними нет ни в одном ряду и ни
    на одной ширине: группы разводит один зазор --chat-head-gap, а подписи-метки и так
    отмечают начало каждой. Черты по соседству элементов ложились через раз. */
-.sel { position: relative; display: flex; align-items: center; gap: 7px; padding: 0 2px; }
-.sel .lbl { flex: none; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); opacity: .75; }
+.cs .sel { position: relative; display: flex; align-items: center; gap: 7px; padding: 0 2px; }
+.cs .sel .lbl {
+  flex: none;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--ink-mid);
+  opacity: .75;
+}
 /* Заморозка на время сжатия (см. frozen): селекты и кнопки выключены атрибутом, а слайдеру
    усилия своего disabled не заводили — гасим его отдельно. Композер не трогаем: печатать
    во время сжатия можно, нельзя только отправить. */
@@ -3125,7 +3175,7 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
    полное название есть в подсказке по ховеру. Порог — по ширине чата: на 1440 рядом с
    широким списком шапка уже, чем на планшете без списка. */
 @container chat (max-width: 899px) {
-  .sel .lbl, .bar :deep(.eff .cap), .bar :deep(.ctx-meter-cap) { display: none; }
+  .cs .sel .lbl, .bar :deep(.eff .cap), .bar :deep(.ctx-meter-cap) { display: none; }
 }
 
 /* ── Шапка уже 640 px: строка последнего хода уходит ───────────────────────────
@@ -3147,7 +3197,7 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
   .cs-top { --chat-head-gap: 12px; }
   .hrow { flex-wrap: wrap; row-gap: 6px; }
   .ttl { flex: 1 1 calc(100% - 44px); }
-  .task-tip { flex: 1 1 0; max-width: none; }
+  .cs .task-tip { flex: 1 1 0; max-width: none; }
   .bar { flex-wrap: wrap; row-gap: 6px; }
   .factbar { order: 9; flex: 1 1 100%; }
   .spacer { display: none; }
@@ -3188,22 +3238,6 @@ html[data-ui-touch] .touch-keyboard-hint { display: inline; }
   .phone-options { display: grid; }
   .cs .session-workspace, .cs .session-controls, .bar .spacer { display: none; }
   .bar:not(:has(.warn)) { display: none; }
-  .phone-chat-options .session-workspace,
-  .phone-chat-options .session-controls { display: grid; gap: 16px; }
-  .phone-chat-options .session-option,
-  .phone-chat-options .sel { display: grid; gap: 6px; min-width: 0; }
-  .phone-chat-options .task-tip { min-width: 0; max-width: 100%; }
-  .phone-chat-options .sel .lbl,
-  .phone-chat-options .option-label {
-    display: block;
-  }
-  .phone-chat-options :deep(.ui-select-wrap) { width: 100%; min-width: 0; }
-  .phone-chat-options .sel.task :deep(.ui-select-wrap) { width: 100%; }
-  .phone-chat-options :deep(.eff) { min-width: 0; gap: 12px; }
-  .phone-chat-options :deep(.eff .cap),
-  .phone-chat-options :deep(.ctx-meter-cap) { display: none; }
-  .phone-chat-options :deep(.eff .eff-slider) { width: auto; flex: 1; }
-  .phone-chat-options .ctx-tip { width: 100%; justify-content: flex-start; }
   .cs-body { min-height: 0; scrollbar-gutter: auto; padding-inline: var(--chat-gutter); }
   .cs-resize { display: none; }
   .composer { flex-wrap: wrap; align-items: center; }

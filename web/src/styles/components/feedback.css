@@ -418,6 +418,14 @@
   background: var(--line-2);
 }
 
+@media (max-width: 600px) {
+  .ui-dialog[data-ui-chat-options] .ui-progress[data-context='chat-context'] {
+    flex: 1;
+    width: auto;
+    height: 5px;
+  }
+}
+
 .ui-progress__value,
 .ui-progress__bar {
   display: block;

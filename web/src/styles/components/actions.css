@@ -2125,6 +2125,30 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
 }
 
 @media (max-width: 600px) {
+  .ui-dialog[data-ui-chat-options] .ui-button[data-context='chat-context'] {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .ui-dialog[data-ui-chat-options] .ui-button[data-context='chat-context'] > .ui-button__content {
+    width: 100%;
+  }
+
+  .ui-dialog[data-ui-chat-options] .ui-button[data-context='chat-context'] .ui-button__label {
+    flex: 1;
+    gap: 14px;
+  }
+
+  .ui-dialog[data-ui-chat-options] .ui-button[data-context='chat-context'] .ctx-meter-value {
+    font-size: 18px;
+  }
+
+  .ui-button[data-context='chat-effort-level'] {
+    min-height: 44px;
+    padding-inline: 8px;
+    font-size: 14px;
+  }
+
   .phone-chat-options .ui-button[data-context='chat-workdir'] {
     width: 100%;
     max-width: 100%;
