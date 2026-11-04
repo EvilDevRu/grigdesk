@@ -33,13 +33,13 @@
 | `/documents` | `DocumentsView.vue` |
 | `/diff` | `DiffView.vue` |
 | `/settings` | `settings/settingsRouteStub.ts`; guard открывает общий модал |
-| `/ext/:id` | `ExtPluginView.vue` |
+| `/ext/:id` | `PluginView.vue` |
 | `/surface` | Пустой route adapter; содержимое карточки или инструмента выбирает `App.vue` |
 
 Панели инструментов монтирует `shared/layout/ToolHost.vue`; route-adapter
 не является второй копией панели. Внешний плагин использует
-`views/ext/PluginFramePanel.vue`: его содержимое внутри iframe принадлежит
-самому плагину и не определяется исходниками встроенного UI.
+`views/ext/PluginModulePanel.vue`: он загружает объявленный ESM-компонент
+с общими Vue/UI и контекстом окна.
 
 ## Дополнительные поверхности
 

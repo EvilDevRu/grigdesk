@@ -24,6 +24,7 @@ function plugin(id = 'feed') {
     name: id,
     version: '0.1.1',
     enabled: true,
+    contributes: { slots: [{ slot: 'provider.popover.after-bars', kind: 'provider-usage' }] },
     placements: [{ slot: 'provider.popover.after-bars', enabled: true }],
   };
 }
@@ -41,6 +42,11 @@ async function fixture(t, get, list = [plugin()], clock = false) {
       expose: ["setLocale: async (value) => (await import('../../ui.ts')).setUiLocale(value)"],
       stubs: {
         '../../stores/plugins.ts': 'export const usePluginsStore = () => globalThis.__providerPlugins;',
+        '../../pluginRuntime/bootstrap.ts': `
+          export const pluginRuntimeFor = () => ({
+            acquireSlot: async (id, slot, { signal }) => ({ signal, release() {} }),
+          });
+        `,
         '../../stores/providers.ts': 'export const useProvidersStore = () => ({});',
         '../../shared/apiClient.ts': `
           export const api = {get: (...args) => globalThis.__providerPluginGet(...args)};
@@ -88,8 +94,8 @@ test('popup показывает только объявленный фонов�
   const f = await fixture(t, async () => ({ resources: [RESOURCE] }), [
     plugin(),
     { ...plugin('disabled'), enabled: false },
-    { ...plugin('page'), web: '/web/' },
-    { ...plugin('module'), webModule: {} },
+    { ...plugin('page'), contributes: { panels: [{}] } },
+    { ...plugin('module'), contributes: {} },
     { ...plugin('without-slot'), placements: [] },
   ]);
 

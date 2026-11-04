@@ -93,7 +93,7 @@ export function compareCatalogVersions(left: string, right: string): number {
 export function compatibleVersions(
   plugin: CatalogPlugin,
   current: string,
-  supportedApis: readonly number[] = [1, 2],
+  supportedApis: readonly number[] = [1],
 ) {
   return plugin.versions.filter((item) => supportedApis.includes(item.api)
     && (item.minGrigDeskVersion === null

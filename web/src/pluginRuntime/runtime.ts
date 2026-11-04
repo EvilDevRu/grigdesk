@@ -22,7 +22,7 @@ interface RuntimeEntry {
   panelActive: Ref<boolean>;
   backgroundActive: Ref<boolean>;
   panels: Set<PanelOwner>;
-  background: boolean;
+  slots: Set<Cleanup>;
   pending: Promise<Prepared>;
   starting?: Promise<Prepared>;
   cleanup?: Cleanup;
@@ -65,6 +65,7 @@ function safely(cleanup?: Cleanup): void {
  */
 export function createPluginRuntime(options: PluginRuntimeOptions) {
   const entries = new Map<string, RuntimeEntry>();
+  const serverSlots = new Map<string, Set<Cleanup>>();
   const failures = new Map<string, { descriptor: string; error: unknown }>();
   const load = options.loadPluginModule ?? loadPluginModule;
   const createContext = options.createPluginContext ?? createPluginContext;
@@ -78,6 +79,15 @@ export function createPluginRuntime(options: PluginRuntimeOptions) {
     const entry = entries.get(pluginId);
 
     failures.delete(pluginId);
+
+    const leases = serverSlots.get(pluginId);
+
+    serverSlots.delete(pluginId);
+
+    for (const release of leases ?? []) {
+      release();
+    }
+
 
     if (!entry) {
       return;
@@ -176,7 +186,7 @@ export function createPluginRuntime(options: PluginRuntimeOptions) {
       panelActive: ref(false),
       backgroundActive: ref(false),
       panels: new Set(),
-      background: false,
+      slots: new Set(),
       pending,
     };
     entries.set(pluginId, entry);
@@ -192,6 +202,13 @@ export function createPluginRuntime(options: PluginRuntimeOptions) {
     init: { active?: boolean; signal?: AbortSignal } = {}) {
     await options.waitForAccess?.();
     init.signal?.throwIfAborted();
+
+    const plugin = options.plugins.byId(pluginId);
+
+    if (!plugin?.enabled || plugin.compatibility?.status === 'incompatible'
+      || !plugin.contributes?.panels?.length) {
+      throw new PluginModuleError('load-failed');
+    }
 
     const entry = entryFor(pluginId, descriptor);
     let released = false;
@@ -213,7 +230,7 @@ export function createPluginRuntime(options: PluginRuntimeOptions) {
         if (entry.panels.size === 0) {
           entry.clearPanel?.();
 
-          if (!entry.background && entries.get(pluginId) === entry) {
+          if (entry.slots.size === 0 && entries.get(pluginId) === entry) {
             stop(pluginId);
           }
         }
@@ -225,7 +242,7 @@ export function createPluginRuntime(options: PluginRuntimeOptions) {
     init.signal?.addEventListener('abort', owner.release, { once: true });
 
     try {
-      const prepared = await entry.pending;
+      const prepared = await startEntry(pluginId, entry);
 
       entry.controller.signal.throwIfAborted();
       init.signal?.throwIfAborted();
@@ -249,17 +266,10 @@ export function createPluginRuntime(options: PluginRuntimeOptions) {
   }
 
   /**
-   * Только явный opt-in допускает named hook, загрузчик сам его не исполняет.
-   * Фоновые подписки разрешены уже внутри start, в том числе до его первого await.
+   * Первый спрос запускает необязательный hook ровно один раз на общий контекст.
+   * Поздний результат после отмены освобождается самим завершившимся hook.
    */
-  async function startBackground(pluginId: string, descriptor: PluginWebModule): Promise<Prepared> {
-    const entry = entryFor(pluginId, descriptor);
-
-    if (descriptor.startOnLogin !== true) {
-      return entry.pending;
-    }
-
-    entry.background = true;
+  async function startEntry(pluginId: string, entry: RuntimeEntry): Promise<Prepared> {
     entry.starting ??= (async () => {
       try {
         const prepared = await entry.pending;
@@ -267,7 +277,7 @@ export function createPluginRuntime(options: PluginRuntimeOptions) {
         entry.controller.signal.throwIfAborted();
 
         if (typeof prepared.start !== 'function') {
-          throw new PluginModuleError('load-failed');
+          return prepared;
         }
 
         entry.backgroundActive.value = true;
@@ -295,8 +305,70 @@ export function createPluginRuntime(options: PluginRuntimeOptions) {
     return entry.starting;
   }
 
+  /**
+   * Слот получает отдельного владельца того же модуля, что и открытая панель.
+   * Серверный поставщик без ESM использует только отзываемый signal запроса.
+   */
+  async function acquireSlot(pluginId: string, slot: string, init: { signal?: AbortSignal } = {}) {
+    await options.waitForAccess?.();
+    init.signal?.throwIfAborted();
+
+    const plugin = options.plugins.byId(pluginId);
+
+    if (!plugin?.enabled || plugin.system || plugin.compatibility?.status === 'incompatible'
+      || !plugin.contributes?.slots?.some((item) => item.slot === slot && item.kind === 'provider-usage')
+      || !plugin.placements?.some((item) => item.slot === slot && item.enabled)) {
+      throw new PluginModuleError('load-failed');
+    }
+
+    const descriptor = plugin.entrypoints?.web;
+    const entry = descriptor ? entryFor(pluginId, descriptor) : null;
+    const controller = new AbortController();
+    /**
+     * Отзыв слота завершает его запрос и освобождает только собственного владельца.
+     * Панель сохраняет общий экземпляр до освобождения последнего места.
+     */
+    const release = () => {
+      controller.abort();
+      init.signal?.removeEventListener('abort', release);
+      entry?.controller.signal.removeEventListener('abort', release);
+      entry?.slots.delete(release);
+      serverSlots.get(pluginId)?.delete(release);
+
+      if (entry && !entry.slots.size && !entry.panels.size && entries.get(pluginId) === entry) {
+        stop(pluginId);
+      }
+    };
+
+    if (entry) {
+      entry.slots.add(release);
+    } else {
+      const owners = serverSlots.get(pluginId) ?? new Set<Cleanup>();
+
+      owners.add(release);
+      serverSlots.set(pluginId, owners);
+    }
+
+    init.signal?.addEventListener('abort', release, { once: true });
+    entry?.controller.signal.addEventListener('abort', release, { once: true });
+
+    try {
+      if (entry) {
+        await startEntry(pluginId, entry);
+      }
+
+      controller.signal.throwIfAborted();
+
+      return { signal: controller.signal, release };
+    } catch (error) {
+      release();
+
+      throw error;
+    }
+  }
+
   const reset = () => {
-    for (const id of [...entries.keys()]) {
+    for (const id of new Set([...entries.keys(), ...serverSlots.keys()])) {
       stop(id);
     }
 
@@ -306,7 +378,7 @@ export function createPluginRuntime(options: PluginRuntimeOptions) {
   return {
     access: options.access,
     acquirePanel,
-    startBackground,
+    acquireSlot,
     stop,
     reset,
     dispose: () => {

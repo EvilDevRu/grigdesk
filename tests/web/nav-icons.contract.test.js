@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 
-import { NAV_ICONS, navIconPath, pluginIconPath } from '../../web/src/shared/navIcons.ts';
+import { NAV_ICONS, navIconPath } from '../../web/src/shared/navIcons.ts';
 import { TOOL_CATALOG } from '../../web/src/shared/tools/catalog.ts';
 import { SYSTEM } from '../../server/src/lib/pluginsRegistry.ts';
 
@@ -35,25 +35,18 @@ test('каждый рисунок в карте иконок уникален', 
   assert.deepEqual(collisions, []);
 });
 
-test('иконка плагина в манифесте совпадает с иконкой его панели', () => {
-  const byPlugin = new Map(TOOL_CATALOG
-    .filter((tool) => tool.plugin)
-    .map((tool) => [tool.plugin, tool.icon]));
-  const mismatched = SYSTEM
-    .filter((plugin) => byPlugin.has(plugin.id))
-    .filter((plugin) => plugin.nav?.icon !== byPlugin.get(plugin.id))
-    .map((plugin) => plugin.id);
+test('каждый системный пункт навигации имеет отдельный файл PNG', async () => {
+  const icons = SYSTEM.filter((plugin) => plugin.nav).map((plugin) => plugin.icon);
 
-  assert.deepEqual(mismatched, []);
-});
+  assert.equal(new Set(icons).size, icons.length);
 
-test('каждый системный пункт навигации имеет рисунок в общей карте', () => {
-  const missing = SYSTEM
-    .filter((plugin) => plugin.nav)
-    .filter((plugin) => !NAV_ICONS[plugin.nav.icon])
-    .map((plugin) => plugin.id);
+  for (const icon of icons) {
+    assert.match(icon, /^\/plugin-icons\/[a-z0-9-]+\.png$/u);
 
-  assert.deepEqual(missing, []);
+    const bytes = await readFile(new URL(`web/public${icon}`, root));
+
+    assert.deepEqual([...bytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  }
 });
 
 // Список и страницы берут controls и иконки из общей границы UI.
@@ -68,21 +61,12 @@ test('страницы плагинов используют общую гран
 });
 
 
-test('плагин задаёт собственный контур, сохраняя именованные и запасные иконки', () => {
-  const path = 'M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3z M8.5 12l2.5 2.5 4.5-5';
-
-  assert.equal(navIconPath(`svg:${path}`), path);
-  assert.equal(pluginIconPath({ id: 'custom', nav: { icon: `svg: ${path} ` } }), path);
+test('внутренние имена сохраняют карту, авторские SVG-контуры не принимаются', () => {
   assert.equal(navIconPath('search'), NAV_ICONS.search);
-  assert.equal(pluginIconPath({ id: 'github', nav: { icon: 'unknown' } }), NAV_ICONS.github);
-  assert.equal(pluginIconPath(null), NAV_ICONS.plugin);
+  assert.equal(navIconPath(null), NAV_ICONS.plugin);
 
-  for (const icon of [
-    'constructor', '__proto__', 'unknown', null, undefined, 'svg:', 'svg:M',
-    'svg:L1 1', 'svg:M0 0<script>alert(1)</script>',
-    'svg:M0 0" onload="alert(1)', 'svg:https://example.invalid/icon.svg',
-    'svg:data:image/svg+xml,<svg/>', `svg:M0 0${' L1 1'.repeat(1000)}`,
-  ]) {
-    assert.equal(navIconPath(icon), NAV_ICONS.plugin, String(icon).slice(0, 80));
+  for (const icon of ['constructor', '__proto__', 'unknown', undefined, 'svg:M0 0 L1 1',
+    'svg:M0 0<script>alert(1)</script>', 'https://example.invalid/icon.svg']) {
+    assert.equal(navIconPath(icon), NAV_ICONS.plugin);
   }
 });

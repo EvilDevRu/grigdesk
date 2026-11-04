@@ -2,6 +2,7 @@ import type { PluginWebModule } from '../../../shared/plugins/pluginsContracts.t
 import { lstatSync } from 'node:fs';
 import path from 'node:path';
 import type { ResolvedPluginWebModule } from '../../../packages/plugin-types/src/manifest.ts';
+import { pluginResourcePath } from './pluginAssets.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 
 export type { ResolvedPluginWebModule } from '../../../packages/plugin-types/src/manifest.ts';
@@ -25,10 +26,7 @@ export function resolvePluginWebModule(
 
   try {
     if (!isRecord(raw)) {
-      throw new Error('webModule должен быть объектом');
-    }
-    if (Object.hasOwn(raw, 'startOnLogin') && typeof raw.startOnLogin !== 'boolean') {
-      throw new Error('startOnLogin должен быть boolean');
+      throw new Error('entrypoints.web должен быть объектом');
     }
 
     const dirPath = modulePath(raw.dir, normalize);
@@ -66,10 +64,9 @@ export function resolvePluginWebModule(
       entry: url(entry),
       css: css.map(url),
       locales: Object.fromEntries(Object.entries(locales).map(([language, file]) => [language, url(file)])),
-      ...(Object.hasOwn(raw, 'startOnLogin') ? { startOnLogin: raw.startOnLogin as boolean } : {}),
     };
   } catch (error) {
-    warn(`webModule пропущен: ${(error as Error).message}`);
+    warn(`entrypoints.web пропущен: ${(error as Error).message}`);
 
     return null;
   }
@@ -80,6 +77,8 @@ export function resolvePluginWebModule(
  * Скрытые компоненты и схемы нельзя превратить в адрес исполняемого ресурса.
  */
 function modulePath(raw: unknown, normalize: NormalizePath): string {
+  pluginResourcePath(raw);
+
   const normalized = normalize(raw, false);
 
   if (!normalized || typeof raw !== 'string' || /[:?#]/u.test(raw)
@@ -104,7 +103,7 @@ function ordinaryPath(root: string, relative: string, directory = false): boolea
     }
 
     for (const [index, part] of parts.entries()) {
-      if (!part || part.startsWith('.') || /[\\\x00-\x1f\x7f]/u.test(part)) {
+      if (!part || part.startsWith('.') || part === 'node_modules' || /[\\\x00-\x1f\x7f]/u.test(part)) {
         return false;
       }
 

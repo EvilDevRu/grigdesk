@@ -17,6 +17,7 @@ const baseEntry: SandboxEntry = {
     slot: 0,
     fePort: 5190,
     apiPort: 8090,
+    serviceHost: null,
     repos: [
         {
             name: 'frontend',
@@ -67,6 +68,7 @@ async function fixture(t: TestContext) {
         profiles: [{
                 id: 'demo-shop',
                 canRaise: true,
+                canDismantle: null,
                 reason: null,
             }],
         sandboxes: [

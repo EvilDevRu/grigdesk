@@ -1401,3 +1401,35 @@ test('Новая установка: закрытый bootstrap не скрыв�
   assert.equal(state.job.status, 'done');
   assert.equal(calls.some(([method]) => method === 'forgetJob'), false);
 });
+
+test('D-V1-REINSTALL: несовместимость показывает checkbox без автоматического force', async (t) => {
+  const plugin = {
+    id: 'demo',
+    name: 'Демо',
+    install: webInstallInfo({ localChanges: false }),
+    compatibility: {
+      status: 'incompatible',
+      code: 'manifest_incompatible',
+      reason: 'Старый формат манифеста.',
+    },
+  };
+  const { wrapper, state, calls } = await mountInstallDialog(t, {}, { plugin, mode: 'update' });
+
+  assert.equal(wrapper.find('[data-role="install-replace-modified"]').exists(), true);
+  assert.equal(wrapper.get('[data-role="install-replace-modified"]').element.checked, false);
+  state.versions = [{
+    version: '1.1.0',
+    tag: 'v1.1.0',
+    sha: 'a'.repeat(40)
+  }];
+  state.versionsUrl = plugin.install.source.url;
+  state.versionsInputKey = plugin.install.source.url;
+  await nextTick();
+  await wrapper.get('[data-role="install-version"]').setValue('1.1.0');
+  await wrapper.get('[data-role="install-start"]').trigger('click');
+
+  const update = calls.find(([method]) => method === 'startUpdate');
+
+  assert.ok(update);
+  assert.equal(update[1][2], false);
+});

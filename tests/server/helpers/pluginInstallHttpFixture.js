@@ -14,6 +14,8 @@ import pluginsModule from '../../../server/src/modules/plugins/index.ts';
 import { PluginInstallService } from '../../../server/src/lib/packageInstall/service.ts';
 import { installJob, installedRecord } from './pluginInstallState.js';
 
+import { png } from '../../helpers/pluginV1.js';
+
 export const requireFromServer = createRequire(new URL('../../../server/package.json', import.meta.url));
 
 /**
@@ -158,6 +160,7 @@ export async function installHttpFixture(t, options = {}) {
       config,
       prefs,
       ...(options.withoutInstalls ? {} : { installs }),
+      grigDeskVersion: options.serviceOptions?.grigDeskVersion ?? '1.0.0',
     });
   } else {
     await app.register(installRoutes, { installs });
@@ -195,11 +198,16 @@ export async function writeHttpPlugin(pluginsDir, id, manifest = {}, files = {})
   await mkdir(directory, { recursive: true });
   await writeFile(path.join(directory, 'plugin.json'), JSON.stringify({
     id,
+    api: 1,
     version: '1.0.0',
+    description: 'Тестовый плагин',
+    icon: 'assets/icon.png',
+    entrypoints: files['server.js'] ? { server: 'server.js' } : {},
+    contributes: {},
     ...manifest,
   }));
 
-  for (const [file, content] of Object.entries(files)) {
+  for (const [file, content] of Object.entries({ 'assets/icon.png': png, ...files })) {
     await mkdir(path.dirname(path.join(directory, file)), { recursive: true });
     await writeFile(path.join(directory, file), content);
   }

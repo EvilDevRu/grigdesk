@@ -56,42 +56,12 @@ export const NAV_ICONS = {
   plugin: 'M4 7h3a2 2 0 1 1 4 0h3v3a2 2 0 1 1 0 4v3h-3a2 2 0 1 0-4 0H4v-3a2 2 0 1 0 0-4V7z',
 };
 
-// Минимум манифеста, по которому выбирается знак: карта иконок и id плагина.
-interface PluginIconSource {
-  id?: string;
-  nav?: { icon?: string } | null;
-}
-
 const ICON_BY_NAME: Readonly<Record<string, string>> = NAV_ICONS;
 
 /**
- * Иконка приходит как имя общего знака или SVG-контур из манифеста плагина.
- * В path.d попадают только команды и числа; разметка и внешние адреса не принимаются.
+ * Внутренние разделы используют только имена встроенных знаков.
+ * Внешние плагины показывают проверенный файл через PluginIcon.
  */
 export function navIconPath(name: string | null | undefined, fallback = NAV_ICONS.plugin): string {
-  if (typeof name !== 'string') {
-    return fallback;
-  }
-
-  if (Object.hasOwn(ICON_BY_NAME, name)) {
-    return ICON_BY_NAME[name]!;
-  }
-
-  if (!name.startsWith('svg:')) {
-    return fallback;
-  }
-
-  const path = name.slice(4).trim();
-  const valid = path.length <= 4096 && /^[Mm]\s*[-+.\d]/u.test(path)
-    && /^[MmLlHhVvCcSsQqTtAaZzEe\d\s.,+-]+$/u.test(path);
-
-  return valid ? path : fallback;
-}
-
-/**
- * Собственный контур и именованный знак используют один путь отображения.
- * Если объявление неверно, сохраняется запасная иконка по id либо нейтральный знак.
- */
-export function pluginIconPath(plugin: PluginIconSource | null | undefined): string {
-  return navIconPath(plugin?.nav?.icon, navIconPath(plugin?.id));
+  return typeof name === 'string' && Object.hasOwn(ICON_BY_NAME, name) ? ICON_BY_NAME[name]! : fallback;
 }

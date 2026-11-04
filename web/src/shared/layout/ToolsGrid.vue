@@ -32,10 +32,9 @@
             "
           >
             <span class="tool-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path :d="navIconPath(item.icon)" />
-              </svg>
+              <PluginIcon v-if="item.icon.startsWith('/')" :src="item.icon" />
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   aria-hidden="true"><path :d="navIconPath(item.icon)" /></svg>
               <NavigationCount v-if="layout === 'grid'" :badge="badges[item.to]" />
             </span>
             <span class="tool-label">{{ item.label }}</span>
@@ -48,6 +47,8 @@
 </template>
 
 <script setup lang="ts">
+import PluginIcon from '../PluginIcon.vue';
+
 import { computed, ref } from 'vue';
 
 import { t, UiActionLink, UiSearchInput, vTooltip } from '../../ui.ts';

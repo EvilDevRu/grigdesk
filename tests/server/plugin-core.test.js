@@ -50,10 +50,10 @@ function runtimeServicesFixture(overrides = {}) {
   return { runtime, target, calls, reads };
 }
 
-test('CORE-API2: loader выдаёт сервисы через core без отдельного hostServices', async (t) => {
+test('CORE-V1: loader выдаёт сервисы через core без отдельного hostServices', async (t) => {
   const data = runtimeServicesFixture();
   const f = await runtimeFixture(t, [
-    { id: 'demo', manifest: { api: 2 } },
+    { id: 'demo', manifest: { api: 1 } },
   ], { runtimeServices: data.runtime });
   const core = pluginCore(f);
 
@@ -107,7 +107,7 @@ test('CORE-MODEL: выключение во время выбора модели
       return data.target;
     },
   });
-  const f = await runtimeFixture(t, [{ id: 'demo', manifest: { api: 2 } }], {
+  const f = await runtimeFixture(t, [{ id: 'demo', manifest: { api: 1 } }], {
     runtimeServices: data.runtime,
   });
   const pending = pluginCore(f).modelText({

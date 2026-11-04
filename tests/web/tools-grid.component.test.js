@@ -308,13 +308,17 @@ test('PH-NAV: группы сохраняют порядок, скрывают �
 });
 
 
-test('иконка из плагина отображается в SVG меню и обновляется вместе с манифестом', async (t) => {
+test('файловая иконка плагина обновляется вместе с каталогом и имеет fallback', async (t) => {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/:pathMatch(.*)*', component: { template: '<div />' } }],
   });
-  const path = 'M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3z';
-  const item = { id: 'audit', to: '/ext/audit', label: 'Аудит', icon: `svg:${path}` };
+  const item = {
+    id: 'audit',
+    to: '/ext/audit',
+    label: 'Аудит',
+    icon: `/api/plugins/audit/icon/${'a'.repeat(64)}`,
+  };
 
   await router.push('/ext/audit');
   await router.isReady();
@@ -325,12 +329,13 @@ test('иконка из плагина отображается в SVG меню 
   });
 
   t.after(() => wrapper.unmount());
-  assert.equal(wrapper.get('.tool-icon path').attributes('d'), path);
-
-  await wrapper.setProps({ items: [{ ...item, icon: 'svg:M1 1<script>alert(1)</script>' }] });
-  assert.equal(wrapper.get('.tool-icon path').attributes('d'), NAV_ICONS.plugin);
+  assert.equal(wrapper.get('img').attributes('src'), item.icon);
+  await wrapper.get('img').trigger('error');
+  assert.equal(wrapper.get('svg path').attributes('d'), NAV_ICONS.plugin);
   assert.equal(wrapper.find('script').exists(), false);
 
-  await wrapper.setProps({ items: [{ ...item, icon: 'search' }] });
-  assert.equal(wrapper.get('.tool-icon path').attributes('d'), NAV_ICONS.search);
+  const nextIcon = `/api/plugins/audit/icon/${'b'.repeat(64)}`;
+
+  await wrapper.setProps({ items: [{ ...item, icon: nextIcon }] });
+  assert.equal(wrapper.get('img').attributes('src'), nextIcon);
 });

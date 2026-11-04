@@ -34,7 +34,7 @@ test('AUTH-01: session, CLI/internal, API/static и encoded API после off/o
   for (const enabled of [true, false, true]) {
     assert.equal((await f.toggle('demo', enabled)).statusCode, 200);
 
-    for (const url of ['/api/ext/demo/x', '/api/ext/demo/web/', '/api/ext/%64emo/x']) {
+    for (const url of ['/api/ext/demo/x', '/api/ext/demo/module/panel.js', '/api/ext/%64emo/x']) {
       assert.equal((await f.request('GET', url, undefined, {})).statusCode, 401);
     }
 
@@ -43,7 +43,7 @@ test('AUTH-01: session, CLI/internal, API/static и encoded API после off/o
     }
 
     assert.equal((await f.request('GET', '/api/ext/demo/human')).statusCode, 200);
-    assert.equal((await f.request('GET', '/api/ext/demo/web/')).statusCode, 200);
+    assert.equal((await f.request('GET', '/api/ext/demo/module/panel.js')).statusCode, 200);
 
     for (const headers of [
       { 'x-grigdesk-token': 'runtime-cli' },
@@ -81,7 +81,7 @@ for (const kind of ['hooks', 'legacy', 'static']) {
       staticOnly: kind === 'static',
       hooks,
     }]);
-    const urls = ['/api/ext/demo/web/', ...(kind === 'static' ? [] : ['/api/ext/demo/x'])];
+    const urls = ['/api/ext/demo/module/panel.js', ...(kind === 'static' ? [] : ['/api/ext/demo/x'])];
 
     for (const url of urls) {
       assert.equal((await f.request('GET', url)).statusCode, 200);
@@ -201,11 +201,11 @@ for (const outcome of ['installed', 'blocked']) {
     let changes = 0;
     const f = await runtimeFixture(t, [{
       id: 'demo',
-      manifest: { settings: [{
+      manifest: { entrypoints: { server: 'server.js' }, contributes: { settings: [{
         key: 'name',
         type: 'text',
         default: 'до',
-      }] },
+      }] } },
       hooks: {
         prepareReplace: async () => ({ async finish() {} }),
         prepareChange: () => {

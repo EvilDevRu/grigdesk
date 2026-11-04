@@ -34,6 +34,7 @@ test('E2: полная таблица содержит все контрактн
     "id_invalid",
     "id_reserved",
     "id_mismatch",
+    "manifest_incompatible",
     "api_unsupported",
     "contract_unsupported",
     "version_invalid",

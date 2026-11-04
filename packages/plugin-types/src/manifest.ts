@@ -1,32 +1,29 @@
 import type {
   PluginNav, PluginPlacementDecl, PluginSetting, PluginSetup, PluginWebModule,
+  PluginCompatibility, PluginContributions,
 } from '../../../shared/plugins/pluginsContracts.ts';
 
-// Вход автора содержит относительные пути, а не адреса ресурсов установленного модуля.
+// Автор объявляет собственные файлы; HTTP-адреса формирует только GrigDesk.
 export interface PluginWebModuleManifest {
   dir: string;
   entry: string;
   css?: string[];
   locales?: { ru?: string; en?: string };
-  startOnLogin?: boolean;
 }
 
 export interface PluginManifest {
   id: string;
-  api?: 1 | 2;
+  api: 1;
   name?: string;
   version?: string;
-  description?: string;
+  description: string;
+  icon: string;
   category?: string;
   defaultEnabled?: boolean;
-  nav?: (Pick<PluginNav, 'path'> & Partial<Pick<PluginNav, 'label' | 'icon' | 'order'>> & {
-    group?: 'rail' | 'tools' | 'dock';
-  }) | null;
-  settings?: PluginSetting[];
-  placements?: PluginPlacementDecl[];
-  web?: string;
-  webModule?: PluginWebModuleManifest;
-  minGrigDeskVersion?: string;
+  engines?: { grigdesk: string };
+  entrypoints: { server?: string; web?: PluginWebModuleManifest };
+  contributes: PluginContributions;
+  gallery?: { screenshots?: string[] };
   install?: { npm?: string[] };
 }
 
@@ -34,12 +31,6 @@ export interface InstallablePluginManifest extends PluginManifest {
   version: string;
 }
 
-export interface PluginWebPage {
-  dir: string;
-  url: string;
-}
-
-// Нормализованный модуль options.plugin: адреса выдачи и абсолютный каталог сервера.
 export interface ResolvedPluginWebModule extends PluginWebModule {
   dir: string;
 }
@@ -59,8 +50,11 @@ export interface PluginMetadata {
   setup?: PluginSetup | null;
   dir?: string;
   hasServer?: boolean;
-  serverEntry?: 'server.js' | 'server.ts' | null;
+  serverEntry?: string | null;
   serverError?: string | null;
-  web?: PluginWebPage | null;
-  webModule?: ResolvedPluginWebModule | null;
+  icon?: string | null;
+  iconPath?: string;
+  compatibility?: PluginCompatibility;
+  contributes?: PluginContributions;
+  entrypoints?: { web?: ResolvedPluginWebModule | null };
 }

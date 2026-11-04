@@ -3,7 +3,7 @@ import {
   validatePluginPackage,
   validatePreparedPluginPackage,
 } from './validatePackage.ts';
-import { installedWebModuleDir, sensitivePluginFile } from './serviceSnapshots.ts';
+import { installedWebModuleDir, installedServerEntry, sensitivePluginFile } from './serviceSnapshots.ts';
 
 export interface InstallPackagePolicy {
   validate: typeof validatePluginPackage;
@@ -11,6 +11,7 @@ export interface InstallPackagePolicy {
   readManifest: typeof readPluginManifest;
   installedModuleDir: typeof installedWebModuleDir;
   sensitiveFile: typeof sensitivePluginFile;
+  installedServerEntry?: typeof installedServerEntry;
   serverWarnings: string[];
 }
 
@@ -20,6 +21,7 @@ export const pluginPackagePolicy: InstallPackagePolicy = {
   readManifest: readPluginManifest,
   installedModuleDir: installedWebModuleDir,
   sensitiveFile: sensitivePluginFile,
+  installedServerEntry,
   serverWarnings: ['Код плагина выполняется с правами GrigDesk.'],
 };
 

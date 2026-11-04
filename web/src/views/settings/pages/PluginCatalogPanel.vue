@@ -74,6 +74,7 @@
         </UiInlineMessage>
         <template v-else-if="detail">
           <header class="catalog-card-heading">
+            <PluginIcon :src="catalogMediaUrl(detail.repository, detail.icon)" />
             <h4 data-catalog-title tabindex="-1">{{ detail.name }}</h4>
             <span class="catalog-origin">{{ detail.origin === 'official'
               ? t('settings.marketplaceOfficial') : t('settings.marketplaceCommunity') }}</span>
@@ -168,6 +169,9 @@
 </template>
 
 <script setup lang="ts">
+import PluginIcon from '../../../shared/PluginIcon.vue';
+import { catalogMediaUrl } from '../../../../../shared/plugins/pluginCatalogContracts.ts';
+
 import { UiSkeletonLayout } from '../../../ui';
 
 

@@ -1,25 +1,36 @@
+import { assertPluginResource, pluginResourcePath } from './pluginAssets.ts';
+import { installError } from './packageInstall/errors.ts';
+
 export interface PluginServerEntry {
-  serverEntry: 'server.js' | 'server.ts' | null;
+  serverEntry: string | null;
   serverError: string | null;
   hasServer: boolean;
 }
 
 /**
- * Скан и установщик выбирают один серверный вход по одинаковому правилу.
- * Наличие двух файлов требует исправления пакета, а не выбора по приоритету.
+ * Исполняется только явно объявленный собственный файл пакета.
+ * Соседние server.js и server.ts не участвуют в выборе и не импортируются.
  */
-export function selectPluginServerEntry(jsPresent: boolean, tsPresent: boolean): PluginServerEntry {
-  if (jsPresent && tsPresent) {
+export function selectPluginServerEntry(root: string, declared: unknown): PluginServerEntry {
+  if (declared === undefined) {
     return {
       serverEntry: null,
-      serverError: 'У плагина есть server.js и server.ts. Оставьте один серверный файл.',
-      hasServer: true,
+      serverError: null,
+      hasServer: false,
     };
   }
 
+  const relative = pluginResourcePath(declared);
+
+  if (!/\.(?:js|mjs|ts)$/u.test(relative)) {
+    throw installError('manifest_invalid', 'entrypoints.server: нужен файл js, mjs или ts');
+  }
+
+  assertPluginResource(root, relative);
+
   return {
-    serverEntry: jsPresent ? 'server.js' : tsPresent ? 'server.ts' : null,
+    serverEntry: relative,
     serverError: null,
-    hasServer: jsPresent || tsPresent,
+    hasServer: true,
   };
 }

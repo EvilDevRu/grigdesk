@@ -8,11 +8,10 @@ import { serviceFixture } from './helpers/pluginServiceFixture.js';
 import { moduleRelease, prepareModule } from './helpers/pluginModuleFixture.js';
 
 for (const file of ['panel.js', 'panel.css', 'ru.json']) {
-  test(`AC10-UI-FILES-LOCAL: api1 обнаруживает ручную правку ${file}`, async (t) => {
+  test(`AC10-UI-FILES-LOCAL: v1 обнаруживает ручную правку ${file}`, async (t) => {
     const repo = await createPluginRepo(t);
     const release = moduleRelease('1.0.0', 'web/ui');
 
-    release.manifest = { api: 1, web: 'web' };
     release.files['web/index.html'] = '<title>Демо</title>';
     await repo.release('1.0.0', release);
     await repo.release('1.1.0', { ...release, files: moduleRelease('1.1.0', 'web/ui').files });

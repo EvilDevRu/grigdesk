@@ -19,7 +19,7 @@ import { pluginModuleStaticOptions } from '../../lib/pluginWebModule.ts';
 import { createPluginLifecycle, PluginAdmission } from './lifecycle.ts';
 import { changeError } from './changes.ts';
 
-export const PLUGIN_APIS = [1, 2];
+export const PLUGIN_APIS = [1];
 
 interface RuntimeEntry {
   app: FastifyInstance;
@@ -94,21 +94,18 @@ export class UserPluginRuntime {
     }
 
     const prefix = `/api/ext/${manifest.id}/module/`;
+    const web = manifest.entrypoints?.web;
     const url = (value: string) => `${prefix}${entry.generation}/` + value.slice(prefix.length);
 
     return {
       ...manifest,
-      web: manifest.web ? {
-        ...manifest.web,
-        url: `/api/ext/${manifest.id}/web/${entry.generation}/`,
-      } : manifest.web,
-      webModule: manifest.webModule ? {
-        ...manifest.webModule,
-        entry: url(manifest.webModule.entry),
-        css: manifest.webModule.css.map(url),
-        locales: Object.fromEntries(Object.entries(manifest.webModule.locales)
+      entrypoints: { web: web ? {
+        ...web,
+        entry: url(web.entry),
+        css: web.css.map(url),
+        locales: Object.fromEntries(Object.entries(web.locales)
           .map(([language, value]) => [language, url(value)])),
-      } : manifest.webModule,
+      } : null },
     };
   }
 
@@ -157,7 +154,8 @@ export class UserPluginRuntime {
    * Копия дерева даёт новый ESM graph, включая относительные зависимости server.js.
    */
   private async start(manifest: PluginManifest): Promise<void> {
-    if (manifest.serverError || !PLUGIN_APIS.includes(manifest.api || 1)) {
+    if (manifest.compatibility?.status === 'incompatible' || manifest.serverError
+      || !PLUGIN_APIS.includes(manifest.api || 1)) {
       return;
     }
 
@@ -215,18 +213,10 @@ export class UserPluginRuntime {
     this.gates.set(manifest.id, gate);
 
     try {
-      if (manifest.web) {
-        await app.register(fastifyStatic, {
-          root: manifest.web.dir,
-          prefix: manifest.web.url,
-          decorateReply: false,
-          index: ['index.html'],
-          maxAge: 0,
-        });
-      }
+      const web = manifest.entrypoints?.web;
 
-      if (manifest.webModule) {
-        await app.register(fastifyStatic, pluginModuleStaticOptions(manifest.webModule, manifest.id));
+      if (web) {
+        await app.register(fastifyStatic, pluginModuleStaticOptions(web, manifest.id));
       }
 
       if (manifest.hasServer) {
@@ -239,7 +229,7 @@ export class UserPluginRuntime {
         });
 
         const mod = await importRuntimeModule<PluginServerModule>(
-          path.join(entry.directory, manifest.serverEntry ?? 'server.js'));
+          path.join(entry.directory, String(manifest.serverEntry)));
 
         await app.register(async (scope) => {
           if (mod.default.length >= 3) {
@@ -303,7 +293,7 @@ export class UserPluginRuntime {
 
     request.raw.url = canonical;
 
-    for (const resource of ['module', 'web']) {
+    for (const resource of ['module']) {
       const prefix = `/api/ext/${id}/${resource}/`;
       const versioned = `${prefix}${entry.generation}/`;
 

@@ -8,16 +8,14 @@
 //  • ПОЛЬЗОВАТЕЛЬСКИЕ — папки plugins/<id>/ в папке данных: plugin.json (манифест
 //    той же формы, что SYSTEM-записи) + опционально server.js (default-экспорт
 //    fastify-плагина; регистрируется на старте, роуты обязаны жить под /api/ext/<id>/)
-//    + опционально своя страница (`web`: папка с index.html — GrigDesk раздаёт её под
-//    /api/ext/<id>/web/ и показывает панелью в рейке или страницей по nav.path).
-//    Выключенный пользовательский плагин не регистрируется вовсе (вкл/выкл — рестарт).
+//    + модуль интерфейса и серверный вход, явно объявленные в entrypoints.
 //
 // Состояние (вкл/выкл, значения настроек) — в prefs (state/prefs.json в папке данных):
 //   plugins:        { <id>: true|false }   — отсутствие ключа = дефолт манифеста
 //                                            (defaultEnabled, иначе системный вкл / пользовательский выкл)
 //   pluginSettings: { <id>: {key: value} }
 import type {
-  PluginMetadata as PluginManifest, PluginWebPage,
+  PluginMetadata as PluginManifest,
 } from '../../../packages/plugin-types/src/manifest.ts';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -31,12 +29,16 @@ import type {
   PluginSetup,
 } from '../../../shared/plugins/pluginsContracts.ts';
 import { PLUGIN_SLOT_LABELS, isPluginSlotName } from '../../../shared/plugins/slots/index.ts';
+import { isRecord } from '../../../shared/lib/objects.ts';
+import { compareSemVer, parseSemVer } from './releaseCommon.ts';
+import { installError, errorInfo } from './packageInstall/errors.ts';
+import { pluginResourcePath, resolvePluginAssets } from './pluginAssets.ts';
 import { resolvePluginWebModule } from './pluginWebModule.ts';
 
 export type { PluginNav, PluginPlacementDecl, PluginPlacementState, PluginSetting, PluginSetup };
 
 // Нормализованные метаданные отличаются от входного plugin.json автора.
-export type { PluginMetadata as PluginManifest, PluginWebPage } from
+export type { PluginMetadata as PluginManifest } from
   '../../../packages/plugin-types/src/manifest.ts';
 
 // Журнал сервера в том минимуме, который использует скан.
@@ -53,7 +55,12 @@ export const SYSTEM: PluginManifest[] = [
     version: '1.0.0',
     description: 'Разбор видеозаписи встречи: распознавание речи (whisper), выжимка по темам, черновики задач в Б24 со скриншотами.',
     category: 'work',
-    nav: { path: '/video', label: 'Видео', icon: 'video', group: 'tools', order: 10 },
+    nav: {
+      path: '/video',
+      label: 'Видео',
+      group: 'tools',
+      order: 10,
+    },
     // Настройки распознавания диктовки и видео живут в едином speech-контракте.
     // Здесь — только то, что делают С УЖЕ ГОТОВОЙ расшифровкой.
     settings: [
@@ -82,7 +89,12 @@ export const SYSTEM: PluginManifest[] = [
       + 'изменения, коммиты и push для основного репозитория или worktree. Пути '
       + 'репозиториев — в разделе «Проекты».',
     category: 'dev',
-    nav: { path: '/code', label: 'Код', icon: 'code', group: 'dock', order: 10 },
+    nav: {
+      path: '/code',
+      label: 'Код',
+      group: 'dock',
+      order: 10,
+    },
     settings: [
       {
         key: 'commitMessageModel',
@@ -132,7 +144,12 @@ export const SYSTEM: PluginManifest[] = [
     description: 'Личный список задач Б24, по которым человек ждёт оценку, '
       + 'событие конвейера или новые комментарии.',
     category: 'work',
-    nav: { path: '/shelf', label: 'Полка', icon: 'shelf', group: 'dock', order: 20 },
+    nav: {
+      path: '/shelf',
+      label: 'Полка',
+      group: 'dock',
+      order: 20,
+    },
     settings: [
       {
         key: 'browserNotifications',
@@ -159,7 +176,12 @@ export const SYSTEM: PluginManifest[] = [
     version: '1.0.0',
     description: 'Единая очередь новых обращений из подключённых каналов с ручным разбором и созданием задач в Б24.',
     category: 'work',
-    nav: { path: '/inbox', label: 'Входящие', icon: 'inbox', group: 'rail', order: 30 },
+    nav: {
+      path: '/inbox',
+      label: 'Входящие',
+      group: 'rail',
+      order: 30,
+    },
     settings: [
       {
         key: 'triageModel',
@@ -200,7 +222,12 @@ export const SYSTEM: PluginManifest[] = [
     version: '0.1.0',
     description: 'Подключение Telegram Bot API, нативный архив и allowlist чатов для общего раздела «Входящие».',
     category: 'work',
-    nav: { path: '/telegram', label: 'Телеграм', icon: 'telegram', group: 'tools', order: 20 },
+    nav: {
+      path: '/telegram',
+      label: 'Телеграм',
+      group: 'tools',
+      order: 20,
+    },
     settings: [],
   },
   {
@@ -211,7 +238,12 @@ export const SYSTEM: PluginManifest[] = [
     version: '0.1.0',
     description: 'Подключение одного GitHub repository: новые Issues поступают в общий раздел «Входящие» через подписанный webhook и REST-сверку.',
     category: 'work',
-    nav: { path: '/github', label: 'GitHub', icon: 'github', group: 'tools', order: 30 },
+    nav: {
+      path: '/github',
+      label: 'GitHub',
+      group: 'tools',
+      order: 30,
+    },
     settings: [],
   },
   {
@@ -222,7 +254,12 @@ export const SYSTEM: PluginManifest[] = [
     version: '0.1.0',
     description: 'Терминал и SFTP для человека, надзорное выполнение команд для агента.',
     category: 'dev',
-    nav: { path: '/ssh', label: 'SSH', icon: 'ssh', group: 'dock', order: 40 },
+    nav: {
+      path: '/ssh',
+      label: 'SSH',
+      group: 'dock',
+      order: 40,
+    },
     settings: [
       {
         key: 'outputLimitKiB',
@@ -251,7 +288,12 @@ export const SYSTEM: PluginManifest[] = [
     version: '0.1.0',
     description: 'Надзорный доступ человека и агента к базам данных без хранения паролей.',
     category: 'dev',
-    nav: { path: '/db', label: 'Базы', icon: 'db', group: 'dock', order: 50 },
+    nav: {
+      path: '/db',
+      label: 'Базы',
+      group: 'dock',
+      order: 50,
+    },
     settings: [
       {
         key: 'allowDdlAdmin',
@@ -339,7 +381,12 @@ export const SYSTEM: PluginManifest[] = [
     description: 'Обзор локального Docker: контейнеры и compose-проекты, порты, образы, '
       + 'тома и сети, логи и терминал контейнера, очистка неиспользуемого места.',
     category: 'dev',
-    nav: { path: '/docker', label: 'Докер', icon: 'docker', group: 'dock', order: 60 },
+    nav: {
+      path: '/docker',
+      label: 'Докер',
+      group: 'dock',
+      order: 60,
+    },
     settings: [
       {
         key: 'allowVolumeRemoval',
@@ -399,7 +446,12 @@ export const SYSTEM: PluginManifest[] = [
     description: 'Ролик о готовой работе по сценам: сценарий, озвучка, запись браузера '
       + 'и сборка mp4 с субтитрами. Адреса, экраны и вход берутся из объявления профиля.',
     category: 'knowledge',
-    nav: { path: '/showcase', label: 'Презентации', icon: 'video', group: 'tools', order: 50 },
+    nav: {
+      path: '/showcase',
+      label: 'Презентации',
+      group: 'tools',
+      order: 50,
+    },
     // Разделу нужны браузер записи, ffmpeg, голос и распознавание: что из этого
     // есть и что можно поставить кнопкой, показывают настройки плагина.
     setup: { path: '/api/showcase/setup' },
@@ -452,7 +504,6 @@ export const SYSTEM: PluginManifest[] = [
     nav: {
       path: '/3d',
       label: '3D',
-      icon: 'cube',
       group: 'dock',
       order: 30,
     },
@@ -518,38 +569,125 @@ export const SYSTEM: PluginManifest[] = [
   },
 ];
 
+for (const plugin of SYSTEM) {
+  plugin.icon = `/plugin-icons/${plugin.id}.png`;
+  plugin.compatibility = {
+    status: 'compatible',
+    code: null,
+    reason: null,
+  };
+  plugin.contributes = {
+    panels: plugin.nav ? [{ title: plugin.nav.label, group: plugin.nav.group as 'dock' }] : [],
+    slots: (plugin.placements ?? []).map((placement) => ({ ...placement, kind: 'provider-usage' })),
+    settings: plugin.settings,
+  };
+}
+
 export const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/;
 export const NAV_GROUPS = ['rail', 'tools', 'dock'];
 
-export type UserManifestFields = Pick<PluginManifest,
-  'id' | 'system' | 'name' | 'api' | 'version' | 'description'
-  | 'category' | 'nav' | 'settings' | 'placements'
-> & { webDir: string | null };
+export type UserManifestFields = PluginManifest;
 
 /**
- * Installer и scanner читают принятый manifest через одну чистую функцию.
- * Политика допуска и проверки файлов остаётся у соответствующего caller.
+ * Единый структурный допуск выполняется до файловых проверок и импорта кода.
+ * Старые поля не адаптируются: совпадающее api=1 не означает новый контракт.
  */
 export function decodeUserPluginManifest(
   raw: Record<string, unknown>,
   warn: (message: string) => void = () => {},
+  grigDeskVersion = '0.0.0',
 ): UserManifestFields {
+  const legacy = ['web', 'webModule', 'nav', 'settings', 'placements', 'minGrigDeskVersion'];
+
+  if (raw.api === 2 || legacy.some((key) => Object.hasOwn(raw, key))
+    || !Object.hasOwn(raw, 'entrypoints') || !Object.hasOwn(raw, 'contributes')) {
+    throw installError('manifest_incompatible');
+  }
+
+  if (raw.api !== 1) {
+    throw installError('api_unsupported');
+  }
+
+  if (typeof raw.id !== 'string' || !PLUGIN_ID_RE.test(raw.id)) {
+    throw installError('id_invalid');
+  }
+
+  if (typeof raw.description !== 'string' || !raw.description.trim() || raw.description.length > 4096
+    || !isRecord(raw.entrypoints) || !isRecord(raw.contributes)) {
+    throw installError('manifest_invalid', 'нужны description, entrypoints и contributes');
+  }
+
+  pluginResourcePath(raw.icon);
+
+  if (raw.engines !== undefined) {
+    const minimum = isRecord(raw.engines) && typeof raw.engines.grigdesk === 'string'
+      ? raw.engines.grigdesk.match(/^>=(\d+\.\d+\.\d+)$/u)?.[1] : null;
+
+    if (!minimum || !parseSemVer(minimum)) {
+      throw installError('manifest_invalid', 'engines.grigdesk должен быть вида >=X.Y.Z');
+    }
+
+    if (compareSemVer(minimum, grigDeskVersion) > 0) {
+      throw installError('grigdesk_too_old');
+    }
+  }
+
+  const contributes = raw.contributes;
+  const panels = contributes.panels ?? [];
+  const slots = contributes.slots ?? [];
+  const settings = contributes.settings ?? [];
+
+  if (!Array.isArray(panels) || panels.length > 1 || !panels.every(isRecord)
+    || !Array.isArray(slots) || !slots.every(isRecord) || !Array.isArray(settings)) {
+    throw installError('manifest_invalid', 'неверные декларации contributes');
+  }
+
+  if (panels.length && !isRecord(raw.entrypoints.web)) {
+    throw installError('manifest_invalid', 'панель требует entrypoints.web');
+  }
+
+  for (const slot of slots) {
+    if (slot.kind !== 'provider-usage' || !isPluginSlotName(slot.slot) || !raw.entrypoints.server) {
+      throw installError('manifest_invalid', 'слот provider-usage требует известное место и серверный вход');
+    }
+  }
+
+  for (const key of ['commands', 'themes']) {
+    const declarations = contributes[key] ?? [];
+
+    if (!Array.isArray(declarations) || !declarations.every((item) => isRecord(item)
+      && typeof item.id === 'string' && typeof item.title === 'string')) {
+      throw installError('manifest_invalid', 'неверные декларации команд или тем');
+    }
+  }
+
   const name = String(raw.name || raw.id);
-  const nav = raw.nav !== null && typeof raw.nav === 'object' && !Array.isArray(raw.nav)
-    ? raw.nav : null;
+  const panel = panels[0];
+  const nav = panel ? normalizePluginNav({
+    path: `/ext/${raw.id}`,
+    label: panel.title,
+    group: panel.group ?? 'dock',
+    order: panel.order,
+  }, name, warn) : null;
 
   return {
-    id: String(raw.id),
+    id: raw.id,
     system: false,
     name,
-    api: Number(raw.api || 1),
+    api: 1,
     version: String(raw.version || '0.0.0'),
-    description: String(raw.description || ''),
+    description: raw.description,
     category: userPluginCategory(raw.category, warn),
-    nav: normalizePluginNav(nav, name, warn),
-    settings: Array.isArray(raw.settings) ? raw.settings as PluginSetting[] : [],
-    placements: normalizePlacements(raw.placements, warn),
-    webDir: normalizePluginPackagePath(raw.web, false),
+    defaultEnabled: typeof raw.defaultEnabled === 'boolean' ? raw.defaultEnabled : undefined,
+    nav,
+    settings: settings as PluginSetting[],
+    placements: normalizePlacements(slots, warn),
+    contributes: contributes as PluginManifest['contributes'],
+    compatibility: {
+    status: 'compatible',
+    code: null,
+    reason: null,
+  },
   };
 }
 
@@ -577,7 +715,12 @@ export function normalizePluginPackagePath(raw: unknown, rootAllowed: boolean): 
  * остаётся отдельным реестром во фронте.
  */
 export function normalizePluginNav(
-  raw: { path?: unknown; label?: unknown; icon?: unknown; group?: unknown; order?: unknown } | null,
+  raw: {
+    path?: unknown;
+    label?: unknown;
+    group?: unknown;
+    order?: unknown;
+  } | null,
   fallbackLabel: string,
   warn: ((message: string) => void) | null = null,
 ): PluginNav | null {
@@ -588,10 +731,10 @@ export function normalizePluginNav(
     warn?.(`nav.group «${requested || 'не задан'}» не поддерживается — ссылка помещена в rail`);
   }
   const order = typeof raw.order === 'number' ? raw.order : Number.NaN;
+
   return {
     path: String(raw.path),
     label: String(raw.label || fallbackLabel),
-    icon: String(raw.icon || 'plugin'),
     group,
     ...(Number.isFinite(order) ? { order } : {}),
   };
@@ -614,98 +757,73 @@ function userPluginCategory(raw: unknown, warn: (message: string) => void): stri
 }
 
 /**
- * Страница пользовательского плагина: поле `web` — путь папки относительно каталога
- * плагина, внутри обязан лежать index.html. Абсолютный путь и выход за каталог
- * отвергаются: манифест называет свою папку, а не любое место на машине.
- */
-async function resolvePluginWeb(
-  dir: string,
-  id: string,
-  raw: unknown,
-  warn: (message: string) => void,
-): Promise<PluginWebPage | null> {
-  if (raw === undefined || raw === null || raw === '') return null;
-  if (typeof raw !== 'string' || path.isAbsolute(raw)) {
-    warn('web должен быть относительным путём к папке страницы — страница пропущена');
-    return null;
-  }
-  const webDir = path.resolve(dir, raw);
-  if (!webDir.startsWith(`${path.resolve(dir)}${path.sep}`) && webDir !== path.resolve(dir)) {
-    warn('web выходит за каталог плагина — страница пропущена');
-    return null;
-  }
-  const index = await fs.stat(path.join(webDir, 'index.html')).then((s) => s.isFile()).catch(() => false);
-  if (!index) {
-    warn(`в папке страницы (${raw}) нет index.html — страница пропущена`);
-    return null;
-  }
-  return { dir: webDir, url: `/api/ext/${id}/web/` };
-}
-
-/**
- * Скан пользовательских плагинов: plugins/<id>/plugin.json.
- * Битый манифест пропускается с warn — один плагин не валит остальные.
+ * Ошибка одного пакета сохраняет его карточку с причиной несовместимости.
+ * Ни старые, ни повреждённые пакеты не получают права на исполнение кода.
  */
 export async function scanUserPlugins(
   userPluginsDir: string,
   log?: RegistryLog,
+  grigDeskVersion = '0.0.0',
 ): Promise<PluginManifest[]> {
   const out: PluginManifest[] = [];
-  let entries = [];
-  try {
-    entries = await fs.readdir(userPluginsDir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
+  const entries = await fs.readdir(userPluginsDir, { withFileTypes: true }).catch(() => []);
 
-  for (const e of entries) {
-    if (!e.isDirectory() || !PLUGIN_ID_RE.test(e.name)) {
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !PLUGIN_ID_RE.test(entry.name)) {
       continue;
     }
 
-    const dir = path.join(userPluginsDir, e.name);
+    const dir = path.join(userPluginsDir, entry.name);
+    let raw: Record<string, unknown> = {};
 
     try {
-      const m = JSON.parse(await fs.readFile(path.join(dir, 'plugin.json'), 'utf8'));
+      raw = JSON.parse(await fs.readFile(path.join(dir, 'plugin.json'), 'utf8'));
 
-      if (!m.id || m.id !== e.name) {
-        throw new Error(`id в манифесте («${m.id}») не совпадает с папкой «${e.name}»`);
+      if (!isRecord(raw) || raw.id !== entry.name) {
+        throw installError('id_mismatch');
       }
 
-      const decoded = decodeUserPluginManifest(m, (message: string) => {
-        log?.warn?.({ plugin: e.name }, message);
-      });
-      const { webDir, ...fields } = decoded;
-      const webModule = fields.api === 2 ? resolvePluginWebModule(
-        dir, m.id, m.webModule, normalizePluginPackagePath,
-        (message) => log?.warn?.({ plugin: e.name }, message),
-      ) : null;
-
-      const [jsPresent, tsPresent] = await Promise.all(['server.js', 'server.ts'].map((entry) =>
-        fs.access(path.join(dir, entry)).then(() => true).catch(() => false)));
+      const fields = decodeUserPluginManifest(raw, (message) => {
+        log?.warn?.({ plugin: entry.name }, message);
+      }, grigDeskVersion);
+      const declared = raw.entrypoints as Record<string, unknown>;
+      const web = resolvePluginWebModule(dir, entry.name, declared.web, normalizePluginPackagePath,
+        () => {
+          throw installError('manifest_invalid', 'неверный entrypoints.web');
+        });
 
       out.push({
         ...fields,
-        nav: fields.nav ?? (webModule && m.nav == null ? {
-          path: `/ext/${m.id}`,
-          label: fields.name,
-          icon: 'plugin',
-          group: 'dock',
-        } : null),
         dir,
-        webModule,
-        ...selectPluginServerEntry(jsPresent ?? false, tsPresent ?? false),
-        web: await resolvePluginWeb(dir, m.id, webDir ?? m.web, (message: string) => {
-          log?.warn?.({ plugin: e.name }, message);
-        }),
+        entrypoints: { web },
+        ...selectPluginServerEntry(dir, declared.server),
+        ...resolvePluginAssets(dir, entry.name, raw),
       });
-    } catch (err) {
-      log?.warn?.(
-        { plugin: e.name, err: (err as Error).message },
-        'манифест пользовательского плагина не прочитан — пропущен',
-      );
+    } catch (error) {
+      const failure = errorInfo(error);
+
+      log?.warn?.({ plugin: entry.name, code: failure.code }, failure.message);
+      out.push({
+        id: entry.name,
+        name: typeof raw?.name === 'string' ? raw.name : entry.name,
+        version: typeof raw?.version === 'string' ? raw.version : '0.0.0',
+        description: typeof raw?.description === 'string' ? raw.description.slice(0, 4096) : '',
+        dir,
+        nav: null,
+        settings: [],
+        placements: [],
+        entrypoints: {},
+        contributes: {},
+        icon: null,
+        compatibility: {
+          status: 'incompatible',
+          code: failure.code,
+          reason: failure.message,
+        },
+      });
     }
   }
+
   return out;
 }
 
@@ -716,8 +834,12 @@ export async function scanUserPlugins(
  */
 export function isEnabled(
   prefsData: Record<string, unknown>,
-  manifest: Pick<PluginManifest, 'id' | 'system' | 'defaultEnabled'>,
+  manifest: Pick<PluginManifest, 'id' | 'system' | 'defaultEnabled' | 'compatibility'>,
 ): boolean {
+  if (manifest.compatibility?.status === 'incompatible') {
+    return false;
+  }
+
   const map = (prefsData.plugins || {}) as Record<string, unknown>;
   if (manifest.id in map) return !!map[manifest.id];
   return manifest.defaultEnabled ?? !!manifest.system;

@@ -3,23 +3,25 @@ import test from 'node:test';
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
 import { loadProductModule } from './helpers/compile-vue.js';
 import { api } from '../../web/src/shared/apiClient.ts';
-import { descriptor, pluginCard, registryModule } from './helpers/pluginModuleContract.js';
+import { registryModule } from './helpers/pluginModuleContract.js';
+
+import { cardV1, webEntryV1 as descriptor } from './helpers/pluginV1.js';
 
 const { usePluginsStore, normalizeNavItem } = await loadProductModule('src/stores/plugins.ts');
 const { pluginTools } = await registryModule();
 
-test('PM-TOOLS: DTO модуля, /ext, выключение и приоритет над iframe', async (t) => {
+test('PM-TOOLS: DTO модуля, /ext, выключение и единственный вид панели', async (t) => {
   setActivePinia(createPinia());
 
   const store = usePluginsStore();
-  const card = pluginCard({ webModule: descriptor, web: '/api/ext/ui-module/web/' });
+  const card = cardV1();
 
   t.mock.method(api, 'get', async () => ({ plugins: [card] }));
   await store.load();
   assert.equal(store.loadError, null);
   assert.ok(Array.isArray(store.modulePages), 'Каталог должен проецировать модульные панели');
   assert.equal(store.modulePages.length, 1);
-  assert.equal(normalizeNavItem(pluginCard({ webModule: descriptor })).to, '/ext/ui-module');
+  assert.equal(normalizeNavItem(cardV1()).to, '/ext/ui-module');
 
   const tools = pluginTools(store);
 
@@ -41,7 +43,7 @@ test('PM-TOOLS: неверный DTO/чужой URL не публикуется;
 
   const store = usePluginsStore();
 
-  t.mock.method(api, 'get', async () => ({ plugins: [pluginCard()] }));
+  t.mock.method(api, 'get', async () => ({ plugins: [cardV1({ entrypoints: {} })] }));
   await store.load();
   assert.equal(store.loadError, null);
 
@@ -51,41 +53,10 @@ test('PM-TOOLS: неверный DTO/чужой URL не публикуется;
     { ...descriptor, css: 'panel.css' },
     { ...descriptor, locales: { ru: '/api/secrets' } },
   ]) {
-    api.get.mock.mockImplementation(async () => ({ plugins: [pluginCard({ webModule })] }));
+    api.get.mock.mockImplementation(async () => ({ plugins: [cardV1({ entrypoints: { web: webModule } })] }));
     await store.load();
     assert.ok(store.loadError, 'Невалидный модуль не должен заменять принятый каталог');
-    assert.equal(store.list[0].webModule, undefined);
-  }
-});
-
-for (const startOnLogin of ['true', 1, null]) {
-  test(`PM-START-DESCRIPTOR: ${JSON.stringify(startOnLogin)} отвергается каталогом`, async (t) => {
-    setActivePinia(createPinia());
-
-    const store = usePluginsStore();
-
-    t.mock.method(api, 'get', async () => ({
-      plugins: [pluginCard({ webModule: { ...descriptor, startOnLogin } })],
-    }));
-    await store.load();
-    assert.ok(store.loadError, 'Небулевый startOnLogin нельзя публиковать');
-    assert.equal(store.list.length, 0);
-  });
-}
-
-test('PM-START-DESCRIPTOR: true/false и прежний DTO принимаются', async (t) => {
-  setActivePinia(createPinia());
-
-  const store = usePluginsStore();
-
-  t.mock.method(api, 'get', async () => ({}));
-
-  for (const webModule of [descriptor, { ...descriptor, startOnLogin: true },
-    { ...descriptor, startOnLogin: false }]) {
-    api.get.mock.mockImplementation(async () => ({ plugins: [pluginCard({ webModule })] }));
-    await store.load();
-    assert.equal(store.loadError, null);
-    assert.deepEqual(store.list[0].webModule, webModule);
+    assert.equal(store.list[0].entrypoints.web, undefined);
   }
 });
 
@@ -103,7 +74,7 @@ test('PM-LAUNCH-MODULE-ONLY: module-only, недоступный id и фоку�
     setRuntime: (id, value) => calls.push(['focus', id, value]),
   };
 
-  store.list = [pluginCard({ webModule: descriptor })];
+  store.list = [cardV1()];
   globalThis.__pluginLauncherStore = store;
   t.after(() => delete globalThis.__pluginLauncherStore);
 
@@ -138,4 +109,43 @@ test('PM-LAUNCH-MODULE-ONLY: module-only, недоступный id и фоку�
   calls.length = 0;
   assert.equal(await launchTool(context, 'ui-module'), true);
   assert.deepEqual(calls.map((call) => call[0]), ['focus']);
+});
+
+test('V1-PANELS: настоящий store открывает только объявленную совместимую панель', async (t) => {
+  setActivePinia(createPinia());
+
+  const store = usePluginsStore();
+  let card = cardV1();
+
+  t.mock.method(api, 'get', async () => ({ plugins: [card] }));
+  await store.load();
+  assert.equal(store.loadError, null);
+  assert.equal(store.modulePages.length, 1);
+
+  const [tool] = pluginTools(store);
+
+  assert.equal(tool.route, '/ext/ui-module');
+  assert.equal(tool.detachable, false);
+  assert.deepEqual(tool.panelProps.descriptor, descriptor);
+  assert.equal('src' in tool.panelProps, false);
+
+  for (const overrides of [
+    { contributes: {
+      panels: [],
+      slots: [],
+      commands: [],
+      themes: []
+    } },
+    { enabled: false },
+    { compatibility: {
+      status: 'incompatible',
+      code: 'manifest_incompatible',
+      reason: 'Старый формат'
+    } },
+  ]) {
+    card = cardV1(overrides);
+    await store.load();
+    assert.equal(store.loadError, null);
+    assert.equal(pluginTools(store).length, 0);
+  }
 });

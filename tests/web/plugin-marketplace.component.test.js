@@ -331,8 +331,13 @@ test('CAT-UI8: версия ниже установленной называет
 });
 
 
-test('CAT-UI-API2: карточка api2 создаёт точный install intent без автоматического apply', async (t) => {
+test('CAT-UI-V1: карточка api1 создаёт точный install intent без автоматического apply', async (t) => {
   const modules = moduleCatalogFixture();
+
+  modules.version.api = 1;
+  modules.index.plugins[0].latest.api = 1;
+  modules.detail.plugin.versions[0].api = 1;
+
   const h = await settingsHarness(t, 'plugins.installed', 'PluginCatalogPanel', {
     prepare({ control }) {
       control.handlers['/api/plugin-catalog'] = () => Response.json(catalogResponse(modules));
@@ -448,4 +453,39 @@ test('Настройки: просмотр результата и новая Gi
   assert.equal(install.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'source');
   assert.equal(install.get('[data-role="install-url"]').element.value, '');
   assert.equal(h.writes().some((call) => /\/jobs(?:\/|$)/u.test(call.path)), false);
+});
+
+test('CAT-V1-MEDIA: detail рисует icon по repository/SHA, ошибка изображения даёт fallback', async (t) => {
+  const fixture = catalogFixture();
+  const icon = {
+    path: 'assets/icon.png',
+    sha: fixture.version.sha,
+    mediaType: 'image/png',
+    bytes: 1024,
+  };
+
+  fixture.detail.plugin.icon = icon;
+  fixture.detail.plugin.gallery = { screenshots: [] };
+
+  const h = await settingsHarness(t, 'plugins.installed', 'PluginCatalogPanel', {
+    prepare({ control }) {
+      catalogHandlers(control, fixture, () => fixture.detail);
+    },
+  });
+
+  await h.wrapper.get('[data-catalog-id="demo"]').trigger('click');
+  await h.flushPromises();
+
+  const expected = `https://raw.githubusercontent.com/${fixture.entry.repository}/${icon.sha}/${icon.path}`;
+  const image = h.wrapper.findAll('.catalog-card img').find((item) => item.attributes('src') === expected);
+
+  assert.ok(image, 'иконка detail строится только из проверенных repository/SHA/path');
+  assert.equal(h.wrapper.get('[data-catalog-readme]').text().includes('Example README'), true);
+  await image.trigger('error');
+  await h.flushPromises();
+
+  const remaining = h.wrapper.findAll('.catalog-card img');
+
+  assert.equal(remaining.some((item) => item.attributes('src') === expected && item.isVisible()), false);
+  assert.equal(h.wrapper.find('[data-catalog-action]').exists(), true);
 });

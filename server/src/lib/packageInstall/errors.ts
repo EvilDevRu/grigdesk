@@ -80,9 +80,13 @@ export const PLUGIN_INSTALL_ERRORS: Record<string, { status: number; message: st
     status: 422,
     message: "id в новой версии отличается от установленного плагина.",
   },
+  manifest_incompatible: {
+    status: 422,
+    message: 'Старый формат плагина несовместим. Переустановите пакет с манифестом v1.',
+  },
   api_unsupported: {
     status: 422,
-    message: "Плагин рассчитан на другую версию контракта (api). Этот GrigDesk поддерживает api 1 и 2.",
+    message: "Плагин рассчитан на другую версию контракта (api). Этот GrigDesk поддерживает api 1.",
   },
   contract_unsupported: {
     status: 422,

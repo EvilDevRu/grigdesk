@@ -8,10 +8,9 @@
                   :pressed="presentation === 'dock' && presentedTool === item.id"
                   @click="clickRail(item)">
       <span class="rail-mark">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path :d="navIconPath(item.icon)" />
-        </svg>
+        <PluginIcon v-if="item.icon.startsWith('/')" :src="item.icon" />
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   aria-hidden="true"><path :d="navIconPath(item.icon)" /></svg>
         <NavigationCount :badge="toolBadges[item.id]" />
       </span>
       <span v-if="item.id === 'terminal' && ['open', 'connecting'].includes(String(dock.runtime.terminal?.status))"
@@ -49,6 +48,8 @@
 </template>
 
 <script setup lang="ts">
+import PluginIcon from '../PluginIcon.vue';
+
 import { toolWindowText } from '../tools/toolWindowMessages.ts';
 import { getToolWindowCoordinator } from '../../stores/toolWindows.ts';
 import { useShellStore } from '../../stores/shell.ts';

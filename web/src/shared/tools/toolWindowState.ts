@@ -21,7 +21,7 @@ const fields: Record<string, string[]> = {
 
 /**
  * Снимок содержит только явные поля выбора панели и черновики.
- * Адрес iframe, пароли и объекты соединений никогда не передаются между документами.
+ * Адрес внешнего ресурса, пароли и объекты соединений никогда не передаются между документами.
  */
 export function parseToolWindowState(id: string, value: unknown): ToolWindowState | null {
   const state = recordOrNull(value);
@@ -107,7 +107,7 @@ export function nativeToolId(id: string): string {
 
 /**
  * Обратное преобразование native id остаётся в одном адаптере.
- * Registry сам выбирает компонент и адрес iframe по установленному плагину.
+ * Registry выбирает компонент и объявленный модуль установленного плагина.
  */
 export function registryToolId(id: string): string {
   return id.startsWith('plugin:') ? id.slice(7) : id;

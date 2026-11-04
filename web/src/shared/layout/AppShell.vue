@@ -16,10 +16,9 @@
           <router-link v-for="item in pluginNav" :key="item.to" :to="item.to" class="navitem" data-ui-shell-nav active-class="active"
                        :aria-label="navTitle(item)" v-tooltip.right="navTitle(item)">
             <span class="icwrap">
-              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                   stroke-linecap="round" stroke-linejoin="round">
-                <path :d="navIconPath(item.icon)" />
-              </svg>
+              <PluginIcon v-if="item.icon.startsWith('/')" :src="item.icon" />
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   aria-hidden="true"><path :d="navIconPath(item.icon)" /></svg>
               <NavigationCount :badge="badges[item.to]" />
             </span>
             </router-link>
@@ -68,8 +67,9 @@
         <router-link v-for="item in dockRouteNav" :key="item.to" :to="item.to" class="navitem" data-ui-shell-nav active-class="active"
                        :aria-label="navTitle(item)" v-tooltip.right="navTitle(item)">
           <span class="icwrap">
-            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                 stroke-linecap="round" stroke-linejoin="round"><path :d="navIconPath(item.icon)" /></svg>
+            <PluginIcon v-if="item.icon.startsWith('/')" :src="item.icon" />
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   aria-hidden="true"><path :d="navIconPath(item.icon)" /></svg>
             <NavigationCount :badge="badges[item.to]" />
           </span>
         </router-link>
@@ -445,6 +445,8 @@
 </template>
 
 <script setup lang="ts">
+import PluginIcon from '../PluginIcon.vue';
+
 import { useGrigdeskTasksStore } from '../../stores/grigdeskTasks.ts';
 import { boardSupportsTimer } from '../trackerCapabilities.ts';
 import { formatDate, intlLocale } from '../../../../shared/i18n/formats.ts';

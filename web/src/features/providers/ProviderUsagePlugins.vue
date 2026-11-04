@@ -20,6 +20,7 @@ import {
   parseProviderPluginUsage,
 } from '../../../../shared/plugins/providerUsageResources.ts';
 import type { ProviderPluginResource } from '../../../../shared/plugins/providerUsageResources.ts';
+import { pluginRuntimeFor } from '../../pluginRuntime/bootstrap.ts';
 import { api } from '../../shared/apiClient.ts';
 import { usePluginsStore } from '../../stores/plugins.ts';
 import { t, UiInlineMessage, uiLocale } from '../../ui.ts';
@@ -28,9 +29,14 @@ import ProviderUsageResources from './ProviderUsageResources.vue';
 const props = defineProps<{ providerId: string }>();
 const plugins = usePluginsStore();
 const SLOT = 'provider.popover.after-bars';
+const runtime = pluginRuntimeFor();
+const leases = new Map<string, Awaited<ReturnType<typeof runtime.acquireSlot>>>();
 const snapshots = reactive<Record<string, { resources: ProviderPluginResource[]; error: boolean }>>({});
-const contributors = computed(() => plugins.loaded ? plugins.list.filter((plugin) => (
-  !plugin.system && !plugin.web && !plugin.webModule && plugin.enabled
+const available = computed(() => plugins.loaded
+  && (!runtime.access || runtime.access.value.status === 'ready'));
+const contributors = computed(() => available.value ? plugins.list.filter((plugin) => (
+  !plugin.system && plugin.enabled && plugin.compatibility?.status !== 'incompatible'
+  && plugin.contributes?.slots?.some((item) => item.slot === SLOT && item.kind === 'provider-usage')
   && plugins.placementEnabled(plugin.id, SLOT)
 )).sort((left, right) => left.id.localeCompare(right.id)) : []);
 
@@ -45,6 +51,12 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 function stop() {
   epoch += 1;
   controller?.abort();
+
+  for (const lease of leases.values()) {
+    lease.release();
+  }
+
+  leases.clear();
   controller = null;
   clearTimeout(timer ?? undefined);
   timer = null;
@@ -59,22 +71,29 @@ async function refresh(owner: number, signal: AbortSignal) {
 
   await Promise.all(contributors.value.map(async (plugin) => {
     try {
+      let lease = leases.get(plugin.id);
+
+      if (!lease) {
+        lease = await runtime.acquireSlot(plugin.id, SLOT, { signal });
+        leases.set(plugin.id, lease);
+      }
+
       const url = `/api/ext/${encodeURIComponent(plugin.id)}/provider-usage`;
       const value = await api.get(
         `${url}?providerId=${encodeURIComponent(providerId)}`,
         {
-          signal,
+          signal: lease.signal,
           timeoutMs: 20_000,
           retry: false,
         },
       );
       const resources = parseProviderPluginUsage(plugin.id, value);
 
-      if (owner === epoch && !signal.aborted) {
+      if (owner === epoch && !signal.aborted && !leases.get(plugin.id)?.signal.aborted) {
         snapshots[plugin.id] = { resources, error: false };
       }
     } catch {
-      if (owner === epoch && !signal.aborted) {
+      if (owner === epoch && !signal.aborted && !leases.get(plugin.id)?.signal.aborted) {
         snapshots[plugin.id] = { resources: snapshots[plugin.id]?.resources ?? [], error: true };
       }
     }
@@ -110,7 +129,14 @@ function resourcesOf(pluginId: string) {
   });
 }
 
-watch(() => [props.providerId, ...contributors.value.map((plugin) => `${plugin.id}@${plugin.version}`)],
+watch(() => [
+  runtime.access?.value?.status,
+  runtime.access?.value?.owner,
+  props.providerId,
+  ...contributors.value.map((plugin) => JSON.stringify([
+    plugin.id, plugin.version, plugin.entrypoints, plugin.install?.revision,
+  ])),
+],
   () => {
     stop();
 
