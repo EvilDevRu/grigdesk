@@ -508,10 +508,12 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: min(360px, calc(100vw - 24px));
+  width: min(380px, calc(100vw - 24px));
   max-height: calc(100dvh - 80px);
+  padding: 2px;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   pointer-events: none;
 }
 
@@ -526,34 +528,52 @@
   }
 }
 
-/* Телефон: верхняя панель 52 px, внизу навигация и поле ввода — стопка во всю ширину сверху. */
+/* Узкое окно занимает доступную ширину; телефон дополнительно учитывает полосу статуса.
+   Тосты начинаются под обеими строками шапки и оставляют место нижней навигации. */
 @media (max-width: 759px) {
   .ui-toast-host {
-    top: calc(58px + env(safe-area-inset-top, 0px));
+    top: calc(var(--app-topbar-h) + 8px + env(safe-area-inset-top, 0px));
     right: 8px;
     left: 8px;
     width: auto;
   }
 }
 
-/* Карточка: значок тона и текст в две колонки, крестик висит в углу и не отнимает
-   ширину у кнопок. Тон окрашивает значок, рамку и едва заметно фон — сразу видно,
-   что срочно, не читая текст. */
+@media (max-width: 600px) {
+  .ui-toast-host {
+    top: calc(var(--app-topbar-h) + var(--app-phone-status-h) + 8px + env(safe-area-inset-top, 0px));
+    max-height: calc(100dvh - var(--app-topbar-h) - var(--app-phone-status-h) - 80px);
+  }
+}
+
+/* Спокойная поверхность и цветная кромка отделяют уведомление от рабочего документа.
+   Сдвиг принадлежит карточке, направление ухода задаёт только подтверждённый свайп. */
 .ui-toast {
   --ui-toast-tone: var(--accent);
   position: relative;
   display: grid;
+  flex: none;
   grid-template-columns: 22px minmax(0, 1fr);
   column-gap: 10px;
   align-items: start;
-  padding: 10px 12px 10px 11px;
-  border: 1px solid color-mix(in srgb, var(--ui-toast-tone) 30%, var(--line-2));
+  padding: 10px 12px 10px 10px;
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--ui-toast-tone);
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--ui-toast-tone) 7%, var(--surface));
+  background: var(--surface);
   color: var(--ink);
   font-size: 12px;
   line-height: 1.4;
-  box-shadow: 0 14px 34px #0000009c, inset 0 1px 0 #ffffff0d;
+  box-shadow: 0 6px 18px #00000066;
+  touch-action: pan-y pinch-zoom;
+  transform: translateX(var(--ui-toast-swipe-x, 0px));
+  opacity: var(--ui-toast-swipe-opacity, 1);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.ui-toast[data-swiping='true'] {
+  transition: none;
+  user-select: none;
 }
 
 .ui-toast[data-tone='warning'] {
@@ -570,35 +590,36 @@
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--ui-toast-tone) 18%, transparent);
   color: var(--ui-toast-tone);
 }
 
 .ui-toast__icon svg {
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
 }
 
 .ui-toast__content {
   min-width: 0;
-  padding-top: 2px;
+  padding-top: 1px;
 }
 
 .ui-toast__title {
   display: block;
-  padding-right: 20px;
-  font-size: 12.5px;
+  padding-right: 24px;
+  font-size: 13px;
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 18px;
   overflow-wrap: anywhere;
 }
 
 .ui-toast__body {
   display: -webkit-box;
   margin: 3px 0 0;
+  padding-right: 20px;
   overflow: hidden;
   color: var(--ink-mid);
   overflow-wrap: anywhere;
+  line-height: 18px;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
@@ -621,8 +642,8 @@
 .ui-toast__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 4px 6px;
+  margin-top: 4px;
 }
 
 .ui-toast-host__more {
@@ -649,7 +670,7 @@
 .ui-toast-enter-from,
 .ui-toast-leave-to {
   opacity: 0;
-  transform: translateX(24px);
+  transform: translateX(var(--ui-toast-exit-x, 24px));
 }
 
 .ui-toast-leave-active {
@@ -658,6 +679,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .ui-toast,
   .ui-toast-enter-active,
   .ui-toast-leave-active,
   .ui-toast-move {
@@ -714,15 +736,15 @@
 
 /* Дополнительные 16 px прозрачны и не конкурируют с текстом карточки.
    Крестик тоже получает отдельные 44 px, для него зарезервирован конец заголовка. */
-:root[data-ui-touch] .ui-button[data-context='toast-action'] {
+html:root[data-ui-touch] .ui-button[data-context='toast-action'] {
   padding-block: 14px;
 }
 
-:root[data-ui-touch] .ui-button[data-context='toast-action']::before {
+html:root[data-ui-touch] .ui-button[data-context='toast-action']::before {
   inset-block: 8px;
 }
 
-:root[data-ui-touch] .ui-toast__title {
+html:root[data-ui-touch] :is(.ui-toast__title, .ui-toast__body) {
   padding-right: 32px;
 }
 
@@ -741,8 +763,13 @@
   color: var(--ink);
 }
 
+.ui-icon-button[data-context='toast-close'] svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* Прозрачный угол не закрывает заголовок и остаётся удобным для касания. */
-:root[data-ui-touch] .ui-icon-button[data-context='toast-close'] {
+html:root[data-ui-touch] .ui-icon-button[data-context='toast-close'] {
   top: 0;
   right: 0;
   width: 44px;
