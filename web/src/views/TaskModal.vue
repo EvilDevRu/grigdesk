@@ -1,5 +1,7 @@
 <template>
   <TaskCardFrame
+    data-perf-target="task"
+    :data-perf-key="`${taskSource || ''}:${taskId}`"
     :presentation="presentation"
     :open="Boolean(taskId)"
     data-role="task-modal"
@@ -10,7 +12,8 @@
     fade-only
     @update:open="onTaskDialogOpenChange"
   >
-    <div class="task-detail" data-ui-workspace :data-pane="contentPane">
+    <div class="task-detail"
+    :data-perf-pending="loading && !detail ? '' : undefined" data-ui-workspace :data-pane="contentPane">
       <div class="mhead" :class="{ 'mhead-window': presentation === 'document' }">
         <UiPaneHeader class="task-toolbar" inset="content" data-ui-task-header>
           <template #title>
@@ -59,7 +62,8 @@
       </div>
 
       <div v-if="err || (canUsePersonal && (favorites.error || shelf.error))" class="malerts" aria-live="polite">
-        <p v-if="err" class="err">{{ err }}</p>
+        <p v-if="err" class="err"
+    :data-perf-error="!detail && !loading ? '' : undefined">{{ err }}</p>
         <p v-if="canUsePersonal && favorites.error" class="err">Избранное: {{ favorites.error }}</p>
         <p v-if="canUsePersonal && shelf.error" class="err">Полка: {{ shelf.error }}</p>
       </div>

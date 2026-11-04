@@ -94,3 +94,56 @@ test('CLI в тексте показывает время окна, маршру
   assert.match(bad.stderr, /Использование:/u);
   assert.match(cli(['--nope']).stderr, /Неизвестный аргумент: --nope/u);
 });
+
+test('reader читает новый perf.surface вместе с прежней mark и фильтрует perf.*', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-perf-reader-'));
+  const log = createWebLog({
+    now: () => new Date('2026-11-04T00:00:00Z'),
+    monotonicNow: () => 0,
+    pageId: 'page-aaaaaaaaaaaaaaaa',
+    tabId: 'tab-bbbbbbbbbbbbbbbb',
+    version: 'dev',
+    context: () => ({
+      route: '/projects/private',
+      vis: 'visible',
+      boot: null
+    }),
+    level: 'verbose',
+  });
+
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  log.record('perf.surface', {
+    surface: 1,
+    kind: 'route',
+    target: 'projects',
+    view: '/projects/private',
+    phase: 'ready',
+    origin: 'navigation',
+    first: true,
+    ms: 1,
+    pending: 0,
+  });
+  log.mark('Отметка');
+
+  const lines = log.snapshot().entries.map((entry) => JSON.stringify({
+    ...entry, rx: '2026-11-04T00:00:01Z',
+  }));
+
+  await writeFile(path.join(dir, '2026-11-04.ndjson'), lines.join('\n') + '\n');
+
+  const rows = [];
+
+  for await (const row of readWebLog({
+    dir,
+    since: new Date('2026-11-04T00:00:00Z'),
+    now: () => new Date('2026-11-04T01:00:00Z'),
+    ev: 'perf.*',
+  })) {
+    rows.push(row);
+  }
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].entry.data.ms, 1);
+  assert.equal(rows[0].entry.data.view, '/projects/:id?');
+  assert.doesNotMatch(JSON.stringify(rows), /private/u);
+});

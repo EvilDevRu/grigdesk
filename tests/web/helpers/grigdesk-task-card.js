@@ -92,6 +92,7 @@ export async function mountLocalCard(t, {
   task = LOCAL_TASK,
   load = null,
   presentation = 'dialog',
+  wrap = null,
   launchOptions = null,
   enabled = true,
   detail = triageDetail(),
@@ -293,10 +294,12 @@ export async function mountLocalCard(t, {
   };
 
   const TaskModal = await compileTaskModal(prefix);
-  const wrapper = mount(TaskModal, {
+  const pinia = createPinia();
+  const component = wrap ? await wrap(TaskModal, { browser, pinia }) : TaskModal;
+  const wrapper = mount(component, {
     props: { presentation },
     attachTo: browser.document.querySelector('#mount'),
-    global: { plugins: [createPinia()], stubs: { teleport: true } },
+    global: { plugins: [pinia], stubs: { teleport: true } },
   });
 
   t.after(() => {

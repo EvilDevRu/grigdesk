@@ -1,5 +1,7 @@
 <template>
-  <div class="pipeline ui-workspace-page">
+  <div class="pipeline ui-workspace-page"
+    :data-perf-pending="performanceLoading && (!loaded || error) ? '' : undefined"
+    :data-perf-error="error && !performanceLoading ? '' : undefined">
     <PipelinePhoneToolbar
       :projects="projectOptions"
       :statuses="statusOptions"
@@ -1213,6 +1215,7 @@ const board = useBoardStore();
 const tasks = ref<PipelineViewTask[]>([]);
 const error = ref<string | null>(null);
 const loaded = ref(false);
+const performanceLoading = ref(false);
 const now = ref(Date.now());
 const silenceWindow = ref(0);
 
@@ -3221,6 +3224,8 @@ const STATE_RELOAD_DELAY_MS = 800;
  * никогда не перезаписал более свежий.
  */
 async function loadSnapshot() {
+  performanceLoading.value = true;
+
   try {
     const { tasks: list = [], silenceWindow: nextSilenceWindow }
       = decodePipelineTasks(await api.get('/api/tasks?sources=1'));
@@ -3243,6 +3248,7 @@ async function loadSnapshot() {
   } catch (e) {
     error.value = errorMessage(e, '');
   } finally {
+    performanceLoading.value = false;
     loaded.value = true;
   }
 }

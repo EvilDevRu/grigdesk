@@ -2,7 +2,8 @@
   <section class="diff-core ui-workspace" data-ui-workspace :aria-busy="loading || undefined"
            :aria-label="t('core.diffDesignWorkspace')">
     <DiffLoading v-if="showLoading" label="Считаю диф…" :side-by-side="sideBySide" />
-    <div v-else-if="error && !repos.length" class="state" role="status">
+    <div v-else-if="error && !repos.length" class="state"
+    :data-perf-error="error && !repos.length && !loading ? '' : undefined" role="status">
       <span class="state__icon" aria-hidden="true">±</span>
       <strong>{{ t('core.diffDesignLoadFailed') }}</strong>
       <p class="bad">{{ error }}</p>

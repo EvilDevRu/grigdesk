@@ -29,11 +29,23 @@
           <component :is="Component" />
         </router-view>
       </AppShell>
-      <TaskModal v-if="!surfaceDocument" />
-      <DiffModal />
-      <DocumentModal />
+      <PerformanceBoundary kind="dialog" :target="() => 'task'"
+        :identity="() => !surfaceDocument && ui.taskId ? `${ui.taskSource || ''}:${ui.taskId}` : null">
+        <TaskModal v-if="!surfaceDocument" />
+      </PerformanceBoundary>
+      <PerformanceBoundary kind="dialog" :target="() => 'diff'"
+        :identity="() => performanceDiff.open ? String(performanceDiff.taskId || '') : null">
+        <DiffModal />
+      </PerformanceBoundary>
+      <PerformanceBoundary kind="dialog" :target="() => 'document'"
+        :identity="() => performanceDocument.href || null">
+        <DocumentModal />
+      </PerformanceBoundary>
       <MediaViewer />
-      <SettingsModal v-if="settings.isOpen" />
+      <PerformanceBoundary kind="settings" :target="() => settings.pageId"
+        :identity="() => settings.isOpen ? settings.pageId : null">
+        <SettingsModal v-if="settings.isOpen" />
+      </PerformanceBoundary>
       <UiToastHost />
       </div>
     </SpeechProvider>
@@ -43,6 +55,9 @@
 </template>
 
 <script setup lang="ts">
+import PerformanceBoundary from './shared/performanceBoundary.ts';
+import { useDocumentPreviewStore } from './stores/documentPreview.ts';
+import { useDiffStore } from './stores/diff.ts';
 import { useGrigdeskTasksStore } from './stores/grigdeskTasks.ts';
 import { useTasksStore } from './stores/tasks.ts';
 import { useUiStore } from './stores/ui.ts';
@@ -143,6 +158,9 @@ const connectionMessage = computed(() => {
   return `${name}: ${status}.`;
 });
 const settings = useSettingsStore();
+const ui = useUiStore();
+const performanceDocument = useDocumentPreviewStore();
+const performanceDiff = useDiffStore();
 const SettingsModal = asyncView(
   () => import('./views/settings/SettingsModal.vue'),
   SettingsModalLoading,

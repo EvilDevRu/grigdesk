@@ -30,6 +30,8 @@ import okio.BufferedSink;
 import org.json.JSONObject;
 
 public final class Upstream implements PipeTransport {
+  private static final java.util.regex.Pattern TIMING =
+    java.util.regex.Pattern.compile("(?:^|,)\\s*grigdesk;dur=[0-9]");
   private static final Set<String> FORBIDDEN = Set.of("cookie", "host", "origin", "connection",
     "proxy-connection", "keep-alive", "transfer-encoding", "upgrade", "x-grigdesk-token",
     "x-grigdesk-internal", "x-grigdesk-window-key", "forwarded", "proxy-authorization");
@@ -254,6 +256,8 @@ public final class Upstream implements PipeTransport {
    * Проверка версии и отзыва выполняется прежде передачи заголовков WebView.
    */
   private PipeResponse forward(HttpHead head, InputStream body, boolean probe) throws Exception {
+    long diagnosticStart = System.nanoTime();
+
     if (closed || terminal != null) {
       return PipeResponse.error(rejection, terminal == null ? "offline" : terminal);
     }
@@ -294,6 +298,18 @@ public final class Upstream implements PipeTransport {
           .contains(lower)) {
           headers.put(lower, response.header(name));
         }
+      }
+
+      String timing = headers.getOrDefault("server-timing", "");
+
+      if (TIMING.matcher(timing).find()) {
+        String kept = java.util.Arrays.stream(timing.split(","))
+          .filter(part -> !part.trim().startsWith("grigdesk_pipe;"))
+          .collect(java.util.stream.Collectors.joining(","));
+        double milliseconds = Math.max(0, System.nanoTime() - diagnosticStart) / 1_000_000.0;
+
+        headers.put("server-timing", kept + ", grigdesk_pipe;dur="
+          + String.format(java.util.Locale.ROOT, "%.1f", milliseconds));
       }
 
       return new PipeResponse(response.code(), headers, response.body().byteStream(),

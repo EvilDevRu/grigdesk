@@ -1,5 +1,6 @@
 # Сервер и доступ
 
+- [Времена HTTP, ожидания, цикл событий, CPU и GC](runtime-performance.md)
 
 - [Единый режим допуска GLM при установке сервера и DeepSeek](server-install-glm-mode.md)
 

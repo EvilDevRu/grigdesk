@@ -9,8 +9,15 @@ test('API sink видит отказ без query и содержимого; dow
   const originalFetch = globalThis.fetch;
   const calls = [];
   const events = [];
+  const completions = [];
 
-  setApiLogSink((ev, data) => events.push({ ev, data }));
+  setApiLogSink((ev, data) => {
+  if (ev === 'api.complete') {
+    completions.push({ ev, data });
+  } else {
+    events.push({ ev, data });
+  }
+});
   globalThis.fetch = async (url, options) => {
     calls.push({ url, method: options?.method || 'GET' });
     if (String(url).includes('/api/web-log/download')) {
@@ -38,9 +45,16 @@ test('API sink видит отказ без query и содержимого; dow
 test('API sink охватывает двоичные методы и upload без содержимого тела', async () => {
   const originalFetch = globalThis.fetch;
   const events = [];
+  const completions = [];
   const methods = [];
 
-  setApiLogSink((ev, data) => events.push({ ev, data }));
+  setApiLogSink((ev, data) => {
+  if (ev === 'api.complete') {
+    completions.push({ ev, data });
+  } else {
+    events.push({ ev, data });
+  }
+});
   globalThis.fetch = async (_url, options) => {
     methods.push(options?.method || 'GET');
     return new Response(JSON.stringify({ message: 'secret-response' }), { status: 503 });
@@ -55,6 +69,8 @@ test('API sink охватывает двоичные методы и upload бе
     await assert.rejects(api.postBytes('/api/files/private', new Uint8Array([1, 2, 3])));
 
     assert.deepEqual(methods, ['POST', 'POST', 'GET', 'POST', 'POST']);
+    assert.equal(completions.length, 5);
+    assert.ok(completions.every((row) => row.data.outcome === 'error'));
     assert.equal(events.length, 5);
     assert.ok(events.every((event) => event.ev === 'api.fail'
       && event.data.path === '/api/files/private' && event.data.attempt === 1));
@@ -68,17 +84,27 @@ test('API sink охватывает двоичные методы и upload бе
 test('повтор GET фиксирует неудачную попытку с willRetry', async () => {
   const originalFetch = globalThis.fetch;
   const events = [];
+  const completions = [];
   let calls = 0;
 
-  setApiLogSink((ev, data) => events.push({ ev, data }));
+  setApiLogSink((ev, data) => {
+  if (ev === 'api.complete') {
+    completions.push({ ev, data });
+  } else {
+    events.push({ ev, data });
+  }
+});
   globalThis.fetch = async () => {
     calls += 1;
     if (calls === 1) throw new TypeError('secret-network-detail');
     return new Response('{"ok":true}', { status: 200 });
   };
+
   try {
     assert.deepEqual(await api.get('/api/tasks'), { ok: true });
     assert.equal(calls, 2);
+    assert.deepEqual(completions.map((row) => row.data.outcome), ['error', 'success']);
+    assert.deepEqual(completions.map((row) => row.data.attempt), [1, 2]);
     assert.deepEqual(events.map(({ ev, data }) => [ev, data.attempt, data.willRetry]),
       [['api.fail', 1, true], ['api.recovered', 2, undefined]]);
     assert.doesNotMatch(JSON.stringify(events), /secret-network-detail/u);
@@ -91,9 +117,16 @@ test('повтор GET фиксирует неудачную попытку с w
 test('ответ 401 не повторяется и не помечается к повтору', async () => {
   const originalFetch = globalThis.fetch;
   const events = [];
+  const completions = [];
   let calls = 0;
 
-  setApiLogSink((ev, data) => events.push({ ev, data }));
+  setApiLogSink((ev, data) => {
+  if (ev === 'api.complete') {
+    completions.push({ ev, data });
+  } else {
+    events.push({ ev, data });
+  }
+});
   globalThis.fetch = async () => {
     calls += 1;
 
@@ -105,6 +138,8 @@ test('ответ 401 не повторяется и не помечается к
 
     assert.equal(error.status, 401);
     assert.equal(calls, 1);
+    assert.equal(completions.length, 1);
+    assert.equal(completions[0].data.outcome, 'error');
     assert.deepEqual(events.map(({ ev, data }) => [ev, data.attempt, data.willRetry]),
       [['api.fail', 1, false]]);
   } finally {

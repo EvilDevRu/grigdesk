@@ -276,3 +276,26 @@ test('обычная установка включает observers только 
   stop();
   assert.ok(Observer.instances.every((observer) => observer.disconnected));
 });
+
+test('смена маршрута не прерывает учёт блокировок документа', () => {
+  const f = fixture();
+  const views = ['/chats', '/projects/:id?'];
+  let routeIndex = 0;
+  const recorder = createChatPerformanceRecorder({
+    ...f,
+    view: () => views[routeIndex],
+    afterFlush: (callback) => callback(),
+  });
+
+  recorder.block('longtask', 0, 100);
+  routeIndex = 1;
+  recorder.block('longtask', 200, 120);
+  recorder.flush();
+
+  const blocks = f.log.snapshot().entries.filter((entry) => entry.ev === 'perf.block');
+
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0].data.count, 2);
+  assert.equal(blocks[0].data.totalMs, 220);
+  assert.equal(blocks[0].data.view, '/projects/:id?');
+});

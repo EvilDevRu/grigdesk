@@ -1,3 +1,4 @@
+import { measured } from './helpers/performance-surface.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -336,4 +337,19 @@ test('отключённый provider явно показывает отсутс
   const state = wrapper.get('[data-state="provider-disconnected"]');
   assert.match(state.text(), /новые issues не принимаются/);
   assert.match(state.text(), /только для чтения/);
+});
+
+test('PERF: первый отказ GitHub даёт error, не ready', async (t) => {
+  const failure = apiError(503, { error: 'github down' });
+  const { wrapper } = await mountChannelView(t, 'github', {
+    api: { get: async () => {
+      throw failure;
+    }, post: async () => {
+      throw failure;
+    } },
+  });
+  const f = measured(t, wrapper, 'github', 'route');
+
+  await f.paint();
+  assert.equal(f.log.snapshot().entries.at(-1).data.phase, 'error');
 });

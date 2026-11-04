@@ -1,6 +1,7 @@
 <template>
   <div class="ui-loading-state" :class="{ 'ui-loading-state--custom': $slots.default }"
-       :data-variant="normalizedVariant" data-ui-loading>
+       :data-variant="normalizedVariant" data-ui-loading
+    :data-perf-failed="failed ? '' : undefined">
     <div class="ui-loading-state__status" role="status" aria-live="polite" aria-atomic="true">
       <span class="ui-loading-state__mark" :class="{ 'ui-loading-state__hidden': !visibleLabel }"
             aria-hidden="true">

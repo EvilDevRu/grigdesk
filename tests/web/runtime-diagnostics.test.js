@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
 
 import { api, setApiLogSink } from '../../web/src/shared/apiClient.ts';
+import { setPerformanceSurface } from '../../web/src/shared/performanceContext.ts';
 import { resetApiDiagnostics } from '../../web/src/shared/apiDiagnostics.ts';
 import { createWebLog } from '../../web/src/shared/webLog.ts';
 import { compileModule, webFile } from './helpers/compile-vue.js';
@@ -261,4 +262,113 @@ test('повторы аномалий и ошибок подписчиков о�
   assert.equal(events.filter((entry) => entry.ev === 'sse.fault').length, 5);
   assert.equal(events.filter((entry) => entry.ev === 'state.anomaly').length, 5);
   assert.doesNotMatch(JSON.stringify(events), /private-signal/u);
+});
+
+test('быстрый API связывает исходный surface и ответ сервера, не следующий экран', async (t) => {
+  const f = fixture(t);
+  let resolve;
+
+  setPerformanceSurface(7);
+  t.after(() => setPerformanceSurface());
+  t.mock.method(globalThis, 'fetch', () => new Promise((done) => resolve = done));
+
+  const request = api.get('/api/providers?token=secret');
+
+  setPerformanceSurface(8);
+  f.at(25);
+  resolve(new Response('{}', { headers: {
+    'Server-Timing': 'grigdesk;dur=10.0, grigdesk_pipe;dur=20.5',
+    'X-GrigDesk-Request': 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa',
+  } }));
+  await request;
+
+  const event = f.log.snapshot().entries.find((entry) => entry.ev === 'api.complete');
+
+  assert.ok(event);
+  assert.equal(event.data.surface, 7);
+  assert.equal(event.data.serverRequest, 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa');
+  assert.equal(event.data.pipeMs, 20.5);
+  assert.equal(event.data.serverMs, 10);
+  assert.equal(event.data.outcome, 'success');
+  assert.equal(event.data.ms, 25);
+  assert.doesNotMatch(JSON.stringify(event), /secret|token/u);
+});
+
+test('две параллельные попытки и двоичный ответ не смешивают serverRequest', async (t) => {
+  const f = fixture(t);
+  const replies = [];
+
+  t.mock.method(globalThis, 'fetch', () => new Promise((resolve) => replies.push(resolve)));
+
+  const a = api.get('/api/providers');
+  const b = api.getBlob('/api/providers');
+
+  replies[1](new Response('binary', { headers: {
+    'X-GrigDesk-Request': 'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb',
+  } }));
+  await b;
+  replies[0](new Response('{}', { headers: {
+    'X-GrigDesk-Request': 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa',
+  } }));
+  await a;
+
+  const rows = f.log.snapshot().entries.filter((entry) => entry.ev === 'api.complete');
+
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((entry) => entry.data.serverRequest), [
+    'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb',
+    'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa',
+  ]);
+  assert.equal(rows[0].data.parseMs, undefined);
+  assert.equal(rows[0].data.serverMs, undefined);
+  assert.equal(rows[0].data.pipeMs, undefined);
+});
+
+test('postBlob/upload сохраняют consumer abort до заголовков и при чтении', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  const f = fixture(t);
+
+  for (const method of ['postBlob', 'upload']) {
+    for (const phase of ['headers', 'body']) {
+      const abort = new AbortController();
+      const reason = new DOMException('fixture abort', 'AbortError');
+
+      t.mock.method(globalThis, 'fetch', async (_url, options) => {
+        if (phase === 'headers') {
+          return new Promise((_resolve, reject) => {
+            options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+          });
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          blob: () => new Promise((_resolve, reject) => {
+            options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+          }),
+          text: () => new Promise((_resolve, reject) => {
+            options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+          }),
+        };
+      });
+
+      const request = method === 'postBlob'
+        ? api.postBlob('/api/providers', {}, { signal: abort.signal })
+        : api.upload('/api/providers', new FormData(), { signal: abort.signal });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      abort.abort(reason);
+      await assert.rejects(request, (error) => error === reason);
+
+      const complete = f.log.snapshot().entries.filter((row) => row.ev === 'api.complete').at(-1);
+
+      assert.equal(complete.data.outcome, 'cancelled');
+      f.log.clear();
+      t.mock.timers.tick(30_000);
+      assert.equal(f.log.snapshot().entries.length, 0);
+    }
+  }
 });

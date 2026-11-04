@@ -82,6 +82,7 @@ import { runInboxTriage } from './lib/inbox/triage.ts';
 import { FactoryDebugSettings } from './lib/factoryDebug.ts';
 import { DiagnosticLoggingPolicy, serverLogLevel } from './lib/diagnosticLogging.ts';
 import { installHttpDiagnostics } from './lib/httpDiagnostics.ts';
+import { createRuntimeDiagnostics } from './lib/runtimeDiagnostics.ts';
 import { readRouteWorkTime } from './lib/factoryRouteCli.ts';
 import { TaskFavoritesStore } from './lib/taskFavoritesStore.ts';
 import { TaskFavoritesService } from './lib/taskFavoritesService.ts';
@@ -242,15 +243,22 @@ async function build(desktopParent: DesktopParent | null) {
   });
 
   await fastify.register(apiVersionPlugin);
-  installHttpDiagnostics(fastify);
+
+  const httpDiagnostics = installHttpDiagnostics(fastify);
+  const runtimeDiagnostics = createRuntimeDiagnostics((data) => {
+    fastify.log.debug(data, 'Ресурсы сервера');
+  });
 
   // Журнал окна хранит пути /api шаблонами; каталог шаблонов собирается здесь,
   // до регистрации модулей, чтобы в него попал каждый маршрут сервера.
   const apiRoutes = createApiRouteRegistry();
 
   fastify.addHook('onRoute', (route) => apiRoutes.add(route.url));
+
   const stopLoggingPolicy = diagnosticLogging.subscribe((level) => {
     fastify.log.level = serverLogLevel(level);
+    httpDiagnostics.reset();
+    runtimeDiagnostics.setEnabled(level === 'verbose');
   });
   const loggingPolicyTimer = setInterval(() => {
     void diagnosticLogging.level().catch(() => undefined);
@@ -261,6 +269,7 @@ async function build(desktopParent: DesktopParent | null) {
     clearInterval(loggingPolicyTimer);
     stopLoggingPolicy();
     diagnosticLogging.close();
+    runtimeDiagnostics.close();
   });
   // Остановка: модули регистрируют слив (чат прерывает ходы и сохраняет их итог), а
   // сигнал или кнопка «Перезапустить» запускают его ДО закрытия сервера. Обработчики

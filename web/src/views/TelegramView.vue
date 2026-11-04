@@ -1,5 +1,6 @@
 <template>
-  <UiWorkspacePage>
+  <UiWorkspacePage
+    :data-perf-pending="loading ? '' : undefined">
       <template #title><h1>Телеграм</h1></template>
       <template #actions>
         <UiActionLink v-if="!pluginOff && connected" href="#/inbox" size="compact">
@@ -24,7 +25,8 @@
       </p>
 
       <div v-if="error || note" class="feedback" role="status" aria-live="polite">
-        <p v-if="error" class="err">{{ error }}</p>
+        <p v-if="error" class="err"
+    :data-perf-error="!loading && error && !connected ? '' : undefined">{{ error }}</p>
         <p v-if="note" class="ok">{{ note }}</p>
       </div>
 

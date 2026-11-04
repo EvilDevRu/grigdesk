@@ -1,5 +1,6 @@
 <template>
-  <UiWorkspacePage>
+  <UiWorkspacePage
+    :data-perf-pending="loading ? '' : undefined">
       <template #title><h1>GitHub Issues</h1></template>
       <template #actions>
         <UiIconButton label="Обновить" data-context="workspace-toolbar"
@@ -16,7 +17,8 @@
     </section>
 
     <template v-else>
-      <p v-if="error" class="banner bad" role="alert">{{ error }}</p>
+      <p v-if="error" class="banner bad" role="alert"
+    :data-perf-error="!loading && error && !status.connectedAt ? '' : undefined">{{ error }}</p>
       <p v-if="notice" class="banner good" role="status">{{ notice }}</p>
       <GitHubLoading v-if="loading" label="Проверяю GitHub…"  :failed="Boolean(error)" />
 

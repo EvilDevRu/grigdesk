@@ -1,8 +1,8 @@
 import { delayWithAbort } from '../../../shared/lib/delay.ts';
 import { startChatPerformance } from './chatPerformance.ts';
 import { acquireTrackerRead, trackerReadRoute, shouldLogTrackerFailure } from './trackerReadBackoff.ts';
-import { resetApiDiagnostics, startApiDiagnostic } from './apiDiagnostics.ts';
-import type { ApiDiagnostic } from './apiDiagnostics.ts';
+import { resetApiDiagnostics, startApiDiagnostic, captureApiDiagnosticContext } from './apiDiagnostics.ts';
+import type { ApiDiagnostic, ApiDiagnosticContext } from './apiDiagnostics.ts';
 import type { WebApiTiming } from '../../../shared/web-log/webDiagnostics.ts';
 
 // Единый клиент к серверу GrigDesk.
@@ -170,7 +170,7 @@ function handleData(res: Response, path: string, data: unknown): unknown {
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
-type ApiLogEvent = 'api.fail' | 'api.slow' | 'api.pending' | 'api.recovered';
+type ApiLogEvent = 'api.complete' | 'api.fail' | 'api.slow' | 'api.pending' | 'api.recovered';
 type ApiLogSink = (event: ApiLogEvent, data: Record<string, unknown>) => void;
 
 let logSink: ApiLogSink | null = null;
@@ -282,21 +282,24 @@ function reportAttempt(
 }
 
 /**
- * Оборачиваем отдельный запрос без изменения его результата.
- * Успех и ошибка получают длительность одной и той же попытки.
+ * Отдельный запрос сохраняет контекст вызова и истинную причину consumer-отмены.
+ * Возвращаемое значение, исходное исключение и отсутствие повторов не меняются.
  */
-async function observed<T>(method: Method, path: string, work: () => Promise<T>): Promise<T> {
+async function observed<T>(method: Method, path: string,
+  work: (diagnostic: ApiDiagnostic) => Promise<T>, consumer?: AbortSignal): Promise<T> {
+  const context = captureApiDiagnosticContext();
   const start = performance.now();
-  const diagnostic = observeAttempt(method, path, 1, 'request');
+  const diagnostic = observeAttempt(method, path, 1, 'request', context);
 
   try {
-    const result = await work();
+    const result = await work(diagnostic);
 
     reportAttempt(method, path, elapsed(start), 1, undefined, false, diagnostic?.finish(true));
 
     return result;
   } catch (error) {
-    reportAttempt(method, path, elapsed(start), 1, error, false, diagnostic?.finish());
+    reportAttempt(method, path, elapsed(start), 1, error, false,
+      diagnostic?.finish(false, !!consumer?.aborted));
 
     throw error;
   }
@@ -307,11 +310,19 @@ async function observed<T>(method: Method, path: string, work: () => Promise<T>)
  * Путь очищается от query до передачи sink, который дополнительно заменит его шаблоном.
  */
 function observeAttempt(method: Method, path: string, attempt: number,
-  phase: 'request' | 'headers' = 'headers'): ApiDiagnostic {
+  phase: 'request' | 'headers' = 'headers',
+  context: ApiDiagnosticContext = captureApiDiagnosticContext()): ApiDiagnostic {
   return startApiDiagnostic({
+    context,
     path,
     phase,
     enabled: () => logSink !== null && diagnosticEnabled(),
+    complete: (timing) => reportApi('api.complete', {
+      method,
+      path: path.split(/[?#]/u, 1)[0],
+      attempt,
+      ...timing,
+    }),
     pending: (timing) => reportApi('api.pending', {
       method,
       path: path.split(/[?#]/u, 1)[0],
@@ -446,6 +457,7 @@ async function request(
   body?: unknown,
   options: RequestOptions = {},
 ): Promise<unknown> {
+  const context = captureApiDiagnosticContext();
   const headers: Record<string, string> = { ...options.headers };
   const opts: RequestInit = {
     ...FETCH_OPTS,
@@ -505,7 +517,7 @@ async function request(
 
     const complete = trackerRoute ? await acquireTrackerRead(trackerRoute, options.signal) : null;
     const start = performance.now();
-    const diagnostic = observeAttempt(method, path, number);
+    const diagnostic = observeAttempt(method, path, number, 'headers', context);
 
     try {
       const result = options.idleTimeoutMs && options.idleTimeoutMs > 0
@@ -526,7 +538,7 @@ async function request(
       const transient = error instanceof TypeError || name === 'TimeoutError' || name === 'AbortError'
         || (trackerRoute && error instanceof ApiError && [502, 503, 504].includes(error.status));
       const cancelled = options.signal?.aborted;
-      const timing = diagnostic?.finish();
+      const timing = diagnostic?.finish(false, !!cancelled);
 
       complete?.(cancelled ? 'cancelled' : transient ? 'failure' : 'success');
 
@@ -570,6 +582,7 @@ async function upload(
   path: string,
   formData: FormData,
   { timeoutMs = 0, signal = null }: UploadOptions = {},
+  diagnostic?: ApiDiagnostic,
 ): Promise<unknown> {
   // У загрузок общий таймаут опасен: видео на гигабайты и короткая диктовка имеют
   // разные бюджеты. Вызывающий включает его явно; переданный AbortSignal сильнее.
@@ -584,7 +597,7 @@ async function upload(
     ...(signal || timeoutSignal ? { signal: signal || timeoutSignal } : {}),
   });
 
-  return handle(res, path);
+  return handle(res, path, diagnostic);
 }
 
 // Двоичный ответ: имя файла приходит заголовком и бывает не задано вовсе.
@@ -594,41 +607,57 @@ export interface DownloadedFile {
 }
 
 /**
+ * Двоичное тело не проходит JSON.parse и не получает выдуманный parseMs.
+ * Исходный Blob возвращается без копии и дополнительного чтения.
+ */
+async function diagnosticBlob(res: Response, diagnostic?: ApiDiagnostic): Promise<Blob> {
+  const blob = await res.blob();
+
+  diagnostic?.bodyDone();
+
+  return blob;
+}
+
+/**
  * Двоичный ответ. Отказ при этом остаётся обычным JSON-ом, поэтому неуспешный ответ
  * уходит в общий разбор — иначе 401 на выгрузке молча вернул бы пустой файл.
  */
-async function download(path: string): Promise<DownloadedFile> {
+async function download(path: string, diagnostic?: ApiDiagnostic): Promise<DownloadedFile> {
   const res = await fetch(url(path), {
     ...FETCH_OPTS,
     method: 'POST',
   });
 
+  diagnostic?.received(res);
+
   if (!res.ok) {
-    await handle(res, path);
+    await handle(res, path, diagnostic);
   }
 
   const disposition = res.headers.get('Content-Disposition') || '';
   const filename = disposition.match(/filename="([^"]+)"/iu)?.[1];
 
-  return { blob: await res.blob(), ...(filename ? { filename } : {}) };
+  return { blob: await diagnosticBlob(res, diagnostic), ...(filename ? { filename } : {}) };
 }
 
 /**
  * GET-скачивание с безопасным именем файла; прежний download остаётся POST.
  * Обработка ошибок совпадает с прочими загрузками.
  */
-async function downloadGet(path: string): Promise<DownloadedFile> {
+async function downloadGet(path: string, diagnostic?: ApiDiagnostic): Promise<DownloadedFile> {
   const res = await fetch(url(path), { ...FETCH_OPTS, method: 'GET' });
 
+  diagnostic?.received(res);
+
   if (!res.ok) {
-    await handle(res, path);
+    await handle(res, path, diagnostic);
   }
 
   const header = res.headers.get('Content-Disposition') || '';
   const candidate = header.match(/filename="([^"]+)"/iu)?.[1] || '';
   const filename = /^[A-Za-z0-9._-]{1,100}$/u.test(candidate) ? candidate : 'web-log.ndjson';
 
-  return { blob: await res.blob(), filename };
+  return { blob: await diagnosticBlob(res, diagnostic), filename };
 }
 
 /**
@@ -636,14 +665,16 @@ async function downloadGet(path: string): Promise<DownloadedFile> {
  * Отказ и здесь приходит JSON-ом и уходит в общий разбор — иначе человек услышал
  * бы тишину вместо причины, по которой движок не ответил.
  */
-async function getBlob(path: string): Promise<Blob> {
+async function getBlob(path: string, diagnostic?: ApiDiagnostic): Promise<Blob> {
   const res = await fetch(url(path), FETCH_OPTS);
 
+  diagnostic?.received(res);
+
   if (!res.ok) {
-    await handle(res, path);
+    await handle(res, path, diagnostic);
   }
 
-  return res.blob();
+  return diagnosticBlob(res, diagnostic);
 }
 
 /**
@@ -654,6 +685,7 @@ async function postBlob(
   path: string,
   body: unknown,
   { signal }: { signal?: AbortSignal } = {},
+  diagnostic?: ApiDiagnostic,
 ): Promise<Blob> {
   const res = await fetch(url(path), {
     ...FETCH_OPTS,
@@ -663,11 +695,13 @@ async function postBlob(
     ...(signal ? { signal } : {}),
   });
 
+  diagnostic?.received(res);
+
   if (!res.ok) {
-    await handle(res, path);
+    await handle(res, path, diagnostic);
   }
 
-  return res.blob();
+  return diagnosticBlob(res, diagnostic);
 }
 
 // Пароль SSH уходит только как непрозрачные байты: общий JSON-клиент здесь
@@ -676,6 +710,7 @@ async function postBytes(
   path: string,
   body: BodyInit,
   { headers = {} }: { headers?: Record<string, string> } = {},
+  diagnostic?: ApiDiagnostic,
 ): Promise<unknown> {
   const res = await fetch(url(path), {
     ...FETCH_OPTS,
@@ -684,7 +719,7 @@ async function postBytes(
     body,
   });
 
-  return handle(res, path);
+  return handle(res, path, diagnostic);
 }
 
 // Транспорт GrigDesk. Все методы отдают `unknown`: форму подтверждает декодер раздела.
@@ -698,12 +733,14 @@ export interface ApiClient {
   put: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
   patch: (path: string, body?: unknown) => Promise<unknown>;
   del: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
-  postBytes: typeof postBytes;
-  postBlob: typeof postBlob;
-  download: typeof download;
-  downloadGet: typeof downloadGet;
-  getBlob: typeof getBlob;
-  upload: typeof upload;
+  postBytes: (path: string, body: BodyInit,
+    options?: { headers?: Record<string, string> }) => Promise<unknown>;
+  postBlob: (path: string, body: unknown,
+    options?: { signal?: AbortSignal }) => Promise<Blob>;
+  download: (path: string) => Promise<DownloadedFile>;
+  downloadGet: (path: string) => Promise<DownloadedFile>;
+  getBlob: (path: string) => Promise<Blob>;
+  upload: (path: string, formData: FormData, options?: UploadOptions) => Promise<unknown>;
 }
 
 export const api: ApiClient = {
@@ -716,10 +753,11 @@ export const api: ApiClient = {
   put: (path: string, body?: unknown, options?: RequestOptions) => request('PUT', path, body, options),
   patch: (path: string, body?: unknown) => request('PATCH', path, body),
   del: (path: string, body?: unknown, options?: RequestOptions) => request('DELETE', path, body, options),
-  postBytes: (path, body, opts) => observed('POST', path, () => postBytes(path, body, opts)),
-  postBlob: (path, body, opts) => observed('POST', path, () => postBlob(path, body, opts)),
-  download: (path) => observed('POST', path, () => download(path)),
-  downloadGet: (path) => observed('GET', path, () => downloadGet(path)),
-  getBlob: (path) => observed('GET', path, () => getBlob(path)),
-  upload: (path, formData, opts) => observed('POST', path, () => upload(path, formData, opts)),
+postBytes: (path, body, opts) => observed('POST', path, (d) => postBytes(path, body, opts, d)),
+postBlob: (path, body, opts) => observed('POST', path, (d) => postBlob(path, body, opts, d), opts?.signal),
+download: (path) => observed('POST', path, (d) => download(path, d)),
+downloadGet: (path) => observed('GET', path, (d) => downloadGet(path, d)),
+getBlob: (path) => observed('GET', path, (d) => getBlob(path, d)),
+upload: (path, formData, opts) => observed('POST', path,
+  (d) => upload(path, formData, opts, d), opts?.signal ?? undefined),
 };

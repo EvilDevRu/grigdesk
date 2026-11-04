@@ -1,3 +1,4 @@
+import { measured } from './helpers/performance-surface.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
@@ -104,6 +105,8 @@ function harness() {
     settings.snapshot = session.getSnapshot();
   });
   let failControl = false;
+  let failNative = false;
+  let nativeHold = null;
   let chosenApp = { id: 'app:manual-fixture', name: 'Fixture browser' };
   const browser = reactive({
     snapshot: structuredClone(raw),
@@ -145,6 +148,13 @@ function harness() {
     },
     native: async (request) => {
       calls.push(structuredClone(request));
+
+      if (failNative) {
+        throw new Error('native failed');
+      }
+      if (nativeHold) {
+        await nativeHold;
+      }
 
       if (request.operation === 'preferences') {
         raw.preferences = structuredClone(request.value);
@@ -191,6 +201,12 @@ function harness() {
     },
   });
   const value = {
+    setFailNative: (value) => {
+      failNative = value;
+    },
+    holdNative: (promise) => {
+      nativeHold = promise;
+    },
     browser,
     settings,
     calls,
@@ -1138,4 +1154,70 @@ test('BR-U10: startup off не меняет mode; explicit off ACK предше�
   assert.equal(off.options.body.includes('fixture-private'), false);
   assert.equal(JSON.stringify(runtimeBrowser.hostStatus).includes('fixture-private'), false);
   assert.equal(requests.some((item) => item.url.includes('fixture-private')), false);
+});
+
+test('PERF: страница браузера ждёт state и apps, отказ даёт error, повтор — ready', async (t) => {
+  const fixture = harness();
+
+  fixture.setFailNative(true);
+
+  const wrapper = mount(BrowserPage, { props: { active: true }, attachTo: document.body });
+
+  t.after(() => {
+    wrapper.unmount();
+    fixture.cleanup();
+    delete globalThis.__browserUiHarness;
+  });
+
+  const f = measured(t, wrapper, 'tools.browser');
+
+  await f.paint();
+
+  const failure = f.log.snapshot().entries.at(-1).data;
+
+  assert.equal(failure.phase, 'error');
+  fixture.setFailNative(false);
+
+  const hold = Promise.withResolvers();
+
+  fixture.holdNative(hold.promise);
+  await wrapper.setProps({ active: false });
+  await rendered();
+  await wrapper.setProps({ active: true });
+  await flushPromises();
+  await f.paint();
+  assert.equal(f.log.snapshot().entries.at(-1).data.phase, 'start');
+  hold.resolve();
+  await rendered();
+  await f.paint();
+
+  const last = f.log.snapshot().entries.at(-1).data;
+
+  assert.equal(last.phase, 'ready');
+  assert.notEqual(last.surface, failure.surface);
+});
+
+test('PERF: готовый state браузера продолжает ждать отдельный список приложений', async (t) => {
+  const fixture = harness();
+  const applications = Promise.withResolvers();
+
+  fixture.browser.loadApps = () => applications.promise;
+
+  const wrapper = mount(BrowserPage, { props: { active: true }, attachTo: document.body });
+  const f = measured(t, wrapper, 'tools.browser');
+
+  t.after(() => {
+    applications.resolve();
+    wrapper.unmount();
+    fixture.cleanup();
+    delete globalThis.__browserUiHarness;
+  });
+  await rendered();
+  await f.paint();
+  assert.equal(f.log.snapshot().entries.some((row) => row.data.phase === 'ready'), false);
+  assert.equal(Object.hasOwn(wrapper.attributes(), 'data-perf-pending'), true);
+  applications.resolve();
+  await rendered();
+  await f.paint();
+  assert.equal(f.log.snapshot().entries.at(-1).data.phase, 'ready');
 });

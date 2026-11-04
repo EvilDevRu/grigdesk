@@ -1,5 +1,7 @@
 <template>
-  <div class="board ui-workspace" data-ui-workspace :class="{ 'stats-expanded': statsExpanded, 'has-board-pages': phonePages.length > 1 }">
+  <div class="board ui-workspace"
+    :data-perf-pending="performanceInitialPending ? '' : undefined"
+    :data-perf-error="performanceInitialFailure ? '' : undefined" data-ui-workspace :class="{ 'stats-expanded': statsExpanded, 'has-board-pages': phonePages.length > 1 }">
     <UiPaneHeader class="board-heading" data-context="board-heading">
       <template #title>
         <h2 class="board-title">{{ t('core.board') }}</h2>
@@ -28,7 +30,8 @@
       </div>
     <template v-if="ownTasks.trackerConfigured !== false">
     <BoardLoading v-if="!phoneBoard && !data && !error" label="Загрузка доски…" />
-    <UiInlineMessage v-if="error" :tone="data ? 'warning' : 'danger'" class="board-tracker-error">
+    <UiInlineMessage v-if="error" :tone="data ? 'warning' : 'danger'" class="board-tracker-error"
+    :data-perf-error="!data && !loading ? '' : undefined">
       <div class="board-tracker-error-heading">
         <strong>{{ trackerUnavailableLabel }}</strong>
         <div class="board-tracker-error-actions">
@@ -557,6 +560,12 @@ const trackerUnavailableLabel = computed(() => {
 // Данные — из кеш-стора (мгновенный показ при переходе + фоновое обновление).
 const board = useBoardStore();
 const { data, error, loading, readAt } = storeToRefs(board);
+const performanceInitialFailure = computed(() => (!data.value && !!error.value && !loading.value)
+  || (!ownTasks.loaded && !!ownTasks.error && !ownTasks.loading));
+const performanceInitialPending = computed(() => !performanceInitialFailure.value
+  && ((ownTasks.trackerConfigured !== false && !data.value && !error.value)
+    || (!ownTasks.loaded && !ownTasks.error)));
+
 
 watch(error, () => {
   errorDetailsOpen.value = false;

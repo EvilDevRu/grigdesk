@@ -1,3 +1,4 @@
+import { measured } from './helpers/performance-surface.js';
 import { migrationUrl } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -822,4 +823,19 @@ test('router регистрирует lazy /inbox и /github', async () => {
     assert.ok(ts.isStringLiteral(body.arguments[0]), path);
     assert.equal(body.arguments[0].text, component, path);
   }
+});
+
+test('PERF: первый отказ очереди даёт error, не ready', async (t) => {
+  const failure = apiError(503, { error: 'inbox down' });
+  const { wrapper } = await mountChannelView(t, 'inbox', {
+    api: { get: async () => {
+      throw failure;
+    }, post: async () => {
+      throw failure;
+    } },
+  });
+  const f = measured(t, wrapper, 'inbox', 'route');
+
+  await f.paint();
+  assert.equal(f.log.snapshot().entries.at(-1).data.phase, 'error');
 });

@@ -1,3 +1,4 @@
+import { measured } from './helpers/performance-surface.js';
 // Раздел «Телеграм»: подключение бота формой вместо терминала.
 // Смысл проверок — цена ошибки здесь та же, что у файла с токеном: непроверенный
 // токен не должен выглядеть подключённым, отказ обязан доехать до человека словами
@@ -323,4 +324,20 @@ test('LOAD-SURFACE-telegram: каркас подключения сменяет�
   assert.deepEqual(calls, ['/api/telegram/status']);
   assert.equal(h.wrapper.find('[data-ui-loading]').exists(), false);
   assert.ok(bricks > 0, 'подключение использует свой каркас вместо одинаковых строк');
+});
+
+test('PERF: первый отказ состояния Telegram даёт error, не ready', async (t) => {
+  const failure = apiError(503, { error: 'telegram down' });
+  const { wrapper } = await mountTelegramView(t, {
+    prefix: 'connect',
+    api: { get: async () => {
+      throw failure;
+    }, post: async () => {
+      throw failure;
+    } },
+  });
+  const f = measured(t, wrapper, 'telegram', 'route');
+
+  await f.paint();
+  assert.equal(f.log.snapshot().entries.at(-1).data.phase, 'error');
 });

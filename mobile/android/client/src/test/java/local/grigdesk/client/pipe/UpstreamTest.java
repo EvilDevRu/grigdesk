@@ -295,4 +295,42 @@ public class UpstreamTest {
       assertEquals(2, checks.get());
     }
   }
+  /**
+   * Заголовки диагностики проходят настоящий pinned TLS до чтения потокового тела.
+   * Обычный сервер без подробной метрики не включает диагностику в мосте.
+   */
+  @Test
+  public void timingIsOptionalAndPreservesServerCorrelation() throws Exception {
+    try (TlsFixture server = new TlsFixture((head, body, output) -> {
+      boolean detailed = head.target().equals("/api/timed");
+      String timing = detailed ? "db;dur=2, grigdesk;dur=10.0" : "db;dur=2";
+
+      output.write(("HTTP/1.1 200 OK\r\nX-GrigDesk-Api: 0.1\r\n"
+        + "Server-Timing: " + timing + "\r\n"
+        + "X-GrigDesk-Request: aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa\r\n"
+        + "Connection: close\r\nContent-Length: 2\r\n\r\n{}").getBytes(StandardCharsets.US_ASCII));
+      output.flush();
+    }); Upstream upstream = new Upstream(server.address(), server.pin, TlsFixture.keys("client"),
+      new VersionGate(0, 1), (status, reason) -> {})) {
+      for (String path : new String[] { "/api/timed", "/api/plain" }) {
+        try (PipeResponse response = upstream.forward(new HttpHead("GET " + path + " HTTP/1.1",
+          Map.of()), new ByteArrayInputStream(new byte[0]))) {
+          assertEquals(200, response.status);
+          assertEquals("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            response.headers.get("x-grigdesk-request"));
+
+          String timing = response.headers.get("server-timing");
+
+          if (path.equals("/api/timed")) {
+            assertTrue(timing.contains("grigdesk;dur=10.0"));
+            assertTrue(timing.matches(".*grigdesk_pipe;dur=[0-9]+\\.[0-9]+.*"));
+          } else {
+            assertEquals("db;dur=2", timing);
+          }
+
+          assertEquals("{}", new String(response.body.readAllBytes(), StandardCharsets.UTF_8));
+        }
+      }
+    }
+  }
 }

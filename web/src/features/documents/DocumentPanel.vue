@@ -1,7 +1,9 @@
 <template>
-  <section class="document-panel">
+  <section class="document-panel"
+    :data-perf-pending="loading ? '' : undefined">
     <DocumentLoading v-if="loading" label="Открываю документ…"  />
-    <div v-else-if="error" class="state error">
+    <div v-else-if="error" class="state error"
+    :data-perf-error="!loading && error ? '' : undefined">
       <b>Документ не открыт</b>
       <span>{{ error }}</span>
       <UiButton @click="load">Повторить</UiButton>

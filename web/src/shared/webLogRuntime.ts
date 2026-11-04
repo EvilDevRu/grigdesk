@@ -1,3 +1,6 @@
+import { createApiPerformanceSummary } from './apiPerformanceSummary.ts';
+import { installSurfacePerformance } from './surfacePerformanceRuntime.ts';
+import { setPerformancePolicy } from './performanceContext.ts';
 import type { App } from 'vue';
 import { nextTick } from 'vue';
 import type { Pinia } from 'pinia';
@@ -38,7 +41,7 @@ type AuthStoreLike = {
   $subscribe: (fn: () => void, options?: { detached?: boolean }) => () => void;
 };
 
-type ApiEvent = 'api.fail' | 'api.slow' | 'api.pending' | 'api.recovered';
+type ApiEvent = 'api.complete' | 'api.fail' | 'api.slow' | 'api.pending' | 'api.recovered';
 
 type RuntimeOptions = {
   app: App;
@@ -459,6 +462,10 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
    * Отправка запрашивается сразу, без ожидания обычного интервала транспорта.
    */
   function mark(text: string) {
+    if (log.level() === 'verbose') {
+      apiSummary.flush();
+    }
+
     flushChatPerformance();
 
     const key = log.mark(text);
@@ -470,12 +477,57 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
     return key;
   }
 
+  const apiSummary = createApiPerformanceSummary({
+    now: () => win.performance?.now?.() ?? Date.now(),
+    emit: (data) => log.record('api.summary', data),
+  });
+  let apiSummaryTimer: ReturnType<typeof setInterval> | undefined;
+
+  /**
+   * Фоновые сводки не работают при запрещённом уровне или скрытом окне.
+   * Смена политики очищает числа прежнего периода без отложенной отправки.
+   */
+  function syncApiSummary(): void {
+    clearInterval(apiSummaryTimer);
+    apiSummaryTimer = undefined;
+    apiSummary.clear();
+
+    if (log.level() === 'verbose' && doc.visibilityState !== 'hidden') {
+      apiSummaryTimer = setInterval(() => apiSummary.flush(), 10_000);
+    }
+  }
+
+  const stopApiSummaryLevel = log.subscribeLevel(syncApiSummary);
+
+  doc.addEventListener('visibilitychange', onApiSummaryVisibility);
+  syncApiSummary();
+
+  /**
+   * Последняя видимая порция не теряется при уходе приложения в фон.
+   * После возврата новый период не включает время скрытого документа.
+   */
+  function onApiSummaryVisibility(): void {
+    if (log.level() === 'verbose' && doc.visibilityState === 'hidden') {
+      apiSummary.flush();
+    }
+
+    syncApiSummary();
+  }
+
   /**
    * Отказ или медленный ответ API: реальный путь сводится к шаблону каталога
    * здесь, до записи, поэтому id и query в журнал не попадают.
    */
   function recordApi(event: ApiEvent, data: Record<string, unknown>): void {
     const path = typeof data.path === 'string' ? matchApiRoute(data.path) : 'other';
+
+    if (event === 'api.complete' && !data.surface) {
+      if (log.level() === 'verbose' && doc.visibilityState !== 'hidden') {
+        apiSummary.add({ ...data, path });
+      }
+
+      return;
+    }
 
     log.record(event, {
       ...data,
@@ -490,6 +542,10 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
 
   (win as Window & { __grigDeskLog?: unknown }).__grigDeskLog = publicHandle;
 
+  const beforeHidden = new Set<() => void>();
+
+  beforeHidden.add(onApiSummaryVisibility);
+
   const stopCapture = installCapture({
     app,
     router,
@@ -497,7 +553,18 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
     log,
     win,
     doc,
-    onHidden: transport.onHidden,
+    onHidden: () => {
+      for (const callback of beforeHidden) {
+        try {
+          callback();
+        } catch {
+          /* отказ диагностики не отменяет последнюю доставку */
+        }
+      }
+
+      flushChatPerformance();
+      transport.onHidden();
+    },
     onVisible: transport.onVisible,
     isReportedError: options.isReportedError,
   });
@@ -561,6 +628,26 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
       void nextTick(callback);
     },
   });
+
+  const stopSurfacePerformance = installSurfacePerformance({
+    log,
+    win,
+    doc,
+    router,
+    afterUpdate: (callback) => {
+      void nextTick(callback);
+    },
+    beforeHidden: (callback) => {
+      beforeHidden.add(callback);
+
+      return () => beforeHidden.delete(callback);
+    },
+  });
+  const stopPerformancePolicy = log.subscribeLevel((level) => {
+    setPerformancePolicy(level === 'verbose');
+  });
+
+  setPerformancePolicy(log.level() === 'verbose');
 
   let stopAuth: (() => void) | null = null;
   let stopLog: (() => void) | null = null;
@@ -703,6 +790,14 @@ export function createWebLogRuntime(options: RuntimeOptions): WebLogRuntime {
     }
 
     stopCapture();
+    clearInterval(apiSummaryTimer);
+    stopApiSummaryLevel();
+    doc.removeEventListener('visibilitychange', onApiSummaryVisibility);
+    beforeHidden.delete(onApiSummaryVisibility);
+    apiSummary.clear();
+    stopSurfacePerformance();
+    stopPerformancePolicy();
+    setPerformancePolicy(false);
     stopPerformance();
     transport.dispose();
     (win as Window & { __grigDeskLog?: unknown }).__grigDeskLog = oldGlobal;

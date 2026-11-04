@@ -23,7 +23,8 @@ export async function featureModule(relative) {
  * Настоящие ToolHost, ToolDock, router и Pinia сохраняют lifecycle документа.
  * Только тяжёлые панели заменены наблюдаемыми компонентами без сети и сеансов владельца.
  */
-export async function hostFixture(t, { width = 1280, mode = 'main', windows = true } = {}) {
+export async function hostFixture(t, { width = 1280, mode = 'main', windows = true,
+  onActivate = null, extraStubs = {} } = {}) {
   const browser = await installUiBrowser(t, 'http://grigdesk.test/#/chats');
 
   Object.defineProperty(globalThis, 'history', { value: browser.history, configurable: true });
@@ -50,6 +51,7 @@ export async function hostFixture(t, { width = 1280, mode = 'main', windows = tr
     id,
 
     label: names[index],
+    icon: 'code',
 
     route: ['example', 'module-example'].includes(id) ? '/ext/' + id : '/' + id,
 
@@ -77,6 +79,12 @@ export async function hostFixture(t, { width = 1280, mode = 'main', windows = tr
           },
         });
         contexts[id] = (value) => emit('context', value);
+vue.watch(() => props.active, (active) => {
+  if (active && onActivate) {
+    void onActivate(id);
+  }
+}, { immediate: true });
+
 
         return () => vue.h('section', { 'data-panel': id }, props.presentation);
       },
@@ -126,10 +134,15 @@ export async function hostFixture(t, { width = 1280, mode = 'main', windows = tr
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
-      { path: '/chats', component: { render: () => null } },
+      {
+        path: '/chats',
+        name: 'chats',
+        component: { render: () => null }
+      },
       ...tools.filter((item) => item.id !== 'module-example').map((item) => ({
 
         path: item.route,
+        name: item.id,
 
         component: { render: () => null },
 
@@ -150,6 +163,7 @@ export async function hostFixture(t, { width = 1280, mode = 'main', windows = tr
 
   const component = await compileVue(webFile('src/shared/layout/ToolHost.vue'), {
     stubs: {
+      ...extraStubs,
 
       '../../stores/plugins.ts':
 

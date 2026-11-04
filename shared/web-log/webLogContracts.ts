@@ -1,6 +1,10 @@
 // Общий контракт журнала не зависит ни от браузера, ни от Fastify.
 // Любой текст из автоматических событий сначала проходит здесь через закрытый каталог.
 
+import { SURFACE_KINDS, SURFACE_PHASES, SURFACE_ORIGINS, SURFACE_TARGETS,
+  SHELL_OPERATIONS } from './surfacePerformance.ts';
+import type { SurfaceTiming, ApiSummary } from './surfacePerformance.ts';
+
 import { recordOrNull } from '../lib/objects.ts';
 
 import { isApiRouteTemplate } from './webLogApiRoutes.ts';
@@ -58,6 +62,10 @@ export const WEB_LOG_EVENTS = {
   'state.anomaly': 'warn',
   'ui.layer': 'debug',
   'ui.focus': 'debug',
+  'perf.surface': 'info',
+  'api.complete': 'info',
+  'api.summary': 'info',
+  'perf.shell': 'info',
   'perf.ready': 'info',
   'perf.operation': 'info',
   'perf.block': 'warn',
@@ -200,6 +208,14 @@ export type WebLogData = {
     depth: number;
   };
   'ui.focus': { target: SafeDescriptor };
+  'perf.surface': SurfaceTiming;
+  'api.complete': ApiAttemptData & { outcome: 'success' | 'error' | 'cancelled' };
+  'api.summary': ApiSummary;
+  'perf.shell': {
+    operation: typeof SHELL_OPERATIONS[number];
+    phase: 'pending' | 'success' | 'error';
+    ms: number;
+  };
   'perf.ready': {
     tag: 'AGENT-DBG';
     longTasks: boolean;
@@ -290,11 +306,16 @@ type FieldKind = 'bool' | 'number' | 'count' | 'id' | 'route' | 'api' | 'method'
   | 'result' | 'authReason' | 'transportReason' | 'visibility' | 'operation' | 'layer'
   | 'performanceOperation' | 'performanceBlock' | 'diagnosticTag'
   | 'apiPhase' | 'ssePhase' | 'sseSignal' | 'registryReason' | 'registryOutcome'
-  | 'anomalyKind' | 'actionOutcome';
+  | 'anomalyKind' | 'actionOutcome'
+  | 'surfaceKind' | 'surfacePhase' | 'surfaceOrigin' | 'surfaceTarget' | 'apiOutcome'
+  | 'shellOperation' | 'shellPhase';
 
 type FieldSchema = Record<string, FieldKind>;
 
 const API_TIMING_FIELDS: FieldSchema = {
+  surface: 'count',
+  serverRequest: 'id',
+  pipeMs: 'number',
   request: 'count',
   phase: 'apiPhase',
   refresh: 'bool',
@@ -428,6 +449,42 @@ const DATA_FIELDS: Record<WebLogEvent, FieldSchema> = {
     depth: 'count',
   },
   'ui.focus': { target: 'descriptor' },
+  'perf.surface': {
+    surface: 'count',
+    kind: 'surfaceKind',
+    target: 'surfaceTarget',
+    view: 'route',
+    phase: 'surfacePhase',
+    origin: 'surfaceOrigin',
+    first: 'bool',
+    ms: 'number',
+    mountedMs: 'number',
+    pending: 'count',
+  },
+  'api.complete': {
+    ...API_ATTEMPT_FIELDS,
+    outcome: 'apiOutcome',
+  },
+  'api.summary': {
+    totalMs: 'number',
+    maxMs: 'number',
+    headersMs: 'number',
+    bodyMs: 'number',
+    parseMs: 'number',
+    serverMs: 'number',
+    pipeMs: 'number',
+    periodMs: 'number',
+    method: 'method',
+    path: 'api',
+    count: 'count',
+    serverCount: 'count',
+    pipeCount: 'count',
+  },
+  'perf.shell': {
+    operation: 'shellOperation',
+    phase: 'shellPhase',
+    ms: 'number',
+  },
   'perf.ready': {
     tag: 'diagnosticTag',
     longTasks: 'bool',
@@ -507,6 +564,10 @@ const REQUIRED_FIELDS: Partial<Record<WebLogEvent, string[]>> = {
   'state.anomaly': ['store', 'action', 'kind', 'request', 'previous'],
   'ui.layer': ['op', 'kind', 'id', 'depth'],
   'ui.focus': ['target'],
+  'perf.surface': ['surface', 'kind', 'target', 'view', 'phase', 'origin', 'first', 'ms', 'pending'],
+  'api.complete': ['method', 'path', 'ms', 'attempt', 'outcome'],
+  'api.summary': ['method', 'path', 'count', 'totalMs', 'maxMs', 'periodMs'],
+  'perf.shell': ['operation', 'phase', 'ms'],
   'perf.ready': ['tag', 'longTasks', 'longFrames'],
   'perf.operation': ['tag', 'operation', 'view', 'ms', 'totalMs', 'count'],
   'perf.block': ['tag', 'kind', 'view', 'ms', 'totalMs', 'count', 'startMs'],
@@ -518,7 +579,7 @@ const REQUIRED_FIELDS: Partial<Record<WebLogEvent, string[]>> = {
 
 // Шаблоны маршрутов окна. Тест сверяет список с web/src/router.js.
 export const WEB_LOG_ROUTES = [
-  '/', '/board', '/pipeline', '/sandboxes', '/showcase/:id?', '/chats',
+  '/', '/board', '/browser', '/pipeline', '/sandboxes', '/showcase/:id?', '/chats',
   '/diff', '/documents', '/terminal', '/ssh', '/db', '/docker', '/routes',
   '/projects/:id?', '/code', '/shelf', '/tools', '/ext/:id', '/video', '/inbox',
   '/github', '/telegram', '/settings', '/3d', '/surface',
@@ -808,6 +869,13 @@ function numeric(value: unknown, count = false): number | Invalid {
 
 /** Закрытые перечисления полей: неизвестная строка становится `other`. */
 const ENUMS: Partial<Record<FieldKind, readonly string[]>> = {
+  surfaceKind: SURFACE_KINDS,
+  surfacePhase: SURFACE_PHASES,
+  surfaceOrigin: SURFACE_ORIGINS,
+  surfaceTarget: SURFACE_TARGETS,
+  apiOutcome: ['success', 'error', 'cancelled'],
+  shellOperation: SHELL_OPERATIONS,
+  shellPhase: ['pending', 'success', 'error'],
   signature: ['api', 'js', 'vue', 'store', 'router', 'res', 'sse', 'state'],
   layer: LAYERS,
   visibility: ['visible', 'hidden'],

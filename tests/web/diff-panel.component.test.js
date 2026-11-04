@@ -1,3 +1,4 @@
+import { measured } from './helpers/performance-surface.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -84,7 +85,7 @@ function snapshot() {
  * Панель получает настоящий UI и записывающие порты API и Monaco.
  * Проверяем выбор, модели и lifecycle без чтения рабочих репозиториев человека.
  */
-async function mountPanel(t, reply = snapshot()) {
+async function mountPanel(t, reply = snapshot(), { failFirst = false, holdFirst = null } = {}) {
   await installUiBrowser(t);
 
   const harness = {
@@ -92,8 +93,21 @@ async function mountPanel(t, reply = snapshot()) {
     editors: [],
     models: [],
     calls: [],
+    /**
+     * Тестовый порт удерживает повтор и отклоняет первый запрос.
+     * Настоящая панель сама снимает ожидание и объявляет результат.
+     */
     async get(url) {
       this.calls.push(url);
+
+      if (failFirst) {
+        failFirst = false;
+
+        throw new Error('diff down');
+      }
+      if (holdFirst) {
+        await holdFirst;
+      }
 
       return structuredClone(this.reply);
     },
@@ -110,7 +124,10 @@ async function mountPanel(t, reply = snapshot()) {
   const { mount, flushPromises } = await import(
     '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
   );
-  const wrapper = mount(component, { props: { taskId: '42' } });
+  const wrapper = mount(component, {
+    props: { taskId: '42' },
+    attachTo: document.querySelector('#mount'),
+  });
 
   t.after(() => {
     wrapper.unmount();
@@ -216,4 +233,32 @@ test('повтор после ошибки создаёт редактор на 
   await flushPromises();
   assert.equal(harness.editors.length, 2);
   assert.equal(harness.editors[1].model.modified.text, 'after');
+});
+
+test('PERF: DiffPanel отказ даёт error, повтор через aria-busy — новый span', async (t) => {
+  const hold = Promise.withResolvers();
+  const h = await mountPanel(t, snapshot(), { failFirst: true, holdFirst: hold.promise });
+  const f = measured(t, h.wrapper, 'diff', 'dialog');
+
+  await f.paint();
+
+  const failure = f.log.snapshot().entries.at(-1).data;
+
+  assert.equal(failure.phase, 'error');
+
+  const retry = h.wrapper.findAll('button').find((button) => button.text() === 'Повторить');
+
+  assert.ok(retry);
+  await retry.trigger('click');
+  await h.flushPromises();
+  await f.paint();
+  assert.equal(f.log.snapshot().entries.at(-1).data.phase, 'start');
+  hold.resolve();
+  await h.flushPromises();
+  await f.paint();
+
+  const last = f.log.snapshot().entries.at(-1).data;
+
+  assert.equal(last.phase, 'ready');
+  assert.notEqual(last.surface, failure.surface);
 });

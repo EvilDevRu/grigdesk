@@ -771,3 +771,65 @@ test('R2: один медленный hello сохраняет online и SSE, т
 
     await reader.cancel();
   });
+
+test('труба передаёт корреляцию и время до заголовков без ожидания конца SSE', async (t) => {
+  let release = () => {};
+  const server = http.createServer((req, res) => {
+    res.setHeader('X-GrigDesk-Api', '0.1');
+
+    if (req.url === '/api/auth/window-session') {
+      res.setHeader('set-cookie', 'grigdesk_sid=fixture-session');
+      res.end('{}');
+
+      return;
+    }
+    if (req.url === '/api/plain') {
+      res.setHeader('Server-Timing', 'db;dur=2');
+      res.end('{}');
+
+      return;
+    }
+
+    res.setHeader('Server-Timing', 'db;dur=2, grigdesk;dur=10.0');
+    res.setHeader('X-GrigDesk-Request', 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa');
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.write('data: first\n\n');
+    release = () => res.end('data: second\n\n');
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    release();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  const upstream = createUpstream({
+    address: `http://127.0.0.1:${server.address().port}`,
+    windowKey: async () => 'fixture-key',
+  });
+  const pipe = await makePipe(t, upstream);
+  const headers = { cookie: COOKIE };
+  const response = await fetch(`${pipe.origin}/api/timed`, {
+    headers, signal: AbortSignal.timeout(5000),
+  });
+
+  assert.match(response.headers.get('server-timing'), /grigdesk;dur=10\.0/u);
+  assert.match(response.headers.get('server-timing'), /grigdesk_pipe;dur=\d+(?:\.\d+)?/u);
+  assert.equal(response.headers.get('x-grigdesk-request'), 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa');
+
+  const reader = response.body.getReader();
+  const first = await reader.read();
+
+  assert.match(new TextDecoder().decode(first.value), /data: first/u);
+  release();
+
+  while (!(await reader.read()).done) {
+    // Дочитываем остаток, не удерживая тело и не оставляя активный сокет фикстуры.
+  }
+
+  const plain = await fetch(`${pipe.origin}/api/plain`, { headers });
+
+  assert.equal(plain.headers.get('server-timing'), 'db;dur=2');
+  assert.deepEqual(await plain.json(), {});
+});

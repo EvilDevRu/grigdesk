@@ -1,5 +1,6 @@
 <template>
-  <main class="tool-window-page">
+  <main class="tool-window-page"
+    data-perf-surface="route" data-perf-target="surface" data-perf-key="/surface">
     <header class="tool-window-titlebar">
       <span>{{ item?.label || 'GrigDesk' }}</span>
       <div class="tool-window-actions">

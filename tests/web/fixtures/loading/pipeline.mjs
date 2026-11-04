@@ -20,13 +20,13 @@ export async function mountLoadingPipeline(t, compact = false, loops = false) {
         '../../../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'
     );
     const prefix = `__loadingPipeline${serial += 1}`;
-    const pending = Promise.withResolvers();
+    let pending = Promise.withResolvers();
     const calls = [];
 
     globalThis[`${prefix}Api`] = {
         get(url) {
             calls.push(url);
-            assert.equal(url, '/api/tasks');
+            assert.equal(url, '/api/tasks?sources=1');
 
             return pending.promise;
         },
@@ -46,9 +46,12 @@ export async function mountLoadingPipeline(t, compact = false, loops = false) {
 
     const component = await compilePipelineView(prefix, {
         realGraph: true,
-        expose: ['stage', 'stageDoc', 'stageDocLoading'],
+        expose: ['stage', 'stageDoc', 'stageDocLoading', 'load'],
     });
-    const wrapper = mount(component, { global: { plugins: [createPinia()], stubs: { teleport: true } } });
+    const wrapper = mount(component, {
+        attachTo: browser.document.querySelector('#mount'),
+        global: { plugins: [createPinia()], stubs: { teleport: true } },
+    });
 
     t.after(() => {
         wrapper.unmount();
@@ -62,7 +65,13 @@ export async function mountLoadingPipeline(t, compact = false, loops = false) {
     return {
         wrapper,
         calls,
-        pending,
+        get pending() {
+            return pending;
+        },
+        reset() {
+            pending = Promise.withResolvers();
+        },
+        flush: flushPromises,
         async resolve() {
             pending.resolve({ tasks: [] });
             await flushPromises();

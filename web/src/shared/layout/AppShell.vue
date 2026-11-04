@@ -420,7 +420,11 @@
     <PhoneStatusBar v-show="hasMachine" />
     <ConnectionRecovery />
 
-    <main class="content" :class="{
+    <main class="content"
+    :data-perf-surface="route.meta.tool ? undefined
+    : 'route'"
+    :data-perf-target="String(route.name || 'other')"
+    :data-perf-key="route.fullPath" :class="{
             'is-workspace': !hasMachine || route.meta.layout === 'workspace',
             'is-phone-board': route.name === 'board',
           }"

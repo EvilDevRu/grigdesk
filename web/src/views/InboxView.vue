@@ -1,5 +1,6 @@
 <template>
-  <main class="inbox-page ui-workspace" data-ui-workspace>
+  <main class="inbox-page ui-workspace"
+    :data-perf-pending="loading ? '' : undefined" data-ui-workspace>
     <UiPaneHeader>
       <template #title><h1 class="ui-workspace-title">Входящие</h1></template>
       <template #actions>
@@ -17,7 +18,8 @@
 
     <template v-else>
       <div class="inbox-notices">
-        <p v-if="error" class="banner bad" role="alert">{{ error }}</p>
+        <p v-if="error" class="banner bad" role="alert"
+    :data-perf-error="!loading && error && !payload.items.length ? '' : undefined">{{ error }}</p>
         <p v-if="automationNotice" class="banner" :class="automationNotice.kind"
           data-state="automation-notice" role="status">
           {{ automationNotice.text }}

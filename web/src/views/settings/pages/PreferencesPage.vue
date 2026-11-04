@@ -1,5 +1,7 @@
 <template>
-  <div class="settings-preferences">
+  <div class="settings-preferences"
+    :data-perf-pending="performanceLoading && !loaded ? '' : undefined"
+    :data-perf-error="!loaded && error && !performanceLoading ? '' : undefined">
     <p v-if="error" role="alert">{{ error }}</p>
     <UiLoadingState v-if="!loaded && !error" :label="t('settings.loadingParameters')" variant="document" >
       <UiSkeletonLayout layout="form" :header="false" />
@@ -110,6 +112,7 @@ const providerOptions = computed(() => providers.providers
   }))
   .filter((provider) => provider.models.length));
 const error = ref('');
+const performanceLoading = ref(false);
 const fields = computed(() => getSettingsFields(uiLocale.value).filter((field) =>
   field.resourceId === 'prefs' && field.address.pageId === settings.pageId));
 const loaded = computed(() => settings.snapshot.resources.some((item) => item.id === 'prefs' && item.loaded));
@@ -179,19 +182,25 @@ async function load(): Promise<void> {
     return;
   }
 
-  try {
-    settings.registerResource(createPreferencesAdapter(api, (values) => {
-      if (typeof values.chatAutoCompactWindow === 'number') {
-        useChatStore().compactWindow = values.chatAutoCompactWindow;
-      }
+  performanceLoading.value = true;
 
-      if (typeof values.showAllModels === 'boolean') {
-        providers.showAllModels = values.showAllModels;
-      }
-    }, uiLocale), SETTINGS_FIELDS.filter((field) => field.resourceId === 'prefs'));
-    await settings.loadResource('prefs');
-  } catch (cause) {
-    error.value = failureText(cause);
+  try {
+    try {
+      settings.registerResource(createPreferencesAdapter(api, (values) => {
+        if (typeof values.chatAutoCompactWindow === 'number') {
+          useChatStore().compactWindow = values.chatAutoCompactWindow;
+        }
+
+        if (typeof values.showAllModels === 'boolean') {
+          providers.showAllModels = values.showAllModels;
+        }
+      }, uiLocale), SETTINGS_FIELDS.filter((field) => field.resourceId === 'prefs'));
+      await settings.loadResource('prefs');
+    } catch (cause) {
+      error.value = failureText(cause);
+    }
+  } finally {
+    performanceLoading.value = false;
   }
 }
 

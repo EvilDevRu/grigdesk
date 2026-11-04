@@ -1,5 +1,6 @@
 <template>
-  <div class="routes-page ui-workspace" data-ui-workspace :data-pane="mobilePane">
+  <div class="routes-page ui-workspace"
+    :data-perf-pending="loading ? '' : undefined" data-ui-workspace :data-pane="mobilePane">
     <div class="route-pane-nav">
     <UiTabs v-model="mobilePane" data-ui-workspace-tabs size="compact" label="Область маршрута">
       <UiTab value="catalog" controls="route-catalog-pane">Каталог</UiTab>
@@ -29,7 +30,8 @@
         <UiLoadingState v-if="loading && !revisions.length" label="Загружаю…" >
           <UiSkeletonLayout layout="list" :header="false" />
         </UiLoadingState>
-        <div v-else-if="error" class="pad bad" role="alert">{{ error }}</div>
+        <div v-else-if="error" class="pad bad" role="alert"
+    :data-perf-error="!loading && error && !revisions.length ? '' : undefined">{{ error }}</div>
         <p v-else-if="!displayRouteList.length" class="pad muted">
           {{ editingDraft ? 'В черновике пока нет маршрутов' : 'Каталог не опубликован' }}
         </p>

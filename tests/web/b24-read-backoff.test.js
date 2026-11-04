@@ -1,3 +1,4 @@
+import { setPerformanceSurface } from '../../web/src/shared/performanceContext.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setImmediate } from 'node:timers/promises';
@@ -22,6 +23,7 @@ async function flush() {
 function fixture(t, fetch) {
   const calls = [];
   const events = [];
+  const completions = [];
 
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_000_000 });
   t.mock.method(globalThis, 'fetch', async (path, options) => {
@@ -33,18 +35,28 @@ function fixture(t, fetch) {
 
     return fetch(path, options);
   });
-  setApiLogSink((event, data) => events.push({
-    event,
-    data,
-    at: Date.now(),
-  }));
+  setApiLogSink((event, data) => {
+    const row = {
+      event,
+      data,
+      at: Date.now()
+    };
+
+    (event === 'api.complete' ? completions : events).push(row);
+  });
   t.after(() => setApiLogSink(null));
 
-  return { calls, events };
+  return {
+    calls,
+    events,
+    completions
+  };
 }
 
 test('Б24: общий backoff task/:id растёт до минуты, журнал не зависит от ms и query', async (t) => {
-  const { calls, events } = fixture(t, () => new Response('<h1>Bad gateway</h1>', { status: 502 }));
+  const { calls, events, completions } = fixture(t, () => {
+    return new Response('<h1>Bad gateway</h1>', { status: 502 });
+  });
   const read = (id) => api.get(`/api/tracker/task/${id}?refresh=${id}`, {
     retry: false,
     timeoutMs: 0,
@@ -79,6 +91,8 @@ test('Б24: общий backoff task/:id растёт до минуты, журн
   // Другой маршрут получает собственную попытку, несмотря на паузу карточек.
   await assert.rejects(api.get('/api/tracker/dashboard', { retry: false, timeoutMs: 0 }), { status: 502 });
   assert.equal(calls.length, 9);
+  assert.equal(completions.length, 9);
+  assert.ok(completions.every((row) => row.data.outcome === 'error'));
   assert.equal(events.length, 5);
 });
 
@@ -159,4 +173,30 @@ test('остановка доски отменяет активный fetch и �
   assert.equal(board.data, null);
   assert.equal(board.error, null);
   assert.equal(board.loading, false);
+});
+
+test('surface логического вызова сохраняется через реальную очередь/backoff', async (t) => {
+  let online = false;
+  const f = fixture(t, () => online ? Response.json({ ok: true })
+    : new Response('{}', { status: 502 }));
+
+  setPerformanceSurface(7);
+  t.after(() => setPerformanceSurface());
+  await assert.rejects(api.get('/api/tracker/context-surface?read=seed', {
+    retry: false, timeoutMs: 0,
+  }));
+
+  const waiting = api.get('/api/tracker/context-surface?read=next', { retry: false, timeoutMs: 0 });
+
+  await flush();
+  assert.equal(f.calls.length, 1);
+  setPerformanceSurface(8);
+  online = true;
+  t.mock.timers.tick(2000);
+  await waiting;
+
+  const complete = f.completions.at(-1);
+
+  assert.equal(complete.data.surface, 7);
+  assert.equal(complete.data.outcome, 'success');
 });

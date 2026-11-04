@@ -219,6 +219,8 @@ test('шаблоны страниц журнала совпадают с compone
 });
 
 test('RET-LOG: снятый адрес не является страницей журнала', () => {
+  assert.equal(normalizeRoute('/help'), '/help/:id?');
+  assert.equal(normalizeRoute('/help/chats'), '/help/:id?');
   assert.equal(normalizeRoute('/agents'), 'other');
   assert.equal(normalizeRoute('/agents?x=1'), 'other');
   assert.equal(normalizeRoute('/routes'), '/routes');

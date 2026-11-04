@@ -1,5 +1,7 @@
 <template>
   <UiDialog
+    data-perf-target="diff"
+    :data-perf-key="String(diff.taskId || '')"
     :open="diff.open"
     class="diff-dialog"
     layer="diff-workspace"

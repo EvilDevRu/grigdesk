@@ -104,6 +104,7 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
     stubs: {
       'vue-router': `export const useRouter = () => globalThis.${prefix}Router || ({ push() {} });`,
       '../shared/shellClient.ts': [
+        'export const isShellState = () => false;',
         `export const shellAction = (...args) => globalThis.${prefix}ShellAction?.(...args);`,
         'export const readShellState = async () => null;',
       ].join('\n'),

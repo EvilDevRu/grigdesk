@@ -1,6 +1,8 @@
 <template>
   <section
     class="settings-processes"
+    :data-perf-pending="!loaded && loading ? '' : undefined"
+    :data-perf-error="!loaded && error && !loading ? '' : undefined"
     data-processes-page
     :data-ready="loaded"
   >

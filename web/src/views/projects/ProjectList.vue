@@ -1,5 +1,6 @@
 <template>
-  <section class="list" data-role="project-list">
+  <section class="list"
+    :data-perf-pending="loading && !items.length ? '' : undefined" data-role="project-list">
     <UiPaneHeader>
       <template #title><h1>Проекты</h1></template>
       <template #meta><span class="count">{{ items.length }}</span></template>
@@ -35,7 +36,8 @@
       Отказ показывается НАД списком, а не вместо него: последний удачный ответ
       остаётся на экране, и человек видит, что именно не перечиталось.
     -->
-    <div v-if="error" class="failure" data-role="project-error" role="alert">
+    <div v-if="error" class="failure" data-role="project-error"
+    :data-perf-error="!items.length && !loading ? '' : undefined" role="alert">
       <UiInlineMessage tone="danger">{{ error }}</UiInlineMessage>
       <UiButton variant="text" data-role="project-retry" @click="emit('retry')">Повторить</UiButton>
     </div>

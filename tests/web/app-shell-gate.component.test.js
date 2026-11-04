@@ -50,6 +50,8 @@ test('оболочка: интерфейс открыт до сервера, м�
     };
 
     const stubs = {
+      './stores/documentPreview.ts': 'export const useDocumentPreviewStore = () => ({ href: null });',
+      './stores/diff.ts': 'export const useDiffStore = () => ({ open: false, taskId: null });',
       ...appWindowStubs,
       './stores/settings.ts': `export const useSettingsStore = () => ({
         isOpen: false, setAuthenticated() {}, dispose() {},

@@ -1,3 +1,5 @@
+import { createWebLog } from '../../web/src/shared/webLog.ts';
+import { installSurfacePerformance } from '../../web/src/shared/surfacePerformanceRuntime.ts';
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 
@@ -247,3 +249,88 @@ test('LIST-STATE-03', async (t) => {
     });
   }
 });
+
+test('PERF: видимый список телефона ждёт успеха, отказ даёт error, повтор получает новый span',
+  async (t) => {
+    const h = await fixture(t);
+    const frames = new Map();
+    let serial = 0;
+    const previousFrames = [window.requestAnimationFrame, window.cancelAnimationFrame];
+
+    window.happyDOM.setWindowSize({ width: 390, height: 844 });
+    window.requestAnimationFrame = (callback) => {
+      frames.set(serial += 1, callback);
+
+      return serial;
+    };
+    window.cancelAnimationFrame = (id) => frames.delete(id);
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+
+    const log = createWebLog({
+      now: () => new Date(),
+      monotonicNow: () => 0,
+      pageId: 'page-aaaaaaaaaaaaaaaa',
+      tabId: 'tab-bbbbbbbbbbbbbbbb',
+      version: 'dev',
+      context: () => ({
+        route: '/chats',
+        vis: 'visible',
+        boot: null
+      }),
+      level: 'verbose',
+    });
+    const host = h.wrapper.element.parentElement;
+
+    host.setAttribute('data-perf-surface', 'route');
+    host.setAttribute('data-perf-target', 'chats');
+
+    const stop = installSurfacePerformance({
+      log,
+      win: window,
+      doc: document,
+      router: {
+        currentRoute: { value: { path: '/chats' } },
+        beforeEach: () => () => {},
+        afterEach: () => () => {},
+        onError: () => () => {},
+      },
+      now: () => 0,
+      isVisible: () => true,
+      afterUpdate: (callback) => {
+        void vue.nextTick(callback);
+      },
+    });
+    const paint = async () => {
+      // Доставка MutationObserver в happy-dom идёт нативным таймером: ждём её до кадров.
+      await window.happyDOM.whenAsyncComplete();
+      await drain();
+
+      for (let index = 0; index < 2; index += 1) {
+        const batch = [...frames.values()];
+
+        frames.clear();
+        batch.forEach((callback) => callback(0));
+      }
+    };
+
+    t.after(() => {
+      stop();
+      [window.requestAnimationFrame, window.cancelAnimationFrame] = previousFrames;
+      host.removeAttribute('data-perf-surface');
+      host.removeAttribute('data-perf-target');
+    });
+    await paint();
+    assert.equal(log.snapshot().entries.some((row) => row.data.phase === 'ready'), false);
+    h.state.loadError = 'network';
+    h.state.loading = false;
+    await paint();
+    assert.equal(log.snapshot().entries.at(-1).data.phase, 'error');
+    h.state.loading = true;
+    await paint();
+    assert.equal(log.snapshot().entries.at(-1).data.phase, 'start');
+    h.state.loaded = true;
+    h.state.loading = false;
+    h.state.loadError = null;
+    await paint();
+    assert.equal(log.snapshot().entries.at(-1).data.phase, 'ready');
+  });

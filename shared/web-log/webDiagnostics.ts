@@ -25,6 +25,9 @@ export type WebRegistryReason = typeof WEB_REGISTRY_REASONS[number];
 
 export interface WebApiTiming {
   request?: number;
+  surface?: number;
+  serverRequest?: string;
+  pipeMs?: number;
   phase?: 'request' | 'headers' | 'body' | 'parse' | 'done';
   refresh?: boolean;
   status?: number;

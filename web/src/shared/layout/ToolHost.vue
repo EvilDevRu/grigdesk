@@ -19,7 +19,16 @@
   </aside>
 
   <template v-for="item in tools" :key="item.id">
+    <PerformanceBoundary kind="tool" :target="() => item.id"
+      :identity="() => modeOf(item.id) === 'dock' ? item.id : null">
     <ToolDock v-if="dock.mounted[item.id] && !dock.windowOwners[item.id]"
+    :data-perf-surface="modeOf(item.id) === 'hidden' ? undefined
+    : modeOf(item.id) === 'page' ? 'route'
+    : 'tool'"
+    :data-perf-target="modeOf(item.id) === 'page' ? String(route.name || 'other')
+    : item.id"
+    :data-perf-key="modeOf(item.id) === 'page' ? route.fullPath
+    : item.id"
               :ref="(value) => setDockRef(item.id, value)" :mode="modeOf(item.id)"
               :detachable="canDetach(item.id)" @detach="detach(item.id)"
               :label="item.label" :width="dock.width" :min-width="minWidth" :max-width="maxWidth"
@@ -37,9 +46,14 @@
                  @consume-intent="consumeIntent(item.id, $event)"
                  @status="onStatus(item.id, $event)" @context="onContext(item.id, $event)" />
     </ToolDock>
+    </PerformanceBoundary>
   </template>
 
-  <section v-if="presentation === 'placeholder'" class="tool-placeholder" role="status">
+  <section v-if="presentation === 'placeholder'"
+    data-perf-surface="route"
+    :data-perf-target="String(route.name || 'other')"
+    :data-perf-key="route.fullPath"
+    :aria-busy="routeState === 'pending' || undefined" class="tool-placeholder" role="status">
     <span v-if="routeState === 'pending'">{{ t('core.checkingToolAvailability') }}</span>
     <span v-else>
       {{ t('core.plugin') }}{{ routeItem?.label || t('core.tool') }}{{ t('core.isDisabledEnableItInSettingsPlugins') }}
@@ -48,6 +62,7 @@
 </template>
 
 <script setup lang="ts">
+import PerformanceBoundary from '../performanceBoundary.ts';
 import PluginIcon from '../PluginIcon.vue';
 
 import { toolWindowText } from '../tools/toolWindowMessages.ts';

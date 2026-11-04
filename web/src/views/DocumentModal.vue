@@ -1,6 +1,9 @@
 <template>
   <!-- Картинки и видео показывает MediaViewer во весь экран; здесь только документы. -->
   <UiDialog
+    data-perf-target="document"
+    :data-perf-key="preview.href"
+    :data-perf-pending="resolving ? '' : undefined"
     :open="Boolean(preview.href)"
     class="document-dialog"
     layer="document"
@@ -40,7 +43,8 @@
     <UiLoadingState v-if="resolving" label="Проверяю ссылку…" variant="document" >
       <UiSkeletonLayout layout="text" :header="false" />
     </UiLoadingState>
-    <div v-else-if="resolveError" class="document-state error">
+    <div v-else-if="resolveError" class="document-state error"
+    :data-perf-error="resolveError ? '' : undefined">
       {{ resolveError }}
     </div>
     <DocumentPanel

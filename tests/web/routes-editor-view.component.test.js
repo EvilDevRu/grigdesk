@@ -1,3 +1,4 @@
+import { measured } from './helpers/performance-surface.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -1287,3 +1288,43 @@ for (const area of ['catalog', 'current-graph', 'snapshot-graph']) {
     assert.equal(h.wrapper.find('[data-ui-skeleton]').exists(), false);
   });
 }
+
+test('PERF: отказ первого profiles даёт error, успешный повтор получает новый span', async (t) => {
+  const { flushPromises } = await import(
+    '../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs');
+  const gate = Promise.withResolvers();
+  let profilesOk = false;
+  const client = await fixture(t, {
+    profiles: () => {
+      if (!profilesOk) {
+        throw new Error('profiles down');
+      }
+
+      return ['sample'];
+    },
+    revisionsGate: gate.promise,
+  });
+  const f = measured(t, client.wrapper, 'routes', 'route');
+
+  await f.paint();
+
+  const failure = f.log.snapshot().entries.at(-1).data;
+
+  assert.equal(failure.phase, 'error');
+  profilesOk = true;
+
+  const retry = client.wrapper.vm.load();
+
+  await flushPromises();
+  await f.paint();
+  assert.equal(f.log.snapshot().entries.at(-1).data.phase, 'start');
+  gate.resolve(null);
+  await retry;
+  await flushPromises();
+  await f.paint();
+
+  const last = f.log.snapshot().entries.at(-1).data;
+
+  assert.equal(last.phase, 'ready');
+  assert.notEqual(last.surface, failure.surface);
+});

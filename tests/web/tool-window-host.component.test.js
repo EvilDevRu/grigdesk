@@ -224,3 +224,21 @@ test(
       assert.equal(host.wrapper.findAll('[data-panel="code"]').length, 1);
     }
   });
+
+test('PERF: ToolHost передаёт маркеры в ToolDock и сохраняет смонтированную панель', async (t) => {
+  const host = await hostFixture(t);
+
+  host.dock.open('code');
+  await host.settle();
+
+  const dock = host.wrapper.get('[data-perf-surface="tool"][data-perf-target="code"]');
+
+  assert.equal(dock.find('[data-panel="code"]').exists(), true);
+
+  const mounted = host.mounts.filter((id) => id === 'code').length;
+
+  await host.router.push('/code');
+  await host.settle();
+  assert.equal(host.wrapper.find('[data-perf-surface="route"][data-perf-target="code"]').exists(), true);
+  assert.equal(host.mounts.filter((id) => id === 'code').length, mounted);
+});

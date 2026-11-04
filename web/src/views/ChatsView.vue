@@ -1,5 +1,7 @@
 <template>
-  <div ref="host" class="agents" :class="`m-${pane}`" :style="layoutStyle">
+  <div ref="host" class="agents"
+    :data-perf-pending="!chat.loaded && (!chat.loadError || chat.loading) ? '' : undefined"
+    :data-perf-error="!chat.loaded && chat.loadError && !chat.loading ? '' : undefined" :class="`m-${pane}`" :style="layoutStyle">
     <ChatList @open="pane = 'chat'" />
     <div ref="splitter" class="lsplit" role="separator" aria-orientation="vertical" tabindex="0"
          aria-label="Ширина списка чатов"

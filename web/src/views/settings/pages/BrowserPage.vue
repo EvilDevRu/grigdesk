@@ -1,5 +1,7 @@
 <template>
-  <section>
+  <section
+    :data-perf-pending="performancePending ? '' : undefined"
+    :data-perf-error="!loaded && error && !performancePending ? '' : undefined">
     <SettingsScope :scope="t('settings.thisDevice2')" />
     <p v-if="!browser.available" role="status">{{ t('core.browserDesktopOnly') }}</p>
     <p v-if="error" role="alert">{{ t('core.browserRequestFailed') }}</p>
@@ -68,6 +70,7 @@ const props = defineProps<{ active: boolean }>();
 const browser = useBrowserStore();
 const settings = useSettingsStore();
 const error = ref(false);
+const performancePending = ref(false);
 const choosing = ref(false);
 const fields = computed(() => getSettingsFields(uiLocale.value)
   .filter((field) => field.resourceId === 'browser'));
@@ -122,32 +125,38 @@ async function load(): Promise<void> {
     return;
   }
 
-  const opening = settings.snapshot.sessionId;
+  performancePending.value = true;
 
   try {
-    settings.registerResource(createBrowserSettingsAdapter({
-      read: async (signal) => {
-        signal.throwIfAborted();
+    const opening = settings.snapshot.sessionId;
 
-        const snapshot = await browser.native({ operation: 'state' });
+    try {
+      settings.registerResource(createBrowserSettingsAdapter({
+        read: async (signal) => {
+          signal.throwIfAborted();
 
-        signal.throwIfAborted();
-        browser.apply(snapshot);
+          const snapshot = await browser.native({ operation: 'state' });
 
-        return browser.snapshot.preferences;
-      },
-      write: async (patch, signal) => {
-        signal.throwIfAborted();
+          signal.throwIfAborted();
+          browser.apply(snapshot);
 
-        return browser.native({ operation: 'preferences', value: patch });
-      },
-      disablePreference: () => browser.disablePreference(),
-    }), SETTINGS_FIELDS.filter((field) => field.resourceId === 'browser'));
-    await Promise.all([settings.loadResource('browser'), browser.loadApps()]);
-  } catch {
-    if (mounted && settings.snapshot.sessionId === opening) {
-      error.value = true;
+          return browser.snapshot.preferences;
+        },
+        write: async (patch, signal) => {
+          signal.throwIfAborted();
+
+          return browser.native({ operation: 'preferences', value: patch });
+        },
+        disablePreference: () => browser.disablePreference(),
+      }), SETTINGS_FIELDS.filter((field) => field.resourceId === 'browser'));
+      await Promise.all([settings.loadResource('browser'), browser.loadApps()]);
+    } catch {
+      if (mounted && settings.snapshot.sessionId === opening) {
+        error.value = true;
+      }
     }
+  } finally {
+    performancePending.value = false;
   }
 }
 

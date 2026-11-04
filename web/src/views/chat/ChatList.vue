@@ -1,5 +1,7 @@
 <template>
-  <aside class="cl">
+  <aside class="cl"
+    :data-perf-pending="!chat.loaded && (!chat.loadError || chat.loading) ? '' : undefined"
+    :data-perf-error="!chat.loaded && chat.loadError && !chat.loading ? '' : undefined">
     <div class="top">
       <div class="tools">
         <div class="search">

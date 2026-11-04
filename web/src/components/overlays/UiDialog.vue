@@ -17,6 +17,8 @@
       >
         <section
           v-bind="surfaceAttrs"
+    data-perf-surface="dialog"
+    :data-perf-target="attrs['data-perf-target'] || 'dialog'"
           ref="surfaceElement"
           :class="['ui-dialog', attrs.class]"
           :style="attrs.style"

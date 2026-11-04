@@ -1,5 +1,6 @@
 <template>
-  <UiInlineMessage tone="danger">
+  <UiInlineMessage tone="danger"
+    data-perf-error>
     Не удалось загрузить раздел. Закройте и снова запустите приложение.
     Если ошибка повторится, переустановите пакет приложения.
   </UiInlineMessage>

@@ -34,6 +34,27 @@ const FORBIDDEN = new Set([
 ]);
 
 /**
+ * Труба добавляет лишь своё время до передачи заголовков и только по разрешению сервера.
+ * Оно включает сервер/сеть; тела остаются потоками, чужие метрики не теряются.
+ */
+function appendPipeTiming(headers: IncomingHttpHeaders, start?: number): IncomingHttpHeaders {
+  const result = { ...headers };
+  const previous = Array.isArray(headers['server-timing'])
+    ? headers['server-timing'].join(', ') : headers['server-timing'] || '';
+
+  if (start === undefined || !/(?:^|,)\s*grigdesk;dur=\d/u.test(previous)) {
+    return result;
+  }
+
+  const kept = previous.split(',').filter((part) => !/^\s*grigdesk_pipe\s*[;]/u.test(part));
+  const duration = Math.max(0, performance.now() - start).toFixed(1);
+
+  result['server-timing'] = [...kept, `grigdesk_pipe;dur=${duration}`].join(', ');
+
+  return result;
+}
+
+/**
  * Cookie и привилегированные заголовки renderer никогда не пересекают трубу.
  * Host и разрешённый Origin заново строятся из проверенного адреса профиля.
  */
@@ -150,6 +171,7 @@ export function createUpstream(options: UpstreamOptions) {
   const transport = remote ? https : http;
   const agent = remote ? pinnedAgent(options) : new http.Agent({ keepAlive: true });
   const streams = new Set<Duplex>();
+  const timingStarts = new WeakMap<ServerResponse, number>();
   let cookie = '';
   let exchanging: Promise<void> | null = null;
   let blocked = false;
@@ -400,7 +422,7 @@ export function createUpstream(options: UpstreamOptions) {
       return;
     }
 
-    const headers = { ...incoming.headers };
+    const headers = appendPipeTiming(incoming.headers, timingStarts.get(res));
 
     delete headers['set-cookie'];
     res.writeHead(incoming.statusCode || 502, headers);
@@ -441,6 +463,10 @@ export function createUpstream(options: UpstreamOptions) {
    * Уже начатый POST не повторяется даже после успешного обновления сессии.
    */
   const request = async (req: IncomingMessage, res: ServerResponse, retried = false): Promise<void> => {
+    if (!timingStarts.has(res)) {
+      timingStarts.set(res, performance.now());
+    }
+
     if (closed || blocked || terminalStatus) {
       json(res, closed ? 503 : blocked ? 426 : terminalStatus!, {
         error: closed ? 'disconnected' : current.detail?.code || current.status,

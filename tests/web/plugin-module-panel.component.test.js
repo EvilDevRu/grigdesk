@@ -1,3 +1,4 @@
+import { measured } from './helpers/performance-surface.js';
 import assert from 'node:assert/strict';
 import { access } from 'node:fs/promises';
 import test from 'node:test';
@@ -532,4 +533,17 @@ test('PM-PUBLIC-PROPS: четыре presentation и compact сохраняют p
       }
     }
   }
+});
+
+test('PERF: модульная панель ждёт CSS, отказ ресурсов завершает открытие как error', async (t) => {
+  const pending = Promise.withResolvers();
+  const f = await panelFixture(t, { styles: () => pending.promise });
+  const surface = measured(t, f.wrapper, 'other', 'tool');
+
+  await surface.paint();
+  assert.equal(surface.log.snapshot().entries.some((row) => row.data.phase === 'ready'), false);
+  pending.reject(new Error('fixture CSS failure'));
+  await f.settle();
+  await surface.paint();
+  assert.equal(surface.log.snapshot().entries.at(-1).data.phase, 'error');
 });

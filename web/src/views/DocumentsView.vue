@@ -3,11 +3,13 @@
     <UiIconButton role="rail" label="Назад" v-tooltip="'Назад'" @click="close">←</UiIconButton>
     <span class="title" v-tooltip="document?.displayPath || title">{{ title }}</span>
   </TopbarActions>
-  <main class="documents-view">
+  <main class="documents-view"
+    :data-perf-pending="resolving ? '' : undefined">
     <UiLoadingState v-if="resolving" label="Проверяю ссылку…" variant="document" >
       <UiSkeletonLayout layout="text" :header="false" />
     </UiLoadingState>
-    <div v-else-if="resolveError" class="resolve-state error">{{ resolveError }}</div>
+    <div v-else-if="resolveError" class="resolve-state error"
+    :data-perf-error="resolveError ? '' : undefined">{{ resolveError }}</div>
     <DocumentPanel v-else :source="source" :path="documentPath" :anchor="anchor" :line="line"
                    @loaded="document = $event" />
   </main>

@@ -1,6 +1,8 @@
 <template>
   <div
     class="settings-speech"
+    :data-perf-pending="performanceLoading && !loaded ? '' : undefined"
+    :data-perf-error="!loaded && error && !performanceLoading ? '' : undefined"
     :data-settings-speech-page="settings.pageId"
     :data-ready="loaded"
   >
@@ -370,6 +372,7 @@ const settings = useSettingsStore();
 const advancedOpen = ref(false);
 const advancedId = `speech-advanced-${useId().replaceAll(':', '')}`;
 const error = ref('');
+const performanceLoading = ref(false);
 const refreshing = ref(false);
 const browserStatus = ref('unknown');
 const launcher = useToolLauncher();
@@ -676,10 +679,14 @@ async function refresh(): Promise<void> {
 
 watch(() => props.active, async (active) => {
   if (active) {
+    performanceLoading.value = true;
+
     try {
       await settings.loadResource('speech');
     } catch (cause) {
       error.value = failureText(cause);
+    } finally {
+      performanceLoading.value = false;
     }
   }
 }, { immediate: true });

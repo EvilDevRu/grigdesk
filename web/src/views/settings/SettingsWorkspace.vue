@@ -37,7 +37,10 @@
         </div>
       </div>
     </aside>
-    <section class="settings-page-area" aria-labelledby="settings-page-title">
+    <section class="settings-page-area"
+    data-perf-surface="settings"
+    :data-perf-target="settings.pageId"
+    :data-perf-key="settings.pageId" aria-labelledby="settings-page-title">
       <div class="settings-page-heading">
         <UiButton class="settings-sections" variant="ghost" @click="navigationVisible = true">
           <span aria-hidden="true">‹</span> {{ t('settings.sections') }}

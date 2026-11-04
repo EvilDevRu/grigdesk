@@ -1,5 +1,6 @@
 <template>
-  <main class="task-window-page" :aria-label="t('core.grigdeskTaskCard')">
+  <main class="task-window-page"
+    data-perf-surface="route" data-perf-target="surface" data-perf-key="/surface" :aria-label="t('core.grigdeskTaskCard')">
     <TaskModal v-if="target && ready" presentation="document" />
     <template v-else>
       <header class="task-window-titlebar">

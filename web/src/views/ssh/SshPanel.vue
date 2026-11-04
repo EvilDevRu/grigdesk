@@ -54,7 +54,8 @@
     </div>
 
     <div class="ssh-panel__body">
-      <UiInlineMessage v-if="store.error" tone="danger">
+      <UiInlineMessage v-if="store.error" tone="danger"
+    :data-perf-error="store.error && !refreshLoading && !store.connections?.length ? '' : undefined">
         {{ store.error }}
       </UiInlineMessage>
 

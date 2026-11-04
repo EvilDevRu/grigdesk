@@ -49,6 +49,15 @@ test('Оболочка настроек на настоящем UiDialog', async
 
     assert.equal(Boolean(doc.querySelector('[data-role="settings-modal"]')), true);
 
+const dialog = doc.querySelector('[data-role="settings-modal"]');
+const measured = doc.querySelector('[data-perf-surface="settings"]');
+
+assert.equal(dialog.getAttribute('data-perf-surface'), 'dialog');
+assert.equal(Boolean(measured), true);
+assert.equal(measured.getAttribute('data-perf-target'), settings.pageId);
+assert.equal(measured.getAttribute('data-perf-key'), settings.pageId);
+
+
     const resource = settingsResource('test', { value: 'исходное' }, options);
 
     settings.registerResource(resource.adapter, resource.fields);

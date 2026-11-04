@@ -1,5 +1,8 @@
 <template>
-  <section class="plugin-module" :class="{ 'is-compact': compact }" :aria-label="label">
+  <section
+    :data-perf-pending="state === 'loading' ? '' : undefined"
+    :data-perf-error="state !== 'loading' && state !== 'ready' ? '' : undefined"
+    class="plugin-module" :class="{ 'is-compact': compact }" :aria-label="label">
     <component
       :is="component"
       v-if="state === 'ready' && component && context"

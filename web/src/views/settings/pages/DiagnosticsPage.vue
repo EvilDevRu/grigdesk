@@ -1,5 +1,7 @@
 <template>
-  <div class="settings-diagnostics">
+  <div class="settings-diagnostics"
+    :data-perf-pending="performanceLoading && !loaded ? '' : undefined"
+    :data-perf-error="!loaded && error && !performanceLoading ? '' : undefined">
     <SettingsScope />
     <p v-if="error" role="alert">{{ error }}</p>
     <UiLoadingState v-if="!loaded && !error" :label="t('settings.loadingParameters')" variant="document" >
@@ -60,6 +62,7 @@ import WebLogPanel from '../WebLogPanel.vue';
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
 const error = ref('');
+const performanceLoading = ref(false);
 const fields = computed(() => getSettingsFields(uiLocale.value)
   .filter((field) => field.resourceId === 'factoryDebug'));
 const loaded = computed(() => settings.snapshot.resources.some((item) =>
@@ -105,50 +108,56 @@ async function load(): Promise<void> {
     return;
   }
 
-  if (settings.snapshot.resources.some((item) => item.id === 'factoryDebug')) {
-    await settings.loadResource('factoryDebug');
-
-    return;
-  }
-
-  const opening = settings.snapshot.sessionId;
-  const adapter = createFactoryDebugAdapter(api, (view) => {
-    if (!settings.isOpen || settings.snapshot.sessionId !== opening) {
-      return;
-    }
-
-    settings.resourceDetails = {
-      ...settings.resourceDetails,
-      factoryDebug: { effective: view.effective, source: view.source },
-    };
-    getWebLogRuntime()?.applyPolicy(view.effective, view.expiresAt);
-  }, uiLocale);
+  performanceLoading.value = true;
 
   try {
-    settings.registerResource(adapter, fields.value);
-    await settings.loadResource('factoryDebug');
+    if (settings.snapshot.resources.some((item) => item.id === 'factoryDebug')) {
+      await settings.loadResource('factoryDebug');
 
-    if (!settings.isOpen || settings.snapshot.sessionId !== opening) {
       return;
     }
 
-    settings.bindSession('factoryDebug', () => {
-      const controller = new AbortController();
-      const unsubscribe = sseSubscribe((name) => {
-        if (name === 'diagnostic-logging') {
-          void adapter.read(controller.signal).then((values) => {
-            settings.acceptSnapshot('factoryDebug', values, opening);
-          }).catch(() => undefined);
-        }
-      });
+    const opening = settings.snapshot.sessionId;
+    const adapter = createFactoryDebugAdapter(api, (view) => {
+      if (!settings.isOpen || settings.snapshot.sessionId !== opening) {
+        return;
+      }
 
-      return () => {
-        controller.abort();
-        unsubscribe();
+      settings.resourceDetails = {
+        ...settings.resourceDetails,
+        factoryDebug: { effective: view.effective, source: view.source },
       };
-    });
-  } catch (cause) {
-    error.value = failureText(cause);
+      getWebLogRuntime()?.applyPolicy(view.effective, view.expiresAt);
+    }, uiLocale);
+
+    try {
+      settings.registerResource(adapter, fields.value);
+      await settings.loadResource('factoryDebug');
+
+      if (!settings.isOpen || settings.snapshot.sessionId !== opening) {
+        return;
+      }
+
+      settings.bindSession('factoryDebug', () => {
+        const controller = new AbortController();
+        const unsubscribe = sseSubscribe((name) => {
+          if (name === 'diagnostic-logging') {
+            void adapter.read(controller.signal).then((values) => {
+              settings.acceptSnapshot('factoryDebug', values, opening);
+            }).catch(() => undefined);
+          }
+        });
+
+        return () => {
+          controller.abort();
+          unsubscribe();
+        };
+      });
+    } catch (cause) {
+      error.value = failureText(cause);
+    }
+  } finally {
+    performanceLoading.value = false;
   }
 }
 
