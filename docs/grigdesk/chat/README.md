@@ -1,6 +1,6 @@
 # Чат и исполнители
 
-- [Скорость конкретного чата: Fast, Ultrafast, наследование и нативный снимок](chat-speed.md)
+- [Скорость чата: меню с «Обычная», Fast → priority у Codex, Ultrafast и наследование](chat-speed.md)
 
 - [Индивидуальный и Team Plan GLM: поколения, общие часы и разные квоты](glm-plan-variants.md)
 

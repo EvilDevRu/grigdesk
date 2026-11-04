@@ -5,6 +5,10 @@
 Fast, Codex — обычную, Fast и Ultrafast. Другие исполнители этого управления не получают.
 Модель и усилие рассуждения при выборе скорости не меняются.
 
+Меню сразу начинается с «Обычная», затем идут доступные исполнителю Fast и Ultrafast.
+«По настройкам исполнителя» скрыто из списка: пустой native option и подпись закрытого
+поля сохраняются для старых чатов без явной скорости, не меняя их наследование.
+
 ## Хранение и совместимость
 
 Поле `speed` одного чата принимает `standard`, `fast`, `ultrafast` или `null`.
@@ -26,7 +30,11 @@ Fast, Codex — обычную, Fast и Ultrafast. Другие исполнит
 
 Публичный provider содержит только `chatSpeed.modes`, модель — `chatSpeedModes`.
 Допуск ускорения определяется их пересечением. Codex читает точные `serviceTiers`
-из `model/list`: Fast и Ultrafast независимы, rollout-алиас не расширяет допуск.
+из `model/list`: публичный Fast соответствует native id `priority`, а Ultrafast —
+`ultrafast`. Подпись `name: "Fast"` сама по себе не подтверждает режим. Fast и Ultrafast
+независимы, rollout-алиас не расширяет допуск. Если каталог объявил только `priority`,
+доступен Fast, а Ultrafast остаётся недоступным. Одна таблица адаптера используется и
+для допуска каталога, и для native-параметра хода.
 Claude читает `supportsFastMode` и `resolvedModel` через control initialize без user
 prompt. Probe использует временный cwd, отключает hooks и persistence, ограничен
 пятью секундами. Проверка выполняется в общем минутном цикле каталога.
@@ -46,7 +54,7 @@ prompt. Probe использует временный cwd, отключает ho
 Claude получает явный `fastMode` через `--settings`; внутренний `chatSpeedMode` в
 native JSON не передаётся. При явном Fast состояния `off`/`cooldown` из init/result
 добавляют предупреждение об обычной скорости в ленту, без публикации сырых причин CLI.
-Codex получает `serviceTierForTurn`: `fast`, `ultrafast` или явный `default` для обычной
+Codex получает `serviceTierForTurn`: `priority`, `ultrafast` или явный `default` для обычной
 скорости. Отсутствие выбора не добавляет этого параметра и сохраняет native inheritance.
 
 Fast и Ultrafast повышают расход лимитов или кредитов. Окончательный допуск и ошибки
@@ -61,3 +69,9 @@ Fast и Ultrafast повышают расход лимитов или креди
 неподдерживаемые режимы и совместимость старого клиента. Native transport покрывают
 `codex-app-server-contract` и `chat-speed-native`; компонентный выбор —
 `chat-model-availability.component`. После серверных изменений нужен ручной перезапуск.
+
+Read-only проверка установленного Codex 0.166.0 подтвердила `serviceTiers` с
+`id: "priority", name: "Fast"`: прежнее сравнение с `fast` ошибочно снимало допуск.
+Чтение `model/list` с обычным и experimental handshake дало одинаковые скорости;
+thread/turn не создавались. Регрессии проверяют `priority` в каталоге и в `turn/start`,
+независимость Ultrafast и отсутствие допуска по одной лишь подписи режима.

@@ -66,6 +66,14 @@ import {
 
 const APP_SERVER_TIMEOUT_MS = 15_000;
 
+// Публичные скорости чата отличаются от native id Codex: Fast объявлен как priority.
+// Одна таблица связывает допуск из каталога и значение, отправляемое в turn/start.
+const CODEX_SERVICE_TIER_BY_SPEED: Readonly<Record<ChatSpeed, string>> = {
+  standard: 'default',
+  fast: 'priority',
+  ultrafast: 'ultrafast',
+};
+
 // Серверный config в объёме, который читает исполнитель. Полная его форма
 // объявлена в config.ts; адаптер получает его целиком.
 type CodexConfig = {
@@ -746,7 +754,7 @@ export function parseCodexModelList(value: unknown) {
     models.push({
       id,
       chatSpeedModes: ['standard', ...(['fast', 'ultrafast'] as const)
-        .filter((mode) => exact.serviceTiers?.some((tier) => tier.id === mode))],
+        .filter((mode) => exact.serviceTiers?.some((tier) => tier.id === CODEX_SERVICE_TIER_BY_SPEED[mode]))],
       ...(family && { family }),
       name: exact.displayName || id,
       ...codexCatalogContext(exact),
@@ -2765,8 +2773,7 @@ export function openCodexSession({
           ...(model && { model }),
           ...(effort && { effort }),
           ...(providerSettings?.chatSpeedMode ? {
-            serviceTierForTurn: providerSettings.chatSpeedMode === 'standard'
-              ? 'default' : providerSettings.chatSpeedMode,
+            serviceTierForTurn: CODEX_SERVICE_TIER_BY_SPEED[providerSettings.chatSpeedMode],
           } : {}),
           summary: 'detailed',
         }, current) as { turn?: { id?: string } } | null;

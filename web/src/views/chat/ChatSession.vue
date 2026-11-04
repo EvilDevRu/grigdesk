@@ -162,7 +162,10 @@
                         :model-value="sess.speed || ''" :disabled="frozen"
                         v-tooltip="speedHint" :aria-description="speedHint"
                         @change="chat.setSpeed(sid, ($event.target as HTMLSelectElement).value || null)">
-                <option value="">{{ t('core.chatSpeedInherit') }}</option>
+                <template #value="{ option }">
+                  {{ option?.label || t('core.chatSpeedInherit') }}
+                </template>
+                <option value="" hidden>{{ t('core.chatSpeedInherit') }}</option>
                 <option value="standard">{{ t('core.chatSpeedStandard') }}</option>
                 <option value="fast" :disabled="!speedModes.includes('fast')">
                   {{ t('core.chatSpeedFast') }}

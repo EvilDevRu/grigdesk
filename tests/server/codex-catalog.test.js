@@ -120,7 +120,7 @@ test('SPEED-CATALOG: скорости exact записи не берутся у 
       model: 'codex-test',
       displayName: 'Test',
       serviceTiers: [{
-        id: 'fast',
+        id: 'priority',
         name: 'Fast',
         description: 'Быстрее',
       }],
@@ -130,7 +130,7 @@ test('SPEED-CATALOG: скорости exact записи не берутся у 
       model: 'gpt-fast',
       displayName: 'Fast',
       serviceTiers: [{
-        id: 'fast',
+        id: 'priority',
         name: 'Fast',
         description: 'Быстрее',
       }],
@@ -153,7 +153,10 @@ test('SPEED-CATALOG: скорости exact записи не берутся у 
 test('SPEED-ULTRA-CATALOG: каждый tier подтверждён exact metadata независимо', () => {
   const rows = parseCodexModelList({ data: [
     { id: 'ultra-only', serviceTiers: [{ id: 'ultrafast' }] },
-    { id: 'both', serviceTiers: [{ id: 'fast' }, { id: 'ultrafast' }] },
+    { id: 'both', serviceTiers: [{ id: 'priority' }, { id: 'ultrafast' }] },
+    { id: 'fast-only', serviceTiers: [{ id: 'priority', name: 'Fast' }] },
+    { id: 'wrong-id', serviceTiers: [{ id: 'fast', name: 'Fast' }] },
+    { id: 'wrong-name', serviceTiers: [{ id: 'warp', name: 'Fast' }] },
     { id: 'unknown-tier', serviceTiers: [{ id: 'warp' }] },
     { id: 'empty', serviceTiers: [] },
     { id: 'missing' },
@@ -161,6 +164,7 @@ test('SPEED-ULTRA-CATALOG: каждый tier подтверждён exact metada
 
   assert.deepEqual(rows.map((row) => row.chatSpeedModes), [
     ['standard', 'ultrafast'], ['standard', 'fast', 'ultrafast'],
+    ['standard', 'fast'], ['standard'], ['standard'],
     ['standard'], ['standard'], ['standard'],
   ]);
 });

@@ -850,7 +850,7 @@ test('SPEED-CODEX: явный Fast и standard идут в turn/start без с�
     .filter((entry) => entry.direction === 'client' && entry.message?.method === 'turn/start')
     .map((entry) => entry.message.params);
 
-  assert.deepEqual(turns.map((turn) => turn.serviceTierForTurn), ['fast', 'default', 'ultrafast']);
+  assert.deepEqual(turns.map((turn) => turn.serviceTierForTurn), ['priority', 'default', 'ultrafast']);
   assert.equal(turns.every((turn) => turn.model === 'gpt-contract-0.149'), true);
   assert.equal(turns.every((turn) => turn.effort === 'medium'), true);
 });
