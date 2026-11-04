@@ -60,24 +60,38 @@ def paths(name: str) -> list[str]:
     return [node.attrib['d'] for node in document.findall('.//{http://www.w3.org/2000/svg}path')]
 
 
-def component(mark: str, class_name: str) -> str:
-    """Оборачивает неизменный контур G в компонент с цветом текста.
-    Короткие строковые фрагменты сохраняют читаемость без изменения геометрии.
+def component(class_name: str) -> str:
+    """Переносит цветной знак целиком, сохраняя контуры и преобразования мастера.
+    Цвета граней фиксированы и не зависят от цвета текста в месте использования.
     """
-    chunks = [mark[index:index + 85] for index in range(0, len(mark), 85)]
-    literal = "const MARK = '" + chunks[0] + "'"
-    literal += ''.join("\n  + '" + chunk + "'" for chunk in chunks[1:]) + ';'
+    document = ET.parse(BRAND / 'grigdesk-app-icon.svg')
+    contours = []
+    declarations = []
+    for index, node in enumerate(document.findall('.//{http://www.w3.org/2000/svg}path')):
+        name = f'PART_{index}'
+        mark = node.attrib['d']
+        chunks = [mark[offset:offset + 85] for offset in range(0, len(mark), 85)]
+        literal = f"const {name} = '" + chunks[0] + "'"
+        literal += ''.join("\n  + '" + chunk + "'" for chunk in chunks[1:]) + ';'
+        declarations.append(literal)
+        transform = node.attrib.get('transform')
+        attributes = f' :d="{name}" fill="{node.attrib["fill"]}"'
+        if transform:
+            attributes += f' transform="{transform}"'
+        contours.append(f'    <path{attributes} />')
+    body = '\n'.join(contours)
+    script = '\n'.join(declarations)
 
     return f'''<template>
   <svg class="{class_name}" viewBox="0 0 256 256" aria-hidden="true" focusable="false">
-    <path :d="MARK" />
+{body}
   </svg>
 </template>
 
 <script setup lang="ts">
-// Малая G для тёмного фона из grigdesk-g-small-reversed.svg.
-// Генератор переносит контур без изменений; размер и цвет задаёт место использования.
-{literal}
+// L3 «Янтарь»: исходная G и две цветные плоскости из мастера приложения.
+// Генератор сохраняет геометрию; место использования задаёт только размер.
+{script}
 </script>
 
 <style scoped>
@@ -86,34 +100,40 @@ def component(mark: str, class_name: str) -> str:
   height: 1em;
   flex: none;
 }}
-
-path {{
-  fill: currentColor;
-}}
 </style>
 '''
 
 
 def android_foreground() -> str:
-    """Помещает GD в безопасную область adaptive-иконки на холсте 108 dp.
-    Координаты масштаба, сдвига и цвет зафиксированы утверждённой картой.
+    """Помещает полный знак в центральный круг диаметром 66 dp adaptive-иконки.
+    Вложенные группы сохраняют исходные переносы и равномерный масштаб буквы.
     """
-    contours = '\n'.join(f'        <path android:fillColor="#F2F3F5" android:pathData="{value}" />'
-                         for value in paths('gd-reversed'))
+    document = ET.parse(BRAND / 'grigdesk-app-icon.svg')
+    contours = []
+    for node in document.findall('.//{http://www.w3.org/2000/svg}path'):
+        contour = f'        <path android:fillColor="{node.attrib["fill"]}"'
+        contour += f' android:pathData="{node.attrib["d"]}" />'
+        transform = node.attrib.get('transform', '')
+        if transform:
+            numbers = re.findall(r'-?\d+(?:\.\d+)?', transform)
+            x, y = numbers[:2]
+            scale = numbers[2] if len(numbers) > 2 else '1'
+            contour = (f'        <group android:translateX="{x}" android:translateY="{y}"'
+                       f' android:scaleX="{scale}" android:scaleY="{scale}">\n'
+                       + contour + '\n        </group>')
+        contours.append(contour)
+    body = '\n'.join(contours)
 
     return f'''<?xml version="1.0" encoding="utf-8"?>
-<!-- Сгенерировано web/scripts/gen-icons.py из утверждённого мастера GD. -->
+<!-- Сгенерировано web/scripts/gen-icons.py из мастера L3 «Янтарь». -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <group
-        android:scaleX="0.21459"
-        android:scaleY="0.21459"
-        android:translateX="26.533"
-        android:translateY="26.533">
-{contours}
+    <group android:scaleX="0.20" android:scaleY="0.20"
+        android:translateX="28.4" android:translateY="28.4">
+{body}
     </group>
 </vector>
 '''
@@ -171,12 +191,23 @@ def generate() -> None:
         raise RuntimeError('В web/index.html должна быть одна встроенная иконка.')
     write(index, html)
 
-    mark_paths = paths('g-small-reversed')
-    if len(mark_paths) != 1:
-        raise RuntimeError('Мастер малой G должен содержать один контур.')
-    write(ROOT / 'web/src/shared/GrigDeskMark.vue', component(mark_paths[0], 'grigdesk-mark'))
-    write(ROOT / 'mobile/src/ui/UiBrandMark.vue', component(mark_paths[0], 'ui-brand-mark'))
-    write(ANDROID / 'drawable/ic_launcher_foreground.xml', android_foreground())
+    write(ROOT / 'web/src/shared/GrigDeskMark.vue', component('grigdesk-mark'))
+    write(ROOT / 'mobile/src/ui/UiBrandMark.vue', component('ui-brand-mark'))
+    foreground = android_foreground()
+    write(ANDROID / 'drawable/ic_launcher_foreground.xml', foreground)
+    client = ROOT / 'mobile/android/client/src/main/res'
+    shutil.copyfile(ROOT / 'web/public/icon-512.png', client / 'drawable-nodpi/client_icon.png')
+    write(client / 'drawable/ic_launcher_foreground.xml', foreground)
+    write(client / 'values/ic_launcher_background.xml',
+          '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n'
+          '    <color name="ic_launcher_background">#0B0D11</color>\n</resources>\n')
+    adaptive = ('<?xml version="1.0" encoding="utf-8"?>\n'
+                '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n'
+                '    <background android:drawable="@color/ic_launcher_background" />\n'
+                '    <foreground android:drawable="@drawable/ic_launcher_foreground" />\n'
+                '</adaptive-icon>\n')
+    write(client / 'mipmap-anydpi-v26/ic_launcher.xml', adaptive)
+    write(client / 'mipmap-anydpi-v26/ic_launcher_round.xml', adaptive)
     write(ANDROID / 'values/ic_launcher_background.xml',
           '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n'
           '    <color name="ic_launcher_background">#0B0D11</color>\n</resources>\n')

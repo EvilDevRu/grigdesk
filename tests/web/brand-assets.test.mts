@@ -31,6 +31,12 @@ const files = [
     .map((suffix) => `${android}/mipmap-${density}/ic_launcher${suffix}.png`)),
   `${android}/drawable/ic_launcher_foreground.xml`, `${android}/values/ic_launcher_background.xml`,
   'web/src/shared/notificationIcon.ts', 'web/index.html',
+  'web/src/shared/GrigDeskMark.vue', 'mobile/src/ui/UiBrandMark.vue',
+  'mobile/android/client/src/main/res/drawable-nodpi/client_icon.png',
+  'mobile/android/client/src/main/res/drawable/ic_launcher_foreground.xml',
+  'mobile/android/client/src/main/res/values/ic_launcher_background.xml',
+  'mobile/android/client/src/main/res/mipmap-anydpi-v26/ic_launcher.xml',
+  'mobile/android/client/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml',
 ];
 
 function read(file: string): Buffer {
@@ -67,7 +73,7 @@ function hashes(): Record<string, string> {
  */
 function componentPaths(file: string): string[] {
   const source = text(file);
-  const literal = /const (?:MARK|ARC|NEEDLE) = ([\s\S]*?);/g;
+  const literal = /const (?:PART_\d+) = ([\s\S]*?);/g;
 
   return [...source.matchAll(literal)].map((match) =>
     [...match[1]!.matchAll(/'([^']*)'/g)].map((part) => part[1]).join(''));
@@ -131,23 +137,45 @@ test('GI-04: встроенные favicon и уведомление равны �
     text(`${brand}/grigdesk-favicon-tile.svg`));
 });
 
-test('GI-05: компоненты используют G, Android — GD из утверждённых векторов', () => {
-  const small = paths(`${brand}/grigdesk-g-small-reversed.svg`);
+test('GI-05: шапка и Android сохраняют полный L3 и исходную G', () => {
+  const master = `${brand}/grigdesk-app-icon.svg`;
+  const contours = paths(master);
+  const originalG = paths(`${brand}/grigdesk-wordmark.svg`)[0]!.split('M371.83')[0];
+
+  assert.equal(contours.length, 3);
+  assert.equal(contours[2], originalG);
 
   for (const file of ['web/src/shared/GrigDeskMark.vue', 'mobile/src/ui/UiBrandMark.vue']) {
-    assert.deepEqual(componentPaths(file), small, file);
-    assert.match(text(file), /fill: currentColor/);
-    assert.doesNotMatch(text(file), /var\(--accent\)|\bmono\b/);
+    assert.deepEqual(componentPaths(file), contours, file);
+    assert.match(text(file), /translate\(24 12\)/);
+    assert.match(text(file), /translate\(35.264 54.763\) scale\(0.51\)/);
+
+    for (const color of ['#AD5839', '#F5C44C', '#20233B']) {
+      assert.ok(text(file).includes(`fill="${color}"`));
+    }
   }
 
+  const client = 'mobile/android/client/src/main';
   const foreground = text(`${android}/drawable/ic_launcher_foreground.xml`);
 
   assert.deepEqual([...foreground.matchAll(/android:pathData="([^"]+)"/g)].map((match) => match[1]),
-    paths(`${brand}/grigdesk-gd-reversed.svg`));
-  assert.match(foreground, /android:scaleX="0.21459"/);
-  assert.match(foreground, /android:translateX="26.533"/);
-  assert.match(foreground, /android:fillColor="#F2F3F5"/);
+    contours);
+  assert.match(foreground, /android:scaleX="0.20"/);
+  assert.match(foreground, /android:translateX="28.4"/);
+  assert.match(foreground, /android:scaleX="0.51"/);
+  assert.equal(text(`${client}/res/drawable/ic_launcher_foreground.xml`), foreground);
+  assert.ok(read(`${client}/res/drawable-nodpi/client_icon.png`).equals(read('web/public/icon-512.png')));
+  assert.match(text(`${client}/AndroidManifest.xml`), /android:icon="@mipmap\/ic_launcher"/);
+  assert.match(text(`${client}/AndroidManifest.xml`), /android:roundIcon="@mipmap\/ic_launcher_round"/);
+
+  for (const name of ['ic_launcher', 'ic_launcher_round']) {
+    assert.match(text(`${client}/res/mipmap-anydpi-v26/${name}.xml`),
+      /@drawable\/ic_launcher_foreground/);
+  }
+
   assert.match(text(`${android}/values/ic_launcher_background.xml`), /#0B0D11/);
+  assert.match(text('web/src/shared/layout/AppShell.vue'),
+    /\.app-mark \.logo \{ width: 20px; height: 20px;/);
 });
 
 test('GI-06: повтор генератора не меняет байты ни одного результата', () => {

@@ -1202,7 +1202,7 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .app-mark {
   display: grid; place-items: center; flex: none; width: var(--app-rail-w); height: 100%;
 }
-.app-mark .logo { width: 16px; height: 16px; color: var(--ink); }
+.app-mark .logo { width: 20px; height: 20px; }
 /* Слот действий экрана — сразу после заголовка; статус уезжает вправо */
 .tb-slot { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
 .tb-slot:empty { display: none; }
