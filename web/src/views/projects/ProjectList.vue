@@ -7,7 +7,8 @@
     </UiPaneHeader>
     <div class="tools">
       <label class="search" data-role="project-search">
-        <UiSearchInput v-model="search" aria-label="Поиск проектов" placeholder="Найти проект…" />
+        <UiSearchInput v-model="search" size="compact"
+                       aria-label="Поиск проектов" placeholder="Найти проект…" />
       </label>
       <div data-role="project-sort" :data-sort="sort">
       <UiIconButton data-context="workspace-toolbar"
@@ -172,8 +173,8 @@ const visible = computed(() => {
 .tools {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 12px 10px 6px;
+  gap: 7px;
+  padding: 6px 10px;
 }
 
 .search {

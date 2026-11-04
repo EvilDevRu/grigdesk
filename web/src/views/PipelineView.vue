@@ -1,5 +1,5 @@
 <template>
-  <div class="pipeline">
+  <div class="pipeline ui-workspace-page">
     <PipelinePhoneToolbar
       :projects="projectOptions"
       :statuses="statusOptions"
@@ -17,6 +17,7 @@
       @loops="toggleLoops"
       @bulk="runBulkAction"
     />
+    <UiPaneHeader class="pipeline-toolbar" :aria-label="translate('core.pipeline')">
     <div class="toolbar">
       <div class="pipeline-run-controls" role="group" :aria-label="translate('core.pipelineRunControls')">
         <UiPopover
@@ -319,6 +320,8 @@
       </div>
     </div>
 
+    </UiPaneHeader>
+    <div class="pipeline-content ui-workspace-page__body">
     <PipelineLoading v-if="!loaded && !error" label="Загрузка…" :compact="compact" :loops-on="loopsOn" />
     <p v-else-if="error" class="err">Ошибка: {{ error }}</p>
     <p v-else-if="!tasks.length" class="muted">Задач в состоянии фабрики нет.</p>
@@ -1088,6 +1091,7 @@
     </UiDialog>
 
   </div>
+    </div>
 </template>
 
 <script setup lang="ts">
@@ -3348,29 +3352,19 @@ function cardState(g: PipelineViewGraph) {
 .pipeline {
   container-name: pipeline-view;
   container-type: inline-size;
-  display: flex;
-  flex-direction: column;
+}
+
+.pipeline-content {
   gap: 14px;
 }
 
-/* Панель заполняет верхний отступ оболочки и оставляет до карточек 12 px.
+/* Общая шапка владеет высотой и полями, сетка раскладывает только controls.
    Проекты получают свободное место, состояния и вид собраны справа. */
 .toolbar {
-  --pipeline-content-gutter: var(--page-gutter);
-  position: sticky;
-  top: calc(var(--pipeline-content-gutter) * -1);
-  z-index: 30;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  min-height: calc(var(--toolbar-control-h) + 8px);
-  margin: calc(var(--pipeline-content-gutter) * -1)
-    calc(var(--pipeline-content-gutter) * -1)
-    -2px;
-  padding: 3px var(--pipeline-content-gutter) 4px;
-  border-bottom: 1px solid var(--line);
-  background: var(--topbar);
 }
 
 .pipeline-run-controls {
@@ -4560,7 +4554,7 @@ function cardState(g: PipelineViewGraph) {
   .runner-attempts { max-height: 200px; }
 }
 @media (max-width: 600px) {
-  .toolbar {
+  .pipeline-toolbar {
     display: none;
   }
 

@@ -7,6 +7,7 @@
     <UiSearchInput
       v-if="searchable"
       v-model="query"
+      size="compact"
       :aria-label="t('core.sectionsSearch')"
       :placeholder="t('core.sectionsSearch')"
     />

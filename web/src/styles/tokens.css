@@ -38,9 +38,12 @@
   --app-rail-w: 36px;
   --app-nav-row-h: 30px;
   --toolbar-control-h: 28px;
+  --pane-header-action-h: 28px;
   --panel-header-font-size: 13px;
   --panel-header-font-weight: 600;
   --panel-header-title-color: var(--ink);
+  --panel-header-inset-top: 3px;
+  --panel-header-inset-bottom: 4px;
   --tool-dock-action-size: 30px;
   /* Два ряда toolbar, зазор 4 px, поля по 4 px и нижняя граница 1 px.
      На touch ряды растут до 44 px: общий минимум обеих колонок следует за ними. */
@@ -124,6 +127,12 @@
   --md-code-token-changed: var(--warn);
 }
 
+.ui-pane-header,
+.ui-dialog__header {
+  --control-radius: var(--radius-sm);
+  --control-border: var(--line-2);
+}
+
 [data-ui-workspace] {
   /* Рабочая форма наследует палитру каркаса; ввод получает более светлый surface-2.
      Роли общие, локального оформления controls у экранов нет. */
@@ -154,15 +163,18 @@
 
 /* Сенсорный размер задаёт общая граница UI, consumer включает его на своём контейнере.
    Диалоги получают тот же атрибут на собственном teleported surface. */
-:root[data-ui-touch],
+html:root[data-ui-touch],
 [data-ui-touch] {
   --control-height: 44px;
   --workspace-control-h: 44px;
   --toolbar-control-h: 44px;
+  --pane-header-action-h: 32px;
   --tool-dock-action-size: 44px;
+  --panel-header-inset-top: 1px;
+  --panel-header-inset-bottom: 2px;
 }
 
-:root[data-ui-touch] {
+html:root[data-ui-touch] {
   --app-rail-w: 44px;
   --app-topbar-h: 44px;
   --app-nav-row-h: 44px;
@@ -180,10 +192,18 @@
     --panel-header-font-size: 12px;
     --panel-header-font-weight: 500;
     --panel-header-title-color: var(--ink-mid);
+    --panel-header-inset-top: 1px;
+    --panel-header-inset-bottom: 2px;
     --chat-gutter: 12px;
     --chat-flow-inset: 8px;
     --chat-list-row-h: 72px;
     --chat-avatar-size: 40px;
+  }
+
+  .ui-pane-header,
+  .ui-dialog__header {
+    --toolbar-control-h: 44px;
+    --pane-header-action-h: 32px;
   }
 }
 

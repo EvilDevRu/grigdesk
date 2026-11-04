@@ -1,10 +1,14 @@
 <template>
-  <main class="github-page ui-page">
-    <header class="page-head ui-page-head">
-      <div><h1>GitHub Issues</h1><p>Один проверенный репозиторий как канал общего Inbox.</p></div>
-      <UiButton class="btn" :loading="loading" :disabled="!!busy"
-                loading-label="Обновляю" @click="load">Обновить</UiButton>
-    </header>
+  <UiWorkspacePage>
+      <template #title><h1>GitHub Issues</h1></template>
+      <template #actions>
+        <UiIconButton label="Обновить" data-context="workspace-toolbar"
+                      :loading="loading" :disabled="!!busy" loading-label="Обновляю" @click="load">
+          <UiRefreshIcon />
+        </UiIconButton>
+      </template>
+    <div class="github-page">
+    <p class="ui-workspace-intro">Один проверенный репозиторий как канал общего Inbox.</p>
 
     <section v-if="unavailable" class="card" data-state="plugin-disabled">
       <h2>GitHub недоступен</h2>
@@ -123,7 +127,8 @@
         </section>
       </div>
     </template>
-  </main>
+    </div>
+  </UiWorkspacePage>
 </template>
 
 <script setup lang="ts">
@@ -146,6 +151,9 @@ import {
   UiCheckbox,
   UiField,
   UiInput,
+  UiIconButton,
+  UiWorkspacePage,
+  UiRefreshIcon,
   UiPasswordInput,
   UiSelect,
   confirmDialog,
@@ -570,20 +578,15 @@ onMounted(load);
 </script>
 
 <style scoped>
-.github-page { background: var(--ground); }
-.grid { max-width: 1100px; }
-.page-head {
+.github-page {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 18px;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
 }
-.page-head h1 { margin: 0; font-size: 24px; }
-.page-head p, .hint { color: var(--ink-mid); margin: 4px 0; }
-.page-head > div { flex: 1 1 240px; min-width: 0; }
-.page-head > .btn { flex: none; }
+
+.grid { max-width: 1100px; }
+
 .grid { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(340px, 1fr); gap: 14px; }.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; }.card h2 { margin: 0 0 13px; font-size: 17px; }
 .form { display: grid; gap: 11px; }
 .connection-head, .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }.connection-head { justify-content: space-between; }.pill { border-radius: 999px; background: var(--surface-2); padding: 3px 8px; font-size: 12px; }.pill.connected, .good { color: var(--good); }.pill.degraded, .bad, .read-only { color: var(--bad); }.pill.connecting, .warn { color: var(--warn); }.lifecycle-note { color: var(--ink-mid); }.lifecycle-note a { color: var(--accent); }

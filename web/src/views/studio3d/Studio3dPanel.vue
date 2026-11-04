@@ -9,14 +9,9 @@
       'is-page': presentation === 'page'
     }"
   >
-    <header class="studio-header">
-      <div class="studio-identity">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
-          stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 2l9 5v10l-9 5-9-5V7z M12 22V12 M21 7l-9 5-9-5" />
-        </svg>
-        <h2>3D</h2>
-      </div>
+    <UiPaneHeader class="studio-header" :data-ui-host-actions="presentation === 'dock' ? '' : undefined">
+      <template #title><h2>3D</h2></template>
+    </UiPaneHeader>
       <div v-if="store.state" class="studio-resources">
         <div v-for="provider in store.state.providers.filter((item) => !item.local)"
           :key="provider.id" class="studio-resource">
@@ -34,7 +29,6 @@
           <span class="studio-resource-note">свободно {{ bytes(store.state.library.freeBytes) }}</span>
         </div>
       </div>
-    </header>
     <UiInlineMessage v-if="disabled">
       Плагин «3D» выключен. Включить его можно в «Настройки → Плагины».
     </UiInlineMessage>
@@ -62,7 +56,8 @@
           @created="openCreated" @tasks="choose('tasks')" />
         <div v-if="tab === 'models' && modelId" class="studio-layout" :data-pane="modelPane"
           :class="{ 'studio-compact-column': !wide }" :style="{ '--studio-nav-width': `${navWidth}px` }">
-          <UiTabs v-model="modelPane" class="studio-model-panes" data-ui-workspace-tabs label="Работа с моделью">
+          <UiTabs v-model="modelPane" class="studio-model-panes" data-ui-workspace-tabs size="compact"
+                  label="Работа с моделью">
             <UiTab value="viewer" :controls="`${panelId}-viewer`">Модель</UiTab>
             <UiTab value="versions" :controls="`${panelId}-versions`">Версии</UiTab>
             <UiTab value="details" :controls="`${panelId}-details`">Сведения</UiTab>
@@ -133,7 +128,9 @@
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch, useId } from 'vue';
-import { UiButton, UiTabs, UiTab, UiActionLink, UiInlineMessage, UiPressable } from '../../ui.ts';
+import {
+  UiButton, UiTabs, UiTab, UiActionLink, UiInlineMessage, UiPaneHeader, UiPressable,
+} from '../../ui.ts';
 import { useStudio3dStore } from '../../stores/studio3d.ts';
 import { openSettings } from '../../shared/settingsNavigation.ts';
 import { usePluginsStore } from '../../stores/plugins.ts';
@@ -468,42 +465,13 @@ onUnmounted(() => {
   container: studio / inline-size;
 }
 
-.studio-header {
-  display: flex;
-  flex: none;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px 24px;
-  padding: 10px 16px 6px;
-}
-
-.studio-identity {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.studio-identity svg {
-  width: 20px;
-  height: 20px;
-  color: var(--accent);
-}
-
-.studio-header h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 650;
-}
-
-.is-dock .studio-header {
-  padding-right: var(--tool-dock-actions-space, 82px);
-}
 
 .studio-resources {
   display: flex;
-  flex: 1;
+  flex: none;
   align-items: center;
-  justify-content: flex-end;
+  padding: 8px 12px;
+  justify-content: flex-start;
   flex-wrap: wrap;
   gap: 8px 20px;
   font-size: 12px;
@@ -713,12 +681,6 @@ onUnmounted(() => {
 }
 
 @container studio (max-width: 559px) {
-  .studio-header {
-    align-items: flex-start;
-    gap: 10px;
-    padding-top: 12px;
-    padding-left: 14px;
-  }
 
   .studio-resources {
     flex-basis: 100%;
@@ -750,8 +712,9 @@ onUnmounted(() => {
   .studio-layout:not([data-pane='details']) > .studio-side { display: none; }
 }
 @media (max-height: 500px) {
-  .studio-header { padding-block: 8px; }
-  .is-model .studio-header { display: none; }
+
+  .is-model .studio-header,
+  .is-model .studio-resources { display: none; }
   .studio-main, .studio-side { padding: 8px; }
 }
 </style>

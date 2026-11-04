@@ -222,6 +222,8 @@ export async function mountSandboxes(t, options = {}) {
     globalThis.__sandboxLayoutHarness = harness;
 
     const stubs = {
+        '../../stores/browser.ts': `
+export const useBrowserStore = () => ({ available: false });`,
         '../actions/sandboxes': actions,
         '../../actions/sandboxes': actions,
         '../ui': ui,

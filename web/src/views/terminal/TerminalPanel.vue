@@ -1,10 +1,14 @@
 <template>
   <div class="term-view" :class="{ compact }">
-    <div class="bar">
+    <UiPaneHeader class="bar" :data-ui-host-actions="compact ? '' : undefined">
+      <template #title><h2>{{ t('core.terminal') }}</h2></template>
+      <template #meta>
       <span class="st" :class="status">
         <span class="dot"></span>
         {{ status === 'open' ? 'подключено' : status === 'connecting' ? 'подключение…' : 'отключено' }}
       </span>
+      </template>
+      <template #actions>
       <UiPopover placement="bottom-start" aria-label="Быстрые команды терминала">
         <template #trigger><UiButton variant="text">Команды</UiButton></template>
         <template #default="{ close }">
@@ -21,7 +25,8 @@
                 @click="reconnect">Переподключить</UiButton>
       <UiButton v-else class="end" tone="danger"
                 @click="closeSession({ announce: true })" aria-label="Завершить сессию">Завершить</UiButton>
-    </div>
+      </template>
+    </UiPaneHeader>
     <div ref="host" class="term-host" data-escape-owner="terminal"></div>
   </div>
 </template>
@@ -34,7 +39,7 @@ import type { IDisposable } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 
 import { api } from '../../shared/apiClient.ts';
-import { UiButton, UiCommandButton, UiPopover } from '../../ui';
+import { UiButton, UiCommandButton, UiPaneHeader, UiPopover, t } from '../../ui';
 
 interface TerminalIntent extends Record<string, unknown> {
   id: number;
@@ -437,16 +442,13 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .term-view { height: 100%; display: flex; flex-direction: column; min-height: 0; }
-.bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .st { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-mid); }
 .st .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
 .st.open .dot { background: var(--good); box-shadow: 0 0 6px color-mix(in srgb, var(--good) 60%, transparent); }
 .st.connecting .dot { background: var(--warn); }
 .st.closed .dot { background: var(--bad); }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
-.reconnect, .end { margin-left: auto; }
 .term-host { flex: 1; min-height: 0; padding: 8px 10px; background: var(--ground); overflow: hidden; }
 :deep(.xterm) { height: 100%; }
 :deep(.xterm-viewport) { background: transparent !important; }
-.term-view.compact .bar { gap: 8px; padding: 7px var(--tool-dock-actions-space, 9px) 7px 9px; }
 </style>

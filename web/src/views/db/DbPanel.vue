@@ -34,25 +34,24 @@
             </span>
           </template>
           <template #actions>
-            <UiButton data-context="workspace-toolbar" @click="openDriverInstall('install', false)">
-              {{ t('core.dbInstallDriver') }}
-            </UiButton>
-            <UiButton tone="accent" data-context="workspace-toolbar"
-                      :aria-expanded="showCreate" aria-controls="db-create" @click="toggleCreate">
-              {{ showCreate ? t('core.dbDesignHideForm') : t('core.dbDesignAddProfile') }}
-            </UiButton>
             <UiIconButton class="db-refresh" role="embedded" data-context="workspace-toolbar"
                           label="Обновить базы" v-tooltip="'Обновить'" :loading="refreshLoading"
                           loading-label="Обновляю" @click="refresh">
               <UiRefreshIcon />
             </UiIconButton>
+            <UiButton data-context="workspace-toolbar" :aria-label="t('core.dbInstallDriver')"
+                      v-tooltip="t('core.dbInstallDriver')" @click="openDriverInstall('install', false)">
+              {{ t('core.dbDriverAction') }}
+            </UiButton>
+            <UiCreateButton :label="showCreate ? t('core.dbDesignHideForm') : t('core.dbDesignAddProfile')"
+                            :expanded="showCreate" aria-controls="db-create" @click="toggleCreate" />
           </template>
         </UiPaneHeader>
       </div>
 
       <div class="db-panel__body">
         <div v-show="!showCreate" class="db-panel__navigation">
-          <UiTabs v-model="mobileWorkspace" data-ui-workspace-tabs label="Рабочая область базы">
+          <UiTabs v-model="mobileWorkspace" data-ui-workspace-tabs size="compact" label="Рабочая область базы">
             <UiTab value="profiles" controls="db-profiles-pane">
               Профили · {{ store.profiles?.length || 0 }}
             </UiTab>
@@ -332,7 +331,7 @@
               </header>
 
               <div v-if="activeSession" class="db-console__navigation">
-                <UiTabs v-model="mobilePane" data-ui-workspace-tabs label="Рабочая область базы">
+                <UiTabs v-model="mobilePane" data-ui-workspace-tabs size="compact" label="Рабочая область базы">
                   <UiTab value="query" controls="db-workbench">Запрос</UiTab>
                   <UiTab value="result" controls="db-workbench">Результат</UiTab>
                   <UiTab value="schema" controls="db-workbench">Схема</UiTab>
@@ -599,7 +598,7 @@
               <template #meta>{{ store.profiles?.length || 0 }}</template>
             </UiPaneHeader>
             <div class="db-catalog-search">
-              <UiSearchInput v-model="search" :placeholder="t('core.dbDesignSearchPlaceholder')"
+              <UiSearchInput v-model="search" size="compact" :placeholder="t('core.dbDesignSearchPlaceholder')"
                              :aria-label="t('core.dbDesignSearchLabel')" />
             </div>
             <div class="db-profiles__body">
@@ -725,6 +724,7 @@ import {
   UiField,
   UiFormActions,
   UiIconButton,
+  UiCreateButton,
   UiInlineMessage,
   UiInput,
   UiNumberInput,

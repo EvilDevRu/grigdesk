@@ -1,5 +1,5 @@
 <template>
-  <div class="ui-input-composite ui-search-input">
+  <div class="ui-input-composite ui-search-input" :data-size="normalizedSize">
     <UiInput
       ref="input"
       v-bind="$attrs"
@@ -26,7 +26,8 @@
 <script setup lang="ts">
 import { t } from '../../services/locale.ts';
 
-import { nextTick, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
+import { normalizeActionSize, type UiActionSize } from '../../types/uiActions';
 import UiIconButton from '../primitives/UiIconButton.vue';
 import UiInput from '../primitives/UiInput.vue';
 
@@ -38,12 +39,14 @@ const props = withDefaults(
     readonly?: boolean;
     invalid?: boolean;
     clearLabel?: string;
+    size?: UiActionSize;
   }>(),
   {
     disabled: false,
     readonly: false,
     invalid: false,
     clearLabel: undefined,
+    size: 'default',
   },
 );
 const emit = defineEmits<{
@@ -53,6 +56,7 @@ const emit = defineEmits<{
 }>();
 const model = defineModel<string>({ default: '' });
 const input = ref<InstanceType<typeof UiInput> | null>(null);
+const normalizedSize = computed(() => normalizeActionSize(props.size));
 
 /**
  * После очистки кнопка исчезает из DOM, поэтому фокус возвращается полю

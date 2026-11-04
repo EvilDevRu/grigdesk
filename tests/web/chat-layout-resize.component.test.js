@@ -364,11 +364,11 @@ test('раскладка чата: JS и CSS считают одни и те ж�
     actions,
     /data-context='chat-context'\] \.ui-button__label\s*\{[^}]*overflow:\s*visible;/,
   );
-  assert.match(list, /data-context="chat-list-new"/);
+  assert.match(list, /<UiCreateButton/);
   assert.match(list, /data-context="chat-list-action"/);
   assert.match(
     actions,
-    /data-context='chat-list-new'\]\s*\{[^}]*background:\s*var\(--surface-2\);/,
+    /data-context='workspace-create'\]\s*\{[^}]*background:\s*var\(--surface-2\);/,
   );
   assert.match(
     actions,

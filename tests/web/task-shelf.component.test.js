@@ -243,7 +243,7 @@ test('Фильтр внимания учитывает просмотренны�
     row({ taskId: '44', completed: true, state: 'lit' }),
   ]);
 
-  assert.equal(wrapper.get('.shelf-heading p').text(), '4 задачи · требуют внимания: 2');
+  assert.equal(wrapper.get('.shelf-content .shelf-heading').text(), '4 задачи · требуют внимания: 2');
   await wrapper.get('[data-shelf-filter="attention"]').trigger('click');
 
   assert.deepEqual(

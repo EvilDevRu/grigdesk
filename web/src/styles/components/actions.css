@@ -1733,13 +1733,14 @@ html[data-ui-touch] .ui-icon-button[data-context='alert-history'] .alert-bell-ba
   font-size: 12px;
 }
 
-/* Телефонная панель оставляет явные подписи и крупные действия вокруг схемы.
+/* Телефонная панель оставляет фильтры и меню в одной строке вокруг схемы.
    Геометрия карточки принадлежит разделу, оформление controls — общей библиотеке. */
 @media (max-width: 600px) {
-  .ui-button[data-context='pipeline-phone-controls'] {
+  .ui-icon-button[data-context='pipeline-phone-controls'] {
+    width: 44px;
+    height: 44px;
     min-height: 44px;
-    padding-inline: 12px;
-    font-size: 13px;
+    padding: 0;
   }
 
   .ui-button[data-context='pipeline-phone-menu'] > .ui-button__content,
@@ -1877,9 +1878,12 @@ html[data-ui-touch] .ui-icon-button[data-context='alert-history'] .alert-bell-ba
   transform: rotate(90deg);
 }
 
-/* Действия списка лежат поверх названия и бейджа модели. Их фон обязан быть
-   непрозрачным: прозрачный ghost-control показывает текст строки сквозь иконку. */
-.ui-icon-button[data-context='chat-list-new'] {
+/* Создание во всех панелях повторяет круглый плюс списка чатов.
+   Общий контекст сохраняет размер и непрозрачную поверхность вне конкретного раздела. */
+.ui-icon-button[data-role][data-context='workspace-create'] {
+  flex: none;
+  margin-left: 6px;
+  margin-right: 6px;
   width: 32px;
   height: 32px;
   min-height: 32px;
@@ -1890,7 +1894,7 @@ html[data-ui-touch] .ui-icon-button[data-context='alert-history'] .alert-bell-ba
   font-size: 16px;
 }
 
-.ui-icon-button[data-context='chat-list-new']:hover:not(:disabled) {
+.ui-icon-button[data-context='workspace-create']:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
   background: var(--surface-2);
   color: var(--accent);
@@ -1923,7 +1927,7 @@ html[data-ui-touch] .ui-icon-button[data-context='alert-history'] .alert-bell-ba
 /* Компактные действия списка не забирают ширину у названия разговора.
    Прозрачная область сохраняет касание 44 px без чёрной подложки. */
 html[data-ui-touch] .ui-icon-button[data-role]:is(
-  [data-context='chat-list-new'],
+  [data-context='workspace-create'],
   [data-context='chat-list-action']
 ) {
   position: relative;
@@ -1934,7 +1938,7 @@ html[data-ui-touch] .ui-icon-button[data-role]:is(
 }
 
 html[data-ui-touch] .ui-icon-button[data-role]:is(
-  [data-context='chat-list-new'],
+  [data-context='workspace-create'],
   [data-context='chat-list-action']
 )::after {
   content: '';
@@ -2485,7 +2489,13 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
 }
 
 /* Шапки диалогов следуют высоте controls и в узком desktop-окне. */
-.ui-icon-button[data-context='task-modal-header'],
+.ui-dialog__header .ui-icon-button,
+.ui-icon-button[data-context='task-modal-header'] {
+  width: var(--toolbar-control-h);
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
+}
+
 .ui-icon-button[data-context='pipeline-stage-close'] {
   width: var(--control-height);
   height: var(--control-height);
@@ -2796,18 +2806,26 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
   }
 }
 
-/* Размер действия задаёт шапка: desktop сохраняет 28 px, сенсорная версия — 32 px.
-   Невидимое расширение оставляет площадку 44 px на телефоне и планшете. */
-.ui-pane-header__actions .ui-button[data-context='workspace-toolbar'][data-role='board-new-task'] {
+/* Все текстовые действия шапки используют одну геометрию, включая ссылки.
+   Невидимое расширение оставляет площадку 44 px при видимой высоте 32 px на touch. */
+.ui-pane-header__actions .ui-button:not(.ui-icon-button) {
   position: relative;
-  height: var(--board-new-task-height, var(--toolbar-control-h));
-  min-height: var(--board-new-task-height, var(--toolbar-control-h));
+  height: auto;
+  min-height: var(--pane-header-action-h);
+  max-width: 100%;
+  margin-block: max(0px, calc((var(--toolbar-control-h) - var(--pane-header-action-h)) / 2));
+  padding: 4px 7px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
-.ui-button[data-role='board-new-task']::after {
+.ui-pane-header__actions .ui-button:not(.ui-icon-button)::after {
   content: '';
   position: absolute;
-  inset: var(--board-new-task-hit-inset, 0) 0;
+  inset: min(0px, calc((var(--pane-header-action-h) - var(--toolbar-control-h)) / 2)) 0;
 }
 
 @media (max-width: 600px) {

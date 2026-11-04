@@ -2,10 +2,11 @@
   <main class="inbox-page ui-workspace" data-ui-workspace>
     <UiPaneHeader>
       <template #title><h1 class="ui-workspace-title">Входящие</h1></template>
-      <template #meta>{{ t('core.inboxQueueSubtitle') }}</template>
       <template #actions>
-        <UiButton :loading="loading" data-context="workspace-toolbar"
-        loading-label="Обновляю" @click="load">Обновить</UiButton>
+        <UiIconButton label="Обновить" :loading="loading" data-context="workspace-toolbar"
+                      loading-label="Обновляю" @click="load">
+          <UiRefreshIcon />
+        </UiIconButton>
       </template>
     </UiPaneHeader>
 
@@ -28,7 +29,8 @@
         </p>
       </div>
 
-      <details class="channels-disclosure ui-workspace-disclosure" data-context="workspace-inline">
+      <details class="channels-disclosure ui-workspace-disclosure"
+               data-context="workspace-inline" data-inset="content">
         <summary>
           {{ t('core.inboxChannelsSummary', {
             total: payload.channels.length,
@@ -103,7 +105,7 @@
         <div class="inbox-workspace" :data-panel="panel">
           <aside ref="catalog" class="inbox-catalog" :aria-label="t('core.inboxQueueLabel')">
             <div class="catalog-tools">
-              <UiTabs v-model="activeSection" class="section-tabs" data-ui-workspace-tabs
+              <UiTabs v-model="activeSection" class="section-tabs" data-ui-workspace-tabs size="compact"
                 label="Разделы входящих">
                 <UiTab class="section-tab" value="review" data-section="review">
                   К разбору <span>{{ reviewItems.length }}</span>
@@ -336,6 +338,8 @@ import {
   UiActionLink,
   UiButton,
   UiCheckbox,
+  UiIconButton,
+  UiRefreshIcon,
   UiSpinner,
   UiTab,
   UiTabs,

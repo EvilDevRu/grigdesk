@@ -205,7 +205,7 @@ test('LIST-STATE-01', async (t) => {
 
 test('LIST-STATE-02', async (t) => {
   const { wrapper, state, calls } = await fixture(t);
-  const create = wrapper.find('[data-context="chat-list-new"]');
+  const create = wrapper.find('[data-context="workspace-create"]');
 
   assert.equal(create.element.disabled, true);
   assert.ok(wrapper.text().includes(TEXT.ru.blocked), 'объяснение видно без tooltip');

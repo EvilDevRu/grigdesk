@@ -1,22 +1,17 @@
 <template>
-  <section class="showcase ui-page" :class="{ 'showcase--film': store.opened }" aria-labelledby="showcase-title">
-    <header v-if="!store.opened" class="showcase__head ui-page-head">
-      <div class="showcase__intro">
-        <h1 id="showcase-title">Презентации</h1>
-        <p>
-          Выберите стенд, чтобы создать ролик с озвучкой и субтитрами.
-        </p>
-      </div>
-      <UiButton
-        class="showcase__refresh"
-        variant="ghost"
-        :loading="store.loading"
-        @click="loadShowcase(store)"
-      >
-        Обновить
-      </UiButton>
-    </header>
-    <h1 v-else id="showcase-title" class="ui-visually-hidden">Презентации</h1>
+  <UiWorkspacePage aria-labelledby="showcase-title">
+      <template v-if="!store.opened" #title><h1 id="showcase-title">Презентации</h1></template>
+      <template v-if="!store.opened" #actions>
+        <UiIconButton label="Обновить" data-context="workspace-toolbar"
+                      :loading="store.loading" @click="loadShowcase(store)">
+          <UiRefreshIcon />
+        </UiIconButton>
+      </template>
+    <h1 v-if="store.opened" id="showcase-title" class="ui-visually-hidden">Презентации</h1>
+    <div class="showcase" :class="{ 'showcase--film': store.opened }">
+    <p v-if="!store.opened" class="ui-workspace-intro">
+      Выберите стенд, чтобы создать ролик с озвучкой и субтитрами.
+    </p>
 
     <UiInlineMessage v-if="store.error" tone="danger">{{ store.error }}</UiInlineMessage>
 
@@ -148,7 +143,8 @@
         </div>
       </section>
     </template>
-  </section>
+    </div>
+  </UiWorkspacePage>
 </template>
 
 <script setup lang="ts">
@@ -160,6 +156,9 @@ import {
   UiActionLink,
   UiButton,
   UiInlineMessage,
+  UiIconButton,
+  UiWorkspacePage,
+  UiRefreshIcon,
   confirmDialog,
   promptDialog,
 } from '../ui';
@@ -816,36 +815,6 @@ async function check() {
   min-width: 0;
 }
 
-.showcase__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-}
-
-.showcase__intro {
-  min-width: 0;
-}
-
-.showcase__intro h1 {
-  margin: 0;
-  font-size: 24px;
-  line-height: 1.2;
-  letter-spacing: -0.03em;
-}
-
-.showcase__intro p {
-  max-width: 620px;
-  margin: 6px 0 0;
-  color: var(--ink-mid);
-  font-size: 13.5px;
-  line-height: 1.5;
-}
-
-.showcase__refresh {
-  flex: none;
-}
-
 .showcase__panel,
 .showcase__block {
   display: flex;
@@ -938,10 +907,6 @@ async function check() {
 }
 
 @media (max-width: 720px) {
-  .showcase__head {
-    flex-direction: column;
-    gap: 12px;
-  }
 
   .showcase__panel {
     padding: 15px;

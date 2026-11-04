@@ -1,109 +1,132 @@
 <template>
-  <div v-if="phone" class="phone-toolbar" data-ui-touch>
+  <UiPaneHeader v-if="phone" class="phone-toolbar" data-ui-touch :aria-label="t('core.pipeline')">
+    <div class="phone-toolbar__filters">
     <UiSelect
       data-role="pipeline-phone-project"
+      data-context="pipeline-phone-filter"
       :aria-label="t('core.pipelineProject')"
+      v-tooltip="selectedProject?.id === 'all' ? t('core.pipelineAllProjects') : selectedProject?.label"
       :model-value="project"
       @update:model-value="emit('project', String($event))"
     >
       <option v-for="option in projects" :key="option.id" :value="option.id">
         {{ option.id === 'all' ? t('core.pipelineAllProjects') : option.label }} · {{ option.count }}
       </option>
+      <template #value>
+        <span class="phone-toolbar__label">
+          {{ project === 'all' ? t('core.pipelineAllProjects') : selectedProject?.label }}
+        </span>
+        <span class="phone-toolbar__count">{{ selectedProject?.count }}</span>
+      </template>
     </UiSelect>
 
-    <div class="phone-toolbar__row">
-      <UiSelect
-        data-role="pipeline-phone-status"
-        :aria-label="t('core.pipelineStatus')"
-        :model-value="status"
-        @update:model-value="emit('status', String($event))"
-      >
-        <option v-for="option in statuses" :key="option.id" :value="option.id">
-          {{ option.id === 'all' ? t('core.pipelineAllStatuses') : option.label }} · {{ option.count }}
-        </option>
-      </UiSelect>
+    <UiSelect
+      data-role="pipeline-phone-status"
+      data-context="pipeline-phone-filter"
+      :aria-label="t('core.pipelineStatus')"
+      v-tooltip="status === 'all' ? t('core.pipelineAllStatuses') : selectedStatus?.label"
+      :data-filtered="status !== 'all' || undefined"
+      :model-value="status"
+      @update:model-value="emit('status', String($event))"
+    >
+      <option v-for="option in statuses" :key="option.id" :value="option.id">
+        {{ option.id === 'all' ? t('core.pipelineAllStatuses') : option.label }} · {{ option.count }}
+      </option>
+      <template #value>
+        <span class="phone-toolbar__label">{{ selectedStatus?.label }}</span>
+        <span class="phone-toolbar__count">{{ selectedStatus?.count }}</span>
+      </template>
+    </UiSelect>
 
-      <UiPopover
-        has-popup="menu"
-        placement="bottom-end"
-        :aria-label="t('core.pipelineRunControls')"
-        :style="{ width: 'min(320px, calc(100vw - 20px))' }"
-        data-ui-touch
-      >
-        <template #trigger>
-          <UiButton
-            data-role="pipeline-phone-controls"
-            data-context="pipeline-phone-controls"
-            :loading="bulkBusy !== null"
-            :loading-label="t(bulkBusy === 'stop' ? 'core.stoppingPipelines' : 'core.startingPipelines')"
-          >
-            {{ t('core.pipelineControls') }}
-          </UiButton>
-        </template>
-
-        <template #default="{ close }">
-          <div class="phone-controls">
-            <div class="phone-controls__group" role="group" :aria-label="t('core.pipelineCardView')">
-              <p class="phone-controls__heading">{{ t('core.pipelineCardView') }}</p>
-              <UiButton
-                data-role="pipeline-phone-compact"
-                data-context="pipeline-phone-menu"
-                variant="ghost"
-                block
-                role="menuitemcheckbox"
-                :aria-checked="compact"
-                :pressed="compact"
-                @click="emit('compact', !compact)"
-              >
-                {{ t('core.pipelineCompactView') }}
-              </UiButton>
-              <UiButton
-                data-role="pipeline-phone-loops"
-                data-context="pipeline-phone-menu"
-                variant="ghost"
-                block
-                role="menuitemcheckbox"
-                :aria-checked="loopsOn"
-                :pressed="loopsOn"
-                :disabled="compact"
-                @click="emit('loops', !loopsOn)"
-              >
-                {{ t('core.pipelineShowLoops') }}
-              </UiButton>
-              <p v-if="compact" class="phone-controls__hint">{{ t('core.pipelineLoopsHint') }}</p>
-            </div>
-
-            <div v-for="action in bulkActions" :key="action.id" class="phone-controls__group"
-                 role="group" :aria-label="t(action.label)">
-              <p class="phone-controls__heading">{{ t(action.label) }}</p>
-              <UiButton
-                v-for="scope in ['project', 'all'] as const"
-                :key="scope"
-                :data-phone-bulk-action="action.id"
-                data-context="pipeline-phone-menu"
-                :data-bulk-scope="scope"
-                variant="ghost"
-                block
-                role="menuitem"
-                :disabled="disabled || bulkBusy !== null || !bulkCounts[action.id][scope]"
-                @click="close('action'); emit('bulk', action.id, scope)"
-              >
-                <span class="phone-controls__command">
-                  <span>{{ t(action[scope]) }}</span>
-                  <b class="mono">{{ bulkCounts[action.id][scope] }}</b>
-                </span>
-              </UiButton>
-            </div>
-          </div>
-        </template>
-      </UiPopover>
     </div>
-  </div>
+    <template #actions>
+    <UiPopover
+      has-popup="menu"
+      placement="bottom-end"
+      :aria-label="t('core.pipelineRunControls')"
+      :style="{ width: 'min(320px, calc(100vw - 20px))' }"
+      data-ui-touch
+    >
+      <template #trigger>
+        <UiIconButton
+          data-phone-controls
+          data-context="pipeline-phone-controls"
+          :label="t('core.pipelineControls')"
+          v-tooltip="t('core.pipelineControls')"
+          :loading="bulkBusy !== null"
+          :loading-label="t(bulkBusy === 'stop' ? 'core.stoppingPipelines' : 'core.startingPipelines')"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="5" cy="12" r="1.7" />
+            <circle cx="12" cy="12" r="1.7" />
+            <circle cx="19" cy="12" r="1.7" />
+          </svg>
+        </UiIconButton>
+      </template>
+
+      <template #default="{ close }">
+        <div class="phone-controls">
+          <div class="phone-controls__group" role="group" :aria-label="t('core.pipelineCardView')">
+            <p class="phone-controls__heading">{{ t('core.pipelineCardView') }}</p>
+            <UiButton
+              data-role="pipeline-phone-compact"
+              data-context="pipeline-phone-menu"
+              variant="ghost"
+              block
+              role="menuitemcheckbox"
+              :aria-checked="compact"
+              :pressed="compact"
+              @click="emit('compact', !compact)"
+            >
+              {{ t('core.pipelineCompactView') }}
+            </UiButton>
+            <UiButton
+              data-role="pipeline-phone-loops"
+              data-context="pipeline-phone-menu"
+              variant="ghost"
+              block
+              role="menuitemcheckbox"
+              :aria-checked="loopsOn"
+              :pressed="loopsOn"
+              :disabled="compact"
+              @click="emit('loops', !loopsOn)"
+            >
+              {{ t('core.pipelineShowLoops') }}
+            </UiButton>
+            <p v-if="compact" class="phone-controls__hint">{{ t('core.pipelineLoopsHint') }}</p>
+          </div>
+
+          <div v-for="action in bulkActions" :key="action.id" class="phone-controls__group"
+               role="group" :aria-label="t(action.label)">
+            <p class="phone-controls__heading">{{ t(action.label) }}</p>
+            <UiButton
+              v-for="scope in ['project', 'all'] as const"
+              :key="scope"
+              :data-phone-bulk-action="action.id"
+              data-context="pipeline-phone-menu"
+              :data-bulk-scope="scope"
+              variant="ghost"
+              block
+              role="menuitem"
+              :disabled="disabled || bulkBusy !== null || !bulkCounts[action.id][scope]"
+              @click="close('action'); emit('bulk', action.id, scope)"
+            >
+              <span class="phone-controls__command">
+                <span>{{ t(action[scope]) }}</span>
+                <b class="mono">{{ bulkCounts[action.id][scope] }}</b>
+              </span>
+            </UiButton>
+          </div>
+        </div>
+      </template>
+    </UiPopover>
+    </template>
+  </UiPaneHeader>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
-import { UiButton, UiPopover, UiSelect, t } from '../../ui';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { UiButton, UiIconButton, UiPaneHeader, UiPopover, UiSelect, t, vTooltip } from '../../ui';
 
 type BulkAction = 'resume' | 'stop';
 type BulkScope = 'project' | 'all';
@@ -114,7 +137,7 @@ interface FilterOption {
   count: number;
 }
 
-defineProps<{
+const props = defineProps<{
   projects: FilterOption[];
   statuses: FilterOption[];
   project: string;
@@ -143,6 +166,9 @@ const emit = defineEmits<{
 const media = window.matchMedia('(max-width: 600px)');
 const phone = ref(media.matches);
 
+const selectedProject = computed(() => props.projects.find((option) => option.id === props.project));
+const selectedStatus = computed(() => props.statuses.find((option) => option.id === props.status));
+
 function updatePhone() {
   phone.value = media.matches;
 }
@@ -152,24 +178,23 @@ onUnmounted(() => media.removeEventListener('change', updatePhone));
 </script>
 
 <style scoped>
-.phone-toolbar {
-  position: sticky;
-  top: calc(var(--page-gutter) * -1);
-  z-index: 30;
+.phone-toolbar__filters {
   display: grid;
-  gap: 8px;
-  margin: calc(var(--page-gutter) * -1) calc(var(--page-gutter) * -1) -2px;
-  padding: 8px var(--page-gutter);
-  border-bottom: 1px solid var(--line);
-  background: var(--topbar);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
 }
 
-.phone-toolbar__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
+.phone-toolbar__label {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phone-toolbar__count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
 }
 
 .phone-controls {

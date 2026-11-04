@@ -5,21 +5,16 @@
         <div class="search">
           <UiSearchInput
             v-model="q"
-            data-context="chat-list-search"
+            size="compact"
             :placeholder="showArchived ? 'Поиск в архиве' : 'Поиск'"
           />
         </div>
-        <UiIconButton
+        <UiCreateButton
           class="new"
-          data-context="chat-list-new"
           label="Новый чат"
-          v-tooltip="'Новый чат'"
-          tone="accent"
           :disabled="!chat.loaded"
           @click="newChat"
-        >
-          ＋
-        </UiIconButton>
+        />
       </div>
       <div class="archive-toggle">
         <UiSwitch v-model="showArchived">{{ archiveLabel }}</UiSwitch>
@@ -263,6 +258,7 @@ import {
   UiButton,
   UiPopover,
   UiIconButton,
+  UiCreateButton,
   UiInput,
   UiPressable,
   UiSearchInput,

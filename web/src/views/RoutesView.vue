@@ -1,7 +1,7 @@
 <template>
   <div class="routes-page ui-workspace" data-ui-workspace :data-pane="mobilePane">
     <div class="route-pane-nav">
-    <UiTabs v-model="mobilePane" data-ui-workspace-tabs label="Область маршрута">
+    <UiTabs v-model="mobilePane" data-ui-workspace-tabs size="compact" label="Область маршрута">
       <UiTab value="catalog" controls="route-catalog-pane">Каталог</UiTab>
       <UiTab value="work" controls="route-work-pane">Маршрут</UiTab>
       <UiTab value="inspector" controls="route-work-pane" :disabled="!editingDraft || !selectedRoute">
@@ -13,11 +13,9 @@
       <UiPaneHeader>
         <template #title><h1>Маршруты</h1></template>
         <template #actions>
-          <UiButton v-if="profile" data-test="create-draft" data-context="workspace-toolbar"
-                    variant="ghost" :disabled="!pageReady"
-                    :aria-label="currentHash ? 'Создать черновик из current' : 'Создать черновик'"
-                    v-tooltip="currentHash ? 'Создать черновик из current' : 'Создать черновик'"
-                    @click="createEditorDraft">+ Черновик</UiButton>
+          <UiCreateButton v-if="profile" data-test="create-draft" :disabled="!pageReady"
+                          :label="currentHash ? 'Создать черновик из current' : 'Создать черновик'"
+                          @click="createEditorDraft" />
         </template>
       </UiPaneHeader>
       <div class="catalog-content">
@@ -199,7 +197,7 @@
                                @select-node="selectCanvasNode" @change="replaceEditorDocument" />
           <div class="route-editor-inspectors">
             <template v-if="selectedNode">
-              <UiTabs :model-value="selectedTab" data-ui-workspace-tabs label="Редактор этапа"
+              <UiTabs :model-value="selectedTab" data-ui-workspace-tabs size="compact" label="Редактор этапа"
                       @update:model-value="selectNodeTab">
                 <UiTab value="graph" controls="route-node-properties">Свойства и переходы</UiTab>
                 <UiTab value="prompt" controls="route-node-prompt">Инструкция</UiTab>
@@ -371,6 +369,7 @@ import type { DraftCreateRequest } from '../shared/routesApi.ts';
 import {
   UiButton,
   UiIconButton,
+  UiCreateButton,
   UiInlineMessage,
   UiPaneHeader,
   UiTabs,
@@ -1938,7 +1937,7 @@ onUnmounted(() => {
     display: flex;
     grid-column: 1 / -1;
     grid-row: 1;
-    padding: 4px 8px;
+    padding: 0 12px;
     border-bottom: 1px solid var(--line);
     background: var(--topbar);
   }

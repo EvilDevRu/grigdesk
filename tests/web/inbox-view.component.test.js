@@ -75,7 +75,8 @@ function response(over = {}) {
 }
 
 function button(wrapper, text) {
-  const found = wrapper.findAll('button').find((entry) => entry.text() === text);
+  const found = wrapper.findAll('button').find((entry) =>
+    entry.text() === text || entry.attributes('aria-label') === text);
   assert.ok(found, `не найдена кнопка «${text}»`);
   return found;
 }

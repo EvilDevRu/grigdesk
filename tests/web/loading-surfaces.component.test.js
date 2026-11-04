@@ -269,7 +269,7 @@ for (const compact of [false, true]) {
 
             await h.resolve();
             assert.equal(h.wrapper.find('[data-ui-loading]').exists(), false);
-            assert.deepEqual(h.calls, ['/api/tasks']);
+            assert.deepEqual(h.calls, ['/api/tasks?sources=1']);
             assert.ok(pendingBricks > 0, 'Конвейер использует свой каркас');
             assert.ok(props, 'режимы переданы лёгкому PipelineLoading');
             assert.equal(props.compact, compact);

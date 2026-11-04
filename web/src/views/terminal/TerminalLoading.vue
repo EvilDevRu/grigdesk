@@ -2,11 +2,13 @@
   <div class="panel" :class="{ compact }">
     <UiLoadingState style="height: 100%" :label="label" :failed="failed">
       <div class="outline">
-        <div class="header">
-          <UiSkeleton width="96px" height="12px" />
-          <UiSkeleton shape="block" width="80px" height="var(--control-height)" />
-          <UiSkeleton class="action" shape="block" width="140px" height="var(--control-height)" />
-        </div>
+        <UiPaneHeader class="header" :data-ui-host-actions="compact ? '' : undefined">
+          <template #title><UiSkeleton width="96px" height="12px" /></template>
+          <template #actions>
+            <UiSkeleton shape="block" width="80px" height="var(--pane-header-action-h)" />
+            <UiSkeleton shape="block" width="140px" height="var(--pane-header-action-h)" />
+          </template>
+        </UiPaneHeader>
         <div class="console"><UiSkeletonLayout layout="text" :header="false" :rows="12" /></div>
       </div>
     </UiLoadingState>
@@ -14,7 +16,7 @@
 </template>
 
 <script setup lang="ts">
-import { UiLoadingState, UiSkeleton, UiSkeletonLayout } from '../../ui';
+import { UiLoadingState, UiPaneHeader, UiSkeleton, UiSkeletonLayout } from '../../ui';
 
 defineOptions({ inheritAttrs: false });
 
@@ -34,9 +36,5 @@ withDefaults(defineProps<{
 <style scoped>
 .panel, .outline { height: 100%; min-height: 0; }
 .outline { display: flex; flex-direction: column; }
-.header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding: 8px 12px; border-bottom: 1px solid var(--line); }
-.action { margin-left: auto; }
 .console { flex: 1; min-height: 0; padding: 8px 10px; overflow: hidden; }
-.compact .header { gap: 8px; padding: 7px var(--tool-dock-actions-space, 9px) 7px 9px; }
 </style>

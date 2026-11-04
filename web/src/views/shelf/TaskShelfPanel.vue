@@ -5,9 +5,6 @@
       <div class="shelf-pane-heading">
         <UiPaneHeader>
           <template #title><h2>Полка задач</h2></template>
-          <template #meta>
-            <div class="shelf-heading"><p>{{ summaryText }}</p></div>
-          </template>
           <template #actions>
             <UiIconButton v-if="!shelf._viewMirror" role="embedded" data-context="workspace-toolbar"
                           :label="t('core.shelfDesignRefresh')" v-tooltip="t('core.shelfDesignRefresh')"
@@ -40,6 +37,7 @@
     </header>
 
     <div class="shelf-content">
+      <p class="shelf-heading ui-workspace-intro">{{ summaryText }}</p>
       <UiLoadingState v-if="shelf.loading && !shelf.loaded" label="Загружаю полку…"
                       :failed="Boolean(shelf.error)">
         <div class="shelf-loading"><UiSkeletonLayout layout="list" :header="true" /></div>
@@ -489,7 +487,7 @@ defineExpose({
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--ground);
+  background: var(--surface);
   color: var(--ink);
 }
 
@@ -504,11 +502,8 @@ defineExpose({
   padding-right: var(--tool-dock-actions-space, 0px);
 }
 
-.shelf-heading p {
-  margin: 0;
-  color: var(--ink-mid);
-  font-size: 11px;
-  line-height: 17px;
+.shelf-heading {
+  padding: 10px 12px 0;
 }
 
 .shelf-toolbar {

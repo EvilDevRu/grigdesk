@@ -1,5 +1,12 @@
 <template>
-  <div class="tg ui-page">
+  <UiWorkspacePage>
+      <template #title><h1>Телеграм</h1></template>
+      <template #actions>
+        <UiActionLink v-if="!pluginOff && connected" href="#/inbox" size="compact">
+          Общая очередь
+        </UiActionLink>
+      </template>
+    <div class="tg">
     <section v-if="pluginOff" class="card disabled-card">
       <div class="disabled-mark">TG</div>
       <div>
@@ -12,14 +19,9 @@
     </section>
 
     <template v-else>
-      <header class="tg-hero ui-page-head">
-        <div>
-          <h1>Телеграм</h1>
-          <p v-if="!loading">{{ connected ? `Подключён @${bot?.username}`
-            : 'Подключите бота токеном от @BotFather.' }}</p>
-        </div>
-        <UiActionLink v-if="connected" href="#/inbox">Общая очередь</UiActionLink>
-      </header>
+      <p v-if="!loading" class="ui-workspace-intro">
+        {{ connected ? `Подключён @${bot?.username}` : 'Подключите бота токеном от @BotFather.' }}
+      </p>
 
       <div v-if="error || note" class="feedback" role="status" aria-live="polite">
         <p v-if="error" class="err">{{ error }}</p>
@@ -792,7 +794,8 @@
         </section>
       </template>
     </template>
-  </div>
+    </div>
+  </UiWorkspacePage>
 </template>
 
 <script setup lang="ts">
@@ -827,6 +830,7 @@ import {
   UiIconButton,
   UiInput,
   UiNumberInput,
+  UiWorkspacePage,
   UiSelect,
   UiSpinner,
   vTooltip,
@@ -1948,42 +1952,16 @@ async function disconnect(): Promise<void> {
 <style scoped>
 .tg {
   --tg-soft: color-mix(in srgb, var(--accent) 9%, var(--surface));
-  width: min(1480px, 100%); margin: 0 auto; padding-bottom: 36px;
   display: flex; flex-direction: column; gap: 16px;
 }
 
-/* Верх страницы сразу отвечает на два вопроса новичка: что здесь происходит и
-   насколько всё уже настроено. Цифры справа — быстрые переходы к рабочим блокам. */
-.tg-hero {
-  position: relative; overflow: hidden; display: grid;
-  grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 28px;
-  min-height: 150px; padding: 24px 26px;
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line)); border-radius: 16px;
-  background:
-    radial-gradient(circle at 92% 5%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 34%),
-    linear-gradient(135deg, color-mix(in srgb, var(--surface) 93%, var(--accent)), var(--surface));
-  box-shadow: var(--shadow);
-}
-.tg-hero::after {
-  content: ''; position: absolute; width: 230px; height: 230px; right: -105px; bottom: -155px;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); border-radius: 50%;
-  pointer-events: none;
-}
-.hero-copy { position: relative; z-index: 1; max-width: 760px; }
 .eyebrow, .section-kicker {
   color: var(--accent); font-size: 10.5px; font-weight: 720; letter-spacing: .09em;
   line-height: 1.25; text-transform: uppercase;
 }
 .ttl { margin: 5px 0 8px; font-size: clamp(21px, 2vw, 28px); line-height: 1.2; letter-spacing: -.025em; }
 .lead { max-width: 76ch; margin: 0; font-size: 13.5px; line-height: 1.6; }
-.hero-stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, minmax(104px, 1fr)); gap: 8px; }
-.hero-stat {
-  min-width: 112px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px;
-  background: color-mix(in srgb, var(--ground) 66%, transparent); transition: border-color .14s, transform .14s;
-}
-.hero-stat:hover { border-color: var(--accent); transform: translateY(-1px); }
-.hero-stat strong { display: block; font-size: 24px; line-height: 1; font-variant-numeric: tabular-nums; }
-.hero-stat span { display: block; margin-top: 7px; color: var(--ink-mid); font-size: 11.5px; line-height: 1.3; }
+
 .setup-summary, .hero-loading {
   position: relative; z-index: 1; display: flex; flex-direction: column; gap: 5px;
   max-width: 260px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 11px;
@@ -2217,9 +2195,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Средние экраны: native-карточки становятся одной колонкой. */
 @media (max-width: 1100px) {
-  .tg-hero { grid-template-columns: minmax(0, 1fr); gap: 17px; }
-  .hero-stats { width: 100%; }
-  .hero-stat { min-width: 0; }
+
   .setup-summary { max-width: none; flex-direction: row; align-items: baseline; }
   .setup-grid { grid-template-columns: minmax(0, 1fr) minmax(310px, .82fr); }
 }
@@ -2234,13 +2210,10 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 
 @media (max-width: 640px) {
-  .tg { gap: 12px; padding-bottom: 20px; }
-  .tg-hero { min-height: 0; padding: 18px; border-radius: 13px; }
+  .tg { gap: 12px; }
+
   .ttl { font-size: 21px; }
-  .hero-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .hero-stat { padding: 10px; }
-  .hero-stat strong { font-size: 19px; }
-  .hero-stat span { font-size: 9.5px; }
+
   .setup-summary { flex-direction: column; }
   .setup-path { grid-template-columns: minmax(0, 1fr); }
   .path-step { min-height: 58px; }
@@ -2260,9 +2233,7 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .empty-rules { align-items: stretch; flex-direction: column; }
   .after-grid { grid-template-columns: minmax(0, 1fr); }
 }
-.tg { width: 100%; margin: 0; }
-.tg-hero { display: flex; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; gap: 12px; }
-.tg-hero::after { display: none; }
+
 .setup-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
 .setup-card { padding: 16px; }
 .token-control { margin-top: 0; }

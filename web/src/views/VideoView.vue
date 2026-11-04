@@ -1,8 +1,10 @@
 <template>
-  <div class="video ui-page">
-    <header class="video-hero ui-page-head" :class="{ compact: meetingReady }">
-      <div><h1>Видео → задачи</h1><p v-if="!meetingReady">Выберите запись встречи для расшифровки и подготовки задач.</p></div>
-    </header>
+  <UiWorkspacePage>
+      <template #title><h1>Видео → задачи</h1></template>
+    <div class="video">
+    <p v-if="!meetingReady" class="ui-workspace-intro">
+      Выберите запись встречи для расшифровки и подготовки задач.
+    </p>
 
     <div v-if="pluginOff" class="empty-state">
       <span class="empty-icon" aria-hidden="true">
@@ -32,7 +34,8 @@
       <!-- Мастер оставляет на экране только текущую работу. Шаги после записи
            заперты до готовой расшифровки, но назад можно вернуться без потери сеанса. -->
       <div class="wizard-bar">
-        <UiTabs v-model="wizardStep" class="video-steps" data-ui-workspace-tabs label="Шаги разбора видео">
+        <UiTabs v-model="wizardStep" class="video-steps" data-ui-workspace-tabs size="compact"
+                label="Шаги разбора видео">
           <UiTab
             id="video-step-record"
             class="video-step"
@@ -683,7 +686,8 @@
       </div>
       </div>
     </template>
-  </div>
+    </div>
+  </UiWorkspacePage>
 </template>
 
 <script setup lang="ts">
@@ -695,6 +699,7 @@ import {
   UiFilePicker,
   UiIconButton,
   UiInput,
+  UiWorkspacePage,
   UiPressable,
   UiSegmentedControl,
   UiSelect,
@@ -1183,8 +1188,6 @@ onUnmounted(() => {
 
 <style scoped>
 .video {
-  width: min(100%, 1160px);
-  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1215,34 +1218,7 @@ section.wizard-panel { display: grid; gap: 16px; }
   background: color-mix(in srgb, var(--surface-2) 55%, transparent);
 }
 .draft-empty p { margin: 0; font-size: 12px; }
-.video-hero {
-  position: relative;
-  min-height: 176px;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 32px;
-  padding: 30px 34px;
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  background:
-    radial-gradient(circle at 84% 10%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 31%),
-    linear-gradient(135deg, color-mix(in srgb, var(--surface) 94%, var(--accent)) 0%, var(--surface) 72%);
-  box-shadow: var(--shadow);
-}
-.video-hero::after {
-  content: '';
-  position: absolute;
-  right: -72px;
-  bottom: -145px;
-  width: 390px;
-  height: 280px;
-  border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
-  border-radius: 50%;
-  pointer-events: none;
-}
-.hero-copy { position: relative; z-index: 1; max-width: 650px; }
+
 .eyebrow, .section-kicker, .summary-kicker {
   margin: 0 0 7px;
   color: var(--accent);
@@ -1254,7 +1230,7 @@ section.wizard-panel { display: grid; gap: 16px; }
 }
 .ttl { margin: 0; font-size: clamp(26px, 2.5vw, 34px); line-height: 1.16; letter-spacing: -.035em; }
 .lead { max-width: 64ch; margin: 10px 0 0; color: var(--ink-mid); font-size: 14px; line-height: 1.55; }
-.hero-route { position: relative; z-index: 1; display: flex; align-items: center; flex: none; }
+
 .route-node {
   display: grid;
   place-items: center;
@@ -1269,7 +1245,6 @@ section.wizard-panel { display: grid; gap: 16px; }
 .route-node svg { width: 23px; height: 23px; }
 .route-node.active { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent); }
 .route-node.good { border-color: color-mix(in srgb, var(--good) 50%, var(--line)); color: var(--good); }
-.hero-route i { width: 30px; height: 1px; background: linear-gradient(90deg, var(--line-2), color-mix(in srgb, var(--accent) 45%, var(--line-2))); }
 
 .empty-state, .notice {
   display: flex;
@@ -1491,8 +1466,7 @@ section.wizard-panel { display: grid; gap: 16px; }
 .ok svg { width: 15px; height: 15px; }
 
 @media (max-width: 760px) {
-  .video-hero { min-height: 0; padding: 23px; border-radius: 17px; }
-  .hero-route { display: none; }
+
   .ttl { font-size: 25px; }
   .upload-action { display: none; }
   .wizard-bar { align-items: stretch; flex-direction: column; }
@@ -1515,8 +1489,7 @@ section.wizard-panel { display: grid; gap: 16px; }
 
 @media (max-width: 520px) {
   .video { gap: 12px; }
-  .video-hero { padding: 20px; }
-  .video-hero.compact .lead { display: none; }
+
   .upload-icon { width: 43px; height: 43px; border-radius: 12px; }
   .meeting-summary, .transcript, .drafts { padding: 15px; border-radius: 14px; }
   .dhead {
@@ -1543,9 +1516,7 @@ section.wizard-panel { display: grid; gap: 16px; }
 @media (prefers-reduced-motion: reduce) {
   .upload-card, .pbar span, .seg-add { transition: none; }
 }
-.video { width: 100%; margin: 0; }
-.video-hero, .video-hero.compact { min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
-.video-hero::after { display: none; }
+
 @media (max-height: 500px) {
   .video { gap: 8px; }
   .upload-card { padding: 12px; }

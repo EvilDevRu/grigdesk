@@ -206,7 +206,7 @@ async function fixture(t: TestContext) {
  * Переключатель нужен только когда рабочая область стала однопанельной.
  */
 async function showList(page: Page) {
-    const list = page.getByRole('button', { name: 'Список', exact: true });
+    const list = page.getByRole('tab', { name: 'Список', exact: true });
 
     if (await list.isVisible()) {
         await list.click();
@@ -607,17 +607,17 @@ test('список и стенд переключаются по контейн�
             });
         }
 
-        const list = page.getByRole('button', { name: 'Список', exact: true });
-        const detail = page.getByRole('button', { name: 'Стенд', exact: true });
+        const list = page.getByRole('tab', { name: 'Список', exact: true });
+        const detail = page.getByRole('tab', { name: 'Стенд', exact: true });
 
         assert.equal(await list.count(), 1, 'Есть переключатель списка по ширине контейнера');
         assert.equal(await list.isVisible(), true);
         await list.click();
-        assert.equal(await list.getAttribute('aria-pressed'), 'true');
+        assert.equal(await list.getAttribute('aria-selected'), 'true');
         assert.equal(await page.locator('[data-context="workspace-catalog-row"]').first().isVisible(), true);
         assert.equal(await page.locator('.sandbox-card').isVisible(), false);
         await chooseStand(page, baseEntry.task);
-        assert.equal(await detail.getAttribute('aria-pressed'), 'true');
+        assert.equal(await detail.getAttribute('aria-selected'), 'true');
         assert.equal(await page.locator('.sandbox-card').isVisible(), true);
         assert.equal(await page.locator('[data-context="workspace-catalog-row"]').first().isVisible(), false);
         await page.getByRole('button', { name: '+ Поднять стенд', exact: true }).click();

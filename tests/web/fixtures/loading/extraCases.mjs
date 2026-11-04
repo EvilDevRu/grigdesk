@@ -266,6 +266,13 @@ export function extraStubs() {
 const sandboxCase = extraPorts.find((item) => item.id === 'sandboxes');
 
 sandboxCase.readyState.manualSandboxes = sandboxCase.readyState.sandboxes;
+
+const shelfCase = extraPorts.find((item) => item.id === 'shelf');
+
+for (const state of [shelfCase.state, shelfCase.readyState, shelfCase.emptyState]) {
+    state.allRows = state.rows;
+}
+
 extraPorts.push({
     id: 'settings-setup',
     file: 'src/views/settings/pages/PluginSetupPanel.vue',

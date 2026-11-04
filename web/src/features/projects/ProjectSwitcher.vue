@@ -5,8 +5,7 @@
                 @update:model-value="model = String($event ?? '')">
         <option v-for="project in profiles" :key="project" :value="project">{{ project }}</option>
       </UiSelect>
-      <UiIconButton label="Новый проект" v-tooltip="'Новый проект'"
-                    data-context="workspace-form" tone="accent" @click="emit('create')">+</UiIconButton>
+      <UiCreateButton label="Новый проект" @click="emit('create')" />
     </UiControlGroup>
     <UiControlGroup v-else label="Проект">
       <UiButton
@@ -21,14 +20,10 @@
         {{ project }}
       </UiButton>
 
-      <UiIconButton
+      <UiCreateButton
         label="Новый проект"
-        v-tooltip="'Новый проект'"
-        tone="accent"
         @click="emit('create')"
-      >
-        +
-      </UiIconButton>
+      />
     </UiControlGroup>
     <UiButton v-if="model" variant="ghost" data-context="workspace-toolbar"
       @click="emit('manage', model)">
@@ -43,7 +38,7 @@
 // Заведение проекта — не его дело: форма, проверка идентификатора и запись живут
 // в разделе «Проекты», и второй вход создавал бы вторую запись в том же реестре.
 import type { PropType } from 'vue';
-import { UiButton, UiControlGroup, UiIconButton, UiSelect, vTooltip } from '../../ui';
+import { UiButton, UiControlGroup, UiCreateButton, UiSelect } from '../../ui';
 
 defineProps({
   compact: Boolean,

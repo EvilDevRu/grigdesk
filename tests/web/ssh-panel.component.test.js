@@ -136,6 +136,40 @@ async function mountPanel(t, { pending = {}, store: storeOverrides = {}, props =
   return { wrapper, store, chatStore, answers, savedConnections, flushPromises };
 }
 
+test('общие вкладки SSH переключаются с клавиатуры, обновление предшествует плюсу', async (t) => {
+  const { wrapper } = await mountPanel(t, { store: {
+    connections: [{
+      id: 'demo',
+      projectId: 'grigdesk',
+      label: 'Demo',
+      role: 'app',
+      host: 'example.test',
+      port: 22,
+      user: 'demo',
+    }],
+  } });
+  const navigation = wrapper.get('.ssh-panel__navigation');
+  const tabs = navigation.findAll('[role="tab"]');
+
+  assert.equal(navigation.get('[role="tablist"]').attributes('data-size'), 'compact');
+  assert.deepEqual(tabs.map((tab) => tab.attributes('aria-controls')),
+    ['ssh-connections', 'ssh-workspace']);
+  assert.equal(tabs[1].attributes('aria-selected'), 'true');
+  await navigation.get('[role="tablist"]').trigger('keydown', { key: 'Home' });
+  assert.equal(tabs[0].attributes('aria-selected'), 'true');
+  assert.equal(wrapper.classes().includes('show-connections'), true);
+  await navigation.get('[role="tablist"]').trigger('keydown', { key: 'ArrowRight' });
+  assert.equal(tabs[1].attributes('aria-selected'), 'true');
+  assert.equal(globalThis.__sshPanelTerminals.length, 1);
+
+  const actions = wrapper.findAll('.ssh-panel__header .ui-pane-header__actions button');
+
+  assert.deepEqual(actions.map((button) => button.attributes('aria-label')),
+    ['Обновить SSH', 'Добавить сервер']);
+  assert.equal(actions[1].attributes('data-context'), 'workspace-create');
+  assert.equal(wrapper.get('.ssh-catalog-search .ui-search-input').attributes('data-size'), 'compact');
+});
+
 test('две server-owned сессии показаны вкладками при одном xterm', async (t) => {
   const { wrapper } = await mountPanel(t);
 
@@ -148,7 +182,7 @@ test('две server-owned сессии показаны вкладками пр�
       inTitle: wrapper.get('.ssh-panel__title [data-product-maturity="beta"]').exists(),
       inSummary: wrapper.find('.ssh-panel__summary [data-product-maturity]').exists(),
     },
-    tabs: wrapper.findAll('[role="tab"]').map((entry) => ({
+    tabs: wrapper.findAll('.ssh-tabs [role="tab"]').map((entry) => ({
       project: entry.get('[data-ssh-session-project]').text(),
       target: entry.get('[data-ssh-session-target]').text(),
     })),
@@ -198,7 +232,7 @@ test('одноимённые сессии показывают проект и �
   });
 
   assert.deepEqual(
-    wrapper.findAll('[role="tab"]').map((tab) => ({
+    wrapper.findAll('.ssh-tabs [role="tab"]').map((tab) => ({
       project: tab.get('[data-ssh-session-project]').text(),
       target: tab.get('[data-ssh-session-target]').text(),
       ariaLabel: tab.attributes('aria-label'),
@@ -250,7 +284,8 @@ test('повторные сессии одного сервера получаю
 
 test('переключение внутренней вкладки переиспользует тот же xterm', async (t) => {
   const { wrapper, store, flushPromises } = await mountPanel(t);
-  await wrapper.findAll('[role="tab"]')[1].trigger('click');
+
+  await wrapper.findAll('.ssh-tabs [role="tab"]')[1].trigger('click');
   await flushPromises();
 
   assert.deepEqual({ activeId: store.activeId, terminals: globalThis.__sshPanelTerminals.length }, {
@@ -346,7 +381,7 @@ test('без активной сессии панель показывает п�
 
 test('стрелки переключают сессии и фокус без второго xterm', async (t) => {
   const { wrapper, store, flushPromises } = await mountPanel(t);
-  const tabs = wrapper.findAll('[role="tab"]');
+  const tabs = wrapper.findAll('.ssh-tabs [role="tab"]');
 
   await tabs[0].trigger('keydown', { key: 'ArrowRight' });
   await flushPromises();
@@ -376,7 +411,7 @@ test('закрытие активной сессии выбирает сосед
   await close.trigger('click');
   await flushPromises();
 
-  const tabs = wrapper.findAll('[role="tab"]');
+  const tabs = wrapper.findAll('.ssh-tabs [role="tab"]');
   assert.deepEqual({
     activeId: store.activeId,
     labels: tabs.map((tab) => tab.text()),

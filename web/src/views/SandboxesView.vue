@@ -4,14 +4,14 @@
       <template #title><h1 id="sandboxes-title">Песочницы</h1></template>
       <template #meta><span v-if="store.loaded">Стендов: {{ rows.length }}</span></template>
       <template #actions>
+        <UiIconButton label="Обновить песочницы" v-tooltip="'Обновить песочницы'"
+                      data-context="workspace-toolbar" :loading="store.loading" @click="loadSandboxes()">
+          <UiRefreshIcon />
+        </UiIconButton>
         <UiButton v-if="store.loaded" tone="accent" data-context="workspace-toolbar"
                   :aria-expanded="showCreate" aria-controls="sandboxes-create" @click="toggleCreate">
           {{ createOpen ? 'Скрыть форму' : '+ Поднять стенд' }}
         </UiButton>
-        <UiIconButton label="Обновить песочницы" v-tooltip="'Обновить песочницы'"
-                      data-context="workspace-toolbar" :loading="store.loading" @click="loadSandboxes()">
-<UiRefreshIcon />
-        </UiIconButton>
       </template>
     </UiPaneHeader>
 
@@ -23,10 +23,10 @@
     </UiInlineMessage>
 
     <div class="sandboxes__tabs">
-      <UiButton data-context="workspace-toolbar" :pressed="panel === 'list'"
-                aria-controls="sandboxes-list" @click="panel = 'list'">Список</UiButton>
-      <UiButton data-context="workspace-toolbar" :pressed="panel === 'detail'"
-                aria-controls="sandboxes-detail" @click="panel = 'detail'">Стенд</UiButton>
+      <UiTabs v-model="panel" size="compact" data-ui-workspace-tabs label="Область песочниц">
+        <UiTab value="list" controls="sandboxes-list">Список</UiTab>
+        <UiTab value="detail" controls="sandboxes-detail">Стенд</UiTab>
+      </UiTabs>
     </div>
 
     <div class="sandboxes__panels" :data-panel="panel">
@@ -144,6 +144,8 @@ import {
   UiPaneHeader,
   UiProgress,
   UiSelect,
+  UiTab,
+  UiTabs,
   confirmDialog,
   promptDialog,
   vTooltip,
@@ -487,8 +489,7 @@ async function run(payload: { task: string; action: SandboxActionDecl }) {
 .sandboxes__tabs {
   display: none;
   flex: none;
-  gap: 8px;
-  padding: 4px 12px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -602,10 +603,6 @@ async function run(payload: { task: string; action: SandboxActionDecl }) {
 }
 
 @container sandboxes (max-width: 360px) {
-  .sandboxes__header :deep(.ui-pane-header__actions) {
-    flex-basis: 100%;
-  }
-
   .sandboxes__filters {
     grid-template-columns: minmax(0, 1fr);
   }

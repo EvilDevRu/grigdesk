@@ -1,6 +1,7 @@
 <template>
   <div
     class="ui-tabs"
+    :data-size="normalizedSize"
     role="tablist"
     :aria-label="label"
     :aria-orientation="orientation"
@@ -11,7 +12,8 @@
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue';
+import { computed, reactive } from 'vue';
+import { normalizeActionSize, type UiActionSize } from '../../types/uiActions';
 import {
   provideUiTabsContext,
   type UiTabRegistration,
@@ -23,17 +25,20 @@ const props = withDefaults(
     label?: string;
     activation?: UiTabsActivation;
     orientation?: 'horizontal' | 'vertical';
+    size?: UiActionSize;
   }>(),
   {
     label: undefined,
     activation: 'automatic',
     orientation: 'horizontal',
+    size: 'default',
   },
 );
 
 defineSlots<{ default(): unknown }>();
 
 const model = defineModel<string | number>({ required: true });
+const normalizedSize = computed(() => normalizeActionSize(props.size));
 const registrations = reactive(new Map<symbol, UiTabRegistration>());
 
 provideUiTabsContext({

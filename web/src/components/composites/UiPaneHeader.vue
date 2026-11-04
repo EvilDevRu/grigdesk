@@ -1,5 +1,6 @@
 <template>
-  <header class="ui-pane-header" :data-inset="inset">
+  <header class="ui-pane-header" :data-inset="inset"
+          :data-layout="$slots.title || $slots.meta ? 'title' : 'controls'">
     <div class="ui-pane-header__layout">
       <div v-if="$slots.navigation" class="ui-pane-header__navigation"><slot name="navigation" /></div>
       <div class="ui-pane-header__main">

@@ -179,6 +179,8 @@ test('PH-NAV: поиск, пустота, очистка, динамически
 
   const search = wrapper.get('input[type="search"]');
 
+  assert.equal(wrapper.get('.ui-search-input').attributes('data-size'), 'compact');
+
   assert.equal(browser.document.activeElement === search.element, false);
   await search.setValue('ПЛАГИН');
   assert.deepEqual(wrapper.findAll('a').map((link) => link.attributes('href')), ['/plugin/example']);

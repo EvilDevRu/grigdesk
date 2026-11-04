@@ -105,7 +105,7 @@
     </template>
       </div>
       <UiTabs v-if="phoneBoard && phonePages.length > 1" class="board-page-nav"
-              data-context="board-page-nav" :label="t('core.boardPages')"
+              data-context="board-page-nav" data-ui-workspace-tabs size="compact" :label="t('core.boardPages')"
               :model-value="activeBoardPage" @update:model-value="selectBoardPage">
         <UiTab v-for="page in phonePages" :id="`${boardPagesId}-tab-${page.id}`" :key="page.id"
                :value="page.id" :controls="`${boardPagesId}-panel-${page.id}`"

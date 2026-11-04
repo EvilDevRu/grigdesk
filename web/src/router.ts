@@ -12,7 +12,7 @@ const routes: RouteRecordRaw[] = [
     path: '/3d',
     name: 'studio3d',
     component: () => import('./views/Studio3dView.vue'),
-    meta: { title: '3D', tool: 'studio3d' },
+    meta: { title: '3D', tool: 'studio3d', layout: 'workspace' },
   },
   {
     path: '/board',
@@ -24,7 +24,7 @@ const routes: RouteRecordRaw[] = [
     path: '/pipeline',
     name: 'pipeline',
     component: () => import('./views/PipelineView.vue'),
-    meta: { title: 'Конвейер' },
+    meta: { title: 'Конвейер', layout: 'workspace' },
   },
   {
     path: '/sandboxes',
@@ -47,7 +47,7 @@ const routes: RouteRecordRaw[] = [
     path: '/showcase/:id?',
     name: 'showcase',
     component: () => import('./views/ShowcaseView.vue'),
-    meta: { title: 'Презентации' },
+    meta: { title: 'Презентации', layout: 'workspace' },
   },
   {
     path: '/chats',
@@ -98,7 +98,7 @@ const routes: RouteRecordRaw[] = [
     path: '/db',
     name: 'db',
     component: () => import('./views/DbView.vue'),
-    meta: { title: 'Базы', tool: 'db' },
+    meta: { title: 'Базы', tool: 'db', layout: 'workspace' },
   },
   {
     path: '/docker',
@@ -139,13 +139,13 @@ const routes: RouteRecordRaw[] = [
     path: '/shelf',
     name: 'shelf',
     component: () => import('./views/ShelfView.vue'),
-    meta: { title: 'Полка', tool: 'shelf' },
+    meta: { title: 'Полка', tool: 'shelf', layout: 'workspace' },
   },
   {
     path: '/tools',
     name: 'tools',
     component: () => import('./views/ToolsView.vue'),
-    meta: { title: 'Инструменты' },
+    meta: { title: 'Инструменты', layout: 'workspace' },
   },
   // Страница пользовательского плагина: панель-iframe ведёт ToolHost, id — из адреса.
   {
@@ -158,7 +158,7 @@ const routes: RouteRecordRaw[] = [
     path: '/video',
     name: 'video',
     component: () => import('./views/VideoView.vue'),
-    meta: { title: 'Видео' },
+    meta: { title: 'Видео', layout: 'workspace' },
   },
   {
     path: '/inbox',
@@ -170,13 +170,13 @@ const routes: RouteRecordRaw[] = [
     path: '/github',
     name: 'github',
     component: () => import('./views/GitHubView.vue'),
-    meta: { title: 'GitHub' },
+    meta: { title: 'GitHub', layout: 'workspace' },
   },
   {
     path: '/telegram',
     name: 'telegram',
     component: () => import('./views/TelegramView.vue'),
-    meta: { title: 'Телеграм' },
+    meta: { title: 'Телеграм', layout: 'workspace' },
   },
   {
     path: '/surface',

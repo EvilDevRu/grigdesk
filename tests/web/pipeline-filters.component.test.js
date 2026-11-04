@@ -226,10 +226,8 @@ test('проекты занимают свободный левый участо
     style,
     /\.toolbar\s*\{[^}]*grid-template-columns:\s*auto minmax\(0, 1fr\) auto;/su,
   );
-  assert.match(
-    style,
-    /\.toolbar\s*\{[^}]*top:\s*calc\(var\(--pipeline-content-gutter\) \* -1\);/su,
-  );
+  assert.equal(wrapper.get('.pipeline-toolbar').classes().includes('ui-pane-header'), true);
+  assert.equal(wrapper.get('.pipeline-content').classes().includes('ui-workspace-page__body'), true);
   assert.doesNotMatch(style, /\.toolbar::before\s*\{/u);
   assert.match(style, /\.toolbar-secondary\s*\{[^}]*display:\s*flex;/su);
 });
@@ -614,27 +612,39 @@ test('пакет пропускает уже запущенную задачу �
 
 test('телефон: выбор проекта и состояния использует общие фильтры и сохраняет их', async (t) => {
   const { wrapper, flushPromises } = await mountPipeline(t, { width: 390 });
-  const project = wrapper.get('[data-role="pipeline-phone-project"]');
-  const status = wrapper.get('[data-role="pipeline-phone-status"]');
+  const project = wrapper.get('button[data-role="pipeline-phone-project"]');
+  const status = wrapper.get('button[data-role="pipeline-phone-status"]');
 
-  await project.setValue('beta');
+  await project.trigger('click');
+  await flushPromises();
+  await wrapper.findAll('[role="option"]').find((option) => option.text().includes('beta')).trigger('click');
   await flushPromises();
 
   assert.equal(localStorage.getItem('grigdesk-pipeline-project'), 'beta');
   assert.equal(wrapper.findAll('.card').length, 1);
-  assert.match(wrapper.get('.phone-toolbar').text(), /Все состояния · 1/u);
+  assert.equal(project.get('.phone-toolbar__label').text(), 'beta');
+  assert.equal(project.get('.phone-toolbar__count').text(), '1');
+  assert.equal(status.get('.phone-toolbar__label').text(), 'Все');
+  assert.equal(status.get('.phone-toolbar__count').text(), '1');
+  assert.equal(wrapper.get('[data-phone-controls]').attributes('aria-label'), 'Управление');
 
-  await status.setValue('waiting');
+  await status.trigger('click');
+  await flushPromises();
+  await wrapper.findAll('[role="option"]')
+    .find((option) => option.text().includes('Ждут решения')).trigger('click');
   await flushPromises();
 
   assert.equal(localStorage.getItem('grigdesk-pipeline-status'), 'waiting');
+  assert.equal(status.get('.phone-toolbar__label').text(), 'Ждут решения');
+  assert.equal(status.get('.phone-toolbar__count').text(), '0');
+  assert.equal(status.attributes('data-filtered'), 'true');
   assert.equal(wrapper.find('.filter-empty').exists(), true);
 });
 
 test('телефон: настройки вида управляют прежними карточками и закрываются при расширении', async (t) => {
   const { wrapper, flushPromises, browser } = await mountPipeline(t, { width: 390 });
 
-  await wrapper.get('[data-role="pipeline-phone-controls"]').trigger('click');
+  await wrapper.get('[data-phone-controls]').trigger('click');
   await wrapper.get('[data-role="pipeline-phone-compact"]').trigger('click');
   await flushPromises();
 
@@ -674,7 +684,7 @@ test('телефон: массовая команда сохраняет обл�
     },
   });
 
-  await wrapper.get('[data-role="pipeline-phone-controls"]').trigger('click');
+  await wrapper.get('[data-phone-controls]').trigger('click');
 
   const command = wrapper.get('[data-phone-bulk-action="stop"][data-bulk-scope="project"]');
 

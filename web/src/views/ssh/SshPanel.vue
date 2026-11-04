@@ -31,29 +31,26 @@
             </span>
           </template>
           <template #actions>
-            <UiButton tone="accent" data-context="workspace-toolbar"
-                      :aria-expanded="showCreate" aria-controls="ssh-create" @click="toggleCreate">
-              {{ showCreate ? 'Скрыть форму' : '+ Добавить сервер' }}
-            </UiButton>
             <UiIconButton class="ssh-refresh" role="embedded" data-context="workspace-toolbar"
                           label="Обновить SSH" v-tooltip="'Обновить'" :loading="refreshLoading"
                           loading-label="Обновляю" @click="refresh">
               <UiRefreshIcon />
             </UiIconButton>
+            <UiCreateButton :label="showCreate ? 'Скрыть форму' : 'Добавить сервер'"
+                            :expanded="showCreate" aria-controls="ssh-create" @click="toggleCreate" />
           </template>
         </UiPaneHeader>
       </div>
 
     <div class="ssh-panel__navigation">
-      <UiButton data-context="workspace-toolbar" :pressed="showConnections"
-                aria-controls="ssh-connections" @click="showConnections = true">
-        Серверы
-        <span class="ssh-nav-count">{{ store.connections?.length || 0 }}</span>
-      </UiButton>
-      <UiButton data-context="workspace-toolbar" :pressed="!showConnections"
-                aria-controls="ssh-workspace" @click="showConnections = false">
-        {{ showCreate ? 'Новый сервер' : 'Терминал' }}
-      </UiButton>
+      <UiTabs v-model="mobileWorkspace" size="compact" data-ui-workspace-tabs label="Рабочая область SSH">
+        <UiTab value="connections" controls="ssh-connections">
+          Серверы · {{ store.connections?.length || 0 }}
+        </UiTab>
+        <UiTab value="workspace" controls="ssh-workspace">
+          {{ showCreate ? 'Новый сервер' : 'Терминал' }}
+        </UiTab>
+      </UiTabs>
     </div>
 
     <div class="ssh-panel__body">
@@ -428,6 +425,7 @@
         <div v-if="store.connections?.length" class="ssh-catalog-search">
           <UiSearchInput
             v-model="search"
+            size="compact"
             aria-label="Поиск сервера"
             placeholder="Найти сервер…"
           />
@@ -650,6 +648,7 @@ import {
   UiFilePicker,
   UiFormActions,
   UiIconButton,
+  UiCreateButton,
   UiInlineMessage,
   UiInput,
   UiNumberInput,
@@ -741,6 +740,12 @@ const sshApprovals = computed(() => Object.values(chat.pending || {})
   .filter((item) => item.origin === 'ssh'));
 const activeSession = computed(() => (store.sessions || [])
   .find((item) => item.id === store.activeId));
+const mobileWorkspace = computed({
+  get: () => showConnections.value ? 'connections' : 'workspace',
+  set: (value: string) => {
+    showConnections.value = value === 'connections';
+  },
+});
 const selectedSessionId = computed({
   get: () => store.activeId || store.sessions?.[0]?.id || '',
   set: (sessionId: string) => {
@@ -1513,22 +1518,6 @@ defineExpose({ exportState, importState });
   gap: 6px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--line);
-}
-
-.ssh-nav-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 17px;
-  height: 16px;
-  margin-left: 5px;
-  padding-inline: 5px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--ink-mid);
-  font-size: 10.5px;
-  font-variant-numeric: tabular-nums;
-  line-height: 15px;
 }
 
 .ssh-layout {

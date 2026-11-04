@@ -124,7 +124,7 @@ test('BOARD-PAGES: CSS оставляет вертикальную прокру�
   assert.equal(css('.board-heading .ui-pane-header__layout').paddingRight, '12px');
   assert.notEqual(css('.board-heading .ui-icon-button').marginLeft, 'calc(10px + 12px)');
   assert.equal(wrapper.find('[data-role="board-new-task"]').exists(), true);
-  assert.equal(css('[data-role="board-new-task"]').height, '32px');
+  assert.equal(css('[data-role="board-new-task"]').height, 'auto');
   assert.equal(css('[data-role="board-new-task"]').minHeight, '32px');
   assert.equal(css('[data-board-page-tab="mine"]').minHeight, '32px');
   assert.equal(css('.board-page-nav').overflowX, 'visible');

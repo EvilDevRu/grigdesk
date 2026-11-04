@@ -3,6 +3,7 @@ export { default as UiActionLink } from './components/primitives/UiActionLink.vu
 export { default as UiAudio } from './components/primitives/UiAudio.vue';
 export { default as UiButton } from './components/primitives/UiButton.vue';
 export { default as UiCheckbox } from './components/primitives/UiCheckbox.vue';
+export { default as UiCreateButton } from './components/primitives/UiCreateButton.vue';
 export { default as UiIconButton } from './components/primitives/UiIconButton.vue';
 export { default as UiRefreshIcon } from './components/primitives/UiRefreshIcon.vue';
 export { default as UiInput } from './components/primitives/UiInput.vue';
@@ -37,6 +38,7 @@ export { default as UiSettingControl } from './components/composites/UiSettingCo
 export { default as UiTab } from './components/composites/UiTab.vue';
 export { default as UiTabs } from './components/composites/UiTabs.vue';
 export { default as UiToggleButton } from './components/composites/UiToggleButton.vue';
+export { default as UiWorkspacePage } from './components/composites/UiWorkspacePage.vue';
 
 export { default as UiInlineMessage } from './components/feedback/UiInlineMessage.vue';
 export { default as UiLoadingState } from './components/feedback/UiLoadingState.vue';

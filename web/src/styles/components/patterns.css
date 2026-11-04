@@ -4,32 +4,7 @@
   margin: 0;
 }
 
-/* Внешние поля обычной страницы принадлежат AppShell.
-   Внутренние формы могут ограничивать ширину, сохраняя ось заголовка. */
-.ui-page-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.ui-page-head > div { min-width: 0; }
-.ui-page-head h1 { margin: 0; font-size: 24px; line-height: 1.3; }
-.ui-page-head p { margin: 4px 0 0; color: var(--ink-mid); font-size: 13px; }
-
-@media (max-width: 600px) {
-  .ui-page-head { gap: 8px; margin-bottom: 12px; }
-  .ui-page-head h1 { font-size: 20px; overflow-wrap: anywhere; }
-}
-
-@media (max-height: 500px) {
-  .ui-page-head { margin-bottom: 8px; gap: 8px; }
-  .ui-page-head h1 { font-size: 20px; }
-}
-
-/* Панель повторяет геометрию toolbar конвейера: 28 + 8 px, на touch 44 + 8.
+/* Панель задаёт общую геометрию разделов, каталогов и редакторов.
    Слоты содержат семантические заголовки, состояния и настоящие controls экрана. */
 .ui-pane-header {
   flex: none;
@@ -39,13 +14,18 @@
   container: ui-pane-header / inline-size;
 }
 
+.ui-pane-header[data-ui-host-actions] {
+  padding-right: var(--tool-dock-actions-space, 0px);
+}
+
 .ui-pane-header__layout {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
-  min-height: calc(var(--toolbar-control-h) + 7px);
-  padding: 3px 12px 4px;
+  min-height: calc(var(--toolbar-control-h) + var(--panel-header-inset-top)
+    + var(--panel-header-inset-bottom));
+  padding: var(--panel-header-inset-top) 12px var(--panel-header-inset-bottom);
 }
 
 .ui-pane-header[data-inset='content'] .ui-pane-header__layout {
@@ -98,7 +78,45 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+  min-height: var(--toolbar-control-h);
   max-width: 100%;
+}
+
+/* Шапка остаётся на полной ширине, содержимое прокручивается под ней.
+   Одинаковые поля не зависят от наличия карточек или пустого состояния раздела. */
+.ui-workspace-page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ground);
+}
+
+.ui-workspace-page__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--page-gutter);
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.ui-workspace-page__body > * {
+  flex-shrink: 0;
+}
+
+.ui-workspace-intro {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
 }
 
 .ui-pane-header__navigation {
@@ -155,7 +173,7 @@
 
 .ui-workspace-disclosure > summary {
   min-height: var(--control-height);
-  padding: 6px 10px;
+  padding: calc((var(--control-height) - 20px) / 2) 10px;
   border-radius: var(--radius-sm);
   background: var(--sidebar);
   color: var(--ink);
@@ -195,6 +213,12 @@
   padding-inline: 0;
   background: transparent;
   border-radius: 0;
+}
+
+/* Вложенные раскрытия наследуют поля родителя, а полоса у края страницы задаёт их сама.
+   Вертикальные поля summary центрируют текст и нативный маркер в сенсорной строке. */
+.ui-workspace-disclosure[data-inset='content'] > summary {
+  padding-inline: 12px;
 }
 
 .ui-workspace-disclosure[data-context='workspace-inline'] > summary:hover {
@@ -1047,11 +1071,49 @@
 .ui-action-menu { display: flex; flex-direction: column; gap: 4px; }
 .ui-action-menu > .ui-button { justify-content: flex-start; text-align: left; white-space: normal; }
 
-/* Переключение рабочей области сохраняет смонтированные редакторы и соединения. */
-.ui-tabs[data-ui-workspace-tabs] { width: 100%; flex-wrap: wrap; gap: 4px; }
-.ui-tabs[data-ui-workspace-tabs] > .ui-tab { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: 1 1 auto; padding: 4px 10px; min-height: var(--control-height); height: auto; white-space: nowrap; }
-@media (pointer: coarse) {
-  .ui-tabs[data-ui-workspace-tabs] > .ui-tab { min-height: 44px; }
+/* Рабочие вкладки меняют только раскладку: общая рамка сегментов остаётся непрерывной.
+   Равные доли и перенос текста удерживают навигацию в одной строке узкой панели. */
+.ui-tabs[data-ui-workspace-tabs] {
+  flex: none;
+  width: 100%;
+  gap: 0;
+}
+
+.ui-tabs[data-ui-workspace-tabs] > .ui-tab {
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  height: auto;
+  min-height: calc(var(--control-height) - 2px);
+  padding: 4px 10px;
+  white-space: normal;
+}
+
+/* Общий компактный размер перенесён с навигации доски на публичный UiTabs.
+   Внешние поля резервируют прозрачную площадку, чтобы соседние controls её не перекрывали. */
+.ui-tabs[data-size='compact'] {
+  margin-top: 6px;
+  margin-bottom: 6px;
+  overflow-x: visible;
+  overflow-y: visible;
+}
+
+.ui-tabs[data-size='compact'] > .ui-tab {
+  position: relative;
+  min-width: 0;
+  height: auto;
+  min-height: 32px;
+  padding: 4px 6px;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: normal;
+}
+
+.ui-tabs[data-size='compact'] > .ui-tab::after {
+  content: '';
+  position: absolute;
+  inset: -6px 0;
 }
 
 @container studio (max-width: 440px) {
@@ -1430,19 +1492,6 @@
   }
 }
 
-/* Планшет получает ту же компактную шапку доски, что и телефон.
-   Сенсорный режим сохраняет площадку настроек 44 px независимо от ширины окна. */
-[data-ui-touch] .ui-pane-header[data-context='board-heading'] {
-  --board-new-task-height: 32px;
-  --board-new-task-hit-inset: -6px;
-}
-
-[data-ui-touch] .ui-pane-header[data-context='board-heading'] .ui-pane-header__layout {
-  min-height: calc(var(--toolbar-control-h) + 3px);
-  padding-top: 1px;
-  padding-bottom: 2px;
-}
-
 /* Заголовок не сжимается до буквенного столбца: длинные actions переносятся целиком.
    Короткое действие остаётся рядом, когда обоим хватает собственной ширины. */
 @media (max-width: 600px) {
@@ -1452,34 +1501,6 @@
 
   .board-phone-footer [data-role='board-snapshot-status'] {
     color: var(--board-secondary-color);
-  }
-
-  .ui-tabs[data-context='board-page-nav'] {
-    display: flex;
-    flex: none;
-    gap: 0;
-    width: 100%;
-    overflow-x: visible;
-    overflow-y: visible;
-  }
-
-  .ui-tabs[data-context='board-page-nav'] .ui-tab[data-context='board-page-tab'] {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-    height: auto;
-    min-height: 32px;
-    padding: 4px 6px;
-    gap: 4px;
-    font-size: 12px;
-    line-height: 18px;
-    white-space: normal;
-  }
-
-  .ui-tab[data-context='board-page-tab']::after {
-    content: '';
-    position: absolute;
-    inset: -6px 0;
   }
 
   .ui-segmented-control[data-context='board-triage-mode'] > .ui-button {
@@ -1512,19 +1533,6 @@
 
   .ui-pane-header__layout {
     gap: 4px 8px;
-    min-height: calc(var(--toolbar-control-h) + 3px);
-    padding-top: 1px;
-    padding-bottom: 2px;
-  }
-
-  .ui-pane-header[data-context='board-heading'] .ui-pane-header__layout {
-    padding-left: 12px;
-    padding-right: 12px;
-  }
-
-  .ui-pane-header[data-context='board-heading'] {
-    --board-new-task-height: 32px;
-    --board-new-task-hit-inset: -6px;
   }
 
   .ui-pane-header__navigation {
@@ -1547,6 +1555,10 @@
     max-width: 100%;
   }
 
+  .ui-pane-header[data-layout='controls'] .ui-pane-header__main {
+    flex: 1;
+  }
+
   .ui-pane-header__actions {
     flex: 0 1 auto;
     max-width: 100%;
@@ -1560,6 +1572,10 @@
   .ui-pane-header__meta {
     font-size: 12px;
     line-height: 18px;
+  }
+
+  .ui-workspace-page {
+    background: var(--surface);
   }
 }
 

@@ -1,8 +1,25 @@
 <template>
   <div class="code-panel" :class="{ compact, narrow: codePanelNarrow }"
        :aria-busy="loading ? 'true' : undefined" @keydown="onDiffKeydown">
-    <header ref="panelHeader" class="code-head" tabindex="-1">
-      <strong>Код</strong>
+    <div ref="panelHeader" class="code-head" tabindex="-1">
+      <UiPaneHeader class="code-pane-heading" :data-ui-host-actions="compact ? '' : undefined">
+        <template #title><h2>Код</h2></template>
+        <template #actions>
+      <!-- Переключатель навигатора — иконка без подписи, того же роста, что кнопки дока
+           справа. Подпись с именем вкладки читалась второй вкладкой «Коммиты». -->
+      <UiIconButton v-if="!codePanelNarrow" class="navigator-toggle" role="embedded"
+                    data-context="workspace-toolbar"
+                    :pressed="!navigatorCollapsed" :aria-expanded="!navigatorCollapsed"
+                    :label="navigatorToggleLabel" v-tooltip="navigatorToggleLabel"
+                    @click="navigatorCollapsed = !navigatorCollapsed">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2.5" y="3" width="15" height="14" rx="2" />
+          <path d="M7 3v14" />
+        </svg>
+      </UiIconButton>
+        </template>
+      </UiPaneHeader>
       <!-- Выбор рабочей копии живёт в шапке, а не отдельным блоком панели: там он
            виден и при свёрнутом дереве, а панели остаётся один смысл — содержимое. -->
       <div class="head-ctx">
@@ -31,21 +48,7 @@
         <span v-else-if="headContext" class="tlabel mono"
               v-tooltip="context?.treePath">{{ headContext }}</span>
       </div>
-      <span class="grow"></span>
-      <!-- Переключатель навигатора — иконка без подписи, того же роста, что кнопки дока
-           справа. Подпись с именем вкладки читалась второй вкладкой «Коммиты». -->
-      <UiIconButton v-if="!codePanelNarrow" class="navigator-toggle" role="embedded"
-                    data-context="tool-dock-navigator"
-                    :pressed="!navigatorCollapsed" :aria-expanded="!navigatorCollapsed"
-                    :label="navigatorToggleLabel" v-tooltip="navigatorToggleLabel"
-                    @click="navigatorCollapsed = !navigatorCollapsed">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"
-             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="2.5" y="3" width="15" height="14" rx="2" />
-          <path d="M7 3v14" />
-        </svg>
-      </UiIconButton>
-    </header>
+    </div>
 
     <!-- Холодный запуск сразу занимает финальную сетку. Без этого сначала был
          короткий пустой экран «Загрузка…», а затем вся рабочая область прыгала. -->
@@ -1335,6 +1338,7 @@ import type {
 import {
   UiButton,
   UiIconButton,
+  UiPaneHeader,
   UiInlineMessage,
   UiPopover,
   UiPressable,
@@ -6200,16 +6204,24 @@ onBeforeUnmount(() => {
 .code-panel { height: 100%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .hunk-navigation { display: flex; align-items: center; gap: 4px; }
 .code-head {
-  min-width: 0; min-height: 36px; display: flex; align-items: center; gap: 10px;
-  padding: 0 4px 8px; color: var(--ink); outline: none;
+  flex: none;
+  min-width: 0;
+  outline: none;
   container: code-head / inline-size;
 }
-.code-head strong { flex: none; font-size: 13px; font-weight: 650; }
 .code-head:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
 .navigator-toggle { flex: none; }
 /* Шапка — не форма: у контролов нет своих коробок, только подпись-метка, значение
    и шеврон. Тот же приём, что в строке состояния чата. */
-.head-ctx { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.head-ctx {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--topbar);
+}
 .head-pick { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .head-pick label { flex: none; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
   color: var(--ink-mid); opacity: .75; }
@@ -6235,7 +6247,6 @@ onBeforeUnmount(() => {
   .head-pick.tree :deep(.ui-select) { width: 100%; max-width: none; }
   .head-pick + .head-pick { padding-left: 6px; }
 }
-.code-panel.narrow .code-head { column-gap: 6px; }
 .tlabel { font-size: 12px; color: var(--ink-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Только корневое «проектов нет»: у состояний внутри панели (`.git-index-state.empty`)
    свои классы, и общий селектор `.empty` раздувал их отступами на 40px. */
@@ -6286,12 +6297,6 @@ onBeforeUnmount(() => {
 .code-split span { width: 2px; height: 34px; border-radius: 999px; background: var(--line-2); }
 .code-split:hover span, .code-split:focus-visible span { background: var(--accent); }
 .code-split:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.code-panel.compact .code-head {
-  min-height: 40px;
-  padding: var(--tool-dock-action-top, 4px) var(--tool-dock-actions-space, 4px) 5px 11px;
-  border-bottom: 1px solid var(--line); background: var(--topbar);
-}
-.code-panel.compact .code-head strong { font-size: 12.5px; letter-spacing: .01em; }
 
 /* Рейка разделов: skin кнопки — в общем actions.css по data-context, здесь только
    раскладка колонки и бейдж счётчика поверх значка «Изменений». */
@@ -6616,12 +6621,6 @@ onBeforeUnmount(() => {
 /* Подписи стоят рядом со значениями, чтобы контекст не занимал четыре строки формы.
    Оба выбора сохраняют отдельный ряд и читаемую ширину без изменения состояния редактора. */
 @media (max-width: 600px) {
-  .code-panel .code-head {
-    flex-wrap: wrap;
-    row-gap: 4px;
-    padding-bottom: 4px;
-  }
-
   .code-panel .code-head .head-ctx {
     flex: 1 0 100%;
     order: 2;

@@ -34,6 +34,7 @@ async function mountPanel(t, store, props = {}) {
           job: null, versions: [], error: null, recoveryError: null, pendingAction: null,
           reconciling: false, busy: false, versionsLoading: false, versionsInputKey: '', versionsUrl: '',
           loadJob: async () => {}, invalidateVersions: () => {},
+          forgetJob: () => {},
         });
       `,
     },
@@ -80,6 +81,7 @@ test('панель БД объединяет сессии схему консо�
           job: null, versions: [], error: null, recoveryError: null, pendingAction: null,
           reconciling: false, busy: false, versionsLoading: false, versionsInputKey: '', versionsUrl: '',
           loadJob: async () => {}, invalidateVersions: () => {},
+          forgetJob: () => {},
         });
       `,
       },
@@ -138,6 +140,7 @@ test('панель передаёт выбранную SSH-сессию при �
           job: null, versions: [], error: null, recoveryError: null, pendingAction: null,
           reconciling: false, busy: false, versionsLoading: false, versionsInputKey: '', versionsUrl: '',
           loadJob: async () => {}, invalidateVersions: () => {},
+          forgetJob: () => {},
         });
       `,
     },
@@ -206,7 +209,7 @@ test('панель БД использует каркас ToolHost и явные
     workspace: true,
     profiles: true,
     emptyProfile: 'Профилей пока нетДобавьте подключение — оно появится в каталоге проектов.'
-      + '+ Добавить профиль',
+      + 'Добавить профиль',
     emptyResult: '{ }Результатов пока нетОткройте сессию из профиля слева.',
   });
 });
@@ -633,8 +636,7 @@ test('DUI-01: явная установка открывает driver wizard и 
     compact: true, presentation: 'dock',
   });
 
-  const install = wrapper.findAll('button')
-    .find((button) => /Установить драйвер из Git/u.test(button.text()));
+  const install = wrapper.get('[aria-label="Установить драйвер из Git…"]');
 
   assert.ok(install, 'в Базах нужна явная кнопка установки драйвера');
 
@@ -654,7 +656,7 @@ test('DUI-01: явная установка открывает driver wizard и 
 
   await flushPromises();
 
-  const add = wrapper.findAll('button').find((button) => button.text().includes('Добавить профиль'));
+  const add = wrapper.get('[aria-controls="db-create"]');
 
   await add.trigger('click');
 
