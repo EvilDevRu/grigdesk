@@ -201,7 +201,7 @@ import type { ExternalCliDefinition } from '../providerInstall/inventoryTypes.ts
 
 import { createWorkToolRegistry } from './work-tools/index.ts';
 
-export { withBrowserToolPolicy } from './work-tools/index.ts';
+export { withBrowserToolPolicy, withHelpToolPolicy } from './work-tools/index.ts';
 
 import { executorLoaders } from './registryTable.ts';
 import { externalCliAdapter } from '../providerInstall/externalCliAdapter.ts';
@@ -443,8 +443,8 @@ export interface ExecutorAdapter {
 }
 
 /**
- * Provider-neutral рабочие инструменты замкнуты на server-owned scope. Никакое
- * поле аргументов модели не способно назначить проект, чат или живую сессию.
+ * Все рабочие порты принимаются и передаются registry явно, включая чтение справки.
+ * Аргументы модели не назначают проект, чат, живую сессию или scope SSH/БД/browser.
  */
 export function createWorkTools({
   projectId = null,
@@ -457,18 +457,19 @@ export function createWorkTools({
   browserAvailable,
   browserOwner,
   browserInvoke,
+  helpInvoke,
 }: Record<string, unknown> = {}) {
   return createWorkToolRegistry({
-  browserAvailable,
-  browserOwner,
-  browserInvoke,
-
     projectId,
     chatKey,
     permissionMode,
     invoke,
     pluginEnabled,
     dbInvoke,
+    browserAvailable,
+    browserOwner,
+    browserInvoke,
+    helpInvoke,
     workToolPolicy: workToolPolicy as import('../../../../shared/chat/chatPermissionModes.ts').WorkToolPolicy,
   });
 }

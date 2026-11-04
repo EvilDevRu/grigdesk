@@ -37,3 +37,10 @@ export {
 } from '../../../web/src/views/settings/pages/PluginWorkspacePage.vue';
 
 export { default as SettingsModal } from '../../../web/src/views/settings/SettingsModal.vue';
+
+export { default as HelpWorkspace } from '../../../web/src/features/help/HelpWorkspace.vue';
+export { default as HelpBrowser } from '../../../web/src/features/help/HelpBrowser.vue';
+export { default as HelpDialog } from '../../../web/src/features/help/HelpDialog.vue';
+export { useHelpStore } from '../../../web/src/stores/help.ts';
+export { useAuthStore } from '../../../web/src/stores/auth.ts';
+export { installHelpNavigation } from '../../../web/src/shared/helpNavigation.ts';

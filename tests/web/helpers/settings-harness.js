@@ -144,7 +144,7 @@ export async function settingsHarness(t, pageId, component, options = {}) {
 
   const wrapper = mount(module[component], {
     attachTo: browser.document.querySelector('#mount'),
-    props: { active: true },
+    props: { active: true, ...options.props },
     global: {
       plugins: [pinia],
       stubs: options.stubs ?? {},

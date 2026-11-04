@@ -1,3 +1,6 @@
+import { createHelpService } from './lib/help/service.ts';
+import helpModule from './modules/help/index.ts';
+import { runtimeKind } from './lib/runtimePaths.ts';
 import { GrigdeskTaskStore } from './lib/grigdeskTasks/store.ts';
 // Ядро сервера GrigDesk. Явная сборка: конфиг → адаптеры → плагины → модули → listen.
 // Никакой автозагрузки (YAGNI): модули регистрируются списком, зависимости передаём явно.
@@ -324,6 +327,9 @@ async function build(desktopParent: DesktopParent | null) {
     prefs,
     broadcast: (event, data) => fastify.sse?.broadcast?.(event, data),
   });
+
+  const help = createHelpService({ root: config.rootDir, kind: runtimeKind() });
+
   const browserAuthority = {
     controlRoot: config.factoryControlDir,
     trusted: createFactoryBrowserTrusted({
@@ -1129,6 +1135,7 @@ async function build(desktopParent: DesktopParent | null) {
     windowAuth,
   });
   await fastify.register(healthModule, { config, factoryState });
+  await fastify.register(helpModule, { help });
   await fastify.register<FactoryModuleOptions>(factoryModule, {
     factoryState,
     config,
@@ -1360,6 +1367,7 @@ async function build(desktopParent: DesktopParent | null) {
   await fastify.register(showcaseModule, { service: showcaseService });
   await fastify.register(browserModule, browser);
   await fastify.register(chatModule, {
+    help,
     browser,
     projectsService,
     factoryState,

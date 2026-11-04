@@ -13,6 +13,7 @@
 | `/board` | `BoardView.vue` |
 | `/pipeline` | `PipelineView.vue` |
 | `/chats` | `ChatsView.vue` |
+| `/help/:id?` | `HelpView.vue` |
 | `/routes` | `RoutesView.vue` |
 | `/projects/:id?` | `ProjectsView.vue` |
 | `/tools` | `ToolsView.vue` |

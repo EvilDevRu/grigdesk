@@ -1,3 +1,4 @@
+import { writeHelpResources } from '../help/writeHelpResources.mts';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -60,6 +61,8 @@ export async function prepareRelease(input: {
 
   await copyResources(input.sourceRoot, directory, resources);
 
+  const helpPackages = await writeHelpResources(input);
+
   const helpers = await loadHelpers(
     path.join(input.sourceRoot, 'server/build/helpers.json'), input.sourceRoot,
   );
@@ -77,5 +80,9 @@ export async function prepareRelease(input: {
 
   await writeCompatibility(directory, await json('server/build/compatibility.json'), helpers);
 
-  return { helpers, dependencies };
+  return {
+    helpers,
+    dependencies,
+    helpPackages,
+  };
 }

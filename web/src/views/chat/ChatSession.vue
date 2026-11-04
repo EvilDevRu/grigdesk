@@ -324,6 +324,11 @@
         </template>
         {{ t('core.chatListRetry') }}
       </UiButton>
+      <HelpArticleLink
+  v-if="messageLoad?.state === 'error'"
+  data-role="chat-history-help"
+/>
+
     </UiInlineMessage>
 
     <UiDialog v-model:open="optionsOpen" size="compact" :title="t('core.conversationOptions')"
@@ -446,7 +451,9 @@
               <!-- Ответ агента — безопасный GFM; raw HTML экранируется в md.js -->
               <ChatMarkdown v-if="m.role === 'assistant'" :text="m.text || ''" :chat-id="sid"
                             @click="onMarkdownClick" />
-              <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span><span
+              <div v-else class="text"><span v-if="m.text" class="m-copy">{{ m.text }}</span>
+              <HelpArticleLink v-if="m.role === 'error'" data-role="chat-error-help" />
+<span
                 v-if="m.role === 'user' && (validMessageTime(m.sentAt) || deliveryMark(m)?.kind === 'pending')"
                 class="m-meta">
                 <time v-if="validMessageTime(m.sentAt)" class="m-time"
@@ -806,6 +813,7 @@
 
 <script setup lang="ts">
 import { chatSpeedModes } from '../../../../shared/chat/chatSpeed.ts';
+import HelpArticleLink from '../../features/help/HelpArticleLink.vue';
 import {
   COMPOSER_KEY, COMPOSER_MIN, COMPOSER_KEYBOARD_MIN, COMPOSER_MAX_VH, storedComposerHeight,
 } from './chatLayout.ts';

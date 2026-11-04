@@ -49,7 +49,10 @@ test('3D guide связывает ручной разбор и расходы с
   const closed = parseStudio3d.version({ ...unknown, status: 'unresolved' });
 
   assert.match(guide, /не повторяет оплату автоматически/);
-  assert.match(guide, /в unresolved, освобождает локальные блокировки и сохраняет расходы/);
+
+  const contract = await read('plugins/studio3d-user-contract.md');
+
+  assert.match(contract, /в unresolved, освобождает локальные блокировки и сохраняет расходы/);
   assert.equal(ACTIVE_STATUSES.includes(unknown.status), true);
   assert.equal(ACTIVE_STATUSES.includes(closed.status), false);
   assert.equal(closed.cost.state, 'unknown');

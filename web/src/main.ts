@@ -1,3 +1,4 @@
+import { installHelpNavigation } from './shared/helpNavigation.ts';
 import { toolWindowText } from './shared/tools/toolWindowMessages.ts';
 
 import './shared/legacyStorage.ts';
@@ -112,6 +113,14 @@ const settings = useSettingsStore(pinia);
 const removeSettingsGuard = installSettingsRouteGuard(router, settings);
 const removeSettingsListener = installSettingsOpenListener(window,
   (request) => settings.requestOpen(request));
+
+const removeHelpNavigation = installHelpNavigation(window, router, () => {
+  const auth = useAuthStore(pinia);
+  const shell = useShellStore(pinia);
+
+  return currentDesktopMode() !== 'surface' && auth.authenticated
+    && (!shell.present || shell.status === 'online');
+});
 
 const removeRouteError = router.onError(showSectionLoadFailure);
 
@@ -302,6 +311,7 @@ import.meta.hot?.dispose(() => {
   webLog.dispose();
   removeSettingsGuard();
   removeSettingsListener();
+  removeHelpNavigation();
   removeRouteError();
   removeBackAction();
   removeAppViewport();

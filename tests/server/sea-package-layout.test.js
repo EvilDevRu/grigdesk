@@ -385,3 +385,27 @@ test('SEA-LAYOUT-05: аудит считает файлы и mode, провер�
     await symlink('/etc/passwd', path.join(root, 'outside'));
     await assert.rejects(auditStage(root, options), /ссылк/);
   });
+
+
+test('HELP-LICENSE: дополнительные пакеты сайта требуют полного текста лицензии', async (t) => {
+  const root = await scratch(t);
+  const extra = path.join(root, 'help-fixture');
+
+  await put(root, 'runtime/node/LICENSE', 'Node fixture license');
+  await mkdir(path.join(root, 'server/node_modules'), { recursive: true });
+  await put(extra, 'package.json', JSON.stringify({
+    name: 'help-fixture',
+    version: '1.0.0',
+    license: 'MIT',
+  }));
+  await put(extra, 'LICENSE', 'Полный текст лицензии fixture');
+
+  const index = await collectLicenses(root, { extraPackages: [extra, extra] });
+
+  assert.equal(index.packages.length, 1);
+  assert.equal(index.packages[0].name, 'help-fixture');
+  assert.equal(await readFile(path.join(root, index.packages[0].files[0]), 'utf8'),
+    'Полный текст лицензии fixture');
+  await rm(path.join(extra, 'LICENSE'));
+  await assert.rejects(collectLicenses(root, { extraPackages: [extra] }), /Нет текста лицензии/);
+});

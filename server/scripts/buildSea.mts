@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { copyFile, readFile, stat, writeFile } from 'node:fs/promises';
+import { cp, copyFile, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -97,7 +97,7 @@ export async function buildRelease(options: BuildArgs) {
       outDir: options.outDir,
       name: `grigdesk-server-${version}-linux-x64`,
       prepare: async (directory) => {
-        const { helpers, dependencies } = await prepareRelease({
+        const { helpers, dependencies, helpPackages } = await prepareRelease({
           sourceRoot,
           directory,
           archive,
@@ -121,10 +121,14 @@ export async function buildRelease(options: BuildArgs) {
             });
           },
         });
-        await collectLicenses(directory);
+        await collectLicenses(directory, { extraPackages: helpPackages });
+        await cp(path.join(directory, 'licenses'), path.join(directory, 'server/help/site/licenses'), {
+          recursive: true,
+        });
         await normalizeStageModes(directory);
 
-        const required = ['VERSION', 'server/grigdesk-server', 'runtime/node/bin/node',
+        const required = ['server/help/help.json', 'server/help/site/index.html',
+          'server/help/site/help.json', 'VERSION', 'server/grigdesk-server', 'runtime/node/bin/node',
           'server/package.json', 'server/node_modules/fastify/package.json',
           'server/runtime/esmBridge.cjs', 'licenses/NODE.txt', 'licenses/THIRD-PARTY.json',
           'bin/grigdesk-ctl', 'bin/b24', 'bin/grigdesk-relay', ...helpers.helpers.map(

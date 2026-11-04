@@ -1,4 +1,5 @@
 import browser from './browser.ts';
+import help from './help.ts';
 import { browserActions } from '../../../../../shared/browser/browserActions.ts';
 
 import supervisedDb from './supervisedDb.ts';
@@ -15,7 +16,7 @@ export interface WorkToolRegistration {
 }
 
 const REGISTRATIONS = Object.freeze([
-  supervisedSsh, supervisedDb, browser,
+  supervisedSsh, supervisedDb, browser, help,
 ]) as readonly WorkToolRegistration[];
 
 /**
@@ -44,6 +45,23 @@ export function withBrowserToolPolicy(base: WorkToolPolicy | undefined, mode: st
     .filter((action) => !prior || prior.includes(action));
 
   return { revision: Math.max(2, base?.revision ?? 0), allowedActions };
+}
+
+/**
+ * Справка остаётся доступной в read-only профиле, не расширяя остальные действия.
+ * Новая ревизия входит в отпечаток живой сессии через существующий контракт.
+ */
+export function withHelpToolPolicy(base: WorkToolPolicy | undefined): WorkToolPolicy | undefined {
+  if (!base) {
+    return undefined;
+  }
+
+  return {
+    revision: Math.max(3, base.revision), allowedActions: {
+      ...base.allowedActions,
+      grigdesk_help: ['index', 'search', 'read'],
+    }
+  };
 }
 
 /**

@@ -15,6 +15,7 @@ const options = {
   native: ['server/node_modules/native/build/Release/binding.node'],
 };
 const required = [
+  'server/help/help.json', 'server/help/site/index.html', 'server/help/site/help.json',
   'VERSION', 'runtime/node/bin/node', 'runtime/node/bin/npm',
   'server/package.json', 'server/package-lock.json', 'server/payload.cjs',
   'server/worker-bootstrap.cjs', 'server/runtime/esmBridge.cjs',

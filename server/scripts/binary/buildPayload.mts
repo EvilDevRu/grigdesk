@@ -1,4 +1,4 @@
-import { copyFile, readFile, readdir } from 'node:fs/promises';
+import { cp, copyFile, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import { makeReadOnlyTree } from '../../../shared/node/files.ts';
@@ -24,6 +24,7 @@ export interface PayloadAuditOptions {
  */
 export async function auditPayload(root: string, options: PayloadAuditOptions): Promise<PackageFile[]> {
   const required = [
+    'server/help/help.json', 'server/help/site/index.html', 'server/help/site/help.json',
     'VERSION', 'runtime/node/bin/node', 'runtime/node/bin/npm',
     'server/package.json', 'server/package-lock.json', 'server/payload.cjs',
     'server/worker-bootstrap.cjs', 'server/runtime/esmBridge.cjs',
@@ -78,7 +79,7 @@ export async function buildPayload(input: {
   const resources = JSON.parse(await readFile(
     path.join(input.sourceRoot, 'server/build/binary-resources.json'), 'utf8',
   ));
-  const { helpers, dependencies } = await prepareRelease({
+  const { helpers, dependencies, helpPackages } = await prepareRelease({
     ...input,
     resources,
     install: prepareOfflineDependencies,
@@ -90,7 +91,10 @@ export async function buildPayload(input: {
     outfile: path.join(input.directory, 'server/payload.cjs'),
   });
   await copyFile(input.bootstrap, path.join(input.directory, 'server/worker-bootstrap.cjs'));
-  await collectLicenses(input.directory);
+  await collectLicenses(input.directory, { extraPackages: helpPackages });
+  await cp(path.join(input.directory, 'licenses'), path.join(input.directory, 'server/help/site/licenses'), {
+    recursive: true,
+  });
   await makeReadOnlyTree(input.directory);
 
   const compatibility = JSON.parse(await readFile(

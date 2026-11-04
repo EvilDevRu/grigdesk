@@ -359,3 +359,13 @@
 
 - [История без открытого окна и mobileId](mobile-history.md)
 - [Подтверждение pending после записи истории и ответа сервера](pending-ack.md)
+
+- [Контекст разговора и его индикатор — подробный контракт](context-measurements.md)
+
+- [Рабочая папка разговора — подробный контракт](workdir-reference.md)
+
+- [DeepSeek Harness — подробный контракт](deepseek-reference.md)
+
+- [Прогноз лимитов — подробный контракт](usage-forecast-reference.md)
+
+- [Инструмент справки: общий registry, версии и порционное чтение](help-tool.md)

@@ -48,3 +48,7 @@
 - [Браузерный VS Code был и ВЫПИЛЕН: serve-web не видит git в worktree](browser-vscode-removal.md)
 
 - [Типизированные границы исполнителей и речи](typed-provider-speech-boundaries.md) — реестр, usage, плагины, оповещения и browser ports.
+
+- [Проекты и их репозитории — подробный контракт](projects-api.md)
+
+- [Руководство своего выпуска: корпус, API и состав поколения](packaged-help.md)

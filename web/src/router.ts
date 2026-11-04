@@ -69,6 +69,17 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
+    path: '/help/:id?',
+    name: 'help',
+    component: () => import('./views/HelpView.vue'),
+    meta: {
+      layout: 'workspace',
+      get title() {
+        return t('core.helpTitle');
+      },
+    },
+  },
+  {
     path: '/documents',
     name: 'documents',
     component: () => import('./views/DocumentsView.vue'),

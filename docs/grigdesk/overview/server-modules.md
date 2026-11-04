@@ -23,11 +23,13 @@
 | `plugins` | `/api/plugins*`, `/api/ext/<id>/*` | системный реестр + `plugins/<id>/` |
 | `auth` | `/api/auth*` | учётная запись, сессии и CLI token |
 | `terminal` | `/api/terminal` (WebSocket: `in`, `resize`) | stdlib Python helper: `pty.fork()`, `TIOCSWINSZ`/`SIGWINCH`, cleanup process group |
+| `help` | `GET /api/help` под общим auth guard | текущий guide в source или server/help/help.json своего поколения; [контракт](packaged-help.md) |
 | `health` | `/api/health` | — |
 
 Fastify-плагины: `auth` (весь `/api`, WebSocket и `/shots` закрыты сессией;
 публичны state/login/setup, локальные CLI используют `X-GrigDesk-Token`), `sse`
-(fs.watch → broadcast), `static` (web/dist, index=no-cache, assets=immutable).
+(fs.watch → broadcast). Интерфейс встроен в приложение; сервер не раздаёт web/dist
+или help/site ([граница API](../server/api-only-server.md)).
 Гард регистрируется до модулей. Сервер использует один HTTP-сокет на loopback;
 [локальный доступ](../server/loopback-access.md) описывает cookie и настройки запуска.
 

@@ -580,7 +580,7 @@ const REQUIRED_FIELDS: Partial<Record<WebLogEvent, string[]>> = {
 // Шаблоны маршрутов окна. Тест сверяет список с web/src/router.js.
 export const WEB_LOG_ROUTES = [
   '/', '/board', '/browser', '/pipeline', '/sandboxes', '/showcase/:id?', '/chats',
-  '/diff', '/documents', '/terminal', '/ssh', '/db', '/docker', '/routes',
+  '/help/:id?', '/diff', '/documents', '/terminal', '/ssh', '/db', '/docker', '/routes',
   '/projects/:id?', '/code', '/shelf', '/tools', '/ext/:id', '/video', '/inbox',
   '/github', '/telegram', '/settings', '/3d', '/surface',
 ] as const;

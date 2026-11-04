@@ -56,6 +56,7 @@
 | `i18n/` | Чистый переводчик, descriptors, каталоги RU/EN, LocaleSource и Intl; [контракт](../web/interface-language.md) | Node, браузер |
 | `browser/` | Настройки и URL, action decoder и descriptor grigdesk_browser; [контракт](../web/browser-workspace.md) | Node, браузер |
 | `client/` | Подключение приложений: версия API, строка привязки, API оболочки | Node, браузер |
+| `help/` | Корпус справки, ограниченный поиск, порционное чтение и контекстные ссылки | Node, браузер |
 | `runtime/` | Папка данных, настройки, готовность, проекты, обновление и версии интерфейса | Node, браузер |
 | `web-log/` | Контракты журнала, шаблоны API-маршрутов и уровни диагностики | Node, браузер |
 | `lib/` | Независимые от области общие функции | Node, браузер |
@@ -90,6 +91,8 @@
 | `node/cliPathOrder.ts` | Синхронный [порядок PATH packaged-запуска](../server/server-binary-path.md) без файлового discovery в раннем графе |
 | `node/userCliPaths.ts` | Однократный поиск CLI: явный список, умолчания, nvm без shell rc; совместимый экспорт порядка PATH |
 | `node/packageTests.ts` | Выбор *.test.mts и запуск пакетов Б24/DeepSeek через общий сторож памяти |
+| `node/helpSources.ts` | Компиляция закрытого guide и проверка revision пакета справки |
+| `lib/shellQuote.ts` | Один буквальный shell-аргумент для команд, включая транзакцию публикации |
 | `node/hash.ts` | SHA256 байтов и потокового файла; отдельно короткий хеш JSON.stringify без канонизации |
 | `node/deepSeekArtifact.ts` | Полный manifest/payload generation и совместимость с явно выбранным Node |
 | `node/glmCompatibility.ts` | Прежняя формула compatibility GLM для сервера и установщика ELF |

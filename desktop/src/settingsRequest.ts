@@ -4,6 +4,9 @@ import { sameOrigin } from './windowSecurity.ts';
 export const OPEN_SETTINGS_SCRIPT =
   "window.dispatchEvent(new Event('grigdesk:open-settings')); void 0;";
 
+export const OPEN_HELP_SCRIPT =
+  "window.dispatchEvent(new Event('grigdesk:open-help')); void 0;";
+
 type RequestWindow = Pick<BrowserWindow, 'isDestroyed' | 'webContents' | 'on' | 'removeListener'>;
 
 type SettingsRequestOptions = {
@@ -16,7 +19,10 @@ type SettingsRequestOptions = {
  * Событие доставляется в тот же проверенный frame без создания документа.
  * Только ещё не отправленный запрос склеивается и снимает свои обработчики при отмене.
  */
-export function createSettingsRequest(options: SettingsRequestOptions) {
+export function createSettingsRequest(
+  options: SettingsRequestOptions,
+  event: 'grigdesk:open-settings' | 'grigdesk:open-help' = 'grigdesk:open-settings',
+) {
   let pending: RequestWindow | null = null;
   let disposed = false;
 
@@ -92,7 +98,9 @@ export function createSettingsRequest(options: SettingsRequestOptions) {
         return;
       }
 
-      void frame.executeJavaScript(OPEN_SETTINGS_SCRIPT).catch(() => undefined);
+      const script = event === 'grigdesk:open-help' ? OPEN_HELP_SCRIPT : OPEN_SETTINGS_SCRIPT;
+
+      void frame.executeJavaScript(script).catch(() => undefined);
     } catch {
       clearPending();
     }

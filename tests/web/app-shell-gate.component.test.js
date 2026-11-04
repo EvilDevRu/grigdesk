@@ -50,6 +50,7 @@ test('оболочка: интерфейс открыт до сервера, м�
     };
 
     const stubs = {
+      './features/help/HelpDialog.vue': 'export default { render: () => null };',
       './stores/documentPreview.ts': 'export const useDocumentPreviewStore = () => ({ href: null });',
       './stores/diff.ts': 'export const useDiffStore = () => ({ open: false, taskId: null });',
       ...appWindowStubs,

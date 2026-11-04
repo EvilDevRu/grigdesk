@@ -11,6 +11,8 @@ test('RW-1: workflow релиза собирает комплект и публ�
   );
 
   assert.match(text, /workflow_dispatch/);
+  assert.match(text, /tests\/docs\/help-guide\.test\.mts/);
+  assert.match(text, /group: grigdesk-release\s*\n/);
   assert.match(text, /tags:\s*\n\s*- 'v\*'/);
   assert.match(text, /node-version:\s*24\.21\.0/);
   assert.match(text, /npm --prefix server test/);

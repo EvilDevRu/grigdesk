@@ -229,3 +229,142 @@ test('PLUGIN-DOCS-06: сбой поиска документации не меш
   assert.deepEqual(run.options.pluginDocsDirs, []);
   run.release('Готово');
 });
+
+test('HELP-T2: обычный ход получает справку, исходная история и plugin hint сохраняются', async (t) => {
+  const control = controlledExecutor();
+  const helpCalls = [];
+  const help = {
+    bundle: async () => {
+      throw new Error('в этом тесте не читается');
+    },
+    invoke: async (input) => {
+      helpCalls.push(input);
+
+      return {
+        ok: true,
+        text: 'Справка fixture',
+        revision: 'a'.repeat(64)
+      };
+    },
+  };
+  const { app } = await chatAppFixture(t, {
+    executor: control.executor, syntheticPorts: {
+      help
+    }
+  });
+
+  await saveChat(app, 'help-chat');
+
+  const request = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: turnBody('help-chat', 'help-turn-0001', 'Как выбрать папку?')
+  });
+
+  assert.equal(request.statusCode, 202);
+
+  const [run] = await control.waitForRuns(1);
+
+  assert.match(run.message, /\[Справка GrigDesk\]/u);
+  assert.equal(run.options.workTools.descriptors.some((entry) => entry.name === 'grigdesk_help'), true);
+  assert.deepEqual(await run.options.workTools.invoke('grigdesk_help', {
+    action: 'read', id: 'chats'
+  }), {
+    ok: true,
+    text: 'Справка fixture',
+    revision: 'a'.repeat(64)
+  });
+  assert.deepEqual(helpCalls, [{
+    action: 'read',
+    id: 'chats',
+    offset: 0
+  }]);
+  run.release();
+  assert.equal(request.statusCode, 202);
+
+  const saved = await app.inject('/api/chat/store');
+
+  assert.equal(saved.body.includes('[Справка GrigDesk]'), false);
+});
+
+test('HELP-T4: native slash и оба compaction сохраняют descriptor без обычного hint', async (t) => {
+  const calls = [];
+  const executor = {
+    id: 'test-provider',
+    commands: async () => [{
+      cmd: '/status',
+      desc: 'Статус',
+      run: 'prompt'
+    }],
+    async run(options) {
+      calls.push(options);
+
+      return {
+        reply: 'Выжимка', sessionId: 'fixture-session'
+      };
+    },
+  };
+  const help = {
+    invoke: async () => ({
+      ok: true, items: []
+    })
+  };
+  const { app } = await chatAppFixture(t, {
+    executor, syntheticPorts: {
+      help
+    }
+  });
+  const slash = await app.inject({
+    method: 'POST',
+    url: '/api/chat',
+    payload: {
+      modelRef: {
+        provider: 'test-provider', model: 'test-model'
+      },
+
+      message: '/status',
+      slashCommand: '/status',
+      requestTitle: true,
+    }
+  });
+
+  assert.equal(slash.statusCode, 200, slash.body);
+  assert.equal(calls[0].message, '/status');
+  executor.compaction = {
+    kind: 'native', message: '/compact'
+  };
+
+  const native = await app.inject({
+    method: 'POST',
+    url: '/api/chat/compact',
+    payload: {
+      modelRef: {
+        provider: 'test-provider', model: 'test-model'
+      }, sessionId: 'fixture-session',
+    }
+  });
+
+  assert.equal(native.statusCode, 200, native.body);
+  assert.equal(calls[1].message, '/compact');
+  executor.compaction = {
+    kind: 'summary'
+  };
+
+  const summary = await app.inject({
+    method: 'POST',
+    url: '/api/chat/compact',
+    payload: {
+      modelRef: {
+        provider: 'test-provider', model: 'test-model'
+      }, sessionId: 'fixture-session',
+    }
+  });
+
+  assert.equal(summary.statusCode, 200, summary.body);
+  assert.match(calls[2].message, /Сожми наш разговор/u);
+
+  for (const run of calls) {
+    assert.doesNotMatch(run.message, /\[Справка GrigDesk\]/u);
+    assert.equal(run.workTools.descriptors.some((entry) => entry.name === 'grigdesk_help'), true);
+  }
+});

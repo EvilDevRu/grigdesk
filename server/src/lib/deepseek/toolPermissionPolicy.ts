@@ -19,6 +19,11 @@ export function normalizeDeepSeekPermissionMode(value: unknown) {
 export type DeepSeekWorkActions = Record<string, Record<string, 'read' | 'broker'>>;
 
 const WORK_ACTIONS: DeepSeekWorkActions = {
+  grigdesk_help: {
+    index: 'read',
+    search: 'read',
+    read: 'read',
+  },
   grigdesk_browser: Object.fromEntries(browserActions('default').map((action) => [action,
     browserActions('read-only').includes(action) ? 'read' as const : 'broker' as const])),
   supervised_ssh: { list: 'read', exec: 'broker' },

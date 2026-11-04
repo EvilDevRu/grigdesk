@@ -177,6 +177,10 @@ async function serverPackageFixture(t) {
   await writeFile(path.join(directory, 'VERSION'), '0.1.0\n');
   await writeFile(path.join(directory, 'engine/factory'), 'fixture-engine');
   await symlink('factory', path.join(directory, 'engine/link'));
+  await mkdir(path.join(directory, 'server/help/site'), { recursive: true });
+  await writeFile(path.join(directory, 'server/help/help.json'), 'HELP-A');
+  await writeFile(path.join(directory, 'server/help/site/index.html'), '<title>Help</title>');
+  await writeFile(path.join(directory, 'server/help/site/help.json'), 'HELP-A');
   await makeReadOnlyTree(directory);
 
   return { directory, outputFile };
@@ -196,6 +200,20 @@ test('SB20: sorted ZIP/index/id одинаковы между каталогам
     packageIdFor({ launcher: 'first', payload: b }));
   assert.notEqual(packageIdFor({ payload: a, launcher: 'first' }),
     packageIdFor({ payload: a, launcher: 'second' }));
+
+  const helpFile = path.join(second.directory, 'server/help/help.json');
+
+  await chmod(helpFile, 0o644);
+  await writeFile(helpFile, 'HELP-B');
+  await chmod(helpFile, 0o444);
+
+  const helpChanged = await packageServerPayload(second);
+
+  assert.notEqual(packageIdFor({ payload: a }), packageIdFor({ payload: helpChanged }));
+  await chmod(helpFile, 0o644);
+  await writeFile(helpFile, 'HELP-A');
+  await chmod(helpFile, 0o444);
+  assert.equal(packageIdFor({ payload: a }), packageIdFor({ payload: await packageServerPayload(second) }));
 
   await chmod(path.join(second.directory, 'engine/factory'), 0o555);
 

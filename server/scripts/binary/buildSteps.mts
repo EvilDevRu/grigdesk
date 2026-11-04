@@ -26,6 +26,7 @@ export interface BinarySmokeMetrics {
 export async function readBuildInputs(sourceRoot: string): Promise<Record<string, string>> {
   const files = ['VERSION', 'server/package.json', 'server/package-lock.json',
     'server/build/node-runtime.json', 'server/build/helpers.json', 'server/build/compatibility.json',
+    'shared/node/helpSources.ts', 'web/package-lock.json',
     'server/build/binary-resources.json', 'server/build/esmBridge.cjs', 'server/scripts/buildBinary.mts'];
 
   for (const directory of ['server/scripts/binary', 'server/scripts/sea']) {
@@ -33,6 +34,16 @@ export async function readBuildInputs(sourceRoot: string): Promise<Record<string
       if (name.endsWith('.mts') && !name.startsWith('install')) {
         files.push(`${directory}/${name}`);
       }
+    }
+  }
+
+  for (const directory of ['docs/grigdesk/guide', 'shared/help', 'web/help', 'server/scripts/help']) {
+    for (const entry of await readdir(path.join(sourceRoot, directory), { withFileTypes: true })) {
+      if (!entry.isFile()) {
+        throw new Error(`Недопустимый вход справки: ${directory}/${entry.name}`);
+      }
+
+      files.push(`${directory}/${entry.name}`);
     }
   }
 

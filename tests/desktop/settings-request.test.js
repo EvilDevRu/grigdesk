@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { createSettingsRequest, OPEN_SETTINGS_SCRIPT } from '../../desktop/src/settingsRequest.ts';
+import {
+  createSettingsRequest, OPEN_SETTINGS_SCRIPT, OPEN_HELP_SCRIPT,
+} from '../../desktop/src/settingsRequest.ts';
 import { applicationMenuTemplate } from '../../desktop/src/menu.ts';
 
 const origin = 'http://127.0.0.1:8140';
@@ -11,7 +13,7 @@ const origin = 'http://127.0.0.1:8140';
  * Фейковые события не требуют Electron и настоящей загрузки.
  * Любая попытка создать окно или загрузить URL провалит тест немедленно.
  */
-function fixture() {
+function fixture(event = 'grigdesk:open-settings') {
   const calls = [];
   const state = {
     shown: true,
@@ -47,7 +49,7 @@ function fixture() {
     origin,
     getWindow: () => window,
     revealed: () => state.shown,
-  });
+  }, event);
 
   return {
     state,
@@ -152,4 +154,21 @@ test('EL05 исчезнувшее окно и синхронный отказ fr
     throw new Error('Frame уже уничтожен');
   };
   assert.doesNotThrow(f.request.open);
+});
+
+test('HELP-N3: фиксированное native help событие сохраняет проверку frame и dispose', () => {
+  const f = fixture('grigdesk:open-help');
+
+  f.request.open();
+  assert.deepEqual(f.calls, [OPEN_HELP_SCRIPT]);
+  f.state.url = 'https://example.org/';
+  f.request.open();
+  assert.equal(f.calls.length, 1);
+  f.state.url = origin + '/#/chats';
+  f.state.loading = true;
+  f.request.open();
+  f.request.dispose();
+  f.state.loading = false;
+  f.contents.emit('did-finish-load');
+  assert.equal(f.calls.length, 1);
 });

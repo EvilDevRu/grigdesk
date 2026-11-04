@@ -1431,6 +1431,15 @@
       "owner": "task-16",
       "fate": "helper",
       "detail": "Standalone shell: проверенный ELF, свой Node и собранные helper-ы; source/v3 сохранены."
+    },
+    {
+      "file": "server/scripts/help/buildHelpSite.mts",
+      "construct": "exec-path",
+      "target": "",
+      "count": 1,
+      "owner": "task-13",
+      "fate": "development-only",
+      "detail": "Сборочная подготовка существующего Markdown renderer своим Node; не исполняется из payload."
     }
   ],
   "resources": [
@@ -1961,6 +1970,30 @@
       "owner": "task-13",
       "fate": "asset",
       "detail": "Полные SPDX тексты для точных версий npm-пакетов без собственного LICENSE; SHA256 и метаданные сохраняются."
+    },
+    {
+      "path": "docs/grigdesk/guide/",
+      "kind": "dir",
+      "expect": "source",
+      "owner": "task-13",
+      "fate": "asset",
+      "detail": "Исходный пользовательский корпус компилируется в help.json; исходные Markdown не копируются в payload."
+    },
+    {
+      "path": "web/help/",
+      "kind": "dir",
+      "expect": "source",
+      "owner": "task-13",
+      "fate": "development-only",
+      "detail": "Самостоятельный reader и ресурсы справки: сборка, полные лицензии и собственное поколение сервера."
+    },
+    {
+      "path": "server/help/",
+      "kind": "dir",
+      "expect": "generated",
+      "owner": "task-13",
+      "fate": "asset",
+      "detail": "Самостоятельный reader и ресурсы справки: сборка, полные лицензии и собственное поколение сервера."
     }
   ]
 }

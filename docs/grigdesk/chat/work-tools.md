@@ -47,3 +47,8 @@ permission mode/auto/remember, создаёт `origin:'ssh'` в общей `pend
 | `comment` | пояснение к отказу | ACP-outcome текста не несёт → `commentDelivered: false`, фронт досылает сообщением |
 
 Источник до переноса: docs/grigdesk/chat-agents.md § Рабочие инструменты GrigDesk
+
+`grigdesk_help` читает встроенное руководство через тот же реестр и server-owned сервис,
+включая режимы только чтения. Он принимает только index/search/read, возвращает версию
+и revision, не даёт файловых прав и не меняет scope SSH/БД/browser.
+[Контракт справки](help-tool.md) описывает порции чтения и подсказку обычного хода.

@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: grigdesk-release-${{ github.ref }}
+  group: grigdesk-release
   cancel-in-progress: false
 
 jobs:
@@ -56,6 +56,10 @@ jobs:
         run: >-
           NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test
           --test-concurrency=2 tests/shared/*.test.mts
+      - name: Руководство выпуска
+        run: >-
+          NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh --test
+          --test-concurrency=2 tests/docs/help-guide.test.mts tests/docs/markdown-links.test.mjs
       - name: Production-сборка web
         run: npm --prefix web run build
 

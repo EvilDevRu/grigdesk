@@ -403,6 +403,12 @@
           <PhoneConnectButton :labeled="phoneLayout" :menu="phoneLayout" />
         </PhoneShellPortal>
         <AlertHistoryPopover />
+        <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
+          <UiIconButton v-if="active && hasMachine" data-role="help-open"
+                        :label="t('core.helpTitle')" variant="link" role="rail" @click="openHelp()">
+            <span aria-hidden="true">?</span>
+          </UiIconButton>
+        </PhoneShellPortal>
         <UiIconButton v-if="active" variant="link" role="rail" data-context="topbar-action"
           :label="t('settings.settings')" v-tooltip="t('settings.settings')"
           aria-haspopup="dialog" :pressed="settings.isOpen"
@@ -537,6 +543,7 @@ import ToolsGrid from './ToolsGrid.vue';
 import { toolById } from '../tools/registry.ts';
 import { useToolLauncher } from '../tools/launcher.ts';
 import { openSettings } from '../settingsNavigation.ts';
+import { openHelp } from '../helpNavigation.ts';
 import { useSettingsStore } from '../../stores/settings.ts';
 import { useShellStore } from '../../stores/shell.ts';
 import { currentDesktopMode } from '../desktopSettings.ts';

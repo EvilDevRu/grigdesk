@@ -120,12 +120,31 @@ const baseEnv = (bins, extra = {}) => {
 });
 };
 
+/**
+ * Подписи и ранние проверки остаются настоящими; модельный payload здесь синтетический.
+ * Production CLI не получает тестового флага: отдельный child вызывает модульный порт.
+ */
+function runPublication(directory, options) {
+  const script = `import { publishRelease } from './tools/release-publish.mts';
+    await publishRelease(process.argv[1], {
+      dryRun: process.argv.includes('--dry-run'),
+      prepareHelp: async () => ({
+        archive: process.argv[1] + '/help-site.tar.gz',
+        revision: 'a'.repeat(64),
+        dispose: async () => {},
+      }),
+    });`;
+
+  return spawnSync(process.execPath, ['--input-type=module', '-e', script, directory,
+    ...(options.dryRun ? ['--dry-run'] : [])], options);
+}
+
 test('RP-1: публикация заливает во временную папку и атомарно переименовывает', async (t) => {
   const rel = await release(t);
   const bins = await stubBins(t);
   const env = baseEnv(bins, { RELEASE_SIGNING_PUBLIC_KEY_FILE: rel.pubFile });
 
-  const result = spawnSync(process.execPath, ['tools/release-publish.mts', rel.dir], {
+  const result = runPublication(rel.dir, {
     cwd: repository,
     env,
     encoding: 'utf8',
@@ -137,12 +156,13 @@ test('RP-1: публикация заливает во временную пап
 
   assert.match(calls, /scp .*release\.tar\.gz/);
   assert.match(calls, /scp .*channel\.json/);
-  assert.match(calls, /ssh .*mv .*releases\/0\.3\.0/);
-  assert.match(calls, /ssh .*api\/releases\/v1\/channel\.json/);
+  assert.match(calls, /help-site\.tar\.gz/);
+  assert.match(calls, /root\/releases|\$root\/releases/);
+  assert.match(calls, /api\/releases\/v1\/channel\.json/);
 
   const sshCalls = await fs.readFile(bins.sshLog, 'utf8');
 
-  assert.ok(sshCalls.indexOf('else mv') < sshCalls.lastIndexOf('channel.json.new'),
+  assert.ok(sshCalls.indexOf('mv "$stage/release"') < sshCalls.lastIndexOf('mv "$stage/channel.json"'),
     'канал переключается после публикации архива');
 
   const channel = JSON.parse(await fs.readFile(path.join(rel.dir, 'channel.json'), 'utf8'));
@@ -161,7 +181,7 @@ test('RP-2: без окружения отказ с перечнем перем�
     env[name] = '';
   }
 
-  const result = spawnSync(process.execPath, ['tools/release-publish.mts', rel.dir], {
+  const result = runPublication(rel.dir, {
     cwd: repository,
     env,
     encoding: 'utf8',
@@ -179,7 +199,7 @@ test('RP-3: битый архив — отказ до любой команды'
   const bins = await stubBins(t);
   const env = baseEnv(bins, { RELEASE_SIGNING_PUBLIC_KEY_FILE: rel.pubFile });
 
-  const result = spawnSync(process.execPath, ['tools/release-publish.mts', rel.dir], {
+  const result = runPublication(rel.dir, {
     cwd: repository,
     env,
     encoding: 'utf8',
@@ -203,7 +223,7 @@ test('RP-4: отказ зеркала — предупреждение, публ
     RELEASE_SITE_MIRROR_PUBLIC_ORIGIN: 'https://grigdesk.ru',
   });
 
-  const result = spawnSync(process.execPath, ['tools/release-publish.mts', rel.dir], {
+  const result = runPublication(rel.dir, {
     cwd: repository,
     env,
     encoding: 'utf8',
@@ -221,7 +241,7 @@ test('RP-5: отказ основного хоста — код 4, явная о
   const bins = await stubBins(t, 'site.example');
   const env = baseEnv(bins, { RELEASE_SIGNING_PUBLIC_KEY_FILE: rel.pubFile });
 
-  const result = spawnSync(process.execPath, ['tools/release-publish.mts', rel.dir], {
+  const result = runPublication(rel.dir, {
     cwd: repository,
     env,
     encoding: 'utf8',
@@ -242,7 +262,7 @@ test('RP-6: несогласованная опись канала и чужая
       ? Buffer.alloc(64, 8).toString('base64') : '1'.repeat(64);
     await fs.writeFile(channelPath, JSON.stringify(channel));
 
-    const result = spawnSync(process.execPath, ['tools/release-publish.mts', rel.dir], {
+    const result = runPublication(rel.dir, {
       cwd: repository,
       env: baseEnv(bins, { RELEASE_SIGNING_PUBLIC_KEY_FILE: rel.pubFile }),
       encoding: 'utf8',
@@ -258,7 +278,8 @@ test('RP-7: dry-run не меняет канал и не отправляет в
   const bins = await stubBins(t);
   const channelPath = path.join(rel.dir, 'channel.json');
   const before = await fs.readFile(channelPath, 'utf8');
-  const result = spawnSync(process.execPath, ['tools/release-publish.mts', rel.dir, '--dry-run'], {
+  const result = runPublication(rel.dir, {
+    dryRun: true,
     cwd: repository,
     env: baseEnv(bins, { RELEASE_SIGNING_PUBLIC_KEY_FILE: rel.pubFile }),
     encoding: 'utf8',

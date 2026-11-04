@@ -5,6 +5,7 @@ import {
   applicationMenuTemplate,
   SETTINGS_ACCELERATOR,
   isSettingsShortcut,
+  isHelpShortcut,
   isReloadShortcut,
   contextMenuTemplate,
 } from '../../desktop/src/menu.ts';
@@ -53,7 +54,7 @@ function checkSeparators(items) {
 test('DW-25: роли и русские подписи', () => {
   const template = applicationMenuTemplate({ openSettings() {} });
 
-  assert.deepEqual(template.map((item) => item.label), ['Файл', 'Правка', 'Вид']);
+  assert.deepEqual(template.map((item) => item.label), ['Файл', 'Правка', 'Вид', 'Справка']);
   assert.deepEqual(template[1].submenu.filter((item) => item.role).map((item) => item.role), [
     'undo',
     'redo',
@@ -69,7 +70,7 @@ test('DW-25: роли и русские подписи', () => {
     'togglefullscreen',
   ]);
 
-  for (const group of template.slice(1)) {
+  for (const group of template.slice(1, 3)) {
     checkSeparators(group.submenu);
 
     for (const item of group.submenu.filter((entry) => entry.type !== 'separator')) {
@@ -173,4 +174,40 @@ test('перезагрузка заблокирована по физическ�
   assert.equal(isReloadShortcut(base), false);
   assert.equal(isReloadShortcut({ ...base, code: 'KeyC', control: true }), false);
   assert.equal(isReloadShortcut({ ...base, control: true, alt: true }), false);
+});
+
+test('HELP-N1: F1 и меню открывают справку один раз без настройки или reload', () => {
+  let help = 0;
+  const template = applicationMenuTemplate({
+    openSettings() {
+    }, openHelp() {
+      help += 1;
+    }
+  });
+  const menu = template.find((entry) => entry.label === 'Справка');
+
+  assert.ok(menu);
+  menu.submenu[0].click();
+  assert.equal(help, 1);
+  assert.equal(menu.submenu[0].accelerator, 'F1');
+  assert.equal(isHelpShortcut({
+    type: 'keyDown',
+    code: 'F1',
+    isAutoRepeat: false,
+
+    control: false,
+    alt: false,
+    shift: false,
+    meta: false
+  }), true);
+  assert.equal(isHelpShortcut({
+    type: 'keyDown',
+    code: 'F1',
+    isAutoRepeat: true,
+
+    control: false,
+    alt: false,
+    shift: false,
+    meta: false
+  }), false);
 });

@@ -18,7 +18,7 @@ const PROMPT_RULE = 'Для браузерной проверки использ
  * Настоящий chatModule работает с отдельным history и synthetic executor.
  * Browser port наблюдает authority и вызовы без запуска CLI или модели.
  */
-async function fixture(t, provider = 'claude') {
+async function fixture(t, provider = 'claude', help = undefined) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'browser-chat-wiring-'));
   const worktree = path.join(root, 'worktree');
   const profilesDir = path.join(root, 'profiles');
@@ -92,6 +92,7 @@ async function fixture(t, provider = 'claude') {
   };
 
   await app.register(chatModule, {
+    help,
     config,
     browser,
     factoryState: {
@@ -360,3 +361,45 @@ test('BR-C09: удалённый чат и chatModule onClose удаляют own
   await f.app.close();
   assert.deepEqual(await f.browser.owners.list(), []);
 });
+
+for (const provider of PROVIDERS) {
+  test(`HELP-T3 ${provider}: read-only ход читает справку через общий registry`, async (t) => {
+    const calls = [];
+    const help = {
+      bundle: async () => {
+        throw new Error('не используется');
+      },
+      invoke: async (input) => {
+        calls.push(input);
+
+        return {
+          ok: true,
+          text: 'Fixture help',
+          revision: 'c'.repeat(64)
+        };
+      },
+    };
+    const f = await fixture(t, provider, help);
+    const record = await f.chat('44');
+
+    await f.turn(record, 'plan');
+
+    const run = f.runs.at(-1);
+    const descriptor = run.workTools.descriptors.find((entry) => entry.name === 'grigdesk_help');
+
+    assert.ok(descriptor);
+    assert.match(run.message, /\[Справка GrigDesk\]/u);
+    assert.deepEqual(await run.workTools.invoke('grigdesk_help', {
+      action: 'read', id: 'chats'
+    }), {
+      ok: true,
+      text: 'Fixture help',
+      revision: 'c'.repeat(64)
+    });
+    assert.deepEqual(calls, [{
+      action: 'read',
+      id: 'chats',
+      offset: 0
+    }]);
+  });
+}

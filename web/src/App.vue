@@ -49,6 +49,7 @@
         :identity="() => settings.isOpen ? settings.pageId : null">
         <SettingsModal v-if="settings.isOpen" />
       </PerformanceBoundary>
+      <HelpDialog v-if="help.isOpen" />
       <UiToastHost />
       </div>
     </SpeechProvider>
@@ -105,6 +106,9 @@ import MediaViewer from './views/MediaViewer.vue';
 import { SpeechProvider } from './features/speech/provider.ts';
 import { useBoardStore } from './stores/board.ts';
 import { useSystemStore } from './stores/system.ts';
+import { useHelpStore } from './stores/help.ts';
+import { bindHelpAccess } from './shared/helpNavigation.ts';
+
 import { useAuthStore } from './stores/auth.ts';
 import { useSettingsStore } from './stores/settings.ts';
 import { useTaskFavoritesStore } from './stores/taskFavorites.ts';
@@ -136,6 +140,11 @@ if (surfaceDocument) {
 
 const auth = useAuthStore();
 const shell = useShellStore();
+const help = useHelpStore();
+const stopHelpAccess = bindHelpAccess(auth, shell, help.close);
+
+onBeforeUnmount(stopHelpAccess);
+
 const showMachines = computed(() => shell.present && shell.showConnections);
 const workspaceStarted = ref(auth.authenticated);
 const connectionTone = computed(() => ['unpaired', 'revoked', 'identityMismatch', 'incompatible']
@@ -172,6 +181,8 @@ const SettingsModal = asyncView(
     showSectionLoadFailure();
   },
 );
+
+const HelpDialog = asyncView(() => import('./features/help/HelpDialog.vue'));
 
 let pollingStarted = false;
 let pollingGeneration = 0;

@@ -1,5 +1,8 @@
+import { prepareReleaseHelp, helpPublicationCommand } from './helpPublication.mts';
+import { shellQuote } from '../shared/lib/shellQuote.ts';
+
 import { execFile } from 'node:child_process';
-import { createPublicKey, verify as verifyBytes } from 'node:crypto';
+import { randomUUID, createPublicKey, verify as verifyBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,20 +58,14 @@ function targets(): SiteTarget[] {
 }
 
 /**
- * Пути конфигурации передаются удалённой оболочке как один буквальный аргумент.
- * Экранирование сохраняет пробелы и запрещает интерпретацию shell-подстановок.
- */
-function quoteShell(value: string): string {
-  return "'" + value.replaceAll("'", "'\\''") + "'";
-}
-
-/**
  * Публикация проверяет выпуск локально до отправки: подпись файла сумм, потоковый
  * SHA256 архива и согласованность channel.json; заполняет archiveUrl и только затем
  * ходит по SSH во временную папку с атомарным переименованием на каждой цели.
  */
-async function main(): Promise<void> {
-  const directory = process.argv[2];
+export async function publishRelease(directory: string | undefined, ports: {
+  prepareHelp?: typeof prepareReleaseHelp;
+  dryRun?: boolean;
+} = {}): Promise<void> {
 
   if (!directory || !path.isAbsolute(directory)) {
     throw new Error('Использование: node tools/release-publish.mts <каталог выпуска>');
@@ -166,80 +163,89 @@ async function main(): Promise<void> {
 
   const version = entry.version;
   const upload = ['release.tar.gz', 'release.tar.gz.sha256', 'release.tar.gz.sha256.sig',
-    'channel.json'];
-  const tmp = `.grigdesk-publish-${version}-${Date.now()}`;
+    'channel.json', 'help-site.tar.gz'];
+  const tmp = `.grigdesk-publish-${version}-${randomUUID()}`;
 
   // dry-run печатает план до мутации channel.json: пробный запуск ничего не меняет.
-  if (process.argv.includes('--dry-run')) {
+  if (ports.dryRun) {
     process.stdout.write(`План: ${upload.join(', ')} → ${tmp} → releases/${version}\n`);
 
     return;
   }
 
-  await fs.writeFile(channelPath, `${JSON.stringify({
-    ...index,
-    latest: {
-      ...entry,
-      archiveUrl
-    },
-  }, null, 2)}\n`, { mode: 0o644 });
+  const prepared = await (ports.prepareHelp ?? prepareReleaseHelp)(directory, {
+    version: entry.version,
+    commit: entry.commit,
+    archiveSha256: archiveHash,
+    bundleSha256: entry.bundleSha256,
+  });
 
-  let mirrorFailed = false;
+  try {
+    await fs.writeFile(channelPath, `${JSON.stringify({
+      ...index,
+      latest: {
+        ...entry,
+        archiveUrl
+      },
+    }, null, 2)}\n`, { mode: 0o644 });
 
-  for (const target of targetList) {
-    if (!target.host || !target.user || !target.key || !target.dir || !target.origin) {
-      continue;
-    }
+    let mirrorFailed = false;
 
-    const sshOptions = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
-      '-o', 'StrictHostKeyChecking=accept-new'];
-    const remote = (command: string) => {
-      return execute('ssh', [...sshOptions, '-i', target.key, '-p', target.port,
-        `${target.user}@${target.host}`, command], { maxBuffer: 16 * 1024 * 1024 });
-    };
-    const staging = quoteShell(`${target.dir}/${tmp}`);
-    const published = quoteShell(`${target.dir}/releases/${version}`);
-    const channel = quoteShell(`${target.dir}/api/releases/v1/channel.json`);
-    const pendingChannel = quoteShell(`${target.dir}/api/releases/v1/channel.json.new`);
-
-    try {
-      await remote(`mkdir -p ${quoteShell(`${target.dir}/releases`)} ${staging}`);
-      await execute('scp', [...sshOptions, '-i', target.key, '-P', target.port,
-        ...upload.map((name) => {
-          return path.join(directory, name);
-        }),
-        `${target.user}@${target.host}:${target.dir}/${tmp}/`]);
-      await remote(`cp ${staging}/channel.json ${pendingChannel}`);
-      // Каталог версии неизменяем: повтор допускается только с теми же суммами.
-      // Канал переключается последним, когда архив уже доступен по постоянному URL.
-      await remote(`if test -e ${published}; then cmp ${staging}/release.tar.gz.sha256`
-        + ` ${published}/release.tar.gz.sha256 && rm -rf ${staging};`
-        + ` else mv ${staging} ${published}; fi`);
-      await remote(`mv ${pendingChannel} ${channel}`);
-      process.stdout.write(`Опубликовано на ${target.host}: releases/${version}\n`);
-    } catch (error) {
-      if (target === primary) {
-        process.stderr.write(`Публикация на ${target.host} не удалась:`
-          + ` ${(error as Error).message}\n`);
-        process.exitCode = 4;
-
-        return;
+    for (const target of targetList) {
+      if (!target.host || !target.user || !target.key || !target.dir || !target.origin) {
+        continue;
       }
 
-      mirrorFailed = true;
-      process.stderr.write(`Зеркало ${target.host} не опубликовано:`
-        + ` ${(error as Error).message}\n`);
-    }
-  }
+      const sshOptions = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
+        '-o', 'StrictHostKeyChecking=accept-new'];
+      const remote = (command: string) => {
+        return execute('ssh', [...sshOptions, '-i', target.key, '-p', target.port,
+          `${target.user}@${target.host}`, command], { maxBuffer: 16 * 1024 * 1024 });
+      };
+      const staging = shellQuote(`${target.dir}/${tmp}`);
 
-  if (mirrorFailed) {
-    process.stderr.write('Часть зеркал не опубликована; основной хост обновлён.\n');
+      try {
+        await remote(`mkdir -p ${shellQuote(`${target.dir}/releases`)} ${staging}`);
+        await execute('scp', [...sshOptions, '-i', target.key, '-P', target.port,
+          ...upload.map((name) => {
+            return name === 'help-site.tar.gz' ? prepared.archive : path.join(directory, name);
+          }),
+          `${target.user}@${target.host}:${target.dir}/${tmp}/`]);
+        await remote(helpPublicationCommand({
+          directory: target.dir,
+          staging: `${target.dir}/${tmp}`,
+          version,
+          archiveSha256: archiveHash,
+        }));
+        process.stdout.write(`Опубликовано на ${target.host}: releases/${version}\n`);
+      } catch (error) {
+        if (target === primary) {
+          process.stderr.write(`Публикация на ${target.host} не удалась:`
+            + ` ${(error as Error).message}\n`);
+          process.exitCode = 4;
+
+          return;
+        }
+
+        mirrorFailed = true;
+        process.stderr.write(`Зеркало ${target.host} не опубликовано:`
+          + ` ${(error as Error).message}\n`);
+      }
+    }
+
+    if (mirrorFailed) {
+      process.stderr.write('Часть зеркал не опубликована; основной хост обновлён.\n');
+    }
+  } finally {
+    await prepared.dispose();
   }
 }
 
 if (process.argv[1]
   && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  await main().catch((error: unknown) => {
+  await publishRelease(process.argv[2], {
+    dryRun: process.argv.includes('--dry-run'),
+  }).catch((error: unknown) => {
     process.stderr.write(`${(error as Error).message}\n`);
     process.exitCode = process.exitCode === 3 ? 3 : 4;
   });

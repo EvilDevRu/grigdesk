@@ -51,7 +51,7 @@ import { windowKeyPath } from '../../shared/desktop/windowKeyPath.ts';
 import { clientUiDirectory } from './clientUi.ts';
 import { loadDocument } from './windowDocuments.ts';
 import {
-  applicationMenuTemplate, contextMenuTemplate, isReloadShortcut, isSettingsShortcut,
+  applicationMenuTemplate, contextMenuTemplate, isReloadShortcut, isSettingsShortcut, isHelpShortcut,
 } from './menu.ts';
 import { createQuitController } from './quitController.ts';
 import { loadServerRuntime, runtimeDependencies } from './runtimeConfig.ts';
@@ -96,6 +96,7 @@ let removeBrowserIpc: (() => void) | null = null;
 const surfaceWindowOrder: BrowserWindow[] = [];
 const maximizeOnShow = new WeakSet<object>();
 let settingsRequest: ReturnType<typeof createSettingsRequest> | null = null;
+let helpRequest: ReturnType<typeof createSettingsRequest> | null = null;
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
 let localSession: Session | null = null;
@@ -543,6 +544,9 @@ function installSettingsShortcut(window: BrowserWindow): void {
     if (isSettingsShortcut(input)) {
       event.preventDefault();
       settingsRequest?.open();
+    } else if (isHelpShortcut(input)) {
+      event.preventDefault();
+      helpRequest?.open();
     }
   });
 }
@@ -736,6 +740,7 @@ function localStartupText(): string {
  */
 async function createMainWindow(origin: string, stored: DesktopSettings): Promise<void> {
   Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate({
+    openHelp: () => helpRequest?.open(),
     openSettings: () => {
       settingsRequest?.open();
     },
@@ -821,6 +826,11 @@ async function createMainWindow(origin: string, stored: DesktopSettings): Promis
     revealed,
     origin,
   });
+  helpRequest = createSettingsRequest({
+    getWindow: () => mainWindow,
+    revealed,
+    origin,
+  }, 'grigdesk:open-help');
   configureWindow(window, origin, options);
   window.on('ready-to-show', () => frames.painted());
   window.on('close', (event) => {
@@ -1135,6 +1145,7 @@ async function prepare(signal: AbortSignal): Promise<void> {
     onLocale: (preference) => {
       setDesktopLocale(preference, app.getPreferredSystemLanguages()[0] ?? '');
       Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate({
+        openHelp: () => helpRequest?.open(),
         openSettings: () => settingsRequest?.open(),
       }, desktopLocale())));
     },
@@ -1301,11 +1312,17 @@ async function prepare(signal: AbortSignal): Promise<void> {
       }
 
       settingsRequest?.dispose();
+      helpRequest?.dispose();
       settingsRequest = createSettingsRequest({
         getWindow: () => mainWindow,
         revealed,
         origin,
       });
+      helpRequest = createSettingsRequest({
+        getWindow: () => mainWindow,
+        revealed,
+        origin,
+      }, 'grigdesk:open-help');
 
       if (mainWindow) {
         await loadDocument(mainWindow, origin + '/', lifetime.signal);
@@ -1577,6 +1594,7 @@ if (app.requestSingleInstanceLock()) {
   app.on('before-quit', (event) => {
     desktopExit.bypass();
     settingsRequest?.dispose();
+    helpRequest?.dispose();
 
     if (exiting) {
       return;

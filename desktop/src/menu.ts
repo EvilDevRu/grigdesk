@@ -4,6 +4,18 @@ import type { ContextMenuParams, MenuItemConstructorOptions, Input } from 'elect
 
 export const SETTINGS_ACCELERATOR = 'CommandOrControl+Alt+S';
 
+export const HELP_ACCELERATOR = 'F1';
+/**
+ * Нативная F1 не зависит от того, остановил ли терминал DOM-событие.
+ * Один keyDown без модификаторов открывает справку текущего документа.
+ */
+export function isHelpShortcut(input: Pick<
+  Input, 'type' | 'code' | 'control' | 'alt' | 'shift' | 'meta' | 'isAutoRepeat'
+>): boolean {
+  return input.type === 'keyDown' && input.code === 'F1' && !input.isAutoRepeat
+    && !input.control && !input.alt && !input.shift && !input.meta;
+}
+
 /**
  * Перезагрузка документа не является пользовательской командой приложения.
  * Проверяется физическая клавиша, включая другой язык раскладки и вариант с Shift.
@@ -59,7 +71,7 @@ const EDIT_ACTIONS = [
  * Подписи вычисляются по локали установки, роли и горячие клавиши сохраняются.
  */
 export function applicationMenuTemplate(
-  actions: { openSettings: () => void },
+  actions: { openSettings: () => void; openHelp?: () => void },
   locale = 'ru',
 ): MenuItemConstructorOptions[] {
   return [
@@ -112,6 +124,15 @@ export function applicationMenuTemplate(
         },
       ],
     },
+{
+  label: translator.t(locale, 'core.helpTitle'),
+  submenu: [{
+    label: translator.t(locale, 'core.helpTitle'),
+    accelerator: HELP_ACCELERATOR,
+    registerAccelerator: false,
+    click: () => actions.openHelp?.(),
+  }],
+},
   ];
 }
 

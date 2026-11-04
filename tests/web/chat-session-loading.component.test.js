@@ -1,3 +1,4 @@
+import { compileModule, webFile } from './helpers/compile-vue.js';
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 
@@ -27,10 +28,14 @@ const PROVIDER = {
 let mount;
 
 let ChatSession;
+let helpEntry;
 
 before(async () => {
   process.env.NODE_ENV = 'test';
   await installUiBrowser({ after: (fn) => after(fn) });
+  helpEntry = await compileModule(webFile('../tests/web/helpers/help-entry.ts'), {
+    stubs: { '../router.ts': 'export const router = { push: async () => {} };' },
+  });
   globalThis.__sharedChatContextFill = (await import('../../shared/chat/chatContext.ts')).contextFill;
   ({ mount } = await import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'));
   globalThis[`${PREFIX}TasksStore`] = () => ({ load: async () => null });
@@ -193,4 +198,109 @@ test('DETAIL-DRAFT: смена sid и скрытая колонка не сох�
   const draftWrites = state.calls.filter((call) => ['PUT', 'PATCH'].includes(call.method));
 
   assert.equal(draftWrites.some((call) => call.body?.chat?.draft === ''), false);
+});
+
+/**
+ * Справка монтируется настоящим диалогом на той же активной Pinia, что лента разговора.
+ * Только сетевой ответ корпуса синтетический; эффект клика виден в настоящем тексте статьи.
+ */
+function mountHelpForError(t) {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const corpus = {
+    format: 1,
+    version: '0.1.0',
+    commit: 'a'.repeat(40),
+    revision: 'b'.repeat(64),
+    locale: 'ru',
+    articles: [
+      {
+        id: 'overview',
+        file: 'README.md',
+        title: 'Начало',
+        section: 'Помощь',
+
+        keywords: [],
+        routes: [],
+        markdown: '# Начало'
+      },
+      {
+        id: 'troubleshooting',
+        file: 'troubleshooting.md',
+        title: 'Разбор неполадки',
+        section: 'Помощь',
+
+        keywords: [],
+        routes: [],
+        markdown: '# Разбор неполадки\nПроверьте подключение.'
+      },
+    ],
+  };
+
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    assert.equal(String(url), '/api/help');
+
+    return Response.json(corpus);
+  };
+
+  const auth = helpEntry.useAuthStore();
+
+  auth.authenticated = true;
+  auth.clientScope = 'help-fixture';
+
+  const help = helpEntry.useHelpStore();
+
+  help.close();
+
+  const dialog = mount(helpEntry.HelpDialog, { attachTo: document.body });
+
+  t.after(() => {
+    dialog.unmount();
+    help.close();
+    globalThis.fetch = originalFetch;
+  });
+
+  return { help, calls };
+}
+
+test('HELP-ERR1: ошибка истории открывает troubleshooting без повтора чтения и потери draft', async (t) => {
+  const state = await fixture(t, {
+    chats: [sampleChat('history-help')],
+    detail: async () => {
+      throw new TypeError('История недоступна');
+    },
+  });
+  const session = state.chat.sessions.find((entry) => entry.id === state.id);
+
+  session.draft = 'НЕОТПРАВЛЕННЫЙ ЧЕРНОВИК';
+
+  const readsBefore = detailReads(state.calls, state.id).length;
+  const help = mountHelpForError(t);
+
+  await state.wrapper.get('[data-role="chat-history-help"]').trigger('click');
+  await drain();
+  assert.equal(help.help.isOpen, true);
+  assert.equal(help.help.articleId, 'troubleshooting');
+  assert.match(document.querySelector('[data-role="help-dialog"]').textContent, /Разбор неполадки/u);
+  assert.equal(session.draft, 'НЕОТПРАВЛЕННЫЙ ЧЕРНОВИК');
+  assert.equal(detailReads(state.calls, state.id).length, readsBefore);
+  assert.equal(state.calls.some((call) => call.method === 'POST' && call.url === '/api/chat'), false);
+});
+
+test('HELP-ERR2: ошибка подготовки в ленте открывает troubleshooting без отправки модели', async (t) => {
+  const original = sampleChat('turn-error-help', {
+    draft: 'ПРЕЖНИЙ ТЕКСТ',
+    messages: [{ role: 'error', text: 'Не удалось подготовить исполнителя' }],
+  });
+  const state = await fixture(t, { chats: [original] });
+  const help = mountHelpForError(t);
+
+  assert.equal(state.wrapper.get('textarea').element.value, 'ПРЕЖНИЙ ТЕКСТ');
+  await state.wrapper.get('[data-role="chat-error-help"]').trigger('click');
+  await drain();
+  assert.equal(help.help.articleId, 'troubleshooting');
+  assert.match(document.querySelector('[data-role="help-dialog"]').textContent, /Разбор неполадки/u);
+  assert.equal(state.wrapper.get('textarea').element.value, 'ПРЕЖНИЙ ТЕКСТ');
+  assert.equal(state.calls.some((call) => call.method === 'POST' && call.url === '/api/chat'), false);
 });

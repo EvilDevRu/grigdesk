@@ -4,6 +4,7 @@
   "extends": "./tsconfig.base.json",
   "include": [
     "src/**/*.ts",
+    "help/**/*.ts",
     "src/**/*.vue",
     "dev/**/*.ts",
     "dev/**/*.vue",

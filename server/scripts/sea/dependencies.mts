@@ -162,7 +162,7 @@ async function dependencyDirectories(directory: string, boundary: string): Promi
  * SPDX в package.json без текста лицензии не считается завершённой поставкой.
  */
 export async function collectLicenses(stageRoot: string,
-  options: { fallbackFile?: string } = {}): Promise<LicenseIndex> {
+  options: { fallbackFile?: string; extraPackages?: readonly string[] } = {}): Promise<LicenseIndex> {
   const boundary = await realpath(stageRoot);
   const directory = path.join(stageRoot, 'licenses');
 
@@ -179,7 +179,7 @@ export async function collectLicenses(stageRoot: string,
 
   const index: LicenseIndex = { packages: [] };
 
-  for (const packageDirectory of packages.sort()) {
+  for (const packageDirectory of [...new Set([...packages, ...options.extraPackages ?? []])].sort()) {
     const manifest = JSON.parse(await readFile(path.join(packageDirectory, 'package.json'), 'utf8')) as {
       name: string;
       version: string;

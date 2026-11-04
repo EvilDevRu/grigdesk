@@ -1,4 +1,6 @@
 import { applyChatSpeed } from '../../lib/chat/speed.ts';
+import type { HelpService } from '../../lib/help/service.ts';
+import { withHelpHint } from '../../lib/chat/helpHint.ts';
 import { projectWebChatHead } from '../../../../shared/chat/chatListProjection.ts';
 import { applyWebPending } from '../../lib/chat/webPendingHistory.ts';
 import { ChatProjectWorkspaces } from '../../lib/chat/projectWorkspaces.ts';
@@ -26,7 +28,9 @@ import { randomUUID } from 'node:crypto';
 import { isRecord } from '../../../../shared/lib/objects.ts';
 import { BROWSER_USAGE_GUIDANCE } from '../../../../shared/browser/browserTool.ts';
 
-import { createWorkTools, getExecutor, withBrowserToolPolicy } from '../../lib/executors/index.ts';
+import {
+  createWorkTools, getExecutor, withBrowserToolPolicy, withHelpToolPolicy,
+} from '../../lib/executors/index.ts';
 import { createChatBrowserOwnerSource } from '../../lib/chat/browserOwners.ts';
 import type { BrowserService } from '../../lib/browser/browserService.ts';
 import { ExecutorRuntimeError } from '../../lib/executors/errors.ts';
@@ -351,6 +355,7 @@ interface ChatPrefs extends Record<string, unknown> {
 }
 
 interface ChatModuleOptions {
+  help?: HelpService;
   projectsService?: Pick<ProjectsService, 'withReferences' | 'registerDeletionCleanup'>;
   config: GrigDeskConfig;
   factoryState: Pick<FactoryStateAdapter,
@@ -3295,6 +3300,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       );
     // Режим прав выбирает только пользователь в чате. UI-context не является
     // authorization surface и не даёт ни cwd, ни fallback permission mode.
+    if (!plan && !slash && opts.help) {
+      fullMessage = withHelpHint(fullMessage ?? '');
+    }
+
     const normalizedMode = executor?.normalizePermissionMode?.(wantMode);
 
     if (normalizedMode && !normalizedMode.ok) {
@@ -3324,10 +3333,13 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const workProjectId = await trustedWorkProject(id);
     const browserOwner = chatKey && target.record ? await chatBrowserOwners.owner(chatKey) : null;
     const browserIntent = Boolean(browserOwner && opts.browser?.routing.mode() === 'grigdesk');
-    const previousWorkPolicy = executor.workToolPolicy?.(permissionMode);
+    const previousWorkPolicy = opts.help
+      ? withHelpToolPolicy(executor.workToolPolicy?.(permissionMode))
+      : executor.workToolPolicy?.(permissionMode);
     const workToolPolicy = browserIntent
       ? withBrowserToolPolicy(previousWorkPolicy, permissionMode) : previousWorkPolicy;
     const workToolScopeKey = JSON.stringify([
+      Boolean(opts.help),
       workProjectId || null,
       chatKey || id || 'free',
       permissionMode,
@@ -3337,6 +3349,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       opts.browser?.broker.generation() ?? 0,
     ]);
     const workToolsValue = createWorkTools({
+      helpInvoke: opts.help ? (input: unknown) => opts.help!.invoke(input) : undefined,
       projectId: workProjectId,
       chatKey,
       permissionMode,
