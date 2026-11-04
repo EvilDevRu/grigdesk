@@ -37,3 +37,38 @@ for (const relative of ['web/src/ui.ts', 'web/src/components/primitives/UiButton
     await healthyCore(f.page);
   });
 }
+
+for (const width of [390, 1280]) {
+  test(`PM-V1-BROWSER: actual ESM, общий Vue/UI, панель и slot без iframe при ${width}px`, async (t) => {
+    const f = await runtimeBrowser(t, { width, v1: true });
+
+    assert.equal(await f.page.evaluate(() => window.__pluginEntryExecutions ?? 0), 0);
+    await openModule(f.page, f.origin);
+    await sharedIdentity(f.page, { production: false });
+    assert.equal(await f.page.locator('.tool-surface iframe').count(), 0);
+    assert.equal(await f.page.evaluate(() => window.__pluginB1.starts), 1);
+    await f.page.getByLabel('Ввод плагина').fill('Сохранённый ввод');
+    await f.page.evaluate(() => {
+      window.__closeV1Popup = window.__pluginHost.mountProviderPopup();
+    });
+    await f.page.getByText('Источник браузера', { exact: true }).waitFor({ timeout: 6000 });
+    assert.equal(await f.page.evaluate(() => window.__pluginB1.starts), 1);
+    assert.equal(await f.page.evaluate(() => window.__pluginEntryExecutions), 1);
+
+    const icon = f.page.locator('img[src*="/api/plugins/ui-module/icon/"]').first();
+
+    await icon.waitFor({ state: 'attached', timeout: 6000 });
+    await icon.evaluate((image) => image.decode());
+    assert.equal(await icon.evaluate((image) => image.complete && image.naturalWidth > 0), true);
+    await f.page.evaluate(() => {
+      const state = window.__pluginHost.fixtureState();
+
+      state.plugins.list[0].placements[0].enabled = false;
+    });
+    await f.page.getByText('Источник браузера', { exact: true }).waitFor({ state: 'hidden' });
+    assert.equal(await f.page.getByLabel('Ввод плагина').inputValue(), 'Сохранённый ввод');
+    assert.equal(await f.page.evaluate(() => window.__pluginB1.cleanups), 0);
+    await f.page.evaluate(() => window.__closeV1Popup());
+    await healthyCore(f.page);
+  });
+}

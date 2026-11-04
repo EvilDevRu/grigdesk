@@ -29,9 +29,8 @@ export async function capturePackageSnapshot(dir: string, npmDirs: string[]): Pr
 export async function validatePreparedPayload(
   dir: string,
   snapshot: PackageSnapshot,
-  webDir: string | null,
 ): Promise<string> {
-  const tree = await readPackageTree(dir, { generatedDirs: snapshot.npmDirs, webDir });
+  const tree = await readPackageTree(dir, { generatedDirs: snapshot.npmDirs });
   const generated = snapshot.npmDirs.map((npmDir) => path.posix.join(npmDir, 'node_modules'));
   const original = tree.filter((entry) => !generated.some((root) => entry.relative === root
     || entry.relative.startsWith(`${root}/`)));

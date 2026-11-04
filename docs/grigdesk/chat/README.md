@@ -16,6 +16,8 @@
 
 - [Режимы Codex: admission, явный выбор чата, native-вопросы и предел проверки](codex-permission-modes.md)
 
+- [Асинхронные вопросы Codex: карточка, ответ через steer и отмена вместе с ходом](codex-async-questions.md)
+
 - [Границы подготовки внешнего CLI и reuse живого процесса](executor-preparation-boundaries.md)
 - [Срок прямого вопроса: callback не наследует таймер enqueue](direct-interaction-lifetime.md)
 
@@ -98,6 +100,8 @@
 
 ## Устройство
 
+- [Текстовый вызов DeepSeek и GLM: изоляция, отмена и отсутствие инструментов](dsh-model-only.md)
+
 - [Области дополнительных настроек: чаты, конвейеры и непроверенная ACP-схема](native-settings-consumers.md)
 
 - [Доступность моделей: фильтр чата и выбор в настройках](unavailable-executor-model-selection.md)
@@ -145,6 +149,7 @@
 - [Длинный запрос: нижняя панель сохраняет высоту кнопок решения](intervention-footer-layout.md)
 - [Поля запросов: общий фон, компактные действия, ссылки и выравнивание](intervention-controls.md)
 - [Диалог: агент задаёт вопрос (AskUserQuestion)](agent-questions.md)
+- [Полный ответ на анкету: блокировка кнопки, клавиатуры и обработчика](question-answer-completeness.md)
 - [Доставка хода: приём по turnId, журнал ходов, итог через pending](turn-delivery.md)
 - [Ошибки подготовки: понятная причина, конец хода и восстановление статуса окна](turn-preparation-errors.md)
 - [Порядок финалов очереди при записи из нескольких окон](pending-final-order.md)

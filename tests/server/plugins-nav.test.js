@@ -11,6 +11,7 @@ import {
   scanUserPlugins,
   settingsValues,
 } from '../../server/src/lib/pluginsRegistry.ts';
+import { manifestV1, png } from '../helpers/pluginV1.js';
 import { normalizePluginCategory } from '../../shared/plugins/pluginsContracts.ts';
 
 test('системные инструменты имеют явные group/order, а неизвестная группа нормализуется в rail', () => {
@@ -64,15 +65,25 @@ test('системные инструменты имеют явные group/orde
   assert.equal(github.defaultEnabled, false);
 
   const warnings = [];
+
   assert.deepEqual(
     normalizePluginNav({ path: '/legacy', label: 'Legacy', group: 'future', order: 7 }, 'fallback', (m) => warnings.push(m)),
-    { path: '/legacy', label: 'Legacy', icon: 'plugin', group: 'rail', order: 7 },
+    {
+      path: '/legacy',
+      label: 'Legacy',
+      group: 'rail',
+      order: 7,
+    },
   );
   assert.match(warnings[0], /future.*rail/);
   assert.equal(normalizePluginNav(null, 'x'), null);
   assert.deepEqual(
     normalizePluginNav({ path: '/no-order', order: null }, 'Без порядка'),
-    { path: '/no-order', label: 'Без порядка', icon: 'plugin', group: 'rail' },
+    {
+      path: '/no-order',
+      label: 'Без порядка',
+      group: 'rail',
+    },
   );
 });
 
@@ -110,10 +121,17 @@ test('каждый системный плагин объявляет род р�
       alerts: { id: 'alerts', name: 'Сигналы', category: 'notifications' },
       plain: { id: 'plain', name: 'Без категории' },
     };
+
     for (const [id, manifest] of Object.entries(manifests)) {
       const pluginDir = path.join(dir, id);
       await mkdir(pluginDir);
-      await writeFile(path.join(pluginDir, 'plugin.json'), JSON.stringify(manifest));
+      await mkdir(path.join(pluginDir, 'assets'));
+      await writeFile(path.join(pluginDir, 'assets/icon.png'), png);
+      await writeFile(path.join(pluginDir, 'plugin.json'), JSON.stringify(manifestV1({
+        entrypoints: {},
+        contributes: {},
+        ...manifest,
+      })));
     }
     const warnings = [];
     const plugins = await scanUserPlugins(dir, { warn: (meta, message) => warnings.push({ meta, message }) });

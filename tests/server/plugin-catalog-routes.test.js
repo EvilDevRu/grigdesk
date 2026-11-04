@@ -108,3 +108,35 @@ test('CAT-R2-MIXED: общий маршрут отдаёт api1/2, сохран�
     }
   }
 });
+
+test('CAT-V1-MEDIA-ROUNDTRIP: service и HTTP сохраняют media и README детальной карточки', async (t) => {
+  const data = catalogFixture();
+  const icon = {
+    path: 'assets/icon.webp',
+    sha: data.version.sha,
+    mediaType: 'image/webp',
+    bytes: 1024
+  };
+
+  data.detail.plugin.icon = icon;
+  data.detail.plugin.gallery = { screenshots: [{ ...icon, path: 'assets/screen.webp' }] };
+
+  const catalog = new PluginCatalogService({
+    urls: ['https://catalog.test/api/plugins/v1/index.json'],
+    applicationVersion: '1.0.0',
+    fetch: async (input) => Response.json(String(input).endsWith('index.json') ? data.index : data.detail),
+  });
+
+  t.after(() => catalog.close());
+
+  const f = await installHttpFixture(t, { catalog });
+
+  await f.app.inject({ url: '/api/plugin-catalog', headers: f.session });
+
+  const response = await f.app.inject({ url: '/api/plugin-catalog/demo', headers: f.session });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().plugin.icon, icon);
+  assert.deepEqual(response.json().plugin.gallery, data.detail.plugin.gallery);
+  assert.equal(response.json().plugin.readme, data.detail.plugin.readme);
+});

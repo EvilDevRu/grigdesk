@@ -1,11 +1,13 @@
 import { defineStore } from 'pinia';
 
 import { API_VERSION } from '../../../shared/client/apiVersion.ts';
+import { connectionRetryDelay } from '../../../shared/client/connectionRetry.ts';
 import type { ShellState } from '../../../shared/client/clientShell.ts';
 import { delayWithAbort } from '../../../shared/lib/delay.ts';
-import { readShellState, shellAction } from '../shared/shellClient.ts';
+import { isShellState, readShellState, shellAction } from '../shared/shellClient.ts';
 
 const controllers = new WeakMap<object, AbortController>();
+const retryWaits = new WeakMap<object, AbortController>();
 
 export const useShellStore = defineStore('shell', {
   state: () => ({
@@ -14,6 +16,9 @@ export const useShellStore = defineStore('shell', {
     snapshot: null as ShellState | null,
     everOnline: false,
     showConnections: false,
+    unavailable: false,
+    retryAt: 0,
+    retryAttempt: 0,
   }),
   getters: {
     status: (state) => state.snapshot?.status ?? 'none',
@@ -56,13 +61,33 @@ export const useShellStore = defineStore('shell', {
     },
     /**
      * Long-poll имеет одну активную цепочку, ошибка добавляет минимум секунду паузы.
+     * Отказ уже обнаруженной оболочки сохраняет снимок и повторяется после той же паузы.
      * Abort останавливает также паузу, таймеры не находятся в сериализуемом состоянии Pinia.
      */
     async poll(signal: AbortSignal, failed = false) {
       while (!signal.aborted) {
         try {
           if (failed) {
-            await delayWithAbort(1000, signal);
+            this.unavailable = true;
+
+            const wait = new AbortController();
+            const delay = connectionRetryDelay(this.retryAttempt++);
+
+            retryWaits.set(this, wait);
+            this.retryAt = Date.now() + delay;
+
+            try {
+              await delayWithAbort(delay, AbortSignal.any([signal, wait.signal]));
+            } catch {
+              if (signal.aborted) {
+                return;
+              }
+            } finally {
+              if (retryWaits.get(this) === wait) {
+                retryWaits.delete(this);
+                this.retryAt = 0;
+              }
+            }
           }
 
           const state = await readShellState(this.snapshot?.rev, signal);
@@ -73,11 +98,11 @@ export const useShellStore = defineStore('shell', {
 
           this.apply(state);
 
-          if (!state) {
+          if (!state && !this.present) {
             return;
           }
 
-          failed = false;
+          failed = state === null;
         } catch {
           failed = true;
         }
@@ -85,9 +110,18 @@ export const useShellStore = defineStore('shell', {
     },
     /**
      * Старый ответ не может откатить более свежую ревизию после действия человека.
+     * Обнаруженная оболочка принадлежит документу: её временный отказ не отменяет обнаружение.
      * everOnline запоминает факт связи до конца документа и переживает временный offline.
      */
     apply(state: ShellState | null) {
+      if (state !== null && !isShellState(state)) {
+        throw new Error('Получено некорректное состояние оболочки');
+      }
+
+      if (!state && this.present) {
+        return;
+      }
+
       if (state && this.snapshot && state.rev < this.snapshot.rev) {
         return;
       }
@@ -95,13 +129,24 @@ export const useShellStore = defineStore('shell', {
       this.present = state !== null;
       this.snapshot = state;
       this.everOnline ||= state?.status === 'online';
+      this.unavailable = false;
+      this.retryAttempt = 0;
     },
     async refresh() {
       this.apply(await readShellState());
     },
+    /**
+     * Закрытие документа отменяет запрос и ожидание повтора через общий signal.
+     * Старая цепочка не может снять таймер уже запущенного нового обнаружения.
+     */
     stop() {
       controllers.get(this)?.abort();
       controllers.delete(this);
+      retryWaits.delete(this);
+      this.retryAt = 0;
+    },
+    retryNow() {
+      retryWaits.get(this)?.abort();
     },
     addMachine(pairing: string) {
       return shellAction('POST', '/profiles', { pairing });
@@ -127,11 +172,16 @@ export const useShellStore = defineStore('shell', {
     /**
      * Успешная разблокировка возвращает свежий снимок, сразу снимающий блокирующий слой.
      * Ревизия защищает его от запоздалого long-poll со старым состоянием locked.
+     * Прежний Android отвечает только ok: после него снимок читается отдельным GET.
      */
     async unlock() {
-      const state = await shellAction('POST', '/unlock') as ShellState;
+      const state = await shellAction('POST', '/unlock');
 
-      this.apply(state);
+      if (isShellState(state)) {
+        this.apply(state);
+      } else {
+        await this.refresh();
+      }
 
       return state;
     },

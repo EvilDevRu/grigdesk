@@ -4,6 +4,7 @@ import { translate as t } from '../../../../shared/i18n/catalogs.ts';
 import { localizeUsageAmount, localizeUsageResourceText } from './usageResourceText.ts';
 import { localizeProviderAction } from './providerLocale.ts';
 import { providerUsageFreshness } from '../../../../shared/chat/providerUsageFreshness.ts';
+import { localizeProviderPluginResource } from '../../../../shared/plugins/providerUsageResources.ts';
 
 import type { UsageEntry, UsageBar, UsageResource } from './contracts.ts';
 
@@ -345,6 +346,10 @@ export function localizeUsageResource<T extends UsageResource>(
   providerId: string, resource: T, locale: LocaleSource = 'ru',
 ): T {
   const id = typeof locale === 'string' ? locale : locale.value;
+
+  if (resource.kind === 'plugin') {
+    return localizeProviderPluginResource(resource, id);
+  }
 
   if (id === 'ru' || !['claude', 'codex', 'kimi', 'deepseek', 'glm', 'tripo'].includes(providerId)) {
     return resource;

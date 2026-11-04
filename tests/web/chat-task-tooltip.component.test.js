@@ -187,7 +187,11 @@ test('кольцо контекста открывает форматирова�
       return {
         id: session.model,
         model: { name: 'Opus 5 (1M)', context: 1_000_000, efforts: [] },
-        provider: { id: 'claude', capabilities: { chatAutoCompact: true } },
+        provider: {
+          id: 'claude',
+          color: '#d97757',
+          capabilities: { chatAutoCompact: true },
+        },
       };
     },
     visibleModels() { return []; },
@@ -214,7 +218,8 @@ test('кольцо контекста открывает форматирова�
   const headerMeter = wrapper.get('[data-context="chat-header-context"]');
 
   assert.equal(headerMeter.attributes('aria-valuenow'), '80');
-  assert.equal(headerMeter.classes().includes('ui-progress--warning'), true);
+  assert.equal(headerMeter.element.style.getPropertyValue('--chat-context-color'), '#d97757');
+  assert.equal(ring.get('.ui-progress').classes().includes('ui-progress--warning'), true);
   assert.equal(headerMeter.attributes('aria-valuetext'), ring.attributes('aria-label'));
   assert.equal(ring.attributes('title'), undefined);
   assert.match(ring.attributes('aria-label'), /Контекст: 160[\s\u00a0]000/);
@@ -252,7 +257,8 @@ test('кольцо контекста открывает форматирова�
   assert.match(ring.attributes('aria-label'), /40[\s\u00a0]000 из 80[\s\u00a0]000.*50%/);
   assert.match(ring.attributes('aria-label'), /замер этого хода/);
   assert.equal(headerMeter.attributes('aria-valuenow'), '50');
-  assert.equal(headerMeter.classes().includes('ui-progress--success'), true);
+  assert.equal(headerMeter.element.style.getPropertyValue('--chat-context-color'), '#d97757');
+  assert.equal(ring.get('.ui-progress').classes().includes('ui-progress--success'), true);
 
   session.sessionId = null;
   await nextTick();

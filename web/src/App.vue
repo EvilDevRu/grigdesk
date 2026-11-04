@@ -349,10 +349,12 @@ onBeforeUnmount(() => {
   pollingStarted = false;
   stopWindowSync();
   stopShellRelay?.();
+  auth.stopRecovery();
   shell.stop();
 });
 watch(() => shell.status, (status, previous) => {
   if (shell.present && status !== 'online') {
+    auth.stopRecovery();
     auth.logEpoch += 1;
     auth.logReason = 'shell-' + status;
     auth.authenticated = false;

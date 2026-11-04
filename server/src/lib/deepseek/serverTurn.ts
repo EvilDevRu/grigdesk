@@ -10,6 +10,7 @@ import type { ChatModelSource, ChatRunMetadata } from '../../../../shared/chat/c
 import { createStepSink } from '../chat/streamSteps.ts';
 import type { ChatStep } from '../chat/streamSteps.ts';
 import type { TurnFailureSignal, TurnRecovery } from '../chat/turnFailures.ts';
+import { waitForDshOperation } from './abortableOperation.ts';
 import { DeepSeekWebError } from './serverClient.ts';
 import type { DeepSeekWebClient } from './serverClient.ts';
 import { createScopedRemote, remoteQuestions } from './scopedRemote.ts';
@@ -79,6 +80,8 @@ export interface DeepSeekSessionObserver {
 
 // Ход другого исполнителя на той же сборке DSH. Без варианта поведение DeepSeek прежнее.
 export interface DeepSeekTurnVariant {
+  // Только model-only прерывает RPC/ready и сразу переходит к cleanup процесса.
+  interruptOnAbort?: boolean;
   createObserver?: (options: {
     client: DeepSeekWebClient;
     sessionId: string;
@@ -234,6 +237,7 @@ function compactText(stream: unknown): string {
  */
 export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) {
   const variant = options.variant;
+  const operationSignal = variant?.interruptOnAbort ? options.signal : undefined;
   const labels = variant?.labels ?? {
     stopped: 'Ход DeepSeek остановлен.',
     blocked: 'Ход DeepSeek заблокирован.',
@@ -259,6 +263,7 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
     cwd: options.cwd,
     env: options.env,
     signal: options.signal,
+    interruptVerification: variant?.interruptOnAbort === true,
   });
   let server = await start();
   let promptAttempted = false;
@@ -288,21 +293,24 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
       await verifyDeepSeekNativeSettings(server.client, options.nativeSettings, options.signal);
     }
 
-    const sessionId = await server.client.createSession(options.cwd, options.sessionId);
+    const sessionId = await waitForDshOperation(
+      server.client.createSession(options.cwd, options.sessionId, operationSignal), operationSignal,
+    );
 
     cleanupSession = sessionId;
     checkpoint();
     await options.onSessionCreated?.(sessionId);
     checkpoint();
+
     if (options.model) {
       const selected = modelSelection(options.model);
 
-      await server.client.rpc('session/selectModel', {
+      await waitForDshOperation(server.client.rpc('session/selectModel', {
         request: {
           sessionId, ...selected,
           ...(options.effort ? { reasoningEffort: options.effort } : {}),
         },
-      });
+      }, 30_000, operationSignal), operationSignal);
       checkpoint();
     }
 
@@ -616,7 +624,10 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
 
       if (violation) {
         fail(violation);
-        cancellation ||= server.client.cancel(sessionId).catch(() => {});
+
+        if (!variant?.interruptOnAbort) {
+          cancellation ||= server.client.cancel(sessionId).catch(() => {});
+        }
 
         return;
       }
@@ -818,12 +829,15 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
     });
     const abort = () => {
       fail(stoppedError());
-      cancellation ||= server.client.cancel(sessionId).catch(() => {});
+
+      if (!variant?.interruptOnAbort) {
+        cancellation ||= server.client.cancel(sessionId).catch(() => {});
+      }
     };
     options.signal?.addEventListener('abort', abort, { once: true });
 
     try {
-      await Promise.all([follow.ready, remote.ready]);
+      await waitForDshOperation(Promise.all([follow.ready, remote.ready]), operationSignal);
       await observer?.ready().catch((error) => {
         throw failure ?? error;
       });
@@ -832,7 +846,10 @@ export async function runDeepSeekServerTurn(options: DeepSeekServerTurnOptions) 
 
       options.onPromptAttempted?.();
       promptAttempted = true;
-      await server.client.prompt(sessionId, options.message, randomUUID(), 'queue');
+      await waitForDshOperation(
+        server.client.prompt(sessionId, options.message, randomUUID(), 'queue', operationSignal),
+        operationSignal,
+      );
 
       const port: InTurnPort = {
         /**

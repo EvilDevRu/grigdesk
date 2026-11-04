@@ -10,30 +10,36 @@
     <UiInlineMessage v-if="failed" tone="warning">{{ t('core.onboardingProviderFailed') }}</UiInlineMessage>
     <UiLoadingState v-if="checking && !providers.providers.length" variant="cards" />
     <div v-else class="providers">
-      <article v-for="provider in providers.providers" :key="provider.id" class="provider"
-        :class="{ 'is-ready': isChatReady(provider) }">
+      <article v-for="card in cards" :key="card.provider.id" class="provider"
+        :class="{ 'is-ready': card.available }">
         <header class="provider-heading">
-          <span class="provider-icon" :style="{ color: isChatReady(provider) ? provider.color : undefined }">
-            <ProviderIcon :provider="{ ...provider, available: isChatReady(provider) }" :size="16" />
+          <span class="provider-icon" :style="{ color: card.available ? card.provider.color : undefined }">
+            <ProviderIcon :provider="card.provider" :size="16" />
           </span>
-          <h3>{{ provider.name }}</h3>
+          <h3>{{ card.provider.name }}</h3>
         </header>
         <p class="provider-status">
-          <span aria-hidden="true">{{ isChatReady(provider) ? '✓' : '○' }}</span>
-          <span>{{ t(isChatReady(provider) ? 'core.onboardingReady' : 'core.onboardingNotReady') }}</span>
+          <span aria-hidden="true">{{ card.available ? '✓' : '○' }}</span>
+          <span>{{ card.label }}</span>
         </p>
         <div class="provider-details">
-          <p>{{ t(provider.installed ? 'core.onboardingInstalled' : 'core.onboardingNotInstalled') }}</p>
-          <p>{{ localizeProviderAuthLabel(provider, uiLocale) }}</p>
+          <p>{{ card.typeLabel }}</p>
+          <p v-if="card.provider.kind === 'api'">{{ t('core.onboardingApiConnection') }}</p>
+          <p v-else>
+            {{ t(card.provider.installed ? 'core.onboardingInstalled' : 'core.onboardingNotInstalled') }}
+          </p>
+          <p>{{ localizeProviderAuthLabel(card.provider, uiLocale) }}</p>
         </div>
-        <div v-if="!isChatReady(provider)" class="provider-actions">
-          <UiButton data-context="workspace-form-wrap" v-if="!provider.installed && provider.installation?.canInstall"
-            :disabled="installer.busy" @click="installer.requestInstall(provider.id, 'install')">
-            {{ t('core.onboardingInstall', { name: provider.name }) }}
+        <div v-if="!card.available" class="provider-actions">
+          <UiButton data-context="workspace-form-wrap"
+            v-if="!card.provider.installed && card.provider.installation?.canInstall"
+            :disabled="installer.busy" @click="installer.requestInstall(card.provider.id, 'install')">
+            {{ t('core.onboardingInstall', { name: card.provider.name }) }}
           </UiButton>
-          <UiButton data-context="workspace-form-wrap" v-if="provider.installed && !provider.available && provider.installation?.loginCommand"
-            @click="login(provider.installation.loginCommand)">
-            {{ t('core.onboardingLogin', { name: provider.name }) }}
+          <UiButton data-context="workspace-form-wrap"
+            v-if="card.provider.installed && card.provider.installation?.loginCommand"
+            @click="login(card.provider.installation.loginCommand)">
+            {{ t('core.onboardingLogin', { name: card.provider.name }) }}
           </UiButton>
         </div>
       </article>
@@ -52,11 +58,12 @@
 import { computed, onMounted, ref, watch } from 'vue';
 
 import { UiRefreshIcon, t, uiLocale, UiButton, UiInlineMessage, UiLoadingState } from '../../ui';
-import type { ProviderEntry } from '../../../../shared/chat/providersContracts.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
 import { useProviderInstallStore } from '../../stores/providerInstall.ts';
 import { useOnboardingStore } from '../../stores/onboarding.ts';
-import { localizeProviderAuthLabel } from '../../features/providers/providerLocale.ts';
+import { localizeProviderAuthLabel, providerAvailability } from '../../features/providers/providerLocale.ts';
+import { EXECUTOR_TYPES, normalizeExecutorType } from '../../../../shared/chat/executorTypes.ts';
+import { localizeExecutorType } from '../../features/settings/metadataLocale.ts';
 import { useToolLauncher } from '../../shared/tools/launcher.ts';
 import ProviderIcon from '../../shared/ProviderIcon.vue';
 
@@ -67,11 +74,15 @@ const onboarding = useOnboardingStore();
 const launcher = useToolLauncher();
 const checking = ref(false);
 const failed = ref(false);
-const ready = computed(() => providers.providers.some(isChatReady));
-
-function isChatReady(provider: Pick<ProviderEntry, 'available' | 'chatEnabled'>): boolean {
-  return Boolean(provider.available && provider.chatEnabled !== false);
-}
+const cards = computed(() => providers.providers.map((provider) => ({
+  provider,
+  ...providerAvailability(provider, uiLocale),
+  typeLabel: localizeExecutorType(
+    EXECUTOR_TYPES.find((type) => type.id === normalizeExecutorType(provider.type))!,
+    uiLocale.value,
+  ).label,
+})));
+const ready = computed(() => cards.value.some((card) => card.chatReady));
 
 /**
  * Принудительная проверка использует прежний refresh=1 и ждёт его реального результата.

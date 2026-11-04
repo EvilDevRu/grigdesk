@@ -10,6 +10,7 @@ import { measureChatPerformance, startChatPerformance } from '../shared/chatPerf
 import type { RelayChannel } from '../shared/windowRelay.ts';
 import { WEB_SSE_SIGNALS } from '../../../shared/web-log/webDiagnostics.ts';
 import { summarizeWebError } from '../shared/webDiagnostics.ts';
+import { connectionRetryDelay } from '../../../shared/client/connectionRetry.ts';
 
 // Все именованные события сервера — новые добавлять сюда (иначе подписчик их не увидит).
 // `as const` не украшение: из списка выводится тип имени, и опечатка в ветке подписчика
@@ -23,6 +24,8 @@ export type SseEventName = (typeof EVENT_NAMES)[number];
 export type SseListener = (name: SseEventName, data: unknown) => void;
 
 const connected = ref(false);
+export const sseRetryAt = ref(0);
+export const sseRecovering = ref(false);
 const listeners = new Set<SseListener>();
 
 type SseLogSink = (
@@ -96,6 +99,8 @@ export function resetSseForTests(): void {
 
   stableTimer = null;
   connected.value = false;
+  sseRetryAt.value = 0;
+  sseRecovering.value = false;
   listeners.clear();
   retries = 0;
   openedAt = 0;
@@ -148,6 +153,8 @@ export function configureSseRelay(
   es?.close();
   es = null;
   connected.value = false;
+  sseRetryAt.value = 0;
+  sseRecovering.value = false;
 
   if (retry) {
     clearTimeout(retry);
@@ -277,7 +284,13 @@ function ensure(): void {
   const source = es;
 
   source.onopen = () => {
+    if (es !== source) {
+      return;
+    }
+
     connected.value = true;
+    sseRetryAt.value = 0;
+    sseRecovering.value = false;
     openedAt = performance.now();
     report('sse.open', { gapMs: lastClosedAt ? Math.max(0, openedAt - lastClosedAt) : 0, retries });
 
@@ -292,7 +305,12 @@ function ensure(): void {
   };
 
   source.onerror = () => {
+    if (es !== source) {
+      return;
+    }
+
     connected.value = false;
+    sseRecovering.value = true;
 
     if (stableTimer) {
       clearTimeout(stableTimer);
@@ -309,7 +327,14 @@ function ensure(): void {
     es = null;
 
     if (accessEnabled) {
-      retry = setTimeout(ensure, 3000);
+      const delay = connectionRetryDelay(retries - 1);
+
+      sseRetryAt.value = Date.now() + delay;
+      retry = setTimeout(() => {
+        retry = null;
+        sseRetryAt.value = 0;
+        ensure();
+      }, delay);
     } // авто-переподключение
   };
 
@@ -368,6 +393,33 @@ export function useSse(onEvent?: SseListener) {
 }
 
 /**
+ * Явное действие пропускает ожидание, сохраняя единственный поток и его подписчиков.
+ * Отозванный доступ и окна-зеркала не могут открыть самостоятельное соединение.
+ */
+export function reconnectSse(): void {
+  if (!accessEnabled || relayRole === 'mirror') {
+    return;
+  }
+
+  if (retry) {
+    clearTimeout(retry);
+    retry = null;
+  }
+
+  if (stableTimer) {
+    clearTimeout(stableTimer);
+    stableTimer = null;
+  }
+
+  es?.close();
+  es = null;
+  connected.value = false;
+  sseRetryAt.value = 0;
+  sseRecovering.value = true;
+  ensure();
+}
+
+/**
  * Отзыв доступа гасит поток и его таймер, сохраняя подписчиков рабочего документа.
  * Возврат подтверждённого входа поднимает одну общую связь без перемонтирования экрана.
  */
@@ -386,6 +438,8 @@ export function setSseEnabled(enabled: boolean): void {
   es = null;
   closeRelay();
   connected.value = false;
+  sseRetryAt.value = 0;
+  sseRecovering.value = false;
 
   if (retry) {
     clearTimeout(retry);

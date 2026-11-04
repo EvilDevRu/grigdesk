@@ -88,7 +88,6 @@ export async function validateDriverPackage(
     version,
     description: typeof manifest.description === 'string' ? manifest.description : '',
     hasServer: true,
-    webDir: null,
     webModuleDir: null,
     npmDirs: await validateNpmDirs(directory, manifest),
   };

@@ -842,6 +842,15 @@ html[data-ui-touch] .ui-select[data-context='chat-session-toolbar']::after {
   .phone-chat-options .ui-select[data-context='chat-session-toolbar'] {
     font-size: 16px;
   }
+
+  .ui-dialog[data-ui-chat-options] .ui-select[data-context='chat-session-toolbar'] {
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .ui-dialog[data-ui-chat-options] .ui-select[data-context='chat-session-toolbar']::after {
+    display: none;
+  }
 }
 
 /* Формы настроек используют общий ритм primitives; варианты ниже описывают только

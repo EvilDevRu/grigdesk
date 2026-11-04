@@ -12,9 +12,13 @@ import {
 for (const [hasModule, hasServer] of [[true, false], [false, false], [false, true], [true, true]]) {
   test(`AC4-MODULE-WARNING: module=${hasModule}, server=${hasServer}`, async (t) => {
     const repo = await createPluginRepo(t);
-    const release = hasModule ? moduleRelease('1.0.0') : { manifest: { api: 2 }, files: {} };
+    const release = hasModule ? moduleRelease('1.0.0') : {
+      manifest: { entrypoints: {}, contributes: {} },
+      files: {},
+    };
 
     if (hasServer) {
+      release.manifest.entrypoints.server = 'server.js';
       release.files['server.js'] = 'throw new Error("Не исполнять при подготовке");';
     }
 
@@ -37,7 +41,6 @@ for (const dir of ['web/ui', 'docs/ui']) {
       const repo = await createPluginRepo(t);
       const first = moduleRelease('1.0.0', dir);
 
-      first.manifest.web = 'web';
       first.files[`${dir}/helper.txt`] = 'Первый helper';
       first.files['web/index.html'] = '<title>Первая страница</title>';
       first.files['docs/readme.md'] = 'Первый документ';
@@ -50,7 +53,7 @@ for (const dir of ['web/ui', 'docs/ui']) {
 
       const nextDir = change === 'move' ? 'next-ui' : dir;
       const next = change === 'remove'
-        ? { manifest: { api: 2 }, files: {} }
+        ? { manifest: { entrypoints: {}, contributes: {} }, files: {} }
         : moduleRelease('1.1.0', nextDir);
 
       if (change !== 'update') {
@@ -60,7 +63,6 @@ for (const dir of ['web/ui', 'docs/ui']) {
         next.files[`${nextDir}/helper.txt`] = 'Следующий helper';
       }
 
-      next.manifest.web = 'web';
       next.files['web/index.html'] = '<title>Следующая страница</title>';
       next.files['docs/readme.md'] = 'Следующий документ';
       await repo.release('1.1.0', next);
@@ -90,7 +92,7 @@ test('AC9-MODULE-FAILED-STATE: понятный manifest_invalid читаетс�
   const repo = await createPluginRepo(t);
   const release = moduleRelease('1.0.0');
 
-  release.manifest.webModule.entry = 'missing.js';
+  release.manifest.entrypoints.web.entry = 'missing.js';
   await repo.release('1.0.0', release);
 
   const { service, statePath, root } = await serviceFixture(t);
@@ -102,7 +104,7 @@ test('AC9-MODULE-FAILED-STATE: понятный manifest_invalid читаетс�
 
   assert.equal(failed.status, 'failed');
   assert.equal(failed.error.code, 'manifest_invalid');
-  assert.match(failed.error.message, /webModule.*(?:ресурс|entry)/u);
+  assert.match(failed.error.message, /entrypoints\.web/u);
   assert.equal(failed.error.message.includes(root), false);
   assert.equal(failed.error.message.includes(repo.root), false);
   assert.equal((await compatibleState(statePath)).job.error.code, 'manifest_invalid');

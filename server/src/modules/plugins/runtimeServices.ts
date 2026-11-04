@@ -18,7 +18,7 @@ export interface PluginRuntimePorts {
 }
 
 /**
- * Общие серверные сервисы API 2 используют живые экземпляры приложения.
+ * Общие серверные сервисы v1 используют живые экземпляры приложения.
  * Регистрация не читает проекты, файлы и каталог моделей и не запускает исполнителя.
  */
 export function createPluginRuntimeServices(ports: PluginRuntimePorts): PluginRuntimeServices {

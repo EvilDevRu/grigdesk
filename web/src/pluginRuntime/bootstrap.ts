@@ -111,6 +111,7 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
     },
   });
 
+  runtime.access ??= access;
   runtimes.set(pinia, runtime);
 
   /**
@@ -146,8 +147,9 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
     const modules = new Map<string, PluginWebModule>();
 
     for (const plugin of snapshot) {
-      if (plugin.enabled && !plugin.system && isPluginModuleDescriptor(plugin.id, plugin.webModule)) {
-        modules.set(plugin.id, plugin.webModule);
+      if (plugin.enabled && plugin.compatibility?.status !== 'incompatible'
+        && !plugin.system && isPluginModuleDescriptor(plugin.id, plugin.entrypoints?.web)) {
+        modules.set(plugin.id, plugin.entrypoints?.web);
       }
     }
 
@@ -165,11 +167,7 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
 
       tracked.set(id, JSON.stringify(descriptor));
 
-      if (backgroundWindow && descriptor.startOnLogin === true) {
-        void runtime.startBackground(id, descriptor).catch(() => {
-          // Отказ одного trusted hook остаётся локальным и не останавливает соседние модули.
-        });
-      }
+
     }
   }
 
@@ -250,7 +248,8 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
     id: plugin.id,
     enabled: plugin.enabled,
     system: plugin.system,
-    webModule: plugin.webModule,
+    web: plugin.entrypoints?.web,
+    compatibility: plugin.compatibility,
   })))], () => {
     if (epoch && !epoch.pending) {
       epoch.accepted = true;
@@ -264,7 +263,7 @@ export function installPluginRuntime(pinia: Pinia, router: Router,
     const plugin = plugins.byId(id);
 
     if (!permitted() || !epoch?.accepted || !plugin?.enabled || plugin.system
-      || !isPluginModuleDescriptor(id, plugin.webModule)) {
+      || !isPluginModuleDescriptor(id, plugin.entrypoints?.web)) {
       return false;
     }
 

@@ -38,6 +38,7 @@ export const auth = reactive({
   ready: true,
   logEpoch: 0,
   watchUnauthorized() {},
+  stopRecovery() {},
   async load() {},
 });
 export const shell = reactive({

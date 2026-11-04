@@ -38,7 +38,7 @@
     "web/src/views/DbView.vue",
     "web/src/views/DiffView.vue",
     "web/src/views/DocumentsView.vue",
-    "web/src/views/ExtPluginView.vue",
+    "web/src/views/PluginView.vue",
     "web/src/views/OpenDiffButton.vue",
     "web/src/views/PipelineView.vue",
     "web/src/views/TaskModal.vue",

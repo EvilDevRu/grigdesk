@@ -468,7 +468,15 @@ export class PluginInstallService {
     if (record.previous) {
       if (await this.copyModified(id, path.join(this.workDir, 'previous', id), record.previous)) {
         rollbackError = errorInfo(installError('previous_modified'));
-      } else if (localChanges) {
+      } else {
+        try {
+          await this.validateRollbackCandidate(id, record.previous);
+        } catch (error) {
+          rollbackError = errorInfo(error);
+        }
+      }
+
+      if (!rollbackError && localChanges) {
         rollbackError = errorInfo(installError('local_changes'));
       }
     }
@@ -481,6 +489,20 @@ export class PluginInstallService {
       rollbackAvailable: record.previous !== null && rollbackError === null,
       rollbackError,
     };
+  }
+
+  /**
+   * Откат допускает только исполняемый контракт кандидата, сохраняя старую копию на диске.
+   * Текущий несовместимый пакет остаётся заменяемым через обычную установку.
+   */
+  private async validateRollbackCandidate(id: string, previous: PluginInstalledVersion): Promise<void> {
+    await this.packagePolicy.validatePrepared(path.join(this.workDir, 'previous', id), {
+      packageKind: this.options.packageKind,
+      expectedId: id,
+      version: previous.version,
+      reservedIds: new Set(this.options.reservedIds),
+      grigDeskVersion: this.options.grigDeskVersion,
+    });
   }
 
   /**
@@ -937,6 +959,8 @@ export class PluginInstallService {
       || record.previous.payloadDigest !== request.expectedPreviousDigest) {
       throw installError('preview_stale');
     }
+
+    await this.validateRollbackCandidate(id, record.previous);
 
     this.operation = 'rollback';
 
@@ -1441,7 +1465,7 @@ export class PluginInstallService {
       });
 
       const candidateDigest = await prepareNpmDependencies(
-        directory, validated.npmDirs, validated.webDir, this.npm, controller.signal, budget,
+        directory, validated.npmDirs, this.npm, controller.signal, budget,
       );
       const preview: PluginInstallPreview = {
         source: initial.source,
@@ -1451,7 +1475,7 @@ export class PluginInstallService {
         version: validated.version,
         description: validated.description,
         hasServer: validated.hasServer,
-        hasWeb: validated.webDir !== null || validated.webModuleDir !== null,
+        hasWeb: validated.webModuleDir !== null,
         replaces: record ? {
           kind: 'managed',
           version: record.version,
@@ -1471,13 +1495,18 @@ export class PluginInstallService {
         const previousModuleDir = await this.packagePolicy.installedModuleDir(
           path.join(this.options.pluginsDir, validated.id),
         );
+        const previousServerEntry = await this.packagePolicy.installedServerEntry?.(
+          path.join(this.options.pluginsDir, validated.id),
+        );
+        const serverEntries = [validated.serverEntry, previousServerEntry]
+          .filter((entry): entry is string => typeof entry === 'string');
         const moduleDirs = [validated.webModuleDir, previousModuleDir]
           .filter((dir): dir is string => dir !== null);
 
         preview.changes = changes ? {
           ...changes,
           sensitive: changes.files.filter((file) =>
-            this.packagePolicy.sensitiveFile(file.path, validated.webDir, moduleDirs))
+            this.packagePolicy.sensitiveFile(file.path, moduleDirs, serverEntries))
             .map((file) => file.path),
         } : null;
       }

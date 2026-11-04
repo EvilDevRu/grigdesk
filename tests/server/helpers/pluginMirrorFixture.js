@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { installError } from '../../../server/src/lib/packageInstall/errors.ts';
 import { PluginSourceRegistry } from '../../../server/src/lib/packageInstall/sources.ts';
+import { manifestV1, png } from '../../helpers/pluginV1.js';
 import { serviceFixture } from './pluginServiceFixture.js';
 
 /**
@@ -28,13 +29,16 @@ export function fixtureMirror() {
       const version = versions.get(request.target.version);
 
       await mkdir(request.destination, { recursive: true });
-      await writeFile(path.join(request.destination, 'plugin.json'), JSON.stringify({
+      await writeFile(path.join(request.destination, 'plugin.json'), JSON.stringify(manifestV1({
+        entrypoints: {},
+        contributes: {},
+        install: undefined,
         id: 'demo',
         version: request.target.version,
         ...version.manifest,
-      }));
+      })));
 
-      for (const [file, content] of Object.entries(version.files)) {
+      for (const [file, content] of Object.entries({ 'assets/icon.png': png, ...version.files })) {
         await mkdir(path.dirname(path.join(request.destination, file)), { recursive: true });
         await writeFile(path.join(request.destination, file), content);
       }

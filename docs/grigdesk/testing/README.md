@@ -39,6 +39,8 @@
 
 ## Грабли
 
+- [Нормализованные поля в фикстурах песочниц](normalized-sandbox-fixtures.md)
+
 - [Vue scoped CSS: :global с хвостом заменяет весь селектор](vue-global-selector.md)
 
 - [Подмена Python os.open и очистка TemporaryDirectory через dir_fd](python-open-fixture.md)

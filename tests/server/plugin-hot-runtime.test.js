@@ -18,13 +18,14 @@ import { requireFromServer } from './helpers/pluginInstallHttpFixture.js';
 function release(version) {
   return {
     manifest: {
-      api: 2,
-      webModule: {
+      api: 1,
+      contributes: { panels: [{}] },
+      entrypoints: { server: 'server.js', web: {
         dir: 'ui',
         entry: 'panel.js',
         css: ['panel.css'],
         locales: { ru: 'ru.json' },
-      },
+      } },
     },
     files: {
       'package.json': '{"type":"module"}',
@@ -146,10 +147,13 @@ test('HOT: legacy update → off/on → rollback, новые ESM зависим�
 
   assert.equal(after.needsRestart, false);
   assert.equal(after.install.restartRequired, false);
-  assert.notEqual(after.webModule.entry, before.webModule.entry);
-  assert.equal((await f.request(before.webModule.entry)).statusCode, 404);
-  assert.match((await f.request(after.webModule.entry.replace('panel.js', 'helper.js'))).body, /1\.1\.0/u);
-  assert.equal((await f.request(after.webModule.locales.ru)).json().version, '1.1.0');
+  assert.notEqual(after.entrypoints.web.entry, before.entrypoints.web.entry);
+  assert.equal((await f.request(before.entrypoints.web.entry)).statusCode, 404);
+
+  const helper = await f.request(after.entrypoints.web.entry.replace('panel.js', 'helper.js'));
+
+  assert.match(helper.body, /1\.1\.0/u);
+  assert.equal((await f.request(after.entrypoints.web.locales.ru)).json().version, '1.1.0');
   assert.deepEqual((await f.request('/api/ext/demo/echo', { value: 'тело' })).json(), {
     body: { value: 'тело' }, auth: 'session',
   });
@@ -157,7 +161,7 @@ test('HOT: legacy update → off/on → rollback, новые ESM зависим�
   assert.equal((await f.request('/api/ext/demo/version')).statusCode, 404);
   assert.equal((await f.toggle(true)).json().needsRestart, false);
   assert.equal((await f.request('/api/ext/demo/version')).json().version, '1.1.0');
-  assert.notEqual((await f.card()).webModule.entry, after.webModule.entry);
+  assert.notEqual((await f.card()).entrypoints.web.entry, after.entrypoints.web.entry);
 
   const installed = await f.service.describe('demo');
   const restored = await f.service.rollback('demo', {

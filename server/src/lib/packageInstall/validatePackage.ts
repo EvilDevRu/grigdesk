@@ -13,7 +13,8 @@ import {
   decodeUserPluginManifest,
   normalizePluginPackagePath,
 } from '../pluginsRegistry.ts';
-import { compareSemVer, parseSemVer } from '../releaseCommon.ts';
+import { resolvePluginAssets } from '../pluginAssets.ts';
+import { parseSemVer } from '../releaseCommon.ts';
 import { PluginInstallError, installError } from './errors.ts';
 import { assertRealPackageRoot, readPackageTree } from './packageTree.ts';
 import type { PackageEntry } from './packageTree.ts';
@@ -45,7 +46,7 @@ export interface ValidatedPackage {
   version: string;
   description: string;
   hasServer: boolean;
-  webDir: string | null;
+  serverEntry?: string | null;
   webModuleDir: string | null;
   npmDirs: string[];
 }
@@ -108,7 +109,6 @@ export async function readPreparedPackageTree(
 
   const tree = await readPackageTree(dir, {
     generatedDirs,
-    webDir: normalizePluginPackagePath(manifest.web, false),
   });
   const generated = generatedDirs.map((dir) => path.posix.join(dir, 'node_modules'));
   const original = tree.filter((entry) => !generated.some((root) => entry.relative === root
@@ -160,7 +160,6 @@ async function validatePackageTree(
       version: expected.version,
       description: '',
       hasServer: true,
-      webDir: null,
       webModuleDir: null,
       npmDirs: await validateNpmDirs(dir, manifest),
     };
@@ -181,10 +180,6 @@ async function validatePackageTree(
     throw installError('id_mismatch');
   }
 
-  if (Object.hasOwn(manifest, 'api') && manifest.api !== 1 && manifest.api !== 2) {
-    throw installError('api_unsupported');
-  }
-
   const version = manifest.version;
 
   if (typeof version !== 'string' || version.trim() !== version || !parseSemVer(version)) {
@@ -195,37 +190,18 @@ async function validatePackageTree(
     throw installError('version_mismatch');
   }
 
-  if (Object.hasOwn(manifest, 'minGrigDeskVersion')) {
-    const minimum = manifest.minGrigDeskVersion;
+  const fields = decodeUserPluginManifest(manifest, () => {}, expected.grigDeskVersion);
+  const declared = manifest.entrypoints as Record<string, unknown>;
+  const webModule = resolvePluginWebModule(dir, id, declared.web, normalizeModulePath, () => {
+    throw installError('manifest_invalid', 'неверный entrypoints.web');
+  });
+  const server = selectPluginServerEntry(dir, declared.server);
 
-    if (typeof minimum !== 'string' || minimum.trim() !== minimum || !parseSemVer(minimum)) {
-      throw installError('manifest_invalid', 'minGrigDeskVersion должен быть вида X.Y.Z');
-    }
+  resolvePluginAssets(dir, id, manifest);
 
-    if (compareSemVer(minimum, expected.grigDeskVersion) > 0) {
-      throw installError('grigdesk_too_old', `нужна ${minimum}, установлена ${expected.grigDeskVersion}`);
-    }
-  }
-
-  const fields = decodeUserPluginManifest(manifest);
-  const webDir = await validateWeb(dir, manifest.web);
   const npmDirs = await validateNpmDirs(dir, manifest);
-  const webModule = manifest.api === 2
-    ? resolvePluginWebModule(dir, id, manifest.webModule, normalizeModulePath, (message) => {
-      const reason = message.replace(/^webModule пропущен: /u, '');
-
-      throw new PluginInstallError('manifest_invalid', `Некорректный webModule: ${reason}`, 422);
-    }) : null;
 
   await validateGitControls(dir, tree);
-
-  const [js, ts] = await Promise.all(['server.js', 'server.ts'].map((entry) =>
-    lstat(path.join(dir, entry)).catch(() => null)));
-  const server = selectPluginServerEntry(js?.isFile() ?? false, ts?.isFile() ?? false);
-
-  if (server.serverError) {
-    throw new PluginInstallError('manifest_invalid', server.serverError, 422);
-  }
 
   return {
     id,
@@ -233,7 +209,7 @@ async function validatePackageTree(
     version,
     description: fields.description,
     hasServer: server.hasServer,
-    webDir,
+    serverEntry: server.serverEntry,
     webModuleDir: webModule ? path.relative(dir, webModule.dir).split(path.sep).join('/') : null,
     npmDirs,
   };
@@ -399,30 +375,6 @@ export async function validateGitControls(dir: string, tree: PackageEntry[]): Pr
       await handle.close();
     }
   }
-}
-
-/**
- * Пользовательская страница обязана жить в отдельной подпапке с обычным index.
- * Единая нормализация пути позже используется и для npmDirs.
- */
-async function validateWeb(dir: string, raw: unknown): Promise<string | null> {
-  if (raw === undefined || raw === null || raw === '') {
-    return null;
-  }
-
-  const relative = normalizePluginPackagePath(raw, false);
-
-  if (relative === null) {
-    throw installError('web_invalid');
-  }
-
-  const info = await lstat(path.join(dir, relative, 'index.html')).catch(() => null);
-
-  if (!info?.isFile() || info.isSymbolicLink()) {
-    throw installError('web_invalid');
-  }
-
-  return relative;
 }
 
 /**

@@ -25,7 +25,7 @@ async function panelFixture(t, width) {
   const router = { currentRoute, push: async (value) => pushed.push(value) };
   const abort = new AbortController();
 
-  plugins.list = [pluginCard({ webModule: descriptor })];
+  plugins.list = [pluginCard({ entrypoints: { web: descriptor } })];
   dock.open('code');
   dock.setWidth(615);
   dock.setExpanded(true);

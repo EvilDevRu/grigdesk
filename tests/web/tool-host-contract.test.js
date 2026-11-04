@@ -40,15 +40,17 @@ test('AppShell держит один ToolHost, а route-adapter не монти�
 });
 
 test('Code, Shelf, Terminal, SSH, DB и Докер лениво загружаются независимо', async () => {
-  const [registry, codeLoading, asyncView] = await Promise.all([
+  const [registry, codeLoading, asyncView, panelLoading] = await Promise.all([
     source('web/src/shared/tools/registry.ts'),
     source('web/src/views/code/codePanelLoading.ts'),
     source('web/src/shared/asyncView.ts'),
+    source('web/src/shared/tools/panelLoading.ts'),
   ]);
 
-  // Семь встроенных панелей плюс панель модуля и общая панель-iframe для страниц плагинов.
-  assert.equal(count(registry, /asyncView\(/g), 9);
-  assert.match(registry, /import\('\.\.\/\.\.\/views\/ext\/PluginFramePanel\.vue'\)/);
+  // Семь встроенных панелей и единственная модульная панель плагина.
+  // Удаление старого канала не меняет независимую ленивую загрузку соседей.
+  assert.equal(count(registry, /asyncView\(/g), 8);
+  assert.doesNotMatch(registry, /PluginFramePanel/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/ext\/PluginModulePanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/studio3d\/Studio3dPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/code\/CodePanel\.vue'\)/);
@@ -57,7 +59,8 @@ test('Code, Shelf, Terminal, SSH, DB и Докер лениво загружаю
   assert.match(registry, /import\('\.\.\/\.\.\/views\/ssh\/SshPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/db\/DbPanel\.vue'\)/);
   assert.match(registry, /import\('\.\.\/\.\.\/views\/docker\/DockerPanel\.vue'\)/);
-  assert.match(registry, /CodePanelLoading\)/);
+  assert.match(registry, /CodePanel\.vue'\), panelLoading\('code'\)\)/);
+  assert.match(panelLoading, /code:\s*CodePanelLoading/);
   assert.match(asyncView, /delay: 0/);
   assert.match(asyncView, /errorComponent: LoadFailure/);
   assert.match(asyncView, /timeout: 30000/);

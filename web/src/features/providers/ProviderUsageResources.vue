@@ -189,7 +189,7 @@ function noteOf(resource: UsageResource) {
     return '';
   }
 
-  return !props.readonly || resource.tone === 'bad' ? resource.note : '';
+  return !props.readonly || resource.tone === 'bad' || resource.kind === 'plugin' ? resource.note : '';
 }
 
 function stateKey(resource: UsageResource, control: UsageControl) {

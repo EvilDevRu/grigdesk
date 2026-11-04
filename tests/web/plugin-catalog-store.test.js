@@ -293,3 +293,34 @@ test('CAT-W9-FAILURE: HTTP400 после dispose не запускает нов�
   assert.deepEqual(calls, ['/api/plugin-catalog']);
   assert.equal(store.index, null);
 });
+
+test('CAT-V1-MEDIA-ROUNDTRIP: store принимает проверенный media detail того же SHA', async (t) => {
+  const module = await compileModule(webFile('src/stores/pluginCatalog.ts'));
+  const data = catalogFixture();
+  const icon = {
+    path: 'assets/icon.png',
+    sha: data.version.sha,
+    mediaType: 'image/png',
+    bytes: 1024
+  };
+
+  data.detail.plugin.icon = icon;
+  data.detail.plugin.gallery = { screenshots: [{ ...icon, path: 'assets/screen.png' }] };
+
+  const store = module.definePluginCatalogStore({
+    get: async (url) => url.includes('/demo') ? data.detail : {
+      state: 'fresh',
+      applicationVersion: '1.0.0',
+      fetchedAt: data.index.generatedAt,
+      catalog: data.index,
+    },
+  }, 'catalog-v1-media')(createPinia());
+
+  t.after(() => store.$dispose());
+  await store.loadIndex();
+  await store.loadDetail('demo');
+  assert.equal(store.detailError, false);
+  assert.deepEqual(store.detail.plugin.icon, icon);
+  assert.deepEqual(store.detail.plugin.gallery, data.detail.plugin.gallery);
+  assert.equal(store.detail.plugin.readme, data.detail.plugin.readme);
+});

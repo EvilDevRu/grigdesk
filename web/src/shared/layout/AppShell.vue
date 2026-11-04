@@ -16,10 +16,9 @@
           <router-link v-for="item in pluginNav" :key="item.to" :to="item.to" class="navitem" data-ui-shell-nav active-class="active"
                        :aria-label="navTitle(item)" v-tooltip.right="navTitle(item)">
             <span class="icwrap">
-              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                   stroke-linecap="round" stroke-linejoin="round">
-                <path :d="navIconPath(item.icon)" />
-              </svg>
+              <PluginIcon v-if="item.icon.startsWith('/')" :src="item.icon" />
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   aria-hidden="true"><path :d="navIconPath(item.icon)" /></svg>
               <NavigationCount :badge="badges[item.to]" />
             </span>
             </router-link>
@@ -68,8 +67,9 @@
         <router-link v-for="item in dockRouteNav" :key="item.to" :to="item.to" class="navitem" data-ui-shell-nav active-class="active"
                        :aria-label="navTitle(item)" v-tooltip.right="navTitle(item)">
           <span class="icwrap">
-            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                 stroke-linecap="round" stroke-linejoin="round"><path :d="navIconPath(item.icon)" /></svg>
+            <PluginIcon v-if="item.icon.startsWith('/')" :src="item.icon" />
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   aria-hidden="true"><path :d="navIconPath(item.icon)" /></svg>
             <NavigationCount :badge="badges[item.to]" />
           </span>
         </router-link>
@@ -364,6 +364,7 @@
                     <!-- Слот плагинов под полосами: кто здесь стоит, решают реестр размещений
                          и настройки плагинов, всплывашка ни одного из них не знает. -->
                     <PluginSlot name="provider.popover.after-bars" :context="{ providerId: p.id }" />
+                    <ProviderUsagePlugins :provider-id="p.id" />
                     <!-- Доплата и прочие ресурсы аккаунта — только на чтение: менять их
                          можно в «Настройках → Исполнители», кнопка на них ведёт ниже. -->
                     <ProviderUsageResources
@@ -426,6 +427,7 @@
     <!-- Цели Teleport живут столько же, сколько оболочка: выбор машины меняет видимость.
          Удалённая цель остаётся в Teleport и ломает следующий перенос при подключении. -->
     <PhoneStatusBar v-show="hasMachine" />
+    <ConnectionRecovery />
 
     <main class="content" :class="{
             'is-workspace': !hasMachine || route.meta.layout === 'workspace',
@@ -444,6 +446,8 @@
 </template>
 
 <script setup lang="ts">
+import PluginIcon from '../PluginIcon.vue';
+
 import { useGrigdeskTasksStore } from '../../stores/grigdeskTasks.ts';
 import { boardSupportsTimer } from '../trackerCapabilities.ts';
 import { formatDate, intlLocale } from '../../../../shared/i18n/formats.ts';
@@ -484,6 +488,7 @@ import {
   vTooltip,
 } from '../../ui';
 import { useSse } from '../../composables/useSse.ts';
+import ConnectionRecovery from './ConnectionRecovery.vue';
 import { useTrackersStore } from '../../stores/trackers.ts';
 import { useSystemStore } from '../../stores/system.ts';
 import { useProvidersStore } from '../../stores/providers.ts';
@@ -528,6 +533,7 @@ import ProviderIcon from '../ProviderIcon.vue';
 import { vSvgPixelSnap } from '../svgPixelSnap.ts';
 import GrigDeskMark from '../GrigDeskMark.vue';
 import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
+import ProviderUsagePlugins from '../../features/providers/ProviderUsagePlugins.vue';
 import PluginSlot from '../../plugins/PluginSlot.vue';
 import { createUsageWatch } from '../../features/providers/usageWatch.ts';
 import AttentionAlerts from '../../features/analysis/AttentionAlerts.vue';
@@ -1198,7 +1204,7 @@ watch(connected, (value) => prov.noteUsageConnection(value), { immediate: true, 
 .app-mark {
   display: grid; place-items: center; flex: none; width: var(--app-rail-w); height: 100%;
 }
-.app-mark .logo { width: 16px; height: 16px; color: var(--ink); }
+.app-mark .logo { width: 20px; height: 20px; }
 /* Слот действий экрана — сразу после заголовка; статус уезжает вправо */
 .tb-slot { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
 .tb-slot:empty { display: none; }

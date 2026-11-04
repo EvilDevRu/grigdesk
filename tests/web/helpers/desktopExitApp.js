@@ -47,6 +47,7 @@ export async function desktopExitApp(t, options = {}) {
     authenticated: true,
     load: async () => {},
     watchUnauthorized() {},
+    stopRecovery() {},
   });
   const other = {
     load: async () => {},

@@ -38,6 +38,7 @@ async function build() {
     configFile: path.join(root, 'vite.config.mjs'),
     build: { outDir: path.join(output, 'ui') },
   });
+  await cp(path.join(root, 'assets'), path.join(output, 'assets'), { recursive: true });
   await cp(path.join(root, 'plugin.json'), path.join(output, 'plugin.json'));
 }
 

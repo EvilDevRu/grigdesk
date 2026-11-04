@@ -10,6 +10,8 @@ import { pathToFileURL } from 'node:url';
 
 import { promisify } from 'node:util';
 
+import { png } from '../../helpers/pluginV1.js';
+
 const exec = promisify(execFile);
 
 /**
@@ -80,6 +82,11 @@ export async function createPluginRepo(t, { id = 'demo', name = 'Демо', pack
         api: 1,
         version,
         description: 'Тестовый плагин',
+        ...(packageKind === 'plugin' ? {
+          icon: 'assets/icon.png',
+          entrypoints: files['server.js'] ? { server: 'server.js' } : {},
+          contributes: {},
+        } : {}),
         ...(packageKind === 'db-engine' ? {
           label: name,
           kind: 'db-engine',
@@ -88,6 +95,7 @@ export async function createPluginRepo(t, { id = 'demo', name = 'Демо', pack
         } : {}),
         ...manifest,
       }, null, 2),
+      ...(packageKind === 'plugin' ? { 'assets/icon.png': png } : {}),
       ...files,
     };
 

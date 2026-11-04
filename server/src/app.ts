@@ -1165,6 +1165,7 @@ async function build(desktopParent: DesktopParent | null) {
 
   // Реестр плагинов — ДО модулей-плагинов: они гейтят роуты через fastify.pluginEnabled().
   await fastify.register(pluginsModule, {
+    grigDeskVersion: installOptions.grigDeskVersion,
     runtimeServices: createPluginRuntimeServices({
       config,
       project: (id) => projectsService.read(id),

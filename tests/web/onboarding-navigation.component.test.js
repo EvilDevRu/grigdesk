@@ -43,7 +43,7 @@ test('ONB-NAV-UI: цвет готовности, единые кнопки и в
 
   assert.equal(icons[0].element.style.color, '#10a37f');
   assert.equal(icons[1].element.style.color, '');
-  assert.equal(icons[2].get('path').attributes('fill'), 'currentColor');
+  assert.equal(icons[2].get('path').attributes('fill'), '#F6D85A');
   assert.equal(Boolean(button('Назад')), false);
   assert.equal(button('Пропустить шаг').attributes('data-variant'), 'outline');
   assert.equal(button('Пропустить настройку').attributes('data-variant'), 'outline');

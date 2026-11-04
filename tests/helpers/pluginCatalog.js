@@ -37,6 +37,8 @@ export function catalogFixture() {
     generatedAt: date,
     plugin: {
       ...entry,
+      icon: null,
+      gallery: { screenshots: [] },
       description: 'Example description',
       versions: [version],
       readme: '<script>throw new Error("untrusted")</script>\nExample README',

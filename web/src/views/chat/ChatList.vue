@@ -703,7 +703,11 @@ async function del(r: ListRow) {
 }
 
 @media (max-width: 600px) {
-  .top { min-height: 108px; padding: 8px 12px; gap: 6px; }
+  .top {
+    min-height: 0;
+    padding: 6px 12px;
+    gap: 4px;
+  }
   .rows { padding: 4px 6px; }
   .row { gap: 8px; padding: 8px 6px; }
   .name { font-size: 15px; }

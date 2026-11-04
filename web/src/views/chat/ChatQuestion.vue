@@ -217,9 +217,6 @@ const questions = computed(() => props.req?.questions || []);
 const structured = computed(() => props.req?.structured === true);
 const source = computed(() => String(props.req?.source || ''));
 const prompt = computed(() => String(props.req?.prompt || ''));
-const ready = computed(() => (structured.value
-  ? questions.value.every((question, index) => validStructured(question, state.value[index]?.value))
-  : state.value.some((item) => item.picked.length || item.text.trim())));
 const answered = computed(() => questions.value.filter((question, index) => {
   const item = state.value[index];
 
@@ -230,6 +227,11 @@ const answered = computed(() => questions.value.filter((question, index) => {
       && validStructured(question, item?.value)
     : Boolean(item?.picked.length || item?.text.trim());
 }).length);
+// Обычная анкета отправляется только целиком: счётчик и доступность используют один критерий.
+// Structured-формы сохраняют свои required-ограничения и разрешённые пустые подтверждения.
+const ready = computed(() => (structured.value
+  ? questions.value.every((question, index) => validStructured(question, state.value[index]?.value))
+  : questions.value.length > 0 && answered.value === questions.value.length));
 
 const DEFAULT_ACTIONS = Object.freeze(['accept', 'cancel']);
 const ACTION_LABELS: Readonly<Record<string, string>> = Object.freeze({
@@ -589,6 +591,10 @@ async function toggleOwn(questionIndex: number) {
  * остаются массивом, а свободный текст обрезается только по краям.
  */
 function submit() {
+  if (!ready.value) {
+    return;
+  }
+
   emit(
     'answer',
     questions.value.map((question, index) => ({

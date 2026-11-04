@@ -133,16 +133,19 @@ for (const width of [390, 899, 900, 1280]) {
         built,
         width,
         mode,
-        b1: true
+        b1: true,
+        v1: true,
       });
 
       await f.page.waitForFunction('window.__pluginHost.fixtureState().plugins.loaded');
       assert.equal(await f.page.evaluate('window.__pluginHost.currentDesktopMode()'), mode);
-      await f.page.waitForFunction('window.__pluginB1?.starts === 1', undefined, {
-        timeout: 5_000,
-      }).catch(() => {});
+      assert.equal(await f.page.evaluate('window.__pluginB1?.starts || 0'), 0);
+      await f.page.evaluate(() => {
+        (window as any).__closeV1Popup = (window as any).__pluginHost.mountProviderPopup();
+      });
+      await f.page.waitForFunction('window.__pluginB1?.starts === 1');
       assert.equal(await f.page.evaluate('window.__pluginB1?.starts || 0'), 1,
-        'Настоящий main должен запустить opt-in при закрытой панели');
+        'Объявленный слот запускает модуль при закрытой панели');
       assert.equal(await f.page.locator('link[href*="/module/panel.css"]').count(), 0);
       await f.page.evaluate('window.__pluginBackgroundContext.panel.open()');
       await f.page.getByRole('button', { name: 'Уведомление B1', exact: true }).waitFor();
@@ -202,6 +205,7 @@ for (const width of [390, 899, 900, 1280]) {
       await f.page.waitForFunction('window.__pluginB1.cleanups === 1');
       assert.equal(await f.page.evaluate('window.__pluginB1.starts'), 1);
       assert.equal(await f.page.locator('link[href*="/module/panel.css"]').count(), 0);
+      await f.page.evaluate('window.__closeV1Popup()');
     });
   }
 }

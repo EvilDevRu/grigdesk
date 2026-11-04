@@ -113,9 +113,7 @@
                 data-ui-settings-plugin-row
                 @select="selectPlugin(entry.id)"
               >
-                <svg class="settings-plugin-icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="pluginIconPath(entry)" />
-                </svg>
+                <PluginIcon class="settings-plugin-icon" :src="entry.icon" />
                 <span class="settings-plugin-copy">
                   <span class="settings-plugin-name">{{ entry.name }}</span>
                   <span class="settings-plugin-meta">
@@ -131,7 +129,8 @@
                     :model-value="draftEnabled(entry.id)"
                     :aria-label="t('settings.enable2', { pluginName: entry.name })"
                     :data-plugin-enabled="entry.id"
-                    :disabled="!ready || recoveryBlocked || Boolean(togglingId)"
+                    :disabled="!ready || recoveryBlocked || Boolean(togglingId)
+                      || entry.compatibility?.status === 'incompatible'"
                     @update:model-value="toggleEntry(entry.id, $event === true)"
                   />
                 </template>
@@ -154,9 +153,7 @@
       <section class="settings-plugin-editor" :aria-label="t('settings.selectedPluginSettings')">
         <template v-if="plugin && ready">
           <header v-if="!showcasePage" class="settings-plugin-title">
-            <svg v-if="singlePluginId" class="settings-plugin-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path :d="pluginIconPath(plugin)" />
-            </svg>
+            <PluginIcon v-if="singlePluginId" class="settings-plugin-icon" :src="plugin.icon" />
             <div class="settings-plugin-heading">
               <h4>{{ plugin.name }}</h4>
               <span v-if="singlePluginId" class="settings-plugin-meta">{{ plugin.version }}</span>
@@ -165,7 +162,7 @@
               <SettingsField :address="address('enabled')" presentation="action">
                 <UiButton
                   data-plugin-enable-action
-                  :disabled="recoveryBlocked"
+                  :disabled="recoveryBlocked || plugin.compatibility?.status === 'incompatible'"
                   :aria-label="enabled
                     ? t('settings.pluginDisableNamed', { pluginName: plugin.name })
                     : t('settings.enable2', { pluginName: plugin.name })"
@@ -203,6 +200,9 @@
             </div>
             <p v-if="singlePluginId && plugin.description">{{ plugin.description }}</p>
           </header>
+          <UiInlineMessage v-if="plugin.compatibility?.status === 'incompatible'" tone="danger">
+            {{ plugin.compatibility.reason }}
+          </UiInlineMessage>
           <UiInlineMessage v-if="!singlePluginId && plugin.serverError" tone="danger"
                            :heading="t('settings.pluginRuntimeError')"
                            class="settings-plugin-runtime-error">
@@ -498,6 +498,8 @@
 </template>
 
 <script setup lang="ts">
+import PluginIcon from '../../../shared/PluginIcon.vue';
+
 import { t, uiLocale } from '../../../ui.ts';
 
 import { localizePluginMetadata, localizePluginCategory } from '../../../features/settings/metadataLocale.ts';
@@ -539,7 +541,6 @@ import {
 } from '../../../features/settings/pluginPages.ts';
 import type { FieldAddress, JsonValue } from '../../../features/settings/contracts.ts';
 import { failureText } from '../../../shared/apiClient.ts';
-import { pluginIconPath } from '../../../shared/navIcons.ts';
 import SettingsField from '../SettingsField.vue';
 import SettingsSection from '../SettingsSection.vue';
 

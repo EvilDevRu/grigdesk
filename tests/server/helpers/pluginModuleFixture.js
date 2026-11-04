@@ -13,13 +13,14 @@ export const moduleWarning = 'Модуль интерфейса исполняе
 export function moduleRelease(version, dir = 'ui') {
   return {
     manifest: {
-      api: 2,
-      webModule: {
+      api: 1,
+      contributes: { panels: [{}] },
+      entrypoints: { web: {
         dir,
         entry: 'panel.js',
         css: ['panel.css'],
         locales: { ru: 'ru.json', en: 'en.json' },
-      },
+      } },
     },
     files: {
       [`${dir}/panel.js`]: `throw new Error('Установщик исполнил модуль ${version}');`,

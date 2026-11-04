@@ -165,7 +165,11 @@ async function panelFixture(t, options = {}) {
       stubs: eventStubs,
     });
 
-    state.store.card.webModule = options.descriptor;
+    state.store.card.entrypoints = { web: options.descriptor };
+    state.store.card.contributes = { panels: [{}], slots: [{
+      slot: 'provider.popover.after-bars', kind: 'provider-usage',
+    }] };
+    state.store.card.placements = [{ slot: 'provider.popover.after-bars', enabled: true }];
     state.runtime = createPluginRuntime({
       plugins: { byId: () => state.store.card },
       router: { currentRoute: vue.ref({
@@ -186,7 +190,7 @@ async function panelFixture(t, options = {}) {
       createPluginContext: state.context,
     });
     t.after(() => state.runtime.dispose());
-    await state.runtime.startBackground('ui-module', options.descriptor);
+    await state.runtime.acquireSlot('ui-module', 'provider.popover.after-bars');
   }
 
   const facade = Object.keys(ui).map((name) =>

@@ -34,7 +34,7 @@ export interface PluginDirectoryLock {
   release(): Promise<void>;
 }
 
-// Возможности серверного core API 2. Типы не раскрывают config, executor или fd.
+// Возможности серверного core v1. Типы не раскрывают config, executor или fd.
 // Доступность проверяется по методам: старые сборки могут не иметь расширения.
 export interface PluginRuntimeServices {
   project(id: string): Promise<ProjectDetail>;

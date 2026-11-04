@@ -2,15 +2,50 @@
   "id": "typed-example",
   "name": "Пример TypeScript",
   "version": "1.0.0",
-  "api": 2,
+  "api": 1,
   "description": "Проверяемый сервер и панель Vue с публичными типами GrigDesk",
-  "minGrigDeskVersion": "0.1.0",
-  "settings": [{ "key": "greeting", "type": "string", "default": "Привет" }],
-  "webModule": {
-    "dir": "ui",
-    "entry": "panel.js",
-    "css": ["panel.css"],
-    "startOnLogin": true
+  "install": {
+    "npm": []
   },
-  "install": { "npm": [] }
+  "icon": "assets/icon.png",
+  "engines": {
+    "grigdesk": ">=0.1.0"
+  },
+  "entrypoints": {
+    "server": "server.js",
+    "web": {
+      "dir": "ui",
+      "entry": "panel.js",
+      "css": [
+        "panel.css"
+      ]
+    }
+  },
+  "contributes": {
+    "panels": [
+      {
+        "title": "Пример TypeScript",
+        "group": "dock"
+      }
+    ],
+    "slots": [
+      {
+        "slot": "provider.popover.after-bars",
+        "kind": "provider-usage",
+        "default": true
+      }
+    ],
+    "settings": [
+      {
+        "key": "greeting",
+        "type": "string",
+        "default": "Привет"
+      }
+    ],
+    "commands": [],
+    "themes": []
+  },
+  "gallery": {
+    "screenshots": []
+  }
 }

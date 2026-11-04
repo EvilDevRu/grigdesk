@@ -27,6 +27,7 @@ import type { PluginInstallInfo } from '../../../../shared/plugins/pluginInstall
 import type { DocumentReader } from '../../lib/documents/reader.ts';
 import { createPluginCore } from './core.ts';
 import type { PluginRuntimeServices } from '../../../../packages/plugin-types/src/coreRuntime.ts';
+import { readPluginRaster, PLUGIN_MEDIA_LIMITS } from '../../lib/pluginAssets.ts';
 import { changeError, writeUserPluginChange } from './changes.ts';
 import type { PluginTransition } from './changes.ts';
 
@@ -34,6 +35,7 @@ export type { PluginTransition } from './changes.ts';
 
 export interface PluginsModuleOptions {
   runtimeServices?: PluginRuntimeServices;
+  grigDeskVersion?: string;
   config: Pick<GrigDeskConfig, 'userPluginsDir'> & { userPluginsDataDir?: string };
   prefs: PrefsStore;
   installs?: PluginInstallPort;
@@ -101,7 +103,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
     throw new TypeError('Для installer нужен отдельный userPluginsDataDir.');
   }
 
-  const scanned = await scanUserPlugins(config.userPluginsDir, fastify.log);
+  const scanned = await scanUserPlugins(config.userPluginsDir, fastify.log, opts.grigDeskVersion);
   const userPlugins = scanned.filter((manifest) => recovery?.blockedIds !== '*'
     && !recovery?.blockedIds.includes(manifest.id));
   const runtime = new UserPluginRuntime({
@@ -113,7 +115,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
       prefix: `/api/ext/${manifest.id}`,
       dataDir: manifest.hasServer && dataRoot ? await preparePluginDataDir(dataRoot, manifest.id) : undefined,
       core: createPluginCore(fastify, manifest.id, opts.documentReader,
-        manifest.api === 2 ? opts.runtimeServices : undefined),
+        opts.runtimeServices),
     }),
   });
   const gates = runtime.gates;
@@ -132,7 +134,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
   async function refreshUserPlugins(): Promise<void> {
     await assertRealPackageRoot(config.userPluginsDir);
 
-    const nextUser = await scanUserPlugins(config.userPluginsDir, fastify.log);
+    const nextUser = await scanUserPlugins(config.userPluginsDir, fastify.log, opts.grigDeskVersion);
     const next = [...SYSTEM, ...nextUser.filter((manifest) => recovery?.blockedIds !== '*'
       && !recovery?.blockedIds.includes(manifest.id))];
     const nextById = new Map(next.map((manifest) => [manifest.id, manifest]));
@@ -233,14 +235,15 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
    * Ошибка пакета и несовместимый API требуют исправления причины, а не рестарта.
    */
   function needsRestart(manifest: PluginManifest): boolean {
-    if (manifest.system || manifest.serverError || !PLUGIN_APIS.includes(manifest.api || 1)) {
+    if (manifest.compatibility?.status === 'incompatible' || manifest.system || manifest.serverError
+      || !PLUGIN_APIS.includes(manifest.api || 1)) {
       return false;
     }
 
     const gate = gates.get(manifest.id);
 
     return !!gate?.needsRestart || (!runtime.isLoaded(manifest.id) && isEnabled(prefs.read(), manifest)
-      && (!!manifest.hasServer || !!manifest.web || !!manifest.webModule));
+      && (!!manifest.hasServer || !!manifest.entrypoints?.web));
   }
 
   /**
@@ -284,13 +287,18 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
         values: settingsValues(p, m),
         placements: placementsState(p, m),
         setup: m.setup || null,
-        web: m.web?.url ?? null,
-        webModule: m.webModule ? {
-          entry: m.webModule.entry,
-          css: m.webModule.css,
-          locales: m.webModule.locales,
-          ...(m.webModule.startOnLogin === undefined ? {} : { startOnLogin: m.webModule.startOnLogin }),
-        } : null,
+        icon: m.icon ?? null,
+        compatibility: m.compatibility ?? {
+          status: 'compatible',
+          code: null,
+          reason: null,
+        },
+        contributes: m.contributes ?? {},
+        entrypoints: { web: m.entrypoints?.web ? {
+          entry: m.entrypoints.web.entry,
+          css: m.entrypoints.web.css,
+          locales: m.entrypoints.web.locales,
+        } : null },
         serverError: m.serverError ?? null,
         needsRestart: needsRestart(m),
         install: m.system ? null : await describeInstall(m.id),
@@ -298,10 +306,35 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
     };
   });
 
+  fastify.get<{ Params: { id: string; digest: string } }>(
+    '/api/plugins/:id/icon/:digest', async (request, reply) => {
+      const manifest = byId.get(request.params.id);
+
+      if (manifest?.dir && manifest.iconPath && manifest.icon?.endsWith(`/${request.params.digest}`)) {
+        try {
+          const raster = readPluginRaster(manifest.dir, manifest.iconPath, PLUGIN_MEDIA_LIMITS.icon);
+
+          if (raster.digest === request.params.digest) {
+            return reply.type(raster.mediaType).header('x-content-type-options', 'nosniff')
+              .header('cache-control', 'no-store').send(raster.bytes);
+          }
+        } catch {
+          // Удалённый или заменённый ресурс больше не принадлежит опубликованному снимку.
+        }
+      }
+
+      return reply.code(404).send({ error: 'not_found' });
+    },
+  );
+
   fastify.post('/api/plugins/:id/toggle', async (request: PluginRequest, reply) => {
     const m = byId.get(String(request.params.id));
     if (!m) return reply.code(404).send({ error: 'not_found' });
     const enabled = !!(request.body || {}).enabled;
+
+    if (enabled && m.compatibility?.status === 'incompatible') {
+      return reply.code(409).send({ error: m.compatibility.code, message: m.compatibility.reason });
+    }
 
     if (!m.system) {
       let gate = gates.get(m.id);

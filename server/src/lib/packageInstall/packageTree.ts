@@ -14,7 +14,6 @@ export interface PackageTreeOptions {
   maxFiles?: number;
   maxBytes?: number;
   generatedDirs?: string[];
-  webDir?: string | null;
 }
 
 /**
@@ -65,8 +64,7 @@ export async function readPackageTree(
       const inGenerated = generated.some((dir) => relative === dir || relative.startsWith(`${dir}/`));
 
       if (info.isSymbolicLink()) {
-        if (!inGenerated || options.webDir
-          && (relative === options.webDir || relative.startsWith(`${options.webDir}/`))) {
+        if (!inGenerated) {
           throw installError('symlink_forbidden', relative);
         }
 

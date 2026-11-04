@@ -1,20 +1,20 @@
 import assert from 'node:assert/strict';
-import test, { type TestContext } from 'node:test';
+import test from 'node:test';
+import type { TestContext } from 'node:test';
 
-import type { Window as HappyDomWindow } from '../../web/node_modules/happy-dom/lib/index.js';
 import { installChatComposerFocusDebug } from '../../web/src/shared/chatComposerFocusDebug.ts';
 import { createUiBrowser } from './helpers/ui-components.js';
 
-interface FocusDebugWindow extends HappyDomWindow {
+type FocusDebugBrowser = Awaited<ReturnType<typeof createUiBrowser>> & {
   __grigDeskLog?: { mark(text: string): unknown };
-}
+};
 
 /**
  * Настоящие focus-события DOM отделены от сервера: журнал собирает только текст отметок.
  * Часы управляемы, чтобы проверить паузу и снятие подписок без ожидания минуты.
  */
 async function fixture(t: TestContext) {
-  const browser: FocusDebugWindow = await createUiBrowser();
+  const browser: FocusDebugBrowser = await createUiBrowser();
   const element = browser.document.createElement('textarea');
   const target = browser.document.createElement('button');
   const marks: string[] = [];
@@ -29,6 +29,8 @@ async function fixture(t: TestContext) {
 
   console.warn = () => {};
 
+  // Happy DOM реализует используемые события, но его DOM-типы уже браузерных.
+  // Приведение остаётся в фикстуре; контракт производственного кода не меняется.
   const dispose = installChatComposerFocusDebug(element as unknown as HTMLTextAreaElement, () => time);
 
   t.after(() => {

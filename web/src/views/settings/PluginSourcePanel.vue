@@ -9,6 +9,10 @@
       <h3>{{ t('settings.sourceAndUpdates') }}</h3>
       <span v-if="plugin.install" class="source-version">v{{ plugin.install.version }}</span>
     </header>
+    <UiInlineMessage v-if="plugin.compatibility?.status === 'incompatible'" tone="danger"
+                     data-role="plugin-source-incompatible">
+      {{ plugin.compatibility.reason }}
+    </UiInlineMessage>
     <UiInlineMessage v-if="store.error" tone="danger">{{ store.error }}</UiInlineMessage>
     <UiInlineMessage v-if="store.recoveryError" tone="danger">
       {{ store.recoveryError.message }}
@@ -85,7 +89,7 @@
           </UiButton>
           <UiButton
             data-context="workspace-form-wrap"
-            v-if="plugin.install.localChanges"
+            v-if="plugin.install.localChanges || plugin.compatibility?.status === 'incompatible'"
             data-role="plugin-source-update"
             :disabled="locked"
             @click="emit('update')"

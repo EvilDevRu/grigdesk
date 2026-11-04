@@ -7,8 +7,7 @@ import type { PluginWebModule } from '../../../shared/plugins/pluginsContracts.t
  */
 export function isPluginModuleDescriptor(id: string, value: unknown): value is PluginWebModule {
   if (!isRecord(value) || typeof value.entry !== 'string' || !Array.isArray(value.css)
-    || !isRecord(value.locales)
-    || Object.hasOwn(value, 'startOnLogin') && typeof value.startOnLogin !== 'boolean') {
+    || !isRecord(value.locales)) {
     return false;
   }
 

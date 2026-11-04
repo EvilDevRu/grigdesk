@@ -16,6 +16,11 @@ import type { PluginVersionRef, PluginInstallJob } from '../../../shared/plugins
 import type { PluginInstallInfo } from '../../../shared/plugins/pluginInstallContracts.ts';
 
 export interface InstallSubject {
+  compatibility?: {
+    status: string;
+    code: string | null;
+    reason: string | null;
+  };
   id: string;
   name: string;
   install?: PluginInstallInfo | null;

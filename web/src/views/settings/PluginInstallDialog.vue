@@ -127,7 +127,7 @@
               {{ t('settings.installedV') }}{{ plugin.install.version }} {{ t('settings.from') }}
               <span>{{ plugin.install.source.url }}</span>
             </p>
-            <template v-if="plugin.install.localChanges">
+            <template v-if="plugin.install.localChanges || plugin.compatibility?.status === 'incompatible'">
               <UiInlineMessage tone="warning">{{ t('settings.theInstalledCopyHasManualChanges') }}</UiInlineMessage>
               <UiCheckbox
                 v-model="replaceModified"

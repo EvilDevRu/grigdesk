@@ -42,6 +42,7 @@ async function fixture(t, mode, authenticated, present = false, options = {}) {
   };
 
   h.auth.load = async () => h.calls.push('auth.load');
+  h.auth.stopRecovery = () => {};
   h.auth.watchUnauthorized = () => h.calls.push('auth.watch');
   h.store = {
     startPolling: () => h.calls.push('poll'),

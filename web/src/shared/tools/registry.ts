@@ -1,4 +1,4 @@
-// Встроенные панели, страницы api1 и доверенные модули api2 имеют один реестр дока.
+// Встроенные панели и доверенные модули плагинов имеют один реестр дока.
 // Manifest задаёт навигацию; исполнение модуля изолирует отдельная ленивая панель.
 import { uiLocale } from '../../ui.ts';
 import { translator } from '../../../../shared/i18n/catalogs.ts';
@@ -13,24 +13,21 @@ export interface ToolEntry extends ToolMeta {
   // Встроенный инструмент без панели (терминал ведёт своя страница) остаётся в реестре
   // ради рейки и горячих клавиш — компонент у него не обязателен.
   component: Component | undefined;
-  // Пропсы панели сверх общих (active/compact/presentation/intents): у панели-iframe
-  // это адрес страницы плагина.
+  // Пропсы модуля сверх общих active/compact/presentation/intents.
   panelProps?: Record<string, unknown>;
   detachable?: boolean;
 }
 
 // Страница плагина в объёме, который читает реестр: то, что отдаёт стор плагинов.
-export interface PluginWebPage {
+export interface PluginModulePage {
   id: string;
-  src: string;
   label: string;
   icon: string;
   order: number;
 }
 
 interface PluginsPagesPort {
-  webPages: PluginWebPage[];
-  modulePages?: Array<Omit<PluginWebPage, 'src'> & { descriptor: PluginWebModule }>;
+  modulePages?: Array<PluginModulePage & { descriptor: PluginWebModule }>;
 }
 
 // Панель на инструмент. Ключи совпадают с `id` каталога — это и есть условие
@@ -45,15 +42,13 @@ const PANELS: Record<string, Component> = {
   docker: asyncView(() => import('../../views/docker/DockerPanel.vue'), panelLoading('docker')),
 };
 
-const PluginFramePanel = asyncView(
-  () => import('../../views/ext/PluginFramePanel.vue'), panelLoading('external'),
-);
 const PluginModulePanel = asyncView(
   () => import('../../views/ext/PluginModulePanel.vue'), panelLoading('external'),
 );
 
 export const TOOL_REGISTRY: ToolEntry[] = TOOL_CATALOG.map((item) => ({
   ...item,
+  icon: item.plugin ? `/plugin-icons/${item.plugin}.png` : item.icon,
   get label() {
     return translator.t(uiLocale.value, `core.builtinNavigation.${item.id}`, {}, item.label);
   },
@@ -70,20 +65,8 @@ export const TOOL_BY_ROUTE = new Map(TOOL_REGISTRY.map((item) => [item.route, it
  */
 export function pluginTools(plugins: PluginsPagesPort): ToolEntry[] {
   const modules = plugins.modulePages ?? [];
-  const moduleIds = new Set(modules.map((page) => page.id));
-  const frames = plugins.webPages.filter((page) => !moduleIds.has(page.id)).map((page) => ({
-    id: page.id,
-    route: pluginPageRoute(page.id),
-    label: page.label,
-    icon: page.icon,
-    order: page.order,
-    hotkey: '',
-    plugin: page.id,
-    component: PluginFramePanel,
-    panelProps: { src: page.src, label: page.label },
-  }));
 
-  return [...frames, ...modules.map((page) => ({
+  return modules.map((page) => ({
     id: page.id,
     route: pluginPageRoute(page.id),
     label: page.label,
@@ -98,7 +81,7 @@ export function pluginTools(plugins: PluginsPagesPort): ToolEntry[] {
       label: page.label,
     },
     detachable: false,
-  }))];
+  }));
 }
 
 /**
