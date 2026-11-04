@@ -21,7 +21,6 @@ interface RuntimeOptions {
   keyboardLayout?(): Promise<KeyboardLayout | null>;
   applicationLauncher?: ApplicationLauncher;
   nativeBrowser?: NativeBrowserState;
-  selectDirectory?(origin: string): Promise<string | null>;
   windowControls?: WindowControls;
   desktopExit?: DesktopExitPreference;
   nativeWindows?: NativeWindows;
@@ -62,7 +61,6 @@ export function createClientRuntime(options: RuntimeOptions) {
   const shell = createShellApi({
     keyboardLayout: options.keyboardLayout,
     applicationLauncher: options.applicationLauncher,
-    selectDirectory: options.selectDirectory,
     windowControls: options.windowControls,
     desktopExit: options.desktopExit,
     nativeWindows: options.nativeWindows,

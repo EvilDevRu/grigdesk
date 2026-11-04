@@ -322,13 +322,6 @@
   height: calc(100dvh - 40px);
 }
 
-/* Мастер использует рабочую оболочку с постоянными шапкой и действиями.
-   Ограниченная высота оставляет текущий раздел видимым вокруг окна. */
-.ui-dialog-overlay[data-size='workspace'] .ui-dialog[data-role='onboarding-modal'] {
-  width: min(960px, calc(100vw - 40px));
-  height: min(640px, calc(100dvh - 40px));
-}
-
 /* Просмотр медиа: окно — сам экран. Поверхности, рамки и тени нет, затемнение глубже,
    чтобы картинка читалась без отвлечения на интерфейс под ней. Поверхность прозрачна
    для кликов: пустое место закрывает окно через затемнение, а потребитель включает
@@ -676,8 +669,6 @@
     .ui-dialog[data-role='pipeline-stage'],
   .ui-dialog-overlay[data-size='workspace']
     .ui-dialog[data-role='task-modal'],
-  .ui-dialog-overlay[data-size='workspace']
-    .ui-dialog[data-role='onboarding-modal'],
   .ui-dialog-overlay[data-size='workspace']
     .ui-dialog[data-role='settings-modal'] {
     width: 100%;

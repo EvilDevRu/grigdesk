@@ -521,7 +521,7 @@ export const WEB_LOG_ROUTES = [
   '/', '/board', '/pipeline', '/sandboxes', '/showcase/:id?', '/chats',
   '/diff', '/documents', '/terminal', '/ssh', '/db', '/docker', '/routes',
   '/projects/:id?', '/code', '/shelf', '/tools', '/ext/:id', '/video', '/inbox',
-  '/github', '/telegram', '/settings', '/3d', '/surface', '/onboarding',
+  '/github', '/telegram', '/settings', '/3d', '/surface',
 ] as const;
 
 const LAYERS = [

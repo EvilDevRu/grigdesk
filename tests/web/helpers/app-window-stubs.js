@@ -1,7 +1,6 @@
 // Подмены новых связей App не запускают тяжёлые страницы и закрывают выданные каналы.
 // Общие gate-тесты продолжают проверять настоящие watchers оболочки и авторизации.
 export const appWindowStubs = {
-  './shared/onboarding/OnboardingHost.vue': 'export default { render: () => null };',
   './shared/layout/DesktopExitHost.vue': 'export default { render: () => null };',
   './shared/layout/DesktopWindowControls.vue': 'export default { render: () => null };',
   './views/ToolWindowPage.vue': 'export default { render: () => null };',

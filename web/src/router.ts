@@ -126,12 +126,6 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
-    path: '/onboarding',
-    name: 'onboarding',
-    component: () => import('./views/onboarding/onboardingRouteStub.ts'),
-    meta: { title: 'Мастер настройки', layout: 'workspace' },
-  },
-  {
     path: '/code',
     name: 'code',
     component: () => import('./views/CodeView.vue'),

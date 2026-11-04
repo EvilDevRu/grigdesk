@@ -1,6 +1,5 @@
 import { showStyledContextMenu } from './contextMenu.ts';
 import { desktopLocale, desktopText, setDesktopLocale } from './locale.ts';
-import { createDirectorySelector } from './directorySelection.ts';
 import { createApplicationLauncher } from './applicationLauncher.ts';
 import {
   app,
@@ -1092,10 +1091,6 @@ async function prepare(signal: AbortSignal): Promise<void> {
         execFile('gio', ['set', file, 'metadata::trusted', 'true'], { timeout: 2000 }, () => resolve());
       }),
     }) : undefined,
-    selectDirectory: createDirectorySelector({
-      getWindow: () => mainWindow,
-      showOpenDialog: (parent, options) => dialog.showOpenDialog(parent, options),
-    }),
     windowControls,
     nativeBrowser: {
       state: () => {

@@ -8,7 +8,7 @@ export const WEB_SSE_SIGNALS = [
   'chat-session', 'chat-store', 'chat-store-meta', 'speech-settings', 'diagnostic-logging',
   'inbox-changed', 'telegram-status', 'mobile-changed', 'task-shelf-changed', 'grigdesk-tasks-changed',
   'arbiter-live', 'arbiter-conversation', 'sandboxes-changed', 'sandbox-progress', 'projects-changed',
-  'onboarding-changed', 'routes-draft-changed', 'routes-catalog-changed', 'showcase-changed',
+  'routes-draft-changed', 'routes-catalog-changed', 'showcase-changed',
   'showcase-progress', 'showcase-build-progress', 'showcase-voice', 'usage-forecast',
   'studio-changed', 'studio-progress', 'trackers-changed',
 ] as const;

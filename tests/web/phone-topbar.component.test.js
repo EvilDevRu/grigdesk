@@ -503,7 +503,6 @@ test('PHONE-TOPBAR: запуск без машины восстанавлива�
   assert.equal(browser.document.activeElement === metrics, true);
 
   // Граница сети отключена для проверки прямых действий настоящей оболочки.
-  // Сам мастер запрашивается настоящим store без запуска серверного прохода.
   for (const [store, action] of [
     ['chat', 'ensure'],
     ['plugins', 'load'],
@@ -518,17 +517,8 @@ test('PHONE-TOPBAR: запуск без машины восстанавлива�
   await wrapper.setProps({ active: true });
   await flushPromises();
 
-  const originalRoute = router.currentRoute.value.fullPath;
-  const wizard = wrapper.get('.topbar button[aria-label="Мастер настройки"]');
   const machine = wrapper.get('.topbar [data-context="connection-trigger"]');
 
-  assert.equal(wizard.attributes('data-context'), 'topbar-action');
-  assert.equal(wizard.attributes('aria-haspopup'), 'dialog');
-  await wizard.trigger('click');
-  await flushPromises();
-  assert.equal(pinia._s.get('onboarding').requestedMode, 'manual');
-  assert.equal(router.currentRoute.value.fullPath, originalRoute);
-  assert.equal(browser.document.querySelectorAll('button[aria-label="Мастер настройки"]').length, 1);
   await machine.trigger('click');
   await flushPromises();
   assert.equal(browser.document.querySelectorAll('[data-connection-menu]').length, 1);
@@ -537,17 +527,12 @@ test('PHONE-TOPBAR: запуск без машины восстанавлива�
   await wrapper.get('.phone-nav button').trigger('click');
   await flushPromises();
   assert.equal(Boolean(browser.document.querySelector(
-    '#phone-sections-actions button[aria-label="Мастер настройки"]',
-  )), false);
-  assert.equal(Boolean(browser.document.querySelector(
     '#phone-sections-actions [data-context="connection-trigger"]',
   )), false);
   browser.document.querySelector('[data-role="phone-sections"] button[aria-label="Закрыть"]').click();
   await flushPromises();
-  assert.equal(wizard.element.closest('.topbar') !== null, true);
   assert.equal(machine.element.closest('.topbar') !== null, true);
   await wrapper.setProps({ active: false });
   await flushPromises();
-  assert.equal(wrapper.find('.topbar button[aria-label="Мастер настройки"]').exists(), false);
   assert.equal(wrapper.get('.topbar [data-context="connection-trigger"]').element === machine.element, true);
 });

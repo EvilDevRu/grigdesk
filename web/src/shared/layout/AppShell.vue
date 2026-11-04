@@ -403,15 +403,6 @@
           <PhoneConnectButton :labeled="phoneLayout" :menu="phoneLayout" />
         </PhoneShellPortal>
         <AlertHistoryPopover />
-        <UiIconButton v-if="active && hasMachine" variant="link" role="rail" data-context="topbar-action"
-          :label="t('core.onboardingOpen')" v-tooltip="t('core.onboardingOpen')"
-          aria-haspopup="dialog" :pressed="onboarding.isOpen"
-          @click="onboarding.requestOpen()">
-          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
-            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="m3 18 12-12 3 3L6 21ZM5 2v6M2 5h6M19 15v6M16 18h6M17 2v3M15.5 3.5h3" />
-          </svg>
-        </UiIconButton>
         <UiIconButton v-if="active" variant="link" role="rail" data-context="topbar-action"
           :label="t('settings.settings')" v-tooltip="t('settings.settings')"
           aria-haspopup="dialog" :pressed="settings.isOpen"
@@ -510,7 +501,6 @@ import { useTasksStore } from '../../stores/tasks.ts';
 import { useUiStore } from '../../stores/ui.ts';
 import { startInboxSummary, stopInboxSummary, useInboxStore } from '../../actions/inbox';
 import { useDockStore } from '../../stores/dock.ts';
-import { useOnboardingStore } from '../../stores/onboarding.ts';
 import {
   providerStatusHint,
   providerUsageView,
@@ -567,7 +557,6 @@ const route = useRoute();
 const router = useRouter();
 const ui = useUiStore();
 const toolDock = useDockStore();
-const onboarding = useOnboardingStore();
 const { data: sys, stale: sysStale, updatedAt: sysUpdatedAt } = storeToRefs(useSystemStore());
 // Время последнего удачного снимка метрик — для подсказки «устарело».
 const sysSnapshotTime = computed(() => (sysUpdatedAt.value

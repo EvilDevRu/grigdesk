@@ -41,7 +41,6 @@ interface ShellOptions {
   keyboardLayout?(): Promise<KeyboardLayout | null>;
   applicationLauncher?: ApplicationLauncher;
   nativeBrowser?: NativeBrowserState;
-  selectDirectory?(origin: string): Promise<string | null>;
   windowControls?: WindowControls;
   desktopExit?: DesktopExitPreference;
   beforeSelect?(profile: DesktopProfile): Promise<void>;
@@ -153,7 +152,6 @@ export function createShellApi(options: ShellOptions) {
         ...(options.applicationLauncher ? ['applicationLauncher' as const] : []),
         ...(options.nativeWindows ? ['windows' as const, 'taskSources' as const] : []),
         ...(options.nativeBrowser ? ['browser' as const] : []),
-        ...(options.selectDirectory ? ['selectDirectory' as const] : []),
       ],
       localAvailable: options.localAvailable(),
     };
@@ -386,42 +384,6 @@ export function createShellApi(options: ShellOptions) {
 
       if (pathname === '/__shell/launcher') {
         await applicationLauncherApi(req, res, body, options.applicationLauncher);
-
-        return;
-      }
-
-      if (req.method === 'POST' && pathname === '/__shell/directory/select') {
-        if (!options.selectDirectory) {
-          json(res, 404, { error: 'not_found' });
-
-          return;
-        }
-
-        if (!body || Object.keys(body).length !== 1 || typeof body.profileId !== 'string') {
-          json(res, 400, { error: 'invalid_directory_request' });
-
-          return;
-        }
-
-        const selected = options.profiles.settings.profiles.find((item) => item.id === body.profileId);
-        const origin = new URL('http://' + req.headers.host).origin;
-        const selection = rev;
-        const valid = () => !closed && selected?.kind === 'local'
-          && options.profiles.settings.selected === selected.id && rev === selection;
-
-        if (!valid()) {
-          json(res, 409, { error: 'directory_selection_changed' });
-
-          return;
-        }
-
-        const directory = await options.selectDirectory(origin);
-
-        if (!valid()) {
-          json(res, 409, { error: 'directory_selection_changed' });
-        } else {
-          json(res, 200, { path: directory });
-        }
 
         return;
       }

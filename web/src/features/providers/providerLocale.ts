@@ -2,11 +2,9 @@ import {
   localeTranslator, messages, translator, type LocaleSource,
 } from '../../../../shared/i18n/catalogs.ts';
 import type { ProviderEntry } from '../../../../shared/chat/providersContracts.ts';
-import { isSelectableModelProvider } from '../../shared/providerModelSelect.ts';
 
 export interface ProviderAvailabilityView {
   available: boolean;
-  chatReady: boolean;
   label: string;
 }
 
@@ -18,10 +16,10 @@ interface ProviderAction {
 
 /**
  * Общая подпись описывает доступность сервиса независимо от поддержки чата.
- * Чатовый допуск берётся из существующего селектора; проекция не запускает проверки.
+ * Проекция читает готовый снимок и не запускает дополнительные проверки.
  */
 export function providerAvailability(
-  provider: Pick<ProviderEntry, 'available' | 'chatEnabled'>,
+  provider: Pick<ProviderEntry, 'available'>,
   locale: LocaleSource = 'ru',
 ): ProviderAvailabilityView {
   const available = provider.available === true;
@@ -29,7 +27,6 @@ export function providerAvailability(
 
   return {
     available,
-    chatReady: isSelectableModelProvider(provider),
     label: available ? t('settings.available') : t('settings.unavailable2'),
   };
 }
