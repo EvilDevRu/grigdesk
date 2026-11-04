@@ -1493,6 +1493,8 @@
   "helpVersion": "Версия {version}",
   "helpContents": "Оглавление",
   "helpSearch": "Поиск по справке",
+  "helpSearchCount": "Найдено: {count}",
+  "helpOnThisPage": "На этой странице",
   "helpNoResults": "Ничего не найдено",
   "helpUnavailable": "Не удалось загрузить справку",
   "helpServerUpgradeRequired": "На этом сервере ещё нет встроенной справки. Обновите GrigDesk.",

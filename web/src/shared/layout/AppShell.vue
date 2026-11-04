@@ -404,9 +404,10 @@
         </PhoneShellPortal>
         <AlertHistoryPopover />
         <PhoneShellPortal :phone="phoneLayout" :menu-open="phoneMenuOpen">
-          <UiIconButton v-if="active && hasMachine" data-role="help-open"
-                        :label="t('core.helpTitle')" variant="link" role="rail" @click="openHelp()">
-            <span aria-hidden="true">?</span>
+          <UiIconButton v-if="active && hasMachine" data-context="topbar-action"
+                        :label="t('core.helpTitle')" v-tooltip="t('core.helpTitle')"
+                        variant="link" role="rail" aria-haspopup="dialog" @click="openHelp()">
+            <UiHelpIcon />
           </UiIconButton>
         </PhoneShellPortal>
         <UiIconButton v-if="active" variant="link" role="rail" data-context="topbar-action"
@@ -483,6 +484,7 @@ import {
   UiActionLink,
   UiButton,
   UiDialog,
+  UiHelpIcon,
   UiIconButton,
   UiTopbarPanel,
   UiPressable,

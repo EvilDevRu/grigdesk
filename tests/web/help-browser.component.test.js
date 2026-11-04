@@ -39,7 +39,7 @@ test('HELP-C1: реальные поиск, дерево, безопасный M
   assert.match(h.wrapper.text(), /Начало/u);
   assert.equal(h.wrapper.find('script').exists(), false);
 
-  const link = h.wrapper.find('a[href="#/help/chats"]');
+  const link = h.wrapper.find('article a[href="#/help/chats"]');
 
   assert.equal(link.exists(), true);
   await link.trigger('click');
@@ -100,4 +100,51 @@ test('HELP-C3: переход к статье возвращает её нача
   await h.wrapper.setProps({ articleId: 'overview', fragment: 'начало' });
   await h.flushPromises();
   assert.equal(headings.at(-1), 'начало');
+});
+
+test('HELP-C4: reader связывает оглавления, сворачивает каталог и сохраняет поиск', async (t) => {
+  const h = await mountMarkdown(t, 'src/features/help/HelpBrowser.vue', {
+    bundle: {
+      ...bundle,
+      articles: [{
+        ...article,
+        markdown: '# Начало\n## Проверка\nШаг один.\n## Проверка\nШаг два.',
+      }, chats],
+    },
+    status: 'ready',
+    articleId: 'overview',
+    embedded: true,
+  });
+
+  await h.flushPromises();
+
+  assert.equal(h.wrapper.find('.help-brand').exists(), false);
+  assert.equal(h.wrapper.get('.help-index-item[aria-current="page"]').text(), 'Начало');
+  assert.deepEqual(h.wrapper.findAll('.help-outline a').map((link) => link.attributes('href')), [
+    '#/help/overview#проверка',
+    '#/help/overview#проверка-1',
+  ]);
+  await h.wrapper.findAll('.help-outline a')[1].trigger('click');
+  assert.deepEqual(h.wrapper.emitted('navigate')[0], ['overview', 'проверка-1']);
+
+  const toggle = h.wrapper.get('button[aria-controls]');
+  const controlledId = toggle.attributes('aria-controls');
+
+  assert.equal(h.wrapper.get('.help-index-panel').attributes('id'), controlledId);
+  await toggle.trigger('click');
+  assert.equal(toggle.attributes('aria-expanded'), 'true');
+  await h.wrapper.get('input[type="search"]').setValue('рабочая');
+  await h.wrapper.get('.help-index-item').trigger('click', { ctrlKey: true });
+  assert.equal(h.wrapper.emitted('navigate').length, 1);
+  await h.wrapper.get('.help-index-item').trigger('click');
+  assert.deepEqual(h.wrapper.emitted('navigate')[1], ['chats', '']);
+  assert.equal(toggle.attributes('aria-expanded'), 'false');
+  assert.equal(h.wrapper.get('input[type="search"]').element.value, 'рабочая');
+
+  await h.wrapper.setProps({ status: 'loading' });
+  await h.flushPromises();
+  assert.equal(h.wrapper.find('.help-outline').exists(), false);
+  await h.wrapper.setProps({ status: 'ready' });
+  await h.flushPromises();
+  assert.equal(h.wrapper.findAll('.help-outline a').length, 2);
 });

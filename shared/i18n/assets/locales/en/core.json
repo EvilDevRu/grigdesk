@@ -1473,6 +1473,8 @@
   "helpVersion": "Version {version}",
   "helpContents": "Contents",
   "helpSearch": "Search help",
+  "helpSearchCount": "Results: {count}",
+  "helpOnThisPage": "On this page",
   "helpNoResults": "No results",
   "helpUnavailable": "Could not load help",
   "helpServerUpgradeRequired": "This server does not provide built-in help yet. Update GrigDesk.",

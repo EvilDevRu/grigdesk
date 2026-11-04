@@ -2916,3 +2916,41 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
 .ui-pressable.resource-trigger .lv-ok { color: var(--ink); }
 .ui-pressable.resource-trigger .lv-warn { color: var(--warn); }
 .ui-pressable.resource-trigger .lv-bad { color: var(--bad); }
+
+/* Ссылки reader используют общий skin навигации: текущая статья заметна,
+   а длинное название переносится без изменения ширины оглавления. */
+.ui-action-link[data-context='help-index-item'],
+.ui-action-link[data-context='help-outline-item'] {
+  --ui-action-tone: var(--ink-mid);
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  min-height: max(32px, var(--toolbar-control-h));
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ui-action-link[data-context='help-index-item']:hover {
+  background: var(--surface-2);
+}
+
+.ui-action-link[data-context='help-index-item'][aria-current='page'] {
+  --ui-action-tone: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--sidebar));
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.ui-action-link[data-context='help-outline-item'] {
+  min-height: max(28px, var(--toolbar-control-h));
+  padding-block: 5px;
+}
+
+.ui-action-link[data-context='help-outline-item'][aria-current='location'] {
+  --ui-action-tone: var(--accent);
+}

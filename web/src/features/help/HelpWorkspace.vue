@@ -1,6 +1,6 @@
 <template>
   <HelpBrowser :bundle="state.bundle" :status="state.status" :error="state.error"
-               :article-id="articleId" :fragment="fragment" :can-ask="chat.loaded"
+               :article-id="articleId" :fragment="fragment" :can-ask="chat.loaded" :embedded="embedded"
                @navigate="(id, hash) => $emit('navigate', id, hash)" @retry="loader.reload" @ask="ask" />
 </template>
 
@@ -20,8 +20,11 @@ import HelpBrowser from './HelpBrowser.vue';
 withDefaults(defineProps<{
   articleId?: string;
   fragment?: string;
+  embedded?: boolean;
 }>(), {
-  articleId: 'overview', fragment: ''
+  articleId: 'overview',
+  fragment: '',
+  embedded: false,
 });
 defineEmits<{
   navigate: [
