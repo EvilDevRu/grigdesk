@@ -828,7 +828,10 @@
   color: var(--ink);
 }
 
-.ui-icon-button[data-context='tool-rail-item'] svg {
+/* Файловые иконки плагинов и резервные SVG следуют размеру соседних разделов.
+   Правило обеих реек перекрывает базовые 24 px общего PluginIcon. */
+.shell [data-ui-shell-nav] :is(svg, .plugin-icon),
+.ui-icon-button[data-context='tool-rail-item'] :is(svg, .plugin-icon) {
   width: 16px;
   height: 16px;
 }
@@ -1298,7 +1301,7 @@ html[data-ui-touch] .ui-icon-button[data-context='alert-history'] .alert-bell-ba
   gap: 1px;
 }
 
-.ui-action-link[data-context='tool-tile'] .tool-icon svg {
+.ui-action-link[data-context='tool-tile'] .tool-icon :is(svg, .plugin-icon) {
   width: 28px;
   height: 28px;
 }
@@ -1331,7 +1334,7 @@ html[data-ui-touch] .ui-icon-button[data-context='alert-history'] .alert-bell-ba
   height: 28px;
 }
 
-.ui-action-link[data-context='tool-menu-item'] .tool-icon svg {
+.ui-action-link[data-context='tool-menu-item'] .tool-icon :is(svg, .plugin-icon) {
   width: 20px;
   height: 20px;
 }

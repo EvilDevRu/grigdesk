@@ -382,7 +382,7 @@
 - [Цветные числа обеих реек: один счётчик внимания, причины и предел 999+](navigation-counts.md)
 - [Счётчики внимания в навигации](navigation-attention-badges.md)
 - [Счётчики боковых панелей: центровка цифр и предел по доступной ширине](sidebar-chip-geometry.md)
-- [Подложки иконок обеих боковых панелей: прямые углы и вся ширина рейки](sidebar-icon-surfaces.md)
+- [Иконки обеих боковых панелей: единый размер 16 px для картинок и SVG, плоские подложки](sidebar-icon-surfaces.md)
 - [Пункт «Доска» в сайдбаре: число новых задач без точек состояния](board-sidebar-icon.md)
 - [Code, Shelf, Terminal и SSH монтирует только постоянный shared/layout/ToolHost.vue](persistent-tool-host.md)
 - [Escape координирует единый typed stack](escape-stack.md)

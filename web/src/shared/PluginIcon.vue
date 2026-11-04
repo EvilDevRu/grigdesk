@@ -18,10 +18,14 @@ const failed = ref<string | null | undefined>(null);
 </script>
 
 <style scoped>
-.plugin-icon {
-  width: 24px;
-  height: 24px;
-  flex: 0 0 auto;
-  object-fit: contain;
+/* Базовый размер находится в общем слое компонентов.
+   Контексты реек и меню могут переопределять его без !important. */
+@layer components {
+  .plugin-icon {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+    object-fit: contain;
+  }
 }
 </style>
