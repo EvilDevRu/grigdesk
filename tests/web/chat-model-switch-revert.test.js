@@ -1,3 +1,4 @@
+import { createChatSelectionState } from '../../web/src/shared/chatSelectionState.ts';
 // Настоящее CAS-хранилище и независимые окна воспроизводят гонки выбора настроек.
 // Все записи изолированы временной папкой; ни CLI, ни личные данные здесь не нужны.
 import assert from 'node:assert/strict';
@@ -14,12 +15,33 @@ import { chatStoreFixture, setChatProviders, sseOf } from './helpers/chat-store.
 const test = (name, run) => nodeTest(name, { timeout: 15000 }, run);
 
 const MODELS = {
+  'speed-provider': [{
+    id: 'speed-a',
+    efforts: ['high'],
+    chatSpeedModes: ['standard', 'fast', 'ultrafast'],
+  }],
   deepseek: [{ id: 'ds-test', efforts: ['off', 'high', 'max'] }],
   claude: [
-    { id: 'claude-a', efforts: ['low', 'high', 'max'] },
-    { id: 'claude-b', efforts: ['low', 'high'] },
-    { id: 'claude-c', efforts: ['low', 'high'] },
-    { id: 'claude-empty', efforts: [] },
+    {
+      id: 'claude-a',
+      chatSpeedModes: ['standard', 'fast'],
+      efforts: ['low', 'high', 'max'],
+    },
+    {
+      id: 'claude-b',
+      chatSpeedModes: ['standard', 'fast'],
+      efforts: ['low', 'high'],
+    },
+    {
+      id: 'claude-c',
+      chatSpeedModes: ['standard', 'fast'],
+      efforts: ['low', 'high'],
+    },
+    {
+      id: 'claude-empty',
+      chatSpeedModes: ['standard'],
+      efforts: [],
+    },
   ],
 };
 const refOf = (model) => ({
@@ -66,6 +88,9 @@ function installProviders() {
         model,
         provider: provider ? {
           id: provider,
+          ...(provider === 'claude' ? { chatSpeed: { modes: ['standard', 'fast'] } } : {}),
+          ...(provider === 'speed-provider'
+            ? { chatSpeed: { modes: ['standard', 'fast', 'ultrafast'] } } : {}),
           sessionBinding: provider === 'deepseek',
           modes: (provider === 'deepseek' ? ['default', 'auto', 'read-only'] : ['manual', 'auto', 'plan'])
             .map((mode) => ({ id: mode, label: mode })),
@@ -724,3 +749,160 @@ for (const delivery of ['send', 'pending-f5']) {
     assert.deepEqual(post.body.modelRef, refOf('claude-b'));
   });
 }
+
+for (const speed of ['fast', 'ultrafast']) {
+  const speedInitial = speed === 'ultrafast'
+    ? { model: 'speed-a', modelRef: refOf('speed-a') } : {};
+
+  test(`SPEED-STORE: ${speed} переживает F5 и сохраняет effort`, async (t) => {
+    const f = await fixture(t, { initial: speedInitial });
+    const beforeEffort = f.live.effort;
+    const beforeDefault = f.chat.defEffort;
+
+    f.chat.setSpeed(f.live.id, speed);
+    await flush(f.chat);
+
+    assert.equal((await f.read()).speed, speed);
+    assert.equal(f.live.effort, beforeEffort);
+    assert.equal(f.chat.defEffort, beforeDefault);
+
+    const reloaded = await f.open(true);
+
+    assert.equal(reloaded.sessions[0].speed, speed);
+  });
+
+  test(`SPEED-ACK: ${speed} позднее подтверждение не откатывает следующий выбор`, async (t) => {
+    const f = await fixture(t, { initial: { ...speedInitial, speed: 'standard' } });
+    const sent = f.gate();
+    const release = f.gate();
+
+    f.hooks.ack = async (response) => {
+      sent.resolve();
+      await release.promise;
+
+      return response;
+    };
+    f.chat.setSpeed(f.live.id, speed);
+
+    const writing = flush(f.chat);
+    const entered = await Promise.race([
+      sent.promise.then(() => true),
+      writing.then(() => false),
+    ]);
+
+    assert.equal(entered, true, 'изменённая скорость должна действительно начать PUT');
+    f.chat.setSpeed(f.live.id, 'standard');
+    delete f.hooks.ack;
+    release.resolve();
+    await writing;
+    await flush(f.chat);
+
+    assert.equal(f.live.speed, 'standard');
+    assert.equal((await f.read()).speed, 'standard');
+  });
+
+  test(`SPEED-SWITCH: ${speed} не переносится другому исполнителю`, async (t) => {
+    const f = await fixture(t, { initial: { ...speedInitial, speed } });
+
+    f.chat.setModel(f.live.id, 'ds-test');
+    await flush(f.chat);
+
+    assert.equal(f.live.speed, 'standard');
+    assert.equal((await f.read()).speed, 'standard');
+  });
+
+
+}
+
+for (const initial of [{}, { speed: null }]) {
+  test(`SPEED-NULL-BASE: два выбора из ${JSON.stringify(initial)} сохраняют основание`, async (t) => {
+    const f = await fixture(t, { initial });
+    const original = await f.read();
+    const persist = t.mock.method(f.chat, '_persist', () => {});
+
+    f.chat.setSpeed(f.live.id, 'fast');
+    f.chat.setSpeed(f.live.id, 'standard');
+    await f.put({ chat: { ...original, mode: 'plan' } });
+    persist.mock.restore();
+    await flush(f.chat);
+
+    assert.equal(f.live.speed, 'standard');
+    assert.equal(f.live.mode, 'plan');
+    assert.equal((await f.read()).speed, 'standard');
+
+    const reloaded = await f.open(true);
+
+    assert.equal(reloaded.sessions[0].speed, 'standard');
+  });
+}
+
+test('SPEED-REBASE: конфликт скорости принимает сервер, не затирая независимый effort', () => {
+  const state = createChatSelectionState();
+  const before = {
+    model: 'a',
+    modelRef: {
+    provider: 'p',
+    model: 'a',
+  },
+    speed: null,
+    effort: 'low',
+  };
+  const live = {
+    ...before,
+    speed: 'fast',
+    effort: 'high',
+  };
+
+  state.change('chat', 'speed', before, live);
+  state.change('chat', 'effort', before, live);
+  state.rebase('chat', live, { ...before, speed: 'standard' });
+  assert.equal(live.speed, 'standard');
+  assert.equal(live.effort, 'high');
+});
+
+test('SPEED-MODEL-CAS: проигравшая смена модели не переносит сброс скорости', () => {
+  const state = createChatSelectionState();
+  const before = {
+    model: 'a',
+    modelRef: {
+    provider: 'p',
+    model: 'a',
+  },
+    speed: 'fast',
+  };
+  const live = {
+    ...before,
+    model: 'b',
+    modelRef: {
+    provider: 'p',
+    model: 'b',
+  },
+    speed: 'standard',
+  };
+  const generation = state.change('chat', 'model', before, live);
+
+  state.change('chat', 'speed', before, live, generation);
+  state.rebase('chat', live, {
+    ...before,
+    model: 'c',
+    modelRef: {
+    provider: 'p',
+    model: 'c',
+  },
+  });
+  assert.equal(live.modelRef.model, 'c');
+  assert.equal(live.speed, 'fast');
+});
+
+test('SPEED-NEW: новый соседний чат начинает standard без наследования платного выбора', async (t) => {
+  const f = await fixture(t, { initial: { speed: 'fast' } });
+
+  f.chat.defModel = f.live.model;
+  f.chat.defModelRef = f.live.modelRef;
+
+  const id = f.chat.newSession();
+  const neighbor = f.chat.sessions.find((item) => item.id === id);
+
+  assert.equal(neighbor.speed, 'standard');
+  assert.equal(f.live.speed, 'fast');
+});

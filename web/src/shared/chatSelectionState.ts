@@ -1,10 +1,12 @@
+import { isChatSpeed } from '../../../shared/chat/chatSpeed.ts';
+import type { ChatSpeed } from '../../../shared/chat/chatSpeed.ts';
 import type { ChatRecord } from './chatContracts.ts';
 import type { ChatHistorySnapshot } from './chatHistorySnapshot.ts';
 
-type Group = 'model' | 'effort' | 'mode';
+type Group = 'model' | 'effort' | 'mode' | 'speed';
 type ModelSelection = Pick<ChatRecord, 'model' | 'modelRef'>;
 type ModeSelection = Pick<ChatRecord, 'mode' | 'modeSelection'>;
-type Selection = string | ModelSelection | ModeSelection;
+type Selection = string | ModelSelection | ModeSelection | null;
 type Source = ChatRecord | ChatHistorySnapshot;
 
 interface Intent {
@@ -17,7 +19,7 @@ interface Intent {
 type Choices = Partial<Record<Group, Intent>>;
 type Generations = Partial<Record<Group, number>>;
 
-const groups: Group[] = ['model', 'effort', 'mode'];
+const groups: Group[] = ['model', 'effort', 'mode', 'speed'];
 
 /**
  * Модель сравнивается по сохранённой паре, если она уже известна.
@@ -40,6 +42,10 @@ function modelKey(value: Selection): string {
  * Пустые effort и mode сравниваются одинаково при отсутствии поля в старой схеме.
  */
 function read(source: Source, group: Group): Selection {
+  if (group === 'speed') {
+    return isChatSpeed(source.speed) ? source.speed ?? null : null;
+  }
+
   if (group === 'mode') {
     return { mode: typeof source.mode === 'string' ? source.mode : '',
       modeSelection: source.modeSelection
@@ -71,6 +77,12 @@ function same(group: Group, left: Selection, right: Selection): boolean {
  * Пара модели меняется вместе, чтобы legacy-id не расходился с modelRef.
  */
 function assign(target: ChatRecord, group: Group, value: Selection): void {
+  if (group === 'speed') {
+    target.speed = value as ChatSpeed | null;
+
+    return;
+  }
+
   if (group === 'model' || group === 'mode') {
     Object.assign(target, value as ModelSelection);
   } else {
@@ -101,14 +113,18 @@ export function createChatSelectionState() {
       }
 
       const intent: Intent = {
-        base: previous?.base ?? read(before, group),
+        base: previous ? previous.base : read(before, group),
         value,
         generation: ++generation,
         modelGeneration,
       };
 
-      if (group === 'model' && previous && choices.effort?.modelGeneration === previous.generation) {
-        choices.effort.modelGeneration = intent.generation;
+      if (group === 'model' && previous) {
+        for (const key of ['effort', 'speed'] as const) {
+          if (choices[key]?.modelGeneration === previous.generation) {
+            choices[key]!.modelGeneration = intent.generation;
+          }
+        }
       }
 
       choices[group] = intent;
@@ -165,7 +181,7 @@ export function createChatSelectionState() {
       for (const group of groups) {
         const intent = choices[group];
         const actual = read(remote, group);
-        const dependent = group === 'effort' && intent?.modelGeneration !== undefined
+        const dependent = (group === 'effort' || group === 'speed') && intent?.modelGeneration !== undefined
           && intent.modelGeneration === rejectedModel;
 
         if (intent && !dependent

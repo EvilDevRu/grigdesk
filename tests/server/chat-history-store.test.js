@@ -1,3 +1,4 @@
+import { projectWebChatHead } from '../../shared/chat/chatListProjection.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { promises as fs } from 'node:fs';
@@ -257,4 +258,68 @@ test('heads отдаёт шапки без сообщений и перечит�
 
   assert.equal(await store.remove('chat-old'), true);
   assert.deepEqual((await store.heads()).map((head) => head.id), ['chat-live', companion.id]);
+});
+
+for (const speed of ['fast', 'ultrafast']) {
+  test(`SPEED-CAS: ${speed} старый клиент и stale PUT не стирают скорость`, async (t) => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'speed-history-'));
+    const history = new ChatHistoryStore({
+      chatsDir: path.join(dir, 'chats'),
+      registryProvider: async () => ({ claude: [{ id: 'claude-test' }] }),
+    });
+
+    t.after(() => fs.rm(dir, { recursive: true, force: true }));
+    await history.saveOne({
+      id: 'speed-cas',
+      revision: 0,
+      modelRef: { provider: 'claude', model: 'claude-test' },
+      messages: [],
+      speed,
+    });
+
+    const initial = await history.readOne('speed-cas');
+    const legacy = { ...initial };
+
+    delete legacy.speed;
+    await history.saveOne(legacy);
+    assert.equal((await history.readOne('speed-cas')).speed, speed);
+
+    const fresh = await history.readOne('speed-cas');
+
+    await history.saveOne({ ...fresh, speed: 'standard' });
+    await history.saveOne({ ...initial, speed });
+    assert.equal((await history.readOne('speed-cas')).speed, 'standard');
+
+    const latest = await history.readOne('speed-cas');
+
+    await history.saveOne({ ...latest, speed }, true);
+    assert.equal((await history.readOne('speed-cas')).speed, speed);
+    assert.equal((await history.read()).archived.find((chat) => chat.id === 'speed-cas').speed, speed);
+  });
+}
+
+test('SPEED-INPUT: хранилище отказывает произвольной платной строке', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'speed-invalid-'));
+  const history = new ChatHistoryStore({
+    chatsDir: path.join(dir, 'chats'),
+    registryProvider: async () => ({ claude: [{ id: 'claude-test' }] }),
+  });
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await assert.rejects(history.saveOne({
+    id: 'invalid-speed',
+    revision: 0,
+    modelRef: { provider: 'claude', model: 'claude-test' },
+    messages: [],
+    speed: 'warp',
+  }),
+  (error) => error.code === 'bad_chat_speed' && error.statusCode === 400);
+  assert.equal(await history.readOne('invalid-speed'), null);
+});
+
+test('SPEED-HEAD: лёгкая шапка сохраняет скорость и прежнее отсутствие', () => {
+  assert.equal(projectWebChatHead({ id: 'a', speed: 'fast' }, 'v1').speed, 'fast');
+  assert.equal(projectWebChatHead({ id: 'u', speed: 'ultrafast' }, 'v1').speed, 'ultrafast');
+  assert.equal(Object.hasOwn(projectWebChatHead({ id: 'b' }, 'v1'), 'speed'), false);
+  assert.equal(projectWebChatHead({ id: 'c', speed: null }, 'v1').speed, null);
 });

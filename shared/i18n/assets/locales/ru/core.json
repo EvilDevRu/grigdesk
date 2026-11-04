@@ -1,4 +1,11 @@
 {
+  "chatSpeedLabel": "Скорость",
+  "chatSpeedInherit": "По настройкам исполнителя",
+  "chatSpeedStandard": "Обычная",
+  "chatSpeedFast": "Fast",
+  "chatSpeedUltrafast": "Ultrafast",
+  "chatSpeedCostHint": "Fast и Ultrafast повышают расход лимитов или кредитов. Выбор действует со следующего хода; доступность определяет исполнитель.",
+  "chatSpeedUnavailableHint": "Модель не подтвердила ускорение. Можно выбрать обычную скорость или обновить сведения об исполнителе. Fast и Ultrafast повышают расход лимитов или кредитов.",
   "codeDiffSideBySide": "Рядом",
   "codeDiffUnified": "В одну колонку",
   "codeDiffComputeFailed": "Не удалось вычислить сравнение. Попробуйте ещё раз.",

@@ -339,3 +339,55 @@ test('Настоящий владелец: запуск запрещает на�
   assert.equal(changed.statusCode, 200, changed.body);
   assert.deepEqual((await grigdesk.mobileChat.read(id)).workdir, { kind: 'path', path: '/tmp' });
 });
+
+
+test('SPEED-MOBILE-NEW: standard только нового чата, повтор create сохраняет speed', async (t) => {
+  const { controls, history } = await owner(t);
+  const first = await controls.create('speed-new', modelRef);
+
+  assert.equal(first.speed, 'standard');
+  await history.patchExecution(first.id, () => ({ speed: 'ultrafast' }), { durable: true });
+
+  const again = await controls.create('speed-new', modelRef);
+
+  assert.equal(again.speed, 'ultrafast');
+});
+
+
+for (const speed of ['fast', 'ultrafast', null, undefined, 'standard']) {
+  for (const target of ['provider', 'unsupported', 'compatible']) {
+    test(`SPEED-MOBILE-SWITCH: ${String(speed)} / ${target}`, async (t) => {
+      const previous = registry.one;
+
+      t.after(() => {
+        registry.one = previous;
+      });
+      registry.one = [
+        { ...previous[0], chatSpeedModes: ['standard', 'fast', 'ultrafast'] },
+        {
+          id: 'slow',
+          efforts: [],
+          chatSpeedModes: ['standard'],
+        },
+      ];
+
+      const { controls, history } = await owner(t);
+      const first = await controls.create('speed-switch', modelRef);
+      const current = await history.patchExecution(first.id, () => ({ speed }), { durable: true });
+      const nextRef = target === 'provider' ? secondRef
+        : target === 'unsupported' ? { provider: 'one', model: 'slow' } : modelRef;
+      const changed = await controls.configure(first.id, {
+        expectedRevision: current.revision,
+        modelRef: nextRef,
+        effort: target === 'provider' ? 'max' : '',
+        reset: true,
+      });
+      const expected = speed != null && speed !== 'standard' && target !== 'compatible'
+        ? 'standard' : speed;
+
+      assert.equal(changed.speed, expected);
+      assert.equal((await history.readOne(first.id)).speed, expected);
+      assert.deepEqual(changed.modelRef, nextRef);
+    });
+  }
+}

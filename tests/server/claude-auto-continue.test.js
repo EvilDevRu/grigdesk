@@ -189,3 +189,16 @@ test('настоящий ответ после сбоя заканчивает �
   assert.notEqual(out.deliveryFailure, true, 'метка сбоя не перенесена в успех');
   assert.equal(out.turnRecovery, undefined, 'подтверждение сбоя тоже не перенесено');
 });
+
+
+test('SPEED-FALLBACK: обычная native скорость при запросе Fast видна в ленте', () => {
+  const collector = createClaudeTurnCollector({ requestedFast: true });
+
+  collector.push({
+    type: 'system',
+    subtype: 'init',
+    fast_mode_state: 'cooldown',
+  });
+  assert.equal(collector.steps.some((step) => step.k === 'note'
+    && step.text.includes('обычную скорость')), true);
+});

@@ -59,6 +59,7 @@ export class MobileChatControls {
         title: 'Новый чат',
         modelRef: selected.modelRef,
         effort: '',
+        speed: 'standard',
         taskId: null,
         workdir: { kind: 'grigdesk' },
         messages: [],
@@ -91,6 +92,8 @@ export class MobileChatControls {
       const selected = this.selection(input.modelRef, input.effort, registry);
       const previous = normalizeModelRef(current.modelRef);
       const changing = Boolean(previous && previous.provider !== selected.modelRef.provider);
+      const resetSpeed = current.speed != null && current.speed !== 'standard'
+        && (changing || !selected.model.chatSpeedModes?.includes(current.speed));
 
       if (changing && !input.reset) {
         throw new ChatHistoryError('reset_required', 'Подтвердите сброс памяти при смене исполнителя.');
@@ -116,6 +119,7 @@ export class MobileChatControls {
         modelRefState: migrated.modelRefState,
         model: migrated.model,
         effort: input.effort,
+        ...(resetSpeed ? { speed: 'standard' } : {}),
       };
     }, { durable: true, skipUnchanged: true }));
 

@@ -454,3 +454,17 @@ test('COMP-ENSURE-05: HTTP conflict возвращает 409 и оба канд�
   assert.deepEqual(new Set(response.json().chatIds), new Set(['conflict-a', 'conflict-b']));
   assert.equal(response.json().conflicts.length, 2);
 });
+
+
+test('SPEED-COMPANION-NEW: standard только при создании, повтор сохраняет выбор', async (t) => {
+  const { store } = await storeFixture(t);
+  const first = await store.ensureByPurpose({ purpose: 'companion' });
+
+  assert.equal(first.chat.speed, 'standard');
+  await store.patchExecution(first.chat.id, () => ({ speed: 'fast' }), { durable: true });
+
+  const again = await store.ensureByPurpose({ purpose: 'companion' });
+
+  assert.equal(again.chat.speed, 'fast');
+  assert.equal((await store.readOne(first.chat.id)).speed, 'fast');
+});

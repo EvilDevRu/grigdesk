@@ -308,3 +308,14 @@ test('текст и справка сохраняют общий контрак�
   assert.equal(readonly.error, 'readonly_setting');
   assert.equal(resolved.find((setting) => setting.id === 'status').value, 'Текущее состояние');
 });
+
+
+test('SPEED-CLAUDE: explicit standard перекрывает общий Fast только у одного запуска', () => {
+  const saved = { fastMode: true, blockDirectSsh: true };
+  const settings = claude.chatSpeed?.apply(saved, 'standard') || saved;
+  const payload = settingsPayload(claudeProviderSettingsArgs(settings));
+
+  assert.equal(payload.fastMode, false);
+  assert.equal(saved.fastMode, true);
+  assert.equal(JSON.stringify(payload.hooks).includes('_direct-ssh-policy-hook.js'), true);
+});

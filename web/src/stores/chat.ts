@@ -1,3 +1,4 @@
+import { isChatSpeed, chatSpeedModes } from '../../../shared/chat/chatSpeed.ts';
 import { chatReplyKey, chatSearchSnippet, projectWebChatHead }
   from '../../../shared/chat/chatListProjection.ts';
 import { parseProjectsChange } from '../../../shared/runtime/projectsContracts.ts';
@@ -865,6 +866,7 @@ function slimOf(s: ChatRecord) {
     revision: s.revision,
 
     effort: s.effort,
+    ...(s.speed !== undefined ? { speed: s.speed } : {}),
     mode: s.mode || '',
     modeSelection: s.modeSelection,
 
@@ -3055,10 +3057,11 @@ export const useChatStore = defineStore('chat', {
         let remote = this.historyStepReuseProtocol === 1
           ? decodeChatHead(isRecord(raw) ? raw.head : null) : decodeChatEnvelope(raw).chat;
 
-        // Старые серверы с protocol 1 не включали effort/mode в head.
+        // Старые серверы с protocol 1 не включали effort/mode/speed в head.
         // Их отсутствие не доказывает default: полный GET нужен только для такого контракта.
         if (remote && this.historyStepReuseProtocol === 1
-          && (!Object.hasOwn(remote, 'effort') || !Object.hasOwn(remote, 'mode'))) {
+          && (!Object.hasOwn(remote, 'effort') || !Object.hasOwn(remote, 'mode')
+            || !Object.hasOwn(remote, 'speed'))) {
           remote = decodeChatEnvelope(await api.get(`/api/chat/store/chat/${id}`)).chat;
         }
 
@@ -3365,6 +3368,7 @@ export const useChatStore = defineStore('chat', {
         model: this.defModel,
         modelRef: this.defModelRef,
         effort: this.defEffort,
+        speed: 'standard',
         mode: initialMode,
 
         schema: 2,
@@ -5171,11 +5175,13 @@ export const useChatStore = defineStore('chat', {
         return;
       }
 
+      const previousProvider = useProvidersStore().modelOf(selectedModel(s)).provider?.id;
       const resolved = useProvidersStore().modelOf(m);
       const before = {
         model: s.model,
         modelRef: s.modelRef,
         effort: s.effort,
+        speed: s.speed,
       };
 
       s.model = resolved.id || m;
@@ -5197,6 +5203,14 @@ export const useChatStore = defineStore('chat', {
       }
 
       const modelGeneration = selectionStateFor(this).change(id, 'model', before, s);
+
+      if (s.speed != null && s.speed !== 'standard' && resolved.model
+        && (previousProvider !== resolved.provider?.id
+        || !chatSpeedModes(resolved.provider?.chatSpeed, resolved.model).includes(s.speed))) {
+        selectionStateFor(this).change(id, 'speed', before,
+          { ...before, speed: 'standard' }, modelGeneration);
+        s.speed = 'standard';
+      }
 
       if (resolved.model && s.effort && !(resolved.model.efforts || []).includes(s.effort)) {
         selectionStateFor(this).change(id, 'effort', before, { ...before, effort: '' }, modelGeneration);
@@ -5265,6 +5279,34 @@ export const useChatStore = defineStore('chat', {
       }
 
       this.setDraftAttachments(id, [...(s.draftAttachments || []), attachment]);
+    },
+
+    /**
+     * Скорость принадлежит одному чату и не меняет defaults остальных разговоров.
+     * Неподтверждённое ускорение нельзя выбрать через окно, выключение доступно всегда.
+     */
+    setSpeed(id: string, value: unknown) {
+      if (!this.isChatMessagesLoaded(id) || !isChatSpeed(value)) {
+        return;
+      }
+
+      const session = this._find(id);
+
+      if (!session) {
+        return;
+      }
+
+      const resolved = useProvidersStore().modelOf(selectedModel(session));
+      const modes = chatSpeedModes(resolved.provider?.chatSpeed, resolved.model);
+
+      if (!resolved.provider?.chatSpeed
+        || (value != null && value !== 'standard' && !modes.includes(value))) {
+        return;
+      }
+
+      selectionStateFor(this).change(id, 'speed', session, { ...session, speed: value ?? null });
+      session.speed = value ?? null;
+      this._persist();
     },
 
     /**

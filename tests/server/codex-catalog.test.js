@@ -105,3 +105,62 @@ test('Codex keeps an explicit context window from an older app-server contract',
   assert.equal(model.contextUnverified, undefined);
   assert.equal(model.contextRuntimeOnly, undefined);
 });
+
+
+test('SPEED-CATALOG: скорости exact записи не берутся у rollout-алиаса', () => {
+  const rows = parseCodexModelList({ data: [
+    {
+      id: 'gpt-test',
+      model: 'gpt-test',
+      displayName: 'Test',
+      serviceTiers: [],
+    },
+    {
+      id: 'codex-test',
+      model: 'codex-test',
+      displayName: 'Test',
+      serviceTiers: [{
+        id: 'fast',
+        name: 'Fast',
+        description: 'Быстрее',
+      }],
+    },
+    {
+      id: 'gpt-fast',
+      model: 'gpt-fast',
+      displayName: 'Fast',
+      serviceTiers: [{
+        id: 'fast',
+        name: 'Fast',
+        description: 'Быстрее',
+      }],
+    },
+    {
+      id: 'gpt-unknown',
+      model: 'gpt-unknown',
+      displayName: 'Unknown',
+    },
+  ] });
+
+  assert.deepEqual(rows.map((row) => [row.id, row.chatSpeedModes]), [
+    ['gpt-test', ['standard']],
+    ['gpt-fast', ['standard', 'fast']],
+    ['gpt-unknown', ['standard']],
+  ]);
+});
+
+
+test('SPEED-ULTRA-CATALOG: каждый tier подтверждён exact metadata независимо', () => {
+  const rows = parseCodexModelList({ data: [
+    { id: 'ultra-only', serviceTiers: [{ id: 'ultrafast' }] },
+    { id: 'both', serviceTiers: [{ id: 'fast' }, { id: 'ultrafast' }] },
+    { id: 'unknown-tier', serviceTiers: [{ id: 'warp' }] },
+    { id: 'empty', serviceTiers: [] },
+    { id: 'missing' },
+  ] });
+
+  assert.deepEqual(rows.map((row) => row.chatSpeedModes), [
+    ['standard', 'ultrafast'], ['standard', 'fast', 'ultrafast'],
+    ['standard'], ['standard'], ['standard'],
+  ]);
+});

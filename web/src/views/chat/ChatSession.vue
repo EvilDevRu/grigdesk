@@ -154,6 +154,25 @@
                 </template>
               </ProviderModelSelect>
             </div>
+            <div v-if="current.provider?.chatSpeed" class="sel speed"
+                 data-role="chat-speed" :aria-description="speedHint">
+              <span class="lbl">{{ t('core.chatSpeedLabel') }}</span>
+              <UiSelect compact data-context="chat-session-toolbar"
+                        :aria-label="t('core.chatSpeedLabel')"
+                        :model-value="sess.speed || ''" :disabled="frozen"
+                        v-tooltip="speedHint" :aria-description="speedHint"
+                        @change="chat.setSpeed(sid, ($event.target as HTMLSelectElement).value || null)">
+                <option value="">{{ t('core.chatSpeedInherit') }}</option>
+                <option value="standard">{{ t('core.chatSpeedStandard') }}</option>
+                <option value="fast" :disabled="!speedModes.includes('fast')">
+                  {{ t('core.chatSpeedFast') }}
+                </option>
+                <option v-if="current.provider.chatSpeed.modes.includes('ultrafast')"
+                        value="ultrafast" :disabled="!speedModes.includes('ultrafast')">
+                  {{ t('core.chatSpeedUltrafast') }}
+                </option>
+              </UiSelect>
+            </div>
             <!-- Режим прав: как агент поступает с действиями (спрашивать / сам / только план) -->
             <div v-if="modes.length || modeUnavailable" class="sel mode">
               <span class="lbl">{{ t('core.chatOptionMode') }}</span>
@@ -786,6 +805,7 @@
 </template>
 
 <script setup lang="ts">
+import { chatSpeedModes } from '../../../../shared/chat/chatSpeed.ts';
 import {
   COMPOSER_KEY, COMPOSER_MIN, COMPOSER_KEYBOARD_MIN, COMPOSER_MAX_VH, storedComposerHeight,
 } from './chatLayout.ts';
@@ -1182,6 +1202,9 @@ const provGroups = computed(() => prov.providers
   .filter((p) => p.models.length));
 const FALLBACK_MODELS = ['opus', 'sonnet', 'haiku', 'fable']; // пока реестр не загрузился
 const effortLevels = computed(() => currentModel.value?.efforts || []);
+const speedModes = computed(() => chatSpeedModes(current.value.provider?.chatSpeed, currentModel.value));
+const speedHint = computed(() => speedModes.value.some((mode) => mode !== 'standard')
+  ? t('core.chatSpeedCostHint') : t('core.chatSpeedUnavailableHint'));
 // Режимы прав исполнителя (список даёт его CLI). Пока чат не выбрал свой — показываем
 // «вручную»: именно так работает чат по умолчанию (спрашивает разрешение на действия).
 const modes = computed(() => prov.modesOf(sess.value?.modelRef || sess.value?.model));

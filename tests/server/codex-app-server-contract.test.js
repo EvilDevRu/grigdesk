@@ -1,7 +1,7 @@
 // Проверяет совместимость адаптера Codex с протоколом app-server и нормализацию шагов.
 import assert from 'node:assert/strict';
 import {
-  chmod, copyFile, mkdir, mkdtemp, readFile, rm,
+  chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile,
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -836,4 +836,92 @@ test('Codex разовый запуск передаёт квоты в hook и �
     assert.equal(patches[0]?.bars[0].pct, 8);
     assert.equal(patches.filter((patch) => patch.bars[0].key === 'codex_reserve:primary').length, 1);
   }
+});
+
+
+test('SPEED-CODEX: явный Fast и standard идут в turn/start без смены модели', async (t) => {
+  const f = await fixture(t);
+
+  for (const mode of ['fast', 'standard', 'ultrafast']) {
+    await codex.run(runOptions(f, { providerSettings: { chatSpeedMode: mode } }));
+  }
+
+  const turns = (await readTrace(f.trace))
+    .filter((entry) => entry.direction === 'client' && entry.message?.method === 'turn/start')
+    .map((entry) => entry.message.params);
+
+  assert.deepEqual(turns.map((turn) => turn.serviceTierForTurn), ['fast', 'default', 'ultrafast']);
+  assert.equal(turns.every((turn) => turn.model === 'gpt-contract-0.149'), true);
+  assert.equal(turns.every((turn) => turn.effort === 'medium'), true);
+});
+
+test('SPEED-CODEX-LEGACY: отсутствие chatSpeedMode оставляет native inheritance', async (t) => {
+  const f = await fixture(t);
+
+  await codex.run(runOptions(f));
+
+  const turns = (await readTrace(f.trace))
+    .filter((entry) => entry.direction === 'client' && entry.message?.method === 'turn/start');
+
+  assert.equal(Object.hasOwn(turns[0].message.params, 'serviceTierForTurn'), false);
+});
+
+
+test('SPEED-CODEX-PERSISTENT: Ultrafast дважды, затем standard при resume',
+  { timeout: 10_000 }, async (t) => {
+  const f = await fixture(t);
+  // Rich-снимок завершает CLI после ответа; callback сохраняет transport и даёт
+  // несколько настоящих turn/start с разными id, не заменяя код адаптера.
+  const source = await readFile(f.bin, 'utf8');
+
+  await writeFile(f.bin, source.replace('if (isMain) runFixture();', `
+if (isMain) runFixture({
+  onTurn({ send, activeTurn, threadId }) {
+    send({ method: 'item/completed', params: {
+      threadId, turnId: activeTurn.id,
+      item: { type: 'agentMessage', id: 'answer-' + activeTurn.id,
+        phase: 'final_answer', text: 'Готово' },
+    } });
+    send({ method: 'turn/completed', params: {
+      threadId, turn: { ...activeTurn, status: 'completed', items: [], error: null },
+    } });
+  },
+});`));
+
+  const saved = { chatSpeedMode: 'ultrafast', blockDirectSsh: true };
+  const session = codex.session.open(runOptions(f, { providerSettings: saved }));
+  let sessionId;
+
+  t.after(() => session.close());
+
+  try {
+    const first = await session.send({ message: 'первый' });
+
+    sessionId = first.sessionId;
+    await session.send({ message: 'второй' });
+  } finally {
+    await session.close();
+  }
+
+  const resumed = codex.session.open(runOptions(f, {
+    sessionId,
+    providerSettings: { ...saved, chatSpeedMode: 'standard' },
+  }));
+
+  try {
+    await resumed.send({ message: 'обычный' });
+  } finally {
+    await resumed.close();
+  }
+
+  const wire = (await readTrace(f.trace)).filter((entry) => entry.direction === 'client');
+  const turns = wire.filter((entry) => entry.message?.method === 'turn/start');
+  const resume = wire.find((entry) => entry.message?.method === 'thread/resume');
+
+  assert.deepEqual(turns.map((entry) => entry.message.params.serviceTierForTurn),
+    ['ultrafast', 'ultrafast', 'default']);
+  assert.equal(resume.message.params.threadId, sessionId);
+  assert.equal(turns.every((entry) => entry.message.params.model === 'gpt-contract-0.149'), true);
+  assert.equal(turns.every((entry) => entry.message.params.effort === 'medium'), true);
+  assert.deepEqual(saved, { chatSpeedMode: 'ultrafast', blockDirectSsh: true });
 });

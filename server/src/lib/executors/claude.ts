@@ -1,4 +1,6 @@
 // Исполнитель Claude (Anthropic, Claude Code CLI).
+import { readClaudeFastModels } from './_claudeSpeed.ts';
+import type { ChatSpeed } from '../../../../shared/chat/chatSpeed.ts';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
@@ -63,6 +65,7 @@ type ClaudeConfig = {
 
 // Сохранённые ручки исполнителя из prefs: их состав объявляет он же.
 interface ClaudeSettings {
+  chatSpeedMode?: ChatSpeed;
   blockDirectSsh?: unknown;
   blockDirectDb?: unknown;
   strictUnknownDbClient?: unknown;
@@ -1647,6 +1650,20 @@ function claudeConfigDir() {
 
 export default {
   id: 'claude',
+  chatSpeed: {
+    modes: ['standard', 'fast'] as const,
+    /**
+     * Явный выбор чата перекрывает общий default только в снимке данного запуска.
+     * Prefs и нативные файлы пользователя эта функция не меняет.
+     */
+    apply(settings: Record<string, unknown>, speed: ChatSpeed) {
+      return {
+        ...settings,
+        fastMode: speed === 'fast',
+        chatSpeedMode: speed,
+      };
+    },
+  },
   effortHints: {
     low: 'Экономное усилие для простых задач; быстрее и дешевле.',
     medium: 'Баланс тщательности, скорости и расхода для повседневной работы.',
@@ -1976,9 +1993,18 @@ export default {
    * возможности читаются из встроенного registry (с явным fallback при деградации).
    * Пересобирается при смене версии CLI или catalogCacheKey.
    */
-  catalog(config: ClaudeConfig) {
-    return claudeCatalog(config);
+  async catalog(config: ClaudeConfig) {
+    const [models, fast] = await Promise.all([
+      claudeCatalog(config),
+      readClaudeFastModels(config),
+    ]);
+
+    return (models || []).map((model) => ({
+      ...model,
+      chatSpeedModes: fast.has(String(model.id)) ? ['standard', 'fast'] : ['standard'],
+    }));
   },
+  catalogLive: true,
 
   catalogCacheKey() {
     return claudeCatalogCacheKey();
@@ -2180,6 +2206,7 @@ export default {
           nativeSettings,
           log,
           hooks: { onProviderUsage },
+          requestedFast: providerSettings?.chatSpeedMode === 'fast',
         });
         const onAbort = () => {
           void session.interrupt();
@@ -2210,6 +2237,7 @@ export default {
       // Разбор потока общий с живой сессией (_claude-stream.js): событие CLI одно и то
       // же, и вторая копия правил про usage, компакт и пустой ответ разошлась бы с первой.
       const collector = createClaudeTurnCollector({
+        requestedFast: providerSettings?.chatSpeedMode === 'fast',
         onStep,
         onProgress,
         onRunMetadata,
@@ -2369,6 +2397,7 @@ export default {
         nativeSettings,
         log,
         hooks,
+        requestedFast: providerSettings?.chatSpeedMode === 'fast',
       });
     },
   },

@@ -318,6 +318,7 @@ async function providersModule(
         available: ok && auth.available,
         // Setup-only карточка видна здесь, но отсутствует в runtime-реестре чатов.
         chatEnabled,
+        ...(chatEnabled && ex.chatSpeed ? { chatSpeed: { modes: [...ex.chatSpeed.modes] } } : {}),
         capabilities: {
           chatAutoCompact: universal && (ex.chatAutoCompact === true || !!ex.autoCompactEnv),
           scopedWorkspace: chatEnabled && await supportsScopedWorkspace(ex, config),

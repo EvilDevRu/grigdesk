@@ -1,6 +1,7 @@
 // Versioned-ссылка на модель чата. Пара provider/model устраняет коллизии одинаковых
 // model id у разных исполнителей и запрещает исторический fallback «не нашли → Claude».
 
+import type { ChatSpeed } from '../../../../shared/chat/chatSpeed.ts';
 import { trimmedText } from '../../../../shared/lib/text.ts';
 
 export const CHAT_SCHEMA = 2;
@@ -15,6 +16,7 @@ export interface ModelRef {
 
 // Модель в реестре исполнителя. Alias-поля читаются только совместимостью.
 export interface RegistryModel {
+  chatSpeedModes?: ChatSpeed[];
   id?: string;
   family?: string;
   tier?: number;

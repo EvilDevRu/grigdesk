@@ -1,3 +1,4 @@
+import { applyChatSpeed } from '../../lib/chat/speed.ts';
 import { projectWebChatHead } from '../../../../shared/chat/chatListProjection.ts';
 import { applyWebPending } from '../../lib/chat/webPendingHistory.ts';
 import { ChatProjectWorkspaces } from '../../lib/chat/projectWorkspaces.ts';
@@ -302,6 +303,7 @@ type InteractionQueue = Omit<PermissionQueue, 'entries'> & {
 // Порт исполнителя в объёме одного интерактивного хода. Каталоги остаются unknown
 // до проверки массива, а модели и ответы несут только поля, которые читает модуль.
 interface ChatExecutor {
+  chatSpeed?: ExecutorAdapter['chatSpeed'];
   id: string;
   bin?: ExecutorAdapter['bin'];
   nativeSettings?: ExecutorAdapter['nativeSettings'];
@@ -3379,12 +3381,23 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const currentPrefs = prefs?.read?.() || {};
     const savedSettings = currentPrefs.providerSettings?.[executor.id] || {};
     const { nativeSettings: _container, ...localSettings } = savedSettings;
-    const providerSettings = {
+    const localRunSettings = {
       ...localSettings,
       blockDirectDb: fastify.pluginEnabled?.('db') === true,
       strictUnknownDbClient: (fastify.pluginSettings?.('db') as { strictClientPolicy?: unknown } | null)
         ?.strictClientPolicy === true,
     };
+    let providerSettings: Record<string, unknown>;
+
+    try {
+      providerSettings = applyChatSpeed(executor, info?.model, target.record?.speed, localRunSettings);
+    } catch (error) {
+      return channel.refuse(409, {
+        error: 'unsupported_speed',
+        message: error instanceof Error ? error.message : 'Не удалось выбрать скорость чата.',
+      });
+    }
+
     let nativeSettings: ExecutorRunInput['nativeSettings'];
     let preparedRuntime: ExecutorRunInput['preparedRuntime'];
     let runtimeProfileFingerprint: string | undefined;

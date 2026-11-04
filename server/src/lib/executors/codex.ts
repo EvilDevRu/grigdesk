@@ -4,6 +4,7 @@
 // `thread/resume`, затем `turn/start`. Песочница workspace-write: текущий cwd и явно
 // дополнительные рабочие корни доступны для правок, сеть включена для gh/git/package CLI,
 // остальная файловая система закрыта.
+import type { ChatSpeed } from '../../../../shared/chat/chatSpeed.ts';
 import { execFile, spawn } from '../providerInstall/externalCliProcess.ts';
 import type { ChatRunMetadata } from '../../../../shared/chat/chatRun.ts';
 import { randomUUID } from 'node:crypto';
@@ -75,6 +76,7 @@ type CodexConfig = {
 
 // Сохранённые ручки исполнителя из prefs: их состав объявляет он же.
 interface CodexSettings {
+  chatSpeedMode?: ChatSpeed;
   blockDirectSsh?: unknown;
   blockDirectDb?: unknown;
   strictUnknownDbClient?: unknown;
@@ -167,6 +169,7 @@ interface CodexLegacyEvent {
 
 // Запись `model/list`. Значения приходят от app-server и приводятся на месте.
 interface CodexModelEntry {
+  serviceTiers?: Array<{ id?: unknown }>;
   id?: string;
   model?: string;
   displayName?: string;
@@ -742,6 +745,8 @@ export function parseCodexModelList(value: unknown) {
 
     models.push({
       id,
+      chatSpeedModes: ['standard', ...(['fast', 'ultrafast'] as const)
+        .filter((mode) => exact.serviceTiers?.some((tier) => tier.id === mode))],
       ...(family && { family }),
       name: exact.displayName || id,
       ...codexCatalogContext(exact),
@@ -2759,6 +2764,10 @@ export function openCodexSession({
           ...(namedWorkspaceProfile ? { permissions: workspaceProfileId } : { sandboxPolicy }),
           ...(model && { model }),
           ...(effort && { effort }),
+          ...(providerSettings?.chatSpeedMode ? {
+            serviceTierForTurn: providerSettings.chatSpeedMode === 'standard'
+              ? 'default' : providerSettings.chatSpeedMode,
+          } : {}),
           summary: 'detailed',
         }, current) as { turn?: { id?: string } } | null;
         current.turnId = started?.turn?.id || current.turnId;
@@ -3240,6 +3249,16 @@ export default {
         supervised_db: Object.freeze(['list', 'schema']) }) }) : undefined;
   },
   id: 'codex',
+  chatSpeed: {
+    modes: ['standard', 'fast', 'ultrafast'] as const,
+    /**
+     * Явный выбор чата перекрывает общий default только в снимке данного запуска.
+     * Prefs и нативные файлы пользователя эта функция не меняет.
+     */
+    apply(settings: Record<string, unknown>, speed: ChatSpeed) {
+      return { ...settings, chatSpeedMode: speed };
+    },
+  },
   // Виды сбоя хода объявляет сам адаптер: ядро не знает имён вендора. Общие признаки
   // (статусы, слова) добавляет реестр — здесь только коды CodexErrorInfo.
   turnFailureRules: CODEX_TURN_FAILURE_RULES,

@@ -12,20 +12,32 @@ process.env.NODE_ENV = 'test';
 
 const compileChatSession = () => compileChatSessionHarness('__modelAvail');
 
-const PROVIDERS = [
+let PROVIDERS = [
   {
     id: 'claude',
+    chatSpeed: { modes: ['standard', 'fast'] },
     name: 'Claude',
     color: '#d97757',
     available: true,
-    models: [{ id: 'claude-opus-5', name: 'Opus 5', efforts: [] }],
+    models: [{
+      id: 'claude-opus-5',
+      name: 'Opus 5',
+      chatSpeedModes: ['standard', 'fast'],
+      efforts: [],
+    }],
   },
   {
     id: 'codex',
+    chatSpeed: { modes: ['standard', 'fast', 'ultrafast'] },
     name: 'Codex',
     color: '#10a37f',
     available: true,
-    models: [{ id: 'gpt-5.6-sol', name: 'GPT 5.6 Sol', efforts: [] }],
+    models: [{
+      id: 'gpt-5.6-sol',
+      name: 'GPT 5.6 Sol',
+      chatSpeedModes: ['standard', 'fast'],
+      efforts: [],
+    }],
   },
 ];
 
@@ -33,6 +45,10 @@ let sharedBrowser;
 
 before(async () => {
   sharedBrowser = await createUiBrowser('https://grigdesk.test/#/chats');
+
+  const { reactive } = await import('../../web/node_modules/vue/index.mjs');
+
+  PROVIDERS = reactive(PROVIDERS);
 });
 
 after(async () => {
@@ -84,6 +100,7 @@ async function mountChat(t, { initial = {}, reset = async () => true, binding = 
     ...initial,
   });
   const setModelCalls = [];
+  const speedCalls = [];
   const resetCalls = [];
   const resetOptions = [];
 
@@ -99,6 +116,10 @@ async function mountChat(t, { initial = {}, reset = async () => true, binding = 
     markRead() {},
     setDraft() {},
     setEffort() {},
+    setSpeed(sid, speed) {
+      speedCalls.push({ sid, speed });
+      session.speed = speed;
+    },
     setMode() {},
     setTask() {},
     setTitle() {},
@@ -169,6 +190,7 @@ async function mountChat(t, { initial = {}, reset = async () => true, binding = 
     wrapper,
     session,
     setModelCalls,
+    speedCalls,
     resetCalls,
     resetOptions,
     flushPromises,
@@ -535,3 +557,119 @@ for (const disabled of [[1], [0], [0, 1]]) {
     assert.deepEqual(setModelCalls, []);
   });
 }
+
+
+test('SPEED-UI: скорость выбирается рядом с моделью, effort не меняется', async (t) => {
+  const { wrapper, session, speedCalls } = await mountChat(t,
+    { initial: { speed: 'standard', effort: 'high' } });
+  const control = wrapper.find('[data-role="chat-speed"] select');
+
+  assert.equal(control.exists(), true);
+  await control.setValue('fast');
+  assert.deepEqual(speedCalls, [{ sid: session.id, speed: 'fast' }]);
+  assert.equal(session.effort, 'high');
+  assert.match(wrapper.find('[data-role="chat-speed"]').attributes('aria-description'),
+    /расход|лимит|кредит/iu);
+});
+
+test('SPEED-UI-INHERIT: отсутствие старого поля не выдаётся за выключенный Fast', async (t) => {
+  const { wrapper } = await mountChat(t);
+
+  const control = wrapper.find('[data-role="chat-speed"] select');
+
+  assert.equal(control.exists(), true);
+  assert.equal(control.element.value, '');
+});
+
+test('SPEED-UI-UNKNOWN: исчезнувшая поддержка закрывает Fast и сохраняет выбор', async (t) => {
+  const { wrapper, session, flushPromises } = await mountChat(t, { initial: { speed: 'fast' } });
+  const model = PROVIDERS[0].models[0];
+  const previous = model.chatSpeedModes;
+
+  t.after(() => {
+    model.chatSpeedModes = previous;
+  });
+  model.chatSpeedModes = ['standard'];
+  await flushPromises();
+
+  const fast = wrapper.find('[data-role="chat-speed"] option[value="fast"]');
+  const standard = wrapper.find('[data-role="chat-speed"] option[value="standard"]');
+
+  assert.equal(fast.exists(), true);
+  assert.equal(standard.exists(), true);
+  assert.equal(fast.element.disabled, true);
+  assert.equal(standard.element.disabled, false);
+  assert.equal(session.speed, 'fast');
+  model.chatSpeedModes = ['standard', 'fast'];
+  await flushPromises();
+  assert.equal(wrapper.find('[data-role="chat-speed"] option[value="fast"]').element.disabled, false);
+});
+
+test('SPEED-UI-OTHER: без capability управление не появляется', async (t) => {
+  const previous = PROVIDERS[0].chatSpeed;
+
+  t.after(() => {
+    PROVIDERS[0].chatSpeed = previous;
+  });
+  delete PROVIDERS[0].chatSpeed;
+
+  const { wrapper } = await mountChat(t);
+
+  assert.equal(wrapper.find('[data-role="chat-speed"]').exists(), false);
+});
+
+test('SPEED-UI-FROZEN: перенос или сброс памяти блокирует изменение', async (t) => {
+  const { wrapper } = await mountChat(t, { initial: { sessionResetting: true } });
+
+  const control = wrapper.find('[data-role="chat-speed"] select');
+
+  assert.equal(control.exists(), true);
+  assert.equal(control.element.disabled, true);
+});
+
+test('SPEED-ULTRA-UI: synthetic metadata разрешает только Ultrafast без смены effort', async (t) => {
+  const provider = {
+    id: 'synthetic-speed',
+    name: 'Synthetic',
+    available: true,
+    chatSpeed: { modes: ['standard', 'fast', 'ultrafast'] },
+    models: [{
+      id: 'speed-ui',
+      name: 'Speed UI',
+      efforts: ['high'],
+      chatSpeedModes: ['standard', 'ultrafast'],
+    }],
+  };
+
+  PROVIDERS.push(provider);
+  t.after(() => {
+    PROVIDERS.pop();
+  });
+
+  const { wrapper, session, speedCalls, flushPromises } = await mountChat(t, {
+    initial: {
+    model: 'speed-ui',
+    modelRef: { provider: provider.id, model: 'speed-ui' },
+    speed: 'standard',
+    effort: 'high',
+  },
+  });
+  const control = wrapper.find('[data-role="chat-speed"] select');
+
+  assert.equal(control.exists(), true);
+  assert.equal(wrapper.find('[data-role="chat-speed"] option[value="fast"]').element.disabled, true);
+  assert.equal(wrapper.find('[data-role="chat-speed"] option[value="ultrafast"]').element.disabled, false);
+  await control.setValue('ultrafast');
+  assert.deepEqual(speedCalls, [{ sid: session.id, speed: 'ultrafast' }]);
+  assert.equal(session.effort, 'high');
+  PROVIDERS.at(-1).models[0].chatSpeedModes = ['standard'];
+  await flushPromises();
+  assert.equal(wrapper.find('[data-role="chat-speed"] option[value="ultrafast"]').element.disabled, true);
+  assert.equal(session.speed, 'ultrafast');
+});
+
+test('SPEED-UI-CLAUDE: capability не объявляет лишнюю платную скорость', async (t) => {
+  const { wrapper } = await mountChat(t);
+
+  assert.equal(wrapper.find('[data-role="chat-speed"] option[value="ultrafast"]').exists(), false);
+});

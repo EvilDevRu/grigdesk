@@ -196,6 +196,8 @@ function claudeEventIsRealWork(ev: ClaudeEvent): boolean {
 
 // Событие stream-json CLI. Форма зависит от типа, поэтому объявлено ровно читаемое.
 interface ClaudeEvent {
+  fast_mode_state?: unknown;
+  fast_mode_disabled_reason?: unknown;
   type?: string;
   subtype?: string;
   session_id?: string;
@@ -274,11 +276,35 @@ interface StreamLog {
 }
 
 /**
+ * Native состояние отделяет выбранный Fast от временного отката скорости у вендора.
+ * Сырые причины CLI и account payload не публикуются в пользовательской ленте.
+ */
+export function claudeSpeedNotice(event: {
+  type?: string;
+  subtype?: string;
+  fast_mode_state?: unknown;
+}, requestedFast: boolean): string {
+  if (!requestedFast || (event.type !== 'result'
+    && !(event.type === 'system' && event.subtype === 'init'))) {
+    return '';
+  }
+  if (event.fast_mode_state === 'off' || event.fast_mode_state === 'cooldown') {
+    return 'Запрошен Fast, но Claude сейчас использует обычную скорость. '
+      + 'Проверьте доступность Fast и usage credits в настройках исполнителя.';
+  }
+
+  return '';
+}
+
+/**
  * Сборщик одного хода: копит шаги, токены и телеметрию контекста из потока событий.
  * Живёт ровно один ход, потому что лента шагов и счётчик токенов — свойства хода,
  * а не сессии: в долгоживущем процессе их иначе пришлось бы обнулять руками.
  */
-export function createClaudeTurnCollector({ onStep, onProgress, onRunMetadata, log }: {
+export function createClaudeTurnCollector({
+  onStep, onProgress, onRunMetadata, log, requestedFast = false,
+}: {
+  requestedFast?: boolean;
   onStep?: (step: ChatStep) => void;
   onProgress?: (tokens: number, extra: Record<string, unknown>) => void;
   onRunMetadata?: (metadata: ChatRunMetadata) => void;
@@ -348,6 +374,16 @@ export function createClaudeTurnCollector({ onStep, onProgress, onRunMetadata, l
     // session_id CLI проставляет во всех событиях, начиная с init. Забираем сразу:
     // у оборванного хода финального result нет, а продолжать разговор всё равно нужно.
     if (ev.session_id) state.streamSessionId = ev.session_id;
+
+    const speedNotice = claudeSpeedNotice(ev, requestedFast);
+
+    if (speedNotice) {
+      stepSink.emitAll([{
+        k: 'note',
+        text: speedNotice,
+        at: Date.now(),
+      }]);
+    }
 
     if (ev.type === 'system' && ev.subtype === 'init' && ev.model) {
       state.actualModel = ev.model;
@@ -650,10 +686,11 @@ interface ClaudeInputCommand {
  * чата и SSE — тем же путём, которым доезжают ответы после закрытого окна.
  */
 export function openClaudeStreamSession({
-  bin, args, cwd, env, sessionId = null, nativeSettings, log, hooks = {},
+  bin, args, cwd, env, sessionId = null, nativeSettings, log, hooks = {}, requestedFast = false,
 }: {
   bin: string;
   args: string[];
+  requestedFast?: boolean;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   sessionId?: string | null;
@@ -813,6 +850,7 @@ export function openClaudeStreamSession({
   function backgroundCollector() {
     if (!state.background) {
       state.background = createClaudeTurnCollector({
+        requestedFast,
         onStep: (step) => hooks.onBackgroundStep?.(step as never),
         onProgress: (tokens, extra) => (
           hooks.onBackgroundProgress?.(tokens as never, extra as never)
@@ -1429,6 +1467,7 @@ export function openClaudeStreamSession({
       }
 
       const collector = createClaudeTurnCollector({
+        requestedFast,
         onStep,
         onProgress,
         onRunMetadata,

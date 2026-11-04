@@ -1,3 +1,5 @@
+import { isChatSpeed } from '../../../shared/chat/chatSpeed.ts';
+import type { ChatSpeed } from '../../../shared/chat/chatSpeed.ts';
 import type { ChatModeSelection } from '../../../shared/chat/chatPermissionModes.ts';
 // Клиентские формы подтверждений и вопросов: расширения исполнителя остаются данными.
 // Сетевой envelope проверяется владельцем состояния перед публикацией этих форм.
@@ -247,6 +249,7 @@ export interface ChatRecord extends Record<string, unknown>, ChatContextUsage {
   surface?: string;
   revision?: number;
   effort?: string;
+  speed?: ChatSpeed | null;
   mode?: string;
   modeSelection?: ChatModeSelection;
   sessionId?: string | null;
@@ -563,6 +566,7 @@ export function isChatSession(value: unknown): value is ChatSession {
       'contextWindow', 'totalInputTokens', 'cachedInputTokens', 'compactedAt'], 'number')
     || (value.messages != null && (!Array.isArray(value.messages)
       || !value.messages.every(isHistoryMessage)))
+    || !isChatSpeed(value.speed)
     || (value.modelRef != null && !isModelRef(value.modelRef))
     || (value.taskId != null && typeof value.taskId !== 'string' && typeof value.taskId !== 'number')
     || (value.workdir != null && !normalizeChatWorkdir(value.workdir))

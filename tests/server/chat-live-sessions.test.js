@@ -2135,3 +2135,28 @@ test('SLEEP-API-03: одинаковый нейтральный снимок н�
   reportTasks(f.opened[0], [{ ...sleepingTasks[0], description: 'Проверяет другой документ' }]);
   assert.equal(f.changes.filter((event) => event.event === 'tasks').length, 2);
 });
+
+
+test('SPEED-LIVE: смена снимка переоткрывает агент с сохранённой памятью', async () => {
+  const opened = [];
+  const executor = fakeExecutor({ opened, restartOn: ['providerSettings'] });
+  const pool = new ChatLiveSessions();
+
+  try {
+    const first = {
+      chatKey: 'speed-live',
+      executor,
+      providerSettings: {
+      fastMode: true,
+    },
+    };
+
+    await pool.run(first, { message: 'первый' });
+    await pool.run({ ...first, providerSettings: { fastMode: false } }, { message: 'второй' });
+    assert.equal(opened.length, 2);
+    assert.equal(opened[0].closed, true);
+    assert.equal(opened[1].spec.sessionId, 'sid-1');
+  } finally {
+    await pool.closeAll();
+  }
+});

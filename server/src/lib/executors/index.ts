@@ -169,6 +169,7 @@
 // для поэтапного подключения нового CLI: сначала обычная установка/авторизация, затем
 // отдельным изменением transport и модели.
 // Папка сканируется при старте: новый исполнитель = новый файл, код ядра не трогаем.
+import type { ChatSpeed, ChatSpeedCapability } from '../../../../shared/chat/chatSpeed.ts';
 import path from 'node:path';
 
 import type { WorkdirCapability } from '../../../../shared/chat/chatWorkdir.ts';
@@ -344,6 +345,9 @@ export interface PermissionModeContext {
 }
 
 export interface ExecutorAdapter {
+  chatSpeed?: ChatSpeedCapability & {
+    apply(settings: Record<string, unknown>, speed: ChatSpeed): Record<string, unknown>;
+  };
   defaultPermissionMode?: string;
   permissionModeSelectionPolicy?: 'preserve-explicit';
   permissionModesRequiringExplicitSelection?: readonly string[];

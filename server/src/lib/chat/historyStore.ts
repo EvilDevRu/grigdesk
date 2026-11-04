@@ -2,6 +2,8 @@
 // Каждый чат — свой файл chats/YYYY-MM/<id>.json (месяц СОЗДАНИЯ чата, файл не переезжает),
 // мета (активный чат, дефолты модели/усилия) — chats/meta.json. Битый файл одного чата
 // не валит остальную историю: он пропускается с предупреждением.
+import { isChatSpeed } from '../../../../shared/chat/chatSpeed.ts';
+import type { ChatSpeed } from '../../../../shared/chat/chatSpeed.ts';
 import { randomUUID } from 'node:crypto';
 import { setImmediate as yieldToLoop } from 'node:timers/promises';
 import { performance } from 'node:perf_hooks';
@@ -53,6 +55,7 @@ const COMPANION_TASK_RE = /^[1-9][0-9]{0,18}$/;
 // Запись чата на диске. Форма открытая: клиент владеет своими полями, сервер —
 // перечисленными в SERVER_CHAT_KEYS.
 export interface StoredChat extends ChatRecord {
+  speed?: ChatSpeed | null;
   id?: string;
   purpose?: string;
   taskId?: string | null;
@@ -1109,6 +1112,11 @@ export class ChatHistoryStore {
         const chat = reuseSteps === undefined
           ? incoming
           : restoreHistorySteps(incoming, prev?.chat || null, reuseSteps);
+
+        if (Object.hasOwn(chat, 'speed') && !isChatSpeed(chat.speed)) {
+          throw new ChatHistoryError('bad_chat_speed', 'Некорректная скорость чата.', { statusCode: 400 });
+        }
+
         const registry = await this.registry();
         const incomingRevision = Number.isSafeInteger(chat.revision) ? chat.revision : null;
         const currentRevision = Number.isSafeInteger(prev?.chat?.revision)
@@ -1141,10 +1149,14 @@ export class ChatHistoryStore {
           clean.taskId = prev.chat.taskId ?? null;
         }
 
+        if (prev && !Object.hasOwn(chat, 'speed') && Object.hasOwn(prev.chat, 'speed')) {
+          clean.speed = prev.chat.speed;
+        }
+
         const phase = prev?.chat.workdirState?.transition?.phase;
 
         if (phase && !['done', 'failed'].includes(phase)
-          && ['modelRef', 'mode', 'modeSelection', 'effort'].some((key) => (
+          && ['modelRef', 'mode', 'modeSelection', 'effort', 'speed'].some((key) => (
             Object.hasOwn(chat, key) && JSON.stringify(chat[key]) !== JSON.stringify(prev?.chat[key])
           ))) {
           throw new ChatHistoryError('chat_busy', 'Сначала дождитесь переноса разговора.');
@@ -1262,6 +1274,13 @@ export class ChatHistoryStore {
         c.modelRef = prev.chat.modelRef;
         c.modelRefState = prev.chat.modelRefState;
         c.effort = prev.chat.effort;
+
+        if (Object.hasOwn(prev.chat, 'speed')) {
+          c.speed = prev.chat.speed;
+        } else {
+          delete c.speed;
+        }
+
         c.mode = prev.chat.mode;
         c.modeSelection = prev.chat.modeSelection;
         c.unread = prev.chat.unread;
@@ -1481,6 +1500,7 @@ export class ChatHistoryStore {
         id: randomUUID(),
         title: canonicalTaskId ? `Компаньон · задача #${canonicalTaskId}` : 'Компаньон',
         purpose: COMPANION_PURPOSE,
+        speed: 'standard',
         taskId: canonicalTaskId,
         logicalIdentity: key,
         messages: [],

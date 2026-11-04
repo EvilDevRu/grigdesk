@@ -9,6 +9,7 @@
 // У каждой модели: id (что передаём CLI), family (долгоживущая policy), name
 // (с версией — для UI), context (окно), efforts (уровни; null = взять обнаруженные
 // у исполнителя), tier (ранг силы).
+import type { ChatSpeed } from '../../../shared/chat/chatSpeed.ts';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { markSupersededModels } from '../../../shared/chat/modelFamily.ts';
@@ -26,11 +27,13 @@ import type { ExecutorAdapter } from './executors/index.ts';
 //     прежней безусловной заглушки 400k, которую UI выдавал за свойство модели.
 // 11: краткий список считает реестр по семействам любого исполнителя, поэтому DeepSeek
 //     и GLM больше не пишут всем моделям общее `family: 'default'`.
-const CATALOG_SCHEMA = 11;
+// 12: скорости модели приходят из native metadata, старый допуск не переносится.
+const CATALOG_SCHEMA = 12;
 
 // Запись каталога моделей. Форма открытая: файл редактируется руками, и поля,
 // которых ядро не знает, обязаны переживать мёрж.
 export interface CatalogModel {
+  chatSpeedModes?: ChatSpeed[];
   id: string;
   name?: string;
   family?: string;
@@ -188,9 +191,20 @@ export async function mergeCatalog(
 
   let catalog: CatalogModel[] | null = null;
   try { catalog = await ex.catalog(config) as CatalogModel[]; } catch { catalog = null; }
+
   if (!catalog?.length) {
-    // Каталог не прочитался (нет бинаря) — оставляем что есть, версию не фиксируем.
-    return false;
+    let changed = false;
+
+    if (ex.chatSpeed) {
+      for (const model of list) {
+        if (JSON.stringify(model.chatSpeedModes) !== JSON.stringify(['standard'])) {
+          model.chatSpeedModes = ['standard'];
+          changed = true;
+        }
+      }
+    }
+
+    return changed;
   }
   // `modelRefAliases` — миграционная память exact id. Если новый CLI перестал хранить
   // retired id строкой, алиас всё равно нужен старому schema-2 чату. Но если такой id
@@ -216,8 +230,15 @@ export async function mergeCatalog(
   const prevById = new Map(list.map((m) => [m.id, m]));
   const next = catalog.map((m) => mergeCatalogModel(m, prevById.get(m.id)));
   const inCatalog = new Set(catalog.map((m) => m.id));
+
   for (const m of list) {
-    if (!inCatalog.has(m.id) && m.custom) next.push({ ...m, unknown: true });
+    if (!inCatalog.has(m.id) && m.custom) {
+      next.push({
+        ...m,
+        unknown: true,
+        ...(ex.chatSpeed ? { chatSpeedModes: ['standard'] } : {}),
+      });
+    }
   }
   const listChanged = JSON.stringify(list) !== JSON.stringify(next);
   file[prov] = next;
@@ -233,7 +254,14 @@ export function mergeCatalogModel(
 ): CatalogModel {
   // Только явно custom-запись перекрывает живой каталог. Обычная сохранённая копия
   // не должна удерживать старый список efforts после обновления CLI.
-  if (current?.custom) return { ...model, ...current, unknown: false };
+  if (current?.custom) {
+    return {
+      ...model,
+      ...current,
+      chatSpeedModes: model.chatSpeedModes,
+      unknown: false,
+    };
+  }
   const merged = { ...model };
   // Непроверенные поля не затирают последнюю проверенную metadata. Признаки деградации
   // при этом ОСТАЮТСЯ: старое окно — полезный ориентир, но выдавать его за свежий факт

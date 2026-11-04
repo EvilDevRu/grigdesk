@@ -1,3 +1,4 @@
+import type { ChatSpeed, ChatSpeedCapability } from './chatSpeed.ts';
 import type { ProviderInstallationMetadata } from './providerInstallContracts.ts';
 // Контракт раздела «Исполнители» в том объёме, который уже кому-то нужен.
 //
@@ -47,6 +48,7 @@ export interface ProviderCredentialEntry {
 // Модель реестра в том объёме, в каком её читают соседние разделы при выборе.
 // `extra` — старая версия семейства: в кратком списке её не показывают.
 export interface ProviderModelEntry {
+  chatSpeedModes?: ChatSpeed[];
   id: string;
   name: string;
   extra?: boolean;
@@ -65,6 +67,7 @@ export interface ProviderModelEntry {
 // Исполнитель реестра: доступность решает, можно ли его выбрать, а возможности —
 // подходит ли он настройке, которая требует, например, безопасного разбора текста.
 export interface ProviderEntry {
+  chatSpeed?: ChatSpeedCapability;
   defaultPermissionMode?: string;
   permissionModeSelectionPolicy?: 'preserve-explicit';
   permissionModesRequiringExplicitSelection?: readonly string[];

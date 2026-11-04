@@ -1,4 +1,11 @@
 {
+  "chatSpeedLabel": "Speed",
+  "chatSpeedInherit": "Executor default",
+  "chatSpeedStandard": "Standard",
+  "chatSpeedFast": "Fast",
+  "chatSpeedUltrafast": "Ultrafast",
+  "chatSpeedCostHint": "Fast and Ultrafast use more quota or credits. The choice applies to the next turn; availability is determined by the executor.",
+  "chatSpeedUnavailableHint": "The model has not confirmed accelerated modes. Choose standard speed or refresh executor information. Fast and Ultrafast use more quota or credits.",
   "codeDiffSideBySide": "Side by side",
   "codeDiffUnified": "Unified",
   "codeDiffComputeFailed": "Could not compute the comparison. Try again.",

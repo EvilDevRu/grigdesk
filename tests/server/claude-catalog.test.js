@@ -419,3 +419,102 @@ test('binary cache инвалидируется при замене файла �
   assert.equal(second.some((m) => m.id === 'claude-haiku-4-5'), false);
   assert.equal(second.find((m) => m.id === 'claude-fable-5')?.name, 'Fable 5 changed');
 });
+
+
+test('SPEED-DISCOVERY: отказ снимает допуск Fast и сохраняет модель до восстановления', async () => {
+  const fast = [{
+    id: 'native-fast',
+    name: 'Native Fast',
+    chatSpeedModes: ['standard', 'fast'],
+  }];
+  let answer = fast;
+  const file = {};
+  const executor = {
+    id: 'synthetic-speed',
+    catalogLive: true,
+    chatSpeed: { modes: ['standard', 'fast'] },
+    probe: async () => ({ version: 'same' }),
+    catalog: async () => answer,
+  };
+
+  await mergeCatalog(file, 'synthetic-speed', executor, {});
+  assert.deepEqual(file['synthetic-speed'][0].chatSpeedModes, ['standard', 'fast']);
+  answer = null;
+  await mergeCatalog(file, 'synthetic-speed', executor, {});
+  assert.deepEqual(file['synthetic-speed'][0].chatSpeedModes, ['standard']);
+  assert.equal(file['synthetic-speed'][0].id, 'native-fast');
+  answer = fast;
+  await mergeCatalog(file, 'synthetic-speed', executor, {});
+  assert.deepEqual(file['synthetic-speed'][0].chatSpeedModes, ['standard', 'fast']);
+});
+
+test('SPEED-CLAUDE-CATALOG: поддержка Fast приходит из initialize, без user prompt', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-speed-catalog-'));
+  const bin = path.join(dir, 'claude');
+  const trace = path.join(dir, 'trace');
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await fs.writeFile(bin, '#!/usr/bin/env node\n'
+    + `// ${entry('claude-opus-5', 'opus', 'Opus 5', 'window:1e6', ['effort'])}\n`
+    + `import fs from 'node:fs';\nimport readline from 'node:readline';\n`
+    + `readline.createInterface({input:process.stdin}).on('line', line => {\n`
+    + `const q = JSON.parse(line);fs.appendFileSync(${JSON.stringify(trace)},line+'\\n');\n`
+    + `process.stdout.write(JSON.stringify({type:'control_response',response:{\n`
+    + `subtype:'success',request_id:q.request_id,response:{models:[{value:'opus',\n`
+    + `resolvedModel:'claude-opus-5',supportsFastMode:true}]}}})+'\\n');});\n`);
+  await fs.chmod(bin, 0o755);
+
+  const rows = await claude.catalog({ claudeBin: bin });
+
+  assert.deepEqual(rows.find((row) => row.id === 'claude-opus-5').chatSpeedModes,
+    ['standard', 'fast']);
+
+  const calls = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse);
+
+  assert.equal(calls.some((call) => call.type === 'user'), false);
+});
+
+test('SPEED-CUSTOM: сохранённая custom-модель не удерживает старый допуск скорости', () => {
+  const previous = {
+    id: 'custom',
+    custom: true,
+    name: 'Своя модель',
+    chatSpeedModes: ['standard', 'fast', 'ultrafast'],
+  };
+  const actual = mergeCatalogModel({ id: 'custom', chatSpeedModes: ['standard'] }, previous);
+
+  assert.deepEqual(actual.chatSpeedModes, ['standard']);
+  assert.equal(actual.name, 'Своя модель');
+});
+
+test('SPEED-CUSTOM-RETIRED: исчезнувшая custom теряет ускорение до свежей metadata', async () => {
+  const file = {
+    synthetic: [{
+    id: 'custom',
+    custom: true,
+    name: 'Сохранённая',
+  }],
+  };
+  let answer = [{ id: 'custom', chatSpeedModes: ['standard', 'fast'] }];
+  const executor = {
+    id: 'synthetic',
+    catalogLive: true,
+    chatSpeed: { modes: ['standard', 'fast', 'ultrafast'] },
+    probe: async () => ({ version: 'same' }),
+    catalog: async () => answer,
+  };
+
+  await mergeCatalog(file, 'synthetic', executor, {});
+  assert.deepEqual(file.synthetic[0].chatSpeedModes, ['standard', 'fast']);
+  answer = [{ id: 'other', chatSpeedModes: ['standard'] }];
+  await mergeCatalog(file, 'synthetic', executor, {});
+
+  const retained = file.synthetic.find((model) => model.id === 'custom');
+
+  assert.equal(retained.unknown, true);
+  assert.equal(retained.name, 'Сохранённая');
+  assert.deepEqual(retained.chatSpeedModes, ['standard']);
+  answer = [{ id: 'custom', chatSpeedModes: ['standard', 'ultrafast'] }];
+  await mergeCatalog(file, 'synthetic', executor, {});
+  assert.deepEqual(file.synthetic[0].chatSpeedModes, ['standard', 'ultrafast']);
+});
