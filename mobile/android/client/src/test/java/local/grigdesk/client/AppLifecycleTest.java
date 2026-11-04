@@ -8,7 +8,7 @@ import org.junit.Test;
 
 public class AppLifecycleTest {
   /**
-   * Часы подменяются, чтобы проверить фон и окно аутентификации без ожидания.
+   * Часы подменяются, чтобы проверить срок непрерывного фона без ожидания.
    * Длительный возврат требует locked и сохраняет явную разблокировку.
    */
   @Test
@@ -25,7 +25,6 @@ public class AppLifecycleTest {
     });
 
     lifecycle.started();
-    lifecycle.authenticated();
     lifecycle.started();
     lifecycle.stopped(false);
     assertTrue(actions.isEmpty());
@@ -35,7 +34,7 @@ public class AppLifecycleTest {
     lifecycle.started();
     assertEquals(List.of("background", "foreground"), actions);
     lifecycle.stopped(false);
-    clock.set(600001);
+    clock.set(1200000);
     lifecycle.started();
     assertEquals("locked", actions.get(actions.size() - 1));
   }
@@ -123,6 +122,32 @@ public class AppLifecycleTest {
     lifecycle.processForeground(false);
     assertEquals(List.of("background"), actions);
     lifecycle.started();
+    assertEquals(List.of("background", "foreground"), actions);
+  }
+
+  /**
+   * Активная работа не расходует срок фоновой блокировки приложения.
+   * Краткий фон после долгой работы должен восстановить доступ без нового locked.
+   */
+  @Test
+  public void longForegroundAndShortBackgroundDoNotExpire() {
+    AtomicLong clock = new AtomicLong();
+    List<String> actions = new ArrayList<>();
+    AppLifecycle lifecycle = new AppLifecycle(clock::get, new AppLifecycle.Hooks() {
+      public void background() {
+        actions.add("background");
+      }
+      public void foreground(boolean locked) {
+        actions.add(locked ? "locked" : "foreground");
+      }
+    });
+
+    lifecycle.started();
+    clock.set(720000);
+    lifecycle.stopped(false);
+    clock.set(721000);
+    lifecycle.started();
+
     assertEquals(List.of("background", "foreground"), actions);
   }
 }

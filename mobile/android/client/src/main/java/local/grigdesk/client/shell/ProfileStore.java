@@ -135,6 +135,14 @@ public final class ProfileStore {
    * Разные машины получают отдельные постоянные порты и случайные идентификаторы.
    */
   public synchronized JSONObject add(String name, String address, String fp) throws Exception {
+    return add(name, address, fp, 1);
+  }
+
+  /**
+   * QR новой личности сохраняет пользовательское имя и origin уже известного pin.
+   * Прежний метод используется явным редактированием имени и не стирает версию ключа.
+   */
+  public synchronized JSONObject add(String name, String address, String fp, int clientKey) throws Exception {
     boolean relayOnly = address.isEmpty() && profiles.stream().anyMatch(item ->
       item.optString("fp").equals(fp) && item.has("relay"));
 
@@ -164,9 +172,17 @@ public final class ProfileStore {
         .put("port", uri.getPort() < 0 ? 443 : uri.getPort())));
     }
 
-    profile.put("name", name.trim());
+    if (clientKey == 1 || !profile.has("name")) {
+      profile.put("name", name.trim());
+    }
+
     profile.put("address", address);
     profile.put("fp", fp);
+
+    if (clientKey != 1) {
+      profile.put("clientKey", clientKey);
+    }
+
     save();
 
     return profile;
@@ -178,6 +194,15 @@ public final class ProfileStore {
    */
   public synchronized JSONObject addPhone(String name, String fp, JSONArray direct,
     JSONObject relay, String deviceId) throws Exception {
+    return addPhone(name, fp, direct, relay, deviceId, 1);
+  }
+
+  /**
+   * Маршруты и устройство обновляются после QR, а имя и локальный порт остаются прежними.
+   * Обычный вызов без версии сохраняет старую возможность явного переименования.
+   */
+  public synchronized JSONObject addPhone(String name, String fp, JSONArray direct,
+    JSONObject relay, String deviceId, int clientKey) throws Exception {
     PhonePairingPayload.routes(direct, relay);
 
     String address = direct.length() == 0 ? "" : "https://"
@@ -193,8 +218,15 @@ public final class ProfileStore {
       profiles.add(profile);
     }
 
-    profile.put("name", name.trim()).put("fp", fp).put("address", address)
-      .put("direct", direct).put("deviceId", deviceId);
+    if (clientKey == 1 || !profile.has("name")) {
+      profile.put("name", name.trim());
+    }
+
+    profile.put("fp", fp).put("address", address).put("direct", direct).put("deviceId", deviceId);
+
+    if (clientKey != 1) {
+      profile.put("clientKey", clientKey);
+    }
 
     if (relay == null) {
       profile.remove("relay");

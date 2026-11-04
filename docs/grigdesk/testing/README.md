@@ -41,6 +41,8 @@
 
 ## Грабли
 
+- [API Android в JVM-тестах: Files и checked JSONException](android-test-sdk-api.md)
+
 - [Нормализованные поля в фикстурах песочниц](normalized-sandbox-fixtures.md)
 
 - [Vue scoped CSS: :global с хвостом заменяет весь селектор](vue-global-selector.md)

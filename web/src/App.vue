@@ -12,7 +12,10 @@
     <!-- Речь принадлежит рабочему документу и сохраняет один controller при потере связи.
          Без оболочки потеря входа размонтирует Provider и освобождает browser resources. -->
     <SpeechProvider v-else-if="shell.present || auth.authenticated">
-      <div class="shell-workspace" :inert="shell.present && shell.status === 'locked' ? true : undefined">
+      <div
+        class="shell-workspace"
+        :inert="shell.present && (shell.status === 'locked' || shell.appLocked) ? true : undefined"
+      >
       <ToolWindowPage v-if="surfaceDocument && surfaceTarget?.kind === 'tool'"
                       :target="surfaceTarget" :ready="surfaceStarted" />
       <TaskWindowPage v-else-if="surfaceDocument" :target="surfaceTarget" :ready="surfaceStarted" />
@@ -49,7 +52,7 @@
       <UiToastHost />
       </div>
     </SpeechProvider>
-    <LockOverlay v-if="shell.present && shell.status === 'locked'" />
+    <LockOverlay v-if="shell.present && (shell.status === 'locked' || shell.appLocked)" />
   </template>
   <DesktopWindowControls v-if="currentDesktopMode() === 'main'" />
 </template>

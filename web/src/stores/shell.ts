@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 
 import { API_VERSION } from '../../../shared/client/apiVersion.ts';
 import { connectionRetryDelay } from '../../../shared/client/connectionRetry.ts';
-import type { ShellState } from '../../../shared/client/clientShell.ts';
+import { isAppLockState, type ShellState } from '../../../shared/client/clientShell.ts';
 import { delayWithAbort } from '../../../shared/lib/delay.ts';
 import { isShellState, readShellState, shellAction } from '../shared/shellClient.ts';
 
@@ -29,6 +29,16 @@ export const useShellStore = defineStore('shell', {
     localAvailable: (state) => state.snapshot?.localAvailable ?? false,
     serverApi: (state) => state.snapshot?.serverApi ?? null,
     appApi: (state) => state.snapshot?.appApi ?? API_VERSION,
+    appLock: (state) => {
+      const block = state.snapshot?.appLock;
+
+      return isAppLockState(block) ? block : null;
+    },
+    appLocked: (state) => {
+      const block = state.snapshot?.appLock;
+
+      return isAppLockState(block) ? block.locked : false;
+    },
   },
   actions: {
     /**

@@ -1488,5 +1488,12 @@
   "codeReviewPartialUnstageHunk": "Снять текущий блок из индекса",
   "codeReviewStaleNote": "Фрагмент устарел",
   "codeReviewLineRange": "строки {from}–{to}",
-  "codeReviewExplainInstruction": "Объясни выбранные изменения."
+  "codeReviewExplainInstruction": "Объясни выбранные изменения.",
+  "androidAppLock": "Блокировать приложение",
+  "androidAppLockHint": "Требует подтверждение после срока в фоне. Сохраняется сразу для этого устройства.",
+  "androidAppLockDelay": "Срок в фоне",
+  "androidAppLockImmediate": "Сразу",
+  "androidAppLockMinute": "Через минуту",
+  "androidAppLockFiveMinutes": "Через 5 минут",
+  "androidAppLockSaveFailed": "Не удалось сохранить настройку блокировки."
 }

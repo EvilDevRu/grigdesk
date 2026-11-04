@@ -7,12 +7,15 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import java.io.File;
+import local.grigdesk.client.shell.ShellLocale;
 
 /**
  * Счётчик относится ко всему приложению, включая собственную Activity сканера.
  * Внешний системный диалог сохраняет поток только пока процесс остаётся видимым.
  */
 public final class ClientApplication extends Application implements Application.ActivityLifecycleCallbacks {
+  public AppLock appLock;
   public final AppLifecycle lifecycle = new AppLifecycle(SystemClock::elapsedRealtime,
     new AppLifecycle.Hooks() {
     public void background() {
@@ -21,12 +24,18 @@ public final class ClientApplication extends Application implements Application.
     public void foreground(boolean locked) {
       MainActivity.foreground(locked);
     }
-  });
-  public final UnlockSession unlockSession = new UnlockSession(lifecycle::authenticated, this::nativeFlow);
+  }, () -> appLock == null ? Long.MAX_VALUE : appLock.foregroundLimitMillis());
+  public final UnlockSession unlockSession = new UnlockSession(() -> {
+    // Современный ключ не имеет аппаратного срока, момент подтверждения окно не продлевает.
+  }, this::nativeFlow);
 
   private final Handler handler = new Handler(Looper.getMainLooper());
   private int flows;
   private final Runnable checkProcess = new Runnable() {
+    /**
+     * Системный диалог не должен удерживать сеть, когда процесс потерял видимость.
+     * Повторная проверка нужна лишь пока существует незавершённый нативный переход.
+     */
     @Override
     public void run() {
       ActivityManager.RunningAppProcessInfo info = new ActivityManager.RunningAppProcessInfo();
@@ -43,17 +52,28 @@ public final class ClientApplication extends Application implements Application.
 
   /**
    * Локаль установки читается до первого собственного сообщения приложения.
-   * Отказ чтения каталога журналируется и не мешает регистрации lifecycle.
+   * Отказ чтения каталога журналируется и не мешает регистрации lifecycle и gate.
    */
   @Override
   public void onCreate() {
     super.onCreate();
 
+    ShellLocale locale = null;
+
     try {
-      ClientLocale.initialize(this);
+      locale = ClientLocale.initialize(this);
     } catch (Exception exception) {
       android.util.Log.e("GrigDesk", "Не удалось прочитать локаль установки", exception);
     }
+
+    // Gate создаётся до любых Activity: холодный запуск с включённой блокировкой закрыт.
+    // Таймер фона живёт на главном цикле и переживает смену Activity.
+    appLock = new AppLock(new File(getFilesDir(), "app-lock.json"),
+      (callback, delayMillis) -> {
+        handler.postDelayed(callback, delayMillis);
+
+        return () -> handler.removeCallbacks(callback);
+      }, MainActivity::notifyAppLockChanged, locale, SystemClock::elapsedRealtime);
 
     registerActivityLifecycleCallbacks(this);
   }

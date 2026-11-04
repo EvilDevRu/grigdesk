@@ -1,7 +1,7 @@
 # Актуальный интерфейс полного Android-клиента
 
 Полный `:client` получает тот же `web/src`, что и desktop. Оформление проектов, маршрутов,
-конвейера, чатов, мастера настройки, инструментов и общих диалогов переносится сборкой
+конвейера, чатов, инструментов и общих диалогов переносится сборкой
 `tools/client-ui.mts`, а затем APK. Изменение `web/dist` на сервере не обновляет встроенные
 ресурсы установленного приложения. Прежний `mobile/src` не определяет эти экраны.
 
@@ -31,7 +31,7 @@ desktop 1440×1000. Дополнительные поверхности пров
 
 Постоянные проверки: `client-phone.test.js`, `client-responsive.test.js`,
 `machines-responsive.test.js`, `machine-welcome.test.js`, `projects-responsive.test.js`,
-`routes-responsive.test.js`, `inbox-responsive.test.js`, `onboarding.browser.test.js`,
+`routes-responsive.test.js`, `inbox-responsive.test.js`,
 `arbiter-conversation.browser.test.js`, `video-responsive.test.js` и `e2e/settings-modal.e2e.mjs`.
 Проверка видео сохраняет полную подпись добавления задачи и уже заполненный черновик.
 Последний тест настроек проверяет

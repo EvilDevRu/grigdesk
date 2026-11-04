@@ -34,7 +34,7 @@ public class PairingTest {
     })) {
       pin[0] = server.pin;
       Pairing pairing = new Pairing(new ProfileStore(file.toFile(), port -> true),
-        () -> TlsFixture.keys("client"), 0, 1);
+        clientKey -> TlsFixture.keys("client"), 0, 1);
       assertEquals("Рабочая машина", pairing.add(payload(server)).getString("name"));
     } finally {
       Files.deleteIfExists(file);
@@ -55,7 +55,7 @@ public class PairingTest {
       TlsFixture.response(output, 200, "0.0", "{}".getBytes(StandardCharsets.UTF_8));
     })) {
       Pairing pairing = new Pairing(new ProfileStore(file.toFile(), port -> true),
-        () -> TlsFixture.keys("client"), 0, 1);
+        clientKey -> TlsFixture.keys("client"), 0, 1);
       Exception error = assertThrows(Exception.class, () -> pairing.add(payload(server)));
 
       assertEquals("Обновите GrigDesk на машине.", error.getMessage());

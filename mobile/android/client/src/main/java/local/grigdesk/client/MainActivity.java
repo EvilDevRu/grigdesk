@@ -32,6 +32,11 @@ public class MainActivity extends AppCompatActivity {
   private static final PendingNavigation navigation = new PendingNavigation();
   private static volatile String startupFailure;
   private static volatile ClientRuntime runtime;
+  private static volatile AppLock appLock;
+  private AppLockScreen appLockScreen;
+  private android.widget.LinearLayout appLockCover;
+  private android.widget.Button appLockButton;
+  private static volatile boolean coveredUnlocking;
   private static java.util.concurrent.CompletableFuture<String> scanning;
   private androidx.biometric.BiometricPrompt unlockPrompt;
   private static final String ENTRY = "http://127.0.0.1:47100";
@@ -72,6 +77,7 @@ public class MainActivity extends AppCompatActivity {
     super.onCreate(state);
     current = new java.lang.ref.WeakReference<>(this);
     attachUnlockPrompt();
+    appLock = ((ClientApplication) getApplication()).appLock;
     ORIGINS.add(ENTRY);
     if (retainedWeb == null) {
       webContext = new android.content.MutableContextWrapper(this);
@@ -85,7 +91,7 @@ public class MainActivity extends AppCompatActivity {
       ((android.view.ViewGroup) web.getParent()).removeView(web);
     }
 
-    setContentView(web);
+    attachAppLockCover();
 
     WebSettings settings = web.getSettings();
 
@@ -143,10 +149,11 @@ public class MainActivity extends AppCompatActivity {
               if (visible != null) {
                 visible.showOrigin(entry);
               }
-            });
+            }, ((ClientApplication) getApplication()).appLock);
         }
 
         runtime.start(!((ClientApplication) getApplication()).lifecycle.isBackground());
+        notifyAppLockChanged();
       } catch (Exception exception) {
         startupFailure = ClientLocale.text("startupFailure");
         MainActivity visible = current.get();
@@ -158,6 +165,104 @@ public class MainActivity extends AppCompatActivity {
         starting = false;
       }
     }, "grigdesk-client-start").start();
+  }
+
+  /**
+   * Непрозрачная нативная карточка закрывает retained WebView до любого HTTP-ответа.
+   * Подтверждение проходит через существующую сессию, документ и его POST не перегружаются.
+   */
+  private void attachAppLockCover() {
+    android.widget.FrameLayout root = new android.widget.FrameLayout(this);
+    android.widget.FrameLayout.LayoutParams fill = new android.widget.FrameLayout.LayoutParams(
+      android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT);
+    appLockCover = new android.widget.LinearLayout(this);
+    appLockCover.setOrientation(android.widget.LinearLayout.VERTICAL);
+    appLockCover.setGravity(android.view.Gravity.CENTER);
+    android.content.res.TypedArray colors = obtainStyledAttributes(
+      new int[] { android.R.attr.colorBackground });
+
+    appLockCover.setBackgroundColor(colors.getColor(0, android.graphics.Color.BLACK));
+    colors.recycle();
+
+    android.widget.TextView title = new android.widget.TextView(this);
+    appLockButton = new android.widget.Button(this);
+    appLockButton.setOnClickListener(view -> unlockCoveredWorkspace());
+    appLockCover.addView(title);
+    appLockCover.addView(appLockButton);
+    root.addView(web, fill);
+    root.addView(appLockCover, new android.widget.FrameLayout.LayoutParams(fill));
+    // При следующем показе карточка использует текущий язык установки.
+    // Удерживаемый WebView и его Activity ради смены языка не пересоздаются.
+    appLockScreen = new AppLockScreen(appLock, visible -> {
+      title.setText(ClientLocale.text("unlockTitle"));
+      appLockButton.setText(ClientLocale.text("unlock"));
+      web.setVisibility(visible ? android.view.View.VISIBLE : android.view.View.INVISIBLE);
+      appLockCover.setVisibility(visible ? android.view.View.GONE : android.view.View.VISIBLE);
+      appLockButton.setEnabled(!coveredUnlocking && runtime != null);
+    });
+    setContentView(root);
+  }
+
+  /**
+   * Карточка не зависит от загрузки Vue и может открыть холодный запуск без машины.
+   * Повтор после поворота присоединяется к одной UnlockSession; сетевой код работает вне UI.
+   */
+  private void unlockCoveredWorkspace() {
+    ClientRuntime client = runtime;
+
+    if (coveredUnlocking || client == null) {
+      return;
+    }
+
+    coveredUnlocking = true;
+    appLockScreen.refresh();
+
+    new Thread(() -> {
+      boolean failed = false;
+
+      try {
+        client.shell.unlock();
+      } catch (Exception exception) {
+        failed = true;
+      } finally {
+        coveredUnlocking = false;
+      }
+
+      boolean showFailure = failed;
+      MainActivity visible = current.get();
+
+      if (visible != null) {
+        visible.runOnUiThread(() -> {
+          if (current.get() == visible && !visible.isDestroyed()) {
+            visible.appLockScreen.refresh();
+
+            if (showFailure) {
+              Toast.makeText(visible, ClientLocale.text("unlockCancelled"), Toast.LENGTH_LONG).show();
+            }
+          }
+        });
+      }
+    }, "grigdesk-covered-unlock").start();
+  }
+
+  /**
+   * Gate проверяется до разрешения показа удерживаемого документа.
+   * Показ не ждёт long-poll и не перегружает уже начатые операции WebView.
+   */
+  @Override
+  protected void onStart() {
+    super.onStart();
+    appLockScreen.started();
+  }
+
+  /**
+   * Удерживаемый документ скрывается синхронно до завершения остановки окна.
+   * Повторная Activity получит тот же WebView под собственной нативной карточкой.
+   */
+  @Override
+  protected void onStop() {
+    appLockScreen.stopped();
+    super.onStop();
   }
 
   /**
@@ -464,7 +569,17 @@ public class MainActivity extends AppCompatActivity {
   protected void onSaveInstanceState(@NonNull Bundle state) {
     super.onSaveInstanceState(state);
   }
+  /**
+   * Уход в фон сначала ставит таймер gate, затем приостанавливает транспорты.
+   * Выключенная блокировка таймер не создаёт и фон ведёт как прежде.
+   */
   public static void background() {
+    AppLock lock = appLock;
+
+    if (lock != null) {
+      lock.enterBackground();
+    }
+
     ClientRuntime client = runtime;
 
     if (client != null) {
@@ -473,18 +588,48 @@ public class MainActivity extends AppCompatActivity {
   }
 
   /**
-   * Возврат приложения восстанавливает транспорт через общий runtime установки.
-   * Просроченная аутентификация сначала переводит оболочку в locked.
+   * Возврат отменяет таймер фона и объединяет подсказку ключа с глобальной блокировкой.
+   * Закрытый gate не даёт соединению восстановиться до успешного подтверждения.
    */
   public static void foreground(boolean locked) {
+    AppLock lock = appLock;
+    boolean gateLocked = false;
+
+    if (lock != null) {
+      lock.leaveBackground();
+      gateLocked = lock.locked();
+    }
+
     ClientRuntime client = runtime;
 
     if (client != null) {
       try {
-        client.shell.resume(locked);
+        client.shell.resume(locked || gateLocked);
       } catch (Exception exception) {
         throw new IllegalStateException(ClientLocale.text("restoreFailure"), exception);
       }
+    }
+  }
+
+  /**
+   * Изменение gate публикует ревизию снимка для long-poll всех открытых документов.
+   * Runtime может ещё не существовать при раннем событии — публикация пропускается.
+   */
+  public static void notifyAppLockChanged() {
+    ClientRuntime client = runtime;
+
+    if (client != null) {
+      client.shell.state.changed();
+    }
+
+    MainActivity visible = current.get();
+
+    if (visible != null) {
+      visible.runOnUiThread(() -> {
+        if (current.get() == visible && visible.appLockScreen != null && !visible.isDestroyed()) {
+          visible.appLockScreen.refresh();
+        }
+      });
     }
   }
 

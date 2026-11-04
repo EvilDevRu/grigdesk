@@ -83,4 +83,56 @@ public class ProfileStoreTest {
       Files.deleteIfExists(root);
     }
   }
+
+  /**
+   * Оба формата QR переводят ту же машину на v2 и сохраняют её личное имя и порт.
+   * Последующее явное переименование не возвращает старый ключ, включая перечитывание файла.
+   */
+  @Test
+  public void modernQrPreservesNameAndExplicitRenameKeepsKeyVersion() throws Exception {
+    for (boolean phone : new boolean[] { false, true }) {
+      Path root = Files.createTempDirectory("profile-key-version-");
+      Path file = root.resolve("profiles.json");
+
+      try {
+        ProfileStore store = new ProfileStore(file.toFile(), port -> true);
+        String fp = "2".repeat(64);
+        String address = "https://machine.example:443";
+        org.json.JSONArray direct = new org.json.JSONArray().put(new JSONObject()
+          .put("host", "machine.example").put("port", 443));
+        JSONObject legacy = phone
+          ? store.addPhone("Моё имя", fp, direct, null, "d00000001")
+          : store.add("Моё имя", address, fp);
+        String id = legacy.getString("id");
+        int port = legacy.getInt("port");
+        long created = legacy.getLong("createdAt");
+
+        assertFalse(legacy.has("clientKey"));
+
+        for (int repeat = 0; repeat < 2; repeat++) {
+          JSONObject modern = phone
+            ? store.addPhone("Имя сервера", fp, direct, null, "d00000002", 2)
+            : store.add("Имя сервера", address, fp, 2);
+
+          assertEquals(id, modern.getString("id"));
+          assertEquals(port, modern.getInt("port"));
+          assertEquals("Моё имя", modern.getString("name"));
+          assertEquals(2, modern.getInt("clientKey"));
+          assertEquals(created, modern.getLong("createdAt"));
+          assertEquals(1, store.profiles.size());
+        }
+
+        store.add("Новое имя", address, fp);
+        ProfileStore restored = new ProfileStore(file.toFile(), candidate -> true);
+        JSONObject modern = restored.get(id);
+
+        assertEquals("Новое имя", modern.getString("name"));
+        assertEquals(2, modern.getInt("clientKey"));
+        assertEquals(port, modern.getInt("port"));
+      } finally {
+        Files.deleteIfExists(file);
+        Files.deleteIfExists(root);
+      }
+    }
+  }
 }

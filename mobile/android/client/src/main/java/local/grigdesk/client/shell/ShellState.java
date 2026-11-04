@@ -8,6 +8,7 @@ import org.json.JSONObject;
 public final class ShellState {
   private final ProfileStore store;
   private final ShellLocale locale;
+  private final java.util.function.Supplier<JSONObject> appLock;
   private final int major;
   private final int minor;
   private final Map<String, JSONObject> states = new HashMap<>();
@@ -22,6 +23,16 @@ public final class ShellState {
    * Старый конструктор сохраняет прежний контракт без обязательного поля locale.
    */
   public ShellState(ProfileStore store, int major, int minor, ShellLocale locale) {
+    this(store, major, minor, locale, null);
+  }
+
+  /**
+   * Необязательный блок gate читается под монитором состояния вместе с ревизией.
+   * Уведомления AppLock идут вне его монитора, обратного порядка блокировок нет.
+   */
+  public ShellState(ProfileStore store, int major, int minor, ShellLocale locale,
+    java.util.function.Supplier<JSONObject> appLock) {
+    this.appLock = appLock;
     this.locale = locale;
     this.store = store;
     this.major = major;
@@ -122,6 +133,10 @@ public final class ShellState {
     result.put("appApi", new JSONObject().put("major", major).put("minor", minor));
     result.put("localAvailable", false);
     result.put("capabilities", new JSONArray(new String[] { "scan", "save", "unlock" }));
+
+    if (appLock != null) {
+      result.put("appLock", appLock.get());
+    }
 
     return result;
   }

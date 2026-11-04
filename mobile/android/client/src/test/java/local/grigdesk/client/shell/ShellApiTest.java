@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import local.grigdesk.client.pipe.HttpHead;
 import local.grigdesk.client.pipe.PipeResponse;
+import local.grigdesk.client.pipe.PipeTransport;
 import local.grigdesk.client.pipe.StaticAssets;
 import local.grigdesk.client.pipe.Upstream;
 import org.json.JSONObject;
@@ -346,6 +347,222 @@ public class ShellApiTest {
         assertEquals(expected, shell.state.snapshot().getString("status"));
       }
       assertEquals(0, closed.get());
+    } finally {
+      Files.deleteIfExists(file);
+      Files.deleteIfExists(root);
+    }
+  }
+
+  /**
+   * Закрытый gate отвергает обходные действия независимо от состояния машины.
+   * Endpoint политики принимает только полное значение и возвращает полный снимок.
+   */
+  @Test
+  public void appLockGateBlocksAccessAndEndpointManagesPolicy() throws Exception {
+    Path root = Files.createTempDirectory("grigdesk-app-lock-gate-");
+    Path file = root.resolve("profiles.json");
+    ProfileStore store = new ProfileStore(file.toFile(), port -> true);
+    String id = store.add("Фикстура", "https://machine.example:443", "1".repeat(64)).getString("id");
+    java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+    java.util.concurrent.atomic.AtomicInteger unlocks = new java.util.concurrent.atomic.AtomicInteger();
+    ShellApi.Gate gate = new ShellApi.Gate() {
+      public boolean locked() {
+        return closed.get();
+      }
+      public JSONObject snapshot() {
+        try {
+          return new JSONObject().put("enabled", true).put("delaySeconds", 60)
+            .put("locked", closed.get());
+        } catch (org.json.JSONException exception) {
+          throw new IllegalStateException(exception);
+        }
+      }
+      public void unlocked() {
+        closed.set(false);
+      }
+      public void update(JSONObject data) throws Exception {
+        closed.set(true);
+      }
+    };
+    ShellApi.Native nativeActions = new ShellApi.Native() {
+      public String scan() {
+        return "";
+      }
+      public void save(String name, String type, java.io.InputStream body) {
+      }
+      public void unlock() {
+        unlocks.incrementAndGet();
+      }
+    };
+
+    java.util.concurrent.atomic.AtomicInteger creations = new java.util.concurrent.atomic.AtomicInteger();
+
+    try (ShellApi shell = new ShellApi(store, null, (profile, version, report) -> {
+      creations.incrementAndGet();
+
+      return new ShellApi.Transport() {
+        public void probe() {
+          report.accept("online", null);
+        }
+        public void close() {
+        }
+        public PipeTransport pipe() {
+          return new PipeTransport() {
+            public PipeResponse forward(HttpHead head, java.io.InputStream body) {
+              throw new AssertionError("Запросы тестом не отправляются");
+            }
+            public void upgrade(HttpHead head, java.net.Socket socket, java.io.InputStream body,
+              java.util.concurrent.ExecutorService pool) {
+              throw new AssertionError("Туннели тестом не открываются");
+            }
+            public void probe() {
+            }
+            public void close() {
+            }
+          };
+        }
+      };
+    }, (callback, delay) -> () -> {}, Runnable::run, profile -> {}, nativeActions, () -> 0.5, 0, 1,
+      null, gate)) {
+      store.select(id);
+      shell.connect(id, true);
+      assertEquals("online", shell.unavailableStatus(id));
+      assertNotNull(shell.upstream(id));
+
+      HttpHead policy = new HttpHead("POST /__shell/app-lock HTTP/1.1", java.util.Map.of());
+
+      try (PipeResponse response = shell.handle(policy,
+        new ByteArrayInputStream("{\"enabled\":true,\"delaySeconds\":0}".getBytes(StandardCharsets.UTF_8)))) {
+        JSONObject snapshot = new JSONObject(StaticAssets.readText(response.body, 65536));
+
+        assertEquals(200, response.status);
+        assertTrue(closed.get());
+        assertEquals(true, snapshot.getJSONObject("appLock").getBoolean("locked"));
+      }
+
+      assertEquals("locked", shell.unavailableStatus(id));
+      assertNull(shell.upstream(id));
+
+      for (String[] request : new String[][] { {"POST", "/__shell/connect"},
+        {"POST", "/__shell/select"}, {"POST", "/__shell/profiles"},
+        {"POST", "/__shell/app-lock"} }) {
+        HttpHead blocked = new HttpHead(request[0] + " " + request[1] + " HTTP/1.1", java.util.Map.of());
+
+        try (PipeResponse response = shell.handle(blocked,
+          new ByteArrayInputStream("{}".getBytes(StandardCharsets.UTF_8)))) {
+          assertEquals(423, response.status);
+        }
+      }
+
+      HttpHead state = new HttpHead("GET /__shell/state HTTP/1.1", java.util.Map.of());
+
+      try (PipeResponse response = shell.handle(state, new ByteArrayInputStream(new byte[0]))) {
+        assertEquals(200, response.status);
+        assertTrue(new JSONObject(StaticAssets.readText(response.body, 65536))
+          .getJSONObject("appLock").getBoolean("locked"));
+      }
+
+      HttpHead unlock = new HttpHead("POST /__shell/unlock HTTP/1.1", java.util.Map.of());
+
+      try (PipeResponse response = shell.handle(unlock, new ByteArrayInputStream(new byte[0]))) {
+        JSONObject snapshot = new JSONObject(StaticAssets.readText(response.body, 65536));
+
+        assertEquals(200, response.status);
+        assertEquals(1, unlocks.get());
+        assertFalse(closed.get());
+        assertEquals("online", snapshot.getString("status"));
+        assertEquals(id, snapshot.getJSONObject("profile").getString("id"));
+      }
+
+      assertEquals("online", shell.unavailableStatus(id));
+      int beforeDisconnect = creations.get();
+
+      shell.disconnect(id);
+      closed.set(true);
+      shell.unlock();
+      assertFalse(closed.get());
+      assertEquals("offline", shell.state.status(id));
+      assertEquals(beforeDisconnect, creations.get());
+
+      shell.connect(id, true);
+      int beforeBackground = creations.get();
+      shell.suspend();
+      closed.set(true);
+      shell.unlock();
+      assertEquals(beforeBackground, creations.get());
+
+      shell.resume(false);
+      assertEquals(beforeBackground + 1, creations.get());
+    } finally {
+      Files.deleteIfExists(file);
+      Files.deleteIfExists(root);
+    }
+  }
+
+  /**
+   * Отменённое подтверждение не открывает gate и возвращает читаемую ошибку.
+   * Оболочка без gate не публикует блок приложения и отвечает как прежняя версия.
+   */
+  @Test
+  public void cancelledUnlockKeepsGateClosedAndShellWithoutGateHasNoAppLock() throws Exception {
+    Path root = Files.createTempDirectory("grigdesk-app-lock-cancel-");
+    Path file = root.resolve("profiles.json");
+    ProfileStore store = new ProfileStore(file.toFile(), port -> true);
+    ShellApi.Native cancelled = new ShellApi.Native() {
+      public String scan() {
+        return "";
+      }
+      public void save(String name, String type, java.io.InputStream body) {
+      }
+      public void unlock() {
+        throw new IllegalStateException("Подтверждение отменено");
+      }
+    };
+    ShellApi.Native successful = new ShellApi.Native() {
+      public String scan() {
+        return "";
+      }
+      public void save(String name, String type, java.io.InputStream body) {
+      }
+      public void unlock() {
+      }
+    };
+    ShellApi.Gate gate = new ShellApi.Gate() {
+      public boolean locked() {
+        return true;
+      }
+      public JSONObject snapshot() {
+        try {
+          return new JSONObject().put("enabled", true).put("delaySeconds", 60).put("locked", true);
+        } catch (org.json.JSONException exception) {
+          throw new IllegalStateException(exception);
+        }
+      }
+      public void unlocked() {
+        throw new AssertionError("Не должен вызываться после отмены");
+      }
+      public void update(JSONObject data) {
+      }
+    };
+
+    // У каждой оболочки свои нативные действия: одна бросает отмену, другая подтверждает.
+    try (ShellApi shell = new ShellApi(store, null, null, (callback, delay) -> () -> {},
+      Runnable::run, profile -> {}, cancelled, () -> 0.5, 0, 1, null, gate);
+      ShellApi plain = new ShellApi(store, null, null, (callback, delay) -> () -> {},
+      Runnable::run, profile -> {}, successful, () -> 0.5, 0, 1)) {
+      HttpHead unlock = new HttpHead("POST /__shell/unlock HTTP/1.1", java.util.Map.of());
+
+      try (PipeResponse response = shell.handle(unlock, new ByteArrayInputStream(new byte[0]))) {
+        assertEquals(400, response.status);
+        assertTrue(StaticAssets.readText(response.body, 4096).contains("Подтверждение отменено"));
+      }
+
+      assertTrue(gate.locked());
+
+      try (PipeResponse response = plain.handle(unlock, new ByteArrayInputStream(new byte[0]))) {
+        assertEquals(200, response.status);
+        assertFalse(new JSONObject(StaticAssets.readText(response.body, 65536)).has("appLock"));
+      }
     } finally {
       Files.deleteIfExists(file);
       Files.deleteIfExists(root);

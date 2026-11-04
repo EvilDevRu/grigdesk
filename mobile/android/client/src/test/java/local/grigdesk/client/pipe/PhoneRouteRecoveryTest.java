@@ -104,7 +104,7 @@ public class PhoneRouteRecoveryTest {
 
       Path directory = Files.createTempDirectory("phone-first-pair-");
       ProfileStore store = new ProfileStore(directory.resolve("profiles.json").toFile(), port -> true);
-      JSONObject saved = new Pairing(store, () -> TlsFixture.keys("client"), 0, 1)
+      JSONObject saved = new Pairing(store, clientKey -> TlsFixture.keys("client"), 0, 1)
         .add(PhonePairingTest.payload(server.pin, new JSONArray().put(direct.route()), null));
 
       assertEquals("d12345678", saved.getString("deviceId"));
@@ -452,7 +452,7 @@ public class PhoneRouteRecoveryTest {
       relay.unsupported = true;
 
       try {
-        new Pairing(store, () -> TlsFixture.keys("client"), 0, 1)
+        new Pairing(store, clientKey -> TlsFixture.keys("client"), 0, 1)
           .add(PhonePairingTest.payload(server.pin, new JSONArray(), relay.route()));
         fail("Несовместимый relay не может завершить привязку");
       } catch (IllegalStateException expected) {

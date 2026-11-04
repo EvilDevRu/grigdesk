@@ -14,8 +14,12 @@ import local.grigdesk.client.pipe.VersionGate;
 import org.json.JSONObject;
 
 public final class Pairing {
+  /**
+   * Версия личности выбирается по профилю: старые записи используют единицу.
+   * Свежий QR всегда запрашивает современный ключ, не меняя остальные привязки.
+   */
   public interface Keys {
-    X509KeyManager get() throws Exception;
+    X509KeyManager get(int clientKey) throws Exception;
   }
 
   private final ProfileStore store;
@@ -56,7 +60,7 @@ public final class Pairing {
     PairingPayload payload = PairingPayload.decode(text);
     String address = "https://" + payload.host + ":" + payload.port;
 
-    try (Upstream upstream = new Upstream(address, payload.fp, keys.get(), new VersionGate(major, minor),
+    try (Upstream upstream = new Upstream(address, payload.fp, keys.get(2), new VersionGate(major, minor),
       (status, code) -> {})) {
       JSONObject body = new JSONObject();
 
@@ -69,7 +73,7 @@ public final class Pairing {
         throw new IllegalStateException(ClientFailure.message("identityMismatch", locale));
       }
 
-      return store.add(paired.getString("name"), address, payload.fp);
+      return store.add(paired.getString("name"), address, payload.fp, 2);
     }
   }
 
@@ -91,7 +95,7 @@ public final class Pairing {
       throw new IllegalArgumentException(ClientFailure.message("pair_code_invalid", locale));
     }
 
-    X509KeyManager installationKey = keys.get();
+    X509KeyManager installationKey = keys.get(2);
     JSONObject paired;
 
     try (RoutedUpstream upstream = new RoutedUpstream(profile, installationKey,
@@ -114,7 +118,7 @@ public final class Pairing {
 
       return store.addPhone(paired.getJSONObject("server").getString("name"), server.getString("fp"),
         payload.getJSONArray("direct"), payload.optJSONObject("relay"),
-        hello.getJSONObject("device").getString("id"));
+        hello.getJSONObject("device").getString("id"), 2);
     }
   }
 
@@ -124,7 +128,7 @@ public final class Pairing {
    */
   public void verify(JSONObject profile) throws Exception {
     try (Upstream upstream = new Upstream(profile.getString("address"), profile.getString("fp"),
-      keys.get(), new VersionGate(major, minor), (status, code) -> {})) {
+      keys.get(profile.optInt("clientKey", 1)), new VersionGate(major, minor), (status, code) -> {})) {
       if (!profile.getString("fp").equals(json(upstream, "/api/client/hello", null).optString("fp"))) {
         throw new IllegalStateException(ClientFailure.message("identityMismatch", locale));
       }

@@ -10,12 +10,32 @@ import java.security.spec.ECGenParameterSpec;
 import javax.security.auth.x500.X500Principal;
 
 /**
- * Личный ключ создаётся исключительно в Android Keystore с обязательной аутентификацией.
+ * Обе версии личности используют Android Keystore с независимыми алиасами.
  * Потерянная старая привязка не получает автоматически новый ключ или software fallback.
  */
 public final class DeviceKey {
 
   public static final String ALIAS = "grigdesk-client";
+  public static final String ALIAS_V2 = "grigdesk-client-v2";
+
+  private final String alias;
+
+  public DeviceKey() {
+    this(ALIAS);
+  }
+
+  /**
+   * Отдельный алиас современной личности не трогает ключ прежних привязок.
+   * Оба ключа живут в Keystore установки независимо друг от друга.
+   */
+  public DeviceKey(String alias) {
+    this.alias = alias;
+  }
+
+  /** Имя алиаса нужно менеджеру ключа и диагностике без доступа к самому Keystore. */
+  public String alias() {
+    return alias;
+  }
 
   private KeyStore store() throws Exception {
     KeyStore result = KeyStore.getInstance("AndroidKeyStore");
@@ -26,14 +46,14 @@ public final class DeviceKey {
   }
 
   public boolean exists() throws Exception {
-    return store().containsAlias(ALIAS);
+    return store().containsAlias(alias);
   }
 
   /**
-   * SIGN/NONE/SHA256 позволяют Android подписать TLS CertificateVerify для P-256.
-   * Окно аутентификации ограничено 600 секундами и допускает сильную биометрию или код.
+   * Современный ключ создаётся без аппаратного срока аутентификации.
+   * Блокировкой управляет приложение, поэтому подпись TLS не требует prompt.
    */
-  public void ensure() throws Exception {
+  public void ensureWithoutAuthentication() throws Exception {
     if (exists()) {
       return;
     }
@@ -42,15 +62,10 @@ public final class DeviceKey {
       KeyProperties.KEY_ALGORITHM_EC,
       "AndroidKeyStore"
     );
-    KeyGenParameterSpec options = new KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_SIGN)
+    KeyGenParameterSpec options = new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
       .setAlgorithmParameterSpec(new ECGenParameterSpec("secp256r1"))
       .setDigests(KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA256)
-      .setUserAuthenticationRequired(true)
-      .setUserAuthenticationParameters(
-        600,
-        KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL
-      )
-      .setCertificateSubject(new X500Principal("CN=grigdesk-client"))
+      .setCertificateSubject(new X500Principal("CN=" + alias))
       .build();
 
     generator.initialize(options);
@@ -58,7 +73,7 @@ public final class DeviceKey {
   }
 
   public PrivateKey privateKey() throws Exception {
-    PrivateKey result = (PrivateKey) store().getKey(ALIAS, null);
+    PrivateKey result = (PrivateKey) store().getKey(alias, null);
 
     if (result == null) {
       throw new MissingDeviceKeyException();
@@ -68,7 +83,7 @@ public final class DeviceKey {
   }
 
   public X509Certificate certificate() throws Exception {
-    X509Certificate result = (X509Certificate) store().getCertificate(ALIAS);
+    X509Certificate result = (X509Certificate) store().getCertificate(alias);
 
     if (result == null) {
       throw new MissingDeviceKeyException();
@@ -78,6 +93,6 @@ public final class DeviceKey {
   }
 
   public void delete() throws Exception {
-    store().deleteEntry(ALIAS);
+    store().deleteEntry(alias);
   }
 }

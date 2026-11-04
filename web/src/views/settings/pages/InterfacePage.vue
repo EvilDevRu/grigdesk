@@ -20,6 +20,7 @@
       </UiField>
     </div>
     <DesktopExitSetting v-if="settings.pageId === 'interface.behavior'" />
+    <AndroidAppLockSetting v-if="settings.pageId === 'interface.behavior'" />
     <p v-if="error" role="alert">{{ resolveUiText(error) }}</p>
     <SettingsField
       v-for="field in fields"
@@ -125,6 +126,7 @@ import { uiLanguage, uiLanguageBusy, uiLanguageError, setUiLanguage } from '../.
 import SettingsField from '../SettingsField.vue';
 import SettingsScope from '../SettingsScope.vue';
 import DesktopExitSetting from '../DesktopExitSetting.vue';
+import AndroidAppLockSetting from '../AndroidAppLockSetting.vue';
 
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();

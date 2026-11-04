@@ -42,9 +42,21 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
     void unlock() throws Exception;
   }
 
+  /**
+   * Владелец блокировки приложения передаётся из runtime установки.
+   * Null означает оболочку без gate: прежние потребители и тесты сохраняют поведение.
+   */
+  public interface Gate {
+    boolean locked();
+    JSONObject snapshot();
+    void unlocked();
+    void update(JSONObject data) throws Exception;
+  }
+
   public final ShellState state;
   private final ProfileStore store;
   private final ShellLocale locale;
+  private final Gate gate;
   private final Pairing pairing;
   private final Factory factory;
   private final Scheduler scheduler;
@@ -80,6 +92,18 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   public ShellApi(ProfileStore store, Pairing pairing, Factory factory, Scheduler scheduler,
     Consumer<Runnable> worker, Consumer<String> navigate, Native nativeActions, DoubleSupplier random,
     int major, int minor, ShellLocale locale) {
+    this(store, pairing, factory, scheduler, worker, navigate, nativeActions, random, major, minor,
+      locale, null);
+  }
+
+  /**
+   * Gate установки передаётся явно и не меняет контракт прежних оболочек.
+   * Один и тот же владелец обслуживает HTTP-проверки доступа и публичный снимок.
+   */
+  public ShellApi(ProfileStore store, Pairing pairing, Factory factory, Scheduler scheduler,
+    Consumer<Runnable> worker, Consumer<String> navigate, Native nativeActions, DoubleSupplier random,
+    int major, int minor, ShellLocale locale, Gate gate) {
+    this.gate = gate;
     this.locale = locale;
     this.store = store;
     this.pairing = pairing;
@@ -91,10 +115,38 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
     this.random = random;
     this.major = major;
     this.minor = minor;
-    state = new ShellState(store, major, minor, locale);
+    state = new ShellState(store, major, minor, locale, gate == null ? null : gate::snapshot);
   }
 
+  /**
+   * Статус недоступности различает глобальную блокировку приложения и состояние машины.
+   * Труба отображает 423 locked только для настоящего закрытого gate.
+   */
+  public String unavailableStatus(String id) {
+    if (gate != null && gate.locked()) {
+      return "locked";
+    }
+
+    return id == null ? "none" : state.status(id);
+  }
+
+  /**
+   * Факт закрытого gate нужен старту runtime до любых соединений.
+   * Оболочка без gate всегда сообщает открытый доступ.
+   */
+  public boolean gateLocked() {
+    return gate != null && gate.locked();
+  }
+
+  /**
+   * Заблокированный gate скрывает все транспорты: труба ответит 423 по статусу недоступности.
+   * Открытие gate возвращает прежнюю выдачу без пересоздания соединений.
+   */
   public PipeTransport upstream(String id) {
+    if (gate != null && gate.locked()) {
+      return null;
+    }
+
     Transport transport = transports.get(id);
 
     return transport == null ? null : transport.pipe();
@@ -181,7 +233,7 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
    * Probe выполняется вне потока HTTP, поэтому недоступная машина не задерживает UI.
    */
   public synchronized void connect(String id, boolean manual) {
-    if (id == null || closed || suspended) {
+    if (id == null || closed || suspended || gate != null && gate.locked()) {
       return;
     }
 
@@ -302,6 +354,28 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
   }
 
   /**
+   * Подтверждение открывает gate, сохраняя ручное отключение и приостановку в фоне.
+   * Оболочка без gate сохраняет прежний способ повторного входа в старую привязку.
+   */
+  public JSONObject unlock() throws Exception {
+    nativeActions.unlock();
+
+    if (gate != null) {
+      gate.unlocked();
+
+      synchronized (this) {
+        if (!suspended && !disabled.contains(store.selected)) {
+          connect(store.selected, false);
+        }
+      }
+    } else {
+      connect(store.selected, true);
+    }
+
+    return state.snapshot();
+  }
+
+  /**
    * Один контракт shell обслуживает управление профилями и нативные действия Android.
    * Переход на новый origin вызывается после отправки ответа, без обрыва fetch формы.
    */
@@ -312,6 +386,15 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
     Map<String, String> query = query(uri);
 
     try {
+      if (gate != null && gate.locked()) {
+        boolean allowed = head.method().equals("GET") && path.equals("/__shell/state")
+          || head.method().equals("POST") && path.equals("/__shell/unlock");
+
+        if (!allowed) {
+          return PipeResponse.error(423, "locked");
+        }
+      }
+
       if (head.method().equals("GET") && path.equals("/__shell/state")) {
         return PipeResponse.json(200, query.containsKey("rev") ? state.poll(Long.parseLong(query.get("rev")))
           : state.snapshot());
@@ -337,18 +420,20 @@ public final class ShellApi implements ClientPipe.Shell, AutoCloseable {
         return PipeResponse.json(200, state.snapshot());
       }
 
+      if (head.method().equals("POST") && path.equals("/__shell/app-lock") && gate != null) {
+        gate.update(data);
+        state.changed();
+
+        return PipeResponse.json(200, state.snapshot());
+      }
+
       String navigation = null;
       boolean move = false;
 
       if (head.method().equals("POST") && path.equals("/__shell/scan")) {
         return PipeResponse.json(200, new JSONObject().put("pairing", nativeActions.scan()));
       } else if (head.method().equals("POST") && path.equals("/__shell/unlock")) {
-        nativeActions.unlock();
-        connect(store.selected, true);
-
-        // Общий интерфейс сразу применяет снимок и снимает слой блокировки.
-        // Одного ok недостаточно: он не содержит ревизии и выбранной машины.
-        return PipeResponse.json(200, state.snapshot());
+        return PipeResponse.json(200, unlock());
       } else if (head.method().equals("POST") && path.equals("/__shell/profiles")) {
         nativeActions.unlock();
         JSONObject added = pairing.add(data.getString("pairing"));

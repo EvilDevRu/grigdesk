@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import local.grigdesk.client.key.DeviceKey;
 import local.grigdesk.client.key.DeviceKeyManager;
+import local.grigdesk.client.key.MissingDeviceKeyException;
 import local.grigdesk.client.pipe.ClientPipe;
 import local.grigdesk.client.pipe.StaticAssets;
 import local.grigdesk.client.pipe.Upstream;
@@ -45,7 +46,7 @@ public final class ClientRuntime implements AutoCloseable {
    * Встроенные assets проверяются до открытия WebView, сервер не отдаёт интерфейс.
    */
   public ClientRuntime(Context context, String secret, Set<String> origins, ShellApi.Native nativeActions,
-    BiConsumer<String, Boolean> navigate) throws Exception {
+    BiConsumer<String, Boolean> navigate, AppLock appLock) throws Exception {
     this.context = context.getApplicationContext();
     this.secret = secret;
     this.origins = origins;
@@ -74,21 +75,28 @@ public final class ClientRuntime implements AutoCloseable {
       originalPorts.put(profile.getString("id"), profile.getInt("port"));
     }
 
-    DeviceKey key = new DeviceKey();
-    Pairing.Keys keys = () -> {
+    DeviceKey legacyKey = new DeviceKey();
+    DeviceKey modernKey = new DeviceKey(DeviceKey.ALIAS_V2);
+    Pairing.Keys identities = clientKey -> {
+      DeviceKey key = clientKey >= 2 ? modernKey : legacyKey;
+
+      // Современная личность создаётся при первой привязке без аппаратного срока.
+      // Утраченный прежний ключ не пересоздаётся: нужна новая привязка человеком.
+      if (clientKey >= 2) {
+        modernKey.ensureWithoutAuthentication();
+      }
+
       if (!key.exists()) {
-        throw new local.grigdesk.client.key.MissingDeviceKeyException();
+        throw new MissingDeviceKeyException();
       }
 
       return new DeviceKeyManager(key);
     };
-    Pairing pairing = new Pairing(profiles, () -> {
-      key.ensure();
-      return keys.get();
-    }, major, minor, ClientLocale.initialize(context));
+    Pairing pairing = new Pairing(profiles, identities, major, minor, ClientLocale.initialize(context));
 
     shell = new ShellApi(profiles, pairing, (profile, gate, report) -> {
-      RoutedUpstream transport = new RoutedUpstream(profile, keys.get(), gate, report::accept);
+      RoutedUpstream transport = new RoutedUpstream(profile,
+        identities.get(profile.optInt("clientKey", 1)), gate, report::accept);
 
       return new ShellApi.Transport() {
         public void probe() throws Exception {
@@ -107,7 +115,7 @@ public final class ClientRuntime implements AutoCloseable {
 
       return () -> future.cancel(false);
     }, worker::execute, this::show, nativeActions, Math::random, major, minor,
-      ClientLocale.initialize(context));
+      ClientLocale.initialize(context), appLock);
   }
 
   /**
@@ -162,7 +170,7 @@ public final class ClientRuntime implements AutoCloseable {
         int port = id == null ? 47100 : profiles.claimPort(id);
 
         pipe = new ClientPipe(port, secret, assets, () -> id == null ? null : shell.upstream(id),
-          shell, () -> id == null ? "none" : shell.state.status(id));
+          shell, () -> shell.unavailableStatus(id));
         pipes.put(key, pipe);
         reset = id != null && !Integer.valueOf(port).equals(originalPorts.get(id));
         originalPorts.put(id, port);
@@ -179,15 +187,17 @@ public final class ClientRuntime implements AutoCloseable {
 
   /**
    * Интерфейс открывается независимо от состояния удалённого сервера.
-   * Если запуск завершился уже в фоне, соединения остаются остановленными до возврата.
+   * Закрытый gate холодного запуса публикует locked вместо попытки соединения.
    */
-  public void start(boolean foreground) {
+  public void start(boolean foreground) throws Exception {
     show(profiles.selected);
 
-    if (foreground) {
-      shell.connect(profiles.selected, true);
-    } else {
+    if (!foreground) {
       shell.suspend();
+    } else if (shell.gateLocked()) {
+      shell.resume(true);
+    } else {
+      shell.connect(profiles.selected, true);
     }
   }
 

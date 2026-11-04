@@ -1468,5 +1468,12 @@
   "codeReviewPartialUnstageHunk": "Unstage current hunk",
   "codeReviewStaleNote": "Fragment is stale",
   "codeReviewLineRange": "lines {from}–{to}",
-  "codeReviewExplainInstruction": "Explain the selected changes."
+  "codeReviewExplainInstruction": "Explain the selected changes.",
+  "androidAppLock": "Lock the app",
+  "androidAppLockHint": "Requires confirmation after the background timeout. Saved immediately for this device.",
+  "androidAppLockDelay": "Background timeout",
+  "androidAppLockImmediate": "Immediately",
+  "androidAppLockMinute": "After a minute",
+  "androidAppLockFiveMinutes": "After 5 minutes",
+  "androidAppLockSaveFailed": "Could not save the app lock preference."
 }

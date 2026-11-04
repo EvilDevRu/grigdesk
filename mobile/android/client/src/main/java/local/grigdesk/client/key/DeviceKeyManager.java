@@ -21,23 +21,23 @@ public final class DeviceKeyManager extends X509ExtendedKeyManager {
 
   @Override
   public String chooseClientAlias(String[] types, Principal[] issuers, Socket socket) {
-    return DeviceKey.ALIAS;
+    return key.alias();
   }
 
   @Override
   public String chooseEngineClientAlias(String[] types, Principal[] issuers, SSLEngine engine) {
-    return DeviceKey.ALIAS;
+    return key.alias();
   }
 
   @Override
   public String[] getClientAliases(String type, Principal[] issuers) {
-    return new String[] { DeviceKey.ALIAS };
+    return new String[] { key.alias() };
   }
 
   @Override
   public PrivateKey getPrivateKey(String alias) {
     try {
-      return DeviceKey.ALIAS.equals(alias) ? key.privateKey() : null;
+      return key.alias().equals(alias) ? key.privateKey() : null;
     } catch (Exception exception) {
       throw new IllegalStateException("Ключ устройства недоступен", exception);
     }
@@ -46,7 +46,7 @@ public final class DeviceKeyManager extends X509ExtendedKeyManager {
   @Override
   public X509Certificate[] getCertificateChain(String alias) {
     try {
-      return DeviceKey.ALIAS.equals(alias) ? new X509Certificate[] { key.certificate() } : null;
+      return key.alias().equals(alias) ? new X509Certificate[] { key.certificate() } : null;
     } catch (Exception exception) {
       throw new IllegalStateException("Сертификат устройства недоступен", exception);
     }

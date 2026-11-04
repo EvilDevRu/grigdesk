@@ -44,5 +44,7 @@
   "relay_unauthorized": "The relay rejected the phone key. Get a new QR code in Server access.",
   "unpaired": "Pair this device again. Get a new QR in Server access.",
   "device_scope_forbidden": "Revoke the old pairing and connect the current app with a new QR.",
-  "device_unknown": "Device not found. Get a new QR code and pair it again."
+  "device_unknown": "Device not found. Get a new QR code and pair it again.",
+  "appLockInvalid": "Invalid app lock fields.",
+  "appLockSaveFailure": "Could not save the app lock preference."
 }

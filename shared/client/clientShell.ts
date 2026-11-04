@@ -1,6 +1,7 @@
 import type { BrowserPreferences } from '../browser/browserContract.ts';
 
 import { translator } from '../i18n/catalogs.ts';
+import { isRecord } from '../lib/objects.ts';
 
 import type { WindowControlsState } from '../desktop/windowControls.ts';
 
@@ -20,10 +21,27 @@ export interface MachineProfile {
   status: ConnectionStatus;
 }
 
+export interface AppLockState {
+  enabled: boolean;
+  delaySeconds: number;
+  locked: boolean;
+}
+
+/**
+ * Блок приложения читается только в полной форме: неверные типы и пороги не становятся разрешением.
+ * Старые оболочки без блока и повреждённые значения выглядят как отсутствие настройки.
+ */
+export function isAppLockState(value: unknown): value is AppLockState {
+  return isRecord(value) && typeof value.enabled === 'boolean'
+    && (value.delaySeconds === 0 || value.delaySeconds === 60 || value.delaySeconds === 300)
+    && typeof value.locked === 'boolean';
+}
+
 export interface ShellState {
   browser?: { preferences: BrowserPreferences; revision: number };
   windowControls?: WindowControlsState;
   desktopExit?: { skipConfirmation: boolean };
+  appLock?: AppLockState;
   locale?: { preference: string; systemLanguage: string };
   rev: number;
   status: ConnectionStatus;

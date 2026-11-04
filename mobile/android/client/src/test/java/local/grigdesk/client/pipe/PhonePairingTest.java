@@ -45,7 +45,7 @@ public class PhonePairingTest {
 
       ProfileStore store = new ProfileStore(file.toFile(), port -> true);
       javax.net.ssl.X509KeyManager installationKey = TlsFixture.keys("client");
-      Pairing pairing = new Pairing(store, () -> {
+      Pairing pairing = new Pairing(store, clientKey -> {
         keys.incrementAndGet();
 
         return installationKey;
@@ -99,5 +99,68 @@ public class PhonePairingTest {
 
     return "GRIGDESK:PHONE:2:" + Base64.getUrlEncoder().withoutPadding()
       .encodeToString(data.toString().getBytes(StandardCharsets.UTF_8));
+  }
+
+  /**
+   * Повторный QR той же машины обновляет существующий профиль, сохраняя id и порт.
+   * Привязка использует современную личность и записывает её версию в профиль.
+   */
+  @Test
+  public void modernQrRebindsSameProfileAndRecordsKeyVersion() throws Exception {
+    Path root = Files.createTempDirectory("phone-rebind-");
+    Path file = root.resolve("profiles.json");
+    String[] fp = new String[1];
+    java.util.List<Integer> requested = new java.util.ArrayList<>();
+
+    try (TlsFixture server = new TlsFixture((head, body, output) -> {
+      byte[] bytes = body.readAllBytes();
+      JSONObject response = new JSONObject().put("fp", fp[0]).put("name", "Машина стенда")
+        .put("device", new JSONObject().put("id", "d87654321").put("name", "Телефон"));
+
+      if (head.target().endsWith("/pair")) {
+        assertEquals("AAECAwQFBgcICQoLDA0ODxAREhMUFRYX", new JSONObject(
+          new String(bytes, StandardCharsets.UTF_8)).getString("code"));
+        response.put("server", new JSONObject().put("fp", fp[0]).put("name", "Машина стенда"));
+      }
+
+      TlsFixture.response(output, 200, "0.1", response.toString().getBytes(StandardCharsets.UTF_8));
+    }); PhoneDirectFixture direct = new PhoneDirectFixture(server.server.getLocalPort())) {
+      fp[0] = server.pin;
+
+      JSONObject legacy = new JSONObject().put("id", "m11111111").put("name", "Моё имя машины")
+        .put("kind", "remote").put("address", server.address()).put("fp", server.pin)
+        .put("port", 47101).put("createdAt", 1)
+        .put("direct", new JSONArray().put(direct.route()))
+        .put("deviceId", "d00000001");
+      JSONObject data = new JSONObject().put("version", 1).put("selected", JSONObject.NULL)
+        .put("profiles", new JSONArray().put(legacy));
+
+      Files.write(file, data.toString().getBytes(StandardCharsets.UTF_8));
+
+      ProfileStore store = new ProfileStore(file.toFile(), port -> true);
+      javax.net.ssl.X509KeyManager installationKey = TlsFixture.keys("client");
+      Pairing pairing = new Pairing(store, clientKey -> {
+        requested.add(clientKey);
+
+        return installationKey;
+      }, 0, 1);
+
+      JSONObject reborn = pairing.add(payload(server.pin, new JSONArray().put(direct.route()), null));
+
+      assertEquals("m11111111", reborn.getString("id"));
+      assertEquals(47101, reborn.getInt("port"));
+      assertEquals("Моё имя машины", reborn.getString("name"));
+      assertEquals(2, reborn.getInt("clientKey"));
+      assertEquals("d87654321", reborn.getString("deviceId"));
+      assertEquals(java.util.List.of(2), requested);
+      assertEquals(1, store.profiles.size());
+
+      ProfileStore restored = new ProfileStore(file.toFile(), candidate -> true);
+
+      assertEquals(2, restored.profiles.get(0).optInt("clientKey", 1));
+    } finally {
+      Files.deleteIfExists(file);
+      Files.deleteIfExists(root);
+    }
   }
 }
