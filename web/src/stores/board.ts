@@ -1,3 +1,5 @@
+import { useGrigdeskTasksStore } from './grigdeskTasks.ts';
+import { useTaskFavoritesStore } from './taskFavorites.ts';
 // Кеш доски B24. При переходе в раздел данные показываются мгновенно из кеша,
 // обновление идёт в фоне + периодический поллинг (не тормозит навигацию).
 import { useAuthStore } from './auth.ts';
@@ -25,23 +27,22 @@ const forcedJobs = new WeakMap<object, Promise<number | undefined>>();
  * Ни секреты, ни ключ источника не передаются в диагностику или наружный запрос.
  */
 async function readBoardSource(signal?: AbortSignal): Promise<string> {
-  const raw = await api.get('/api/settings/b24', {
+  const raw = await api.get('/api/trackers', {
     signal,
     timeoutMs: 5000,
     retry: false,
   });
 
-  if (!isRecord(raw) || typeof raw.configured !== 'boolean'
-    || typeof raw.baseUrl !== 'string' || typeof raw.login !== 'string') {
+  if (!isRecord(raw) || (raw.externalId !== null && typeof raw.externalId !== 'string')
+    || !Number.isSafeInteger(raw.revision) || Number(raw.revision) < 0) {
     throw new Error(localeTranslator(uiLocalePort)('core.invalidBoardSnapshot'));
   }
 
   return JSON.stringify([
     useAuthStore().clientScope,
     useShellStore().profile?.id ?? '',
-    raw.baseUrl.replace(/\/+$/u, ''),
-    raw.login,
-    raw.configured,
+    raw.externalId,
+    raw.revision,
   ]);
 }
 
@@ -66,10 +67,25 @@ export const useBoardStore = defineStore('board', {
     activity: (s) => {
       const seen = useTaskSeenStore();
 
-      return boardActivity(s.data, seen.taskIds, { ready: seen.ready });
+      const external = boardActivity(s.data, seen.taskIds, { ready: seen.ready });
+      const own = useGrigdeskTasksStore();
+      const internal = boardActivity({ tasks: own.tasks }, seen.own.taskIds, { ready: seen.own.ready });
+
+      return {
+        ...external,
+        unseenCount: external.unseenCount + internal.unseenCount,
+        unseenTaskIds: [...external.unseenTaskIds, ...internal.unseenTaskIds]
+      };
     },
   },
   actions: {
+    /**
+     * Смена трекера снимает чтения и снимки предыдущего поколения.
+     * Общая очистка также отсекает ожидающие принудительные обновления.
+     */
+    invalidate() {
+      this.clearSource();
+    },
     /**
      * Принудительный refresh во время чтения не теряется и объединяется до своего старта.
      * Следующая мутация во время уже начатого refresh получает новое отложенное чтение.
@@ -159,7 +175,7 @@ export const useBoardStore = defineStore('board', {
 
         readAt = Math.max(Date.now(), this.readAt + 1);
 
-        const raw = await api.get('/api/b24/dashboard', {
+        const raw = await api.get('/api/tracker/dashboard', {
           signal: controller.signal,
           retry: false,
         });
@@ -234,6 +250,8 @@ export const useBoardStore = defineStore('board', {
      * Пауза включается только владельцем незавершённой записи credentials.
      */
     clearSource(suspended = false) {
+      useTaskFavoritesStore().clear({ source: 'tracker' });
+      useTaskSeenStore().clear({ source: 'tracker' });
       this.sourceEpoch += 1;
       reads.get(this)?.abort();
       reads.delete(this);

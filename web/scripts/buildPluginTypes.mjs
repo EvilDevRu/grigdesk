@@ -267,7 +267,7 @@ async function buildPackage() {
       ui: 'web/src/pluginRuntime/ui.js',
     };
 
-    metadata.version = `${version}-api2.1`;
+    metadata.version = version;
     metadata.grigDeskVersion = version;
     metadata.exports = {};
     metadata.peerDependencies = { vue: `~${lock.packages['node_modules/vue'].version}`, fastify: '^5.2.0' };

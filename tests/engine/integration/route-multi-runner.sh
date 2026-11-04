@@ -195,6 +195,24 @@ assert_rc 124 "$?" "provider timeout returns to the route retry budget"
 assert_eq alpha "$(cat "$TEST_ROOT/invocations")" \
   "timeout never changes provider"
 
+# Инфраструктурный отказ launch barrier не является ошибкой модели и не выбирает резерв.
+# Настоящие publisher/relay покрыты контрактным тестом; здесь проверяем путь диспетчера.
+saved_browser_start=$(declare -f browser_transport_start)
+browser_transport_start() {
+  BROWSER_TRANSPORT_ERROR=browser_run_stale
+  return 79
+}
+init_registry 470
+: >"$TEST_ROOT/invocations"
+export FAKE_ALPHA_RESULT=done
+run_agent 470 'browser launch failure' BUILD >/dev/null 2>&1
+assert_rc 79 "$?" 'browser launch failure reaches route runtime as host refusal'
+assert_eq '' "$(cat "$TEST_ROOT/invocations")" 'browser failure invokes neither primary nor reserve'
+assert_eq browser_run_stale "$BROWSER_TRANSPORT_ERROR" 'dispatcher retains exact transport cause'
+assert_eq 0 "$DISPATCH_INVOKE_STARTED" 'transport failure precedes model activity'
+assert_eq 1 "$(get 470 STALLED_HUMAN)" 'browser failure leaves resumable host stop'
+eval "$saved_browser_start"
+
 printf 'RUNNERS_COVERAGE=required\n' >>"$config"
 init_registry 48
 : >"$TEST_ROOT/invocations"

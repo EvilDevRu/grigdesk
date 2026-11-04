@@ -7,7 +7,7 @@ import type { GrigdeskTasksConfig, TaskNumberProbe } from './numbers.ts';
 
 export interface GrigdeskTasksServiceOptions {
   config: GrigdeskTasksConfig;
-  b24: TaskNumberProbe;
+  tracker: TaskNumberProbe;
   projectsService: Pick<ProjectsService, 'list' | 'read' | 'withReferences'>;
   factoryState: {
     discoverProfiles(): string[];
@@ -24,7 +24,7 @@ export class GrigdeskTaskInputError extends Error {
  * Origin приходит явно из окна: транспорт устройства может переписать Host и Origin.
  * Ссылка не загружается сервером и не принимает credentials или произвольный путь.
  */
-function clientOrigin(value: unknown): string {
+function clientOrigin(value: unknown, sourced = false): string {
   if (typeof value !== 'string') {
     throw new GrigdeskTaskInputError('Не указан адрес интерфейса');
   }
@@ -34,7 +34,7 @@ function clientOrigin(value: unknown): string {
 
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
       || url.pathname !== '/' || url.search || url.hash || value !== url.origin
-      || value.length + '/#/board?openTask='.length + 12 > TICKET_LIMITS.sourceUrl) {
+      || value.length + '/#/board?openTask='.length + (sourced ? 23 : 12) > TICKET_LIMITS.sourceUrl) {
       throw new Error('Некорректный origin');
     }
 
@@ -49,8 +49,8 @@ function clientOrigin(value: unknown): string {
  * Отсутствующий профиль или пустой каталог не заменяются глобальным проектом.
  */
 export function createGrigdeskTasksService(options: GrigdeskTasksServiceOptions) {
-  const { config, b24, projectsService, factoryState } = options;
-  const store = new GrigdeskTaskStore({ config, b24 });
+  const { config, tracker, projectsService, factoryState } = options;
+  const store = new GrigdeskTaskStore({ config, tracker });
 
   /**
    * Проверяет выбранный проект по действующему реестру и опубликованному каталогу.
@@ -85,7 +85,8 @@ export function createGrigdeskTasksService(options: GrigdeskTasksServiceOptions)
       return {
         tasks: tasks.map(({ description: _description, ...summary }) => summary),
         revision,
-        b24Configured: b24.isConfigured(),
+        trackerConfigured: tracker.isConfigured(),
+        personalStateVersion: 1 as const,
       };
     },
     /**
@@ -111,7 +112,7 @@ export function createGrigdeskTasksService(options: GrigdeskTasksServiceOptions)
      * Клиент не задаёт номер, источник или ссылку на задачу.
      * Сервер валидирует поля и повторно проверяет проект под защитой ссылок.
      */
-    async create(input: unknown) {
+    async create(input: unknown, { sources = false } = {}) {
       if (!isRecord(input) || Object.keys(input).some((key) =>
         !['title', 'description', 'projectId', 'clientOrigin'].includes(key))
         || typeof input.title !== 'string' || !input.title.trim()
@@ -124,7 +125,7 @@ export function createGrigdeskTasksService(options: GrigdeskTasksServiceOptions)
       const title = input.title.trim();
       const description = input.description;
       const projectId = input.projectId;
-      const origin = clientOrigin(input.clientOrigin);
+      const origin = clientOrigin(input.clientOrigin, sources);
 
       return projectsService.withReferences(async () => {
         const selected = await project(projectId);
@@ -135,6 +136,7 @@ export function createGrigdeskTasksService(options: GrigdeskTasksServiceOptions)
           projectId: selected.id,
           projectTitle: selected.title,
           clientOrigin: origin,
+          sourced: sources,
         });
       });
     },

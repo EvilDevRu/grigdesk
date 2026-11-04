@@ -35,9 +35,7 @@
               :loading="store.loading"
               @click="refresh"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                <path d="M21 12a9 9 0 1 1-2.6-6.4 M21 4v5h-5" />
-              </svg>
+              <UiRefreshIcon />
             </UiIconButton>
           </template>
         </UiPaneHeader>
@@ -147,6 +145,7 @@ import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import type { DockerContainer } from '../../../../shared/plugins/docker/dockerContracts';
 
 import { useDockerStore } from '../../stores/docker';
+import { UiRefreshIcon } from '../../ui';
 import { UiIconButton, UiInlineMessage, UiPaneHeader, UiTab, UiTabs, vTooltip } from '../../ui';
 import DockerCleanup from './DockerCleanup.vue';
 import DockerContainers from './DockerContainers.vue';

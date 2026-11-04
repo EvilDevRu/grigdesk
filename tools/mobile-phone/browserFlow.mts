@@ -270,7 +270,7 @@ export async function browserFlow(options: Options) {
         exact: true,
       })
       .waitFor();
-    await capture('b24-task');
+    await capture('tracker-task');
     await page
       .getByRole('button', {
         name: 'Запустить на конвейере',

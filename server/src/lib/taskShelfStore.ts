@@ -5,17 +5,17 @@ import path from 'node:path';
 
 import { objectOrEmpty } from '../../../shared/lib/objects.ts';
 
-import { parseB24TaskId } from './b24TaskId.ts';
+import { parseTrackerTaskId } from './trackers/taskId.ts';
 import type {
   ShelfAnalysisSnapshot,
   ShelfAnalysisState,
-  ShelfB24Snapshot,
+  ShelfTrackerSnapshot,
   ShelfEntry,
   ShelfEntrySnapshot,
   ShelfPipelineSnapshot,
   ShelfPutInput,
   ShelfReason,
-} from '../../../shared/b24/shelfContracts.ts';
+} from '../../../shared/trackers/shelfContracts.ts';
 
 const SCHEMA_VERSION = 1;
 
@@ -46,8 +46,12 @@ export class TaskShelfStoreError extends Error {
   }
 }
 
+/**
+ * Полка сохраняет прежние правила числовых номеров внешних и собственных задач.
+ * Общий разбор не меняет предметный код отказа хранилища.
+ */
 export function normalizeShelfTaskId(value: unknown): string {
-  const normalized = parseB24TaskId(value);
+  const normalized = parseTrackerTaskId(value);
   if (!normalized) {
     throw new TaskShelfStoreError(
       'BAD_SHELF_TASK_ID',
@@ -136,7 +140,11 @@ function normalizePipeline(value: unknown): ShelfPipelineSnapshot | null {
   };
 }
 
-function normalizeB24(value: unknown): ShelfB24Snapshot | null {
+/**
+ * Нейтральный обработчик проверяет значения прежней сериализованной схемы.
+ * Поля сохранённых записей остаются совместимыми и не требуют переноса данных.
+ */
+function normalizeTrackerSettings(value: unknown): ShelfTrackerSnapshot | null {
   if (value === null) return null;
   const source = objectOrEmpty(value);
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -162,7 +170,7 @@ function normalizeSnapshot(value: unknown): ShelfEntrySnapshot {
   return {
     analysis: normalizeAnalysis(source.analysis),
     pipeline: normalizePipeline(source.pipeline),
-    b24: normalizeB24(source.b24),
+    b24: normalizeTrackerSettings(source.b24),
   };
 }
 
@@ -330,11 +338,23 @@ export class TaskShelfStore {
     return this._enqueue(() => this._snapshot(this._read(), String(scope)));
   }
 
-  async put(scope: string, taskId: unknown, value: unknown): Promise<ShelfSnapshot> {
+  /**
+   * Запись проверяется и меняется в общей очереди после проверки поколения источника.
+   * Подтверждение просмотра не создаёт удалённую ранее запись полки заново.
+   */
+  async put(
+    scope: string,
+    taskId: unknown,
+    value: unknown,
+    beforeWrite?: () => void,
+  ): Promise<ShelfSnapshot> {
     const id = normalizeShelfTaskId(taskId);
     const input = normalizeInput(value);
     const key = String(scope);
+
     return this._enqueue(() => {
+      beforeWrite?.();
+
       const document = this._read();
       const current = document.scopes[key] || { revision: 0, entries: [] };
       const index = current.entries.findIndex((entry) => entry.taskId === id);
@@ -362,10 +382,13 @@ export class TaskShelfStore {
     });
   }
 
-  async remove(scope: string, taskId: unknown): Promise<ShelfSnapshot> {
+  async remove(scope: string, taskId: unknown, beforeWrite?: () => void): Promise<ShelfSnapshot> {
     const id = normalizeShelfTaskId(taskId);
     const key = String(scope);
+
     return this._enqueue(() => {
+      beforeWrite?.();
+
       const document = this._read();
       const current = document.scopes[key];
       if (!current || !current.entries.some((entry) => entry.taskId === id)) {

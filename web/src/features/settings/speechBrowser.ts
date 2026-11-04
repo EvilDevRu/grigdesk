@@ -1,3 +1,5 @@
+import { browserLocalSpeechAllowed } from '../speech/browserSupport.ts';
+
 interface BrowserRecognition {
   prototype: object;
   available?: (options: { langs: string[]; processLocally: boolean }) => Promise<string>;
@@ -23,8 +25,9 @@ export function browserSpeechRecognition(win: Window): BrowserRecognition | null
  */
 export async function probeLocalSpeech(win: Window, language: string): Promise<string> {
   const recognition = browserSpeechRecognition(win);
+  const allowed = browserLocalSpeechAllowed(win.navigator?.userAgent ?? '');
 
-  if (!recognition?.available || !('processLocally' in recognition.prototype)) {
+  if (!allowed || !recognition?.available || !('processLocally' in recognition.prototype)) {
     return 'unavailable';
   }
 

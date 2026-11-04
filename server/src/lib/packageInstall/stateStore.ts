@@ -53,6 +53,16 @@ export interface PluginApplyIntent {
   archiveKey: string | null;
 }
 
+export interface PackageRemovalIntent {
+  pluginId: string;
+  transactionId: string;
+  previousTransactionId: string;
+  current: DirectoryIdentity;
+  previous: DirectoryIdentity | null;
+  npmDirs: string[];
+  previousNpmDirs: string[];
+}
+
 export type CleanupEntry =
   | {
     kind: 'job';
@@ -81,6 +91,8 @@ export interface PluginInstallState {
   cleanup: CleanupEntry[];
   lastRollback: Record<string, RollbackReceipt>;
   workers: Record<string, CommandWorker>;
+  removal?: PackageRemovalIntent | null;
+  removedIds?: string[];
 }
 
 export interface InstallStateOptions {

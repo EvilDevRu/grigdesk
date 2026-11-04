@@ -1,6 +1,8 @@
 # Сервер и доступ
 
 - [Состояние мастера: API, ревизии и создание проекта](onboarding-state.md)
+- [Выбор режима задач до заполнения проекта в мастере](onboarding-workspace-preview.md)
+- [Возврат по шагам мастера без повторного создания проекта](onboarding-back.md)
 
 - [Единый режим допуска GLM при установке сервера и DeepSeek](server-install-glm-mode.md)
 
@@ -21,6 +23,8 @@
 Читай перед правкой: `server/src/app.ts`, `server/src/plugins`, `server/src/modules/auth`, `bin`, `deploy`.
 
 ## Устройство
+
+- [Подписанный канал сайта: CI, публикация и восстановление обновления пакета](site-release-channel.md)
 
 - [Фоновый реестр исполнителей: снимок, бюджет 1,2 с, общий сбор и явный refresh](providers-background-read.md)
 

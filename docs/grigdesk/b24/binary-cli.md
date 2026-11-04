@@ -72,7 +72,7 @@ devDependencies пакета (`npm --prefix b24 ci --include=dev`). Порядо
 
 ## Запросы, вывод и коды выхода
 
-Каждая команда — один HTTP-запрос к `/api/b24/…` с заголовком `X-GrigDesk-Token`; `start <id>` —
+Каждая команда — один HTTP-запрос к `/api/tracker/…` с заголовком `X-GrigDesk-Token`; `start <id>` —
 renew с подавлением его ошибки, затем timer/start. Транспорт — `node:http` / `node:https` с
 собственным агентом на каждый запрос, созданным без `proxyEnv`. Прокси не используются:
 `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, их варианты в нижнем регистре и `NODE_USE_ENV_PROXY`

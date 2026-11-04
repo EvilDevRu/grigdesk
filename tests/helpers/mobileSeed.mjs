@@ -15,7 +15,7 @@ import https from 'node:https';
 import tls from 'node:tls';
 
 import authPlugin from '../../server/src/plugins/auth.ts';
-import b24Module from '../../server/src/modules/b24/index.ts';
+import trackerModule from '../../server/src/modules/tracker/index.ts';
 import mobileModule from '../../server/src/modules/mobile/index.ts';
 import { MobileService } from '../../server/src/lib/mobile/service.ts';
 import { registerMobileFacade } from '../../server/src/lib/mobile/facade/index.ts';
@@ -333,7 +333,7 @@ export async function seedFactoryServer(t, fx) {
     factoryState: fx.adapter,
     config: fx.config,
     prefs: { read: () => ({}) },
-    b24: null,
+    tracker: null,
     analyzer: {
       readClarifications: async () => null,
       readOpenQuestions: async () => null,
@@ -482,13 +482,13 @@ export async function createMobileSeed(t, { rootDirectory = null } = {}) {
         factoryState: fx.adapter,
         config: fx.config,
         prefs: { read: () => ({}) },
-        b24: null,
+        tracker: null,
         analyzer: {
           readClarifications: async () => null,
           readOpenQuestions: async () => null,
         },
       });
-      await app.register(b24Module, { b24 });
+      await app.register(trackerModule, { tracker: b24 });
 
       // Каталог стенда соответствует управляемому исполнителю и не запускает discovery.
       // Новые формы читают эти DTO через настоящий мобильный фасад и два TLS-слоя.

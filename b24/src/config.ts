@@ -21,7 +21,7 @@ const PORT_ERROR = 'Некорректный порт GrigDesk: нужно це�
 const TOKEN_ERROR = 'Некорректный токен GrigDesk.';
 
 /**
- * Проверяет адрес GrigDesk и убирает конечные слэши перед добавлением /api/b24.
+ * Проверяет адрес GrigDesk и убирает конечные слэши перед добавлением /api/tracker.
  * Учётные данные, query, fragment и чужие протоколы отвергаются до HTTP.
  */
 function baseUrlOf(value: string): string {

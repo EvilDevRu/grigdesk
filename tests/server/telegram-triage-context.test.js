@@ -121,7 +121,7 @@ async function fixture(t, {
       analysisTimeoutMs: 1000,
     },
     claudeAuth: null,
-    b24: {
+    tracker: {
       taskDetail: async () => task,
       taskPageData: async () => ({ comments: [] }),
     },

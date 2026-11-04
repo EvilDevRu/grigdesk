@@ -28,8 +28,6 @@ async function settingsApp({ prefs, speechRuntime, events = [], modelJobs = unde
     broadcast: (event, data) => events.push({ event, data }),
   });
   await app.register(settingsModule, {
-    credsStore: { publicView: () => ({}), write: () => {} },
-    b24: { invalidate: () => {}, testAuth: async () => ({ ok: true }) },
     prefs,
     factoryDebug: {},
     speechRuntime,

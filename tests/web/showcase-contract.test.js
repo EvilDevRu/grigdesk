@@ -51,6 +51,7 @@ test('обзор принимает готовую цель без карты э
     taskTitle: null,
     viewUrl: 'http://127.0.0.1:13000',
     viewPort: null,
+    serviceHost: null,
     status: 'ready',
     reason: '',
     screenCount: 0,

@@ -19,17 +19,31 @@ import type { PluginServerAsync, PluginServerCallback, PluginServerOptions }
   from '@grigdesk/plugin-types/server';
 import type { FastifyRequest } from 'fastify';
 const manifest: PluginManifest = {
-  id: 'consumer', api: 2, nav: { path: '/ext/consumer', group: 'rail' },
-  settings: [{ key: 'greeting', type: 'string', default: 'Привет' }],
-  placements: [{ slot: 'chat.sidebar', default: true }],
-  webModule: { dir: 'ui', entry: 'panel.js', css: ['panel.css'],
-    locales: { ru: 'ru.json', en: 'en.json' }, startOnLogin: true },
-  install: { npm: [] }, minGrigDeskVersion: '0.1.0',
+  id: 'consumer', api: 1, description: 'Проверка публичного v1', icon: 'assets/icon.png',
+  entrypoints: { server: 'runtime/main.ts', web: { dir: 'ui', entry: 'panel.js' } },
+  contributes: {
+    panels: [{ title: 'Панель', group: 'rail' }],
+    settings: [{ key: 'greeting', type: 'string', default: 'Привет' }],
+    slots: [{ slot: 'provider.popover.after-bars', kind: 'provider-usage', default: true }],
+    commands: [{ id: 'inspect', title: 'Проверить' }], themes: [],
+  },
+  install: { npm: [] }, engines: { grigdesk: '>=0.1.0' },
 };
-const legacy: PluginManifest = { id: 'legacy', api: 1, web: 'web' };
 const installed: InstallablePluginManifest = { ...manifest, version: '1.0.0' };
-// @ts-expect-error Допустимы только API 1 и 2.
-const badApi: PluginManifest = { id: 'bad', api: 3 };
+// @ts-expect-error Поколение исполняемого контракта заморожено значением 1.
+const badApi: PluginManifest = { ...manifest, api: 2 };
+// @ts-expect-error Старый HTML-канал не входит в v1.
+const legacy: PluginManifest = { ...manifest, web: 'web' };
+// @ts-expect-error Модуль объявляется через entrypoints.web.
+const oldModule: PluginManifest = { ...manifest, webModule: { dir: 'ui', entry: 'panel.js' } };
+// @ts-expect-error Строковый nav.icon больше не является входом автора.
+const oldIcon: PluginManifest = { ...manifest, nav: { path: '/x', icon: 'plugin' } };
+const { description: omittedDescription, ...withoutDescription } = manifest;
+const { icon: omittedIcon, ...withoutIcon } = manifest;
+// @ts-expect-error Описание обязательно.
+const missingDescription: PluginManifest = withoutDescription;
+// @ts-expect-error Файловая иконка обязательна.
+const missingIcon: PluginManifest = withoutIcon;
 // @ts-expect-error Устанавливаемому пакету нужна version.
 const badVersion: InstallablePluginManifest = { id: 'bad' };
 declare const request: FastifyRequest;
@@ -73,6 +87,20 @@ const rootId: string | undefined = roots[0]?.id;
 const asset = await options.core.documents.readAsset({ source: 'grigdesk', path: 'image.png' });
 const bytes: Buffer = asset.content;
 const value: Promise<number> = options.core.withPathLock('key', async () => 42);
+if (options.core.modelText && options.core.project && options.core.sandboxes) {
+  const result = await options.core.modelText({
+    modelRef: { provider: 'example', model: 'model', effort: 'high' }, message: 'данные',
+    onReceipt: (receipt) => { const cost: number | null = receipt.cost; },
+  });
+  const reply: string = result.reply;
+  const project = await options.core.project('example');
+  const projectId: string = project.id;
+  const overview = await options.core.sandboxes();
+  // @ts-expect-error Cwd не является параметром model-only вызова.
+  options.core.modelText({ modelRef: { provider: 'p', model: 'm' }, message: '', cwd: '/tmp' });
+  // @ts-expect-error Дополнительного версионированного hostServices нет.
+  options.hostServices;
+}
 const providers = await options.core.getProviders('3d');
 for (const provider of providers) {
   const snapshot = provider.snapshot?.();
@@ -216,7 +244,7 @@ async function assertDeclarationClosure(directory) {
   }
 }
 
-test('TSDK-PACKAGE: внешняя команда создаёт переносимые entries и metadata', async (t) => {
+test('TSDK-V1-METADATA: внешняя команда создаёт переносимые entries и metadata', async (t) => {
   const directory = await builtPackage();
   const metadata = JSON.parse(await readFile(path.join(directory, 'package.json'), 'utf8'));
   const lock = JSON.parse(await readFile(path.join(sourceRoot, 'web/package-lock.json'), 'utf8'));
@@ -227,7 +255,8 @@ test('TSDK-PACKAGE: внешняя команда создаёт перенос�
   assert.equal(metadata.name, '@grigdesk/plugin-types');
   assert.equal(metadata.type, 'module');
   assert.equal(metadata.private, true);
-  assert.equal(metadata.version, `${version}-api2.1`);
+  assert.equal(metadata.version, version);
+  assert.equal(metadata.grigDeskVersion, version);
   assert.equal(metadata.peerDependencies.vue, `~${vueVersion}`);
   assert.ok(semver.satisfies(vueVersion, metadata.peerDependencies.vue));
   assert.equal(semver.satisfies(`${semver.major(vueVersion)}.${semver.minor(vueVersion) + 1}.0`,
@@ -297,7 +326,8 @@ async function assertExampleServer(t, payload, manifest) {
   const files = Object.fromEntries(await Promise.all(entries.map(async (file) => [
     path.relative(payload, file), await readFile(file),
   ])));
-  const ast = ts.createSourceFile('server.js', files['server.js'].toString(), ts.ScriptTarget.Latest, true);
+  const source = files[manifest.entrypoints.server].toString();
+  const ast = ts.createSourceFile('server.js', source, ts.ScriptTarget.Latest, true);
   const routes = [];
   /**
    * Пример объявляет простой read-only маршрут литералом в вызове Fastify.get.
@@ -324,9 +354,14 @@ async function assertExampleServer(t, payload, manifest) {
   const response = await fixture.request('GET', `/api/ext/${manifest.id}${routes[0]}`);
 
   assert.equal(response.statusCode, 200, response.body);
+
+  const usage = await fixture.request('GET', `/api/ext/${manifest.id}/provider-usage?providerId=codex`);
+
+  assert.equal(usage.statusCode, 200, usage.body);
+  assert.ok(Array.isArray(usage.json().resources));
 }
 
-test('TSDK-EXAMPLE: TS и SFC собираются в payload без dev-инструментов и проходят validator', async (t) => {
+test('TSDK-V1-EXAMPLE: TS и SFC собираются в payload и проходят validator', async (t) => {
   const directory = await consumer(t, { example: true });
   const checked = await command('npm', ['run', 'typecheck'], directory);
 
@@ -345,12 +380,35 @@ test('TSDK-EXAMPLE: TS и SFC собираются в payload без dev-инс�
     grigDeskVersion: (await readFile(path.join(sourceRoot, 'VERSION'), 'utf8')).trim(),
   });
   const files = (await filesUnder(payload)).map((file) => path.relative(payload, file));
-  const panel = await readFile(path.join(payload, 'ui/panel.js'), 'utf8');
 
   assert.deepEqual(validation.npmDirs, []);
-  assert.equal(manifest.api, 2);
+  assert.equal(manifest.api, 1);
+  assert.equal(typeof manifest.description, 'string');
+  assert.ok(manifest.description.trim());
+  assert.equal(typeof manifest.icon, 'string');
+  assert.ok(files.includes(manifest.icon));
+  assert.ok(manifest.entrypoints.server);
+  assert.ok(manifest.entrypoints.web);
+  assert.ok(manifest.contributes.panels.length);
+  assert.ok(manifest.contributes.slots.some((slot) => slot.kind === 'provider-usage'));
+
+  for (const legacy of ['web', 'webModule', 'nav', 'minGrigDeskVersion']) {
+    assert.equal(legacy in manifest, false);
+  }
+
   assert.deepEqual(manifest.install.npm, []);
-  assert.ok(files.includes('server.js') && files.includes('ui/panel.js') && files.includes('ui/panel.css'));
+
+  const web = manifest.entrypoints.web;
+  const panelPath = path.join(web.dir, web.entry);
+  const panel = await readFile(path.join(payload, panelPath), 'utf8');
+
+  assert.ok(files.includes(manifest.entrypoints.server));
+  assert.ok(files.includes(panelPath));
+
+  for (const css of web.css ?? []) {
+    assert.ok(files.includes(path.join(web.dir, css)));
+  }
+
   assert.ok(files.every((file) => !/node_modules|package(?:-lock)?\.json|\.vue$|\.ts$/.test(file)));
   assert.match(panel, /from\s*["']vue["']/);
   assert.match(panel, /from\s*["']@grigdesk\/ui["']/);
@@ -396,7 +454,7 @@ test('TSDK-DOCS: рецепт подключения, совместимость
   assert.match(index, /\]\(plugin-types\.md\)/);
 
   for (const pattern of [/build:plugin-types/, /--out-dir/, /@grigdesk\/ui/, /import type/,
-    /external/, /Vue|vue/, /api2\.N/, /0\.1\.0-api2\.(?:N|1)/,
+    /external/, /Vue|vue/,
     /пересоб[а-яё]*[\s\S]{0,250}верс[а-яё]*|верс[а-яё]*[\s\S]{0,250}пересоб[а-яё]*/i]) {
     assert.match(contract, pattern);
   }

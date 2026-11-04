@@ -309,7 +309,7 @@
             </span>
             <UiSelect v-model="defCreator">
               <option value="">— от меня —</option>
-              <option v-for="u in b24users" :key="u.id" :value="u.id">{{ u.name }}</option>
+              <option v-for="u in trackerUsers" :key="u.id" :value="u.id">{{ u.name }}</option>
             </UiSelect>
           </label>
           <label class="fld">
@@ -318,14 +318,14 @@
             </span>
             <UiSelect v-model="defResponsible">
               <option value="">— на себя —</option>
-              <option v-for="u in b24users" :key="u.id" :value="u.id">{{ u.name }}</option>
+              <option v-for="u in trackerUsers" :key="u.id" :value="u.id">{{ u.name }}</option>
             </UiSelect>
           </label>
           <label class="fld">
             <span class="lbl">Проект</span>
             <UiSelect v-model="defGroup">
               <option value="">— без проекта —</option>
-              <option v-for="g in b24groups" :key="g.id" :value="g.id">{{ g.name }}</option>
+              <option v-for="g in trackerGroups" :key="g.id" :value="g.id">{{ g.name }}</option>
             </UiSelect>
           </label>
           <label class="fld">
@@ -486,7 +486,7 @@
               :disabled="Boolean(d.createdId)"
             >
               <option value="">от меня</option>
-              <option v-for="u in b24users" :key="u.id" :value="u.id">от: {{ u.name }}</option>
+              <option v-for="u in trackerUsers" :key="u.id" :value="u.id">от: {{ u.name }}</option>
             </UiSelect>
             <UiSelect
               v-model="d.responsibleId"
@@ -495,7 +495,7 @@
               :disabled="Boolean(d.createdId)"
             >
               <option value="">на себя</option>
-              <option v-for="u in b24users" :key="u.id" :value="u.id">{{ u.name }}</option>
+              <option v-for="u in trackerUsers" :key="u.id" :value="u.id">{{ u.name }}</option>
             </UiSelect>
             <UiSelect
               v-model="d.groupId"
@@ -504,7 +504,7 @@
               :disabled="Boolean(d.createdId)"
             >
               <option value="">без проекта</option>
-              <option v-for="g in b24groups" :key="g.id" :value="g.id">{{ g.name }}</option>
+              <option v-for="g in trackerGroups" :key="g.id" :value="g.id">{{ g.name }}</option>
             </UiSelect>
             <UiSelect
               v-model.number="d.priority"
@@ -1076,8 +1076,8 @@ interface B24Option {
   title?: string;
 }
 
-const b24users = ref<B24Option[]>([]);
-const b24groups = ref<B24Option[]>([]);
+const trackerUsers = ref<B24Option[]>([]);
+const trackerGroups = ref<B24Option[]>([]);
 
 /**
  * Список для селекта из ответа портала. Ростер принадлежит плагину B24, и раздел
@@ -1091,11 +1091,11 @@ function optionList(value: unknown, key: string): B24Option[] {
   return Array.isArray(source) ? source as B24Option[] : [];
 }
 
-api.get('/api/b24/users').then((d) => {
-  b24users.value = optionList(d, 'users');
+api.get('/api/tracker/users').then((d) => {
+  trackerUsers.value = optionList(d, 'users');
 }).catch(() => {});
-api.get('/api/b24/groups').then((d) => {
-  b24groups.value = optionList(d, 'groups');
+api.get('/api/tracker/groups').then((d) => {
+  trackerGroups.value = optionList(d, 'groups');
 }).catch(() => {});
 
 // Смена общего выбора догоняет только те черновики, которые человек не трогал сам.

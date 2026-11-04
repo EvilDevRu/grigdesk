@@ -26,29 +26,29 @@ test('CAPACITY-01: тело портала держит одно место, м�
   t.mock.method(globalThis, 'fetch', async (path) => {
     calls.push(path);
 
-    return path === '/api/b24/capacity-held' ? new Response(stream) : new Response('{}');
+    return path === '/api/tracker/capacity-held' ? new Response(stream) : new Response('{}');
   });
 
   const options = { timeoutMs: 0, retry: false };
-  const first = api.get('/api/b24/capacity-held', options);
+  const first = api.get('/api/tracker/capacity-held', options);
 
   await flush();
 
-  const second = api.get('/api/b24/capacity-next', options);
-  const local = api.get('/api/b24/task-favorites', options);
+  const second = api.get('/api/tracker/capacity-next', options);
+  const local = api.get('/api/tracker/task-favorites', options);
   const ordinary = api.get('/api/providers', options);
 
   try {
     await Promise.all([local, ordinary]);
     await flush();
-    assert.equal(calls.includes('/api/b24/capacity-next'), false);
-    assert.equal(calls.includes('/api/b24/task-favorites'), true);
+    assert.equal(calls.includes('/api/tracker/capacity-next'), false);
+    assert.equal(calls.includes('/api/tracker/task-favorites'), true);
     assert.equal(calls.includes('/api/providers'), true);
     body.enqueue(new TextEncoder().encode('{}'));
     body.close();
     closed = true;
     await Promise.all([first, second]);
-    assert.equal(calls.includes('/api/b24/capacity-next'), true);
+    assert.equal(calls.includes('/api/tracker/capacity-next'), true);
   } finally {
     if (!closed) {
       body.enqueue(new TextEncoder().encode('{}'));
@@ -69,15 +69,15 @@ test('CAPACITY-02: отмена ожидающего чтения не созд�
   t.mock.method(globalThis, 'fetch', async (path) => {
     calls.push(path);
 
-    return path === '/api/b24/capacity-held-cancel' ? held : new Response('{}');
+    return path === '/api/tracker/capacity-held-cancel' ? held : new Response('{}');
   });
 
-  const first = api.get('/api/b24/capacity-held-cancel', { timeoutMs: 0, retry: false });
+  const first = api.get('/api/tracker/capacity-held-cancel', { timeoutMs: 0, retry: false });
 
   await flush();
 
   const consumer = new AbortController();
-  const cancelled = api.get('/api/b24/capacity-abandoned', {
+  const cancelled = api.get('/api/tracker/capacity-abandoned', {
     timeoutMs: 0,
     retry: false,
     signal: consumer.signal,
@@ -90,7 +90,7 @@ test('CAPACITY-02: отмена ожидающего чтения не созд�
     release(new Response('{}'));
     await first;
     await flush();
-    assert.equal(calls.includes('/api/b24/capacity-abandoned'), false);
+    assert.equal(calls.includes('/api/tracker/capacity-abandoned'), false);
   } finally {
     release(new Response('{}'));
     await first;
@@ -114,11 +114,11 @@ test('CAPACITY-03: мутация не ждёт разрешение и не п�
     throw new TypeError('fixture network failure');
   });
 
-  const first = api.get('/api/b24/capacity-held-mutation', { timeoutMs: 0, retry: false });
+  const first = api.get('/api/tracker/capacity-held-mutation', { timeoutMs: 0, retry: false });
 
   try {
     await flush();
-    await assert.rejects(api.post('/api/b24/task/42/timer/start', {}), TypeError);
+    await assert.rejects(api.post('/api/tracker/task/42/timer/start', {}), TypeError);
     assert.equal(mutations, 1);
   } finally {
     release(new Response('{}'));
@@ -139,37 +139,37 @@ test('CAPACITY-04: локальная полоса общая, query и отме
   t.mock.method(globalThis, 'fetch', async (path) => {
     calls.push(path);
 
-    return path.startsWith('/api/b24/task-favorites') ? new Response(stream) : new Response('{}');
+    return path.startsWith('/api/tracker/task-favorites') ? new Response(stream) : new Response('{}');
   });
 
   const options = { timeoutMs: 0, retry: false };
-  const first = api.get('/api/b24/task-favorites?capacity=one', options);
+  const first = api.get('/api/tracker/task-favorites?capacity=one', options);
 
   await flush();
 
   const consumer = new AbortController();
-  const abandoned = api.get('/api/b24/task-seen', {
+  const abandoned = api.get('/api/tracker/task-seen', {
     ...options,
     signal: consumer.signal,
   }).catch((error) => error);
-  const last = api.get('/api/b24/task-shelf', options);
+  const last = api.get('/api/tracker/task-shelf', options);
 
   try {
     await Promise.all([
-      api.get('/api/b24/capacity-portal-with-local', options),
+      api.get('/api/tracker/capacity-portal-with-local', options),
       api.get('/api/providers', options),
     ]);
     await flush();
-    assert.equal(calls.includes('/api/b24/task-seen'), false);
-    assert.equal(calls.includes('/api/b24/task-shelf'), false);
+    assert.equal(calls.includes('/api/tracker/task-seen'), false);
+    assert.equal(calls.includes('/api/tracker/task-shelf'), false);
     consumer.abort();
     assert.equal((await abandoned).name, 'AbortError');
     body.enqueue(new TextEncoder().encode('{}'));
     body.close();
     closed = true;
     await Promise.all([first, last]);
-    assert.equal(calls.includes('/api/b24/task-seen'), false);
-    assert.equal(calls.includes('/api/b24/task-shelf'), true);
+    assert.equal(calls.includes('/api/tracker/task-seen'), false);
+    assert.equal(calls.includes('/api/tracker/task-shelf'), true);
   } finally {
     if (!closed) {
       body.enqueue(new TextEncoder().encode('{}'));

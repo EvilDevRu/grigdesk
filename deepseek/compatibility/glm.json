@@ -1,11 +1,11 @@
 {
   "format": 1,
   "profileRevision": "grigdesk-glm-profile-v3",
-  "policyRevision": "grigdesk-glm-policy-v3",
+  "policyRevision": "grigdesk-glm-policy-v4",
   "admission": [
     {
       "mode": "coding-plan",
-      "compatibility": "6a48990fa63e0b6391a1d087cb378844927126c49e269ee0bcc960beba37fbbc"
+      "compatibility": "b05ed02cd4a9ab6f23325bb8427c4ff8382ea6051bb78c21de55d90db3d3c899"
     }
   ]
 }

@@ -250,7 +250,8 @@ export async function applyIntent(
     await store.mutate((state) => {
       state.apply = structuredClone(intent);
 
-      if (state.job?.id !== intent.jobId || !['ready', 'applying'].includes(state.job.status)) {
+      if (state.job?.id !== intent.jobId
+        || !['ready', 'awaiting_restart', 'applying'].includes(state.job.status)) {
         throw installError('job_not_ready');
       }
 

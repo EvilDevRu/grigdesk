@@ -6,8 +6,10 @@ autoOpenDisabled, active и answersByProject. Только отсутствие 
 CAS по expectedRevision и атомарную запись tmp0600 → rename. `onboarding-changed` следует за записью.
 
 `GET /api/onboarding` возвращает снимок и shouldOpen. `POST /start` принимает mode=auto|manual
-и expectedRevision; результат содержит open. PATCH сохраняет draft. POST `/advance` и `/dismiss`
-принимают sessionId и expectedRevision; skipAi разрешён только на шаге ai. POST `/repository`
+и expectedRevision; результат содержит open. PATCH сохраняет draft. POST `/advance`, `/back` и `/dismiss`
+принимают sessionId и expectedRevision; skipAi разрешён только на шаге ai.
+`/advance` с `previewWorkspace=true` открывает режим задач до заполнения проекта —
+[контракт предварительного выбора](onboarding-workspace-preview.md). POST `/repository`
 принимает dir и только читает локальный Git. Все пути начинаются с `/api/onboarding`, закрыты
 общим auth, возвращают no-store, отклоняют лишние поля. Конфликт даёт 409 с текущим снимком.
 
@@ -20,6 +22,7 @@ CAS по expectedRevision и атомарную запись tmp0600 → rename.
 точное совпадение с собственным обычным паспортом; чужой, архивный или удалённый проект не
 перезаписывается. Сам паспорт пишет существующий ProjectsService, включая projects-changed.
 После создания PATCH меняет только workspace.mode; форму паспорта и профиль мастер не меняет.
+Возврат по шагам сохраняет этот запрет; повторный проход шага проекта использует уже созданный паспорт.
 
 answersByProject сохраняет repositories[].name/source/baseBranch, workspace.mode, aiSkipped,
 projectRevision и complete. Это исходные ответы для будущего образца, не действующий профиль.

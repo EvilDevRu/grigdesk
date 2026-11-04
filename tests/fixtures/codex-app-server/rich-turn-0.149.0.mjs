@@ -1019,7 +1019,8 @@ export function runFixture({ onTurn, onBeforeTurn, effectiveSettings } = {}) {
 
       phase = ['interrupt', 'context-interrupt'].includes(scenario)
         ? 'interrupt'
-        : ['ssh-tool', 'lookup-tool', 'mcp-elicitation', 'mcp-resolved', 'steer'].includes(scenario)
+        : ['ssh-tool', 'lookup-tool', 'screenshot-tool', 'mcp-elicitation', 'mcp-resolved', 'steer']
+          .includes(scenario)
           ? scenario
           : 'complete';
 
@@ -1073,16 +1074,32 @@ export function runFixture({ onTurn, onBeforeTurn, effectiveSettings } = {}) {
           },
         });
       }
-      else if (scenario === 'lookup-tool') {
-        send({ method: 'item/started', params: {
-          threadId: THREAD_ID, turnId: TURN_ID, startedAtMs: 1_700_000_001_050,
-          item: {
-            type: 'dynamicToolCall', id: 'lookup-call-1', namespace: null,
-            tool: 'sample_lookup',
-            arguments: { action: 'search', query: 'деплой', limit: 3 },
-            status: 'inProgress', contentItems: null, success: null, durationMs: null,
+      else if (['lookup-tool', 'screenshot-tool'].includes(scenario)) {
+        const screenshot = scenario === 'screenshot-tool';
+        const tool = screenshot ? 'grigdesk_browser' : 'sample_lookup';
+        const args = screenshot
+          ? { action: 'screenshot', tabId: 'fixture-tab' }
+          : { action: 'search', query: 'деплой', limit: 3 };
+
+        send({
+          method: 'item/started',
+          params: {
+            threadId: THREAD_ID,
+            turnId: TURN_ID,
+            startedAtMs: 1_700_000_001_050,
+            item: {
+              type: 'dynamicToolCall',
+              id: 'lookup-call-1',
+              namespace: null,
+              tool,
+              arguments: args,
+              status: 'inProgress',
+              contentItems: null,
+              success: null,
+              durationMs: null,
+            },
           },
-        } });
+        });
         send({
           id: 91008,
           method: 'item/tool/call',
@@ -1090,8 +1107,8 @@ export function runFixture({ onTurn, onBeforeTurn, effectiveSettings } = {}) {
             threadId: THREAD_ID,
             turnId: TURN_ID,
             callId: 'lookup-call-1',
-            tool: 'sample_lookup',
-            arguments: { action: 'search', query: 'деплой', limit: 3 },
+            tool,
+            arguments: args,
           },
         });
       }
@@ -1266,29 +1283,54 @@ export function runFixture({ onTurn, onBeforeTurn, effectiveSettings } = {}) {
       return;
     }
 
-    if (phase === 'lookup-tool') {
+    if (['lookup-tool', 'screenshot-tool'].includes(phase)) {
       if (message.id !== 91008 || message.method) {
         fail('item/tool/call образца ожидает ровно один JSON-RPC ответ');
+
         return;
       }
-      const payload = dynamicToolPayload(message, true);
+
+      const screenshot = phase === 'screenshot-tool';
+      const payload = screenshot ? message.result : dynamicToolPayload(message, true);
+
       if (!payload) return;
-      if (payload.items?.[0]?.title !== 'Очередь деплоя') {
-        fail('sample_lookup обязан вернуть результат вызова');
+      if (screenshot && (payload.success !== true
+        || payload.contentItems?.[0]?.type !== 'inputImage'
+        || !payload.contentItems[0].imageUrl?.startsWith('data:image/jpeg;base64,'))) {
+        fail('grigdesk_browser обязан передать типизированную картинку');
+
         return;
       }
-      send({ method: 'item/completed', params: {
-        threadId: THREAD_ID, turnId: TURN_ID, completedAtMs: 1_700_000_001_075,
-        item: {
-          type: 'dynamicToolCall', id: 'lookup-call-1', namespace: null,
-          tool: 'sample_lookup',
-          arguments: { action: 'search', query: 'деплой', limit: 3 },
-          status: 'completed', contentItems: message.result.contentItems,
-          success: true, durationMs: 25,
+      if (!screenshot && payload.items?.[0]?.title !== 'Очередь деплоя') {
+        fail('sample_lookup обязан вернуть результат вызова');
+
+        return;
+      }
+
+      send({
+        method: 'item/completed',
+        params: {
+          threadId: THREAD_ID,
+          turnId: TURN_ID,
+          completedAtMs: 1_700_000_001_075,
+          item: {
+            type: 'dynamicToolCall',
+            id: 'lookup-call-1',
+            namespace: null,
+            tool: screenshot ? 'grigdesk_browser' : 'sample_lookup',
+            arguments: screenshot
+              ? { action: 'screenshot', tabId: 'fixture-tab' }
+              : { action: 'search', query: 'деплой', limit: 3 },
+            status: 'completed',
+            contentItems: message.result.contentItems,
+            success: true,
+            durationMs: 25,
+          },
         },
-      } });
+      });
       phase = 'complete';
       emitRichTurn();
+
       return;
     }
 

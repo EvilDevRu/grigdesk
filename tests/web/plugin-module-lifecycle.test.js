@@ -10,7 +10,7 @@ import { deferred, settle } from './helpers/pluginRuntimeUnit.js';
  */
 async function lifecycleFixture(t, options = {}) {
   const f = await serviceFixture(t, 'pluginRuntime/runtime.ts');
-  const cards = f.vue.reactive([pluginCard({ webModule: { ...descriptor, startOnLogin: true } })]);
+  const cards = f.vue.reactive([pluginCard({ entrypoints: { web: { ...descriptor } } })]);
   const calls = {
     loads: [],
     contexts: [],
@@ -69,14 +69,14 @@ async function lifecycleFixture(t, options = {}) {
     calls,
     module,
     registry,
-    descriptor: cards[0].webModule
+    descriptor: cards[0].entrypoints.web
   };
 }
 
-test('PM-SINGLE-RUNTIME: pending load, start и context общие у фона и панелей', async (t) => {
+test('PM-SINGLE-RUNTIME: pending load, start и context общие у слота и панелей', async (t) => {
   const pending = deferred();
   const f = await lifecycleFixture(t, { load: () => pending.promise });
-  const background = f.registry.startBackground('ui-module', f.descriptor);
+  const background = f.registry.acquireSlot('ui-module', 'provider.popover.after-bars');
   const first = f.registry.acquirePanel('ui-module', f.descriptor, { active: true });
   const second = f.registry.acquirePanel('ui-module', f.descriptor, { active: true });
 
@@ -90,7 +90,8 @@ test('PM-SINGLE-RUNTIME: pending load, start и context общие у фона �
 
   assert.equal(f.calls.contexts.length, 1);
   assert.equal(f.calls.starts.length, 1);
-  assert.equal(started.context === panel.context && panel.context === another.context, true);
+  assert.equal(panel.context === another.context, true);
+  assert.equal(started.signal.aborted, false);
   assert.equal(f.calls.starts[0] === panel.context, true);
 
   for (const active of [false, true, false, true]) {
@@ -105,7 +106,7 @@ test('PM-SINGLE-RUNTIME: pending load, start и context общие у фона �
 
   const reopened = await f.registry.acquirePanel('ui-module', f.descriptor, { active: true });
 
-  assert.equal(reopened.context === started.context, true);
+  assert.equal(reopened.context === panel.context, true);
   assert.equal(f.calls.loads.length, 1);
   assert.equal(f.calls.starts.length, 1);
   assert.equal(f.calls.cleanups.length, 0);
@@ -118,7 +119,7 @@ test('PM-SINGLE-RUNTIME: pending load, start и context общие у фона �
     stopToasts();
     f.ui.dismissAllToasts();
   });
-  assert.equal(started.context.alerts.show({
+  assert.equal(panel.context.alerts.show({
     id: 'pending',
     title: 'Фоновый',
     sticky: true
@@ -127,25 +128,25 @@ test('PM-SINGLE-RUNTIME: pending load, start и context общие у фона �
   f.registry.stop('ui-module');
   assert.equal(toasts.length, 0);
   f.registry.stop('ui-module');
-  assert.equal(started.context.signal.aborted, true);
+  assert.equal(panel.context.signal.aborted, true);
   assert.equal(f.calls.cleanups.length, 1);
   f.cards[0].values = { greeting: 'Другой вход' };
 
-  const next = await f.registry.startBackground('ui-module', f.descriptor);
+  const next = await f.registry.acquireSlot('ui-module', 'provider.popover.after-bars');
 
-  assert.equal(next.context === started.context, false);
-  assert.deepEqual(started.context.settings.value, {});
-  assert.equal(started.context.alerts.show({ id: 'old', title: 'Старый владелец' }), false);
-  assert.equal(await started.context.panel.open(), false);
+  assert.equal(f.calls.starts.at(-1) === panel.context, false);
+  assert.deepEqual(panel.context.settings.value, {});
+  assert.equal(panel.context.alerts.show({ id: 'old', title: 'Старый владелец' }), false);
+  assert.equal(await panel.context.panel.open(), false);
   f.ui.setUiLocale('ru');
 });
 
-test('PM-SINGLE-RUNTIME: без фона последний unmount отзывает context и подписки', async (t) => {
+test('PM-SINGLE-RUNTIME: без слота последний unmount отзывает context и подписки', async (t) => {
   const f = await lifecycleFixture(t);
   const panel = await f.registry.acquirePanel('ui-module', descriptor, { active: true });
   const previous = panel.context;
 
-  assert.equal(f.calls.starts.length, 0);
+  assert.equal(f.calls.starts.length, 1);
   panel.release();
   assert.equal(previous.signal.aborted, true);
 
@@ -181,7 +182,7 @@ for (const phase of ['import', 'dictionaries', 'async-start']) {
           return () => lateCleanup += 1;
         } } : {}),
       });
-      const started = f.registry.startBackground('ui-module', f.descriptor);
+      const started = f.registry.acquireSlot('ui-module', 'provider.popover.after-bars');
 
       started.catch(() => {});
       await settle();
@@ -217,23 +218,22 @@ for (const phase of ['import', 'dictionaries', 'async-start']) {
   }
 }
 
-test('PM-START-FAILURE: неверный/упавший hook изолирован; no-opt-in не выполняется', async (t) => {
+test('PM-START-FAILURE: ошибки hook изолированы, optional start допустим', async (t) => {
   const f = await lifecycleFixture(t);
 
   f.module.start = () => {
     throw new Error('Сломанный hook');
   };
-  await assert.rejects(f.registry.startBackground('ui-module', f.descriptor));
+  await assert.rejects(f.registry.acquireSlot('ui-module', 'provider.popover.after-bars'));
   f.registry.stop('ui-module');
 
   const otherDescriptor = {
     entry: '/api/ext/healthy/module/panel.js',
     css: [],
     locales: {},
-    startOnLogin: true
   };
 
-  f.cards.push(pluginCard({ id: 'healthy', webModule: otherDescriptor }));
+  f.cards.push(pluginCard({ id: 'healthy', entrypoints: { web: otherDescriptor } }));
   f.module.start = (context) => {
     f.calls.starts.push(context);
 
@@ -241,18 +241,12 @@ test('PM-START-FAILURE: неверный/упавший hook изолирова�
       throw new Error('Сломанный cleanup');
     };
   };
-  await f.registry.startBackground('healthy', otherDescriptor);
+  await f.registry.acquireSlot('healthy', 'provider.popover.after-bars');
   assert.equal(f.calls.starts.length, 1);
   assert.doesNotThrow(() => f.registry.stop('healthy'));
   f.cards[0].enabled = true;
 
-  for (const start of [undefined, 42]) {
-    f.module.start = start;
-    await assert.rejects(f.registry.startBackground('ui-module', f.descriptor));
-    f.registry.stop('ui-module');
-  }
-
-  f.module.start = () => assert.fail('Нет opt-in, start не должен вызываться');
+  f.module.start = undefined;
 
   const panel = await f.registry.acquirePanel('ui-module', descriptor, { active: true });
 

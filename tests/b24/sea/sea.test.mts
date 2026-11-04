@@ -139,11 +139,11 @@ test('BS-04: SEA выполняет dashboard/comment/create/start через lo
   });
   const input = '{"title":"Задача 🌍"}\r\n';
   const cases: Array<[string[], string, string, string | null, string | undefined]> = [
-    [['dashboard'], 'GET', '/api/b24/dashboard', null, undefined],
-    [['comment', '5', 'два  слова', '$(id)'], 'POST', '/api/b24/task/5/comment',
+    [['dashboard'], 'GET', '/api/tracker/dashboard', null, undefined],
+    [['comment', '5', 'два  слова', '$(id)'], 'POST', '/api/tracker/task/5/comment',
       JSON.stringify({ text: 'два  слова $(id)' }), undefined],
-    [['create'], 'POST', '/api/b24/tasks', input, input],
-    [['start', '5'], 'POST', '/api/b24/task/5/timer/start', null, undefined],
+    [['create'], 'POST', '/api/tracker/tasks', input, input],
+    [['start', '5'], 'POST', '/api/tracker/task/5/timer/start', null, undefined],
   ];
 
   for (const [args, method, url, body, stdin] of cases) {
@@ -165,8 +165,8 @@ test('BS-04: SEA выполняет dashboard/comment/create/start через lo
   }
 
   assert.deepEqual(fixture.requests.slice(-2).map((request) => request.url), [
-    '/api/b24/task/5/renew',
-    '/api/b24/task/5/timer/start',
+    '/api/tracker/task/5/renew',
+    '/api/tracker/task/5/timer/start',
   ]);
 });
 

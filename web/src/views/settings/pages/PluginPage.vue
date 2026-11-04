@@ -5,47 +5,83 @@
     :data-ready="ready"
     :data-single="Boolean(singlePluginId)"
   >
-    <p v-if="error" role="alert">{{ error }}</p>
-    <UiInlineMessage v-if="plugins.loadError" tone="warning" data-plugin-load-error>
-      {{ plugins.loadError }}
-    </UiInlineMessage>
-    <UiButton v-if="plugins.loadError || error" data-plugin-retry @click="load">
-      {{ t('settings.retryLoading') }}
-    </UiButton>
+    <div v-if="error || plugins.loadError || recoveryBlocked || actionError || removedName"
+         class="settings-plugin-notices">
+      <UiInlineMessage v-if="error || plugins.loadError" :tone="error ? 'danger' : 'warning'"
+                       :heading="t('settings.pluginCatalogFailure')" data-plugin-load-error>
+        {{ error || plugins.loadError }}
+        <template #actions>
+          <UiButton data-plugin-retry @click="load">{{ t('settings.retryLoading') }}</UiButton>
+        </template>
+      </UiInlineMessage>
+      <UiInlineMessage v-if="recoveryBlocked" tone="warning"
+                       :heading="t('settings.pluginRecoveryRequired')">
+        {{ installer.recoveryError?.message ?? installer.job?.error?.message }}
+      </UiInlineMessage>
+      <UiInlineMessage v-if="actionError" tone="danger" :heading="t('settings.pluginActionFailed')"
+                       dismissible data-plugin-action-error @dismiss="installer.error = null">
+        {{ actionError }}
+      </UiInlineMessage>
+      <UiInlineMessage v-if="removedName" tone="success" :heading="t('settings.pluginRemoved')"
+                       dismissible data-plugin-removed @dismiss="removedName = ''">
+        {{ t('settings.pluginRemovedRestart', { pluginName: removedName }) }}
+      </UiInlineMessage>
+    </div>
     <p v-if="!ready && !plugins.loadError && !error" role="status" data-plugin-loading>
       {{ t('settings.loadingSection2') }}
     </p>
-    <p v-if="installer.recoveryError" role="alert">{{ installer.recoveryError.message }}</p>
-    <p v-else-if="installer.job?.status === 'recovery_required'" role="alert">
-      {{ installer.job.error?.message }}
-    </p>
-    <div v-if="!singlePluginId" class="settings-plugin-filters">
-      <UiInput
-        v-model="filters.query"
-        data-plugin-filter
-        type="search"
-        :aria-label="t('settings.searchPlugins')"
-        :placeholder="t('settings.findAPlugin')"
-      />
-      <UiSelect v-model="filters.state" :aria-label="t('settings.pluginStatus')">
-        <option value="all">{{ t('settings.all') }}</option>
-        <option value="enabled">{{ t('settings.enabled') }}</option>
-        <option value="disabled">{{ t('settings.disabled3') }}</option>
-      </UiSelect>
-      <div class="settings-plugin-filter-options">
-        <UiCheckbox v-model="filters.configurable">{{ t('settings.withSettings') }}</UiCheckbox>
-        <UiButton v-if="filters.query || filters.state !== 'all' || filters.configurable"
-                  variant="text" data-context="workspace-form-wrap" @click="clearFilters">
-          {{ t('settings.resetFilters') }}
-        </UiButton>
-      </div>
-    </div>
     <div class="settings-plugin-workspace">
       <aside
         v-if="!singlePluginId"
         class="settings-plugin-sidebar"
         :aria-label="t('settings.pluginSelection')"
       >
+        <div class="settings-plugin-filters">
+          <SettingsIcon name="search" />
+          <UiSearchInput
+            v-model="filters.query"
+            data-plugin-filter
+            data-context="plugin-list-search"
+            :aria-label="t('settings.searchPlugins')"
+            :placeholder="t('settings.findAPlugin')"
+          />
+          <UiPopover
+            v-model:open="filtersOpen"
+            placement="bottom-end"
+            :aria-label="t('settings.pluginFilters')"
+            data-ui-workspace
+          >
+            <template #trigger>
+              <UiIconButton
+                :label="t('settings.pluginFilters')"
+                :tone="hasActiveFilters ? 'accent' : 'neutral'"
+                data-plugin-filter-options
+              >
+                <svg
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M3 5h14M3 10h14M3 15h14M7 3v4M13 8v4M7 13v4" />
+                </svg>
+              </UiIconButton>
+            </template>
+            <div class="settings-plugin-filter-menu">
+              <UiSelect v-model="filters.state" :aria-label="t('settings.pluginStatus')">
+                <option value="all">{{ t('settings.all') }}</option>
+                <option value="enabled">{{ t('settings.enabled') }}</option>
+                <option value="disabled">{{ t('settings.disabled3') }}</option>
+              </UiSelect>
+              <UiCheckbox v-model="filters.configurable">{{ t('settings.withSettings') }}</UiCheckbox>
+              <UiButton v-if="hasActiveFilters" variant="text" @click="clearFilters">
+                {{ t('settings.resetFilters') }}
+              </UiButton>
+            </div>
+          </UiPopover>
+        </div>
         <div class="settings-plugin-picker">
           <UiSelect
             :model-value="plugin?.id || ''"
@@ -65,35 +101,47 @@
             :key="group.id"
             :data-plugin-category="group.id"
           >
-            <h4>{{ group.label }}</h4>
+            <h4>{{ group.label }} <span>{{ group.plugins.length }}</span></h4>
             <div class="settings-plugin-list">
-              <div v-for="entry in group.plugins" :key="entry.id" class="settings-plugin-entry">
-                <UiButton
-                  :data-select-plugin="entry.id"
-                  :pressed="plugin?.id === entry.id"
-                  data-ui-settings-catalog data-context="plugin-entry"
-                  @click="selectPlugin(entry.id)"
-                >
-                  <span class="ui-settings-catalog-copy">
-                    <span class="ui-settings-catalog-title">{{ entry.name }}</span>
-                    <small v-if="!entry.system">{{ provenance(entry) }}</small>
-                    <span class="ui-settings-catalog-status" :data-available="draftEnabled(entry.id)">
-                      {{ draftEnabled(entry.id) ? t('settings.enabled2') : t('settings.disabled') }}
-                      <span v-if="pluginInstallBadge(entry)">
-                        · {{ pluginInstallBadge(entry) === 'restart' ? t('settings.waitingForRestart') : t('settings.update2') }}
-                      </span>
+              <UiSelectableRow
+                v-for="entry in group.plugins"
+                :key="entry.id"
+                :data-select-plugin="entry.id"
+                :selected="plugin?.id === entry.id"
+                :pressed="plugin?.id === entry.id"
+                data-context="workspace-catalog"
+                data-ui-settings-plugin-row
+                @select="selectPlugin(entry.id)"
+              >
+                <PluginIcon class="settings-plugin-icon" :src="entry.icon" />
+                <span class="settings-plugin-copy">
+                  <span class="settings-plugin-name">{{ entry.name }}</span>
+                  <span class="settings-plugin-meta">
+                    <span v-if="entry.version">{{ entry.version }}</span>
+                    <span v-if="pluginInstallBadge(entry)" class="settings-plugin-badge">
+                      {{ pluginInstallBadge(entry) === 'restart'
+                        ? t('settings.waitingForRestart') : t('settings.update2') }}
                     </span>
                   </span>
-                </UiButton>
-              </div>
+                </span>
+                <template #actions>
+                  <UiCheckbox
+                    :model-value="draftEnabled(entry.id)"
+                    :aria-label="t('settings.enable2', { pluginName: entry.name })"
+                    :data-plugin-enabled="entry.id"
+                    :disabled="!ready || recoveryBlocked || Boolean(togglingId)
+                      || entry.compatibility?.status === 'incompatible'"
+                    @update:model-value="toggleEntry(entry.id, $event === true)"
+                  />
+                </template>
+              </UiSelectableRow>
             </div>
           </section>
         </div>
         <p v-if="!groups.length && hasCustom">{{ t('settings.noPluginsFoundChangeTheQueryOr') }}</p>
         <p v-else-if="!groups.length">{{ t('settings.installAPluginFromGitToAdd') }}</p>
-        <div class="settings-plugin-actions">
+        <div v-if="list.some((entry) => entry.install)" class="settings-plugin-actions">
           <UiButton
-            v-if="list.some((entry) => entry.install)"
             data-ui-settings-sidebar-action
             :disabled="recoveryBlocked || installer.checking"
             @click="installer.checkUpdates()"
@@ -104,188 +152,323 @@
       </aside>
       <section class="settings-plugin-editor" :aria-label="t('settings.selectedPluginSettings')">
         <template v-if="plugin && ready">
-          <header class="settings-plugin-title">
-            <SettingsIcon name="plugins" />
-            <h4>{{ plugin.name }}</h4>
-            <span>{{ plugin.version }}</span>
-            <p>{{ plugin.description }}</p>
-            <p v-if="!plugin.system" :data-installed-source="plugin.id">{{ provenance(plugin) }}</p>
+          <header v-if="!showcasePage" class="settings-plugin-title">
+            <PluginIcon v-if="singlePluginId" class="settings-plugin-icon" :src="plugin.icon" />
+            <div class="settings-plugin-heading">
+              <h4>{{ plugin.name }}</h4>
+              <span v-if="singlePluginId" class="settings-plugin-meta">{{ plugin.version }}</span>
+            </div>
+            <div v-if="!singlePluginId" class="settings-plugin-header-actions">
+              <SettingsField :address="address('enabled')" presentation="action">
+                <UiButton
+                  data-plugin-enable-action
+                  :disabled="recoveryBlocked || plugin.compatibility?.status === 'incompatible'"
+                  :aria-label="enabled
+                    ? t('settings.pluginDisableNamed', { pluginName: plugin.name })
+                    : t('settings.enable2', { pluginName: plugin.name })"
+                  @click="setEnabled(!enabled)"
+                >
+                  {{ enabled ? t('settings.disable') : t('settings.pluginEnable') }}
+                </UiButton>
+              </SettingsField>
+              <span class="settings-plugin-meta">{{ plugin.version }}</span>
+              <div v-if="!plugin.system" class="settings-plugin-package-actions">
+                <UiIconButton
+                  :label="t('settings.update')"
+                  v-tooltip="t('settings.update')"
+                  data-plugin-update-action
+                  :disabled="packageActionsBlocked"
+                  @click="openInstall(plugin.install ? 'update' : 'install')"
+                >
+                  <UiRefreshIcon />
+                </UiIconButton>
+                <UiIconButton
+                  :label="t('settings.delete')"
+                  v-tooltip="t('settings.delete')"
+                  tone="danger"
+                  data-plugin-remove-action
+                  :disabled="packageActionsBlocked || activeInstall"
+                  :loading="installer.pendingAction === 'remove'"
+                  @click="removePlugin"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6m4-6v6" />
+                  </svg>
+                </UiIconButton>
+              </div>
+            </div>
+            <p v-if="singlePluginId && plugin.description">{{ plugin.description }}</p>
           </header>
-          <PluginSourcePanel
-            v-if="!plugin.system"
-            :key="plugin.id"
-            :plugin="plugin"
-            @update="openInstall('update')"
-            @bind="openInstall('install')"
-          />
-          <PluginSetupPanel
-            v-if="baselineEnabled && plugin.setup && setupPlugin"
-            :key="plugin.id"
-            :plugin="setupPlugin"
-            :active="active"
-          />
-          <UiInlineMessage v-if="plugin.serverError" tone="danger">{{ plugin.serverError }}</UiInlineMessage>
-          <SettingsScope>{{ t('settings.valuesAndPlacementsAreSavedWithApply') }}</SettingsScope>
-          <SettingsField :address="address('enabled')">
-            <UiSwitch
-              :model-value="enabled"
-              :disabled="recoveryBlocked"
-              :aria-label="t('settings.enable2', { pluginName: plugin.name })"
-              @update:model-value="setEnabled"
-            />
-          </SettingsField>
-          <p v-if="restartPending">{{ t('settings.waitingForRestart') }}</p>
-          <p v-else-if="plugin.needsRestart">{{ t('settings.changingServerComponentStatusWillRequireA') }}</p>
-          <h4 v-if="plugin.placements?.length">{{ t('settings.placement') }}</h4>
-          <SettingsField
-            v-for="slot in plugin.placements ?? []"
-            :key="slot.slot"
-            :address="address('placements', slot.slot)"
+          <UiInlineMessage v-if="plugin.compatibility?.status === 'incompatible'" tone="danger">
+            {{ plugin.compatibility.reason }}
+          </UiInlineMessage>
+          <UiInlineMessage v-if="!singlePluginId && plugin.serverError" tone="danger"
+                           :heading="t('settings.pluginRuntimeError')"
+                           class="settings-plugin-runtime-error">
+            {{ plugin.serverError }}
+          </UiInlineMessage>
+          <div v-if="!singlePluginId" class="settings-plugin-detail-tabs">
+            <UiTabs v-model="detailTab" :label="plugin.name" data-ui-settings-tabs>
+              <UiTab
+                :id="`${detailsId}-parameters-tab`"
+                value="parameters"
+                :controls="`${detailsId}-parameters`"
+                data-plugin-details-tab="parameters"
+              >
+                {{ t('settings.parameters') }}
+              </UiTab>
+              <UiTab
+                v-if="!plugin.system"
+                :id="`${detailsId}-source-tab`"
+                value="source"
+                :controls="`${detailsId}-source`"
+                data-plugin-details-tab="source"
+              >
+                {{ t('settings.source') }}
+                <span v-if="sourceNeedsAttention" class="settings-plugin-badge" aria-hidden="true">•</span>
+              </UiTab>
+            </UiTabs>
+          </div>
+          <div
+            :id="`${detailsId}-parameters`"
+            v-show="singlePluginId || detailTab === 'parameters'"
+            class="settings-plugin-content"
+            :role="singlePluginId ? undefined : 'tabpanel'"
+            :aria-labelledby="singlePluginId ? undefined : `${detailsId}-parameters-tab`"
+            :data-ui-plugin-form="!singlePluginId || undefined"
           >
-            <UiCheckbox
-              :model-value="value('placements', slot.slot) === true"
-              :aria-label="slot.label"
-              @update:model-value="set('placements', slot.slot, $event === true)"
+            <p v-if="!singlePluginId && plugin.description" class="settings-plugin-description">
+              {{ plugin.description }}
+            </p>
+            <SettingsSection
+              v-if="showcasePage"
+              :heading="t('settings.showcaseSetupStartHeading')"
+              :description="t('settings.showcaseSetupStartHint')"
+            >
+              <UiButton
+                data-showcase-open
+                data-context="workspace-form-wrap"
+                :disabled="!baselineEnabled || !enabled || recoveryBlocked
+                  || settings.snapshot.applying || settings.actionRunning"
+                @click="openShowcase"
+              >
+                {{ t('settings.showcaseSetupOpen') }}
+              </UiButton>
+              <p v-if="!enabled">{{ t('settings.showcaseSetupEnableFirst') }}</p>
+              <p v-else-if="!baselineEnabled">{{ t('settings.showcaseSetupApplyFirst') }}</p>
+            </SettingsSection>
+            <PluginSetupPanel
+              v-if="baselineEnabled && plugin.setup && setupPlugin"
+              :key="plugin.id"
+              :plugin="setupPlugin"
+              :active="active"
             />
-          </SettingsField>
-          <h4 v-if="plugin.settings.length">{{ t('settings.parameters') }}</h4>
-          <SettingsField
-            v-for="field in plugin.settings"
-            :key="field.key"
-            :address="address('values', field.key)"
-          >
-            <UiCheckbox
-              :disabled="fieldUnavailable(field.key)"
-              v-if="field.type === 'checkbox'"
-              :model-value="value('values', field.key) === true"
-              :aria-label="field.label"
-              @update:model-value="set('values', field.key, $event === true)"
-            />
-            <template v-else-if="field.type === 'providers'">
+            <UiInlineMessage v-if="singlePluginId && plugin.serverError" tone="danger">
+              {{ plugin.serverError }}
+            </UiInlineMessage>
+            <SettingsScope v-if="singlePluginId">
+              {{ t('settings.valuesAndPlacementsAreSavedWithApply') }}
+            </SettingsScope>
+            <SettingsField v-if="singlePluginId" :address="address('enabled')">
+              <UiSwitch
+                :model-value="enabled"
+                :disabled="recoveryBlocked"
+                :aria-label="t('settings.enable2', { pluginName: plugin.name })"
+                @update:model-value="setEnabled"
+              />
+            </SettingsField>
+            <p v-if="restartPending">{{ t('settings.waitingForRestart') }}</p>
+            <p v-else-if="plugin.needsRestart && (singlePluginId || enabled !== baselineEnabled)">
+              {{ t('settings.changingServerComponentStatusWillRequireA') }}
+            </p>
+            <SettingsSection
+              v-if="plugin.system && plugin.id === 'telegram'"
+              :heading="t('settings.telegramSetupHeading')"
+              :description="t('settings.telegramSetupDescription')"
+            >
+              <UiButton
+                data-telegram-setup
+                data-context="workspace-form-wrap"
+                :disabled="!baselineEnabled || !enabled || recoveryBlocked
+                  || settings.snapshot.applying || settings.actionRunning"
+                @click="openTelegram"
+              >
+                {{ t('settings.telegramSetupOpen') }}
+              </UiButton>
+              <p v-if="!enabled">{{ t('settings.telegramSetupEnableFirst') }}</p>
+              <p v-else-if="!baselineEnabled">{{ t('settings.telegramSetupApplyFirst') }}</p>
+            </SettingsSection>
+            <h4 v-if="plugin.placements?.length">{{ t('settings.placement') }}</h4>
+            <SettingsField
+              v-for="slot in plugin.placements ?? []"
+              :key="slot.slot"
+              :address="address('placements', slot.slot)"
+            >
+              <UiCheckbox
+                :model-value="value('placements', slot.slot) === true"
+                :aria-label="slot.label"
+                @update:model-value="set('placements', slot.slot, $event === true)"
+              />
+            </SettingsField>
+            <h4 v-if="singlePluginId && plugin.settings.length">{{ t('settings.parameters') }}</h4>
+            <SettingsField
+              v-for="field in plugin.settings"
+              :key="field.key"
+              :address="address('values', field.key)"
+            >
               <UiCheckbox
                 :disabled="fieldUnavailable(field.key)"
-                v-for="entry in registry"
-                :key="entry.id"
-                :model-value="providerIds(field.key).includes(entry.id)"
-                @update:model-value="setProvider(field.key, entry.id, $event === true)"
-              >
-                {{ entry.name }}
-              </UiCheckbox>
-              <p v-for="id in missingProviders(field.key)" :key="id">
-                {{ id }} {{ t('settings.missingFromRegistry2') }}
-                <UiButton @click="setProvider(field.key, id, false)">{{ t('settings.remove') }}</UiButton>
-              </p>
-              <p>{{ t('settings.noneSelectedMeansAll') }}</p>
-            </template>
-            <template v-else-if="field.type === 'model'">
-              <ProviderModelSelect
-                :providers="registry"
-                :fallback-label="lostModel(field) || selectedModel(field.key)?.name || ''"
-                :disabled="fieldUnavailable(field.key)"
-                :model-value="modelOption(field.key)"
+                v-if="field.type === 'checkbox'"
+                :model-value="value('values', field.key) === true"
                 :aria-label="field.label"
-                @update:model-value="setModel(field.key, $event)"
+                @update:model-value="set('values', field.key, $event === true)"
+              />
+              <template v-else-if="field.type === 'providers'">
+                <UiCheckbox
+                  :disabled="fieldUnavailable(field.key)"
+                  v-for="entry in registry"
+                  :key="entry.id"
+                  :model-value="providerIds(field.key).includes(entry.id)"
+                  @update:model-value="setProvider(field.key, entry.id, $event === true)"
+                >
+                  {{ entry.name }}
+                </UiCheckbox>
+                <p v-for="id in missingProviders(field.key)" :key="id">
+                  {{ id }} {{ t('settings.missingFromRegistry2') }}
+                  <UiButton @click="setProvider(field.key, id, false)">{{ t('settings.remove') }}</UiButton>
+                </p>
+                <p>{{ t('settings.noneSelectedMeansAll') }}</p>
+              </template>
+              <template v-else-if="field.type === 'model'">
+                <ProviderModelSelect
+                  :providers="registry"
+                  :fallback-label="lostModel(field) || selectedModel(field.key)?.name || ''"
+                  :disabled="fieldUnavailable(field.key)"
+                  :model-value="modelOption(field.key)"
+                  :aria-label="field.label"
+                  @update:model-value="setModel(field.key, $event)"
+                >
+                  <option value="">{{ t('settings.notSelected') }}</option>
+                  <option
+                    v-if="lostModel(field) || modelUnavailable(field.key)"
+                    :value="modelOption(field.key)"
+                    :hidden="modelUnavailable(field.key)"
+                    disabled
+                  >
+                    {{ lostModel(field) || selectedModel(field.key)?.name }}
+                  </option>
+                  <optgroup
+                    v-for="group in modelGroups(field)"
+                    :key="group.id"
+                    :label="group.name"
+                  >
+                    <option
+                      v-for="entry in group.models"
+                      :key="entry.id"
+                      :value="modelId(group.id, entry.id)"
+                    >
+                      {{ entry.name }}
+                    </option>
+                  </optgroup>
+                </ProviderModelSelect>
+                <template v-if="efforts(field.key).length || modelValue(field.key)?.effort">
+                  <p>{{ t('settings.effort') }}</p>
+                  <UiSelect
+                    :disabled="fieldUnavailable(field.key)"
+                    :model-value="modelValue(field.key)?.effort || ''"
+                    :aria-label="t('settings.effort')"
+                    @update:model-value="setEffort(field.key, $event)"
+                  >
+                    <option value="">{{ t('settings.providerDefault') }}</option>
+                    <option v-if="lostEffort(field.key)" :value="lostEffort(field.key)">
+                      {{ lostEffort(field.key) }} {{ t('settings.unavailableForThisModel') }}
+                    </option>
+                    <option
+                      v-for="effort in efforts(field.key)"
+                      :key="effort"
+                      :value="effort"
+                    >
+                      {{ effort }}
+                    </option>
+                  </UiSelect>
+                  <p>{{ selectedModel(field.key)?.effortHints?.[modelValue(field.key)?.effort || ''] }}</p>
+                </template>
+              </template>
+              <UiNumberInput
+                :disabled="fieldUnavailable(field.key)"
+                v-else-if="field.type === 'number'"
+                :model-value="numberValue(field.key)"
+                :min="field.min"
+                :max="field.max"
+                :step="field.step ?? 'any'"
+                :aria-label="field.label"
+                @update:model-value="set('values', field.key, $event)"
+              />
+              <UiSelect
+                :disabled="fieldUnavailable(field.key)"
+                v-else-if="field.type === 'select'"
+                :model-value="textValue(field.key)"
+                :aria-label="field.label"
+                @update:model-value="set('values', field.key, String($event))"
               >
-                <option value="">{{ t('settings.notSelected') }}</option>
                 <option
-                  v-if="lostModel(field) || modelUnavailable(field.key)"
-                  :value="modelOption(field.key)"
-                  :hidden="modelUnavailable(field.key)"
+                  v-if="!field.options?.includes(textValue(field.key))"
+                  :value="textValue(field.key)"
                   disabled
                 >
-                  {{ lostModel(field) || selectedModel(field.key)?.name }}
+                  {{ textValue(field.key) }} {{ t('settings.missingFromList') }}
                 </option>
-                <optgroup
-                  v-for="group in modelGroups(field)"
-                  :key="group.id"
-                  :label="group.name"
+                <option
+                  v-for="option in field.options"
+                  :key="option"
+                  :value="option"
                 >
-                  <option
-                    v-for="entry in group.models"
-                    :key="entry.id"
-                    :value="modelId(group.id, entry.id)"
-                  >
-                    {{ entry.name }}
-                  </option>
-                </optgroup>
-              </ProviderModelSelect>
-              <template v-if="efforts(field.key).length || modelValue(field.key)?.effort">
-                <p>{{ t('settings.effort') }}</p>
-                <UiSelect
-                  :disabled="fieldUnavailable(field.key)"
-                  :model-value="modelValue(field.key)?.effort || ''"
-                  :aria-label="t('settings.effort')"
-                  @update:model-value="setEffort(field.key, $event)"
-                >
-                  <option value="">{{ t('settings.providerDefault') }}</option>
-                  <option v-if="lostEffort(field.key)" :value="lostEffort(field.key)">
-                    {{ lostEffort(field.key) }} {{ t('settings.unavailableForThisModel') }}
-                  </option>
-                  <option
-                    v-for="effort in efforts(field.key)"
-                    :key="effort"
-                    :value="effort"
-                  >
-                    {{ effort }}
-                  </option>
-                </UiSelect>
-                <p>{{ selectedModel(field.key)?.effortHints?.[modelValue(field.key)?.effort || ''] }}</p>
-              </template>
-            </template>
-            <UiNumberInput
-              :disabled="fieldUnavailable(field.key)"
-              v-else-if="field.type === 'number'"
-              :model-value="numberValue(field.key)"
-              :min="field.min"
-              :max="field.max"
-              :step="field.step ?? 'any'"
-              :aria-label="field.label"
-              @update:model-value="set('values', field.key, $event)"
-            />
-            <UiSelect
-              :disabled="fieldUnavailable(field.key)"
-              v-else-if="field.type === 'select'"
-              :model-value="textValue(field.key)"
-              :aria-label="field.label"
-              @update:model-value="set('values', field.key, String($event))"
-            >
-              <option
-                v-if="!field.options?.includes(textValue(field.key))"
-                :value="textValue(field.key)"
-                disabled
+                  {{ option }}
+                </option>
+              </UiSelect>
+              <UiPasswordInput
+                :disabled="fieldUnavailable(field.key)"
+                v-else-if="['password', 'secret'].includes(field.type ?? '')"
+                :model-value="textValue(field.key)"
+                :aria-label="field.label"
+                autocomplete="new-password"
+                @update:model-value="set('values', field.key, $event)"
+              />
+              <UiInput
+                :disabled="fieldUnavailable(field.key)"
+                v-else
+                :model-value="textValue(field.key)"
+                :aria-label="field.label"
+                @update:model-value="set('values', field.key, $event)"
+              />
+              <UiButton
+                v-if="fieldUnavailable(field.key)"
+                @click="discard(pluginValueKey('values', field.key))"
               >
-                {{ textValue(field.key) }} {{ t('settings.missingFromList') }}
-              </option>
-              <option
-                v-for="option in field.options"
-                :key="option"
-                :value="option"
-              >
-                {{ option }}
-              </option>
-            </UiSelect>
-            <UiPasswordInput
-              :disabled="fieldUnavailable(field.key)"
-              v-else-if="['password', 'secret'].includes(field.type ?? '')"
-              :model-value="textValue(field.key)"
-              :aria-label="field.label"
-              autocomplete="new-password"
-              @update:model-value="set('values', field.key, $event)"
+                {{ t('settings.discardEdit') }}
+              </UiButton>
+            </SettingsField>
+          </div>
+          <section
+            v-if="!plugin.system"
+            :id="`${detailsId}-source`"
+            v-show="detailTab === 'source'"
+            class="settings-plugin-content"
+            role="tabpanel"
+            :aria-labelledby="`${detailsId}-source-tab`"
+          >
+            <p class="settings-plugin-description" :data-installed-source="plugin.id">
+              {{ provenance(plugin) }}
+            </p>
+            <PluginSourcePanel
+              :key="plugin.id"
+              :plugin="plugin"
+              embedded
+              @update="openInstall('update')"
+              @bind="openInstall('install')"
             />
-            <UiInput
-              :disabled="fieldUnavailable(field.key)"
-              v-else
-              :model-value="textValue(field.key)"
-              :aria-label="field.label"
-              @update:model-value="set('values', field.key, $event)"
-            />
-            <UiButton
-              v-if="fieldUnavailable(field.key)"
-              @click="discard(pluginValueKey('values', field.key))"
-            >
-              {{ t('settings.discardEdit') }}
-            </UiButton>
-          </SettingsField>
+          </section>
         </template>
         <p v-else-if="ready && !plugin && (settings.entityId || singlePluginId)"
            data-plugin-missing>{{ t('settings.thePluginIsNoLongerAvailable') }}</p>
@@ -315,15 +498,20 @@
 </template>
 
 <script setup lang="ts">
+import PluginIcon from '../../../shared/PluginIcon.vue';
+
 import { t, uiLocale } from '../../../ui.ts';
 
 import { localizePluginMetadata, localizePluginCategory } from '../../../features/settings/metadataLocale.ts';
 
 import SettingsScope from '../SettingsScope.vue';
 import SettingsIcon from '../SettingsIcon.vue';
-import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { computed, reactive, ref, watch, onMounted, onBeforeUnmount, useId } from 'vue';
+import { isNavigationFailure, NavigationFailureType, useRouter } from 'vue-router';
 import {
+  UiRefreshIcon,
   UiSwitch, UiCheckbox, UiInput, UiNumberInput, UiSelect, UiPasswordInput, UiButton, UiInlineMessage,
+  UiSearchInput, UiSelectableRow, UiIconButton, UiPopover, UiTabs, UiTab, confirmDialog, messageRef, vTooltip,
 } from '../../../ui.ts';
 import type {
   PluginListItem, PluginModelValue, PluginSetting,
@@ -336,7 +524,7 @@ import {
   sourceMembership, type SourceMembership,
 } from '../../../../../shared/plugins/pluginCatalogPolicy.ts';
 import { usePluginInstallStore } from '../../../stores/pluginInstall.ts';
-import { pluginInstallBadge } from '../../../shared/pluginInstall.ts';
+import { isActiveInstallJob, pluginInstallBadge } from '../../../shared/pluginInstall.ts';
 import { PLUGIN_CATEGORIES } from '../../../../../shared/plugins/pluginsContracts.ts';
 import PluginSourcePanel from '../PluginSourcePanel.vue';
 import PluginInstallDialog from '../PluginInstallDialog.vue';
@@ -354,9 +542,11 @@ import {
 import type { FieldAddress, JsonValue } from '../../../features/settings/contracts.ts';
 import { failureText } from '../../../shared/apiClient.ts';
 import SettingsField from '../SettingsField.vue';
+import SettingsSection from '../SettingsSection.vue';
 
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
+const router = useRouter();
 const plugins = usePluginsStore();
 const installer = usePluginInstallStore();
 const catalog = usePluginCatalogStore();
@@ -370,6 +560,7 @@ const list = computed(() => (plugins.list as PluginListItem[])
 // Одиночный режим: страница из карты системных плагинов рисует форму одного
 // плагина без списка и фильтров магазина.
 const singlePluginId = computed(() => systemPluginOfPage(settings.pageId));
+const showcasePage = computed(() => singlePluginId.value === 'showcase');
 const pluginId = computed(() => singlePluginId.value ?? settings.entityId);
 
 const visible = computed(() => list.value.filter((entry) => {
@@ -391,7 +582,15 @@ const groups = computed(() => PLUGIN_CATEGORIES.map((category) => ({
 const recoveryBlocked = computed(() => Boolean(installer.recoveryError)
   || installer.job?.status === 'recovery_required');
 const installOpen = ref(false);
+const actionError = computed(() => !installOpen.value ? installer.error : '');
 const installMode = ref<'install' | 'update'>('install');
+const confirmingRemoval = ref(false);
+const removedName = ref('');
+const activeInstall = computed(() => isActiveInstallJob(installer.job)
+  || ['ready', 'awaiting_restart'].includes(installer.job?.status ?? ''));
+const packageActionsBlocked = computed(() => recoveryBlocked.value || installer.busy
+  || installer.reconciling || Boolean(installer.pendingAction) || confirmingRemoval.value
+  || settings.snapshot.applying || settings.actionRunning);
 const providers = useProvidersStore();
 const registry = computed(() => providers.providers as ProviderEntry[]);
 const plugin = computed(() => list.value.find((entry) => entry.id === pluginId.value
@@ -413,6 +612,16 @@ const restartPending = computed(() =>
   (plugins.restartPending as Record<string, boolean>)[pluginId.value ?? '']);
 const ready = ref(false);
 const error = ref('');
+const togglingId = ref('');
+const detailTab = ref('parameters');
+const detailsId = `plugin-details-${useId()}`;
+const filtersOpen = ref(false);
+const hasActiveFilters = computed(() => Boolean(filters.query
+  || filters.state !== 'all' || filters.configurable));
+const sourceNeedsAttention = computed(() => Boolean(plugin.value?.install
+  && (plugin.value.install.updateAvailable || plugin.value.install.restartRequired
+    || plugin.value.install.localChanges || plugin.value.install.checkError
+    || plugin.value.install.rollbackError)));
 const unavailable = computed(() => settings.snapshot.resources.find((item) => item.id === resourceId.value)
   ?.fields.filter((field) => field.dirty && field.unavailable
     && !plugin.value?.settings.some((item) => pluginValueKey('values', item.key) === field.key)
@@ -420,6 +629,7 @@ const unavailable = computed(() => settings.snapshot.resources.find((item) => it
       pluginValueKey('placements', item.slot) === field.key)) ?? []);
 let editor: ReturnType<typeof createPluginEditor> | null = null;
 let loadAttempt = 0;
+let disposed = false;
 
 const provenanceKeys: Record<SourceMembership, 'settings.marketplaceOfficial'
   | 'settings.marketplaceCommunity' | 'settings.marketplaceExternal'
@@ -463,9 +673,62 @@ function clearFilters(): void {
 }
 
 function openInstall(mode: 'install' | 'update'): void {
-  if (!recoveryBlocked.value) {
+  if (!packageActionsBlocked.value) {
     installMode.value = mode;
     installOpen.value = true;
+  }
+}
+
+/**
+ * Подтверждение привязано к выбранному плагину и открытию настроек до await.
+ * Только успешное удаление отбрасывает его черновик, сохраняя остальные изменения сессии.
+ */
+async function removePlugin(): Promise<void> {
+  const selected = plugin.value;
+  const opening = settings.snapshot.sessionId;
+
+  if (disposed || !selected || selected.system || packageActionsBlocked.value || activeInstall.value) {
+    return;
+  }
+
+  confirmingRemoval.value = true;
+
+  let confirmed = false;
+
+  try {
+    confirmed = await confirmDialog(
+      messageRef('settings.pluginRemoveConfirmation', { pluginName: selected.name }),
+      { okText: messageRef('settings.delete'), danger: true },
+    );
+  } finally {
+    confirmingRemoval.value = false;
+  }
+
+  if (!confirmed || disposed || !props.active || !settings.isOpen || settings.snapshot.sessionId !== opening
+    || plugin.value?.id !== selected.id || packageActionsBlocked.value || activeInstall.value) {
+    return;
+  }
+
+  const removed = await installer.remove(selected.id);
+
+  if (!removed || disposed || !settings.isOpen || settings.snapshot.sessionId !== opening) {
+    return;
+  }
+
+  removedName.value = selected.name;
+  plugins.list = plugins.list.filter((entry) => entry.id !== selected.id);
+
+  if (!settings.snapshot.applying) {
+    for (const resource of settings.snapshot.resources.filter((entry) =>
+      entry.id === `pluginSettings:${selected.id}` || entry.id === `pluginEnabled:${selected.id}`)) {
+      for (const field of resource.fields) {
+        settings.discardField(resource.id, field.key);
+      }
+    }
+  }
+
+  if (settings.entityId === selected.id) {
+    settings.selectPage('plugins.installed', list.value.find((entry) => !entry.system)?.id);
   }
 }
 
@@ -495,6 +758,56 @@ function set(section: 'values' | 'placements', key: string, next: JsonValue): vo
 
 function setEnabled(next: boolean): void {
   settings.setField(enabledId.value, 'enabled', next);
+}
+
+/**
+ * Флажок списка меняет тот же черновик, что переключатель выбранного плагина.
+ * Baseline читается до правки; закрытая сессия и recovery отбрасывают поздний результат.
+ */
+async function toggleEntry(id: string, next: boolean): Promise<void> {
+  if (!ready.value || recoveryBlocked.value || togglingId.value) {
+    return;
+  }
+
+  const opening = settings.snapshot.sessionId;
+
+  togglingId.value = id;
+
+  try {
+    const loaded = await settings.loadResource(`pluginEnabled:${id}`);
+
+    if (loaded && settings.isOpen && settings.snapshot.sessionId === opening && !recoveryBlocked.value) {
+      settings.setField(`pluginEnabled:${id}`, 'enabled', next);
+    }
+  } finally {
+    togglingId.value = '';
+  }
+}
+
+/**
+ * Настройка подключения открывает существующий раздел с токеном, чатами и пультом.
+ * Общая политика перехода сохраняет выбор судьбы неприменённых настроек.
+ */
+async function openTelegram(): Promise<void> {
+  await settings.requestAction(async () => {
+    const failure = await router.push('/telegram');
+
+    return !isNavigationFailure(failure)
+      || isNavigationFailure(failure, NavigationFailureType.duplicated);
+  });
+}
+
+/**
+ * Создание ролика начинается в рабочем разделе, а настройки остаются подготовкой.
+ * Общий переход сохраняет выбор судьбы всех неприменённых полей модала.
+ */
+async function openShowcase(): Promise<void> {
+  await settings.requestAction(async () => {
+    const failure = await router.push('/showcase');
+
+    return !isNavigationFailure(failure)
+      || isNavigationFailure(failure, NavigationFailureType.duplicated);
+  });
 }
 
 function textValue(key: string): string {
@@ -726,11 +1039,28 @@ async function load(): Promise<void> {
 
 onBeforeUnmount(() => {
   loadAttempt += 1;
+  disposed = true;
 });
 
 onMounted(() => {
   void installer.loadJob();
 });
+
+watch(() => plugin.value?.id, () => {
+  detailTab.value = sourceNeedsAttention.value ? 'source' : 'parameters';
+});
+
+watch(sourceNeedsAttention, (attention) => {
+  if (attention) {
+    detailTab.value = 'source';
+  }
+}, { immediate: true });
+
+watch(() => settings.revealTarget, (target) => {
+  if (target?.pageId === 'plugins.installed' && target.entityId === pluginId.value) {
+    detailTab.value = 'parameters';
+  }
+}, { immediate: true });
 
 watch([
   () => props.active,
@@ -743,159 +1073,293 @@ watch([
 
 <style scoped>
 .settings-plugin {
-  display: grid;
-  gap: 12px;
-  min-width: 0;
-  align-content: start;
-  container: installed-plugins / inline-size;
-}
-.settings-plugin-filters {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 180px;
-  align-items: center;
-  gap: 8px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--line);
-}
-.settings-plugin-filter-options {
-  grid-column: 1 / -1;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
+  flex: 1;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  container: installed-plugins / inline-size;
 }
 .settings-plugin-workspace {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: 16px;
+  flex: 1;
+  grid-template-columns: minmax(260px, 38%) minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
-.settings-plugin[data-single='true'] .settings-plugin-workspace {
-  grid-template-columns: minmax(0, 1fr);
+.settings-plugin-notices {
+  display: grid;
+  flex: none;
+  gap: 8px;
+  max-height: 40%;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 .settings-plugin-sidebar {
-  display: grid;
-  align-content: start;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  padding-right: 16px;
+  min-height: 0;
   border-right: 1px solid var(--line);
+}
+.settings-plugin-filters {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-mid);
+}
+.settings-plugin-filters > .ui-search-input {
+  flex: 1;
+  min-width: 0;
+}
+.settings-plugin-filter-menu {
+  display: grid;
+  gap: 12px;
+  width: min(220px, calc(100vw - 48px));
+  padding: 8px;
 }
 .settings-plugin-catalog {
   display: grid;
-  gap: 16px;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  padding-block: 8px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.settings-plugin-list,
+.settings-plugin-group {
+  display: grid;
   min-width: 0;
 }
-.settings-plugin-list {
-  display: grid;
+.settings-plugin-group > h4 {
+  display: flex;
+  justify-content: space-between;
   gap: 8px;
-  width: 100%;
+  padding: 4px 12px;
+  background: var(--surface-2);
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 18px;
+}
+.settings-plugin-group > h4 > span {
+  color: var(--ink-low);
+}
+.settings-plugin-copy {
+  display: grid;
+  gap: 2px;
   min-width: 0;
 }
-.settings-plugin-entry {
-  display: grid;
+.settings-plugin-name {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+.settings-plugin-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
   min-width: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.settings-plugin-badge {
+  color: var(--accent);
+}
+.settings-plugin-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--ink-mid);
 }
 .settings-plugin-actions {
   display: grid;
-  gap: 8px;
+  flex: none;
+  margin-top: auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
 }
 .settings-plugin-picker {
   display: none;
 }
 .settings-plugin-editor {
-  display: grid;
-  align-content: start;
-  gap: 0;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
-.settings-plugin-editor > h4 {
-  padding: 16px 0 8px;
-  border-bottom: 1px solid var(--line-2);
-  font-size: 13px;
-  font-weight: 600;
-}
-.settings-plugin p, .settings-plugin h4 {
+.settings-plugin p,
+.settings-plugin h4 {
   margin: 0;
-}
-.settings-plugin-editor > p {
-  padding: 10px 0;
-  color: var(--ink-mid);
-  font-size: 12px;
-  line-height: 1.6;
 }
 .settings-plugin-title {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 14px 12px;
+  padding: 22px 24px 16px;
+}
+.settings-plugin-heading {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
 }
 .settings-plugin-title h4 {
-  font-size: 14px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 27px;
+  overflow-wrap: anywhere;
+}
+.settings-plugin-title > p {
+  flex-basis: 100%;
+}
+.settings-plugin-header-actions {
+  display: flex;
+  flex-basis: 100%;
+  align-items: start;
+  gap: 8px 14px;
+  min-width: 0;
+}
+.settings-plugin-header-actions > .settings-plugin-meta {
+  align-self: start;
+  min-height: var(--control-height);
+}
+.settings-plugin-package-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: auto;
+}
+.settings-plugin-detail-tabs {
+  flex: none;
+  padding-inline: 24px;
+}
+.settings-plugin-runtime-error {
+  flex: none;
+  margin: 0 24px 12px;
+}
+.settings-plugin-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 18px 24px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.settings-plugin-description,
+.settings-plugin-title > p {
+  color: var(--ink-mid);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.settings-plugin-content > .settings-plugin-description {
+  margin-bottom: 18px;
+}
+.settings-plugin-content > h4 {
+  padding: 14px 0 6px;
+  font-size: 13px;
   font-weight: 600;
 }
-.settings-plugin-title > span {
-  color: var(--ink-low);
-  font-size: 12px;
-}
-.settings-plugin-title p {
-  flex-basis: 100%;
-  max-width: 70ch;
+.settings-plugin-content > p:not(.settings-plugin-description) {
+  padding-block: 8px;
   color: var(--ink-mid);
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 18px;
 }
 .settings-plugin-empty {
   display: grid;
   align-content: start;
   gap: 10px;
-  padding-block: 16px;
+  padding: 24px;
 }
 .settings-plugin-empty h4 {
   font-size: 14px;
   font-weight: 500;
 }
-.settings-plugin-empty p {
+.settings-plugin-empty p,
+.settings-plugin-sidebar > p {
   color: var(--ink-mid);
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 18px;
+}
+.settings-plugin-sidebar > p {
+  padding: 16px 12px;
+}
+.settings-plugin[data-single='true'] .settings-plugin-workspace {
+  grid-template-columns: minmax(0, 1fr);
+  overflow: visible;
+}
+.settings-plugin[data-single='true'] .settings-plugin-editor {
+  display: grid;
+  align-content: start;
+  overflow: visible;
+}
+.settings-plugin[data-single='true'] .settings-plugin-title {
+  padding: 0 0 16px;
+}
+.settings-plugin[data-single='true'] .settings-plugin-title h4 {
+  font-size: 18px;
+}
+.settings-plugin[data-single='true'] .settings-plugin-content {
+  padding: 0;
+  overflow: visible;
 }
 @container installed-plugins (max-width: 680px) {
   .settings-plugin-workspace {
-    grid-template-columns: minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
   }
   .settings-plugin-sidebar {
-    padding: 0 0 16px;
+    flex: none;
     border-right: 0;
     border-bottom: 1px solid var(--line);
-    gap: 10px;
   }
   .settings-plugin-catalog {
     display: none;
   }
   .settings-plugin-picker {
     display: block;
+    padding: 0 12px 10px;
   }
-  .settings-plugin-actions {
-    display: flex;
-    flex-wrap: wrap;
+  .settings-plugin-editor {
+    flex: none;
+    overflow: visible;
   }
-}
-.settings-plugin-group {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-.settings-plugin-group > h4 {
-  color: var(--ink-mid);
-  font-size: 12px;
-  font-weight: 600;
-}
-@container installed-plugins (max-width: 400px) {
-  .settings-plugin-filters {
-    grid-template-columns: minmax(0, 1fr);
+  .settings-plugin-title {
+    padding: 18px 16px 12px;
+  }
+  .settings-plugin-detail-tabs {
+    padding-inline: 16px;
+  }
+  .settings-plugin-content {
+    padding: 16px;
+    overflow: visible;
   }
 }
 </style>

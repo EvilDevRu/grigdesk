@@ -1,3 +1,9 @@
+import { randomUUID } from 'node:crypto';
+import { FactoryTaskSources, factoryTicketHash } from '../../lib/factoryTaskSources.ts';
+import { trackerAccountScope } from '../../lib/trackers/accountScope.ts';
+import type { TrackerContext } from '../../lib/trackers/facade.ts';
+import type { TaskSourceId } from '../../../../shared/tasks/taskReference.ts';
+import { isTaskSourceId } from '../../../../shared/tasks/taskReference.ts';
 import { GrigdeskTaskStore, readGrigdeskTask } from '../../lib/grigdeskTasks/store.ts';
 import { PrefsCorruptedError } from '../../lib/prefsStore.ts';
 import { ArbiterConversationStore } from '../../lib/arbiterConversationStore.ts';
@@ -14,6 +20,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+
+import { config as runtimeConfig } from '../../config.ts';
+import { dataPath } from '../../../../shared/runtime/dataHome.ts';
+import { unpinFactoryRuntimeAttempt } from '../../lib/factoryRuntimePins.ts';
 import {
   factoryMobileIdentity, factorySnapshotHash, sameFactoryIdentity,
 } from '../../lib/mobile/factoryIdentity.ts';
@@ -89,6 +99,8 @@ interface PreparedLaunch {
   catalogHash: string;
   launchInputs: NormalizedLaunchInputs;
   ticket: RouteTicket;
+  source?: TaskSourceId;
+  sourceContext?: TrackerContext;
 }
 
 // Ответ HTTP, собранный до отправки: статус и тело.
@@ -122,6 +134,7 @@ interface LaunchOptions {
   description?: string;
   acceptanceCriteria?: unknown;
   sourceUrl?: string;
+  source?: TaskSourceId;
   reuseTicket?: boolean;
   runnerPrimary?: string;
   expectedCatalogHash?: string;
@@ -167,8 +180,12 @@ type Registry = Record<string, string>;
 
 // Соседи, которых модуль получает сборкой приложения. Их полные контракты живут
 // в своих файлах; здесь перечислено ровно то, что использует раздел.
-interface B24Port {
-  accountIdentity: () => Promise<{ baseUrl?: unknown; userId?: unknown } | null>;
+interface TrackerPort {
+  captureContext?: () => TrackerContext;
+  assertContext?: (context: TrackerContext) => void;
+  accountIdentity?: () => Promise<import('../../lib/trackers/accountScope.ts').TrackerIdentity | null>;
+  sourceUrl?: (id: string) => Promise<string> | string;
+  capabilities?: () => { comments?: boolean } | undefined;
   taskPageData: (id: string) => Promise<{ comments?: unknown }>;
 }
 
@@ -195,6 +212,7 @@ type FactoryModuleConfig = RouteConfig & LaunchConfig & Pick<
 > & {
   factoryStandsDir?: string;
   grigdeskTasksPath?: string;
+  factoryTaskSourcesPath?: string;
   arbiterConversationsDir?: string;
 };
 
@@ -202,7 +220,7 @@ export interface FactoryModuleOptions {
   factoryState: FactoryStateAdapter;
   config: FactoryModuleConfig;
   prefs: PrefsStore;
-  b24?: B24Port | null;
+  tracker?: TrackerPort | null;
   analyzer: AnalyzerPort;
   internalToken?: string;
   arbiterCards?: ArbiterCardsStore | null;
@@ -291,12 +309,16 @@ function runnerStageIsLive(
   return graph.statuses?.[nodeId] === 'run' || Boolean(registry?.[`ACTIVE_RUN_${stage}`]);
 }
 
+/**
+ * Фабрика получает доступ к внешним задачам через нейтральный порт выбранного трекера.
+ * Мутации конвейера и неизменяемый ticket по-прежнему принадлежат ядру.
+ */
 async function factoryModule(
   fastify: FastifyInstance,
   opts: FactoryModuleOptions,
 ): Promise<void> {
   const {
-    factoryState, config, prefs, b24, analyzer, internalToken = '', arbiterCards = null,
+    factoryState, config, prefs, tracker, analyzer, internalToken = '', arbiterCards = null,
     arbiterLive = null,
   } = opts;
   const cfg = { factoryHome: config.factoryHome, stateDir: config.stateDir };
@@ -579,21 +601,44 @@ async function factoryModule(
     return { ...managed, env, sandbox };
   };
 
+  const sourceIndex = config.factoryTaskSourcesPath
+    ? new FactoryTaskSources(config.factoryTaskSourcesPath) : null;
+
   // Список всех задач с картой статусов этапов.
-  fastify.get<FactoryRoute>('/api/tasks', async () => {
+  fastify.get<FactoryRoute>('/api/tasks', async (request) => {
     const tasks = await factoryState.listTasks();
     // Названия берём из одного снимка: полный файл не перечитывается для каждой строки.
     // Карта живёт только в этом запросе, поэтому следующий увидит новые задачи и правки.
     const ownTasks = tasks.length ? (await new GrigdeskTaskStore({ config }).list()).tasks : [];
     const ownById = new Map(ownTasks.map((task) => [task.id, task]));
+    const extended = request.query.sources === '1';
+    let sourceRecords: Awaited<ReturnType<FactoryTaskSources['read']>>['entries'] = {};
+
+    if (extended && sourceIndex) {
+      try {
+        sourceRecords = (await sourceIndex.read()).entries;
+      } catch (error) {
+        request.log.error({ err: error }, 'Не удалось прочитать источники конвейера');
+      }
+    }
 
     const titledTasks = await Promise.all(tasks.map(async (task) => {
       const own = ownById.get(String(task.task));
+      let source: TaskSourceId | undefined = own?.source;
+
+      if (extended && sourceRecords[String(task.task)]) {
+        try {
+          source = FactoryTaskSources.verified(sourceRecords[String(task.task)],
+            await factoryState.readTrustedTicketProof(task.task));
+        } catch {
+          source = undefined;
+        }
+      }
 
       return {
         ...task,
         title: own?.title || await storedTicketTitle(task.task),
-        ...(own ? { source: own.source } : {}),
+        ...(source ? { source } : {}),
         // Пока идёт разбор, задача снаружи выглядит вставшей: тот же затык, та же кнопка.
         // Без этого признака человек берётся за неё руками параллельно с арбитром.
         arbitrating: arbiterLive?.read(task.task) || null,
@@ -601,7 +646,11 @@ async function factoryModule(
     }));
     // Порог молчания едет вместе со списком: «этот ход завис» обязаны считать одинаково
     // чип в навигации, оповещение и карточка задачи, а хранится он в настройках.
-    return { tasks: titledTasks, silenceWindow: Math.max(0, Number(prefs.read().runSilenceWindow) || 0) };
+    return {
+      tasks: titledTasks,
+      ...(extended ? { sourcesVersion: 1 } : {}),
+      silenceWindow: Math.max(0, Number(prefs.read().runSilenceWindow) || 0)
+    };
   });
 
   // Деталь одной задачи: реестр + карта этапов + таймлайн.
@@ -784,14 +833,14 @@ async function factoryModule(
   }
 
   // Ссылка на задачу в трекере — обязательное поле immutable ticket (движок требует http(s) URL).
-  // Берём из настроек портала: своего адреса задачи GrigDesk не выдумывает.
+  // Адрес даёт сам драйвер: ядро не строит URL по правилам конкретного поставщика.
   async function taskSourceUrl(id: string) {
-    if (!b24) return '';
+    if (!tracker?.sourceUrl) {
+      return '';
+    }
+
     try {
-      const identity = await b24.accountIdentity();
-      const base = String(identity?.baseUrl || '').replace(/\/+$/, '');
-      if (!base || !identity?.userId) return '';
-      return `${base}/company/personal/user/${identity.userId}/tasks/task/view/${id}/`;
+      return await tracker.sourceUrl(id);
     } catch (e) {
       fastify.log.warn({ task: id, err: errorMessage(e) }, 'ссылка на задачу для тикета не получена');
       return '';
@@ -800,7 +849,7 @@ async function factoryModule(
 
   // Контекст, которого нет в описании задачи: локальные уточнения человека и арбитра
   // (в трекер их НЕ публикуем — заказчик видит комментарии) и несистемные комментарии
-  // из B24. Без них конвейер стартует слепее триажа и переспрашивает отвеченное.
+  // из трекера. Без них конвейер стартует слепее триажа и переспрашивает отвеченное.
   // Уточнения режутся тем же пределом, что и в промпте триажа: описание тикета
   // вмещает на порядок больше, а разный объём у двух читателей — разная постановка.
   async function ticketSections(id: string, { profile = null, title = '', description = '', own = false }: {
@@ -839,9 +888,9 @@ async function factoryModule(
         text: lines.join('\n').slice(0, 4000),
       });
     }
-    if (b24 && !own) {
+    if (tracker && !own && tracker.capabilities?.()?.comments !== false) {
       try {
-        const page = await b24.taskPageData(id);
+        const page = await tracker.taskPageData(id);
         const comments = (page.comments || []) as Array<{
           isSystem?: unknown;
           text?: unknown;
@@ -977,46 +1026,114 @@ async function factoryModule(
     }
 
     const stagesLog = path.join(config.stateDir, 'logs', `t${id}.stages.log`);
-    const from = await logLength(stagesLog);
-    const launch = await spawnRouteEngine(config, {
-      task: id,
-      args: routeResumeArgs(config, { task: id, profile, attempt }),
-      extraEnv: stageAutoCompactEnv(prefs?.read()),
-    });
-    if (!launch.ok) {
-      fastify.log.warn({ task: id, err: launch.message }, `route resume ${why} не запустился — продолжить вручную`);
-      return launch;
+
+    /**
+     * Один цикл «запуск движка + подтверждение поднятия». Отдельной функцией:
+     * при несовместимости закреплённой поставки с фактическим раннером цикл
+     * выполняется второй раз уже на перепривязанном рантайме, и метка журнала
+     * stages.log для повтора берётся заново — первый запуск дописал туда свой отказ.
+     */
+    const launchOnce = async (): ReturnType<typeof spawnRouteEngine> => {
+      const from = await logLength(stagesLog);
+      const launch = await spawnRouteEngine(config, {
+        task: id,
+        args: routeResumeArgs(config, { task: id, profile, attempt }),
+        extraEnv: stageAutoCompactEnv(prefs?.read()),
+      });
+
+      if (!launch.ok) {
+        fastify.log.warn(
+          { task: id, err: launch.message },
+          `route resume ${why} не запустился — продолжить вручную`,
+        );
+
+        return launch;
+      }
+
+      const confirmed = await confirmRouteResume({
+        attempt,
+        identity: async () => {
+          try {
+            const { registry } = await factoryState.readRegistry(id);
+
+            return {
+              attempt: registry.ATTEMPT_ID || '',
+              alive: factoryState.isDaemonAlive(registry.ORCH_PID, id),
+            };
+          } catch {
+            return null;
+          }
+        },
+        // Без systemd быстрый выход уже поймал сам spawn (он ждёт код 3 секунды),
+        // поэтому здесь остаётся только финальная проверка identity.
+        unitAlive: launch.unit ? () => routeUnitActive(id) : async () => true,
+        reason: () => readLogSince(stagesLog, from),
+      });
+
+      if (!confirmed.ok) {
+        const failure = routeFailure(confirmed.message);
+
+        fastify.log.warn(
+          { task: id, outcome: confirmed.outcome, err: confirmed.message },
+          `route resume ${why} не поднялся — прогон стоит`,
+        );
+
+        return {
+          ...launch,
+          ok: false,
+          message: failure?.message || confirmed.message,
+          failure,
+        };
+      }
+
+      return { ...launch, ok: true };
+    };
+
+    let resumed = await launchOnce();
+
+    // Несовместимость закреплённого рантайма с фактической поставкой исполнителя
+    // лечится сменой закрепления, а не человеком: движок сам сообщил об этом кодом
+    // runner_preflight_incompatible (маркер раннера), попытка сохраняет курсор,
+    // каталог и ворота, а повторный запуск свободно закрепляет текущую поставку
+    // сервера. Ровно одна перепривязка на нажатие: если несовместима и текущая
+    // поставка, отказ уходит человеку как обычно.
+    if (!resumed.ok && resumed.failure?.error === 'runner_preflight_incompatible') {
+      let migrated = false;
+
+      try {
+        const unpinned = await unpinFactoryRuntimeAttempt({
+          controlRoot: config.factoryControlDir,
+          stateRoot: config.stateDir,
+          profileRoot: config.profilesDir,
+          cacheDir: config.runtime?.cacheDir
+            ?? dataPath(config.dataHome ?? runtimeConfig.dataHome, 'serverRuntime'),
+          task: id,
+          attempt,
+          profile,
+        });
+
+        migrated = unpinned.unpinned;
+      } catch (error) {
+        fastify.log.warn(
+          { task: id, err: (error as Error).message },
+          'route resume: перепривязка рантайма попытки не выполнена',
+        );
+      }
+
+      if (migrated) {
+        const runnersList = resumed.failure.runners ?? [];
+
+        fastify.log.warn(
+          { task: id, runners: runnersList },
+          `route resume ${why}: закрепление рантайма снято, повтор на текущей поставке`
+            + ` (несовместимы исполнители: ${runnersList.join(', ')})`,
+        );
+
+        resumed = await launchOnce();
+      }
     }
-    const confirmed = await confirmRouteResume({
-      attempt,
-      identity: async () => {
-        try {
-          const { registry } = await factoryState.readRegistry(id);
-          return {
-            attempt: registry.ATTEMPT_ID || '',
-            alive: factoryState.isDaemonAlive(registry.ORCH_PID, id),
-          };
-        } catch { return null; }
-      },
-      // Без systemd быстрый выход уже поймал сам spawn (он ждёт код 3 секунды),
-      // поэтому здесь остаётся только финальная проверка identity.
-      unitAlive: launch.unit ? () => routeUnitActive(id) : async () => true,
-      reason: () => readLogSince(stagesLog, from),
-    });
-    if (!confirmed.ok) {
-      const failure = routeFailure(confirmed.message);
-      fastify.log.warn(
-        { task: id, outcome: confirmed.outcome, err: confirmed.message },
-        `route resume ${why} не поднялся — прогон стоит`,
-      );
-      return {
-        ...launch,
-        ok: false,
-        message: failure?.message || confirmed.message,
-        failure,
-      };
-    }
-    return { ...launch, ok: true };
+
+    return resumed;
   }
 
   /**
@@ -1025,12 +1142,38 @@ async function factoryModule(
    * только базовый тикет: уточнения/комментарии/Telegram намеренно перечитываются при dispatch.
    */
   async function preflightRoutePipeline(id: string, {
-    profile, route, title, description, acceptanceCriteria, sourceUrl, reuseTicket = false,
+    profile, route, title, description, acceptanceCriteria, sourceUrl, source, reuseTicket = false,
     runnerPrimary = '', expectedCatalogHash = '',
     deliveryTargets = [], instrumentationFiles = [], diagnosisKind = '', diagnosisSignal = '',
   }: LaunchOptions = {}, { dynamicSections = true }: {
     dynamicSections?: boolean;
   } = {}): Promise<PreflightResult> {
+    const sourceContext = tracker?.captureContext?.();
+    const ownSourceTask = await readGrigdeskTask(config, id);
+    let launchSource: TaskSourceId | undefined = ownSourceTask ? 'grigdesk' : undefined;
+
+    if (reuseTicket && sourceIndex) {
+      const records = await sourceIndex.read();
+
+      try {
+        launchSource = FactoryTaskSources.verified(records.entries[id],
+          await factoryState.readTrustedTicketProof(id));
+      } catch {
+        launchSource = ownSourceTask ? 'grigdesk' : undefined;
+      }
+    } else if (!ownSourceTask && tracker?.accountIdentity && sourceContext?.trackerId) {
+      const identity = await tracker.accountIdentity();
+
+      launchSource = `${sourceContext.trackerId}@${trackerAccountScope(identity)}`;
+    }
+
+    if (sourceContext && !ownSourceTask && !reuseTicket) {
+      tracker?.assertContext?.(sourceContext);
+    }
+    if (source !== undefined && (!isTaskSourceId(source) || source !== launchSource)) {
+      return { ok: false, result: { status: 409, body: { error: 'task_source_mismatch' } } };
+    }
+
     const wanted = String(route || 'feature');
     const expected = String(expectedCatalogHash || '');
     if (expected && !/^[a-f0-9]{64}$/.test(expected)) {
@@ -1210,6 +1353,8 @@ async function factoryModule(
         catalogHash: pinnedCatalogHash,
         launchInputs,
         ticket: built,
+        source: launchSource,
+        sourceContext: !ownSourceTask && !reuseTicket ? sourceContext : undefined,
       },
     };
   }
@@ -1228,6 +1373,18 @@ async function factoryModule(
     const {
       profile, route: wanted, runnerPrimary, catalogHash, launchInputs, ticket: built,
     } = prepared.value;
+
+    if (prepared.value.sourceContext) {
+      tracker?.assertContext?.(prepared.value.sourceContext);
+    }
+
+    const dispatchId = randomUUID();
+    const pendingSource = prepared.value.source && sourceIndex ? {
+      taskId: id,
+      source: prepared.value.source,
+      dispatchId,
+      ticketHash: factoryTicketHash(built),
+    } : null;
     const gitRefresh = await maybeRefreshRepos(id, profile);
 
     // Слот стенда резервируем до запуска, чтобы два provisioning не взяли один порт.
@@ -1253,6 +1410,16 @@ async function factoryModule(
       const ticketFile = await writeTicketFile({ dir: config.ticketsDir, task: id, ticket: built });
       // Именно spawn — первая граница, после которой вызывающий уже не может доказать,
       // появился ли detached engine. До неё ошибки git/slot/ticket безопасно повторяемы.
+      if (prepared.value.sourceContext) {
+        tracker?.assertContext?.(prepared.value.sourceContext);
+      }
+      if (pendingSource) {
+        await sourceIndex!.put(pendingSource);
+      }
+      if (prepared.value.sourceContext) {
+        tracker?.assertContext?.(prepared.value.sourceContext);
+      }
+
       taskLaunchPending.set(String(id), { startedAt: Date.now() });
       launch = await spawnRouteEngine(config, {
         task: id,
@@ -1261,6 +1428,7 @@ async function factoryModule(
           profile,
           route: wanted,
           ticketFile,
+          queueDispatchId: dispatchId,
           runnerPrimary,
           expectedCatalogHash: catalogHash,
           ...launchInputs,
@@ -1307,10 +1475,12 @@ async function factoryModule(
       await pause(250);
       let registry: Registry | null = null;
       try { registry = (await factoryState.readRegistry(id)).registry; } catch { /* реестр ещё пишется */ }
+
       const identity = startRegistryIdentity(registry, {
         profile,
         route: wanted,
         expectedCatalogHash: catalogHash,
+        queueDispatchId: dispatchId,
         runnerPrimaryOverride: runnerPrimary,
       });
       if (identity && registry && factoryState.isDaemonAlive(registry.ORCH_PID, id)) {
@@ -1321,6 +1491,16 @@ async function factoryModule(
         launchConfirmations = 0;
       }
       if (launchConfirmations >= 4 && registry) {
+        if (pendingSource) {
+          const proof = await factoryState.readTrustedTicketProof(id);
+
+          if (!FactoryTaskSources.verified(pendingSource, proof)) {
+            throw new Error('Источник запуска не совпал с trusted попыткой');
+          }
+
+          await sourceIndex!.put({ ...pendingSource, attempt: proof.attempt });
+        }
+
         return {
           status: null,
           body: {
@@ -1827,12 +2007,22 @@ async function factoryModule(
     };
   });
 
-  // Запуск задачи на конвейер (замена входа через хук на mcp__b24__b24_task).
+  // Запуск задачи на конвейер через общий вход фабрики.
   fastify.post<FactoryRoute>('/api/tasks/:id/launch', async (request, reply) => {
     const id = String(request.params.id).replace(/[^0-9]/g, '');
     if (!id) return reply.code(400).send({ error: 'bad_task_id' });
-    const r = await withTaskLaunchLock(id, () => startPipeline(id, request.body || {}));
-    return r.status ? reply.code(r.status).send(r.body) : r.body;
+
+    try {
+      const r = await withTaskLaunchLock(id, () => startPipeline(id, request.body || {}));
+
+      return r.status ? reply.code(r.status).send(r.body) : r.body;
+    } catch (error) {
+      if ((error as { status?: number }).status === 409) {
+        return reply.code(409).send({ error: (error as { code: string }).code });
+      }
+
+      throw error;
+    }
   });
 
   // Занятость слотов стенда: чем заняты, что зарезервировано, сколько свободно.

@@ -542,13 +542,13 @@
                         <span class="field-label">Проект Битрикс24 <em>необязательно</em></span>
                         <UiSelect
                           v-model="r.b24.groupId"
-                          class="sel thin b24-group-select"
+                          class="sel thin tracker-group-select"
                           compact
                         >
                           <option :value="null">
-                            {{ b24GroupsFailed ? 'без проекта — список сейчас недоступен' : 'без проекта Битрикс24' }}
+                            {{ trackerGroupsFailed ? 'без проекта — список сейчас недоступен' : 'без проекта Битрикс24' }}
                           </option>
-                          <option v-for="group in b24GroupOptions" :key="group.id" :value="group.id">
+                          <option v-for="group in trackerGroupOptions" :key="group.id" :value="group.id">
                             {{ group.name }}
                           </option>
                         </UiSelect>
@@ -557,7 +557,7 @@
                         <span class="field-label">Ответственный</span>
                         <UiSelect v-model="r.b24.responsibleId" class="sel">
                           <option :value="null">ответственный — я</option>
-                          <option v-for="u in b24users" :key="u.id" :value="u.id">{{ u.name }}</option>
+                          <option v-for="u in trackerUsers" :key="u.id" :value="u.id">{{ u.name }}</option>
                         </UiSelect>
                       </label>
                       <label class="control">
@@ -884,19 +884,19 @@ type RuleForm = Omit<TelegramRule, 'draft' | 'autoLaunch' | 'agentSearch' | 'b24
 
 // Ростер и проекты портала приходят из соседнего раздела и своего контракта
 // здесь не имеют: разделу «Телеграма» нужны только имя и числовой id.
-interface B24User {
+interface TrackerUser {
   id: number;
   name: string;
 }
 
-interface B24Group {
+interface TrackerGroup {
   id?: unknown;
   name?: unknown;
 }
 
 // Проект в селекте правила. `missing` помечает сохранённый, но сейчас
 // недоступный: подменять такой на «без проекта» нельзя — правило уедет не туда.
-interface B24GroupOption {
+interface TrackerGroupOption {
   id: number;
   name: string;
   missing: boolean;
@@ -1198,35 +1198,35 @@ async function pultDisable(): Promise<void> {
 
 // --- правила «чат или тема → проект» ---
 
-const b24users = ref<B24User[]>([]);
+const trackerUsers = ref<TrackerUser[]>([]);
 
 // Ростер портала для селекта ответственного. Пустой список — не беда: задача
 // без ответственного уходит на владельца сессии, и это разумный дефолт.
 async function loadUsers(): Promise<void> {
   try {
-    const res = await api.get('/api/b24/users') as { users?: B24User[] };
+    const res = await api.get('/api/tracker/users') as { users?: TrackerUser[] };
 
-    b24users.value = res?.users || [];
+    trackerUsers.value = res?.users || [];
   } catch {
     // Портал не настроен или не отвечает — правила от этого не ломаются.
   }
 }
 
-const b24groups = ref<B24Group[]>([]);
-const b24GroupsFailed = ref(false);
+const trackerGroups = ref<TrackerGroup[]>([]);
+const trackerGroupsFailed = ref(false);
 
 // Проекты портала для GROUP_ID задачи. В форме показываем имена, числовой id
 // остаётся только значением option и уезжает в уже существующий контракт правила.
 async function loadGroups(): Promise<void> {
   try {
-    const res = await api.get('/api/b24/groups') as { groups?: B24Group[] };
+    const res = await api.get('/api/tracker/groups') as { groups?: TrackerGroup[] };
 
-    b24groups.value = res?.groups || [];
-    b24GroupsFailed.value = false;
+    trackerGroups.value = res?.groups || [];
+    trackerGroupsFailed.value = false;
   } catch {
     // Сохранённые правила всё равно остаются редактируемыми: ниже подмешиваем
     // неизвестный id отдельным option, а новый проект просто нельзя выбрать.
-    b24GroupsFailed.value = true;
+    trackerGroupsFailed.value = true;
   }
 }
 
@@ -1248,10 +1248,10 @@ function toId(v: unknown): number | null {
 
 // Проект могли архивировать или убрать из доступных уже после сохранения правила.
 // Не подменяем такое значение на «без проекта» при следующей несвязанной правке.
-const b24GroupOptions = computed<B24GroupOption[]>(() => {
-  const out = new Map<number, B24GroupOption>();
+const trackerGroupOptions = computed<TrackerGroupOption[]>(() => {
+  const out = new Map<number, TrackerGroupOption>();
 
-  for (const group of b24groups.value) {
+  for (const group of trackerGroups.value) {
     const id = toId(group?.id);
     const name = String(group?.name || '').trim();
 
@@ -1345,8 +1345,8 @@ function payload(): unknown[] {
 
     const thread = Number(r.threadId);
     const chatId = Number(r.chatId);
-    const b24 = r.b24 || {};
-    const priority = Number(b24.priority);
+    const trackerSettings = r.b24 || {};
+    const priority = Number(trackerSettings.priority);
 
     return {
       ...humanRule,
@@ -1360,9 +1360,9 @@ function payload(): unknown[] {
       threadId: Number.isSafeInteger(thread) && thread > 0 ? thread : null,
       kind: r.kind === 'wish' ? 'wish' : 'bug',
       b24: {
-        ...b24,
-        responsibleId: toId(b24.responsibleId),
-        groupId: toId(b24.groupId),
+        ...trackerSettings,
+        responsibleId: toId(trackerSettings.responsibleId),
+        groupId: toId(trackerSettings.groupId),
         priority: [0, 1, 2].includes(priority) ? priority : 1,
       },
       // Границы повторяют серверные, чтобы сохранение не возвращало другие числа

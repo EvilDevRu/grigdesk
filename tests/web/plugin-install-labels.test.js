@@ -81,11 +81,11 @@ test('W4: result различает fresh/update/rollback, ошибки и ос�
     sourceChanged: false,
   };
   assert.equal(installResultText(fresh),
-    'Плагин «Демо» v1.0.0 установлен. Включите его в каталоге и перезапустите GrigDesk.');
+    'Плагин «Демо» v1.0.0 установлен. Включите его в каталоге.');
   assert.equal(installResultText(update),
-    'Плагин «Демо» обновлён до v1.0.0. Перезапустите GrigDesk и перезагрузите окно, чтобы применить.');
+    'Плагин «Демо» обновлён до v1.0.0.');
   assert.equal(installResultText(rollback),
-    'Версия v1.0.0 восстановлена. Перезапустите GrigDesk и перезагрузите окно.');
+    'Версия v1.0.0 восстановлена.');
 
   const failed = installJob('failed');
 
@@ -153,12 +153,12 @@ test('W7: short SHA и русские подписи всех этапов', asy
 for (const [locale, summary, inline, updateText, rollbackText] of [
   ['ru', 'Затронут код, исполняемый GrigDesk, или его зависимости.',
     'код, исполняемый GrigDesk, или его зависимости',
-    'Плагин «Демо» обновлён до v1.0.0. Перезапустите GrigDesk и перезагрузите окно, чтобы применить.',
-    'Версия v1.0.0 восстановлена. Перезапустите GrigDesk и перезагрузите окно.'],
+    'Плагин «Демо» обновлён до v1.0.0.',
+    'Версия v1.0.0 восстановлена.'],
   ['en', 'Code executed by GrigDesk or its dependencies is affected.',
     'code executed by GrigDesk or its dependencies',
-    'Plugin “Демо” updated to v1.0.0. Restart GrigDesk and reload the window to apply.',
-    'Version v1.0.0 restored. Restart GrigDesk and reload the window.'],
+    'Plugin “Демо” updated to v1.0.0.',
+    'Version v1.0.0 restored.'],
 ]) {
   test(`W8-CODE-RELOAD-LOCALES: подписи кода и оба действия ${locale}`, async () => {
     const { installResultText } = await import('../../web/src/shared/pluginInstall.ts');

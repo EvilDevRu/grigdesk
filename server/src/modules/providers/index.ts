@@ -83,7 +83,10 @@ interface ProviderSettingRoute {
 }
 
 interface ProvidersListRoute {
-  Querystring: { refresh?: string };
+  Querystring: {
+    refresh?: string;
+    wait?: string;
+  };
 }
 
 // Список меняется редко — кэшируем, чтобы не гонять probe-подпроцессы на каждый запрос.
@@ -1013,6 +1016,8 @@ async function providersModule(
 
   fastify.get<ProvidersListRoute>('/api/providers', async (request, reply) => {
     const force = request.query?.refresh === '1';
+    // Отправка ждёт общий готовый каталог без повторного discovery и сброса кэша.
+    const wait = request.query?.wait === '1';
     // Старые версии моделей приходят всегда (с `legacy: true`), а показывать ли их —
     // решает настройка: тумблер в UI не должен ходить за новым списком на сервер.
     const showAllModels = !!prefs?.read().showAllModels;
@@ -1022,7 +1027,7 @@ async function providersModule(
       registryCache.clear();
     }
 
-    return readRegistry((providers) => reply.send({ providers, showAllModels }), !force);
+    return readRegistry((providers) => reply.send({ providers, showAllModels }), !force && !wait);
   });
 
   /**

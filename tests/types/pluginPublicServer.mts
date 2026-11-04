@@ -11,36 +11,43 @@ import { createPluginCore } from '../../server/src/modules/plugins/core.ts';
 // PUBLIC-MANIFEST: вход автора отличается от нормализованных метаданных.
 const manifest: PluginManifest = {
   id: 'typed-plugin',
-  api: 2,
-  nav: { path: '/ext/typed-plugin', group: 'tools' },
-  webModule: {
-    dir: 'ui',
-    entry: 'panel.js',
-    css: ['panel.css'],
-    locales: { ru: 'ru.json', en: 'en.json' },
-    startOnLogin: true,
-  },
-  settings: [{
-    key: 'limit',
-    type: 'number',
-    default: 1,
-  }],
-  placements: [{ slot: 'chat.sidebar', default: true }],
-  install: { npm: [] },
-  minGrigDeskVersion: '0.1.0',
-};
-const legacy: PluginManifest = {
-  id: 'legacy',
   api: 1,
-  web: 'web',
+  description: 'Панель с сервером',
+  icon: 'assets/icon.png',
+  entrypoints: {
+    server: 'runtime/main.ts',
+    web: {
+      dir: 'ui',
+      entry: 'panel.js',
+      css: ['panel.css'],
+      locales: { ru: 'ru.json', en: 'en.json' },
+    },
+  },
+  contributes: {
+    panels: [{ title: 'Панель', group: 'tools' }],
+    settings: [{
+      key: 'limit',
+      type: 'number',
+      default: 1
+    }],
+    slots: [{
+      slot: 'provider.popover.after-bars',
+      kind: 'provider-usage',
+      default: true
+    }],
+  },
+  install: { npm: [] },
+  engines: { grigdesk: '>=0.1.0' },
 };
+// @ts-expect-error PUBLIC-MANIFEST: старый HTML-канал запрещён.
+const legacy: PluginManifest = { ...manifest, web: 'web' };
 const installable: InstallablePluginManifest = { ...manifest, version: '1.0.0' };
-// @ts-expect-error PUBLIC-MANIFEST: третья версия API не поддержана.
-const invalidApi: PluginManifest = { id: 'bad', api: 3 };
+// @ts-expect-error PUBLIC-MANIFEST: второе поколение не исполняется.
+const invalidApi: PluginManifest = { ...manifest, api: 2 };
 // @ts-expect-error PUBLIC-MANIFEST: version обязательна только для установки.
 const missingVersion: InstallablePluginManifest = { id: 'bad' };
-// @ts-expect-error PUBLIC-MANIFEST: вход nav требует path.
-const missingPath: PluginManifest = { id: 'bad', nav: { label: 'Плагин' } };
+// @ts-expect-error PUBLIC-MANIFEST: старый nav не является входом автора.
+const missingPath: PluginManifest = { ...manifest, nav: { label: 'Плагин' } };
 
 // PUBLIC-SERVER-OPTIONS: загрузчик и автор используют один контракт options.
 declare const runtimeOptions: Parameters<PluginServerModule['default']>[1];

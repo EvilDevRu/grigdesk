@@ -143,6 +143,8 @@ function validateBenchmark(value: unknown): BenchmarkSettings {
  * фонового прогресса не используются. Все внешние зависимости инъецируются в тестах.
  */
 export class ModelJobManager {
+  private maintenance = false;
+
   readonly jobsDir: string;
 
   readonly mediaHfDir: string;
@@ -354,6 +356,48 @@ export class ModelJobManager {
     return reconciled;
   }
 
+  /**
+   * Обслуживание закрывает admission до ожидания recovery и проверки дисковых jobs.
+   * Даже отменённый worker удерживает окружение, пока подтверждена его живая identity.
+   */
+  async prepareMaintenance(): Promise<() => void> {
+    if (this.maintenance) {
+      throw new ModelJobError('speech_runtime_busy', 'Окружение речи уже обслуживается.', 409);
+    }
+
+    this.maintenance = true;
+
+    try {
+      if (this.recovery) {
+        await this.recovery;
+      }
+
+      const entries = this.deps.readdirSync(this.jobsDir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith('.json')) {
+          continue;
+        }
+
+        const job = this.#read(entry.name.slice(0, -5));
+
+        if (job && (ACTIVE_MODEL_JOB_STATUSES.has(job.status)
+          || job.process && this.deps.processIdentityMatches(job.process))) {
+          throw new ModelJobError('speech_runtime_busy',
+            'Дождитесь завершения загрузки или проверки модели речи.', 409);
+        }
+      }
+    } catch (error) {
+      this.maintenance = false;
+
+      throw error;
+    }
+
+    return () => {
+      this.maintenance = false;
+    };
+  }
+
   #activeJob(kind: string, modelId: string): { jobId: string } | null {
     const key = activeKey(kind, modelId);
     const launchBlocked = this.launchBlocked.get(key);
@@ -441,6 +485,9 @@ export class ModelJobManager {
   ): Promise<ModelJobStart> {
     const model = this.catalog[modelId] || modelOrThrow(modelId);
     if (this.recovery) await this.recovery;
+    if (this.maintenance) {
+      throw new ModelJobError('speech_runtime_maintenance', 'Окружение речи обслуживается.', 409);
+    }
     const duplicate = this.#activeJob(kind, modelId);
     if (duplicate) return publicStart(duplicate, true);
 

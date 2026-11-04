@@ -3,7 +3,7 @@
 Обычный чат GLM не меняется: прежний JSON политики без поля `consumer`, approval `ask`
 и собственные ревизии профиля и политики.
 Этап фабрики — отдельный потребитель со своими ревизиями
-`grigdesk-glm-factory-profile-v2`/`grigdesk-glm-factory-policy-v3`; допуск сборки DSH
+`grigdesk-glm-factory-profile-v2`/`grigdesk-glm-factory-policy-v4`; допуск сборки DSH
 проверяется прежней формулой identity для режима `api`.
 
 ## Политика этапа
@@ -20,6 +20,8 @@
   `ask_user_question` запрещён, в `state-only` разрешены `write`/`edit` только внутри
   `stateDir` без символических ссылок, shell проходит строгую политику прямого SSH и клиентов БД
   и файловую песочницу DSH. Контракт — [GLM и артефакты state-only](../pipeline/glm-state-artifacts.md).
+  Общий базовый набор разрешает `web_search` и `web_fetch`:
+  [провайдеры и границы веб-инструментов](glm-web-tools.md).
 
 ## Ход этапа
 

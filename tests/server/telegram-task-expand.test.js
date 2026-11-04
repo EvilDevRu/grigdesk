@@ -23,7 +23,7 @@ import test from 'node:test';
 
 import { TelegramArchiveStore } from '../../server/src/lib/telegram/archiveStore.ts';
 import { TelegramRulesStore } from '../../server/src/lib/telegram/rulesStore.ts';
-import b24Module from '../../server/src/modules/b24/index.ts';
+import trackerModule from '../../server/src/modules/tracker/index.ts';
 import telegramModule from '../../server/src/modules/telegram/index.ts';
 import {
   TelegramModuleCredentials,
@@ -96,8 +96,8 @@ async function build(t, { enabled = true, messages = [], task = TASK, archive } 
   app.decorate('pluginEnabled', () => enabled);
   // Порядок регистрации — как в app.js: b24 раньше telegram. Декоратор нужен
   // не при сборке роута, а в момент запроса, и порядок на это влиять не должен.
-  app.register(b24Module, {
-    b24: {
+  app.register(trackerModule, {
+    tracker: {
       taskDetail: async (id) => { calls.push(id); return task; },
       getDashboard: async () => ({}),
       findUsers: async () => [],
@@ -122,7 +122,7 @@ async function build(t, { enabled = true, messages = [], task = TASK, archive } 
     app,
     calls,
     discussion: (text, opts) => app.telegramDiscussion(text, opts),
-    task: () => app.inject({ method: 'GET', url: `/api/b24/task/${task.id}` }),
+    task: () => app.inject({ method: 'GET', url: `/api/tracker/task/${task.id}` }),
   };
 }
 

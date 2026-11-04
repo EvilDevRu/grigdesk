@@ -10,6 +10,15 @@ const server: PluginServerAsync = async (app, options) => {
     authKind: request.authKind,
   }));
 
+  app.get('/provider-usage', async () => ({
+    resources: [{
+      key: 'example',
+      label: 'Пример',
+      summary: 'Данные слота v1',
+      controls: [],
+    }],
+  }));
+
   options.lifecycle.onEnable = () => options.core.emit('enabled');
   options.lifecycle.onDisable = () => options.core.emit('disabled');
   options.lifecycle.prepareChange = async (change, signal) => {

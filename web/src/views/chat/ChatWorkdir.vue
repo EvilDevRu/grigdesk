@@ -4,7 +4,8 @@
     variant="ghost"
     :aria-label="t('core.workdirTrigger', { name: directoryName })"
     v-tooltip="t('core.workdirWorkingIn', { path: currentDirectory || directory })"
-    aria-haspopup="dialog"
+    :aria-haspopup="embedded ? undefined : 'dialog'"
+    :aria-controls="pickerOpen ? pickerId : undefined"
     :aria-expanded="pickerOpen"
     :pressed="pickerOpen"
     :disabled="busy"
@@ -25,32 +26,8 @@
       </svg>
     </template>
   </UiButton>
-  <UiDialog
-    v-model:open="pickerOpen"
-    :title="t('core.workdirTitle')"
-    size="compact"
-    mobile-sheet
-    :body-inset="false"
-    :busy="busy"
-    :dismissible="!busy"
-    data-role="workdir-picker"
-    data-ui-workspace
-  >
-    <template #title>
-      <span class="workdir-heading">
-        <span class="workdir-heading-copy">
-          <span>{{ t('core.workdirTitle') }}</span>
-          <span class="workdir-caption">{{ t('core.workdirOnComputer') }}</span>
-        </span>
-        <UiIconButton :label="t('core.close')" :disabled="busy" @click="closePicker">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-               stroke-linecap="round" aria-hidden="true">
-            <path d="m6 6 12 12M6 18 18 6" />
-          </svg>
-        </UiIconButton>
-      </span>
-    </template>
-    <div class="workdir-content">
+  <ChatWorkdirPicker v-model:open="pickerOpen" :id="pickerId" :embedded="embedded" :busy="busy">
+    <div class="workdir-content" :class="{ 'workdir-content--embedded': embedded }">
       <UiInlineMessage v-for="warning in preview?.target?.warnings || []" :key="warning" tone="warning">
         {{ warning }}
       </UiInlineMessage>
@@ -152,9 +129,10 @@
         {{ t('core.workdirTransfer') }}
       </UiButton>
     </div>
-  </UiDialog>
+  </ChatWorkdirPicker>
   <UiDialog
     :open="Boolean(proposal)"
+    layer="confirm"
     title="Смена рабочей папки"
     :busy="Boolean(session?.workdirChanging)"
     @close="cancel"
@@ -186,13 +164,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, ref, useId, watch } from 'vue';
 
 import {
   UiButton,
   UiDialog,
   UiField,
-  UiIconButton,
   UiInlineMessage,
   UiInput,
   UiSearchInput,
@@ -201,6 +178,7 @@ import {
   t,
   vTooltip,
 } from '../../ui.ts';
+import ChatWorkdirPicker from './ChatWorkdirPicker.vue';
 import { api } from '../../shared/apiClient.ts';
 import { NAV_ICONS } from '../../shared/navIcons.ts';
 import { normalizeChatWorkdir } from '../../../../shared/chat/chatWorkdir.ts';
@@ -246,9 +224,17 @@ interface ProjectOption {
   archivedAt?: string | null;
 }
 
-const props = defineProps<{ sid: string; }>();
+const props = withDefaults(defineProps<{
+  sid: string;
+  embedded?: boolean;
+  active?: boolean;
+}>(), {
+  embedded: false,
+  active: true,
+});
 
 const chat = useChatStore();
+const pickerId = `chat-workdir-picker-${useId()}`;
 const pickerOpen = ref(false);
 const mode = ref<'catalog' | 'path'>('catalog');
 const search = ref('');
@@ -476,9 +462,15 @@ async function loadProjects(): Promise<void> {
 
 /**
  * Каждый вход начинает выбор с общего каталога без прежнего поискового фильтра.
- * Фокус остаётся на кнопке закрытия: телефон не открывает клавиатуру без запроса ввода.
+ * Встроенный выбор сворачивается повторным нажатием; открытие не вызывает клавиатуру.
  */
 async function openPicker(): Promise<void> {
+  if (props.embedded && pickerOpen.value) {
+    closePicker();
+
+    return;
+  }
+
   mode.value = 'catalog';
   search.value = '';
   pathInput.value = '';
@@ -489,6 +481,12 @@ async function openPicker(): Promise<void> {
 }
 
 watch(() => props.sid, closePicker);
+watch(() => props.embedded, closePicker);
+watch(() => props.active, (active) => {
+  if (!active) {
+    closePicker();
+  }
+});
 
 // Обновление зависит от значений выбора, а не от ссылок объектов ACK:
 // так нет цикла preview → save → новый объект workdir → preview.
@@ -511,7 +509,6 @@ watch(() => JSON.stringify([
   overflow-wrap: anywhere;
 }
 
-.workdir-heading,
 .workdir-list-heading {
   display: flex;
   align-items: center;
@@ -519,15 +516,14 @@ watch(() => JSON.stringify([
   gap: 12px;
 }
 
-.workdir-heading-copy,
 .workdir-current-copy {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.workdir-heading-copy .workdir-caption {
-  font-weight: 400;
+.workdir-content--embedded {
+  padding: 12px 0 0;
 }
 
 .workdir-catalog,
@@ -665,7 +661,7 @@ watch(() => JSON.stringify([
 }
 
 @media (max-width: 600px) {
-  .workdir-content {
+  .workdir-content:not(.workdir-content--embedded) {
     padding-right: max(16px, env(safe-area-inset-right));
     padding-bottom: max(20px, env(safe-area-inset-bottom));
     padding-left: max(16px, env(safe-area-inset-left));

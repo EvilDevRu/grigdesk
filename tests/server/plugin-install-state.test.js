@@ -6,7 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 
-import { emptyInstallState, PluginInstallStateStore } from '../../server/src/lib/packageInstall/stateStore.ts';
+import {
+  emptyInstallState, PluginInstallStateStore,
+} from '../../server/src/lib/packageInstall/stateStore.ts';
 import { applyingState, installedRecord, installJob } from './helpers/pluginInstallState.js';
 import { writeDurableFile } from '../../server/src/lib/durableFile.ts';
 
@@ -320,4 +322,21 @@ test('S-values-progress: диск принимает прежние сочета
     };
     assert.deepEqual(decodeInstallState(state), state);
   }
+});
+
+
+test('V1-BARRIER-old-install-error: старый web_invalid читается без изменения record и диска', async (t) => {
+  const { store, statePath } = await fixture(t);
+  const state = emptyInstallState();
+
+  state.nextRevision = 2;
+  state.plugins.demo = installedRecord();
+  state.job = installJob('failed');
+  state.job.error = { code: 'web_invalid', message: 'Старая диагностическая причина.' };
+
+  const serialized = JSON.stringify(state);
+
+  await writeFile(statePath, serialized);
+  assert.deepEqual(await store.read(), state);
+  assert.equal(await readFile(statePath, 'utf8'), serialized);
 });

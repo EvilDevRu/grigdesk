@@ -5,6 +5,7 @@ import { installUiBrowser } from './helpers/ui-components.js';
 
 import {
   askAgentDraft,
+  buildCodeContextChoices,
   buildCodeContexts,
   buildGitGroups,
   chunkList,
@@ -107,6 +108,67 @@ test('рабочие контексты объединяют репозитор�
     codeContextId('repo:one', '/work:two'),
     codeContextId('repo', 'one:/work:two'),
   );
+});
+
+test('варианты копий сокращают названия, сохраняют ветки и различают одинаковые имена', () => {
+  const { contexts } = buildCodeContexts([
+    {
+      key: 'repo',
+      dir: '/repo',
+      trees: [
+        tree('/repo', { main: true, branch: 'dev' }),
+        tree('/work/feature', { name: 'feature', branch: 'feature' }),
+        tree('/work/a/preview', { name: 'preview', branch: '(detached)' }),
+        tree('/work/b/preview', { name: 'preview', branch: 'review' }),
+        tree('/work/task', {
+          name: 'technical',
+          task: '42',
+          branch: 'task-42',
+        }),
+      ],
+    },
+    {
+      key: 'other',
+      dir: '/other',
+      trees: [tree('/other/preview', { name: 'preview', branch: '' })],
+    },
+  ]);
+  const choices = buildCodeContextChoices(contexts);
+
+  assert.deepEqual(choices.map(({ label, description }) => ({ label, description })), [
+    { label: 'Основная', description: 'dev' },
+    { label: 'feature', description: '' },
+    { label: 'a/preview', description: 'detached HEAD' },
+    { label: 'b/preview', description: 'review' },
+    { label: 'Задача 42', description: 'task-42' },
+    { label: 'preview', description: 'ветка не определена' },
+  ]);
+  assert.deepEqual(choices.map(({ id, treePath }) => ({ id, treePath })),
+    contexts.map(({ id, treePath }) => ({ id, treePath })));
+  assert.equal(contexts[2].label, 'repo · Worktree preview · detached HEAD');
+  assert.deepEqual(buildCodeContextChoices([]), []);
+});
+
+test('различение копий учитывает весь нужный хвост и сохраняет смысловую подпись задачи', () => {
+  const { contexts } = buildCodeContexts([
+    {
+      key: 'repo',
+      dir: '/repo',
+      trees: [
+        tree('/alpha/work/preview', { name: 'preview' }),
+        tree('/beta/work/preview', { name: 'preview' }),
+        tree('/alpha/task', { task: '42' }),
+        tree('/beta/task', { task: '42' }),
+      ],
+    },
+  ]);
+
+  assert.deepEqual(buildCodeContextChoices(contexts).map((choice) => choice.label), [
+    'alpha/work/preview',
+    'beta/work/preview',
+    'Задача 42 · alpha/task',
+    'Задача 42 · beta/task',
+  ]);
 });
 
 test('сохранённый контекст валидируется, а повреждённый и протухший дают безопасный main fallback', () => {

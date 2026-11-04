@@ -171,8 +171,6 @@ onMounted(async () => {
 .new-task-title {
   flex: 1;
   min-width: 0;
-  font-size: 17px;
-  font-weight: 600;
 }
 
 .new-task-footer {

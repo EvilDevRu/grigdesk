@@ -1,3 +1,7 @@
+import { taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
+import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
+import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
+import { uiLocalePort } from '../shared/uiLocalePort.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { decodeGrigdeskTask } from '../../../shared/tasks/grigdeskTaskContracts.ts';
 // Кеш деталей B24 и действия через GrigDesk без открытия стороннего портала.
@@ -5,10 +9,13 @@ import { decodeGrigdeskTask } from '../../../shared/tasks/grigdeskTaskContracts.
 import { defineStore } from 'pinia';
 import { api, ApiError } from '../shared/apiClient.ts';
 import { useBoardStore } from './board.ts';
+import { useTrackersStore } from './trackers.ts';
 import {
   decodeTaskDetail, decodeTaskLaunchOptions, decodeTaskLaunchResult,
 } from '../shared/boardContracts.ts';
 import type { TaskDetail } from '../shared/boardContracts.ts';
+
+const t = localeTranslator(uiLocalePort);
 
 type TaskId = string | number;
 
@@ -18,29 +25,52 @@ interface CachedTask {
 }
 
 export const useTasksStore = defineStore('tasks', {
-  state: () => ({ details: {} as Record<string, CachedTask> }),
+  state: () => ({
+    details: {} as Record<string, CachedTask>,
+    epoch: 0,
+  }),
 
   actions: {
+    invalidate() {
+      this.epoch += 1;
+      this.details = {};
+    },
     /**
      * Детали используют прежний кеш на тридцать секунд с принудительным обновлением.
      * Номера вне диапазона собственных задач читаются прежним запросом Б24.
      * Внутри диапазона источник подтверждает запись; ответ проверяется до замены кеша.
      */
-    async load(id: TaskId, force = false, signal?: AbortSignal): Promise<TaskDetail> {
-      const cached = this.details[id];
+    async load(id: TaskId, force = false, signal?: AbortSignal, source?: TaskSourceId): Promise<TaskDetail> {
+      const epoch = this.epoch;
+      const key = source ? taskReferenceKey({ id, source }) : String(id);
+      const cached = this.details[key];
+
+      if (source && source !== 'grigdesk') {
+        const board = useBoardStore();
+
+        if (!board.data?.source) {
+          await board.load();
+        }
+        if (board.data?.source !== source) {
+          throw new Error(t('core.taskSourceMismatch'));
+        }
+      }
+      if (source === 'grigdesk' && !/^[1-9]\d{11}$/.test(String(id))) {
+        throw new Error(t('core.taskSourceUnsupported'));
+      }
 
       if (cached && !force && Date.now() - cached.loadedAt < 30000) {
         return cached.data;
       }
 
       let response: unknown;
-      let portal = !/^[1-9]\d{11}$/u.test(String(id));
+      let portal = source ? source !== 'grigdesk' : !/^[1-9]\d{11}$/u.test(String(id));
 
       if (!portal) {
         try {
           response = await api.get(`/api/grigdesk-tasks/${id}`, { signal });
         } catch (error) {
-          if (!(error instanceof ApiError) || error.status !== 404
+          if (source === 'grigdesk' || !(error instanceof ApiError) || error.status !== 404
             || !isRecord(error.data) || error.data.error !== 'grigdesk_task_not_found') {
             throw error;
           }
@@ -50,10 +80,22 @@ export const useTasksStore = defineStore('tasks', {
       }
 
       const data = portal
-        ? decodeTaskDetail(await api.get(`/api/b24/task/${id}`, { signal }))
+        ? decodeTaskDetail(await api.get(`/api/tracker/task/${id}`, {
+          signal, ...(source ? useTrackersStore().mutationOptions() : {}),
+        }))
         : decodeTaskDetail(decodeGrigdeskTask(response, String(id)));
 
-      this.details[id] = { data, loadedAt: Date.now() };
+      if (source && source !== 'grigdesk' && useBoardStore().data?.source !== source) {
+        throw new DOMException('', 'AbortError');
+      }
+
+      signal?.throwIfAborted();
+
+      if (epoch !== this.epoch) {
+        throw new DOMException('', 'AbortError');
+      }
+
+      this.details[key] = { data, loadedAt: Date.now() };
 
       return data;
     },
@@ -67,7 +109,9 @@ export const useTasksStore = defineStore('tasks', {
      * Доска перечитывается только после подтверждённого ответа обновления.
      */
     async update(id: TaskId, fields: Record<string, unknown>): Promise<TaskDetail> {
-      const data = decodeTaskDetail(await api.put(`/api/b24/task/${id}`, fields));
+      const data = decodeTaskDetail(await api.put(
+        `/api/tracker/task/${id}`, fields, useTrackersStore().mutationOptions(),
+      ));
 
       this.details[id] = { data, loadedAt: Date.now() };
       await useBoardStore().load(true);
@@ -76,7 +120,9 @@ export const useTasksStore = defineStore('tasks', {
     },
 
     async timer(id: TaskId, action: string) {
-      await api.post(`/api/b24/task/${id}/timer/${action}`);
+      await api.post(
+        `/api/tracker/task/${id}/timer/${action}`, undefined, useTrackersStore().mutationOptions(),
+      );
       await useBoardStore().load(true);
     },
 
@@ -85,7 +131,7 @@ export const useTasksStore = defineStore('tasks', {
      * Заголовок остаётся доступным конвейеру до следующего чтения деталей.
      */
     async complete(id: TaskId) {
-      await api.post(`/api/b24/task/${id}/complete`);
+      await api.post(`/api/tracker/task/${id}/complete`, undefined, useTrackersStore().mutationOptions());
 
       if (this.details[id]) {
         this.details[id].loadedAt = 0;
@@ -95,11 +141,22 @@ export const useTasksStore = defineStore('tasks', {
     },
 
     /**
+     * Удалённая задача сразу исключается из кеша, затем доска перечитывается.
+     * Заголовок поколения защищает удаление при смене подключения трекера.
+     */
+    async deleteTask(id: TaskId) {
+      await api.del(`/api/tracker/task/${id}`, undefined, useTrackersStore().mutationOptions());
+
+      delete this.details[id];
+      await useBoardStore().load(true);
+    },
+
+    /**
      * Ответ возобновления не содержит новый статус задачи.
      * Прежний снимок помечается устаревшим перед обновлением доски.
      */
     async renew(id: TaskId) {
-      await api.post(`/api/b24/task/${id}/renew`);
+      await api.post(`/api/tracker/task/${id}/renew`, undefined, useTrackersStore().mutationOptions());
 
       if (this.details[id]) {
         this.details[id].loadedAt = 0;
@@ -108,8 +165,84 @@ export const useTasksStore = defineStore('tasks', {
       await useBoardStore().load(true);
     },
 
+    /**
+     * Фиксирует поколение перед записью и не начинает чтение другого трекера после её ответа.
+     * Общая граница используется новыми мутациями карточки без оптимистичной замены кеша.
+     */
+    async mutateCard(id: TaskId, path: string, method: 'post' | 'put' | 'del', payload?: unknown) {
+      const epoch = this.epoch;
+
+      await api[method](`/api/tracker/task/${id}/${path}`, payload, useTrackersStore().mutationOptions());
+
+      if (epoch !== this.epoch) {
+        throw new DOMException('', 'AbortError');
+      }
+    },
+
+    /**
+     * Чек-лист перечитывается только после подтверждённого добавления пункта.
+     * Ответ мутации не подмешивается в кеш деталей и не предсказывает структуру дерева.
+     */
+    async addChecklistItem(id: TaskId, input: { title: string; parentId?: string }) {
+      await this.mutateCard(id, 'checklist', 'post', input);
+
+      return this.load(id, true);
+    },
+
+    /**
+     * Переименование и отметка передаются как частичное изменение пункта.
+     * После успеха авторитетной остаётся полная карточка драйвера.
+     */
+    async updateChecklistItem(id: TaskId, itemId: string, input: { title?: string; complete?: boolean }) {
+      await this.mutateCard(id, `checklist/${itemId}`, 'put', input);
+
+      return this.load(id, true);
+    },
+
+    /**
+     * Удаление не вырезает пункт из локального дерева до ответа сервера.
+     * Повторное чтение учитывает портальное поведение вложенных пунктов.
+     */
+    async deleteChecklistItem(id: TaskId, itemId: string) {
+      await this.mutateCard(id, `checklist/${itemId}`, 'del');
+
+      return this.load(id, true);
+    },
+
+    /**
+     * Теги заменяются полным списком, затем читаются из прежнего page-ответа.
+     * Пустой список значим: особую REST-сериализацию выполняет внешний пакет.
+     */
+    async updateTaskTags(id: TaskId, tags: string[]) {
+      await this.mutateCard(id, 'tags', 'put', { tags });
+
+      return api.get(`/api/tracker/task/${id}/comments`);
+    },
+
+    /**
+     * Приёмка и возврат обновляют детали и доску после подтверждённой мутации.
+     * Новый статус берётся чтением, чтобы кеш не зависел от формата ответа операции.
+     */
+    async reviewTask(id: TaskId, action: 'approve' | 'disapprove') {
+      await this.mutateCard(id, action, 'post');
+
+      const data = await this.load(id, true);
+
+      await useBoardStore().load(true);
+
+      return data;
+    },
+
+    async approveTask(id: TaskId) {
+      return this.reviewTask(id, 'approve');
+    },
+
+    async disapproveTask(id: TaskId) {
+      return this.reviewTask(id, 'disapprove');
+    },
+
     async comment(id: TaskId, text: string) {
-      await api.post(`/api/b24/task/${id}/comment`, { text });
+      await api.post(`/api/tracker/task/${id}/comment`, { text }, useTrackersStore().mutationOptions());
     },
 
     async launchOptions(id: TaskId, profile = '') {

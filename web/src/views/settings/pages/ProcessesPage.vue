@@ -4,41 +4,107 @@
     data-processes-page
     :data-ready="loaded"
   >
-    <SettingsScope :scope="t('settings.thisMachine')">{{ t('settings.processActionsTakeEffectImmediately') }}</SettingsScope>
-    <div class="settings-process-actions">
-      <UiButton data-context="workspace-form-wrap" :disabled="busy || loading" @click="load">{{ t('settings.update') }}</UiButton>
-      <UiButton data-context="workspace-form-wrap" :disabled="busy || !freeCount" @click="closeFree">{{ t('settings.stopIdleProcesses') }}</UiButton>
-    </div>
+    <SettingsScope :scope="t('settings.thisMachine')">
+      {{ t('settings.processActionsTakeEffectImmediately') }}
+    </SettingsScope>
     <SettingsLoading v-if="!loaded && !error" :label="t('settings.loadingProcesses')"
                      area="processes" page-id="system.processes" />
-    <SettingsFacts v-else-if="loaded" :items="poolFacts" />
-    <p v-if="loaded && !sessions.length">{{ t('settings.noLiveProcessesRightNow') }}</p>
-    <article v-for="item in sessions" :key="item.chatKey" :data-running="item.running">
-      <h4>{{ resolveUiText(title(item)) }}</h4>
-      <p>{{ runLabel(item) }}</p>
-      <p>
-        PID {{ item.pid ?? t('settings.unknown') }} {{ t('settings.opened') }} {{ minutes(item.openedAt) }} {{ t('settings.minAgo') }}
-        {{ item.running ? t('settings.turnRunning') : t('settings.idleMin', { value1: minutes(item.lastUsed) }) }}
-        <span v-if="!item.running && item.idleAtMs">
-          {{ t('settings.stopsIn') }} {{ Math.max(0, Math.round((item.idleAtMs - now) / 60000)) }} {{ t('settings.min') }}
-        </span>
-        <span v-if="item.unsolicited">{{ t('settings.maySpeakOnItsOwn') }}</span>
+    <div v-else-if="loaded" class="settings-process-overview">
+      <dl class="settings-process-metrics">
+        <div v-for="fact in poolFacts" :key="fact.label" :data-running="fact.running">
+          <dt>{{ fact.label }}</dt>
+          <dd>{{ fact.value }}</dd>
+        </div>
+      </dl>
+      <p v-if="limits" class="settings-process-policy">
+        <span>{{ t('settings.processFactLimit') }}</span>
+        {{ t('settings.processFactLimitValue', {
+          count: limits.maxSessions,
+          minutes: Math.round(limits.idleMs / 60000),
+        }) }}
       </p>
-      <p v-if="item.cwd">{{ item.cwd }}</p>
+    </div>
+    <div class="settings-process-toolbar">
+      <h4>{{ t('settings.liveProcesses') }}</h4>
       <div class="settings-process-actions">
-        <UiButton data-context="workspace-form-wrap" :disabled="busy" @click="actions.openChat(item.chatKey)">{{ t('settings.openChat') }}</UiButton>
-        <UiButton data-context="workspace-form-wrap" :disabled="busy" @click="closeOne(item)">{{ t('settings.stopProcess') }}</UiButton>
+        <UiButton
+          data-context="workspace-form-wrap"
+          :loading="loading"
+          :disabled="busy"
+          @click="load"
+        >
+          {{ t('settings.update') }}
+        </UiButton>
+        <UiButton
+          data-context="workspace-form-wrap"
+          :disabled="busy || !freeCount"
+          @click="closeFree"
+        >
+          {{ t('settings.stopIdleProcesses') }}
+        </UiButton>
       </div>
-    </article>
-    <p v-if="message" role="status">{{ resolveUiText(message) }}</p>
-    <p v-if="error" role="alert">{{ resolveUiText(error) }}</p>
+    </div>
+    <SettingsEmpty
+      v-if="loaded && !sessions.length"
+      :heading="t('settings.noLiveProcessesRightNow')"
+    />
+    <div v-if="sessions.length" class="settings-process-list">
+      <article v-for="item in sessions" :key="item.chatKey" :data-running="item.running">
+        <header class="settings-process-heading">
+          <h5>{{ resolveUiText(title(item)) }}</h5>
+          <span class="settings-process-status" :data-running="item.running">
+            <span aria-hidden="true" />
+            {{ item.running ? t('settings.turnRunning') : t('settings.processStatusIdle') }}
+          </span>
+        </header>
+        <p class="settings-process-provider">{{ runLabel(item) }}</p>
+        <div class="settings-process-meta">
+          <span class="settings-process-pid">PID {{ item.pid ?? t('settings.unknown') }}</span>
+          <span>{{ t('settings.processOpenedAgo', { minutes: minutes(item.openedAt) }) }}</span>
+          <span v-if="!item.running">
+            {{ t('settings.idleMin', { value1: minutes(item.lastUsed) }) }}
+          </span>
+          <span v-if="!item.running && item.idleAtMs">
+            {{ t('settings.processStopsIn', {
+              minutes: Math.max(0, Math.round((item.idleAtMs - now) / 60000)),
+            }) }}
+          </span>
+          <span v-if="item.unsolicited">{{ t('settings.processCanSpeak') }}</span>
+        </div>
+        <footer class="settings-process-footer">
+          <p v-if="item.cwd" class="settings-process-path">{{ item.cwd }}</p>
+          <div class="settings-process-actions">
+            <UiButton
+              data-context="workspace-form-wrap"
+              :disabled="busy"
+              @click="actions.openChat(item.chatKey)"
+            >
+              {{ t('settings.openChat') }}
+            </UiButton>
+            <UiButton
+              variant="ghost"
+              data-context="workspace-form-wrap"
+              :disabled="busy"
+              @click="closeOne(item)"
+            >
+              {{ t('settings.stopProcess') }}
+            </UiButton>
+          </div>
+        </footer>
+      </article>
+    </div>
+    <UiInlineMessage v-if="message">{{ resolveUiText(message) }}</UiInlineMessage>
+    <UiInlineMessage v-if="error" tone="danger">{{ resolveUiText(error) }}</UiInlineMessage>
   </section>
 </template>
 
 <script setup lang="ts">
-import SettingsLoading from '../SettingsLoading.vue';
-
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import {
+  UiButton,
+  UiInlineMessage,
+  confirmDialog,
   t,
   uiLocale,
   messageRef,
@@ -46,11 +112,9 @@ import {
   type UiText,
 } from '../../../ui.ts';
 
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import SettingsEmpty from '../SettingsEmpty.vue';
+import SettingsLoading from '../SettingsLoading.vue';
 import SettingsScope from '../SettingsScope.vue';
-import SettingsFacts from '../SettingsFacts.vue';
-import { useRouter } from 'vue-router';
-import { UiButton, confirmDialog } from '../../../ui.ts';
 import { api, failureText } from '../../../shared/apiClient.ts';
 import { useProvidersStore } from '../../../stores/providers.ts';
 import { useChatStore } from '../../../stores/chat.ts';
@@ -91,16 +155,21 @@ const message = ref<UiText>('');
 const now = ref(Date.now());
 const freeCount = computed(() => sessions.value.filter((item) => !item.running).length);
 const poolFacts = computed(() => [
-  { label: t('settings.processFactPool'), value: String(sessions.value.length) },
-  { label: t('settings.processFactRunning'), value: String(sessions.value.length - freeCount.value) },
-  { label: t('settings.processFactIdle'), value: String(freeCount.value) },
-  ...limits.value ? [{
-    label: t('settings.processFactLimit'),
-    value: t('settings.processFactLimitValue', {
-      count: limits.value.maxSessions,
-      minutes: Math.round(limits.value.idleMs / 60000),
-    }),
-  }] : [],
+  {
+    label: t('settings.processFactPool'),
+    value: sessions.value.length,
+    running: false,
+  },
+  {
+    label: t('settings.processFactRunning'),
+    value: sessions.value.length - freeCount.value,
+    running: true,
+  },
+  {
+    label: t('settings.processFactIdle'),
+    value: freeCount.value,
+    running: false,
+  },
 ]);
 const opening = settings.snapshot.sessionId;
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -139,6 +208,10 @@ function title(item: ProcessView): UiText {
       : messageRef('settings.untitledChat');
 }
 
+/**
+ * Сведения об исполнителе остаются в отдельной строке под названием чата.
+ * Неизвестные модель и режим показываются как пришли, без потери данных реестра.
+ */
 function runLabel(item: ProcessView): string {
   const provider = (providers.providers as ProviderEntry[]).find((entry) => entry.id === item.executor);
 
@@ -305,34 +378,177 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.settings-processes, .settings-processes article {
+.settings-processes {
+  container: settings-processes / inline-size;
   display: grid;
-  gap: 12px;
+  gap: 16px;
+  align-content: start;
   min-width: 0;
+}
+.settings-process-overview {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-2) 50%, var(--surface));
+}
+.settings-process-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 16px 0;
+}
+.settings-process-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 18px;
+}
+.settings-process-metrics > div + div {
+  border-left: 1px solid var(--line);
+}
+.settings-process-metrics dt {
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 18px;
+}
+.settings-process-metrics dd {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 32px;
+  font-variant-numeric: tabular-nums;
+}
+.settings-process-metrics [data-running='true'] dd {
+  color: var(--accent);
+}
+.settings-process-policy {
+  padding: 10px 18px;
+  border-top: 1px solid var(--line);
+}
+.settings-process-policy > span {
+  margin-right: 8px;
+  color: var(--ink);
+}
+.settings-process-toolbar,
+.settings-process-heading,
+.settings-process-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  min-width: 0;
+}
+.settings-process-toolbar {
+  flex-wrap: wrap;
+}
+.settings-process-toolbar h4 {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
 }
 .settings-process-actions {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
   gap: 8px;
+  max-width: 100%;
 }
-.settings-processes p, .settings-processes h4 {
-  margin: 0;
-  overflow-wrap: anywhere;
+.settings-process-list {
+  min-width: 0;
+  margin-top: -8px;
+  border-top: 1px solid var(--line);
 }
-.settings-processes article {
+.settings-process-list article {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
   padding: 16px 0;
   border-bottom: 1px solid var(--line);
 }
-.settings-processes article[data-running='true'] {
-  border-bottom-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+.settings-process-heading {
+  align-items: flex-start;
 }
-.settings-processes article h4 {
+.settings-process-status {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+.settings-process-status > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.settings-process-status[data-running='true'] {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: var(--accent);
+}
+.settings-process-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 18px;
+}
+.settings-process-pid {
+  font-variant-numeric: tabular-nums;
+}
+.settings-process-footer {
+  margin-top: 4px;
+}
+.settings-process-path {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+}
+.settings-processes p,
+.settings-processes h4,
+.settings-processes h5 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.settings-processes h5 {
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
+  line-height: 20px;
 }
 .settings-processes p {
   color: var(--ink-mid);
   font-size: 12px;
   line-height: 1.6;
+}
+@container settings-processes (max-width: 480px) {
+  .settings-process-metrics > div {
+    padding: 0 12px;
+  }
+  .settings-process-policy {
+    padding: 10px 12px;
+  }
+  .settings-process-footer {
+    flex-wrap: wrap;
+  }
+  .settings-process-path {
+    flex-basis: 100%;
+  }
+}
+@container settings-processes (max-width: 340px) {
+  .settings-process-heading {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .settings-process-metrics dt {
+    font-size: 11px;
+  }
 }
 </style>

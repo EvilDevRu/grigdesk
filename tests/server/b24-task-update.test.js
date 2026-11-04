@@ -5,17 +5,17 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
-import {
-  B24Client,
-  B24ValidationError,
-} from '../../server/src/lib/b24/client.ts';
-import b24Module from '../../server/src/modules/b24/index.ts';
+import { customClientModule } from './helpers/trackerPackage.js';
+import trackerModule from '../../server/src/modules/tracker/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = requireFromServer('fastify');
 
-/** Собирает B24Client без сети и сохраняет единственный form-urlencoded запрос. */
-function protocolClient(calls) {
+/**
+ * Настоящий клиент создаётся без сети и получает управляемый транспорт.
+ * Единственный form-urlencoded запрос сохраняется для проверки частичного обновления.
+ */
+function protocolClient(B24Client, calls) {
   const client = Object.create(B24Client.prototype);
   client.ensureAuth = async () => {
     calls.push({ kind: 'auth' });
@@ -30,9 +30,16 @@ function protocolClient(calls) {
   return client;
 }
 
-test('tasks.task.update передаёт пустое описание, снятый проект и нулевой приоритет', async () => {
+test('tasks.task.update передаёт пустое описание, снятый проект и нулевой приоритет', async (t) => {
+  const clientModule = await customClientModule(t);
+
+  if (!clientModule) {
+    return;
+  }
+
+  const { B24Client } = clientModule;
   const calls = [];
-  const client = protocolClient(calls);
+  const client = protocolClient(B24Client, calls);
 
   const result = await client.updateTask('42', {
     title: '  Новый заголовок  ',
@@ -57,9 +64,16 @@ test('tasks.task.update передаёт пустое описание, снят
   });
 });
 
-test('частичное обновление не дописывает отсутствующие поля и валидируется до сети', async () => {
+test('частичное обновление не дописывает отсутствующие поля и валидируется до сети', async (t) => {
+  const clientModule = await customClientModule(t);
+
+  if (!clientModule) {
+    return;
+  }
+
+  const { B24Client, B24ValidationError } = clientModule;
   const calls = [];
-  const client = protocolClient(calls);
+  const client = protocolClient(B24Client, calls);
 
   await client.updateTask(42, { title: 'Только заголовок' });
   const request = calls.find((call) => call.kind === 'raw');
@@ -94,8 +108,9 @@ async function updateApp(t, overrides = {}) {
     group_id: 7,
     responsible: { id: 17, name: 'Исполнитель' },
   };
-  app.register(b24Module, {
-    b24: {
+
+  app.register(trackerModule, {
+    tracker: {
       updateTask: async (id, fields) => {
         calls.push({ id, fields });
       },
@@ -108,11 +123,11 @@ async function updateApp(t, overrides = {}) {
   return { app, calls, detail };
 }
 
-test('PUT /api/b24/task/:id обновляет задачу и возвращает свежую карточку', async (t) => {
+test('PUT /api/tracker/task/:id обновляет задачу и возвращает свежую карточку', async (t) => {
   const { app, calls, detail } = await updateApp(t);
   const response = await app.inject({
     method: 'PUT',
-    url: '/api/b24/task/42',
+    url: '/api/tracker/task/42',
     payload: {
       title: ' Обновлённая задача ',
       groupId: '7',
@@ -138,12 +153,12 @@ test('PUT задачи отклоняет лишние поля как b24_bad_r
   const { app, calls } = await updateApp(t);
   const response = await app.inject({
     method: 'PUT',
-    url: '/api/b24/task/42',
-    payload: { title: 'Задача', deadline: 'завтра' },
+    url: '/api/tracker/task/42',
+    payload: { title: 'Задача', unexpected: 'лишнее поле' },
   });
 
   assert.equal(response.statusCode, 400);
   assert.equal(response.json().error, 'b24_bad_request');
-  assert.match(response.json().message, /deadline/);
+  assert.match(response.json().message, /unexpected/);
   assert.deepEqual(calls, []);
 });

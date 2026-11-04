@@ -15,7 +15,7 @@
         <UiPaneHeader class="task-toolbar" inset="content" data-ui-task-header>
           <template #title>
             <span class="meyebrow">{{ ownTask ? t('core.grigdeskTaskLabel')
-              : isB24Task ? 'Задача Битрикс24' : t('core.grigdeskGenericTask') }}</span>
+              : t('core.grigdeskGenericTask') }}</span>
           </template>
           <template #meta>
             <span class="mid mono">#{{ taskId }}</span>
@@ -23,7 +23,7 @@
           <template #actions>
             <div class="mhead-actions" role="group" aria-label="Действия с карточкой">
               <TaskFavoriteButton
-                v-if="isB24Task"
+                v-if="canUsePersonal"
                 :active="favorites.isFavorite(taskId)"
                 :pending="!favorites.loaded || favorites.loading || favorites.isPending(taskId)"
                 :task-title="detail?.title || boardTask?.title || `Задача #${taskId}`"
@@ -38,7 +38,7 @@
                 loading-label="Обновляю задачу"
                 @click="refresh"
               >
-                ⟳
+                <UiRefreshIcon />
               </UiIconButton>
               <UiIconButton
                 data-context="task-modal-header"
@@ -58,31 +58,53 @@
         </div>
       </div>
 
-      <div v-if="err || (isB24Task && (favorites.error || shelf.error))" class="malerts" aria-live="polite">
+      <div v-if="err || (canUsePersonal && (favorites.error || shelf.error))" class="malerts" aria-live="polite">
         <p v-if="err" class="err">{{ err }}</p>
-        <p v-if="isB24Task && favorites.error" class="err">Избранное: {{ favorites.error }}</p>
-        <p v-if="isB24Task && shelf.error" class="err">Полка: {{ shelf.error }}</p>
+        <p v-if="canUsePersonal && favorites.error" class="err">Избранное: {{ favorites.error }}</p>
+        <p v-if="canUsePersonal && shelf.error" class="err">Полка: {{ shelf.error }}</p>
       </div>
 
       <div class="mcontext" aria-label="Состояние задачи">
         <div class="meta">
-          <span v-if="detail?.status_label" class="tag task-status">{{ detail.status_label }}</span>
+          <span v-if="taskStatus" class="tag task-status">{{ taskStatus }}</span>
+          <span v-if="detail?.replicate === 'Y'" class="tag">{{ t('core.taskRecurring') }}</span>
           <span v-if="taskProject" class="context-item">
             <span class="context-label">Проект</span>{{ taskProject }}
           </span>
           <span v-if="taskResponsible" class="context-item">
-            <span class="context-label">Исполнитель</span>{{ taskResponsible }}
+            <span class="context-label">Исполнитель</span>
+            <img v-if="responsibleAvatar" :key="responsibleAvatar" :src="responsibleAvatar" alt=""
+                 class="task-avatar" referrerpolicy="no-referrer" @error="hideAvatar" />
+            {{ taskResponsible }}
           </span>
-          <span v-if="detail?.priority_label" class="context-item">
-            <span class="context-label">Приоритет</span>{{ detail.priority_label }}
+          <span v-if="detail?.creator?.name" class="context-item">
+            <span class="context-label">{{ t('core.taskCreator') }}</span>
+            <img v-if="creatorAvatar" :key="creatorAvatar" :src="creatorAvatar" alt=""
+                 class="task-avatar" referrerpolicy="no-referrer" @error="hideAvatar" />
+            {{ detail.creator.name }}
           </span>
-          <span v-if="boardTask?.deadline" class="context-item" :class="{ over: boardTask.overdue }">
-            <span class="context-label">{{ boardTask.overdue ? 'Просрочена' : 'Срок' }}</span>
-            {{ boardTask.deadline }}
+          <span v-if="taskPriority" class="context-item">
+            <span class="context-label">Приоритет</span>{{ taskPriority }}
           </span>
-          <span v-if="!detail?.status_label && !detail?.priority_label
-            && !taskProject && !taskResponsible && !boardTask?.deadline"
-                class="context-empty">{{ loading ? 'Читаю данные задачи…' : 'Дополнительных меток нет' }}</span>
+          <span v-if="taskDeadlineText" class="context-item" :class="{ over: taskDeadlineState === 'over' }">
+            <span class="context-label">{{ t('core.taskDeadline') }}</span>
+            {{ taskDeadlineText }}
+            <span v-if="taskDeadlineState">🔥 {{ taskDeadlineState === 'over'
+              ? t('core.taskOverdue') : t('core.taskUrgent') }}</span>
+          </span>
+          <span v-if="taskAccomplices" class="context-item">
+            <span class="context-label">{{ t('core.taskAccomplices') }}</span>{{ taskAccomplices }}
+          </span>
+          <span v-if="taskAuditors" class="context-item">
+            <span class="context-label">{{ t('core.taskAuditors') }}</span>{{ taskAuditors }}
+          </span>
+          <UiButton v-if="taskParentId" size="compact" data-role="task-parent"
+                    @click="ui.openTask(taskParentId)">
+            {{ t('core.taskParent', { id: taskParentId }) }}
+          </UiButton>
+          <span v-if="!hasTaskMeta" class="context-empty">
+            {{ loading ? 'Читаю данные задачи…' : 'Дополнительных меток нет' }}
+          </span>
         </div>
       </div>
 
@@ -103,7 +125,7 @@
             data-task-section="triage"
           >{{ t('core.taskDesignAnalysis') }}</UiTab>
           <UiTab
-            v-if="isB24Task"
+            v-if="isB24Task && trackerCaps.comments"
             id="task-tab-comments"
             value="comments"
             controls="task-panel-comments"
@@ -119,9 +141,9 @@
         <section id="task-description" class="task-pane brief-pane"
                  role="tabpanel" aria-labelledby="task-tab-description">
           <div class="brief-head">
-            <h4 class="pane-title">Описание задачи</h4>
+            <h4 class="pane-title">{{ editForm ? t('core.taskEditHeading') : 'Описание задачи' }}</h4>
             <UiButton
-              v-if="isB24Task && detail && !editForm"
+              v-if="isB24Task && trackerCaps.editing && detail && !editForm"
               size="compact"
               data-role="task-edit-open"
               v-tooltip="'Редактировать задачу'"
@@ -131,120 +153,375 @@
               Изменить
             </UiButton>
           </div>
-          <div class="brief-scroll">
+          <div class="brief-scroll" :class="{ 'brief-scroll--editing': editForm }">
             <TaskLoading v-if="loading && !detail" label="Читаю данные задачи…"  area="description" />
-            <div v-else-if="editForm" class="task-edit" aria-label="Редактирование задачи">
-              <UiField
-                label="Заголовок"
-                required
-                :error="editForm.title.trim() ? '' : 'Введите заголовок задачи'"
-              >
-                <UiInput
-                  v-model="editForm.title"
-                  data-role="task-edit-title"
-                  maxlength="255"
-                  autocomplete="off"
-                  :disabled="busy === 'edit'"
-                />
-              </UiField>
-
-              <UiField
-                label="Описание"
-                hint="Сохраняется обычным текстом; ссылки останутся кликабельными в карточке."
-              >
-                <UiTextarea
-                  v-model="editForm.description"
-                  data-role="task-edit-description"
-                  rows="10"
-                  :disabled="busy === 'edit'"
-                  @keydown.ctrl.enter.prevent="saveTaskEdit"
-                />
-              </UiField>
-
-              <div class="task-edit-grid">
-                <UiField label="Исполнитель">
-                  <UiSelect
-                    v-model="editForm.responsibleId"
-                    data-role="task-edit-responsible"
-                    :disabled="editOptionsBusy || busy === 'edit'"
+            <form v-else-if="editForm" class="task-edit" :aria-label="t('core.taskEditHeading')"
+                  @submit.prevent="saveTaskEdit" @keydown.ctrl.enter.prevent="saveTaskEdit"
+                  @keydown.meta.enter.prevent="saveTaskEdit">
+              <div class="task-edit-scroll">
+                <div class="task-edit-main">
+                  <UiField
+                    :label="t('core.taskEditTitle')"
+                    required
+                    :error="editForm.title.trim() ? '' : t('core.taskEditTitleRequired')"
                   >
-                    <option v-if="!editForm.responsibleId" value="" disabled>— не указан —</option>
-                    <option
-                      v-for="user in editResponsibleOptions"
-                      :key="user.id"
-                      :value="String(user.id)"
-                    >
-                      {{ user.name }}
-                    </option>
-                  </UiSelect>
-                </UiField>
+                    <UiInput
+                      ref="editTitleInput"
+                      v-model="editForm.title"
+                      data-role="task-edit-title"
+                      maxlength="255"
+                      autocomplete="off"
+                      :disabled="busy === 'edit'"
+                    />
+                  </UiField>
 
-                <UiField label="Проект">
-                  <UiSelect
-                    v-model="editForm.groupId"
-                    data-role="task-edit-group"
-                    :disabled="editOptionsBusy || busy === 'edit'"
+                  <UiField
+                    :label="t('core.taskDesignDescription')"
+                    :hint="t('core.taskEditDescriptionHint')"
                   >
-                    <option value="">— без проекта —</option>
-                    <option
-                      v-for="group in editGroupOptions"
-                      :key="group.id"
-                      :value="String(group.id)"
-                    >
-                      {{ group.name }}
-                    </option>
-                  </UiSelect>
-                </UiField>
+                    <UiTextarea
+                      v-model="editForm.description"
+                      data-role="task-edit-description"
+                      rows="12"
+                      :placeholder="t('core.taskEditDescriptionPlaceholder')"
+                      :disabled="busy === 'edit'"
+                    />
+                  </UiField>
+                </div>
 
-                <UiField label="Приоритет">
-                  <UiSelect
-                    v-model.number="editForm.priority"
-                    data-role="task-edit-priority"
+                <aside class="task-edit-properties" :aria-label="t('core.taskEditProperties')">
+                  <h5 class="task-edit-section-title">{{ t('core.taskEditProperties') }}</h5>
+                  <div class="task-edit-grid">
+                    <UiField :label="t('core.taskEditResponsible')">
+                      <UiSelect
+                        v-model="editForm.responsibleId"
+                        data-role="task-edit-responsible"
+                        :disabled="editOptionsBusy || busy === 'edit'"
+                      >
+                        <option v-if="!editForm.responsibleId" value="" disabled>
+                          {{ t('core.taskEditUnassigned') }}
+                        </option>
+                        <option
+                          v-for="user in editResponsibleOptions"
+                          :key="user.id"
+                          :value="String(user.id)"
+                        >
+                          {{ user.name }}
+                        </option>
+                      </UiSelect>
+                    </UiField>
+
+                    <UiField :label="t('core.taskEditProject')">
+                      <UiSelect
+                        v-model="editForm.groupId"
+                        data-role="task-edit-group"
+                        :disabled="editOptionsBusy || busy === 'edit'"
+                      >
+                        <option value="">{{ t('core.taskEditNoProject') }}</option>
+                        <option
+                          v-for="group in editGroupOptions"
+                          :key="group.id"
+                          :value="String(group.id)"
+                        >
+                          {{ group.name }}
+                        </option>
+                      </UiSelect>
+                    </UiField>
+
+                    <UiField :label="t('core.taskEditPriority')">
+                      <UiSelect
+                        v-model.number="editForm.priority"
+                        data-role="task-edit-priority"
+                        :disabled="busy === 'edit'"
+                      >
+                        <option :value="0">{{ t('core.taskPriorityLow') }}</option>
+                        <option :value="1">{{ t('core.taskPriorityNormal') }}</option>
+                        <option :value="2">{{ t('core.taskPriorityHigh') }}</option>
+                      </UiSelect>
+                    </UiField>
+
+                    <UiField :label="t('core.taskDeadline')">
+                      <UiInput
+                        v-model="editForm.deadline"
+                        type="datetime-local"
+                        data-role="task-edit-deadline"
+                        :disabled="busy === 'edit'"
+                      />
+                    </UiField>
+                  </div>
+
+                  <div class="task-edit-people">
+                    <UiDisclosureButton v-model:open="editAccomplicesOpen" controls="task-edit-accomplices"
+                                        density="compact" data-role="task-edit-accomplices-toggle"
+                                        :disabled="editOptionsBusy || busy === 'edit'">
+                      {{ t('core.taskAccomplices') }}
+                      <span class="task-edit-count">{{ editForm.accomplices.length }}</span>
+                    </UiDisclosureButton>
+                    <div v-show="editAccomplicesOpen" id="task-edit-accomplices" class="task-edit-people-list">
+                      <UiChoiceList v-model="editForm.accomplices" mode="multiple" selection-indicator
+                                    data-role="task-edit-accomplices" :label="t('core.taskAccomplices')"
+                                    :options="editParticipantOptions"
+                                    :disabled="editOptionsBusy || busy === 'edit'">
+                        <p v-if="!editParticipantOptions.length" class="task-edit-note">
+                          {{ t('core.taskEditNoPeople') }}
+                        </p>
+                      </UiChoiceList>
+                    </div>
+                    <UiDisclosureButton v-model:open="editAuditorsOpen" controls="task-edit-auditors"
+                                        density="compact" data-role="task-edit-auditors-toggle"
+                                        :disabled="editOptionsBusy || busy === 'edit'">
+                      {{ t('core.taskAuditors') }}
+                      <span class="task-edit-count">{{ editForm.auditors.length }}</span>
+                    </UiDisclosureButton>
+                    <div v-show="editAuditorsOpen" id="task-edit-auditors" class="task-edit-people-list">
+                      <UiChoiceList v-model="editForm.auditors" mode="multiple" selection-indicator
+                                    data-role="task-edit-auditors" :label="t('core.taskAuditors')"
+                                    :options="editParticipantOptions"
+                                    :disabled="editOptionsBusy || busy === 'edit'">
+                        <p v-if="!editParticipantOptions.length" class="task-edit-note">
+                          {{ t('core.taskEditNoPeople') }}
+                        </p>
+                      </UiChoiceList>
+                    </div>
+                  </div>
+
+                  <TaskLoading v-if="editOptionsBusy" :label="t('core.taskEditLoadingOptions')"
+                               area="options" :failed="Boolean(editOptionsError)" />
+                  <div v-else-if="editOptionsError" class="edit-options-state bad">
+                    <span>{{ editOptionsError }}</span>
+                    <UiButton data-role="task-edit-options-retry" @click="loadEditOptions">
+                      {{ t('core.taskEditRetry') }}
+                    </UiButton>
+                  </div>
+                </aside>
+              </div>
+
+              <div class="task-edit-footer">
+                <p class="task-edit-note" :class="{ 'task-edit-dirty': editHasChanges }" role="status">
+                  {{ editHasChanges ? t('core.taskEditUnsaved') : t('core.taskEditSaveHint') }}
+                </p>
+                <UiFormActions class="task-edit-actions">
+                  <UiButton
+                    data-role="task-edit-cancel"
+                    variant="ghost"
                     :disabled="busy === 'edit'"
+                    @click="cancelTaskEdit"
                   >
-                    <option :value="0">низкий</option>
-                    <option :value="1">средний</option>
-                    <option :value="2">высокий</option>
-                  </UiSelect>
-                </UiField>
+                    {{ t('core.cancel') }}
+                  </UiButton>
+                  <UiButton
+                    data-role="task-edit-save"
+                    tone="accent"
+                    variant="solid"
+                    :loading="busy === 'edit'"
+                    :disabled="!editCanSave"
+                    :loading-label="t('core.taskEditSaving')"
+                    @click="saveTaskEdit"
+                  >
+                    {{ t('core.save') }}
+                  </UiButton>
+                </UiFormActions>
               </div>
-
-              <TaskLoading v-if="editOptionsBusy" label="Загружаю исполнителей и проекты…"
-                           area="options" :failed="Boolean(editOptionsError)" />
-              <div v-else-if="editOptionsError" class="edit-options-state bad">
-                <span>{{ editOptionsError }}</span>
-                <UiButton data-role="task-edit-options-retry" @click="loadEditOptions">
-                  Повторить
-                </UiButton>
-              </div>
-
-              <UiFormActions class="task-edit-actions">
-                <UiButton
-                  data-role="task-edit-cancel"
-                  :disabled="busy === 'edit'"
-                  @click="cancelTaskEdit"
-                >
-                  Отмена
-                </UiButton>
-                <UiButton
-                  data-role="task-edit-save"
-                  tone="success"
-                  variant="solid"
-                  :loading="busy === 'edit'"
-                  :disabled="!editCanSave"
-                  loading-label="Сохраняю задачу"
-                  @click="saveTaskEdit"
-                >
-                  Сохранить в Битрикс24
-                </UiButton>
-              </UiFormActions>
-            </div>
+            </form>
 
             <template v-else>
               <p v-if="editMessage" class="edit-message" role="status">{{ editMessage }}</p>
               <div v-if="cleanDesc" class="desc-box">
                 <p class="desc" v-html="descHtml"></p>
               </div>
+
+              <section v-if="checklist.rows.length || canEditChecklist"
+                       class="task-extra" data-role="task-checklist">
+                <h5>{{ t('core.taskChecklist') }} · {{ t('core.taskChecklistProgress', {
+                  complete: checklist.complete,
+                  total: checklist.total,
+                }) }}</h5>
+                <div class="task-checklists">
+                  <section v-for="list in checklistLists" :key="list.id"
+                           class="task-checklist-list" :data-checklist-list="list.id">
+                    <ul class="task-checklist">
+                      <li v-for="entry in list.entries" :key="entry.key" class="task-checklist-entry"
+                          :class="{ 'is-list-header': entry.depth === 0 }"
+                          :style="{ marginInlineStart: `${Math.max(0, entry.depth - 1) * 16}px` }">
+                        <div v-if="entry.item" class="task-checklist-row"
+                             :data-checklist-id="entry.item.id">
+                          <h6 v-if="entry.depth === 0" class="task-checklist-heading">
+                            <span>{{ entry.item.title }}</span>
+                            <span v-if="entry.item.important" :aria-label="t('core.taskImportant')">★</span>
+                            <span v-if="entry.progress" class="context-label"
+                                  data-role="checklist-list-progress">
+                              {{ t('core.taskChecklistProgress', entry.progress) }}
+                            </span>
+                          </h6>
+                          <div v-else class="task-checklist-label">
+                            <UiCheckbox :checked="entry.item.complete"
+                                        :disabled="!canEditChecklist || Boolean(busy)"
+                                        @change="toggleChecklistItem(entry.item, $event)">
+                              <span :class="{ 'task-checklist-complete': entry.item.complete }">
+                                {{ entry.item.title }}
+                              </span>
+                              <span v-if="entry.item.important" :aria-label="t('core.taskImportant')">★</span>
+                            </UiCheckbox>
+                          </div>
+                          <template v-if="canEditChecklist">
+                            <div v-if="checklistEditing === entry.item.id" class="task-checklist-editor">
+                              <UiInput v-model="checklistTitleDraft" data-role="checklist-rename-input"
+                                       data-escape-owner
+                                       :aria-label="t(entry.depth === 0
+                                         ? 'core.taskChecklistListTitle' : 'core.taskChecklistTitle')"
+                                       maxlength="255" :disabled="Boolean(busy)"
+                                       @keydown.enter.prevent="renameChecklistItem"
+                                       @keydown.esc.stop.prevent="checklistEditing = null" />
+                              <UiFormActions align="start">
+                                <UiButton size="compact" tone="accent" variant="solid"
+                                          :disabled="Boolean(busy) || !checklistTitleDraft.trim()"
+                                          data-role="checklist-rename-save" @click="renameChecklistItem">
+                                  {{ t('core.taskChecklistSave') }}
+                                </UiButton>
+                                <UiButton size="compact" variant="ghost" :disabled="Boolean(busy)"
+                                          data-role="checklist-rename-cancel" @click="checklistEditing = null">
+                                  {{ t('core.taskChecklistCancel') }}
+                                </UiButton>
+                              </UiFormActions>
+                            </div>
+                            <div v-else class="task-checklist-actions">
+                              <UiIconButton v-if="entry.depth > 0"
+                                            :label="t('core.taskChecklistAddChild', { title: entry.item.title })"
+                                            v-tooltip="t('core.taskChecklistAddChild', { title: entry.item.title })"
+                                            :disabled="Boolean(busy) || checklistAdding !== null"
+                                            data-task-action="checklist-add-child"
+                                            @click="openChecklistItem(entry.item.id)">
+                                +
+                              </UiIconButton>
+                              <UiIconButton :label="t(entry.depth === 0
+                                              ? 'core.taskChecklistListRename' : 'core.taskChecklistRename')"
+                                            v-tooltip="t(entry.depth === 0
+                                              ? 'core.taskChecklistListRename' : 'core.taskChecklistRename')"
+                                            :disabled="Boolean(busy)"
+                                            data-task-action="checklist-rename"
+                                            @click="editChecklistItem(entry.item)">
+                                ✎
+                              </UiIconButton>
+                              <UiIconButton :label="t(entry.depth === 0
+                                              ? 'core.taskChecklistListDelete' : 'core.taskChecklistDelete')"
+                                            v-tooltip="t(entry.depth === 0
+                                              ? 'core.taskChecklistListDelete' : 'core.taskChecklistDelete')"
+                                            :disabled="Boolean(busy)"
+                                            data-task-action="checklist-delete"
+                                            @click="deleteChecklistItem(entry.item)">
+                                ✕
+                              </UiIconButton>
+                            </div>
+                          </template>
+                        </div>
+                        <div v-else :data-checklist-parent="entry.parentId">
+                          <div v-if="checklistAdding === entry.parentId" class="task-checklist-editor"
+                               data-role="checklist-item-form">
+                            <span class="context-label">
+                              {{ entry.depth === 1 ? t('core.taskChecklistNewItem')
+                                : t('core.taskChecklistNewChild', { title: entry.parentTitle }) }}
+                            </span>
+                            <UiInput ref="checklistItemInputs" v-model="checklistDrafts[entry.parentId]"
+                                     data-role="checklist-add-input" data-escape-owner
+                                     :aria-label="t('core.taskChecklistTitle')"
+                                     :placeholder="t('core.taskChecklistTitle')"
+                                     maxlength="255" :disabled="Boolean(busy)"
+                                     @keydown.enter.prevent="addChecklistItem(entry.parentId)"
+                                     @keydown.esc.stop.prevent="cancelChecklistItem(entry.parentId)" />
+                            <UiFormActions align="start">
+                              <UiButton size="compact" tone="accent" variant="solid"
+                                        data-role="checklist-add"
+                                        :loading="busy === `checklist-${entry.parentId}`"
+                                        :loading-label="t('core.taskChecklistSaving')"
+                                        :disabled="Boolean(busy) || !checklistDrafts[entry.parentId]?.trim()"
+                                        @click="addChecklistItem(entry.parentId)">
+                                {{ t('core.taskChecklistSave') }}
+                              </UiButton>
+                              <UiButton size="compact" variant="ghost" data-role="checklist-item-cancel"
+                                        :disabled="Boolean(busy)" @click="cancelChecklistItem(entry.parentId)">
+                                {{ t('core.taskChecklistCancel') }}
+                              </UiButton>
+                            </UiFormActions>
+                          </div>
+                          <UiButton v-else size="compact" variant="ghost" data-role="checklist-add-item"
+                                    :disabled="Boolean(busy) || checklistAdding !== null"
+                                    @click="openChecklistItem(entry.parentId)">
+                            + {{ t('core.taskChecklistAdd') }}
+                          </UiButton>
+                        </div>
+                      </li>
+                    </ul>
+                  </section>
+                </div>
+                <p v-if="checklistSavedTitle" class="task-checklist-saved" role="status"
+                   data-role="checklist-item-saved">
+                  {{ t('core.taskChecklistItemSaved', { title: checklistSavedTitle }) }}
+                </p>
+                <div v-if="canEditChecklist" class="task-checklist-create">
+                  <div v-if="checklistCreating" class="task-checklist-editor">
+                    <UiInput v-model="checklistListTitle" data-role="checklist-list-input" data-escape-owner
+                             :aria-label="t('core.taskChecklistListTitle')"
+                             :placeholder="t('core.taskChecklistListTitle')"
+                             maxlength="255" :disabled="Boolean(busy)"
+                             @keydown.enter.prevent="createChecklistList"
+                             @keydown.esc.stop.prevent="cancelChecklistList" />
+                    <UiFormActions align="start">
+                      <UiButton size="compact" tone="accent" variant="solid" data-role="checklist-create"
+                                :disabled="Boolean(busy) || !checklistListTitle.trim()"
+                                @click="createChecklistList">
+                        {{ t('core.taskChecklistCreate') }}
+                      </UiButton>
+                      <UiButton size="compact" variant="ghost" data-role="checklist-create-cancel"
+                                :disabled="Boolean(busy)" @click="cancelChecklistList">
+                        {{ t('core.taskChecklistCancel') }}
+                      </UiButton>
+                    </UiFormActions>
+                  </div>
+                  <UiButton v-else size="compact" variant="ghost" data-role="checklist-add-list"
+                            :disabled="Boolean(busy)" @click="checklistCreating = true">
+                    {{ t('core.taskChecklistAddList') }}
+                  </UiButton>
+                </div>
+              </section>
+
+              <section v-if="taskTags.length || canEditTags" class="task-extra" data-role="task-tags">
+                <h5>{{ t('core.taskTags') }}</h5>
+                <div v-if="taskTags.length" class="task-tag-list">
+                  <span v-for="tag in taskTags" :key="tag" class="tag">
+                    {{ tag }}
+                    <UiIconButton v-if="canEditTags" :label="t('core.taskTagRemove', { tag })"
+                                  :disabled="Boolean(busy) || comLoading || !taskTagsLoaded"
+                                  data-task-action="task-tag-remove"
+                                  @click="updateTags(taskTags.filter((item) => item !== tag))">
+                      ✕
+                    </UiIconButton>
+                  </span>
+                </div>
+                <div v-if="canEditTags" class="task-tag-editor">
+                  <UiInput ref="taskTagInput" v-model="tagDraft" data-role="task-tag-input"
+                           :placeholder="t('core.taskTagAdd')" :aria-label="t('core.taskTagAdd')"
+                           maxlength="100"
+                           :disabled="Boolean(busy) || comLoading || !taskTagsLoaded || taskTags.length >= 50"
+                           @keydown.enter.prevent="addTag" />
+                  <UiButton data-role="task-tag-add"
+                            :disabled="Boolean(busy) || comLoading || !taskTagsLoaded
+                              || taskTags.length >= 50 || !tagDraft.trim()" @click="addTag">
+                    {{ t('core.taskTagAddButton') }}
+                  </UiButton>
+                </div>
+              </section>
+
+              <section v-if="taskSubtasks.length" class="task-extra" data-role="task-subtasks">
+                <h5>{{ t('core.taskSubtasks') }}</h5>
+                <ul class="task-subtasks">
+                  <li v-for="subtask in taskSubtasks" :key="subtask.id">
+                    <UiButton size="compact" @click="ui.openTask(subtask.id)">
+                      #{{ subtask.id }} {{ subtask.title }}
+                    </UiButton>
+                    <span v-if="subtask.statusText" class="context-label">{{ subtask.statusText }}</span>
+                  </li>
+                </ul>
+              </section>
 
               <!-- Обсуждение в Telegram: то, на что показывают ссылки в описании -->
               <section v-if="tgLinks.length" class="tg">
@@ -544,7 +821,8 @@
                     loading-label="Сохраняю уточнения"
                     @click="sendClarify"
                   >
-                    ↻ Уточнить и переоценить
+                    <template #leading><UiRefreshIcon /></template>
+                    Уточнить и переоценить
                   </UiButton>
                   <UiButton
                     v-if="analysisManifest"
@@ -634,21 +912,21 @@
 
         <!-- Комментарии задачи (таб): список из B24 + добавление -->
         <div
-          v-if="isB24Task"
+          v-if="isB24Task && trackerCaps.comments"
           v-show="mtab === 'comments'"
           id="task-panel-comments"
           class="comtab"
           role="tabpanel"
           aria-labelledby="task-tab-comments"
         >
-          <TaskLoading v-if="comLoading && comments === null"
+          <TaskLoading v-if="mtab === 'comments' && comLoading && comments === null"
                        label="загрузка комментариев…" area="comments" />
           <div v-else-if="comments && !comments.length" class="tmuted">Комментариев нет.</div>
           <div v-else-if="comments" class="comlist">
             <div v-for="c in comments" :key="c.mid" class="com">
               <div class="comhead">
                 <b>{{ c.author }}</b>
-                <span class="comtime mono">{{ c.time }}</span>
+                <span class="comtime mono">{{ formatDateTime(c.time) || c.time }}</span>
               </div>
               <div class="comtext">{{ c.text }}</div>
               <div v-if="c.attachments?.length" class="comatts">
@@ -681,8 +959,9 @@
       </div>
 
       <!-- Управление -->
-      <footer class="controls" aria-label="Действия с задачей">
-          <div v-if="isB24Task" class="timer-group" role="group" aria-label="Учёт времени">
+      <footer v-show="!editForm || taskSection !== 'description'" class="controls"
+              aria-label="Действия с задачей">
+          <div v-if="isB24Task && trackerCaps.timer" class="timer-group" role="group" aria-label="Учёт времени">
             <div class="timer" :class="{ run: running }">
               <span class="tclock mono">{{ elapsed !== null ? secToHMS(elapsed) : '—' }}</span>
               <span class="tstate">{{ running ? 'Идёт учёт' : 'Учёт остановлен' }}</span>
@@ -734,7 +1013,7 @@
               {{ t('core.taskDesignLaunch') }}
             </UiButton>
             <UiButton
-              v-if="isB24Task && completed"
+              v-if="isB24Task && completed && trackerCaps.renew"
               data-context="task-footer-action"
               tone="success"
               variant="solid"
@@ -745,8 +1024,18 @@
             >
               ↺ Возобновить
             </UiButton>
+            <template v-else-if="isB24Task && awaitingReview && trackerCaps.review">
+              <UiButton tone="success" :loading="busy === 'approve'" :disabled="Boolean(busy)"
+                        data-role="task-approve" @click="reviewTask(true)">
+                {{ t('core.taskApprove') }}
+              </UiButton>
+              <UiButton :loading="busy === 'disapprove'" :disabled="Boolean(busy)"
+                        data-role="task-disapprove" @click="reviewTask(false)">
+                {{ t('core.taskDisapprove') }}
+              </UiButton>
+            </template>
             <UiButton
-              v-else-if="isB24Task"
+              v-else-if="isB24Task && !completed && trackerCaps.complete"
               data-context="task-footer-action"
               tone="success"
               variant="solid"
@@ -757,47 +1046,63 @@
             >
               ✓ Завершить
             </UiButton>
-            <UiPopover v-if="isB24Task || sandbox" placement="top-end" aria-label="Другие действия с задачей">
-              <template #trigger><UiButton>Ещё</UiButton></template>
-              <template #default="{ close }">
-                <div class="ui-action-menu">
-            <UiButton
-              v-if="isB24Task && shelfEnabled"
-              data-context="task-footer-action"
-              data-role="task-shelf-toggle"
-              tone="neutral"
-              variant="outline"
-              :pressed="shelf.isOnShelf(taskId)"
-              :loading="shelf.isPending(taskId)"
-              :disabled="shelf.isPending(taskId)"
-              loading-label="Обновляю полку"
-              @click="close('action'); toggleShelf()"
+          </div>
+          <div v-if="canUsePersonal || sandbox" class="csecondary">
+            <div class="ctools" role="group" :aria-label="t('core.taskToolsActions')">
+              <UiButton
+                v-if="canUsePersonal && shelfEnabled"
+                data-context="task-footer-action"
+                data-role="task-shelf-toggle"
+                tone="neutral"
+                variant="ghost"
+                :pressed="shelf.isOnShelf(taskId)"
+                :loading="shelf.isPending(taskId)"
+                :disabled="shelf.isPending(taskId)"
+                loading-label="Обновляю полку"
+                @click="toggleShelf"
+              >
+                {{ shelf.isOnShelf(taskId) ? 'На полке' : 'На полку' }}
+              </UiButton>
+              <OpenDiffButton
+                data-context="task-footer-action"
+                variant="ghost"
+                :task-id="taskId!"
+              />
+            </div>
+            <div
+              v-if="sandbox || (isB24Task && trackerCaps.delete)"
+              class="cdanger"
+              role="group"
+              :aria-label="t('core.taskDestructiveActions')"
             >
-              {{ shelf.isOnShelf(taskId) ? 'На полке' : 'На полку' }}
-            </UiButton>
-            <!-- Стенд задачи сносится прямо отсюда: карточку открывают, чтобы закрыть
-                 задачу, и ради одной кнопки идти в конвейер незачем. -->
-            <UiButton
-              v-if="sandbox"
-              data-context="task-footer-action"
-              tone="danger"
-              variant="outline"
-              :loading="sandboxBusy"
-              :disabled="sandboxBusy"
-              loading-label="Сношу стенд"
-              v-tooltip="`Снести песочницу задачи (фронт :${sandbox.fePort}${sandbox.apiPort ? `, API :${sandbox.apiPort}` : ''})`"
-              @click="close('action'); sandboxDown()"
-            >
-              ⏏ Снести стенд
-            </UiButton>
-            <OpenDiffButton
-              @click="close('action')"
-              data-context="task-footer-action"
-              :task-id="taskId!"
-            />
-                </div>
-              </template>
-            </UiPopover>
+              <!-- Стенд и удаление доступны напрямую, но отделены от запуска
+                   и завершения, чтобы повседневные действия не соседствовали с ними. -->
+              <UiButton
+                v-if="sandbox"
+                data-context="task-footer-action"
+                tone="danger"
+                variant="ghost"
+                :loading="sandboxBusy"
+                :disabled="sandboxBusy"
+                loading-label="Сношу стенд"
+                v-tooltip="`Снести песочницу задачи (фронт :${sandbox.fePort}${sandbox.apiPort ? `, API :${sandbox.apiPort}` : ''})`"
+                @click="sandboxDown"
+              >
+                ⏏ Снести стенд
+              </UiButton>
+              <UiButton
+                v-if="isB24Task && trackerCaps.delete"
+                data-context="task-footer-action"
+                data-role="task-delete"
+                tone="danger"
+                variant="ghost"
+                :loading="busy === 'delete'"
+                :disabled="Boolean(busy)"
+                @click="deleteTask"
+              >
+                {{ t('core.taskDelete') }}
+              </UiButton>
+            </div>
           </div>
           <!-- Обычный запуск показывает только человеческое решение. Immutable-техника
                видна кратко и раскрывается отдельно для редкой ручной корректировки. -->
@@ -991,10 +1296,12 @@
 </template>
 
 <script setup lang="ts">
+import { grigdeskPersonalStateVersion } from '../shared/grigdeskPersonalState.ts';
+import { taskReferenceKey } from '../../../shared/tasks/taskReference.ts';
 import TaskLoading from './TaskLoading.vue';
 
 import type {
-  BoardNamedItem, TaskComment, TaskDetail, TaskLaunchOptions,
+  BoardNamedItem, TaskComment, TaskDetail, TaskLaunchOptions, TaskSubtask,
 } from '../shared/boardContracts.ts';
 import type { ChatAttachment } from '../shared/chatContracts.ts';
 import type { PipelineTask } from '../shared/pipelineContracts.ts';
@@ -1002,24 +1309,30 @@ import type {
   AnalysisDetail, AnalysisQuestion, AnalysisClarificationEntry, AnalysisMeta,
 } from '../../../shared/pipeline/analysisContracts.ts';
 import { isRecord, objectOrEmpty } from '../../../shared/lib/objects.ts';
-import { decodeBoardNamedItems, decodeTaskComments } from '../shared/boardContracts.ts';
+import {
+  decodeBoardNamedItems, decodeTaskComments, decodeTaskTags, decodeTaskSubtasks,
+} from '../shared/boardContracts.ts';
+import type { ChecklistRow } from '../shared/taskCardFields.ts';
+import { taskAvatar, taskPeopleNames, taskPeopleIds, taskChecklist } from '../shared/taskCardFields.ts';
 import { decodeChatAttachment } from '../shared/chatContracts.ts';
 import { decodeLiveGraph, decodePipelineTasks } from '../shared/pipelineContracts.ts';
 
-import { ref, computed, watch, onUnmounted, type PropType } from 'vue';
+import { ref, computed, watch, onUnmounted, nextTick, type PropType } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
 import { api, failureText } from '../shared/apiClient.ts';
 import { shellAction } from '../shared/shellClient.ts';
 import { leaveTaskForPipeline } from '../shared/taskWindowNavigation.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
+import { useTrackersStore } from '../stores/trackers.ts';
 import { sseSubscribe } from '../composables/useSse.ts';
 import { parseProjectsChange } from '../../../shared/runtime/projectsContracts.ts';
 import {
+  UiRefreshIcon,
   confirmDialog,
   showToast,
   UiButton,
-  UiPopover,
+  UiCheckbox,
   UiChoiceList,
   UiDisclosureButton,
   t,
@@ -1048,7 +1361,7 @@ import { useTaskShelfStore } from '../stores/taskShelf.ts';
 import { usePluginsStore } from '../stores/plugins.ts';
 import { useTaskSeenStore } from '../stores/taskSeen.ts';
 import { useDictationController } from '../features/speech/provider.ts';
-import { liveTimerSec, mmss, secToHMS } from '../shared/format.ts';
+import { deadlineState, formatDateTime, liveTimerSec, mmss, secToHMS } from '../shared/format.ts';
 import { mdToHtml } from '../shared/md.ts';
 import { providerLabel } from '../shared/runnerDisplay.ts';
 import OpenDiffButton from './OpenDiffButton.vue';
@@ -1074,22 +1387,42 @@ const router = useRouter();
 
 const ui = useUiStore();
 const tasks = useTasksStore();
+const trackers = useTrackersStore();
+const trackerCaps = computed(() => trackers.capabilities);
 const board = useBoardStore();
-const favorites = useTaskFavoritesStore();
-const shelf = useTaskShelfStore();
+const trackerFavorites = useTaskFavoritesStore();
+const favorites = computed(() => ownTask.value ? trackerFavorites.own : trackerFavorites);
+const trackerShelf = useTaskShelfStore();
+const shelf = computed(() => ownTask.value ? trackerShelf.own : trackerShelf);
 const plugins = usePluginsStore();
-const seen = useTaskSeenStore();
+const trackerSeen = useTaskSeenStore();
+const seen = computed(() => ownTask.value ? trackerSeen.own : trackerSeen);
 const { taskId } = storeToRefs(ui);
+const taskSource = computed(() => ui.taskSource);
 
 const detail = ref<TaskDetail | null>(null);
 const ownTask = computed(() => detail.value?.source === 'grigdesk');
+const currentTaskKey = computed(() => taskReferenceKey({
+  id: taskId.value!,
+  source: ownTask.value ? 'grigdesk' : taskSource.value || board.data?.source,
+}));
+
 // Как и в tasks.load, номер вне собственного диапазона сразу подтверждает источник Б24.
 // Внутри диапазона до ответа карточки портальные действия и личные эффекты скрыты.
-const isB24Task = computed(() => detail.value !== null
-  ? !ownTask.value
-  : Boolean(taskId.value) && !/^[1-9]\d{11}$/u.test(String(taskId.value)));
+const isB24Task = computed(() => {
+  if (taskSource.value && taskSource.value !== 'grigdesk' && taskSource.value !== board.data?.source) {
+    return false;
+  }
+
+  return detail.value !== null ? !ownTask.value
+    : taskSource.value ? taskSource.value !== 'grigdesk'
+      : Boolean(taskId.value) && !/^[1-9]\d{11}$/u.test(String(taskId.value));
+});
 let detailRequest = 0;
+const detailTrackerRevision = ref<number | null>(null);
 const loading = ref(false);
+const canUsePersonal = computed(() => isB24Task.value
+  || (ownTask.value && grigdeskPersonalStateVersion.value === 1));
 const canAnalyzeTask = computed(() => isB24Task.value || (ownTask.value && !loading.value));
 const busy = ref<string | null>(null);   // какое действие выполняется
 const err = ref<string | null>(null);
@@ -1128,6 +1461,8 @@ function taskContextDetails(id: string | number) {
 
 const running = computed(() => !!boardTask.value?.timerRunning);
 const completed = computed(() => detail.value?.status === COMPLETED_STATUS);
+const awaitingReview = computed(() => detail.value?.status === 4
+  || ['await_acceptance', 'my_review'].includes(String(detail.value?.statusKind)));
 const timerStartBlocked = computed(() => completed.value && !running.value);
 const elapsed = computed(() => (boardTask.value ? liveTimerSec(boardTask.value, now.value) : null));
 const shelfEnabled = computed(() => plugins.enabled('shelf'));
@@ -1135,6 +1470,394 @@ const taskProject = computed(() => ownTask.value
   ? detail.value?.projectTitle || ''
   : detail.value?.group_name || boardTask.value?.group || '');
 const taskResponsible = computed(() => detail.value?.responsible?.name || boardTask.value?.responsible || '');
+
+const taskStatus = computed(() => detail.value?.statusText || detail.value?.status_label || '');
+const taskPriority = computed(() => {
+  if (detail.value?.priority_label) {
+    return detail.value.priority_label;
+  }
+
+  const priority = detail.value?.priority;
+
+  if (priority === 0 || priority === '0') {
+    return t('core.taskPriorityLow');
+  }
+  if (priority === 1 || priority === '1') {
+    return t('core.taskPriorityNormal');
+  }
+
+  return priority === 2 || priority === '2' ? t('core.taskPriorityHigh') : '';
+});
+const hasDetailDeadline = computed(() => Boolean(detail.value && Object.hasOwn(detail.value, 'deadline')));
+const taskDeadline = computed(() => hasDetailDeadline.value
+  ? detail.value?.deadline : boardTask.value?.deadline);
+// Старые драйверы уже присылают готовую подпись срока доски. Сохраняем её, когда
+// ISO-поля в деталях нет; явный null из деталей по-прежнему снимает срок целиком.
+const taskDeadlineText = computed(() => formatDateTime(taskDeadline.value)
+  || (!hasDetailDeadline.value ? boardTask.value?.deadline || '' : ''));
+const taskDeadlineState = computed(() => deadlineState(taskDeadline.value, now.value)
+  ?? (!hasDetailDeadline.value && boardTask.value?.overdue ? 'over' : null));
+const creatorAvatar = computed(() => taskAvatar(detail.value?.creator?.icon));
+const responsibleAvatar = computed(() => taskAvatar(detail.value?.responsible?.icon));
+const taskAccomplices = computed(() => taskPeopleNames(detail.value?.accomplicesData));
+const taskAuditors = computed(() => taskPeopleNames(detail.value?.auditorsData));
+const taskParentId = computed(() => {
+  const id = Number(detail.value?.parentId);
+
+  return Number.isSafeInteger(id) && id > 0 ? String(id) : '';
+});
+const checklist = computed(() => taskChecklist(detail.value?.checklist));
+const canEditChecklist = computed(() => isB24Task.value && trackerCaps.value.checklist === true);
+const canEditTags = computed(() => isB24Task.value && trackerCaps.value.tags === true);
+const checklistEditing = ref<string | null>(null);
+const checklistAdding = ref<string | null>(null);
+const checklistCreating = ref(false);
+const checklistListTitle = ref('');
+const checklistTitleDraft = ref('');
+const checklistDrafts = ref<Record<string, string>>({});
+const checklistItemInputs = ref<Array<{ focus: () => void }>>([]);
+const checklistSavedTitle = ref('');
+const tagDraft = ref('');
+const taskTagInput = ref<{ focus: () => void } | null>(null);
+
+interface ChecklistEntry {
+  key: string;
+  depth: number;
+  parentId: string;
+  parentTitle?: string;
+  item?: ChecklistRow;
+  progress?: { complete: number; total: number };
+}
+
+interface ChecklistList {
+  id: string;
+  entries: ChecklistEntry[];
+}
+
+// Поле добавления замыкает поддерево своего родителя, сохраняя прежний плоский обход.
+// Каждый корневой список получает кнопку ввода, подпункт открывается действием на строке.
+// Прогресс корня включает все его вложенные пункты до следующего заголовка списка.
+const checklistLists = computed<ChecklistList[]>(() => {
+  const lists: ChecklistList[] = [];
+  const ancestors: ChecklistRow[] = [];
+  const rows = checklist.value.rows;
+  let entries: ChecklistEntry[] = [];
+  let progress: ChecklistEntry['progress'];
+
+  for (const [index, item] of rows.entries()) {
+    if (item.depth === 0) {
+      progress = { complete: 0, total: 0 };
+      entries = [];
+      lists.push({ id: item.id, entries });
+    } else if (progress) {
+      progress.total += 1;
+      progress.complete += Number(item.complete);
+    }
+
+    entries.push({
+      key: item.id,
+      item,
+      depth: item.depth,
+      parentId: '',
+      ...(item.depth === 0 ? { progress } : {}),
+    });
+    ancestors.push(item);
+
+    const nextDepth = rows[index + 1]?.depth ?? 0;
+
+    while (ancestors.length && ancestors.at(-1)!.depth >= nextDepth) {
+      const parent = ancestors.pop()!;
+
+      if (canEditChecklist.value && (parent.depth === 0 || checklistAdding.value === parent.id)) {
+        entries.push({
+          key: `add-${parent.id}`,
+          parentId: parent.id,
+          parentTitle: parent.title,
+          depth: parent.depth + 1,
+        });
+      }
+    }
+  }
+
+  return lists;
+});
+
+// Удалённый родитель не оставляет скрытую форму, блокирующую добавление в другие списки.
+// Перечитывание дерева и смена задачи используют ту же проверку наличия выбранного узла.
+watch(checklist, (value) => {
+  const parentId = checklistAdding.value;
+
+  if (parentId && !value.rows.some((row) => row.id === parentId)) {
+    delete checklistDrafts.value[parentId];
+    checklistAdding.value = null;
+  }
+});
+
+/**
+ * Черновик переименования отделён от данных задачи до подтверждения сервера.
+ * Отмена оставляет исходный пункт и его отметку без изменений.
+ */
+function editChecklistItem(item: ChecklistRow) {
+  checklistEditing.value = item.id;
+  checklistTitleDraft.value = item.title;
+}
+
+/**
+ * Все изменения дерева перечитывают детали и защищены от смены карточки или трекера.
+ * Ошибка остаётся в общем сообщении карточки; черновик сохраняется для повторной попытки.
+ */
+async function mutateChecklist(
+  itemId: string,
+  mutation: (id: string | number) => Promise<TaskDetail>,
+  success?: () => void,
+) {
+  if (busy.value || !canEditChecklist.value || !taskId.value) {
+    return;
+  }
+
+  const id = taskId.value;
+  const epoch = trackers.epoch;
+
+  checklistSavedTitle.value = '';
+  await act(`checklist-${itemId}`, async () => {
+    const updated = await mutation(id);
+
+    if (taskId.value === id && trackers.epoch === epoch) {
+      detail.value = updated;
+      success?.();
+    }
+  });
+}
+
+/**
+ * Форма открывается только для выбранного списка или подпункта и сразу получает фокус.
+ * Добавление остаётся отдельным явным сохранением текущего текста без создания следующей строки.
+ */
+async function openChecklistItem(parentId: string) {
+  if (busy.value || !canEditChecklist.value) {
+    return;
+  }
+
+  checklistAdding.value = parentId;
+  checklistSavedTitle.value = '';
+  await nextTick();
+  checklistItemInputs.value[0]?.focus();
+}
+
+/**
+ * Отмена очищает только новый пункт выбранного родителя и не отправляет запрос.
+ * Во время записи форма сохраняется до ответа сервера.
+ */
+function cancelChecklistItem(parentId: string) {
+  if (busy.value) {
+    return;
+  }
+
+  checklistDrafts.value[parentId] = '';
+  checklistAdding.value = null;
+}
+
+/**
+ * Нативная отметка возвращается к серверному состоянию на время запроса.
+ * Следующее отображение берётся из перечитанных деталей, включая отказ портала.
+ */
+function toggleChecklistItem(item: ChecklistRow, event: Event) {
+  (event.target as HTMLInputElement).checked = item.complete;
+
+  return mutateChecklist(item.id, (id) => tasks.updateChecklistItem(id, item.id, {
+    complete: !item.complete,
+  }));
+}
+
+/**
+ * Пункт сразу сохраняется внутри выбранного списка с обязательным parentId.
+ * Только успешное чтение обновлённого дерева очищает соответствующий черновик.
+ */
+function addChecklistItem(parentId: string) {
+  const title = checklistDrafts.value[parentId]?.trim();
+
+  if (!title) {
+    return;
+  }
+
+  return mutateChecklist(parentId, (id) => tasks.addChecklistItem(id, {
+    title,
+    parentId,
+  }), () => {
+    checklistDrafts.value[parentId] = '';
+    checklistAdding.value = null;
+    checklistSavedTitle.value = title;
+  });
+}
+
+function cancelChecklistList() {
+  if (!busy.value) {
+    checklistCreating.value = false;
+    checklistListTitle.value = '';
+  }
+}
+
+/**
+ * Именованный корень создаётся без parentId через прежнее действие карточки.
+ * Ошибка сохраняет введённое имя; успех закрывает форму после перечитывания дерева.
+ */
+function createChecklistList() {
+  const title = checklistListTitle.value.trim();
+
+  if (!title) {
+    return;
+  }
+
+  return mutateChecklist('new-list', (id) => tasks.addChecklistItem(id, { title }), () => {
+    checklistCreating.value = false;
+    checklistListTitle.value = '';
+  });
+}
+
+/**
+ * Переименование отправляет только название выбранного пункта.
+ * Редактор закрывается после подтверждённого обновления деталей.
+ */
+function renameChecklistItem() {
+  const itemId = checklistEditing.value;
+  const title = checklistTitleDraft.value.trim();
+
+  if (!itemId || !title) {
+    return;
+  }
+
+  return mutateChecklist(itemId, (id) => tasks.updateChecklistItem(id, itemId, { title }), () => {
+    checklistEditing.value = null;
+  });
+}
+
+/**
+ * Подтверждение удаления связано с исходной задачей и поколением подключения.
+ * Переход на другую задачу во время диалога отменяет подготовленную команду.
+ */
+async function deleteChecklistItem(item: ChecklistRow) {
+  const id = taskId.value;
+  const epoch = trackers.epoch;
+  const confirmation = item.depth === 0
+    ? 'core.taskChecklistListDeleteConfirmation' : 'core.taskChecklistDeleteConfirmation';
+  const confirmed = await confirmDialog(t(confirmation, { title: item.title }), {
+    danger: true,
+    okText: t(item.depth === 0 ? 'core.taskChecklistListDelete' : 'core.taskChecklistDelete'),
+  });
+
+  if (!confirmed || taskId.value !== id || trackers.epoch !== epoch) {
+    return;
+  }
+
+  await mutateChecklist(item.id, (task) => tasks.deleteChecklistItem(task, item.id));
+}
+
+/**
+ * Полный список тегов отправляется без локального изменения чипов.
+ * Page-ответ после записи обновляет теги и прежнее обсуждение той же карточки.
+ */
+async function updateTags(tags: string[]) {
+  if (busy.value || !canEditTags.value || !taskTagsLoaded.value || comLoading.value || !taskId.value) {
+    return;
+  }
+
+  const id = taskId.value;
+  const epoch = trackers.epoch;
+  let updated = false;
+
+  await act('tags', async () => {
+    const page = await tasks.updateTaskTags(id, tags);
+
+    if (taskId.value === id && trackers.epoch === epoch) {
+      taskTags.value = decodeTaskTags(page);
+      taskTagsLoaded.value = isRecord(page) && Array.isArray(page.tags);
+      comments.value = decodeTaskComments(page);
+      taskSubtasks.value = decodeTaskSubtasks(page);
+      tagDraft.value = '';
+      updated = true;
+    }
+  });
+
+  return updated;
+}
+
+/**
+ * Кнопка и Enter отправляют один и тот же список тегов без пустых значений и дублей.
+ * После успешной записи фокус возвращается в разблокированное поле той же карточки.
+ */
+async function addTag() {
+  const tag = tagDraft.value.trim();
+  const id = taskId.value;
+  const epoch = trackers.epoch;
+
+  if (!tag || taskTags.value.includes(tag) || taskTags.value.length >= 50) {
+    return;
+  }
+
+  if (await updateTags([...taskTags.value, tag])) {
+    await nextTick();
+
+    if (taskId.value === id && trackers.epoch === epoch) {
+      taskTagInput.value?.focus();
+    }
+  }
+}
+
+/**
+ * Приёмка и возврат используют общий busy и серверное чтение деталей с доской.
+ * Поздний ответ не заменяет новую карточку после перехода или смены подключения.
+ */
+async function reviewTask(approve: boolean) {
+  if (busy.value || !isB24Task.value || !trackerCaps.value.review || !taskId.value) {
+    return;
+  }
+
+  const id = taskId.value;
+  const epoch = trackers.epoch;
+
+  await act(approve ? 'approve' : 'disapprove', async () => {
+    const updated = approve ? await tasks.approveTask(id) : await tasks.disapproveTask(id);
+
+    if (taskId.value === id && trackers.epoch === epoch) {
+      detail.value = updated;
+      await loadComments(true);
+    }
+  });
+}
+
+const hasTaskMeta = computed(() => Boolean(
+  taskStatus.value || taskPriority.value || taskProject.value || taskResponsible.value
+    || taskDeadlineText.value || detail.value?.creator?.name || taskAccomplices.value
+    || taskAuditors.value || taskParentId.value || detail.value?.replicate === 'Y',
+));
+
+function hideAvatar(event: Event) {
+  const image = event.target as HTMLImageElement | null;
+
+  if (image) {
+    image.hidden = true;
+  }
+}
+
+/**
+ * datetime-local хранит местные часы без смещения, поэтому ISO сначала разбирается как момент.
+ * Нетронутый снимок сравнивается строкой и не теряет исходные секунды или часовой пояс.
+ */
+function deadlineEditValue(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    return '';
+  }
+
+  const date = new Date(value);
+
+  if (!Number.isFinite(date.getTime())) {
+    return '';
+  }
+
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+
+  return local.toISOString().slice(0, 16);
+}
 
 // B24 отдаёт описание с HTML/entities — чистим до читаемого текста.
 function htmlToText(s: string | null | undefined) {
@@ -1163,9 +1886,12 @@ function linkify(s: string) {
 
 const descHtml = computed(() => linkify(cleanDesc.value));
 
-// ── Редактирование основных полей задачи в Битрикс24 ──
+// ── Редактирование основных полей задачи внешнего трекера ──
 const editForm = ref<ReturnType<typeof taskEditSnapshot> | null>(null);
 const editBaseline = ref<ReturnType<typeof taskEditSnapshot> | null>(null);
+const editTitleInput = ref<InstanceType<typeof UiInput> | null>(null);
+const editAccomplicesOpen = ref(false);
+const editAuditorsOpen = ref(false);
 const editUsers = ref<BoardNamedItem[]>([]);
 const editGroups = ref<BoardNamedItem[]>([]);
 const editOptionsBusy = ref(false);
@@ -1188,6 +1914,9 @@ function taskEditSnapshot(task: TaskDetail) {
     responsibleId: responsibleId ? String(responsibleId) : '',
     groupId: Number.isSafeInteger(groupId) && groupId > 0 ? String(groupId) : '',
     priority: [0, 1, 2].includes(priority) ? priority : 1,
+    deadline: deadlineEditValue(task.deadline),
+    accomplices: taskPeopleIds(task.accomplices, task.accomplicesData),
+    auditors: taskPeopleIds(task.auditors, task.auditorsData),
   };
 }
 
@@ -1211,6 +1940,22 @@ const editResponsibleOptions = computed(() => optionsWithCurrent(
   detail.value?.responsible?.name,
   'Исполнитель',
 ));
+const editParticipantOptions = computed(() => {
+  const people = new Map(editUsers.value.map((user) => [String(user.id), user.name]));
+
+  for (const key of ['accomplices', 'auditors'] as const) {
+    for (const id of editForm.value?.[key] || []) {
+      if (!people.has(id)) {
+        const data = detail.value?.[`${key}Data`];
+        const person = isRecord(data) ? data[id] : null;
+
+        people.set(id, isRecord(person) && typeof person.name === 'string' ? person.name : `#${id}`);
+      }
+    }
+  }
+
+  return [...people].map(([value, label]) => ({ value, label }));
+});
 const editGroupOptions = computed(() => optionsWithCurrent(
   editGroups.value,
   editForm.value?.groupId,
@@ -1245,17 +1990,27 @@ function taskEditPayload() {
   if (form.responsibleId !== baseline.responsibleId) {
     fields.responsibleId = Number(form.responsibleId);
   }
+  if (form.deadline !== baseline.deadline) {
+    fields.deadline = form.deadline ? new Date(form.deadline).toISOString() : null;
+  }
   if (Number(form.priority) !== Number(baseline.priority)) {
     fields.priority = Number(form.priority);
+  }
+
+  for (const key of ['accomplices', 'auditors'] as const) {
+    if ([...form[key]].sort().join(',') !== [...baseline[key]].sort().join(',')) {
+      fields[key] = form[key].length ? form[key].map(Number) : '';
+    }
   }
 
   return fields;
 }
 
+const editHasChanges = computed(() => Object.keys(taskEditPayload()).length > 0);
 const editCanSave = computed(() => (
   Boolean(editForm.value?.title.trim())
   && busy.value !== 'edit'
-  && Object.keys(taskEditPayload()).length > 0
+  && editHasChanges.value
 ));
 
 /**
@@ -1273,8 +2028,8 @@ async function loadEditOptions() {
   editOptionsError.value = null;
 
   const [users, groups] = await Promise.allSettled([
-    api.get('/api/b24/users'),
-    api.get('/api/b24/groups'),
+    api.get('/api/tracker/users'),
+    api.get('/api/tracker/groups'),
   ]);
 
   if (requestId !== editOptionsRequest || !editForm.value) {
@@ -1300,13 +2055,11 @@ async function loadEditOptions() {
   editOptionsBusy.value = false;
 }
 
-/** Открывает форму на точном снимке показанной карточки и начинает загрузку справочников. */
-
 /**
- * Открывает форму на снимке показанной карточки и загружает справочники.
- * Повторное открытие не сбрасывает уже введённые человеком изменения.
+ * Открывает форму на снимке показанной карточки, фокусирует название и читает справочники.
+ * Повторное открытие сохраняет черновик; списки участников изначально свёрнуты.
  */
-function openTaskEdit() {
+async function openTaskEdit() {
   if (!detail.value || editForm.value) {
     return;
   }
@@ -1315,9 +2068,13 @@ function openTaskEdit() {
 
   editBaseline.value = snapshot;
   editForm.value = { ...snapshot };
+  editAccomplicesOpen.value = false;
+  editAuditorsOpen.value = false;
   editMessage.value = null;
   editOptionsError.value = null;
-  loadEditOptions();
+  void loadEditOptions();
+  await nextTick();
+  editTitleInput.value?.focus();
 }
 
 
@@ -1354,7 +2111,7 @@ async function saveTaskEdit() {
 
     detail.value = updated;
     cancelTaskEdit();
-    editMessage.value = 'Изменения сохранены в Битрикс24.';
+    editMessage.value = t('core.taskChangesSaved');
 
     if ((Object.hasOwn(fields, 'title') || Object.hasOwn(fields, 'description'))
         && triage.value?.analysis) {
@@ -1364,7 +2121,7 @@ async function saveTaskEdit() {
 }
 
 // ── Обсуждение в Telegram: что стоит за ссылками t.me из описания ──
-// Поле `telegram` приходит от GET /api/b24/task/:id (сервер уже применил
+// Поле `telegram` приходит от GET /api/tracker/task/:id (сервер уже применил
 // allowlist и лимиты). Тело задачи оно не трогает — это отдельный блок.
 // Текст цитат — из чужого чата, поэтому только интерполяция: никакого v-html,
 // как у описания. Отказ показываем ровно так, как прислал сервер: у него нет
@@ -1405,6 +2162,32 @@ function tgPlural(n: number) {
   return 'сообщений';
 }
 
+let personalTarget = '';
+
+/**
+ * Личные эффекты выполняются только для подтверждённой карточки и поддерживаемого пространства.
+ * Позднее подтверждение capability включает own-метки без повторного открытия карточки.
+ */
+function loadPersonalState() {
+  if (!taskId.value || !detail.value || !canUsePersonal.value) {
+    return;
+  }
+
+  const key = currentTaskKey.value;
+
+  if (personalTarget === key) {
+    return;
+  }
+
+  personalTarget = key;
+  void favorites.value.load(true);
+  void shelf.value.load(true, { silent: true });
+  acknowledgeShelfOnOpen(taskId.value);
+  void seen.value.markSeen([taskId.value]);
+}
+
+watch(grigdeskPersonalStateVersion, loadPersonalState);
+
 let detailAbort: AbortController | null = null;
 let commentsAbort: AbortController | null = null;
 
@@ -1426,21 +2209,16 @@ async function loadDetail(force = false) {
   err.value = null;
 
   try {
-    const loaded = await tasks.load(id, force, detailAbort.signal);
+    const loaded = await tasks.load(id, force, detailAbort.signal, taskSource.value);
 
     if (request !== detailRequest || taskId.value !== id) {
       return;
     }
 
     detail.value = loaded;
+    void loadConveyor();
 
-    if (isB24Task.value) {
-      favorites.load(true);
-      acknowledgeShelfOnOpen(id);
-      // Личные отметки принадлежат только подтверждённой карточке Б24.
-      // До определения источника запросы account-scoped служб запрещены.
-      seen.markSeen([id]);
-    }
+    loadPersonalState();
   } catch (e) {
     if (request === detailRequest && taskId.value === id) {
       err.value = failureText(e);
@@ -1870,7 +2648,7 @@ async function startClarifyDictation(questionId: string) {
 // ── Табы модалки: Триаж | Комментарии ──
 const mtab = ref('triage');
 const contentPane = ref<'description' | 'work'>('description');
-// Одна навигация управляет и видимой областью, и прежней ленивой вкладкой обсуждения.
+// Одна навигация управляет видимой областью и сохранённым обсуждением задачи.
 // Возврат к описанию не сбрасывает выбранный разбор и не уничтожает его форму.
 const taskSection = computed({
   get: () => contentPane.value === 'description' ? 'description' : mtab.value,
@@ -1881,12 +2659,15 @@ const taskSection = computed({
   },
 });
 const comments = ref<TaskComment[] | null>(null);    // null = ещё не загружали
+const taskTags = ref<string[]>([]);
+const taskTagsLoaded = ref(false);
+const taskSubtasks = ref<TaskSubtask[]>([]);
 const comLoading = ref(false);
 let commentsRequest = 0;
 
 /**
  * Карточка показывает одну область, сохраняя DOM и черновики остальных.
- * Комментарии используют прежнюю вкладку и её ленивую загрузку без повторных запросов.
+ * Комментарии используют прежнюю вкладку и общий page-ответ без повторных запросов.
  */
 function selectTaskSection(section: 'description' | 'triage' | 'comments') {
   contentPane.value = section === 'description' ? 'description' : 'work';
@@ -1897,11 +2678,12 @@ function selectTaskSection(section: 'description' | 'triage' | 'comments') {
 }
 
 /**
- * Список комментариев проверяется до публикации в шаблоне карточки.
- * Ошибка формы использует прежнее пустое состояние и снимает индикатор загрузки.
+ * Один page-ответ наполняет описание тегами и подзадачами, а обсуждение — комментариями.
+ * Неверные необязательные расширения скрываются без отказа прежнего обсуждения.
  */
-async function loadComments() {
-  if (!isB24Task.value) {
+async function loadComments(force = false) {
+  if (!taskId.value || !isB24Task.value || (!trackerCaps.value.comments && !trackerCaps.value.tags)
+    || (comLoading.value && !force)) {
     return;
   }
 
@@ -1913,16 +2695,27 @@ async function loadComments() {
   comLoading.value = true;
 
   try {
-    const result = decodeTaskComments(await api.get(`/api/b24/task/${id}/comments`, {
+    const page = await api.get(`/api/tracker/task/${id}/comments`, {
       signal: commentsAbort.signal,
-    }));
+    });
+    const result = decodeTaskComments(page);
 
     if (taskId.value === id && request === commentsRequest && isB24Task.value) {
       comments.value = result;
+      taskTags.value = decodeTaskTags(page);
+      taskTagsLoaded.value = isRecord(page) && Array.isArray(page.tags);
+      taskSubtasks.value = decodeTaskSubtasks(page);
     }
-  } catch {
+  } catch (error) {
     if (taskId.value === id && request === commentsRequest) {
+      if (trackerCaps.value.tags) {
+        err.value = failureText(error);
+      }
+
       comments.value = [];
+      taskTags.value = [];
+      taskTagsLoaded.value = false;
+      taskSubtasks.value = [];
     }
   } finally {
     if (taskId.value === id && request === commentsRequest) {
@@ -1932,10 +2725,19 @@ async function loadComments() {
 }
 
 watch(mtab, (t) => {
-  if (isB24Task.value && t === 'comments' && comments.value === null) {
+  if (isB24Task.value && trackerCaps.value.comments && t === 'comments' && comments.value === null) {
     loadComments();
   }
 });
+
+watch(
+  () => [taskId.value, detail.value, trackerCaps.value.comments, trackerCaps.value.tags],
+  () => {
+    if (detail.value && comments.value === null) {
+      void loadComments();
+    }
+  },
+);
 
 // Уже ли задача на конвейере (есть в состоянии фабрики) — для защиты от повторного запуска.
 const conveyor = ref<PipelineTask | null>(null);
@@ -1956,9 +2758,11 @@ async function loadConveyor() {
   }
 
   try {
-    const { tasks: list } = decodePipelineTasks(await api.get('/api/tasks'));
+    const { tasks: list } = decodePipelineTasks(await api.get('/api/tasks?sources=1'));
+    const key = currentTaskKey.value;
 
-    conveyor.value = (list || []).find((t) => String(t.task) === String(taskId.value!)) || null;
+    conveyor.value = (list || []).find((t) => t.source && taskReferenceKey({ id: t.task, source: t.source })
+      === key) || null;
   } catch { /* нет данных фабрики — не блокируем */ }
 
   if (!conveyor.value) {
@@ -2057,24 +2861,72 @@ async function act(name: string, fn: () => Promise<unknown>) {
 }
 
 const toggleTimer = () => act('timer', () => tasks.timer(taskId.value!, running.value ? 'pause' : 'start'));
+
+/**
+ * Подтверждение относится к исходной задаче и поколению подключения.
+ * Смена трекера во время диалога не переносит завершение на другой аккаунт.
+ */
 const complete = async () => {
+  const epoch = trackers.epoch;
+  const id = taskId.value;
+
   if (await confirmDialog('Завершить задачу?', { okText: 'Завершить' })) {
+    if (epoch !== trackers.epoch || taskId.value !== id) {
+      return;
+    }
+
     act('complete', async () => {
-      await tasks.complete(taskId.value!);
+      await tasks.complete(id!);
       ui.close();
     });
   }
 };
 
+/**
+ * Удаление требует подтверждения для исходной задачи и подключения.
+ * После ожидания карточка закрывается только если пользователь всё ещё смотрит эту задачу.
+ */
+async function deleteTask() {
+  if (busy.value || !isB24Task.value || !trackerCaps.value.delete) {
+    return;
+  }
+
+  const epoch = trackers.epoch;
+  const id = taskId.value;
+  const confirmed = await confirmDialog(t('core.taskDeleteConfirmation'), {
+    danger: true,
+    okText: t('core.taskDelete'),
+  });
+
+  if (!confirmed || epoch !== trackers.epoch || taskId.value !== id || busy.value) {
+    return;
+  }
+
+  await act('delete', async () => {
+    await tasks.deleteTask(id!);
+
+    if (epoch === trackers.epoch && taskId.value === id) {
+      ui.close();
+    }
+  });
+}
+
 // Возобновление не возвращает детали задачи: после подтверждения перечитываем их.
 // Статус и доступные действия определяет портал, а ошибки остаются в карточке.
 async function renew() {
+  const epoch = trackers.epoch;
+  const id = taskId.value;
+
   if (!(await confirmDialog('Возобновить задачу?', { okText: 'Возобновить' }))) {
     return;
   }
 
+  if (epoch !== trackers.epoch || taskId.value !== id) {
+    return;
+  }
+
   await act('renew', async () => {
-    await tasks.renew(taskId.value!);
+    await tasks.renew(id!);
     await loadDetail(true);
   });
 }
@@ -2185,6 +3037,30 @@ async function refreshLaunchOptions() {
 }
 
 const stopLaunchEvents = sseSubscribe((name, payload) => {
+  if (name === 'trackers-changed') {
+    detailRequest += 1;
+    commentsRequest += 1;
+    detailAbort?.abort();
+    commentsAbort?.abort();
+    detail.value = null;
+    comments.value = null;
+    taskTags.value = [];
+    taskTagsLoaded.value = false;
+    taskSubtasks.value = [];
+    commentText.value = '';
+    tasks.invalidate?.();
+    trackers.invalidate();
+    detailTrackerRevision.value = isRecord(payload) && Number.isSafeInteger(payload.revision)
+      ? Number(payload.revision) : 0;
+    loading.value = false;
+    comLoading.value = false;
+    void trackers.load(true);
+    closeLaunch();
+    cancelTaskEdit();
+
+    return;
+  }
+
   if (name === 'projects-changed') {
     try {
       const change = parseProjectsChange(payload);
@@ -2201,6 +3077,20 @@ const stopLaunchEvents = sseSubscribe((name, payload) => {
 
   void refreshLaunchOptions();
 });
+
+// Новое поколение metadata подтверждает, что детали читаются уже из текущего подключения.
+// Ожидание переживает замену запроса metadata другим подписчиком или диалогом настроек.
+watch(
+  () => [trackers.catalog, detailTrackerRevision.value] as const,
+  ([catalog, revision]) => {
+    if (!catalog || revision === null || catalog.revision < revision) {
+      return;
+    }
+
+    detailTrackerRevision.value = null;
+    void loadDetail(true);
+  },
+);
 // Рекомендацию маршрута считает сервер: только он знает, из этого ли каталога пришла
 // оценка и остался ли предложенный маршрут опубликованным. Клиент её не пересчитывает.
 function preferredLaunchRoute(opts: TaskLaunchOptions) {
@@ -2480,7 +3370,9 @@ async function doLaunch(payload: unknown) {
   err.value = null;
 
   try {
-    const r = await tasks.launch(taskId.value!, payload);
+    const r = await tasks.launch(taskId.value!, { ...objectOrEmpty(payload),
+      ...(taskSource.value ? { source: taskSource.value } : ownTask.value ? { source: 'grigdesk' } : {}),
+    });
 
     launchForm.value = null;
     launchMsg.value = r.outcome === 'already_running' ? 'Уже идёт на конвейере'
@@ -2544,7 +3436,7 @@ const launchSelected = () => {
 const sendComment = () => act('comment', async () => {
   await tasks.comment(taskId.value!, commentText.value);
   commentText.value = '';
-  loadComments();
+  loadComments(true);
 });
 const refresh = async () => {
   const id = taskId.value;
@@ -2553,10 +3445,11 @@ const refresh = async () => {
 
   if (taskId.value === id && isB24Task.value) {
     board.load(true);
+    void loadComments(true);
   }
 };
-const toggleFavorite = () => favorites.toggle(taskId.value!);
-const toggleShelf = () => shelf.toggle(taskId.value!);
+const toggleFavorite = () => favorites.value.toggle(taskId.value!);
+const toggleShelf = () => shelf.value.toggle(taskId.value!);
 let acknowledgedShelfTask = '';
 /**
  * Открытие карточки гасит накопленное внимание только один раз на задачу.
@@ -2565,13 +3458,14 @@ let acknowledgedShelfTask = '';
 function acknowledgeShelfOnOpen(id = taskId.value!) {
   const key = String(id || '');
 
-  if (!isB24Task.value || !key || !shelfEnabled.value || !shelf.loaded || !shelf.isOnShelf(key)
+  if (!canUsePersonal.value || !key || !shelfEnabled.value || !shelf.value.loaded
+    || !shelf.value.isOnShelf(key)
     || acknowledgedShelfTask === key) {
     return;
   }
 
   acknowledgedShelfTask = key;
-  void Promise.resolve(shelf.acknowledge(key)).then((ok) => {
+  void Promise.resolve(shelf.value.acknowledge(key)).then((ok) => {
     if (!ok && String(taskId.value || '') === key) {
       acknowledgedShelfTask = '';
     }
@@ -2585,7 +3479,15 @@ function onTaskDialogOpenChange(open: boolean) {
 }
 
 // Открытие/закрытие модалки по taskId.
-watch(taskId, (id) => {
+watch(() => [taskId.value, taskSource.value], ([id]) => {
+  checklistEditing.value = null;
+  checklistAdding.value = null;
+  checklistCreating.value = false;
+  checklistListTitle.value = '';
+  checklistDrafts.value = {};
+  checklistSavedTitle.value = '';
+  tagDraft.value = '';
+  detailTrackerRevision.value = null;
   detailAbort?.abort();
   commentsAbort?.abort();
   detailRequest += 1;
@@ -2595,10 +3497,12 @@ watch(taskId, (id) => {
   loading.value = false;
   closeLaunch();
   acknowledgedShelfTask = '';
+  personalTarget = '';
   cancelTaskEdit();
   editMessage.value = null;
 
   if (id) {
+    void trackers.load();
     detail.value = null;
     launchMsg.value = null;
     sandboxMsg.value = null;
@@ -2617,6 +3521,9 @@ watch(taskId, (id) => {
     mtab.value = 'triage';
     contentPane.value = 'description';
     comments.value = null;
+    taskTags.value = [];
+    taskTagsLoaded.value = false;
+    taskSubtasks.value = [];
     clarifyDrafts.value = {};
     clarifySaved.value = '';
     clarifyEntries.value = [];
@@ -2654,7 +3561,7 @@ watch(taskId, (id) => {
 // Полка загружается параллельно карточке. Если её снимок пришёл позже, открытая
 // задача всё равно должна погасить накопленный огонёк ровно один раз.
 watch(
-  () => [taskId.value!, shelf.loaded, shelf.entries, shelfEnabled.value],
+  () => [taskId.value!, shelf.value.loaded, shelf.value.entries, shelfEnabled.value],
   () => acknowledgeShelfOnOpen(),
 );
 watch(analysisEnabled, (enabled) => {
@@ -2807,6 +3714,117 @@ onUnmounted(() => {
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
+.task-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  align-self: center;
+}
+.task-avatar[hidden] {
+  display: none;
+}
+.task-extra h5 {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+.task-checklist-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+.task-checklist-label {
+  flex: 1 1 120px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.task-checklist-complete {
+  color: var(--ink-mid);
+  text-decoration: line-through;
+}
+.task-checklist-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-inline-start: auto;
+}
+.task-checklists {
+  display: grid;
+  gap: 12px;
+}
+.task-checklist-list {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.task-checklist-entry {
+  min-width: 0;
+  padding: 8px 12px;
+}
+.task-checklist-entry.is-list-header {
+  border-block-end: 1px solid var(--line);
+}
+.task-checklist-heading {
+  display: flex;
+  flex: 1 1 160px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.task-checklist-heading .context-label {
+  font-weight: normal;
+}
+.task-checklist-create {
+  margin-block-start: 12px;
+}
+.task-checklist-editor {
+  display: grid;
+  flex: 1 0 100%;
+  gap: 8px;
+  min-width: 0;
+}
+.task-checklist-saved {
+  margin: 8px 0 0;
+  color: var(--good);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.task-tag-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 480px;
+  min-width: 0;
+  margin-block-start: 8px;
+}
+.task-tag-editor > .ui-input {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.task-checklist,
+.task-subtasks {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.task-checklist {
+  gap: 0;
+}
+.task-tag-list,
+.task-subtasks li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
 .context-label {
   color: var(--ink-mid);
 }
@@ -2876,17 +3894,101 @@ onUnmounted(() => {
   padding: 16px 20px 24px;
 }
 .task-edit {
-  display: grid;
-  gap: 13px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+}
+.brief-scroll--editing {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+.task-edit-scroll {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.55fr);
+  align-content: start;
+  align-items: start;
+  gap: 24px;
+  min-width: 0;
+  min-height: 0;
+  padding: 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.task-edit-main {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.task-edit-properties {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding-left: 24px;
+  border-left: 1px solid var(--line);
+}
+.task-edit-section-title {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .task-edit-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
 }
-.task-edit-grid > :last-child {
-  grid-column: 1 / -1;
+.task-edit-people {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.task-edit-count {
+  margin-left: auto;
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.task-edit-people-list {
+  max-height: 200px;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.task-edit-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  min-width: 0;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.task-edit-note {
+  margin: 0;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.task-edit-dirty {
+  color: var(--warn);
+}
+.task-edit-actions {
+  flex: none;
 }
 .edit-options-state {
   display: flex;
@@ -3410,7 +4512,7 @@ onUnmounted(() => {
 }
 .timer-group {
   display: flex;
-  flex: 1 0 auto;
+  flex: 1 1 auto;
   align-items: center;
   gap: 12px;
   min-width: 0;
@@ -3435,11 +4537,34 @@ onUnmounted(() => {
 }
 .cbtns {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
+}
+.csecondary {
+  display: flex;
+  flex: 1 0 100%;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.ctools,
+.cdanger {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.cdanger {
+  margin-left: auto;
 }
 .convstall { width: 100%; }
 .lmsg { font-size: 12px; color: var(--good); flex-basis: 100%; }
@@ -3492,6 +4617,17 @@ onUnmounted(() => {
 }
 
 @container task-detail (max-width: 700px) {
+  .task-edit-scroll {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .task-edit-properties {
+    padding: 20px 0 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+  .task-edit-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .triage-findings {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -3546,11 +4682,21 @@ onUnmounted(() => {
   .tab-scroll {
     padding: 14px 12px;
   }
+  .brief-scroll--editing {
+    padding: 0;
+  }
+  .task-edit-scroll {
+    gap: 20px;
+    padding: 16px 12px;
+  }
   .task-edit-grid {
     grid-template-columns: minmax(0, 1fr);
   }
-  .task-edit-grid > :last-child {
-    grid-column: auto;
+  .task-edit-footer {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
   }
   .task-edit-actions > * {
     flex: 1;
@@ -3600,8 +4746,16 @@ onUnmounted(() => {
   }
   .cbtns {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    flex-basis: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
+  }
+  .cbtns:has(> :nth-child(3)) > :first-child {
+    grid-column: 1 / -1;
+  }
+  .csecondary {
+    gap: 6px 12px;
+    padding-top: 6px;
   }
   .convstall,
   .lmsg {

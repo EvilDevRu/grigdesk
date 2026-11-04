@@ -57,16 +57,17 @@ const composerStyle = computed(() => (
   overflow: hidden; padding: 24px var(--chat-gutter); }
 .message { width: 64%; }
 .outgoing { align-self: flex-end; width: 48%; }
-.conversation-input { padding: 12px var(--chat-gutter) 16px; border-top: 1px solid var(--line); }
-.composer { display: flex; align-items: flex-end; gap: 6px; padding: 8px;
-  border: 1px solid var(--line); border-radius: 12px; }
-.composer-field { flex: 1; height: var(--composer-h, 53px); min-height: 48px; max-height: 46vh; }
-@media (max-width: 899px) {
-  .conversation-input { padding: 8px var(--chat-gutter); }
-  .composer { flex-wrap: wrap; padding: 6px; }
-  .composer-field { flex: 1 0 100%; order: -1; }
+.conversation-input {
+  flex: none;
+  padding: 8px var(--chat-gutter);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
 }
+.composer { display: flex; align-items: flex-end; gap: 6px; }
+.composer-field { flex: 1; height: var(--composer-h, 36px); min-height: 36px; max-height: 46vh; }
 @media (max-width: 600px) {
-  .composer-field { height: 58px; max-height: min(160px, 28vh); }
+  .composer { flex-wrap: wrap; }
+  .composer-field { flex: 1 0 100%; order: -1; }
+  .composer-field { height: 36px; max-height: min(160px, 28vh); }
 }
 </style>

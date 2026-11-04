@@ -88,7 +88,7 @@ test('PHONE-13: способы связи и устройства с rename/last
 });
 
 test('PHONE-14: уже открытые настройки нормализуют старый alias', async (t) => {
-  const h = await settingsHarness(t, 'connections.b24', 'DevicesPage', {
+  const h = await settingsHarness(t, 'interface.behavior', 'DevicesPage', {
     browser: phoneBrowser(),
     prepare({ control }) {
       control.handlers['/api/devices'] = () => Response.json({
@@ -107,7 +107,7 @@ test('PHONE-14: уже открытые настройки нормализую�
 
   h.settings.requestOpen({ pageId: 'connections.mobile' });
   assert.equal(h.settings.pageId, 'connections.devices');
-  h.settings.selectPage('connections.b24');
+  h.settings.selectPage('interface.behavior');
   h.settings.selectPage('connections.mobile');
   assert.equal(h.settings.pageId, 'connections.devices');
 });

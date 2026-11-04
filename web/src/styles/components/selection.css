@@ -327,6 +327,74 @@
   margin-inline: auto;
 }
 
+/* Тонкий вариант сохраняет нативный range для мыши, касаний и клавиатуры.
+   Бегунок невидим: выбранную ступень отмечает высокая риска поверх трека. */
+.ui-discrete-slider--thin .ui-range {
+  height: var(--toolbar-control-h);
+  appearance: none;
+  background: transparent;
+}
+
+.ui-discrete-slider--thin .ui-range::-webkit-slider-runnable-track {
+  box-sizing: border-box;
+  height: 2px;
+  border: 0;
+  border-radius: 1px;
+  background: linear-gradient(to right,
+    var(--accent) var(--ui-slider-fill), var(--idle) var(--ui-slider-fill));
+}
+
+.ui-discrete-slider--thin .ui-range::-moz-range-track {
+  box-sizing: border-box;
+  height: 2px;
+  border: 0;
+  border-radius: 1px;
+  background: linear-gradient(to right,
+    var(--accent) var(--ui-slider-fill), var(--idle) var(--ui-slider-fill));
+}
+
+.ui-discrete-slider--thin .ui-range::-webkit-slider-thumb {
+  width: 6px;
+  height: 12px;
+  margin-top: -5px;
+  appearance: none;
+  border: 0;
+  opacity: 0;
+}
+
+.ui-discrete-slider--thin .ui-range::-moz-range-thumb {
+  width: 6px;
+  height: 12px;
+  border: 0;
+  opacity: 0;
+}
+
+.ui-discrete-slider--thin .ui-range::-moz-range-progress {
+  background: transparent;
+}
+
+.ui-discrete-slider--thin .ui-discrete-slider__points {
+  top: calc(50% - 3px);
+  right: 3px;
+  left: 3px;
+  height: 6px;
+  opacity: 1;
+}
+
+.ui-discrete-slider--thin .ui-discrete-slider__points > span {
+  width: 1px;
+  height: 6px;
+  color: var(--ink-low);
+  border-radius: 1px;
+}
+
+.ui-discrete-slider--thin .ui-discrete-slider__points > .is-active {
+  width: 2px;
+  height: 10px;
+  color: color-mix(in srgb, var(--accent) 65%, var(--ink));
+  transform: translateY(-2px);
+}
+
 .ui-checkbox.is-invalid .ui-checkbox__mark,
 .ui-radio.is-invalid .ui-radio__mark {
   border-color: var(--bad);

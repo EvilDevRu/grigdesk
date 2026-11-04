@@ -136,11 +136,7 @@
             <UiIconButton role="embedded" data-context="workspace-toolbar"
                           :label="t('core.diffDesignRefresh')" v-tooltip="t('core.diffDesignRefresh')"
                           :loading="loading" @click="load">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M20 7v5h-5 M4 17v-5h5" />
-                <path d="M6.1 9a7 7 0 0 1 11.6-2.3L20 9 M4 15l2.3 2.3A7 7 0 0 0 17.9 15" />
-              </svg>
+              <UiRefreshIcon />
             </UiIconButton>
           </template>
         </UiPaneHeader>
@@ -178,6 +174,7 @@ import { isRecord } from '../../../../shared/lib/objects.ts';
 import { monaco, langOf, READONLY_OPTS } from '../../shared/monaco.ts';
 import { api, failureText } from '../../shared/apiClient.ts';
 import {
+  UiRefreshIcon,
   UiButton,
   UiIconButton,
   UiPressable,

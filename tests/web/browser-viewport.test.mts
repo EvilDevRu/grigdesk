@@ -73,10 +73,14 @@ test('VP01: layer registration скрывает view синхронно, tooltip
   await flushPromises();
   assert.equal(calls.at(-1)!.operation, 'layout');
 
+  const beforeTooltip = calls.length;
   const tooltip = fixture.registerUiLayer('viewport-tip', { name: 'tooltip', close: () => true });
 
+  await flushPromises();
+  assert.equal(calls.length, beforeTooltip, 'tooltip не скрывает и не переставляет native view');
   tooltip.unregister();
   await flushPromises();
+  assert.equal(calls.length, beforeTooltip);
   assert.equal(calls.at(-1)!.operation, 'layout');
 });
 
@@ -130,4 +134,182 @@ test('VP02: late mount ACK не возвращает unmounted instance пове
   } finally {
     current.unmount();
   }
+});
+
+test('VP03: оповещение синхронно скрывает guest и закрытие возвращает текущую страницу', async (t) => {
+  const calls: Record<string, unknown>[] = [];
+
+  window.grigdeskBrowser = {
+    invoke: async (request) => {
+      calls.push(request as Record<string, unknown>);
+
+      return {};
+    },
+    hide: (request) => {
+      calls.push(request);
+
+      return true;
+    },
+    subscribe: () => () => undefined,
+    subscribeIntent: () => () => undefined,
+  };
+
+  const wrapper = mount(fixture.BrowserViewport, { attachTo: document.body });
+
+  t.after(() => {
+    wrapper.unmount();
+    fixture.dismissToast('viewport-toast');
+  });
+  await flushPromises();
+  assert.equal(calls.at(-1)!.operation, 'layout');
+  fixture.showToast({
+    id: 'viewport-toast',
+    title: 'Нужен ответ',
+    durationMs: 0,
+  });
+  assert.equal(calls.at(-1)!.operation, 'hide');
+
+  const count = calls.length;
+
+  await flushPromises();
+  assert.equal(calls.length, count);
+  fixture.dismissToast('viewport-toast');
+  await flushPromises();
+  assert.equal(calls.at(-1)!.operation, 'layout');
+  assert.equal(calls.filter((item) => item.operation === 'viewport-mount').length, 1);
+});
+
+test('VP04: меню и dock сохраняют кадр, вложенный слой его не стирает', async (t) => {
+  const calls: Record<string, unknown>[] = [];
+
+  window.grigdeskBrowser = {
+    invoke: async (request) => {
+      calls.push(request as Record<string, unknown>);
+
+      return {};
+    },
+    hide: (request) => {
+      calls.push(request);
+
+      return true;
+    },
+    cover: (request) => {
+      calls.push(request);
+
+      return 'ZnJhbWU=';
+    },
+    subscribe: () => () => undefined,
+    subscribeIntent: () => () => undefined,
+  };
+
+  const wrapper = mount(fixture.BrowserViewport, { attachTo: document.body });
+
+  t.after(() => wrapper.unmount());
+  await flushPromises();
+
+  const dock = fixture.registerUiLayer('preview-dock', { name: 'dock', close: () => true });
+
+  t.after(() => dock.unregister());
+  assert.equal(calls.at(-1)!.operation, 'cover', 'native скрывается в том же уведомлении stack');
+  await nextTick();
+  assert.equal(wrapper.find('img').attributes('src'), 'data:image/jpeg;base64,ZnJhbWU=');
+
+  const menu = fixture.registerUiLayer('preview-menu', { name: 'popover', close: () => true });
+
+  t.after(() => menu.unregister());
+  window.dispatchEvent(new Event('resize'));
+  await flushPromises();
+  assert.equal(calls.filter((item) => item.operation === 'cover').length, 1);
+  assert.equal(wrapper.find('img').exists(), true);
+  menu.unregister();
+  await flushPromises();
+  assert.equal(wrapper.find('img').exists(), true);
+  assert.equal(calls.at(-1)!.operation, 'cover');
+  dock.unregister();
+  await flushPromises();
+  assert.equal(wrapper.find('img').exists(), false);
+  assert.equal(calls.at(-1)!.operation, 'layout');
+});
+
+test('VP05: скрытие документа очищает кадр, новая вкладка не наследует подложку', async (t) => {
+  window.grigdeskBrowser = {
+    invoke: async () => ({}),
+    hide: () => true,
+    cover: () => 'ZnJhbWU=',
+    subscribe: () => () => undefined,
+    subscribeIntent: () => () => undefined,
+  };
+
+  const wrapper = mount(fixture.BrowserViewport, { attachTo: document.body });
+
+  await flushPromises();
+
+  const layer = fixture.registerUiLayer('preview-hidden', { name: 'popover', close: () => true });
+
+  t.after(() => layer.unregister());
+  await nextTick();
+  assert.equal(wrapper.find('img').exists(), true);
+  Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+  document.dispatchEvent(new Event('visibilitychange'));
+  await nextTick();
+  assert.equal(wrapper.find('img').exists(), false);
+  wrapper.unmount();
+  Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  delete window.grigdeskBrowser.cover;
+
+  const current = mount(fixture.BrowserViewport, { attachTo: document.body });
+
+  t.after(() => current.unmount());
+  await flushPromises();
+  assert.equal(current.find('img').exists(), false);
+});
+
+test('VP06: повторное меню до ACK layout снова скрывает guest и сохраняет кадр', async (t) => {
+  let holdLayout = false;
+  let finishLayout = () => {};
+  let covers = 0;
+
+  window.grigdeskBrowser = {
+    invoke: async (request) => {
+      if ((request as { operation: string }).operation === 'layout' && holdLayout) {
+        await new Promise<void>((resolve) => {
+          finishLayout = resolve;
+        });
+      }
+
+      return {};
+    },
+    hide: () => true,
+    cover: () => {
+      covers += 1;
+
+      return covers === 1 ? 'ZnJhbWU=' : null;
+    },
+    subscribe: () => () => undefined,
+    subscribeIntent: () => () => undefined,
+  };
+
+  const wrapper = mount(fixture.BrowserViewport, { attachTo: document.body });
+
+  t.after(() => wrapper.unmount());
+  await flushPromises();
+
+  const first = fixture.registerUiLayer('preview-first', { name: 'popover', close: () => true });
+
+  await nextTick();
+  holdLayout = true;
+  first.unregister();
+  await flushPromises();
+
+  const next = fixture.registerUiLayer('preview-next', { name: 'popover', close: () => true });
+
+  t.after(() => next.unregister());
+  assert.equal(covers, 2, 'новое меню отменяет уже отправленный layout');
+  finishLayout();
+  await flushPromises();
+  assert.equal(wrapper.find('img').attributes('src'), 'data:image/jpeg;base64,ZnJhbWU=');
+  holdLayout = false;
+  next.unregister();
+  await flushPromises();
+  assert.equal(wrapper.find('img').exists(), false);
 });

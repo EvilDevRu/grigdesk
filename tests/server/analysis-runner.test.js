@@ -58,7 +58,7 @@ function runnerConfig(root, extra = {}) {
 function runnerDeps(overrides = {}) {
   return {
     claudeAuth: { env: () => process.env },
-    b24: {
+    tracker: {
       async taskDetail() { return { title: 'Demo | задача', description: '' }; },
       async taskPageData() { return { comments: [] }; },
     },
@@ -145,7 +145,7 @@ test('каждый запуск берёт выбранные provider/model/eff
         GRIGDESK_TEST_ANALYSIS_JSON: legacyJson,
       }),
     },
-    b24: {
+    tracker: {
       async taskDetail() { return { title: 'Demo | задача', description: '' }; },
       async taskPageData() { return { comments: [] }; },
     },
@@ -528,7 +528,7 @@ async function localAnalysis(t) {
   const analyzer = new Analyzer({
     config,
     ...runnerDeps({
-      b24: {
+      tracker: {
         async taskDetail() {
           portals.push('detail');
 

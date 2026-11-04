@@ -39,17 +39,18 @@ function isPlugin(value: unknown): value is PluginCard {
     return false;
   }
 
-  return ['version', 'description', 'category', 'web', 'serverError'].every((key) => (
+  return ['version', 'description', 'category', 'icon', 'serverError'].every((key) => (
     value[key] == null || typeof value[key] === 'string'
   )) && ['system', 'needsRestart'].every((key) => value[key] == null || typeof value[key] === 'boolean')
     && (value.nav == null || (isRecord(value.nav)
-      && ['path', 'label', 'icon', 'group'].every((key) => (
+      && ['path', 'label', 'group'].every((key) => (
         value.nav && isRecord(value.nav) && (value.nav[key] == null || typeof value.nav[key] === 'string')
       )) && (value.nav.order == null || typeof value.nav.order === 'number')))
     && (value.settings == null || (Array.isArray(value.settings) && value.settings.every(isRecord)))
     && (value.values == null || isRecord(value.values))
     && (value.placements == null || isPlacements(value.placements))
-    && (value.webModule == null || isPluginModuleDescriptor(value.id, value.webModule));
+    && (value.entrypoints == null || isRecord(value.entrypoints)
+      && (value.entrypoints.web == null || isPluginModuleDescriptor(value.id, value.entrypoints.web)));
 }
 
 /**
@@ -139,9 +140,9 @@ export function normalizeNavItem(plugin: PluginCard): NavItem | null {
 
   return {
     id: plugin.id,
-    to: !plugin.system && (plugin.web || plugin.webModule) ? pluginPageRoute(plugin.id) : plugin.nav.path,
+    to: !plugin.system && plugin.entrypoints?.web ? pluginPageRoute(plugin.id) : plugin.nav.path,
     label: plugin.nav.label,
-    icon: plugin.nav.icon || 'plugin',
+    icon: plugin.icon || '',
     group,
     order: Number.isFinite(order) ? order : Number.MAX_SAFE_INTEGER,
   };
@@ -185,25 +186,14 @@ export const usePluginsStore = defineStore('plugins', {
     dockNav(): NavItem[] {
       return this.navItems.filter((item) => item.group === 'dock');
     },
-    // Страницы пользовательских плагинов: включённые, со своей папкой web и пунктом
-    // навигации. Из них реестр панелей собирает инструменты рейки.
-    webPages: (s) => s.list
-      .filter((p) => p.enabled && !p.system && p.web && p.nav)
-      .map((p) => ({
-        id: p.id,
-        src: p.web!,
-        label: p.nav!.label || p.name,
-        icon: p.nav!.icon || 'plugin',
-        order: typeof p.nav!.order === 'number' ? p.nav!.order : Number.MAX_SAFE_INTEGER,
-        group: NAV_GROUPS.includes(p.nav!.group) ? p.nav!.group : 'rail',
-      })),
     modulePages: (s) => s.list
-      .filter((p) => p.enabled && !p.system && p.webModule && p.nav)
+      .filter((p) => p.enabled && !p.system && p.entrypoints?.web && p.nav
+        && p.compatibility?.status !== 'incompatible' && p.contributes?.panels?.length)
       .map((p) => ({
         id: p.id,
-        descriptor: p.webModule!,
+        descriptor: p.entrypoints!.web!,
         label: p.nav!.label || p.name,
-        icon: p.nav!.icon || 'plugin',
+        icon: p.icon || '',
         order: typeof p.nav!.order === 'number' ? p.nav!.order : Number.MAX_SAFE_INTEGER,
       })),
     byId: (s) => (id: string) => s.list.find((p) => p.id === id) || null,

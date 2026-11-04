@@ -90,7 +90,7 @@ async function shelfFixture(t, ids = ['11', '99']) {
     async get(url) {
       h.calls.push({ method: 'GET', url });
 
-      return url === '/api/b24/task-shelf'
+      return url === '/api/tracker/task-shelf'
         ? structuredClone(state)
         : { title: 'Полная карточка', group_name: 'Проект' };
     },
@@ -190,7 +190,7 @@ test('TWS-01: полка карточки не ходит в портал и н�
   assert.equal(await store.load(true, { silent: true }), true);
   assert.equal(store.isOnShelf('11'), true);
   assert.deepEqual(store.pending, {});
-  assert.deepEqual(h.calls.filter((call) => /^\/api\/b24\/task\//.test(call.url)), []);
+  assert.deepEqual(h.calls.filter((call) => /^\/api\/tracker\/task\//.test(call.url)), []);
   assert.deepEqual(h.alerts, []);
   assert.equal(h.calls.filter((call) => call.method === 'PUT' && call.url.endsWith('/11')).length, 0);
   assert.deepEqual(channels.flatMap((channel) => channel.posted), [
@@ -198,6 +198,7 @@ test('TWS-01: полка карточки не ходит в портал и н�
       version: 1,
       type: 'shelf-acknowledge',
       taskId: '11',
+      source: 'tracker',
     },
   ]);
 });

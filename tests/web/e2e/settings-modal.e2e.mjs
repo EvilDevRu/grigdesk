@@ -40,7 +40,7 @@ function findFieldMisalignments(modal) {
   });
   const hotkeys = [...modal.querySelectorAll('.settings-hotkey-row')].flatMap((row) => {
     const label = row.querySelector('.settings-hotkey-label');
-    const title = label.getBoundingClientRect();
+    const title = row.querySelector('.settings-hotkey-description').getBoundingClientRect();
     const combo = row.querySelector('kbd').getBoundingClientRect();
     const hint = row.querySelector('small');
 
@@ -49,7 +49,10 @@ function findFieldMisalignments(modal) {
     }
 
     const axis = Math.abs(title.top + title.height / 2 - combo.top - combo.height / 2);
-    const hintBelow = !hint || hint.getBoundingClientRect().top >= Math.max(title.bottom, combo.bottom);
+    const name = label.getBoundingClientRect();
+    const note = hint?.getBoundingClientRect();
+    const hintBelow = !note || Math.abs(note.left - name.left) <= 1
+      && Math.abs(note.top - name.bottom - 2) <= 1;
 
     return axis > 1 || !hintBelow ? [{
       label: label.textContent.trim(),
@@ -115,7 +118,6 @@ test('UI00: общий модал на изолированном браузер
 
   const fixture = await startSettingsBrowser(t, {
     '/api/settings/prefs': data.prefs,
-    '/api/settings/b24': data.b24,
     '/api/system/launcher': data.launcher,
     '/api/system/server': data.server,
     '/api/system/version': data.release,
@@ -127,6 +129,11 @@ test('UI00: общий модал на изолированном браузер
       devices: [],
     },
     '/api/settings/speech': data.speech,
+    '/api/settings/speech/installation': {
+      managed: true,
+      installed: true,
+      job: null,
+    },
     '/api/plugins': data.plugins,
     '/api/plugin-catalog': {
       state: 'unconfigured',
@@ -151,7 +158,7 @@ test('UI00: общий модал на изолированном браузер
     'interface.behavior', 'interface.notifications', 'interface.shortcuts', 'agents.models',
     'automation.chats', 'automation.context', 'automation.launch', 'automation.monitoring',
     'automation.arbiter', 'system.diagnostics',
-    'speech.dictation', 'speech.video', 'speech.language', 'speech.models', 'speech.advanced',
+    'speech.dictation',
   ]) {
     await fixture.page.evaluate((id) => window.settingsFixture.settings.selectPage(id), pageId);
 
@@ -218,7 +225,7 @@ test('UI00: общий модал на изолированном браузер
   }
 
   for (const pageId of [
-    'connections.b24', 'connections.devices',
+    'connections.devices',
     'system.startup', 'system.updates', 'system.processes',
   ]) {
     await fixture.page.evaluate((id) => window.settingsFixture.settings.selectPage(id), pageId);
@@ -285,6 +292,11 @@ async function geometryFixture(t) {
       return data.prefs;
     },
     '/api/settings/speech': data.speech,
+    '/api/settings/speech/installation': {
+      managed: true,
+      installed: true,
+      job: null,
+    },
     '/api/providers': data.providers,
     '/api/providers/usage': { usage: {} },
     '/api/providers/fixture/settings/catalog': native,

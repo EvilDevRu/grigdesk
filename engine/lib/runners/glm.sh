@@ -18,13 +18,36 @@ _runner_glm_node() {
   printf '%s\n' "$node"
 }
 
+# Коды отказа helper-а, означающие несовместимость ПОСТАВКИ: закреплённый движок
+# (glm.sh + glmRuntimeInfo.mts одного пакета) не может работать с фактическим ELF
+# DSH — пересборка ELF или смена ревизий профиля/политики при живой попытке.
+# Такие отказы терминальны для повтора пробы, но полностью обратимы сменой пакета
+# движка, поэтому раннер отдаёт структурный маркер для перепривязки попытки.
+_runner_glm_supply_incompatible() {
+  case "$1" in
+    deepseek_binary_incompatible|glm_runtime_incompatible|glm_plugin_missing) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Metadata helper без ключа модели, settings home и модельного вызова. Режим доступа
 # сверяется по допуску ELF: Coding Plan и неизвестный режим дают штатный код 4.
+# При отказе helper-а его код причины сохраняется: несовместимость поставки печатается
+# отдельным маркером RUNNER_SUPPLY_INCOMPATIBLE, а исходный stderr проходит наружу.
 _runner_glm_runtime_info() {
-  local node rc
+  local node rc err_file code
   node=$(_runner_glm_node) || return 4
-  factory_exec provider "$node" "$FACTORY_HOME/../server/scripts/glmRuntimeInfo.mts" "$@"
+  err_file=$(mktemp "${TMPDIR:-/tmp}/glm-runtime-info.XXXXXX") || return 4
+  factory_exec provider "$node" "$FACTORY_HOME/../server/scripts/glmRuntimeInfo.mts" "$@" 2>"$err_file"
   rc=$?
+  if [[ "$rc" != 0 && "$rc" != 126 ]]; then
+    code=$(grep -oE '"code":"[a-z_]+"' "$err_file" | head -1 | cut -d'"' -f4)
+    if _runner_glm_supply_incompatible "$code"; then
+      printf 'RUNNER_SUPPLY_INCOMPATIBLE=glm\n' >&2
+    fi
+  fi
+  cat -- "$err_file" >&2
+  rm -f -- "$err_file"
   if [[ "$rc" == 0 || "$rc" == 126 ]]; then
     return "$rc"
   fi

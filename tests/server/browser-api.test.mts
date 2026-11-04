@@ -12,6 +12,7 @@ import { createBrowserAccess } from '../../server/src/lib/browser/browserAccess.
 import { createBrowserOwners } from '../../server/src/lib/browser/browserOwners.ts';
 import browserModule from '../../server/src/modules/browser/index.ts';
 import authPlugin from '../../server/src/plugins/auth.ts';
+import { createBrowserHostHttp } from '../../web/src/shared/browser/browserHostHttp.ts';
 
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = require('fastify');
@@ -75,6 +76,34 @@ async function fixture(t: TestContext) {
   }
   };
 }
+
+test('API-host-delete: HTTP клиента снимает host без JSON body и освобождает регистрацию', async (t) => {
+  const f = await fixture(t);
+  const request = createBrowserHostHttp({
+    unauthorized: () => assert.fail('session fixture авторизована'),
+    fetch: async (input, init) => {
+      const headers = Object.fromEntries(new Headers(init?.headers));
+      const response = await f.app.inject({
+        method: init?.method,
+        url: String(input),
+        headers: { ...headers, cookie: f.cookie },
+        ...(init?.body === undefined ? {} : { payload: init.body }),
+      });
+
+      return new Response(response.body, { status: response.statusCode });
+    },
+  });
+  const host = await request('POST', '/hosts', {}, null) as {
+    id: string;
+    token: string;
+    hostEpoch: number;
+    leaseMs: number;
+  };
+
+  assert.deepEqual(await request('DELETE', '/hosts/' + host.id, undefined, host), { accepted: true });
+  assert.equal(f.broker.available(), false);
+  assert.ok(await request('POST', '/hosts', {}, null), 'новый host не ждёт истечения чужого lease');
+});
 
 test('API01: 401/CLI/internal отказ, одна session host и явный takeover', async (t) => {
   const f = await fixture(t);

@@ -55,7 +55,8 @@
 
 - Web-профиль без строки `web` не создаёт сессию: штатный preset падает с
   `agent-preset/invalid` (`tool-web` ждёт сервис `web`). Строки `web`, `web-search-deepseek`,
-  `web-fetch-http` остаются, а инструменты `web_search` и `web_fetch` запрещает политика hook.
+  `web-fetch-http` остаются. Начиная с политики v4, `web_search` и `web_fetch` разрешены;
+  доступность провайдера и сетевые ограничения описаны в [контракте веб-инструментов](glm-web-tools.md).
 - Инструменты web-профиля в запросе модели: `ask_user_question, bash, create_goal, edit,
   exit_plan_mode, get_goal, glob, grep, interrupt_agent, job_kill, job_list, job_output,
   list_agents, present, ralph, read, read_image, send_message, skill, subagent, subagent_fork,

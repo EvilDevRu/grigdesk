@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, lstat, symlink, mkdir, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, lstat, symlink, mkdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -66,4 +66,18 @@ test('E02: symlink parent и параллельное превышение кв�
 
   assert.equal(results.filter((item) => item.status === 'fulfilled').length, 32);
   assert.equal(results.filter((item) => item.status === 'rejected').length, 1);
+});
+
+test('E03: прежняя общая папка снимков становится приватной до записи evidence', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'browser-evidence-existing-'));
+  const directory = path.join(root, 'browser-workspace');
+
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(directory);
+  await chmod(directory, 0o775);
+
+  const result = await createBrowserEvidence(root)(proof, shot) as { imagePath: string };
+
+  assert.equal((await lstat(directory)).mode & 0o777, 0o700);
+  assert.equal(await readFile(result.imagePath, 'utf8'), 'jpeg fixture');
 });

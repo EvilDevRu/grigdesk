@@ -80,9 +80,17 @@ export const PLUGIN_INSTALL_ERRORS: Record<string, { status: number; message: st
     status: 422,
     message: "id в новой версии отличается от установленного плагина.",
   },
+  manifest_incompatible: {
+    status: 422,
+    message: 'Старый формат плагина несовместим. Переустановите пакет с манифестом v1.',
+  },
   api_unsupported: {
     status: 422,
-    message: "Плагин рассчитан на другую версию контракта (api). Этот GrigDesk поддерживает api 1 и 2.",
+    message: "Плагин рассчитан на другую версию контракта (api). Этот GrigDesk поддерживает api 1.",
+  },
+  contract_unsupported: {
+    status: 422,
+    message: 'Драйвер рассчитан на другую версию контракта трекера.',
   },
   version_invalid: {
     status: 422,
@@ -155,6 +163,10 @@ export const PLUGIN_INSTALL_ERRORS: Record<string, { status: number; message: st
   not_managed: {
     status: 404,
     message: "Плагин установлен вручную и не связан с источником.",
+  },
+  package_not_found: {
+    status: 404,
+    message: 'Установленный пакет не найден.',
   },
   no_previous: {
     status: 409,

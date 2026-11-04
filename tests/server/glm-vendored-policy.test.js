@@ -172,7 +172,7 @@ async function exists(file) {
   return fs.stat(file).then(() => true, () => false);
 }
 
-test('настоящий запрещённый инструмент не выполняется, счётчик эффекта 0', async (t) => {
+test('настоящие веб-инструменты проходят native gate, локальный HTTP остаётся закрыт', async (t) => {
   let hits = 0;
   const counter = createServer((_request, response) => {
     hits += 1;
@@ -183,12 +183,19 @@ test('настоящий запрещённый инструмент не вып
   t.after(() => new Promise((resolve) => counter.close(resolve)));
 
   const url = `http://127.0.0.1:${counter.address().port}/effect`;
-  const f = await fixture(t, { respond: scripted([['web_fetch', { url }]]) });
-  const turn = await f.events('forbidden');
-  const entry = turn.events.find((event) => event.type === 'grigdesk/glm-policy')?.data;
+  const f = await fixture(t, { respond: scripted([
+    ['web_fetch', { url }],
+    ['web_search', { query: 'Harness documentation' }],
+  ]) });
+  const turn = await f.events('web-tools');
+  const entries = turn.events.filter((event) => event.type === 'grigdesk/glm-policy')
+    .map((event) => event.data);
 
-  assert.equal(entry.name, 'web_fetch');
-  assert.equal(entry.decision, 'deny');
+  assert.deepEqual(entries.map(({ name, decision, kind }) => [name, decision, kind]), [
+    ['web_fetch', 'allow', 'read'],
+    ['web_search', 'allow', 'search'],
+  ]);
+  assert.equal(turn.turnEnd.data.reason.kind, 'completed');
   assert.equal(hits, 0);
 });
 

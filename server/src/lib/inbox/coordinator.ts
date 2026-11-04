@@ -201,7 +201,7 @@ const MAX_POLICY_STRING_BYTES = 2048;
 const BATCH_KEYS = ['activationEpoch', 'source', 'messages', 'policy', 'truncated'];
 const SOURCE_KEYS = ['id', 'title', 'threadId'];
 const POLICY_KEYS = ['scopeId', 'project', 'kind', 'b24', 'autoTask'];
-const B24_KEYS = ['groupId', 'responsibleId', 'priority'];
+const TRACKER_KEYS = ['groupId', 'responsibleId', 'priority'];
 const AUTO_KEYS = ['enabled', 'minConfidence', 'maxPerDay'];
 
 const clone = <Value>(value: Value): Value => structuredClone(value);
@@ -341,22 +341,26 @@ function nullableSafeInteger(value: unknown, where: string): number | null {
   return value as number;
 }
 
+/**
+ * Канал отдаёт политику с проверенными границами проекта и полей задачи.
+ * Название внутреннего типа не меняет сохранённую схему channel contract.
+ */
 function validatePolicy(source: unknown, where: string): InboxItemPolicy {
   exactObject(source, POLICY_KEYS, where);
 
   const raw = source as Payload;
 
-  exactObject(raw.b24, B24_KEYS, `${where}.b24`);
+  exactObject(raw.b24, TRACKER_KEYS, `${where}.b24`);
   exactObject(raw.autoTask, AUTO_KEYS, `${where}.autoTask`);
 
-  const b24 = raw.b24 as Payload;
+  const tracker = raw.b24 as Payload;
   const autoTask = raw.autoTask as Payload;
   const scopeId = assertNativeSegment(raw.scopeId, `${where}.scopeId`);
   const project = boundedString(raw.project, `${where}.project`);
   const kind = boundedString(raw.kind, `${where}.kind`, { maxBytes: 80 });
-  const groupId = nullableSafeInteger(b24.groupId, `${where}.b24.groupId`);
-  const responsibleId = nullableSafeInteger(b24.responsibleId, `${where}.b24.responsibleId`);
-  const priority = b24.priority;
+  const groupId = nullableSafeInteger(tracker.groupId, `${where}.b24.groupId`);
+  const responsibleId = nullableSafeInteger(tracker.responsibleId, `${where}.b24.responsibleId`);
+  const priority = tracker.priority;
 
   if (priority !== null && ![0, 1, 2].includes(priority as number)) {
     fail('invalid_channel_contract', `${where}.b24.priority: бывает null|0|1|2.`);

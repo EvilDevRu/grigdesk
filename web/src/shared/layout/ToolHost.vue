@@ -8,10 +8,9 @@
                   :pressed="presentation === 'dock' && presentedTool === item.id"
                   @click="clickRail(item)">
       <span class="rail-mark">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path :d="navIcon(item.icon) || NAV_ICONS.plugin" />
-        </svg>
+        <PluginIcon v-if="item.icon.startsWith('/')" :src="item.icon" />
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   aria-hidden="true"><path :d="navIconPath(item.icon)" /></svg>
         <NavigationCount :badge="toolBadges[item.id]" />
       </span>
       <span v-if="item.id === 'terminal' && ['open', 'connecting'].includes(String(dock.runtime.terminal?.status))"
@@ -49,6 +48,8 @@
 </template>
 
 <script setup lang="ts">
+import PluginIcon from '../PluginIcon.vue';
+
 import { toolWindowText } from '../tools/toolWindowMessages.ts';
 import { getToolWindowCoordinator } from '../../stores/toolWindows.ts';
 import { useShellStore } from '../../stores/shell.ts';
@@ -69,7 +70,7 @@ import { useDockStore, MIN_DOCK_WIDTH } from '../../stores/dock.ts';
 import { usePluginsStore } from '../../stores/plugins.ts';
 import { useTaskShelfStore } from '../../stores/taskShelf.ts';
 import { useUiContextSource } from '../../composables/useUiContextSource.ts';
-import { NAV_ICONS } from '../navIcons.ts';
+import { navIconPath } from '../navIcons.ts';
 import { toolsOf, toolById, toolAvailability } from '../tools/registry.ts';
 import { useDockViewport } from '../tools/viewport.ts';
 import { comboFromEvent, formatCombo } from '../hotkeys/combo.ts';
@@ -145,10 +146,6 @@ const toolBadges = computed<Record<string, ReturnType<typeof shelfNavBadge>>>(()
  * Подсказка и доступное имя называют точное число с причинами внимания.
  * Горячая клавиша остаётся частью того же описания кнопки инструмента.
  */
-function navIcon(name: string): string | undefined {
-  return Object.hasOwn(NAV_ICONS, name) ? NAV_ICONS[name as keyof typeof NAV_ICONS] : undefined;
-}
-
 function railTitle(item: ToolMeta) {
   const combo = formatCombo(hotkeys.comboOf(item.id));
   const detail = toolBadges.value[item.id]?.title;

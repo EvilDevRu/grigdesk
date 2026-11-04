@@ -1,3 +1,6 @@
+import { constants } from 'node:fs';
+import { factoryTicketHash } from '../lib/factoryTaskSources.ts';
+import { readContainedText } from '../../../shared/node/readContainedText.ts';
 // FactoryStateAdapter — единственная точка чтения состояния фабрики.
 // Изолирует хрупкий файловый источник (`~/.factory/state`) от остального сервера:
 // читает `tNNNN.pipeline` (реестр), `logs/tNNNN.stages.log` (таймлайн), проверяет
@@ -175,6 +178,36 @@ export class FactoryStateAdapter {
       task: String(task),
       registry: projection,
     });
+  }
+
+  /**
+   * Читает существующий immutable ticket только внутри проверенного control-корня.
+   * Проверка режима и inode запрещает подмену изменяемым staging-файлом или ссылкой.
+   */
+  async readTrustedTicketProof(task: string | number) {
+    const trusted = await this.readTrustedAttempt(task);
+    const relative = `protocol-v2/tasks/t${task}/attempts/${trusted.attempt}/artifacts/ticket.json`;
+
+    if (!this.controlDir) {
+      throw new Error('Не задан control root');
+    }
+
+    const content = await readContainedText(this.controlDir, relative, 1048576);
+    const file = await fsp.open(
+      path.join(this.controlDir, relative), constants.O_RDONLY | constants.O_NOFOLLOW,
+    );
+
+    try {
+      const stat = await file.stat();
+
+      if (!stat.isFile() || (stat.mode & 0o777) !== 0o400 || stat.nlink !== 1 || content === null) {
+        throw new Error('Тикет попытки не является immutable файлом');
+      }
+
+      return { ...trusted, ticketHash: factoryTicketHash(JSON.parse(content)) };
+    } finally {
+      await file.close();
+    }
   }
 
   /** Перед destructive lifecycle mutable `.env` обязан точно совпасть с pin профиля. */

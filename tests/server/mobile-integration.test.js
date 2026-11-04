@@ -23,7 +23,7 @@ const command = (seed, path, body, key) =>
 function decodeAll(kind, value) {
   decodeContract(kind, value);
   decodeApp(kind, value);
-  decodeBaseline(kind, value);
+  decodeBaseline(kind.replace(/^tracker-/u, 'b24-'), value);
 }
 
 test('MC-39: реальные auth/chat/mobile/factory/B24 и HTTPS ответы проходят v1', async (t) => {
@@ -39,9 +39,9 @@ test('MC-39: реальные auth/chat/mobile/factory/B24 и HTTPS ответы
     ['/tasks', 'tasks'],
     ['/tasks/7', 'task'],
     ['/tasks/7/plan', 'plan'],
-    ['/b24/tasks', 'b24-tasks'],
-    ['/b24/tasks/7', 'b24-task'],
-    ['/b24/tasks/7/launch-options', 'launch-options'],
+    ['/tracker/tasks', 'tracker-tasks'],
+    ['/tracker/tasks/7', 'tracker-task'],
+    ['/tracker/tasks/7/launch-options', 'launch-options'],
   ]) {
     const response = await requestMobile(seed, '/api/mobile/v1' + path);
 

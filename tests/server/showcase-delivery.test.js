@@ -307,7 +307,7 @@ test('каналы честно объявляют, чего им не хват�
     '../../server/src/lib/showcase/deliveryChannels.ts'
   );
   const statuses = deliveryChannelStatuses({
-    b24: { uploadDiskFile: async () => ({ id: 'file-1' }) },
+    tracker: { uploadDiskFile: async () => ({ id: 'file-1' }) },
     telegramConnected: () => true,
   });
 
@@ -320,7 +320,7 @@ test('каналы честно объявляют, чего им не хват�
 
   // Неготовый канал отказывает ДО загрузки: файл, повисший на диске получателя
   // без прикрепления, хуже, чем неначатая отправка.
-  const sender = senderFor('b24', { b24: { uploadDiskFile: async () => ({ id: 'file-1' }) } });
+  const sender = senderFor('b24', { tracker: { uploadDiskFile: async () => ({ id: 'file-1' }) } });
 
   await assert.rejects(
     () => sender.upload(

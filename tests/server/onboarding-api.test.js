@@ -279,6 +279,7 @@ test('ONB-AUTH-01: все ручки закрыты до чтения состо
     ['POST', '/start', { expectedRevision: state.revision, mode: 'manual' }],
     ['PATCH', '', {}],
     ['POST', '/advance', {}],
+    ['POST', '/back', {}],
     ['POST', '/dismiss', {}],
     ['POST', '/repository', { dir: '/не-должен-читаться' }],
   ]) {

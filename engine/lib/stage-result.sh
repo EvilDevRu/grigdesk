@@ -40,24 +40,8 @@ if (( stage_flags )) && [[ "${FACTORY_LOOP_ROLE:-}" != lead ]]; then
   exit 2
 fi
 
-# Отказ, в котором не осталось ни одного блокирующего замечания, — это не отказ.
-# Проверяющий сам решил, что всё найденное можно отложить, и держать из-за этого
-# маршрут не за что: исход выпрямляем в done, находки едут отложенным хвостом.
-# Иначе такой вердикт разворачивал бы сборку по замечаниям, чинить которые никто
-# не просил, и упирался бы в no-progress ровно потому, что чинить нечего.
-if [[ "$result" == failed && ${#findings[@]} -gt 0 ]]; then
-  has_blocking=0
-  for raw in "${findings[@]}"; do
-    case "$raw" in
-      deferred:*|anchor:*|reviewed:*|stage:*|stage-closed:*|stage-summary:*) ;;
-      *) has_blocking=1; break ;;
-    esac
-  done
-  if [[ $has_blocking -eq 0 ]]; then
-    result=done
-  fi
-fi
-
+# Не повышаем failed до done по отсутствию блокирующих findings.
+# Противоречивую сдачу отклоняет кодировщик, пока агент ещё может исправить её.
 verdict_b64=$(run_state_verdict_encode "$result" "$failure_owner" "${findings[@]}") || exit
 
 # Предпроверка сдачи профиля — до записи результата, пока агент жив. Хост после

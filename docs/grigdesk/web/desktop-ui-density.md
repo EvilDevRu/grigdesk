@@ -29,7 +29,7 @@ Desktop использует один вид без настройки плот�
 | Control рабочей формы с `data-ui-workspace` | 32 |
 | Плоский toolbar `--toolbar-control-h` | 28 |
 | Действия дока `--tool-dock-action-size` | 30 |
-| Минимум шапки чатов `--chat-head-h` | 80 |
+| Минимум шапки чатов `--chat-head-h` | 80, на touch 101 |
 | Минимум строки чата `--chat-list-row-h` | 56 |
 | Аватар чата `--chat-avatar-size` | 32 |
 | Поля страницы `--page-gutter` | 16 |

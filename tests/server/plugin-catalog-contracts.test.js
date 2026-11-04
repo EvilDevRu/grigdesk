@@ -76,20 +76,17 @@ test('CAT-D2: повреждённый элемент не публикует ч
 });
 
 
-test('CAT-D3-API2-OPT-IN: mixed index/detail/response требуют явного maximumApi=2', () => {
-  const { modern } = moduleCatalogFixture();
-  const response = catalogResponse(modern);
+test('CAT-D3-MIXED: единый v1 принимает api1 и api2 без выбора режима', () => {
+  const data = moduleCatalogFixture();
+  const response = catalogResponse(data);
 
-  assert.deepEqual(decodeCatalogIndex(modern.index, 2), modern.index);
-  assert.deepEqual(decodeCatalogDetail(modern.detail, 2), modern.detail);
-  assert.deepEqual(decodeCatalogResponse(response, 2), response);
-  assert.throws(() => decodeCatalogIndex(modern.index), /Каталог/u);
-  assert.throws(() => decodeCatalogDetail(modern.detail), /Каталог/u);
-  assert.throws(() => decodeCatalogResponse(response), /Каталог/u);
+  assert.deepEqual(decodeCatalogIndex(data.index), data.index);
+  assert.deepEqual(decodeCatalogDetail(data.detail), data.detail);
+  assert.deepEqual(decodeCatalogResponse(response), response);
 });
 
-test('CAT-D3-STRICT-BARRIER: maximumApi=2 не ослабляет api, SHA, identity и оболочку', () => {
-  const { legacy } = moduleCatalogFixture();
+test('CAT-D3-STRICT-BARRIER: смешанный каталог сохраняет проверку api, SHA, identity и оболочки', () => {
+  const fixture = moduleCatalogFixture();
   const mutations = [
     (data) => {
       data.index.plugins[0].latest.api = 3;
@@ -106,14 +103,68 @@ test('CAT-D3-STRICT-BARRIER: maximumApi=2 не ослабляет api, SHA, iden
   ];
 
   for (const mutate of mutations) {
-    const data = structuredClone(legacy);
+    const data = structuredClone(fixture);
 
     mutate(data);
-    assert.throws(() => decodeCatalogIndex(data.index, 2), /Каталог/u);
-    assert.throws(() => decodeCatalogDetail(data.detail, 2), /Каталог/u);
-    assert.throws(() => decodeCatalogResponse(catalogResponse(data), 2), /Каталог/u);
+    assert.throws(() => decodeCatalogIndex(data.index), /Каталог/u);
+    assert.throws(() => decodeCatalogDetail(data.detail), /Каталог/u);
+    assert.throws(() => decodeCatalogResponse(catalogResponse(data)), /Каталог/u);
   }
 
-  assert.throws(() => decodeCatalogResponse({ ...catalogResponse(legacy), state: 'unavailable' }, 2),
+  assert.throws(() => decodeCatalogResponse({ ...catalogResponse(fixture), state: 'unavailable' }),
     /Каталог/u);
 });
+
+
+test('V1-BARRIER-index-no-media: index отбрасывает media, detail сохраняет исходный README', () => {
+  const { index, detail } = catalogFixture();
+  const original = structuredClone(index);
+
+  index.plugins[0].icon = { path: 'assets/icon.png' };
+  index.plugins[0].gallery = { screenshots: ['assets/screen.png'] };
+  assert.deepEqual(decodeCatalogIndex(index), original);
+  assert.equal(decodeCatalogDetail(detail).plugin.readme, detail.plugin.readme);
+});
+
+test('CAT-V1-MEDIA: detail сохраняет проверенные icon/gallery с SHA публикации', () => {
+  const { detail, version } = catalogFixture();
+  const media = {
+    path: 'assets/icon.png',
+    sha: version.sha,
+    mediaType: 'image/png',
+    bytes: 1024
+  };
+
+  detail.plugin.icon = media;
+  detail.plugin.gallery = { screenshots: [{ ...media, path: 'assets/screen.png' }] };
+
+  const decoded = decodeCatalogDetail(detail);
+
+  assert.deepEqual(decoded.plugin.icon, media);
+  assert.deepEqual(decoded.plugin.gallery, detail.plugin.gallery);
+  assert.equal(decoded.plugin.readme, detail.plugin.readme);
+});
+
+for (const [label, icon, screenshots] of [
+  ['родительский путь', { path: '../icon.png' }, []],
+  ['чужой SHA', { sha: 'b'.repeat(40) }, []],
+  ['SVG MIME', { mediaType: 'image/svg+xml' }, []],
+  ['SVG расширение', { path: 'assets/icon.svg' }, []],
+  ['icon size+1', { bytes: 256 * 1024 + 1 }, []],
+  ['7 screenshots', {}, Array.from({ length: 7 }, (_, i) => ({ path: `assets/${i}.png` }))],
+  ['screenshot size+1', {}, [{ path: 'assets/screen.png', bytes: 4 * 1024 * 1024 + 1 }]],
+]) {
+  test(`CAT-V1-MEDIA: ${label} отвергается decoder до построения URL`, () => {
+    const { detail, version } = catalogFixture();
+    const media = {
+      path: 'assets/icon.png',
+      sha: version.sha,
+      mediaType: 'image/png',
+      bytes: 1024,
+    };
+
+    detail.plugin.icon = { ...media, ...icon };
+    detail.plugin.gallery = { screenshots: screenshots.map((item) => ({ ...media, ...item })) };
+    assert.throws(() => decodeCatalogDetail(detail));
+  });
+}

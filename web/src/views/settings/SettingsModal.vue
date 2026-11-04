@@ -131,10 +131,6 @@ onBeforeUnmount(() => settings.dispose('unmount'));
 .settings-heading-icon {
   color: var(--ink-mid);
 }
-.settings-heading h2 {
-  font-size: 15px;
-  font-weight: 600;
-}
 .settings-heading h2, .settings-footer p {
   margin: 0;
 }

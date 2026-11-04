@@ -9,7 +9,7 @@ const FLAT_RULE = new RegExp(
   'u',
 );
 
-test('селекты чата сохраняют прежний плоский skin', () => {
+test('селекты toolbar сохраняют геометрию, а шапка кода — прозрачный фон', () => {
   const source = readFileSync(FIELDS_PATH, 'utf8');
   const flatRule = source.match(FLAT_RULE);
 
@@ -21,7 +21,11 @@ test('селекты чата сохраняют прежний плоский s
   assert.match(declarations, /border:\s*0/u);
   assert.match(declarations, /border-bottom:\s*1px solid transparent/u);
   assert.match(declarations, /border-radius:\s*0/u);
-  assert.match(declarations, /background-color:\s*transparent/u);
+  assert.doesNotMatch(declarations, /background(?:-color)?:/u);
+  assert.match(
+    source,
+    /\.ui-select\[data-context='code-head-select'\]\s*\{\s*background-color:\s*transparent;/u,
+  );
   assert.doesNotMatch(
     source,
     /\.ui-select\[data-context='pipeline-toolbar-select'\]\s*\{/u,

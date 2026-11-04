@@ -84,7 +84,7 @@ export async function reserveTaskNumber(
   config: GrigdeskTasksConfig,
   nextId: string,
   taskIds: string[],
-  b24?: TaskNumberProbe,
+  tracker?: TaskNumberProbe,
 ): Promise<string> {
   const occupied = await occupiedNumbers(config);
 
@@ -107,8 +107,8 @@ export async function reserveTaskNumber(
       continue;
     }
 
-    if (b24?.isConfigured()) {
-      const presence = await b24.probeTaskNumber(id).catch(() => 'unknown');
+    if (tracker?.isConfigured()) {
+      const presence = await tracker.probeTaskNumber(id).catch(() => 'unknown');
 
       if (presence === 'exists') {
         continue;

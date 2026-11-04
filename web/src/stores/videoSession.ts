@@ -887,7 +887,7 @@ export const useVideoSessionStore = defineStore('video-session', {
         // Пустой выбор уезжает как null, а НЕ как 0: нулевой responsibleId портал
         // понимает буквально и отвечает ошибкой о несуществующем исполнителе
         // (docs/grigdesk/b24.md). Пропуск же означает «поставить на владельца сессии».
-        const created: unknown = await api.post('/api/b24/tasks', {
+        const created: unknown = await api.post('/api/tracker/tasks', {
           title: draft.title.trim(),
           description: draft.description,
           // Постановщик: пусто — значит владелец сессии, и `CREATED_BY` порталу не уезжает

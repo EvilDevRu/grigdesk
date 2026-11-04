@@ -2898,6 +2898,20 @@ v2_runner_preflight_stages() (
   fi
 )
 
+# Каждый ли элемент первого CSV-списка входит во второй. Нужна отдельному маркеру
+# несовместимости поставки: миграция закрепления лечит только отказы, целиком
+# перечисленные раннерами с маркером; смесь с прочей недоступностью остаётся
+# общим `runner_preflight_unavailable`.
+_v2_supply_covers_all() {
+  local wanted=$1 have=$2 item
+  [[ -n "$wanted" && -n "$have" ]] || return 1
+  local IFS=,
+  for item in $wanted; do
+    [[ ",$have," == *",$item,"* ]] || return 1
+  done
+  return 0
+}
+
 # Полный опрос остаётся диагностикой профиля, но допуск вычисляется по цепочкам
 # исполняемых узлов с тем же routing_resolve, что использует runtime-диспетчер.
 v2_runner_preflight() {
@@ -3002,6 +3016,21 @@ v2_main() {
         unavailable_runners=$V2_PREFLIGHT_UNAVAILABLE_RUNNERS
       fi
       if [[ -n "$unavailable_runners" ]]; then
+        # Несовместимость поставки отличается от прочей недоступности: закреплённый
+        # движок сам сообщил (маркер раннера), что не может работать с фактическим
+        # CLI/ELF исполнителя. Повтор пробы и ожидание тут бессильны, зато смена
+        # закрепления попытки на текущую поставку лечит причину целиком — поэтому
+        # отдаём отдельный типизированный маркер, по которому GrigDesk перепривязывает
+        # runtime и повторяет resume. Требуем покрытие ВСЕХ недоступных раннеров:
+        # смесь «несовместим + нет ключа» миграцией не лечится и остаётся unavailable.
+        if [[ -n "${PREFLIGHT_SUPPLY_INCOMPATIBLE:-}" ]] \
+           && _v2_supply_covers_all "$unavailable_runners" "$PREFLIGHT_SUPPLY_INCOMPATIBLE"; then
+          preflight_message="runner preflight: закреплённая поставка движка несовместима с $unavailable_runners"
+          v2_log "$preflight_message [FACTORY_ERROR=runner_preflight_incompatible RUNNERS=$unavailable_runners] (код $rc)"
+          printf '%s [FACTORY_ERROR=runner_preflight_incompatible RUNNERS=%s]\n' \
+            "$preflight_message" "$unavailable_runners" >&2
+          return "$rc"
+        fi
         preflight_message="runner preflight не пройден: недоступны $unavailable_runners"
         v2_log "$preflight_message [FACTORY_ERROR=runner_preflight_unavailable RUNNERS=$unavailable_runners] (код $rc)"
         printf '%s [FACTORY_ERROR=runner_preflight_unavailable RUNNERS=%s]\n' \

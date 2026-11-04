@@ -85,6 +85,33 @@ FACTORY_STATUS_FD=7 FACTORY_STAGE_RESULT_CHECK= \
 assert_rc 0 "$?" "empty precheck variable keeps the legacy path"
 exec 7<&-
 
+# Противоречивый отказ нельзя превратить в зелёную сдачу по составу findings.
+# Агент получает причину и может честно назвать недоступный обязательный критерий.
+exec 7<"$token_file"
+run_state_begin "$task" "$stage" run-e 5 "$token"
+output=$(FACTORY_STATUS_FD=7 bash "$result_cmd" \
+  --task "$task" --stage "$stage" --run-id run-e --epoch 5 \
+  --failure-owner environment --finding-deferred 'browser=Обязательная проверка недоступна' \
+  failed 'нет браузера' 2>&1)
+assert_rc 2 "$?" "failed только с deferred отклонён без автоматического done"
+assert_eq running "$(pipeline_store_get "$task" "$stage")" \
+  "противоречивая сдача не записывает успешный результат"
+FACTORY_STATUS_FD=7 bash "$result_cmd" \
+  --task "$task" --stage "$stage" --run-id run-e --epoch 5 \
+  --failure-owner environment --finding 'browser=Обязательная проверка недоступна' \
+  failed 'нет браузера' >/dev/null 2>&1
+assert_rc 0 "$?" "обязательная недоступная проверка сдаётся штатным failed/environment"
+assert_eq failed "$(pipeline_store_get "$task" "$stage")" "критерий не выдаётся за выполненный"
+exec 7<&-
+
+source "$FACTORY_HOME/lib/route-runtime.sh"
+command_result="$TEST_ROOT/command-result.json"
+printf '%s\n' '{"schema":1,"outcome":"failed","comment":"Нет проверки",' \
+  '"failureOwner":"environment","findings":[{"id":"browser","summary":"Нет браузера",' \
+  '"severity":"deferred"}]}' >"$command_result"
+_route_v2_command_result "$command_result" >/dev/null 2>&1
+assert_rc 78 "$?" "доверенная команда тоже не повышает failed с deferred до done"
+
 # --- путь предпроверки назначает движок из хука профиля, а не сам агент ---
 export FACTORY_RUNNERS_DIR="$FACTORY_TESTS_HOME/fakes/runners"
 export FACTORY_PROFILES_DIR="$TEST_ROOT/profiles"

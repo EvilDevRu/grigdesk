@@ -59,3 +59,50 @@ test('BR13-G: queued click не переживает revoke и новый grant 
   await assert.rejects(() => access.invoke('chat:other', { action: 'snapshot', tabId: 'one' }),
     /browser_access_denied/u);
 });
+
+test('BR13-close: heartbeat после native close не отменяет подтверждение закрытия', async () => {
+  const access = createBrowserAccess({
+    generation: () => 1,
+    exists: async () => true,
+    queue: async (_owner, _input, options) => {
+      assert.equal(await options.authorize(), true);
+      access.reconcile([]);
+      assert.equal(await options.authorize(), true, 'ACK закрытой вкладки сохраняет право на ответ');
+      await assert.rejects(() => access.invoke('chat:a', { action: 'snapshot', tabId: 'one' }),
+        /browser_access_denied/u);
+
+      return { ok: true };
+    },
+  });
+
+  access.commitGrant('chat:a', {
+    tabId: 'one',
+    url: 'http://fixture.test/',
+    grantEpoch: 1,
+  });
+  assert.deepEqual(await access.invoke('chat:a', { action: 'close', tabId: 'one' }), { ok: true });
+  await assert.rejects(() => access.invoke('chat:a', { action: 'snapshot', tabId: 'one' }),
+    /browser_access_denied/u);
+});
+
+test('BR13-close-revoke: явный отзыв отменяет ACK даже после исчезновения из heartbeat', async () => {
+  const access = createBrowserAccess({
+    generation: () => 1,
+    exists: async () => true,
+    queue: async (_owner, _input, options) => {
+      access.reconcile([]);
+      access.revoke('one');
+      assert.equal(await options.authorize(), false);
+
+      return { ok: true };
+    },
+  });
+
+  access.commitGrant('chat:a', {
+    tabId: 'one',
+    url: 'http://fixture.test/',
+    grantEpoch: 1,
+  });
+  await assert.rejects(() => access.invoke('chat:a', { action: 'close', tabId: 'one' }),
+    /browser_access_denied/u);
+});

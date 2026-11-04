@@ -1,22 +1,36 @@
 <template>
-  <div class="eff" :class="{ off: disabled }" :data-lvl="model"
-       v-tooltip="hint || effortTooltip">
-    <span class="cap">эффорт</span>
-    <UiDiscreteSlider v-model="sliderIndex" class="eff-slider" :min="0"
-                      :max="Math.max(0, levels.length - 1)" :step="1"
-                      :labels="sliderLabels" :value-text="selectedDescription"
-                      :unselected="idx < 0"
-                      ticks :disabled="disabled" label="Усилие рассуждения" />
-    <span class="val">{{ model || '—' }}</span>
+  <div class="eff" :class="{ off: disabled, 'eff--expanded': expanded }" :data-lvl="model"
+       v-tooltip="expanded ? '' : hint || effortTooltip">
+    <template v-if="expanded">
+      <div class="eff-options" role="group" :aria-label="t('core.chatOptionEffort')"
+           :style="{ gridTemplateColumns: `repeat(${Math.min(levels.length, 3)}, minmax(0, 1fr))` }">
+        <UiButton v-for="level in levels" :key="level" variant="outline"
+                  :tone="model === level ? 'accent' : 'neutral'"
+                  :pressed="model === level" :disabled="disabled"
+                  data-context="chat-effort-level" @click="model = level">
+          {{ level }}
+        </UiButton>
+      </div>
+      <p class="eff-hint">{{ hint || selectedDescription }}</p>
+    </template>
+    <template v-else>
+      <span class="cap">эффорт</span>
+      <UiDiscreteSlider v-model="sliderIndex" class="eff-slider" :min="0"
+                        :max="Math.max(0, levels.length - 1)" :step="1"
+                        :labels="sliderLabels" :value-text="selectedDescription"
+                        :unselected="idx < 0"
+                        thin ticks :disabled="disabled" label="Усилие рассуждения" />
+      <span class="val">{{ model || '—' }}</span>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, type PropType } from 'vue';
-import { UiDiscreteSlider, vTooltip } from '../../ui';
+import { t, UiButton, UiDiscreteSlider, vTooltip } from '../../ui';
 
 // Слайдер усилия рассуждения — как переключатель в расширении VS Code:
-// дискретные точки, клик по точке (или трек) задаёт уровень.
+// дискретные риски, клик по риске (или треку) задаёт уровень.
 // УРОВНИ НЕ ЗАХАРДКОЖЕНЫ: приходят пропсом levels из реестра моделей
 // (у каждой модели свой набор; появится новый уровень — отрисуется сам).
 const props = defineProps({
@@ -27,6 +41,8 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   // Чем заменить обычную подсказку: неактивный слайдер обязан объяснить, где менять.
   hint: { type: String, default: '' },
+  // В настройках телефона уровни выбираются отдельными сенсорными кнопками.
+  expanded: { type: Boolean, default: false },
 });
 
 const model = defineModel({ type: String, default: '' });
@@ -35,7 +51,7 @@ const model = defineModel({ type: String, default: '' });
 // Пустой выбор означает умолчание исполнителя, а не первую риску слайдера.
 const selectedDescription = computed(() => {
   if (!model.value) {
-    return 'Усилие по умолчанию исполнителя';
+    return t('core.chatEffortDefault');
   }
 
   const description = props.hints[model.value];
@@ -80,7 +96,7 @@ const sliderIndex = computed({
   padding: 0; user-select: none; flex: none; }
 .cap { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); opacity: .75; flex: none; }
 .eff-slider { width: 78px; flex: none; }
-.val { font-size: 12px; font-weight: 600; color: var(--accent); flex: none; min-width: 46px; }
+.val { font-size: 12px; font-weight: 600; color: var(--accent); flex: none; }
 
 /* Только индикатор: курсор не обещает клика, но значение остаётся читаемым —
    человек обязан видеть, каким усилием уйдёт ход. */
@@ -89,4 +105,10 @@ const sliderIndex = computed({
 /* Уровни не красим в warn/bad — это цвета ошибок, настройка не должна «тревожить».
    Всё в акценте, только low приглушён. */
 .eff[data-lvl="low"] .val { color: var(--ink-mid); }
+
+/* В развёрнутой форме нет короткого трека и повторных подписей.
+   До трёх уровней в ряду: каждый остаётся отдельной площадкой для касания. */
+.eff.eff--expanded { display: grid; height: auto; min-width: 0; gap: 8px; }
+.eff-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.eff-hint { margin: 0; color: var(--ink-mid); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 </style>

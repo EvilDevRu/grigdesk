@@ -10,7 +10,7 @@ export const WEB_SSE_SIGNALS = [
   'arbiter-live', 'arbiter-conversation', 'sandboxes-changed', 'sandbox-progress', 'projects-changed',
   'onboarding-changed', 'routes-draft-changed', 'routes-catalog-changed', 'showcase-changed',
   'showcase-progress', 'showcase-build-progress', 'showcase-voice', 'usage-forecast',
-  'studio-changed', 'studio-progress',
+  'studio-changed', 'studio-progress', 'trackers-changed',
 ] as const;
 
 export const WEB_REGISTRY_REASONS = [

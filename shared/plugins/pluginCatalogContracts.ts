@@ -1,3 +1,4 @@
+import { isRecord } from '../lib/objects.ts';
 import { contractDecoders, type Decoder } from '../lib/contractDecoders.ts';
 import { isInstallPluginId, isInstallText, isInstallTimestamp } from './pluginInstallValues.ts';
 
@@ -97,13 +98,101 @@ const summary = d.objectOf({
   latest: d.nullable(version),
   details: bounded(64),
 });
-const plugin = d.objectOf({
+const pluginFields = d.objectOf({
   ...baseFields,
   description: bounded(16 * 1024, true),
   versions: d.listOf(version),
   readme: d.nullable(bounded(256 * 1024, true)),
   releaseNotes: d.nullable(bounded(64 * 1024, true)),
 });
+
+export interface CatalogMedia {
+  path: string;
+  sha: string;
+  mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
+  bytes: number;
+}
+
+/**
+ * Медиа принадлежат старшей версии и не могут подменить источник произвольным URL.
+ * Старый сайт без новых полей получает пустую галерею и нейтральную иконку.
+ */
+function catalogMedia(raw: unknown, sha: string | undefined, maximum: number): CatalogMedia {
+  if (!isRecord(raw) || typeof raw.path !== 'string' || !raw.path
+    || /[:?#\\\x00-\x1f\x7f]/u.test(raw.path)
+    || raw.path.split('/').some((part) => !part || part.startsWith('.') || part === 'node_modules')
+    || raw.sha !== sha || !Number.isSafeInteger(raw.bytes) || Number(raw.bytes) <= 0
+    || Number(raw.bytes) > maximum) {
+    throw new TypeError('Каталог: некорректное изображение');
+  }
+
+  const formats: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    webp: 'image/webp',
+  };
+  const extension = raw.path.split('.').at(-1)?.toLowerCase() ?? '';
+
+  if (!formats[extension] || raw.mediaType !== formats[extension]) {
+    throw new TypeError('Каталог: некорректный формат изображения');
+  }
+
+  return {
+    path: raw.path,
+    sha: String(raw.sha),
+    mediaType: raw.mediaType as CatalogMedia['mediaType'],
+    bytes: Number(raw.bytes),
+  };
+}
+
+/**
+ * Краткий индекс не меняется: расширение применяется только к подробной карточке.
+ * README сохраняется прежней проверенной проекцией без редакционных преобразований.
+ */
+function plugin(raw: unknown, path: string) {
+  const fields = pluginFields(raw, path);
+  const input = isRecord(raw) ? raw : {};
+  const latest = [...fields.versions].sort((a, b) => {
+    const left = a.version.split('.').map(BigInt);
+    const right = b.version.split('.').map(BigInt);
+    const index = left.findIndex((part, index) => part !== right[index]);
+
+    return index < 0 ? 0 : left[index]! > right[index]! ? -1 : 1;
+  })[0];
+  const icon = input.icon == null ? null : catalogMedia(input.icon, latest?.sha, 256 * 1024);
+
+  if (input.gallery !== undefined && !isRecord(input.gallery)) {
+    throw new TypeError('Каталог: некорректная галерея');
+  }
+
+  const screenshots = isRecord(input.gallery) ? input.gallery.screenshots ?? [] : [];
+
+  if (!Array.isArray(screenshots) || screenshots.length > 6) {
+    throw new TypeError('Каталог: некорректная галерея');
+  }
+
+  const media = screenshots.map((item) => catalogMedia(item, latest?.sha, 4 * 1024 * 1024));
+
+  if (new Set(media.map((item) => item.path)).size !== media.length) {
+    throw new TypeError('Каталог: повтор изображения');
+  }
+
+  return {
+    ...fields,
+    icon,
+    gallery: { screenshots: media },
+  };
+}
+
+/**
+ * Адрес строится только из проверенной идентичности карточки и SHA изображения.
+ * Отдельного href от автора в контракте нет.
+ */
+export function catalogMediaUrl(repository: string, media: CatalogMedia | null): string | null {
+  return media ? `https://raw.githubusercontent.com/${repository}/${media.sha}/`
+    + media.path.split('/').map(encodeURIComponent).join('/') : null;
+}
 
 export type CatalogVersion = ReturnType<typeof version>;
 export type CatalogSummary = ReturnType<typeof summary>;
@@ -135,7 +224,7 @@ function identity(value: Pick<CatalogSummary, 'repository' | 'source'>): void {
  * Индекс публикуется одной проверенной проекцией; ошибка одного элемента отвергает весь ответ.
  * Null generatedAt разрешён только для начального пустого снимка сайта.
  */
-export function decodeCatalogIndex(raw: unknown, maximumApi: 1 | 2 = 1): CatalogIndex {
+export function decodeCatalogIndex(raw: unknown): CatalogIndex {
   const result = d.objectOf({
     schemaVersion: d.oneOf(1),
     generatedAt: d.nullable(timestamp),
@@ -151,10 +240,6 @@ export function decodeCatalogIndex(raw: unknown, maximumApi: 1 | 2 = 1): Catalog
   for (const item of result.plugins) {
     identity(item);
 
-    if (item.latest && item.latest.api > maximumApi) {
-      throw new TypeError('Каталог: неподдерживаемый api в latest');
-    }
-
     if (item.details !== `${item.id}.json`) {
       throw new TypeError('Каталог: некорректный адрес подробностей');
     }
@@ -167,7 +252,7 @@ export function decodeCatalogIndex(raw: unknown, maximumApi: 1 | 2 = 1): Catalog
  * Detail проверяется независимо от индекса и не допускает повторов версий.
  * Соответствие конкретному index snapshot проверит сервис, который заказывал документ.
  */
-export function decodeCatalogDetail(raw: unknown, maximumApi: 1 | 2 = 1): CatalogDetail {
+export function decodeCatalogDetail(raw: unknown): CatalogDetail {
   const result = d.objectOf({
     schemaVersion: d.oneOf(1),
     generatedAt: timestamp,
@@ -176,10 +261,6 @@ export function decodeCatalogDetail(raw: unknown, maximumApi: 1 | 2 = 1): Catalo
   const versions = result.plugin.versions;
 
   identity(result.plugin);
-
-  if (versions.some((item) => item.api > maximumApi)) {
-    throw new TypeError('Каталог: неподдерживаемый api в versions');
-  }
 
   if (versions.length > 100 || new Set(versions.map((item) => item.version)).size !== versions.length) {
     throw new TypeError('Каталог: несогласованные версии');
@@ -200,12 +281,12 @@ export interface CatalogIndexResponse {
  * Браузер проверяет локальную оболочку так же строго, как сервер проверяет публичный сайт.
  * Свежесть и наличие снимка согласованы: ошибка не превращается в пустой успешный каталог.
  */
-export function decodeCatalogResponse(raw: unknown, maximumApi: 1 | 2 = 1): CatalogIndexResponse {
+export function decodeCatalogResponse(raw: unknown): CatalogIndexResponse {
   const result = d.objectOf({
     state: d.oneOf('fresh', 'stale', 'unavailable', 'unconfigured'),
     applicationVersion: stable,
     fetchedAt: d.nullable(timestamp),
-    catalog: d.nullable((value) => decodeCatalogIndex(value, maximumApi)),
+    catalog: d.nullable(decodeCatalogIndex),
   })(raw, 'response');
   const available = result.state === 'fresh' || result.state === 'stale';
 

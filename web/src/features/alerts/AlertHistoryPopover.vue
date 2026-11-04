@@ -186,25 +186,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.alert-bell {
-  position: relative;
-}
-
-.alert-bell-badge {
-  position: absolute;
-  top: -3px;
-  right: -4px;
-  min-width: 15px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: var(--warn);
-  color: var(--ground);
-  font-size: 9.5px;
-  font-weight: 700;
-  line-height: 15px;
-  text-align: center;
-}
-
 .alert-history {
   display: flex;
   flex-direction: column;

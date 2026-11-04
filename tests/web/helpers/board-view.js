@@ -12,8 +12,11 @@ const TEST_UTILS = '../../../web/node_modules/@vue/test-utils/dist/vue-test-util
 
 let mountNonce = 0;
 
-/** Компиляция вью через общий TS-aware helper с настоящими UI-компонентами. */
-export async function compileBoardView() {
+/**
+ * Компиляция вью оставляет настоящие UI-компоненты.
+ * Точечные HTTP/графические подмены передаются сценарием без изменения соседних тестов.
+ */
+export async function compileBoardView({ stubs = {} } = {}) {
   return compileVue(VIEW_PATH, {
     stubs: {
       '../shared/format.ts': `
@@ -69,11 +72,12 @@ export async function compileBoardView() {
         export const api = {
           get: async (url) => globalThis.__boardViewOwnApi?.get(url) || (
             url === '/api/grigdesk-tasks/projects' ? { projects: [] }
-              : { tasks: [], revision: 0, b24Configured: true }
+              : { tasks: [], revision: 0, trackerConfigured: true }
           ),
           post: async (url, payload) => globalThis.__boardViewOwnApi?.post(url, payload),
         };
       `,
+      ...stubs,
       '../composables/useSse.ts': `
         import { onUnmounted } from 'vue';
         export const sseSubscribe = (listener) => {
@@ -138,6 +142,9 @@ const DEFAULT_TASKS = [
  */
 export async function mountBoardView(t, {
   prefix = 'board',
+  snapshot = {},
+  compilerStubs = {},
+  componentStubs = {},
   tasks = DEFAULT_TASKS,
   pending = false,
   boardError = null,
@@ -180,6 +187,7 @@ export async function mountBoardView(t, {
           tasks,
           toReview,
           created,
+          ...snapshot,
         },
         error: boardError,
         readAt: 1_800_000_000_000,
@@ -199,12 +207,17 @@ export async function mountBoardView(t, {
         taskIds: [], loaded: true, loading: false, error: null, pending: {}, ...favorites,
       }),
       getters: {
+        own: () => stores.ownFavorites(),
         isFavorite: (state) => (id) => state.taskIds.includes(String(id)),
         isPending: (state) => (id) => !!state.pending[String(id)],
       },
       actions: {
         async load(force) { calls.favoritesLoad.push(!!force); },
-        async toggle(id) { calls.toggled.push(String(id)); return true; },
+        async toggle(id) {
+          calls.toggled.push(String(id));
+
+          return true;
+        },
       },
     }),
     shelf: defineStore(`board-view-shelf-${nonce}`, {
@@ -212,6 +225,7 @@ export async function mountBoardView(t, {
         entries: [], loaded: true, loading: false, error: null, pending: {}, ...shelf,
       }),
       getters: {
+        own: () => stores.ownShelf(),
         isOnShelf: (state) => (id) => state.entries
           .some((entry) => entry.taskId === String(id)),
         isPending: (state) => (id) => !!state.pending[String(id)],
@@ -240,22 +254,77 @@ export async function mountBoardView(t, {
         taskIds: [], loaded: true, initialized: true, loading: false, error: null, ...seen,
       }),
       getters: {
+        own: () => stores.ownSeen(),
         isSeen: (state) => (id) => state.taskIds.includes(String(id)),
         ready: (state) => state.loaded && state.initialized,
       },
       actions: {
         async load(force) { calls.seenLoad.push(!!force); },
+
         async markSeen(ids, opts) { calls.seenMarked.push({ ids: ids.map(String), opts }); return true; },
       },
     }),
   };
+
+  stores.ownFavorites = defineStore(`own-favorites-${nonce}`, {
+    state: () => ({
+      taskIds: [],
+      loaded: true,
+      loading: false,
+      error: null
+    }),
+    getters: {
+      isFavorite: (state) => (id) => state.taskIds.includes(String(id)),
+      isPending: () => () => false,
+    },
+    actions: {
+      async load() {
+        return true;
+      },
+      async toggle(id) {
+        calls.toggled.push(String(id));
+
+        return true;
+      },
+    },
+  });
+  stores.ownSeen = defineStore(`own-seen-${nonce}`, {
+    state: () => ({
+      taskIds: [],
+      loaded: true,
+      initialized: true,
+      ready: true,
+      error: null
+    }),
+    getters: { isSeen: (state) => (id) => state.taskIds.includes(String(id)) },
+    actions: {
+      async load() {
+        return true;
+      },
+      async markSeen() {
+        return true;
+      },
+    },
+  });
+  stores.ownShelf = defineStore(`own-shelf-${nonce}`, {
+    state: () => ({
+      loaded: true,
+      loading: false,
+      error: null
+    }),
+    getters: { isOnShelf: () => () => false },
+    actions: { async load() {
+      return true;
+    } },
+  });
+
   const listeners = new Set();
 
   globalThis.__boardViewOwnListeners = listeners;
   globalThis.__boardViewOwnApi = ownApi;
   globalThis.__boardViewStores = stores;
   const pinia = createPinia();
-  const BoardView = await compileBoardView();
+  const BoardView = await compileBoardView({ stubs: compilerStubs });
   const wrapper = mount(BoardView, {
     attachTo: browser.document.querySelector('#mount'),
     global: {
@@ -263,6 +332,7 @@ export async function mountBoardView(t, {
       stubs: {
         RouterLink: { template: '<a><slot /></a>' },
         teleport: true,
+        ...componentStubs,
       },
     },
   });

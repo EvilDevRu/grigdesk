@@ -94,7 +94,8 @@ async function bootstrapFixture(t, mode = 'page') {
   const cleared = [];
   const active = new Set();
   const runtime = {
-    startBackground: async (id) => {
+    reset: () => runtime.dispose(),
+    acquirePanel: async (id) => {
       if (!active.has(id)) {
         active.add(id);
         starts.push(id);
@@ -133,7 +134,7 @@ async function bootstrapFixture(t, mode = 'page') {
   shell.present = true;
   shell.snapshot = { status: 'online', profile: { id: 'first' } };
   plugins.loaded = true;
-  plugins.list = [pluginCard({ webModule: { ...descriptor, startOnLogin: true }, name: 'Устаревший' })];
+  plugins.list = [pluginCard({ entrypoints: { web: descriptor }, name: 'Устаревший' })];
 
   const dispose = f.installPluginRuntime(pinia, router, { runtime });
 
@@ -164,34 +165,32 @@ async function bootstrapFixture(t, mode = 'page') {
 }
 
 for (const mode of ['main', 'page', 'surface']) {
-  test(`PM-LOGIN-BOOTSTRAP: ${mode}, opt-in, offline/online, disable, logout и повторный вход`, async (t) => {
+  test(`PM-LOGIN-BOOTSTRAP: ${mode}, без eager start; offline/online/disable/logout`, async (t) => {
     const f = await bootstrapFixture(t, mode);
-    const opted = pluginCard({ webModule: { ...descriptor, startOnLogin: true } });
+    const opted = pluginCard({ entrypoints: { web: { ...descriptor } } });
     const variant = (id, overrides) => pluginCard({
       id,
-      webModule: {
+      entrypoints: { web: {
         entry: `/api/ext/${id}/module/panel.js`,
         css: [],
         locales: {},
-        startOnLogin: true
-      },
+      } },
       ...overrides,
     });
 
     f.reply([
       opted, variant('off', { enabled: false }), variant('system', { system: true }),
-      variant('false', { webModule: {
+      variant('false', { entrypoints: { web: {
         entry: '/api/ext/false/module/panel.js',
         css: [],
         locales: {},
-        startOnLogin: false
-      } }),
-      variant('omitted', { webModule: {
+      } } }),
+      variant('omitted', { entrypoints: { web: {
         entry: '/api/ext/omitted/module/panel.js',
         css: [],
         locales: {}
-      } }),
-      variant('iframe', { webModule: undefined, web: '/api/ext/iframe/' }),
+      } } }),
+      variant('server-only', { entrypoints: {}, contributes: {} }),
     ]);
     assert.deepEqual(f.starts, []);
     await f.login();
@@ -214,8 +213,10 @@ for (const mode of ['main', 'page', 'surface']) {
     }
 
     assert.equal(f.auth.clientScope, '', 'Пустой scope не отменяет подтверждённый вход');
-    assert.deepEqual(f.starts, ['ui-module']);
+    assert.deepEqual(f.starts, []);
     assert.equal(f.requests.length, 1);
+    await f.runtime.acquirePanel('ui-module');
+    assert.deepEqual(f.starts, ['ui-module']);
     f.plugins.list[0].values = { greeting: 'Обновлено' };
     f.ui.setUiLocale('en');
     await settle();
@@ -227,18 +228,24 @@ for (const mode of ['main', 'page', 'surface']) {
     f.shell.snapshot = { status: 'online', profile: { id: 'first' } };
     await settle();
     await settle();
+    assert.equal(f.starts.length, 1);
+    await f.runtime.acquirePanel('ui-module');
     assert.equal(f.starts.length, 2);
     f.plugins.list[0].enabled = false;
     await settle();
     assert.equal(f.cleanups.length, 2);
     f.plugins.list[0].enabled = true;
     await settle();
+    assert.equal(f.starts.length, 2);
+    await f.runtime.acquirePanel('ui-module');
     assert.equal(f.starts.length, 3);
     f.auth.authenticated = false;
     f.auth.logEpoch += 1;
     await settle();
     assert.equal(f.cleanups.length, 3);
     await f.login();
+    assert.equal(f.starts.length, 3);
+    await f.runtime.acquirePanel('ui-module');
     assert.equal(f.starts.length, 4);
     f.dispose();
     f.ui.setUiLocale('ru');
@@ -268,7 +275,7 @@ test('PM-CATALOG-EPOCH: loaded=true не разрешает старт до св
   assert.equal(responses.length, 2);
   responses[1].resolve({ plugins: [] });
   await settle();
-  responses[0].resolve({ plugins: [pluginCard({ webModule: { ...descriptor, startOnLogin: true } })] });
+  responses[0].resolve({ plugins: [pluginCard({ entrypoints: { web: descriptor } })] });
   await settle();
   assert.deepEqual(f.starts, []);
   assert.deepEqual(f.plugins.list, []);
@@ -295,7 +302,7 @@ test('PM-CATALOG-EPOCH: failed не зацикливает сеть, superseded 
 test('PM-BOOTSTRAP-DISPOSE: отзывает watchers, эпоху и только свою открывалку', async (t) => {
   const f = await bootstrapFixture(t);
 
-  f.reply([pluginCard({ webModule: { ...descriptor, startOnLogin: true } })]);
+  f.reply([pluginCard({ entrypoints: { web: { ...descriptor } } })]);
   await f.login();
   f.dispose();
 
@@ -322,7 +329,7 @@ test('PM-BOOTSTRAP-DISPOSE: отзывает watchers, эпоху и тольк�
 test('PM-CATALOG-EPOCH: смена profile/clientScope/logEpoch создаёт новую эпоху', async (t) => {
   const f = await bootstrapFixture(t);
 
-  f.reply([pluginCard({ webModule: { ...descriptor, startOnLogin: true } })]);
+  f.reply([pluginCard({ entrypoints: { web: { ...descriptor } } })]);
   await f.login();
 
   for (const change of [
@@ -330,12 +337,13 @@ test('PM-CATALOG-EPOCH: смена profile/clientScope/logEpoch создаёт �
     () => f.auth.clientScope = 'another-owner',
     () => f.auth.logEpoch += 1,
   ]) {
-    const previous = f.starts.length;
+    const previous = f.requests.length;
 
+    await f.runtime.acquirePanel('ui-module');
     change();
     await settle();
     await settle();
-    assert.equal(f.starts.length, previous + 1);
+    assert.equal(f.starts.length, previous);
     assert.equal(f.cleanups.length, previous);
     assert.equal(f.requests.length, previous + 1);
   }

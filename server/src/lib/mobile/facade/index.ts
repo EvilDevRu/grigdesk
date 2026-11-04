@@ -6,7 +6,7 @@ import { registerEventRoutes } from './events.ts';
 import { registerMediaRoutes } from './media.ts';
 import { registerWaitingRoutes } from './waiting.ts';
 import { registerTaskRoutes } from './tasks.ts';
-import { registerB24Routes } from './b24.ts';
+import { registerTrackerRoutes } from './tracker.ts';
 import { registerChatControlRoutes } from './chatControls.ts';
 import { registerAttentionRoutes } from './attention.ts';
 
@@ -21,7 +21,7 @@ export function registerMobileFacade(app: MobileApp, deps: FacadeDeps) {
   registerMessageRoutes(app, deps);
   registerWaitingRoutes(app, deps);
   registerTaskRoutes(app, deps);
-  registerB24Routes(app, deps);
+  registerTrackerRoutes(app, deps);
   registerMediaRoutes(app, deps);
   registerEventRoutes(app, deps);
   registerAppRoutes(app, deps);

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PluginCore } from '../../../../packages/plugin-types/src/server.ts';
+import type { PluginRuntimeServices } from '../../../../packages/plugin-types/src/coreRuntime.ts';
 import type { DocumentReader } from '../../lib/documents/reader.ts';
 import { getProviderAdapters } from '../../lib/executors/index.ts';
 import { acquireKernelFileLock } from '../../lib/kernelLock.ts';
@@ -13,6 +14,7 @@ import { createProviderCapabilities } from './providerCapabilities.ts';
  */
 export function createPluginCore(
   fastify: FastifyInstance, pluginId: string, reader?: DocumentReader,
+  runtime?: PluginRuntimeServices,
 ): PluginCore {
   const capabilities = createProviderCapabilities();
   const documents = () => {
@@ -24,6 +26,19 @@ export function createPluginCore(
   };
 
   return Object.freeze({
+    ...runtime,
+    ...(runtime ? {
+      modelText: (input: Parameters<PluginRuntimeServices['modelText']>[0]) => runtime.modelText({
+        ...input,
+        beforeCall: () => {
+          if (!fastify.pluginEnabled(pluginId)) {
+            throw new Error('plugin_disabled');
+          }
+
+          input.beforeCall?.();
+        },
+      }),
+    } : {}),
     getProviders: async (type: unknown) => capabilities(await getProviderAdapters(), type),
     /**
      * Имя SSE и идентификатор задаёт ядро, данные остаются внутри отдельного поля.

@@ -16,8 +16,8 @@ const EXPECTED_PAGES = [
   ['interface', ['behavior', 'notifications', 'shortcuts', 'usageForecast']],
   ['agents', ['providers', 'models']],
   ['automation', ['chats', 'context', 'launch', 'monitoring', 'arbiter', 'analysis', 'shelf', 'inbox']],
-  ['speech', ['dictation', 'video', 'videoTasks', 'language', 'models', 'advanced']],
-  ['connections', ['b24', 'devices', 'ssh', 'db', 'telegram', 'github']],
+  ['speech', ['dictation', 'videoTasks']],
+  ['connections', ['devices', 'ssh', 'db', 'telegram', 'github']],
   ['tools', ['code', 'docker', 'studio3d', 'showcase', 'browser']],
   ['plugins', ['installed']],
   ['system', ['startup', 'updates', 'diagnostics', 'processes']],
@@ -68,7 +68,7 @@ test('CAT02: вызов, query, сохранённая страница, пер�
     storage,
   }), 'agents.models');
   assert.equal(resolveSettingsPage({ queryPage, storage }), 'automation.context');
-  assert.equal(resolveSettingsPage({ storage }), 'speech.language');
+  assert.equal(resolveSettingsPage({ storage }), 'speech.dictation');
   assert.equal(resolveSettingsPage(), 'interface.behavior');
 
   const bothKeys = storageFixture({
@@ -76,13 +76,12 @@ test('CAT02: вызов, query, сохранённая страница, пер�
     'grigdesk-settings-tab': 'providers',
   });
 
-  assert.equal(resolveSettingsPage({ storage: bothKeys }), 'speech.video');
+  assert.equal(resolveSettingsPage({ storage: bothKeys }), 'speech.dictation');
   assert.deepEqual(bothKeys.removed, []);
 
   const oldTabs = {
     app: 'interface.behavior',
     speech: 'speech.dictation',
-    b24: 'connections.b24',
     providers: 'agents.providers',
     runs: 'automation.chats',
     plugins: 'plugins.installed',
@@ -105,7 +104,7 @@ test('CAT02: вызов, query, сохранённая страница, пер�
 });
 
 test('CAT03: неизвестный адрес и отказ storage дают следующий безопасный вариант', () => {
-  const storage = storageFixture({ 'grigdesk-settings-page': 'connections.b24' });
+  const storage = storageFixture({ 'grigdesk-settings-page': 'connections.devices' });
 
   assert.equal(
     resolveSettingsPage({
@@ -113,10 +112,10 @@ test('CAT03: неизвестный адрес и отказ storage дают с
       queryPage: '../evil.vue',
       storage,
     }),
-    'connections.b24',
+    'connections.devices',
   );
-  assert.equal(resolveSettingsPage({ pageId: {}, queryPage: 'speech.video' }), 'speech.video');
-  assert.equal(storage.records.get('grigdesk-settings-page'), 'connections.b24');
+  assert.equal(resolveSettingsPage({ pageId: {}, queryPage: 'speech.video' }), 'speech.dictation');
+  assert.equal(storage.records.get('grigdesk-settings-page'), 'connections.devices');
   assert.equal(resolveSettingsPage({ storage: storageFixture({ 'grigdesk-settings-page': '{' }) }),
     'interface.behavior');
 
@@ -140,6 +139,22 @@ test('CAT03: неизвестный адрес и отказ storage дают с
   assert.equal(resolveSettingsPage({ storage: readOnly }), 'plugins.installed');
   assert.equal(resolveSettingsPage({ storage: storageFixture({ 'grigdesk-settings-tab': 'unknown' }) }),
     'interface.behavior');
+});
+
+test('Речь: старые ссылки, сохранённые страницы и адреса полей ведут на единую страницу', () => {
+  for (const pageId of ['speech.video', 'speech.language', 'speech.models', 'speech.advanced']) {
+    const storage = storageFixture({ 'grigdesk-settings-page': pageId });
+
+    assert.equal(resolveSettingsPage({ pageId }), 'speech.dictation');
+    assert.equal(resolveSettingsPage({ queryPage: pageId }), 'speech.dictation');
+    assert.equal(resolveSettingsPage({ storage }), 'speech.dictation');
+    assert.deepEqual(resolveFieldAddress({ pageId, fieldPath: ['language'] }), {
+      pageId: 'speech.dictation',
+      fieldPath: ['language'],
+    });
+  }
+
+  assert.equal(resolveSettingsPage({ pageId: 'speech.videoTasks' }), 'speech.videoTasks');
 });
 
 test('CAT04: адрес сравнивается по сегментам без разбора точек и слешей', () => {

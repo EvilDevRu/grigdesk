@@ -1,8 +1,8 @@
 # Локализация браузера и данные протокола
 
-Подписи трёх полей browser-настроек и их подсказки находятся в RU/EN settings-каталогах.
+Подписи четырёх полей browser-настроек и их подсказки находятся в RU/EN settings-каталогах.
 Catalog проецирует их через labelKey/hintKey. Для вычисляемых ключей i18n-scope.json
-содержит точные списки browserOpen/browserApplication/browserAgents и соответствующих
+содержит точные списки browserOpen/browserApplication/browserSearch/browserAgents и соответствующих
 Hint: сторож проверяет существование каждого ключа в зарегистрированных локалях.
 
 browser_unavailable в native IPC и browser_preferences_ack_invalid в staged adapter —

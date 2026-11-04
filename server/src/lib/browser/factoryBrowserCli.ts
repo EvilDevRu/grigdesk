@@ -8,6 +8,7 @@ import { FactoryStateAdapter } from '../../adapters/factoryState.ts';
 import { RoutesStore } from '../../modules/routes/store.ts';
 import {
   browserMailboxRequest, browserMailboxOnce, writeBrowserReady, readBrowserReady, readBrowserReadyDetails,
+  BROWSER_READY_LEASE_MS,
 } from './browserMailbox.ts';
 import type { MailboxContext } from './browserMailbox.ts';
 import { parseBrowserRunProof, removeBrowserBinding } from './factoryBrowserBinding.ts';
@@ -155,6 +156,17 @@ async function hostContext(parsed: ReturnType<typeof parseBrowserCli>) {
 }
 
 /**
+ * Heartbeat обновляется независимо от длительного socket request.
+ * Только encrypted lease доступен клиенту: host /proc не требуется его песочнице.
+ */
+async function renewBrowserReady(context: MailboxContext, evidenceRoot: string | null, signal: AbortSignal) {
+  while (!signal.aborted) {
+    await delay(BROWSER_READY_LEASE_MS / 4, undefined, { signal });
+    await writeBrowserReady(context, 'grigdesk', evidenceRoot);
+  }
+}
+
+/**
  * Relay следит за своим parent identity и снимает очередь при остановке launcher.
  * После начального probe routing=grigdesk сохраняется даже при недоступном окне.
  */
@@ -178,6 +190,8 @@ async function relay(parsed: ReturnType<typeof parseBrowserCli>, env: NodeJS.Pro
   const starttime = await parentStat();
   const controller = new AbortController();
   const stop = () => controller.abort();
+  let heartbeat: Promise<void> | undefined;
+  let heartbeatError: unknown;
 
   process.once('SIGTERM', stop);
   process.once('SIGINT', stop);
@@ -214,6 +228,13 @@ async function relay(parsed: ReturnType<typeof parseBrowserCli>, env: NodeJS.Pro
       return;
     }
 
+    heartbeat = renewBrowserReady(context, evidenceRoot, controller.signal).catch((error) => {
+      if (!controller.signal.aborted) {
+        heartbeatError = error;
+        controller.abort();
+      }
+    });
+
     const seen = new Set<string>();
 
     while (!controller.signal.aborted && starttime && await parentStat() === starttime) {
@@ -229,12 +250,17 @@ async function relay(parsed: ReturnType<typeof parseBrowserCli>, env: NodeJS.Pro
       });
       await delay(100, undefined, { signal: controller.signal });
     }
+
+    if (heartbeatError) {
+      throw heartbeatError;
+    }
   } catch (error) {
-    if (!controller.signal.aborted) {
-      throw error;
+    if (!controller.signal.aborted || heartbeatError) {
+      throw heartbeatError ?? error;
     }
   } finally {
     controller.abort();
+    await heartbeat;
     process.removeListener('SIGTERM', stop);
     process.removeListener('SIGINT', stop);
   }

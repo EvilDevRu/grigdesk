@@ -51,8 +51,9 @@ test('TWP-01: карточка ждёт запуска синхронизаци�
 
   state.ui = reactive({
     taskId: null,
-    openTaskInline(id) {
+    openTaskInline(id, source) {
       this.taskId = id;
+      this.taskSource = source;
       calls.push('open:' + id);
     },
   });
@@ -78,6 +79,7 @@ test('TWP-01: карточка ждёт запуска синхронизаци�
   };
   t.after(() => {
     window.close = closeWindow;
+    closeWindow.call(window);
   });
   await wrapper.get('.task-window-titlebar [aria-label="Закрыть окно"]').trigger('click');
   assert.equal(closed, 1);
@@ -93,16 +95,25 @@ test('TWP-01: карточка ждёт запуска синхронизаци�
 
   state.auth.authenticated = false;
   await nextTick();
-  assert.equal(wrapper.get('[data-task-modal]').element, input);
+  assert.equal(wrapper.get('[data-task-modal]').element === input, true);
   assert.equal(input.value, 'Сохраняемый черновик');
   state.auth.authenticated = true;
   await nextTick();
-  assert.equal(wrapper.get('[data-task-modal]').element, input);
+  assert.equal(wrapper.get('[data-task-modal]').element === input, true);
   assert.equal(input.value, 'Сохраняемый черновик');
   state.listener('speech-settings', { revision: 7 });
   state.listener('hello', {});
   state.listener('task-shelf-changed', {});
   assert.deepEqual(calls.slice(1), ['sync', 'markSeen', 'sync', 'speech:7', 'sync']);
+
+  const source = `grigdesk-b24@${'a'.repeat(64)}`;
+
+  await wrapper.setProps({ target: {
+    kind: 'task',
+    id: '42',
+    source,
+  } });
+  assert.equal(state.ui.taskSource, source);
   wrapper.unmount();
   assert.equal(calls.at(-1), 'unsubscribe');
 });

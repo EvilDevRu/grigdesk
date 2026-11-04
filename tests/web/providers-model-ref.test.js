@@ -95,6 +95,55 @@ test('refresh сильнее обычного чтения и объединяе
   assert.equal(store.providers[0].id, 'refreshed');
 });
 
+test('wait сильнее обычного GET, разделяет строгое чтение и отсекает поздний пустой ответ', async (t) => {
+  const { store, gets } = credentialFixture(t);
+  const normal = store.load();
+  const strict = store.load(false, { wait: true });
+  const joined = store.load(false, { wait: true });
+
+  assert.deepEqual(gets.map((entry) => entry.url), ['/api/providers', '/api/providers?wait=1']);
+  gets[1].resolve({ providers: [{ id: 'ready' }] });
+  await Promise.all([strict, joined]);
+  gets[0].resolve({ providers: [] });
+  await normal;
+  assert.equal(store.providers[0].id, 'ready');
+});
+
+test('инвалидация во время ожидания модели повторяет строгое чтение новой версии', async (t) => {
+  const { store, gets } = credentialFixture(t);
+  const ref = { provider: 'fixture', model: 'fixture-model' };
+  const readyProviders = [{ id: ref.provider, models: [{ id: ref.model }] }];
+  const waiting = store.ensureModel(ref);
+  const update = store.load(false, { invalidate: true });
+
+  gets[0].resolve({ providers: readyProviders });
+  gets[1].resolve({ providers: [] });
+  await update;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(gets.map((entry) => entry.url), [
+    '/api/providers?wait=1', '/api/providers', '/api/providers?wait=1',
+  ]);
+  gets[2].resolve({ providers: readyProviders });
+  await waiting;
+  assert.equal(store.modelOf(ref).model.id, ref.model);
+});
+
+test('готовая модель не требует GET, отказ загрузки каталога сохраняет причину', async (t) => {
+  const { store, gets } = credentialFixture(t);
+  const ref = { provider: 'fixture', model: 'fixture-model' };
+
+  store.providers = [{ id: ref.provider, models: [{ id: ref.model }] }];
+  await store.ensureModel(ref);
+  assert.equal(gets.length, 0);
+  store.providers = [];
+  api.get = async () => {
+    throw new Error('Синтетический отказ каталога');
+  };
+
+  await assert.rejects(store.ensureModel(ref), /Синтетический отказ каталога/u);
+});
+
 test('SSE-инвалидация не теряется внутри летящего GET и ожидания настроек', async (t) => {
   const { store, gets } = credentialFixture(t);
   const old = store.load();

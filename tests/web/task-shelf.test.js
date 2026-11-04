@@ -499,15 +499,23 @@ async function reactiveStoreFixture({
     detailGetCalls: 0,
     apiCalls: [],
     api: {
-      async get(url) {
-        if (/^\/api\/b24\/task\/\d+$/.test(url)) {
+      /**
+     * Полка читает детали по нейтральному маршруту с наблюдаемым счётчиком обращений.
+     * Управляемая задержка ответа позволяет проверить поздние снимки и обновления.
+     */
+    async get(url) {
+        if (url === '/api/grigdesk-tasks/task-shelf') {
+          return serverSnapshot('grigdesk', 0, []);
+        }
+
+        if (/^\/api\/tracker\/task\/\d+$/.test(url)) {
           harness.detailGetCalls += 1;
           harness.apiCalls.push({ method: 'GET', url });
           if (detailImpl) return detailImpl(url, harness.detailGetCalls);
           return { title: 'Задача 42', group_name: 'GrigDesk' };
         }
         harness.apiGetCalls += 1;
-        harness.apiCalls.push({ method: 'GET', url: '/api/b24/task-shelf' });
+        harness.apiCalls.push({ method: 'GET', url: '/api/tracker/task-shelf' });
         if (getImpl) return getImpl(harness.apiGetCalls);
         return structuredClone(server);
       },
@@ -1111,11 +1119,11 @@ test('Повторное нажатие снимает запись, а след
     createIfMissing: call.body?.createIfMissing,
   })), [{
     method: 'DELETE',
-    url: '/api/b24/task-shelf/42',
+    url: '/api/tracker/task-shelf/42',
     createIfMissing: undefined,
   }, {
     method: 'PUT',
-    url: '/api/b24/task-shelf/42',
+    url: '/api/tracker/task-shelf/42',
     createIfMissing: true,
   }]);
 });
@@ -1220,7 +1228,8 @@ test('Панель, чип и оповещение не содержат вто�
   }
   const [shared, store, panel, host] = sources;
   const duplicateRules = [panel, host]
-    .some((source) => /gateKnown|generatedAt|finishedAt|statusKind|TERMINAL_ANALYSIS|TERMINAL_B24/.test(source));
+    .some((source) =>
+      /gateKnown|generatedAt|finishedAt|statusKind|TERMINAL_ANALYSIS|TERMINAL_TRACKER/.test(source));
 
   assert.deepEqual({
     sharedExportsDecision: /export\s+(?:default\s+)?(?:function|const)\b/.test(shared),

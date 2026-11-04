@@ -89,6 +89,11 @@ export const config = {
   installationBin,
   dataHome,
   dataStateDir,
+  driversDir: process.env.GRIGDESK_DRIVERS_DIR || path.join(dataHome, 'drivers'),
+  driverSourcesPath: path.join(dataHome, 'driver-sources.json'),
+  driverInstallsPath: path.join(dataStateDir, 'driver-installs.json'),
+  trackerSettingsPath: path.join(dataStateDir, 'tracker-settings.json'),
+  trackerCredentialsPath: path.join(dataStateDir, 'tracker-credentials.json'),
   // Библиотека 3D отделена от чатов и проектных деревьев; плагин открывает её
   // только после включения, тестовые серверы задают собственный каталог.
   studio3dDir: process.env.GRIGDESK_3D_DIR || dataPath(dataHome, 'studio3d'),
@@ -214,16 +219,11 @@ export const config = {
   webLogDir: process.env.GRIGDESK_WEB_LOG_DIR || path.join(dataStateDir, 'web-log'),
 
 
-  // Битрикс24. Куки и креды — В СВОЁМ каталоге (изоляция: свой cookie-файл = нет
-  // session-thrash). Портал/креды задаются из «Настроек» и живут в .state (gitignore).
-  // Никаких проектных значений по умолчанию в коде — пустой GrigDesk не знает ничего.
-  b24BaseUrl: process.env.GRIGDESK_B24_BASE_URL || '',
-  b24CookiePath: process.env.B24_COOKIE_PATH || path.join(dataStateDir, 'b24-cookies.json'),
-  b24CredsPath: process.env.B24_CREDS_PATH || path.join(dataStateDir, 'b24-creds.json'),
-
   // Постановки задач для immutable route-прогонов. Хранилище GrigDesk, а НЕ
   // рабочее дерево задачи: дерево принадлежит агенту, и файл постановки в нём агент
   // может переписать. Движок делает себе доверенную копию сам.
+  factoryTaskSourcesPath: process.env.GRIGDESK_FACTORY_TASK_SOURCES_PATH
+    || path.join(dataStateDir, 'factory-task-sources.json'),
   grigdeskTasksPath: process.env.GRIGDESK_TASKS_PATH || path.join(dataStateDir, 'grigdesk-tasks.json'),
 
   ticketsDir: process.env.GRIGDESK_TICKETS_DIR || path.join(dataStateDir, 'tickets'),
@@ -319,10 +319,10 @@ export const config = {
   // Пусто → кнопка «снести стенд» отвечает «не настроено». Без хардкода путей проекта.
   sandboxDownCmd: process.env.GRIGDESK_SANDBOX_DOWN_CMD || '',
 
-  // Медиа-конвейер (распознавание речи). Venv из state/ папки данных подключается через
-  // GRIGDESK_MEDIA_PYTHON; читается в media/preflight.ts. Хранилище job'ов/медиа.
+  // Медиа-конвейер использует штатный venv папки данных без дополнительной настройки.
+  // GRIGDESK_MEDIA_PYTHON позволяет явно подключить внешнее окружение вместо штатного.
   mediaDir: process.env.GRIGDESK_MEDIA_DIR || path.join(dataStateDir, 'media'),
-  mediaPython: process.env.GRIGDESK_MEDIA_PYTHON || '',
+  mediaPython: process.env.GRIGDESK_MEDIA_PYTHON || path.join(dataPath(dataHome, 'mediaVenv'), 'bin/python'),
   // Собственный кэш моделей речи: обычный transcribe работает fail-closed и никогда
   // не скачивает веса в общий ~/.cache. Все Python-spawn получают этот HF_HOME.
   mediaHfDir: process.env.GRIGDESK_MEDIA_HF_DIR || path.join(dataStateDir, 'hf'),

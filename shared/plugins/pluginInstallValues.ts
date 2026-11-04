@@ -13,7 +13,8 @@ export const INSTALL_JOB_KINDS = [
   'install', 'update', 'rollback',
 ] as const satisfies readonly PluginInstallJobKind[];
 export const INSTALL_JOB_STATUSES = [
-  'running', 'ready', 'applying', 'done', 'failed', 'cancelled', 'interrupted', 'recovery_required',
+  'running', 'ready', 'awaiting_restart', 'applying', 'done', 'failed', 'cancelled',
+  'interrupted', 'recovery_required',
 ] as const satisfies readonly PluginInstallJobStatus[];
 export const INSTALL_STAGES = [
   'fetching', 'validating', 'dependencies',
@@ -22,7 +23,7 @@ export const INSTALL_TERMINAL_STATUSES = [
   'done', 'failed', 'cancelled', 'interrupted',
 ] as const satisfies readonly PluginInstallJobStatus[];
 export const INSTALL_PREPARED_STATUSES = [
-  'ready', 'applying', 'done',
+  'ready', 'awaiting_restart', 'applying', 'done',
 ] as const satisfies readonly PluginInstallJobStatus[];
 
 /**

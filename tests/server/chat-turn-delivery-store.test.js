@@ -4,6 +4,7 @@
 // запуск: F5 до приёма, потерянный ответ на приём, обрыв SSE на конце хода, очередь
 // одного чата и второе окно.
 import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
 import test from 'node:test';
 import { withChatImageHint } from '../../server/src/lib/chat/imageHint.ts';
 import { ChatHistoryStore } from '../../server/src/lib/chat/historyStore.ts';
@@ -187,6 +188,87 @@ function replies(chat, id) {
 
 const settle = () => new Promise((resolve) => {
   setTimeout(resolve, 20);
+});
+
+test('ENOSPC при подготовке инструментов завершает ход в окне и позволяет новый запуск', async (t) => {
+  const w = await world(t);
+  const id = 'preparation-error-chat';
+
+  w.executor.workToolsTransport = 'mcp';
+  await saveChat(w.app, id);
+
+  const view = await w.openWindow(id);
+  const mkdtemp = fs.mkdtemp;
+  const failure = Object.assign(new Error('ENOSPC: no space left on device, mkdtemp'), {
+    code: 'ENOSPC',
+  });
+  const mock = t.mock.method(fs, 'mkdtemp', (prefix, ...args) => {
+    if (String(prefix).includes('grigdesk-work-')) {
+      return Promise.reject(failure);
+    }
+
+    return mkdtemp(prefix, ...args);
+  });
+
+  await view.chat.send(id, 'Проверь временные файлы');
+  await waitFor(() => view.chat.session(id).messages.some((message) => message.role === 'error'));
+  await settle();
+
+  const session = view.chat.session(id);
+  const error = session.messages.find((message) => message.role === 'error');
+  const turnId = session.messages.find((message) => message.role === 'user').turnId;
+  const done = w.events.filter((entry) => entry.event === 'chat-done' && entry.data.turnId === turnId);
+
+  assert.equal(done.length, 1, 'подготовка тоже обязана послать конец хода');
+  assert.equal(session.sending, false, 'после ошибки агент не остаётся работающим');
+  assert.match(error.text, /недостаточно места/i);
+  assert.match(error.text, /освободите/i);
+  assert.match(error.text, /ENOSPC/);
+  assert.equal(w.runs.length, 0, 'ошибка подготовки не запускает исполнителя');
+  assert.deepEqual((await w.app.inject('/api/chat/active')).json().active, []);
+
+  mock.mock.restore();
+  await view.chat.send(id, 'Место освобождено, проверь снова');
+  await w.waitForRuns(1);
+  w.runs[0].release('Запуск восстановлен');
+  await waitFor(() => replies(view.chat, id).some((message) => message.text === 'Запуск восстановлен')
+    && !view.chat.session(id).sending);
+  assert.equal(w.runs.length, 1);
+});
+
+test('ошибка подготовки из очереди снимает работу после предыдущего успешного хода', async (t) => {
+  const w = await world(t);
+  const id = 'queued-preparation-chat';
+
+  await saveChat(w.app, id);
+
+  const view = await w.openWindow(id);
+
+  await view.chat.send(id, 'Первое сообщение');
+  await w.waitForRuns(1);
+
+  w.executor.workToolPolicy = () => {
+    throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+  };
+
+  await view.chat.send(id, 'Второе сообщение');
+  w.runs[0].release('Первый ответ');
+  await waitFor(() => replies(view.chat, id).length === 1
+    && view.chat.session(id).messages.some((message) => message.role === 'error'));
+  await settle();
+  assert.equal(view.chat.session(id).sending, false);
+  assert.equal(w.runs.length, 1);
+
+  const failedDone = w.events.find((entry) => entry.event === 'chat-done' && !entry.data.runId);
+
+  delete w.executor.workToolPolicy;
+  await view.chat.send(id, 'Третье сообщение');
+  await w.waitForRuns(2);
+  view.sse('chat-done', failedDone.data);
+  await settle();
+  assert.equal(view.chat.session(id).sending, true, 'поздний конец подготовки не гасит новый запуск');
+  w.runs[1].release('Третий ответ');
+  await waitFor(() => replies(view.chat, id).length === 2 && !view.chat.session(id).sending);
 });
 
 test('20 завершённых блоков с серверными записями сохраняются sparse без лишних full PUT', async (t) => {

@@ -333,10 +333,15 @@ onBeforeUnmount(() => {
 }
 
 @container chat-status (max-width: 480px) {
-  /* Слева место уступают декоративные точки и подпись единицы: время и число токенов
-     остаются целыми. */
-  .chat-status__row { gap: 8px; }
-  .chat-status__activity { max-width: calc(100% - min(8em, 38%) - 8px); }
+  /* В узком чате активность и метрики получают отдельные строки: несжимаемые числа
+     больше не заходят на квоты справа. Смена слова не меняет число строк и высоту. */
+  .chat-status__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .chat-status__activity { max-width: none; }
+  .chat-status__summary { padding-left: 27px; }
   .chat-status__activity :deep(.think) { gap: 5px; }
   .chat-status__activity :deep(.said) { min-width: 0; }
   .chat-status__activity :deep(.fact) { margin-left: 0; }

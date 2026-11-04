@@ -53,3 +53,16 @@ test('SELECT-DATA-02: пустота и number/trim повторяют суще�
   assert.equal(api.normalizeUiSelectValue(' x ', { trim: true }), 'x');
   assert.equal(api.normalizeUiSelectValue('unknown', { number: true }), 'unknown');
 });
+
+test('SELECT-DATA-03: отдельная подсказка ищется независимо от короткого описания', () => {
+  const select = browser.document.createElement('select');
+
+  select.innerHTML = '<option value="copy" data-description="dev" title="/work/project">Основная</option>';
+
+  const rows = api.readUiSelectOptions(select);
+
+  assert.equal(rows[0].description, 'dev');
+  assert.equal(rows[0].title, '/work/project');
+  assert.equal(api.filterUiSelectOptions(rows, '/WORK/PROJECT')[0].value, 'copy');
+  assert.equal(api.filterUiSelectOptions(rows, 'dev')[0].value, 'copy');
+});

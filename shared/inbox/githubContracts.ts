@@ -79,7 +79,7 @@ const githubStatus = objectOf({
 
 // Поля задачи Битрикс24 у правила. Пустое значение — это null, а не ноль: ноль был бы
 // настоящим идентификатором, и подставлять его вместо «не задано» нельзя.
-const ruleB24 = objectOf({
+const ruleTracker = objectOf({
   responsibleId: nullable(wholeNumber),
   groupId: nullable(wholeNumber),
   priority: oneOf(0, 1, 2),
@@ -99,7 +99,7 @@ const githubRule = objectOf({
   repositoryId: text,
   project: text,
   kind: oneOf('bug', 'wish'),
-  b24: optional(ruleB24),
+  b24: optional(ruleTracker),
   autoTask: optional(ruleAutoTask),
   agentSearch: optional(boolean),
 });
@@ -123,7 +123,7 @@ const agentSearchSaved = objectOf({
 export type GitHubStatus = ReturnType<typeof githubStatus>;
 export type GitHubRule = ReturnType<typeof githubRule>;
 export type GitHubPolicy = ReturnType<typeof githubPolicy>;
-export type GitHubRuleB24 = ReturnType<typeof ruleB24>;
+export type GitHubRuleTracker = ReturnType<typeof ruleTracker>;
 export type GitHubRuleAutoTask = ReturnType<typeof ruleAutoTask>;
 
 // Что уезжает на сервер при сохранении правила. `agentSearch` здесь отсутствует
@@ -132,7 +132,7 @@ export interface GitHubRuleInput {
   repositoryId: string;
   project: string;
   kind: 'bug' | 'wish';
-  b24?: GitHubRuleB24;
+  b24?: GitHubRuleTracker;
   autoTask?: GitHubRuleAutoTask;
 }
 

@@ -7,11 +7,14 @@ import { liveGroupMembers } from '../../../server/src/lib/packageInstall/workerI
 
 import { AuthStore } from '../../../server/src/lib/authStore.ts';
 import authPlugin from '../../../server/src/plugins/auth.ts';
+import { SESSION_ONLY_PREFIXES } from '../../../server/src/modules/plugins/installRoutes.ts';
 import installRoutes from '../../../server/src/modules/plugins/installRoutes.ts';
 import catalogRoutes from '../../../server/src/modules/plugin-catalog/index.ts';
 import pluginsModule from '../../../server/src/modules/plugins/index.ts';
 import { PluginInstallService } from '../../../server/src/lib/packageInstall/service.ts';
 import { installJob, installedRecord } from './pluginInstallState.js';
+
+import { png } from '../../helpers/pluginV1.js';
 
 export const requireFromServer = createRequire(new URL('../../../server/package.json', import.meta.url));
 
@@ -36,6 +39,7 @@ export function installPortFixture() {
     refreshCatalog: async () => {},
     restartRequired: () => false,
     describe: async () => null,
+    listInstalled: async () => call('listInstalled', [], {}),
     currentJob: async () => call('currentJob', [], job),
     getJob: async (id) => call('getJob', [id], job),
     listVersions: async (url) => call('listVersions', [url],
@@ -137,12 +141,15 @@ export async function installHttpFixture(t, options = {}) {
   options.configure?.(app);
 
   await app.register(authPlugin, {
+    sessionOnlyPrefixes: SESSION_ONLY_PREFIXES,
     authStore,
     internalToken: 'fixture-internal',
     cliToken: 'fixture-cli',
   });
 
-  await options.registerRoutes?.(app);
+  if (options.registerRoutes) {
+    await options.registerRoutes(app);
+  }
 
   if (options.catalog) {
     await app.register(catalogRoutes, { catalog: options.catalog });
@@ -153,6 +160,7 @@ export async function installHttpFixture(t, options = {}) {
       config,
       prefs,
       ...(options.withoutInstalls ? {} : { installs }),
+      grigDeskVersion: options.serviceOptions?.grigDeskVersion ?? '1.0.0',
     });
   } else {
     await app.register(installRoutes, { installs });
@@ -190,11 +198,16 @@ export async function writeHttpPlugin(pluginsDir, id, manifest = {}, files = {})
   await mkdir(directory, { recursive: true });
   await writeFile(path.join(directory, 'plugin.json'), JSON.stringify({
     id,
+    api: 1,
     version: '1.0.0',
+    description: 'Тестовый плагин',
+    icon: 'assets/icon.png',
+    entrypoints: files['server.js'] ? { server: 'server.js' } : {},
+    contributes: {},
     ...manifest,
   }));
 
-  for (const [file, content] of Object.entries(files)) {
+  for (const [file, content] of Object.entries({ 'assets/icon.png': png, ...files })) {
     await mkdir(path.dirname(path.join(directory, file)), { recursive: true });
     await writeFile(path.join(directory, file), content);
   }

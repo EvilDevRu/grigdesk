@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { promises as fs } from 'node:fs';
 import {
   mkdirSync,
   mkdtempSync,
@@ -249,6 +250,10 @@ export class SpeechRuntime {
 
   private closed: boolean;
 
+  private maintenance = false;
+
+  private transcriptions = 0;
+
   constructor({
     mediaDir,
     jobsDir = path.join(mediaDir, 'jobs'),
@@ -375,7 +380,15 @@ export class SpeechRuntime {
     return this.modelJobs?.cancelJob(jobId);
   }
 
+  /**
+   * Все новые операции проходят общий допуск до разрешения параметров и запуска worker.
+   * Обслуживание окружения не допускает старта Python даже при готовом кэше capabilities.
+   */
   #options(settings: unknown, options: unknown, scenario: string): SpeechOptions {
+    if (this.maintenance) {
+      throw speechUnavailable('Окружение речи обслуживается. Повторите после завершения операции.');
+    }
+
     if (isResolvedOptions(options)) return normalizeSpeechOptions(options, scenario);
     return resolveSpeechOptions(options ?? settings ?? this.settings, scenario);
   }
@@ -1180,7 +1193,29 @@ export class SpeechRuntime {
     }
   }
 
-  async transcribe({
+  /**
+   * Счётчик охватывает подготовку и внешние процессы до очистки рабочего каталога.
+   * Установщик не меняет venv между проверкой готовности и запуском Python.
+   */
+  async transcribe(input: Parameters<SpeechRuntime['transcribeInternal']>[0]) {
+    if (this.maintenance) {
+      throw speechUnavailable('Окружение речи обслуживается. Повторите после завершения операции.');
+    }
+
+    this.transcriptions += 1;
+
+    try {
+      return await this.transcribeInternal(input);
+    } finally {
+      this.transcriptions -= 1;
+    }
+  }
+
+  /**
+   * Распознаёт запись через подходящий прогрев либо отдельный процесс.
+   * Рабочий каталог и прогрев освобождаются только после завершения распознавания.
+   */
+  private async transcribeInternal({
     filePath,
     workDir = null,
     settings = null,
@@ -1309,6 +1344,55 @@ export class SpeechRuntime {
 
   residentStatus() {
     return residentUnavailable();
+  }
+
+  /**
+   * Допуск запрещает новые старты до первой асинхронной проверки и не прерывает текущие.
+   * Detached video и model jobs проверяются отдельно от живых диктовок этого процесса.
+   */
+  async prepareMaintenance(): Promise<() => void> {
+    if (this.maintenance || this.transcriptions || this.streams.size
+      || this.warmups.size || this.pendingWarmups) {
+      throw speechStreamBusy('Речь сейчас используется. Дождитесь окончания распознавания.');
+    }
+
+    this.maintenance = true;
+
+    let releaseModels: (() => void) | undefined;
+
+    try {
+      releaseModels = await this.modelJobs?.prepareMaintenance();
+
+      const entries = await fs.readdir(this.jobsDir).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') {
+          return [];
+        }
+
+        throw error;
+      });
+
+      for (const entry of entries) {
+        if (!entry.endsWith('.json') || entry.endsWith('.worker.json')) {
+          continue;
+        }
+
+        const job = this.readVideoJob(entry.slice(0, -5));
+
+        if (job?.status === 'running') {
+          throw speechStreamBusy('Сейчас идёт расшифровка видео. Дождитесь её окончания.');
+        }
+      }
+    } catch (error) {
+      this.maintenance = false;
+      releaseModels?.();
+
+      throw error;
+    }
+
+    return () => {
+      releaseModels?.();
+      this.maintenance = false;
+    };
   }
 
   async shutdown(): Promise<void> {

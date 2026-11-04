@@ -9,38 +9,113 @@
     </div>
     <template v-else>
       <div class="browser-tab-row">
-        <div v-if="browser.snapshot.tabs.length" ref="tabRow" class="browser-tabs-scroll">
+        <div v-if="browser.snapshot.tabs.length" ref="tabRow" class="browser-tabs-scroll" @wheel="scrollTabs">
           <UiTabs
             :model-value="selected"
             :label="t('core.browserTabs')"
             data-ui-browser-tabs
             @update:model-value="selectTab"
           >
-            <div
+            <UiPopover
                 v-for="tab in browser.snapshot.tabs"
                 :key="tab.id"
-                data-ui-browser-tab
-                :data-selected="tab.id === selected"
+                :open="contextTab === tab.id"
+                has-popup="menu"
+                :return-focus="false"
+                @update:open="menuState(tab.id, $event)"
+                @close="menuClosed($event, tab.id)"
             >
-              <UiTab :id="`browser-tab-${tab.id}`" :value="tab.id" controls="browser-page">
-                <svg class="browser-tab-icon" v-bind="ICON" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M3 12h18M12 3a16 16 0 0 1 0 18a16 16 0 0 1 0-18" />
-                </svg>
-                <span class="browser-tab-label" v-tooltip="tabName(tab)">
-                  {{ tabName(tab) }}
-                </span>
-              </UiTab>
-              <UiIconButton
-                  role="embedded"
-                  data-context="workspace-toolbar"
-                  :label="t('core.browserCloseNamed', { name: tabName(tab) })"
-                  v-tooltip="t('core.browserCloseNamed', { name: tabName(tab) })"
-                  @click="closeTab(tab.id)"
-              >
-                <svg v-bind="ICON" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
-              </UiIconButton>
-            </div>
+              <template #trigger>
+                <div
+                    data-ui-browser-tab
+                    :data-selected="tab.id === selected"
+                    :data-dragging="draggedTab === tab.id"
+                    :data-drop="dropTab === tab.id ? dropSide : undefined"
+                    draggable="true"
+                    @contextmenu.prevent.stop="contextTab = tab.id"
+                    @keydown="tabMenuKey($event, tab.id)"
+                    @auxclick.middle.prevent="closeTab(tab.id)"
+                    @dragstart="startDrag($event, tab.id)"
+                    @dragover="overTab($event, tab.id)"
+                    @drop="dropOnTab($event, tab.id)"
+                    @dragend="endDrag"
+                >
+                  <UiTab :id="`browser-tab-${tab.id}`" :value="tab.id" controls="browser-page">
+                    <svg
+                        class="browser-tab-icon"
+                        v-bind="ICON"
+                        aria-hidden="true"
+                        :data-agent-state="hasAgentAccess(tab)
+                          ? (tab.paused ? 'paused' : 'active') : undefined"
+                        v-tooltip="hasAgentAccess(tab)
+                          ? t(tab.owner !== null ? 'core.browserOwner' : 'core.browserController',
+                            { name: ownerName(tab.owner ?? tab.grantee) }) : ''"
+                    >
+                      <g v-if="hasAgentAccess(tab)" data-browser-tab-robot>
+                        <rect x="3" y="8" width="18" height="12" rx="3" />
+                        <path d="M12 8V4m-2 0h4M8 12v2m8-2v2m-7 3h6M3 13H1m20 0h2" />
+                      </g>
+                      <g v-else data-browser-tab-globe>
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M3 12h18M12 3a16 16 0 0 1 0 18a16 16 0 0 1 0-18" />
+                      </g>
+                    </svg>
+                    <span class="browser-tab-label" v-tooltip="tabName(tab)">
+                      {{ tabName(tab) }}
+                    </span>
+                  </UiTab>
+                  <UiIconButton
+                      role="embedded"
+                      data-context="workspace-toolbar"
+                      :label="t('core.browserCloseNamed', { name: tabName(tab) })"
+                      v-tooltip="t('core.browserCloseNamed', { name: tabName(tab) })"
+                      @click.stop="closeTab(tab.id)"
+                  >
+                    <svg v-bind="ICON" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+                  </UiIconButton>
+                </div>
+              </template>
+              <template #default>
+                <div class="browser-tab-menu">
+                  <UiButton role="menuitem" variant="ghost" @click="tabMenuAction('new', tab.id)">
+                    {{ t('core.browserNewTab') }}
+                  </UiButton>
+                  <UiButton role="menuitem" variant="ghost" @click="tabMenuAction('reload', tab.id)">
+                    {{ t('core.browserReload') }}
+                  </UiButton>
+                  <UiButton role="menuitem" variant="ghost" @click="tabMenuAction('duplicate', tab.id)">
+                    {{ t('core.browserDuplicateTab') }}
+                  </UiButton>
+                  <UiButton role="menuitem" variant="ghost" @click="tabMenuAction('close', tab.id)">
+                    {{ t('core.browserCloseTab') }}
+                  </UiButton>
+                  <UiButton
+                      role="menuitem"
+                      variant="ghost"
+                      :disabled="browser.snapshot.tabs.length < 2"
+                      @click="tabMenuAction('others', tab.id)"
+                  >
+                    {{ t('core.browserCloseOtherTabs') }}
+                  </UiButton>
+                  <UiButton
+                      role="menuitem"
+                      variant="ghost"
+                      :disabled="browser.snapshot.tabs.at(-1)?.id === tab.id"
+                      @click="tabMenuAction('right', tab.id)"
+                  >
+                    {{ t('core.browserCloseTabsRight') }}
+                  </UiButton>
+                  <UiButton
+                      role="menuitem"
+                      variant="ghost"
+                      :disabled="!browser.snapshot.tabs.some(isUnusedTab)"
+                      @click="tabMenuAction('unused', tab.id)"
+                  >
+                    {{ t('core.browserCloseUnusedTabs') }}
+                  </UiButton>
+                </div>
+              </template>
+            </UiPopover>
           </UiTabs>
         </div>
         <div class="browser-tab-row__create">
@@ -87,14 +162,16 @@
               v-tooltip="t('core.browserReload')"
               @click="history('reload')"
           >
-            <svg v-bind="ICON" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
+            <UiRefreshIcon />
           </UiIconButton>
         </div>
         <div class="browser-address">
           <UiInput
             ref="address"
             v-model="draft"
-            type="url"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
             :aria-label="t('core.browserAddress')"
             :placeholder="t('core.browserAddressPlaceholder')"
             @focus="addressFocused = true"
@@ -192,7 +269,7 @@
               :disabled="browser.hostStatus.phase !== 'online'"
               @click="loadOwners"
           >
-            <svg v-bind="ICON" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
+            <UiRefreshIcon />
           </UiIconButton>
         </div>
       </div>
@@ -228,18 +305,20 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { SVGAttributes } from 'vue';
 
 import {
+  UiRefreshIcon,
   UiButton,
   UiDisclosureButton,
   UiIconButton,
   UiInlineMessage,
   UiInput,
+  UiPopover,
   UiSelect,
   UiTab,
   UiTabs,
   t,
   vTooltip,
 } from '../ui.ts';
-import { browserUrl } from '../../../shared/browser/browserContract.ts';
+import { browserAddress } from '../../../shared/browser/browserContract.ts';
 import { useBrowserStore } from '../stores/browser.ts';
 import { browserOwnerScope } from '../shared/browser/browserUi.ts';
 import type { BrowserTab } from '../shared/browser/browserUi.ts';
@@ -264,6 +343,10 @@ const chosenOwner = ref('');
 const accessExpanded = ref(false);
 const grantBusy = ref(false);
 const error = ref('');
+const contextTab = ref('');
+const draggedTab = ref('');
+const dropTab = ref('');
+const dropSide = ref<'before' | 'after'>('before');
 const selected = computed(() => active.value?.id ?? '');
 const hasPage = computed(() => Boolean(active.value?.url && active.value.url !== 'about:blank'));
 const zoomLevels = [25, 50, 75, 100, 125, 150, 175, 200, 250, 300];
@@ -272,6 +355,18 @@ let tabObserver: ResizeObserver | null = null;
 
 function tabName(tab: BrowserTab): string {
   return tab.title || (tab.url === 'about:blank' ? '' : tab.url) || t('core.browserNewTab');
+}
+
+// Пауза сохраняет доступ исполнителя, поэтому робот остаётся в том же слоте.
+// Владелец без живого origin и без явного grant уже не управляет вкладкой.
+function hasAgentAccess(tab: BrowserTab): boolean {
+  return tab.grantee !== null || (tab.owner !== null && tab.grantOrigin !== null);
+}
+
+// Очистка касается только агентских остатков, которым нужна новая выдача человеком.
+// Человеческие вкладки и любой живой доступ, включая паузу, сохраняются.
+function isUnusedTab(tab: BrowserTab): boolean {
+  return tab.owner !== null && tab.grantee === null && tab.grantOrigin === null;
 }
 
 /**
@@ -357,14 +452,15 @@ async function selectTab(id: string | number): Promise<void> {
 }
 
 /**
- * URL валидируется до вызова IPC, а native повторяет собственную проверку.
+ * Адрес без схемы или поисковый запрос преобразуется в абсолютный HTTP(S) URL.
+ * Выбранная поисковая система берётся из подтверждённых настроек компьютера.
  * Invalid/unknown result не вызывает fallback во внешний браузер.
  */
 async function submit(): Promise<void> {
   let url: string;
 
   try {
-    url = browserUrl(draft.value.trim());
+    url = browserAddress(draft.value, browser.preferences.search);
   } catch {
     error.value = 'browser_request_failed';
 
@@ -414,6 +510,167 @@ async function closeTab(tabId: string): Promise<void> {
       address.value?.focus();
     }
   }
+}
+
+function menuState(tabId: string, open: boolean): void {
+  if (!open && contextTab.value === tabId) {
+    contextTab.value = '';
+  }
+}
+
+function menuClosed(reason: string, tabId: string): void {
+  if (reason === 'escape') {
+    document.getElementById(`browser-tab-${tabId}`)?.focus();
+  }
+}
+
+function scrollTabs(event: WheelEvent): void {
+  const strip = tabRow.value;
+
+  if (strip && strip.scrollWidth > strip.clientWidth && event.deltaY && !event.ctrlKey) {
+    event.preventDefault();
+    strip.scrollLeft += event.deltaY;
+  }
+}
+
+function tabMenuKey(event: KeyboardEvent, tabId: string): void {
+  if (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') {
+    event.preventDefault();
+    contextTab.value = tabId;
+  }
+}
+
+/**
+ * Меню действует на указанную вкладку, даже если выбрана другая страница.
+ * Групповое закрытие фиксирует список до первого await и останавливается при отказе native.
+ */
+async function tabMenuAction(
+  operation: 'new' | 'reload' | 'duplicate' | 'close' | 'others' | 'right' | 'unused',
+  tabId: string,
+): Promise<void> {
+  contextTab.value = '';
+
+  const tabs = [...browser.snapshot.tabs];
+  const index = tabs.findIndex((tab) => tab.id === tabId);
+  const tab = tabs[index];
+
+  if (!tab) {
+    return;
+  }
+
+  if (operation === 'new') {
+    await newTab();
+
+    return;
+  }
+
+  if (operation === 'reload') {
+    await action({ operation: 'reload', tabId });
+  } else if (operation === 'duplicate') {
+    await action({
+      operation: 'open',
+      target: 'internal',
+      url: tab.url === 'about:blank' ? '' : tab.url,
+      deduplicate: false,
+    });
+  } else {
+    const closing = operation === 'others' ? tabs.filter((item) => item.id !== tabId)
+      : operation === 'right' ? tabs.slice(index + 1)
+        : operation === 'unused' ? tabs.filter(isUnusedTab) : [tab];
+
+    if (operation === 'others' && !await action({ operation: 'activate', tabId })) {
+      return;
+    }
+
+    for (const item of closing) {
+      if (!await action({ operation: 'close', tabId: item.id })) {
+        break;
+      }
+    }
+  }
+
+  await nextTick();
+  tabRow.value?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+
+  if (!active.value) {
+    address.value?.focus();
+  }
+}
+
+/**
+ * Drag содержит лишь локальный ID вкладки и не принимает перенос с сайта или из другого окна.
+ * Начало переноса закрывает меню, чтобы overlay не перехватил drop полосы вкладок.
+ */
+function startDrag(event: DragEvent, tabId: string): void {
+  if (!event.dataTransfer) {
+    return;
+  }
+
+  contextTab.value = '';
+  draggedTab.value = tabId;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', tabId);
+}
+
+/**
+ * Левая и правая половины вкладки задают точное место вставки.
+ * Края прокручиваемой полосы позволяют дотянуть перенос до скрытых вкладок.
+ */
+function overTab(event: DragEvent, tabId: string): void {
+  if (!draggedTab.value || draggedTab.value === tabId || !event.dataTransfer) {
+    return;
+  }
+
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  const strip = tabRow.value;
+
+  dropTab.value = tabId;
+  dropSide.value = event.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+
+  if (strip) {
+    const bounds = strip.getBoundingClientRect();
+
+    if (event.clientX < bounds.left + 32) {
+      strip.scrollLeft -= 24;
+    } else if (event.clientX > bounds.right - 32) {
+      strip.scrollLeft += 24;
+    }
+  }
+}
+
+/**
+ * Перестановку подтверждает native-реестр, иначе следующий snapshot отменит порядок.
+ * ID соседней вкладки устойчив к закрытию или появлению других вкладок во время drag.
+ */
+async function dropOnTab(event: DragEvent, tabId: string): Promise<void> {
+  if (!draggedTab.value || dropTab.value !== tabId) {
+    return;
+  }
+
+  event.preventDefault();
+
+  const tabIds = browser.snapshot.tabs.map((tab) => tab.id);
+  const beforeId = dropSide.value === 'before' ? tabId : tabIds[tabIds.indexOf(tabId) + 1] ?? null;
+  const moving = draggedTab.value;
+
+  endDrag();
+
+  if (moving !== beforeId) {
+    await action({
+      operation: 'move',
+      tabId: moving,
+      beforeId,
+    });
+    revealActiveTab();
+  }
+}
+
+function endDrag(): void {
+  draggedTab.value = '';
+  dropTab.value = '';
 }
 
 async function zoom(value: number): Promise<void> {
@@ -614,6 +871,17 @@ onBeforeUnmount(() => {
   flex: 0 1 auto;
   min-width: 0;
   overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.browser-tabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.browser-tab-menu {
+  display: grid;
+  min-width: 200px;
+  gap: 4px;
 }
 
 .browser-tab-row__create {

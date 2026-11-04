@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import { compileVue, webFile } from '../../helpers/compile-vue.js';
 import { compileTaskModal } from '../../helpers/task-modal.js';
+import { trackerMetadata } from '../../helpers/trackerCard.js';
 import { installUiBrowser } from '../../helpers/ui-components.js';
 
 let serial = 0;
@@ -44,6 +45,10 @@ export async function mountLoadingTask(t, area = 'options') {
     get(url) {
       calls.push(url);
 
+      if (url === '/api/trackers') {
+        return Promise.resolve(trackerMetadata('fixture-driver'));
+      }
+
       if (url.endsWith('/clarifications')) {
         return Promise.resolve({ text: '' });
       }
@@ -52,15 +57,15 @@ export async function mountLoadingTask(t, area = 'options') {
         return Promise.resolve({ tasks: [] });
       }
 
-      if (url === '/api/b24/users') {
+      if (url === '/api/tracker/users') {
         return users.promise;
       }
 
-      if (url === '/api/b24/groups') {
+      if (url === '/api/tracker/groups') {
         return groups.promise;
       }
 
-      if (url === '/api/b24/task/42/comments') {
+      if (url === '/api/tracker/task/42/comments') {
         return comments.promise;
       }
 

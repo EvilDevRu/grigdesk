@@ -995,3 +995,106 @@ export async function initializeFactoryRuntimeRegistry(cacheDir: string): Promis
     await writeRuntimeJson(path.join(cacheDir, 'state/control-roots.json'), registry);
   });
 }
+
+/**
+ * Снимает закрепление попытки с её рантайма: authority pin, производный индекс,
+ * пережитую reservation и ссылки реестра. Попытка, каталог и курсор не меняются —
+ * следующий запуск попытки свободно закрепится за текущей поставкой сервера.
+ *
+ * Единственный штатный потребитель — перепривязка после runner_preflight_incompatible:
+ * закреплённый движок сам сообщил, что несовместим с фактической поставкой исполнителя.
+ * Вызов идёт под gc+package lock и идемпотентен: частичный отказ лечится повтором,
+ * отсутствие пина и ссылок — штатный «unpinned: false».
+ */
+export async function unpinFactoryRuntimeAttempt(input: FactoryRuntimeRoots & {
+  cacheDir: string;
+  task: string;
+  attempt: string;
+  profile: string;
+}): Promise<{ unpinned: boolean; packageId: string | null }> {
+  await validateFactoryRuntimeRoots(input);
+
+  const scope = factoryRuntimeScope(input);
+  const identity = await readFactoryRuntimeAttempt(input, input.task, input.attempt);
+
+  if (identity.profile !== input.profile) {
+    throw runtimeError('factory_runtime_attempt_invalid');
+  }
+
+  return withRuntimeGcLock(input.cacheDir, () => withPackageLock(input.cacheDir, scope, async () => {
+    const file = path.join(input.controlRoot, 'server-runtimes', scope, `${input.attempt}.json`);
+    const index = path.join(input.cacheDir, 'attempt-pins', scope, `${input.attempt}.json`);
+
+    let previousPin: FactoryRuntimePin | null = null;
+    let packageId: string | null = null;
+    let reservationToken: string | null = null;
+
+    for (const candidate of [file, index]) {
+      const value = await readRuntimeJson(candidate).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') {
+          return undefined;
+        }
+
+        throw error;
+      });
+
+      if (value === undefined) {
+        continue;
+      }
+
+      const pin = decodeFactoryRuntimePin(value);
+
+      if (pin.scope !== scope || pin.task !== input.task || pin.attempt !== input.attempt) {
+        throw runtimeError('factory_runtime_pin_invalid');
+      }
+
+      // Производный индекс не подменяет authority: расхождение означает порчу,
+      // при которой снимать защиту поколения и чужой reservation token нельзя.
+      if (previousPin && canonicalJson(previousPin) !== canonicalJson(pin)) {
+        throw runtimeError('factory_runtime_pin_invalid');
+      }
+
+      previousPin = pin;
+      packageId = pin.packageId;
+      reservationToken = reservationToken ?? pin.reservationToken;
+    }
+
+    const registryFile = path.join(input.cacheDir, 'state/control-roots.json');
+    const registry = await registryForRegistration(input.cacheDir);
+    const root = registry.roots.find((entry) => factoryRuntimeScope(entry) === scope);
+
+    // Висячая ссылка без живого пина (снятая бронь, уцелевший реестр) тоже мешает
+    // повторному закреплению: resolve отвергает её как pin_missing. Убираем вместе
+    // с пином всё, что адресует эту попытку её прежним токеном.
+    const references = root?.references ?? [];
+    const stale = references.filter((ref) =>
+      (ref.token === null && ref.task === input.task && ref.attempt === input.attempt)
+      || (reservationToken !== null && ref.token === reservationToken));
+
+    if (!previousPin && stale.length === 0) {
+      return { unpinned: false, packageId: null };
+    }
+
+    // Токен остаётся в пине до конца очистки: при отказе удаления reservation
+    // следующий вызов сможет найти её снова, не оставив бессрочную бронь в кэше.
+    if (reservationToken !== null) {
+      await fs.rm(
+        path.join(input.controlRoot, 'server-runtimes', 'reservations', `${reservationToken}.json`),
+        { force: true },
+      );
+      await fs.rm(path.join(input.cacheDir, 'attempt-pins', 'reservations', `${reservationToken}.json`), {
+        force: true,
+      });
+    }
+
+    if (root) {
+      root.references = references.filter((ref) => !stale.includes(ref));
+      await writeRuntimeJson(registryFile, registry);
+    }
+
+    await fs.rm(index, { force: true });
+    await fs.rm(file, { force: true });
+
+    return { unpinned: true, packageId };
+  }));
+}

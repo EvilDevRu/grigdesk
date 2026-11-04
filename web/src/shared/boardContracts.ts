@@ -1,9 +1,16 @@
+import { isTaskSourceId } from '../../../shared/tasks/taskReference.ts';
+import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from './uiLocalePort.ts';
+import type { TrackerCapabilities, TrackerWidget } from '../../../shared/trackers/contracts.ts';
+import { isTrackerWidget } from '../../../shared/trackers/validation.ts';
 
 export interface BoardTask extends Record<string, unknown> {
   id: string | number;
+  source?: TaskSourceId | 'b24';
+  personalSource?: 'tracker' | 'grigdesk';
+  createdAt?: string;
   title?: string;
   group?: string;
   responsible?: string;
@@ -25,12 +32,27 @@ export interface TaskDetail extends Record<string, unknown> {
   title?: string;
   description?: string;
   status?: string | number;
+  statusText?: string;
   status_label?: string;
   priority?: number | string;
   priority_label?: string;
   group_id?: number | string;
   group_name?: string;
-  responsible?: { id?: number | string; name?: string };
+  deadline?: string | null;
+  creator?: {
+    name?: string;
+    icon?: string;
+  };
+  responsible?: {
+    id?: number | string;
+    name?: string;
+    icon?: string;
+  };
+  accomplicesData?: unknown;
+  auditorsData?: unknown;
+  checklist?: unknown;
+  parentId?: number | string;
+  replicate?: string;
   telegram?: { links?: TelegramLink[] };
 }
 
@@ -63,6 +85,12 @@ export interface TaskComment {
   time?: string;
   text?: string;
   attachments?: Array<{ attachedId?: number | string; name?: string }>;
+}
+
+export interface TaskSubtask {
+  id: number | string;
+  title: string;
+  statusText?: string;
 }
 
 export interface TaskLaunchOptions {
@@ -111,6 +139,11 @@ export interface BoardChart {
 }
 
 export interface BoardDashboard extends Record<string, unknown> {
+  source?: TaskSourceId;
+  trackerId?: string;
+  capabilities?: TrackerCapabilities;
+  widgets?: TrackerWidget[];
+  generation?: number;
   charts?: Record<string, BoardChart>;
   tasks?: BoardTask[];
   toReview?: BoardTask[];
@@ -146,7 +179,7 @@ function isBoardTask(value: unknown): value is BoardTask {
   }
 
   const textFields = [
-    'title', 'group', 'responsible', 'statusKind', 'statusLabel', 'deadline',
+    'title', 'group', 'responsible', 'statusKind', 'statusLabel', 'deadline', 'createdAt',
   ];
   const textValid = textFields.every((key) => value[key] == null || typeof value[key] === 'string');
   const numbersValid = ['timerElapsed'].every((key) => value[key] == null || typeof value[key] === 'number');
@@ -155,7 +188,8 @@ function isBoardTask(value: unknown): value is BoardTask {
   const timerStartValid = value.timerStartedAt == null || typeof value.timerStartedAt === 'string'
     || (typeof value.timerStartedAt === 'number' && Number.isFinite(value.timerStartedAt));
 
-  return textValid && numbersValid && flagsValid && timerStartValid && (value.responsibleId == null
+  return (value.source === undefined || value.source === 'b24' || isTaskSourceId(value.source))
+    && textValid && numbersValid && flagsValid && timerStartValid && (value.responsibleId == null
     || typeof value.responsibleId === 'string' || typeof value.responsibleId === 'number');
 }
 
@@ -165,6 +199,15 @@ function isBoardTask(value: unknown): value is BoardTask {
  */
 export function isBoardDashboard(value: unknown): value is BoardDashboard {
   if (!isRecord(value)) {
+    return false;
+  }
+
+  if ((value.source !== undefined && !isTaskSourceId(value.source))
+    || (value.trackerId !== undefined && typeof value.trackerId !== 'string')
+    || (value.capabilities !== undefined && (!isRecord(value.capabilities)
+      || !Object.values(value.capabilities).every((item) => typeof item === 'boolean')))
+    || (value.widgets !== undefined
+      && (!Array.isArray(value.widgets) || !value.widgets.every(isTrackerWidget)))) {
     return false;
   }
 
@@ -310,6 +353,35 @@ export function decodeTaskComments(value: unknown): TaskComment[] {
   }
 
   return items;
+}
+
+/**
+ * Теги остаются обычными строками драйвера, без интерпретации как ключей перевода.
+ * Отсутствующее или повреждённое расширение не мешает читать прежние комментарии.
+ */
+export function decodeTaskTags(value: unknown): string[] {
+  const tags = isRecord(value) ? value.tags : undefined;
+
+  return Array.isArray(tags) && tags.every((tag) => typeof tag === 'string') ? tags : [];
+}
+
+/**
+ * Подзадачи принимаются только с номером и заголовком для безопасного перехода.
+ * Старые драйверы без расширения сохраняют пустой список и прежний контракт ответа.
+ */
+export function decodeTaskSubtasks(value: unknown): TaskSubtask[] {
+  const subtasks = isRecord(value) ? value.subtasks : undefined;
+
+  if (!Array.isArray(subtasks) || !subtasks.every((item): item is TaskSubtask => (
+    isRecord(item) && ['string', 'number'].includes(typeof item.id)
+      && /^\d+$/u.test(String(item.id)) && Number(item.id) > 0
+      && typeof item.title === 'string'
+      && (item.statusText == null || typeof item.statusText === 'string')
+  ))) {
+    return [];
+  }
+
+  return subtasks;
 }
 
 /**

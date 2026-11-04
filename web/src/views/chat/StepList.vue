@@ -4,6 +4,7 @@
     <UiDisclosureButton
       v-if="!live"
       class="summary-disclosure"
+      data-context="chat-activity-summary"
       density="compact"
       :open="open"
       :controls="`${baseId}-list`"
@@ -25,6 +26,7 @@
         <template v-if="r.k === 'think'">
           <UiDisclosureButton
             class="step-disclosure"
+            data-context="chat-step"
             density="compact"
             :open="Boolean(expanded[r.rowKey])"
             :controls="`${baseId}-${r.rowKey}`"
@@ -48,6 +50,7 @@
         <template v-else-if="r.k === 'tool'">
           <UiDisclosureButton
             class="step-disclosure"
+            data-context="chat-step"
             density="compact"
             :open="Boolean(expanded[r.rowKey])"
             :controls="`${baseId}-${r.rowKey}`"
@@ -113,6 +116,7 @@
         <template v-else-if="r.k === 'res'">
           <UiDisclosureButton
             class="step-disclosure"
+            data-context="chat-step"
             density="compact"
             :open="Boolean(expanded[r.rowKey])"
             :controls="`${baseId}-${r.rowKey}`"
@@ -285,7 +289,7 @@ function toggle(row: StepRow) {
 
 function hasBody(row: StepRow) {
   return !!(
-    row.text || row.command || row.preview || row.diff || row.res?.text || pathOf(row)
+    row.text || row.command || row.preview || row.diff || row.res?.text || pathOf(row) || row.imagePath
     || changesOf(row).length
   );
 }
@@ -296,16 +300,19 @@ function pathOf(row: StepRow) {
   return typeof row.sub === 'string' ? row.sub : '';
 }
 
-// Картинка, которую агент рассмотрел (Read) или создал (GenerateImage), показывается
-// после успешного итога. Адрес даёт только маршрут картинок разговора: внешний URL и готовый
-// адрес /api из пути инструмента в ленту не попадают, а сервер отдаёт лишь растр из
-// рабочей папки или объявленного исполнителем каталога.
+/**
+ * Успешный результат инструмента может нести путь сохранённой картинки отдельно от подписи.
+ * Read и GenerateImage сохраняют прежний путь в sub; все миниатюры идут через маршрут чата.
+ */
 function imageOf(row: StepRow) {
-  if (!IMAGE_STEPS.has(row.name || '') || !row.res?.ok) {
+  if (!row.res?.ok) {
     return '';
   }
 
-  const href = chatWorkdirImageHref(pathOf(row), props.chatId);
+  const file = typeof row.imagePath === 'string'
+    ? row.imagePath
+    : IMAGE_STEPS.has(row.name || '') ? pathOf(row) : '';
+  const href = chatWorkdirImageHref(file, props.chatId);
 
   return href ? api.url(href) : '';
 }
@@ -402,6 +409,11 @@ function toolLabel(name: string | undefined) {
   color: var(--ink-low);
 }
 .list { display: flex; flex-direction: column; gap: 2px; }
+/* Компактные строки технической ленты идут без дополнительного промежутка.
+   Вложенные детали остаются внутри своей строки и не меняют площадку её раскрытия. */
+@media (max-width: 600px) {
+  .steps, .list { gap: 0; }
+}
 .step.nested { padding-left: 16px; border-left: 1px dashed var(--line); }
 
 .step-disclosure {

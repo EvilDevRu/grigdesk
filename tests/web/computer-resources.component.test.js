@@ -50,10 +50,10 @@ test('UI-01: GPU и разделы своего устройства', TEST_OPTI
   const memory = await h.panel.locator('.resource-section').nth(1).boundingBox();
   const disks = await h.panel.locator('.resource-disks').boundingBox();
 
-  assert.ok(memory.x >= computing.x + computing.width, 'память находится в средней колонке');
-  assert.ok(disks.x >= memory.x + memory.width, 'диски находятся в третьей колонке');
-  assert.ok(Math.abs(computing.y - memory.y) < 1 && Math.abs(memory.y - disks.y) < 1,
-    'все три раздела начинаются на одной высоте');
+  assert.ok(memory.x >= computing.x + computing.width, 'память находится справа от вычислений');
+  assert.ok(disks.y >= computing.y + computing.height, 'диски расположены под сводными карточками');
+  assert.ok(disks.width > computing.width, 'диски используют полную ширину диалога');
+  assert.ok(Math.abs(computing.y - memory.y) < 1, 'сводные группы начинаются на одной высоте');
 
   const cpu = await resourceRow(h.panel, labels.ru.cpu);
 
@@ -246,7 +246,7 @@ test('BR-01: ширина метрики и доступность панели'
       assert.ok(Math.abs(after.width - before.width) <= 0.5, 'тревога не расширяет trigger');
       assert.ok(Math.abs(neighborsAfter.x - neighbors.x) <= 0.5, 'соседние controls не сдвигаются');
       await h.trigger.focus();
-      await h.trigger.press('ArrowDown');
+      await h.trigger.press('Enter');
       await h.panel.waitFor();
 
       const geometry = await h.panel.evaluate((panel) => {
@@ -280,14 +280,14 @@ test('BR-01: ширина метрики и доступность панели'
 
   await h.page.keyboard.press('Escape');
   await h.page.setViewportSize({ width: 390, height: 844 });
-  await h.trigger.waitFor({ state: 'hidden' });
+  await h.trigger.waitFor({ state: 'visible' });
 
   const touch = await resourcesBrowser(t, extendedMetrics(), {
     hasTouch: true,
     viewport: { width: 390, height: 844 },
   });
 
-  assert.equal(await touch.trigger.isVisible(), false);
+  assert.equal(await touch.trigger.isVisible(), true);
   await touch.open();
 
   for (const width of [320, 390, 600]) {
@@ -302,14 +302,14 @@ test('BR-01: ширина метрики и доступность панели'
 
       return {
         oneColumn: Math.abs(computing.left - memory.left) < 1 && memory.top >= computing.bottom,
-        memoryStacked: Math.abs(ram.left - swap.left) < 1 && swap.top >= ram.bottom,
+        memorySideBySide: Math.abs(ram.top - swap.top) < 1 && swap.left >= ram.right,
         fits: box.left >= 0 && box.right <= innerWidth && box.bottom <= innerHeight,
         overflows: panel.scrollWidth > panel.clientWidth,
       };
     });
 
     assert.equal(geometry.oneColumn, true, `${width}: блоки расположены в одну колонку`);
-    assert.equal(geometry.memoryStacked, true, `${width}: память расположена в одну колонку`);
+    assert.equal(geometry.memorySideBySide, true, `${width}: память сгруппирована в две карточки`);
     assert.equal(geometry.fits, true, `${width}: панель помещается в экран`);
     assert.equal(geometry.overflows, false, `${width}: нет горизонтальной прокрутки`);
   }

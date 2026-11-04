@@ -328,9 +328,9 @@ async function main() {
     ['/tasks', 'tasks'],
     ['/tasks/7', 'task'],
     ['/tasks/7/plan', 'plan'],
-    ['/b24/tasks', 'b24-tasks'],
-    ['/b24/tasks/7', 'b24-task'],
-    ['/b24/tasks/7/launch-options', 'launch-options'],
+    ['/tracker/tasks', 'tracker-tasks'],
+    ['/tracker/tasks/7', 'tracker-task'],
+    ['/tracker/tasks/7/launch-options', 'launch-options'],
   ]) {
     assert.equal((await json(phone, route!, kind!)).status, 200, route);
   }

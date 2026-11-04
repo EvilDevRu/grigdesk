@@ -38,11 +38,7 @@
             <UiIconButton class="ssh-refresh" role="embedded" data-context="workspace-toolbar"
                           label="Обновить SSH" v-tooltip="'Обновить'" :loading="refreshLoading"
                           loading-label="Обновляю" @click="refresh">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-                   stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M20 7v5h-5 M4 17v-5h5" />
-                <path d="M6.1 9a7 7 0 0 1 11.6-2.3L20 9 M4 15l2.3 2.3A7 7 0 0 0 17.9 15" />
-              </svg>
+              <UiRefreshIcon />
             </UiIconButton>
           </template>
         </UiPaneHeader>
@@ -647,6 +643,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { errorMessage } from '../../../../shared/lib/errors.ts';
 
 import {
+  UiRefreshIcon,
   UiButton,
   UiDisclosureButton,
   UiField,

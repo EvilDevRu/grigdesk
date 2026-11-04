@@ -114,7 +114,7 @@ export async function runtimeFixture(t, definitions = [{ id: 'demo' }], options 
       ...(definition.staticOnly ? {} : {
         [definition.entry ?? 'server.js']: serverSource(definition.callback, marker),
       }),
-      ...(definition.web ? { 'web/index.html': '<p>Страница фикстуры</p>' } : {}),
+      ...(definition.web ? { 'ui/panel.js': 'export default {};' } : {}),
       ...definition.files,
     };
 
@@ -122,7 +122,11 @@ export async function runtimeFixture(t, definitions = [{ id: 'demo' }], options 
     await writeHttpPlugin(config.userPluginsDir, definition.id, {
       name: definition.id,
       enabled: true,
-      ...(definition.web ? { web: 'web' } : {}),
+      entrypoints: {
+        ...(definition.staticOnly ? {} : { server: definition.entry ?? 'server.js' }),
+        ...(definition.web ? { web: { dir: 'ui', entry: 'panel.js' } } : {}),
+      },
+      contributes: definition.web ? { panels: [{}] } : {},
       ...definition.manifest,
     }, files);
   }
@@ -132,6 +136,8 @@ export async function runtimeFixture(t, definitions = [{ id: 'demo' }], options 
     prefs,
     installs: port,
     documentReader: options.documentReader,
+    runtimeServices: options.runtimeServices,
+    grigDeskVersion: options.grigDeskVersion ?? '1.0.0',
   });
   await app.ready();
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 import { compileVue, webFile } from './helpers/compile-vue.js';
@@ -596,4 +597,242 @@ test('подавленный баннер сохраняет арбитраж у
   await wrapper.setProps({ arbitrating: null });
 
   assert.ok(wrapper.get('.ng').attributes('data-ui-tooltip').includes(hint));
+});
+
+test('телефон показывает граф со связями и открывает этап одним нажатием', async (t) => {
+  const browser = await installUiBrowser(t);
+
+  browser.happyDOM.setWindowSize({ width: 390, height: 844 });
+  browser.document.documentElement.setAttribute('data-ui-touch', '');
+
+  const [{ mount }, FactoryGraph] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/views/pipeline/FactoryGraph.vue')),
+  ]);
+  const graph = {
+    ...GRAPH,
+    pos: {
+      plan: [140, 55],
+      build: [480, 55],
+      review: [480, 240],
+      sandbox: [140, 240],
+    },
+    nodes: {
+      plan: ['agent', 'План и критика', 'Планирование'],
+      build: ['agent', 'Сборка', 'npm run build'],
+      review: ['human', 'Проверка', 'Решение человека'],
+      sandbox: ['code', 'Длинное название статического стенда', 'Состояние стенда'],
+    },
+    edges: [
+      ['_start', 'plan', '', 'pass', 'h'],
+      ['plan', 'build', 'Готово', 'pass', 'h'],
+      ['build', 'review', '', 'pass', 'v'],
+      ['review', 'build', 'Замечания', 'fail', 'arc_up'],
+    ],
+    statuses: {
+      plan: 'done',
+      build: 'run',
+      review: 'pending',
+      sandbox: 'pending',
+    },
+    nodeOrigins: { build: { originId: 'compile', executable: true } },
+  };
+  const events = [];
+  const wrapper = mount(FactoryGraph, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { graph, onNode: (...args) => events.push(args) },
+  });
+  const style = browser.document.createElement('style');
+  const graphSource = await readFile(webFile('src/views/pipeline/FactoryGraph.vue'), 'utf8');
+  const graphCss = graphSource.match(/<style scoped>([\s\S]*?)<\/style>/u)[1];
+
+  browser.document.head.append(style);
+  t.after(() => {
+    wrapper.unmount();
+    style.remove();
+  });
+
+  for (const width of [320, 390, 600, 601, 1280]) {
+    browser.happyDOM.setWindowSize({ width, height: 844 });
+    style.textContent = graphCss;
+
+    const viewportCss = browser.getComputedStyle(wrapper.get('.graph-viewport').element);
+    const toolbarCss = browser.getComputedStyle(wrapper.get('.graph-phone-tools').element);
+
+    assert.notEqual(viewportCss.display, 'none', `схема видна при ${width}px`);
+    assert.equal(toolbarCss.display, width <= 600 ? 'flex' : 'none');
+    assert.equal(wrapper.findAll('[data-node]').length, 4);
+    assert.equal(wrapper.find('[data-phone-node]').exists(), false);
+  }
+
+  assert.equal(wrapper.get('[data-source="plan"] path').exists(), true);
+  assert.equal(wrapper.find('.e-fail').exists(), false);
+  assert.equal(wrapper.get('[data-node="sandbox"]').attributes('role'), undefined);
+
+  await wrapper.get('[data-node="build"]').trigger('click');
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0][0].id, 'build');
+  assert.equal(events[0][0].originId, 'compile');
+
+  await wrapper.setProps({ graph: { ...graph, loops: { review: 2 } } });
+  await wrapper.get('[data-node="review"]').trigger('focusin');
+
+  assert.match(wrapper.get('.elbl-fail').text(), /Замечания ×2/u);
+  assert.equal(events.length, 1, 'обновление графа не открывает этап');
+
+  await wrapper.setProps({ reference: true });
+
+  assert.equal(wrapper.find('.graph-phone-tools').exists(), false);
+  assert.equal(wrapper.find('svg.graph').exists(), true);
+});
+
+test('масштаб и обзор телефона сохраняются при SSE, текущий этап доступен по кнопке', async (t) => {
+  const browser = await installUiBrowser(t);
+
+  browser.happyDOM.setWindowSize({ width: 390, height: 844 });
+
+  const [{ mount }, { nextTick }, FactoryGraph] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    import('../../web/node_modules/vue/dist/vue.runtime.esm-bundler.js'),
+    compileVue(webFile('src/views/pipeline/FactoryGraph.vue')),
+  ]);
+  const graph = {
+    ...GRAPH,
+    pos: { plan: [140, 55], build: [980, 640] },
+    nodes: { plan: ['agent', 'План', ''], build: GRAPH.nodes.build },
+    edges: [...GRAPH.edges, ['plan', 'build', '', 'pass', 'v']],
+    statuses: { plan: 'done', build: 'run' },
+  };
+  const wrapper = mount(FactoryGraph, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { graph, scale: 0.8 },
+  });
+  const host = wrapper.get('.graph-viewport').element;
+  const svg = wrapper.get('svg.graph').element;
+  const current = wrapper.get('[data-node="build"]').element;
+  const naturalWidth = Number(svg.getAttribute('viewBox').split(' ')[2]);
+  const naturalHeight = Number(svg.getAttribute('viewBox').split(' ')[3]);
+
+  Object.defineProperties(host, { clientWidth: { value: 300 }, clientHeight: { value: 180 } });
+  host.getBoundingClientRect = () => ({
+    left: 0,
+    top: 0,
+    width: 300,
+    height: 180,
+  });
+  current.getBoundingClientRect = () => ({
+    left: 600 - host.scrollLeft,
+    top: 400 - host.scrollTop,
+    width: 100,
+    height: 80,
+  });
+  svg.getBoundingClientRect = () => ({
+    left: -host.scrollLeft,
+    top: -host.scrollTop,
+    width: Number.parseFloat(svg.style.minWidth),
+    height: naturalHeight * Number.parseFloat(svg.style.minWidth) / naturalWidth,
+  });
+  t.after(() => wrapper.unmount());
+
+  await nextTick();
+  await nextTick();
+
+  assert.equal(Number.parseFloat(svg.style.minWidth), naturalWidth, 'телефон начинает с читаемого 100%');
+  assert.equal(host.scrollLeft, 500, 'текущий этап центрируется по горизонтали');
+  assert.equal(host.scrollTop, 350, 'нижний ряд открывается внутри схемы');
+
+  await wrapper.get('[data-graph-zoom-in]').trigger('click');
+  await nextTick();
+
+  assert.equal(Number.parseFloat(svg.style.minWidth), naturalWidth * 1.25);
+  assert.equal(host.scrollLeft, 662.5, 'увеличение сохраняет точку в центре');
+  assert.equal(host.scrollTop, 460);
+
+  await wrapper.setProps({ graph: { ...graph, statuses: { plan: 'run', build: 'done' } } });
+
+  assert.equal(Number.parseFloat(svg.style.minWidth), naturalWidth * 1.25);
+  assert.equal(host.scrollLeft, 662.5, 'SSE не перехватывает прокрутку');
+  assert.equal(host.scrollTop, 460);
+
+  await wrapper.get('[data-graph-fit]').trigger('click');
+  await nextTick();
+
+  assert.equal(wrapper.get('[data-graph-fit]').attributes('aria-pressed'), 'true');
+  assert.ok(Number.parseFloat(svg.style.minWidth) <= 300);
+  assert.ok(Number.parseFloat(svg.style.minWidth) * naturalHeight / naturalWidth <= 172);
+  assert.equal(host.scrollLeft, 0);
+  assert.equal(host.scrollTop, 0);
+
+  await wrapper.setProps({ graph: { ...graph, loops: { build: 1 } } });
+
+  assert.equal(wrapper.get('[data-graph-fit]').attributes('aria-pressed'), 'true');
+
+  await wrapper.get('[data-graph-current]').trigger('click');
+  await nextTick();
+
+  assert.equal(Number.parseFloat(svg.style.minWidth), naturalWidth);
+  assert.equal(wrapper.get('[data-graph-fit]').attributes('aria-pressed'), 'false');
+  assert.equal(host.scrollLeft, 500);
+  assert.equal(host.scrollTop, 350);
+
+  browser.dispatchEvent(new browser.Event('resize'));
+  browser.happyDOM.setWindowSize({ width: 1280, height: 900 });
+  await nextTick();
+
+  assert.equal(Number.parseFloat(svg.style.minWidth), naturalWidth * 0.8, 'desktop использует prop scale');
+});
+
+test('переход к этапу учитывает остановку и отключается для завершённого маршрута', async (t) => {
+  const browser = await installUiBrowser(t);
+
+  browser.happyDOM.setWindowSize({ width: 390, height: 844 });
+
+  const [{ mount }, FactoryGraph] = await Promise.all([
+    import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    compileVue(webFile('src/views/pipeline/FactoryGraph.vue')),
+  ]);
+  const wrapper = mount(FactoryGraph, {
+    attachTo: browser.document.querySelector('#mount'),
+    props: { graph: GRAPH },
+  });
+
+  t.after(() => wrapper.unmount());
+
+  assert.equal(wrapper.get('[data-graph-current]').attributes('disabled'), '');
+
+  for (const status of ['run', 'wait', 'stall', 'fail', 'skipbad', 'premature']) {
+    await wrapper.setProps({ graph: { ...GRAPH, statuses: { build: status } } });
+
+    assert.equal(wrapper.get('[data-graph-current]').attributes('disabled'), undefined, status);
+  }
+
+  await wrapper.setProps({
+    graph: {
+      ...GRAPH,
+      statuses: { build: 'done' },
+      stall: { node: 'build', title: 'Нужен разбор' },
+    },
+  });
+
+  assert.equal(wrapper.get('[data-graph-current]').attributes('disabled'), undefined);
+
+  await wrapper.setProps({ graph: { ...GRAPH, statuses: { build: 'done' } } });
+
+  assert.equal(wrapper.get('[data-graph-current]').attributes('disabled'), '');
+  assert.equal(wrapper.find('svg.graph').exists(), true);
+
+  await wrapper.setProps({ selectedNode: 'build' });
+
+  assert.equal(wrapper.get('[data-graph-current]').attributes('disabled'), undefined);
+
+  await wrapper.setProps({
+    graph: {
+      pos: {},
+      nodes: {},
+      edges: [],
+    },
+  });
+
+  assert.equal(wrapper.find('.graph-phone-tools').exists(), false);
 });

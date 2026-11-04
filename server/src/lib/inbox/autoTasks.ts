@@ -52,7 +52,7 @@ interface TaskServicePort {
   dismiss: (ref: string, body: Payload, options: Payload) => Promise<unknown>;
 }
 
-interface B24Port {
+interface TrackerPort {
   isConfigured: () => boolean;
 }
 
@@ -239,7 +239,7 @@ export class InboxAutoTasks {
 
   taskService: TaskServicePort;
 
-  b24: B24Port;
+  tracker: TrackerPort;
 
   attachmentAnalyzer: AttachmentAnalyzerPort | null;
 
@@ -304,7 +304,7 @@ export class InboxAutoTasks {
   constructor({
     coordinator,
     taskService,
-    b24,
+    tracker,
     attachmentAnalyzer = null,
     triage = runInboxTriage,
     triageReadiness = resolveInboxTriageTarget,
@@ -322,7 +322,7 @@ export class InboxAutoTasks {
   }: {
     coordinator?: CoordinatorPort;
     taskService?: TaskServicePort;
-    b24?: B24Port;
+    tracker?: TrackerPort;
     attachmentAnalyzer?: AttachmentAnalyzerPort | null;
     triage?: (options: Payload) => Promise<InboxTriageRun>;
     triageReadiness?: (options: Payload) => Promise<InboxTriageTarget>;
@@ -345,7 +345,7 @@ export class InboxAutoTasks {
         || typeof coordinator.resolveItem !== 'function'
         || !taskService || typeof taskService.task !== 'function'
         || typeof taskService.dismiss !== 'function'
-        || !b24 || typeof b24.isConfigured !== 'function'
+        || !tracker || typeof tracker.isConfigured !== 'function'
         || typeof triage !== 'function'
         || typeof triageReadiness !== 'function'
         || typeof modelRef !== 'function'
@@ -358,7 +358,7 @@ export class InboxAutoTasks {
     }
     this.coordinator = coordinator as CoordinatorPort;
     this.taskService = taskService as TaskServicePort;
-    this.b24 = b24 as B24Port;
+    this.tracker = tracker as TrackerPort;
     this.attachmentAnalyzer = attachmentAnalyzer;
     this.triage = triage;
     this.triageReadiness = triageReadiness;
@@ -461,7 +461,9 @@ export class InboxAutoTasks {
     if (!readiness?.ok) {
       return { reason: safeCode({ code: readiness?.error }, 'model_unavailable'), ref: null };
     }
-    if (!this.b24.isConfigured()) return { reason: 'no_b24', ref: null };
+    if (!this.tracker.isConfigured()) {
+      return { reason: 'no_b24', ref: null };
+    }
     return { reason: '', ref };
   }
 
@@ -988,7 +990,7 @@ export class InboxAutoTasks {
           itemRef: item.ref,
           taskId: (error as { details?: { taskId?: unknown } } | null)?.details?.taskId ?? null,
           code,
-        }, 'inbox: auto channel blocked after indeterminate B24 commit');
+        }, 'inbox: auto channel blocked after indeterminate трекер commit');
       } else {
         this.log.error?.({ channel: channel.id, itemRef: item.ref, code },
           'inbox: auto mutation failed');
@@ -1048,10 +1050,11 @@ export class InboxAutoTasks {
     const loop = async () => {
       if (!this.running || generation !== this.loopGeneration) return;
       let pause = this.idleMs;
+
       try {
         const result = await this.tick({ signal: controller.signal });
         // Отсутствие настройки — штатное изменяемое состояние. После выбора
-        // модели/подключения B24 автомат должен проснуться максимум через минуту,
+        // модели/подключения трекера автомат должен проснуться максимум через минуту,
         // а не ждать пятиминутный backoff настоящей ошибки.
         if (result.ran === false && 'reason' in result && result.reason === 'snapshot_failed') {
           pause = this.errorMs;

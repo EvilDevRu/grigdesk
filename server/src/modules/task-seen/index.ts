@@ -1,4 +1,5 @@
-import { withB24RequestRead } from '../../lib/b24/requestRead.ts';
+import { trackerPersonalRequestOptions } from '../../lib/taskPersonalScope.ts';
+import { withTrackerRequestRead } from '../../lib/trackers/requestRead.ts';
 // Просмотренные B24-задачи. Метки живут только в state GrigDesk и в B24 не пишутся.
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -19,25 +20,54 @@ class TaskSeenRequestError extends Error {
   }
 }
 
-/** Разбор недоверенного тела: базовая линия и отдельная отметка приходят одной ручкой. */
-function parseMarkBody(body: unknown): { taskIds: string[]; baseline: boolean } {
+/**
+ * Отдельный просмотр и порции базовой линии используют один проверенный контракт.
+ * Лимит batch сохраняется, служебный ключ связывает части одной инициализации.
+ */
+function parseMarkBody(body: unknown): {
+  taskIds: string[];
+  baseline: boolean;
+  baselineId?: string
+} {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new TaskSeenRequestError('Тело запроса должно быть объектом');
   }
 
-  const { taskIds, baseline } = body as { taskIds?: unknown; baseline?: unknown };
+  const { taskIds, baseline, baselineId } = body as {
+    taskIds?: unknown;
+    baseline?: unknown;
+    baselineId?: unknown
+  };
   if (!Array.isArray(taskIds) || taskIds.length > MAX_TASK_IDS_PER_REQUEST) {
     throw new TaskSeenRequestError('taskIds должен быть массивом номеров задач');
   }
   if (baseline !== undefined && typeof baseline !== 'boolean') {
     throw new TaskSeenRequestError('baseline должен быть булевым');
   }
-  return { taskIds: taskIds.map(normalizeSeenTaskId), baseline: !!baseline };
+  if (baselineId !== undefined
+    && (typeof baselineId !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(baselineId))) {
+    throw new TaskSeenRequestError('Некорректный ключ baseline');
+  }
+
+  return {
+    taskIds: taskIds.map(normalizeSeenTaskId),
+    baseline: !!baseline,
+    ...(typeof baselineId === 'string' ? { baselineId } : {})
+  };
 }
 
-/** Код отказа наружу: внутренние коды хранилища человеку ничего не говорят. */
+/**
+ * Публичная ошибка сохраняет статус отказа источника и не раскрывает личную identity.
+ * Повреждение хранилища остаётся недоступностью, а смена поколения — конфликтом.
+ */
 function publicError(reply: FastifyReply, error: unknown): unknown {
   const code = (error as { code?: unknown } | null)?.code;
+  const status = (error as { status?: number }).status
+    ?? (String(code).startsWith('grigdesk_tasks_') ? 503 : undefined);
+
+  if (status && [400, 404, 409, 503].includes(status)) {
+    return reply.code(status).send({ error: code, message: (error as Error).message });
+  }
   if (code === 'BAD_SEEN_TASK_ID') {
     return reply.code(400).send({
       error: 'bad_task_id',
@@ -89,12 +119,27 @@ async function taskSeenModule(
     }
   };
 
-  fastify.get('/api/b24/task-seen', (request, reply) =>
-    withB24RequestRead(request, reply, (options) =>
+
+
+  fastify.get('/api/tracker/task-seen', (request, reply) =>
+    withTrackerRequestRead(request, reply, (options) =>
       run(() => seen.list(options))(request, reply)));
-  fastify.post('/api/b24/task-seen', run((request) => {
+  fastify.post('/api/tracker/task-seen', run((request) => {
     const { taskIds, baseline } = parseMarkBody(request.body);
-    return seen.markSeen(taskIds, { baseline });
+
+    return seen.markSeen(taskIds, { baseline, ...trackerPersonalRequestOptions(request.headers) });
+  }));
+  fastify.get('/api/grigdesk-tasks/task-seen', (request, reply) =>
+    withTrackerRequestRead(request, reply, (options) =>
+      run(() => seen.list(options, { source: 'grigdesk' }))(request, reply)));
+  fastify.post('/api/grigdesk-tasks/task-seen', run((request) => {
+    const { taskIds, baseline, baselineId } = parseMarkBody(request.body);
+
+    return seen.markSeen(taskIds, {
+      baseline,
+      baselineId,
+      source: 'grigdesk'
+    });
   }));
 }
 

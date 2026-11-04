@@ -86,6 +86,10 @@ Snapshot outbox фиксирует mode вместе с marker. Изменени
 Суточный срок direct waiter отменяет карточку и поздний ответ; resolved/stop/конец
 хода/закрытие процесса снимают только своё ожидание. Request ID различает number/string.
 
+`request_user_input_async` использует другой канал: `agentMessage` с `delivery=async`
+и `questions`. Его карточка не блокирует ход, ответ возвращается через `turn/steer`,
+а не RPC response. Подробности — [асинхронные вопросы](codex-async-questions.md).
+
 Настоящий CLI с loopback Responses подтвердил shell/patch контрпримеры strict modes,
 workspace/sibling markers dontAsk/bypass, два send dontAsk через wrapped adapter и cleanup.
 Отдельная native-проба показала: пустой список terminals после cleanup не препятствует

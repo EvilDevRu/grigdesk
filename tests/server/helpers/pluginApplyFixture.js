@@ -16,6 +16,8 @@ import { PluginInstallStateStore } from '../../../server/src/lib/packageInstall/
 
 import { applyingState, installedRecord } from './pluginInstallState.js';
 
+import { manifestV1, png } from '../../helpers/pluginV1.js';
+
 import { adapterSource } from './dbEngineFixture.js';
 
 /**
@@ -176,10 +178,19 @@ async function createCopy(directory, version, marker, revision, importMarker = n
     api: 1,
     minimum: '0.0.0',
     entry: 'entry.mjs',
-  } : { id: 'demo', version };
+  } : manifestV1({
+    version,
+    entrypoints: { server: 'server.js' },
+    contributes: {},
+  });
 
   await writeFile(path.join(directory, packageKind === 'db-engine' ? 'engine.json' : 'plugin.json'),
     JSON.stringify(manifest));
+
+  if (packageKind === 'plugin') {
+    await mkdir(path.join(directory, 'assets'));
+    await writeFile(path.join(directory, 'assets/icon.png'), png);
+  }
 
   await writeFile(path.join(directory, 'marker.txt'), marker);
 

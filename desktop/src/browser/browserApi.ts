@@ -47,6 +47,24 @@ export async function saveBrowserPreferences(port: {
 }
 
 /**
+ * Координаты события мыши приводятся от CSS-пикселей страницы к DIP-пикселям ввода.
+ * Zoom вкладки приходит процентами (100 = без масштабирования); чужие поля метода
+ * копируются без изменений, а некорректное значение оставляет params как есть.
+ */
+function scaleMouseEvent(percent: number, params: unknown): unknown {
+  if (!isPlainRecord(params) || !Number.isFinite(percent) || percent <= 0 || percent === 100
+    || !Number.isFinite(Number(params.x)) || !Number.isFinite(Number(params.y))) {
+    return params;
+  }
+
+  return {
+    ...params,
+    x: Number(params.x) * (percent / 100),
+    y: Number(params.y) * (percent / 100)
+  };
+}
+
+/**
  * UI и host используют один native runtime, но имеют разные закрытые operations.
  * Agent input всегда проходит parser, host/grant/epoch checks и последовательность tab.
  */
@@ -75,6 +93,7 @@ export function createBrowserApi(options: {
   const id = options.id ?? randomUUID;
   const views = new Map<string, {
     view: NativeBrowserView;
+    send: NativeBrowserView['send'];
     protocol: ReturnType<typeof createBrowserProtocol>;
     driver: ReturnType<typeof createBrowserDriver>;
     command: NativeCommand | null;
@@ -140,22 +159,26 @@ export function createBrowserApi(options: {
 
   /**
    * Зависший CDP или capture не удерживает tab queue бесконечно.
-   * Неизвестный исход отзывает grant; следующая команда требует ручного решения.
+   * Неизвестный исход мутации отзывает grant. Захват только читает страницу:
+   * его отказ не лишает агента доступа и завершается раньше сторожа транспорта.
    */
   function bounded<T>(pending: Promise<T>, value: NativeCommand, tabId: string,
-    timeout?: () => void,
+    timeout?: () => void, limit?: number,
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         try {
-          tabs.revoke(tabId);
+          if (value.action !== 'screenshot') {
+            tabs.revoke(tabId);
+          }
+
           timeout?.();
         } catch {
           // Закрытый tab уже не имеет действующего grant.
         }
 
-        reject(new Error('outcome_unknown'));
-      }, Math.max(1, value.deadline - now()));
+        reject(new Error(value.action === 'screenshot' ? 'browser_capture_failed' : 'outcome_unknown'));
+      }, Math.max(1, Math.min(value.deadline - now(), limit ?? Infinity)));
 
       pending.then(resolve, reject).finally(() => clearTimeout(timer));
     });
@@ -237,7 +260,17 @@ export function createBrowserApi(options: {
           views.get(tabId)!.dispatched = true;
         }
 
-        const result = await bounded(view.send(method, params), current, tabId);
+        /**
+         * Координаты CDP-ввода живут в DIP, а resolve возвращает CSS-точку страницы.
+         * Зум вкладки масштабирует отрисовку: без множителя mousedown попадает мимо
+         * элемента при любом zoom ≠ 100% — клик «не работает», fill теряет фокус.
+         */
+        if (method === 'Input.dispatchMouseEvent') {
+          params = scaleMouseEvent(views.get(tabId)!.view.state().zoom, params);
+        }
+
+        const result = await bounded(view.send(method, params), current, tabId, undefined,
+          current.action === 'screenshot' ? 5000 : undefined);
 
         if (!allowed(current, tabId)) {
           throw new Error('access_revoked');
@@ -247,6 +280,7 @@ export function createBrowserApi(options: {
       };
       const bundle = {
         view,
+        send,
         command: null as NativeCommand | null,
         dispatched: false,
         protocol: createBrowserProtocol({
@@ -262,6 +296,7 @@ export function createBrowserApi(options: {
         epoch: () => tabs.get(tabId).pageEpoch,
         resolve: bundle.protocol.resolve,
         send,
+        act: bundle.protocol.act,
       });
       views.set(tabId, bundle);
 
@@ -411,7 +446,18 @@ export function createBrowserApi(options: {
       }
 
       if (value.action === 'screenshot') {
-        const data = await bounded(bundle.view.screenshot(), value, tabId);
+        /**
+         * Захват не меняет дерево главного окна и выбранную вкладку. Временный show/hide
+         * мерцал поверх чата и отменял новый layout, пришедший во время ожидания.
+         */
+        const capture = bundle.view.screenshot((method, params) => {
+          if (bundle.command !== value) {
+            throw new Error('access_revoked');
+          }
+
+          return bundle.send(method, params);
+        });
+        const data = await bounded(capture, value, tabId, undefined, 5000);
 
         if (!allowed(value, tabId)) {
           throw new Error('access_revoked');
@@ -439,13 +485,29 @@ export function createBrowserApi(options: {
         return { ok: true };
       }
 
-      await bundle.driver.input({
+      /**
+       * Native-ввод доходит только до показанной на экране вкладки. При
+       * смонтированной панели ввод активирует вкладку (render покажет её) и идёт
+       * системными событиями; без панели команда исполняется в DOM страницы —
+       * ввод работает и при закрытом инструменте браузера, не трогая фокус.
+       */
+      const input = {
         action: value.action as 'click' | 'fill' | 'scroll',
         pageEpoch: Number(value.pageEpoch),
         ref: value.ref as string | undefined,
         text: value.text as string | undefined,
         deltaY: value.deltaY as number | undefined,
-      });
+      };
+
+      if (tabs.layoutRect() !== null) {
+        if (tabs.activeId() !== tabId) {
+          tabs.activate(tabId);
+        }
+
+        await bundle.driver.input(input);
+      } else {
+        await bundle.driver.domInput(input);
+      }
 
       return { ok: true };
     } catch (error) {
@@ -518,6 +580,7 @@ export function createBrowserApi(options: {
       preferences: ['value'],
       open: ['url', 'target', 'deduplicate'],
       activate: ['tabId'],
+      move: ['tabId', 'beforeId'],
       navigate: ['tabId', 'url'],
       back: ['tabId'],
       forward: ['tabId'],
@@ -534,6 +597,7 @@ export function createBrowserApi(options: {
       'viewport-unmount': ['instance'],
       layout: ['instance', 'revision', 'rect'],
       hide: ['instance', 'revision'],
+      cover: ['instance', 'revision'],
     };
 
     if (!isPlainRecord(raw) || typeof raw.operation !== 'string' || !Object.hasOwn(fields, raw.operation)
@@ -552,14 +616,34 @@ export function createBrowserApi(options: {
 
       return () => subscribers.delete(listener);
     },
+    /**
+     * Только актуальный viewport получает кадр выбранной вкладки перед скрытием.
+     * Подложка не выдаёт права агенту и не обходит fences обычного layout.
+     */
     hide(raw: unknown) {
       const value = request(raw);
 
-      if (value.operation !== 'hide') {
+      if (value.operation !== 'hide' && value.operation !== 'cover') {
         throw new Error('browser_request_invalid');
       }
 
-      layout(value, true);
+      let preview: string | null = null;
+
+      try {
+        if (value.operation === 'cover' && viewport && value.instance === viewport.instance
+          && Number.isSafeInteger(value.revision) && Number(value.revision) > viewport.revision
+          && tabs.layoutRect() !== null) {
+          const active = tabs.activeId();
+
+          preview = active ? views.get(active)?.view.preview() ?? null : null;
+        }
+      } finally {
+        // Отказ копирования кадра не оставляет native guest поверх меню.
+        // Старые instance/revision по-прежнему не меняют текущий layout.
+        layout(value, true);
+      }
+
+      return preview;
     },
     hideForResize: () => tabs.layout(null),
     /**
@@ -624,7 +708,7 @@ export function createBrowserApi(options: {
         const next = normalizeBrowserPreferences(candidate);
 
         if (!isPlainRecord(candidate)
-          || Object.keys(candidate).sort().join() !== 'agents,external,open'
+          || Object.keys(candidate).sort().join() !== 'agents,external,open,search'
           || Object.keys(next).some((key) => next[key as keyof BrowserPreferences] !== candidate[key])) {
           throw new Error('browser_request_invalid');
         }
@@ -765,7 +849,10 @@ export function createBrowserApi(options: {
               'access_revoked', 'stale_page', 'stale_element', 'invalid_fill', 'outcome_unknown',
             ].includes(code);
 
-            return { ok: false, error: known ? code : 'browser_unavailable' };
+            const fallback = native.action === 'screenshot'
+              ? 'browser_capture_failed' : 'browser_unavailable';
+
+            return { ok: false, error: known ? code : fallback };
           }
         });
 
@@ -812,6 +899,12 @@ export function createBrowserApi(options: {
 
       if (operation === 'activate') {
         tabs.activate(tabId);
+      } else if (operation === 'move') {
+        if (value.beforeId !== null && typeof value.beforeId !== 'string') {
+          throw new Error('browser_request_invalid');
+        }
+
+        tabs.move(tabId, value.beforeId);
       } else if (operation === 'pause' || operation === 'resume') {
         tabs.pause(tabId, operation === 'pause');
         views.get(tabId)!.protocol.reset();

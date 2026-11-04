@@ -38,3 +38,49 @@ export const RESOLVE_SOURCE = String.raw`function(ref) {
     || (node.tagName === 'TEXTAREA' && !node.readOnly) || node.isContentEditable;
   return { x, y, editable: Boolean(editable) };
 }`;
+
+/**
+ * DOM-исполнение команды агента в изолированном мире: клик, заполнение и прокрутка
+ * работают на невидимой вкладке без синтетических событий ввода окна. Действие
+ * видно обработчикам главной страницы: DOM-события пересекают миры, а execCommand
+ * порождает настоящие input-события для реактивных форм.
+ */
+export const DOM_ACT_SOURCE = String.raw`function(payload) {
+  const node = globalThis.__grigdeskBrowserNodes?.get(payload.ref);
+  if (!node || !node.isConnected || node.disabled) return { ok: false, code: 'stale_element' };
+
+  if (payload.action === 'scroll') {
+    window.scrollBy(0, Math.max(-2000, Math.min(2000, payload.deltaY || 0)));
+    return { ok: true };
+  }
+
+  node.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+
+  if (payload.action === 'fill') {
+    const editable = (node.tagName === 'INPUT' && !['checkbox', 'radio', 'file', 'submit', 'button']
+      .includes(node.type) && !node.readOnly)
+      || (node.tagName === 'TEXTAREA' && !node.readOnly) || node.isContentEditable;
+
+    if (!editable) return { ok: false, code: 'invalid_fill' };
+
+    if (node.tagName === 'SELECT') {
+      const option = Array.from(node.options)
+        .find((item) => item.value === payload.text || item.text === payload.text);
+
+      if (!option) return { ok: false, code: 'invalid_fill' };
+
+      node.value = option.value;
+      node.dispatchEvent(new Event('input', { bubbles: true }));
+      node.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true };
+    }
+
+    node.focus();
+    document.execCommand('selectAll');
+    document.execCommand('insertText', false, payload.text);
+    return { ok: true };
+  }
+
+  node.click();
+  return { ok: true };
+}`;

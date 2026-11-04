@@ -8,6 +8,7 @@ interface Grant {
   hostGeneration: number;
   url: string;
   paused: boolean;
+  missing?: boolean;
 }
 
 interface NativeTabResult {
@@ -31,6 +32,7 @@ export function createBrowserAccess(port: {
   }): Promise<unknown>;
 }) {
   const grants = new Map<string, Grant>();
+  const closing = new Set<Grant>();
   const key = (owner: string, tabId: string) => JSON.stringify([owner, tabId]);
 
   /**
@@ -92,6 +94,12 @@ export function createBrowserAccess(port: {
       for (const [id, grant] of grants) {
         const row = rows.find((item) => item.tabId === grant.tabId);
 
+        if (!row && closing.has(grant) && grant.hostGeneration === port.generation()) {
+          grant.missing = true;
+
+          continue;
+        }
+
         if (!row || grant.hostGeneration !== port.generation()) {
           grants.delete(id);
 
@@ -101,6 +109,7 @@ export function createBrowserAccess(port: {
         if (row.grantEpoch >= grant.grantEpoch) {
           grant.grantEpoch = row.grantEpoch;
           grant.paused = row.paused;
+          grant.missing = false;
         }
       }
     },
@@ -116,6 +125,7 @@ export function createBrowserAccess(port: {
       const generation = port.generation();
       const grant = input.tabId ? grants.get(key(owner, input.tabId)) : undefined;
       const epoch = grant?.grantEpoch ?? 0;
+      let closingStarted = false;
       /**
        * Проверка связывает существующего владельца, proof и поколение host.
        * После await grant должен по-прежнему совпадать с захваченной эпохой.
@@ -134,7 +144,8 @@ export function createBrowserAccess(port: {
 
         const current = grants.get(key(owner, input.tabId));
 
-        return Boolean(current && !current.paused && current.grantEpoch === epoch
+        return Boolean(current && (!current.missing || closingStarted && current === grant)
+          && !current.paused && current.grantEpoch === epoch
           && current.hostGeneration === generation);
       };
 
@@ -142,14 +153,36 @@ export function createBrowserAccess(port: {
         throw new Error('browser_access_denied');
       }
 
-      const result = await port.queue(owner, input, {
-        grantEpoch: epoch,
-        authorize,
-        signal: options.signal,
-      });
+      /**
+       * Native close удаляет вкладку до ACK, а heartbeat может прийти раньше ответа.
+       * Только этот запрос сохраняет право завершения через пропавшую проекцию;
+       * явный revoke, regrant, смена host и proof по-прежнему отменяют его.
+       */
+      if (input.action === 'close' && grant) {
+        closingStarted = true;
+        closing.add(grant);
+      }
 
-      if (!await authorize()) {
-        throw new Error('browser_access_denied');
+      let result: unknown;
+
+      try {
+        result = await port.queue(owner, input, {
+          grantEpoch: epoch,
+          authorize,
+          signal: options.signal,
+        });
+
+        if (!await authorize()) {
+          throw new Error('browser_access_denied');
+        }
+      } finally {
+        if (closingStarted && grant) {
+          closing.delete(grant);
+
+          if (grant.missing && grants.get(key(owner, grant.tabId)) === grant) {
+            grants.delete(key(owner, grant.tabId));
+          }
+        }
       }
 
       if (result && typeof result === 'object' && (result as { ok?: boolean }).ok === false) {

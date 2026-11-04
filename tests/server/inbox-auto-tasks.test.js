@@ -191,7 +191,7 @@ function harness({
   const worker = new InboxAutoTasks({
     coordinator,
     taskService,
-    b24: { isConfigured: () => live.configured },
+    tracker: { isConfigured: () => live.configured },
     attachmentAnalyzer: attachmentAnalyzer ? {
       async analyze(args) {
         calls.analysis.push(args);

@@ -2,8 +2,8 @@
 
 Загрузчик передаёт `options.core` вместе с прежними `config`, `prefs`, `plugin`, `prefix`,
 `dataDir`, `lifecycle`. Поддержаны async и callback/done default-export обычного Fastify plugin.
-Используется native encapsulation: scope наследует декораторы приложения, общий auth guard
-продолжает закрывать API, static и WebSocket. Для действий только человека автор проверяет
+Используется отдельный Fastify router: scope получает живые ссылки на декораторы приложения,
+общий auth guard оболочки закрывает API, static и WebSocket до dispatch. Для действий только человека автор проверяет
 `request.authKind === 'session'`. Это доверенный код процесса, не sandbox ОС.
 
 Реализация: `server/src/modules/plugins/{core,providerCapabilities,changes,lifecycle,index}.ts`.
@@ -51,11 +51,11 @@ enabled gate после успешной записи prefs. Новый HTTP/sta
 `{error:'plugin_disabled',message:'Плагин выключен.'}`; повторное включение открывает тот же
 runtime. Уже принятые streams/WS и фон не обрываются. Loaded не сбрасывается.
 
-Dormant при boot не импортируется; первое on сохраняет prefs, но требует нового старта.
-Off отменяет это ожидание. GET каталога и успешный toggle возвращают актуальный needsRestart:
+Dormant при boot не импортируется; первое on ждёт готовности собственного сервера
+до записи prefs и открытия admission. Обновление и откат подключают новый router сразу. GET каталога и успешный toggle возвращают актуальный needsRestart:
 false для системного, здорового загруженного, dormant-off и пакета без кода/страницы;
-true для включённого незагруженного server/web, failed import/register и installed поверх
-loaded версии. Несовместимый api и конфликт двух входов дают false: рестарт не исправляет
+Обычное первое включение и завершённая замена дают false. Неудачный import/register
+или незавершённая публикация runtime могут дать true. Несовместимый api и конфликт двух входов дают false: рестарт не исправляет
 пакет. Blocked остаётся recovery-ошибкой. Ручная правка prefs меняет gate после рестарта.
 
 Store принимает boolean needsRestart из ACK и GET, включая снятие ожидания по false.
@@ -99,8 +99,11 @@ Apply сохраняет settings перед enabled двумя запросам
 Replacement-фаза проверяется до enabled: replacing/installed/blocked сохраняют прежние
 HTTP-коды. Reverted снимает запрет замены, но не включает выключенный gate. Installed/blocked
 допускают запись prefs без validator и уведомлений старого кода и не открывают routes.
-Off не предоставляет lease: loaded server без prepareReplace требует выключения и ручного
-рестарта перед заменой. Подробности — [runtime lease](plugin-install-runtime.md).
+Off не предоставляет lease: управляемый server без prepareReplace отдельно закрывается
+через Fastify onClose. После installed refresh подключает новый сервер и панель без
+перезапуска; [подробности горячего runtime](plugin-hot-runtime.md). Резерв следующего
+запуска сохраняется для runtime после неудачного import/register.
+Подробности — [runtime lease](plugin-install-runtime.md).
 
 В пакете необязателен один `server.js` или `server.ts`. Общий selectPluginServerEntry сохраняет
 hasServer и выбирает serverEntry; scanner использует прежний access, installer — lstat/isFile

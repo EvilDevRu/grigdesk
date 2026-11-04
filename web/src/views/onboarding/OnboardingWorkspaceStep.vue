@@ -4,6 +4,9 @@
       <h2 tabindex="-1">{{ t('core.onboardingChooseWorkspace') }}</h2>
       <p class="onboarding-description">{{ t('core.onboardingWorkspaceHelp') }}</p>
     </header>
+    <UiInlineMessage v-if="!store.snapshot?.active?.projectSaved" tone="warning">
+      {{ t('core.onboardingWorkspaceNeedsProject') }}
+    </UiInlineMessage>
     <UiRadioGroup class="workspace-modes" :label="t('core.onboardingWorkspace')" @keydown="moveOption">
       <div v-for="mode in modes" :key="mode" class="workspace-option"
         :class="{ 'is-selected': store.draft.workspace.mode === mode }">
@@ -88,6 +91,10 @@ onMounted(async () => {
   const session = store.snapshot?.active?.id;
 
   for (const repo of store.draft?.repositories ?? []) {
+    if (!repo.source.trim()) {
+      continue;
+    }
+
     try {
       const inspection = await inspectOnboardingRepository(repo.source);
 

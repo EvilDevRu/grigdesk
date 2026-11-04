@@ -3,9 +3,9 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-import { B24Adapter } from '../../server/src/adapters/b24.ts';
+import { customReadModule } from '../server/helpers/trackerPackage.js';
 import { TaskFavoritesService } from '../../server/src/lib/taskFavoritesService.ts';
-import b24Module from '../../server/src/modules/b24/index.ts';
+import b24Module from '../../server/src/modules/tracker/index.ts';
 import favoritesModule from '../../server/src/modules/task-favorites/index.ts';
 
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -30,6 +30,21 @@ function deferred() {
 test('BROWSER-01: медленный портал, SSE и shell не запирают обычный API и метки', {
   timeout: 15000,
 }, async (t) => {
+  const sessionModule = await customReadModule('src/session.ts', t);
+
+  if (!sessionModule) {
+    return;
+  }
+
+  const { CustomSession: B24Adapter } = sessionModule;
+  let tail = Promise.resolve();
+  const serial = (fn) => {
+    const work = tail.then(fn);
+
+    tail = work.catch(() => undefined);
+
+    return work;
+  };
   const portal = deferred();
   const shell = deferred();
   const firstPortal = deferred();
@@ -38,8 +53,11 @@ test('BROWSER-01: медленный портал, SSE и shell не запир�
   let portalStarts = 0;
   const app = Fastify({ logger: false });
   const adapter = new B24Adapter({
-    credsStore: { read: () => null },
-    cookiePath: '/tmp/unused-b24-browser-cookie',
+    host: {
+      credentials: { read: () => null },
+      serial,
+      cookiePath: '/tmp/unused-b24-browser-cookie',
+    },
     readTimeoutMs: 65_000,
   });
   const client = {
@@ -63,18 +81,18 @@ test('BROWSER-01: медленный портал, SSE и shell не запир�
   await adapter.accountIdentity();
 
   const favorites = new TaskFavoritesService({
-    b24: adapter,
+    tracker: adapter,
     store: { list: async () => ({ revision: 1, taskIds: [] }) },
   });
 
   app.addHook('onRequest', async (request) => {
-    if (['/api/b24/dashboard', '/api/b24/task/42', '/api/b24/users', '/api/b24/groups']
+    if (['/api/tracker/dashboard', '/api/tracker/task/42', '/api/tracker/users', '/api/tracker/groups']
       .includes(request.url)) {
       portalStarts += 1;
       firstPortal.resolve();
     }
   });
-  app.register(b24Module, { b24: adapter });
+  app.register(b24Module, { tracker: adapter });
   app.register(favoritesModule, { favorites });
   app.get('/api/providers', async () => ({ ok: true }));
   app.get('/__shell/state', async () => {
@@ -127,7 +145,9 @@ test('BROWSER-01: медленный портал, SSE и shell не запир�
   await page.evaluate(() => {
     window.results = {};
 
-    for (const path of ['/api/b24/dashboard', '/api/b24/task/42', '/api/b24/users', '/api/b24/groups']) {
+    for (const path of [
+      '/api/tracker/dashboard', '/api/tracker/task/42', '/api/tracker/users', '/api/tracker/groups',
+    ]) {
       void window.fixtureApi.get(path, { timeoutMs: 0, retry: false }).catch(() => undefined);
     }
   });
@@ -136,7 +156,7 @@ test('BROWSER-01: медленный портал, SSE и shell не запир�
     void window.fixtureApi.get('/api/providers').then(() => {
       window.results.providers = true;
     });
-    void window.fixtureApi.get('/api/b24/task-favorites').then(() => {
+    void window.fixtureApi.get('/api/tracker/task-favorites').then(() => {
       window.results.favorites = true;
     });
   });

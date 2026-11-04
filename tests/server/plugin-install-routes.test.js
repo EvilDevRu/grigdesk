@@ -6,6 +6,29 @@ import { installHttpFixture } from './helpers/pluginInstallHttpFixture.js';
 
 const base = '/api/plugin-installs';
 
+test('HTTP: awaiting_restart возвращается как подтверждённый исход apply и current', async (t) => {
+  const fixture = await installHttpFixture(t);
+  const queued = { ...fixture.stub.job, status: 'awaiting_restart' };
+
+  fixture.installs.apply = async () => queued;
+  fixture.installs.currentJob = async () => queued;
+
+  const apply = await fixture.app.inject({
+    method: 'POST',
+    url: `${base}/jobs/${queued.id}/apply`,
+    payload: { reviewToken: queued.reviewToken },
+    headers: fixture.session,
+  });
+  const current = await fixture.app.inject({
+    url: `${base}/jobs/current`,
+    headers: fixture.session,
+  });
+
+  assert.equal(apply.statusCode, 200);
+  assert.equal(apply.json().job.status, 'awaiting_restart');
+  assert.equal(current.json().job.status, 'awaiting_restart');
+});
+
 test('R2: versions закрыт локальным strict AJV, production defaults прежних routes сохранены', async (t) => {
   const fixture = await installHttpFixture(t, {
     configure: (app) => {
@@ -248,7 +271,7 @@ function runtimeBarrier() {
   return { promise, release };
 }
 
-test('R8: настоящий Git/service держит API/static до первого rename и после installed/blocked', async (t) => {
+test('R8: Git/service закрывает API/static до rename и удерживает blocked', async (t) => {
   const { createPluginRepo } = await import('./helpers/pluginRepo.js');
   const { readFile } = await import('node:fs/promises');
   const path = await import('node:path');
@@ -361,8 +384,13 @@ test('R8: настоящий Git/service держит API/static до перво
     for (const url of ['/api/ext/demo/value', '/api/ext/demo/web/']) {
       const response = await fixture.app.inject({ url, headers: fixture.session });
 
-      assert.equal(response.statusCode, blocked ? 503 : 409);
-      assert.equal(response.json().error, blocked ? 'recovery_required' : 'plugin_restart_required');
+      assert.equal(response.statusCode, blocked ? 503 : 200);
+
+      if (blocked) {
+        assert.equal(response.json().error, 'recovery_required');
+      } else if (url.endsWith('/web/')) {
+        assert.equal(response.body, 'new static');
+      }
     }
 
     delete globalThis[key];
@@ -431,7 +459,7 @@ test('R9: dataDir0700 вне заменяемого дерева, same lifecycle
   }
 });
 
-test('R10: refresh атомарно меняет каталог/byId, новый server не импортируется до restart', async (t) => {
+test('R10: refresh атомарно меняет каталог/byId, новый server импортируется при включении', async (t) => {
   const { writeHttpPlugin } = await import('./helpers/pluginInstallHttpFixture.js');
   const { lstat, rename, symlink, unlink } = await import('node:fs/promises');
   const path = await import('node:path');
@@ -461,7 +489,10 @@ test('R10: refresh атомарно меняет каталог/byId, новый
     payload: { enabled: true },
     headers: fixture.session,
   })).statusCode, 200);
-  assert.equal(await lstat(marker).catch(() => null), null);
+  assert.equal((await lstat(marker)).isFile(), true);
+  assert.equal((await fixture.app.inject({
+    url: '/api/ext/added/value', headers: fixture.session,
+  })).statusCode, 200);
 
   const saved = path.join(fixture.root, 'saved-plugins');
 

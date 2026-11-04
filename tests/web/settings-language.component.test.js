@@ -14,7 +14,7 @@ process.env.NODE_ENV = 'test';
 const pages = [
   'interface.behavior', 'interface.notifications', 'interface.shortcuts',
   'automation.chats', 'automation.context', 'automation.launch', 'automation.monitoring',
-  'automation.arbiter', 'agents.models', 'connections.devices', 'connections.b24',
+  'automation.arbiter', 'agents.models', 'connections.devices',
   'connections.ssh',
   'connections.db',
   'connections.telegram',
@@ -28,9 +28,10 @@ const pages = [
   'tools.docker',
   'tools.studio3d',
   'tools.showcase',
+  'tools.browser',
   'connections.mobile', 'system.startup', 'system.updates', 'system.processes',
   'plugins.installed', 'agents.providers', 'speech.dictation',
-  'speech.video', 'speech.language', 'speech.models', 'speech.advanced', 'system.diagnostics',
+  'system.diagnostics',
 ];
 
 /**
@@ -180,7 +181,23 @@ test('I18N-S02: все страницы, публичные метаданные
     networks: [],
     relays: [],
   };
-  const h = await i18nComponent(t, { responses: { '/api/devices/access': access } });
+  const h = await i18nComponent(t, {
+    responses: {
+      '/api/devices/access': access,
+      '/api/settings/speech': {
+        ...data.speech,
+        capabilities: {
+          ...data.speech.capabilities,
+          models: data.speech.capabilities.models.map((model) => ({ ...model, cached: true })),
+        },
+      },
+      '/api/settings/speech/installation': {
+        managed: true,
+        installed: true,
+        job: null,
+      },
+    },
+  });
 
   const plugins = h.module.usePluginsStore(h.pinia);
 
@@ -235,6 +252,15 @@ test('I18N-S02: все страницы, публичные метаданные
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
       await h.flushPromises();
+    }
+
+    if (pageId === 'speech.dictation') {
+      const advanced = new h.DOMWrapper(document.querySelector('[data-speech-advanced-toggle]'));
+
+      assert.equal(advanced.attributes('aria-expanded'), 'false');
+      await advanced.trigger('click');
+      await h.flushPromises();
+      assert.equal(advanced.attributes('aria-expanded'), 'true');
     }
 
     const title = document.querySelector('#settings-page-title')?.textContent || '';
@@ -302,12 +328,12 @@ test('I18N-S02: все страницы, публичные метаданные
 
   h.settings.selectPage('connections.devices');
 
-  // «Добавить устройство» активна после загрузки списка устройств выбранного сервера.
+  // Подключение компьютера доступно после загрузки списка устройств выбранного сервера.
   for (let attempt = 0; attempt < 8; attempt += 1) {
     await h.flushPromises();
   }
 
-  const adding = await catalogMessage('settings', 'Добавить устройство');
+  const adding = await catalogMessage('settings', 'Подключить компьютер');
   const add = [...document.querySelectorAll('[role="dialog"] button')]
     .map((button) => new h.DOMWrapper(button))
     .find((button) => button.text() === adding.en);

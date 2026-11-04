@@ -137,7 +137,8 @@ const job = dto({
   target: nullable(target),
   replaceModified: flag,
   status: { type: 'string', enum: [
-    'running', 'ready', 'applying', 'done', 'failed', 'cancelled', 'interrupted', 'recovery_required',
+    'running', 'ready', 'awaiting_restart', 'applying', 'done', 'failed', 'cancelled',
+    'interrupted', 'recovery_required',
   ] },
   stage: nullable({ type: 'string', enum: ['fetching', 'validating', 'dependencies'] }),
   percent: nullable({

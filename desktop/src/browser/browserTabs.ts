@@ -1,3 +1,5 @@
+import { BROWSER_TAB_LIMIT } from '../../../shared/browser/browserLimits.ts';
+
 export interface BrowserRect {
   x: number;
   y: number;
@@ -84,6 +86,11 @@ export function createBrowserTabs(port: {
   return {
     list: () => [...entries.values()].map(publicTab),
     activeId: () => active,
+    /**
+     * Текущий rect смонтированной панели браузера: null, когда инструмент браузера
+     * закрыт и показать вкладку в окне нечем. Ввод агента опирается на это состояние.
+     */
+    layoutRect: () => layout,
     get: (id: string) => publicTab(required(id)),
     scope: (id: string) => required(id).scope,
     effectiveOwner(id: string) {
@@ -115,7 +122,7 @@ export function createBrowserTabs(port: {
         return publicTab(existing);
       }
 
-      if (entries.size >= 20) {
+      if (entries.size >= BROWSER_TAB_LIMIT) {
         throw new Error('browser_tab_limit');
       }
 
@@ -170,6 +177,33 @@ export function createBrowserTabs(port: {
       required(id);
       active = id;
       render();
+    },
+    /**
+     * Порядок принадлежит native-реестру и сохраняется при следующих snapshot.
+     * Перенос не меняет активную страницу, разрешения и живые native views.
+     */
+    move(id: string, beforeId: string | null) {
+      const tab = required(id);
+
+      if (beforeId === id) {
+        return;
+      }
+
+      if (beforeId !== null) {
+        required(beforeId);
+      }
+
+      const ordered = [...entries.values()].filter((entry) => entry.id !== id);
+      const index = beforeId === null ? ordered.length : ordered.findIndex((entry) => entry.id === beforeId);
+
+      ordered.splice(index, 0, tab);
+      entries.clear();
+
+      for (const entry of ordered) {
+        entries.set(entry.id, entry);
+      }
+
+      port.changed?.();
     },
     layout(rect: BrowserRect | null) {
       layout = rect;

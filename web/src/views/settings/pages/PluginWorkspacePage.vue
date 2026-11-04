@@ -1,6 +1,7 @@
 <template>
   <div class="plugins-workspace ui-workspace" data-plugins-workspace data-ui-workspace>
     <div class="plugins-toolbar">
+      <h3 id="settings-page-title">{{ t('settings.plugins') }}</h3>
       <div class="plugins-tabs">
         <UiTabs v-model="state.tab" :label="t('settings.grigdeskPlugins')" data-ui-settings-tabs>
           <UiTab
@@ -21,22 +22,42 @@
           </UiTab>
         </UiTabs>
       </div>
-      <UiButton data-context="workspace-form" data-install-git :disabled="recoveryBlocked" @click="openGit">
-        {{ t('settings.marketplaceInstallGit') }}
-      </UiButton>
+      <div class="plugins-toolbar-actions">
+        <UiButton
+          v-if="installer.job || installer.recoveryError"
+          variant="text"
+          data-context="workspace-form"
+          data-install-job
+          @click="openJob"
+        >
+          {{ t('settings.pluginInstallationJob') }}
+        </UiButton>
+        <UiButton
+          variant="text"
+          data-context="workspace-form"
+          data-install-git
+          :disabled="recoveryBlocked"
+          @click="openGit"
+        >
+          {{ t('settings.marketplaceInstallGit') }}
+        </UiButton>
+      </div>
     </div>
-    <UiInlineMessage v-if="recoveryBlocked" tone="warning">
-      {{ installer.recoveryError?.message ?? installer.job?.error?.message }}
-    </UiInlineMessage>
-    <UiInlineMessage v-if="plugins.loadError" tone="warning">
-      {{ plugins.loadError }}
-    </UiInlineMessage>
-    <UiButton v-if="plugins.loadError" data-context="workspace-form" @click="plugins.load()">
-      {{ t('settings.retryLoading') }}
-    </UiButton>
-    <UiButton v-if="installer.job || installer.recoveryError" data-context="workspace-form" data-install-job @click="openJob">
-      {{ t('settings.marketplaceOpenJob') }}
-    </UiButton>
+    <div v-if="state.tab === 'catalog' && (recoveryBlocked || plugins.loadError)" class="plugins-notices">
+      <UiInlineMessage v-if="recoveryBlocked" tone="warning"
+                       :heading="t('settings.pluginRecoveryRequired')">
+        {{ installer.recoveryError?.message ?? installer.job?.error?.message }}
+      </UiInlineMessage>
+      <UiInlineMessage v-if="plugins.loadError" tone="warning"
+                       :heading="t('settings.pluginCatalogFailure')">
+        {{ plugins.loadError }}
+        <template #actions>
+          <UiButton data-context="workspace-form" @click="plugins.load()">
+            {{ t('settings.retryLoading') }}
+          </UiButton>
+        </template>
+      </UiInlineMessage>
+    </div>
     <section
       id="plugins-catalog-panel"
       v-if="state.tab === 'catalog'"
@@ -57,6 +78,7 @@
       v-if="installOpen"
       v-model:open="installOpen"
       :mode="installMode"
+      :resume="resumeJob"
       :plugin="installPlugin"
       :catalog-selection="selection"
     />
@@ -88,6 +110,7 @@ const plugins = usePluginsStore();
 const state = usePluginMarketplaceState();
 const installOpen = ref(false);
 const installMode = ref<'install' | 'update'>('install');
+const resumeJob = ref(false);
 const installPlugin = shallowRef<PluginListItem | null>(null);
 const selection = shallowRef<CatalogSelection | null>(null);
 const recoveryBlocked = computed(() => Boolean(installer.recoveryError)
@@ -105,6 +128,7 @@ function openGit(): void {
   selection.value = null;
   installPlugin.value = null;
   installMode.value = 'install';
+  resumeJob.value = false;
   installOpen.value = true;
 }
 
@@ -116,6 +140,7 @@ function openJob(): void {
   selection.value = null;
   installPlugin.value = null;
   installMode.value = 'install';
+  resumeJob.value = true;
   installOpen.value = true;
 }
 
@@ -135,6 +160,7 @@ function openSelection(next: CatalogSelection, installed: PluginListItem | null)
   };
   installPlugin.value = installed;
   installMode.value = installed?.install ? 'update' : 'install';
+  resumeJob.value = false;
   installOpen.value = true;
 }
 
@@ -171,19 +197,59 @@ onMounted(() => {
 
 <style scoped>
 .plugins-workspace {
-  display: grid;
-  gap: 12px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.plugins-workspace > [role='tabpanel'] {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.plugins-workspace > #plugins-installed-panel {
+  display: flex;
+  overflow: hidden;
 }
 .plugins-tabs {
-  flex: 1 1 220px;
+  flex: 1 1 160px;
   min-width: 0;
+}
+.plugins-notices {
+  display: grid;
+  flex: none;
+  gap: 8px;
+  max-height: 40%;
+  padding: 12px 16px;
+  overflow: auto;
 }
 .plugins-toolbar {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  flex: none;
+  gap: 4px 16px;
+  min-height: 52px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.plugins-toolbar h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.plugins-workspace > #plugins-catalog-panel {
+  padding: 16px;
+}
+.plugins-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
 }
 </style>

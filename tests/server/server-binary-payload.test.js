@@ -241,6 +241,7 @@ test('SB20: manifest связывает launcher, npm lock, license, native, hel
     size: 22,
   };
   const input = {
+    version: '0.1.0',
     launcherSha256: 'b'.repeat(64),
     engineSha256: 'c'.repeat(64),
     buildInputs: {

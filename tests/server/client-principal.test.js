@@ -10,7 +10,7 @@ import tls from 'node:tls';
 
 import { AuthStore } from '../../server/src/lib/authStore.ts';
 import { bindDevice, deviceOf, markRevoked } from '../../server/src/lib/clientAccess/principal.ts';
-import b24Module from '../../server/src/modules/b24/index.ts';
+import trackerModule from '../../server/src/modules/tracker/index.ts';
 import { ownTask, registerTasksModule, seedTasks, tasksFixture } from './helpers/grigdesk-tasks.js';
 
 import authModule from '../../server/src/modules/auth/index.ts';
@@ -279,8 +279,8 @@ test('DEVICE-B24-DETAIL-01: устройство читает карточку �
   const telegram = { links: [{ url: 'https://t.me/example_channel/42', text: 'Обсуждение' }] };
   const fx = await principalFixture(t, async (app) => {
     app.decorate('telegramDiscussion', async () => telegram);
-    await app.register(b24Module, {
-      b24: {
+    await app.register(trackerModule, {
+      tracker: {
         async taskDetail(id) {
           assert.equal(String(id), '42');
 
@@ -293,17 +293,17 @@ test('DEVICE-B24-DETAIL-01: устройство читает карточку �
       },
     });
   });
-  const response = await request(fx, '/api/b24/task/42');
+  const response = await request(fx, '/api/tracker/task/42');
 
   assert.equal(response.status, 200);
   assert.equal(response.body.description, '<p>Исходный текст</p>');
   assert.deepEqual(response.body.telegram, telegram);
 
-  const anonymous = await request(fx, '/api/b24/task/42', { key: undefined, cert: undefined });
+  const anonymous = await request(fx, '/api/tracker/task/42', { key: undefined, cert: undefined });
 
   assert.equal(anonymous.status, 401);
   markRevoked(fx.client.fp);
-  assert.equal((await request(fx, '/api/b24/task/42')).status, 403);
+  assert.equal((await request(fx, '/api/tracker/task/42')).status, 403);
 });
 
 test('LOCAL-DETAIL-03: устройство читает own и прежний Б24 по исходному TLS-транспорту', async (t) => {
@@ -317,14 +317,14 @@ test('LOCAL-DETAIL-03: устройство читает own и прежний �
     app.decorate('telegramDiscussion', async () => ({
       links: [{ url: 'https://t.me/example_channel/42' }],
     }));
-    await app.register(b24Module, { b24: storage.moduleOptions.b24 });
+    await app.register(trackerModule, { tracker: storage.moduleOptions.tracker });
   });
   const missing = await request(fx, '/api/grigdesk-tasks/42');
 
   assert.equal(missing.status, 404);
   assert.equal(missing.body.error, 'grigdesk_task_not_found');
 
-  const portal = await request(fx, '/api/b24/task/42');
+  const portal = await request(fx, '/api/tracker/task/42');
 
   assert.equal(portal.status, 200);
   assert.equal(portal.body.title, 'Задача портала');

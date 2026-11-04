@@ -1,31 +1,30 @@
 import { catalogFixture } from './pluginCatalog.js';
 
 /**
- * Оба канала сохраняют старый api1 релиз одного ID, modern добавляет старший api2.
- * В индексе modern также остаётся api1 карточка, чтобы проверять смешанную выдачу.
+ * Единый каталог содержит новый api2 релиз и прежний api1 релиз одного ID.
+ * Отдельная api1 карточка проверяет смешанную выдачу без выбора канала.
  */
 export function moduleCatalogFixture() {
-  const legacy = catalogFixture();
-  const modern = structuredClone(legacy);
+  const data = catalogFixture();
   const next = {
-    ...legacy.version,
+    ...data.version,
     version: '2.0.0',
     tag: 'v2.0.0',
     sha: 'b'.repeat(40),
     api: 2,
   };
-  const ordinary = structuredClone(legacy.index.plugins[0]);
+  const ordinary = structuredClone(data.index.plugins[0]);
 
   ordinary.id = 'ordinary';
   ordinary.repository = 'example/ordinary';
   ordinary.source.url = 'https://github.com/example/ordinary.git';
   ordinary.details = 'ordinary.json';
-  modern.index.plugins[0].latest = next;
-  modern.index.plugins.push(ordinary);
-  modern.detail.plugin.versions.unshift(next);
-  modern.version = next;
+  data.index.plugins[0].latest = next;
+  data.index.plugins.push(ordinary);
+  data.detail.plugin.versions.unshift(next);
+  data.version = next;
 
-  return { legacy, modern };
+  return data;
 }
 
 /**

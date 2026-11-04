@@ -10,10 +10,7 @@
         </UiButton>
         <UiIconButton label="Обновить песочницы" v-tooltip="'Обновить песочницы'"
                       data-context="workspace-toolbar" :loading="store.loading" @click="loadSandboxes()">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M20 7v5h-5M4 17v-5h5M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9" />
-          </svg>
+<UiRefreshIcon />
         </UiIconButton>
       </template>
     </UiPaneHeader>
@@ -139,6 +136,7 @@ import { UiSkeletonLayout } from '../ui';
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
+  UiRefreshIcon,
   UiButton,
   UiIconButton,
   UiInlineMessage,

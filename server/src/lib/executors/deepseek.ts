@@ -29,6 +29,7 @@ import { directSshSetting } from './_directSshPolicy.ts';
 import { deepSeekNativeSettings } from '../executorSettings/deepseek.ts';
 import { installedLegacyBuildId } from '../deepseek/legacyCutover.ts';
 import { runScopedDsh } from './scopedDsh.ts';
+import { runDeepSeekModelOnly } from '../deepseek/modelOnly.ts';
 import { buildDeepSeekChildEnv } from '../deepseek/env.ts';
 import type { WorkToolsPort } from './workIpc.ts';
 
@@ -84,6 +85,8 @@ export function deepSeekSecurityProfile(
 
 export default {
   id: 'deepseek',
+  untrustedInput: Object.freeze({ text: true, images: false }),
+  runUntrusted: runDeepSeekModelOnly,
   effortHints: {
     off: 'Рассуждение выключено: быстрые ответы без этапа обдумывания.',
     low: 'Короткое рассуждение для простых задач; быстрее и экономнее.',

@@ -9,6 +9,8 @@ import { build as viteBuild } from '../../../web/node_modules/vite/dist/node/ind
 import { build as esbuild } from '../../../web/node_modules/esbuild/lib/main.js';
 import ts from '../../../web/node_modules/typescript/lib/typescript.js';
 import { clientBrowser } from './client-browser.mjs';
+import { cardV1 } from './pluginV1.js';
+import { png } from '../../helpers/pluginV1.js';
 import { descriptor, pluginCard } from './pluginModuleContract.js';
 
 const execFileAsync = promisify(execFile);
@@ -18,6 +20,9 @@ const fixtureRoot = path.join(root, 'tests/fixtures/plugins/ui-module/ui');
 const hostId = '\0plugin-test-host-probe';
 const probeSource = `
   import * as Vue from 'vue';
+  import { getActivePinia } from 'pinia';
+  import ProviderUsagePlugins
+    from ${JSON.stringify(path.join(root, 'web/src/features/providers/ProviderUsagePlugins.vue'))};
   import * as UI from ${JSON.stringify(path.join(root, 'web/src/ui.ts'))};
   import { usePluginsStore } from ${JSON.stringify(path.join(root, 'web/src/stores/plugins.ts'))};
   import { useDockStore } from ${JSON.stringify(path.join(root, 'web/src/stores/dock.ts'))};
@@ -25,6 +30,15 @@ const probeSource = `
   import { useAuthStore } from ${JSON.stringify(path.join(root, 'web/src/stores/auth.ts'))};
   export function fixtureState() {
     return { plugins: usePluginsStore(), dock: useDockStore(), chat: useChatStore(), auth: useAuthStore() };
+  }
+
+  export function mountProviderPopup() {
+    const element = document.createElement('div');
+    document.body.append(element);
+    const popup = Vue.createApp(ProviderUsagePlugins, { providerId: 'codex' });
+    popup.use(getActivePinia());
+    popup.mount(element);
+    return () => { popup.unmount(); element.remove(); };
   }
 
   export { Vue, UI };
@@ -269,7 +283,7 @@ export function runtimeMap(built) {
  * Тестовый middleware отдаёт байты собранного HTML до преобразований Vite.
  * Пакет, API и сессия вымышленные; запросы не уходят на живой GrigDesk.
  */
-function assetsPlugin(built, variant = 'valid') {
+function assetsPlugin(built, variant = 'valid', v1 = false) {
   return {
     name: 'plugin-test-assets',
     configureServer(server) {
@@ -279,7 +293,18 @@ function assetsPlugin(built, variant = 'valid') {
         let body;
         let type = 'application/javascript';
 
-        if (url.pathname === '/api/fixture/echo') {
+        if (v1 && url.pathname.startsWith('/api/plugins/ui-module/icon/')) {
+          body = png;
+          type = 'image/png';
+        } else if (v1 && url.pathname === '/api/ext/ui-module/provider-usage') {
+          body = JSON.stringify({ resources: [{
+            key: 'browser',
+            label: 'Источник браузера',
+            summary: '42 %',
+            controls: [],
+          }] });
+          type = 'application/json';
+        } else if (url.pathname === '/api/fixture/echo') {
           body = JSON.stringify({ session: req.headers.cookie?.includes('fixture-session') ?? false });
           type = 'application/json';
         } else if (url.pathname.startsWith('/api/ext/ui-module/module/')) {
@@ -349,10 +374,11 @@ function assetsPlugin(built, variant = 'valid') {
  * Изменён только каталог и статика пакета; дополнительные hosts и SSE не создаются.
  * @param {import('node:test').TestContext} t
  * @param {{built?: Awaited<ReturnType<typeof buildRuntime>> | null, variant?: string,
- * entry?: string, width?: number, hmr?: boolean, b1?: boolean, mode?: 'main' | 'page'}} [options]
+ * entry?: string, width?: number, hmr?: boolean, b1?: boolean, v1?: boolean,
+ * mode?: 'main' | 'page'}} [options]
  */
 export async function runtimeBrowser(t, { built = null, variant = 'valid', entry = descriptor.entry,
-  width = 1280, hmr = false, b1 = false, mode = 'page' } = {}) {
+  width = 1280, hmr = false, b1 = false, v1 = false, mode = 'page' } = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-plugin-browser-'));
   const streams = new Set();
   const requests = [];
@@ -378,7 +404,7 @@ export async function runtimeBrowser(t, { built = null, variant = 'valid', entry
       });
     },
   };
-  const plugins = [assetsPlugin(built, variant), ...(b1 ? [eventPlugin] : []), hostProbePlugin()];
+  const plugins = [assetsPlugin(built, variant, v1), ...(b1 ? [eventPlugin] : []), hostProbePlugin()];
 
   t.after(() => {
     for (const stream of streams) {
@@ -413,12 +439,9 @@ export async function runtimeBrowser(t, { built = null, variant = 'valid', entry
 
 
     responses: {
-      '/api/plugins': { plugins: [pluginCard({
-        webModule: {
-          ...descriptor,
-          entry,
-          ...(b1 ? { startOnLogin: true } : {})
-        },
+      '/api/plugins': { plugins: [v1
+        ? cardV1({ entrypoints: { web: { ...descriptor, entry } } }) : pluginCard({
+        entrypoints: { web: { ...descriptor, entry } },
       })] },
       ...(b1 ? {
         '/api/chat/store': {
@@ -530,7 +553,8 @@ export async function runtimeBrowser(t, { built = null, variant = 'valid', entry
 export async function sharedIdentity(page, { production = true } = {}) {
   const identity = await page.evaluate(async (production) => {
     const host = window.__pluginHost.runtimeProbe;
-    const plugin = await import('/api/ext/ui-module/module/panel.js');
+    const plugin = await import(production
+      ? '/api/ext/ui-module/module/panel.js' : '/api/ext/ui-module/module/panel.js?import');
     const vue = await import('vue');
     const ui = await import('@grigdesk/ui');
 

@@ -87,3 +87,69 @@ export function codexQuestionResponse(presentation: NonNullable<ReturnType<
     [answer.key, { answers: [answer.value as string] }]
   ))) };
 }
+
+/**
+ * Асинхронный вопрос приходит сообщением, без native ID отдельных вопросов.
+ * Позиционные ключи сохраняют порядок и различают одинаковые заголовки внутри карточки.
+ */
+export function codexAsyncQuestionPresentation(item: unknown) {
+  if (!isRecord(item) || item.delivery !== 'async' || !Array.isArray(item.questions)
+    || !item.questions.length || item.questions.length > 3) {
+    return null;
+  }
+
+  const questions = [];
+
+  for (const [index, raw] of item.questions.entries()) {
+    if (!isRecord(raw) || typeof raw.title !== 'string'
+      || (raw.options != null && (!Array.isArray(raw.options)
+        || !raw.options.every((option) => typeof option === 'string')))) {
+      return null;
+    }
+
+    questions.push({
+      id: `async-question-${index + 1}`,
+      header: '',
+      question: raw.title,
+      isOther: true,
+      isSecret: false,
+      options: raw.options?.length
+        ? raw.options.map((label: string) => ({ label, description: '' })) : null,
+    });
+  }
+
+  return codexQuestionPresentation({ isBlocking: false, questions });
+}
+
+/**
+ * Ответ проверяется по сохранённой карточке и передаётся в текущий ход обычным вводом.
+ * Пропуск явно отличается от согласия; повреждённые ответы вообще не доставляются.
+ */
+export function codexAsyncQuestionResponse(presentation: NonNullable<ReturnType<
+  typeof codexAsyncQuestionPresentation>>, decision: unknown): string | null {
+  if (!isRecord(decision)) {
+    return null;
+  }
+
+  if (decision.action === 'cancel') {
+    return 'Пользователь пропустил вопросы агента. Ответ не получен; согласие на действия не дано.\n'
+      + presentation.questions.map((question) => `• ${question.question}`).join('\n');
+  }
+
+  if (decision.action !== 'accept') {
+    return null;
+  }
+
+  const checked = validateStructuredAnswers(presentation.questions, decision.answers);
+
+  if (!checked.ok) {
+    return null;
+  }
+
+  const answers = new Map(checked.answers.map((answer) => [answer.key, answer.value]));
+
+  return 'Ответ пользователя на вопросы агента:\n'
+    + presentation.questions.map((question) => (
+      `• ${question.question}\nОтвет: ${answers.get(question.key)}`
+    )).join('\n');
+}

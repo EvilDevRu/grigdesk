@@ -88,8 +88,6 @@ test('CD-DH-1 вся раскладка данных отделена от ко�
     telegramAccountCredsPath: 'state/telegram-account-creds.json',
     githubCredsPath: 'state/github-creds.json',
     webLogDir: 'state/web-log',
-    b24CookiePath: 'state/b24-cookies.json',
-    b24CredsPath: 'state/b24-creds.json',
     ticketsDir: 'state/tickets',
     sandboxJournalDir: 'state/sandboxes',
     showcaseDir: 'state/showcase',

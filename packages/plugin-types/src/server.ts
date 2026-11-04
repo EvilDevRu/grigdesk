@@ -2,9 +2,11 @@ import type { Buffer } from 'node:buffer';
 import type { FastifyInstance } from 'fastify';
 import type { PluginMetadata } from './manifest.ts';
 import type { PluginProvider } from './provider.ts';
+import type { PluginRuntimeServices } from './coreRuntime.ts';
 import type { ResolvedDocument } from '../../../shared/plugins/documents/documentsContracts.ts';
 
 export type * from './provider.ts';
+export type * from './coreRuntime.ts';
 
 export type AuthKind = 'session' | 'internal' | 'cli' | null;
 
@@ -86,7 +88,7 @@ export interface PluginDocuments {
   readAsset(ref: PluginDocumentRef | null | undefined): Promise<PluginDocumentAsset>;
 }
 
-export interface PluginCore {
+export interface PluginCore extends Partial<PluginRuntimeServices> {
   getProviders(type: unknown): Promise<PluginProvider[]>;
   emit(event: string, data?: unknown): void;
   withPathLock<Result>(key: string, task: () => Promise<Result>): Promise<Result>;

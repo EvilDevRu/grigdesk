@@ -45,7 +45,7 @@ export function installStageRows(
   locale: LocaleSource = 'ru',
 ): PluginInstallStageRow[] {
   const current = job.stage ? INSTALL_STAGE_ORDER.indexOf(job.stage) : -1;
-  const completed = ['ready', 'applying', 'done'].includes(job.status);
+  const completed = ['ready', 'awaiting_restart', 'applying', 'done'].includes(job.status);
 
   return INSTALL_STAGE_ORDER.map((id, index) => {
     let state: PluginInstallStageRow['state'] = 'pending';
@@ -108,20 +108,24 @@ export function installResultText(job: PluginInstallJob,
   const name = job.preview?.name ?? job.pluginId ?? t("settings.plugin");
   const version = job.target?.version ?? '';
 
+  if (job.status === 'awaiting_restart') {
+    return t('settings.pluginUpdateScheduled', { name, version });
+  }
+
   if (job.status === 'done') {
     if (packageKind === 'db-engine') {
       return t('settings.driverInstalledRestart', { name, version });
     }
 
     if (job.kind === 'rollback') {
-      return t("settings.versionVRestoredRestartGrigDesk", { version: version });
+      return t("settings.pluginVersionRestored", { version: version });
     }
 
     if (job.preview?.replaces.kind === 'none') {
-      return t("settings.pluginVInstalledEnableItInThe", { name: name, version: version });
+      return t("settings.pluginInstalledEnable", { name: name, version: version });
     }
 
-    return t("settings.pluginUpdatedToVRestartGrigDeskTo", { name: name, version: version });
+    return t("settings.pluginUpdatedToVersion", { name: name, version: version });
   }
 
   if (job.status === 'failed') {

@@ -33,7 +33,31 @@ async function mountSlider(t, props) {
 
 const LEVELS = ['low', 'medium', 'high'];
 
-test('EFFORT-01: обычный слайдер меняет уровень кликом по точке и по треку', async (t) => {
+test('EFFORT-PHONE: кнопки следуют уровням модели, выбору и disabled', async (t) => {
+  const wrapper = await mountSlider(t, {
+    modelValue: '',
+    levels: ['off', 'high', 'max'],
+    hints: { high: 'Подробное рассуждение' },
+    expanded: true,
+  });
+
+  assert.equal(wrapper.find('input[type="range"]').exists(), false);
+  assert.equal(wrapper.findAll('[aria-pressed="true"]').length, 0);
+  assert.match(wrapper.get('.eff-hint').text(), /по умолчанию/);
+  await wrapper.get('button[data-context="chat-effort-level"]').trigger('click');
+  assert.deepEqual(wrapper.emitted('update:modelValue'), [['off']]);
+  await wrapper.setProps({ modelValue: 'high' });
+  assert.equal(wrapper.get('[aria-pressed="true"]').text(), 'high');
+  assert.match(wrapper.get('.eff-hint').text(), /Подробное рассуждение/);
+
+  await wrapper.setProps({ levels: ['medium', 'high'], disabled: true });
+  assert.deepEqual(wrapper.findAll('button').map((button) => button.text()), ['medium', 'high']);
+  await wrapper.findAll('button')[0].trigger('click');
+  assert.deepEqual(wrapper.emitted('update:modelValue'), [['off']]);
+  assert.equal(wrapper.findAll('button').every((button) => button.element.disabled), true);
+});
+
+test('EFFORT-01: тонкий слайдер меняет уровень и следует динамической шкале модели', async (t) => {
   const wrapper = await mountSlider(t, { modelValue: 'low', levels: LEVELS });
 
   assert.equal(wrapper.findAll('.ui-discrete-slider__points > span').length, LEVELS.length);
@@ -46,6 +70,10 @@ test('EFFORT-01: обычный слайдер меняет уровень кл�
   assert.equal(wrapper.findAll('.ui-discrete-slider__points > span').length, 5);
   assert.equal(wrapper.get('input[type="range"]').attributes('max'), '4');
   assert.equal(wrapper.get('input[type="range"]').attributes('aria-valuetext'), 'high');
+
+  const track = wrapper.get('.ui-discrete-slider--thin');
+
+  assert.equal(track.element.style.getPropertyValue('--ui-slider-fill'), '75%');
 });
 
 test('EFFORT-02: неактивный слайдер молчит, но значение остаётся читаемым', async (t) => {
@@ -149,6 +177,7 @@ test('SLIDER-B1: обычный числовой слайдер сохраняе
   });
 
   assert.equal(wrapper.get('.is-active').text(), 'Обычно');
+  assert.equal(wrapper.find('.ui-discrete-slider--thin').exists(), false);
   assert.equal(wrapper.get('input').element.value, '2');
   await wrapper.get('input').setValue(4);
 

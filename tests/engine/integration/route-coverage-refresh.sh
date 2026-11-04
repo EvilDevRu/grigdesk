@@ -17,6 +17,10 @@ runner_alpha_probe() {
   [[ -z "${FAKE_CONFIG_CHANGE:-}" ]] ||
     sed -i 's/CONFIG_REVISION=1/CONFIG_REVISION=2/' "$FAKE_CONFIG_CHANGE"
   [[ -z "${FAKE_PROBE_DELAY:-}" ]] || sleep "$FAKE_PROBE_DELAY"
+  if [[ "${FAKE_ALPHA_PROBE:-}" == incompatible ]]; then
+    printf 'RUNNER_SUPPLY_INCOMPATIBLE=alpha\n' >&2
+    return 4
+  fi
   [[ "${FAKE_ALPHA_PROBE:-ready}" == ready ]] || return 4
   printf 'ready\n'
 }
@@ -35,6 +39,10 @@ cat >>"$FACTORY_RUNNERS_DIR/beta.sh" <<'RUNNER'
 # Журнал позволяет отличить новый preflight от чтения свежего снимка.
 runner_beta_probe() {
   printf 'beta\n' >>"$TEST_ROOT/probes"
+  if [[ "${FAKE_BETA_PROBE:-}" == incompatible ]]; then
+    printf 'RUNNER_SUPPLY_INCOMPATIBLE=beta\n' >&2
+    return 4
+  fi
   [[ "${FAKE_BETA_PROBE:-ready}" == ready ]] || return 4
   printf 'ready\n'
 }
@@ -247,6 +255,10 @@ runner_beta_refresh_probe() {
 runner_beta_probe() {
   local build
   printf 'beta\n' >>"$TEST_ROOT/probes"
+  if [[ "${FAKE_BETA_PROBE:-}" == incompatible ]]; then
+    printf 'RUNNER_SUPPLY_INCOMPATIBLE=beta\n' >&2
+    return 4
+  fi
   [[ "${FAKE_BETA_PROBE:-ready}" == ready ]] || return 4
   if [[ ! -f "$TEST_ROOT/beta-build" ]]; then
     printf 'ready\n'
@@ -429,6 +441,33 @@ assert_rc 1 "$?" "resume требует недоступный primary реал�
 assert_contains "$(cat "$TEST_ROOT/scoped-blocked-resume.log")" \
   'FACTORY_ERROR=runner_preflight_unavailable RUNNERS=beta' "отказ называет только цепочку SHIP"
 assert_eq "$before_resume" "$(cat "$TEST_ROOT/invocations")" "отказ resume не вызывает модель"
+
+# Перепривязка разрешена только при покрытии всей блокирующей цепочки.
+# Один посторонний отказ остаётся unavailable, даже если сосед сообщил о поставке.
+export FAKE_BETA_PROBE=incompatible
+resume_factory resume --attempt "$attempt" >"$TEST_ROOT/supply-resume.log" 2>&1
+assert_rc 1 "$?" "несовместимая поставка оставляет rc=1 preflight"
+assert_contains "$(cat "$TEST_ROOT/supply-resume.log")" \
+  'FACTORY_ERROR=runner_preflight_incompatible RUNNERS=beta' "все недоступные покрыты маркером"
+
+printf 'STAGE_SHIP_FAILOVER=alpha\n' >>"$profile_dir/runners.env"
+export FAKE_ALPHA_PROBE=missing
+resume_factory resume --attempt "$attempt" >"$TEST_ROOT/mixed-resume.log" 2>&1
+assert_rc 1 "$?" "смесь причин оставляет rc=1 preflight"
+assert_contains "$(cat "$TEST_ROOT/mixed-resume.log")" \
+  'FACTORY_ERROR=runner_preflight_unavailable RUNNERS=alpha,beta' "смесь причин не разрешает перепривязку"
+
+export FAKE_ALPHA_PROBE=incompatible
+resume_factory resume --attempt "$attempt" >"$TEST_ROOT/all-supply-resume.log" 2>&1
+assert_rc 1 "$?" "несовместимость всей цепочки блокирует запуск"
+assert_contains "$(cat "$TEST_ROOT/all-supply-resume.log")" \
+  'FACTORY_ERROR=runner_preflight_incompatible RUNNERS=alpha,beta' "проверяется покрытие каждого кандидата"
+assert_eq "$before_resume" "$(cat "$TEST_ROOT/invocations")" "все отказы поставки предшествуют model call"
+assert_eq approved "$(awk -F= '$1=="GATE_ACCEPT"{print $2}' "$registry")" \
+  "проверки поставки сохраняют решение ворот"
+sed -i '/^STAGE_SHIP_FAILOVER=/d' "$profile_dir/runners.env"
+unset FAKE_ALPHA_PROBE
+export FAKE_BETA_PROBE=missing
 
 # Реестровый primary расходится с pin: runtime восстановит пустое значение запуска.
 # Preflight должен видеть ту же цепочку, сохраняя независимый task-stage override.

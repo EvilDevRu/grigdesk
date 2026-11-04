@@ -203,3 +203,23 @@ test('P8: явное уточнение вызывает reconcile вместо 
   assert.equal(calls.filter(([method]) => method === 'reconcile').length, 1);
   assert.equal(calls.filter(([method]) => method === 'rollback').length, 0);
 });
+
+test('P-V1-INCOMPATIBLE: причина и переустановка доступны без localChanges', async (t) => {
+  const f = await mountPanel(t, webInstallInfo({ localChanges: false }));
+  const reason = 'Пакет использует старый формат манифеста. Переустановите плагин.';
+
+  f.plugin.compatibility = {
+    status: 'incompatible',
+    code: 'manifest_incompatible',
+    reason
+  };
+  await nextTick();
+  assert.equal(f.wrapper.text().includes(reason), true);
+
+  const reinstall = f.wrapper.findAll('button').find((button) => /переустанов/i.test(button.text()));
+
+  assert.ok(reinstall, 'несовместимый пакет можно переустановить даже без ручных изменений');
+  await reinstall.trigger('click');
+  assert.equal(f.wrapper.emitted('update').length, 1);
+  assert.equal(f.calls.filter(([method]) => method === 'startUpdate').length, 0);
+});

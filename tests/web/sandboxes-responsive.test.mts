@@ -17,6 +17,7 @@ const baseEntry: SandboxEntry = {
     slot: 0,
     fePort: 5190,
     apiPort: 8090,
+    serviceHost: null,
     repos: [
         {
             name: 'frontend',
@@ -67,6 +68,7 @@ async function fixture(t: TestContext) {
         profiles: [{
                 id: 'demo-shop',
                 canRaise: true,
+                canDismantle: null,
                 reason: null,
             }],
         sandboxes: [
@@ -175,7 +177,7 @@ async function fixture(t: TestContext) {
 
             await route.fulfill({ json });
         });
-        await page.route(/\/api\/b24\/task\/\d+(?:\?.*)?$/, async (route) => {
+        await page.route(/\/api\/tracker\/task\/\d+(?:\?.*)?$/, async (route) => {
             const task = new URL(route.request().url()).pathname.split('/').at(-1)!;
 
             await route.fulfill({ json: {

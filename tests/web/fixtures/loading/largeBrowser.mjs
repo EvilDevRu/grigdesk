@@ -104,7 +104,7 @@ export async function startLargeBrowser(t) {
     replies: {
       '/api/grigdesk-tasks': {
         revision: 1,
-        b24Configured: true,
+        trackerConfigured: true,
         tasks: [],
       },
       '/api/tasks': { tasks: [{

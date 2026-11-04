@@ -29,6 +29,8 @@
               v-for="action in toast.actions"
               :key="action.id"
               data-context="toast-action"
+              size="compact"
+              wrap
               :tone="action.tone || 'neutral'"
               :variant="action.variant || 'outline'"
               @click="void runToastAction(toast.id, action.id)"

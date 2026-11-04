@@ -1,12 +1,25 @@
 <template>
+  <UiButton
+    v-if="labeled"
+    :variant="menu ? 'ghost' : 'solid'"
+    :tone="menu ? 'neutral' : 'accent'"
+    :data-context="menu ? 'phone-section-action' : undefined"
+    wrap
+    aria-haspopup="dialog"
+    :disabled="disabled"
+    @click="phone.start()"
+  >
+    {{ t('settings.connectPhone') }}
+  </UiButton>
   <UiIconButton
+    v-else
     variant="link"
     role="rail"
     data-context="topbar-action"
     :label="t('settings.connectPhone')"
     v-tooltip="t('settings.connectPhone')"
     aria-haspopup="dialog"
-    :disabled="!auth.authenticated || !auth.ready || (shell.present && shell.status !== 'online')"
+    :disabled="disabled"
     @click="phone.start()"
   >
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
@@ -18,12 +31,19 @@
 </template>
 
 <script setup lang="ts">
-import { UiIconButton, t, vTooltip } from '../../ui.ts';
+import { computed } from 'vue';
+
+import { UiButton, UiIconButton, t, vTooltip } from '../../ui.ts';
 import { useAuthStore } from '../../stores/auth.ts';
 import { useShellStore } from '../../stores/shell.ts';
 import { usePhoneAccessStore } from '../../stores/phoneAccess.ts';
 
+defineProps<{ labeled?: boolean; menu?: boolean }>();
+
 const auth = useAuthStore();
 const shell = useShellStore();
 const phone = usePhoneAccessStore();
+
+const disabled = computed(() => !auth.authenticated || !auth.ready
+  || (shell.present && shell.status !== 'online'));
 </script>

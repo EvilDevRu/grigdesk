@@ -121,7 +121,7 @@ async function factoryFixture(t, givenPrefs = prefsDouble()) {
       factoryProfile: '',
     },
     prefs: givenPrefs,
-    b24: null,
+    tracker: null,
     analyzer: {
       readClarifications: async () => null,
       readOpenQuestions: async () => null,

@@ -12,7 +12,6 @@ import type { PluginInstallInfo } from './pluginInstallContracts.ts';
 export interface PluginNav {
   path: string;
   label: string;
-  icon: string;
   group: string;
   order?: number;
 }
@@ -93,7 +92,30 @@ export interface PluginWebModule {
   entry: string;
   css: string[];
   locales: { ru?: string; en?: string };
-  startOnLogin?: boolean;
+}
+
+export interface PluginPanelDecl {
+  title?: string;
+  group?: 'rail' | 'tools' | 'dock';
+  order?: number;
+}
+
+export interface PluginSlotDecl extends PluginPlacementDecl {
+  kind: 'provider-usage';
+}
+
+export interface PluginContributions {
+  panels?: PluginPanelDecl[];
+  slots?: PluginSlotDecl[];
+  settings?: PluginSetting[];
+  commands?: Array<{ id: string; title: string }>;
+  themes?: Array<{ id: string; title: string }>;
+}
+
+export interface PluginCompatibility {
+  status: 'compatible' | 'incompatible';
+  code: string | null;
+  reason: string | null;
 }
 
 // Запись списка `/api/plugins`: манифест плюс состояние этой установки.
@@ -114,10 +136,10 @@ export interface PluginListItem {
   values: Record<string, unknown>;
   placements?: PluginPlacementState[];
   setup?: PluginSetup | null;
-  // Адрес своей страницы пользовательского плагина (GrigDesk показывает её панелью или
-  // страницей по nav.path); у плагинов без страницы поля нет.
-  web?: string | null;
-  webModule?: PluginWebModule | null;
+  icon?: string | null;
+  compatibility?: PluginCompatibility;
+  entrypoints?: { web?: PluginWebModule | null };
+  contributes?: PluginContributions;
 }
 
 export interface PluginCategory {

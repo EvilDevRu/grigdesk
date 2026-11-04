@@ -10,6 +10,7 @@ function uiFacadeStub(prefix, { stubDialog = false } = {}) {
   const componentImports = [
     ['UiPopover', 'src/components/overlays/UiPopover.vue'],
     ['UiButton', 'src/components/primitives/UiButton.vue'],
+    ['UiCheckbox', 'src/components/primitives/UiCheckbox.vue'],
     ['UiChoiceList', 'src/components/composites/UiChoiceList.vue'],
     ['UiDisclosureButton', 'src/components/composites/UiDisclosureButton.vue'],
     ['UiField', 'src/components/composites/UiField.vue'],
@@ -102,11 +103,13 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
   return compileVue(TASK_MODAL_PATH, {
     stubs: {
       'vue-router': `export const useRouter = () => globalThis.${prefix}Router || ({ push() {} });`,
-      '../shared/shellClient.ts':
+      '../shared/shellClient.ts': [
         `export const shellAction = (...args) => globalThis.${prefix}ShellAction?.(...args);`,
+        'export const readShellState = async () => null;',
+      ].join('\n'),
       '../shared/apiClient.ts': [
         `export const api = globalThis.${prefix}Api;`,
-        `export { failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,
+        `export { ApiError, failureText } from ${JSON.stringify(webFile('src/shared/apiClient.ts'))};`,
       ].join('\n'),
       '../composables/useUiContextSource.ts': contextSourceStub(prefix),
       '../composables/useSse.ts': [
@@ -130,6 +133,7 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
         `  arbitrate: (id) => globalThis.${prefix}Api.post('/api/tasks/' + id + '/analysis/arbitrate', {}),`,
         '};',
       ].join('\n'),
+      '../shared/grigdeskPersonalState.ts': 'export const grigdeskPersonalStateVersion = { value: 1 };',
       '../stores/taskFavorites.ts': (
         `export const useTaskFavoritesStore = globalThis.${prefix}FavoritesStore;`
       ),
@@ -137,6 +141,7 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
         `export const useTaskShelfStore = globalThis.${prefix}ShelfStore || (() => ({`,
         '  entries: [], rows: [], loaded: true, loading: false, error: null, pending: {},',
         '  isOnShelf: () => false, isPending: () => false,',
+        '  async load() { return true; },',
         '  async toggle() { return true; }, async acknowledge() { return true; },',
         '}));',
       ].join('\n'),
@@ -160,6 +165,7 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
         `  globalThis.${prefix}DictationController || fallbackController;`,
       ].join('\n'),
       '../shared/format.ts': [
+        `export { formatDateTime, deadlineState } from ${JSON.stringify(webFile('src/shared/format.ts'))};`,
         'export const liveTimerSec = (task) => task?.timerElapsed || 0;',
         'export const secToHMS = (value) => String(value ?? 0);',
         // mmss повторён настоящим: тест прогресса триажа читает именно таймкод,
@@ -188,4 +194,12 @@ export function compileTaskModal(prefix, { stubDialog = false } = {}) {
       './board/TaskFavoriteButton.vue': favoriteButtonStub(prefix),
     },
   });
+}
+
+/**
+ * Пункт интерактивного чек-листа ищется по id, сохраняя свободу внутренней разметки.
+ * Все тесты карточки используют одну границу строки с отметкой и действиями.
+ */
+export function taskChecklistItem(wrapper, id) {
+  return wrapper.get(`[data-checklist-id="${id}"]`);
 }

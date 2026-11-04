@@ -88,3 +88,23 @@ test('GET-DEFAULT-02', async (t) => {
     assert.equal(count, 1);
   });
 });
+
+
+test('DELETE-DEFAULT-01: удаление передаёт заголовок поколения до сети', async (t) => {
+  const calls = [];
+
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ url, options });
+
+    return Response.json({ ok: true });
+  });
+
+  const response = await api.del('/api/tracker/task/42', undefined, {
+    headers: { 'x-grigdesk-tracker-generation': '7' },
+  });
+
+  assert.deepEqual(response, { ok: true });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.method, 'DELETE');
+  assert.equal(calls[0].options.headers['x-grigdesk-tracker-generation'], '7');
+});

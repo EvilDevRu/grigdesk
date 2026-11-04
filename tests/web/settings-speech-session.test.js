@@ -42,7 +42,7 @@ function speechResponse(patch = {}, revision = 'sha256:initial') {
       models: [{
         modelId: 'medium',
         sizeMb: 700,
-        cached: false,
+        cached: true,
         canCopy: true,
       }],
       benchmark: { available: true, reason: '' },
@@ -65,7 +65,7 @@ test('SP01/SP03/SP09: общий patch речи, null reset и conditionOnPrevio
 
   session.begin();
   session.register(resource.adapter, ['engine', 'dictionary', 'videoInitialPrompt', 'conditionOnPreviousText']
-    .map((key) => ({ key, address: { pageId: 'speech.advanced', fieldPath: [key] } })));
+    .map((key) => ({ key, address: { pageId: 'speech.dictation', fieldPath: [key] } })));
   await session.load('speech');
   session.setField('speech', 'engine', 'whisper');
   session.setField('speech', 'dictionary', 'термины');
@@ -103,7 +103,7 @@ test('SP02: SSE сохраняет dirty; старый GET и POST не отка
   session.begin();
   session.register(resource.adapter, ['dictionary', 'language'].map((key) => ({
     key,
-    address: { pageId: 'speech.language', fieldPath: [key] },
+    address: { pageId: 'speech.dictation', fieldPath: [key] },
   })));
   await session.load('speech');
   session.setField('speech', 'dictionary', 'черновик');
@@ -145,7 +145,7 @@ test('SP02b (guard): старый GET после save не откатывает 
   session.begin();
   session.register(resource.adapter, [{
     key: 'dictionary',
-    address: { pageId: 'speech.language', fieldPath: ['dictionary'] },
+    address: { pageId: 'speech.dictation', fieldPath: ['dictionary'] },
   }]);
   await session.load('speech');
 
@@ -161,7 +161,7 @@ test('SP02b (guard): старый GET после save не откатывает 
   assert.equal(session.getSnapshot().dirtyCount, 0);
 });
 
-test('Новые страницы речи и операции', async (t) => {
+test('Единая страница речи и операции', async (t) => {
   const browser = await installUiBrowser(t);
   const [{ createPinia, setActivePinia }, { mount, flushPromises }, module] = await Promise.all([
     import('../../web/node_modules/pinia/dist/pinia.mjs'),
@@ -183,6 +183,14 @@ test('Новые страницы речи и операции', async (t) => {
   globalThis.fetch = async (url, options = {}) => {
     const path = String(url);
     const method = options.method ?? 'GET';
+
+    if (path.endsWith('/speech/installation')) {
+      return Response.json({
+        managed: true,
+        installed: true,
+        job: null,
+      });
+    }
 
     if (path.includes('/jobs/')) {
       if (method === 'DELETE') {
@@ -244,35 +252,22 @@ test('Новые страницы речи и операции', async (t) => {
   await flushPromises();
 
   await t.test('SP04/SP05: недоступный browser-local не включает облако и не даёт согласие', async () => {
+    await wrapper.get('[data-speech-advanced-toggle]').trigger('click');
     assert.match(wrapper.text(), /Whisper|Недоступно/);
     assert.equal(settings.getValue('speech', 'browserProcessing'), 'local');
     assert.equal(posts.length, 0);
     assert.equal(module.useChatStore().speech.browserAutoConsent, false);
   });
 
-  await t.test('CONS-speech.*: каталог и смонтированные поля совпадают', async () => {
-    for (const pageId of ['speech.dictation', 'speech.video', 'speech.language',
-      'speech.models', 'speech.advanced']) {
-      settings.selectPage(pageId);
-      await flushPromises();
-
-      assertSettingsFields(wrapper.element, SETTINGS_FIELDS, pageId);
-    }
+  await t.test('CONS-speech.*: все прежние поля присутствуют на единой странице', async () => {
+    assertSettingsFields(wrapper.element, SETTINGS_FIELDS, 'speech.dictation');
   });
 
-  await t.test('SP01/SP03/SP09: ввод разных страниц и сброс ждут общего Apply', async () => {
-    settings.selectPage('speech.dictation');
-    await flushPromises();
-    await wrapper.find('select').setValue('whisper');
-    settings.selectPage('speech.language');
-    await flushPromises();
+  await t.test('SP01/SP03/SP09: простые и расширенные поля и сброс ждут общего Apply', async () => {
+    await wrapper.get('[data-speech-advanced] select').setValue('whisper');
     await wrapper.find('textarea').setValue('новые термины');
-    settings.selectPage('speech.video');
-    await flushPromises();
-    await wrapper.find('button').trigger('click');
-    settings.selectPage('speech.advanced');
-    await flushPromises();
-    await wrapper.find('[role="switch"]').setValue(false);
+    await wrapper.find('[data-speech-prompt-reset]').trigger('click');
+    await wrapper.get('[data-speech-advanced] [role="switch"]').setValue(false);
 
     assert.equal(posts.length, 0);
     assert.equal(wrapper.find('option[value="cuda"]').attributes('disabled'), '');
@@ -293,7 +288,11 @@ test('Новые страницы речи и операции', async (t) => {
   });
 
   await t.test('SP06/SP07: job стартует один раз, уход снимает опрос, возврат перечитывает', async () => {
-    settings.selectPage('speech.models');
+    settings.selectPage('speech.dictation');
+    await flushPromises();
+
+    speech.capabilities.models[0].cached = false;
+    await wrapper.get('[data-speech-recheck]').trigger('click');
     await flushPromises();
 
     const download = wrapper.find('[data-download="medium"]');
@@ -303,7 +302,7 @@ test('Новые страницы речи и операции', async (t) => {
     await flushPromises();
 
     assert.equal(posts.filter((entry) => entry.path.endsWith('/download')).length, 1);
-    settings.selectPage('speech.language');
+    settings.selectPage('interface.behavior');
     await flushPromises();
 
     const reads = gets.length;
@@ -312,7 +311,7 @@ test('Новые страницы речи и операции', async (t) => {
 
     assert.equal(gets.length, reads);
     finished = true;
-    settings.selectPage('speech.models');
+    settings.selectPage('speech.dictation');
     await flushPromises();
 
     assert.equal(gets.length > reads, true);
@@ -327,7 +326,7 @@ test('Новые страницы речи и операции', async (t) => {
   });
 
   await t.test('SP08: замер использует неприменённые параметры и не пишет настройки', async () => {
-    settings.selectPage('speech.advanced');
+    settings.selectPage('speech.dictation');
     await flushPromises();
     settings.setField('speech', 'model', 'small');
     settings.setField('speech', 'language', 'en');

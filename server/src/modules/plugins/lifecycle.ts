@@ -53,6 +53,7 @@ export interface PluginAdmissionOptions {
   hasServer: boolean;
   stopRequired?: boolean;
   timeoutMs?: number;
+  prepareReplace?: (signal: AbortSignal) => Promise<ReplacementLease>;
 }
 
 /**
@@ -78,6 +79,10 @@ export class PluginAdmission {
 
   get needsRestart(): boolean {
     return this.phase === 'installed' || !!this.options.stopRequired;
+  }
+
+  get isEnabled(): boolean {
+    return this.enabled;
   }
 
   setEnabled(enabled: boolean): void {
@@ -175,7 +180,8 @@ export class PluginAdmission {
         throw installError('plugin_busy');
       }
 
-      if (this.options.stopRequired || (this.options.hasServer && !this.options.lifecycle.prepareReplace)) {
+      if (this.options.stopRequired || (this.options.hasServer
+        && !this.options.lifecycle.prepareReplace && !this.options.prepareReplace)) {
         throw installError('plugin_stop_required');
       }
 
@@ -207,7 +213,7 @@ export class PluginAdmission {
    * Поздний lease возвращается как reverted и лишь успешный cleanup открывает gate.
    */
   private async obtainLease(signal: AbortSignal): Promise<ReplacementLease | null> {
-    const hook = this.options.lifecycle.prepareReplace;
+    const hook = this.options.lifecycle.prepareReplace ?? this.options.prepareReplace;
 
     if (!hook) {
       return null;

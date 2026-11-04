@@ -458,7 +458,7 @@
         "title": "Плагин",
         "tool": "ext"
       },
-      "component": "./views/ExtPluginView.vue"
+      "component": "./views/PluginView.vue"
     },
     {
       "path": "/video",

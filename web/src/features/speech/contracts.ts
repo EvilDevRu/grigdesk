@@ -165,6 +165,7 @@ export interface ControllerOptions {
   apiClient?: Pick<typeof api, 'get' | 'post' | 'upload' | 'del'>;
   browser?: Partial<{
     isSecureContext(): boolean;
+    localRecognitionAllowed(): boolean;
     recognitionCtor(): RecognitionCtor | null;
     phraseCtor(): SpeechWindow['SpeechRecognitionPhrase'] | null;
     uiLanguage(): string;

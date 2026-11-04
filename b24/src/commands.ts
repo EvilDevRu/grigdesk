@@ -14,7 +14,7 @@ export interface CommandIO {
  * Числовая нормализация остаётся на сервере.
  */
 function taskPath(id: string, tail = ''): string {
-  return `/api/b24/task/${encodeURIComponent(id)}${tail}`;
+  return `/api/tracker/task/${encodeURIComponent(id)}${tail}`;
 }
 
 /**
@@ -38,7 +38,7 @@ async function specOf(command: Exclude<ApiCommand, { kind: 'start' }>, io: Comma
     case 'dashboard':
       return {
         method: 'GET',
-        path: '/api/b24/dashboard',
+        path: '/api/tracker/dashboard',
       };
     case 'task':
       return {
@@ -70,14 +70,14 @@ async function specOf(command: Exclude<ApiCommand, { kind: 'start' }>, io: Comma
     case 'create':
       return {
         method: 'POST',
-        path: '/api/b24/tasks',
+        path: '/api/tracker/tasks',
         body: await stdinBody(io),
         json: true,
       };
     case 'users':
       return {
         method: 'GET',
-        path: `/api/b24/users?${new URLSearchParams({ q: command.query })}`,
+        path: `/api/tracker/users?${new URLSearchParams({ q: command.query })}`,
       };
   }
 }

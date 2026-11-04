@@ -179,14 +179,18 @@ export function assertDeepSeekPreparedRuntime(
 }
 
 /**
- * Асинхронная перепроверка перед spawn для серверных путей: тот же контракт,
- * но обход поколения не блокирует остальные запросы GrigDesk.
+ * Проверка закреплённого файла сохраняет signature, SHA и packageId до spawn.
+ * Optional signal отменяет только caller; shared probe остальных ожидателей продолжает работать.
  */
-export async function verifyDeepSeekRuntimeDescriptorAsync(
-  runtime: DeepSeekRuntimeDescriptor,
-): Promise<void> {
+export async function verifyDeepSeekRuntimeDescriptorAsync(runtime: DeepSeekRuntimeDescriptor, options: {
+  signal?: AbortSignal;
+} = {}): Promise<void> {
+  options.signal?.throwIfAborted();
+
   try {
-    const current = await probeDeepSeekBinaryCached(runtime.command);
+    const current = await probeDeepSeekBinaryCached(runtime.command, options.signal);
+
+    options.signal?.throwIfAborted();
 
     if (current.info.packageId !== runtime.metadata?.packageId
       || runtime.binaryFile && (current.file.signature !== runtime.binaryFile.signature
@@ -194,6 +198,8 @@ export async function verifyDeepSeekRuntimeDescriptorAsync(
       throw new Error('changed');
     }
   } catch {
+    options.signal?.throwIfAborted();
+
     throw deepSeekRuntimeError('deepseek_runtime_changed', 'Закреплённый бинарник DeepSeek изменился');
   }
 }

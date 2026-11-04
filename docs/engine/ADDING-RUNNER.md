@@ -38,6 +38,12 @@ id — `^[a-z][a-z0-9_-]*$` (`index.sh:11`); реестр сканирует к�
 
 Условно обязательные (в contract_check не входят, но нужны движку):
 
+- При доказанной несовместимости поставки `probe` может вернуть `4` и отдельную строку
+  `RUNNER_SUPPLY_INCOMPATIBLE=<id>` в stderr. Отсутствие CLI, ключа или допуска такого
+  права не даёт. Preflight принимает только строгий маркер проверяемого раннера;
+  [полный контракт](../grigdesk/pipeline/runner-supply-incompatibility.md) описывает
+  покрытие всех недоступных кандидатов и единственную перепривязку при resume.
+
 - `default_policy` — вызывается при отсутствии `MODEL_*_<ID>_*` в профиле
   (`multi-runner.sh:161-169`). Без неё кандидат получает `route_unavailable`, а host
   preflight — `structural_level=unavailable`, что роняет весь профиль

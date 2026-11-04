@@ -180,20 +180,24 @@ export const useOnboardingStore = defineStore('onboarding', () => {
   }
 
   /**
-   * Все переходы берут токен из последнего ACK после завершения очереди autosave.
-   * Ответ старого scope не меняет страницу и не восстанавливает личные ответы.
+   * Переход блокирует повторные действия до ожидания autosave и берёт токен последнего ACK.
+   * Смена scope во время ожидания не отправляет действие к проходу другого подключения.
    */
   async function transition(suffix: string, extra: Record<string, unknown> = {}): Promise<boolean> {
-    if (busy.value || !await flush() || !snapshot.value?.active) {
+    if (busy.value || opening.value) {
       return false;
     }
 
     const epoch = generation;
-    const state = snapshot.value;
 
     busy.value = true;
 
     try {
+      if (!await flush() || epoch !== generation || !snapshot.value?.active) {
+        return false;
+      }
+
+      const state = snapshot.value;
       const result = await writeOnboarding(suffix, {
         expectedRevision: state.revision,
         sessionId: state.active!.id,

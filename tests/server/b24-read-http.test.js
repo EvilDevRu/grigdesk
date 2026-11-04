@@ -3,8 +3,8 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 
 import { setImmediate } from 'node:timers/promises';
-import { B24Adapter } from '../../server/src/adapters/b24.ts';
-import { currentB24Read } from '../../server/src/lib/b24/readOperations.ts';
+import { customReadModule } from './helpers/trackerPackage.js';
+
 import { TaskFavoritesService } from '../../server/src/lib/taskFavoritesService.ts';
 import { TaskSeenService } from '../../server/src/lib/taskSeenService.ts';
 import { TaskShelfService } from '../../server/src/lib/taskShelfService.ts';
@@ -12,7 +12,7 @@ import favoritesModule from '../../server/src/modules/task-favorites/index.ts';
 import seenModule from '../../server/src/modules/task-seen/index.ts';
 import shelfModule from '../../server/src/modules/task-shelf/index.ts';
 
-import b24Module from '../../server/src/modules/b24/index.ts';
+import b24Module from '../../server/src/modules/tracker/index.ts';
 
 const require = createRequire(new URL('../../server/package.json', import.meta.url));
 const Fastify = require('fastify');
@@ -35,7 +35,7 @@ test('HTTP-01: GET передаёт signal, успешный ответ не о�
   const app = Fastify({ logger: false });
 
   app.register(b24Module, {
-    b24: {
+    tracker: {
       async getDashboard(options = {}) {
         signal = options.signal;
 
@@ -45,7 +45,7 @@ test('HTTP-01: GET передаёт signal, успешный ответ не о�
   });
   t.after(() => app.close());
 
-  const response = await app.inject('/api/b24/dashboard');
+  const response = await app.inject('/api/tracker/dashboard');
 
   assert.equal(response.statusCode, 200);
   assert.equal(signal instanceof AbortSignal, true);
@@ -62,7 +62,7 @@ test('HTTP-02: disconnect настоящего GET отменяет сервер
   let serverSignal;
 
   app.register(b24Module, {
-    b24: {
+    tracker: {
       /**
        * Синтетический ответ остаётся открытым до ухода HTTP-потребителя.
        * Отмена наблюдается на сервере независимо от отклонения браузерного fetch.
@@ -90,7 +90,7 @@ test('HTTP-02: disconnect настоящего GET отменяет сервер
   });
 
   const address = await app.listen({ host: '127.0.0.1', port: 0 });
-  const request = fetch(`${address}/api/b24/dashboard`, {
+  const request = fetch(`${address}/api/tracker/dashboard`, {
     signal: consumer.signal,
   }).catch((error) => error);
 
@@ -107,6 +107,22 @@ test('HTTP-02: disconnect настоящего GET отменяет сервер
  * В queued-режиме перед ним стоит мутация, отменённое определение не должно начаться.
  */
 async function assertColdLocalCancellation(t, kind, queued) {
+  const sessionModule = await customReadModule('src/session.ts', t);
+
+  if (!sessionModule) {
+    return;
+  }
+
+  const { CustomSession: B24Adapter } = sessionModule;
+  const { currentB24Read } = await customReadModule('src/readOperations.ts', t);
+  let tail = Promise.resolve();
+  const serial = (fn) => {
+    const work = tail.then(fn);
+
+    tail = work.catch(() => undefined);
+
+    return work;
+  };
   const held = deferred();
   const bothSubscribed = deferred();
   const bothGone = deferred();
@@ -119,8 +135,11 @@ async function assertColdLocalCancellation(t, kind, queued) {
   const signals = [];
   let master;
   const adapter = new B24Adapter({
-    credsStore: { read: () => null },
-    cookiePath: '/tmp/unused-cold-local-cookie',
+    host: {
+      credentials: { read: () => null },
+      serial,
+      cookiePath: '/tmp/unused-cold-local-cookie',
+    },
   });
 
   adapter.client = () => ({
@@ -169,9 +188,9 @@ async function assertColdLocalCancellation(t, kind, queued) {
     }),
   };
   const configuration = {
-    favorites: [favoritesModule, { favorites: new TaskFavoritesService({ store, b24: adapter }) }],
-    seen: [seenModule, { seen: new TaskSeenService({ store, b24: adapter }) }],
-    shelf: [shelfModule, { shelf: new TaskShelfService({ store, b24: adapter }) }],
+    favorites: [favoritesModule, { favorites: new TaskFavoritesService({ store, tracker: adapter }) }],
+    seen: [seenModule, { seen: new TaskSeenService({ store, tracker: adapter }) }],
+    shelf: [shelfModule, { shelf: new TaskShelfService({ store, tracker: adapter }) }],
   };
   const [module, options] = configuration[kind];
 
@@ -187,7 +206,7 @@ async function assertColdLocalCancellation(t, kind, queued) {
 
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
   const requests = consumers.map((consumer, index) => fetch(
-    `${origin}/api/b24/task-${kind}?slot=${index}`,
+    `${origin}/api/tracker/task-${kind}?slot=${index}`,
     { signal: consumer.signal },
   ).catch((error) => error));
 

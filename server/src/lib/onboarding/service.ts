@@ -255,23 +255,40 @@ export function createOnboardingService(options: OnboardingOptions) {
 
     /**
      * Шаги меняются только после подтверждённой записи; Git перепроверяется при commit.
+     * Просмотр режима до создания проекта не разрешает завершить пустой проход.
      * Итог завершает лишь эту часть мастера, не создавая работающий профиль.
      */
-    async advance(expected: number, id: string, skipAi?: boolean): Promise<OnboardingState> {
+    async advance(
+      expected: number,
+      id: string,
+      skipAi?: boolean,
+      previewWorkspace?: boolean,
+    ): Promise<OnboardingState> {
       const state = await store.transact(expected, async (value, save) => {
         const session = current(value, id);
 
-        if (session.status !== 'active' || (skipAi !== undefined && session.step !== 'ai')) {
+        if (session.status !== 'active' || (skipAi !== undefined && session.step !== 'ai')
+          || (previewWorkspace !== undefined && session.step !== 'project')) {
           throw new OnboardingError('invalid_transition');
         }
 
         if (session.step === 'project') {
-          await commitProject(value, session, save);
+          if (session.projectSaved || (previewWorkspace === true && !session.projectIntent)) {
+            session.step = 'workspace';
+            await save();
+          } else {
+            await commitProject(value, session, save);
+          }
         } else {
           if (session.step === 'ai') {
             session.aiSkipped = skipAi === true;
             session.step = 'project';
+            remember(value, session);
           } else if (session.step === 'workspace') {
+            if (!session.projectSaved) {
+              throw new OnboardingError('invalid_project');
+            }
+
             session.step = 'summary';
             session.status = 'completed';
             value.autoOpenDisabled = true;
@@ -283,6 +300,30 @@ export function createOnboardingService(options: OnboardingOptions) {
           await save();
         }
 
+        announce(value.revision);
+      });
+
+      return snapshot(state);
+    },
+
+    /**
+     * Возврат сохраняет ответы и созданный паспорт, не повторяя создание проекта.
+     * Итог можно открыть заново для выбора режима; пропущенный проход не возобновляется.
+     */
+    async back(expected: number, id: string): Promise<OnboardingState> {
+      const state = await store.transact(expected, async (value, save) => {
+        const session = current(value, id);
+
+        if (session.status === 'dismissed' || session.step === 'ai'
+          || (session.status === 'completed' && session.step !== 'summary')) {
+          throw new OnboardingError('invalid_transition');
+        }
+
+        session.step = session.step === 'summary' ? 'workspace'
+          : session.step === 'workspace' ? 'project' : 'ai';
+        session.status = 'active';
+        remember(value, session);
+        await save();
         announce(value.revision);
       });
 

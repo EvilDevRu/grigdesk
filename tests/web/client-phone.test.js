@@ -124,7 +124,7 @@ const tasks = Array.from({ length: 55 }, (_, index) => ({
 
 const responses = {
   ...projects,
-  '/api/b24/dashboard': {
+  '/api/tracker/dashboard': {
     today: { hours: 1, tasks_count: 1 },
     month: { hours: 1, norm: 160 },
     tasks,
@@ -186,16 +186,21 @@ test('телефон: полная ширина, меню разделов, ча
       await page.locator('.cl .row-hit').first().click();
 
       const composer = page.locator('textarea[data-role="chat-composer"]');
-      const model = page.locator('[data-role="chat-model"]');
+      const model = page.locator('button[data-role="chat-model"][role="combobox"]');
+      const nativeModel = page.locator('select[data-role="chat-model"]');
       const options = page.getByRole('button', { name: 'Настройки чата', exact: true });
 
       await composer.fill('Черновик на телефоне');
       await assertPhoneFrame(page, width, 844);
+      assert.equal(await model.count(), 1);
+      assert.equal(await nativeModel.count(), 1);
+      assert.equal(await nativeModel.isVisible(), false);
       assert.equal(await page.locator('.sidebar').isVisible(), false);
       assert.equal(await model.isVisible(), false);
       assert.ok(await page.locator('.cs-top').evaluate((el) => el.clientHeight) <= 68);
       await options.click();
       assert.equal(await model.isVisible(), true);
+      assert.equal(await nativeModel.isVisible(), false);
       await scaleClientText(page, 1.3, '.cs-top');
       assert.equal(await page.locator('.cs-top').evaluate((el) => (
         el.scrollWidth <= el.clientWidth + 1
@@ -221,7 +226,7 @@ test('телефон: полная ширина, меню разделов, ча
   }
 });
 
-test('телефон: доска прокручивается страницей, фильтрует и позволяет загрузить оставшиеся задачи', {
+test('телефон: страница доски прокручивает свой список, фильтрует и загружает оставшиеся задачи', {
   timeout: 120000,
 }, async (t) => {
   const { browser, origin } = await clientBrowser(t, { responses, artifacts });
@@ -232,6 +237,9 @@ test('телефон: доска прокручивается страницей
   await assertPhoneFrame(page, 360, 740);
   assert.equal(await page.locator('.trow').count(), 40);
   assert.equal(await page.locator('.scroller').evaluate((el) => getComputedStyle(el).overflowY), 'visible');
+  assert.equal(await page.locator('.col.primary').evaluate((el) => getComputedStyle(el).overflowY), 'auto');
+  assert.equal(await page.locator('.board-pages').evaluate((el) => getComputedStyle(el).scrollSnapType),
+    'x mandatory');
 
   const firstTask = await page.locator('.ttext').first().boundingBox();
 
@@ -239,7 +247,7 @@ test('телефон: доска прокручивается страницей
   await page.screenshot({ path: path.join(artifacts, 'board-360.png') });
   await page.locator('[data-role="board-load-more"]').click();
   assert.equal(await page.locator('.trow').count(), 55);
-  await page.locator('.content').evaluate((el) => {
+  await page.locator('.col.primary').evaluate((el) => {
     el.scrollTop = 0;
   });
   await page.locator('.filter-toggle').click();

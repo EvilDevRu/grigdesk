@@ -113,7 +113,7 @@ test('NUMBER-03: рестарт не повторяет номер, corrupt и �
 
   const before = await readFile(unwritable.config.grigdeskTasksPath, 'utf8');
 
-  unwritable.moduleOptions.b24.probeTaskNumber = async () => {
+  unwritable.moduleOptions.tracker.probeTaskNumber = async () => {
     await chmod(unwritable.root, 0o500);
 
     return 'absent';

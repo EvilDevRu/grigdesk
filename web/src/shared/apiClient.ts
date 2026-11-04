@@ -1,6 +1,6 @@
 import { delayWithAbort } from '../../../shared/lib/delay.ts';
 import { startChatPerformance } from './chatPerformance.ts';
-import { acquireB24Read, b24ReadRoute, shouldLogB24Failure } from './b24ReadBackoff.ts';
+import { acquireTrackerRead, trackerReadRoute, shouldLogTrackerFailure } from './trackerReadBackoff.ts';
 import { resetApiDiagnostics, startApiDiagnostic } from './apiDiagnostics.ts';
 import type { ApiDiagnostic } from './apiDiagnostics.ts';
 import type { WebApiTiming } from '../../../shared/web-log/webDiagnostics.ts';
@@ -261,12 +261,12 @@ function reportAttempt(
     reportedErrors.add(error);
   }
 
-  const b24Route = b24ReadRoute(path);
+  const trackerRoute = trackerReadRoute(path);
 
   const transient = (status === undefined && name !== 'SyntaxError')
     || (status !== undefined && [502, 503, 504].includes(status));
 
-  if (method === 'GET' && b24Route && transient && !shouldLogB24Failure(b24Route)) {
+  if (method === 'GET' && trackerRoute && transient && !shouldLogTrackerFailure(trackerRoute)) {
     return;
   }
 
@@ -324,6 +324,7 @@ function observeAttempt(method: Method, path: string, attempt: number,
 // Настройка одной попытки. По умолчанию GET ждёт 30 с и повторяется один раз, а
 // мутации ждут без таймаута и не повторяются.
 export interface RequestOptions {
+  headers?: Record<string, string>;
   // Таймаут попытки в миллисекундах; 0 — без таймаута.
   timeoutMs?: number;
   // Вместо общего предела ждём указанное время без заголовков или непустых байтов.
@@ -445,7 +446,7 @@ async function request(
   body?: unknown,
   options: RequestOptions = {},
 ): Promise<unknown> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...options.headers };
   const opts: RequestInit = {
     ...FETCH_OPTS,
     method,
@@ -484,7 +485,7 @@ async function request(
   const isGet = method === 'GET';
   const timeoutMs = options.timeoutMs ?? (isGet ? DEFAULT_GET_TIMEOUT_MS : 0);
   const attempts = isGet && options.retry !== false ? 2 : 1;
-  const b24Route = isGet ? b24ReadRoute(path) : null;
+  const trackerRoute = isGet ? trackerReadRoute(path) : null;
   // Consumer отмена объединяется с deadline: оба охватывают fetch и чтение body.
   // Отдельный signal не должен незаметно выключать прежний timeout GET.
   const attempt = () => {
@@ -502,7 +503,7 @@ async function request(
   for (let number = 1; number <= attempts; number += 1) {
     options.signal?.throwIfAborted();
 
-    const complete = b24Route ? await acquireB24Read(b24Route, options.signal) : null;
+    const complete = trackerRoute ? await acquireTrackerRead(trackerRoute, options.signal) : null;
     const start = performance.now();
     const diagnostic = observeAttempt(method, path, number);
 
@@ -523,7 +524,7 @@ async function request(
       // дошла ли первая (риск дубля).
       const name = (error as { name?: string } | null)?.name;
       const transient = error instanceof TypeError || name === 'TimeoutError' || name === 'AbortError'
-        || (b24Route && error instanceof ApiError && [502, 503, 504].includes(error.status));
+        || (trackerRoute && error instanceof ApiError && [502, 503, 504].includes(error.status));
       const cancelled = options.signal?.aborted;
       const timing = diagnostic?.finish();
 
@@ -547,7 +548,7 @@ async function request(
         throw error;
       }
 
-      if (!b24Route) {
+      if (!trackerRoute) {
         await delayWithAbort(700, options.signal);
       }
     }
@@ -694,9 +695,9 @@ export interface ApiClient {
   eventsUrl: () => string;
   get: (path: string, options?: RequestOptions) => Promise<unknown>;
   post: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
-  put: (path: string, body?: unknown) => Promise<unknown>;
+  put: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
   patch: (path: string, body?: unknown) => Promise<unknown>;
-  del: (path: string, body?: unknown) => Promise<unknown>;
+  del: (path: string, body?: unknown, options?: RequestOptions) => Promise<unknown>;
   postBytes: typeof postBytes;
   postBlob: typeof postBlob;
   download: typeof download;
@@ -712,9 +713,9 @@ export const api: ApiClient = {
   eventsUrl: () => url('/api/events'),
   get: (path: string, options?: RequestOptions) => request('GET', path, undefined, options),
   post: (path: string, body?: unknown, options?: RequestOptions) => request('POST', path, body, options),
-  put: (path: string, body?: unknown) => request('PUT', path, body),
+  put: (path: string, body?: unknown, options?: RequestOptions) => request('PUT', path, body, options),
   patch: (path: string, body?: unknown) => request('PATCH', path, body),
-  del: (path: string, body?: unknown) => request('DELETE', path, body),
+  del: (path: string, body?: unknown, options?: RequestOptions) => request('DELETE', path, body, options),
   postBytes: (path, body, opts) => observed('POST', path, () => postBytes(path, body, opts)),
   postBlob: (path, body, opts) => observed('POST', path, () => postBlob(path, body, opts)),
   download: (path) => observed('POST', path, () => download(path)),

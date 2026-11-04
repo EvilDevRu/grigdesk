@@ -440,6 +440,43 @@ test('CHAT-IMG-06c: общая папка артефактов читается 
   assert.equal((await f.app.inject(imageUrl(path.join(f.outside, 'frame.png')))).statusCode, 403);
 });
 
+test('CHAT-IMG-06d: миниатюра читает вложение вне workdir, сохраняя границы каталога', async (t) => {
+  const f = await httpFixture(t);
+  const attachments = path.join(f.root, 'chats', 'attachments');
+  const neighbour = `${attachments}-neighbour`;
+  const image = path.join(attachments, 'uploaded.png');
+  const privateImage = path.join(f.root, 'chats', 'private.png');
+
+  await saveImageChat(f, { kind: 'path', path: f.cwd });
+  await fs.mkdir(attachments, { recursive: true });
+  await fs.mkdir(neighbour);
+  await fs.writeFile(image, CHAT_IMAGE_FIXTURES.png);
+  await fs.writeFile(privateImage, CHAT_IMAGE_FIXTURES.png);
+  await fs.writeFile(path.join(neighbour, 'frame.png'), CHAT_IMAGE_FIXTURES.png);
+  await fs.symlink(privateImage, path.join(attachments, 'alias.png'));
+
+  const response = await f.app.inject(imageUrl(image));
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.rawPayload.equals(CHAT_IMAGE_FIXTURES.png), true);
+  assert.equal(response.headers['content-type'], 'image/png');
+  assert.equal(response.headers['cache-control'], 'private, no-store');
+  assert.equal(response.headers['x-content-type-options'], 'nosniff');
+  assert.equal(response.headers['cross-origin-resource-policy'], 'same-origin');
+
+  for (const requested of [
+    privateImage,
+    path.join(neighbour, 'frame.png'),
+    `${attachments}/../private.png`,
+    path.join(attachments, 'alias.png'),
+  ]) {
+    const denied = await f.app.inject(imageUrl(requested));
+
+    assert.equal(denied.statusCode, 403, requested);
+    assert.deepEqual(denied.json(), { error: 'outside_workdir' });
+  }
+});
+
 test('CHAT-IMG-07: HTTP отказы не кэшируются и смена workdir снимает старый доступ', async (t) => {
   const f = await httpFixture(t);
 

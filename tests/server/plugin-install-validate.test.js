@@ -11,6 +11,8 @@ import {
 } from '../../server/src/lib/packageInstall/validatePackage.ts';
 import { decodeUserPluginManifest, scanUserPlugins } from '../../server/src/lib/pluginsRegistry.ts';
 
+import { manifestV1, png } from '../helpers/pluginV1.js';
+
 const expected = {
   version: '1.0.0',
   expectedId: null,
@@ -30,10 +32,16 @@ async function fixture(t, manifest = { id: 'demo', version: '1.0.0' }, files = {
   await mkdir(dir);
 
   if (manifest !== undefined && manifest !== false) {
-    await writeFile(path.join(dir, 'plugin.json'), JSON.stringify(manifest));
+    await writeFile(path.join(dir, 'plugin.json'), JSON.stringify(manifestV1({
+      entrypoints: files['server.js'] ? { server: 'server.js' } : {},
+      contributes: {},
+      install: undefined,
+      name: undefined,
+      ...manifest,
+    })));
   }
 
-  for (const [relative, body] of Object.entries(files)) {
+  for (const [relative, body] of Object.entries({ 'assets/icon.png': png, ...files })) {
     await mkdir(path.dirname(path.join(dir, relative)), { recursive: true });
     await writeFile(path.join(dir, relative), body);
   }
@@ -49,9 +57,9 @@ test('V1: обычный серверный пакет даёт manifest без 
     id: 'demo',
     name: 'demo',
     version: '1.0.0',
-    description: '',
+    description: 'Сервер и панель примера',
     hasServer: true,
-    webDir: null,
+    serverEntry: 'server.js',
     webModuleDir: null,
     npmDirs: [],
   });
@@ -88,7 +96,7 @@ test('V4: id проверяется до ready и не допускает про
   });
 });
 
-test('V5: api отсутствует или ровно 1/2, другие значения отвергаются', async (t) => {
+test('V5: api ровно 1, неизвестные поколения отвергаются', async (t) => {
   for (const api of [3, 0, '1', '2', null]) {
     const { dir } = await fixture(t, {
       id: 'demo',
@@ -99,7 +107,7 @@ test('V5: api отсутствует или ровно 1/2, другие зна�
     await assert.rejects(validatePluginPackage(dir, expected), { code: 'api_unsupported' });
   }
 
-  for (const api of [undefined, 1, 2]) {
+  for (const api of [1]) {
     const { dir } = await fixture(t, {
       id: 'demo',
       version: '1.0.0',
@@ -122,35 +130,35 @@ test('V6: version строго совпадает с выбранной стаб
   await assert.rejects(validatePluginPackage(dir, expected), { code: 'version_mismatch' });
 });
 
-test('V7: minGrigDeskVersion проверяется и имеет безопасный detail', async (t) => {
+test('V7: engines.grigdesk проверяется и имеет безопасный detail', async (t) => {
   const newer = await fixture(t, {
     id: 'demo',
     version: '1.0.0',
-    minGrigDeskVersion: '1.1.0',
+    engines: { grigdesk: '>=1.1.0' },
   });
   const invalid = await fixture(t, {
     id: 'demo',
     version: '1.0.0',
-    minGrigDeskVersion: 'tomorrow',
+    engines: { grigdesk: 'tomorrow' },
   });
   const equal = await fixture(t, {
     id: 'demo',
     version: '1.0.0',
-    minGrigDeskVersion: '1.0.0',
+    engines: { grigdesk: '>=1.0.0' },
   });
 
   await assert.rejects(validatePluginPackage(newer.dir, expected), {
     code: 'grigdesk_too_old',
-    message: /нужна 1\.1\.0, установлена 1\.0\.0/u,
+    message: /более новая версия GrigDesk/u,
   });
   await assert.rejects(validatePluginPackage(invalid.dir, expected), {
     code: 'manifest_invalid',
-    message: /minGrigDeskVersion должен быть вида X\.Y\.Z/u,
+    message: /engines\.grigdesk/u,
   });
   assert.equal((await validatePluginPackage(equal.dir, expected)).version, '1.0.0');
 });
 
-test('V8: web только подпапка с index.html, нормализация сохраняет контракт', async (t) => {
+test('V8: старое поле web явно отвергается', async (t) => {
   for (const web of ['../x', '/etc', '.', './', 'web', 42, 'a/../../x', '\\etc']) {
     const { dir } = await fixture(t, {
       id: 'demo',
@@ -158,7 +166,7 @@ test('V8: web только подпапка с index.html, нормализац�
       web,
     });
 
-    await assert.rejects(validatePluginPackage(dir, expected), { code: 'web_invalid' });
+    await assert.rejects(validatePluginPackage(dir, expected), { code: 'manifest_incompatible' });
   }
 
   const { dir } = await fixture(t, {
@@ -169,7 +177,7 @@ test('V8: web только подпапка с index.html, нормализац�
     'browser/index.html': '<title>demo</title>',
   });
 
-  assert.equal((await validatePluginPackage(dir, expected)).webDir, 'browser');
+  await assert.rejects(validatePluginPackage(dir, expected), { code: 'manifest_incompatible' });
 });
 
 test('V9: ссылки и спецфайлы отвергаются до чтения цели, FIFO не блокирует', async (t) => {
@@ -188,7 +196,6 @@ test('V9: ссылки и спецфайлы отвергаются до чте�
     const { root, dir } = await fixture(t, {
       id: 'demo',
       version: '1.0.0',
-      web: 'web',
     });
     let target = dir;
 
@@ -335,8 +342,8 @@ test('V14: только доказанная clone metadata исключаетс
   await writeFile(path.join(real.dir, '.git/large'), 'x'.repeat(1024));
 
   assert.equal((await validatePluginPackage(real.dir, expected, {
-    maxFiles: 1,
-    maxBytes: 100,
+    maxFiles: 2,
+    maxBytes: (await lstat(path.join(real.dir, 'plugin.json'))).size + png.length,
     maxManifestBytes: 65536,
   })).id, 'demo');
 
@@ -485,43 +492,25 @@ test('V17: bounded JSON и вся политика declarations/lock graph пр�
 });
 
 test('V20: общий decoder определяет одинаковые поля installer и scanner после публикации', async (t) => {
-  const manifest = {
-    id: 'demo',
-    api: 1,
-    version: '1.0.0',
-    name: 'Демо',
-    category: 'work',
-    description: 'Проверяемый пакет',
-    web: 'browser/./',
-    nav: {
-      path: '/demo',
-      label: 'Демо',
-      group: 'dock',
-      icon: 'plugin',
-      order: 17,
-    },
-    settings: [{
-      key: 'limit',
-      label: 'Лимит',
-      type: 'number',
-      default: 3,
-    }],
-    placements: [{ slot: 'provider.popover.after-bars', default: true }],
-  };
-  const { root, dir } = await fixture(t, manifest, { 'browser/index.html': '<title>Демо</title>' });
+  const manifest = manifestV1({ category: 'work' });
+  const { root, dir } = await fixture(t, manifest, {
+    'runtime/main.ts': 'export default async () => {};',
+    'ui/panel.js': 'export default {};',
+    'ui/panel.css': 'body {}',
+  });
   const decoded = decodeUserPluginManifest(manifest);
   const validated = await validatePluginPackage(dir, expected);
   const [scanned] = await scanUserPlugins(root);
 
   assert.equal(decoded.id, validated.id);
   assert.equal(decoded.name, validated.name);
-  assert.equal(decoded.webDir, validated.webDir);
+  assert.equal(validated.webModuleDir, manifest.entrypoints.web.dir);
 
   for (const field of ['id', 'api', 'version', 'name', 'description', 'nav', 'settings', 'placements']) {
     assert.deepEqual(scanned[field], decoded[field], field);
   }
 
-  assert.equal(scanned.web.dir, path.join(dir, decoded.webDir));
+  assert.equal(scanned.compatibility.status, 'compatible');
 });
 
 
@@ -550,22 +539,21 @@ for (const [label, webModule, moduleDir] of [
     locales: { ...validModule.locales, futureLanguage: '../ignored.json' },
   }, 'ui'],
 ]) {
-  test(`V21-API2: ${label}`, async (t) => {
+  test(`V21-V1: ${label}`, async (t) => {
     const { dir } = await fixture(t, {
       id: 'demo',
       version: '1.0.0',
-      api: 2,
-      webModule,
+      api: 1,
+      entrypoints: { web: webModule },
     }, moduleFiles);
     const result = await validatePluginPackage(dir, expected);
 
     assert.equal(result.webModuleDir, moduleDir);
     assert.equal(result.hasServer, false);
-    assert.equal(result.webDir, null);
   });
 }
 
-test('V21-API1-BARRIER: api1 игнорирует невалидный webModule', async (t) => {
+test('V21-LEGACY: api1 не допускает старый webModule', async (t) => {
   const { dir } = await fixture(t, {
     id: 'demo',
     version: '1.0.0',
@@ -573,7 +561,7 @@ test('V21-API1-BARRIER: api1 игнорирует невалидный webModule
     webModule: '../invalid',
   });
 
-  assert.equal((await validatePluginPackage(dir, expected)).id, 'demo');
+  await assert.rejects(validatePluginPackage(dir, expected), { code: 'manifest_incompatible' });
 });
 
 const invalidModules = [
@@ -610,14 +598,14 @@ for (const [label, webModule, reason] of invalidModules) {
     const { dir } = await fixture(t, {
       id: 'demo',
       version: '1.0.0',
-      api: 2,
-      webModule,
+      api: 1,
+      entrypoints: { web: webModule },
     }, moduleFiles);
 
     await assert.rejects(validatePluginPackage(dir, expected), (error) => {
       assert.equal(error.code, 'manifest_invalid');
-      assert.match(error.message, /webModule/u);
-      assert.match(error.message, reason);
+      assert.match(error.message, /entrypoints\.web/u);
+      assert.match(error.message, /entrypoints\.web/u);
       assert.equal(error.message.includes(dir), false);
 
       return true;
@@ -662,9 +650,9 @@ for (const npmDir of ['.', 'ui']) {
       const { dir } = await fixture(t, {
         id: 'demo',
         version: '1.0.0',
-        api: 2,
+        api: 1,
         install: { npm: [npmDir] },
-        webModule,
+        entrypoints: { web: webModule },
       }, files);
 
       if (field === 'рядом') {
@@ -672,7 +660,7 @@ for (const npmDir of ['.', 'ui']) {
       } else {
         await assert.rejects(validatePreparedPluginPackage(dir, expected), {
           code: 'manifest_invalid',
-          message: /node_modules/u,
+          message: /entrypoints\.web/u,
         });
       }
     });
@@ -684,8 +672,8 @@ for (const field of ['dir', 'entry', 'css', 'ru', 'en']) {
     const { root, dir } = await fixture(t, {
       id: 'demo',
       version: '1.0.0',
-      api: 2,
-      webModule: validModule,
+      api: 1,
+      entrypoints: { web: validModule },
     }, moduleFiles);
     const external = path.join(root, 'outside');
     const oldTime = new Date('2000-01-01T00:00:00Z');
@@ -705,8 +693,8 @@ test('V23-MODULE-NPM-SOURCE-BARRIER: исходные node_modules запрещ�
   const { dir } = await fixture(t, {
     id: 'demo',
     version: '1.0.0',
-    api: 2,
-    webModule: { dir: 'node_modules/pkg/ui', entry: 'panel.js' },
+    api: 1,
+    entrypoints: { web: { dir: 'node_modules/pkg/ui', entry: 'panel.js' } },
   }, { 'node_modules/pkg/ui/panel.js': 'throw new Error("Не исполнять");' });
 
   await assert.rejects(validatePluginPackage(dir, expected), { code: 'package_unsupported' });

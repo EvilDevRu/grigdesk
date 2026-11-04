@@ -150,7 +150,11 @@ const clamp = (v: unknown, lo: number, hi: number, def: number) => {
   return Math.min(hi, Math.max(lo, n));
 };
 
-function normalizeB24(raw: unknown = {}) {
+/**
+ * Нейтральный обработчик проверяет значения прежней сериализованной схемы.
+ * Поля сохранённых записей остаются совместимыми и не требуют переноса данных.
+ */
+function normalizeTrackerSettings(raw: unknown = {}) {
   const src = (raw && typeof raw === 'object' ? raw : {}) as Payload;
   const priority = toInt(src.priority);
   return {
@@ -492,7 +496,7 @@ export function normalizeRules(list: unknown, { projects = null }: {
       title: isFilled(src.title) ? String(src.title).trim() : '',
       threadId,
       kind,
-      b24: normalizeB24(src.b24),
+      b24: normalizeTrackerSettings(src.b24),
       draft,
       // Ответ в исходный чат — явный opt-in каждого правила. Старые правила
       // остаются молчащими, а настройка темы не расползается на соседние темы.

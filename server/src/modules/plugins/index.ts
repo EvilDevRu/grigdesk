@@ -1,15 +1,10 @@
-import type {
-  PluginServerOptions, PluginServerCallback, PluginServerAsync,
-} from '../../../../packages/plugin-types/src/server.ts';
 // Модуль plugins — реестр плагинов GrigDesk: список, вкл/выкл, настройки.
 // Регистрируется РАНЬШЕ модулей-плагинов: декорирует fastify.pluginEnabled(id),
 // которым системные модули (media/code) гейтят свои роуты на лету — тумблер
-// действует без рестарта. Пользовательский сервер подключается только при старте;
-// загруженный runtime выключается и включается через собственный admission gate.
+// действует без рестарта. Пользовательские серверы подключаются отдельными router
+// при первом включении и после обновления, сохраняя общий auth и admission gate.
 import fp from 'fastify-plugin';
-import fastifyStatic from '@fastify/static';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import path from 'node:path';
 import {
   SYSTEM,
   scanUserPlugins,
@@ -24,22 +19,23 @@ import { normalizePluginCategory } from '../../../../shared/plugins/pluginsContr
 import type { PrefsStore } from '../../lib/prefsStore.ts';
 import type { GrigDeskConfig } from '../../config.ts';
 import type { PluginInstallPort } from '../../lib/packageInstall/service.ts';
-import { createPluginLifecycle, PluginAdmission } from './lifecycle.ts';
+import { PLUGIN_APIS, UserPluginRuntime } from './runtime.ts';
 import installRoutes from './installRoutes.ts';
 import { preparePluginDataDir, preparePluginDataRoot } from './pluginData.ts';
-import { importRuntimeModule } from '../../lib/runtimeImport.ts';
-import type { PluginServerModule } from '../../lib/runtimeImport.ts';
 import { assertRealPackageRoot } from '../../lib/packageInstall/packageTree.ts';
 import type { PluginInstallInfo } from '../../../../shared/plugins/pluginInstallContracts.ts';
-import { pluginModuleStaticOptions } from '../../lib/pluginWebModule.ts';
 import type { DocumentReader } from '../../lib/documents/reader.ts';
 import { createPluginCore } from './core.ts';
+import type { PluginRuntimeServices } from '../../../../packages/plugin-types/src/coreRuntime.ts';
+import { readPluginRaster, PLUGIN_MEDIA_LIMITS } from '../../lib/pluginAssets.ts';
 import { changeError, writeUserPluginChange } from './changes.ts';
 import type { PluginTransition } from './changes.ts';
 
 export type { PluginTransition } from './changes.ts';
 
 export interface PluginsModuleOptions {
+  runtimeServices?: PluginRuntimeServices;
+  grigDeskVersion?: string;
   config: Pick<GrigDeskConfig, 'userPluginsDir'> & { userPluginsDataDir?: string };
   prefs: PrefsStore;
   installs?: PluginInstallPort;
@@ -94,7 +90,7 @@ type PluginRequest = FastifyRequest<{
 
 /**
  * Recovery предшествует scan и import, а зарегистрированные runtime держат свои gates.
- * Installer обновляет каталог без загрузки новой версии кода в текущий процесс.
+ * Installer публикует новый каталог и подключает включённые версии без рестарта ядра.
  */
 async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOptions): Promise<void> {
   const { config, prefs, onToggle, prepareChange } = opts;
@@ -107,11 +103,24 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
     throw new TypeError('Для installer нужен отдельный userPluginsDataDir.');
   }
 
-  const scanned = await scanUserPlugins(config.userPluginsDir, fastify.log);
+  const scanned = await scanUserPlugins(config.userPluginsDir, fastify.log, opts.grigDeskVersion);
   const userPlugins = scanned.filter((manifest) => recovery?.blockedIds !== '*'
     && !recovery?.blockedIds.includes(manifest.id));
-  const loaded = new Set<string>();
-  const gates = new Map<string, PluginAdmission>();
+  const runtime = new UserPluginRuntime({
+    parent: fastify,
+    options: async (manifest) => ({
+      config,
+      prefs,
+      plugin: manifest,
+      prefix: `/api/ext/${manifest.id}`,
+      dataDir: manifest.hasServer && dataRoot ? await preparePluginDataDir(dataRoot, manifest.id) : undefined,
+      core: createPluginCore(fastify, manifest.id, opts.documentReader,
+        opts.runtimeServices),
+    }),
+  });
+  const gates = runtime.gates;
+
+  fastify.addHook('onClose', () => runtime.close());
   // Признак `system` объявляет сам манифест (в SYSTEM и в скане) — здесь его не
   // дописываем: умолчание вкл/выкл считается по манифесту целиком, и вторая
   // копия правды разошлась бы с первой.
@@ -119,19 +128,29 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
   let byId = new Map(all.map((m) => [m.id, m]));
 
   /**
-   * Новый scan публикуется целиком без import и регистрации runtime routes.
-   * Существующий каталог и byId сохраняются при отказе любого подготовительного шага.
+   * Новый scan публикуется целиком, затем подключает включённые версии пакетов.
+   * Ошибка одного сервера не подменяет каталог и не оставляет старые routes открытыми.
    */
   async function refreshUserPlugins(): Promise<void> {
     await assertRealPackageRoot(config.userPluginsDir);
 
-    const nextUser = await scanUserPlugins(config.userPluginsDir, fastify.log);
+    const nextUser = await scanUserPlugins(config.userPluginsDir, fastify.log, opts.grigDeskVersion);
     const next = [...SYSTEM, ...nextUser.filter((manifest) => recovery?.blockedIds !== '*'
       && !recovery?.blockedIds.includes(manifest.id))];
     const nextById = new Map(next.map((manifest) => [manifest.id, manifest]));
 
     all = next;
     byId = nextById;
+    runtime.catalogPublished();
+
+    for (const manifest of next) {
+      if (!manifest.system && isEnabled(prefs.read(), manifest)) {
+        await runtime.load(manifest).catch(() => {});
+        gates.get(manifest.id)?.setEnabled(true);
+      }
+    }
+
+    fastify.sse?.broadcast?.('state-change', { plugins: true });
   }
 
   /**
@@ -147,12 +166,9 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
   }
 
   opts.installs?.bindRuntime({
-    isLoaded: (id) => loaded.has(id),
-    prepareReplace: async (id, signal) => {
-      const gate = gates.get(id);
-
-      return gate ? gate.prepare(signal) : { async finish() {} };
-    },
+    isLoaded: (id) => runtime.isLoaded(id),
+    prepareReplace: (id, signal) => runtime.prepareReplace(id, signal),
+    restartRequired: (id) => gates.get(id)?.needsRestart ?? false,
     refresh: refreshUserPlugins,
   });
 
@@ -169,91 +185,20 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
     return m ? settingsValues(prefs.read(), m) : {};
   });
 
-  // Пользовательские server.js: только включённые. Ошибка одного плагина не валит сервер.
-  // ВАЖНО: регистрация с prefix — роуты плагина ЖЁСТКО заперты в /api/ext/<id>/ (это не
-  // конвенция, а механика Fastify: перекрыть системный путь плагин не может). Контракт
-  // манифеста версионирован полем api — несовместимый плагин не поднимаем, а честно жалуемся.
-  const PLUGIN_APIS = [1, 2];
+  // Маршруты оболочки постоянны: замена меняет только принадлежащий плагину router.
+  // Dispatch стоит до чтения body и после общего auth, включая HTTP upgrade.
+  const dispatch = async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    runtime.dispatch(request.params.id, request, reply);
+  };
 
-  for (const m of userPlugins) {
-    if (!isEnabled(prefs.read(), m) || m.serverError) {
-      continue;
+  fastify.all('/api/ext/:id', { onRequest: dispatch }, async () => {});
+  fastify.all('/api/ext/:id/*', { onRequest: dispatch }, async () => {});
+
+  for (const manifest of userPlugins) {
+    if (isEnabled(prefs.read(), manifest)) {
+      await runtime.load(manifest).catch(() => {});
+      gates.get(manifest.id)?.setEnabled(true);
     }
-
-    if (!PLUGIN_APIS.includes(m.api || 1)) {
-      fastify.log.warn({ plugin: m.id, api: m.api }, `плагин рассчитан на api=${m.api}, GrigDesk даёт api=${PLUGIN_APIS.join(', ')} — пропущен`);
-      continue;
-    }
-
-    const dataDir = m.hasServer && dataRoot ? await preparePluginDataDir(dataRoot, m.id) : undefined;
-    const lifecycle = createPluginLifecycle();
-    const gate = new PluginAdmission({ lifecycle, hasServer: !!m.hasServer });
-
-    gates.set(m.id, gate);
-    await fastify.register(async (scope) => {
-      scope.addHook('onRequest', async (request, reply) => {
-        gate.admit(request, reply);
-      });
-
-      if (m.web) {
-        await scope.register(fastifyStatic, {
-          root: m.web.dir,
-          prefix: m.web.url,
-          decorateReply: false,
-          index: ['index.html'],
-          cacheControl: true,
-          maxAge: 0,
-        });
-        loaded.add(m.id);
-      }
-
-      if (m.webModule) {
-        await scope.register(fastifyStatic, pluginModuleStaticOptions(m.webModule, m.id));
-        loaded.add(m.id);
-      }
-
-      if (!m.hasServer) {
-        return;
-      }
-
-      // Import может успеть создать timer или child даже перед исключением.
-      // Такой runtime остаётся загруженным и требует остановки после неудачи.
-      loaded.add(m.id);
-
-      try {
-        const mod = await importRuntimeModule<PluginServerModule>(
-          path.join(String(m.dir), m.serverEntry ?? 'server.js'));
-
-        await scope.register(async (serverScope) => {
-          try {
-            const options: PluginServerOptions = {
-              config,
-              prefs,
-              plugin: m,
-              prefix: `/api/ext/${m.id}`,
-              dataDir,
-              lifecycle,
-              core: createPluginCore(fastify, m.id, opts.documentReader),
-            };
-
-            if (mod.default.length >= 3) {
-              await new Promise<void>((resolve, reject) => {
-                (mod.default as PluginServerCallback)(serverScope, options,
-                  (error?: Error) => error ? reject(error) : resolve());
-              });
-            } else {
-              await (mod.default as PluginServerAsync)(serverScope, options);
-            }
-          } catch (error) {
-            gate.options.stopRequired = true;
-            fastify.log.warn({ plugin: m.id }, 'пользовательский сервер не зарегистрирован; нужен рестарт');
-          }
-        }, { prefix: `/api/ext/${m.id}` });
-      } catch (error) {
-        gate.options.stopRequired = true;
-        fastify.log.warn({ plugin: m.id }, 'пользовательский сервер не импортирован; нужен рестарт');
-      }
-    });
   }
 
   /**
@@ -290,14 +235,15 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
    * Ошибка пакета и несовместимый API требуют исправления причины, а не рестарта.
    */
   function needsRestart(manifest: PluginManifest): boolean {
-    if (manifest.system || manifest.serverError || !PLUGIN_APIS.includes(manifest.api || 1)) {
+    if (manifest.compatibility?.status === 'incompatible' || manifest.system || manifest.serverError
+      || !PLUGIN_APIS.includes(manifest.api || 1)) {
       return false;
     }
 
     const gate = gates.get(manifest.id);
 
-    return !!gate?.needsRestart || (!loaded.has(manifest.id) && isEnabled(prefs.read(), manifest)
-      && (!!manifest.hasServer || !!manifest.web || !!manifest.webModule));
+    return !!gate?.needsRestart || (!runtime.isLoaded(manifest.id) && isEnabled(prefs.read(), manifest)
+      && (!!manifest.hasServer || !!manifest.entrypoints?.web));
   }
 
   /**
@@ -326,7 +272,7 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
     const p = prefs.read();
 
     return {
-      plugins: await Promise.all(all.map(async (m) => ({
+      plugins: await Promise.all(all.map((manifest) => runtime.manifest(manifest)).map(async (m) => ({
         id: m.id,
         name: m.name,
         version: m.version,
@@ -341,13 +287,18 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
         values: settingsValues(p, m),
         placements: placementsState(p, m),
         setup: m.setup || null,
-        web: m.web?.url ?? null,
-        webModule: m.webModule ? {
-          entry: m.webModule.entry,
-          css: m.webModule.css,
-          locales: m.webModule.locales,
-          ...(m.webModule.startOnLogin === undefined ? {} : { startOnLogin: m.webModule.startOnLogin }),
-        } : null,
+        icon: m.icon ?? null,
+        compatibility: m.compatibility ?? {
+          status: 'compatible',
+          code: null,
+          reason: null,
+        },
+        contributes: m.contributes ?? {},
+        entrypoints: { web: m.entrypoints?.web ? {
+          entry: m.entrypoints.web.entry,
+          css: m.entrypoints.web.css,
+          locales: m.entrypoints.web.locales,
+        } : null },
         serverError: m.serverError ?? null,
         needsRestart: needsRestart(m),
         install: m.system ? null : await describeInstall(m.id),
@@ -355,18 +306,53 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
     };
   });
 
+  fastify.get<{ Params: { id: string; digest: string } }>(
+    '/api/plugins/:id/icon/:digest', async (request, reply) => {
+      const manifest = byId.get(request.params.id);
+
+      if (manifest?.dir && manifest.iconPath && manifest.icon?.endsWith(`/${request.params.digest}`)) {
+        try {
+          const raster = readPluginRaster(manifest.dir, manifest.iconPath, PLUGIN_MEDIA_LIMITS.icon);
+
+          if (raster.digest === request.params.digest) {
+            return reply.type(raster.mediaType).header('x-content-type-options', 'nosniff')
+              .header('cache-control', 'no-store').send(raster.bytes);
+          }
+        } catch {
+          // Удалённый или заменённый ресурс больше не принадлежит опубликованному снимку.
+        }
+      }
+
+      return reply.code(404).send({ error: 'not_found' });
+    },
+  );
+
   fastify.post('/api/plugins/:id/toggle', async (request: PluginRequest, reply) => {
     const m = byId.get(String(request.params.id));
     if (!m) return reply.code(404).send({ error: 'not_found' });
     const enabled = !!(request.body || {}).enabled;
 
+    if (enabled && m.compatibility?.status === 'incompatible') {
+      return reply.code(409).send({ error: m.compatibility.code, message: m.compatibility.reason });
+    }
+
     if (!m.system) {
-      const gate = gates.get(m.id);
+      let gate = gates.get(m.id);
       let changed = false;
 
       try {
         if (enabled && m.serverError) {
           throw changeError('plugin_server_conflict', m.serverError);
+        }
+
+        if (runtime.isLoading(m.id)) {
+          throw changeError('plugin_change_busy',
+            'Плагин ещё загружается. Повторите изменение после загрузки.');
+        }
+
+        if (enabled) {
+          await runtime.load(m);
+          gate = gates.get(m.id);
         }
 
         await writeUserPluginChange(gate, { enabled }, () => {
@@ -380,6 +366,10 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
           gate?.setEnabled(enabled);
 
           if (changed) {
+            if (enabled) {
+              runtime.renewModule(m.id);
+            }
+
             notifyEnabled(m.id, enabled);
           }
         }, () => fastify.log.warn({ plugin: m.id }, 'Очистка изменения плагина не завершена.'));
@@ -506,6 +496,11 @@ async function pluginsModule(fastify: FastifyInstance, opts: PluginsModuleOption
       const preparedPrefs = { ...prefs.read(), pluginSettings: { [m.id]: values } };
 
       try {
+        if (runtime.isLoading(m.id)) {
+          throw changeError('plugin_change_busy',
+            'Плагин ещё загружается. Повторите изменение после загрузки.');
+        }
+
         await writeUserPluginChange(gates.get(m.id), { values: settingsValues(preparedPrefs, m) },
           () => prefs.write(settingsPatch()), () => {},
           () => fastify.log.warn({ plugin: m.id }, 'Очистка изменения плагина не завершена.'));

@@ -29,7 +29,7 @@ const missing = (file) => access(file).then(() => false, () => true);
  * Необязательный портал меняет только источник контекста, прежние defaults сохранены.
  */
 async function fixture(t, {
-  b24 = null,
+  tracker = null,
   clarifications = null,
   openQuestions = null,
   publishRegistry = true,
@@ -199,7 +199,7 @@ exit 0
     },
     config,
     prefs: { read: () => ({}) },
-    b24,
+    tracker,
     analyzer: {
       readClarifications: async () => clarifications,
       readOpenQuestions: async () => openQuestions,
@@ -394,7 +394,8 @@ test('runner_preflight_failed marker остаётся fail-closed', async (t) =>
 
 test('B24-SOURCE-01: запуск сохраняет портальную ссылку, комментарии и уточнения', async (t) => {
   const { app, config } = await fixture(t, {
-    b24: {
+    tracker: {
+      sourceUrl: (id) => `https://portal.test/company/personal/user/17/tasks/task/view/${id}/`,
       async accountIdentity() {
         return { baseUrl: 'https://portal.test/', userId: 17 };
       },
@@ -438,7 +439,7 @@ test('B24-SOURCE-01: запуск сохраняет портальную ссы
 test('LOCAL-LAUNCH-01: собственная постановка сильнее body, без обращений к Б24', async (t) => {
   const portalCalls = [];
   const { app, config } = await fixture(t, {
-    b24: {
+    tracker: {
       async accountIdentity() {
         portalCalls.push('identity');
 

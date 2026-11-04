@@ -3,11 +3,16 @@
     class="plugin-source"
     data-role="plugin-source"
     :data-managed="!!plugin.install"
+    :data-embedded="embedded"
   >
-    <header class="source-heading">
+    <header v-if="!embedded" class="source-heading">
       <h3>{{ t('settings.sourceAndUpdates') }}</h3>
       <span v-if="plugin.install" class="source-version">v{{ plugin.install.version }}</span>
     </header>
+    <UiInlineMessage v-if="plugin.compatibility?.status === 'incompatible'" tone="danger"
+                     data-role="plugin-source-incompatible">
+      {{ plugin.compatibility.reason }}
+    </UiInlineMessage>
     <UiInlineMessage v-if="store.error" tone="danger">{{ store.error }}</UiInlineMessage>
     <UiInlineMessage v-if="store.recoveryError" tone="danger">
       {{ store.recoveryError.message }}
@@ -84,7 +89,7 @@
           </UiButton>
           <UiButton
             data-context="workspace-form-wrap"
-            v-if="plugin.install.localChanges"
+            v-if="plugin.install.localChanges || plugin.compatibility?.status === 'incompatible'"
             data-role="plugin-source-update"
             :disabled="locked"
             @click="emit('update')"
@@ -142,7 +147,11 @@ import { usePluginInstallStore } from '../../stores/pluginInstall.ts';
 import { shortSha } from '../../shared/pluginInstall.ts';
 import type { InstallSubject } from '../../stores/packageInstall.ts';
 
-const props = defineProps<{ plugin: InstallSubject; packageKind?: 'plugin' | 'db-engine' }>();
+const props = defineProps<{
+  plugin: InstallSubject;
+  packageKind?: 'plugin' | 'db-engine';
+  embedded?: boolean;
+}>();
 const emit = defineEmits<{
   update: [];
   bind: [];
@@ -222,6 +231,13 @@ onBeforeUnmount(() => {
 .plugin-source h3 {
   margin: 0;
   overflow-wrap: anywhere;
+}
+.plugin-source[data-embedded='true'] {
+  gap: 8px;
+  margin: 0;
+  padding: 8px 0 0;
+  border: 0;
+  border-radius: 0;
 }
 .source-heading {
   display: flex;

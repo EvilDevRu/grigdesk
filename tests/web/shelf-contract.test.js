@@ -5,7 +5,7 @@ import {
   ShelfContractError,
   parseShelfEntrySnapshot,
   parseShelfState,
-} from '../../shared/b24/shelfContracts.ts';
+} from '../../shared/trackers/shelfContracts.ts';
 import { api } from '../../web/src/shared/apiClient.ts';
 import { shelfApi } from '../../web/src/shared/shelfApi.ts';
 
@@ -117,14 +117,14 @@ test('адаптер полки кодирует номер задачи и от
   await shelfApi.remove('42');
 
   assert.deepEqual(seen, [
-    ['GET', '/api/b24/task-shelf'],
-    ['PUT', `/api/b24/task-shelf/${encodeURIComponent('42/../43')}`, {
+    ['GET', '/api/tracker/task-shelf'],
+    ['PUT', `/api/tracker/task-shelf/${encodeURIComponent('42/../43')}`, {
       title: 'Задача 42',
       reason: 'analysis',
       snapshot,
       createIfMissing: true,
     }],
-    ['DELETE', '/api/b24/task-shelf/42'],
+    ['DELETE', '/api/tracker/task-shelf/42'],
   ]);
 });
 

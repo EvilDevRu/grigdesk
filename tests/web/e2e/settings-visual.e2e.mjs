@@ -17,7 +17,6 @@ async function openSettings(t) {
 
   const fixture = await startSettingsBrowser(t, {
     '/api/settings/prefs': data.prefs,
-    '/api/settings/b24': data.b24,
     '/api/system/launcher': data.launcher,
     '/api/system/server': data.server,
     '/api/system/version': data.release,
@@ -29,6 +28,11 @@ async function openSettings(t) {
       devices: [],
     },
     '/api/settings/speech': data.speech,
+    '/api/settings/speech/installation': {
+      managed: true,
+      installed: true,
+      job: null,
+    },
     '/api/plugins': data.plugins,
     '/api/plugin-catalog': {
       state: 'unconfigured',
@@ -87,8 +91,8 @@ function contrastSource() {
 test('V01: текстовая область — во всю ширину под названием', async (t) => {
   const fixture = await openSettings(t);
 
-  await showPage(fixture, 'speech.language',
-    '[data-settings-speech-page="speech.language"][data-ready="true"]');
+  await showPage(fixture, 'speech.dictation',
+    '[data-settings-speech-page="speech.dictation"][data-ready="true"]');
 
   const field = await fixture.page.locator('[data-ui-settings-field]:has(.ui-textarea)').first()
     .evaluate((element) => {
@@ -109,8 +113,8 @@ test('V01: текстовая область — во всю ширину под
 test('V02: ширина формы и шкала заголовков', async (t) => {
   const fixture = await openSettings(t);
 
-  await showPage(fixture, 'speech.advanced',
-    '[data-settings-speech-page="speech.advanced"][data-ready="true"]');
+  await showPage(fixture, 'speech.dictation',
+    '[data-settings-speech-page="speech.dictation"][data-ready="true"]');
 
   const narrow = await fixture.page.locator('[data-role="settings-modal"]').evaluate((modal) => {
     const inner = modal.querySelector('.settings-page-inner').getBoundingClientRect();
@@ -203,7 +207,7 @@ test('V06: дерево — одна раскрытая группа и подп
   const pages = new Set();
   let expanded = [];
 
-  for (const pageId of ['agents.models', 'speech.advanced', 'connections.devices', 'plugins.installed']) {
+  for (const pageId of ['agents.models', 'speech.dictation', 'connections.devices', 'plugins.installed']) {
     await showPage(fixture, pageId, `[data-settings-node="${pageId}"][aria-selected="true"]`);
 
     const tree = await fixture.page.locator('[role="tree"]').evaluate((element) => {
@@ -233,9 +237,10 @@ test('V06: дерево — одна раскрытая группа и подп
     groupHeights: 1,
     pageHeights: 1,
   });
-  await showPage(fixture, 'speech.advanced', '[data-settings-node="speech.advanced"][aria-selected="true"]');
-  assert.equal(await fixture.page.locator('[data-settings-node="speech.advanced"]').textContent(),
-    'Дополнительно');
+  await showPage(fixture, 'speech.dictation',
+    '[data-settings-node="speech.dictation"][aria-selected="true"]');
+  assert.equal(await fixture.page.locator('[data-settings-node="speech.dictation"]').textContent(),
+    'Речь');
   assert.deepEqual(fixture.errors, []);
   assert.deepEqual(fixture.unexpected, []);
 });
@@ -295,14 +300,17 @@ test('V08: «Обновления» и «Запуск системы» — св�
   assert.deepEqual(fixture.unexpected, []);
 });
 
-test('V09: «Процессы» — сводка парами', async (t) => {
+test('V09: «Процессы» — три счётчика и отдельные правила пула', async (t) => {
   const fixture = await openSettings(t);
 
   await showPage(fixture, 'system.processes', '[data-processes-page][data-ready="true"]');
 
-  const terms = await fixture.page.locator('[data-processes-page] dl.settings-facts dt').allTextContents();
+  const terms = await fixture.page.locator('[data-processes-page] dl.settings-process-metrics dt')
+    .allTextContents();
 
-  assert.deepEqual(terms.map((term) => term.trim()), ['В пуле', 'Ведут ход', 'Свободны', 'Лимит пула']);
+  assert.deepEqual(terms.map((term) => term.trim()), ['В пуле', 'Ведут ход', 'Свободны']);
+  assert.match(await fixture.page.locator('.settings-process-policy').textContent(),
+    /Лимит пула\s*4, автогашение через 30 мин простоя/);
   assert.deepEqual(fixture.errors, []);
   assert.deepEqual(fixture.unexpected, []);
 });
@@ -312,10 +320,13 @@ test('V10: речь — сведения парами, модели строка
 
   await showPage(fixture, 'speech.dictation',
     '[data-settings-speech-page="speech.dictation"][data-ready="true"]');
+  assert.equal(await fixture.page.locator('[data-speech-advanced]').count(), 0);
+  await fixture.page.locator('[data-speech-advanced-toggle]').click();
   assert.equal(await fixture.page.locator('[data-settings-speech-page] dl.settings-facts dt').count(), 4);
-  await showPage(fixture, 'speech.models', '[data-settings-speech-page="speech.models"][data-ready="true"]');
+  await showPage(fixture, 'speech.dictation',
+    '[data-settings-speech-page="speech.dictation"][data-ready="true"]');
 
-  const models = await fixture.page.locator('[data-settings-speech-page="speech.models"]')
+  const models = await fixture.page.locator('[data-settings-speech-page="speech.dictation"]')
     .evaluate((element) => ({
       rows: element.querySelectorAll('li.settings-speech-model').length,
       sections: element.querySelectorAll('.settings-speech-model .settings-section-heading').length,
@@ -328,7 +339,7 @@ test('V10: речь — сведения парами, модели строка
     rows: 2,
     sections: 0,
     cachedDownload: false,
-    status: 'В кэше',
+    status: 'Установлено на сервере',
   });
   assert.deepEqual(fixture.errors, []);
   assert.deepEqual(fixture.unexpected, []);
@@ -368,7 +379,9 @@ test('V12: у плагина один переключатель включен�
   });
   await fixture.page.locator('[data-plugin-page="sample"][data-ready="true"]').waitFor();
   assert.equal(await fixture.page.locator('.settings-plugin-catalog [role="switch"]').count(), 0);
-  assert.equal(await fixture.page.locator('[data-plugin-page="sample"] [role="switch"]').count() >= 1, true);
+  assert.equal(await fixture.page.locator(
+    '[data-plugin-page="sample"] [data-plugin-enable-action]',
+  ).count(), 1);
   assert.deepEqual(fixture.errors, []);
   assert.deepEqual(fixture.unexpected, []);
 });
@@ -405,9 +418,6 @@ test('V14: тексты без внутренних значений и обре
 
   await showPage(fixture, 'interface.behavior');
   assert.match(await fixture.page.locator('.settings-page-intro p').textContent(), /язык/i);
-  await showPage(fixture, 'connections.b24', '[data-connections-page="connections.b24"][data-ready="true"]');
-  assert.equal(await fixture.page.locator('[data-connections-page] input[type="password"]')
-    .getAttribute('placeholder'), 'Новый пароль');
   await showPage(fixture, 'system.diagnostics');
   assert.match(await fixture.page.locator('.settings-diagnostics').textContent(),
     /Только ошибки · источник: переменная окружения/);

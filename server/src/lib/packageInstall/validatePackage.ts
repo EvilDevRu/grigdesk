@@ -13,7 +13,8 @@ import {
   decodeUserPluginManifest,
   normalizePluginPackagePath,
 } from '../pluginsRegistry.ts';
-import { compareSemVer, parseSemVer } from '../releaseCommon.ts';
+import { resolvePluginAssets } from '../pluginAssets.ts';
+import { parseSemVer } from '../releaseCommon.ts';
 import { PluginInstallError, installError } from './errors.ts';
 import { assertRealPackageRoot, readPackageTree } from './packageTree.ts';
 import type { PackageEntry } from './packageTree.ts';
@@ -45,7 +46,7 @@ export interface ValidatedPackage {
   version: string;
   description: string;
   hasServer: boolean;
-  webDir: string | null;
+  serverEntry?: string | null;
   webModuleDir: string | null;
   npmDirs: string[];
 }
@@ -73,6 +74,19 @@ export async function validatePreparedPluginPackage(
   expected: PackageExpectations,
 ): Promise<ValidatedPackage> {
   const manifest = await readPluginManifest(dir, expected.packageKind);
+  const tree = await readPreparedPackageTree(dir, manifest);
+
+  return validatePackageTree(dir, expected, PACKAGE_LIMITS, tree);
+}
+
+/**
+ * Сгенерированные зависимости имеют общую файловую политику для всех пакетов.
+ * Их исключение из исходного дерева не ослабляет проверку ссылок и пределов payload.
+ */
+export async function readPreparedPackageTree(
+  dir: string,
+  manifest: Record<string, unknown>,
+): Promise<PackageEntry[]> {
   const selection = isRecord(manifest.install) ? manifest.install.npm : undefined;
   const lockInfo = await lstat(path.join(dir, 'package-lock.json')).catch(() => null);
   const rawDirs = selection ?? (lockInfo ? ['.'] : []);
@@ -95,13 +109,12 @@ export async function validatePreparedPluginPackage(
 
   const tree = await readPackageTree(dir, {
     generatedDirs,
-    webDir: normalizePluginPackagePath(manifest.web, false),
   });
   const generated = generatedDirs.map((dir) => path.posix.join(dir, 'node_modules'));
   const original = tree.filter((entry) => !generated.some((root) => entry.relative === root
     || entry.relative.startsWith(`${root}/`)));
 
-  return validatePackageTree(dir, expected, PACKAGE_LIMITS, original);
+  return original;
 }
 
 /**
@@ -147,7 +160,6 @@ async function validatePackageTree(
       version: expected.version,
       description: '',
       hasServer: true,
-      webDir: null,
       webModuleDir: null,
       npmDirs: await validateNpmDirs(dir, manifest),
     };
@@ -168,10 +180,6 @@ async function validatePackageTree(
     throw installError('id_mismatch');
   }
 
-  if (Object.hasOwn(manifest, 'api') && manifest.api !== 1 && manifest.api !== 2) {
-    throw installError('api_unsupported');
-  }
-
   const version = manifest.version;
 
   if (typeof version !== 'string' || version.trim() !== version || !parseSemVer(version)) {
@@ -182,37 +190,18 @@ async function validatePackageTree(
     throw installError('version_mismatch');
   }
 
-  if (Object.hasOwn(manifest, 'minGrigDeskVersion')) {
-    const minimum = manifest.minGrigDeskVersion;
+  const fields = decodeUserPluginManifest(manifest, () => {}, expected.grigDeskVersion);
+  const declared = manifest.entrypoints as Record<string, unknown>;
+  const webModule = resolvePluginWebModule(dir, id, declared.web, normalizeModulePath, () => {
+    throw installError('manifest_invalid', 'неверный entrypoints.web');
+  });
+  const server = selectPluginServerEntry(dir, declared.server);
 
-    if (typeof minimum !== 'string' || minimum.trim() !== minimum || !parseSemVer(minimum)) {
-      throw installError('manifest_invalid', 'minGrigDeskVersion должен быть вида X.Y.Z');
-    }
+  resolvePluginAssets(dir, id, manifest);
 
-    if (compareSemVer(minimum, expected.grigDeskVersion) > 0) {
-      throw installError('grigdesk_too_old', `нужна ${minimum}, установлена ${expected.grigDeskVersion}`);
-    }
-  }
-
-  const fields = decodeUserPluginManifest(manifest);
-  const webDir = await validateWeb(dir, manifest.web);
   const npmDirs = await validateNpmDirs(dir, manifest);
-  const webModule = manifest.api === 2
-    ? resolvePluginWebModule(dir, id, manifest.webModule, normalizeModulePath, (message) => {
-      const reason = message.replace(/^webModule пропущен: /u, '');
-
-      throw new PluginInstallError('manifest_invalid', `Некорректный webModule: ${reason}`, 422);
-    }) : null;
 
   await validateGitControls(dir, tree);
-
-  const [js, ts] = await Promise.all(['server.js', 'server.ts'].map((entry) =>
-    lstat(path.join(dir, entry)).catch(() => null)));
-  const server = selectPluginServerEntry(js?.isFile() ?? false, ts?.isFile() ?? false);
-
-  if (server.serverError) {
-    throw new PluginInstallError('manifest_invalid', server.serverError, 422);
-  }
 
   return {
     id,
@@ -220,7 +209,7 @@ async function validatePackageTree(
     version,
     description: fields.description,
     hasServer: server.hasServer,
-    webDir,
+    serverEntry: server.serverEntry,
     webModuleDir: webModule ? path.relative(dir, webModule.dir).split(path.sep).join('/') : null,
     npmDirs,
   };
@@ -281,7 +270,7 @@ export async function validateNpmDirectory(directory: string): Promise<void> {
  * Lock в корне требует парный package.json, runtime declarations требуют lock.
  * Пустой package.json без runtime зависимостей не запускает npm.
  */
-async function validateNpmDirs(dir: string, manifest: Record<string, unknown>): Promise<string[]> {
+export async function validateNpmDirs(dir: string, manifest: Record<string, unknown>): Promise<string[]> {
   const packageFile = path.join(dir, 'package.json');
   const lockFile = path.join(dir, 'package-lock.json');
   const packageInfo = await lstat(packageFile).catch(() => null);
@@ -355,7 +344,7 @@ async function validateNpmDirs(dir: string, manifest: Record<string, unknown>): 
  * Git-фильтры и LFS pointers не переносятся в устанавливаемый payload.
  * Все пути уже проверены обходом; префикс обычного blob читается ограниченно.
  */
-async function validateGitControls(dir: string, tree: PackageEntry[]): Promise<void> {
+export async function validateGitControls(dir: string, tree: PackageEntry[]): Promise<void> {
   for (const entry of tree) {
     if (!entry.info.isFile()) {
       continue;
@@ -389,34 +378,10 @@ async function validateGitControls(dir: string, tree: PackageEntry[]): Promise<v
 }
 
 /**
- * Пользовательская страница обязана жить в отдельной подпапке с обычным index.
- * Единая нормализация пути позже используется и для npmDirs.
- */
-async function validateWeb(dir: string, raw: unknown): Promise<string | null> {
-  if (raw === undefined || raw === null || raw === '') {
-    return null;
-  }
-
-  const relative = normalizePluginPackagePath(raw, false);
-
-  if (relative === null) {
-    throw installError('web_invalid');
-  }
-
-  const info = await lstat(path.join(dir, relative, 'index.html')).catch(() => null);
-
-  if (!info?.isFile() || info.isSymbolicLink()) {
-    throw installError('web_invalid');
-  }
-
-  return relative;
-}
-
-/**
  * Размер обычного файла проверяется до чтения, JSON обязан быть объектом.
  * Ошибки парсинга скрываются за стабильным безопасным кодом.
  */
-async function boundedJson(file: string, maximum: number): Promise<Record<string, unknown>> {
+export async function boundedJson(file: string, maximum: number): Promise<Record<string, unknown>> {
   try {
     const info = await lstat(file);
 

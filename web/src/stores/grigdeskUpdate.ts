@@ -83,6 +83,11 @@ function isReleaseSnapshot(value: unknown): value is ReleaseSnapshot {
     || typeof value.checkError.code !== 'string' || typeof value.checkError.message !== 'string')) {
     return false;
   }
+  if (value.packageUpdate != null && (!isRecord(value.packageUpdate)
+    || typeof value.packageUpdate.version !== 'string'
+    || typeof value.packageUpdate.archiveSha256 !== 'string')) {
+    return false;
+  }
   if (value.updateCapability != null) {
     const capability = value.updateCapability;
 
@@ -113,10 +118,19 @@ function isJobEnvelope(value: unknown): value is Record<string, unknown> & { job
     return false;
   }
 
-  const textFields = ['kind', 'stage', 'targetSha', 'previousRunningInstanceId', 'expectedRuntimeBuildId',
-    'expectedDeepSeekBinary', 'previousRuntimeBuildId', 'publicationStage', 'completedAt'];
+  const textFields = ['kind', 'stage', 'targetSha', 'targetVersion', 'previousRunningInstanceId',
+    'expectedRuntimeBuildId', 'expectedDeepSeekBinary', 'previousRuntimeBuildId',
+    'publicationStage', 'completedAt'];
 
   if (!textFields.every((key) => job[key] == null || typeof job[key] === 'string')) {
+    return false;
+  }
+  if (job.progress != null && (!isRecord(job.progress)
+    || typeof job.progress.downloadedBytes !== 'number'
+    || typeof job.progress.totalBytes !== 'number'
+    || !Number.isFinite(job.progress.downloadedBytes)
+    || !Number.isFinite(job.progress.totalBytes)
+    || job.progress.downloadedBytes < 0 || job.progress.totalBytes < 0)) {
     return false;
   }
   if (job.error != null && (!isRecord(job.error)
@@ -151,6 +165,20 @@ export const useGrigDeskUpdateStore = defineStore('grigdesk-update', {
     initialized: false,
   }),
   getters: {
+    /**
+     * Процент доступен только при известном размере скачиваемого архива.
+     * Округление вниз не показывает завершение до получения последнего байта.
+     */
+    packageProgress(state) {
+      const progress = state.status?.job?.progress;
+
+      if (!progress || !progress.totalBytes) {
+        return null;
+      }
+
+      return Math.floor((progress.downloadedBytes / progress.totalBytes) * 100);
+    },
+
     tone: (state) => grigDeskUpdateTone(state.status),
     active: (state) => ACTIVE_UPDATE_STATES.has(state.status?.job?.status ?? ''),
   },
@@ -255,6 +283,23 @@ export const useGrigDeskUpdateStore = defineStore('grigdesk-update', {
       }
 
       return this._start('/api/system/update', { targetTag: tag, expectedCheckoutSha: sha });
+    },
+
+    /**
+     * Обновление пакета запускается только с показанной и подтверждённой записью канала.
+     * Параллельное действие остаётся заблокированным на время запроса.
+     */
+    async installPackage() {
+      const target = this.status?.packageUpdate;
+
+      if (!target || this.actionBusy) {
+        return null;
+      }
+
+      return this._start('/api/system/package-update', {
+        expectedVersion: target.version,
+        expectedArchiveSha256: target.archiveSha256,
+      });
     },
 
     /**

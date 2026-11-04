@@ -56,19 +56,12 @@ export const NAV_ICONS = {
   plugin: 'M4 7h3a2 2 0 1 1 4 0h3v3a2 2 0 1 1 0 4v3h-3a2 2 0 1 0-4 0H4v-3a2 2 0 1 0 0-4V7z',
 };
 
-// Минимум манифеста, по которому выбирается знак: карта иконок и id плагина.
-interface PluginIconSource {
-  id?: string;
-  nav?: { icon?: string } | null;
-}
+const ICON_BY_NAME: Readonly<Record<string, string>> = NAV_ICONS;
 
-const ICON_BY_NAME = NAV_ICONS as Record<string, string>;
-
-// Иконка относится к назначению плагина, а не к его происхождению. Встроенные
-// повторяют навигацию GrigDesk; неизвестному пользовательскому модулю достаётся
-// нейтральный знак плагина — манифест не получает права передавать произвольный SVG.
-export function pluginIconPath(plugin: PluginIconSource | null | undefined): string {
-  const requested = plugin?.nav?.icon || '';
-
-  return ICON_BY_NAME[requested] || ICON_BY_NAME[plugin?.id || ''] || NAV_ICONS.plugin;
+/**
+ * Внутренние разделы используют только имена встроенных знаков.
+ * Внешние плагины показывают проверенный файл через PluginIcon.
+ */
+export function navIconPath(name: string | null | undefined, fallback = NAV_ICONS.plugin): string {
+  return typeof name === 'string' && Object.hasOwn(ICON_BY_NAME, name) ? ICON_BY_NAME[name]! : fallback;
 }

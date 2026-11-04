@@ -1,4 +1,5 @@
-import { chatReplyKey, chatSearchSnippet } from '../../../shared/chat/chatListProjection.ts';
+import { chatReplyKey, chatSearchSnippet, projectWebChatHead }
+  from '../../../shared/chat/chatListProjection.ts';
 import { parseProjectsChange } from '../../../shared/runtime/projectsContracts.ts';
 import { messageRef, t } from '../ui.ts';
 // Чат с агентами — МУЛЬТИСЕССИИ (вкладки, как в VS Code).
@@ -979,6 +980,30 @@ function selectedModel(session: ChatRecord | null) {
   return session?.modelRef || session?.model || '';
 }
 
+/**
+ * Пустой снимок при старте не доказывает отсутствие выбранной модели.
+ * После ожидания читаем текущий выбор заново: человек мог изменить его за это время.
+ */
+async function requestModel(session: ChatRecord) {
+  const providers = useProvidersStore();
+  let resolved = providers.modelOf(selectedModel(session));
+
+  if (!resolved.provider || !resolved.model) {
+    await providers.ensureModel(selectedModel(session));
+    resolved = providers.modelOf(selectedModel(session));
+  }
+
+  if (!resolved.provider || !resolved.model) {
+    throw new Error('Выбранная модель недоступна в реестре.');
+  }
+
+  return {
+    ...resolved,
+    provider: resolved.provider,
+    model: resolved.model,
+  };
+}
+
 const CODEX_CONTEXT_METRIC = 'active-input-v1';
 
 function metricNumber(value: unknown, { positive = false } = {}) {
@@ -1449,6 +1474,19 @@ export const useChatStore = defineStore('chat', {
       const local = this._find(head.id);
       const full = !!local && !runtime.headOnly.has(head.id);
       const dirty = !!local && this._dirty(local);
+      const revision = Math.max(previous?.revision || 0, local?.revision || 0);
+
+      if (typeof head.revision === 'number' && head.revision < revision) {
+        return;
+      }
+
+      // Чужое прочтение применяем и поверх несохранённого названия головы.
+      // Местное прочтение относится лишь к прежнему ответу, новый финал оно не скрывает.
+      if (local && dirty && !full) {
+        const sameReply = (previous?.lastReply?.key || '') === (head.lastReply?.key || '');
+
+        local.unread = sameReply ? !!local.unread && !!head.unread : !!head.unread;
+      }
 
       runtime.heads.set(head.id, { ...head });
       runtime.versions.set(head.id, head.version!);
@@ -2911,6 +2949,7 @@ export const useChatStore = defineStore('chat', {
       const fingerprint = fingerprintOf(snapshot);
       const steps = state.signature(snapshot);
       const generation = state.generation(id);
+      const confirmedReplyKey = state.replyKey(id);
       const selections = selectionStateFor(this);
       const selected = selections.capture(id);
 
@@ -3035,6 +3074,19 @@ export const useChatStore = defineStore('chat', {
           return response;
         }
 
+        const localReplyKey = projectWebChatHead({ ...latest }, '').lastReply?.key || '';
+        const remoteReplyKey = (Object.hasOwn(remote, 'lastReply')
+          ? remote.lastReply?.key : projectWebChatHead({ ...remote }, '').lastReply?.key) || '';
+        // Сервер мог добавить новый локальный итог при первом stale PUT, сохранив
+        // старый unread. Отличаем его от снимка уже прочитанного в другом окне ответа.
+        const newLocalReply = !!localReplyKey && localReplyKey !== confirmedReplyKey
+          && (localReplyKey === remoteReplyKey ? remote.revision === response.revision
+            : !remoteReplyKey || latest.messages.some((message, index) => (
+              messageNoticeKey(id, message, index) === remoteReplyKey
+            )));
+
+        latest.unread = newLocalReply ? !!latest.unread
+          : localReplyKey === remoteReplyKey ? !!latest.unread && !!remote.unread : !!remote.unread;
         selections.rebase(id, latest, remote);
         applySaveAck(latest, remote, { runtimeOnly: true });
         latest.revision = remote.revision;
@@ -3628,6 +3680,11 @@ export const useChatStore = defineStore('chat', {
             s.progressTokensEstimate = false;
             s.turnStartedAt = 0;
           } else {
+            // Стоп относился к прошлому ходу: очередь сразу пускает следующий, и кнопка
+            // обязана освободиться уже здесь. В chat-done её держит queued-гвардия (работа
+            // ведь продолжается), и без этого сброса она висела бы в «Останавливаю…»
+            // весь новый ход — как у фоновых ходов, для которых тот же сброс ниже.
+            s.stopping = false;
             s.sending = true;
             s.steps = [];
             s.progressTokens = 0;
@@ -3658,6 +3715,15 @@ export const useChatStore = defineStore('chat', {
           const s = this._find(d.chatKey);
           const current = this.runtimeRuns[d.chatKey];
           const inTurn = this.inTurnRuns[d.chatKey];
+
+          // Отказ подготовки имеет turnId, но ещё не имеет runId. Прежний запуск может
+          // всё ещё забирать итог: сначала ждём pending, затем сверяем работу с сервером,
+          // чтобы не оставить «работает» и не погасить уже начавшийся следующий ход.
+          if (d.turnId && !d.runId) {
+            this._collectPending().finally(() => this._loadActive());
+
+            return;
+          }
 
           // Конец своего запуска закрывает его черновики раньше ранних выходов: сверка
           // страницей может не пройти, а повторного chat-done не будет.
@@ -4471,10 +4537,19 @@ export const useChatStore = defineStore('chat', {
           ...(comment ? { comment } : {}),
         }));
       } catch { /* запрос уже протух (таймаут/другое окно) */ }
-      // Kimi (ACP) не умеет текст в отказе: сервер отвечает commentDelivered:false,
-      // и пояснение едет обычным сообщением — встанет в очередь чата.
+      // Канал эскалации текст отказа не несёт: сервер отвечает commentDelivered:false.
+      // Пояснение обязано догнать агента сразу — он только что получил голый отказ и без
+      // причины действует вслепую. У прямых исполнителей (GLM, DeepSeek) есть ввод в
+      // активный ход: отправляем туда с префиксом-связкой. Фолбэк — прежняя очередь:
+      // канал не готов (Kimi/ACP, ход уже кончился) или текст не приняли.
       if (!allow && comment && res?.commentDelivered === false) {
-        await this.send(p.chatKey || '', comment);
+        const key = p.chatKey || '';
+        const text = `Пояснение к отказу (${p.tool || 'действие'}): ${comment}`;
+        const delivered = await this.sendInTurn(key, text);
+
+        if (!delivered) {
+          await this.send(key, comment);
+        }
       }
     },
     // Legacy-вопрос получает массив, structured-форма — `{ action, answers }` с raw values.
@@ -5347,13 +5422,8 @@ export const useChatStore = defineStore('chat', {
 
       try {
         const url = s.taskId ? `/api/tasks/${s.taskId}/compact` : '/api/chat/compact';
-        const provStore = useProvidersStore();
-        const resolvedModel = provStore.modelOf(selectedModel(s));
+        const resolvedModel = await requestModel(s);
         const effortLevels = resolvedModel.model?.efforts || [];
-
-        if (!resolvedModel.provider || !resolvedModel.model) {
-          throw new Error('Выбранная модель недоступна в реестре.');
-        }
 
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
@@ -5570,13 +5640,8 @@ export const useChatStore = defineStore('chat', {
         const context = useUiContextStore().capture(router.currentRoute.value).promptContext;
         // Модель: сохранённый алиас резолвим в конкретную (что показано в селекте, то и считает),
         // пустое значение — модель по умолчанию из реестра.
-        const provStore = useProvidersStore();
-        const resolvedModel = provStore.modelOf(selectedModel(s));
+        const resolvedModel = await requestModel(s);
         const effortLevels = resolvedModel.model?.efforts || [];
-
-        if (!resolvedModel.provider || !resolvedModel.model) {
-          throw new Error('Выбранная модель недоступна в реестре.');
-        }
 
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
@@ -5788,11 +5853,7 @@ export const useChatStore = defineStore('chat', {
       try {
         // Модель: что показано в селекте, то и считает; пустое значение — модель по
         // умолчанию из реестра. Сохраняется в чат ДО durable save.
-        const resolvedModel = useProvidersStore().modelOf(selectedModel(s));
-
-        if (!resolvedModel.provider || !resolvedModel.model) {
-          throw new Error('Выбранная модель недоступна в реестре.');
-        }
+        const resolvedModel = await requestModel(s);
 
         s.model = resolvedModel.id;
         s.modelRef = { provider: resolvedModel.provider.id, model: resolvedModel.model.id };
@@ -5891,17 +5952,26 @@ export const useChatStore = defineStore('chat', {
 
       let request;
 
+      postingTurns.add(turnId);
+
       try {
+        await requestModel(s);
+
+        if (m.delivery !== 'sending') {
+          postingTurns.delete(turnId);
+
+          return 'settled';
+        }
+
         request = this._turnRequest(s, m);
       } catch (caught) {
           const e = chatFailure(caught);
 
+        postingTurns.delete(turnId);
         this._refuseTurn(s, m, e);
 
         return 'refused';
       }
-
-      postingTurns.add(turnId);
 
       try {
         const r = decodeChatEnvelope(await api.post(

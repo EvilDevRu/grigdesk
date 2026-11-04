@@ -44,7 +44,7 @@ function cardByTask(wrapper, task) {
 }
 
 function timerSnapshot(card) {
-  const timer = card?.find('[data-role="pipeline-b24-timer"]');
+  const timer = card?.find('[data-role="pipeline-tracker-timer"]');
 
   if (!timer?.exists()) {
     return {

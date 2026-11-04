@@ -401,10 +401,10 @@
     },
     "web/src/features/settings/catalog.ts": {
       "labelKey": [
-        "settings.browserOpen", "settings.browserApplication", "settings.browserAgents"
+        "settings.browserOpen", "settings.browserApplication", "settings.browserAgents", "settings.browserSearch"
       ],
       "hintKey": [
-        "settings.browserOpenHint", "settings.browserApplicationHint", "settings.browserAgentsHint"
+        "settings.browserOpenHint", "settings.browserApplicationHint", "settings.browserAgentsHint", "settings.browserSearchHint"
       ],
       "GROUP_MESSAGES[group.id]!.label!": [
         "settings.*"

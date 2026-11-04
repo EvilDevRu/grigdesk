@@ -47,7 +47,7 @@ export class LinkEvents {
           if (event.name === 'ready' && data.api !== 1) {
             void this.link.stopEvents();
             state({ state: 'contract' });
-          } else if (['ready', 'chat', 'chats', 'tasks', 'b24', 'waiting'].includes(event.name)) {
+          } else if (['ready', 'chat', 'chats', 'tasks', 'tracker', 'waiting'].includes(event.name)) {
             signal(event.name, data);
           }
         } catch {

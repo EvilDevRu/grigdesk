@@ -58,6 +58,7 @@ function environment(root: string, data: string, port: number, mobilePort: numbe
  */
 async function boot(input: {
   binary: string;
+  version?: string;
   root: string;
   data: string;
   packageId?: string;
@@ -117,7 +118,9 @@ async function boot(input: {
         if (response.status === 200) {
           const status = await response.json() as { running?: { version?: string; packageId?: string } };
 
-          assert.equal(status.running?.version, '0.1.0');
+          if (input.version) {
+            assert.equal(status.running?.version, input.version);
+          }
 
           if (input.packageId) {
             assert.equal(status.running?.packageId, input.packageId);
@@ -223,6 +226,7 @@ export async function runBinarySmoke(input: {
 
     const candidateInput = {
       binary: input.binary,
+      version: metadata.version,
       root,
       data,
       packageId: metadata.packageId,
@@ -239,6 +243,7 @@ export async function runBinarySmoke(input: {
     });
     const ipcMs = await run({
       binary: input.binary,
+      version: metadata.version,
       root,
       data,
       packageId: metadata.packageId,

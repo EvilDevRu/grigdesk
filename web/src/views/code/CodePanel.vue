@@ -17,19 +17,15 @@
              v-tooltip="context?.treePath || 'Рабочая копия'">
           <label for="code-context">рабочая копия</label>
           <UiSelect id="code-context" compact data-context="code-head-select"
+                    option-layout="inline"
                     :model-value="contextId" @change="selectContext">
-            <template v-if="contextGroups.length > 1">
-              <optgroup v-for="group in contextGroups" :key="group.repoKey" :label="group.repoKey">
-                <option v-for="item in group.items" :key="item.id" :value="item.id" :title="item.treePath">
-                  {{ item.label }}
-                </option>
-              </optgroup>
-            </template>
-            <template v-else>
-              <option v-for="item in contexts" :key="item.id" :value="item.id" :title="item.treePath">
+            <template #value>{{ headContext }}</template>
+            <optgroup v-for="group in contextGroups" :key="group.repoKey" :label="group.repoKey">
+              <option v-for="item in group.items" :key="item.id" :value="item.id"
+                      :title="item.treePath" :data-description="item.description">
                 {{ item.label }}
               </option>
-            </template>
+            </optgroup>
           </UiSelect>
         </div>
         <span v-else-if="headContext" class="tlabel mono"
@@ -1151,6 +1147,7 @@ import { codeLinkHref } from '../../features/code/links';
 import { pickCodeProject } from './projectChoice';
 import {
   askAgentDraft,
+  buildCodeContextChoices,
   buildCodeContexts,
   buildGitGroups,
   chunkList,
@@ -1169,7 +1166,13 @@ import {
   treeDecorations,
   toggleCommitSelection,
 } from '../../shared/codeTree';
-import type { CodeContext, GitGroup, GitGroupId, GitGroupStat } from '../../shared/codeTree';
+import type {
+  CodeContext,
+  CodeContextChoice,
+  GitGroup,
+  GitGroupId,
+  GitGroupStat,
+} from '../../shared/codeTree';
 import {
   UiButton,
   UiIconButton,
@@ -1279,11 +1282,12 @@ const contexts = computed(() => contextModel.value.contexts);
 const unavailableRepos = computed(() => contextModel.value.unavailable);
 const contextById = computed(() => new Map(contexts.value.map((item) => [item.id, item])));
 const context = computed(() => contextById.value.get(contextId.value) || null);
+const contextChoices = computed(() => buildCodeContextChoices(contexts.value));
 const contextGroups = computed(() => {
-  const groups: { repoKey: string; items: CodeContext[] }[] = [];
-  const byRepo = new Map<string, { repoKey: string; items: CodeContext[] }>();
+  const groups: { repoKey: string; items: CodeContextChoice[] }[] = [];
+  const byRepo = new Map<string, { repoKey: string; items: CodeContextChoice[] }>();
 
-  for (const item of contexts.value) {
+  for (const item of contextChoices.value) {
     let group = byRepo.get(item.repoKey);
 
     if (!group) {
@@ -1306,24 +1310,24 @@ const projectHasRepos = computed(() => (
 const showsProjectPicker = computed(() => projects.value.length > 0);
 const showsContextPicker = computed(() => contexts.value.length > 0);
 /**
- * Текст шапки на время, пока рабочих копий ещё нет: репозитории проекта не прочитаны
- * или все оказались недоступны. Имя проекта добавляется только при живом отличии от
- * ключа репозитория, а сам ключ пропадает, когда его уже назвал селект проекта.
+ * Шапка показывает короткое имя выбранной копии и отличающуюся ветку.
+ * Репозиторий добавляется только тогда, когда его ещё не назвал соседний селект проекта.
  */
 const headContext = computed(() => {
-  if (!context.value) {
+  const choice = contextChoices.value.find((item) => item.id === contextId.value);
+
+  if (!choice) {
     return '';
   }
 
+  const label = [choice.label, choice.description].filter(Boolean).join(' · ');
+  const repoLabel = `${choice.repoKey} · ${label}`;
+
   if (showsProjectPicker.value) {
-    return context.value.repoKey === project.value
-      ? context.value.treeLabel
-      : context.value.label;
+    return choice.repoKey === project.value ? label : repoLabel;
   }
 
-  return context.value.repoKey === project.value
-    ? context.value.label
-    : `${project.value} · ${context.value.label}`;
+  return choice.repoKey === project.value ? repoLabel : `${project.value} · ${repoLabel}`;
 });
 
 // ── Дерево файлов (ленивое: каталог читается при раскрытии) ──
@@ -5509,4 +5513,49 @@ onBeforeUnmount(() => {
 .note.img-note { color: var(--ink-mid); }
 
 .diff-layout { flex: none; }
+/* Подписи стоят рядом со значениями, чтобы контекст не занимал четыре строки формы.
+   Оба выбора сохраняют отдельный ряд и читаемую ширину без изменения состояния редактора. */
+@media (max-width: 600px) {
+  .code-panel .code-head {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding-bottom: 4px;
+  }
+
+  .code-panel .code-head .head-ctx {
+    flex: 1 0 100%;
+    order: 2;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    overflow: visible;
+  }
+
+  .code-panel .code-head .head-pick {
+    flex: none;
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    overflow: visible;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .code-panel .code-head .head-pick label {
+    display: block;
+    font-size: 13px;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  .code-panel .code-head .head-pick :deep(.ui-select-wrap),
+  .code-panel .code-head .head-pick :deep(.ui-select) {
+    width: 100%;
+    max-width: none;
+  }
+}
 </style>

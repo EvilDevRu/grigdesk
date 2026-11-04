@@ -7,13 +7,44 @@
     <p v-if="error" role="alert">{{ resolveUiText(error) }}</p>
     <p v-if="message" role="status">{{ resolveUiText(message) }}</p>
     <template v-if="settings.pageId === 'system.startup'">
-      <SettingsSection :heading="t('settings.sectionGrigdeskProcess')" :description="t('settings.currentServerStatusOnThisMachine')">
-        <SettingsFacts v-if="server" :items="serverFacts" />
-        <p v-if="serverText.hint">{{ serverText.hint }}</p>
-        <UiButton data-context="workspace-form-wrap" :disabled="busy || !server" @click="restart">{{ t('settings.restartServer') }}</UiButton>
+      <SettingsSection
+        data-startup-scope="application"
+        :heading="t('settings.startupApplication')"
+        :description="t('settings.startupApplicationDescription')"
+      >
+        <SettingsScope :scope="t('settings.applicationComputer')" />
+        <SettingsField
+          v-for="field in applicationFields"
+          :key="field.key"
+          :address="field.address"
+        >
+          <UiSwitch
+            :model-value="applicationAutostartValue"
+            :disabled="!applicationLauncher || busy"
+            :aria-label="field.label"
+            @update:model-value="settings.setField('applicationAutostart', 'enabled', $event)"
+          />
+        </SettingsField>
+        <template v-if="applicationLauncher">
+          <SettingsFacts :items="applicationFacts" />
+          <p>{{ t('settings.shortcut') }} {{ shortcutLabel }}</p>
+          <UiButton data-context="workspace-form-wrap" :disabled="busy" @click="shortcut">
+            {{ shortcutPresent ? t('settings.removeShortcut') : t('settings.createShortcut') }}
+          </UiButton>
+          <p class="settings-startup-note">{{ t('settings.applicationShortcutDescription') }}</p>
+        </template>
+        <p v-else-if="!shell.capabilities.includes('applicationLauncher')" class="settings-startup-note">
+          {{ t('settings.applicationLauncherUnavailable') }}
+        </p>
+        <p v-else-if="!applicationError" class="settings-startup-note">{{ t('settings.loading') }}</p>
+        <p v-if="applicationError" role="alert">{{ resolveUiText(applicationError) }}</p>
       </SettingsSection>
-      <SettingsSection :heading="t('settings.sectionAutomaticStartup')">
-        <SettingsScope :scope="t('settings.thisMachine')" />
+      <SettingsSection
+        data-startup-scope="server"
+        :heading="t('settings.startupServer')"
+        :description="serverDescription"
+      >
+        <SettingsScope :scope="t('settings.selectedServerComputer')" />
         <SettingsField
           v-for="field in startupFields"
           :key="field.key"
@@ -35,18 +66,16 @@
             <p v-else-if="server && !server.systemd">{{ t('settings.theServerWasStartedManuallyTheSwitch') }}</p>
           </div>
         </template>
-      </SettingsSection>
-      <template v-if="launcher">
-        <SettingsSection
-          :heading="t('settings.sectionApplicationShortcut')"
-          :description="t('settings.quickAccessFromTheDesktopAndApplication')"
+        <SettingsFacts v-if="server" :items="serverFacts" />
+        <p v-if="serverText.hint" class="settings-startup-note">{{ serverText.hint }}</p>
+        <UiButton
+          data-context="workspace-form-wrap"
+          :disabled="busy || !server"
+          @click="restart"
         >
-          <p>{{ t('settings.shortcut') }} {{ shortcutLabel }}</p>
-          <UiButton data-context="workspace-form-wrap" :disabled="busy || (!shortcutPresent && !launcher.shortcut.desktopDir)" @click="shortcut">
-            {{ shortcutPresent ? t('settings.removeShortcut') : t('settings.createShortcut') }}
-          </UiButton>
-        </SettingsSection>
-      </template>
+          {{ t('settings.restartServer') }}
+        </UiButton>
+      </SettingsSection>
     </template>
     <template v-else>
       <SettingsSection
@@ -105,6 +134,29 @@
             {{ t('settings.releaseInstallation') }} {{ blockReasonLabel(reason, uiLocale) }}
           </p>
         </template>
+        <template v-if="release?.updateCapability?.kind === 'package'">
+          <p data-context="package-update-card">
+            {{ t('settings.pkgUpdateTitle') }} · {{ release.running.version }}
+            <template v-if="release.updateAvailable && release.packageUpdate">
+              → {{ release.packageUpdate.version }}
+            </template>
+            <UiButton data-context="package-update-check"
+              :disabled="updates.checking || updates.active" @click="updates.check()">
+              {{ t('settings.pkgUpdateCheck') }}
+            </UiButton>
+            <UiButton data-context="package-update-open"
+              :disabled="!release.updateAvailable && !release.job" @click="packageDialogOpen = true">
+              {{ t('settings.pkgUpdateButton') }}
+            </UiButton>
+          </p>
+          <p v-if="release.job" data-context="package-update-job">
+            {{ stageLabel }}
+          </p>
+          <p v-if="release.checkError" role="alert" data-context="package-update-channel-error">
+            {{ release.checkError.message }}
+          </p>
+          <PackageUpdateDialog :open="packageDialogOpen" @close="packageDialogOpen = false" />
+        </template>
         <p v-if="updates.error" role="alert">{{ updates.error }}</p>
       </SettingsSection>
       <SettingsSection v-if="!packageCapability" :heading="t('settings.sectionInterfaceBuild')">
@@ -128,7 +180,9 @@ import { api, ApiError, failureText } from '../../../shared/apiClient.ts';
 import { useSettingsStore } from '../../../stores/settings.ts';
 import { useGrigDeskUpdateStore } from '../../../stores/grigdeskUpdate.ts';
 import { serverModeText, serverRestartMessage } from '../serverMode.ts';
-import { blockReasonLabel, UPDATE_STAGE_LABELS } from '../../../shared/grigdeskUpdate.ts';
+import {
+  blockReasonLabel, UPDATE_STAGE_LABELS, PACKAGE_UPDATE_STAGE_LABELS,
+} from '../../../shared/grigdeskUpdate.ts';
 import { getSettingsFields } from '../../../features/settings/catalog.ts';
 import { createAutostartResource } from '../../../features/settings/resources/startup.ts';
 import { sseSubscribe } from '../../../composables/useSse.ts';
@@ -137,6 +191,15 @@ import type { ReleaseStatus } from '../../../../../shared/runtime/grigDeskUpdate
 import SettingsField from '../SettingsField.vue';
 import SettingsFacts from '../SettingsFacts.vue';
 import PackagedServerVersion from '../PackagedServerVersion.vue';
+import PackageUpdateDialog from '../../../shared/PackageUpdateDialog.vue';
+import { useShellStore } from '../../../stores/shell.ts';
+import { shellAction } from '../../../shared/shellClient.ts';
+import {
+  createApplicationLauncherResource,
+  decodeApplicationLauncher,
+} from '../../../features/settings/resources/applicationLauncher.ts';
+import type { ApplicationLauncherState } from '../../../../../shared/desktop/applicationLauncher.ts';
+import { machineProfileName } from '../../../../../shared/client/clientShell.ts';
 
 type ServerView = {
   mode?: string;
@@ -152,8 +215,12 @@ declare const __GRIGDESK_SHA__: string;
 const props = defineProps<{ active: boolean }>();
 const settings = useSettingsStore();
 const updates = useGrigDeskUpdateStore();
+const packageDialogOpen = ref(false);
+const shell = useShellStore();
 const server = ref<ServerView | null>(null);
 const launcher = ref<LauncherState | null>(null);
+const applicationLauncher = ref<ApplicationLauncherState | null>(null);
+const applicationError = ref<UiText>('');
 const ready = ref(false);
 const error = ref<UiText>('');
 const message = ref<UiText>('');
@@ -162,6 +229,22 @@ const controller = new AbortController();
 const opening = settings.snapshot.sessionId;
 const startupFields = computed(() => getSettingsFields(uiLocale.value)
   .filter((field) => field.resourceId === 'autostart'));
+const applicationFields = computed(() => getSettingsFields(uiLocale.value)
+  .filter((field) => field.resourceId === 'applicationAutostart'));
+const applicationAutostartValue = computed(() => {
+  settings.snapshot;
+
+  return settings.getValue('applicationAutostart', 'enabled') === true;
+});
+const applicationFacts = computed(() => applicationLauncher.value ? [{
+  label: t('settings.applicationExecutable'),
+  value: applicationLauncher.value.executablePath,
+}] : []);
+const serverDescription = computed(() => shell.profile
+  ? t('settings.startupSelectedServerDescription', {
+    machine: machineProfileName(shell.profile, uiLocale.value),
+  })
+  : t('settings.startupServerDescription'));
 const serverText = computed(() => serverModeText(server.value, uiLocale));
 const release = computed(() => updates.status as ReleaseStatus | null);
 const packageCapability = computed(() => {
@@ -169,9 +252,12 @@ const packageCapability = computed(() => {
 
   return capability?.kind === 'package' ? capability : null;
 });
-const stageLabel = computed(() =>
-  (UPDATE_STAGE_LABELS as Record<string, string>)[release.value?.job?.stage ?? '']
-  || release.value?.job?.stage);
+const stageLabel = computed(() => {
+  const job = release.value?.job;
+  const labels = job?.kind === 'package-update' ? PACKAGE_UPDATE_STAGE_LABELS : UPDATE_STAGE_LABELS;
+
+  return (labels as Record<string, string>)[job?.stage ?? ''] || job?.stage;
+});
 const buildVersion = typeof __GRIGDESK_VERSION__ === 'undefined' ? '—' : __GRIGDESK_VERSION__;
 const buildSha = typeof __GRIGDESK_SHA__ === 'undefined' ? '' : __GRIGDESK_SHA__;
 const autostartValue = computed(() => {
@@ -179,10 +265,15 @@ const autostartValue = computed(() => {
 
   return settings.getValue('autostart', 'enabled') === true;
 });
-const shortcutPresent = computed(() => launcher.value?.shortcut.desktop || launcher.value?.shortcut.menu);
-const shortcutLabel = computed(() => launcher.value?.shortcut.desktop && launcher.value.shortcut.menu
-  ? t('settings.onDesktopAndInApplicationMenu') : launcher.value?.shortcut.desktop ? t('settings.onDesktop')
-    : launcher.value?.shortcut.menu ? t('settings.inApplicationMenu') : t('settings.notCreated'));
+const shortcutPresent = computed(() =>
+  applicationLauncher.value?.shortcut.desktop || applicationLauncher.value?.shortcut.menu);
+const shortcutLabel = computed(() => {
+  const state = applicationLauncher.value?.shortcut;
+
+  return state?.desktop && state.menu ? t('settings.onDesktopAndInApplicationMenu')
+    : state?.desktop ? t('settings.onDesktop')
+      : state?.menu ? t('settings.inApplicationMenu') : t('settings.notCreated');
+});
 const uptime = computed(() => {
   const seconds = server.value?.uptimeSec ?? 0;
 
@@ -361,24 +452,58 @@ async function restart(): Promise<void> {
  * Ответ обновляет только свой раздел снимка после подтверждённой операции.
  */
 async function shortcut(): Promise<void> {
-  if (busy.value || !launcher.value) {
+  if (!current() || busy.value || !applicationLauncher.value) {
     return;
   }
 
   busy.value = true;
+  applicationError.value = '';
 
   try {
-    const result = await (shortcutPresent.value ? api.del('/api/system/launcher/shortcut')
-      : api.post('/api/system/launcher/shortcut')) as { shortcut: LauncherState['shortcut'] };
+    const result = decodeApplicationLauncher(await shellAction('POST', '/launcher', {
+      shortcut: !shortcutPresent.value,
+    }, controller.signal), uiLocale);
 
     if (current()) {
-      launcher.value = { ...launcher.value, shortcut: result.shortcut };
+      const resource = settings.sessionService('application-launcher-resource',
+        () => createApplicationLauncherResource(uiLocale));
+
+      resource.accept(result);
+      applicationLauncher.value = result;
       message.value = messageRef('settings.shortcutUpdated');
     }
   } catch (cause) {
-    error.value = failureText(cause);
+    if (current()) {
+      applicationError.value = failureText(cause);
+    }
   } finally {
     busy.value = false;
+  }
+}
+
+/**
+ * Настройки окна читаются через локальную трубу независимо от доступности серверного юнита.
+ * Старый клиент показывает причину отсутствия возможности без обращения к серверным ярлыкам.
+ */
+async function loadApplicationLauncher(): Promise<void> {
+  if (!shell.capabilities.includes('applicationLauncher')) {
+    return;
+  }
+
+  try {
+    const resource = settings.sessionService('application-launcher-resource',
+      () => createApplicationLauncherResource(uiLocale));
+
+    settings.registerResource(resource.adapter, applicationFields.value);
+    await settings.loadResource('applicationAutostart');
+
+    if (current()) {
+      applicationLauncher.value = resource.view();
+    }
+  } catch (cause) {
+    if (current()) {
+      applicationError.value = failureText(cause);
+    }
   }
 }
 
@@ -504,10 +629,11 @@ async function load(): Promise<void> {
 
   try {
     if (settings.pageId === 'system.startup') {
+      await loadApplicationLauncher();
       await readServer();
 
       const resource = settings.sessionService('autostart-resource',
-    () => createAutostartResource(api, uiLocale));
+        () => createAutostartResource(api, uiLocale));
 
       settings.registerResource(resource.adapter, startupFields.value);
       await settings.loadResource('autostart');
@@ -539,6 +665,13 @@ watch(() => settings.snapshot.lastResult, () => {
     () => createAutostartResource(api, uiLocale));
 
   launcher.value = resource.view();
+
+  if (shell.capabilities.includes('applicationLauncher')) {
+    const application = settings.sessionService('application-launcher-resource',
+      () => createApplicationLauncherResource(uiLocale));
+
+    applicationLauncher.value = application.view();
+  }
 });
 watch(() => release.value?.job?.status, (status) => {
   if (status === 'done' && current()) {
@@ -576,6 +709,11 @@ onBeforeUnmount(() => {
 .settings-autostart-note {
   display: grid;
   gap: 6px;
+  color: var(--ink-mid);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.settings-startup-note {
   color: var(--ink-mid);
   font-size: 12px;
   line-height: 1.6;

@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { catalogFixture } from '../helpers/pluginCatalog.js';
 import { moduleCatalogFixture, catalogResponse } from '../helpers/pluginCatalogModules.js';
-import { webInstallInfo } from './helpers/pluginInstallFixtures.js';
+import { webInstallInfo, webInstallJob } from './helpers/pluginInstallFixtures.js';
 import { settingsHarness } from './helpers/settings-harness.js';
 
 test('CAT-UI1: поиск, safe README, выбор совместимой версии и install intent', async (t) => {
@@ -283,6 +283,7 @@ test('CAT-UI7: «Открыть задание установки» не нас�
   assert.equal(dialog().props('catalogSelection'), null);
   assert.equal(dialog().props('plugin'), null);
   assert.equal(dialog().props('mode'), 'install');
+  assert.equal(dialog().props('resume'), true);
 });
 
 test('CAT-UI8: версия ниже установленной называет установленную, а не выбранную', async (t) => {
@@ -330,13 +331,18 @@ test('CAT-UI8: версия ниже установленной называет
 });
 
 
-test('CAT-UI-API2: modern карточка создаёт точный install intent без автоматического apply', async (t) => {
-  const { modern } = moduleCatalogFixture();
+test('CAT-UI-V1: карточка api1 создаёт точный install intent без автоматического apply', async (t) => {
+  const modules = moduleCatalogFixture();
+
+  modules.version.api = 1;
+  modules.index.plugins[0].latest.api = 1;
+  modules.detail.plugin.versions[0].api = 1;
+
   const h = await settingsHarness(t, 'plugins.installed', 'PluginCatalogPanel', {
     prepare({ control }) {
-      control.handlers['/api/plugin-catalog?api=2'] = () => Response.json(catalogResponse(modern));
-      control.handlers['/api/plugin-catalog?api=2&refresh=1'] = () => Response.json(catalogResponse(modern));
-      control.handlers['/api/plugin-catalog/demo?api=2'] = () => Response.json(modern.detail);
+      control.handlers['/api/plugin-catalog'] = () => Response.json(catalogResponse(modules));
+      control.handlers['/api/plugin-catalog?refresh=1'] = () => Response.json(catalogResponse(modules));
+      control.handlers['/api/plugin-catalog/demo'] = () => Response.json(modules.detail);
     },
   });
 
@@ -351,8 +357,8 @@ test('CAT-UI-API2: modern карточка создаёт точный install i
 
   assert.deepEqual(selection, {
     id: 'demo',
-    source: modern.entry.source,
-    target: modern.version,
+    source: modules.entry.source,
+    target: modules.version,
   });
   assert.equal(installed, null);
   assert.equal(h.writes().length, 0);
@@ -412,4 +418,74 @@ test('CAT-CONFIGURE: кнопка каталога выбирает страни
       assert.equal(h.writes().length, 0);
     });
   }
+});
+
+
+test('Настройки: просмотр результата и новая Git-установка имеют разные намерения', async (t) => {
+  const previous = webInstallJob('done', 'update');
+  const h = await settingsHarness(t, 'plugins.installed', 'PluginWorkspacePage', {
+    stubs: { teleport: true },
+    prepare({ control }) {
+      control.handlers['/api/plugin-installs/jobs/current'] = () => new Response(JSON.stringify({
+        job: previous,
+        recoveryError: null,
+      }));
+    },
+  });
+
+  await h.flushPromises();
+  await h.wrapper.get('[data-install-job]').trigger('click');
+  await h.flushPromises();
+
+  const result = h.wrapper.findComponent({ name: 'PluginInstallDialog' });
+
+  assert.equal(result.props('resume'), true);
+  assert.equal(result.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'result');
+  // Закрытие родителя может размонтировать мастер без его собственного обработчика.
+  result.vm.$emit('update:open', false);
+  await h.flushPromises();
+  await h.wrapper.get('[data-install-git]').trigger('click');
+  await h.flushPromises();
+
+  const install = h.wrapper.findComponent({ name: 'PluginInstallDialog' });
+
+  assert.equal(install.props('resume'), false);
+  assert.equal(install.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'source');
+  assert.equal(install.get('[data-role="install-url"]').element.value, '');
+  assert.equal(h.writes().some((call) => /\/jobs(?:\/|$)/u.test(call.path)), false);
+});
+
+test('CAT-V1-MEDIA: detail рисует icon по repository/SHA, ошибка изображения даёт fallback', async (t) => {
+  const fixture = catalogFixture();
+  const icon = {
+    path: 'assets/icon.png',
+    sha: fixture.version.sha,
+    mediaType: 'image/png',
+    bytes: 1024,
+  };
+
+  fixture.detail.plugin.icon = icon;
+  fixture.detail.plugin.gallery = { screenshots: [] };
+
+  const h = await settingsHarness(t, 'plugins.installed', 'PluginCatalogPanel', {
+    prepare({ control }) {
+      catalogHandlers(control, fixture, () => fixture.detail);
+    },
+  });
+
+  await h.wrapper.get('[data-catalog-id="demo"]').trigger('click');
+  await h.flushPromises();
+
+  const expected = `https://raw.githubusercontent.com/${fixture.entry.repository}/${icon.sha}/${icon.path}`;
+  const image = h.wrapper.findAll('.catalog-card img').find((item) => item.attributes('src') === expected);
+
+  assert.ok(image, 'иконка detail строится только из проверенных repository/SHA/path');
+  assert.equal(h.wrapper.get('[data-catalog-readme]').text().includes('Example README'), true);
+  await image.trigger('error');
+  await h.flushPromises();
+
+  const remaining = h.wrapper.findAll('.catalog-card img');
+
+  assert.equal(remaining.some((item) => item.attributes('src') === expected && item.isVisible()), false);
+  assert.equal(h.wrapper.find('[data-catalog-action]').exists(), true);
 });

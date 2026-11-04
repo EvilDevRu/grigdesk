@@ -148,6 +148,7 @@ async function mountApp(t, options = {}) {
       export { t, uiLocale } from ${JSON.stringify(webFile('src/services/locale.ts'))};
       const Host = { render: () => h('div') };
       export const UiDialogHost = Host;
+      export const UiDesktopContextMenu = Host;
       export const UiTooltipHost = Host;
       export const UiToastHost = Host;
       export const UiInlineMessage = Host;
@@ -169,6 +170,8 @@ async function mountApp(t, options = {}) {
     './stores/shell.ts': 'export const useShellStore = () => globalThis.__noAccess.shell;',
     './shell.ts': 'export const useShellStore = () => globalThis.__noAccess.shell;',
     './stores/board.ts': store('useBoardStore'),
+    './stores/grigdeskTasks.ts': store('useGrigdeskTasksStore'),
+    './stores/tasks.ts': store('useTasksStore', 'invalidate() {},'),
     './stores/system.ts': store('useSystemStore'),
     './stores/taskFavorites.ts': store('useTaskFavoritesStore'),
     './stores/taskShelf.ts': store('useTaskShelfStore'),

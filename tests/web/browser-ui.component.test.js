@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { compileVue, compileModule, webFile } from './helpers/compile-vue.js';
@@ -75,7 +76,8 @@ function harness() {
     preferences: {
       open: 'internal',
       external: 'system',
-      agents: true
+      agents: true,
+      search: 'yandex'
     },
     tabs: [tab('one'), tab('two')],
     active: 'one',
@@ -171,6 +173,20 @@ function harness() {
         browser.snapshot.active = request.tabId;
       } else if (request.operation === 'navigate') {
         browser.active.url = request.url;
+      } else if (request.operation === 'close') {
+        browser.snapshot.tabs = browser.snapshot.tabs.filter((item) => item.id !== request.tabId);
+
+        if (browser.snapshot.active === request.tabId) {
+          browser.snapshot.active = browser.snapshot.tabs[0]?.id ?? null;
+        }
+      } else if (request.operation === 'move') {
+        const moving = browser.snapshot.tabs.find((item) => item.id === request.tabId);
+        const rest = browser.snapshot.tabs.filter((item) => item.id !== request.tabId);
+        const index = request.beforeId === null ? rest.length
+          : rest.findIndex((item) => item.id === request.beforeId);
+
+        rest.splice(index, 0, moving);
+        browser.snapshot.tabs = rest;
       }
     },
   });
@@ -270,12 +286,13 @@ test('BR-U02: site navigation не стирает focused draft; Ctrl+T/W упр
     ctrlKey: true,
     cancelable: true
   });
+  const closingId = f.browser.snapshot.active;
 
   window.dispatchEvent(close);
   await rendered();
   assert.equal(close.defaultPrevented, true);
   assert.equal(f.calls.some((item) => item.operation === 'close'
-    && item.tabId === f.browser.snapshot.active), true);
+    && item.tabId === closingId), true);
 });
 
 test('BR-U12: guest intent приходит через preload subscription и снимается при unmount', async (t) => {
@@ -321,6 +338,411 @@ test('BR-U12: guest intent приходит через preload subscription и �
   assert.equal(deliver, undefined);
 });
 
+test('BR-U13: адрес без схемы и поисковый запрос проходят настоящее поле и выбранный engine', async (t) => {
+  const f = mounted(t, BrowserView);
+
+  await rendered();
+
+  const input = f.wrapper.get('input[aria-label="Адрес"]');
+
+  assert.equal(input.attributes('type'), 'text');
+  await input.setValue('ya.ru');
+  await f.wrapper.get('form').trigger('submit');
+  await rendered();
+  assert.equal(f.browser.active.url, 'https://ya.ru/');
+
+  for (const search of ['yandex', 'google']) {
+    f.browser.snapshot.preferences.search = search;
+    await input.setValue('найти кота & собаку');
+    await f.wrapper.get('form').trigger('submit');
+    await rendered();
+
+    const url = new URL(f.browser.active.url);
+
+    assert.equal(url.hostname, search === 'google' ? 'www.google.com' : 'yandex.ru');
+    assert.equal(url.searchParams.get(search === 'google' ? 'q' : 'text'), 'найти кота & собаку');
+  }
+});
+
+test('BR-U14: контекстное меню фоновой вкладки, дубликат и закрытие справа/остальных', async (t) => {
+  const f = mounted(t, BrowserView);
+
+  f.browser.snapshot.tabs.push(tab('three'));
+  await rendered();
+  await f.wrapper.get('#browser-tab-two').trigger('click');
+  await rendered();
+  assert.equal(document.querySelector('[role="menu"]'), null);
+  await f.wrapper.get('#browser-tab-one').trigger('contextmenu');
+  await rendered();
+  assert.equal(f.browser.snapshot.active, 'two');
+  assert.equal(document.querySelectorAll('[role="menuitem"]').length, 7);
+  [...document.querySelectorAll('[role="menuitem"]')]
+    .find((item) => item.textContent.includes('Дублировать')).click();
+  await rendered();
+
+  const duplicate = f.calls.find((item) => item.operation === 'open');
+
+  assert.equal(duplicate.url, 'http://fixture.test/one');
+  assert.equal(duplicate.deduplicate, false);
+  assert.equal('owner' in duplicate, false);
+
+  await f.wrapper.get('#browser-tab-two').trigger('contextmenu');
+  await rendered();
+  [...document.querySelectorAll('[role="menuitem"]')]
+    .find((item) => item.textContent.includes('Закрыть вкладки справа')).click();
+  await rendered();
+  assert.deepEqual(f.browser.snapshot.tabs.map((item) => item.id), ['one', 'two']);
+  await f.wrapper.get('#browser-tab-two').trigger('keydown', { key: 'F10', shiftKey: true });
+  await rendered();
+  [...document.querySelectorAll('[role="menuitem"]')]
+    .find((item) => item.textContent.includes('Закрыть другие')).click();
+  await rendered();
+  assert.deepEqual(f.browser.snapshot.tabs.map((item) => item.id), ['two']);
+  assert.equal(f.browser.snapshot.active, 'two');
+  await f.wrapper.get('#browser-tab-two').trigger('auxclick', { button: 1 });
+  await rendered();
+  assert.equal(f.browser.snapshot.tabs.length, 0);
+});
+
+test('BR-U16: робот отражает owner/grantee доступ, паузу и подпись исполнителя', async (t) => {
+  const f = mounted(t, BrowserView);
+  const owner = JSON.stringify(['chat', null, 'fixture-owner', null]);
+  const grantee = JSON.stringify(['chat', null, 'fixture-controller', null]);
+
+  f.browser.snapshot.tabs = [
+    tab('human'),
+    {
+      ...tab('owner'),
+      creator: 'agent',
+      owner,
+      grantOrigin: 'http://fixture.test',
+    },
+    {
+      ...tab('agent-grant'),
+      creator: 'agent',
+      owner,
+      grantee,
+    },
+    {
+      ...tab('human-grant'),
+      grantee,
+      grantOrigin: 'http://fixture.test',
+      paused: true,
+    },
+    {
+      ...tab('unused'),
+      creator: 'agent',
+      owner,
+      paused: true,
+    },
+    {
+      ...tab('human-origin'),
+      grantOrigin: 'http://fixture.test',
+    },
+  ];
+  f.browser.snapshot.active = 'human';
+  await rendered();
+
+  for (const id of ['owner', 'agent-grant', 'human-grant']) {
+    const icon = f.wrapper.get(`#browser-tab-${id} .browser-tab-icon`);
+
+    assert.equal(icon.find('[data-browser-tab-robot]').exists(), true);
+    assert.equal(icon.find('[data-browser-tab-globe]').exists(), false);
+    assert.equal(icon.attributes('aria-hidden'), 'true');
+    assert.equal(icon.attributes('data-agent-state'), id === 'human-grant' ? 'paused' : 'active');
+    assert.equal(icon.attributes('data-ui-tooltip'), id === 'human-grant'
+      ? 'Управляет: Чат fixture-controller' : 'Владелец: Чат fixture-owner');
+  }
+
+  for (const id of ['human', 'unused', 'human-origin']) {
+    const icon = f.wrapper.get(`#browser-tab-${id} .browser-tab-icon`);
+
+    assert.equal(icon.find('[data-browser-tab-robot]').exists(), false);
+    assert.equal(icon.find('[data-browser-tab-globe] circle').exists(), true);
+    assert.equal(icon.attributes('data-agent-state'), undefined);
+    assert.equal(icon.attributes('data-ui-tooltip'), undefined);
+  }
+});
+
+test('BR-U17: смена доступа сохраняет SVG-слот 14×14 и flex-детей вкладки', async (t) => {
+  const f = mounted(t, BrowserView);
+  const style = document.createElement('style');
+  const source = await readFile(webFile('src/views/BrowserView.vue'), 'utf8');
+
+  style.textContent = [
+    await readFile(webFile('src/styles/tokens.css'), 'utf8'),
+    await readFile(webFile('src/styles/components/patterns.css'), 'utf8'),
+    source.split('<style scoped>')[1].split('</style>')[0],
+  ].join('\n');
+  document.head.append(style);
+  t.after(() => style.remove());
+  await rendered();
+
+  const button = f.wrapper.get('#browser-tab-one').element;
+  const icon = button.querySelector('.browser-tab-icon');
+  const label = button.querySelector('.browser-tab-label');
+  const owner = JSON.stringify(['chat', null, 'fixture-owner', null]);
+  const states = [
+    {
+      owner: null,
+      grantee: null,
+      grantOrigin: null,
+      paused: false,
+    },
+    {
+      owner,
+      grantee: null,
+      grantOrigin: 'http://fixture.test',
+      paused: false,
+    },
+    {
+      owner,
+      grantee: null,
+      grantOrigin: 'http://fixture.test',
+      paused: true,
+    },
+    {
+      owner,
+      grantee: null,
+      grantOrigin: null,
+      paused: true,
+    },
+    {
+      owner: null,
+      grantee: owner,
+      grantOrigin: 'http://fixture.test',
+      paused: false,
+    },
+  ];
+
+  for (const state of states) {
+    Object.assign(f.browser.active, state);
+    await rendered();
+
+    const iconStyle = getComputedStyle(icon);
+    const labelStyle = getComputedStyle(label);
+
+    assert.equal(button.children.length, 2);
+    assert.equal(button.children[0] === icon, true);
+    assert.equal(button.children[1] === label, true);
+    assert.equal(iconStyle.flex, '0 0 auto');
+    assert.equal(iconStyle.width, '14px');
+    assert.equal(iconStyle.height, '14px');
+    assert.equal(labelStyle.minWidth, '0');
+    assert.equal(labelStyle.textOverflow, 'ellipsis');
+
+    if (state.paused && state.grantOrigin !== null) {
+      assert.equal(iconStyle.opacity, '0.48');
+    } else {
+      assert.notEqual(iconStyle.opacity, '0.48');
+    }
+  }
+});
+
+for (const menuTab of ['one', 'dead-a']) {
+  test(`BR-U18: очистка из меню ${menuTab} закрывает только мёртвые agent-вкладки`, async (t) => {
+    const f = mounted(t, BrowserView);
+    const owner = JSON.stringify(['chat', null, 'fixture-owner', null]);
+    const agent = { creator: 'agent', owner };
+    const origin = { grantOrigin: 'http://fixture.test' };
+
+    f.browser.snapshot.tabs = [
+      tab('one'),
+      {
+        ...tab('human-origin'),
+        ...origin,
+      },
+      {
+        ...tab('dead-a'),
+        ...agent,
+      },
+      {
+        ...tab('owner-live'),
+        ...agent,
+        ...origin,
+      },
+      {
+        ...tab('owner-paused'),
+        ...agent,
+        ...origin,
+        paused: true,
+      },
+      {
+        ...tab('agent-grant'),
+        ...agent,
+        grantee: owner,
+      },
+      {
+        ...tab('agent-paused'),
+        ...agent,
+        grantee: owner,
+        paused: true,
+      },
+      {
+        ...tab('human-grant'),
+        grantee: owner,
+        ...origin,
+      },
+      {
+        ...tab('human-paused'),
+        grantee: owner,
+        ...origin,
+        paused: true,
+      },
+      {
+        ...tab('dead-b'),
+        ...agent,
+        paused: true,
+      },
+    ];
+    await rendered();
+    await f.wrapper.get(`#browser-tab-${menuTab}`).trigger('contextmenu');
+    await rendered();
+
+    const item = [...document.querySelectorAll('[role="menuitem"]')]
+      .find((item) => item.textContent.trim() === 'Закрыть неиспользуемые');
+
+    assert.equal(item.disabled, false);
+    item.click();
+    await rendered();
+    assert.equal(document.querySelector('[role="menu"]'), null);
+    assert.deepEqual(f.calls.filter((item) => item.operation === 'close').map((item) => item.tabId),
+      ['dead-a', 'dead-b']);
+    assert.deepEqual(f.browser.snapshot.tabs.map((item) => item.id), [
+      'one', 'human-origin', 'owner-live', 'owner-paused', 'agent-grant', 'agent-paused',
+      'human-grant', 'human-paused',
+    ]);
+    assert.equal(f.browser.snapshot.active, 'one');
+    assert.equal(document.activeElement.id, 'browser-tab-one');
+
+    await f.wrapper.get('#browser-tab-one').trigger('contextmenu');
+    await rendered();
+
+    const disabled = [...document.querySelectorAll('[role="menuitem"]')]
+      .find((item) => item.textContent.trim() === 'Закрыть неиспользуемые');
+
+    assert.equal(disabled.disabled, true);
+    disabled.click();
+    await rendered();
+    assert.equal(f.calls.filter((item) => item.operation === 'close').length, 2);
+  });
+}
+
+test('BR-U19: очистка ждёт ACK и фиксирует кандидатов до первого запроса', async (t) => {
+  const f = mounted(t, BrowserView);
+  const agent = { creator: 'agent', owner: JSON.stringify(['chat', null, 'fixture-owner', null]) };
+  const control = f.browser.control;
+  const started = [];
+  let release;
+  const ack = new Promise((resolve) => {
+    release = resolve;
+  });
+
+  f.browser.snapshot.tabs.push({ ...tab('dead-a'), ...agent }, { ...tab('dead-b'), ...agent });
+  f.browser.control = async (request) => {
+    started.push(request.tabId);
+
+    if (request.tabId === 'dead-a') {
+      await ack;
+    }
+
+    await control(request);
+  };
+  await rendered();
+  await f.wrapper.get('#browser-tab-two').trigger('contextmenu');
+  await rendered();
+  [...document.querySelectorAll('[role="menuitem"]')]
+    .find((item) => item.textContent.trim() === 'Закрыть неиспользуемые').click();
+  await rendered();
+  assert.equal(document.querySelector('[role="menu"]'), null);
+  assert.deepEqual(started, ['dead-a']);
+  f.browser.snapshot.tabs.push({ ...tab('dead-late'), ...agent });
+  release();
+  await rendered();
+  assert.deepEqual(started, ['dead-a', 'dead-b']);
+  assert.deepEqual(f.browser.snapshot.tabs.map((item) => item.id), ['one', 'two', 'dead-late']);
+  assert.equal(document.activeElement.id, 'browser-tab-one');
+});
+
+test('BR-U20: очистка прекращается при первом отказе native и возвращает фокус', async (t) => {
+  const f = mounted(t, BrowserView);
+  const agent = { creator: 'agent', owner: JSON.stringify(['chat', null, 'fixture-owner', null]) };
+  const control = f.browser.control;
+
+  f.browser.snapshot.tabs.push(...['dead-a', 'dead-b', 'dead-c']
+    .map((id) => ({ ...tab(id), ...agent })));
+  f.browser.control = async (request) => {
+    await control(request);
+
+    if (request.tabId === 'dead-a') {
+      f.fail();
+    }
+  };
+  await rendered();
+  await f.wrapper.get('#browser-tab-dead-a').trigger('contextmenu');
+  await rendered();
+  [...document.querySelectorAll('[role="menuitem"]')]
+    .find((item) => item.textContent.trim() === 'Закрыть неиспользуемые').click();
+  await rendered();
+  assert.deepEqual(f.calls.filter((item) => item.operation === 'close').map((item) => item.tabId),
+    ['dead-a', 'dead-b']);
+  assert.deepEqual(f.browser.snapshot.tabs.map((item) => item.id), ['one', 'two', 'dead-b', 'dead-c']);
+  assert.equal(f.wrapper.find('[role="alert"]').exists(), true);
+  assert.equal(document.activeElement.id, 'browser-tab-one');
+});
+
+test('BR-U21: очистка последней вкладки переводит фокус в адресную строку', async (t) => {
+  const f = mounted(t, BrowserView);
+
+  f.browser.snapshot.tabs = [{
+    ...tab('one'),
+    creator: 'agent',
+    owner: JSON.stringify(['chat', null, 'fixture-owner', null]),
+  }];
+  await rendered();
+  await f.wrapper.get('#browser-tab-one').trigger('contextmenu');
+  await rendered();
+  [...document.querySelectorAll('[role="menuitem"]')]
+    .find((item) => item.textContent.trim() === 'Закрыть неиспользуемые').click();
+  await rendered();
+  assert.equal(f.browser.snapshot.tabs.length, 0);
+  assert.equal(document.activeElement === f.wrapper.get('input[aria-label="Адрес"]').element, true);
+});
+
+test('BR-U15: перенос меняет native порядок, а стрелки следуют новому DOM порядку', async (t) => {
+  const f = mounted(t, BrowserView);
+
+  f.browser.snapshot.tabs.push(tab('three'));
+  await rendered();
+
+  const rows = f.wrapper.findAll('[data-ui-browser-tab]');
+  const dataTransfer = {
+    effectAllowed: '',
+    dropEffect: '',
+    setData() {},
+  };
+
+  await rows[2].trigger('dragstart', { dataTransfer });
+  await rows[0].trigger('dragover', { dataTransfer, clientX: -1 });
+  await rows[0].trigger('drop', { dataTransfer });
+  await rendered();
+  assert.deepEqual(f.calls.find((item) => item.operation === 'move'), {
+    operation: 'move',
+    tabId: 'three',
+    beforeId: 'one',
+  });
+  assert.deepEqual(f.wrapper.findAll('[role="tab"]').map((item) => item.attributes('id')),
+    ['browser-tab-three', 'browser-tab-one', 'browser-tab-two']);
+
+  const moved = f.wrapper.get('#browser-tab-three');
+
+  moved.element.focus();
+  await moved.trigger('keydown', { key: 'ArrowRight' });
+  await rendered();
+  assert.equal(f.browser.snapshot.active, 'one');
+  assert.equal(document.activeElement.id, 'browser-tab-one');
+});
+
 test('BR-U03: pause/revoke доступны при busy, grant несёт captured epochs', async (t) => {
   const f = mounted(t, BrowserView);
 
@@ -350,6 +772,7 @@ test('BR-U04: settings edits/file picker остаются draft, только Ap
 
   await rendered();
   await f.wrapper.get('select[aria-label="Открывать стенды"]').setValue('external');
+  await f.wrapper.get('select[aria-label="Поиск по умолчанию"]').setValue('google');
   await f.wrapper.get('input[role="switch"]').setValue(false);
   await f.wrapper.findAll('button')
     .find((button) => button.text() === 'Выбрать приложение…').trigger('click');
@@ -364,6 +787,7 @@ test('BR-U04: settings edits/file picker остаются draft, только Ap
     open: 'external',
     external: 'app:manual-fixture',
     agents: false,
+    search: 'google',
   });
   assert.equal(f.settings.snapshot.dirtyCount, 0);
 });
@@ -423,16 +847,16 @@ test('BR-U06: обычный href fallback, native override, middle click и о�
   assert.equal(f.wrapper.find('[role="alert"]').exists(), true);
 });
 
-test('BR-U07: catalog/page metadata RU/EN содержит три точных browser поля', () => {
+test('BR-U07: catalog/page metadata RU/EN содержит четыре точных browser поля', () => {
   const ru = getSettingsFields('ru').filter((field) => field.resourceId === 'browser');
   const en = getSettingsFields('en').filter((field) => field.resourceId === 'browser');
   const pages = getSettingsPages('en').map((page) => page.id);
 
-  assert.deepEqual(ru.map((field) => field.key), ['open', 'external', 'agents']);
+  assert.deepEqual(ru.map((field) => field.key), ['open', 'external', 'search', 'agents']);
   assert.equal(ru.every((field) => field.address.pageId === 'tools.browser'), true);
   assert.equal(en.every((field) => field.label !== ru.find((old) => old.key === field.key).label), true);
   assert.equal(pages.indexOf('tools.browser'), pages.indexOf('tools.showcase') + 1);
-  assert.equal(SETTINGS_FIELDS.filter((field) => field.resourceId === 'browser').length, 3);
+  assert.equal(SETTINGS_FIELDS.filter((field) => field.resourceId === 'browser').length, 4);
 });
 
 test('BR-U08: настоящий store отвергает старый snapshot и отзывает native до сетевого сбоя', async (t) => {
@@ -449,7 +873,8 @@ test('BR-U08: настоящий store отвергает старый snapshot 
     preferences: {
       open: 'internal',
       external: 'system',
-      agents: true
+      agents: true,
+      search: 'yandex'
     },
     active: 'one',
     tabs: [tab('one')],
@@ -514,7 +939,8 @@ test('BR-U09: push новее initial GET, unsubscribe освобождаетс�
     preferences: {
       open: 'internal',
       external: 'system',
-      agents: false
+      agents: false,
+      search: 'yandex'
     },
     active: 'one',
     tabs: [tab('one')],
@@ -565,7 +991,8 @@ test('BR-U11: canonical owner/grantee и native history/zoom переживаю�
     preferences: {
       open: 'internal',
       external: 'system',
-      agents: true
+      agents: true,
+      search: 'yandex'
     },
     active: 'one',
     tabs: [{
@@ -611,7 +1038,8 @@ test('BR-U10: startup off не меняет mode; explicit off ACK предше�
     preferences: {
       open: 'external',
       external: 'system',
-      agents: false
+      agents: false,
+      search: 'yandex'
     },
     hostStatus: { phase: 'off', error: '' },
     startSnapshots: () => () => {},

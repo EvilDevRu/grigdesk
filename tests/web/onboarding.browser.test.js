@@ -239,7 +239,7 @@ test('ONB-E2E-02: RU/EN, узкий экран, touch, текст130%, все ш
         await assertGeometry(page, size.touch);
         assert.equal(await page.getByText(/onboarding\.[a-z]/i).count(), 0,
           'Не показаны ключи вместо перевода');
-        await page.getByRole('button', { name: names.dismiss }).click();
+        await page.getByRole('button', { name: /^(Готово|Done)$/ }).click();
         await page.waitForURL(/#\/projects/);
         await page.goto(f.origin + '#/board');
         await page.reload({ waitUntil: 'domcontentloaded' });

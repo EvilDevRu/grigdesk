@@ -1,13 +1,15 @@
-import type { B24ReadOptions } from './b24/readOperations.ts';
+import { personalWriteGuard, resolvePersonalScope, validateOwnPersonalTasks } from './taskPersonalScope.ts';
+import type { PersonalScopeOptions, OwnTaskReader, PersonalIdentitySource } from './taskPersonalScope.ts';
+import type { TrackerReadOptions } from './trackers/contract.ts';
 // Предметный слой полки: scope всегда выводится из текущей портальной сессии,
 // а клиент получает только непрозрачный хеш и полный server-confirmed снимок.
-import { b24AccountScope } from './b24AccountScope.ts';
-import type { B24Identity } from './b24AccountScope.ts';
+import { trackerAccountScope } from './trackers/accountScope.ts';
+import type { TrackerIdentity } from './trackers/accountScope.ts';
 import type { ShelfSnapshot, TaskShelfStore } from './taskShelfStore.ts';
-import type { ShelfState } from '../../../shared/b24/shelfContracts.ts';
+import type { ShelfState } from '../../../shared/trackers/shelfContracts.ts';
 
-export interface TaskShelfIdentitySource {
-  accountIdentity(options?: B24ReadOptions): Promise<unknown>;
+export interface TaskShelfIdentitySource extends PersonalIdentitySource {
+  accountIdentity(options?: TrackerReadOptions): Promise<TrackerIdentity | null>;
 }
 
 export interface TaskShelfResult extends ShelfState {
@@ -18,7 +20,7 @@ export interface TaskShelfResult extends ShelfState {
 export class TaskShelfIdentityError extends Error {
   code: string;
 
-  constructor(message = 'Не удалось определить B24-пользователя', cause: unknown = null) {
+  constructor(message = 'Не удалось определить пользователя трекера', cause: unknown = null) {
     super(message, cause ? { cause } : undefined);
     this.name = 'TaskShelfIdentityError';
     this.code = 'B24_IDENTITY_UNAVAILABLE';
@@ -41,23 +43,32 @@ function withScope(scope: string, snapshot: ShelfSnapshot): TaskShelfResult {
 export class TaskShelfService {
   store: TaskShelfStore;
 
-  b24: TaskShelfIdentitySource;
+  tracker: TaskShelfIdentitySource;
 
-  constructor({ store, b24 }: { store: TaskShelfStore; b24: TaskShelfIdentitySource }) {
+  readonly ownTasks?: OwnTaskReader;
+
+  constructor({ store, tracker, ownTasks }: {
+    store: TaskShelfStore;
+    tracker: TaskShelfIdentitySource;
+    ownTasks?: OwnTaskReader
+  }) {
     this.store = store;
-    this.b24 = b24;
+    this.tracker = tracker;
+    this.ownTasks = ownTasks;
   }
 
   /**
    * Scope берётся только из подтверждённой серверной identity.
    * Signal отменяет чтение; локальные мутации сохраняют прежнюю доставку.
    */
-  async _scope(options: B24ReadOptions = {}): Promise<string> {
+  async _scope(readOptions: TrackerReadOptions = {}, options: PersonalScopeOptions = {}): Promise<string> {
     try {
-      const identity = await this.b24.accountIdentity(options);
-
-      return b24AccountScope(identity as B24Identity | null);
+      return await resolvePersonalScope(this.tracker, options, readOptions);
     } catch (error) {
+      if ((error as { status?: number }).status === 409) {
+        throw error;
+      }
+
       throw new TaskShelfIdentityError(undefined, error);
     }
   }
@@ -66,19 +77,42 @@ export class TaskShelfService {
    * Чтение полки снимает только своего подписчика при закрытии HTTP-ответа.
    * Состав снимка и не перечисляемый changed сохраняются общим withScope.
    */
-  async list(options: B24ReadOptions = {}): Promise<TaskShelfResult> {
-    const scope = await this._scope(options);
+  async list(
+    options: TrackerReadOptions = {},
+    sourceOptions: PersonalScopeOptions = {},
+  ): Promise<TaskShelfResult> {
+    const scope = await this._scope(options, sourceOptions);
 
     return withScope(scope, await this.store.list(scope));
   }
 
-  async put(taskId: unknown, value: unknown): Promise<TaskShelfResult> {
-    const scope = await this._scope();
-    return withScope(scope, await this.store.put(scope, taskId, value));
+  /**
+   * Локальная мутация проверяет источник и собственную запись до очереди сохранения.
+   * Проверка поколения повторяется внутри транзакции, не затрагивая own-пространство.
+   */
+  async put(taskId: unknown, value: unknown, options: PersonalScopeOptions = {}): Promise<TaskShelfResult> {
+    const beforeWrite = personalWriteGuard(this.tracker, options);
+    const scope = await this._scope({}, options);
+
+    if (options.source === 'grigdesk') {
+      await validateOwnPersonalTasks([taskId], this.ownTasks, true);
+    }
+
+    return withScope(scope, await this.store.put(scope, taskId, value, beforeWrite));
   }
 
-  async remove(taskId: unknown): Promise<TaskShelfResult> {
-    const scope = await this._scope();
-    return withScope(scope, await this.store.remove(scope, taskId));
+  /**
+   * Локальная мутация проверяет источник и собственную запись до очереди сохранения.
+   * Проверка поколения повторяется внутри транзакции, не затрагивая own-пространство.
+   */
+  async remove(taskId: unknown, options: PersonalScopeOptions = {}): Promise<TaskShelfResult> {
+    const beforeWrite = personalWriteGuard(this.tracker, options);
+    const scope = await this._scope({}, options);
+
+    if (options.source === 'grigdesk') {
+      await validateOwnPersonalTasks([taskId], this.ownTasks, false);
+    }
+
+    return withScope(scope, await this.store.remove(scope, taskId, beforeWrite));
   }
 }

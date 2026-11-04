@@ -4,6 +4,7 @@ export interface BrowserPreferences {
   open: 'external' | 'internal';
   external: string;
   agents: boolean;
+  search: 'yandex' | 'google';
 }
 
 /**
@@ -20,7 +21,44 @@ export function normalizeBrowserPreferences(value: unknown): BrowserPreferences 
     open: source.open === 'internal' ? 'internal' : 'external',
     external,
     agents: source.agents === true,
+    search: source.search === 'google' ? 'google' : 'yandex',
   };
+}
+
+/**
+ * Адресная строка человека принимает домены без схемы и поисковые запросы.
+ * Строгий IPC URL-контракт остаётся отдельным: нестандартные схемы и credentials запрещены.
+ */
+export function browserAddress(value: string, search: BrowserPreferences['search']): string {
+  const input = value.trim();
+
+  if (!input || input.length > 8192 || /[\u0000-\u001f\u007f]/u.test(input)) {
+    throw new Error('invalid_browser_url');
+  }
+
+  if (/^https?:/iu.test(input)) {
+    return browserUrl(input);
+  }
+
+  const host = input.split(/[/?#]/u, 1)[0]!;
+  const address = /^(?:localhost|\[[\da-f:]+\]|[^\s:@]+\.[^\s:@]+)(?::\d{1,5})?$/iu.test(host);
+
+  if (address && !/\s/u.test(input)) {
+    const local = /^(?:localhost|127(?:\.\d+){3}|\[::1\])(?::|$)/iu.test(host);
+
+    return browserUrl(`${local ? 'http' : 'https'}://${input}`);
+  }
+
+  if (/^[a-z][a-z\d+.-]*:/iu.test(input) || /^\/\//u.test(input)
+    || /^[^\s/]*@[^\s/]+(?:\/|$)/u.test(input)) {
+    throw new Error('invalid_browser_url');
+  }
+
+  const url = new URL(search === 'google' ? 'https://www.google.com/search' : 'https://yandex.ru/search/');
+
+  url.searchParams.set(search === 'google' ? 'q' : 'text', input);
+
+  return browserUrl(url.href);
 }
 
 /**

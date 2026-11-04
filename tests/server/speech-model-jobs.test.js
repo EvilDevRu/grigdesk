@@ -724,6 +724,9 @@ with tempfile.TemporaryDirectory() as root:
     module.os.open = secure_open
     module.os.replace = inspect_replace
     module.atomic_write({'status': 'running'})
+    # os общий для всех модулей; TemporaryDirectory использует open с dir_fd при очистке.
+    module.os.open = real_open
+    module.os.replace = real_replace
     print(json.dumps({
         **observed,
         'exclusive': bool(observed['flags'] & os.O_EXCL),
@@ -787,8 +790,6 @@ async function settingsApp(t, modelJobs) {
   const app = Fastify({ logger: false });
   t.after(() => app.close());
   await app.register(settingsModule, {
-    credsStore: { publicView: () => ({}), write: () => {} },
-    b24: { invalidate: () => {}, testAuth: async () => ({ ok: true }) },
     prefs: new PrefsStore({ prefsPath: path.join(root, 'prefs.json') }),
     factoryDebug: {},
     speechRuntime: { capabilities: async () => ({ local: { ready: false } }) },

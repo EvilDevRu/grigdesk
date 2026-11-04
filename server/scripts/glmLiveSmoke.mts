@@ -103,7 +103,9 @@ export async function runGlmLiveSmoke(options: GlmSmokeOptions) {
   const secrets = glmSmokeSecrets(options.env);
   const project = path.join(root, 'project');
   const marker = `GLM-SMOKE-${randomUUID().slice(0, 8)}`;
-  const model = JSON.stringify(['zai', options.model ?? 'glm-5.3']);
+  // Дешёвая flash-модель по умолчанию: живой допуск не зависит от модели, сценарий
+  // проверяет конвейер; явный --model перекрывает выбор (например, флагман glm-5.3).
+  const model = JSON.stringify(['zai', options.model ?? 'glm-5.3-flash']);
   const config = {
     ...options.config,
     deepseekRuntimeMode: 'binary' as const,
@@ -346,7 +348,7 @@ async function main(): Promise<void> {
     || !path.isAbsolute(binary) || !path.isAbsolute(cacheDir)) {
     process.stderr.write('Использование: node server/scripts/glmLiveSmoke.mts --mode api|coding-plan '
       + '--confirm-live --binary <абсолютный ELF> --cache-dir <отдельный cache> '
-      + '[--model glm-5.3] [--admit]\n');
+      + '[--model glm-5.3-flash] [--admit]\n');
     process.exitCode = 2;
 
     return;

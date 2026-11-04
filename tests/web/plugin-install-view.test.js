@@ -109,6 +109,18 @@ test('Проекция: pending apply и reconciliation важнее ready', () 
   }
 });
 
+test('Проекция: подтверждённая замена ждёт restart, без apply и ложного успеха', () => {
+  const view = deriveInstallDialogView(input({ job: webInstallJob('awaiting_restart', 'update') }));
+
+  assert.equal(view.screen, 'result');
+  assert.equal(view.completed, false);
+  assert.equal(view.stageTone, 'warning');
+  assert.equal(view.stageHeading, 'Обновление ждёт перезапуска');
+  assert.equal(view.footer.primary.action, 'close');
+  assert.equal(view.footer.secondary.action, 'cancel');
+  assert.match(view.resultText, /при следующем запуске GrigDesk/u);
+});
+
 test('Проекция: recoveryError блокирует start и apply с job и без него', () => {
   for (const job of [null, webInstallJob()]) {
     const view = deriveInstallDialogView(input({
@@ -142,11 +154,11 @@ test('Проекция: done install, update и rollback сохраняют ра
   assert.equal(install.stageHeading, 'Установка завершена');
   assert.equal(rollback.stageHeading, 'Версия восстановлена');
   assert.equal(install.resultText,
-    'Плагин «Демо» v1.0.0 установлен. Включите его в каталоге и перезапустите GrigDesk.');
+    'Плагин «Демо» v1.0.0 установлен. Включите его в каталоге.');
   assert.equal(update.resultText,
-    'Плагин «Демо» обновлён до v1.0.0. Перезапустите GrigDesk и перезагрузите окно, чтобы применить.');
+    'Плагин «Демо» обновлён до v1.0.0.');
   assert.equal(rollback.resultText,
-    'Версия v1.0.0 восстановлена. Перезапустите GrigDesk и перезагрузите окно.');
+    'Версия v1.0.0 восстановлена.');
   assert.equal(rollback.completed, true);
   assert.equal(rollback.footer.primary.label, 'Готово');
 });

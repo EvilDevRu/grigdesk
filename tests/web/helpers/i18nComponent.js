@@ -79,7 +79,6 @@ export async function i18nComponent(t, options = {}) {
         fetchedAt: null,
         catalog: null,
       },
-      '/api/settings/b24': data.b24,
       '/api/system/launcher': data.launcher,
       '/api/system/server': data.server,
       '/api/system/version': data.release,

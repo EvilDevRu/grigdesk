@@ -198,7 +198,7 @@ function fixture(over = {}) {
   };
   const service = new InboxTaskService({
     coordinator,
-    b24,
+    tracker: b24,
     listProjects: async () => {
       calls.projects += 1;
       if (over.disconnectB24DuringProjects) b24.configured = false;
@@ -1171,7 +1171,7 @@ test('глобальная очередь не допускает две B24-з�
   };
   const service = new InboxTaskService({
     coordinator,
-    b24: {
+    tracker: {
       isConfigured: () => true,
       async createTask() {
         b24Calls += 1;

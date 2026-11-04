@@ -5,6 +5,7 @@ export { default as SpeechPage } from '../../../web/src/views/settings/pages/Spe
 export { default as ProviderPage } from '../../../web/src/views/settings/pages/ProviderPage.vue';
 export { UiDialog } from '../../../web/src/ui.ts';
 export { useSettingsStore } from '../../../web/src/stores/settings.ts';
+export { useShellStore } from '../../../web/src/stores/shell.ts';
 export { SETTINGS_FIELDS } from '../../../web/src/features/settings/catalog.ts';
 export { useDeviceStore } from '../../../web/src/stores/device.ts';
 export { useHotkeysStore } from '../../../web/src/stores/hotkeys.ts';

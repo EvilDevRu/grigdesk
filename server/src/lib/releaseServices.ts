@@ -1,6 +1,8 @@
 import { GrigDeskReleaseService } from './grigDeskRelease.ts';
 import { GrigDeskUpdateManager } from './grigDeskUpdate.ts';
 import { createPackagedServices } from './packagedRelease.ts';
+import type { PackagedReleaseService, PackagedUpdateManager } from './packagedRelease.ts';
+import type { ReleaseChannelService } from './releaseChannel.ts';
 import { runtimeKind } from './runtimePaths.ts';
 import type { RuntimeKind } from './runtimePaths.ts';
 
@@ -8,8 +10,9 @@ export interface ReleaseServicesOptions {
   rootDir: string;
   statePath: string;
   kind?: RuntimeKind;
-  releases?: GrigDeskReleaseService;
-  updates?: GrigDeskUpdateManager;
+  releases?: GrigDeskReleaseService | PackagedReleaseService;
+  updates?: GrigDeskUpdateManager | PackagedUpdateManager;
+  packagedChannel?: ReleaseChannelService;
   broadcast?: (name: string, payload?: unknown) => void;
   desktop?: () => boolean;
   origin?: string;
@@ -26,7 +29,10 @@ export function createReleaseServices(options: ReleaseServicesOptions) {
   }
 
   const releases = options.releases ?? new GrigDeskReleaseService(options);
-  const updates = options.updates ?? new GrigDeskUpdateManager({ ...options, releases });
+  const updates = options.updates ?? new GrigDeskUpdateManager({
+    ...options,
+    releases,
+  });
 
   return { releases, updates };
 }

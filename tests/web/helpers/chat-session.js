@@ -10,11 +10,18 @@ function uiFacadeStub(prefix) {
   const components = [
     ['UiButton', 'src/components/primitives/UiButton.vue'],
     ['UiDisclosureButton', 'src/components/composites/UiDisclosureButton.vue'],
+    ['UiDialog', 'src/components/overlays/UiDialog.vue'],
+    ['UiField', 'src/components/composites/UiField.vue'],
     ['UiFilePicker', 'src/components/composites/UiFilePicker.vue'],
     ['UiIconButton', 'src/components/primitives/UiIconButton.vue'],
+    ['UiInlineMessage', 'src/components/feedback/UiInlineMessage.vue'],
     ['UiInput', 'src/components/primitives/UiInput.vue'],
     ['UiPressable', 'src/components/primitives/UiPressable.vue'],
+    ['UiProgress', 'src/components/feedback/UiProgress.vue'],
+    ['UiRefreshIcon', 'src/components/primitives/UiRefreshIcon.vue'],
     ['UiSelect', 'src/components/primitives/UiSelect.vue'],
+    ['UiSearchInput', 'src/components/composites/UiSearchInput.vue'],
+    ['UiSelectableRow', 'src/components/composites/UiSelectableRow.vue'],
     ['UiSpinner', 'src/components/primitives/UiSpinner.vue'],
     ['UiTextarea', 'src/components/primitives/UiTextarea.vue'],
     ['UiTooltip', 'src/components/overlays/UiTooltip.vue'],
@@ -60,7 +67,7 @@ function effortSliderStub() {
   return [
     'export default {',
     '  name: "EffortSlider",',
-    '  props: ["modelValue", "levels", "hints", "disabled", "hint"],',
+    '  props: ["modelValue", "levels", "hints", "disabled", "hint", "expanded"],',
     '  emits: ["update:modelValue"],',
     '  template: `<span class="eff eff-stub"></span>`,',
     '};',
@@ -80,7 +87,12 @@ function inertComponentStub(className) {
  * ChatSession бандлится единым TS-aware compiler-ом с настоящими UI primitives.
  * Stores, сеть, speech-controller и product children остаются границами сценария.
  */
-export function compileChatSession(prefix, { realSteps = false, expose = [], stubs = {} } = {}) {
+export function compileChatSession(prefix, {
+  realSteps = false,
+  realWorkdir = false,
+  expose = [],
+  stubs = {},
+} = {}) {
   return compileVue(CHAT_SESSION_PATH, {
     expose,
     stubs: {
@@ -113,8 +125,9 @@ export function compileChatSession(prefix, { realSteps = false, expose = [], stu
       ...(realSteps ? {} : { './StepList.vue': inertComponentStub('step-list-stub') }),
       './ChatQuestion.vue': inertComponentStub('chat-question-stub'),
       './ChatPermission.vue': inertComponentStub('chat-permission-stub'),
-      './ChatWorkdir.vue': inertComponentStub('chat-workdir-stub'),
+      ...(realWorkdir ? {} : { './ChatWorkdir.vue': inertComponentStub('chat-workdir-stub') }),
       '../../ui': uiFacadeStub(prefix),
+      '../../ui.ts': uiFacadeStub(prefix),
       './codeHighlight.ts': 'export const highlightCode = async () => null;',
       './mermaidRender.ts': 'export const renderMermaid = async () => null;',
       '../clipboard.ts': 'export const writeClipboardText = async () => false;',

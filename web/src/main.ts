@@ -165,7 +165,7 @@ function installSurfaceMainHandler() {
         return allowed() && router.currentRoute.value.path === '/pipeline';
       }
 
-      useUiStore(pinia).openTaskInline(request.target.id);
+      useUiStore(pinia).openTaskInline(request.target.id, request.target.source);
       await nextTick();
 
       return allowed();

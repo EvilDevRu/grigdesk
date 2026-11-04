@@ -4,11 +4,16 @@ import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { execFile, spawn } from 'node:child_process';
 import path from 'node:path';
+
+import { config as runtimeConfig } from '../../config.ts';
+import { PackagedReleaseService, PackagedUpdateManager, readInstallVersion }
+  from '../../lib/packagedRelease.ts';
+import { ReleaseChannelService } from '../../lib/releaseChannel.ts';
 import type { GrigDeskReleaseService } from '../../lib/grigDeskRelease.ts';
 import type { GrigDeskUpdateManager } from '../../lib/grigDeskUpdate.ts';
 import { createReleaseServices } from '../../lib/releaseServices.ts';
 import { PACKAGE_UPDATE_ERROR, PACKAGE_UPDATE_MESSAGE } from '../../lib/packagedRelease.ts';
-import { runtimeKind } from '../../lib/runtimePaths.ts';
+import { runtimeInstallationRoot, runtimeKind } from '../../lib/runtimePaths.ts';
 import type { RuntimeKind } from '../../lib/runtimePaths.ts';
 import { DESKTOP_RESTART_EXIT_CODE } from '../../lib/desktopParent.ts';
 import type { DesktopParent } from '../../lib/desktopParent.ts';
@@ -45,6 +50,13 @@ interface UpdateRoute {
   Body: { targetTag: string; expectedCheckoutSha: string };
 }
 
+interface PackageUpdateRoute {
+  Body: {
+    expectedVersion: string;
+    expectedArchiveSha256: string
+  };
+}
+
 interface UpdateRestartRoute {
   Body: { jobId: string };
 }
@@ -64,8 +76,8 @@ interface SystemModuleConfig {
 export interface SystemModuleOptions {
   system: SystemAdapter;
   config: SystemModuleConfig;
-  releases?: GrigDeskReleaseService;
-  updates?: GrigDeskUpdateManager;
+  releases?: GrigDeskReleaseService | PackagedReleaseService;
+  updates?: GrigDeskUpdateManager | PackagedUpdateManager;
   // Подмена для тестов: реальный билд в них не гоняем.
   webRebuilder?: () => Promise<RebuildFailure | null>;
   // Подмена для тестов: systemctl и ярлык в них не трогаем.
@@ -104,12 +116,35 @@ async function systemModule(
   const restartScript = opts.restartViaScript ?? restartViaScript;
 
   const packaged = (opts.runtimeKind ?? runtimeKind)() === 'packaged';
+  // Packaged-сервисы собираются здесь и передаются фабрике через opts: инъекции
+  // тестов (opts.releases/opts.updates) имеют приоритет, как у source-ветки.
+  const packagedInstallRoot = runtimeInstallationRoot();
+  const packagedChannel = packaged ? new ReleaseChannelService() : undefined;
+  const packagedReleases = opts.releases ?? (packaged
+    ? new PackagedReleaseService(config.rootDir, undefined, {
+      channel: packagedChannel,
+      installVersionReader: () => {
+        return readInstallVersion(packagedInstallRoot);
+      },
+    })
+    : undefined);
+  const packagedUpdates = opts.updates ?? (packaged
+    ? new PackagedUpdateManager({
+      installRoot: packagedInstallRoot,
+      statePath: path.join(runtimeConfig.dataHome, 'state',
+        'grigdesk-package-update.json'),
+      channel: packagedChannel,
+      onRestart: () => {
+        return schedulePackageRestart();
+      },
+    })
+    : undefined);
   const { releases, updates } = createReleaseServices({
     rootDir: config.rootDir,
     statePath: config.grigDeskUpdateStatePath,
     kind: packaged ? 'packaged' : 'source',
-    releases: opts.releases,
-    updates: opts.updates,
+    releases: packagedReleases,
+    updates: packagedUpdates,
     broadcast: (event, data) => fastify.sse?.broadcast?.(event, data),
     desktop: () => Boolean(opts.desktop?.connected),
     origin: `http://127.0.0.1:${config.port}`,
@@ -127,9 +162,61 @@ async function systemModule(
 
   // GET принципиально локальный: HEAD/status + сохранённый результат последней remote-
   // проверки. Сеть разрешена только явному POST и редкому фоновому таймеру.
-  fastify.get('/api/system/version', async () => releases.getStatus());
-  fastify.post('/api/system/version/check', async () => packaged
-    ? releases.getStatus() : releases.checkRemote());
+  fastify.get('/api/system/version', async () => {
+    const status = await releases.getStatus();
+
+    return packaged ? {
+      ...status,
+      job: await updates.getJob()
+    } : status;
+  });
+  fastify.post('/api/system/version/check', async () => {
+    const status = await releases.checkRemote();
+
+    if (packaged && typeof status === 'object' && status !== null) {
+      return {
+        ...status,
+        job: await updates.getJob()
+      };
+    }
+
+    return status;
+  });
+  fastify.post<PackageUpdateRoute>('/api/system/package-update', {
+    schema: {
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['expectedVersion', 'expectedArchiveSha256'],
+        propertyNames: { enum: ['expectedVersion', 'expectedArchiveSha256'] },
+        properties: {
+          expectedVersion: {
+            type: 'string',
+            pattern: '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$'
+          },
+          expectedArchiveSha256: {
+            type: 'string',
+            pattern: '^[0-9a-f]{64}$'
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (!packaged) {
+      return packageRequired(reply);
+    }
+    try {
+      const job = await updates.startPackageUpdate(request.body);
+
+      return reply.code(202).send({
+        ok: true,
+        job
+      });
+    } catch (error) {
+      return sendReleaseError(reply, error);
+    }
+  });
+
   fastify.get('/api/system/update-job', async () => ({ job: await updates.getJob() }));
 
   /**
@@ -142,6 +229,34 @@ async function systemModule(
     if (!error?.statusCode || !error?.code) throw thrown;
 
     return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+  }
+
+  /**
+   * Перезапуск после обновления пакета: desktop — выход 75 для приложения-владельца,
+   * systemd — штатный слив (юнит поднимет). Ручной режим не вызывает скрипт: задание
+   * остаётся restarting, перезапуск подтверждает человек.
+   */
+  function schedulePackageRestart() {
+    const mode = serverMode();
+
+    // Разорванный владелец не поднимет процесс после кода 75: задание остаётся
+    // в restarting и подтверждается следующим запуском человека.
+    if (mode === 'manual' || (mode === 'desktop' && !opts.desktop?.connected)) {
+      return;
+    }
+
+    setTimeout(() => {
+      if (mode === 'desktop') {
+        void fastify.shutdown!.begin('обновление пакета', DESKTOP_RESTART_EXIT_CODE);
+
+        return;
+      }
+      if (fastify.shutdown) {
+        void fastify.shutdown.begin('обновление пакета');
+      } else {
+        process.exit(0);
+      }
+    }, 400);
   }
 
   fastify.post<ApplyRoute>('/api/system/apply', {
@@ -434,10 +549,8 @@ async function systemModule(
     return reply.code(202).send({ ok: true });
   });
 
-  if (!packaged) {
-    await updates.recover?.();
-    releases.start?.();
-  }
+  await updates.recover?.();
+  releases.start?.();
 
   fastify.addHook('onClose', async () => { releases.stop?.(); });
 }

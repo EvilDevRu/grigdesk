@@ -974,6 +974,24 @@
       "detail": "Worker медиа собирается как helper; guard входа сравнивает argv с entry helper."
     },
     {
+      "file": "server/src/lib/media/preflight.ts",
+      "construct": "import-meta",
+      "target": "url",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Путь пробы файлового декодера берётся из контракта ресурсов."
+    },
+    {
+      "file": "server/src/lib/media/preflight.ts",
+      "construct": "resource-ref",
+      "target": "server/src/lib/media/audio-probe.py",
+      "count": 1,
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Проба файлового декодера копируется в серверный комплект."
+    },
+    {
       "file": "server/src/lib/packageInstall/commandSupervisor.mjs",
       "construct": "fork",
       "target": "",
@@ -1519,6 +1537,14 @@
       "owner": "task-9",
       "fate": "development-only",
       "detail": "Ссылок в дереве нет; в поставку не копировать без отдельной проверки."
+    },
+    {
+      "path": "server/src/lib/media/audio-probe.py",
+      "kind": "file",
+      "expect": "source",
+      "owner": "task-9",
+      "fate": "asset",
+      "detail": "Проверка совместимости файлового декодера речи без модели."
     },
     {
       "path": "server/src/lib/media/transcribe.py",

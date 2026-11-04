@@ -8,7 +8,7 @@ import { api, ApiError } from '../../web/src/shared/apiClient.ts';
 import { useBoardStore } from '../../web/src/stores/board.ts';
 import { useTasksStore } from '../../web/src/stores/tasks.ts';
 import { startBoardRelay } from '../../web/src/shared/windowRelay.ts';
-import { createB24Adapter } from '../../web/src/features/settings/resources/connections.ts';
+import { useTrackersStore } from '../../web/src/stores/trackers.ts';
 
 /**
  * Барьер отделяет поздний ответ прежнего источника от текущего чтения.
@@ -29,14 +29,13 @@ test('SOURCE-01: успех A, смена аккаунта и ошибка B н�
   let login = 'one';
 
   t.mock.method(api, 'get', async (path) => {
-    if (path === '/api/settings/b24') {
+    if (path === '/api/trackers') {
       return {
-        configured: true,
-        baseUrl: 'https://portal.example.test',
-        login,
+        externalId: login,
+        revision: login === 'one' ? 1 : 2,
       };
     }
-    if (path === '/api/b24/task-seen') {
+    if (path === '/api/tracker/task-seen') {
       return {
         scope: 'fixture',
         revision: 1,
@@ -75,14 +74,13 @@ test('SOURCE-02: поздний GET A не восстанавливает дан
   let login = 'one';
 
   t.mock.method(api, 'get', async (path) => {
-    if (path === '/api/settings/b24') {
+    if (path === '/api/trackers') {
       return {
-        configured: true,
-        baseUrl: 'https://portal.example.test',
-        login,
+        externalId: login,
+        revision: login === 'one' ? 1 : 2,
       };
     }
-    if (path === '/api/b24/task-seen') {
+    if (path === '/api/tracker/task-seen') {
       return {
         scope: 'fixture',
         revision: 1,
@@ -119,37 +117,30 @@ test('SOURCE-02: поздний GET A не восстанавливает дан
   }
 });
 
-test('SOURCE-03: запись credentials снимает снимок до POST, подтверждение запускает чтение', async () => {
-  const pending = deferred();
-  const stages = [];
-  const resource = createB24Adapter({
-    get: async () => ({}),
-    post: () => pending.promise,
-  }, () => undefined, 'ru', () => {
-    stages.push('before');
+test('SOURCE-03: запись настроек снимает снимок до POST, подтверждение запускает чтение', async (t) => {
+  setActivePinia(createPinia());
 
-    return (outcome) => stages.push(outcome);
+  const pending = deferred();
+  const board = useBoardStore();
+
+  t.mock.method(api, 'post', () => pending.promise);
+  t.mock.method(api, 'get', async (path) => path === '/api/trackers'
+    ? sourceView() : path.endsWith('task-seen') ? seenView : { tasks: [] });
+
+  const writing = useTrackersStore().saveSettings({
+    externalId: 'one',
+    settings: {},
+    expectedRevision: 1,
   });
-  const writing = resource.write(new Map([
-    ['login', { op: 'set', value: 'two' }],
-    ['password', { op: 'set', value: 'fixture' }],
-  ]), { baseUrl: 'https://portal.example.test', login: 'one' }, new AbortController().signal);
 
   try {
-    assert.deepEqual(stages, ['before']);
-    pending.resolve({
-      configured: true,
-      baseUrl: 'https://portal.example.test',
-      login: 'two',
-    });
+    assert.equal(board.sourceSuspended, true);
+    pending.resolve({ revision: 2 });
     await writing;
-    assert.deepEqual(stages, ['before', 'confirmed']);
+    assert.equal(board.sourceSuspended, false);
+    assert.deepEqual(board.data.tasks, []);
   } finally {
-    pending.resolve({
-      configured: true,
-      baseUrl: 'https://portal.example.test',
-      login: 'two',
-    });
+    pending.resolve({ revision: 2 });
     await writing;
   }
 });
@@ -159,9 +150,8 @@ test('SOURCE-03: запись credentials снимает снимок до POST,
  */
 function sourceView(login = 'one') {
   return {
-    configured: true,
-    baseUrl: 'https://portal.example.test',
-    login,
+    externalId: login,
+        revision: login === 'one' ? 1 : 2,
   };
 }
 
@@ -180,12 +170,12 @@ test('SOURCE-04: удержанный probe зеркала не поглощае
   let dashboards = 0;
 
   t.mock.method(api, 'get', async (path) => {
-    if (path === '/api/settings/b24') {
+    if (path === '/api/trackers') {
       probes += 1;
 
       return probes === 1 ? probe.promise : sourceView();
     }
-    if (path === '/api/b24/task-seen') {
+    if (path === '/api/tracker/task-seen') {
       return seenView;
     }
 
@@ -223,7 +213,7 @@ test('SOURCE-05: ошибка старого GET не меняет новый re
   const failed = deferred();
 
   t.mock.method(api, 'get', async (path) => {
-    if (path === '/api/settings/b24') {
+    if (path === '/api/trackers') {
       return sourceView();
     }
 
@@ -261,10 +251,10 @@ test('SOURCE-06: удержанный POST закрывает polling и relay �
   let refreshed;
 
   t.mock.method(api, 'get', async (path) => {
-    if (path === '/api/settings/b24') {
+    if (path === '/api/trackers') {
       return sourceView(login);
     }
-    if (path === '/api/b24/task-seen') {
+    if (path === '/api/tracker/task-seen') {
       return seenView;
     }
 
@@ -278,20 +268,14 @@ test('SOURCE-06: удержанный POST закрывает polling и relay �
   await board.load(true);
 
   const oldKey = board.sourceKey;
-  const resource = createB24Adapter({
-    get: async () => ({}),
-    post: () => post.promise,
-  }, () => undefined, 'ru', () => {
-    const token = board.beginSourceChange();
 
-    return () => {
-      refreshed = board.finishSourceChange(token);
-    };
+  t.mock.method(api, 'post', () => post.promise);
+
+  const writing = useTrackersStore().saveSettings({
+    externalId: 'two',
+    settings: {},
+    expectedRevision: 1,
   });
-  const writing = resource.write(new Map([
-    ['login', { op: 'set', value: 'two' }],
-    ['password', { op: 'set', value: 'fixture' }],
-  ]), sourceView(), new AbortController().signal);
 
   try {
     await board.load(true);
@@ -316,8 +300,8 @@ test('SOURCE-06: удержанный POST закрывает polling и relay �
 test('SOURCE-07: исход старой записи не снимает паузу новой записи', async (t) => {
   setActivePinia(createPinia());
 
-  t.mock.method(api, 'get', async (path) => path === '/api/settings/b24'
-    ? sourceView() : path === '/api/b24/task-seen' ? seenView : { tasks: [] });
+  t.mock.method(api, 'get', async (path) => path === '/api/trackers'
+    ? sourceView() : path === '/api/tracker/task-seen' ? seenView : { tasks: [] });
 
   const board = useBoardStore();
   const first = board.beginSourceChange();
@@ -404,10 +388,10 @@ test('SOURCE-RELAY: A очищается в зеркале даже при ош�
   let dashboards = 0;
 
   t.mock.method(api, 'get', async (path) => {
-    if (path === '/api/settings/b24') {
+    if (path === '/api/trackers') {
       return sourceView(login);
     }
-    if (path === '/api/b24/task-seen') {
+    if (path === '/api/tracker/task-seen') {
       return seenView;
     }
 
@@ -457,29 +441,29 @@ for (const [name, error] of [
   ['failed', new ApiError('fixture rejected', 400, {})],
   ['unknown', new TypeError('fixture connection lost')],
 ]) {
-  test(`SOURCE-OUTCOME: ${name} завершает только одну паузу без повтора POST`, async () => {
-    const stages = [];
+  test(`SOURCE-OUTCOME: ${name} снимает паузу без повтора POST`, async (t) => {
+    setActivePinia(createPinia());
+
     let posts = 0;
-    const resource = createB24Adapter({
-      get: async () => ({}),
-      post: async () => {
-        posts += 1;
 
-        throw error;
-      },
-    }, () => undefined, 'ru', () => {
-      stages.push('before');
+    t.mock.method(api, 'post', async () => {
+      posts += 1;
 
-      return (outcome) => stages.push(outcome);
+      throw error;
     });
+    t.mock.method(api, 'get', async (path) => path === '/api/trackers'
+      ? sourceView() : path.endsWith('task-seen') ? seenView : { tasks: [] });
 
-    await assert.rejects(resource.write(new Map([
-      ['password', { op: 'set', value: 'fixture' }],
-    ]), sourceView(), new AbortController().signal));
-    assert.deepEqual(stages, ['before', name]);
+    await assert.rejects(useTrackersStore().saveSettings({
+      externalId: 'two',
+    settings: {},
+    expectedRevision: 1,
+    }));
+    assert.equal(useBoardStore().sourceSuspended, false);
     assert.equal(posts, 1);
   });
 }
+
 
 
 test('SOURCE-SHAPE: намеренная форма board совпадает с его секцией golden', async () => {

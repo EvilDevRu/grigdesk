@@ -4,7 +4,7 @@
 import { objectOrEmpty } from '../../../shared/lib/objects.ts';
 
 const TERMINAL_ANALYSIS = new Set(['done', 'finished', 'failed', 'interrupted']);
-const TERMINAL_B24 = new Set(['completed', 'done', 'closed']);
+const TERMINAL_TRACKER = new Set(['completed', 'done', 'closed']);
 
 // Наблюдаемый снимок мягче серверного: живой источник может назвать состояние, которого
 // контракт не знает, и решателю важно не потерять сам факт наблюдения.
@@ -25,7 +25,7 @@ export interface ShelfObservedPipeline {
   gate: string | null;
 }
 
-export interface ShelfObservedB24 {
+export interface ShelfObservedTracker {
   present: boolean;
   status: string | null;
   statusKind: string | null;
@@ -35,7 +35,7 @@ export interface ShelfObservedB24 {
 export interface ShelfObservedSnapshot {
   analysis: ShelfObservedAnalysis | null;
   pipeline: ShelfObservedPipeline | null;
-  b24: ShelfObservedB24 | null;
+  b24: ShelfObservedTracker | null;
 }
 
 export type ShelfEventSource = 'analysis' | 'pipeline' | 'b24' | 'comments' | null;
@@ -69,10 +69,10 @@ export interface ShelfDecisionInput {
  * Узнаёт завершённую B24-задачу по живому статусу или подтверждённому уходу с доски.
  * Недоступный источник сюда не попадает: вызывающая сторона подставляет durable snapshot.
  */
-export function isShelfTaskCompleted(value: ShelfObservedB24 | null | undefined): boolean {
+export function isShelfTaskCompleted(value: ShelfObservedTracker | null | undefined): boolean {
   const kind = value?.statusKind;
 
-  return value?.present === false || (typeof kind === 'string' && TERMINAL_B24.has(kind));
+  return value?.present === false || (typeof kind === 'string' && TERMINAL_TRACKER.has(kind));
 }
 
 function text(value: unknown): string | null {
@@ -133,7 +133,7 @@ function pipelineSnapshot(value: unknown): ShelfObservedPipeline | null {
   };
 }
 
-function b24Snapshot(value: unknown): ShelfObservedB24 | null {
+function trackerSnapshot(value: unknown): ShelfObservedTracker | null {
   if (!value || typeof value !== 'object') {
     return null;
   }
@@ -154,7 +154,7 @@ function normalized(value: unknown): ShelfObservedSnapshot {
   return {
     analysis: analysisSnapshot(source.analysis),
     pipeline: pipelineSnapshot(source.pipeline),
-    b24: b24Snapshot(source.b24),
+    b24: trackerSnapshot(source.b24),
   };
 }
 
@@ -321,8 +321,8 @@ export default function taskShelfDecision({
   const closed = before.b24 && current.b24
     && ((before.b24.present && !current.b24.present)
       || (current.b24.present
-        && !TERMINAL_B24.has(String(before.b24.statusKind))
-        && TERMINAL_B24.has(String(current.b24.statusKind))));
+        && !TERMINAL_TRACKER.has(String(before.b24.statusKind))
+        && TERMINAL_TRACKER.has(String(current.b24.statusKind))));
 
   if (closed) {
     return event(

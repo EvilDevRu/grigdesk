@@ -1,23 +1,29 @@
-import type { B24ReadOptions } from './b24/readOperations.ts';
+import { personalWriteGuard, resolvePersonalScope, validateOwnPersonalTasks } from './taskPersonalScope.ts';
+import type { PersonalScopeOptions, OwnTaskReader } from './taskPersonalScope.ts';
+import type { TrackerReadOptions } from './trackers/contract.ts';
 // Предметный слой просмотренных задач: scope выводится из текущего B24-портала и
 // пользователя, наружу уходит только opaque hash — клиент не может попросить чужой набор.
-import { b24AccountScope } from './b24AccountScope.ts';
-import type { B24Identity } from './b24AccountScope.ts';
+import { trackerAccountScope } from './trackers/accountScope.ts';
+import type { TrackerIdentity } from './trackers/accountScope.ts';
 import type { TaskSeenStore, SeenScope } from './taskSeenStore.ts';
-import type { B24Adapter } from '../adapters/b24.ts';
+import type { PersonalIdentitySource } from './taskPersonalScope.ts';
 
 export class TaskSeenIdentityError extends Error {
   readonly code = 'B24_IDENTITY_UNAVAILABLE';
 
-  constructor(message = 'Не удалось определить B24-пользователя', cause: unknown = null) {
+  constructor(message = 'Не удалось определить пользователя трекера', cause: unknown = null) {
     super(message, cause ? { cause } : undefined);
     this.name = 'TaskSeenIdentityError';
   }
 }
 
-export function seenScopeFor(identity: B24Identity | null | undefined): string {
+/**
+ * Просмотренные задачи используют тот же ключ учётной записи, что избранное и полка.
+ * Отказ определения пользователя остаётся безопасной ошибкой предметного сервиса.
+ */
+export function seenScopeFor(identity: TrackerIdentity | null | undefined): string {
   try {
-    return b24AccountScope(identity);
+    return trackerAccountScope(identity);
   } catch (error) {
     throw new TaskSeenIdentityError(undefined, error);
   }
@@ -26,44 +32,72 @@ export function seenScopeFor(identity: B24Identity | null | undefined): string {
 export class TaskSeenService {
   readonly store: TaskSeenStore;
 
-  // Адаптер портала: из него берётся текущая учётная запись, а не из запроса браузера.
-  readonly b24: Pick<B24Adapter, 'accountIdentity'>;
+  // Фасад трекера: из него берётся текущая учётная запись, а не из запроса браузера.
+  readonly tracker: PersonalIdentitySource;
 
-  constructor({ store, b24 }: { store: TaskSeenStore; b24: Pick<B24Adapter, 'accountIdentity'> }) {
+  readonly ownTasks?: OwnTaskReader;
+
+  constructor({ store, tracker, ownTasks }: {
+    ownTasks?: OwnTaskReader;
+    store: TaskSeenStore;
+    tracker: PersonalIdentitySource;
+  }) {
     this.store = store;
-    this.b24 = b24;
+    this.tracker = tracker;
+    this.ownTasks = ownTasks;
   }
 
   /**
    * Scope берётся только из подтверждённой серверной identity.
    * Signal отменяет чтение; локальные мутации сохраняют прежнюю доставку.
    */
-  private async _scope(options: B24ReadOptions = {}): Promise<string> {
-    let identity: Awaited<ReturnType<B24Adapter['accountIdentity']>>;
-
+  async _scope(readOptions: TrackerReadOptions = {}, options: PersonalScopeOptions = {}): Promise<string> {
     try {
-      identity = await this.b24.accountIdentity(options);
+      return await resolvePersonalScope(this.tracker, options, readOptions);
     } catch (error) {
+      if ((error as { status?: number }).status === 409) {
+        throw error;
+      }
+
       throw new TaskSeenIdentityError(undefined, error);
     }
-    return seenScopeFor(identity);
   }
 
   /**
    * Чтение отметок передаёт срок жизни HTTP до общего определения identity.
    * Серверный scope по-прежнему не может быть выбран полем запроса.
    */
-  async list(options: B24ReadOptions = {}): Promise<SeenScope & { scope: string }> {
-    const scope = await this._scope(options);
+  async list(
+    options: TrackerReadOptions = {},
+    sourceOptions: PersonalScopeOptions = {},
+  ): Promise<SeenScope & { scope: string }> {
+    const scope = await this._scope(options, sourceOptions);
 
     return { scope, ...await this.store.list(scope) };
   }
 
+  /**
+   * Локальная мутация проверяет источник и собственную запись до очереди сохранения.
+   * Проверка поколения повторяется внутри транзакции, не затрагивая own-пространство.
+   */
   async markSeen(
     taskIds: unknown,
-    options: { baseline?: boolean } = {},
+    options: PersonalScopeOptions & { baseline?: boolean; baselineId?: string } = {},
   ): Promise<SeenScope & { scope: string }> {
-    const scope = await this._scope();
-    return { scope, ...await this.store.markSeen(scope, taskIds, options) };
+    const beforeWrite = personalWriteGuard(this.tracker, options);
+    const scope = await this._scope({}, options);
+
+    if (options.source === 'grigdesk') {
+      await validateOwnPersonalTasks(Array.isArray(taskIds) ? taskIds : [taskIds], this.ownTasks);
+    }
+
+    return {
+      scope,
+      ...await this.store.markSeen(scope, taskIds, {
+      ...options,
+      beforeWrite,
+      initializeOnce: options.source === 'grigdesk'
+    })
+    };
   }
 }

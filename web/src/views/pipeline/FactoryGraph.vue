@@ -1,5 +1,5 @@
 <template>
-  <div class="graph-shell">
+  <div class="graph-shell" :data-phone-graph="!reference ? '' : undefined">
     <!-- Плашка обязана согласоваться с узлом: зелёный разбираемый узел под красным
          «конвейер встал» противоречил бы сам себе, и верили бы надписи. -->
     <div
@@ -23,7 +23,31 @@
       }}</span>
     </div>
 
+    <div v-if="!reference && nodeElements.length" class="graph-phone-tools">
+      <UiButton variant="ghost" :disabled="!initialStageId" data-graph-current @click="revealCurrentStage">
+        {{ t('core.phoneGraphCurrent') }}
+      </UiButton>
+      <div class="graph-phone-zoom">
+        <UiIconButton :label="t('core.phoneGraphZoomOut')" :disabled="displayScale <= 0.2"
+                      data-graph-zoom-out @click="changeZoom(1 / 1.25)">
+          <span aria-hidden="true">−</span>
+        </UiIconButton>
+        <UiButton variant="ghost" :pressed="phoneFit" data-graph-fit @click="fitGraph">
+          {{ t('core.phoneGraphFit') }}
+        </UiButton>
+        <UiIconButton :label="t('core.phoneGraphZoomIn')" :disabled="displayScale >= 2"
+                      data-graph-zoom-in @click="changeZoom(1.25)">
+          <span aria-hidden="true">+</span>
+        </UiIconButton>
+      </div>
+    </div>
+    <p v-if="!reference && nodeElements.length" :id="`${markerId}-hint`" class="graph-phone-hint">
+      {{ t('core.phoneGraphHint') }}
+    </p>
+
     <div ref="viewport" class="graph-viewport"
+         :style="viewportStyle"
+         :aria-describedby="!reference && nodeElements.length ? `${markerId}-hint` : undefined"
          @pointerdown="initialPositioned = true" @wheel="initialPositioned = true">
       <svg
         class="graph"
@@ -242,7 +266,7 @@
 <script setup lang="ts">
 import { computed, ref, useId, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
 
-import { UiSvgPressable, vTooltip } from '../../ui';
+import { t, UiButton, UiIconButton, UiSvgPressable, vTooltip } from '../../ui';
 import {
   computeViewBox,
   edgePath,
@@ -366,39 +390,96 @@ const emit = defineEmits<{
 }>();
 
 const viewport = ref<HTMLElement | null>(null);
+const stallView = computed<GraphStall | null>(() => {
+  if (props.reference) {
+    return null;
+  }
+
+  return graphStallView(props.graph) as GraphStall | null;
+});
 const initialStageId = computed(() => {
   const statuses = Object.entries(props.graph.statuses ?? {});
 
-  return statuses.find(([, status]) => status === 'run')?.[0]
-    || statuses.find(([, status]) => ['wait', 'fail'].includes(status))?.[0];
+  return props.selectedNode || stallView.value?.node
+    || statuses.find(([, status]) => ['stall', 'premature', 'fail', 'skipbad'].includes(status))?.[0]
+    || statuses.find(([, status]) => status === 'wait')?.[0]
+    || statuses.find(([, status]) => status === 'run')?.[0];
 });
+const phoneViewport = ref(false);
+const phoneZoom = ref(1);
+const phoneFit = ref(false);
+const viewportSize = ref({ width: 0, height: 0 });
+
 let initialPositioned = false;
 let viewportObserver: ResizeObserver | null = null;
+let phoneMedia: MediaQueryList | null = null;
 
 /**
- * При первом показе живого графа открывает текущий этап в пределах его полосы.
- * После ручной прокрутки и обновлений данных положение остаётся у человека.
+ * Возвращает выбранный или требующий внимания этап в центр внутренней области.
+ * На телефоне центрируется и высота: длинная схема не прокручивает всю карточку.
  */
-function revealInitialStage(): void {
+function centerCurrentStage(): void {
   const host = viewport.value;
-  const current = initialStageId.value;
+  const node = Array.from(host?.querySelectorAll<SVGElement>('[data-node]') ?? [])
+    .find((element) => element.dataset.node === initialStageId.value);
 
-  if (props.reference || initialPositioned || !host?.clientWidth || !current) {
-    return;
-  }
-
-  const node = Array.from(host.querySelectorAll<SVGElement>('[data-node]'))
-    .find((element) => element.dataset.node === current);
-
-  if (!node) {
+  if (!host?.clientWidth || !node) {
     return;
   }
 
   const bounds = host.getBoundingClientRect();
   const target = node.getBoundingClientRect();
 
-  host.scrollLeft += target.left + target.width / 2 - bounds.left - bounds.width / 2;
+  host.scrollLeft += target.left + target.width / 2 - bounds.left - host.clientWidth / 2;
+
+  if (phoneViewport.value && !props.reference) {
+    host.scrollTop += target.top + target.height / 2 - bounds.top - host.clientHeight / 2;
+  }
+
   initialPositioned = true;
+}
+
+/**
+ * При первом показе живого графа открывает текущий этап в пределах его полосы.
+ * После ручной прокрутки и обновлений данных положение остаётся у человека.
+ */
+function revealInitialStage(): void {
+  if (props.reference || initialPositioned || !initialStageId.value) {
+    return;
+  }
+
+  centerCurrentStage();
+}
+
+/**
+ * Явный переход восстанавливает читаемый масштаб и показывает актуальный этап.
+ * Обновление статусов само по себе не меняет выбранные человеком масштаб и прокрутку.
+ */
+async function revealCurrentStage(): Promise<void> {
+  phoneFit.value = false;
+  phoneZoom.value = 1;
+
+  await nextTick();
+  centerCurrentStage();
+}
+
+/**
+ * Размеры внутреннего окна нужны режиму обзора, включая поворот устройства.
+ * Первое позиционирование откладывается, пока скрытая карточка не получит реальную ширину.
+ */
+function measureViewport(): void {
+  viewportSize.value = {
+    width: viewport.value?.clientWidth ?? 0,
+    height: viewport.value?.clientHeight ?? 0,
+  };
+
+  void nextTick(revealInitialStage);
+}
+
+function updatePhoneViewport(): void {
+  phoneViewport.value = phoneMedia?.matches ?? false;
+
+  void nextTick(measureViewport);
 }
 
 watch(() => initialStageId.value, () => {
@@ -406,15 +487,22 @@ watch(() => initialStageId.value, () => {
 });
 
 onMounted(() => {
-  revealInitialStage();
+  phoneMedia = window.matchMedia('(max-width: 600px)');
+
+  phoneMedia.addEventListener('change', updatePhoneViewport);
+  updatePhoneViewport();
 
   if (typeof ResizeObserver !== 'undefined' && viewport.value) {
-    viewportObserver = new ResizeObserver(revealInitialStage);
+    viewportObserver = new ResizeObserver(measureViewport);
+
     viewportObserver.observe(viewport.value);
   }
 });
 
-onBeforeUnmount(() => viewportObserver?.disconnect());
+onBeforeUnmount(() => {
+  viewportObserver?.disconnect();
+  phoneMedia?.removeEventListener('change', updatePhoneViewport);
+});
 
 const markerId = `graph-arrow-${useId()}`;
 const focusedNode = ref<string | null>(null);
@@ -493,13 +581,6 @@ const activeReturnNodes = computed(() => new Set(props.graph.edges
 const parallelNodes = computed(() => props.graph.edges
   .filter(([, , , , routing]) => routing === 'to_sandbox')
   .map(([, destination]) => destination));
-const stallView = computed<GraphStall | null>(() => {
-  if (props.reference) {
-    return null;
-  }
-
-  return graphStallView(props.graph) as GraphStall | null;
-});
 const positions = computed<Record<string, GraphPosition>>(() => layoutGraphPositions(
   props.graph.pos,
   props.graph.nodes,
@@ -626,14 +707,84 @@ const viewBox = computed(() => computeViewBox(
     labelText: edge.label,
   })),
 ));
+/**
+ * Телефон начинает с читаемого размера, а обзор вмещает весь маршрут по обеим осям.
+ * В редакторе и на desktop источником масштаба остаётся прежний входной параметр.
+ */
+const displayScale = computed(() => {
+  if (!phoneViewport.value || props.reference) {
+    return props.scale;
+  }
+
+  if (!phoneFit.value) {
+    return phoneZoom.value;
+  }
+
+  const [, , width = 1, height = 1] = viewBox.value.split(' ').map(Number);
+
+  return Math.min(1, (viewportSize.value.width || width) / width,
+    Math.max(1, (viewportSize.value.height || height) - 8) / height);
+});
+const viewportStyle = computed(() => ({
+  '--graph-height': `${Number(viewBox.value.split(' ')[3]) + 8}px`,
+}));
 const canvasStyle = computed(() => {
-  const width = Number(viewBox.value.split(' ')[2]) * props.scale;
+  const width = Number(viewBox.value.split(' ')[2]) * displayScale.value;
 
   return {
     minWidth: `${width}px`,
     maxWidth: `${width}px`,
   };
 });
+
+/**
+ * При увеличении сохраняет точку в центре окна, чтобы схема не прыгала к началу.
+ * Смещение SVG учитывает auto-поля короткой схемы, а масштаб ограничен читаемым диапазоном.
+ */
+async function changeZoom(factor: number): Promise<void> {
+  const host = viewport.value;
+  const svg = host?.querySelector('svg');
+
+  if (!host || !svg) {
+    return;
+  }
+
+  const bounds = host.getBoundingClientRect();
+  const before = svg.getBoundingClientRect();
+  const centerX = bounds.left + host.clientWidth / 2;
+  const centerY = bounds.top + host.clientHeight / 2;
+  const previousScale = displayScale.value;
+  const pointX = (centerX - before.left) / previousScale;
+  const pointY = (centerY - before.top) / previousScale;
+
+  initialPositioned = true;
+  phoneZoom.value = Math.min(2, Math.max(0.2, previousScale * factor));
+  phoneFit.value = false;
+
+  await nextTick();
+
+  const after = svg.getBoundingClientRect();
+
+  host.scrollLeft += after.left + pointX * displayScale.value - centerX;
+  host.scrollTop += after.top + pointY * displayScale.value - centerY;
+}
+
+/**
+ * Обзор помещает весь маршрут вместе с возвратами в ограниченное окно.
+ * Режим остаётся включённым при SSE и пересчитывается по новым границам схемы.
+ */
+async function fitGraph(): Promise<void> {
+  initialPositioned = true;
+  phoneFit.value = true;
+  measureViewport();
+
+  await nextTick();
+
+  if (viewport.value) {
+    viewport.value.scrollLeft = 0;
+    viewport.value.scrollTop = 0;
+  }
+}
 
 /**
  * Ромб обозначает автоматический шаг; его вершины совпадают с точками подключения связей.
@@ -752,7 +903,7 @@ function onNodeActivate(
 </script>
 
 <style scoped>
-.graph-shell { width: 100%; }
+.graph-shell { width: 100%; min-width: 0; }
 .graph-stop { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline;
   gap: 4px 10px; margin: 2px 0 8px; padding: 8px 11px; color: var(--bad);
   background: color-mix(in srgb, var(--bad) 12%, transparent);
@@ -953,5 +1104,39 @@ function onNodeActivate(
 @media (max-width: 720px) {
   .graph-stop { grid-template-columns: 1fr auto; }
   .graph-stop strong, .graph-stop-hint { grid-column: 1 / -1; }
+}
+.graph-phone-tools,
+.graph-phone-hint {
+  display: none;
+}
+
+.graph-phone-zoom {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+@media (max-width: 600px) {
+  .graph-shell[data-phone-graph] > .graph-viewport {
+    height: min(var(--graph-height), clamp(180px, 46dvh, 380px));
+    overflow: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .graph-phone-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+  }
+
+  .graph-phone-hint {
+    display: block;
+    margin: 2px 0 6px;
+    color: var(--ink-mid);
+    font-size: 12px;
+    line-height: 1.4;
+  }
 }
 </style>

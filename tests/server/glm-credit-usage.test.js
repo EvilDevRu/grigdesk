@@ -137,6 +137,12 @@ test('кредитные окна проходят HTTP usage вместе с п
   limits.push({ type: 'TIME_LIMIT', percentage: 3 });
 
   const { root, adapter, config } = await fixture(t, limits);
+  // Проверяется перенос квот через HTTP, поэтому наличие ELF задаётся явно.
+  // Настоящий probe зависит от runtime машины и не относится к этому сценарию.
+  const installedAdapter = {
+    ...adapter,
+    probe: async () => ({ ok: true }),
+  };
   const app = Fastify({ logger: false });
 
   t.after(() => app.close());
@@ -149,7 +155,7 @@ test('кредитные окна проходят HTTP usage вместе с п
     },
     env: {},
     claudeAuth: null,
-    getProviderAdapters: async () => new Map([['glm', adapter]]),
+    getProviderAdapters: async () => new Map([['glm', installedAdapter]]),
     getModelsRegistry: async () => ({}),
   });
 

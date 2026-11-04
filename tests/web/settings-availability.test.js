@@ -89,7 +89,8 @@ test('настройки доступны только после подключ
       assert.equal(await modal.count(), 0);
       await page.screenshot({ path: path.join(artifacts, `no-machine-${width}.png`) });
       await setConnection(page, 'connecting');
-      await page.locator('.sidebar').waitFor();
+      await page.locator('.sidebar').waitFor({ state: 'attached' });
+      await page.locator('.phone-nav').waitFor({ state: 'attached' });
       assert.equal(await gear.count(), 0);
       assert.equal(await modal.count(), 0);
       assert.deepEqual(serverRequests, [], 'До подключения и входа нет запросов рабочих страниц');

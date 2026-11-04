@@ -1,12 +1,6 @@
 <template>
   <div v-if="sess" class="cs" :class="{ frozen, 'options-open': optionsOpen }" :style="composerStyle"
        @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
-    <section v-if="!messagesReady" class="load-state" role="status">
-      <p>{{ messageLoad?.error || t('core.chatMessagesLoading') }}</p>
-      <UiButton v-if="messageLoad?.state === 'error'" @click="retryMessages">
-        {{ t('core.chatListRetry') }}
-      </UiButton>
-    </section>
     <!-- Оверлей при перетаскивании файла -->
     <div v-if="dragOver" class="drop-overlay">
       <div class="drop-box">📎 Отпусти, чтобы приложить</div>
@@ -16,77 +10,91 @@
          горизонтали, что и линия под шапкой списка чатов слева. -->
     <div class="cs-top">
       <div class="hrow">
-        <!-- Назад к списку — только когда список и чат делят одну колонку (мобила) -->
-        <UiIconButton
-          class="back"
-          role="rail"
-          label="К списку чатов"
-          v-tooltip="'К списку чатов'"
-          data-context="chat-session-back"
-          @click="emit('back')"
-        >
-          ←
-        </UiIconButton>
-        <div class="ttl">
-          <UiInput
-            v-if="editingTitle"
-            ref="titleEl"
-            v-model="titleVal"
-            class="ctitle-edit"
-            data-role="chat-title"
-            @keydown.enter="commitTitle"
-            @keydown.esc="editingTitle = false"
-            @blur="commitTitle"
-          />
-          <template v-else>
-            <span class="ctitle" v-tooltip="chat.tabLabel(sess)">
-              {{ chat.tabLabel(sess) }}
-            </span>
-            <!-- Единственная точка переименования доступна мышью, клавиатурой и touch. -->
-            <UiIconButton
-              class="tedit"
-              role="embedded"
-              label="Переименовать чат"
-              v-tooltip="'Переименовать чат'"
-              data-context="chat-title-edit"
-              @click="startTitleEdit"
-            >
-              ✎
-            </UiIconButton>
-          </template>
-        </div>
-        <UiTooltip
-          :text="activeTaskLabel"
-          placement="top-start"
-          :surface-style="{ maxWidth: 'min(520px, calc(100vw - 16px))' }"
-        >
-          <template #trigger>
-            <span class="task-tip sel task">
-              <span class="lbl">задача</span>
-              <UiSelect
-                v-model="taskChoice"
-                compact
-                data-context="chat-session-toolbar"
-                :disabled="frozen || sess.sending || sess.purpose === 'companion'"
-                @change="onTaskChange"
+        <div class="session-heading">
+          <!-- Назад к списку — только когда список и чат делят одну колонку (мобила) -->
+          <UiIconButton
+            class="back"
+            role="rail"
+            label="К списку чатов"
+            v-tooltip="'К списку чатов'"
+            data-context="chat-session-back"
+            @click="emit('back')"
+          >
+            ←
+          </UiIconButton>
+          <div class="ttl">
+            <UiInput
+              v-if="editingTitle"
+              ref="titleEl"
+              v-model="titleVal"
+              class="ctitle-edit"
+              data-role="chat-title"
+              @keydown.enter="commitTitle"
+              @keydown.esc="editingTitle = false"
+              @blur="commitTitle"
+            />
+            <template v-else>
+              <span class="ctitle" v-tooltip="chat.tabLabel(sess)">
+                {{ chat.tabLabel(sess) }}
+              </span>
+              <!-- Единственная точка переименования доступна мышью, клавиатурой и touch. -->
+              <UiIconButton
+                class="tedit"
+                role="embedded"
+                label="Переименовать чат"
+                v-tooltip="'Переименовать чат'"
+                data-context="chat-title-edit"
+                @click="startTitleEdit"
               >
-                <option value="">без задачи</option>
-                <option v-for="o in taskOpts" :key="o.task" :value="o.task">
-                  {{ optLabel(o) }}
-                </option>
-              </UiSelect>
-            </span>
-          </template>
-        </UiTooltip>
-        <ChatWorkdir :sid="sid" />
-        <UiIconButton class="phone-options" role="rail" :label="t('core.conversationOptions')"
-                      :pressed="optionsOpen" :aria-expanded="optionsOpen"
-                      @click="optionsOpen = !optionsOpen">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-               stroke-linecap="round" aria-hidden="true">
-            <path d="M4 7h16M4 17h16M8 4v6M16 14v6" />
-          </svg>
-        </UiIconButton>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m16 3 5 5L9 20l-6 1 1-6L16 3z M13 6l5 5" />
+                </svg>
+              </UiIconButton>
+            </template>
+          </div>
+          <UiIconButton class="phone-options" role="rail" :label="t('core.conversationOptions')"
+                        :pressed="optionsOpen" :aria-expanded="optionsOpen" aria-haspopup="dialog"
+                        @click="optionsOpen = !optionsOpen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                 stroke-linecap="round" aria-hidden="true">
+              <path d="M4 7h16M4 17h16M8 4v6M16 14v6" />
+            </svg>
+          </UiIconButton>
+        </div>
+        <Teleport :to="workspaceOptionsHost || 'body'"
+                  :disabled="!phoneLayout || !optionsOpen || !workspaceOptionsHost">
+          <div class="session-workspace">
+            <UiTooltip
+              :text="activeTaskLabel"
+              placement="top-start"
+              :surface-style="{ maxWidth: 'min(520px, calc(100vw - 16px))' }"
+            >
+              <template #trigger>
+                <span class="task-tip sel task">
+                  <span class="lbl">{{ t('core.chatOptionTask') }}</span>
+                  <UiSelect
+                    v-model="taskChoice"
+                    compact
+                    data-context="chat-session-toolbar"
+                    :aria-label="t('core.chatOptionTask')"
+                    :disabled="frozen || sess.sending || sess.purpose === 'companion'"
+                    @change="onTaskChange"
+                  >
+                    <option value="">без задачи</option>
+                    <option v-for="o in taskOpts" :key="o.task" :value="o.task">
+                      {{ optLabel(o) }}
+                    </option>
+                  </UiSelect>
+                </span>
+              </template>
+            </UiTooltip>
+            <div class="session-option workdir-option">
+              <span class="option-label">{{ t('core.chatOptionWorkdir') }}</span>
+              <ChatWorkdir :sid="sid" :embedded="phoneLayout" :active="!phoneLayout || optionsOpen" />
+            </div>
+          </div>
+        </Teleport>
       </div>
       <div class="col bar">
         <!-- Последний завершённый запуск. «Факт» пишем только когда модель назвал сам CLI;
@@ -105,127 +113,234 @@
           </span>
         </div>
         <div class="spacer"></div>
-        <div class="sel model">
-          <span class="lbl">модель</span>
-          <ProviderModelSelect
-            compact
-            :providers="prov.providers"
-            value-format="id"
-            data-context="chat-session-toolbar"
-            data-role="chat-model"
-            :aria-label="t('core.chatModelPicker')"
-            :model-value="modelId"
-            :disabled="frozen"
-            v-tooltip="currentModelTitle" :aria-description="currentModelTitle"
-            @change="onModelChange"
-          >
-            <template #value="{ option, value }">
-              {{ currentModel ? modelOptionLabel(currentModel) : option?.label || value }}
-            </template>
-            <option v-if="modelId && (!currentModel || currentModelHidden)"
-                    :value="modelId" :hidden="currentModelHidden" disabled>
-              {{ currentModel ? modelOptionLabel(currentModel) : modelId + ' — нет в реестре' }}
-            </option>
-            <template v-if="prov.loaded || prov.providers.length">
-              <!-- Вкладки и модели строятся только по доступным исполнителям.
-                   Сохранённый выбор недоступного исполнителя остаётся скрытым native option. -->
-              <optgroup v-for="p in provGroups" :key="p.id" :label="p.name">
-                <!-- «?» — модели нет в каталоге установленного CLI (он про неё не знает) -->
-                <option v-for="m in p.models" :key="m.id" :value="m.id"
-                        :data-description="modelOptionDescription(m)"
-                        :title="modelOptionTitle(m)">
-                  {{ modelOptionLabel(m) }}
+        <Teleport :to="controlOptionsHost || 'body'"
+                  :disabled="!phoneLayout || !optionsOpen || !controlOptionsHost">
+          <div class="session-controls">
+            <div class="sel model">
+              <span class="lbl">{{ t('core.chatOptionModel') }}</span>
+              <ProviderModelSelect
+                compact
+                :providers="prov.providers"
+                value-format="id"
+                data-context="chat-session-toolbar"
+                data-role="chat-model"
+                :aria-label="t('core.chatModelPicker')"
+                :model-value="modelId"
+                :disabled="frozen"
+                v-tooltip="currentModelTitle" :aria-description="currentModelTitle"
+                @change="onModelChange"
+              >
+                <template #value="{ option, value }">
+                  {{ currentModel ? modelOptionLabel(currentModel) : option?.label || value }}
+                </template>
+                <option v-if="modelId && (!currentModel || currentModelHidden)"
+                        :value="modelId" :hidden="currentModelHidden" disabled>
+                  {{ currentModel ? modelOptionLabel(currentModel) : modelId + ' — нет в реестре' }}
                 </option>
-              </optgroup>
-            </template>
-            <template v-else>
-              <option v-for="m in FALLBACK_MODELS" :key="m" :value="m">{{ m }}</option>
-            </template>
-          </ProviderModelSelect>
-        </div>
-        <!-- Режим прав: как агент поступает с действиями (спрашивать / сам / только план) -->
-        <div v-if="modes.length || modeUnavailable" class="sel mode">
-          <span class="lbl">режим</span>
-          <UiSelect
-            compact
-            data-context="chat-session-toolbar"
-            :model-value="currentMode"
-            :disabled="frozen"
-            v-tooltip="modeHint" :aria-description="modeHint"
-            @change="chat.setMode(sid, ($event.target as HTMLSelectElement).value)"
-          >
-            <option v-for="m in modes" :key="m.id" :value="m.id" :title="m.hint">{{ m.label }}</option>
-            <option v-if="!modeState.available" :value="currentMode" disabled>
-              {{ currentMode }} · {{ t('core.chatModeUnavailable') }}
-            </option>
-          </UiSelect>
-        </div>
-        <EffortSlider v-if="effortLevels.length" :model-value="effortValue" :levels="effortLevels"
-                      :hints="currentModel?.effortHints || {}"
-                      :disabled="frozen" @update:model-value="chat.setEffort(sid, $event)" />
-        <!-- Контекст: точная активная заполненность; при недоступной метрике дуга пустая.
-             Клик — сжатие контекста (с подтверждением), Alt+клик — сброс памяти агента.
-             Подсказка штатная, а не browser title: так она не обрезается и вмещает
-             раздельные числа, состояние и действия. -->
-        <UiTooltip
-          placement="top-end"
-          :surface-style="{ maxWidth: 'min(300px, calc(100vw - 16px))' }"
-        >
-          <template #trigger>
-            <UiIconButton
-              class="ctx-tip ctx-ring"
-              :class="[ctxClass, { estimate: ctxIsEstimate, compacting: sess.compacting }]"
-              role="embedded"
-              :label="ctxTitle"
-              :aria-disabled="ctxRingDisabled"
-              data-context="chat-context"
-              @click="onCtxClick"
+                <template v-if="prov.loaded || prov.providers.length">
+                  <!-- Вкладки и модели строятся только по доступным исполнителям.
+                       Сохранённый выбор недоступного исполнителя остаётся скрытым native option. -->
+                  <optgroup v-for="p in provGroups" :key="p.id" :label="p.name">
+                    <!-- «?» — модели нет в каталоге установленного CLI (он про неё не знает) -->
+                    <option v-for="m in p.models" :key="m.id" :value="m.id"
+                            :data-description="modelOptionDescription(m)"
+                            :title="modelOptionTitle(m)">
+                      {{ modelOptionLabel(m) }}
+                    </option>
+                  </optgroup>
+                </template>
+                <template v-else>
+                  <option v-for="m in FALLBACK_MODELS" :key="m" :value="m">{{ m }}</option>
+                </template>
+              </ProviderModelSelect>
+            </div>
+            <!-- Режим прав: как агент поступает с действиями (спрашивать / сам / только план) -->
+            <div v-if="modes.length || modeUnavailable" class="sel mode">
+              <span class="lbl">{{ t('core.chatOptionMode') }}</span>
+              <UiSelect
+                compact
+                data-context="chat-session-toolbar"
+                :aria-label="t('core.chatOptionMode')"
+                :model-value="currentMode"
+                :disabled="frozen"
+                v-tooltip="modeHint" :aria-description="modeHint"
+                @change="chat.setMode(sid, ($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="m in modes" :key="m.id" :value="m.id" :title="m.hint">{{ m.label }}</option>
+                <option v-if="!modeState.available" :value="currentMode" disabled>
+                  {{ currentMode }} · {{ t('core.chatModeUnavailable') }}
+                </option>
+              </UiSelect>
+              <p v-if="phoneLayout" class="option-help">{{ modeHint }}</p>
+            </div>
+            <div v-if="effortLevels.length" class="session-option effort-option">
+              <span class="option-label">{{ t('core.chatOptionEffort') }}</span>
+              <EffortSlider :model-value="effortValue" :levels="effortLevels"
+                            :hints="currentModel?.effortHints || {}"
+                            :expanded="phoneLayout"
+                            :disabled="frozen" @update:model-value="chat.setEffort(sid, $event)" />
+            </div>
+          </div>
+        </Teleport>
+        <Teleport :to="contextOptionsHost || 'body'"
+                  :disabled="!phoneLayout || !optionsOpen || !contextOptionsHost">
+          <!-- Контекст: точная активная заполненность; при недоступной метрике полоса пустая.
+               Клик — сжатие контекста (с подтверждением), Alt+клик — сброс памяти агента.
+               Подсказка штатная, а не browser title: так она не обрезается и вмещает
+               раздельные числа, состояние и действия. -->
+          <div class="session-option context-option">
+            <span class="option-label">{{ t('core.chatContextLabel') }}</span>
+            <UiTooltip
+              placement="top-end"
+              :surface-style="{ maxWidth: 'min(300px, calc(100vw - 16px))' }"
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle class="rbg" cx="12" cy="12" r="9" fill="none" stroke-width="3" />
-                <circle
-                  class="rfg"
-                  cx="12"
-                  cy="12"
-                  r="9"
-                  fill="none"
-                  stroke-width="3"
-                  stroke-linecap="round"
-                  :stroke-dasharray="RING_C"
-                  :stroke-dashoffset="ringDash"
-                  transform="rotate(-90 12 12)"
-                />
-              </svg>
-            </UiIconButton>
-          </template>
-          <template #tip>
-            <span class="ctx-pop" data-testid="context-tooltip">
-              <span class="ctx-pop-head">
-                <span><b>{{ ctxTooltip.title }}</b><span class="ctx-pop-unit"> · токены</span></span>
-                <span v-if="ctxTooltip.percent" class="ctx-pop-pct" :class="ctxTooltip.tone">
-                  {{ ctxTooltip.percent }}
+              <template #trigger>
+                <UiButton
+                  class="ctx-tip ctx-meter"
+                  :class="[ctxClass, { estimate: ctxIsEstimate, compacting: sess.compacting }]"
+                  variant="ghost"
+                  :aria-label="ctxTitle"
+                  :aria-disabled="ctxDisabled"
+                  data-context="chat-context"
+                  @click="onCtxClick"
+                >
+                  <span class="ctx-meter-cap" aria-hidden="true">{{ t('core.chatContextLabel') }}</span>
+                  <UiProgress
+                    :value="ctxMeterValue"
+                    :tone="ctxMeterTone"
+                    :indeterminate="sess.compacting"
+                    :label="ctxTooltip.title"
+                    :value-text="ctxTitle"
+                    data-context="chat-context"
+                    aria-hidden="true"
+                  />
+                  <span class="ctx-meter-value" aria-hidden="true">{{ ctxMeterText }}</span>
+                </UiButton>
+              </template>
+              <template #tip>
+                <span class="ctx-pop" data-testid="context-tooltip">
+                  <span class="ctx-pop-head">
+                    <span><b>{{ ctxTooltip.title }}</b><span class="ctx-pop-unit"> · токены</span></span>
+                    <span v-if="ctxTooltip.percent" class="ctx-pop-pct" :class="ctxTooltip.tone">
+                      {{ ctxTooltip.percent }}
+                    </span>
+                  </span>
+                  <span v-if="ctxTooltip.status" class="ctx-pop-status" :class="ctxTooltip.tone">
+                    {{ ctxTooltip.status }}
+                  </span>
+                  <span v-if="ctxTooltip.detail" class="ctx-pop-detail">{{ ctxTooltip.detail }}</span>
+                  <span v-if="ctxTooltip.rows.length" class="ctx-pop-rows">
+                    <span v-for="row in ctxTooltip.rows" :key="row.label"
+                          class="ctx-pop-row" :class="{ unverified: row.unverified, cache: row.cache }">
+                      <span class="ctx-pop-label">{{ row.label }}</span>
+                      <span class="ctx-pop-value">{{ row.value }}</span>
+                    </span>
+                  </span>
+                  <span v-if="ctxTooltip.actions && !phoneLayout" class="ctx-pop-actions">
+                    <span class="ctx-pop-action"><b>Клик</b><span>сжать</span></span>
+                    <span class="ctx-pop-action"><b>Alt + клик</b><span>сбросить</span></span>
+                  </span>
                 </span>
-              </span>
-              <span v-if="ctxTooltip.status" class="ctx-pop-status" :class="ctxTooltip.tone">
-                {{ ctxTooltip.status }}
-              </span>
-              <span v-if="ctxTooltip.detail" class="ctx-pop-detail">{{ ctxTooltip.detail }}</span>
-              <span v-if="ctxTooltip.rows.length" class="ctx-pop-rows">
-                <span v-for="row in ctxTooltip.rows" :key="row.label"
-                      class="ctx-pop-row" :class="{ unverified: row.unverified, cache: row.cache }">
-                  <span class="ctx-pop-label">{{ row.label }}</span>
-                  <span class="ctx-pop-value">{{ row.value }}</span>
-                </span>
-              </span>
-              <span v-if="ctxTooltip.actions" class="ctx-pop-actions">
-                <span class="ctx-pop-action"><b>Клик</b><span>сжать</span></span>
-                <span class="ctx-pop-action"><b>Alt + клик</b><span>сбросить</span></span>
-              </span>
-            </span>
-          </template>
-        </UiTooltip>
+              </template>
+            </UiTooltip>
+            <template v-if="phoneLayout">
+              <p class="option-help" role="status">
+                <template v-if="ctxTooltip.status">{{ ctxTooltip.status }}</template>
+                <template v-else-if="ctxTooltip.percent">
+                  {{ t('core.chatContextTokens', {
+                    used: fmtTokens(ctxTokens),
+                    limit: fmtTokens(ctxLimit),
+                  }) }}
+                </template>
+                <template v-else>{{ ctxTooltip.detail }}</template>
+              </p>
+              <div class="context-actions">
+                <UiButton :disabled="ctxDisabled || frozen" @click="onCtxClick({ altKey: false })">
+                  {{ t('core.chatContextCompact') }}
+                </UiButton>
+                <UiButton variant="ghost" :disabled="ctxDisabled || frozen"
+                          @click="onCtxClick({ altKey: true })">
+                  {{ t('core.chatContextReset') }}
+                </UiButton>
+              </div>
+              <p class="option-help">{{ t('core.chatContextActionsHint') }}</p>
+            </template>
+          </div>
+        </Teleport>
       </div>
+      <UiProgress
+        class="header-context"
+        data-context="chat-header-context"
+        size="line"
+        :value="ctxMeterValue"
+        :style="{ '--chat-context-color': providerInfo?.color }"
+        :indeterminate="sess.compacting"
+        :label="ctxTooltip.title"
+        :value-text="ctxTitle"
+      />
     </div>
+
+    <UiInlineMessage v-if="!messagesReady" class="load-state" data-context="chat-message-load"
+                     :tone="messageLoad?.state === 'error' ? 'warning' : 'neutral'" aria-atomic="true">
+      <span class="ui-inline-message__icon" aria-hidden="true">
+        <svg v-if="messageLoad?.state === 'error'" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.3 4.9 2.6 18.2A2 2 0 0 0 4.3 21h15.4
+                   a2 2 0 0 0 1.7-2.8L13.7 4.9a2 2 0 0 0-3.4 0Z" />
+          <path d="M12 9v4m0 4h.01" />
+        </svg>
+        <UiSpinner v-else decorative />
+      </span>
+      <div class="ui-inline-message__body">
+        <strong class="ui-inline-message__title">
+          {{ t(messageLoad?.state === 'error' ? 'core.chatMessagesLoadFailed' : 'core.chatMessagesLoading') }}
+        </strong>
+        <p v-if="messageLoad?.state === 'error' && messageLoad.error" class="ui-inline-message__detail">
+          {{ messageLoad.error }}
+        </p>
+      </div>
+      <UiButton v-if="messageLoad?.state === 'error'" size="compact" @click="retryMessages">
+        <template #leading>
+          <UiRefreshIcon />
+        </template>
+        {{ t('core.chatListRetry') }}
+      </UiButton>
+    </UiInlineMessage>
+
+    <UiDialog v-model:open="optionsOpen" size="compact" :title="t('core.conversationOptions')"
+              class="phone-chat-options" data-role="chat-options" data-ui-workspace data-ui-touch
+              data-ui-chat-options
+              initial-focus="[data-role='chat-options-body']">
+      <template #title>
+        <span class="options-heading">
+          <span>{{ t('core.conversationOptions') }}</span>
+          <UiIconButton :label="t('core.close')" @click="optionsOpen = false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                 stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg>
+          </UiIconButton>
+        </span>
+      </template>
+      <div class="options-body" data-role="chat-options-body" tabindex="-1">
+        <section class="options-section" :aria-labelledby="`chat-options-agent-${sid}`">
+          <h2 :id="`chat-options-agent-${sid}`">{{ t('core.chatSettingsAgent') }}</h2>
+          <div ref="controlOptionsHost"></div>
+        </section>
+        <section class="options-section" :aria-labelledby="`chat-options-workspace-${sid}`">
+          <h2 :id="`chat-options-workspace-${sid}`">{{ t('core.chatSettingsWorkspace') }}</h2>
+          <div ref="workspaceOptionsHost"></div>
+        </section>
+        <section class="options-section" :aria-labelledby="`chat-options-context-${sid}`">
+          <h2 :id="`chat-options-context-${sid}`">{{ t('core.chatContextLabel') }}</h2>
+          <div ref="contextOptionsHost"></div>
+        </section>
+      </div>
+      <template #footer>
+        <span class="option-help">{{ t('core.chatSettingsImmediate') }}</span>
+        <UiButton variant="solid" tone="accent" @click="optionsOpen = false">
+          {{ t('core.chatSettingsDone') }}
+        </UiButton>
+      </template>
+    </UiDialog>
 
     <!-- Плашки «переписка не сохраняется» здесь НЕТ намеренно: saveError — состояние
          общее (сервер не принимает запись вообще), а рисовалась бы она внутри открытого
@@ -235,7 +350,7 @@
     <!-- Сообщения: ты — справа, агент — слева, ошибка — компактная плашка -->
     <div ref="body" class="cs-body" @scroll.passive="onBodyScroll">
       <div class="col flow">
-        <div v-if="!sess.messages?.length" class="empty">
+        <div v-if="messagesReady && !sess.messages?.length" class="empty">
           <div class="e-title">{{ sess.taskId ? chat.tabLabel(sess) : 'Спроси агента' }}</div>
           <div class="e-sub muted">
             <p class="e-workdir">
@@ -243,7 +358,8 @@
                 || sess.workdirState?.committed?.cwd || chatWorkdirLabel(sess.workdir) }}
             </p>
             <p>
-              Модель и усилие — сверху. Enter — отправить, Shift+Enter — перенос.
+              <span class="keyboard-hint">Модель и усилие — сверху. Enter — отправить, Shift+Enter — перенос.</span>
+              <span class="touch-keyboard-hint">{{ t('core.chatTouchKeyboardHint') }}</span>
               «/» — команды, «$» — навыки Codex.
             </p>
           </div>
@@ -425,8 +541,8 @@
            поэтому места в раскладке не занимает и ничего не сдвигает. -->
       <div class="cs-resize" role="separator" aria-orientation="horizontal" tabindex="0"
            aria-label="Высота поля ввода"
-           :aria-valuemin="COMPOSER_MIN" :aria-valuemax="composerMax()"
-           :aria-valuenow="Math.round(composerH ?? COMPOSER_MIN)"
+           :aria-valuemin="composerMin" :aria-valuemax="composerMax()"
+           :aria-valuenow="clampComposer(composerH ?? composerMin)"
            v-tooltip="'Потяни — высота поля ввода. Двойной клик — вернуть обычную'"
            @pointerdown.prevent="startComposerResize" @pointermove.prevent="moveComposerResize"
            @pointerup.prevent="finishComposerResize" @pointercancel.prevent="cancelComposerResize"
@@ -556,6 +672,7 @@
         </div>
         <div v-if="interimSpeech" class="speech-interim" data-testid="speech-interim">Слышу: {{ interimSpeech }}</div>
         <div class="composer">
+          <ChatKeyboardLayout @visibility-change="keyboardLayoutVisible = $event" />
           <UiFilePicker
             data-role="chat-attachment"
             density="compact"
@@ -579,8 +696,9 @@
             :disabled="!messagesReady"
             ref="taEl"
             v-model="input"
-            rows="2"
+            rows="1"
             data-role="chat-composer"
+            enterkeyhint="enter"
             :placeholder="recording ? 'Говори… (клик по микрофону — стоп, Esc — отмена)' : drainingSpeech ? 'Завершаю распознавание…' : speechBusy ? 'Подготавливаю диктовку…' : 'Сообщение агенту…'"
             @keydown="onKey"
             @paste="onPaste"
@@ -644,17 +762,20 @@
             :label="modeUnavailable ? t('core.chatModeUnavailable') : speechBusy ? 'Сначала заверши диктовку'
               : frozen ? frozenHint
               : sess.sending ? (inTurnComposer.ready
-                ? 'Уточнить сейчас (Enter)' : 'Отправить после текущего хода (Enter)')
-              : 'Отправить (Enter)'"
+                ? 'Уточнить сейчас' : 'Отправить после текущего хода')
+              : 'Отправить'"
             v-tooltip="modeUnavailable ? t('core.chatModeUnavailable') : speechBusy ? 'Сначала заверши диктовку'
               : frozen ? frozenHint
               : sess.sending ? (inTurnComposer.ready
-                ? 'Уточнить сейчас (Enter)' : 'Отправить после текущего хода (Enter)')
-              : 'Отправить (Enter)'"
+                ? 'Уточнить сейчас' : 'Отправить после текущего хода')
+              : 'Отправить'"
             data-context="chat-send"
             @click="submit"
           >
-            ↑
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 19V5m-7 7 7-7 7 7" />
+            </svg>
           </UiIconButton>
         </div>
         <div v-if="speechNotice" class="speech-note" data-testid="speech-notice">{{ speechNotice }}</div>
@@ -665,9 +786,12 @@
 </template>
 
 <script setup lang="ts">
-import { COMPOSER_KEY, COMPOSER_MIN, COMPOSER_MAX_VH, storedComposerHeight } from './chatLayout.ts';
+import {
+  COMPOSER_KEY, COMPOSER_MIN, COMPOSER_KEYBOARD_MIN, COMPOSER_MAX_VH, storedComposerHeight,
+} from './chatLayout.ts';
 
 import ChatWorkdir from './ChatWorkdir.vue';
+import ChatKeyboardLayout from './ChatKeyboardLayout.vue';
 import { chatWorkdirLabel } from '../../../../shared/chat/chatWorkdir.ts';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { api } from '../../shared/apiClient.ts';
@@ -684,6 +808,8 @@ import type { ProviderModelEntry } from '../../../../shared/chat/providersContra
 import { useDictationController } from '../../features/speech/provider.ts';
 import { useChatStore, CONTEXT_WINDOW } from '../../stores/chat.ts';
 import { startChatPerformance } from '../../shared/chatPerformance.ts';
+// AGENT-DBG: временно, до установления причины потери фокуса при наборе.
+import { installChatComposerFocusDebug } from '../../shared/chatComposerFocusDebug.ts';
 import { contextFill } from '../../../../shared/chat/chatContext.ts';
 import { writeClipboardText } from '../../shared/clipboard.ts';
 import { useTasksStore } from '../../stores/tasks.ts';
@@ -704,17 +830,22 @@ import ProviderIcon from '../../shared/ProviderIcon.vue';
 import ProviderModelSelect from '../../shared/ProviderModelSelect.vue';
 import { isSelectableModelProvider } from '../../shared/providerModelSelect.ts';
 import {
+  UiRefreshIcon,
   confirmDialog,
   t,
   UiButton,
   UiFilePicker,
+  UiDialog,
   UiIconButton,
+  UiInlineMessage,
   UiInput,
+  UiProgress,
   UiSelect,
   UiSpinner,
   UiTextarea,
   UiTooltip,
   vTooltip,
+  type UiActionTone,
 } from '../../ui';
 import ChatMarkdown from './ChatMarkdown.vue';
 import { documentLinkFromClick } from '../../features/documents/links.ts';
@@ -731,6 +862,29 @@ const props = defineProps({
 // где список и чат делят одну колонку (показом управляет CSS, не JS).
 const emit = defineEmits<{ back: [] }>();
 const optionsOpen = ref(false);
+const workspaceOptionsHost = ref<HTMLElement | null>(null);
+const controlOptionsHost = ref<HTMLElement | null>(null);
+const contextOptionsHost = ref<HTMLElement | null>(null);
+const phoneOptionsMedia = window.matchMedia('(max-width: 600px)');
+const phoneLayout = ref(phoneOptionsMedia.matches);
+
+/**
+ * Настройки телефона открываются отдельной формой, desktop сохраняет прежнюю шапку.
+ * При расширении окна диалог закрывается, а те же controls возвращаются на свои места.
+ */
+function syncPhoneOptionsLayout(): void {
+  phoneLayout.value = phoneOptionsMedia.matches;
+
+  if (!phoneLayout.value) {
+    optionsOpen.value = false;
+  }
+}
+
+onMounted(() => phoneOptionsMedia.addEventListener('change', syncPhoneOptionsLayout));
+onUnmounted(() => phoneOptionsMedia.removeEventListener('change', syncPhoneOptionsLayout));
+watch(() => props.sid, () => {
+  optionsOpen.value = false;
+});
 
 const chat = useChatStore();
 const tasks = useTasksStore();
@@ -1586,39 +1740,47 @@ const ctxTitle = computed(() => {
   return `Контекст: ${estimate}${tokens} из ${limit} ${ctxLimitWhat.value} (${ctxPct.value}%)`
     + `${live}${warn}${window}${spentHint.value}${cacheHint.value} · ${hint}`;
 });
-// Кольцо-индикатор контекста (клик — сжатие, Alt+клик — сброс памяти).
-const RING_C = 2 * Math.PI * 9;
-// На время сжатия дуга — короткий бегунок: кольцо в этот момент вращается, а полное
-// (или почти полное) кольцо при вращении выглядело бы неподвижным.
-const SPIN_DASH = RING_C * 0.75;
-const ringDash = computed(() => {
+// Полоса и подпись используют ту же достоверность, что и подробная подсказка.
+// Отсутствие свежего замера не превращается в нулевую или старую заполненность.
+const ctxMeterValue = computed(() => ctxTooltip.value.percent ? ctxPct.value : 0);
+const ctxMeterText = computed(() => {
   if (sess.value?.compacting) {
-    return SPIN_DASH;
-  }
-  if (ctxUnavailable.value) {
-    return RING_C;
+    return '…';
   }
 
-  return RING_C * (1 - ctxPct.value / 100);
+  const percent = ctxTooltip.value.percent;
+
+  return percent ? `${ctxIsEstimate.value ? '≈ ' : ''}${percent}` : '—';
 });
-// Нативный disabled выкидывает кнопку из Tab-порядка вместе с её подсказкой. Кольцо
+const ctxMeterTone = computed<UiActionTone>(() => {
+  if (sess.value?.compacting || ctxIsEstimate.value) {
+    return 'accent';
+  }
+  if (!ctxTooltip.value.percent) {
+    return 'neutral';
+  }
+  if (ctxClass.value === 'hi') {
+    return 'danger';
+  }
+
+  return ctxClass.value === 'mid' ? 'warning' : 'success';
+});
+// Нативный disabled выкидывает кнопку из Tab-порядка вместе с её подсказкой. Индикатор
 // остаётся фокусируемым и честно объявляет недоступность через aria-disabled; обработчик
 // ниже всё равно не запускает действие, пока нет сессии или идёт ход/сжатие.
-const ctxRingDisabled = computed(() => !sess.value?.sessionId
-  || !!sess.value?.compacting || !!sess.value?.sending);
+const ctxDisabled = computed(() => !sess.value?.sessionId
+  || !!sess.value?.compacting || !!sess.value?.sending || frozen.value);
 
 /**
- * Клик по кольцу. Основное действие — СЖАТИЕ: агент пересказывает разговор сам и
- * продолжает с выжимки. Alt+клик оставлен под прежнее поведение кольца — полный сброс
+ * Клик по индикатору. Основное действие — СЖАТИЕ: агент пересказывает разговор сам и
+ * продолжает с выжимки. Alt+клик оставлен под прежнее поведение — полный сброс
  * памяти агента: путать эти два действия дорого (после сброса переписка на экране
  * остаётся, а агент не помнит ничего), поэтому у каждого свой вопрос и свой текст.
  */
 async function onCtxClick(e: { altKey: boolean }) {
-  const s = sess.value;
-
-  if (!s?.sessionId || s.compacting || s.sending) {
-      return;
-    }
+  if (ctxDisabled.value) {
+    return;
+  }
   if (e.altKey) {
     const ok = await confirmDialog(
       'Агент забудет весь разговор: следующее сообщение начнёт его с нуля. '
@@ -1704,8 +1866,20 @@ function scrollDown() {
 // Настройка устройства (localStorage, как ширина дока и списка чатов). Пусто =
 // высоту решает CSS, как раньше.
 const taEl = ref<InstanceType<typeof UiTextarea> | null>(null);
+// AGENT-DBG-START
+let stopFocusDebug: (() => void) | undefined;
+
+onMounted(() => {
+  if (taEl.value?.el) {
+    stopFocusDebug = installChatComposerFocusDebug(taEl.value.el);
+  }
+});
+onUnmounted(() => stopFocusDebug?.());
+// AGENT-DBG-END
 
 const composerH = ref<number | null>(storedComposerHeight());
+const keyboardLayoutVisible = ref(false);
+const composerMin = computed(() => keyboardLayoutVisible.value ? COMPOSER_KEYBOARD_MIN : COMPOSER_MIN);
 const composerStyle = computed(() => (
   composerH.value == null ? null : { '--composer-h': `${composerH.value}px` }
 ));
@@ -1713,18 +1887,18 @@ const composerStyle = computed(() => (
 function composerMax() {
   const view = typeof window === 'undefined' ? 0 : window.innerHeight;
 
-  return Math.max(COMPOSER_MIN, Math.round((view || 720) * COMPOSER_MAX_VH));
+  return Math.max(composerMin.value, Math.round((view || 720) * COMPOSER_MAX_VH));
 }
 
 function clampComposer(value: number) {
-  return Math.round(Math.min(Math.max(COMPOSER_MIN, value), composerMax()));
+  return Math.round(Math.min(Math.max(composerMin.value, value), composerMax()));
 }
 // Тянем от ФАКТИЧЕСКОЙ высоты поля, а не от сохранённого числа: после смены окна
 // (поворот планшета) CSS уже подрезал поле по 46vh, и старое число дало бы скачок.
 function composerHeightNow() {
   const h = taEl.value?.el?.getBoundingClientRect?.().height;
 
-  return clampComposer(h !== undefined && h > 0 ? h : (composerH.value ?? COMPOSER_MIN));
+  return clampComposer(h !== undefined && h > 0 ? h : (composerH.value ?? composerMin.value));
 }
 
 
@@ -1813,7 +1987,7 @@ function onComposerResizeKey(event: KeyboardEvent) {
   } else if (event.key === 'ArrowDown') {
     composerH.value = clampComposer(composerHeightNow() - step);
   } else if (event.key === 'Home') {
-    composerH.value = COMPOSER_MIN;
+    composerH.value = composerMin.value;
   } else if (event.key === 'End') {
     composerH.value = composerMax();
   } else {
@@ -2086,6 +2260,13 @@ function onKey(e: KeyboardEvent) {
   if (e.isComposing || e.keyCode === 229) {
     return;
   }
+
+  // Экранная клавиатура присылает обычный Enter и после завершения композиции.
+  // Возвращаем его textarea до выбора команд: перенос никогда не отправляет черновик.
+  if (e.key === 'Enter' && (e.target as HTMLElement)?.closest('[data-ui-touch]')) {
+    return;
+  }
+
   // Открыто меню команд — стрелки/Enter/Tab/Esc управляют им.
   // Навигация по выбираемым пунктам (cmdNav): заголовки и run:'none' пропускаются.
   const m = cmdNav.value;
@@ -2652,12 +2833,23 @@ function skipQuestion() {
 }
 
 .col { width: 100%; min-width: 0; }
+.load-state { flex: none; margin: 12px var(--chat-gutter) 0; }
 /* Шапка подстраивается под ширину самого чата, а не окна: рядом со списком, ширину
    которого тянут мышью, чату на одном и том же экране остаётся от 400 до 1300 px. */
 .cs { container: chat / inline-size; }
 
-.cs-top { --chat-head-gap: 16px; display: flex; flex-direction: column; gap: 4px; padding: 4px var(--chat-gutter);
-  border-bottom: 1px solid var(--line); min-height: var(--chat-head-h); justify-content: center; }
+.cs-top {
+  --chat-head-gap: 16px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px var(--chat-gutter);
+  border-bottom: 1px solid var(--line);
+  min-height: var(--chat-head-h);
+  justify-content: center;
+}
+.header-context { display: none; }
 /* На странице высота шапки — общий с левым списком токен, иначе две разделительные линии
    расходятся. min-height, а не height: редкое предупреждение о модели важнее ровной линии —
    пусть шапка подрастёт, чем текст обрежется. */
@@ -2665,6 +2857,10 @@ function skipQuestion() {
    линии. Вместо переноса ряд ужимается (см. shrink у .factbar), а на узком экране страница
    и так уходит в одну колонку, где шапке разрешено расти. */
 .hrow { display: flex; align-items: center; column-gap: var(--chat-head-gap); min-width: 0; }
+.session-heading, .cs .session-workspace, .cs .session-controls, .cs .session-option { display: contents; }
+.cs .option-label { display: none; }
+.options-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+.options-body { display: flex; flex-direction: column; gap: 20px; min-width: 0; outline: none; }
 /* Назад к списку: на широком экране список виден всегда, кнопка нужна только на мобиле */
 .back { display: none; flex: none; margin: 0 calc(8px - var(--chat-head-gap)) 0 -6px; place-items: center; }
 .phone-options { display: none; flex: none; }
@@ -2682,11 +2878,11 @@ function skipQuestion() {
    значению (field-sizing в скине селекта), а не пустая половина ряда с шевроном на краю;
    при нехватке места ужимается первой (shrink 100): название важнее. Полное название
    задачи доступно по ховеру в общем UiTooltip — внешний overflow страницы его не обрежет. */
-.task-tip { flex: 0 100 auto; max-width: min(420px, 50%); }
+.cs .task-tip { flex: 0 100 auto; max-width: min(420px, 50%); }
 /* Минимум — целое «без задачи»: дальше ужимается название чата. Это тот же элемент,
    что .task-tip (класс триггера подсказки), поэтому min-width задаётся здесь. */
-.sel.task { min-width: 104px; }
-.sel.task :deep(.ui-select-wrap) { flex: 0 1 auto; width: auto; min-width: 0; }
+.cs .sel.task { min-width: 104px; }
+.cs .sel.task :deep(.ui-select-wrap) { flex: 0 1 auto; width: auto; min-width: 0; }
 /* Модель получает ширину выбранного названия, а не фиксированные 140px.
    При нехватке места первой сокращается информационная строка последнего хода. */
 .sel.model { flex: 0 1 auto; min-width: 0; max-width: 100%; }
@@ -2694,17 +2890,24 @@ function skipQuestion() {
    подпись-метка, значение и шеврон. Вертикальных черт между ними нет ни в одном ряду и ни
    на одной ширине: группы разводит один зазор --chat-head-gap, а подписи-метки и так
    отмечают начало каждой. Черты по соседству элементов ложились через раз. */
-.sel { position: relative; display: flex; align-items: center; gap: 7px; padding: 0 2px; }
-.sel .lbl { flex: none; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-mid); opacity: .75; }
+.cs .sel { position: relative; display: flex; align-items: center; gap: 7px; padding: 0 2px; }
+.cs .sel .lbl {
+  flex: none;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--ink-mid);
+  opacity: .75;
+}
 /* Заморозка на время сжатия (см. frozen): селекты и кнопки выключены атрибутом, а слайдеру
    усилия своего disabled не заводили — гасим его отдельно. Композер не трогаем: печатать
    во время сжатия можно, нельзя только отправить. */
 .cs.frozen .bar :deep(.eff) { opacity: .5; pointer-events: none; }
 
-/* Кольцо контекста — маленькое, кликабельное (сжатие; Alt — сброс) */
+/* Индикатор контекста сохраняет своё место в строке при изменении чисел. */
 .ctx-tip { flex: none; align-items: center; }
 
-/* Форматированная подсказка кольца. Содержимое слота телепортируется UiTooltip в body,
+/* Форматированная подсказка контекста. Содержимое слота телепортируется UiTooltip в body,
    но сохраняет scope этого компонента, поэтому локальные стили работают и не текут. */
 .ctx-pop { display: flex; flex-direction: column; gap: 7px; width: 260px; max-width: 100%; text-align: left; }
 .ctx-pop-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
@@ -2720,8 +2923,13 @@ function skipQuestion() {
 .ctx-pop-rows { display: flex; flex-direction: column; gap: 4px; padding-top: 7px; border-top: 1px solid var(--line); }
 .ctx-pop-row { display: grid; grid-template-columns: minmax(76px, auto) minmax(0, 1fr); gap: 14px; align-items: baseline; }
 .ctx-pop-label { color: var(--ink-mid); }
-.ctx-pop-value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ctx-pop-row.cache .ctx-pop-value { white-space: normal; }
+.ctx-pop-value {
+  min-width: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .ctx-pop-row.unverified .ctx-pop-value { color: var(--warn); }
 .ctx-pop-actions { display: flex; flex-direction: column; gap: 3px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--ink-mid); }
 .ctx-pop-action { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
@@ -2754,6 +2962,9 @@ function skipQuestion() {
 .e-sub { display: grid; gap: 8px; font-size: 13px; line-height: 1.6; margin-top: 8px; }
 .e-sub p { margin: 0; }
 .e-workdir { overflow-wrap: anywhere; }
+.touch-keyboard-hint { display: none; }
+html[data-ui-touch] .keyboard-hint { display: none; }
+html[data-ui-touch] .touch-keyboard-hint { display: inline; }
 
 .msg { display: flex; flex-direction: column; gap: 4px; }
 /* Текст + иконка копирования рядом (в потоке, не поверх текста). У пользовательских
@@ -2882,8 +3093,16 @@ function skipQuestion() {
 .m-file { font-size: 12.5px; color: var(--ink-mid); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: inline-block; }
 .m-atts a { text-decoration: none; }
 
-/* position — опора для разделителя высоты поля (.cs-resize) */
-.cs-input { position: relative; padding: 12px var(--chat-gutter) 16px; border-top: 1px solid var(--line); }
+/* Единая подложка отделяет всю панель ввода от ленты без вложенной карточки.
+   position оставляет верхнюю линию опорой разделителя высоты (.cs-resize). */
+.cs-input {
+  position: relative;
+  flex: none;
+  padding: 8px var(--chat-gutter);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.cs-input:focus-within { border-top-color: var(--line-2); }
 /* Чипы вложений до отправки */
 .pend { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .chip { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }
@@ -2927,8 +3146,18 @@ function skipQuestion() {
 .drop-box { border: 2px dashed var(--accent); border-radius: 14px; padding: 18px 28px; font-size: 14px;
   color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 
-.composer { display: flex; gap: 6px; align-items: flex-end; background: var(--ground); border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
-.composer:focus-within { border-color: var(--line-2); }
+/* Ввод и действия лежат на общей поверхности нижней панели без отдельной карточки.
+   Фокус отмечает верхний разделитель панели, не замыкая рамку вокруг текста. */
+.composer {
+  position: relative;
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
 
 /* Разделитель высоты поля ввода — на верхней кромке блока, поверх его линии
    (как разделитель дока): собственного места не занимает, включение ресайза
@@ -2946,7 +3175,7 @@ function skipQuestion() {
    полное название есть в подсказке по ховеру. Порог — по ширине чата: на 1440 рядом с
    широким списком шапка уже, чем на планшете без списка. */
 @container chat (max-width: 899px) {
-  .sel .lbl, .bar :deep(.eff .cap) { display: none; }
+  .cs .sel .lbl, .bar :deep(.eff .cap), .bar :deep(.ctx-meter-cap) { display: none; }
 }
 
 /* ── Шапка уже 640 px: строка последнего хода уходит ───────────────────────────
@@ -2968,13 +3197,12 @@ function skipQuestion() {
   .cs-top { --chat-head-gap: 12px; }
   .hrow { flex-wrap: wrap; row-gap: 6px; }
   .ttl { flex: 1 1 calc(100% - 44px); }
-  .task-tip { flex: 1 1 0; max-width: none; }
+  .cs .task-tip { flex: 1 1 0; max-width: none; }
   .bar { flex-wrap: wrap; row-gap: 6px; }
   .factbar { order: 9; flex: 1 1 100%; }
   .spacer { display: none; }
-  /* Резерв под самое длинное слово уровня снят: на 320 px он сталкивал кольцо в свой ряд */
+  /* На телефоне укорачиваем трек: подпись уровня на всех ширинах занимает место по тексту. */
   :deep(.eff .eff-slider) { width: 56px; }
-  :deep(.eff .val) { min-width: 0; }
 }
 
 /* ── Планшет-портрет и телефон: список и чат делят одну колонку ──────────────────
@@ -2989,7 +3217,6 @@ function skipQuestion() {
 /* Узкие сообщения сохраняют прежние размеры текста и предел ширины вложений. */
 @media (max-width: 759px) {
   .cs-top { justify-content: flex-start; }
-  .cs-input { padding-bottom: 12px; }
   /* Иначе длинный текст режется в узкий столбик */
   .msg.user { max-width: 92%; }
   .msg .text { font-size: 14px; }
@@ -2999,31 +3226,28 @@ function skipQuestion() {
 /* При чтении на телефоне шапка занимает один ряд. Настройки раскрываются явно,
    сохраняя те же экземпляры controls и все предупреждения о неизвестной модели. */
 @media (max-width: 600px) {
-  .cs-top { min-height: 56px; padding-block: 6px; flex: none; }
-  .hrow { column-gap: 6px; row-gap: 4px; }
+  .cs-top { min-height: 45px; padding-block: 0; flex: none; }
+  /* Дублируем шкалу настроек на границе шапки: она видна и при закрытом диалоге.
+     Абсолютная линия не отнимает место у названия и сенсорных площадок действий. */
+  .header-context { display: block; position: absolute; inset-inline: 0; bottom: -1px; }
+  .hrow { gap: 4px; }
+  .session-heading { display: flex; align-items: center; gap: 4px; min-width: 0; width: 100%; }
+  .back { margin: 0; }
   .ttl { flex: 1 1 0; }
-  .ctitle { font-size: 16px; }
-  .phone-options { display: grid; order: 2; }
-  .task-tip { order: 3; }
-  .hrow > :deep([data-context='chat-workdir']) { order: 4; }
-  .cs:not(.options-open) .task-tip,
-  .cs:not(.options-open) .tedit,
-  .cs:not(.options-open) :deep([data-context='chat-workdir']) { display: none; }
-  .cs:not(.options-open) .bar > :not(.factbar) { display: none; }
-  .cs:not(.options-open) .bar:not(:has(.warn)) { display: none; }
-  .cs.options-open .ttl { flex-basis: calc(100% - 100px); }
-  .bar { gap: 6px 12px; }
+  .ctitle { font-size: 15px; }
+  .phone-options { display: grid; }
+  .cs .session-workspace, .cs .session-controls, .bar .spacer { display: none; }
+  .bar:not(:has(.warn)) { display: none; }
   .cs-body { min-height: 0; scrollbar-gutter: auto; padding-inline: var(--chat-gutter); }
-  .cs-input { padding: 8px var(--chat-gutter); flex: none; }
   .cs-resize { display: none; }
-  .composer { flex-wrap: wrap; padding: 6px; }
+  .composer { flex-wrap: wrap; align-items: center; }
   .composer > :deep([data-role='chat-composer']) {
     flex: 1 0 100%;
     order: -1;
   }
   .composer > :deep([data-role='chat-attachment']) { margin-right: auto; }
   .cs { --chat-reply-size: .9375rem; --chat-reply-heading-size: 1rem; }
-  .conversation-group.turn { padding-left: 6px; }
+  .conversation-group.turn { padding-left: 6px; gap: 4px; }
   .agent-reply { gap: 4px; padding-left: 0; }
 }
 </style>

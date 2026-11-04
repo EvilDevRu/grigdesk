@@ -1,5 +1,22 @@
 <template>
   <div class="pipeline">
+    <PipelinePhoneToolbar
+      :projects="projectOptions"
+      :statuses="statusOptions"
+      :project="activeProject"
+      :status="activeStatus"
+      :compact="compact"
+      :loops-on="loopsOn"
+      :disabled="!loaded || !!error"
+      :bulk-busy="bulkBusy"
+      :bulk-actions="bulkActions"
+      :bulk-counts="bulkCounts"
+      @project="setProject"
+      @status="setStatus"
+      @compact="toggleCompact"
+      @loops="toggleLoops"
+      @bulk="runBulkAction"
+    />
     <div class="toolbar">
       <div class="pipeline-run-controls" role="group" :aria-label="translate('core.pipelineRunControls')">
         <UiPopover
@@ -335,12 +352,12 @@
         </UiButton>
         <span class="route">{{ ROUTE_ICON[t.route || ''] || '•' }} {{ t.route }}</span>
         <UiButton
-          v-if="t.source === 'grigdesk' || b24Title(t.task)"
+          v-if="t.source === 'grigdesk' || trackerTitle(t.task)"
           class="ctitle"
           data-role="pipeline-title"
           v-tooltip="title(t)"
           variant="text"
-          @click="ui.openTask(t.task)"
+          @click="ui.openTask(t.task, t.source)"
         >
           {{ title(t) }}
         </UiButton>
@@ -358,14 +375,14 @@
           {{ t.readOnly ? '◌ только чтение' : t.stall ? (t.stall.kind === 'crashed' ? '✖ оборвалась' : '🛑 встала') : (t.daemonAlive ? '● идёт' : '○ стоит') }}
         </span>
         <span
-          v-if="b24TimerState(t)"
-          class="b24-timer mono"
-          :class="b24TimerState(t)"
-          data-role="pipeline-b24-timer"
-          :data-state="b24TimerState(t)"
+          v-if="trackerTimerState(t)"
+          class="tracker-timer mono"
+          :class="trackerTimerState(t)"
+          data-role="pipeline-tracker-timer"
+          :data-state="trackerTimerState(t)"
           v-tooltip="'Таймер Битрикс24 по этой задаче'"
         >
-          {{ b24TimerLabel(t) }}
+          {{ trackerTimerLabel(t) }}
         </span>
         <!-- Чистая работа узлов: все петли входят, ожидание человека на воротах — нет. -->
         <span v-if="t.graph.timing" class="elapsed mono" v-tooltip="elapsedTitle(t)">⏱ {{ elapsedLabel(t) }}</span>
@@ -421,10 +438,11 @@
               стенд
             </span>
             <div class="strip__links">
-              <StandLink size="compact" :href="sandboxUrl(t.graph.fePort, t.graph.serviceHost) || ''">
+              <StandLink size="compact" data-context="pipeline-stand-link"
+                         :href="sandboxUrl(t.graph.fePort, t.graph.serviceHost) || ''">
                 фронт :{{ t.graph.fePort }}
               </StandLink>
-              <StandLink v-if="t.graph.apiPort" size="compact"
+              <StandLink v-if="t.graph.apiPort" size="compact" data-context="pipeline-stand-link"
                          :href="sandboxUrl(t.graph.apiPort, t.graph.serviceHost) || ''">
                 API :{{ t.graph.apiPort }}
               </StandLink>
@@ -476,55 +494,47 @@
       data-ui-workspace
       size="workspace"
       :label="stage?.label || 'Этап конвейера'"
+      initial-focus="#stage-modal-title"
       :body-inset="false"
       fade-only
       @update:open="onStageDialogOpenChange"
     >
-        <header class="sh">
-          <div class="shead-copy">
-            <span class="shead-kicker">{{ translate('core.stageWorkspace') }}
-              <span aria-hidden="true">/</span> <span class="mono">{{ stage!.key }}</span>
-            </span>
-            <h3 id="stage-modal-title">{{ stage!.label }}</h3>
+      <div class="stage-detail">
+        <div class="sh">
+          <UiPaneHeader inset="content" data-ui-detail-header>
+            <template #title>{{ translate('core.stageWorkspace') }}</template>
+            <template #meta><span class="stage-key mono">{{ stage!.key }}</span></template>
+            <template #actions>
+              <UiIconButton
+                data-context="pipeline-stage-close"
+                label="Закрыть этап"
+                v-tooltip="'Закрыть (Esc)'"
+                @click="closeStage()"
+              >
+                ✕
+              </UiIconButton>
+            </template>
+          </UiPaneHeader>
+          <div class="sheading">
+            <h3 id="stage-modal-title" tabindex="-1">{{ stage!.label }}</h3>
+          </div>
+        </div>
+
+        <!-- Контекст этапа повторяет сведения задачи: состояние и исполнитель под
+             названием. Шапка с закрытием не растёт вместе с этими метаданными. -->
+        <div id="stage-task-context" class="stage-context">
+          <div class="shead-state">
+            <span class="sbadge" :class="stageArbitrating ? 'arb' : stage!.status">{{
+              stageArbitrating ? 'арбитр разбирает' : stageStatusHint(stage!)
+            }}</span>
+            <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{
+              agentActivityLabel(stageActivity)
+            }}</span>
             <span v-if="stage!.meta.runner" class="shead-executor">
               {{ runnerNodeLabel(stage!.meta.runner) }}
               <span class="shead-model mono">{{ runnerModelEffortLabel(stage!.meta.runner) }}</span>
             </span>
           </div>
-          <!-- Статус этапа и признак жизни хода — один вопрос человека («этап идёт
-               или встал?»), поэтому они стоят рядом. Раньше ответ был разнесён по двум
-               полосам: бейдж в шапке, «нет событий 28 мин» — строкой ниже среди чипов. -->
-          <div class="shead-state">
-            <span v-if="stageActivity" class="smchip jf" :class="{ on: stageActivity.journalFresh }">{{
-              agentActivityLabel(stageActivity)
-            }}</span>
-            <span class="sbadge" :class="stageArbitrating ? 'arb' : stage!.status">{{
-              stageArbitrating ? 'арбитр разбирает' : stageStatusHint(stage!)
-            }}</span>
-          </div>
-          <UiIconButton
-            class="sx"
-            data-context="pipeline-stage-close"
-            label="Закрыть этап"
-            v-tooltip="'Закрыть (Esc)'"
-            @click="closeStage()"
-          >
-            ✕
-          </UiIconButton>
-        </header>
-
-        <!-- В обсуждении статус принадлежит шапке арбитра и не дублируется над вкладками.
-             В журнале и настройках плашка сохраняет сведения об идущем разборе. -->
-        <div v-if="stageArbitrating && (!stageUsesConversation || stageTab !== 'result')"
-             class="sarbrun sarbnode">
-          <span class="sarbspin" aria-hidden="true"></span>
-          <span class="sarbtxt">Арбитр разбирает эту остановку — ожидается результат</span>
-          <span class="sarbmeta mono">{{ arbiterRunLabel(stageArbitrating) }}</span>
-        </div>
-
-        <!-- Контекст решения: задачу и её стенд видно, пока ворота открыты. Ссылки те же,
-             что в подвале карточки конвейера; нового действия или отдельного API здесь нет. -->
-        <div id="stage-task-context" class="stage-context">
           <div class="stage-task-context">
             <span class="stage-context-label">Задача <b class="mono">#{{ stage!.task }}</b></span>
             <span v-if="stageTaskTitle" class="stage-task-title" v-tooltip="stageTaskTitle">{{ stageTaskTitle }}</span>
@@ -546,6 +556,15 @@
             </span>
             <span v-else class="stage-stand-state">не поднят</span>
           </div>
+        </div>
+
+        <!-- В обсуждении статус принадлежит шапке арбитра и не дублируется над вкладками.
+             В журнале и настройках плашка сохраняет сведения об идущем разборе. -->
+        <div v-if="stageArbitrating && (!stageUsesConversation || stageTab !== 'result')"
+             class="sarbrun sarbnode">
+          <span class="sarbspin" aria-hidden="true"></span>
+          <span class="sarbtxt">Арбитр разбирает эту остановку — ожидается результат</span>
+          <span class="sarbmeta mono">{{ arbiterRunLabel(stageArbitrating) }}</span>
         </div>
 
         <div class="stage-navigation">
@@ -702,7 +721,7 @@
                     tone="danger"
                     variant="solid"
                     :loading="stageBusy === 'gate'"
-                    :disabled="stageBusy === 'gate'"
+                    :disabled="Boolean(stageBusy)"
                     loading-label="Отправляю на доработку"
                     @click="gateDecide('reject')"
                   >
@@ -710,7 +729,7 @@
                   </UiButton>
                   <UiButton
                     class="btn"
-                    :disabled="stageBusy === 'gate'"
+                    :disabled="Boolean(stageBusy)"
                     @click="cancelGateReject()"
                   >
                     Отмена
@@ -725,7 +744,7 @@
                     tone="success"
                     variant="solid"
                     :loading="stageBusy === 'gate'"
-                    :disabled="stageBusy === 'gate' || (stage!.id === 'gate_accept' && !stageFindingsReady)"
+                    :disabled="Boolean(stageBusy) || (stage!.id === 'gate_accept' && !stageFindingsReady)"
                     loading-label="Принимаю решение"
                     @click="gateDecide('approve')"
                   >
@@ -735,7 +754,7 @@
                     class="btn bad"
                     tone="danger"
                     variant="solid"
-                    :disabled="stageBusy === 'gate'"
+                    :disabled="Boolean(stageBusy)"
                     @click="startGateReject()"
                   >
                     ✗ Отклонить
@@ -798,7 +817,7 @@
                 variant="solid"
                 block
                 :loading="stageBusy === 'force'"
-                :disabled="stageBusy === 'force'"
+                :disabled="Boolean(stageBusy)"
                 loading-label="Возвращаю конвейер"
                 @click="forceStatus('running')"
               >
@@ -885,7 +904,7 @@
                       data-role="pipeline-compact-action"
                       variant="text"
                       tone="warning"
-                      :disabled="stageBusy === 'runner-override'"
+                      :disabled="Boolean(stageBusy)"
                       @click="setStageRunner('')"
                     >
                       Сбросить
@@ -905,7 +924,7 @@
                       :selected="id === stageRunnerActive"
                       :pressed="id === stageRunnerActive"
                       :aria-busy="runnerPending === id"
-                      :disabled="stageBusy === 'runner-override'"
+                      :disabled="Boolean(stageBusy)"
                       @select="pickStageRunner(id)"
                     >
                       <span class="executor-identity">
@@ -959,7 +978,7 @@
                     tone="warning"
                     variant="outline"
                     :loading="stageBusy === 'runner-switch'"
-                    :disabled="stageBusy === 'runner-switch'"
+                    :disabled="Boolean(stageBusy)"
                     :loading-label="`Переключаю на ${providerLabel(id)}`"
                     @click="switchRunner(id)"
                   >
@@ -1065,14 +1084,17 @@
             <OpenDiffButton :task-id="stage!.task" />
           </div>
         </footer>
+      </div>
     </UiDialog>
 
   </div>
 </template>
 
 <script setup lang="ts">
+import { boardSupportsTimer } from '../shared/trackerCapabilities.ts';
 import StandLink from '../shared/browser/StandLink.vue';
 import PipelineLoading from './PipelineLoading.vue';
+import PipelinePhoneToolbar from './pipeline/PipelinePhoneToolbar.vue';
 
 import DeferredFindings from './pipeline/DeferredFindings.vue';
 import StageExecutorFields from './pipeline/StageExecutorFields.vue';
@@ -1097,6 +1119,8 @@ type BulkScope = 'all' | 'project';
 
 interface Stage {
   task: TaskId;
+  profile?: string;
+  attempt?: string | number | null;
   id: string;
   key: string;
   runnerKey: string;
@@ -1115,6 +1139,13 @@ interface StageNode {
   status: string;
 }
 
+type StageAction = 'gate' | 'force' | 'runner-switch' | 'runner-override';
+
+interface PendingStageAction {
+  action: StageAction;
+  runner?: string;
+}
+
 import { useSse } from '../composables/useSse.ts';
 import { useUiContextSource } from '../composables/useUiContextSource.ts';
 import { useUiStore } from '../stores/ui.ts';
@@ -1128,6 +1159,7 @@ import {
   UiDialog,
   UiDisclosureButton,
   UiIconButton,
+  UiPaneHeader,
   UiPopover,
   UiSpinner,
   UiSelectableRow,
@@ -1195,7 +1227,7 @@ function collapsedCards(value: unknown): TaskId[] {
   return value;
 }
 
-function b24Title(taskNum: TaskId) {
+function trackerTitle(taskNum: TaskId) {
   return taskStore.title(taskNum);
 }
 
@@ -1210,7 +1242,7 @@ function title(taskOrNum: PipelineViewTask | TaskId) {
     ? taskOrNum
     : tasks.value.find((item) => Number(item.task) === Number(taskNum));
 
-  return task?.source === 'grigdesk' ? task.title || null : b24Title(taskNum) || task?.title || null;
+  return task?.source === 'grigdesk' ? task.title || null : trackerTitle(taskNum) || task?.title || null;
 }
 
 const boardTasksById = computed(() => new Map(
@@ -1225,7 +1257,11 @@ function boardTask(t: PipelineViewTask) {
  * Не превращаем отсутствие портальной задачи в ложное состояние «таймер стоит».
  * Статус существует только для явного булева значения из снимка доски.
  */
-function b24TimerState(t: PipelineViewTask) {
+function trackerTimerState(t: PipelineViewTask) {
+  if (!boardSupportsTimer(board.data)) {
+    return null;
+  }
+
   const timerRunning = boardTask(t)?.timerRunning;
 
   if (timerRunning === true) {
@@ -1243,10 +1279,10 @@ function b24TimerState(t: PipelineViewTask) {
  * Подписывает только явно известное состояние портального таймера.
  * Отсутствие задачи остаётся пустой подписью, а не остановленным таймером.
  */
-function b24TimerLabel(t: PipelineViewTask) {
+function trackerTimerLabel(t: PipelineViewTask) {
   const task = boardTask(t);
 
-  if (!task || typeof task.timerRunning !== 'boolean') {
+  if (!boardSupportsTimer(board.data) || !task || typeof task.timerRunning !== 'boolean') {
     return '';
   }
 
@@ -1261,7 +1297,7 @@ const outsideTimers = computed(() => {
 
   const d = board.data;
 
-  if (!d) {
+  if (!d || !boardSupportsTimer(d)) {
     return [];
   }
 
@@ -1738,7 +1774,42 @@ function isCollapsed(task: TaskId) {
 
 // Модалка этапа (клик по узлу графа): инфо + управление (ворота/форс/указание/активность).
 const stage = ref<Stage | null>(null);
-const stageBusy = ref<string | null>(null);
+const pendingStageActions = ref(new Map<string, PendingStageAction>());
+const stagePending = computed(() => (
+  stage.value ? pendingStageActions.value.get(stageActionKey(stage.value)) : undefined
+));
+const stageBusy = computed(() => stagePending.value?.action ?? null);
+
+function stageActionKey(opened: Stage) {
+  return JSON.stringify([String(opened.task), opened.profile, opened.attempt, opened.id]);
+}
+
+/**
+ * Занимает только исходный узел конкретной попытки, независимо от открытого окна.
+ * Повторный запрос к занятому узлу не может подменить выполняемое действие.
+ */
+function beginStageAction(opened: Stage, action: StageAction, runner?: string) {
+  const key = stageActionKey(opened);
+
+  if (pendingStageActions.value.has(key)) {
+    return false;
+  }
+
+  pendingStageActions.value.set(key, { action, runner });
+
+  return true;
+}
+
+function finishStageAction(opened: Stage) {
+  pendingStageActions.value.delete(stageActionKey(opened));
+}
+
+function closeCompletedStage(opened: Stage) {
+  if (stage.value === opened) {
+    closeStage();
+  }
+}
+
 // Два РАЗНЫХ текста, а не один на обе кнопки: у ворот пояснение доезжает до агента только
 // при отклонении, у возврата — всегда. Общий ref переносил бы набранное из одного смысла
 // в другой и подсказывал, что при «Принять» текст тоже куда-то уйдёт (он не уходит).
@@ -1922,6 +1993,8 @@ function openStage(t: PipelineViewTask, node: StageNode) {
 
   stage.value = {
     task: t.task,
+    profile: t.profile,
+    attempt: t.attempt,
     id: nodeId,
     key: t.graph.keys?.[nodeId] || nodeId.toUpperCase(),
     runnerKey: t.graph.runnerKeys?.[nodeId]
@@ -1941,24 +2014,28 @@ function openStage(t: PipelineViewTask, node: StageNode) {
   gateRejecting.value = false;
   rewindComment.value = '';
   rewindAnswers.value = {};
-  runnerPending.value = null;
   stageActivity.value = null;
   stageDoc.value = '';
   stageDocOpen.value = true;
   stageDocLoading.value = false;
   stageLogOpen.value = false;
 
+  const opened = stage.value;
   const doc = NODE_DOC[nodeId];
 
   if (doc) {
     stageDocLoading.value = true;
     api.get(`/api/tasks/${t.task}/doc/${doc}`)
       .then((r) => {
-        stageDoc.value = decodePipelineReply(r).text || '';
+        if (stage.value === opened) {
+          stageDoc.value = decodePipelineReply(r).text || '';
+        }
       })
       .catch(() => { /* документа нет — секция не показывается */ })
       .finally(() => {
-        stageDocLoading.value = false;
+        if (stage.value === opened) {
+          stageDocLoading.value = false;
+        }
       });
   }
 
@@ -1987,12 +2064,18 @@ function onStageDialogOpenChange(open: boolean) {
  * Отказ не закрывает модалку и не стирает последний успешный снимок.
  */
 async function pollActivity() {
-  if (!stage.value) {
+  const opened = stage.value;
+
+  if (!opened) {
     return;
   }
 
   try {
-    stageActivity.value = decodePipelineActivity(await api.get(`/api/tasks/${stage.value!.task}/activity`));
+    const activity = decodePipelineActivity(await api.get(`/api/tasks/${opened.task}/activity`));
+
+    if (stage.value === opened && opened.status === 'run' && opened.daemonAlive) {
+      stageActivity.value = activity;
+    }
   } catch { /* игнор */ }
 }
 // Модалка живёт дольше этапа: её открывают на бегущем узле и не закрывают. Статус в ней
@@ -2210,27 +2293,31 @@ function gateErrorText(e: unknown) {
  * Комментарий передаётся только при отклонении, как требует маршрут.
  */
 async function gateDecide(decision: string) {
-  stageBusy.value = 'gate';
+  const opened = stage.value;
+
+  if (!opened || !beginStageAction(opened, 'gate')) {
+    return;
+  }
   // При принятии комментарий не отправляем вовсе: пустое поле честнее, чем текст,
   // который движок молча выбросит, а проекция реестра потом покажет как «Замечание».
   const comment = decision === 'reject' ? gateComment.value : '';
 
   try {
     const res = decodePipelineReply(await api.post(
-      `/api/tasks/${stage.value!.task}/gate/${stage.value!.key}/${decision}`, {
+      `/api/tasks/${opened.task}/gate/${opened.key}/${decision}`, {
       comment,
-      profile: stageTask.value?.profile,
-      attempt: stageTask.value?.attempt,
+      profile: opened.profile,
+      attempt: opened.attempt,
     }));
 
     await load();
-    closeStage();
+    closeCompletedStage(opened);
     await warnIfNotResumed(res);
   }
   catch (e) {
     await alertDialog(gateErrorText(e));
   } finally {
-    stageBusy.value = null;
+    finishStageAction(opened);
   }
 }
 
@@ -2240,57 +2327,75 @@ async function gateDecide(decision: string) {
  * Указание человека уходит вместе с прежним запросом смены статуса.
  */
 async function forceStatus(status: string) {
+  const opened = stage.value;
+
+  if (!opened || stageBusy.value) {
+    return;
+  }
+
+  const comment = buildRewindNote(rewindQuestions.value, rewindAnswers.value, rewindComment.value);
   // Возврат курсора сбрасывает НЕ ТОЛЬКО этот узел, но и весь хвост маршрута за ним.
   // Возврат с приёмки на план сносит результаты всего, что между.
-  const question = `Вернуть конвейер на «${stage.value!.label}»? `
+  const question = `Вернуть конвейер на «${opened.label}»? `
     + 'Результаты этого узла и всех следующих за ним будут сброшены.';
 
   if (!await confirmDialog(question, { okText: 'Вернуть' })) {
     return;
   }
 
-  stageBusy.value = 'force';
+  if (stage.value !== opened || !beginStageAction(opened, 'force')) {
+    return;
+  }
+
   // Указание уезжает тем же запросом, что и сам возврат: сервер кладёт его в журнал
   // попытки причиной human-rewind, движок оттуда подмешивает его в промпт захода.
   try {
     const res = decodePipelineReply(await api.post(
-      `/api/tasks/${stage.value!.task}/stage/${stage.value!.key}/${status}`,
-      { comment: buildRewindNote(rewindQuestions.value, rewindAnswers.value, rewindComment.value) }));
+      `/api/tasks/${opened.task}/stage/${opened.key}/${status}`,
+      { comment }));
 
     await load();
-    closeStage();
+    closeCompletedStage(opened);
     await warnIfNotResumed(res);
   }
   catch (e) {
     alertDialog(`Ошибка: ${errorMessage(e, '')}`);
   } finally {
-    stageBusy.value = null;
+    finishStageAction(opened);
   }
 }
 // Выбор исполнителя модалку НЕ закрывает: человек сравнивает варианты и перебирает их,
 // а закрытие после каждого клика заставляло открывать узел заново. Новое состояние узла
 // приезжает обычным путём — load() → watch(stageLive) → stage.meta.
 async function switchRunner(target: string) {
+  const opened = stage.value;
+
+  if (!opened || stageBusy.value) {
+    return;
+  }
+
   if (!await confirmDialog(
-    `Остановить текущий запуск ${providerLabel(stage.value!.meta.runner!.actual)} `
+    `Остановить текущий запуск ${providerLabel(opened.meta.runner!.actual)} `
       + `и продолжить этап через ${providerLabel(target)}?`,
     { okText: 'Переключить' },
   )) {
     return;
   }
 
-  stageBusy.value = 'runner-switch';
+  if (stage.value !== opened || !beginStageAction(opened, 'runner-switch')) {
+    return;
+  }
 
   try {
-    await api.post(`/api/tasks/${stage.value!.task}/runner/switch`, {
-      stage: stage.value!.runnerKey,
+    await api.post(`/api/tasks/${opened.task}/runner/switch`, {
+      stage: opened.runnerKey,
       target,
     });
     await load();
   } catch (e) {
     alertDialog(`Не удалось переключить исполнителя: ${errorMessage(e, '')}`);
   } finally {
-    stageBusy.value = null;
+    finishStageAction(opened);
   }
 }
 // Исполнители, установленные на фабрике — для override этапа. Тянем один раз,
@@ -2332,29 +2437,26 @@ const stageRunnerLive = computed(() => Boolean(
 ));
 // Кого выбрали прямо сейчас: подсветка обязана переехать по клику, а не через секунду,
 // когда доедет полный load() всех задач с графами.
-const runnerPending = ref<string | null>(null);
+const runnerPending = computed(() => stagePending.value?.runner || null);
 const stageRunnerActive = computed(() => (
   runnerPending.value ?? (stage.value?.meta?.runner?.primary || '')
 ));
 // Override исполнителя до запуска этапа (бегущий переключают только кнопки switch).
 // '' — снять override этапа: вернётся переопределение задачи с запуска или профиль.
 async function setStageRunner(primary: string) {
-  if (stageBusy.value) {
+  const opened = stage.value;
+
+  if (!opened || !beginStageAction(opened, 'runner-override', primary)) {
     return;
   }
 
-  stageBusy.value = 'runner-override';
-  // У сброса будущего значения нет (его решит профиль) — подсветку до ответа не двигаем.
-  runnerPending.value = primary || null;
-
   try {
-    await taskStore.setStageRunner(stage.value!.task, stage.value!.runnerKey, primary);
+    await taskStore.setStageRunner(opened.task, opened.runnerKey, primary);
     await load();
   } catch (e) {
     alertDialog(`Не удалось сменить исполнителя этапа: ${errorMessage(e, '')}`);
   } finally {
-    stageBusy.value = null;
-    runnerPending.value = null;
+    finishStageAction(opened);
   }
 }
 
@@ -2979,6 +3081,16 @@ const bulkActions = [
   },
 ] as const;
 const bulkBusy = ref<BulkAction | null>(null);
+const bulkCounts = computed(() => ({
+  resume: {
+    project: bulkCandidates('resume', 'project').length,
+    all: bulkCandidates('resume', 'all').length,
+  },
+  stop: {
+    project: bulkCandidates('stop', 'project').length,
+    all: bulkCandidates('stop', 'all').length,
+  },
+}));
 
 /**
  * Область команды берётся из вкладки проекта, независимо от фильтра состояния.
@@ -3107,7 +3219,7 @@ const STATE_RELOAD_DELAY_MS = 800;
 async function loadSnapshot() {
   try {
     const { tasks: list = [], silenceWindow: nextSilenceWindow }
-      = decodePipelineTasks(await api.get('/api/tasks'));
+      = decodePipelineTasks(await api.get('/api/tasks?sources=1'));
     const graphs = await Promise.all(
       list.map((t) => api.get(`/api/tasks/${t.task}/graph`).catch(() => null)
         .then((graph) => graph == null ? null : decodePipelineViewGraph(graph))),
@@ -3597,9 +3709,9 @@ function cardState(g: PipelineViewGraph) {
 .daemon.alive { color: var(--good); }
 .daemon.idle { color: var(--ink-mid); }
 .daemon.stall { color: var(--bad); font-weight: 600; }
-.b24-timer { flex: none; font-size: 12px; white-space: nowrap; }
-.b24-timer.running { color: var(--good); }
-.b24-timer.stopped { color: var(--ink-mid); }
+.tracker-timer { flex: none; font-size: 12px; white-space: nowrap; }
+.tracker-timer.running { color: var(--good); }
+.tracker-timer.stopped { color: var(--ink-mid); }
 .elapsed { font-size: 12px; color: var(--ink-mid); white-space: nowrap; }
 
 .progress { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
@@ -3672,75 +3784,76 @@ function cardState(g: PipelineViewGraph) {
 
 /* Окно узла разделяет чтение результата, настройку и решение человека.
    Шапка и вкладки постоянны; документ получает собственную спокойную поверхность. */
-.sh {
-  min-height: 78px;
-  flex: none;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: start;
-  gap: 20px;
-  padding: 12px 16px 10px 18px;
+.stage-detail {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  container: pipeline-stage / inline-size;
   background: var(--surface);
 }
-.shead-copy {
+.sh {
+  flex: none;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
-.shead-kicker {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: var(--ink-mid);
-  font-size: 11px;
-  line-height: 14px;
+.sheading {
+  min-width: 0;
+  padding: 18px 20px 10px;
 }
-.shead-kicker > span:first-child {
-  opacity: .4;
+.stage-key {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
 }
-.sh h3 {
+.sheading h3 {
+  max-height: 84px;
   margin: 0;
+  overflow-y: auto;
   color: var(--ink);
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 650;
-  line-height: 1.2;
-  letter-spacing: -.035em;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 .shead-executor {
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 9px;
+  gap: 4px 9px;
   color: var(--ink-mid);
-  font-size: 11px;
-  line-height: 14px;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .shead-model {
-  opacity: .75;
   font-size: 11px;
 }
 .shead-state {
+  min-width: 0;
   display: flex;
-  justify-content: flex-end;
   align-items: center;
-  gap: 8px;
+  gap: 8px 18px;
   flex-wrap: wrap;
-  padding-top: 2px;
+}
+.shead-state .jf {
+  margin-left: 0;
 }
 .stage-context {
   flex: none;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 20px;
-  min-height: 36px;
-  padding: 7px 18px;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--ground) 45%, var(--surface));
+  gap: 8px 18px;
+  padding: 0 20px 8px;
+}
+.stage-context .shead-state {
+  flex: 1 0 100%;
 }
 .stage-task-context {
+  flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -3802,11 +3915,12 @@ function cardState(g: PipelineViewGraph) {
 }
 .stage-navigation {
   flex: none;
+  min-width: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 0 18px;
+  padding: 0 20px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
 }
@@ -3886,9 +4000,17 @@ function cardState(g: PipelineViewGraph) {
 
 /* Компактная строка метаданных */
 .smeta { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.sbadge { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px;
-  border-radius: 999px; font-size: 10px; font-weight: 650;
-  line-height: 1.15; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+.sbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
 /* Точка статуса: цвет и слово читаются одним знаком, как у узлов на графе. */
 .sbadge::before { content: ''; flex: none; width: 5px; height: 5px; border-radius: 50%;
   background: currentColor; }
@@ -4256,7 +4378,7 @@ function cardState(g: PipelineViewGraph) {
   justify-content: space-between;
   gap: 14px;
   margin-top: auto;
-  padding: 6px 16px 6px 18px;
+  padding: 10px 20px;
   border-top: 1px solid var(--line);
   background: var(--surface);
 }
@@ -4319,37 +4441,8 @@ function cardState(g: PipelineViewGraph) {
 }
 
 @media (max-width: 600px) {
-  .sh {
-    min-height: 0;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
-    padding: 14px 12px;
-  }
-  .shead-copy {
-    grid-column: 1;
-    grid-row: 1;
-  }
-  .shead-state {
-    grid-column: 1;
-    grid-row: 2;
-    justify-content: flex-start;
-    padding-top: 0;
-  }
-  .sx {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-  }
-  .sh h3 {
-    font-size: 18px;
-  }
-  .shead-executor {
-    font-size: 11px;
-    gap: 5px;
-  }
-  .stage-context {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 9px;
-    padding: 8px 12px;
+  .stage-task-context {
+    flex-basis: 100%;
   }
   .stage-task-context {
     align-items: baseline;
@@ -4367,10 +4460,6 @@ function cardState(g: PipelineViewGraph) {
   }
   .stage-stand-link {
     min-height: 28px;
-  }
-  .stage-navigation {
-    gap: 0;
-    padding: 0 12px;
   }
   .stage-readonly {
     display: none;
@@ -4424,13 +4513,126 @@ function cardState(g: PipelineViewGraph) {
   }
 }
 
+@container pipeline-stage (max-width: 480px) {
+  .sheading {
+    padding: 10px 12px 8px;
+  }
+  .sheading h3 {
+    max-height: 70px;
+    font-size: 16px;
+  }
+  .stage-context {
+    max-height: 72px;
+    padding: 0 12px 10px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .shead-state {
+    gap: 6px 14px;
+  }
+  .shead-executor {
+    font-size: 11px;
+    gap: 4px 6px;
+  }
+  .stage-navigation {
+    gap: 0;
+    padding: 0 12px;
+  }
+}
+
+@media (max-height: 540px) {
+  .sheading {
+    padding-block: 6px;
+  }
+  .sheading h3 {
+    max-height: 48px;
+    font-size: 16px;
+  }
+  .stage-context {
+    max-height: 46px;
+    padding-bottom: 6px;
+    overflow-y: auto;
+  }
+}
+
 @media (max-height: 700px) and (min-width: 601px) {
-  .sh { min-height: 56px; }
   .live-feed { max-height: 190px; }
   .runner-attempts { max-height: 200px; }
 }
 @media (max-width: 600px) {
-  .head { flex-wrap: wrap; gap: 6px 8px; }
-  .head .ctitle { order: 10; flex: 1 0 100%; white-space: normal; overflow-wrap: anywhere; }
+  .toolbar {
+    display: none;
+  }
+
+  .card {
+    min-width: 0;
+    padding: 10px 12px 12px;
+  }
+
+  .head {
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-bottom: 8px;
+  }
+
+  .head .ctitle {
+    order: 10;
+    flex: 1 0 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .head .daemon {
+    margin-inline-start: auto;
+  }
+
+  .progress {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+  }
+
+  .pw {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    overflow-wrap: anywhere;
+  }
+
+  .pbar-wrap,
+  .pnum {
+    grid-row: 2;
+  }
+
+  .strip {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 12px;
+  }
+
+  .strip__context {
+    flex: none;
+    overflow-wrap: anywhere;
+  }
+
+  .strip__stand {
+    display: grid;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .strip__links {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .strip__links > * {
+    min-width: 0;
+  }
+
+  .strip__actions {
+    margin-inline-start: 0;
+  }
 }
 </style>

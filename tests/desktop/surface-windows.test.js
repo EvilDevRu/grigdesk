@@ -148,6 +148,60 @@ test('SW-01: у каждой задачи своё окно, повтор под
   f.controller.closeAll();
   assert.equal(f.made.every((win) => win.destroyed), true);
 });
+test('SW-SOURCE: одинаковые номера разных источников открываются независимо', async (t) => {
+  const f = fixture();
+  const origin = 'http://127.0.0.1:47101';
+  const id = '100000000000';
+  const targets = [
+    {
+      kind: 'task',
+      id,
+    },
+    {
+      kind: 'task',
+      id,
+      source: 'grigdesk',
+    },
+    {
+      kind: 'task',
+      id,
+      source: `grigdesk-b24@${'a'.repeat(64)}`,
+    },
+    {
+      kind: 'task',
+      id,
+      source: `grigdesk-b24@${'b'.repeat(64)}`,
+    },
+  ];
+  const gate = Promise.withResolvers();
+
+  t.after(() => f.controller.closeAll());
+  f.holdNext(gate.promise);
+
+  const first = f.controller.open(origin, targets[0]);
+  const repeated = f.controller.open(origin, targets[0]);
+
+  assert.equal(repeated, first);
+
+  for (const target of targets.slice(1)) {
+    assert.equal(await f.controller.open(origin, target), true);
+  }
+
+  assert.deepEqual(f.made.map((window) => window.target), targets);
+  gate.resolve();
+  assert.equal(await first, true);
+
+  for (const [index, target] of targets.entries()) {
+    const focuses = f.made[index].focuses;
+
+    assert.equal(await f.controller.open(origin, target), true);
+    assert.equal(f.made[index].focuses, focuses + 1);
+    assert.equal(f.made[index].loads.length, 1);
+  }
+
+  assert.equal(f.made.length, targets.length);
+});
+
 test('SW-02: отмена pending не показывает окно; старый origin не создаёт новое', async () => {
   const f = fixture();
   const blocked = Promise.withResolvers();

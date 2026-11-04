@@ -184,7 +184,7 @@ test('ограничение сетевых отказов Б24 не скрыв�
   t.mock.method(globalThis, 'fetch', async () => new Response('private-invalid-json'));
 
   for (let index = 0; index < 2; index += 1) {
-    await assert.rejects(api.get('/api/b24/task/private-id', { retry: false }), SyntaxError);
+    await assert.rejects(api.get('/api/tracker/task/private-id', { retry: false }), SyntaxError);
   }
 
   const failures = f.log.snapshot().entries.filter((entry) => entry.ev === 'api.fail');

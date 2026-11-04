@@ -1,3 +1,5 @@
+import { isTaskSourceId, parseTaskReference } from '../../../shared/tasks/taskReference.ts';
+import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import { defineStore } from 'pinia';
 
 import { parseSurfaceTarget } from '../../../shared/desktop/surfaceContract.ts';
@@ -46,22 +48,45 @@ function showOpeningFailure() {
 }
 
 export const useUiStore = defineStore('ui', {
-  state: () => ({ taskId: null as string | null }),
+  state: () => ({ taskId: null as string | null, taskSource: undefined as TaskSourceId | undefined }),
 
   actions: {
     /**
      * Все экраны выбирают размещение карточки через один вход по capability оболочки.
      * Документ карточки сохраняет свою цель даже при отказе открытия соседней задачи.
      */
-    async openTask(id: string | number): Promise<void> {
+    async openTask(id: string | number, source?: unknown): Promise<void> {
+      if (source !== undefined && !isTaskSourceId(source)) {
+        showOpeningFailure();
+
+        return;
+      }
+
+      const reference = parseTaskReference(isTaskSourceId(source) ? `${source}:${id}` : id);
+
+      if (!reference) {
+        showOpeningFailure();
+
+        return;
+      }
+
+      id = reference.id;
+      source = reference.source;
+
       const generation = nextGeneration(this);
       const surface = currentDesktopMode() === 'surface';
-      const target = parseSurfaceTarget({ kind: 'task', id: String(id) });
-      const supported = useShellStore().capabilities.includes('windows');
+      const target = parseSurfaceTarget({
+        kind: 'task',
+        id: String(id),
+        ...(source ? { source } : {})
+      });
+      const supported = useShellStore().capabilities.includes('windows')
+        && (!source || useShellStore().capabilities.includes('taskSources'));
 
       if (!target || !supported) {
         if (!surface) {
           this.taskId = String(id);
+          this.taskSource = reference.source;
         } else {
           showOpeningFailure();
         }
@@ -96,16 +121,19 @@ export const useUiStore = defineStore('ui', {
       }
 
       this.taskId = result === 'window' ? null : String(id);
+      this.taskSource = result === 'window' ? undefined : reference.source;
     },
 
-    openTaskInline(id: string | number) {
+    openTaskInline(id: string | number, source?: TaskSourceId) {
       nextGeneration(this);
       this.taskId = String(id);
+      this.taskSource = source;
     },
 
     close() {
       nextGeneration(this);
       this.taskId = null;
+      this.taskSource = undefined;
     },
   },
 });

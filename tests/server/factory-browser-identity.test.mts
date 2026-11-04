@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -62,28 +63,28 @@ function procStat(pid: number, starttime: string, state = 'S'): string {
  * Fixture не читает личный runtime и создаёт control вне provider-writable state.
  * Изменяемые closures дают детерминированные stale/death/PID-reuse сценарии.
  */
-async function fixture(t: TestContext) {
+async function fixture(t: TestContext, stage = 'CHECK') {
   const root = await mkdtemp(path.join(os.tmpdir(), 'browser-authority-'));
 
   t.after(() => rm(root, { recursive: true, force: true }));
 
   const proof: BrowserRunProof = {
     task: '77',
-    stage: 'CHECK',
+    stage,
     runId: 'run-a',
     epoch: '2',
     attemptId: ATTEMPT,
     token: 'fixture-token-with-private-authority',
   };
   const tokenHash = createHash('sha256').update(proof.token).digest('hex');
-  const active = path.join(root, 'runs/t77/CHECK.active');
+  const active = path.join(root, `runs/t77/${stage}.active`);
   const live = path.join(root, 'runner-processes/t77.active');
 
   await mkdir(path.dirname(active), { recursive: true, mode: 0o700 });
   await mkdir(path.dirname(live), { recursive: true, mode: 0o700 });
   await writeFile(active, `SCHEMA=1\nRUN_ID=run-a\nEPOCH=2\nTOKEN_HASH=${tokenHash}\nSTATE=active\n`,
     { mode: 0o600 });
-  await writeFile(live, 'SCHEMA=1\nTASK=77\nSTAGE=CHECK\nRUN_ID=run-a\nEPOCH=2\n'
+  await writeFile(live, `SCHEMA=1\nTASK=77\nSTAGE=${stage}\nRUN_ID=run-a\nEPOCH=2\n`
     + 'RUNNER=codex\nPID=1234\nPGID=1234\nSESSION=1234\nSTARTTIME=987\nSTATE=active\n',
   { mode: 0o600 });
 
@@ -94,8 +95,8 @@ async function fixture(t: TestContext) {
     catalogHash: 'c'.repeat(64),
     route: 'feature',
     routeHash: 'd'.repeat(64),
-    node: 'check',
-    runKey: 'CHECK',
+    node: stage.toLowerCase(),
+    runKey: stage,
     sequence: 8,
     headEventHash: 'e'.repeat(64),
     identity: 'head-a',
@@ -187,6 +188,72 @@ test('BR17-A: binding связывает secret/run/current visit и не сод
     /browser_run_stale/u);
   await assert.rejects(() => publishFactoryBrowserBinding(f.port, f.proof));
   assert.deepEqual(await factoryBrowserOwner(f.port, f.proof), owner);
+});
+
+test('BR17-PARENTS: небезопасные родители дают stale до чтения trusted cursor', async (t) => {
+  const f = await fixture(t, 'BROWSER');
+  const trusted = f.port.trusted;
+  let trustedReads = 0;
+
+  f.port.trusted = async () => {
+    trustedReads += 1;
+
+    return trusted();
+  };
+
+  for (const directory of [path.join(f.root, 'runs'), path.dirname(f.active)]) {
+    await removeBrowserBinding(f.root, f.proof);
+    await chmod(directory, 0o775);
+    trustedReads = 0;
+
+    await assert.rejects(() => publishFactoryBrowserBinding(f.port, f.proof), /browser_run_stale/u);
+    assert.equal(trustedReads, 0, 'отказ происходит раньше trusted и matches');
+    await chmod(directory, 0o700);
+    await publishFactoryBrowserBinding(f.port, f.proof);
+    assert.equal((await factoryBrowserOwner(f.port, f.proof)).kind, 'task');
+  }
+});
+
+test('BR17-UMASK: writer движка закрывает новые и прежние runs-каталоги до publish', async (t) => {
+  const f = await fixture(t, 'BROWSER');
+  const state = `${f.root}-state`;
+
+  t.after(() => rm(state, { recursive: true, force: true }));
+  await mkdir(state);
+  await chmod(path.join(f.root, 'runs'), 0o775);
+  await chmod(path.dirname(f.active), 0o775);
+
+  for (const directories of ['existing', 'new']) {
+    await removeBrowserBinding(f.root, f.proof);
+
+    if (directories === 'new') {
+      await rm(path.join(f.root, 'runs'), { recursive: true });
+    }
+
+    const result = spawnSync('bash', ['-c', `
+      umask 0002
+      source "$FACTORY_HOME/lib/run-state.sh"
+      pipeline_store_route_init 77 BROWSER || exit $?
+      run_state_begin 77 BROWSER run-a 3 "$FIXTURE_TOKEN"
+    `], {
+      env: {
+        ...process.env,
+        FACTORY_HOME: path.resolve('engine'),
+        FACTORY_CONTROL_ROOT: f.root,
+        STATE_DIR: state,
+        FIXTURE_TOKEN: f.proof.token,
+      },
+      encoding: 'utf8',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    f.proof.epoch = '3';
+    await writeFile(f.live, (await readFile(f.live, 'utf8')).replace('EPOCH=2', 'EPOCH=3'));
+    f.setTrusted({ sequence: 9 });
+    await publishFactoryBrowserBinding(f.port, f.proof);
+    assert.equal((await readBrowserBinding(f.root, f.proof)).sequence, 9, directories);
+    assert.equal((await factoryBrowserOwner(f.port, f.proof)).kind, 'task', directories);
+  }
 });
 
 test('BR17-B: смена attempt внутри trusted await отвергает старый proof', async (t) => {

@@ -1,13 +1,17 @@
+import { showStyledContextMenu } from './contextMenu.ts';
 import { desktopLocale, desktopText, setDesktopLocale } from './locale.ts';
 import { createDirectorySelector } from './directorySelection.ts';
+import { createApplicationLauncher } from './applicationLauncher.ts';
 import {
   app,
+  BaseWindow,
   BrowserWindow,
   WebContentsView,
   ipcMain,
   clipboard,
   dialog,
   Menu,
+  nativeImage,
   safeStorage,
   screen,
   session,
@@ -15,7 +19,7 @@ import {
 } from 'electron';
 import type { BrowserWindowConstructorOptions, Rectangle, Session } from 'electron';
 import type { ChildProcess } from 'node:child_process';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 
 import { createBrowserApi } from './browser/browserApi.ts';
 import { createBrowserApps } from './browser/browserApps.ts';
@@ -57,6 +61,7 @@ import type { ServerStartupStage } from './serverSupervisor.ts';
 import { readSettings, writeSettings, updateSettings } from './settings.ts';
 import { API_VERSION } from '../../shared/client/apiVersion.ts';
 import { createClientRuntime } from './clientRuntime.ts';
+import { createKeyboardLayoutReader } from './keyboardLayout.ts';
 import { createPortableRuntime } from './portableRuntime.ts';
 import { offerPortableIntegration } from './portableIntegration.ts';
 import { Profiles } from './profiles.ts';
@@ -131,6 +136,13 @@ if (dataDirectory !== undefined) {
 }
 
 app.enableSandbox();
+
+// Скрытая поверхность не получает подтверждение показа кадра на экране.
+// CDP ждёт новую поверхность вместо presentation ACK; прочие features сохраняются.
+const captureFeatures = app.commandLine.getSwitchValue('enable-features').split(',').filter(Boolean);
+
+app.commandLine.appendSwitch('enable-features',
+  [...new Set([...captureFeatures, 'CDPScreenshotNewSurface'])].join(','));
 
 function writeLog(message: string): void {
   process.stderr.write(`${message}\n`);
@@ -502,11 +514,21 @@ function configureWindow(
     },
     onChild: (child) => configureWindow(child, origin, childOptions),
   });
-  window.webContents.on('context-menu', (_event, params) => {
+  window.webContents.on('context-menu', async (_event, params) => {
     const template = contextMenuTemplate(params, (url) => clipboard.writeText(url), desktopLocale());
 
     if (template.length > 0 && !window.isDestroyed()) {
-      Menu.buildFromTemplate(template).popup({ window });
+      try {
+        if (await showStyledContextMenu(window, params, template)) {
+          return;
+        }
+      } catch {
+        // Во время навигации документ может исчезнуть до ответа на запрос меню.
+      }
+
+      if (!window.isDestroyed()) {
+        Menu.buildFromTemplate(template).popup({ window });
+      }
     }
   });
 }
@@ -1007,6 +1029,8 @@ async function prepare(signal: AbortSignal): Promise<void> {
       machine: stored.selected ?? 'unselected',
       scope,
       create: (options) => new WebContentsView(options),
+      captureWindow: (options) => new BaseWindow(options),
+      imageFromBuffer: (data) => nativeImage.createFromBuffer(data),
       window: () => {
         if (!mainWindow || mainWindow.isDestroyed()) {
           throw new Error('browser_unavailable');
@@ -1055,6 +1079,19 @@ async function prepare(signal: AbortSignal): Promise<void> {
   });
 
   client = createClientRuntime({
+    keyboardLayout: createKeyboardLayoutReader({
+      platform: process.platform,
+      env: browserEnvironment,
+    }),
+    applicationLauncher: process.platform === 'linux' ? createApplicationLauncher({
+      executablePath: process.env.APPIMAGE ?? process.execPath,
+      arguments: app.isPackaged ? [] : [app.getAppPath()],
+      home: os.homedir(),
+      env: process.env,
+      trustShortcut: (file) => new Promise((resolve) => {
+        execFile('gio', ['set', file, 'metadata::trusted', 'true'], { timeout: 2000 }, () => resolve());
+      }),
+    }) : undefined,
     selectDirectory: createDirectorySelector({
       getWindow: () => mainWindow,
       showOpenDialog: (parent, options) => dialog.showOpenDialog(parent, options),

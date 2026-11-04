@@ -25,8 +25,10 @@ function publicError(reply: FastifyReply, error: unknown) {
  * Все маршруты наследуют общий auth guard и не используют внутренний inject.
  * Создание публикует событие только после записи документа, без автоматической оценки.
  */
-async function grigdeskTasksModule(fastify: FastifyInstance, options: GrigdeskTasksServiceOptions) {
-  const service = createGrigdeskTasksService(options);
+async function grigdeskTasksModule(fastify: FastifyInstance, options: GrigdeskTasksServiceOptions & {
+  service?: ReturnType<typeof createGrigdeskTasksService>;
+}) {
+  const service = options.service ?? createGrigdeskTasksService(options);
   const run = (operation: () => Promise<unknown>) => async (_request: unknown, reply: FastifyReply) => {
     reply.header('Cache-Control', 'no-store');
 
@@ -54,9 +56,9 @@ async function grigdeskTasksModule(fastify: FastifyInstance, options: GrigdeskTa
       return publicError(reply, error);
     }
   });
-  fastify.post('/api/grigdesk-tasks', async (request, reply) => {
+  fastify.post<{ Querystring: { sources?: string } }>('/api/grigdesk-tasks', async (request, reply) => {
     try {
-      const result = await service.create(request.body);
+      const result = await service.create(request.body, { sources: request.query.sources === '1' });
 
       try {
         await fastify.sse?.broadcast?.('grigdesk-tasks-changed', { revision: result.revision });

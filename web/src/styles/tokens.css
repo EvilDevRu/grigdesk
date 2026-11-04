@@ -34,11 +34,17 @@
      Токен общий, потому что иначе их разделительные линии расходятся: слева высоту
      задаёт поиск с тумблером архива, справа — название, задача и ряд настроек. */
   --app-topbar-h: 36px;
+  --app-phone-status-h: 30px;
   --app-rail-w: 36px;
   --app-nav-row-h: 30px;
   --toolbar-control-h: 28px;
+  --panel-header-font-size: 13px;
+  --panel-header-font-weight: 600;
+  --panel-header-title-color: var(--ink);
   --tool-dock-action-size: 30px;
-  --chat-head-h: 80px;
+  /* Два ряда toolbar, зазор 4 px, поля по 4 px и нижняя граница 1 px.
+     На touch ряды растут до 44 px: общий минимум обеих колонок следует за ними. */
+  --chat-head-h: max(80px, calc(2 * var(--toolbar-control-h) + 13px));
   --chat-list-row-h: 56px;
   --chat-avatar-size: 32px;
   --page-gutter: 16px;
@@ -68,11 +74,10 @@
   --workspace-inset: 20px;
   --workspace-row-inset: 7px 10px;
 
-  /* Семантические токены общего control skin. Значения только ссылаются на исходную
-     палитру: foundation не вводит вторую тему и не меняет существующие поверхности. */
-  --control-background: var(--ground);
+  /* Обычные controls используют поверхность действия, общую с полями.
+     Фон страницы остаётся отдельным слоем и не просвечивает чёрной заливкой кнопок. */
+  --control-background: var(--surface-2);
   --control-background-hover: var(--surface-2);
-  --control-background-readonly: color-mix(in srgb, var(--surface-2) 58%, var(--ground));
   --control-border: var(--line);
   --control-border-hover: var(--line-2);
   --control-text: var(--ink);
@@ -83,6 +88,11 @@
   --control-motion-duration: 150ms;
   --control-motion-easing: ease;
   --control-thumb-shadow: 0 1px 3px #00000080;
+
+  /* Поля имеют одну поверхность в форме, диалоге и teleported-меню.
+     Их фон не зависит от рабочего контейнера и не меняет заливку кнопок или переключателей. */
+  --field-background: var(--surface-2);
+  --field-background-readonly: var(--surface);
 
   --overlay-scrim: #000000aa;
   --overlay-popover-shadow: 0 14px 40px #000000aa;
@@ -118,7 +128,7 @@
   /* Рабочая форма наследует палитру каркаса; ввод получает более светлый surface-2.
      Роли общие, локального оформления controls у экранов нет. */
   --workspace-catalog-background: var(--sidebar);
-  --workspace-field-background: var(--surface-2);
+  --workspace-field-background: var(--field-background);
   --workspace-label-column: 128px;
   --workspace-selection-column: 100px;
   --workspace-actions-column: calc(3 * var(--toolbar-control-h));
@@ -132,7 +142,6 @@
      Hover сохраняет эту поверхность; readonly остаётся отдельным спокойным слоем. */
   --control-background: var(--workspace-field-background);
   --control-background-hover: var(--surface-2);
-  --control-background-readonly: var(--surface);
   --control-outline-background-hover: var(--control-background-hover);
   --control-outline-border: var(--control-border);
   --control-border: var(--line-2);
@@ -162,8 +171,15 @@
 /* Телефонные поля оставляют место данным, а не внешним рамкам страницы.
    Размер 16 px в полях также сохраняет масштаб страницы при фокусе в iOS. */
 @media (max-width: 600px) {
-  :root {
+  html:root {
     --page-gutter: 10px;
+    --workspace-title-size: 16px;
+    --workspace-entity-title-size: 15px;
+    --workspace-text-size: 15px;
+    --workspace-meta-size: 13px;
+    --panel-header-font-size: 12px;
+    --panel-header-font-weight: 500;
+    --panel-header-title-color: var(--ink-mid);
     --chat-gutter: 12px;
     --chat-flow-inset: 8px;
     --chat-list-row-h: 72px;

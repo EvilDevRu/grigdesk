@@ -92,10 +92,11 @@ test('выключение и повторное включение не мен�
   const clarificationBytes = '## Ответ человека\nОставить ручной режим.\n';
   await writeFile(analysisPath, analysisBytes);
   await writeFile(clarificationPath, clarificationBytes);
+
   const analyzer = new Analyzer({
     config: { analysisDir },
     claudeAuth: null,
-    b24: null,
+    tracker: null,
     factoryState: {},
     log: null,
   });

@@ -25,6 +25,24 @@ export interface SpeechJob {
 const TERMINAL = new Set(['done', 'failed', 'cancelled', 'interrupted']);
 
 /**
+ * Карточка модели и замер показывают одинаковые состояния серверного задания.
+ * Неизвестный статус остаётся видимым и не превращается в успешную установку.
+ */
+export function speechJobLabel(job?: SpeechJob, locale?: LocaleSource): string {
+  const translate = localeTranslator(locale);
+  const labels: Record<string, string> = {
+    queued: translate('settings.queued'),
+    running: translate('settings.running'),
+    done: translate('settings.done2'),
+    failed: translate('settings.error'),
+    cancelled: translate('settings.cancelled'),
+    interrupted: translate('settings.interruptedByRestart'),
+  };
+
+  return job ? `${labels[job.status] ?? job.status}${job.percent === null ? '' : ` · ${job.percent}%`}` : '';
+}
+
+/**
  * Серверный job содержит больше данных; UI получает только статус, прогресс и результат.
  * Неполный start-ответ дополняется явно известным типом операции и моделью.
  */

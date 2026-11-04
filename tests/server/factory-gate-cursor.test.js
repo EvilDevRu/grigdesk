@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
-  access, chmod, mkdir, mkdtemp, readFile, rm, writeFile,
+  access, chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile,
 } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -188,11 +188,12 @@ async function fixture(t, { cursor = null } = {}) {
 
 async function server(t, fx) {
   const app = Fastify({ logger: false });
+
   await app.register(factoryModule, {
     factoryState: fx.adapter,
     config: fx.config,
     prefs: { read: () => ({}) },
-    b24: null,
+    tracker: null,
     analyzer: { readClarifications: async () => null, readOpenQuestions: async () => null },
   });
   await app.ready();
@@ -201,6 +202,121 @@ async function server(t, fx) {
 }
 
 const POS = { build: [0, 0], lint: [1, 0], gate_accept: [2, 0], ship: [3, 0] };
+
+// HTTP resume проходит настоящий resolver и unpin. Подменяется только процесс
+// движка: юнит публикует причину в stages.log, а «живость» задаёт ответ адаптера.
+for (const scenario of [
+  {
+    first: 'incompatible',
+    next: 'ready',
+    launches: 2,
+    status: 200,
+  },
+  {
+    first: 'incompatible',
+    next: 'incompatible',
+    launches: 2,
+    status: 500,
+  },
+  {
+    first: 'incompatible',
+    next: 'unavailable',
+    launches: 2,
+    status: 500,
+  },
+  {
+    first: 'unavailable',
+    next: 'ready',
+    launches: 1,
+    status: 500,
+  },
+]) {
+  test(`/resume: ${scenario.first} → ${scenario.next}, запусков ${scenario.launches}`, async (t) => {
+    const fx = await fixture(t, { cursor: { node: 'ship', state: 'ready' } });
+    const args = ['7', 'resume', '--profile', 'demo', '--attempt', ATTEMPT];
+
+    await prepareFactoryRouteLaunch(fx.config, args);
+
+    const roots = {
+      controlRoot: fx.controlDir,
+      stateRoot: fx.stateDir,
+      profileRoot: fx.config.profilesDir,
+    };
+    const authority = path.join(
+      fx.controlDir, 'server-runtimes', factoryRuntimeScope(roots), `${ATTEMPT}.json`,
+    );
+    const attemptDir = path.join(fx.controlDir, 'protocol-v2/tasks/t7/attempts', ATTEMPT);
+    const beforePin = JSON.parse(await readFile(authority, 'utf8'));
+    const immutableFiles = [
+      'attempt.json', 'attempt.sha256', 'pins.json', 'pins.sha256',
+      'artifacts/profile-contract.tsv', 'stage-results/runtime.json',
+      '../../active-attempt.json',
+      ...(await readdir(attemptDir)).filter((file) => file.startsWith('route-pin.')),
+    ];
+    const before = await Promise.all(
+      immutableFiles.map((file) => readFile(path.join(attemptDir, file), 'utf8')),
+    );
+
+    const nextBin = path.join(fx.root, 'bin/factory-current');
+
+    await writeFile(nextBin, '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+
+    fx.config.factoryBin = nextBin;
+
+    await writeFile(path.join(fx.root, 'bin/systemd-run'), `#!/usr/bin/env bash
+if [[ "$1" == --version ]]; then echo 'systemd 252 (fixture)'; exit 0; fi
+printf '%s\\n' "$*" >> '${fx.callsLog}'
+count=$(wc -l < '${fx.callsLog}')
+reason='${scenario.first}'
+if (( count > 1 )); then reason='${scenario.next}'; fi
+if [[ "$reason" != ready ]]; then
+  printf 'FACTORY_ERROR=runner_preflight_%s RUNNERS=glm\\n' "$reason" \\
+    >> '${path.join(fx.stateDir, 'logs/t7.stages.log')}'
+fi
+`, { mode: 0o755 });
+    await writeFile(path.join(fx.root, 'bin/systemctl'), `#!/usr/bin/env bash
+if [[ '${scenario.next}' == ready && -f '${fx.callsLog}' ]] \\
+  && (( $(wc -l < '${fx.callsLog}') > 1 )); then
+  echo active
+  exit 0
+fi
+echo inactive
+exit 3
+`, { mode: 0o755 });
+
+    fx.adapter.isDaemonAlive = () => scenario.next === 'ready'
+      && existsSync(fx.callsLog) && readFileSync(fx.callsLog, 'utf8').trim().split('\n').length > 1;
+
+    const app = await server(t, fx);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/tasks/7/resume',
+      payload: {},
+    });
+
+    assert.equal(response.statusCode, scenario.status, response.body);
+
+    const calls = (await readFile(fx.callsLog, 'utf8')).trim().split('\n');
+    const afterPin = JSON.parse(await readFile(authority, 'utf8'));
+
+    assert.equal(calls.length, scenario.launches, 'перепривязка ограничена одним повтором');
+    assert.ok(calls[0].includes(beforePin.engineBin), 'первый запуск использует прежний pin');
+    assert.equal(afterPin.engineBin, scenario.launches === 2 ? nextBin : beforePin.engineBin);
+    assert.deepEqual(await Promise.all(
+      immutableFiles.map((file) => readFile(path.join(attemptDir, file), 'utf8')),
+    ), before, 'попытка, каталог, маршрут, курсор и active pointer сохраняют исходные bytes');
+
+    if (scenario.launches === 2) {
+      assert.ok(calls[1].includes(nextBin), 'повтор использует текущую поставку');
+    }
+
+    if (scenario.status === 500) {
+      const failure = scenario.launches === 2 ? scenario.next : scenario.first;
+
+      assert.equal(response.json().error, `runner_preflight_${failure}`);
+    }
+  });
+}
 
 test('v2-реестр не дорисовывает ворота без явной записи waiting', () => {
   // LINT=done записан узлом, коммит в журнал не лёг — ворота не достигнуты.

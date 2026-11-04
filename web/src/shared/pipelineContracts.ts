@@ -1,3 +1,5 @@
+import { isTaskSourceId } from '../../../shared/tasks/taskReference.ts';
+import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from './uiLocalePort.ts';
 import { isRecord } from '../../../shared/lib/objects.ts';
@@ -10,7 +12,7 @@ const t = localeTranslator(uiLocalePort);
 
 export interface PipelineTask extends Record<string, unknown> {
   task: string | number;
-  source?: 'grigdesk';
+  source?: TaskSourceId;
   title?: string;
   profile?: string;
   route?: string;
@@ -81,7 +83,7 @@ export interface TaskObservation {
  */
 function isPipelineTask(value: unknown): value is PipelineTask {
   return isRecord(value) && ['string', 'number'].includes(typeof value.task)
-    && (value.source == null || value.source === 'grigdesk')
+    && (value.source == null || isTaskSourceId(value.source))
     && (value.title == null || typeof value.title === 'string')
     && (value.daemonAlive == null || typeof value.daemonAlive === 'boolean')
     && (value.attempt == null || ['string', 'number'].includes(typeof value.attempt))
@@ -97,9 +99,14 @@ function isPipelineTask(value: unknown): value is PipelineTask {
  * Некорректный контейнер не объявляется пустым успешным снимком.
  * Неизвестные расширения и отсутствие полей старого сервера сохраняются.
  */
-export function decodePipelineTasks(value: unknown): { tasks?: PipelineTask[]; silenceWindow?: number } {
+export function decodePipelineTasks(value: unknown): {
+  tasks?: PipelineTask[];
+  silenceWindow?: number;
+  sourcesVersion?: 1
+} {
   if (!isRecord(value) || (value.tasks != null
     && (!Array.isArray(value.tasks) || !value.tasks.every(isPipelineTask)))
+    || (value.sourcesVersion !== undefined && value.sourcesVersion !== 1)
     || (value.silenceWindow != null && typeof value.silenceWindow !== 'number')) {
     throw new Error(t('core.invalidPipelineSnapshot'));
   }

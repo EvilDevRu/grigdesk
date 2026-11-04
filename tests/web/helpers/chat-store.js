@@ -33,6 +33,7 @@ globalThis.__chatUiContext = {
 /** Реестр исполнителей по умолчанию: любая запрошенная модель существует, уровней нет. */
 function defaultProviders() {
   return {
+    ensureModel: async () => {},
     modelOf(value) {
       const id = typeof value === 'object' && value ? value.model : (value || 'test-model');
       const provider = typeof value === 'object' && value?.provider ? value.provider : 'test-provider';
@@ -42,9 +43,16 @@ function defaultProviders() {
 }
 globalThis.__chatProviders = defaultProviders();
 
-/** Подменить реестр на время теста (модель с уровнями эффорта, пропавшая модель и т.п.). */
+/**
+ * Подменяет каталог для теста уровней усилия, пропавшей модели или живого store.
+ * Статические подмены не загружают каталог; настоящий store сохраняет свой барьер.
+ */
 export function setChatProviders(providers) {
   globalThis.__chatProviders = providers || defaultProviders();
+
+  if (!globalThis.__chatProviders.ensureModel) {
+    globalThis.__chatProviders.ensureModel = async () => {};
+  }
 }
 
 /**

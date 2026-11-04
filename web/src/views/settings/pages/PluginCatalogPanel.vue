@@ -21,10 +21,7 @@
       </UiSelect>
       <UiIconButton :label="t('settings.marketplaceRefresh')" v-tooltip="t('settings.marketplaceRefresh')"
                     data-context="workspace-form" :loading="catalog.loading" @click="refresh">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
-             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M20 7v5h-5M4 17v-5h5M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9" />
-        </svg>
+        <UiRefreshIcon />
       </UiIconButton>
     </div>
     <UiLoadingState v-if="catalog.loading" :label="t('settings.marketplaceLoading')"
@@ -77,6 +74,7 @@
         </UiInlineMessage>
         <template v-else-if="detail">
           <header class="catalog-card-heading">
+            <PluginIcon :src="catalogMediaUrl(detail.repository, detail.icon)" />
             <h4 data-catalog-title tabindex="-1">{{ detail.name }}</h4>
             <span class="catalog-origin">{{ detail.origin === 'official'
               ? t('settings.marketplaceOfficial') : t('settings.marketplaceCommunity') }}</span>
@@ -171,12 +169,16 @@
 </template>
 
 <script setup lang="ts">
+import PluginIcon from '../../../shared/PluginIcon.vue';
+import { catalogMediaUrl } from '../../../../../shared/plugins/pluginCatalogContracts.ts';
+
 import { UiSkeletonLayout } from '../../../ui';
 
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 
 import {
+  UiRefreshIcon,
   UiActionLink,
   UiButton,
   UiIconButton,

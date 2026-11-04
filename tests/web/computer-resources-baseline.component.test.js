@@ -21,7 +21,8 @@ test('PRES-02: исходная панель, старый mem и stale', { time
     const swap = await resourceRow(h.panel, text.swap);
 
     assert.equal(cpu.width, original.cpu.percent);
-    assert.ok(cpu.note.includes(text.averageLoadOverOneMinute));
+    assert.ok(cpu.note.includes(text.resourceLoadAverage.replace('{value}',
+      formatNumber(original.cpu.load1, locale))));
     assert.ok(cpu.note.includes(formatNumber(original.cpu.load1, locale)));
     assert.equal(ram.width, 75);
     assert.match(ram.head, /75%/);

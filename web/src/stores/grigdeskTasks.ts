@@ -1,3 +1,5 @@
+import { grigdeskPersonalStateVersion } from '../shared/grigdeskPersonalState.ts';
+import { useTaskSeenStore } from './taskSeen.ts';
 import { defineStore } from 'pinia';
 
 import {
@@ -20,9 +22,13 @@ export const useGrigdeskTasksStore = defineStore('grigdesk-tasks', {
     tasks: [] as GrigdeskTaskSummary[],
     projects: [] as GrigdeskTaskProject[],
     revision: -1,
-    b24Configured: null as boolean | null,
+    trackerConfigured: null as boolean | null,
     error: '',
     loading: false,
+    loaded: false,
+    personalStateVersion: null as 1 | null,
+    baselineIds: null as string[] | null,
+    epoch: 0,
   }),
   actions: {
     /**
@@ -35,8 +41,16 @@ export const useGrigdeskTasksStore = defineStore('grigdesk-tasks', {
       }
 
       this.tasks = snapshot.tasks;
+      this.loaded = true;
+      this.personalStateVersion = snapshot.personalStateVersion ?? null;
+      grigdeskPersonalStateVersion.value = this.personalStateVersion;
+
+      if (this.baselineIds === null) {
+        this.baselineIds = snapshot.tasks.map((task) => task.id);
+      }
+
       this.revision = snapshot.revision;
-      this.b24Configured = snapshot.b24Configured;
+      this.trackerConfigured = snapshot.trackerConfigured;
     },
 
     /**
@@ -52,6 +66,7 @@ export const useGrigdeskTasksStore = defineStore('grigdesk-tasks', {
         return pending.promise;
       }
 
+      const epoch = this.epoch;
       const state: PendingRead = { promise: Promise.resolve(), queued: false };
 
       this.loading = true;
@@ -60,19 +75,85 @@ export const useGrigdeskTasksStore = defineStore('grigdesk-tasks', {
           state.queued = false;
 
           try {
-            this.applySnapshot(decodeGrigdeskTasksSnapshot(await api.get('/api/grigdesk-tasks')));
+            const snapshot = decodeGrigdeskTasksSnapshot(await api.get('/api/grigdesk-tasks'));
+
+            if (epoch !== this.epoch) {
+              return;
+            }
+
+            this.applySnapshot(snapshot);
+            void this.markBaselineSeen();
             this.error = '';
           } catch (error) {
-            this.error = failureText(error);
+            if (epoch === this.epoch) {
+              this.error = failureText(error);
+            }
           }
         } while (state.queued);
       })().finally(() => {
-        pendingReads.delete(this);
-        this.loading = false;
+        if (pendingReads.get(this) === state) {
+          pendingReads.delete(this);
+          this.loading = false;
+        }
       });
       pendingReads.set(this, state);
 
       return state.promise;
+    },
+
+    /**
+     * Первый успешный снимок заморожен до создания и повторяется неизменным после отказа.
+     * Части baseline сервер собирает атомарно; готовность публикуется только последней частью.
+     */
+    async markBaselineSeen(): Promise<boolean> {
+      if (!this.loaded || this.personalStateVersion !== 1 || this.baselineIds === null) {
+        return false;
+      }
+
+      const epoch = this.epoch;
+      const seen = useTaskSeenStore().own;
+
+      await seen.load();
+
+      if (epoch !== this.epoch || !seen.loaded || seen.initialized) {
+        return seen.ready;
+      }
+
+      const ids = [...this.baselineIds];
+      const baselineId = crypto.randomUUID();
+
+      for (let offset = 0; offset < Math.max(1, ids.length); offset += 1000) {
+        const complete = offset + 1000 >= ids.length;
+        const ok = await seen.markSeen(ids.slice(offset, offset + 1000), {
+          baseline: complete,
+          baselineId,
+        });
+
+        if (!ok || epoch !== this.epoch) {
+          return false;
+        }
+      }
+
+      return seen.ready;
+    },
+
+    /**
+     * Смена установки удаляет собственный список и замороженную базовую линию.
+     * Растущая эпоха запрещает применение ответов прежней авторизации.
+     */
+    clear() {
+      this.epoch += 1;
+      pendingReads.delete(this);
+      this.tasks = [];
+      this.projects = [];
+      this.revision = -1;
+      this.trackerConfigured = null;
+      this.personalStateVersion = null;
+      grigdeskPersonalStateVersion.value = null;
+      this.baselineIds = null;
+      this.loaded = false;
+      this.loading = false;
+      this.error = '';
     },
 
     /**
@@ -93,7 +174,22 @@ export const useGrigdeskTasksStore = defineStore('grigdesk-tasks', {
       projectId: string;
       clientOrigin: string;
     }) {
-      const result = decodeGrigdeskTaskCreated(await api.post('/api/grigdesk-tasks', input));
+      if (!this.loaded) {
+        await this.load();
+      }
+
+      if (!this.loaded) {
+        throw new Error(this.error);
+      }
+
+      const epoch = this.epoch;
+      const result = decodeGrigdeskTaskCreated(await api.post('/api/grigdesk-tasks?sources=1', input));
+
+      if (epoch !== this.epoch) {
+        throw new DOMException('', 'AbortError');
+      }
+
+      void this.markBaselineSeen();
 
       if (result.revision >= this.revision) {
         this.tasks = [result.task, ...this.tasks.filter((task) => task.id !== result.task.id)];

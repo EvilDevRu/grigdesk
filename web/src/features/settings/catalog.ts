@@ -166,6 +166,7 @@ SETTINGS_FIELDS.push(...DEVICE_FIELDS.map(([pageId, resourceId, key, control, la
 SETTINGS_FIELDS.push(...([
   ['open', 'select', 'settings.browserOpen', 'settings.browserOpenHint'],
   ['external', 'select', 'settings.browserApplication', 'settings.browserApplicationHint'],
+  ['search', 'select', 'settings.browserSearch', 'settings.browserSearchHint'],
   ['agents', 'switch', 'settings.browserAgents', 'settings.browserAgentsHint'],
 ] as const).map(([key, control, labelKey, hintKey]) => ({
   address: { pageId: 'tools.browser', fieldPath: [key] },
@@ -210,77 +211,77 @@ const SPEECH_FIELDS = [
     translator.t('ru', 'settings.presetForModelAndRecognitionDepth'),
   ],
   [
-    'speech.video',
+    'speech.dictation',
     'videoQuality',
     'select',
     translator.t('ru', 'settings.videoQuality'),
     translator.t('ru', 'settings.meetingRecordingRecognitionPreset'),
   ],
   [
-    'speech.video',
+    'speech.dictation',
     'videoInitialPrompt',
     'textarea',
     translator.t('ru', 'settings.videoStylePrompt'),
     translator.t('ru', 'settings.upToCharactersAShortExampleSets'),
   ],
   [
-    'speech.language',
+    'speech.dictation',
     'language',
     'select',
     translator.t('ru', 'settings.recognitionLanguage'),
     translator.t('ru', 'settings.automaticRussianOrEnglish'),
   ],
   [
-    'speech.language',
+    'speech.dictation',
     'dictionary',
     'textarea',
     translator.t('ru', 'settings.projectTerms'),
     translator.t('ru', 'settings.upToCharactersOneTermPerLine'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'model',
     'select',
     translator.t('ru', 'settings.dictationModel'),
     translator.t('ru', 'settings.emptySelectionKeepsThePresetModel'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'videoModel',
     'select',
     translator.t('ru', 'settings.videoModel'),
     translator.t('ru', 'settings.emptySelectionKeepsThePresetModel'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'device',
     'select',
     translator.t('ru', 'settings.processingDevice'),
     translator.t('ru', 'settings.cudaIsAvailableOnlyAfterASuccessful'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'computeType',
     'select',
     translator.t('ru', 'settings.computeType'),
     translator.t('ru', 'settings.emptySelectionKeepsTheDeviceDefault'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'beamSize',
     'number',
     translator.t('ru', 'settings.dictationSearchDepth'),
     translator.t('ru', 'settings.fromToEmptyMeansPresetDefault'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'vadSilenceMs',
     'number',
     translator.t('ru', 'settings.vadPauseMs'),
     translator.t('ru', 'settings.fromToMilliseconds'),
   ],
   [
-    'speech.advanced',
+    'speech.dictation',
     'conditionOnPreviousText',
     'switch',
     translator.t('ru', 'settings.usePreviousText'),
@@ -298,43 +299,22 @@ SETTINGS_FIELDS.push(...SPEECH_FIELDS.map(([pageId, key, control, label, descrip
   scope: translator.t('ru', 'settings.allDevices'),
 })));
 
-const CONNECTION_FIELDS = [
-  [
-    'baseUrl',
-    'text',
-    translator.t('ru', 'settings.bPortalAddress'),
-    translator.t('ru', 'settings.theFullAddressIsSavedTogetherWith'),
-  ],
-  [
-    'login',
-    'text',
-    translator.t('ru', 'settings.bLogin'),
-    translator.t('ru', 'settings.portalAccountForAllDevices'),
-  ],
-  [
-    'password',
-    'text',
-    translator.t('ru', 'settings.bPassword'),
-    translator.t('ru', 'settings.enterANewPasswordWheneverChangingThe'),
-  ],
-] as const;
-
-SETTINGS_FIELDS.push(...CONNECTION_FIELDS.map(([key, control, label, description]) => ({
-  address: { pageId: 'connections.b24', fieldPath: [key] },
-  resourceId: 'b24',
-  key,
-  control,
-  label,
-  description,
-  scope: translator.t('ru', 'settings.allDevices'),
-})), {
+SETTINGS_FIELDS.push({
   address: { pageId: 'system.startup', fieldPath: ['enabled'] },
   resourceId: 'autostart',
   key: 'enabled',
   control: 'switch',
   label: translator.t('ru', 'settings.startWhenTheMachineTurnsOn'),
   description: translator.t('ru', 'settings.configuresTheSystemdUnitOnThisMachine'),
-  scope: translator.t('ru', 'settings.thisMachine'),
+  scope: translator.t('ru', 'settings.selectedServerComputer'),
+}, {
+  address: { pageId: 'system.startup', fieldPath: ['application', 'enabled'] },
+  resourceId: 'applicationAutostart',
+  key: 'enabled',
+  control: 'switch',
+  label: translator.t('ru', 'settings.startApplicationOnLogin'),
+  description: translator.t('ru', 'settings.applicationAutostartDescription'),
+  scope: translator.t('ru', 'settings.applicationComputer'),
 });
 
 export const SETTINGS_PAGE_KEY = 'grigdesk-settings-page';
@@ -355,7 +335,7 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
   },
   {
     id: 'speech',
-    label: translator.t('ru', 'settings.speechAndTranscription'),
+    label: translator.t('ru', 'settings.speechPageTitle'),
   },
   {
     id: 'connections',
@@ -463,44 +443,14 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   {
     id: 'speech.dictation',
     groupId: 'speech',
-    label: translator.t('ru', 'settings.dictation2'),
-    description: translator.t('ru', 'settings.dictationEngineProcessingLocationAndQuality'),
-  },
-  {
-    id: 'speech.video',
-    groupId: 'speech',
-    label: translator.t('ru', 'settings.videoTranscription'),
-    description: translator.t('ru', 'settings.transcriptionQualityAndStylePrompt'),
+    label: translator.t('ru', 'settings.speechPageTitle'),
+    description: translator.t('ru', 'settings.speechPageDescription'),
   },
   {
     id: 'speech.videoTasks',
     groupId: 'speech',
     label: translator.t('ru', 'settings.builtinPlugins.video.name'),
     description: translator.t('ru', 'settings.builtinPlugins.video.description'),
-  },
-  {
-    id: 'speech.language',
-    groupId: 'speech',
-    label: translator.t('ru', 'settings.languageAndTerms'),
-    description: translator.t('ru', 'settings.recognitionLanguageAndTermDictionary'),
-  },
-  {
-    id: 'speech.models',
-    groupId: 'speech',
-    label: translator.t('ru', 'settings.localModels'),
-    description: translator.t('ru', 'settings.modelCatalogDownloadsAndCopying'),
-  },
-  {
-    id: 'speech.advanced',
-    groupId: 'speech',
-    label: translator.t('ru', 'settings.speechAdvancedPage'),
-    description: translator.t('ru', 'settings.modelsDeviceEnvironmentAndPerformanceMeasurement'),
-  },
-  {
-    id: 'connections.b24',
-    groupId: 'connections',
-    label: translator.t('ru', 'settings.bitrix'),
-    description: translator.t('ru', 'settings.portalCredentialsAndConnectionTesting'),
   },
   {
     id: 'connections.devices',
@@ -554,7 +504,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     id: 'tools.showcase',
     groupId: 'tools',
     label: translator.t('ru', 'settings.builtinPlugins.showcase.name'),
-    description: translator.t('ru', 'settings.builtinPlugins.showcase.description'),
+    description: translator.t('ru', 'settings.showcaseSetupDescription'),
   },
   {
     id: 'tools.browser',
@@ -615,7 +565,6 @@ function migrateLegacyPage(storage: SettingsStorage): string | undefined {
   const legacyPages = new Map([
     ['app', 'interface.behavior'],
     ['speech', 'speech.dictation'],
-    ['b24', 'connections.b24'],
     ['providers', 'agents.providers'],
     ['runs', 'automation.chats'],
     ['plugins', 'plugins.installed'],
@@ -638,11 +587,18 @@ function migrateLegacyPage(storage: SettingsStorage): string | undefined {
 }
 
 /**
- * Бывшая отдельная страница установки стала безопасным alias общего раздела.
+ * Снятые страницы установки и речи ведут в соответствующий общий раздел.
  * Неизвестный ID по-прежнему не даёт импортировать произвольный компонент.
  */
 export function normalizeSettingsPageId(raw: unknown): string | undefined {
-  const id = raw === 'plugins.install' ? 'plugins.installed' : raw;
+  const aliases: Record<string, string> = {
+    'plugins.install': 'plugins.installed',
+    'speech.video': 'speech.dictation',
+    'speech.language': 'speech.dictation',
+    'speech.models': 'speech.dictation',
+    'speech.advanced': 'speech.dictation',
+  };
+  const id = typeof raw === 'string' ? aliases[raw] ?? raw : raw;
 
   return typeof id === 'string' && SETTINGS_PAGES.some((page) => page.id === id) ? id : undefined;
 }
@@ -666,13 +622,19 @@ export function resolveSettingsPage(request: PageRequest = {}): string {
  * Допустимость динамического поля проверяет владелец каталога после загрузки сущности.
  */
 export function resolveFieldAddress(address: FieldAddress): FieldAddress | null {
-  if (!SETTINGS_PAGES.some((page) => page.id === address.pageId)
+  const pageId = normalizeSettingsPageId(address.pageId);
+
+  if (!pageId
       || !Array.isArray(address.fieldPath) || address.fieldPath.length === 0
       || address.fieldPath.some((part) => typeof part !== 'string' || part.length === 0)) {
     return null;
   }
 
-  return { ...address, fieldPath: [...address.fieldPath] };
+  return {
+    ...address,
+    pageId,
+    fieldPath: [...address.fieldPath],
+  };
 }
 
 /**
@@ -696,7 +658,7 @@ const GROUP_MESSAGES: Record<string, Record<string, string>> = {
     "label": "settings.chatsAndPipeline"
   },
   "speech": {
-    "label": "settings.speechAndTranscription"
+    "label": "settings.speechPageTitle"
   },
   "connections": {
     "label": "settings.connectionsAndAccess"
@@ -758,28 +720,8 @@ const PAGE_MESSAGES: Record<string, Record<string, string>> = {
     "description": "settings.automaticStopAnalysisModelAndEffort"
   },
   "speech.dictation": {
-    "label": "settings.dictation2",
-    "description": "settings.dictationEngineProcessingLocationAndQuality"
-  },
-  "speech.video": {
-    "label": "settings.videoTranscription",
-    "description": "settings.transcriptionQualityAndStylePrompt"
-  },
-  "speech.language": {
-    "label": "settings.languageAndTerms",
-    "description": "settings.recognitionLanguageAndTermDictionary"
-  },
-  "speech.models": {
-    "label": "settings.localModels",
-    "description": "settings.modelCatalogDownloadsAndCopying"
-  },
-  "speech.advanced": {
-    "label": "settings.speechAdvancedPage",
-    "description": "settings.modelsDeviceEnvironmentAndPerformanceMeasurement"
-  },
-  "connections.b24": {
-    "label": "settings.bitrix",
-    "description": "settings.portalCredentialsAndConnectionTesting"
+    "label": "settings.speechPageTitle",
+    "description": "settings.speechPageDescription"
   },
   "connections.devices": {
     "label": "settings.serverAccess",
@@ -839,7 +781,7 @@ const PAGE_MESSAGES: Record<string, Record<string, string>> = {
   },
   "tools.showcase": {
     "label": "settings.builtinPlugins.showcase.name",
-    "description": "settings.builtinPlugins.showcase.description"
+    "description": "settings.showcaseSetupDescription"
   },
   "plugins.installed": {
     "label": "settings.marketplaceOverview",
@@ -877,6 +819,11 @@ const FIELD_MESSAGES: Record<string, Record<string, string>> = {
   'browser:agents': {
     label: 'settings.browserAgents',
     description: 'settings.browserAgentsHint',
+    scope: 'settings.thisDevice2',
+  },
+  'browser:search': {
+    label: 'settings.browserSearch',
+    description: 'settings.browserSearchHint',
     scope: 'settings.thisDevice2',
   },
   "prefs:chatLiveSessions": {
@@ -1019,25 +966,15 @@ const FIELD_MESSAGES: Record<string, Record<string, string>> = {
     "description": "settings.forDictationVideoTranscriptionUsesItsOwn",
     "scope": "settings.allDevices"
   },
-  "b24:baseUrl": {
-    "label": "settings.bPortalAddress",
-    "description": "settings.theFullAddressIsSavedTogetherWith",
-    "scope": "settings.allDevices"
-  },
-  "b24:login": {
-    "label": "settings.bLogin",
-    "description": "settings.portalAccountForAllDevices",
-    "scope": "settings.allDevices"
-  },
-  "b24:password": {
-    "label": "settings.bPassword",
-    "description": "settings.enterANewPasswordWheneverChangingThe",
-    "scope": "settings.allDevices"
-  },
   "autostart:enabled": {
     "label": "settings.startWhenTheMachineTurnsOn",
     "description": "settings.configuresTheSystemdUnitOnThisMachine",
-    "scope": "settings.thisMachine"
+    "scope": "settings.selectedServerComputer"
+  },
+  "applicationAutostart:enabled": {
+    "label": "settings.startApplicationOnLogin",
+    "description": "settings.applicationAutostartDescription",
+    "scope": "settings.applicationComputer"
   },
   "devicePairing:name": {
     "label": "settings.deviceName",

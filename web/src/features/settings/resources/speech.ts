@@ -60,7 +60,15 @@ export interface SpeechModel {
   sizeMb: number;
 }
 
+export interface SpeechEnvironmentCheck {
+  name: string;
+  ok: boolean;
+  fix: string;
+}
+
 export interface SpeechCapabilities {
+  environmentReady: boolean | null;
+  environmentChecks: SpeechEnvironmentCheck[];
   local: {
     ready: boolean;
     reason: string;
@@ -85,6 +93,8 @@ export interface SpeechSnapshot {
 }
 
 const EMPTY_CAPABILITIES: SpeechCapabilities = {
+  environmentReady: null,
+  environmentChecks: [],
   local: {
     ready: false,
     reason: '',
@@ -134,6 +144,18 @@ function validSpeechValue(key: string, value: unknown, snapshot = false): value 
 }
 
 /**
+ * Диагностика окружения и итоговая готовность используют один формат проверок.
+ * Неизвестные имена и инструкции сохраняются как данные выбранного сервера.
+ */
+function speechChecks(value: unknown): SpeechEnvironmentCheck[] {
+  return Array.isArray(value) ? value.filter(isPlainRecord).map((check) => ({
+    name: String(check.name ?? check.id ?? ''),
+    ok: check.ok === true,
+    fix: typeof check.fix === 'string' ? check.fix : '',
+  })) : [];
+}
+
+/**
  * Возможности не смешиваются с редактируемыми значениями и дополняют частичные ответы.
  * Из публичного DTO берутся только используемые интерфейсом поля состояния.
  */
@@ -143,16 +165,23 @@ function capabilities(value: unknown, previous: SpeechCapabilities): SpeechCapab
   const cuda = isPlainRecord(raw.cuda) ? raw.cuda : previous.cuda;
   const benchmark = isPlainRecord(raw.benchmark) ? raw.benchmark : previous.benchmark;
   const measure = isPlainRecord(raw.lastDictionaryMeasure) ? raw.lastDictionaryMeasure : null;
+  const checks = speechChecks(local.checks);
+  const environmentChecks = Array.isArray(raw.environmentChecks) ? speechChecks(raw.environmentChecks)
+    : Array.isArray(raw.checks) ? speechChecks(raw.checks)
+      : Array.isArray(local.checks) ? checks.filter((check) => !SPEECH_MODELS.some((modelId) =>
+        check.name === translator.t('ru', 'settings.speechCheckModel', { modelId })))
+        : previous.environmentChecks;
+  const environmentReady = typeof raw.environmentReady === 'boolean' ? raw.environmentReady
+    : environmentChecks.length ? environmentChecks.every((check) => check.ok)
+      : local.ready === true ? true : previous.environmentReady;
 
   return {
+    environmentReady,
+    environmentChecks,
     local: {
       ready: local.ready === true,
       reason: typeof local.reason === 'string' ? local.reason : '',
-      checks: Array.isArray(local.checks) ? local.checks.filter(isPlainRecord).map((check) => ({
-        name: String(check.name ?? check.id ?? ''),
-        ok: check.ok === true,
-        fix: typeof check.fix === 'string' ? check.fix : '',
-      })) : [],
+      checks,
     },
     models: Array.isArray(raw.models) ? raw.models.filter(isPlainRecord)
       .filter((model) => typeof model.modelId === 'string').map((model) => ({

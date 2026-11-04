@@ -33,26 +33,25 @@ export function sameSource(left: PluginSourceRef, right: PluginSourceRef): boole
 }
 
 /**
- * Sensitive показывает только эвристику путей, не аудит безопасности кода.
- * Manifest/сервер/dependencies важны даже внутри пользовательского web.
+ * Чувствительность ограничена объявленным кодом и метаданными пакета, без аудита содержимого.
+ * Прежние и новые пути сервера и модуля учитываются вместе при обновлении или удалении.
  */
 export function sensitivePluginFile(
   file: string,
-  webDir: string | null,
   moduleDirs: readonly string[] = [],
+  serverEntries: readonly string[] = [],
 ): boolean {
   const basename = file.split('/').at(-1) ?? '';
+
+  if (serverEntries.includes(file)) {
+    return true;
+  }
 
   if (moduleDirs.some((dir) => file.startsWith(`${dir}/`))) {
     return true;
   }
 
-  if (['plugin.json', 'server.js', 'server.ts', 'package.json', 'package-lock.json'].includes(basename)) {
-    return true;
-  }
-
-  return !(webDir && file.startsWith(`${webDir}/`))
-    && !/^docs?\//iu.test(file) && !/\.(md|txt|rst)$/iu.test(file);
+  return ['plugin.json', 'package.json', 'package-lock.json'].includes(basename);
 }
 
 /**
@@ -63,8 +62,25 @@ export async function installedWebModuleDir(directory: string): Promise<string |
   try {
     const manifest = await readPluginManifest(directory);
 
-    return manifest.api === 2 && isRecord(manifest.webModule)
-      ? normalizePluginPackagePath(manifest.webModule.dir, false) : null;
+    const entries = manifest.entrypoints;
+
+    return isRecord(entries) && isRecord(entries.web)
+      ? normalizePluginPackagePath(entries.web.dir, false) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Прежний серверный путь остаётся чувствительным даже после его удаления из нового манифеста.
+ * Чтение метаданных не импортирует код и не запрещает замену повреждённого пакета.
+ */
+export async function installedServerEntry(directory: string): Promise<string | null> {
+  try {
+    const manifest = await readPluginManifest(directory);
+    const entries = manifest.entrypoints;
+
+    return isRecord(entries) ? normalizePluginPackagePath(entries.server, false) : null;
   } catch {
     return null;
   }

@@ -107,7 +107,7 @@ const saveBtn = (wrapper) => btn(wrapper, 'Сохранить');
 const chatSelect = (row) => row.get('.ui-select-wrap:has(.chat-select) select');
 const topicSelect = (row) => row.get('.ui-select-wrap:has(.topic-select) select');
 const projectSelect = (row) => row.get('.ui-select-wrap:has(.project-select) select');
-const b24GroupSelect = (row) => row.get('.ui-select-wrap:has(.b24-group-select) select');
+const trackerGroupSelect = (row) => row.get('.ui-select-wrap:has(.tracker-group-select) select');
 
 test('правил нет — раздел говорит, что закрыты все чаты, и ничего не сохраняет сам', async (t) => {
   const srv = server();
@@ -268,12 +268,13 @@ test('проект Битрикс24 выбирается по имени, а в 
 
   await btn(wrapper, 'Добавить').trigger('click');
   const row = wrapper.get('.rule');
-  assert.match(b24GroupSelect(row).text(), /Проект Альфа/);
-  assert.match(b24GroupSelect(row).text(), /Магазин/);
+
+  assert.match(trackerGroupSelect(row).text(), /Проект Альфа/);
+  assert.match(trackerGroupSelect(row).text(), /Магазин/);
 
   await chatSelect(row).setValue(`id:${CHAT}`);
   await projectSelect(row).setValue('demo');
-  await b24GroupSelect(row).setValue('101');
+  await trackerGroupSelect(row).setValue('101');
   await saveBtn(wrapper).trigger('click');
   await settle(flushPromises);
 
@@ -286,7 +287,7 @@ test('недоступный сохранённый проект Битрикс2
   const srv = server({ rules: [saved], groups: [{ id: 101, name: 'Проект Альфа' }] });
   const { wrapper } = await mountView(t, { api: srv.api });
 
-  const select = b24GroupSelect(wrapper.get('.rule'));
+  const select = trackerGroupSelect(wrapper.get('.rule'));
   assert.equal(select.element.value, '99');
   assert.match(select.text(), /Проект #99.*сохранён/);
 });

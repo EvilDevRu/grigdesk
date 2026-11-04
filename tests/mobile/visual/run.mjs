@@ -171,7 +171,7 @@ async function main() {
                 chats: 'chats',
                 waiting: 'waiting',
                 tasks: 'tasks',
-                'b24/tasks': 'b24-tasks',
+                'tracker/tasks': 'tracker-tasks',
                 app: 'app',
                 'chat-options': 'chat-options',
                 attention: 'attention',
@@ -237,7 +237,7 @@ async function main() {
                             ? 'task'
                             : route.endsWith('/launch-options')
                               ? 'launch-options'
-                              : 'b24-task';
+                              : 'tracker-task';
                   }
 
                   const value = structuredClone(data.data[kind] || { error: 'mock_missing' });

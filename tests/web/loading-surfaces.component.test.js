@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mountSurface, propCases, portCases } from './fixtures/loading/component.mjs';
 import { settingsHarness } from './helpers/settings-harness.js';
+import { CUSTOM_CAPS, trackerMetadata } from './helpers/trackerCard.js';
 
 for (const spec of [...propCases, ...portCases].filter((item) => !item.browserOnly)) {
     test(`LOAD-SURFACE-${spec.id}: pending, настоящий ready и пустой успех`, async (t) => {
@@ -156,7 +157,7 @@ test('LOAD-ERROR-RETRY-task-options: прежний повтор справоч�
     assert.match(h.wrapper.text(), /Не удалось загрузить: исполнителей и проекты/);
     h.resetOptions();
     await h.wrapper.get('[data-role="task-edit-options-retry"]').trigger('click');
-    assert.equal(h.calls.filter((url) => url === '/api/b24/users').length, 2);
+    assert.equal(h.calls.filter((url) => url === '/api/tracker/users').length, 2);
     assert.equal(h.wrapper.get('[data-role="task-edit-group"]').attributes('disabled'), '');
     h.resolveOptions();
     await h.flush();
@@ -211,13 +212,29 @@ const { mountChannelView } = await import('./helpers/channel-views.js');
 test('LOAD-SURFACE-board: первый каркас сменяется настоящими показателями и списком', async (t) => {
     const h = await mountBoardView(t, {
       pending: true,
-      tasks: []
+      tasks: [],
+      ownApi: {
+        get: (url) => url === '/api/trackers' ? trackerMetadata('fixture-driver') : null,
+      },
     });
     const pendingBricks = h.wrapper.findAll('[data-ui-skeleton]').length;
     const board = h.stores.board();
 
     board.data = {
         userId: 7,
+        trackerId: 'fixture-driver',
+        capabilities: { ...CUSTOM_CAPS },
+        widgets: [{
+            id: 'ready-summary',
+            kind: 'kpi',
+            title: { text: 'Готовая сводка драйвера' },
+            items: [{
+                id: 'ready-task-count',
+                label: { text: 'Готовых задач' },
+                value: 17,
+                format: 'count',
+            }],
+        }],
         today: {
             hours: 0,
             tasks_count: 0,
@@ -236,7 +253,8 @@ test('LOAD-SURFACE-board: первый каркас сменяется наст�
     };
     board.loading = false;
     await h.flushPromises();
-    assert.equal(h.wrapper.find('.stats-summary').exists(), true);
+    assert.equal(h.wrapper.find('.tracker-widgets .stats').exists(), true);
+    assert.equal(h.wrapper.get('[data-stat="ready-task-count"] .tval').text(), '17');
     assert.equal(h.wrapper.find('[data-ui-loading]').exists(), false);
     assert.ok(pendingBricks > 0, 'Доска использует собственный каркас из общих кирпичиков');
 });

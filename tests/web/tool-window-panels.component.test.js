@@ -137,6 +137,10 @@ test('TW-P01/shelf: перенос восстанавливает фильтр �
 
     }],
 
+    get allRows() {
+      return this.rows;
+    },
+
     loaded: true,
 
     loading: false,
@@ -197,16 +201,15 @@ test('TW-P01/docker и plugin: снимок сохраняет viewer/tab; src �
         'export const asyncView = () => ({});',
       ...Object.fromEntries([
         'code/CodePanel', 'shelf/TaskShelfPanel', 'studio3d/Studio3dPanel', 'terminal/TerminalPanel',
-        'ssh/SshPanel', 'db/DbPanel', 'docker/DockerPanel', 'ext/PluginFramePanel',
+        'ssh/SshPanel', 'db/DbPanel', 'docker/DockerPanel', 'ext/PluginModulePanel',
       ].map((name) => [`../../views/${name}.vue`, 'export default {};'])),
     }
   });
   const page = registry.toolById({
-    webPages: [{
+    modulePages: [{
 
       id: 'example',
 
-      src: '/api/ext/example/web/',
 
       label: 'Пример',
 
@@ -217,7 +220,8 @@ test('TW-P01/docker и plugin: снимок сохраняет viewer/tab; src �
     }]
   }, 'example');
 
-  assert.equal(page.panelProps.src, '/api/ext/example/web/');
+  assert.equal(page.panelProps.pluginId, 'example');
+  assert.equal('src' in page.panelProps, false);
 });
 
 test('TW-P02: mirror события обновляют настоящие SSH/DB actions без второго EventSource', async (t) => {
@@ -255,6 +259,13 @@ test('TW-P02: mirror события обновляют настоящие SSH/DB
     },
 
     dbApi: {
+
+      engineSnapshot: async () => ({
+        engines: [],
+        errors: [],
+        installs: {},
+        installHealth: null,
+      }),
 
       engines: async () => [],
 

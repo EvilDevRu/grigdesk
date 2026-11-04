@@ -43,7 +43,7 @@ async function fixture(t, { autoArbitrate = false, reply, questions = null } = {
       factoryProfile: '',
     },
     claudeAuth: null,
-    b24: null,
+    tracker: null,
     factoryState: { async primaryProfile() { return null; } },
     prefs: { read: () => ({}) },
     log: null,

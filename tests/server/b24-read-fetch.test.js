@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import test from 'node:test';
+import nodeTest, { before } from 'node:test';
+import { customReadModule } from './helpers/trackerPackage.js';
 
-import { B24Client } from '../../server/src/lib/b24/client.ts';
-import { B24ReadOperations } from '../../server/src/lib/b24/readOperations.ts';
+
+
 
 /**
  * Барьер подтверждает вход в нужную фазу без ожидания случайного количества миллисекунд.
@@ -116,3 +117,43 @@ test('FETCH-03: ошибка вне контекста сохраняет пре
   }), TypeError);
   assert.equal(attempts, 3);
 });
+
+let B24ReadOperations;
+let B24Client;
+let B24Adapter;
+let currentB24Read;
+let missing = false;
+
+before(async () => {
+  const context = {
+    skip: () => {
+      missing = true;
+    },
+  };
+  const reads = await customReadModule('src/readOperations.ts', context);
+
+  if (reads) {
+    ({ B24ReadOperations, currentB24Read } = reads);
+    ({ B24Client } = await customReadModule('src/client.ts', context));
+    ({ CustomSession: B24Adapter } = await customReadModule('src/session.ts', context));
+  }
+});
+
+/**
+ * Каждый сценарий получает явный skip только при отсутствующем необязательном пакете.
+ * Ошибки подготовки и непустой неверный env по-прежнему прерывают before с ошибкой.
+ */
+function test(name, options, run) {
+  const operation = run ?? options;
+  const settings = run ? options : {};
+
+  return nodeTest(name, settings, async (t) => {
+    if (missing) {
+      t.skip('пакет не подготовлен');
+
+      return;
+    }
+
+    return operation(t);
+  });
+}

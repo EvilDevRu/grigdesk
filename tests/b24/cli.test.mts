@@ -60,17 +60,18 @@ test('BI-01: весь CLI-контракт проходит через HTTP', as
     sendChunked(response, 200, echoBody(request));
   });
   const cases: Array<[string[], string, string, string | null]> = [
-    [['dashboard'], 'GET', '/api/b24/dashboard', null],
-    [['task', '007'], 'GET', '/api/b24/task/007', null],
-    [['comment', '42', 'два  пробела', '$(id)', '--help'], 'POST', '/api/b24/task/42/comment',
+    [['dashboard'], 'GET', '/api/tracker/dashboard', null],
+    [['task', '007'], 'GET', '/api/tracker/task/007', null],
+    [['comment', '42', 'два  пробела', '$(id)', '--help'], 'POST', '/api/tracker/task/42/comment',
       JSON.stringify({ text: 'два  пробела $(id) --help' })],
-    [['timer', '42', 'start'], 'POST', '/api/b24/task/42/timer/start', null],
-    [['timer', '42', 'pause'], 'POST', '/api/b24/task/42/timer/pause', null],
-    [['timer', '42', 'stop'], 'POST', '/api/b24/task/42/timer/stop', null],
-    [['complete', '42'], 'POST', '/api/b24/task/42/complete', null],
-    [['renew', '42'], 'POST', '/api/b24/task/42/renew', null],
-    [['users'], 'GET', '/api/b24/users?q=', null],
-    [['users', 'Иван Петров'], 'GET', `/api/b24/users?${new URLSearchParams({ q: 'Иван Петров' })}`, null],
+    [['timer', '42', 'start'], 'POST', '/api/tracker/task/42/timer/start', null],
+    [['timer', '42', 'pause'], 'POST', '/api/tracker/task/42/timer/pause', null],
+    [['timer', '42', 'stop'], 'POST', '/api/tracker/task/42/timer/stop', null],
+    [['complete', '42'], 'POST', '/api/tracker/task/42/complete', null],
+    [['renew', '42'], 'POST', '/api/tracker/task/42/renew', null],
+    [['users'], 'GET', '/api/tracker/users?q=', null],
+    [['users', 'Иван Петров'], 'GET',
+      `/api/tracker/users?${new URLSearchParams({ q: 'Иван Петров' })}`, null],
   ];
 
   for (const [args, method, url, body] of cases) {
@@ -139,8 +140,8 @@ test('BI-03: start сохраняет только результат timer', as
       const result = await runSource(t, fixture, ['start', '42']);
 
       assert.deepEqual(fixture.requests.map((request) => request.url), [
-        '/api/b24/task/42/renew',
-        '/api/b24/task/42/timer/start',
+        '/api/tracker/task/42/renew',
+        '/api/tracker/task/42/timer/start',
       ]);
       assert.ok(!result.stdout.toString().includes('renew'));
       assert.ok(!result.stderr.toString().includes('renew'));

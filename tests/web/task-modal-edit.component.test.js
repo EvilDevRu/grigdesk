@@ -3,6 +3,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { trackerMetadata } from './helpers/trackerCard.js';
+
 import { compileTaskModal } from './helpers/task-modal.js';
 
 process.env.NODE_ENV = 'test';
@@ -61,6 +63,10 @@ async function mountEditor(t, presentation = 'dialog') {
     async get(url) {
       reads.push(url);
 
+      if (url === '/api/trackers') {
+        return trackerMetadata();
+      }
+
       if (url.endsWith('/comments')) {
         return { comments: [{
           mid: 1,
@@ -71,7 +77,7 @@ async function mountEditor(t, presentation = 'dialog') {
       }
       if (url.endsWith('/clarifications')) return { text: '' };
       if (url === '/api/tasks') return { tasks: [] };
-      if (url === '/api/b24/users') {
+      if (url === '/api/tracker/users') {
         return {
           users: [
             { id: 17, name: 'Старый исполнитель' },
@@ -79,7 +85,7 @@ async function mountEditor(t, presentation = 'dialog') {
           ],
         };
       }
-      if (url === '/api/b24/groups') {
+      if (url === '/api/tracker/groups') {
         return {
           groups: [
             { id: 7, name: 'Старый проект' },
@@ -207,7 +213,7 @@ test('TaskModal редактирует все основные поля и ум�
     },
   }]);
   assert.equal(wrapper.find('[data-role="task-edit-title"]').exists(), false);
-  assert.match(wrapper.text(), /Изменения сохранены в Битрикс24/);
+  assert.match(wrapper.text(), /Изменения сохранены\./);
   assert.match(wrapper.text(), /Новая постановка/);
 });
 
@@ -226,6 +232,62 @@ test('TaskModal не перезаписывает нетронутые поля 
   }]);
 });
 
+for (const modifier of ['ctrlKey', 'metaKey']) {
+  test(`Редактор фокусирует название и сохраняет по ${modifier} + Enter один раз`, async (t) => {
+    const { wrapper, flushPromises, updates } = await mountEditor(t);
+
+    await wrapper.get('[data-role="task-edit-open"]').trigger('click');
+    await flushPromises();
+
+    const title = wrapper.get('[data-role="task-edit-title"]');
+
+    assert.equal(document.activeElement === title.element, true);
+    assert.equal(wrapper.get('[data-role="task-edit-save"]').element.disabled, true);
+    await title.setValue('   ');
+    assert.equal(wrapper.get('[data-role="task-edit-save"]').element.disabled, true);
+    assert.match(wrapper.get('.task-edit').text(), /Введите название задачи/);
+
+    await title.setValue('Сохранено с клавиатуры');
+    assert.match(wrapper.get('.task-edit-footer').text(), /Есть несохранённые изменения/);
+    await title.trigger('keydown', { key: 'Enter', [modifier]: true });
+    await flushPromises();
+
+    assert.deepEqual(updates, [{ id: '42', fields: { title: 'Сохранено с клавиатуры' } }]);
+    assert.equal(wrapper.find('.task-edit').exists(), false);
+  });
+}
+
+test('Свёрнутые участники сохраняют выбор, а отмена возвращает исходные поля', async (t) => {
+  const { wrapper, flushPromises, updates } = await mountEditor(t);
+
+  await wrapper.get('[data-role="task-edit-open"]').trigger('click');
+  await flushPromises();
+
+  const toggle = wrapper.get('[data-role="task-edit-accomplices-toggle"]');
+
+  assert.equal(toggle.attributes('aria-expanded'), 'false');
+  await toggle.trigger('click');
+  await wrapper.get('[data-role="task-edit-accomplices"] [role="option"]:last-child').trigger('click');
+  assert.match(toggle.text(), /1/);
+  await toggle.trigger('click');
+  await toggle.trigger('click');
+  assert.equal(wrapper.get(
+    '[data-role="task-edit-accomplices"] [role="option"]:last-child',
+  ).attributes('aria-selected'), 'true');
+  await wrapper.get('[data-role="task-edit-save"]').trigger('click');
+  await flushPromises();
+  assert.deepEqual(updates, [{ id: '42', fields: { accomplices: [23] } }]);
+
+  await wrapper.get('[data-role="task-edit-open"]').trigger('click');
+  await flushPromises();
+  await wrapper.get('[data-role="task-edit-title"]').setValue('Отменённое изменение');
+  await wrapper.get('[data-role="task-edit-cancel"]').trigger('click');
+  assert.equal(updates.length, 1);
+  await wrapper.get('[data-role="task-edit-open"]').trigger('click');
+  await flushPromises();
+  assert.equal(wrapper.get('[data-role="task-edit-title"]').element.value, 'Старая постановка');
+});
+
 test('TF-01: та же карточка редактируется как документ без модального backdrop', async (t) => {
   const { wrapper, flushPromises, updates } = await mountEditor(t, 'document');
 
@@ -241,12 +303,12 @@ test('TF-01: та же карточка редактируется как док
 });
 
 for (const presentation of ['dialog', 'document']) {
-  test(`Разделы карточки сохраняют черновики и лениво читают комментарии: ${presentation}`, async (t) => {
+  test(`Разделы карточки сохраняют черновики и используют один page-запрос: ${presentation}`, async (t) => {
     const { wrapper, flushPromises, reads, updates } = await mountEditor(t, presentation);
     const section = (name) => wrapper.get(`[data-task-section="${name}"]`);
 
     assert.equal(wrapper.get('.task-detail').attributes('data-pane'), 'description');
-    assert.equal(reads.filter((url) => url.endsWith('/comments')).length, 0);
+    assert.equal(reads.filter((url) => url.endsWith('/comments')).length, 1);
     assert.equal(section('description').attributes('aria-selected'), 'true');
     section('description').element.focus();
     await section('description').trigger('keydown', { key: 'ArrowRight' });

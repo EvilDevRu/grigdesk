@@ -7,7 +7,7 @@
   min-width: 0;
   border: 1px solid var(--control-border);
   border-radius: var(--control-radius);
-  background: var(--control-background);
+  background: var(--field-background);
   color: var(--control-text);
   transition:
     border-color var(--control-motion-duration) var(--control-motion-easing),
@@ -68,7 +68,6 @@
 }
 
 .ui-textarea[data-role='task-clarification'] {
-  background: var(--surface-2);
   font-size: 13px;
 }
 
@@ -78,7 +77,6 @@
 
 .ui-textarea[data-role='task-launch-note'] {
   min-height: 72px;
-  background: var(--ground);
   font-size: 13px;
 }
 
@@ -118,7 +116,7 @@
 .ui-input[readonly],
 .ui-number-input[readonly],
 .ui-textarea[readonly] {
-  background: var(--control-background-readonly);
+  background: var(--field-background-readonly);
   color: var(--ink-mid);
 }
 
@@ -203,12 +201,7 @@ button.ui-select {
   padding: 4px;
   overflow: hidden;
   border-radius: var(--control-radius);
-}
-
-/* Каталог моделей использует плотность toolbar и на компьютере, и на телефоне.
-   Сенсорный токен сохраняет 44 px, не возвращая desktop к обычной высоте формы. */
-.ui-select-popup[data-group-navigation] {
-  --control-height: var(--toolbar-control-h);
+  font-size: 13px;
 }
 
 .ui-select-panel {
@@ -237,14 +230,19 @@ button.ui-select {
   pointer-events: none;
 }
 
-.ui-input[data-context='select-search'] {
+/* Поиск имеет один вид во всех меню независимо от компоновки пунктов.
+   Toolbar-токен задаёт 28 px на desktop и сохраняет 44 px на touch. */
+.ui-select-popup .ui-input[data-context='select-search'] {
+  height: var(--toolbar-control-h);
+  min-height: var(--toolbar-control-h);
   padding-left: 32px;
+  border-radius: var(--radius-sm);
 }
 
-/* В компактном меню фокус остаётся тонкой рамкой общего поля.
+/* В меню фокус остаётся тонкой рамкой общего поля.
    Внешний ореол здесь упирался в край панели и выглядел второй рамкой. */
-.ui-select-popup[data-group-navigation] .ui-input[data-context='select-search'] {
-  --control-focus-ring: none;
+.ui-select-popup .ui-input[data-context='select-search']:focus-visible {
+  box-shadow: none;
 }
 
 .ui-select-list {
@@ -295,8 +293,8 @@ button.ui-select {
   flex-direction: column;
   justify-content: center;
   width: 100%;
-  min-height: var(--control-height);
-  padding: 6px 28px 6px 8px;
+  min-height: max(32px, var(--toolbar-control-h));
+  padding: 4px 28px 4px 8px;
   border: 0;
   border-radius: 4px;
   background: transparent;
@@ -306,8 +304,37 @@ button.ui-select {
   cursor: pointer;
 }
 
-.ui-select-popup[data-group-navigation] .ui-select-option {
-  padding-block: 4px;
+[data-ui-touch] .ui-select-popup[data-density='compact'] .ui-select-group-nav .ui-button[data-group-icon] {
+  position: relative;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  margin: 6px;
+}
+
+[data-ui-touch] .ui-select-popup[data-density='compact']
+  .ui-select-group-nav .ui-button[data-group-icon]::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+
+.ui-search-input:has(.ui-input[data-context='chat-list-search']) > .ui-icon-button,
+.ui-select-popup .ui-search-input > .ui-icon-button {
+  top: 50%;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  transform: translateY(-50%);
+}
+
+.ui-search-input:has(.ui-input[data-context='chat-list-search']) > .ui-icon-button::after,
+.ui-select-popup .ui-search-input > .ui-icon-button::after {
+  content: '';
+  position: absolute;
+  inset: -10px;
 }
 
 .ui-select-option__label,
@@ -357,8 +384,40 @@ button.ui-select {
 
 .ui-select-option__check {
   position: absolute;
-  top: 8px;
+  top: 50%;
   right: 8px;
+  transform: translateY(-50%);
+}
+
+/* Однострочное представление меняет только расположение текста пункта.
+   Шрифт, поиск, размеры строк и отметка выбора принадлежат общему стилю меню. */
+.ui-select-popup[data-option-layout='inline'] .ui-select-option__content {
+  width: 100%;
+}
+
+.ui-select-popup[data-option-layout='inline'] .ui-select-option__text {
+  flex: 1;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ui-select-popup[data-option-layout='inline'] .ui-select-option__label,
+.ui-select-popup[data-option-layout='inline'] .ui-select-option__description {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ui-select-popup[data-option-layout='inline'] .ui-select-option__label {
+  flex: 1;
+}
+
+.ui-select-popup[data-option-layout='inline'] .ui-select-option__description {
+  flex: 0 1 auto;
+  max-width: 45%;
 }
 
 .ui-select-group {
@@ -629,7 +688,6 @@ button.ui-select {
   padding: 0 8px;
   border-color: var(--line-2);
   border-radius: 7px;
-  background: var(--ground);
   color: var(--ink);
   font-size: 14px;
   font-weight: 600;
@@ -701,7 +759,6 @@ button.ui-select {
   border: 0;
   border-bottom: 1px solid transparent;
   border-radius: 0;
-  background-color: transparent;
   background-position: right 4px center;
   color: var(--ink);
   font-size: 12.5px;
@@ -724,13 +781,18 @@ button.ui-select {
   opacity: 0.5;
 }
 
+/* Выбор проекта и рабочей копии встроен в строку навигации по коду.
+   Прозрачный фон сохраняет общую поверхность шапки без отдельных плашек. */
+.ui-select[data-context='code-head-select'] {
+  background-color: transparent;
+}
+
 /* Все селекты шапки чата используют одну рамку, подложку и отступы.
    Модель, режим и задача сохраняют общий сенсорный размер без отдельных скинов. */
 .ui-select[data-context='chat-session-toolbar'] {
   padding-inline: 8px 28px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background-color: var(--surface-2);
   background-position: right 8px center;
   -webkit-tap-highlight-color: transparent;
 }
@@ -745,13 +807,58 @@ button.ui-select {
   border-color: var(--accent);
 }
 
+/* Сенсорная шапка получает компактное видимое поле вместо высокой плашки.
+   Площадка расширяется по вертикали до 44 px и не сдвигает соседние значения. */
+html[data-ui-touch] .ui-select[data-context='chat-session-toolbar'] {
+  position: relative;
+  height: 32px;
+  min-height: 32px;
+}
+
+html[data-ui-touch] .ui-select[data-context='chat-session-toolbar']::after {
+  content: '';
+  position: absolute;
+  inset: -6px 0;
+}
+
+/* Поиск списка использует ту же поверхность, что и остальные поля шапки.
+   Внешние поля контейнера отделяют его от верхней границы без роста самой формы. */
+.ui-input[data-context='chat-list-search'] {
+  height: 32px;
+  min-height: 32px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+/* Раскрытые настройки телефона занимают равные колонки вместо ширины значения.
+   Длинная модель остаётся внутри поля, полное имя доступно в прежнем меню. */
+@media (max-width: 600px) {
+  .cs .ui-select[data-context='chat-session-toolbar'],
+  .phone-chat-options .ui-select[data-context='chat-session-toolbar'] {
+    width: 100%;
+    field-sizing: fixed;
+  }
+
+  .phone-chat-options .ui-select[data-context='chat-session-toolbar'] {
+    font-size: 16px;
+  }
+
+  .ui-dialog[data-ui-chat-options] .ui-select[data-context='chat-session-toolbar'] {
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .ui-dialog[data-ui-chat-options] .ui-select[data-context='chat-session-toolbar']::after {
+    display: none;
+  }
+}
+
 /* Формы настроек используют общий ритм primitives; варианты ниже описывают только
    плотные карточки исполнителей и большие многострочные поля речи. */
 .ui-input[data-context='settings-field'],
 .ui-number-input[data-context='settings-field'],
 .ui-textarea[data-context='settings-field'],
 .ui-select[data-context='settings-field'] {
-  background-color: var(--ground);
   font-size: 14px;
 }
 
@@ -772,7 +879,6 @@ button.ui-select {
 .plugrow .ui-select.inp[data-context='settings-field'] {
   padding-right: 31px;
   padding-left: 11px;
-  background-color: var(--surface);
   background-position: right 11px center;
   font-size: 12.5px;
 }
@@ -838,12 +944,14 @@ button.ui-select {
   height: 18px;
 }
 
-/* `--composer-h` появляется только после ручного ресайза. Ограничение 46vh обязано
-   совпадать с COMPOSER_MAX_VH в ChatSession, иначе у разделителя будет мёртвый ход. */
+/* Без ручной высоты поле растёт и сжимается по тексту, включая переносы по ширине.
+   Потолок 46vh совпадает с COMPOSER_MAX_VH; дальше текст прокручивается внутри. */
 .ui-textarea[data-role='chat-composer'] {
   flex: 1;
+  min-width: 0;
+  field-sizing: content;
   height: var(--composer-h, auto);
-  min-height: 48px;
+  min-height: 36px;
   max-height: 46vh;
   padding: 6px 0;
   resize: none;
@@ -857,11 +965,17 @@ button.ui-select {
   outline: none;
 }
 
-/* Фокус показывает внешняя рамка composer-а. Внутренний focus-ring primitive-а
-   создавал вторую прямоугольную рамку посреди составного поля. */
+/* Фокус показывает верхний разделитель панели ввода в ChatSession.
+   Внутренний focus-ring primitive-а создавал прямоугольную рамку посреди панели. */
 .ui-textarea[data-role='chat-composer']:focus-visible {
   outline: none;
   box-shadow: none;
+}
+
+/* Раскладка занимает верх скрепочной колонки; две иконки не перекрываются даже
+   у пустого поля. Минимальная высота применяется только при видимом индикаторе. */
+.composer:has([data-role='chat-keyboard-layout']) > .ui-textarea[data-role='chat-composer'] {
+  min-height: 64px;
 }
 
 @media (max-width: 600px) {
@@ -871,6 +985,7 @@ button.ui-select {
   .ui-textarea[data-role='chat-composer'] {
     height: auto;
     max-height: min(160px, 28vh);
+    padding-inline: 12px;
     font-size: 16px;
   }
 }
@@ -907,4 +1022,41 @@ button.ui-select {
 
 .ui-input[data-context='workspace-path'] {
   font: 12px/20px var(--mono);
+}
+
+/* Рабочие overrides идут после общей шкалы, поэтому телефонный размер замыкает каскад.
+   Числовые поля используют ту же читаемость, а desktop сохраняет прежнюю плотность. */
+@media (max-width: 600px) {
+  html:root :is(.ui-workspace, [data-ui-workspace], [data-role='settings-modal'])
+    :is(.ui-input, .ui-number-input, .ui-textarea, .ui-select) {
+    font-size: 16px;
+    line-height: 1.4;
+  }
+
+  html:root .ui-field__label,
+  html:root .ui-select-option__description,
+  html:root .ui-select-group {
+    font-size: 13px;
+  }
+
+  html:root .ui-select[data-context='code-head-select'] {
+    height: auto;
+    min-height: var(--control-height);
+    padding-block: 8px;
+    font-size: 16px;
+  }
+
+  html:root .ui-select[data-context='code-head-select'] .ui-select__label {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+.ui-input[data-context='plugin-list-search'] {
+  padding-inline: 0;
+  border-color: transparent;
+  background: transparent;
 }

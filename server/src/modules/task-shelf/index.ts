@@ -1,4 +1,5 @@
-import { withB24RequestRead } from '../../lib/b24/requestRead.ts';
+import { trackerPersonalRequestOptions } from '../../lib/taskPersonalScope.ts';
+import { withTrackerRequestRead } from '../../lib/trackers/requestRead.ts';
 // Account-scoped полка B24-задач. Роуты меняют только state GrigDesk и живо
 // закрываются гейтом системного плагина; общий auth guard уже закрывает весь /api.
 import fp from 'fastify-plugin';
@@ -19,8 +20,18 @@ interface TaskShelfRoute {
   Body: unknown;
 }
 
+/**
+ * Публичная ошибка сохраняет статус источника без раскрытия личной identity.
+ * Повреждение хранилища не превращается в пустую успешную полку.
+ */
 function publicError(reply: FastifyReply, error: unknown): FastifyReply {
   const code = errorCode(error);
+  const status = (error as { status?: number }).status
+    ?? (String(code).startsWith('grigdesk_tasks_') ? 503 : undefined);
+
+  if (status && [400, 404, 409, 503].includes(status)) {
+    return reply.code(status).send({ error: code, message: (error as Error).message });
+  }
   if (code === 'BAD_SHELF_TASK_ID') {
     return reply.code(400).send({ error: 'bad_task_id', message: 'Некорректный номер задачи.' });
   }
@@ -82,16 +93,33 @@ async function taskShelfModule(
     }
   };
 
-  fastify.get<TaskShelfRoute>('/api/b24/task-shelf', (request, reply) =>
-    withB24RequestRead(request, reply, (options) =>
+
+
+  fastify.get<TaskShelfRoute>('/api/tracker/task-shelf', (request, reply) =>
+    withTrackerRequestRead(request, reply, (options) =>
       run(() => shelf.list(options))(request, reply)));
-  fastify.put<TaskShelfRoute>('/api/b24/task-shelf/:taskId', run((request) => {
+  fastify.put<TaskShelfRoute>('/api/tracker/task-shelf/:taskId', run((request) => {
     const taskId = normalizeShelfTaskId(request.params.taskId);
-    return shelf.put(taskId, request.body);
+
+    return shelf.put(taskId, request.body, trackerPersonalRequestOptions(request.headers));
   }, { mutation: true }));
-  fastify.delete<TaskShelfRoute>('/api/b24/task-shelf/:taskId', run((request) => {
+  fastify.delete<TaskShelfRoute>('/api/tracker/task-shelf/:taskId', run((request) => {
     const taskId = normalizeShelfTaskId(request.params.taskId);
-    return shelf.remove(taskId);
+
+    return shelf.remove(taskId, trackerPersonalRequestOptions(request.headers));
+  }, { mutation: true }));
+  fastify.get<TaskShelfRoute>('/api/grigdesk-tasks/task-shelf', (request, reply) =>
+    withTrackerRequestRead(request, reply, (options) =>
+      run(() => shelf.list(options, { source: 'grigdesk' }))(request, reply)));
+  fastify.put<TaskShelfRoute>('/api/grigdesk-tasks/task-shelf/:taskId', run((request) => {
+    const taskId = normalizeShelfTaskId(request.params.taskId);
+
+    return shelf.put(taskId, request.body, { source: 'grigdesk' });
+  }, { mutation: true }));
+  fastify.delete<TaskShelfRoute>('/api/grigdesk-tasks/task-shelf/:taskId', run((request) => {
+    const taskId = normalizeShelfTaskId(request.params.taskId);
+
+    return shelf.remove(taskId, { source: 'grigdesk' });
   }, { mutation: true }));
 }
 

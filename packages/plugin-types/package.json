@@ -1,6 +1,6 @@
 {
   "name": "@grigdesk/plugin-types",
-  "version": "0.1.0-api2.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Публичные типы пользовательских плагинов GrigDesk"

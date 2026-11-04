@@ -4,6 +4,7 @@ import test from 'node:test';
 import { compileModule, migrationHarness, webFile } from './helpers/compile-vue.js';
 import { compileTaskModal } from './helpers/task-modal.js';
 import { installUiBrowser } from './helpers/ui-components.js';
+import { trackerMetadata } from './helpers/trackerCard.js';
 
 process.env.NODE_ENV = 'test';
 
@@ -69,11 +70,15 @@ async function mountCard(t, browser, {
     // Детали копируются как сетевой ответ, чтобы кеш не менялся вместе с порталом.
     // Остальные запросы карточки получают пустые независимые ответы.
     async get(url, options) {
+      if (url === '/api/trackers') {
+        return trackerMetadata();
+      }
+
       if (url.startsWith('/api/grigdesk-tasks/')) {
         throw new migrationHarness.ApiError('Нет своей задачи', 404, { error: 'grigdesk_task_not_found' });
       }
 
-      if (url === '/api/b24/task/42') {
+      if (url === '/api/tracker/task/42') {
         calls.push(`GET:${url}`);
         detailSignals.push(options?.signal);
 
@@ -233,7 +238,7 @@ test('Действия карточки учитывают завершение 
     assert.equal(stop?.attributes('data-ui-tooltip'), undefined);
     await stop.trigger('click');
     await flushPromises();
-    assert.ok(calls.includes('POST:/api/b24/task/42/timer/pause'));
+    assert.ok(calls.includes('POST:/api/tracker/task/42/timer/pause'));
   });
 
   for (const status of [2, 3, 4, 6]) {
@@ -246,7 +251,7 @@ test('Действия карточки учитывают завершение 
       assert.equal(footerButton(wrapper, '▶ Начать учёт')?.attributes('data-ui-tooltip'), undefined);
       await footerButton(wrapper, '▶ Начать учёт').trigger('click');
       await flushPromises();
-      assert.ok(calls.includes('POST:/api/b24/task/42/timer/start'));
+      assert.ok(calls.includes('POST:/api/tracker/task/42/timer/start'));
     });
   }
 
@@ -259,10 +264,10 @@ test('Действия карточки учитывают завершение 
     await flushPromises();
     assert.deepEqual(confirmations, [['Возобновить задачу?', { okText: 'Возобновить' }]]);
     assert.deepEqual(calls, [
-      'GET:/api/b24/task/42',
-      'POST:/api/b24/task/42/renew',
+      'GET:/api/tracker/task/42',
+      'POST:/api/tracker/task/42/renew',
       'board:true',
-      'GET:/api/b24/task/42',
+      'GET:/api/tracker/task/42',
     ]);
     assert.equal(wrapper.get('.task-status').text(), 'Ждёт выполнения');
     assert.equal(footerButton(wrapper, '↺ Возобновить'), undefined);
@@ -280,7 +285,7 @@ test('Действия карточки учитывают завершение 
     await footerButton(wrapper, '↺ Возобновить').trigger('click');
     await flushPromises();
     assert.equal(confirmations.length, 1);
-    assert.deepEqual(calls, ['GET:/api/b24/task/42']);
+    assert.deepEqual(calls, ['GET:/api/tracker/task/42']);
     assert.equal(wrapper.get('.task-status').text(), 'Завершена');
   });
 
@@ -294,7 +299,7 @@ test('Действия карточки учитывают завершение 
     assert.equal(ui.taskId, 42);
     assert.equal(wrapper.get('.malerts .err').text(), 'Портал не разрешил возобновить задачу');
     assert.equal(footerButton(wrapper, '↺ Возобновить')?.element.disabled, false);
-    assert.deepEqual(calls, ['GET:/api/b24/task/42', 'POST:/api/b24/task/42/renew']);
+    assert.deepEqual(calls, ['GET:/api/tracker/task/42', 'POST:/api/tracker/task/42/renew']);
   });
 
   await t.test('после завершения повторное открытие читает новый статус без ожидания TTL', async (s) => {
@@ -309,10 +314,10 @@ test('Действия карточки учитывают завершение 
     assert.equal(wrapper.get('.task-status').text(), 'Завершена');
     assert.equal(footerButton(wrapper, '✓ Завершить'), undefined);
     assert.deepEqual(calls, [
-      'GET:/api/b24/task/42',
-      'POST:/api/b24/task/42/complete',
+      'GET:/api/tracker/task/42',
+      'POST:/api/tracker/task/42/complete',
       'board:true',
-      'GET:/api/b24/task/42',
+      'GET:/api/tracker/task/42',
     ]);
   });
 });

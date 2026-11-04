@@ -83,7 +83,7 @@ async function openTooltip(wrapper, selector) {
 }
 
 async function openContextTooltip(wrapper) {
-  return (await openTooltip(wrapper, '.ctx-ring')).get('[data-testid="context-tooltip"]');
+  return (await openTooltip(wrapper, '.ctx-meter')).get('[data-testid="context-tooltip"]');
 }
 
 test('UiTooltip не добавляет второй Tab-stop составному триггеру и открывается по наведению', async (t) => {
@@ -187,7 +187,11 @@ test('кольцо контекста открывает форматирова�
       return {
         id: session.model,
         model: { name: 'Opus 5 (1M)', context: 1_000_000, efforts: [] },
-        provider: { id: 'claude', capabilities: { chatAutoCompact: true } },
+        provider: {
+          id: 'claude',
+          color: '#d97757',
+          capabilities: { chatAutoCompact: true },
+        },
       };
     },
     visibleModels() { return []; },
@@ -210,7 +214,13 @@ test('кольцо контекста открывает форматирова�
   t.after(() => wrapper.unmount());
   await flushPromises();
 
-  const ring = wrapper.get('.ctx-ring');
+  const ring = wrapper.get('.ctx-meter');
+  const headerMeter = wrapper.get('[data-context="chat-header-context"]');
+
+  assert.equal(headerMeter.attributes('aria-valuenow'), '80');
+  assert.equal(headerMeter.element.style.getPropertyValue('--chat-context-color'), '#d97757');
+  assert.equal(ring.get('.ui-progress').classes().includes('ui-progress--warning'), true);
+  assert.equal(headerMeter.attributes('aria-valuetext'), ring.attributes('aria-label'));
   assert.equal(ring.attributes('title'), undefined);
   assert.match(ring.attributes('aria-label'), /Контекст: 160[\s\u00a0]000/);
   assert.equal(Boolean(browser.document.querySelector('[data-testid="context-tooltip"]')), false);
@@ -246,6 +256,9 @@ test('кольцо контекста открывает форматирова�
   await nextTick();
   assert.match(ring.attributes('aria-label'), /40[\s\u00a0]000 из 80[\s\u00a0]000.*50%/);
   assert.match(ring.attributes('aria-label'), /замер этого хода/);
+  assert.equal(headerMeter.attributes('aria-valuenow'), '50');
+  assert.equal(headerMeter.element.style.getPropertyValue('--chat-context-color'), '#d97757');
+  assert.equal(ring.get('.ui-progress').classes().includes('ui-progress--success'), true);
 
   session.sessionId = null;
   await nextTick();
@@ -258,15 +271,25 @@ test('кольцо контекста открывает форматирова�
   await nextTick();
   assert.match(ring.attributes('aria-label'), /Контекст: 0 из/);
   assert.equal(content.querySelector('.ctx-pop-pct')?.textContent.trim(), '0%');
+  assert.equal(ring.get('.ctx-meter-value').text(), '0%');
+  assert.equal(headerMeter.attributes('aria-valuenow'), '0');
 
   session.liveContextUsage.contextTokens = 90_000;
   session.liveContextUsage.contextMetric = 'unavailable';
   await nextTick();
-  const arc = ring.get('.rfg');
-  assert.equal(arc.attributes('stroke-dashoffset'), arc.attributes('stroke-dasharray'));
+  assert.equal(ring.get('.ui-progress__bar').element.style.width, '0%');
+  assert.equal(ring.get('.ctx-meter-value').text(), '—');
   assert.equal(Boolean(content.querySelector('.ctx-pop-pct')), false);
   assert.match(content.textContent, /Точная заполненность пока недоступна/);
   assert.equal(ring.classes().includes('hi'), false);
+  assert.equal(headerMeter.get('.ui-progress__bar').element.style.width, '0%');
+  assert.match(headerMeter.attributes('aria-valuetext'), /недоступна/);
+
+  session.compacting = true;
+  await nextTick();
+  assert.equal(headerMeter.attributes('aria-valuenow'), undefined);
+  assert.equal(headerMeter.find('.is-indeterminate').exists(), true);
+  session.compacting = false;
   session.sending = false;
   session.liveContextUsage = null;
 
@@ -394,7 +417,8 @@ test('ChatSession передаёт в тултип полное загружен
   assert.equal(taskTip.text(), `#42 · ${title}`);
   assert.equal(wrapper.get('.task-tip').attributes('tabindex'), undefined);
   assert.equal(wrapper.find('.sel.task option[value="42"]').text(), `#42 · ${title}`);
-  const ring = wrapper.find('.ctx-ring');
+
+  const ring = wrapper.find('.ctx-meter');
   const ringLabel = ring.attributes('aria-label');
   assert.equal(ring.attributes('title'), undefined, 'native title снова создаст системную подсказку');
   assert.equal(ring.classes().includes('ctx-tip'), true);
@@ -647,7 +671,7 @@ test('ChatSession возвращает селект задачи к привяз
 // Сторож согласованности шкал кольца. Цвет считался от порога сжатия, а дуга и подсказка —
 // от окна модели: на 1M это расходилось впятеро (жёлтое кольцо, залитое на 17%), и человек
 // читал форму, а не оттенок — «места ещё дофига», пока CLI уже сжимал контекст по кругу.
-test('ChatSession рисует дугу и процент кольца по тому же порогу, что и его цвет', async (t) => {
+test('ChatSession рисует полосу и процент по тому же порогу, что и его цвет', async (t) => {
   const browser = await browserHarness(t);
   const [{ mount, flushPromises }, { reactive, nextTick }] = await Promise.all([
     import('../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
@@ -715,7 +739,7 @@ test('ChatSession рисует дугу и процент кольца по то
   t.after(() => wrapper.unmount());
   await flushPromises();
 
-  const ring = wrapper.find('.ctx-ring');
+  const ring = wrapper.find('.ctx-meter');
   assert.equal(ring.attributes('title'), undefined);
   // Порог сжатия ниже потолка окна (80% от 1M), значит считаем по нему и так и пишем.
   assert.match(ring.attributes('aria-label'), /Контекст: 160[\s ]000 из 200[\s ]000 до сжатия \(80%\)/);
@@ -727,14 +751,13 @@ test('ChatSession рисует дугу и процент кольца по то
 
   assert.equal(contextTip.get('.ctx-pop-head b').text(), 'Контекст сессии');
   assert.equal(contextTip.get('.ctx-pop-pct').text(), '80%');
+  assert.equal(ring.get('.ctx-meter-value').text(), '80%');
   assert.equal(contextTip.get('.ctx-pop-status').text(), 'Порог близко — пора сжать');
   assert.match(contextTooltipRows(contextTip).Порог, /200[\s\u00a0]000 · автосжатие/);
   assert.equal(ring.classes().includes('mid'), true);
 
   // Форма обязана говорить то же, что цвет: дуга заполнена на те же 80%, а не на 16%.
-  const arc = wrapper.find('.ctx-ring .rfg');
-  const circumference = Number(arc.attributes('stroke-dasharray'));
-  const filled = 1 - Number(arc.attributes('stroke-dashoffset')) / circumference;
+  const filled = parseFloat(ring.get('.ui-progress__bar').element.style.width) / 100;
   assert.ok(
     Math.abs(filled - CONTEXT_TOKENS / COMPACT_WINDOW) < 0.01,
     `дуга залита на ${Math.round(filled * 100)}% — она обязана идти по порогу сжатия`,
@@ -746,6 +769,7 @@ test('ChatSession рисует дугу и процент кольца по то
   assert.match(ring.attributes('aria-label'), /порог достигнут — пора сжать/);
   assert.equal(contextTip.get('.ctx-pop-status').text(), 'Порог достигнут — пора сжать');
   assert.equal(contextTip.get('.ctx-pop-pct').text(), '100%');
+  assert.equal(ring.get('.ctx-meter-value').text(), '100%');
   assert.equal(ring.classes().includes('hi'), true);
 });
 
@@ -820,7 +844,7 @@ test('ChatSession игнорирует устаревшую границу ст�
   t.after(() => wrapper.unmount());
   await flushPromises();
 
-  const ring = wrapper.find('.ctx-ring');
+  const ring = wrapper.find('.ctx-meter');
   assert.equal(ring.attributes('title'), undefined);
   assert.match(ring.attributes('aria-label'), /Контекст: 200[\s ]000 из 800[\s ]000 до потолка окна \(25%\)/);
   assert.doesNotMatch(ring.attributes('aria-label'), /подорож/);
@@ -828,9 +852,7 @@ test('ChatSession игнорирует устаревшую границу ст�
   const contextTip = await openContextTooltip(wrapper);
   assert.equal(contextTooltipRows(contextTip).Кэш, 'нет данных');
 
-  const arc = wrapper.find('.ctx-ring .rfg');
-  const circumference = Number(arc.attributes('stroke-dasharray'));
-  const filled = 1 - Number(arc.attributes('stroke-dashoffset')) / circumference;
+  const filled = parseFloat(ring.get('.ui-progress__bar').element.style.width) / 100;
   assert.ok(
     Math.abs(filled - CONTEXT_TOKENS / (MODEL_WINDOW * 0.8)) < 0.01,
     `дуга залита на ${Math.round(filled * 100)}% — она обязана идти по 80% окна`,
@@ -909,7 +931,7 @@ test('ChatSession показывает provider-нейтральный стат�
   t.after(() => wrapper.unmount());
   await flushPromises();
 
-  const ring = wrapper.find('.ctx-ring');
+  const ring = wrapper.find('.ctx-meter');
   assert.equal(ring.attributes('title'), undefined);
   assert.match(ring.attributes('aria-label'), /Контекст: 200[\s ]000 из 800[\s ]000 до потолка окна \(25%\)/);
   assert.doesNotMatch(ring.attributes('aria-label'), /подорож/);
@@ -990,7 +1012,7 @@ test('ChatSession показывает неподтверждённое окно
   t.after(() => wrapper.unmount());
   await flushPromises();
 
-  const ring = wrapper.find('.ctx-ring');
+  const ring = wrapper.find('.ctx-meter');
   const ringLabel = ring.attributes('aria-label');
   assert.equal(ring.attributes('title'), undefined);
   assert.match(ringLabel, /Контекст: пусто/);
@@ -1092,7 +1114,7 @@ test('ChatSession показывает рабочее окно Codex из жив
   assert.equal(option.text(), 'GPT-5.6-Sol');
   assert.match(option.attributes('title'), /рабочее окно 258[\s\u00a0]400 токенов/);
 
-  const ring = wrapper.get('.ctx-ring');
+  const ring = wrapper.get('.ctx-meter');
   assert.match(ring.attributes('aria-label'), /110[\s\u00a0]512 из 206[\s\u00a0]720/);
   assert.match(ring.attributes('aria-label'), /окно модели 258[\s\u00a0]400/);
   assert.equal(contextTooltipRows(await openContextTooltip(wrapper)).Окно, '258 400');

@@ -61,17 +61,7 @@
               :disabled="busy === item.task"
               @click="restart(item.task)"
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.7"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M20 7v5h-5M20 12a8 8 0 1 0-2.4 5.7" />
-              </svg>
+<UiRefreshIcon />
             </UiIconButton>
             <UiIconButton
               :label="t('core.hideEvaluation', { itemTask: item.task })"
@@ -133,6 +123,7 @@ import {
   useAnalysisStore,
 } from '../../actions/analysis';
 import {
+  UiRefreshIcon,
   UiButton,
   UiFormActions,
   UiIconButton,

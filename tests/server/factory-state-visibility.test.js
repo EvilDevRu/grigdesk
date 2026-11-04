@@ -263,11 +263,12 @@ async function fixture(t) {
 
 async function server(t, fx) {
   const app = Fastify({ logger: false });
+
   await app.register(factoryModule, {
     factoryState: fx.adapter,
     config: fx.config,
     prefs: { read: () => ({}) },
-    b24: null,
+    tracker: null,
     analyzer: { readClarifications: async () => null, readOpenQuestions: async () => null },
   });
   await app.ready();

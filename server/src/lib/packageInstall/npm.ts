@@ -93,7 +93,6 @@ export function createNpmRunner(
 export async function prepareNpmDependencies(
   directory: string,
   npmDirs: string[],
-  webDir: string | null,
   npm: NpmRunner = createNpmRunner(),
   signal?: AbortSignal,
   budget?: PluginWorkspaceBudget,
@@ -132,5 +131,5 @@ export async function prepareNpmDependencies(
     throw installError('workspace_limit');
   }
 
-  return validatePreparedPayload(directory, snapshot, webDir);
+  return validatePreparedPayload(directory, snapshot);
 }

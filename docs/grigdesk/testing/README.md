@@ -1,5 +1,18 @@
 # Тесты и проверка
 
+- [Navigator.locks Node и удержанный ответ фикстуры окна](node-navigator-locks.md)
+
+- [Happy DOM: первое несовпадение media не вызывает change без начального resize](happy-dom-media-initial-state.md)
+
+- [Teleport: defer откладывает монтаж, но не смену назначения](teleport-defer-update.md)
+
+- [Happy DOM: :root внутри media и проверяемая запись html:root](happy-dom-root-media.md)
+- [Happy DOM: корневой touch-атрибут и устаревший computed style](happy-dom-root-attribute-cache.md)
+
+- [Параметры test runner: concurrency перед списком файлов](node-test-option-order.md)
+
+- [Happy DOM: старый computedStyle после изменения viewport и способ сбросить кэш](happy-dom-media-cache.md)
+
 - [Режим HTML предпросмотра: doctype и ложный отступ формы](preview-document-mode.md)
 
 - [Три описи browser-тестов: запуск, typecheck и снимок миграции](browser-test-inventory.md)
@@ -26,6 +39,15 @@
 
 ## Грабли
 
+- [Нормализованные поля в фикстурах песочниц](normalized-sandbox-fixtures.md)
+
+- [Vue scoped CSS: :global с хвостом заменяет весь селектор](vue-global-selector.md)
+
+- [Подмена Python os.open и очистка TemporaryDirectory через dir_fd](python-open-fixture.md)
+
+- [Фикстуры трекеров, настроек и актуальной оболочки](tracker-dev-fixtures.md)
+
+- [Каталог capabilities и виджеты в loading-фикстурах трекера](tracker-loading-fixtures.md)
 - [Снимок после recovery нового владельца для проверки повторного close установщика](installer-recovery-close-snapshot.md)
 
 - [Арбитр: кнопка resume появляется раньше окончательного сообщения о запуске](arbiter-resume-observation.md)
@@ -51,6 +73,7 @@
 - [Source-фикстуры с установленным ELF и trusted файлы legacy /gate](source-runtime-fixtures.md)
 - [Подготовленные dependencies source-проверок GLM и SEA без legacy prefix](source-runtime-dependencies.md)
 - [Smoke GLM проверяет admission выбранного выпуска без внешней модели](glm-release-admission-fixture.md)
+- [Smoke GLM: устаревший запрет Coding Plan в тестах и изоляция env для CLI](glm-smoke-mode-fixtures.md)
 
 - [Родитель временной фикстуры в артефактах создаётся самим тестом](artifact-fixture-parent.md)
 
@@ -116,6 +139,8 @@
 - [Перенаправленный XDG_CACHE_HOME прячет браузеры Playwright](playwright-xdg-cache.md)
 - [Удалённый JS-файл валит снимок миграции, хотя код рабочий](migration-inventory-snapshot.md)
 - [Тест проходит из корня, но падает из папки своего пакета](package-test-working-directory.md)
+- [Протокольные проверки трекера требуют отдельный пакет драйвера](tracker-driver-package.md)
+- [Нет соседнего пакета драйвера: skip; неверный явный путь: ошибка](tracker-package-skips.md)
 - [Настройки роняют вкладку headless-проверки = нужен полный Chromium](headless-shell-settings-crash.md)
 - [Живой замер production-сборки: посредник с CLI-токеном и что под ним не открывается](live-ui-cli-proxy.md)
 - [Тест ждёт `OK`, а утилита пишет `ЦЕЛ` = вывод coreutils переведён на язык машины](coreutils-locale.md)

@@ -3,6 +3,8 @@
     :open="open"
     size="content"
     :body-inset="false"
+    class="ui-workspace"
+    data-ui-workspace
     data-role="plugin-install-dialog"
     :data-mode="mode"
     :data-view="view"
@@ -125,7 +127,7 @@
               {{ t('settings.installedV') }}{{ plugin.install.version }} {{ t('settings.from') }}
               <span>{{ plugin.install.source.url }}</span>
             </p>
-            <template v-if="plugin.install.localChanges">
+            <template v-if="plugin.install.localChanges || plugin.compatibility?.status === 'incompatible'">
               <UiInlineMessage tone="warning">{{ t('settings.theInstalledCopyHasManualChanges') }}</UiInlineMessage>
               <UiCheckbox
                 v-model="replaceModified"
@@ -184,8 +186,13 @@
               {{ t('settings.refreshVersionList') }}
             </UiButton>
           </div>
-          <template v-if="mode === 'install'">
-            <UiDisclosureButton v-model:open="sourceHelpOpen" controls="plugin-install-source-help">
+          <div v-if="mode === 'install'" class="install-source-support">
+            <UiDisclosureButton
+              v-model:open="sourceHelpOpen"
+              controls="plugin-install-source-help"
+              size="compact"
+              block
+            >
               {{ t('settings.sshAndPrivateRepositories') }}
             </UiDisclosureButton>
             <p
@@ -195,7 +202,7 @@
             >
               {{ t('settings.httpsSshGitHostPathAndFile') }}
             </p>
-          </template>
+          </div>
         </form>
         <section v-else-if="view === 'progress'" class="install-preparation">
           <div
@@ -238,7 +245,7 @@
         </section>
         <section v-else-if="view === 'ready' && preview" class="install-ready">
           <PluginSourceNotice v-if="!driver" :membership="membership" :source="store.job?.source.url ?? ''" />
-          <PluginInstallPreview :preview="preview" />
+          <PluginInstallPreview :preview="preview" :official="!driver && membership === 'official'" />
         </section>
         <section v-else-if="view === 'result' && store.job" class="install-result-layout">
           <div v-if="store.job.preview" class="install-package-summary">
@@ -305,7 +312,7 @@
               {{ t('settings.cancel') }}
             </UiButton>
             <UiButton
-              v-else-if="view === 'ready'
+              v-else-if="view === 'ready' || store.job?.status === 'awaiting_restart'
                 || view === 'progress' && !clarifying && store.job?.status === 'running'"
               block
               data-role="install-cancel"
@@ -431,6 +438,7 @@ import type { InstallSubject } from '../../stores/packageInstall.ts';
 const props = defineProps<{
   open: boolean;
   mode: 'install' | 'update';
+  resume?: boolean;
   plugin: InstallSubject | null;
   packageKind?: 'plugin' | 'db-engine';
   catalogSelection?: CatalogSelection | null;
@@ -447,11 +455,12 @@ const bootLoading = ref(false);
 const bootFailed = ref(false);
 const contentElement = ref<HTMLElement | null>(null);
 let openingEpoch = 0;
+let discardPreviousTerminal = false;
 let disposed = false;
 
 const dialogView = computed(() => deriveInstallDialogView({
   packageKind: props.packageKind,
-  job: store.job,
+  job: bootLoading.value && isTerminalInstallJob(store.job) ? null : store.job,
   mode: props.mode,
   pluginName: props.plugin?.name ?? null,
   pluginLocalChanges: Boolean(props.plugin?.install?.localChanges),
@@ -610,19 +619,29 @@ watch(view, () => {
 }, { flush: 'post' });
 
 /**
- * Пока current не прочитан, новая операция недоступна: сервер мог сохранить старую.
- * При повторном открытии уже известное задание остаётся на месте без загрузочной вспышки.
+ * Current восстанавливает незавершённую работу до разрешения новой установки.
+ * Новый запуск скрывает прежний terminal; просмотр задания сохраняет его результат.
  */
 async function loadCurrent(): Promise<void> {
   const epoch = ++openingEpoch;
+  const discardTerminal = discardPreviousTerminal;
 
   bootLoading.value = true;
   bootFailed.value = false;
+
+  if (discardTerminal) {
+    store.forgetJob();
+    store.error = null;
+  }
 
   try {
     await store.loadJob();
   } finally {
     if (!disposed && props.open && epoch === openingEpoch) {
+      if (discardTerminal && !store.recoveryError && !store.pendingAction) {
+        store.forgetJob();
+      }
+
       bootLoading.value = false;
       bootFailed.value = !store.job && !!store.error;
     }
@@ -667,6 +686,15 @@ async function retry(): Promise<void> {
 
 watch(() => props.open, (open) => {
   if (open) {
+    discardPreviousTerminal = !props.resume && !store.busy && !store.reconciling
+      && !store.pendingAction && !store.recoveryError
+      && (!store.job || isTerminalInstallJob(store.job));
+
+    url.value = '';
+    selectedVersion.value = '';
+    replaceModified.value = false;
+    sourceHelpOpen.value = false;
+    store.invalidateVersions('');
     void loadCurrent();
   } else {
     openingEpoch += 1;
@@ -682,7 +710,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .install-header {
   display: grid;
-  gap: 1rem;
+  gap: 0.75rem;
   width: 100%;
   min-width: 0;
 }
@@ -691,7 +719,7 @@ onBeforeUnmount(() => {
   grid-template-columns: 2.5rem minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.75rem;
-  height: 3rem;
+  min-height: 2.5rem;
 }
 .install-brand-icon,
 .install-stage-icon {
@@ -700,7 +728,7 @@ onBeforeUnmount(() => {
   flex: none;
   width: 2.5rem;
   height: 2.5rem;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--accent);
 }
@@ -723,8 +751,6 @@ onBeforeUnmount(() => {
 .install-heading {
   overflow: hidden;
   margin: 0;
-  font-size: 1rem;
-  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -743,7 +769,7 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
   height: 2.25rem;
   padding: 0 0.625rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   color: var(--ink-low);
 }
 .install-steps [data-current='true'] {
@@ -790,14 +816,14 @@ onBeforeUnmount(() => {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  gap: 1rem;
+  gap: 0.75rem;
   width: 100%;
   min-width: 0;
-  padding: 1.25rem;
+  padding: 1rem 1.25rem;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  font-size: 0.875rem;
+  font-size: var(--workspace-text-size);
   line-height: 1.55;
 }
 .install-content > * {
@@ -809,23 +835,27 @@ onBeforeUnmount(() => {
 }
 .install-stage-heading {
   display: grid;
-  grid-template-columns: 2.75rem minmax(0, 1fr);
+  grid-template-columns: 2rem minmax(0, 1fr);
   align-items: start;
-  gap: 0.875rem;
-  height: 4.5rem;
+  gap: 0.75rem;
+  min-height: 3.25rem;
 }
 .install-stage-icon {
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 50%;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-sm);
+}
+.install-stage-icon svg {
+  width: 1.125rem;
+  height: 1.125rem;
 }
 .install-stage-copy h3 {
-  font-size: 1.125rem;
-  line-height: 1.35;
+  font-size: 0.9375rem;
+  line-height: 1.4;
   font-weight: 600;
 }
 .install-stage-copy p {
-  margin-top: 0.375rem;
+  margin-top: 0.25rem;
   color: var(--ink-mid);
   font-size: 0.8125rem;
   line-height: 1.5;
@@ -849,7 +879,7 @@ onBeforeUnmount(() => {
 .install-result-layout {
   display: grid;
   align-content: start;
-  gap: 1rem;
+  gap: 0.75rem;
   min-width: 0;
 }
 .install-repository-input {
@@ -859,16 +889,22 @@ onBeforeUnmount(() => {
 }
 .install-version-block {
   display: grid;
+  gap: 0.375rem;
+}
+.install-source-support {
+  display: grid;
   gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
 }
 .install-source-help,
 .install-version-status,
 .install-current-version {
   color: var(--ink-mid);
-  font-size: 0.8125rem;
+  font-size: var(--workspace-meta-size);
 }
 .install-version-status {
-  min-height: 2.75rem;
+  min-height: 2.25rem;
 }
 .install-loading-label {
   display: flex;
@@ -878,10 +914,10 @@ onBeforeUnmount(() => {
 .install-current-version,
 .install-job-source,
 .install-package-summary {
-  padding: 1rem;
+  padding: 0.75rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--ground);
+  background: var(--surface-2);
   overflow-wrap: anywhere;
 }
 .install-job-source {
@@ -1045,9 +1081,6 @@ onBeforeUnmount(() => {
   }
   .install-repository-input {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .install-stage-heading {
-    height: 6rem;
   }
   .install-steps {
     gap: 0.25rem;

@@ -167,7 +167,7 @@ function analyzerFor(project, executor) {
       analysisConcurrency: 1,
     },
     claudeAuth: { env: () => process.env },
-    b24: {
+    tracker: {
       async taskDetail() {
         return { title: 'Demo | задача', description: '' };
       },

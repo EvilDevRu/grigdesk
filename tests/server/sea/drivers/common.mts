@@ -83,8 +83,6 @@ export function environment(): NodeJS.ProcessEnv {
     GRIGDESK_SSH_KNOWN_HOSTS_PATH: '/D/state/known_hosts',
     GRIGDESK_DB_PROFILES_PATH: '/D/state/db.json',
     GRIGDESK_PROVIDER_USAGE_SEEN_PATH: '/D/state/usage.json',
-    B24_CREDS_PATH: '/D/state/b24.json',
-    B24_COOKIE_PATH: '/D/state/b24-cookie.txt',
     GRIGDESK_TELEGRAM_ACCOUNT_CREDS_PATH: '/D/state/telegram.json',
     GRIGDESK_GITHUB_CREDS_PATH: '/D/state/github.json',
   };

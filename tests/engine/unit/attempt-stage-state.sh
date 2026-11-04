@@ -726,6 +726,16 @@ assert_contains "$(json_field "$(cat "$fresh_event")" reason)" \
   'замкнутый набор замечаний расширен новыми id: only-third' \
   "журнал называет новый id, разомкнувший scope"
 
+# Поздно обнаруженный дефект остаётся блокером даже при остановке расширения.
+# Guard ограничивает число ремонтов, но не повышает failed и не теряет finding.
+assert_eq failed "$(json_field "$(cat "$fresh_event")" outcome)" \
+  "поздний блокер на no-progress не превращается в успешную приёмку"
+fresh_findings=$(attempt_stage_state_findings_v2 65 "$fresh_attempt")
+assert_eq only-third "$(json_field "$fresh_findings" open 0 id)" \
+  "последний подтверждённый блокер остаётся открытым для человека"
+assert_eq 0 "$(json_field "$fresh_findings" deferred length)" \
+  "рост списка не переводит дефект в deferred"
+
 # Ремонт замкнутого набора обычно и создаёт новые артефакты: закрыть «сценарий не
 # покрыт» нельзя, не написав файл. Замечание по такому файлу — первый проход по
 # новому коду, а не рост охвата, и человека для него звать незачем: раньше этого

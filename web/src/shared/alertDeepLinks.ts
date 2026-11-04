@@ -1,3 +1,5 @@
+import { parseTaskReference } from '../../../shared/tasks/taskReference.ts';
+import type { TaskSourceId } from '../../../shared/tasks/taskReference.ts';
 import { watch } from 'vue';
 import type { LocationQueryRaw } from 'vue-router';
 import { ALERT_CHAT_QUERY, ALERT_TASK_QUERY, firstQueryValue } from './alertTargets.ts';
@@ -38,7 +40,7 @@ export interface AlertLinkDeps {
     revealChat(chatId: string): Promise<boolean> | boolean;
   };
   ui: {
-    openTask(taskId: string): void;
+    openTask(taskId: string, source?: TaskSourceId): void;
   };
 }
 
@@ -55,7 +57,7 @@ export function openAlertTarget(target: AlertTarget, deps: AlertLinkDeps): void 
       query: { model: target.modelId, version: target.versionId }
     });
   } else if (target.kind === 'task') {
-    deps.ui.openTask(target.taskId);
+    deps.ui.openTask(target.taskId, target.source);
   } else if (target.kind === 'chat') {
     void deps.router.push({
       path: '/chats',
@@ -98,7 +100,11 @@ export function installAlertDeepLinks(deps: AlertLinkDeps): () => void {
       void Promise.resolve(deps.chat.revealChat(chatId)).catch(() => { });
     }
     if (taskId) {
-      deps.ui.openTask(taskId);
+      const reference = parseTaskReference(taskId);
+
+      if (reference) {
+        deps.ui.openTask(reference.id, reference.source);
+      }
     }
   }, {
     immediate: true

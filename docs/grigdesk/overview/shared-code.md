@@ -37,7 +37,8 @@
 |---|---|---|
 | `chat/` | Ход, история и контекст чата, исполнители, модели, настройки и прогноз лимитов | Node, браузер |
 | `pipeline/` | Маршруты, граф, ожидание, активность задачи, каталог стадий и триаж | Node, браузер |
-| `b24/` | Контракт полки задач и её снимков | Node, браузер |
+| `tasks/` | Собственные задачи, источник доски и полные ссылки задач | Node, браузер |
+| `trackers/` | Контракты драйверов и полки задач с её снимками | Node, браузер |
 | `inbox/` | Общий автомат входящих и источник GitHub Issues | Node, браузер |
 | `telegram/` | Состояние Telegram, подключение и политика источников | Node, браузер |
 | `media/` | Контракты встреч, файлов и обработки речи | Node, браузер |
@@ -65,10 +66,13 @@
 | Модуль | Назначение |
 |---|---|
 | `web/src/shared/providerModelSelect.ts` | Допуск доступного исполнителя и непрозрачные значения селекта; `ProviderModelSelect.vue` объединяет представление моделей чата, арбитра и плагинов |
-| `browser/browserContract.ts`, `browser/browserActions.ts`, `browser/browserTool.ts` | Общие безопасные defaults/URL, закрытые actions и provider-neutral tool schema |
+| `web/src/features/providers/providerLocale.ts:providerAvailability` | Общие доступность и подпись сервиса для мастера и настроек; отдельный чатовый допуск вызывает существующий селектор моделей |
+| `browser/browserContract.ts`, `browser/browserActions.ts`, `browser/browserTool.ts`, `browser/browserLimits.ts` | Безопасные defaults/URL, распознавание адресной строки и поиск, закрытые actions, provider-neutral tool schema и лимит вкладок |
+| `plugins/providerUsageResources.ts` | Проверка JSON-ресурсов фонового плагина, безопасных ссылок и собственных переводов для всплывашки исполнителя |
 | `plugins/sandboxes/serviceHost.ts` | Проверка имени хоста стенда без схемы, порта и пути; профиль на сервере и ссылки в браузере |
 | `chat/chatPermissionModes.ts` | Маркер явного выбора режима конкретного чата и server-owned action-матрица work tools |
 | `pipeline/arbiterConversation.ts` | StopIdentity, лимиты, строгий ответ арбитра, допустимые действия и инвалидирование решения; общий контракт сервера и диалога |
+| `server/src/lib/executors/scopedDsh.ts`, `server/src/lib/deepseek/abortableOperation.ts` | Общий одноразовый профиль DSH для scoped triage и отдельного текстового model-only; proof, cleanup и отмена ожидания caller без остановки shared metadata probe ([контракт](../chat/dsh-model-only.md)) |
 | `server/src/lib/mcpEnvironment.ts` | Окружение MCP: ACP-пары → объект, готовый объект без изменений; используют Kimi host и DeepSeek, пустое поле решает адаптер |
 | `lib/errors.ts` | Строковый code, message с fallback и отдельное преобразование Error/String |
 | `web-log/webLogContracts.ts` | `sanitizeWebLogError`: безопасные имена, категории и кадры ресурсов сборки до записи исключения |
@@ -90,6 +94,7 @@
 | `node/deepSeekArtifact.ts` | Полный manifest/payload generation и совместимость с явно выбранным Node |
 | `node/glmCompatibility.ts` | Прежняя формула compatibility GLM для сервера и установщика ELF |
 | `node/binaryInstall.ts` | Общий протокол установщиков: O_NOFOLLOW copy/fsync, inode/SHA, uid/mode receipt, approved CAS и target lock; формат ELF, backup и admission задают потребители ([сервер](../server/server-binary-install.md)) |
+| `node/readContainedText.ts` | Ограниченное чтение обычного текста внутри корня без вложенных симлинков; core API 2 и Showcase |
 | `node/directoryLock.ts` | Асинхронный mkdir-lock с PID/starttime, ограниченным ожиданием и своим release |
 | `runtime/nodeVersion.ts` | Общая чистая политика версий Node без чтения процесса вызывающего |
 | `lib/objects.ts` | Проверки прототипа/массива и преобразования unknown; разные политики пустого значения |

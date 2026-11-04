@@ -26,7 +26,6 @@ const keys = [
     'automation.arbiter',
     'agents.models',
     'connections.devices',
-    'connections.b24',
     'connections.mobile',
     'connections.ssh',
     'connections.db',
@@ -48,10 +47,6 @@ const keys = [
     'plugins.installed',
     'agents.providers',
     'speech.dictation',
-    'speech.video',
-    'speech.language',
-    'speech.models',
-    'speech.advanced',
     'system.diagnostics',
 ];
 
@@ -87,7 +82,6 @@ before(async () => {
         '../../views/ssh/SshPanel.vue',
         '../../views/db/DbPanel.vue',
         '../../views/docker/DockerPanel.vue',
-        '../../views/ext/PluginFramePanel.vue',
         '../../views/ext/PluginModulePanel.vue',
         './pages/PreferencesPage.vue',
         './pages/SpeechPage.vue',
@@ -197,20 +191,10 @@ for (const id of [
     'ssh',
     'db',
     'docker',
-    'external-frame',
     'external-module',
 ]) {
     test(`LOAD-LAZY-tools-${id}: свой каркас, успех и отказ chunk`, async (t) => {
         const external = tools.pluginTools({
-            webPages: [
-                {
-                    id: 'external-frame',
-                src: '/fixture',
-                label: 'Плагин',
-                icon: '',
-                order: 1
-                }
-            ],
             modulePages: [
                 {
                     id: 'external-module',

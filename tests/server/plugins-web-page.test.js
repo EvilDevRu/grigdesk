@@ -1,6 +1,3 @@
-// Своя страница пользовательского плагина: манифест называет папку `web` с index.html,
-// GrigDesk раздаёт её под /api/ext/<id>/web/ только включённому плагину и не исполняет
-// её код. Абсолютный путь, выход за каталог и папка без index.html — не страница.
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -9,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { scanUserPlugins } from '../../server/src/lib/pluginsRegistry.ts';
+import { manifestV1, png } from '../helpers/pluginV1.js';
 import pluginsModule from '../../server/src/modules/plugins/index.ts';
 
 const requireFromServer = createRequire(new URL('../../server/package.json', import.meta.url));
@@ -18,9 +16,15 @@ async function pluginDir(root, id, manifest, files = {}) {
   const dir = path.join(root, id);
 
   await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, 'plugin.json'), JSON.stringify({ id, name: id, ...manifest }));
+  await writeFile(path.join(dir, 'plugin.json'), JSON.stringify(manifestV1({
+    id,
+    name: id,
+    entrypoints: {},
+    contributes: {},
+    ...manifest,
+  })));
 
-  for (const [file, body] of Object.entries(files)) {
+  for (const [file, body] of Object.entries({ 'assets/icon.png': png, ...files })) {
     await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
     await writeFile(path.join(dir, file), body, 'utf8');
   }
@@ -36,39 +40,40 @@ async function fixture(t) {
   return root;
 }
 
-test('скан принимает папку страницы с index.html и отбрасывает кривые объявления', async (t) => {
+test('скан принимает объявленный модуль и объясняет неверные входы', async (t) => {
   const root = await fixture(t);
 
-  await pluginDir(root, 'viewer', { web: 'web' }, { 'web/index.html': '<h1>viewer</h1>' });
-  await pluginDir(root, 'absolute', { web: '/etc' });
-  await pluginDir(root, 'escape', { web: '../viewer/web' });
-  await pluginDir(root, 'empty', { web: 'web' }, { 'web/readme.txt': 'без index' });
+  for (const [id, dir] of [['viewer', 'ui'], ['absolute', '/etc'], ['escape', '../viewer/ui'],
+    ['empty', 'missing']]) {
+    await pluginDir(root, id, {
+      entrypoints: { web: { dir, entry: 'panel.js' } },
+      contributes: { panels: [{}] },
+    }, { 'ui/panel.js': 'export default {};' });
+  }
+
   await pluginDir(root, 'plain', {});
 
-  const warnings = [];
-  const plugins = await scanUserPlugins(root, { warn: (meta, message) => warnings.push({ meta, message }) });
+  const plugins = await scanUserPlugins(root);
   const byId = Object.fromEntries(plugins.map((plugin) => [plugin.id, plugin]));
 
-  assert.deepEqual(byId.viewer.web, { dir: path.join(root, 'viewer', 'web'), url: '/api/ext/viewer/web/' });
-  assert.equal(byId.absolute.web, null);
-  assert.equal(byId.escape.web, null);
-  assert.equal(byId.empty.web, null);
-  assert.equal(byId.plain.web, null);
-  assert.deepEqual(
-    warnings.map((entry) => entry.meta.plugin).sort(),
-    ['absolute', 'empty', 'escape'],
-    'каждое отброшенное объявление названо в журнале',
-  );
+  assert.equal(byId.viewer.compatibility.status, 'compatible');
+  assert.equal(byId.plain.nav, null);
+
+  for (const id of ['absolute', 'escape', 'empty']) {
+    assert.equal(byId[id].compatibility.status, 'incompatible');
+    assert.ok(byId[id].compatibility.reason);
+  }
 });
 
-test('страница включённого плагина раздаётся под /api/ext/<id>/web/, выключенного — нет', async (t) => {
+test('модуль включённого плагина раздаётся, выключенного нет; старое поколение отозвано', async (t) => {
   const root = await fixture(t);
 
-  await pluginDir(root, 'viewer', { web: 'web', nav: { path: '/ext/viewer', label: 'Обзор', group: 'dock' } }, {
-    'web/index.html': '<!doctype html><title>Обзор</title>',
-    'web/app.js': 'console.log("viewer")',
-  });
-  await pluginDir(root, 'sleeper', { web: 'web' }, { 'web/index.html': '<title>sleeper</title>' });
+  for (const id of ['viewer', 'sleeper']) {
+    await pluginDir(root, id, {
+      entrypoints: { web: { dir: 'ui', entry: 'panel.js' } },
+      contributes: { panels: [{ title: 'Обзор', group: 'dock' }] },
+    }, { 'ui/panel.js': 'export default {};' });
+  }
 
   const app = Fastify({ logger: false });
   let prefsData = { plugins: { viewer: true } };
@@ -79,34 +84,26 @@ test('страница включённого плагина раздаётся 
     },
   };
 
-  await app.register(pluginsModule, { config: { userPluginsDir: root }, prefs });
   t.after(() => app.close());
+  await app.register(pluginsModule, { config: { userPluginsDir: root }, prefs });
 
-  const list = (await app.inject({ method: 'GET', url: '/api/plugins' })).json().plugins;
+  const list = (await app.inject('/api/plugins')).json().plugins;
   const viewer = list.find((plugin) => plugin.id === 'viewer');
   const sleeper = list.find((plugin) => plugin.id === 'sleeper');
+  const entry = viewer.entrypoints.web.entry;
 
-  assert.equal(viewer.web, '/api/ext/viewer/web/');
-  assert.equal(viewer.needsRestart, false, 'загруженная страница переключается без рестарта');
-  assert.equal(sleeper.web, '/api/ext/sleeper/web/');
+  assert.equal(viewer.needsRestart, false);
   assert.equal(sleeper.enabled, false);
+  assert.equal((await app.inject(entry)).statusCode, 200);
+  assert.equal((await app.inject(sleeper.entrypoints.web.entry)).statusCode, 404);
+  assert.equal((await app.inject('/api/ext/viewer/web/')).statusCode, 404);
+  assert.notEqual((await app.inject('/api/ext/viewer/module/../plugin.json')).statusCode, 200);
+  await app.inject({ method: 'POST', url: '/api/plugins/viewer/toggle', payload: { enabled: false } });
+  await app.inject({ method: 'POST', url: '/api/plugins/viewer/toggle', payload: { enabled: true } });
 
-  const index = await app.inject({ method: 'GET', url: '/api/ext/viewer/web/' });
+  const changed = (await app.inject('/api/plugins')).json().plugins.find((plugin) => plugin.id === 'viewer');
 
-  assert.equal(index.statusCode, 200);
-  assert.match(index.headers['content-type'], /text\/html/);
-  assert.match(index.body, /Обзор/);
-
-  const script = await app.inject({ method: 'GET', url: '/api/ext/viewer/web/app.js' });
-
-  assert.equal(script.statusCode, 200);
-  assert.match(script.headers['content-type'], /javascript/);
-
-  const escape = await app.inject({ method: 'GET', url: '/api/ext/viewer/web/../plugin.json' });
-
-  assert.notEqual(escape.statusCode, 200, 'выход за папку страницы закрыт');
-
-  const off = await app.inject({ method: 'GET', url: '/api/ext/sleeper/web/' });
-
-  assert.equal(off.statusCode, 404);
+  assert.notEqual(changed.entrypoints.web.entry, entry);
+  assert.equal((await app.inject(changed.entrypoints.web.entry)).statusCode, 200);
+  assert.equal((await app.inject(entry)).statusCode, 404);
 });

@@ -1,5 +1,4 @@
-// Модуль settings — редактирование кредов B24 из «Настроек» + проверка авторизации.
-// GrigDesk хранит креды у себя (единственный владелец сессии).
+// Модуль settings управляет общими предпочтениями, диагностикой и настройками речи.
 // Авторизация Claude настраивается не здесь: чат использует хостовый CLI (claude login),
 // статус исполнителей отдаёт реестр /api/providers.
 import fp from 'fastify-plugin';
@@ -17,27 +16,17 @@ import type { SpeechRuntime } from '../../lib/speech/runtime.ts';
 import type { FactoryDebugSettings } from '../../lib/factoryDebug.ts';
 import { PrefsCorruptedError, publicPrefsView } from '../../lib/prefsStore.ts';
 import type { PrefsStore } from '../../lib/prefsStore.ts';
-
-// Кто владеет кредами B24 и умеет проверить вход. Оба соседа ещё JavaScript.
-export interface CredsStorePort {
-  publicView: () => unknown;
-  write: (creds: { login: unknown; password: unknown; baseUrl: unknown }) => unknown;
-}
-
-export interface B24Port {
-  invalidate: () => unknown;
-  testAuth: () => Promise<unknown>;
-}
+import type { SpeechInstallationService } from '../../lib/speech/installation.ts';
+import { registerSpeechInstallation } from './speechInstallation.ts';
 
 export interface SettingsModuleOptions {
-  credsStore: CredsStorePort;
-  b24: B24Port;
   prefs: PrefsStore;
   factoryDebug: FactoryDebugSettings;
   diagnosticLogging?: DiagnosticLoggingPolicy;
   speechRuntime?: SpeechRuntime | null;
   speechSettings?: SpeechSettingsStore;
   modelJobs?: ModelJobManager | null;
+  speechInstallation?: SpeechInstallationService;
 }
 
 // Снимок настроек речи вместе с возможностями окружения.
@@ -88,19 +77,24 @@ const UNAVAILABLE_SPEECH_BENCHMARK = Object.freeze({
 
 /**
  * Настройки подключают серверные сервисы через явные зависимости.
- * Учётные данные, диагностика и речь сохраняют собственные контракты записи.
+ * Предпочтения, диагностика и речь сохраняют собственные контракты записи.
  */
 async function settingsModule(
   fastify: FastifyInstance,
   opts: SettingsModuleOptions,
 ): Promise<void> {
   const {
-    credsStore, b24, prefs, factoryDebug, speechRuntime,
+    prefs, factoryDebug, speechRuntime,
   } = opts;
   const diagnosticLogging = opts.diagnosticLogging ?? new DiagnosticLoggingPolicy(factoryDebug);
   const speechSettings = opts.speechSettings || new SpeechSettingsStore({ prefs });
   const modelJobs = Object.hasOwn(opts, 'modelJobs') ? opts.modelJobs : (speechRuntime?.modelJobs || null);
   let speechMutationTail: Promise<unknown> = Promise.resolve();
+
+  if (opts.speechInstallation) {
+    registerSpeechInstallation(fastify, opts.speechInstallation);
+    fastify.addHook('onClose', () => opts.speechInstallation!.close());
+  }
 
   function serializeSpeechMutation<Value>(operation: () => Promise<Value>): Promise<Value> {
     const result = speechMutationTail.then(operation, operation);
@@ -371,23 +365,6 @@ async function settingsModule(
       });
     }
   });
-
-  // Текущие настройки B24 (без пароля).
-  fastify.get('/api/settings/b24', async () => credsStore.publicView());
-
-  // Сохранить креды. Мутация (нужен токен, если настроен).
-  fastify.post('/api/settings/b24', async (request: SettingsRequest, reply) => {
-    const { login, password, baseUrl } = request.body || {};
-    if (!login || !password) {
-      return reply.code(400).send({ error: 'bad_input', message: 'Укажите логин и пароль.' });
-    }
-    credsStore.write({ login, password, baseUrl });
-    b24.invalidate(); // пересобрать клиент под новые креды
-    return credsStore.publicView();
-  });
-
-  // Проверить авторизацию: логинимся, возвращаем результат.
-  fastify.post('/api/settings/b24/test', async () => b24.testAuth());
 }
 
 export default fp(settingsModule, { name: 'module-settings' });

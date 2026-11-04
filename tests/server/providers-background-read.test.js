@@ -20,6 +20,7 @@ async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'providers-background-'));
   const app = Fastify();
   const events = [];
+  const modelReads = [];
   let pending = null;
   let builds = 0;
   let version = '1.0.0';
@@ -51,7 +52,11 @@ async function fixture(t) {
       providerUsageSeenPath: path.join(root, 'usage.json'),
     },
     getProviderAdapters: async () => new Map([[adapter.id, adapter]]),
-    getModelsRegistry: async () => ({}),
+    getModelsRegistry: async (_config, options) => {
+      modelReads.push(!!options?.refresh);
+
+      return {};
+    },
   });
   t.after(async () => {
     await app.close();
@@ -62,6 +67,7 @@ async function fixture(t) {
     app,
     adapter,
     events,
+    modelReads,
     builds: () => builds,
     hold() {
       let finish;
@@ -104,6 +110,35 @@ test('холодный /api/providers: p95 < 1,5 с, один сбор для в
   await setImmediate();
   assert.deepEqual(own.events, ['providers-update']);
   assert.equal((await own.app.inject('/api/providers')).json().providers[0].version, '2.0.0');
+});
+
+test('wait ждёт холодный общий сбор без refresh каталога и сохраняет быстрый обычный GET', async (t) => {
+  const own = await fixture(t);
+  const release = own.hold();
+  let settled = false;
+
+  t.after(release);
+
+  const strict = own.app.inject('/api/providers?wait=1').then((response) => {
+    settled = true;
+
+    return response;
+  });
+  const ordinary = await own.app.inject('/api/providers');
+
+  assert.equal(ordinary.statusCode, 200);
+  assert.deepEqual(ordinary.json().providers, []);
+  assert.equal(settled, false, 'строгое чтение не принимает холодный fallback');
+  assert.equal(own.builds(), 1);
+  release();
+
+  const ready = await strict;
+
+  assert.equal(ready.statusCode, 200);
+  assert.equal(ready.json().providers[0].version, '2.0.0');
+  assert.deepEqual(own.modelReads, [false], 'ожидание не пересобирает каталог моделей');
+  await own.app.inject('/api/providers?wait=1');
+  assert.equal(own.builds(), 1, 'готовый снимок переиспользуется без сброса');
 });
 
 test('просроченный снимок отдаётся сразу; refresh ждёт общий сбор и не получает stale', async (t) => {

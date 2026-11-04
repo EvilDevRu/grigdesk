@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import nodeTest, { before } from 'node:test';
+import { customReadModule } from './helpers/trackerPackage.js';
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { setImmediate } from 'node:timers/promises';
 
-import { B24Adapter } from '../../server/src/adapters/b24.ts';
-import { B24Client } from '../../server/src/lib/b24/client.ts';
-import { currentB24Read } from '../../server/src/lib/b24/readOperations.ts';
+
+
+
 import { TaskFavoritesService } from '../../server/src/lib/taskFavoritesService.ts';
 
 /**
@@ -29,8 +30,11 @@ function deferred() {
  */
 function fixture(client) {
   const adapter = new B24Adapter({
-    credsStore: { read: () => null },
-    cookiePath: '/tmp/unused-b24-adapter-reads-cookie',
+    host: {
+      credentials: { read: () => null },
+      serial: serial(),
+      cookiePath: '/tmp/unused-b24-adapter-reads-cookie',
+    },
   });
 
   adapter.client = () => client;
@@ -51,7 +55,7 @@ test('ADAPTER-01: локальное избранное читает scope до 
   const busy = adapter.taskDetail('42');
   let readStore = false;
   const service = new TaskFavoritesService({
-    b24: adapter,
+    tracker: adapter,
     store: {
       async list() {
         readStore = true;
@@ -123,7 +127,7 @@ test('ADAPTER-03: invalidate не даёт позднему определени
   old = false;
   held.resolve(77);
   assert.equal((await first).name, 'AbortError');
-  assert.equal((await adapter.accountIdentity()).userId, 88);
+  assert.equal((await adapter.accountIdentity()).userId, '88');
 });
 
 test('ADAPTER-04: изменения credentials не оставляют кэш прошлого аккаунта', async (t) => {
@@ -138,17 +142,20 @@ test('ADAPTER-04: изменения credentials не оставляют кэш 
   });
 
   const adapter = new B24Adapter({
-    credsStore: { read: () => creds },
-    cookiePath: '/tmp/unused-b24-adapter-account-cookie',
+    host: {
+      credentials: { read: () => creds },
+      serial: serial(),
+      cookiePath: '/tmp/unused-b24-adapter-account-cookie',
+    },
   });
 
-  assert.equal((await adapter.accountIdentity()).userId, 77);
+  assert.equal((await adapter.accountIdentity()).userId, '77');
   creds = {
     baseUrl: 'https://second.example.test',
     login: 'two',
     password: 'two',
   };
-  assert.equal((await adapter.accountIdentity()).userId, 88);
+  assert.equal((await adapter.accountIdentity()).userId, '88');
 });
 
 test('ADAPTER-05: все внешние читатели получают контекст, мутация его не получает', async () => {
@@ -219,9 +226,15 @@ test('ADAPTER-06: живые cookies прежнего аккаунта не по
     return new Response(`<a href="/personal/user/${id}/">fixture</a>`);
   });
 
-  const adapter = new B24Adapter({ credsStore: { read: () => creds }, cookiePath });
+  const adapter = new B24Adapter({
+    host: {
+      credentials: { read: () => creds },
+      cookiePath,
+      serial: serial(),
+    },
+  });
 
-  assert.equal((await adapter.accountIdentity()).userId, 77);
+  assert.equal((await adapter.accountIdentity()).userId, '77');
   creds = {
     ...creds,
     login: 'two',
@@ -229,10 +242,66 @@ test('ADAPTER-06: живые cookies прежнего аккаунта не по
   };
   expected = 88;
   adapter.invalidate();
-  assert.equal((await adapter.accountIdentity()).userId, 88);
+  assert.equal((await adapter.accountIdentity()).userId, '88');
   creds = { ...creds, baseUrl: 'https://second.example.test' };
   expected = 99;
-  assert.equal((await adapter.accountIdentity()).userId, 99);
+  assert.equal((await adapter.accountIdentity()).userId, '99');
   assert.deepEqual(logins, [77, 88, 99]);
   assert.equal(await readFile(cookiePath, 'utf8'), legacy);
 });
+
+/**
+ * Фикстура воспроизводит host.serial с той же непрерывной цепочкой.
+ * Отказ не разрешает двум операциям работать с одной сессией одновременно.
+ */
+function serial() {
+  let tail = Promise.resolve();
+
+  return (fn) => {
+    const result = tail.then(fn);
+
+    tail = result.catch(() => undefined);
+
+    return result;
+  };
+}
+
+let B24ReadOperations;
+let B24Client;
+let B24Adapter;
+let currentB24Read;
+let missing = false;
+
+before(async () => {
+  const context = {
+    skip: () => {
+      missing = true;
+    },
+  };
+  const reads = await customReadModule('src/readOperations.ts', context);
+
+  if (reads) {
+    ({ B24ReadOperations, currentB24Read } = reads);
+    ({ B24Client } = await customReadModule('src/client.ts', context));
+    ({ CustomSession: B24Adapter } = await customReadModule('src/session.ts', context));
+  }
+});
+
+/**
+ * Каждый сценарий получает явный skip только при отсутствующем необязательном пакете.
+ * Ошибки подготовки и непустой неверный env по-прежнему прерывают before с ошибкой.
+ */
+function test(name, options, run) {
+  const operation = run ?? options;
+  const settings = run ? options : {};
+
+  return nodeTest(name, settings, async (t) => {
+    if (missing) {
+      t.skip('пакет не подготовлен');
+
+      return;
+    }
+
+    return operation(t);
+  });
+}

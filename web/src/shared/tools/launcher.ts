@@ -53,7 +53,7 @@ export async function launchTool(
   }
 
   const item = TOOL_META_BY_ID.get(id)
-    ?? (getActivePinia() && [...usePluginsStore().modulePages, ...usePluginsStore().webPages]
+    ?? (getActivePinia() && usePluginsStore().modulePages
       .some((page) => page.id === id)
       ? { route: pluginPageRoute(id) } : null);
 

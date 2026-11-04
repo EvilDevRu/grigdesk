@@ -157,7 +157,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/ext/:id',
     name: 'ext',
-    component: () => import('./views/ExtPluginView.vue'),
+    component: () => import('./views/PluginView.vue'),
     meta: { title: 'Плагин', tool: 'ext' },
   },
   {

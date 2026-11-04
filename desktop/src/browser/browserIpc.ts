@@ -32,7 +32,7 @@ export function attachBrowserIpc(options: {
   origin(): string | null;
   epoch(): number;
   execute(request: unknown, valid: () => boolean): Promise<unknown>;
-  hide(request: unknown): void;
+  hide(request: unknown): string | null | void;
 }) {
   const sender = (event: Pick<IpcMainInvokeEvent, 'sender' | 'senderFrame'>) =>
     isBrowserSender(event, options.window(), options.origin());
@@ -67,8 +67,9 @@ export function attachBrowserIpc(options: {
     try {
       const message = payload(event, value);
 
-      options.hide(message.request);
-      event.returnValue = { ok: true };
+      const preview = options.hide(message.request);
+
+      event.returnValue = typeof preview === 'string' ? { ok: true, preview } : { ok: true };
     } catch {
       event.returnValue = { ok: false, error: 'browser_sender_forbidden' };
     }

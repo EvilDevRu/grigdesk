@@ -49,7 +49,7 @@ export function acquireB24Capacity(route: string, signal?: AbortSignal): Promise
   }
 
   const path = route.split(/[?#]/u, 1)[0] ?? '';
-  const local = ['/api/b24/task-favorites', '/api/b24/task-seen', '/api/b24/task-shelf'];
+  const local = ['/api/tracker/task-favorites', '/api/tracker/task-seen', '/api/tracker/task-shelf'];
   const lane: Lane = local.includes(path) ? 'local' : 'portal';
 
   return new Promise((resolve, reject) => {

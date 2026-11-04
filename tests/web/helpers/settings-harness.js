@@ -15,19 +15,34 @@ export async function settingsHarness(t, pageId, component, options = {}) {
     handlers: {},
     answer: true,
     confirms: [],
+    navigations: [],
   };
 
   globalThis.__settingsHarness = control;
 
-  const [{ createPinia, setActivePinia }, { mount, flushPromises }, module] = await Promise.all([
+  const [
+    { createPinia, setActivePinia },
+    { mount, flushPromises },
+    { routerKey, routeLocationKey },
+    module,
+  ] = await Promise.all([
     import('../../../web/node_modules/pinia/dist/pinia.mjs'),
     import('../../../web/node_modules/@vue/test-utils/dist/vue-test-utils.esm-bundler.mjs'),
+    import('../../../web/node_modules/vue-router/dist/vue-router.mjs'),
     compileModule(webFile('../tests/web/helpers/settings-pages.ts'), {
       stubs: {
         '../router.ts': 'export const router = { push: async () => {} };',
         '../../../composables/useSse.ts': 'export const sseSubscribe = () => () => {};',
         '../../composables/useSse.ts': 'export const useSse = () => ({ connected: { value: false } });',
         '../../../ui.ts': `
+          export * from './src/ui.ts';
+          export const confirmDialog = async (...args) => {
+            globalThis.__settingsHarness.confirms.push(args);
+            return globalThis.__settingsHarness.answer;
+          };
+        `,
+        ...options.moduleStubs,
+        '../../ui.ts': `
           export * from './src/ui.ts';
           export const confirmDialog = async (...args) => {
             globalThis.__settingsHarness.confirms.push(args);
@@ -76,17 +91,17 @@ export async function settingsHarness(t, pageId, component, options = {}) {
       return control.handlers[path](call);
     }
 
-    // Старый mock-сервер отклоняет новую пробу только после точных handlers.
-    // Остальные query не стираются: assertions видят настоящий маршрут запроса.
-    if (/^\/api\/plugin-catalog\?api=2(?:&refresh=1)?$/u.test(path)) {
-      return Response.json({ error: 'Неизвестный query api' }, { status: 400 });
-    }
-
     let value;
 
     if (path === '/api/settings/prefs') {
       Object.assign(control.data.prefs, body ?? {});
       value = control.data.prefs;
+    } else if (path === '/api/settings/speech/installation') {
+      value = {
+        managed: true,
+        installed: control.data.speech.capabilities.environmentReady === true,
+        job: null,
+      };
     } else if (path === '/api/settings/speech' || path === '/api/settings/speech?refresh=1') {
       Object.assign(control.data.speech.settings, body ?? {});
       value = control.data.speech;
@@ -133,6 +148,16 @@ export async function settingsHarness(t, pageId, component, options = {}) {
     global: {
       plugins: [pinia],
       stubs: options.stubs ?? {},
+      provide: {
+        [routeLocationKey]: { meta: {}, params: {} },
+        [routerKey]: {
+          async push(target) {
+            control.navigations.push(target);
+
+            return options.navigate?.(target);
+          },
+        },
+      },
     },
   });
 

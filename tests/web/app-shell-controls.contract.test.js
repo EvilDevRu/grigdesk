@@ -29,14 +29,14 @@ test('AppShell использует public UI controls и общую повер�
   assert.match(publicUiImport[1], /\bUiIconButton\b/u);
   assert.match(publicUiImport[1], /\bUiPressable\b/u);
   // Метрики и сеть тоже открываются с клавиатуры через общий pressable.
-  assert.equal([...source.matchAll(/<UiPressable\b/gu)].length, 5);
-  assert.equal([...source.matchAll(/<UiButton\b/gu)].length, 2);
+  assert.equal([...source.matchAll(/<UiPressable\b/gu)].length, 4);
+  assert.equal([...source.matchAll(/<UiButton\b/gu)].length, 1);
   assert.doesNotMatch(source, /instbar|installDismissed/u);
 
   const providerSection = /<span v-if="runtimeProviders.length"[\s\S]*?class="netbox mono"/u;
   const outsideProviders = source.replace(providerSection, '');
 
-  assert.equal([...outsideProviders.matchAll(/<UiIconButton\b/gu)].length, 2);
+  assert.equal([...outsideProviders.matchAll(/<UiIconButton\b/gu)].length, 3);
   assert.doesNotMatch(source, /<button\b/u);
 
   const { page } = await shellContractBrowser(t);
@@ -79,7 +79,7 @@ test('AppShell использует public UI controls и общую повер�
   assert.match(source, /await taskStore\.timer\(task\.id, action\)/u);
   assert.match(source, /boardStore\.data\?\.today\?\.hours \?\? 0/u);
   assert.ok(
-    source.indexOf('class="metric mono"') < source.indexOf('<BoardTimerPopover'),
+    source.indexOf('<SystemResourcesButton') < source.indexOf('<BoardTimerPopover'),
     'индикатор таймеров должен стоять после динамических CPU/RAM',
   );
   assert.match(providerUsage, /data-context="topbar-popover-confirm"/u);

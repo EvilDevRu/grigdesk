@@ -7,6 +7,7 @@ export interface UiSelectOptionSnapshot {
   groupKey: string;
   groupLabel: string;
   description: string;
+  title?: string;
   disabled: boolean;
 }
 
@@ -32,6 +33,7 @@ export function readUiSelectOptions(select: HTMLSelectElement): UiSelectOptionSn
       groupKey: group ? String(groups.indexOf(group)) : '',
       groupLabel: group?.label ?? '',
       description: option.getAttribute('data-description') ?? option.title,
+      title: option.title,
       disabled: option.disabled || Boolean(group?.disabled),
     }];
   });
@@ -48,7 +50,7 @@ export function filterUiSelectOptions(
   const needle = query.trim().toLocaleLowerCase();
 
   return options.filter((option) => {
-    const text = [option.label, option.value, option.groupLabel, option.description]
+    const text = [option.label, option.value, option.groupLabel, option.description, option.title]
       .join(' ')
       .toLocaleLowerCase();
 

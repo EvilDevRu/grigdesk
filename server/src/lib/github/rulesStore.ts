@@ -1,4 +1,4 @@
-// Fail-closed allowlist одного GitHub repository → проект/B24 policy.
+// Fail-closed allowlist одного GitHub repository → проект/политику трекера.
 // Отсутствующий файл и пустой список означают «не разрешено ничего»; автомат у
 // нового правила выключен, пока человек не включит его явно.
 import { createHash, timingSafeEqual } from 'node:crypto';
@@ -19,12 +19,12 @@ const DOCUMENT_KEYS = [
 ];
 const LEGACY_RULE_KEYS = ['repositoryId', 'project', 'kind', 'b24', 'autoTask'];
 const RULE_KEYS = [...LEGACY_RULE_KEYS, 'agentSearch'];
-const B24_KEYS = ['responsibleId', 'groupId', 'priority'];
+const TRACKER_KEYS = ['responsibleId', 'groupId', 'priority'];
 const AUTO_KEYS = ['enabled', 'minConfidence', 'maxPerDay'];
 const KINDS = new Set(['bug', 'wish']);
 const POLICY_FINGERPRINT_RE = /^ghpol1:[0-9a-f]{64}$/u;
 
-export interface GitHubRuleB24 {
+export interface GitHubRuleTracker {
   responsibleId: number | null;
   groupId: number | null;
   priority: number;
@@ -42,7 +42,7 @@ export interface GitHubRule {
   repositoryId: string;
   project: string;
   kind: string;
-  b24: GitHubRuleB24;
+  b24: GitHubRuleTracker;
   autoTask: GitHubRuleAutoTask;
   agentSearch: boolean;
 }
@@ -97,11 +97,16 @@ function nullablePositiveInt(value: unknown, where: string): number | null {
   return value;
 }
 
-function normalizeB24(source: unknown, { stored }: { stored: boolean }): GitHubRuleB24 {
+/**
+ * Политика трекера сохраняет прежние имена сериализованных полей и их валидацию.
+ * Нейтральное имя типа не меняет чтение существующих GitHub rules.
+ */
+function normalizeTrackerSettings(source: unknown, { stored }: { stored: boolean }): GitHubRuleTracker {
   if (source === undefined && !stored) {
     return { responsibleId: null, groupId: null, priority: 1 };
   }
-  exactObject(source, B24_KEYS, 'rule.b24');
+
+  exactObject(source, TRACKER_KEYS, 'rule.b24');
   const raw = source as Payload;
   if (![0, 1, 2].includes(raw.priority as number)) {
     fail('github_rules_invalid', 'rule.b24.priority должен быть 0, 1 или 2.');
@@ -179,11 +184,12 @@ function validateRule(
   if (stored && raw.agentSearch !== undefined && typeof raw.agentSearch !== 'boolean') {
     fail('github_rules_invalid', 'rule.agentSearch должен быть boolean.');
   }
+
   return {
     repositoryId: owner,
     project,
     kind,
-    b24: normalizeB24(raw.b24, { stored }),
+    b24: normalizeTrackerSettings(raw.b24, { stored }),
     autoTask: normalizeAutoTask(raw.autoTask, { stored }),
     // Поле additive: существующий schemaVersion=1 без него всегда закрыт агентам.
     agentSearch: stored ? raw.agentSearch === true : false,

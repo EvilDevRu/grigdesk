@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { B24Client } from '../../server/src/lib/b24/client.ts';
+import { customClientModule } from './helpers/trackerPackage.js';
 
 const cases = [
   ['exists', { success: true, data: { id: '100000000001', title: 'Занята' } }, 'exists'],
@@ -17,7 +17,14 @@ const cases = [
 ];
 
 for (const [name, reply, expected] of cases) {
-  test(`PRESENCE-01: ${name} имеет явный результат ${expected}`, async () => {
+  test(`PRESENCE-01: ${name} имеет явный результат ${expected}`, async (t) => {
+    const clientModule = await customClientModule(t);
+
+    if (!clientModule) {
+      return;
+    }
+
+    const { B24Client } = clientModule;
     const client = Object.create(B24Client.prototype);
     const calls = [];
 

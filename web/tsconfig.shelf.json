@@ -6,7 +6,7 @@
   },
   "include": [
     "../shared/lib/contractDecoders.ts",
-    "../shared/b24/shelfContracts.ts",
+    "../shared/trackers/shelfContracts.ts",
     "src/shared/shelfApi.ts",
     "src/shared/taskShelfDecision.ts",
     "src/stores/taskShelf.ts",

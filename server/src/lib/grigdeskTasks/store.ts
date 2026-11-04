@@ -19,7 +19,10 @@ interface TaskDocument {
   tasks: GrigdeskTask[];
 }
 
-type TaskDraft = Omit<GrigdeskTask, 'id' | 'source' | 'createdAt' | 'sourceUrl'> & { clientOrigin: string };
+type TaskDraft = Omit<GrigdeskTask, 'id' | 'source' | 'createdAt' | 'sourceUrl'> & {
+  clientOrigin: string;
+  sourced?: boolean;
+};
 
 /**
  * Только отсутствие файла означает новое хранилище.
@@ -76,11 +79,11 @@ export async function readGrigdeskTask(
 
 export class GrigdeskTaskStore {
   config: GrigdeskTasksConfig;
-  b24?: TaskNumberProbe;
+  tracker?: TaskNumberProbe;
 
-  constructor({ config, b24 }: { config: GrigdeskTasksConfig; b24?: TaskNumberProbe }) {
+  constructor({ config, tracker }: { config: GrigdeskTasksConfig; tracker?: TaskNumberProbe }) {
     this.config = config;
-    this.b24 = b24;
+    this.tracker = tracker;
   }
 
   async list() {
@@ -113,14 +116,14 @@ export class GrigdeskTaskStore {
 
       const document = await readDocument(this.config);
       const id = await reserveTaskNumber(
-        this.config, document.nextId, document.tasks.map((task) => task.id), this.b24,
+        this.config, document.nextId, document.tasks.map((task) => task.id), this.tracker,
       );
-      const { clientOrigin, ...fields } = draft;
+      const { clientOrigin, sourced, ...fields } = draft;
       const task: GrigdeskTask = {
         ...fields,
         id,
         source: 'grigdesk',
-        sourceUrl: `${clientOrigin}/#/board?openTask=${id}`,
+        sourceUrl: `${clientOrigin}/#/board?openTask=${sourced ? encodeURIComponent(`grigdesk:${id}`) : id}`,
         createdAt: new Date().toISOString(),
       };
       const revision = document.revision + 1;

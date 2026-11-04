@@ -1283,6 +1283,7 @@ _route_v2_run_agent_node() {
   # Класс запуска читается после run_agent из глобала диспетчера; след прошлого узла не
   # должен сойти за класс этого захода, если до диспетчера дело не дошло.
   DISPATCH_RESULT_KIND=""
+  BROWSER_TRANSPORT_ERROR=""
   FACTORY_ROUTE_FILESYSTEM_POLICY="$policy" \
   FACTORY_ROUTE_BROWSER_POLICY="${ROUTE_V2_NODE_BROWSER:-forbid}" \
   FACTORY_ROUTE_TIMEOUT_CLASS="${ROUTE_V2_NODE_TIMEOUT_CLASS:-}" \
@@ -1312,6 +1313,15 @@ _route_v2_run_agent_node() {
   # fail-closed, оставляя узел невыполненным: после починки конфига resume продолжит.
   if (( agent_rc == 79 )); then
     rm -f -- "$_r2_context_file" "$_r2_prompt_file"
+    if [[ -n "${BROWSER_TRANSPORT_ERROR:-}" ]]; then
+      local transport_reason="браузерный транспорт не запущен — $BROWSER_TRANSPORT_ERROR"
+      run_state_control_update "$task" "$run_key" failed \
+        "${run_key}_COMMENT" "$transport_reason" "ACTIVE_RUN_${run_key}" "" \
+        STALLED_HUMAN 1 "RUNNER_REASON_${run_key}" "$BROWSER_TRANSPORT_ERROR" || return
+      declare -F v2_log >/dev/null && v2_log "${run_key}: $transport_reason"
+      _route_v2_fail "$transport_reason; исправь транспорт и повтори resume"
+      return 75
+    fi
     _route_v2_fail "run_agent отказал по конфигурации хоста (код 79): исправь и повтори resume"
     return 75
   fi
@@ -1401,9 +1411,12 @@ _route_v2_run_agent_node() {
       # устранить сам (t8702: в manifest тестов попал файл, который VERIFY не исполняет),
       # поэтому цикл узла даёт один повтор с её цитатой и лишь потом зовёт человека.
       result=failed
-      verdict_b64=""
       ROUTE_V2_EVIDENCE_REJECTED=1
       ROUTE_V2_EVIDENCE_REASON=$(_route_v2_evidence_reason "$evidence_output")
+      # Непринятое доказательство не является задачей на слепой ремонт реализации.
+      # После штатного повтора typed human сохраняет открытый блокер у человека.
+      verdict_b64=$(run_state_verdict_encode failed human \
+        "evidence-rejected=${ROUTE_V2_EVIDENCE_REASON:-Обязательное доказательство недоступно}") || return
     fi
   fi
   rm -f -- "$_r2_context_file" "$_r2_prompt_file"
@@ -1523,11 +1536,9 @@ if outcome == "failed" or (outcome == "done" and findings):
     if outcome == "done" and blocking:
         fail()
     if outcome == "failed" and not blocking:
-        # Отказ, в котором не осталось ни одного блокирующего замечания, — не отказ:
-        # проверяющий сам объявил всё найденное отложенным. Разворачивать сборку не
-        # за что, иначе маршрут упрётся в no-progress по замечаниям, которые никто
-        # не просил чинить.
-        outcome = "done"
+        # Противоречивый отказ не доказывает выполнение обязательных критериев.
+        # Команда исправляет payload; хост не повышает исход до успешного.
+        fail()
     verdict = {"owner": owner or "build", "findings": normalized}
     if reviewed_raw is not None:
         if not isinstance(reviewed_raw, list) or not 1 <= len(reviewed_raw) <= 64:

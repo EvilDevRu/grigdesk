@@ -45,7 +45,7 @@ function fixture(t, fetch) {
 
 test('Б24: общий backoff task/:id растёт до минуты, журнал не зависит от ms и query', async (t) => {
   const { calls, events } = fixture(t, () => new Response('<h1>Bad gateway</h1>', { status: 502 }));
-  const read = (id) => api.get(`/api/b24/task/${id}?refresh=${id}`, {
+  const read = (id) => api.get(`/api/tracker/task/${id}?refresh=${id}`, {
     retry: false,
     timeoutMs: 0,
   }).catch((error) => error);
@@ -77,7 +77,7 @@ test('Б24: общий backoff task/:id растёт до минуты, журн
   }
 
   // Другой маршрут получает собственную попытку, несмотря на паузу карточек.
-  await assert.rejects(api.get('/api/b24/dashboard', { retry: false, timeoutMs: 0 }), { status: 502 });
+  await assert.rejects(api.get('/api/tracker/dashboard', { retry: false, timeoutMs: 0 }), { status: 502 });
   assert.equal(calls.length, 9);
   assert.equal(events.length, 5);
 });
@@ -85,7 +85,7 @@ test('Б24: общий backoff task/:id растёт до минуты, журн
 test('Б24: встроенный повтор 502 отменяется во время общей паузы', async (t) => {
   const { calls, events } = fixture(t, () => new Response('{}', { status: 502 }));
   const consumer = new AbortController();
-  const request = api.get('/api/b24/cancel-fixture', {
+  const request = api.get('/api/tracker/cancel-fixture', {
     signal: consumer.signal,
     timeoutMs: 0,
   }).catch((error) => error);
@@ -112,7 +112,7 @@ test('Б24: сетевой отказ, очередь потребителей �
 
     return new Response('{"ok":true}');
   });
-  const route = '/api/b24/network-fixture';
+  const route = '/api/tracker/network-fixture';
 
   await assert.rejects(api.get(route, { retry: false, timeoutMs: 0 }), TypeError);
 

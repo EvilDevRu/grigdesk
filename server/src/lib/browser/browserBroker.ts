@@ -219,6 +219,7 @@ export function createBrowserBroker(options: {
     /**
      * Один poll обслуживает один host и выдаёт только ещё не исполненную команду.
      * Разные вкладки не блокируют друг друга, одна вкладка сохраняет последовательность.
+     * Общий срок не сдвигается при ACK: клиент ограничивает HTTP ожидание отдельно.
      */
     async poll(hostId: string, token: string, signal?: AbortSignal): Promise<Command | null> {
       const current = check(hostId, token);
@@ -229,9 +230,15 @@ export function createBrowserBroker(options: {
 
       polling = true;
 
+      const deadline = now() + 20000;
+
       try {
         while (!signal?.aborted) {
           check(hostId, token);
+
+          if (now() >= deadline) {
+            return null;
+          }
 
           const busy = new Set([...requests.values()]
             .filter((request) => request.dispatched).map((request) => request.command.tabId));
@@ -242,6 +249,10 @@ export function createBrowserBroker(options: {
             const valid = await request.validate();
 
             check(hostId, token);
+
+            if (now() >= deadline) {
+              return null;
+            }
 
             if (!requests.has(request.command.requestId) || current.epoch !== generation) {
               continue;
@@ -273,7 +284,7 @@ export function createBrowserBroker(options: {
               resolve(timedOut);
             };
             const aborted = () => done(false);
-            const timer = setTimeout(() => done(true), 20000);
+            const timer = setTimeout(() => done(true), Math.max(0, deadline - now()));
 
             wake.add(done);
             signal?.addEventListener('abort', aborted, { once: true });

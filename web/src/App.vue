@@ -3,6 +3,7 @@
        в промежутке между созданием документа и ответом сервера. -->
   <UiDialogHost />
   <UiTooltipHost />
+  <UiDesktopContextMenu v-if="desktopDocument" />
   <DesktopExitHost v-if="currentDesktopMode() === 'main'" />
 
   <template v-if="shell.initialized">
@@ -43,6 +44,9 @@
 </template>
 
 <script setup lang="ts">
+import { useGrigdeskTasksStore } from './stores/grigdeskTasks.ts';
+import { useTasksStore } from './stores/tasks.ts';
+import { useUiStore } from './stores/ui.ts';
 import WorkspaceLoading from './shared/layout/WorkspaceLoading.vue';
 import SettingsModalLoading from './views/settings/SettingsModalLoading.vue';
 
@@ -59,6 +63,7 @@ import {
   uiLocale,
   UiDialogHost,
   UiTooltipHost,
+  UiDesktopContextMenu,
   UiToastHost,
   UiInlineMessage,
 } from './ui';
@@ -191,13 +196,16 @@ function startWindowSync() {
       callback,
       { flush: 'post' },
     ),
-    reload: () => Promise.allSettled([favorites.load(true), seen.load(true)]),
+    reload: () => Promise.allSettled([favorites.load(true), seen.load(true),
+      favorites.own.load(true), seen.own.load(true)]),
   });
   const stopSync = startTaskWindowSync({
     channel: new BroadcastChannel('grigdesk-task-data-v1'),
     stores: [
       { store: favorites, actions: ['setFavorite'] },
       { store: seen, actions: ['markSeen'] },
+      { store: useTaskFavoritesStore().own as unknown as typeof favorites, actions: ['setFavorite'] },
+      { store: useTaskSeenStore().own as unknown as typeof seen, actions: ['markSeen'] },
     ],
     invalidate: () => refresh.request(),
   });
@@ -255,7 +263,7 @@ function startWindowSync() {
   const stopShelfAcknowledge = surfaceDocument ? () => {} : startShelfRelay({
     role: 'source',
     channel: new BroadcastChannel('grigdesk-task-data-v1'),
-    acknowledge: (id) => shelf.acknowledge(id),
+    acknowledge: (id, source, taskSource) => shelf.acknowledge(id, { source, taskSource }),
   });
 
   stopTaskWindowSync = () => {
@@ -294,6 +302,7 @@ function startPolling() {
   // Отметки просмотра нужны всему приложению, а не только доске: без них чип «Доска»
   // в навигации не знает, какие задачи новые, на какой бы странице человек ни стоял.
   useTaskSeenStore().load(true);
+  void useGrigdeskTasksStore().load();
   startWindowSync();
 
   if (surfaceDocument) {
@@ -340,10 +349,12 @@ onBeforeUnmount(() => {
   pollingStarted = false;
   stopWindowSync();
   stopShellRelay?.();
+  auth.stopRecovery();
   shell.stop();
 });
 watch(() => shell.status, (status, previous) => {
   if (shell.present && status !== 'online') {
+    auth.stopRecovery();
     auth.logEpoch += 1;
     auth.logReason = 'shell-' + status;
     auth.authenticated = false;
@@ -358,6 +369,12 @@ watch(() => shell.status, (status, previous) => {
 // Ключ Б24 отдельно проверяется локальным GET перед принятием HTTP или relay.
 watch([() => shell.profile?.id, () => auth.clientScope], () => {
   useBoardStore().clearSource();
+  useTaskFavoritesStore().clear();
+  useTaskSeenStore().clear();
+  useTaskShelfStore().clear();
+  useGrigdeskTasksStore().clear();
+  useTasksStore().invalidate();
+  useUiStore().close();
 }, { flush: 'sync' });
 
 watch(() => auth.authenticated && (!shell.present || shell.status === 'online'), setSseEnabled,
@@ -384,6 +401,7 @@ watch(() => auth.authenticated, (on, was) => {
     dismissAllAlerts();
 
     if (!shell.present) {
+      useGrigdeskTasksStore().clear();
       useTaskFavoritesStore().clear();
       useTaskShelfStore().clear();
       clearAlertHistory();

@@ -10,7 +10,7 @@ import type {
   PluginInstallPreview,
   PluginInstalledVersion,
 } from '../../../../shared/plugins/pluginInstallContracts.ts';
-import { isInstallSha } from '../../../../shared/plugins/pluginInstallValues.ts';
+import { isInstallPluginId, isInstallSha } from '../../../../shared/plugins/pluginInstallValues.ts';
 import { createDefaultPluginSources } from './sources.ts';
 import type { PluginSourceRegistry } from './sources.ts';
 import type { NpmRunner } from './npm.ts';
@@ -35,11 +35,8 @@ import type {
   InstallBaseSnapshot,
 } from './stateStore.ts';
 import { errorInfo, installError } from './errors.ts';
-import {
-  readPluginManifest,
-  validatePluginPackage,
-  validatePreparedPluginPackage,
-} from './validatePackage.ts';
+import { pluginPackagePolicy } from './packagePolicy.ts';
+import type { InstallPackagePolicy } from './packagePolicy.ts';
 import { createNpmRunner, prepareNpmDependencies } from './npm.ts';
 import { computePayloadDigest } from './payloadDigest.ts';
 import { safeGitConfigDigest } from './gitMetadata.ts';
@@ -47,8 +44,9 @@ import { isDeepStrictEqual } from 'node:util';
 import { terminateOwnedWorker } from './workerIdentity.ts';
 import type { ApplyFs } from './applyPackage.ts';
 import { applyIntent, createApplyFs, recoverApply } from './applyPackage.ts';
+import { finishPackageRemoval } from './removePackage.ts';
 import {
-  installedSnapshot, installedWebModuleDir, sameSource, sensitivePluginFile,
+  installedSnapshot, sameSource,
 } from './serviceSnapshots.ts';
 import { compareSemVer } from '../releaseCommon.ts';
 import { workspaceWithinBudget } from './workspaceBudget.ts';
@@ -66,11 +64,15 @@ export interface PluginInstallRuntime {
   isLoaded(id: string): boolean;
   prepareReplace(id: string, signal: AbortSignal): Promise<PluginReplacementLease>;
   refresh(): Promise<void>;
+  removed?(id: string): void;
+  installed?(id: string): void;
+  restartRequired?(id: string): boolean;
 }
 
 export interface PluginInstallServiceOptions {
   packageKind?: PackageKind;
   pluginsDir: string;
+  packagePolicy?: InstallPackagePolicy;
   statePath: string;
   grigDeskVersion: string;
   reservedIds: readonly string[];
@@ -104,7 +106,8 @@ export interface RollbackRequest {
 export type PluginInstallPort = Pick<PluginInstallService,
   | 'bindRuntime' | 'recover' | 'health' | 'close' | 'describe' | 'listVersions'
   | 'startInstall' | 'startUpdate' | 'currentJob' | 'getJob' | 'apply' | 'cancel'
-  | 'rollback' | 'checkUpdates' | 'restartRequired' | 'refreshCatalog'
+  | 'rollback' | 'checkUpdates' | 'restartRequired' | 'refreshCatalog' | 'payloadDigest'
+  | 'remove' | 'listInstalled'
 >;
 
 /**
@@ -114,6 +117,7 @@ export type PluginInstallPort = Pick<PluginInstallService,
 export class PluginInstallService {
   readonly options: PluginInstallServiceOptions;
   readonly workDir: string;
+  private readonly packagePolicy: InstallPackagePolicy;
   readonly store: PluginInstallStateStore;
   private readonly sources: PluginSourceRegistry;
   private readonly npm: NpmRunner;
@@ -139,7 +143,7 @@ export class PluginInstallService {
   private healthError: PluginInstallErrorInfo | null = null;
   private closed = false;
   private reserved = false;
-  private operation: 'cancel' | 'apply' | 'rollback' | null = null;
+  private operation: 'cancel' | 'apply' | 'rollback' | 'remove' | null = null;
   private generation = 0;
   private controller: AbortController | null = null;
 
@@ -149,6 +153,13 @@ export class PluginInstallService {
    */
   constructor(options: PluginInstallServiceOptions) {
     this.options = options;
+    this.packagePolicy = options.packagePolicy ?? {
+      ...pluginPackagePolicy,
+      readManifest: (directory) => pluginPackagePolicy.readManifest(directory, options.packageKind),
+      serverWarnings: packagePolicy(options.packageKind).warnings,
+      installedModuleDir: options.packageKind === 'db-engine'
+        ? async () => null : pluginPackagePolicy.installedModuleDir,
+    };
     this.workDir = path.join(options.pluginsDir, '.grigdesk-install');
     this.now = options.now ?? (() => new Date());
     this.store = new PluginInstallStateStore({
@@ -233,6 +244,8 @@ export class PluginInstallService {
           await fs.ensureDir(path.join(this.workDir, name));
         }
 
+        await finishPackageRemoval(this.store, fs, fs.roots);
+
         const resolved = await recoverApply(this.store, fs);
 
         this.state = await this.store.read();
@@ -265,6 +278,15 @@ export class PluginInstallService {
           };
         }
 
+        await this.applyScheduledUpdate();
+
+        if (this.healthError) {
+          return {
+            blockedIds: this.state.job?.pluginId ? [this.state.job.pluginId] : '*',
+            error: structuredClone(this.healthError),
+          };
+        }
+
         const interrupted = this.state.job;
 
         if (!this.state.apply && interrupted && ['running', 'ready'].includes(interrupted.status)) {
@@ -282,7 +304,8 @@ export class PluginInstallService {
         }
 
         this.reserved = !!this.state.job
-          && ['running', 'ready', 'applying', 'recovery_required'].includes(this.state.job.status);
+          && ['running', 'ready', 'awaiting_restart', 'applying', 'recovery_required']
+            .includes(this.state.job.status);
 
         return { blockedIds: [], error: null };
       } catch (error) {
@@ -301,6 +324,33 @@ export class PluginInstallService {
    */
   health(): PluginInstallErrorInfo | null {
     return structuredClone(this.healthError ?? this.catalogError);
+  }
+
+  /**
+   * Подтверждённая замена legacy-плагина выполняется до сканирования и import runtime.
+   * Отказ повторной проверки сохраняет старую установку и требует нового подтверждения.
+   */
+  private async applyScheduledUpdate(): Promise<void> {
+    const job = this.state.job;
+
+    if (job?.status !== 'awaiting_restart' || !job.reviewToken) {
+      return;
+    }
+
+    try {
+      await this.performApply(job.id, job.reviewToken, true);
+    } catch (error) {
+      if (this.state.apply || this.healthError) {
+        throw error;
+      }
+
+      await this.updateJob(job.id, this.generation, (current) => {
+        current.status = 'failed';
+        current.error = errorInfo(error);
+        current.finishedAt = this.now().toISOString();
+        current.reviewToken = null;
+      });
+    }
   }
 
   /**
@@ -355,6 +405,26 @@ export class PluginInstallService {
    * Локальная информация использует persisted record и не требует сети.
    * Проверка целостности и cache расширяются сервисными сценариями.
    */
+  async listInstalled(): Promise<Record<string, PluginInstallInfo>> {
+    this.assertAvailable();
+
+    const result: Record<string, PluginInstallInfo> = {};
+
+    for (const id of Object.keys(this.state.plugins)) {
+      const record = await this.describe(id);
+
+      if (record) {
+        result[id] = record;
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Сведения конкретного пакета используют persisted record и локальную проверку.
+   * Короткий cache не требует сети и сбрасывается при публикации нового снимка.
+   */
   async describe(id: string): Promise<PluginInstallInfo | null> {
     this.assertAvailable();
 
@@ -398,7 +468,15 @@ export class PluginInstallService {
     if (record.previous) {
       if (await this.copyModified(id, path.join(this.workDir, 'previous', id), record.previous)) {
         rollbackError = errorInfo(installError('previous_modified'));
-      } else if (localChanges) {
+      } else {
+        try {
+          await this.validateRollbackCandidate(id, record.previous);
+        } catch (error) {
+          rollbackError = errorInfo(error);
+        }
+      }
+
+      if (!rollbackError && localChanges) {
         rollbackError = errorInfo(installError('local_changes'));
       }
     }
@@ -411,6 +489,20 @@ export class PluginInstallService {
       rollbackAvailable: record.previous !== null && rollbackError === null,
       rollbackError,
     };
+  }
+
+  /**
+   * Откат допускает только исполняемый контракт кандидата, сохраняя старую копию на диске.
+   * Текущий несовместимый пакет остаётся заменяемым через обычную установку.
+   */
+  private async validateRollbackCandidate(id: string, previous: PluginInstalledVersion): Promise<void> {
+    await this.packagePolicy.validatePrepared(path.join(this.workDir, 'previous', id), {
+      packageKind: this.options.packageKind,
+      expectedId: id,
+      version: previous.version,
+      reservedIds: new Set(this.options.reservedIds),
+      grigDeskVersion: this.options.grigDeskVersion,
+    });
   }
 
   /**
@@ -456,7 +548,8 @@ export class PluginInstallService {
       await this.writeState((state) => {
         const current = state.plugins[id];
 
-        if (!current || current.revision !== record.revision || !sameSource(current.source, record.source)) {
+        if (!current || current.revision !== record.revision || !sameSource(current.source, record.source)
+          || state.job?.status === 'awaiting_restart' && state.job.pluginId === id) {
           return;
         }
 
@@ -487,7 +580,102 @@ export class PluginInstallService {
    * Новый плагин ещё не имеет загруженного кода.
    */
   restartRequired(id: string): boolean {
-    return this.restarts.has(id);
+    return this.runtime?.restartRequired?.(id) ?? this.restarts.has(id);
+  }
+
+  removedIds(): string[] {
+    return [...(this.state.removedIds ?? [])];
+  }
+
+  /**
+   * Удаление использует общий mutex и lifetime, как замена или откат пакета.
+   * Ручная установка также удаляется: наличие записи managed не является условием.
+   */
+  async remove(id: string): Promise<{ id: string; restartRequired: boolean }> {
+    return this.mutation(() => this.performRemove(id));
+  }
+
+  /**
+   * Lease дожидается принятых вызовов до durable намерения и перемещения файлов.
+   * Реквизиты принадлежат runtime и не входят ни в цель удаления, ни в cleanup.
+   */
+  private async performRemove(id: string): Promise<{ id: string; restartRequired: boolean }> {
+    this.assertAvailable();
+
+    if (!this.runtime) {
+      throw installError('recovery_required');
+    }
+
+    if (this.reserved || this.operation) {
+      throw installError('install_busy');
+    }
+
+    if (!isInstallPluginId(id) || this.options.reservedIds.includes(id)) {
+      throw installError('package_not_found');
+    }
+
+    this.operation = 'remove';
+
+    const fs = this.filesystem();
+    let lease: PluginReplacementLease | null = null;
+    let intentStarted = false;
+
+    try {
+      const record = this.state.plugins[id];
+      const npmDirs = record?.npmDirs ?? [];
+      const previousNpmDirs = record?.previous?.npmDirs ?? [];
+      const directory = path.join(this.options.pluginsDir, id);
+
+      if (!await fs.lstatIdentity(directory)) {
+        throw installError('package_not_found');
+      }
+
+      lease = await this.runtime.prepareReplace(id, this.closingSignal.signal);
+
+      const current = await fs.lstatIdentity(directory, npmDirs);
+      const previous = await fs.lstatIdentity(path.join(this.workDir, 'previous', id), previousNpmDirs);
+
+      if (!current) {
+        throw installError('package_not_found');
+      }
+
+      intentStarted = true;
+
+      await this.writeState((state) => {
+        state.removal = {
+          pluginId: id,
+          transactionId: randomUUID(),
+          previousTransactionId: randomUUID(),
+          current,
+          previous,
+          npmDirs,
+          previousNpmDirs,
+        };
+      });
+
+      await finishPackageRemoval(this.store, fs, fs.roots);
+      this.state = await this.store.read();
+      this.invalidateDescriptions();
+      this.restarts.add(id);
+      this.runtime.removed?.(id);
+      await lease.finish('installed');
+      await this.refreshRuntime();
+      await recoverApply(this.store, fs);
+      this.state = await this.store.read();
+
+      return { id, restartRequired: this.restartRequired(id) };
+    } catch (error) {
+      if (intentStarted) {
+        this.healthError = errorInfo(installError('recovery_required'));
+        this.reserved = true;
+      }
+
+      await lease?.finish(intentStarted ? 'blocked' : 'reverted');
+
+      throw error;
+    } finally {
+      this.operation = null;
+    }
   }
 
   /**
@@ -502,10 +690,10 @@ export class PluginInstallService {
    * Полная цепочка публикации принадлежит lifetime сервиса до последнего callback.
    * Mutex резервируется до внешнего await и не освобождается при начале close.
    */
-  private async performApply(id: string, token: string): Promise<PluginInstallJob> {
+  private async performApply(id: string, token: string, startup = false): Promise<PluginInstallJob> {
     this.assertAvailable();
 
-    if (!this.runtime) {
+    if (!this.runtime && !startup) {
       throw installError('recovery_required');
     }
 
@@ -516,7 +704,7 @@ export class PluginInstallService {
       throw installError('job_not_found');
     }
 
-    if (!['ready', 'done'].includes(job.status)) {
+    if (!['ready', 'awaiting_restart', 'done'].includes(job.status)) {
       throw installError('job_not_ready');
     }
 
@@ -524,7 +712,7 @@ export class PluginInstallService {
       throw installError('preview_stale');
     }
 
-    if (job.status === 'done') {
+    if (job.status === 'done' || job.status === 'awaiting_restart' && !startup) {
       return job;
     }
 
@@ -539,13 +727,31 @@ export class PluginInstallService {
     this.operation = 'apply';
 
     const pluginId = job.pluginId;
-    const wasLoaded = this.runtime.isLoaded(pluginId);
+    const wasLoaded = this.runtime?.isLoaded(pluginId) ?? false;
     const fs = this.filesystem();
     let lease: PluginReplacementLease | null = null;
     let effectStarted = false;
+    let schedule = false;
 
     try {
-      lease = await this.runtime.prepareReplace(pluginId, this.closingSignal.signal);
+      if (startup) {
+        if (wasLoaded || this.options.packageKind && this.options.packageKind !== 'plugin') {
+          throw installError('recovery_required');
+        }
+
+        lease = { async finish() {} };
+      } else {
+        try {
+          lease = await this.runtime!.prepareReplace(pluginId, this.closingSignal.signal);
+        } catch (error) {
+          if (errorInfo(error).code !== 'plugin_stop_required' || !wasLoaded
+            || this.options.packageKind && this.options.packageKind !== 'plugin') {
+            throw error;
+          }
+
+          schedule = true;
+        }
+      }
 
       const disk = await this.store.read();
       const prepared = disk.prepared;
@@ -555,7 +761,7 @@ export class PluginInstallService {
         throw installError('preview_stale');
       }
 
-      const validated = await validatePreparedPluginPackage(directory, {
+      const validated = await this.packagePolicy.validatePrepared(directory, {
         packageKind: this.options.packageKind,
         version: job.target.version,
         expectedId: pluginId,
@@ -604,6 +810,18 @@ export class PluginInstallService {
         throw installError('preview_stale');
       }
 
+      if (schedule) {
+        if (!current) {
+          throw installError('plugin_stop_required');
+        }
+
+        await this.updateJob(id, this.generation, (current) => {
+          current.status = 'awaiting_restart';
+        });
+
+        return structuredClone(this.state.job!);
+      }
+
       await this.writeState((state) => {
         targetRecord.revision = state.nextRevision++;
       });
@@ -631,7 +849,7 @@ export class PluginInstallService {
 
       effectStarted = true;
 
-      return await this.publishReplacement(intent, fs, lease, wasLoaded);
+      return await this.publishReplacement(intent, fs, lease!, wasLoaded);
     } catch (error) {
       if (lease && !effectStarted) {
         await lease.finish('reverted');
@@ -661,6 +879,16 @@ export class PluginInstallService {
     if (outcome.outcome === 'completed'
       && (wasLoaded || packagePolicy(this.options.packageKind).restartOnly)) {
       this.restarts.add(intent.pluginId);
+    }
+
+    if (outcome.outcome === 'completed' && this.state.removedIds?.includes(intent.pluginId)) {
+      await this.writeState((state) => {
+        state.removedIds = state.removedIds?.filter((id) => id !== intent.pluginId);
+      });
+    }
+
+    if (outcome.outcome === 'completed') {
+      this.runtime?.installed?.(intent.pluginId);
     }
 
     await lease.finish(outcome.outcome === 'completed' ? 'installed'
@@ -732,6 +960,8 @@ export class PluginInstallService {
       throw installError('preview_stale');
     }
 
+    await this.validateRollbackCandidate(id, record.previous);
+
     this.operation = 'rollback';
 
     const currentDir = path.join(this.options.pluginsDir, id);
@@ -777,7 +1007,7 @@ export class PluginInstallService {
         checkedAt: sameSource(record.source, record.previous.source) ? record.checkedAt : null,
         checkError: sameSource(record.source, record.previous.source) ? record.checkError : null,
       };
-      const manifest = await readPluginManifest(previousDir, this.options.packageKind);
+      const manifest = await this.packagePolicy.readManifest(previousDir);
       const time = this.now().toISOString();
       const target: PluginVersionRef = {
         version: targetRecord.version,
@@ -990,6 +1220,25 @@ export class PluginInstallService {
   }
 
   /**
+   * Digest берётся из проверенного durable кандидата, а не из review token.
+   * После публикации текущего задания его байты подтверждает установленная запись.
+   */
+  payloadDigest(jobId: string): string | null {
+    const job = this.state.job;
+
+    if (job?.id !== jobId) {
+      return null;
+    }
+
+    if (this.state.prepared?.jobId === jobId) {
+      return this.state.prepared.candidateDigest;
+    }
+
+    return job.status === 'done' && job.pluginId
+      ? this.state.plugins[job.pluginId]?.payloadDigest ?? null : null;
+  }
+
+  /**
    * Job by id нужен для reconciliation, даже если current job уже сменился.
    * Сохранённый terminal summary удерживается отдельно от live job.
    */
@@ -1035,7 +1284,7 @@ export class PluginInstallService {
       throw installError('install_busy');
     }
 
-    if (!['running', 'ready'].includes(job.status)) {
+    if (!['running', 'ready', 'awaiting_restart'].includes(job.status)) {
       throw installError('job_not_ready');
     }
 
@@ -1086,7 +1335,7 @@ export class PluginInstallService {
 
         const disk = await this.store.read();
 
-        if (this.healthError || Object.keys(disk.workers).length > 0 || disk.apply) {
+        if (this.healthError || Object.keys(disk.workers).length > 0 || disk.apply || disk.removal) {
           throw installError('recovery_required');
         }
 
@@ -1167,7 +1416,7 @@ export class PluginInstallService {
         job.percent = null;
       });
 
-      const validated = await validatePluginPackage(directory, {
+      const validated = await this.packagePolicy.validate(directory, {
         packageKind: this.options.packageKind,
         version: target.version,
         expectedId: request.expectedId ?? null,
@@ -1216,7 +1465,7 @@ export class PluginInstallService {
       });
 
       const candidateDigest = await prepareNpmDependencies(
-        directory, validated.npmDirs, validated.webDir, this.npm, controller.signal, budget,
+        directory, validated.npmDirs, this.npm, controller.signal, budget,
       );
       const preview: PluginInstallPreview = {
         source: initial.source,
@@ -1226,14 +1475,14 @@ export class PluginInstallService {
         version: validated.version,
         description: validated.description,
         hasServer: validated.hasServer,
-        hasWeb: validated.webDir !== null || validated.webModuleDir !== null,
+        hasWeb: validated.webModuleDir !== null,
         replaces: record ? {
           kind: 'managed',
           version: record.version,
           sourceChanged: !sameSource(record.source, initial.source),
         } : current ? { kind: 'unmanaged' } : { kind: 'none' },
         changes: null,
-        warnings: validated.hasServer ? [...packagePolicy(this.options.packageKind).warnings] : [],
+        warnings: validated.hasServer ? [...this.packagePolicy.serverWarnings] : [],
       };
 
       if (validated.webModuleDir !== null) {
@@ -1243,15 +1492,21 @@ export class PluginInstallService {
 
       if (record) {
         const changes = await source.changes(directory, record.sha, target.sha);
-        const previousModuleDir = this.options.packageKind === 'db-engine' ? null
-          : await installedWebModuleDir(path.join(this.options.pluginsDir, validated.id));
+        const previousModuleDir = await this.packagePolicy.installedModuleDir(
+          path.join(this.options.pluginsDir, validated.id),
+        );
+        const previousServerEntry = await this.packagePolicy.installedServerEntry?.(
+          path.join(this.options.pluginsDir, validated.id),
+        );
+        const serverEntries = [validated.serverEntry, previousServerEntry]
+          .filter((entry): entry is string => typeof entry === 'string');
         const moduleDirs = [validated.webModuleDir, previousModuleDir]
           .filter((dir): dir is string => dir !== null);
 
         preview.changes = changes ? {
           ...changes,
           sensitive: changes.files.filter((file) =>
-            sensitivePluginFile(file.path, validated.webDir, moduleDirs))
+            this.packagePolicy.sensitiveFile(file.path, moduleDirs, serverEntries))
             .map((file) => file.path),
         } : null;
       }
@@ -1467,7 +1722,7 @@ export class PluginInstallService {
     try {
       return await this.readOperation(async () => {
         const digest = await computePayloadDigest(directory, expected.npmDirs);
-        const manifest = await readPluginManifest(directory, this.options.packageKind);
+        const manifest = await this.packagePolicy.readManifest(directory);
 
         if (digest !== expected.payloadDigest
           || manifest.id !== id || (this.options.packageKind === 'db-engine'

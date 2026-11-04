@@ -23,6 +23,8 @@ export interface StartDeepSeekServerOptions {
   cwd: string;
   env: NodeJS.ProcessEnv;
   spawnProcess?: typeof spawn;
+  // Только model-only отменяет ожидание повторной descriptor verification.
+  interruptVerification?: boolean;
   signal?: AbortSignal;
 }
 
@@ -84,7 +86,9 @@ export async function startDeepSeekServer(options: StartDeepSeekServerOptions): 
   const port = await unusedPort();
 
   if (options.runtime) {
-    await verifyDeepSeekRuntimeDescriptorAsync(options.runtime);
+    await verifyDeepSeekRuntimeDescriptorAsync(options.runtime, {
+      signal: options.interruptVerification ? options.signal : undefined,
+    });
     options.signal?.throwIfAborted();
   }
 

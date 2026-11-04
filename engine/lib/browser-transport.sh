@@ -8,6 +8,20 @@ BROWSER_RUN_ID=""
 BROWSER_RUN_EPOCH=""
 BROWSER_RUN_ATTEMPT=""
 BROWSER_TOKEN_FD=""
+BROWSER_TRANSPORT_ERROR=""
+
+# В журнал попадает только закрытый машинный код helper, без argv и секрета.
+# Ошибка сохраняется до route dispatcher, даже когда cleanup уже убрал binding.
+browser_transport_fail() {
+  local log=${1:-} fallback=${2:-browser_transport_dead} code=""
+  if [[ -f "$log" ]]; then
+    code=$(tail -1 "$log")
+    [[ "$code" =~ ^(browser_[a-z_]{1,64}|outcome_unknown|access_revoked)$ ]] || code=""
+  fi
+  BROWSER_TRANSPORT_ERROR=${code:-$fallback}
+  printf '%s\n' "$BROWSER_TRANSPORT_ERROR" >&2
+  return 79
+}
 
 browser_transport_available() {
   [[ "${FACTORY_ROUTE_BROWSER_POLICY:-forbid}" == allow &&
@@ -30,34 +44,58 @@ browser_transport_arguments() {
 browser_transport_prepare() {
   local task=$1 stage=$2 run_id=$3 epoch=$4 request_dir=$5 token_fd=$6
   export FACTORY_BROWSER_ENABLED=0
+  BROWSER_TRANSPORT_ERROR=""
   unset FACTORY_BROWSER_NONCE FACTORY_BROWSER_REQUEST_DIR
   browser_transport_available || return 0
   [[ "${FACTORY_LIFECYCLE_ATTEMPT_ID:-}" =~ ^a_[a-f0-9]{32}$ &&
-     "${ROUTE_V2_ROUTES_DIR:-}" == /* && "${FACTORY_PROFILES_DIR:-}" == /* ]] || return 0
+     "${ROUTE_V2_ROUTES_DIR:-}" == /* && "${FACTORY_PROFILES_DIR:-}" == /* ]] || {
+    browser_transport_fail '' browser_run_invalid
+    return 79
+  }
   BROWSER_RUN_TASK=$task
   BROWSER_RUN_STAGE=$stage
   BROWSER_RUN_ID=$run_id
   BROWSER_RUN_EPOCH=$epoch
   BROWSER_RUN_ATTEMPT=$FACTORY_LIFECYCLE_ATTEMPT_ID
   BROWSER_TOKEN_FD=$token_fd
-  FACTORY_BROWSER_NONCE=$("$GRIGDESK_BROWSER_NODE" "$GRIGDESK_BROWSER_HELPER" key) || return 0
-  [[ "$FACTORY_BROWSER_NONCE" =~ ^[a-f0-9]{64}$ ]] || return 0
   FACTORY_BROWSER_REQUEST_DIR="$request_dir/browser"
-  mkdir -p -- "$FACTORY_BROWSER_REQUEST_DIR" || return 0
-  chmod 700 -- "$FACTORY_BROWSER_REQUEST_DIR" || return 0
+  mkdir -p -- "$FACTORY_BROWSER_REQUEST_DIR" && chmod 700 -- "$FACTORY_BROWSER_REQUEST_DIR" || {
+    browser_transport_fail
+    return 79
+  }
+  local log="$FACTORY_BROWSER_REQUEST_DIR/relay.log"
+  FACTORY_BROWSER_NONCE=$("$GRIGDESK_BROWSER_NODE" "$GRIGDESK_BROWSER_HELPER" key 2>"$log") || {
+    browser_transport_fail "$log"
+    return 79
+  }
+  [[ "$FACTORY_BROWSER_NONCE" =~ ^[a-f0-9]{64}$ ]] || {
+    browser_transport_fail '' browser_nonce_invalid
+    return 79
+  }
   export FACTORY_BROWSER_NONCE FACTORY_BROWSER_REQUEST_DIR
   export FACTORY_BROWSER_ENABLED=1
 }
 
 # Publisher вызывается только после protected runner identity и до CONT provider.
-# Отказ браузера не заменяет status transport и не завершает этап за модель.
+# Отказ удерживает provider на барьере: инфраструктурный сбой не тратит заход модели.
 browser_transport_start() {
   [[ "${FACTORY_BROWSER_ENABLED:-0}" == 1 ]] || return 0
   browser_transport_arguments
-  local log="$FACTORY_BROWSER_REQUEST_DIR/relay.log" identity pgid session state ppid poll
+  local log="$FACTORY_BROWSER_REQUEST_DIR/relay.log" identity pgid session state ppid poll attempt mode
   local relay_parent=$BASHPID
-  "$GRIGDESK_BROWSER_NODE" "$GRIGDESK_BROWSER_HELPER" publish-binding \
-    "${BROWSER_HOST_ARGS[@]}" 9<&"$BROWSER_TOKEN_FD" >"$log" 2>&1 || return 0
+  : >"$log"
+  for attempt in 1 2 3; do
+    if "$GRIGDESK_BROWSER_NODE" "$GRIGDESK_BROWSER_HELPER" publish-binding \
+      "${BROWSER_HOST_ARGS[@]}" 9<&"$BROWSER_TOKEN_FD" >>"$log" 2>&1; then
+      break
+    fi
+    if (( attempt == 3 )) || [[ "$(tail -1 "$log")" != browser_run_stale ]]; then
+      browser_transport_fail "$log"
+      return 79
+    fi
+    sleep 0.1
+  done
+  printf 'binding опубликован\n' >>"$log"
   FACTORY_RUN_TASK="$BROWSER_RUN_TASK" FACTORY_RUN_STAGE="$BROWSER_RUN_STAGE" \
   FACTORY_RUN_ID="$BROWSER_RUN_ID" FACTORY_RUN_EPOCH="$BROWSER_RUN_EPOCH" \
   FACTORY_STATUS_MODE=request FACTORY_STATUS_REQUEST_DIR="${FACTORY_BROWSER_REQUEST_DIR%/browser}" \
@@ -68,10 +106,24 @@ browser_transport_start() {
   identity=$(_runner_process_full_identity "$BROWSER_RELAY_PID" 2>/dev/null || true)
   read -r pgid session BROWSER_RELAY_STARTTIME state ppid <<<"$identity"
   for poll in {1..100}; do
-    [[ ! -f "$FACTORY_BROWSER_REQUEST_DIR/host.ready" ]] || return 0
+    if [[ -f "$FACTORY_BROWSER_REQUEST_DIR/host.ready" ]]; then
+      mode=$(FACTORY_RUN_TASK="$BROWSER_RUN_TASK" FACTORY_RUN_STAGE="$BROWSER_RUN_STAGE" \
+        FACTORY_RUN_ID="$BROWSER_RUN_ID" FACTORY_RUN_EPOCH="$BROWSER_RUN_EPOCH" \
+        "$GRIGDESK_BROWSER_NODE" "$GRIGDESK_BROWSER_HELPER" mode 2>>"$log") || {
+        browser_transport_fail "$log"
+        return 79
+      }
+      if [[ "$mode" == legacy || "$mode" == grigdesk ]]; then
+        BROWSER_TRANSPORT_ERROR=""
+        return 0
+      fi
+      printf 'browser_ready_invalid\n' >>"$log"
+      break
+    fi
     kill -0 "$BROWSER_RELAY_PID" 2>/dev/null || break
     sleep 0.02
   done
+  browser_transport_fail "$log"
 }
 
 # Удаление binding раньше завершения relay делает даже поздний request запрещённым.
@@ -103,17 +155,18 @@ browser_transport_stop() {
   BROWSER_RELAY_PID="" BROWSER_RELAY_STARTTIME="" BROWSER_RUN_ID="" BROWSER_TOKEN_FD=""
 }
 
-# Вызывается bridge после CONT: ready уже опубликован либо режим закрывается unavailable.
+# Вызывается bridge после CONT: ready уже проверен launcher, а повторный отказ запрещает model call.
 # В legacy режиме исходный prompt сохраняется байт-в-байт.
 browser_transport_prompt() {
-  local original=$1 mode=grigdesk command
+  local original=$1 mode command
   BROWSER_TRANSPORT_PROMPT=$original
   [[ "${FACTORY_BROWSER_ENABLED:-0}" == 1 ]] || return 0
-  mode=$("$GRIGDESK_BROWSER_NODE" "$GRIGDESK_BROWSER_HELPER" mode 2>/dev/null) || mode=grigdesk
+  mode=$("$GRIGDESK_BROWSER_NODE" "$GRIGDESK_BROWSER_HELPER" mode) || return 79
   if [[ "$mode" == legacy ]]; then
     export FACTORY_BROWSER_ENABLED=0
     return 0
   fi
+  [[ "$mode" == grigdesk ]] || return 79
   printf -v command '%q %q request --input-json' "$GRIGDESK_BROWSER_NODE" "$GRIGDESK_BROWSER_HELPER"
   BROWSER_TRANSPORT_PROMPT+=$'\n\n[Браузер GrigDesk]\n'
   BROWSER_TRANSPORT_PROMPT+="Для браузерной проверки используй браузер GrigDesk: $command '<JSON>'."

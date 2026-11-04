@@ -1,4 +1,6 @@
-// Серверное избранное B24-задач. Строка фильтра меняется после подтверждения сервера.
+import type { TaskSourceOptions, TaskPersonalSource } from '../../../shared/tasks/taskReference.ts';
+import { trackerMutationOptions } from '../shared/trackerMutation.ts';
+// Независимое серверное избранное трекера и GrigDesk. Строка фильтра меняется после подтверждения сервера.
 // Ошибка мутации сохраняет прежний список без локального rollback.
 import { defineStore } from 'pinia';
 import { api } from '../shared/apiClient.ts';
@@ -32,7 +34,27 @@ function normalizedSnapshot(value: unknown) {
   };
 }
 
-export const useTaskFavoritesStore = defineStore('taskFavorites', {
+interface FavoritesBranch {
+  scope: string;
+  revision: number;
+  taskIds: string[];
+  loaded: boolean;
+  loading: boolean;
+  error: string | null;
+  clear(options?: TaskSourceOptions): void;
+  load(force?: boolean, options?: TaskSourceOptions): Promise<boolean>;
+  pending: Record<string, boolean>;
+  isFavorite(id: unknown): boolean;
+  isPending(id: unknown): boolean;
+  setFavorite(id: unknown, favorite: boolean, options?: TaskSourceOptions): Promise<boolean>;
+  toggle(id: unknown, options?: TaskSourceOptions): Promise<boolean>;
+}
+
+const createTaskFavoritesStore = (storeId: string, source: TaskPersonalSource) => {
+  const prefix = source === 'grigdesk' ? 'grigdesk-tasks' : 'tracker';
+  const url = `/api/${prefix}/task-favorites`;
+
+  return defineStore(storeId, {
   state: () => ({
     scope: '',
     revision: -1,
@@ -46,6 +68,7 @@ export const useTaskFavoritesStore = defineStore('taskFavorites', {
     _scopeRequestSeq: 0,
   }),
   getters: {
+    own: (): FavoritesBranch => useGrigdeskTaskFavoritesStore(),
     count: (state) => state.taskIds.length,
     isFavorite: (state) => (id: unknown) => state.taskIds.includes(taskKey(id)),
     isPending: (state) => (id: unknown) => !!state.pending[taskKey(id)],
@@ -57,6 +80,11 @@ export const useTaskFavoritesStore = defineStore('taskFavorites', {
      */
     applySnapshot(value: unknown, requestSeq: number | null = null) {
       const snapshot = normalizedSnapshot(value);
+
+      if (source === 'grigdesk' && snapshot.scope !== 'grigdesk') {
+        throw new Error('Некорректный источник личных меток GrigDesk');
+      }
+
       const seq = requestSeq ?? ++this._requestSeq;
 
       if (snapshot.scope !== this.scope && seq < this._scopeRequestSeq) {
@@ -79,7 +107,11 @@ export const useTaskFavoritesStore = defineStore('taskFavorites', {
      * Загрузка сохраняет прежнее правило единственного запроса и кеша снимка.
      * Смена эпохи отменяет применение ответа и его служебных флагов.
      */
-    async load(force = false): Promise<boolean> {
+    async load(force = false, options: TaskSourceOptions = {}): Promise<boolean> {
+      if (options.source === 'grigdesk' && source !== 'grigdesk') {
+        return useGrigdeskTaskFavoritesStore().load(force);
+      }
+
       if (this.loading) {
         return false;
       }
@@ -94,7 +126,7 @@ export const useTaskFavoritesStore = defineStore('taskFavorites', {
       this.error = null;
 
       try {
-        const snapshot = await api.get('/api/b24/task-favorites');
+        const snapshot = await api.get(url);
 
         if (epoch !== this._epoch) {
           return false;
@@ -120,7 +152,11 @@ export const useTaskFavoritesStore = defineStore('taskFavorites', {
      * Меняет список только по подтверждённому серверному снимку.
      * Блокировка принадлежит задаче и снимается только в своей эпохе.
      */
-    async setFavorite(id: unknown, favorite: boolean): Promise<boolean> {
+    async setFavorite(id: unknown, favorite: boolean, options: TaskSourceOptions = {}): Promise<boolean> {
+      if (options.source === 'grigdesk' && source !== 'grigdesk') {
+        return useGrigdeskTaskFavoritesStore().setFavorite(id, favorite);
+      }
+
       const key = taskKey(id);
 
       if (!key || this.pending[key]) {
@@ -140,8 +176,10 @@ export const useTaskFavoritesStore = defineStore('taskFavorites', {
 
       try {
         const snapshot = favorite
-          ? await api.put(`/api/b24/task-favorites/${encodeURIComponent(key)}`)
-          : await api.del(`/api/b24/task-favorites/${encodeURIComponent(key)}`);
+          ? await api.put(`${url}/${encodeURIComponent(key)}`, undefined,
+            source === 'tracker' ? trackerMutationOptions() : {})
+          : await api.del(`${url}/${encodeURIComponent(key)}`, undefined,
+            source === 'tracker' ? trackerMutationOptions() : {});
 
         if (epoch !== this._epoch) {
           return false;
@@ -165,7 +203,11 @@ export const useTaskFavoritesStore = defineStore('taskFavorites', {
       }
     },
 
-    toggle(id: unknown): Promise<boolean> {
+    toggle(id: unknown, options: TaskSourceOptions = {}): Promise<boolean> {
+      if (options.source === 'grigdesk' && source !== 'grigdesk') {
+        return useGrigdeskTaskFavoritesStore().toggle(id);
+      }
+
       return this.setFavorite(id, !this.isFavorite(id));
     },
 
@@ -173,7 +215,11 @@ export const useTaskFavoritesStore = defineStore('taskFavorites', {
      * Выход из аккаунта сбрасывает снимок и повышает эпоху запросов.
      * Летящие ответы больше не могут восстановить избранное.
      */
-    clear() {
+    clear(options: TaskSourceOptions = {}): void {
+      if (source === 'tracker' && options.source !== 'tracker') {
+        useGrigdeskTaskFavoritesStore().clear();
+      }
+
       this._epoch += 1;
       this._requestSeq += 1;
       this._scopeRequestSeq = this._requestSeq;
@@ -186,4 +232,8 @@ export const useTaskFavoritesStore = defineStore('taskFavorites', {
       this.pending = {};
     },
   },
-});
+  });
+};
+
+export const useTaskFavoritesStore = createTaskFavoritesStore('taskFavorites', 'tracker');
+export const useGrigdeskTaskFavoritesStore = createTaskFavoritesStore('grigdeskTaskFavorites', 'grigdesk');

@@ -55,6 +55,138 @@ const ssh = {
   },
 };
 
+const telegram = {
+  id: 'telegram',
+  system: true,
+  name: 'Телеграм',
+  version: '0.1.0',
+  description: 'Подключение бота Telegram.',
+  enabled: false,
+  needsRestart: false,
+  settings: [],
+  values: {},
+};
+
+test('Telegram: настройка подключения доступна после сохранения включения', async (t) => {
+  const h = await systemHarness(t, 'connections.telegram', {
+    prepare({ plugins }) {
+      plugins.list = [structuredClone(telegram)];
+    },
+  });
+  const setup = () => h.wrapper.get('[data-telegram-setup]');
+
+  assert.match(h.wrapper.text(), /токену, выбрать чаты и настроить пульт/u);
+  assert.equal(setup().element.disabled, true);
+  assert.match(h.wrapper.text(), /Включите Telegram и нажмите «Применить»/u);
+  await h.wrapper.get('[role="switch"]').setValue(true);
+  assert.equal(setup().element.disabled, true);
+  assert.match(h.wrapper.text(), /Нажмите «Применить», чтобы сохранить включение/u);
+  assert.equal(h.writes().length, 0);
+  assert.deepEqual(h.control.navigations, []);
+
+  await h.settings.apply();
+  await h.flushPromises();
+  assert.equal(setup().element.disabled, false);
+  await setup().trigger('click');
+  await h.flushPromises();
+  assert.deepEqual(h.control.navigations, ['/telegram']);
+  assert.equal(h.settings.isOpen, false);
+  assert.deepEqual(h.writes().map((call) => call.path), ['/api/plugins/telegram/toggle']);
+});
+
+test('Telegram: ошибка включения оставляет переход недоступным', async (t) => {
+  const h = await systemHarness(t, 'connections.telegram', {
+    prepare({ plugins, control }) {
+      plugins.list = [structuredClone(telegram)];
+      control.handlers['/api/plugins/telegram/toggle'] = () =>
+        Response.json({ error: 'Не удалось включить Telegram' }, { status: 503 });
+    },
+  });
+
+  await h.wrapper.get('[role="switch"]').setValue(true);
+  await h.settings.apply();
+  await h.flushPromises();
+  assert.equal(h.wrapper.get('[data-telegram-setup]').element.disabled, true);
+  assert.equal(h.plugins.byId('telegram').enabled, false);
+  assert.equal(h.settings.isOpen, true);
+  assert.deepEqual(h.control.navigations, []);
+});
+
+test('Telegram: переход сохраняет выбор судьбы других неприменённых настроек', async (t) => {
+  const h = await systemHarness(t, 'connections.telegram', {
+    prepare({ plugins }) {
+      plugins.list = [{ ...structuredClone(telegram), enabled: true }, structuredClone(ssh)];
+    },
+  });
+
+  h.settings.selectPage('connections.ssh');
+  await h.flushPromises();
+  await h.wrapper.get('input[type="number"]').setValue('128');
+  h.settings.selectPage('connections.telegram');
+  await h.flushPromises();
+  await h.wrapper.get('[data-telegram-setup]').trigger('click');
+  assert.equal(h.settings.closeChoiceOpen, true);
+  assert.deepEqual(h.control.navigations, []);
+  await h.settings.chooseClose('continue');
+  assert.equal(h.settings.isOpen, true);
+  assert.equal(h.settings.snapshot.dirtyCount, 1);
+
+  await h.wrapper.get('[data-telegram-setup]').trigger('click');
+  await h.settings.chooseClose('discard');
+  await h.flushPromises();
+  assert.deepEqual(h.control.navigations, ['/telegram']);
+  assert.equal(h.settings.isOpen, false);
+  assert.equal(h.writes().length, 0);
+});
+
+test('Telegram: ошибка перехода сохраняет окно настроек', async (t) => {
+  const h = await systemHarness(t, 'connections.telegram', {
+    prepare({ plugins }) {
+      plugins.list = [{ ...structuredClone(telegram), enabled: true }];
+    },
+    navigate: async () => {
+      throw new Error('Переход недоступен');
+    },
+  });
+
+  await h.wrapper.get('[data-telegram-setup]').trigger('click');
+  await h.flushPromises();
+  assert.deepEqual(h.control.navigations, ['/telegram']);
+  assert.equal(h.settings.isOpen, true);
+  assert.equal(h.wrapper.get('[data-telegram-setup]').element.disabled, false);
+  assert.match(h.settings.navigationError, /Не удалось открыть/u);
+});
+
+test('Telegram: уже открытый раздел закрывает настройки без повторного перехода', async (t) => {
+  const previousHistory = globalThis.history;
+
+  globalThis.history = browser.history;
+  t.after(() => {
+    globalThis.history = previousHistory;
+  });
+
+  const { createMemoryHistory, createRouter } = await import(
+    '../../web/node_modules/vue-router/dist/vue-router.mjs');
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/telegram', component: { template: '<div />' } }],
+  });
+
+  await router.push('/telegram');
+
+  const h = await systemHarness(t, 'connections.telegram', {
+    prepare({ plugins }) {
+      plugins.list = [{ ...structuredClone(telegram), enabled: true }];
+    },
+    navigate: (target) => router.push(target),
+  });
+
+  await h.wrapper.get('[data-telegram-setup]').trigger('click');
+  await h.flushPromises();
+  assert.equal(h.settings.isOpen, false);
+  assert.deepEqual(h.control.navigations, ['/telegram']);
+});
+
 test('Страница системного плагина: форма без списка магазина, Apply и тумблер', async (t) => {
   const h = await systemHarness(t, 'connections.ssh', {
     prepare({ plugins }) {

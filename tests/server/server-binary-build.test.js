@@ -44,6 +44,7 @@ async function fixture(t, failure) {
     size: 22,
     sha256: 'a'.repeat(64),
   }, {
+    version: '0.1.0',
     launcherSha256: sha256('launcher'),
     engineSha256: 'c'.repeat(64),
     buildInputs: {},

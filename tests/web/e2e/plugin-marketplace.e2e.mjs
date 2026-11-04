@@ -174,17 +174,17 @@ for (const locale of ['ru', 'en']) {
   for (const [width, height] of [[1280, 800], [600, 800], [390, 844]]) {
     test(`CAT-B2-MODULE-INSTALL: ${locale}, ${width}×${height}, warning/code/reopen/reload`, async (t) => {
       const data = JSON.parse(await fs.readFile('tests/web/fixtures/settings-modal/data.json', 'utf8'));
-      const { modern } = moduleCatalogFixture();
+      const modules = moduleCatalogFixture();
       const seed = webInstallJob();
       const starts = [];
       let current = null;
       let applies = 0;
 
-      seed.source = modern.entry.source;
+      seed.source = modules.entry.source;
       seed.target = {
-        version: modern.version.version,
-        tag: modern.version.tag,
-        sha: modern.version.sha,
+        version: modules.version.version,
+        tag: modules.version.tag,
+        sha: modules.version.sha,
       };
       seed.preview.source = seed.source;
       seed.preview.target = seed.target;
@@ -204,8 +204,8 @@ for (const locale of ['ru', 'en']) {
         '/api/settings/prefs': data.prefs,
         '/api/providers': data.providers,
         '/api/plugins': data.plugins,
-        '/api/plugin-catalog': catalogResponse(modern),
-        '/api/plugin-catalog/demo': modern.detail,
+        '/api/plugin-catalog': catalogResponse(modules),
+        '/api/plugin-catalog/demo': modules.detail,
         '/api/plugin-installs/jobs/current': () => ({ job: current, recoveryError: null }),
         '/api/plugin-installs/versions': () => ({ source: seed.source, versions: [seed.target] }),
         '/api/plugin-installs/jobs': (request) => {
@@ -258,10 +258,10 @@ for (const locale of ['ru', 'en']) {
       await page.locator('[data-role="install-warning"]').waitFor();
       assert.equal(await page.locator('[data-role="install-warning"]').textContent(), moduleWarning);
       assert.deepEqual(starts, [{
-        url: modern.entry.source.url,
-        version: modern.version.version,
+        url: modules.entry.source.url,
+        version: modules.version.version,
         expectedId: 'demo',
-        expectedSha: modern.version.sha,
+        expectedSha: modules.version.sha,
       }]);
       assert.equal(applies, 0);
 
@@ -300,7 +300,7 @@ for (const locale of ['ru', 'en']) {
       current.target = {
         version: '1.1.0',
         tag: 'v1.1.0',
-        sha: modern.detail.plugin.versions[1].sha,
+        sha: modules.detail.plugin.versions[1].sha,
       };
       current.preview.target = current.target;
       current.preview.version = current.target.version;

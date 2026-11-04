@@ -24,6 +24,7 @@ interface RegistryRead {
   promise: Promise<void>;
   version: number;
   refresh: boolean;
+  wait: boolean;
   request: number;
 }
 
@@ -31,6 +32,7 @@ interface RegistryLoadOptions {
   cached?: boolean;
   invalidate?: boolean;
   reason?: WebRegistryReason;
+  wait?: boolean;
 }
 
 const registryReads = new WeakMap<object, RegistryRead>();
@@ -234,7 +236,7 @@ export const useProvidersStore = defineStore('providers', {
      * SSE/credentials инвалидируют летящий ответ, а явный refresh сильнее обычного чтения.
      */
     load(refresh = false, {
-      cached = false, invalidate = false, reason = 'other',
+      cached = false, invalidate = false, reason = 'other', wait = false,
     }: RegistryLoadOptions = {}): Promise<void> {
       const key = toRaw(this);
       const previousCount = this.providers.length;
@@ -257,12 +259,13 @@ export const useProvidersStore = defineStore('providers', {
         ...(count === undefined ? {} : { count }),
       });
 
-      if (previous?.version === version && (!refresh || previous.refresh)) {
+      if (previous?.version === version && (!refresh || previous.refresh)
+        && (!wait || previous.wait || previous.refresh)) {
         trace('joined', previous.request);
 
         return previous.promise;
       }
-      if (cached && this.loaded && !refresh && !invalidate) {
+      if (cached && this.loaded && !refresh && !invalidate && !wait) {
         trace('cached', this.registryRequest, previousCount);
 
         return Promise.resolve();
@@ -274,7 +277,8 @@ export const useProvidersStore = defineStore('providers', {
 
       const pending = (async () => {
         try {
-          const reply = await api.get(`/api/providers${refresh ? '?refresh=1' : ''}`);
+          const query = refresh ? '?refresh=1' : wait ? '?wait=1' : '';
+          const reply = await api.get(`/api/providers${query}`);
 
           if (!isRecord(reply) || (reply.providers != null
             && (!Array.isArray(reply.providers) || !reply.providers.every(isProvider)))) {
@@ -338,10 +342,35 @@ export const useProvidersStore = defineStore('providers', {
         promise: pending,
         version,
         refresh,
+        wait,
         request,
       });
 
       return pending;
+    },
+    /**
+     * Отсутствие модели в холодном HTTP-снимке ещё не означает её удаления.
+     * Строгое чтение ждёт общий серверный сбор; инвалидация требует новой проверки.
+     */
+    async ensureModel(selection: ModelSelection): Promise<void> {
+      const current = this.modelOf(selection);
+
+      if (current.provider && current.model) {
+        return;
+      }
+
+      let version;
+      let status;
+
+      do {
+        version = this.registryVersion;
+        await this.load(false, { wait: true });
+        status = await this.whenRegistryReady();
+      } while (version !== this.registryVersion);
+
+      if (!status.ok) {
+        throw new Error(status.message || t('settings.providerRegistryFailure'));
+      }
     },
     /**
      * Координатор настроек ждёт актуальное чтение реестра после записи ключа.

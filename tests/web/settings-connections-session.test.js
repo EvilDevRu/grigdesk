@@ -38,11 +38,6 @@ test('Подключения и система в общей сессии', asyn
   globalThis.__connectionsAnswer = false;
 
   const originalFetch = globalThis.fetch;
-  const b24 = {
-    configured: true,
-    baseUrl: 'https://portal.test/custom',
-    login: 'before',
-  };
 
   globalThis.fetch = async (url, options = {}) => {
     const method = options.method ?? 'GET';
@@ -54,14 +49,6 @@ test('Подключения и система в общей сессии', asyn
       body,
     });
 
-    if (String(url) === '/api/settings/b24') {
-      return new Response(JSON.stringify(method === 'POST'
-        ? {
-          ...b24,
-          login: body.login,
-          baseUrl: body.baseUrl,
-        } : b24));
-    }
     if (String(url) === '/api/chat/active') {
       return new Response(JSON.stringify({ active: [{}, {}] }));
     }
@@ -132,7 +119,7 @@ test('Подключения и система в общей сессии', asyn
     throw new Error('Неизвестный API фикстуры подключений');
   };
   settings.setAuthenticated(true);
-  settings.requestOpen({ pageId: 'connections.b24' });
+  settings.requestOpen({ pageId: 'connections.mobile' });
 
   const page = mount(module.ConnectionsPage, { props: { active: true }, global: { plugins: [pinia] } });
 
@@ -145,29 +132,6 @@ test('Подключения и система в общей сессии', asyn
   });
   await flushPromises();
 
-  await t.test('CN01/01b/02: пароль обязателен, прежний baseUrl остаётся в полном POST', async () => {
-    assertSettingsFields(page.element, module.SETTINGS_FIELDS, 'connections.b24');
-    await page.find('input[aria-label="Логин Б24"]').setValue('after');
-
-    const checking = page.findAll('button').find((item) => item.text() === 'Проверить подключение');
-
-    assert.equal(checking.element.disabled, true);
-    await settings.apply('ok');
-    assert.equal(calls.filter((call) => call.method === 'POST').length, 0);
-    assert.equal(settings.isOpen, true);
-    assert.equal(page.find('input[type="password"]').element.value, '');
-    await page.find('input[type="password"]').setValue('synthetic-b24-password');
-    assert.equal(JSON.stringify(settings.$state).includes('synthetic-b24-password'), false);
-    await settings.apply();
-
-    assert.deepEqual(calls.find((call) => call.method === 'POST').body, {
-      baseUrl: 'https://portal.test/custom',
-      login: 'after',
-      password: 'synthetic-b24-password',
-    });
-    assert.equal(settings.getValue('b24', 'password'), undefined);
-  });
-
   await t.test('SY01/02: автозапуск — черновик, режим приложения сохраняет правильную причину', async () => {
     page.unmount();
     settings.selectPage('system.startup');
@@ -178,7 +142,7 @@ test('Подключения и система в общей сессии', asyn
       await flushPromises();
       assertSettingsFields(startup.element, module.SETTINGS_FIELDS, 'system.startup');
       assert.match(startup.text(), /Под управлением приложения/);
-      await startup.find('[role="switch"]').setValue(true);
+      await startup.find('[data-startup-scope="server"] [role="switch"]').setValue(true);
       assert.equal(calls.filter((call) => call.method === 'PUT').length, 0);
       await settings.apply();
       assert.equal(calls.filter((call) => call.method === 'PUT').length, 1);

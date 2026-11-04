@@ -44,7 +44,7 @@ async function migrationAnalyzer(t, { initial = {}, legacy = 'sonnet' } = {}) {
       analysisConcurrency: 1,
     },
     claudeAuth: null,
-    b24: {
+    tracker: {
       async taskDetail() { return { title: 'Задача', description: '' }; },
       async taskPageData() { return { comments: [] }; },
     },

@@ -1,16 +1,16 @@
 # Плагины GrigDesk
 
 Плагин = отключаемый блок: ссылка в одной из групп навигации, строка каталога
-и панель подробностей в «Настройки → Плагины», свои API/настройки. `nav.group` принимает `rail`, `tools` или
+и панель подробностей в «Настройки → Плагины», свои API/настройки. Проекция `nav.group` из contributes.panels принимает `rail`, `tools` или
 `dock`, отсутствующее/невалидное значение нормализуется в `rail`; `nav.order` задаёт
 порядок внутри группы. При разнесённом rollout новый web восстанавливает group/order
 старых серверных manifest только для известных встроенных `system: true` плагинов;
-пользовательский legacy-manifest остаётся в `rail`. Реестр: `server/src/lib/pluginsRegistry.ts` (SYSTEM =
+несовместимый пользовательский пакет остаётся без навигации. Реестр: `server/src/lib/pluginsRegistry.ts` (SYSTEM =
 video, code, analysis, shelf, inbox, telegram, github, ssh, db, docker, showcase, studio3d) + скан
-пользовательских `plugins/<id>/plugin.json` (опционально один из `server.js` / `server.ts`).
-Роуты заперты в префиксе `/api/ext/<id>/` механикой Fastify; контракт версионирован полем `api` (1 или 2).
-Регистрация идёт на старте: загруженный пользовательский плагин выключается и включается сразу,
-первое включение dormant требует рестарта. Функции ядра, hooks и проверка настроек —
+пользовательских `plugins/<id>/plugin.json` (сервер объявлен в entrypoints.server).
+Роуты заперты в префиксе `/api/ext/<id>/` механикой Fastify; контракт версионирован полем `api: 1`.
+Пользовательский плагин выключается и включается сразу, включая первое включение dormant;
+обновление и откат заменяют [собственный router и поколения ESM](plugin-hot-runtime.md) без рестарта. Функции ядра, hooks и проверка настроек —
 [серверный набор](server-core-api.md).
 Состояние — prefs (`plugins`, `pluginSettings`). Модуль `modules/plugins/` декорирует
 `fastify.pluginEnabled(id)` / `fastify.pluginSettings(id)` — регистрируется ДО модулей-плагинов;
@@ -26,8 +26,7 @@ server-owned сессии и ожидания без рестарта. Полн�
 Telegram и GitHub системные, но выключены: их страницы просят provider credentials и не
 должны появляться сами у каждой установки.
 
-Для api1 серверный manifest отвечает за размещение ссылки, а пользовательская страница
-открывается в iframe. Api2 допускает доверенный готовый модуль через `webModule` и общие
+Панель объявляется в contributes.panels и entrypoints.web, использует общие
 фасады Vue/UI: [модульные панели](plugin-ui-modules.md). Фронт: `stores/plugins.ts`, VideoView,
 InboxView, TelegramView, GitHubView и `ToolHost` для Code/Shelf показывают заглушку при выключенном плагине
 (по `plugins.loaded && !plugins.enabled(id)`, а `404 plugin_disabled` от сервера в этом
@@ -42,7 +41,7 @@ InboxView, TelegramView, GitHubView и `ToolHost` для Code/Shelf показы
 подготовка остаются явными операциями. Все controls и подтверждения приходят из ui.ts.
 
 **Категория (`category` манифеста) режет каталог по РОДУ РАБОТЫ, а не по месту в
-интерфейсе**: место объявляет `nav.group` и отвечает на другой вопрос. Список категорий
+интерфейсе**: место объявляет contributes.panels.group и отвечает на другой вопрос. Список категорий
 общий для сервера и веба — `shared/plugins/pluginsContracts.ts`: `work` («Задачи и связь»), `dev`
 («Разработка»), `knowledge` («Показ работы») и `other` («Прочее»). Неизвестное или
 пустое значение нормализуется в `other` — чужой плагин не заводит на экране свою группу;

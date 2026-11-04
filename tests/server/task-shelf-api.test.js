@@ -65,7 +65,7 @@ async function fixture(t, { enabled = true, identityError = null } = {}) {
     },
   };
   const store = new storeModule.TaskShelfStore({ filePath });
-  const shelf = new serviceModule.TaskShelfService({ store, b24 });
+  const shelf = new serviceModule.TaskShelfService({ store, tracker: b24 });
   const app = Fastify({ logger: false });
   app.decorate('pluginEnabled', (id) => id === 'shelf' && pluginEnabled);
   app.decorate('sse', { broadcast: (event) => events.push(event) });
@@ -85,7 +85,7 @@ test('GET выводит opaque scope из текущей B24-сессии и з
   const { app } = await fixture(t);
   const response = await app.inject({
     method: 'GET',
-    url: '/api/b24/task-shelf?scope=attacker',
+    url: '/api/tracker/task-shelf?scope=attacker',
   });
 
   assert.deepEqual({
@@ -109,12 +109,12 @@ test('PUT и DELETE всегда возвращают полный снимок 
   const { app } = await fixture(t);
   const added = await app.inject({
     method: 'PUT',
-    url: '/api/b24/task-shelf/0042',
+    url: '/api/tracker/task-shelf/0042',
     payload: payload(),
   });
   const removed = await app.inject({
     method: 'DELETE',
-    url: '/api/b24/task-shelf/42',
+    url: '/api/tracker/task-shelf/42',
   });
 
   assert.deepEqual({
@@ -138,7 +138,7 @@ test('Полка принимает фактическое состояние do
   const { app } = await fixture(t);
   const done = await app.inject({
     method: 'PUT',
-    url: '/api/b24/task-shelf/42',
+    url: '/api/tracker/task-shelf/42',
     payload: payload({
       snapshot: {
         analysis: {
@@ -167,7 +167,7 @@ test('Клиент не может выбрать чужой scope через qu
   const { app } = await fixture(t);
   const response = await app.inject({
     method: 'PUT',
-    url: '/api/b24/task-shelf/9?scope=attacker',
+    url: '/api/tracker/task-shelf/9?scope=attacker',
     payload: { ...payload(), scope: 'attacker', revision: 900, addedAt: '2000-01-01' },
   });
 
@@ -186,13 +186,15 @@ test('Смена портала или пользователя переключ
   const { app, setIdentity } = await fixture(t);
   const first = await app.inject({
     method: 'PUT',
-    url: '/api/b24/task-shelf/11',
+    url: '/api/tracker/task-shelf/11',
     payload: payload(),
   });
   setIdentity({ baseUrl: 'https://other.example.test/', userId: 77 });
-  const other = await app.inject({ method: 'GET', url: '/api/b24/task-shelf' });
+
+  const other = await app.inject({ method: 'GET', url: '/api/tracker/task-shelf' });
   setIdentity({ baseUrl: 'https://portal.example.test/', userId: 77 });
-  const restored = await app.inject({ method: 'GET', url: '/api/b24/task-shelf' });
+
+  const restored = await app.inject({ method: 'GET', url: '/api/tracker/task-shelf' });
 
   assert.deepEqual({
     scopesDiffer: first.json().scope !== other.json().scope,
@@ -207,11 +209,18 @@ test('Смена портала или пользователя переключ
 
 test('Выключение плагина закрывает API, но не удаляет сохранённые записи', async (t) => {
   const { app, setEnabled } = await fixture(t);
-  await app.inject({ method: 'PUT', url: '/api/b24/task-shelf/42', payload: payload() });
+
+  await app.inject({
+    method: 'PUT',
+    url: '/api/tracker/task-shelf/42',
+    payload: payload(),
+  });
   setEnabled(false);
-  const disabled = await app.inject({ method: 'GET', url: '/api/b24/task-shelf' });
+
+  const disabled = await app.inject({ method: 'GET', url: '/api/tracker/task-shelf' });
   setEnabled(true);
-  const restored = await app.inject({ method: 'GET', url: '/api/b24/task-shelf' });
+
+  const restored = await app.inject({ method: 'GET', url: '/api/tracker/task-shelf' });
 
   assert.deepEqual({
     disabledStatus: disabled.statusCode,
@@ -228,10 +237,10 @@ test('Невалидный body получает именованный отка
   const { app } = await fixture(t);
   const invalid = await app.inject({
     method: 'PUT',
-    url: '/api/b24/task-shelf/42',
+    url: '/api/tracker/task-shelf/42',
     payload: { title: 'Без снимка' },
   });
-  const current = await app.inject({ method: 'GET', url: '/api/b24/task-shelf' });
+  const current = await app.inject({ method: 'GET', url: '/api/tracker/task-shelf' });
 
   assert.deepEqual({
     statusCode: invalid.statusCode,
@@ -249,7 +258,7 @@ test('Невалидный body получает именованный отка
 test('Недоступная B24 identity получает безопасный именованный отказ', async (t) => {
   const secret = 'private identity failure';
   const { app } = await fixture(t, { identityError: new Error(secret) });
-  const response = await app.inject({ method: 'GET', url: '/api/b24/task-shelf' });
+  const response = await app.inject({ method: 'GET', url: '/api/tracker/task-shelf' });
 
   assert.deepEqual({
     statusCode: response.statusCode,
@@ -266,7 +275,8 @@ test('Повреждённое хранилище получает task_shelf_un
   const { app, filePath } = await fixture(t);
   const corrupt = '{"schemaVersion":1';
   await writeFile(filePath, corrupt, { mode: 0o600 });
-  const response = await app.inject({ method: 'GET', url: '/api/b24/task-shelf' });
+
+  const response = await app.inject({ method: 'GET', url: '/api/tracker/task-shelf' });
 
   assert.deepEqual({
     statusCode: response.statusCode,
@@ -281,21 +291,36 @@ test('Повреждённое хранилище получает task_shelf_un
 
 test('SSE-инвалидация уходит только после изменения revision', async (t) => {
   const { app, events } = await fixture(t);
-  await app.inject({ method: 'PUT', url: '/api/b24/task-shelf/42', payload: payload() });
-  await app.inject({ method: 'PUT', url: '/api/b24/task-shelf/42', payload: payload() });
-  await app.inject({ method: 'DELETE', url: '/api/b24/task-shelf/777' });
-  await app.inject({ method: 'DELETE', url: '/api/b24/task-shelf/42' });
+
+  await app.inject({
+    method: 'PUT',
+    url: '/api/tracker/task-shelf/42',
+    payload: payload(),
+  });
+  await app.inject({
+    method: 'PUT',
+    url: '/api/tracker/task-shelf/42',
+    payload: payload(),
+  });
+  await app.inject({ method: 'DELETE', url: '/api/tracker/task-shelf/777' });
+  await app.inject({ method: 'DELETE', url: '/api/tracker/task-shelf/42' });
 
   assert.deepEqual(events, ['task-shelf-changed', 'task-shelf-changed']);
 });
 
 test('Поздний acknowledge после DELETE не воскрешает запись', async (t) => {
   const { app } = await fixture(t);
-  await app.inject({ method: 'PUT', url: '/api/b24/task-shelf/42', payload: payload() });
-  await app.inject({ method: 'DELETE', url: '/api/b24/task-shelf/42' });
+
+  await app.inject({
+    method: 'PUT',
+    url: '/api/tracker/task-shelf/42',
+    payload: payload(),
+  });
+  await app.inject({ method: 'DELETE', url: '/api/tracker/task-shelf/42' });
+
   const response = await app.inject({
     method: 'PUT',
-    url: '/api/b24/task-shelf/42',
+    url: '/api/tracker/task-shelf/42',
     payload: payload({ createIfMissing: false }),
   });
 

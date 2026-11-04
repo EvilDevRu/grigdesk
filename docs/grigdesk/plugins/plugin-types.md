@@ -55,8 +55,8 @@ Runtime template compiler не предоставляется.
 
 ## Границы контракта
 
-- `PluginManifest` — входной plugin.json: API 1 или 2, относительные web/webModule,
-  настройки, навигация, размещения, `install.npm`, `minGrigDeskVersion`. Scanner допускает
+- `PluginManifest` — входной plugin.json: api=1, обязательные description/icon,
+  относительные entrypoints, декларации contributes, gallery, install.npm и engines.grigdesk. Scanner допускает
   пропуск version; `InstallablePluginManifest` требует version для установки.
 - `PluginMetadata` в options.plugin — нормализованный результат: заполненные поля,
   абсолютный каталог сервера и URL ресурсов. HTTP DTO `PluginWebModule` содержит URL
@@ -64,6 +64,10 @@ Runtime template compiler не предоставляется.
 - `PluginServerAsync` и `PluginServerCallback` описывают оба прежних способа регистрации,
   mutable lifecycle, prepareChange и transition. Request augmentation добавляет только
   необязательный `authKind`; прочие декораторы ядра не являются публичными типами.
+- Расширение core описывает проекты, песочницы, lease, чтение исходников,
+  mkdir-lock, канонический digest и model-only вызов с квитанцией. Методы необязательны
+  для проверки возможностей старого сервера; `hostServices` не объявляется. Подробности —
+  [серверные сервисы](plugin-core-runtime.md).
 - Core описан структурными портами: исполнители без credentials, события, очередь,
   kernel lock без выбора бинарника/фабрики ошибок/дескриптора, Range, чтение документов.
   Полного config, классов чтения документов и PrefsStore в пакете нет. Config содержит
@@ -85,10 +89,9 @@ Runtime template compiler не предоставляется.
 ## Совместимость и пример
 
 Папка является снимком версии GrigDesk: её нужно **пересобирать к каждой версии GrigDesk**,
-а автору — обновлять подключённую копию. При VERSION `0.1.0` первая ревизия пакета имеет
-номер `0.1.0-api2.1`; исправления деклараций получают `0.1.0-api2.N`. VERSION приложения
-эта сборка не меняет. Metadata содержит grigDeskVersion. API манифеста и версия пакета
-описывают разные вещи: пакет содержит контракты API 1 и 2.
+а автору — обновлять подключённую копию. Версия пакета равна VERSION приложения,
+metadata также содержит grigDeskVersion. Поколение манифеста api=1 не является
+версией SDK и не выбирает способ панели или доступ к серверным сервисам.
 
 Peer Vue вычисляется из web/package-lock.json как `~<текущая версия>`: допускает patch
 той же minor, исключает следующую minor. После обновления Vue папку также пересобирают.
@@ -104,5 +107,5 @@ Dev-проект с локальным SDK не устанавливается �
 не запускает npm-подготовку. Проверка зависимостей установщика не ослаблена: file:, URL
 архивов и workspace в устанавливаемом плагине остаются запрещены, включая devDependencies.
 
-JS/api1 работает по прежним правилам. Обновление сервера и окон для api2 описано в
+Единственный исполняемый контракт — v1. Обновление сервера и окон описано в
 [модульных панелях](plugin-ui-modules.md), услуги — в [контексте](plugin-module-services.md).

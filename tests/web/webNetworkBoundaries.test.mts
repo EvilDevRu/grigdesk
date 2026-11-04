@@ -31,11 +31,10 @@ async function fixture(oldName: string, newName: string, exported: string) {
     async get(url: string) {
       calls.push({ method: 'GET', url });
 
-      if (url === '/api/settings/b24') {
+      if (url === '/api/trackers') {
         return {
-          configured: true,
-          baseUrl: 'https://portal.example.test',
-          login: 'fixture',
+          externalId: 'fixture',
+          revision: 1,
         };
       }
 
@@ -266,7 +265,7 @@ test('NET-b24', async () => {
   server.reply = { tasks: [] };
   await store.load(true);
   assert.equal(baselineCalls, 1);
-  assert.equal(calls.filter((call) => call.url === '/api/settings/b24').length, 2);
+  assert.equal(calls.filter((call) => call.url === '/api/trackers').length, 2);
 
   const previous = store.data;
 
@@ -275,8 +274,8 @@ test('NET-b24', async () => {
   assert.equal(store.data, previous, 'неверная доска не назначается');
   assert.equal(baselineCalls, 1);
   assert.ok(store.error);
-  assert.equal(calls.filter((call) => call.url === '/api/b24/dashboard').length, 2);
-  assert.equal(calls.filter((call) => call.url === '/api/settings/b24').length, 5);
+  assert.equal(calls.filter((call) => call.url === '/api/tracker/dashboard').length, 2);
+  assert.equal(calls.filter((call) => call.url === '/api/trackers').length, 5);
 });
 
 test('NET-b24-task', async () => {
@@ -290,7 +289,7 @@ test('NET-b24-task', async () => {
   server.reply = { id: '42', title: [] };
   await Promise.resolve(store.load('42', true)).catch(() => {});
   assert.equal(store.details['42'], previous, 'неверный title не кешируется');
-  assert.equal(calls.filter((call) => call.url.startsWith('/api/b24/task/')).length, 2);
+  assert.equal(calls.filter((call) => call.url.startsWith('/api/tracker/task/')).length, 2);
 });
 
 test('NET-chat', async () => {

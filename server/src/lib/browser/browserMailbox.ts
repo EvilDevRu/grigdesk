@@ -6,6 +6,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { parseBrowserAction } from '../../../../shared/browser/browserActions.ts';
 
+export const BROWSER_READY_LEASE_MS = 2000;
+
 export interface MailboxContext {
   stateDir: string;
   task: string;
@@ -285,26 +287,47 @@ export async function writeBrowserReady(context: MailboxContext, mode: 'legacy' 
 ) {
   const directory = await directoryFor(context);
 
-  await publish(path.join(directory, 'host.ready'), seal(context, { mode, evidenceRoot }, 'ready'));
+  await publish(path.join(directory, 'host.ready'), seal(context, {
+    mode,
+    evidenceRoot,
+    validUntil: Date.now() + BROWSER_READY_LEASE_MS,
+  }, 'ready'));
 }
 
 /**
  * Provider bridge читает только подтверждённый режим своего запуска после barrier.
- * Отсутствие или подмена readiness не разрешает переход к отдельному браузеру.
+ * Lease проверяется через mailbox: host PID может быть невидим в namespace клиента.
  */
 export async function readBrowserReadyDetails(context: MailboxContext): Promise<{
   mode: 'legacy' | 'grigdesk';
   evidenceRoot: string | null;
 }> {
-  const directory = await directoryFor(context);
-  const envelope = await readJson(path.join(directory, 'host.ready'), 4096);
+  let envelope: Record<string, unknown>;
+
+  try {
+    const directory = await directoryFor(context);
+
+    envelope = await readJson(path.join(directory, 'host.ready'), 4096);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error('browser_transport_dead');
+    }
+
+    throw error;
+  }
+
   const value = unseal(context, envelope, 'ready');
 
-  if (Object.keys(value).sort().join(',') !== 'evidenceRoot,mode'
+  if (Object.keys(value).sort().join(',') !== 'evidenceRoot,mode,validUntil'
     || !['legacy', 'grigdesk'].includes(String(value.mode))
+    || !Number.isSafeInteger(value.validUntil) || Number(value.validUntil) <= 0
     || value.evidenceRoot !== null && (typeof value.evidenceRoot !== 'string'
       || !path.isAbsolute(value.evidenceRoot) || /[\r\n\0]/u.test(value.evidenceRoot))) {
     throw new Error('browser_ready_invalid');
+  }
+
+  if (value.mode === 'grigdesk' && Number(value.validUntil) <= Date.now()) {
+    throw new Error('browser_transport_dead');
   }
 
   return { mode: value.mode as 'legacy' | 'grigdesk', evidenceRoot: value.evidenceRoot as string | null };

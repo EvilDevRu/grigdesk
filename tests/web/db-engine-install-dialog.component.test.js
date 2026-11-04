@@ -153,7 +153,11 @@ test('DWIZ-01: ready/reopen сохраняет предупреждение де
 
 for (const status of ['running', 'applying', 'done', 'failed', 'recovery_required']) {
   test(`DWIZ-01: ${status} показывает driver job, done требует ручной restart`, async (t) => {
-    const { wrapper, calls } = await mountDriver(t, { job: webInstallJob(status) });
+    const { wrapper, state, calls } = await mountDriver(t);
+
+    state.job = webInstallJob(status);
+
+    await nextTick();
 
     assert.equal(calls.filter(([method]) => method === 'loadJob').length, 1);
 
@@ -254,7 +258,11 @@ test('DWIZ-02: update остаётся preview до отдельного При�
 });
 
 test('DWIZ-01: результат драйвера просит ручной restart на русском и английском', async (t) => {
-  const { wrapper } = await mountDriver(t, { job: webInstallJob('done') }, 'dialog-harness');
+  const { wrapper, state } = await mountDriver(t, {}, 'dialog-harness');
+
+  state.job = webInstallJob('done');
+
+  await nextTick();
 
   const setLocale = wrapper.vm.setUiLocale;
 
@@ -269,4 +277,14 @@ test('DWIZ-01: результат драйвера просит ручной res
   assert.match(wrapper.text(), /restart/iu);
 
   assert.doesNotMatch(wrapper.text(), /перезапус/iu);
+});
+
+
+test('Новая установка драйвера БД не восстанавливает прошлый итог', async (t) => {
+  const { wrapper, state, plugin } = await mountDriver(t, { job: webInstallJob('done') });
+
+  assert.equal(wrapper.get('[data-role="plugin-install-dialog"]').attributes('data-view'), 'source');
+  assert.equal(wrapper.get('[data-role="install-url"]').element.value, '');
+  assert.equal(state.job, null);
+  assert.equal(plugin.calls.length, 0);
 });

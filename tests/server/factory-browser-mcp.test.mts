@@ -229,3 +229,18 @@ test('BR-M09: missing/invalid/legacy ready возвращает unavailable до
     assert.equal(JSON.stringify(result).includes(NONCE), false);
   }
 });
+
+test('BR-M10: смерть relay сохраняет отдельный код и не отправляет mailbox request', async () => {
+  const server = createFactoryBrowserMcp(environment(), {
+    ready: async () => {
+      throw new Error('browser_transport_dead');
+    },
+    request: async () => {
+      assert.fail('транспорт уже умер, запрос не должен публиковаться');
+    },
+  });
+  const result = await server.invoke({ action: 'list' });
+
+  assert.equal(result.structuredContent.error, 'browser_transport_dead');
+  assert.equal(result.isError, true);
+});

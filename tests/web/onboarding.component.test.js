@@ -142,9 +142,13 @@ test('ONB-AI-01: статусы, общий installer, login без Enter и н�
   await page.getByText('Claude', { exact: true }).last().waitFor();
   await page.getByText(/не установлен/i).first().waitFor();
   await page.getByText(/нет входа|не выполнен вход/i).first().waitFor();
-  await page.getByText('Готов к работе', { exact: true }).waitFor();
-  assert.equal(await page.getByText('Готов к работе', { exact: true }).count(), 1,
-    'setup-only не объявлен готовым для чатов');
+
+  const available = page.locator('.provider-status span:last-child')
+    .filter({ hasText: /^Доступен$/u });
+
+  await available.first().waitFor();
+  assert.equal(await available.count(), 2,
+    'Доступность сервиса не равна допуску чата');
   await page.getByRole('button', { name: /установить.*Claude|установить/i }).last().click();
 
   const confirmation = page.getByRole('dialog').filter({
@@ -217,7 +221,7 @@ test('ONB-AI-01: статусы, общий installer, login без Enter и н�
 test('ONB-SKIP-01: предупреждение и подтверждённый пропуск восстанавливаются', async (t) => {
   const f = await aiPage(t, { providers: [] });
 
-  await f.page.getByText(/без ИИ конвейер работать не будет/i).waitFor();
+  await f.page.getByText(/Нужен хотя бы один доступный исполнитель с поддержкой чата/u).waitFor();
   await f.page.getByRole('button', { name: names.skip }).click();
 
   const state = await waitState(f, (value) => value.active.step === 'project');
@@ -368,8 +372,8 @@ for (const locale of ['ru', 'en']) {
   });
 }
 
-for (const step of ['ai', 'project', 'workspace', 'summary']) {
-  test(`ONB-DISMISS-UI: ${step} ждёт ACK и открывает обычное место настройки`, async (t) => {
+for (const step of ['ai', 'project', 'workspace']) {
+  test(`ONB-DISMISS-UI: ${step} ждёт ACK и оставляет исходный раздел`, async (t) => {
     requireWizard();
 
     const f = await wizardBrowser(t);
@@ -379,14 +383,11 @@ for (const step of ['ai', 'project', 'workspace', 'summary']) {
     } else if (step === 'project') {
       await atProject(f, 'manual');
     } else {
-      const state = await atWorkspace(f, 'manual');
-
-      if (step === 'summary') {
-        await request(f.app, 'POST', '/advance', token(state));
-      }
+      await atWorkspace(f, 'manual');
     }
 
     const page = await f.newPage({ route: '#/onboarding' });
+    const initialUrl = page.url();
     let release;
     const gate = new Promise((resolve) => {
     release = resolve;
@@ -407,16 +408,10 @@ for (const step of ['ai', 'project', 'workspace', 'summary']) {
       release();
     }
 
-    await page.waitForURL(/#\/projects/);
+    await page.locator('[data-role="onboarding-modal"]').waitFor({ state: 'hidden' });
     assert.equal((await request(f.app)).autoOpenDisabled, true);
-
-    if (step === 'ai') {
-      const settings = page.locator('[data-role="settings-modal"]');
-
-      await settings.waitFor();
-      await settings.locator('[data-page="agents.providers"]').waitFor();
-      await settings.getByRole('heading', { name: /исполнител|provider/i }).waitFor();
-    }
+    assert.equal(page.url(), initialUrl);
+    assert.equal(await page.locator('[data-role="settings-modal"]').count(), 0);
   });
 }
 
