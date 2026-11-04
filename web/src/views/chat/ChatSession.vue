@@ -246,7 +246,7 @@
         data-context="chat-header-context"
         size="line"
         :value="ctxMeterValue"
-        :tone="ctxMeterTone"
+        :style="{ '--chat-context-color': providerInfo?.color }"
         :indeterminate="sess.compacting"
         :label="ctxTooltip.title"
         :value-text="ctxTitle"
