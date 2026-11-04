@@ -245,3 +245,26 @@ for (const [props, color] of [
     }
   });
 }
+
+for (const attrs of [{}, { 'data-ui-workspace': '' }, { 'data-ui-touch': '' }]) {
+  test(`ACTION-SURFACE: кнопки и ссылки используют поверхность действий ${JSON.stringify(attrs)}`, (t) => {
+    const wrapper = fixture(t, () => h('section', attrs, [
+      h(ui.UiButton, {}, () => 'Обычная кнопка'),
+      h(ui.UiButton, { disabled: true }, () => 'Недоступная кнопка'),
+      h(ui.UiActionLink, { href: '#stand' }, () => 'Фронт :5182'),
+      h(ui.UiIconButton, { label: 'Открыть', variant: 'outline' }, () => '+'),
+      h(ui.UiButton, { variant: 'ghost' }, () => 'Без заливки'),
+      h(ui.UiButton, { variant: 'solid', tone: 'danger' }, () => 'Остановить'),
+    ]));
+    const controls = [...wrapper.element.querySelectorAll('button, a')];
+
+    assert.equal(controls.length, 6);
+
+    for (const control of controls.slice(0, 4)) {
+      assert.equal(browser.getComputedStyle(control).backgroundColor, '#1c222c');
+    }
+
+    assert.equal(browser.getComputedStyle(controls[4]).backgroundColor, 'transparent');
+    assert.equal(browser.getComputedStyle(controls[5]).backgroundColor, '#f0564c');
+  });
+}
