@@ -364,6 +364,7 @@
                     <!-- Слот плагинов под полосами: кто здесь стоит, решают реестр размещений
                          и настройки плагинов, всплывашка ни одного из них не знает. -->
                     <PluginSlot name="provider.popover.after-bars" :context="{ providerId: p.id }" />
+                    <ProviderUsagePlugins :provider-id="p.id" />
                     <!-- Доплата и прочие ресурсы аккаунта — только на чтение: менять их
                          можно в «Настройках → Исполнители», кнопка на них ведёт ниже. -->
                     <ProviderUsageResources
@@ -528,6 +529,7 @@ import ProviderIcon from '../ProviderIcon.vue';
 import { vSvgPixelSnap } from '../svgPixelSnap.ts';
 import GrigDeskMark from '../GrigDeskMark.vue';
 import ProviderUsageResources from '../../features/providers/ProviderUsageResources.vue';
+import ProviderUsagePlugins from '../../features/providers/ProviderUsagePlugins.vue';
 import PluginSlot from '../../plugins/PluginSlot.vue';
 import { createUsageWatch } from '../../features/providers/usageWatch.ts';
 import AttentionAlerts from '../../features/analysis/AttentionAlerts.vue';
