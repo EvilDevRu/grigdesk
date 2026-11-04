@@ -442,10 +442,8 @@ watch([() => job.value?.outputTail, outputElement, outputOpen], async (current, 
   display: grid;
   place-items: center;
   flex: none;
-  width: 2.375rem;
-  height: 2.375rem;
-  border-radius: 0.5rem;
-  background: color-mix(in srgb, var(--provider-install-brand) 16%, transparent);
+  width: 1.25rem;
+  height: 1.25rem;
   color: var(--provider-install-brand);
 }
 

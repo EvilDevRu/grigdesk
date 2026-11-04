@@ -716,7 +716,7 @@ onBeforeUnmount(() => {
 }
 .install-head-row {
   display: grid;
-  grid-template-columns: 2.5rem minmax(0, 1fr) auto;
+  grid-template-columns: 1.5rem minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.75rem;
   min-height: 2.5rem;
@@ -726,11 +726,11 @@ onBeforeUnmount(() => {
   display: grid;
   place-items: center;
   flex: none;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--accent);
+}
+.install-brand-icon {
+  width: 1.5rem;
+  height: 1.5rem;
 }
 .install-brand-icon svg,
 .install-stage-icon svg {
@@ -844,6 +844,7 @@ onBeforeUnmount(() => {
   width: 2rem;
   height: 2rem;
   border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 .install-stage-icon svg {
   width: 1.125rem;
