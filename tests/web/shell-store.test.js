@@ -174,3 +174,49 @@ test('W11: HTTP401/503 означает отсутствие оболочки и
     assert.equal(calls, 1);
   }
 });
+
+test('разблокировка старого APK перечитывает снимок после ответа ok', async (t) => {
+  const saved = globalThis.fetch;
+  const store = useShellStore(createPinia());
+  const profile = {
+    id: 'fixture',
+    name: 'Фикстура',
+    kind: 'remote',
+    address: 'https://machine.example',
+    status: 'locked',
+  };
+  const locked = {
+    ...state,
+    status: 'locked',
+    profile,
+    profiles: [profile],
+  };
+  const calls = [];
+
+  t.after(() => globalThis.fetch = saved);
+  store.apply(locked);
+  globalThis.fetch = async (url) => {
+    calls.push(url);
+
+    return Response.json(url === '/__shell/unlock' ? { ok: true } : {
+      ...locked,
+      rev: 4,
+      status: 'online',
+    });
+  };
+  await store.unlock();
+  assert.equal(store.status, 'online');
+  assert.equal(store.profile.id, profile.id);
+  assert.equal(store.snapshot.rev, 4);
+  assert.deepEqual(calls, ['/__shell/unlock', '/__shell/state']);
+});
+
+test('подтверждение действия не может заменить снимок обнаруженной оболочки', () => {
+  const store = useShellStore(createPinia());
+
+  store.apply(state);
+  assert.throws(() => store.apply({ ok: true }), /состояние оболочки/);
+  assert.equal(store.snapshot.rev, state.rev);
+  assert.equal(store.status, state.status);
+  assert.equal(store.present, true);
+});

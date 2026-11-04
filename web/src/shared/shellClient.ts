@@ -1,7 +1,19 @@
 import { localeTranslator } from '../../../shared/i18n/catalogs.ts';
 import { uiLocalePort } from './uiLocalePort.ts';
+import { isRecord } from '../../../shared/lib/objects.ts';
 
 import type { ShellState } from '../../../shared/client/clientShell.ts';
+
+/**
+ * Подтверждение действия с ok не является снимком и не может стирать выбранную машину.
+ * Проверка общей формы применяется и к чтению, и к ответам нативных действий.
+ */
+export function isShellState(value: unknown): value is ShellState {
+  return isRecord(value) && typeof value.rev === 'number' && Number.isFinite(value.rev)
+    && typeof value.status === 'string' && Object.hasOwn(value, 'profile')
+    && (value.profile === null || isRecord(value.profile)) && Array.isArray(value.profiles)
+    && Array.isArray(value.capabilities) && typeof value.localAvailable === 'boolean';
+}
 
 /**
  * API оболочки не проходит через журнал прикладного API: строка привязки секретна.
@@ -24,9 +36,9 @@ export async function readShellState(rev?: number, signal?: AbortSignal): Promis
     return null;
   }
 
-  const state = await response.json() as ShellState | null;
+  const state: unknown = await response.json();
 
-  return state && typeof state.rev === 'number' && Number.isFinite(state.rev) ? state : null;
+  return isShellState(state) ? state : null;
 }
 
 /**

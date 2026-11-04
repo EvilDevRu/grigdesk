@@ -3,7 +3,7 @@ import { defineStore } from 'pinia';
 import { API_VERSION } from '../../../shared/client/apiVersion.ts';
 import type { ShellState } from '../../../shared/client/clientShell.ts';
 import { delayWithAbort } from '../../../shared/lib/delay.ts';
-import { readShellState, shellAction } from '../shared/shellClient.ts';
+import { isShellState, readShellState, shellAction } from '../shared/shellClient.ts';
 
 const controllers = new WeakMap<object, AbortController>();
 
@@ -88,6 +88,10 @@ export const useShellStore = defineStore('shell', {
      * everOnline запоминает факт связи до конца документа и переживает временный offline.
      */
     apply(state: ShellState | null) {
+      if (state !== null && !isShellState(state)) {
+        throw new Error('Получено некорректное состояние оболочки');
+      }
+
       if (state && this.snapshot && state.rev < this.snapshot.rev) {
         return;
       }
@@ -127,11 +131,16 @@ export const useShellStore = defineStore('shell', {
     /**
      * Успешная разблокировка возвращает свежий снимок, сразу снимающий блокирующий слой.
      * Ревизия защищает его от запоздалого long-poll со старым состоянием locked.
+     * Прежний Android отвечает только ok: после него снимок читается отдельным GET.
      */
     async unlock() {
-      const state = await shellAction('POST', '/unlock') as ShellState;
+      const state = await shellAction('POST', '/unlock');
 
-      this.apply(state);
+      if (isShellState(state)) {
+        this.apply(state);
+      } else {
+        await this.refresh();
+      }
 
       return state;
     },
