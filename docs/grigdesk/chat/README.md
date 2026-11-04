@@ -16,6 +16,8 @@
 
 - [Режимы Codex: admission, явный выбор чата, native-вопросы и предел проверки](codex-permission-modes.md)
 
+- [Асинхронные вопросы Codex: карточка, ответ через steer и отмена вместе с ходом](codex-async-questions.md)
+
 - [Границы подготовки внешнего CLI и reuse живого процесса](executor-preparation-boundaries.md)
 - [Срок прямого вопроса: callback не наследует таймер enqueue](direct-interaction-lifetime.md)
 
