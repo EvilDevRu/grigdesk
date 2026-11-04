@@ -18,31 +18,42 @@ export function isShellState(value: unknown): value is ShellState {
 /**
  * API оболочки не проходит через журнал прикладного API: строка привязки секретна.
  * Детектор допускает только JSON с числовой ревизией, не SPA-fallback Vite.
+ * Срок включает чтение тела и оставляет запас после штатного long-poll в 25 секунд.
  */
 export async function readShellState(rev?: number, signal?: AbortSignal): Promise<ShellState | null> {
-  const response = await fetch(`/__shell/state${rev === undefined ? '' : `?rev=${rev}`}`, {
-    credentials: 'same-origin',
-    cache: 'no-store',
-    signal,
-  });
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), 35_000);
+  const requestSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
+  const cancelTimeout = () => clearTimeout(timer);
 
-  if (response.status >= 500 || response.status === 429) {
-    throw new Error('Оболочка временно недоступна');
+  requestSignal.addEventListener('abort', cancelTimeout, { once: true });
+
+  try {
+    const response = await fetch(`/__shell/state${rev === undefined ? '' : `?rev=${rev}`}`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      signal: requestSignal,
+    });
+
+    if (response.status >= 500 || response.status === 429) {
+      throw new Error('Оболочка временно недоступна');
+    }
+
+    if (!response.ok) {
+      return null;
+    }
+
+    if (!response.headers.get('content-type')?.includes('application/json')) {
+      return null;
+    }
+
+    const state: unknown = await response.json();
+
+    return isShellState(state) ? state : null;
+  } finally {
+    clearTimeout(timer);
+    requestSignal.removeEventListener('abort', cancelTimeout);
   }
-
-  if (!response.ok) {
-    return null;
-  }
-
-
-
-  if (!response.headers.get('content-type')?.includes('application/json')) {
-    return null;
-  }
-
-  const state: unknown = await response.json();
-
-  return isShellState(state) ? state : null;
 }
 
 /**

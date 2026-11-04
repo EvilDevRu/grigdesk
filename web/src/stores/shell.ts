@@ -135,6 +135,10 @@ export const useShellStore = defineStore('shell', {
     async refresh() {
       this.apply(await readShellState());
     },
+    /**
+     * Закрытие документа отменяет запрос и ожидание повтора через общий signal.
+     * Старая цепочка не может снять таймер уже запущенного нового обнаружения.
+     */
     stop() {
       controllers.get(this)?.abort();
       controllers.delete(this);

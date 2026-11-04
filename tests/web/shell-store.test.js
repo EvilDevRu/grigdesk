@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { createPinia, setActivePinia } from '../../web/node_modules/pinia/dist/pinia.mjs';
 import { useShellStore } from '../../web/src/stores/shell.ts';
+import { readShellState } from '../../web/src/shared/shellClient.ts';
 
 const state = {
   rev: 3,
@@ -322,4 +323,124 @@ test('подтверждение действия не может заменит
   assert.equal(store.snapshot.rev, state.rev);
   assert.equal(store.status, state.status);
   assert.equal(store.present, true);
+});
+
+test('зависший опрос оболочки отменяется и получает актуальную блокировку', async (t) => {
+  for (const phase of ['headers', 'body']) {
+    await t.test(phase, async (t) => {
+      const saved = globalThis.fetch;
+      const store = useShellStore(createPinia());
+      let calls = 0;
+      let stalledSignal;
+
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      t.after(() => {
+        store.stop();
+        globalThis.fetch = saved;
+      });
+      globalThis.fetch = async (_url, options) => {
+        calls += 1;
+
+        if (calls === 1) {
+          return Response.json({ ...state, status: 'online' });
+        }
+        if (calls === 2) {
+          stalledSignal = options.signal;
+
+          const stalled = new Promise((_resolve, reject) => {
+            stalledSignal.addEventListener('abort', () => reject(stalledSignal.reason), { once: true });
+          });
+
+          return phase === 'headers' ? stalled : {
+            ok: true,
+            status: 200,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: () => stalled,
+          };
+        }
+        if (calls === 3) {
+          return Response.json({
+            ...state,
+            rev: 4,
+            status: 'locked',
+          });
+        }
+
+        return new Promise(() => {});
+      };
+
+      await store.start();
+      await new Promise((resolve) => setImmediate(resolve));
+      t.mock.timers.tick(34_999);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(stalledSignal.aborted, false);
+      assert.equal(calls, 2);
+      t.mock.timers.tick(1);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(stalledSignal.aborted, true, 'Зависшее чтение должно иметь конечный срок');
+      assert.equal(store.present, true);
+      assert.equal(store.status, 'online');
+      assert.equal(store.unavailable, true);
+      t.mock.timers.tick(1000);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(calls, 4, 'После таймаута продолжается одна цепочка long-poll');
+      assert.equal(store.status, 'locked');
+      assert.equal(store.unavailable, false);
+    });
+  }
+});
+
+test('штатный long-poll успевает ответить, завершённое чтение освобождает таймер', async (t) => {
+  const saved = globalThis.fetch;
+  let signal;
+
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.after(() => globalThis.fetch = saved);
+  globalThis.fetch = (_url, options) => {
+    signal = options.signal;
+
+    return new Promise((resolve) => setTimeout(() => resolve(Response.json(state)), 25_000));
+  };
+
+  const reading = readShellState(state.rev);
+
+  t.mock.timers.tick(25_000);
+  assert.deepEqual(await reading, state);
+  t.mock.timers.tick(10_000);
+  assert.equal(signal.aborted, false, 'Таймер завершённого чтения больше не срабатывает');
+});
+
+test('закрытие документа отменяет зависший опрос до срока и не запускает повтор', async (t) => {
+  const saved = globalThis.fetch;
+  const store = useShellStore(createPinia());
+  let calls = 0;
+  let signal;
+
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.after(() => {
+    store.stop();
+    globalThis.fetch = saved;
+  });
+  globalThis.fetch = async (_url, options) => {
+    calls += 1;
+
+    if (calls === 1) {
+      return Response.json(state);
+    }
+
+    signal = options.signal;
+
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+  };
+
+  await store.start();
+  store.stop();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(signal.aborted, true);
+  t.mock.timers.tick(60_000);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 2);
+  assert.equal(store.unavailable, false);
 });
