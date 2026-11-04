@@ -20,6 +20,7 @@ import { assertGlmGenerationAdmission, describeGlmGenerationAsync } from '../glm
 import { readGlmCatalog } from '../glm/catalog.ts';
 import { glmMcpStatus } from '../glm/mcp.ts';
 import { runGlmTurn } from '../glm/runtime.ts';
+import { runGlmModelOnly } from '../glm/modelOnly.ts';
 import { glmUsage } from '../glm/usage.ts';
 import { prepareGlmRuntime, preparedGlmRuntime } from '../glm/preparedRuntime.ts';
 import type { PreparedExecutorRuntime } from '../executorSettings/types.ts';
@@ -112,6 +113,8 @@ export function createGlmAdapter(deps: GlmAdapterDeps) {
     // Ввод в активный ход — как у DeepSeek на той же сборке DSH: steer встаёт в следующий шаг
     // того же хода, а хук приёма запроса снова отмечает этот ход, и политика его не обрывает.
     ...(admitted ? {
+      untrustedInput: Object.freeze({ text: true, images: false }),
+      runUntrusted: (input: Parameters<typeof runGlmModelOnly>[0]) => runGlmModelOnly(input, deps),
       run: (input: GlmTurnOptions) => runGlmTurn(input, deps),
       async scopedWorkspace(config: GlmConfig) {
         const runtime = await preparedGlmRuntime(config);
