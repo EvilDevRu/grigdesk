@@ -89,7 +89,7 @@ def component(class_name: str) -> str:
 </template>
 
 <script setup lang="ts">
-// L3 «Янтарь»: исходная G и две цветные плоскости из мастера приложения.
+// L8 «Графит»: исходная G и две цветные плоскости из мастера приложения.
 // Генератор сохраняет геометрию; место использования задаёт только размер.
 {script}
 </script>
@@ -125,7 +125,7 @@ def android_foreground() -> str:
     body = '\n'.join(contours)
 
     return f'''<?xml version="1.0" encoding="utf-8"?>
-<!-- Сгенерировано web/scripts/gen-icons.py из мастера L3 «Янтарь». -->
+<!-- Сгенерировано web/scripts/gen-icons.py из мастера L8 «Графит». -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"

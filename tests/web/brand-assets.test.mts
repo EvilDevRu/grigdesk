@@ -137,7 +137,7 @@ test('GI-04: встроенные favicon и уведомление равны �
     text(`${brand}/grigdesk-favicon-tile.svg`));
 });
 
-test('GI-05: шапка и Android сохраняют полный L3 и исходную G', () => {
+test('GI-05: шапка и Android сохраняют полный L8 и исходную G', () => {
   const master = `${brand}/grigdesk-app-icon.svg`;
   const contours = paths(master);
   const originalG = paths(`${brand}/grigdesk-wordmark.svg`)[0]!.split('M371.83')[0];
@@ -150,7 +150,7 @@ test('GI-05: шапка и Android сохраняют полный L3 и исх�
     assert.match(text(file), /translate\(24 12\)/);
     assert.match(text(file), /translate\(35.264 54.763\) scale\(0.51\)/);
 
-    for (const color of ['#AD5839', '#F5C44C', '#20233B']) {
+    for (const color of ['#9A7DF5', '#292C46', '#FFFFFF']) {
       assert.ok(text(file).includes(`fill="${color}"`));
     }
   }

@@ -1,13 +1,13 @@
 <template>
   <svg class="ui-brand-mark" viewBox="0 0 256 256" aria-hidden="true" focusable="false">
-    <path :d="PART_0" fill="#AD5839" transform="translate(24 12)" />
-    <path :d="PART_1" fill="#F5C44C" />
-    <path :d="PART_2" fill="#20233B" transform="translate(35.264 54.763) scale(0.51)" />
+    <path :d="PART_0" fill="#9A7DF5" transform="translate(24 12)" />
+    <path :d="PART_1" fill="#292C46" />
+    <path :d="PART_2" fill="#FFFFFF" transform="translate(35.264 54.763) scale(0.51)" />
   </svg>
 </template>
 
 <script setup lang="ts">
-// L3 «Янтарь»: исходная G и две цветные плоскости из мастера приложения.
+// L8 «Графит»: исходная G и две цветные плоскости из мастера приложения.
 // Генератор сохраняет геометрию; место использования задаёт только размер.
 const PART_0 = 'M56 12H168L216 60V180L168 228H56Q16 228 16 188V52Q16 12 56 12Z';
 const PART_1 = 'M56 12H168L216 60V180L168 228H56Q16 228 16 188V52Q16 12 56 12Z';
