@@ -1767,6 +1767,51 @@ html[data-ui-touch] .ui-icon-button[data-context='alert-history'] .alert-bell-ba
   font-size: 12px;
 }
 
+/* Телефонная панель оставляет явные подписи и крупные действия вокруг схемы.
+   Геометрия карточки принадлежит разделу, оформление controls — общей библиотеке. */
+@media (max-width: 600px) {
+  .ui-button[data-context='pipeline-phone-controls'] {
+    min-height: 44px;
+    padding-inline: 12px;
+    font-size: 13px;
+  }
+
+  .ui-button[data-context='pipeline-phone-menu'] > .ui-button__content,
+  .ui-button[data-context='pipeline-phone-menu'] .ui-button__label {
+    width: 100%;
+    text-align: left;
+  }
+
+  .ui-action-link[data-context='pipeline-stand-link'] {
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+    padding-inline: 10px;
+  }
+
+  .ui-button[data-role='pipeline-compact-action'],
+  .ui-button[data-role='pipeline-stall-answer-open'] {
+    height: auto;
+    min-height: 44px;
+    padding: 10px;
+    font-size: 13px;
+    line-height: 1.4;
+    white-space: normal;
+  }
+
+  .ui-button[data-role='pipeline-task-id'] {
+    min-height: 44px;
+    font-size: 13px;
+  }
+
+  .ui-button[data-role='pipeline-title'] {
+    min-height: 44px;
+    padding-block: 6px;
+    font-size: 15px;
+    line-height: 1.45;
+  }
+}
+
 .ui-button[data-role='task-compact-action'] {
   height: var(--control-height);
   min-height: var(--control-height);

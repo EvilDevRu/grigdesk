@@ -35,6 +35,7 @@
 ## Ручной сенсорный режим
 
 `data-ui-touch` вручную стоит в [настройках чата телефона](phone-chat-options-content.md),
+в [телефонной панели конвейера](phone-pipeline-controls.md) и её меню,
 `MobileAccess.vue`, `ServerAccessPanel.vue`,
 `PhoneConnectDialog.vue` и `MobilePairingDialog.vue`; `confirmDialog` включает его опцией
 `touchTargets`. Пометка действует и на компьютере с мышью: поля и кнопки этих мест

@@ -1,5 +1,22 @@
 <template>
   <div class="pipeline">
+    <PipelinePhoneToolbar
+      :projects="projectOptions"
+      :statuses="statusOptions"
+      :project="activeProject"
+      :status="activeStatus"
+      :compact="compact"
+      :loops-on="loopsOn"
+      :disabled="!loaded || !!error"
+      :bulk-busy="bulkBusy"
+      :bulk-actions="bulkActions"
+      :bulk-counts="bulkCounts"
+      @project="setProject"
+      @status="setStatus"
+      @compact="toggleCompact"
+      @loops="toggleLoops"
+      @bulk="runBulkAction"
+    />
     <div class="toolbar">
       <div class="pipeline-run-controls" role="group" :aria-label="translate('core.pipelineRunControls')">
         <UiPopover
@@ -421,10 +438,11 @@
               стенд
             </span>
             <div class="strip__links">
-              <StandLink size="compact" :href="sandboxUrl(t.graph.fePort, t.graph.serviceHost) || ''">
+              <StandLink size="compact" data-context="pipeline-stand-link"
+                         :href="sandboxUrl(t.graph.fePort, t.graph.serviceHost) || ''">
                 фронт :{{ t.graph.fePort }}
               </StandLink>
-              <StandLink v-if="t.graph.apiPort" size="compact"
+              <StandLink v-if="t.graph.apiPort" size="compact" data-context="pipeline-stand-link"
                          :href="sandboxUrl(t.graph.apiPort, t.graph.serviceHost) || ''">
                 API :{{ t.graph.apiPort }}
               </StandLink>
@@ -1076,6 +1094,7 @@
 import { boardSupportsTimer } from '../shared/trackerCapabilities.ts';
 import StandLink from '../shared/browser/StandLink.vue';
 import PipelineLoading from './PipelineLoading.vue';
+import PipelinePhoneToolbar from './pipeline/PipelinePhoneToolbar.vue';
 
 import DeferredFindings from './pipeline/DeferredFindings.vue';
 import StageExecutorFields from './pipeline/StageExecutorFields.vue';
@@ -3062,6 +3081,16 @@ const bulkActions = [
   },
 ] as const;
 const bulkBusy = ref<BulkAction | null>(null);
+const bulkCounts = computed(() => ({
+  resume: {
+    project: bulkCandidates('resume', 'project').length,
+    all: bulkCandidates('resume', 'all').length,
+  },
+  stop: {
+    project: bulkCandidates('stop', 'project').length,
+    all: bulkCandidates('stop', 'all').length,
+  },
+}));
 
 /**
  * Область команды берётся из вкладки проекта, независимо от фильтра состояния.
@@ -4531,7 +4560,79 @@ function cardState(g: PipelineViewGraph) {
   .runner-attempts { max-height: 200px; }
 }
 @media (max-width: 600px) {
-  .head { flex-wrap: wrap; gap: 6px 8px; }
-  .head .ctitle { order: 10; flex: 1 0 100%; white-space: normal; overflow-wrap: anywhere; }
+  .toolbar {
+    display: none;
+  }
+
+  .card {
+    min-width: 0;
+    padding: 10px 12px 12px;
+  }
+
+  .head {
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-bottom: 8px;
+  }
+
+  .head .ctitle {
+    order: 10;
+    flex: 1 0 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .head .daemon {
+    margin-inline-start: auto;
+  }
+
+  .progress {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+  }
+
+  .pw {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    overflow-wrap: anywhere;
+  }
+
+  .pbar-wrap,
+  .pnum {
+    grid-row: 2;
+  }
+
+  .strip {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 12px;
+  }
+
+  .strip__context {
+    flex: none;
+    overflow-wrap: anywhere;
+  }
+
+  .strip__stand {
+    display: grid;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .strip__links {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .strip__links > * {
+    min-width: 0;
+  }
+
+  .strip__actions {
+    margin-inline-start: 0;
+  }
 }
 </style>
