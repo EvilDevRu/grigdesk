@@ -22,6 +22,7 @@ import { execFile, spawn } from 'node:child_process';
 
 import { createBrowserApi } from './browser/browserApi.ts';
 import { createBrowserApps } from './browser/browserApps.ts';
+import { createBrowserEvents } from './browser/browserEvents.ts';
 import { openExternalBrowser } from './browser/externalBrowser.ts';
 import { createNativeBrowserView, browserChildWindowOptions } from './browser/browserView.ts';
 import { attachBrowserIpc } from './browser/browserIpc.ts';
@@ -39,6 +40,7 @@ import { probeGrigDesk } from '../../shared/runtime/grigDeskReadiness.ts';
 import { desktopUserAgent } from '../../shared/desktop/desktopWindowContract.ts';
 import { createSettingsRequest } from './settingsRequest.ts';
 import { createWindowControls } from './windowControls.ts';
+import { attachMainRendererRecovery } from './mainRendererRecovery.ts';
 import { createDesktopExitController } from './desktopExitController.ts';
 import { createDesktopExitPreference } from './desktopExitPreference.ts';
 import { createSurfaceWindows } from './surfaceWindows.ts';
@@ -765,6 +767,40 @@ async function createMainWindow(origin: string, stored: DesktopSettings): Promis
   const window = new BrowserWindow(options);
 
   mainWindow = window;
+  attachMainRendererRecovery({
+    window,
+    signal: lifetime.signal,
+    origin: () => pipeOrigin,
+    stopping: () => quit.stopping,
+    revealed,
+    invalidate: () => {
+      browserDocumentEpoch += 1;
+      mainDocumentCode = null;
+      browserApi?.documentChanged();
+    },
+    confirm: async (signal) => {
+      const result = await dialog.showMessageBox(window, {
+        type: 'error',
+        title: 'GrigDesk',
+        message: desktopText('desktop.rendererGone'),
+        detail: desktopText('desktop.rendererRecoveryDetail'),
+        buttons: [desktopText('desktop.rendererReload'), desktopText('desktop.rendererKeepWindow')],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        signal,
+      });
+
+      return result.response === 0;
+    },
+    reload: (origin) => loadDocument(window, origin + '/', lifetime.signal),
+    failStartup: () => fatal(new Error(desktopText('desktop.rendererGone'))),
+    log: (diagnostic) => writeLog(`GrigDesk: ${JSON.stringify({
+      ...diagnostic,
+      electron: process.versions.electron,
+      chromium: process.versions.chrome,
+    })}`),
+  });
   window.webContents.on('did-start-navigation', (event) => {
     if (event.isMainFrame && !event.isSameDocument) {
       browserDocumentEpoch += 1;
@@ -1050,22 +1086,11 @@ async function prepare(signal: AbortSignal): Promise<void> {
         zoom: window?.webContents.getZoomFactor() ?? 1,
       };
     },
-    changed: (snapshot) => {
-      const window = mainWindow;
-
-      if (window && !window.isDestroyed() && pipeOrigin
-        && sameOrigin(window.webContents.mainFrame.url, pipeOrigin)) {
-        window.webContents.send('grigdesk:browser:state', snapshot);
-      }
-    },
-    intent: (value) => {
-      const window = mainWindow;
-
-      if (window && !window.isDestroyed() && pipeOrigin
-        && sameOrigin(window.webContents.mainFrame.url, pipeOrigin)) {
-        window.webContents.send('grigdesk:browser:intent', value);
-      }
-    },
+    ...createBrowserEvents({
+      window: () => mainWindow,
+      origin: () => pipeOrigin,
+      stopping: () => quit.stopping,
+    }),
   });
   removeBrowserIpc?.();
   removeBrowserIpc = attachBrowserIpc({
