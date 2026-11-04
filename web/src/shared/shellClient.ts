@@ -26,6 +26,10 @@ export async function readShellState(rev?: number, signal?: AbortSignal): Promis
     signal,
   });
 
+  if (response.status >= 500 || response.status === 429) {
+    throw new Error('Оболочка временно недоступна');
+  }
+
   if (!response.ok) {
     return null;
   }

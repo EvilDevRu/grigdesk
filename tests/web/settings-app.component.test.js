@@ -106,6 +106,7 @@ test('IN01/02/04/06/10/11: App сохраняет основной докуме�
     ready: false,
     authenticated: false,
     watchUnauthorized() {},
+    stopRecovery() {},
     async load() {},
   });
   globalThis.__modalAppCounts = {

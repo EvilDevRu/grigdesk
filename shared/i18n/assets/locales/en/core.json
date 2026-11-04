@@ -1,4 +1,10 @@
 {
+  "connectionRestoring": "Reconnecting",
+  "connectionUpdatesPaused": "Updates paused",
+  "connectionRecoveryHint": "Your chats and drafts stay in place.",
+  "connectionTrying": "Trying to connect…",
+  "connectionConnectNow": "Connect now",
+  "connectionRecoveryFailed": "Could not connect. Please try again.",
   "keyboardLayoutCurrent": "Keyboard layout: {layout}",
   "keyboardLayoutUnavailable": "Keyboard layout unavailable",
   "browserCloseTabsRight": "Close tabs to the right",

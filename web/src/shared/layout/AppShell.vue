@@ -427,6 +427,7 @@
     <!-- Цели Teleport живут столько же, сколько оболочка: выбор машины меняет видимость.
          Удалённая цель остаётся в Teleport и ломает следующий перенос при подключении. -->
     <PhoneStatusBar v-show="hasMachine" />
+    <ConnectionRecovery />
 
     <main class="content" :class="{
             'is-workspace': !hasMachine || route.meta.layout === 'workspace',
@@ -485,6 +486,7 @@ import {
   vTooltip,
 } from '../../ui';
 import { useSse } from '../../composables/useSse.ts';
+import ConnectionRecovery from './ConnectionRecovery.vue';
 import { useTrackersStore } from '../../stores/trackers.ts';
 import { useSystemStore } from '../../stores/system.ts';
 import { useProvidersStore } from '../../stores/providers.ts';

@@ -1,4 +1,10 @@
 {
+  "connectionRestoring": "Восстанавливаем связь",
+  "connectionUpdatesPaused": "Обновления приостановлены",
+  "connectionRecoveryHint": "Чаты и черновики остаются на месте.",
+  "connectionTrying": "Пробуем подключиться…",
+  "connectionConnectNow": "Подключиться сейчас",
+  "connectionRecoveryFailed": "Не удалось подключиться. Попробуйте ещё раз.",
   "keyboardLayoutCurrent": "Раскладка клавиатуры: {layout}",
   "keyboardLayoutUnavailable": "Раскладка клавиатуры недоступна",
   "browserCloseTabsRight": "Закрыть вкладки справа",
