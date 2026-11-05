@@ -45,7 +45,7 @@
 - [Память и контекст разговора](chat-context.md)
 - [DeepSeek и GLM](deepseek.md)
 - [Прогноз лимитов](usage-forecast.md)
-- [Плагины, SSH и базы](plugins.md)
+- [Плагины, удаление несовместимых пакетов, SSH и базы](plugins.md)
 - [Код и Git](code.md)
 - [Докер](docker.md)
 - [Песочницы и стенды](sandboxes.md)

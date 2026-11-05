@@ -123,7 +123,8 @@ export function createApplyFs(roots: ApplyRoots): ApplyFs {
           throw installError('recovery_required');
         }
 
-        const retired = await native.lstatIdentity(path.join(directory, 'retired'), entry.npmDirs);
+        const digestDirs = entry.retired?.payloadDigest ? entry.npmDirs : undefined;
+        const retired = await native.lstatIdentity(path.join(directory, 'retired'), digestDirs);
 
         if (entry.retired ? retired !== null && !matchesIdentity(retired, entry.retired) : retired !== null) {
           throw installError('recovery_required');
@@ -618,8 +619,8 @@ async function requireIdentity(
 }
 
 /**
- * Identity без digest допустима только для целиком сохраняемой ручной копии.
- * Managed snapshot всегда сравнивает весь подготовленный payload.
+ * Identity без digest используется для сохраняемой ручной копии и явного удаления.
+ * Managed snapshot при установке и откате сравнивает весь подготовленный payload.
  */
 function matchesIdentity(actual: DirectoryIdentity | null, expected: DirectoryIdentity): boolean {
   return actual !== null && actual.dev === expected.dev && actual.ino === expected.ino

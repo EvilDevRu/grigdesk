@@ -100,7 +100,7 @@ export function decodeInstallState(raw: unknown, writing = false): PluginInstall
     } else {
       object(raw, ['kind', 'transactionId', 'retired', 'npmDirs']);
       requireValid(entry.kind === 'transaction' && uuid(entry.transactionId));
-      validateIdentity(entry.retired, true, true);
+      validateIdentity(entry.retired, false, true);
       requireValid(Array.isArray(entry.npmDirs)
         && entry.npmDirs.every((value) => normalizePluginPackagePath(value, true) === value));
     }
@@ -128,8 +128,8 @@ export function decodeInstallState(raw: unknown, writing = false): PluginInstall
     requireValid(validPluginId(removal.pluginId) && uuid(removal.transactionId)
       && uuid(removal.previousTransactionId) && removal.transactionId !== removal.previousTransactionId);
     requireValid(state.apply === null && state.prepared === null);
-    validateIdentity(removal.current, true);
-    validateIdentity(removal.previous, true, true);
+    validateIdentity(removal.current, false);
+    validateIdentity(removal.previous, false, true);
 
     for (const paths of [removal.npmDirs, removal.previousNpmDirs]) {
       requireValid(Array.isArray(paths)

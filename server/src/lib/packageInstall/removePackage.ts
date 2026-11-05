@@ -8,6 +8,7 @@ import type { DirectoryIdentity, PackageRemovalIntent, PluginInstallStateStore }
 /**
  * Пакет сначала уходит в собственную transaction-папку, оставаясь восстанавливаемым по identity.
  * Повтор после остановки процесса принимает только исходную либо уже перемещённую копию.
+ * Прежнее намерение с digest сохраняет проверку содержимого, новое требует только dev/ino.
  */
 async function retireDirectory(
   fs: ApplyFs,
@@ -19,8 +20,9 @@ async function retireDirectory(
   await fs.ensureDir(transaction);
 
   const retired = path.join(transaction, 'retired');
-  const current = await fs.lstatIdentity(directory, npmDirs);
-  const parked = await fs.lstatIdentity(retired, npmDirs);
+  const digestDirs = expected.payloadDigest ? npmDirs : undefined;
+  const current = await fs.lstatIdentity(directory, digestDirs);
+  const parked = await fs.lstatIdentity(retired, digestDirs);
 
   if (current && !parked && isDeepStrictEqual(current, expected)) {
     await fs.rename(directory, retired);

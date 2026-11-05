@@ -55,7 +55,7 @@ SSH, просмотр документов, «Код», стенды и песо
 - [Границы установки: публикация, runtime lease и общие значения DTO](plugin-install-module-boundaries.md)
 
 - [Установка из git: версии, проверка пакета, обновление, откат и восстановление](user-plugin-install.md)
-- [Удаление пользовательского пакета: session API, runtime lease и сохранение данных](user-plugin-removal.md)
+- [Удаление пользовательского пакета: несовместимые пакеты, identity recovery и сохранение данных](user-plugin-removal.md)
 
 - [Установка v1: проверка модуля, доверие, обновление и единый каталог](plugin-module-install.md)
 

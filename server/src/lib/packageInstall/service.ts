@@ -597,6 +597,7 @@ export class PluginInstallService {
 
   /**
    * Lease дожидается принятых вызовов до durable намерения и перемещения файлов.
+   * Установочная проверка содержимого здесь не нужна: явное удаление узнаёт каталог по dev/ino.
    * Реквизиты принадлежат runtime и не входят ни в цель удаления, ни в cleanup.
    */
   private async performRemove(id: string): Promise<{ id: string; restartRequired: boolean }> {
@@ -632,8 +633,8 @@ export class PluginInstallService {
 
       lease = await this.runtime.prepareReplace(id, this.closingSignal.signal);
 
-      const current = await fs.lstatIdentity(directory, npmDirs);
-      const previous = await fs.lstatIdentity(path.join(this.workDir, 'previous', id), previousNpmDirs);
+      const current = await fs.lstatIdentity(directory);
+      const previous = await fs.lstatIdentity(path.join(this.workDir, 'previous', id));
 
       if (!current) {
         throw installError('package_not_found');
