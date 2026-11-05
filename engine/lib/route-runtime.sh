@@ -1185,7 +1185,7 @@ sys.stdout.buffer.write(reason.encode("utf-8"))
 _route_v2_run_agent_node() {
   local task=$1 attempt=$2 node=$3 run_key=$4 policy=$5 sequence=$6
   local _r2_context_file _r2_prompt_file active before_signature after_signature
-  local result run_id verdict_b64
+  local result run_id verdict_b64 run_epoch comment_b64
   local guard_before="" guard_after=""
   # rc 75 неоднозначен (нет результата ИЛИ guard поймал нарушение) — ретраить
   # можно только первое, поэтому источник помечается флагом.
@@ -1196,6 +1196,7 @@ _route_v2_run_agent_node() {
   ROUTE_V2_NO_RESULT_CLASS=""
   ROUTE_V2_NO_RESULT_DETAIL=""
   DISPATCH_RESULT_DETAIL=""
+  ROUTE_V2_NODE_COMMENT=""
   ROUTE_V2_NODE_VERDICT_B64=""
   ROUTE_V2_FINAL_RUN_ID=""
   # Флаг отказа сторожа обнуляется на входе, а не только перед самой проверкой: заход,
@@ -1348,7 +1349,8 @@ _route_v2_run_agent_node() {
     ROUTE_V2_NO_RESULT=1
     return 75
   }
-  if ! IFS=$'\t' read -r result run_id verdict_b64 < <(_route_v2_active_result "$active"); then
+  if ! IFS=$'\t' read -r result run_id verdict_b64 run_epoch comment_b64 \
+    < <(_route_v2_active_result "$active" identity); then
     rm -f -- "$_r2_context_file" "$_r2_prompt_file"
     # Незакрытый запуск (STATE=active) — раннер умер, не отчитавшись, например из-за
     # исчерпания лимита у всех провайдеров. Это «результата нет», а не
@@ -1364,6 +1366,9 @@ _route_v2_run_agent_node() {
     return 78
   }
   ROUTE_V2_FINAL_RUN_ID=$run_id
+  if [[ "$comment_b64" != - ]]; then
+    ROUTE_V2_NODE_COMMENT=$(printf '%s' "$comment_b64" | base64 -d) || return 78
+  fi
   [[ "$verdict_b64" != - ]] || verdict_b64=""
   run_state_verdict_validate "$result" "$verdict_b64" || {
     rm -f -- "$_r2_context_file" "$_r2_prompt_file"
@@ -2450,9 +2455,15 @@ route_v2_dispatch_next() {
         return "$rc"
       }
   fi
+  # Skipped без typed verdict всё равно содержит объяснение агента.
+  # Полный текст остаётся в run-state, bounded копия — в immutable событии остановки.
+  local skipped_reason=""
+  if [[ "$executor" == agent && "$outcome" == skipped ]]; then
+    skipped_reason=$(_route_v2_evidence_reason "${ROUTE_V2_NODE_COMMENT:-}")
+  fi
   _route_v2_commit_and_project \
     "$task" "$attempt" "$node" "$outcome" "$hard_rewind_limit" \
-    "$verdict_b64" "$no_progress_limit" 0 "$target_rewind_budget" "" \
+    "$verdict_b64" "$no_progress_limit" 0 "$target_rewind_budget" "$skipped_reason" \
     "$loop_max_rounds" || {
       rc=$?
       runtime_lifecycle_node_visit_finish_v2 \

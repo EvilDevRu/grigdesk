@@ -90,6 +90,8 @@ route_v2_context_for_node() {
 # Фейковый раннер: пишет в журнал то, что заход увидел бы в промпте (режим веера, номер
 # захода, причина и класс повтора), молчит SILENT_LEFT раз на узле PREPARE и оставляет
 # в глобале диспетчера класс запуска — как настоящий dispatcher_run_chain.
+FAKE_RESULT=done
+FAKE_COMMENT=""
 FAKE_EPOCH=0
 SILENT_LEFT=0
 SILENT_CLASS=timeout
@@ -110,7 +112,7 @@ run_agent() {
     DISPATCH_RESULT_DETAIL=$SILENT_DETAIL
     return 0
   fi
-  run_state_apply_result "$task" "$stage" "$run_id" "$FAKE_EPOCH" "$token" done
+  run_state_apply_result "$task" "$stage" "$run_id" "$FAKE_EPOCH" "$token" "$FAKE_RESULT" "$FAKE_COMMENT"
 }
 
 # Попытка на маршруте command: его узел prepare объявляет веер parallel/3 с
@@ -205,5 +207,18 @@ assert_contains "$(pipeline_store_get "$detail_task" PREPARE_COMMENT)" "$SILENT_
   "конкретная ошибка передана в комментарий остановки"
 assert_contains "$(route_v2_stop_line_suffix "$detail_task" "$detail_attempt")" "$SILENT_DETAIL" \
   "та же ошибка передана в журнал остановки"
+
+# Skipped передаёт комментарий из terminal record в immutable commit.
+skipped_task=9205
+skipped_attempt=$(begin_attempt "$skipped_task" a_92059205920592059205920592059205)
+assert_rc 0 "$?" "попытка skipped начинается"
+SILENT_LEFT=0
+FAKE_RESULT=skipped
+FAKE_COMMENT='Браузер недоступен: access_revoked; отчёт сохранён'
+stopped=$(route_v2_dispatch_next "$skipped_task" "$skipped_attempt")
+assert_rc 0 "$?" "skipped с комментарием коммитится"
+skipped_event=$(find "$(factory_control_root)/protocol-v2/tasks/t${skipped_task}" -name 'event.*.json' -print | sort | tail -1)
+assert_eq "$FAKE_COMMENT" "$(json_field "$(cat "$skipped_event")" reason)" \
+  "причина skipped сохранена в журнале маршрута"
 
 finish_tests

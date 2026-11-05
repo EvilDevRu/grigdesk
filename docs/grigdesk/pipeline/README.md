@@ -223,3 +223,5 @@
 - [Редактор маршрутов: черновики через плюс, публикация и откат](route-editor.md)
 
 - [Задача: постановка и триаж — подробный контракт](task-triage.md)
+
+- [Комментарий skipped в причине остановки](codex-no-result-contract.md) — terminal COMMENT и immutable reason.

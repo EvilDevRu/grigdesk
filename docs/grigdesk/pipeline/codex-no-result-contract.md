@@ -11,3 +11,12 @@ terminal результата. `_route_v2_active_result` отвергает та
 CAS проверяет runtime маршрута. Регрессии: route-multi-runner и route-retry-wrapup.
 Native denied одной команды не подменяет этот контракт: разрешённая альтернатива
 может записать done, невозможность сдачи — failed с failure-owner human.
+
+## Skipped с объяснением
+
+Обычный agent-node читает COMMENT вместе с terminal identity. При skipped копия
+комментария без управляющих символов и длиной до 500 символов сохраняется в reason
+immutable commit; полный комментарий остаётся в run-state. Пустой комментарий
+совместим со старым результатом. Crash-retry допускает только прежний reason.
+Skipped не превращается в человеческое указание следующему исполнителю.
+Проверка: integration/route-retry-wrapup.sh, сценарий skipped с комментарием.

@@ -1462,7 +1462,7 @@ elif OP == "prepare-commit":
         and last.get("node") == node
         and last.get("outcome") == outcome
     )
-    if same_last_commit and outcome == "rejected":
+    if same_last_commit and outcome in {"rejected", "skipped"}:
         # Crash-retry допустим только пока lastCommit является последним событием и
         # только с дословно тем же feedback. Иначе UI мог бы показать новый текст,
         # хотя immutable ledger сохранил старый. Если курсор позже явно вернули на те
@@ -1499,11 +1499,11 @@ elif OP == "prepare-commit":
     sequence = integer(runtime.get("sequence")) + 1
     event_kind = "commit"
     action_mode = validate_action(action)
-    # Метка восстановления и замечание rejected-ворот используют reason, но
+    # Объяснение skipped и замечание rejected-ворот используют reason, но
     # взаимоисключаются по исходу. Rejected→stop тоже сохраняет комментарий для
     # аудита; доставить его следующему узлу можно только при объявленном rewind.
     if feedback_raw:
-        if outcome != "rejected" or recovery_raw != "0":
+        if outcome not in {"rejected", "skipped"} or recovery_raw != "0":
             fail(2)
         event_reason = reason(feedback_raw)
     else:
@@ -2151,7 +2151,7 @@ elif OP == "validate-ledger":
                     fail()
             elif event["kind"] == "commit":
                 # Обычно коммит объясняет себя исходом. Два строго различимых
-                # исключения: константа recovery и bounded reason у rejected. При
+                # исключения: recovery и reason у rejected/skipped. При
                 # rewind это ещё и замечание человека целевому узлу; при stop —
                 # неизменяемый аудит причины остановки.
                 if cursor["state"] not in {"ready", "paused"}:
@@ -2161,7 +2161,7 @@ elif OP == "validate-ledger":
                 if event["reason"] is not None:
                     if event["reason"] == RECOVERY_COMMIT_REASON:
                         pass
-                    elif event["outcome"] == "rejected":
+                    elif event["outcome"] in {"rejected", "skipped"}:
                         reason(event["reason"])
                     else:
                         fail()
@@ -2802,8 +2802,8 @@ attempt_stage_state_commit_v2() {
   # последний предохранитель после no-progress и лимита дуги, решением человека
   # не обнуляется.
   target_budget=${9:-0}
-  # Десятый — замечание человека у rejected-ворот. Оно ложится в immutable reason
-  # коммита и адресуется узлу rewind через общий канал human note.
+  # Десятый — замечание rejected-ворот либо объяснение skipped агента.
+  # Оба сохраняются в reason; только rejected передаёт human note следующему узлу.
   reject_feedback=${10:-}
   # Одиннадцатый — потолок кругов цикла из профиля (1..300). Нужен только передаче
   # lead → worker маршрута с `loop`; у остальных коммитов не читается.
