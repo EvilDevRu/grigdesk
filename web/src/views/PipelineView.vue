@@ -1180,6 +1180,7 @@ import {
 import { sandboxUrl } from '../shared/sandbox.ts';
 import { agentActivityLabel, silenceReason } from '../../../shared/pipeline/agentActivity.ts';
 import { arbiterRunLabel, nodeIsArbitrated } from '../shared/arbiterRun.ts';
+import { arbiterConversationApi } from '../shared/arbiterConversationApi.ts';
 import { buildRewindNote, rewindQuestionsOf } from '../shared/rewindNote.ts';
 // «Ждёт тебя» и подписи узлов — общие с чипом в навигации и оповещениями:
 // цифра на чипе обязана сходиться с тем, что нарисовано на этой странице.
@@ -2891,6 +2892,32 @@ async function arbitrate(task: TaskId) {
   }
 }
 
+/**
+ * Карточка прерывает только показанный ход арбитра и обновляет живую отметку.
+ * Общая блокировка действий задачи защищает от повторного нажатия до ответа.
+ */
+async function stopArbiter(task: PipelineViewTask) {
+  const operationId = task.arbitrating?.runId;
+
+  if (!operationId || pendingCardActions.value.has(task.task)) {
+    return;
+  }
+
+  pendingCardActions.value = new Map(pendingCardActions.value).set(task.task, 'stopArbiter');
+
+  try {
+    await arbiterConversationApi.stop(String(task.task), operationId);
+    await load();
+  } catch (error) {
+    await alertDialog(errorMessage(error, translate('core.arbiterStopFailed')));
+  } finally {
+    const remaining = new Map(pendingCardActions.value);
+
+    remaining.delete(task.task);
+    pendingCardActions.value = remaining;
+  }
+}
+
 // Оборвавшийся прогон продолжает человек кнопкой: новый start движок отклонит,
 // пока у задачи есть открытая попытка. Исторические записи остаются только чтением.
 function canResume(t: PipelineViewTask) {
@@ -2944,7 +2971,7 @@ function cardActions(t: PipelineViewTask): PipelineCardAction[] {
       loadingLabel,
       className,
       role: id === 'answer' ? 'pipeline-stall-answer-open' : 'pipeline-compact-action',
-      tone: ['stop', 'down', 'close'].includes(id) ? 'danger' : 'accent',
+      tone: ['stop', 'stopArbiter', 'down', 'close'].includes(id) ? 'danger' : 'accent',
       disabled: pendingAction !== undefined,
       loading: pendingAction === id,
       primary: false,
@@ -2971,6 +2998,11 @@ function cardActions(t: PipelineViewTask): PipelineCardAction[] {
         : 'Арбитр изучит остановку и предложит следующий шаг. Исправление выбираете вы.',
       'Арбитр разбирает', 'sbretry',
     );
+  }
+
+  if (!t.readOnly && t.arbitrating?.runId) {
+    add('stopArbiter', translate('core.arbiterStop'), translate('core.arbiterStopHint'),
+      translate('core.arbiterStopping'), 'sbstop');
   }
 
   if (canRetrySandbox(t)) {
@@ -3006,8 +3038,8 @@ function cardActions(t: PipelineViewTask): PipelineCardAction[] {
   const question = t.stall?.phase === 'bootstrap' || arbiterAsksHuman(t)
     || (human && t.stall?.outcome !== 'exhausted');
   const priority: PipelineCardActionId[] = question
-    ? ['answer', 'retry', 'arbitrate', 'resume', 'stop', 'down', 'close']
-    : ['retry', 'arbitrate', 'resume', 'answer', 'stop', 'down', 'close'];
+    ? ['stopArbiter', 'answer', 'retry', 'arbitrate', 'resume', 'stop', 'down', 'close']
+    : ['stopArbiter', 'retry', 'arbitrate', 'resume', 'answer', 'stop', 'down', 'close'];
   const primary = priority.find((id) => actions.some((action) => action.id === id));
 
   return actions.map((action) => ({ ...action, primary: action.id === primary }));
@@ -3021,6 +3053,7 @@ function runCardAction(t: PipelineViewTask, id: PipelineCardActionId) {
   const handlers = {
     answer: () => openStallAnswer(t),
     arbitrate: () => arbitrate(t.task),
+    stopArbiter: () => stopArbiter(t),
     retry: () => sandboxRetry(t.task),
     resume: () => resumeRun(t.task),
     stop: () => stopRun(t.task),

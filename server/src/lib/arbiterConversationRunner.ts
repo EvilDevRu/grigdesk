@@ -281,6 +281,7 @@ interface RunnerOptions {
   timeoutMs?: number;
   flushMs?: number;
   controller?: AbortController;
+  onExecution?: (completion: Promise<unknown>) => void;
 }
 
 /**
@@ -378,20 +379,24 @@ export async function runArbiterConversation(options: RunnerOptions) {
     deadline = setTimeout(() => controller.abort(new Error('Истёк лимит времени разбора.')),
       options.timeoutMs ?? ARBITER_TURN_LIMIT_MS);
 
+    const execution = executor.run({
+      ...input,
+      // Каждый durable ход получает отдельную сессию: весь контекст уже в prompt.
+      // Resume и привязка к пользовательскому чату здесь не используются.
+      chatKey: `arbiter:${doc.id}:${operationId}`,
+      sessionId: null,
+      onSessionCreated: () => {
+        controller.signal.throwIfAborted();
+      },
+      message: prompt,
+      signal: controller.signal,
+      onAssistantMessage: receive
+    });
+
+    options.onExecution?.(execution);
+
     const output = await Promise.race([
-      executor.run({
-        ...input,
-        // Каждый durable ход получает отдельную сессию: весь контекст уже в prompt.
-        // Resume и привязка к пользовательскому чату здесь не используются.
-        chatKey: `arbiter:${doc.id}:${operationId}`,
-        sessionId: null,
-        onSessionCreated: () => {
-          controller.signal.throwIfAborted();
-        },
-        message: prompt,
-        signal: controller.signal,
-        onAssistantMessage: receive
-      }),
+      execution,
       cancelled,
     ]);
     const reply = String(output.reply || '');
@@ -432,6 +437,8 @@ export async function runArbiterConversation(options: RunnerOptions) {
     const stale = !sameStop(current?.identity, context.identity);
 
     await store.update(doc.identity.task, doc.id, (latest) => {
+      controller.signal.throwIfAborted();
+
       const operation = latest.operations.find((row) => row.id === operationId);
 
       if (!operation || !['queued', 'running'].includes(operation.outcome)) {

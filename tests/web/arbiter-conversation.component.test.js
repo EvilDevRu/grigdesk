@@ -112,6 +112,16 @@ async function fixture(t, { unsupported = false, readOnly = false } = {}) {
     answers: {}
   });
   const calls = [];
+  const stops = [];
+
+  globalThis.arbiterComponentApi = {
+    stop: async (...args) => {
+      stops.push(args);
+      doc.state = 'interrupted';
+      doc.operations.at(-1).outcome = 'failed';
+      doc.operations.at(-1).error = 'cancelled';
+    },
+  };
 
   globalThis.arbiterComponentStore = reactive({
     currentByTask: {
@@ -139,6 +149,8 @@ async function fixture(t, { unsupported = false, readOnly = false } = {}) {
     stubs: {
       '../../stores/arbiterConversations.ts': ("export const useArbiterConversationsStore = () => " +
         "globalThis.arbiterComponentStore;"),
+      '../../shared/arbiterConversationApi.ts': 'export const arbiterConversationApi = '
+        + 'globalThis.arbiterComponentApi;',
     }
   });
   const wrapper = mount(component, { props: { task: '7', node: 'check' }, attachTo: browser.document.body });
@@ -149,6 +161,7 @@ async function fixture(t, { unsupported = false, readOnly = false } = {}) {
   return {
     wrapper,
     calls,
+    stops,
     doc,
     draft,
     flushPromises
@@ -174,6 +187,50 @@ test('единый блок показывает источник, ход, ит�
   assert.equal(calls[2][3].proposalId, 'p');
   assert.match(wrapper.text(), /Подготовка проверок/);
   assert.equal(wrapper.text().includes('settings.arbiter'), true);
+});
+
+test('работающий разбор можно остановить из шапки, после остановки доступен явный повтор', async (t) => {
+  const { wrapper, doc, stops, flushPromises } = await fixture(t);
+
+  doc.state = 'analyzing';
+  doc.result = null;
+  doc.operations.push({
+    id: 'active-turn',
+    kind: 'start',
+    outcome: 'running',
+  });
+  await flushPromises();
+
+  const button = wrapper.get('[data-role="arbiter-stop"]');
+
+  assert.equal(button.attributes('disabled'), undefined);
+  assert.match(button.text(), /Остановить арбитра/);
+  await button.trigger('click');
+  await flushPromises();
+
+  assert.deepEqual(stops, [['7', 'active-turn']]);
+  assert.equal(wrapper.find('[data-role="arbiter-stop"]').exists(), false);
+  assert.equal(wrapper.find('[data-role="arbiter-start"]').exists(), true);
+  assert.equal(wrapper.find('[data-role="arbiter-analysis-failure"]').exists(), false);
+  assert.match(wrapper.get('.ac-status').text(), /Разбор остановлен/);
+  assert.match(wrapper.text(), /Читаю журнал/);
+});
+
+test('исторический разбор и применение решения не получают кнопку остановки арбитра', async (t) => {
+  const { wrapper, doc, flushPromises } = await fixture(t, { readOnly: true });
+
+  doc.state = 'analyzing';
+  doc.operations.push({
+    id: 'old-turn',
+    kind: 'start',
+    outcome: 'running',
+  });
+  await flushPromises();
+  assert.equal(wrapper.find('[data-role="arbiter-stop"]').exists(), false);
+  doc.readOnly = false;
+  doc.state = 'applying';
+  await flushPromises();
+  assert.equal(wrapper.find('[data-role="arbiter-stop"]').exists(), false);
 });
 
 test('рекомендованный ответ выделен, а выбор сохраняет исходный вопрос и id варианта', async (t) => {

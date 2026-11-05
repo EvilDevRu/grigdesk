@@ -84,6 +84,7 @@ export interface FactoryGraphData {
 
 // Идущий разбор арбитра: не свойство графа, а отдельный живой факт задачи.
 export interface ArbiterRun {
+  runId?: string;
   actor?: string;
   model?: string | null;
   elapsedSec?: number;

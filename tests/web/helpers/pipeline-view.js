@@ -55,6 +55,8 @@ export function compilePipelineView(prefix, { realGraph = false, expose = [] } =
         + '\nexport { ApiError } from "./src/shared/apiClient.ts";',
       '../../shared/apiClient.ts': `export const api = globalThis.${prefix}Api;`
         + '\nexport { ApiError } from "./src/shared/apiClient.ts";',
+      './apiClient.ts': `export const api = globalThis.${prefix}Api;`
+        + '\nexport { ApiError } from "./src/shared/apiClient.ts";',
       '../composables/useSse.ts': [
         'export const sseSubscribe = () => () => {};',
         'export function useSse(onEvent) {',

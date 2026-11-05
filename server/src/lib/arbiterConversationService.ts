@@ -68,7 +68,13 @@ export class ArbiterConversationService {
 
   private readonly admissions = new Map<string, Promise<unknown>>();
 
-  private readonly jobs = new Map<string, { completion: Promise<void>; controller: AbortController }>();
+  private readonly jobs = new Map<string, {
+    completion: Promise<void>;
+    controller: AbortController;
+    kind: IntentKind;
+    operationId: string;
+    execution?: Promise<unknown>;
+  }>();
 
   private closed = false;
 
@@ -349,12 +355,19 @@ export class ArbiterConversationService {
         controller,
         timeoutMs: this.deps.turnTimeoutMs,
         readCurrent: () => this.deps.readContext(task),
+        onExecution: (execution) => {
+          const job = this.jobs.get(task);
+
+          if (job?.operationId === operation.id) {
+            job.execution = execution;
+          }
+        },
       })).finally(() => {
         doneLive?.();
         this.jobs.delete(task);
       });
 
-      this.track(task, controller, completion);
+      this.track(task, operation, controller, completion);
 
       return this.ack(doc, operation);
     });
@@ -389,6 +402,57 @@ export class ArbiterConversationService {
 
   wait(task: string) {
     return this.jobs.get(task)?.completion || Promise.resolve();
+  }
+
+  /**
+   * Явная остановка адресует конкретный ход, чтобы запоздалая кнопка не прервала новый.
+   * История завершается до ответа; применение решения этим действием не отменяется.
+   */
+  stopRead(task: string, operationId: string) {
+    return this.admit(task, () => this.cancelRead(task, operationId,
+      'Разбор остановлен человеком.'));
+  }
+
+  /**
+   * Продолжение конвейера сначала прерывает читающий ход и сохраняет его историю.
+   * Общая admission не допускает нового разбора между отменой и завершением запуска.
+   */
+  withReadStopped<T>(task: string, action: () => Promise<T>) {
+    return this.admit(task, async () => {
+      await this.cancelRead(task, undefined, 'Разбор остановлен перед продолжением прогона.');
+
+      return action();
+    });
+  }
+
+  /**
+   * Отменяет только модельный разбор и ждёт освобождения job и живой отметки.
+   * Отсутствие хода делает повтор остановки безопасным; чужой operationId закрывает отмену.
+   */
+  private async cancelRead(task: string, operationId: string | undefined, reason: string) {
+    const job = this.jobs.get(task);
+
+    if (!job) {
+      return { ok: true, outcome: 'not_running' };
+    }
+
+    if (operationId && operationId !== job.operationId) {
+      throw new ArbiterConversationError('stale_operation', 'Ход арбитра уже изменился.', 409);
+    }
+
+    if (job.kind === 'apply' || job.kind === 'resume') {
+      if (operationId) {
+        throw new ArbiterConversationError('conversation_busy', 'Выполняется применение решения.', 409);
+      }
+
+      return { ok: true, outcome: 'not_running' };
+    }
+
+    job.controller.abort(new ArbiterConversationError('cancelled', reason));
+    await job.completion;
+    await job.execution?.catch(() => { });
+
+    return { ok: true, outcome: 'stopped' };
   }
 
   /**
@@ -459,8 +523,22 @@ export class ArbiterConversationService {
     };
   }
 
-  private track(task: string, controller: AbortController, completion: Promise<void>) {
-    this.jobs.set(task, { controller, completion });
+  /**
+   * Сохраняет владельца и вид операции для точной отмены читающего хода.
+   * Ошибка фонового завершения передаётся общему обработчику сервиса.
+   */
+  private track(
+    task: string,
+    operation: ArbiterOperation,
+    controller: AbortController,
+    completion: Promise<void>,
+  ) {
+    this.jobs.set(task, {
+      controller,
+      completion,
+      kind: operation.kind,
+      operationId: operation.id,
+    });
     void completion.catch((error) => this.deps.onError?.(error));
   }
 
@@ -611,7 +689,7 @@ export class ArbiterConversationService {
       });
     }).finally(() => this.jobs.delete(task));
 
-    this.track(task, controller, completion);
+    this.track(task, operation, controller, completion);
 
     return this.ack(doc, operation);
   }

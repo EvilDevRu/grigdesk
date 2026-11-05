@@ -95,11 +95,25 @@ async function mountPipeline(t, { factoryTask, graph }, { response, compact = tr
   };
   globalThis.__pipelineArbiterApiCalls = [];
   globalThis.__pipelineArbiterApi = {
+    /**
+     * Список использует тот же opt-in источников, что и настоящий экран конвейера.
+     * Все ответы принадлежат фикстуре и не обращаются к живым задачам.
+     */
     async get(url) {
       globalThis.__pipelineArbiterApiCalls.push(url);
-      if (url === '/api/tasks') return { tasks: [factoryTask] };
-      if (url === `/api/tasks/${factoryTask.task}/graph`) return graph;
-      if (url === '/api/factory/runners') return { runners: [] };
+
+      if (url === '/api/tasks?sources=1') {
+        return { tasks: [factoryTask] };
+      }
+
+      if (url === `/api/tasks/${factoryTask.task}/graph`) {
+        return graph;
+      }
+
+      if (url === '/api/factory/runners') {
+        return { runners: [] };
+      }
+
       return {};
     },
     async post(url, body) {
@@ -149,6 +163,27 @@ const openStageNode = async (wrapper, flushPromises, node) => {
   wrapper.findComponent(globalThis.__pipelineArbiterFactoryGraph).vm.$emit('node', node);
   await flushPromises();
 };
+
+test('карточка останавливает exact ход арбитра и сохраняет доступ к продолжению прогона', async (t) => {
+  const { wrapper, posts, bodies, flushPromises } = await mountPipeline(t, makeFixture({
+    stall: NO_PROGRESS_STALL,
+    arbitrating: {
+      runId: 'active-arbiter-turn',
+      actor: 'auto',
+      elapsedSec: 10,
+    },
+  }));
+  const buttons = wrapper.findAll('.stalled button');
+  const stop = buttons.find((button) => /Остановить арбитра/u.test(button.text()));
+
+  assert.equal(Boolean(stop), true);
+  assert.equal(buttons.some((button) => /продолжить прогон/u.test(button.text())), true);
+  await stop.trigger('click');
+  await flushPromises();
+
+  assert.deepEqual(posts, ['/api/tasks/42/arbiter-conversations/stop']);
+  assert.deepEqual(bodies[0].body, { operationId: 'active-arbiter-turn' });
+});
 
 // Разбор арбитра заканчивается словами «решать тебе» — и до 28.08.2026 отправить это
 // решение было нечем: плашка предлагала только позвать арбитра ещё раз либо продолжить

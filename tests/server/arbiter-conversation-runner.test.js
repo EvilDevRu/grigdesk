@@ -94,6 +94,31 @@ test('уже отменённый ход не вызывает executor и со�
   assert.equal((await fx.store.read('7', fx.doc.id)).state, 'interrupted');
 });
 
+test('отмена после ответа модели перед записью итога не публикует предложения', async (t) => {
+  const fx = await fixture(t);
+  const controller = new AbortController();
+
+  await runArbiterConversation({
+    ...fx,
+    operationId: 'turn',
+    input: {},
+    controller,
+    executor: { run: async () => ({ reply: framedResult }) },
+    readCurrent: async () => {
+      controller.abort(new Error('Разбор остановлен человеком.'));
+
+      return fx.context;
+    },
+  });
+
+  const saved = await fx.store.read('7', fx.doc.id);
+
+  assert.equal(saved.state, 'interrupted');
+  assert.equal(saved.result, null);
+  assert.equal(saved.operations[0].outcome, 'failed');
+  assert.match(saved.operations[0].message, /остановлен человеком/);
+});
+
 /**
  * Fake executor не завершается, пока проверка не отпустит его явно.
  * Это доказывает видимость durable сообщения до конечного ответа модели.

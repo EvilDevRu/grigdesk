@@ -1,6 +1,7 @@
 import type { UiActionTone } from '../ui';
 
-export type PipelineCardActionId = 'answer' | 'arbitrate' | 'retry' | 'resume' | 'stop' | 'down' | 'close';
+export type PipelineCardActionId =
+  'answer' | 'arbitrate' | 'stopArbiter' | 'retry' | 'resume' | 'stop' | 'down' | 'close';
 
 export interface PipelineCardAction {
   id: PipelineCardActionId;

@@ -4,7 +4,9 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 import type { ArbiterConversationService } from '../../lib/arbiterConversationService.ts';
 import type { IntentKind } from '../../../../shared/pipeline/arbiterConversation.ts';
-import { ArbiterConversationError } from '../../../../shared/pipeline/arbiterConversation.ts';
+import {
+  ArbiterConversationError, arbiterRecord, arbiterText,
+} from '../../../../shared/pipeline/arbiterConversation.ts';
 
 /**
  * Короткие HTTP-входы подтверждают только durable операцию сервиса.
@@ -29,6 +31,11 @@ export function registerArbiterConversationRoutes(
   };
 
   app.get<Route>(`${root}/current`, options, async (request) => service.current(request.params.id));
+  app.post<Route>(`${root}/stop`, options, async (request) => {
+    const body = arbiterRecord(request.body, ['operationId']);
+
+    return service.stopRead(request.params.id, arbiterText(body.operationId, 500));
+  });
   app.get<Route>(`${root}/:conversationId/journal`, options, async (request, reply) => {
     const task = request.params.id;
     const doc = await service.store.read(task, request.params.conversationId);

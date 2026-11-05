@@ -68,7 +68,7 @@ async function mountPipelines(t, { running = false } = {}) {
       if (reads.has(url)) {
         return reads.get(url).promise;
       }
-      if (url === '/api/tasks') {
+      if (url === '/api/tasks?sources=1') {
         return { tasks };
       }
       if (url === '/api/factory/runners') {

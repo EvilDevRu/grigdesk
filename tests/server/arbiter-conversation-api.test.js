@@ -7,6 +7,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { ArbiterConversationStore } from '../../server/src/lib/arbiterConversationStore.ts';
 import { ArbiterConversationService } from '../../server/src/lib/arbiterConversationService.ts';
+import { FactoryArbiterLive } from '../../server/src/lib/factoryArbiterLive.ts';
 import {
   registerArbiterConversationRoutes
 } from '../../server/src/modules/factory/arbiterConversationRoutes.ts';
@@ -47,7 +48,7 @@ const result = {
  * HTTP работает с настоящим durable service и удерживаемым executor без живых задач.
  * Внешняя команда отсутствует в зависимостях читающего хода.
  */
-async function fixture(t, { replies = [] } = {}) {
+async function fixture(t, { replies = [], holdAll = false, afterAbort = async () => {} } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'arbiter-api-'));
 
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
@@ -56,11 +57,14 @@ async function fixture(t, { replies = [] } = {}) {
   let finish;
   let calls = 0;
   const prompts = [];
+  const inputs = [];
+  const live = new FactoryArbiterLive();
   const held = new Promise((resolve) => {
     finish = resolve;
   });
   const service = new ArbiterConversationService({
     store,
+    live,
     readContext: async () => ({
       identity,
       targets: [],
@@ -80,9 +84,21 @@ async function fixture(t, { replies = [] } = {}) {
         run: async (input) => {
           calls += 1;
           prompts.push(input.message);
+          inputs.push(input);
 
-          if (calls === 1) {
-            await held;
+          if (calls === 1 || holdAll) {
+            try {
+              await Promise.race([
+                held,
+                new Promise((_resolve, reject) => {
+                  input.signal.addEventListener('abort', () => reject(input.signal.reason), { once: true });
+                }),
+              ]);
+            } finally {
+              if (input.signal.aborted) {
+                await afterAbort();
+              }
+            }
           }
 
           const reply = JSON.stringify(replies[calls - 1] || result);
@@ -105,6 +121,8 @@ async function fixture(t, { replies = [] } = {}) {
     store,
     finish,
     prompts,
+    inputs,
+    live,
     dir,
     calls: () => calls
   };
@@ -163,6 +181,156 @@ test('GET без создания; POST даёт durable 202 до заверше
   fx.finish();
   await fx.service.wait('7');
   assert.equal(fx.calls(), 1);
+});
+
+test('остановка прерывает exact ход, сохраняет реплики и не принимает поздний ответ', async (t) => {
+  const fx = await fixture(t);
+  const started = await fx.service.start('7', { requestId: randomUUID(), expectedStop: identity }, true);
+
+  await new Promise((resolve) => setImmediate(resolve));
+  fx.inputs[0].onAssistantMessage({
+    assistantMessageId: 'partial',
+    text: '<arbiter-message>Уже прочитал журнал',
+    sourceRevision: 1,
+    complete: false,
+  });
+
+  const url = '/api/tasks/7/arbiter-conversations/stop';
+  const invalid = await fx.app.inject({
+    method: 'POST',
+    url,
+    payload: {},
+  });
+
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(fx.inputs[0].signal.aborted, false);
+
+  const response = await fx.app.inject({
+    method: 'POST',
+    url,
+    payload: { operationId: started.operationId },
+  });
+  const saved = await fx.store.read('7', started.conversationId);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().outcome, 'stopped');
+  assert.equal(fx.inputs[0].signal.aborted, true);
+  assert.equal(fx.live.read('7'), null);
+  assert.equal(saved.state, 'interrupted');
+  assert.equal(saved.result, null);
+  assert.equal(saved.operations[0].error, 'cancelled');
+  assert.match(saved.operations[0].message, /остановлен человеком/);
+  assert.equal(saved.messages.find((row) => row.text === 'Уже прочитал журнал')?.status, 'interrupted');
+
+  const repeated = await fx.app.inject({
+    method: 'POST',
+    url,
+    payload: { operationId: started.operationId },
+  });
+
+  assert.equal(repeated.json().outcome, 'not_running');
+  fx.inputs[0].onAssistantMessage({
+    assistantMessageId: 'partial',
+    text: '<arbiter-message>Запоздалый ответ</arbiter-message>',
+    sourceRevision: 2,
+    complete: true,
+  });
+  fx.finish();
+  await started.completion;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await fx.store.read('7', started.conversationId)).revision, saved.revision);
+
+  await fx.service.start('7', { requestId: randomUUID(), expectedStop: identity }, true);
+  assert.equal(fx.calls(), 1, 'авторазбор не повторяет остановленный ход');
+});
+
+test('запоздалая остановка старого хода не отменяет новый разбор', async (t) => {
+  const fx = await fixture(t, { holdAll: true });
+  const first = await fx.service.start('7', { requestId: randomUUID(), expectedStop: identity });
+
+  await fx.service.stopRead('7', first.operationId);
+
+  const second = await fx.service.start('7', { requestId: randomUUID(), expectedStop: identity });
+  const response = await fx.app.inject({
+    method: 'POST',
+    url: '/api/tasks/7/arbiter-conversations/stop',
+    payload: { operationId: first.operationId },
+  });
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json().error, 'stale_operation');
+  assert.equal(fx.inputs.at(-1).signal.aborted, false);
+  assert.equal(fx.live.read('7').runId, second.operationId);
+  await fx.service.stopRead('7', second.operationId);
+});
+
+test('продолжение ждёт освобождения исполнителя после сигнала отмены', async (t) => {
+  let entered;
+  let release;
+  let launched = false;
+  const cleaning = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const cleanup = new Promise((resolve) => {
+    release = resolve;
+  });
+  const fx = await fixture(t, {
+    afterAbort: async () => {
+      entered();
+      await cleanup;
+    },
+  });
+
+  t.after(() => release());
+  await fx.service.start('7', { requestId: randomUUID(), expectedStop: identity });
+
+  const continuation = fx.service.withReadStopped('7', async () => {
+    launched = true;
+  });
+
+  await cleaning;
+  assert.equal(launched, false);
+  release();
+  await continuation;
+  assert.equal(launched, true);
+});
+
+test('продолжение ждёт сохранения остановки и блокирует новый разбор до завершения запуска', async (t) => {
+  const fx = await fixture(t);
+  const started = await fx.service.start('7', { requestId: randomUUID(), expectedStop: identity });
+  let entered;
+  let release;
+  const launching = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const resume = fx.service.withReadStopped('7', async () => {
+    const saved = await fx.store.read('7', started.conversationId);
+
+    assert.equal(saved.state, 'interrupted');
+    assert.match(saved.operations[0].message, /перед продолжением прогона/);
+    assert.equal(fx.live.read('7'), null);
+    entered();
+    await held;
+
+    return 'launched';
+  });
+
+  await launching;
+
+  const next = fx.service.start('7', { requestId: randomUUID(), expectedStop: identity });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fx.calls(), 1, 'новая модель не стартует во время продолжения');
+  release();
+  assert.equal(await resume, 'launched');
+
+  const ack = await next;
+
+  await ack.completion;
+  assert.equal(fx.calls(), 2);
 });
 
 test('перезапуск завершает чтение как interrupted и не повторяет модель; auto не повторяет exact stop',

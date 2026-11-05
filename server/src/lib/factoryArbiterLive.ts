@@ -71,7 +71,9 @@ export class FactoryArbiterLive {
   read(task: unknown) {
     const run = this.runs.get(String(task || ''));
     if (!run) return null;
+
     return {
+      runId: run.runId,
       actor: run.actor,
       model: run.model,
       startedAt: run.startedAt,

@@ -992,7 +992,7 @@ async function factoryModule(
    * а движок на resume их только проверяет и выходит кодом 73. Владелец стенда берётся
    * из закреплённой попытки — общий стенд GrigDesk не запускает.
    */
-  async function resumeRouteAttempt(id: string, { profile, attempt, why, standOwnership }: {
+  async function launchRouteAttempt(id: string, { profile, attempt, why, standOwnership }: {
     profile: string;
     attempt: string;
     why: string;
@@ -2298,13 +2298,22 @@ async function factoryModule(
     }),
   );
 
-  await registerArbiterConversationRuntime(fastify, opts, conversationStore, arbiterExecutor,
+  const conversationService = await registerArbiterConversationRuntime(
+    fastify, opts, conversationStore, arbiterExecutor,
     (trusted) => resumeRouteAttempt(trusted.task, {
       profile: trusted.profile || '',
       attempt: trusted.attempt,
       why: 'после выбранного исправления',
       standOwnership: trusted.standOwnership,
     }));
+
+  /**
+   * Любой путь продолжения сначала останавливает арбитра той же задачи.
+   * Подготовка стенда и запуск защищены от параллельного старта нового разбора.
+   */
+  function resumeRouteAttempt(id: string, params: Parameters<typeof launchRouteAttempt>[1]) {
+    return conversationService.withReadStopped(id, () => launchRouteAttempt(id, params));
+  }
 
   // Ручное переключение ТОЛЬКО активной попытки и ТОЛЬКО на provider из уже
   // разрешённой цепочки этого этапа. Сам engine применяет CAS к run/epoch и завершает
@@ -2735,7 +2744,10 @@ async function factoryModule(
       });
     }
     if (factoryState.isDaemonAlive(registry.ORCH_PID, id)) {
-      return { ok: true, outcome: 'already_running' };
+      return conversationService.withReadStopped(id, async () => ({
+        ok: true,
+        outcome: 'already_running',
+      }));
     }
     if (trusted.terminal) {
       return reply.code(409).send({ error: 'attempt_terminal', message: `попытка закрыта (${trusted.terminal}) — продолжать нечего` });

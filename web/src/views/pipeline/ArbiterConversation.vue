@@ -13,6 +13,12 @@
             </p>
           </div>
           <span v-if="analyzing && arbitrating?.model" class="ac-model mono">{{ arbitrating.model }}</span>
+          <UiButton v-if="analyzing && stopOperationId" size="compact" tone="danger"
+                    data-role="arbiter-stop" :loading="stopping"
+                    :loading-label="t('core.arbiterStopping')"
+                    :disabled="stopping || store.sending[task] || pending" @click="stopAnalysis">
+            {{ t('core.arbiterStop') }}
+          </UiButton>
         </header>
         <p v-if="doc?.automatic" class="ac-automatic">{{ t('core.arbiterAutomaticNotice') }}</p>
         <p v-if="error" class="ac-error" role="alert">{{ error }}</p>
@@ -176,6 +182,7 @@
           <p>{{ analysisFailure }}</p>
           <p>{{ t('core.arbiterAnalysisRecovery') }}</p>
         </div>
+        <p v-else-if="analysisStopped" class="ac-notice">{{ t('core.arbiterStopped') }}</p>
         <p v-else-if="!doc?.result" class="ac-decision-empty">
           {{ t('core.stageAnalysisDecisionHint') }}
         </p>
@@ -260,6 +267,7 @@ import type {
   ArbiterConversationSummary,
 } from '../../../../shared/pipeline/arbiterConversation.ts';
 import { useArbiterConversationsStore } from '../../stores/arbiterConversations.ts';
+import { arbiterConversationApi } from '../../shared/arbiterConversationApi.ts';
 import { formatDate } from '../../../../shared/i18n/formats.ts';
 import type { ArbiterRun } from '../../../../shared/pipeline/factoryGraphContracts.ts';
 import type { ArbiterCard } from '../../shared/pipelineContracts.ts';
@@ -280,6 +288,7 @@ const inputId = `arbiter-${useId()}`;
 const technicalOpen = ref(false);
 const sourceOpen = ref(false);
 const localError = ref('');
+const stopping = ref(false);
 const composer = ref<InstanceType<typeof UiTextarea> | null>(null);
 const failurePanel = ref<HTMLElement | null>(null);
 const openedId = ref(props.conversationId || '');
@@ -307,10 +316,13 @@ const readOnly = computed(() => Boolean(doc.value?.readOnly || doc.value?.state 
   || openedId.value && !doc.value
   || identity.value && !sameStop(current.value?.identity, identity.value)));
 const pending = computed(() => Boolean(store.pending[props.task]));
-const busy = computed(() => Boolean(store.sending[props.task]
+const busy = computed(() => Boolean(stopping.value || store.sending[props.task]
   || doc.value?.state === 'analyzing' || doc.value?.state === 'applying'));
 const analyzing = computed(() => !readOnly.value && (doc.value
   ? doc.value.state === 'analyzing' : Boolean(props.arbitrating)));
+const stopOperationId = computed(() => [...(doc.value?.operations || [])].reverse()
+  .find((operation) => ['start', 'discuss', 'diagnose'].includes(operation.kind)
+    && ['queued', 'running'].includes(operation.outcome))?.id || props.arbitrating?.runId);
 const showDecisions = computed(() => pending.value || !analyzing.value
   && (doc.value?.result?.nextStep !== 'continue_discussion'
     || readOnly.value || capabilities.value?.status !== 'supported'));
@@ -342,8 +354,10 @@ const instructionTargets = computed(() => capabilities.value?.targets
   .filter((target) => target.acceptsInstruction)
   || []);
 const error = computed(() => localError.value || store.errors[props.task] || store.storageError);
+const analysisStopped = computed(() => doc.value?.state === 'interrupted'
+  && doc.value.operations.at(-1)?.error === 'cancelled');
 const analysisFailure = computed(() => {
-  if (doc.value?.state !== 'interrupted') {
+  if (doc.value?.state !== 'interrupted' || analysisStopped.value) {
     return '';
   }
 
@@ -394,6 +408,10 @@ const status = computed(() => {
 
   if (analyzing.value) {
     return t('core.arbiterConnected');
+  }
+
+  if (analysisStopped.value) {
+    return t('core.arbiterStopped');
   }
 
   if (doc.value?.state === 'awaiting_user' && !questions.value.length) {
@@ -472,6 +490,30 @@ async function send(kind: string, payload: Record<string, unknown> = {}) {
     return await store.send(props.task, doc.value?.id || null, kind, payload);
   } catch (error) {
     localError.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+/**
+ * Остановка адресует показанный читающий ход, сохраняя опубликованные сообщения.
+ * Повторное нажатие блокируется до ответа и обновления серверного состояния.
+ */
+async function stopAnalysis() {
+  const operationId = stopOperationId.value;
+
+  if (stopping.value || !operationId) {
+    return;
+  }
+
+  stopping.value = true;
+  localError.value = '';
+
+  try {
+    await arbiterConversationApi.stop(props.task, operationId);
+    await store.open(props.task, doc.value?.id);
+  } catch (error) {
+    localError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    stopping.value = false;
   }
 }
 

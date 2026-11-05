@@ -61,6 +61,10 @@ export function decodeConversationSnapshot(value: unknown): ConversationSnapshot
 }
 
 export const arbiterConversationApi = {
+  stop(task: string, operationId: string) {
+    return api.post(`${taskPath(task)}/stop`, { operationId }, { timeoutMs: 30_000 });
+  },
+
   /**
    * Текущая остановка проверяется отдельно от сохранённого исторического диалога.
    * GET не создаёт модельный ход и не содержит намерения применить действие.

@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import * as routeCli from '../../server/src/lib/factoryRouteCli.ts';
 import { factoryDecisionFixture } from './helpers/factoryDecisionFixture.js';
+import { ArbiterConversationService } from '../../server/src/lib/arbiterConversationService.ts';
 
 /**
  * Подставной бинарь проверяет настоящий execFile без обращения к живому движку.
@@ -69,6 +70,24 @@ test('runRouteDecision берёт срок из config.decisionTimeoutMs', async
   assert.equal(result.timedOut, true);
   assert.ok(performance.now() - started < 3000);
   assert.equal(routeCli.ROUTE_DECISION_TIMEOUT_MS, 180_000);
+});
+
+test('кнопка продолжения проходит барьер остановки арбитра до запуска движка', async (t) => {
+  const original = ArbiterConversationService.prototype.withReadStopped;
+  const stopped = [];
+
+  t.mock.method(ArbiterConversationService.prototype, 'withReadStopped', function (task, action) {
+    stopped.push(task);
+
+    return original.call(this, task, action);
+  });
+
+  const fx = await factoryDecisionFixture(t);
+  const response = await fx.app.inject({ method: 'POST', url: '/api/tasks/7/resume' });
+
+  assert.deepEqual(stopped, ['7']);
+  assert.equal(response.statusCode, 500, 'подставной юнит завершается без живого оркестратора');
+  assert.match(await readFile(fx.callsLog, 'utf8'), /systemd-run .*7 resume /);
 });
 
 test('«Перейти сюда» после срока продолжает прогон, если возврат записан', async (t) => {
