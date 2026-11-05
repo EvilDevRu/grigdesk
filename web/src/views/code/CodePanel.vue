@@ -424,6 +424,90 @@
               </UiIconButton>
             </div>
           </div>
+          <div v-if="git && (gitPane === 'changes' || commitGroup)" class="git-controls">
+            <div class="git-filter-bar">
+              <UiSearchInput v-model="gitFilterPath" data-action="git-filter-path"
+                             size="compact" :placeholder="t('core.codeReviewFilterPath')"
+                             :aria-label="t('core.codeReviewFilterPath')" />
+              <UiIconButton role="embedded" data-context="code-editor-action"
+                            data-action="git-filter-toggle" :pressed="gitFiltersOpen || !!gitFilterStatus"
+                            :aria-expanded="gitFiltersOpen" aria-controls="code-status-filter"
+                            :label="t('core.codeReviewFilterStatus')" v-tooltip="t('core.codeReviewFilterStatus')"
+                            @click="gitFiltersOpen = !gitFiltersOpen">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M2 3h12L9.5 8v4.5l-3 1V8z" />
+                </svg>
+              </UiIconButton>
+              <UiPopover has-popup="dialog" placement="bottom-end"
+                         :style="{ width: 'min(260px, calc(100vw - 20px))' }">
+                <template #trigger>
+                  <UiIconButton role="embedded" data-context="code-editor-action"
+                                data-action="git-tree-tools" :label="t('core.codeReviewTreeTools')"
+                                v-tooltip="t('core.codeReviewTreeTools')">
+                    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                      <circle cx="3" cy="8" r="1.15" />
+                      <circle cx="8" cy="8" r="1.15" />
+                      <circle cx="13" cy="8" r="1.15" />
+                    </svg>
+                  </UiIconButton>
+                </template>
+                <div class="code-popover-panel">
+                  <strong class="code-popover-title">{{ t('core.codeReviewTreeTools') }}</strong>
+                  <UiButton block variant="ghost" data-context="code-popover-action"
+                            data-action="git-collapse-all" @click="setAllGitDirs(false)">
+                    {{ t('core.codeReviewCollapseAll') }}
+                  </UiButton>
+                  <UiButton block variant="ghost" data-context="code-popover-action"
+                            data-action="git-expand-all" @click="setAllGitDirs(true)">
+                    {{ t('core.codeReviewExpandAll') }}
+                  </UiButton>
+                  <UiButton block variant="ghost" data-context="code-popover-action"
+                            data-action="git-reveal-current" @click="revealCurrentGitPath">
+                    {{ t('core.codeReviewReveal') }}
+                  </UiButton>
+                </div>
+              </UiPopover>
+            </div>
+            <div v-show="gitFiltersOpen || gitFilterStatus" id="code-status-filter" class="git-status-filter">
+              <UiSelect v-model="gitFilterStatus" compact data-action="git-filter-status"
+                        :aria-label="t('core.codeReviewFilterStatus')">
+                <option value="">{{ t('core.codeReviewAllStatuses') }}</option>
+                <option v-for="status in ['A', 'M', 'D', 'U'] as const" :key="status" :value="status">
+                  {{ t(`core.codeReviewStatus${status}`) }}
+                </option>
+              </UiSelect>
+            </div>
+            <div v-show="gitFilterPath || gitFilterStatus" class="git-filter-summary">
+              <span data-action="git-filter-count">{{ gitFilterFound }} / {{ gitFilterTotal }}</span>
+              <UiButton size="compact" variant="ghost" data-action="git-filter-clear" @click="clearGitFilter">
+                {{ t('core.codeReviewClearFilter') }}
+              </UiButton>
+            </div>
+            <div v-show="gitSelection.size" class="git-selection-tools code-review-controls">
+              <span data-action="git-selection-count" class="selection-caption">
+                {{ t('core.codeReviewSelectedCount', { count: gitSelection.size }) }}
+              </span>
+              <UiIconButton role="embedded" data-context="code-group-action"
+                            data-action="git-selection-clear" :label="t('core.codeReviewClearSelection')"
+                            v-tooltip="t('core.codeReviewClearSelection')" @click="gitSelection = new Set()">×</UiIconButton>
+              <UiSwitch v-if="hiddenSelectionCount" v-model="includeHiddenSelection"
+                        :label="t('core.codeReviewIncludeHidden', { count: hiddenSelectionCount })" />
+              <UiButton v-for="action in selectionActions" :key="action" variant="ghost" size="compact"
+                        :tone="action === 'discard' || action === 'clean-new' ? 'danger' : 'neutral'"
+                        :data-action="`selection-${action}`" :disabled="gitActionBusy || !canSelectionAction(action)"
+                        @click="executeGitSelection(action)">{{ t(`core.codeReviewAction${action}`) }}</UiButton>
+              <UiButton size="compact" variant="ghost" :disabled="!gitSelection.size" @click="askGitSelection">
+                {{ t('core.codeReviewAskSelection') }}
+              </UiButton>
+            </div>
+            <UiInlineMessage v-if="gitActionResult" data-action="git-action-result" tone="neutral">
+              {{ gitActionResult }}
+            </UiInlineMessage>
+            <p v-if="gitFilterTotal && !gitFilterFound" class="pnote" role="status">
+              {{ t('core.codeReviewNoFiles') }}
+            </p>
+          </div>
           <div class="scroll tree git-tree" :class="{ 'commit-tree': gitPane === 'commits' }">
             <UiLoadingState v-if="gitLoading && !git" label="Читаю гит…" >
               <UiSkeletonLayout layout="list" :header="false" />
@@ -480,42 +564,6 @@
                   </UiPressable>
                 </div>
               </section>
-              <div class="code-review-controls">
-                <UiSearchInput v-model="gitFilterPath" data-action="git-filter-path"
-                               :aria-label="t('core.codeReviewFilterPath')" />
-                <UiSelect v-model="gitFilterStatus" compact data-action="git-filter-status"
-                          :aria-label="t('core.codeReviewFilterStatus')">
-                  <option value="">{{ t('core.codeReviewAllStatuses') }}</option>
-                  <option v-for="status in ['A', 'M', 'D', 'U'] as const" :key="status" :value="status">
-                    {{ t(`core.codeReviewStatus${status}`) }}
-                  </option>
-                </UiSelect>
-                <span data-action="git-filter-count">{{ gitFilterFound }} / {{ gitFilterTotal }}</span>
-                <UiButton variant="ghost" data-action="git-filter-clear" @click="clearGitFilter">
-                  {{ t('core.codeReviewClearFilter') }}
-                </UiButton>
-                <UiButton variant="ghost" data-action="git-collapse-all" @click="setAllGitDirs(false)">
-                  {{ t('core.codeReviewCollapseAll') }}
-                </UiButton>
-                <UiButton variant="ghost" data-action="git-expand-all" @click="setAllGitDirs(true)">
-                  {{ t('core.codeReviewExpandAll') }}
-                </UiButton>
-                <UiButton variant="ghost" data-action="git-reveal-current" @click="revealCurrentGitPath">
-                  {{ t('core.codeReviewReveal') }}
-                </UiButton>
-                <span data-action="git-selection-count">{{ gitSelection.size }}</span>
-                <UiSwitch v-if="hiddenSelectionCount" v-model="includeHiddenSelection"
-                          :label="t('core.codeReviewIncludeHidden', { count: hiddenSelectionCount })" />
-                <UiButton v-for="action in selectionActions" :key="action" variant="ghost"
-                          :data-action="`selection-${action}`" :disabled="gitActionBusy || !canSelectionAction(action)"
-                          @click="executeGitSelection(action)">{{ t(`core.codeReviewAction${action}`) }}</UiButton>
-                <UiButton variant="ghost" :disabled="!gitSelection.size" @click="askGitSelection">
-                  {{ t('core.codeReviewAskSelection') }}
-                </UiButton>
-                <UiInlineMessage v-if="gitActionResult" data-action="git-action-result" tone="neutral">
-                  {{ gitActionResult }}
-                </UiInlineMessage>
-              </div>
               <section v-for="group in visibleGitGroups" :key="group.id" class="git-group"
                        :data-group-section="group.id">
               <!-- Сводка отрезка — заголовок группы его файлов в две строки: сам отрезок с
@@ -966,186 +1014,265 @@
           </div>
         </div>
         <div v-if="showsComparisonRow" class="diffhead">
-          <div class="comparison-identity">
-            <span v-if="comparisonBadge" class="comparison-sides mono"
-                  v-tooltip="comparisonBadge.hint">
-              {{ comparisonBadge.label }}
-            </span>
-            <span v-if="rangeSummary" class="note mono range-summary">{{ rangeSummary }}</span>
-            <span v-if="diffLoading" class="note">читаю…</span>
-            <span v-else-if="diffError" class="note diff-error">{{ diffError }}</span>
-          </div>
-          <UiButton v-if="tab === 'git' && gitPane === 'changes' && (commitSel.size || branchMode)"
-                    variant="ghost" data-context="code-editor-action"
-                    data-action="clear-commits" v-tooltip="'Сбросить выбранный диапазон'"
-                    @click="clearCommitSelection">
-            Сбросить диапазон
-          </UiButton>
-          <span class="grow"></span>
-          <div v-if="tab === 'git' && !fileHistoryActive" class="hunk-navigation" role="group"
-               :aria-label="t('core.codeDiffHunkNavigation')">
-            <UiButton variant="ghost" data-action="hunk-previous" :disabled="!diffHunks.length"
-                      :aria-label="t('core.codeDiffPreviousHunk')" @click="navigateHunk(-1)">↑</UiButton>
-            <span data-action="hunk-position" class="mono" aria-live="polite">
-              {{ diffHunks.length ? hunkIndex + 1 : 0 }} / {{ diffHunks.length }}
-            </span>
-            <UiButton variant="ghost" data-action="hunk-next" :disabled="!diffHunks.length"
-                      :aria-label="t('core.codeDiffNextHunk')" @click="navigateHunk(1)">↓</UiButton>
-          </div>
-          <UiSelect v-if="tab === 'git' && shownEntry && !fileHistoryActive" compact data-action="diff-file-list"
-                    :aria-label="t('core.codeDiffFiles')"
-                    :model-value="gitRef(shownEntry.group.id, shownEntry.file.path)"
-                    @change="selectQuickDiff">
-            <option v-for="file in shownEntry.group.files" :key="file.path"
-                    :value="gitRef(shownEntry.group.id, file.path)">{{ file.path }}</option>
-          </UiSelect>
-          <UiButton variant="ghost" data-action="diff-layout-switch"
-                    :disabled="oneSidedDiff || editorForcesInlineDiff"
-                    @click="setDiffLayout(!side)">
-            {{ renderSideBySide ? t('core.codeDiffSideBySide') : t('core.codeDiffUnified') }}
-          </UiButton>
-          <div v-if="gitFileNavigation" class="file-navigation" role="group"
-               :aria-label="`Навигация по файлам изменений: файл ${gitFileNavigation.index + 1} из ${gitFileNavigation.total}`">
-            <UiIconButton role="embedded" data-context="code-editor-action"
-                          label="Предыдущий файл" v-tooltip="'Предыдущий файл'"
-                          :disabled="!gitFileNavigation.previous"
-                          @click="navigateGitFile(-1)">
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
-                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="m10 3-5 5 5 5" />
-              </svg>
-            </UiIconButton>
-            <span class="file-position mono" aria-live="polite">
-              <span class="file-position-label">Файл </span>{{ gitFileNavigation.index + 1 }} /
-              {{ gitFileNavigation.total }}
-            </span>
-            <UiIconButton role="embedded" data-context="code-editor-action"
-                          label="Следующий файл" v-tooltip="'Следующий файл'"
-                          :disabled="!gitFileNavigation.next"
-                          @click="navigateGitFile(1)">
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
-                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="m6 3 5 5-5 5" />
-              </svg>
-            </UiIconButton>
-          </div>
-          <UiPopover has-popup="dialog" placement="bottom-end"
-                     :style="{ width: 'min(320px, calc(100vw - 20px))' }">
-            <template #trigger>
-              <UiButton class="diff-view-trigger" variant="ghost"
-                        data-context="code-editor-action" data-action="diff-view"
-                        v-tooltip="`Вид сравнения: ${diffLayoutLabel}`">
-                <span>Вид сравнения</span>
-                <span class="diff-view-mode">· {{ diffLayoutLabel }}</span>
-                <svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor"
-                     stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
-                     aria-hidden="true">
-                  <path d="m4 6 4 4 4-4" />
-                </svg>
-              </UiButton>
-            </template>
-            <div class="code-popover-panel diff-view-panel">
-              <strong class="code-popover-title">Вид сравнения</strong>
-              <span class="code-popover-label">Расположение</span>
-              <div class="diff-layout-options" role="group" aria-label="Расположение сравнения">
-                <UiButton variant="ghost" data-context="code-popover-choice"
-                          :pressed="renderSideBySide"
-                          :disabled="oneSidedDiff || editorForcesInlineDiff"
-                          @click="setDiffLayout(true)">
-                  Рядом
-                </UiButton>
-                <UiButton variant="ghost" data-context="code-popover-choice"
-                          :pressed="!renderSideBySide" @click="setDiffLayout(false)">
-                  В одну колонку
-                </UiButton>
-              </div>
-              <p v-if="oneSidedDiff" class="code-popover-note">
-                Новый или удалённый файл показывается в одну колонку.
-              </p>
-              <p v-else-if="editorForcesInlineDiff" class="code-popover-note">
-                На этой ширине сравнение показано в одну колонку. При расширении вернётся
-                сохранённый режим «Рядом».
-              </p>
-              <UiSwitch :model-value="diffWrap" data-action="diff-wrap"
-                        @change="toggleDiffWrap">
-                Переносить длинные строки
-              </UiSwitch>
-              <UiSwitch :model-value="ignoreTrimWhitespace" data-action="diff-whitespace"
-                        @change="toggleDiffWhitespace">
-                Игнорировать пробелы по краям строк
-              </UiSwitch>
-              <UiSwitch :model-value="diffPreferences.collapse" data-action="diff-collapse"
-                        @change="setDiffBoolean('collapse', $event)">
-                {{ t('core.codeDiffCollapse') }}
-              </UiSwitch>
-              <label>{{ t('core.codeDiffContext') }}
-                <UiSelect :model-value="diffPreferences.context" data-action="diff-context"
-                          @change="setDiffChoice('context', $event)">
-                  <option value="3">3</option>
-                  <option value="10">10</option>
-                  <option value="all">{{ t('core.codeDiffAllLines') }}</option>
-                </UiSelect>
-              </label>
-              <label>{{ t('core.codeDiffDetail') }}
-                <UiSelect :model-value="diffPreferences.detail" data-action="diff-detail"
-                          @change="setDiffChoice('detail', $event)">
-                  <option value="line">{{ t('core.codeDiffLines') }}</option>
-                  <option value="word">{{ t('core.codeDiffWords') }}</option>
-                  <option value="char">{{ t('core.codeDiffCharacters') }}</option>
-                </UiSelect>
-              </label>
-              <label>{{ t('core.codeDiffWhitespace') }}
-                <UiSelect :model-value="diffPreferences.whitespace" data-action="diff-whitespace-mode"
-                          @change="setDiffChoice('whitespace', $event)">
-                  <option value="all">{{ t('core.codeDiffAllDifferences') }}</option>
-                  <option value="trim">{{ t('core.codeDiffTrim') }}</option>
-                  <option value="ignore-all">{{ t('core.codeDiffIgnoreWhitespace') }}</option>
-                </UiSelect>
-              </label>
-              <UiSwitch :model-value="diffPreferences.renderWhitespace" data-action="diff-render-whitespace"
-                        @change="setDiffBoolean('renderWhitespace', $event)">
-                {{ t('core.codeDiffWhitespaceGlyphs') }}
-              </UiSwitch>
-              <UiSwitch :model-value="diffPreferences.sync" data-action="diff-sync-scroll"
-                        :disabled="!renderSideBySide" @change="setDiffBoolean('sync', $event)">
-                {{ t('core.codeDiffSyncScroll') }}
-              </UiSwitch>
-              <UiSwitch :model-value="diffPreferences.align" data-action="diff-align"
-                        :disabled="!renderSideBySide" @change="setDiffBoolean('align', $event)">
-                {{ t('core.codeDiffAlign') }}
-              </UiSwitch>
-              <p v-if="!renderSideBySide" class="code-popover-note">{{ t('core.codeDiffPairOnly') }}</p>
+          <div class="diff-primary">
+            <div class="comparison-identity">
+              <span v-if="comparisonBadge" class="comparison-sides mono"
+                    v-tooltip="comparisonBadge.hint">
+                {{ comparisonBadge.label }}
+              </span>
+              <span v-if="rangeSummary" class="note mono range-summary">{{ rangeSummary }}</span>
+              <span v-if="diffLoading" class="note">читаю…</span>
+              <span v-else-if="diffError" class="note diff-error">{{ diffError }}</span>
             </div>
-          </UiPopover>
+            <UiButton v-if="tab === 'git' && gitPane === 'changes' && (commitSel.size || branchMode)"
+                      variant="ghost" data-context="code-editor-action"
+                      data-action="clear-commits" v-tooltip="'Сбросить выбранный диапазон'"
+                      @click="clearCommitSelection">
+              Сбросить диапазон
+            </UiButton>
+            <div v-if="tab === 'git' && !fileHistoryActive" class="hunk-navigation" role="group"
+                 :aria-label="t('core.codeDiffHunkNavigation')">
+              <UiIconButton role="embedded" data-context="code-editor-action" data-action="hunk-previous"
+                            :disabled="!diffHunks.length" :label="t('core.codeDiffPreviousHunk')"
+                            v-tooltip="t('core.codeDiffPreviousHunk')" @click="navigateHunk(-1)">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M8 13V3M4 7l4-4 4 4" />
+                </svg>
+              </UiIconButton>
+              <span data-action="hunk-position" class="mono" aria-live="polite">
+                {{ diffHunks.length ? hunkIndex + 1 : 0 }} / {{ diffHunks.length }}
+              </span>
+              <UiIconButton role="embedded" data-context="code-editor-action" data-action="hunk-next"
+                            :disabled="!diffHunks.length" :label="t('core.codeDiffNextHunk')"
+                            v-tooltip="t('core.codeDiffNextHunk')" @click="navigateHunk(1)">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M8 3v10M4 9l4 4 4-4" />
+                </svg>
+              </UiIconButton>
+            </div>
+          </div>
+          <div class="diff-secondary">
+            <UiSelect v-if="tab === 'git' && shownEntry && !fileHistoryActive
+                        && (navigatorCollapsed || codePanelNarrow)"
+                      compact data-action="diff-file-list"
+                      :aria-label="t('core.codeDiffFiles')"
+                      :model-value="gitRef(shownEntry.group.id, shownEntry.file.path)"
+                      @change="selectQuickDiff">
+              <option v-for="file in shownEntry.group.files" :key="file.path"
+                      :value="gitRef(shownEntry.group.id, file.path)">{{ file.path }}</option>
+            </UiSelect>
+            <UiButton class="diff-layout-switch" variant="ghost" data-action="diff-layout-switch"
+                      data-context="code-editor-action"
+                      :disabled="oneSidedDiff || editorForcesInlineDiff"
+                      @click="setDiffLayout(!side)">
+              {{ renderSideBySide ? t('core.codeDiffSideBySide') : t('core.codeDiffUnified') }}
+            </UiButton>
+            <div v-if="gitFileNavigation" class="file-navigation" role="group"
+                 :aria-label="`Навигация по файлам изменений: файл ${gitFileNavigation.index + 1} из ${gitFileNavigation.total}`">
+              <UiIconButton role="embedded" data-context="code-editor-action"
+                            label="Предыдущий файл" v-tooltip="'Предыдущий файл'"
+                            :disabled="!gitFileNavigation.previous"
+                            @click="navigateGitFile(-1)">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m10 3-5 5 5 5" />
+                </svg>
+              </UiIconButton>
+              <span class="file-position mono" aria-live="polite">
+                <span class="file-position-label">Файл </span>{{ gitFileNavigation.index + 1 }} /
+                {{ gitFileNavigation.total }}
+              </span>
+              <UiIconButton role="embedded" data-context="code-editor-action"
+                            label="Следующий файл" v-tooltip="'Следующий файл'"
+                            :disabled="!gitFileNavigation.next"
+                            @click="navigateGitFile(1)">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m6 3 5 5-5 5" />
+                </svg>
+              </UiIconButton>
+            </div>
+            <UiPopover has-popup="dialog" placement="bottom-end"
+                       :style="{ width: 'min(320px, calc(100vw - 20px))' }">
+              <template #trigger>
+                <UiIconButton class="diff-view-trigger" role="embedded"
+                          data-context="code-editor-action" data-action="diff-view"
+                          :label="t('core.codeReviewDiffSettings')"
+                          v-tooltip="`Вид сравнения: ${diffLayoutLabel}`">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                       stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
+                       aria-hidden="true">
+                    <path d="M3 2v12M8 2v12M13 2v12M1.5 5h3M6.5 11h3M11.5 6h3" />
+                  </svg>
+                </UiIconButton>
+              </template>
+              <div class="code-popover-panel diff-view-panel">
+                <strong class="code-popover-title">Вид сравнения</strong>
+                <span class="code-popover-label">Расположение</span>
+                <div class="diff-layout-options" role="group" aria-label="Расположение сравнения">
+                  <UiButton variant="ghost" data-context="code-popover-choice"
+                            :pressed="renderSideBySide"
+                            :disabled="oneSidedDiff || editorForcesInlineDiff"
+                            @click="setDiffLayout(true)">
+                    Рядом
+                  </UiButton>
+                  <UiButton variant="ghost" data-context="code-popover-choice"
+                            :pressed="!renderSideBySide" @click="setDiffLayout(false)">
+                    В одну колонку
+                  </UiButton>
+                </div>
+                <p v-if="oneSidedDiff" class="code-popover-note">
+                  Новый или удалённый файл показывается в одну колонку.
+                </p>
+                <p v-else-if="editorForcesInlineDiff" class="code-popover-note">
+                  На этой ширине сравнение показано в одну колонку. При расширении вернётся
+                  сохранённый режим «Рядом».
+                </p>
+                <UiSwitch :model-value="diffWrap" data-action="diff-wrap"
+                          @change="toggleDiffWrap">
+                  Переносить длинные строки
+                </UiSwitch>
+                <UiSwitch :model-value="ignoreTrimWhitespace" data-action="diff-whitespace"
+                          @change="toggleDiffWhitespace">
+                  Игнорировать пробелы по краям строк
+                </UiSwitch>
+                <UiSwitch :model-value="diffPreferences.collapse" data-action="diff-collapse"
+                          @change="setDiffBoolean('collapse', $event)">
+                  {{ t('core.codeDiffCollapse') }}
+                </UiSwitch>
+                <label>{{ t('core.codeDiffContext') }}
+                  <UiSelect :model-value="diffPreferences.context" data-action="diff-context"
+                            @change="setDiffChoice('context', $event)">
+                    <option value="3">3</option>
+                    <option value="10">10</option>
+                    <option value="all">{{ t('core.codeDiffAllLines') }}</option>
+                  </UiSelect>
+                </label>
+                <label>{{ t('core.codeDiffDetail') }}
+                  <UiSelect :model-value="diffPreferences.detail" data-action="diff-detail"
+                            @change="setDiffChoice('detail', $event)">
+                    <option value="line">{{ t('core.codeDiffLines') }}</option>
+                    <option value="word">{{ t('core.codeDiffWords') }}</option>
+                    <option value="char">{{ t('core.codeDiffCharacters') }}</option>
+                  </UiSelect>
+                </label>
+                <label>{{ t('core.codeDiffWhitespace') }}
+                  <UiSelect :model-value="diffPreferences.whitespace" data-action="diff-whitespace-mode"
+                            @change="setDiffChoice('whitespace', $event)">
+                    <option value="all">{{ t('core.codeDiffAllDifferences') }}</option>
+                    <option value="trim">{{ t('core.codeDiffTrim') }}</option>
+                    <option value="ignore-all">{{ t('core.codeDiffIgnoreWhitespace') }}</option>
+                  </UiSelect>
+                </label>
+                <UiSwitch :model-value="diffPreferences.renderWhitespace" data-action="diff-render-whitespace"
+                          @change="setDiffBoolean('renderWhitespace', $event)">
+                  {{ t('core.codeDiffWhitespaceGlyphs') }}
+                </UiSwitch>
+                <UiSwitch :model-value="diffPreferences.sync" data-action="diff-sync-scroll"
+                          :disabled="!renderSideBySide" @change="setDiffBoolean('sync', $event)">
+                  {{ t('core.codeDiffSyncScroll') }}
+                </UiSwitch>
+                <UiSwitch :model-value="diffPreferences.align" data-action="diff-align"
+                          :disabled="!renderSideBySide" @change="setDiffBoolean('align', $event)">
+                  {{ t('core.codeDiffAlign') }}
+                </UiSwitch>
+                <p v-if="!renderSideBySide" class="code-popover-note">{{ t('core.codeDiffPairOnly') }}</p>
+              </div>
+            </UiPopover>
+          </div>
         </div>
         </header>
-        <div v-if="tab === 'git' && shownEntry && !fileHistoryActive" class="code-review-controls">
-          <UiButton data-action="mark-viewed" variant="ghost" :disabled="diffLoading || !currentDiffContent()"
-                    :pressed="isViewed(currentComparison())" @click="markViewed">
-            {{ t('core.codeReviewViewed') }}
-          </UiButton>
-          <span data-action="review-progress">{{ t('core.codeReviewComparisons') }}: {{ viewedCount }} /
-            {{ reviewComparisonCount }}</span>
-          <UiButton data-action="next-unreviewed" variant="ghost"
-                    :aria-label="t('core.codeReviewNextUnreviewed')" @click="nextUnreviewed">
-            {{ t('core.codeReviewNextUnreviewed') }}
-          </UiButton>
-          <UiButton data-action="select-diff-hunk" variant="ghost" :disabled="!diffHunks.length"
-                    @click="selectCurrentHunk">{{ t('core.codeReviewSelectHunk') }}</UiButton>
-          <UiButton data-action="add-review-note" variant="ghost" :disabled="!diffDisplay"
-                    @click="addReviewNote(false)">{{ t('core.codeReviewAddNote') }}</UiButton>
-          <UiButton data-action="explain-selection" variant="ghost" :disabled="!diffDisplay"
-                    @click="addReviewNote(true)">{{ t('core.codeReviewExplain') }}</UiButton>
-          <UiButton data-action="review-notes-preview" variant="ghost" :disabled="!reviewNotes.length"
-                    @click="previewReviewNotes">{{ t('core.codeReviewNotes') }} ({{ reviewNotes.length }})</UiButton>
-          <UiButton v-if="partialAvailable" data-action="partial-stage" variant="ghost" :disabled="gitActionBusy"
-                    @click="applyPartialSelection(false)">{{ t(shownEntry.group.id === 'staged'
-                      ? 'core.codeReviewPartialUnstage' : 'core.codeReviewPartialStage') }}</UiButton>
-          <UiButton v-if="partialAvailable" data-action="partial-stage-hunk" variant="ghost"
-                    :disabled="gitActionBusy || !diffHunks.length" @click="applyPartialSelection(true)">
-            {{ t(shownEntry.group.id === 'staged'
-              ? 'core.codeReviewPartialUnstageHunk' : 'core.codeReviewPartialStageHunk') }}
-          </UiButton>
+        <div v-if="tab === 'git' && shownEntry && !fileHistoryActive" class="review-toolbar">
+          <div class="review-status">
+            <UiButton data-action="mark-viewed" data-context="code-editor-action" variant="ghost"
+                      :disabled="diffLoading || !currentDiffContent()"
+                      :pressed="isViewed(currentComparison())" @click="markViewed">
+              <span class="review-button-content">
+                <svg class="review-glyph" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                     stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m3 8 3 3 7-7" />
+                </svg>
+                {{ t('core.codeReviewViewed') }}
+              </span>
+            </UiButton>
+            <span data-action="review-progress" class="review-progress mono"
+                  v-tooltip="t('core.codeReviewComparisons')">{{ viewedCount }} / {{ reviewComparisonCount }}</span>
+            <UiIconButton data-action="next-unreviewed" role="embedded" data-context="code-editor-action"
+                          :label="t('core.codeReviewNextUnreviewed')"
+                          v-tooltip="t('core.codeReviewNextUnreviewed')" @click="nextUnreviewed">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 3v9h9M8 8l4 4-4 3" />
+              </svg>
+            </UiIconButton>
+          </div>
+          <div class="review-actions">
+            <UiButton data-action="review-notes-preview" data-context="code-editor-action"
+                      variant="ghost" :disabled="!reviewNotes.length" :aria-label="t('core.codeReviewNotes')"
+                      v-tooltip="t('core.codeReviewNotes')" @click="previewReviewNotes">
+              <span class="review-button-content">
+                <svg class="review-glyph" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                     stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M2.5 2.5h11v8h-7l-3 3v-3h-1zM5 5h6M5 8h4" />
+                </svg>
+                <span class="review-action-label">{{ t('core.codeReviewNotes') }}</span>
+                <span class="toolbar-count mono">{{ reviewNotes.length }}</span>
+              </span>
+            </UiButton>
+            <UiPopover has-popup="dialog" placement="bottom-end"
+                       :style="{ width: 'min(300px, calc(100vw - 20px))' }">
+              <template #trigger>
+                <UiButton variant="ghost" data-context="code-editor-action" data-action="review-tools"
+                          :aria-label="t('core.codeReviewTools')" v-tooltip="t('core.codeReviewTools')">
+                  <span class="review-button-content">
+                    <svg class="review-glyph" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                         stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="m5 4-4 4 4 4M11 4l4 4-4 4M9 2 7 14" />
+                    </svg>
+                    <span class="review-action-label">{{ t('core.codeReviewTools') }}</span>
+                    <span class="review-action-chevron" aria-hidden="true">⌄</span>
+                  </span>
+                </UiButton>
+              </template>
+              <template #default="{ close }">
+                <div class="code-popover-panel">
+                  <strong class="code-popover-title">{{ t('core.codeReviewSelectionTools') }}</strong>
+                  <UiButton data-action="select-diff-hunk" block variant="ghost"
+                            data-context="code-popover-action" :disabled="!diffHunks.length"
+                            @click="selectCurrentHunk(); close('action')">
+                    {{ t('core.codeReviewSelectHunk') }}
+                  </UiButton>
+                  <UiButton data-action="add-review-note" block variant="ghost"
+                            data-context="code-popover-action" :disabled="!diffDisplay"
+                            @click="addReviewNote(false); close('action')">
+                    {{ t('core.codeReviewAddNote') }}
+                  </UiButton>
+                  <UiButton data-action="explain-selection" block variant="ghost"
+                            data-context="code-popover-action" :disabled="!diffDisplay"
+                            @click="addReviewNote(true); close('action')">
+                    {{ t('core.codeReviewExplain') }}
+                  </UiButton>
+                  <template v-if="partialAvailable">
+                    <span class="code-popover-label">{{ t('core.codeReviewIndexTools') }}</span>
+                    <UiButton data-action="partial-stage" block variant="ghost"
+                              data-context="code-popover-action" :disabled="gitActionBusy"
+                              @click="applyPartialSelection(false); close('action')">
+                      {{ t(shownEntry.group.id === 'staged'
+                        ? 'core.codeReviewPartialUnstage' : 'core.codeReviewPartialStage') }}
+                    </UiButton>
+                    <UiButton data-action="partial-stage-hunk" block variant="ghost"
+                              data-context="code-popover-action" :disabled="gitActionBusy || !diffHunks.length"
+                              @click="applyPartialSelection(true); close('action')">
+                      {{ t(shownEntry.group.id === 'staged'
+                        ? 'core.codeReviewPartialUnstageHunk' : 'core.codeReviewPartialStageHunk') }}
+                    </UiButton>
+                  </template>
+                </div>
+              </template>
+            </UiPopover>
+          </div>
         </div>
         <div v-if="noteEditing" class="code-review-controls">
           <UiTextarea v-model="noteText" data-action="review-note-text" :aria-label="t('core.codeReviewAddNote')" />
@@ -1822,6 +1949,7 @@ const gitGroups = computed(() => buildGitGroups(git.value, gitOpenDirs.value, co
 const changeGroups = computed(() => gitGroups.value.filter((group) => group.id !== 'commits'));
 const gitFilterPath = ref('');
 const gitFilterStatus = ref('');
+const gitFiltersOpen = ref(false);
 const paneGitGroups = computed(() => (
   gitPane.value === 'changes'
     ? changeGroups.value
@@ -6199,6 +6327,54 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.git-controls { flex: none; min-width: 0; }
+.git-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: var(--code-toolbar-height);
+  box-sizing: border-box;
+  padding: 3px var(--code-gutter);
+  border-bottom: 1px solid var(--line);
+}
+.git-filter-bar :deep(.ui-search-input) { flex: 1; min-width: 0; }
+.git-status-filter { display: grid; padding: 6px var(--code-gutter); }
+.git-filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px var(--code-gutter);
+  color: var(--ink-mid);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.git-selection-tools.code-review-controls {
+  padding: 6px var(--code-gutter);
+  border-block: 1px solid var(--line);
+}
+.selection-caption { flex: 1; color: var(--ink); font-size: 11.5px; }
+.review-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  min-height: var(--code-toolbar-height);
+  box-sizing: border-box;
+  padding: 4px var(--code-gutter);
+  border-bottom: 1px solid var(--line);
+  background: var(--topbar);
+}
+.review-status, .review-actions { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.review-status { flex: none; }
+.review-actions { justify-content: flex-end; }
+.review-button-content { display: inline-flex; align-items: center; gap: 6px; }
+.review-glyph { flex: none; width: 14px; height: 14px; }
+.toolbar-count { min-width: 16px; text-align: center; font-size: 11px; }
+.review-progress { color: var(--ink-mid); font-size: 11px; white-space: nowrap; }
 .code-review-controls {
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px;
   min-width: 0; max-height: 30vh; overflow: auto; flex-shrink: 0;
@@ -6207,8 +6383,13 @@ onBeforeUnmount(() => {
 .code-review-draft { max-height: 40%; overflow: auto; padding: 4px; }
 .git-file[data-viewed="true"] .nm::after { content: ' ✓'; }
 
-.code-panel { height: 100%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
-.hunk-navigation { display: flex; align-items: center; gap: 4px; }
+.code-panel {
+  --code-toolbar-height: 40px;
+  --code-gutter: 12px;
+  height: 100%; min-width: 0; display: flex; flex-direction: column; min-height: 0;
+}
+.hunk-navigation { display: flex; flex: none; align-items: center; gap: 0; }
+.hunk-navigation [data-action='hunk-position'] { min-width: 44px; text-align: center; font-size: 11px; }
 .code-head {
   flex: none;
   min-width: 0;
@@ -6291,7 +6472,7 @@ onBeforeUnmount(() => {
 .loading-panel { gap: 0; }
 .loading-tree { display: flex; flex-direction: column; gap: 11px; padding: 15px 17px; }
 .loading-row { width: var(--loading-row); height: 8px; border-radius: 999px; background: var(--line); opacity: .78; }
-.loading-editor .ehead { min-height: 37px; }
+.loading-editor .ehead { min-height: var(--code-toolbar-height); }
 .loading-path { width: min(42%, 260px); height: 8px; border-radius: 999px; background: var(--line); }
 .loading-editor .ebody { display: grid; place-items: center; background: #0a0c10; }
 .loading-status { color: var(--ink-mid); font-size: 12px; }
@@ -6306,7 +6487,7 @@ onBeforeUnmount(() => {
 
 /* Рейка разделов: skin кнопки — в общем actions.css по data-context, здесь только
    раскладка колонки и бейдж счётчика поверх значка «Изменений». */
-.rail { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; align-items: center;
+.rail { display: flex; flex-direction: column; gap: 6px; padding: 3px 0; align-items: center;
   background: var(--sidebar); border-right: 1px solid var(--line); }
 .rail-item { position: relative; }
 .ic { width: 19px; height: 19px; }
@@ -6326,7 +6507,7 @@ onBeforeUnmount(() => {
 .unavailable-repo { color: var(--bad); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-footer { order: 20; flex: none; min-width: 0; border-top: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 72%, var(--sidebar)); }
-.git-compose { display: flex; flex-direction: column; gap: 5px; padding: 6px 8px; }
+.git-compose { display: flex; flex-direction: column; gap: 6px; padding: 8px var(--code-gutter); }
 .git-compose-head { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .commit-disclosure { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0;
   text-align: left; }
@@ -6345,8 +6526,9 @@ onBeforeUnmount(() => {
 .git-compose-actions { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .git-compose-actions .commit-action { flex: 1; min-width: 0; }
 .git-compose-actions .generate-commit { flex: none; }
-.git-sync-row { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 34px;
-  padding: 3px 8px; border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent); }
+.git-sync-row { display: flex; align-items: center; gap: 6px; min-width: 0;
+  min-height: var(--code-toolbar-height); box-sizing: border-box;
+  padding: 4px var(--code-gutter); border-top: 1px solid var(--line); }
 .git-remote-actions { display: inline-flex; flex: none; align-items: center; gap: 3px; }
 .git-notice {
   flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere;
@@ -6357,12 +6539,12 @@ onBeforeUnmount(() => {
 .git-panel { order: 10; display: flex; flex: 1; flex-direction: column; min-width: 0;
   min-height: 0; }
 .git-panel-toolbar {
-  display: flex; flex: none; align-items: center; gap: 6px; min-height: 31px; padding: 3px 10px;
+  display: flex; flex: none; align-items: center; gap: 6px;
+  min-height: var(--code-toolbar-height); box-sizing: border-box; padding: 4px var(--code-gutter);
   border-bottom: 1px solid var(--line); background: var(--sidebar);
 }
 .git-panel-label {
-  color: var(--ink-low); font-size: 10.5px; font-weight: 650;
-  letter-spacing: .035em; text-transform: uppercase;
+  color: var(--ink-mid); font-size: 12px; font-weight: 500;
 }
 .git-clean {
   display: flex; align-items: center; gap: 7px; padding: 8px 6px;
@@ -6450,8 +6632,7 @@ onBeforeUnmount(() => {
    с кнопками: замер при 300 px показал заголовок, ужатый до «В…». Поэтому там итог
    целиком уходит на свою строку под заголовком — числа и полоска остаются читаемыми. */
 @container code-panel (max-width: 359px) {
-  .subhead:not(.commit-range-summary) { flex-wrap: wrap; }
-  .subhead > .diffstat { order: 10; flex-basis: 100%; }
+  .git-group > .subhead:not(.commit-range-summary) .bar { display: none; }
 }
 /* В узкой панели имени файла уступают и счётчик строк, и хвост каталога: имя — то,
    ради чего список открывают, числа видны в самом дифе, а целый путь остаётся в
@@ -6459,6 +6640,7 @@ onBeforeUnmount(() => {
    а не размер экрана. */
 @container code-panel (max-width: 299px) {
   .git-file .cnt, .git-file .nm-dir { display: none; }
+  .git-group > .subhead:not(.commit-range-summary) .diffstat { display: none; }
 }
 
 /* Заголовок группы: капс с разрядкой был вдвое шире строчных букв и в узком доке
@@ -6467,9 +6649,18 @@ onBeforeUnmount(() => {
   color: var(--ink-mid); padding: 6px 4px 4px; display: flex; align-items: center; gap: 5px;
   min-width: 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent); }
 .git-tree .subhead {
-  position: sticky; top: -6px; z-index: 3;
+  position: sticky; top: 0; z-index: 3;
   background: color-mix(in srgb, var(--sidebar) 94%, var(--surface));
 }
+.git-tree { padding-top: 0; }
+.git-group > .subhead:not(.commit-range-summary) {
+  min-height: var(--code-toolbar-height);
+  box-sizing: border-box;
+  padding-block: 4px;
+  flex-wrap: nowrap;
+}
+.git-group > .subhead:not(.commit-range-summary) .group-toggle { flex: 1; }
+.git-group > .subhead:not(.commit-range-summary) > .grow { display: none; }
 .commit-tree { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
 /* Секция журнала — flex-колонка: список получает остаток высоты и прокручивается сам.
    Блочная секция с overflow: hidden просто отрезала хвост истории без прокрутки. */
@@ -6505,7 +6696,8 @@ onBeforeUnmount(() => {
 .file-history-entry .subj { flex: 1; min-width: 0; }
 .history-old-path { flex-basis: 100%; padding-left: 64px; color: var(--ink-mid);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; }
-.code-search { padding: 7px; border-bottom: 1px solid var(--line); }
+.code-search { display: flex; align-items: center; min-height: var(--code-toolbar-height);
+  box-sizing: border-box; padding: 3px var(--code-gutter); border-bottom: 1px solid var(--line); }
 .code-search :deep(.ui-search-input) { width: 100%; }
 .code-search :deep(.ui-input) { min-width: 0; width: 100%; }
 .search-result-head { padding-top: 8px; }
@@ -6520,10 +6712,12 @@ onBeforeUnmount(() => {
 /* Просмотр */
 .editorwrap { display: flex; flex-direction: column; min-width: 0; min-height: 0;
   container: code-editor / inline-size; }
-.editor-header { flex: none; min-width: 0; border-bottom: 1px solid var(--line);
+.editor-header { flex: none; min-width: 0;
   background: var(--topbar); }
 .ehead {
-  display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 10px;
+  display: flex; align-items: center; gap: 8px;
+  min-height: var(--code-toolbar-height); box-sizing: border-box; padding: 4px var(--code-gutter);
+  border-bottom: 1px solid var(--line);
 }
 .ehead [data-action='back-to-navigator'] { flex: none; }
 .editor-identity { display: flex; flex: 0 1 auto; align-items: center; gap: 8px;
@@ -6538,19 +6732,24 @@ onBeforeUnmount(() => {
 .file-view-state { flex: none; color: var(--ink-low); font-size: 12px; }
 .file-head-actions { display: flex; flex: none; align-items: center; gap: 2px; min-width: 0; }
 .diffhead {
-  display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 36px;
-  padding: 2px 10px; border-top: 1px solid var(--line);
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  min-height: var(--code-toolbar-height); box-sizing: border-box;
+  padding: 4px var(--code-gutter); border-bottom: 1px solid var(--line);
 }
-.comparison-identity { display: flex; flex: 0 1 auto; align-items: center; gap: 8px;
+.diff-primary, .diff-secondary { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.diff-primary { flex: 1; }
+.diff-secondary { flex: none; gap: 4px; border-left: 1px solid var(--line); padding-left: 8px; }
+.comparison-identity { display: flex; flex: 1; align-items: center; gap: 8px;
   min-width: 0; }
 .comparison-sides {
   min-width: 0; color: var(--ink-mid); font-size: 12px; line-height: 16px;
   white-space: normal;
 }
 .file-navigation { display: inline-flex; flex: none; align-items: center; gap: 1px; }
-.file-position { min-width: 66px; color: var(--ink-mid); font-size: 11px;
+.file-position { min-width: 54px; color: var(--ink-mid); font-size: 11px;
   font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
-.file-head-actions > *, .diffhead > * { flex-shrink: 0; }
+.file-head-actions > *, .diff-secondary > * { flex-shrink: 0; }
+.diff-secondary > :deep(.ui-select-wrap) { flex: 1; min-width: 0; max-width: 220px; }
 .ehead .glyph { display: inline-flex; align-items: center; justify-content: center;
   width: 14px; height: 14px; flex: none; }
 .ehead svg.glyph { fill: currentColor; }
@@ -6572,23 +6771,24 @@ onBeforeUnmount(() => {
   .range-summary { display: none; }
 }
 @container code-editor (max-width: 760px) {
-  .ehead { min-height: 40px; padding-inline: 8px; }
-  .diffhead { padding-inline: 8px; }
   .file-view-state { display: none; }
+  .review-actions .review-action-label, .review-action-chevron { display: none; }
+  .review-actions .review-glyph { margin: 0; }
 }
 @container code-editor (max-width: 520px) {
   .ehead, .diffhead { gap: 4px; }
+  .diffhead { flex-wrap: wrap; }
+  .diff-primary, .diff-secondary { flex: 1 1 100%; }
+  .diff-secondary { border-left: 0; padding-left: 0; justify-content: flex-end; }
+  .diff-secondary .diff-layout-switch { display: none; }
   .file-position { min-width: 38px; }
   .file-position-label, .diff-view-mode { display: none; }
   .epath-dir { max-width: 34%; }
+  .review-toolbar { gap: 4px; }
 }
 @container code-editor (max-width: 390px) {
-  .ehead { align-items: flex-start; min-height: 44px; }
-  .editor-identity { align-items: flex-start; padding-top: 6px; }
-  .epath { flex-wrap: wrap; line-height: 17px; white-space: normal; }
-  .epath-dir { max-width: 100%; }
-  .diffhead { flex-wrap: wrap; min-height: 36px; padding-block: 4px; }
-  .comparison-identity { flex: 1 1 100%; }
+  .epath-dir { display: none; }
+  .review-status, .review-actions { gap: 0; }
 }
 .note { font-size: 11px; color: var(--warn); flex: none; }
 .note.diff-error { color: var(--bad); }

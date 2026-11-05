@@ -59,6 +59,7 @@ const hiddenRegions = new Map<monaco.editor.IStandaloneCodeEditor, SourceRange[]
 let activeSide: DiffSide = 'new';
 let scrolling = false;
 let rendering = false;
+let renderQueued = false;
 let destroyed = false;
 
 /**
@@ -210,8 +211,8 @@ function createEditors() {
       emit('position', position.side, position.line);
     }));
 
-    const onLayout = editor.onDidLayoutChange?.(() => render());
-    const onSize = editor.onDidContentSizeChange?.(() => alignEditors());
+    const onLayout = editor.onDidLayoutChange?.(scheduleRender);
+    const onSize = editor.onDidContentSizeChange?.(scheduleRender);
 
     if (onLayout) {
       disposables.push(onLayout);
@@ -222,6 +223,25 @@ function createEditors() {
   }
 
   setModels();
+}
+
+/**
+ * Событие размера приходит также из renderText самого Monaco. Изменение зон внутри
+ * этого вызова разрушает снимок whitespace для render; обновляем после текущего стека.
+ */
+function scheduleRender() {
+  if (rendering || renderQueued || destroyed) {
+    return;
+  }
+
+  renderQueued = true;
+  queueMicrotask(() => {
+    renderQueued = false;
+
+    if (!destroyed) {
+      render();
+    }
+  });
 }
 
 /**

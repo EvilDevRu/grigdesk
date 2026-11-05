@@ -191,6 +191,8 @@ function makeMonaco() {
       scrollTop: 0,
       scrollListeners: new Set(),
       cursorListeners: new Set(),
+      layoutListeners: new Set(),
+      contentSizeListeners: new Set(),
       getModel() {
         return this.model;
       },
@@ -237,6 +239,16 @@ function makeMonaco() {
         this.cursorListeners.add(listener);
 
         return { dispose: () => this.cursorListeners.delete(listener) };
+      },
+      onDidLayoutChange(listener) {
+        this.layoutListeners.add(listener);
+
+        return { dispose: () => this.layoutListeners.delete(listener) };
+      },
+      onDidContentSizeChange(listener) {
+        this.contentSizeListeners.add(listener);
+
+        return { dispose: () => this.contentSizeListeners.delete(listener) };
       },
       revealRangeInCenter(range) {
         this.revealed.push(range.startLineNumber);
@@ -953,7 +965,7 @@ test('Git по умолчанию показан деревом, доступн�
   await wrapper.get('button.git-file[data-path="src/a.js"]').trigger('click');
   await settle(flushPromises);
   assert.match(wrapper.get('.ehead').text(), /src\/\s*a\.js/s);
-  assert.match(wrapper.get('.diffhead').text(), /Вид сравнения.*Одна колонка/s);
+  assert.equal(wrapper.get('[data-action="diff-layout-switch"]').text(), 'В одну колонку');
   assert.equal(diffView(monacoState).paired, false,
     'новый файл не оставляет пустую половину side-by-side diff');
 
@@ -3648,7 +3660,8 @@ test('шапка разделяет файл и сравнение, а редк�
   await settle(flushPromises);
 
   assert.match(wrapper.get('.file-head-row').text(), /a\.js.*История.*Спросить агента/s);
-  assert.match(wrapper.get('.diffhead').text(), /индекс → рабочая копия.*Вид сравнения/s);
+  assert.match(wrapper.get('.diffhead').text(), /индекс → рабочая копия/s);
+  assert.equal(wrapper.get('[data-action="diff-view"]').attributes('aria-label'), 'Вид сравнения');
   assert.equal(wrapper.find('.file-head-row .file-navigation').exists(), false);
   assert.equal(wrapper.find('.diffhead .file-navigation').exists(), false,
     'для единственного файла навигация не рисуется');
@@ -3678,8 +3691,8 @@ test('шапка разделяет файл и сравнение, а редк�
 
   assert.match(styles, /\.epath \{[^}]*min-width:\s*0/);
   assert.match(styles, /\.editorwrap \{[^}]*container:\s*code-editor \/ inline-size/);
-  assert.match(styles, /\.ehead \{[^}]*min-height:\s*44px/);
-  assert.match(styles, /\.diffhead \{[^}]*min-height:\s*36px/);
+  assert.match(styles, /\.ehead \{[^}]*min-height:\s*var\(--code-toolbar-height\)/);
+  assert.match(styles, /\.diffhead \{[^}]*min-height:\s*var\(--code-toolbar-height\)/);
   assert.doesNotMatch(styles, /data-action="diff-(?:wrap|whitespace)"[^}]*display:\s*none/);
 });
 
@@ -5610,6 +5623,90 @@ function reviewControl(wrapper, action) {
   return new CodeViewDomWrapper(teleported);
 }
 
+test('CODE-RESIZE: события отрисовки Monaco не перестраивают зоны синхронно', async (t) => {
+  const h = await mountReviewPanel(t);
+  const editors = reviewEditors(h);
+  let insideMonacoRender = true;
+  let updates = 0;
+
+  for (const editor of editors) {
+    const changeZones = editor.changeViewZones.bind(editor);
+
+    editor.changeViewZones = (callback) => {
+      assert.equal(insideMonacoRender, false, 'снимок whitespace ещё используется Monaco');
+      updates += 1;
+      changeZones(callback);
+    };
+
+    for (const listener of [...editor.layoutListeners, ...editor.contentSizeListeners]) {
+      listener();
+    }
+  }
+
+  assert.equal(updates, 0);
+  insideMonacoRender = false;
+  await settle(h.flushPromises);
+  assert.ok(updates > 0, 'зоны выровнены после завершения отрисовки Monaco');
+});
+
+test('CODE-LAYOUT: фильтры и групповые команды появляются по контексту', async (t) => {
+  const h = await mountReviewPanel(t);
+  const filters = h.wrapper.get('#code-status-filter');
+  const selection = h.wrapper.get('.git-selection-tools');
+
+  assert.equal(filters.isVisible(), false);
+  assert.equal(selection.isVisible(), false);
+  assert.equal(h.wrapper.get('.git-filter-summary').isVisible(), false);
+  await reviewControl(h.wrapper, 'git-filter-toggle').trigger('click');
+  assert.equal(filters.isVisible(), true);
+  await reviewControl(h.wrapper, 'git-filter-status').setValue('M');
+  await reviewControl(h.wrapper, 'git-filter-toggle').trigger('click');
+  assert.equal(filters.isVisible(), true, 'активный статус остаётся доступен после закрытия фильтра');
+  await reviewControl(h.wrapper, 'git-filter-path').setValue('missing-file');
+  assert.match(h.wrapper.get('[role="status"]').text(), /Нет файлов/);
+  await reviewControl(h.wrapper, 'git-filter-clear').trigger('click');
+  assert.equal(filters.isVisible(), false);
+  await h.wrapper.get('button.git-file[data-path="a.txt"]').trigger('click', { ctrlKey: true });
+  assert.equal(selection.isVisible(), true);
+  assert.match(reviewControl(h.wrapper, 'git-selection-count').text(), /Выбрано: 1/);
+  await reviewControl(h.wrapper, 'git-selection-clear').trigger('click');
+  assert.equal(selection.isVisible(), false);
+  assert.equal(h.wrapper.get('.ehead .epath').text(), 'a.txt');
+});
+
+test('CODE-LAYOUT: меню выбирает блок, быстрый список заменяет скрытое дерево', async (t) => {
+  const h = await mountReviewPanel(t);
+
+  assert.equal(h.browser.document.querySelector('[data-action="select-diff-hunk"]'), null);
+  assert.equal(h.wrapper.find('[data-action="diff-file-list"]').exists(), false);
+  await clickReviewMenuAction(h, 'select-diff-hunk');
+  assert.equal(h.browser.document.querySelector('[data-action="select-diff-hunk"]'), null);
+  assert.ok(reviewEditors(h).some((editor) => editor.getSelection()?.startLineNumber === 5));
+  await h.wrapper.get('button.navigator-toggle').trigger('click');
+  await reviewControl(h.wrapper, 'diff-file-list').setValue('work:b.txt');
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.get('.ehead .epath').text(), 'b.txt');
+  await h.wrapper.get('button.navigator-toggle').trigger('click');
+  assert.equal(h.wrapper.find('[data-action="diff-file-list"]').exists(), false);
+  assert.equal(h.wrapper.get('button.git-file[data-path="b.txt"]').attributes('aria-pressed'), 'true');
+});
+
+/**
+ * Открывает настоящее меню действий перед выбором команды, как при работе мышью.
+ * После закрытия popover следующий вызов снова проходит через его кнопку.
+ */
+async function clickReviewMenuAction(h, action, trigger = 'review-tools') {
+  const selector = `[data-action="${action}"]`;
+
+  if (!h.browser.document.querySelector(selector)) {
+    await reviewControl(h.wrapper, trigger).trigger('click');
+    await settle(h.flushPromises);
+  }
+
+  await reviewControl(h.wrapper, action).trigger('click');
+  await settle(h.flushPromises);
+}
+
 /**
  * Настройки могут быть телепортированы общим popover за пределы wrapper.
  * Меняем настоящий native select/switch и посылаем тот же change, что делает браузер.
@@ -6010,17 +6107,15 @@ test('CODE-NOTES-BATCH/SIDES: old/new двух файлов, редактиру�
     newContent: '\n\nnew insertion\n',
   })) });
 
-  // Control проверяется раньше выбора: исходный RED — отсутствие новой возможности.
-  reviewControl(h.wrapper, 'add-review-note');
   await reviewSetting(h, 'diff-whitespace-mode', 'ignore-all');
   selectReviewLines(h, 'old', 2);
-  await reviewControl(h.wrapper, 'add-review-note').trigger('click');
+  await clickReviewMenuAction(h, 'add-review-note');
   await reviewControl(h.wrapper, 'review-note-text').setValue('Почему удалено?');
   await reviewControl(h.wrapper, 'save-review-note').trigger('click');
   await h.wrapper.get('button.git-file[data-path="b.txt"]').trigger('click');
   await settle(h.flushPromises);
   selectReviewLines(h, 'new', 3);
-  await reviewControl(h.wrapper, 'explain-selection').trigger('click');
+  await clickReviewMenuAction(h, 'explain-selection');
   await reviewControl(h.wrapper, 'review-notes-preview').trigger('click');
 
   const draft = reviewControl(h.wrapper, 'review-draft');
@@ -6055,9 +6150,8 @@ test('CODE-PARTIAL-UI: stage C передаёт raw ids/token без whole-file 
     post: async () => ({ ok: true, changed: 1 }),
   });
 
-  reviewControl(h.wrapper, 'partial-stage');
   selectReviewLines(h, 'new', 3);
-  await reviewControl(h.wrapper, 'partial-stage').trigger('click');
+  await clickReviewMenuAction(h, 'partial-stage');
   await settle(h.flushPromises);
 
   const partial = h.requests.find((entry) => entry.url.includes('/partial-index?'));
@@ -6126,14 +6220,14 @@ test('CODE-TREE-CONTROLS: collapse/reveal и счётчики leaf-файлов'
   })) });
 
   await h.wrapper.get('button.git-file[data-path="src/sub/a.txt"]').trigger('click');
-  await reviewControl(h.wrapper, 'git-collapse-all').trigger('click');
+  await clickReviewMenuAction(h, 'git-collapse-all', 'git-tree-tools');
   assert.equal(h.wrapper.find('button.git-file[data-path="src/sub/a.txt"]').exists(), false);
-  await reviewControl(h.wrapper, 'git-reveal-current').trigger('click');
+  await clickReviewMenuAction(h, 'git-reveal-current', 'git-tree-tools');
   assert.equal(h.wrapper.get('button.git-dir[data-path="src"]').attributes('aria-expanded'), 'true');
   assert.equal(h.wrapper.get('button.git-dir[data-path="src/sub"]').attributes('aria-expanded'), 'true');
   assert.equal(h.wrapper.get('button.git-dir[data-path="other"]').attributes('aria-expanded'), 'false');
   assert.match(h.wrapper.get('[data-dir="src"] [data-action="directory-count"]').text(), /2/);
-  await reviewControl(h.wrapper, 'git-expand-all').trigger('click');
+  await clickReviewMenuAction(h, 'git-expand-all', 'git-tree-tools');
   assert.equal(h.wrapper.get('button.git-dir[data-path="other"]').attributes('aria-expanded'), 'true');
 });
 
@@ -6211,7 +6305,7 @@ for (const view of ['tree', 'list']) {
       }
 
       for (const action of forbidden) {
-        assert.equal(menu.querySelector(`[data-action="${action}"]:not([disabled])`), null, action);
+        assert.equal(Boolean(menu.querySelector(`[data-action="${action}"]:not([disabled])`)), false, action);
       }
 
       assert.equal(h.requests.some((entry) => entry.method === 'POST'), false);
@@ -6420,7 +6514,7 @@ test('CODE-REVIEW-LOCALE: RU→EN меняет новые labels/aria без с�
 
   t.after(() => setLocale('ru'));
 
-  await reviewControl(h.wrapper, 'add-review-note').trigger('click');
+  await clickReviewMenuAction(h, 'add-review-note');
   await reviewControl(h.wrapper, 'review-note-text').setValue('Мой комментарий');
 
   const before = reviewControl(h.wrapper, 'mark-viewed').text();
@@ -6644,7 +6738,7 @@ for (const view of ['tree', 'list']) {
 
     for (const action of ['stage-file', 'unstage-file', 'discard-file', 'clean-file', 'mark-resolved',
       'ignore-shared', 'ignore-local']) {
-      assert.equal(menu.querySelector(`[data-action="${action}"]:not([disabled])`), null, action);
+      assert.equal(Boolean(menu.querySelector(`[data-action="${action}"]:not([disabled])`)), false, action);
     }
 
     assert.ok(menu.querySelector('[data-action="copy-path"]'));
