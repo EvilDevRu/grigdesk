@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import pluginRuntimePlugin from './scripts/pluginRuntimePlugin.mjs';
+import localApiPlugin from './scripts/localApiPlugin.ts';
 
 const envDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -26,13 +27,13 @@ function buildMetadata() {
 // В dev проксируем API/статику фабрики на настроенный порт сервера, чтобы фронт ходил
 // на тот же origin, что и в проде.
 export default defineConfig(({ command }) => {
-  let filePort;
+  let fileEnv = {};
 
-  if (command === 'serve' && process.env.GRIGDESK_PORT === undefined) {
+  if (command === 'serve') {
     try {
       const file = envFilePath({ env: process.env, home: os.homedir() });
 
-      filePort = parseEnv(readFileSync(file, 'utf8')).GRIGDESK_PORT;
+      fileEnv = parseEnv(readFileSync(file, 'utf8'));
     } catch (error) {
       if (error.code !== 'ENOENT') {
         throw error;
@@ -40,12 +41,12 @@ export default defineConfig(({ command }) => {
     }
   }
 
-  const grigDeskPort = Number(process.env.GRIGDESK_PORT ?? filePort) || 8140;
-  const proxyTarget = `http://localhost:${grigDeskPort}`;
+  const effectiveEnv = { ...fileEnv, ...process.env };
+  const grigDeskPort = Number(effectiveEnv.GRIGDESK_PORT) || 8140;
   const metadata = buildMetadata();
 
   return {
-    plugins: [vue(), pluginRuntimePlugin()],
+    plugins: [vue(), pluginRuntimePlugin(), localApiPlugin({ port: grigDeskPort, env: effectiveEnv })],
     base: './',
     define: {
       __GRIGDESK_VERSION__: JSON.stringify(metadata.version),
@@ -54,34 +55,8 @@ export default defineConfig(({ command }) => {
     // envDir — корень репозитория (VERSION, git, VITE_*); .env GrigDesk лежит в папке данных.
     envDir,
     server: {
+      host: '127.0.0.1',
       port: 5180,
-      proxy: {
-        // Чатовая live-диктовка использует WebSocket под /api; HTTP-маршруты
-        // продолжают проксироваться тем же правилом. Сервер сверяет Origin с
-        // Host fail-closed, поэтому dev-proxy переписывает оба к :8140.
-        '/api': {
-          target: proxyTarget,
-          changeOrigin: true,
-          ws: true,
-          rewriteWsOrigin: true,
-          // changeOrigin в паре с rewriteWsOrigin выравнивает Host и Origin только
-          // у WS-апгрейда. Обычному HTTP-запросу changeOrigin подменяет Host на
-          // target, а Origin браузера остаётся с портом dev-сервера — и серверные
-          // гарды «Origin === Host» (установка плагинов/движков, обмен ключа окна)
-          // резали POST за прокси 403 origin_forbidden. Возвращаем исходный Host:
-          // сервер сверяет то, что реально в браузере. WS идёт событием proxyReqWs
-          // и этой правкой не задет.
-          configure(proxy) {
-            proxy.on('proxyReq', (proxyReq, req) => {
-              const host = req.headers.host;
-
-              if (host) proxyReq.setHeader('host', host);
-            });
-          },
-        },
-        '/vscode': { target: proxyTarget, changeOrigin: true, ws: true },
-        '/shots': proxyTarget,
-      },
     },
     build: { outDir: 'dist', emptyOutDir: true },
   };

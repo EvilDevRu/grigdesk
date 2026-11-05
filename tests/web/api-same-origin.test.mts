@@ -33,7 +33,7 @@ test('LO-12b: API, события и WebSocket используют origin ин�
   }
 });
 
-test('Vite сохраняет API proxy после удаления серверной раздачи UI', async (t) => {
+test('Vite подключает авторизованный dev-транспорт после удаления серверной раздачи UI', async (t) => {
   const previous = process.env.GRIGDESK_PORT;
 
   process.env.GRIGDESK_PORT = '28141';
@@ -48,14 +48,9 @@ test('Vite сохраняет API proxy после удаления сервер
   const { loadConfigFromFile } = await import('../../web/node_modules/vite/dist/node/index.js');
   const loaded = await loadConfigFromFile({ command: 'serve', mode: 'development' },
     new URL('../../web/vite.config.js', import.meta.url).pathname);
-  const proxy = loaded?.config.server?.proxy;
+  const plugins = loaded?.config.plugins?.flat();
 
-  assert.ok(proxy);
-  assert.deepEqual(proxy['/api'], {
-    target: 'http://localhost:28141',
-    changeOrigin: true,
-    ws: true,
-    rewriteWsOrigin: true,
-  });
-  assert.equal(proxy['/shots'], 'http://localhost:28141');
+  assert.equal(loaded?.config.server?.host, '127.0.0.1');
+  assert.ok(plugins?.some((plugin) => plugin && 'name' in plugin
+    && plugin.name === 'grigdesk-local-api'));
 });

@@ -542,10 +542,10 @@ test('AudioWorklet ресемплирует 48 кГц в PCM16 16 кГц и flus
   assert.ok(new Int16Array(tailProcessor.messages[0].pcm).length >= 159);
 });
 
-test('Vite dev proxy пропускает WebSocket upgrade для /api', async () => {
+test('Vite подключает dev-транспорт с проверенным WebSocket upgrade', async () => {
   const source = await readFile(VITE_CONFIG_PATH, 'utf8');
-  assert.match(source, /['"]\/api['"]:\s*\{[^}]*\bws:\s*true\b/);
-  assert.match(source, /['"]\/api['"]:\s*\{[^}]*\brewriteWsOrigin:\s*true\b/);
+
+  assert.match(source, /localApiPlugin\(\{ port: grigDeskPort, env: effectiveEnv \}\)/u);
 });
 
 test('production transport limits закреплены ниже серверного rolling window', async () => {
