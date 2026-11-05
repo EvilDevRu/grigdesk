@@ -244,12 +244,7 @@
             </div>
           </div>
           <div class="git-sync-row">
-            <UiInlineMessage v-if="gitNotice" class="git-notice"
-                             data-context="code-git-notice"
-                             :tone="gitNotice.type === 'err' ? 'danger' : 'success'">
-              {{ gitNotice.text }}
-            </UiInlineMessage>
-            <p v-else-if="trackingNote" class="git-notice git-tracking-note"
+            <p v-if="trackingNote" class="git-notice git-tracking-note"
                :class="trackingNote.type"
                v-tooltip="trackingNote.hint">
               {{ trackingNote.text }}
@@ -1350,6 +1345,7 @@ import {
   promptDialog,
   vTooltip,
   UiLoadingState,
+  showToast,
   t,
 } from '../../ui';
 
@@ -1388,7 +1384,6 @@ type OpenFileIntent = {
 type CodeIntent = OpenFileIntent | { type: 'project'; project: string };
 type IntentEnvelope = { id: number; payload: CodeIntent | null };
 type FileTreeRow = CodeDirectoryEntry & { rel: string; depth: number };
-type GitNotice = { type: 'ok' | 'err'; text: string };
 interface FileHistoryOrigin {
   tab: CodeTab;
   gitPane: GitPane;
@@ -1410,6 +1405,7 @@ type GitActionOptions<Result> = {
   key: string;
   refreshGit?: boolean;
   onSuccess?: (result: Result) => void;
+  successMessage?: (result: Result) => string;
 };
 
 const props = withDefaults(defineProps<{
@@ -1545,7 +1541,6 @@ const amendHeadMessage = ref('');
 const commitComposerOpen = ref(false);
 const commitComposerTouched = ref(false);
 const gitBusy = ref('');
-const gitNotice = ref<GitNotice | null>(null);     // { type: 'ok' | 'err', text }
 const gitActionBusy = computed(() => !!gitBusy.value);
 const commitComposerTitle = computed(() => {
   if (!commitComposerOpen.value) {
@@ -3541,7 +3536,6 @@ function resetState() {
   commitComposerOpen.value = false;
   commitComposerTouched.value = false;
   gitBusy.value = '';
-  gitNotice.value = null;
   gitOpenDirs.value = new Set();
   gitKnownDirs.value = new Set();
   gitDirsReady.value = false;
@@ -4352,14 +4346,31 @@ async function discardGitGroup(group: GitGroup) {
 }
 
 /**
- * Выполняет одну Git-команду для точного снимка рабочей копии и при необходимости
- * перечитывает обе группы. Поздний ответ старого worktree не меняет новый выбор.
+ * Общий тост принадлежит окну и переживает закрытие панели. Проект в заголовке
+ * называет исходную операцию, даже когда человек уже выбрал другую рабочую копию.
+ */
+function notifyGitResult(snapshot: ContextSnapshot, body: string, failed = false) {
+  showToast({
+    id: `code-git-${crypto.randomUUID()}`,
+    scope: 'code-git',
+    title: t(failed ? 'core.codeGitErrorTitle' : 'core.codeGitSuccessTitle', {
+      project: snapshot.project,
+    }),
+    body,
+    tone: failed ? 'danger' : 'accent',
+  });
+}
+
+/**
+ * Выполняет команду до конца независимо от видимости панели и сообщает исход тостом.
+ * Только актуальная операция вправе обновлять модели и черновики своей рабочей копии.
  */
 async function performGitAction<Result>({
   execute,
   key,
   refreshGit = true,
   onSuccess,
+  successMessage,
 }: GitActionOptions<Result>): Promise<Result | null> {
   if (gitActionBusy.value || !treePath.value) {
     return null;
@@ -4369,10 +4380,13 @@ async function performGitAction<Result>({
   const own = ++gitActionId;
 
   gitBusy.value = key;
-  gitNotice.value = null;
 
   try {
     const result = await execute(snapshot);
+
+    if (successMessage) {
+      notifyGitResult(snapshot, successMessage(result));
+    }
 
     if (!contextIsCurrent(snapshot) || own !== gitActionId) {
       return null;
@@ -4381,17 +4395,12 @@ async function performGitAction<Result>({
     onSuccess?.(result);
 
     if (refreshGit) {
-      await loadGit(snapshot, { silent: true });
+      await loadGit(snapshot, { silent: true, metadataOnly: !props.active });
     }
 
     return result;
   } catch (actionError) {
-    if (contextIsCurrent(snapshot) && own === gitActionId) {
-      gitNotice.value = {
-        type: 'err',
-        text: codeErrorMessage(actionError),
-      };
-    }
+    notifyGitResult(snapshot, codeErrorMessage(actionError), true);
 
     return null;
   } finally {
@@ -4464,11 +4473,8 @@ function generateCommitMessage() {
     refreshGit: false,
     onSuccess: (result) => {
       commitMessage.value = result.title;
-      gitNotice.value = {
-        type: 'ok',
-        text: `Название составлено · ${result.model}`,
-      };
     },
+    successMessage: (result) => t('core.codeGitTitleGenerated', { model: result.model }),
   });
 }
 
@@ -4535,11 +4541,11 @@ function commitGitChanges() {
     onSuccess: (result) => {
       commitMessage.value = '';
       amendCommit.value = false;
-      gitNotice.value = {
-        type: 'ok',
-        text: `Создан коммит ${result.hash}: ${result.subject}`,
-      };
     },
+    successMessage: (result) => t('core.codeGitCommitted', {
+      hash: result.hash,
+      subject: result.subject,
+    }),
   });
 }
 
@@ -4551,14 +4557,19 @@ function pushGitChanges() {
   return performGitAction({
     execute: (snapshot) => codeApi.push(snapshot),
     key: 'push',
+    refreshGit: false,
     onSuccess: (result) => {
-      gitNotice.value = {
-        type: 'ok',
-        text: result.published
-          ? `Ветка ${result.branch} опубликована и связана с remote.`
-          : `Ветка ${result.branch} отправлена.`,
-      };
+      // Ответ push свежее снимков, прочитанных при повторном открытии панели.
+      // Старый GET не должен возвращать прежний ahead после успешной отправки.
+      gitRequestId += 1;
+
+      if (git.value) {
+        git.value = { ...git.value, tracking: result.tracking };
+      }
     },
+    successMessage: (result) => t(result.published ? 'core.codeGitPublished' : 'core.codeGitPushed', {
+      branch: result.branch,
+    }),
   });
 }
 
@@ -4612,11 +4623,8 @@ async function undoGitCommit() {
     onSuccess: (result) => {
       amendCommit.value = false;
       commitMessage.value = result.message;
-      gitNotice.value = {
-        type: 'ok',
-        text: 'Последний коммит отменён; изменения возвращены в индекс.',
-      };
     },
+    successMessage: () => t('core.codeGitUndone'),
   });
 }
 
@@ -6135,8 +6143,6 @@ watch(() => props.active, (active, wasActive) => {
   }
   else {
     activationId += 1;
-    gitActionId += 1;
-    gitBusy.value = '';
   }
 }, { immediate: true });
 watch(() => props.intents, processIntents, { deep: true });

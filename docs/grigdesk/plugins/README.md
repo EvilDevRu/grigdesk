@@ -21,6 +21,8 @@ SSH, просмотр документов, «Код», стенды и песо
 
 ## Устройство
 
+- [Git в фоне: завершение после закрытия панели, общие тосты и свежий tracking](code-git-notifications.md)
+
 - [Read-only diff: исходные координаты, Worker, типы, настройки и навигация блоков](code-diff-view.md)
 
 - [Проверка Git-изменений: fingerprints, частичный индекс, scoped actions и ignore](code-review.md)

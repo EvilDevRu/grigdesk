@@ -46,7 +46,7 @@
 - [DeepSeek и GLM](deepseek.md)
 - [Прогноз лимитов](usage-forecast.md)
 - [Плагины, удаление несовместимых пакетов, SSH и базы](plugins.md)
-- [Код и Git](code.md)
+- [Код и Git: просмотр, фоновый push и сообщения о результате](code.md)
 - [Докер](docker.md)
 - [Песочницы и стенды](sandboxes.md)
 - [Создание и библиотека 3D](studio3d.md)

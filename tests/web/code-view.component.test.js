@@ -99,6 +99,12 @@ async function compileCodeView() {
       '../../router.ts': codeViewPortStub('router', 'router'),
       '../../ui': (`
         import { setUiLocale } from './src/services/locale.ts';
+        import { listToasts, dismissToast, dismissAllToasts } from './src/ui.ts';
+        globalThis.__codeViewModuleSlot.toasts = {
+          list: listToasts,
+          dismiss: dismissToast,
+          clear: dismissAllToasts,
+        };
         globalThis.__codeViewModuleSlot.setLocale = setUiLocale;
         export * from './src/ui.ts';
         export { default as UiLoadingState } from './src/components/feedback/UiLoadingState.vue';
@@ -559,6 +565,7 @@ async function mountCodeView(t, {
 
   t.after(() => {
     wrapper?.unmount();
+    slot.toasts?.clear();
     slot.ports = null;
     slot.busy = false;
     delete globalThis.__codeViewApi;
@@ -577,6 +584,7 @@ async function mountCodeView(t, {
     slot.component ||= compileCodeView(),
   ]);
 
+  slot.toasts.clear();
   globalThis.__codeViewSetLocale = slot.setLocale;
   slot.setLocale('ru');
   CodeViewDomWrapper = DOMWrapper;
@@ -589,7 +597,14 @@ async function mountCodeView(t, {
     },
   });
   await settle(flushPromises);
-  return { browser, wrapper, flushPromises, monacoState };
+
+  return {
+    browser,
+    wrapper,
+    flushPromises,
+    monacoState,
+    toasts: slot.toasts,
+  };
 }
 
 test('холодный запуск Code сразу занимает финальную сетку без пустого loading-кадра', async (t) => {
@@ -2303,7 +2318,7 @@ test('Git-кнопки индексируют, генерируют сообще
       throw new Error(`unexpected POST ${url}`);
     },
   };
-  const { wrapper, flushPromises } = await mountCodeView(t, {
+  const { wrapper, flushPromises, toasts } = await mountCodeView(t, {
     api,
     confirm: async (text) => {
       phases.push('confirm');
@@ -2361,7 +2376,7 @@ test('Git-кнопки индексируют, генерируют сообще
   await settle(flushPromises);
   assert.equal(wrapper.get('textarea.commit-message').element.value,
     'GrigDesk: добавить Git-действия');
-  assert.match(wrapper.get('.git-notice').text(), /claude\/claude-test/);
+  assert.match(String(toasts.list().at(-1)?.body), /claude\/claude-test/);
 
   await wrapper.get('button.commit-action').trigger('click');
   await settle(flushPromises);
@@ -2370,12 +2385,12 @@ test('Git-кнопки индексируют, генерируют сообще
 
   assert.deepEqual(commit.body, { message: 'GrigDesk: добавить Git-действия' });
   assert.equal(wrapper.get('textarea.commit-message').element.value, '');
-  assert.match(wrapper.get('.git-notice').text(), /abc1234/);
+  assert.match(String(toasts.list().at(-1)?.body), /abc1234/);
   assert.equal(wrapper.get('button.push-action').attributes('aria-label'), 'Опубликовать');
 
   await wrapper.get('button.push-action').trigger('click');
   await settle(flushPromises);
-  assert.match(wrapper.get('.git-notice').text(), /опубликована/);
+  assert.match(String(toasts.list().at(-1)?.body), /опубликована/);
   assert.equal(wrapper.get('button.push-action').attributes('aria-label'), 'Пуш');
 });
 
@@ -2617,6 +2632,177 @@ async function mountGitPanel(t, gitPayload, {
 
   return mounted;
 }
+
+/**
+ * Задерживает только HTTP-ответ push, сохраняя настоящий компонент и общий центр тостов.
+ * Метаданные меняются явно, чтобы повторное открытие читало подтверждённое состояние.
+ */
+async function mountPendingPush(t) {
+  const request = deferred();
+  const posts = [];
+  const payload = {
+    branch: 'main',
+    tracking: {
+      detached: false,
+      upstream: 'origin/main',
+      ahead: 1,
+      behind: 0,
+    },
+  };
+  const mounted = await mountGitPanel(t, payload, {
+    post: async (url, body) => {
+      posts.push({ url, body });
+      assert.match(url, /\/push\?/);
+
+      return request.promise;
+    },
+  });
+  const complete = () => {
+    payload.tracking = { ...payload.tracking, ahead: 0 };
+    request.resolve({
+      ok: true,
+      branch: 'main',
+      remote: 'origin',
+      published: false,
+      tracking: payload.tracking,
+    });
+  };
+
+  return {
+    ...mounted,
+    request,
+    posts,
+    complete,
+  };
+}
+
+test('CODE-PUSH-BACKGROUND: закрытие панели сохраняет результат и закрываемый общий тост', async (t) => {
+  const h = await mountPendingPush(t);
+
+  await h.wrapper.get('button.push-action').trigger('click');
+  await h.wrapper.setProps({ active: false });
+  h.complete();
+  await settle(h.flushPromises);
+
+  assert.equal(h.posts.length, 1);
+  assert.equal(h.wrapper.vm.git.tracking.ahead, 0);
+  assert.equal(h.wrapper.find('.git-notice').exists(), false);
+  assert.match(String(h.toasts.list().at(-1)?.body), /main.*отправлена/);
+
+  const toast = h.toasts.list().at(-1);
+
+  assert.equal(h.toasts.dismiss(toast.id, 'user'), true);
+  assert.equal(h.toasts.list().length, 0);
+  await h.wrapper.setProps({ active: true });
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.find('.git-notice').exists(), false);
+});
+
+test('CODE-PUSH-BUSY: повторное открытие не разрешает второй push до ответа', async (t) => {
+  const h = await mountPendingPush(t);
+
+  await h.wrapper.get('button.push-action').trigger('click');
+  await h.wrapper.setProps({ active: false });
+  await h.wrapper.setProps({ active: true });
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.get('button.push-action').element.disabled, true);
+  await h.wrapper.get('button.push-action').trigger('click');
+  assert.equal(h.posts.length, 1);
+  h.complete();
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.get('button.push-action').element.disabled, false);
+  assert.equal(h.wrapper.vm.git.tracking.ahead, 0);
+});
+
+test('CODE-PUSH-ERROR: ошибка после закрытия показывается тостом и освобождает кнопку', async (t) => {
+  const h = await mountPendingPush(t);
+
+  await h.wrapper.get('button.push-action').trigger('click');
+  await h.wrapper.setProps({ active: false });
+  h.request.reject(new Error('Remote rejected push'));
+  await settle(h.flushPromises);
+  assert.equal(h.toasts.list().at(-1)?.tone, 'danger');
+  assert.match(String(h.toasts.list().at(-1)?.body), /Remote rejected push/);
+  assert.equal(h.wrapper.find('.git-notice[role="alert"]').exists(), false);
+  await h.wrapper.setProps({ active: true });
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.get('button.push-action').element.disabled, false);
+});
+
+test('CODE-PUSH-UNMOUNT: ответ после уничтожения панели всё равно попадает в общий тост', async (t) => {
+  const h = await mountPendingPush(t);
+
+  await h.wrapper.get('button.push-action').trigger('click');
+  h.wrapper.unmount();
+  h.complete();
+  await settle(h.flushPromises);
+  assert.equal(h.posts.length, 1);
+  assert.match(String(h.toasts.list().at(-1)?.body), /main.*отправлена/);
+});
+
+test('CODE-PUSH-FRESH: поздний GET открытия не возвращает старый ahead', async (t) => {
+  const h = await mountPendingPush(t);
+  const staleRead = deferred();
+  const previous = JSON.parse(JSON.stringify(h.wrapper.vm.git));
+  const originalGet = globalThis.__codeViewApi.get;
+
+  await h.wrapper.get('button.push-action').trigger('click');
+  globalThis.__codeViewApi.get = (url) => url.includes('/git?') ? staleRead.promise : originalGet(url);
+  await h.wrapper.setProps({ active: false });
+  await h.wrapper.setProps({ active: true });
+  await settle(h.flushPromises);
+  h.complete();
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.vm.git.tracking.ahead, 0);
+  staleRead.resolve(previous);
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.vm.git.tracking.ahead, 0);
+  assert.equal(h.toasts.list().length, 1);
+});
+
+test('CODE-PUSH-CONTEXT: результат прежней копии сообщает исход, не меняя новое дерево', async (t) => {
+  const h = await mountPendingPush(t);
+  const originalGet = globalThis.__codeViewApi.get;
+  const nextGit = {
+    ...JSON.parse(JSON.stringify(h.wrapper.vm.git)),
+    branch: 'linked',
+    tracking: {
+      detached: false,
+      upstream: 'origin/linked',
+      ahead: 2,
+      behind: 0,
+    },
+  };
+
+  await h.wrapper.get('button.push-action').trigger('click');
+  globalThis.__codeViewApi.get = async (url) => {
+    if (url === '/api/code/demo/repos') {
+      return {
+        repos: [{
+          key: 'demo',
+          dir: '/demo',
+          trees: [mainTree('/demo'), worktree('/linked', 'linked', 'linked')],
+        }],
+      };
+    }
+    if (url.includes('/git?') && query(url).get('root') === '/linked') {
+      return nextGit;
+    }
+
+    return originalGet(url);
+  };
+  await h.wrapper.setProps({ active: false });
+  await h.wrapper.setProps({ active: true });
+  await settle(h.flushPromises);
+  await h.wrapper.get('#code-context-native').setValue(JSON.stringify(['demo', '/linked']));
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.vm.git.tracking.ahead, 2);
+  h.complete();
+  await settle(h.flushPromises);
+  assert.equal(h.wrapper.vm.git.tracking.upstream, 'origin/linked');
+  assert.equal(h.wrapper.vm.git.tracking.ahead, 2);
+  assert.match(String(h.toasts.list().at(-1)?.body), /main.*отправлена/);
+});
 
 test('оба переключателя живут в шапке и не дублируются внутри панели', async (t) => {
   const api = {
@@ -3735,7 +3921,7 @@ test('повреждённые Git и ответ генератора не за�
       return { ok: true, title: { invalid: true }, model: 'test', effort: null, truncated: false };
     },
   };
-  const { wrapper, flushPromises, monacoState, browser } = await mountCodeView(t, { api });
+  const { wrapper, flushPromises, monacoState, browser, toasts } = await mountCodeView(t, { api });
   await selectCodeTab(wrapper, 'changes');
   await settle(flushPromises);
 
@@ -3753,7 +3939,7 @@ test('повреждённые Git и ответ генератора не за�
   await wrapper.get('button[data-ui-tooltip="Составить сообщение по staged diff"]').trigger('click');
   await settle(flushPromises);
   assert.equal(wrapper.get('textarea').element.value, 'Моё сообщение');
-  assert.match(wrapper.get('.git-notice[role="alert"]').text(), /commitTitle\.title/);
+  assert.match(String(toasts.list().at(-1)?.body), /commitTitle\.title/);
   assert.equal(
     wrapper.get('button[data-ui-tooltip="Составить сообщение по staged diff"]').element.disabled,
     false,
