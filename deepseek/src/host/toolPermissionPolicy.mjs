@@ -60,6 +60,7 @@ export function decideToolPermission({ mode, name, args, pathFacts = undefined, 
 
 const INTERNAL_TOOLS = new Set([
   'read', 'grep', 'glob', 'read_image', 'skill', 'todo_write',
+  'web_search', 'web_fetch',
   'get_goal', 'create_goal', 'update_goal', 'ask_user_question', 'exit_plan_mode',
 ]);
 const MUTATING_TOOLS = new Set(['bash', 'write', 'edit']);

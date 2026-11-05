@@ -88,6 +88,24 @@ test('штатные чтение и внутренние действия до�
   }).kind, 'ask');
 });
 
+test('штатный веб-поиск и чтение страниц не требуют вопроса во всех трёх режимах', () => {
+  for (const [name, args] of [
+    ['web_search', { queries: ['Harness documentation'] }],
+    ['web_fetch', { url: 'https://example.org/' }],
+  ] as const) {
+    for (const mode of ['default', 'auto', 'read-only']) {
+      assert.equal(decision(mode, name, args).kind, 'allow', `${mode}: ${name}`);
+      assert.equal(decideToolPermission({
+        mode,
+        name,
+        args,
+        trusted: false,
+      }).kind, mode === 'read-only' ? 'deny' : 'ask');
+      assert.equal(decision(mode, `${name}_extra`, args).kind, mode === 'read-only' ? 'deny' : 'ask');
+    }
+  }
+});
+
 test('native эскалация требует валидную пару и не доверяет полю неизвестного инструмента', () => {
   const args = { sandbox_permissions: 'danger-full-access', justification: 'Запись рядом' };
 

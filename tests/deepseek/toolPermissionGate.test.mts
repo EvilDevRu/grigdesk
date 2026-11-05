@@ -6,6 +6,8 @@ import { runToolPermissionRegistry } from '../helpers/deepseekToolRegistry.mts';
 for (const scenario of [
   'allow', 'reject', 'abort', 'bypass', 'parallel', 'unavailable', 'throwing', 'hook-deny',
   'automatic', 'automatic-bash', 'automatic-hook-ask', 'automatic-hook-deny',
+  'automatic-web-search', 'automatic-web-fetch', 'default-web-search', 'default-web-fetch',
+  'readonly-web-search', 'readonly-web-fetch',
   'readonly-read', 'readonly-write', 'child', 'frozen-args',
   'swapped-agent', 'swapped-args', 'swapped-definition',
 ]) {

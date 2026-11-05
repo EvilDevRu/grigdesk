@@ -43,7 +43,7 @@
 - [Редактор маршрутов](routes.md)
 - [Рабочая папка разговора](chat-workdir.md)
 - [Память и контекст разговора](chat-context.md)
-- [DeepSeek и GLM](deepseek.md)
+- [DeepSeek и GLM: режимы и веб-поиск DeepSeek без отдельных разрешений](deepseek.md)
 - [Прогноз лимитов](usage-forecast.md)
 - [Плагины, удаление несовместимых пакетов, SSH и базы](plugins.md)
 - [Код и Git: просмотр, фоновый push и сообщения о результате](code.md)

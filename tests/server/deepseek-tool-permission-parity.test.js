@@ -80,6 +80,37 @@ test('настоящий auto пишет обычный файл без вопр
   }
 });
 
+test('настоящий auto пропускает веб-инструменты без вопросов и сохраняет сетевые ограничения', {
+  timeout: 900_000,
+}, async (t) => {
+  let url;
+  const fixture = await deepSeekProductionChatFixture(t, {
+    respond: async (_payload, index) => {
+      if (index === 0) {
+        return call('web_search', { queries: ['Harness documentation'] }, 'web-search-call');
+      }
+
+      if (index === 1) {
+        return call('web_fetch', { url }, 'web-fetch-call');
+      }
+
+      return { deltas: [{ role: 'assistant', content: 'finished' }] };
+    },
+  }, { outsideTemp: true });
+
+  url = `${fixture.mock.endpoint}/blocked-page`;
+
+  const result = await fixture.run({ permissionMode: 'auto', onPermission: async () => {
+    assert.fail('Штатные веб-инструменты не должны спрашивать разрешение');
+  } });
+  const messages = fixture.mock.payloads.at(-1).messages.filter((message) => message.role === 'tool');
+
+  assert.equal(result.reply, 'finished');
+  assert.equal(messages.length, 2);
+  assert.match(JSON.stringify(messages[0].content), /Mock допускает только loopback fetch/u);
+  assert.match(JSON.stringify(messages[1].content), /non-public IP address/u);
+});
+
 test('настоящий shell различает auto, default и read-only для поиска и обычной записи', {
   timeout: 900_000,
 }, async (t) => {

@@ -47,6 +47,7 @@ ctx.provide('permissionPresets', {
 });
 
 let effects = 0;
+let questions = 0;
 const controller = new AbortController();
 let answer;
 let asked;
@@ -67,6 +68,7 @@ ctx.on('tools/pre-execute', async (exec, next) => {
 
 if (scenario !== 'unavailable') {
   ctx.on('approval/request', (request) => {
+    questions += 1;
     asked();
 
     if (scenario === 'throwing') {
@@ -93,7 +95,9 @@ if (scenario === 'automatic-hook-ask') {
 }
 
 const toolName = scenario.startsWith('automatic-bash') || scenario.startsWith('automatic-hook')
-  ? 'bash' : scenario === 'readonly-read' ? 'read' : 'write';
+  ? 'bash' : scenario === 'readonly-read' ? 'read'
+    : scenario.endsWith('web-search') ? 'web_search'
+      : scenario.endsWith('web-fetch') ? 'web_fetch' : 'write';
 
 ctx.tools.register({
   name: toolName,
@@ -127,7 +131,9 @@ if (scenario === 'bypass') {
 
 const argumentsForCall = toolName === 'bash'
   ? { command: 'pwd', description: 'Тест штатного вызова shell' }
-  : { file_path: `${root}/new.txt`, content: 'ok' };
+  : toolName === 'web_search' ? { queries: ['Harness documentation'] }
+    : toolName === 'web_fetch' ? { url: 'https://example.org/' }
+      : { file_path: `${root}/new.txt`, content: 'ok' };
 const pending = ctx.tools.execute({
   name: toolName,
   callId: 'write-call',
@@ -158,9 +164,11 @@ if (scenario === 'parallel') {
   answers.get('other-call')('rejected');
   assert.equal((await second).isError, true);
   assert.equal(effects, 1);
-} else if (['automatic', 'automatic-bash', 'readonly-read'].includes(scenario)) {
+} else if (['automatic', 'automatic-bash', 'readonly-read'].includes(scenario)
+  || ['web_search', 'web_fetch'].includes(toolName)) {
   assert.equal((await pending).isError, false);
   assert.equal(effects, 1);
+  assert.equal(questions, 0);
 } else if (['bypass', 'unavailable', 'throwing', 'hook-deny', 'automatic-hook-deny',
   'readonly-write', 'child'].includes(scenario)) {
   const result = await pending;

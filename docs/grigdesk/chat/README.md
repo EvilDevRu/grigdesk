@@ -21,6 +21,7 @@
 - [Скорость чата: меню с «Обычная», Fast → priority у Codex, Ultrafast и наследование](chat-speed.md)
 - [Индивидуальный и Team Plan GLM: поколения, общие часы и разные квоты](glm-plan-variants.md)
 - [Веб-инструменты GLM: разрешение поиска и чтения страниц, провайдеры и ревизия v4](glm-web-tools.md)
+- [Веб-инструменты DeepSeek: поиск и чтение страниц без вопросов во всех режимах](deepseek-web-tools.md)
 - [Preflight допуска GLM: условный вопрос о smoke и предупреждение об отложенной установке](glm-admission-preflight.md)
 - [Длинный resume GLM: собственный предел RPC 32 МиБ и отмена чтения страницы истории](glm-resume-page-limit.md)
 - [Согласование ревизии политики GLM в producer и host](glm-producer-policy-sync.md)
