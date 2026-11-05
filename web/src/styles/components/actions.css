@@ -2298,10 +2298,6 @@ html[data-ui-touch] .cs .ui-pressable[data-context='chat-status-more'] {
   gap: 12px;
 }
 
-.ui-button[data-role='chat-command'] + .ui-button[data-role='chat-command'] {
-  border-top: 1px solid var(--line);
-}
-
 .ui-button[data-role='chat-command'].on {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }

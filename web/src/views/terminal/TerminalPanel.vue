@@ -9,15 +9,19 @@
       </span>
       </template>
       <template #actions>
-      <UiPopover placement="bottom-start" aria-label="Быстрые команды терминала">
+      <UiPopover has-popup="menu" placement="bottom-start" aria-label="Быстрые команды терминала">
         <template #trigger><UiButton variant="text">Команды</UiButton></template>
         <template #default="{ close }">
           <div class="ui-action-menu">
-            <UiCommandButton @click="insert('claude\n'); close('action')">claude login</UiCommandButton>
-            <UiCommandButton @click="insert('claude --version\n'); close('action')">
+            <UiCommandButton role="menuitem" @click="insert('claude\n'); close('action')">
+              claude login
+            </UiCommandButton>
+            <UiCommandButton role="menuitem" @click="insert('claude --version\n'); close('action')">
               claude --version
             </UiCommandButton>
-            <UiCommandButton @click="insert('clear\n'); close('action')">clear</UiCommandButton>
+            <UiCommandButton role="menuitem" @click="insert('clear\n'); close('action')">
+              clear
+            </UiCommandButton>
           </div>
         </template>
       </UiPopover>

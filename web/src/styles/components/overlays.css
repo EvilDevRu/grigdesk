@@ -48,6 +48,49 @@
   overflow: auto;
 }
 
+/* Меню действий повторяют плоские строки UiSelect, включая опасные команды.
+   Нулевая ширина рамки не даёт общим hover/pressed-стилям кнопки вернуть обводку. */
+.ui-popover[role='menu'] {
+  padding: 4px;
+}
+
+.ui-popover .ui-button,
+.ui-button[data-role='chat-command'] {
+  border: 0;
+}
+
+:is(.ui-popover[role='menu'] .ui-button, .ui-button[data-context='code-popover-action']) {
+  --ui-action-background: transparent;
+  --ui-action-background-hover: var(--surface-2);
+
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  min-height: max(32px, var(--toolbar-control-h));
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+:is(.ui-popover[role='menu'] .ui-button, .ui-button[data-context='code-popover-action'])
+  > .ui-button__content {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+:is(.ui-popover[role='menu'] .ui-button, .ui-button[data-context='code-popover-action']):is(
+  :hover, :focus-visible, [aria-pressed='true'], [aria-checked='true']
+):not(:disabled):not([aria-disabled='true']) {
+  background: var(--surface-2);
+}
+
+:is(.ui-popover[role='menu'] .ui-button, .ui-button[data-context='code-popover-action']):focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 .ui-floating-dialog__header {
   display: grid;
   gap: 3px;

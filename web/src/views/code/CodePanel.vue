@@ -670,7 +670,7 @@
                     </UiIconButton>
                   </template>
                   <template #default="{ close }">
-                    <UiButton block variant="ghost" tone="danger"
+                    <UiButton block variant="ghost" tone="danger" role="menuitem"
                               data-context="code-popover-action" data-action="discard-all"
                               :loading="gitBusy === 'discard:all'" :disabled="gitActionBusy"
                               @click="discardGitGroup(group); close('action')">

@@ -5,7 +5,7 @@
         @click="click" @auxclick="aux">
       <slot>{{ href }}</slot>
     </UiActionLink>
-    <UiPopover v-if="browser.available" :trigger-label="t('core.browserOpenWith')">
+    <UiPopover v-if="browser.available" has-popup="menu" :trigger-label="t('core.browserOpenWith')">
       <template v-if="size === 'compact'" #trigger="{ toggle }">
         <UiIconButton
             role="embedded"
@@ -22,8 +22,12 @@
         </UiIconButton>
       </template>
       <template #default="{ close }">
-        <UiButton @click="override('internal', close)">{{ t('settings.browserInternal') }}</UiButton>
-        <UiButton @click="override('external', close)">{{ t('settings.browserExternal') }}</UiButton>
+        <UiButton role="menuitem" variant="ghost" @click="override('internal', close)">
+          {{ t('settings.browserInternal') }}
+        </UiButton>
+        <UiButton role="menuitem" variant="ghost" @click="override('external', close)">
+          {{ t('settings.browserExternal') }}
+        </UiButton>
       </template>
     </UiPopover>
     <span v-if="failed" role="alert">{{ t('core.browserRequestFailed') }}</span>
