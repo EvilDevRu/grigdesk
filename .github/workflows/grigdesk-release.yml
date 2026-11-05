@@ -2,9 +2,6 @@ name: Релиз GrigDesk — сборка и публикация
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
 
 permissions:
   contents: read
@@ -17,11 +14,14 @@ jobs:
   release:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    env:
-      GRIGDESK_TEST_DEEPSEEK_ROOT: ${{ runner.temp }}/deepseek-tests
-      GRIGDESK_ARTIFACTS_DIR: ${{ runner.temp }}/deepseek-tests
-      GRIGDESK_DEEPSEEK_NODE_CACHE: ${{ runner.temp }}/deepseek-tests/node-cache
     steps:
+      - name: Окружение тестов
+        run: |
+          printf '%s\n' \
+            "GRIGDESK_TEST_DEEPSEEK_ROOT=$RUNNER_TEMP/deepseek-tests" \
+            "GRIGDESK_ARTIFACTS_DIR=$RUNNER_TEMP/deepseek-tests" \
+            "GRIGDESK_DEEPSEEK_NODE_CACHE=$RUNNER_TEMP/deepseek-tests/node-cache" >> "$GITHUB_ENV"
+
       - name: Исходники
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -5,15 +5,15 @@ import test from 'node:test';
 
 const repository = path.resolve(import.meta.dirname, '../..');
 
-test('RW-1: workflow релиза собирает комплект и публикует на сайт', async () => {
+test('RW-1: workflow релиза запускается вручную, собирает комплект и публикует на сайт', async () => {
   const text = await fs.readFile(
     path.join(repository, '.github/workflows/grigdesk-release.yml'), 'utf8',
   );
 
-  assert.match(text, /workflow_dispatch/);
+  assert.match(text, /^  workflow_dispatch:/m);
+  assert.doesNotMatch(text, /^  push:/m);
   assert.match(text, /tests\/docs\/help-guide\.test\.mts/);
   assert.match(text, /group: grigdesk-release\s*\n/);
-  assert.match(text, /tags:\s*\n\s*- 'v\*'/);
   assert.match(text, /node-version:\s*24\.21\.0/);
   assert.match(text, /npm --prefix server test/);
   assert.match(text, /npm --prefix web test/);

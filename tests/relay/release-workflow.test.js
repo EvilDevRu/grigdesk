@@ -90,8 +90,8 @@ test('RL-45: посредник выпускается через общий wor
     return match[1];
   });
 
-  assert.match(text, /workflow_dispatch:/);
-  assert.match(text, /tags:\s*\n\s*- 'v\*'/);
+  assert.match(text, /^  workflow_dispatch:/m);
+  assert.doesNotMatch(text, /^  push:/m);
   assert.match(text, /^permissions:\n  contents: read$/m);
   assert.match(text, /persist-credentials: false/);
   assert.ok(text.includes(`node-version: ${runtime.version}`));
