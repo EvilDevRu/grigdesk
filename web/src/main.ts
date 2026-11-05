@@ -1,3 +1,7 @@
+// Порядок CSS-слоёв объявляется до компонентов: их scoped-стили уже используют @layer.
+// Иначе base регистрируется после components и перекрывает цвета навигационных ссылок.
+import './styles/index.css';
+
 import { installHelpNavigation } from './shared/helpNavigation.ts';
 import { toolWindowText } from './shared/tools/toolWindowMessages.ts';
 
@@ -39,7 +43,6 @@ import { useShellStore } from './stores/shell.ts';
 import { installBrowserHostRuntime } from './shared/browser/browserHostRuntime.ts';
 import { installBackAction } from './shared/backAction.ts';
 import { installAppViewport } from './shared/appViewport.ts';
-import './styles/index.css';
 // Системные плагины веба регистрируют свои размещения в слотах до первой отрисовки.
 import './plugins/index.ts';
 
