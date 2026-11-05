@@ -55,7 +55,7 @@ defineEmits<{ dismiss: [] }>();
 const normalizedTone = computed(() => normalizeActionTone(props.tone));
 const iconPath = computed(() => {
   if (normalizedTone.value === 'success') {
-    return 'M22 11.1V12a10 10 0 1 1-5.9-9.1M22 4 12 14l-3-3';
+    return 'm5 12 4 4L19 6';
   }
 
   if (normalizedTone.value === 'warning') {
