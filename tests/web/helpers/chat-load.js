@@ -1,6 +1,8 @@
 import { setImmediate } from 'node:timers/promises';
 
-import { protocolChanges, protocolHead, protocolList, protocolReconcile } from './chat-protocol.js';
+import {
+  protocolChanges, protocolHead, protocolPage, protocolReconcile, protocolWindow, protocolWindowAck,
+} from './chat-protocol.js';
 
 export const SNAPSHOT_KEY = 'grigdesk-chat-snapshot';
 export const LEGACY_KEY = 'grigdesk-chat-v2';
@@ -74,17 +76,17 @@ export function loadApi(read = async () => ({ sessions: [SERVER_CHAT], archived:
     async get(url, options) {
       calls.push(['GET', url, options]);
 
-      if (url === '/api/chat/store/list') {
+      if (url.startsWith('/api/chat/store/list')) {
         store = structuredClone(await read(options));
 
-        return protocolList(store);
+        return protocolPage(store, url);
       }
       if (url.startsWith('/api/chat/store/head/') || url.startsWith('/api/chat/store/chat/')) {
-        const id = decodeURIComponent(url.split('/').at(-1));
+        const id = decodeURIComponent(url.split('?')[0].split('/').at(-1));
         const chat = [...store.sessions, ...store.archived].find((entry) => entry.id === id);
 
         return url.includes('/head/') ? { head: protocolHead(chat) }
-          : { chat: structuredClone(chat), version: protocolHead(chat).version };
+          : protocolWindow(chat, url);
       }
       if (url === '/api/chat/waiting?include=ssh,db') {
         return { waiting: [] };
@@ -95,7 +97,7 @@ export function loadApi(read = async () => ({ sessions: [SERVER_CHAT], archived:
     async put(url, body) {
       calls.push(['PUT', url, body]);
 
-      return { ok: true };
+      return protocolWindowAck(body);
     },
     /**
      * Сверка получает версии или очередь полной ленты в отдельных оболочках.
@@ -105,7 +107,7 @@ export function loadApi(read = async () => ({ sessions: [SERVER_CHAT], archived:
       calls.push(['POST', url, body, options]);
 
       if (url === '/api/chat/store/changes') {
-        return protocolChanges(store, body.known);
+        return protocolChanges(store, body.known, body.onlyKnown);
       }
       if (url === '/api/chat/store/reconcile') {
         return protocolReconcile();

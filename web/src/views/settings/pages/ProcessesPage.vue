@@ -185,7 +185,10 @@ const actions = createSettingsActions({
   },
   openTerminal: async () => false,
   async openChat(key) {
-    chat.setActive(key);
+    if (!await chat.revealChat(key)) {
+      return false;
+    }
+
     await router.push('/chats');
 
     return true;

@@ -1513,5 +1513,21 @@
   "androidAppLockImmediate": "Immediately",
   "androidAppLockMinute": "After a minute",
   "androidAppLockFiveMinutes": "After 5 minutes",
-  "androidAppLockSaveFailed": "Could not save the app lock preference."
+  "androidAppLockSaveFailed": "Could not save the app lock preference.",
+  "chatPageLoading": "Loading more…",
+  "chatPageRetry": "Retry",
+  "chatPageRefresh": "Refresh list",
+  "chatPageMore": "Load more",
+  "chatHistoryOlderLoading": "Loading older messages…",
+  "chatHistoryOlder": "Show earlier messages",
+  "chatHistoryLatest": "Go to new messages",
+  "chatPagingUnsupported": "The server does not support paged chat loading",
+  "chatPageInvalid": "The chat page is too large",
+  "chatHistoryWindowInvalid": "Invalid history page",
+  "chatHistoryWindowFailed": "Could not load the history page",
+  "chatHistoryRefreshFailed": "Could not refresh history",
+  "chatHistoryOlderFailed": "Could not load older messages",
+  "chatHistoryBaseFailed": "Could not refresh the history base",
+  "chatHistoryChanged": "The chat window has changed",
+  "chatHistoryWindowAckMissing": "The server did not confirm the history window base"
 }

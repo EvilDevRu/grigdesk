@@ -1533,5 +1533,21 @@
   "androidAppLockImmediate": "Сразу",
   "androidAppLockMinute": "Через минуту",
   "androidAppLockFiveMinutes": "Через 5 минут",
-  "androidAppLockSaveFailed": "Не удалось сохранить настройку блокировки."
+  "androidAppLockSaveFailed": "Не удалось сохранить настройку блокировки.",
+  "chatPageLoading": "Загружаем следующую порцию…",
+  "chatPageRetry": "Повторить",
+  "chatPageRefresh": "Обновить список",
+  "chatPageMore": "Показать ещё",
+  "chatHistoryOlderLoading": "Загружаем старые сообщения…",
+  "chatHistoryOlder": "Показать более ранние сообщения",
+  "chatHistoryLatest": "К новым сообщениям",
+  "chatPagingUnsupported": "Сервер не поддерживает порционную загрузку чатов",
+  "chatPageInvalid": "Слишком большая страница чатов",
+  "chatHistoryWindowInvalid": "Некорректная порция истории",
+  "chatHistoryWindowFailed": "Не загрузилась порция истории",
+  "chatHistoryRefreshFailed": "Не обновилась история",
+  "chatHistoryOlderFailed": "Не загрузились старые сообщения",
+  "chatHistoryBaseFailed": "Не обновилась база истории",
+  "chatHistoryChanged": "Окно чата уже изменилось",
+  "chatHistoryWindowAckMissing": "Сервер не подтвердил базу окна"
 }

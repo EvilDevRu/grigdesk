@@ -1,3 +1,4 @@
+import { protocolWindow, protocolPage } from './chat-protocol.js';
 import assert from 'node:assert/strict';
 
 import { chatStoreFixture, sseOf } from './chat-store.js';
@@ -5,7 +6,7 @@ import { memoryStorage } from './chat-load.js';
 import { listFixture, sampleChat } from '../../server/helpers/chat-list.js';
 
 export const DETAIL = '/api/chat/store/chat/';
-export const CATALOG = '/api/chat/store/list';
+export const CATALOG = '/api/chat/store/list?page=1&archived=0&limit=40';
 
 /**
  * Управляемая голова следует отдельному web-протоколу, без messages и defaults полной сессии.
@@ -90,8 +91,26 @@ export async function lazyWindow(t, {
     if (custom !== undefined) {
       return custom;
     }
-    if (url === CATALOG) {
-      return structuredClone(data);
+    if (url.startsWith('/api/chat/store/list?')) {
+      const page = protocolPage({
+        sessions: chats.filter((chat) => !chat.archived),
+        archived: chats.filter((chat) => chat.archived),
+      }, url);
+
+      for (const group of ['sessions', 'archived']) {
+        page[group] = page[group].map((head) => ({
+          ...headOf(chats.find((chat) => chat.id === head.id)),
+          ...(head.snippetSource !== undefined ? { snippetSource: head.snippetSource } : {}),
+        }));
+      }
+
+      return {
+        ...page,
+        turnProtocol: 1,
+        inTurnProtocol: 1,
+        historyStepReuseProtocol: 1,
+        activeId: data.activeId,
+      };
     }
     if (url === '/api/chat/store') {
       return {
@@ -102,7 +121,7 @@ export async function lazyWindow(t, {
     }
     if (url.startsWith(DETAIL) && method === 'GET') {
 
-      const id = decodeURIComponent(url.slice(DETAIL.length));
+      const id = decodeURIComponent(url.split('?')[0].slice(DETAIL.length));
 
       const chat = chats.find((entry) => entry.id === id);
 
@@ -110,6 +129,11 @@ export async function lazyWindow(t, {
         chat: structuredClone(chat),
         version: 'version-one',
       };
+
+      if (Array.isArray(result?.chat?.messages) && typeof result.version === 'string'
+        && url.includes('window=1')) {
+        Object.assign(result, protocolWindow(result.chat, url), { version: result.version || 'version-one' });
+      }
 
       responses.push(result);
 
@@ -292,7 +316,7 @@ export async function serverWorld(t, chats, options = {}) {
  * Чтения головы и общей меты в этот счётчик не входят.
  */
 export function detailReads(calls, id) {
-  return calls.filter((call) => call.method === 'GET' && call.url === `${DETAIL}${id}`);
+  return calls.filter((call) => call.method === 'GET' && call.url.split('?')[0] === `${DETAIL}${id}`);
 }
 
 /**

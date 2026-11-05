@@ -1,3 +1,8 @@
+import { ChatCatalogPaging } from '../../lib/chat/catalogPaging.ts';
+import {
+  decodeWindowBase, historyWindow, historyPrefixHash, historyWindowCursor,
+} from '../../lib/chat/historyWindow.ts';
+
 import { applyChatSpeed } from '../../lib/chat/speed.ts';
 import type { HelpService } from '../../lib/help/service.ts';
 import { withHelpHint } from '../../lib/chat/helpHint.ts';
@@ -234,8 +239,13 @@ interface ChatBody extends ChatTurnInput, ChatMeta {
   chat?: StoredChat;
   reuseSteps?: unknown;
   known?: Record<string, unknown>;
+  onlyKnown?: boolean;
+  top?: { archived?: boolean; q?: string };
+  window?: unknown;
+  clearHistory?: boolean;
   patch?: Record<string, unknown>;
   loadedIds?: unknown;
+  knownIds?: unknown;
   deliveryIds?: unknown;
 }
 
@@ -1398,7 +1408,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     try {
       const chat = await workdirTransitions.change(String(request.body?.chatKey || ''), request.body);
 
-      return { chat };
+      return request.query.window === '1' ? historyWindow(chat) : { chat };
     } catch (error) {
       return workdirFailure(reply, error);
     }
@@ -5287,9 +5297,18 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    * Каталог и дельта имеют одну оболочку и возвращают только короткие проекции.
    * Отсутствующие known id передаются явно, без привязки к времени или процессу.
    */
-  async function listStore(known?: Record<string, unknown>) {
+  const catalogPaging = new ChatCatalogPaging(history, () => new Set(
+    [...pendingPerms.values()].map((entry) => String(entry.chatKey || '')).filter(Boolean),
+  ));
+
+  /**
+   * Общая дельта оставляет прежний формат метаданных и версий голов.
+   * onlyKnown ограничивает payload уже просмотренными id без полной выдачи каталога.
+   */
+  async function listStore(known?: Record<string, unknown>, onlyKnown = false) {
     const heads = await history.webHeads();
-    const selected = known ? heads.filter((head) => known[head.id] !== head.version) : heads;
+    const selected = known ? heads.filter((head) => (!onlyKnown || Object.hasOwn(known, head.id))
+      && known[head.id] !== head.version) : heads;
     const meta = await history.readMetaRaw();
 
     return {
@@ -5297,13 +5316,34 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       activeId: meta.activeId ?? null,
       ...(await storeOptions()),
       listProtocol: 1,
+      historyWindowProtocol: 1,
+      summary: catalogPaging.summary(heads),
       sessions: selected.filter((head) => !head.archived),
       archived: selected.filter((head) => head.archived),
       ...(known ? { gone: Object.keys(known).filter((id) => !heads.some((head) => head.id === id)) } : {}),
     };
   }
 
-  fastify.get<ChatRoute>('/api/chat/store/list', () => listStore());
+  fastify.get<ChatRoute>('/api/chat/store/list', async (request, reply) => {
+    if (!request.query.page) {
+      return listStore();
+    }
+
+    try {
+      if (request.query.page !== '1') {
+        return reply.code(400).send({ error: 'bad_chat_page' });
+      }
+
+      return {
+        ...await history.readMetaRaw(),
+        ...await storeOptions(),
+        historyWindowProtocol: 1,
+        ...await catalogPaging.page(request.query),
+      };
+    } catch (error) {
+      return workdirFailure(reply, error);
+    }
+  });
   fastify.post<ChatRoute>('/api/chat/store/changes', async (request, reply) => {
     const known = request.body?.known;
 
@@ -5312,7 +5352,33 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       return reply.code(400).send({ error: 'bad_known' });
     }
 
-    return listStore(known);
+    if ((request.body.onlyKnown !== undefined && typeof request.body.onlyKnown !== 'boolean')
+      || (request.body.onlyKnown && Object.keys(known).length > 100)) {
+      return reply.code(400).send({ error: 'bad_known' });
+    }
+
+    const top = request.body.top;
+
+    if (top !== undefined && (!top || typeof top !== 'object' || Array.isArray(top)
+      || Object.keys(top).some((key) => !['q', 'archived'].includes(key))
+      || (top.q !== undefined && (typeof top.q !== 'string' || top.q.length > 256))
+      || (top.archived !== undefined && typeof top.archived !== 'boolean'))) {
+      return reply.code(400).send({ error: 'bad_chat_page' });
+    }
+
+    const result = await listStore(known, request.body.onlyKnown === true);
+
+    if (top && request.body.onlyKnown) {
+      const page = await catalogPaging.page({ archived: top.archived ? '1' : '0', q: top.q || '' }, true);
+
+      return {
+        ...result,
+        topHeads: [...page.sessions, ...page.archived],
+        summary: page.summary
+      };
+    }
+
+    return result;
   });
   fastify.get<ChatRoute>('/api/chat/store/head/:id', async (request, reply) => {
     const head = (await history.webHeads()).find((entry) => entry.id === request.params.id);
@@ -5382,8 +5448,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
     const validIds = (ids: unknown): ids is string[] => Array.isArray(ids)
       && ids.every((id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id));
 
-    if (!body || Object.keys(body).some((key) => !['loadedIds', 'deliveryIds'].includes(key))
-      || !validIds(body.loadedIds) || !validIds(body.deliveryIds)) {
+    if (!body || Object.keys(body).some((key) => !['loadedIds', 'deliveryIds', 'knownIds'].includes(key))
+      || !validIds(body.loadedIds) || !validIds(body.deliveryIds)
+      || (body.knownIds !== undefined && !validIds(body.knownIds))) {
       return reply.code(400).send({ error: 'bad_reconcile' });
     }
 
@@ -5509,11 +5576,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         heads.push(projectWebChatHead(entry!.chat, history.versionOf(entry!.json)));
       }
 
+      const known = body.knownIds === undefined ? null : new Set(body.knownIds as string[]);
+
       return {
         pending,
-        heads,
-        gone,
+        heads: known ? heads.filter((head) => known.has(head.id)) : heads,
+        gone: known ? gone.filter((id) => known.has(id)) : gone,
         deliveries,
+        ...(known ? { summary: catalogPaging.summary(await history.webHeads()) } : {}),
       };
     });
 
@@ -5552,8 +5622,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
           ensured: true,
         });
       }
+
       return {
-        chat: result.chat,
+        ...(request.query.window === '1' ? historyWindow(result.chat!) : { chat: result.chat }),
         created: result.created,
         restored: result.restored,
       };
@@ -5618,9 +5689,18 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
    * Оба маршрута используют одну очередь, CAS, durable запись и уведомления.
    * Сокращённый запрос защищён отдельным URI: старый сервер не сможет принять его как полный.
    */
-  async function saveChat(request: FastifyRequest<ChatRoute>, reply: FastifyReply, sparse = false) {
+  async function saveChat(
+    request: FastifyRequest<ChatRoute>, reply: FastifyReply, sparse = false, windowed = false,
+  ) {
     const { chat, archived, origin } = request.body || {};
     if (!chat?.id) return reply.code(400).send({ error: 'bad_chat' });
+
+    const window = windowed ? decodeWindowBase(request.body.window) : null;
+
+    if (windowed && (!window || !Array.isArray(chat.messages)
+      || (request.body.clearHistory !== undefined && typeof request.body.clearHistory !== 'boolean'))) {
+      return reply.code(400).send({ error: 'bad_chat_window' });
+    }
 
     const reuseSteps = sparse ? decodeHistoryStepReuseRequest(request.body?.reuseSteps, chat.messages) : null;
 
@@ -5641,7 +5721,10 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       let result;
 
       try {
-        result = await history.saveOne(chat, !!archived, reuseSteps ? { reuseSteps } : {});
+        result = await history.saveOne(chat, !!archived, {
+          ...(reuseSteps ? { reuseSteps } : {}),
+          ...(window ? { window, clearHistory: request.body.clearHistory === true } : {}),
+        });
       } catch (error) {
         if (!(error instanceof ChatHistoryError)) throw error;
         return reply.code(error.statusCode || 409).send({ error: error.code, message: error.message });
@@ -5673,7 +5756,25 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
         restored,
         dropped,
         stale,
-        stepReuseAck: result.stepReuseAck,
+        stepReuseAck: window && !request.body.clearHistory && result.stepReuseAck ? {
+          ...result.stepReuseAck,
+          confirmed: result.stepReuseAck.confirmed.filter((ref) => (
+            ref.messageIndex >= window.offset && ref.sourceIndex >= window.offset
+          )).map((ref) => ({
+            ...ref,
+            messageIndex: ref.messageIndex - window.offset,
+            sourceIndex: ref.sourceIndex - window.offset,
+          })),
+        } : result.stepReuseAck,
+        ...(window && saved ? { window: {
+          offset: request.body.clearHistory ? 0 : window.offset,
+          prefixHash: historyPrefixHash(saved.messages || [], request.body.clearHistory ? 0 : window.offset),
+          before: historyWindowCursor(saved, request.body.clearHistory ? 0 : window.offset),
+          hasOlder: !request.body.clearHistory && window.offset > 0,
+          historyEpoch: Number(saved.mobileHistoryEpoch || 0),
+          baseEnd: saved.messages?.length || 0,
+          baseHash: historyPrefixHash(saved.messages || [], saved.messages?.length || 0),
+        } } : {}),
         revision: saved?.revision ?? null,
         schema: saved?.schema ?? null,
         surface: saved?.surface ?? null,
@@ -5694,6 +5795,9 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
 
   fastify.put<ChatRoute>('/api/chat/store/chat', (request, reply) => saveChat(request, reply));
   fastify.put<ChatRoute>(HISTORY_STEP_REUSE_ROUTE, (request, reply) => saveChat(request, reply, true));
+  fastify.put<ChatRoute>('/api/chat/store/chat/window', (request, reply) => (
+    saveChat(request, reply, request.body?.reuseSteps !== undefined, true)
+  ));
 
   fastify.get<ChatRoute>('/api/chat/store/chat/:id', async (request, reply) => {
     if (deletingChats.has(String(request.params.id))) {
@@ -5708,10 +5812,24 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       return reply.code(404).send({ error: 'no_chat' });
     }
 
-    return {
-      chat: entry.chat,
-      version: history.versionOf(entry.json),
-    };
+    if (request.query.window === '1') {
+      try {
+        const limit = Number(request.query.limit || 40);
+
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+          return reply.code(400).send({ error: 'bad_chat_window' });
+        }
+
+        return {
+          ...historyWindow(entry.chat, request.query.before || '', limit),
+          version: history.versionOf(entry.json),
+        };
+      } catch (error) {
+        return workdirFailure(reply, error);
+      }
+    }
+
+    return { chat: entry.chat, version: history.versionOf(entry.json) };
   });
 
   fastify.delete<ChatRoute>('/api/chat/store/chat/:id', async (request, reply) => {

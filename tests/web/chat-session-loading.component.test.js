@@ -76,6 +76,8 @@ async function fixture(t, options = {}) {
 
   globalThis.__lazyDetailChat = state.chat;
 
+  state.chat.selectChat(id);
+
   const surface = state.chat.registerSurface('страница', {
     chatId: id,
     visible: true,
@@ -188,6 +190,7 @@ test('DETAIL-DRAFT: смена sid и скрытая колонка не сох�
     version: 'version-one',
   });
   await drain();
+  state.chat.selectChat(second.id);
   state.surface.update({
     chatId: second.id,
     visible: true,
@@ -303,4 +306,129 @@ test('HELP-ERR2: ошибка подготовки в ленте открыва�
   assert.match(document.querySelector('[data-role="help-dialog"]').textContent, /Разбор неполадки/u);
   assert.equal(state.wrapper.get('textarea').element.value, 'ПРЕЖНИЙ ТЕКСТ');
   assert.equal(state.calls.some((call) => call.method === 'POST' && call.url === '/api/chat'), false);
+});
+
+test('PAGE-UI-HISTORY: prepend сохраняет anchor и новый ответ не уводит вниз', async (t) => {
+  const original = sampleChat('detail-anchor', {
+    messages: Array.from({
+      length: 80
+    }, (_, index) => ({
+
+      role: 'assistant',
+      text: `Строка ${index}`,
+      pid: `anchor-${index}`,
+
+    })),
+  });
+  const state = await fixture(t, { chats: [original] });
+
+  await state.chat.ensureChatMessages(state.id);
+  await drain();
+
+  const body = state.wrapper.get('.cs-body').element;
+  let height = 2000;
+  const anchor = state.wrapper.findAll('.msg').find((row) => row.text().includes('Строка 40')).element;
+  const anchorKey = anchor.getAttribute('data-history-key');
+
+  t.mock.method(anchor, 'getBoundingClientRect', () => ({
+
+    top: state.chat.session(state.id).messages.length === 40 ? 100 : 2100 - body.scrollTop + 100,
+
+    bottom: 2200,
+    left: 0,
+    right: 200,
+    width: 200,
+    height: 100,
+    x: 0,
+    y: 0,
+    toJSON() {},
+
+  }));
+  t.mock.method(body, 'getBoundingClientRect', () => ({
+
+    top: 0,
+    bottom: 400,
+    left: 0,
+    right: 200,
+    width: 200,
+    height: 400,
+    x: 0,
+    y: 0,
+    toJSON() {},
+
+  }));
+
+  Object.defineProperty(body, 'scrollHeight', { configurable: true, get: () => height });
+  Object.defineProperty(body, 'clientHeight', { configurable: true, value: 400 });
+  body.scrollTop = 100;
+
+  const firstText = state.wrapper.findAll('.conversation-group').at(0).text();
+
+  await state.wrapper.get('.cs-body').trigger('scroll');
+  await drain();
+  height = 4000;
+  await drain();
+  assert.equal(state.chat.session(state.id).messages.length, 80);
+  assert.ok(state.wrapper.text().includes(firstText));
+  assert.equal(anchor.getAttribute('data-history-key'), anchorKey);
+  assert.equal(anchor.getBoundingClientRect().top, 100);
+  assert.ok(body.scrollTop < height - body.clientHeight);
+
+  const top = body.scrollTop;
+
+  state.chat.session(state.id).messages.push({
+    role: 'assistant',
+    text: 'Поздний ответ',
+    pid: 'late-anchor'
+  });
+  await drain();
+  assert.equal(body.scrollTop, top);
+});
+
+test('PAGE-UI-GAP: новые сообщения ждут явного перехода при чтении вверх', async (t) => {
+  const original = sampleChat('visible-gap', {
+    messages: Array.from({
+      length: 101
+    }, (_, index) => ({
+
+      role: 'assistant',
+      text: `Старая ${index}`,
+      pid: `old-gap-${index}`,
+
+    })),
+  });
+  const state = await fixture(t, { chats: [original] });
+
+  await state.chat.ensureChatMessages(state.id);
+  await drain();
+
+  const body = state.wrapper.get('.cs-body');
+
+  Object.defineProperty(body.element, 'scrollHeight', { configurable: true, value: 2000 });
+  Object.defineProperty(body.element, 'clientHeight', { configurable: true, value: 400 });
+  body.element.scrollTop = 600;
+  await body.trigger('scroll');
+
+  const old = [...state.chat.session(state.id).messages];
+
+  for (let index = 101; index < 181; index += 1) {
+    original.messages.push({
+      role: 'assistant',
+      text: `Новая ${index}`,
+      pid: `new-gap-${index}`
+    });
+  }
+
+  await state.chat._pullChat(state.id, false);
+  await drain();
+  assert.deepEqual(state.chat.session(state.id).messages, old);
+  assert.equal(body.element.scrollTop, 600);
+
+  const jump = state.wrapper.findAll('button').find((button) => button.text() === 'К новым сообщениям');
+
+  assert.ok(jump);
+  await jump.trigger('click');
+  await drain();
+  assert.deepEqual(state.chat.session(state.id).messages, original.messages.slice(141));
+  assert.equal(state.chat.hasNewerMessages(state.id), false);
 });

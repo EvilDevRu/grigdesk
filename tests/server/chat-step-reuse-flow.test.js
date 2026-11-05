@@ -164,7 +164,7 @@ async function exercise(t, legacy) {
   }
 
   assert.equal(transport.requests.filter((request) => request.method === 'PUT')
-    .every((request) => request.url.endsWith('/step-reuse')), true);
+    .every((request) => request.url.endsWith('/window') && !!request.body.reuseSteps), true);
 
   session.messages.push({
     role: 'user',
@@ -235,7 +235,7 @@ async function exercise(t, legacy) {
   const stable = transport.requests.slice(stableStart).filter((request) => request.method === 'PUT');
 
   assert.equal(stable.length, 5);
-  assert.equal(stable.every((request) => request.url.endsWith('/step-reuse')), true,
+  assert.equal(stable.every((request) => request.url.endsWith('/window') && !!request.body.reuseSteps), true,
     JSON.stringify(transport.requests.filter((request) => request.method === 'PUT')
       .map((request) => ({
         url: request.url,
@@ -255,7 +255,8 @@ async function exercise(t, legacy) {
   assert.deepEqual(durable.messages.map((message) => message.steps),
     session.messages.map((message) => message.steps));
 
-  const archived = await transport.api.put('/api/chat/store/chat/step-reuse', {
+  const archived = await transport.api.put('/api/chat/store/chat/window', {
+    window: stable.at(-1).body.window,
     chat: {
       ...stable.at(-1).body.chat,
       revision: durable.revision
@@ -299,7 +300,7 @@ for (const legacy of [false, true]) {
   });
 }
 
-test('после GET нового сервера старый HTTP-маршрутизатор отказывает sparse без записи', async (t) => {
+test('после window GET старый HTTP-маршрутизатор отказывает без full fallback', async (t) => {
   const fixture = await chatAppFixture(t);
   const initial = [{
     role: 'assistant',
@@ -361,23 +362,16 @@ test('после GET нового сервера старый HTTP-маршру�
   t.after(() => oldServer.close());
   transport.useServer(oldServer);
   session.draft = 'После отката сервера';
-  await chat._writeChat(session.id);
+  await assert.rejects(chat._writeChat(session.id), (error) => error.status === 404);
 
   const writes = transport.requests.filter((request) => request.method === 'PUT');
 
-  assert.deepEqual(writes.map((request) => request.result.status), [404, 200]);
-  assert.equal(writes[0].url, '/api/chat/store/chat/step-reuse');
+  assert.deepEqual(writes.map((request) => request.result.status), [404]);
+  assert.equal(writes[0].url, '/api/chat/store/chat/window');
   assert.equal(Object.hasOwn(writes[0].body.chat.messages[0], 'steps'), false);
-  assert.equal(writes[1].url, '/api/chat/store/chat');
-  assert.deepEqual(fullBodies[0].chat.messages, initial);
-  assert.equal(fullBodies[0].chat.revision, previous.revision);
-  assert.deepEqual((await history.readOne(session.id)).messages, initial);
-  assert.equal(chat.historyStepReuseProtocol, 0);
-
-  session.draft = 'Следующая запись';
-  await chat._writeChat(session.id);
-  assert.equal(transport.requests.at(-1).url, '/api/chat/store/chat');
-  chat._persist(true);
-  await waitFor(() => transport.requests.every((request) => request.result));
+  assert.equal(fullBodies.length, 0);
+  assert.deepEqual((await history.readOne(session.id)).messages, previous.messages);
+  assert.equal(session.draft, 'После отката сервера');
+  assert.ok(chat.saveError);
   chat.$dispose();
 });

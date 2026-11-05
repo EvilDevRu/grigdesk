@@ -195,17 +195,15 @@ async function setup({
     sessions: [baseChat()]
   }, {
     api,
-    fromServer: loaded
+    fromServer: false
   });
 
   cleanups.push(() => chat.$dispose());
 
+  // Сценарии прежнего full-протокола проверяют resolver/refs отдельно от входной пагинации.
+  // Серверное происхождение подтверждает базу; browser snapshot её не подтверждает.
   if (loaded) {
-    const surface = chat.registerSurface({}, { chatId: stored.id, visible: true });
-
-    cleanups.push(() => surface.dispose());
-    // В исходном протоколе лента уже полная после _load; в новом ждём то же состояние.
-    await chat.ensureChatMessages?.(stored.id);
+    chat._markSent({ fromServer: true });
   }
 
   chat.historyStepReuseProtocol = capability;
@@ -358,39 +356,15 @@ test('потеря capability и dispose освобождают подтверж
   }
 });
 
-test('более свежий browser snapshot не подтверждает steps при capability сервера', async (t) => {
-  const previousStorage = globalThis.localStorage;
+test('browser snapshot не подтверждает steps при capability сервера', async () => {
+  const { chat, session, requests } = await setup({ loaded: false });
   const snapshot = {
     ...baseChat(),
     updatedAt: 1000,
     draft: 'Восстановленный текст'
   };
-  const data = new Map([
-    ['grigdesk-chat-snapshot', JSON.stringify({
-      sessions: [snapshot],
-      archived: []
-    })]
-  ]);
 
-  globalThis.localStorage = {
-    getItem: (key) => data.get(key) || null,
-    setItem: (key, value) => data.set(key, value),
-    removeItem: (key) => data.delete(key),
-  };
-  t.after(() => {
-    if (previousStorage === undefined) {
-      delete globalThis.localStorage;
-    } else {
-      globalThis.localStorage = previousStorage;
-    }
-  });
-
-  const {
-    chat,
-    session,
-    requests
-  } = await setup();
-
+  Object.assign(session, snapshot);
   await chat._writeChat(session.id);
   assert.equal(chat.historyStepReuseProtocol, 1);
   assert.equal(requests[0].url, '/api/chat/store/chat');

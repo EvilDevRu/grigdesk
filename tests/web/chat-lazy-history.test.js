@@ -257,6 +257,7 @@ test('HEAD-ALIVE: соседний persist сохраняет головы, яв
 
   const { chat, calls } = await world.open();
 
+  await chat.ensureChatPage('', true);
   assert.deepEqual(chat._find(original.id).messages || [], [], 'неоткрытая голова не содержит ленту');
   chat.setTitle(other.id, 'Правка соседа');
   await chat._writeChat(other.id);

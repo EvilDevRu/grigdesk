@@ -15,7 +15,7 @@
     </div>
     <div class="stage">
       <ChatLoadingPreview v-if="chat.loaded === false" :failed="Boolean(chat.loadError)" />
-      <ChatSession v-else-if="activeId" :key="activeId" :sid="activeId" @back="pane = 'list'" />
+      <ChatSession v-else-if="activeId && explicitlyOpened && (dockCapable || pane === 'chat')" :key="activeId" :sid="activeId" @back="pane = 'list'" />
     </div>
   </div>
 </template>
@@ -49,6 +49,7 @@ watch(() => chat.revealRequest, (id) => {
 }, { immediate: true });
 
 const { dockCapable } = useDockViewport();
+const explicitlyOpened = computed(() => (chat.openedChatIds || []).includes(activeId.value || ''));
 const chatsContext = useUiContextSource('chats', { layer: 'page', active: false });
 
 watch(activeId, (chatId) => {
@@ -59,13 +60,13 @@ watch(activeId, (chatId) => {
   }
 }, { immediate: true });
 
-// CSS скрывает detail-pane на телефоне, но компонент остаётся mounted. Регистрируем
-// фактическую поверхность тем же breakpoint-контрактом, чтобы скрытый чат не гасил
+// До явного открытия detail не монтируется, а телефон дополнительно учитывает pane.
+// Регистрируем фактическую поверхность, чтобы скрытый чат не гасил
 // unread и не подавлял уведомление.
 const pageSurface = chat.registerSurface('chats-page', { chatId: null, visible: false });
 
-watch([activeId, dockCapable, pane], ([chatId, wide, currentPane]) => {
-  const visible = Boolean(chatId) && (wide || currentPane === 'chat');
+watch([activeId, dockCapable, pane, explicitlyOpened], ([chatId, wide, currentPane, opened]) => {
+  const visible = Boolean(chatId) && opened && (wide || currentPane === 'chat');
 
   pageSurface.update({ chatId: chatId || null, visible });
 

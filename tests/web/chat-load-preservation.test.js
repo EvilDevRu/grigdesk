@@ -29,7 +29,9 @@ test('LOAD-KEEP-01', async (t) => {
   assert.equal(chat.activeId, chat.sessions[0].id);
   await chat.ensure();
   assert.equal(chat.sessions.length, 1);
-  assert.equal(calls.filter(([method, url]) => method === 'GET' && url === '/api/chat/store/list').length, 1);
+  assert.equal(calls.filter(([method, url]) => (
+    method === 'GET' && url === '/api/chat/store/list?page=1&archived=0&limit=40'
+  )).length, 1);
 });
 
 test('LOAD-KEEP-02', async (t) => {
@@ -66,7 +68,7 @@ test('LOAD-KEEP-02', async (t) => {
   assert.equal(chat.historyStepReuseProtocol, server.historyStepReuseProtocol);
   assert.equal(chat.speech.engine, server.speech.engine);
   assert.equal(chat.speech.language, server.speech.language);
-  assert.ok(calls.some(([method, url, body]) => method === 'PUT' && url === '/api/chat/store/chat'
+  assert.ok(calls.some(([method, url, body]) => method === 'PUT' && url === '/api/chat/store/chat/window'
     && body.chat.messages[0].text === snapshot.sessions[0].messages[0].text));
 });
 

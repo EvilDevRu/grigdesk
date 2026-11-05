@@ -124,6 +124,7 @@ export async function chatAppFixture(t, {
   shutdownGraceMs = 30,
   shutdownInterruptMs = 150,
   extraRoutes = null,
+  beforeChat = null,
   taskEnv = null,
   modelsRegistry = async () => ({ 'test-provider': [{ id: 'test-model', efforts: [] }] }),
   syntheticPorts = {},
@@ -179,6 +180,8 @@ export async function chatAppFixture(t, {
     port: 18140,
     ...configOverrides,
   };
+
+  await beforeChat?.(app, { root, config });
 
   await app.register(chatModule, {
     config,
