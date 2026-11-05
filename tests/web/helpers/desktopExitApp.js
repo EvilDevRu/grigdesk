@@ -1,3 +1,4 @@
+import { protocolHead } from './chat-protocol.js';
 import { after } from 'node:test';
 
 import { appWindowStubs } from './app-window-stubs.js';
@@ -88,14 +89,14 @@ export async function desktopExitApp(t, options = {}) {
       payload = control.active;
     } else if (path === '/api/tasks') {
       payload = control.tasks;
-    } else if (path.startsWith('/api/chat/store/chat/')) {
-      const id = decodeURIComponent(path.slice('/api/chat/store/chat/'.length));
+    } else if (path.startsWith('/api/chat/store/head/')) {
+      const id = decodeURIComponent(path.slice('/api/chat/store/head/'.length));
 
-      payload = { chat: {
+      payload = { head: protocolHead({
         id,
         title: control.titles[id] ?? '',
         messages: [],
-      } };
+      }) };
     } else if (/^\/api\/tasks\/\d+\/stop$/.test(path)) {
       payload = { ok: true, outcome: 'stopped' };
     } else {
