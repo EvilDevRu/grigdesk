@@ -71,6 +71,63 @@ test('приёмник отвергает неверную пачку целик
     url: '/api/web-log/download?day=2026-09-23', headers })).statusCode, 404);
 });
 
+test('HTTP-скачивание объединяет gzip-части и активный файл дня', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-web-log-api-parts-'));
+  const app = Fastify({ logger: false });
+
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(() => app.close());
+  await app.register(authPlugin, {
+    authStore: {
+      isConfigured: () => true,
+      isValidSession: (id) => id === 'test-session',
+    },
+  });
+  await app.register(webLogModule, {
+    dir,
+    policy: { level: async () => 'verbose' },
+    now: () => new Date('2026-09-23T11:00:00Z'),
+    segmentBytes: 400,
+  });
+
+  const log = createWebLog({
+    now: () => new Date('2026-09-23T11:00:00Z'),
+    monotonicNow: () => 0,
+    pageId: 'page-aaaaaaaaaaaaaaaa',
+    tabId: 'tab-bbbbbbbbbbbbbbbb',
+    version: 'dev',
+    context: () => ({
+      route: '/chats',
+      vis: 'visible',
+      boot: null,
+    }),
+  });
+
+  log.record('app.pagehide', { persisted: false });
+
+  const entry = log.snapshot().entries[0];
+  const headers = { cookie: 'grigdesk_sid=test-session' };
+  const posted = await app.inject({
+    method: 'POST',
+    url: '/api/web-log',
+    headers,
+    payload: { v: 1, entries: Array.from({ length: 8 }, (_, index) => ({ ...entry, seq: index + 1 })) },
+  });
+
+  assert.equal(posted.statusCode, 200);
+  assert.equal(posted.json().accepted, 8);
+
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/web-log/download?day=2026-09-23',
+    headers,
+  });
+  const rows = response.body.trim().split('\n').map((line) => JSON.parse(line));
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(rows.map((row) => row.seq), [1, 2, 3, 4, 5, 6, 7, 8]);
+});
+
 test('сервер проверяет глобальный уровень для корня и вложенной предыстории', async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'grigdesk-web-log-policy-'));
   t.after(() => rm(dir, { recursive: true, force: true }));

@@ -15,7 +15,9 @@ export type WebLogModuleOptions = {
   // Без реестра (изолированные проверки) путь /api проверяется только по форме.
   apiRoutes?: Pick<ApiRouteRegistry, 'has' | 'list'>;
   now?: () => Date;
-  dailyBytes?: number;
+  segmentBytes?: number;
+  maxTotalBytes?: number;
+  maxArchives?: number;
 };
 
 /**
@@ -59,10 +61,7 @@ function projectBatch(
  * все ошибки наружу отдаются без исходного текста запроса.
  */
 async function webLogModule(fastify: FastifyInstance, options: WebLogModuleOptions): Promise<void> {
-  const store = createWebLogStore({
-    ...options,
-    warn: (message) => fastify.log.warn(message),
-  });
+  const store = createWebLogStore(options);
 
   fastify.addHook('onClose', async () => store.close());
 

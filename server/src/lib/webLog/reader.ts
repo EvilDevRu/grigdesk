@@ -1,12 +1,13 @@
-import { createReadStream } from 'node:fs';
-import { readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 
 import { projectWebLogEntry } from '../../../../shared/web-log/webLogContracts.ts';
 
 import type { WebLogEntry, WebLogKey, WebLogLevel } from '../../../../shared/web-log/webLogContracts.ts';
 
-import { validUtcDay } from './store.ts';
+import { validUtcDay, webLogFiles } from './files.ts';
+import { closeLogSnapshot, snapshotChunks, snapshotLogs } from '../../../../shared/node/logArchives.ts';
+import type { LogSnapshot } from '../../../../shared/node/logArchives.ts';
 
 export type ReaderOptions = {
   dir: string;
@@ -65,46 +66,67 @@ function eventMatches(event: string, pattern: string | undefined): boolean {
  * Какие дневные файлы читать: явный день, дни начиная с даты `--since`
  * (имя файла — UTC-день приёма) либо сегодняшний UTC-день.
  */
-async function days(options: ReaderOptions): Promise<string[]> {
+async function sourceSnapshot(options: ReaderOptions): Promise<LogSnapshot> {
+  const groups = await webLogFiles(options.dir).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') {
+      throw error;
+    }
+
+    return new Map<string, string[]>();
+  });
+  let first: string;
+
   if (options.day) {
     if (!validUtcDay(options.day)) {
       throw new Error('Некорректный UTC-день');
     }
 
-    return [options.day];
+    return snapshotLogs(options.dir, groups.get(options.day) ?? []);
   }
   if (!options.since) {
-    return [(options.now ?? (() => new Date()))().toISOString().slice(0, 10)];
+    first = (options.now ?? (() => new Date()))().toISOString().slice(0, 10);
+
+    return snapshotLogs(options.dir, groups.get(first) ?? []);
   }
 
-  const first = options.since.toISOString().slice(0, 10);
-  let names: string[];
+  first = options.since.toISOString().slice(0, 10);
 
-  try {
-    names = await readdir(options.dir);
-  } catch {
-    return [];
+  const names = [...groups.entries()].filter(([day]) => day >= first).flatMap(([, files]) => files);
+
+  return snapshotLogs(options.dir, names);
+}
+
+/**
+ * Между чтением каталога и open другая программа может завершить ротацию.
+ * Повтор собирает новый состав вместо ошибки на уже переименованном файле.
+ */
+async function stableSnapshot(options: ReaderOptions): Promise<LogSnapshot> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await sourceSnapshot(options);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || attempt >= 2) {
+        throw error;
+      }
+    }
   }
-
-  return names
-    .filter((name) => name.endsWith('.ndjson'))
-    .map((name) => name.slice(0, -'.ndjson'.length))
-    .filter((day) => validUtcDay(day) && day >= first)
-    .sort();
 }
 
 /**
  * Строки читаются потоково. Хвост без перевода строки не является подтверждённой
  * записью; сообщение в stderr содержит только номер, без сырого содержимого.
  */
-async function* lines(file: string, warn: (message: string) => void): AsyncGenerator<NumberedLine> {
+async function* lines(
+  snapshot: LogSnapshot, file: string, warn: (message: string) => void,
+): AsyncGenerator<NumberedLine> {
   const name = path.basename(file);
   let rest = '';
   let number = 0;
+  const decoder = new StringDecoder('utf8');
 
   try {
-    for await (const chunk of createReadStream(file, { encoding: 'utf8', highWaterMark: 64 * 1024 })) {
-      rest += chunk;
+    for await (const chunk of snapshotChunks(snapshot)) {
+      rest += decoder.write(chunk);
 
       let newline = rest.indexOf('\n');
 
@@ -175,13 +197,13 @@ function parseLine(
  * Все строки выбранных дней по порядку, уже прошедшие проекцию. С `--since`
  * отсекаются записи, принятые сервером раньше начала интервала.
  */
-async function* source(options: ReaderOptions): AsyncGenerator<ReadWebLogRow> {
+async function* source(options: ReaderOptions, snapshot: LogSnapshot): AsyncGenerator<ReadWebLogRow> {
   const warn = options.warn ?? (() => undefined);
 
-  for (const day of await days(options)) {
-    const file = path.join(options.dir, `${day}.ndjson`);
+  for (const part of snapshot.parts) {
+    const file = part.name;
 
-    for await (const line of lines(file, warn)) {
+    for await (const line of lines({ parts: [part] }, file, warn)) {
       const row = parseLine(line, file, warn);
 
       if (row && (!options.since || Date.parse(row.rx) >= options.since.getTime())) {
@@ -207,6 +229,20 @@ function selected(row: ReadWebLogRow, options: ReaderOptions): boolean {
  * Индекс ограничен; после потолка новые ключи выводятся без скрытого пропуска.
  */
 export async function* readWebLog(options: ReaderOptions): AsyncGenerator<ReadWebLogRow> {
+  const snapshot = await stableSnapshot(options);
+
+  try {
+    yield* readSnapshot(options, snapshot);
+  } finally {
+    await closeLogSnapshot(snapshot);
+  }
+}
+
+/**
+ * Оба прохода используют одни и те же inode и зафиксированные размеры.
+ * Между подсчётом дублей и выдачей ротация не меняет состав выборки.
+ */
+async function* readSnapshot(options: ReaderOptions, snapshot: LogSnapshot): AsyncGenerator<ReadWebLogRow> {
   const warn = options.warn ?? (() => undefined);
 
   if (options.ev && !/^[A-Za-z0-9.*_-]+$/u.test(options.ev)) {
@@ -217,7 +253,7 @@ export async function* readWebLog(options: ReaderOptions): AsyncGenerator<ReadWe
   const counts = new Map<string, IndexState>();
   let warnedLimit = false;
 
-  for await (const row of source({ ...options, warn: () => undefined })) {
+  for await (const row of source({ ...options, warn: () => undefined }, snapshot)) {
     const key = keyOf(row.entry);
     const state = counts.get(key);
 
@@ -235,7 +271,7 @@ export async function* readWebLog(options: ReaderOptions): AsyncGenerator<ReadWe
     }
   }
 
-  for await (const row of source(options)) {
+  for await (const row of source(options, snapshot)) {
     const state = counts.get(keyOf(row.entry));
 
     if (state?.seen) {

@@ -82,6 +82,8 @@
 | `node/payloadCache.ts` | Atomic extraction, package lock, полный verifier и kernel fingerprints; политика marker задаётся адаптером |
 | `node/payloadArchive.ts` | Индекс и потоковая проверка ZIP; error и ZIP ports передаёт пакет |
 | `node/files.ts` | ENOENT→null, временная папка, fsync; read-only modes готового дерева без обхода symlinks |
+| `node/logArchives.ts` | Потоковый gzip, восстановление raw, импорт прежнего .1 и снимки чтения по inode |
+| `node/rotatingLog.ts` | Общий Writable для stdout/stderr: ротация по размеру и пределы числа, возраста и объёма архивов |
 | `node/seaBuild.ts` | Имя архива Node, SEA config и потоковая загрузка; инструменты сборки остаются у пакетов |
 | `node/nodeRuntime.ts` | Манифест Node 24, кэш архива с SHA256, `SEA_FUSE`, запрет tracked output и атомарная публикация файла Б24/DeepSeek/посредника/сервера; шаги конкретного сборщика остаются у пакета |
 | `node/seaRuntime.ts` | Проверка готового R без boot: startup для окна, полный хеш для выбора пакета |

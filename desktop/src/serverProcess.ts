@@ -23,7 +23,7 @@ export function openServerLog(file: string): number {
  * Запускает явную команду source или SEA из проверенного runtime через порт spawn.
  * Значения окружения не входят в аргументы командной строки.
  */
-export function spawnServer(runtime: ServerRuntime, logFd: number, spawnImpl = spawn): ChildProcess {
+export function spawnServer(runtime: ServerRuntime, logFd: number | 'pipe', spawnImpl = spawn): ChildProcess {
   return spawnImpl(runtime.serverCommand, runtime.serverArgs, {
     cwd: path.join(runtime.root, 'server'),
     env: runtime.env,

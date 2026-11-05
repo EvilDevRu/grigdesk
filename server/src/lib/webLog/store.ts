@@ -1,7 +1,13 @@
 import { constants } from 'node:fs';
-import { chmod, mkdir, open, readdir, stat, unlink } from 'node:fs/promises';
+import { chmod, mkdir, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { Readable } from 'node:stream';
+import type { Readable } from 'node:stream';
+import {
+  archiveLog, logSnapshotStream, openLogFile, recoverLogArchives, snapshotLogs,
+} from '../../../../shared/node/logArchives.ts';
+import { validUtcDay, webLogFiles } from './files.ts';
+
+export { validUtcDay } from './files.ts';
 
 import type { FileHandle } from 'node:fs/promises';
 import type { WebLogEntry } from '../../../../shared/web-log/webLogContracts.ts';
@@ -15,26 +21,13 @@ export type WebLogAck = {
 export type WebLogStoreOptions = {
   dir: string;
   now?: () => Date;
-  dailyBytes?: number;
-  warn?: (message: string) => void;
+  segmentBytes?: number;
+  maxTotalBytes?: number;
+  maxArchives?: number;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RETAINED_PAST_DAYS = 13;
-
-/**
- * Календарный UTC-день вида YYYY-MM-DD, который реально существует.
- * Только такое имя может стать именем дневного файла журнала.
- */
-export function validUtcDay(value: unknown): value is string {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
-    return false;
-  }
-
-  const date = new Date(`${value}T00:00:00.000Z`);
-
-  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
 
 /**
  * Все операции append проходят через одну цепочку. Проверка размера и запись
@@ -43,11 +36,18 @@ export function validUtcDay(value: unknown): value is string {
 export function createWebLogStore(options: WebLogStoreOptions) {
   const dir = options.dir;
   const now = options.now ?? (() => new Date());
-  const dailyBytes = options.dailyBytes ?? 20 * 1024 * 1024;
+  const segmentBytes = options.segmentBytes ?? 20 * 1024 * 1024;
+  const maxTotalBytes = options.maxTotalBytes ?? 280 * 1024 * 1024;
+  const maxArchives = options.maxArchives ?? 128;
   const repaired = new Set<string>();
-  const warned = new Set<string>();
   let chain: Promise<unknown> = Promise.resolve();
   let closed = false;
+  let recovered = false;
+
+  if ([segmentBytes, maxTotalBytes, maxArchives].some((value) => !Number.isSafeInteger(value) || value < 1)
+    || maxTotalBytes < segmentBytes) {
+    throw new Error('invalid_web_log_limits');
+  }
 
   function exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const result = chain.then(operation, operation);
@@ -71,6 +71,16 @@ export function createWebLogStore(options: WebLogStoreOptions) {
     }
 
     await chmod(dir, 0o700);
+
+    if (!recovered) {
+      const groups = await webLogFiles(dir);
+
+      for (const day of groups.keys()) {
+        await recoverLogArchives(fileOf(day));
+      }
+
+      recovered = true;
+    }
   }
 
   function fileOf(day: string): string {
@@ -130,8 +140,8 @@ export function createWebLogStore(options: WebLogStoreOptions) {
   }
 
   /**
-   * Приём пачки подтверждает только реально дописанный префикс. Дата и rx
-   * принадлежат серверу, поэтому часы браузера не выбирают файл.
+   * Пачка последовательно записывается целыми строками, при заполнении части
+   * запись продолжается после ротации. Ошибка диска не превращается в ACK.
    */
   function append(entries: WebLogEntry[]): Promise<WebLogAck> {
     return exclusive(async () => {
@@ -143,47 +153,56 @@ export function createWebLogStore(options: WebLogStoreOptions) {
 
       const received = now().toISOString();
       const day = received.slice(0, 10);
-      const flags = constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW;
-      const handle = await open(fileOf(day), flags, 0o600);
+      let index = 0;
 
-      try {
-        await handle.chmod(0o600);
-        await repairTail(handle, day);
+      while (index < entries.length) {
+        const handle = await openLogFile(fileOf(day), constants.O_RDWR | constants.O_CREAT);
+        let rotate = false;
 
-        let size = (await handle.stat()).size;
-        const lines: string[] = [];
+        try {
+          await handle.chmod(0o600);
+          await repairTail(handle, day);
 
-        for (const entry of entries) {
-          const line = `${JSON.stringify({ ...entry, rx: received })}\n`;
-          const length = Buffer.byteLength(line, 'utf8');
+          let size = (await handle.stat()).size;
+          const lines: string[] = [];
 
-          if (size + length > dailyBytes) {
-            break;
+          while (index < entries.length) {
+            const entry = entries[index]!;
+            const line = `${JSON.stringify({ ...entry, rx: received })}\n`;
+            const length = Buffer.byteLength(line, 'utf8');
+
+            if (size > 0 && size + length > segmentBytes) {
+              rotate = true;
+
+              break;
+            }
+
+            lines.push(line);
+            size += length;
+            index += 1;
           }
 
-          lines.push(line);
-          size += length;
+          if (lines.length) {
+            await writeLines(handle, day, lines);
+          }
+        } finally {
+          await handle.close();
         }
 
-        if (lines.length) {
-          await writeLines(handle, day, lines);
+        if (rotate) {
+          await archiveLog(fileOf(day));
+          repaired.delete(day);
+          await cleanupFiles();
         }
-
-        const dropped = entries.length - lines.length;
-
-        if (dropped && !warned.has(day)) {
-          warned.add(day);
-          options.warn?.('Суточная квота журнала окна исчерпана.');
-        }
-
-        return {
-          accepted: lines.length,
-          dropped,
-          reason: dropped ? 'daily_limit' : null,
-        };
-      } finally {
-        await handle.close();
       }
+
+      await cleanupFiles();
+
+      return {
+        accepted: entries.length,
+        dropped: 0,
+        reason: null,
+      };
     });
   }
 
@@ -199,61 +218,54 @@ export function createWebLogStore(options: WebLogStoreOptions) {
 
       await ensureDirectory();
 
-      const cutoff = new Date(now().getTime() - RETAINED_PAST_DAYS * DAY_MS)
-        .toISOString()
-        .slice(0, 10);
-
-      for (const name of await readdir(dir)) {
-        const day = name.endsWith('.ndjson') ? name.slice(0, -'.ndjson'.length) : '';
-
-        if (validUtcDay(day) && day < cutoff) {
-          await unlink(fileOf(day));
-        }
-      }
+      await cleanupFiles();
     });
   }
 
   /**
-   * Фиксируем длину открытого файла: активный append не удлиняет скачивание.
-   * O_NOFOLLOW исключает подмену дневного файла ссылкой на чужие данные.
-   * Поток получает сам FileHandle и закрывает его: голый fd закрывался бы
-   * дважды — потоком и сборщиком мусора, уже чужой дескриптор.
+   * Возраст, число частей и общий размер ограничивают весь каталог журнала.
+   * Самый новый активный файл сохраняется, старые данные уходят первыми.
    */
-  async function download(day: string): Promise<Readable | null> {
-    if (!validUtcDay(day)) {
-      return null;
+  async function cleanupFiles(): Promise<void> {
+    const cutoff = new Date(now().getTime() - RETAINED_PAST_DAYS * DAY_MS)
+      .toISOString()
+      .slice(0, 10);
+    const groups = await webLogFiles(dir);
+    const files = [...groups.entries()].flatMap(([day, names]) => names.map((name) => ({ day, name })));
+    const sizes = await Promise.all(files.map((file) => stat(path.join(dir, file.name))));
+    let total = sizes.reduce((sum, info) => sum + info.size, 0);
+    let archives = files.filter((file) => file.name !== `${file.day}.ndjson`).length;
+
+    for (let index = 0; index < files.length; index += 1) {
+      const { day, name } = files[index]!;
+      const newest = index === files.length - 1;
+      const archive = name !== `${day}.ndjson`;
+      const excess = total > maxTotalBytes || (archive && archives > maxArchives);
+
+      if (day < cutoff || (!newest && excess)) {
+        await unlink(path.join(dir, name));
+        total -= sizes[index]!.size;
+        archives -= Number(archive);
+      }
     }
+  }
 
-    let handle: FileHandle;
-
-    try {
-      handle = await open(fileOf(day), constants.O_RDONLY | constants.O_NOFOLLOW);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+  /**
+   * Снимок всех частей фиксируется под той же очередью, что запись и ротация.
+   * Поток владеет FileHandle и закрывает их при окончании или отмене скачивания.
+   */
+  function download(day: string): Promise<Readable | null> {
+    return exclusive(async () => {
+      if (!validUtcDay(day)) {
         return null;
       }
 
-      throw error;
-    }
+      await ensureDirectory();
 
-    try {
-      const size = (await handle.stat()).size;
+      const names = (await webLogFiles(dir)).get(day);
 
-      if (size === 0) {
-        await handle.close();
-
-        return Readable.from([]);
-      }
-
-      return handle.createReadStream({
-        start: 0,
-        end: size - 1,
-      });
-    } catch (error) {
-      await handle.close();
-
-      throw error;
-    }
+      return names ? logSnapshotStream(await snapshotLogs(dir, names)) : null;
+    });
   }
 
   const timer = setInterval(() => {

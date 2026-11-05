@@ -17,6 +17,14 @@ LOG="${GRIGDESK_EFFECTIVE_LOG:-$DATA_HOME/state/grigdesk-server.log}"
 PORT="$GRIGDESK_EFFECTIVE_PORT"
 grigdesk_server_command "$ROOT"
 
+# Потребитель труб владеет ротацией: сервер больше не держит fd старого архива.
+# В готовом комплекте используется собранный helper и собственный Node.
+grigdesk_require_node
+LOG_RUNNER="$ROOT/server/scripts/runLoggedServer.mts"
+if [[ -f "$ROOT/release.json" ]]; then
+  LOG_RUNNER="$ROOT/server/runtime/helpers/run-logged-server.mjs"
+fi
+
 listening() { ss -tln 2>/dev/null | grep -q ":$1 "; }
 busy() { listening "$PORT"; }
 
@@ -36,7 +44,8 @@ fi
 
 ( umask 077; mkdir -p "$(dirname "$LOG")" )
 cd "$ROOT"
-setsid nohup "${GRIGDESK_SERVER_COMMAND[@]}" </dev/null >>"$LOG" 2>&1 &
+setsid nohup "${_grigdesk_packaged_node:-node}" "$LOG_RUNNER" \
+  "$LOG" "${GRIGDESK_SERVER_COMMAND[@]}" </dev/null >/dev/null 2>&1 &
 disown
 
 # Живость проверяем по /api/auth/state: он публичный (нужен экрану входа), а /api/health

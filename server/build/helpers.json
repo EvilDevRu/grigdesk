@@ -2,6 +2,13 @@
   "schema": 1,
   "helpers": [
     {
+      "id": "run-logged-server",
+      "entry": "server/scripts/runLoggedServer.mts",
+      "entryKind": "main",
+      "exports": ["main"],
+      "description": "Ручной сервер с потоковой ротацией stdout и stderr."
+    },
+    {
       "id": "factory-browser",
       "entry": "server/src/lib/browser/factoryBrowserCli.ts",
       "entryKind": "main",

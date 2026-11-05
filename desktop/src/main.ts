@@ -28,7 +28,6 @@ import { createNativeBrowserView, browserChildWindowOptions } from './browser/br
 import { attachBrowserIpc } from './browser/browserIpc.ts';
 import { normalizeBrowserPreferences } from '../../shared/browser/browserContract.ts';
 import { cleanDesktopChildEnvironment } from './childEnvironment.ts';
-import { closeSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import os from 'node:os';
@@ -56,7 +55,9 @@ import {
 import { createQuitController } from './quitController.ts';
 import { loadServerRuntime, runtimeDependencies } from './runtimeConfig.ts';
 import type { ServerRuntime } from './runtimeConfig.ts';
-import { openServerLog, readUnitState, runVpnGate, spawnServer } from './serverProcess.ts';
+import { readUnitState, runVpnGate, spawnServer } from './serverProcess.ts';
+import { RotatingLog } from '../../shared/node/rotatingLog.ts';
+import { finished } from 'node:stream/promises';
 import { createServerSupervisor } from './serverSupervisor.ts';
 import type { ServerStartupStage } from './serverSupervisor.ts';
 import { readSettings, writeSettings, updateSettings } from './settings.ts';
@@ -157,21 +158,82 @@ function setTimer(ms: number, callback: () => void): () => void {
 }
 
 /**
- * Свой сервер пишет stdout и stderr в журнал; дескриптор main закрывает сразу после spawn.
- * Постоянный обработчик error не даёт позднему отказу kill уронить главный процесс.
+ * Все поколения своего сервера пишут через один ротируемый потребитель на путь.
+ * Потомки старого поколения не удерживают fd закрытого архива и не теряют хвост.
  */
 function startOwnServer(runtime: ServerRuntime): ChildProcess {
-  const descriptor = openServerLog(runtime.logPath);
+  let log = serverLogs.get(runtime.logPath);
+
+  if (!log || log.destroyed) {
+    log = new RotatingLog(runtime.logPath);
+    log.on('error', () => writeLog(`GrigDesk: журнал сервера недоступен: ${runtime.logPath}`));
+    serverLogs.set(runtime.logPath, log);
+  }
+
+  const child = spawnServer(runtime, 'pipe');
+
+  serverLogChildren.set(child, log);
+  child.stdout?.pipe(log, { end: false });
+  child.stderr?.pipe(log, { end: false });
+  child.on('error', (error) => writeLog(`GrigDesk: процесс сервера: ${error.message}`));
+
+  /**
+   * Отказ диска не должен заполнить трубы и заблокировать работающий сервер.
+   * После отказа остаток вывода уходит в stderr владельца приложения.
+   */
+  const failed = () => {
+    child.stdout?.unpipe(log);
+    child.stderr?.unpipe(log);
+    child.stdout?.pipe(process.stderr, { end: false });
+    child.stderr?.pipe(process.stderr, { end: false });
+  };
+
+  log.once('error', failed);
+  child.once('close', () => {
+    log?.off('error', failed);
+    serverLogChildren.delete(child);
+  });
+
+  return child;
+}
+
+const serverLogs = new Map<string, RotatingLog>();
+const serverLogChildren = new Map<ChildProcess, RotatingLog>();
+
+/**
+ * Exit сервера приходит раньше конца stdio: сначала дожидаемся хвоста труб.
+ * Осиротевший потомок не задерживает выход окна дольше дополнительного бюджета.
+ */
+async function closeServerLogs(): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const closed = [...serverLogChildren.keys()].map((child) => new Promise<void>((resolve) => {
+    child.once('close', () => resolve());
+  }));
 
   try {
-    const child = spawnServer(runtime, descriptor);
-
-    child.on('error', (error) => writeLog(`GrigDesk: процесс сервера: ${error.message}`));
-
-    return child;
+    await Promise.race([
+      Promise.all(closed),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, 5000);
+      }),
+    ]);
   } finally {
-    closeSync(descriptor);
+    clearTimeout(timer);
   }
+
+  for (const [child, log] of serverLogChildren) {
+    child.stdout?.unpipe(log);
+    child.stderr?.unpipe(log);
+    child.stdout?.resume();
+    child.stderr?.resume();
+  }
+
+  await Promise.all([...serverLogs.values()].map(async (log) => {
+    const done = finished(log);
+
+    log.end();
+    await done;
+  }));
 }
 
 // Каталог пакета для очистки окружения своего сервера: распакованный AppRun не экспортирует APPDIR.
@@ -1544,6 +1606,7 @@ const quit = createQuitController({
   stopOwnServer: async () => {
     await client?.close();
     await supervisor.stop();
+    await closeServerLogs();
   },
   revealed: () => revealed(),
   saveWindow: () => {
