@@ -21,6 +21,7 @@ import type { ChildProcess } from 'node:child_process';
 import { execFile, spawn } from 'node:child_process';
 
 import { createBrowserApi } from './browser/browserApi.ts';
+import { createBrowserInputGuard } from './browser/browserInputGuard.ts';
 import { createBrowserApps } from './browser/browserApps.ts';
 import { createBrowserEvents } from './browser/browserEvents.ts';
 import { openExternalBrowser } from './browser/externalBrowser.ts';
@@ -1099,6 +1100,10 @@ async function prepare(signal: AbortSignal): Promise<void> {
   });
 
   browserApi = createBrowserApi({
+    inputGuard: createBrowserInputGuard({
+      create: (options) => new WebContentsView(options),
+      window: () => mainWindow,
+    }),
     preferences: () => normalizeBrowserPreferences(stored.browser),
     commit: (value) => updateSettings(settingsFile!, stored, { browser: value }),
     apps: browserApps.list,

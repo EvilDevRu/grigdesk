@@ -10,6 +10,7 @@ import { createBrowserProtocol } from './browserProtocol.ts';
 import type { BrowserPreferences } from '../../../shared/browser/browserContract.ts';
 import type { BrowserRect } from './browserTabs.ts';
 import type { BrowserViewEvents, NativeBrowserView } from './browserView.ts';
+import type { createBrowserInputGuard } from './browserInputGuard.ts';
 
 interface NativeCommand {
   requestId: string;
@@ -69,6 +70,7 @@ function scaleMouseEvent(percent: number, params: unknown): unknown {
  * Agent input всегда проходит parser, host/grant/epoch checks и последовательность tab.
  */
 export function createBrowserApi(options: {
+  inputGuard?: ReturnType<typeof createBrowserInputGuard>;
   preferences(): BrowserPreferences;
   commit(value: BrowserPreferences): Promise<void>;
   apps(): Promise<{ id: string; name: string }[]>;
@@ -124,7 +126,27 @@ export function createBrowserApi(options: {
       paused: tab.paused || tab.navigating,
     })),
   });
+  /**
+   * Блокировка ввода синхронна с реестром, раньше доставки snapshot во Vue.
+   * Фокус сайта во время CDP-команды возвращается в UI, сохраняя физическую клавиатуру вне guest.
+   */
+  function syncInputGuard(): void {
+    const active = tabs.activeId();
+    const rect = tabs.layoutRect();
+
+    if (!disposed && active && rect && tabs.get(active).agentWorking) {
+      options.inputGuard?.show(rect);
+    } else {
+      options.inputGuard?.hide();
+    }
+  }
+
+  /**
+   * Native-перехватчик обновляется до публичного snapshot и его подписчиков.
+   * Поэтому поздняя отрисовка интерфейса не оставляет страницу открытой для ручного ввода.
+   */
   const changed = () => {
+    syncInputGuard();
     revision += 1;
     options.changed?.(snapshot());
 
@@ -214,6 +236,7 @@ export function createBrowserApi(options: {
      */
     create(tabId, scope) {
       const events: BrowserViewEvents = {
+        focused: syncInputGuard,
         start: () => {
           if (views.has(tabId)) {
             tabs.beginNavigation(tabId);
@@ -388,6 +411,12 @@ export function createBrowserApi(options: {
       })) };
     }
 
+    await options.inputGuard?.ready();
+
+    if (!globalAllowed(value)) {
+      throw new Error('access_revoked');
+    }
+
     if (value.action === 'open') {
       let openedId = '';
       const pending = tabs.open(browserUrl(value.url), value.owner, true, {
@@ -421,6 +450,10 @@ export function createBrowserApi(options: {
 
     if (value.action === 'grant') {
       const tab = tabs.get(tabId);
+
+      if (tab.agentWorking) {
+        throw new Error('browser_tab_busy');
+      }
 
       if (tab.grantEpoch !== value.grantEpoch || tab.pageEpoch !== value.pageEpoch) {
         throw new Error('access_revoked');
@@ -839,6 +872,11 @@ export function createBrowserApi(options: {
           return previous;
         }
 
+        if (native.action === 'grant' && tabs.list().some((tab) =>
+          tab.id === native.tabId && tab.agentWorking)) {
+          return { ok: false, error: 'browser_tab_busy' };
+        }
+
         const pending = enqueue(native.tabId ?? `owner:${native.owner}`, async () => {
           try {
             if (!valid()) {
@@ -899,7 +937,11 @@ export function createBrowserApi(options: {
 
       const tabId = value.tabId;
 
-      tabs.get(tabId);
+      const tab = tabs.get(tabId);
+
+      if (tab.agentWorking && !['activate', 'pause', 'resume', 'revoke'].includes(operation)) {
+        throw new Error('browser_tab_busy');
+      }
 
       if (operation === 'activate') {
         tabs.activate(tabId);
@@ -949,6 +991,7 @@ export function createBrowserApi(options: {
         disposed = true;
         stopHost();
         tabs.dispose();
+        options.inputGuard?.dispose();
         subscribers.clear();
       }
     },

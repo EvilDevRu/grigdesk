@@ -1291,6 +1291,7 @@
   "browserGrant": "Transfer",
   "browserRefreshOwners": "Refresh list",
   "browserLoading": "Loading…",
+  "browserAgentWorking": "The agent is working. Tab controls are temporarily locked.",
   "browserPageFailed": "The page could not load. Check the address and reload the tab.",
   "browserEnterAddress": "Enter a website address, search query, or open a stand from the pipeline.",
   "browserAppMissing": "The selected browser is unavailable. Choose another application in settings.",

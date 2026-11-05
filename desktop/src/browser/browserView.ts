@@ -13,6 +13,7 @@ import type { createBrowserProtocol } from './browserProtocol.ts';
 type Send = Parameters<typeof createBrowserProtocol>[0]['send'];
 
 export interface BrowserViewEvents {
+  focused?(): void;
   start(): void;
   navigated(url: string): void;
   metadata(value: {
@@ -369,6 +370,7 @@ export function createNativeBrowserView(options: {
       options.events.intent(intent);
     }
   });
+  contents.on('focus', () => options.events.focused?.());
 
   try {
     contents.debugger.attach('1.3');

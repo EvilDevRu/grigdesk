@@ -61,6 +61,7 @@ async function fixture(t: TestContext, agents = true) {
     params?: unknown
   }[] = [];
   const listeners = new Set<(value: Snapshot) => void>();
+  const guard = { rect: null as BrowserRect | null };
   const views = new Map<string, {
     events: BrowserViewEvents;
     scope: string;
@@ -72,6 +73,16 @@ async function fixture(t: TestContext, agents = true) {
     gate: { method: string; barrier: ReturnType<typeof barrier> } | null;
   }>();
   const api = createBrowserApi({
+    inputGuard: {
+      ready: async () => {},
+      show: (rect) => {
+        guard.rect = rect;
+      },
+      hide: () => {
+        guard.rect = null;
+      },
+      dispose: () => {},
+    },
     now: () => clock,
     id: () => `tab${++serial}`,
     preferences: () => preferences,
@@ -286,6 +297,7 @@ async function fixture(t: TestContext, agents = true) {
 
   return {
     api,
+    guard,
     views,
     calls,
     execute,
@@ -357,6 +369,80 @@ test('BR-N-activity: native push отмечает вкладку до завер
   assert.equal(f.api.snapshot().tabs.find((item) => item.id === tab.tabId)!.agentWorking, false);
   navigation.release();
   await human;
+});
+
+test('BR-N-lock: занятая вкладка защищена native-слоем и от ручных IPC-действий', async (t) => {
+  const f = await fixture(t);
+  const tab = await f.open();
+  const rect = await f.mount();
+  const gate = barrier();
+
+  f.views.get(tab.tabId)!.gate = { method: 'Runtime.evaluate', barrier: gate };
+
+  const pending = f.execute({ action: 'snapshot', tabId: tab.tabId }, tab.grantEpoch);
+
+  t.after(() => gate.release());
+  await gate.entered;
+  assert.deepEqual(f.guard.rect, rect);
+  assert.deepEqual(f.views.get(tab.tabId)!.rect, rect, 'сайт остаётся показанным для CDP');
+
+  for (const request of [
+    { operation: 'navigate', url: 'http://fixture.test/other' },
+    { operation: 'reload' },
+    { operation: 'back' },
+    { operation: 'forward' },
+    { operation: 'zoom', percent: 150 },
+    { operation: 'close' },
+    { operation: 'move', beforeId: null },
+  ]) {
+    await assert.rejects(f.api.invoke({ ...request, tabId: tab.tabId }), /browser_tab_busy/u);
+  }
+
+  assert.deepEqual(await f.execute({
+    action: 'grant',
+    human: true,
+    tabId: tab.tabId,
+    pageEpoch: tab.pageEpoch,
+  }, tab.grantEpoch), { ok: false, error: 'browser_tab_busy' });
+
+  const other = await f.open('owner-b');
+
+  assert.equal(f.guard.rect, null, 'другая вкладка остаётся доступна');
+  await f.api.invoke({ operation: 'activate', tabId: tab.tabId });
+  assert.deepEqual(f.guard.rect, rect);
+  f.guard.rect = null;
+  f.views.get(tab.tabId)!.events.focused?.();
+  assert.deepEqual(f.guard.rect, rect, 'повторный фокус guest восстанавливает shield');
+  gate.release();
+  await pending;
+  assert.equal(f.guard.rect, null);
+  await f.api.invoke({
+    operation: 'zoom',
+    tabId: tab.tabId,
+    percent: 150
+  });
+  assert.equal(f.views.get(tab.tabId)!.zoom, 1.5);
+  assert.equal(f.api.snapshot().tabs.some((item) => item.id === other.tabId), true);
+});
+
+test('BR-N-lock-revoke: экстренный отзыв работает и ошибка команды снимает блокировку', async (t) => {
+  const f = await fixture(t);
+  const tab = await f.open();
+  const rect = await f.mount();
+  const gate = barrier();
+
+  f.views.get(tab.tabId)!.gate = { method: 'Runtime.evaluate', barrier: gate };
+
+  const pending = f.execute({ action: 'snapshot', tabId: tab.tabId }, tab.grantEpoch);
+
+  t.after(() => gate.release());
+  await gate.entered;
+  await f.api.invoke({ operation: 'pause', tabId: tab.tabId });
+  await f.api.invoke({ operation: 'revoke', tabId: tab.tabId });
+  assert.deepEqual(f.guard.rect, rect, 'незавершённый эффект продолжает блокировать ручной ввод');
+  gate.release();
+  assert.deepEqual(await pending, { ok: false, error: 'access_revoked' });
+  assert.equal(f.guard.rect, null);
 });
 
 test('BR-N01: human tab невидима агенту до explicit grant и после revoke', async (t) => {

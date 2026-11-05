@@ -31,7 +31,7 @@
                     :data-selected="tab.id === selected"
                     :data-dragging="draggedTab === tab.id"
                     :data-drop="dropTab === tab.id ? dropSide : undefined"
-                    draggable="true"
+                    :draggable="!tab.agentWorking"
                     @contextmenu.prevent.stop="contextTab = tab.id"
                     @keydown="tabMenuKey($event, tab.id)"
                     @auxclick.middle.prevent="closeTab(tab.id)"
@@ -64,6 +64,7 @@
                       role="embedded"
                       data-context="workspace-toolbar"
                       :label="t('core.browserCloseNamed', { name: tabName(tab) })"
+                      :disabled="tab.agentWorking"
                       v-tooltip="t('core.browserCloseNamed', { name: tabName(tab) })"
                       @click.stop="closeTab(tab.id)"
                   >
@@ -76,13 +77,16 @@
                   <UiButton role="menuitem" variant="ghost" @click="tabMenuAction('new', tab.id)">
                     {{ t('core.browserNewTab') }}
                   </UiButton>
-                  <UiButton role="menuitem" variant="ghost" @click="tabMenuAction('reload', tab.id)">
+                  <UiButton role="menuitem" variant="ghost" :disabled="tab.agentWorking"
+                      @click="tabMenuAction('reload', tab.id)">
                     {{ t('core.browserReload') }}
                   </UiButton>
-                  <UiButton role="menuitem" variant="ghost" @click="tabMenuAction('duplicate', tab.id)">
+                  <UiButton role="menuitem" variant="ghost" :disabled="tab.agentWorking"
+                      @click="tabMenuAction('duplicate', tab.id)">
                     {{ t('core.browserDuplicateTab') }}
                   </UiButton>
-                  <UiButton role="menuitem" variant="ghost" @click="tabMenuAction('close', tab.id)">
+                  <UiButton role="menuitem" variant="ghost" :disabled="tab.agentWorking"
+                      @click="tabMenuAction('close', tab.id)">
                     {{ t('core.browserCloseTab') }}
                   </UiButton>
                   <UiButton
@@ -133,7 +137,7 @@
           <UiIconButton
               role="embedded"
               data-context="workspace-toolbar"
-              :disabled="!active?.canBack || Boolean(browser.busy)"
+              :disabled="activeLocked || !active?.canBack || Boolean(browser.busy)"
               :label="t('core.browserBack')"
               v-tooltip="t('core.browserBack')"
               @click="history('back')"
@@ -143,7 +147,7 @@
           <UiIconButton
               role="embedded"
               data-context="workspace-toolbar"
-              :disabled="!active?.canForward || Boolean(browser.busy)"
+              :disabled="activeLocked || !active?.canForward || Boolean(browser.busy)"
               :label="t('core.browserForward')"
               v-tooltip="t('core.browserForward')"
               @click="history('forward')"
@@ -153,7 +157,7 @@
           <UiIconButton
               role="embedded"
               data-context="workspace-toolbar"
-              :disabled="!active || Boolean(browser.busy)"
+              :disabled="activeLocked || !active || Boolean(browser.busy)"
               :label="t('core.browserReload')"
               v-tooltip="t('core.browserReload')"
               @click="history('reload')"
@@ -170,6 +174,7 @@
             spellcheck="false"
             :aria-label="t('core.browserAddress')"
             :placeholder="t('core.browserAddressPlaceholder')"
+            :disabled="activeLocked"
             @focus="addressFocused = true"
             @blur="addressFocused = false"
           />
@@ -177,7 +182,7 @@
               role="embedded"
               data-context="workspace-toolbar"
               type="submit"
-              :disabled="!draft || Boolean(browser.busy)"
+              :disabled="activeLocked || !draft || Boolean(browser.busy)"
               :label="t('core.browserGo')"
               v-tooltip="t('core.browserGo')"
           >
@@ -188,7 +193,7 @@
           <UiSelect
             :aria-label="t('core.browserZoom')"
             :model-value="String(active?.zoom ?? 100)"
-            :disabled="!active"
+            :disabled="activeLocked || !active"
             @update:model-value="zoom(Number($event))"
           >
             <option v-for="percent in zoomLevels" :key="percent" :value="String(percent)">
@@ -202,18 +207,25 @@
         {{ errorText }}
       </UiInlineMessage>
 
-      <div v-if="browser.preferences.agents" class="browser-control">
+      <div v-if="browser.preferences.agents || activeLocked" class="browser-control">
         <div class="browser-control__summary">
           <span class="browser-host" :data-phase="browser.hostStatus.phase" role="status" v-tooltip="hostText">
             <i aria-hidden="true"></i>{{ hostLabel }}
           </span>
           <div v-if="active" class="browser-control__context">
+            <div v-if="activeLocked" class="browser-agent-lock" role="status" data-browser-agent-lock
+                v-tooltip="t('core.browserAgentWorking')">
+              <UiSpinner decorative />
+              <span>{{ t('core.browserAgentWorking') }}</span>
+            </div>
+            <template v-else>
             <span v-tooltip="t('core.browserOwner', { name: ownerName(active.owner) })">
               {{ t('core.browserOwner', { name: ownerName(active.owner) }) }}
             </span>
             <span v-tooltip="t('core.browserController', { name: ownerName(active.grantee) })">
               {{ t('core.browserController', { name: ownerName(active.grantee) }) }}
             </span>
+            </template>
           </div>
           <UiButton
               v-if="browser.hostStatus.phase === 'conflict'"
@@ -238,6 +250,7 @@
                 v-model:open="accessExpanded"
                 controls="browser-access"
                 size="compact"
+                :disabled="activeLocked"
             >
               {{ t('core.browserGrantTo') }}
             </UiDisclosureButton>
@@ -248,13 +261,13 @@
             <UiSelect
               v-model="chosenOwner"
               :aria-label="t('core.browserGrantTo')"
-              :disabled="browser.hostStatus.phase !== 'online'"
+              :disabled="activeLocked || browser.hostStatus.phase !== 'online'"
             >
               <option value="">{{ t('core.browserChooseOwner') }}</option>
               <option v-for="owner in browser.owners" :key="owner.id" :value="owner.id">{{ owner.label }}</option>
             </UiSelect>
           </div>
-          <UiButton size="compact" :disabled="!chosenOwner || grantBusy" @click="grant">
+          <UiButton size="compact" :disabled="activeLocked || !chosenOwner || grantBusy" @click="grant">
             {{ t('core.browserGrant') }}
           </UiButton>
           <UiIconButton
@@ -275,6 +288,7 @@
           class="browser-stage"
           role="tabpanel"
           :aria-labelledby="active ? `browser-tab-${active.id}` : undefined"
+          :aria-busy="activeLocked"
       >
         <UiInlineMessage v-if="active?.loading" class="browser-message">
           {{ t('core.browserLoading') }}
@@ -309,6 +323,7 @@ import {
   UiInput,
   UiPopover,
   UiSelect,
+  UiSpinner,
   UiTab,
   UiTabs,
   t,
@@ -321,6 +336,12 @@ import type { BrowserTab } from '../shared/browser/browserUi.ts';
 import BrowserViewport from '../shared/browser/BrowserViewport.vue';
 import BrowserSiteIcon from '../shared/browser/BrowserSiteIcon.vue';
 
+interface BrowserControlRequest {
+  operation: string;
+  tabId?: string;
+  [key: string]: unknown;
+}
+
 const ICON: SVGAttributes = {
   viewBox: '0 0 24 24',
   fill: 'none',
@@ -332,6 +353,7 @@ const ICON: SVGAttributes = {
 
 const browser = useBrowserStore();
 const active = computed(() => browser.active);
+const activeLocked = computed(() => Boolean(active.value?.agentWorking));
 const draft = ref('');
 const addressFocused = ref(false);
 const address = ref<InstanceType<typeof UiInput> | null>(null);
@@ -363,7 +385,11 @@ function hasAgentAccess(tab: BrowserTab): boolean {
 // Очистка касается только агентских остатков, которым нужна новая выдача человеком.
 // Человеческие вкладки и любой живой доступ, включая паузу, сохраняются.
 function isUnusedTab(tab: BrowserTab): boolean {
-  return tab.owner !== null && tab.grantee === null && tab.grantOrigin === null;
+  return !tab.agentWorking && tab.owner !== null && tab.grantee === null && tab.grantOrigin === null;
+}
+
+function isTabLocked(id: string): boolean {
+  return browser.snapshot.tabs.some((tab) => tab.id === id && tab.agentWorking);
 }
 
 /**
@@ -388,7 +414,8 @@ function ownerName(value: string | null): string {
     { key: scope.key }) : t('core.browserHuman');
 }
 
-const errorText = computed(() => (error.value || browser.error) === 'browser_app_missing'
+const errorText = computed(() => (error.value || browser.error) === 'browser_tab_busy'
+  ? t('core.browserAgentWorking') : (error.value || browser.error) === 'browser_app_missing'
   ? t('core.browserAppMissing') : (error.value || browser.error) === 'browser_sync_failed'
     ? t('core.browserSyncFailed') : t('core.browserRequestFailed'));
 const hostMessages = {
@@ -406,7 +433,12 @@ const hostLabel = computed(() => browser.hostStatus.phase === 'online'
  * Ошибки обработчиков остаются в странице и не становятся unhandled rejection Vue.
  * Выбор новой вкладки завершает черновик только после native ACK успешного открытия.
  */
-async function action(value: unknown): Promise<boolean> {
+async function action(value: BrowserControlRequest): Promise<boolean> {
+  if (value.tabId && isTabLocked(value.tabId)
+    && !['activate', 'pause', 'resume', 'revoke'].includes(value.operation)) {
+    return false;
+  }
+
   error.value = '';
 
   try {
@@ -454,6 +486,10 @@ async function selectTab(id: string | number): Promise<void> {
  * Invalid/unknown result не вызывает fallback во внешний браузер.
  */
 async function submit(): Promise<void> {
+  if (activeLocked.value) {
+    return;
+  }
+
   let url: string;
 
   try {
@@ -551,7 +587,7 @@ async function tabMenuAction(
   const index = tabs.findIndex((tab) => tab.id === tabId);
   const tab = tabs[index];
 
-  if (!tab) {
+  if (!tab || tab.agentWorking && ['reload', 'duplicate', 'close'].includes(operation)) {
     return;
   }
 
@@ -579,7 +615,7 @@ async function tabMenuAction(
       return;
     }
 
-    for (const item of closing) {
+    for (const item of closing.filter((item) => !item.agentWorking)) {
       if (!await action({ operation: 'close', tabId: item.id })) {
         break;
       }
@@ -599,7 +635,9 @@ async function tabMenuAction(
  * Начало переноса закрывает меню, чтобы overlay не перехватил drop полосы вкладок.
  */
 function startDrag(event: DragEvent, tabId: string): void {
-  if (!event.dataTransfer) {
+  if (!event.dataTransfer || isTabLocked(tabId)) {
+    event.preventDefault();
+
     return;
   }
 
@@ -711,7 +749,7 @@ async function loadOwners(): Promise<void> {
 async function grant(): Promise<void> {
   const tab = active.value;
 
-  if (!tab || !chosenOwner.value || grantBusy.value) {
+  if (!tab || tab.agentWorking || !chosenOwner.value || grantBusy.value) {
     return;
   }
 
@@ -752,6 +790,10 @@ async function refresh(): Promise<void> {
  * Сочетание не закрывает BrowserWindow и не навигирует основной UI назад.
  */
 function shortcut(intent: string): void {
+  if (activeLocked.value && intent !== 'new') {
+    return;
+  }
+
   if (intent === 'address') {
     address.value?.focus();
     address.value?.select();
@@ -933,6 +975,15 @@ onBeforeUnmount(() => {
 .browser-message {
   flex: none;
   margin: 8px 12px;
+}
+
+.browser-agent-lock {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  color: var(--accent);
+  gap: 8px;
 }
 
 .browser-control {

@@ -131,8 +131,10 @@ export const useBrowserStore = defineStore('browser', {
 
         return result;
       } catch (error) {
-        this.error = (error as Error).message === 'browser_app_missing'
-          ? 'browser_app_missing' : 'browser_request_failed';
+        const code = (error as Error).message;
+
+        this.error = ['browser_app_missing', 'browser_tab_busy'].includes(code)
+          ? code : 'browser_request_failed';
 
         throw error;
       } finally {

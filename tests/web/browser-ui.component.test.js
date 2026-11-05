@@ -587,6 +587,74 @@ test('BR-U22: favicon рядом с роботом, пульсация толь�
   assert.equal(f.wrapper.get('#browser-tab-one img').attributes('src'), 'data:image/png;base64,Ag==');
 });
 
+test('BR-U23: работа агента блокирует controls, горячие клавиши и закрытие вкладки', async (t) => {
+  const f = mounted(t, BrowserView);
+  const button = (name) => f.wrapper.findAll('button')
+    .find((item) => item.attributes('aria-label') === name || item.text() === name);
+
+  f.browser.active.agentWorking = true;
+  await rendered();
+  assert.match(f.wrapper.get('[data-browser-agent-lock]').text(), /Агент работает/u);
+  assert.equal(f.wrapper.get('[data-browser-agent-lock]').attributes('role'), 'status');
+  assert.equal(f.wrapper.get('#browser-page').attributes('aria-busy'), 'true');
+
+  for (const name of ['Назад', 'Вперёд', 'Обновить', 'Масштаб страницы', 'Закрыть вкладку «Fixture one»']) {
+    assert.equal(button(name).element.disabled, true, name);
+  }
+
+  assert.equal(f.wrapper.get('input[aria-label="Адрес"]').element.disabled, true);
+
+  const before = f.calls.length;
+
+  await f.wrapper.get('form').trigger('submit');
+  await f.wrapper.get('#browser-tab-one').trigger('auxclick', { button: 1 });
+  window.dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'w',
+    ctrlKey: true,
+    cancelable: true
+  }));
+  window.dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'ArrowLeft',
+    altKey: true,
+    cancelable: true
+  }));
+  await rendered();
+  assert.equal(f.calls.length, before);
+  assert.equal(button('Приостановить').element.disabled, false);
+  assert.equal(button('Отозвать доступ').element.disabled, false);
+
+  await f.wrapper.get('#browser-tab-two').trigger('click');
+  await rendered();
+  assert.equal(f.wrapper.find('[data-browser-agent-lock]').exists(), false);
+  assert.equal(f.wrapper.get('input[aria-label="Адрес"]').element.disabled, false);
+  assert.equal(button('Закрыть вкладку «Fixture one»').element.disabled, true);
+
+  f.browser.snapshot.active = 'one';
+  f.browser.active.agentWorking = false;
+  await rendered();
+  assert.equal(f.wrapper.find('[data-browser-agent-lock]').exists(), false);
+  assert.equal(button('Обновить').element.disabled, false);
+  await button('Обновить').trigger('click');
+  assert.equal(f.calls.at(-1).operation, 'reload');
+});
+
+test('BR-U24: групповое закрытие оставляет занятые вкладки', async (t) => {
+  const f = mounted(t, BrowserView);
+
+  f.browser.snapshot.tabs[1].agentWorking = true;
+  await f.wrapper.get('#browser-tab-one').trigger('contextmenu');
+  await rendered();
+
+  const closeOthers = [...document.querySelectorAll('[role="menuitem"]')]
+    .find((item) => item.textContent.trim() === 'Закрыть другие вкладки');
+
+  assert.ok(closeOthers);
+  closeOthers.click();
+  await rendered();
+  assert.equal(f.calls.some((item) => item.operation === 'close'), false);
+  assert.equal(f.browser.snapshot.tabs.length, 2);
+});
+
 for (const menuTab of ['one', 'dead-a']) {
   test(`BR-U18: очистка из меню ${menuTab} закрывает только мёртвые agent-вкладки`, async (t) => {
     const f = mounted(t, BrowserView);
