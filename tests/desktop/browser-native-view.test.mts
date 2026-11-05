@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
+import { setImmediate as nextLoop } from 'node:timers/promises';
 
 import {
   browserChildWindowOptions, browserViewOptions, createNativeBrowserView,
@@ -22,8 +23,10 @@ function fixture(options: {
   pendingFreshCapture?: boolean;
   failedAttach?: boolean;
   failedCaptureAttach?: boolean;
+  favicon?(url: string, init?: RequestInit): Promise<Response>;
 } = {}) {
   const calls: unknown[] = [];
+  const metadata: { favicon?: string | null }[] = [];
   const contents = new EventEmitter();
   const debuggerPort = new EventEmitter();
   const frames: ((image: NativeImage) => void)[] = [];
@@ -77,6 +80,9 @@ function fixture(options: {
   } as unknown as NativeImage;
   const webContents = Object.assign(contents, {
     session: {
+      fetch: options.favicon ?? (async () => new Response('icon', {
+        headers: { 'content-type': 'image/png' },
+      })),
       setPermissionCheckHandler: (handler: () => boolean) => {
         calls.push(['permission-check', handler()]);
       },
@@ -244,7 +250,7 @@ function fixture(options: {
     events: {
       start: () => calls.push(['start']),
       navigated: (target) => calls.push(['navigated', target]),
-      metadata: () => {},
+      metadata: (value) => metadata.push(value),
       lost: () => calls.push(['lost']),
       popup: (target) => calls.push(['popup', target]),
       intent: (intent) => calls.push(['intent', intent]),
@@ -253,6 +259,7 @@ function fixture(options: {
 
   return {
     adapter,
+    metadata,
     contents,
     debuggerPort,
     calls,
@@ -287,6 +294,59 @@ function fixture(options: {
     },
   };
 }
+
+test('BR-V-favicon: иконка читается в session сайта и передаётся встроенным изображением', async (t) => {
+  const requests: string[] = [];
+  const f = fixture({ favicon: async (url) => {
+    requests.push(url);
+
+    return new Response('icon', { headers: { 'content-type': 'image/x-icon' } });
+  } });
+
+  t.after(() => f.adapter.destroy());
+  f.contents.emit('page-favicon-updated', {}, ['https://fixture.test/favicon.ico']);
+  await nextLoop();
+  assert.deepEqual(requests, ['https://fixture.test/favicon.ico']);
+  assert.equal(f.metadata.at(-1)?.favicon, 'data:image/x-icon;base64,aWNvbg==');
+
+  f.contents.emit('page-favicon-updated', {}, ['http://pipe.test/api/private']);
+  await nextLoop();
+  assert.equal(requests.length, 1);
+  assert.equal(f.metadata.at(-1)?.favicon, null);
+});
+
+test('BR-V-favicon-navigation: поздняя иконка не попадает на новую страницу', async (t) => {
+  const pending = Promise.withResolvers<Response>();
+  const f = fixture({ favicon: () => pending.promise });
+
+  t.after(() => f.adapter.destroy());
+  f.contents.emit('page-favicon-updated', {}, ['https://fixture.test/old.png']);
+  f.contents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+  pending.resolve(new Response('old', { headers: { 'content-type': 'image/png' } }));
+  await nextLoop();
+  assert.equal(f.metadata.at(-1)?.favicon, null);
+
+  f.contents.emit('page-favicon-updated', {}, ['data:image/svg+xml;base64,AQ==']);
+  await nextLoop();
+  assert.equal(f.metadata.at(-1)?.favicon, 'data:image/svg+xml;base64,AQ==');
+  f.contents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true });
+  assert.equal(f.metadata.at(-1)?.favicon, 'data:image/svg+xml;base64,AQ==');
+});
+
+test('BR-V-favicon-failure: ошибка, чужой тип и большая иконка оставляют глобус', async (t) => {
+  for (const response of [
+    new Response('missing', { status: 404 }),
+    new Response('<html>', { headers: { 'content-type': 'text/html' } }),
+    new Response(new Uint8Array(256 * 1024 + 1), { headers: { 'content-type': 'image/png' } }),
+  ]) {
+    const f = fixture({ favicon: async () => response });
+
+    t.after(() => f.adapter.destroy());
+    f.contents.emit('page-favicon-updated', {}, ['https://fixture.test/favicon.png']);
+    await nextLoop();
+    assert.equal(f.metadata.at(-1)?.favicon, null);
+  }
+});
 
 test('BR-V-preview: подложка хранит показанный кадр, не захватывает скрытый guest', () => {
   const f = fixture();

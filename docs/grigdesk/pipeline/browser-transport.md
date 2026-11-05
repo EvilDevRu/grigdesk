@@ -66,3 +66,7 @@ Electron smoke запускается отдельно от worker cache/profile
 [native-окно и настройки](../web/browser-workspace.md),
 [упакованные helpers](../server/server-binary-factory-helpers.md).
 Разбор отказа до первого запроса — [права control и стартовый барьер](browser-launch-permissions.md).
+
+Новый open собственной вкладки после технической смены host может восстановить
+доступ с новой grantEpoch. Старые команды и proof остаются недействительными;
+ручные revoke/pause и human-вкладки требуют явного решения человека.

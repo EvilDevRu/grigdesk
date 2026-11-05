@@ -3,7 +3,6 @@ import { Buffer } from 'node:buffer';
 
 import { isPlainRecord } from '../../../../shared/lib/objects.ts';
 import { BROWSER_DESCRIPTOR } from '../../../../shared/browser/browserTool.ts';
-import { BROWSER_TAB_LIMIT_FAILURE } from '../../../../shared/browser/browserLimits.ts';
 import { parseBrowserAction } from '../../../../shared/browser/browserActions.ts';
 import { browserMailboxRequest, readBrowserReady } from './browserMailbox.ts';
 import type { MailboxContext } from './browserMailbox.ts';
@@ -77,7 +76,7 @@ function browserContext(env: NodeJS.ProcessEnv): MailboxContext | null {
 const PUBLIC_ERRORS = new Set([
   'browser_unavailable', 'browser_action_invalid', 'browser_result_invalid',
   'browser_access_denied', 'browser_owner_forbidden', 'browser_cancelled',
-  'browser_tab_missing', 'browser_tab_limit', 'browser_origin_forbidden',
+  'browser_tab_missing', 'browser_origin_forbidden',
   'browser_navigation_pending', 'browser_debugger_unavailable', 'browser_load_failed',
   'browser_renderer_gone', 'browser_image_too_large', 'browser_queue_full',
   'browser_timeout', 'browser_run_stale', 'browser_run_limit', 'browser_transport_dead',
@@ -91,8 +90,7 @@ const PUBLIC_ERRORS = new Set([
 function failure(error: unknown): FactoryBrowserMcpResult {
   const message = error instanceof Error ? error.message : '';
   const code = PUBLIC_ERRORS.has(message) ? message : 'browser_unavailable';
-  const result = code === 'browser_tab_limit'
-    ? { ...BROWSER_TAB_LIMIT_FAILURE } : { ok: false, error: code };
+  const result = { ok: false, error: code };
 
   return {
     content: [{ type: 'text', text: JSON.stringify(result) }],

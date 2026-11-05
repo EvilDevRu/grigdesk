@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { browserUrl } from '../../../shared/browser/browserContract.ts';
+import { browserFavicon, browserUrl } from '../../../shared/browser/browserContract.ts';
 import { isPlainRecord } from '../../../shared/lib/objects.ts';
 
 import type {
@@ -17,6 +17,7 @@ export interface BrowserViewEvents {
   navigated(url: string): void;
   metadata(value: {
     title?: string;
+    favicon?: string | null;
     loading?: boolean;
     error?: string
   }): void;
@@ -98,6 +99,7 @@ export function createNativeBrowserView(options: {
   const log: { level: string; text: string }[] = [];
   let disposed = false;
   let debuggerReady = false;
+  let faviconRead: AbortController | null = null;
   let attached = false;
   let captureHost: BaseWindow | null = null;
   let captureJobs = 0;
@@ -174,6 +176,77 @@ export function createNativeBrowserView(options: {
     }
   };
 
+  /**
+   * Иконку читаем в session сайта, сохраняя его cookies вне документа GrigDesk.
+   * Навигация, новая иконка и закрытие отменяют чтение; поздний ответ не меняет новую страницу.
+   */
+  async function updateFavicon(urls: string[]): Promise<void> {
+    faviconRead?.abort();
+
+    const read = new AbortController();
+
+    faviconRead = read;
+    options.events.metadata({ favicon: null });
+
+    try {
+      const source = urls[0];
+
+      if (!source || disposed) {
+        return;
+      }
+
+      let favicon = browserFavicon(source);
+
+      if (!favicon) {
+        const response = await contents.session.fetch(webUrl(source), {
+          signal: AbortSignal.any([read.signal, AbortSignal.timeout(3000)]),
+          redirect: 'error',
+        });
+        const type = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+        const reader = response.body?.getReader();
+
+        if (!response.ok || !reader) {
+          return;
+        }
+
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+
+        while (true) {
+          const chunk = await reader.read();
+
+          if (chunk.done) {
+            break;
+          }
+
+          size += chunk.value.length;
+
+          if (size > 256 * 1024) {
+            read.abort();
+
+            return;
+          }
+
+          chunks.push(chunk.value);
+        }
+
+        favicon = browserFavicon(`data:${type};base64,${Buffer.concat(chunks).toString('base64')}`);
+      }
+
+      if (!disposed && faviconRead === read && !read.signal.aborted) {
+        options.events.metadata({ favicon });
+      }
+    } catch {
+      // Недоступная иконка оставляет глобус, не меняя состояние загрузки страницы.
+    } finally {
+      read.abort();
+
+      if (faviconRead === read) {
+        faviconRead = null;
+      }
+    }
+  }
+
   view.setBounds({
     x: 0,
     y: 0,
@@ -219,6 +292,10 @@ export function createNativeBrowserView(options: {
   });
   contents.on('did-start-navigation', (event) => {
     if (event.isMainFrame) {
+      if (!event.isSameDocument) {
+        void updateFavicon([]);
+      }
+
       reset();
     }
   });
@@ -233,6 +310,9 @@ export function createNativeBrowserView(options: {
   });
   contents.on('page-title-updated', (_event, title) => {
     options.events.metadata({ title: title.slice(0, 300) });
+  });
+  contents.on('page-favicon-updated', (_event, urls) => {
+    void updateFavicon(urls);
   });
   contents.on('did-start-loading', () => {
     options.events.metadata({ loading: true });
@@ -731,6 +811,7 @@ export function createNativeBrowserView(options: {
       }
 
       disposed = true;
+      faviconRead?.abort();
       hideView();
       releaseCaptureHost();
 

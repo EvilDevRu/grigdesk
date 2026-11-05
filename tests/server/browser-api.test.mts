@@ -215,3 +215,36 @@ test('API03: opaque owner не восстанавливает удалённый
   await assert.rejects(() => f.access.invoke(f.owner, { action: 'snapshot', tabId: 'human' }),
     /browser_access_denied/u);
 });
+
+test('API04: heartbeat сохраняет доступ при числе выданных вкладок больше двадцати', async (t) => {
+  const f = await fixture(t);
+  const host = f.broker.register();
+  const grants = Array.from({ length: 25 }, (_, index) => ({
+    tabId: `tab-${index}`,
+    grantEpoch: 1,
+    pageEpoch: 1,
+    paused: false,
+  }));
+
+  for (const grant of grants) {
+    f.access.commitGrant(f.owner, { ...grant, url: 'https://stand.invalid/' });
+  }
+
+  const response = await f.app.inject({
+    method: 'POST',
+    url: `/api/browser/hosts/${host.id}/heartbeat`,
+    headers: { cookie: f.cookie, 'x-grigdesk-browser-host': host.token },
+    payload: { grants },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { leaseMs: 15000 });
+
+  const pending = f.access.invoke(f.owner, { action: 'console', tabId: 'tab-24' });
+  const command = await f.broker.poll(host.id, host.token);
+
+  assert.ok(command);
+  assert.equal(command.tabId, 'tab-24');
+  await f.broker.result(host.id, host.token, command.requestId, { ok: true, console: [] });
+  assert.deepEqual(await pending, { ok: true, console: [] });
+});

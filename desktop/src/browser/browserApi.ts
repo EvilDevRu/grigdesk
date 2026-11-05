@@ -206,6 +206,7 @@ export function createBrowserApi(options: {
 
   const tabs = createBrowserTabs({
     id,
+    now,
     changed,
     /**
      * Одна вкладка связывает native view, protocol и input driver.
@@ -315,9 +316,9 @@ export function createBrowserApi(options: {
 
   /**
    * Любая смена host/document/machine отнимает прежние grants до следующих эффектов.
-   * Вкладки сохраняются при host reconnect, но повторная выдача человеку остаётся явной.
+   * При техническом reconnect собственную вкладку восстанавливает новый open агента.
    */
-  function stopHost(): void {
+  function stopHost(reconnect = false): void {
     host = null;
     completed.clear();
 
@@ -327,7 +328,7 @@ export function createBrowserApi(options: {
     }
 
     for (const tab of tabs.list()) {
-      tabs.revoke(tab.id);
+      tabs.revoke(tab.id, reconnect);
       views.get(tab.id)?.protocol.reset();
     }
 
@@ -435,6 +436,8 @@ export function createBrowserApi(options: {
       throw new Error('access_revoked');
     }
 
+    const release = tabs.use(tabId, true);
+
     bundle.command = value;
     bundle.dispatched = false;
 
@@ -518,6 +521,7 @@ export function createBrowserApi(options: {
       throw error;
     } finally {
       bundle.command = null;
+      release();
     }
   }
 
@@ -674,7 +678,7 @@ export function createBrowserApi(options: {
       }
 
       if (host && host.leaseUntil <= now()) {
-        stopHost();
+        stopHost(true);
       }
 
       if (operation === 'state') {
@@ -748,7 +752,7 @@ export function createBrowserApi(options: {
         }
 
         if (host && (host.hostId !== value.hostId || host.hostEpoch !== value.hostEpoch)) {
-          stopHost();
+          stopHost(true);
         }
 
         host = {
@@ -765,7 +769,7 @@ export function createBrowserApi(options: {
 
         leaseTimer = setTimeout(() => {
           if (host === expected && host.leaseUntil <= now()) {
-            stopHost();
+            stopHost(true);
           }
         }, Math.max(1, host.leaseUntil - now()));
         leaseTimer.unref?.();
@@ -775,7 +779,7 @@ export function createBrowserApi(options: {
 
       if (operation === 'host-stop') {
         if (host && host.hostId === value.hostId && host.hostEpoch === value.hostEpoch) {
-          stopHost();
+          stopHost(true);
         }
 
         return snapshot();
@@ -914,10 +918,18 @@ export function createBrowserApi(options: {
       } else if (operation === 'close') {
         tabs.close(tabId);
       } else if (operation === 'navigate') {
-        await views.get(tabId)!.view.navigate(browserUrl(value.url));
+        const release = tabs.use(tabId);
+
+        try {
+          await views.get(tabId)!.view.navigate(browserUrl(value.url));
+        } finally {
+          release();
+        }
       } else if (operation === 'back' || operation === 'forward') {
+        tabs.touch(tabId);
         views.get(tabId)!.view.history(operation === 'back' ? -1 : 1);
       } else if (operation === 'reload') {
+        tabs.touch(tabId);
         views.get(tabId)!.view.reload();
       } else if (operation === 'zoom') {
         if (typeof value.percent !== 'number' || !Number.isFinite(value.percent)

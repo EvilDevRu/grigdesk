@@ -1,5 +1,5 @@
 import { isPlainRecord } from '../../../../shared/lib/objects.ts';
-import { normalizeBrowserPreferences } from '../../../../shared/browser/browserContract.ts';
+import { browserFavicon, normalizeBrowserPreferences } from '../../../../shared/browser/browserContract.ts';
 import type { BrowserPreferences } from '../../../../shared/browser/browserContract.ts';
 
 export interface BrowserApp {
@@ -11,6 +11,8 @@ export interface BrowserTab {
   id: string;
   url: string;
   title: string;
+  favicon: string | null;
+  agentWorking: boolean;
   creator: 'human' | 'agent';
   owner: string | null;
   grantee: string | null;
@@ -95,11 +97,11 @@ export function browserOwnerScope(value: unknown): { kind: 'chat' | 'task'; key:
 
 /**
  * Native metadata не является произвольным объектом для публичного Pinia state.
- * Декодер копирует только объявленные поля и ограничивает размер каталога вкладок.
+ * Декодер копирует только объявленные поля и проверяет каждую вкладку каталога.
  */
 export function decodeBrowserSnapshot(value: unknown): BrowserSnapshot {
   if (!isPlainRecord(value) || !Number.isSafeInteger(value.revision)
-    || Number(value.revision) < 0 || !Array.isArray(value.tabs) || value.tabs.length > 20
+    || Number(value.revision) < 0 || !Array.isArray(value.tabs)
     || !(value.active === null || typeof value.active === 'string')) {
     throw new Error('browser_snapshot_invalid');
   }
@@ -119,6 +121,8 @@ export function decodeBrowserSnapshot(value: unknown): BrowserSnapshot {
       id: item.id,
       url: item.url,
       title: String(item.title ?? '').slice(0, 500),
+      favicon: browserFavicon(item.favicon),
+      agentWorking: item.agentWorking === true,
       creator: item.creator as BrowserTab['creator'],
       owner: item.owner as string | null,
       grantee: item.grantee as string | null,

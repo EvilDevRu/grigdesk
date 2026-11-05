@@ -1,5 +1,4 @@
 import { BROWSER_DESCRIPTOR } from '../../../../../shared/browser/browserTool.ts';
-import { BROWSER_TAB_LIMIT_FAILURE } from '../../../../../shared/browser/browserLimits.ts';
 import { parseBrowserAction } from '../../../../../shared/browser/browserActions.ts';
 
 interface BrowserOptions {
@@ -17,10 +16,6 @@ export function browserToolResult(value: unknown, action: string) {
 
   if (!source || typeof source !== 'object' || Array.isArray(source)) {
     return { ok: false, error: 'browser_result_invalid' };
-  }
-
-  if (source.ok === false && source.error === 'browser_tab_limit') {
-    return { ...BROWSER_TAB_LIMIT_FAILURE };
   }
 
   if (source.format === 'grigdesk-work-content-v1') {
@@ -68,10 +63,6 @@ async function invoke(options: BrowserOptions, raw: Record<string, unknown>) {
     return browserToolResult(result, input.action);
   } catch (error) {
     const message = (error as Error).message;
-
-    if (message === 'browser_tab_limit') {
-      return { ...BROWSER_TAB_LIMIT_FAILURE };
-    }
 
     return { ok: false, error: /^(browser_[a-z_]+|outcome_unknown|access_revoked|stale_page)$/u.test(message)
       ? message : 'browser_unavailable' };

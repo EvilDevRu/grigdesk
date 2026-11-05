@@ -326,6 +326,39 @@ async function fixture(t: TestContext, agents = true) {
   };
 }
 
+test('BR-N-activity: native push отмечает вкладку до завершения команды агента', async (t) => {
+  const f = await fixture(t);
+  const tab = await f.open();
+  const other = await f.open('owner-b');
+  const gate = barrier();
+
+  f.views.get(tab.tabId)!.gate = { method: 'Runtime.evaluate', barrier: gate };
+
+  const pending = f.execute({ action: 'snapshot', tabId: tab.tabId }, tab.grantEpoch);
+
+  await gate.entered;
+  assert.equal(f.api.snapshot().tabs.find((item) => item.id === tab.tabId)!.agentWorking, true);
+  assert.equal(f.api.snapshot().tabs.find((item) => item.id === other.tabId)!.agentWorking, false);
+  gate.release();
+  await pending;
+  assert.equal(f.api.snapshot().tabs.find((item) => item.id === tab.tabId)!.agentWorking, false);
+
+  const navigation = barrier();
+
+  f.navigation(navigation);
+
+  const human = f.api.invoke({
+    operation: 'navigate',
+    tabId: tab.tabId,
+    url: 'http://fixture.test/next'
+  });
+
+  await navigation.entered;
+  assert.equal(f.api.snapshot().tabs.find((item) => item.id === tab.tabId)!.agentWorking, false);
+  navigation.release();
+  await human;
+});
+
 test('BR-N01: human tab невидима агенту до explicit grant и после revoke', async (t) => {
   const f = await fixture(t);
 
@@ -1004,7 +1037,7 @@ test('BR-N-COVER: подложка принадлежит текущим viewpor
   assert.equal(f.api.hide({ ...cover, revision: 5 }), null);
 });
 
-test('BR-N-LIMIT: общий лимит действует при пустом списке нового агента', async (t) => {
+test('BR-N-LIMIT: больше 20 вкладок разных владельцев открываются без общего лимита', async (t) => {
   const f = await fixture(t);
 
   for (let index = 0; index < 20; index += 1) {
@@ -1017,11 +1050,13 @@ test('BR-N-LIMIT: общий лимит действует при пустом �
   }
 
   assert.deepEqual(await f.execute({ action: 'list' }), { ok: true, tabs: [] });
-  assert.deepEqual(await f.execute({ action: 'open', url: 'http://fixture.test/new' }), {
-    ok: false,
-    error: 'browser_tab_limit',
+  assert.equal((await f.open()).ok, true);
+  await f.api.invoke({
+    operation: 'open',
+    url: '',
+    target: 'internal',
   });
-  assert.equal(f.api.snapshot().tabs.length, 20);
+  assert.equal(f.api.snapshot().tabs.length, 22);
 
   const existing = await f.execute({
     action: 'open',
@@ -1029,7 +1064,160 @@ test('BR-N-LIMIT: общий лимит действует при пустом �
   }, 0, 'owner-b') as TabResult;
 
   assert.equal(existing.ok, true);
-  assert.equal(f.api.snapshot().tabs.length, 20);
+  assert.equal(f.api.snapshot().tabs.length, 22);
   await f.api.invoke({ operation: 'close', tabId: existing.tabId });
   assert.equal((await f.open()).ok, true);
+});
+
+test('BR-N-IDLE: обращение к странице продлевает срок, list и state не мешают очистке', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  const f = await fixture(t);
+  const tab = await f.open();
+  let time = 100;
+
+  /**
+   * Живой host продлевает lease каждые пять секунд независимо от команд агента.
+   * Эти heartbeat не должны продлевать срок простоя самой вкладки.
+   */
+  async function advance(ms: number): Promise<void> {
+    for (let remaining = ms; remaining > 0; remaining -= 5000) {
+      const step = Math.min(remaining, 5000);
+
+      time += step;
+      f.clock(time);
+      await f.api.invoke({
+        operation: 'host-start',
+        hostId: 'host-a',
+        hostEpoch: 1,
+        leaseUntil: time + 15000,
+      });
+      t.mock.timers.tick(step);
+    }
+  }
+
+  await advance(240000);
+  assert.equal((await f.execute({ action: 'console', tabId: tab.tabId }, tab.grantEpoch) as
+    { ok: boolean }).ok, true);
+  await advance(60000);
+  assert.equal((await f.execute({ action: 'list' }) as { tabs: unknown[] }).tabs.length, 1);
+  await f.api.invoke({ operation: 'state' });
+  await advance(240000);
+  assert.equal(f.api.snapshot().tabs.length, 0);
+  assert.equal(f.views.get(tab.tabId)!.closed, true);
+});
+
+test('BR-N-reconnect: новый open восстанавливает собственную вкладку после потери host', async (t) => {
+  const f = await fixture(t);
+  const tab = await f.open();
+
+  await f.api.invoke({
+    operation: 'host-stop',
+    hostId: 'host-a',
+    hostEpoch: 1
+  });
+  await f.api.invoke({
+    operation: 'host-start',
+    hostId: 'host-a',
+    hostEpoch: 1,
+    leaseUntil: 15100
+  });
+  assert.deepEqual(await f.execute({ action: 'list' }), { ok: true, tabs: [] });
+  assert.deepEqual(await f.execute({ action: 'console', tabId: tab.tabId }, tab.grantEpoch),
+    { ok: false, error: 'access_revoked' });
+
+  const reopened = await f.open();
+
+  assert.equal(reopened.tabId, tab.tabId);
+  assert.ok(reopened.grantEpoch > tab.grantEpoch);
+  assert.equal((await f.execute({ action: 'snapshot', tabId: tab.tabId }, reopened.grantEpoch) as
+    { ok: boolean }).ok, true);
+  assert.equal(f.api.snapshot().tabs.length, 1);
+});
+
+test('BR-N-reconnect-deny: технический reconnect не отменяет решения человека', async (t) => {
+  for (const operation of ['revoke', 'pause'] as const) {
+    for (const before of [true, false]) {
+      const f = await fixture(t);
+      const tab = await f.open();
+
+      if (before) {
+        await f.api.invoke({ operation, tabId: tab.tabId });
+      }
+
+      await f.api.invoke({
+        operation: 'host-stop',
+        hostId: 'host-a',
+        hostEpoch: 1
+      });
+
+      if (!before) {
+        await f.api.invoke({ operation, tabId: tab.tabId });
+      }
+
+      await f.api.invoke({
+        operation: 'host-start',
+        hostId: 'host-a',
+        hostEpoch: 1,
+        leaseUntil: 15100
+      });
+      assert.deepEqual(await f.execute({ action: 'open', url: 'http://fixture.test/' }),
+        { ok: false, error: 'access_revoked' });
+    }
+  }
+});
+
+test('BR-N-reconnect-origin: другой origin отменяет восстановление', async (t) => {
+  const f = await fixture(t);
+  const tab = await f.open();
+
+  await f.api.invoke({
+    operation: 'host-stop',
+    hostId: 'host-a',
+    hostEpoch: 1
+  });
+  f.views.get(tab.tabId)!.events.navigated('http://other.test/');
+  f.views.get(tab.tabId)!.events.navigated('http://fixture.test/');
+  await f.api.invoke({
+    operation: 'host-start',
+    hostId: 'host-a',
+    hostEpoch: 1,
+    leaseUntil: 15100
+  });
+  assert.deepEqual(await f.execute({ action: 'open', url: 'http://fixture.test/' }),
+    { ok: false, error: 'access_revoked' });
+});
+
+test('BR-N-reconnect-transfer: переданная вкладка не восстанавливается', async (t) => {
+  const f = await fixture(t);
+  const tab = await f.open();
+
+  await f.execute({
+    action: 'grant',
+    human: true,
+    tabId: tab.tabId,
+    pageEpoch: tab.pageEpoch
+  }, tab.grantEpoch, 'owner-b');
+  await f.api.invoke({
+    operation: 'host-start',
+    hostId: 'host-b',
+    hostEpoch: 2,
+    leaseUntil: 15100
+  });
+
+  const result = await f.api.invoke({
+    operation: 'execute',
+    command: {
+      action: 'open',
+      url: 'http://fixture.test/',
+      owner: 'owner-a',
+      requestId: 'new-host-open',
+      hostId: 'host-b',
+      hostEpoch: 2,
+      grantEpoch: 0,
+      deadline: 10100
+    }
+  });
+
+  assert.deepEqual(result, { ok: false, error: 'access_revoked' });
 });

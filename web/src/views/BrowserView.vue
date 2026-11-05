@@ -41,23 +41,19 @@
                     @dragend="endDrag"
                 >
                   <UiTab :id="`browser-tab-${tab.id}`" :value="tab.id" controls="browser-page">
+                    <BrowserSiteIcon class="browser-tab-icon" :favicon="tab.favicon" />
                     <svg
-                        class="browser-tab-icon"
+                        v-if="hasAgentAccess(tab)"
+                        class="browser-tab-icon browser-tab-agent"
                         v-bind="ICON"
                         aria-hidden="true"
-                        :data-agent-state="hasAgentAccess(tab)
-                          ? (tab.paused ? 'paused' : 'active') : undefined"
-                        v-tooltip="hasAgentAccess(tab)
-                          ? t(tab.owner !== null ? 'core.browserOwner' : 'core.browserController',
-                            { name: ownerName(tab.owner ?? tab.grantee) }) : ''"
+                        :data-agent-state="tab.paused ? 'paused' : tab.agentWorking ? 'working' : 'active'"
+                        v-tooltip="t(tab.owner !== null ? 'core.browserOwner' : 'core.browserController',
+                          { name: ownerName(tab.owner ?? tab.grantee) })"
                     >
-                      <g v-if="hasAgentAccess(tab)" data-browser-tab-robot>
+                      <g data-browser-tab-robot>
                         <rect x="3" y="8" width="18" height="12" rx="3" />
                         <path d="M12 8V4m-2 0h4M8 12v2m8-2v2m-7 3h6M3 13H1m20 0h2" />
-                      </g>
-                      <g v-else data-browser-tab-globe>
-                        <circle cx="12" cy="12" r="9" />
-                        <path d="M3 12h18M12 3a16 16 0 0 1 0 18a16 16 0 0 1 0-18" />
                       </g>
                     </svg>
                     <span class="browser-tab-label" v-tooltip="tabName(tab)">
@@ -323,6 +319,7 @@ import { useBrowserStore } from '../stores/browser.ts';
 import { browserOwnerScope } from '../shared/browser/browserUi.ts';
 import type { BrowserTab } from '../shared/browser/browserUi.ts';
 import BrowserViewport from '../shared/browser/BrowserViewport.vue';
+import BrowserSiteIcon from '../shared/browser/BrowserSiteIcon.vue';
 
 const ICON: SVGAttributes = {
   viewBox: '0 0 24 24',

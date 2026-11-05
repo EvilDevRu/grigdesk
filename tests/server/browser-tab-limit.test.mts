@@ -1,54 +1,51 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { BROWSER_TAB_LIMIT_FAILURE } from '../../shared/browser/browserLimits.ts';
 import { BROWSER_DESCRIPTOR } from '../../shared/browser/browserTool.ts';
 import browser, { browserToolResult } from '../../server/src/lib/executors/work-tools/browser.ts';
 import { createFactoryBrowserMcp } from '../../server/src/lib/browser/factoryBrowserMcp.ts';
 
-test('Лимит окна: descriptor объясняет пустой личный список', () => {
-  assert.match(BROWSER_DESCRIPTOR.description, /общий лимит окна/u);
-  assert.match(BROWSER_DESCRIPTOR.description, /пустой list/u);
+test('Вкладки: descriptor объясняет личный список и автоматическое закрытие после простоя', () => {
+  assert.match(BROWSER_DESCRIPTOR.description, /Пустой list/u);
+  assert.match(BROWSER_DESCRIPTOR.description, /через 5 минут/u);
+  assert.match(BROWSER_DESCRIPTOR.description, /browser_tab_missing/u);
+  assert.doesNotMatch(BROWSER_DESCRIPTOR.description, /browser_tab_limit/u);
 });
 
-test('Лимит окна: ответ инструмента не переносит чужие данные и произвольную подсказку', () => {
+test('Вкладки: ответ о закрытой странице не переносит чужие данные и произвольную подсказку', () => {
   const result = browserToolResult({
     ok: false,
-    error: 'browser_tab_limit',
+    error: 'browser_tab_missing',
     message: 'Недоверенная подсказка',
     owner: 'other-agent',
-    tabs: [{ tabId: 'private-tab', url: 'https://private.test/' }],
   }, 'open');
 
-  assert.deepEqual(result, BROWSER_TAB_LIMIT_FAILURE);
-  assert.equal(result.scope, 'window');
-  assert.equal(result.limit, 20);
-  assert.match(result.message, /общий лимит окна: 20 вкладок/u);
+  assert.deepEqual(result, { ok: false, error: 'browser_tab_missing' });
   assert.deepEqual(browserToolResult({ ok: false, error: 'access_revoked' }, 'open'), {
     ok: false,
     error: 'access_revoked',
   });
 });
 
-test('Лимит окна: рабочий инструмент поясняет отказ при ответе и исключении', async () => {
+test('Вкладки: рабочий инструмент сохраняет код закрытой страницы при ответе и исключении', async () => {
   for (const throws of [false, true]) {
     const result = await browser.invoke({
       browserAvailable: () => true,
       browserOwner: 'fixture-owner',
       browserInvoke: async () => {
         if (throws) {
-          throw new Error('browser_tab_limit');
+          throw new Error('browser_tab_missing');
         }
 
-        return { ok: false, error: 'browser_tab_limit' };
+        return { ok: false, error: 'browser_tab_missing' };
       },
     }, { action: 'open', url: 'http://fixture.test/' });
 
-    assert.deepEqual(result, BROWSER_TAB_LIMIT_FAILURE);
+    assert.deepEqual(result, { ok: false, error: 'browser_tab_missing' });
   }
 });
 
-test('Лимит окна: MCP возвращает подсказку при ответе и исключении', async () => {
+test('Вкладки: MCP сохраняет код закрытой страницы при ответе и исключении', async () => {
   for (const throws of [false, true]) {
     const mcp = createFactoryBrowserMcp({
       FACTORY_STATE: '/fixture/state',
@@ -65,20 +62,21 @@ test('Лимит окна: MCP возвращает подсказку при о
       ready: async () => 'grigdesk',
       request: async () => {
         if (throws) {
-          throw new Error('browser_tab_limit');
+          throw new Error('browser_tab_missing');
         }
 
         return {
           ok: false,
-          error: 'browser_tab_limit',
+          error: 'browser_tab_missing',
           message: 'Недоверенная подсказка',
         };
       },
     });
     const result = await mcp.invoke({ action: 'open', url: 'http://fixture.test/' });
+    const failure = { ok: false, error: 'browser_tab_missing' };
 
     assert.equal(result.isError, true);
-    assert.deepEqual(result.structuredContent, BROWSER_TAB_LIMIT_FAILURE);
-    assert.deepEqual(result.content, [{ type: 'text', text: JSON.stringify(BROWSER_TAB_LIMIT_FAILURE) }]);
+    assert.deepEqual(result.structuredContent, failure);
+    assert.deepEqual(result.content, [{ type: 'text', text: JSON.stringify(failure) }]);
   }
 });

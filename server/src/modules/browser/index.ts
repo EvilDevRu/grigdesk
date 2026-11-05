@@ -150,7 +150,7 @@ export default async function browserModule(app: FastifyInstance, options: Brows
         const value = body(request, ['grants']);
         const rows = value.grants;
 
-        if (!Array.isArray(rows) || rows.length > 20 || rows.some((row) => !isPlainRecord(row)
+        if (!Array.isArray(rows) || rows.some((row) => !isPlainRecord(row)
           || Object.keys(row).sort().join(',') !== 'grantEpoch,pageEpoch,paused,tabId'
           || typeof row.tabId !== 'string' || !Number.isSafeInteger(row.grantEpoch)
           || !Number.isSafeInteger(row.pageEpoch) || typeof row.paused !== 'boolean')) {

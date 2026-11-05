@@ -50,6 +50,8 @@ function tab(id, url = 'http://fixture.test/' + id) {
     id,
     url,
     title: 'Fixture ' + id,
+    favicon: null,
+    agentWorking: false,
     creator: 'human',
     owner: null,
     grantee: null,
@@ -460,10 +462,10 @@ test('BR-U16: робот отражает owner/grantee доступ, паузу
   await rendered();
 
   for (const id of ['owner', 'agent-grant', 'human-grant']) {
-    const icon = f.wrapper.get(`#browser-tab-${id} .browser-tab-icon`);
+    const icon = f.wrapper.get(`#browser-tab-${id} .browser-tab-agent`);
 
     assert.equal(icon.find('[data-browser-tab-robot]').exists(), true);
-    assert.equal(icon.find('[data-browser-tab-globe]').exists(), false);
+    assert.equal(f.wrapper.find(`#browser-tab-${id} [data-browser-tab-globe]`).exists(), true);
     assert.equal(icon.attributes('aria-hidden'), 'true');
     assert.equal(icon.attributes('data-agent-state'), id === 'human-grant' ? 'paused' : 'active');
     assert.equal(icon.attributes('data-ui-tooltip'), id === 'human-grant'
@@ -480,7 +482,7 @@ test('BR-U16: робот отражает owner/grantee доступ, паузу
   }
 });
 
-test('BR-U17: смена доступа сохраняет SVG-слот 14×14 и flex-детей вкладки', async (t) => {
+test('BR-U17: смена доступа сохраняет иконку сайта 14×14 и обрезку названия', async (t) => {
   const f = mounted(t, BrowserView);
   const style = document.createElement('style');
   const source = await readFile(webFile('src/views/BrowserView.vue'), 'utf8');
@@ -538,9 +540,9 @@ test('BR-U17: смена доступа сохраняет SVG-слот 14×14 �
     const iconStyle = getComputedStyle(icon);
     const labelStyle = getComputedStyle(label);
 
-    assert.equal(button.children.length, 2);
+    assert.equal(button.children.length, state.grantee || state.owner && state.grantOrigin ? 3 : 2);
     assert.equal(button.children[0] === icon, true);
-    assert.equal(button.children[1] === label, true);
+    assert.equal(button.children[button.children.length - 1] === label, true);
     assert.equal(iconStyle.flex, '0 0 auto');
     assert.equal(iconStyle.width, '14px');
     assert.equal(iconStyle.height, '14px');
@@ -548,11 +550,41 @@ test('BR-U17: смена доступа сохраняет SVG-слот 14×14 �
     assert.equal(labelStyle.textOverflow, 'ellipsis');
 
     if (state.paused && state.grantOrigin !== null) {
-      assert.equal(iconStyle.opacity, '0.48');
-    } else {
-      assert.notEqual(iconStyle.opacity, '0.48');
+      assert.equal(getComputedStyle(button.querySelector('.browser-tab-agent')).opacity, '0.48');
     }
   }
+});
+
+test('BR-U22: favicon рядом с роботом, пульсация только у работающей вкладки', async (t) => {
+  const f = mounted(t, BrowserView);
+  const owner = JSON.stringify(['chat', null, 'fixture-owner', null]);
+  const favicon = 'data:image/png;base64,AQ==';
+
+  Object.assign(f.browser.snapshot.tabs[0], { favicon, grantee: owner });
+  Object.assign(f.browser.snapshot.tabs[1], { grantee: owner, agentWorking: true });
+  await rendered();
+  assert.equal(f.wrapper.get('#browser-tab-one img').attributes('src'), favicon);
+  assert.equal(f.wrapper.get('#browser-tab-one .browser-tab-agent').attributes('data-agent-state'), 'active');
+  assert.equal(f.wrapper.get('#browser-tab-two .browser-tab-agent')
+    .attributes('data-agent-state'), 'working');
+
+  f.browser.snapshot.tabs[1].agentWorking = false;
+  f.browser.snapshot.tabs[0].agentWorking = true;
+  await rendered();
+  assert.equal(f.wrapper.get('#browser-tab-one .browser-tab-agent')
+    .attributes('data-agent-state'), 'working');
+  assert.equal(f.wrapper.get('#browser-tab-two .browser-tab-agent').attributes('data-agent-state'), 'active');
+
+  f.browser.snapshot.tabs[0].paused = true;
+  await rendered();
+  assert.equal(f.wrapper.get('#browser-tab-one .browser-tab-agent').attributes('data-agent-state'), 'paused');
+  await f.wrapper.get('#browser-tab-one img').trigger('error');
+  assert.equal(f.wrapper.find('#browser-tab-one [data-browser-tab-globe]').exists(), true);
+  assert.equal(f.wrapper.find('#browser-tab-one .browser-tab-agent').exists(), true);
+
+  f.browser.snapshot.tabs[0].favicon = 'data:image/png;base64,Ag==';
+  await rendered();
+  assert.equal(f.wrapper.get('#browser-tab-one img').attributes('src'), 'data:image/png;base64,Ag==');
 });
 
 for (const menuTab of ['one', 'dead-a']) {
@@ -1030,8 +1062,44 @@ test('BR-U11: canonical owner/grantee и native history/zoom переживаю�
   assert.equal(state.tabs[0].canBack, true);
   assert.equal(state.tabs[0].canForward, false);
   assert.equal(state.tabs[0].zoom, 150);
+  assert.equal(state.tabs[0].favicon, null);
+  assert.equal(state.tabs[0].agentWorking, false);
+
+  const iconState = decodeBrowserSnapshot({
+    ...raw,
+    tabs: [{
+      ...raw.tabs[0],
+      favicon: 'data:image/png;base64,AQ==',
+      agentWorking: true
+    }],
+  });
+
+  assert.equal(iconState.tabs[0].favicon, 'data:image/png;base64,AQ==');
+  assert.equal(iconState.tabs[0].agentWorking, true);
+
+  const invalidIcons = [
+    'https://fixture.test/icon.png',
+    'javascript:alert(1)',
+    'data:text/html;base64,AQ=='
+  ];
+
+  for (const favicon of invalidIcons) {
+    const invalid = decodeBrowserSnapshot({ ...raw, tabs: [{ ...raw.tabs[0], favicon }] });
+
+    assert.equal(invalid.tabs[0].favicon, null);
+  }
+
   assert.equal(browserOwnerScope(null), null);
   assert.equal(browserOwnerScope('["chat",null,"forged",null,{}]'), null);
+
+  const many = decodeBrowserSnapshot({
+    ...raw,
+    active: 'tab-24',
+    tabs: Array.from({ length: 25 }, (_, index) => tab(`tab-${index}`)),
+  });
+
+  assert.equal(many.tabs.length, 25);
+  assert.equal(many.active, 'tab-24');
   assert.throws(() => decodeBrowserSnapshot({ ...raw, tabs: [{ ...tab('one'), owner: 'chat:forged' }] }),
     /browser_snapshot_invalid/u);
 });

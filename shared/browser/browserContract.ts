@@ -8,6 +8,21 @@ export interface BrowserPreferences {
 }
 
 /**
+ * Иконка сайта передаётся в UI только встроенным изображением ограниченного размера.
+ * Сетевые URL и исполняемые схемы не заставляют привилегированный документ делать запросы.
+ */
+export function browserFavicon(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 350_000) {
+    return null;
+  }
+
+  const match = /^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/u.exec(value);
+  const type = /^image\/(?:png|jpeg|gif|webp|avif|svg\+xml|x-icon|vnd\.microsoft\.icon)$/u;
+
+  return match && type.test(match[1]!) ? value : null;
+}
+
+/**
  * Повреждённый файл настроек сохраняет безопасные независимые defaults.
  * Идентификатор приложения не является командой или файловым путём.
  */
