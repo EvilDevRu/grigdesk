@@ -153,4 +153,12 @@ test('BOARD-PAGES: CSS оставляет вертикальную прокру�
   assert.equal(css('.cols').display, 'flex');
   assert.notEqual(css('.board-pages').scrollSnapType, 'x mandatory');
   assert.notEqual(css('.filter-toggle-label').display, 'none');
+
+  await wrapper.get('.filter-toggle').trigger('click');
+  assert.equal(wrapper.get('.filter-toggle').attributes('aria-expanded'), 'false');
+  assert.equal(css('.filterbar').display, 'none');
+  assert.equal(css('.show-filter').display, 'flex');
+  assert.equal(Boolean(wrapper.get('.favfilter').element.closest('#board-task-filters')), false);
+  assert.equal(Boolean(wrapper.get('.newfilter').element.closest('#board-task-filters')), false);
+  assert.equal(wrapper.find('.board-heading [data-role="board-snapshot-status"]').exists(), true);
 });

@@ -1600,6 +1600,20 @@ html[data-ui-touch] .ui-icon-button[data-context='alert-history'] .alert-bell-ba
   overflow-wrap: anywhere;
 }
 
+.ui-icon-button[data-context='board-task-favorite'][aria-pressed='false']:not(:hover) {
+  --ui-action-color: var(--ink-low);
+}
+
+.ui-button[data-context='board-quick-filter'][aria-pressed='false'] {
+  --ui-action-color: var(--ink-mid);
+}
+
+@media (max-width: 600px) {
+  .ui-pressable[data-role='task-title'][data-context='board-task'] {
+    min-height: 44px;
+  }
+}
+
 .ui-tab[data-context='board-related-tab'] {
   display: flex;
   align-items: center;

@@ -6,8 +6,13 @@
       <template #title>
         <h2 class="board-title">{{ t('core.board') }}</h2>
       </template>
-      <template v-if="phoneBoard" #meta>
-        <BoardTrackerSettingsButton @click="trackerSettingsOpen = true" />
+      <template #meta>
+        <BoardTrackerSettingsButton v-if="phoneBoard" @click="trackerSettingsOpen = true" />
+        <p v-else-if="data && ownTasks.trackerConfigured !== false" class="board-updated muted"
+           role="status" data-role="board-snapshot-status">
+          <span v-if="error">{{ t('core.boardSnapshotStale') }} </span>
+          <time :datetime="snapshotDateTime">{{ t('core.boardSnapshotUpdated', { time: snapshotTime }) }}</time>
+        </p>
       </template>
       <template #actions>
         <UiButton tone="accent" data-context="workspace-toolbar" data-role="board-new-task"
@@ -19,7 +24,7 @@
     <NewGrigdeskTaskDialog v-if="newTaskOpen" v-model:open="newTaskOpen" @created="ui.openTask($event, 'grigdesk')" />
 
     <div id="board-tracker-panel" class="tracker-board">
-      <div v-if="!phoneBoard || ownTasks.trackerConfigured === false || error
+      <div v-if="(!phoneBoard && !data) || ownTasks.trackerConfigured === false || error
                  || data?.widgets?.length || activeTasks.length"
            class="board-overview">
       <div v-if="ownTasks.trackerConfigured === false" class="tracker-setup-banner">
@@ -45,11 +50,6 @@
       </div>
       <p v-if="errorDetailsOpen" :id="errorDetailsId" class="board-tracker-error-details">{{ error }}</p>
     </UiInlineMessage>
-
-    <p v-if="data && !phoneBoard" class="muted" role="status" data-role="board-snapshot-status">
-      <span v-if="error">{{ t('core.boardSnapshotStale') }} </span>
-      <time :datetime="snapshotDateTime">{{ t('core.boardSnapshotUpdated', { time: snapshotTime }) }}</time>
-    </p>
 
     <template v-if="data">
       <TrackerWidgets :widgets="data.widgets ?? []" />
@@ -137,6 +137,15 @@
                 {{ myTasks.length }}<template v-if="hasListFilters"> из {{ allTasks.length }}</template>
               </span>
             </h3>
+            <div class="search" role="search">
+              <UiSearchInput
+                ref="taskSearch"
+                v-model="q"
+                aria-label="Поиск по задачам"
+                placeholder="Номер, название, проект…"
+                clear-label="Очистить поиск"
+              />
+            </div>
             <UiButton
               class="filter-toggle"
               data-context="board-filter-toggle"
@@ -165,15 +174,58 @@
               <span class="filter-toggle-label">Фильтры</span>
               <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
             </UiButton>
-            <div class="search" role="search">
-              <UiSearchInput
-                ref="taskSearch"
-                v-model="q"
-                aria-label="Поиск по задачам"
-                placeholder="Номер, название, проект…"
-                clear-label="Очистить поиск"
-              />
-            </div>
+
+          </div>
+
+          <div class="filter-section show-filter" role="group" aria-label="Показать">
+            <UiToggleButton
+              v-model="favoriteOnly"
+              class="favfilter"
+              data-context="board-quick-filter"
+              variant="outline"
+              tone="warning"
+              :disabled="!favoritesReady"
+              v-tooltip="favoritesReady ? 'Только избранные задачи' : 'Избранное загружается'"
+            >
+              <template #leading>
+                <svg
+                  viewBox="0 0 24 24"
+                  :fill="favoriteOnly ? 'currentColor' : 'none'"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="m12 2.7 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3-4.6-4.4 6.3-.9z" />
+                </svg>
+              </template>
+              Избранные {{ currentFavoriteCount }}
+            </UiToggleButton>
+            <!-- «Новых» не бывает без загруженной базовой линии отметок, поэтому кнопка
+                 ждёт сервер (seen.ready), а не гадает по пустому набору. -->
+            <UiToggleButton
+              v-model="newOnly"
+              class="newfilter"
+              data-context="board-quick-filter"
+              variant="outline"
+              tone="accent"
+              :disabled="!seenReady"
+              v-tooltip="seenReady ? 'Только новые — те, что ещё не открывали' : 'Отметки просмотра загружаются'"
+            >
+              <template #leading>
+                <svg
+                  viewBox="0 0 24 24"
+                  :fill="newOnly ? 'currentColor' : 'none'"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 3.4 14 9l5.6 2-5.6 2-2 5.6-2-5.6L4.4 11 10 9z" />
+                </svg>
+              </template>
+              Новые {{ currentNewCount }}
+            </UiToggleButton>
           </div>
 
           <div id="board-task-filters" class="filterbar" :class="{ expanded: filtersOpen }"
@@ -208,56 +260,6 @@
                 <option v-for="group in groupOptions" :key="group" :value="group">{{ group }}</option>
               </UiSelect>
             </label>
-
-            <div class="filter-section show-filter" role="group" aria-labelledby="board-show-filter-label">
-              <span id="board-show-filter-label" class="filter-caption">Показать</span>
-              <UiToggleButton
-                v-model="favoriteOnly"
-                class="favfilter"
-                variant="outline"
-                tone="warning"
-                :disabled="!favoritesReady"
-                v-tooltip="favoritesReady ? 'Только избранные задачи' : 'Избранное загружается'"
-              >
-                <template #leading>
-                  <svg
-                    viewBox="0 0 24 24"
-                    :fill="favoriteOnly ? 'currentColor' : 'none'"
-                    stroke="currentColor"
-                    stroke-width="1.8"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="m12 2.7 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3-4.6-4.4 6.3-.9z" />
-                  </svg>
-                </template>
-                Избранные {{ currentFavoriteCount }}
-              </UiToggleButton>
-              <!-- «Новых» не бывает без загруженной базовой линии отметок, поэтому кнопка
-                   ждёт сервер (seen.ready), а не гадает по пустому набору. -->
-              <UiToggleButton
-                v-model="newOnly"
-                class="newfilter"
-                variant="outline"
-                tone="accent"
-                :disabled="!seenReady"
-                v-tooltip="seenReady ? 'Только новые — те, что ещё не открывали' : 'Отметки просмотра загружаются'"
-              >
-                <template #leading>
-                  <svg
-                    viewBox="0 0 24 24"
-                    :fill="newOnly ? 'currentColor' : 'none'"
-                    stroke="currentColor"
-                    stroke-width="1.8"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M12 3.4 14 9l5.6 2-5.6 2-2 5.6-2-5.6L4.4 11 10 9z" />
-                  </svg>
-                </template>
-                Новые {{ currentNewCount }}
-              </UiToggleButton>
-            </div>
 
             <div v-if="analysisEnabled" class="filter-section triage-filter" role="group" aria-labelledby="board-triage-filter-label">
               <span id="board-triage-filter-label" class="filter-caption">Оценка</span>
@@ -351,6 +353,7 @@
             <li v-for="t in visibleTasks" :key="taskReferenceKey(t)" class="trow"
                 :class="{ 'without-analysis': !analysisEnabled, 'without-timer': !supportsTimer }">
               <TaskFavoriteButton :active="favoriteState(t).isFavorite(t.id)"
+                                  class="board-favorite" data-context="board-task-favorite"
                                   :pending="!favoriteState(t).loaded || favoriteState(t).loading || favoriteState(t).isPending(t.id)"
                                   :task-title="t.title" @toggle="toggleFavorite(t)" />
               <UiPressable
@@ -419,7 +422,13 @@
                  :role="phoneBoard && phonePages.length > 1 ? 'tabpanel' : undefined"
                  :aria-labelledby="phoneBoard && phonePages.length > 1 ? `${boardPagesId}-tab-related` : undefined"
                  :inert="phoneBoard && activeBoardPage !== 'related' ? true : undefined">
-          <h3 class="h big">{{ t('core.boardRelatedTitle') }}</h3>
+          <h3 class="h big related-heading">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M8 5H5v15h14V5h-3M9 3h6v4H9zM8 12h8M8 16h5" />
+            </svg>
+            {{ t('core.boardRelatedTitle') }}
+          </h3>
           <UiTabs :model-value="secondaryMode ?? 'review'" class="secondary-tabs" label="Связанные задачи"
                   @update:model-value="secondaryMode = String($event)">
             <UiTab id="board-review-tab" data-context="board-related-tab"
@@ -1104,6 +1113,11 @@ onUnmounted(() => {
   min-width: 0;
   container: board-page / inline-size;
 }
+.board-updated {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
 .err { color: var(--bad); }
 .link { color: var(--accent); margin-left: 8px; }
 
@@ -1307,15 +1321,22 @@ onUnmounted(() => {
 /* Основной блок «Мои задачи» — в карточке, чтобы визуально доминировал */
 .col.primary {
   flex: 2 1 720px; container: board-primary / inline-size;
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px;
 }
 .col.secondary {
-  flex: 1 1 320px;
-  gap: 12px;
-  padding: 14px;
+  flex: 1 1 280px;
+  gap: 14px;
+  padding: 18px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
+}
+.related-heading { min-height: var(--control-height); }
+.related-heading svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  color: var(--ink-mid);
 }
 .secondary-tabs { width: 100%; }
 .secondary-tabs > :deep(.ui-tab) { flex: 1; }
@@ -1329,13 +1350,18 @@ onUnmounted(() => {
 }
 .related-panel { display: flex; flex: 1; min-height: 0; }
 .related-list { flex: 1; max-height: min(58vh, 560px); overflow-y: auto; scrollbar-gutter: stable; }
-.related-row { padding: 11px 4px; }
+.related-row { padding: 14px 6px; }
+.related-row:hover, .related-row:focus-within { background: var(--surface-2); }
 .related-row + .related-row { border-top: 1px solid var(--line); }
 /* Правой колонки нет — карточка задач занимает всю доступную строку. */
 .cols.solo .primary { flex-basis: 100%; }
 .colhead {
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);
-  align-items: center; gap: 10px 14px; margin: 6px 0 2px; min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(180px, 300px) auto;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 4px;
+  min-width: 0;
 }
 .h {
   font-size: 14px;
@@ -1346,12 +1372,23 @@ onUnmounted(() => {
   gap: 8px;
   color: var(--ink-mid);
 }
-.h.big { font-size: 16px; color: var(--ink); }
+.h.big { font-size: 16px; color: var(--ink); letter-spacing: -.015em; }
 .colhead .h { flex-wrap: wrap; }
 .heading-name { white-space: nowrap; }
-.cnt { font-size: 11px; color: var(--ink); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.cnt {
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-mid);
+  background: var(--surface-2);
+  border-radius: 4px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
 .filter-toggle {
-  display: none;
+  display: inline-flex;
+  grid-column: 3;
+  grid-row: 1;
   justify-self: end;
 }
 .filter-count {
@@ -1360,12 +1397,24 @@ onUnmounted(() => {
   color: var(--accent); font-size: 10px; font-weight: 700; line-height: 1;
 }
 .filterbar {
-  display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px 12px;
-  min-width: 0; max-width: 100%; padding: 3px 0 5px;
+  display: none;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 14px 0 6px;
+  border-top: 1px solid var(--line);
 }
+.filterbar.expanded { display: flex; }
 .filter-section { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .sort-filter { flex: 0 1 205px; }
-.show-filter, .triage-filter { flex: 0 1 auto; }
+.show-filter {
+  flex: none;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+.triage-filter { flex: 0 1 auto; }
 .filter-caption {
   flex-basis: 100%; color: var(--ink-mid); font-size: 11px; font-weight: 500;
   line-height: 1.4; white-space: nowrap;
@@ -1384,6 +1433,8 @@ onUnmounted(() => {
   font-size: 10px; line-height: 1;
 }
 .search {
+  grid-column: 2;
+  grid-row: 1;
   width: 100%;
   min-width: 0;
 }
@@ -1416,38 +1467,39 @@ onUnmounted(() => {
   gap: 12px;
 }
 .list-head {
-  padding: 10px 10px 2px;
+  padding: 10px 8px;
   overflow-y: hidden;
   scrollbar-gutter: stable;
   border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   color: var(--ink-mid);
   font-size: 11px;
 }
 .list-task-label { grid-column: 2; }
 .list-time-label { text-align: right; }
-.trow { min-width: 0; padding: 12px 10px; border-radius: 8px; }
+.trow { min-width: 0; padding: 15px 8px; }
 .trow.without-analysis,
 .list-head.without-analysis { grid-template-columns: 28px minmax(0, 1fr) 86px; }
 .trow.without-timer,
 .list-head.without-timer { grid-template-columns: 28px minmax(0, 1fr) 182px; }
 .trow.without-analysis.without-timer,
 .list-head.without-analysis.without-timer { grid-template-columns: 28px minmax(0, 1fr); }
-.trow > :deep(.favbtn) { align-self: start; margin-top: -4px; }
+.trow > :deep(.board-favorite) { align-self: start; margin-top: -3px; }
 .trow:hover,
 .trow:focus-within { background: var(--surface-2); }
 .trow + .trow { border-top: 1px solid var(--line); }
-.task-name { width: 100%; font-size: 14px; font-weight: 500; }
+.task-name { width: 100%; font-size: 14px; font-weight: 500; line-height: 1.5; }
 .task-meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 5px 12px;
+  gap: 4px 10px;
   min-width: 0;
   color: var(--ink-mid);
   font-size: 11.5px;
   line-height: 1.5;
 }
-.task-id { color: var(--ink-mid); }
+.task-id { color: var(--ink-low); font-size: 10.5px; }
 .task-project { overflow-wrap: anywhere; }
 .task-state { display: inline-flex; align-items: center; gap: 7px; }
 .task-state.overdue { color: var(--bad); }
@@ -1467,6 +1519,12 @@ onUnmounted(() => {
   border-radius: 5px;
   background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); padding: 1px 6px;
 }
+.task-internal-flag {
+  background: color-mix(in srgb, var(--ink-mid) 8%, transparent);
+  color: var(--ink-mid);
+  border-radius: 3px;
+  padding: 0 5px;
+}
 .ttime {
   display: flex;
   flex-direction: column;
@@ -1483,14 +1541,15 @@ onUnmounted(() => {
    колонка могут оставить планшету узкий primary даже при широком окне. */
 @container board-primary (max-width: 720px) {
   .colhead { grid-template-columns: minmax(0, 1fr) auto; }
-  .filter-toggle { display: inline-flex; }
-  .search { grid-column: 1 / -1; }
+  .colhead .h { grid-column: 1 / -1; }
+  .filter-toggle { grid-column: 2; grid-row: 2; }
+  .search { grid-column: 1; grid-row: 2; }
   .filterbar { display: none; padding-top: 5px; border-top: 1px solid var(--line); }
   .filterbar.expanded { display: flex; }
   .filter-section { flex: 1 1 100%; align-items: stretch; }
   .filter-caption { flex-basis: 100%; padding: 2px 1px 0; }
   .sort-filter .trisort { flex-basis: 100%; width: 100%; }
-  .show-filter > :deep(.ui-button) { flex: 1 1 140px; }
+  .show-filter { flex: none; align-items: center; }
   .trisegment { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
   .trisegment :deep(.ui-button) { width: 100%; }
   .filter-actions { width: 100%; margin-left: 0; }
@@ -1547,7 +1606,6 @@ onUnmounted(() => {
   .board:not(.stats-expanded) .stats { display: none; }
   .filter-toggle { display: inline-flex; }
   .filterbar:not(.expanded) { display: none; }
-  .colhead { grid-template-columns: minmax(0, 1fr) auto minmax(180px, 1fr); }
 }
 @container board-page (max-width: 500px) {
   .stats-summary { display: flex; flex-wrap: wrap; }
@@ -1644,8 +1702,8 @@ onUnmounted(() => {
     padding: 8px 12px;
     border-radius: 0;
   }
-  .tasks .trow .ttext { grid-column: 1 / 3; grid-row: 1; min-height: 44px; }
-  .tasks .trow > :deep(.favbtn) { grid-column: 3; grid-row: 1; margin-top: 0; }
+  .tasks .trow .ttext { grid-column: 1 / 3; grid-row: 1; }
+  .tasks .trow > :deep(.board-favorite) { grid-column: 3; grid-row: 1; margin-top: 0; }
   .tasks .trow .task-triage { grid-column: 1; grid-row: 2; }
   .tasks .trow .ttime {
     grid-column: 2 / -1;

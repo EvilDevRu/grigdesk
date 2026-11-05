@@ -153,19 +153,19 @@ const arc = computed(() => `${((total.value ?? 0) / 5) * CIRC} ${CIRC}`);
 
 <style scoped>
 .tri { display: inline-flex; flex-direction: column; gap: 5px; align-items: flex-start; }
-.metrics { display: inline-flex; align-items: center; gap: 4px; }
+.metrics { display: inline-flex; align-items: center; gap: 8px; }
 .info-needed { color: var(--warn); font-size: 11px; line-height: 1.4; }
 .unrated { color: var(--ink-mid); font-size: 12px; }
 .chip {
   font-size: 11px; line-height: 1.2;
-  padding: 3px 5px; border-radius: 5px; border: 1px solid transparent; white-space: nowrap;
+  white-space: nowrap;
 }
-.chip.dim { color: var(--ink-mid); border-color: color-mix(in srgb, var(--ink-mid) 30%, transparent); }
-.chip.acc { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-.chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
-.chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+.chip.dim { color: var(--ink-mid); }
+.chip.acc { color: var(--accent); }
+.chip.warn { color: var(--warn); }
+.chip.bad { color: var(--bad); }
 /* Итог: кольцо-прогресс (дуга = тяжесть/5), цвет по тяжести — как индикатор контекста */
-.total { width: 18px; height: 18px; flex: none; }
+.total { width: 18px; height: 18px; flex: none; order: -1; }
 .total .trk { fill: none; stroke: color-mix(in srgb, var(--ink-mid) 30%, transparent); stroke-width: 2.4; }
 .total .arc { fill: none; stroke-width: 2.4; stroke-linecap: round; }
 .total text { font-size: 9.5px; font-weight: 700; }
