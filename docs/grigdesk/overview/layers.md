@@ -24,5 +24,3 @@ capability read подбирает завершившиеся detached jobs, п�
 атомарных status-файлах 0600 внутри каталога 0700: частые обновления загрузки не
 переписывают prefs. Restart recovery удерживает dedupe до подтверждённой смерти прежнего
 worker по полной process identity.
-
-Источник до переноса: docs/grigdesk/architecture.md § Слои

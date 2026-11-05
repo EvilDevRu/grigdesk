@@ -9,8 +9,6 @@
 `lib/kimi/sandbox.ts`), но ограничивалась writable bind-mount в sandbox namespace:
 сам CLI про каталоги не узнавал, и его инструменты считали всё вне `cwd` чужим.
 
-Источник до переноса: docs/grigdesk/kimi-workspace-extra-dirs.md § Проблема
-
 ## Реализация
 
 `server/src/lib/kimi/sandbox.ts`:
@@ -35,8 +33,6 @@
   всё равно пуст. Замаскированные пути пишутся в лог сервера
   (`maskedWorkspacePaths`).
 
-Источник до переноса: docs/grigdesk/kimi-workspace-extra-dirs.md § Реализация
-
 ## Безопасность
 
 - Содержимое `local.toml` строится только из `canonicalExtras`; отклонённые
@@ -55,8 +51,6 @@
 - Известный побочный эффект (pre-existing): bwrap создаёт destination-каталоги
   на хосте, если их не было (`.kimi-code`, masked-пути).
 
-Источник до переноса: docs/grigdesk/kimi-workspace-extra-dirs.md § Безопасность
-
 ## Проверка
 
 - Живой ACP-сеанс с реальным `kimi acp` 0.31.1: сессия с `local.toml` получила
@@ -73,8 +67,6 @@
   отказ для самого control state, отдельный тест `resolveVisibleProjectRoot`.
   Весь kimi-набор зелёный.
 
-Источник до переноса: docs/grigdesk/kimi-workspace-extra-dirs.md § Проверка
-
 ## Раскатка
 
 1. Перезапустить grigdesk-server (код рантайма загружается при старте):
@@ -86,8 +78,6 @@
 Связанные документы: [папка чата](../guide/chat-workdir.md),
 [kimi-runtime-security.md](kimi-runtime-security.md) («Границы contained runtime»).
 
-Источник до переноса: docs/grigdesk/kimi-workspace-extra-dirs.md § Раскатка
-
 ## Почему не --add-dir
 
 По коду pinned CLI 0.31.1 (strings из бинарника):
@@ -98,5 +88,3 @@
   `<projectRoot>/.kimi-code/local.toml` → `[workspace] additional_dir`
   (packages/agent-core `config/workspace-local.ts`); это документированный
   механизм (`/add-dir` в TUI пишет тот же файл).
-
-Источник до переноса: docs/grigdesk/kimi-workspace-extra-dirs.md § Почему не --add-dir

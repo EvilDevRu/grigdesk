@@ -1,5 +1,7 @@
 # Telegram-пульт
 
+Читай при изменении Telegram-пульта, его авторизации, сообщений и действий.
+
 Пульт GrigDesk в Telegram: владелец, вотчер прогонов, действия и ассистент.
 
 Читай перед правкой: `server/src/lib/telegram`, `server/src/modules/telegram`.

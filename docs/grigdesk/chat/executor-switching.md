@@ -25,5 +25,3 @@
   `never/user`. Notifications нормализуются в ленту в реальном
   времени; summary рассуждений виден, если его отдал сам CLI. Авторизация = наличие
   `~/.codex/auth.json`.
-
-Источник до переноса: docs/grigdesk/chat-agents.md § Смена ИИ внутри чата

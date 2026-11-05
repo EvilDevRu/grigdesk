@@ -30,5 +30,3 @@
 получает никогда. То же правило уже действует для Telegram: повтор выдан скачиванию
 вложений, но не отправке сообщений. Тесты — `tests/server/retry.test.js` (сам хелпер и
 правила Kimi) и `tests/server/provider-usage.test.js` (Claude и Codex сквозняком).
-
-Источник до переноса: docs/grigdesk/gotchas.md § Повтор без паузы — не повтор

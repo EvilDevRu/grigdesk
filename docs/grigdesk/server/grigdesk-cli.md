@@ -153,7 +153,8 @@ Codex) не скрывает cgroup, поэтому сторож видит хо
 `tests/cli/{readiness,entry,server,open,relay-status,cli-link}.test.mts` проверяют чистые
 правила и CLI через [песочницу](../testing/cli-sandbox.md). Проверки ярлыка —
 `tests/server/{launch-script,shortcut-script,docker-launch}.test.js`; заставки —
-`tests/desktop/offline.test.js`. Включены общий typecheck, граф входов и сторож миграции.
+`tests/desktop/startup-controller.test.js`. Общий typecheck, граф входов и сторож
+миграции проверяются отдельно от этих сценариев.
 Переходный режим `open` — `tests/cli/open.test.mts` (CO-4…8): с исправным `runtime.json`
 ни systemctl, ни HTTP не вызываются.
 

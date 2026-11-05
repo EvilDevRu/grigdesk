@@ -12,5 +12,3 @@
 После cutover runtime root один: `config.stateDir`; SSE принимает ровно его и не сканирует
 исторические каталоги. Любой новый writer обязан использовать тот же root. Проверка —
 `tests/server/sse-state.test.js`.
-
-Источник до переноса: docs/grigdesk/gotchas.md § Задача в UI «замирает»: SSE смотрит не в runtime root

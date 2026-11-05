@@ -39,5 +39,3 @@ ls ~/.factory/control/protocol-v2/tasks/t<TASK>/attempts/a_*/lifecycle/segments/
 
 Ноль байт (или каталога нет вовсе) — это он. Сторож — три проверки `pre-ledger`
 в `tests/engine/contract/factory-launcher.sh`.
-
-Источник до переноса: docs/grigdesk/gotchas.md § Стенд старой задачи не сносился: попытка родилась раньше lifecycle-журнала

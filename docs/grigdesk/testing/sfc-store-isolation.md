@@ -33,7 +33,7 @@ Node кэширует по URL, то есть по всей строке `data:t
 **Заглушка нужна не всякому импорту: ЧИСТЫЙ модуль подставляется настоящим.** Относительный
 путь из `data:`-модуля не резолвится, но абсолютный `file://` — резолвится, и для модуля без
 Vue/pinia/DOM это лучше заглушки: тест проверяет то самое правило, что работает в бою. Приём
-уже был у `shared/factoryDebug.ts`; так же подставлялся и `shared/companion-run.js`, пока его
+уже был у `web/src/shared/factoryDebug.ts`; так же подставлялся и `shared/companion-run.js`, пока его
 не сняли вместе с компаньоном (2026-09-10):
 
 ```js
@@ -62,5 +62,3 @@ const PURE_MODULE_URL = pathToFileURL(fileURLToPath(
 отдельный headless Chrome: `npm --prefix web run test:ui-browser`. Он запускает dev-only
 gallery во временном профиле и проверяет матрицу viewport-ов; ручной взгляд не заменяет
 этот gate.
-
-Источник до переноса: docs/grigdesk/gotchas.md § Веб-тест монтирует SFC дважды — а работает со сторами первого теста

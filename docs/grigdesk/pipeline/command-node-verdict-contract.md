@@ -53,5 +53,3 @@ source engine/lib/route-runtime.sh; _route_v2_command_result /путь/к/result
 `t<TASK>.route-v2.log` пишется, чем именно вердикт не понравился — форма JSON, `comment` не
 декодировался, не прошла `run_state_verdict_validate` или не снялся workspace-снимок «после».
 Файл перезаписывается следующим отказом той же задачи, смотреть его надо сразу.
-
-Источник до переноса: docs/grigdesk/gotchas.md § Маршрут встал «код 78» на узле, который отработал = вердикт command-узла не по контракту

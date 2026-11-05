@@ -6,8 +6,8 @@
   `aria-label` и `title`; цвет точки состояния остаётся дополнительным, а не единственным
   способом различить статус. Сторож адаптивного хвоста и всей иерархии —
   `tests/web/pipeline-filters.component.test.js`.
-- `views/pipeline/FactoryGraph.vue` — SVG-граф; геометрия/кривые в `shared/graphGeom.ts`
-  (порт `node_geom`/`edge_path`); автораскладка маршрутов — `shared/routeLayout.ts`.
+- `views/pipeline/FactoryGraph.vue` — SVG-граф; геометрия/кривые в `web/src/shared/graphGeom.ts`
+  (порт `node_geom`/`edge_path`); автораскладка маршрутов — `web/src/shared/routeLayout.ts`.
 - `TaskModal` pin-ит в запуске тот catalog hash, который показал человеку: между
   открытием формы и стартом профиль мог опубликовать новый каталог.
 - `stores/`: `board` (кеш доски + поллинг), `tasks` (кеш деталей + действия), `system`, `ui`
@@ -22,5 +22,3 @@
   server-confirmed снимок с revision),
   `ui-context` (owner-scoped bounded prompt context и отдельный trusted `routingScope`),
   `notify-watch` (что на конвейере встало на человеке и готовая наблюдаемая проекция для полки).
-
-Источник до переноса: docs/grigdesk/architecture.md § Вид — третичный уровень без заголовка.

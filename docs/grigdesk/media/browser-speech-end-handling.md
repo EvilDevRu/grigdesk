@@ -13,5 +13,3 @@ retry с backoff. Промежуточный текст живёт отдель�
 `browserProcessing=local` проверяет `SpeechRecognition.available()` и устанавливает пакет
 только по явному действию; отсутствие API — «не поддерживается», а не разрешение тихо
 перейти в auto. Оба браузерных варианта, MediaRecorder и AudioWorklet требуют secure context.
-
-Источник до переноса: docs/grigdesk/gotchas.md § Browser speech: onend не означает «включить снова»

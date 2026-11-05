@@ -12,7 +12,7 @@ foreground spawn/fork защищены [native gate и наблюдением д
 ## Откуда брался запрет до v3
 
 Обычный чат DeepSeek использует web-профиль и штатный Agent preset. Список
-`DISABLED_ROWS` в `deepseek/profile.ts` применяется к ACP-профилю, а не к web-чату.
+`DISABLED_ROWS` в `server/src/lib/deepseek/profile.ts` применяется к ACP-профилю, а не к web-чату.
 У GLM поверх того же web-профиля включён PreToolUse hook с matcher `*` и коротким
 списком `GLM_NATIVE_TOOLS`. Штатный preset объявляет `subagent` и `subagent_fork`,
 а hook отказывает их вызовам: [политика GLM](glm-tool-policy.md).

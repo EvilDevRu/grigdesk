@@ -21,5 +21,3 @@ Reconnect той же immutable provider identity возвращает тот ж
 rules, activation history и decisions, но сам Inbox повторно не активирует. Другой bot
 или repository получает новый случайный `accountRef`, пустой allowlist и состояние
 `never_activated`.
-
-Источник до переноса: docs/grigdesk/inbox.md § Три независимых состояния

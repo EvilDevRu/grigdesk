@@ -1,11 +1,11 @@
 # Оповещения: тост в окне, системное — когда окна нет
 
-`shared/alerts.ts` направляет события в общий центр тостов и системный канал.
+`web/src/shared/alerts.ts` направляет события в общий центр тостов и системный канал.
 Человек «здесь», когда `document.visibilityState === 'visible'` и `document.hasFocus()`:
 в этом случае показывается только тост. Если документ скрыт или другое приложение забрало
 фокус, показываются тост и системное уведомление. При отсутствии метода `hasFocus` видимый
 документ считается активным. Кнопка «Проверить» в настройках по-прежнему напрямую проверяет
-системный канал через `shared/notify.ts`.
+системный канал через `web/src/shared/notify.ts`.
 
 | Событие | id | scope | Тон | Исчезает само | Действия и цель |
 | --- | --- | --- | --- | --- | --- |
@@ -68,7 +68,7 @@ Notification. Service worker не используется; иконка — в�
 ## История оповещений
 
 Колокольчик в верхней панели, слева от настроек, открывает историю оповещений этого окна
-(`shared/alertHistory.ts`, вид — `features/alerts/AlertHistoryPopover.vue`). Запись создаётся
+(`web/src/shared/alertHistory.ts`, вид — `features/alerts/AlertHistoryPopover.vue`). Запись создаётся
 на каждый показанный тост, новейшие сверху, не больше 50. История живёт в памяти вкладки:
 в ней текст переписки, поэтому на диск она не пишется. Её стирают потеря сессии
 и кнопка «Очистить».
@@ -106,7 +106,6 @@ Notification. Service worker не используется; иконка — в�
 `in-app-alerts-wiring.contract.test.js`, `chat-store-alerts.test.js`,
 `notify-watch-stall.test.js`, `task-shelf.test.js`, `task-shelf.component.test.js` и
 `shelf-contract.test.js`.
-
 
 Раздел 3D получает terminal состояние через постоянный shell subscriber и
 `studio-changed` → перечитывание задач. Семантический dedup не даёт повторить тост

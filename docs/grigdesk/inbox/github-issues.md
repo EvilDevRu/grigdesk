@@ -47,5 +47,3 @@ connect невозможен, запасного варианта нет.
 base без query/fragment, создаёт fine-grained PAT для одного repository с Metadata read,
 Issues read и Webhooks write, затем выбирает B24 project в rules и явно активирует GitHub
 на `/inbox`. Код, тесты и установка сами remote webhook не создают.
-
-Источник до переноса: docs/grigdesk/inbox.md § GitHub Issues

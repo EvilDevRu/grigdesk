@@ -36,5 +36,3 @@ st[back] = recent ? 'run' : 'wait';   // back = build
 Как отличить такой случай за один взгляд: сравни `statuses` из `/api/tasks/:id/graph` с
 СЫРЫМ реестром и курсором ledger. Расходятся — врёт проекция, а не движок. Сторож —
 `tests/server/factory-graph-reject-rewind.test.js`.
-
-Источник до переноса: docs/grigdesk/gotchas.md § Жёлтая карточка без единых ворот = доинференс возврата поверх живого курсора

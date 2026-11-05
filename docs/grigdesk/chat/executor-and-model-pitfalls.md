@@ -8,5 +8,3 @@
   `PERM_WAIT_MS`, а не прежними короткими таймаутами.
 - Чат: селект — optgroup по исполнителям, недоступный ИИ виден, но options disabled. Сервер выбирает
   executor по модели (`providerOfModel`); GPT без бинаря → понятная ошибка «npm i -g @openai/codex && codex login».
-
-Источник до переноса: docs/grigdesk/chat-agents.md § Грабли:

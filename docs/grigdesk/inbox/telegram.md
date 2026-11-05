@@ -85,5 +85,3 @@ private `t.me/c/<internal>/<message>` и comment links; парсер не уга
 Архивные строки без position journal остаются доступной для разворота ссылок историей,
 но не попадают в Inbox. Даже поздняя правка такой строки не превращает её в новое
 post-activation обращение.
-
-Источник до переноса: docs/grigdesk/inbox.md § Telegram

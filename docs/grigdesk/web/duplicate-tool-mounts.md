@@ -5,7 +5,7 @@ Terminal — xterm, WebSocket и настоящий PTY. Два экземпля
 состояние, повторные id, двойные события или лишнюю shell-сессию; общий флаг «док когда-либо
 открывали» тоже плох — открытие Code тогда поднимает невидимый Terminal.
 
-Владелец один: постоянный `shared/layout/ToolHost.vue` в `AppShell`. Route-компоненты
+Владелец один: постоянный `web/src/shared/layout/ToolHost.vue` в `AppShell`. Route-компоненты
 `CodeView.vue`/`ShelfView.vue`/`TerminalView.vue` — только пустые адаптеры, а `page`, `dock`, `hidden`
 переключают CSS стабильного render-site. Lazy mounted-флаг отдельный у каждого registry id.
 Док разрешён с 900 px; при переходе на 899 px он закрывается, непоказанные панели
@@ -46,5 +46,3 @@ Terminal intent заменяет прежний `sessionStorage`: очередь
 делить один reconnect и отправляться после первого вывода shell без `\n`. Resize xterm —
 не косметика: клиент посылает `{t:'resize', cols, rows}`, сервер применяет `TIOCSWINSZ` и
 `SIGWINCH`; helper при закрытии WebSocket обязан убрать всю process group.
-
-Источник до переноса: docs/grigdesk/gotchas.md § Code/Shelf/Terminal нельзя монтировать отдельно в route и в правом доке

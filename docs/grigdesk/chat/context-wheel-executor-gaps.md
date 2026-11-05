@@ -17,7 +17,7 @@ Kimi 2.4.0 и числовых метрик истории чатов (без ч
 
 ## Пробел 1: DeepSeek/GLM — окно контекста не приходит никогда, кольцо «недоступно»
 
-Web-ход обоих исполнителей идёт через `deepseek/serverTurn.ts` → метрика `deepseek-web-usage`
+Web-ход обоих исполнителей идёт через `server/src/lib/deepseek/serverTurn.ts` → метрика `deepseek-web-usage`
 (сумма `inputTokens + cacheReadTokens + cacheWriteTokens` usage-чанка). Окно адаптер читает
 из `usage.contextWindow` — но такого поля в протоколе DSH НЕТ: `TokenUsage`
 (`packages/llm/llm/src/types.ts`) содержит только токены. Подтверждение историей: у всех

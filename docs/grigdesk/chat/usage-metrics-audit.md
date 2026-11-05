@@ -134,12 +134,12 @@ Codex сообщает `account/rateLimits/updated`, но `consumeAppNotificatio
 
 ### DeepSeek и GLM: живой контекст не сохраняется в итоге
 
-`deepseek/serverTurn.ts` передаёт в прогресс сумму
+`server/src/lib/deepseek/serverTurn.ts` передаёт в прогресс сумму
 `inputTokens + cacheReadTokens + cacheWriteTokens` последнего обращения.
 Расход вывода суммируется отдельно по обращениям; прежняя ошибка «последний запрос
 вместо всего хода» в этом месте уже исправлена.
 
-Однако `deepseek/webRuntime.ts` возвращает `contextTokens/contextWindow: undefined`
+Однако `server/src/lib/deepseek/webRuntime.ts` возвращает `contextTokens/contextWindow: undefined`
 и `contextMetric: unavailable`; `glm/runtime.ts` тоже выставляет `unavailable`.
 Сборщик server-хода не сохраняет последний размер в результате. Это разрыв между
 живым замером и итоговыми данными для сохранения истории, а не неверная сумма выхода.

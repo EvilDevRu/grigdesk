@@ -1,6 +1,6 @@
 # VERIFY дважды вернул исправную сборку: помощник теста ушёл в Pest как тест
 
-Симптом (13.10.2026, t9164, debug-маршрут): VERIFY падает с `verify-backend-tests-failed`
+Симптом на debug-маршруте: VERIFY падает с `verify-backend-tests-failed`
 «Pest не прошёл: Undefined variable $argv in tests/Support/manual-scan-request.php …
 TypeError file_get_contents()». BUILD повторно доказывает, что продукт и тесты в порядке,
 ничего не меняет — VERIFY падает тем же замечанием, и маршрут встаёт `no-progress`.

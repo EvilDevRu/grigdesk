@@ -54,5 +54,3 @@
 Живут фрагменты в `mediaDir/meeting-clips/<разбор>/` и убираются по возрасту (7 дней)
 тем же обходом, что кадры (`sweepRunDirs`). Сторожа — `tests/server/meeting-clips.test.js`
 и `tests/web/video-section.component.test.js`.
-
-Источник до переноса: docs/grigdesk/video.md § Фрагмент записи: посмотреть до постановки и приложить к задаче

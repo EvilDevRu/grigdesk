@@ -21,7 +21,7 @@
 
 ## Разбор и загрузка
 
-`shared/md.ts` разделяет `lexMarkdown` и `mdTokensToHtml`; прежний `mdToHtml`
+`web/src/shared/md.ts` разделяет `lexMarkdown` и `mdTokensToHtml`; прежний `mdToHtml`
 комбинирует их. Один lexer разбирает весь ответ, включая reference definitions.
 `markdown/segments.ts` отделяет только ограждённые блоки верхнего уровня. Ключи
 состоят из позиции и вида куска; реактивные резолверы ссылок обновляют HTML без

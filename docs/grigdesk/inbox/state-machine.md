@@ -22,5 +22,3 @@ Runtime читает модель только из `pluginSettings.inbox.triage
 runtime generation продолжает следующий tick после последнего реально проверенного item.
 Поэтому постоянная ошибка или низкая уверенность на первых обращениях не закрывает более
 глубокие; account switch сбрасывает cursor вместе с generation.
-
-Источник до переноса: docs/grigdesk/inbox.md § Общий автомат

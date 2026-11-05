@@ -9,5 +9,3 @@
 считает ТЕМИ ЖЕ модулями, что чип навигации и вотчер браузера, — импортом
 `shared/pipeline/pipelineWait.ts` и `shared/pipeline/agentActivity.ts` (оба — чистые
 ESM без Vue): правило остаётся в одном файле.
-
-Источник до переноса: docs/grigdesk/telegram-pult.md § Ключевой принцип: пульт — ещё одно «окно» GrigDesk

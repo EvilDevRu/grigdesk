@@ -9,5 +9,3 @@ attempt/pins. Перечитывать current между сверкой и за
 При расхождении движок печатает `FACTORY_ERROR=catalog_changed EXPECTED=… ACTUAL=…|none`,
 не публикует attempt/registry, а GrigDesk освобождает свою новую slot reservation и отвечает
 409 `catalog_changed`.
-
-Источник до переноса: docs/grigdesk/gotchas.md § Каталог маршрутов сверяется внутри движка, а не в HTTP-preflight

@@ -20,5 +20,3 @@
   `[Контекст GrigDesk]` framing. Exact `pageHint()` даёт только описание страницы.
   Клиентский path не меняет cwd или permission mode; worktree
   выбирает только task-chat route и сохранённая server identity.
-
-Источник до переноса: docs/grigdesk/chat-agents.md § UI-контекст: чат знает, где пользователь

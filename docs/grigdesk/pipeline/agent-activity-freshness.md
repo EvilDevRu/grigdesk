@@ -32,5 +32,3 @@
   снос работы по косвенному признаку; лимит этапа и так стоит на страже.
 
 Проверки — `tests/server/factory-activity.test.js`, `tests/web/agent-activity.test.js`.
-
-Источник до переноса: docs/grigdesk/gotchas.md § «Агент пишет» над намертво вставшим агентом = свежесть журнала считали по mtime

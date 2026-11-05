@@ -238,5 +238,3 @@ provider-neutral массивом `resources`; его `toggle`/`number`/`button`
 сканирует установленный бинарь, Codex читает read-only `model/list` app-server с доступом
 текущего аккаунта. Живой Codex-каталог и открытый UI обновляются раз в минуту; hidden и
 модели с рекомендованным `upgrade` показываются только при включённом «Показывать все модели».
-
-Источник до переноса: docs/grigdesk/architecture.md § Модули сервера (server/src/modules/)

@@ -1,5 +1,7 @@
 # Входящие
 
+Читай при изменении приёма сообщений, преобразования в задачи и восстановления очереди.
+
 Общий автомат входящих и его источники: Telegram и GitHub Issues.
 
 Читай перед правкой: `server/src/lib/inbox`, `server/src/modules/inbox`, `server/src/lib/github`, `server/src/modules/github`.

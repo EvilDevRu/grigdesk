@@ -21,5 +21,3 @@ SSH-ожидания fail-closed не выдаются в Telegram: там не 
 `/api/chat/waiting` исключает SSH, generic permission endpoint отвергает `origin:'ssh'`,
 а новый интерфейс делает явный opt-in и отвечает через SSH endpoint. Поэтому смешанный
 rollout безопасно оставляет команду ждать новое окно, а не молча разрешает её.
-
-Источник до переноса: docs/grigdesk/gotchas.md § SSH-плагин закрывается на каждой границе

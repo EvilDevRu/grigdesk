@@ -1,5 +1,8 @@
 # Экраны приложения и дизайн GrigDesk
 
+**Совместимость с прежним v1.** Этот документ относится к отдельному клиенту `:app`
+и его инструментам. Полное приложение `:client` описано в [контракте клиента](client-app.md).
+
 Эталон приложения — рабочая оболочка `web/src/shared/layout/AppShell.vue`, список
 `web/src/views/chat/ChatList.vue`, лента и composer `ChatSession.vue`, общие controls
 из `web/src/styles/components/`. Мобильный пакет сохраняет независимые исходники:

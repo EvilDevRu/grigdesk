@@ -77,5 +77,3 @@ server-owned companion-чате, что виден на странице `/chats
   сопоставляет markers с `GET /api/chat/active`, удаляет устаревший «Стоп» и один раз
   говорит словами, что вопрос надо повторить. Живой exact `chatKey` получает назад
   только наблюдение, модель повторно не запускается.
-
-Источник до переноса: docs/grigdesk/telegram-pult.md § Разговор с ассистентом (lib/telegram/pult/assistant.js)

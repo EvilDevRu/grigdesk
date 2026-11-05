@@ -29,5 +29,3 @@
 
 Сторож — `tests/server/factory-graph-stall.test.js` («сводка задачи называет узел
 остановки»).
-
-Источник до переноса: docs/grigdesk/gotchas.md § Одна остановка, два разных DTO: stall в сводке и stall в графе — не одно и то же

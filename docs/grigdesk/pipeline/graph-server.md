@@ -61,5 +61,3 @@ read-only реестры могут использовать старый route 
 Это compatibility timing самой SVG-карты. Потерянные run-артефакты нельзя
 «восстановить» по birthtime каталога или mtime `meta.env`: такая цифра выглядела бы
 точной, ничем таковой не являясь.
-
-Источник до переноса: docs/grigdesk/factory-graph.md § Сервер (server/src/lib/factory-graph.js)

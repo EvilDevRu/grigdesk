@@ -59,8 +59,6 @@ fail-closed: открыть свою транзакцию значит полу�
 Проверки — `tests/engine/unit/route-goto-transaction-guard.sh` и
 `tests/engine/unit/route-recover-instrumentation.sh`.
 
-Источник до переноса: docs/grigdesk/gotchas.md § Возврат курсора в зону instrument→proof ломал маршрут насмерть
-
 ### Третья дверь — переходы самого маршрута
 
 Гард `goto` и восстановление закрывают двери человека и обрыва, но не переходы, записанные

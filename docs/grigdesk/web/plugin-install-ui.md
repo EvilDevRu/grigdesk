@@ -6,13 +6,13 @@
 [замена выполняется при следующем запуске](../plugins/plugin-update-on-restart.md).
 Мастер показывает ожидание и отмену без повторного apply; закрытие не скрывает намерение.
 
-`shared/pluginInstall.ts` содержит чистые подписи результата, этапы и progress.
+`web/src/shared/pluginInstall.ts` содержит чистые подписи результата, этапы и progress.
 Измеримый процент относится только к скачиванию Git; установка зависимостей и
 применение показываются без процента. Recovery не означает успешно законченный job.
 Rollback имеет отдельный текст восстановления версии. Badge перезапуска приоритетнее
 доступного обновления.
 
-`shared/pluginInstallApi.ts` превращает unknown JSON в проверенный публичный DTO.
+`web/src/shared/pluginInstallApi.ts` превращает unknown JSON в проверенный публичный DTO.
 Он заново строит поля job, source, target, preview, изменений и install info; unknown
 поля не выпускаются. Проверяются UUID, safe integer revision, стабильная версия,
 SHA/digests, UTC даты и согласованность preview с job. Ready/applying/done требуют
@@ -91,7 +91,6 @@ Health блокирует изменения, сохраняя системны�
 
 Проверки — P1–P8 с настоящим dialog host, K1–K6, включая настоящие Pinia installer
 и каталог: done перечитывает список один раз, новый id выключен, prefs сохранены.
-
 
 ## Каталог и происхождение
 

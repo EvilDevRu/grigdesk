@@ -34,5 +34,3 @@
 
 Сторожа — `tests/server/meeting-plan.test.js`, `tests/server/media-plan-tasks.test.js`,
 `tests/server/meeting-frames.test.js`, `tests/web/video-section.component.test.js`.
-
-Источник до переноса: docs/grigdesk/video.md § Кому и в какой проект

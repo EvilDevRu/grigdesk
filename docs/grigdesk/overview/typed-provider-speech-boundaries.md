@@ -21,7 +21,7 @@ HTTP и общий SSE передают usage через одну проверк
 `stores/notifyWatch.ts` проверяет список задач до обхода и граф до расчёта ворот.
 Неверный граф остаётся неизвестным наблюдением; неверный список сохраняет прошлый
 снимок и loadedAt. Наборы дедупликации и редкий страховочный интервал остаются прежними.
-Клиентский envelope объявлен в `shared/pipelineContracts.ts`, отдельно от renderer DTO.
+Клиентский envelope объявлен в `web/src/shared/pipelineContracts.ts`, отдельно от renderer DTO.
 
 `features/speech/contracts.ts` описывает browser ports, lease, run и захват MediaRecorder.
 Контроллер проверяет consent/settings до применения, не преобразуя строку в boolean.
@@ -29,6 +29,6 @@ HTTP и общий SSE передают usage через одну проверк
 Сохраняются один provider, независимый язык речи, revision/generation, bounded cleanup,
 полная запись для batch fallback и отсутствие автоматического reconnect.
 
-`shared/speechStream.ts` проверяет читаемые поля JSON WebSocket до передачи машине
+`web/src/shared/speechStream.ts` проверяет читаемые поля JSON WebSocket до передачи машине
 состояний. AudioWorklet получает URL выпущенного Vite JS. Очередь PCM, подтверждения,
 flush хвоста, отмена и право владельца остановить MediaStream сохраняются.

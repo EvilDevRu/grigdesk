@@ -9,6 +9,8 @@ const execFileAsync = promisify(execFile);
 const PUBLIC_UPSTREAM = ['Evil', 'DevRu'].join('');
 const PUBLIC_UPSTREAM_FILES = new Set([
   'README.md',
+  // Публичный источник встроенных ярлыков драйверов, а не подключённый личный профиль.
+  'docs/grigdesk/b24/driver-sources.md',
   'tests/server/grigdesk-release.test.js',
 ]);
 

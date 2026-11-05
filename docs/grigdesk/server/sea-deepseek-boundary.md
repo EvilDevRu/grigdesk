@@ -15,7 +15,7 @@ legacy generation не входят в серверный комплект.
 
 | Точка | Судьба и проверка |
 | --- | --- |
-| `deepseek/distribution.ts`: runtimeInstallationBin | Входит в server bundle. Fallback выбирает внешний `I/bin/deepseek`; source сохраняет свой bin. |
+| `server/src/lib/deepseek/distribution.ts`: runtimeInstallationBin | Входит в server bundle. Fallback выбирает внешний `I/bin/deepseek`; source сохраняет свой bin. |
 | `deepSeekCandidateGate.ts`: `process.execPath` | Только разработка: source-sync строит и принимает отдельный ELF обычным Node. В серверный SEA этот builder не входит. |
 | `grigDeskRelease.ts`: два импорта `binaryReadiness.ts` | Только git-updater исходников. SEA подменяет `releaseServices` на `packagedRelease`; `grigDeskRelease` отсутствует в CJS-графе. |
 | `grigdesk-update-worker.js`: `process.execPath` | Только git-updater исходников; серверный SEA не запускает этот worker. |

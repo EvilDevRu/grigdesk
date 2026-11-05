@@ -52,8 +52,6 @@ credentials (`0600`, владелец) и исполняемости бинар�
 `tests/server/kimi-runtime.test.js` (прямой spawn без proxy/preflight/systemd, ACP-ход,
 корень вложений).
 
-Источник до переноса: docs/grigdesk/kimi-runtime-security.md § Host-режим (умолчание)
-
 ## Contained-профиль (откат)
 
 Contained-профиль `kimi-contained-v1` был допущен для закреплённой версии Kimi Code `0.31.1`.
@@ -63,8 +61,6 @@ Contained-профиль `kimi-contained-v1` был допущен для зак
 Это узкое разрешение на запуск Kimi из чатов через единственный contained runtime. Оно не
 разрешает прямой spawn CLI, наследование host environment, автоматические permissions или запуск
 другой версии без повторного аудита и preflight.
-
-Источник до переноса: docs/grigdesk/kimi-runtime-security.md § Contained-профиль (откат)
 
 ## Обязательный host preflight
 
@@ -81,8 +77,6 @@ Preflight повторяется на каждой машине; его резу
 он использует проверенную альтернативу через transient user-systemd service и перед каждым
 запуском сверяет реально применённые свойства unit. Process group сама по себе заменой cgroup не
 считается.
-
-Источник до переноса: docs/grigdesk/kimi-runtime-security.md § Обязательный host preflight
 
 ## Границы contained runtime
 
@@ -123,8 +117,6 @@ Preflight повторяется на каждой машине; его резу
 - ACP-режим сессии выставляется только из списка ниже; произвольная строка в
   `session/set_config_option` не проходит.
 
-Источник до переноса: docs/grigdesk/kimi-runtime-security.md § Границы contained runtime
-
 ## Режимы прав: что даёт ACP, а что — GrigDesk
 
 Бинарь объявляет четыре режима (`ACP_MODES` в `0.33.0`): `default`, `plan`, `auto`, `yolo`.
@@ -154,8 +146,6 @@ GrigDesk показывает четыре пункта, но соответст
   продолжает проверять канал GrigDesk даже при yolo. Классификатор GrigDesk к этому режиму не применяется по определению —
   спросов, которые он мог бы разобрать, не существует.
 
-Источник до переноса: docs/grigdesk/kimi-runtime-security.md § Режимы прав: что даёт ACP, а что — GrigDesk
-
 ## Проверки
 
 [Offline adversarial suite](../../../tests/server/kimi-security.test.js) покрывает traversal,
@@ -175,8 +165,6 @@ Contained probe Kimi `0.31.1` подтвердил без model prompt:
 
 Содержимое credentials не читалось, не копировалось и не логировалось. Этот probe не отправлял
 model prompt и не расходовал квоту.
-
-Источник до переноса: docs/grigdesk/kimi-runtime-security.md § Проверки
 
 ## Credential barrier снят
 
@@ -206,8 +194,6 @@ stop больше не инвалидирует binding — оборванная
 досье сделанного (`lib/chat/stoppedBrief.ts`). Опасного автоповтора после принятого prompt
 нет в обоих случаях.
 
-Источник до переноса: docs/grigdesk/kimi-runtime-security.md § Credential barrier снят
-
 ## Оставшиеся ограничения MVP
 
 - успешный многошаговый ответ после снятия credential barrier, question flow,
@@ -219,5 +205,3 @@ stop больше не инвалидирует binding — оборванная
   contained-профиле остаются запрещены;
 - нужно сохранить дополнительные обезличенные fixtures usage/context и успешного event ordering,
   а live adversarial suite расширить detached-child и DNS-rebinding сценариями.
-
-Источник до переноса: docs/grigdesk/kimi-runtime-security.md § Оставшиеся ограничения MVP

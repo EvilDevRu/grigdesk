@@ -9,5 +9,3 @@
   {allow, comment?} → `chat-permission-done` закрывает всплывашку во всех окнах.
 - **Нюанс:** то, что уже в глобальном allowlist пользователя (~/.claude/settings.json), выполняется
   БЕЗ всплывашки — prompt-tool зовётся только для того, что иначе спросило бы.
-
-Источник до переноса: docs/grigdesk/chat-agents.md § Всплывашка разрешений (аналог permission prompt Claude Code)

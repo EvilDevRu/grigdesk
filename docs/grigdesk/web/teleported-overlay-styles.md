@@ -26,5 +26,3 @@ semantic layer даёт им уровень выше модалок и банн�
 
 Проверять замером, а не глазами: навести и сверить `getBoundingClientRect()` с вьюпортом плюс
 `document.elementFromPoint` по центру — перекрытие на скриншоте видно не всегда.
-
-Источник до переноса: docs/grigdesk/gotchas.md § Tooltip/popover живут в <body>: scoped-селектор consumer-а до surface не дотянется

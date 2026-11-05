@@ -1,12 +1,6 @@
 # Конвейер
 
-- [Достоверность приёмки: поздние блокеры, обязательные доказательства и автоматические цепочки](acceptance-evidence.md)
-
-- [Подтверждённый источник запуска и совместимая выдача конвейера](task-source-index.md)
-
-- [Codex: rc=0 без terminal status, noResult маршрута и stage-result](codex-no-result-contract.md)
-
-- [Offline-граница DeepSeek: metadata как provider, код 126 и denylist](deepseek-offline-guard.md)
+Читай при изменении запуска, маршрутов, графа, остановок, триажа и арбитра.
 
 Фабрика и движок маршрутов, граф попытки, ворота, арбитр и триаж.
 
@@ -21,24 +15,21 @@
 
 ## Устройство
 
+- [Достоверность приёмки: поздние блокеры, обязательные доказательства и автоматические цепочки](acceptance-evidence.md)
+- [Подтверждённый источник запуска и совместимая выдача конвейера](task-source-index.md)
+- [Codex: отсутствие terminal status, noResult, stage-result и пояснение skipped](codex-no-result-contract.md)
+- [Offline-граница DeepSeek: metadata как provider, код 126 и denylist](deepseek-offline-guard.md)
 - [Браузер этапа: pinned authority, CLI/MCP, lifecycle и поставка](browser-transport.md)
-
 - [Как усиливать узлы конвейера](node-hardening.md) — входы и результаты, PLAN/SKEPTIC,
   доказательства проверок, повторы, границы GLM и безопасная публикация.
 
 - [Арбитр: приём итогов модели, чистые реплики и ручной повтор](arbiter-result-recovery.md)
-
 - [Остановка арбитра кнопкой и перед продолжением прогона](arbiter-cancellation.md)
-
 - [Арбитр: учёт ответов, короткое продолжение, пустые вопросы и следующий шаг](arbiter-dialog-progress.md)
-
 - [GLM: обязательные артефакты state-only и граница записи STATE_DIR](glm-state-artifacts.md)
-
 - [Массовый запуск и остановка: области, гейты и блокировка повторов](bulk-run-controls.md)
-
 - [Выбор модели триажа и профили доступа Codex](triage-model-selection.md)
 - [Триаж GLM, Kimi и DeepSeek: файловый брокер и проверка инструментов](triage-executors.md)
-
 - [Образец профиля с тремя маршрутами](profile-sample.md) — единое описание проекта,
   ручное подключение, режим без стенда, командная проверка и способы сдачи.
 - [Проверки и доказательства образца](profile-sample-checks.md) — выбор тестов по match
@@ -47,7 +38,6 @@
   отказ PR в shared, состав приёмки за 15 минут и допустимые исправления ревью.
 - [Источник собственной задачи: профиль оценки, арбитр, тикет и название](grigdesk-task-source.md)
 - [Сводка конвейера читает собственные названия одним снимком на запрос](task-title-snapshot.md)
-
 - [Профили конвейера: устройство и параметры](project-profiles.md) — файлы, переменные,
   хуки, исполнители и модели, маршруты, значения по умолчанию и применение изменений.
 - [Покрытие исполнителей по цепочкам узлов](runner-chain-coverage.md) — схема 2,
@@ -56,13 +46,9 @@
   покрытие всех недоступных кандидатов и одна перепривязка рантайма на resume.
 
 - [Холодный запуск ACP: единый бюджет без повтора initialize](deepseek-acp-startup.md)
-
 - [Упакованные Factory helpers и границы стадий status MCP](../server/server-binary-factory-helpers.md)
-
 - [Бинарный DeepSeek в Factory: descriptor, package coverage, cache и prepared handle](deepseek-binary-factory.md)
-
 - [DeepSeek: canonical prefs, runtime identity и host status каждого узла](deepseek-native-settings-runtime.md)
-
 - [Авто-шип фабрики](automatic-shipping.md)
 - [Маршруты (modules/routes)](route-management.md)
 - [Палитра](graph-palette.md)
@@ -76,49 +62,29 @@
 ### Данные фабрики
 
 - [Диалог разбора остановки: история, явный выбор, CAS и восстановление](arbiter-stop-dialog.md)
-
 - [Результат отдельной разведки: checkpoint, deferred, вопрос и exact ответ](bootstrap-results.md)
-
-- [Вердикт human и история отдельной модалки](human-verdict-dialog.md)
-- [вердикт human закрывает автоматический повтор по этой остановке](human-verdict-retry-boundary.md)
-- [границу задачи арбитр менять не вправе](arbiter-task-scope.md)
 - [Данные фабрики](factory-data.md)
 - [разбор СОХРАНЯЕТСЯ и виден в карточке остановки](persistent-stall-analysis.md)
-- [решение о границе задачи больше не останавливает конвейер, если у развилки есть минимальный вариант](minimal-scope-default.md)
-- [что решено за человека, показывают ВОРОТА](gate-decision-transparency.md)
 
 ### Клиент графа
 
 - [Изоляция действий узла и запоздалых ответов между конвейерами](node-action-isolation.md)
-
 - [Окно узла по образцу задачи: служебная шапка, название, сведения и вкладки](node-dialog-task-layout.md)
-
 - [Телефон: граф со стрелками, масштаб, обзор и переход к текущему этапу](phone-graph.md)
 - [Телефон: фильтры, управление и подвал вокруг прежней схемы](../web/phone-pipeline-controls.md)
-
 - [Загрузка действия карточки: один спиннер и блокировка соседних кнопок](card-action-loading.md)
-
 - [Чтение плана: единая область, меню оглавления, переходы и плотность текста](stage-document-reader.md)
-
 - [Одинаковая высота главного и вторичных действий карточки](card-action-height.md)
 - [Подвал карточки: адреса стенда слева, компактные действия справа](card-footer-layout.md)
-
 - [GLM: единое имя модели, действия wrapper-а и конкретная причина отказа](glm-runner-display.md)
-
 - [Компактные controls окна узла и общие состояния выбора](node-dialog-controls.md)
-
 - [Окно узла: новые вкладки, действия и предварительные параметры исполнителей](node-dialog-design.md)
-
 - [Обсуждение с арбитром: компактное подключение, источник, авторы реплик и ожидание](arbiter-conversation-design.md)
-
 - [Ответы арбитру: вертикальные варианты, зелёная рекомендация и отдельное поле ответа](arbiter-question-choices.md)
-
 - [Исполнители: заголовок карточки без плашки цепочки, сведения в узле и окне этапа](card-runner-details.md)
 - [Одна панель остановки: полки, метки, узкий экран и совместимость DTO](stall-panel.md)
 - [Раскрытие подробностей сохраняется при обновлении карточки](stop-disclosure-state.md)
-
 - [Старый формат узлов живого графа](live-graph-legacy-nodes.md)
-
 - [Петля агентов: круг, этап и видимая передача между ведущим и исполнителем](loop-visualization.md)
 - [Работа узла: вращающаяся обводка и синяя стрелка текущего возврата](running-node-outline.md)
 - [Выбор исполнителя на отдельной вкладке без закрытия окна](node-executor-selection.md)
@@ -128,34 +94,22 @@
 - [Импорт общего API из вложенных компонентов конвейера](client-api-imports.md)
 - [Модель и effort в модалке узла](node-model-and-effort.md)
 - [Предыдущая раскладка и причины разделения содержимого и решения](stage-dialog-layout.md)
-- [Разбор и решение внутри окна проблемного этапа](human-decision-dialog.md)
 - [Текст человека в модалке: у ворот и у возврата он разный](gate-and-rewind-comments.md)
 - [Токены попытки: meta.env — зеркало, а не источник правды](attempt-token-accounting.md)
 
 ## Грабли
 
 - [Browser run stale до первого запроса: umask, права control и стартовый барьер](browser-launch-permissions.md)
-
 - [Арбитр: текст разбора сохранён, но ошибка формата итога убрала варианты решения](arbiter-result-format-failure.md)
-
 - [Арбитр требует отсутствующий plan: запуск использует режим «Авто»](arbiter-auto-mode.md)
-
 - [Составной modelRef GLM требует представления маршрут/модель в lifecycle](lifecycle-model-id.md)
-
 - [Повтор INSTRUMENT после временного отказа упирался в завершённую транзакцию](instrumentation-retry.md)
-
 - [Codex на SHIP: native Auto-review, защищённый Git и границы сдачи](codex-delivery-permissions.md)
-
 - [«Продолжить» после failed: остановка ждёт goto без побочных эффектов](failed-resume.md)
-
 - [Подключение раннера: неявный effort, статус, fanout и host-диагностика](runner-extension-boundaries.md)
 - [Не все исполнители видны в узле: отдельный каталог раннеров, цепочка живого переключения и граница GLM](runner-selection-boundaries.md)
-
 - [«Агент пишет» над намертво вставшим агентом = свежесть журнала считали по mtime](agent-activity-freshness.md)
-- [«Арбитр не сработал» на остановке human — так и задумано, но карточка об этом молчала](human-stall-arbitration.md)
-- [«Арбитр помер» = он отработал, а показать результат было негде](arbiter-result-visibility.md)
 - [«Блокирующее замечание» проверяющего узла бывает просто отказом прав](reviewer-permission-denials.md)
-- [«Встал на самом старте» на маршруте без плана = новый вопрос повторного триажа](planless-route-open-question.md)
 - [«Завис — агент молчит», «узел вернул решение человеку» и «исчерпан бюджет повторов» в одной модалке = три захода убиты по лимиту, а туннель терял половину рукопожатий](retry-timeouts-and-tunnel-failures.md)
 - [Перегрузка модели и неизвестная ошибка сохраняют конкретную причину в карточке](runner-failure-diagnostics.md)
 - [«Конвейер оборвался» сразу после «Принять» = окно передачи хода](gate-handoff-window.md)
@@ -168,7 +122,6 @@
 - [«TESTS: узел вернул решение человеку» при победном отчёте агента = сторож отверг manifest тестов, а сторож отстал от проекта](test-manifest-validation.md)
 - [Возврат курсора в зону instrument→proof ломал маршрут насмерть](instrument-proof-rewind.md)
 - [Возврат курсора записан, а человек видит отказ: пост-шаг goto ронял решение](rewind-post-action-failure.md)
-- [Вотчер арбитра молчал и когда брался за задачу, и когда отдавал её человеку](arbiter-watcher-notifications.md)
 - [Доделанный маршрут в виде «✖ оборвалась» = сторож ловил формулировку финала v1](completion-status-detection.md)
 - [Жёлтая карточка без единых ворот = доинференс возврата поверх живого курсора](rewind-gate-consistency.md)
 - [Задача в UI «замирает»: SSE смотрит не в runtime root](sse-runtime-root.md)
@@ -196,7 +149,6 @@
 - [Цикл ведущего и исполнителя: счётчики, findings, отчёты визитов, пределы argv и readers остановок](route-loop-runtime-constraints.md)
 - [Ретро оставлял файлы и ничего не менял: генератор предложений без канала решения](retrospective-decision-flow.md)
 - [Ромб «Песочница» на графе — статус из реальности, не из цепочки](sandbox-observed-status.md)
-- [Самая частая остановка маршрута была невидимой и неразбираемой](stall-visibility-and-analysis.md)
 - [Скрипты публикации маршрутов получают схему от сервера (`GRIGDESK_ROUTES_KIT`), а не по относительному пути](route-publisher-typescript-imports.md)
 - [Старт route engine из GrigDesk: сервис возвращает 0 всегда, а отказ приходит позже](start-route-engine.md)
 - [Подтверждение resume ждёт lifecycle: стоимость чтения и второе окно в 120 секунд](resume-lifecycle-read-cost.md)
@@ -214,16 +166,23 @@
 - [ttNNNN.pipeline — призраки](legacy-pipeline-artifacts.md)
 - [VERIFY встал «ESLint не стартовал: No files matching the pattern» = в diff удалённый файл, статика линтовала его](eslint-deleted-file-filter.md)
 - [VERIFY дважды вернул исправную сборку: помощник теста ушёл в Pest как тест](verify-test-helper-targets.md)
-
 - [Контракт каталога ролей, подготовки и атомарной вставки этапа](stage-wizard.md)
 - [Ответы мастера о правах и проблемах этапа](stage-wizard-answers.md)
-
 - [Где конвейер спрашивает человека — подробный контракт](human-gates.md)
-
 - [Схема конвейера — подробный контракт](graph-rendering.md)
-
 - [Редактор маршрутов: черновики через плюс, публикация и откат](route-editor.md)
-
 - [Задача: постановка и триаж — подробный контракт](task-triage.md)
 
-- [Комментарий skipped в причине остановки](codex-no-result-contract.md) — terminal COMMENT и immutable reason.
+## История решений
+
+- [История: Вердикт human и история отдельной модалки](human-verdict-dialog.md)
+- [История: вердикт human закрывает автоматический повтор по этой остановке](human-verdict-retry-boundary.md)
+- [История: границу задачи арбитр менять не вправе](arbiter-task-scope.md)
+- [История: решение о границе задачи больше не останавливает конвейер, если у развилки есть минимальный вариант](minimal-scope-default.md)
+- [История: что решено за человека, показывают ВОРОТА](gate-decision-transparency.md)
+- [История: Разбор и решение внутри окна проблемного этапа](human-decision-dialog.md)
+- [История: «Арбитр не сработал» на остановке human — так и задумано, но карточка об этом молчала](human-stall-arbitration.md)
+- [История: «Арбитр помер» = он отработал, а показать результат было негде](arbiter-result-visibility.md)
+- [История: «Встал на самом старте» на маршруте без плана = новый вопрос повторного триажа](planless-route-open-question.md)
+- [История: Вотчер арбитра молчал и когда брался за задачу, и когда отдавал её человеку](arbiter-watcher-notifications.md)
+- [История: Самая частая остановка маршрута была невидимой и неразбираемой](stall-visibility-and-analysis.md)

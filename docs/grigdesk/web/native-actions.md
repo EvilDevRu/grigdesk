@@ -1,6 +1,6 @@
 # Сохранение файлов и системная кнопка «Назад»
 
-`shared/saveFile.ts` выбирает способ сохранения по capability `save` оболочки. POST
+`web/src/shared/saveFile.ts` выбирает способ сохранения по capability `save` оболочки. POST
 `/__shell/save?name=&type=` передаёт Blob без прикладного журнала. В браузере временная ссылка
 освобождается в finally. Экспорт маршрутов, расшифровки, журнала, env посредника и ссылки
 `UiActionLink` с download используют общий helper.

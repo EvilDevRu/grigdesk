@@ -1,6 +1,6 @@
 # Плагины
 
-- [Официальные пакеты: скрытие общих предупреждений при сохранении проверок и подтверждения](official-install-notices.md)
+Читай при изменении API плагинов, установки пакетов и встроенных инструментов.
 
 SSH, просмотр документов, «Код», стенды и песочницы, презентации.
 
@@ -10,9 +10,7 @@ SSH, просмотр документов, «Код», стенды и песо
 
 - [Манифест v1: декларации, активация, иконки, галерея и несовместимость](manifest-v1.md)
 - [Чувствительные файлы предпросмотра: объявленный код и метаданные пакета](plugin-sensitive-files.md)
-
 - [Раздел «3D»: создание, деньги, библиотека, scoped viewer и восстановление](../guide/studio3d.md)
-
 - [Плагины: слоты, размещения и область](../guide/plugins.md)
 - [Плагин «Код»](../guide/code.md)
 - [Раздел «Песочницы»](../guide/sandboxes.md)
@@ -21,22 +19,16 @@ SSH, просмотр документов, «Код», стенды и песо
 
 ## Устройство
 
+- [Официальные пакеты: скрытие общих предупреждений при сохранении проверок и подтверждения](official-install-notices.md)
 - [Git в фоне: завершение после закрытия панели, общие тосты и свежий tracking](code-git-notifications.md)
-
 - [Read-only diff: исходные координаты, Worker, отложенный resize, настройки и навигация блоков](code-diff-view.md)
-
 - [Проверка Git-изменений: fingerprints, частичный индекс, scoped actions и ignore](code-review.md)
 - [Ресурсы фонового плагина во всплывашке исполнителя: JSON, переводы и отмена](server-provider-resources.md)
-
 - [Включение, обновление и откат без перезапуска: собственный router, onClose и поколения ESM](plugin-hot-runtime.md)
-
 - [Резервное обновление при следующем запуске: подтверждение, отмена и проверка до import](plugin-update-on-restart.md)
-
 - [Общий git-установщик драйверов: отдельная политика пакета, цель, журнал и HTTP](driver-installer-policy.md)
 - [Устанавливаемые драйверы БД: Git, манифест, SPI, recovery и ручной перезапуск](db-engine-install.md)
-
 - [Снос ручного стенда без журнала: явный выбор профиля и проверка владельца](manual-sandbox-removal.md)
-
 - [Пакет типов: переносимые декларации, подключение, совместимость и пример TS/Vue](plugin-types.md)
 - [Серверные сервисы core: проекты, песочницы, исходники и model-only вызовы](plugin-core-runtime.md)
 - [Сборка деклараций: файловые ссылки и видимая пометка служебных экспортов](plugin-types-declarations.md)
@@ -44,38 +36,24 @@ SSH, просмотр документов, «Код», стенды и песо
 - [Сервисы модуля v1: события, уведомления, новый чат, своя панель и запуск по спросу](plugin-module-services.md)
 - [Отзыв модуля после выключения в другом окне: каталог через общий SSE](plugin-module-catalog-sync.md)
 - [Открытая модульная панель: ввод и подписки после восстановления связи оболочки](plugin-panel-reconnect.md)
-
 - [Каталог сайта, происхождение и единый раздел плагинов](plugin-marketplace.md)
 - [Единый каталог v1: история версий и изображения detail](catalog-schema.md)
 - [Автоматический выбор сайта каталога и согласование снимков при отказе](catalog-failover.md)
 - [Локальный резерв каталога: последний хост, каналы и ограничения HTTP](catalog-loopback-fallback.md)
-
 - [Каталог и протокол Tripo: фасад, владельцы полей, цен, запросов и ответов](tripo-module-boundaries.md)
-
 - [Заказы 3D: резервы, скачивание, публикация файлов и пачки](studio3d-job-boundaries.md)
-
 - [Границы установки: публикация, runtime lease и общие значения DTO](plugin-install-module-boundaries.md)
-
 - [Установка из git: версии, проверка пакета, обновление, откат и восстановление](user-plugin-install.md)
 - [Удаление пользовательского пакета: несовместимые пакеты, identity recovery и сохранение данных](user-plugin-removal.md)
-
 - [Установка v1: проверка модуля, доверие, обновление и единый каталог](plugin-module-install.md)
-
 - [Installer boot: пути, VERSION, SYSTEM, recovery до import и close](plugin-install-boot.md)
-
 - [Runtime lease, drain потоков, user dataDir и строгий HTTP установки](plugin-install-runtime.md)
-
 - [Сервис подготовки: admission, owned reads, managed update и snapshot rollback](user-plugin-install-service.md)
-
 - [Замена папок: durable intent, identity resolver, cleanup и process-crash barriers](user-plugin-apply-recovery.md)
-
 - [Подготовка npm: реальный offline fixture, изоляция config и durable state](user-plugin-npm-state.md)
-
 - [Пакет до npm: безопасные пути, manifest, lock graph и digest результата](user-plugin-package-validation.md)
-
 - [Git-источник: точный тег, tree до checkout, закрытая конфигурация и NUL diff](user-plugin-git-source.md)
 - [Команды подготовки: durable ACK, группы потомков и предел рабочего каталога](plugin-command-supervisor.md)
-
 - [Плагины GrigDesk](plugin-architecture.md)
 - [Иконки плагинов: файл манифеста, резервный знак и единые размеры картинок и SVG](plugin-icons.md)
 - [Runtime пользовательского плагина: загрузка, авторизация и границы долгих заданий](user-plugin-runtime.md)
@@ -103,9 +81,7 @@ SSH, просмотр документов, «Код», стенды и песо
 ## Грабли
 
 - [Базы: сохранение дат, непрерывный срез результата, ошибки, отмена и повреждённый аудит](db-human-query-pitfalls.md)
-
 - [npm ci: ignore-scripts не закрывает запуск через project .npmrc](npm-install-config.md)
-
 - [Параллельные записи журнала песочницы теряли общий временный файл на rename](sandbox-journal-concurrency.md)
 - [«Сборка остановлена. locator.waitFor: Timeout…» у «Собрать ролик» = продолжение ждало каркас экрана, с которого предыдущая сцена ушла; страницы фичи не было в карте — теперь экраны находятся сами](showcase-scene-navigation.md)
 - [Адрес стенда: прямой порт текущего хоста](sandbox-host-resolution.md)
@@ -115,17 +91,10 @@ SSH, просмотр документов, «Код», стенды и песо
 - [Чтение git из GrigDesk: diff HEAD — не вся правда, а не-ASCII путь приезжает байтами](git-diff-and-path-encoding.md)
 - [«Код» замерзает на новом репозитории = тысячи файлов в индексе, все каталоги раскрыты](code-large-change-list.md)
 - [SSH-плагин закрывается на каждой границе](ssh-access-boundaries.md)
-
 - [Проверка изменений: ровные панели, компактные меню, просмотрено, замечания и выбор](code-review-ui.md)
-
 - [Плагин «Код» — подробный контракт](code-interface.md)
-
 - [Плагин «Докер» — подробный контракт](docker-contract.md)
-
 - [Плагины: слоты, размещения и область — подробный контракт](placements.md)
-
 - [Раздел «Песочницы» — подробный контракт](sandbox-operations.md)
-
 - [Раздел «Презентации» — подробный контракт](showcase-reference.md)
-
 - [Раздел «3D» — подробный контракт](studio3d-user-contract.md)

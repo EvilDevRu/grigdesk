@@ -32,5 +32,3 @@
 
 Проверки — `tests/server/factory-gate-cursor.test.js` (доставка многострочного замечания и
 отказ на переполнении), `tests/engine/unit/attempt-state.sh`.
-
-Источник до переноса: docs/grigdesk/gotchas.md § Замечание человека доезжало до агента огрызком: две независимые обрезки подряд

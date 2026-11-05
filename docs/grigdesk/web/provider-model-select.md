@@ -1,6 +1,6 @@
 # Общий выбор языковой модели
 
-`shared/ProviderModelSelect.vue` — предметная обёртка общего `UiSelect`, используемая в
+`web/src/shared/ProviderModelSelect.vue` — предметная обёртка общего `UiSelect`, используемая в
 чате, настройке арбитра и всех полях плагинов с `type: 'model'`. Встроенные поля таких
 плагинов выбирают модель для разбора встреч, сообщения коммита, оценки задач, входящих
 и сценария презентации. Пользовательский плагин с тем же типом поля получает тот же вид.
@@ -20,7 +20,7 @@ options передаются слотом: caller сохраняет собст�
 
 ## Значения и отбор
 
-`shared/providerModelSelect.ts` содержит общий допуск `isSelectableModelProvider`:
+`web/src/shared/providerModelSelect.ts` содержит общий допуск `isSelectableModelProvider`:
 `available === true` и `chatEnabled !== false`. Он применяется в чате, арбитре и
 параметрах плагинов до построения групп, поэтому скрыты также вкладки, «Все» и поиск.
 Краткий список берётся из `providers.visibleModels`, включая настройку `showAllModels`

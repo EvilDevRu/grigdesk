@@ -34,5 +34,3 @@
   Неизвестный ID отвергается через optional `normalizePermissionMode` адаптера до общего
   fallback. Меню и HTTP используют один effective mode текущего провайдера.
   [Полный контракт DeepSeek](deepseek-tool-permissions.md).
-
-Источник до переноса: docs/grigdesk/chat-agents.md § Режимы прав (--permission-mode)

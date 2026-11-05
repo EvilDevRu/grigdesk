@@ -50,5 +50,3 @@ degraded и не публикует частичный список — поте
 Удалённые `/api/telegram/inbox*`, событие `telegram-inbox`, store `telegram/inbox.json` и
 Telegram-owned triage model не поддерживаются: Inbox до этой архитектуры публично не
 выпускался, поэтому aliases, importer и dual-read отсутствуют.
-
-Источник до переноса: docs/grigdesk/inbox.md § HTTP и real-time

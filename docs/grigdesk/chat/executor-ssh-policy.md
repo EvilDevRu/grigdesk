@@ -17,5 +17,3 @@
   | DeepSeek | `command-hook` | server-owned PreToolUse hook в штатном DSH (DeepSeek CLI) |
   | Kimi contained | `network-sandbox` | egress разрешён только API Kimi |
   | Kimi host | `fail-closed` | при включённом запрете весь ход отклоняется до spawn |
-
-Источник до переноса: docs/grigdesk/chat-agents.md § Запрет прямого SSH — настройка каждого исполнителя, а не общая политика UI.

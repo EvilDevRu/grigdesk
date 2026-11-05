@@ -1,11 +1,11 @@
-# Code, Shelf, Terminal и SSH монтирует только постоянный shared/layout/ToolHost.vue
+# Code, Shelf, Terminal и SSH монтирует только постоянный web/src/shared/layout/ToolHost.vue
 
-- **Code, Shelf, Terminal и SSH монтирует только постоянный `shared/layout/ToolHost.vue`.**
+- **Code, Shelf, Terminal и SSH монтирует только постоянный `web/src/shared/layout/ToolHost.vue`.**
   Route-компоненты `/code`, `/shelf`, `/terminal` и `/ssh` — пустые адаптеры; `page`, `dock` и
   `hidden` меняют CSS одного render-site.
   Поэтому во вкладке бывает максимум один Monaco и по одному активному terminal/SSH WebSocket.
   Внутренние вкладки SSH переподключают один xterm, а сессии остаются на сервере. Компоненты загружаются
-  независимо через `shared/tools/registry.ts`, а `stores/dock.ts` держит динамические mounted-флаги,
+  независимо через `web/src/shared/tools/registry.ts`, а `stores/dock.ts` держит динамические mounted-флаги,
   runtime и exact-once intent-очереди. Правая рейка и overlay-док существуют с 900 px; на
   ширинах 601–899 px остаются боковая рейка и route-страницы; до 600 px используется
   [нижняя навигация телефона](phone-workspaces.md). Левая рейка имеет ширину 36 px,
@@ -116,8 +116,6 @@
   проект, исчезнувшая рабочая копия и пропавший файл называются в плашке ошибки поимённо.
   Переход 900→899 закрывает док и размонтирует непоказанные панели, чтобы возврат на широкий
   экран сам не создал PTY.
-
-Источник до переноса: docs/grigdesk/architecture.md § Code, Shelf, Terminal и SSH монтирует только постоянный shared/layout/ToolHost.vue.
 
 ## Передача в окно
 

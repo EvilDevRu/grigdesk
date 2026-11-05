@@ -43,5 +43,3 @@
   `autoDecision` (`lib/chat/autoApprove.ts`) по словарю ACP-действий `toolCall.kind`
   (`read`/`search`/`edit`/`execute`/`delete`); исполнитель обязан лишь назвать свой вызов
   одним из этих типов, а не заводить вторую политику рядом.
-
-Источник до переноса: docs/grigdesk/chat-agents.md § Диалог: агент задаёт вопрос (AskUserQuestion)

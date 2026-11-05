@@ -17,8 +17,6 @@ lifecycle покрывает [offline contract test](../../../tests/server/kimi-
 Исследовательский harness удалён: рабочий Kimi устанавливается как обычный системный CLI и
 находится через `PATH`/`GRIGDESK_KIMI_BIN`.
 
-Источник до переноса: docs/grigdesk/kimi-acp-spike.md § Зафиксированная совместимость
-
 ## Что доказано живым процессом
 
 Unauthenticated probe ранее подтвердил:
@@ -50,8 +48,6 @@ loopback-only `kimi web`, читает его типизированный read-
 завершает именно этот child. Так в UI попадают недельная квота, скользящее окно 5 часов и Extra
 Usage; model session/turn не создаётся, а OAuth credential file остаётся во владении Kimi CLI.
 
-Источник до переноса: docs/grigdesk/kimi-acp-spike.md § Что доказано живым процессом
-
 ## Результат source audit точного тега
 
 Проверен точный tag `@moonshot-ai/kimi-code@0.31.1`, а не плавающая ветка:
@@ -69,8 +65,6 @@ Usage; model session/turn не создаётся, а OAuth credential file ос
 
 Следствие реализовано в [contained runtime](kimi-runtime-security.md): host sources скрыты mount и
 чистым environment, а пустая `mcpServers` сама по себе границей безопасности не считается.
-
-Источник до переноса: docs/grigdesk/kimi-acp-spike.md § Результат source audit точного тега
 
 ## Mode/tool matrix MVP
 
@@ -97,8 +91,6 @@ think/fetch/edit/move и shell-команды вне деструктивног�
 credentials). ACP-режимы `auto`/`yolo` по-прежнему заблокированы; классификатор не снимает пункт
 «фактические формы tool calls» из квотного smoke ниже.
 
-Источник до переноса: docs/grigdesk/kimi-acp-spike.md § Mode/tool matrix MVP
-
 ## Что осталось проверить с расходом квоты
 
 - ~~первый authenticated prompt: ordering chunks/tool calls~~ — зафиксировано 2026-08-02; terminal
@@ -112,8 +104,6 @@ credentials). ACP-режимы `auto`/`yolo` по-прежнему заблок�
 Эти проверки требуют отдельного явного разрешения. До него Kimi можно выбрать в чате, но первый
 реальный ответ нельзя считать live-smoke-проверенным.
 
-Источник до переноса: docs/grigdesk/kimi-acp-spike.md § Что осталось проверить с расходом квоты
-
 ## Первичные источники
 
 - [Kimi ACP reference](https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-acp)
@@ -121,5 +111,3 @@ credentials). ACP-режимы `auto`/`yolo` по-прежнему заблок�
 - [Kimi Code 0.31.1](https://github.com/MoonshotAI/kimi-code/tree/%40moonshot-ai%2Fkimi-code%400.31.1)
 - [ACP server lifecycle](https://github.com/MoonshotAI/kimi-code/blob/%40moonshot-ai%2Fkimi-code%400.31.1/packages/acp-adapter/src/server.ts)
 - [Квоты Kimi Code и команда `/usage`](https://www.kimi.com/code/docs/en/kimi-code/membership.html)
-
-Источник до переноса: docs/grigdesk/kimi-acp-spike.md § Первичные источники

@@ -30,8 +30,6 @@ localhost/loopback и не хранится и не попадает в prefs, `
 сколько байт показано из скольких. Выключается настройкой плагина «Эхо команд агента
 в терминал».
 
-Источник до переноса: docs/grigdesk/ssh.md § Состояние и подключение
-
 ## HTTP, WebSocket и SSE
 
 - `GET/POST /api/ssh/connections`, `PUT/DELETE /api/ssh/connections/:id` — профили.
@@ -49,8 +47,6 @@ localhost/loopback и не хранится и не попадает в prefs, `
 SSE `ssh-sessions`, `ssh-permission` и `ssh-audit` — только инвалидации в общем потоке
 `/api/events`. Полный список ожиданий восстанавливает
 `GET /api/chat/waiting?include=ssh`; без opt-in SSH-записи не выдаются.
-
-Источник до переноса: docs/grigdesk/ssh.md § HTTP, WebSocket и SSE
 
 ## Агент и подтверждения
 
@@ -86,5 +82,3 @@ Auto-allow, remember и режим прав исполнителя её не о�
 
 Связанные границы описаны в [агентах чата](../chat/README.md),
 [архитектуре](../overview/README.md) и [граблях](README.md#грабли).
-
-Источник до переноса: docs/grigdesk/ssh.md § Агент и подтверждения

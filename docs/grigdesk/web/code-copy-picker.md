@@ -28,5 +28,5 @@
 не создаёт своего оформления поиска или отдельной шкалы размеров.
 
 Skin принадлежит `styles/components/fields.css`, содержимое вариантов готовит
-`buildCodeContextChoices` в `shared/codeTree.ts`. Проверки: `code-tree.test.js`,
+`buildCodeContextChoices` в `web/src/shared/codeTree.ts`. Проверки: `code-tree.test.js`,
 `code-view.component.test.js`, `ui-select-options.test.js`, `ui-select.component.test.js`.

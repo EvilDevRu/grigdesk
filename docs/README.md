@@ -21,8 +21,9 @@
 Каждая область — папка с README-оглавлением: контракты продукта, устройство и грабли по
 строке на документ. Документ читается по ссылке, когда задача касается области.
 Имена файлов — короткие английские `kebab-case.md`, без транслита; заголовки и текст — русские.
-Правила поддержки и результат сверки переноса — в
-[документе о переносе знаний](grigdesk/overview/documentation-migration.md).
+Правила актуальности, обезличивания и выборочного чтения — в
+[порядке поддержки документации](grigdesk/overview/documentation-maintenance.md).
+Происхождение корпуса описывает [история переноса знаний](grigdesk/overview/documentation-migration.md).
 
 - [Устройство GrigDesk](grigdesk/overview/README.md) — слои, модули сервера, принципы.
 - [Чат и исполнители](grigdesk/chat/README.md) — чат, модели, права, контекст, MCP.
@@ -30,9 +31,11 @@
 - [Задачи Б24](grigdesk/b24/README.md) — портал, статусы, доска и полка.
 - [Входящие](grigdesk/inbox/README.md) — общий автомат, Telegram и GitHub Issues.
 - [Telegram-пульт](grigdesk/telegram/README.md) — вотчер, действия, ассистент.
-- [Интерфейс](grigdesk/web/README.md) — раскладка, слои, всплывашки, PWA.
-- [Сервер и доступ](grigdesk/server/README.md) — юнит, авторизация, сеть; только loopback.
-- [Приложение на телефоне](grigdesk/mobile/README.md) — посредник, привязка, контракт v1, сборка APK.
+- [Интерфейс](grigdesk/web/README.md) — раскладка, слои, всплывашки и пакет приложения.
+- [Сервер и доступ](grigdesk/server/README.md) — запуск, авторизация, основной HTTP на loopback
+  и отдельно включаемый клиентский TLS-вход.
+- [Приложение на телефоне](grigdesk/mobile/README.md) — полный клиент, локальная труба,
+  привязка, сборка APK и совместимость с прежним v1.
 - [Видео и речь](grigdesk/media/README.md) — записи встреч, расшифровка, речь.
 - [Плагины](grigdesk/plugins/README.md) — SSH, документы, «Код», стенды, презентации.
 - [Тесты и проверка](grigdesk/testing/README.md) — happy-dom, Playwright, ловушки.
@@ -71,7 +74,8 @@
 Целостность относительных ссылок проверяет:
 
 ```bash
-node --test tests/docs/*.test.mjs tests/docs/*.test.mts
+NODE_TEST_MAX_RSS_MB=4096 bash tests/run-node-tests-safe.sh \
+  --test --test-concurrency=2 tests/docs/*.test.mjs tests/docs/*.test.mts
 ```
 
 Все безопасные проверки перечислены в [tests/README.md](../tests/README.md).

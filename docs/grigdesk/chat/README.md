@@ -1,41 +1,41 @@
 # Чат и исполнители
 
+Читай при изменении чата, истории, моделей, прав и жизненного цикла исполнителей.
+
+Чат, исполнители ИИ, каталог моделей, режимы прав, кольцо контекста и MCP.
+
+Читай перед правкой: `server/src/modules/chat`, `server/src/lib/chat`, `server/src/lib/executors`, `server/src/modules/providers`, `server/src/lib/kimi`, `server/src/lib/deepseek`, `server/src/lib/acp`, `web/src/views/chat`.
+
+## Контракты продукта
+
+- [Доступ агента к браузеру: owner, передача, отзыв, инструменты и отказы](browser-access.md)
+- [Вкладки без фиксированного лимита и закрытие после пяти минут простоя](browser-tab-limits.md)
+- [Пустой список: открытие своей вкладки и ограничения режима](browser-empty-list.md)
+- [Рабочая папка разговора: выбор проекта, пути и перенос памяти](../guide/chat-workdir.md)
+- [Контекст разговора и его индикатор](../guide/chat-context.md)
+- [DeepSeek Harness](../guide/deepseek.md)
+- [Прогноз лимитов](../guide/usage-forecast.md)
+
+## Устройство
+
 - [Скорость чата: меню с «Обычная», Fast → priority у Codex, Ultrafast и наследование](chat-speed.md)
-
 - [Индивидуальный и Team Plan GLM: поколения, общие часы и разные квоты](glm-plan-variants.md)
-
-- [Утренний расход GLM: повторная сверка пика, скидки и живого API, 03.11.2026](glm-morning-quota.md)
-
 - [Веб-инструменты GLM: разрешение поиска и чтения страниц, провайдеры и ревизия v4](glm-web-tools.md)
-
 - [Preflight допуска GLM: условный вопрос о smoke и предупреждение об отложенной установке](glm-admission-preflight.md)
-
 - [Длинный resume GLM: собственный предел RPC 32 МиБ и отмена чтения страницы истории](glm-resume-page-limit.md)
-
 - [Согласование ревизии политики GLM в producer и host](glm-producer-policy-sync.md)
-
-- [Повторная сверка пика, кредитных квот и коэффициентов GLM, 29.10.2026](glm-quota-recheck.md)
-
 - [Режимы Codex: admission, явный выбор чата, native-вопросы и предел проверки](codex-permission-modes.md)
-
 - [Асинхронные вопросы Codex: карточка, ответ через steer и отмена вместе с ходом](codex-async-questions.md)
-
 - [Границы подготовки внешнего CLI и reuse живого процесса](executor-preparation-boundaries.md)
 - [Срок прямого вопроса: callback не наследует таймер enqueue](direct-interaction-lifetime.md)
-
 - [Codex: ask-hook, повторный stdin и границы строгих ручных подтверждений](codex-hook-approval-limits.md)
-
 - [Auto-review Codex: запуск, native события, остановка запросов и граница проверки](codex-auto-review-runtime.md)
-
 - [Удаление CLI: снятие привязки, оставшиеся копии и обновление карточки](provider-uninstall-state.md)
 - [Наличие CLI: видимость топбара, заморозка лимитов и автоматический возврат](provider-cli-presence.md)
 - [Оставшаяся копия после удаления npm: версии и обычные действия](provider-native-after-uninstall.md)
-
 - [Копия официального установщика: своя группа при 0775, причины отказов, удаление и восстановление](provider-native-lifecycle.md)
 - [Окно обслуживания: немедленная проверка подготовки, подтверждение и отказ](provider-lifecycle-preparation.md)
-
 - [Две формы Bash: ссылки на один CLI не блокируют переустановку](provider-shell-symlink-identity.md)
-
 - [Опись внешних CLI, успешное время замера и границы прогноза](external-cli-diagnostics.md)
 - [Проверка лимитов Kimi сохраняет путь к пользовательскому Node.js](kimi-usage-node-path.md)
 - [Окружение запуска и источники лимитов всех встроенных исполнителей](provider-runtime-environments.md)
@@ -44,7 +44,6 @@
 - [Переустановка сохраняет старый prefix вместо текущего каталога пользовательского npm](provider-reinstall-prefix.md)
 - [Установка после удаления: отсутствующая привязка и оставшаяся npm-копия](provider-install-stale-binding.md)
 - [Проверка installer-хуков: точная версия или прежние байты](provider-install-hooks-review-gate.md)
-
 - [Установка CLI: краткое подтверждение, подробности, token и восстановление](provider-cli-installation.md)
 - [Внешний Node/npm и пользовательский prefix вместо папки данных](provider-install-npm.md)
 - [Проверка и подключение npm-копии, перенос прежней bin-ссылки](provider-install-npm-binding.md)
@@ -56,56 +55,25 @@
 - [Постоянная высота окна установки, прокрутка деталей и доступность действий](provider-install-height.md)
 - [Повтор установки и обновления CLI при плохой сети: бюджет, паузы и остановка](provider-install-network-retry.md)
 - [Кнопка «Повторить» после отказа установки или обновления CLI](provider-install-manual-retry.md)
-
 - [Самостоятельная поставка DeepSeek: установка, память и границы](deepseek-binary.md)
-
 - [Первый переход на автономный Harness: home и CAS без потери сессии](deepseek-binary-cutover.md)
-
 - [GLM parity: те же сценарии на ELF, policy/MCP и исходы остановки](glm-binary-parity.md)
-
 - [Offline/live проверка GLM: явный ELF/cache, оба режима, временный допуск и --admit](glm-smoke-binary.md)
 - [Отчёт smoke GLM: полный HTTP-отказ без секретов и остановка после первого неуспеха](glm-smoke-http-errors.md)
-
 - [Память GLM: A→B→A, несовместимый журнал и закрепление ELF до prompt](glm-binary-memory.md)
-
 - [GLM в бинарной поставке: metadata, допуск выпуска и проверка plugin](glm-binary-admission.md)
-
 - [Память DeepSeek: стабильный home, обновление/откат и несовместимый журнал](deepseek-binary-memory.md)
-
 - [Подготовленный runtime: внутренний handle адаптера и native context](prepared-executor-runtime.md)
-
 - [Управляемая поставка: чистые distribution/bin и запрет обновления через карточку](provider-managed-delivery.md)
-
 - [Сборка автономного DeepSeek и явная подготовка pinned Node](deepseek-binary-build.md)
 - [Kernel fingerprints прогретого кэша DeepSeek](deepseek-cache-fingerprints.md)
 - [Физические codec журналов и worker миграции DeepSeek](deepseek-journal-codecs.md)
-
 - [Целостность generation и проверка ABI выбранного Node](deepseek-runtime-integrity.md)
 - [Проверяемый ZIP поставки, индекс файлов и обязательные лицензии](deepseek-payload.md)
 - [Приватная атомарная распаковка и восстановление после SIGKILL](deepseek-extraction-cache.md)
 - [Освобождение directory lock во время уборки reclaim](deepseek-cache-lock-release.md)
-
-Чат, исполнители ИИ, каталог моделей, режимы прав, кольцо контекста и MCP.
-
-Читай перед правкой: `server/src/modules/chat`, `server/src/lib/chat`, `server/src/lib/executors`, `server/src/modules/providers`, `server/src/lib/kimi`, `server/src/lib/deepseek`, `server/src/lib/acp`, `web/src/views/chat`.
-
-## Контракты продукта
-
-- [Доступ агента к браузеру: owner, передача, отзыв, инструменты и отказы](browser-access.md)
-- [Вкладки без фиксированного лимита и закрытие после пяти минут простоя](browser-tab-limits.md)
-- [Пустой список: открытие своей вкладки и ограничения режима](browser-empty-list.md)
-
-- [Рабочая папка разговора: выбор проекта, пути и перенос памяти](../guide/chat-workdir.md)
-- [Контекст разговора и его индикатор](../guide/chat-context.md)
-- [DeepSeek Harness](../guide/deepseek.md)
-- [Прогноз лимитов](../guide/usage-forecast.md)
-
-## Устройство
-
 - [Текстовый вызов DeepSeek и GLM: изоляция, отмена и отсутствие инструментов](dsh-model-only.md)
-
 - [Области дополнительных настроек: чаты, конвейеры и непроверенная ACP-схема](native-settings-consumers.md)
-
 - [Доступность моделей: фильтр чата и выбор в настройках](unavailable-executor-model-selection.md)
 
 ### Kimi
@@ -127,12 +95,10 @@
 ### Чат
 
 - [Типы плагинов при отдельном импорте модуля чата](module-plugin-types.md)
-
-- [Цельный лёгкий список и адресная загрузка истории: принятое решение №93038](lazy-history.md)
+- [Цельный лёгкий список и адресная загрузка истории](lazy-history.md)
 - [Подготовка порциями, персистные шапки и кэш текстов поиска](catalog-cache.md)
 - [Отметка прочтения при адресной загрузке ленты](detail-read-metadata-race.md)
 - [Прочтение между устройствами: stale PUT, лёгкие шапки и поздние ответы](unread-sync.md)
-
 - [Загрузка списка: состояния, причины отказа, повторы и защита до первого успеха](store-loading-recovery.md)
 - [Экран загрузки: единый статус, силуэты списка и заглушка области разговора](loading-screen.md)
 - [Загрузка истории: уведомление под шапкой, причина отказа и компактный повтор](message-load-notice.md)
@@ -170,7 +136,7 @@
 - [Кольцо контекста, prompt cache и сжатие](context-cache-and-compaction.md)
 - [Компактный companion удалён; остался server-owned companion-чат](server-owned-companion.md)
 - [Лента хода агента (как в чате VS Code)](agent-turn-feed.md)
-- [Действия субагента под своим вызовом, включая поздние реплики (№93016)](subagent-step-placement.md)
+- [Действия субагента под своим вызовом, включая поздние реплики](subagent-step-placement.md)
 - [Картинка в строке Read и генерации Codex: миниатюра через маршрут картинок чата вместо «[изображение]» и base64](step-images.md)
 - [Картинка результата рабочего инструмента Codex: снимок браузера без base64 в ленте](tool-result-images.md)
 - [Вложения в миниатюрах: общий каталог и отличие отказа окна от отказа агента](attachment-step-images.md)
@@ -209,21 +175,18 @@
 - [Выбор модели: вкладки исполнителей, иконки, общий поиск, отключение и адаптив](model-picker.md)
 - [Компактное меню моделей на desktop: ряд иконок, поле поиска и тонкий фокус](model-picker-desktop.md)
 - [Выбор модели: скрытие недоступных вкладок, моделей и результатов поиска](model-picker-availability.md)
-
 - [Единые подписи окон лимитов: поповер, прогноз и строка чата на RU/EN](usage-window-labels.md)
 - [Видимость доплаты Kimi/Codex, пустые ответы и слияние снимков](extra-usage-visibility.md)
 - [Два формата квот Kimi: окна, календарный месяц, разбивка кода и кошелёк](kimi-quota-format.md)
-
 - [Gemini: отдельные точки подключения чата и Factory, offline-защита и внешние контракты](gemini-integration-boundaries.md)
-
 - [GigaCode CLI: документированные возможности и граница проверки](gigacode-cli-contract.md)
 - [Qwen Code: две точки подключения и проверенные внешние источники](qwen-integration-boundaries.md)
 - [Исполнитель GLM (Z.ai): допуск режима, живая проверка и ограничения](glm-executor.md)
-- [Coding Plan: успешный smoke нового ключа, точный допуск и история отказа 1113](glm-coding-plan-smoke.md)
+- [Coding Plan: полный smoke выбранного ELF и условия допуска](glm-coding-plan-smoke.md)
 - [Ошибки модели GLM: код 1113, понятная причина и безопасное сообщение в чате](glm-model-errors.md)
 - [Типы ключей GLM: почему активный Pro совместим с ошибкой 1113 и как проверить причину](glm-key-types.md)
-- [Диагностика GLM: оплата SUCCESS, активный Pro и отказ 1113 на двух модельных маршрутах](glm-entitlement-diagnostics.md)
-- [Дополнительный контроль GLM без ЛК: нулевой API-баланс, каталог и таймаут бесплатной модели](glm-api-control.md)
+- [Диагностика GLM: подписка, ключ и отказ модельного шлюза](glm-entitlement-diagnostics.md)
+- [GLM: что доказывают API-баланс, каталог и ответ модели](glm-api-control.md)
 - [GLM после перезапуска: видимость при закрытом допуске и кэш адаптера](glm-setup-visibility.md)
 - [Картинки GLM: read_image в политике v3, чтение вложений и image input модели](glm-image-input.md)
 - [Контракт доступа и допуска GLM: два режима, отдельные ключи, отпечаток и setup-only карточка](glm-access-contract.md)
@@ -236,7 +199,7 @@
 - [Счёт и лимиты GLM: баланс Обычного API и окна Coding Plan из адресов кабинета Z.ai](glm-usage.md)
 - [Кредитные окна GLM: поддержка CREDIT_LIMIT, живые поля и отсутствие данных Extra Usage](glm-credit-windows.md)
 - [Тариф Coding Plan GLM: местные окна, оба поколения расходов и сторож документации Z.ai](glm-tariff.md)
-- [Кеш Z.ai и цена хода GLM: 97–98% входа из кеша, цену делают шаги × контекст, как сверить по журналу](glm-cache-cost.md)
+- [Кеш GLM: категории токенов, стоимость хода и границы сверки](glm-cache-cost.md)
 - [Native gate и foreground-делегирование GLM](glm-native-gate.md) — proof до эффекта, точная связь ребёнка, журнал resume и remote ownership.
 - [Политика инструментов GLM: native gate чата и прежний hook Factory/ACP](glm-tool-policy.md)
 - [Навыки GLM: каталог пользователя и разрешённый загрузчик skill типом read](glm-skill-policy.md)
@@ -266,7 +229,7 @@
 - [Собранный DeepSeek: чат, поток, настройки и файловые границы](deepseek-compiled-chat-parity.md)
 - [Обновление upstream DeepSeek и совместимый откат журналов](deepseek-upstream-update-rollback.md)
 - [Границы сборки каталога и переключения модели](model-selection-boundaries.md)
-- [Сохранение модели, эффорта и режима при переключении (№93021)](model-switch-revert.md)
+- [Сохранение модели, эффорта и режима при переключении](model-switch-revert.md)
 - [Стабильный владелец runtime: общий raw-ключ для actions Pinia devtools](store-runtime-identity.md)
 - [Реестр моделей: устаревший отдаётся сразу, пересборка одна и в фоне](models-registry-cache.md)
 - [Отправка при холодном каталоге: ожидание готовой модели без ложного отказа](model-registry-startup.md)
@@ -293,7 +256,7 @@
 - [Эффорты обнаруживаются динамически](reasoning-effort-discovery.md)
 - [Codex: глубина xhigh и max, автоматическое делегирование ultra](codex-effort-modes.md)
 - [Краткие подсказки усилия каждого исполнителя в чате и настройках](effort-hints.md)
-- [Пустой и выбранный уровни эффорта: оформление зависит только от текущего выбора (№93021)](effort-slider-states.md)
+- [Пустой и выбранный уровни эффорта: оформление зависит только от текущего выбора](effort-slider-states.md)
 - [Claude: ступень ultracode запрашивает workflow; discovery, модельный допуск и ограничения](claude-ultracode.md)
 - [MCP-серверы исполнителя — блок в той же плашке](mcp-server-controls.md)
 - [Codex: native Auto-review, ручные requests и intentional never служебных запусков](codex-mcp-approvals.md)
@@ -315,9 +278,7 @@
 ## Грабли
 
 - [Проверка авторизации Codex игнорирует CODEX_HOME и может скрыть доступный CLI](codex-auth-home.md)
-
 - [Аудит токенов и остатков: пропущенные события Kimi и квот, округление, повторный учёт Claude и потеря итогового контекста DSH](usage-metrics-audit.md)
-
 - [Неудачный запуск Claude: необработанная ошибка stdin может завершить сервер](claude-startup-pipe-error.md)
 - [Claude: границы завершения реплик, исчезновение «Пишет…» и запись полного текста](claude-assistant-block-completion.md)
 - [«Пишет…» залипает у Codex и других = черновик реплики никто не закрывал](assistant-draft-abandon.md)
@@ -328,7 +289,6 @@
 - [GLM и DeepSeek: «запр.» в строке состояния и крошечный счётчик токенов = ход DSH не называл модель и считал последний запрос](dsh-run-model-and-tokens.md)
 - [Снятие адаптера: сохранённый каталог, сброс памяти и барьер записи истории](executor-removal-boundaries.md)
 - [Сообщение во время работы: прежняя очередь и границы уточнения](in-turn-message-gap.md)
-- [Ответ в pending ещё не входит в историю следующего хода](queued-turn-history-gap.md)
 - [Локальная картинка в ответе: рабочая область, папка артефактов, маршрут и fallback](assistant-image-links.md)
 - [«Связь теряется при отправках в несколько чатов» = POST держал соединение весь ход](concurrent-send-transport.md)
 - [«Агент повис» на длинном ходе = лимит ленты глушил не хранение, а трансляцию](turn-feed-broadcast-limit.md)
@@ -338,7 +298,6 @@
 - [«Переписка потёрлась» = PUT истории упёрся в лимит тела, и клиент ретраил молча](history-request-size-limit.md)
 - [«На телефоне нет чатов» = вся история одним GET не укладывается в таймаут](history-initial-load-timeout.md)
 - [«Чат уходит на сервер целиком при каждом сохранении» = отпечаток отправленного включал поле ответа, которого нет в снимке](chat-save-fingerprint.md)
-- [Ссылки на сохранённые шаги: ограничения старого PUT, ACK, отпечатка и снимка отправки](step-reuse-constraints.md)
 - [«Я послежу и сообщу» = обещание, которое некому выполнить](agent-lifetime-and-promises.md)
 - [«Codex сжал контекст хода» через четверть часа после ручного сжатия и досье вместо ответа = выжимка не закрывала живую сессию](compaction-session-reset.md)
 - [«DeepSeek не пишет в соседний каталог» = граница записи — папка разговора, доверенный каталог её не расширяет](deepseek-write-boundary.md)
@@ -356,16 +315,15 @@
 - [MCP «не удалось получить» и мёртвые кнопки карточки = опрос перезапускал сам себя](mcp-polling-restart-loop.md)
 - [MCP-серверы: «отвалился» = не поднялся на этой сессии, переподключать нечего](mcp-session-startup.md)
 - [UI-context — данные, а не полномочия; identity companion-чата принадлежит серверу](ui-context-trust-boundary.md)
-
-- [История без открытого окна и mobileId](mobile-history.md)
 - [Подтверждение pending после записи истории и ответа сервера](pending-ack.md)
-
 - [Контекст разговора и его индикатор — подробный контракт](context-measurements.md)
-
 - [Рабочая папка разговора — подробный контракт](workdir-reference.md)
-
 - [DeepSeek Harness — подробный контракт](deepseek-reference.md)
-
 - [Прогноз лимитов — подробный контракт](usage-forecast-reference.md)
-
 - [Инструмент справки: общий registry, версии и порционное чтение](help-tool.md)
+
+## История решений
+
+- [История: Ответ в pending ещё не входит в историю следующего хода](queued-turn-history-gap.md)
+- [История: Ссылки на сохранённые шаги: ограничения старого PUT, ACK, отпечатка и снимка отправки](step-reuse-constraints.md)
+- [История: История без открытого окна и mobileId](mobile-history.md)

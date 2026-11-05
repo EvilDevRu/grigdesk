@@ -37,5 +37,3 @@ tail -5 ~/.factory/state/logs/t<TASK>.stages.log
 ```
 
 Проверки — `tests/server/factory-graph-linearity.test.js`.
-
-Источник до переноса: docs/grigdesk/gotchas.md § «Конвейер встал» при живом этапе: правило линейности гасило сам фронт

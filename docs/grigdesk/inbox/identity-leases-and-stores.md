@@ -58,5 +58,3 @@ github/
 Files с credentials имеют режим `0600`; они не лежат в prefs и не попадают в browser DTO.
 Runtime открывает только account-aware paths и актуальные owner-bound schemas. Flat stores,
 старый credential и старые schemas он не импортирует, не читает и не удаляет.
-
-Источник до переноса: docs/grigdesk/inbox.md § Identity, leases и stores

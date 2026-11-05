@@ -1,5 +1,7 @@
 # Видео и речь
 
+Читай при изменении встреч, расшифровки, диктовки, голосов и установки речевых компонентов.
+
 Разбор записей встреч, расшифровка, диктовка и синтез речи.
 
 Читай перед правкой: `server/src/lib/media`, `server/src/modules/media`, `server/src/lib/speech`.
@@ -7,9 +9,7 @@
 ## Устройство
 
 - [Ссылки установки системных зависимостей речи](speech-dependency-links.md)
-
 - [Установка, обновление и удаление окружения Whisper через настройки](speech-installation.md)
-
 - [Встреча из нескольких файлов](multi-file-meetings.md)
 - [Кадр записи: превью до постановки и вложение к задаче](frame-preview-and-attachments.md)
 - [Кому и в какой проект](task-assignment.md)
@@ -29,11 +29,8 @@
 ## Грабли
 
 - [Файловая диктовка: faster-whisper 1.2.1 несовместим с PyAV 19](whisper-pyav-compatibility.md)
-
 - [Python без ensurepip: системный пакет venv и понятная ошибка установки](speech-missing-venv.md)
-
 - [Штатный Python: имена python3 и ссылки родительских каталогов](speech-managed-paths.md)
-
 - [Медиа: runtime отдельно от исходников](runtime-storage-boundary.md)
 - [Расшифровка видео сплошным потоком = у неё не было стилевой подсказки](transcription-style-prompt.md)
 - [Browser speech: onend не означает «включить снова»](browser-speech-end-handling.md)
