@@ -98,6 +98,16 @@ function moduleFile(target: string): string | undefined {
     .find((file) => existsSync(file) && statSync(file).isFile());
 }
 
+/**
+ * Query и fragment задают режим импорта Vite, а не имя исходного файла.
+ * Убираем их до resolve, чтобы слеши в параметрах не меняли проверяемую границу Node.
+ */
+function webDependencyPath(file: string, spec: string): string {
+  const path = spec.split(/[?#]/u, 1)[0] ?? '';
+
+  return spec.startsWith('.') ? resolve(dirname(file), path) : resolve(root, path);
+}
+
 function areaOf(file: string): string {
   const parts = relative(shared, file).split('/');
 
@@ -209,7 +219,7 @@ test('web: прямые и транзитивные зависимости не 
     visited.add(file);
 
     for (const spec of references(file)) {
-      const target = spec.startsWith('.') ? resolve(dirname(file), spec) : resolve(root, spec);
+      const target = webDependencyPath(file, spec);
 
       if (isInside(join(shared, 'node'), target)) {
         errors.push(`${relative(root, file)} → ${spec}`);
@@ -232,7 +242,7 @@ test('web: относительные ссылки на оба shared разре
 
   for (const file of sourceFiles(join(root, 'web/src'))) {
     for (const spec of references(file).filter((value) => value.startsWith('.'))) {
-      const target = resolve(dirname(file), spec);
+      const target = webDependencyPath(file, spec);
 
       if ((isInside(shared, target) || isInside(webShared, target)) && !moduleFile(target)) {
         errors.push(`${relative(root, file)} → ${spec}`);
@@ -241,6 +251,35 @@ test('web: относительные ссылки на оба shared разре
   }
 
   assert.deepEqual(errors, []);
+});
+
+test('web: суффиксы Vite разрешаются в исходный файл, отсутствующие файлы сохраняют отказ', () => {
+  const file = join(root, 'web/src/shared/speechStream.ts');
+  const expected = join(root, 'web/src/shared/speechPcmWorklet.ts');
+
+  for (const suffix of ['', '?worker&url', '?url', '#processor', '?url=/../missing.ts#processor']) {
+    const target = webDependencyPath(file, `./speechPcmWorklet.ts${suffix}`);
+
+    assert.equal(target, expected);
+    assert.equal(moduleFile(target), expected);
+  }
+
+  const missing = webDependencyPath(file, './missing-worklet-fixture.ts?worker&url#processor');
+
+  assert.equal(moduleFile(missing), undefined);
+});
+
+test('web: query не скрывает Node-зависимость и не превращает обычный импорт в Node-путь', () => {
+  const file = join(root, 'web/src/shared/speechStream.ts');
+  const nodeDirectory = join(shared, 'node');
+  const forbidden = webDependencyPath(file, '../../../shared/node/files.ts?url=/../../hidden.ts');
+  const allowed = webDependencyPath(file, './speechPcmWorklet.ts?url=/../../../../shared/node/files.ts');
+
+  assert.equal(forbidden, join(nodeDirectory, 'files.ts'));
+  assert.equal(isInside(nodeDirectory, forbidden), true);
+  assert.equal(moduleFile(forbidden), forbidden);
+  assert.equal(allowed, join(root, 'web/src/shared/speechPcmWorklet.ts'));
+  assert.equal(isInside(nodeDirectory, allowed), false);
 });
 
 test('сторож видит import, export, динамический import, require, тип и URL', () => {
