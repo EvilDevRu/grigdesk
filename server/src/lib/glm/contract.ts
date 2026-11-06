@@ -55,7 +55,8 @@ export const GLM_NATIVE_TOOLS: readonly string[] = Object.freeze([
 ]);
 
 // Ошибка модели приходит в turn/end как reason.error.code; HTTP-статуса нет.
-// Остальные коды (RATE_LIMIT, TRANSPORT, SERVER и др.) — сбой доставки хода.
+// Бизнес-коды квоты из тела Z.ai уточняются в modelErrors даже при RATE_LIMIT.
+// Остальные переходные причины — сбой доставки хода.
 export const GLM_MODEL_ERROR_CODES: Readonly<Record<string, string>> = Object.freeze({
   AUTH: 'glm_auth_failed',
   QUOTA: 'glm_quota_exhausted',

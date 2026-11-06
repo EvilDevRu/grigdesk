@@ -9,6 +9,7 @@ import { startGlmLoopback } from '../helpers/glmLoopback.mts';
 import { GLM_RESEARCH_KEY, writeGlmResearchOverlay } from '../helpers/glmResearchOverlay.mts';
 import { glmResearchEnv, runGlmTurn, startGlmAcp, startGlmWeb } from '../helpers/glmDriver.mts';
 import { openDeepSeekStream } from '../../server/src/lib/deepseek/serverEvents.ts';
+import { classifyGlmModelError } from '../../server/src/lib/glm/modelErrors.ts';
 import { artifactsPath } from '../../shared/runtime/dataHome.ts';
 
 const ARTIFACTS = path.join(artifactsPath({ env: process.env, home: os.homedir() }), 'glm/G2/fixtures');
@@ -680,6 +681,30 @@ test('настоящий ответ 429 и обрыв потока дают ро
       code: 'TRANSPORT',
     },
   });
+});
+
+test('настоящий Harness: недельный лимит Z.ai 1310 распознаётся поверх RATE_LIMIT', async (t) => {
+  const f = await fixture(t, { scenarios: [{
+    kind: 'http-error',
+    status: 429,
+    code: '1310',
+    message: 'Weekly/Monthly Limit Exhausted. Your limit will reset at 2030-01-01 00:00:00',
+  }] });
+  const server = await f.web();
+  const turn = await runGlmTurn(server, {
+    cwd: f.cwd,
+    message: 'quota',
+    model: 'glm-5.3',
+  });
+  const failure = turn.turnEnd.data.reason.error;
+  const error = classifyGlmModelError(failure);
+
+  t.diagnostic(JSON.stringify({ harnessCode: failure.code, publicCode: error?.code }));
+  assert.equal(failure.code, 'RATE_LIMIT');
+  assert.equal(error?.code, 'glm_quota_exhausted');
+  assert.match(error.message, /код 1310/u);
+  assert.match(error.message, /исчерпан лимит использования/iu);
+  assert.equal(f.mock.requests.length, 1);
 });
 
 test('настоящие имена MCP a__b+c и a+b__c и длинное имя', async (t) => {
