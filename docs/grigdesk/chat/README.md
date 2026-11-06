@@ -150,7 +150,7 @@
 - [Строка активного хода: правый край, точки и отдельный вид сжатия](active-run-status.md)
 - [Одна базовая линия для индикатора и текстовых сведений](run-status-baseline.md)
 - [Модульное подключение нового ИИ](executor-integration.md)
-- [Рабочие инструменты GrigDesk](work-tools.md)
+- [Рабочие инструменты GrigDesk: доверенная задача и выбранный проект свободного чата](work-tools.md)
 - [Режимы прав (--permission-mode)](permission-modes.md)
 - [DeepSeek: три режима, native gate до эффекта, подтверждения и совместимость](deepseek-tool-permissions.md)
 - [Штатная песочница Harness: расширение доступа и отсутствие оценки опасности команд](deepseek-native-sandbox.md)

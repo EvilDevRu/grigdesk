@@ -2,9 +2,17 @@
 
 `supervised_ssh` — первый рабочий tool самого GrigDesk. Он доставляется Claude через MCP,
 Codex как app-server dynamic tool, Kimi и DeepSeek через ACP/MCP, но
-descriptor и dispatcher едины. Scope строится только из trusted attempt ledger и
-authoritative project membership; UI-context, body и история его выбрать не могут.
-Свободный чат получает null scope.
+descriptor и dispatcher едины. У задачи scope строится из trusted attempt ledger:
+task id → доверенный attempt.profile → существующий project. У свободного чата используется
+явно выбранный проект (`workdir.kind: 'project'`) из сохранённой сервером записи разговора.
+В обоих случаях проект повторно проверяется по действующему каталогу регистраций.
+
+Недоверенная/legacy-задача не получает fallback к выбранному проекту. Свободный чат с
+обычным путём или выбором GrigDesk получает null scope, даже если путь совпадает с
+репозиторием проекта. Удалённая регистрация не даёт надзорного доступа через сохранённые
+исторические корни. UI-context, текст сообщений, поля запроса хода и аргументы model tool
+не выбирают scope. Смена проекта входит в `workToolScopeKey`, поэтому следующая сессия
+исполнителя не переиспользует инструменты прежнего проекта.
 
 Агент видит у доступной живой сессии только `label`/`role`. Любой `exec`, независимо от
 permission mode/auto/remember, создаёт `origin:'ssh'` в общей `pendingPerms`; ответ идёт
@@ -12,7 +20,7 @@ permission mode/auto/remember, создаёт `origin:'ssh'` в общей `pend
 в tool отсутствует. Lifecycle, DTO и остаточный риск недоверенного вывода описаны в
 [ssh.md](../plugins/ssh.md).
 
-`supervised_db` использует тот же server-owned descriptor/dispatcher во всех исполнителях;
+`supervised_db` использует тот же проектный scope и server-owned descriptor/dispatcher во всех исполнителях;
 его рубеж решений описан в [дополнительных контрактах](../reference/runtime-contracts.md).
 Прежний третий tool, `knowledge_search`, снят вместе с базой знаний — его устройство сохранено
 в [истории базы](../overview/knowledge-base-history.md).

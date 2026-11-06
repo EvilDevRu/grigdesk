@@ -683,11 +683,14 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
   }
 
   /**
-   * Рабочие инструменты сохраняют прежний фильтр доступного каталога.
-   * Исторический resolver отдельно получает доверенный ID удалённого проекта.
+   * Свободный чат использует проект из сохранённого сервером выбора рабочей области.
+   * Задача сохраняет trusted scope без fallback; удалённые проекты не получают инструменты.
    */
-  async function trustedWorkProject(taskId: string | null | undefined) {
-    const id = await trustedWorkspaceProject(taskId);
+  async function trustedWorkProject(taskId: string | null | undefined, storedWorkdir?: unknown) {
+    const workdir = normalizeChatWorkdir(storedWorkdir);
+    const id = taskId
+      ? await trustedWorkspaceProject(taskId)
+      : workdir?.kind === 'project' ? workdir.projectId : null;
 
     return id && (await listProjects(config, prefs)).includes(id) ? id : null;
   }
@@ -3340,7 +3343,7 @@ async function chatModule(instance: FastifyInstance, opts: ChatModuleOptions) {
       });
     }
 
-    const workProjectId = await trustedWorkProject(id);
+    const workProjectId = await trustedWorkProject(id, target.record?.workdir);
     const browserOwner = chatKey && target.record ? await chatBrowserOwners.owner(chatKey) : null;
     const browserIntent = Boolean(browserOwner && opts.browser?.routing.mode() === 'grigdesk');
     const previousWorkPolicy = opts.help
