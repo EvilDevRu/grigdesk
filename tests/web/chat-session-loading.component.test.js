@@ -432,3 +432,61 @@ test('PAGE-UI-GAP: новые сообщения ждут явного пере�
   assert.deepEqual(state.chat.session(state.id).messages, original.messages.slice(141));
   assert.equal(state.chat.hasNewerMessages(state.id), false);
 });
+
+test('PAGE-UI-OLDER-WITH-NEWER: новый хвост оставляет доступной старую историю', async (t) => {
+  const original = sampleChat('older-with-pending-tail', {
+    messages: Array.from({ length: 101 }, (_, index) => ({
+      role: 'assistant',
+      text: `Строка ${index}`,
+      pid: `pending-tail-${index}`,
+    })),
+  });
+  const state = await fixture(t, { chats: [original] });
+
+  await state.chat.ensureChatMessages(state.id);
+  state.chat.setChatViewport(state.id, false);
+  original.messages.push({
+    role: 'assistant',
+    text: 'Поздний ответ',
+    pid: 'pending-tail-new',
+  });
+  await state.chat._pullChat(state.id, false);
+  await drain();
+
+  const older = state.wrapper.findAll('button')
+    .find((button) => button.text() === 'Показать более ранние сообщения');
+
+  assert.ok(older);
+  assert.equal(state.chat.hasNewerMessages(state.id), true);
+  await older.trigger('click');
+  await drain();
+  assert.equal(state.chat.session(state.id).messages.length, 80);
+  assert.equal(state.chat.hasNewerMessages(state.id), true);
+});
+
+test('PAGE-UI-SEND-FAILURE: отказ истории показывает причину и восстанавливает черновик', async (t) => {
+  for (const failure of ['declined', 'rejected']) {
+    await t.test(failure, async (t) => {
+      const state = await fixture(t, { chats: [sampleChat(`send-failure-${failure}`)] });
+
+      await state.chat.ensureChatMessages(state.id);
+      t.mock.method(state.chat, 'send', async () => {
+        if (failure === 'rejected') {
+          throw new Error('Не удалось перечитать историю');
+        }
+
+        return false;
+      });
+      await state.wrapper.get('textarea').setValue('Неотправленный текст');
+      await state.wrapper.get('[data-context="chat-send"]').trigger('click');
+      await drain();
+      assert.equal(state.wrapper.get('textarea').element.value, 'Неотправленный текст');
+      assert.equal(state.chat.session(state.id).draft, 'Неотправленный текст');
+      assert.ok(state.wrapper.get('.in-err').text());
+
+      if (failure === 'rejected') {
+        assert.equal(state.wrapper.get('.in-err').text(), 'Не удалось перечитать историю');
+      }
+    });
+  }
+});

@@ -383,7 +383,7 @@
           <UiButton v-if="historyPage?.newer" @click="showLatestHistory">
             {{ t('core.chatHistoryLatest') }}
           </UiButton>
-          <UiButton v-else-if="sess?.historyWindow?.hasOlder" :disabled="historyPage?.loading || prepending"
+          <UiButton v-if="sess?.historyWindow?.hasOlder" :disabled="historyPage?.loading || prepending"
                     @click="loadOlderHistory">
             {{ t(historyPage?.loading ? 'core.chatHistoryOlderLoading' : historyPage?.error
               ? 'core.chatPageRetry' : 'core.chatHistoryOlder') }}
@@ -2183,17 +2183,17 @@ async function submit() {
     return;
   }
 
-  const t = input.value.trim();
+  const text = input.value.trim();
   const atts = pending.value.slice();
 
-  if ((!t && !atts.length) || !sess.value || frozen.value || modeUnavailable.value) {
+  if ((!text && !atts.length) || !sess.value || frozen.value || modeUnavailable.value) {
     return;
   }
 
   // Точное имя пункта выполняем через его dispatch. `/`-команды провайдера идут
   // служебным ходом, навыки — обычным prompt; run:'none' остаётся обычным сообщением.
   // Сверка регистронезависимая — как в меню: имя навыка приходит от исполнителя.
-  const exact = allCommands.value.find((c) => c.cmd.toLowerCase() === t.toLowerCase() && c.run !== 'none');
+  const exact = allCommands.value.find((c) => c.cmd.toLowerCase() === text.toLowerCase() && c.run !== 'none');
 
   if (exact && exact.cmd.startsWith('/') && exact.kind !== 'skill') {
     runCommand(exact);
@@ -2201,7 +2201,7 @@ async function submit() {
     return;
   }
   if (sess.value.sending && inTurnComposer.value.ready) {
-    const accepted = await chat.sendInTurn(props.sid, t, atts);
+    const accepted = await chat.sendInTurn(props.sid, text, atts);
 
     if (!accepted) {
       inputErr.value = chat.inTurnError || 'Не удалось отправить уточнение.';
@@ -2235,11 +2235,20 @@ async function submit() {
     chat.setDraftAttachments(props.sid, []);
   }
 
-  const accepted = await chat.send(props.sid, t, atts);
+  let accepted: boolean | undefined;
+
+  try {
+    accepted = await chat.send(props.sid, text, atts);
+  } catch (error) {
+    inputErr.value = errorMessage(error, t('core.chatHistoryRefreshFailed'));
+    accepted = false;
+  }
 
   if (accepted === false) {
-    input.value = t;
-    chat.setDraft(props.sid, t);
+    inputErr.value ||= chat.historyPaging?.[props.sid]?.error || chat.messageLoads?.[props.sid]?.error
+      || sess.value?.error || t('core.chatHistoryChanged');
+    input.value = text;
+    chat.setDraft(props.sid, text);
 
     if (atts.length) {
       chat.setDraftAttachments(props.sid, atts);

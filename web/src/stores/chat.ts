@@ -1957,14 +1957,21 @@ export const useChatStore = defineStore('chat', {
       const active = runtime.windowJobs.get(id);
 
       if (active) {
-        return active;
+        await active;
+
+        // Фоновое чтение могло оставить candidate ради прежней позиции читателя.
+        // Явная отправка после него всё ещё должна принять актуальную историю.
+        if (jumpToLatest && this._find(id)?.historyWindow?.stale) {
+          await this._refreshChatWindow(id, true);
+        }
+
+        return;
       }
       if (runtime.disposed || !this._find(id)) {
         return;
       }
 
       const controller = new AbortController();
-      const epoch = runtime.epochs.get(id) || 0;
 
       runtime.resyncControllers.add(controller);
       this.historyPaging[id] ||= {
@@ -1976,6 +1983,14 @@ export const useChatStore = defineStore('chat', {
 
       const job = (async () => {
         try {
+          if (jumpToLatest && this._dirty(this._find(id)!)) {
+            await this._writeChat(id);
+          }
+          if (runtime.disposed || !this._find(id)) {
+            return;
+          }
+
+          const epoch = runtime.epochs.get(id) || 0;
           const raw = await api.get(`/api/chat/store/chat/${id}?window=1`, {
 
             signal: controller.signal,
@@ -2050,12 +2065,9 @@ export const useChatStore = defineStore('chat', {
         if (!local?.historyWindow?.before) {
           return;
         }
-        if (local.historyWindow.stale) {
-          await this._refreshChatWindow(id);
 
-          return;
-        }
-
+        // Новый хвост не меняет доказанную верхнюю границу older-cursor.
+        // Сам сервер отвергнет cursor, если прежняя база действительно изменилась.
         await this._writeChat(id);
 
         const window = local.historyWindow;
@@ -2317,8 +2329,17 @@ export const useChatStore = defineStore('chat', {
           delete live.clearHistory;
         }
 
-        acknowledged.historyWindow = { ...live.historyWindow };
+        acknowledged.historyWindow = savedWindow(live.historyWindow);
         delete acknowledged.clearHistory;
+
+        // Подтверждение сравнивается с той же проекцией, что следующий снимок.
+        // Runtime-свежесть и дополнительные поля ACK не являются местными правками.
+        for (const key of Object.keys(acknowledged)) {
+          if (!Object.hasOwn(snapshot, key)) {
+            delete acknowledged[key];
+          }
+        }
+
         state.acceptAck(snapshot, response, steps);
         state.markSent(acknowledged, fingerprintOf(acknowledged), steps);
         runtime.baseKeys.set(id, (snapshot.messages || []).map(messageKey));

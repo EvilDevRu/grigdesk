@@ -404,9 +404,19 @@ watch(() => rows.value.map((row) => row.id).join('\0'), async () => {
   }
 
   const restore = captureChatScrollAnchor(rowsHost.value, '[data-chat-id]');
+  const atTop = rowsHost.value.scrollTop <= 1;
+  const epoch = scopeEpoch;
 
   await nextTick();
-  restore();
+
+  if (!rowsHost.value || restoringScope || epoch !== scopeEpoch) {
+    return;
+  }
+  if (atTop) {
+    rowsHost.value.scrollTop = 0;
+  } else {
+    restore();
+  }
 });
 
 // Memo строки перечисляет всё, что рисует её поддерево, включая выбор и инлайн-редактор.
@@ -573,7 +583,7 @@ async function del(r: ListRow) {
 .archive-toggle { display: flex; align-self: flex-start; }
 .new { flex: none; }
 
-.rows { flex: 1; overflow-y: auto; padding: 5px; }
+.rows { flex: 1; overflow-y: auto; overflow-anchor: none; padding: 5px; }
 .none { padding: 12px; font-size: 12.5px; text-align: center; }
 
 .list-pending {

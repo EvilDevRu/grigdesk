@@ -403,6 +403,41 @@ test('PAGE-UI-LIST: scroll добавляет карточки, без scroll с
   assert.equal(requests, 1);
 });
 
+test('PAGE-UI-TOP: новый ответ сохраняет начало списка, середина сохраняет строку', async (t) => {
+  for (const initialScroll of [0, 100]) {
+    await t.test(`scrollTop=${initialScroll}`, async (t) => {
+      const ids = vue.ref(['first', 'second', 'updated']);
+      const { wrapper } = await fixture(t, { loaded: true, loading: false }, {
+        list: () => ids.value.map((id) => ({
+          id,
+          title: id,
+          snippet: '',
+          model: '',
+          ts: 100,
+        })),
+      });
+
+      await drain();
+
+      const host = wrapper.get('.rows').element;
+      const anchor = wrapper.get('[data-chat-id="first"]').element;
+
+      host.scrollTop = initialScroll;
+      t.mock.method(host, 'getBoundingClientRect', () => ({ top: 0, bottom: 400 }));
+      t.mock.method(anchor, 'getBoundingClientRect', () => {
+        const index = [...host.querySelectorAll('[data-chat-id]')].indexOf(anchor);
+        const top = index * 56 - host.scrollTop + initialScroll;
+
+        return { top, bottom: top + 56 };
+      });
+
+      ids.value = ['updated', 'first', 'second'];
+      await drain();
+      assert.equal(host.scrollTop, initialScroll === 0 ? 0 : initialScroll + 56);
+    });
+  }
+});
+
 test('PAGE-UI-RETRY: ошибка продолжения сохраняет40 и кнопка повторяет cursor', async (t) => {
   const ids = vue.ref(Array.from({ length: 40 }, (_, index) => `retry-${index}`));
   const page = vue.reactive({

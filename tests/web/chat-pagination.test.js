@@ -7,6 +7,207 @@ import { chatStoreFixture } from './helpers/chat-store.js';
 import { drain, SNAPSHOT_KEY } from './helpers/chat-load.js';
 import { controlledExecutor, waitFor } from '../server/helpers/chat-turns.js';
 
+test('PAGE-ACK-CLEAN: подтверждение окна не оставляет чат dirty и не повторяет PUT', async (t) => {
+  const world = await serverWorld(t, chats(1));
+  const view = await world.open();
+  const id = 'web-page-0';
+
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  view.chat.selectChat(id);
+  await view.chat.ensureChatMessages(id);
+
+  const session = view.chat.session(id);
+
+  session.draft = 'Сохраняемый черновик';
+  await view.chat._writeChat(id);
+  assert.equal(view.chat._dirty(session), false);
+
+  const before = view.calls.length;
+
+  await view.chat._writeChat(id);
+  assert.equal(view.calls.slice(before).some((call) => call.method === 'PUT'), false);
+});
+
+test('PAGE-SEND-RESTORED: после слияния и очистки черновика отправка достигает приёма', async (t) => {
+  const records = chats(1);
+  const world = await serverWorld(t, records);
+  const view = await world.open();
+  const id = records[0].id;
+
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  view.chat.selectChat(id);
+  await view.chat.ensureChatMessages(id);
+
+  const remote = await jsonRequest(world.app, 'GET', `/api/chat/store/chat/${id}`);
+
+  await jsonRequest(world.app, 'PUT', '/api/chat/store/chat', {
+    chat: {
+      ...remote.chat,
+      messages: [...remote.chat.messages, {
+        role: 'note',
+        text: 'Серверное сжатие',
+        pid: 'server-compact-note',
+      }],
+    },
+    archived: false,
+  });
+
+  const session = view.chat.session(id);
+
+  session.messages.push({ role: 'note', text: 'Локальное сжатие' });
+  session.draft = 'Сообщение после сжатия';
+  await view.chat._writeChat(id);
+  assert.equal(session.historyWindow.stale, true);
+  view.chat.setDraft(id, '');
+
+  let admitted = false;
+
+  t.mock.method(view.chat, '_sendTurn', async () => {
+    admitted = true;
+
+    return true;
+  });
+
+  assert.equal(await view.chat.send(id, 'Сообщение после сжатия'), true);
+  assert.equal(admitted, true);
+  assert.equal(session.historyWindow.stale, false);
+  assert.ok(session.messages.some((message) => message.pid === 'server-compact-note'));
+});
+
+test('PAGE-ACK-EDIT: поздний ACK не подтверждает черновик, изменённый во время PUT', async (t) => {
+  const world = await serverWorld(t, chats(1));
+  const network = windowApi(world.app);
+  const put = network.api.put;
+  const gate = Promise.withResolvers();
+  const entered = Promise.withResolvers();
+
+  t.after(() => gate.resolve());
+  network.api.put = async (url, body) => {
+    const response = await put(url, body);
+
+    if (url === '/api/chat/store/chat/window') {
+      entered.resolve();
+      await gate.promise;
+    }
+
+    return response;
+  };
+
+  const view = await world.open(network);
+  const id = 'web-page-0';
+
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  view.chat.selectChat(id);
+  await view.chat.ensureChatMessages(id);
+
+  const session = view.chat.session(id);
+
+  session.draft = 'Первый черновик';
+
+  const saving = view.chat._writeChat(id);
+
+  await entered.promise;
+  session.draft = 'Набрано во время записи';
+  gate.resolve();
+  await saving;
+  assert.equal(session.draft, 'Набрано во время записи');
+  assert.equal(view.chat._dirty(session), true);
+  await view.chat._writeChat(id);
+  assert.equal(view.chat._dirty(session), false);
+});
+
+test('PAGE-OLDER-WITH-NEWER: новый хвост не блокирует чтение старых сообщений', async (t) => {
+  const records = chats(1);
+  const world = await serverWorld(t, records);
+  const view = await world.open();
+  const id = records[0].id;
+
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  view.chat.selectChat(id);
+  await view.chat.ensureChatMessages(id);
+
+  const surface = view.chat.registerSurface('older-with-newer', { chatId: id, visible: true });
+
+  t.after(() => surface.dispose());
+  view.chat.setChatViewport(id, false);
+
+  const remote = await jsonRequest(world.app, 'GET', `/api/chat/store/chat/${id}`);
+
+  await jsonRequest(world.app, 'PUT', '/api/chat/store/chat', {
+    chat: {
+      ...remote.chat,
+      messages: [...remote.chat.messages, {
+        role: 'assistant',
+        text: 'Новый ответ',
+        pid: 'newer-tail',
+      }],
+    },
+    archived: false,
+  });
+  await view.chat._pullChat(id, false);
+  assert.equal(view.chat.hasNewerMessages(id), true);
+  await view.chat.loadOlderMessages(id);
+
+  const session = view.chat.session(id);
+
+  assert.equal(session.messages.length, 80);
+  assert.equal(session.messages[0].text, 'Ответ 0/21');
+  assert.equal(session.messages.at(-1).text, 'Ответ 0/100');
+  assert.equal(view.chat.hasNewerMessages(id), true);
+  await view.chat.loadOlderMessages(id);
+  assert.equal(session.messages.length, 101);
+});
+
+test('PAGE-SEND-DURING-REFRESH: отправка дожидается фонового чтения и принимает свежий хвост', async (t) => {
+  const world = await serverWorld(t, chats(1));
+  const network = windowApi(world.app);
+  const get = network.api.get;
+  const gate = Promise.withResolvers();
+  const entered = Promise.withResolvers();
+  let hold = false;
+
+  t.after(() => gate.resolve());
+  network.api.get = async (url) => {
+    const response = await get(url);
+
+    if (hold && url.includes('/store/chat/') && url.includes('window=1')) {
+      hold = false;
+      entered.resolve();
+      await gate.promise;
+    }
+
+    return response;
+  };
+
+  const view = await world.open(network);
+  const id = 'web-page-0';
+
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  view.chat.selectChat(id);
+  await view.chat.ensureChatMessages(id);
+
+  const session = view.chat.session(id);
+
+  session.draft = 'Сохранённый черновик';
+  await view.chat._writeChat(id);
+  session.historyWindow.stale = true;
+  view.chat.setDraft(id, '');
+  view.chat.setChatViewport(id, false);
+  hold = true;
+
+  const refreshing = view.chat._refreshChatWindow(id);
+
+  await entered.promise;
+  t.mock.method(view.chat, '_sendTurn', async () => true);
+
+  const sending = view.chat.send(id, 'Сохранённый черновик');
+
+  gate.resolve();
+  await refreshing;
+  assert.equal(await sending, true);
+  assert.equal(session.historyWindow.stale, false);
+});
+
 // Много карточек нужны, чтобы прежний цельный список не выглядел правильным.
 // Каждая содержит сообщения: запрет фонового detail проверяется по журналу HTTP.
 function chats(count = 95) {
