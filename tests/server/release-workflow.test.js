@@ -55,6 +55,13 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
   assert.equal(inputs.publish.default, false);
   assert.equal(workflow.on.push, undefined);
 
+  const serverTests = workflow.jobs.release.steps.find((step) =>
+    step.run?.includes('npm --prefix server test'));
+
+  assert.equal(serverTests.env.NODE_OPTIONS, '--test-reporter=tap');
+  assert.match(serverTests.run, /df -h/u);
+  assert.match(serverTests.run, /free -m/u);
+
   const publish = workflow.jobs.release.steps.find((step) =>
     step.run?.includes('tools/release-publish.mts'));
 

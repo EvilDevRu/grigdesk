@@ -73,7 +73,13 @@ jobs:
           npm --prefix deepseek run prepare:runtime --
           --node-cache-dir "$GRIGDESK_DEEPSEEK_NODE_CACHE"
       - name: Тесты сервера
-        run: npm --prefix server test
+        env:
+          NODE_OPTIONS: --test-reporter=tap
+        run: |
+          df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          free -m
+          getconf _NPROCESSORS_ONLN
+          npm --prefix server test
       - name: Тесты web
         run: npm --prefix web test
       - name: Тесты shared-контрактов
