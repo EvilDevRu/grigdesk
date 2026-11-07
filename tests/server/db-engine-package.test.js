@@ -36,7 +36,7 @@ test('DPK-01: engine.json без plugin.json/version нормализуется 
 
   assert.equal(result.hasServer, true);
 
-  assert.equal(result.webDir, null);
+  assert.equal(result.serverEntry, 'entry.mjs');
 
   assert.equal(result.webModuleDir, null);
 

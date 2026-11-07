@@ -160,6 +160,7 @@ async function validatePackageTree(
       version: expected.version,
       description: '',
       hasServer: true,
+      serverEntry: fields.entry,
       webModuleDir: null,
       npmDirs: await validateNpmDirs(dir, manifest),
     };

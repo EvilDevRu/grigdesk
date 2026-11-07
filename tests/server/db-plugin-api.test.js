@@ -31,7 +31,6 @@ test('плагин «Базы» зарегистрирован системны�
     nav: {
       path: '/db',
       label: 'Базы',
-      icon: 'db',
       group: 'dock',
       order: 50,
     },

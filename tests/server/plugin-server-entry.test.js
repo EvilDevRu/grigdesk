@@ -17,7 +17,6 @@ const expected = {
   reservedIds: new Set(['code']),
   grigDeskVersion: '1.0.0',
 };
-const conflict = 'У плагина есть server.js и server.ts. Оставьте один серверный файл.';
 
 test('ENTRY-01: scanner и validator выбирают js-only/ts-only/no-server одинаково', async (t) => {
   const f = await runtimeFixture(t, [
@@ -60,38 +59,36 @@ test('ENTRY-01: server.ts с типом, относительным импорт
   assert.deepEqual(response.json(), { value: 42, marker: 'ts-tla' });
 });
 
-test('ENTRY-02: конфликт сохраняет карточку, не исполняет код и не раздаёт страницу', async (t) => {
+test('ENTRY-02: объявленный server.js работает, соседний server.ts не исполняется', async (t) => {
   const f = await runtimeFixture(t, [{
     id: 'demo',
-    web: true,
-    files: { 'server.ts': 'throw new Error("Нельзя исполнять конфликтный плагин");' },
+    files: { 'server.ts': 'throw new Error("Нельзя исполнять необъявленный вход");' },
   }]);
   const scanned = await scanUserPlugins(f.config.userPluginsDir, { warn() {} });
   const descriptor = scanned.find((item) => item.id === 'demo');
 
-  assert.equal(descriptor.serverError, conflict);
-  assert.equal((await f.card('demo')).serverError, conflict);
-  assert.equal((await f.card('demo')).needsRestart, false);
-  assert.equal(await f.imported('demo'), false);
-  assert.equal((await f.request('GET', '/api/ext/demo/x')).statusCode, 404);
-  assert.equal((await f.request('GET', '/api/ext/demo/web/')).statusCode, 404);
-  await assert.rejects(validatePluginPackage(path.join(f.config.userPluginsDir, 'demo'), expected),
-    (error) => error.code === 'manifest_invalid' && error.message.includes(conflict));
+  assert.equal(descriptor.serverEntry, 'server.js');
+  assert.equal(descriptor.serverError ?? null, null);
+  assert.equal(await f.imported('demo'), true);
+  assert.equal((await f.request('GET', '/api/ext/demo/x')).statusCode, 200);
+
+  const preview = await validatePluginPackage(path.join(f.config.userPluginsDir, 'demo'), expected);
+
+  assert.equal(preview.serverEntry, 'server.js');
   assert.equal((await f.toggle('demo', false)).statusCode, 200);
-
-  const before = structuredClone(f.prefs.read());
-  const response = await f.toggle('demo', true);
-
-  assert.equal(response.statusCode, 409);
-  assert.equal(response.json().error, 'plugin_server_conflict');
-  assert.deepEqual(f.prefs.read(), before);
+  assert.equal((await f.request('GET', '/api/ext/demo/x')).statusCode, 404);
+  assert.equal((await f.toggle('demo', true)).statusCode, 200);
+  assert.equal((await f.request('GET', '/api/ext/demo/x')).statusCode, 200);
 });
 
-test('ENTRY-03: server.ts чувствителен внутри web, документация и asset прежние', () => {
-  assert.equal(sensitivePluginFile('web/server.ts', 'web'), true);
-  assert.equal(sensitivePluginFile('web/server.js', 'web'), true);
-  assert.equal(sensitivePluginFile('web/app.js', 'web'), false);
-  assert.equal(sensitivePluginFile('docs/README.md', 'web'), false);
+test('ENTRY-03: старый и новый входы и web-модуль чувствительны, соседние файлы прежние', () => {
+  const entries = ['web/server.ts', 'web/server.js'];
+
+  assert.equal(sensitivePluginFile('web/server.ts', ['ui'], entries), true);
+  assert.equal(sensitivePluginFile('web/server.js', ['ui'], entries), true);
+  assert.equal(sensitivePluginFile('ui/panel.js', ['ui'], entries), true);
+  assert.equal(sensitivePluginFile('web/app.js', ['ui'], entries), false);
+  assert.equal(sensitivePluginFile('docs/README.md', ['ui'], entries), false);
 });
 
 test('ENTRY-04: Git/service ставит dormant TS, включение подключает код до нового boot',
@@ -99,7 +96,7 @@ test('ENTRY-04: Git/service ставит dormant TS, включение подк
     const repo = await createPluginRepo(t);
     const marker = path.join(repo.root, 'imported');
 
-    await repo.release('1.0.0', { files: {
+    await repo.release('1.0.0', { manifest: { entrypoints: { server: 'server.ts' } }, files: {
       'package.json': '{"type":"module"}',
       'server.ts': [
         "import { writeFileSync } from 'node:fs';",
