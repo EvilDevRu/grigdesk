@@ -157,3 +157,37 @@ test('UNREAD-LATE: поздняя шапка не отменяет подтве�
   desktop.chat._applyChatHead(oldHead);
   assert.equal(desktop.chat._find(original.id).unread, false);
 });
+
+test('UNREAD-FLIP: молчаливый чужой flip гасится корректирующей записью', async (t) => {
+  const original = sampleChat('silent-unread-flip', { unread: false });
+  const world = await serverWorld(t, [original]);
+  const desktop = await world.open();
+
+  await ensureMessages(desktop.chat, original.id);
+  desktop.chat._visible = () => true;
+  desktop.chat.markRead(original.id);
+  await desktop.chat._writeChat(original.id);
+  assert.equal((await readChat(world, original)).unread, false);
+
+  // Чужая запись (материализация pending, PATCH третьего окна) меняет метку молча,
+  // не меняя ленту: отпечаток «уже отправлено» у этого окна остаётся прежним.
+  const before = await readChat(world, original);
+
+  await writeChat(world, {
+    ...before,
+    revision: before.revision + 1,
+    unread: true,
+  });
+
+  const { head } = (await world.app.inject(`/api/chat/store/head/${original.id}`)).json();
+
+  desktop.chat._applyChatHead(head);
+  // Загруженная лента применяет чужую шапку тем же правилом, что и лёгкая: при том же
+  // ответе местное прочтение не превращается обратно в «не прочитано».
+  assert.equal(desktop.chat._find(original.id).unread, false);
+
+  await desktop.chat._writeChat(original.id);
+
+  assert.equal((await readChat(world, original)).unread, false,
+    'расхождение с подтверждённой шапкой доезжает до сервера');
+});

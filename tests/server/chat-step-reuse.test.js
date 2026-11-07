@@ -362,6 +362,7 @@ test('pending дополняет новые сообщения, сохраняя
   };
   const current = {
     id: 'pending-reuse',
+    unread: false,
     messages: [...messages(), final],
   };
   const pending = {
@@ -378,6 +379,9 @@ test('pending дополняет новые сообщения, сохраняя
   assert.equal(applied.messages.at(-1).steps, steps);
   assert.equal(applied.messages[0].steps, current.messages[0].steps);
   assert.equal(current.messages.at(-1).text, 'Промежуточный текст');
+  // Финал уже лежал в ленте (совпадение по runId+assistantMessageId без pid):
+  // дополнение его тела не делает ответ новым и не взводит «не прочитано».
+  assert.equal(applied.unread, false);
 
   const repeated = applyWebPending({ ...current, ...applied }, pending, projection, null);
   const appended = applyWebPending(current, {
@@ -387,7 +391,10 @@ test('pending дополняет новые сообщения, сохраняя
   }, projection, null);
 
   assert.equal(repeated.messages.at(-1).steps, steps);
+  assert.equal(repeated.unread, false);
   assert.deepEqual(appended.messages.at(-1).steps, pending.steps);
+  // Финал, которого в ленте не было, — законная отметка непрочитанного.
+  assert.equal(appended.unread, true);
 });
 
 test('reconcile публикует свежую head и не заменяет сохранённые steps финала', async (t) => {
@@ -422,6 +429,7 @@ test('reconcile публикует свежую head и не заменяет с
   assert.equal(result.statusCode, 200);
   assert.deepEqual(saved.messages[0].steps, final.steps);
   assert.equal(saved.messages[0].text, 'Полный текст');
+  assert.notEqual(saved.unread, true, 'уже сохранённый финал не взводит непрочитанность');
   assert.equal(event.data.head.id, id);
   assert.equal(event.data.head.revision, saved.revision);
   assert.deepEqual(event.data.head, result.json().heads[0]);

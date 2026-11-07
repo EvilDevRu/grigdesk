@@ -30,6 +30,13 @@ export function applyWebPending(
     userText: pending.unsolicited || userKnown ? '' : userText,
     assistantMessageId: pending.finalAssistantMessageId || pending.assistantMessageId,
   };
+  // Ответ мог уже лежать в ленте без pid: живое окно сохранило его по SSE, а durable
+  // pending доехал позже и дополняет то же сообщение. Такой финал не «новый» — взводить
+  // unread нельзя, иначе прочитанный ответ возвращает отметку «не прочитано» на всех
+  // устройствах при очередном reconcile.
+  const represented = original.some((message) => message.pid === id
+    || (canonical.assistantMessageId && message.assistantMessageId === canonical.assistantMessageId
+      && message.runId === pending.runId));
   const messages = projection.project({
     chatKey: String(current.id),
     base: original.map((message) => ({ ...message })),
@@ -97,7 +104,7 @@ export function applyWebPending(
     ...(Array.isArray(current.outbox) ? {
       outbox: current.outbox.filter((entry: Record<string, unknown>) => entry.turnId !== turnId),
     } : {}),
-    unread: !seen && final?.role === 'assistant' ? true : current.unread,
+    unread: !represented && final?.role === 'assistant' ? true : current.unread,
     updatedAt: Math.max(Number(current.updatedAt || 0), Number(pending.at || 0)),
   };
 }
