@@ -83,6 +83,16 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
   assert.ok(publish, 'publisher остаётся отдельным шагом');
   assert.equal(bundle.env.GRIGDESK_RELEASE_ORIGIN,
     "${{ secrets.RELEASE_SITE_PUBLIC_ORIGIN || 'https://grigdesk.com' }}");
+
+  const cleanup = workflow.jobs.release.steps.find((step) =>
+    step.name === 'Освобождение тестовых артефактов');
+  const steps = workflow.jobs.release.steps;
+
+  assert.ok(steps.indexOf(cleanup) > steps.findIndex((step) =>
+    step.run?.includes('npm --prefix web run build')));
+  assert.ok(steps.indexOf(cleanup) < steps.indexOf(bundle));
+  assert.match(cleanup.run, /test "\$GRIGDESK_TEST_DEEPSEEK_ROOT" = "\$RUNNER_TEMP\/deepseek-tests"/u);
+  assert.match(cleanup.run, /rm -rf -- "\$GRIGDESK_TEST_DEEPSEEK_ROOT"/u);
   assert.match(publish.if ?? '', /inputs\.publish/u);
   assert.equal(publish.env.RELEASE_SITE_PORT, "${{ secrets.RELEASE_SITE_PORT || '22' }}");
   assert.equal(publish.env.RELEASE_SITE_MIRROR_PORT, "${{ secrets.RELEASE_SITE_MIRROR_PORT || '22' }}");
