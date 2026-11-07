@@ -24,6 +24,10 @@ runtime в исходную фикстуру не входят.
 проверяет `--queue-dispatch-id` между hash каталога и `--routes-dir`, сохраняя проверку
 явного `--runner-primary`.
 
+Снимок `DATA_LAYOUT` в `data-home.test.mts` проверяет действующую раскладку GrigDesk.
+Прежние `factory`, `factoryState`, `factoryControl`, `factoryConfig`, `factoryRoutes`
+и `factoryAnalysis` не входят в этот реестр: пути внешнего движка задаются отдельно.
+
 После выноса хеша `deepseek/scripts/deepseekVendorManifest.ts` импортирует `shared/node/hash.ts`.
 Если копировать только инструменты, подготовка завершается `ERR_MODULE_NOT_FOUND`
 до проверки установки. Фикстура должна переносить общий исходный слой целиком,

@@ -76,7 +76,7 @@
 - [SEA GUI-фикстура: явный выбор местной машины до ожидания рабочего экрана](sea-desktop-fixture.md)
 - [Горячая клавиша меню не срабатывает в тесте = Playwright не доводит клавиши до главного процесса Electron](electron-synthetic-keys.md)
 - [Файл теста висит до таймаута = в Node остался открытый BroadcastChannel](node-broadcast-channel.md)
-- [Сквозной тест «сервер + store окна» не выходит = окно ещё ходит в сервер при закрытии](window-store-fixture-close.md)
+- [Сквозные фикстуры чата: завершение SSE, ожидание состояния и закрытие окна до сервера](window-store-fixture-close.md)
 - [Версия шапки фикстуры фиксируется до нормализации store](chat-fixture-head-version.md)
 - [Очистка фикстуры: область hooks, закрытие сервера до удаления каталога](node-test-hook-cleanup.md)
 - [Проверка старта сервера использует своё состояние](boot-smoke-state-isolation.md)
