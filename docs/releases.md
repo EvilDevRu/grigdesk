@@ -101,7 +101,7 @@ fast-forward, замены действующего web-бандла и пере
 
 Workflow «Релиз GrigDesk» (`grigdesk-release.yml`) запускается только вручную кнопкой
 Run workflow. Отправка коммитов и тегов в GitHub не запускает сборку и публикацию.
-Он устанавливает зависимости server, web, tracker, relay, deepseek и desktop, готовит среду
+Он устанавливает зависимости server, web, mobile, tracker, relay, deepseek и desktop, готовит среду
 офлайн-тестового исполнителя, прогоняет server/web/shared, собирает UI и комплект
 `node tools/bundle.mts`, затем deb-бутстрап `node tools/buildDeb.mts` и публикует
 из корня репозитория через release-publish. Deb-пакет кладёт только загрузчик

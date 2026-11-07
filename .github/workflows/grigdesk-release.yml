@@ -56,6 +56,10 @@ jobs:
         run: npm --prefix server ci
       - name: Зависимости web
         run: npm --prefix web ci
+      # Серверный typecheck включает tools/mobile-phone с прямыми импортами Vite.
+      # Поэтому зависимости клиента нужны до проверки сервера даже без сборки APK.
+      - name: Зависимости мобильных инструментов
+        run: npm --prefix mobile ci
       # Сборщик комплекта не вызывает install (tools/bundle.mts), а билдеры всех
       # пакетов импортируют esbuild из своих node_modules — ставим их явно.
       - name: Зависимости комплекта

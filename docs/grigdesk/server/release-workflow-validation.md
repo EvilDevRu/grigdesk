@@ -17,8 +17,12 @@
 Выражения `${{ runner.temp }}` в `steps[*].env` для ключей публикации допустимы.
 
 После переименования CLI задач сборка устанавливает зависимости `tracker/`;
-прежней папки `b24/` в checkout нет. Порядок установки server/web/tracker/relay/deepseek/desktop
+прежней папки `b24/` в checkout нет. Порядок установки server/web/mobile/tracker/relay/deepseek/desktop
 и закреплённые версии всех трёх Actions, включая загрузку артефактов, проверяются контрактными тестами.
+
+`mobile ci` выполняется до серверных тестов: общая программа TypeScript включает
+`tools/mobile-phone`, который импортирует Vite, Vue-плагин и Playwright из зависимостей
+мобильного клиента. На чистом runner отсутствие этого шага даёт TS2307 ещё до тестов.
 
 Перед отправкой изменения проверь конфигурацию валидатором
 [actionlint](https://github.com/rhysd/actionlint):

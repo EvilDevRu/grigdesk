@@ -106,6 +106,7 @@ test('RL-45: посредник выпускается через общий wor
   for (const command of [
     'npm --prefix server ci',
     'npm --prefix web ci',
+    'npm --prefix mobile ci',
     'npm --prefix tracker ci',
     'npm --prefix relay ci',
     'npm --prefix deepseek ci',
