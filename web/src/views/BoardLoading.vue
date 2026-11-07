@@ -26,7 +26,7 @@
           <UiSkeleton width="75%" height="16px" />
         </div>
       </div>
-      <div class="columns">
+      <div v-if="!summaryOnly" class="columns">
         <div class="primary" data-loading-region="primary">
           <div class="header" data-loading-region="header">
             <UiSkeleton width="28%" height="24px" />
@@ -49,12 +49,14 @@ withDefaults(defineProps<{
   description?: string;
   failed?: boolean;
   includeOwnTasks?: boolean;
+  summaryOnly?: boolean;
   compact?: boolean;
 }>(), {
   label: undefined,
   description: undefined,
   failed: false,
   includeOwnTasks: false,
+  summaryOnly: false,
   compact: false,
 });
 </script>

@@ -34,7 +34,7 @@
         </UiButton>
       </div>
     <template v-if="ownTasks.trackerConfigured !== false">
-    <BoardLoading v-if="!phoneBoard && !data && !error" label="Загрузка доски…" />
+    <BoardLoading v-if="!phoneBoard && !data && !error" summary-only label="Загрузка доски…" />
     <UiInlineMessage v-if="error" :tone="data ? 'warning' : 'danger'" class="board-tracker-error"
     :data-perf-error="!data && !loading ? '' : undefined">
       <div class="board-tracker-error-heading">

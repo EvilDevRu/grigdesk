@@ -79,8 +79,16 @@ test('BOARD-PAGES: общий список и внешние роли сохра
 test('BOARD-PAGES: own виден при загрузке и после отключения внешнего трекера', async (t) => {
   const { wrapper, browser, flushPromises } = await fixture(t, { pending: true });
 
+  assert.equal(wrapper.find('[data-loading-region="summary"]').exists(), true);
+  assert.equal(wrapper.find('[data-loading-region="primary"]').exists(), false);
+  assert.equal(wrapper.findAll('.col.primary .trow').length, 1);
+
+  const primary = wrapper.get('.col.primary').element;
+
   browser.happyDOM.setWindowSize({ width: 390, height: 844 });
   await flushPromises();
+  assert.equal(wrapper.find('[data-ui-skeleton]').exists(), false);
+  assert.ok(wrapper.get('.col.primary').element === primary);
   assert.equal(wrapper.findAll('.col.primary .trow').length, 1);
   assert.equal(wrapper.find('.board-page-nav').exists(), false);
 
