@@ -120,7 +120,7 @@ test('адаптер объявляет полный честный контра
   assert.deepEqual(deepseek.compaction, { kind: 'summary' });
   assert.equal(typeof deepseek.run, 'function');
   assert.equal(deepseek.session, undefined);
-  assert.equal(deepseek.untrustedInput, undefined);
+  assert.deepEqual(deepseek.untrustedInput, { text: true, images: false });
   assert.equal(typeof deepseek.scopedWorkspace, 'function');
   assert.deepEqual(deepseek.workdir, { switch: 'reseed', roots: 'single' });
 

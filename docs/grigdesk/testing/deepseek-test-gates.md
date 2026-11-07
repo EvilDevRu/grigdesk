@@ -14,6 +14,14 @@ SEA и host compiled parity имеют отдельные ступени. Тол
 [автоматически готовятся в отдельном кэше](deepseek-legacy-preflight.md).
 Отказ любой ступени сохраняет ошибочный итог прогона.
 
+Host-прогоны GLM требуют работоспособного системного sandbox backend. Release CI
+устанавливает bubblewrap и проверяет настоящий mount/PID-профиль до подготовки ELF;
+успешная metadata-проба не доказывает, что sandbox доступен при boot GLM gate.
+
+Проверка Factory coverage передаёт выбранные primary/failover явно, как dispatcher.
+Смена сборки резервного DeepSeek обновляет host snapshot; отсутствие резерва сохраняет
+доступный Claude, а цепочка только из недоступного DeepSeek остаётся закрытой.
+
 Source-sync gate `server/scripts/verifyDeepSeekCandidate.mts --vendor-dir <каталог>` строит
 ELF именно из переданного vendor, затем проверяет пакет и host parity на нём. Builder
 запрещает сочетание `--vendor-dir` и `--payload`: архив прежней сборки не доказывает новый

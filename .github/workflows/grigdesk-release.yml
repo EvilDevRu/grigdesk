@@ -52,6 +52,12 @@ jobs:
         env:
           RELEASE_CHANNEL: ${{ inputs.channel }}
 
+      - name: Песочница native-проверок
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent -- /usr/bin/true
+
       - name: Зависимости сервера
         run: npm --prefix server ci
       - name: Зависимости web

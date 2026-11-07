@@ -24,6 +24,11 @@
 `tools/mobile-phone`, который импортирует Vite, Vue-плагин и Playwright из зависимостей
 мобильного клиента. На чистом runner отсутствие этого шага даёт TS2307 ещё до тестов.
 
+До native-проверок workflow устанавливает системный `bubblewrap` и выполняет настоящую
+пробу read-only mount/PID-песочницы. GLM gate запускает shell уже при boot; отсутствие
+backend даёт отказ до модели даже при успешных metadata/verify. Непригодная песочница
+останавливает workflow на ранней пробе, до дорогих сборок.
+
 После подготовки pinned dependencies workflow явно материализует проверенный snapshot
 Harness через `materializeDeepSeekSnapshot`. В Git хранится только manifest, patches
 и лицензии; `upstream/` — игнорируемый кэш. Без подготовки холодная сборка тестового ELF
