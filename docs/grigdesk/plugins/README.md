@@ -36,7 +36,7 @@ Tripo остаются в ядре; библиотека, заказы, прос
 - [Серверные сервисы core: проекты, единая среда с защищёнными путями, песочницы и model-only](plugin-core-runtime.md)
 - [Сборка деклараций: файловые ссылки и видимая пометка служебных экспортов](plugin-types-declarations.md)
 - [Модульные панели v1: фасады Vue/UI, контекст, ошибки и сборка](plugin-ui-modules.md)
-- [Сервисы модуля v1: binary API, настройки, события, адресные уведомления, retry и intents панели](plugin-module-services.md)
+- [Сервисы модуля v1: binary API, настройки, события, уведомления, intents и холодная загрузка чата](plugin-module-services.md)
 - [Серверные оповещения: generation, snapshot, dedup/импорт прежнего seen, темы и RU/EN](plugin-notifications.md)
 - [Отдельный background entry: boot без панели, готовность, retry и очистка эпохи](plugin-background.md)
 - [Отзыв модуля после выключения в другом окне: каталог через общий SSE](plugin-module-catalog-sync.md)
