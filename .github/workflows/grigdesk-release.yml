@@ -68,6 +68,8 @@ jobs:
 
       - name: Зависимости сервера
         run: npm --prefix server ci
+      - name: Браузер тестов
+        run: node server/node_modules/playwright-core/cli.js install --with-deps chromium
       - name: Зависимости web
         run: npm --prefix web ci
       # Серверный typecheck включает tools/mobile-phone с прямыми импортами Vite.

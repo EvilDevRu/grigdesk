@@ -62,6 +62,13 @@ test('RW-CHANNELS: ручной выпуск выбирает release/dev и п�
   assert.match(serverTests.run, /df -h/u);
   assert.match(serverTests.run, /free -m/u);
 
+  const browser = workflow.jobs.release.steps.findIndex((step) =>
+    step.run?.includes('node server/node_modules/playwright-core/cli.js install --with-deps chromium'));
+  const serverDependencies = workflow.jobs.release.steps.findIndex((step) =>
+    step.run === 'npm --prefix server ci');
+
+  assert.ok(browser > serverDependencies && browser < workflow.jobs.release.steps.indexOf(serverTests));
+
   const sandbox = workflow.jobs.release.steps.findIndex((step) =>
     step.run?.includes('apt-get install -y --no-install-recommends bubblewrap'));
 
